@@ -393,9 +393,9 @@ const char* ConstraintKindToString(sketch::ConstraintKind k) {
     return "diameter";
   case K::DistancePL:
     return "distance_pl";
-  case K::Curvature: // vNEXT
+  case K::Curvature: // v191
     return "curvature";
-  case K::ArcLength: // vNEXT
+  case K::ArcLength: // v191
     return "arc_length";
   }
   return "coincident";

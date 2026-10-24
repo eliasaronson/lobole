@@ -317,6 +317,7 @@ here; the golden corpus and git history cover them.
 | 188 | An assembly sequence's step names a **group** (`occurrences`: two or more ids, moved as one) or is a **pose** (`pose`: [{`mate`, `rotation_deg` \| `offset_mm`}], placing nothing) in place of its one `occurrence` ([assembly sequences](../assemblies/README.md#assembly-sequences)); a step states exactly one of the three. Golden `v188-assembly-sequence-groups`. |
 | 189 | A requirement's measure kind `expression` {`expression` (a formula over the variables), `unit`?, `document`? (a part: read in its scope), `configuration`? (that part's configuration, 0 = base)} ([expression](../requirements/README.md#expression)); its evidence's `detail` carries `scope`, `part`?, `configuration`? and `inputs` {name: value}. A `configuration` without `document` is refused on load; a build that does not know the kind refuses the file. Golden `v189-expression-requirement` |
 | 190 | An Import's `up_axis` (which axis OF THE FILE is up: `auto`, `none`, `+x`, `-x`, `+y`, `-y`, `-z`; absent = `auto`) and `turn_deg` (a turn about world Z after it; absent = 0) ([up axis](../interchange/README.md#up-axis)). An unknown `up_axis` is refused on load. An Import saved before v190 loads as `none`, so no saved part moves. Golden `v190-import-up-axis` |
+| 191 | Two sketch constraint kinds: `curvature` (G2 between two curves joined end to end, at least one a spline: tangent there with equal curvature) and `arc_length` (a dimension, mm: a circular arc's radius x sweep; driven like any dimension). An older build refuses the file on the unknown kind ([curvature continuity](../sketching/README.md#curvature-continuity), [arc length](../sketching/README.md#arc-length)). Golden `v191-g2-arc-length` |
 
 ## Pending changes
 
@@ -326,7 +327,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | Two sketch constraint kinds: `curvature` (G2 between two curves joined end to end, at least one a spline: tangent there with equal curvature) and `arc_length` (a dimension, mm: a circular arc's radius x sweep; driven like any dimension). An older build refuses the file on the unknown kind ([curvature continuity](../sketching/README.md#curvature-continuity), [arc length](../sketching/README.md#arc-length)). Golden `vNEXT-g2-arc-length` |
 
 ## Paths in a project
 

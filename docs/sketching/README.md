@@ -1094,7 +1094,7 @@ link; `modify_feature` with an edited sketch JSON covers them.
   `v46-ellipse-arc`, `v49-reference-image`, `v50-linear-pattern-2d`,
   `v51-mirror-and-center-ref`, `v137-text`, `v155-ellipse-axis-ends`,
   `v166-underlay-show-always`, `v177-driven-dimension`,
-  `vNEXT-g2-arc-length` (a spline in G2 with an arc held to its length).
+  `v191-g2-arc-length` (a spline in G2 with an arc held to its length).
 - `tests/test_sketch_g2.cpp` `[g2]` `[arc_length]` — G2 between a spline and
   a line, an arc (tangent alone shown to leave the curvature jumping) and
   another spline, each read back through OCC on the built wire
