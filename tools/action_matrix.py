@@ -72,7 +72,9 @@ ACTIONS = ("edge.fillet", "edge.chamfer", "edge.frame",
            "face.hole", "face.shell", "face.draft", "face.frame",
            "curved.thread", "curved.frame",
            "body.pattern_linear", "body.pattern_circular", "body.mirror",
-           "body.split")
+           "body.split",
+           "face.delete", "face.delete_feature", "face.offset_out",
+           "face.offset_in", "face.move", "face.replace")
 OUTCOMES = ("pass", "refuse", "fail", "finding")
 # A message naming a signal OpenCASCADE caught (OSD::SetSignal turns a
 # SIGSEGV inside the kernel into an OSD_SIGSEGV exception, which reads as an
@@ -392,10 +394,20 @@ def family_of(kind, el):
     return None
 
 
-def plan_actions(els, state):
+def round125(raw):
+    """1, 2 or 5 x 10^n at or below raw > 0: the app's derived defaults are
+    rounded so (ui::SizeFromBody, ui::SizeFromFace)."""
+    decade = 10.0 ** math.floor(math.log10(raw))
+    mant = raw / decade
+    return decade * (5.0 if mant >= 5.0 else 2.0 if mant >= 2.0 else 1.0)
+
+
+def plan_actions(els, state, grow=None):
     """[action] for every body, face and edge of the active part, and the
     entities that could not be tried {unnamed_faces, capped}. An action is
-    {entity, family, action, calls, expect, check?}."""
+    {entity, family, action, calls, expect, check?}. `grow(refs)` is the
+    app's grow_faces, which the direct edits that take a whole feature (Add
+    the feature) are planned through; without it they are not planned."""
     features = state.get("features", [])
     order = {f["id"]: i for i, f in enumerate(features)}
     bodies = state.get("bodies", [])
@@ -490,6 +502,12 @@ def plan_actions(els, state):
             info["shells_sampled"] = info.get("shells_sampled", 0) + len(
                 planar) - len(shell_on)
         for f in b["faces"]:
+            if shell_on is None or f["name"] in shell_on:
+                direct_actions(f, cb, lo, hi, ext, least, add, ref,
+                               feature)
+        if grow is not None:
+            feature_actions(b, cb, ext, shell_on, add, ref, feature, grow)
+        for f in b["faces"]:
             kind = f.get("kind")
             if f in planar:
                 plane_actions(f, b, faces, cb, size, least, add, ref, feature,
@@ -530,6 +548,89 @@ def plan_actions(els, state):
 
 
 WORLD = ((0, "yz"), (1, "xz"), (2, "xy"))
+
+
+def direct_actions(f, cb, lo, hi, ext, least, add, ref, feature):
+    """The direct edits of one face (docs/modeling/README.md#direct-edit), at
+    the app's derived defaults: deleted alone; offset out and in by a tenth of
+    the smaller of how far its inside reaches (inset_mm; a cylinder's radius)
+    and the body's thinnest extent; a planar face put onto the parallel plane
+    a twentieth of the body past its far extent along the face's normal."""
+    add("face", f, "face.delete", [feature({
+        "type": "DeleteFace", "name": "AM delete", "body_id": cb,
+        "faces": [ref(f)]})], "any")
+    kind = f.get("kind")
+    reach = (f.get("inset_mm") if kind == "plane" else
+             f.get("radius") if kind == "cylinder" else None)
+    if reach and reach > 0 and least > 0:
+        d = round125(0.1 * min(reach, least))
+        for action, dist, expect in (("face.offset_out", d, "add"),
+                                     ("face.offset_in", -d, "cut")):
+            add("face", f, action, [feature({
+                "type": "OffsetFace", "name": "AM offset", "body_id": cb,
+                "faces": [ref(f)], "distance_mm": dist})], expect)
+    if kind == "plane" and "normal" in f and "centroid" in f:
+        c, n, u, v = face_frame(f)
+        # How far the body reaches past the face along its normal: the
+        # farthest corner of its box.
+        corners = [[(hi[i] if (k >> i) & 1 else lo[i]) for i in range(3)]
+                   for k in range(8)]
+        far = round(max(_dot(_sub(cc, c), n) for cc in corners) +
+                    0.05 * max(ext), 6)
+        if far > 0:
+            o = [c[i] + n[i] * far for i in range(3)]
+            pts = [o, [o[i] + u[i] for i in range(3)],
+                   [o[i] + v[i] for i in range(3)]]
+            add("face", f, "face.replace", [feature({
+                "type": "DatumPlane", "name": "AM target",
+                "kind": "through_points",
+                "points": [[round(x, 6) for x in p] for p in pts]}),
+                feature({
+                    "type": "ReplaceFace", "name": "AM replace",
+                    "body_id": cb, "face": ref(f),
+                    "target": {"kind": "plane", "datum_id": {"$ref": 1}}})],
+                "any")
+
+
+def feature_actions(b, cb, ext, shell_on, add, ref, feature, grow):
+    """Delete and Move Face of whole features: each face grown to the faces
+    of the hole or boss it belongs to (grow_faces, the GUI's Add the
+    feature), one row per feature, on its first face by name. A face that
+    does not grow (a fillet, a face of the body itself) plans the growth
+    alone, which refuses, saying why. The move is a tenth of the body's
+    largest extent in the plane of the face the feature sits in."""
+    from lobole.errors import Refused
+    seen = set()
+    for f in b["faces"]:
+        if shell_on is not None and f["name"] not in shell_on:
+            continue
+        try:
+            got = grow([ref(f)])
+        except Refused:
+            add("face", f, "face.delete_feature", [{
+                "method": "grow_faces", "params": {"faces": [ref(f)]}}],
+                "any")
+            continue
+        names = sorted(g["element"] for g in got["faces"])
+        if tuple(names) in seen or names[0] != f["name"]:
+            continue
+        seen.add(tuple(names))
+        refs = [ref({"name": n}) for n in names]
+        add("face", f, "face.delete_feature", [feature({
+            "type": "DeleteFace", "name": "AM delete feature", "body_id": cb,
+            "faces": refs})], "any")
+        hn = got.get("host_normal")
+        axes = [a for a in range(3) if hn is None or abs(hn[a]) <= 0.5]
+        if not axes:
+            continue
+        axis = max(axes, key=lambda a: ext[a])
+        if ext[axis] <= 0:
+            continue
+        t = [0.0, 0.0, 0.0]
+        t[axis] = round125(0.1 * ext[axis])
+        add("face", f, "face.move", [feature({
+            "type": "MoveFace", "name": "AM move", "body_id": cb,
+            "faces": refs, "translate_mm": t})], "same")
 
 
 def plane_actions(f, b, faces, cb, size, least, add, ref, feature,
@@ -730,6 +831,12 @@ def run_action(src, act, ctx):
     batch = len(calls) > 1
     method, params = (("batch", {"calls": calls}) if batch else
                       (calls[0]["method"], calls[0]["params"]))
+    # The box a "cut" is held inside is the part's BEFORE the action: taken
+    # lazily, the first cut of a unit measured its own result, and every cut
+    # after it was judged against that (an Offset Face in that shrinks the
+    # box read as growing it).
+    if act["expect"] == "cut":
+        ctx.box()
     try:
         answer = src.request(method, params)
     except TimeoutError as e:
@@ -805,6 +912,10 @@ def judge_refusal(src, e, batch, ctx):
         return outcome("fail", "refusal_changed",
                        f"refused ({msg}) but changed the part: {changed}"), \
             "rebuild"
+    # A batch's rollback moved the revision (above): the next single call is
+    # judged from where it now stands, or its honest refusal reads as one
+    # that changed the part.
+    ctx.revision = st.get("revision", {}).get("version")
     return outcome("refuse", "", msg), None
 
 
@@ -966,7 +1077,9 @@ class Worker:
         els = inst.request("list_elements", {"max_faces": 1000000},
                            timeout=300)
         ctx = Context(inst)
-        plan, info = plan_actions(els, ctx.state)
+        plan, info = plan_actions(
+            els, ctx.state,
+            grow=lambda refs: inst.request("grow_faces", {"faces": refs}))
         info["list_s"] = round(time.time() - t, 3)
         named_edges = sum(len(b["edges"]) for b in els.get("bodies", []))
         edges = inst.call("query_geometry", element_type="edge",
@@ -1580,7 +1693,10 @@ def cmd_determinism(args, corpus):
                     els = inst.request("list_elements",
                                        {"max_faces": 1000000}, timeout=300)
                     ctx = Context(inst)
-                    plan, _ = plan_actions(els, ctx.state)
+                    plan, _ = plan_actions(
+                        els, ctx.state,
+                        grow=lambda refs: inst.request(
+                            "grow_faces", {"faces": refs}))
                     names = sorted({a["entity"] for a in plan})
                     seen = {}
                     for act in plan:
@@ -1692,7 +1808,9 @@ EXPECT = {"edge.fillet": "any", "edge.chamfer": "any", "edge.frame": "same",
           "face.draft": "any", "face.frame": "same", "curved.thread": "same",
           "curved.frame": "same", "body.pattern_linear": "any",
           "body.pattern_circular": "any", "body.mirror": "any",
-          "body.split": "same"}
+          "body.split": "same", "face.delete": "any",
+          "face.delete_feature": "any", "face.offset_out": "add",
+          "face.offset_in": "cut", "face.move": "same", "face.replace": "any"}
 
 
 # --- the self-test --------------------------------------------------------
