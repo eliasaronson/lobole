@@ -14,7 +14,11 @@
 #include "core/Literals.h"
 #include "core/Primitives.h"
 #include "core/PrintSplit.h"
+#include "core/features/DeleteFaceFeature.h"
 #include "core/features/DerivedFeature.h"
+#include "core/features/MoveFaceFeature.h"
+#include "core/features/OffsetFaceFeature.h"
+#include "core/features/ReplaceFaceFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/WormFeature.h"
@@ -110,6 +114,44 @@ void RefuseThread(const Feature& f) {
   if (const auto* th = dynamic_cast<const ThreadFeature*>(&f))
     if (const std::string why = th->WhyRefused(); !why.empty())
       throw std::runtime_error("Thread: " + why);
+}
+
+// A direct edit (Delete/Offset/Move/Replace Face) whose own Execute fails is
+// refused, not stored broken (docs/modeling/README.md#direct-edit): it is
+// built first on a copy of the document -- the bodies reused, so only the
+// edit and what follows it runs -- and its error, if it has one of its own,
+// is the call's. Built on a copy, the refusal changes nothing: not the
+// features, not the revision, inside a batch or out of one
+// (docs/scripting/rpc.md#a-refused-call-changes-nothing). An upstream edit
+// that later breaks a stored one is a broken feature in that edit's regen.
+// `at` is the index a modify replaces; absent, the edit is appended.
+bool IsDirectEdit(const Feature& f) {
+  return dynamic_cast<const DeleteFaceFeature*>(&f) != nullptr ||
+         dynamic_cast<const OffsetFaceFeature*>(&f) != nullptr ||
+         dynamic_cast<const MoveFaceFeature*>(&f) != nullptr ||
+         dynamic_cast<const ReplaceFaceFeature*>(&f) != nullptr;
+}
+
+void RefuseFailingDirectEdit(const Document& doc, const Feature& f,
+                             std::optional<size_t> at) {
+  if (!IsDirectEdit(f))
+    return;
+  const auto copy = Document::CopyWithGeometry(doc);
+  std::unique_ptr<Feature> probe = f.Clone();
+  size_t index = 0;
+  if (at) {
+    probe->SetId(doc.GetFeatures()[*at]->GetId());
+    copy->ReplaceFeature(*at, std::move(probe));
+    index = *at;
+  } else {
+    copy->AddFeature(std::move(probe));
+    index = copy->FeatureCount() - 1;
+  }
+  copy->Regenerate();
+  const Feature* built = copy->GetFeatures()[index].get();
+  if (!built->GetError().empty() && !built->ErrorAfterEarlierFailure())
+    throw std::runtime_error(f.TypeName() + " refused: " + built->GetError() +
+                             ". The document is unchanged");
 }
 
 // V2 strict inputs: the feature dialect used to IGNORE unknown fields — a
@@ -1268,6 +1310,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
       throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
     }
+    RefuseFailingDirectEdit(*doc, *feature, std::nullopt);
     const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(feature)), *doc);
@@ -1450,6 +1493,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const auto probe = FeatureFromJsonNamed(p.at("feature"));
       RejectUnknownFeatureFields(p.at("feature"), *probe);
       RefuseThread(*probe);
+      RefuseFailingDirectEdit(*doc, *probe, index);
     }
     json before = DocumentIO::FeatureToJson(*feature);
     json after = p.at("feature");

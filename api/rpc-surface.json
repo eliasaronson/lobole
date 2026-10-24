@@ -144,6 +144,7 @@
   "get_state": ["part"],
   "get_tube_rules": ["part"],
   "get_units": [],
+  "grow_faces": ["faces"],
   "history_log": ["limit"],
   "history_restore": ["commit"],
   "import_catalog": ["expected_hash", "options", "path"],

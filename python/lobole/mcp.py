@@ -313,6 +313,27 @@ typed `contract`: every field, its type and its enum values.
   "thickness_expr"?: str, "open_faces": [{{"feature_id": <same body>,
   "element": <stable face name from list_elements>}}, ...]}} — at least one
   open face is required (the faces removed to hollow through).
+- Direct edit — change a body's faces where they are, the way an imported
+  part (no history) is changed. Each takes faces on ONE body:
+  {{"feature_id": <the body's created_by>, "element": <face name from
+  list_elements>}}, and a call whose edit cannot build is REFUSED with the
+  face named, the document unchanged. grow_faces grows picks to the
+  whole hole or boss they belong to.
+  DeleteFace: {{"type": "DeleteFace", "name": str, "body_id": <created_by>,
+  "faces": [...]}} — removed, the gap healed (a hole fills, a boss levels, a
+  fillet gives back its edge).
+  OffsetFace: {{"type": "OffsetFace", "name": str, "body_id", "faces":
+  [...], "distance_mm": num (+ outward), "distance_mm_expr"?: str}} — a
+  face beside a tangent fillet is offset with the fillet or not at all.
+  MoveFace: {{"type": "MoveFace", "name": str, "body_id", "faces": [...],
+  "translate_mm": [x, y, z], "translate_mm_expr"?: [str, str, str] ("" =
+  none), "rotate_deg"?: num, "rotate_deg_expr"?: str, "axis"?: an axis as
+  Revolve's}} — the faces of one hole/boss/pocket, moved rigidly.
+  ReplaceFace: {{"type": "ReplaceFace", "name": str, "body_id", "face":
+  {{...}}, "target": {{"kind": "plane", "base_plane": "xy"|"xz"|"yz"}} |
+  {{"kind": "plane", "datum_id": id}} | {{"kind": "sketch", "sketch_id":
+  id}} | {{"kind": "face", "face": {{...}}}}}} — the face put onto the
+  target, its neighbours extended or trimmed to meet it.
 - BaseFlange (the first wall of a SHEET part): {{"type": "BaseFlange",
   "name": str, "sketch_id": <a closed-profile sketch>, "reversed"?: bool,
   "regions"?: [[entity ids]]}} — the profile thickened by the document's

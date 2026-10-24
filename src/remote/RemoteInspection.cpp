@@ -10,7 +10,9 @@
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Configuration.h"
+#include "core/DirectEdit.h"
 #include "core/Document.h"
+#include "core/ElementHistory.h"
 #include "core/ElementOrigin.h"
 #include "core/FitBands.h"
 #include "core/FitStandards.h"
@@ -1747,6 +1749,17 @@ static constexpr MethodDoc InspectionMethods[] = {
      "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
     {"remove_section", "Remove one cut {id}, or all of them with {all: true}.",
      "all, id"},
+    {"grow_faces",
+     "The faces of the one feature some picked faces belong to {faces: "
+     "[{feature_id, element}]} on one body -- the GUI's 'Add the feature' "
+     "for Delete/Move Face (docs/modeling/README.md#delete-face): grown "
+     "across edges to every face reachable without stepping onto a host face "
+     "whose inner loop (a hole in it) the edge lies on, so a blind hole's "
+     "bore takes its floor and a boss's side takes the boss. Refused, saying "
+     "why, when no such loop bounds them (a fillet runs on into the body). "
+     "Nothing is changed.",
+     "faces", remote::NeedsPart,
+     "faces:{feature_id:int, element:string}[], added:string[]"},
 };
 std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
 
@@ -6965,6 +6978,54 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         {"tubes", std::move(tubes)}, {"count", count}, {"members", members}};
   }
 
+  if (m == "grow_faces") {
+    Document& part = RequirePartDoc(doc, "grow_faces");
+    const json& refs = p.at("faces");
+    if (!refs.is_array() || refs.empty())
+      throw std::runtime_error(
+          "faces is a non-empty list of {feature_id, element}");
+    const Body* body = nullptr;
+    std::vector<int> seeds;
+    std::vector<std::string> given;
+    for (const json& r : refs) {
+      if (!r.is_object() || !r.contains("feature_id") || !r.contains("element"))
+        throw std::runtime_error("each face is {feature_id, element}");
+      const ElementRef ref{r.at("feature_id").get<uint64_t>(),
+                           r.at("element").get<std::string>()};
+      if (body != nullptr && body->createdBy != ref.featureId)
+        throw std::runtime_error(
+            "faces on two bodies (" + std::to_string(body->createdBy) +
+            " and " + std::to_string(ref.featureId) + "): a feature is on one");
+      for (const Body& b : part.GetBodies())
+        if (b.createdBy == ref.featureId)
+          body = &b;
+      if (body == nullptr)
+        throw std::runtime_error("no body is created by feature " +
+                                 std::to_string(ref.featureId));
+      const auto at = body->elementMap.Resolve(ref.name);
+      if (!at)
+        throw std::runtime_error(topo::UnresolvedReason(
+            part.GetBodies(), ref, topo::ElementKind::Face, "face"));
+      seeds.push_back(*at);
+      given.push_back(ref.name);
+    }
+    std::string why;
+    const auto grown = directedit::FeatureFaces(*body, seeds, &why);
+    if (!grown)
+      throw std::runtime_error("grow_faces: " + why);
+    json faces = json::array(), added = json::array();
+    for (const int i : *grown) {
+      const std::string* n = body->elementMap.NameOf(i);
+      if (n == nullptr)
+        throw std::runtime_error(
+            "grow_faces: a face of the feature has no name, so it cannot "
+            "be picked (list_elements' unnamed_faces)");
+      faces.push_back({{"feature_id", body->createdBy}, {"element", *n}});
+      if (std::find(given.begin(), given.end(), *n) == given.end())
+        added.push_back(*n);
+    }
+    return json{{"faces", faces}, {"added", added}};
+  }
   if (m == "list_elements") {
     // Stable element names (topological naming) for each body's faces and
     // edges — what Fillet/Chamfer edge refs {feature_id, element} point at
