@@ -131,6 +131,13 @@ Occurrence OccurrenceFromJson(const json& j) {
   o.visible = j.value("visible", true);
   o.fixed = j.value("fixed", false);
   o.attachedTo = j.value("attached_to", uint64_t{0}); // v72
+  // Written only beside what it rides on: without it, a save would drop
+  // them and the rider would come loose with no word.
+  if (o.attachedTo == 0)
+    for (const char* key : {"attach_offset", "attach_rotation", "attach_seat"})
+      if (j.contains(key))
+        throw std::runtime_error(std::string("occurrence: ") + key +
+                                 " without attached_to (what it rides on)");
   if (const auto it = j.find("attach_offset");
       HasArrayOf(j, "attach_offset", 3)) {
     o.attachOffset = glm::dvec3((*it)[0].get<double>(), (*it)[1].get<double>(),
@@ -1003,6 +1010,11 @@ Relation RelationFromJson(const json& j) {
   r.ratio = j.at("ratio").get<double>();
   r.teethA = TeethOf(j, "teeth_a"); // v171
   r.teethB = TeethOf(j, "teeth_b");
+  // Written as a pair (what the ratio came from); one alone would be dropped.
+  if ((r.teethA > 0) != (r.teethB > 0))
+    throw std::runtime_error("relation: teeth_a and teeth_b come as a pair; "
+                             "this one has only " +
+                             std::string(r.teethA > 0 ? "teeth_a" : "teeth_b"));
   r.internal = j.value("internal", false);
   if (r.internal && r.kind != RelationKind::Gear)
     throw std::runtime_error("`internal` is a gear relation's; this one is a " +

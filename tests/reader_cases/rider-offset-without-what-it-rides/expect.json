@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "assembly",
+  "id": "assembly/v72-attachment.json:drop_run:4",
+  "input": "v72-attachment.json",
+  "message": [
+    "v72-attachment.json",
+    "attach_offset without attached_to"
+  ],
+  "seed": 1
+}

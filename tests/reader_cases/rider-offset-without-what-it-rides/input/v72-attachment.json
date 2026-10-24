@@ -1,0 +1,40 @@
+{
+  "format": "designer-document",
+  "version": 72,
+  "kind": "assembly",
+  "occurrences": [
+    {
+      "type": "Occurrence",
+      "id": 1,
+      "name": "Plate",
+      "part_id": 2,
+      "ref_kind": "part",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": true,
+      "fixed": true
+    },
+    {
+      "type": "Occurrence",
+      "id": 2,
+      "name": "ISO 4762 M6x20",
+      "part_id": 3,
+      "ref_kind": "part",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [4.0, 0.0, 10.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": true,
+      "fixed": false,
+       "attach_offset": [4.0, 0.0, 10.0],
+      "attach_rotation": [0.0, 0.0, 0.0, 1.0]
+    }
+  ],
+  "mates": []
+}

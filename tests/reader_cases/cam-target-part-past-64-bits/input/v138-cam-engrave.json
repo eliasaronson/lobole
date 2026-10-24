@@ -1,0 +1,79 @@
+{
+  "cam": [
+    {
+      "id": 3,
+      "name": "Files and ranks",
+      "operations": [
+        {
+          "bottom_z": 17.1339746,
+          "id": 4,
+          "name": "Engrave a-h",
+          "targets": [
+            {
+              "element": "g12",
+              "feature_id": 5,
+              "part": 1
+            },
+            {
+              "element": "g13",
+              "feature_id": 5,
+              "part": 1
+            }
+          ],
+          "tool": 1,
+          "top_z": 18.0,
+          "type": "engrave",
+          "width_mm": 1.0
+        },
+        {
+          "bottom_z": 17.6,
+          "depth_mm": 0.4,
+          "id": 6,
+          "name": "Engrave 1-8, with a flat",
+          "targets": [
+            {
+              "element": "g14",
+              "feature_id": 5,
+              "part": 18446744073709551616
+            }
+          ],
+          "tool": 2,
+          "top_z": 18.0,
+          "type": "engrave"
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        }
+      ],
+      "rotation_a": 0.0,
+      "safe_z": 10.0,
+      "tools": [
+        {
+          "diameter": 6.0,
+          "name": "60 degree V-bit",
+          "number": 1,
+          "tip_angle": 60.0,
+          "tool_type": "vbit"
+        },
+        {
+          "diameter": 1.0,
+          "name": "1 mm flat",
+          "number": 2
+        }
+      ]
+    }
+  ],
+  "format": "designer-document",
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "name": "Board",
+      "source": 2
+    }
+  ],
+  "version": 138
+}

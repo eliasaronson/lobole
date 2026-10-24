@@ -1,0 +1,63 @@
+{
+  "cam": [
+    {
+      "id": 2,
+      "name": "From a sheet",
+      "operations": [
+        {
+          "bottom_z": -9.0,
+          "id": 3,
+          "name": "Cut it out",
+          "side": "outside",
+          "stepdown": 3.0,
+          "tool_number": 1,
+          "top_z": 9.0,
+          "type": "profile"
+        }
+      ],
+      "origin_at": "stock_centre",
+      "post": "linuxcnc",
+      "safe_z": 30.0,
+      "stock": {
+        "bottom_margin": 1.0,
+        "margin": [
+          2.0,
+          2.0,
+          1.0
+        ],
+        "place": [
+          0.5,
+          0.5,
+          1.0
+        ],
+        "size": [
+          600.0,
+          400.0,
+          18.0
+        ]
+      },
+      "tools": [
+        {
+          "diameter": 6.0,
+          "feed_cut": 1200.0,
+          "feed_plunge": 400.0,
+          "flute_length": 25.0,
+          "flutes": 2,
+          "name": "6 mm flat",
+          "number": 1,
+          "spindle_rpm": 18000.0
+        }
+      ]
+    }
+  ],
+  "format": "designer-document",
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "name": "Part",
+      "source": 1
+    }
+  ],
+  "version": 73
+}

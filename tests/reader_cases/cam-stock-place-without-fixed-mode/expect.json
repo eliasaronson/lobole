@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "job",
+  "id": "job/v73-cam-work-origin.json:delete_key:4",
+  "input": "v73-cam-work-origin.json",
+  "message": [
+    "v73-cam-work-origin.json",
+    "belongs to a fixed stock"
+  ],
+  "seed": 1
+}

@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "assembly",
+  "id": "assembly/v174-intermittent-relation.json:delete_key:1",
+  "input": "v174-intermittent-relation.json",
+  "message": [
+    "v174-intermittent-relation.json",
+    "teeth_a and teeth_b come as a pair",
+    "only teeth_b"
+  ],
+  "seed": 1
+}

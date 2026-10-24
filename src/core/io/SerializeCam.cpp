@@ -100,6 +100,11 @@ cam::Target TargetFromJson(const json& j) {
   readctx::RefuseUnknownKeys(j, {"part", "feature_id", "element"},
                              "cam target");
   cam::Target t;
+  // A job part's id, whole: 2^64 parses as a float, which read as 0 and the
+  // target lost its part.
+  if (j.contains("part") && !readctx::IsWhole(j.at("part")))
+    throw std::runtime_error("cam target " + j.dump() +
+                             ": part is not a job part's id");
   t.jobPartId = j.value("part", uint64_t{0});
   // Both halves of the face, or neither: half of one is dropped on save.
   if (j.contains("feature_id") != j.contains("element"))
@@ -763,6 +768,14 @@ cam::Setup CamSetupFromJson(const json& j) {
         throw std::runtime_error("unknown cam stock mode '" + mode +
                                  "'; this build accepts relative, fixed");
     }
+    // A size and a place are a fixed workpiece's, written only beside its
+    // mode: without it they would be dropped by the next save.
+    if (setup.stock.mode != cam::StockMode::Fixed)
+      for (const char* key : {"size", "place"})
+        if (sj.contains(key))
+          throw std::runtime_error(std::string("cam stock ") + key +
+                                   " belongs to a fixed stock, and this one "
+                                   "has no mode \"fixed\"");
     if (HasArrayOf(sj, "size", 3))
       setup.stock.size = {sj["size"][0].get<double>(),
                           sj["size"][1].get<double>(),
