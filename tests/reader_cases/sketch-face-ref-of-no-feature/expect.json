@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v84-derived-servo.json:liar_number:0",
+  "input": "v84-derived-servo.json",
+  "message": [
+    "v84-derived-servo.json",
+    "face_ref",
+    "names no face"
+  ],
+  "seed": 3
+}

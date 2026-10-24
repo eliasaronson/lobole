@@ -1,0 +1,13 @@
+{
+  "a": 2,
+  "b": 3,
+  "checked_key": 0,
+  "id": 8,
+  "measured_mm": 0.0,
+  "min_mm": 1.0,
+  "mode": "exact",
+  "name": "planet to ring",
+  "note": "occurrence 3 is gone — this clearance is about something the assembly no longer contains",
+  "type": "ClearanceAssertion",
+  "verdict": "unverifiable"
+}

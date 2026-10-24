@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "drawing",
+  "id": "drawing/v30-drawing.json:liar_number:0",
+  "input": "v30-drawing.json",
+  "message": [
+    "v30-drawing.json",
+    "is not a view's id"
+  ],
+  "seed": 3
+}

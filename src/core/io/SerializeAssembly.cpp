@@ -880,6 +880,13 @@ ClearanceAssertion ClearanceAssertionFromJson(const json& j) {
     throw std::runtime_error("unknown clearance assertion verdict '" +
                              a.verdict +
                              "' (expected holds, violated or unverifiable)");
+  // The last answer is written only beside its verdict: without one, the
+  // next save would drop it.
+  if (a.verdict.empty())
+    for (const char* key : {"measured_mm", "checked_key", "note"})
+      if (j.contains(key))
+        throw std::runtime_error(std::string("clearance assertion: ") + key +
+                                 " without the verdict it belongs to");
   a.measuredMm = j.value("measured_mm", 0.0);
   a.checkedKey = j.value("checked_key", uint64_t{0});
   a.note = j.value("note", std::string{});

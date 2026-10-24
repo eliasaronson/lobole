@@ -1,0 +1,12 @@
+{
+  "a": 1,
+  "b": 2,
+  "checked_key": 12297829382473034410,
+  "id": 7,
+  "measured_mm": 3.416,
+  "min_mm": 2.0,
+  "mode": "mesh",
+  "name": "carrier to planet",
+  "type": "ClearanceAssertion",
+  "why": "room for the retaining clip"
+}

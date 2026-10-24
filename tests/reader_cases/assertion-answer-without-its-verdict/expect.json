@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "assembly-dir",
+  "id": "assembly-dir/v100-clearance-assertions/assertions/7-carrier-to-planet.json:drop_line:1",
+  "input": "tree.dsgn",
+  "message": [
+    "assertions/7-carrier-to-planet.json",
+    "measured_mm without the verdict it belongs to"
+  ],
+  "seed": 3
+}

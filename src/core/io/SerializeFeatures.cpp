@@ -2840,6 +2840,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       refKeys(fr, "face_ref");
       sk->faceRef = ElementRef{fr.value("feature_id", uint64_t{0}),
                                fr.value("element", std::string{})};
+      // Written only when set: half of one would be dropped by the save,
+      // and the sketch would come loose from its face.
+      if (!sk->faceRef.IsSet())
+        throw std::runtime_error("sketch '" + name + "': face_ref " +
+                                 fr.dump() + " names no face");
     }
     out = std::move(sk);
   } else if (type == "Extrude") {

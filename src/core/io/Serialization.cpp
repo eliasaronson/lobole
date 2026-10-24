@@ -2273,6 +2273,10 @@ DrawingView DrawingViewFromJson(const json& j) {
     throw std::runtime_error(
         "unknown view orientation '" + orientStr +
         "' (expected one of: front, back, left, right, top, bottom, iso)");
+  // A view's id, whole: 2^64 parses as a float, which read as none.
+  if (j.contains("base_view") && !readctx::IsWhole(j.at("base_view")))
+    throw std::runtime_error("base_view " + j.at("base_view").dump() +
+                             " is not a view's id");
   v.baseViewId = j.value("base_view", uint64_t{0});
   v.scale = j.value("scale", 1.0);
   v.scaleExpr = j.value("scale_expr", std::string{});
