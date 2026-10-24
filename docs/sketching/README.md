@@ -465,6 +465,8 @@ affine: pixel `(px, py)` maps to `origin + R(rotation)·(px, py)·unitsPerPixel`
   renderer decodes each asset into one texture however many images use it.
   Only referenced assets are saved: as `assets/<name>` in a directory
   project, as base64 under a root `"assets"` map in a single-file document.
+  A load refuses a document whose image names an asset the file does not
+  hold, naming it ([what a load refuses](../versioning/README.md#what-a-load-refuses)).
 - `widthPx`/`heightPx` are cached so sizing and calibration never need a
   decoder (headless builds have none).
 - **Calibration** (`CalibrateImage(id, p1, p2, distance, alignAxis)`) rescales

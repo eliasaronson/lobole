@@ -123,11 +123,11 @@ set_variable {name: "od", expression: "lookup(\"bearings\", size, \"D\")"}
   JSON `6002` and the string `"6002"` all find one row. A text key (`"M6"`,
   `"608"`) is matched exactly.
 - **Where it lives: the project.** `AppState::projectTables`, beside the
-  project variables, saved in `project.json` under `"tables"` (an additive
-  key; the envelope stays version 2). A lone part's flat file is the whole
+  project variables, saved in `project.json` under `"tables"`. A lone part's flat file is the whole
   project, so its envelope carries them (`"tables"`, format v150) and the
   open takes them back into the project scope (`Document::TakeTables`), the
-  way the project variables travel. A malformed table refuses the open: an
+  way the project variables travel. A malformed table — including one with a
+key other than `name`, `comment`, `columns` and `rows` — refuses the open: an
   expression reads it, and a project that lost one would load with every
   lookup in it broken. A `Document` that keeps its own tables (a core test,
   a file read without the app) evaluates its lookups against them.

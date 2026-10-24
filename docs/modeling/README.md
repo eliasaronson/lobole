@@ -456,7 +456,9 @@ interference checks: [holes-and-threads.md](holes-and-threads.md#thread).
   `BRepOffsetAPI_ThruSections`. With `path_id` the sections are instead swept
   along that spine by `MakePipeShell` with several sections, and an optional
   `guide_id` scales them to keep contact with the guide
-  (`BRepFill_ContactOnBorder`) — `ThruSections` has no guide support.
+  (`BRepFill_ContactOnBorder`) — `ThruSections` has no guide support. A
+  section whose sketch failed fails the loft, naming it ("loft section 'S'
+  failed: …"), rather than lofting what the sketch left behind.
 - **`Pipe`** is a circle of `outer_diameter` (hollow when `wall_thickness` >
   0) swept along a path.
 
@@ -473,7 +475,12 @@ confusion tolerance is 1e-7 mm and a double carries about 16 digits, so past
 about 1e9 mm a coordinate cannot tell two points apart and an algorithm loops
 or crashes instead of failing. A Hole's diameter and depth, a linear
 pattern's reach (spacing × (count − 1)) and a Shell's thickness are refused
-past it, by name. A Shell is also refused at a wall of half the body's
+past it, by name, and so are a sketch's plane origin and its entities'
+coordinates, sizes and angles (naming the entity), a 3D curve's points,
+axis, radius and pitch (and a helix of more than 10 000 turns), and a
+stored Box's, Sphere's or Cylinder's position or centre, direction and
+sizes: a file can hold any of them, and OpenCASCADE's loft crashes on a
+sketch at 2⁶⁴ mm. A Shell is also refused at a wall of half the body's
 thinnest extent or more, which leaves no cavity.
 
 ## A reshaping feature keeps only a valid solid

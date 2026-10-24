@@ -309,7 +309,10 @@ When parts were rebuilt because their saved geometry was refused (an older
 geometry format, a stale hash, none on disk), a menu-bar item
 `Geometry rebuilt` says how many and why (`DocumentIO::InspectGeometry` reads
 only the blob's index), and saving re-bakes. `open_project` answers
-`rebuilt_parts` and `rebuild_reason`.
+`rebuilt_parts` and `rebuild_reason`. A blob that is there but damaged
+(unreadable, a link out of the project, not matching its `content_hash`)
+also rebuilds, and is reported as a derived drop
+([a lossy load](../versioning/README.md#a-lossy-load)).
 
 **The parallel read is safe because three process-wide states were made so:**
 OpenCASCADE's STEP/XCAF exchange shares one unlocked application and lazily

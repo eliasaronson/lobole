@@ -183,7 +183,8 @@ Push with ahead/behind counts. Clone is RPC-only (`clone_project`);
   part at the chosen version (`ui::CompareVersionGeometry`):
   `GitVault::ExtractSubtree` writes that revision's document to a scratch
   directory file by file (falling back to the project root for a flat
-  one-part project), it is loaded and regenerated, and
+  one-part project), it is loaded and regenerated (a revision that does not
+  load answers with the loader's own reason, naming its file), and
   `Measure::CompareBodySets` compares the body sets. The answer is `N mm³
   added / removed` or `same shape` (a millionth of the larger volume counts
   as zero), and the diff solids are drawn on the part: red where material

@@ -62,7 +62,8 @@ reference.
   own and refuses a part with no rules.
 - **EdgeFlange** `{edges, length, angle_deg, radius?, position?, length_mode?,
   offset_start?/offset_end?, relief?, corners?}` — a wall bent up from STRAIGHT
-  edges of a flat panel, one bend per edge. `position` (`material_inside`
+  edges of a flat panel, one bend per edge (an edge listed twice is flanged
+  once, as a fillet blends it once; so for a Hem). `position` (`material_inside`
   default, `material_outside`, `bend_outside`) says which mold line the picked
   edge marks; `length_mode` (`flat` default = the wall past the bend,
   `outside`, `inside`) says which dimension `length` states. Offsets stop the

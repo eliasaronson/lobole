@@ -88,7 +88,10 @@ Every instance that opens a remote port writes
 `{app, pid, port, mode: gui|headless|offscreen, started}` — and removes it
 when the port closes (`src/remote/InstanceRegistry.h`). A crash leaves the
 file behind, so the pid is the truth: readers skip entries whose process is
-gone and delete them. The file holds only what does not change while the app
+gone and delete them. The app's own reader (`remote::LiveInstances`) also
+deletes an entry that does not parse or whose `pid`, `port` or `started` is
+not a whole number in its range (a pid of 0 or -1 asks `kill()` about a
+process group and reads as alive). The file holds only what does not change while the app
 runs; the open project and whether it is dirty come from `ping`, live.
 
 **The port claim.** The registry follows `XDG_STATE_HOME`, and an agent's

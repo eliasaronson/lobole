@@ -151,7 +151,7 @@ did:
 ## The library
 
 `AppState::projectTemplates`, beside the project variables and tables:
-saved in `project.json` under `templates` (additive), and in a lone part's
+saved in `project.json` under `templates`, and in a lone part's
 file envelope (format v161), which an open takes back into the project. A
 malformed template refuses the open. Saving, importing or deleting one is a
 project-scope edit on the project variables' undo history

@@ -324,8 +324,10 @@ agree.
 
 **Written once.** The bin goes first and the json, which carries
 `bin_bytes`, second; a json whose bin is missing or another size (a torn
-save, one file copied without the other) drops that result with a warning
-and the study runs again. Each file is skipped when its bytes are the ones
+save, one file copied without the other), or a result that does not read,
+drops that result and the study runs again. The open reports it as a
+derived drop, never a failed load
+([a lossy load](../versioning/README.md#a-lossy-load)). Each file is skipped when its bytes are the ones
 on disk, so a save whose result has not changed writes neither and leaves
 its modification time alone. An autosave writes no result: its sidecars are
 the single-file form, which carries none

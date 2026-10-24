@@ -365,8 +365,9 @@ view's files only when their bytes differ (and only for a projection whose
 inputs were hashed), an autosave writes none (its sidecars are the
 single-file form, which carries none), and the project's history keeps none
 ([versioning](../versioning/README.md#saved-results-stay-out-of-the-history)). A
-projection file that does not read (a torn bin) is dropped with a warning
-and the view projects.
+projection file that does not read (a torn bin) is dropped and the view
+projects; the open reports it as a derived drop
+([a lossy load](../versioning/README.md#a-lossy-load)).
 
 ### Staleness and updates
 

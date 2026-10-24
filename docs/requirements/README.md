@@ -222,8 +222,8 @@ expression over the project's variables (`"run_gap / 2"`), evaluated when
 the requirement is checked; the evidence keeps what it evaluated to.
 
 **Refused, naming what is accepted:** an unknown measure kind, an unknown
-key for the kind, a missing required key, an unknown value of a key that
-has a vocabulary (`quantity`, `mode`, `expect`, `class`), an unknown bound
+key for the kind (in a saved file, also in the requirement or its evidence),
+a missing required key, an unknown value of a key that has a vocabulary (`quantity`, `mode`, `expect`, `class`), an unknown bound
 kind, a number bounded `pass` or a verdict bounded by a number, `within`
 with its min above its max, and a requirement naming a document, study,
 occurrence, mate or setup that does not exist. A key of the wrong type is

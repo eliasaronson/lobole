@@ -197,14 +197,23 @@ joint with the wrong degrees of freedom, a modal study running as static).
   `FeatureFromJson` refuses a feature type with no `kFeatureTypes` row.
 - The directory format is one hand-editable file per item, so a typo in a
   file is a normal-workflow risk, and the loader applies the same rule as
-  the RPC surface.
+  the RPC surface: every reader — parts, assemblies, drawings, jobs,
+  `project.json`, requirements, lookup tables, print profiles, machines —
+  refuses a key it does not know, naming the accepted keys, and a key
+  written twice, naming the file
+  ([what a load refuses](versioning/README.md#what-a-load-refuses)). What
+  a load keeps going past (an unlisted file, a damaged derived file) it
+  reports as a drop, never silently
+  ([a lossy load](versioning/README.md#a-lossy-load)).
 
 **Gates:** the `test_conventions.cpp` cases "every bool *FromString parser is
 [[nodiscard]]" and "an enum-returning *FromString parser has no silent
 fallback"; per-parser refusal tests in `test_serialization.cpp`,
 `test_drawing.cpp`, `test_fem.cpp` and the CAM tests;
 `tests/strict_inputs_smoke.py` (unknown feature-JSON fields refused on the
-RPC path); `tests/blindspots/03_unknown_feature_field.py`.
+RPC path); `tests/blindspots/03_unknown_feature_field.py`; the reader sweep,
+`tests/test_reader_fuzz.cpp`, which fails a reader that loads past a key it
+drops ([reader fuzzing](versioning/README.md#reader-fuzzing)).
 
 ## A mutating RPC reports a broken feature in its own response
 

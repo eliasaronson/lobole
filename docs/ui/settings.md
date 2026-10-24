@@ -40,7 +40,10 @@ OS sweeps.
   instance changed. Two instances at once is the normal case (the human's
   windowed instance plus agents' scratch instances); without the merge the
   last writer would revert the other's preferences.
-- **Absent file = defaults.** **Corrupt file = defaults**, a log line, and the
+- **Absent file = defaults.** **Corrupt file = defaults** — one that does
+  not parse as a whole, so also one with anything after its JSON (written
+  twice, or half of a torn sync) or a key written twice
+  (`readctx::ParseStrict`) — a log line, and the
   bad file set aside as `settings.json.bad-<YYYYmmdd-HHMMSS>` (never over an
   earlier one: a `-2` is added) rather than overwritten; the windowed app
   says so once, in a modal naming where it was kept (`settings::Load`'s
@@ -71,7 +74,10 @@ Two members are deliberately not `kFields` rows: `keys` (the keymap
 overrides, [keybindings.md](keybindings.md)) and `window` (the main window's
 last geometry — remembered state nobody wants to type, restored through
 `FitToMonitors` in `core/io/WindowGeometry.h`, which drops a rect no current
-monitor can show).
+monitor can show). The rect is read field by field: a field that is not a
+whole number of pixels in `int` range (or a `maximized` that is not a bool)
+loses the remembered rect, with a log line, never the start or the other
+settings; `set_settings` refuses one, naming the field.
 
 ## Tiers: how a change arrives
 

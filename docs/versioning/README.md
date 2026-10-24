@@ -54,19 +54,92 @@ gated by `tests/test_golden.cpp` and `format_version_gate`.
 
 ### What a load refuses
 
-The loader says what is wrong rather than guessing:
+A reader given a damaged file does one of two things: refuses it, naming the
+file and what is wrong, or loads it correctly. It never loads a document
+that is silently missing content, because the next save would write over
+the original without it. Every reader opens a `readctx::FileContext`
+(`src/core/io/ReadContext.h`) around each file it reads, so any refusal
+from inside it arrives as `features/7-fillet.json: features[...]: ...` (a
+project container's documents add their directory: `parts/stand/…`), never
+as nlohmann's bare `type_error.302`.
 
-- a file holding git conflict markers (`<<<<<<<`), named;
-- two files claiming one id (`15-box.json` and `15-hole.json`), and an index
-  listing an id twice — per collection: features, studies, study results,
-  configurations, occurrences, mates, relations, assertions, motion studies,
-  drawing views and dimensions;
-- a sketch with two entities sharing an id;
-- a document of another kind, or a version newer than `kVersion`;
-- a name or a path that would reach outside the project
-  ([format.md](format.md#paths-in-a-project)).
+The loader refuses, naming it:
+
+- a file that does not parse, holds git conflict markers (`<<<<<<<`), or
+  writes one key twice in an object (`readctx::ParseStrict`; nlohmann keeps
+  the last and drops the first);
+- a key no reader of that object knows, naming it and every key that is
+  accepted (`readctx::RefuseUnknownKeys`, in every `…FromJson`, in the
+  envelopes and in `project.json`). A newer build's keys come with a newer
+  version, which is refused too. A key a reader accepts and does not use (a
+  written type tag, `next_entity_id`, a CAM op's `tool_number`) must still be
+  what it says (`readctx::RequireTag` / `RequireCount`);
+- a version newer than `kVersion`, one that is not a whole number, one older
+  than its kind of document (assemblies arrived at 23, drawings at 30, jobs
+  at 73), and a part whose features include a type that arrived after the
+  version it claims: the migrations for that older version would rewrite
+  content that never needed them;
+- two files claiming one id (`15-box.json` and `15-hole.json`), an index
+  listing an id twice, an index listing an id whose file is not there, an
+  item file whose `id` is not the one its name starts with or that has none
+  — per collection: features, studies, study results, configurations,
+  occurrences, mates, relations, assertions, motion studies, drawing views
+  and dimensions — and in a single file, two items of one list sharing an
+  id, an id that is not a whole number above 0, or an item other than a v1
+  feature with no id;
+- a sketch with two entities sharing an id; a parameter defined twice; a
+  Cope's or a Derived feature's id list naming one id twice (a damaged file
+  listed one a million times);
+- an asset an image or a Derived snapshot names and `assets/` (or the
+  single file's `assets` map) does not hold;
+- a document of another kind; in `project.json`, a document entry with no
+  `type` or one this build does not know, a `dir` that is not there, an id
+  listed twice;
+- a name, a path or a symlink that would reach outside the project
+  ([format.md](format.md#paths-in-a-project));
+- a value of the right type that a writer would not write back: a
+  fixed-size array of another size (`[x, y, z]` with a fourth number), half
+  an element reference, an element of no feature where the writer writes
+  only a set one, a constraint point ref out of its range, a leader that
+  points at nothing, an `fcf` frame on a note that is not one, a relation's
+  `ride` without its `teeth`, a flat mill with a `tip_angle`, tabs without a
+  count, an `active_configuration` the document does not have, a sketch
+  plane whose axis lies along its normal.
 
 A save refuses an item with id 0 (see [format.md](format.md#stability-guarantees)).
+
+### A lossy load
+
+A load that keeps going past damage reports it: one `readctx::Drop` per
+file it could not keep — `{path, pointer, reason, derived}` — collected by
+`readctx::CollectDrops` into the `LoadReport` that travels with the read
+(`ui::LoadedProject::drops`, then `AppState::openDrops`). What loads around
+damage, rather than refusing:
+
+- a file in a collection directory that the index does not list, or whose
+  name starts with no id: not loaded, and a save would delete it;
+- an asset nothing names (the single file's `assets` map);
+- derived data, marked `derived`: a study or motion result that does not
+  read (or whose `.bin` is not the size its json says), a drawing view's
+  saved projection that does not read, and baked geometry that cannot be
+  used for damage rather than age (unreadable, a link out of the project,
+  or not matching its `content_hash`). It is rebuilt.
+
+A document that loaded with a drop that is not derived is not saved back
+over the path it came from by default, because that save would lose the
+content for good (`ui::SaveProject`, `SaveWouldLoseDrops`):
+
+- GUI: the menu bar shows "Opened incomplete" (or "Results dropped" when
+  every drop is derived) with the list. Save raises "Save over an
+  incomplete open?" listing each drop, with three ways out: **Save a
+  copy…** (the default: the save dialog, leaving the original as it is),
+  **Overwrite anyway** (saves, and logs the drops once more) and
+  **Cancel**.
+- RPC: `open_project` returns `dropped`; `save_project` to the same path is
+  refused, naming each drop, unless the call passes `overwrite_lossy: true`,
+  when it saves and its reply's `warning` repeats what was lost.
+- A save to any other path (Save As) is never blocked. A save over the
+  source clears the drops.
 
 ## Baked geometry
 
@@ -98,6 +171,17 @@ with the blob's:
 - anything else (absent, truncated, a different `geometry_format`, a hash
   from another recipe, a feature file edited by hand or by a merge): the
   blob is ignored and the document rebuilds.
+
+The index also carries a `content_hash`: FNV-1a over the index itself
+(without that key) and every `.brep` it names. The chain hash says which
+recipe the blob was built from; the content hash says the blob is still what
+was written. A blob whose index or bodies were edited or damaged while the
+chain hash survived (a body list grown, an element map changed) would
+otherwise be adopted whole; it is ignored, the part rebuilds, and the load
+reports a derived drop ([a lossy load](#a-lossy-load)). A blob without one
+(an older build's) is read on the chain hash alone, and an older build
+ignores the key, so it moved no `geometry_format`. A blob that cannot be used because of damage — not
+because it is old or from another recipe — is reported the same way.
 
 A blob that no longer matches the recipe makes an open slower, never wrong.
 Consequences:
@@ -237,7 +321,12 @@ A clean save clears every sidecar (and the unsaved slot). Recovery:
 - GUI: on open, a "Recover autosave?" modal names how many documents have
   newer work; accepting lays every recovered document over the project
   (`ui::RecoverProject`). All or nothing — half from one session and half
-  from another is a state nobody can reason about. The project stays dirty.
+  from another is a state nobody can reason about: every sidecar is read
+  before any is laid over the project, and one that does not load refuses
+  the recovery with the loader's own reason, naming the sidecar
+  (`the autosave of parts/Stand does not load: …`). The project stays dirty.
+  A one-document project's single sidecar is opened as the document it is;
+  one that does not load leaves the project as it was and says why.
 - After a crash: the next start's "Loböle closed unexpectedly" notice offers
   the same recovery for the project the crashed session had open, or the
   report's copy of the unsaved slot for one never saved
@@ -366,12 +455,119 @@ so a saved project is self-contained. See
 | RPC | does |
 |---|---|
 | `new_project` | reset to one empty part, discarding what is open |
-| `open_project {path}` | open; returns `autosave_available`, `autosave_path`, `rebuilt_parts`, `rebuild_reason`, regen |
-| `save_project {path, message?, force?}` | save; `message` is the git commit message; refuses when the disk moved unless `force` |
+| `open_project {path}` | open; returns `autosave_available`, `autosave_path`, `rebuilt_parts`, `rebuild_reason`, `dropped` ([a lossy load](#a-lossy-load)), regen |
+| `save_project {path, message?, force?, overwrite_lossy?}` | save; `message` is the git commit message; refuses when the disk moved unless `force`, and over a lossy open unless `overwrite_lossy` (then its reply carries `warning`) |
 | `autosave_now`, `autosave_status` | force an autosave; list recoverable documents |
 | `project_changed_on_disk` | the stamp check |
 
 History, merge and remote RPCs are listed in [history.md](history.md#rpcs).
+
+## Reader fuzzing
+
+No hand-picked case damages a file the way a disk, a sync client or a merge
+does, so a sweep does: `tests/test_reader_fuzz.cpp` hands every reader
+damaged versions of a valid input and holds each case to the rules above.
+
+**The damage** (`tests/mutate/Mutate.{h,cpp}`) is seeded and reproducible.
+Each case has a stable id, `<corpus>/<file>:<operator>:<n>`, and is a pure
+function of the input, the id and the base seed (xorshift64 seeded by a hash
+of the id), so one case replays without the others. Five levels:
+
+- bytes: truncation (every length of a file under 1 KB; else the first and
+  last 64 and 1024 spread between), bytes flipped, zeroed and set to 0xff,
+  runs dropped, repeated and swapped, garbage appended, the file doubled,
+  reversed, emptied;
+- text: lines dropped, repeated, swapped and replaced, a word replaced by
+  another of the file's, each number in turn and then all of them replaced
+  by a liar (the values the hostile sweep sends,
+  [rpc.md](../scripting/rpc.md#the-hostile-sweep));
+- JSON: a key deleted or written twice, keys reordered (which must load
+  identically), a value's type swapped, a number lied about, an enum string
+  with one character changed, `version` set to 0, 1, `kVersion`,
+  `kVersion + 1`, -1, a string or removed, a value wrapped 10 000 arrays
+  deep, an array grown to 10⁶ copies of its first element (at most 8 MB of
+  text);
+- model: an id reference pointed at no item, at its own or at a later one;
+  two items given one id; id 0; items reordered;
+- directory: a file deleted, emptied, duplicated under another id or
+  unlisted; a document's index swapped for another kind's; a `dir`, asset
+  or blob name that leaves the project; a symlink out of it; a result's
+  `offset`, `count` or `bin_bytes` lying.
+
+**The corpus** is every golden in its single-file form and, saved by this
+build, in its directory form (with a saved study result on
+`v153-saved-study-results`, a motion result on `v87-motion-study`, and the
+committed `v162-stored-projection` drawing), one project container of every
+document kind with variables, a folder, a section and a requirement; and,
+for the readers outside documents, fixtures written by the test: a settings
+file with every key, a keymap and a window; a machine and a print profile
+store; a dead session's marker, crash file and log beside an earlier
+report; the instance registry; a project's autosave sidecars; a git vault
+with two commits (a damaged version committed, logged, extracted, loaded,
+and scanned by `ProjectMerge`); a PNG and a JPEG for `stbi_info_from_memory`
+and the underlay's decode. A tree's own file damage runs on every file that
+is no collection's item and on one item of each kind per directory; the
+single-file families damage every item's content.
+
+**The rules** for every case:
+
+- crash: the process dies, or ASan / UBSan reports. Before each case its id
+  goes to stderr and to `build/reader-fuzz-last-case.<family>` (one file per
+  family: ctest runs them side by side), so a crash or a hang names it;
+- refused without a name: the message must hold the damaged file's path
+  relative to what was read (or, for a file a directory operator removed or
+  added, its directory and id) and something beyond it. Damage to derived
+  files only must not refuse the document at all;
+- silently missing content: a loaded case is saved, and every value of the
+  input that is not in the save — past what the unmutated input's own round
+  trip loses, counted by shape so a re-keyed item still matches — must be
+  covered by a drop. A value the writer leaves out as its default is not
+  lost: changed, it changes the save (or is refused), which is how the
+  harness tells it from a value the reader ignores. The saved copy must load
+  and save again to the same bytes (geometry aside: a rebuilt body and one
+  read back write different B-Rep bytes). Item counts (features,
+  occurrences, views, setups, …) must be the original's unless a lossy drop
+  was reported; bodies only where the damage cannot change the model;
+- budget: 2 s a case (8 s under `ENABLE_SANITIZERS`), or four times the
+  unmutated input's read when that is longer (a part that rebuilds its blob
+  takes its rebuild's time). A reader that never returns is stopped by
+  ctest's `TIMEOUT` (1200 s), and the last-case file names it.
+
+The non-document families have rules of their own: settings never throw
+and a file that does not parse leaves a note naming it; a profile store
+loads every file or names it as unreadable; collecting crash reports never
+throws and copies nothing from outside the state dir; the registry never
+reports an instance with pid or port 0; a recovery refuses naming the
+sidecar; an image decodes to the size its header states, or not at all.
+
+**Registration.** One `TEST_CASE` per family, so ctest runs them in
+parallel. `[reader_fuzz]` is the fixed sample: every operator at least once
+per family, about 1/50 of the rest, over a sixth of the corpus (each input
+costs a load and a save before its first case) plus the inputs with side
+files; it is in `tools/test-fast.sh`. `[reader_fuzz][slow]` is every case
+of the whole corpus, in the headless suite and under `tools/ci-local.sh
+--asan`; the part files and the part directories run as four shards each
+(`… 1/4` to `4/4`, split by a hash of the input's name). Two exceptions keep
+it to minutes: an input whose own read takes a quarter second or more (a
+modeled thread, a worm, a text sketch — most of its damaged cases rebuild
+it) runs every operator once and an eighth of the rest, and the git vault
+runs a handful of operators, each case costing six git processes. Each
+prints its count and time.
+`Reader fuzz: the harness catches what it claims to` plants a reader that
+drops an unknown key, one that refuses without naming the file and one that
+sleeps, and each must fail its rule.
+
+**By hand.** `tools/reader-fuzz.py run --seed S [--family F] [--only TEXT]`
+reruns the full sweep with another base seed (ctest's is fixed) and prints
+the failures; `LOBOLE_READER_FUZZ_OPS=a,b` narrows a run to operators.
+`tools/reader-fuzz.py case <id>` writes one case — the damaged file or tree,
+as bytes, not the id — to `tests/reader_cases/<name>/input/` with an
+`expect.json` (`refused` and the substrings its message holds, `loads` with
+its counts and drops, or `passes` for a family outside documents), which
+`tests/test_reader_cases.cpp` loads; every bug the sweep found is one of
+these, and each failed before its fix. `LOBOLE_READER_CORPUS=<dir>` runs the
+hidden `[.reader_corpus]` case over generator output under `scratch/`
+(untracked, so it never decides whether the suite passes).
 
 ## Tests
 
@@ -388,6 +584,10 @@ History, merge and remote RPCs are listed in [history.md](history.md#rpcs).
 | `tests/test_projectstamp.cpp` `[stamp]` | stability, external edits, `.git/` and `geometry/` ignored at every depth, invalid never matching |
 | `tests/test_command_modify.cpp` | a modified feature keeps its id; no id-0 item is written |
 | `tests/headless_smoke.py` | autosave across a SIGKILL, the disk guard end to end with `force` and Save As |
+| `tests/test_reader_fuzz.cpp` `[reader_fuzz]` | the mutation library's own test, the harness's planted readers, and the sweep ([reader fuzzing](#reader-fuzzing)) |
+| `tests/test_reader_cases.cpp` | every regression in `tests/reader_cases/` reads as its `expect.json` says |
+| `tests/lossy_open_smoke.py` | `open_project` reports an unlisted feature file in `dropped`; `save_project` over it is refused until `overwrite_lossy`, and a save elsewhere is not |
+| GUI `disk/a_lossy_open_asks_before_saving_over` | Save raises the choice; Cancel keeps the file, Overwrite anyway saves over it (Save a copy… is not clicked: it opens the system dialog) |
 | GUI `autosave/recovers_every_document` | a multi-document project autosaves each dirty document and recovers all of them |
 | GUI `disk/*` | the moved-project modal and the History banner (the menu-bar notice itself is not asserted: a disabled main-menu `MenuItem` does not resolve through the test engine; the flag behind it is) |
 

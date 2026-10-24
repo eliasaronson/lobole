@@ -21,9 +21,12 @@ baked geometry and autosave are in [README.md](README.md).
 
 - `format` must be exactly `designer-document`; anything else refuses to load.
 - `version` newer than the build's `kVersion`
-  (`src/core/io/SerializationInternal.h`) refuses to load ("Document version
-  is newer than this build supports"). There is no forward compatibility.
-  Older versions load through the loader's migrations.
+  (`src/core/io/SerializationInternal.h`) refuses to load ("format version
+  189 is newer than this build reads (188)"). There is no forward
+  compatibility. Older versions load through the loader's migrations. A
+  version that is not a whole number, one older than its kind of document,
+  and a part holding a feature type newer than the version it claims are
+  refused too.
 - `kind` discriminates the document: absent or `part`, `assembly`, `drawing`,
   `job`. Each loader refuses a document of another kind, naming it.
 - `parameters` precede features: expressions evaluate against them during
@@ -73,6 +76,12 @@ A file may rely on exactly these:
    cannot be parameter names.
 5. JSON key order is not significant; writers emit sorted keys (nlohmann's
    default object) so diffs stay readable.
+6. **Every key is one a reader knows.** A key no reader of its object
+   knows is refused, naming it and the keys that are accepted; so is a key
+   written twice in one object. A file is never loaded past what it says,
+   because the next save would drop it. So a key a format change adds comes
+   with a version bump, which an older build refuses as a whole
+   ([what a load refuses](README.md#what-a-load-refuses)).
 
 ## Migration policy
 
@@ -271,7 +280,7 @@ here; the golden corpus and git history cover them.
 | 151 | Drawings: a view's `detail` {`view`, `center` [x, y, z] world mm, `radius_mm`, `label`}, a detail of another view ([detail views](../drawings/README.md#detail-views)); a note's `style: "fcf"` with `fcf` {`symbol`, `tolerance_mm`, `diameter`?, `modifier`? (`mmc`, `lmc`), `datums`} and `dim`, the dimension a frame stands under ([feature control frames](../drawings/README.md#feature-control-frames)); an unknown symbol or modifier, or a frame ISO 1101 cannot write, is refused on load. Material slugs `aluminum_6061_t6` and `aluminum_6082_t6`. Golden `drawing/v151-frames-details` |
 | 152 | Studies: `load_cases` [{`name`, `weight` (+`weight_expr`)}] on a static or topology study, and a force's or pressure's `case` naming one ([load cases](../topopt/README.md#load-cases)); a topology study's `keep_outs` [{`body`} or {`box_min`, `box_max`} mm] ([keep-outs](../topopt/README.md#keep-outs)); a static study's `shape_from` {`study`, `threshold`? or `whole`?}, refused on any other type ([a static study of the optimised shape](../topopt/README.md#a-static-study-of-the-optimised-shape)). A topology result file carries `cases` [{`name`, `weight`, `compliance`}], `keep_outs` [{`what`, `tets`, `volume`}] and `islands` {`threshold`, `components`, `tets`, `volume`, `keep_faces`, `load_path_broken`} ([connectivity](../topopt/README.md#connectivity)). A keep-out that is neither a body nor a box is refused on load. Golden `v152-topology-load-cases` |
 | 153 | Every study result is saved beside its study with its `input_hash`, in the directory form only: a static or modal result in a part's or an assembly's `studies/<id>-<slug>.result.json` (`kind` `static`/`modal`/`topology`, `maxima`, each body's mesh with `results` {`displacement`, `von_mises`, maxima, `modes` [{`frequency_hz`, `shape`}]} or one per load case in `cases`, and a shape study's `shape` {`source`, `threshold`, `island_tets`, `volume`, `threshold_lowered_from`}), and a motion result in an assembly's `motion/<id>-<slug>.result.json` (every sample's `worlds`, `leaves`, `clashes`, `unknown_contacts` and `mates`, the pair counts). A reopened project's run of the same inputs is answered from it; one whose inputs moved reads stale ([studies as jobs](../simulation/README.md#studies-as-jobs)). A `kind` that is none of the three, or a malformed hash, is refused on load. Golden `v153-saved-study-results` (the single-file form carries no results; `tests/test_study_inputs.cpp` and `tests/test_motion.cpp` reopen each kind) |
-| 154 | A study or motion result is two files beside its study: `<id>-<slug>.result.json` (the metadata, `input_hash`, and `bin_bytes`) and `<id>-<slug>.result.bin` (its numeric arrays, raw little-endian). Each array in the json is a reference {`type`, `offset`, `count`}: `f32` for a field (nodes, displacements, stresses, mode shapes, density), `u16`/`u32` for indices (`i32` where one is -1, a cut triangle on no face) (`tets`, `boundary` six nodes a triangle with `boundary_face` apart, `tet_domain`), `f64` for a motion placement (`worlds` {`occurrences`, `world`}, `leaf_world`). A static or modal body keeps its boundary surface only, with `node_count` and `tet_count` of the mesh it solved ([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps)). An unknown `type`, or a reference outside the bin, is refused; a bin missing or not `bin_bytes` long drops that result. A v153 result (arrays inline) still reads. Golden `v154-study-results-binary` (the single-file form carries no results; `tests/test_study_inputs.cpp` reopens each kind) |
+| 154 | A study or motion result is two files beside its study: `<id>-<slug>.result.json` (the metadata, `input_hash`, and `bin_bytes`) and `<id>-<slug>.result.bin` (its numeric arrays, raw little-endian). Each array in the json is a reference {`type`, `offset`, `count`}: `f32` for a field (nodes, displacements, stresses, mode shapes, density), `u16`/`u32` for indices (`i32` where one is -1, a cut triangle on no face) (`tets`, `boundary` six nodes a triangle with `boundary_face` apart, `tet_domain`), `f64` for a motion placement (`worlds` {`occurrences`, `world`}, `leaf_world`). A static or modal body keeps its boundary surface only, with `node_count` and `tet_count` of the mesh it solved ([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps)). An unknown `type`, a reference outside the bin, or a bin missing or not `bin_bytes` long drops that result ([a lossy load](README.md#a-lossy-load)). A v153 result (arrays inline) still reads. Golden `v154-study-results-binary` (the single-file form carries no results; `tests/test_study_inputs.cpp` reopens each kind) |
 | 155 | Sketch constraint refs reach an `ellipse`'s or `ellipse_arc`'s axis ends: `which` 3/4 the major-axis ends, 5/6 the minor-axis ends, so a radius is a `distance` from the centre (0) to one, and `horizontal`/`vertical` on an ellipse levels its major axis. An ellipse or elliptical arc with `r_minor` > `r_major`, or `r_minor` <= 0, is refused on load ([ellipses and splines](../sketching/README.md#ellipses-and-splines)). Golden `v155-ellipse-axis-ends` |
 | 156 | Two feature types. `RetainingRing` {`standard`: `din471`\|`din472`, `size` (the nominal shaft or bore diameter, mm)}: a generated retaining ring, every other dimension read from the table. `RetainingRingGroove` {`face`, `from` (a circular edge at one end of that face), `offset` (+`offset_expr`), `standard?`}: its groove cut in a shaft or bore. An unknown standard or size is a feature error naming what is carried ([retaining rings](../parts/README.md#retaining-rings)). Golden `v156-retaining-ring` |
 | 157 | An attached occurrence may name the faces it is seated on: `attach_seat` {`face`, `axis`: {`feature_id`, `element`}, `inner_path`?}, the planar face it bears on and the cylinder or cone whose axis centres it (a fastener: its hole's face and bore); with it, `attach_offset`/`attach_rotation` are in the seat's frame, so the piece follows a hole that moves inside its part. Written only with `attached_to`; a seat missing either face is refused on load. A rider without one keeps the part-frame offset, and a fastener is seated in the hole under it on its first solve ([attached, and mated](../parts/README.md#attached-and-mated)). Golden `assembly/v157-attach-seat` |
@@ -330,7 +339,8 @@ until `core/io/ProjectPaths.h` says so:
   through a symlink, or the project is refused (`InsideProject`);
 - an asset name, and a baked body's `brep` file, must be a plain file name,
   or the document is refused (`CheckedAssetName`) or its baked geometry is
-  ignored;
+  ignored and reported as a derived drop
+  ([a lossy load](README.md#a-lossy-load));
 - an Import path is adopted from staging only as `<subfolder>/<file>`.
 
 ## The directory form
@@ -405,5 +415,8 @@ A multi-document project is a directory with `project.json`:
 `folder` an optional tab-bar folder. Optional keys: project-scope
 `parameters`, `folders`, `sections`, `catalogs`, `tables`,
 `requirements_next_id`, `templates`; the project's requirements are files under
-`requirements/` beside it (v160). The envelope stays at
-version 2 because every later key is additive and ignorable.
+`requirements/` beside it (v160). The envelope is at version 2: the keys
+added since were additive, and older builds ignored them. This build refuses
+a key it does not know, as a document's reader does, and a v2 document
+entry without a `type`, so a key added to it raises the project
+version.

@@ -458,7 +458,9 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   `DeletePrintProfile`, `src/core/io/SerializePrintProfiles.cpp`), mirrored
   in `state.printProfiles` by `ui::ReloadPrintProfiles`
   (`src/ui/PrintProfileActions.cpp`) at startup, headless too, and after
-  every save and delete. A broken file is reported and the rest still load.
+  every save and delete. A broken file — one that does not parse, writes a
+  key twice, or holds a key a profile or a row does not have — is reported
+  by name and the rest still load.
 - **A save refuses** (`printfit::ValidateProfile`) a missing name, two names
   that fold to one file, a base process and material the built-in tables do
   not carry, no rows, a size range that is empty, overlapping or out of order

@@ -490,9 +490,12 @@ by the same name drift apart without any test noticing:
   happened — "crashed: SIGSEGV", or "ended without a crash report: killed,
   out of memory, or power lost" — version, build, OS, mode, project, and the
   crash file), `report.json` (the same fields, for `crash_reports`),
-  `session.log` (the last 2000 lines of that session's log), `crash.dmp`
-  where there is one, and `autosave/` (copies of the autosaves that session
-  wrote: nothing older than it). Twenty reports are kept. Nothing is sent
+  `session.log` (the last 2000 lines of that session's log, taken only from
+  the state dir's `logs/`), `crash.dmp` where there is one, and `autosave/`
+  (copies of the autosaves that session wrote: nothing older than it, each
+  once, and only a sidecar path — a damaged marker naming another file gets
+  nothing copied). A marker's or a report's fields are read one by one: a
+  damaged one loses that field, never the start. Twenty reports are kept. Nothing is sent
   anywhere, and `report.txt` says at the top that the folder may hold the
   user's design and file paths.
 - **The windowed app says so**: a "Loböle closed unexpectedly" modal with
@@ -673,15 +676,19 @@ not abort:
   headless run excludes. `gui_smoke` runs the same cases as
   `tools/gui-tests-xvfb.sh`, serially; the python ones also carry `pygui`, so
   they run as `tools/ctest -L pygui` rather than by excluding `gui_smoke` by name.
-- Three sweeps test from outside what no hand-picked case does:
+- Four sweeps test from outside what no hand-picked case does:
   `tests/hostile_params_smoke.py` sends right-typed wrong values to every
   RPC key ([rpc.md](scripting/rpc.md#the-hostile-sweep)),
   `tools/fuzz.py` builds random designs and checks each against a rebuild
   from nothing, a reopen, undo and redo and the Boolean identities
-  ([modeling](modeling/README.md#random-designs)), and
+  ([modeling](modeling/README.md#random-designs)),
   `tools/action_matrix.py` tries every ordinary action on every face, edge
   and body of a fixed corpus against a committed baseline
-  ([modeling](modeling/README.md#action-matrix)).
+  ([modeling](modeling/README.md#action-matrix)), and
+  `tests/test_reader_fuzz.cpp` hands every file reader damaged versions of
+  the golden corpus and of fixtures for the readers outside documents, and
+  each must refuse naming the file or load without losing content
+  ([versioning](versioning/README.md#reader-fuzzing)).
 - `src/render/`, `app/main.cpp` and `app/GpuOwners.cpp` have no unit tests;
   they are verified by
   the GUI suite, the pixel gate and screenshots. Low line coverage there is
