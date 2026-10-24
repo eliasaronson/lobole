@@ -441,6 +441,16 @@ TEST_CASE("A bearing is placed on a picked journal and mated there",
   bearing = state.assembly->FindById(fit.occurrence);
   CHECK(glm::length(bearing->position - before) < 1e-4);
 
+  // The bearing and its seat mate are ONE undo step
+  // (docs/parts/README.md#placing-is-one-undo-step); a dry run is none.
+  REQUIRE(state.assemblyHistory.undo.size() == 1);
+  REQUIRE(ui::UndoAssembly(state));
+  CHECK(state.assembly->GetOccurrences().size() == 1);
+  CHECK(state.assembly->GetMates().empty());
+  REQUIRE(ui::RedoAssembly(state));
+  CHECK(state.assembly->FindById(fit.occurrence) != nullptr);
+  CHECK(state.assembly->GetMates().size() == 1);
+
   // The generated part is filed with the standard parts.
   bool filed = false;
   for (const ui::PartSlot& slot : state.parts)
@@ -463,6 +473,7 @@ TEST_CASE("A bearing is refused on a part tab and by an unknown name",
   CHECK(ui::AddBearing(state, "6200-2RS", {}, {1, 0, 0, 0}, &error) == 0);
   CHECK_THAT(error, ContainsSubstring("\"6200\""));
   CHECK(state.parts.size() == tabs); // no tab left behind by a refusal
+  CHECK(state.assemblyHistory.undo.empty()); // ...nor an undo step
 }
 
 TEST_CASE("Bearings on the BOM are one row per designation",
@@ -476,6 +487,7 @@ TEST_CASE("Bearings on the BOM are one row per designation",
   REQUIRE(ui::AddBearing(state, "608", {}, {1, 0, 0, 0}, &error) != 0);
   REQUIRE(ui::AddBearing(state, "608", {0, 0, 20}, {1, 0, 0, 0}, &error) != 0);
   REQUIRE(ui::AddBearing(state, "6200", {0, 0, 40}, {1, 0, 0, 0}, &error) != 0);
+  CHECK(state.assemblyHistory.undo.size() == 3); // one step per placement
   const ui::BomTable bom = ui::ComputeBom(state);
   REQUIRE(bom.rows.size() == 2);
   for (const ui::BomRow& row : bom.rows) {

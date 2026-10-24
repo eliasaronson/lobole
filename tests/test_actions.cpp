@@ -1672,6 +1672,60 @@ TEST_CASE("A bolt through two parts mates them", "[actions][parts][assembly]") {
   CHECK(state.assembly->FindById(far.placed.back())->attachedTo == f2);
 }
 
+TEST_CASE("Placing a fastener is one undo step", "[actions][parts]") {
+  // Neither add_fastener nor fit_fastener took an assembly snapshot, so
+  // Ctrl+Z skipped the placement and undid whatever came before it
+  // (docs/parts/README.md#placing-is-one-undo-step).
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+  const std::vector<ElementRef> topRims =
+      MakeMultiBorePlate(state, "Top", 12.0, 6.6, {0.0});
+  MakeMultiBorePlate(state, "Bottom", 26.0, 6.6, {0.0});
+  REQUIRE(topRims.size() == 1);
+  ui::SetActivePart(state, ui::AddAssembly(state, "Bolted"));
+  const auto place = [&](const char* part, glm::vec3 at) {
+    ui::SnapshotAssembly(state); // the steps an undo must NOT take back
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = at;
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t topOcc = place("Top", glm::vec3(0.0f));
+  place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
+  const size_t steps = state.assemblyHistory.undo.size();
+
+  // A whole joint — screw, nut, mate — is ONE step.
+  ui::FastenerRequest request;
+  request.nut = "iso4032";
+  const ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{topOcc, topRims[0]}, request);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  REQUIRE(fit.placed.size() == 2);
+  CHECK(state.assemblyHistory.undo.size() == steps + 1);
+  REQUIRE(ui::UndoAssembly(state));
+  CHECK(state.assembly->GetOccurrences().size() == 2);
+  CHECK(state.assembly->GetMates().empty());
+  REQUIRE(ui::RedoAssembly(state));
+  CHECK(state.assembly->GetOccurrences().size() == 4);
+  CHECK(state.assembly->GetMates().size() == 1);
+
+  // A lone placement is its own step, and a refused one is none.
+  const size_t afterFit = state.assemblyHistory.undo.size();
+  std::string error;
+  REQUIRE(ui::AddFastener(state, "iso4762", "M6", 20.0, "", {0, 0, 40},
+                          {1, 0, 0, 0}, &error) != 0);
+  CHECK(state.assemblyHistory.undo.size() == afterFit + 1);
+  CHECK(ui::AddFastener(state, "iso4762", "M5.5", 20.0, "", {0, 0, 40},
+                        {1, 0, 0, 0}, &error) == 0);
+  CHECK(state.assemblyHistory.undo.size() == afterFit + 1);
+  REQUIRE(ui::UndoAssembly(state));
+  CHECK(state.assembly->GetOccurrences().size() == 4);
+}
+
 TEST_CASE("A placed fastener rides on the part it bears on",
           "[actions][parts]") {
   // Reported from use: "I get surprised by the parts and fasteners being

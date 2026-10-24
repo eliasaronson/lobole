@@ -610,6 +610,12 @@ add_test(NAME fastener_stack_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(fastener_stack_smoke PROPERTIES TIMEOUT 300)
 
+# Placing a fastener, bearing or retaining ring is one undo step.
+add_test(NAME placement_undo_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/placement_undo_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(placement_undo_smoke PROPERTIES TIMEOUT 180)
+
 # A read reaches another part by reference and never switches tabs (W2).
 add_test(NAME tabless_read_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tabless_read_smoke.py

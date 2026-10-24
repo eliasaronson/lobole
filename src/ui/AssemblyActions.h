@@ -97,6 +97,11 @@ struct BomTable {
 // assembly / empty stack (Undo/Redo return whether they did anything).
 void SnapshotAssembly(AppState& state);
 
+// Takes back the last SnapshotAssembly when the change it was taken for
+// turned out to change nothing (a refusal after the snapshot), so the undo
+// stack holds no empty step. The redo stack the snapshot cleared stays clear.
+void DropAssemblySnapshot(AppState& state);
+
 bool UndoAssembly(AppState& state);
 
 bool RedoAssembly(AppState& state);

@@ -9,20 +9,6 @@ yet".
 Entries are grouped by area. Add a new one under its area's heading, creating
 the heading if it is not here yet.
 
-## Assemblies
-
-### Placing a fastener, bearing or retaining ring cannot be undone
-
-- **Symptom:** after `add_fastener`/`fit_fastener` (and the bearing and ring
-  versions), or the same placement in the GUI, Ctrl+Z skips the placement and
-  undoes whatever came before it.
-- **Cause:** none of those paths takes an assembly snapshot before it
-  changes the assembly.
-- **Where:** `src/remote/RemoteAssembly.cpp` (`add_*`, `fit_*`) and the GUI
-  placement paths in `src/ui/`.
-- **Likely fix:** `ui::SnapshotAssembly(state)` before the first change, as
-  every other occurrence edit does.
-
 ## Inspection
 
 ### A refused `add_section` leaves a section behind

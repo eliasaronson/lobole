@@ -119,9 +119,12 @@ const BearingFeature* BearingOn(AppState& state, const Occurrence& occ) {
 
 } // namespace
 
-uint64_t AddBearing(AppState& state, const std::string& designation,
-                    const glm::dvec3& position, const glm::dquat& orientation,
-                    std::string* error) {
+namespace {
+// AddBearing's body; `snapshot` as PlaceFastener's: FitBearing takes one undo
+// step for the bearing and its mates.
+uint64_t PlaceBearing(AppState& state, const std::string& designation,
+                      const glm::dvec3& position, const glm::dquat& orientation,
+                      std::string* error, bool snapshot) {
   const auto fail = [&](const std::string& why) -> uint64_t {
     if (error)
       *error = why;
@@ -156,12 +159,21 @@ uint64_t AddBearing(AppState& state, const std::string& designation,
   if (state.assembly == nullptr)
     return fail("could not return to the assembly after creating " + name);
 
+  if (snapshot)
+    SnapshotAssembly(state);
   Occurrence occ;
   occ.partId = partId;
   occ.name = name;
   occ.position = position;
   occ.orientation = orientation;
   return state.assembly->AddOccurrence(occ);
+}
+} // namespace
+
+uint64_t AddBearing(AppState& state, const std::string& designation,
+                    const glm::dvec3& position, const glm::dquat& orientation,
+                    std::string* error) {
+  return PlaceBearing(state, designation, position, orientation, error, true);
 }
 
 BearingFit FitBearing(AppState& state, const RimPick& pick,
@@ -341,10 +353,14 @@ BearingFit FitBearing(AppState& state, const RimPick& pick,
   }
 
   std::string error;
-  fit.occurrence = AddBearing(state, row->designation, fit.position,
-                              fit.orientation, &error);
-  if (fit.occurrence == 0)
+  // One undo step for the bearing and the mates that seat it.
+  SnapshotAssembly(state);
+  fit.occurrence = PlaceBearing(state, row->designation, fit.position,
+                                fit.orientation, &error, false);
+  if (fit.occurrence == 0) {
+    DropAssemblySnapshot(state);
     return fail(error);
+  }
   const Occurrence* placed = state.assembly->FindById(fit.occurrence);
   const BearingFeature* bearing =
       placed != nullptr ? BearingOn(state, *placed) : nullptr;

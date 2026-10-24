@@ -2964,6 +2964,19 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK(s_App->gpu.fastenerGhostInstances.empty());
 
+    // Ctrl+Z takes the whole joint back in ONE step — the screw, its nut and
+    // the mate — and Ctrl+Y puts it back. It used to skip the placement
+    // and undo whatever came before it
+    // (docs/parts/README.md#placing-is-one-undo-step).
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z);
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), before);
+    IM_CHECK(s_App->assembly->GetMates().empty());
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y);
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), before + 2);
+    IM_CHECK_EQ(s_App->assembly->GetMates().size(), (size_t)1);
+
     // And the other half: a stack that moved under a placed screw has to be
     // ASKED about, because deriving a length from other documents' geometry
     // cannot be a live binding (A2). Until this button existed the question

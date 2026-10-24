@@ -91,6 +91,18 @@ about fasteners. A fastener is **refused on a part tab**: CAM would machine a
 screw body in a part, mass and BOM would count it as the part, and
 `check_geometry` would flag it as a disconnected component.
 
+### Placing is one undo step
+
+Every placement — `add_fastener`, `add_bearing`, `add_retaining_ring`, the
+three `fit_*` and the GUI tools that call them — takes an assembly snapshot
+(`ui::SnapshotAssembly`) after its last refusal and before its first change,
+so Ctrl+Z (or `undo`) takes it back whole: a fitted joint's screw, washers,
+nut and mates are one step, as are a bearing and its seat mates. A fit that
+places nothing drops its snapshot again (`ui::DropAssemblySnapshot`). The
+generated part tab a first placement creates stays; it is the part, and the
+next placement of that spec reuses it. `tests/placement_undo_smoke.py` and
+the GUI test `parts/a_fastener_is_placed_by_picking_a_rim` check it.
+
 ## Inch screws (ASME B18.3)
 
 `asme_b18_3` is the inch hexagon socket head cap screw, #4-40 to 3/4-10

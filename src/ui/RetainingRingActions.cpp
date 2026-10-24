@@ -19,9 +19,12 @@
 
 namespace ui {
 
-uint64_t AddRetainingRing(AppState& state, const std::string& standard,
-                          double size, const glm::dvec3& position,
-                          const glm::dquat& orientation, std::string* error) {
+namespace {
+// AddRetainingRing's body; `snapshot` as PlaceFastener's.
+uint64_t PlaceRetainingRing(AppState& state, const std::string& standard,
+                            double size, const glm::dvec3& position,
+                            const glm::dquat& orientation, std::string* error,
+                            bool snapshot) {
   const auto fail = [&](const std::string& why) -> uint64_t {
     if (error)
       *error = why;
@@ -62,12 +65,22 @@ uint64_t AddRetainingRing(AppState& state, const std::string& standard,
   if (state.assembly == nullptr)
     return fail("could not return to the assembly after creating " + name);
 
+  if (snapshot)
+    SnapshotAssembly(state);
   Occurrence occ;
   occ.partId = partId;
   occ.name = name;
   occ.position = position;
   occ.orientation = orientation;
   return state.assembly->AddOccurrence(occ);
+}
+} // namespace
+
+uint64_t AddRetainingRing(AppState& state, const std::string& standard,
+                          double size, const glm::dvec3& position,
+                          const glm::dquat& orientation, std::string* error) {
+  return PlaceRetainingRing(state, standard, size, position, orientation, error,
+                            true);
 }
 
 namespace {
@@ -202,10 +215,16 @@ RetainingRingFit FitRetainingRing(AppState& state, const RimPick& pick,
   }
 
   std::string error;
-  fit.occurrence = AddRetainingRing(state, fit.standard, fit.size, fit.position,
-                                    fit.orientation, &error);
-  if (fit.occurrence == 0)
+  // One undo step for the ring and its seating; dropped again below if it
+  // cannot be seated, since nothing then stays changed.
+  SnapshotAssembly(state);
+  fit.occurrence =
+      PlaceRetainingRing(state, fit.standard, fit.size, fit.position,
+                         fit.orientation, &error, false);
+  if (fit.occurrence == 0) {
+    DropAssemblySnapshot(state);
     return fail(error);
+  }
   Occurrence* ring = state.assembly->FindById(fit.occurrence);
   if (ring == nullptr)
     return fail("the ring was added and is not in the assembly");
@@ -213,6 +232,7 @@ RetainingRingFit FitRetainingRing(AppState& state, const RimPick& pick,
   if (!assembly::SeatRider(*state.assembly, *ring, seat, PartResolverFor(state),
                            AssemblyResolverFor(state), &why)) {
     state.assembly->RemoveOccurrence(fit.occurrence);
+    DropAssemblySnapshot(state);
     fit.occurrence = 0;
     return fail("the ring could not be seated in its groove: " + why);
   }

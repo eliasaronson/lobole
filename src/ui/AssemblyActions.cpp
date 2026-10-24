@@ -103,6 +103,13 @@ void SnapshotAssembly(AppState& state) {
   state.assemblyHistory.redoStamps.clear();
 }
 
+void DropAssemblySnapshot(AppState& state) {
+  if (state.assemblyHistory.undo.empty())
+    return;
+  state.assemblyHistory.undo.pop_back();
+  state.assemblyHistory.undoStamps.pop_back();
+}
+
 namespace {
 // A snapshot keeps the version and save stamp it was taken at, which later
 // edits may have passed and a save may have recorded: restored as it is, an

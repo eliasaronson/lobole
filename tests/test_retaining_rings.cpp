@@ -441,9 +441,13 @@ TEST_CASE("A retaining ring is placed and counted as a bought part",
         0);
   CHECK_THAT(error, ContainsSubstring("din471"));
   CHECK(state.parts.size() == tabs);
+  CHECK(state.assemblyHistory.undo.empty()); // a refusal is no undo step
 
   REQUIRE(ui::AddRetainingRing(state, "din471", 25, {}, {1, 0, 0, 0}, &error) !=
           0);
+  // Each placement is its own undo step
+  // (docs/parts/README.md#placing-is-one-undo-step).
+  CHECK(state.assemblyHistory.undo.size() == 1);
   REQUIRE(ui::AddRetainingRing(state, "din471", 25, {0, 0, 10}, {1, 0, 0, 0},
                                &error) != 0);
   REQUIRE(ui::AddRetainingRing(state, "din472", 47, {0, 0, 20}, {1, 0, 0, 0},
@@ -568,6 +572,7 @@ TEST_CASE("A retaining ring is fitted into its groove and follows it",
 
   // Any face of the groove names it; a dry run places nothing.
   const size_t before = state.assembly->GetOccurrences().size();
+  const size_t steps = state.assemblyHistory.undo.size();
   const ui::RetainingRingFit dry =
       ui::FitRetainingRing(state, ui::RimPick{rod.occ, flankB}, true);
   INFO(dry.why);
@@ -593,11 +598,21 @@ TEST_CASE("A retaining ring is fitted into its groove and follows it",
   CHECK(glm::length(glm::dvec3(local[3]) - glm::dvec3(0, 0, 22)) < 1e-6);
   CHECK(glm::dot(glm::dvec3(local[2]), glm::dvec3(0, 0, 1)) > 1.0 - 1e-9);
 
-  // One ring to a groove.
+  // The fit is ONE undo step (the dry run none), and redo puts it back
+  // seated (docs/parts/README.md#placing-is-one-undo-step).
+  CHECK(state.assemblyHistory.undo.size() == steps + 1);
+  REQUIRE(ui::UndoAssembly(state));
+  CHECK(state.assembly->GetOccurrences().size() == before);
+  REQUIRE(ui::RedoAssembly(state));
+  REQUIRE(state.assembly->FindById(fit.occurrence) != nullptr);
+  CHECK(state.assembly->FindById(fit.occurrence)->attachSeat.IsSet());
+
+  // One ring to a groove, and the refusal is no undo step.
   const ui::RetainingRingFit twice =
       ui::FitRetainingRing(state, ui::RimPick{rod.occ, flankB}, false);
   CHECK_FALSE(twice.ok);
   CHECK_THAT(twice.why, ContainsSubstring("already holds"));
+  CHECK(state.assemblyHistory.undo.size() == steps + 1);
   // A face no groove made is refused.
   const ui::RetainingRingFit wrong = ui::FitRetainingRing(
       state, ui::RimPick{rod.occ, ElementRef{rod.body, "1/face0"}}, false);

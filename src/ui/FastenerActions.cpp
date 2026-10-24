@@ -94,11 +94,15 @@
 
 namespace ui {
 
-uint64_t AddFastener(AppState& state, const std::string& standard,
-                     const std::string& size, double length,
-                     const std::string& drive, const glm::dvec3& position,
-                     const glm::dquat& orientation, std::string* error,
-                     uint64_t ridesOn, std::string* warning) {
+namespace {
+// AddFastener's body. `snapshot` is whether it takes its own undo step: a
+// lone placement does, a fit takes ONE for the whole joint before its first
+// piece (docs/parts/README.md#placing-is-one-undo-step).
+uint64_t PlaceFastener(AppState& state, const std::string& standard,
+                       const std::string& size, double length,
+                       const std::string& drive, const glm::dvec3& position,
+                       const glm::dquat& orientation, std::string* error,
+                       uint64_t ridesOn, std::string* warning, bool snapshot) {
   const auto fail = [&](const std::string& why) -> uint64_t {
     if (error)
       *error = why;
@@ -148,6 +152,9 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
     return fail("could not return to the assembly after creating " +
                 designation);
 
+  // Every refusal is behind us, and the assembly is about to change.
+  if (snapshot)
+    SnapshotAssembly(state);
   Occurrence occ;
   occ.partId = partId;
   occ.name = designation;
@@ -177,6 +184,16 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
       warning != nullptr)
     *warning = placed->name + " " + placed->attachWarning;
   return id;
+}
+} // namespace
+
+uint64_t AddFastener(AppState& state, const std::string& standard,
+                     const std::string& size, double length,
+                     const std::string& drive, const glm::dvec3& position,
+                     const glm::dquat& orientation, std::string* error,
+                     uint64_t ridesOn, std::string* warning) {
+  return PlaceFastener(state, standard, size, length, drive, position,
+                       orientation, error, ridesOn, warning, true);
 }
 
 namespace {
@@ -1024,6 +1041,10 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   }
 
   const auto tPhasePlan = std::chrono::steady_clock::now();
+  // The whole joint is one undo step: the screw, its washers, its nut and
+  // the mates that hold the parts
+  // (docs/parts/README.md#placing-is-one-undo-step).
+  SnapshotAssembly(state);
   // The commit just walks the plan. It used to recompute the same arithmetic
   // a second time, which is how a preview and a placement come to disagree.
   for (size_t i = 0; i < fit.plan.size(); i++) {
@@ -1032,11 +1053,14 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // and handing it one is refused by the standard that does not have it.
     std::string loose;
     const uint64_t id =
-        AddFastener(state, part.standard, part.size, part.length,
-                    i == 0 ? request.drive : std::string{}, part.position,
-                    part.orientation, &fit.why, part.ridesOn, &loose);
-    if (id == 0)
+        PlaceFastener(state, part.standard, part.size, part.length,
+                      i == 0 ? request.drive : std::string{}, part.position,
+                      part.orientation, &fit.why, part.ridesOn, &loose, false);
+    if (id == 0) {
+      if (fit.placed.empty()) // nothing changed: no undo step for it
+        DropAssemblySnapshot(state);
       return fail(fit.why);
+    }
     if (!loose.empty())
       fit.warnings.push_back(std::move(loose));
     fit.placed.push_back(id);
