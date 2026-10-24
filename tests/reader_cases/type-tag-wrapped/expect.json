@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "assembly",
+  "input": "v100-clearance-assertions.json",
+  "message": [
+    "v100-clearance-assertions.json",
+    "its type is"
+  ]
+}

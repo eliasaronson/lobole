@@ -1,0 +1,7 @@
+{
+  "expect": "passes",
+  "family": "crash",
+  "id": "crash/fixture/state/sessions/20261023-120000-4242.crash:ff:0",
+  "input": "tree.dsgn",
+  "seed": 0
+}

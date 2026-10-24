@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v01-plain-box.json",
+  "message": [
+    "v01-plain-box.json",
+    "not a whole number"
+  ]
+}

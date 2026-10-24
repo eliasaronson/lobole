@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "job",
+  "input": "v74-cam-two-parts.json",
+  "message": [
+    "v74-cam-two-parts.json",
+    "reach_offset: expected 2 numbers"
+  ]
+}

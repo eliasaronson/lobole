@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v31-configurations.json",
+  "message": [
+    "v31-configurations.json",
+    "active_configuration is 999"
+  ]
+}

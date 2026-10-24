@@ -1,0 +1,12 @@
+{
+  "edges": [
+    {
+      "element": "2/g1;U0",
+      "feature_id": 2
+    }
+  ],
+  "id": 6,
+  "name": "Break",
+  "radius": 0.2,
+  "type": "Chamfer"
+}

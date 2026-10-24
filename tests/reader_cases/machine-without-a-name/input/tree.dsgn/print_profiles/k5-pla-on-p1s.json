@@ -1,0 +1,28 @@
+{
+  "conditions": "Bambu Lab P1S, 0.4 mm nozzle, Bambu Studio 0.20 mm, X-Y hole and contour compensation 0",
+  "material": "pla",
+  "name": "K5 PLA on P1S",
+  "process": "fdm",
+  "rows": [
+    {
+      "allowance_mm": 0.2,
+      "from_mm": 0.0,
+      "kind": "hole",
+      "source": "the built-in fdm pla row"
+    },
+    {
+      "allowance_mm": -0.1,
+      "from_mm": 0.0,
+      "kind": "shaft",
+      "source": "the built-in fdm pla row"
+    },
+    {
+      "allowance_mm": 0.2,
+      "from_mm": 0.0,
+      "kind": "gap",
+      "source": "print_coupon --gap-only, 0.1 a side slid freely",
+      "to_mm": 50.0
+    }
+  ],
+  "stl_deflection_mm": 0.01
+}

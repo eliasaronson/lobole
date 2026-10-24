@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "drawing-dir",
+  "id": "drawing-dir/v30-drawing/dims/3-diameter.json:rm_file:0",
+  "input": "tree.dsgn",
+  "message": [
+    "index.json",
+    "dims/ has no 3-*.json"
+  ],
+  "seed": 0
+}

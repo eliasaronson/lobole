@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "project",
+  "id": "project/project.dsgn/project.json:reorder_keys:0",
+  "input": "tree.dsgn",
+  "message": [
+    "requirements/1-pad-volume.json",
+    "unknown key 'owner'"
+  ],
+  "seed": 0
+}

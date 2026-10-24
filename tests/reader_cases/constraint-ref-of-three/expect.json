@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v17-full.json",
+  "message": [
+    "v17-full.json",
+    "[entity, which]"
+  ]
+}

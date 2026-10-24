@@ -1,0 +1,19 @@
+{
+  "analysis": "modal",
+  "id": 7,
+  "loads": [
+    {
+      "face": {
+        "element": "2/cap0",
+        "feature_id": 2
+      },
+      "id": 8,
+      "magnitude": 0.0,
+      "type": "fixed"
+    }
+  ],
+  "mesh_size": 1.0,
+  "name": "Ring",
+  "num_modes": 3,
+  "type": "Study"
+}

@@ -1,0 +1,13 @@
+{
+  "counts": {
+    "motion": 1
+  },
+  "dropped": [
+    "motion/5-crank.result.json"
+  ],
+  "expect": "loads",
+  "family": "assembly-dir",
+  "id": "assembly-dir/v87-motion-study/motion/5-crank.result.json:empty_file:0",
+  "input": "tree.dsgn",
+  "seed": 0
+}

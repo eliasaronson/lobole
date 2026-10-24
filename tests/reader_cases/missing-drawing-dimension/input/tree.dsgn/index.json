@@ -1,0 +1,23 @@
+{
+  "dims": [
+    3
+  ],
+  "format": "designer-document",
+  "kind": "drawing",
+  "notes": [],
+  "sheet": {
+    "landscape": true,
+    "size": "a3",
+    "title_block": {
+      "author": "E. Aronsson",
+      "date": "2026-07-14",
+      "document": "Bracket rev B",
+      "project": "Gearbox"
+    }
+  },
+  "version": 188,
+  "views": [
+    1,
+    2
+  ]
+}

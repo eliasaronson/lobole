@@ -1,0 +1,12 @@
+{
+  "axis": {
+    "kind": "y"
+  },
+  "count": 2,
+  "id": 8,
+  "kind": "linear",
+  "name": "Row",
+  "source_id": 7,
+  "spacing": 3.0,
+  "type": "Pattern"
+}

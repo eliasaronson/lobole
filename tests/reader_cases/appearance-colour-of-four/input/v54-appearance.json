@@ -1,0 +1,48 @@
+{
+  "format": "designer-document",
+  "version": 54,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Stained block",
+      "id": 1,
+      "material": "wood_pine",
+      "appearance": {
+        "color": [
+          0.32,
+          0.18,
+          0.4,
+          0.5
+        ],
+        "roughness": 0.35
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 10.0,
+      "height": 5.0,
+      "depth": 4.0
+    },
+    {
+      "type": "Sphere",
+      "name": "Blue ball",
+      "id": 2,
+      "appearance": {
+        "color": [
+          0.05,
+          0.2,
+          0.6
+        ],
+        "metallic": 0.1
+      },
+      "center": [
+        20.0,
+        0.0,
+        0.0
+      ],
+      "radius": 3.0
+    }
+  ]
+}

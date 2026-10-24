@@ -1,0 +1,9 @@
+{
+  "counts": {
+    "failed": 2,
+    "features": 4
+  },
+  "expect": "loads",
+  "family": "part",
+  "input": "v45-guided-loft.json"
+}

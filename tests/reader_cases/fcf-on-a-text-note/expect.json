@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "drawing",
+  "input": "v147-sheet-furniture.json",
+  "message": [
+    "v147-sheet-furniture.json",
+    "fcf note's frame"
+  ]
+}

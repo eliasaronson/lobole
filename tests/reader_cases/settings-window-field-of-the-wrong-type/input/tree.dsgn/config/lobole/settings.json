@@ -1,0 +1,28 @@
+{
+  "zoom_to_cursor": true,
+  "window": {
+    "y": 20,
+    "x": "left",
+    "w": 800,
+    "maximized": true,
+    "h": 600
+  },
+  "ui_font_scale": 1.2000000476837158,
+  "terminal_panel": false,
+  "ssao": "full",
+  "shadows": true,
+  "shadow_map": 2048,
+  "settings_format": 1,
+  "lock_lights_to_model": false,
+  "keys": {
+    "view.fit": "F"
+  },
+  "idle_throttle": true,
+  "gpu_device": "",
+  "git_user_name": "Fuzz",
+  "git_user_email": "",
+  "from_a_newer_build": {
+    "kept": true
+  },
+  "autosave_interval": 60.0
+}

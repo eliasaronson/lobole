@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part-dir",
+  "id": "part-dir/v49-reference-image/assets/1-1.png:rm_file:0",
+  "input": "tree.dsgn",
+  "message": [
+    "assets/1-1.png",
+    "missing"
+  ],
+  "seed": 0
+}

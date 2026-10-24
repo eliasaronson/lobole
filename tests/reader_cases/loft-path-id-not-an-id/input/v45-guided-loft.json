@@ -1,0 +1,106 @@
+{
+  "format": "designer-document",
+  "version": 45,
+  "parameters": [],
+  "features": [
+    {
+      "type": "Sketch",
+      "name": "Bot",
+      "id": 1,
+      "next_entity_id": 2,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "circle",
+          "id": 1,
+          "center": [
+            0,
+            0
+          ],
+          "radius": 1.0
+        }
+      ],
+      "constraints": []
+    },
+    {
+      "type": "Sketch",
+      "name": "Top",
+      "id": 2,
+      "next_entity_id": 2,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          10
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "circle",
+          "id": 1,
+          "center": [
+            0,
+            0
+          ],
+          "radius": 1.0
+        }
+      ],
+      "constraints": []
+    },
+    {
+      "type": "Curve3D",
+      "name": "Spine",
+      "id": 3,
+      "kind": "fit_spline",
+      "points": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          10
+        ]
+      ]
+    },
+    {
+      "type": "Loft",
+      "name": "Along",
+      "id": 4,
+      "sketch_ids": [
+        1,
+        2
+      ],
+      "path_id": 1.8446744073709552e+19,
+      "mode": "new_body"
+    }
+  ]
+}

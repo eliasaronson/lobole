@@ -1,0 +1,108 @@
+{
+  "type": "Sketch",
+  "plane": {
+    "uAxis": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "origin": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "normal": [
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "name": "Base",
+  "id": 1,
+  "entities": [
+    {
+      "type": "line",
+      "id": 1,
+      "b": [
+        6.0,
+        0.0
+      ],
+      "a": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "type": "line",
+      "b": [
+        6.0,
+        4.0
+      ],
+      "a": [
+        6.0,
+        0.0
+      ]
+    },
+    {
+      "type": "line",
+      "id": 3,
+      "b": [
+        0.0,
+        4.0
+      ],
+      "a": [
+        6.0,
+        4.0
+      ]
+    },
+    {
+      "type": "line",
+      "id": 4,
+      "b": [
+        0.0,
+        0.0
+      ],
+      "a": [
+        0.0,
+        4.0
+      ]
+    },
+    {
+      "type": "circle",
+      "radius": 1.0,
+      "id": 5,
+      "construction": true,
+      "center": [
+        3.0,
+        2.0
+      ]
+    },
+    {
+      "type": "arc",
+      "start_angle": 0.0,
+      "radius": 0.3999999761581422,
+      "id": 6,
+      "end_angle": 1.0,
+      "construction": true,
+      "center": [
+        1.0,
+        1.0
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "value": 6.0,
+      "kind": "distance",
+      "expr": "w",
+      "b": [
+        1,
+        1
+      ],
+      "a": [
+        1,
+        0
+      ]
+    }
+  ]
+}

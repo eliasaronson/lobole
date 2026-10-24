@@ -1,0 +1,17 @@
+{
+  "autosaves": [
+    "project.dsgn.autosave"
+  ],
+  "build": "abc, Release",
+  "crashed": true,
+  "first_frame": false,
+  "mode": "windowed",
+  "os": "Linux",
+  "project": "/tmp/reader-case-t7sqvry0/tree.dsgn/project.dsgn",
+  "reason": "crashed: SI�SEGV",
+  "started": "2026-10-23 12:00:00",
+  "started_epoch": 1792800000,
+  "started_ms": 1792800000000,
+  "stem": "20261023-120000-4242",
+  "version": "0.1.0"
+}

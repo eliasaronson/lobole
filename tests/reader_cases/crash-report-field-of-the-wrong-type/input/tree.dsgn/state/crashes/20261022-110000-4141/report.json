@@ -1,0 +1,15 @@
+{
+  "version": "0.1.0",
+  "stem": "20261022-110000-4141",
+  "started_ms": 1792700000000,
+  "started_epoch": "yesterday",
+  "started": "2026-10-22 11:00:00",
+  "reason": "crashed: SIGSEGV",
+  "project": "",
+  "os": "Linux",
+  "mode": "windowed",
+  "first_frame": false,
+  "crashed": true,
+  "build": "abc",
+  "autosaves": []
+}

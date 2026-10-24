@@ -1,0 +1,56 @@
+{
+  "autosave_interval": 60.0,
+  "from_a_newer_build": {
+    "kept": true
+  },
+  "git_user_email": "",
+  "git_user_name": "Fuzz",
+  "gpu_device": "",
+  "idle_throttle": true,
+  "keys": {
+    "view.fit": "F"
+  },
+  "lock_lights_to_model": false,
+  "settings_format": 1,
+  "shadow_map": 2048,
+  "shadows": true,
+  "ssao": "full",
+  "terminal_panel": false,
+  "ui_font_scale": 1.2000000476837158,
+  "window": {
+    "h": 600,
+    "maximized": true,
+    "w": 800,
+    "x": 10,
+    "y": 20
+  },
+  "zoom_to_cursor": true
+}
+{
+  "autosave_interval": 60.0,
+  "from_a_newer_build": {
+    "kept": true
+  },
+  "git_user_email": "",
+  "git_user_name": "Fuzz",
+  "gpu_device": "",
+  "idle_throttle": true,
+  "keys": {
+    "view.fit": "F"
+  },
+  "lock_lights_to_model": false,
+  "settings_format": 1,
+  "shadow_map": 2048,
+  "shadows": true,
+  "ssao": "full",
+  "terminal_panel": false,
+  "ui_font_scale": 1.2000000476837158,
+  "window": {
+    "h": 600,
+    "maximized": true,
+    "w": 800,
+    "x": 10,
+    "y": 20
+  },
+  "zoom_to_cursor": true
+}

@@ -1,0 +1,53 @@
+{
+  "active": 0,
+  "documents": [
+    {
+      "dir": "parts/Plate",
+      "folder": "Group",
+      "id": 1,
+      "name": "Plate",
+      "type": "part"
+    },
+    {
+      "dir": "assemblies/Crank",
+      "folder": "Group",
+      "id": 2,
+      "name": "Crank",
+      "type": "assembly"
+    },
+    {
+      "dir": "drawings/Sheet",
+      "folder": "Group",
+      "id": 3,
+      "name": "Sheet",
+      "type": "drawing"
+    },
+    {
+      "dir": "jobs/Mill",
+      "folder": "Group",
+      "id": 4,
+      "name": "Mill",
+      "type": "job"
+    }
+  ],
+  "folders": [
+    "Group"
+  ],
+  "format": "designer-project",
+  "parameters": [
+    {
+      "expression": "10",
+      "name": "w"
+    }
+  ],
+  "requirements_next_id": 2,
+  "sections": [
+    {
+      "base_plane": 0,
+      "offset": 1.5,
+      "reverse": false,
+      "visible": true
+    }
+  ],
+  "version": 2
+}

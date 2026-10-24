@@ -1,0 +1,11 @@
+{
+  "distance": 1.5,
+  "distance_expr": "t",
+  "id": 2,
+  "material": "steel",
+  "mode": "new_body",
+  "name": "Pad",
+  "reversed": false,
+  "sketch_id": 1,
+  "type": "Extrude"
+}

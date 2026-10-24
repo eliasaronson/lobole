@@ -1,0 +1,7 @@
+{
+  "expect": "passes",
+  "family": "settings",
+  "id": "settings/fixture/config/lobole/settings.json:double:0",
+  "input": "tree.dsgn",
+  "seed": 0
+}

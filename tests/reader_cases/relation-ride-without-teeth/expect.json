@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "assembly",
+  "input": "v105-click-and-dogs.json",
+  "message": [
+    "v105-click-and-dogs.json",
+    "`ride` comes with its `teeth`"
+  ]
+}

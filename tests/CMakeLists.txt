@@ -63,6 +63,10 @@ add_executable(designer_tests
     test_startup_report.cpp
     test_keymap.cpp
     test_golden.cpp
+    test_reader_fuzz.cpp
+    test_reader_cases.cpp
+    mutate/Mutate.cpp
+    mutate/ReaderFuzz.cpp
     test_units.cpp
     test_window_geometry.cpp
     test_assembly.cpp
@@ -186,7 +190,14 @@ add_executable(designer_tests
 # does mean calling an ImGui function without a context CRASHES rather than
 # failing to compile. Test the actions layer, not the widgets.
 target_link_libraries(designer_tests PRIVATE designer_app designer_core Catch2::Catch2WithMain)
-target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src
+                           ${CMAKE_CURRENT_SOURCE_DIR})
+# The reader-fuzz budget per case is longer under the sanitizers
+# (docs/versioning/README.md#reader-fuzzing).
+if(ENABLE_SANITIZERS)
+    target_compile_definitions(designer_tests PRIVATE
+                               LOBOLE_READER_FUZZ_SANITIZED)
+endif()
 # What the build option promised, stated apart from the define the app's
 # library carries, so a test can hold the one to the other.
 if(HAVE_FEM_GPU)
@@ -263,7 +274,15 @@ file(MAKE_DIRECTORY "${LOBOLE_TEST_HOME}/state" "${LOBOLE_TEST_HOME}/config")
 # property name — and the whole thing is silently dropped. It generated tests
 # with no ENVIRONMENT at all, which looked exactly like it had worked.
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
+                     TEST_SPEC "~[reader_fuzz]"
                      PROPERTIES ENVIRONMENT
+                     "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
+# The reader-fuzz families (docs/versioning/README.md#reader-fuzzing) with a
+# TIMEOUT of their own: a reader that never returns is stopped here, and
+# build/reader-fuzz-last-case.<family> names the case it was reading.
+catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
+                     TEST_SPEC "[reader_fuzz]"
+                     PROPERTIES TIMEOUT 1200 ENVIRONMENT
                      "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 
 # Release metadata smoke: --version must exit before GLFW/Vulkan initialization,
@@ -844,6 +863,14 @@ add_test(NAME unsaved_edits_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/unsaved_edits_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(unsaved_edits_smoke PROPERTIES TIMEOUT 120)
+
+# A lossy open (docs/versioning/README.md#a-lossy-load): open_project reports
+# what it dropped, and save_project back over it is refused until
+# overwrite_lossy. Headless.
+add_test(NAME lossy_open_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/lossy_open_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(lossy_open_smoke PROPERTIES TIMEOUT 120)
 
 # V4 compare_geometry: boolean-diff metrics, golden-file compare, diff-solid
 # export, occurrence compare. Headless.

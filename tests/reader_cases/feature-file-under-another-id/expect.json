@@ -1,0 +1,13 @@
+{
+  "counts": {
+    "features": 8
+  },
+  "dropped": [
+    "features/1008-sketch.json"
+  ],
+  "expect": "loads",
+  "family": "part-dir",
+  "id": "part-dir/v17-full/features/1-sketch.json:dup_file:0",
+  "input": "tree.dsgn",
+  "seed": 0
+}

@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "drawing",
+  "input": "v151-frames-details.json",
+  "message": [
+    "v151-frames-details.json",
+    "leader names neither"
+  ]
+}

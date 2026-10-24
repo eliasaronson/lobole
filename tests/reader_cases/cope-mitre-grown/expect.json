@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v120-mitre.json",
+  "message": [
+    "v120-mitre.json",
+    "mitre lists 4 twice"
+  ]
+}

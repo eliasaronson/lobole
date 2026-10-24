@@ -1,0 +1,15 @@
+{
+  "base_view": 1,
+  "hidden": [],
+  "id": 2,
+  "name": "Top",
+  "orientation": "top",
+  "position": [
+    80.0,
+    90.0
+  ],
+  "quality": "exact",
+  "scale": 0.5,
+  "show_hidden": false,
+  "source": 3
+}

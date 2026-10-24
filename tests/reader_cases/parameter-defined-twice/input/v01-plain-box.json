@@ -1,0 +1,28 @@
+{
+  "format": "designer-document",
+  "version": 1,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Box 1",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 2,
+      "height": 3,
+      "depth": 4
+    }
+  ],
+  "parameters": [
+    {
+      "name": "a",
+      "expression": "1"
+    },
+    {
+      "name": "a",
+      "expression": "2"
+    }
+  ]
+}

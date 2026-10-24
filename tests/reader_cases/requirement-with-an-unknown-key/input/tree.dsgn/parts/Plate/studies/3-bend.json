@@ -1,0 +1,57 @@
+{
+  "id": 3,
+  "load_cases": [
+    {
+      "name": "down",
+      "weight": 1.0
+    },
+    {
+      "name": "side",
+      "weight": 1.0
+    }
+  ],
+  "loads": [
+    {
+      "face": {
+        "element": "2/cap0",
+        "feature_id": 2
+      },
+      "id": 4,
+      "magnitude": 0.0,
+      "type": "fixed"
+    },
+    {
+      "case": "down",
+      "direction": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "face": {
+        "element": "2/g1",
+        "feature_id": 2
+      },
+      "id": 5,
+      "magnitude": 500.0,
+      "type": "force"
+    },
+    {
+      "case": "side",
+      "direction": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "face": {
+        "element": "2/g1",
+        "feature_id": 2
+      },
+      "id": 6,
+      "magnitude": 200.0,
+      "type": "force"
+    }
+  ],
+  "mesh_size": 1.0,
+  "name": "Bend",
+  "type": "Study"
+}

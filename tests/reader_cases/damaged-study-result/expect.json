@@ -1,0 +1,13 @@
+{
+  "counts": {
+    "studies": 2
+  },
+  "dropped": [
+    "studies/3-bend.result.json"
+  ],
+  "expect": "loads",
+  "family": "part-dir",
+  "id": "part-dir/v153-saved-study-results/studies/3-bend.result.json:empty_file:0",
+  "input": "tree.dsgn",
+  "seed": 0
+}

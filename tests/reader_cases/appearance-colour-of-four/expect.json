@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v54-appearance.json",
+  "message": [
+    "v54-appearance.json",
+    "color: expected 3 numbers"
+  ]
+}

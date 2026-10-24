@@ -1,0 +1,9 @@
+{
+  "base_plane": "xy",
+  "id": 3,
+  "kind": "offset",
+  "name": "Top",
+  "offset": 1.5,
+  "offset_expr": "t",
+  "type": "DatumPlane"
+}

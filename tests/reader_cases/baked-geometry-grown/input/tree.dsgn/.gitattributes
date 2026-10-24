@@ -1,0 +1,3 @@
+# Written by Lobole. Baked geometry is derived data: binary, and
+# never merged — a conflicted .brep is resolved by rebuilding.
+geometry/*.brep binary -merge -diff

@@ -1,0 +1,114 @@
+{
+  "constraints": [
+    {
+      "a": [
+        1,
+        0
+      ],
+      "b": [
+        0,
+        0
+      ],
+      "kind": "horizontal",
+      "value": 0.0
+    },
+    {
+      "a": [
+        1,
+        0
+      ],
+      "b": [
+        1,
+        1
+      ],
+      "kind": "distance",
+      "value": 4.0
+    }
+  ],
+  "entities": [
+    {
+      "a": [
+        0.0,
+        0.0
+      ],
+      "b": [
+        4.0,
+        0.0
+      ],
+      "id": 1,
+      "type": "line"
+    },
+    {
+      "a": [
+        4.0,
+        0.0
+      ],
+      "b": [
+        4.0,
+        2.0
+      ],
+      "id": 2,
+      "type": "line"
+    },
+    {
+      "a": [
+        4.0,
+        2.0
+      ],
+      "b": [
+        0.0,
+        2.0
+      ],
+      "id": 3,
+      "type": "line"
+    },
+    {
+      "a": [
+        0.0,
+        2.0
+      ],
+      "b": [
+        0.0,
+        0.0
+      ],
+      "id": 4,
+      "type": "line"
+    }
+  ],
+  "id": 1,
+  "images": [
+    {
+      "asset": "1-1.png",
+      "height_px": 2,
+      "id": 1,
+      "opacity": 0.5,
+      "origin": [
+        0.0,
+        0.0
+      ],
+      "rotation": 0.0,
+      "units_per_pixel": 0.5,
+      "width_px": 2
+    }
+  ],
+  "name": "Base",
+  "next_image_id": 2,
+  "plane": {
+    "normal": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "origin": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "uAxis": [
+      1.0,
+      0.0,
+      0.0
+    ]
+  },
+  "type": "Sketch"
+}

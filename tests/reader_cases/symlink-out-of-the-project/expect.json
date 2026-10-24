@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part-dir",
+  "id": "part-dir/v17-full/index.json:reorder_keys:0",
+  "input": "tree.dsgn",
+  "message": [
+    "features/1-sketch.json",
+    "outside the project"
+  ],
+  "seed": 0
+}

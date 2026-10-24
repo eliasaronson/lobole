@@ -1,0 +1,10 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v45-guided-loft.json",
+  "message": [
+    "v45-guided-loft.json",
+    "path_id",
+    "is not an id"
+  ]
+}

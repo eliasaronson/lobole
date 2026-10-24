@@ -1,0 +1,25 @@
+{
+  "version": 188,
+  "parameters": [
+    {
+      "name": "w",
+      "expression": "6",
+      "comment": "plate width"
+    },
+    {
+      "name": "t",
+      "expression": "1.5"
+    }
+  ],
+  "format": "designer-document",
+  "features": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ]
+}

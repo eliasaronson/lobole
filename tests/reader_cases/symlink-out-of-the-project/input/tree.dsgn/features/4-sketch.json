@@ -1,0 +1,35 @@
+{
+  "constraints": [],
+  "entities": [
+    {
+      "center": [
+        3.0,
+        2.0
+      ],
+      "id": 1,
+      "radius": 1.0,
+      "type": "circle"
+    }
+  ],
+  "id": 4,
+  "name": "BossS",
+  "plane": {
+    "normal": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "origin": [
+      0.0,
+      0.0,
+      1.5
+    ],
+    "uAxis": [
+      1.0,
+      0.0,
+      0.0
+    ]
+  },
+  "plane_ref": 3,
+  "type": "Sketch"
+}

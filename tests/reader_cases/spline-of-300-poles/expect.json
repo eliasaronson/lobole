@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v40-spline.json",
+  "message": [
+    "v40-spline.json",
+    "at most 255 poles"
+  ]
+}

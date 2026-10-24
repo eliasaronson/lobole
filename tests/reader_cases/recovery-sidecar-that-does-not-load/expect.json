@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "recovery",
+  "id": "recovery/fixture/box.dsgn.autosave.d/assemblies/Crank.json:empty_file:0",
+  "input": "tree.dsgn",
+  "message": [
+    "autosave of assemblies/Crank does not load",
+    "Crank.json"
+  ],
+  "seed": 0
+}

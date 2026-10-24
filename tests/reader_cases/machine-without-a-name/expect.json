@@ -1,0 +1,7 @@
+{
+  "expect": "passes",
+  "family": "profiles",
+  "id": "profiles/fixture/machines/big-router.json:drop_line:2",
+  "input": "tree.dsgn",
+  "seed": 0
+}

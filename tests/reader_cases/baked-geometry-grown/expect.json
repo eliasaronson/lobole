@@ -1,0 +1,13 @@
+{
+  "counts": {
+    "bodies": 1
+  },
+  "dropped": [
+    "geometry/index.json"
+  ],
+  "expect": "loads",
+  "family": "part-dir",
+  "id": "part-dir/v40-spline/geometry/index.json:grow_array:0",
+  "input": "tree.dsgn",
+  "seed": 0
+}

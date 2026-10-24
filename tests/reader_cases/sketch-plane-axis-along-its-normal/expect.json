@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v148-topology-input-hash.json",
+  "message": [
+    "v148-topology-input-hash.json",
+    "make no frame"
+  ]
+}

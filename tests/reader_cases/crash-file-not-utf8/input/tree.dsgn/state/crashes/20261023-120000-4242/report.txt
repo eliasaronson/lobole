@@ -1,0 +1,21 @@
+LobÃ¶le crash report
+
+This folder may hold your design (the copies in autosave/) and the
+names and paths of your files (session.log). Nothing has been sent
+anywhere: share it only with someone you would show the design to.
+
+What happened: crashed: SIÿSEGV
+Started:       2026-10-23 12:00:00
+Collected:     2026-10-23 19:39:46
+Version:       0.1.0
+Build:         abc, Release
+OS:            Linux
+Mode:          windowed
+Project:       /tmp/reader-case-t7sqvry0/tree.dsgn/project.dsgn
+Log:           session.log (the last 2000 lines)
+Autosaves:     autosave/ (1 file)
+
+--- the crash handler's report (raw frames are module+offset;
+--- tools/symbolize-crash.py report.txt BINARY names them) ---
+reason: SIÿSEGV
+frame 0

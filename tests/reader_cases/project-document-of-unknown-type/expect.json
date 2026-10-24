@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "project",
+  "id": "project/project.dsgn/project.json:reorder_keys:0",
+  "input": "tree.dsgn",
+  "message": [
+    "project.json",
+    "type 'jobb'",
+    "part, assembly, drawing, job"
+  ],
+  "seed": 0
+}

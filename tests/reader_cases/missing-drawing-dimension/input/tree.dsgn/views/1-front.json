@@ -1,0 +1,14 @@
+{
+  "hidden": [],
+  "id": 1,
+  "name": "Front",
+  "orientation": "front",
+  "position": [
+    80.0,
+    150.0
+  ],
+  "quality": "exact",
+  "scale": 0.5,
+  "show_hidden": true,
+  "source": 3
+}
