@@ -19,6 +19,7 @@ CLI:
     python3 -m lobole.client 8437 screenshot '{"path": "/tmp/shot.png"}'
 """
 import json
+import os
 import socket
 import sys
 import time
@@ -43,6 +44,29 @@ def _check_result(method, result):
         raise LoboleError(f"{method}: the answer breaks its returns "
                           f"contract — {e}") from None
 
+
+
+def plain_params(value):
+    """`value` with every os.PathLike in it (a `pathlib.Path` given as a path
+    parameter) replaced by the string it names, at any depth, so a typed
+    contract sees the string it asks for."""
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
+    if isinstance(value, dict):
+        return {k: plain_params(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(plain_params(v) for v in value)
+    return value
+
+
+def _jsonable(value):
+    """A path parameter may be a `pathlib.Path` (or any os.PathLike): it goes
+    over the wire as the string it names. Anything else JSON cannot hold is
+    still an error."""
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON "
+                    "serializable")
 
 class Client:
     """`strict`: an answer holding a non-finite number raises NonFiniteError
@@ -100,7 +124,8 @@ class Client:
         if timeout is not None:
             self.sock.settimeout(timeout)
         try:
-            self.file.write(json.dumps(request, allow_nan=False) + "\n")
+            self.file.write(json.dumps(request, allow_nan=False,
+                                       default=_jsonable) + "\n")
             self.file.flush()
             while True:
                 line = self.file.readline()

@@ -17,6 +17,7 @@ Usage: sdk_smoke.py <path-to-designer-binary>
 import inspect
 import math
 import os
+import pathlib
 import sys
 import tempfile
 
@@ -394,7 +395,8 @@ def check_compare_aligns(app, tmp):
     sk.circle((0, 0), d=105.0)
     sk.circle((0, 0), d=100.0)
     ref.extrude(sk.add(), distance=250.0, name="tube")
-    golden = os.path.join(tmp, "far-tube.step")
+    # A pathlib.Path is a path parameter too: the client sends the string.
+    golden = pathlib.Path(tmp) / "far-tube.step"
     app.export_step(path=golden)
 
     here = app.part("tube at origin")

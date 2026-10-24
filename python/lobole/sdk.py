@@ -56,7 +56,7 @@ import time
 from collections.abc import Callable, Iterator, KeysView
 from typing import TYPE_CHECKING, Any, NoReturn, Self, TypeVar
 
-from lobole.client import Client as _Remote  # noqa: E402
+from lobole.client import Client as _Remote, plain_params  # noqa: E402
 from lobole.contracts import contract_refusal  # noqa: E402
 from lobole.contracts import validate as _validate_contract  # noqa: E402
 from lobole.errors import SdkError, UnknownArgument  # noqa: E402
@@ -398,6 +398,7 @@ class App(_RpcSurface):
     def call(self, method, /, _timeout=None, **params) -> Any:
         # `method` positional-only: describe(method=...) is a parameter, not
         # this argument (lobole.client.call says the same).
+        params = plain_params(params)
         if method in self._schemas:
             _validate_contract(self._schemas[method], params, method)
         if method in ("add_feature", "modify_feature"):
@@ -2161,7 +2162,14 @@ class Part(_Tab):
             name="Box") -> Body | Feature:
         """A box on `on`: `width` along u, `depth` along v, `height` along
         the normal (`reversed=True` the other way). `at` is its centre, or
-        with `centered=False` its low-u low-v corner."""
+        with `centered=False` its low-u low-v corner.
+
+        `on` is something the primitive follows when it moves: a planar
+        Face, a `part.datum_plane(...)`, a `part.frame(...)`, a Sketch, or
+        "Top"/"Front"/"Right". A `Plane` (`Plane.xy(z)` and the other
+        helpers) is numbers, not a reference, and is refused here; it is
+        for sketches. To stand a primitive at a position, put a datum plane
+        or a frame there."""
         f = {"type": "Box", "name": name, "on": _on(on), "mode": mode}
         _dim(f, "width", width)
         _dim(f, "depth", depth)
@@ -2182,7 +2190,14 @@ class Part(_Tab):
                  mode="new_body", reversed=False,
                  name="Cylinder") -> Body | Feature:
         """A cylinder standing on `on`, its axis along the normal through
-        `at`."""
+        `at`.
+
+        `on` is something the primitive follows when it moves: a planar
+        Face, a `part.datum_plane(...)`, a `part.frame(...)`, a Sketch, or
+        "Top"/"Front"/"Right". A `Plane` (`Plane.xy(z)` and the other
+        helpers) is numbers, not a reference, and is refused here; it is
+        for sketches. To stand a primitive at a position, put a datum plane
+        or a frame there."""
         f = {"type": "Cylinder", "name": name, "on": _on(on), "mode": mode}
         _diameter(f, d, r, "cylinder")
         _dim(f, "height", height)
@@ -2195,7 +2210,14 @@ class Part(_Tab):
                             "centre there, ON that plane"))
     def sphere(self, on, d=None, r=None, at=None, mode="new_body",
                name="Sphere") -> Body | Feature:
-        """A sphere centred at `at` on `on` (half above it, half below)."""
+        """A sphere centred at `at` on `on` (half above it, half below).
+
+        `on` is something the primitive follows when it moves: a planar
+        Face, a `part.datum_plane(...)`, a `part.frame(...)`, a Sketch, or
+        "Top"/"Front"/"Right". A `Plane` (`Plane.xy(z)` and the other
+        helpers) is numbers, not a reference, and is refused here; it is
+        for sketches. To stand a primitive at a position, put a datum plane
+        or a frame there."""
         f = {"type": "Sphere", "name": name, "on": _on(on), "mode": mode}
         _diameter(f, d, r, "sphere")
         _at(f, at)
