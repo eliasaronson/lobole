@@ -471,6 +471,30 @@ def main():
                   needle=f"source_id: {plate['created_by']}",
                   tab=part["name"])
 
+            # A section cut on a datum that is not there: add_section added
+            # the cut and update_section applied base_plane, each before
+            # refusing the plane_id. Both now check first.
+            d.call("set_active_part", part=part["name"])
+
+            def sections():
+                return d.call("list_sections")["sections"]
+            cuts = sections()
+            check("add_section on no datum", "add_section",
+                  {"base_plane": "xz", "plane_id": 987654},
+                  needle="no feature with that id", tab=part["name"])
+            note(sections() == cuts,
+                 f"add_section left a cut under a refusal: {sections()}")
+            cut = d.call("add_section", base_plane="xy", offset=1.0)["id"]
+            cuts = sections()
+            check("update_section on no datum", "update_section",
+                  {"id": cut, "base_plane": "yz", "offset": 2.0,
+                   "plane_id": 987654},
+                  needle="no feature with that id", tab=part["name"])
+            note(sections() == cuts,
+                 f"update_section changed the cut under a refusal: "
+                 f"{cuts} -> {sections()}")
+            d.call("remove_section", id=cut)
+
             # The single-call rollback: a handler that edited and THEN
             # refused leaves nothing behind -- part, job.
             d.call("set_active_part", part=part["name"])

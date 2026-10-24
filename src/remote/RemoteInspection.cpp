@@ -3440,46 +3440,70 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
   }
   if (m == "add_section" || m == "update_section") {
     const bool adding = m == "add_section";
+    // Every parameter is read and checked before the first change: a refused
+    // call changes nothing (docs/scripting/rpc.md#a-refused-call-changes-
+    // nothing). This added the section, or applied base_plane, and THEN
+    // refused a plane_id naming no feature, leaving the cut behind.
+    std::optional<int> basePlane;
+    if (p.contains("base_plane"))
+      basePlane = BasePlaneFromString(p.at("base_plane").get<std::string>());
+    std::optional<uint64_t> planeId;
+    if (p.contains("plane_id")) {
+      // A datum plane in the ACTIVE PART; the cut then follows it when the
+      // datum moves, which is the only reason to name one.
+      planeId = p.at("plane_id").get<uint64_t>();
+      if (*planeId != 0 && doc != nullptr &&
+          doc->FindFeatureById(*planeId) == nullptr)
+        throw std::runtime_error("no feature with that id in this part");
+    }
+    const auto number = [&](const char* key) -> std::optional<float> {
+      if (!p.contains(key))
+        return std::nullopt;
+      return p.at(key).get<float>();
+    };
+    const auto flag = [&](const char* key) -> std::optional<bool> {
+      if (!p.contains(key))
+        return std::nullopt;
+      return p.at(key).get<bool>();
+    };
+    const std::optional<float> offset = number("offset");
+    const std::optional<float> tiltU = number("tilt_u");
+    const std::optional<float> tiltV = number("tilt_v");
+    const std::optional<bool> reverse = flag("reverse");
+    const std::optional<bool> visible = flag("visible");
+
     ui::AppState::SectionView* sec = nullptr;
     if (adding) {
-      const int basePlane =
-          BasePlaneFromString(p.value("base_plane", std::string("xy")));
-      const uint64_t id = ui::AddSection(state, basePlane);
-      if (id == 0)
+      if (state.sections.size() >= static_cast<size_t>(kMaxClipPlanes))
         throw std::runtime_error("at most " + std::to_string(kMaxClipPlanes) +
                                  " sections at once; remove one first");
+      const uint64_t id = ui::AddSection(state, basePlane.value_or(0));
       sec = ui::FindSection(state, id);
     } else {
       sec = ui::FindSection(state, p.at("id").get<uint64_t>());
       if (sec == nullptr)
         throw std::runtime_error("no section with that id; list_sections "
                                  "shows the ones that exist");
-      if (p.contains("base_plane")) {
-        sec->basePlane =
-            BasePlaneFromString(p.at("base_plane").get<std::string>());
+      if (basePlane) {
+        sec->basePlane = *basePlane;
         sec->planeId = 0; // a base plane and a datum are alternatives
         sec->face = ElementRef{};
       }
     }
-    if (p.contains("plane_id")) {
-      // A datum plane in the ACTIVE PART; the cut then follows it when the
-      // datum moves, which is the only reason to name one.
-      sec->planeId = p.at("plane_id").get<uint64_t>();
+    if (planeId) {
+      sec->planeId = *planeId;
       sec->face = ElementRef{};
-      if (sec->planeId != 0 && doc != nullptr &&
-          doc->FindFeatureById(sec->planeId) == nullptr)
-        throw std::runtime_error("no feature with that id in this part");
     }
-    if (p.contains("offset"))
-      sec->offset = p.at("offset").get<float>();
-    if (p.contains("tilt_u"))
-      sec->tiltU = p.at("tilt_u").get<float>();
-    if (p.contains("tilt_v"))
-      sec->tiltV = p.at("tilt_v").get<float>();
-    if (p.contains("reverse"))
-      sec->reverse = p.at("reverse").get<bool>();
-    if (p.contains("visible"))
-      sec->visible = p.at("visible").get<bool>();
+    if (offset)
+      sec->offset = *offset;
+    if (tiltU)
+      sec->tiltU = *tiltU;
+    if (tiltV)
+      sec->tiltV = *tiltV;
+    if (reverse)
+      sec->reverse = *reverse;
+    if (visible)
+      sec->visible = *visible;
     const glm::vec4 plane = ui::SectionPlaneOf(state, *sec);
     return json{{"id", sec->id},
                 {"offset", sec->offset},

@@ -11,18 +11,6 @@ the heading if it is not here yet.
 
 ## Inspection
 
-### A refused `add_section` leaves a section behind
-
-- **Symptom:** `add_section` with a `plane_id` that names no feature is
-  refused, yet the section it added stays; a refused `update_section`
-  keeps the `base_plane` it was given.
-- **Cause:** the handler adds the section (or applies `base_plane`) before it
-  checks the datum.
-- **Where:** `add_section`/`update_section` in
-  `src/remote/RemoteInspection.cpp`.
-- **Likely fix:** check every parameter first
-  ([rpc](scripting/rpc.md#a-refused-call-changes-nothing)).
-
 ### `interference` reports a phantom clash at an exactly symmetric pose
 
 - **Symptom:** two meshing gears read *touching* at every pose of a tooth
