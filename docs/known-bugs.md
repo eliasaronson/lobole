@@ -9,7 +9,33 @@ yet".
 Entries are grouped by area. Add a new one under its area's heading, creating
 the heading if it is not here yet.
 
+## Assemblies
+
+### Placing a fastener, bearing or retaining ring cannot be undone
+
+- **Symptom:** after `add_fastener`/`fit_fastener` (and the bearing and ring
+  versions), or the same placement in the GUI, Ctrl+Z skips the placement and
+  undoes whatever came before it.
+- **Cause:** none of those paths takes an assembly snapshot before it
+  changes the assembly.
+- **Where:** `src/remote/RemoteAssembly.cpp` (`add_*`, `fit_*`) and the GUI
+  placement paths in `src/ui/`.
+- **Likely fix:** `ui::SnapshotAssembly(state)` before the first change, as
+  every other occurrence edit does.
+
 ## Inspection
+
+### A refused `add_section` leaves a section behind
+
+- **Symptom:** `add_section` with a `plane_id` that names no feature is
+  refused, yet the section it added stays; a refused `update_section`
+  keeps the `base_plane` it was given.
+- **Cause:** the handler adds the section (or applies `base_plane`) before it
+  checks the datum.
+- **Where:** `add_section`/`update_section` in
+  `src/remote/RemoteInspection.cpp`.
+- **Likely fix:** check every parameter first
+  ([rpc](scripting/rpc.md#a-refused-call-changes-nothing)).
 
 ### `interference` reports a phantom clash at an exactly symmetric pose
 
@@ -30,6 +56,32 @@ the heading if it is not here yet.
   touching.
 
 ## Modeling
+
+### Two values a call accepts are dropped on save
+
+- **Symptom:** `set_study` accepts `num_modes` on a study that is not modal,
+  and `add_cam_op` accepts `finish_stock` without `finish_tool`; the save
+  drops both, and the reader refuses them in a file.
+- **Where:** the `set_study` and `add_cam_op` handlers.
+- **Likely fix:** refuse them at the call, naming what makes them valid.
+
+### Some add paths ignore the feature limit
+
+- **Symptom:** beginning a sketch, DXF/SVG import into a sketch, inserting a
+  template and `split_for_printing` add features past the 50 000 a part may
+  hold, so the app can save a part it will not open.
+- **Where:** each path that builds an `AddFeatureCommand` directly;
+  `kMaxPartFeatures` in `src/core/io/ReadContext.h`.
+- **Likely fix:** one check every add path calls before its first change.
+
+### OpenCASCADE reported "premature end of file" in `headless_smoke`
+
+- **Symptom:** once, during the import-formats work, `headless_smoke`'s
+  import phase printed OCC's "Error: premature end of file". Not reproduced
+  since.
+- **Where:** the import phase of `tests/headless_smoke.py`.
+- **Likely fix:** first reproduce it (the phase in a loop under load); a
+  file read while still being written is the first suspect.
 
 ### A thin Shell of the worm runs past the matrix's minute
 
@@ -126,6 +178,17 @@ the heading if it is not here yet.
   fixes (by each edge's midpoint, then its length), not the wire's order.
   That renames U edges in saved documents, so the goldens that cite one
   move with it.
+
+## Tools
+
+### `fix-stale-nix-cache.sh` points a worktree's build at main's source
+
+- **Symptom:** run from main after the toolchain moved, the script
+  reconfigures every build dir it found with `cmake -S .`, so a worktree's
+  `build/` is configured from the checkout the script ran from.
+- **Where:** the toolchain-moved loop in `tools/fix-stale-nix-cache.sh`.
+- **Likely fix:** read each tree's `CMAKE_HOME_DIRECTORY` before deleting
+  its cache and pass that as `-S`.
 
 ## Scripting
 
