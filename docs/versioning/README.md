@@ -601,7 +601,9 @@ line and the list.
   read back write different B-Rep bytes). A sketch's projected entities
   (an external reference's `gen_ids`) are derived, like bodies: every
   regeneration projects them again, so damage to the sketch the face came
-  from changes them as an edit would, and they are not counted. Item
+  from changes them as an edit would, and they are not counted. A project
+  document renamed in `project.json` is saved under the folder its new name
+  gives it, and its content is compared there. Item
   counts (features,
   occurrences, views, setups, …) must be the original's unless a lossy drop
   was reported; bodies only where the damage cannot change the model;

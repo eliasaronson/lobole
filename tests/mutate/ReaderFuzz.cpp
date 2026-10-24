@@ -221,8 +221,52 @@ void AddLeaves(const json& j, const std::string& file, const std::string& rel,
   }
 }
 
+// A project's document lives in a folder named after it
+// (projectpaths::DocFolder), so a document renamed in project.json is saved
+// under another folder: the same content somewhere else. Each saved
+// document's `dir/` whose input counterpart (the same id, else the same
+// place in the list) sat elsewhere, and that `dir/`.
+using DocDirs = std::vector<std::pair<std::string, std::string>>;
+DocDirs MovedDocuments(const fs::path& input, const fs::path& saved) {
+  DocDirs out;
+  try {
+    const json in = json::parse(ReadBytes(input / "project.json"));
+    const json sv = json::parse(ReadBytes(saved / "project.json"));
+    const json ind = in.value("documents", json::array());
+    const json svd = sv.value("documents", json::array());
+    const auto dirOf = [](const json& d) {
+      return d.is_object() && d.contains("dir") && d.at("dir").is_string()
+                 ? d.at("dir").get<std::string>() + "/"
+                 : std::string();
+    };
+    for (size_t i = 0; i < svd.size(); i++) {
+      const json* match = i < ind.size() ? &ind[i] : nullptr;
+      if (svd[i].is_object() && svd[i].contains("id"))
+        for (const json& d : ind)
+          if (d.is_object() && d.contains("id") &&
+              d.at("id") == svd[i].at("id"))
+            match = &d;
+      if (match == nullptr)
+        continue;
+      const std::string from = dirOf(svd[i]), to = dirOf(*match);
+      if (!from.empty() && !to.empty() && from != to)
+        out.emplace_back(from, to);
+    }
+  } catch (const std::exception&) {
+    // Not a project, or an index that does not parse: nothing moved.
+  }
+  return out;
+}
+std::string Unmoved(const std::string& file, const DocDirs& moved) {
+  for (const auto& [from, to] : moved)
+    if (file.starts_with(from))
+      return to + file.substr(from.size());
+  return file;
+}
+
 // The content of a file (named `single`) or of every JSON file of a tree.
-Leaves LeavesOf(const fs::path& path, const std::string& single) {
+Leaves LeavesOf(const fs::path& path, const std::string& single,
+                const DocDirs& moved = {}) {
   Leaves out;
   const auto addFile = [&](const fs::path& file, const std::string& name,
                            const std::string& rel) {
@@ -247,7 +291,7 @@ Leaves LeavesOf(const fs::path& path, const std::string& single) {
         it->path().lexically_relative(path).generic_string();
     if (IsDerived(rel))
       continue;
-    addFile(it->path(), NormFile(rel), rel);
+    addFile(it->path(), Unmoved(NormFile(rel), moved), rel);
   }
   return out;
 }
@@ -1504,7 +1548,9 @@ struct Sweep::Impl {
     // unmutated input's round trip loses anyway (counted by shape, so a
     // leaf that moved with its item, or whose item's id changed, still
     // matches the loss it is).
-    const Leaves given = LeavesOf(work, "doc"), saved = LeavesOf(s1, "doc");
+    const Leaves given = LeavesOf(work, "doc"),
+                 saved = LeavesOf(
+                     s1, "doc", in.tree ? MovedDocuments(work, s1) : DocDirs{});
     const Leaves lost = Lost(given, saved);
     std::map<std::string, long> excess = NetLoss(given, saved);
     for (auto& [shape, n] : excess) {
