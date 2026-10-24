@@ -809,6 +809,169 @@ belongs to one `GENERATOR_VERSION`, and changes only with the generator.
 union that breaks the identity and a reopen with another volume, and a
 failure planted at step 5 of 8 that needs step 2 must minimise to those two.
 
+## Action matrix
+
+Every test above builds the part it was written for, on the edges its
+author chose. `tools/action_matrix.py` asks what a user asks on every part
+they open — does a fillet, a chamfer, a shell, a hole, a sketch, an extrude,
+a draft, a thread, a frame, a pattern, a mirror or a split work HERE, on this
+face or edge — for every face, edge and body of a fixed corpus, over the
+RPC, and holds each answer to a committed baseline.
+
+**The corpus** is `tests/action_matrix/corpus.json`, one row per design
+(`kind`, `source`, the `parts` a generator's design contributes), built from
+what is committed and never from `scratch/`:
+
+- `reference/<case>`: every [reference part](reference-parts.md), built with
+  `reference_parts.build`; a case marked `known_failure` is skipped.
+- `fuzz/<seed>`: the seeds of `fuzz_seeds_smoke`, generated as they build
+  (the generator's loop without its end checks, which that smoke runs); the
+  corpus names the `fuzz_generator` version, and another version is refused
+  until the corpus and the baseline follow it.
+- `golden/<file>`: every part document in `tests/golden/v*.json`; one that
+  does not open with a clean regeneration and a body is in the baseline's
+  `skipped` table with the reason, so one that stops opening shows in the
+  diff.
+- `generator/<name>`: `gear.py`, `gear_train.py`, `slider_crank.py`,
+  `toolmakers_clamp.py` and `hinge_box/build.py`, each into a new project and
+  a private `--out` directory, visiting only the part tabs that own their
+  geometry (not a Derived print plate or a negative control).
+
+The loader refuses a corpus that lacks a reference case, a seed or a golden,
+or lists one that is gone. **Entities** come from `list_elements`: each face
+and edge is addressed as `{feature_id: the body's created_by, element}` (an
+element's `made_by` would name a feature that does not own the body). A face
+the element map never named, and an edge `query_geometry` counts but
+`list_elements` does not name, cannot be referenced; the baseline's
+`unreferenceable` table counts them per design. A body past 400 faces or
+1200 edges is not tried. Vertices are not elements, so there is no vertex
+row. Bodies that share a `created_by` (a pattern's copies, a split's pieces)
+cannot be named apart: they get no body actions, an element name two of them
+carry is not tried, and the rest of their elements are, keyed
+`<kind>@<body index>:<name>` where a name occurs twice in the part (most of
+them fail as [the second piece of a
+split](../known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build)
+does).
+
+**The actions**, each default derived from what it acts on (`size` the
+body's largest bbox extent, `least` its smallest, `a` a face's √area, `r0`
+its `inset_mm`); an action whose default would be zero or would not apply
+is not tried and not recorded:
+
+| entity | action | feature and default |
+|---|---|---|
+| edge, not `smooth` | `edge.fillet`, `edge.chamfer` | the edge alone, 10 % of the least of its length, each adjacent face's `a` and its radius if circular |
+| circular edge | `edge.frame` | Frame `from_element` |
+| planar face | `face.sketch` | Sketch with `face_ref`, a circle at `inside_point` of radius ½ `r0`; it passes when the sketch's plane after regeneration is the face's frame (`CADShape::FacePlane`: the centroid, the outward normal, world Y projected as u, or X near Y) |
+| | `face.extrude_add`, `face.extrude_cut` | that sketch, Extrude `add` / blind `cut` (reversed, into the body), 5 % of `size`, in one `batch` |
+| | `face.hole` | a point sketch at `inside_point`, Hole `simple`, `through`, diameter `r0` |
+| | `face.shell` | Shell opening that face, 5 % of `least`; on a body past 100 faces only the four planar faces whose names hash lowest (a shell offsets the whole body: on the 195-face gear one takes 9-36 s) |
+| | `face.draft` | Draft of the adjacent faces square to it (planes, and cylinders along its normal), 2°, neutral plane the world plane square to the face (a face whose normal is not a world axis has none) |
+| | `face.frame` | Frame `from_element` |
+| cylindrical face | `curved.thread` | cosmetic Thread with the ISO coarse designation whose major diameter is within 5 % of the face's (none: not tried) |
+| | `curved.frame` | Frame `from_element` |
+| body | `body.pattern_linear` | Pattern of the body's newest feature (the latest that made one of its faces), 2 along X, spacing 1.5 × its X extent |
+| | `body.pattern_circular`, `body.mirror` | 3 at 120° about Z; mirror about YZ |
+| | `body.split` | Split at the mid-plane square to its largest extent |
+
+The matrix copies no GUI literal (Fillet and Chamfer start at 0.5, Shell at
+0.25, in `CreateActions.cpp`).
+
+**An outcome.** Each action is one `add_feature`, or one `batch` for a
+sketch and its feature, then `undo`:
+
+- **pass**: the regeneration is clean with no warning (a cut that removed
+  nothing warns), `check_geometry` is valid, `fuzz_design.check_step` holds
+  (finite positive volumes; a cut, Hole or Shell never adds and stays in the
+  measured box, an add never removes), and a sketch, Frame, cosmetic Thread
+  or Split leaves the part's volume as it was, to 1e-5 of it (a split's
+  pieces are integrated over new faces); a warning the part already carried
+  is not the action's;
+- **refuse**: a structured error whose message states a condition
+  (`fuzz_design.measured`), and nothing changed: the same revision for one
+  call; for a batch, whose rollback is its edits and their undo, so its
+  revision moves, the same features and bodies;
+- **fail**: accepted, and the feature is broken, warns or fails a check, or
+  a refusal changed the part. A broken feature is never a refusal;
+- **finding**: a crash or a hang (60 s an action; the instance is killed by
+  its pid, restarted, the design rebuilt, and the run goes on), an
+  `internal` error, `nonfinite` numbers, a message naming a signal the
+  kernel caught (`OSD_SIGSEGV`, `SIGBUS`...) reported as an ordinary error,
+  a failure message that states nothing, or an `undo` that does not give back
+  the bodies (volume and bbox to 1e-9) and the feature count from before.
+
+**The ratchet.** `tests/action_matrix/baseline.json` holds, per design (and
+part, as `design#part`) and entity, its actions on one sorted line:
+`edge.fillet` a pass, `!edge.fillet` a fail, `-edge.fillet` a refusal. A run
+fails on a pass that became a fail or a refusal, a refusal that became a
+fail, an action that passed and is no longer offered, a design that no
+longer builds, and any finding the `known` table does not list — each `known`
+row names its unit, entity, action and class, its
+[known-bugs](../known-bugs.md) entry and its reproduction in
+`tests/action_matrix/open/`; one that no longer reproduces fails the run too,
+saying to remove it, its reproduction and its entry. Improvements, new
+entities and entities gone are listed, not judged. A name by position can
+swap with a sibling between runs, so siblings form a family, judged by how
+many pass (`edge.fillet*3 !edge.fillet*1`): a piece whose `ordinal` is all
+that tells it from its siblings (`<kind>:<of>[*]`), a `positional` role, and
+any name holding a fallback-numbered boundary edge `;U<k>`. That number
+follows the order the kernel hands a face's edges back, and so does which of
+an edge's two faces names it first, both following shape addresses
+([known-bugs](../known-bugs.md#a-blend-faces-edge-names-depend-on-what-the-process-did-before)),
+so one edge can carry either face's name from one process to the next. Every
+such name of one feature is therefore one family, `edge:<feature>/*;U*`.
+The baseline is one OpenCASCADE series' (`occ`); on another the run judges
+only crashes and hangs. An action that took more than 5 s is in its `slow`
+table with its seconds: the sample and the determinism check skip it, and
+the whole sweep gives it ten times those seconds (never under 60) before it
+is a hang, so a loaded machine does not turn a 22 s extrude into one.
+
+**Determinism.** `--determinism` takes the sample's designs at one action in
+eight, builds each in two fresh instances and runs every action twice in
+each (add, undo, add): the entity names, each family's outcomes and each
+result's bodies (volume and bbox to 1e-9) must agree.
+
+    tools/action_matrix.py run [--sample] [--shard K/N] [--design PAT]
+                               [--actions a,b] [--jobs N] [--out DIR]
+                               [--determinism] [--bless]
+    tools/action_matrix.py bless --from DIR
+    tools/action_matrix.py replay CASE.json [--timeout S]
+    tools/action_matrix.py self-test
+
+Each worker owns one headless instance (`smoke_app`'s isolation,
+`--autosave 0`), replaced every 25 designs; `--jobs` comes from free memory.
+A run writes one JSONL per design (entity, action, outcome, class, message,
+the calls sent, seconds) and `report.md` (rates by action and by design,
+messages by gist) under untracked `scratch/action_matrix/`. Sampling is by a
+stable hash of (design, action, family or entity): one in 32 for `--sample`,
+which takes the reference parts, the first eight seeds and the gear. Designs
+are sharded by a stable hash of their name, except a generator's: its parts
+hold half the corpus's actions (the gear train's wheel alone is ten minutes
+of them), so every shard builds it and takes the actions whose (part, family
+or entity) hashes to it. `replay CASE` builds a reproduction's design in a
+fresh instance, sends its one action and judges it (a JSONL row of a run is
+a case too).
+
+**Blessing.** `run --bless` rewrites the baseline from a whole run and
+refuses a partial one (`--sample`, `--design`, `--actions`, `--shard`);
+`bless --from DIR` merges the outputs of `run --shard K/N --out DIR` for
+every K. Both refuse while a finding is not in the `known` table: it wants a
+fix, or a bug entry, a reproduction and a `known` row first. The `known`
+table and the corpus are edited by hand; everything else in the baseline is
+written by `bless`.
+
+The tests (`tests/action_matrix_smoke.py`): `action_matrix_sample` (the
+headless suite and `test-fast.sh`), `action_matrix_full_0`..`7` and
+`action_matrix_determinism` (labelled `slow;action_matrix`, and registered
+only for the ctest configuration `action_matrix`, as the big generators are
+for theirs, so that no plain ctest runs some forty CPU-minutes: `tools/ctest
+-C action_matrix -L action_matrix -j4`), and `action_matrix_selftest`, which
+feeds the classifier and the ratchet planted answers — a pass, a refusal, a
+refusal that moved the revision, a broken feature, a caught `OSD_SIGSEGV`, a
+silent message, a hole that added, an undo that did not restore, two ordinal
+pieces that swapped, a family that lost its pass and an unknown finding — and
+must judge each.
+
 ## Tests
 
 Headless, one file per feature (`tests/test_extrude.cpp`,
@@ -831,7 +994,9 @@ checks that every golden regenerates to the same volumes and the same element
 names. GUI coverage is in `src/app/guitests/GuiTestsModeling.cpp` and the
 `defaults/*` suite, which asserts every creation tool either changes the
 document or refuses visibly. Random designs (above) check the same
-invariants from outside, over designs nobody chose.
+invariants from outside, over designs nobody chose, and the action matrix
+(above) every ordinary action on every face, edge and body of a fixed
+corpus.
 
 Whole parts are checked by the [reference parts](reference-parts.md)
 (`tests/reference_parts.py`, `tools/ctest -L reference`): each built over

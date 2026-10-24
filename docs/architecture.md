@@ -671,12 +671,15 @@ not abort:
   headless run excludes. `gui_smoke` runs the same cases as
   `tools/gui-tests-xvfb.sh`, serially; the python ones also carry `pygui`, so
   they run as `tools/ctest -L pygui` rather than by excluding `gui_smoke` by name.
-- Two sweeps test from outside what no hand-picked case does:
+- Three sweeps test from outside what no hand-picked case does:
   `tests/hostile_params_smoke.py` sends right-typed wrong values to every
-  RPC key ([rpc.md](scripting/rpc.md#the-hostile-sweep)), and
+  RPC key ([rpc.md](scripting/rpc.md#the-hostile-sweep)),
   `tools/fuzz.py` builds random designs and checks each against a rebuild
   from nothing, a reopen, undo and redo and the Boolean identities
-  ([modeling](modeling/README.md#random-designs)).
+  ([modeling](modeling/README.md#random-designs)), and
+  `tools/action_matrix.py` tries every ordinary action on every face, edge
+  and body of a fixed corpus against a committed baseline
+  ([modeling](modeling/README.md#action-matrix)).
 - `src/render/`, `app/main.cpp` and `app/GpuOwners.cpp` have no unit tests;
   they are verified by
   the GUI suite, the pixel gate and screenshots. Low line coverage there is

@@ -1,0 +1,29 @@
+{
+ "what": "A Fillet of one piece of the thread's end-cap edge: the blend builder segfaults at a wild address, caught as OSD_SIGSEGV and reported as an ordinary failure",
+ "unit": "reference/25-modelled-thread",
+ "entity": "edge:2/cap0;G3[2/g924694956;M3|3/face107;M3].0",
+ "family": "edge:2/cap0;G3[*]",
+ "action": "edge.fillet",
+ "call": [
+  {
+   "method": "add_feature",
+   "params": {
+    "feature": {
+     "type": "Fillet",
+     "name": "AM fillet",
+     "edges": [
+      {
+       "feature_id": 2,
+       "element": "2/cap0;G3[2/g924694956;M3|3/face107;M3].0"
+      }
+     ],
+     "radius": 0.184391
+    }
+   }
+  }
+ ],
+ "expect_outcome": [
+  "finding",
+  "signal"
+ ]
+}

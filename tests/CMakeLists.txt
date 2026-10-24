@@ -1392,6 +1392,38 @@ add_test(NAME hostile_params_selftest
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/hostile_params_smoke.py
                  $<TARGET_FILE:designer> --self-test)
 set_tests_properties(hostile_params_selftest PROPERTIES TIMEOUT 120)
+# The action matrix (docs/modeling/README.md#action-matrix): every ordinary
+# action on every face, edge and body of a fixed corpus, against the committed
+# baseline (tests/action_matrix/). The sample runs everywhere. The full sweep,
+# designs sharded by a stable hash of their name, and the determinism check
+# are some forty CPU-minutes between them, so like the big generators they
+# exist only under a configuration: no plain ctest (the headless suite, CI)
+# sees them, and
+#   tools/ctest -C action_matrix -L action_matrix -j4
+# runs them. A shard is up to 500 s on a quiet machine and twice that loaded.
+add_test(NAME action_matrix_sample
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/action_matrix_smoke.py
+                 $<TARGET_FILE:designer> --sample)
+set_tests_properties(action_matrix_sample PROPERTIES TIMEOUT 240)
+set(ACTION_MATRIX_SHARDS 8)
+math(EXPR ACTION_MATRIX_LAST "${ACTION_MATRIX_SHARDS} - 1")
+foreach(k RANGE ${ACTION_MATRIX_LAST})
+  add_test(NAME action_matrix_full_${k} CONFIGURATIONS action_matrix
+           COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/action_matrix_smoke.py
+                   $<TARGET_FILE:designer> --shard ${k}/${ACTION_MATRIX_SHARDS})
+  set_tests_properties(action_matrix_full_${k} PROPERTIES
+                       LABELS "slow;action_matrix" TIMEOUT 1800)
+endforeach()
+add_test(NAME action_matrix_determinism CONFIGURATIONS action_matrix
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/action_matrix_smoke.py
+                 $<TARGET_FILE:designer> --determinism)
+set_tests_properties(action_matrix_determinism PROPERTIES
+                     LABELS "slow;action_matrix" TIMEOUT 900)
+# The classifier and the ratchet against planted answers.
+add_test(NAME action_matrix_selftest
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/action_matrix_smoke.py
+                 --self-test)
+set_tests_properties(action_matrix_selftest PROPERTIES TIMEOUT 60)
 # Random designs: a fixed list of seeds that must stay clean (with the
 # fuzzer's own self-test first), and every minimised case replayed.
 add_test(NAME fuzz_seeds_smoke
