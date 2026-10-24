@@ -537,7 +537,9 @@ single-file families damage every item's content.
   was reported; bodies only where the damage cannot change the model;
 - budget: 2 s a case (20 s under `ENABLE_SANITIZERS`), or four times the
   unmutated input's read when that is longer (a part that rebuilds its blob
-  takes its rebuild's time). A reader that never returns is stopped by
+  takes its rebuild's time), plus half that for every megabyte the damage
+  wrote (a grown array is 8 MB of honest parsing; a quadratic reader takes
+  minutes on it). A reader that never returns is stopped by
   ctest's `TIMEOUT` (1200 s), and the last-case file names it.
 
 The non-document families have rules of their own: settings never throw

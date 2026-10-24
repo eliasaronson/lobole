@@ -1275,7 +1275,14 @@ struct Sweep::Impl {
       summary.slowest = took;
       summary.slowestId = c.id;
     }
-    const double budget = std::max(Budget(), 4.0 * base.seconds);
+    // And a second for every megabyte the damage wrote: a grown array is
+    // 8 MB of honest parsing, which took 2-3 s with two suites beside it,
+    // where a quadratic reader takes minutes.
+    size_t written = c.bytes.size();
+    for (const mutate::Edit& e : c.edits)
+      written += e.bytes.size();
+    const double budget = std::max(Budget(), 4.0 * base.seconds) +
+                          static_cast<double>(written >> 20) * (Budget() / 2.0);
     if (took > budget)
       Fail(c.id, "the read took " + std::to_string(took) +
                      " s, past its budget of " + std::to_string(budget) + " s");
