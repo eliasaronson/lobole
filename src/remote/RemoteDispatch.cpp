@@ -2985,6 +2985,20 @@ EditMarks MarkEdits(const ui::AppState& state) {
   marks.drawingUndo = state.drawingHistory.undo.size();
   marks.job = state.job.get();
   marks.jobUndo = state.jobHistory.undo.size();
+  marks.projectVarUndo = state.projectVarHistory.undo.size();
+  marks.projectVarRedo = state.projectVarHistory.redo;
+  auto& mutableState = const_cast<ui::AppState&>(state);
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (static_cast<int>(i) != state.activePart &&
+        ui::SlotVersion(mutableState, i) == state.parts[i].lastSavedVersion)
+      marks.savedOtherSlots.push_back(state.parts[i].id);
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (static_cast<int>(i) != state.activePart && state.parts[i].doc) {
+      const ui::PartSlot& slot = state.parts[i];
+      marks.stashedStacks.push_back(
+          {slot.id, slot.doc.get(), slot.commands.get(),
+           slot.commands ? slot.commands->UndoDepth() : 0});
+    }
   return marks;
 }
 
@@ -2993,13 +3007,77 @@ std::string RollBackEdits(ui::AppState& state, const EditMarks& marks) {
   // Each history only where the tab is still the one marked: a call that
   // switched tabs moved the histories with them, and the marks say nothing
   // about the tab that is active now.
-  if (state.document && state.commands &&
-      state.document.get() == marks.document &&
-      state.commands.get() == marks.commands) {
-    const size_t undone =
-        state.commands->RollbackSince(marks.commandDepth, *state.document);
-    if (undone > 0)
-      what.push_back(std::to_string(undone) + " edit(s) undone");
+  const bool partMarked = state.document && state.commands &&
+                          state.document.get() == marks.document &&
+                          state.commands.get() == marks.commands;
+  // The project scope is one history for every tab, so it rolls back
+  // whichever tab is active -- and interleaved with the part's commands,
+  // newest first by the action clock both are stamped from: a feature edit
+  // and a project edit that each saved the same feature's prior state
+  // (extract_variables, then modify_feature) only come back right in the
+  // reverse of the order they were made.
+  auto& vars = state.projectVarHistory;
+  size_t undone = 0;
+  size_t varsUndone = 0;
+  if (vars.undo.size() > marks.projectVarUndo) {
+    // The active part regenerates once, after the whole unwind.
+    std::optional<Document::BulkEdit> bulk;
+    if (partMarked)
+      bulk.emplace(*state.document);
+    for (;;) {
+      const bool command =
+          partMarked && state.commands->UndoDepth() > marks.commandDepth;
+      const bool var = vars.undo.size() > marks.projectVarUndo;
+      if (command &&
+          (!var || state.commands->TopUndoStamp() > vars.undo.back().stamp))
+        undone += state.commands->RollbackSince(state.commands->UndoDepth() - 1,
+                                                *state.document);
+      else if (var && ui::UndoProjectVars(state))
+        varsUndone++;
+      else
+        break;
+    }
+    // Undo moved each entry onto redo; what was there before the call -- the
+    // redo its first edit cleared -- goes back instead.
+    vars.redo = marks.projectVarRedo;
+  } else if (partMarked) {
+    undone = state.commands->RollbackSince(marks.commandDepth, *state.document);
+  }
+  if (undone > 0)
+    what.push_back(std::to_string(undone) + " edit(s) undone");
+  if (varsUndone > 0)
+    what.push_back("the project variables restored");
+  // An edit made on another part tab by naming it, on that tab's own stack.
+  // Only where the tab is still stashed and still holds the document marked:
+  // a stack that moved there by a tab switch is not this one's to unwind.
+  std::vector<uint64_t> restoredSlots;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    ui::PartSlot& slot = state.parts[i];
+    if (static_cast<int>(i) == state.activePart || !slot.doc ||
+        !slot.commands || slot.commands.get() == marks.commands)
+      continue;
+    for (const EditMarks::StashedStack& m : marks.stashedStacks)
+      if (m.slot == slot.id && m.document == slot.doc.get() &&
+          (m.commands == slot.commands.get() || m.commands == nullptr)) {
+        const size_t depth = m.commands ? m.depth : 0;
+        if (const size_t n = slot.commands->RollbackSince(depth, *slot.doc)) {
+          what.push_back(std::to_string(n) + " edit(s) on '" + slot.name +
+                         "' undone");
+          restoredSlots.push_back(slot.id);
+        }
+      }
+  }
+  // A project edit and its undo regenerated every part, and a stashed tab's
+  // rollback moved its stamp: the ones saved before the call hold what they
+  // held then, so they read saved again.
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    const uint64_t id = state.parts[i].id;
+    if (static_cast<int>(i) != state.activePart &&
+        (varsUndone > 0 || std::find(restoredSlots.begin(), restoredSlots.end(),
+                                     id) != restoredSlots.end()) &&
+        std::find(marks.savedOtherSlots.begin(), marks.savedOtherSlots.end(),
+                  id) != marks.savedOtherSlots.end())
+      state.parts[i].lastSavedVersion = ui::SlotVersion(state, i);
   }
   // The snapshot histories: every edit pushed its pre-edit copy, so undoing
   // back to the mark and dropping the redo entries that made restores

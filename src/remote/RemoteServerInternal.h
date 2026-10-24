@@ -92,6 +92,25 @@ struct EditMarks {
   size_t drawingUndo = 0;
   const void* job = nullptr;
   size_t jobUndo = 0;
+  // The project scope (variables, tables, templates): one cross-tab history,
+  // whichever tab is active. Its redo is kept whole, because the first edit
+  // a call makes clears it and a rollback has to put it back.
+  size_t projectVarUndo = 0;
+  std::vector<ui::ProjectVarSnapshot> projectVarRedo;
+  // The other tabs that were saved as they stood, by slot id: a project
+  // edit regenerates every part, which moves each one's stamp, so the
+  // rollback that restores them stamps them saved again.
+  std::vector<uint64_t> savedOtherSlots;
+  // The other part tabs' own undo histories: an edit that names its part
+  // (set_tolerance {part}) lands on that tab's stashed stack, not the active
+  // one's. A stack made since the mark (null here) rolls back to empty.
+  struct StashedStack {
+    uint64_t slot = 0;
+    const void* document = nullptr;
+    const void* commands = nullptr;
+    size_t depth = 0;
+  };
+  std::vector<StashedStack> stashedStacks;
   // Whether the active tab was saved as it stood: a rollback restores the
   // content, and a restore moves the version on (so no cache serves the
   // state it replaced) -- which would read as an unsaved edit nobody made.

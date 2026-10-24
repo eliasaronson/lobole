@@ -199,6 +199,9 @@ void MarkProjectRecovered(AppState& state, const std::string& path);
 // True when any document in the project (every tab, not just the active one)
 // has edits since its last clean save/open.
 bool ProjectDirty(AppState& state);
+// The stamp slot `i`'s dirty check compares against its lastSavedVersion,
+// whichever kind of document it holds; 0 for an empty slot.
+uint64_t SlotVersion(AppState& state, size_t i);
 
 // Window title: "<project name>[*] - Loböle", * = ProjectDirty. The name is
 // the project path's stem; "Untitled" before the first save.

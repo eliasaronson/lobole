@@ -299,6 +299,65 @@ def main():
         expect(len(d.call("get_state")["features"]) == len(before),
                "and that batch undoes as one step too")
 
+        # ---- A rollback takes back the PROJECT scope too ---------------
+        # A project variable or table lives outside the part's command
+        # stack, on the cross-tab project history. A refused batch used to
+        # leave one it had set in place while its reply said nothing had
+        # changed (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+        def project_scope():
+            return ({v["name"]: v["expression"]
+                     for v in d.call("list_variables")["variables"]
+                     if v["scope"] == "project"},
+                    [t["name"] for t in d.call("list_tables")["tables"]])
+
+        d.call("set_variable", name="keep", expression="1")
+        d.call("set_variable", name="later", expression="7")
+        d.call("undo")  # `later` waits on redo
+        d.call("save_project", path=os.path.join(tmp, "vars.dsgn"))
+        scope_before = project_scope()
+        # ...and an edit that names ANOTHER part lands on that tab's own
+        # stashed stack, which the rollback has to reach as well.
+        print_before = d.call("get_print_settings", part="drill")["part"]
+        err = refused(d, "batch", ["rolled back", "project variables"],
+                      calls=[
+            {"method": "set_variable",
+             "params": {"name": "leak", "expression": "5"}},
+            {"method": "add_feature", "params": {"feature": {
+                "type": "Sketch", "name": "Interleaved", "plane": plane(),
+                "entities": [{"type": "circle", "center": [0, 0],
+                              "radius": 1.0}]}}},
+            {"method": "set_variable",
+             "params": {"name": "keep", "expression": "2"}},
+            {"method": "set_print_settings",
+             "params": {"part": "drill", "walls": 9}},
+            {"method": "set_table", "params": {
+                "name": "sizes", "columns": ["d"],
+                "rows": [{"key": 1, "values": [3]}]}},
+            {"method": "delete_feature", "params": {"feature_id": 999999}}])
+        print(f"  project rollback says: {err[:160]}...")
+        expect(project_scope() == scope_before,
+               f"the project's variables and tables are as they were: "
+               f"{project_scope()} vs {scope_before}")
+        expect(d.call("get_print_settings", part="drill")["part"]
+               == print_before,
+               f"the other part's slicer settings are as they were: "
+               f"{d.call('get_print_settings', part='drill')['part']}")
+        expect(all(f["name"] != "Interleaved"
+                   for f in d.call("get_state")["features"]),
+               "the part edit between them went too")
+        expect(not d.call("ping")["dirty"],
+               "a saved project reads saved after the rollback")
+        # The history is as it was: the redo the batch's first edit cleared
+        # is back, and the rollback left no undo step of its own behind.
+        d.call("redo")
+        expect(project_scope()[0].get("later") == "7",
+               f"redo still restores `later`: {project_scope()}")
+        d.call("undo")
+        d.call("undo")
+        expect("keep" not in project_scope()[0],
+               f"the next undo is `keep`'s own, not a stray step left by "
+               f"the rollback: {project_scope()}")
+
         # ---- An assembly batch is one snapshot -------------------------
         d.call("add_part", name="cube")
         box(d, (0, 0, 0), (5, 5, 5), "C")

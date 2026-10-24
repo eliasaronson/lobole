@@ -814,7 +814,8 @@ bool SameEdits(const EditMarks& a, const EditMarks& b) {
          a.assembly == b.assembly && a.assemblyUndo == b.assemblyUndo &&
          a.drawing == b.drawing && a.drawingUndo == b.drawingUndo &&
          a.job == b.job && a.jobUndo == b.jobUndo &&
-         a.activePart == b.activePart && a.activeStamp == b.activeStamp;
+         a.projectVarUndo == b.projectVarUndo && a.activePart == b.activePart &&
+         a.activeStamp == b.activeStamp;
 }
 
 void LogRpc(const std::string& method, const nlohmann::json& params) {

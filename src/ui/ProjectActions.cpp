@@ -1076,7 +1076,6 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
   return AdoptProject(state, std::move(*loaded), error);
 }
 
-namespace {
 // The stamp a slot's dirty check (and its autosave) compares against:
 // whichever document kind the slot holds. 0 for an empty slot. A part's,
 // an assembly's and a job's is its SaveStamp, not its Version: a tolerance,
@@ -1094,6 +1093,7 @@ uint64_t SlotVersion(AppState& state, size_t i) {
     return j->SaveStamp();
   return 0;
 }
+namespace {
 // SaveProject writes every slot, so a clean save stamps every slot — the
 // active one through state.lastSavedVersion (its slot copy is stale while
 // active; StashActive writes it back on tab switch).
