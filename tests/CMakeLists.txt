@@ -205,24 +205,6 @@ if(ENABLE_SANITIZERS)
     target_compile_definitions(designer_tests PRIVATE
                                LOBOLE_READER_FUZZ_SANITIZED)
 endif()
-# The OpenCASCADE patches the kernel carries (nix/occt-overlay.nix writes the
-# list into its install; packaging/appimage/deps.sh too). A test of what a
-# patch fixed skips without it: CI's stock Ubuntu jobs link apt's OCC, where
-# the fuzz/30 fillet still never returns. LOBOLE_OCC_PATCHES is the names,
-# ';'-separated, each with its .patch.
-set(LOBOLE_OCC_PATCHES "")
-if(OpenCASCADE_INCLUDE_DIR)
-    get_filename_component(_occ_prefix "${OpenCASCADE_INCLUDE_DIR}/../.."
-                           ABSOLUTE)
-    if(EXISTS "${_occ_prefix}/share/lobole/occt-patches")
-        file(STRINGS "${_occ_prefix}/share/lobole/occt-patches"
-             LOBOLE_OCC_PATCHES)
-    endif()
-endif()
-string(REPLACE ";" "," _occ_patches "${LOBOLE_OCC_PATCHES}")
-message(STATUS "OpenCASCADE patches: ${_occ_patches}")
-target_compile_definitions(designer_tests PRIVATE
-                           LOBOLE_OCC_PATCHES="${_occ_patches}")
 # What the build option promised, stated apart from the define the app's
 # library carries, so a test can hold the one to the other.
 if(HAVE_FEM_GPU)

@@ -8,12 +8,13 @@
 //
 // A patch's test skips where the kernel does not carry it: CI's stock Ubuntu
 // jobs link apt's OpenCASCADE, where the fuzz/30 fillet never returns. The
-// list comes from the install (tests/CMakeLists.txt, LOBOLE_OCC_PATCHES).
+// list comes from the install (cad/OccPatches.h).
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestPaths.h"
+#include "cad/OccPatches.h"
 #include "cad/OccSignals.h"
 #include "core/Document.h"
 #include "core/ElementHistory.h"
@@ -37,15 +38,9 @@
 using Catch::Matchers::ContainsSubstring;
 namespace fs = std::filesystem;
 
-#ifndef LOBOLE_OCC_PATCHES
-#define LOBOLE_OCC_PATCHES ""
-#endif
-
 namespace {
 
-bool Patched(const char* name) {
-  return std::strstr(LOBOLE_OCC_PATCHES, name) != nullptr;
-}
+bool Patched(const char* name) { return occpatch::Carries(name); }
 
 #define REQUIRE_PATCH(name)                                                    \
   do {                                                                         \

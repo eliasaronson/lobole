@@ -818,9 +818,21 @@ The CI Ubuntu job links apt's OpenCASCADE, which is unpatched, so the Shell
 also keeps its own guard (Offset Face, on the same builder, shares it). Every such answer fails one of the checks above,
 so a Shell that fails them is built again on a `BRepBuilderAPI_Copy` of its
 input (the same solid at new addresses, sub-shape for sub-shape, so its
-index-keyed names are the body's), up to five draws, and is refused only
-when every draw failed. On the patched kernel the first draw is the answer.
-An honest refusal (a wall too thick for the geometry) costs the five draws.
+index-keyed names are the body's), up to five draws on apt's kernel and two
+on a patched one (`occpatch::Carries`, `src/cad/OccPatches.h`: the install
+lists its patches), and is refused only when every draw failed. On the
+patched kernel the first draw is nearly always the answer -- two shells of
+the action matrix's 1,800 still built only on a later one -- and an honest
+refusal (a wall too thick for the geometry) cost five draws for nothing, a
+fifth of a full sweep. Between the first draw and the rest the offset
+builder runs once in its Intersection mode (offset faces intersected over
+the whole solid, not only between neighbours): on the matrix's shells it
+built 106 the arc joins refused and refused 2 they built, so it is never
+the first try. Every draw shares one budget, the direct edits'
+(`directedit::BuilderBudgetS` by the body's faces): the builder stops at its
+progress checks, so a wall far too thin for a worm's flank gives up instead
+of running for minutes, though it overshoots to the end of whatever step it
+was in.
 `test_shell`'s "A shell builds the same wherever its input lives in memory"
 shells 60 copies of that box and requires one solid with one set of names.
 

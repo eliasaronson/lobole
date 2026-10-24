@@ -16,6 +16,7 @@
 #include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
 #include "cad/MeshExport.h"
+#include "cad/OccPatches.h"
 #include "cad/OccSignals.h"
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
@@ -366,7 +367,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"ping",
      "Liveness check; returns {ok, app, port, pid, mode, ui_actions, "
      "project, dirty, gpu, renderer, safe_mode, occ, features, "
-     "binary_replaced, kernel_faults}. `pid` is this "
+     "binary_replaced, kernel_faults, occ_patches}. `pid` is this "
      "process's id, so "
      "a launcher can tell its own instance from one already on the port. `gpu` "
      "is the device that answers "
@@ -390,6 +391,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "is what this BUILD contains (cam, cam_adaptive, fem, mesher) and "
      "whether ffmpeg is on PATH (ffmpeg: export_motion_video's mp4, webm "
      "and gif). "
+     "`occ_patches` lists the kernel patches this build's OpenCASCADE "
+     "carries (nix/patches/, comma-separated; empty for a distro's). "
      "`kernel_faults` counts the faults inside OpenCASCADE this process "
      "caught as a feature's error (a SIGSEGV in a draft builder): above "
      "zero, save and restart -- the fault may have written somewhere first "
@@ -1672,6 +1675,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // distro build links whatever that distro ships (Ubuntu 24.04:
             // 7.6.3). tests/fuzz_seeds_smoke.py keys its expectations on it.
             {"occ", OCC_VERSION_COMPLETE},
+            // Which of our kernel patches it carries (nix/patches/): apt's
+            // OpenCASCADE has none, and still hangs on the fillet one fixes.
+            {"occ_patches", occpatch::List()},
             // Faults inside OpenCASCADE this process caught and went on
             // from (occsig::FaultCount): above zero, its heap may hold what
             // a wild write left, and a save and a restart are worth it.

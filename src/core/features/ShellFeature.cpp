@@ -3,8 +3,10 @@
 
 #include "core/features/ShellFeature.h"
 
+#include "cad/OccPatches.h"
 #include "cad/OccSignals.h"
-#include "core/Measure.h" // InvalidReasons
+#include "core/DirectEdit.h" // MakeDeadline, BuilderBudgetS
+#include "core/Measure.h"    // InvalidReasons
 #include "core/ModelSpace.h"
 #include "core/features/OffsetFaceFeature.h" // WallsUnder
 
@@ -45,6 +47,7 @@ double OffsetTolerance(double thickness) {
 // Empty on success with `out` and `map` set, else why it failed.
 std::string ShellOnce(const Body& body, const TopoDS_Shape& input,
                       const TopTools_ListOfShape& remove, double thickness,
+                      bool intersection, const Message_ProgressRange& range,
                       uint64_t featureTag, std::optional<CADShape>& out,
                       ElementMap& map) {
   try {
@@ -54,8 +57,10 @@ std::string ShellOnce(const Body& body, const TopoDS_Shape& input,
     // In an OCC signal scope (cad/OccSignals.h): the offset builder faults
     // rather than failing on walls it cannot make.
     if (const auto why = occsig::RunCatchingOccSignals([&] {
-          maker.MakeThickSolidByJoin(input, remove, -thickness,
-                                     OffsetTolerance(thickness));
+          maker.MakeThickSolidByJoin(
+              input, remove, -thickness, OffsetTolerance(thickness),
+              BRepOffset_Skin, intersection, Standard_False, GeomAbs_Arc,
+              Standard_False, range);
         }))
       return "shell failed inside OpenCASCADE (" + *why +
              "); a thinner wall usually builds";
@@ -299,27 +304,58 @@ bool ShellFeature::Execute(RegenContext& ctx) {
   // is the previous feature's cached result. A refused shell left the part
   // unlike a rebuild from nothing (tests/fuzz_seeds_smoke.py, on CI's
   // Ubuntu job). The copy is topology only; the geometry is shared.
-  constexpr int kAttempts = 5;
+  //
+  // The offset builder runs with its arc joins, as it always has, then once
+  // in its Intersection mode, which intersects the offset faces over the
+  // whole solid rather than only between neighbours: measured on the action
+  // matrix's shells it built 106 the arc joins refused, and refused 2 they
+  // built, so it is the second try and never the first. The draws after it
+  // are on fresh copies with the arc joins again. With the patch they are
+  // fewer -- the same input mostly gives the same answer, and the four
+  // draws of every honest refusal were a fifth of an action-matrix sweep --
+  // but not none: a shell or two of the matrix still built on a later draw.
+  const int arcDraws = occpatch::Carries("occt-shell-cap-order") ? 2 : 5;
+  const int attempts = arcDraws + 1;
+  // One budget for every attempt, the direct edits' (directedit::
+  // BuilderBudgetS, by the faces the offset moves -- all of them): the
+  // offset builder stops at its progress checks. A thin wall on the worm's
+  // flank (golden/v146-worm) ran past the action matrix's minute.
+  const double budget =
+      directedit::BuilderBudgetS(static_cast<size_t>(body->shape.FaceCount()));
+  const Handle(Message_ProgressIndicator) deadline =
+      directedit::MakeDeadline(budget);
   std::string error;
-  for (int attempt = 0; attempt < kAttempts; attempt++) {
+  for (int attempt = 0; attempt < attempts; attempt++) {
+    const bool intersection = attempt == 1;
     BRepBuilderAPI_Copy copy(shape, /*copyGeom=*/false, /*copyMesh=*/false);
     TopTools_ListOfShape remove;
     for (const TopoDS_Shape& f : facesToRemove)
       remove.Append(copy.ModifiedShape(f));
     std::optional<CADShape> result;
     ElementMap map;
-    error =
-        ShellOnce(*body, copy.Shape(), remove, thickness, GetId(), result, map);
-    if (error.empty()) {
+    std::string why =
+        ShellOnce(*body, copy.Shape(), remove, thickness, intersection,
+                  deadline->Start(), GetId(), result, map);
+    if (!why.empty() && directedit::Expired(deadline)) {
+      error = "shell gave up after " + std::to_string(int(budget)) +
+              " s: offsetting this body's " +
+              std::to_string(body->shape.FaceCount()) + " faces by a wall of " +
+              Mm(thickness) +
+              " mm costs more; a thicker wall, or fewer faces, builds faster";
+      break;
+    }
+    if (why.empty()) {
       if (attempt > 0)
-        LOG_INFO("ShellFeature '{}': built on attempt {} of {}", m_name,
-                 attempt + 1, kAttempts);
+        LOG_INFO("ShellFeature '{}': built on attempt {}{}", m_name,
+                 attempt + 1, intersection ? " (intersection mode)" : "");
       body->shape = std::move(*result);
       body->elementMap = std::move(map);
       return true;
     }
+    if (error.empty())
+      error = std::move(why); // the arc joins' answer is the one to give
   }
   SetError(error);
-  LOG_ERROR("ShellFeature '{}': {} ({} attempts)", m_name, error, kAttempts);
+  LOG_ERROR("ShellFeature '{}': {} ({} attempts)", m_name, error, attempts);
   return false;
 }

@@ -219,6 +219,24 @@ else()
     endif()
 endif()
 
+# The OpenCASCADE patches the kernel carries (nix/occt-overlay.nix writes the
+# list into its install, packaging/appimage/deps.sh too; apt's has none):
+# src/cad/OccPatches.h, for the code that leans on one (a shell that need
+# not draw again) and the tests of what they fix, which skip without it.
+set(LOBOLE_OCC_PATCHES "")
+if(OpenCASCADE_INCLUDE_DIR)
+    get_filename_component(_occ_prefix "${OpenCASCADE_INCLUDE_DIR}/../.."
+                           ABSOLUTE)
+    if(EXISTS "${_occ_prefix}/share/lobole/occt-patches")
+        file(STRINGS "${_occ_prefix}/share/lobole/occt-patches"
+             LOBOLE_OCC_PATCHES)
+    endif()
+endif()
+string(REPLACE ";" "," LOBOLE_OCC_PATCHES "${LOBOLE_OCC_PATCHES}")
+message(STATUS "OpenCASCADE patches: ${LOBOLE_OCC_PATCHES}")
+set_source_files_properties(src/cad/OccPatches.cpp PROPERTIES
+    COMPILE_DEFINITIONS "LOBOLE_OCC_PATCHES=\"${LOBOLE_OCC_PATCHES}\"")
+
 if(OPENCASCADE_FOUND)
     # Core OpenCASCADE libraries we need. With the config package these are
     # imported targets; with the /usr fallback, plain library names.
@@ -329,6 +347,7 @@ set(core_sources
     src/render/OutlineEdges.cpp
     src/render/StillOutlines.cpp
     src/cad/CADKernel.cpp
+    src/cad/OccPatches.cpp
     src/cad/OccSignals.cpp
     src/cad/CADMeshConverter.cpp
     src/cad/CADMaterials.cpp
