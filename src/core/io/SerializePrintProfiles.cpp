@@ -52,6 +52,14 @@ printfit::Row PrintRowFromJson(const json& j) {
   r.toMm = j.contains("to_mm") && !j.at("to_mm").is_null()
                ? j.at("to_mm").get<double>()
                : printfit::kAboveMm;
+  // "And up" is no `to_mm`: one at or past the sentinel is not written
+  // back, and the row would end somewhere else with no word.
+  if (j.contains("to_mm") && !j.at("to_mm").is_null() &&
+      !(r.toMm < printfit::kAboveMm))
+    throw std::runtime_error("a " + kind + " row's to_mm " +
+                             j.at("to_mm").dump() +
+                             " is past any size; a row that runs on up "
+                             "has no to_mm");
   r.source = j.value("source", std::string());
   return r;
 }

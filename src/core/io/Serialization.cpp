@@ -268,6 +268,12 @@ std::optional<printfit::Process> PrintFromEnvelope(const json& j) {
       throw std::runtime_error("print process: profile '" +
                                m.value("profile", std::string{}) +
                                "' carries no rows");
+    // The embedded profile's name is `profile`; a `name` beside it would be
+    // written over by it, with no word.
+    if (m.contains("name"))
+      throw std::runtime_error("print process: `name` is not a key of the "
+                               "print envelope; the profile's name is "
+                               "`profile`");
     json pj = m;
     pj["name"] = m.at("profile");
     pj.erase("profile");

@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v179-printed-press.json:replace_line:5",
+  "input": "v179-printed-press.json",
+  "message": [
+    "v179-printed-press.json",
+    "`name` is not a key of the print envelope"
+  ],
+  "seed": 1
+}
