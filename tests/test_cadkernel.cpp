@@ -1613,8 +1613,10 @@ TEST_CASE("an Import saved before up_axis existed reloads unmoved",
     std::ofstream(path) << j.dump();
     return path;
   };
-  // Saved before the field: `none`, exactly where it was (30 along Y).
-  const auto old = write(now - 1);
+  // Saved before the field (it arrived in v190): `none`, exactly where it
+  // was (30 along Y). Not `now - 1`, which is v190 itself once a later
+  // format change lands.
+  const auto old = write(189);
   const auto before = testio::Load(old.string());
   REQUIRE(before != nullptr);
   CHECK(TheImport(*before).upAxis == interchange::UpAxis::None);
