@@ -1,0 +1,18 @@
+{
+  "id": 2,
+  "loads": [
+    {
+      "face": {
+        "element": "1/face0",
+        "feature_id": 1
+      },
+      "id": 3,
+      "magnitude": 0.0,
+      "type": "fixed"
+    }
+  ],
+  "mesh_size": 5.0,
+  "name": "Modes",
+  "num_modes": 8,
+  "type": "Study"
+}

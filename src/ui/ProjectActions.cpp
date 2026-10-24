@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/ProjectActions.h"
+#include "render/ClipPlanes.h" // kMaxClipPlanes: the sections a project holds
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/RendererSync.h"
@@ -711,7 +712,15 @@ void CheckProjectIndex(const nlohmann::json& index) {
     if (!f.is_string() || f.get<std::string>().empty())
       throw std::runtime_error("`folders` holds a name that is not one: " +
                                f.dump());
-  for (const auto& s : list("sections")) {
+  // The app holds at most as many cuts as the renderer carries, and never
+  // writes more: a list past it is damage (a grown one loaded every copy).
+  const nlohmann::json sections = list("sections");
+  if (sections.size() > static_cast<size_t>(kMaxClipPlanes))
+    throw std::runtime_error("`sections` lists " +
+                             std::to_string(sections.size()) +
+                             " section cuts; a project holds at most " +
+                             std::to_string(kMaxClipPlanes));
+  for (const auto& s : sections) {
     readctx::RefuseUnknownKeys(s,
                                {"base_plane", "offset", "reverse", "visible",
                                 "plane_id", "face", "tilt_u", "tilt_v"},

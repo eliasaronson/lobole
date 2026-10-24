@@ -1,0 +1,15 @@
+{
+  "check_clash": true,
+  "clash_mode": "mesh",
+  "driver_dof": "rotation",
+  "driver_mate": 7,
+  "driver_path": [
+    3
+  ],
+  "from": 0.0,
+  "id": 6,
+  "name": "the unit's crank, turned from the parent",
+  "samples": 13,
+  "to": 3.141592653589793,
+  "type": "MotionStudy"
+}

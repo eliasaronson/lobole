@@ -1,0 +1,27 @@
+{
+  "id": 8,
+  "name": "the crank lifted out of its unit",
+  "steps": [
+    {
+      "occurrence": 3,
+      "offset": [
+        0.0,
+        0.0,
+        20.0
+      ]
+    },
+    {
+      "occurrence": 2,
+      "offset": [
+        0.0,
+        0.0,
+        0.0,
+        15.0
+      ],
+      "path": [
+        3
+      ]
+    }
+  ],
+  "type": "ExplodedView"
+}

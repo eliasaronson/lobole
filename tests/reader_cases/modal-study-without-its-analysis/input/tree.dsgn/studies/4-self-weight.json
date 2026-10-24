@@ -1,0 +1,22 @@
+{
+  "gravity": [
+    0.0,
+    0.0,
+    -9.81
+  ],
+  "id": 4,
+  "loads": [
+    {
+      "face": {
+        "element": "1/face1",
+        "feature_id": 1
+      },
+      "id": 5,
+      "magnitude": 0.0,
+      "type": "fixed"
+    }
+  ],
+  "mesh_size": 5.0,
+  "name": "Self weight",
+  "type": "Study"
+}

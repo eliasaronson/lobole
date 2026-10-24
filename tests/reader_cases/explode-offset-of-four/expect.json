@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "assembly-dir",
+  "id": "assembly-dir/v130-explode-inner-part/exploded/8-the-crank-lifted-out-of-its-unit.json:repeat_line:2",
+  "input": "tree.dsgn",
+  "message": [
+    "exploded/8-the-crank-lifted-out-of-its-unit.json",
+    "an explode step's offset is [x, y, z]"
+  ],
+  "seed": 1
+}

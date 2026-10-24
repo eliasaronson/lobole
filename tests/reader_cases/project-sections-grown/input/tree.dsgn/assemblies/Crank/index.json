@@ -1,0 +1,16 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    4
+  ],
+  "motion": [
+    5
+  ],
+  "occurrences": [
+    1,
+    2,
+    3
+  ],
+  "version": 192
+}

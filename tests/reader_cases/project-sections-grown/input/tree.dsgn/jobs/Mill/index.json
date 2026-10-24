@@ -1,0 +1,79 @@
+{
+  "cam": [
+    {
+      "id": 2,
+      "machine": {
+        "name": "",
+        "post": "mach3"
+      },
+      "name": "Finishing",
+      "operations": [
+        {
+          "bottom_z": 4.0,
+          "id": 3,
+          "name": "Rough",
+          "side": "inside",
+          "stepover": 0.25,
+          "tool": 1,
+          "top_z": 10.0,
+          "type": "adaptive"
+        },
+        {
+          "bottom_z": 4.0,
+          "cut_angle_deg": 45.0,
+          "id": 4,
+          "name": "Finish surface",
+          "sample_step_mm": 0.12,
+          "stepover": 0.18,
+          "stock_to_leave": 0.05,
+          "tool": 1,
+          "top_z": 10.0,
+          "type": "surface_parallel"
+        },
+        {
+          "bottom_z": 4.0,
+          "id": 5,
+          "name": "Finish walls",
+          "sample_step_mm": 0.12,
+          "tool": 1,
+          "top_z": 10.0,
+          "type": "surface_waterline",
+          "z_step_mm": 0.4
+        }
+      ],
+      "safe_z": 25.0,
+      "stock": {
+        "bottom_margin": 1.0,
+        "margin": [
+          2.0,
+          2.0,
+          1.0
+        ]
+      },
+      "tools": [
+        {
+          "diameter": 6.0,
+          "feed_cut": 600.0,
+          "feed_plunge": 200.0,
+          "flute_length": 20.0,
+          "flutes": 2,
+          "name": "6 mm ball",
+          "number": 1,
+          "spindle_rpm": 12000.0,
+          "tip_angle": 90.0,
+          "tool_type": "ball"
+        }
+      ]
+    }
+  ],
+  "format": "designer-document",
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "name": "Part",
+      "source": 1
+    }
+  ],
+  "version": 192
+}

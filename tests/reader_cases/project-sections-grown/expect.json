@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "project",
+  "id": "project/project.dsgn/project.json:grow_array:0",
+  "input": "tree.dsgn",
+  "message": [
+    "project.json",
+    "`sections` lists 5 section cuts; a project holds at most 4"
+  ],
+  "note": "the grown list cut to its first five copies",
+  "seed": 1
+}

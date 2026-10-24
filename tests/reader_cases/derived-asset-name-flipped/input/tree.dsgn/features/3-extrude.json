@@ -1,0 +1,9 @@
+{
+  "distance": 3.0,
+  "id": 3,
+  "mode": "add",
+  "name": "Foot",
+  "reversed": false,
+  "sketch_id": 2,
+  "type": "Extrude"
+}

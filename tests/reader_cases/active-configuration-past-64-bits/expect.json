@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part-dir",
+  "id": "part-dir/v31-configurations/index.json:liar_number:0",
+  "input": "tree.dsgn",
+  "message": [
+    "index.json",
+    "is not a configuration's id"
+  ],
+  "seed": 1
+}

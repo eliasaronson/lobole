@@ -1,0 +1,59 @@
+{
+  "bodies": [
+    1
+  ],
+  "id": 1,
+  "name": "Servo copy",
+  "placement": {
+    "orientation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "position": [
+      10.0,
+      0.0,
+      0.0
+    ]
+  },
+  "reference": true,
+  "snapshot": {
+    "bodies": [
+      {
+        "asset": "derived-df2D7964f3b817f5.brep",
+        "element_map": {
+          "edges": {
+            "0": "1/face0;U0",
+            "1": "1/face0;U1",
+            "10": "1/face3;U0",
+            "11": "1/face3;U2",
+            "2": "1/face0;U2",
+            "3": "1/face0;U3",
+            "4": "1/face1;U0",
+            "5": "1/face1;U1",
+            "6": "1/face1;U2",
+            "7": "1/face1;U3",
+            "8": "1/face2;U0",
+            "9": "1/face2;U2"
+          },
+          "faces": {
+            "0": "1/face0",
+            "1": "1/face1",
+            "2": "1/face2",
+            "3": "1/face3",
+            "4": "1/face4",
+            "5": "1/face5"
+          }
+        },
+        "material": "",
+        "name": "Servo",
+        "source_created_by": 1
+      }
+    ],
+    "source_chain_hash": 15271087062726980294
+  },
+  "source_name": "Servo",
+  "source_part": 7,
+  "type": "Derived"
+}

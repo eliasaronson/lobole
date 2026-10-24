@@ -463,6 +463,12 @@ AssemblySequence AssemblySequenceFromJson(const json& j) {
     if (it.key() != "steps" && it.key() != "allowance_mm")
       throw std::runtime_error("unknown assembly sequence key '" + it.key() +
                                "' (accepted: steps, allowance_mm)");
+  // A sequence is written only with steps: one without would be dropped by
+  // the next save, its allowance with it.
+  if (!j.contains("steps") || !j.at("steps").is_array() ||
+      j.at("steps").empty())
+    throw std::runtime_error("an assembly sequence lists its steps; this one "
+                             "has none");
   seq.allowanceMm = j.value("allowance_mm", 0.0);
   const auto vec = [](const json& v, const char* key) {
     if (!v.is_array() || v.size() != 3 ||
@@ -560,6 +566,10 @@ ExplodedView ExplodedViewFromJson(const json& j) {
     ExplodeStep s;
     s.occurrenceId = sj.at("occurrence").get<uint64_t>();
     const auto& o = sj.at("offset");
+    // Three numbers: a fourth would be dropped by the next save.
+    if (!o.is_array() || o.size() != 3)
+      throw std::runtime_error("an explode step's offset is [x, y, z]; got " +
+                               o.dump().substr(0, 80));
     s.offset = glm::dvec3(o.at(0).get<double>(), o.at(1).get<double>(),
                           o.at(2).get<double>());
     if (sj.contains("path")) {

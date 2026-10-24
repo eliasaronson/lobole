@@ -1,0 +1,22 @@
+{
+  "exploded": [
+    8
+  ],
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    4
+  ],
+  "motion": [
+    6
+  ],
+  "occurrences": [
+    1,
+    2,
+    3
+  ],
+  "relations": [
+    5
+  ],
+  "version": 192
+}

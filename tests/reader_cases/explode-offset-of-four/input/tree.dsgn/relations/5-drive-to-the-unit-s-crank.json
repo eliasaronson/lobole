@@ -1,0 +1,15 @@
+{
+  "dof_a": "rotation",
+  "dof_b": "rotation",
+  "id": 5,
+  "kind": "chain",
+  "mate_a": 4,
+  "mate_b": 7,
+  "mate_b_path": [
+    3
+  ],
+  "name": "drive to the unit's crank",
+  "phase": 0.0,
+  "ratio": 1.0,
+  "type": "Relation"
+}

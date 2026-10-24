@@ -1,0 +1,21 @@
+{
+  "a": {
+    "anchor": {
+      "origin": true
+    },
+    "occurrence": 1
+  },
+  "b": {
+    "anchor": {
+      "origin": true
+    },
+    "occurrence": 2
+  },
+  "flipped": false,
+  "id": 4,
+  "mate_type": "fastened",
+  "name": "cap on block",
+  "offset": 0.0,
+  "rotation": 0.0,
+  "type": "Mate"
+}

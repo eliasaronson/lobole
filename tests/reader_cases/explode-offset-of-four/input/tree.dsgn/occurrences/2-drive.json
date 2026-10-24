@@ -1,0 +1,24 @@
+{
+  "configuration_id": 0,
+  "fixed": false,
+  "id": 2,
+  "name": "Drive",
+  "part_id": 2,
+  "part_version": null,
+  "ref_kind": "part",
+  "transform": {
+    "orientation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "position": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "type": "Occurrence",
+  "visible": true
+}

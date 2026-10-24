@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "part-dir",
+  "id": "part-dir/v32-fem-modal/studies/2-modes.json:drop_line:2",
+  "input": "tree.dsgn",
+  "message": [
+    "studies/2-modes.json",
+    "num_modes is a modal study's",
+    "this one is static"
+  ],
+  "seed": 1
+}

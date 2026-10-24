@@ -1,0 +1,10 @@
+{
+  "distance": 10.0,
+  "distance_expr": "depth",
+  "id": 2,
+  "mode": "new_body",
+  "name": "Extrude1",
+  "reversed": false,
+  "sketch_id": 1,
+  "type": "Extrude"
+}

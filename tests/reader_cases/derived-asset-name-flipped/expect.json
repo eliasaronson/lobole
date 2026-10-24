@@ -1,0 +1,10 @@
+{
+  "expect": "refused",
+  "family": "part-dir",
+  "id": "part-dir/v84-derived-servo/features/1-derived.json:flip:0",
+  "input": "tree.dsgn",
+  "message": [
+    "features/1-derived.json names this asset"
+  ],
+  "seed": 1
+}

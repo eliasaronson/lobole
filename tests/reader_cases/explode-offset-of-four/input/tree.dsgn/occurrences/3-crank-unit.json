@@ -1,0 +1,48 @@
+{
+  "configuration_id": 9,
+  "fixed": true,
+  "flexible": true,
+  "id": 3,
+  "inner_mate_dofs": [
+    {
+      "mate": 7,
+      "offset": 0.0,
+      "rotation": 0.5
+    }
+  ],
+  "inner_poses": [
+    {
+      "occurrence": 2,
+      "orientation": [
+        0.0,
+        0.0,
+        0.24740396,
+        0.96891242
+      ],
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "name": "Crank unit",
+  "part_id": 100,
+  "part_version": null,
+  "ref_kind": "assembly",
+  "transform": {
+    "orientation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "position": [
+      100.0,
+      0.0,
+      0.0
+    ]
+  },
+  "type": "Occurrence",
+  "visible": true
+}

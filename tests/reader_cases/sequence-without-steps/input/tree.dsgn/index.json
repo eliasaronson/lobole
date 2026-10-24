@@ -1,0 +1,17 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    4,
+    5
+  ],
+  "occurrences": [
+    1,
+    2,
+    3
+  ],
+  "sequence": {
+    "allowance_mm": 0.1
+  },
+  "version": 192
+}

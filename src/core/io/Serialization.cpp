@@ -557,20 +557,26 @@ std::vector<unsigned char> Base64Decode(const std::string& in) {
   return out;
 }
 
+// The asset names one feature holds.
+std::set<std::string> ReferencedAssets(const Feature& f) {
+  std::set<std::string> names;
+  if (auto* sk = dynamic_cast<const SketchFeature*>(&f))
+    for (const auto& img : sk->images)
+      if (!img.asset.empty())
+        names.insert(img.asset);
+  // A Derived feature's snapshot B-Reps (v84) live in the same store.
+  if (auto* d = dynamic_cast<const DerivedFeature*>(&f))
+    for (const DerivedBody& b : d->snapshot)
+      names.insert(b.asset);
+  return names;
+}
+
 // Asset names actually referenced by a reference image somewhere in the doc —
 // so serialization persists only live assets and prunes orphans.
 std::set<std::string> ReferencedAssets(const Document& doc) {
   std::set<std::string> names;
-  for (const auto& f : doc.GetFeatures()) {
-    if (auto* sk = dynamic_cast<const SketchFeature*>(f.get()))
-      for (const auto& img : sk->images)
-        if (!img.asset.empty())
-          names.insert(img.asset);
-    // A Derived feature's snapshot B-Reps (v84) live in the same store.
-    if (auto* d = dynamic_cast<const DerivedFeature*>(f.get()))
-      for (const DerivedBody& b : d->snapshot)
-        names.insert(b.asset);
-  }
+  for (const auto& f : doc.GetFeatures())
+    names.merge(ReferencedAssets(*f));
   return names;
 }
 
@@ -846,6 +852,12 @@ void SetRollbackOf(Document& doc, const json& j) {
 // refused -- it used to be skipped, and the save then wrote no active
 // configuration at all.
 template <class Doc> void SetActive(Doc& doc, const json& j) {
+  // Whole: 2^64 parses as a float, which read as 0, "none active".
+  if (j.contains("active_configuration") &&
+      !readctx::IsWhole(j.at("active_configuration")))
+    throw std::runtime_error("active_configuration " +
+                             j.at("active_configuration").dump() +
+                             " is not a configuration's id");
   const uint64_t id = j.value("active_configuration", uint64_t{0});
   if (!doc.SetActiveConfiguration(id) && id != 0)
     throw std::runtime_error("active_configuration is " + std::to_string(id) +
@@ -1271,15 +1283,26 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     });
     // Reference-image bytes (v49) from assets/ into the doc store. Only
     // assets an image references are loaded, and every one must be there.
+    // A missing one names the feature file that names it too: the damage
+    // may be in that name, not in assets/.
+    std::map<std::string, std::string> namedBy;
+    for (size_t i = 0; i < featureFiles.size() && i < doc->FeatureCount(); i++)
+      if (const Feature* f = doc->GetFeature(i))
+        for (const std::string& name : ReferencedAssets(*f))
+          namedBy.emplace(name, featureFiles[i].second);
     for (const std::string& name : ReferencedAssets(*doc)) {
       readctx::InFile("assets/" + name, [&] {
         RequireInside(dir, dir / "assets" / CheckedAssetName(name));
         std::ifstream ain(dir / "assets" / CheckedAssetName(name),
                           std::ios::binary);
-        if (!ain)
+        if (!ain) {
+          const auto by = namedBy.find(name);
           throw std::runtime_error(
-              "missing — the document names this asset, and a load "
-              "without it would save the document back without it");
+              "missing — " +
+              (by != namedBy.end() ? by->second : std::string("the document")) +
+              " names this asset, and a load without it would save the "
+              "document back without it");
+        }
         std::string data((std::istreambuf_iterator<char>(ain)),
                          std::istreambuf_iterator<char>());
         doc->SetAsset(name,

@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "assembly-dir",
+  "id": "assembly-dir/v188-assembly-sequence-groups/index.json:delete_key:1",
+  "input": "tree.dsgn",
+  "message": [
+    "index.json",
+    "an assembly sequence lists its steps"
+  ],
+  "seed": 1
+}

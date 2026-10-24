@@ -252,6 +252,24 @@ fem::Study StudyFromJson(const json& j) {
   if (!fem::AnalysisTypeFromString(analysisStr, s.type))
     throw std::runtime_error("unknown study analysis type '" + analysisStr +
                              "' (expected one of: static, modal, topology)");
+  // Each analysis's own keys are written only for it: on another, the next
+  // save would drop them (a modal study that lost its `analysis` line read
+  // as static, its num_modes gone).
+  const auto refuseUnless = [&](fem::AnalysisType type,
+                                std::initializer_list<const char*> keys) {
+    if (s.type == type)
+      return;
+    for (const char* key : keys)
+      if (j.contains(key))
+        throw std::runtime_error(std::string("study ") + key + " is a " +
+                                 fem::AnalysisTypeToString(type) +
+                                 " study's, and this one is " + analysisStr);
+  };
+  refuseUnless(fem::AnalysisType::Modal, {"num_modes"});
+  refuseUnless(fem::AnalysisType::Topology,
+               {"volume_fraction", "volume_fraction_expr", "filter_radius",
+                "filter_radius_expr", "max_iterations", "keep_faces",
+                "keep_outs"});
   s.numModes = j.value("num_modes", 6);
   if (j.contains("gravity")) {
     const auto& g = j.at("gravity");

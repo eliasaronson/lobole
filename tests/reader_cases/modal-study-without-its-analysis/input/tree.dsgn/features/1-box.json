@@ -1,0 +1,13 @@
+{
+  "depth": 10.0,
+  "height": 10.0,
+  "id": 1,
+  "name": "Bar",
+  "position": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "type": "Box",
+  "width": 100.0
+}

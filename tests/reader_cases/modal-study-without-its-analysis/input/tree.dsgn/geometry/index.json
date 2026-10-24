@@ -1,0 +1,38 @@
+{
+  "bodies": [
+    {
+      "brep": "0.brep",
+      "created_by": 1,
+      "element_map": {
+        "edges": {
+          "0": "1/face0;U0",
+          "1": "1/face0;U1",
+          "10": "1/face3;U0",
+          "11": "1/face3;U2",
+          "2": "1/face0;U2",
+          "3": "1/face0;U3",
+          "4": "1/face1;U0",
+          "5": "1/face1;U1",
+          "6": "1/face1;U2",
+          "7": "1/face1;U3",
+          "8": "1/face2;U0",
+          "9": "1/face2;U2"
+        },
+        "faces": {
+          "0": "1/face0",
+          "1": "1/face1",
+          "2": "1/face2",
+          "3": "1/face3",
+          "4": "1/face4",
+          "5": "1/face5"
+        }
+      },
+      "material": "",
+      "name": "Bar"
+    }
+  ],
+  "chain_hash": 16840495707502990329,
+  "content_hash": "0x3be3967f2ce7eb34",
+  "geometry_format": 6,
+  "occ_version": "7.9.3"
+}
