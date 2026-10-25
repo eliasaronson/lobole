@@ -19,6 +19,7 @@
 #include "cad/OccPatches.h"
 #include "cad/OccSignals.h"
 #include "common/Logger.h"
+#include "common/Platform.h"
 #include "common/RuntimePaths.h"
 #include "core/Angles.h"
 #include "core/Conventions.h"
@@ -424,10 +425,16 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"debug_crash",
      "Crash this process on purpose, to test crash reports end to end after "
      "edits have been made (--crash-test crashes before there are any): "
-     "kind segv (a null write), abort, or exception (one nothing catches). "
-     "There is no answer. Refused unless the app was started with "
+     "kind segv (a null write), abort, exception (one nothing catches), "
+     "system_fault (a new thread hands the system C library's memcpy an "
+     "unmapped source: a fault in system code, on a worker), or "
+     "system_probe (a new thread asks the system whether an unmapped "
+     "address is readable -- IsBadReadPtr, which faults and catches its own "
+     "fault; Windows only -- and answers {unreadable}: the process lives). "
+     "Otherwise there is no answer. Refused unless the app was started with "
      "LOBOLE_ALLOW_DEBUG_CRASH=1 in its environment.",
-     "kind:'segv'|'abort'|'exception'", remote::NotInBatch},
+     "kind:'segv'|'abort'|'exception'|'system_fault'|'system_probe'",
+     remote::NotInBatch, "unreadable:bool"},
     {"debug_fault",
      "Fail on purpose, the ways a handler can, so the tests that judge a "
      "failure can be shown to see it (tests/hostile_params_smoke.py "
@@ -1013,7 +1020,7 @@ namespace {
 
 // debug_crash's payload. Its own function, never inlined, so a report's
 // stack names it (tests/crash_report_smoke.py looks for it).
-enum class DebugCrashKind { Segv, Abort, Exception };
+enum class DebugCrashKind { Segv, Abort, Exception, SystemFault };
 [[gnu::noinline]] [[noreturn]] void DebugCrash(DebugCrashKind kind) {
   LOG_WARN("debug_crash: crashing on purpose");
   if (kind == DebugCrashKind::Segv) {
@@ -1021,6 +1028,10 @@ enum class DebugCrashKind { Segv, Abort, Exception };
     *p = 1; // NOLINT: the point
   } else if (kind == DebugCrashKind::Exception) {
     ThrowPastEveryCatch();
+  } else if (kind == DebugCrashKind::SystemFault) {
+    // On a thread of its own: on Windows a worker's next frame up is
+    // mcfgthread's, which is what lost this kind of crash's report.
+    std::thread(platform::FaultInSystemCopy).join();
   }
   std::abort();
 }
@@ -1806,19 +1817,33 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   }
   if (m == "debug_crash") {
     const std::string kind = p.at("kind").get<std::string>();
+    const bool probe = kind == "system_probe";
     const remote::DebugCrashKind how =
-        kind == "segv"    ? remote::DebugCrashKind::Segv
-        : kind == "abort" ? remote::DebugCrashKind::Abort
-        : kind == "exception"
-            ? remote::DebugCrashKind::Exception
-            : throw std::runtime_error("debug_crash: kind is segv, abort or "
-                                       "exception");
+        kind == "segv"        ? remote::DebugCrashKind::Segv
+        : kind == "abort"     ? remote::DebugCrashKind::Abort
+        : kind == "exception" ? remote::DebugCrashKind::Exception
+        : kind == "system_fault" || probe
+            ? remote::DebugCrashKind::SystemFault
+            : throw std::runtime_error(
+                  "debug_crash: kind is segv, abort, exception, "
+                  "system_fault or system_probe");
     const char* allow = std::getenv("LOBOLE_ALLOW_DEBUG_CRASH");
     if (allow == nullptr || std::string(allow) != "1")
       throw std::runtime_error(
           "debug_crash is refused: it crashes the app, so it runs only when "
           "the app was started with LOBOLE_ALLOW_DEBUG_CRASH=1 in its "
           "environment. Nothing was done.");
+    if (probe) {
+      bool unreadable = false, ok = false;
+      std::string why;
+      std::thread([&] {
+        ok = platform::ProbeWithSystem(&unreadable, &why);
+      }).join();
+      if (!ok)
+        throw std::runtime_error("debug_crash: system_probe is refused: " +
+                                 why + ". Nothing was done.");
+      return json{{"unreadable", unreadable}};
+    }
     remote::DebugCrash(how);
   }
   if (m == "debug_fault") {

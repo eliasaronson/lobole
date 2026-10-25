@@ -3,6 +3,9 @@
 
 #include "common/Platform.h"
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -136,6 +139,25 @@ std::string OsDescription() {
 
 int CurrentPid() { return static_cast<int>(GetCurrentProcessId()); }
 
+// Never inlined, so a crash report's frames name it as memcpy's caller.
+[[gnu::noinline]] void FaultInSystemCopy() {
+  using Copy = void* (*)(void*, const void*, size_t);
+  HMODULE crt = LoadLibraryW(L"msvcrt.dll");
+  const auto copy = crt ? reinterpret_cast<Copy>(reinterpret_cast<void*>(
+                              GetProcAddress(crt, "memcpy")))
+                        : nullptr;
+  char to[256];
+  if (copy)
+    copy(to, reinterpret_cast<const void*>(uintptr_t{0x10}), sizeof to);
+  std::abort(); // not reached: the copy faulted
+}
+
+bool ProbeWithSystem(bool* unreadable, std::string*) {
+  *unreadable =
+      IsBadReadPtr(reinterpret_cast<const void*>(uintptr_t{0x10}), 256) != 0;
+  return true;
+}
+
 #else // POSIX
 
 bool FileLock::TryLock(const std::filesystem::path& path, bool create) {
@@ -238,6 +260,23 @@ std::string OsDescription() {
 }
 
 int CurrentPid() { return static_cast<int>(::getpid()); }
+
+// Never inlined, so a crash report's frames name it as memcpy's caller.
+[[gnu::noinline]] void FaultInSystemCopy() {
+  // Through a volatile pointer, so the compiler cannot expand the copy
+  // inline: the fault has to be in libc's memcpy.
+  void* (*volatile copy)(void*, const void*, size_t) = &std::memcpy;
+  char to[256];
+  copy(to, reinterpret_cast<const void*>(uintptr_t{0x10}), sizeof to);
+  std::abort(); // not reached: the copy faulted
+}
+
+bool ProbeWithSystem(bool*, std::string* error) {
+  if (error)
+    *error = "this platform has no system call that probes memory under its "
+             "own exception handler (Windows: IsBadReadPtr)";
+  return false;
+}
 
 #endif
 

@@ -53,7 +53,7 @@ COLUMNS: dict[str, str] = {
     'conflict_list': '',
     'crash_reports': '',
     'create_drawing': 'name?:string, sheet?:object',
-    'debug_crash': "kind:'segv'|'abort'|'exception'",
+    'debug_crash': "kind:'segv'|'abort'|'exception'|'system_fault'|'system_probe'",
     'debug_fault': "kind:'out_of_range'|'json_out_of_range'|'bad_optional_access'|'standard_failure'|'refusal'|'type_error'|'edit_then_out_of_range'|'nonfinite'|'write_then_refuse'|'occ_fault'|'device_lost'",
     'delete_feature': 'feature_id?:int>=0, id?:int>=0, index?:int>=0, expect_revision?:revision',
     'delete_part': 'part?:string|int, index?:int>=0',
@@ -201,7 +201,7 @@ class CreateDrawingParams(TypedDict):
     sheet: NotRequired[Mapping[str, Any]]
 
 class DebugCrashParams(TypedDict):
-    kind: Literal['segv', 'abort', 'exception']
+    kind: Literal['segv', 'abort', 'exception', 'system_fault', 'system_probe']
 
 class DebugFaultParams(TypedDict):
     kind: Literal['out_of_range', 'json_out_of_range', 'bad_optional_access', 'standard_failure', 'refusal', 'type_error', 'edit_then_out_of_range', 'nonfinite', 'write_then_refuse', 'occ_fault', 'device_lost']
@@ -1259,6 +1259,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'contact_status': {'type': 'object', 'properties': {'cancel_requested': {'type': 'boolean'}, 'cancellable': {'type': 'boolean'}, 'elapsed_seconds': {'type': 'number'}, 'fraction': {'type': 'number'}, 'job': {'type': 'integer'}, 'kind': {'type': 'string'}, 'label': {'type': 'string'}, 'outlives_client': {'type': 'boolean'}, 'running': {'type': 'boolean'}, 'outcome': {'type': 'string'}, 'seconds': {'type': 'number'}, 'error': {'type': 'string'}, 'cancel_reason': {'type': 'string'}, 'report': {'type': 'object'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['job', 'kind', 'running'], 'additionalProperties': False},
     'crash_reports': {'type': 'object', 'properties': {'folder': {'type': 'string'}, 'last_startup_failure': {'anyOf': [{'type': 'object', 'properties': {'path': {'type': 'string'}, 'text': {'type': 'string'}}, 'required': ['path', 'text'], 'additionalProperties': False}, {'type': 'null'}]}, 'reports': {'type': 'array', 'items': {'type': 'object', 'properties': {'autosaves': {'type': 'array', 'items': {'type': 'string'}}, 'build': {'type': 'string'}, 'crashed': {'type': 'boolean'}, 'mode': {'type': 'string'}, 'os': {'type': 'string'}, 'path': {'type': 'string'}, 'project': {'type': 'string'}, 'reason': {'type': 'string'}, 'started': {'type': 'string'}, 'stem': {'type': 'string'}, 'version': {'type': 'string'}}, 'required': ['autosaves', 'build', 'crashed', 'mode', 'os', 'path', 'project', 'reason', 'started', 'stem', 'version'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['folder', 'last_startup_failure', 'reports'], 'additionalProperties': False},
     'curve_points': {'type': 'object', 'properties': {'at_mm': {'type': 'array', 'items': {'type': 'number'}}, 'curve': {'type': 'integer'}, 'kind': {'type': 'string'}, 'length_mm': {'type': 'number'}, 'name': {'type': 'string'}, 'points': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['at_mm', 'curve', 'kind', 'length_mm', 'name', 'points'], 'additionalProperties': False},
+    'debug_crash': {'type': 'object', 'properties': {'unreadable': {'type': 'boolean'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['unreadable'], 'additionalProperties': False},
     'design_sweep': {'type': 'object', 'properties': {'base': {'type': 'object'}, 'cancelled': {'type': 'boolean'}, 'cap': {'type': 'integer'}, 'first_failure': {'type': 'object'}, 'job': {'type': 'integer'}, 'kind': {'type': 'string'}, 'not_swept': {'type': 'array', 'items': {'type': 'object'}}, 'planned': {'type': 'integer'}, 'points': {'type': 'array', 'items': {'type': 'object'}}, 'seconds': {'type': 'number'}, 'started': {'type': 'boolean'}, 'variables': {'type': 'array', 'items': {'type': 'object'}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['cap', 'job', 'planned', 'variables'], 'additionalProperties': False},
     'design_sweep_result': {'type': 'object', 'properties': {'base': {'type': 'object'}, 'cancelled': {'type': 'boolean'}, 'cap': {'type': 'integer'}, 'first_failure': {'type': 'object'}, 'fraction': {'type': 'number'}, 'job': {'type': 'integer'}, 'label': {'type': 'string'}, 'not_swept': {'type': 'array', 'items': {'type': 'object'}}, 'planned': {'type': 'integer'}, 'points': {'type': 'array', 'items': {'type': 'object'}}, 'running': {'type': 'boolean'}, 'seconds': {'type': 'number'}, 'variables': {'type': 'array', 'items': {'type': 'object'}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['job'], 'additionalProperties': False},
     'export_stl': {'type': 'object', 'properties': {'bodies': {'type': 'integer'}, 'deflection_from': {'type': 'string'}, 'deflection_mm': {'type': 'number'}, 'free_edges': {'type': 'integer'}, 'path': {'type': 'string'}, 'shells': {'type': 'integer'}, 'watertight': {'type': 'boolean'}, 'chord_share': {'type': 'number'}, 'smallest_gap_side_mm': {'type': 'number'}, 'warning': {'type': 'string'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['bodies', 'deflection_from', 'deflection_mm', 'free_edges', 'path', 'shells', 'watertight'], 'additionalProperties': False},
@@ -2086,6 +2087,10 @@ CurvePointsResult = TypedDict('CurvePointsResult', {
     'length_mm': float,
     'name': str,
     'points': list[list[float]],
+})
+
+DebugCrashResult = TypedDict('DebugCrashResult', {
+    'unreadable': bool,
 })
 
 DesignSweepResult = TypedDict('DesignSweepResult', {
@@ -3566,7 +3571,7 @@ class RpcSurface:
     def curve_points(self, _timeout: float | None = None, **params: Any) -> CurvePointsResult:
         raise NotImplementedError
 
-    def debug_crash(self, _timeout: float | None = None, **params: Unpack[DebugCrashParams]) -> dict[str, Any]:
+    def debug_crash(self, _timeout: float | None = None, **params: Unpack[DebugCrashParams]) -> DebugCrashResult:
         raise NotImplementedError
 
     def debug_fault(self, _timeout: float | None = None, **params: Unpack[DebugFaultParams]) -> dict[str, Any]:

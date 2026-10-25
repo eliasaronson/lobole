@@ -13,6 +13,9 @@
 # names lavapipe's ICD file):
 #   - tools/release-smoke.py: it starts, models with OpenCASCADE, solves a
 #     sketch;
+#   - tools/release-smoke.py --system-faults: a fault the system catches
+#     itself leaves the app running, and one it does not, on a worker thread,
+#     leaves a crash report;
 #   - a GUI test (app/boots_and_renders) in a window on Xvfb, through
 #     winevulkan to lavapipe. Headless never loads the fonts, so it passed
 #     from C:\Program Files\Loböle while the window died there on the first
@@ -48,6 +51,8 @@ wineboot --init
 wineserver --wait
 
 python3 "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
+  -- wine "$exe"
+python3 "$repo/tools/release-smoke.py" --port 8437 --system-faults \
   -- wine "$exe"
 
 [ -f "$LAVAPIPE_ICD" ] || { echo "LAVAPIPE_ICD is not a file: '$LAVAPIPE_ICD'" >&2; exit 1; }

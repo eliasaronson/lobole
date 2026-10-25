@@ -64,4 +64,14 @@ std::string OsDescription();
 // This process's id.
 int CurrentPid();
 
+// The faults in system code debug_crash makes, on a thread of its own
+// (docs/architecture.md#crashes-and-stalls). FaultInSystemCopy copies from an
+// unmapped address with the system C library's own memcpy (msvcrt.dll's on
+// Windows, libc's elsewhere): the fault is in system code, called from ours,
+// and it does not return. ProbeWithSystem asks the system whether an
+// unmapped address is unreadable with IsBadReadPtr, which faults and catches
+// its own fault, into `unreadable`; Windows only, false with `error` elsewhere.
+[[noreturn]] void FaultInSystemCopy();
+bool ProbeWithSystem(bool* unreadable, std::string* error);
+
 } // namespace platform

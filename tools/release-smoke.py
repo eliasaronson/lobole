@@ -19,10 +19,24 @@ checks after it are the ones a broken package has failed before:
 
 `--version` also checks that `CMD --version` names the version being
 released, so a tag cannot ship a binary built from another one.
+
+`--system-faults` (Windows, run by packaging/windows/smoke.sh) checks the
+crash handler with faults in the system's own code, on a worker thread,
+through `debug_crash` (docs/architecture.md#crashes-and-stalls):
+
+- one the system catches itself (`system_probe`: IsBadReadPtr on an unmapped
+  address) answers, and the app lives on;
+- one it does not (`system_fault`: msvcrt's memcpy from an unmapped address)
+  ends the app with a crash file, which the next start turns into a report
+  whose frames are the system DLL's, then lobole.exe's. Before the handler
+  walked such a fault's frames, mcfgthread's thread entry ended the process
+  first and there was no report.
 """
 import argparse
 import math
+import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -74,6 +88,85 @@ def check_models(port):
                  "is not working in this build")
 
 
+def start(cmd, port, env=None):
+    return subprocess.Popen(cmd + ["--headless", "--remote", str(port)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, env=env)
+
+
+def stop(proc):
+    proc.terminate()
+    try:
+        proc.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+def local_path(path):
+    """A path the app reported, as this machine can open it: Wine's are
+    Windows paths, which `winepath -u` maps into the prefix."""
+    if os.path.exists(path):
+        return path
+    out = subprocess.run(["winepath", "-u", path], capture_output=True,
+                         text=True)
+    return out.stdout.strip()
+
+
+def check_system_faults(cmd, port, timeout):
+    env = dict(os.environ, LOBOLE_ALLOW_DEBUG_CRASH="1")
+    proc = start(cmd, port, env)
+    try:
+        wait_for_ping(port, proc, timeout)
+        c = Client(port)
+        before = len(c.call("crash_reports")["reports"])
+        probed = c.call("debug_crash", kind="system_probe")
+        if probed.get("unreadable") is not True:
+            sys.exit(f"FAIL: IsBadReadPtr on an unmapped address answered "
+                     f"{probed}, not unreadable")
+        if not c.call("ping").get("ok"):
+            sys.exit("FAIL: the app did not answer after a fault the system "
+                     "caught itself")
+        try:
+            Client(port, timeout=60).call("debug_crash", kind="system_fault")
+        except Exception:
+            pass  # no answer: that is the point
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            sys.exit("FAIL: a fault in msvcrt's memcpy on a worker thread "
+                     "did not end the app")
+    finally:
+        if proc.poll() is None:
+            stop(proc)
+
+    proc = start(cmd, port, env)
+    try:
+        wait_for_ping(port, proc, timeout)
+        reports = Client(port).call("crash_reports")["reports"]
+        if len(reports) != before + 1:
+            sys.exit(f"FAIL: {len(reports) - before} new crash reports, not "
+                     "one: the fault the system caught left one, or the "
+                     "one it did not left none")
+        r = reports[0]
+        if not r["crashed"] or "0xC0000005" not in r["reason"]:
+            sys.exit(f"FAIL: a fault in msvcrt's memcpy on a worker thread "
+                     f"was not reported as one: {r['reason']!r}")
+        text = open(os.path.join(local_path(r["path"]), "report.txt"),
+                    encoding="utf-8", errors="replace").read()
+        frames = re.findall(r"^\s*#(\d+) (.+?)\+0x", text, re.M)
+        system = [f for f in frames if "system32" in f[1].lower()]
+        ours = [f for f in frames if f[1].lower().endswith("lobole.exe")]
+        if (not frames or frames[0] not in system or not ours or
+                int(ours[0][0]) < int(system[0][0])):
+            sys.exit("FAIL: the report's frames are not the system DLL's "
+                     f"and then lobole.exe's:\n{text}")
+    finally:
+        stop(proc)
+    print(f"release-smoke: a fault the system catches itself left no report; "
+          f"one it does not, on a worker thread, was reported "
+          f"(#0 {frames[0][1]}, #{ours[0][0]} {ours[0][1]})")
+
+
 def main():
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--port", type=int, default=8437)
@@ -83,6 +176,9 @@ def main():
     ap.add_argument("--timeout", type=float, default=180,
                     help="seconds to wait for the first answer (Wine is slow "
                          "to start)")
+    ap.add_argument("--system-faults", action="store_true",
+                    help="check faults in system code on a worker thread "
+                         "(Windows) instead of modeling")
     ap.add_argument("cmd", nargs="*", help="the app's command line")
     args = ap.parse_args()
     if args.attach == bool(args.cmd):
@@ -96,11 +192,15 @@ def main():
             sys.exit(f"FAIL: `--version` says {text.strip()!r}, not "
                      f"{args.version}")
 
+    if args.system_faults:
+        if not args.cmd:
+            ap.error("--system-faults starts the app: give its command line")
+        check_system_faults(args.cmd, args.port, args.timeout)
+        return
+
     proc = None
     if args.cmd:
-        proc = subprocess.Popen(
-            args.cmd + ["--headless", "--remote", str(args.port)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = start(args.cmd, args.port)
     try:
         ping = wait_for_ping(args.port, proc, args.timeout)
         if ping.get("app") != "lobole":
@@ -108,11 +208,7 @@ def main():
         check_models(args.port)
     finally:
         if proc is not None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            stop(proc)
     print(f"release-smoke: {' '.join(args.cmd) or f'port {args.port}'} "
           f"answers, models a box and solves a sketch")
 

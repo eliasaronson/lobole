@@ -17,7 +17,10 @@ else, so no planted session or report reaches the developer's real one:
   4. a clean quit gives no report, and leaves no marker in sessions/;
   5. tools/symbolize-crash.py names the handler from the RAW frames alone;
   6. an exception nothing catches is reported as SIGABRT with its message,
-     and `debug_crash` without LOBOLE_ALLOW_DEBUG_CRASH=1 is refused.
+     and `debug_crash` without LOBOLE_ALLOW_DEBUG_CRASH=1 is refused;
+  7. `debug_crash system_fault` (libc's memcpy faulting on a worker thread)
+     is reported naming its caller; `system_probe`, Windows-only, is refused.
+     (Windows: packaging/windows/smoke.sh runs both under Wine.)
 
 Usage: crash_report_smoke.py <path-to-designer-binary>
 """
@@ -173,6 +176,30 @@ def main():
         expect("LOBOLE_ALLOW_DEBUG_CRASH" in refused,
                "debug_crash is refused without the variable")
         expect(d.call("ping")["ok"], "and the app carries on")
+        app.terminate()
+        wait_exit(app)
+
+        # 7 -------------------------------------------------------------
+        app, d = launch()
+        try:
+            d.call("debug_crash", kind="system_probe")
+            refused = ""
+        except Exception as e:
+            refused = str(e)
+        expect("IsBadReadPtr" in refused,
+               "system_probe is refused here, naming what it needs")
+        try:
+            d.call("debug_crash", kind="system_fault")
+        except Exception:
+            pass
+        expect(wait_exit(app) == -signal.SIGSEGV,
+               "a fault in libc's memcpy on a worker is a SIGSEGV")
+        app, d = launch()
+        reports = d.call("crash_reports")["reports"]
+        text = read(os.path.join(reports[0]["path"], "report.txt"))
+        expect(reports[0]["reason"] == "crashed: SIGSEGV" and
+               "FaultInSystemCopy" in text,
+               "reported, naming memcpy's caller")
         app.terminate()
         wait_exit(app)
 
