@@ -539,6 +539,20 @@ for itself — so the frame only asks and applies:
   synchronously, when it is empty, for another project, or invalidated by an
   action (naming, restoring, a push): the person just did something and is
   looking for the result.
+- The conflicts scan (F7) rides it too, whenever something could have
+  changed its answer: after an open, every save, a merge, a resolution, a
+  change from outside. Every save owes one, so on the frame it was a hitch
+  the size of the old poll after the most frequent action there is. Its
+  answer is discarded when the conflicts were invalidated again or scanned
+  synchronously since (`conflictsGeneration`). Who reads the result, and how
+  ([history](history.md#branches-and-merging)):
+  - showing it tolerates "not scanned yet": the Conflicts panel (the last
+    answer, row actions disabled while `ConflictScanPending`), the History
+    banner (which defers to the panel while it lists conflicts),
+    `ProjectHasConflicts` (no caller today);
+  - deciding on it scans for itself: `FinishMerge` (refuses while anything
+    needs a decision) and the RPCs `branch_merge`, `pull`, `conflict_list`
+    and `conflict_resolve`. A save and a branch merge do not read conflicts.
 - What stays synchronous guards a write, which already blocks: the save and
   share paths' `ProjectChangedOnDisk` and the `project_changed_on_disk` RPC.
 - It is not a `BackgroundJob`: a poll is nothing the user started or can
@@ -560,7 +574,7 @@ loaded machine; Windows pays more for each process start and each stat):
 | History panel trust checks (`UntrustedReason`, `IsRepo`) | every frame while drawn | 0.01-0.03 ms (stats; the `git config` read is cached on the config's mtime) | the frame |
 | autosave (`ui::AutosaveProject`) | every 60 s, only with unsaved edits | 19 ms per changed document | the frame: once a minute, only while editing, and a worker would need a copy of each document |
 | settings flush | 1 s after a preference or window change | one small file | the frame |
-| conflict scan | after an open, a save, a merge or a detected change — an event, not a clock | one `git` plus a walk, about the stamp's | the frame |
+| conflict scan | after an open, a save, a merge, a resolution or a detected change — an event, not a clock | `git diff` plus a walk, about the stamp's | the worker |
 | Open Recent menu, recover-autosave modal | each frame while open | one small file, `exists` per entry; one folder listing | the frame |
 
 The instance registry is written only when the port opens and closes, and
@@ -761,7 +775,8 @@ hidden `[.reader_corpus]` case over generator output under `scratch/`
 | GUI `disk/a_lossy_open_asks_before_saving_over` | Save raises the choice; Cancel keeps the file, Overwrite anyway saves over it (Save a copy… is not clicked: it opens the system dialog) |
 | GUI `autosave/recovers_every_document` | a multi-document project autosaves each dirty document and recovers all of them |
 | GUI `disk/*` | the moved-project modal and the History banner (the menu-bar notice itself is not asserted: a disabled main-menu `MenuItem` does not resolve through the test engine; the flag behind it is); `disk/the_poll_does_not_hold_the_frame` holds the walk 500 ms (`LOBOLE_TEST_STAMP_MS`) and asserts frames are drawn while it is held, then that an outside write still raises the banner |
-| `tests/test_disk_poller.cpp` `[disk]` | a held poll answer is applied while it still describes the project, and discarded after another project opened, after a save, or (its log part) after the panel refreshed |
+| `tests/test_disk_poller.cpp` `[disk]` | a held poll answer is applied while it still describes the project, and discarded after another project opened, after a save, or (its log part) after the panel refreshed; a held conflicts scan lands, and is discarded after an invalidation, a synchronous scan or another project |
+| GUI `disk/a_save_does_not_hold_the_frame_for_the_scan` | with the conflicts scan held 500 ms (`LOBOLE_TEST_SCAN_MS`), frames are drawn while the scan a save owes is running, and its answer lands |
 | `tests/test_gitvault.cpp` `HeadHash` | the file read agrees with `git rev-parse HEAD` on a loose ref, a packed ref, a detached HEAD and an unborn branch |
 
 ## Not done

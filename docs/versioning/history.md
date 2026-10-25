@@ -127,10 +127,16 @@ Theirs buttons labelled with the values themselves (an occurrence conflict
 reads as a place: `(50, 0, 0) vs (-12.5, 0, 0) turned 90° about Z`), a
 "Merge both" for auto-resolvable rows, **Finish**, and **Throw the merge
 away**. Clicking a row
-selects the item (see below). The scan does not run on a timer: it runs when
-the disk poll sees the project move (see
-[README.md](README.md#changes-made-outside-the-app)), which is the only way a
-conflict can appear without the app causing it.
+selects the item (see below). The scan does not run on a timer: it runs after
+an open, a save, a merge or a resolution, and when the disk poll sees the
+project move (see [README.md](README.md#changes-made-outside-the-app)), which
+is the only way a conflict can appear without the app causing it. It runs on
+the disk poller's worker, off the frame
+([README.md](README.md#the-poll-runs-off-the-frame)), so the panel shows the
+last answer for a few frames after any of those, with its row actions
+disabled until the new one lands. What DECIDES on conflicts scans for
+itself: **Finish** (`FinishMerge`) and the merge RPCs (`branch_merge`,
+`pull`, `conflict_list`, `conflict_resolve`) call `ProjectMerge::Scan` directly.
 
 ## Sharing through a remote
 
