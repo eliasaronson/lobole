@@ -31,7 +31,6 @@ the heading if it is not here yet.
 
 ## Modeling
 
-
 ### Two Shells of the clamp's screw are refused on every draw
 
 - **Symptom:** on the toolmaker's clamp's M3 retaining screw
