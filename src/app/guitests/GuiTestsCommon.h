@@ -169,6 +169,11 @@ bool WaitFor(ImGuiTestContext* ctx, const char* what,
 bool WaitForJobs(ImGuiTestContext* ctx, const char* kind);
 // No project open in flight, the modal or not (ui/OpenJob.h).
 bool WaitForOpen(ImGuiTestContext* ctx);
+// Ask the disk poll (F8) now and wait for ITS answer: it runs off the frame
+// (ui/DiskPoller.h), so a fixed number of frames is a guess. A poll already
+// in flight was asked before whatever the caller just did, so it is let
+// finish first. Returns at once when the banner is already up.
+bool PollDiskNow(ImGuiTestContext* ctx);
 
 // The CPU time the app's MAIN thread has used, in ms. What a frame COST, for
 // a test that bounds it ("no frame ran the pass"): under load a frame's WALL

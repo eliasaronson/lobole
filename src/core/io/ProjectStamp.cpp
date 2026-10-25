@@ -4,7 +4,11 @@
 #include "core/io/ProjectStamp.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -19,9 +23,31 @@ uint64_t MtimeTicks(const fs::directory_entry& entry, std::error_code& ec) {
   return static_cast<uint64_t>(time.time_since_epoch().count());
 }
 
+std::atomic<int>& Hold() {
+  static std::atomic<int> ms{[] {
+    const char* env = std::getenv("LOBOLE_TEST_STAMP_MS");
+    return env ? std::atoi(env) : 0;
+  }()};
+  return ms;
+}
+
+std::atomic<int> g_inProgress{0};
+
+struct InProgress {
+  InProgress() { g_inProgress++; }
+  ~InProgress() { g_inProgress--; }
+};
+
 } // namespace
 
+void SetTestStampHold(int ms) { Hold().store(ms); }
+
+int StampsInProgress() { return g_inProgress.load(); }
+
 ProjectStamp StampProject(const std::string& path) {
+  const InProgress inProgress;
+  if (const int ms = Hold().load(); ms > 0)
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
   ProjectStamp stamp;
   if (path.empty())
     return stamp;

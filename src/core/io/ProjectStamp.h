@@ -54,4 +54,12 @@ struct ProjectStamp {
 //              that. The stamp covers the recipe.
 ProjectStamp StampProject(const std::string& path);
 
+// Tests only: every StampProject holds `ms` before it walks (0: none), so a
+// test can tell whether the frame waits on one. Also LOBOLE_TEST_STAMP_MS.
+void SetTestStampHold(int ms);
+
+// Tests only: how many StampProject calls are inside their walk right now.
+// A frame that sees this non-zero is a frame that did not wait on one.
+int StampsInProgress();
+
 } // namespace DocumentIO

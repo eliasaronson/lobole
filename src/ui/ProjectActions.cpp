@@ -1707,11 +1707,10 @@ void StampDiskState(AppState& state, const std::string& path) {
   state.diskStampPath = path;
   state.diskStamp = DocumentIO::StampProject(path);
   state.diskStampHead.clear();
-  if (GitVault::IsRepo(path)) {
-    const auto head = GitVault::Log(path, 1);
-    if (!head.empty())
-      state.diskStampHead = head[0].hash;
-  }
+  // Read the way the poll reads it (no `git`), so the two always agree.
+  if (GitVault::IsRepo(path))
+    state.diskStampHead = GitVault::HeadHash(path);
+  state.diskGeneration++; // a poll asked before this compared the old stamp
   state.diskChanged = false;
   state.diskCheckStamp = -1.0; // let the poll re-answer from the new baseline
   state.conflictsStale = true; // a different tree: rescan once, not on a clock

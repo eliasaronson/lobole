@@ -9,10 +9,12 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/CrashReports.h"
+#include "core/io/ProjectStamp.h"
 #include "remote/RemoteRequirements.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/DerivedActions.h"
 #include "ui/DesignSweepPanel.h"
+#include "ui/DiskPoller.h"
 #include "ui/DocumentSlots.h"
 #include "ui/OpenJob.h"
 #include "ui/PanelTitles.h"
@@ -861,9 +863,58 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     {
       std::ofstream(dir / "NOTES.txt") << "someone else\n";
     }
-    s_App->diskCheckStamp = -1.0;
-    ctx->Yield(5);
-    IM_CHECK(s_App->conflictScans > before + during);
+    IM_CHECK(PollDiskNow(ctx));
+    IM_CHECK(WaitFor(ctx, "the rescan the change asks for", [before, during] {
+      return s_App->conflictScans > before + during;
+    }));
+  };
+
+  // The disk poll walks the whole project and asks git for HEAD every few
+  // seconds; on a 4 100-file project on Windows that was a dropped frame each
+  // time. It runs on a worker now (ui/DiskPoller.h). With the walk held for
+  // half a second, frames must keep coming WHILE it is held — a frame that
+  // sees a stamp in progress is a frame that did not wait on it — and an
+  // outside write must still raise the banner.
+  t = IM_REGISTER_TEST(engine, "disk", "the_poll_does_not_hold_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_disk_offframe.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    IM_CHECK(PollDiskNow(ctx)); // settled: nothing in flight, nothing seen
+    IM_CHECK(!s_App->diskChanged);
+
+    struct HoldStamps {
+      HoldStamps() { DocumentIO::SetTestStampHold(500); }
+      ~HoldStamps() { DocumentIO::SetTestStampHold(0); }
+    } hold;
+    const uint64_t before = s_App->diskPollsAnswered;
+    s_App->diskCheckStamp = -1.0; // due now
+    int framesDuringWalk = 0;
+    IM_CHECK(WaitFor(ctx, "the held poll's answer", [&] {
+      if (DocumentIO::StampsInProgress() > 0)
+        framesDuringWalk++;
+      return s_App->diskPollsAnswered > before;
+    }));
+    ctx->LogInfo("frames drawn while the walk was held: %d", framesDuringWalk);
+    IM_CHECK_GT(framesDuringWalk, 0);
+    IM_CHECK(!s_App->diskChanged);
+
+    // Somebody else writes: the banner comes up within a poll or two, on the
+    // poll's own clock (not driven here), the walk still held.
+    {
+      std::ofstream(dir / "NOTES.txt") << "not this app\n";
+    }
+    IM_CHECK(
+        WaitFor(ctx, "the banner", [] { return s_App->diskChanged; }, 30.0));
+    std::filesystem::remove_all(dir);
   };
 
   // F8: the project moved on disk while the app held it in memory. This is
@@ -1033,8 +1084,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     }
     // The poll is deliberately slow (a directory walk), so drive it rather
     // than yielding for three seconds of test time.
-    s_App->diskCheckStamp = -1.0;
-    ctx->Yield(3);
+    IM_CHECK(PollDiskNow(ctx));
     // Noticed with the History panel BEHIND another tab: the poll runs from
     // the top of the frame, not from inside the panel, which would only ever
     // have caught changes made while you were looking at the History tab.
@@ -1601,8 +1651,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     // Naming is our own write: the disk check must not call it someone
     // else's. The empty commit that carries the name came after the save's
     // stamp, and the poll read the new HEAD as a change from outside.
-    s_App->diskCheckStamp = -1.0; // poll now, not in a second
-    ctx->Yield(3);
+    IM_CHECK(PollDiskNow(ctx)); // poll now, not in a second
     IM_CHECK(!s_App->diskChanged);
 
     // A second part, saved: the version above predates it.

@@ -29,6 +29,7 @@
 #include "ui/ConfigurationsPanel.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/CreateActions.h"
+#include "ui/DiskPoller.h"
 #include "ui/DockLayout.h"
 #include "ui/DocumentSlots.h"
 #include "ui/FeatureTreePanel.h"
@@ -988,7 +989,10 @@ void DrawUI(AppState& state) {
   // Outside the tab-kind branches on purpose: a version is a property of the
   // PROJECT, so the history reads the same from a part, an assembly or a
   // drawing tab (F6).
-  PollDiskState(state); // F8 — before the panels, so all of them agree
+  // F8 — before the panels, so all of them agree. Starts the disk and git
+  // questions on a worker and applies the answers that have come back; the
+  // frame never waits on either (ui/DiskPoller.h).
+  PumpDiskPoll(state);
   DrawHistoryPanel(state);
   DrawConflictsPanel(state);
   DrawRequirementsPanel(state); // the project's, so on every kind of tab

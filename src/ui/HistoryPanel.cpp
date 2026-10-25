@@ -9,6 +9,7 @@
 #include "core/io/GitVault.h"
 #include "core/io/ProjectStamp.h"
 #include "ui/ConflictsPanel.h"
+#include "ui/DiskPoller.h"
 #include "ui/FileDialogs.h"
 #include "ui/ProjectActions.h"
 #include "ui/RendererSync.h"
@@ -23,14 +24,10 @@ namespace ui {
 
 namespace {
 
-// How many versions the panel lists. Long enough that a day's work fits;
-// git holds the rest, and "restore something older" is a job for the tool
-// that owns the whole history.
-constexpr int kVersionsShown = 60;
-
 // Re-reading the log means spawning `git`, so the panel works off a cache
-// (AppState::historyLog) and never refreshes faster than this.
-constexpr double kRefreshSeconds = 1.0;
+// (AppState::historyLog). The panel fills it itself only when it is empty,
+// for another project, or invalidated by an action; keeping it current on a
+// clock is the disk poller's job, off the frame (ui/DiskPoller.h).
 
 // "3 minutes ago". Coarse on purpose: which of two versions is newer is what
 // a person reads off this column, not a duration.
@@ -60,9 +57,9 @@ std::string Ago(int64_t unixTime, int64_t now) {
 
 void RefreshHistory(AppState& state, bool force) {
   const double now = ImGui::GetTime();
-  const bool stale = state.historyStamp < 0.0 ||
-                     now - state.historyStamp > kRefreshSeconds ||
-                     state.historyPath != state.projectPath;
+  state.historyShownFrame = ImGui::GetFrameCount();
+  const bool stale =
+      state.historyStamp < 0.0 || state.historyPath != state.projectPath;
   if (!force && !stale)
     return;
   // A diff belongs to the project it was opened in. Without this, opening
@@ -78,73 +75,26 @@ void RefreshHistory(AppState& state, bool force) {
   // The cheap log first: one process, and it answers "has anything changed"
   // — which is what decides whether to pay for the descriptions (F11 G1).
   std::vector<GitVault::LogEntry> fresh =
-      GitVault::Log(state.projectPath, kVersionsShown);
+      GitVault::Log(state.projectPath, kHistoryVersionsShown);
   const bool unchanged =
       fresh.size() == state.historyLog.size() &&
       (fresh.empty() || fresh[0].hash == state.historyLog[0].hash);
   if (!unchanged) {
     state.historyLog =
-        GitVault::LogWithChanges(state.projectPath, kVersionsShown);
+        GitVault::LogWithChanges(state.projectPath, kHistoryVersionsShown);
   }
   state.historyUncommitted = GitVault::Dirty(state.projectPath);
 }
 
-// How often the project directory is re-examined. Slow on purpose: the walk
-// is cheap per file but a 48-part project is thousands of them, and the
-// question "did somebody else write to this" does not need a fast answer —
-// it needs a certain one before the next save.
-constexpr double kDiskPollSeconds = 3.0;
-
-} // namespace
-
-// Has the project moved under us? (F8) Two cheap gates before the walk:
-// focus coming back (the terminal-and-back workflow), and — for a git
-// project — whether HEAD moved, which every checkout/merge/pull does and
-// which costs one `git` call instead of a directory walk.
-//
-// Neither gate is sufficient alone, which is why both are here: HEAD does not
-// move for a working-tree edit, and focus does not change when a headless
-// agent writes while you keep working.
-void PollDiskState(AppState& state) {
-  if (state.projectPath.empty() || state.diskChanged)
-    return; // already known — the banner is up
-  const double now = ImGui::GetTime();
-  static bool wasFocused = true;
-  const bool focusReturned = state.windowFocused && !wasFocused;
-  wasFocused = state.windowFocused;
-  if (!focusReturned && state.diskCheckStamp >= 0.0 &&
-      now - state.diskCheckStamp < kDiskPollSeconds)
-    return;
-  state.diskCheckStamp = now;
-
-  if (!state.diskStampHead.empty()) {
-    const auto head = GitVault::Log(state.projectPath, 1);
-    if (!head.empty() && head[0].hash != state.diskStampHead) {
-      if (!state.diskChanged)
-        state.conflictsStale = true;
-      state.diskChanged = true;
-      return;
-    }
-  }
-  const bool wasChanged = state.diskChanged;
-  state.diskChanged = ProjectChangedOnDisk(state);
-  // Something else wrote the project, which is the only way a conflict can
-  // appear without us doing it — so this is where the conflicts scan earns
-  // its keep, rather than on a timer.
-  if (state.diskChanged && !wasChanged)
-    state.conflictsStale = true;
-}
-
-namespace {
-
 // Remotes and the ahead/behind counts, cached: each is a `git` process, and
 // the panel draws them as labels.
 void RefreshRemotes(AppState& state, bool force) {
-  const double now = ImGui::GetTime();
-  if (!force && state.remotesStamp >= 0.0 &&
-      now - state.remotesStamp < kRefreshSeconds)
+  state.remotesShownFrame = ImGui::GetFrameCount();
+  // Kept current on a clock by the disk poller, off the frame; filled here
+  // only the first time and after an action invalidates it.
+  if (!force && state.remotesStamp >= 0.0)
     return;
-  state.remotesStamp = now;
+  state.remotesStamp = ImGui::GetTime();
   state.remotes = GitVault::Remotes(state.projectPath);
   state.divergence = GitVault::AheadBehind(state.projectPath);
 }

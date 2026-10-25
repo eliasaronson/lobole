@@ -888,6 +888,7 @@ set(app_sources
     src/ui/DesignSweepPanel.cpp
     src/ui/LiteralActions.cpp
     src/ui/HistoryPanel.cpp
+    src/ui/DiskPoller.cpp
     src/ui/ConflictsPanel.cpp
     src/ui/BackgroundJobs.cpp
     src/ui/ImportJob.cpp

@@ -38,15 +38,6 @@ bool SwitchToBranch(AppState& state, const std::string& branch,
 bool MergeBranch(AppState& state, const std::string& branch,
                  std::string* error = nullptr);
 
-// Ask — cheaply, and at most every few seconds — whether the project changed
-// on disk (F8), setting AppState::diskChanged.
-//
-// Called once a frame from the top of the UI, NOT from the History panel:
-// the panel returns early when its tab is behind another, and a check that
-// only runs while you are looking at the History tab would miss every change
-// made while you were looking at your model, which is all of them.
-void PollDiskState(AppState& state);
-
 bool CanVersionProject(const AppState& state);
 
 // True when there is a history to show — CanVersionProject plus a repository

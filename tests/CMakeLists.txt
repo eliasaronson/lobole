@@ -60,6 +60,7 @@ add_executable(designer_tests
     test_project_trust.cpp
     test_projectmerge.cpp
     test_projectstamp.cpp
+    test_disk_poller.cpp
     test_settings.cpp
     test_startup_report.cpp
     test_keymap.cpp

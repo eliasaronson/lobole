@@ -75,6 +75,7 @@ struct GLFWwindow;
 namespace ui {
 
 struct OpenJob; // ui/OpenJob.h
+class DiskPoller; // ui/DiskPoller.h
 
 // Per-part tessellation + GPU asset cache; see AppState::partRenderCache.
 // Defined in AppActionsInternal.h, where Vertex3D is complete.
@@ -2674,13 +2675,19 @@ struct AppState {
   std::vector<std::string> directoryContents;
 
   // Version history (F6). Every read shells out to `git`, so the panel works
-  // off this cache: refreshed when it is visible and stale (~1 Hz), and
-  // immediately after any action that changes the history. `historyPath`
-  // guards the cache against a project switch.
+  // off this cache: refreshed while it is visible and stale (~1 Hz) by the
+  // disk poller, off the frame (ui/DiskPoller.h), and by the panel itself,
+  // synchronously, right after any action that changes the history.
+  // `historyPath` guards the cache against a project switch.
   std::vector<GitVault::LogEntry> historyLog;
   std::string historyPath;
   double historyStamp = -1.0; // ImGui time of the last refresh; <0 = never
   bool historyUncommitted = false;
+  // The frame the History panel last drew its version list (and its Sharing
+  // section): the disk poller refreshes those caches on its clock only while
+  // they are on screen (ui/DiskPoller.h).
+  int historyShownFrame = -1;
+  int remotesShownFrame = -1;
 
   // Did the project change on disk under us? (F8) `diskStamp` is what the
   // directory looked like when we last read or wrote it; anything else is
@@ -2695,6 +2702,16 @@ struct AppState {
   bool diskChangeBlockedSave = false;
   double diskCheckStamp = -1.0; // ImGui time of the last poll; <0 = never
   bool windowFocused = true;    // main.cpp mirrors GLFW_FOCUSED here
+  // The poll runs off the frame (ui/DiskPoller.h). `diskGeneration` moves
+  // whenever the project is (re-)stamped — open, save, reload — so an answer
+  // to a question asked before that is discarded, not applied to the new
+  // baseline. `diskPollsAnswered` counts the disk answers applied (tests
+  // wait on it instead of a frame count).
+  std::shared_ptr<DiskPoller> diskPoller;
+  uint64_t diskGeneration = 0;
+  uint64_t diskPollsAnswered = 0;
+  bool diskPollWasFocused = true;
+  bool diskPollFocusPending = false;
 
   // Conflicts (F7). A scan spawns `git` and walks the project for the
   // duplicate ids git cannot see, so it runs on an event rather than a clock

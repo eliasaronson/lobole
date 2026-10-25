@@ -11,6 +11,7 @@
 
 #include "ui/BackgroundJobs.h"
 #include "ui/DerivedActions.h"
+#include "ui/DiskPoller.h"
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
 #include "ui/OpenJob.h"
@@ -464,6 +465,17 @@ bool WaitFor(ImGuiTestContext* ctx, const char* what,
     frames++;
   }
   return true;
+}
+
+bool PollDiskNow(ImGuiTestContext* ctx) {
+  if (!WaitFor(ctx, "the disk poll already in flight",
+               [] { return !s_App->diskPoller || !s_App->diskPoller->Busy(); }))
+    return false;
+  const uint64_t before = s_App->diskPollsAnswered;
+  s_App->diskCheckStamp = -1.0;
+  return WaitFor(ctx, "the disk poll's answer", [before] {
+    return s_App->diskPollsAnswered > before || s_App->diskChanged;
+  });
 }
 
 bool WaitForJobs(ImGuiTestContext* ctx, const char* kind) {
