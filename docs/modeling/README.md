@@ -1058,7 +1058,7 @@ suppressed}`, `set_rollback {feature_id | index}`, `set_material` and
 `set_appearance` (`{feature_id | body | body_name}`, on the body's creating
 feature; a Boolean, pattern or Split's body continues its source's material:
 [the feature that holds a material](../rendering/materials.md#the-feature-that-holds-a-material)),
-`project_geometry`, `update_derived`, `derive_occurrence`
+`project_geometry`, `update_derived`, `set_derived_follow`, `derive_occurrence`
 (`src/remote/RemoteModeling.cpp`), and there too `check_literals` and
 `extract_variables`
 ([../variables/README.md](../variables/README.md#literals-that-should-be-expressions));

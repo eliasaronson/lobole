@@ -476,9 +476,17 @@ outputs re-sync from the source until the link is broken.
   regeneration** with a break-link hint; it never desyncs silently.
 - `BreakLink(opIndex)` removes the op and keeps its outputs as ordinary
   geometry with ids intact, so profile regions and constraints on them survive.
+- **From another part** the clipboard names the source's part as well as its
+  sketch (feature ids are per-part counters), and a linked paste makes -- or
+  reuses, when one already copies that sketch before this one -- a
+  [Derived copy of the source sketch](../modeling/derived.md#sketches),
+  inserted before the sketch being edited, and projects the pasted entities
+  from it. They follow the other part as its copy keeps up, at the
+  [gates](../modeling/derived.md#copies-that-keep-up). One undo step.
 - Paste-linked falls back to a plain paste, with a message saying why, when
-  the source is in another part, is not earlier in the history, or has lost
-  one of the copied entities.
+  a same-part source is not earlier in the history or has lost one of the
+  copied entities, or the other part cannot be copied (a cycle, a sketch
+  that failed there).
 
 The same solver-fixed mechanism holds **expression-driven coordinates**
 (`entityExprs`, see [../variables/README.md](../variables/README.md)) and
@@ -493,6 +501,14 @@ regeneration (`ProjectElement`) as solver-fixed construction entities with
 stable ids (`ExternalGeom::genIds`), so geometry constrained to it follows the
 source. A reference that no longer resolves fails the sketch. Planar curves
 parallel to the sketch keep their type; anything else is sampled into a spline.
+
+An entity of another part's sketch, copied by a Derived (an Edge named
+`<derived id>/<sketch id>/<entity id>`), is projected as it is drawn there
+(`sketch::ProjectEntity`): exact on a parallel plane, keeping its
+construction flag -- so it can be a profile -- solver-fixed and drawn violet
+([derived](../modeling/derived.md#sketches)). A sketch whose `plane_ref` is
+such a Derived stands on the copied sketch's plane (`plane_ref_sketch` names
+which).
 
 ### Reference images (underlays)
 

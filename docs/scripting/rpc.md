@@ -217,6 +217,15 @@ the active tab never changed.
   after the handler (`remote::RefreshExpressionRequirements`, in
   `ProcessPending`), to every call whose answer is untyped or whose
   `returns` row names it; the requirement verbs answer their own rows.
+- **`links_updated`** on any response whose call passed a
+  [gate](../modeling/derived.md#copies-that-keep-up) that brought a
+  following cross-part copy up to date: `[{part, part_id, features,
+  broken: [{feature_id, name, error}]}]`, one per part updated, with every
+  feature the update broke there. The gate runs before every call not flagged
+  `Deferrable` (in `ProcessPending`, before the request could park) and
+  before each such call in a `batch`, whose answer collects them. Any answer
+  may carry it, typed or not: `tools/rpc_contract.py` adds it to every
+  result schema.
 - **`digest`** on every response that carries `regen` (`AttachRegen`;
   `rpc_digest_gate` holds every handler to it): per body `{name,
   created_by, volume_mm3, bbox_min, bbox_max, solids}`, and a `delta` against the
