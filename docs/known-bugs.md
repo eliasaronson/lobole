@@ -49,10 +49,10 @@ the heading if it is not here yet.
 - **Where:** `BRepOffset_MakeOffset` (`nix/patches/occt-offset-arc-bind-order.patch`);
   `ShellFeature::Execute` (`src/core/features/ShellFeature.cpp`), which now
   draws once on a kernel carrying the patch.
-- **Likely fix (a decision):** keep it -- the same refusal every time is
-  better than a coin toss -- or give the patch a second, fixed order (the
-  reverse of the binding order) for the Shell's second draw: deterministic
-  both times, at the price of a second build of every honest refusal.
+- **Kept as it is:** the same refusal every time is better than a coin
+  toss, and a second fixed order (the reverse of the binding order) would
+  cost a second build of every honest refusal. The fix belongs upstream, in
+  the offset's intersections, not in the order.
 
 ### A small sphere cut beside a fillet keeps a face inside the sphere
 
