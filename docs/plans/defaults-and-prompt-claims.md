@@ -108,10 +108,13 @@ to 1, 2 or 5 x 10^n by `RoundDown125`, whose two pasted copies go):
 
 ## Verification
 
-- A GUI test per tool opens it on a 2 mm body and a 300 mm one and checks
-  the default scales with it (as `defaults/blend_and_wall_scale_with_body`
-  does); each refusal checks its reason is shown and the document is
-  unchanged. Each fails on main.
+- What a default must do is stay sensible on the part in front of it: a
+  preview that is visible, inside the view fitted to the part, and not a
+  sliver. Its exact value matters less. One GUI test opens every creation
+  tool on a 2 mm body and a 300 mm one and checks its preview's bbox lies
+  within the fitted view and is not under a hundredth of the body's size;
+  each refusal checks its reason is shown and the document is unchanged.
+  Both fail on main.
 - `rpc_digest_gate.py` fails on main (`set_variable`) and passes after.
 - The prompt-name gate fails on a planted unknown name.
 - The headless suite, the GUI suite, `tools/ctest -L pygui`;
