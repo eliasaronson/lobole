@@ -20,6 +20,17 @@
 #   tools/ci-local.sh --asan       # ASan+UBSan build and suite, ~6 min warm
 #   tools/ci-local.sh --tsan       # ThreadSanitizer build and suite
 #
+#   tools/ci-local.sh --serial     # one job after another, output live
+#
+# The jobs run as LANES, concurrently: one for the nix chain (its builds and
+# suites in the order above) and one per container image. The compile budget
+# (tools/build-jobs) is divided among the lanes still running, so the builds
+# in flight never add up to more than one build was allowed; suites take
+# turns under a machine-wide lock, each at full -j$(nproc), so no
+# deadline-based test sees more load than it would alone. What overlaps is
+# one lane's compile with another lane's suite. Each lane's output is kept
+# and printed whole at the end, in lane order, then every step's seconds.
+#
 # Build trees live in .ci-local/ (gitignored) and are reused, so the second
 # run of a container is a rebuild of what changed rather than a fresh compile.
 #
@@ -48,6 +59,7 @@ run_tsan=0
 run_gui=1
 run_pixel=0
 pixel_record=0
+serial=0
 only_image=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -69,7 +81,10 @@ while [ $# -gt 0 ]; do
     # hatch for a machine without one (and for --containers, which has none).
     --no-gui) run_gui=0 ;;
     --image) only_image="$2"; shift ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    # Today's order, one job at a time with its output on the terminal as it
+    # happens: for a run being debugged, or a machine that should stay quiet.
+    --serial) serial=1 ;;
+    -h|--help) sed -n '5,35p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -131,16 +146,68 @@ step() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m   %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m   %s\033[0m\n' "$*"; }
 
+started=$SECONDS
+failures=0
+lane=""  # the lane a step belongs to; set in each lane's subshell
+lanes_dir="$root/.ci-local/lanes"
+# One suite at a time, MACHINE-wide: a second ci-local run in another
+# worktree puts the same load on the same deadline-based tests as a second
+# lane in this one. The same pattern as gui-tests-xvfb.sh's GPU lock.
+suite_lock=/tmp/lobole-ci-local-suite.lock
+# Compilers from free memory, not cores (tools/build-jobs, ~1.5 GB each): at
+# one per core the containers' builds took the host's memory.
+jobs="$("$root/tools/build-jobs")"
+
+# The -j for a build starting NOW: the budget divided by the lanes still
+# running. A lane builds only while it runs, and every build in flight took
+# its share when at least as many lanes were alive as are now, so the shares
+# of the builds in flight never add up to more than `jobs` -- what one build
+# was allowed when the jobs ran one after another. A fixed split would hold
+# too, but would leave the last lane compiling on a fraction of the budget
+# after the others had finished.
+build_share() {
+  if [ "$serial" = 1 ]; then echo "$jobs"; return; fi
+  local alive share
+  alive=$(find "$lanes_dir" -maxdepth 1 -name '*.alive' | wc -l)
+  [ "$alive" -ge 1 ] || alive=1
+  share=$((jobs / alive))
+  echo $((share > 0 ? share : 1))
+}
+
+# Run one step with its whole output in <log>, record how long it took (and,
+# for a suite, how long it queued for the suite lock) for the table at the
+# end, and return its status. A suite holds the lock for exactly its own
+# command: the lock's fd is closed for the command, so a process the suite
+# leaves behind cannot go on holding it.
+#   logged <log> <step label> <build|suite> <command...>
+logged() {
+  local log="$1" label="$2" kind="$3"; shift 3
+  local t0=$SECONDS waited=0 rc=0 fd
+  mkdir -p "$(dirname "$log")"
+  if [ "$kind" = suite ]; then
+    exec {fd}>>"$suite_lock"
+    flock "$fd"
+    waited=$((SECONDS - t0)); t0=$SECONDS
+    "$@" > "$log" 2>&1 {fd}>&- || rc=$?
+    exec {fd}>&-
+  else
+    "$@" > "$log" 2>&1 || rc=$?
+  fi
+  printf '%s\t%s\t%d\t%d\t%s\n' "$lane" "$label" $((SECONDS - t0)) "$waited" \
+    "$([ "$rc" = 0 ] && echo ok || echo FAILED)" >> "$lanes_dir/$lane.times"
+  return "$rc"
+}
+
 # Run a test command, keeping its whole output in .ci-local/<name>.log: three
 # lines on success (the ctest summary), the last 40 plus the path on failure.
 # The first version piped straight to `tail -3`, which meant a red run showed
 # a count and threw the diagnosis away — the opposite of what a failure needs.
+# It runs under the suite lock.
 #   run_tests <name> <human label> <command...>
 run_tests() {
   local name="$1" label="$2"; shift 2
   local log="$root/.ci-local/$name.log"
-  mkdir -p "$root/.ci-local"
-  if "$@" > "$log" 2>&1; then
+  if logged "$log" "$label" suite "$@"; then
     tail -3 "$log"
     ok "$label passed"
   else
@@ -150,15 +217,26 @@ run_tests() {
   fi
 }
 
+# A step that ends its lane when it fails (a build: nothing after it in the
+# lane has a binary to run). The other lanes go on.
+#   run_fatal <log> <step label> <command...>
+run_fatal() {
+  local log="$1" label="$2"; shift 2
+  logged "$log" "$label" build "$@" && return 0
+  tail -40 "$log"
+  fail "$label FAILED — full log: $log"
+  failures=$((failures+1))
+  exit 1
+}
+
 # Configure and build, keeping the output in .ci-local/<name>-build.log.
 # Ninja prints a failing compile on its STDOUT, so `> /dev/null` here used to
 # swallow the diagnosis whole: a broken build exited 1 with nothing on screen
 # but a stray CMake warning. Same rule as run_tests — quiet when green, the
-# last 40 lines and a path when red.
+# last 40 lines and a path when red. The -j is the lane's share (build_share).
 #   run_build <name> <cmake-configure-args...> -- <cmake-build-args...>
 run_build() {
   local name="$1"; shift
-  local log="$root/.ci-local/$name-build.log"
   local cfg=() bld=()
   while [ "$1" != "--" ]; do cfg+=("$1"); shift; done
   shift
@@ -175,14 +253,9 @@ run_build() {
     step "$name: the nix environment moved; configuring $tree afresh"
     rm -f "$tree/CMakeCache.txt"
   fi
-  if "$root/tools/nix-run" "cmake ${cfg[*]}" > "$log" 2>&1 \
-     && "$root/tools/nix-run" "cmake --build ${bld[*]}" >> "$log" 2>&1; then
-    echo "$stamp" > "$tree/.nix-env-stamp"
-    return 0
-  fi
-  tail -40 "$log"
-  fail "$name build FAILED — full log: $log"
-  exit 1
+  run_fatal "$root/.ci-local/$name-build.log" "$name build" \
+    "$root/tools/nix-run" "cmake ${cfg[*]} && cmake --build ${bld[*]} -j$(build_share)"
+  echo "$stamp" > "$tree/.nix-env-stamp"
 }
 
 # The containers run as the invoking user (`--user`), so what they write into
@@ -201,17 +274,16 @@ reclaim_tree() {
     || { fail "could not chown $dir; remove it with: docker run --rm -v \"$root/$dir:/t\" $tag rm -rf /t/*"; exit 1; }
 }
 
-started=$SECONDS
-failures=0
-# Compilers from free memory, not cores (tools/build-jobs, ~1.5 GB each): at
-# one per core the containers' builds took the host's memory.
-jobs="$("$root/tools/build-jobs")"
+# Every container is NAMED after this run and its lane, so an interrupted run
+# stops exactly the containers it started: killing a `docker run` client
+# leaves its container running in the daemon.
+container_name() { echo "ci-local-$$-$lane-$1"; }
 
 # ---- job 1: what build-and-test does, using this machine's toolchain -------
-if [ "$run_nix" = 1 ]; then
+lane_nix() {
   step "build-and-test (local toolchain)"
   run_build release -S . -B .ci-local/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -- .ci-local/build -j"$jobs"
+    -- .ci-local/build
   run_tests headless "headless suite" \
     "$root/tools/ctest" --test-dir .ci-local/build -LE gui -j"$(nproc)" --output-on-failure
 
@@ -224,13 +296,8 @@ if [ "$run_nix" = 1 ]; then
 
   step "build without the test engine"
   run_build no-te -S . -B .ci-local/build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TEST_ENGINE=OFF \
-    -- .ci-local/build-no-te -j"$jobs"
-  if "$root/tools/nix-run" "python3 tests/headless_smoke.py .ci-local/build-no-te/lobole" > /dev/null \
-     && ! .ci-local/build-no-te/lobole --gui-tests --hidden 2>/dev/null; then
-    ok "engine-free build works and refuses --gui-tests"
-  else
-    fail "engine-free build FAILED"; failures=$((failures+1))
-  fi
+    -- .ci-local/build-no-te
+  run_tests no-te "engine-free build works and refuses --gui-tests" engine_free_check
 
   # ...and without CAM, the job's last two steps. Both configurations exist
   # for the same reason and break the same way: nobody compiles them by
@@ -239,25 +306,33 @@ if [ "$run_nix" = 1 ]; then
   # Spectra-less link -- and neither could be seen from a nix build.
   step "build without CAM"
   run_build no-cam -S . -B .ci-local/build-nocam -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_CAM=OFF \
-    -- .ci-local/build-nocam -j"$jobs"
+    -- .ci-local/build-nocam
   run_tests nocam "CAM-free suite" \
     "$root/tools/ctest" --test-dir .ci-local/build-nocam -LE gui -j"$(nproc)" --output-on-failure
-fi
+}
+
+engine_free_check() {
+  "$root/tools/nix-run" "python3 tests/headless_smoke.py .ci-local/build-no-te/lobole" || return 1
+  if .ci-local/build-no-te/lobole --gui-tests --hidden; then
+    echo "the engine-free build ran --gui-tests instead of refusing them"
+    return 1
+  fi
+}
 
 # ---- the sanitizer job (opt-in here, weekly/manual on GitHub) --------------
-if [ "$run_asan" = 1 ]; then
+lane_asan() {
   step "sanitizers (ASan + UBSan)"
   # build-asan, not .ci-local/: the same tree tools/run-sanitized-tests.sh
   # uses, so an incremental developer build and this share their objects.
   source "$root/tools/sanitizer-env.sh"
   run_build asan -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON \
-    -- build-asan -j"$jobs" --target designer designer_tests
+    -- build-asan --target designer designer_tests
   run_tests asan "sanitized suite" \
     "$root/tools/ctest" --test-dir build-asan -LE "$SANITIZER_LABEL_EXCLUDE" -j"$(nproc)" --output-on-failure -E "$SANITIZER_TEST_EXCLUDE"
-fi
+}
 
 # ---- the race job (opt-in; separate tree, ASan and TSan cannot combine) -----
-if [ "$run_tsan" = 1 ]; then
+lane_tsan() {
   step "ThreadSanitizer"
   # Its own tree because -fsanitize=thread and -fsanitize=address cannot be
   # linked into one binary. Not part of any scheduled run: this is an
@@ -265,58 +340,60 @@ if [ "$run_tsan" = 1 ]; then
   # that stopped being single-threaded — the import worker, OCC meshing across
   # threads, async FEM, the remote server.
   run_build tsan -S . -B build-tsan -G Ninja -DENABLE_TSAN=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -- build-tsan -j$(nproc) --target designer designer_tests
+    -- build-tsan --target designer designer_tests
   # -j4, not -j$(nproc): TSan multiplies each process's memory footprint, and
   # a saturated machine turns a race hunt into a timeout hunt.
   run_tests tsan "race suite" \
     "$root/tools/ctest" --test-dir build-tsan -LE gui -j4 --output-on-failure
+}
+
+# ---- job 2: the stock-Ubuntu containers, one lane per image ----------------
+# In a worktree, .git is a FILE naming the main checkout's .git/worktrees/X
+# by absolute path, and with only /src mounted every git call in the suite
+# (spdx_gate, format_version_gate) died "not a git repository". The common
+# git dir is mounted at its own path, read-only, so that pointer resolves.
+git_mount=()
+if [ -f "$root/.git" ]; then
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
+  git_mount=(--mount "type=bind,src=$common,dst=$common,readonly")
 fi
 
-# ---- job 2: the stock-Ubuntu containers ------------------------------------
-if [ "$run_containers" = 1 ]; then
-  command -v docker > /dev/null || { fail "docker not found — skipping containers"; exit $((failures > 0)); }
-  # In a worktree, .git is a FILE naming the main checkout's .git/worktrees/X
-  # by absolute path, and with only /src mounted every git call in the suite
-  # (spdx_gate, format_version_gate) died "not a git repository". The common
-  # git dir is mounted at its own path, read-only, so that pointer resolves.
-  git_mount=()
-  if [ -f "$root/.git" ]; then
-    common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
-    git_mount=(--mount "type=bind,src=$common,dst=$common,readonly")
-  fi
-  for entry in "${MATRIX[@]}"; do
-    image="${entry%%@@*}"
-    rest="${entry#*@@}"
-    exclude="${rest%%@@*}"
-    extra="${rest#*@@}"
-    [ -n "$only_image" ] && [ "$image" != "$only_image" ] && continue
-    tag="designer-ci-${image//[:.]/-}"
-    build_dir=".ci-local/${image//[:.]/-}"
-    mkdir -p "$build_dir"
+#   lane_image <matrix entry: image@@exclude@@extra>
+lane_image() {
+  local entry="$1" image rest exclude extra tag build_dir
+  image="${entry%%@@*}"
+  rest="${entry#*@@}"
+  exclude="${rest%%@@*}"
+  extra="${rest#*@@}"
+  tag="designer-ci-${image//[:.]/-}"
+  build_dir=".ci-local/${image//[:.]/-}"
+  mkdir -p "$build_dir"
 
-    step "stock-ubuntu ($image)"
-    # The image is the workflow's package list and nothing else — that is the
-    # point of this job: it fails if the README's list is incomplete.
-    printf 'FROM %s\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates %s && rm -rf /var/lib/apt/lists/*\n' \
-      "$image" "$PACKAGES $extra" > "$build_dir/Dockerfile"
-    docker build -q -t "$tag" "$build_dir" > /dev/null
-    reclaim_tree "$tag" "$build_dir"
+  step "stock-ubuntu ($image)"
+  # The image is the workflow's package list and nothing else — that is the
+  # point of this job: it fails if the README's list is incomplete.
+  printf 'FROM %s\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates %s && rm -rf /var/lib/apt/lists/*\n' \
+    "$image" "$PACKAGES $extra" > "$build_dir/Dockerfile"
+  run_fatal "$root/.ci-local/$lane-image.log" "$image image" \
+    docker build -q -t "$tag" "$build_dir"
+  reclaim_tree "$tag" "$build_dir"
 
-    # No '> /dev/null' on the build: run_tests keeps the whole log and prints
-    # it only on failure, and a compile error with its output discarded leaves
-    # an eleven-line log that says nothing (which is exactly what happened).
-    ctest_cmd="ctest --test-dir /b -LE gui -j\$(nproc) --output-on-failure"
-    [ -n "$exclude" ] && ctest_cmd="$ctest_cmd -E \"$exclude\""
-    # `set -o pipefail`: without it the pipe to tail swallows ctest's exit
-    # status and every run looks green.
-    run_tests "${image//[:.]/-}" "$image" \
-      docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
-        -v "$root:/src:ro" "${git_mount[@]}" -v "$root/$build_dir:/b" "$tag" bash -c "
-         set -o pipefail
-         cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release &&
-         cmake --build /b -j$jobs && $ctest_cmd"
-  done
-fi
+  # The build and the suite are two containers, so the suite takes its turn
+  # at the suite lock while another lane compiles. Neither's output is
+  # discarded: the log keeps it and is printed on failure, and a compile
+  # error with its output thrown away leaves an eleven-line log that says
+  # nothing (which is exactly what happened).
+  local run=(docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp
+             -v "$root:/src:ro" "${git_mount[@]}" -v "$root/$build_dir:/b")
+  run_fatal "$root/.ci-local/$lane-build.log" "$image build" \
+    "${run[@]}" --name "$(container_name build)" "$tag" bash -c "
+      cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release &&
+      cmake --build /b -j$(build_share)"
+  local ctest_cmd="ctest --test-dir /b -LE gui -j\$(nproc) --output-on-failure"
+  [ -n "$exclude" ] && ctest_cmd="$ctest_cmd -E \"$exclude\""
+  run_tests "$lane" "$image suite" \
+    "${run[@]}" --name "$(container_name suite)" "$tag" bash -c "$ctest_cmd"
+}
 
 # ---- the gui-suite job's pixel gate, in the runner's driver ----------------
 # Not the whole job: the GUI suite itself runs here under nix already. What
@@ -324,22 +401,22 @@ fi
 # is keyed to the driver that drew it -- llvmpipe from ubuntu:24.04, which is
 # what the runner installs and is NOT the mesa in shell.nix. The image is the
 # workflow's own gui-suite package list, so it cannot drift from CI.
-if [ "$run_pixel" = 1 ]; then
-  command -v docker > /dev/null || { fail "docker not found"; exit 1; }
+lane_pixel() {
   # The job runs on a RUNNER, not in a container; the closest an image can
   # sit to it is the same Ubuntu release, which is where its driver comes
   # from. Derived, so moving the job moves this.
-  image="${GUI_RUNS_ON/ubuntu-/ubuntu:}"
-  tag="designer-ci-gui"
-  build_dir=".ci-local/gui-build"
+  local image="${GUI_RUNS_ON/ubuntu-/ubuntu:}"
+  local tag="designer-ci-gui"
+  local build_dir=".ci-local/gui-build"
   mkdir -p "$build_dir"
   step "gui-suite pixel gate ($image)"
   printf 'FROM %s\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 %s && rm -rf /var/lib/apt/lists/*\n' \
     "$image" "$GUI_PACKAGES" > "$build_dir/Dockerfile"
-  docker build -q -t "$tag" "$build_dir" > /dev/null
+  run_fatal "$root/.ci-local/pixel-image.log" "$image image" \
+    docker build -q -t "$tag" "$build_dir"
   # The ICD discovery step of the job, verbatim in spirit: lavapipe's filename
   # moved once already (lvp_icd.x86_64.json -> lvp_icd.json).
-  pixel_cmd="PYTHONPATH=/src/python python3 tests/render_pixel_smoke.py /b/lobole --require-baseline"
+  local pixel_cmd="PYTHONPATH=/src/python python3 tests/render_pixel_smoke.py /b/lobole --require-baseline"
   [ "$pixel_record" = 1 ] && pixel_cmd="PYTHONPATH=/src/python python3 tests/render_pixel_smoke.py /b/lobole --record"
   # --user: a root-owned PNG in tests/golden/ is a file nobody can commit.
   # The ccache mount must exist first, or docker creates it owned by root and
@@ -348,7 +425,7 @@ if [ "$run_pixel" = 1 ]; then
   reclaim_tree "$tag" "$build_dir"
   reclaim_tree "$tag" .ci-local/ccache
   run_tests pixel "pixel gate" \
-    docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp --name "$(container_name pixel)" \
       -v "$root:/src" -v "$root/$build_dir:/b" -v "$root/.ci-local/ccache:/tmp/ccache" \
       -e CCACHE_DIR=/tmp/ccache "$tag" bash -c "
          set -o pipefail
@@ -356,11 +433,123 @@ if [ "$run_pixel" = 1 ]; then
          [ -n \"\$VK_DRIVER_FILES\" ] || { echo 'no lavapipe ICD in the image'; exit 1; }
          cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release \
                -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache &&
-         cmake --build /b -j$jobs --target designer &&
+         cmake --build /b -j$(build_share) --target designer &&
          cd /src && $pixel_cmd"
+}
+
+# ---- the lanes ---------------------------------------------------------------
+# One lane per independent chain, listed in the order a serial run takes them
+# and the report prints them.
+lane_names=() lane_cmds=()
+add_lane() { lane_names+=("$1"); shift; lane_cmds+=("$*"); }
+[ "$run_nix" = 1 ] && add_lane nix lane_nix
+[ "$run_asan" = 1 ] && add_lane asan lane_asan
+[ "$run_tsan" = 1 ] && add_lane tsan lane_tsan
+if [ "$run_containers" = 1 ]; then
+  if command -v docker > /dev/null; then
+    for entry in "${MATRIX[@]}"; do
+      image="${entry%%@@*}"
+      [ -n "$only_image" ] && [ "$image" != "$only_image" ] && continue
+      add_lane "${image//[:.]/-}" lane_image "$entry"
+    done
+  else
+    fail "docker not found — skipping containers"
+  fi
+fi
+if [ "$run_pixel" = 1 ]; then
+  command -v docker > /dev/null || { fail "docker not found"; exit 1; }
+  add_lane pixel lane_pixel
 fi
 
-printf '\n%s in %dm%02ds\n' \
+mkdir -p "$lanes_dir"
+find "$lanes_dir" -mindepth 1 -maxdepth 1 -type f -delete
+for name in "${lane_names[@]}"; do touch "$lanes_dir/$name.alive"; done
+
+# A lane is a subshell, so its failure count is its own: it leaves the count
+# in a file on the way out however it goes out (a failed build ends it with
+# `exit 1`), and stops counting toward the build budget.
+#   run_lane <index>
+run_lane() {
+  lane="${lane_names[$1]}"
+  failures=0  # a serial lane would otherwise start from the lanes before it
+  trap 'echo "$failures" > "$lanes_dir/$lane.failures"; rm -f -- "${lanes_dir:?}/${lane:?}.alive"' EXIT
+  : > "$lanes_dir/$lane.times"
+  # shellcheck disable=SC2086  # a lane function and its argument, split on purpose
+  ${lane_cmds[$1]}
+}
+
+# A finished lane's failures, added to the run's: a lane that stopped without
+# counting anything (a set -e exit) still failed.
+# (Not called in $(...): the count must reach this shell's `failures`.)
+#   collect_lane <name> <exit status>   (sets lane_failures)
+collect_lane() {
+  lane_failures="$(cat "$lanes_dir/$1.failures" 2>/dev/null || echo 0)"
+  [ "$2" != 0 ] && [ "$lane_failures" = 0 ] && lane_failures=1
+  failures=$((failures + lane_failures))
+}
+
+elapsed() { printf '%dm%02ds' $(( (SECONDS-started)/60 )) $(( (SECONDS-started)%60 )); }
+
+# Each lane's process group, and the containers this run named: what an
+# interrupted run stops. Background jobs in a script ignore SIGINT, so
+# without this a Ctrl-C would leave every lane building.
+declare -A live=() lane_of=()
+interrupted() {
+  trap - INT TERM
+  local pid
+  for pid in "${!live[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done
+  if command -v docker > /dev/null; then
+    docker ps -q --filter "name=^ci-local-$$-" | xargs -r docker kill > /dev/null 2>&1 || true
+  fi
+  fail "interrupted"
+  exit 130
+}
+trap interrupted INT TERM
+
+if [ "$serial" = 1 ] || [ "${#lane_names[@]}" -le 1 ]; then
+  for i in "${!lane_names[@]}"; do
+    rc=0; ( run_lane "$i" ) || rc=$?
+    collect_lane "${lane_names[$i]}" "$rc"
+  done
+else
+  echo "CI-local: ${#lane_names[@]} lanes (${lane_names[*]}); builds share -j$jobs, suites take turns"
+  echo "  each lane's output goes to $lanes_dir/<lane>.out and is printed at the end"
+  set -m  # each lane in its own process group, so `interrupted` stops all of it
+  for i in "${!lane_names[@]}"; do
+    # stdin from /dev/null: a background process group that reads the
+    # terminal is stopped (SIGTTIN), and the lane would hang unseen.
+    ( run_lane "$i" ) < /dev/null > "$lanes_dir/${lane_names[$i]}.out" 2>&1 &
+    live[$!]=1; lane_of[$!]=$i
+  done
+  set +m
+  while [ "${#live[@]}" -gt 0 ]; do
+    rc=0; wait -n -p done_pid "${!live[@]}" || rc=$?
+    unset "live[$done_pid]"
+    name="${lane_names[${lane_of[$done_pid]}]}"
+    collect_lane "$name" "$rc"
+    if [ "$lane_failures" = 0 ]; then ok "lane $name passed at $(elapsed)"
+    else fail "lane $name: $lane_failures failure(s), at $(elapsed)"; fi
+  done
+  for name in "${lane_names[@]}"; do
+    printf '\n\033[1m######## lane %s ########\033[0m\n' "$name"
+    cat "$lanes_dir/$name.out"
+  done
+fi
+trap - INT TERM
+
+# Every step's seconds: whether the overlap pays, and where the next minute
+# is. "queued" is how long a suite waited for the suite lock.
+if [ "${#lane_names[@]}" -gt 0 ]; then
+  printf '\n%-12s %-50s %7s %7s  %s\n' lane step seconds queued status
+  for name in "${lane_names[@]}"; do
+    [ -f "$lanes_dir/$name.times" ] || continue
+    while IFS=$'\t' read -r l s secs q st; do
+      printf '%-12s %-50s %7d %7d  %s\n' "$l" "$s" "$secs" "$q" "$st"
+    done < "$lanes_dir/$name.times"
+  done
+fi
+
+printf '\n%s in %s\n' \
   "$([ "$failures" = 0 ] && echo 'CI-local: everything passed' || echo "CI-local: $failures job(s) failed")" \
-  $(( (SECONDS-started)/60 )) $(( (SECONDS-started)%60 ))
+  "$(elapsed)"
 exit $(( failures > 0 ))

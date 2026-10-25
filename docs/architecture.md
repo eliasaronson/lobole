@@ -714,6 +714,36 @@ a separate build; Netgen's own thread pool is suppressed in
 `tools/tsan-suppressions.txt`, OpenCASCADE deliberately is not, since OCC is
 called from our workers).
 
+### CI on this machine
+
+`tools/ci-local.sh` runs the CI jobs here, reading the package lists, the
+container images and the excluded tests from `.github/workflows/ci.yml`. It
+runs them as LANES, concurrently: one for the nix chain (Release build,
+headless suite, GUI suite, the no-test-engine and no-CAM builds and their
+checks, in that order) and one per stock-Ubuntu image (image, build, suite).
+Starting everything at full strength would be wrong twice over, so two rules
+bound it:
+
+- **Builds share the compile budget.** A build's `-j` is `tools/build-jobs`
+  divided by the lanes still running when it starts. Every build in flight
+  took its share when at least as many lanes were alive, so the shares never
+  add up to more than one build was allowed, and the last lane standing
+  compiles at the full budget.
+- **Suites take turns**, under a machine-wide `flock`
+  (`/tmp/lobole-ci-local-suite.lock`, the pattern of the GUI runner's GPU
+  lock), each at full `-j$(nproc)`, so no deadline-based test sees more load
+  than it would alone. A container's build and suite are two `docker run`s
+  for this reason. What overlaps is one lane's compile with another lane's
+  suite.
+
+Each lane writes its output to `.ci-local/lanes/<lane>.out`, printed whole
+at the end in lane order, then a table of every step's seconds and how long
+each suite queued for the lock. A failed build ends its own lane and no
+other; the run exits non-zero if any step failed. An interrupted run stops
+every lane's process group and the containers it named
+(`ci-local-<pid>-<lane>-…`). `--serial` runs the lanes one after another
+with their output live, in the order the script ran before it had lanes.
+
 ## C++ usage
 
 - C++23 (`CMAKE_CXX_STANDARD 23`); the default build type is Debug, which
