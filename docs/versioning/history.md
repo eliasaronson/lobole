@@ -164,7 +164,9 @@ For a small team that already uses git. `GitVault` adds `Remotes`,
   `OpenProject`, which re-stamps.
 
 The History panel's sharing section adds a remote and offers Fetch, Pull and
-Push with ahead/behind counts. Clone is RPC-only (`clone_project`);
+Push with ahead/behind counts, which (with the version list) the disk
+poller refreshes every second on its worker while they are drawn
+([README.md](README.md#the-poll-runs-off-the-frame)). Clone is RPC-only (`clone_project`);
 `ui::StartClone` exists but no GUI calls it.
 
 ## Seeing what changed

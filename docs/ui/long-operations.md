@@ -433,6 +433,10 @@ synchronous call parks on it.
   presentation, and with an immediate-mode UI a separate render thread would
   keep presenting the last frame of a window that ignores every click.
 - The perf HUD does not list the registry.
+- **The disk poll** (`ui/DiskPoller.h`) has its own worker: it is nothing
+  the user started or can cancel, and as a job it would flash a progress bar
+  every few seconds and keep the idle throttle awake while it ran
+  (docs/versioning/README.md#the-poll-runs-off-the-frame).
 
 If coarse cancel ever proves unacceptable for uninterruptible third-party
 code, the remedy is a separate process that can be killed, at the cost of

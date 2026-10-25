@@ -496,11 +496,12 @@ mistaken for an external write.
   naming a version, `save_project`. When the target is the opened path and
   the disk moved, it refuses. The GUI offers **Reload from disk**, **Save
   anyway** and Cancel; `save_project {force: true}` saves over it.
-- **The poll.** `PollDiskState` (`src/ui/HistoryPanel.cpp`) runs once a
-  frame from the top of the UI, not inside a panel (a panel behind another
-  tab does not run). It checks when the window regains focus and on a slow
-  timer, since a headless agent can write while the window keeps focus. With
-  git it first compares HEAD, one `git` call instead of a walk.
+- **The poll.** `ui::PumpDiskPoll` (`src/ui/DiskPoller.{h,cpp}`) runs once
+  a frame from the top of the UI, not inside a panel (a panel behind another
+  tab does not run). It asks when the window regains focus and every 3 s,
+  since a headless agent can write while the window keeps focus. The
+  question is answered on a worker ([below](#the-poll-runs-off-the-frame));
+  with git, HEAD is compared first, then the directory is walked.
 - **The notice.** A "Changed on disk" label in the main menu bar — text, not
   a button, since both actions discard something — and a banner with Reload
   at the top of the History panel, above its git checks so projects without
@@ -510,6 +511,66 @@ mistaken for an external write.
 
 Merging in-memory edits against a moved disk is not done: "reload or
 overwrite" is the choice.
+
+### The poll runs off the frame
+
+On Windows the OM615 engine (3 760 recipe files, a git project) drew at
+200+ fps and dropped to a few fps every three seconds: the poll walked the
+project and started `git` on the frame. Nothing about the question needs the
+frame — the banner must be right before the next save, and the save checks
+for itself — so the frame only asks and applies:
+
+- The frame builds a `DiskPollRequest` out of COPIES (the path, the stamp to
+  compare against, the HEAD it last saw, the History panel's cached log) and
+  hands it to `DiskPoller`, one worker thread, one poll in flight. A later
+  frame takes the answer and applies it (`ApplyDiskPollAnswer`), setting
+  `diskChanged`/`conflictsStale` as the synchronous poll did.
+- An answer to a question that went stale is DISCARDED, part by part: another
+  project open (path), the project saved, opened or reloaded since
+  (`diskGeneration`, moved by every `StampDiskState`), or the panel's cache
+  refreshed by an action meanwhile (`historyStamp`/`remotesStamp`). A
+  "changed" answer to a poll started before a save would be our own write.
+- HEAD is read from `.git/HEAD` and the ref it names (loose, else
+  `packed-refs`) by `GitVault::HeadHash` — no process. `StampDiskState`
+  records it the same way, so the two cannot disagree.
+- The History panel's log and "saved, not yet a version", and the Sharing
+  section's remotes and ahead/behind counts, ride the same worker on a 1 s
+  clock while they are drawn. The panel still fills its cache itself,
+  synchronously, when it is empty, for another project, or invalidated by an
+  action (naming, restoring, a push): the person just did something and is
+  looking for the result.
+- What stays synchronous guards a write, which already blocks: the save and
+  share paths' `ProjectChangedOnDisk` and the `project_changed_on_disk` RPC.
+- It is not a `BackgroundJob`: a poll is nothing the user started or can
+  cancel, and on the registry it would show a bar every few seconds and keep
+  the idle throttle awake ([long operations](../ui/long-operations.md#what-is-not-on-the-registry)).
+
+Everything the frame reached on a clock rather than from a user action, with
+its cost on the OM615 project on Linux (a 389-feature part for autosave;
+each figure an average over repeated calls, the range across a quiet and a
+loaded machine; Windows pays more for each process start and each stat):
+
+| what | when | cost | where it runs |
+|---|---|---|---|
+| HEAD, `git log -1` | every 3 s | 18-45 ms | gone: `HeadHash`, 0.01-0.03 ms, on the worker |
+| the stamp walk | every 3 s | 41 ms quiet, 190-400 ms loaded (3 760 files) | the worker |
+| History log (`git log -60`) and `git status` | every 1 s while the panel is drawn | 16-65 ms plus 34-74 ms | the worker |
+| the log's descriptions (`LogWithChanges`) | when the log moved | 74-174 ms | the worker |
+| remotes and ahead/behind | every 1 s while Sharing is open | 12-50 ms plus 12-42 ms | the worker |
+| History panel trust checks (`UntrustedReason`, `IsRepo`) | every frame while drawn | 0.01-0.03 ms (stats; the `git config` read is cached on the config's mtime) | the frame |
+| autosave (`ui::AutosaveProject`) | every 60 s, only with unsaved edits | 19 ms per changed document | the frame: once a minute, only while editing, and a worker would need a copy of each document |
+| settings flush | 1 s after a preference or window change | one small file | the frame |
+| conflict scan | after an open, a save, a merge or a detected change — an event, not a clock | one `git` plus a walk, about the stamp's | the frame |
+| Open Recent menu, recover-autosave modal | each frame while open | one small file, `exists` per entry; one folder listing | the frame |
+
+The instance registry is written only when the port opens and closes, and
+the crash-session marker only when the project path changes.
+
+Measured in the windowed app on that project (Xvfb, shadows and SSAO off),
+over 30 s with the model tab in front: the longest frame went from 651 ms
+to 113 ms, and the slowest UI phase in each second
+from 13-170 ms (a spike every three seconds) to 11-25 ms; with the History
+tab in front, 658 ms to 115 ms and 13-49 ms to 11-22 ms.
 
 ## Imported geometry inside a project
 
@@ -699,7 +760,9 @@ hidden `[.reader_corpus]` case over generator output under `scratch/`
 | `tests/lossy_open_smoke.py` | `open_project` reports an unlisted feature file in `dropped`; `save_project` over it is refused until `overwrite_lossy`, and a save elsewhere is not |
 | GUI `disk/a_lossy_open_asks_before_saving_over` | Save raises the choice; Cancel keeps the file, Overwrite anyway saves over it (Save a copy… is not clicked: it opens the system dialog) |
 | GUI `autosave/recovers_every_document` | a multi-document project autosaves each dirty document and recovers all of them |
-| GUI `disk/*` | the moved-project modal and the History banner (the menu-bar notice itself is not asserted: a disabled main-menu `MenuItem` does not resolve through the test engine; the flag behind it is) |
+| GUI `disk/*` | the moved-project modal and the History banner (the menu-bar notice itself is not asserted: a disabled main-menu `MenuItem` does not resolve through the test engine; the flag behind it is); `disk/the_poll_does_not_hold_the_frame` holds the walk 500 ms (`LOBOLE_TEST_STAMP_MS`) and asserts frames are drawn while it is held, then that an outside write still raises the banner |
+| `tests/test_disk_poller.cpp` `[disk]` | a held poll answer is applied while it still describes the project, and discarded after another project opened, after a save, or (its log part) after the panel refreshed |
+| `tests/test_gitvault.cpp` `HeadHash` | the file read agrees with `git rev-parse HEAD` on a loose ref, a packed ref, a detached HEAD and an unborn branch |
 
 ## Not done
 

@@ -402,6 +402,15 @@ by the same name drift apart without any test noticing:
   against an all-thread one byte for byte.
 - `CADShape` memoizes its bounding box on the shape, so it replaces its shape
   only through `SetShape` (gated).
+- **Nothing on a clock may touch the disk or start a process on the
+  frame.** A question the frame asks every few seconds — has the project
+  changed on disk, what does the history say — is asked on a worker with
+  copies of what it needs, and the answer is applied on a later frame, or
+  discarded if the project changed meanwhile (`ui/DiskPoller.h`,
+  docs/versioning/README.md#the-poll-runs-off-the-frame). On a 4 000-file
+  project the walk and the `git` calls were a dropped frame every three
+  seconds on Windows. A check that guards a write (the save's) stays
+  synchronous: the write blocks anyway.
 
 ## App modes
 
