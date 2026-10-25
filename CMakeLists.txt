@@ -214,8 +214,12 @@ else()
         message(STATUS "OpenCASCADE includes found at: ${OPENCASCADE_INCLUDE_DIR}")
         set(OPENCASCADE_FOUND TRUE)
     else()
-        message(WARNING "OpenCASCADE not found - CAD functionality will be limited")
-        set(OPENCASCADE_FOUND FALSE)
+        # Nothing builds without it, and a configure that carried on built a
+        # tree that failed far from here, on a missing TopoDS_Shape.hxx. In a
+        # tree configured before, this is usually a nix GC having taken the
+        # OpenCASCADE it found: tools/fix-stale-nix-cache.sh.
+        message(FATAL_ERROR "OpenCASCADE not found (OpenCASCADE_DIR=${OpenCASCADE_DIR}). "
+                "If this tree built before, a nix GC took it: run tools/fix-stale-nix-cache.sh")
     endif()
 endif()
 

@@ -18,7 +18,10 @@ nix shell. Both of the script's branches are driven:
   1. the toolchain moved (the cache names another compiler): the cache is
      thrown away and the tree configured fresh -- from the scratch source;
   2. a cache entry names a collected store path: it is unset and the tree
-     reconfigured -- from the scratch source, which cmake requires.
+     reconfigured -- from the scratch source, which cmake requires;
+  3. a package's config directory is cached as not found (a configure ran
+     after a GC took the package): no store path is named, and it was
+     called clean. It is unset and the tree reconfigured.
 
 Usage: fix_stale_nix_cache_smoke.py
 """
@@ -123,6 +126,15 @@ def main():
         expect(entry(build, "CMAKE_HOME_DIRECTORY") == src,
                f"reconfigured from {entry(build, 'CMAKE_HOME_DIRECTORY')}, "
                f"not its own source {src}")
+
+        # 3. A package cached as not found.
+        configure()
+        rewrite(build, "Gone_DIR", "Gone_DIR-NOTFOUND", "PATH")
+        code, said = run()
+        expect(code == 0 and "reconfigured" in said,
+               f"the not-found package was called clean ({code}): {said}")
+        expect(entry(build, "Gone_DIR") is None,
+               "the not-found package is still in the cache")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("fix_stale_nix_cache_smoke: ok")

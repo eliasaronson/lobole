@@ -125,7 +125,11 @@ What makes a worktree share main's cache:
   compiler and headers. `tools/fix-stale-nix-cache.sh` reconfigures it,
   from the source its cache names (`CMAKE_HOME_DIRECTORY`), so a
   worktree's tree reconfigured from main stays the worktree's
-  (`tests/fix_stale_nix_cache_smoke.py`).
+  (`tests/fix_stale_nix_cache_smoke.py`). A package's directory cached as
+  not found (a configure that ran after a GC took the package) counts as
+  stale too: no store path names it, and the script called such a tree
+  clean. A missing OpenCASCADE now stops the configure, where it used to
+  warn and carry on into a build that failed on a missing header.
 
 Measured on 22 cores, `designer` plus `designer_tests` in a fresh worktree:
 **2 min 8 s, 404 of 423 compiles from the cache.** It was 11 min 30 s before.
@@ -163,7 +167,12 @@ The numbers were measured on this 22-core, 30 GB machine.
   them, where one used to relink `designer_tests` mid-suite so a test failed
   once and passed on the rerun. What a suite launches does not inherit the
   lock, so an app a test left running cannot keep it. `build_lock_smoke`
-  proves a merge waits for a running suite.
+  proves a merge waits for a running suite. Under the lock, both refuse to
+  run when the app or a test binary is older than any file it is built from
+  (`tools/stale-binaries.sh`, `ninja -t inputs`): `femgpu_tests`, which
+  `tools/build.sh` did not build, sat twelve days behind main and would have
+  passed on old code had a nix GC not taken its libraries. `tools/build.sh`
+  builds it with the pair now.
 - **Trees share one ccache** ([precompiled headers](#precompiled-headers)): a
   fresh worktree builds in about 2 minutes, where it took 11.5.
 - **`tools/nix-run`** runs a command with what `nix-shell` adds to the

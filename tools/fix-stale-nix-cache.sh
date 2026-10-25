@@ -9,6 +9,7 @@
 #   ccache: No such file or directory        (every compile "fails to compile")
 #   undefined reference to `vterm_new'       (a half-cleared pkg-config module)
 #   libnglib.so: cannot open shared object   (a binary linked against a corpse)
+#   OpenCASCADE not found                    (a configure ran after the GC)
 #
 # This unsets exactly the cache entries that point at collected store paths and
 # reconfigures, so cmake re-finds them in the current store. Cheap and safe:
@@ -84,6 +85,14 @@ stale = [n for n, v in entries
          if any(not os.path.exists('/nix/store/' + m.split('/')[3]) or
                 moved(m.split('/')[3])
                 for m in pat.findall(v))]
+
+# A package's config directory cached as not found: a configure that ran
+# after a GC took the package (OpenCASCADE, then the whole tree failed on a
+# missing header). Nothing points at a store path any more, so the check
+# above calls it clean; cleared, cmake searches for it again. A healthy tree
+# has no such entry.
+stale += [n for n, v in entries
+          if n.endswith('_DIR') and v.endswith('-NOTFOUND') and n not in stale]
 
 # Take the whole pkg-config prefix with any stale entry of it (see header).
 prefixes = set()
