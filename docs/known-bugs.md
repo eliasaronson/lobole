@@ -31,15 +31,6 @@ the heading if it is not here yet.
 
 ## Modeling
 
-### Some add paths ignore the feature limit
-
-- **Symptom:** beginning a sketch, DXF/SVG import into a sketch, inserting a
-  template and `split_for_printing` add features past the 50 000 a part may
-  hold, so the app can save a part it will not open.
-- **Where:** each path that builds an `AddFeatureCommand` directly;
-  `kMaxPartFeatures` in `src/core/io/ReadContext.h`.
-- **Likely fix:** one check every add path calls before its first change.
-
 ### OpenCASCADE reported "premature end of file" in `headless_smoke`
 
 - **Symptom:** once, during the import-formats work, `headless_smoke`'s

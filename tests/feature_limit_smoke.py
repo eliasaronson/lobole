@@ -7,8 +7,8 @@ cannot open.
 
 A file listing more is refused on load, naming the count and the limit
 (docs/versioning/README.md#what-a-load-refuses), so `add_feature` refuses
-the feature that would take a part past it -- in a batch too -- and the
-refused call changes nothing
+the feature that would take a part past it -- in a batch too, and an
+import as well -- and the refused call changes nothing
 (docs/scripting/rpc.md#a-refused-call-changes-nothing). A part AT the limit
 saves and opens again.
 
@@ -26,6 +26,8 @@ from lobole.errors import Refused  # noqa: E402
 from smoke_app import launch  # noqa: E402
 
 LIMIT = 50000
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "fixtures", "import")
 PLANE = {"type": "DatumPlane", "name": "P", "kind": "offset",
          "base_plane": "xy", "offset": 1}
 
@@ -100,6 +102,14 @@ def main():
                                              {"feature": PLANE}))
             unchanged("a batch", refused(d, "batch", {"calls": [
                 {"method": "add_feature", "params": {"feature": PLANE}}]}))
+            # The paths that built their feature without asking: a DXF or
+            # SVG imported as a new sketch, and a model imported into the
+            # part. Every one asks readctx::CheckFeatureRoom first
+            # (tests/test_conventions.cpp holds them to it).
+            unchanged("import_sketch", refused(d, "import_sketch", {
+                "path": os.path.join(FIXTURES, "plate-ezdxf.dxf")}))
+            unchanged("import_step", refused(d, "import_step", {
+                "path": os.path.join(FIXTURES, "box-lobole.step")}))
 
             # At the limit, the part opens again.
             d.request("open_project", {"path": at}, timeout=300)

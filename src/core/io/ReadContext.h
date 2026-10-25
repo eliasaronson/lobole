@@ -24,12 +24,15 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+class Document;
 
 namespace readctx {
 
@@ -103,6 +106,13 @@ std::string GroupedCount(size_t n);
 void RequirePartFeatureCount(size_t listed, const std::string& rel = {});
 // Why `adding` features cannot go into a part holding `have`, or "".
 std::string PartFeatureLimitRefusal(size_t have, size_t adding);
+// Why `adding` more features do not fit in `doc`, or "": THE check every
+// path that adds a feature to a part calls before its first change, so the
+// app never writes a part it will not open. 0 asks whether what the part
+// holds now fits (a pending tool's features are in it already).
+// tests/test_conventions.cpp fails an AddFeatureCommand built in a function
+// that does not call it.
+[[nodiscard]] std::string CheckFeatureRoom(const Document& doc, size_t adding);
 
 // Refuses a key of `j` that is not in `accepted`, naming it and every key
 // that is accepted, and an `j` that is not an object at all. `what` names

@@ -4,6 +4,7 @@
 #include "core/io/ReadContext.h"
 
 #include "common/Logger.h"
+#include "core/Document.h"
 
 #include <algorithm>
 #include <cmath>
@@ -71,6 +72,10 @@ std::string PartFeatureLimitRefusal(size_t have, size_t adding) {
     return {};
   return "a part holds at most " + GroupedCount(kMaxPartFeatures) +
          " features, and this one has " + GroupedCount(have);
+}
+
+std::string CheckFeatureRoom(const Document& doc, size_t adding) {
+  return PartFeatureLimitRefusal(doc.FeatureCount(), adding);
 }
 
 namespace {

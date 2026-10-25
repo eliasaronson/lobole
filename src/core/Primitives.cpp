@@ -10,6 +10,7 @@
 #include "core/features/FrameFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/ReadContext.h" // CheckFeatureRoom
 #include "core/io/Serialization.h"
 
 #include <algorithm>
@@ -608,6 +609,9 @@ SymbolTable Symbols(const Document& doc) {
 Added Add(Document& doc, CommandStack& commands, Spec spec,
           double fallbackSize) {
   const std::string type = KindName(spec.kind);
+  // The sketch and the solid.
+  if (const std::string why = readctx::CheckFeatureRoom(doc, 2); !why.empty())
+    throw std::runtime_error(type + ": " + why);
   for (uint64_t id : {spec.solidId, spec.sketchId})
     if (id != 0 && doc.FindFeatureById(id) != nullptr)
       throw std::runtime_error(type + ": ids: feature " + std::to_string(id) +

@@ -104,9 +104,7 @@ namespace {
 std::string PastFeatureLimit(const AppState& state) {
   if (!state.document)
     return {};
-  const size_t pending = state.pendingCompanionId != 0 ? 2 : 1;
-  const size_t n = state.document->FeatureCount();
-  return readctx::PartFeatureLimitRefusal(n - std::min(n, pending), pending);
+  return readctx::CheckFeatureRoom(*state.document, 0);
 }
 
 // A flat pattern REPLACES the folded shape rather than adding a body, so it is
@@ -162,7 +160,8 @@ void AcceptPendingFeature(AppState& state) {
   // A tool whose inputs are not there yet must not commit. The UI disables
   // Accept for the same reason (the slot gate), but keyboard paths, scripts
   // and future callers all land here.
-  if (!f->WhyIncomplete().empty() || !PastFeatureLimit(state).empty())
+  if (!f->WhyIncomplete().empty() ||
+      !readctx::CheckFeatureRoom(*state.document, 0).empty())
     return;
   // Nor one the bodies it acts on refuse (Feature::WhyRefusedOn), which
   // add_feature refuses with the same words: the GUI and the RPC refuse

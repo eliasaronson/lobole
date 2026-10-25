@@ -132,6 +132,20 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ui::CancelPendingFeature(*s_App);
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), readctx::kMaxPartFeatures);
+
+    // Nor does a sketch begin past it: it committed its feature without
+    // asking. Refused where the plane pick is answered, which stays armed
+    // and says why.
+    IM_CHECK_EQ(ui::BeginSketchOnPlane(*s_App, ui::DefaultPlane(0), "S"),
+                (uint64_t)0);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), readctx::kMaxPartFeatures);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undo);
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+    IM_CHECK(s_App->sketchEdit.pickingPlane);
+    IM_CHECK(s_App->sketchEdit.actionMsg.find("at most 50 000 features") !=
+             std::string::npos);
+    s_App->sketchEdit = ui::SketchEditState{};
   };
 
   t = IM_REGISTER_TEST(engine, "document", "create_sphere_and_cylinder");

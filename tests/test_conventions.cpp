@@ -2356,3 +2356,131 @@ TEST_CASE("every background job kind is in background_jobs' row",
   INFO("background_jobs' row does not name these job kinds:\n" << missing);
   CHECK(missing.empty());
 }
+
+namespace {
+// `code` with every string and character literal's contents blanked (raw
+// strings too), so a brace inside one -- "{feature_id}" -- does not count.
+std::string WithoutLiterals(const std::string& code) {
+  std::string out = code;
+  for (size_t i = 0; i < out.size(); ++i) {
+    if (out[i] == 'R' && i + 1 < out.size() && out[i + 1] == '"' &&
+        (i == 0 || !(std::isalnum(static_cast<unsigned char>(out[i - 1])) ||
+                     out[i - 1] == '_'))) {
+      const size_t open = out.find('(', i + 2);
+      if (open == std::string::npos)
+        break;
+      const std::string close = ")" + out.substr(i + 2, open - (i + 2)) + "\"";
+      const size_t end = out.find(close, open);
+      if (end == std::string::npos)
+        break;
+      for (size_t k = open + 1; k < end; ++k)
+        if (out[k] != '\n')
+          out[k] = ' ';
+      i = end + close.size() - 1;
+      continue;
+    }
+    if (out[i] != '"' && out[i] != '\'')
+      continue;
+    // A digit separator (1'000) is not a character literal.
+    if (out[i] == '\'' && i > 0 &&
+        std::isxdigit(static_cast<unsigned char>(out[i - 1])))
+      continue;
+    const char quote = out[i];
+    size_t k = i + 1;
+    for (; k < out.size() && out[k] != quote && out[k] != '\n'; ++k) {
+      if (out[k] == '\\' && k + 1 < out.size()) {
+        out[k] = ' ';
+        ++k;
+      }
+      out[k] = ' ';
+    }
+    i = k;
+  }
+  return out;
+}
+
+// The body of the outermost FUNCTION around `pos` in `code` (comments and
+// literals already blanked): the outermost enclosing brace that does not
+// open a namespace, class, struct, union or enum. A lambda inside a function
+// is part of the function. Empty at namespace or class scope.
+std::string EnclosingFunctionBody(const std::string& code, size_t pos) {
+  static const std::regex scope(R"(\b(namespace|class|struct|union|enum)\b)");
+  std::vector<size_t> open;
+  for (size_t i = 0; i < pos && i < code.size(); ++i) {
+    if (code[i] == '{')
+      open.push_back(i);
+    else if (code[i] == '}' && !open.empty())
+      open.pop_back();
+  }
+  for (const size_t brace : open) {
+    const size_t headStart = code.find_last_of(";{}", brace - 1);
+    const std::string head = code.substr(
+        headStart == std::string::npos ? 0 : headStart + 1,
+        brace - (headStart == std::string::npos ? 0 : headStart + 1));
+    if (std::regex_search(head, scope) ||
+        head.find("extern") != std::string::npos)
+      continue;
+    return BlockAfter(code, brace);
+  }
+  return {};
+}
+} // namespace
+
+TEST_CASE("every path that adds a feature checks the feature limit first",
+          "[convention]") {
+  // A part holds at most readctx::kMaxPartFeatures, and a file listing more
+  // is refused on load. add_feature, batch, derive_occurrence and the tool
+  // window refused past it, but beginning a sketch, importing a DXF into a
+  // sketch, inserting a template and split_for_printing built their
+  // AddFeatureCommand without asking, so the app could save a part it would
+  // not open (docs/versioning/README.md#what-a-load-refuses). Every
+  // function that builds one calls readctx::CheckFeatureRoom.
+  const std::string sample =
+      "namespace a { struct S { int x; };\n"
+      "void f() { auto l = [&] { g(\"{\"); h<AddFeatureCommand>(1); }; }\n"
+      "void k() { CheckFeatureRoom(d, 1); }\n}";
+  const std::string clean = WithoutLiterals(CodeOnly(sample));
+  const std::string body =
+      EnclosingFunctionBody(clean, clean.find("AddFeatureCommand"));
+  REQUIRE(body.rfind("{ auto l", 0) == 0); // f's body, lambda and all
+  CHECK(body.find("CheckFeatureRoom(") == std::string::npos);
+  CHECK(EnclosingFunctionBody(clean, clean.find("CheckFeatureRoom"))
+            .find("CheckFeatureRoom(") != std::string::npos);
+
+  static const std::regex builds(
+      R"(\bAddFeatureCommand\s*>\s*\(|\bnew\s+AddFeatureCommand\b|)"
+      R"(\bAddFeatureCommand\s+[A-Za-z_]\w*\s*[({])");
+  const std::set<std::string> exempt = {"src/core/Command.h",
+                                        "src/core/Command.cpp"};
+  std::vector<std::string> offenders;
+  size_t sites = 0;
+  for (const std::string& ext : {".cpp", ".h"})
+    for (const SourceFile& src : SourcesUnder("src", ext)) {
+      const std::string rel = Relative(src.path);
+      // The GUI suite builds its fixtures; it is not a path a person takes.
+      if (exempt.contains(rel) || rel.rfind("src/app/guitests/", 0) == 0)
+        continue;
+      const std::string code = WithoutLiterals(CodeOnly(src.text));
+      for (std::sregex_iterator it(code.begin(), code.end(), builds), end;
+           it != end; ++it) {
+        ++sites;
+        const size_t at = static_cast<size_t>(it->position());
+        if (EnclosingFunctionBody(code, at).find("CheckFeatureRoom(") ==
+            std::string::npos)
+          offenders.push_back(
+              rel + ":" +
+              std::to_string(std::count(code.begin(), code.begin() + at, '\n') +
+                             1));
+      }
+    }
+  CHECK(sites > 5); // the scan still finds the paths it guards
+  INFO("call readctx::CheckFeatureRoom(doc, n) (core/io/ReadContext.h) in "
+       "the function, before its first change:\n" +
+       [&] {
+         std::string s;
+         for (const std::string& o : offenders)
+           s += "  " + o + "\n";
+         return s;
+       }());
+  CHECK(offenders.empty());
+}

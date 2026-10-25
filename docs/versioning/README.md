@@ -79,11 +79,15 @@ The loader refuses, naming it:
   a sanity bound, not a default: the largest real part here holds a few
   hundred, and one near the limit would take far too long to rebuild to
   be used. An assembly's occurrences are not limited. So that the app
-  never writes a part it cannot open, `add_feature` (a `batch` too, and
-  `derive_occurrence`) refuses the feature that would take a part past it,
-  naming the limit, and the tool window shows the same refusal and keeps
-  Accept disabled. If real work ever reaches it, it is raised in that one
-  place;
+  never writes a part it cannot open, every path that adds a feature asks
+  `readctx::CheckFeatureRoom(doc, n)` before its first change and refuses,
+  naming the limit: `add_feature` (a `batch` too), `derive_occurrence`,
+  `import_sketch` and `import_step`, a template placed or unlinked,
+  `split_for_printing`, and in the GUI a sketch begun (the plane pick stays
+  armed and says why) and the tool window (Accept disabled).
+  `tests/test_conventions.cpp` fails an `AddFeatureCommand` built in a
+  function that does not call it. If real work ever reaches the limit, it
+  is raised in that one place;
 - a key no reader of that object knows, naming it and every key that is
   accepted (`readctx::RefuseUnknownKeys`, in every `…FromJson`, in the
   envelopes and in `project.json`). A newer build's keys come with a newer
@@ -690,7 +694,7 @@ hidden `[.reader_corpus]` case over generator output under `scratch/`
 | `tests/headless_smoke.py` | autosave across a SIGKILL, the disk guard end to end with `force` and Save As |
 | `tests/test_reader_fuzz.cpp` `[reader_fuzz]` | the mutation library's own test, the harness's planted readers, and the sweep ([reader fuzzing](#reader-fuzzing)) |
 | `tests/test_reader_cases.cpp` | every regression in `tests/reader_cases/` reads as its `expect.json` says; a part past `kMaxPartFeatures` is refused before it is built, in seconds and under 100 MB, in either form |
-| `tests/feature_limit_smoke.py` | `add_feature` (and a batch) past `kMaxPartFeatures` is refused naming the limit, changing nothing; a part at the limit saves and opens |
+| `tests/feature_limit_smoke.py` | `add_feature` (and a batch), `import_sketch` and `import_step` past `kMaxPartFeatures` are refused naming the limit, changing nothing; a part at the limit saves and opens |
 | GUI `document/accept_refused_past_the_feature_limit` | the tool window's Accept is disabled past the limit, and the keyboard's accept does nothing |
 | `tests/lossy_open_smoke.py` | `open_project` reports an unlisted feature file in `dropped`; `save_project` over it is refused until `overwrite_lossy`, and a save elsewhere is not |
 | GUI `disk/a_lossy_open_asks_before_saving_over` | Save raises the choice; Cancel keeps the file, Overwrite anyway saves over it (Save a copy… is not clicked: it opens the system dialog) |

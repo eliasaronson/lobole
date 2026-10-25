@@ -1000,6 +1000,10 @@ json SplitForPrinting(ui::AppState& state, Document& active,
   const std::vector<printsplit::Piece> planned = plan->pieces;
   const uint64_t wasActive = state.parts[state.activePart].id;
   const auto add = [&](json fj) {
+    // A fresh tab has room; asked all the same, as every add path asks.
+    if (const std::string why = readctx::CheckFeatureRoom(*state.document, 1);
+        !why.empty())
+      throw std::runtime_error("split_for_printing: " + why);
     auto feature = FeatureFromJsonNamed(fj);
     if (auto* d = dynamic_cast<DerivedFeature*>(feature.get())) {
       ui::DerivedSource from;
@@ -1310,8 +1314,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     const bool twoFeatures =
         fj.is_object() &&
         primitive::KindFromName(fj.value("type", std::string{})).has_value();
-    if (const std::string why = readctx::PartFeatureLimitRefusal(
-            doc->FeatureCount(), twoFeatures ? 2 : 1);
+    if (const std::string why =
+            readctx::CheckFeatureRoom(*doc, twoFeatures ? 2 : 1);
         !why.empty())
       throw std::runtime_error(why);
     if (fj.is_object() &&
@@ -1481,8 +1485,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                (neighbours.empty()
                                     ? " (there are none)"
                                     : "; the neighbours are: " + neighbours));
-    if (const std::string why =
-            readctx::PartFeatureLimitRefusal(doc->FeatureCount(), 1);
+    if (const std::string why = readctx::CheckFeatureRoom(*doc, 1);
         !why.empty())
       throw std::runtime_error(why);
     auto d = std::make_unique<DerivedFeature>(

@@ -5,6 +5,7 @@
 
 #include "core/Command.h"
 #include "core/Primitives.h"
+#include "core/io/ReadContext.h" // CheckFeatureRoom
 #include "core/io/Serialization.h"
 #include "ui/AppActionsInternal.h" // SlotDoc
 #include "ui/PreviewFeature.h"
@@ -262,6 +263,8 @@ MakeTemplateInstance(AppState& state, const std::string& name,
 size_t PlaceTemplateInstance(AppState& state,
                              std::unique_ptr<TemplateFeature> instance) {
   Document& doc = *state.document;
+  if (const std::string why = readctx::CheckFeatureRoom(doc, 1); !why.empty())
+    throw std::runtime_error(why);
   const size_t depth = state.commands->UndoDepth();
   state.commands->Execute(
       std::make_unique<AddFeatureCommand>(std::move(instance)), doc);
@@ -342,6 +345,11 @@ std::string UnlinkTemplate(AppState& state, uint64_t featureId,
   std::vector<std::unique_ptr<Feature>> plain = tf->Unlinked(&why);
   if (plain.empty())
     return Quoted(tf->GetName()) + ": " + why;
+  // The instance's features take its one place in the list, and more.
+  if (const std::string why =
+          readctx::CheckFeatureRoom(*state.document, plain.size() - 1);
+      !why.empty())
+    return why;
   std::vector<nlohmann::json> features;
   for (const auto& f : plain) {
     features.push_back(DocumentIO::FeatureToJson(*f));

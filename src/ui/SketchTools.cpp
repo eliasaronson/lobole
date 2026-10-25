@@ -10,6 +10,7 @@
 #include "core/Expression.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/ReadContext.h" // CheckFeatureRoom
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchProfile.h"
@@ -458,6 +459,14 @@ SketchFeature* ResolveActiveSketch(AppState& state, size_t* outIndex) {
 static uint64_t BeginSketch(AppState& state, std::unique_ptr<SketchFeature> sk,
                             const SketchPlane& plane, const std::string& name,
                             SketchPurpose purpose) {
+  // Refused where the pick is answered: the pick stays armed and its prompt
+  // says why (docs/ui/tool-sessions.md#defaults-and-refusals).
+  if (const std::string why = readctx::CheckFeatureRoom(*state.document, 1);
+      !why.empty()) {
+    state.sketchEdit.pickingPlane = true;
+    state.sketchEdit.actionMsg = "Sketch: " + why;
+    return 0;
+  }
   state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(sk)),
                           *state.document);
   const size_t index = state.document->FeatureCount() - 1;

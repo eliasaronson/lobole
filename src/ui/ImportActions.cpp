@@ -44,6 +44,7 @@
 #include "core/io/ImportDxf.h"
 #include "core/io/ImportSvg.h"
 #include "core/io/ProjectStamp.h"
+#include "core/io/ReadContext.h" // CheckFeatureRoom
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "core/io/SketchImport.h"
@@ -228,6 +229,12 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
     return false;
   }
 
+  if (const std::string why = readctx::CheckFeatureRoom(*state.document, 1);
+      !why.empty()) {
+    if (error)
+      *error = why;
+    return false;
+  }
   const size_t before = state.document->GetBodies().size();
   const std::string name = std::filesystem::path(filename).stem().string();
   auto feature = std::make_unique<ImportFeature>(name, filename);
@@ -379,6 +386,9 @@ SketchImportResult ImportSketch(AppState& state,
     if (!resolved)
       throw std::runtime_error("plane: " + resolved.error());
     placement = *resolved;
+    // A new sketch: the one feature this adds.
+    if (const std::string why = readctx::CheckFeatureRoom(doc, 1); !why.empty())
+      throw std::runtime_error(why);
   }
 
   // Centred on the sketch origin unless the file's coordinates are wanted.
