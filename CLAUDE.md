@@ -31,7 +31,7 @@ Bare `ninja`/`cmake` fail outside the nix env (missing glm/vulkan/OCC headers).
 Always wrap:
 
 ```
-tools/build.sh            # = ninja -j$(tools/build-jobs) designer designer_tests, in nix
+tools/build.sh            # = ninja -j$(tools/build-jobs) designer designer_tests femgpu_tests, in nix
 ```
 
 That pair is the inner loop. **`-j` comes from free memory, not cores**
@@ -41,9 +41,9 @@ also holds `build/`'s lock exclusively, as `tools/merge-branch.sh` does before
 it changes the tree: a merge that lands mid-build links objects that saw two
 versions of a header. A suite holds it SHARED — **run ctest only through
 `tools/ctest`** (every argument is ctest's), or a merge can relink
-`designer_tests` mid-run and a test fails once and passes on the rerun. A
-*fresh* build dir needs plain `ninja` — the pair skips `femgpu_tests`, and
-ctest then fails on a missing executable instead of running the suite.
+`designer_tests` mid-run and a test fails once and passes on the rerun. Both
+suites refuse a binary older than a file it is built from
+(`tools/stale-binaries.sh`): build first.
 
 ccache is shared machine-wide, so rebuilds are fast. Do NOT nest a `nix-shell`
 inside another (temp-dir failures) — the tool scripts already self-manage nix.

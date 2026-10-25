@@ -5,6 +5,7 @@
 # Build, holding the build directory's lock: the one way to build here.
 #
 #   tools/build.sh                       # build/: designer designer_tests
+#                                        #   femgpu_tests
 #   tools/build.sh build designer        # one target
 #   tools/build.sh .ci-local/build-nocam # a whole other tree
 #
@@ -24,6 +25,10 @@ targets=("$@")
 [ -f "$dir/build.ninja" ] || { echo "build: $dir has no build.ninja (configure it first)" >&2; exit 2; }
 if [ ${#targets[@]} -eq 0 ] && [ "$(basename "$dir")" = build ]; then
   targets=(designer designer_tests)
+  # The GPU solver's tests are a binary of their own; left out, it went on
+  # testing the code it was last linked from (tools/stale-binaries.sh).
+  grep -q '^build femgpu_tests: phony' "$dir/build.ninja" &&
+    targets+=(femgpu_tests)
 fi
 jobs="$("$root/tools/build-jobs")"
 log="$(mktemp)"

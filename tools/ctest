@@ -11,6 +11,9 @@
 # (tools/build-lock.sh). It runs in shell.nix's environment (tools/nix-run)
 # when it is not already in one.
 #
+# It refuses to run when the app or a test binary is older than a file it is
+# built from (tools/stale-binaries.sh): build first.
+#
 # --test-dir is resolved here (against the cwd, then the repo root) and
 # handed to ctest as that ABSOLUTE path in place of the one given: ctest
 # runs from inside the build directory, where a relative --test-dir would
@@ -36,6 +39,19 @@ dir="$(cd "$dir" && pwd)"
 # shellcheck source=build-lock.sh
 . "$root/tools/build-lock.sh"
 build_lock_shared "$dir" 9
+# A binary behind its source would test the code it was linked from, not this
+# tree's (tools/stale-binaries.sh). Asked under the lock, so a build that is
+# running finishes first.
+if [ -n "${IN_NIX_SHELL:-}" ] || ! command -v nix-instantiate >/dev/null; then
+  behind="$("$root/tools/stale-binaries.sh" "$dir")" || true
+else
+  behind="$("$root/tools/nix-run" "$(printf '%q %q' "$root/tools/stale-binaries.sh" "$dir")")" || true
+fi
+if [ -n "$behind" ]; then
+  echo "$behind" | sed 's/^/ctest: /' >&2
+  echo "ctest: build first: tools/build.sh $(printf '%q' "$dir")" >&2
+  exit 2
+fi
 quoted=" --test-dir $(printf '%q' "$dir")"
 for a in ${rest[@]+"${rest[@]}"}; do quoted+=" $(printf '%q' "$a")"; done
 # The fd is closed for the run: a process a test leaves behind must not keep

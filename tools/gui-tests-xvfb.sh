@@ -73,6 +73,14 @@ fi
 # shellcheck source=build-lock.sh
 . "$ROOT/tools/build-lock.sh"
 build_lock_shared "$ROOT/build" 8
+# A binary behind its source tests the code it was linked from
+# (tools/stale-binaries.sh), as tools/ctest refuses too.
+behind="$("$ROOT/tools/nix-run" "$(printf '%q %q' "$ROOT/tools/stale-binaries.sh" "$ROOT/build")")" || true
+if [ -n "$behind" ]; then
+  echo "$behind" | sed 's/^/gui-tests: /' >&2
+  echo "gui-tests: build first: tools/build.sh" >&2
+  exit 2
+fi
 
 if command -v xvfb-run >/dev/null; then
   XVFB_RUN=xvfb-run
