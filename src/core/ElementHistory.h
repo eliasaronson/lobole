@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Message_ProgressRange.hxx>
 #include <TopTools_ListOfShape.hxx>
 
 #include "cad/CADKernel.h"
@@ -55,12 +56,16 @@ using RefineResult = std::function<TopoDS_Shape(const TopoDS_Shape& result,
 // `fuzzy` > 0 runs it with OCC's fuzzy option at that tolerance and
 // NON-destructively (cad::BuildNonDestructive): the one retry a refused body
 // boolean gets (CheckedBooleanNamed, core/BodyMode.h). `refine` (optional)
-// cleans the result up before it is named (RefineResult).
+// cleans the result up before it is named (RefineResult). `progress`
+// (optional) is the range the kernel reports to and asks whether to stop:
+// a direct edit's deadline (directedit::MakeDeadline) ends a boolean that
+// outruns it, which then fails as one that did not complete.
 CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
                       ElementMap& out, std::string* error = nullptr,
-                      double fuzzy = 0.0, const RefineResult& refine = {});
+                      double fuzzy = 0.0, const RefineResult& refine = {},
+                      const Message_ProgressRange& progress = {});
 
 // Names for `result` from a history the caller built itself, for a chain of
 // operations that stands for one boolean of `target` and `tool` (the worm

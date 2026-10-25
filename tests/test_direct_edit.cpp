@@ -11,6 +11,7 @@
 #include "TestPaths.h"
 #include "core/DirectEdit.h"
 #include "core/Document.h"
+#include "core/ElementHistory.h"
 #include "core/ElementOrigin.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
@@ -30,6 +31,7 @@
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepLib.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Solid.hxx>
@@ -142,6 +144,35 @@ TEST_CASE("A direct edit's deadline counts the builder thread's CPU, not the "
             std::chrono::seconds(30));
   }
   CHECK(directedit::Expired(busy));
+}
+
+// Move Face separates the feature it moves with booleans of two nearly
+// identical solids, which on a chamfered, drilled body (random design 33's
+// bore) ran past a minute. Those booleans take the edit's deadline: one that
+// has run out stops the kernel, and the boolean fails as incomplete.
+TEST_CASE("A named boolean stops when its deadline has run out",
+          "[direct_edit]") {
+  const Handle(Message_ProgressIndicator) spent = directedit::MakeDeadline(0.0);
+  const Message_ProgressRange burn = spent->Start();
+  volatile double sink = 0.0;
+  while (!burn.UserBreak())
+    for (int i = 0; i < 1000; ++i)
+      sink = sink + std::sqrt(static_cast<double>(i));
+  REQUIRE(directedit::Expired(spent));
+
+  const CADShape a(BRepPrimAPI_MakeBox(10, 10, 10).Shape());
+  const CADShape b(BRepPrimAPI_MakeBox(gp_Pnt(5, 5, 5), 10, 10, 10).Shape());
+  ElementMap out;
+  std::string err;
+  const CADShape cut = topo::BooleanNamed(BooleanOp::Subtract, a, {}, b, {}, 7,
+                                          out, &err, 0.0, {}, spent->Start());
+  CHECK_FALSE(cut.IsValid());
+  CHECK_FALSE(err.empty());
+
+  // Without a deadline the same boolean builds.
+  const CADShape free =
+      topo::BooleanNamed(BooleanOp::Subtract, a, {}, b, {}, 7, out, &err);
+  CHECK(free.IsValid());
 }
 
 TEST_CASE("Delete Face fills a through bore", "[direct_edit]") {

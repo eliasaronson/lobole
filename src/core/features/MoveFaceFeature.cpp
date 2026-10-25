@@ -10,6 +10,7 @@
 #include "core/features/DeleteFaceFeature.h"
 
 #include <BRepTools_History.hxx>
+#include <Message_ProgressScope.hxx>
 #include <TopLoc_Location.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Trsf.hxx>
@@ -158,13 +159,37 @@ bool MoveFaceFeature::Execute(RegenContext& ctx) {
   const double vol = std::max(1.0, std::abs(body.shape.Volume()));
   const double tol = 1e-9 * vol;
 
+  // Every boolean below runs under one deadline: separating the feature
+  // from a body is a boolean of two nearly identical solids, every face
+  // coincident with one of the other's, and on chamfered, drilled bodies the
+  // kernel spends minutes intersecting them (a hole's bore on random design
+  // 33 took 68 s just to separate).
+  const double budget = directedit::BuilderBudgetS(picked.names.size());
+  const Handle(Message_ProgressIndicator) deadline =
+      directedit::MakeDeadline(budget);
+  Message_ProgressScope steps(deadline->Start(), "Move Face", 7);
+  auto gaveUp = [&] {
+    return "Move Face of " + what + " gave up after " +
+           std::to_string(int(budget)) +
+           " s: the body's faces are too costly to intersect with the "
+           "feature's";
+  };
+
   // 2. The feature's material.
   ElementMap mapCut, mapAdd;
   std::string err;
-  const CADShape cut = topo::BooleanNamed(BooleanOp::Subtract, H, mapH, B,
-                                          body.elementMap, tag, mapCut, &err);
-  const CADShape add = topo::BooleanNamed(
-      BooleanOp::Subtract, B, body.elementMap, H, mapH, tag, mapAdd, &err);
+  const CADShape cut =
+      topo::BooleanNamed(BooleanOp::Subtract, H, mapH, B, body.elementMap, tag,
+                         mapCut, &err, 0.0, {}, steps.Next());
+  const CADShape add =
+      directedit::Expired(deadline)
+          ? CADShape()
+          : topo::BooleanNamed(BooleanOp::Subtract, B, body.elementMap, H, mapH,
+                               tag, mapAdd, &err, 0.0, {}, steps.Next());
+  if (directedit::Expired(deadline)) {
+    SetError(gaveUp());
+    return false;
+  }
   if (!cut.IsValid() && !add.IsValid()) {
     SetError("Move Face could not separate " + what +
              " from the body: " + (err.empty() ? "the boolean failed" : err));
@@ -208,8 +233,13 @@ bool MoveFaceFeature::Execute(RegenContext& ctx) {
   // The moved hole must stay inside the body, the moved boss outside it.
   if (hasCut) {
     ElementMap mapOut;
-    const CADShape out = topo::BooleanNamed(BooleanOp::Subtract, tCut, mapCut,
-                                            H, mapH, tag, mapOut);
+    const CADShape out =
+        topo::BooleanNamed(BooleanOp::Subtract, tCut, mapCut, H, mapH, tag,
+                           mapOut, nullptr, 0.0, {}, steps.Next());
+    if (directedit::Expired(deadline)) {
+      SetError(gaveUp());
+      return false;
+    }
     if (out.IsValid() && out.Volume() > tol) {
       const auto crossed = HostFaces(mapOut, mapH, mapCut, tag);
       SetError("moving " + what + " " + MoveWords(translate, rotateDeg) +
@@ -221,8 +251,13 @@ bool MoveFaceFeature::Execute(RegenContext& ctx) {
   }
   if (hasAdd) {
     ElementMap mapIn;
-    const CADShape in = topo::BooleanNamed(BooleanOp::Intersect, tAdd, mapAdd,
-                                           H, mapH, tag, mapIn);
+    const CADShape in =
+        topo::BooleanNamed(BooleanOp::Intersect, tAdd, mapAdd, H, mapH, tag,
+                           mapIn, nullptr, 0.0, {}, steps.Next());
+    if (directedit::Expired(deadline)) {
+      SetError(gaveUp());
+      return false;
+    }
     if (in.IsValid() && in.Volume() > tol) {
       const auto crossed = HostFaces(mapIn, mapH, mapAdd, tag);
       SetError("moving " + what + " " + MoveWords(translate, rotateDeg) +
@@ -240,14 +275,18 @@ bool MoveFaceFeature::Execute(RegenContext& ctx) {
   if (hasCut) {
     ElementMap next;
     result = topo::BooleanNamed(BooleanOp::Subtract, result, map, tCut, mapCut,
-                                tag, next, &err);
+                                tag, next, &err, 0.0, {}, steps.Next());
     map = std::move(next);
   }
   if (hasAdd && result.IsValid()) {
     ElementMap next;
     result = topo::BooleanNamed(BooleanOp::Union, result, map, tAdd, mapAdd,
-                                tag, next, &err);
+                                tag, next, &err, 0.0, {}, steps.Next());
     map = std::move(next);
+  }
+  if (directedit::Expired(deadline)) {
+    SetError(gaveUp());
+    return false;
   }
   if (!result.IsValid()) {
     SetError("Move Face of " + what +

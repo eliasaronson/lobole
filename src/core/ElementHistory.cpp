@@ -493,7 +493,8 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
                       ElementMap& out, std::string* error, double fuzzy,
-                      const RefineResult& refine) {
+                      const RefineResult& refine,
+                      const Message_ProgressRange& progress) {
   out = {};
   if (!target.IsValid() || !tool.IsValid()) {
     if (error)
@@ -542,13 +543,13 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
     } else {
       switch (op) {
       case BooleanOp::Union:
-        mk = std::make_unique<BRepAlgoAPI_Fuse>(targetIn, toolIn);
+        mk = std::make_unique<BRepAlgoAPI_Fuse>(targetIn, toolIn, progress);
         break;
       case BooleanOp::Subtract:
-        mk = std::make_unique<BRepAlgoAPI_Cut>(targetIn, toolIn);
+        mk = std::make_unique<BRepAlgoAPI_Cut>(targetIn, toolIn, progress);
         break;
       case BooleanOp::Intersect:
-        mk = std::make_unique<BRepAlgoAPI_Common>(targetIn, toolIn);
+        mk = std::make_unique<BRepAlgoAPI_Common>(targetIn, toolIn, progress);
         break;
       }
     }

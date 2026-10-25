@@ -555,14 +555,19 @@ face. Offset and Replace Face refuse the same way
 (`directedit::FreeformNeighbour`); pick the freeform faces with it, or edit
 the feature that made them.
 
-Every direct-edit builder (Defeaturing, the offset builder, MakerVolume) also
+Every direct-edit builder (Defeaturing, the offset builder, MakerVolume,
+and Move Face's booleans, through `topo::BooleanNamed`'s progress range) also
 runs under a deadline, `directedit::BuilderBudgetS` (30 s and 0.5 s a
 face), through a `Message_ProgressIndicator` whose `UserBreak` turns true
 once it has passed: past it the edit is refused ("gave up after 30 s …").
 The builders check it only at their progress points, so a call can run
 past the budget before it stops. It is a backstop against a frozen app, far
 past any edit that builds, not a timer whose answer could depend on the
-machine's load.
+machine's load. Move Face separates the feature it moves with booleans of the
+body and the body less its faces, two solids whose every face but the moved
+ones coincide; on random design 33's chamfered, drilled body the kernel's
+edge-face intersections spent 68 s on one bore before they answered, and
+the deadline now refuses it at 30.
 
 The bbox may grow by no more than the deleted faces' own extent. Defeaturing
 trims the host face's own surface, so a pocket in an imported face whose
