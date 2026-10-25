@@ -96,8 +96,7 @@ them:
 - **Springs** that stretch between two occurrences and follow the motion.
 - **Undo for project-level edits.** Units, tube rules, the rollback marker,
   part renames and the folder verbs change the document with no undo step,
-  and placing a fastener, bearing or retaining ring takes no assembly
-  snapshot, so none of them can be undone, in the GUI or over RPC. A batch
+  so none of them can be undone, in the GUI or over RPC. A batch
   refuses them for that reason
   ([rpc.md](scripting/rpc.md#a-refused-call-changes-nothing)); giving each a
   command would let a batch take them too.
