@@ -579,10 +579,11 @@ runs on into the body) is refused, saying why, and the picks stay as they
 were. `grow_faces` also answers `host_normal`, the largest planar face the
 feature sits in.
 
-All 100 bores of SolidCraft's `plate_100_holes.step` delete in one feature
-in about 17 s of CPU, nearly all of it Defeaturing, on one thread; the test
-allows 60 s of CPU, which a loaded machine does not stretch the way it does
-the wall clock.
+All 100 bores of SolidCraft's `plate_100_holes.step` delete in one feature,
+nearly all of it Defeaturing, on one thread: 17 s of CPU on a P-core of the
+development machine, 33 s on an E-core, 57 s on a low-power E-core. The
+test allows 120 s of CPU, which holds on the slowest core and, unlike the
+wall clock, does not grow with what else the machine is running.
 
 ### Offset Face
 

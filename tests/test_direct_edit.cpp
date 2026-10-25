@@ -787,10 +787,11 @@ TEST_CASE("Delete Face fills all 100 holes of a STEP plate in one feature",
   const glm::dvec3 e = hi - lo;
   CHECK_THAT(VolumeOf(doc, imp), WithinRel(e.x * e.y * e.z, 1e-9));
   CHECK(BodyOf(doc, imp)->shape.FaceCount() == 6);
-  // The budget docs/modeling/README.md#delete-face states: about 17 s of CPU
-  // here, nearly all of it BRepAlgoAPI_Defeaturing. 60 s leaves room for a
-  // slower core (an E-core, a busy hyperthread sibling) and still fails a
-  // heal that went quadratic in the holes.
+  // The budget docs/modeling/README.md#delete-face states: nearly all of it
+  // BRepAlgoAPI_Defeaturing, and how much CPU that is depends on the core
+  // it lands on -- 17 s on a P-core here, 33 s on an E-core, 57 s on a
+  // low-power one, 62 s in a parallel suite. 120 s holds on the slowest
+  // and still fails a heal that went quadratic in the holes.
   INFO("100 holes deleted in " << s << " s of CPU");
-  CHECK(s < 60.0);
+  CHECK(s < 120.0);
 }
