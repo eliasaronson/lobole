@@ -51,6 +51,9 @@ for p in (os.path.join(ROOT, "python"), os.path.join(ROOT, "tests"), HERE):
 
 from lobole.client import Client  # noqa: E402
 import smoke_app  # noqa: E402
+# The busy probe, shared with the smokes' wall-clock checks.
+from host_load import (Foreign, compilers, cpu_busy_s, load1,  # noqa: E402
+                       proc_cpu_s, self_cpu_s)
 import bench_workloads as W  # noqa: E402
 
 SCHEMA = 1
@@ -62,9 +65,6 @@ STATE = os.path.join(os.environ.get("XDG_STATE_HOME")
 # The environment the verification hooks read (src/core/Document.cpp): a run
 # that sees one says so in its record, and compare says so beside it.
 INJECTED = ("LOBOLE_TEST_REGEN_DELAY_MS", "LOBOLE_TEST_NO_REGEN_CACHE")
-# What a running compiler looks like in /proc/<pid>/comm.
-COMPILERS = {"cc1", "cc1plus", "cc1obj", "lto1", "clang", "clang++", "ld",
-             "ld.lld", "ld.gold", "ld.bfd", "mold", "rustc", "ninja"}
 CALL_TIMEOUT_S = 3600.0
 # A fixture build is untimed and runs on whatever the machine is doing, so
 # its budget is a runaway guard at twice the generator test's (test.json).
@@ -200,15 +200,6 @@ def _procs():
         yield pid, d
 
 
-def compilers():
-    found = []
-    for pid, d in _procs():
-        comm = (_read(os.path.join(d, "comm")) or "").strip()
-        if comm in COMPILERS:
-            found.append(f"{comm}[{pid}]")
-    return sorted(found)
-
-
 def lobole_instances(exclude=()):
     """Every running lobole of this user: [{pid, cwd}] (what
     tools/stray-instances.sh lists), less `exclude`."""
@@ -231,61 +222,6 @@ def lobole_instances(exclude=()):
             cwd = "?"
         found.append({"pid": pid, "cwd": cwd})
     return found
-
-
-def load1():
-    return os.getloadavg()[0]
-
-
-HZ = os.sysconf("SC_CLK_TCK")
-
-
-def cpu_busy_s():
-    """Seconds of CPU every process on the machine has used since boot
-    (/proc/stat: user, nice, system, irq, softirq, steal)."""
-    f = (_read("/proc/stat") or "cpu 0").splitlines()[0].split()[1:]
-    t = [int(x) for x in f] + [0] * 8
-    return (t[0] + t[1] + t[2] + t[5] + t[6] + t[7]) / HZ
-
-
-def proc_cpu_s(pid):
-    """Seconds of CPU one process has used, every thread of it."""
-    st = _read(f"/proc/{pid}/stat")
-    if not st:
-        return 0.0
-    f = st[st.rindex(")") + 2:].split()
-    return (int(f[11]) + int(f[12])) / HZ
-
-
-def self_cpu_s():
-    t = os.times()
-    return t.user + t.system
-
-
-class Foreign:
-    """The CPU the REST of the machine used while a workload ran, as a load
-    (CPUs busy on average): the machine's total less this process's and the
-    instances'. The 1-minute load average cannot answer that, since the
-    workload's own threads raise it; this can, so a workload is marked busy
-    for what others did, never for itself."""
-
-    def __init__(self):
-        self.t0 = time.monotonic()
-        self.busy0 = cpu_busy_s()
-        self.self0 = self_cpu_s()
-        self.instances = 0.0
-
-    def instance(self, pid):
-        """Count an instance's CPU; call just before it stops."""
-        self.instances += proc_cpu_s(pid)
-
-    def load(self):
-        wall = time.monotonic() - self.t0
-        if wall <= 0:
-            return 0.0
-        other = (cpu_busy_s() - self.busy0 - (self_cpu_s() - self.self0)
-                 - self.instances)
-        return max(0.0, other / wall)
 
 
 def machine_state(pinned):
