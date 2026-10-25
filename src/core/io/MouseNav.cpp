@@ -46,12 +46,14 @@ std::string_view Trim(std::string_view s) {
 // instead.
 std::span<const Preset> PresetTable() {
   static const Preset kPresets[] = {
-      // Ours (docs/ui/README.md#viewport): the middle and right buttons and
-      // Alt+left all orbit; Ctrl makes any of them pan, Shift zoom; Alt on the
-      // middle button rolls.
+      // Ours (docs/ui/README.md#viewport), exactly what was hard-coded
+      // before this table: the middle and right buttons and Alt+left orbit
+      // (Alt+right too); Ctrl makes any of them pan, Shift zoom; Alt on the
+      // middle button rolls. test_mousenav checks it combination by
+      // combination against that code.
       {"lobole",
        "Loböle",
-       {{{"middle", "right", "alt+left"},
+       {{{"middle", "right", "alt+right", "alt+left"},
          {"ctrl+middle", "ctrl+right", "ctrl+alt+left"},
          {"shift+middle", "shift+right", "shift+alt+left"},
          {"alt+middle"}}}},

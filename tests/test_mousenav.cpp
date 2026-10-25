@@ -264,3 +264,38 @@ TEST_CASE("a bad navigation row in the file is refused, not substituted",
   CHECK(s.navRoll.empty());
   CHECK(s.navPreset == "custom");
 }
+
+// The defaults reproduce the navigation that was hard-coded before the table
+// (main's ViewportInput.cpp, up to 4019094a), combination by combination, so
+// a default that drops one is caught here rather than by a user. `Old` is
+// that code's resolution, transcribed: the middle and right buttons always
+// started a drag and Alt+left did; while it ran, Ctrl panned, else Shift
+// zoomed, else Alt rolled on the middle button only, else it orbited. On the
+// left button Alt was needed only to START the drag.
+TEST_CASE("the defaults resolve every combination as the old code did",
+          "[mousenav]") {
+  const auto old = [](Button b, bool ctrl, bool shift, bool alt) {
+    if (ctrl)
+      return Action::Pan;
+    if (shift)
+      return Action::Zoom;
+    if (alt && b == Button::Middle)
+      return Action::Roll;
+    return Action::Orbit;
+  };
+  const NavMap map = *NavMap::Build(DefaultRows());
+  for (const Button b : {Button::Middle, Button::Right, Button::Left}) {
+    // Starting: middle and right with any keys; left only with Alt.
+    CHECK(map.Navigates(b, true));
+    CHECK(map.Navigates(b, false) == (b != Button::Left));
+    for (int keys = 0; keys < 8; keys++) {
+      const bool ctrl = keys & 1, shift = keys & 2, alt = keys & 4;
+      INFO("button " << int(b) << " ctrl " << ctrl << " shift " << shift
+                     << " alt " << alt);
+      // The input layer asks with Alt held for a drag the left button
+      // started (HandleViewportInput: viewportDragLeft || KeyAlt).
+      const bool asked = b == Button::Left ? true : alt;
+      CHECK(map.ActionFor(b, ctrl, shift, asked) == old(b, ctrl, shift, alt));
+    }
+  }
+}

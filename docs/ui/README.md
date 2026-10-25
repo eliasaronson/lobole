@@ -72,7 +72,7 @@ that size. The window title is the project name, `*` when dirty.
   clicked face, edge or corner, with a home button. View > Viewport Controls
   shows the mouse and trackpad cheat sheet, written from the bindings.
 - **The mouse drags are preferences.** By default the middle and right
-  buttons and Alt+left rotate, Ctrl makes any of them pan, Shift zoom, and
+  buttons and Alt+left rotate (Alt+right too), Ctrl makes any of them pan, Shift zoom, and
   Alt+middle rolls; Preferences > Navigation rebinds them, offers the
   SolidWorks, Fusion, Onshape and Blender presets, and sets the three speeds
   and the wheel's direction ([mouse navigation](keybindings.md#mouse-navigation)).
