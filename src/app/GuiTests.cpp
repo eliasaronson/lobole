@@ -4,6 +4,7 @@
 #include "app/GuiTests.h"
 
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h" // SetJobEditAudit
 
 // The GUI suite's entry point. The 175 registrations used to live here in one
@@ -21,6 +22,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   // runs, and RunTestWithReset fails a test that edited a job without saying
   // so (ui::SetJobEditAudit).
   ui::SetJobEditAudit(true);
+  // ...and of the link gates
+  // (docs/modeling/derived.md#nothing-may-miss-a-gate): every part handed to
+  // another document must have passed one.
+  ui::SetLinkAudit(true);
 
   RegisterShellGuiTests(engine);
   RegisterModelingGuiTests(engine);

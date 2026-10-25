@@ -5,6 +5,7 @@
 #include "ui/RendererSync.h"
 
 #include "core/Units.h"
+#include "core/features/DerivedFeature.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
 #include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
 #include "ui/CamTool.h"            // RunCamVerification (job undo)
@@ -334,6 +335,17 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     if (op.kind == sketch::DerivedKind::LinkedCopy)
       for (const auto& inst : op.instances)
         linkedIds.insert(inst.genId);
+  // Another part's sketch, projected through a Derived copy of it, is a
+  // linked copy too: that part owns it (docs/modeling/derived.md#sketches).
+  for (const auto& ext : sk->external) {
+    const auto* dv = dynamic_cast<const DerivedFeature*>(
+        state.document ? state.document->FindFeatureById(ext.ref.featureId)
+                       : nullptr);
+    const DerivedSketch* copied = nullptr;
+    const sketch::Entity* entity = nullptr;
+    if (dv != nullptr && dv->ResolveSketchEntity(ext.ref.name, copied, entity))
+      linkedIds.insert(ext.genIds.begin(), ext.genIds.end());
+  }
   // Expression-driven entities (Decision 2A) share the violet solver-fixed
   // convention: their driven coordinates are owned by the parameter table,
   // not the mouse (v1: no in-canvas editing of the expressions).

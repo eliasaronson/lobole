@@ -2198,6 +2198,142 @@ std::vector<Entity> ProjectElement(const CADShape& shape, ExternalKind kind,
   return out;
 }
 
+namespace {
+
+// One entity as a world-space edge on `plane` (a point has none).
+std::optional<TopoDS_Edge> EntityEdge(const SketchPlane& plane,
+                                      const Entity& entity) {
+  const glm::dvec3 n = plane.GetNormal(), u = plane.GetUAxis(),
+                   v = plane.GetVAxis();
+  const auto frame = [&](const glm::dvec2& c, double rotation) {
+    const glm::dvec3 x = std::cos(rotation) * u + std::sin(rotation) * v;
+    return gp_Ax2(ProfilePoint(plane, c), gp_Dir(n.x, n.y, n.z),
+                  gp_Dir(x.x, x.y, x.z));
+  };
+  try {
+    std::optional<TopoDS_Edge> out;
+    std::visit(
+        [&](const auto& e) {
+          using T = std::decay_t<decltype(e)>;
+          if constexpr (std::is_same_v<T, Line>) {
+            if (glm::length(e.b - e.a) > 1e-12)
+              out = BRepBuilderAPI_MakeEdge(ProfilePoint(plane, e.a),
+                                            ProfilePoint(plane, e.b))
+                        .Edge();
+          } else if constexpr (std::is_same_v<T, Circle>) {
+            out =
+                BRepBuilderAPI_MakeEdge(gp_Circ(frame(e.center, 0.0), e.radius))
+                    .Edge();
+          } else if constexpr (std::is_same_v<T, Arc>) {
+            Handle(Geom_Circle) c =
+                new Geom_Circle(gp_Circ(frame(e.center, 0.0), e.radius));
+            out = BRepBuilderAPI_MakeEdge(c, e.startAngle, e.endAngle).Edge();
+          } else if constexpr (std::is_same_v<T, Ellipse>) {
+            out = BRepBuilderAPI_MakeEdge(
+                      gp_Elips(frame(e.center, e.rotation), e.rMajor, e.rMinor))
+                      .Edge();
+          } else if constexpr (std::is_same_v<T, EllipseArc>) {
+            out = BRepBuilderAPI_MakeEdge(
+                      gp_Elips(frame(e.center, e.rotation), e.rMajor, e.rMinor),
+                      e.startParam, e.endParam)
+                      .Edge();
+          } else if constexpr (std::is_same_v<T, BSpline>) {
+            if (e.poles.size() >= 2)
+              out = BRepBuilderAPI_MakeEdge(MakeBSplineCurve(plane, e)).Edge();
+          }
+        },
+        entity);
+    return out;
+  } catch (const Standard_Failure&) {
+    return std::nullopt;
+  }
+}
+
+} // namespace
+
+std::optional<Entity> ProjectEntity(const Entity& entity,
+                                    const SketchPlane& from,
+                                    const SketchPlane& to) {
+  if (std::holds_alternative<Text>(entity))
+    return std::nullopt; // not projected (docs/modeling/derived.md#sketches)
+  const bool construction = IsConstruction(entity);
+  const double facing = glm::dot(from.GetNormal(), to.GetNormal());
+  if (std::abs(facing) > 1.0 - 1e-9) {
+    // Parallel planes: every point lands on the target by its UV, so the
+    // entity keeps its type and its exact curve. Facing the other way, the
+    // pair is a mirror image, and a counter-clockwise sweep comes out
+    // clockwise: arcs run the other way round.
+    const bool mirrored = facing < 0.0;
+    const auto at = [&](const glm::dvec2& p) {
+      return to.WorldToPlane(from.PlaneToWorld(p));
+    };
+    const auto angle = [&](double a) {
+      const glm::dvec3 d =
+          std::cos(a) * from.GetUAxis() + std::sin(a) * from.GetVAxis();
+      return std::atan2(glm::dot(d, to.GetVAxis()), glm::dot(d, to.GetUAxis()));
+    };
+    const auto ccw = [](double& start, double& end) {
+      while (end <= start)
+        end += 2.0 * M_PI;
+      while (end - start > 2.0 * M_PI + 1e-12)
+        end -= 2.0 * M_PI;
+    };
+    Entity out = entity;
+    std::visit(
+        [&](auto& e) {
+          using T = std::decay_t<decltype(e)>;
+          if constexpr (std::is_same_v<T, Point>) {
+            e.p = at(e.p);
+          } else if constexpr (std::is_same_v<T, Line>) {
+            e.a = at(e.a);
+            e.b = at(e.b);
+          } else if constexpr (std::is_same_v<T, Circle>) {
+            e.center = at(e.center);
+          } else if constexpr (std::is_same_v<T, Arc>) {
+            const double s = angle(e.startAngle), t = angle(e.endAngle);
+            e.center = at(e.center);
+            e.startAngle = mirrored ? t : s;
+            e.endAngle = mirrored ? s : t;
+            ccw(e.startAngle, e.endAngle);
+          } else if constexpr (std::is_same_v<T, Ellipse>) {
+            e.center = at(e.center);
+            e.rotation = angle(e.rotation);
+          } else if constexpr (std::is_same_v<T, EllipseArc>) {
+            // The point at parameter t is C + a cos t u + b sin t v; mirrored,
+            // v turns over, so the same point is at -t.
+            e.center = at(e.center);
+            e.rotation = angle(e.rotation);
+            if (mirrored) {
+              const double s = -e.endParam, t = -e.startParam;
+              e.startParam = s;
+              e.endParam = t;
+            }
+            ccw(e.startParam, e.endParam);
+          } else if constexpr (std::is_same_v<T, BSpline>) {
+            for (glm::dvec2& p : e.poles)
+              p = at(p);
+          }
+        },
+        out);
+    SetEntityId(out, 0);
+    return out;
+  }
+  // Planes at an angle: the shadow, as external geometry projects an edge.
+  if (const auto* pt = std::get_if<Point>(&entity)) {
+    Point p;
+    p.p = to.WorldToPlane(from.PlaneToWorld(pt->p));
+    p.construction = construction;
+    return p;
+  }
+  const std::optional<TopoDS_Edge> edge = EntityEdge(from, entity);
+  if (!edge)
+    return std::nullopt;
+  std::optional<Entity> out = ProjectEdge(*edge, to);
+  if (out)
+    SetConstruction(*out, construction);
+  return out;
+}
+
 std::vector<Entity> ProjectFaceBoundary(const CADShape& shape, int faceIndex,
                                         const SketchPlane& plane) {
   return ProjectElement(shape, ExternalKind::Face, faceIndex, plane);

@@ -10,6 +10,7 @@
 #include "core/features/UnfoldFeature.h"
 
 #include "ui/BackgroundJobs.h"
+#include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
 #include "ui/OpenJob.h"
@@ -238,6 +239,7 @@ std::unordered_map<ImGuiTest*, void (*)(ImGuiTestContext*)> g_origTestFunc;
 void RunTestWithReset(ImGuiTestContext* ctx) {
   ResetAppForTest();
   ui::ResetJobEditAudit();
+  ui::ResetLinkAudit();
   const auto it = g_origTestFunc.find(ctx->Test);
   if (it != g_origTestFunc.end() && it->second)
     it->second(ctx);
@@ -248,6 +250,10 @@ void RunTestWithReset(ImGuiTestContext* ctx) {
     ctx->LogError("a job edit did not call MarkJobEdited: %s",
                   ui::JobEditAuditLastMiss().c_str());
   IM_CHECK_EQ(ui::JobEditAuditMisses(), 0);
+  // ...and of the link gates: a part read past them was read stale.
+  if (ui::LinkAuditMisses() > 0)
+    ctx->LogError("%s", ui::LinkAuditLastMiss().c_str());
+  IM_CHECK_EQ(ui::LinkAuditMisses(), 0);
 }
 
 // Window position of a world point, mapped through the central-node viewport

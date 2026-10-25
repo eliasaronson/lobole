@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "core/features/DerivedFeature.h"
+#include "ui/DerivedActions.h"
 #include "ui/Overlays.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
@@ -485,6 +487,16 @@ static uint64_t BeginSketch(AppState& state, std::unique_ptr<SketchFeature> sk,
   return id;
 }
 
+uint64_t BeginPreparedSketch(AppState& state,
+                             std::unique_ptr<SketchFeature> sketch) {
+  if (!state.document || !sketch)
+    return 0;
+  const SketchPlane plane = sketch->plane;
+  const std::string name = sketch->GetName();
+  return BeginSketch(state, std::move(sketch), plane, name,
+                     SketchPurpose::Freeform);
+}
+
 void AlignCameraToSketch(AppState& state, const SketchPlane& plane) {
   if (!state.camera)
     return;
@@ -612,6 +624,11 @@ void CopySketchSelection(AppState& state, SketchFeature& sketch) {
       state.sketchClipboardIds.push_back(EntityId(e));
     }
   state.sketchClipboardSourceSketch = sketch.GetId();
+  state.sketchClipboardSourcePart =
+      state.activePart >= 0 &&
+              static_cast<size_t>(state.activePart) < state.parts.size()
+          ? state.parts[state.activePart].id
+          : 0;
   state.sketchEdit.actionMsg =
       std::to_string(state.sketchClipboard.size()) +
       " entities copied (Ctrl+V paste, Ctrl+Shift+V paste linked)";
@@ -665,14 +682,63 @@ void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
 // Pastes the clipboard as a LINKED copy
 // (docs/sketching/README.md#linked-copies): outputs re-sync from the source
 // until the link is broken. Cross-sketch requires the source EARLIER in the
-// history; cross-part (source not in this document) falls back to a plain paste
-// with an explanation.
+// history. From ANOTHER part, the source sketch is copied by a Derived placed
+// before this sketch (made, or one already there reused) and the pasted
+// entities project its copies, so they follow the other part
+// (docs/modeling/derived.md#sketches).
 void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
                                 size_t index) {
   if (state.sketchClipboardIds.empty())
     return;
   Document& doc = *state.document;
   const uint64_t srcId = state.sketchClipboardSourceSketch;
+  const uint64_t herePart =
+      state.activePart >= 0 &&
+              static_cast<size_t>(state.activePart) < state.parts.size()
+          ? state.parts[state.activePart].id
+          : 0;
+  // The clipboard names its part: a feature id alone is a per-part counter,
+  // and named this part's own sketch of that id.
+  if (state.sketchClipboardSourcePart != 0 &&
+      state.sketchClipboardSourcePart != herePart) {
+    const uint64_t sketchId = sketch.GetId();
+    const size_t mark = state.commands->UndoDepth();
+    size_t at = index;
+    uint64_t derivedId = 0;
+    if (const std::string why = DerivedSketchBefore(
+            state, state.sketchClipboardSourcePart, srcId, at, derivedId);
+        !why.empty()) {
+      state.commands->RollbackSince(mark, doc);
+      state.sketchEdit.actionMsg =
+          "Could not link to the other part (" + why + ") - pasted unlinked";
+      if (auto* sk =
+              dynamic_cast<SketchFeature*>(doc.FindFeatureById(sketchId)))
+        PasteSketchClipboard(state, *sk, at);
+      return;
+    }
+    // The commands above replaced the feature objects: find the sketch again.
+    auto* target =
+        dynamic_cast<SketchFeature*>(doc.FindFeatureById(sketchId, &at));
+    const auto* copy =
+        dynamic_cast<const DerivedFeature*>(doc.FindFeatureById(derivedId));
+    if (target == nullptr || copy == nullptr)
+      return;
+    nlohmann::json before = DocumentIO::FeatureToJson(*target);
+    for (uint32_t id : state.sketchClipboardIds)
+      target->AddExternalGeometry(
+          ElementRef{derivedId, copy->SketchEntityName(srcId, id)},
+          sketch::ExternalKind::Edge);
+    state.sketchEdit.selected.clear();
+    nlohmann::json after = DocumentIO::FeatureToJson(*target);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(at, before, after), doc);
+    state.commands->CoalesceSince(mark, "Paste linked from another part");
+    state.sketchEdit.actionMsg =
+        std::to_string(state.sketchClipboardIds.size()) +
+        " linked copies pasted from '" + copy->sourceName +
+        "' (violet = follows that part)";
+    return;
+  }
   SketchFeature* source = nullptr;
   uint64_t opSourceId = 0; // 0 = same sketch
   if (srcId == sketch.GetId()) {
@@ -683,7 +749,7 @@ void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
         dynamic_cast<SketchFeature*>(doc.FindFeatureById(srcId, &srcIndex));
     if (source == nullptr) {
       state.sketchEdit.actionMsg =
-          "Source sketch is in another part - pasted unlinked";
+          "The source sketch is gone - pasted unlinked";
       PasteSketchClipboard(state, sketch, index);
       return;
     }

@@ -41,6 +41,13 @@ uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
                             const std::string& name,
                             SketchPurpose purpose = SketchPurpose::Freeform);
 
+// Starts `sketch`, already set up by the caller (a plane it tracks,
+// projections), as BeginSketchOnPlane starts one: one AddFeatureCommand, edit
+// mode on it, the camera on its plane. Returns its id (0 when refused, the
+// reason in the prompt). What "Sketch on it" opens a copied sketch with.
+uint64_t BeginPreparedSketch(AppState& state,
+                             std::unique_ptr<SketchFeature> sketch);
+
 // Starts a new sketch that tracks a datum plane: bakes the datum's current
 // plane and records planeRef, so the sketch re-derives its plane whenever the
 // datum regenerates. Returns the new sketch's id.

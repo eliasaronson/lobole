@@ -549,6 +549,15 @@ void DrawFeatureTreePanel(AppState& state) {
               state.sketchEdit.actionMsg = why;
             replaced = true;
           }
+          const bool following = derivedFeat->follow;
+          if (ImGui::MenuItem("Follow source###feat_derived_follow", nullptr,
+                              following)) {
+            if (const std::string why =
+                    SetDerivedFollow(state, feature->GetId(), !following);
+                !why.empty())
+              state.sketchEdit.actionMsg = why;
+            replaced = true;
+          }
           if (ImGui::MenuItem("Break link###feat_derived_break")) {
             if (const std::string why =
                     BreakDerivedLink(state, feature->GetId());

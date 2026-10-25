@@ -5,6 +5,7 @@
 
 #include "common/Logger.h"
 #include "core/Document.h"
+#include "core/InputHash.h"
 
 #include <BinTools.hxx>
 #include <Standard_Failure.hxx>
@@ -38,15 +39,84 @@ DerivedFeature::DerivedName(uint64_t sourceCreatedBy,
          sourceElementName;
 }
 
+std::string DerivedFeature::SketchEntityName(uint64_t sourceSketchId,
+                                             uint32_t entityId) const {
+  return std::to_string(GetId()) + "/" + std::to_string(sourceSketchId) + "/" +
+         std::to_string(entityId);
+}
+
+const DerivedSketch* DerivedFeature::FindSketch(uint64_t sourceSketchId) const {
+  if (sourceSketchId == 0)
+    return sketchSnapshot.size() == 1 ? &sketchSnapshot.front() : nullptr;
+  for (const DerivedSketch& s : sketchSnapshot)
+    if (s.sourceSketch == sourceSketchId)
+      return &s;
+  return nullptr;
+}
+
+SketchPlane DerivedFeature::PlacedPlane(const DerivedSketch& s) const {
+  if (IdentityPlacement())
+    return s.plane;
+  const glm::dmat4 xf = Placement();
+  const glm::dmat3 r(xf);
+  return SketchPlane(glm::dvec3(xf * glm::dvec4(s.plane.GetOrigin(), 1.0)),
+                     glm::normalize(r * s.plane.GetNormal()),
+                     glm::normalize(r * s.plane.GetUAxis()));
+}
+
+bool DerivedFeature::ResolveSketchEntity(const std::string& name,
+                                         const DerivedSketch*& sk,
+                                         const sketch::Entity*& entity) const {
+  // "<this id>/<source sketch id>/<entity id>", three numbers: a body's
+  // element name under this feature has a source name after the second
+  // slash, which is never a bare number of a sketch this feature copies.
+  const size_t a = name.find('/');
+  const size_t b = a == std::string::npos ? a : name.find('/', a + 1);
+  if (b == std::string::npos || name.find('/', b + 1) != std::string::npos)
+    return false;
+  const auto number = [](std::string_view t, uint64_t& out) {
+    if (t.empty() || t.size() > 19)
+      return false;
+    out = 0;
+    for (char c : t) {
+      if (c < '0' || c > '9')
+        return false;
+      out = out * 10 + static_cast<uint64_t>(c - '0');
+    }
+    return true;
+  };
+  uint64_t self = 0, sketchId = 0, entityId = 0;
+  if (!number(std::string_view(name).substr(0, a), self) || self != GetId() ||
+      !number(std::string_view(name).substr(a + 1, b - a - 1), sketchId) ||
+      !number(std::string_view(name).substr(b + 1), entityId) ||
+      entityId > UINT32_MAX)
+    return false;
+  for (const DerivedSketch& s : sketchSnapshot) {
+    if (s.sourceSketch != sketchId)
+      continue;
+    for (const sketch::Entity& e : s.entities)
+      if (sketch::EntityId(e) == entityId) {
+        sk = &s;
+        entity = &e;
+        return true;
+      }
+  }
+  return false;
+}
+
 std::string DerivedFeature::WhyIncomplete() const {
   if (sourcePart == 0)
     return "no source part chosen";
-  if (snapshot.empty())
+  if (snapshot.empty() && sketchSnapshot.empty())
     return "no snapshot taken from '" + sourceName + "' yet";
   return {};
 }
 
 bool DerivedFeature::Execute(RegenContext& ctx) {
+  // A copy of sketches only adds no body: its sketches are read by the
+  // sketches of this part that stand on them or project them.
+  if (snapshot.empty() && !sketchSnapshot.empty())
+    return true;
   if (snapshot.empty()) {
     SetError(sourceName.empty()
                  ? "no snapshot taken yet"
@@ -127,10 +197,147 @@ std::string AssetNameFor(const std::vector<unsigned char>& bytes) {
   return std::string("derived-") + buf + ".brep";
 }
 
-std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
-                         Document& host) {
+namespace {
+
+// The key of one copied body: its exact B-Rep and every field the copy
+// carries from it. FNV, so the same body keys the same on every platform and
+// in every build. The B-Rep goes in as inputhash digests it -- the shape as
+// a project reads it back, without the meshes and flags OCC hangs on it --
+// so a source reopened from its baked geometry keys as the one regenerated.
+void HashBody(inputhash::Hasher& h, const DerivedBody& b,
+              const CADShape& shape) {
+  h.Str("body");
+  h.Shape(shape);
+  h.Str(b.name);
+  h.Str(b.material);
+  h.U64(b.sourceCreatedBy);
+  h.U64(b.elementMap.names.size());
+  for (const auto& [index, name] : b.elementMap.names) {
+    h.U64(static_cast<uint64_t>(index));
+    h.Str(name);
+  }
+  h.U64(b.elementMap.edgeNames.size());
+  for (const auto& [index, name] : b.elementMap.edgeNames) {
+    h.U64(static_cast<uint64_t>(index));
+    h.Str(name);
+  }
+  h.U64(b.hasDisplayColor ? 1 : 0);
+  if (b.hasDisplayColor) {
+    h.F64(b.displayColor.x);
+    h.F64(b.displayColor.y);
+    h.F64(b.displayColor.z);
+  }
+  h.U64(b.fitBands.size());
+  for (const FitBand& f : b.fitBands) {
+    h.Str(f.face.name); // the source's name; the copy renames it
+    h.F64(f.lower);
+    h.F64(f.upper);
+    h.U64(static_cast<uint64_t>(f.side));
+    h.F64(f.allowance);
+    h.U64(f.printedPress ? 1 : 0);
+    h.Str(f.label);
+  }
+}
+
+void HashVec(inputhash::Hasher& h, const glm::dvec2& v) {
+  h.F64(v.x);
+  h.F64(v.y);
+}
+void HashVec(inputhash::Hasher& h, const glm::dvec3& v) {
+  h.F64(v.x);
+  h.F64(v.y);
+  h.F64(v.z);
+}
+
+// The key of one copied sketch: its plane and each entity's fields, named
+// one by one (a JSON dump would move with every key a build adds).
+void HashSketch(inputhash::Hasher& h, const DerivedSketch& s) {
+  h.Str("sketch");
+  h.U64(s.sourceSketch);
+  h.Str(s.name);
+  HashVec(h, s.plane.GetOrigin());
+  HashVec(h, s.plane.GetNormal());
+  HashVec(h, s.plane.GetUAxis());
+  h.U64(s.entities.size());
+  for (const sketch::Entity& e : s.entities) {
+    h.U64(e.index());
+    h.U64(sketch::EntityId(e));
+    h.U64(sketch::IsConstruction(e) ? 1 : 0);
+    std::visit(
+        [&](const auto& x) {
+          using T = std::decay_t<decltype(x)>;
+          if constexpr (std::is_same_v<T, sketch::Point>) {
+            HashVec(h, x.p);
+          } else if constexpr (std::is_same_v<T, sketch::Line>) {
+            HashVec(h, x.a);
+            HashVec(h, x.b);
+          } else if constexpr (std::is_same_v<T, sketch::Circle>) {
+            HashVec(h, x.center);
+            h.F64(x.radius);
+          } else if constexpr (std::is_same_v<T, sketch::Arc>) {
+            HashVec(h, x.center);
+            h.F64(x.radius);
+            h.F64(x.startAngle);
+            h.F64(x.endAngle);
+          } else if constexpr (std::is_same_v<T, sketch::Ellipse>) {
+            HashVec(h, x.center);
+            h.F64(x.rMajor);
+            h.F64(x.rMinor);
+            h.F64(x.rotation);
+          } else if constexpr (std::is_same_v<T, sketch::EllipseArc>) {
+            HashVec(h, x.center);
+            h.F64(x.rMajor);
+            h.F64(x.rMinor);
+            h.F64(x.rotation);
+            h.F64(x.startParam);
+            h.F64(x.endParam);
+          } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
+            h.U64(static_cast<uint64_t>(x.degree));
+            h.U64(x.poles.size());
+            for (const glm::dvec2& p : x.poles)
+              HashVec(h, p);
+          } else if constexpr (std::is_same_v<T, sketch::Text>) {
+            HashVec(h, x.anchor);
+            h.Str(x.text);
+            h.Str(x.font);
+            h.F64(x.height);
+            h.F64(x.angle);
+            h.U64(static_cast<uint64_t>(x.halign));
+            h.U64(static_cast<uint64_t>(x.valign));
+            h.F64(x.spacing);
+          }
+        },
+        e);
+  }
+}
+
+uint64_t KeyOf(const std::vector<DerivedBody>& bodies,
+               const std::function<CADShape(size_t)>& shapeOf,
+               const std::vector<DerivedSketch>& sketches) {
+  inputhash::Hasher h;
+  h.Str("derived-snapshot");
+  h.U64(bodies.size());
+  for (size_t i = 0; i < bodies.size(); i++)
+    HashBody(h, bodies[i], shapeOf(i));
+  h.U64(sketches.size());
+  for (const DerivedSketch& s : sketches)
+    HashSketch(h, s);
+  // 0 means "not recorded"; a real key is never it.
+  return h.Digest() == 0 ? 1 : h.Digest();
+}
+
+} // namespace
+
+std::string Take(const DerivedFeature& feature, const Document& source,
+                 Taken& out) {
+  out = Taken{};
   const std::vector<Body>& all = source.GetBodies();
-  if (all.empty())
+  // A copy that names sketches copies only the bodies it names as well.
+  const bool wantsSketches =
+      !feature.sketches.empty() || !feature.sketchNames.empty();
+  const bool wantsBodies =
+      !wantsSketches || !feature.bodies.empty() || !feature.bodyNames.empty();
+  if (wantsBodies && all.empty())
     return "source part has no bodies to derive from";
 
   // The filter must name bodies the source actually has, by their producer.
@@ -171,8 +378,71 @@ std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
            " creators and bodies including: " + list + ")";
   }
 
-  std::vector<DerivedBody> taken;
+  // The sketches, by id and/or by name; each one the source has and that
+  // built. The ones it has are listed when one is not there.
+  if (wantsSketches) {
+    std::vector<const SketchFeature*> sources;
+    std::map<const SketchFeature*, size_t> indexOf;
+    for (size_t i = 0; i < source.GetFeatures().size(); i++)
+      if (const auto* sk = dynamic_cast<const SketchFeature*>(
+              source.GetFeatures()[i].get())) {
+        sources.push_back(sk);
+        indexOf[sk] = i;
+      }
+    const auto known = [&] {
+      std::string list;
+      for (const SketchFeature* sk : sources)
+        list += (list.empty() ? "" : ", ") + sk->GetName() + " (" +
+                std::to_string(sk->GetId()) + ")";
+      return list.empty() ? std::string("it has none") : "it has: " + list;
+    };
+    for (uint64_t id : feature.sketches)
+      if (std::none_of(
+              sources.begin(), sources.end(),
+              [&](const SketchFeature* sk) { return sk->GetId() == id; }))
+        return "source part has no sketch with id " + std::to_string(id) +
+               " (" + known() + ")";
+    for (const std::string& want : feature.sketchNames)
+      if (std::none_of(
+              sources.begin(), sources.end(),
+              [&](const SketchFeature* sk) { return sk->GetName() == want; }))
+        return "source part has no sketch named '" + want + "' (" + known() +
+               ")";
+    for (const SketchFeature* sk : sources) {
+      const bool byId =
+          std::find(feature.sketches.begin(), feature.sketches.end(),
+                    sk->GetId()) != feature.sketches.end();
+      const bool byName =
+          std::find(feature.sketchNames.begin(), feature.sketchNames.end(),
+                    sk->GetName()) != feature.sketchNames.end();
+      // Both filters given narrow together, as bodies and body_names do.
+      if (!feature.sketches.empty() && !feature.sketchNames.empty()
+              ? !(byId && byName)
+              : !(byId || byName))
+        continue;
+      if (!sk->GetError().empty())
+        return "source sketch '" + sk->GetName() +
+               "' failed: " + sk->GetError();
+      if (source.EffectiveSuppressed(indexOf.at(sk)))
+        return "source sketch '" + sk->GetName() +
+               "' is suppressed in the source";
+      DerivedSketch ds;
+      ds.sourceSketch = sk->GetId();
+      ds.name = sk->GetName();
+      ds.plane = sk->plane;
+      ds.entities = sk->entities;
+      out.sketches.push_back(std::move(ds));
+    }
+    if (out.sketches.empty())
+      return "that filter selects none of the source's sketches (sketches "
+             "and sketch_names narrow TOGETHER — a sketch must match both "
+             "when both are given)";
+  }
+
+  std::vector<const CADShape*> shapes;
   for (const Body& b : all) {
+    if (!wantsBodies)
+      break;
     if (b.reference)
       continue; // the source's own ghosts are not its geometry
     if (!feature.bodies.empty() &&
@@ -183,14 +453,14 @@ std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
         std::find(feature.bodyNames.begin(), feature.bodyNames.end(), b.name) ==
             feature.bodyNames.end())
       continue;
-    std::ostringstream out(std::ios::binary);
+    std::ostringstream stream(std::ios::binary);
     try {
-      BinTools::Write(b.shape.GetShape(), out);
+      BinTools::Write(b.shape.GetShape(), stream);
     } catch (const Standard_Failure& e) {
       return "could not serialize body '" + b.name + "': " +
              (e.GetMessageString() ? e.GetMessageString() : "OCC error");
     }
-    const std::string s = out.str();
+    const std::string s = stream.str();
     if (s.empty())
       return "could not serialize body '" + b.name + "'";
     std::vector<unsigned char> bytes(s.begin(), s.end());
@@ -205,11 +475,11 @@ std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
     db.fitBands = b.fitBands;
     for (FitBand& band : db.fitBands)
       band.face.featureId = 0; // the source's; the copy names its own
-    if (host.GetAsset(db.asset) == nullptr)
-      host.SetAsset(db.asset, std::move(bytes));
-    taken.push_back(std::move(db));
+    out.bodies.push_back(std::move(db));
+    out.bytes.push_back(std::move(bytes));
+    shapes.push_back(&b.shape);
   }
-  if (taken.empty()) {
+  if (wantsBodies && out.bodies.empty()) {
     // Name the cause: a filter that matches nothing is a different mistake
     // from a source that has nothing to give, and both used to say the
     // second (bodies + body_names can narrow to the empty set together).
@@ -219,17 +489,54 @@ std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
              "are given)";
     return "source part has only reference bodies; nothing to derive";
   }
-  feature.snapshot = std::move(taken);
-  feature.sourceChainHash = source.TipChainHash();
+  out.key =
+      KeyOf(out.bodies, [&](size_t i) { return *shapes[i]; }, out.sketches);
   return {};
 }
 
-std::optional<bool> IsStale(const DerivedFeature& feature,
-                            const PartResolver& partById) {
-  const Document* source = partById(feature.sourcePart);
-  if (source == nullptr)
-    return std::nullopt;
-  return source->TipChainHash() != feature.sourceChainHash;
+std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
+                         Document& host) {
+  Taken taken;
+  if (std::string why = Take(feature, source, taken); !why.empty())
+    return why;
+  for (size_t i = 0; i < taken.bodies.size(); i++)
+    if (host.GetAsset(taken.bodies[i].asset) == nullptr)
+      host.SetAsset(taken.bodies[i].asset, std::move(taken.bytes[i]));
+  feature.snapshot = std::move(taken.bodies);
+  feature.sketchSnapshot = std::move(taken.sketches);
+  feature.sourceKey = taken.key;
+  return {};
+}
+
+uint64_t StoredKey(const DerivedFeature& feature, const Document& host) {
+  if (feature.sourceKey != 0)
+    return feature.sourceKey;
+  return KeyOf(
+      feature.snapshot,
+      [&](size_t i) {
+        // The stored B-Rep, read as Execute reads it; an unreadable one keys
+        // as nothing, which no source gives.
+        TopoDS_Shape shape;
+        if (const auto* bytes = host.GetAsset(feature.snapshot[i].asset)) {
+          try {
+            std::istringstream in(std::string(bytes->begin(), bytes->end()),
+                                  std::ios::binary);
+            BinTools::Read(shape, in);
+          } catch (const Standard_Failure&) {
+            shape.Nullify();
+          }
+        }
+        return shape.IsNull() ? CADShape() : CADShape(shape);
+      },
+      feature.sketchSnapshot);
+}
+
+bool IsStale(const DerivedFeature& feature, const Document& source,
+             const Document& host) {
+  Taken taken;
+  if (!Take(feature, source, taken).empty())
+    return true; // the source lost what this copies: behind, and says why
+  return taken.key != StoredKey(feature, host);
 }
 
 bool WouldCycle(uint64_t hostId, uint64_t sourceId,

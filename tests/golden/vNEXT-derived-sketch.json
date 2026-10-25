@@ -1,0 +1,158 @@
+{
+  "features": [
+    {
+      "follow": false,
+      "id": 1,
+      "name": "Outline copy",
+      "placement": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "reference": true,
+      "sketches": [
+        3
+      ],
+      "snapshot": {
+        "bodies": [],
+        "sketches": [
+          {
+            "entities": [
+              {
+                "center": [
+                  3.0,
+                  2.0
+                ],
+                "id": 1889325867,
+                "radius": 4.0,
+                "type": "circle"
+              },
+              {
+                "a": [
+                  -10.0,
+                  0.0
+                ],
+                "b": [
+                  10.0,
+                  0.0
+                ],
+                "construction": true,
+                "id": 1744598356,
+                "type": "line"
+              }
+            ],
+            "name": "Outline",
+            "plane": {
+              "normal": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "origin": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "uAxis": [
+                1.0,
+                0.0,
+                0.0
+              ]
+            },
+            "source_id": 3
+          }
+        ],
+        "source_key": "0x299bcb29671529d2"
+      },
+      "source_name": "Servo",
+      "source_part": 7,
+      "type": "Derived"
+    },
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "center": [
+            3.0,
+            2.0
+          ],
+          "id": 1889325867,
+          "radius": 4.0,
+          "type": "circle"
+        },
+        {
+          "a": [
+            -10.0,
+            0.0
+          ],
+          "b": [
+            10.0,
+            0.0
+          ],
+          "construction": true,
+          "id": 1744598356,
+          "type": "line"
+        }
+      ],
+      "external": [
+        {
+          "element": "1/3/1889325867",
+          "feature_id": 1,
+          "gen_ids": [
+            1889325867
+          ],
+          "kind": "edge"
+        },
+        {
+          "element": "1/3/1744598356",
+          "feature_id": 1,
+          "gen_ids": [
+            1744598356
+          ],
+          "kind": "edge"
+        }
+      ],
+      "id": 2,
+      "name": "On outline",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "plane_ref": 1,
+      "plane_ref_sketch": 3,
+      "type": "Sketch"
+    },
+    {
+      "distance": 2.0,
+      "id": 3,
+      "mode": "new_body",
+      "name": "Pad",
+      "reversed": false,
+      "sketch_id": 2,
+      "type": "Extrude"
+    }
+  ],
+  "format": "designer-document",
+  "version": 193
+}

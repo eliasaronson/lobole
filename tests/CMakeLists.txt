@@ -76,6 +76,7 @@ add_executable(designer_tests
     test_assembly_loops.cpp
     test_assembly_relations.cpp
     test_derived.cpp
+    test_links.cpp
     test_templates.cpp
     test_measure.cpp
     test_receipt.cpp

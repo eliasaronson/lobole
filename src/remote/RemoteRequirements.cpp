@@ -32,6 +32,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
+#include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h"
 #include "ui/RequirementsPanel.h"
@@ -3325,6 +3326,7 @@ json EnginePlan(ui::AppState& state, const json& params) {
 }
 
 uint64_t EngineStart(ui::AppState& state, const json& params) {
+  ui::RefreshLinks(state); // the gate (derived.md#copies-that-keep-up)
   return StartSweep(state, PlanSweep(state, RpcParams{params}), 0);
 }
 
@@ -3415,6 +3417,7 @@ json RefreshExpressionRequirements(ui::AppState& state) {
 }
 
 uint64_t StartRequirementsCheck(ui::AppState& state, bool recompute) {
+  ui::RefreshLinks(state); // the gate (derived.md#copies-that-keep-up)
   if (ui::FindBackgroundJob(state, kJobKind))
     return ui::FindBackgroundJob(state, kJobKind)->id;
   std::vector<uint64_t> ids, asked;

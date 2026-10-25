@@ -1049,6 +1049,21 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       continue;
     }
 
+    // The gate (docs/modeling/derived.md#copies-that-keep-up): a call whose
+    // answer reads geometry first brings every following cross-part link
+    // up to date, in link order, and says so in its own response. An edit
+    // that only queues (Deferrable) does not, so a run of them is not
+    // interleaved with updates of the parts copying what they change.
+    if (!(remote::MethodFlagsOf(request.method) & remote::Deferrable)) {
+      const std::vector<ui::LinkUpdate> took = ui::RefreshLinks(state);
+      if (!took.empty()) {
+        if (!request.linksUpdated.is_array())
+          request.linksUpdated = json::array();
+        for (json& u : ui::LinksUpdatedJson(took))
+          request.linksUpdated.push_back(std::move(u));
+      }
+    }
+
     // A request that would compute on the frame waits instead
     // (remote/RemoteParking.h): a CAM one on its passes, a drawing one on its
     // projection, an exact interference of two named sides on its boolean, a
@@ -1200,6 +1215,13 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         if (request.params.is_object() &&
             request.params.contains("expect_revision") && result.is_object())
           result["revision"] = ActivePartRevision(state);
+        if (request.linksUpdated.is_array() && result.is_object()) {
+          json& took = result["links_updated"];
+          if (!took.is_array())
+            took = json::array();
+          for (const json& u : request.linksUpdated)
+            took.push_back(u);
+        }
         Respond(request.client, request.id, result);
         continue;
       }

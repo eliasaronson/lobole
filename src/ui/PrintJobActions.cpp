@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/PrintJobActions.h"
+#include "ui/DerivedActions.h"
 
 #include "core/Document.h"
 #include "core/PrintAllowance.h"
@@ -293,6 +294,7 @@ BuildPrintJob(AppState& state, const std::vector<JobPlateAsk>& plates,
               const std::optional<json>& projectConfig,
               const std::string& jobName) {
   using std::unexpected;
+  RefreshLinks(state); // the gate: docs/modeling/derived.md#copies-that-keep-up
   if (plates.empty())
     return unexpected("a job has at least one plate");
   if (plates.size() > 1 && !projectConfig)

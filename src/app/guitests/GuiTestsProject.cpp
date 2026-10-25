@@ -7,6 +7,7 @@
 #include "core/Requirements.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/io/CrashReports.h"
 #include "remote/RemoteRequirements.h"
 #include "ui/BackgroundJobs.h"
@@ -1760,29 +1761,58 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
                                            Doc()->GetFeature(0)))
                   .value_or(true));
 
-    // The source grows a second body. Nothing happens to the copy until
-    // asked; the row says it is behind, and the verb retakes it.
+    // The source grows a second body. Showing this tab again is a gate
+    // (docs/modeling/derived.md#copies-that-keep-up): the copy follows, and
+    // the menu bar says so.
     ui::SetActivePart(*s_App, 1);
     ctx->Yield(2);
     AddFixtureSphere(ctx);
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
     ui::SetActivePart(*s_App, 0);
     ctx->Yield(2);
-    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    IM_CHECK(!ui::DerivedStale(*s_App, *dynamic_cast<const DerivedFeature*>(
+                                           Doc()->GetFeature(0)))
+                  .value_or(true));
+    IM_CHECK(s_App->linksNotice.find("updated from Servo") !=
+             std::string::npos);
+
+    // Follow source off (the row's menu): the next change waits. The row
+    // says it is behind, and the verb retakes it.
+    ctx->ItemClick("//###Model/Servo (derived)##0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/###feat_derived_follow");
+    ctx->Yield(2);
+    IM_CHECK(
+        !dynamic_cast<const DerivedFeature*>(Doc()->GetFeature(0))->follow);
+    const auto volume = [] {
+      double v = 0.0;
+      for (const Body& b : Doc()->GetBodies())
+        v += b.shape.Volume();
+      return v;
+    };
+    const double followed = volume();
+    ui::SetActivePart(*s_App, 1);
+    ctx->Yield(2);
+    AddFixtureCylinder(ctx);
+    const double source = volume();
+    IM_CHECK(std::abs(source - followed) > 1e-3);
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    IM_CHECK(std::abs(volume() - followed) < 1e-6);
     IM_CHECK(ui::DerivedStale(*s_App, *dynamic_cast<const DerivedFeature*>(
                                           Doc()->GetFeature(0)))
                  .value_or(false));
     ctx->ItemClick("//###Model/Servo (derived)##0", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/###feat_derived_update");
     ctx->Yield(2);
-    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    IM_CHECK(std::abs(volume() - source) < 1e-6);
     IM_CHECK(!ui::DerivedStale(*s_App, *dynamic_cast<const DerivedFeature*>(
                                            Doc()->GetFeature(0)))
                   .value_or(true));
     // One undo step gives the previous snapshot back.
     ctx->MenuClick("Edit/Undo");
     ctx->Yield(2);
-    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(std::abs(volume() - followed) < 1e-6);
   };
 
   // A ghost belongs to the part that drew on it, and to NOTHING else: in an
@@ -1874,6 +1904,66 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(d->sourcePart, servoId);
     IM_CHECK_EQ(d->sourceName, std::string("Servo"));
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+  };
+
+  // A part that is only a sketch (docs/modeling/derived.md#sketches): the
+  // Derive tool offers its sketches, ticking one copies it, and "Sketch on
+  // it" opens a sketch here on the copy's plane with all of it projected --
+  // a profile, solver-fixed, following the other part.
+  t = IM_REGISTER_TEST(engine, "derived", "a_copied_sketch_is_sketched_on");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ui::AddPart(*s_App, "Lid");
+    ui::SetActivePart(*s_App, 1);
+    ctx->Yield(2);
+    auto outline =
+        std::make_unique<SketchFeature>("Outline", SketchPlane(PlaneType::XY));
+    outline->AddEntity(sketch::Circle{{0.0, 0.0}, 4.0});
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::move(outline)), *Doc());
+    const uint64_t outlineId = Doc()->GetFeature(0)->GetId();
+    const uint64_t lidId = s_App->parts[1].id;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_derive");
+    ctx->Yield(2);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ctx->ItemClick(
+        ("//###ToolWindow/###derive_sketch_" + std::to_string(outlineId))
+            .c_str());
+    ctx->Yield(2);
+    const ImGuiTestItemInfo accept =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    const auto* d = dynamic_cast<const DerivedFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(d != nullptr);
+    IM_CHECK_EQ(d->sourcePart, lidId);
+    IM_CHECK_EQ(d->sketchSnapshot.size(), (size_t)1);
+    IM_CHECK(Doc()->GetBodies().empty()); // a sketch is no body
+
+    s_App->editFeatureId = d->GetId();
+    ctx->Yield(2);
+    ctx->ItemClick(
+        ("//###ToolWindow/###derived_sketch_on_" + std::to_string(outlineId))
+            .c_str());
+    ctx->Yield(2);
+    const uint64_t on = s_App->sketchEdit.activeSketchId;
+    IM_CHECK(on != 0);
+    const auto* sk =
+        dynamic_cast<const SketchFeature*>(Doc()->FindFeatureById(on));
+    IM_CHECK(sk != nullptr);
+    IM_CHECK_EQ(sk->external.size(), (size_t)1);
+    int profileCircles = 0;
+    for (const sketch::Entity& e : sk->entities)
+      if (const auto* c = std::get_if<sketch::Circle>(&e))
+        profileCircles += !c->construction && std::abs(c->radius - 4.0) < 1e-9;
+    IM_CHECK_EQ(profileCircles, 1);
+    s_App->editFeatureId = 0;
   };
 
   // Opening a project off the frame

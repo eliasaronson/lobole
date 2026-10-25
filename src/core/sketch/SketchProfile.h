@@ -237,6 +237,16 @@ std::vector<Entity> ProjectFaceBoundary(const CADShape& shape, int faceIndex,
 std::vector<Entity> ProjectElement(const CADShape& shape, ExternalKind kind,
                                    int index, const SketchPlane& plane);
 
+// One entity drawn on `from`, put onto `to`: exactly (same type, same
+// curve) when the planes coincide -- either facing, a mirrored pair turning
+// arcs the other way round -- else its shadow, as ProjectElement projects an
+// edge (a point to a point). Keeps the entity's construction flag; the id is
+// 0. Nullopt for what has no shadow there (a line seen end on) and for text,
+// which is not projected. What a sketch reads a Derived's copied sketch
+// through (docs/modeling/derived.md#sketches).
+std::optional<Entity> ProjectEntity(const Entity& e, const SketchPlane& from,
+                                    const SketchPlane& to);
+
 // Why a profile consumer (extrude, revolve) got nothing from single-stroke
 // text, naming the label and its font: a region that picks one, or a sketch
 // whose only would-be profile is one. Empty when no stroke text is involved.

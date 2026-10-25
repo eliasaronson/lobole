@@ -597,6 +597,20 @@ void DrawNotices(AppState& state) {
   std::string restartedTip;
   // A rebuild in place (docs/rendering/README.md#rebuilding-the-device) is
   // said once, for a while, and then is only in About and ping.
+  // A gate brought cross-part links up to date
+  // (docs/modeling/derived.md#reporting): said for a while, then only in
+  // the parts' trees and undo histories.
+  std::string linksTip;
+  if (state.linksNoticeUntil == -2.0)
+    state.linksNoticeUntil = ImGui::GetTime() + 20.0;
+  if (!state.linksNotice.empty() && ImGui::GetTime() < state.linksNoticeUntil) {
+    linksTip = state.linksNotice +
+               ". Each part's update is one step in that part's undo "
+               "history; undone, it is taken again at the next gate unless "
+               "the copy's Follow source is off.";
+    notices.push_back(
+        {"Linked copies updated###links_notice", linksTip.c_str()});
+  }
   if (state.rendererRestartedNoticeUntil == -2.0)
     state.rendererRestartedNoticeUntil = ImGui::GetTime() + 20.0;
   if (!state.renderer.lost &&

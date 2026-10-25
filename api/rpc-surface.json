@@ -274,6 +274,7 @@
   "set_cam_setup": ["chuck", "fit_arcs", "flip", "grip_mm", "has_rotary_axis", "held_in", "holding", "id", "job", "lay_face_up", "machine", "name", "order", "origin_at", "post", "reach_offset", "rotary", "rotation_a", "safe_z", "split_output", "stock", "tailstock", "tool"],
   "set_camera": ["direction", "distance", "eye", "target", "up"],
   "set_configuration": ["id", "mate_overrides", "name", "parameter_overrides", "suppressed_features", "suppressed_mates", "suppressed_occurrences", "suppressed_relations", "unsuppressed_features"],
+  "set_derived_follow": ["feature_id", "follow"],
   "set_drawing_sheet": ["landscape", "size", "title_block"],
   "set_drawing_view": ["base_view", "configuration", "detail", "hidden", "id", "name", "position", "quality", "rotation_deg", "scale", "section", "show_hidden"],
   "set_explode": ["factor", "view"],

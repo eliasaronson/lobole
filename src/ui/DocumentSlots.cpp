@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/DocumentSlots.h"
+#include "ui/DerivedActions.h" // RefreshLinks (the tab gate)
 #include "ui/DrawingActions.h"
 #include "ui/RendererSync.h"
 #include "ui/ViewActions.h"
@@ -835,6 +836,10 @@ void SetActivePart(AppState& state, size_t index) {
   ActivateSlot(state, index);
   LOG_INFO("tab: {}", state.parts[index].name);
   ResetActiveTabUiState(state);
+  // The gate (docs/modeling/derived.md#copies-that-keep-up): a tab shown
+  // shows its copies of other parts as those parts are now, and so does
+  // every tab it reads.
+  RefreshLinks(state);
   // Part→assembly propagation (A4): entering an assembly whose referenced
   // parts regenerated since its last solve re-solves it, so mates track part
   // edits without an explicit solve_assembly.

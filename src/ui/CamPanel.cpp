@@ -7,6 +7,7 @@
 
 #include "ui/BackgroundJobs.h"
 #include "ui/CamPanel.h"
+#include "ui/DerivedActions.h"
 
 #include "core/cam/CamEngrave.h"
 #include "ui/Icons.h"
@@ -225,6 +226,7 @@ void SyncCamResultOwner(AppState& state) {
 }
 
 void RefreshCamToolpaths(AppState& state) {
+  RefreshLinks(state); // the gate: docs/modeling/derived.md#copies-that-keep-up
   SwapCamResultOwner(state);
   // Moves are kept for a pass still cutting only from the SAME setup's last
   // generate: operation ids count from the same start in every job, so

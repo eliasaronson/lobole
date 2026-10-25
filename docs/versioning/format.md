@@ -328,6 +328,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | Cross-part links ([derived](../modeling/derived.md#sketches)): a Derived copies sketches (`sketches`, `sketch_names`; `snapshot.sketches` holds each one's plane and solved entities), carries `follow` (absent = true), and records `snapshot.source_key`, the content key of what it copied, in place of `source_chain_hash` (read and dropped; the key is then computed from the snapshot). A Sketch whose `plane_ref` is a Derived names the copied sketch it stands on in `plane_ref_sketch`. Golden `vNEXT-derived-sketch`. |
 
 ## Paths in a project
 

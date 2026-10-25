@@ -3,10 +3,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The Derived feature over the RPC, headless (docs/modeling/derived.md):
-a jaw derives a servo as a ghost; the refusals in words; stale reported and
-never auto-resolved; update_derived as one undo step; derive_occurrence in
-an in-context edit lands the copy where the neighbour is; the project
-round-trips through disk with the copy intact.
+a jaw derives a servo as a ghost; the refusals in words; a copy that does
+not follow reports stale and stays; update_derived as one undo step;
+derive_occurrence in an in-context edit lands the copy where the neighbour
+is; the project round-trips through disk with the copy intact. Then the
+links that follow (docs/modeling/derived.md#copies-that-keep-up): a sketch
+of one part copied into another and padded there, an edit to it carried
+over by the next call that reads geometry -- export_step answering
+`links_updated`, a broken feature downstream named in it.
 """
 import os
 import sys
@@ -49,6 +53,70 @@ def bodies(d):
     return d.call("get_state")["bodies"]
 
 
+XY = {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]}
+
+
+def links(d, tmp):
+    """A sketch copied across parts, and the gate that keeps it up."""
+    d.call("new_project")
+    d.call("add_part", name="plate")
+    plate = part_id(d, "plate")
+    sk = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Outline", "plane": XY,
+        "entities": [{"type": "circle", "center": [0, 0], "radius": 5}]})
+    sketch_id, circle = sk["id"], sk["entity_ids"][0]
+    d.call("add_part", name="gasket")
+    refused(d, "add_feature", "no sketch named 'Rim'", feature={
+        "type": "Derived", "name": "x", "source_part": plate,
+        "sketch_names": ["Rim"]})
+    did = d.call("add_feature", feature={
+        "type": "Derived", "name": "outline", "source_part": plate,
+        "sketches": [sketch_id]})["id"]
+    on = d.call("add_feature", feature={
+        "type": "Sketch", "name": "On outline", "plane": XY,
+        "plane_ref": did})["id"]
+    d.call("project_geometry", sketch_id=on, feature_id=did,
+           element=f"{did}/{sketch_id}/{circle}")
+    pad = d.call("add_feature", feature={
+        "type": "Extrude", "name": "Pad", "sketch_id": on, "distance": 2})
+    expect(pad["regen"]["ok"], pad)
+    vol = sum(b["volume_mm3"] for b in bodies(d))
+    expect(abs(vol - 3.14159265 * 25 * 2) < 1e-3, bodies(d))
+
+    # Edit the plate's sketch, then ask the gasket's export: it is taken.
+    d.call("set_active_part", part="plate")
+    row = next(f for f in d.call("get_state")["features"]
+               if f["id"] == sketch_id)
+    row["entities"][0]["radius"] = 6
+    d.call("modify_feature", feature_id=sketch_id, feature=row)
+    out = d.call("export_step", part="gasket",
+                 path=os.path.join(tmp, "gasket.step"))
+    took = out.get("links_updated", [])
+    expect([u["part"] for u in took] == ["gasket"]
+           and took[0]["features"] == [did] and took[0]["broken"] == [],
+           f"export_step did not take the link first: {out}")
+    d.call("set_active_part", part="gasket")
+    vol = sum(b["volume_mm3"] for b in bodies(d))
+    expect(abs(vol - 3.14159265 * 36 * 2) < 1e-3, f"not followed: {bodies(d)}")
+
+    # A downstream feature the update breaks is named where it happened.
+    rim = d.call("add_feature", feature={
+        "type": "Extrude", "name": "Rim cut", "sketch_id": on,
+        "distance": 1, "mode": "cut"})
+    expect(rim["regen"]["ok"], rim)
+    d.call("set_active_part", part="plate")
+    row = next(f for f in d.call("get_state")["features"]
+               if f["id"] == sketch_id)
+    row["entities"] = []
+    d.call("modify_feature", feature_id=sketch_id, feature=row)
+    st = d.call("get_state")  # the plate's; the gate runs before it
+    took = st.get("links_updated", [])
+    expect(took and took[0]["part"] == "gasket" and took[0]["broken"],
+           f"the broken feature is not reported: {took}")
+    names = {b["name"] for b in took[0]["broken"]}
+    expect("On outline" in names, f"broken names: {names}")
+
+
 def main():
     binary = sys.argv[1]
     env = dict(os.environ)
@@ -78,13 +146,16 @@ def main():
 
         # The copy: one ghost body, the servo's volume, weightless, not
         # exportable, fresh.
+        # follow: false -- this copy is the one that waits for update_derived.
         r = d.call("add_feature", feature={
-            "type": "Derived", "name": "servo copy", "source_part": servo})
+            "type": "Derived", "name": "servo copy", "source_part": servo,
+            "follow": False})
         did = r["id"]
         expect(r["regen"]["ok"], f"derived did not regenerate: {r['regen']}")
         row = derived_row(d)
         expect(row["stale"] is False, f"fresh copy reads {row['stale']!r}")
         expect(row["source_name"] == "servo", row)
+        expect(row["follow"] is False, row)
         b = bodies(d)
         expect(len(b) == 1 and abs(b[0]["volume_mm3"] - 1000.0) < 1e-6, b)
         refused(d, "mass_properties", "reference: false")
@@ -202,8 +273,9 @@ def main():
             "type": "Derived", "name": "lug only", "source_part": servo,
             "body_names": ["Lug"]})
         expect(r["regen"]["ok"], r)
-        lug = [b for b in bodies(d) if b["name"].endswith("Lug")]
-        expect(len(lug) == 1 and abs(lug[0]["volume_mm3"] - 125.0) < 1e-6,
+        lug = [b for b in bodies(d) if b["created_by"] == r["id"]]
+        expect(len(lug) == 1 and lug[0]["name"].endswith("Lug") and
+               abs(lug[0]["volume_mm3"] - 125.0) < 1e-6,
                f"only the named body came across: {bodies(d)}")
         refused(d, "add_feature", "no body named 'Flange'", feature={
             "type": "Derived", "name": "x", "source_part": servo,
@@ -232,14 +304,16 @@ def main():
                    if f["name"] == "bare servo")
         expect(row.get("configuration") == bare, row)
         expect(row["stale"] is False, f"a configured copy reads stale: {row}")
-        mine = [b for b in bodies(d) if b["name"].endswith("Lug")]
-        expect(len(mine) == 1, f"the bare copy brought a lug: {bodies(d)}")
+        mine = [b for b in bodies(d) if b["name"].endswith("Lug") and
+                b["created_by"] == r["id"]]
+        expect(mine == [], f"the bare copy brought a lug: {bodies(d)}")
         # The source's tab never left its authored model.
         d.call("set_active_part", part="servo")
         expect(d.call("list_configurations")["active"] == 0,
                "taking the copy switched the source's configuration")
         expect(len(bodies(d)) == 2, bodies(d))
 
+        links(d, tmp)
         print("derived_smoke: ok")
     finally:
         app.terminate()

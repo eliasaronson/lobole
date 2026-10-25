@@ -216,9 +216,24 @@ def request_schema(params, vocab):
     return _object_schema(params, False, vocab)
 
 
+# What the dispatcher puts on ANY answer, whatever its row says: the
+# cross-part links the gate before the call brought up to date
+# (docs/modeling/derived.md#reporting).
+LINKS_UPDATED = {"type": "array", "items": {
+    "type": "object",
+    "properties": {"part": {"type": "string"},
+                   "part_id": {"type": "integer"},
+                   "features": {"type": "array", "items": {"type": "integer"}},
+                   "broken": {"type": "array", "items": {"type": "object"}}},
+    "required": ["part", "part_id", "features", "broken"],
+    "additionalProperties": False}}
+
+
 def result_schema(parsed, vocab):
     """The JSON Schema an answer is held to, from parse_result_column."""
-    return _object_schema(parsed["entries"], parsed["open"], vocab)
+    out = _object_schema(parsed["entries"], parsed["open"], vocab)
+    out["properties"].setdefault("links_updated", LINKS_UPDATED)
+    return out
 
 
 def _object_schema(params, is_open, vocab):

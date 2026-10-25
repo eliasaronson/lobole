@@ -4,6 +4,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/ElementHistory.h"
 #include "core/ModelSpace.h"
+#include "core/features/DerivedFeature.h"
 
 #include "common/Logger.h"
 #include "core/Angles.h"
@@ -1349,8 +1350,66 @@ void SketchFeature::RemoveExternalGeometry(size_t extIndex) {
   external.erase(external.begin() + extIndex);
 }
 
+namespace {
+
+// Refreshes `ext`'s generated entities in place from `proj`: reuses the
+// existing ids (so a user's constraints to them survive), creating/deleting
+// entities only when the projected count changes.
+void RefreshGenerated(SketchFeature& sk, sketch::ExternalGeom& ext,
+                      std::vector<sketch::Entity> proj) {
+  for (size_t i = 0; i < proj.size(); i++) {
+    const size_t existing =
+        i < ext.genIds.size() ? sk.IndexOfEntity(ext.genIds[i]) : SIZE_MAX;
+    if (existing != SIZE_MAX) {
+      sketch::SetEntityId(proj[i], ext.genIds[i]);
+      sk.entities[existing] = std::move(proj[i]);
+    } else {
+      const uint32_t id = sk.AddEntity(std::move(proj[i]));
+      if (i < ext.genIds.size())
+        ext.genIds[i] = id;
+      else
+        ext.genIds.push_back(id);
+    }
+  }
+  while (ext.genIds.size() > proj.size()) {
+    sk.DeleteEntity(ext.genIds.back());
+    ext.genIds.pop_back();
+  }
+}
+
+} // namespace
+
 bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
   for (auto& ext : external) {
+    // An entity of another part's sketch, copied by a Derived
+    // (docs/modeling/derived.md#sketches): put onto this plane as it is,
+    // construction or not, so a profile can be drawn of it. Solver-fixed
+    // like every projection; its source owns it.
+    if (ext.kind == sketch::ExternalKind::Edge) {
+      if (const auto* dv = dynamic_cast<const DerivedFeature*>(
+              ctx.FindById(ext.ref.featureId))) {
+        const DerivedSketch* copied = nullptr;
+        const sketch::Entity* entity = nullptr;
+        if (dv->ResolveSketchEntity(ext.ref.name, copied, entity)) {
+          std::vector<sketch::Entity> proj;
+          if (auto e = sketch::ProjectEntity(*entity, dv->PlacedPlane(*copied),
+                                             plane))
+            proj.push_back(std::move(*e));
+          RefreshGenerated(*this, ext, std::move(proj));
+          continue;
+        }
+        if (!dv->sketchSnapshot.empty() &&
+            std::count(ext.ref.name.begin(), ext.ref.name.end(), '/') == 2) {
+          SetError("external geometry '" + ext.ref.name +
+                   "' names no entity "
+                   "of the sketches '" +
+                   dv->GetName() +
+                   "' copies (the source sketch lost it; break the link or "
+                   "re-project)");
+          return false;
+        }
+      }
+    }
     // A feature can create SEVERAL bodies (an Import, a Derived copy of a
     // multi-body part): the element lives on whichever of them resolves the
     // name, not on the first one. Taking the first left every element of a
@@ -1384,28 +1443,9 @@ bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
     }
     std::vector<sketch::Entity> proj =
         sketch::ProjectElement(body->shape, ext.kind, *idx, plane);
-    // Refresh in place: reuse the existing generated ids (so a user's
-    // constraints to them survive), creating/deleting entities only when the
-    // projected count changes.
-    for (size_t i = 0; i < proj.size(); i++) {
-      sketch::SetConstruction(proj[i], true);
-      const size_t existing =
-          i < ext.genIds.size() ? IndexOfEntity(ext.genIds[i]) : SIZE_MAX;
-      if (existing != SIZE_MAX) {
-        sketch::SetEntityId(proj[i], ext.genIds[i]);
-        entities[existing] = std::move(proj[i]);
-      } else {
-        const uint32_t id = AddEntity(std::move(proj[i]));
-        if (i < ext.genIds.size())
-          ext.genIds[i] = id;
-        else
-          ext.genIds.push_back(id);
-      }
-    }
-    while (ext.genIds.size() > proj.size()) {
-      DeleteEntity(ext.genIds.back());
-      ext.genIds.pop_back();
-    }
+    for (sketch::Entity& e : proj)
+      sketch::SetConstruction(e, true);
+    RefreshGenerated(*this, ext, std::move(proj));
   }
   return true;
 }
@@ -1524,9 +1564,30 @@ bool SketchFeature::Execute(RegenContext& ctx) {
       plane = sk->plane;
     } else if (const auto* fr = dynamic_cast<const FrameFeature*>(ref)) {
       plane = SketchPlane(fr->Origin(), fr->ZAxis(), fr->XAxis());
+    } else if (const auto* dv = dynamic_cast<const DerivedFeature*>(ref)) {
+      // Another part's sketch, copied (docs/modeling/derived.md#sketches):
+      // its plane, where the copy is placed, so this sketch follows it.
+      const DerivedSketch* copied = dv->FindSketch(planeRefSketch);
+      if (copied == nullptr) {
+        std::string have;
+        for (const DerivedSketch& c : dv->sketchSnapshot)
+          have += (have.empty() ? "" : ", ") + c.name + " (" +
+                  std::to_string(c.sourceSketch) + ")";
+        SetError("the plane this sketch is on is a copied sketch of '" +
+                 dv->GetName() + "' that it no longer carries (" +
+                 (planeRefSketch == 0
+                      ? std::string("it copies several, and "
+                                    "none was named")
+                      : "sketch " + std::to_string(planeRefSketch)) +
+                 "; it copies: " + (have.empty() ? "no sketch" : have) + ")");
+        return false;
+      }
+      plane = dv->PlacedPlane(*copied);
     } else {
       SetError("the plane this sketch is on, '" + ref->GetName() + "', is a " +
-               ref->TypeName() + ", not a DatumPlane, Sketch or Frame");
+               ref->TypeName() +
+               ", not a DatumPlane, Sketch, Frame or a Derived copy of a "
+               "sketch");
       return false;
     }
   }

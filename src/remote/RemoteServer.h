@@ -135,6 +135,9 @@ private:
     uint64_t connection = 0;
     // Came back from parking (below): dispatch it, do not park it again.
     bool resumed = false;
+    // What the gate before it took (ui::RefreshLinks), answered as the
+    // response's `links_updated` (docs/modeling/derived.md#reporting).
+    nlohmann::json linksUpdated;
   };
 
   // A request answered LATER, while the frame and other clients carry on:

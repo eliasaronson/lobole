@@ -1664,13 +1664,21 @@ void DrawDerivedParams(AppState& state, DerivedFeature& d, size_t index,
   } else {
     ImGui::Text("Source: %s (id %llu)", d.sourceName.c_str(),
                 static_cast<unsigned long long>(d.sourcePart));
-    const std::optional<bool> stale = DerivedStale(state, d);
-    if (!stale.has_value())
+    std::string staleWhy;
+    const std::optional<bool> stale =
+        DerivedStale(state, d, state.document.get(), &staleWhy);
+    if (!stale.has_value()) {
       ImGui::TextDisabled("(source not loaded; freshness unknown)");
-    else if (*stale)
-      ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f),
-                         ICON_FA_TRIANGLE_EXCLAMATION
-                         " Stale: the source has changed since this copy");
+    } else if (*stale) {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(
+          ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "%s",
+          (ICON_FA_TRIANGLE_EXCLAMATION " Stale: " +
+           (staleWhy.empty() ? std::string("the source has changed")
+                             : staleWhy))
+              .c_str());
+      ImGui::PopTextWrapPos();
+    }
   }
   const std::vector<DerivedSource> candidates = DerivedSourceCandidates(state);
   if (candidates.empty()) {
@@ -1704,11 +1712,88 @@ void DrawDerivedParams(AppState& state, DerivedFeature& d, size_t index,
       }
     }
   }
+  // The source's sketches (docs/modeling/derived.md#sketches): ticking one
+  // copies it, and then the bodies only when they are named too.
+  // Before a source is chosen, every candidate's sketches are offered: a
+  // part that is only a sketch has no body to be chosen by.
+  std::vector<uint64_t> offering;
+  if (d.sourcePart != 0)
+    offering.push_back(d.sourcePart);
+  else
+    for (const DerivedSource& c : candidates)
+      if (c.occurrenceId == 0)
+        offering.push_back(c.slotId);
+  for (uint64_t from : offering) {
+    const std::vector<SourceSketch> sketches = SourceSketches(state, from);
+    if (!sketches.empty()) {
+      ImGui::TextDisabled(
+          "%s", (d.sourcePart != 0
+                     ? std::string("Sketches to copy (then bodies only by "
+                                   "name):")
+                     : "Sketches of " +
+                           std::string(std::find_if(
+                                           candidates.begin(), candidates.end(),
+                                           [&](const DerivedSource& c) {
+                                             return c.slotId == from;
+                                           })
+                                           ->name) +
+                           ":")
+                    .c_str());
+      for (const SourceSketch& sk : sketches) {
+        bool on = std::find(d.sketches.begin(), d.sketches.end(), sk.id) !=
+                  d.sketches.end();
+        const std::string label =
+            sk.name + "###derive_sketch_" + std::to_string(sk.id);
+        if (!ImGui::Checkbox(label.c_str(), &on))
+          continue;
+        nlohmann::json before = DocumentIO::FeatureToJson(d);
+        DerivedFeature trial = d;
+        if (on)
+          trial.sketches.push_back(sk.id);
+        else
+          std::erase(trial.sketches, sk.id);
+        DerivedSource same;
+        same.slotId = from;
+        if (const std::string why = PointDerivedAt(state, trial, same);
+            !why.empty()) {
+          state.sketchEdit.actionMsg = why;
+          continue;
+        }
+        if (d.GetName() == "Derived" && !trial.sketchSnapshot.empty())
+          trial.SetName(trial.sketchSnapshot.front().name + " from " +
+                        trial.sourceName);
+        d = std::move(trial);
+        CommitDiscrete(state, d, before, index, commit);
+        return; // the feature object may have been replaced
+      }
+    }
+  }
   HandleEdit(state, d,
              ImGui::Checkbox("Reference (a ghost to draw on, not this "
                              "part's matter)",
                              &d.reference),
              index, commit);
+  HandleEdit(state, d,
+             ImGui::Checkbox("Follow source###derived_follow", &d.follow),
+             index, commit);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Kept up with the source on its own: retaken when a "
+                      "tab is shown, before a save or an export. Off, it "
+                      "stays as taken until Update from source.");
+  // A sketch of this part on a copied one, with all of it projected.
+  if (commit)
+    for (const DerivedSketch& copied : d.sketchSnapshot) {
+      const std::string label = "Sketch on " + copied.name +
+                                "###derived_sketch_on_" +
+                                std::to_string(copied.sourceSketch);
+      if (ImGui::Button(label.c_str())) {
+        if (const std::string why =
+                SketchOnDerived(state, d.GetId(), copied.sourceSketch);
+            !why.empty())
+          state.sketchEdit.actionMsg = why;
+        return; // the session moved on to the new sketch
+      }
+    }
   if (d.sourcePart != 0 && ImGui::Button("Update from source")) {
     if (const std::string why = UpdateDerived(state, d.GetId()); !why.empty())
       state.sketchEdit.actionMsg = why;

@@ -6,6 +6,7 @@
 
 #include "core/Angles.h"
 #include "core/Feature.h"
+#include "core/InputHash.h"
 #include "core/ThreadStandards.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BearingFeature.h"
@@ -1120,6 +1121,8 @@ json FeatureToJson(const Feature& feature) {
     if (sk->planeRef != 0) { // v12: tracked datum plane (omit when baked)
       j["plane_ref"] = sk->planeRef;
     }
+    if (sk->planeRefSketch != 0) // vNEXT: which sketch of a Derived's copies
+      j["plane_ref_sketch"] = sk->planeRefSketch;
     if (sk->faceRef.IsSet()) { // v16: attached body face (toponaming)
       j["face_ref"] = {{"feature_id", sk->faceRef.featureId},
                        {"element", sk->faceRef.name}};
@@ -1365,8 +1368,35 @@ json FeatureToJson(const Feature& feature) {
       }
       bodies.push_back(std::move(bj));
     }
-    j["snapshot"] = {{"source_chain_hash", d->sourceChainHash},
-                     {"bodies", std::move(bodies)}};
+    if (!d->sketches.empty()) // vNEXT
+      j["sketches"] = d->sketches;
+    if (!d->sketchNames.empty()) // vNEXT
+      j["sketch_names"] = d->sketchNames;
+    if (!d->follow) // vNEXT; absent = follows
+      j["follow"] = false;
+    json snap = {{"bodies", std::move(bodies)}};
+    // vNEXT: the content key of what the snapshot holds, in place of the
+    // source's chain hash (a std::hash of its JSON, which moved with the
+    // standard library and with every key a build added).
+    if (d->sourceKey != 0)
+      snap["source_key"] = inputhash::Hex(d->sourceKey);
+    if (!d->sketchSnapshot.empty()) {
+      json sketches = json::array();
+      for (const DerivedSketch& sk : d->sketchSnapshot) {
+        json entities = json::array();
+        for (const sketch::Entity& e : sk.entities)
+          entities.push_back(EntityToJson(e));
+        sketches.push_back({{"source_id", sk.sourceSketch},
+                            {"name", sk.name},
+                            {"plane",
+                             {{"origin", Vec3ToJson(sk.plane.GetOrigin())},
+                              {"normal", Vec3ToJson(sk.plane.GetNormal())},
+                              {"uAxis", Vec3ToJson(sk.plane.GetUAxis())}}},
+                            {"entities", std::move(entities)}});
+      }
+      snap["sketches"] = std::move(sketches);
+    }
+    j["snapshot"] = std::move(snap);
   } else if (auto* dp = dynamic_cast<const DatumPlaneFeature*>(&feature)) {
     j["kind"] = DatumPlaneKindToString(dp->kind);
     // Parent (Offset/Angled): earlier datum by id, or a base plane.
@@ -2117,12 +2147,21 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "hundreds one Import creates), placement?: {position [x,y,z], orientation "
      "[x,y,z,w]}, reference?: true (a ghost to draw on — absent from mass, "
      "BOM, export, CAM and booleans) | false (an ordinary body of this "
-     "part). A COPY of another part's bodies, taken when the feature is "
-     "added and on update_derived; regeneration reads the snapshot, never "
-     "the source, and get_state reports `stale` when the source has moved "
+     "part); sketches?: [source sketch ids] and/or sketch_names?: [names] "
+     "-- copy those sketches (a Derived that names a sketch copies only the "
+     "bodies it names too); a sketch of this part stands on a copied one "
+     "with plane_ref = this feature's id (+ plane_ref_sketch) and projects "
+     "its entities with project_geometry {sketch_id, feature_id, element: "
+     "\"<this id>/<sketch id>/<entity id>\", kind: edge}; follow?: true "
+     "(default: retaken at the gates -- a tab shown, an RPC that reads "
+     "geometry, a save or export -- reported as `links_updated`) | false "
+     "(kept as taken until update_derived). A COPY of another part's "
+     "bodies and sketches; regeneration reads the snapshot, never the "
+     "source, and get_state reports `stale` when the source has moved "
      "(docs/modeling/derived.md)",
      "source_part:int>=0, configuration?:int|string, bodies?:int[], "
-     "body_names?:string[], placement?:object, reference?:bool, "
+     "body_names?:string[], sketches?:int[], sketch_names?:string[], "
+     "follow?:bool, placement?:object, reference?:bool, "
      "snapshot?:any, source_name?:string"},
     {"Template", 161,
      "template (a name in the project's library: list_templates), "
@@ -2439,8 +2478,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                           std::less<>>
         kTypeKeys = {
             {"Sketch",
-             {"plane", "plane_ref", "face_ref", "entities", "constraints",
-              "derived_ops", "external", "images", "next_image_id",
+             {"plane", "plane_ref", "plane_ref_sketch", "face_ref", "entities",
+              "constraints", "derived_ops", "external", "images",
+              "next_image_id",
               // ignored since ids are minted collision-resistantly; older
               // files still carry it
               "next_entity_id"}},
@@ -2475,7 +2515,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
              {"template", "revision", "on", "parameters", "ids", "definition"}},
             {"Derived",
              {"source_part", "source_name", "configuration", "bodies",
-              "body_names", "placement", "reference", "snapshot"}},
+              "body_names", "sketches", "sketch_names", "follow", "placement",
+              "reference", "snapshot"}},
             {"DatumPlane",
              {"kind", "parent_id", "base_plane", "offset", "offset_expr",
               "flip", "axis", "angle_deg", "angle_expr", "points"}},
@@ -2835,6 +2876,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     sk->planeRef =
         j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
+    sk->planeRefSketch = j.value("plane_ref_sketch", uint64_t{0}); // vNEXT
     if (j.contains("face_ref")) {          // v16: attached body face
       const json& fr = j.at("face_ref");
       refKeys(fr, "face_ref");
@@ -3045,6 +3087,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       d->bodies = UniqueIds(j.at("bodies"), "bodies");
     if (j.contains("body_names")) // v85
       d->bodyNames = j.at("body_names").get<std::vector<std::string>>();
+    if (j.contains("sketches")) // vNEXT
+      d->sketches = UniqueIds(j.at("sketches"), "sketches");
+    if (j.contains("sketch_names")) // vNEXT
+      d->sketchNames = j.at("sketch_names").get<std::vector<std::string>>();
+    d->follow = j.value("follow", true); // vNEXT
     if (j.contains("placement")) {
       const json& pl = j.at("placement");
       readctx::RefuseUnknownKeys(pl, {"position", "orientation"}, "placement");
@@ -3056,9 +3103,53 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     d->reference = j.value("reference", true);
     if (j.contains("snapshot")) {
       const json& snap = j.at("snapshot");
-      readctx::RefuseUnknownKeys(snap, {"source_chain_hash", "bodies"},
-                                 "snapshot");
-      d->sourceChainHash = snap.value("source_chain_hash", size_t{0});
+      // `source_chain_hash` (before vNEXT) is read and dropped: the key is
+      // then computed from the snapshot itself (derived::StoredKey).
+      readctx::RefuseUnknownKeys(
+          snap, {"source_chain_hash", "source_key", "bodies", "sketches"},
+          "snapshot");
+      if (snap.contains("source_key") &&
+          !inputhash::FromHex(snap.at("source_key").get<std::string>(),
+                              d->sourceKey))
+        throw std::runtime_error("Derived '" + name + "': source_key '" +
+                                 snap.at("source_key").get<std::string>() +
+                                 "' is not 0x and 16 hex digits");
+      for (const json& sj : snap.value("sketches", json::array())) {
+        readctx::RefuseUnknownKeys(
+            sj, {"source_id", "name", "plane", "entities"}, "snapshot sketch");
+        DerivedSketch ds;
+        ds.sourceSketch = sj.at("source_id").get<uint64_t>();
+        ds.name = sj.value("name", std::string{});
+        const json& pl = sj.at("plane");
+        readctx::RefuseUnknownKeys(pl, {"origin", "normal", "uAxis"},
+                                   "snapshot sketch plane");
+        RequirePlaneFrame(Vec3FromJson(pl.at("normal")),
+                          Vec3FromJson(pl.at("uAxis")),
+                          "snapshot sketch plane");
+        ds.plane = SketchPlane(Vec3FromJson(pl.at("origin")),
+                               Vec3FromJson(pl.at("normal")),
+                               Vec3FromJson(pl.at("uAxis")));
+        std::set<uint32_t> ids;
+        for (const json& ej : sj.value("entities", json::array())) {
+          sketch::Entity e = EntityFromJson(ej);
+          // Projections name an entity by its id: two of one id would be
+          // one name for two curves.
+          if (!ids.insert(sketch::EntityId(e)).second)
+            throw std::runtime_error("Derived '" + name + "': copied sketch '" +
+                                     ds.name + "' holds entity id " +
+                                     std::to_string(sketch::EntityId(e)) +
+                                     " twice");
+          ds.entities.push_back(std::move(e));
+        }
+        if (std::any_of(d->sketchSnapshot.begin(), d->sketchSnapshot.end(),
+                        [&](const DerivedSketch& o) {
+                          return o.sourceSketch == ds.sourceSketch;
+                        }))
+          throw std::runtime_error("Derived '" + name +
+                                   "': its snapshot holds sketch " +
+                                   std::to_string(ds.sourceSketch) + " twice");
+        d->sketchSnapshot.push_back(std::move(ds));
+      }
       // A body written twice, whole, is a copy no source has (a damaged
       // file grown to twenty thousand of one took seconds to read).
       std::set<std::string> seenBodies;

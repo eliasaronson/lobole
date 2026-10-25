@@ -6,6 +6,7 @@
 #include "core/cam/CamToolpath.h"
 
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h" // PartDocById
 #include "ui/BackgroundJobs.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/DocumentSlots.h"
@@ -31,14 +32,7 @@ const cam::JobDocument* ActiveJob(const AppState& state) {
 }
 
 Document* JobSourceDocument(AppState& state, uint64_t sourceDocId) {
-  for (size_t i = 0; i < state.parts.size(); i++) {
-    if (state.parts[i].id != sourceDocId ||
-        state.parts[i].kind != DocKind::Part)
-      continue;
-    return static_cast<int>(i) == state.activePart ? state.document.get()
-                                                   : state.parts[i].doc.get();
-  }
-  return nullptr;
+  return PartDocById(state, sourceDocId); // the one part resolver (audited)
 }
 
 uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId) {

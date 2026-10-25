@@ -30,6 +30,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "core/sketch/SketchProfile.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -138,7 +139,7 @@ TEST_CASE("a derived part regenerates from its snapshot with the source absent",
     CHECK(d->sourcePart == 7);
     CHECK(d->sourceName == "Servo");
     CHECK(d->snapshot.size() == 2);
-    CHECK(d->sourceChainHash != 0);
+    CHECK(d->sourceKey != 0);
     std::error_code ec;
     fs::remove_all(path, ec);
   }
@@ -164,11 +165,6 @@ TEST_CASE("update after the source changes replaces the geometry, clears the "
           "stale flag, and undoes",
           "[derived]") {
   auto source = MakeSource();
-  std::map<uint64_t, const Document*> parts{{7, source.get()}};
-  const derived::PartResolver resolve = [&](uint64_t id) -> const Document* {
-    const auto it = parts.find(id);
-    return it == parts.end() ? nullptr : it->second;
-  };
 
   Document host;
   CommandStack commands;
@@ -178,17 +174,14 @@ TEST_CASE("update after the source changes replaces the geometry, clears the "
 
   auto* feature = dynamic_cast<DerivedFeature*>(host.FindFeatureById(did));
   REQUIRE(feature);
-  REQUIRE(derived::IsStale(*feature, resolve) == std::optional<bool>{false});
-  CHECK(!derived::IsStale(*feature, [](uint64_t) -> const Document* {
-           return nullptr;
-         }).has_value()); // source not loaded: unknown, not stale
+  REQUIRE(!derived::IsStale(*feature, *source, host));
 
   // The source grows. Nothing happens to the copy until asked (the FEM rule).
   auto* box = dynamic_cast<BoxFeature*>(source->GetFeature(0));
   REQUIRE(box);
   box->width = 40.0;
   REQUIRE(source->Regenerate());
-  CHECK(derived::IsStale(*feature, resolve) == std::optional<bool>{true});
+  CHECK(derived::IsStale(*feature, *source, host));
   REQUIRE(host.Regenerate());
   CHECK_THAT(VolumeOf(host, did), WithinRel(before, 1e-9));
 
@@ -206,13 +199,13 @@ TEST_CASE("update after the source changes replaces the geometry, clears the "
              WithinRel(before + 1000.0, 1e-6)); // 20 more mm of 10 x 5
   feature = dynamic_cast<DerivedFeature*>(host.FindFeatureById(did));
   REQUIRE(feature);
-  CHECK(derived::IsStale(*feature, resolve) == std::optional<bool>{false});
+  CHECK(!derived::IsStale(*feature, *source, host));
 
   commands.Undo(host);
   CHECK_THAT(VolumeOf(host, did), WithinRel(before, 1e-9));
   feature = dynamic_cast<DerivedFeature*>(host.FindFeatureById(did));
   REQUIRE(feature);
-  CHECK(derived::IsStale(*feature, resolve) == std::optional<bool>{true});
+  CHECK(derived::IsStale(*feature, *source, host));
   commands.Redo(host);
   CHECK_THAT(VolumeOf(host, did), WithinRel(before + 1000.0, 1e-6));
 }
@@ -473,10 +466,8 @@ TEST_CASE("the v133 derived-configuration golden builds from this recipe",
   // not moved, while its authored model's tip is a different hash.
   const auto* taken = dynamic_cast<const DerivedFeature*>(host.GetFeature(0));
   REQUIRE(taken);
-  CHECK(derived::IsStale(*taken, [&](uint64_t) { return &configured; }) ==
-        std::optional<bool>{false});
-  CHECK(derived::IsStale(*taken, [&](uint64_t) { return source.get(); }) ==
-        std::optional<bool>{true});
+  CHECK(!derived::IsStale(*taken, configured, host));
+  CHECK(derived::IsStale(*taken, *source, host));
 
   const char* out = std::getenv("LOBOLE_WRITE_GOLDEN");
   const fs::path path = out ? fs::path(out) : TempPath("derived-v133.json");
@@ -741,17 +732,16 @@ TEST_CASE("a moved import file is not a changed source; a changed file is",
   Document host;
   const uint64_t did = Derive(host, source);
   REQUIRE(host.Regenerate());
-  const auto resolver = [&](uint64_t) -> const Document* { return &source; };
   const auto* d = dynamic_cast<const DerivedFeature*>(host.GetFeature(0));
   REQUIRE(d != nullptr);
-  CHECK(derived::IsStale(*d, resolver) == std::optional<bool>{false});
+  CHECK(!derived::IsStale(*d, source, host));
 
   // The same bytes at another path: the adoption case.
   auto* imp = dynamic_cast<ImportFeature*>(source.GetFeature(0));
   REQUIRE(imp != nullptr);
   imp->path = b.string();
   REQUIRE(source.Regenerate());
-  CHECK(derived::IsStale(*d, resolver) == std::optional<bool>{false});
+  CHECK(!derived::IsStale(*d, source, host));
 
   // Different bytes: a bigger box at the path is a changed source.
   Document big;
@@ -761,7 +751,7 @@ TEST_CASE("a moved import file is not a changed source; a changed file is",
   REQUIRE(CADKernel::Instance().SaveBREP(c.string(), big.GetBodies()[0].shape));
   imp->path = c.string();
   REQUIRE(source.Regenerate());
-  CHECK(derived::IsStale(*d, resolver) == std::optional<bool>{true});
+  CHECK(derived::IsStale(*d, source, host));
   (void)did;
   std::error_code ec;
   fs::remove_all(dir, ec);
@@ -830,4 +820,220 @@ TEST_CASE("a material given to a derived copy reaches its bodies",
   copy->SetMaterial("");
   REQUIRE(host.Regenerate());
   CHECK(materialOf("Servo") == "steel"); // back to the source's
+}
+
+// ---- Sketches across parts and the content key (vNEXT) ---------------------
+
+namespace {
+
+// The source of a sketch link: the servo, plus an outline sketch -- a
+// circle and a construction line -- that no body is made from.
+std::unique_ptr<Document> MakeSketchSource(double r = 4.0) {
+  auto doc = MakeSource();
+  auto sk = std::make_unique<SketchFeature>("Outline", kXY);
+  sk->AddEntity(sketch::Circle{{3.0, 2.0}, r});
+  sketch::Line axis{{-10.0, 0.0}, {10.0, 0.0}};
+  axis.construction = true;
+  sk->AddEntity(axis);
+  doc->AddFeature(std::move(sk));
+  REQUIRE(doc->Regenerate());
+  return doc;
+}
+
+uint64_t OutlineId(const Document& source) {
+  return source.GetFeatures().back()->GetId();
+}
+
+// A host with a Derived of the outline (slot 7, placed `at`), a sketch on
+// it projecting every entity, and that sketch extruded 2 mm.
+void BuildOnOutline(Document& host, const Document& source,
+                    glm::dvec3 at = glm::dvec3(0.0)) {
+  auto d = std::make_unique<DerivedFeature>("Outline copy", 7);
+  d->sourceName = "Servo";
+  d->sketches = {OutlineId(source)};
+  d->position = at;
+  REQUIRE(derived::TakeSnapshot(*d, source, host).empty());
+  REQUIRE(d->snapshot.empty()); // a sketch named: bodies only by name
+  REQUIRE(d->sketchSnapshot.size() == 1);
+  host.AddFeature(std::move(d));
+  const auto* added = dynamic_cast<const DerivedFeature*>(
+      host.GetFeature(host.FeatureCount() - 1));
+  const DerivedSketch& copied = added->sketchSnapshot.front();
+  auto sk =
+      std::make_unique<SketchFeature>("On outline", added->PlacedPlane(copied));
+  sk->planeRef = added->GetId();
+  sk->planeRefSketch = copied.sourceSketch;
+  for (const sketch::Entity& e : copied.entities)
+    sk->AddExternalGeometry(
+        ElementRef{
+            added->GetId(),
+            added->SketchEntityName(copied.sourceSketch, sketch::EntityId(e))},
+        sketch::ExternalKind::Edge);
+  host.AddFeature(std::move(sk));
+  const uint64_t skId = host.GetFeature(host.FeatureCount() - 1)->GetId();
+  host.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", skId, 2.0, ExtrudeMode::NewBody));
+  REQUIRE(host.Regenerate());
+}
+
+} // namespace
+
+TEST_CASE("a copied sketch is projected as it is drawn, and a part built on "
+          "it regenerates with the source absent",
+          "[derived][sketch]") {
+  auto source = MakeSketchSource();
+  Document host;
+  BuildOnOutline(host, *source, glm::dvec3(0.0, 0.0, 10.0));
+  for (const auto& f : host.GetFeatures())
+    INFO(f->GetName() << ": " << f->GetError());
+  REQUIRE(host.GetBodies().size() == 1);
+  CHECK_THAT(host.GetBodies()[0].shape.Volume(),
+             WithinRel(M_PI * 16.0 * 2.0, 1e-6));
+  // The projected circle is a profile (not construction), the line stays
+  // construction, both solver-fixed through `external`; the sketch stands
+  // where the copy is placed.
+  const auto* on = dynamic_cast<const SketchFeature*>(host.GetFeature(1));
+  REQUIRE(on != nullptr);
+  CHECK_THAT(on->plane.GetOrigin().z, WithinAbs(10.0, 1e-12));
+  int circles = 0, constructionLines = 0;
+  for (const sketch::Entity& e : on->entities) {
+    if (std::holds_alternative<sketch::Circle>(e) && !sketch::IsConstruction(e))
+      circles++;
+    if (std::holds_alternative<sketch::Line>(e) && sketch::IsConstruction(e))
+      constructionLines++;
+  }
+  CHECK(circles == 1);
+  CHECK(constructionLines == 1);
+
+  // Saved and opened with no source anywhere: a pure function of its file.
+  const fs::path path = TempPath("derived-sketch-roundtrip.json");
+  REQUIRE(testio::Save(host, path.string()));
+  auto reloaded = testio::Load(path.string());
+  REQUIRE(reloaded);
+  REQUIRE(reloaded->GetBodies().size() == 1);
+  CHECK_THAT(reloaded->GetBodies()[0].shape.Volume(),
+             WithinRel(M_PI * 16.0 * 2.0, 1e-6));
+  const auto* back =
+      dynamic_cast<const DerivedFeature*>(reloaded->GetFeature(0));
+  REQUIRE(back != nullptr);
+  CHECK(back->sketches == std::vector<uint64_t>{OutlineId(*source)});
+  CHECK(back->sourceKey ==
+        dynamic_cast<const DerivedFeature*>(host.GetFeature(0))->sourceKey);
+  CHECK(back->follow);
+  std::error_code ec;
+  fs::remove(path, ec);
+}
+
+TEST_CASE("the freshness key is the copied content, not the source's JSON",
+          "[derived][sketch]") {
+  auto source = MakeSketchSource();
+  Document host;
+  BuildOnOutline(host, *source);
+  const auto* d = dynamic_cast<const DerivedFeature*>(host.GetFeature(0));
+  REQUIRE(d != nullptr);
+  REQUIRE(!derived::IsStale(*d, *source, host));
+
+  // The source read back from a file whose sketch carries a key this build
+  // writes no more and ignores (`next_entity_id`): the old stamp, a hash of
+  // the source's JSON, moved with keys like it; the content did not.
+  const size_t outline = source->FeatureCount() - 1;
+  nlohmann::json j = DocumentIO::FeatureToJson(*source->GetFeature(outline));
+  j["next_entity_id"] = 4242;
+  REQUIRE(source->ReplaceFeature(outline, DocumentIO::FeatureFromJson(j)));
+  REQUIRE(source->Regenerate());
+  CHECK(!derived::IsStale(*d, *source, host));
+
+  // A feature that adds nothing the copy holds moves the tip, not the key.
+  const size_t tip = source->TipChainHash();
+  source->AddFeature(std::make_unique<SketchFeature>("Doodle", kXY));
+  REQUIRE(source->Regenerate());
+  CHECK(source->TipChainHash() != tip);
+  CHECK(!derived::IsStale(*d, *source, host));
+
+  // An edit to what it copies is a change.
+  auto* sk = dynamic_cast<SketchFeature*>(source->GetFeature(outline));
+  REQUIRE(sk != nullptr);
+  std::get<sketch::Circle>(sk->entities[0]).radius = 4.5;
+  REQUIRE(source->Regenerate());
+  CHECK(derived::IsStale(*d, *source, host));
+
+  // A file from before vNEXT records no key: it is computed from the
+  // snapshot, and agrees with the one recorded.
+  DerivedFeature unrecorded = *d;
+  unrecorded.sourceKey = 0;
+  CHECK(derived::StoredKey(unrecorded, host) == d->sourceKey);
+}
+
+TEST_CASE("a copied sketch names what it cannot find", "[derived][sketch]") {
+  auto source = MakeSketchSource();
+  Document host;
+  DerivedFeature d("Copy", 7);
+  d.sketches = {999};
+  CHECK_THAT(derived::TakeSnapshot(d, *source, host),
+             ContainsSubstring("no sketch with id 999") &&
+                 ContainsSubstring("Outline"));
+  d.sketches.clear();
+  d.sketchNames = {"Gasket"};
+  CHECK_THAT(derived::TakeSnapshot(d, *source, host),
+             ContainsSubstring("no sketch named 'Gasket'"));
+}
+
+TEST_CASE("an entity put onto a plane facing the other way is the same curve",
+          "[derived][sketch]") {
+  // The copy's plane and a sketch's on it can face opposite ways (a lid
+  // drawn on the underside); a counter-clockwise arc then runs clockwise,
+  // and must still be the same points in space.
+  const SketchPlane up(glm::dvec3(0, 0, 5), glm::dvec3(0, 0, 1),
+                       glm::dvec3(1, 0, 0));
+  const SketchPlane down(glm::dvec3(2, 1, 5), glm::dvec3(0, 0, -1),
+                         glm::dvec3(0, 1, 0));
+  sketch::Arc arc{{1.0, 1.0}, 3.0, 0.2, 1.9};
+  const auto put = sketch::ProjectEntity(arc, up, down);
+  REQUIRE(put.has_value());
+  const auto* out = std::get_if<sketch::Arc>(&*put);
+  REQUIRE(out != nullptr);
+  const auto at = [](const SketchPlane& p, const sketch::Arc& a, double t) {
+    return p.PlaneToWorld(a.center +
+                          a.radius * glm::dvec2(std::cos(t), std::sin(t)));
+  };
+  const double mid = 0.5 * (arc.startAngle + arc.endAngle);
+  const double outMid = 0.5 * (out->startAngle + out->endAngle);
+  CHECK(glm::length(at(up, arc, mid) - at(down, *out, outMid)) < 1e-9);
+  // The ends swap: the source's start is where the copy ends.
+  CHECK(glm::length(at(up, arc, arc.startAngle) -
+                    at(down, *out, out->endAngle)) < 1e-9);
+  CHECK(glm::length(at(up, arc, arc.endAngle) -
+                    at(down, *out, out->startAngle)) < 1e-9);
+}
+
+// How tests/golden/vNEXT-derived-sketch.json was made: the outline sketch of
+// the servo copied (follow off), a sketch standing on the copy projecting
+// all of it, and that sketch padded. Set LOBOLE_WRITE_GOLDEN=<path> to write
+// it again.
+TEST_CASE("the vNEXT derived-sketch golden builds from this recipe",
+          "[derived][sketch]") {
+  auto source = MakeSketchSource();
+  Document host;
+  BuildOnOutline(host, *source);
+  auto* d = dynamic_cast<DerivedFeature*>(host.GetFeature(0));
+  REQUIRE(d != nullptr);
+  d->follow = false;
+  REQUIRE(host.Regenerate());
+  const char* out = std::getenv("LOBOLE_WRITE_GOLDEN");
+  const fs::path path =
+      out ? fs::path(out) : TempPath("derived-vnext-sketch.json");
+  REQUIRE(testio::Save(host, path.string()));
+  auto reloaded = testio::Load(path.string());
+  REQUIRE(reloaded);
+  REQUIRE(reloaded->GetBodies().size() == 1);
+  CHECK_THAT(reloaded->GetBodies()[0].shape.Volume(),
+             WithinRel(M_PI * 16.0 * 2.0, 1e-6));
+  const auto* back =
+      dynamic_cast<const DerivedFeature*>(reloaded->GetFeature(0));
+  REQUIRE(back != nullptr);
+  CHECK(!back->follow);
+  if (!out) {
+    std::error_code ec;
+    fs::remove(path, ec);
+  }
 }

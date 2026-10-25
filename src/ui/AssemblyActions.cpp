@@ -3,6 +3,7 @@
 
 #include "ui/AssemblyActions.h"
 #include "ui/BodyAppearance.h"
+#include "ui/DerivedActions.h" // AuditPartRead
 #include "ui/MotionActions.h"
 
 #include "core/cam/CamToolpath.h" // StockBounds (the placement snap)
@@ -567,8 +568,15 @@ glm::dmat4 DisplayMatrixOf(const AppState& state, const Occurrence& o) {
 // The part document an occurrence references, by stable id (active or stashed).
 Document* PartDocById(AppState& state, uint64_t partId) {
   for (size_t i = 0; i < state.parts.size(); i++)
-    if (state.parts[i].kind == DocKind::Part && state.parts[i].id == partId)
-      return SlotDoc(state, i);
+    if (state.parts[i].kind == DocKind::Part && state.parts[i].id == partId) {
+      Document* doc = SlotDoc(state, i);
+      // Handed to another document to read: it must have passed a gate
+      // (docs/modeling/derived.md#nothing-may-miss-a-gate). Checked only
+      // while the audit is on (the GUI suite, the smokes).
+      if (doc != nullptr)
+        AuditPartRead(state, *doc);
+      return doc;
+    }
   return nullptr;
 }
 

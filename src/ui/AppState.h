@@ -1805,6 +1805,10 @@ struct AppState {
   // Where the clipboard came from (paste-LINKED needs it): the source
   // sketch's feature id and the copied entity ids, in clipboard order.
   uint64_t sketchClipboardSourceSketch = 0;
+  // ...and the part it is in (its slot id). Feature ids are per-part
+  // counters, so a sketch id alone named this part's own sketch of that id
+  // when pasted into another part.
+  uint64_t sketchClipboardSourcePart = 0;
   std::vector<uint32_t> sketchClipboardIds;
 
   // 2D sheet viewport (workstream 13): a drawing tab pans/zooms an
@@ -2796,6 +2800,11 @@ struct AppState {
     std::string appliedPreference;
     bool preferenceWaiting = false;
   } renderer;
+  // The menu bar's notice after a gate brought cross-part links up to date
+  // (ui::RefreshLinks): "Bracket updated from Plate: Hole 2 failed". Shown
+  // until `linksNoticeUntil` (ImGui time; -2 = from the next frame).
+  std::string linksNotice;
+  double linksNoticeUntil = -1.0;
   // The menu bar's "Graphics device restarted" notice after a rebuild, said
   // once: shown until this (ImGui) time.
   double rendererRestartedNoticeUntil = -1.0;

@@ -3,6 +3,7 @@
 
 #include "ui/FileDialogs.h"
 #include "ui/AssemblyActions.h"
+#include "ui/DerivedActions.h"
 #include "ui/ImportJob.h"
 #include "ui/MotionActions.h"
 #include "ui/OpenJob.h"
@@ -1006,6 +1007,7 @@ void ExportMotionVideoDialog(AppState& state, uint64_t studyId) {
 
 bool ExportActiveDocument(AppState& state, const std::string& path,
                           std::string* error) {
+  RefreshLinks(state); // the gate: docs/modeling/derived.md#copies-that-keep-up
   const auto fail = [&](std::string why) {
     if (error != nullptr)
       *error = std::move(why);

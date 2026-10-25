@@ -1100,6 +1100,12 @@ TEST_CASE("every feature reference is reported by VisitFeatureRefs",
       "bodies",              // Derived: created_by ids in the SOURCE document
       "sourceCreatedBy",     // Derived: ditto, per snapshot body
       "sourceConfiguration", // Derived: a configuration OF the source part
+      "sketches",            // Derived: sketch ids in the SOURCE document
+      "sourceSketch",        // Derived: ditto, per copied sketch
+      "sourceKey",           // Derived: a content key, not an id at all
+      "key",                 // derived::Taken: the same content key
+      "planeRefSketch",      // Sketch: a SOURCE sketch id, within the
+                             // Derived its planeRef names (reported)
   };
 
   std::vector<std::string> problems;

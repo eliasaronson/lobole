@@ -90,6 +90,10 @@ from lobole.client import Client  # noqa: E402
 # (sent as null, listed under `nonfinite`) fails the smoke instead of reading
 # as a missing value (docs/scripting/rpc.md#what-a-response-carries).
 os.environ.setdefault("LOBOLE_REMOTE_STRICT", "1")
+# Every app a smoke launches audits the link gates: a part handed to another
+# document with a stale following link it never brought up to date aborts
+# the app, naming it (docs/modeling/derived.md#nothing-may-miss-a-gate).
+os.environ.setdefault("LOBOLE_LINK_AUDIT", "1")
 
 # Both the windowed and the headless path log this; matching either means the
 # helper does not care which one it launched.

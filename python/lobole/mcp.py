@@ -406,16 +406,21 @@ typed `contract`: every field, its type and its enum values.
   number (about world Z, after the axis)}} — the reply's `up_axis` says
   what was applied and why. A DXF or SVG goes into a sketch with
   rpc('import_sketch', ...).
-- Derived (a copy of another part's bodies, to draw on): {{"type":
-  "Derived", "name": str, "source_part": <part slot id from
+- Derived (a copy of another part's bodies or sketches, to draw on):
+  {{"type": "Derived", "name": str, "source_part": <part slot id from
   list_parts>, "configuration"?: <the source's configuration, id or
   name> (absent = its active one), "bodies"?: [<created_by ids>] and/or
   "body_names"?: [<names, as get_state shows them>] (both absent = all),
-  "placement"?: {{"position": [x,y,z], "orientation": [x,y,z,w]}},
-  "reference"?: true (a ghost: absent from mass, BOM, export, CAM and
-  booleans) | false (an ordinary body of this part)}} — the snapshot is
-  taken when added; `update_derived` retakes it, `get_state` says when
-  it is stale.
+  "sketches"?: [<source sketch ids>] and/or "sketch_names"?: [<names>]
+  (a copy naming a sketch takes bodies only by name), "follow"?: true
+  (default: retaken before any call that reads geometry, reported as
+  `links_updated`) | false, "placement"?: {{"position": [x,y,z],
+  "orientation": [x,y,z,w]}}, "reference"?: true (a ghost: absent from
+  mass, BOM, export, CAM and booleans) | false (an ordinary body of this
+  part)}} — a sketch here stands on a copied sketch with "plane_ref":
+  <its id>, and rpc('project_geometry', {{sketch_id, feature_id, element:
+  "<derived id>/<sketch id>/<entity id>"}}) projects its entities;
+  `get_state` says when a copy is stale.
 - Template (one instance of a feature template from the project's
   library — a composite saved once, e.g. a bearing seat, placed as ONE
   feature that expands into its features at every regeneration):

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/DrawingActions.h"
+#include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/RendererSync.h"
 
@@ -1633,6 +1634,7 @@ Sheet DrawingSheetForOutput(AppState& state) {
 
 bool ExportActiveDrawingWhenProjected(AppState& state, const std::string& path,
                                       std::string* error) {
+  RefreshLinks(state); // the gate: docs/modeling/derived.md#copies-that-keep-up
   if (!state.drawing) {
     if (error)
       *error = "no active drawing";
@@ -1654,6 +1656,8 @@ bool ExportActiveDrawingWhenProjected(AppState& state, const std::string& path,
 
 bool ExportActiveDrawing(AppState& state, const std::string& path,
                          std::string* error, bool update) {
+  if (update)
+    RefreshLinks(state); // the gate (derived.md#copies-that-keep-up)
   if (!state.drawing) {
     if (error)
       *error = "no active drawing";
@@ -1714,12 +1718,7 @@ uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId) {
 }
 
 Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId) {
-  for (size_t i = 0; i < state.parts.size(); i++) {
-    if (state.parts[i].id == sourceDocId &&
-        state.parts[i].kind == DocKind::Part)
-      return SlotDoc(state, i);
-  }
-  return nullptr;
+  return PartDocById(state, sourceDocId); // the one part resolver (audited)
 }
 
 const Document* ConfiguredPartDocument(AppState& state, uint64_t partId,

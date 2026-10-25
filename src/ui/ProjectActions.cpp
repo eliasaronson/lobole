@@ -3,6 +3,7 @@
 
 #include "ui/ProjectActions.h"
 #include "render/ClipPlanes.h" // kMaxClipPlanes: the sections a project holds
+#include "ui/DerivedActions.h" // RefreshLinks (the open and save gates)
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/RendererSync.h"
@@ -296,6 +297,9 @@ bool SaveWouldLoseDrops(const AppState& state, const std::string& path) {
 
 bool SaveProject(AppState& state, const std::string& path, std::string* error,
                  bool overwriteExternalChanges, bool overwriteLossy) {
+  // The gate (docs/modeling/derived.md#copies-that-keep-up): what is saved
+  // is each part with its copies of the others up to date.
+  RefreshLinks(state);
   const bool saved = SaveProjectUnguarded(
       state, path, error, overwriteExternalChanges, overwriteLossy);
   // Written over the project the drops came from: they are gone from it
@@ -909,6 +913,15 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
   }
 }
 
+namespace {
+// The parts the open gate brought up to date, and the project it opened:
+// MarkProjectOpened stamps every part saved and then marks these unsaved.
+std::pair<std::string, std::vector<uint64_t>>& TakenAtOpen() {
+  static std::pair<std::string, std::vector<uint64_t>> taken;
+  return taken;
+}
+} // namespace
+
 bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
   namespace fs = std::filesystem;
   const std::string path = loaded.path;
@@ -1033,6 +1046,14 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
                                          0.0,
                                          {}});
     SyncProjectScope(state);
+    // The open gate (docs/modeling/derived.md#copies-that-keep-up): before
+    // anything reads a part -- the assembly's solve below, the results'
+    // inputs -- a copy its source moved past while on disk is taken. The
+    // parts it changed are remembered so the open's stamp leaves them
+    // unsaved, as an edit would.
+    TakenAtOpen() = {path, {}};
+    for (const LinkUpdate& u : RefreshLinks(state))
+      TakenAtOpen().second.push_back(u.partId);
     // A4: an assembly active on open solves immediately (no stamps yet), so
     // mates re-solve on load — the format's stated contract.
     if (state.assembly && AssemblyPartsStale(state))
@@ -1281,6 +1302,17 @@ void MarkProjectOpened(AppState& state, const std::string& path) {
   RecentProjects::Remember(path); // ignores "" (the unsaved slot)
   StampAllSaved(state);
   StampDiskState(state, path); // F8: memory and disk agree as of now
+  // What the open gate took is not what is on disk: those parts read
+  // unsaved, as an edit would leave them
+  // (docs/modeling/derived.md#copies-that-keep-up).
+  if (!path.empty() && SamePath(TakenAtOpen().first, path))
+    for (uint64_t id : TakenAtOpen().second)
+      for (PartSlot& slot : state.parts)
+        if (slot.id == id)
+          slot.lastSavedVersion = 0;
+  TakenAtOpen() = {};
+  // ...and a gate after the stamps, for a path that opened without one.
+  RefreshLinks(state);
 }
 
 namespace {

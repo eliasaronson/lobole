@@ -4,8 +4,9 @@
 #pragma once
 
 // Derived (docs/modeling/derived.md): a COPY of another part's
-// bodies carried inside this part's file, the way the Import feature carries
-// a STEP's, updated on request the way a drawing is.
+// bodies and sketches carried inside this part's file, the way the Import
+// feature carries a STEP's, brought up to date at the project's gates
+// (ui::RefreshLinks) while it follows its source.
 //
 // Regeneration never resolves the source document — Execute loads the
 // snapshot from the host document's asset store — so a part with a Derived
@@ -15,7 +16,9 @@
 // at regen time; the one cycle that matters (A derives B derives A) is
 // refused at creation, like an assembly occurrence that would loop.
 
+#include "cad/SketchPlane.h"
 #include "core/Feature.h"
+#include "core/features/SketchFeature.h" // sketch::Entity
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -52,6 +55,20 @@ struct DerivedBody {
   std::vector<FitBand> fitBands;
 };
 
+// One copied SKETCH: the source sketch's solved entities (after its own
+// Execute -- expressions, constraints, its external geometry) on its plane,
+// both in the SOURCE part's coordinates; the feature's placement moves the
+// plane. It is reference geometry in this part: a sketch here stands on its
+// plane (SketchFeature::planeRef + planeRefSketch) and projects its entities
+// as external geometry named "<derived id>/<source sketch id>/<entity id>"
+// (DerivedFeature::SketchEntityName), never a profile on its own.
+struct DerivedSketch {
+  uint64_t sourceSketch = 0;
+  std::string name;
+  SketchPlane plane{PlaneType::XY};
+  std::vector<sketch::Entity> entities;
+};
+
 class DerivedFeature : public Feature {
 public:
   DerivedFeature(const std::string& name, uint64_t sourcePart);
@@ -74,7 +91,7 @@ public:
   // Names no feature of THIS history, on purpose. `sourcePart` is a part
   // slot, and `bodies` are created_by ids in the SOURCE document — neither is
   // an index into the tree this feature lives in. What the snapshot depends
-  // on is tracked by the chain hash instead (D1).
+  // on is its content key (`sourceKey`) instead.
   void VisitFeatureRefs(const RefVisitor&) const override {}
 
   std::string WhyIncomplete() const override;
@@ -96,6 +113,11 @@ public:
   // so a created_by filter cannot pick one of them out. Empty = no name
   // filter; the two narrow together when both are given.
   std::vector<std::string> bodyNames;
+  // The source's sketches to copy, by feature id and/or by name (vNEXT).
+  // A Derived that names a sketch copies only the bodies it names too: a
+  // shared outline is wanted without the part it came from.
+  std::vector<uint64_t> sketches;
+  std::vector<std::string> sketchNames;
   // Where the copy sits in THIS part. Identity unless made from an
   // in-context edit, where it is OccMatrix(edited)^-1 * OccMatrix(source).
   glm::dvec3 position{0.0};
@@ -104,11 +126,18 @@ public:
   // booleans. false: an ordinary body of this part (a mould from its
   // casting).
   bool reference = true;
-  // The source's Document::TipChainHash when the snapshot was taken. The
-  // stale check compares against the source's current one; Version() would
-  // not do, it restarts at 0 on every load.
-  size_t sourceChainHash = 0;
+  // vNEXT: whether the copy keeps up with its source on its own. A
+  // following link is retaken at the project's gates (ui::RefreshLinks);
+  // off, it stays as taken until Update, and reads stale when behind.
+  bool follow = true;
+  // vNEXT: the content key of what the snapshot holds (derived::KeyOf):
+  // the copied bodies' exact B-Rep and the copied sketches' solved
+  // entities. The copy is stale exactly when taking it again would give
+  // another key. 0 = not recorded (a file from before vNEXT): the key is
+  // then computed from the snapshot itself.
+  uint64_t sourceKey = 0;
   std::vector<DerivedBody> snapshot;
+  std::vector<DerivedSketch> sketchSnapshot;
 
   glm::dmat4 Placement() const;
   bool IdentityPlacement() const;
@@ -120,6 +149,19 @@ public:
   std::string DerivedName(uint64_t sourceCreatedBy,
                           const std::string& sourceElementName) const;
 
+  // "<this id>/<source sketch id>/<entity id>": a copied sketch entity, as
+  // external geometry names it.
+  std::string SketchEntityName(uint64_t sourceSketchId,
+                               uint32_t entityId) const;
+  // The copied sketch `sourceSketchId` (0 = the only one), or null.
+  const DerivedSketch* FindSketch(uint64_t sourceSketchId) const;
+  // Its plane in THIS part (the placement applied).
+  SketchPlane PlacedPlane(const DerivedSketch& s) const;
+  // The copied entity a SketchEntityName names, with its sketch; false when
+  // the name is not one of this feature's sketch entities.
+  bool ResolveSketchEntity(const std::string& name, const DerivedSketch*& sk,
+                           const sketch::Entity*& entity) const;
+
 private:
   // Decoded B-Reps by asset name. Assets are content-addressed, so a hit is
   // always the right shape; a Clone carries the cache along harmlessly.
@@ -130,26 +172,47 @@ namespace derived {
 
 using PartResolver = std::function<const Document*(uint64_t)>;
 
-// Replaces `feature`'s snapshot with `source`'s current bodies (regenerated,
-// at the source's own tip), storing their B-Reps as assets on `host`. Returns
-// the refusal in words, or empty on success: a source with no bodies, a
-// `bodies` filter naming a created_by the source does not have (the ones it
-// has are listed). The source's own reference bodies are never copied — a
-// ghost of a ghost is not the source's geometry. Does not touch
+// What taking `feature` from a source gives, before it is stored: the
+// bodies (with their BinTools bytes), the sketches and their content key.
+struct Taken {
+  std::vector<DerivedBody> bodies;
+  std::vector<std::vector<unsigned char>> bytes; // one per body
+  std::vector<DerivedSketch> sketches;
+  uint64_t key = 0;
+};
+
+// Takes `feature`'s filter from `source` (regenerated, at its own tip).
+// Returns the refusal in words, or empty: a source with no bodies to give, a
+// `bodies`/`body_names` filter the source does not satisfy (the ones it has
+// are listed), a `sketches`/`sketch_names` filter naming a sketch it does
+// not have or one that failed. The source's own reference bodies are never
+// copied — a ghost of a ghost is not the source's geometry.
+[[nodiscard]] std::string Take(const DerivedFeature& feature,
+                               const Document& source, Taken& out);
+
+// Take, then replace `feature`'s snapshot with it, storing the B-Reps as
+// assets on `host` and recording the key. Does not touch
 // `feature.sourceName`; the caller knows the slot's name.
 [[nodiscard]] std::string TakeSnapshot(DerivedFeature& feature,
                                        const Document& source, Document& host);
 
-// Whether the source has moved since the snapshot was taken: nullopt when
-// the source is not loaded (nothing to compare against — not stale, not
-// fresh, unknown), otherwise the chain-hash comparison. Never auto-updates
-// (the FEM rule).
-[[nodiscard]] std::optional<bool> IsStale(const DerivedFeature& feature,
-                                          const PartResolver& partById);
+// The content key of a snapshot as stored (sourceKey when recorded, else
+// computed from the snapshot and `host`'s assets). Platform-stable: FNV
+// over the B-Rep bytes and the named fields, never a JSON dump or std::hash,
+// so a build that adds a key to a feature's JSON moves no copy.
+[[nodiscard]] uint64_t StoredKey(const DerivedFeature& feature,
+                                 const Document& host);
+
+// Whether the copy is behind `source`: taking it again would give another
+// key (or would be refused -- the source lost what it copies). The caller
+// caches; this takes the snapshot afresh.
+[[nodiscard]] bool IsStale(const DerivedFeature& feature,
+                           const Document& source, const Document& host);
 
 // Would `hostId` deriving from `sourceId` close a cycle over derived edges?
-// Walks the source's Derived features through `partById`; `why` (optional)
-// names the chain.
+// Walks the source's Derived features -- the ones copying bodies and the ones
+// copying sketches alike -- through `partById`; `why` (optional) names the
+// chain.
 [[nodiscard]] bool WouldCycle(uint64_t hostId, uint64_t sourceId,
                               const PartResolver& partById,
                               std::string* why = nullptr);

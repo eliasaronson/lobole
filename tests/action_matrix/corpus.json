@@ -149,6 +149,7 @@
   {"design": "golden/v189-expression-requirement", "kind": "golden", "source": "tests/golden/v189-expression-requirement.json"},
   {"design": "golden/v192-delete-face", "kind": "golden", "source": "tests/golden/v192-delete-face.json"},
   {"design": "golden/v192-offset-face", "kind": "golden", "source": "tests/golden/v192-offset-face.json"},
+  {"design": "golden/vNEXT-derived-sketch", "kind": "golden", "source": "tests/golden/vNEXT-derived-sketch.json"},
   {"design": "golden/v192-move-face", "kind": "golden", "source": "tests/golden/v192-move-face.json"},
   {"design": "golden/v192-replace-face", "kind": "golden", "source": "tests/golden/v192-replace-face.json"},
   {"design": "golden/v19-suppress", "kind": "golden", "source": "tests/golden/v19-suppress.json"},

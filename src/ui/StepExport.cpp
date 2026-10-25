@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/StepExport.h"
+#include "ui/DerivedActions.h"
 
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
@@ -205,6 +206,7 @@ StepExportCounts CountStepModel(const CADKernel::StepExportModel& model) {
 std::expected<StepExportCounts, std::string>
 ExportStep(AppState& state, const Document* part, int bodyIndex,
            const std::string& path) {
+  RefreshLinks(state); // the gate: docs/modeling/derived.md#copies-that-keep-up
   std::expected<CADKernel::StepExportModel, std::string> model;
   if (part == nullptr) {
     model = BuildAssemblyStepModel(state);

@@ -450,12 +450,21 @@ static constexpr MethodDoc ModelingMethods[] = {
      "solids:int, volume_mm3:number, part?:string, part_id?:int}[]"},
     {"update_derived",
      "Retake a Derived feature's snapshot from its source part (one undo "
-     "step): {feature_id} or {index}, or {all: true} for every Derived of "
-     "the active part whose source is loaded. Refuses a source that is not "
-     "in the project or a broken link. Returns {updated: [ids], regen, "
-     "digest}. Never automatic: get_state's `stale` says when to call it "
-     "(docs/modeling/derived.md).",
+     "step): {feature_id} or {index}, or {all: true} for every linked "
+     "Derived of the active part, as ONE undo step. Refuses a source that "
+     "is not in the project, a broken link, or a cycle. Returns {updated: "
+     "[ids taken], skipped?: [\"<name>: <why>\"], regen, digest}. A copy "
+     "that follows its source (`follow`, the default) is retaken at the "
+     "gates anyway -- an RPC that reads geometry answers `links_updated` "
+     "-- so this is for one with follow off (docs/modeling/derived.md).",
      "all, feature_id, index", remote::NeedsPart},
+    {"set_derived_follow",
+     "Turn a Derived feature's `follow` on or off (one undo step): "
+     "{feature_id, follow: bool}. A copy that follows is retaken at the "
+     "gates (docs/modeling/derived.md#copies-that-keep-up); one that does "
+     "not stays as taken until update_derived, and get_state reads it "
+     "stale when behind. Returns {regen, digest}.",
+     "feature_id, follow", remote::NeedsPart | remote::Deferrable},
     {"derive_occurrence",
      "In an in-context edit (edit_in_context): add a Derived copy of a "
      "neighbour occurrence's part, placed where the ghost is "
@@ -541,7 +550,12 @@ static constexpr MethodDoc ModelingMethods[] = {
      remote::NeedsPart | remote::Deferrable},
     {"project_geometry",
      "Project a body face/edge (feature_id + element) into "
-     "a sketch as live locked construction geometry.",
+     "a sketch as live locked construction geometry. An entity of another "
+     "part's sketch copied by a Derived (element \"<derived id>/<sketch "
+     "id>/<entity id>\", kind edge, the default for one) is projected as "
+     "it is drawn there -- a profile line stays one -- solver-fixed and "
+     "following the copy (docs/modeling/derived.md#sketches). kind: "
+     "face | edge; anything else is refused.",
      "element, feature_id, kind, sketch_id", remote::NeedsPart},
     {"add_reference_image",
      "Attach an image underlay to a sketch from an image file (`path`: PNG, "
@@ -1423,22 +1437,18 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     const json preDigest = BodyDigestJson(*doc);
     json updated = json::array();
     if (p.value("all", false)) {
-      std::vector<uint64_t> before;
-      for (const auto& f : doc->GetFeatures())
-        if (auto* d = dynamic_cast<const DerivedFeature*>(f.get());
-            d && d->sourcePart != 0)
-          before.push_back(d->GetId());
-      std::string why;
-      const size_t n = ui::UpdateAllDerived(state, &why);
-      if (n == 0 && !why.empty())
-        throw std::runtime_error(why);
-      for (uint64_t id : before)
-        updated.push_back(id);
-      json resp = {{"updated", std::move(updated)},
+      // One undo step for them all; `updated` lists exactly the ones taken
+      // and `skipped` each one that was not, with its reason.
+      std::vector<uint64_t> ids;
+      std::vector<std::string> skipped;
+      ui::UpdateAllDerived(state, ids, skipped);
+      if (ids.empty() && !skipped.empty())
+        throw std::runtime_error(skipped.front());
+      json resp = {{"updated", ids},
                    {"regen", RegenSummaryJson(*doc)},
                    {"digest", DigestJson(preDigest, *doc)}};
-      if (!why.empty())
-        resp["skipped"] = why;
+      if (!skipped.empty())
+        resp["skipped"] = skipped;
       return resp;
     }
     uint64_t id = 0;
@@ -1460,6 +1470,18 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     updated.push_back(id);
     return json{{"updated", std::move(updated)},
                 {"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
+  }
+  if (m == "set_derived_follow") {
+    const uint64_t id = p.at("feature_id").get<uint64_t>();
+    if (!p.at("follow").is_boolean())
+      throw std::runtime_error("set_derived_follow: follow is true or false");
+    const bool follow = p.at("follow").get<bool>();
+    const json preDigest = BodyDigestJson(*doc);
+    if (const std::string why = ui::SetDerivedFollow(state, id, follow);
+        !why.empty())
+      throw std::runtime_error(why);
+    return json{{"regen", RegenSummaryJson(*doc)},
                 {"digest", DigestJson(preDigest, *doc)}};
   }
   if (m == "derive_occurrence") {
@@ -1880,10 +1902,23 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
           ". Sketches here: " + FeatureCandidates(*doc, true) +
           " (ids come from add_feature results / get_state)");
     json before = DocumentIO::FeatureToJson(*sk);
-    const sketch::ExternalKind kind =
-        p.value("kind", std::string("face")) == "edge"
-            ? sketch::ExternalKind::Edge
-            : sketch::ExternalKind::Face;
+    // A copied sketch's entity is an edge whatever `kind` was left at.
+    bool copiedSketchEntity = false;
+    if (const auto* dv = dynamic_cast<const DerivedFeature*>(
+            doc->FindFeatureById(p.at("feature_id").get<uint64_t>()))) {
+      const DerivedSketch* cs = nullptr;
+      const sketch::Entity* ce = nullptr;
+      copiedSketchEntity =
+          dv->ResolveSketchEntity(p.at("element").get<std::string>(), cs, ce);
+    }
+    const std::string kindName =
+        p.value("kind", std::string(copiedSketchEntity ? "edge" : "face"));
+    if (kindName != "face" && kindName != "edge")
+      throw std::runtime_error("project_geometry: kind '" + kindName +
+                               "' is not one (accepted: face, edge)");
+    const sketch::ExternalKind kind = kindName == "edge"
+                                          ? sketch::ExternalKind::Edge
+                                          : sketch::ExternalKind::Face;
     const size_t ei =
         sk->AddExternalGeometry(ElementRef{p.at("feature_id").get<uint64_t>(),
                                            p.at("element").get<std::string>()},

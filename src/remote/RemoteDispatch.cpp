@@ -1277,6 +1277,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     } guard{m_inBatch};
 
     std::string fatal;
+    json batchLinks = json::array();
     for (size_t i = 0; i < calls.size(); i++) {
       const std::string sub = calls[i].at("method").get<std::string>();
       json subParams =
@@ -1353,6 +1354,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         }
       } else {
         flush();
+        // The gate before a read, as for a call made alone
+        // (docs/modeling/derived.md#copies-that-keep-up).
+        for (json& u : ui::LinksUpdatedJson(ui::RefreshLinks(state)))
+          batchLinks.push_back(std::move(u));
       }
       try {
         subParams = resolveRefs(subParams);
@@ -1455,6 +1460,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
              {"regenerations", regenerations}};
     if (!failures.empty())
       out["failed"] = std::move(failures);
+    if (!batchLinks.empty())
+      out["links_updated"] = std::move(batchLinks);
     remote::AttachRegen(out, state.document.get(), preDigest);
     return out;
   }
@@ -1934,8 +1941,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // or null when the source is not loaded — unknown is not fresh.
       if (auto* d =
               dynamic_cast<const DerivedFeature*>(stateDoc->GetFeature(i))) {
-        const std::optional<bool> stale = ui::DerivedStale(state, *d);
+        std::string why;
+        const std::optional<bool> stale =
+            ui::DerivedStale(state, *d, stateDoc, &why);
         f["stale"] = stale.has_value() ? json(*stale) : json(nullptr);
+        if (stale == std::optional<bool>{true} && !why.empty())
+          f["stale_reason"] = why; // transitive: names the part behind
+        f["follow"] = d->follow;
       }
       // A template instance says whether the library has moved on from the
       // definition it expands (true/false, or null when the library has no
