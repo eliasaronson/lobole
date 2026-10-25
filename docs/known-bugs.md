@@ -32,24 +32,6 @@ the heading if it is not here yet.
 ## Modeling
 
 
-### A thin Shell of the worm runs past the matrix's minute
-
-- **Symptom:** on `golden/v146-worm`, a Shell opening the flank face
-  `1/face1;M2` with the Shell tool's default wall (a tenth of the body's
-  thinnest wall: 0.02 mm) fails "shell gave up after 46 s" -- after about
-  96 s. The [action matrix](modeling/README.md#action-matrix) gives an
-  action a minute and records it as a hang.
-- **Case:** `tests/action_matrix/open/worm-shell-slow.json`
-  (`tools/action_matrix.py replay` it; with `--timeout 200` it answers).
-- **Cause:** the offset builder stops at its progress checks once the
-  budget (`directedit::BuilderBudgetS`, 46 s for 33 faces) is spent, and on
-  this body one step between two checks takes about 50 s more.
-- **Where:** `ShellFeature::Execute` (`src/core/features/ShellFeature.cpp`);
-  the builder is `BRepOffsetAPI_MakeThickSolid`.
-- **Likely fix:** find the step (a profile of the replay) and either give
-  it a progress check in our OCC patches or refuse a wall that thin for a
-  worm's flank before the builder starts.
-
 ### Two Shells of the clamp's screw are refused on every draw
 
 - **Symptom:** on the toolmaker's clamp's M3 retaining screw

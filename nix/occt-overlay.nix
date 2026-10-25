@@ -28,6 +28,12 @@
 #   invalid from the next (the toolmaker's clamp's M3 screw). It now visits
 #   them in the order they were bound. Upstream's OCCT#1600 (its first
 #   commit), backported to 7.9; not yet merged there.
+# - occt-offset-inter3d-progress.patch: the arc-join offset intersected two
+#   neighbouring offset faces with a pave filler that never saw the caller's
+#   progress indicator, and on a worm one edge/face pair of it ran for
+#   minutes past a deadline; the range now reaches the edge/face
+#   intersector, which asks it between its extremum searches
+#   (nix/patches/upstream/offset-inter3d-progress.md).
 #
 # And no IPA-CP clones: GCC 16 at -O3 miscompiles BRepClass3d_SClassifier.cxx,
 # so every point-in-solid test could call through a garbage vtable and every
@@ -46,6 +52,7 @@ let
     ./patches/occt-draft-null-curve-and-parallel.patch
     ./patches/occt-topopebrep-unclosed-wire-iterator.patch
     ./patches/occt-offset-arc-bind-order.patch
+    ./patches/occt-offset-inter3d-progress.patch
   ];
 in
 {

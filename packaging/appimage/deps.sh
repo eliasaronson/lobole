@@ -32,7 +32,7 @@ fetch https://github.com/Open-Cascade-SAS/OCCT.git V7_9_3 \
 patches="occt-shell-cap-order occt-fillet-reorder-faces-loop
          occt-draft-null-curve-and-parallel
          occt-topopebrep-unclosed-wire-iterator
-         occt-offset-arc-bind-order"
+         occt-offset-arc-bind-order occt-offset-inter3d-progress"
 for patch in $patches; do
   git -C "$work/occt" apply "$repo/nix/patches/$patch.patch"
 done

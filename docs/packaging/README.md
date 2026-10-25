@@ -225,7 +225,7 @@ apply, so netgen links the same patched library. The Flatpak manifest and
 the list each writes to the install's `share/lobole/occt-patches` (what
 `occpatch::Carries` and `ping`'s `occ_patches` read). Two make a Shell's
 result independent of memory addresses (one is upstream's OCCT#1600,
-backported)
+backported) and one lets its deadline stop the offset's intersections
 ([modeling](../modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid));
 the other three turn a fillet that never returned and three faults inside
 the kernel into ordinary failures

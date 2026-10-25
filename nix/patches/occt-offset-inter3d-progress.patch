@@ -1,0 +1,267 @@
+--- a/src/BOPAlgo/BOPAlgo_PaveFiller_5.cxx
++++ b/src/BOPAlgo/BOPAlgo_PaveFiller_5.cxx
+@@ -127,7 +127,7 @@
+         hasTrsf = Standard_True;
+       }
+ 
+-      IntTools_EdgeFace::Perform();
++      IntTools_EdgeFace::Perform(aPS.Next());
+     }
+     catch (Standard_Failure const&)
+     {
+--- a/src/BRepOffset/BRepOffset_Inter3d.cxx
++++ b/src/BRepOffset/BRepOffset_Inter3d.cxx
+@@ -270,14 +270,15 @@
+   // etape 1 : Intersection of faces // corresponding to the initial faces
+   //           separated by a concave edge if offset > 0, otherwise convex.
+   //---------------------------------------------------------------------
+-  for (; Exp.More(); Exp.Next(), aPSIntF.Next())
++  for (; Exp.More(); Exp.Next())
+   {
+     if (!aPSIntF.More())
+     {
+       return;
+     }
+-    const TopoDS_Edge&               E = TopoDS::Edge(Exp.Current());
+-    const BRepOffset_ListOfInterval& L = Analyse.Type(E);
++    const Message_ProgressRange      aPairRange = aPSIntF.Next();
++    const TopoDS_Edge&               E          = TopoDS::Edge(Exp.Current());
++    const BRepOffset_ListOfInterval& L          = Analyse.Type(E);
+     if (!L.IsEmpty() && L.First().Type() == OT)
+     {
+       //-----------------------------------------------------------
+@@ -293,7 +294,11 @@
+         F2                        = TopoDS::Face(InitOffsetFace.Image(InitF2).First());
+         if (!IsDone(F1, F2))
+         {
+-          BRepOffset_Tool::Inter3D(F1, F2, LInt1, LInt2, mySide, E, InitF1, InitF2);
++          BRepOffset_Tool::Inter3D(F1, F2, LInt1, LInt2, mySide, E, InitF1, InitF2, aPairRange);
++          if (aPairRange.UserBreak())
++          {
++            return;
++          }
+           Store(F1, F2, LInt1, LInt2);
+         }
+       }
+@@ -307,13 +312,16 @@
+   TopoDS_Vertex                      V[2];
+   TopTools_ListIteratorOfListOfShape it;
+   Message_ProgressScope aPSIntT(aPSOuter.Next(), "Intersecting tubes", 1, Standard_True);
+-  for (Exp.Init(ShapeInit, TopAbs_EDGE); Exp.More(); Exp.Next(), aPSIntT.Next())
++  for (Exp.Init(ShapeInit, TopAbs_EDGE); Exp.More(); Exp.Next())
+   {
+     if (!aPSIntT.More())
+     {
+       return;
+     }
+-    const TopoDS_Edge& E1 = TopoDS::Edge(Exp.Current());
++    // Every intersection made about this edge takes a range of its own and
++    // checks the indicator between its pairs.
++    Message_ProgressScope aPSTube(aPSIntT.Next(), NULL, 1, Standard_True);
++    const TopoDS_Edge&    E1 = TopoDS::Edge(Exp.Current());
+     if (InitOffsetFace.HasImage(E1))
+     {
+       //---------------------------
+@@ -401,7 +409,12 @@
+                                              mySide,
+                                              NullEdge,
+                                              NullFace,
+-                                             NullFace);
++                                             NullFace,
++                                             aPSTube.Next());
++                    if (!aPSTube.More())
++                    {
++                      return;
++                    }
+                     Store(F1, F2, LInt1, LInt2);
+                   }
+                 }
+@@ -419,7 +432,12 @@
+                                              mySide,
+                                              NullEdge,
+                                              NullFace,
+-                                             NullFace);
++                                             NullFace,
++                                             aPSTube.Next());
++                    if (!aPSTube.More())
++                    {
++                      return;
++                    }
+                     Store(F1, F2, LInt1, LInt2);
+                   }
+                 }
+--- a/src/BRepOffset/BRepOffset_Tool.cxx
++++ b/src/BRepOffset/BRepOffset_Tool.cxx
+@@ -1388,7 +1388,8 @@
+                               const TopAbs_State    Side,
+                               const TopoDS_Edge&    RefEdge,
+                               const TopoDS_Face&    theRefFace1,
+-                              const TopoDS_Face&    theRefFace2)
++                              const TopoDS_Face&    theRefFace2,
++                              const Message_ProgressRange& theRange)
+ {
+ #ifdef DRAW
+   if (AffichInter)
+@@ -1431,7 +1432,16 @@
+   aLS.Append(F2);
+   aPF.SetArguments(aLS);
+   //
+-  aPF.Perform();
++  // The edge/face intersections of two offset faces can take minutes (BSpline
++  // faces offset by a wall far thinner than their size): the pave filler checks
++  // the caller's progress indicator between its pairs.
++  aPF.Perform(theRange);
++  if (theRange.UserBreak())
++  {
++    L1.Clear();
++    L2.Clear();
++    return;
++  }
+ 
+   TopTools_IndexedMapOfShape TrueEdges;
+   if (!RefEdge.IsNull())
+--- a/src/BRepOffset/BRepOffset_Tool.hxx
++++ b/src/BRepOffset/BRepOffset_Tool.hxx
+@@ -22,6 +22,7 @@
+ #include <Standard_Handle.hxx>
+ 
+ #include <Standard_Boolean.hxx>
++#include <Message_ProgressRange.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ #include <TopAbs_State.hxx>
+ #include <Standard_Real.hxx>
+@@ -87,7 +88,8 @@
+                                       const TopAbs_State    Side,
+                                       const TopoDS_Edge&    RefEdge,
+                                       const TopoDS_Face&    RefFace1,
+-                                      const TopoDS_Face&    RefFace2);
++                                      const TopoDS_Face&    RefFace2,
++                                      const Message_ProgressRange& theRange = Message_ProgressRange());
+ 
+   //! Find if the edges <Edges> of the face <F2> are on
+   //! the face <F1>.
+--- a/src/IntTools/IntTools_BeanFaceIntersector.cxx
++++ b/src/IntTools/IntTools_BeanFaceIntersector.cxx
+@@ -290,7 +290,7 @@
+ 
+ //=================================================================================================
+ 
+-void IntTools_BeanFaceIntersector::Perform()
++void IntTools_BeanFaceIntersector::Perform(const Message_ProgressRange& theRange)
+ {
+   myIsDone = Standard_False;
+   myResults.Clear();
+@@ -340,7 +340,11 @@
+             && (mySurface.UDegree() > 2 || mySurface.VDegree() > 2)
+             && (mySurface.NbUKnots() > 2 && mySurface.NbVKnots() > 2)));
+ 
+-  Standard_Boolean isLocalized = bLocalize && ComputeLocalized();
++  Standard_Boolean isLocalized = bLocalize && ComputeLocalized(theRange);
++  if (theRange.UserBreak())
++  {
++    return;
++  }
+ 
+   // Perform real intersection
+   if (!isLocalized)
+@@ -1865,7 +1869,8 @@
+ 
+ //=================================================================================================
+ 
+-Standard_Boolean IntTools_BeanFaceIntersector::ComputeLocalized()
++Standard_Boolean IntTools_BeanFaceIntersector::ComputeLocalized(
++  const Message_ProgressRange& theRange)
+ {
+   Standard_Real Tol = Precision::PConfusion();
+ 
+@@ -1992,8 +1997,17 @@
+ 
+     Extrema_GenExtCS anExtremaGen;
+ 
++    // One global extremum search per localized range: on a BSpline face offset
++    // by a wall far thinner than its size there are thousands, minutes in all,
++    // so the caller's indicator is asked between them.
++    Message_ProgressScope aPS(theRange, NULL, 1, Standard_True);
+     for (; anItC.More() && anItS.More(); anItC.Next(), anItS.Next())
+     {
++      if (aPS.UserBreak())
++      {
++        aSurfaceData.ClearGrid();
++        return Standard_False;
++      }
+ 
+       IntTools_Range aRangeC(myFirstParameter, myLastParameter);
+ 
+--- a/src/IntTools/IntTools_BeanFaceIntersector.hxx
++++ b/src/IntTools/IntTools_BeanFaceIntersector.hxx
+@@ -21,6 +21,7 @@
+ 
+ #include <BRepAdaptor_Curve.hxx>
+ #include <BRepAdaptor_Surface.hxx>
++#include <Message_ProgressRange.hxx>
+ #include <Standard_Real.hxx>
+ #include <Extrema_ExtCS.hxx>
+ #include <GeomAPI_ProjectPointOnSurf.hxx>
+@@ -129,8 +130,9 @@
+                                             const Standard_Real theVMinParameter,
+                                             const Standard_Real theVMaxParameter);
+ 
+-  //! Launches the algorithm
+-  Standard_EXPORT void Perform();
++  //! Launches the algorithm. It stops, not done, when theRange's indicator
++  //! asks for a break.
++  Standard_EXPORT void Perform(const Message_ProgressRange& theRange = Message_ProgressRange());
+ 
+   //! Returns Done/NotDone state of the algorithm.
+   Standard_Boolean IsDone() const { return myIsDone; }
+@@ -158,7 +160,7 @@
+ 
+   Standard_EXPORT void ComputeNearRangeBoundaries();
+ 
+-  Standard_EXPORT Standard_Boolean ComputeLocalized();
++  Standard_EXPORT Standard_Boolean ComputeLocalized(const Message_ProgressRange& theRange);
+ 
+   Standard_EXPORT void ComputeRangeFromStartPoint(const Standard_Boolean ToIncreaseParameter,
+                                                   const Standard_Real    theParameter,
+--- a/src/IntTools/IntTools_EdgeFace.cxx
++++ b/src/IntTools/IntTools_EdgeFace.cxx
+@@ -485,7 +485,7 @@
+ 
+ //=================================================================================================
+ 
+-void IntTools_EdgeFace::Perform()
++void IntTools_EdgeFace::Perform(const Message_ProgressRange& theRange)
+ {
+   Standard_Integer   i, aNb;
+   IntTools_CommonPrt aCommonPrt;
+@@ -549,7 +549,7 @@
+   //
+   anIntersector.SetContext(myContext);
+   //
+-  anIntersector.Perform();
++  anIntersector.Perform(theRange);
+ 
+   if (anIntersector.MinimalSquareDistance() < RealLast())
+     myMinDistance = Sqrt(anIntersector.MinimalSquareDistance());
+--- a/src/IntTools/IntTools_EdgeFace.hxx
++++ b/src/IntTools/IntTools_EdgeFace.hxx
+@@ -28,6 +28,7 @@
+ #include <Standard_Boolean.hxx>
+ #include <IntTools_SequenceOfCommonPrts.hxx>
+ #include <IntTools_Range.hxx>
++#include <Message_ProgressRange.hxx>
+ class IntTools_Context;
+ class gp_Pnt;
+ class IntTools_CommonPrt;
+@@ -103,8 +104,9 @@
+   Standard_Boolean IsCoincidenceCheckedQuickly() { return myQuickCoincidenceCheck; }
+ 
+ public: //! @name Performing the operation
+-  //! Launches the process
+-  Standard_EXPORT void Perform();
++  //! Launches the process. It stops, not done, when theRange's indicator asks
++  //! for a break.
++  Standard_EXPORT void Perform(const Message_ProgressRange& theRange = Message_ProgressRange());
+ 
+ public: //! @name Checking validity of the intersection
+   //! Returns TRUE if computation was successful.

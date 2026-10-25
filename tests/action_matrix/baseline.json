@@ -4027,7 +4027,5 @@
   "golden/v146-worm": {"edge:2/*;U* edge.chamfer": 14.4, "face:1/face1;M* face.shell": 0.0},
   "reference/25-modelled-thread": {"face:2/cap0;M3 face.shell": 5.4, "face:2/cap1;M3 face.shell": 5.4}
  },
- "known": [
-  {"action": "face.shell", "bug": "docs/known-bugs.md#a-thin-shell-of-the-worm-runs-past-the-matrixs-minute", "class": "hang", "entity": "face:1/face1;M*", "repro": "tests/action_matrix/open/worm-shell-slow.json", "unit": "golden/v146-worm"}
- ]
+ "known": []
 }

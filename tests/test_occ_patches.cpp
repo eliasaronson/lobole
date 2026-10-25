@@ -16,6 +16,7 @@
 #include "TestPaths.h"
 #include "cad/OccPatches.h"
 #include "cad/OccSignals.h"
+#include "core/DirectEdit.h"
 #include "core/Document.h"
 #include "core/ElementHistory.h"
 #include "core/Feature.h"
@@ -24,13 +25,17 @@
 #include "core/features/ShellFeature.h"
 
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <Message_ProgressIndicator.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -221,6 +226,46 @@ TEST_CASE("A shell of the clamp's screw answers alike on every copy",
     INFO("face " << face << " (" << name << "):" << seen);
     CHECK(answers.size() == 1);
   }
+}
+
+// golden/v146-worm, a Shell of 0.02 mm (the Shell tool's default, a tenth
+// of its thinnest wall) opening its face 1: from about 3 s in, one edge/face
+// intersection of two neighbouring offset faces ran for one to three minutes
+// without asking the progress indicator, so the Shell's budget was overrun
+// by as much (nix/patches/upstream/offset-inter3d-progress.md). A deadline
+// inside that stretch is now heard there: the longest silence measured is
+// about 1 s, under load. Unpatched, a 15 s deadline returned after 170 to
+// 270 s.
+TEST_CASE("A thin shell of the worm stops when its deadline passes",
+          "[occ][shell][slow]") {
+  REQUIRE_PATCH("occt-offset-inter3d-progress");
+  const Body worm = Fixture("shell-worm-thin-wall.brep");
+  TopTools_ListOfShape open;
+  int k = 0;
+  for (TopExp_Explorer ex(worm.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), k++)
+    if (k == 1)
+      open.Append(ex.Current());
+  REQUIRE(open.Extent() == 1);
+  // Inside the silent stretch on any machine this runs on: it starts within
+  // a few seconds and lasts most of a minute even on a quiet one.
+  const double deadline = 15.0;
+  const Handle(Message_ProgressIndicator) stop =
+      directedit::MakeDeadline(deadline);
+  const auto t0 = std::chrono::steady_clock::now();
+  BRepOffsetAPI_MakeThickSolid maker;
+  maker.MakeThickSolidByJoin(worm.shape.GetShape(), open, -0.02, 2.0e-4,
+                             BRepOffset_Skin, false, false, GeomAbs_Arc, false,
+                             stop->Start());
+  const double took =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  CHECK(directedit::Expired(stop));
+  CHECK_FALSE(maker.IsDone());
+  INFO("stopped " << took - deadline << " s after its deadline");
+  // Ten times the longest silence measured: room for a loaded machine, and
+  // a tenth of what an unheard deadline overran by.
+  CHECK(took < deadline + 10.0);
 }
 
 TEST_CASE("A caught kernel fault leaves the earlier bodies as they were and "

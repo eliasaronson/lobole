@@ -320,8 +320,10 @@ bool ShellFeature::Execute(RegenContext& ctx) {
   //
   // Every draw shares one budget, the direct edits' (directedit::
   // BuilderBudgetS, by the faces the offset moves -- all of them): the
-  // offset builder stops at its progress checks. A thin wall on the worm's
-  // flank (golden/v146-worm) ran past the action matrix's minute.
+  // offset builder stops at its progress checks. A 0.02 mm wall on the
+  // worm (golden/v146-worm) ran minutes past the budget inside one
+  // edge/face intersection that never looked at it; our kernel asks there
+  // too (occt-offset-inter3d-progress.patch).
   const int attempts = occpatch::Carries("occt-offset-arc-bind-order") ? 1
                        : occpatch::Carries("occt-shell-cap-order")     ? 2
                                                                        : 5;

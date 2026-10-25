@@ -842,15 +842,21 @@ between neighbours) was measured as a further try: it built 106 of the
 matrix's shells the arc joins refused, but the shell it built on random
 design 33 left a body the next cut could not cut, so it is not used. Every
 draw shares one budget, the direct edits' (`directedit::BuilderBudgetS` by
-the body's faces): the builder stops at its progress checks, so a wall far
-too thin for a worm's flank gives up instead of running for minutes, though
-it overshoots to the end of whatever step it was in.
+the body's faces): the builder stops at its progress checks. One edge/face
+intersection of two offset faces asked no progress indicator, and a 0.02 mm
+wall on the worm (`golden/v146-worm`) spent minutes there past the budget;
+`occt-offset-inter3d-progress.patch` passes the indicator down to it
+(nix/patches/upstream/offset-inter3d-progress.md), so that shell now gives
+up within about a second of its 46 s budget (the replay answered in 47 s;
+it took 96 s on a quiet machine before, and three minutes on a busy one).
 `test_shell`'s "A shell builds the same wherever its input lives in memory"
 shells 60 copies of that box and requires one solid with one set of names.
 
 `test_occ_patches`' "A shell of the clamp's screw answers alike on every
 copy" shells 24 copies of the screw through each of its faces, a different
-amount of heap held before each, and requires one answer per face.
+amount of heap held before each, and requires one answer per face; "A thin
+shell of the worm stops when its deadline passes" requires the builder back
+within 10 s of a deadline that lands in that intersection.
 
 On a kernel with the cap-order patch alone (or none) a feature after a
 Shell sees the same solid with its faces in another order, which mattered
