@@ -457,7 +457,7 @@ by the same name drift apart without any test noticing:
   alternate stack. `lobole --crash-test` crashes once the session marker
   exists and before there are any edits (or, windowed, a first frame: it is
   how a test makes a start that dies starting up); the
-  `debug_crash {kind: segv|abort|exception}` RPC crashes after
+  `debug_crash {kind: segv|abort|exception|system_fault}` RPC crashes after
   them, and is refused unless the app was started with
   `LOBOLE_ALLOW_DEBUG_CRASH=1`; so is `debug_fault {kind}`, which fails the
   ways a handler can without crashing, for the hostile sweep's self-test
@@ -483,7 +483,24 @@ by the same name drift apart without any test noticing:
   GCC-built code can handle one, and on a `std::thread` the next frame up is
   mcfgthread's, which ends the process with `RaiseFailFastException` before
   any filter runs, so a worker's crash left no report. A fault in the
-  system's own code still goes to the filter. The crash file gives the
+  system's own code (msvcrt's `memcpy` handed a bad pointer, a driver) is
+  reported the same way when nothing in the system would catch it: the
+  handler walks the faulting thread's frames from the fault's context as
+  the dispatch will (`RtlLookupFunctionEntry`, `RtlVirtualUnwind` with
+  `UNW_FLAG_EHANDLER`, which returns each frame's handler, and, for
+  Wine's GCC-built DLLs, the TEB's handler list, which Wine's dispatch
+  calls too), and reports when it reaches a frame of code we ship before
+  any system frame with a handler. One that passes a handler first — the
+  system probing memory under its own `__try`, as `IsBadReadPtr` does — or
+  a walk that cannot go on (no frame within the limit, a stack pointer off
+  the thread's stack) is left to the dispatch as before. The walk allocates
+  nothing and takes no lock. `debug_crash {kind: "system_fault"}` (on a new
+  thread, msvcrt's `memcpy` from an unmapped address) and
+  `{kind: "system_probe"}` (on a new thread, `IsBadReadPtr` on one, which
+  answers and lives) are the two cases, which `packaging/windows/smoke.sh`
+  runs under Wine (`tools/release-smoke.py --system-faults`); on Linux the
+  first is a SIGSEGV like any other and the second is refused. The crash
+  file gives the
   address touched (`address: … (read)`), all ones for a general-protection
   fault. OCC's console handler, which swallowed Ctrl+C, is kept behind ours
   (below). `debug_fault {kind: "occ_fault"}` faults inside an OCC scope on

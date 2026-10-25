@@ -510,7 +510,14 @@ fuzzer's `tests/fuzz/cases/crash-153.jsonl` and `crash-181.jsonl` replay to
 the end (`python/lobole/replay.py`); `--stall-test` logs a main-thread
 stack that `symbolize-crash.py` names (`StallSelfTest`); and a Ctrl+C
 (`SIGINT` to the Wine process, which Wine turns into `CTRL_C_EVENT`) after a
-fillet stops headless and leaves no report. All of it runs under Wine; the
+fillet stops headless and leaves no report. `smoke.sh` itself checks faults
+in the system's own code on a worker thread (`tools/release-smoke.py
+--system-faults`): `debug_crash {kind: "system_probe"}` (`IsBadReadPtr`,
+which catches its own fault) answers and leaves no report, and
+`{kind: "system_fault"}` (msvcrt's `memcpy` from an unmapped address)
+leaves one whose frames are msvcrt's, then `lobole.exe`'s
+([architecture](../architecture.md#crashes-and-stalls)). All of it runs
+under Wine; the
 crash path has not run on real Windows, though the app has been tested
 there by hand.
 
