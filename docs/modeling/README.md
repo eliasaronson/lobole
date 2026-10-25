@@ -1128,8 +1128,7 @@ bug); or a finding: `boolean_failed`, `invalid`, `wrong_way`, `identity`,
 `rebuild`, `reopen`, `undo`, `message`, `internal`, `nonfinite`, `crash`,
 `hang`, or `leak` (failed in a reused instance, clean in a fresh one: state
 the previous seed left behind, or a kernel answer that follows shape
-addresses, for which the fresh instance was only a luckier draw —
-[known-bugs](../known-bugs.md#a-blend-faces-edge-names-depend-on-what-the-process-did-before)).
+addresses, for which the fresh instance was only a luckier draw).
 A message's **gist** is its class and first
 60 characters less digits, and the report groups seeds by it.
 
@@ -1279,12 +1278,13 @@ entities and entities gone are listed, not judged. A name by position can
 swap with a sibling between runs, so siblings form a family, judged by how
 many pass (`edge.fillet*3 !edge.fillet*1`): a piece whose `ordinal` is all
 that tells it from its siblings (`<kind>:<of>[*]`), a `positional` role, and
-any name holding a fallback-numbered boundary edge `;U<k>`. That number
-follows the order the kernel hands a face's edges back, and so does which of
-an edge's two faces names it first, both following shape addresses
-([known-bugs](../known-bugs.md#a-blend-faces-edge-names-depend-on-what-the-process-did-before)),
-so one edge can carry either face's name from one process to the next. Every
-such name of one feature is therefore one family, `edge:<feature>/*;U*`.
+any name holding a fallback-numbered boundary edge `;U<k>`. The number is
+the edge's place in its face's geometric order, but which of an edge's two
+faces names it is the first in the result's face order, which a builder may
+hand back in shape-address order
+([toponaming](toponaming.md#how-each-operation-names-its-output)), so one
+edge can carry either face's name from one process to the next. Every such
+name of one feature is therefore one family, `edge:<feature>/*;U*`.
 The baseline is one OpenCASCADE series' (`occ`); on another the run judges
 only crashes and hangs. An action that took more than 5 s is in its `slow`
 table with its seconds: the sample and the determinism check skip it, and

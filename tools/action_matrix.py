@@ -389,10 +389,10 @@ def family_of(kind, el):
     many of them pass:
 
     - a name holding a fallback-numbered boundary edge (`;U<k>`) anywhere:
-      the number follows the order the kernel hands a face's edges back,
-      which follows shape addresses, and so does which of an edge's two
-      faces names it first
-      (docs/known-bugs.md#a-blend-faces-edge-names-depend-on-what-the-process-did-before).
+      the number is geometric, but which of an edge's two faces names it
+      follows the result's face order, which a builder may hand back in
+      shape-address order
+      (docs/modeling/toponaming.md#how-each-operation-names-its-output).
       Its family is every such name of the feature that made it,
       `edge:<feature>/*;U*`;
     - a piece whose ordinal is all that tells it from its siblings;

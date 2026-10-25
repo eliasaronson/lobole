@@ -125,7 +125,7 @@ joined with `|`:
 ```
 2/cap1;M4[2/g3|4/g3;M4]      the right piece: the block's right wall, the slot's wall
 2/cap1;M4[2/g5|4/g5;M4]      the left piece
-2/g2;U3;M4[2/g3|4/g3;M4]     the right half of the front wall's top edge
+2/g2;U2;M4[2/g3|4/g3;M4]     the right half of the front wall's top edge
 ```
 
 A moved or resized cutter keeps those names exactly, and so does a second
@@ -175,7 +175,23 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
 - **Fallback passes** (`topo::ApplyFallbackPasses`), run after history: **U**
   — a named face names each unnamed boundary edge `<face>;U<k>`, which is what
   gives edges (fillet spines) stable names; **L** — a still-unnamed face takes
-  its sorted boundary-edge names joined with `,` plus `;L`.
+  its sorted boundary-edge names joined with `,` plus `;L`. `k` is the edge's
+  place among all the face's unique boundary edges, named or not (a seam
+  counts once), sorted by the edge's own geometry: its parameter midpoint,
+  each coordinate quantized to 100 × `Precision::Confusion()` and compared
+  x, then y, then z; for edges whose midpoints tie, then its length, curve
+  type and two end points. Never the order the kernel hands the face's edges
+  back: a blend builder returns them in an order that follows shape
+  addresses, so a Fillet saved citing `100/g1;G110;U0` found another edge, or
+  none, in a process that had built something else first. Two edges equal on
+  every part of the key are coincident, which a valid face cannot have, and
+  neither is named rather than one by a guess. The key costs one curve
+  evaluation per edge (the rest only on a tie): the whole OM615 project, 1880
+  passes over 140 000 named faces, spends 0.74 s in both passes against
+  0.56 s for the wire order, in a 70 s rebuild. A geometric order is stable
+  across processes, not across every edit: an edit that moves one edge's
+  midpoint past a sibling's renumbers the two. Which of an edge's two faces
+  names it is still the first in the result's face order.
 - **Primitives and rebuilt shapes** (`topo::NamePrimitiveElements`): every face
   `<prefix>/face<i>` in index order, then the fallback passes. Used by
   Import, the stored Box/Sphere/Cylinder an older document carries

@@ -83,39 +83,6 @@ the heading if it is not here yet.
 - **Likely fix:** for a face on an elementary surface, bound the face's own
   boundary and its interior extrema, or tighten against a fine mesh.
 
-### A blend face's edge names depend on what the process did before
-
-- **Symptom:** the same design, run in an instance that has just built
-  another one, names a fillet face's boundary edges differently from a
-  fresh instance: a Fillet whose edge was picked as `100/g1;G110;U0` finds
-  no such edge when the steps are replayed from nothing in the same
-  process. `tools/fuzz.py` reports it as `leak` (seed 41 after seed 37, on
-  generator 1).
-- **Cause:** a U name (`<face>;U<k>`, `topo::ApplyFallbackPasses`) numbers a
-  face's boundary edges in the order OpenCASCADE's blend builder hands the
-  face back, and that order follows its maps keyed by shape address, so it
-  moves with the process's allocation history. A fresh instance is not a
-  cure, only another draw: the addresses are the allocator's, and differ
-  from one process to the next as from one build to the next. The same
-  mechanism moved a whole shape, not only names: the offset builder shelled
-  `tests/fuzz/cases/rebuild-139.jsonl` into an invalid solid about one build
-  in seven, in fresh instances as in reused ones, which is what made
-  `fuzz_corpus_smoke` fail at random. That one was OpenCASCADE's quilt
-  order, now patched in every build we make
-  ([modeling](modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
-  The blend and draft builders' shapes do not: Fillet, Chamfer and Draft
-  gave one volume and one set of names over 60 copies of a drilled box, ten
-  cases between them. The offset builder returned its faces in an address
-  order too (our builds now fix it, `occt-offset-arc-bind-order.patch`),
-  which made a later Draft's validity a coin toss until the check stopped
-  sampling one point per cavity
-  ([inspect](inspect/README.md#geometry-checks)).
-- **Where:** `FallbackPasses` in `src/core/ElementHistory.cpp`.
-- **Likely fix:** number a face's unnamed edges in an order the geometry
-  fixes (by each edge's midpoint, then its length), not the wire's order.
-  That renames U edges in saved documents, so the goldens that cite one
-  move with it.
-
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused
