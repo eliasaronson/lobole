@@ -926,6 +926,20 @@ static std::string BatchRefusalFor(const ui::AppState& state,
   return {};
 }
 
+// The id of the part slot holding `doc`, or 0. An identity lookup, not a
+// read: PartDocById audits every part it hands out, and an undo leaves the
+// parts linked to the active one behind until the next gate
+// (docs/modeling/derived.md#nothing-may-miss-a-gate).
+static uint64_t PartSlotIdOf(const ui::AppState& state, const Document* doc) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].kind == ui::DocKind::Part &&
+        (static_cast<int>(i) == state.activePart
+             ? state.document.get()
+             : state.parts[i].doc.get()) == doc)
+      return state.parts[i].id;
+  return 0;
+}
+
 json ActivePartRevision(ui::AppState& state) {
   if (!state.document || state.activePart < 0 ||
       state.activePart >= static_cast<int>(state.parts.size()))
@@ -2132,9 +2146,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // the part this state describes.
             {"revision",
              [&]() -> json {
-               for (const ui::PartSlot& slot : state.parts)
-                 if (ui::PartDocById(state, slot.id) == stateDoc)
-                   return remote::PartRevision(*stateDoc, slot.id);
+               if (const uint64_t id = PartSlotIdOf(state, stateDoc))
+                 return remote::PartRevision(*stateDoc, id);
                return nullptr;
              }()},
             {"pending_feature_id", state.pendingFeatureId}};
@@ -2384,9 +2397,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     remote::AttachRegen(out, state.document.get(), pre);
     if (state.document) {
       out["feature_count"] = state.document->FeatureCount();
-      for (const ui::PartSlot& slot : state.parts)
-        if (ui::PartDocById(state, slot.id) == state.document.get())
-          out["revision"] = remote::PartRevision(*state.document, slot.id);
+      if (const uint64_t id = PartSlotIdOf(state, state.document.get()))
+        out["revision"] = remote::PartRevision(*state.document, id);
     }
     return out;
   }
@@ -2398,9 +2410,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     remote::AttachRegen(out, state.document.get(), pre);
     if (state.document) {
       out["feature_count"] = state.document->FeatureCount();
-      for (const ui::PartSlot& slot : state.parts)
-        if (ui::PartDocById(state, slot.id) == state.document.get())
-          out["revision"] = remote::PartRevision(*state.document, slot.id);
+      if (const uint64_t id = PartSlotIdOf(state, state.document.get()))
+        out["revision"] = remote::PartRevision(*state.document, id);
     }
     return out;
   }

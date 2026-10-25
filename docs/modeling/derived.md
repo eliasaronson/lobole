@@ -156,8 +156,10 @@ a gate. The GUI suite turns it on and fails the test with a miss
 (`LinkAuditMisses`, beside the job-edit audit); every smoke sets
 `LOBOLE_LINK_AUDIT=1` (`tests/smoke_app.py`), which makes a miss abort the
 app with the part and the link named. Off, it costs nothing. The gate's own
-reads, and the existence and cycle checks that read no geometry, go through
-a raw slot lookup instead.
+reads, the existence and cycle checks that read no geometry, and the lookup
+that finds which slot a document is (an undo's `revision`, after which the
+parts linked to it are behind until the next gate), go through a raw slot
+lookup instead.
 
 ## Sketches
 

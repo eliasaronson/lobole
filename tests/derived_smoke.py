@@ -99,6 +99,18 @@ def links(d, tmp):
     vol = sum(b["volume_mm3"] for b in bodies(d))
     expect(abs(vol - 3.14159265 * 36 * 2) < 1e-3, f"not followed: {bodies(d)}")
 
+    # An undo in the plate leaves the gasket behind until the next gate, and
+    # the undo's own answer must not read the gasket (the link audit aborts).
+    d.call("set_active_part", part="plate")
+    row = next(f for f in d.call("get_state")["features"]
+               if f["id"] == sketch_id)
+    row["entities"][0]["radius"] = 7
+    d.call("modify_feature", feature_id=sketch_id, feature=row)
+    d.call("get_state")  # the gate: the gasket takes radius 7
+    expect(d.call("undo").get("revision") is not None, "undo: no revision")
+    expect(d.call("redo").get("revision") is not None, "redo: no revision")
+    d.call("set_active_part", part="gasket")
+
     # A downstream feature the update breaks is named where it happened.
     rim = d.call("add_feature", feature={
         "type": "Extrude", "name": "Rim cut", "sketch_id": on,
