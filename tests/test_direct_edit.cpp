@@ -9,6 +9,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "TestPaths.h"
+#include "core/DirectEdit.h"
 #include "core/Document.h"
 #include "core/ElementOrigin.h"
 #include "core/Feature.h"
@@ -39,6 +40,7 @@
 #include <nlohmann/json.hpp>
 #include <unistd.h>
 
+#include <chrono>
 #include <cmath>
 #include <ctime>
 #include <filesystem>
@@ -47,6 +49,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -116,6 +119,30 @@ double VolumeOf(const Document& doc, uint64_t body) {
 Feature* Last(Document& doc) { return doc.GetFeature(doc.FeatureCount() - 1); }
 
 } // namespace
+
+// The builders' deadline counts what the edit costs, not how long the
+// machine took to give it a core: a direct edit that builds on a quiet
+// machine builds in a loaded suite too.
+TEST_CASE("A direct edit's deadline counts the builder thread's CPU, not the "
+          "wall clock",
+          "[direct_edit]") {
+  const Handle(Message_ProgressIndicator) idle = directedit::MakeDeadline(0.2);
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  CHECK_FALSE(idle->Start().UserBreak()); // waited, did not work
+  CHECK_FALSE(directedit::Expired(idle));
+
+  const Handle(Message_ProgressIndicator) busy = directedit::MakeDeadline(0.2);
+  const auto start = std::chrono::steady_clock::now();
+  volatile double sink = 0.0;
+  const Message_ProgressRange range = busy->Start();
+  while (!range.UserBreak()) {
+    for (int i = 0; i < 100000; ++i)
+      sink = sink + std::sqrt(static_cast<double>(i));
+    REQUIRE(std::chrono::steady_clock::now() - start <
+            std::chrono::seconds(30));
+  }
+  CHECK(directedit::Expired(busy));
+}
 
 TEST_CASE("Delete Face fills a through bore", "[direct_edit]") {
   Document doc;

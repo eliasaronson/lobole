@@ -21,10 +21,21 @@
 #include <TopoDS_Wire.hxx>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <set>
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <time.h>
+#elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace directedit {
 
@@ -488,14 +499,37 @@ std::string FreeformNeighbour(const Picked& picked, const std::string& op,
 
 namespace {
 
+// The budget is the CPU time of the thread that made the deadline (the one
+// running the builder): what the edit costs, so whether it builds does not
+// depend on what else the machine is doing. A wall-clock limit four times
+// the budget stays behind it, for a builder whose work runs on threads whose
+// time is not counted here. Asked from any thread, as a builder may.
 class Deadline : public Message_ProgressIndicator {
 public:
   explicit Deadline(double seconds)
-      : m_end(std::chrono::steady_clock::now() +
-              std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                  std::chrono::duration<double>(seconds))) {}
+      : m_budget(seconds),
+        m_wallEnd(
+            std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(4.0 * seconds))) {
+#if defined(__linux__)
+    m_haveClock = pthread_getcpuclockid(pthread_self(), &m_clock) == 0;
+#elif defined(_WIN32)
+    m_thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE,
+                          GetCurrentThreadId());
+    m_haveClock = m_thread != nullptr;
+#endif
+    m_start = CpuSeconds();
+  }
+  ~Deadline() override {
+#if defined(_WIN32)
+    if (m_thread != nullptr)
+      CloseHandle(m_thread);
+#endif
+  }
   Standard_Boolean UserBreak() override {
-    if (!m_expired && std::chrono::steady_clock::now() > m_end)
+    if (!m_expired && (std::chrono::steady_clock::now() > m_wallEnd ||
+                       (m_haveClock && CpuSeconds() - m_start > m_budget)))
       m_expired = true;
     return m_expired;
   }
@@ -503,8 +537,37 @@ public:
   bool expired() const { return m_expired; }
 
 private:
-  std::chrono::steady_clock::time_point m_end;
-  bool m_expired = false;
+  // The owning thread's CPU time, s; 0 where there is no such clock (the
+  // wall-clock limit alone then applies).
+  double CpuSeconds() const {
+#if defined(__linux__)
+    timespec ts{};
+    if (m_haveClock && clock_gettime(m_clock, &ts) == 0)
+      return static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1e9;
+#elif defined(_WIN32)
+    FILETIME created, exited, kernel, user;
+    if (m_haveClock &&
+        GetThreadTimes(m_thread, &created, &exited, &kernel, &user)) {
+      const auto ticks = [](const FILETIME& f) {
+        return (static_cast<uint64_t>(f.dwHighDateTime) << 32) |
+               f.dwLowDateTime;
+      };
+      return static_cast<double>(ticks(kernel) + ticks(user)) / 1e7;
+    }
+#endif
+    return 0.0;
+  }
+
+  double m_budget;
+  std::chrono::steady_clock::time_point m_wallEnd;
+  bool m_haveClock = false;
+#if defined(__linux__)
+  clockid_t m_clock{};
+#elif defined(_WIN32)
+  HANDLE m_thread = nullptr;
+#endif
+  double m_start = 0.0;
+  std::atomic<bool> m_expired{false};
 };
 
 } // namespace
