@@ -621,6 +621,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "autosave_interval:number, devices:string[], "
      "git_user_email:string, git_user_name:string, gpu_device:string, "
      "idle_throttle:bool, keys:object, lock_lights_to_model:bool, "
+     "nav_invert_wheel:bool, nav_orbit:string[], nav_orbit_speed:number, "
+     "nav_pan:string[], nav_pan_speed:number, nav_preset:string, "
+     "nav_roll:string[], nav_zoom:string[], nav_zoom_speed:number, "
      "path:string, settings_format:int, shadow_map:int, shadows:bool, "
      "ssao:string, terminal_panel:bool, ui_font_scale:number, "
      "window:{h:int, maximized:bool, w:int, x:int, y:int}, "
@@ -737,16 +740,20 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "rect (0.5,0.5 = its centre, whatever is docked around it).",
      "button, ctrl, x, y", remote::UiAction},
     {"viewport_drag",
-     "Drag in the viewport (button 0/1/2) — orbit/pan. From (x0, y0) to "
-     "(x1, y1), the same 0-1 fractions of the viewport rect; the defaults "
-     "drag from its centre a tenth of the way out.",
-     "button, ctrl, shift, x0, x1, y0, y1", remote::UiAction},
+     "Drag in the viewport with button 0/1/2 (left/right/middle; default "
+     "middle) and ctrl/shift/alt held: what it does is whatever "
+     "Preferences > Navigation binds that gesture to (get_settings "
+     "nav_orbit/nav_pan/nav_zoom/nav_roll). From (x0, y0) to (x1, y1), the "
+     "same 0-1 fractions of the viewport rect; the defaults drag from its "
+     "centre a tenth of the way out.",
+     "alt, button, ctrl, shift, x0, x1, y0, y1", remote::UiAction},
     {"scroll",
      "Scroll (zoom) the viewport at (x, y), 0-1 fractions of the viewport "
-     "rect (default its centre). The zoom heads for what is under that "
-     "point unless Preferences > Navigation > Zoom to cursor is off. With "
-     "`window`, scrolls that panel by dy pixels instead.",
-     "amount, dy, window, x, y", remote::UiAction},
+     "rect (default its centre), with ctrl/shift held. The zoom heads for "
+     "what is under that point unless Preferences > Navigation > Zoom to "
+     "cursor is off; shift pans instead. With `window`, scrolls that panel "
+     "by dy pixels instead.",
+     "amount, ctrl, dy, shift, window, x, y", remote::UiAction},
 };
 
 // Every method's row, by name.

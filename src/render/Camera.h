@@ -57,6 +57,23 @@ public:
   void ZoomAbout(double delta, const glm::vec3& point);
   void Roll(double delta); // rotate around the view axis
 
+  // The rates a pixel of drag turns into: orbit radians per pixel, pan
+  // distance-fractions per pixel, zoom distance-fraction per unit. The
+  // multipliers are Preferences > Navigation's speeds (1 = these rates).
+  static constexpr float kOrbitRate = 0.005f;
+  static constexpr float kPanRate = 0.001f;
+  static constexpr float kZoomRate = 0.1f;
+  void SetOrbitSpeed(float multiplier) {
+    m_orbitSensitivity = kOrbitRate * multiplier;
+  }
+  void SetPanSpeed(float multiplier) {
+    m_panSensitivity = kPanRate * multiplier;
+  }
+  void SetZoomSpeed(float multiplier) {
+    m_zoomSensitivity = kZoomRate * multiplier;
+  }
+  float GetOrbitSensitivity() const { return m_orbitSensitivity; }
+
   // Camera properties. Position/target/up are a look-at view of the orbit
   // state: SetTarget keeps the camera where it is and re-aims at the target,
   // SetPosition keeps the target and moves the camera, SetUp re-rolls to the

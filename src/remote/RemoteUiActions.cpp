@@ -208,6 +208,20 @@ ImVec2 FractionToPos(const json& params, const char* xKey = "x",
                 pos.y + params.value(yKey, yDef) * size.y);
 }
 
+// The keys a viewport_drag or scroll holds: {ctrl, shift, alt}, so a script
+// can make every gesture Preferences > Navigation can bind. A scroll takes
+// no `alt`: no wheel gesture holds it.
+ImGuiKeyChord HeldMods(const json& params, bool alt = true) {
+  ImGuiKeyChord mods = 0;
+  if (params.value("ctrl", false))
+    mods |= ImGuiMod_Ctrl;
+  if (params.value("shift", false))
+    mods |= ImGuiMod_Shift;
+  if (alt && params.value("alt", false))
+    mods |= ImGuiMod_Alt;
+  return mods;
+}
+
 // Everything from here to BuildSheetFooter speaks the test engine's types
 // (ImGuiTestRef, ImGuiTestItemInfo, ImGuiTestContext) or reaches into
 // imgui_internal.h, which only the engine's headers pull in — so none of it
@@ -656,25 +670,20 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     // how both of these methods came to advertise their MODIFIERS and not the
     // place to click. Every drag a script could ask for started at the centre
     // of the viewport and ended a tenth of the way out.
-    // rpc-params: x0, y0, x1, y1
+    // rpc-params: x0, y0, x1, y1, ctrl, shift, alt
     m_uiAction = [p](ImGuiTestContext* ctx) {
       const ImVec2 from = FractionToPos(p, "x0", "y0", 0.5f, 0.5f);
       const ImVec2 to = FractionToPos(p, "x1", "y1", 0.6f, 0.6f);
       const int button = p.value("button", ImGuiMouseButton_Middle);
-      const bool ctrl = p.value("ctrl", false);
-      const bool shift = p.value("shift", false);
+      const ImGuiKeyChord mods = HeldMods(p);
       ctx->MouseMoveToPos(from);
-      if (ctrl)
-        ctx->KeyDown(ImGuiMod_Ctrl);
-      if (shift)
-        ctx->KeyDown(ImGuiMod_Shift);
+      if (mods != 0)
+        ctx->KeyDown(mods);
       ctx->MouseDown(button);
       ctx->MouseMoveToPos(to);
       ctx->MouseUp(button);
-      if (shift)
-        ctx->KeyUp(ImGuiMod_Shift);
-      if (ctrl)
-        ctx->KeyUp(ImGuiMod_Ctrl);
+      if (mods != 0)
+        ctx->KeyUp(mods);
     };
   } else if (m == "key_press") {
     std::string error;
@@ -688,7 +697,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     }
     m_uiAction = [chord](ImGuiTestContext* ctx) { ctx->KeyPress(chord); };
   } else if (m == "scroll") {
-    // rpc-params: x, y
+    // rpc-params: x, y, ctrl, shift
     m_uiAction = [p](ImGuiTestContext* ctx) {
       if (p.contains("window")) {
         // V5: scroll a PANEL by {window, dy} pixels (dy > 0 = down) — the
@@ -701,8 +710,13 @@ bool RemoteServer::QueueUiAction(const Request& request) {
                        0.0f, w->ScrollMax.y));
         return;
       }
+      const ImGuiKeyChord mods = HeldMods(p, false);
       ctx->MouseMoveToPos(FractionToPos(p));
+      if (mods != 0)
+        ctx->KeyDown(mods);
       ctx->MouseWheelY(p.value("amount", 1.0f));
+      if (mods != 0)
+        ctx->KeyUp(mods);
     };
   } else {
     return false;

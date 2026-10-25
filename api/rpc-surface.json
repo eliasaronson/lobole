@@ -259,7 +259,7 @@
   "save_project": ["force", "message", "overwrite_lossy", "path"],
   "save_template": ["comment", "comments", "dry_run", "feature_ids", "literals", "name", "rename", "replace", "strings"],
   "screenshot": ["fit", "path", "view"],
-  "scroll": ["amount", "dy", "window", "x", "y"],
+  "scroll": ["amount", "ctrl", "dy", "shift", "window", "x", "y"],
   "scroll_panel": ["to", "window"],
   "section": ["base_plane", "bodies", "enclosed", "loops", "normal", "offset", "origin", "part", "regions"],
   "select_face": ["element", "face", "mesh"],
@@ -332,6 +332,6 @@
   "verify_assertions": ["id"],
   "view": ["fit", "name"],
   "viewport_click": ["button", "ctrl", "x", "y"],
-  "viewport_drag": ["button", "ctrl", "shift", "x0", "x1", "y0", "y1"]
+  "viewport_drag": ["alt", "button", "ctrl", "shift", "x0", "x1", "y0", "y1"]
  }
 }

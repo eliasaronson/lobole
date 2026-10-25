@@ -28,6 +28,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/fem/FemSolver.h" // ContactPatch (assembly studies)
 #include "core/io/GitVault.h"
+#include "core/io/MouseNav.h"
 #include "core/io/ProjectMerge.h"
 #include "core/io/ProjectStamp.h"
 #include "core/io/ReadContext.h"
@@ -120,7 +121,9 @@ struct DocumentRenderMesh {
   uint64_t leafConfiguration = 0;
 };
 
-enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
+// What the viewport's navigation drag is doing this frame: the gesture table
+// (core/io/MouseNav.h) answers it, so the type is the table's.
+using ViewportDrag = mousenav::Action;
 
 // Why a sketch session exists. Hole = the session is collecting hole centres
 // for the Hole tool, so ✓/Enter hand off to BeginSketchHole instead of just
@@ -1625,14 +1628,20 @@ struct AppState {
   // is explicit — double-click / context-menu Edit — now that the always-on
   // Properties panel is gone). 0 = none. Transient; edits commit as usual.
   uint64_t editFeatureId = 0;
+  // What the held navigation drag does this frame (None when nothing is
+  // held, or when the keys held now make a gesture nothing is bound to).
   ViewportDrag viewportDrag = ViewportDrag::None;
+  // A button that navigates (Preferences > Navigation) went down over the
+  // viewport and is still held. Separate from viewportDrag: a drag whose
+  // keys bind nothing still owns its button until release.
+  bool viewportNavHeld = false;
   // True when the drag was started with Alt+left (trackpad-friendly) rather
   // than the middle/right button; the drag then owns the left button, so the
   // click must not leak into picking.
   bool viewportDragLeft = false;
   // Which ImGuiMouseButton started the current viewport nav drag (so release
-  // is detected on the same button). Meaningful only while viewportDrag !=
-  // None. 0 = Left (Alt+left), 1 = Right, 2 = Middle.
+  // is detected on the same button). Meaningful only while viewportNavHeld.
+  // 0 = Left (Alt+left), 1 = Right, 2 = Middle.
   int viewportDragButton = 2;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
   // The menu bar's top-level names, rebuilt every frame as it draws. The
@@ -1820,7 +1829,8 @@ struct AppState {
   struct Sheet2DView {
     glm::dvec2 offset{0.0};
     double scale = 0.0;
-    bool panning = false;
+    bool panning = false; // a navigating button is held (HandleSheetInput)
+    int panButton = 2;    // which ImGuiMouseButton, while `panning`
   } sheetView;
 
   // Projected view geometry for the active drawing tab, keyed by DrawingView

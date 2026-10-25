@@ -467,13 +467,30 @@ void DrawControlsHelpOverlay(AppState& state) {
     if (ImGui::SmallButton("x"))
       state.showControlsHelp = false;
     ImGui::Separator();
+    // Written from the tables, not by hand: the mouse lines from the gesture
+    // table (Preferences > Navigation), the keys from the keymap, so this
+    // cannot drift from what the input actually does again.
     ImGui::BulletText("Click: select edge/face (again: cycle, Ctrl: multi)");
     ImGui::BulletText("Shift+Click: align camera to face");
-    ImGui::BulletText("Middle or right drag: rotate");
+    const mousenav::NavMap& nav = CurrentNavMap(state);
+    for (const mousenav::Action a :
+         {mousenav::Action::Orbit, mousenav::Action::Pan,
+          mousenav::Action::Zoom, mousenav::Action::Roll}) {
+      std::string line;
+      for (const mousenav::Gesture& g : nav.GesturesFor(a))
+        line += (line.empty() ? "" : ", ") + mousenav::DescribeGesture(g);
+      if (!line.empty())
+        ImGui::BulletText("%s: %s", mousenav::ActionLabel(a), line.c_str());
+    }
     ImGui::BulletText("Right-click a part (assembly): its menu");
-    ImGui::BulletText("Ctrl+Middle: pan   Shift+Middle: zoom");
-    ImGui::BulletText("Alt+Middle: roll   Scroll: zoom at the cursor");
-    ImGui::BulletText("Arrows: rotate (Shift: 90\xc2\xb0)   Z: zoom");
+    ImGui::BulletText("Scroll: zoom%s%s   Shift+Scroll: pan",
+                      state.settings.zoomToCursor ? " at the cursor" : "",
+                      state.settings.navInvertWheel ? " (inverted)" : "");
+    ImGui::BulletText(
+        "Arrows: rotate (Shift: 90\xc2\xb0)   Ctrl: pan   Alt: roll");
+    if (const std::string fit = state.settings.keys.Text("view.fit");
+        !fit.empty())
+      ImGui::BulletText("%s: fit the view", fit.c_str());
   }
   ImGui::End();
 }

@@ -19,12 +19,93 @@
 #include "ui/ViewActions.h"
 #include "ui/ViewportHandleDraw.h"
 
+#include "core/io/MouseNav.h"
+#include "core/io/Settings.h"
+#include "render/Camera.h"
+
+#include <algorithm>
+#include <cmath>
+
 // Viewport GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
 // Test names and categories are UNCHANGED: tools/gui-tests-xvfb.sh builds its
 // shard partition from the binary's own --gui-test-list and asserts every
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
+namespace {
+
+// Preferences > Navigation, through the path set_settings takes.
+void SetNav(const nlohmann::json& j) {
+  std::string error;
+  IM_CHECK_NO_RET(settings::ApplyJson(s_App->settings, j, &error));
+  if (!error.empty())
+    IM_ERRORF_NOHDR("%s", error.c_str());
+}
+
+// A point of the viewport with nothing under it (left of centre, clear of
+// the controls overlay in the bottom corner): a gesture that navigates
+// nothing reaches picking instead, and must find nothing there to act on.
+ImVec2 EmptyViewportPoint() {
+  return ImVec2(s_App->viewportPos.x + s_App->viewportSize.x * 0.25f,
+                s_App->viewportPos.y + s_App->viewportSize.y * 0.35f);
+}
+
+// Makes one gesture -- `gesture` as the settings rows spell it -- as a drag
+// of (dx, dy) pixels from `from`.
+void DragGesture(ImGuiTestContext* ctx, const mousenav::Gesture& g, ImVec2 from,
+                 float dx = 80.0f, float dy = 50.0f) {
+  ImGuiKeyChord mods = 0;
+  if (g.button == mousenav::Button::Left)
+    mods |= ImGuiMod_Alt;
+  if (g.mod == mousenav::Mod::Ctrl)
+    mods |= ImGuiMod_Ctrl;
+  else if (g.mod == mousenav::Mod::Shift)
+    mods |= ImGuiMod_Shift;
+  else if (g.mod == mousenav::Mod::Alt)
+    mods |= ImGuiMod_Alt;
+  const int button = static_cast<int>(g.button);
+  ctx->MouseMoveToPos(from);
+  if (mods != 0)
+    ctx->KeyDown(mods);
+  ctx->MouseDown(button);
+  ctx->MouseMoveToPos(ImVec2(from.x + dx, from.y + dy));
+  ctx->MouseUp(button);
+  if (mods != 0)
+    ctx->KeyUp(mods);
+  ctx->Yield(2);
+}
+
+// What a camera change WAS, from the four things that tell them apart:
+// orbit turns the view direction, pan moves the target, zoom changes the
+// distance, roll turns only the up vector.
+struct CameraPose {
+  glm::vec3 forward, up, target;
+  float distance;
+};
+CameraPose Pose() {
+  const Camera& c = *s_App->camera;
+  return {c.GetForward(), c.GetUp(), c.GetTarget(), c.GetDistance()};
+}
+mousenav::Action WhatChanged(const CameraPose& a, const CameraPose& b) {
+  const bool turned = glm::length(a.forward - b.forward) > 1e-3f;
+  const bool moved = glm::length(a.target - b.target) > 1e-4f * a.distance;
+  const bool zoomed = std::abs(a.distance - b.distance) > 1e-3f * a.distance;
+  const bool rolled = glm::length(a.up - b.up) > 1e-3f;
+  if (turned && !zoomed)
+    return mousenav::Action::Orbit;
+  if (zoomed && !turned)
+    return mousenav::Action::Zoom;
+  if (moved && !turned && !zoomed && !rolled)
+    return mousenav::Action::Pan;
+  if (rolled && !turned && !zoomed && !moved)
+    return mousenav::Action::Roll;
+  if (!turned && !moved && !zoomed && !rolled)
+    return mousenav::Action::None;
+  return static_cast<mousenav::Action>(99); // a mixture: a bug either way
+}
+
+} // namespace
+
 void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
   (void)t;
@@ -178,6 +259,101 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(glm::length(s_App->camera->GetTarget() - targetBefore) > 0.01f);
     IM_CHECK(std::abs(s_App->camera->GetDistance() - distBefore) <
              0.01f * distBefore);
+  };
+
+  // Every preset (Preferences > Navigation): each gesture it binds does that
+  // action to the camera, and each it does not bind does nothing at all.
+  // Driven through the same input a hand makes, from an empty spot of the
+  // viewport so an unbound left gesture's click finds nothing to pick.
+  t = IM_REGISTER_TEST(engine, "viewport", "every_preset_drives_its_gestures");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->Yield();
+    // Anchored zoom also slides the target; the centre keeps the test about
+    // WHICH action ran.
+    SetNav({{"zoom_to_cursor", false}});
+    for (const mousenav::Preset& preset : mousenav::Presets()) {
+      SetNav({{"nav_preset", preset.name}});
+      ctx->Yield();
+      const mousenav::NavMap map = *mousenav::NavMap::Build(preset.rows);
+      for (const char* text : mousenav::AcceptedGestures()) {
+        const mousenav::Gesture g = *mousenav::ParseGesture(text);
+        const mousenav::Action want = map.ActionFor(
+            g.button, g.mod == mousenav::Mod::Ctrl,
+            g.mod == mousenav::Mod::Shift,
+            g.button == mousenav::Button::Left || g.mod == mousenav::Mod::Alt);
+        s_App->camera->StopAnimation();
+        const CameraPose before = Pose();
+        DragGesture(ctx, g, EmptyViewportPoint());
+        s_App->camera->FinishAnimation();
+        const mousenav::Action got = WhatChanged(before, Pose());
+        if (got != want)
+          IM_ERRORF_NOHDR(
+              "%s: %s did %s, bound to %s", preset.name, text,
+              got == mousenav::Action::None ? "nothing"
+                                            : mousenav::ActionLabel(got),
+              want == mousenav::Action::None ? "nothing"
+                                             : mousenav::ActionLabel(want));
+        IM_CHECK(s_App->viewportDrag == ui::ViewportDrag::None);
+        IM_CHECK(!s_App->viewportNavHeld);
+        s_App->selection.Clear();
+      }
+    }
+  };
+
+  // The wheel's direction and the three speeds (Preferences > Navigation):
+  // inverted, the same notch zooms the other way; at 2x, the same drag
+  // turns, slides or zooms twice as far.
+  t = IM_REGISTER_TEST(engine, "viewport", "wheel_inverts_and_speeds_scale");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->Yield();
+    SetNav({{"zoom_to_cursor", false}});
+    const ImVec2 at = EmptyViewportPoint();
+    const Camera home = *s_App->camera;
+
+    ctx->MouseMoveToPos(at);
+    float d0 = s_App->camera->GetDistance();
+    ctx->MouseWheelY(1.0f);
+    ctx->Yield();
+    IM_CHECK(s_App->camera->GetDistance() < d0); // away from you: in
+    SetNav({{"nav_invert_wheel", true}});
+    d0 = s_App->camera->GetDistance();
+    ctx->MouseWheelY(1.0f);
+    ctx->Yield();
+    IM_CHECK(s_App->camera->GetDistance() > d0); // inverted: out
+    SetNav({{"nav_invert_wheel", false}});
+
+    // One drag at 1x and the same at 2x, each from the same camera.
+    const auto measure = [&](const char* gesture, auto&& amount) {
+      *s_App->camera = home;
+      const CameraPose a = Pose();
+      DragGesture(ctx, *mousenav::ParseGesture(gesture), at, 40.0f, 25.0f);
+      return amount(a, Pose());
+    };
+    const auto angle = [](const CameraPose& a, const CameraPose& b) {
+      return std::acos(std::clamp(glm::dot(a.forward, b.forward), -1.0f, 1.0f));
+    };
+    const auto slide = [](const CameraPose& a, const CameraPose& b) {
+      return glm::length(a.target - b.target);
+    };
+    const auto zoom = [](const CameraPose& a, const CameraPose& b) {
+      return std::abs(std::log(b.distance / a.distance));
+    };
+    const float orbit1 = measure("middle", angle);
+    const float pan1 = measure("ctrl+middle", slide);
+    const float zoom1 = measure("shift+middle", zoom);
+    SetNav({{"nav_orbit_speed", 2.0},
+            {"nav_pan_speed", 2.0},
+            {"nav_zoom_speed", 2.0}});
+    const float orbit2 = measure("middle", angle);
+    const float pan2 = measure("ctrl+middle", slide);
+    const float zoom2 = measure("shift+middle", zoom);
+    IM_CHECK(orbit1 > 0.0f && pan1 > 0.0f && zoom1 > 0.0f);
+    IM_CHECK(std::abs(orbit2 / orbit1 - 2.0f) < 0.1f);
+    IM_CHECK(std::abs(pan2 / pan1 - 2.0f) < 0.1f);
+    // Zoom compounds per frame, so twice the rate is close to, not exactly,
+    // twice the log of the distance.
+    IM_CHECK(std::abs(zoom2 / zoom1 - 2.0f) < 0.2f);
+    *s_App->camera = home;
   };
 
   // Entering simulation or sketch mode drops an armed measure tool — it owns

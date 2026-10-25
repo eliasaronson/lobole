@@ -63,6 +63,7 @@ add_executable(designer_tests
     test_settings.cpp
     test_startup_report.cpp
     test_keymap.cpp
+    test_mousenav.cpp
     test_golden.cpp
     test_reader_fuzz.cpp
     test_reader_cases.cpp

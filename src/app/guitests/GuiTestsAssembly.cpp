@@ -1517,6 +1517,58 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!menuOpen());
   };
 
+  // Under a preset whose ROTATE is the right button (Onshape's, with no
+  // middle-button orbit to fall back on), a right CLICK on a part is still
+  // its menu and moves nothing, and a right drag still turns the view.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "right_click_menu_under_a_right_orbit_preset");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    std::string error;
+    IM_CHECK(settings::ApplyJson(s_App->settings, {{"nav_preset", "onshape"}},
+                                 &error));
+    IM_CHECK(s_App->settings.navOrbit[0] == "right");
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    ctx->Yield();
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Menu");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence box;
+    box.name = "Box";
+    box.partId = s_App->parts[0].id;
+    box.fixed = true;
+    const uint64_t occId = s_App->assembly->AddOccurrence(box);
+    ui::SolveActiveAssembly(*s_App);
+    ctx->Yield(3);
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->StopAnimation();
+    ctx->Yield(3);
+    glm::vec3 lo, hi;
+    IM_CHECK(ui::VisibleSceneBounds(*s_App, lo, hi));
+    const ImVec2 at = WorldToWindow((lo + hi) * 0.5f);
+    const auto menuOpen = [&] {
+      return ctx->UiContext->OpenPopupStack.Size > 0;
+    };
+
+    ctx->MouseMoveToPos(at);
+    const glm::vec3 still = s_App->camera->GetPosition();
+    ctx->MouseClick(ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    IM_CHECK(menuOpen());
+    IM_CHECK(glm::length(s_App->camera->GetPosition() - still) < 1e-4f);
+    IM_CHECK(ui::IsOccurrenceSelected(*s_App, occId));
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(!menuOpen());
+
+    ctx->MouseMoveToPos(at);
+    ctx->MouseDown(ImGuiMouseButton_Right);
+    ctx->MouseMoveToPos(ImVec2(at.x + 80.0f, at.y + 40.0f));
+    ctx->MouseUp(ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    IM_CHECK(glm::length(s_App->camera->GetPosition() - still) > 0.1f);
+    IM_CHECK(!menuOpen());
+  };
+
   // A part picked in the VIEWPORT is highlighted in a row that may be far
   // off the end of the list, where nobody sees it. The panel scrolls to it.
   t = IM_REGISTER_TEST(engine, "assembly",

@@ -95,6 +95,65 @@ bool DrawField(AppState& state, const settings::Field& f) {
       changed = true;
     }
   } else if (auto* m =
+                 std::get_if<std::vector<std::string> settings::Settings::*>(
+                     &f.member)) {
+    // A list row (the navigation gestures): a combo whose entries tick on
+    // and off. A gesture another row holds is shown but disabled, naming
+    // that row -- a gesture does one thing, so a click here cannot make a
+    // clash for the file to refuse later.
+    std::vector<std::string>& list = s.*(*m);
+    std::string preview;
+    for (const std::string& g : list) {
+      const auto parsed = mousenav::ParseGesture(g);
+      preview += (preview.empty() ? "" : ", ") +
+                 (parsed ? mousenav::DescribeGesture(*parsed) : g);
+    }
+    if (preview.empty())
+      preview = "none";
+    if (ImGui::BeginCombo(id.c_str(), preview.c_str())) {
+      const mousenav::Rows rows = s.NavRows();
+      for (const char* option : f.values) {
+        const auto parsed = mousenav::ParseGesture(option);
+        const std::string label =
+            (parsed ? mousenav::DescribeGesture(*parsed) : option) + "###" +
+            option;
+        const char* heldBy = nullptr;
+        for (size_t i = 0; i < rows.size(); i++)
+          if (std::string_view(mousenav::kActionKeys[i]) != f.key &&
+              std::find(rows[i].begin(), rows[i].end(), option) !=
+                  rows[i].end())
+            heldBy =
+                mousenav::ActionLabel(static_cast<mousenav::Action>(i + 1));
+        const auto at = std::find(list.begin(), list.end(), option);
+        ImGui::BeginDisabled(heldBy != nullptr);
+        if (ImGui::Selectable(label.c_str(), at != list.end(),
+                              ImGuiSelectableFlags_DontClosePopups)) {
+          if (at != list.end())
+            list.erase(at);
+          else
+            list.push_back(option);
+          changed = true;
+        }
+        ImGui::EndDisabled();
+        if (heldBy != nullptr)
+          ImGui::SetItemTooltip("Already %s", heldBy);
+      }
+      ImGui::EndCombo();
+    }
+  } else if (auto* m = std::get_if<float settings::Settings::*>(&f.member);
+             m != nullptr && f.choices.empty()) {
+    // A ranged multiplier (the navigation speeds): a slider over the range,
+    // logarithmic so 0.5x and 2x sit the same distance from 1x.
+    float value = s.*(*m);
+    char format[32];
+    std::snprintf(format, sizeof(format), "%%.2f%s", f.unit);
+    if (ImGui::SliderFloat(id.c_str(), &value, f.min, f.max, format,
+                           ImGuiSliderFlags_Logarithmic |
+                               ImGuiSliderFlags_AlwaysClamp)) {
+      s.*(*m) = value;
+      changed = true;
+    }
+  } else if (auto* m =
                  std::get_if<std::string settings::Settings::*>(&f.member)) {
     if (f.freeText) {
       // A name or an email: no list to choose from. Committed on the way out
@@ -182,6 +241,10 @@ bool DrawField(AppState& state, const settings::Field& f) {
       changed = true;
     }
   }
+  // A preset writes the gesture rows; a gesture row edited by hand makes the
+  // preset Custom (or whichever preset the rows have become).
+  if (changed)
+    settings::SyncNavPreset(s, f.key);
   return changed;
 }
 

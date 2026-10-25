@@ -10,8 +10,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -126,6 +128,111 @@ const Field kFields[] = {
      "where it is on screen. Off, it zooms toward the centre of the view.",
      Tier::Live,
      &Settings::zoomToCursor,
+     {},
+     {},
+     0.0f,
+     0.0f},
+    // Mouse navigation (core/io/MouseNav.h, docs/ui/keybindings.md). The
+    // preset row writes the four gesture rows below it; each of those is a
+    // LIST, so one action can sit on several gestures, and no gesture may sit
+    // on two actions.
+    {"nav_preset",
+     "Navigation",
+     "Mouse navigation",
+     "Which program's mouse navigation the four rows below follow. Choosing "
+     "one rewrites them; changing one by hand makes this Custom.",
+     Tier::Live,
+     &Settings::navPreset,
+     {},
+     mousenav::PresetNames(),
+     0.0f,
+     0.0f},
+    {"nav_orbit",
+     "Navigation",
+     "Rotate",
+     "The drags that rotate the view about the pivot. The left button "
+     "navigates only with Alt held: alone it selects.",
+     Tier::Live,
+     &Settings::navOrbit,
+     {},
+     mousenav::AcceptedGestures(),
+     0.0f,
+     0.0f},
+    {"nav_pan",
+     "Navigation",
+     "Pan",
+     "The drags that slide the view. On a drawing sheet, the rotate drags "
+     "pan too.",
+     Tier::Live,
+     &Settings::navPan,
+     {},
+     mousenav::AcceptedGestures(),
+     0.0f,
+     0.0f},
+    {"nav_zoom",
+     "Navigation",
+     "Zoom",
+     "The drags that zoom: down zooms out, up in, about where the drag "
+     "started.",
+     Tier::Live,
+     &Settings::navZoom,
+     {},
+     mousenav::AcceptedGestures(),
+     0.0f,
+     0.0f},
+    {"nav_roll",
+     "Navigation",
+     "Roll",
+     "The drags that turn the view about the line of sight.",
+     Tier::Live,
+     &Settings::navRoll,
+     {},
+     mousenav::AcceptedGestures(),
+     0.0f,
+     0.0f},
+    {"nav_orbit_speed",
+     "Navigation",
+     "Rotate speed",
+     "How far a drag of the same length turns the view.",
+     Tier::Live,
+     &Settings::navOrbitSpeed,
+     {},
+     {},
+     0.25f,
+     4.0f,
+     1.0f,
+     "x"},
+    {"nav_pan_speed",
+     "Navigation",
+     "Pan speed",
+     "How far a drag of the same length slides the view.",
+     Tier::Live,
+     &Settings::navPanSpeed,
+     {},
+     {},
+     0.25f,
+     4.0f,
+     1.0f,
+     "x"},
+    {"nav_zoom_speed",
+     "Navigation",
+     "Zoom speed",
+     "How far one wheel notch, or a zoom drag of the same length, zooms.",
+     Tier::Live,
+     &Settings::navZoomSpeed,
+     {},
+     {},
+     0.25f,
+     4.0f,
+     1.0f,
+     "x"},
+    {"nav_invert_wheel",
+     "Navigation",
+     "Invert wheel zoom",
+     "Off, rolling the wheel away from you zooms in. On, it zooms out. The "
+     "drawing sheet follows it too.",
+     Tier::Live,
+     &Settings::navInvertWheel,
      {},
      {},
      0.0f,
@@ -256,6 +363,28 @@ bool ReadField(Settings& s, const Field& f, const json& value,
       *error = std::string(f.key) + ": " + why;
     return false;
   };
+  if (auto* m = std::get_if<std::vector<std::string> Settings::*>(&f.member)) {
+    // The gesture rows: a list, each entry a gesture, kept in its canonical
+    // text so "Ctrl+Middle" and "ctrl+middle" are one gesture to everything
+    // that compares them.
+    if (!value.is_array())
+      return fail("expected a list of gestures, e.g. [\"middle\"]");
+    std::vector<std::string> out;
+    for (const json& item : value) {
+      if (!item.is_string())
+        return fail("expected a list of gestures, each a string");
+      std::string why;
+      const std::optional<mousenav::Gesture> g =
+          mousenav::ParseGesture(item.get<std::string>(), &why);
+      if (!g)
+        return fail(why);
+      const std::string text = mousenav::FormatGesture(*g);
+      if (std::find(out.begin(), out.end(), text) == out.end())
+        out.push_back(text);
+    }
+    s.*(*m) = std::move(out);
+    return true;
+  }
   if (auto* m = std::get_if<std::string Settings::*>(&f.member)) {
     if (!value.is_string())
       return fail("expected a string");
@@ -294,7 +423,10 @@ bool ReadField(Settings& s, const Field& f, const json& value,
     if (!ok)
       return fail("not one of " + allowed);
   } else if (f.max > f.min && (v < f.min || v > f.max)) {
-    return fail("out of range");
+    char range[64];
+    std::snprintf(range, sizeof range, "%g out of range; %g to %g", v,
+                  static_cast<double>(f.min), static_cast<double>(f.max));
+    return fail(range);
   }
   if (auto* m = std::get_if<float Settings::*>(&f.member))
     s.*(*m) = static_cast<float>(v);
@@ -316,7 +448,39 @@ json FieldValue(const Settings& s, const Field& f) {
     return s.*(*m);
   if (auto* m = std::get_if<std::string Settings::*>(&f.member))
     return s.*(*m);
+  if (auto* m = std::get_if<std::vector<std::string> Settings::*>(&f.member))
+    return s.*(*m);
   return nullptr;
+}
+
+bool IsNavRowKey(std::string_view key) {
+  for (const char* k : mousenav::kActionKeys)
+    if (key == k)
+      return true;
+  return false;
+}
+
+// A preset named in `j` writes the four rows BEFORE the keys are read, so a
+// request (or a file) that names a preset and one row gets the preset with
+// that row changed, whatever order the keys come in. Unknown preset: refused
+// by name, as ReadField refuses any fixed-value row.
+bool ApplyNavPresetFirst(Settings& s, const json& j, std::string* error) {
+  const auto it = j.find("nav_preset");
+  if (it == j.end())
+    return true;
+  for (const Field& f : kFields)
+    if (std::string_view(f.key) == "nav_preset" && !ReadField(s, f, *it, error))
+      return false;
+  if (const mousenav::Preset* p = mousenav::FindPreset(s.navPreset))
+    s.SetNavRows(p->rows);
+  return true;
+}
+
+// The rows checked TOGETHER: each was checked alone as it was read, but a
+// gesture claimed by two actions is only visible across them.
+bool FinishNav(Settings& s, std::string* error) {
+  s.navPreset = mousenav::MatchPreset(s.NavRows());
+  return mousenav::NavMap::Build(s.NavRows(), error).has_value();
 }
 
 // Parse the file, or nullopt when it is absent or unreadable-as-JSON.
@@ -346,13 +510,28 @@ std::optional<json> ReadFile(const fs::path& path) {
 bool Settings::operator==(const Settings& other) const {
   return uiFontScale == other.uiFontScale &&
          lockLightsToModel == other.lockLightsToModel &&
-         zoomToCursor == other.zoomToCursor && gpuDevice == other.gpuDevice &&
-         shadows == other.shadows && ssao == other.ssao &&
-         shadowMap == other.shadowMap && idleThrottle == other.idleThrottle &&
+         zoomToCursor == other.zoomToCursor && navPreset == other.navPreset &&
+         navOrbit == other.navOrbit && navPan == other.navPan &&
+         navZoom == other.navZoom && navRoll == other.navRoll &&
+         navOrbitSpeed == other.navOrbitSpeed &&
+         navPanSpeed == other.navPanSpeed &&
+         navZoomSpeed == other.navZoomSpeed &&
+         navInvertWheel == other.navInvertWheel &&
+         gpuDevice == other.gpuDevice && shadows == other.shadows &&
+         ssao == other.ssao && shadowMap == other.shadowMap &&
+         idleThrottle == other.idleThrottle &&
          autosaveInterval == other.autosaveInterval && keys == other.keys;
 }
 
 std::span<const Field> Fields() { return kFields; }
+
+void SyncNavPreset(Settings& s, std::string_view key) {
+  if (key == "nav_preset")
+    if (const mousenav::Preset* p = mousenav::FindPreset(s.navPreset))
+      s.SetNavRows(p->rows);
+  if (key == "nav_preset" || IsNavRowKey(key))
+    s.navPreset = mousenav::MatchPreset(s.NavRows());
+}
 
 void ResetSection(Settings& s, std::string_view section,
                   std::span<const Field> fields) {
@@ -429,7 +608,14 @@ Settings Load(std::string* note) {
                         kept.string() + ".";
     return s;
   }
+  {
+    std::string error;
+    if (!ApplyNavPresetFirst(s, *parsed, &error))
+      LOG_WARN("Settings: ignoring {} ({})", error, path.string());
+  }
   for (auto it = parsed->begin(); it != parsed->end(); ++it) {
+    if (it.key() == "nav_preset")
+      continue; // read first, above
     if (it.key() == kWindowKey) {
       std::string why;
       s.window = WindowFromJson(it.value(), &why);
@@ -458,6 +644,16 @@ Settings Load(std::string* note) {
       break;
     }
   }
+  // Two rows claiming one gesture: neither can be preferred, so the
+  // navigation goes back to the defaults WHOLE, and says why -- the rule a
+  // bad single value gets, at the size of the thing that was bad.
+  if (std::string error; !FinishNav(s, &error)) {
+    LOG_WARN("Settings: ignoring the mouse navigation rows ({}); using the "
+             "defaults ({})",
+             error, path.string());
+    s.SetNavRows(mousenav::DefaultRows());
+    s.navPreset = mousenav::MatchPreset(s.NavRows());
+  }
   return s;
 }
 
@@ -480,8 +676,10 @@ bool ApplyJson(Settings& s, const nlohmann::json& j, std::string* error) {
   // Validate against a copy first: a rejected value must not leave half the
   // request applied.
   Settings candidate = s;
+  if (!ApplyNavPresetFirst(candidate, j, error))
+    return false;
   for (auto it = j.begin(); it != j.end(); ++it) {
-    if (it.key() == kFormatKey)
+    if (it.key() == kFormatKey || it.key() == "nav_preset")
       continue;
     if (it.key() == kWindowKey) {
       // `candidate`, not `s`: this function's whole contract is that a
@@ -512,6 +710,8 @@ bool ApplyJson(Settings& s, const nlohmann::json& j, std::string* error) {
     if (!ReadField(candidate, *field, it.value(), error))
       return false;
   }
+  if (!FinishNav(candidate, error))
+    return false;
   s = candidate;
   return true;
 }
@@ -565,6 +765,10 @@ bool Save(const Settings& current, std::string* error) {
   none.idleThrottle = !current.idleThrottle;
   none.ssao = "\x01";
   none.gpuDevice = "\x01";
+  none.navPreset = "\x01";
+  none.navOrbit = none.navPan = none.navZoom = none.navRoll = {"\x01"};
+  none.navOrbitSpeed = none.navPanSpeed = none.navZoomSpeed = -1.0f;
+  none.navInvertWheel = !current.navInvertWheel;
   none.keys.Set("\x01", "F"); // a command id no build has: forces a rewrite
   return Save(current, none, error);
 }

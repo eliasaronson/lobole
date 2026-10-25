@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/DrawingPanel.h"
+#include "ui/ViewportInput.h"
 
 #include "core/drawing/DrawingExport.h" // TitleBlockRows
 #include "core/io/Format.h"
@@ -629,7 +630,9 @@ void HandleSheetInput(AppState& state) {
   const bool overViewport = !io.WantCaptureMouse;
 
   // Scroll-to-cursor zoom: keep the sheet point under the cursor fixed.
-  // Shift+scroll and a horizontal wheel/swipe pan instead (trackpads).
+  // Shift+scroll and a horizontal wheel/swipe pan instead (trackpads). The
+  // wheel's direction and the zoom speed are the viewport's
+  // (Preferences > Navigation).
   if (overViewport && (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f)) {
     const double s = state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
     const double wheelPanPx = 30.0; // one wheel notch ≈ 30 px of drag
@@ -637,26 +640,53 @@ void HandleSheetInput(AppState& state) {
     if (io.KeyShift) {
       state.sheetView.offset.y -= io.MouseWheel * wheelPanPx / s;
     } else if (io.MouseWheel != 0.0f) {
+      const double wheel =
+          state.settings.navInvertWheel ? -io.MouseWheel : io.MouseWheel;
       const glm::dvec2 before = ScreenToSheet(state, io.MousePos);
-      state.sheetView.scale *= std::pow(1.1, io.MouseWheel);
+      state.sheetView.scale *=
+          std::pow(1.0 + 0.1 * state.settings.navZoomSpeed, wheel);
       state.sheetView.scale = std::clamp(state.sheetView.scale, 0.02, 200.0);
       const glm::dvec2 after = ScreenToSheet(state, io.MousePos);
       state.sheetView.offset += before - after;
     }
   }
 
-  // Middle-drag pan (no orbit camera on a sheet); Alt+left-drag for trackpads
-  // without a usable middle button.
-  const bool altLeft =
-      io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-  if (overViewport &&
-      (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || altLeft))
-    state.sheetView.panning = true;
-  if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle) ||
-      ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-    state.sheetView.panning = false;
+  // Drag-pan, from the viewport's gesture table: a sheet has nothing to
+  // orbit, so what rotates in 3D pans here too, and a hand that pans in 3D
+  // pans the sheet. Asked every frame, as the viewport asks.
+  const mousenav::NavMap& nav = CurrentNavMap(state);
+  const auto pans = [](mousenav::Action a) {
+    return a == mousenav::Action::Pan || a == mousenav::Action::Orbit;
+  };
+  if (overViewport && !state.sheetView.panning) {
+    for (const ImGuiMouseButton b :
+         {ImGuiMouseButton_Middle, ImGuiMouseButton_Right,
+          ImGuiMouseButton_Left}) {
+      if (!ImGui::IsMouseClicked(b))
+        continue;
+      bool any = false;
+      for (const mousenav::Action a :
+           {mousenav::Action::Pan, mousenav::Action::Orbit})
+        for (const mousenav::Gesture& g : nav.GesturesFor(a))
+          any = any || g.button == static_cast<mousenav::Button>(b);
+      if (!any || (b == ImGuiMouseButton_Left && !io.KeyAlt))
+        continue;
+      state.sheetView.panning = true;
+      state.sheetView.panButton = b;
+      break;
+    }
+  }
   if (state.sheetView.panning &&
-      (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
+      ImGui::IsMouseReleased(state.sheetView.panButton))
+    state.sheetView.panning = false;
+  const mousenav::Action action =
+      state.sheetView.panning
+          ? nav.ActionFor(
+                static_cast<mousenav::Button>(state.sheetView.panButton),
+                io.KeyCtrl, io.KeyShift,
+                state.sheetView.panButton == ImGuiMouseButton_Left || io.KeyAlt)
+          : mousenav::Action::None;
+  if (pans(action) && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
     const double s = state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
     state.sheetView.offset.x -= io.MouseDelta.x / s;
     state.sheetView.offset.y += io.MouseDelta.y / s; // screen +Y is sheet -Y

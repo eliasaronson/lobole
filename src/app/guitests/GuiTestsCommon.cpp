@@ -162,6 +162,8 @@ void ResetAppForTest() {
   s_App->hoveredHandle = 0;
   s_App->pick = {};
   s_App->viewportDrag = ui::ViewportDrag::None;
+  s_App->viewportNavHeld = false;
+  s_App->sheetView.panning = false;
   // Feature sessions: a preview left in the document, or an open editor, is
   // a tool window over the next test's viewport.
   s_App->pendingFeatureId = 0;

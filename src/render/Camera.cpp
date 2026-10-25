@@ -13,8 +13,9 @@ Camera::Camera()
       m_orientation(1.0f, 0.0f, 0.0f, 0.0f) // identity
       ,
       m_fov(kDefaultFovDegrees), m_aspectRatio(16.0f / 9.0f), m_nearPlane(0.1f),
-      m_farPlane(1000.0f), m_orbitSensitivity(0.005f), m_panSensitivity(0.01f),
-      m_zoomSensitivity(0.1f), m_minDistance(0.5f)
+      m_farPlane(1000.0f), m_orbitSensitivity(kOrbitRate),
+      m_panSensitivity(kPanRate), m_zoomSensitivity(kZoomRate),
+      m_minDistance(0.5f)
       // Zoom-out clamp must exceed room scale — metre-scale parts fit at
       // several thousand mm of distance.
       ,
@@ -147,8 +148,7 @@ void Camera::Pan(double deltaX, double deltaY) {
   const glm::vec3 right = GetRight();
   const glm::vec3 up = GetUp();
 
-  float panScale = 0.005f;
-  panScale *= (m_distance * 0.2f); // pan speed tracks zoom
+  const float panScale = m_panSensitivity * m_distance; // tracks zoom
 
   // Content follows the cursor: drag right moves the model right (camera
   // left), drag down moves the model down (camera up). Moving the pivot moves

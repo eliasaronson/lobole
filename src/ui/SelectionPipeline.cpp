@@ -540,7 +540,7 @@ void HandleSelectionInput(AppState& state, bool overViewport,
     state.selection.Clear();
   }
 
-  if (!overViewport || state.viewportDrag != ViewportDrag::None) {
+  if (!overViewport || state.viewportNavHeld) {
     ClearHoverPreviews(state);
     return;
   }

@@ -132,6 +132,40 @@ std::pair<size_t, uint64_t> SpringOnAnUnvisitedSheet(ImGuiTestContext* ctx) {
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
 void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
+
+  // The sheet pans on what Preferences > Navigation binds to pan and to
+  // rotate (a sheet has nothing to rotate), and on nothing else: under
+  // Blender's, Shift+middle pans and Ctrl+middle (its zoom) does not.
+  {
+    ImGuiTest* sheetPan = IM_REGISTER_TEST(engine, "drawing",
+                                           "the_sheet_pans_on_the_pan_gesture");
+    sheetPan->TestFunc = [](ImGuiTestContext* ctx) {
+      PlateOnASheet(ctx);
+      std::string error;
+      IM_CHECK(settings::ApplyJson(s_App->settings, {{"nav_preset", "blender"}},
+                                   &error));
+      const ImVec2 from(s_App->viewportPos.x + s_App->viewportSize.x * 0.3f,
+                        s_App->viewportPos.y + s_App->viewportSize.y * 0.4f);
+      const auto drag = [&](ImGuiKeyChord mods) {
+        const glm::dvec2 before = s_App->sheetView.offset;
+        ctx->MouseMoveToPos(from);
+        ctx->KeyDown(mods);
+        ctx->MouseDown(ImGuiMouseButton_Middle);
+        ctx->MouseMoveToPos(ImVec2(from.x + 60.0f, from.y + 30.0f));
+        ctx->MouseUp(ImGuiMouseButton_Middle);
+        ctx->KeyUp(mods);
+        ctx->Yield(2);
+        return glm::length(s_App->sheetView.offset - before);
+      };
+      IM_CHECK(drag(ImGuiMod_Shift) > 1.0); // Blender's pan
+      IM_CHECK(drag(ImGuiMod_Ctrl) < 1e-9); // Blender's zoom: not a pan
+      IM_CHECK(!s_App->sheetView.panning);
+      // The defaults: Ctrl+middle is pan.
+      IM_CHECK(settings::ApplyJson(s_App->settings, {{"nav_preset", "lobole"}},
+                                   &error));
+      IM_CHECK(drag(ImGuiMod_Ctrl) > 1.0);
+    };
+  }
   ImGuiTest* t = nullptr;
   (void)t;
   t = IM_REGISTER_TEST(engine, "drawing", "build_a_drawing_by_clicking");

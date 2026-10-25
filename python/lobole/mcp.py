@@ -1774,7 +1774,9 @@ _reference("fit_view", "Frame the whole model at the current orientation.")
 
 
 _reference("get_settings", "Read the user's preferences: GPU device, font size, "
-          "shadows/SSAO/shadow map, autosave interval. Also returns `path` "
+          "shadows/SSAO/shadow map, autosave interval, the mouse navigation "
+          "(nav_preset; nav_orbit/nav_pan/nav_zoom/nav_roll gesture lists; "
+          "speeds; wheel direction). Also returns `path` "
           "(the settings file) and `devices` (what gpu_device may be set to). "
           "These are per-USER and persist; a project's own settings do not "
           "live here.")

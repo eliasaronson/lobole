@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include "core/io/Keymap.h"
+#include "core/io/MouseNav.h"
 #include "core/io/WindowGeometry.h"
 
 #include <nlohmann/json_fwd.hpp>
@@ -46,6 +47,31 @@ struct Settings {
   // The wheel (and Shift-drag) zooms toward what the cursor is over, as other
   // CAD programs do; off, toward the centre of the view (docs/ui/README.md).
   bool zoomToCursor = true;
+  // Which drag orbits, pans, zooms and rolls: each row a list of gestures
+  // (core/io/MouseNav.h), checked together so no gesture does two things.
+  // `navPreset` names the preset the rows are, or "custom"; choosing a preset
+  // writes the rows, and editing a row re-derives it (SyncNavPreset).
+  std::string navPreset = "lobole";
+  std::vector<std::string> navOrbit = mousenav::DefaultRows()[0];
+  std::vector<std::string> navPan = mousenav::DefaultRows()[1];
+  std::vector<std::string> navZoom = mousenav::DefaultRows()[2];
+  std::vector<std::string> navRoll = mousenav::DefaultRows()[3];
+  // Multipliers on the camera's own rates (render/Camera.h), 0.25-4.
+  float navOrbitSpeed = 1.0f;
+  float navPanSpeed = 1.0f;
+  float navZoomSpeed = 1.0f;
+  // Scrolling toward you zooms in; on, it zooms out (viewport and sheet).
+  bool navInvertWheel = false;
+
+  mousenav::Rows NavRows() const {
+    return {navOrbit, navPan, navZoom, navRoll};
+  }
+  void SetNavRows(const mousenav::Rows& rows) {
+    navOrbit = rows[0];
+    navPan = rows[1];
+    navZoom = rows[2];
+    navRoll = rows[3];
+  }
 
   // Performance
   std::string gpuDevice; // "" = automatic (prefer discrete)
@@ -94,9 +120,12 @@ struct Settings {
 
 // One table drives the field list, the JSON round trip and the window rows —
 // adding a setting is one row, not three edits that drift apart.
+// A `std::vector<std::string>` row is a LIST of `values` (the navigation
+// gestures): the JSON holds an array, the window a combo that ticks several.
 using Member =
     std::variant<float Settings::*, bool Settings::*, int Settings::*,
-                 double Settings::*, std::string Settings::*>;
+                 double Settings::*, std::string Settings::*,
+                 std::vector<std::string> Settings::*>;
 
 struct Field {
   const char* key;     // JSON key, and the window's "###id"
@@ -123,6 +152,11 @@ struct Field {
 };
 
 std::span<const Field> Fields();
+
+// After an edit to `key` (the Preferences window's, or a request's): a preset
+// chosen writes the four gesture rows; a gesture row edited by hand makes the
+// preset whichever one the rows now are, or "custom".
+void SyncNavPreset(Settings& s, std::string_view key);
 
 // Puts the rows of one section back to their defaults and leaves the rest --
 // the other sections, the keymap, the window and the unknown keys -- as they

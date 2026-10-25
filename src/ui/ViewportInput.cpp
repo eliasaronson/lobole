@@ -113,6 +113,30 @@ void ZoomAt(AppState& state, double delta, ImVec2 mouse) {
 
 } // namespace
 
+const mousenav::NavMap& CurrentNavMap(const AppState& state) {
+  // The rows are validated together wherever they are set (settings::
+  // ApplyJson, Load, the Preferences window), so Build cannot fail on them;
+  // if it ever did, an EMPTY table navigates nothing, visibly, rather than
+  // a guess.
+  static mousenav::Rows rows;
+  static mousenav::NavMap map;
+  static bool built = false;
+  const mousenav::Rows now = state.settings.NavRows();
+  if (!built || now != rows) {
+    rows = now;
+    std::string error;
+    if (std::optional<mousenav::NavMap> m =
+            mousenav::NavMap::Build(rows, &error))
+      map = std::move(*m);
+    else {
+      map = {};
+      LOG_WARN("Mouse navigation: {}", error);
+    }
+    built = true;
+  }
+  return map;
+}
+
 void HandleViewportInput(AppState& state) {
   // A drawing tab drives a 2D sheet, not the orbit camera.
   if (state.drawing) {
@@ -131,6 +155,13 @@ void HandleViewportInput(AppState& state) {
   // panels/menus and false over the 3D viewport.
   const bool overViewport = !io.WantCaptureMouse;
 
+  // Preferences > Navigation: the speeds, read every frame so a change in
+  // the window applies to the next drag.
+  state.camera->SetOrbitSpeed(state.settings.navOrbitSpeed);
+  state.camera->SetPanSpeed(state.settings.navPanSpeed);
+  state.camera->SetZoomSpeed(state.settings.navZoomSpeed);
+  const mousenav::NavMap& nav = CurrentNavMap(state);
+
   // Scroll: plain vertical = zoom; Shift = pan (trackpad two-finger pan); a
   // horizontal wheel/swipe always pans sideways (only trackpads emit it).
   if (overViewport && (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f)) {
@@ -141,62 +172,47 @@ void HandleViewportInput(AppState& state) {
     } else {
       if (io.MouseWheelH != 0.0f)
         state.camera->Pan(io.MouseWheelH * wheelPanPx, 0.0);
-      if (io.MouseWheel != 0.0f)
-        ZoomAt(state, -io.MouseWheel * 2.0,
-               io.MousePos); // gentler per-notch step
+      // Away from you zooms in, unless the preference turns it round.
+      const double wheel =
+          state.settings.navInvertWheel ? -io.MouseWheel : io.MouseWheel;
+      if (wheel != 0.0)
+        ZoomAt(state, -wheel * 2.0, io.MousePos); // gentler per-notch step
     }
   }
 
-  // Standard CAD navigation drags: plain = rotate, Ctrl = pan,
-  // Shift = zoom, Alt = roll. The drag starts over the viewport and keeps
-  // tracking until release even if the cursor crosses a panel; modifiers
-  // are re-read every frame so pressing Ctrl mid-drag switches to pan.
-  // Both the middle button and the (otherwise-unused-over-the-viewport)
-  // right button drive it — the right button is the no-middle-button /
-  // trackpad path (rotate with no modifier, +Ctrl pan, +Shift zoom). Left
-  // stays selection. Alt+left-drag still navigates too, for completeness;
-  // Alt is only needed to start it and the click never reaches picking.
-  if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
-    state.viewportDrag = ViewportDrag::Orbit; // actual mode resolved below
-    state.viewportDragLeft = false;
-    state.viewportDragButton = ImGuiMouseButton_Middle;
-    state.camera->StopAnimation();
-  } else if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
-             state.viewportDrag == ViewportDrag::None) {
-    state.viewportDrag = ViewportDrag::Orbit;
-    state.viewportDragLeft = false;
-    state.viewportDragButton = ImGuiMouseButton_Right;
-    state.camera->StopAnimation();
-  } else if (overViewport && io.KeyAlt &&
-             ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-             state.viewportDrag == ViewportDrag::None) {
-    state.viewportDrag = ViewportDrag::Orbit;
-    state.viewportDragLeft = true;
-    state.viewportDragButton = ImGuiMouseButton_Left;
-    state.camera->StopAnimation();
-  }
-  if (state.viewportDrag != ViewportDrag::None &&
-      ImGui::IsMouseReleased(state.viewportDragButton)) {
-    state.viewportDrag = ViewportDrag::None;
-  }
-  if (state.viewportDrag != ViewportDrag::None) {
-    // Roll needs a modifier that neither the right nor the left path can
-    // reach without ambiguity, so it stays middle-button-only (as before).
-    const bool canRoll = state.viewportDragButton == ImGuiMouseButton_Middle;
-    if (io.KeyCtrl) {
-      state.viewportDrag = ViewportDrag::Pan;
-    } else if (io.KeyShift) {
-      state.viewportDrag = ViewportDrag::Zoom;
-    } else if (io.KeyAlt && canRoll) {
-      state.viewportDrag = ViewportDrag::Roll;
-    } else {
-      state.viewportDrag = ViewportDrag::Orbit;
+  // Navigation drags, from the gesture table (Preferences > Navigation,
+  // core/io/MouseNav.h): a press of a button anything is bound to starts a
+  // drag over the viewport, which keeps tracking until release even if the
+  // cursor crosses a panel. What it DOES is asked again every frame, so a
+  // key pressed mid-drag switches it (Ctrl mid-drag: pan, by default). A
+  // left button navigates only with Alt held at the press; Alt is then the
+  // button's own and the click never reaches picking.
+  if (!state.viewportNavHeld && overViewport) {
+    for (const ImGuiMouseButton b :
+         {ImGuiMouseButton_Middle, ImGuiMouseButton_Right,
+          ImGuiMouseButton_Left}) {
+      if (!ImGui::IsMouseClicked(b) ||
+          !nav.Navigates(static_cast<mousenav::Button>(b), io.KeyAlt))
+        continue;
+      state.viewportNavHeld = true;
+      state.viewportDragButton = b;
+      state.viewportDragLeft = b == ImGuiMouseButton_Left;
+      state.camera->StopAnimation();
+      break;
     }
   }
+  if (state.viewportNavHeld && ImGui::IsMouseReleased(state.viewportDragButton))
+    state.viewportNavHeld = false;
+  state.viewportDrag =
+      state.viewportNavHeld
+          ? nav.ActionFor(
+                static_cast<mousenav::Button>(state.viewportDragButton),
+                io.KeyCtrl, io.KeyShift, state.viewportDragLeft || io.KeyAlt)
+          : ViewportDrag::None;
 
-  // The right button is also a click (an occurrence's menu, in the pick
-  // pipeline), so its drag moves nothing until it passes the drag threshold:
-  // a click must not nudge the view.
+  // The right button is also a click (an occurrence's menu, the sketch
+  // dimension menu), so its drag moves nothing until it passes the drag
+  // threshold: a click must not nudge the view.
   const bool rightClickSoFar =
       state.viewportDragButton == ImGuiMouseButton_Right &&
       io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] <
@@ -226,15 +242,17 @@ void HandleViewportInput(AppState& state) {
 
   // An Alt+left navigation drag owns the left button — stop here so the click
   // can't leak into the sketch / picking handlers below.
-  if (state.viewportDrag != ViewportDrag::None && state.viewportDragLeft)
+  if (state.viewportNavHeld && state.viewportDragLeft)
     return;
 
   // CAD keyboard navigation (when the UI isn't capturing keys):
   // arrows rotate (Shift = 90 degree steps), Ctrl+arrows pan, Alt+left/right
   // roll, Z / Shift+Z zoom out/in
   if (!io.WantCaptureKeyboard && !TerminalCapturesKeys(state)) {
-    // 15 degrees per press (90 with Shift); orbit is 0.005 rad per "pixel"
-    const double step = (io.KeyShift ? 1.5707963 : 0.2617994) / 0.005;
+    // 15 degrees per press (90 with Shift), whatever the orbit speed: the
+    // camera turns a "pixel" into its orbit rate, so divide by that.
+    const double step = (io.KeyShift ? 1.5707963 : 0.2617994) /
+                        state.camera->GetOrbitSensitivity();
     const double panStep = 40.0;
 
     auto arrow = [&](ImGuiKey key, double dx, double dy) {
