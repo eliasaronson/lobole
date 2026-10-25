@@ -614,6 +614,60 @@ LONG WINAPI OnWindowsException(EXCEPTION_POINTERS* info) {
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// Whether the exception dispatcher, walking up from a fault in system code,
+// reaches a frame of code we ship before any system frame that has an
+// exception handler. It walks the frames as the dispatch will: from the
+// fault's own context, RtlLookupFunctionEntry for each frame and
+// RtlVirtualUnwind with UNW_FLAG_EHANDLER, which returns the frame's
+// language handler, and Wine's handler list as Wine's dispatch reads it (see
+// below). A system frame with a handler may catch the fault (memory probed
+// under __try), so the answer is no; so it is when the walk cannot go
+// on (no frame within the limit, a stack pointer off this thread's stack), and
+// the fault is left to the dispatch as before. Inside a vectored handler, on
+// a stack that may be broken: no allocation, no locks, a frame limit, and
+// every read of the stack checked against the thread's own bounds.
+bool ShippedCodeComesFirst(const CONTEXT& fault) {
+#if defined(__x86_64__) || defined(_M_X64)
+  const auto* tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+  const auto lo = reinterpret_cast<DWORD64>(tib->StackLimit);
+  const auto hi = reinterpret_cast<DWORD64>(tib->StackBase);
+  CONTEXT ctx = fault;
+  for (int i = 0; i < kMaxCrashFrames; ++i) {
+    if (ctx.Rip == 0 || ctx.Rsp < lo || ctx.Rsp + 8 > hi)
+      return false;
+    if (InShippedCode(static_cast<uintptr_t>(ctx.Rip)))
+      return true;
+    DWORD64 imageBase = 0;
+    PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
+    if (fn) {
+      void* handlerData = nullptr;
+      DWORD64 establisher = 0;
+      if (RtlVirtualUnwind(UNW_FLAG_EHANDLER, imageBase, ctx.Rip, fn, &ctx,
+                           &handlerData, &establisher, nullptr) != nullptr)
+        return false;
+    } else {
+      // A leaf function, as the dispatch reads one: no handler, and the
+      // return address on top of the stack.
+      ctx.Rip = *reinterpret_cast<const DWORD64*>(ctx.Rsp);
+      ctx.Rsp += 8;
+    }
+    // Wine's own DLLs, built with GCC, catch a fault with a frame on the
+    // thread's 32-bit-style handler list (the TEB's ExceptionList), which its
+    // dispatch calls once the walk has passed it: IsBadReadPtr is one. A
+    // record below the caller's stack pointer belongs to a frame just
+    // passed. Windows x64 does not use the list, and Wine's empty one is
+    // null: off the stack, so it never counts.
+    const auto listed = reinterpret_cast<DWORD64>(tib->ExceptionList);
+    if (listed >= lo && listed < hi && listed < ctx.Rsp)
+      return false;
+  }
+  return false;
+#else
+  (void)fault;
+  return false;
+#endif
+}
+
 // A fault in code we ship, at first chance. Nothing there can handle it: GCC
 // code has no __except, and the start-up filter mingw puts round main only
 // calls a signal() handler, which is left at the default
@@ -622,13 +676,19 @@ LONG WINAPI OnWindowsException(EXCEPTION_POINTERS* info) {
 // RaiseFailFastException before any filter runs (__MCF_seh_top,
 // mcfgthread src/xglobals.c), and a worker's crash left no report. So it is
 // reported here, and the process ends with the exception's code. A fault in
-// the system's own code is left alone -- that code may be probing memory
-// under its own __try -- and reaches the filter as before. Registered last:
-// OCC's catch scopes, whose handler runs first, take their faults before it.
+// the system's own code is the same when the dispatch would pass no handler
+// of the system's before it reached our code (ShippedCodeComesFirst): msvcrt's
+// memcpy handed a bad pointer, a driver. One that does pass one -- the system
+// probing memory under its own __try -- is left alone, and reaches the filter
+// as before if nothing takes it. Registered last: OCC's catch scopes, whose
+// handler runs first, take their faults before it.
 LONG WINAPI OnFaultInShippedCode(EXCEPTION_POINTERS* info) {
   const DWORD code = info->ExceptionRecord->ExceptionCode;
-  if (!IsFatalCode(code) || !InShippedCode(reinterpret_cast<uintptr_t>(
-                                info->ExceptionRecord->ExceptionAddress)))
+  if (!IsFatalCode(code))
+    return EXCEPTION_CONTINUE_SEARCH;
+  if (!InShippedCode(reinterpret_cast<uintptr_t>(
+          info->ExceptionRecord->ExceptionAddress)) &&
+      !ShippedCodeComesFirst(*info->ContextRecord))
     return EXCEPTION_CONTINUE_SEARCH;
   OnWindowsException(info);
   TerminateProcess(GetCurrentProcess(), code);
