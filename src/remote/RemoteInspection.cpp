@@ -3440,10 +3440,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
   }
   if (m == "add_section" || m == "update_section") {
     const bool adding = m == "add_section";
-    // Every parameter is read and checked before the first change: a refused
-    // call changes nothing (docs/scripting/rpc.md#a-refused-call-changes-
-    // nothing). This added the section, or applied base_plane, and THEN
-    // refused a plane_id naming no feature, leaving the cut behind.
+    // Every parameter is read and checked before the first change
+    // (docs/scripting/rpc.md#a-refused-call-changes-nothing). This added the
+    // section, or applied base_plane, and THEN refused a plane_id naming no
+    // feature, leaving the cut behind.
     std::optional<int> basePlane;
     if (p.contains("base_plane"))
       basePlane = BasePlaneFromString(p.at("base_plane").get<std::string>());
@@ -3456,6 +3456,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           doc->FindFeatureById(*planeId) == nullptr)
         throw std::runtime_error("no feature with that id in this part");
     }
+    // rpc-params: offset, tilt_u, tilt_v, reverse, visible
     const auto number = [&](const char* key) -> std::optional<float> {
       if (!p.contains(key))
         return std::nullopt;
