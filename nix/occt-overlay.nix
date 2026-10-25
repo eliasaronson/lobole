@@ -22,6 +22,12 @@
 #   CorrectUnclosedWire removed edges from a wire while iterating it, and the
 #   iterator faulted (a fillet whose blend went through the old boolean's
 #   repair) (nix/patches/upstream/topopebrep-unclosed-wire-iterator.md).
+# - occt-offset-arc-bind-order.patch: BRepOffset_MakeOffset::BuildOffsetByArc
+#   registered the offset faces in the order of a map hashed on shape
+#   addresses, so the same shell came back valid from one copy of a solid and
+#   invalid from the next (the toolmaker's clamp's M3 screw). It now visits
+#   them in the order they were bound. Upstream's OCCT#1600 (its first
+#   commit), backported to 7.9; not yet merged there.
 #
 # And no IPA-CP clones: GCC 16 at -O3 miscompiles BRepClass3d_SClassifier.cxx,
 # so every point-in-solid test could call through a garbage vtable and every
@@ -39,6 +45,7 @@ let
     ./patches/occt-fillet-reorder-faces-loop.patch
     ./patches/occt-draft-null-curve-and-parallel.patch
     ./patches/occt-topopebrep-unclosed-wire-iterator.patch
+    ./patches/occt-offset-arc-bind-order.patch
   ];
 in
 {

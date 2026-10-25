@@ -12,13 +12,16 @@ cross.opencascade-occt.overrideAttrs (old: {
     ../../nix/patches/occt-fillet-reorder-faces-loop.patch
     ../../nix/patches/occt-draft-null-curve-and-parallel.patch
     ../../nix/patches/occt-topopebrep-unclosed-wire-iterator.patch
+    ../../nix/patches/occt-offset-arc-bind-order.patch
   ];
   # The patches it carries, as the Linux overlay lists them.
   postInstall = (old.postInstall or "") + ''
     mkdir -p $out/share/lobole
     printf '%s\n' occt-shell-cap-order.patch occt-fillet-reorder-faces-loop.patch \
       occt-draft-null-curve-and-parallel.patch \
-      occt-topopebrep-unclosed-wire-iterator.patch > $out/share/lobole/occt-patches
+      occt-topopebrep-unclosed-wire-iterator.patch \
+      occt-offset-arc-bind-order.patch \
+      > $out/share/lobole/occt-patches
   '';
   buildInputs = [ ];                       # drop tcl tk libglvnd glu libx* rapidjson
   cmakeFlags = [

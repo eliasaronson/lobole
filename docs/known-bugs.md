@@ -50,22 +50,28 @@ the heading if it is not here yet.
   it a progress check in our OCC patches or refuse a wall that thin for a
   worm's flank before the builder starts.
 
-### A Shell's answer can still follow memory addresses on the patched kernel
+### Two Shells of the clamp's screw are refused on every draw
 
-- **Symptom:** a Shell of 0.1 mm opening `9/cap1;M12[12/g3;M12]` of the
-  toolmaker's clamp's M3 retaining screw (`generator/toolmakers_clamp`)
-  builds in a full action-matrix sweep and is refused ("shell produced an
-  invalid solid (invalid geometry)") in that sweep's shard 3 and in a fresh
-  replay. In a fresh instance two, and five, draws on copies all fail; ten
-  build. `action_matrix_full_3` reads it as a pass that became a fail.
-- **Cause:** the offset builder still orders its work by shape address
-  where `occt-shell-cap-order.patch` does not reach (it fixes which way the
-  shell's faces point, not the order: upstream's OCCT#1600), and on this
-  body the order decides whether the result is valid.
-- **Where:** `ShellFeature::Execute`
-  (`src/core/features/ShellFeature.cpp`), `BRepOffset_MakeOffset`.
-- **Likely fix:** carry OCCT#1600 in `nix/patches/`, then measure whether
-  any draw beyond the first still changes an answer.
+- **Symptom:** on the toolmaker's clamp's M3 retaining screw
+  (`generator/toolmakers_clamp`), the Shell tool's 0.05 mm wall opening
+  `12/g1;M12` or `9/cap1;M12[12/g3;M12]` fails "shell failed (wall too
+  thick for the geometry?)", on every copy and in every process. Before
+  `occt-offset-arc-bind-order.patch` both built on about a third of 100
+  draws, and the action matrix's baseline had them as passes; it now has
+  them as fails.
+- **Cause:** the patch fixes the order the arc-join offset registers its
+  offset faces in, which used to follow shape addresses; whether the
+  intersections after it succeed on this body depends on that order, and
+  the order now fixed is one where they fail. Upstream's OCCT#1600 reports
+  the same of one input (a fuse of two boxes), and that reversing the order
+  built it.
+- **Where:** `BRepOffset_MakeOffset` (`nix/patches/occt-offset-arc-bind-order.patch`);
+  `ShellFeature::Execute` (`src/core/features/ShellFeature.cpp`), which now
+  draws once on a kernel carrying the patch.
+- **Likely fix (a decision):** keep it -- the same refusal every time is
+  better than a coin toss -- or give the patch a second, fixed order (the
+  reverse of the binding order) for the Shell's second draw: deterministic
+  both times, at the price of a second build of every honest refusal.
 
 ### A small sphere cut beside a fillet keeps a face inside the sphere
 
@@ -118,9 +124,10 @@ the heading if it is not here yet.
   ([modeling](modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
   The blend and draft builders' shapes do not: Fillet, Chamfer and Draft
   gave one volume and one set of names over 60 copies of a drilled box, ten
-  cases between them. The offset builder still returns its faces in an
-  address order, which made a later Draft's validity a coin toss until the
-  check stopped sampling one point per cavity
+  cases between them. The offset builder returned its faces in an address
+  order too (our builds now fix it, `occt-offset-arc-bind-order.patch`),
+  which made a later Draft's validity a coin toss until the check stopped
+  sampling one point per cavity
   ([inspect](inspect/README.md#geometry-checks)).
 - **Where:** `FallbackPasses` in `src/core/ElementHistory.cpp`.
 - **Likely fix:** number a face's unnamed edges in an order the geometry

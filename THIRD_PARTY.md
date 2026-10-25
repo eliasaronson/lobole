@@ -72,7 +72,8 @@ functional but cannot generate FEM meshes.
   `nix/patches/` (`occt-shell-cap-order.patch`,
   `occt-fillet-reorder-faces-loop.patch`,
   `occt-draft-null-curve-and-parallel.patch`,
-  `occt-topopebrep-unclosed-wire-iterator.patch`)
+  `occt-topopebrep-unclosed-wire-iterator.patch`,
+  `occt-offset-arc-bind-order.patch`, a backport of upstream's OCCT#1600)
 - **Source:** <https://github.com/Open-Cascade-SAS/OCCT>
 
 OpenCASCADE supplies B-Rep modeling, topology, tessellation, mass properties,

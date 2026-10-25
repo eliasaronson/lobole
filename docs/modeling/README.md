@@ -811,41 +811,50 @@ several times the volume about one build in seven, in a copy, in another
 process or a second time in the same one. `MakeShells` quilts the offset
 faces in the order of a map hashed on shape addresses, the split of a cap
 that the offset extends (a bore's floor) is oriented against them, and the
-quilt keeps the orientation of whichever face comes first. Every build here
-(nix, the Flatpak, the AppImage, the Windows cross build; not the Debian
-package) carries
-`nix/patches/occt-shell-cap-order.patch`, which quilts the caps last; the
-overlay in `nix/occt-overlay.nix` applies it, and netgen is built against
-the same patched library.
+quilt keeps the orientation of whichever face comes first; and before
+that, `BuildOffsetByArc` registers the offset faces in the order of another
+such map, so the same shell of the toolmaker's clamp's M3 screw built on one
+copy and not on the next. Every build here (nix, the Flatpak, the AppImage,
+the Windows cross build; not the Debian package) carries
+`nix/patches/occt-shell-cap-order.patch`, which quilts the caps last, and
+`occt-offset-arc-bind-order.patch` (upstream's OCCT#1600, backported to
+7.9), which registers the faces in the order they were made; the overlay in
+`nix/occt-overlay.nix` applies them, and netgen is built against the same
+patched library. With both, each of the screw's eight shells gave one answer
+over 100 draws (ten fresh instances, ten copies each), where six had given
+up to six -- but the order fixed is a failing one for two shells that used
+to build on some copies, so those are now refused every time
+([known-bugs](../known-bugs.md#two-shells-of-the-clamps-screw-are-refused-on-every-draw)).
 
 The CI Ubuntu job links apt's OpenCASCADE, which is unpatched, so the Shell
 also keeps its own guard (Offset Face, on the same builder, has one like it:
-five draws whatever the kernel, under one deadline). Every such answer fails one of the checks above,
-so a Shell that fails them is built again on a `BRepBuilderAPI_Copy` of its
-input (the same solid at new addresses, sub-shape for sub-shape, so its
-index-keyed names are the body's), up to five draws on apt's kernel and two
-on a patched one (`occpatch::Carries`, `src/cad/OccPatches.h`: the install
-lists its patches), and is refused only when every draw failed. On the
-patched kernel the first draw is nearly always the answer -- two shells of
-the action matrix's 1,800 still built only on a later one -- and an honest
-refusal (a wall too thick for the geometry) cost five draws for nothing, a
-fifth of a full sweep. The offset builder's Intersection mode (offset faces
-intersected over the whole solid, not only between neighbours) was measured
-as a further try: it built 106 of the matrix's shells the arc joins refused,
-but the shell it built on random design 33 left a body the next cut could
-not cut, so it is not used. Every draw shares one budget, the direct edits'
-(`directedit::BuilderBudgetS` by the body's faces): the builder stops at its
-progress checks, so a wall far too thin for a worm's flank gives up instead
-of running for minutes, though it overshoots to the end of whatever step it
-was in.
+five draws whatever the kernel, under one deadline). Every such answer fails
+one of the checks above, so a Shell that fails them is built again on a
+`BRepBuilderAPI_Copy` of its input (the same solid at new addresses,
+sub-shape for sub-shape, so its index-keyed names are the body's), and is
+refused only when every draw failed: five draws on apt's kernel, two on one
+with only the cap-order patch, and one on ours, where a copy answers as the
+original does (`occpatch::Carries`, `src/cad/OccPatches.h`: the install
+lists its patches). An honest refusal (a wall too thick for the geometry)
+cost five draws for nothing, a fifth of a full sweep. The offset builder's
+Intersection mode (offset faces intersected over the whole solid, not only
+between neighbours) was measured as a further try: it built 106 of the
+matrix's shells the arc joins refused, but the shell it built on random
+design 33 left a body the next cut could not cut, so it is not used. Every
+draw shares one budget, the direct edits' (`directedit::BuilderBudgetS` by
+the body's faces): the builder stops at its progress checks, so a wall far
+too thin for a worm's flank gives up instead of running for minutes, though
+it overshoots to the end of whatever step it was in.
 `test_shell`'s "A shell builds the same wherever its input lives in memory"
 shells 60 copies of that box and requires one solid with one set of names.
 
-The patch fixes which way the shell's faces point, not the order they come
-in, which still follows those addresses (upstream's
-Open-Cascade-SAS/OCCT#1600 fixes the order). A feature after it sees the
-same solid with its faces in another order, which mattered to one check: a
-Draft that tilted the wall of a sealed cavity through the outer wall passed
+`test_occ_patches`' "A shell of the clamp's screw answers alike on every
+copy" shells 24 copies of the screw through each of its faces, a different
+amount of heap held before each, and requires one answer per face.
+
+On a kernel with the cap-order patch alone (or none) a feature after a
+Shell sees the same solid with its faces in another order, which mattered
+to one check: a Draft that tilted the wall of a sealed cavity through the outer wall passed
 or failed BRepCheck by face order, and is now refused every time
 ([inspect](../inspect/README.md#geometry-checks)).
 

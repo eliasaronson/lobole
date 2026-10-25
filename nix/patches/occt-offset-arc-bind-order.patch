@@ -1,0 +1,87 @@
+--- a/src/BRepOffset/BRepOffset_MakeOffset.cxx
++++ b/src/BRepOffset/BRepOffset_MakeOffset.cxx
+@@ -1925,6 +1925,22 @@
+   {
+     return;
+   }
++  // MapSF is hashed on TShape addresses. Visit its entries in the order they were bound,
++  // otherwise the roots of myImageOffset, and so the faces of the result, change from run to run.
++  TopTools_IndexedMapOfShape aBindOrder;
++  {
++    // The order MakeOffsetFaces binds the faces in.
++    TopTools_ListOfShape aSortedFaces;
++    BRepLib::SortFaces(myFaceComp, aSortedFaces);
++    for (TopTools_ListIteratorOfListOfShape anIt(aSortedFaces); anIt.More(); anIt.Next())
++    {
++      aBindOrder.Add(anIt.Value());
++    }
++    for (TopTools_ListIteratorOfListOfShape anIt(myAnalyse.NewFaces()); anIt.More(); anIt.Next())
++    {
++      aBindOrder.Add(anIt.Value());
++    }
++  }
+   //--------------------------------------------------------
+   // Construction of tubes on edge.
+   //--------------------------------------------------------
+@@ -1994,6 +2010,7 @@
+           }
+           BRepOffset_Offset OF(E, EOn1, EOn2, CurOffset, E1f, E1l);
+           MapSF.Bind(E, OF);
++          aBindOrder.Add(E);
+         }
+       }
+       else
+@@ -2054,6 +2071,7 @@
+ 
+         BRepOffset_Offset OF(V, LOE, CurOffset);
+         MapSF.Bind(V, OF);
++        aBindOrder.Add(V);
+       }
+       //--------------------------------------------------------------
+       // Particular processing if V is at least a free border.
+@@ -2093,17 +2111,22 @@
+   ChFiDS_TypeOfConcavity RT = ChFiDS_Concave;
+   if (myOffset < 0.)
+     RT = ChFiDS_Convex;
+-  BRepOffset_DataMapIteratorOfDataMapOfShapeOffset It(MapSF);
+-  Message_ProgressScope                            aPS3(aPSOuter.Next(), NULL, MapSF.Size());
+-  for (; It.More(); It.Next(), aPS3.Next())
++  Message_ProgressScope aPS3(aPSOuter.Next(), NULL, aBindOrder.Extent());
++  for (Standard_Integer anIdx = 1; anIdx <= aBindOrder.Extent(); ++anIdx, aPS3.Next())
+   {
+     if (!aPS3.More())
+     {
+       myError = BRepOffset_UserBreak;
+       return;
+     }
+-    const TopoDS_Shape&      SI = It.Key();
+-    const BRepOffset_Offset& SF = It.Value();
++    const TopoDS_Shape&      SI     = aBindOrder(anIdx);
++    const BRepOffset_Offset* aSFPtr = MapSF.Seek(SI);
++    if (aSFPtr == NULL)
++    {
++      // Unbound by ToContext.
++      continue;
++    }
++    const BRepOffset_Offset& SF = *aSFPtr;
+     if (SF.Status() == BRepOffset_Reversed || SF.Status() == BRepOffset_Degenerated)
+     {
+       //------------------------------------------------
+@@ -2112,7 +2135,7 @@
+       continue;
+     }
+ 
+-    const TopoDS_Face& OF = It.Value().Face();
++    const TopoDS_Face& OF = SF.Face();
+     myInitOffsetFace.Bind(SI, OF);
+     myInitOffsetFace.SetRoot(SI); // Initial<-> Offset
+     myImageOffset.SetRoot(OF);    // FaceOffset root of images
+@@ -2131,7 +2154,7 @@
+         if (!L.IsEmpty() && L.First().Type() != RT)
+         {
+           TopAbs_Orientation OO          = E.Orientation();
+-          TopoDS_Shape       aLocalShape = It.Value().Generated(E);
++          TopoDS_Shape       aLocalShape = SF.Generated(E);
+           TopoDS_Edge        OE          = TopoDS::Edge(aLocalShape);
+           //          TopoDS_Edge        OE  = TopoDS::Edge(It.Value().Generated(E));
+           myAsDes->Add(OF, OE.Oriented(OO));

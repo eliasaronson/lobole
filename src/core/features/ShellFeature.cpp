@@ -306,18 +306,25 @@ bool ShellFeature::Execute(RegenContext& ctx) {
   //
   // With the patch the draws are fewer -- the same input mostly gives the
   // same answer, and the four more draws of every honest refusal were a
-  // fifth of an action-matrix sweep -- but not none: a shell or two of the
-  // matrix still built only on a later draw. The offset builder's
-  // Intersection mode is not a draw: on the matrix's shells it built 106 the
-  // arc joins refused, but the one it built on random design 33 left a body
-  // the next cut could not cut (it added material), so a refusal is the
-  // better answer.
+  // fifth of an action-matrix sweep -- but not none: the arc joins'
+  // offset faces were still registered in address order, and the
+  // toolmaker's clamp's M3 screw built on some copies and not on others.
+  // occt-offset-arc-bind-order.patch (upstream's OCCT#1600) fixes that
+  // order too, and with it a copy answers as the original does (one answer
+  // over 100 draws of each of the screw's eight shells, where six had up to
+  // six), so a second draw would only repeat the first. The offset
+  // builder's Intersection mode is not a draw: on the matrix's shells it
+  // built 106 the arc joins refused, but the one it built on random design
+  // 33 left a body the next cut could not cut (it added material), so a
+  // refusal is the better answer.
   //
   // Every draw shares one budget, the direct edits' (directedit::
   // BuilderBudgetS, by the faces the offset moves -- all of them): the
   // offset builder stops at its progress checks. A thin wall on the worm's
   // flank (golden/v146-worm) ran past the action matrix's minute.
-  const int attempts = occpatch::Carries("occt-shell-cap-order") ? 2 : 5;
+  const int attempts = occpatch::Carries("occt-offset-arc-bind-order") ? 1
+                       : occpatch::Carries("occt-shell-cap-order")     ? 2
+                                                                       : 5;
   const double budget =
       directedit::BuilderBudgetS(static_cast<size_t>(body->shape.FaceCount()));
   const Handle(Message_ProgressIndicator) deadline =

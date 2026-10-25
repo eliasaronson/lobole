@@ -1982,7 +1982,7 @@
    "edge:9/g1;G12[12/g1;M12|12/g3;M12]": "edge.chamfer edge.fillet edge.frame",
    "edge:9/g1;G12[12/g3;M12]": "edge.chamfer edge.fillet edge.frame",
    "face:12/cap0;M12": "-face.delete face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.move -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
-   "face:12/g1;M12": "face.delete face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch",
+   "face:12/g1;M12": "face.delete face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:12/g3;M12": "face.delete face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:3/cap0": "face.delete face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.move face.offset_in face.offset_out face.replace face.shell face.sketch",
    "face:3/g1": "curved.frame curved.thread -face.delete -face.offset_in -face.offset_out",
@@ -1990,7 +1990,7 @@
    "face:6/cap1;M9": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:6/g1": "curved.frame -face.delete -face.delete_feature -face.offset_in -face.offset_out",
    "face:9/cap1;M12[12/g1;M12]": "-face.delete face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in face.offset_out face.replace !face.shell face.sketch",
-   "face:9/cap1;M12[12/g3;M12]": "-face.delete face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:9/cap1;M12[12/g3;M12]": "-face.delete face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in face.offset_out face.replace !face.shell face.sketch",
    "face:9/g1;M12": "curved.frame curved.thread -face.delete -face.offset_in -face.offset_out"
   },
   "generator/toolmakers_clamp#Moving jaw": {

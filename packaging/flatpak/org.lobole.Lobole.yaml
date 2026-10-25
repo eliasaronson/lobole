@@ -167,6 +167,7 @@ modules:
       - mkdir -p /app/share/lobole
       - printf '%s\n' occt-shell-cap-order.patch occt-fillet-reorder-faces-loop.patch
         occt-draft-null-curve-and-parallel.patch occt-topopebrep-unclosed-wire-iterator.patch
+        occt-offset-arc-bind-order.patch
         > /app/share/lobole/occt-patches
     cleanup:
       - /bin
@@ -183,6 +184,8 @@ modules:
         path: ../../nix/patches/occt-draft-null-curve-and-parallel.patch
       - type: patch
         path: ../../nix/patches/occt-topopebrep-unclosed-wire-iterator.patch
+      - type: patch
+        path: ../../nix/patches/occt-offset-arc-bind-order.patch
 
   # ---- Netgen (FEM tet mesher; nglib/ngcore, LGPL) -------------------------
   # MPI/GUI/Python all off — we only link nglib + ngcore against OCC. Matches

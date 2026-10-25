@@ -223,8 +223,9 @@ apply, so netgen links the same patched library. The Flatpak manifest and
 `packaging/windows/occ-cross.nix` apply the same files, and
 `packaging/appimage/deps.sh` too; a new patch goes in all four, and into
 the list each writes to the install's `share/lobole/occt-patches` (what
-`occpatch::Carries` and `ping`'s `occ_patches` read). One makes a Shell's
-result independent of memory addresses
+`occpatch::Carries` and `ping`'s `occ_patches` read). Two make a Shell's
+result independent of memory addresses (one is upstream's OCCT#1600,
+backported)
 ([modeling](../modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid));
 the other three turn a fillet that never returned and three faults inside
 the kernel into ordinary failures

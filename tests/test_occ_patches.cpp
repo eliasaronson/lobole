@@ -21,7 +21,9 @@
 #include "core/Feature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/ShellFeature.h"
 
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
@@ -29,8 +31,10 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -173,6 +177,50 @@ TEST_CASE("The modelled thread's end-cap fillet fails without a fault",
   CHECK_FALSE(fillet.Execute(ctx));
   CHECK_THAT(fillet.GetError(), !ContainsSubstring("OSD_"));
   CHECK(occsig::FaultCount() == faults);
+}
+
+// generator/toolmakers_clamp's M3 retaining screw (action_matrix_full_3):
+// BRepOffset_MakeOffset::BuildOffsetByArc registered its offset faces in the
+// order of a map hashed on shape address, so the same shell came back valid
+// on one copy and invalid on the next, and the valid ones differed in their
+// volume's last digits (upstream's OCCT#1600). Every face of the screw,
+// opened by the action matrix's wall, on copies at new addresses with a
+// different amount of heap held before each: one answer per face.
+TEST_CASE("A shell of the clamp's screw answers alike on every copy",
+          "[occ][shell][determinism]") {
+  REQUIRE_PATCH("occt-offset-arc-bind-order");
+  const Body base = Fixture("shell-arc-bind-order.brep");
+  const TopoDS_Shape& shape = base.shape.GetShape();
+  int faces = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
+    faces++;
+  REQUIRE(faces > 0);
+  std::vector<std::unique_ptr<Feature>> none;
+  std::vector<std::vector<char>> held;
+  for (int face = 0; face < faces; face++) {
+    const std::string name = *base.elementMap.NameOf(face);
+    std::set<std::string> answers;
+    for (int copy = 0; copy < 24; copy++) {
+      held.emplace_back(64 * (copy * 7 % 13 + 1));
+      std::vector<Body> bodies{base};
+      bodies[0].shape = CADShape(BRepBuilderAPI_Copy(shape, false).Shape());
+      ShellFeature shell("Sh", 1, {ElementRef{1, name}}, 0.05);
+      RegenContext ctx{bodies, none, 0};
+      if (shell.Execute(ctx)) {
+        char volume[64];
+        std::snprintf(volume, sizeof volume, "built, %.17g mm3",
+                      bodies[0].shape.Volume());
+        answers.insert(volume);
+      } else {
+        answers.insert("refused: " + shell.GetError());
+      }
+    }
+    std::string seen;
+    for (const std::string& a : answers)
+      seen += "\n  " + a;
+    INFO("face " << face << " (" << name << "):" << seen);
+    CHECK(answers.size() == 1);
+  }
 }
 
 TEST_CASE("A caught kernel fault leaves the earlier bodies as they were and "
