@@ -5,7 +5,8 @@
 # Run the CI jobs on this machine, so a red build costs a coffee instead of a
 # push. Everything here is DERIVED from .github/workflows/ci.yml — the package
 # list, the container images, the excluded tests — so the two cannot drift.
-# If CI changes, this follows.
+# If CI changes, this follows. After editing this script, run
+# tools/ci-local-selftest.sh (about a minute; the lanes, the -j budget, the lock).
 #
 #   tools/ci-local.sh              # everything: nix suite + both containers
 #   tools/ci-local.sh --nix        # just the local (nix) jobs, ~5 min:

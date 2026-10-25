@@ -744,6 +744,13 @@ every lane's process group and the containers it named
 (`ci-local-<pid>-<lane>-…`). `--serial` runs the lanes one after another
 with their output live, in the order the script ran before it had lanes.
 
+`tools/ci-local-selftest.sh` checks those promises in about a minute, on a
+copy of the script whose builds, suites and containers are stubs that sleep:
+the builds in flight stay within one build's `-j`, one suite runs at a time,
+a failed lane leaves the others to finish, and `--serial` runs one step at a
+time. It is not in any suite, since only an edit to `ci-local.sh` can break
+what it checks: run it after one.
+
 ## C++ usage
 
 - C++23 (`CMAKE_CXX_STANDARD 23`); the default build type is Debug, which
