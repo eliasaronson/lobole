@@ -822,7 +822,7 @@ TEST_CASE("a material given to a derived copy reaches its bodies",
   CHECK(materialOf("Servo") == "steel"); // back to the source's
 }
 
-// ---- Sketches across parts and the content key (vNEXT) ---------------------
+// ---- Sketches across parts and the content key (v193) ---------------------
 
 namespace {
 
@@ -957,7 +957,7 @@ TEST_CASE("the freshness key is the copied content, not the source's JSON",
   REQUIRE(source->Regenerate());
   CHECK(derived::IsStale(*d, *source, host));
 
-  // A file from before vNEXT records no key: it is computed from the
+  // A file from before v193 records no key: it is computed from the
   // snapshot, and agrees with the one recorded.
   DerivedFeature unrecorded = *d;
   unrecorded.sourceKey = 0;
@@ -1006,11 +1006,11 @@ TEST_CASE("an entity put onto a plane facing the other way is the same curve",
                     at(down, *out, out->startAngle)) < 1e-9);
 }
 
-// How tests/golden/vNEXT-derived-sketch.json was made: the outline sketch of
+// How tests/golden/v193-derived-sketch.json was made: the outline sketch of
 // the servo copied (follow off), a sketch standing on the copy projecting
 // all of it, and that sketch padded. Set LOBOLE_WRITE_GOLDEN=<path> to write
 // it again.
-TEST_CASE("the vNEXT derived-sketch golden builds from this recipe",
+TEST_CASE("the v193 derived-sketch golden builds from this recipe",
           "[derived][sketch]") {
   auto source = MakeSketchSource();
   Document host;

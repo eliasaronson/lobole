@@ -28,12 +28,12 @@ that need other documents), `src/remote/RemoteModeling.cpp` (RPCs).
 - `configuration` (v133) — the source configuration the copy is taken in, by
   id (`add_feature` also takes its name and stores the id). Absent: whichever
   the source has active. See [Configurations](#configurations).
-- `sketches` (source sketch ids) and/or `sketch_names` (vNEXT) — which
+- `sketches` (source sketch ids) and/or `sketch_names` (v193) — which
   sketches to copy ([Sketches](#sketches)); the two narrow together like the
   body filters, and a copy that names a sketch copies only the bodies it
   names too. A sketch the source does not have is refused naming the ones it
   has, and so is one that failed or is suppressed there.
-- `follow` (vNEXT, default true) — the copy is retaken at the gates
+- `follow` (v193, default true) — the copy is retaken at the gates
   ([Copies that keep up](#copies-that-keep-up)); false, it stays as taken
   until Update.
 - `placement {position, orientation}` — where the copy sits in this part;
@@ -83,7 +83,7 @@ feature loads and regenerates with no source part present (golden
   bands; each sketch's plane and solved entities, field by field. FNV, never
   `std::hash` or a JSON dump, so it is the same on every platform and is not
   moved by a build that adds a key to a feature's JSON. A file from before
-  vNEXT records none (its `source_chain_hash` is read and dropped); the key
+  v193 records none (its `source_chain_hash` is read and dropped); the key
   is then computed from the snapshot itself.
 - **Stale** = taking the copy again would give another key -- or would be
   refused, the source having lost what it copies -- or its source is itself
@@ -329,7 +329,7 @@ until a source exists). Goldens `v84-derived-servo`, `v85-derived-by-name`,
 `v133-derived-configuration` (a copy taken in a configuration the source does
 not have active, and its stale check against that configuration),
 `v182-derived-fit-bands` (a printed pin's press band on its copy),
-`vNEXT-derived-sketch` (a copied sketch, follow off, a sketch on it padded).
+`v193-derived-sketch` (a copied sketch, follow off, a sketch on it padded).
 `tests/test_press_fits.cpp`, "A Derived copy of a printed pin keeps its
 press": a pin printed under a profile, derived into a part that is not
 printed, is relieved against its printed cap, before and after a round trip.

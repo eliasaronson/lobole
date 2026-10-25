@@ -113,7 +113,7 @@ public:
   // so a created_by filter cannot pick one of them out. Empty = no name
   // filter; the two narrow together when both are given.
   std::vector<std::string> bodyNames;
-  // The source's sketches to copy, by feature id and/or by name (vNEXT).
+  // The source's sketches to copy, by feature id and/or by name (v193).
   // A Derived that names a sketch copies only the bodies it names too: a
   // shared outline is wanted without the part it came from.
   std::vector<uint64_t> sketches;
@@ -126,14 +126,14 @@ public:
   // booleans. false: an ordinary body of this part (a mould from its
   // casting).
   bool reference = true;
-  // vNEXT: whether the copy keeps up with its source on its own. A
+  // v193: whether the copy keeps up with its source on its own. A
   // following link is retaken at the project's gates (ui::RefreshLinks);
   // off, it stays as taken until Update, and reads stale when behind.
   bool follow = true;
-  // vNEXT: the content key of what the snapshot holds (derived::KeyOf):
+  // v193: the content key of what the snapshot holds (derived::KeyOf):
   // the copied bodies' exact B-Rep and the copied sketches' solved
   // entities. The copy is stale exactly when taking it again would give
-  // another key. 0 = not recorded (a file from before vNEXT): the key is
+  // another key. 0 = not recorded (a file from before v193): the key is
   // then computed from the snapshot itself.
   uint64_t sourceKey = 0;
   std::vector<DerivedBody> snapshot;

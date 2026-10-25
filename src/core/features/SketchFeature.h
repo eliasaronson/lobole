@@ -1089,7 +1089,7 @@ public:
   // sketch tracks datum edits. 0 = `plane` is a baked value (legacy
   // behavior, and still how base-plane sketches work).
   uint64_t planeRef = 0;
-  // vNEXT: when planeRef is a Derived feature, the source sketch id of the
+  // v193: when planeRef is a Derived feature, the source sketch id of the
   // copied sketch whose plane this sketch stands on (0 = its only one), so a
   // sketch drawn on another part's copied sketch follows it through an
   // update (docs/modeling/derived.md#sketches).

@@ -1121,7 +1121,7 @@ json FeatureToJson(const Feature& feature) {
     if (sk->planeRef != 0) { // v12: tracked datum plane (omit when baked)
       j["plane_ref"] = sk->planeRef;
     }
-    if (sk->planeRefSketch != 0) // vNEXT: which sketch of a Derived's copies
+    if (sk->planeRefSketch != 0) // v193: which sketch of a Derived's copies
       j["plane_ref_sketch"] = sk->planeRefSketch;
     if (sk->faceRef.IsSet()) { // v16: attached body face (toponaming)
       j["face_ref"] = {{"feature_id", sk->faceRef.featureId},
@@ -1368,14 +1368,14 @@ json FeatureToJson(const Feature& feature) {
       }
       bodies.push_back(std::move(bj));
     }
-    if (!d->sketches.empty()) // vNEXT
+    if (!d->sketches.empty()) // v193
       j["sketches"] = d->sketches;
-    if (!d->sketchNames.empty()) // vNEXT
+    if (!d->sketchNames.empty()) // v193
       j["sketch_names"] = d->sketchNames;
-    if (!d->follow) // vNEXT; absent = follows
+    if (!d->follow) // v193; absent = follows
       j["follow"] = false;
     json snap = {{"bodies", std::move(bodies)}};
-    // vNEXT: the content key of what the snapshot holds, in place of the
+    // v193: the content key of what the snapshot holds, in place of the
     // source's chain hash (a std::hash of its JSON, which moved with the
     // standard library and with every key a build added).
     if (d->sourceKey != 0)
@@ -2876,7 +2876,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     sk->planeRef =
         j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
-    sk->planeRefSketch = j.value("plane_ref_sketch", uint64_t{0}); // vNEXT
+    sk->planeRefSketch = j.value("plane_ref_sketch", uint64_t{0}); // v193
     if (j.contains("face_ref")) {          // v16: attached body face
       const json& fr = j.at("face_ref");
       refKeys(fr, "face_ref");
@@ -3087,11 +3087,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       d->bodies = UniqueIds(j.at("bodies"), "bodies");
     if (j.contains("body_names")) // v85
       d->bodyNames = j.at("body_names").get<std::vector<std::string>>();
-    if (j.contains("sketches")) // vNEXT
+    if (j.contains("sketches")) // v193
       d->sketches = UniqueIds(j.at("sketches"), "sketches");
-    if (j.contains("sketch_names")) // vNEXT
+    if (j.contains("sketch_names")) // v193
       d->sketchNames = j.at("sketch_names").get<std::vector<std::string>>();
-    d->follow = j.value("follow", true); // vNEXT
+    d->follow = j.value("follow", true); // v193
     if (j.contains("placement")) {
       const json& pl = j.at("placement");
       readctx::RefuseUnknownKeys(pl, {"position", "orientation"}, "placement");
@@ -3103,7 +3103,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     d->reference = j.value("reference", true);
     if (j.contains("snapshot")) {
       const json& snap = j.at("snapshot");
-      // `source_chain_hash` (before vNEXT) is read and dropped: the key is
+      // `source_chain_hash` (before v193) is read and dropped: the key is
       // then computed from the snapshot itself (derived::StoredKey).
       readctx::RefuseUnknownKeys(
           snap, {"source_chain_hash", "source_key", "bodies", "sketches"},

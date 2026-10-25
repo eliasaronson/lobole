@@ -319,6 +319,7 @@ here; the golden corpus and git history cover them.
 | 190 | An Import's `up_axis` (which axis OF THE FILE is up: `auto`, `none`, `+x`, `-x`, `+y`, `-y`, `-z`; absent = `auto`) and `turn_deg` (a turn about world Z after it; absent = 0) ([up axis](../interchange/README.md#up-axis)). An unknown `up_axis` is refused on load. An Import saved before v190 loads as `none`, so no saved part moves. Golden `v190-import-up-axis` |
 | 191 | Two sketch constraint kinds: `curvature` (G2 between two curves joined end to end, at least one a spline: tangent there with equal curvature) and `arc_length` (a dimension, mm: a circular arc's radius x sweep; driven like any dimension). An older build refuses the file on the unknown kind ([curvature continuity](../sketching/README.md#curvature-continuity), [arc length](../sketching/README.md#arc-length)). Golden `v191-g2-arc-length` |
 | 192 | Direct edit: four feature types that change a body's faces in place — `DeleteFace` {body_id, faces}, `OffsetFace` {body_id, faces, distance_mm (+_expr)}, `MoveFace` {body_id, faces, translate_mm (+_expr each), rotate_deg (+_expr), axis} and `ReplaceFace` {body_id, face, target {kind: plane\|sketch\|face}}; each face ref may carry the `fingerprint` {surface, area_mm2, centroid_mm} of the face as picked ([direct edit](../modeling/README.md#direct-edit)). Goldens `v192-delete-face`, `v192-offset-face`, `v192-move-face`, `v192-replace-face` |
+| 193 | Cross-part links ([derived](../modeling/derived.md#sketches)): a Derived copies sketches (`sketches`, `sketch_names`; `snapshot.sketches` holds each one's plane and solved entities), carries `follow` (absent = true), and records `snapshot.source_key`, the content key of what it copied, in place of `source_chain_hash` (read and dropped; the key is then computed from the snapshot). A Sketch whose `plane_ref` is a Derived names the copied sketch it stands on in `plane_ref_sketch`. Golden `v193-derived-sketch`. |
 
 ## Pending changes
 
@@ -328,7 +329,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | Cross-part links ([derived](../modeling/derived.md#sketches)): a Derived copies sketches (`sketches`, `sketch_names`; `snapshot.sketches` holds each one's plane and solved entities), carries `follow` (absent = true), and records `snapshot.source_key`, the content key of what it copied, in place of `source_chain_hash` (read and dropped; the key is then computed from the snapshot). A Sketch whose `plane_ref` is a Derived names the copied sketch it stands on in `plane_ref_sketch`. Golden `vNEXT-derived-sketch`. |
 
 ## Paths in a project
 
