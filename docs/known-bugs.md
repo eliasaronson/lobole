@@ -136,17 +136,6 @@ the heading if it is not here yet.
   That renames U edges in saved documents, so the goldens that cite one
   move with it.
 
-## Tools
-
-### `fix-stale-nix-cache.sh` points a worktree's build at main's source
-
-- **Symptom:** run from main after the toolchain moved, the script
-  reconfigures every build dir it found with `cmake -S .`, so a worktree's
-  `build/` is configured from the checkout the script ran from.
-- **Where:** the toolchain-moved loop in `tools/fix-stale-nix-cache.sh`.
-- **Likely fix:** read each tree's `CMAKE_HOME_DIRECTORY` before deleting
-  its cache and pass that as `-S`.
-
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

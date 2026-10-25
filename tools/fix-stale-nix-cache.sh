@@ -111,16 +111,24 @@ current_cxx="$(nix-shell shell.nix --run 'command -v g++' 2>/dev/null | tail -1)
 fixed=0
 for d in "${dirs[@]}"; do
   cached_cxx="$(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' "$d/CMakeCache.txt")"
+  # The source the tree was configured from -- a worktree's own checkout,
+  # not the one this script runs from -- read before its cache is deleted.
+  # `-S .` pointed every worktree's build/ at this checkout's source.
+  src="$(sed -n 's/^CMAKE_HOME_DIRECTORY:[A-Z]*=//p' "$d/CMakeCache.txt")"
+  if [ -z "$src" ] || [ ! -f "$src/CMakeLists.txt" ]; then
+    printf '%-28s its cache names no source tree (%s); skipped\n' "$d" "${src:-none}" >&2
+    continue
+  fi
   if [ -n "$current_cxx" ] && [ -n "$cached_cxx" ] && [ "$cached_cxx" != "$current_cxx" ]; then
     keep="$(grep -E '^(CMAKE_BUILD_TYPE|ENABLE_[A-Z_]+|CMAKE_EXPORT_COMPILE_COMMANDS):' "$d/CMakeCache.txt" \
             | grep -v ':[A-Z]*=$' | sed -E 's/^([^:]+):[A-Z]+=(.*)$/-D\1=\2/' | tr '\n' ' ')"
     printf '%-28s toolchain moved: %s\n%-28s   -> %s\n' "$d" "$cached_cxx" "" "$current_cxx"
     if [ "$dry" = 1 ]; then
-      printf '   would reconfigure fresh with: %s\n' "$keep"
+      printf '   would reconfigure fresh from %s with: %s\n' "$src" "$keep"
       continue
     fi
     rm -rf "$d/CMakeCache.txt" "$d/CMakeFiles"
-    if nix-shell shell.nix --run "cmake -S . -B $d -G Ninja $keep" > /tmp/fsnc.$$.log 2>&1; then
+    if nix-shell shell.nix --run "cmake -S '$src' -B '$d' -G Ninja $keep" > /tmp/fsnc.$$.log 2>&1; then
       echo "   reconfigured fresh (everything recompiles once, then shares ccache)"
       fixed=$((fixed+1))
     else
@@ -141,10 +149,10 @@ for d in "${dirs[@]}"; do
   printf '%-28s %s stale cache entries\n' "$d" "$n"
   args="$(printf '%s\n' "$vars" | sed 's/^/-U/' | tr '\n' ' ')"
   if [ "$dry" = 1 ]; then
-    printf '   would run: cmake -S . -B %s %s\n' "$d" "$args"
+    printf '   would run: cmake -S %s -B %s %s\n' "$src" "$d" "$args"
     continue
   fi
-  if nix-shell shell.nix --run "cmake -S . -B $d $args" > /tmp/fsnc.$$.log 2>&1; then
+  if nix-shell shell.nix --run "cmake -S '$src' -B '$d' $args" > /tmp/fsnc.$$.log 2>&1; then
     echo "   reconfigured"
     fixed=$((fixed+1))
   else

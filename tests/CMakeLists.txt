@@ -865,6 +865,13 @@ add_test(NAME build_lock_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/build_lock_smoke.py)
 set_tests_properties(build_lock_smoke PROPERTIES TIMEOUT 120)
 
+# tools/fix-stale-nix-cache.sh reconfigures a tree from its own source, not
+# from the checkout it runs in. A scratch project and build dir, no app.
+add_test(NAME fix_stale_nix_cache_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fix_stale_nix_cache_smoke.py)
+set_tests_properties(fix_stale_nix_cache_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
+
 # V2 strict inputs + digests: unknown feature fields error, mutating
 # responses carry body digests with deltas, bom warnings. Headless.
 add_test(NAME strict_inputs_smoke

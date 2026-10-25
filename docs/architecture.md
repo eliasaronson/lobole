@@ -122,7 +122,10 @@ What makes a worktree share main's cache:
 - **Relative paths.** The compiler launcher sets `CCACHE_BASEDIR` to the
   source tree, so `-I…/src` hashes as `../src` in every tree.
 - **One toolchain.** A tree configured before `shell.nix` moved keeps the old
-  compiler and headers. `tools/fix-stale-nix-cache.sh` reconfigures it.
+  compiler and headers. `tools/fix-stale-nix-cache.sh` reconfigures it,
+  from the source its cache names (`CMAKE_HOME_DIRECTORY`), so a
+  worktree's tree reconfigured from main stays the worktree's
+  (`tests/fix_stale_nix_cache_smoke.py`).
 
 Measured on 22 cores, `designer` plus `designer_tests` in a fresh worktree:
 **2 min 8 s, 404 of 423 compiles from the cache.** It was 11 min 30 s before.
