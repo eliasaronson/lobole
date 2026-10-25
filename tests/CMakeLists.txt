@@ -464,10 +464,13 @@ set_tests_properties(rpc_gate_smoke PROPERTIES TIMEOUT 120)
 # its handler runs, every wrong-typed key leaves the world as it was, and the
 # calls that write files or move tabs are tried from a valid baseline with
 # each key made wrong (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+# ~5 s quiet, ~13 000 round trips. The timeout is a hang guard: in a -j22
+# suite beside 22 burners it ran 138 s, each round trip waiting for a core
+# three times (client, socket reader, main loop).
 add_test(NAME refused_calls_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/refused_calls_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(refused_calls_smoke PROPERTIES TIMEOUT 180)
+set_tests_properties(refused_calls_smoke PROPERTIES TIMEOUT 300)
 
 # A web page can POST to localhost; the JSON in an HTTP body must not run.
 add_test(NAME http_on_rpc_port_smoke
@@ -1474,12 +1477,14 @@ set_tests_properties(om615_accessories_smoke PROPERTIES LABELS slow TIMEOUT 180)
 add_test(NAME om615_mounting_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/om615_mounting_smoke.py
                  $<TARGET_FILE:designer>)
-# ~58 s alone, and not on one core: ~105 s user + ~50 s system across the
-# app's worker threads (2.7 cores on average). Counted as ONE slot, a -j$(nproc)
-# suite packed the rest of the machine around it and it ran 136-140 s, then
-# past its 180 s timeout once anything else was also building. PROCESSORS is
-# what it actually takes, so ctest leaves it room.
-set_tests_properties(om615_mounting_smoke PROPERTIES LABELS "slow;asan_slow" TIMEOUT 180
+# ~40 s alone, and not on one core: ~86 s user + ~58 s system across the
+# app's worker threads (3.6 cores on average). The system time is futex
+# contention, mostly on OpenCASCADE's process-wide Standard_ErrorHandler
+# mutex, which every OCC call in a try block takes -- from the parallel
+# BRepCheck and booleans under BooleanRefusal -- and a preempted holder makes
+# it worse under load. PROCESSORS is what it takes, so ctest leaves it room;
+# the timeout is a hang guard: 127 s in a -j22 suite beside 22 burners.
+set_tests_properties(om615_mounting_smoke PROPERTIES LABELS "slow;asan_slow" TIMEOUT 300
                      PROCESSORS 3)
 
 add_test(NAME cncest6090_smoke
