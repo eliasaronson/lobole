@@ -94,8 +94,10 @@ as a cache ([saved projections](README.md#saved-projections)).
 
 1. **+ → New Drawing** on the tab bar adds a drawing tab. The Model panel
    becomes the drawing panel (Sheet, Title block, Views, Dimensions); the
-   viewport becomes the sheet: scroll zooms about the cursor, middle-drag (or
-   Alt+left-drag, Shift+scroll) pans, the toolbar's **Fit** recentres. The
+   viewport becomes the sheet: scroll zooms about the cursor, the drags
+   bound to pan or rotate in 3D pan it (middle-drag or Alt+left-drag by
+   default; [mouse navigation](../ui/keybindings.md#mouse-navigation)), as
+   does Shift+scroll, and the toolbar's **Fit** recentres. The
    drawing toolbar holds Add view, Update views, the dimension tools, Fit and
    Export.
 2. **Sheet**: paper size (A4–A0, Letter), landscape, and the title block

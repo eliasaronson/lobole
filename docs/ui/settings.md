@@ -70,6 +70,12 @@ page, with no change to the window. The window no longer needs a section's
 rows together, but the table should read the way it draws, and a test holds
 that.
 
+A row is a bool (a checkbox), a number (a combo over `choices`, or a slider
+over `min`..`max`), a string (a combo over `values`, or free text), or a
+LIST of strings over `values` — the navigation gestures, an array in the
+JSON and a combo whose entries tick on and off in the window. A number out
+of its range is refused naming the range.
+
 Two members are deliberately not `kFields` rows: `keys` (the keymap
 overrides, [keybindings.md](keybindings.md)) and `window` (the main window's
 last geometry — remembered state nobody wants to type, restored through
@@ -97,6 +103,10 @@ rebuilds the device in place ([the GPU choice](#the-gpu-choice)), and
 | Appearance | `ui_font_scale` | Live | 85 / 100 / 120 / 140 %; the font atlas is rebuilt between frames |
 | Appearance | `lock_lights_to_model` | Live | off: the light rig follows the camera; on: fixed in the world where it stands at the home view ([rendering](../rendering/README.md#the-light-rig)) |
 | Navigation | `zoom_to_cursor` | Live | on: the wheel zooms toward what the pointer is over; off: toward the centre of the view ([viewport](README.md#viewport)) |
+| Navigation | `nav_preset` | Live | `lobole`, `solidworks`, `fusion`, `onshape`, `blender` or `custom`; choosing one writes the four rows below ([mouse navigation](keybindings.md#mouse-navigation)) |
+| Navigation | `nav_orbit`, `nav_pan`, `nav_zoom`, `nav_roll` | Live | each a list of gestures (`middle`, `ctrl+right`, `shift+alt+left`, ...); a bare left and a gesture on two rows are refused |
+| Navigation | `nav_orbit_speed`, `nav_pan_speed`, `nav_zoom_speed` | Live | multipliers on the camera's rates, 0.25-4 |
+| Navigation | `nav_invert_wheel` | Live | on: the wheel zooms out when rolled away from you (viewport and sheet) |
 | Performance | `gpu_device` | Live | `""` = automatic (prefers discrete); a change that moves the first rung rebuilds the device in place |
 | Performance | `shadows` | Live | |
 | Performance | `ssao` | Live | `off`, `half`, `full` |

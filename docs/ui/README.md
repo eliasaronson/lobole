@@ -70,9 +70,14 @@ that size. The window title is the project name, `*` when dirty.
   zooms to the selection, `Shift+1`..`7` are the named views (also View >
   Standard Views), and the **view cube** at the bottom right snaps to a
   clicked face, edge or corner, with a home button. View > Viewport Controls
-  shows the mouse and trackpad cheat sheet.
-- **Zoom heads for the cursor.** The wheel, and Shift+middle/right-drag
-  from where the button went down, zoom toward what the pointer is over,
+  shows the mouse and trackpad cheat sheet, written from the bindings.
+- **The mouse drags are preferences.** By default the middle and right
+  buttons and Alt+left rotate, Ctrl makes any of them pan, Shift zoom, and
+  Alt+middle rolls; Preferences > Navigation rebinds them, offers the
+  SolidWorks, Fusion, Onshape and Blender presets, and sets the three speeds
+  and the wheel's direction ([mouse navigation](keybindings.md#mouse-navigation)).
+- **Zoom heads for the cursor.** The wheel, and a zoom drag from where the
+  button went down, zoom toward what the pointer is over,
   and that point stays on its pixel. It is the surface under the cursor
   (`FaceSelector::PickFace`, so a section cut is honoured) or, over empty
   space, where the cursor's ray meets the plane through the pivot facing the
@@ -81,7 +86,8 @@ that size. The window title is the project name, `*` when dirty.
   zoom; at a distance limit nothing moves rather than the view sliding.
   Preferences > Navigation > Zoom to cursor (off) zooms at the centre
   instead (`ZoomAnchor` in `ViewportInput.cpp`).
-- The right button orbits when dragged and is a click when it is not: on an
+- The right button navigates when dragged (when anything is bound to it)
+  and is a click when it is not: on an
   assembly tab a right click on a part opens its menu
   ([selection](selection.md)).
 - **A named view is an orientation, not a place.** The menu, the view cube,
