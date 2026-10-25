@@ -14,6 +14,7 @@
 #include <fstream>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <unistd.h>
 #include <vector>
 
@@ -426,4 +427,54 @@ TEST_CASE("a section resets alone", "[settings]") {
   CHECK(s.gitUserName == "someone");
   CHECK(!s.keys.IsDefault("view.fit")); // the keymap is not a section
   CHECK(s.unknown.size() == 1);
+}
+
+// Equality is how a round trip is checked, so a member it leaves out is a
+// member no round-trip test can see go missing. Every table row, plus the
+// two members outside the table, changed alone, must make two settings
+// differ.
+TEST_CASE("every preference takes part in equality", "[settings]") {
+  for (const settings::Field& f : settings::Fields()) {
+    INFO(f.key);
+    settings::Settings s;
+    std::visit(
+        [&](auto member) {
+          using T = std::remove_reference_t<decltype(s.*member)>;
+          if constexpr (std::is_same_v<T, bool>)
+            s.*member = !(s.*member);
+          else if constexpr (std::is_same_v<T, std::string>)
+            s.*member += "x";
+          else if constexpr (std::is_same_v<T, std::vector<std::string>>)
+            (s.*member).push_back("x");
+          else
+            s.*member += 1;
+        },
+        f.member);
+    CHECK_FALSE(s == settings::Settings{});
+  }
+  settings::Settings moved;
+  moved.window.x += 10;
+  CHECK_FALSE(moved == settings::Settings{});
+  settings::Settings rebound;
+  REQUIRE(rebound.keys.Set("view.fit", "F9"));
+  CHECK_FALSE(rebound == settings::Settings{});
+}
+
+// A save with no baseline writes the whole struct: a value already in the
+// file is not "unchanged" just because ours happens to be the default.
+TEST_CASE("a save with no baseline overwrites every row", "[settings]") {
+  ScratchConfig scratch("no-baseline");
+  scratch.WriteRaw(R"({"zoom_to_cursor": false, "terminal_panel": true,
+    "git_user_name": "Someone", "git_user_email": "a@b", "shadows": false,
+    "window": {"x": 5, "y": 6, "w": 700, "h": 500, "maximized": true}})");
+  const settings::Settings defaults;
+  REQUIRE(settings::Save(defaults));
+  const settings::Settings loaded = settings::Load();
+  CHECK(loaded.zoomToCursor);
+  CHECK_FALSE(loaded.terminalPanel);
+  CHECK(loaded.gitUserName.empty());
+  CHECK(loaded.gitUserEmail.empty());
+  CHECK(loaded.shadows);
+  CHECK(loaded.window == defaults.window);
+  CHECK(loaded == defaults);
 }

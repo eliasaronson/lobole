@@ -520,7 +520,11 @@ bool Settings::operator==(const Settings& other) const {
          gpuDevice == other.gpuDevice && shadows == other.shadows &&
          ssao == other.ssao && shadowMap == other.shadowMap &&
          idleThrottle == other.idleThrottle &&
-         autosaveInterval == other.autosaveInterval && keys == other.keys;
+         autosaveInterval == other.autosaveInterval &&
+         terminalPanel == other.terminalPanel &&
+         gitUserName == other.gitUserName &&
+         gitUserEmail == other.gitUserEmail && keys == other.keys &&
+         window == other.window;
 }
 
 std::span<const Field> Fields() { return kFields; }
@@ -716,7 +720,12 @@ bool ApplyJson(Settings& s, const nlohmann::json& j, std::string* error) {
   return true;
 }
 
-bool Save(const Settings& current, const Settings& before, std::string* error) {
+namespace {
+
+// `before` null: no baseline, so every row, the keymap and the window are
+// written as `current` has them.
+bool SaveMerged(const Settings& current, const Settings* before,
+                std::string* error) {
   if (g_sessionOnly)
     return true; // safe mode: this session's preferences stay in memory
   std::error_code ec;
@@ -733,17 +742,17 @@ bool Save(const Settings& current, const Settings& before, std::string* error) {
   out[kFormatKey] = kFormat;
   for (const Field& f : kFields) {
     const json now = FieldValue(current, f);
-    if (!out.contains(f.key) || now != FieldValue(before, f))
+    if (!before || !out.contains(f.key) || now != FieldValue(*before, f))
       out[f.key] = now;
   }
   // The keymap is written whole when it differs: per-binding merging across
   // two running instances buys nothing over the last-writer-wins the rest of
   // this file already accepts for a single field.
-  if (!out.contains(kKeysKey) || !(current.keys == before.keys))
+  if (!before || !out.contains(kKeysKey) || !(current.keys == before->keys))
     out[kKeysKey] = keymap::OverridesToJson(current.keys);
   // Only when THIS instance moved its window: two instances run here, and a
   // blind write would teleport the other one on its next launch.
-  if (current.window != before.window)
+  if (!before || current.window != before->window)
     out[kWindowKey] = WindowToJson(current.window);
 
   // Keys from a newer build that we read earlier and must not drop.
@@ -754,23 +763,17 @@ bool Save(const Settings& current, const Settings& before, std::string* error) {
   return DocumentIO::WriteTextAtomic(path, out.dump(2) + "\n", error);
 }
 
+} // namespace
+
+bool Save(const Settings& current, const Settings& before, std::string* error) {
+  return SaveMerged(current, &before, error);
+}
+
 bool Save(const Settings& current, std::string* error) {
-  // No baseline: treat every field as changed.
-  Settings none;
-  none.uiFontScale = -1.0f;
-  none.shadowMap = -1;
-  none.autosaveInterval = -1.0;
-  none.shadows = !current.shadows;
-  none.lockLightsToModel = !current.lockLightsToModel;
-  none.idleThrottle = !current.idleThrottle;
-  none.ssao = "\x01";
-  none.gpuDevice = "\x01";
-  none.navPreset = "\x01";
-  none.navOrbit = none.navPan = none.navZoom = none.navRoll = {"\x01"};
-  none.navOrbitSpeed = none.navPanSpeed = none.navZoomSpeed = -1.0f;
-  none.navInvertWheel = !current.navInvertWheel;
-  none.keys.Set("\x01", "F"); // a command id no build has: forces a rewrite
-  return Save(current, none, error);
+  // No baseline: every value is written. A baseline faked to differ from
+  // `current` missed every row someone forgot to fake, and a value already
+  // in the file then survived a save that should have replaced it.
+  return SaveMerged(current, nullptr, error);
 }
 
 } // namespace settings
