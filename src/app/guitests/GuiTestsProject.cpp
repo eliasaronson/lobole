@@ -2389,9 +2389,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
           IM_ERRORF("the check ran %.0f s", since(t0));
           return;
         }
-        const double c0 = MainThreadCpuMs();
         ctx->Yield();
-        worstMs = std::max(worstMs, MainThreadCpuMs() - c0);
+        worstMs = std::max(worstMs, LastFrameWorkCpuMs());
         frames++;
       }
       IM_CHECK(since(t0) > 1.4); // the hold was in the measure

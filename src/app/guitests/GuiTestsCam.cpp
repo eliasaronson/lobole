@@ -1225,18 +1225,16 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->LogInfo("pick returned in %.1f ms", pickMs);
 
     // Frames keep coming while the passes cut, and none of them is held.
-    // The bound is generous against the idle pacer (a resting loop runs at
-    // ~10 Hz, so a frame CAN legitimately take ~100 ms); what it excludes is
-    // a frame that ran a pass, which on this pocket is several hundred ms.
+    // A frame's own work is a few ms; what the bound excludes is a frame that
+    // ran a pass, which on this pocket is several hundred ms.
     int framesWhileRunning = 0;
     double worstMs = 0.0;
     const auto t0 = std::chrono::steady_clock::now();
     while (ui::BackgroundJobRunning(*s_App, "cam")) {
-      // What the frame COST, not how long it waited for a core
-      // (MainThreadCpuMs): a loaded machine stretches every frame.
-      const double f0 = MainThreadCpuMs();
+      // What the frame's work COST (LastFrameWorkCpuMs), not how long it
+      // waited for a core or how long the present took.
       ctx->Yield();
-      worstMs = std::max(worstMs, MainThreadCpuMs() - f0);
+      worstMs = std::max(worstMs, LastFrameWorkCpuMs());
       framesWhileRunning++;
       if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(60))
         break;

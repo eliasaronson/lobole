@@ -153,15 +153,20 @@ is building.
   opens never appeared. Wall time is for what really is wall time (a
   worker's deadline, the idle pacer's cooldown): `std::chrono::steady_clock`,
   not `ImGui::GetTime()`.
-- **A bound on what a frame costs** ("no frame ran the pass", "playback
-  stays interactive") reads `MainThreadCpuMs()`, the main thread's CPU
-  clock, not a stopwatch round `Yield()`: under load a frame that computed
-  nothing still takes 250 ms of wall time waiting for a core.
-  A bound on the app's own work, without what drawing the frame cost, reads
-  `frameTimer.Snapshot(1).workCpuMs` after the `Yield()` — the same clock
-  over the `update` and `ui` phases only
-  (docs/rendering/frame-pacing.md#phases); the frame timer's phases
-  themselves are wall time.
+- **A bound on what a frame costs** reads a CPU clock, not a stopwatch
+  round `Yield()`: under load a frame that computed nothing still takes
+  250 ms of wall time waiting for a core. A fixed bound on the app's own
+  work ("no frame ran the pass") reads `LastFrameWorkCpuMs()` after the
+  `Yield()`: `frameTimer.Snapshot(1).workCpuMs`, the main thread's CPU over
+  the `update` and `ui` phases only (docs/rendering/frame-pacing.md#phases).
+  `MainThreadCpuMs()` round a `Yield()` also counts the present, which under
+  Xvfb is a 3.7 MB copy to the X server: 20 ms of kernel CPU a frame on a
+  fast core, 70 on a low-power one, and several hundred once the machine
+  bills memory reclaim to it. The CAM adaptive and slow-requirements checks
+  read it and failed at 681 and 764 ms on frames whose own work was a few
+  ms. It is for a bound relative to another cost measured the same way
+  (the drawing tab's click against its projection). The frame timer's
+  phases themselves are wall time.
 
 Load reproduces this badly: the burners `tools/with-cpu-load.sh` starts are
 niced (`--contend` unnices them), and the app outruns them. The runner

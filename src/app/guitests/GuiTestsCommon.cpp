@@ -517,6 +517,8 @@ double MainThreadCpuMs() {
 }
 #endif
 
+double LastFrameWorkCpuMs() { return s_App->frameTimer.Snapshot(1).workCpuMs; }
+
 bool WaitForOpen(ImGuiTestContext* ctx) {
   return WaitFor(ctx, "the project to open",
                  [] { return !ui::OpenRunning(*s_App); });

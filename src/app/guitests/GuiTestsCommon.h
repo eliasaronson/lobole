@@ -186,6 +186,14 @@ bool WaitForConflictScan(ImGuiTestContext* ctx);
 void NoteMainThread();
 double MainThreadCpuMs();
 
+// What the last frame's update and ui phases cost the main thread, ms of CPU
+// (FrameTimer::SetWorkCpuMs): the app's own work, without the present. Under
+// Xvfb the present is a 3.7 MB copy to the X server, 20 ms of kernel CPU a
+// frame on a fast core and 70 on a low-power one, plus whatever memory
+// reclaim the machine bills to it; a bound on "this frame ran no pass"
+// reads this, not MainThreadCpuMs around a Yield.
+double LastFrameWorkCpuMs();
+
 // --- U10 defaults gate: the tool table and its preconditions ---------------
 enum class Needs {
   Nothing,
