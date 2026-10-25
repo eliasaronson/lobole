@@ -320,9 +320,7 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads) {
   if (!state.document || !DatumPlanesVisible(state))
     return;
   const glm::vec3 kDatumTint(0.85f, 0.62f, 0.28f); // amber, distinct from bases
-  // A datum quad has always been the smaller, secondary reference (3 against
-  // a base plane's 8); keep that ratio now that both are derived.
-  const float kDatumHalfFraction = 3.0f / kDefaultPlaneHalfExtent;
+  const float half = DatumHalfExtent(state);
   for (size_t i = 0; i < state.document->FeatureCount(); i++) {
     auto* dp = dynamic_cast<DatumPlaneFeature*>(state.document->GetFeature(i));
     if (!dp)
@@ -330,8 +328,12 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads) {
     const bool emphasized = dp->GetId() == state.sketchEdit.hoveredDatumId ||
                             dp->GetId() == state.pendingFeatureId ||
                             dp->GetId() == SelectedFeatureId(state);
-    AppendPlaneQuad(dp->OutputPlane(), kDatumTint * (emphasized ? 1.8f : 1.0f),
-                    kDatumHalfFraction * ScenePlaneHalfExtent(state), quads);
+    // Over the part, not round the world origin: a plane offset clear of a
+    // part built away from the origin was drawn where the part is not.
+    const SketchPlane plane = dp->OutputPlane();
+    const SketchPlane over(DatumQuadCentre(state, *dp), plane.GetNormal(),
+                           plane.GetUAxis());
+    AppendPlaneQuad(over, kDatumTint * (emphasized ? 1.8f : 1.0f), half, quads);
   }
 }
 
@@ -339,7 +341,7 @@ void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines) {
   if (!state.document || !DatumPlanesVisible(state))
     return;
   const glm::vec3 kAxisTint(0.90f, 0.75f, 0.35f); // brighter amber than planes
-  const float half = 3.0f;                        // half the drawn length
+  const float half = DatumHalfExtent(state);      // half the drawn length
   for (size_t i = 0; i < state.document->FeatureCount(); i++) {
     auto* da = dynamic_cast<DatumAxisFeature*>(state.document->GetFeature(i));
     if (!da)
@@ -354,11 +356,51 @@ void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines) {
   }
 }
 
+float DatumHalfExtent(AppState& state) {
+  // A datum has always been the smaller, secondary reference (3 against a
+  // base plane's 8); the ratio stays now that both are derived.
+  return (3.0f / kDefaultPlaneHalfExtent) * ScenePlaneHalfExtent(state);
+}
+
+glm::dvec3 DatumQuadCentre(AppState& state, const DatumPlaneFeature& datum) {
+  const SketchPlane plane = datum.OutputPlane();
+  const glm::dvec3 o = plane.GetOrigin();
+  if (!state.document)
+    return o;
+  // The bodies BEFORE the datum: what it was placed against. Not the
+  // document's whole, which would move the quad whenever anything later is
+  // suppressed or edited.
+  size_t index = 0;
+  if (state.document->FindFeatureById(datum.GetId(), &index) == nullptr ||
+      index == 0)
+    return o;
+  const std::vector<Body>* before =
+      state.document->CachedBodiesAfter(index - 1);
+  if (before == nullptr)
+    return o;
+  glm::dvec3 lo(DBL_MAX), hi(-DBL_MAX);
+  bool any = false;
+  for (const Body& b : *before) {
+    if (!b.shape.IsValid())
+      continue;
+    glm::dvec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax); // memoized on the shape
+    lo = glm::min(lo, bmin);
+    hi = glm::max(hi, bmax);
+    any = true;
+  }
+  if (!any)
+    return o;
+  const glm::dvec3 n = plane.GetNormal();
+  const glm::dvec3 c = 0.5 * (lo + hi);
+  return c - n * glm::dot(c - o, n);
+}
+
 float FrameTriadLength(AppState& state) {
-  // Half a datum quad's half-extent: a triad is a point of reference, not a
-  // surface, so it reads smaller — and it scales with the scene the way the
-  // datum quads do (3 against a base plane's 8, then the document's reach).
-  return 0.5f * (3.0f / kDefaultPlaneHalfExtent) * ScenePlaneHalfExtent(state);
+  // Half a datum's half-extent: a triad is a point of reference, not a
+  // surface, so it reads smaller -- and it scales with the scene the way
+  // the datums do.
+  return 0.5f * DatumHalfExtent(state);
 }
 
 void AppendFrameLines(AppState& state, std::vector<LineVertex3D>& lines) {

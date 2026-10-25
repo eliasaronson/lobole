@@ -2,20 +2,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "app/guitests/GuiTestsCommon.h"
+#include "cad/NonDestructiveBoolean.h"
 #include "core/Angles.h"
 #include "core/ElementHistory.h"
 #include "core/Measure.h"
 #include "core/Primitives.h"
 #include "core/SheetMetal.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/DeleteFaceFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FlatPatternFeature.h"
+#include "core/features/HemFeature.h"
+#include "core/features/JogFeature.h"
 #include "core/features/MoveFaceFeature.h"
 #include "core/features/OffsetFaceFeature.h"
+#include "core/features/PatternFeature.h"
 #include "core/features/ReplaceFaceFeature.h"
+#include "core/features/SketchFeature.h"
+#include "core/features/ThreadFeature.h"
 #include "core/io/ReadContext.h" // kMaxPartFeatures
+#include "core/sketch/SketchProfile.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/FeatureEditor.h"
@@ -23,13 +31,24 @@
 #include "ui/FileDialogs.h" // ExportActiveDocument
 #include "ui/MeasureActions.h"
 #include "ui/PanelTitles.h"
+#include "ui/PreviewFeature.h"
 #include "ui/PrimitiveTool.h"
 #include "ui/PrintProfileActions.h"
 #include "ui/ProjectActions.h" // ProjectDirty
+#include "ui/SceneOverlays.h"
 #include "ui/SettingsWindow.h" // OpenPreferences
 #include "ui/TemplateActions.h"
 #include "ui/VariableActions.h"
+#include "ui/ViewActions.h"
 #include "ui/ViewportHandle.h"
+
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBndLib.hxx>
+#include <BRep_Builder.hxx>
+#include <Bnd_Box.hxx>
+#include <TopoDS_Compound.hxx>
+#include <cfloat>
+#include <format>
 
 #include <unistd.h> // getpid: a scratch file per shard
 
@@ -69,6 +88,155 @@ void LookDownAt(ImGuiTestContext* ctx, const glm::vec3& p, float distance) {
   s_App->camera->SetUp(-glm::vec3(conv::kWorldFront));
   s_App->camera->SetPosition(p + distance * LensScale() * conv::kWorldUpF);
   ctx->Yield(2);
+}
+
+// --- defaults/scale: where a tool's preview lands ----------------------------
+//
+// A default is judged by what it does on the part in front of it
+// (docs/ui/tool-sessions.md#defaults-and-refusals): the preview must be in
+// the view fitted to that part, and must not be a sliver of it.
+struct WorldBox {
+  glm::dvec3 lo{DBL_MAX}, hi{-DBL_MAX};
+  bool Empty() const { return lo.x > hi.x; }
+  void Add(const glm::dvec3& p) {
+    lo = glm::min(lo, p);
+    hi = glm::max(hi, p);
+  }
+  void Add(const WorldBox& b) {
+    if (!b.Empty()) {
+      Add(b.lo);
+      Add(b.hi);
+    }
+  }
+  glm::dvec3 Extent() const { return Empty() ? glm::dvec3(0.0) : hi - lo; }
+};
+
+WorldBox BoxOf(const TopoDS_Shape& shape) {
+  WorldBox out;
+  if (shape.IsNull())
+    return out;
+  Bnd_Box bb;
+  BRepBndLib::AddOptimal(shape, bb, /*useTriangulation=*/false);
+  if (bb.IsVoid())
+    return out;
+  double x0, y0, z0, x1, y1, z1;
+  bb.Get(x0, y0, z0, x1, y1, z1);
+  out.Add(glm::dvec3(x0, y0, z0));
+  out.Add(glm::dvec3(x1, y1, z1));
+  return out;
+}
+
+TopoDS_Compound CompoundOf(const std::vector<const Body*>& bodies) {
+  BRep_Builder builder;
+  TopoDS_Compound c;
+  builder.MakeCompound(c);
+  for (const Body* b : bodies)
+    if (b->shape.IsValid())
+      builder.Add(c, b->shape.GetShape());
+  return c;
+}
+
+// The material `a` has that `b` has not, as a box (empty when none).
+WorldBox CutBox(const TopoDS_Compound& a, const TopoDS_Compound& b) {
+  BRepAlgoAPI_Cut cut;
+  if (!cad::BuildNonDestructive(cut, a, b))
+    return BoxOf(a);
+  return BoxOf(cut.Shape());
+}
+
+// What the reference part is: its bodies and its sketches, the thing the
+// view is fitted to before the tool opens.
+WorldBox ScenePartBox() {
+  WorldBox box;
+  for (const Body& b : Doc()->GetBodies()) {
+    glm::dvec3 lo, hi;
+    b.shape.GetBoundingBox(lo, hi, /*tight=*/true);
+    box.Add(lo);
+    box.Add(hi);
+  }
+  for (size_t i = 0; i < Doc()->FeatureCount(); i++)
+    if (auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(i)))
+      for (const sketch::Entity& e : sk->entities)
+        for (const glm::dvec2& uv : sketch::TessellateEntity(e))
+          box.Add(glm::dvec3(sk->plane.PlaneToWorld(uv)));
+  return box;
+}
+
+// The pending preview's geometry: the material it adds or takes away (the
+// bodies it made, where the material is only re-cut), and the reference
+// geometry drawn for it. `solid` says which kind the box came from.
+struct PreviewExtent {
+  WorldBox box;
+  bool solid = false;
+};
+PreviewExtent PendingPreviewExtent() {
+  PreviewExtent out;
+  size_t idx = 0;
+  if (ui::ResolvePendingFeature(*s_App, &idx) == nullptr)
+    return out;
+  const std::vector<Body>* after = Doc()->CachedBodiesAfter(idx);
+  const std::vector<Body>* before =
+      idx > 0 ? Doc()->CachedBodiesAfter(idx - 1) : nullptr;
+  std::vector<const Body*> added, gone;
+  const auto among = [](const Body& b, const std::vector<Body>* list) {
+    if (list != nullptr)
+      for (const Body& o : *list)
+        if (o.shape.SameGeometryAs(b.shape))
+          return true;
+    return false;
+  };
+  if (after != nullptr)
+    for (const Body& b : *after)
+      if (!among(b, before))
+        added.push_back(&b);
+  if (before != nullptr)
+    for (const Body& b : *before)
+      if (!among(b, after))
+        gone.push_back(&b);
+  if (!added.empty() || !gone.empty()) {
+    const TopoDS_Compound a = CompoundOf(added), g = CompoundOf(gone);
+    WorldBox change;
+    change.Add(gone.empty() ? BoxOf(a) : CutBox(a, g));
+    if (!gone.empty() && !added.empty())
+      change.Add(CutBox(g, a));
+    // Re-cut but not moved (a split): the pieces it made are the preview.
+    if (change.Empty())
+      change = BoxOf(a);
+    out.box = change;
+    out.solid = !change.Empty();
+  }
+  std::vector<LineVertex3D> drawn;
+  ui::AppendDatumPlaneQuads(*s_App, drawn);
+  ui::AppendDatumAxisLines(*s_App, drawn);
+  ui::AppendFrameLines(*s_App, drawn);
+  ui::AppendCurve3DLines(*s_App, drawn);
+  for (const LineVertex3D& v : drawn)
+    out.box.Add(glm::dvec3(v.position));
+  return out;
+}
+
+// How far out of the fitted view a box reaches, in view half-widths at the
+// part's depth: 1 is the edge of the picture, 2 one more half-width past it.
+// Measured at the depth the view was fitted at rather than through the
+// perspective, which is closest to an object the fit puts the eye beside
+// and reads anything wider than that distance as off to infinity.
+double ViewReach(const WorldBox& box) {
+  const Camera& cam = *s_App->camera;
+  const glm::mat4 view = cam.GetViewMatrix();
+  const double halfV =
+      cam.GetDistance() * std::tan(0.5 * glm::radians(double(cam.GetFOV())));
+  const double halfH = halfV * std::max(1e-3f, cam.GetAspectRatio());
+  const glm::vec3 pivot = glm::vec3(view * glm::vec4(cam.GetTarget(), 1.0f));
+  double reach = 0.0;
+  for (int c = 0; c < 8; c++) {
+    const glm::dvec3 p((c & 1) ? box.hi.x : box.lo.x,
+                       (c & 2) ? box.hi.y : box.lo.y,
+                       (c & 4) ? box.hi.z : box.lo.z);
+    const glm::vec3 v = glm::vec3(view * glm::vec4(glm::vec3(p), 1.0f)) - pivot;
+    reach = std::max(
+        {reach, std::abs(double(v.x)) / halfH, std::abs(double(v.y)) / halfV});
+  }
+  return reach;
 }
 
 } // namespace
@@ -1322,6 +1490,84 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     };
   }
 
+  // Every creation tool that opens a preview on its own defaults, on the
+  // same setup at two sizes -- a 2 mm part and a 300 mm one. With the view
+  // fitted to the part, the preview must land in it (within half a picture
+  // past its edges: a pattern's copies beside the part are fine, a helix
+  // three times its size or an axis off through the origin is not), and
+  // must not be a sliver of it (no thinner than a hundredth of the part).
+  // Both are measured, and logged, at both sizes before the test fails.
+  // A literal default passes the defaults/* gate at any one size and fails
+  // here at the other (docs/ui/tool-sessions.md#defaults-and-refusals).
+  for (const ToolCase& tc : kToolCases) {
+    if (tc.expect == Expect::ArmsAPick ||
+        tc.expect == Expect::RefusesUntilPicked)
+      continue;
+    t = IM_REGISTER_TEST(engine, "defaults_scale", tc.name);
+    t->TestFunc = [](ImGuiTestContext* ctx) {
+      const ToolCase* tc = FindToolCase(ctx->Test->Name);
+      IM_CHECK_SILENT(tc != nullptr);
+      // The fitted view and three quarters of a picture past either edge: a
+      // pattern's third copy reaches 2.05 of these.
+      constexpr double kOutOfView = 2.5;
+      std::vector<std::string> misses;
+      for (const float k : {1.0f, 150.0f}) {
+        const double size = 2.0 * k; // the fixture box's, and the setup's
+        ctx->SetRef("//##MainMenuBar");
+        ctx->MenuClick("File/New");
+        ctx->Yield();
+        SetupFor(ctx, tc->needs, k);
+        if (tc->needs == Needs::Nothing)
+          AddFixtureBox(ctx, k); // something to be the size of
+        const WorldBox part = ScenePartBox();
+        IM_CHECK_SILENT(!part.Empty());
+        ui::FitCameraToWorldBox(*s_App, glm::vec3(part.lo), glm::vec3(part.hi));
+        s_App->camera->FinishAnimation();
+        ctx->Yield(2);
+
+        ToolbarClick(ctx, tc->id);
+        ctx->Yield();
+        if (tc->expect == Expect::PickThenChanges) {
+          IM_CHECK(s_App->sketchEdit.pickingPlane);
+          ctx->ItemClick((std::string("//##DockHost/**/") +
+                          SketchPlane::StandardPlaneName(PlaneType::XY))
+                             .c_str());
+          ctx->Yield(2);
+        }
+        IM_CHECK(ui::HasPendingFeature(*s_App));
+        Feature* pending = ui::ResolvePendingFeature(*s_App);
+        IM_CHECK(pending != nullptr);
+        IM_CHECK_STR_EQ(pending->GetError().c_str(), "");
+        const PreviewExtent preview = PendingPreviewExtent();
+        if (tc->expect != Expect::HarmlessNoOp) {
+          IM_CHECK(!preview.box.Empty());
+          const glm::dvec3 ext = preview.box.Extent();
+          // A solid is a sliver by its thinnest side; reference geometry (a
+          // line, a plane, a curve) by its longest.
+          const double measure = preview.solid
+                                     ? std::min({ext.x, ext.y, ext.z})
+                                     : std::max({ext.x, ext.y, ext.z});
+          const double reach = ViewReach(preview.box);
+          ctx->LogInfo("%s at %g: preview %g x %g x %g, %s %g, view reach %.2f",
+                       tc->name, size, ext.x, ext.y, ext.z,
+                       preview.solid ? "thinnest" : "longest", measure, reach);
+          if (measure < size / 100.0)
+            misses.push_back(std::format("at {:g}: a sliver ({:g} < {:g})",
+                                         size, measure, size / 100.0));
+          if (reach > kOutOfView)
+            misses.push_back(std::format(
+                "at {:g}: out of the fitted view ({:.2f} half-widths)", size,
+                reach));
+        }
+        ui::CancelPendingFeature(*s_App);
+        ctx->Yield();
+      }
+      for (const std::string& m : misses)
+        ctx->LogError("%s %s", tc->name, m.c_str());
+      IM_CHECK(misses.empty());
+    };
+  }
+
   // A symmetric extrude is the tool's End choice, not a key of its own
   // (docs/modeling/README.md#extrude): from its defaults, End = Symmetric
   // in the tool window sweeps half the distance each way from the sketch
@@ -1352,16 +1598,22 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ext->distance > 0.0);
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
     // The sketch plane runs through the origin: along its normal the body
-    // reaches distance/2 either side of it.
+    // reaches distance/2 either side of it. (Along the normal, not "on one
+    // axis": the distance opens at the profile's own width, so a square
+    // profile spans it in the plane too.)
+    auto* sk =
+        dynamic_cast<SketchFeature*>(Doc()->FindFeatureById(ext->sketchId));
+    IM_CHECK(sk != nullptr);
+    const glm::dvec3 n = sk->plane.GetNormal();
+    int a = 0;
+    for (int i = 1; i < 3; i++)
+      if (std::abs(n[i]) > std::abs(n[a]))
+        a = i;
     glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
-    int spans = 0;
-    for (int a = 0; a < 3; a++)
-      if (std::abs(hi[a] - lo[a] - ext->distance) < 1e-6 &&
-          std::abs(hi[a] - ext->distance * 0.5) < 1e-6 &&
-          std::abs(lo[a] + ext->distance * 0.5) < 1e-6)
-        spans++;
-    IM_CHECK_EQ(spans, 1);
+    IM_CHECK(std::abs(hi[a] - lo[a] - ext->distance) < 1e-6);
+    IM_CHECK(std::abs(hi[a] - ext->distance * 0.5) < 1e-6);
+    IM_CHECK(std::abs(lo[a] + ext->distance * 0.5) < 1e-6);
   };
 
   // U10: a tool that runs cleanly and changes nothing says so — and is still
@@ -1658,6 +1910,242 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
       ui::CancelPendingFeature(*s_App);
       ctx->Yield();
     }
+  };
+
+  // The same sizes on a body no "producer" made -- here the only body is a
+  // sweep's. The tools measured nothing there and opened at literals (a
+  // 0.5 fillet, a 0.25 wall, a 1.0 offset, a 1.0 rib on a 300 mm part).
+  t = IM_REGISTER_TEST(engine, "defaults", "blend_and_wall_on_a_swept_body");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    SetupFor(ctx, Needs::ProfileAndPath, 150.0f); // 300 profile, 900 path
+    ToolbarCreateAccept(ctx, "###tb_sweep");
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    const double expect = 20.0; // a tenth of 300, rounded down to 1/2/5
+    for (const char* tb : {"###tb_fillet", "###tb_chamfer"}) {
+      ToolbarClick(ctx, tb);
+      ctx->Yield();
+      auto* fil = dynamic_cast<FilletFeature*>(
+          Doc()->FindFeatureById(s_App->pendingFeatureId));
+      IM_CHECK(fil != nullptr);
+      IM_CHECK_EQ(fil->radius, expect);
+      ui::CancelPendingFeature(*s_App);
+      ctx->Yield();
+    }
+    ToolbarClick(ctx, "###tb_shell");
+    ctx->Yield();
+    auto* sh = dynamic_cast<ShellFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(sh != nullptr);
+    IM_CHECK_EQ(sh->bodyId, Doc()->GetBodies()[0].createdBy);
+    IM_CHECK_EQ(sh->thickness, expect);
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_offset_face");
+    ctx->Yield();
+    auto* off = dynamic_cast<OffsetFaceFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(off != nullptr);
+    IM_CHECK_EQ(off->distance, expect);
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
+  // A cut opens THROUGH the part: switching an extrude to Cut in the tool
+  // takes the part's depth along the sketch's normal, where the profile's
+  // width (the Add default) or a fixed millimetre left a skin or a scratch.
+  t = IM_REGISTER_TEST(engine, "defaults", "extrude_cut_goes_through_the_part");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx, 150.0f); // a 300 mm cube
+    glm::dvec3 lo(0.0), hi(0.0);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi, /*tight=*/true);
+    const double solid = Doc()->GetBodies()[0].shape.Volume();
+    // On the bottom face, looking up into the part: a 60 mm square.
+    const glm::dvec3 c = 0.5 * (lo + hi);
+    ui::BeginSketchOnPlane(*s_App,
+                           SketchPlane(glm::dvec3(c.x, c.y, lo.z),
+                                       glm::dvec3(0, 0, 1),
+                                       glm::dvec3(1, 0, 0)),
+                           "Pocket");
+    ctx->Yield();
+    if (s_App->camera)
+      s_App->camera->FinishAnimation();
+    auto* sk = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(sk != nullptr);
+    const size_t index = Doc()->FeatureCount() - 1;
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const float h = 30.0f;
+    sk->AddEntity(sketch::Line{{-h, -h}, {h, -h}});
+    sk->AddEntity(sketch::Line{{h, -h}, {h, h}});
+    sk->AddEntity(sketch::Line{{h, h}, {-h, h}});
+    sk->AddEntity(sketch::Line{{-h, h}, {-h, -h}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_sk_finish");
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_extrude");
+    ctx->Yield();
+    auto* ext = dynamic_cast<ExtrudeFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(ext->mode == ExtrudeMode::Add);
+    IM_CHECK_EQ(ext->distance, 50.0); // the 60 mm profile, rounded down
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###Mode/Cut");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK(ext->mode == ExtrudeMode::Cut);
+    IM_CHECK(std::abs(ext->distance - (hi.z - lo.z)) < 1e-6);
+    IM_CHECK(ext->GetError().empty());
+    size_t idx = 0;
+    IM_CHECK(ui::ResolvePendingFeature(*s_App, &idx) != nullptr);
+    const std::vector<Body>* cut = Doc()->CachedBodiesAfter(idx);
+    IM_CHECK(cut != nullptr && cut->size() == 1);
+    const double hole = 60.0 * 60.0 * (hi.z - lo.z);
+    IM_CHECK(std::abs((*cut)[0].shape.Volume() - (solid - hole)) <
+             1e-6 * solid);
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
+  // A datum axis stands in the part it is for, not at the world origin
+  // where a part built anywhere else is not.
+  t = IM_REGISTER_TEST(engine, "defaults", "datum_axis_through_the_part");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx, 150.0f); // 300 mm, at x = -600..-300
+    glm::dvec3 lo(0.0), hi(0.0);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi, /*tight=*/true);
+    ToolbarClick(ctx, "###tb_datum_axis");
+    ctx->Yield();
+    auto* ax = dynamic_cast<DatumAxisFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(ax != nullptr);
+    IM_CHECK(ax->GetError().empty());
+    const glm::dvec3 o = ax->Origin();
+    for (int a = 0; a < 3; a++) {
+      IM_CHECK_GE(o[a], lo[a]);
+      IM_CHECK_LE(o[a], hi[a]);
+    }
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
+  // Picking the face sizes a thread: the metric size that face carries
+  // (a boss's major diameter), not the M8 the tool opened with, which fits
+  // only an M8 and refused on anything else.
+  t = IM_REGISTER_TEST(engine, "defaults", "thread_takes_the_faces_size");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    struct Case {
+      double radius;
+      const char* expect;
+    };
+    for (const Case c : {Case{0.8, "M1.6"}, Case{10.0, "M20"}}) {
+      ctx->MenuClick("File/New");
+      ctx->Yield();
+      s_App->commands->Execute(
+          std::make_unique<AddFeatureCommand>(std::make_unique<CylinderFeature>(
+              "Boss", glm::vec3(0.0f), conv::kWorldUpF, c.radius,
+              4.0 * c.radius)),
+          *Doc());
+      ctx->Yield(2);
+      const Body& body = Doc()->GetBodies()[0];
+      std::string side;
+      for (const auto& [i, name] : body.elementMap.names) {
+        const auto el =
+            Measure::Describe(Doc()->GetBodies(), {body.createdBy, name});
+        if (el && el->shape == "cylinder")
+          side = name;
+      }
+      IM_CHECK(!side.empty());
+      ToolbarClick(ctx, "###tb_thread");
+      ctx->Yield();
+      auto* th = dynamic_cast<ThreadFeature*>(
+          Doc()->FindFeatureById(s_App->pendingFeatureId));
+      IM_CHECK(th != nullptr);
+      ui::SlotPickClicked(*s_App, {ui::SelectionItem::Kind::Face, 0,
+                                   ElementRef{body.createdBy, side}});
+      ctx->Yield(2);
+      IM_CHECK_STR_EQ(th->designation.c_str(), c.expect);
+      IM_CHECK_STR_EQ(th->GetError().c_str(), "");
+      ui::CancelPendingFeature(*s_App);
+      ctx->Yield();
+    }
+  };
+
+  // Without stock declared, a flange, a hem and a jog have no length to
+  // derive: each opens refused, naming the rules (as a base flange does),
+  // offers no made-up length, and leaves the document as it was.
+  t = IM_REGISTER_TEST(engine, "defaults", "sheet_tools_without_a_gauge");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx);
+    IM_CHECK(!Doc()->SheetMetal());
+    const ui::DocumentFingerprint before = ui::FingerprintOf(*Doc());
+    for (const char* tb : {"###tb_edge_flange", "###tb_hem", "###tb_jog"}) {
+      ToolbarClick(ctx, tb);
+      ctx->Yield(2);
+      Feature* f = Doc()->FindFeatureById(s_App->pendingFeatureId);
+      IM_CHECK(f != nullptr);
+      IM_CHECK(f->GetError().find("sheet-metal rules") != std::string::npos);
+      IM_CHECK((ctx->ItemInfo("//###ToolWindow/###tw_accept").ItemFlags &
+                ImGuiItemFlags_Disabled) != 0);
+      double length = -1.0;
+      if (auto* ef = dynamic_cast<EdgeFlangeFeature*>(f))
+        length = ef->length;
+      else if (auto* hem = dynamic_cast<HemFeature*>(f))
+        length = hem->length;
+      else if (auto* jog = dynamic_cast<JogFeature*>(f))
+        length = jog->height;
+      IM_CHECK_EQ(length, 0.0);
+      ui::CancelPendingFeature(*s_App);
+      ctx->Yield();
+      IM_CHECK(ui::FingerprintOf(*Doc()) == before);
+    }
+  };
+
+  // A pattern whose source has no body has nothing to repeat: it opens
+  // naming the source (not a spacing it could not derive, which it leaves
+  // at 0), and cancelling changes nothing.
+  t = IM_REGISTER_TEST(engine, "defaults", "pattern_without_a_source_body");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::make_unique<BoxFeature>(
+            "Flat", glm::vec3(0.0f), 2.0, 0.0, 2.0)), // fails: no height
+        *Doc());
+    ctx->Yield(2);
+    IM_CHECK(!Doc()->GetFeature(0)->GetError().empty());
+    const ui::DocumentFingerprint before = ui::FingerprintOf(*Doc());
+    ToolbarClick(ctx, "###tb_pattern");
+    ctx->Yield(2);
+    auto* pat = dynamic_cast<PatternFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(pat != nullptr);
+    IM_CHECK_EQ(pat->spacing, 0.0);
+    // Shown in the window; Accept stays offered, as for any feature whose
+    // error is an earlier one's consequence (ErrorAfterEarlierFailure).
+    IM_CHECK(pat->GetError().find("source body") != std::string::npos);
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(ui::FingerprintOf(*Doc()) == before);
   };
 
   // Draft has no body slot, and nothing in the UI ever wrote bodyId — Execute

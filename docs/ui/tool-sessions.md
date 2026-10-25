@@ -135,8 +135,32 @@ origin that misses the body. Examples in the code:
   rounded to 1/2/5 (`SizeFromBody`); Shell at a tenth of its thinnest wall
   (`SizeFromWall`, `ThinnestWall`: on a body already hollow the extent is
   not the wall), the extent where no wall measures. The target is a
-  pre-selected element's body, else the newest
-  (`defaults/blend_and_wall_scale_with_body`).
+  pre-selected element's body, else the newest producer's, else the newest
+  valid body whatever made it -- a part made only by a sweep is measured
+  too (`defaults/blend_and_wall_scale_with_body`,
+  `defaults/blend_and_wall_on_a_swept_body`). With nothing to measure the
+  tool does not open (the toolbar gates it on a body); Rib takes its
+  thickness the same way.
+- Extrude opens at the profile's smaller in-plane extent (the picked
+  regions', when some are), rounded to 1/2/5 x 10^n. Switching its Mode to
+  Cut while the distance is still the default takes the bodies' depth along
+  the sketch's normal, so a cut opens through the part
+  (`defaults/extrude_cut_goes_through_the_part`).
+- A datum axis runs along X through the middle of the newest body (the
+  world origin in an empty part) (`defaults/datum_axis_through_the_part`).
+  A helix stands up the middle of it, its radius half the body's smaller
+  XY extent and its pitch a quarter of its height, rounded, four turns. A
+  pipe's outside diameter is a tenth of its path's length, rounded.
+- Pattern's spacing is 1.5 times the source's extent along the pattern's
+  direction, with no floor. With no source body there is nothing to repeat:
+  the spacing stays 0 and the preview names the missing source
+  (`defaults/pattern_without_a_source_body`).
+- Picking a cylindrical face into the Thread tool sizes it: the ISO metric
+  coarse size whose major diameter (a boss) or tap drill (a hole) is
+  nearest the face's diameter (`defaults/thread_takes_the_faces_size`).
+- Edge Flange, Hem and Jog take their lengths from the sheet-metal rules.
+  With none declared they open at 0 and the preview refuses naming the
+  rules, as Base Flange does (`defaults/sheet_tools_without_a_gauge`).
 - Offset Face opens at a tenth of the smaller of the face's inset (how far
   its inside reaches from its edges) and the body's thinnest extent, rounded
   the same way, outward (`SizeFromFace`), derived again from the first face
@@ -150,8 +174,12 @@ origin that misses the body. Examples in the code:
   occurrence insert and drawing-view placement use it.
 - A simulation force defaults to the negated outward normal of the face it is
   placed on and a magnitude from the part's own weight.
-- Reference geometry is sized from the document's reach
-  ([README.md](README.md#viewport)).
+- Reference geometry is sized from the document's reach and drawn over the
+  part ([README.md](README.md#viewport)).
+
+Angles that are the same on any part are not scales, and stay literal:
+Draft's 5 degrees, Edge Flange's 90. So does Mirror's world YZ plane
+through the origin, which is what a symmetric part drawn there wants.
 
 The companion rule is **refuse visibly**: a tool that cannot do anything with
 its inputs says so where the user is looking, rather than committing a no-op
@@ -178,6 +206,20 @@ exactly one of these must hold:
 - `Expect::HarmlessNoOp` — accepts cleanly and legitimately changes nothing.
 
 "Enabled button, accepts, changes nothing" is the failure it exists to catch.
+
+**`defaults_scale/*`** judges what the gate cannot: whether a default suits
+the part in front of it. One case per tool in `kToolCases` that opens a
+preview on its defaults sets the same document up at two sizes (`SetupFor`'s
+`k`: a 2 mm part and a 300 mm one), fits the view to the part, opens the
+tool and measures the preview -- the material it adds or removes (the
+bodies it made, where it only re-cuts), and the reference geometry drawn
+for it. It must lie within 2.5 half-widths of the fitted view's centre (a
+pattern's third copy reaches 2.05) and be no thinner than a hundredth of
+the part (a solid by its thinnest side, a line or plane by its longest).
+Both sizes are measured and logged before a case fails. A literal default
+passes the gate at any one size and fails here at the other: the 1 mm
+extrude, rib and 2 mm pipe were slivers at 300 mm, the 3-unit helix and the
+datum quad drawn round the world origin out of view at 2 mm.
 The drawing tab's sessions (datum, frame, detail) pick on the sheet rather
 than in the model, so they are not in `kToolCases`;
 `defaults/drawing_sessions_wait_for_a_pick` holds them to `RefusesUntilPicked`
@@ -329,7 +371,9 @@ The sketch's own entity selection stays in `SketchEditState`
 
 ## Tests
 
-- `defaults/*` (one per creation tool), `defaults/no_op_warns_without_blocking`,
+- `defaults/*` (one per creation tool), `defaults_scale/*` (the same tools at
+  2 mm and 300 mm), the derived-default and refusal cases named above,
+  `defaults/no_op_warns_without_blocking`,
   `defaults/extrude_symmetric_from_the_tool` (End = Symmetric in the tool
   window sweeps half the distance each way).
 - `primitive/face_pick_drag_snap_accept` (the ghost on the face, a free

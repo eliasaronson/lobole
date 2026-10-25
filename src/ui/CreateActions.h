@@ -111,6 +111,17 @@ void CreateReplaceFace(AppState& state);
 double SizeFromFace(const AppState& state, const ElementRef& face,
                     double fallback);
 
+// 1, 2 or 5 x 10^n at or below `raw` (> 0): a number a person would type.
+// The one rounding every derived default here goes through.
+[[nodiscard]] double RoundDown125(double raw);
+
+// The thread a cylindrical face takes: the ISO metric coarse size whose
+// major diameter (a boss) or tap drill (a hole) is nearest the face's
+// diameter. Empty when the face is not a cylinder. Picking the face into a
+// Thread tool sizes it with this.
+[[nodiscard]] std::string ThreadForFace(const AppState& state,
+                                        const ElementRef& face);
+
 // Move Face's default: in the host face's plane (the face the picked ones
 // sit in), along the body's largest extent in that plane, a tenth of it,
 // rounded as SizeFromFace rounds. With no faces, along the body's largest

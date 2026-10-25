@@ -103,9 +103,20 @@ def main():
         # Two walls 0.5 mm apart at one end: a slot narrower than the AO
         # kernel, so occlusion there is strong and LOCAL. A lone post gives
         # almost nothing to measure — the radius is crevice-scale.
-        walls_ids = [
-            shapes.box(d, (82.5, 2.5, 10), (3.5, 17.5, 30), "Wall A")["id"],
-            shapes.box(d, (86.5, 2.5, 10), (3.5, 17.5, 30), "Wall B")["id"]]
+        # Both on ONE datum plane, made before either: a datum's quad is drawn
+        # over the bodies before it (docs/ui/README.md#viewport), so a plane
+        # made after Wall A would move when Wall A is suppressed below, and
+        # the diff that finds the walls would find it too.
+        deck = d.call("add_feature", feature={
+            "type": "DatumPlane", "name": "Deck", "kind": "offset",
+            "base_plane": "xy", "offset": 10.0})["id"]
+
+        def wall(x, name):
+            return d.call("add_feature", feature={
+                "type": "Box", "name": name, "on": {"feature_id": deck},
+                "centered": False, "offset": [x, 2.5], "width": 3.5,
+                "depth": 17.5, "height": 30.0})["id"]
+        walls_ids = [wall(82.5, "Wall A"), wall(86.5, "Wall B")]
         # Mid grey (linear 0.2), not the default near-white: AO darkens the
         # AMBIENT term, and a face the lights drive to 255 shows none of it,
         # so which faces could show occlusion would depend on where the

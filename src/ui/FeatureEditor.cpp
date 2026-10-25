@@ -61,7 +61,8 @@
 #include "ui/CreateActions.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchOverlay.h"
-#include "ui/ViewActions.h" // BodyProducers
+#include "ui/SketchToolbar.h" // DefaultExtrudeDistance
+#include "ui/ViewActions.h"   // BodyProducers
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -1005,6 +1006,15 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
     if (auto* th = dynamic_cast<ThreadFeature*>(&f);
         th != nullptr && item.kind == SelectionItem::Kind::Face) {
       th->face = item.element;
+      // In the tool, the face sizes the thread: the metric size that face
+      // carries, not the M8 the tool opened with, which fitted only an M8.
+      if (state.pendingFeatureId == f.GetId())
+        if (const std::string size = ThreadForFace(state, th->face);
+            !size.empty())
+          if (const auto row = threads::Lookup(size)) {
+            th->designation = row->designation;
+            th->pitch = row->pitch;
+          }
       return true;
     }
     return false;
@@ -2132,6 +2142,23 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     int mode = std::to_underlying(ext->mode);
     if (LabeledCombo("Mode", &mode, modes, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ext);
+      // In the tool, a distance still at the mode's default follows the
+      // mode: a cut opens through the part, not a profile's width into it.
+      // Measured on the bodies BEFORE it: the document's own already hold
+      // this extrude's preview.
+      const std::vector<Body>* prior =
+          index > 0 ? state.document->CachedBodiesAfter(index - 1) : nullptr;
+      if (state.pendingFeatureId == ext->GetId() && ext->distanceExpr.empty())
+        if (auto* sk = dynamic_cast<SketchFeature*>(
+                state.document->FindFeatureById(ext->sketchId))) {
+          const std::vector<Body> none;
+          const std::vector<Body>& bodies = prior ? *prior : none;
+          if (ext->distance ==
+              DefaultExtrudeDistance(bodies, *sk, std::to_underlying(ext->mode),
+                                     ext->regions))
+            ext->distance =
+                DefaultExtrudeDistance(bodies, *sk, mode, ext->regions);
+        }
       ext->mode = static_cast<ExtrudeMode>(mode);
       CommitDiscrete(state, feature, before, index, commit);
     }

@@ -38,12 +38,16 @@ void DrawDatumLabels(AppState& state) {
   for (size_t i = 0; i < state.document->FeatureCount(); i++) {
     Feature* f = state.document->GetFeature(i);
     if (auto* dp = dynamic_cast<DatumPlaneFeature*>(f)) {
-      // Label near a corner of the 3-unit quad.
-      glm::vec2 s =
-          SketchUVToScreen(state, dp->OutputPlane(), glm::dvec2(2.6, 2.6));
+      // Near a corner of the quad, wherever and however big it is drawn.
+      const SketchPlane plane = dp->OutputPlane();
+      const double corner = 0.87 * DatumHalfExtent(state);
+      glm::vec2 s = WorldToScreen(
+          state, glm::vec3(DatumQuadCentre(state, *dp) +
+                           (plane.GetUAxis() + plane.GetVAxis()) * corner));
       dl->AddText(ImVec2(s.x, s.y), col, dp->GetName().c_str());
     } else if (auto* da = dynamic_cast<DatumAxisFeature*>(f)) {
-      const glm::vec3 end = da->Origin() + da->Direction() * 3.0;
+      const glm::vec3 end =
+          da->Origin() + da->Direction() * double(DatumHalfExtent(state));
       glm::vec2 s = WorldToScreen(state, end);
       dl->AddText(ImVec2(s.x, s.y), col, da->GetName().c_str());
     } else if (auto* fr = dynamic_cast<FrameFeature*>(f)) {

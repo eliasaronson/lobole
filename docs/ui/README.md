@@ -132,8 +132,15 @@ that size. The window title is the project name, `*` when dirty.
   frame triads and the sketch grid derive from the document's reach
   (`ScenePlaneHalfExtent`), with the old small sizes as the empty-workspace
   floor; the grid's step follows a 1-2-5 decade so the cell count, not the
-  cell size, stays fixed. The drawn plane quad and the pickable one read the
-  same number. The reach rides the renderer resync rather than the frame
+  cell size, stays fixed. Datums are drawn at 3/8 of that extent
+  (`DatumHalfExtent`): an axis that far either side of its origin, a datum
+  plane's quad centred where the centre of the bodies BEFORE it in the
+  history falls on the plane (`DatumQuadCentre`; the plane's origin with
+  none), so a plane offset clear of a part built away from the origin is
+  drawn over that part, and does not move when a later feature is
+  suppressed or edited;
+  the labels sit at the axis's end and the quad's corner. The drawn plane
+  quad and the pickable one read the same numbers. The reach rides the renderer resync rather than the frame
   loop, because a live edit bumps the document version every frame.
 - The prompt pill at the top of the viewport says what the armed tool wants
   ([tool-sessions.md](tool-sessions.md)). While a sketch is edited it shows

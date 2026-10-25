@@ -19,6 +19,7 @@
 #include <vector>
 
 class SketchPlane;
+class DatumPlaneFeature;
 class SketchFeature;
 class SplitFeature;
 class FilletFeature; // defined in core/features/FilletFeature.h
@@ -51,6 +52,16 @@ void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines);
 void AppendFrameLines(AppState& state, std::vector<LineVertex3D>& lines);
 
 float FrameTriadLength(AppState& state);
+
+// A datum's drawn size and place. The quad of a datum plane is
+// `DatumHalfExtent` either side of where the centre of the part it was
+// placed against -- the bodies before it in the history -- falls on the
+// plane (the plane's own origin with none), and a datum axis is drawn
+// that far either side of its origin; their labels sit at the end and the
+// corner. All scale with ScenePlaneHalfExtent, as the base planes do: a
+// fixed 3 units was a speck on a 300 mm part and a span on a 2 mm one.
+float DatumHalfExtent(AppState& state);
+glm::dvec3 DatumQuadCentre(AppState& state, const DatumPlaneFeature& datum);
 
 // Draws every Curve3D feature's tessellated polyline (curves-3d Phase 0).
 void AppendCurve3DLines(AppState& state, std::vector<LineVertex3D>& lines);

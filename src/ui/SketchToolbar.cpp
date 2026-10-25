@@ -27,6 +27,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdlib>
 #include <set>
@@ -854,12 +855,67 @@ RegionsFromSelection(const SketchFeature& sketch,
   return regions;
 }
 
+double
+DefaultExtrudeDistance(const std::vector<Body>& bodies,
+                       const SketchFeature& sketch, int mode,
+                       const std::vector<std::vector<uint32_t>>& regions) {
+  if (mode == std::to_underlying(ExtrudeMode::Cut)) {
+    const glm::dvec3 n = sketch.plane.GetNormal();
+    double lo = DBL_MAX, hi = -DBL_MAX;
+    for (const Body& b : bodies) {
+      if (!b.shape.IsValid())
+        continue;
+      glm::dvec3 bmin, bmax;
+      b.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
+      for (int c = 0; c < 8; c++) {
+        const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
+                                (c & 2) ? bmax.y : bmin.y,
+                                (c & 4) ? bmax.z : bmin.z);
+        lo = std::min(lo, glm::dot(corner, n));
+        hi = std::max(hi, glm::dot(corner, n));
+      }
+    }
+    if (hi > lo)
+      return hi - lo;
+  }
+  // The profile is what its closed loops enclose -- the regions picked, when
+  // some are; construction geometry and stray open chains are no part of
+  // the solid.
+  std::set<uint32_t> inLoops;
+  if (!regions.empty()) {
+    for (const std::vector<uint32_t>& region : regions)
+      inLoops.insert(region.begin(), region.end());
+  } else {
+    for (const sketch::Loop& loop : sketch::BuildLoops(sketch.entities))
+      for (uint32_t id : sketch::LoopEntityIds(loop))
+        inLoops.insert(id);
+  }
+  double ulo = DBL_MAX, uhi = -DBL_MAX, vlo = DBL_MAX, vhi = -DBL_MAX;
+  for (const sketch::Entity& e : sketch.entities) {
+    if (inLoops.count(sketch::EntityId(e)) == 0)
+      continue;
+    for (const glm::dvec2& p : sketch::TessellateEntity(e)) {
+      ulo = std::min(ulo, p.x);
+      uhi = std::max(uhi, p.x);
+      vlo = std::min(vlo, p.y);
+      vhi = std::max(vhi, p.y);
+    }
+  }
+  const double smaller = std::min(uhi - ulo, vhi - vlo);
+  if (smaller > 0.0)
+    return RoundDown125(smaller);
+  return 1.0; // a profile with no extent extrudes to nothing at any distance
+}
+
 void BeginExtrudeOfSketch(AppState& state, SketchFeature& sketch,
                           std::vector<std::vector<uint32_t>> regions) {
   const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-  auto ext = std::make_unique<ExtrudeFeature>("Extrude " + std::to_string(n),
-                                              sketch.GetId(), 1.0,
-                                              DefaultBodyMode(state));
+  const ExtrudeMode mode = DefaultBodyMode(state);
+  auto ext = std::make_unique<ExtrudeFeature>(
+      "Extrude " + std::to_string(n), sketch.GetId(),
+      DefaultExtrudeDistance(state.document->GetBodies(), sketch,
+                             std::to_underlying(mode), regions),
+      mode);
   ext->regions = std::move(regions);
   BeginPreviewFeature(state, std::move(ext));
 }

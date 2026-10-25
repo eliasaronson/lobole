@@ -63,6 +63,7 @@
 #include "render/SketchRenderer.h"
 
 #include "core/DirectEdit.h"
+#include "core/ThreadStandards.h"
 #include "core/features/DeleteFaceFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/LoftFeature.h"
@@ -88,9 +89,12 @@
 #include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PrimitiveTool.h"
+#include "ui/SceneOverlays.h"     // DatumHalfExtent
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (Hole select-first)
 #include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <nlohmann/json.hpp>
 
 #include "thirdparty/stb_image.h" // stbi_info_from_memory (impl in IBL.cpp)
@@ -126,6 +130,62 @@ std::string NextName(const AppState& state, const char* base) {
   const int n =
       state.document ? static_cast<int>(state.document->FeatureCount()) + 1 : 1;
   return std::string(base) + " " + std::to_string(n);
+}
+} // namespace
+
+double RoundDown125(double raw) {
+  const double decade = std::pow(10.0, std::floor(std::log10(raw)));
+  const double mant = raw / decade;
+  return decade * (mant >= 5.0 ? 5.0 : mant >= 2.0 ? 2.0 : 1.0);
+}
+
+namespace {
+// The body a body-op tool should default to: the most recent producer, as
+// Pattern/Boolean do -- else the newest body there is, whatever made it (a
+// sweep, a template, a derived part: none of them is a "producer", and a
+// tool that measured nothing on a part made only of them opened at a
+// literal). 0 when the document has no body.
+uint64_t NewestBody(const AppState& state) {
+  auto producers =
+      BodyProducers(*state.document, state.document->FeatureCount());
+  for (auto it = producers.rbegin(); it != producers.rend(); ++it)
+    for (const Body& b : state.document->GetBodies())
+      if (b.createdBy == it->first && b.shape.IsValid())
+        return it->first;
+  const auto& bodies = state.document->GetBodies();
+  for (auto it = bodies.rbegin(); it != bodies.rend(); ++it)
+    if (it->shape.IsValid())
+      return it->createdBy;
+  return producers.empty() ? 0 : producers.back().first;
+}
+
+// The body a tool will act on before anything is picked: the one a
+// pre-selected element of `kind` belongs to (the seed names it), else the
+// newest.
+uint64_t TargetBody(const AppState& state, SelectionItem::Kind kind) {
+  for (const SelectionItem& item : state.selection.items)
+    if (item.kind == kind && item.element.featureId != 0)
+      return item.element.featureId;
+  return NewestBody(state);
+}
+
+// The world box of the bodies `bodyId` made; nullopt when it made none.
+std::optional<std::pair<glm::dvec3, glm::dvec3>> BodyBox(const AppState& state,
+                                                         uint64_t bodyId) {
+  glm::dvec3 lo(DBL_MAX), hi(-DBL_MAX);
+  bool any = false;
+  for (const Body& b : state.document->GetBodies()) {
+    if (b.createdBy != bodyId || !b.shape.IsValid())
+      continue;
+    glm::dvec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
+    lo = glm::min(lo, bmin);
+    hi = glm::max(hi, bmax);
+    any = true;
+  }
+  if (!any)
+    return std::nullopt;
+  return std::make_pair(lo, hi);
 }
 } // namespace
 
@@ -186,8 +246,20 @@ void CreateDatumPlane(AppState& state) {
 void CreateDatumAxis(AppState& state) {
   auto ax = std::make_unique<DatumAxisFeature>(NextName(state, "Axis"),
                                                DatumAxisKind::TwoPoints);
-  ax->p0 = glm::vec3(0.0f);
-  ax->p1 = glm::vec3(3.0f, 0.0f, 0.0f); // along X at scene scale
+  // Along X through the middle of the part it is for -- through the world
+  // origin, an axis missed any part not built there -- and as long as the
+  // part is wide (two points only name a line; the drawn length is the
+  // scene's, DatumHalfExtent). The origin in an empty part.
+  ax->p0 = glm::dvec3(0.0);
+  double length = double(DatumHalfExtent(state));
+  if (state.document)
+    if (const auto box =
+            BodyBox(state, TargetBody(state, SelectionItem::Kind::Body))) {
+      ax->p0 = 0.5 * (box->first + box->second);
+      if (box->second.x - box->first.x > 0.0)
+        length = box->second.x - box->first.x;
+    }
+  ax->p1 = ax->p0 + glm::dvec3(length, 0.0, 0.0);
   BeginPreviewFeature(state, std::move(ax));
 }
 
@@ -245,17 +317,58 @@ void CreateCurve3D(AppState& state) {
   // preview shows a real curve. The editor switches kind / edits points.
   auto cv = std::make_unique<CurveFeature>(NextName(state, "Curve"),
                                            Curve3DKind::Helix);
-  cv->radius = 3.0;
-  cv->pitch = 2.0;
   cv->turns = 4.0;
+  // Up the middle of the part, inside its footprint and as tall as it is:
+  // a helix is drawn to be a spring, a thread or a sweep path ON this part.
+  // In an empty part, sized like everything else the empty scene holds.
+  const auto box =
+      state.document
+          ? BodyBox(state, TargetBody(state, SelectionItem::Kind::Body))
+          : std::nullopt;
+  const glm::dvec3 ext = box ? box->second - box->first : glm::dvec3(0.0);
+  if (box && ext.x > 0.0 && ext.y > 0.0 && ext.z > 0.0) {
+    const glm::dvec3 c = 0.5 * (box->first + box->second);
+    cv->axisOrigin = glm::dvec3(c.x, c.y, box->first.z);
+    cv->axisDir = glm::dvec3(0.0, 0.0, 1.0);
+    cv->radius = RoundDown125(0.5 * std::min(ext.x, ext.y));
+    cv->pitch = RoundDown125(ext.z / cv->turns);
+  } else {
+    const double half = double(DatumHalfExtent(state));
+    cv->radius = RoundDown125(half);
+    cv->pitch = RoundDown125(half / 2.0);
+  }
   BeginPreviewFeature(state, std::move(cv));
 }
 
 void CreatePipe(AppState& state) {
   // Seed the path with the most recent curve/sketch (if any); the editor's
   // path combo lets the user change it.
-  auto pi = std::make_unique<PipeFeature>(NextName(state, "Pipe"),
-                                          LastPathId(state), 2.0);
+  // Its outside diameter a tenth of the path's length: a tube that reads as
+  // one along any path, where a fixed 2 mm was a hair along a 900 mm one.
+  const uint64_t path = LastPathId(state);
+  double length = 0.0;
+  if (state.document != nullptr)
+    if (Feature* f = state.document->FindFeatureById(path)) {
+      if (auto* cv = dynamic_cast<CurveFeature*>(f)) {
+        const auto& poly = cv->Polyline();
+        for (size_t i = 1; i < poly.size(); i++)
+          length += glm::length(poly[i] - poly[i - 1]);
+      } else if (auto* sk = dynamic_cast<SketchFeature*>(f)) {
+        const TopoDS_Wire wire =
+            sketch::BuildOpenPathWire(sk->plane, sk->entities);
+        if (!wire.IsNull()) {
+          GProp_GProps props;
+          BRepGProp::LinearProperties(wire, props);
+          length = props.Mass();
+        }
+      }
+    }
+  // No path yet: the tool refuses until one is picked, and the size is the
+  // scene's until then.
+  const double diameter = RoundDown125(
+      length > 0.0 ? length / 10.0 : 0.25 * double(DatumHalfExtent(state)));
+  auto pi =
+      std::make_unique<PipeFeature>(NextName(state, "Pipe"), path, diameter);
   BeginPreviewFeature(state, std::move(pi));
 }
 
@@ -376,79 +489,52 @@ void CreatePattern(AppState& state) {
       NextName(state, "Pattern"), PatternKind::Linear, producers.back().first);
   pat->axis.kind = AxisRef::Kind::X;
   pat->count = 3;
-  // Default spacing clears the source body along the axis — a fixed constant
-  // made copies of anything wider than it overlap and fuse into one blob,
-  // which read as "the pattern did nothing".
-  pat->spacing = 3.0;
-  for (const Body& b : state.document->GetBodies()) {
-    if (b.createdBy != pat->sourceId)
-      continue;
-    glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
-    pat->spacing = std::max(3.0, (bmax.x - bmin.x) * 1.5);
-    break;
+  // The spacing clears the source along the pattern's direction, half its
+  // own extent between copies -- a fixed constant made copies of anything
+  // wider than it overlap and fuse into one blob, which read as "the
+  // pattern did nothing". With no source body there is nothing to repeat:
+  // the spacing stays 0 and the preview refuses, naming the source.
+  pat->spacing = 0.0;
+  if (const auto box = BodyBox(state, pat->sourceId)) {
+    const glm::dvec3 ext = box->second - box->first;
+    pat->spacing = 1.5 * ext.x; // the X axis it opens along
   }
   BeginPreviewFeature(state, std::move(pat));
 }
 
 namespace {
-// The body a body-op tool should default to: the most recent producer, as
-// Pattern/Boolean do. 0 when the document has none.
-uint64_t NewestBody(const AppState& state) {
-  auto producers =
-      BodyProducers(*state.document, state.document->FeatureCount());
-  return producers.empty() ? 0 : producers.back().first;
-}
-
-// The body a blend or shell will act on before anything is picked: the one a
-// pre-selected element of `kind` belongs to (the seed names it), else the
-// newest.
-uint64_t TargetBody(const AppState& state, SelectionItem::Kind kind) {
-  for (const SelectionItem& item : state.selection.items)
-    if (item.kind == kind && item.element.featureId != 0)
-      return item.element.featureId;
-  return NewestBody(state);
-}
-
 // A tenth of the body's thinnest extent, rounded down to 1, 2 or 5 x 10^n so
 // the field reads as a number a person would type. The thinnest extent bounds
 // what a blend or a wall can be on that body; a tenth leaves room for the
-// smaller faces it meets. `fallback` stands when there is no body to measure.
-double SizeFromBody(const AppState& state, uint64_t bodyId, double fallback) {
-  for (const Body& b : state.document->GetBodies()) {
-    if (b.createdBy != bodyId || !b.shape.IsValid())
-      continue;
-    glm::dvec3 lo, hi;
-    b.shape.GetBoundingBox(lo, hi);
-    const glm::dvec3 ext = hi - lo;
-    const double thinnest = std::min({ext.x, ext.y, ext.z});
-    if (!(thinnest > 0.0))
-      return fallback;
-    const double raw = thinnest / 10.0;
-    const double decade = std::pow(10.0, std::floor(std::log10(raw)));
-    const double mant = raw / decade;
-    return decade * (mant >= 5.0 ? 5.0 : mant >= 2.0 ? 2.0 : 1.0);
-  }
-  return fallback;
+// smaller faces it meets. nullopt when there is no body to measure -- and
+// then the tool does not open: it acts on a body, and a size made up for
+// one that is not there is a literal (the toolbar gates on a body, so this
+// is the guard behind the gate).
+std::optional<double> SizeFromBody(const AppState& state, uint64_t bodyId) {
+  const auto box = BodyBox(state, bodyId);
+  if (!box)
+    return std::nullopt;
+  const glm::dvec3 ext = box->second - box->first;
+  const double thinnest = std::min({ext.x, ext.y, ext.z});
+  if (!(thinnest > 0.0))
+    return std::nullopt;
+  return RoundDown125(thinnest / 10.0);
 }
 
 // A shell's wall from the body's thinnest wall (ThinnestWall), a tenth of
 // it rounded down to 1, 2 or 5 x 10^n: on a body already thin-walled the
 // bounding box is not the wall, and a tenth of the box broke through it.
 // SizeFromBody where no wall measures.
-double SizeFromWall(const AppState& state, uint64_t bodyId, double fallback) {
+std::optional<double> SizeFromWall(const AppState& state, uint64_t bodyId) {
   for (const Body& b : state.document->GetBodies()) {
     if (b.createdBy != bodyId || !b.shape.IsValid())
       continue;
     const auto wall = ThinnestWall(b);
     if (!wall || !(*wall > 0.0))
       break;
-    const double raw = *wall / 10.0;
-    const double decade = std::pow(10.0, std::floor(std::log10(raw)));
-    const double mant = raw / decade;
-    return decade * (mant >= 5.0 ? 5.0 : mant >= 2.0 ? 2.0 : 1.0);
+    return RoundDown125(*wall / 10.0);
   }
-  return SizeFromBody(state, bodyId, fallback);
+  return SizeFromBody(state, bodyId);
 }
 
 // Shared by CreateFillet/CreateChamfer: start the preview and arm the edge
@@ -458,12 +544,14 @@ void CreateEdgeBlend(AppState& state, EdgeBlendOp op) {
     return; // the menu gates this, but guard anyway
   }
   const char* base = op == EdgeBlendOp::Chamfer ? "Chamfer" : "Fillet";
-  const double size =
-      SizeFromBody(state, TargetBody(state, SelectionItem::Kind::Edge), 0.5);
+  const auto size =
+      SizeFromBody(state, TargetBody(state, SelectionItem::Kind::Edge));
+  if (!size)
+    return;
   // BeginPreviewFeature seeds pre-selected edges and arms the edge slot.
   BeginPreviewFeature(
       state, std::make_unique<FilletFeature>(
-                 NextName(state, base), std::vector<ElementRef>{}, size, op));
+                 NextName(state, base), std::vector<ElementRef>{}, *size, op));
 }
 } // namespace
 
@@ -506,10 +594,12 @@ void CreateShell(AppState& state) {
   // hollow. A pre-selected open face names the body (the seed overrides
   // bodyId), so size from that one.
   const uint64_t body = TargetBody(state, SelectionItem::Kind::Face);
+  const auto wall = SizeFromWall(state, body);
+  if (!wall)
+    return;
   BeginPreviewFeature(state, std::make_unique<ShellFeature>(
                                  NextName(state, "Shell"), NewestBody(state),
-                                 std::vector<ElementRef>{},
-                                 SizeFromWall(state, body, 0.25)));
+                                 std::vector<ElementRef>{}, *wall));
 }
 
 void CreateDraft(AppState& state) {
@@ -522,13 +612,6 @@ void CreateDraft(AppState& state) {
 }
 
 namespace {
-
-// 1, 2 or 5 x 10^n at or below `raw` (> 0): a number a person would type.
-double RoundDown125(double raw) {
-  const double decade = std::pow(10.0, std::floor(std::log10(raw)));
-  const double mant = raw / decade;
-  return decade * (mant >= 5.0 ? 5.0 : mant >= 2.0 ? 2.0 : 1.0);
-}
 
 const Body* BodyCreatedBy(const AppState& state, uint64_t id,
                           const std::string& face) {
@@ -563,6 +646,31 @@ double SizeFromFace(const AppState& state, const ElementRef& face,
   if (!(reach > 0.0))
     return fallback;
   return RoundDown125(reach / 10.0);
+}
+
+std::string ThreadForFace(const AppState& state, const ElementRef& face) {
+  if (!state.document)
+    return {};
+  const auto el = Measure::Describe(state.document->GetBodies(), face);
+  if (!el || el->shape != "cylinder" || !el->hasRadius || !(el->radius > 0.0))
+    return {};
+  const double d = 2.0 * el->radius;
+  // A boss is its major diameter, a hole its tap drill: the nearer of the
+  // two names the size, from the coarse metric rows (no written pitch).
+  std::string best;
+  double bestGap = DBL_MAX;
+  for (const threads::Standard& row : threads::All()) {
+    if (row.series != threads::Series::Metric ||
+        row.designation.find('x') != std::string::npos)
+      continue;
+    const double gap = std::min(std::abs(row.majorDia - d),
+                                std::abs(threads::TapDrill(row) - d));
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = row.designation;
+    }
+  }
+  return best;
 }
 
 glm::dvec3 DefaultFaceMove(const AppState& state,
@@ -614,11 +722,12 @@ void CreateOffsetFace(AppState& state) {
   // From the face when one is selected (the seed then re-derives it the
   // same way), else from the body the tool will most likely act on.
   const std::vector<ElementRef> pre = SelectedFaces(state);
+  const auto fromBody =
+      SizeFromBody(state, TargetBody(state, SelectionItem::Kind::Face));
+  if (!fromBody)
+    return;
   const double size =
-      pre.empty()
-          ? SizeFromBody(state, TargetBody(state, SelectionItem::Kind::Face),
-                         1.0)
-          : SizeFromFace(state, pre.front(), 1.0);
+      pre.empty() ? *fromBody : SizeFromFace(state, pre.front(), *fromBody);
   BeginPreviewFeature(state, std::make_unique<OffsetFaceFeature>(
                                  NextName(state, "Offset face"), 0,
                                  std::vector<ElementRef>{}, size));
@@ -663,8 +772,10 @@ void CreateEdgeFlange(AppState& state) {
   // The wall's default length is the shortest one the brake can make: half a
   // die opening (8t, the air-bending default) plus a thickness. Derived from
   // the stock, so it changes with the gauge and never lands under what
-  // check_sheet_metal will ask for.
-  double wall = 10.0;
+  // check_sheet_metal will ask for. With no stock declared there is no
+  // length to derive: 0, and the preview refuses naming the rules, as a
+  // base flange does.
+  double wall = 0.0;
   if (const auto& rules = state.document->SheetMetal())
     wall = 5.0 * rules->thickness;
   auto flange = std::make_unique<EdgeFlangeFeature>(
@@ -709,7 +820,7 @@ void CreateRefold(AppState& state) {
 void CreateHem(AppState& state) {
   if (!state.document || state.document->GetBodies().empty())
     return;
-  double ret = 6.0;
+  double ret = 0.0; // no stock, no return: refused naming the rules
   if (const auto& rules = state.document->SheetMetal())
     ret = 4.0 * rules->thickness;
   BeginPreviewFeature(
@@ -734,8 +845,9 @@ void CreateJog(AppState& state) {
       line = sk->GetId();
   }
   // The least height the two bends allow, and one thickness of wall
-  // between them — derived from the stock, never a literal millimetre.
-  double height = 10.0;
+  // between them — derived from the stock, never a literal millimetre (0
+  // with none declared: the preview refuses naming the rules).
+  double height = 0.0;
   if (const auto& rules = state.document->SheetMetal())
     height = 2.0 * rules->EffectiveBendRadius() + 2.0 * rules->thickness;
   BeginPreviewFeature(state, std::make_unique<JogFeature>(
@@ -886,9 +998,14 @@ void CreateRib(AppState& state) {
     profile = openSketch(state.document->GetFeature(i - 1));
   if (profile == nullptr)
     return; // no open profile anywhere: nothing to rib (menu gates this)
-  BeginPreviewFeature(state,
-                      std::make_unique<RibFeature>(NextName(state, "Rib"),
-                                                   profile->GetId(), 1.0));
+  // A web as thick as a blend on the body it grows onto would be big.
+  const auto thickness =
+      SizeFromBody(state, TargetBody(state, SelectionItem::Kind::Body));
+  if (!thickness)
+    return;
+  BeginPreviewFeature(
+      state, std::make_unique<RibFeature>(NextName(state, "Rib"),
+                                          profile->GetId(), *thickness));
 }
 
 void StartNewSketch(AppState& state) {

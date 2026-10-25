@@ -406,7 +406,8 @@ and a linear one reaches no further than the model space (below).
 - `angle_deg` is the STEP between instances (six round a circle is 60). A
   step that puts every copy on the seed — a whole number of turns, or a
   linear `spacing` of 0 — is refused: it builds nothing while reading as a
-  pattern that worked.
+  pattern that worked. A missing source (no body and no tool) is reported
+  first, so a pattern opened on a source that failed names the source.
 - Every instance carries the source's element names with an instance suffix
   (`4/g7` becomes `4/g7#2`, a mirror's `#m`), so a face of the third copy is as
   referenceable as one of the first.
@@ -1230,8 +1231,8 @@ is not tried and not recorded:
 | | `body.pattern_circular`, `body.mirror` | 3 at 120° about Z; mirror about YZ |
 | | `body.split` | Split at the mid-plane square to its largest extent |
 
-The matrix copies no GUI literal (Fillet and Chamfer start at 0.5, Shell at
-0.25, in `CreateActions.cpp`). On a body past 100 faces the direct edits,
+The matrix copies no GUI default: the GUI's are derived from the part
+([tool-sessions.md](../ui/tool-sessions.md#defaults-and-refusals)). On a body past 100 faces the direct edits,
 like the shell, take only the four planar faces whose names hash lowest. A
 direct edit passes or is refused, except where it takes away a painted face
 (golden `v164-face-appearance`): the document then warns that the face

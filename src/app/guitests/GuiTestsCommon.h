@@ -138,7 +138,9 @@ void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId);
 // it. Nothing the GUI reaches makes these any more
 // (docs/ui/tool-sessions.md#primitives); the primitive tools are tested by
 // the primitive/* cases.
-void AddFixtureBox(ImGuiTestContext* ctx);
+// `k` scales the box and its spot on the ladder alike (2k cube at k times
+// the spot): the defaults/scale cases set a part up at 2 mm and at 300 mm.
+void AddFixtureBox(ImGuiTestContext* ctx, float k = 1.0f);
 void AddFixtureSphere(ImGuiTestContext* ctx);
 void AddFixtureCylinder(ImGuiTestContext* ctx);
 
@@ -224,8 +226,10 @@ void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);
 void EnterSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);
 void AddRectSketch(ImGuiTestContext* ctx, int planeIdx, float half,
                    float centreU = 0.0f);
-void AddPathSketch(ImGuiTestContext* ctx, int planeIdx);
-void SetupFor(ImGuiTestContext* ctx, Needs needs);
+void AddPathSketch(ImGuiTestContext* ctx, int planeIdx, float length = 6.0f);
+// `k` scales every length the setup draws -- the box, the sketches, the
+// sheet's gauge -- so the same document can be built at any size.
+void SetupFor(ImGuiTestContext* ctx, Needs needs, float k = 1.0f);
 
 // One registrar per domain file; RegisterGuiTests calls them all.
 void RegisterSketchGuiTests(ImGuiTestEngine* engine);

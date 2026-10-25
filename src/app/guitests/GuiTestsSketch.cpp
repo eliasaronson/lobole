@@ -1012,9 +1012,11 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ext->regions[0] == std::vector<uint32_t>{c1});
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
-    // One cylinder's volume, not two (r=1, default distance 1 → pi).
+    // One cylinder's volume, not two: r=1, and the default distance is the
+    // extruded REGION's width (2), not the whole sketch's -> 2 pi.
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
-    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - M_PI) < 1e-2);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 2.0 * M_PI) <
+             1e-2);
   };
 
   // A sketch opens the way it is read: +U to the right and, on Top, +V up --

@@ -136,7 +136,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           if (!dp)
             continue;
           if (auto uv = RayToPlaneUV(ray, dp->OutputPlane())) {
-            if (std::abs(uv->x) > halfExtent || std::abs(uv->y) > halfExtent)
+            // Inside the drawn quad (DatumQuadCentre: over the part), or
+            // where the base planes are hit.
+            const glm::dvec2 c =
+                dp->OutputPlane().WorldToPlane(DatumQuadCentre(state, *dp));
+            const double datumHalf = DatumHalfExtent(state);
+            const bool inQuad = std::abs(uv->x - c.x) <= datumHalf &&
+                                std::abs(uv->y - c.y) <= datumHalf;
+            if (!inQuad &&
+                (std::abs(uv->x) > halfExtent || std::abs(uv->y) > halfExtent))
               continue;
             const float dist = static_cast<float>(glm::length(
                 dp->OutputPlane().PlaneToWorld(*uv) - glm::dvec3(ray.origin)));

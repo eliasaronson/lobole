@@ -211,7 +211,9 @@ parts area).
   the one face whose name extends its own (`FollowModifiedFaces`,
   `Document.cpp`); a face split in two is not followed, and the thread mill
   then says the face carries no thread.
-- GUI: `###tb_thread`, then pick a cylindrical face. The editor has the
+- GUI: `###tb_thread`, then pick a cylindrical face; the pick sizes the
+  designation to the ISO metric coarse size whose major diameter (a boss)
+  or tap drill (a hole) is nearest the face's diameter. The editor has the
   designation combo (both tables, then Custom), the class combo (the
   series' classes for the face's side), **Modeled** and **Hand**.
 - Drawing notes can read a thread's `feature_<id>_pitch`, `_major` and

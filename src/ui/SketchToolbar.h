@@ -33,6 +33,18 @@ void BeginExtrudeOfSketch(AppState& state, SketchFeature& sketch,
 void BeginRevolveOfSketch(AppState& state, SketchFeature& sketch,
                           std::vector<std::vector<uint32_t>> regions = {});
 
+// An extrude's opening distance
+// (docs/ui/tool-sessions.md#defaults-and-refusals): a Cut goes through the part
+// -- the depth of `bodies` (the ones before the extrude) along the sketch's
+// normal -- and anything else rises by the profile's smaller in-plane extent
+// (only the `regions` it extrudes, when it names some), rounded down to 1, 2 or
+// 5 x 10^n. Never a literal: a fixed millimetre was a sliver on a 300 mm plate
+// and a slab on a 0.5 mm one.
+[[nodiscard]] double
+DefaultExtrudeDistance(const std::vector<Body>& bodies,
+                       const SketchFeature& sketch, int mode /* ExtrudeMode */,
+                       const std::vector<std::vector<uint32_t>>& regions = {});
+
 // Turns the active sketch's Point entities into a Hole preview: exits sketch
 // mode, then BeginPreviewFeature (the BeginSketchExtrude recipe). No-ops with
 // an actionMsg when the sketch has no points. Shared by the sketch toolbar's

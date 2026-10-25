@@ -20,6 +20,7 @@
 #include "ui/ViewActions.h"
 
 #include <chrono>
+#include <format>
 
 #if defined(__linux__)
 #include <pthread.h>
@@ -325,9 +326,10 @@ void AddFixture(ImGuiTestContext* ctx, std::unique_ptr<Feature> f) {
 }
 } // namespace
 
-void AddFixtureBox(ImGuiTestContext* ctx) {
-  AddFixture(ctx, std::make_unique<BoxFeature>(FixtureName("Box"),
-                                               FixtureSpot(), 2.0, 2.0, 2.0));
+void AddFixtureBox(ImGuiTestContext* ctx, float k) {
+  AddFixture(ctx,
+             std::make_unique<BoxFeature>(FixtureName("Box"), k * FixtureSpot(),
+                                          2.0 * k, 2.0 * k, 2.0 * k));
 }
 
 void AddFixtureSphere(ImGuiTestContext* ctx) {
@@ -664,14 +666,14 @@ void AddRectSketch(ImGuiTestContext* ctx, int planeIdx, float half,
   ctx->Yield();
 }
 
-void AddPathSketch(ImGuiTestContext* ctx, int planeIdx) {
+void AddPathSketch(ImGuiTestContext* ctx, int planeIdx, float length) {
   EnterSketchOnPlane(ctx, planeIdx);
   auto* sk = dynamic_cast<SketchFeature*>(
       Doc()->GetFeature(Doc()->FeatureCount() - 1));
   IM_CHECK_SILENT(sk != nullptr);
   const size_t index = Doc()->FeatureCount() - 1;
   nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-  sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {0.0f, 6.0f}}); // an open path
+  sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {0.0f, length}}); // an open path
   nlohmann::json after = DocumentIO::FeatureToJson(*sk);
   s_App->commands->Execute(
       std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
@@ -680,27 +682,29 @@ void AddPathSketch(ImGuiTestContext* ctx, int planeIdx) {
   ctx->Yield();
 }
 
-void SetupFor(ImGuiTestContext* ctx, Needs needs) {
+void SetupFor(ImGuiTestContext* ctx, Needs needs, float k) {
   switch (needs) {
   case Needs::Nothing:
     break;
   case Needs::Body:
-    AddFixtureBox(ctx);
+    AddFixtureBox(ctx, k);
     break;
   case Needs::TwoBodies:
-    AddFixtureBox(ctx);
-    AddFixtureBox(ctx);
+    AddFixtureBox(ctx, k);
+    AddFixtureBox(ctx, k);
     break;
   case Needs::ClosedSketch:
     // Off the origin on purpose: a revolve whose profile STRADDLES its axis
     // is geometrically impossible, and refusing it is correct behaviour, not
     // a default worth testing. A user drawing a revolve puts the profile
-    // beside the axis, so the setup does too.
-    AddRectSketch(ctx, 1, 1.0f, /*centreU=*/3.0f);
+    // beside the axis, so the setup does too -- against it, as a turned
+    // part's half-section is drawn, so the revolved solid is the profile's
+    // own size and not a ring of a radius the setup made up.
+    AddRectSketch(ctx, 1, 1.0f * k, /*centreU=*/1.0f * k);
     break;
   case Needs::TwoSketches:
-    AddRectSketch(ctx, 1, 1.5f);
-    AddRectSketch(ctx, 1, 1.0f);
+    AddRectSketch(ctx, 1, 1.5f * k);
+    AddRectSketch(ctx, 1, 1.0f * k);
     break;
   case Needs::SheetRules:
   case Needs::SheetBlank:
@@ -711,10 +715,10 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     // something the tool under test is supposed to do for itself.
     sheet::SheetMetalRules rules;
     rules.material = "aluminum";
-    rules.gauge = "1.5mm";
-    rules.thickness = 1.5;
+    rules.thickness = 1.5 * k;
+    rules.gauge = std::format("{:g}mm", rules.thickness);
     Doc()->SetSheetMetal(rules);
-    AddRectSketch(ctx, 1, 8.0f);
+    AddRectSketch(ctx, 1, 8.0f * k);
     if (needs == Needs::SheetRules)
       break;
     ToolbarCreateAccept(ctx, "###tb_base_flange");
@@ -735,7 +739,7 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
               "Walls",
               std::vector<ElementRef>{ElementRef{base, names[i]},
                                       ElementRef{base, names[j]}},
-              5.0, 90.0);
+              5.0 * k, 90.0);
           walls->position = FlangePosition::BendOutside;
           Doc()->AddFeature(std::move(walls));
           const bool ok =
@@ -771,7 +775,7 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
       bool made = false;
       for (const std::string& name : names) {
         Doc()->AddFeature(std::make_unique<EdgeFlangeFeature>(
-            "Wall", std::vector<ElementRef>{ElementRef{base, name}}, 5.0,
+            "Wall", std::vector<ElementRef>{ElementRef{base, name}}, 5.0 * k,
             90.0));
         if (Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty()) {
           made = true;
@@ -792,12 +796,12 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
   case Needs::BodyAndOpenSketch: {
     // A rib grows a thin web from an open profile down onto a body, so the
     // gate needs both: the default box, and a line hanging above it.
-    AddFixtureBox(ctx);
+    AddFixtureBox(ctx, k);
     glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
     // The web grows along the sketch plane's NORMAL, so the profile has to
     // face the body: a plane hanging above the box, looking down at it.
-    const glm::vec3 over((lo.x + hi.x) * 0.5f, hi.y + 1.0f,
+    const glm::vec3 over((lo.x + hi.x) * 0.5f, hi.y + 1.0f * k,
                          (lo.z + hi.z) * 0.5f);
     ui::BeginSketchOnPlane(
         *s_App, SketchPlane(over, glm::vec3(0, -1, 0), glm::vec3(1, 0, 0)),
@@ -811,7 +815,7 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     IM_CHECK_SILENT(sk != nullptr);
     const size_t index = Doc()->FeatureCount() - 1;
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-    sk->AddEntity(sketch::Line{{-0.4f, 0.0f}, {0.4f, 0.0f}});
+    sk->AddEntity(sketch::Line{{-0.4f * k, 0.0f}, {0.4f * k, 0.0f}});
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
@@ -826,9 +830,9 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
         primitive::Add(*Doc(), *s_App->commands,
                        primitive::SpecFromJson({{"type", "Box"},
                                                 {"on", "Top"},
-                                                {"width", 2.0},
-                                                {"depth", 2.0},
-                                                {"height", 1.0}}));
+                                                {"width", 2.0 * k},
+                                                {"depth", 2.0 * k},
+                                                {"height", 1.0 * k}}));
     tmpl::SaveSpec spec;
     spec.name = "block";
     spec.featureIds = {block.sketchId, block.solidId};
@@ -837,8 +841,8 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     break;
   }
   case Needs::ProfileAndPath:
-    AddRectSketch(ctx, 1, 1.0f); // profile on the top plane
-    AddPathSketch(ctx, 0);       // path rising in the front plane
+    AddRectSketch(ctx, 1, 1.0f * k); // profile on the top plane
+    AddPathSketch(ctx, 0, 6.0f * k); // path rising in the front plane
     break;
   }
   ctx->Yield();

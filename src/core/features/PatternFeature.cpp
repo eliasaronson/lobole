@@ -218,6 +218,33 @@ std::string PatternFeature::WhyRefusedOn(const std::vector<Body>& input,
 }
 
 bool PatternFeature::Execute(RegenContext& ctx) {
+  // Collect the seed body/bodies produced by the referenced feature, each
+  // with its names — an instance that arrives unnamed leaves unnamed, and a
+  // face with no name cannot be picked, threaded, filleted or fitted.
+  std::vector<std::pair<CADShape, ElementMap>> instances;
+  for (const Body& b : ctx.bodies) {
+    if (b.createdBy == sourceId) {
+      // copy: the source stays until we replace it
+      instances.emplace_back(b.shape, b.elementMap);
+    }
+  }
+  // A CUT or ADD source leaves no body of its own behind to replicate —
+  // replicate its TOOL instead: transformed copies of what the source just
+  // swept, each applied in the source's mode (R14 for cuts). Patterned
+  // holes used to refuse "source body not found", pushing every repeated
+  // hole into one multi-loop sketch; so did a ring of teeth added to a
+  // pinion face, which went in as one extrude per tooth.
+  const Feature* src = instances.empty() ? ctx.FindById(sourceId) : nullptr;
+  const CADShape* tool = src != nullptr ? src->ToolShape() : nullptr;
+  // Nothing to repeat is the first thing wrong with a pattern, whatever its
+  // step: a pattern opened on a source that failed says so, not that its
+  // (underived) spacing is 0.
+  if (instances.empty() && (tool == nullptr || !tool->IsValid())) {
+    SetError("source body (feature " + std::to_string(sourceId) +
+             ") not found — did the source feature fail? (an Extrude that "
+             "cuts or adds patterns its tool instead)");
+    return false;
+  }
   // A step that lands every copy on the seed builds nothing while the
   // pattern reads as one that worked (a cut source only warned that its
   // copies removed nothing). `angle_deg` is the STEP between instances, so
@@ -245,35 +272,11 @@ bool PatternFeature::Execute(RegenContext& ctx) {
       }
     }
   }
-  // Collect the seed body/bodies produced by the referenced feature, each
-  // with its names — an instance that arrives unnamed leaves unnamed, and a
-  // face with no name cannot be picked, threaded, filleted or fitted.
-  std::vector<std::pair<CADShape, ElementMap>> instances;
-  for (const Body& b : ctx.bodies) {
-    if (b.createdBy == sourceId) {
-      // copy: the source stays until we replace it
-      instances.emplace_back(b.shape, b.elementMap);
-    }
-  }
   if (instances.empty()) {
-    // A CUT or ADD source leaves no body of its own behind to replicate —
-    // replicate its TOOL instead: transformed copies of what the source just
-    // swept, each applied in the source's mode (R14 for cuts). Patterned
-    // holes used to refuse "source body not found", pushing every repeated
-    // hole into one multi-loop sketch; so did a ring of teeth added to a
-    // pinion face, which went in as one extrude per tooth.
-    const Feature* src = ctx.FindById(sourceId);
-    const CADShape* tool = src != nullptr ? src->ToolShape() : nullptr;
-    if (tool != nullptr && tool->IsValid()) {
-      const ElementMap* toolMap = src->ToolMap();
-      return ExecuteToolPattern(ctx, *tool,
-                                toolMap != nullptr ? *toolMap : ElementMap{},
-                                src->ToolAdds());
-    }
-    SetError("source body (feature " + std::to_string(sourceId) +
-             ") not found — did the source feature fail? (an Extrude that "
-             "cuts or adds patterns its tool instead)");
-    return false;
+    const ElementMap* toolMap = src->ToolMap();
+    return ExecuteToolPattern(ctx, *tool,
+                              toolMap != nullptr ? *toolMap : ElementMap{},
+                              src->ToolAdds());
   }
   const size_t seedCount = instances.size();
 
