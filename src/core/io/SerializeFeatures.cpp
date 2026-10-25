@@ -3132,8 +3132,14 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         std::set<uint32_t> ids;
         for (const json& ej : sj.value("entities", json::array())) {
           sketch::Entity e = EntityFromJson(ej);
-          // Projections name an entity by its id: two of one id would be
-          // one name for two curves.
+          // Projections name an entity by its id, and the writer writes
+          // every one: an entity without one is damage, never a sketch sent
+          // without ids to be stamped (that is a live sketch's form).
+          if (sketch::EntityId(e) == 0)
+            throw std::runtime_error("Derived '" + name + "': copied sketch '" +
+                                     ds.name +
+                                     "' holds an entity without an id");
+          // Two of one id would be one name for two curves.
           if (!ids.insert(sketch::EntityId(e)).second)
             throw std::runtime_error("Derived '" + name + "': copied sketch '" +
                                      ds.name + "' holds entity id " +

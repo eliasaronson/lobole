@@ -1,0 +1,26 @@
+{
+  "bodies": [
+    {
+      "brep": "0.brep",
+      "created_by": 3,
+      "element_map": {
+        "edges": {
+          "0": "3/g1889325867;U0",
+          "1": "3/g1889325867;U1",
+          "2": "3/g1889325867;U2"
+        },
+        "faces": {
+          "0": "3/g1889325867",
+          "1": "3/cap0",
+          "2": "3/cap1"
+        }
+      },
+      "material": "",
+      "name": "Pad"
+    }
+  ],
+  "chain_hash": 5668481487822949405,
+  "content_hash": "0x450774010142f519",
+  "geometry_format": 6,
+  "occ_version": "7.9.3"
+}

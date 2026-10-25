@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part-dir",
+  "id": "part-dir/v193-derived-sketch/features/1-derived.json:drop_line:0",
+  "input": "tree.dsgn",
+  "message": [
+    "1-derived.json",
+    "copied sketch 'Outline' holds an entity without an id"
+  ],
+  "seed": 0
+}

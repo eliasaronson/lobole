@@ -1,0 +1,9 @@
+{
+  "distance": 2.0,
+  "id": 3,
+  "mode": "new_body",
+  "name": "Pad",
+  "reversed": false,
+  "sketch_id": 2,
+  "type": "Extrude"
+}

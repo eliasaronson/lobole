@@ -1,0 +1,75 @@
+{
+  "follow": false,
+  "id": 1,
+  "name": "Outline copy",
+  "placement": {
+    "orientation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "position": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "reference": true,
+  "sketches": [
+    3
+  ],
+  "snapshot": {
+    "bodies": [],
+    "sketches": [
+      {
+        "entities": [
+          {
+            "center": [
+              3.0,
+              2.0
+            ],
+            "radius": 4.0,
+            "type": "circle"
+          },
+          {
+            "a": [
+              -10.0,
+              0.0
+            ],
+            "b": [
+              10.0,
+              0.0
+            ],
+            "construction": true,
+            "id": 1744598356,
+            "type": "line"
+          }
+        ],
+        "name": "Outline",
+        "plane": {
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "uAxis": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        "source_id": 3
+      }
+    ],
+    "source_key": "0x299bcb29671529d2"
+  },
+  "source_name": "Servo",
+  "source_part": 7,
+  "type": "Derived"
+}
