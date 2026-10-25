@@ -153,7 +153,7 @@ navigation from its own documentation, cited beside its row in
 
 | preset | rotate | pan | zoom | roll |
 |---|---|---|---|---|
-| `lobole` | middle, right, Alt+left | Ctrl+ each | Shift+ each | Alt+middle |
+| `lobole` | middle, right, Alt+right, Alt+left | Ctrl+middle/right/Alt+left | Shift+middle/right/Alt+left | Alt+middle |
 | `solidworks` | middle | Ctrl+middle | Shift+middle | Alt+middle |
 | `fusion` | Shift+middle | middle | Ctrl+middle | — |
 | `onshape` | right, Alt+right | Ctrl+right, middle | — | — |
@@ -172,8 +172,9 @@ any button something is bound to, and a held combination that is bound to
 nothing moves nothing. What is not navigation stays fixed and wins where it
 did: a right RELEASE short of the drag threshold is a click (the occurrence
 menu, the sketch dimension menu), Shift+click aligns to a face, Ctrl+click
-multi-selects. The drawing sheet asks the same table and pans on whatever
-is bound to pan or to rotate. The cheat-sheet (View > Viewport Controls) is
+multi-selects. The drawing sheet asks the same table and pans on EVERY
+navigation drag: it has nothing to rotate or roll and zooms on the wheel, so
+under the defaults a middle drag pans with any keys held, as it always did. The cheat-sheet (View > Viewport Controls) is
 written from the table and the keymap.
 
 Beside the gestures: `nav_orbit_speed`, `nav_pan_speed`, `nav_zoom_speed`
@@ -182,7 +183,9 @@ Beside the gestures: `nav_orbit_speed`, `nav_pan_speed`, `nav_zoom_speed`
 on the sheet). The remote `viewport_drag` takes `ctrl`/`shift`/`alt` and
 `scroll` `ctrl`/`shift`, so a script can make every gesture.
 
-Tests: `tests/test_mousenav.cpp` (every gesture round-trips; every preset is
+Tests: `tests/test_mousenav.cpp` (every gesture round-trips; **the
+defaults resolve every button and key combination as the hard-coded code
+before the table did**, transcribed in the test; every preset is
 clash-free, never binds a bare left and is its own name back; unknown
 gestures, a bare left, a clash, an unknown preset and an out-of-range speed
 are refused by name; the rows survive a save and a bad file); GUI
@@ -190,7 +193,7 @@ are refused by name; the rows survive a save and a bad file); GUI
 preset does what the preset binds, from an empty spot, and an unbound one
 does nothing), `viewport/wheel_inverts_and_speeds_scale`,
 `assembly/right_click_menu_under_a_right_orbit_preset`,
-`drawing/the_sheet_pans_on_the_pan_gesture`.
+`drawing/the_sheet_pans_on_navigation_drags`.
 
 ## Not built
 

@@ -651,25 +651,20 @@ void HandleSheetInput(AppState& state) {
     }
   }
 
-  // Drag-pan, from the viewport's gesture table: a sheet has nothing to
-  // orbit, so what rotates in 3D pans here too, and a hand that pans in 3D
-  // pans the sheet. Asked every frame, as the viewport asks.
+  // Drag-pan, from the viewport's gesture table: EVERY navigation drag pans
+  // the sheet. A sheet has nothing to orbit or roll, and its zoom is the
+  // wheel's, so the drags that do those in 3D have nothing else to do here
+  // -- and under the defaults that keeps what the sheet always did: a middle
+  // drag pans whatever keys are held, and so does Alt+left. A combination
+  // bound to nothing in 3D moves nothing here either. Asked every frame, as
+  // the viewport asks.
   const mousenav::NavMap& nav = CurrentNavMap(state);
-  const auto pans = [](mousenav::Action a) {
-    return a == mousenav::Action::Pan || a == mousenav::Action::Orbit;
-  };
   if (overViewport && !state.sheetView.panning) {
     for (const ImGuiMouseButton b :
          {ImGuiMouseButton_Middle, ImGuiMouseButton_Right,
           ImGuiMouseButton_Left}) {
-      if (!ImGui::IsMouseClicked(b))
-        continue;
-      bool any = false;
-      for (const mousenav::Action a :
-           {mousenav::Action::Pan, mousenav::Action::Orbit})
-        for (const mousenav::Gesture& g : nav.GesturesFor(a))
-          any = any || g.button == static_cast<mousenav::Button>(b);
-      if (!any || (b == ImGuiMouseButton_Left && !io.KeyAlt))
+      if (!ImGui::IsMouseClicked(b) ||
+          !nav.Navigates(static_cast<mousenav::Button>(b), io.KeyAlt))
         continue;
       state.sheetView.panning = true;
       state.sheetView.panButton = b;
@@ -679,14 +674,13 @@ void HandleSheetInput(AppState& state) {
   if (state.sheetView.panning &&
       ImGui::IsMouseReleased(state.sheetView.panButton))
     state.sheetView.panning = false;
-  const mousenav::Action action =
-      state.sheetView.panning
-          ? nav.ActionFor(
-                static_cast<mousenav::Button>(state.sheetView.panButton),
-                io.KeyCtrl, io.KeyShift,
-                state.sheetView.panButton == ImGuiMouseButton_Left || io.KeyAlt)
-          : mousenav::Action::None;
-  if (pans(action) && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
+  const bool pans =
+      state.sheetView.panning &&
+      nav.ActionFor(static_cast<mousenav::Button>(state.sheetView.panButton),
+                    io.KeyCtrl, io.KeyShift,
+                    state.sheetView.panButton == ImGuiMouseButton_Left ||
+                        io.KeyAlt) != mousenav::Action::None;
+  if (pans && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
     const double s = state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
     state.sheetView.offset.x -= io.MouseDelta.x / s;
     state.sheetView.offset.y += io.MouseDelta.y / s; // screen +Y is sheet -Y

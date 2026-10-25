@@ -133,12 +133,14 @@ std::pair<size_t, uint64_t> SpringOnAnUnvisitedSheet(ImGuiTestContext* ctx) {
 // loudly instead of silently disappearing.
 void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
 
-  // The sheet pans on what Preferences > Navigation binds to pan and to
-  // rotate (a sheet has nothing to rotate), and on nothing else: under
-  // Blender's, Shift+middle pans and Ctrl+middle (its zoom) does not.
+  // The sheet pans on every drag Preferences > Navigation binds (a sheet
+  // has nothing to rotate, roll or drag-zoom), and on nothing else. Under
+  // the defaults that is what it always did: a middle drag pans whatever
+  // keys are held. Under Blender's, Alt+middle is bound to nothing, so it
+  // moves nothing.
   {
-    ImGuiTest* sheetPan = IM_REGISTER_TEST(engine, "drawing",
-                                           "the_sheet_pans_on_the_pan_gesture");
+    ImGuiTest* sheetPan = IM_REGISTER_TEST(
+        engine, "drawing", "the_sheet_pans_on_navigation_drags");
     sheetPan->TestFunc = [](ImGuiTestContext* ctx) {
       PlateOnASheet(ctx);
       std::string error;
@@ -149,21 +151,28 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
       const auto drag = [&](ImGuiKeyChord mods) {
         const glm::dvec2 before = s_App->sheetView.offset;
         ctx->MouseMoveToPos(from);
-        ctx->KeyDown(mods);
+        if (mods != 0)
+          ctx->KeyDown(mods);
         ctx->MouseDown(ImGuiMouseButton_Middle);
         ctx->MouseMoveToPos(ImVec2(from.x + 60.0f, from.y + 30.0f));
         ctx->MouseUp(ImGuiMouseButton_Middle);
-        ctx->KeyUp(mods);
+        if (mods != 0)
+          ctx->KeyUp(mods);
         ctx->Yield(2);
         return glm::length(s_App->sheetView.offset - before);
       };
       IM_CHECK(drag(ImGuiMod_Shift) > 1.0); // Blender's pan
-      IM_CHECK(drag(ImGuiMod_Ctrl) < 1e-9); // Blender's zoom: not a pan
+      IM_CHECK(drag(ImGuiMod_Ctrl) > 1.0);  // its zoom drag: a pan here
+      IM_CHECK(drag(ImGuiMod_Alt) < 1e-9);  // bound to nothing
       IM_CHECK(!s_App->sheetView.panning);
-      // The defaults: Ctrl+middle is pan.
+      // The defaults: every middle drag pans, whatever is held.
       IM_CHECK(settings::ApplyJson(s_App->settings, {{"nav_preset", "lobole"}},
                                    &error));
-      IM_CHECK(drag(ImGuiMod_Ctrl) > 1.0);
+      for (const ImGuiKeyChord mods :
+           {ImGuiKeyChord(0), ImGuiKeyChord(ImGuiMod_Ctrl),
+            ImGuiKeyChord(ImGuiMod_Shift), ImGuiKeyChord(ImGuiMod_Alt),
+            ImGuiKeyChord(ImGuiMod_Ctrl | ImGuiMod_Shift)})
+        IM_CHECK(drag(mods) > 1.0);
     };
   }
   ImGuiTest* t = nullptr;
