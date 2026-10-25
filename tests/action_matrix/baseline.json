@@ -4027,5 +4027,7 @@
   "golden/v146-worm": {"edge:2/*;U* edge.chamfer": 14.4, "face:1/face1;M* face.shell": 0.0},
   "reference/25-modelled-thread": {"face:2/cap0;M3 face.shell": 5.4, "face:2/cap1;M3 face.shell": 5.4}
  },
- "known": []
+ "known": [
+  {"action": "face.shell", "bug": "docs/known-bugs.md#a-very-thin-shell-of-random-design-17-faults-in-the-offset-builder", "class": "signal", "entity": "face:100/*;U*", "repro": "tests/action_matrix/open/fuzz17-shell-signal.json", "unit": "fuzz/17"}
+ ]
 }

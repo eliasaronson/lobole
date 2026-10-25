@@ -1,0 +1,30 @@
+{
+ "what": "A 0.002 mm Shell of random design 17 (generator 1), opening the blend face 100/g5;U0;G110;M120: the offset builder faults (SIGSEGV in BOPDS_DS::ShapeInfo under BRepOffset_Tool::Inter3D), caught and refused as a signal",
+ "unit": "fuzz/17",
+ "entity": "face:100/g5;U0;G110;M120",
+ "family": "face:100/*;U*",
+ "action": "face.shell",
+ "call": [
+  {
+   "method": "add_feature",
+   "params": {
+    "feature": {
+     "type": "Shell",
+     "name": "AM shell",
+     "body_id": 100,
+     "thickness": 0.002,
+     "open_faces": [
+      {
+       "feature_id": 100,
+       "element": "100/g5;U0;G110;M120"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "expect_outcome": [
+  "finding",
+  "signal"
+ ]
+}
