@@ -69,11 +69,14 @@ class World:
             "parts": d.call("list_parts"),
             "undo": st.get("undo"), "redo": st.get("redo"),
             # What a caller started and would have to stop. Not the CAM
-            # passes: they are the job's derived toolpaths, recomputed
-            # whenever the job is put back, rollback included.
+            # passes, nor the verification that follows them when they land:
+            # they are the job's derived toolpaths, recomputed whenever the
+            # job is put back, rollback included, and they finish on their
+            # own between any two calls. (A caller's own cam_verify is parked
+            # until its job ends, so no refusal can leave one running.)
             "jobs": sorted((j["kind"], j["id"]) for j in
                            d.call("background_jobs")["jobs"]
-                           if j["kind"] != "cam"),
+                           if j["kind"] not in ("cam", "cam-verify")),
             "machines": (d.call("list_machines")["machines"]
                          if self.cam else None),
             "settings": d.call("get_settings"),

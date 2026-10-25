@@ -8,6 +8,8 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <fstream>
 #include <functional>
@@ -86,6 +88,15 @@ public:
   // idle timeout on every RPC. Set BEFORE Start() and never after: the
   // reader threads read it unsynchronized.
   void SetWakeCallback(std::function<void()> wake) { m_wake = std::move(wake); }
+
+  // The same notification for a loop with no window to post an event to
+  // (--headless, --offscreen): sleeps up to `most`, returning as soon as a
+  // request has arrived since the last call. A fixed sleep there put its
+  // whole length on every RPC's round trip -- ~2 ms a call, ~13 000 calls in
+  // refused_calls_smoke -- and a loaded machine stretches every sleep.
+  // Edge-triggered, not "while the queue is non-empty": a request held behind
+  // a capture stays queued, and the loop must not spin on it.
+  void WaitForRequest(std::chrono::milliseconds most);
 
   // Session recording (S4): tee every handled semantic request as one JSON
   // per line — a replayable session (python/lobole/replay.py). UI actions
@@ -199,6 +210,9 @@ private:
   std::mutex m_queueMutex;
   std::deque<Request> m_requests;
   std::function<void()> m_wake; // enqueue notification; see SetWakeCallback
+  std::condition_variable m_arrived; // WaitForRequest; under m_queueMutex
+  uint64_t m_arrivals = 0;           // requests enqueued, ever
+  uint64_t m_arrivalsSeen = 0;       // main thread: as of the last wait
 
   std::ofstream m_recording; // open = recording (main thread only)
 

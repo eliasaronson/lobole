@@ -1462,7 +1462,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
     }
 
     ui::AutosaveProject(g_App, autosaver, now);
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    // Up to 2 ms for jobs and autosave; a request ends it at once.
+    server.WaitForRequest(std::chrono::milliseconds(2));
   }
 
   LOG_INFO("Offscreen: stop requested, shutting down");

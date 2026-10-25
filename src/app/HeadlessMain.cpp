@@ -119,7 +119,8 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
     ui::PollBackgroundJobs(state);
     // The PROJECT, not the open tab (F10) — same fix as the windowed loop.
     ui::AutosaveProject(state, autosaver, seconds());
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    // Up to 2 ms for jobs and autosave; a request ends it at once.
+    server.WaitForRequest(std::chrono::milliseconds(2));
   }
 
   LOG_INFO("Headless: stop requested, shutting down");

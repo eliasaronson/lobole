@@ -280,6 +280,12 @@ bool RemoteServer::UiActionsAvailable() const {
 #endif
 }
 
+void RemoteServer::WaitForRequest(std::chrono::milliseconds most) {
+  std::unique_lock<std::mutex> lock(m_queueMutex);
+  m_arrived.wait_for(lock, most, [&] { return m_arrivals != m_arrivalsSeen; });
+  m_arrivalsSeen = m_arrivals;
+}
+
 bool RemoteServer::StartRecording(const std::string& path) {
   m_recording.open(path, std::ios::trunc);
   if (!m_recording.is_open()) {
@@ -385,7 +391,9 @@ void RemoteServer::ClientThread(int client, uint64_t connection) {
       {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_requests.push_back(std::move(request));
+        ++m_arrivals;
       }
+      m_arrived.notify_one();
       // Outside the lock: wake a throttled frame loop so the request is
       // pumped now, not after the idle timeout
       // (docs/rendering/frame-pacing.md#idle-throttle).
