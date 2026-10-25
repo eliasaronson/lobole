@@ -135,8 +135,9 @@ them:
 - Putting the current selection into an agent's context unasked: the
   workflow prompt has the agent read `get_state`'s `selection` before it
   acts on "this" ([mcp.md](scripting/mcp.md#the-workflow-prompt)).
-- `design_audit`: perturb each parameter and report which perturbations break
-  regeneration.
+- `design_sweep` with no `variables`: every variable at a default spread
+  about its value, so a part's fragile parameters show without ranges stated
+  first ([design sweep](requirements/README.md#design-sweep)).
 - Benchmark tasks graded on relations (gears, racks, cams); mechanisms are
   graded only on their mates and a motion answer.
 - **Benchmark tasks that edit an existing part.** Every task builds from
