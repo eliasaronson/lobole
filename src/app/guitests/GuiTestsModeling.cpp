@@ -52,6 +52,14 @@
 
 #include <unistd.h> // getpid: a scratch file per shard
 
+// On Windows, OpenCASCADE's Standard_Mutex.hxx (through
+// cad/NonDestructiveBoolean.h) includes windows.h, whose winbase.h defines
+// `Yield()` as a macro and breaks every ctx->Yield(n) below. Only the Windows
+// build sees it (docs/packaging/README.md#windows).
+#ifdef Yield
+#undef Yield
+#endif
+
 // Modeling GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
 // Test names and categories are UNCHANGED: tools/gui-tests-xvfb.sh builds its
