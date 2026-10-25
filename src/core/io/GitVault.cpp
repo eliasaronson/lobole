@@ -561,6 +561,66 @@ std::string VersionTagRef(const std::string& decorations) {
 
 } // namespace
 
+namespace {
+
+// The first line of a small file under .git, without its line ending.
+std::string ReadGitLine(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  std::string line;
+  if (!in || !std::getline(in, line))
+    return {};
+  return FirstLine(line);
+}
+
+bool IsObjectHash(const std::string& s) {
+  // SHA-1 or SHA-256 object names, lowercase as git writes them.
+  return (s.size() == 40 || s.size() == 64) &&
+         std::all_of(s.begin(), s.end(), [](char c) {
+           return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+         });
+}
+
+} // namespace
+
+std::string HeadHash(const std::string& dir) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  const fs::path git = fs::path(dir) / ".git";
+  if (!fs::is_directory(git, ec))
+    return {};
+  std::string target = ReadGitLine(git / "HEAD");
+  // A symbolic ref may name another symbolic ref; git follows a few levels,
+  // and so does this. A ref outside refs/ (or climbing out of it) is not
+  // something git writes, and is not followed.
+  for (int depth = 0; depth < 5 && target.starts_with("ref: "); depth++) {
+    std::string ref = target.substr(5);
+    while (!ref.empty() && ref.front() == ' ')
+      ref.erase(ref.begin());
+    if (!ref.starts_with("refs/") || ref.find("..") != std::string::npos)
+      return {};
+    target = ReadGitLine(git / ref);
+    if (!target.empty())
+      continue; // a loose ref: a hash, or another "ref: "
+    // Not loose: packed. "<hash> <ref>" per line; '#' is the header and '^'
+    // a peeled tag's target, neither of which names this ref.
+    std::ifstream packed(git / "packed-refs", std::ios::binary);
+    std::string line;
+    while (std::getline(packed, line)) {
+      line = FirstLine(line);
+      if (line.empty() || line[0] == '#' || line[0] == '^')
+        continue;
+      const size_t space = line.find(' ');
+      if (space != std::string::npos && line.substr(space + 1) == ref) {
+        target = line.substr(0, space);
+        break;
+      }
+    }
+    if (target.empty())
+      return {}; // an unborn branch: HEAD names a ref with no commit
+  }
+  return IsObjectHash(target) ? target : std::string();
+}
+
 std::vector<LogEntry> Log(const std::string& dir, int limit) {
   std::vector<LogEntry> out;
   if (!Available() || !IsRepo(dir))

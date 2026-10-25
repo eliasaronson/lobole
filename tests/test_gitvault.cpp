@@ -5,6 +5,8 @@
 
 #include "core/io/GitVault.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -859,4 +861,72 @@ TEST_CASE("GitVault: a saved study result stays out of the history, and the "
   tracked = TrackedFiles(fresh);
   CHECK(tracked.find("5-turn.json") != std::string::npos);
   CHECK(tracked.find(".result.") == std::string::npos);
+}
+
+namespace {
+
+// What git itself says HEAD is ("" when it names nothing yet).
+std::string RevParseHead(const std::string& dir) {
+  const std::string cmd =
+      "git -C '" + dir + "' rev-parse --verify --quiet HEAD 2>/dev/null";
+  FILE* pipe = ::popen(cmd.c_str(), "r");
+  if (!pipe)
+    return "?";
+  std::string out;
+  char buf[256];
+  while (::fgets(buf, sizeof(buf), pipe))
+    out += buf;
+  ::pclose(pipe);
+  while (!out.empty() && (out.back() == '\n' || out.back() == '\r'))
+    out.pop_back();
+  return out;
+}
+
+int Git(const std::string& dir, const std::string& args) {
+  return std::system(
+      ("git -C '" + dir + "' " + args + " >/dev/null 2>&1").c_str());
+}
+
+} // namespace
+
+// The disk poll reads HEAD from .git's files instead of starting `git`
+// (docs/versioning/README.md#the-poll-runs-off-the-frame), so it must name
+// the same commit git does in every shape a HEAD comes in — a disagreement is
+// a banner that fires on nothing, or stays down for a checkout.
+TEST_CASE("GitVault: HeadHash agrees with git on every kind of HEAD", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git not on PATH");
+  ScratchRepo repo("headhash");
+
+  // No repository at all, then an unborn branch: nothing to name.
+  CHECK(GitVault::HeadHash(repo.path()).empty());
+  REQUIRE(GitVault::Init(repo.path()));
+  CHECK(RevParseHead(repo.path()).empty());
+  CHECK(GitVault::HeadHash(repo.path()).empty());
+
+  // A loose branch ref.
+  repo.Write("a.json", "{}");
+  REQUIRE(GitVault::CommitAll(repo.path(), "first"));
+  const std::string first = RevParseHead(repo.path());
+  REQUIRE(first.size() >= 40);
+  CHECK(GitVault::HeadHash(repo.path()) == first);
+  CHECK(GitVault::Log(repo.path(), 1).at(0).hash == first);
+
+  // A packed ref: the loose file is gone and only packed-refs names it.
+  repo.Write("b.json", "{}");
+  REQUIRE(GitVault::CommitAll(repo.path(), "second"));
+  REQUIRE(Git(repo.path(), "pack-refs --all --prune") == 0);
+  const std::string second = RevParseHead(repo.path());
+  REQUIRE(second != first);
+  CHECK(GitVault::HeadHash(repo.path()) == second);
+
+  // A detached HEAD: the hash is in HEAD itself.
+  REQUIRE(Git(repo.path(), "checkout -q --detach " + first) == 0);
+  CHECK(RevParseHead(repo.path()) == first);
+  CHECK(GitVault::HeadHash(repo.path()) == first);
+
+  // Back on a branch, then onto a new branch with no commits (unborn again).
+  REQUIRE(Git(repo.path(), "checkout -q --orphan empty") == 0);
+  CHECK(RevParseHead(repo.path()).empty());
+  CHECK(GitVault::HeadHash(repo.path()).empty());
 }

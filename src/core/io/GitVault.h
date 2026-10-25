@@ -91,6 +91,16 @@ bool Tag(const std::string& dir, const std::string& name);
 
 std::vector<LogEntry> Log(const std::string& dir, int limit = 20);
 
+// The commit HEAD names, read from `.git/HEAD` and the ref it points at (a
+// loose ref, else `packed-refs`) without starting `git`: the same hash
+// `Log(dir, 1)[0].hash` gives, for a fraction of the cost, which is what lets
+// the disk poll ask it every few seconds
+// (docs/versioning/README.md#the-poll-runs-off-the-frame). Empty when there is
+// no `.git` directory or HEAD names a branch with no commit yet (an unborn
+// branch) — as Log() is. Reads files only, so it is safe on any thread and in a
+// repository UntrustedReason refuses.
+std::string HeadHash(const std::string& dir);
+
 // Log, plus what each version changed. One `git log --name-only` for the
 // whole page rather than a process per row — and one `git show` only for a
 // commit that touched a single item, which is the case worth naming
