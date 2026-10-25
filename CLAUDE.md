@@ -155,6 +155,10 @@ list kept elsewhere drifts.
   post, the rotary check and playback. Two fixes each made one side agree
   before a test through the pipeline showed which was right, and an indexed
   cut would have landed on the far side of the part.
+- **A timing check is a COST check (CPU time) or a RESPONSIVENESS check
+  (wall clock, skipped with its reason when `tests/host_load.py` finds the
+  machine busy)**; a hang guard stays as it is
+  (docs/ui/testing.md#tests-that-time-things).
 - No test is a known flake. Anything "flaky under load" is worth one look for
   a mechanism before it earns that label: the ones that looked like it here
   were real bugs (a version number used as a document identity, a port race,

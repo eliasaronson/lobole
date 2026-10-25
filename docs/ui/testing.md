@@ -178,6 +178,45 @@ passes at. `--headless` honours `--gui-test-job-latency-ms` too, so a smoke
 can hold its instance's jobs open the same way (`hostile_params_smoke
 --self-test`, [the hostile sweep](../scripting/rpc.md#the-hostile-sweep)).
 
+## Tests that time things
+
+A check that compares a time with a fixed number is one of three kinds,
+and a loaded machine treats each differently (one with load 24 to 61 failed
+three suites that passed alone):
+
+- **Cost** -- "this must not go quadratic", "a refusal costs a parse", "a
+  frame does not run the pass". Read CPU time, which other work does not
+  inflate: `std::clock()` for the process in a Catch2 case (Delete Face's
+  100 holes, under 120 s of CPU; the feature-limit refusal, under 5 s;
+  `FaceSnapPoints`), `MainThreadCpuMs()` in a GUI test (above), the
+  reader-fuzz budget (docs/versioning/README.md#reader-fuzzing). CPU time
+  still depends on the core the work lands on: a hybrid CPU's low-power
+  E-core spends 3.3 times a P-core's CPU seconds on the same heal, so a
+  bound is set against the slowest core, measured pinned there (`taskset
+  -c`). A ratio of two times taken in the same run stays wall-clock, since
+  load cancels out of it (`test_meshcollide`'s mesh against exact).
+- **Responsiveness** -- "a ping answers within 1 s while a job runs", "a
+  reuse answers within 1 s", "a cancel lands inside the hold", "a budget
+  bounds the call". Wall time is the point, so a smoke keeps it, measures
+  inside a `host_load` window, and calls `host_load.judge`: a check that
+  holds passes; one that fails fails on a quiet machine, and on a machine
+  busy with other work is skipped, printing why, while the rest of the
+  test runs ([the probe](../performance/README.md#is-the-machine-busy)).
+  These are the latency checks in `contact_smoke`, `insertion_smoke`,
+  `drawing_parked_smoke`, `cam_parked_smoke`, `remote_smoke`,
+  `requirements_smoke`, the reuse checks in `fem_async_smoke`,
+  `topo_smoke`, `motion_smoke`, `study_jobs_smoke` and
+  `study_reopen_smoke`, and `drawing_quality_smoke`'s budget.
+- **Hang guard** -- `PumpUntil`, `WaitFor`, a `< 30` s wait loop, a ctest
+  `TIMEOUT`, `test_occ_patches`' deadline check (ten times the longest
+  silence). It ends a hang rather than judging speed, so it stays as it is,
+  with room for a loaded machine.
+
+A new timing check names its kind, and is shown to fail on a quiet machine
+against a planted slowdown in the path it times: a CPU spin inside the
+measured interval for a cost check (a sleep would not count, which is the
+point), a delay in the method for a responsiveness one.
+
 ## Recording a scene
 
 The test engine records video: `ctx->CaptureBeginVideo()` and

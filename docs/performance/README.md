@@ -197,6 +197,20 @@ instances' (`/proc/<pid>/stat`), over the wall time, recorded as
 own threads raise it. A workload whose `foreign_load` passes the limit
 marks itself and the record busy.
 
+### Is the machine busy
+
+The probe is `tests/host_load.py`, shared with the smokes' wall-clock
+checks: `Foreign` is the measure above, `compilers()` the compiler scan,
+`load1()` the load average. A smoke measures a responsiveness check inside
+a `host_load.Window(app_pid)` (or `Timed`, which also times its body), and
+`host_load.judge` lets a check that holds pass; one that fails is a failure
+when the rest of the machine held under a quarter of the CPUs and no
+compiler ran, and otherwise a printed skip naming the cause ("18.3 of 22
+CPUs busy with other work"). A window under a second is judged on a fresh
+one-second sample, because `/proc/stat` counts in 10 ms ticks and a
+millisecond window reads one tick of anything as several CPUs. Which
+checks are which: [testing.md](../ui/testing.md#tests-that-time-things).
+
 ## The history
 
 Records are appended to `~/.local/state/lobole/bench/<host-key>.jsonl`, one

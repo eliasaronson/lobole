@@ -256,6 +256,16 @@ lands. `ProcessPending`'s count includes an async job still in flight
 progress. `remote_smoke` ("Idle throttle wakes on RPC") asserts N pings
 against an idle app finish in far less than N x 100 ms.
 
+`--headless` and `--offscreen` have no window to post an event to. Their
+loops wait in `RemoteServer::WaitForRequest(2 ms)` between passes, which
+returns as soon as a request has arrived since the last wait, so background
+jobs and autosave keep a 2 ms cadence and an RPC waits for none of it. A
+plain 2 ms sleep there put its whole length on every round trip: 2.1 ms a
+ping where it is now 0.08 ms, and `refused_calls_smoke`'s ~13 000 calls
+took 29 s instead of 5. The wait is edge-triggered (a count of arrivals,
+not "the queue is non-empty"), because a request held behind a capture
+stays queued and the loop must not spin on it.
+
 The wait sits **before** `FrameTimer::BeginFrame`, so the sleep is not frame
 time: an idle app's `frame_stats` shows normal per-frame ms, and
 `idle_frames` is the share of paced iterations. The pacer records which
