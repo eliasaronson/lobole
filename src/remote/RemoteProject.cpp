@@ -198,7 +198,8 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"merge_abort", "Throw an in-progress merge away.", "", remote::NotInBatch},
     {"set_variable",
      "Add or redefine a variable {name, expression, comment?, "
-     "scope: project|part}; returns value + regen, and `requirements`: "
+     "scope: project|part}; returns value, the active part's regen and "
+     "digest (as add_feature's), and `requirements`: "
      "each expression requirement whose state the edit changed "
      "(docs/requirements/README.md#expression).",
      "name:string, expression:string|number, scope?:'project'|'part', "
@@ -221,7 +222,7 @@ static constexpr MethodDoc ProjectMethods[] = {
      "refused saying what is wrong, never stored as a different one. An "
      "expression requirement the edit moves answers in `requirements`.",
      "columns, comment, name, rows", remote::Deferrable,
-     "regen:{failed:any[], ok:bool, warnings:any[]}, "
+     "digest:object, regen:{failed:any[], ok:bool, warnings:any[]}, "
      "requirements?:object[], table:{columns:string[], name:string, "
      "rows:object[], comment?:string}"},
     {"list_tables",
@@ -688,13 +689,14 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         ui::SetActivePart(state, i);
         break;
       }
+    const json preDigest = remote::BodyDigestJson(part);
     if (!state.commands->Execute(
             std::make_unique<generated::UpdateCommand>(part, source, stamp),
             part))
       throw std::runtime_error("component update failed and was rolled back");
     out["applied"] = true;
     out["revision"] = generated::Revision(part);
-    out["regen"] = remote::RegenSummaryJson(part);
+    remote::AttachRegen(out, &part, preDigest);
     out["regen"]["executed"] = part.LastRegenStats().executed;
     out["regen"]["cached"] = part.LastRegenStats().cached;
     bool reused = part.GetBodies().size() == source.GetBodies().size();
@@ -767,7 +769,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // What the load kept going past (docs/versioning/README.md#a-lossy-load),
     // said in ITS OWN reply rather than left for a later call to find.
     out["dropped"] = state.openDrops.ToJson();
-    AttachRegen(out, state.document.get());
+    // Another document entirely: every body it holds is new to the caller.
+    AttachRegen(out, state.document.get(), json::array());
     return out;
   }
   if (m == "checkpoint_create") {
@@ -832,6 +835,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const std::string path = Checkpoints::PathOf(state.projectPath, name);
     if (path.empty())
       throw std::runtime_error("no such checkpoint: " + name);
+    const json preDigest = BodyDigestOf(state.document.get());
     auto loaded = DocumentIO::Load(path);
     if (!loaded)
       throw std::runtime_error(loaded.error().empty()
@@ -841,7 +845,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     ui::FitCameraToDocument(state);
     ui::MarkProjectRecovered(state, state.projectPath);
     json out = json::object();
-    AttachRegen(out, state.document.get());
+    AttachRegen(out, state.document.get(), preDigest);
     return out;
   }
   if (m == "history_log") {
@@ -862,10 +866,11 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // params: {commit} (hash, tag like "cp/v1", or any git rev)
     const std::string commit = p.at("commit").get<std::string>();
     std::string error;
+    const json preDigest = BodyDigestOf(state.document.get());
     if (!ui::RestoreVersion(state, commit, commit, &error))
       throw std::runtime_error(error);
     json out = json::object();
-    AttachRegen(out, state.document.get());
+    AttachRegen(out, state.document.get(), preDigest);
     return out;
   }
   if (m == "project_changed_on_disk") {
@@ -978,6 +983,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       if (prior)
         comment = prior->comment;
     }
+    const json preDigest = BodyDigestOf(doc);
     if (partScope) {
       if (!state.commands->Execute(
               std::make_unique<SetVariableCommand>(name, expression, comment),
@@ -991,8 +997,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     json result = {{"value", param->value}, {"scope", scope}};
     if (!param->error.empty())
       result["error"] = param->error;
-    if (doc != nullptr) // no active part on an assembly or drawing tab
-      result["regen"] = RegenSummaryJson(*doc);
+    // No active part on an assembly or drawing tab: nothing to report.
+    AttachRegen(result, doc, preDigest);
     return result;
   }
   if (m == "delete_variable") {
@@ -1000,6 +1006,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // variable's references span every part. params: {name, scope?}. scope
     // auto-detects (project first, then the active part's local) when omitted.
     const std::string name = p.at("name").get<std::string>();
+    const json preDigest = BodyDigestOf(state.document.get());
     const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
     const bool haveLocal =
         doc != nullptr && doc->FindParameter(name) != nullptr;
@@ -1020,7 +1027,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error(msg);
       }
       json out = json::object();
-      AttachRegen(out, state.document.get());
+      AttachRegen(out, state.document.get(), preDigest);
       return out;
     }
     if (!haveProject)
@@ -1033,7 +1040,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(msg);
     }
     json out = json::object();
-    AttachRegen(out, state.document.get());
+    AttachRegen(out, state.document.get(), preDigest);
     return out;
   }
   if (m == "rename_variable") {
@@ -1042,6 +1049,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // delete_variable.
     const std::string name = p.at("name").get<std::string>();
     const std::string newName = p.at("new_name").get<std::string>();
+    const json preDigest = BodyDigestOf(state.document.get());
     const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
     const bool haveLocal =
         doc != nullptr && doc->FindParameter(name) != nullptr;
@@ -1058,7 +1066,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
             "valid identifier, or it is already taken — list_variables "
             "shows what exists in each scope");
       json out = json::object();
-      AttachRegen(out, state.document.get());
+      AttachRegen(out, state.document.get(), preDigest);
       return out;
     }
     if (!ui::RenameProjectVariable(state, name, newName))
@@ -1068,7 +1076,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
           "valid identifier, or it is already taken — list_variables "
           "shows what exists in each scope");
     json out = json::object();
-    AttachRegen(out, state.document.get());
+    AttachRegen(out, state.document.get(), preDigest);
     return out;
   }
   if (m == "set_table") {
@@ -1135,11 +1143,11 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       }
       t.rows.push_back(std::move(row));
     }
+    const json preDigest = BodyDigestOf(doc);
     if (const std::string why = ui::SetProjectTable(state, t); !why.empty())
       throw std::runtime_error("set_table: " + why);
     json out = {{"table", lookuptable::ToJson(t)}};
-    if (doc != nullptr)
-      out["regen"] = RegenSummaryJson(*doc);
+    AttachRegen(out, doc, preDigest);
     return out;
   }
   if (m == "list_tables") {
@@ -1161,12 +1169,13 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     return json{{"tables", lookuptable::ToJson(state.projectTables)}};
   }
   if (m == "delete_table") {
+    const json preDigest = BodyDigestOf(state.document.get());
     if (const std::string why =
             ui::RemoveProjectTable(state, p.at("name").get<std::string>());
         !why.empty())
       throw std::runtime_error("delete_table: " + why);
     json out = json::object();
-    AttachRegen(out, state.document.get());
+    AttachRegen(out, state.document.get(), preDigest);
     return out;
   }
   if (m == "list_variables") {
@@ -1290,7 +1299,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(error);
     ui::MarkProjectOpened(state, path);
     json out = {{"path", path}};
-    AttachRegen(out, state.document.get());
+    AttachRegen(out, state.document.get(), json::array());
     return out;
   }
   if (m == "branch_list") {

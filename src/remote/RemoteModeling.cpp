@@ -526,7 +526,9 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"set_rollback",
      "Move the rollback bar: only features before it regenerate. Takes "
      "`feature_id` — the bar stops just BEFORE that feature — or `index` "
-     "(features [0, index) regenerate; -1 = end).",
+     "(features [0, index) regenerate; -1 = end). Answers {rollback, "
+     "regen, digest}: the bodies as of the bar, against those shown "
+     "before -- an intermediate state read in the same call.",
      "feature_id, index", remote::NeedsPart | remote::NotInBatch},
     {"suppress_feature",
      "Toggle suppression by feature_id; suppressed "
@@ -1665,6 +1667,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // This used to sniff for `== DEFAULT` here, which caught it on this one
     // path and named nothing.
     const std::string slug = p.value("material", std::string{});
+    const json preDigest = BodyDigestJson(*doc);
     json before = DocumentIO::FeatureToJson(*f);
     f->SetMaterial(slug);
     doc->Regenerate();
@@ -1675,7 +1678,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // are unchanged and SyncDocumentRenderers would skip the re-push. Force a
     // resync so the shaded body recolors immediately (no other edit needed).
     state.gpu.syncedDocumentVersion = UINT64_MAX;
-    return json{{"regen", RegenSummaryJson(*doc)}};
+    json out = json::object();
+    AttachRegen(out, doc, preDigest);
+    return out;
   }
   if (m == "set_appearance") {
     // V-appearance: a visual override on a body's creating feature, separate
@@ -1750,6 +1755,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                           std::to_string(f->GetId()) + "} lists them)") +
             (ap.Any() ? "" : "; and it carries no face override to clear"));
     }
+    const json preDigest = BodyDigestJson(*doc);
     json before = DocumentIO::FeatureToJson(*f);
     if (p.contains("element"))
       f->SetFaceAppearance(element, ap);
@@ -1762,7 +1768,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // Colors changed but no meshes did — force the renderer resync (the
     // same nudge set_material needs).
     state.gpu.syncedDocumentVersion = UINT64_MAX;
-    json resp = {{"regen", RegenSummaryJson(*doc)}};
+    json resp = json::object();
+    AttachRegen(resp, doc, preDigest);
     resp["cleared"] = !ap.Any();
     if (p.contains("element")) {
       resp["element"] = element;
@@ -1791,9 +1798,14 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     } else {
       stop = IntParam(p.at("index"), "index");
     }
+    // What the bar's move shows: the bodies as of that point, against the
+    // ones shown before -- the digest is how a caller reads an
+    // intermediate state without a get_state after it.
+    const json preDigest = BodyDigestJson(*doc);
     doc->SetRollback(stop);
-    return json{{"rollback", doc->Rollback()},
-                {"regen", RegenSummaryJson(*doc)}};
+    json out = {{"rollback", doc->Rollback()}};
+    AttachRegen(out, doc, preDigest);
+    return out;
   }
   if (m == "suppress_feature") {
     // Toggle suppression (by feature id) as one undoable edit; a suppressed

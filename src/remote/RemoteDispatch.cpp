@@ -342,12 +342,13 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "that names it are one batch. A call that "
      "throws rolls the WHOLE batch back and names which call failed and why "
      "(stop_on_error, default true; false runs on and reports each error in "
-     "place). Returns {results: [...], regen, calls, failed?, "
+     "place). Returns {results: [...], regen, digest, calls, failed?, "
      "regenerations}: each result is {call, method, id?, result} -- `id` "
      "the one the call created (a feature, a mate, an occurrence), as "
      "the call alone answers it -- and the per-call `regen`/`digest` are "
      "STRIPPED: geometry is answered once, at the end, by the batch's own "
-     "`regen`. Refuses to nest, and "
+     "`regen` and `digest` (against the bodies before its first call). "
+     "Refuses to nest, and "
      "refuses anything whose effect a rollback could not take back "
      "(screenshots, exports, project and git verbs, UI actions), naming it. "
      "A feature that fails to BUILD is not a failed call: it is reported in "
@@ -1247,6 +1248,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // snapshot its first mutation pushed.
     const EditMarks marks = MarkEdits(state);
     const size_t undoMark = marks.commandDepth;
+    // The batch answers geometry ONCE, for the whole: its members' digests
+    // are stripped below, and this is what the batch's own is against.
+    const json preDigest = remote::BodyDigestOf(state.document.get());
     const size_t asmMark = marks.assemblyUndo;
 
     json results = json::array();
@@ -1451,8 +1455,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
              {"regenerations", regenerations}};
     if (!failures.empty())
       out["failed"] = std::move(failures);
-    if (state.document)
-      out["regen"] = remote::RegenSummaryJson(*state.document);
+    remote::AttachRegen(out, state.document.get(), preDigest);
     return out;
   }
 
@@ -2366,9 +2369,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                     : json::array();
     ui::GlobalUndo(state);
     json out = {{"can_undo", ui::CanGlobalUndo(state)}};
-    remote::AttachRegen(out, state.document.get());
+    remote::AttachRegen(out, state.document.get(), pre);
     if (state.document) {
-      out["digest"] = remote::DigestJson(pre, *state.document);
       out["feature_count"] = state.document->FeatureCount();
       for (const ui::PartSlot& slot : state.parts)
         if (ui::PartDocById(state, slot.id) == state.document.get())
@@ -2381,9 +2383,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                     : json::array();
     ui::GlobalRedo(state);
     json out = {{"can_redo", ui::CanGlobalRedo(state)}};
-    remote::AttachRegen(out, state.document.get());
+    remote::AttachRegen(out, state.document.get(), pre);
     if (state.document) {
-      out["digest"] = remote::DigestJson(pre, *state.document);
       out["feature_count"] = state.document->FeatureCount();
       for (const ui::PartSlot& slot : state.parts)
         if (ui::PartDocById(state, slot.id) == state.document.get())

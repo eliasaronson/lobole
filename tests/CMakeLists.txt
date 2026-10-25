@@ -887,6 +887,14 @@ add_test(NAME regen_honesty_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(regen_honesty_smoke PROPERTIES TIMEOUT 120)
 
+# The modeling-workflow prompt's claims that nothing else pinned: a digest on
+# set_variable and on a batch, set_rollback's intermediate state, get_state's
+# selection (docs/scripting/mcp.md#the-workflow-prompt). Headless.
+add_test(NAME workflow_claims_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/workflow_claims_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(workflow_claims_smoke PROPERTIES TIMEOUT 120)
+
 # The direct edits on real STEP files (docs/modeling/README.md#direct-edit):
 # every face of tests/fixtures/step's parts deleted alone and offset out and
 # in at its derived default, each kept or refused naming a face with nothing
@@ -1166,6 +1174,13 @@ set_tests_properties(rpc_params_gate PROPERTIES TIMEOUT 60)
 add_test(NAME rpc_returns_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_returns_gate.py)
 set_tests_properties(rpc_returns_gate PROPERTIES TIMEOUT 60)
+
+# A handler that answers `regen` answers `digest` beside it, so the workflow
+# prompt's "every mutating call returns a digest" stays true of a new one.
+# Reads the source; no app.
+add_test(NAME rpc_digest_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_digest_gate.py)
+set_tests_properties(rpc_digest_gate PROPERTIES TIMEOUT 60)
 
 add_test(NAME rpc_names_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_names_gate.py)

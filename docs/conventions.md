@@ -229,7 +229,12 @@ poll. That includes undo/redo, configuration switches, variable edits,
 `open_project` and checkpoint/history restores. Study edits are excluded:
 they cannot break a feature, so a `regen` there would always read `ok`.
 
-**Gate:** `tests/regen_honesty_smoke.py`.
+And beside it the bodies' `digest`, against the state before the call:
+`AttachRegen(out, doc, before)` writes both, so a response that says the
+part regenerated also says what it built -- a batch once, for the whole.
+
+**Gate:** `tests/regen_honesty_smoke.py`; `tests/rpc_digest_gate.py` fails a
+handler branch that answers `regen` without `digest`.
 
 ## A verdict says how it knows
 

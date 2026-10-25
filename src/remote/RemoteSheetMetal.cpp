@@ -151,10 +151,11 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
     // The only one here that WRITES, and it writes to the tab you are on.
     Document& active = *doc;
     if (p.value("clear", false)) {
+      const json preDigest = BodyDigestJson(active);
       state.commands->Execute(
           std::make_unique<SetSheetMetalRulesCommand>(std::nullopt), active);
       out = {{"rules", nullptr}};
-      AttachRegen(out, &active);
+      AttachRegen(out, &active, preDigest);
       return true;
     }
     // Start from what is already set, so changing only the relief style does
@@ -200,10 +201,11 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
     if (const std::string bad = sheet::Validate(r); !bad.empty())
       throw std::runtime_error(bad);
 
+    const json preDigest = BodyDigestJson(active);
     state.commands->Execute(std::make_unique<SetSheetMetalRulesCommand>(r),
                             active);
     out = {{"rules", RulesJson(r)}};
-    AttachRegen(out, &active);
+    AttachRegen(out, &active, preDigest);
     return true;
   }
 

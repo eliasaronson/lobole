@@ -319,13 +319,13 @@ The RPCs are handled in `src/remote/RemoteProject.cpp`.
 
 | method | params | notes |
 |---|---|---|
-| `set_variable` | `name, expression, comment?, scope?` | `scope` is `"project"` (the default) or `"part"`; any other value is refused. Omitting `comment` keeps the existing one. Returns `{value, scope, error?, regen?, requirements?}`: `requirements` lists each [expression requirement](../requirements/README.md#expression) whose state the edit changed. |
+| `set_variable` | `name, expression, comment?, scope?` | `scope` is `"project"` (the default) or `"part"`; any other value is refused. Omitting `comment` keeps the existing one. Returns `{value, scope, error?, regen?, digest?, requirements?}` (the active part's regen and digest, as add_feature's): `requirements` lists each [expression requirement](../requirements/README.md#expression) whose state the edit changed. |
 | `list_variables` | none | Project variables first, then the active part's: `{name, expression, value, scope, comment?, error?}`. |
-| `rename_variable` | `name, new_name, scope?` | Without `scope`: project if a project variable has that name or no local one does, otherwise part. Rewrites every expression that reads it, a requirement's included ([above](#rename-and-delete)). |
-| `delete_variable` | `name, scope?` | Same scope rule. Refused while referenced (by a feature, a variable or a requirement), and the refusal names the references. |
-| `set_table` | `name, columns, rows, comment?` | Adds or replaces a project table. A row is `{key, values: [...]}` or `{key, <column>: value, ...}`; a column a row names that the table does not have is refused naming the columns. Returns `{table, regen?, requirements?}`. |
+| `rename_variable` | `name, new_name, scope?` | Without `scope`: project if a project variable has that name or no local one does, otherwise part. Rewrites every expression that reads it, a requirement's included ([above](#rename-and-delete)). Answers the active part's `regen` and `digest`. |
+| `delete_variable` | `name, scope?` | Same scope rule. Refused while referenced (by a feature, a variable or a requirement), and the refusal names the references. Answers `regen` and `digest`. |
+| `set_table` | `name, columns, rows, comment?` | Adds or replaces a project table. A row is `{key, values: [...]}` or `{key, <column>: value, ...}`; a column a row names that the table does not have is refused naming the columns. Returns `{table, regen?, digest?, requirements?}`. |
 | `list_tables` | `name?` | Every table, or the one named (an unknown name is refused naming the tables). |
-| `delete_table` | `name` | Refused while any expression reads it (a variable's, a feature's or a requirement's, naming them), or when there is no such table. |
+| `delete_table` | `name` | Refused while any expression reads it (a variable's, a feature's or a requirement's, naming them), or when there is no such table. Answers `regen` and `digest`. |
 | `check_literals` | `part?` | The advisory lint ([above](#literals-that-should-be-expressions)), in `src/remote/RemoteModeling.cpp`: `{part, literals[], placements[], checked}`. Never refuses. |
 | `extract_variables` | `feature_ids?, fields?, prefix?, merge_equal?, reuse?, scope?, apply?` | A dry run without `apply` ([above](#extracting-variables)); with it one undo step, `{applied, scope, variables[], left_alone[], regen, digest}`. `scope` other than `project`/`part` is refused. |
 

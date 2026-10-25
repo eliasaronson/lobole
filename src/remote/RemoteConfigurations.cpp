@@ -66,23 +66,25 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
                             const std::string& m, const RpcParams& p,
                             json& out) {
   if (m == "add_configuration") {
+    const json preDigest = BodyDigestJson(doc);
     auto cmd = std::make_unique<AddConfigurationCommand>(
         p.value("name", std::string{}));
     AddConfigurationCommand* raw = cmd.get();
     state.commands->Execute(std::move(cmd), doc);
     const Configuration* c = doc.FindConfiguration(raw->ConfigurationId());
     out = {{"id", c->id}, {"name", c->name}};
-    AttachRegen(out, &doc);
+    AttachRegen(out, &doc, preDigest);
     return true;
   }
   if (m == "remove_configuration") {
     const uint64_t id = p.at("id").get<uint64_t>();
     if (!doc.FindConfiguration(id))
       throw std::runtime_error("no such configuration");
+    const json preDigest = BodyDigestJson(doc);
     state.commands->Execute(std::make_unique<RemoveConfigurationCommand>(id),
                             doc);
     out = json::object();
-    AttachRegen(out, &doc);
+    AttachRegen(out, &doc, preDigest);
     return true;
   }
   if (m == "list_configurations") {
@@ -136,6 +138,7 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
       copy.unsuppressedFeatures =
           p.at("unsuppressed_features").get<std::vector<uint64_t>>();
     json after = DocumentIO::ConfigurationToJson(copy);
+    const json preDigest = BodyDigestJson(doc);
     state.commands->Execute(
         std::make_unique<ModifyConfigurationCommand>(
             "Edit configuration", std::move(before), std::move(after)),
@@ -143,7 +146,7 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
     out = {{"id", id}};
     // Editing the ACTIVE configuration re-applies it, so an override that
     // breaks a feature breaks it here, not on the next activation.
-    AttachRegen(out, &doc);
+    AttachRegen(out, &doc, preDigest);
     return true;
   }
   if (m == "set_active_configuration") {
@@ -170,9 +173,8 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
       vols.push_back(b.shape.Volume());
     out = {{"active", doc.ActiveConfiguration()},
            {"bodies", doc.GetBodies().size()},
-           {"volumes", vols},
-           {"digest", DigestJson(preDigest, doc)}};
-    AttachRegen(out, &doc);
+           {"volumes", vols}};
+    AttachRegen(out, &doc, preDigest);
     return true;
   }
   return false;

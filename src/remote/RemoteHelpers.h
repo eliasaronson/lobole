@@ -443,7 +443,16 @@ inline nlohmann::json DigestJson(const nlohmann::json& before,
 // built its next edit on a broken model. `regen.ok` is now in the response
 // that caused the failure, which is the contract this header already
 // described.
-inline void AttachRegen(nlohmann::json& out, const Document* doc);
+//
+// And the bodies' `digest` beside it, against `before` (BodyDigestJson of the
+// document before the edit; an empty array where the call replaced the
+// document): a response that says the part regenerated says what it built.
+// The workflow prompt promises a digest on every mutating call, and
+// `set_variable` -- the call that most often moves geometry -- answered
+// without one. tests/rpc_digest_gate.py fails a handler that answers `regen`
+// without `digest`.
+inline void AttachRegen(nlohmann::json& out, const Document* doc,
+                        const nlohmann::json& before);
 
 inline nlohmann::json RegenSummaryJson(const Document& doc) {
   nlohmann::json failed = nlohmann::json::array();
@@ -485,9 +494,18 @@ inline nlohmann::json RegenSummaryJson(const Document& doc) {
           {"warnings", std::move(warnings)}};
 }
 
-inline void AttachRegen(nlohmann::json& out, const Document* doc) {
-  if (doc != nullptr)
-    out["regen"] = RegenSummaryJson(*doc);
+inline void AttachRegen(nlohmann::json& out, const Document* doc,
+                        const nlohmann::json& before) {
+  if (doc == nullptr)
+    return;
+  out["regen"] = RegenSummaryJson(*doc);
+  out["digest"] = DigestJson(before, *doc);
+}
+
+// BodyDigestJson of `doc`, or an empty array when there is none (an assembly
+// or drawing tab): the `before` a handler reachable from any tab captures.
+inline nlohmann::json BodyDigestOf(const Document* doc) {
+  return doc != nullptr ? BodyDigestJson(*doc) : nlohmann::json::array();
 }
 
 // The flags of a method, or 0 for one we do not know. Defined in

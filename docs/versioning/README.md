@@ -525,7 +525,7 @@ so a saved project is self-contained. See
 | RPC | does |
 |---|---|
 | `new_project` | reset to one empty part, discarding what is open |
-| `open_project {path}` | open; returns `autosave_available`, `autosave_path`, `rebuilt_parts`, `rebuild_reason`, `dropped` ([a lossy load](#a-lossy-load)), regen |
+| `open_project {path}` | open; returns `autosave_available`, `autosave_path`, `rebuilt_parts`, `rebuild_reason`, `dropped` ([a lossy load](#a-lossy-load)), regen, and a digest against no bodies (every body `added`) |
 | `save_project {path, message?, force?, overwrite_lossy?}` | save; `message` is the git commit message; refuses when the disk moved unless `force`, and over a lossy open unless `overwrite_lossy` (then its reply carries `warning`) |
 | `autosave_now`, `autosave_status` | force an autosave; list recoverable documents |
 | `project_changed_on_disk` | the stamp check |

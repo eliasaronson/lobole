@@ -217,7 +217,8 @@ the active tab never changed.
   after the handler (`remote::RefreshExpressionRequirements`, in
   `ProcessPending`), to every call whose answer is untyped or whose
   `returns` row names it; the requirement verbs answer their own rows.
-- **`digest`** on every geometry-mutating response: per body `{name,
+- **`digest`** on every response that carries `regen` (`AttachRegen`;
+  `rpc_digest_gate` holds every handler to it): per body `{name,
   created_by, volume_mm3, bbox_min, bbox_max, solids}`, and a `delta` against the
   state before the call: `{volume_mm3, added[], removed[]}`. Bodies key on
   `created_by`, so a zero-volume add, a body removed, or a body that split
@@ -476,10 +477,11 @@ as one transaction:
   References point backward only; one to a call that failed, or to a key it
   did not return, is refused naming what it did return.
 - **Results.** `{calls, results[{call, method, id?, result}],
-  regenerations, failed?, regen}`, `id` the one the call created, at the top
+  regenerations, failed?, regen, digest}`, `id` the one the call created, at the top
   of its entry as the call alone answers it. Each call's own `regen` and `digest` are stripped: under a
   deferred regeneration they would describe a document that has not been
-  rebuilt. Geometry is answered once, by the batch's `regen`.
+  rebuilt. Geometry is answered once, by the batch's `regen` and `digest`
+  (against the bodies before its first call).
 - **Refused inside a batch:** another `batch`, any `NotInBatch` method,
   UI actions, unknown methods, a key outside a call's row, and — under
   `stop_on_error` — a value a call's [contract](#typed-contracts) refuses,
