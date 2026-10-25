@@ -39,8 +39,8 @@
 #include <nlohmann/json.hpp>
 #include <unistd.h>
 
-#include <chrono>
 #include <cmath>
+#include <ctime>
 #include <filesystem>
 #include <functional>
 #include <limits>
@@ -776,18 +776,21 @@ TEST_CASE("Delete Face fills all 100 holes of a STEP plate in one feature",
   REQUIRE(bores.size() >= 100);
   glm::dvec3 lo, hi;
   b.shape.GetBoundingBox(lo, hi, true);
-  const auto t0 = std::chrono::steady_clock::now();
+  // A cost check, so CPU time (docs/ui/testing.md#tests-that-time-things):
+  // the heal runs on this thread, and a loaded machine stretched its wall
+  // clock from 28 s to 85 s without it costing a cycle more.
+  const std::clock_t t0 = std::clock();
   doc.AddFeature(std::make_unique<DeleteFaceFeature>("Fill", imp, bores));
-  const double s =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
-          .count();
+  const double s = double(std::clock() - t0) / CLOCKS_PER_SEC;
   INFO(Last(doc)->GetError());
   REQUIRE(Last(doc)->GetError().empty());
   const glm::dvec3 e = hi - lo;
   CHECK_THAT(VolumeOf(doc, imp), WithinRel(e.x * e.y * e.z, 1e-9));
   CHECK(BodyOf(doc, imp)->shape.FaceCount() == 6);
-  // The budget docs/modeling/README.md#delete-face states: about 20 s here,
-  // nearly all of it BRepAlgoAPI_Defeaturing; twice that on a loaded machine.
-  INFO("100 holes deleted in " << s << " s");
-  CHECK(s < 90.0);
+  // The budget docs/modeling/README.md#delete-face states: about 17 s of CPU
+  // here, nearly all of it BRepAlgoAPI_Defeaturing. 60 s leaves room for a
+  // slower core (an E-core, a busy hyperthread sibling) and still fails a
+  // heal that went quadratic in the holes.
+  INFO("100 holes deleted in " << s << " s of CPU");
+  CHECK(s < 60.0);
 }

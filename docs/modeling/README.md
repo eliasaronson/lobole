@@ -580,8 +580,9 @@ were. `grow_faces` also answers `host_normal`, the largest planar face the
 feature sits in.
 
 All 100 bores of SolidCraft's `plate_100_holes.step` delete in one feature
-in about 20 s on a quiet machine (nearly 40 s on a loaded one), nearly all of
-it Defeaturing; the test allows 90 s.
+in about 17 s of CPU, nearly all of it Defeaturing, on one thread; the test
+allows 60 s of CPU, which a loaded machine does not stretch the way it does
+the wall clock.
 
 ### Offset Face
 

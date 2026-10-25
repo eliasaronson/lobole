@@ -36,7 +36,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -239,18 +239,17 @@ TEST_CASE("Reader cases: a part past the feature limit is refused before it "
   REQUIRE(fs::exists(input));
   const size_t rssBefore = StatusKb("VmRSS");
   const bool peakReset = ResetPeakRss();
-  const auto t0 = std::chrono::steady_clock::now();
+  // A cost check, so CPU time (docs/ui/testing.md#tests-that-time-things).
+  const std::clock_t t0 = std::clock();
   const auto doc = DocumentIO::Load(input.string());
-  const double seconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
-          .count();
+  const double seconds = double(std::clock() - t0) / CLOCKS_PER_SEC;
   REQUIRE_FALSE(doc.has_value());
   const std::string& error = doc.error();
   INFO(error);
   CHECK(error.find("v01-plain-box.json") != std::string::npos);
   CHECK(error.find("a part holds at most 50 000 features; this one lists "
                    "104 857") != std::string::npos);
-  // Milliseconds on an idle machine: a bound a rebuild could never meet.
+  // Milliseconds of CPU: a bound a rebuild could never meet.
   CHECK(seconds < 5.0);
   // The parse is what it costs: about 90 MB for 8 MB of JSON. Not under
   // the sanitizers, whose allocator keeps what was freed.
