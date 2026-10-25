@@ -33,6 +33,12 @@ Draft's 5 degrees and Edge Flange's 90 degrees stay: an angle that is the
 same on any part is not a scale. Mirror's world YZ plane through the origin
 stays: mirroring about the origin is what a symmetric part drawn there wants.
 
+**Topology settings on a study of another kind.** `set_study` accepts
+`volume_fraction`, `filter_radius` and `max_iterations` on a study that is not
+a topology study; the save drops them and the reader refuses them in a file.
+They are refused at the call as `num_modes` now is, once the call's own
+`type` is applied, naming `type: topology`.
+
 **The workflow prompt's claims.** The MCP `modeling-workflow` prompt
 (`WORKFLOW` in `python/lobole/mcp.py`) tells an agent what it can rely on.
 Most claims are pinned by a test already. These are not:
@@ -100,7 +106,8 @@ to 1, 2 or 5 x 10^n by `RoundDown125`, whose two pasted copies go):
   `src/ui/SceneOverlays.cpp`, `src/ui/Overlays.cpp`.
 - `src/app/guitests/GuiTestsModeling.cpp`: a scale test per tool.
 - `src/remote/RemoteProject.cpp` (`set_variable`), and any handler the gate
-  finds.
+  finds; `src/remote/RemoteSimulation.cpp` (`set_study`), `tests/fem_smoke.py`,
+  `refused_calls_smoke`.
 - `python/lobole/mcp.py`; `tests/mcp_smoke.py`; `tests/rpc_digest_gate.py`
   (new); the smokes for `set_rollback`, the frame literal and the selection.
 - `docs/ui/tool-sessions.md`, `docs/scripting/mcp.md`, the RPC `describe`
