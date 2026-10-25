@@ -552,7 +552,10 @@ topo_to_body {study, path, name?, threshold?, smooth?}
                     -> {part, part_id, volume_mm3, valid, triangles, watertight}
 ```
 
-`volume_fraction` and `filter_radius` also take expression strings. Export
+`volume_fraction` and `filter_radius` also take expression strings. The
+three topology keys are a topology study's: on another they are refused,
+naming `type: topology`, unless the same call sets it (type is applied
+first). Export
 to STL is RPC-only; the panel has no button for it.
 
 ## Tests

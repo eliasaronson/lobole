@@ -484,9 +484,39 @@ def main():
                        f"the refusal names what makes it valid: {e}")
             expect(listed(plain) == was,
                    f"a refused set_study changed the study: {listed(plain)}")
+            # The topology settings, the same way: a topology study's alone,
+            # refused on another naming the type, and accepted in one call
+            # that makes the study a topology one.
+            was = listed(plain)
+            for key, value in (("volume_fraction", 0.4),
+                               ("filter_radius", 2.0),
+                               ("max_iterations", 30)):
+                try:
+                    d.call("set_study", id=plain, name="Renamed",
+                           **{key: value})
+                    raise AssertionError(f"set_study took {key} on a static "
+                                         "study")
+                except RuntimeError as e:
+                    expect(f"{key} applies to a topology study" in str(e)
+                           and "type: topology" in str(e),
+                           f"the refusal names what makes it valid: {e}")
+                expect(listed(plain) == was,
+                       f"a refused set_study changed the study: "
+                       f"{listed(plain)}")
             d.call("set_study", id=plain, type="modal", num_modes=4)
             expect(listed(plain)["type"] == "modal",
                    f"type and num_modes in one call: {listed(plain)}")
+            try:
+                d.call("set_study", id=plain, volume_fraction=0.4)
+                raise AssertionError("set_study took volume_fraction on a "
+                                     "modal study")
+            except RuntimeError as e:
+                expect("is modal" in str(e), f"names the study's type: {e}")
+            d.call("set_study", id=plain, type="topology",
+                   volume_fraction=0.4, filter_radius=2.0, max_iterations=30)
+            topo = listed(plain)
+            expect(topo["type"] == "topology",
+                   f"type and the topology settings in one call: {topo}")
             d.call("remove_study", id=plain)
 
             assembly_study(d)

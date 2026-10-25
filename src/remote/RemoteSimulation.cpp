@@ -402,8 +402,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "true} (every tet of its design domain, the solid reference); null "
      "clears it "
      "(docs/topopt/README.md#a-static-study-of-the-optimised-shape). "
-     "`num_modes` is a modal study's: refused on another type unless the "
-     "same call sets type: modal (type is applied first).",
+     "`num_modes` is a modal study's, and `volume_fraction`, "
+     "`filter_radius` and `max_iterations` a topology study's: each is "
+     "refused on another type unless the same call sets that type (type "
+     "is applied first).",
      "filter_radius, gravity, id, load_cases, max_iterations, mesh_size, "
      "name, num_modes, participants, shape_from, study, type, "
      "volume_fraction"},
@@ -1019,7 +1021,19 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (p.contains("gravity")) {
         s.gravity = remote::Vec3Param(p.at("gravity"), "gravity");
       }
-      // Topology parameters (expression-or-literal, like mesh size).
+      // Topology parameters (expression-or-literal, like mesh size). A
+      // topology study's alone, as num_modes is a modal one's: on another
+      // the save drops them and the reader refuses them in a file, so they
+      // are refused here, after `type`.
+      for (const char* k :
+           {"volume_fraction", "filter_radius", "max_iterations"})
+        if (p.contains(k) && s.type != fem::AnalysisType::Topology)
+          throw std::runtime_error(
+              std::string(k) +
+              " applies to a topology study, and this one "
+              "is " +
+              fem::AnalysisTypeToString(s.type) +
+              "; set type: topology (in this call or before it)");
       if (p.contains("volume_fraction")) {
         const json& v = p.at("volume_fraction");
         if (v.is_string())
