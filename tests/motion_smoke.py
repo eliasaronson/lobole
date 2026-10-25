@@ -24,6 +24,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import host_load  # noqa: E402
 import smoke_shapes as shapes  # noqa: E402
 
 
@@ -95,10 +96,15 @@ def main():
         expect(len(r["samples"]) == 25, f"25 samples: {len(r['samples'])}")
         expect(all(s["solved"] for s in r["samples"]), "every sample solved")
         # Unchanged inputs: the stored run answers, nothing is computed.
-        t0 = time.time()
-        same = d.call("run_motion_study", study=sid)
-        expect(same["reused"] is True and time.time() - t0 < 1.0,
+        with host_load.Timed(app.pid) as took:
+            same = d.call("run_motion_study", study=sid)
+        expect(same["reused"] is True,
                f"an unchanged study is reused: {same.get('reused')}")
+        # Responsiveness: wall time is the point, judged on a quiet machine
+        # (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(took, took.seconds < 1.0,
+                        f"a reuse is well under a second: "
+                        f"{took.seconds:.2f}s", expect, "motion_smoke")
         expect(same["samples"] == r["samples"] and
                same["input_hash"] == r["input_hash"], "the same run")
         # recompute runs it again, and the exact checks come from the cache.

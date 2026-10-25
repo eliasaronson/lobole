@@ -34,6 +34,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import host_load  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
 
@@ -139,20 +140,26 @@ def main():
         pings = 0
         kinds = set()
         answer = None
-        while answer is None:
-            if a.ready():
-                answer = a.read()
-                break
-            t = time.time()
-            d.call("ping")
-            d.call("get_state", part=part)
-            pings += 1
-            for j in d.call("background_jobs")["jobs"]:
-                kinds.add(j["kind"])
-            lag = time.time() - t
-            time.sleep(0.05)
-            expect(lag < 2.0, f"a ping took {lag:.2f} s while cam_verify "
-                   "waited -- the frame is held")
+        worst = 0.0
+        with host_load.Window(app.pid) as busy:
+            while answer is None:
+                if a.ready():
+                    answer = a.read()
+                    break
+                t = time.time()
+                d.call("ping")
+                d.call("get_state", part=part)
+                pings += 1
+                for j in d.call("background_jobs")["jobs"]:
+                    kinds.add(j["kind"])
+                worst = max(worst, time.time() - t)
+                time.sleep(0.05)
+        # Responsiveness: wall time is the point, judged on a quiet machine
+        # (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(busy, worst < 2.0,
+                        f"the slowest ping took {worst:.2f} s while "
+                        f"cam_verify waited -- the frame is held", expect,
+                        "cam_parked_smoke")
         took = time.time() - t0
         expect(answer.get("id") == vid, f"the answer is cam_verify's: {answer}")
         expect("result" in answer, f"cam_verify answered: {answer}")

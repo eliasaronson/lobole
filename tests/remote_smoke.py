@@ -16,6 +16,7 @@ import time
 
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import host_load  # noqa: E402
 
 def box_on_top(name, x, y, size):
     """A Box standing on the Top plane with its low corner at (x, y, 0) and
@@ -135,13 +136,18 @@ def main():
         # most land mid-wait and take tens of ms. Eight rounds with slack for
         # machine load — without the wake, 6+ of 8 exceed the bound.
         slow = 0
-        for _ in range(8):
-            time.sleep(1.3)  # past the 1 s cooldown, into the idle floor
-            t0 = time.monotonic()
-            d.call("ping")
-            if time.monotonic() - t0 >= 0.030:
-                slow += 1
-        expect(slow <= 2, f"idle pings answered promptly ({slow}/8 >= 30 ms)")
+        with host_load.Window(app.pid) as busy:
+            for _ in range(8):
+                time.sleep(1.3)  # past the 1 s cooldown, into the idle floor
+                t0 = time.monotonic()
+                d.call("ping")
+                if time.monotonic() - t0 >= 0.030:
+                    slow += 1
+        # Responsiveness: wall time is the point, judged on a quiet machine
+        # (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(busy, slow <= 2,
+                        f"idle pings answered promptly ({slow}/8 >= 30 ms)",
+                        expect, "remote_smoke")
 
         phase("The swapchain has a spare image")
         # Two images with FIFO is a performance CLIFF, not a detail: the CPU

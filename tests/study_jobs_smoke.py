@@ -35,6 +35,7 @@ from lobole.client import Client  # noqa: E402
 from lobole.sdk import connect  # noqa: E402
 from slider_crank import build  # noqa: E402
 from smoke_app import launch  # noqa: E402
+import host_load  # noqa: E402
 
 # Long enough that no run below finishes before it is cancelled: the solves
 # alone are seconds at this count, and a cancel lands between two of them.
@@ -124,11 +125,14 @@ def main():
         # ---- The same inputs again are reused; a moved one is not ----------
         first = d.call("run_motion_study", study=short)
         expect(first["reused"] is False, "the first run computes")
-        t0 = time.time()
-        again = d.call("run_motion_study", study=short)
-        took = time.time() - t0
-        expect(again["reused"] is True and took < 1.0,
-               f"reused in well under a second: {again['reused']}, {took:.2f}s")
+        with host_load.Timed(app.pid) as took:
+            again = d.call("run_motion_study", study=short)
+        expect(again["reused"] is True, f"reused: {again['reused']}")
+        # Responsiveness: wall time is the point, judged on a quiet machine
+        # (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(took, took.seconds < 1.0,
+                        f"reused in well under a second: "
+                        f"{took.seconds:.2f}s", expect, "study_jobs_smoke")
         expect(again["input_hash"] == first["input_hash"]
                and again["samples"] == first["samples"], "the same run")
         d.call("set_motion_pose", study=short, t=0.5)  # the start pose moves

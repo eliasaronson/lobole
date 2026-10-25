@@ -43,6 +43,7 @@ from lobole.sdk import connect  # noqa: E402
 from fem_smoke import build_bar  # noqa: E402
 from slider_crank import build as build_crank  # noqa: E402
 from smoke_app import launch  # noqa: E402
+import host_load  # noqa: E402
 from smoke_shapes import box, cylinder  # noqa: E402
 from tolerances_smoke import housing  # noqa: E402
 
@@ -370,11 +371,17 @@ def studied_part(d, study):
     expect(r["receipt"]["claims"] and r["checked"] == 5, r["receipt"])
 
     # ---- Re-checking an unchanged design measures nothing ----------------
-    t0 = time.time()
-    again = d.call("check_requirements")
+    with host_load.Window(d.call("ping")["pid"]) as busy:
+        t0 = time.time()
+        again = d.call("check_requirements")
+        took = time.time() - t0
     expect(again["checked"] == 0 and again["reused"] == 5,
            f"all current, nothing measured: {again['checked']}")
-    expect(time.time() - t0 < 2.0, "a reuse is well under the solve")
+    # Responsiveness: wall time is the point, judged on a quiet machine
+    # (docs/ui/testing.md#tests-that-time-things).
+    host_load.judge(busy, took < 2.0,
+                    f"a reuse is well under the solve ({took:.2f} s)",
+                    expect, "requirements_smoke")
     rerun = d.call("check_requirements", recompute=True,
                    ids=[rows(d)["mass"]["id"]])
     expect(rerun["checked"] == 1, f"recompute measures: {rerun}")
@@ -543,18 +550,23 @@ def off_frame(binary):
         th = threading.Thread(target=check)
         th.start()
         slowest, pings = 0.0, 0
-        while th.is_alive():
-            t0 = time.time()
-            other.call("ping")
-            slowest = max(slowest, time.time() - t0)
-            pings += 1
-            time.sleep(0.05)
+        with host_load.Window(app.pid) as busy:
+            while th.is_alive():
+                t0 = time.time()
+                other.call("ping")
+                slowest = max(slowest, time.time() - t0)
+                pings += 1
+                time.sleep(0.05)
         th.join()
         r = answer["r"]
         expect(answer["s"] >= hold * 0.9, f"the hold was measured: {answer}")
-        expect(pings >= 5 and slowest < 1.0,
-               f"another client waited on the check: {pings} pings, the "
-               f"slowest {slowest:.2f} s")
+        # The hold is a lower bound: load only lengthens it. How many pings
+        # fit in it, and how slow the slowest was, are wall time.
+        expect(pings >= 1, "another client was answered during the check")
+        host_load.judge(busy, pings >= 5 and slowest < 1.0,
+                        f"another client waited on the check: {pings} "
+                        f"pings, the slowest {slowest:.2f} s", expect,
+                        "requirements_smoke")
         row = r["requirements"][0]
         expect(row["state"] == "pass" and r["checked"] == 1
                and r["reused"] == 0 and "receipt" in r,
@@ -566,14 +578,18 @@ def off_frame(binary):
         # Async, cancelled: stopped inside the hold, the evidence kept.
         r = d.call("check_requirements", recompute=True, **{"async": True})
         time.sleep(0.3)
-        t0 = time.time()
-        d.call("cancel_study", job=r["job"])
-        while d.call("study_status", job=r["job"])["running"]:
-            expect(time.time() - t0 < 30, "the cancel was not taken")
-            time.sleep(0.05)
+        with host_load.Window(app.pid) as busy:
+            t0 = time.time()
+            d.call("cancel_study", job=r["job"])
+            while d.call("study_status", job=r["job"])["running"]:
+                expect(time.time() - t0 < 30, "the cancel was not taken")
+                time.sleep(0.05)
+            took = time.time() - t0
         st = d.call("study_status", job=r["job"])
         expect(st["outcome"] == "cancelled", st)
-        expect(time.time() - t0 < hold, f"cancelled in {time.time() - t0} s")
+        host_load.judge(busy, took < hold,
+                        f"cancelled inside the hold ({took:.2f} s)", expect,
+                        "requirements_smoke")
         now = rows(d)["crank clears piston"]
         expect(now["state"] == "pass" and now["value"] == gap, now)
 

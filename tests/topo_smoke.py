@@ -23,6 +23,7 @@ import time
 
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import host_load  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
 SKIP = 77  # ctest SKIP_RETURN_CODE: built without Netgen
@@ -171,11 +172,15 @@ def main():
 
         # --- cancel: a second run stopped mid-flight keeps best-so-far -----
         # The same inputs again: the stored result answers, nothing starts.
-        t0 = time.time()
-        re = d.call("run_study", study=study)
+        with host_load.Timed(app.pid) as took:
+            re = d.call("run_study", study=study)
         expect(re.get("reused") is True and re.get("started") is False,
                f"an unchanged topology study is reused: {re}")
-        expect(time.time() - t0 < 1.0, "a reuse is well under a second")
+        # Responsiveness: wall time is the point, judged on a quiet machine
+        # (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(took, took.seconds < 1.0,
+                        f"a reuse is well under a second: "
+                        f"{took.seconds:.2f}s", expect, "topo_smoke")
         started2 = d.call("run_study", study=study, recompute=True)
         expect(started2.get("started") is True, "second run started")
         expect(isinstance(started2.get("job"), int), f"a job id: {started2}")

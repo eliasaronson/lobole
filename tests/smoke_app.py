@@ -146,6 +146,10 @@ class LaunchedApp:
         are under here unless the caller passed its own."""
         return self._tmp
 
+    @property
+    def pid(self):
+        return self.proc.pid
+
     def close(self):
         with contextlib.suppress(Exception):
             self.client.close()

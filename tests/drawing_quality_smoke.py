@@ -35,12 +35,12 @@ Usage: drawing_quality_smoke.py <path-to-designer-binary>
 import os
 import sys
 import tempfile
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from lobole.sdk import Plane, connect  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import host_load  # noqa: E402
 
 
 def expect(condition, message):
@@ -130,15 +130,19 @@ def main():
         p.box(p.datum_plane("xy", 40, name="Boss plane"), width=10, depth=10,
               height=10, at=(0, 0), centered=False, name="Boss")
         a.set_active_part(part="sheet")
-        t = time.time()
-        r = a.update_drawing(budget_s=0.0000001, _timeout=300)
-        elapsed = time.time() - t
+        with host_load.Timed(app.pid) as took:
+            r = a.update_drawing(budget_s=0.0000001, _timeout=300)
+        elapsed = took.seconds
         errs = [v.get("error", "") for v in r["views"]]
         expect(any("time budget" in e for e in errs),
                f"a budget of ~0 stops the update and says so: {errs}")
         expect(any("fast" in e for e in errs),
                f"and names the way through: {errs}")
-        expect(elapsed < 60.0, f"the budget bounded the call: {elapsed:.1f} s")
+        # Responsiveness: a budget is a wall-clock promise, judged on a quiet
+        # machine (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(took, elapsed < 60.0,
+                        f"the budget bounded the call: {elapsed:.1f} s",
+                        expect, "drawing_quality_smoke")
         print("drawing_quality_smoke: ok")
     finally:
         app.terminate()

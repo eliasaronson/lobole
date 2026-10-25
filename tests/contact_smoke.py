@@ -20,6 +20,7 @@ import time
 
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import host_load  # noqa: E402
 from smoke_shapes import box, cylinder  # noqa: E402
 
 
@@ -83,17 +84,21 @@ def main():
             d.call("interference", a=0, b=1)))
         worker.start()
         kinds, slowest = set(), 0.0
-        while worker.is_alive():
-            t0 = time.monotonic()
-            for j in other.call("background_jobs")["jobs"]:
-                kinds.add(j["kind"])
-            slowest = max(slowest, time.monotonic() - t0)
-            time.sleep(0.05)
+        with host_load.Window(app.pid) as busy:
+            while worker.is_alive():
+                t0 = time.monotonic()
+                for j in other.call("background_jobs")["jobs"]:
+                    kinds.add(j["kind"])
+                slowest = max(slowest, time.monotonic() - t0)
+                time.sleep(0.05)
         worker.join()
         expect("interference" in kinds,
                f"an exact pair runs as an interference job: {kinds}")
-        expect(slowest < 1.0,
-               f"and the instance answers while it runs ({slowest:.2f} s)")
+        # Responsiveness: wall time is the point, judged on a quiet machine
+        # (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(busy, slowest < 1.0,
+                        f"the instance answers while it runs "
+                        f"({slowest:.2f} s)", expect, "contact_smoke")
         expect(answer.get("state") == "touching",
                f"the parked call answers as before: {answer}")
 

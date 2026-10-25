@@ -31,6 +31,7 @@ import time
 from lobole.client import Client  # noqa: E402
 from lobole.errors import Refused  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import host_load  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
 
@@ -114,20 +115,24 @@ def main():
         # --- parked: the frame and the other connections carry on ----------
         w = Waiting(app.port, "update_drawing")
         seen, pings, worst = False, 0, 0.0
-        while w.t.is_alive():
-            t0 = time.monotonic()
-            seen = seen or bool(drawing_jobs(d))
-            worst = max(worst, time.monotonic() - t0)
-            pings += 1
-            time.sleep(0.05)
+        with host_load.Window(app.pid) as busy:
+            while w.t.is_alive():
+                t0 = time.monotonic()
+                seen = seen or bool(drawing_jobs(d))
+                worst = max(worst, time.monotonic() - t0)
+                pings += 1
+                time.sleep(0.05)
         w.join()
         expect(w.error is None, f"update_drawing answered: {w.error}")
         print(f"update_drawing waited {w.seconds:.1f} s; {pings} requests "
               f"answered meanwhile, the slowest in {worst * 1000:.0f} ms")
         expect(seen, "background_jobs listed the drawing job")
         expect(pings >= 5, f"the other connection was answered ({pings})")
-        expect(worst < 1.0, f"no request waited behind the projection "
-               f"({worst:.2f} s)")
+        # Responsiveness: wall time is the point, judged on a quiet machine
+        # (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(busy, worst < 1.0,
+                        f"no request waited behind the projection "
+                        f"({worst:.2f} s)", expect, "drawing_parked_smoke")
         view = next(v for v in w.answer["views"] if v["id"] == front)
         expect(view["has_geometry"] and view["curves"] > 0,
                f"the answer carries the projected view: {view}")
@@ -164,9 +169,13 @@ def main():
                f"the view says it was cancelled: {views[right]}")
 
         # --- async: answered at once, landing on its own -------------------
-        t0 = time.monotonic()
-        a = d.call("update_drawing", **{"async": True})
-        expect(time.monotonic() - t0 < 2.0, "async answers at once")
+        with host_load.Window(app.pid) as busy:
+            t0 = time.monotonic()
+            a = d.call("update_drawing", **{"async": True})
+            took = time.monotonic() - t0
+        host_load.judge(busy, took < 2.0,
+                        f"async answers at once ({took:.2f} s)", expect,
+                        "drawing_parked_smoke")
         expect(a.get("job") == "drawing" and "job_id" in a,
                f"async names its job: {a}")
         expect(any(v.get("projecting") for v in a["views"]),

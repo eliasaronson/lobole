@@ -33,6 +33,7 @@ from lobole.client import Client  # noqa: E402
 from lobole.sdk import connect  # noqa: E402
 from slider_crank import build  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import host_load  # noqa: E402
 
 SKIP = 77
 
@@ -151,10 +152,16 @@ def main():
             expect(listed[sid]["has_results"] and not listed[sid]["stale"],
                    f"{kind} reopened current: {listed[sid]}")
         for kind in ("static", "modal", "topology"):
-            t0 = time.time()
-            again = d.call("run_study", study=ids[kind])
-            expect(again.get("reused") is True and time.time() - t0 < 5.0,
+            with host_load.Timed(app.pid) as took:
+                again = d.call("run_study", study=ids[kind])
+            expect(again.get("reused") is True,
                    f"{kind} reused after the reopen: {again}")
+            # Responsiveness: wall time is the point, judged on a quiet machine
+            # (docs/ui/testing.md#tests-that-time-things).
+            host_load.judge(took, took.seconds < 5.0,
+                            f"{kind} reused after the reopen in "
+                            f"{took.seconds:.2f}s", expect,
+                            "study_reopen_smoke")
             expect(again["input_hash"] == hashes[kind],
                    f"{kind}: the inputs it was saved for")
         after = d.call("study_results", study=ids["static"])
@@ -169,10 +176,13 @@ def main():
         ms = d.call("motion_status", study=motion)
         expect(ms["has_result"] and not ms["stale"],
                f"the motion result reopened current: {ms.get('stale')}")
-        t0 = time.time()
-        again = d.call("run_motion_study", study=motion)
-        expect(again["reused"] is True and time.time() - t0 < 5.0,
+        with host_load.Timed(app.pid) as took:
+            again = d.call("run_motion_study", study=motion)
+        expect(again["reused"] is True,
                f"the motion study reused after the reopen: {again['reused']}")
+        host_load.judge(took, took.seconds < 5.0,
+                        f"the motion study reused after the reopen in "
+                        f"{took.seconds:.2f}s", expect, "study_reopen_smoke")
         expect(again["input_hash"] == ran_motion["input_hash"],
                "the inputs it was saved for")
 

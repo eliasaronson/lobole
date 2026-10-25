@@ -34,6 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch  # noqa: E402
+import host_load  # noqa: E402
 from smoke_shapes import cylinder  # noqa: E402
 
 
@@ -172,17 +173,21 @@ def main(binary):
             "check_insertion", a="end ring", b=shaft, entry="positive")))
         worker.start()
         kinds, slowest = set(), 0.0
-        while worker.is_alive():
-            t0 = time.monotonic()
-            for j in other.call("background_jobs")["jobs"]:
-                kinds.add(j["kind"])
-            slowest = max(slowest, time.monotonic() - t0)
-            time.sleep(0.05)
+        with host_load.Window(app.pid) as busy:
+            while worker.is_alive():
+                t0 = time.monotonic()
+                for j in other.call("background_jobs")["jobs"]:
+                    kinds.add(j["kind"])
+                slowest = max(slowest, time.monotonic() - t0)
+                time.sleep(0.05)
         worker.join()
         expect("insertion" in kinds,
                f"check_insertion runs as an insertion job: {kinds}")
-        expect(slowest < 0.5,
-               f"and the instance answers while it runs ({slowest:.2f} s)")
+        # Responsiveness: wall time is the point, judged on a quiet machine
+        # (docs/ui/testing.md#tests-that-time-things).
+        host_load.judge(busy, slowest < 0.5,
+                        f"the instance answers while it runs "
+                        f"({slowest:.2f} s)", expect, "insertion_smoke")
         expect(answer.get("pass") is True and answer.get("confirm", {})
                .get("agrees") is True,
                f"the parked call answers as before: {answer}")

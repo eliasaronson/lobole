@@ -32,6 +32,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from smoke_app import launch  # noqa: E402
+import host_load  # noqa: E402
 from fem_smoke import build_bar, expect, SKIP  # noqa: E402
 
 
@@ -58,12 +59,15 @@ def main():
 
             # The same inputs again: answered from the stored result, nothing
             # started (docs/simulation/README.md#studies-as-jobs).
-            t0 = time.time()
-            again = d.call("run_study", study=study, **{"async": True})
+            with host_load.Timed(app.pid) as took:
+                again = d.call("run_study", study=study, **{"async": True})
             expect(again.get("reused") is True and again.get("started") is False,
                    f"an unchanged static study is reused: {again}")
-            expect(time.time() - t0 < 1.0,
-                   f"a reuse is well under a second: {time.time() - t0:.2f}s")
+            # Responsiveness: wall time is the point, judged on a quiet machine
+            # (docs/ui/testing.md#tests-that-time-things).
+            host_load.judge(took, took.seconds < 1.0,
+                            f"a reuse is well under a second: "
+                            f"{took.seconds:.2f}s", expect, "fem_async_smoke")
             expect(again.get("input_hash") == sync.get("input_hash"),
                    f"the same inputs, the same hash: {again} vs {sync}")
 
