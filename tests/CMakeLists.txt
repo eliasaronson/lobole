@@ -1482,9 +1482,11 @@ add_test(NAME om615_mounting_smoke
 # ~40 s alone, and not on one core: ~86 s user + ~58 s system across the
 # app's worker threads (3.6 cores on average). The system time is futex
 # contention, mostly on OpenCASCADE's process-wide Standard_ErrorHandler
-# mutex, which every OCC call in a try block takes -- from the parallel
-# BRepCheck and booleans under BooleanRefusal -- and a preempted holder makes
-# it worse under load. PROCESSORS is what it takes, so ctest leaves it room;
+# mutex, which every OCC call in a try block takes -- mostly the contact
+# checks' query booleans (Measure::BuildQuery), whose parallel PerformFF
+# checks each curve on its surface with a try block per evaluation -- and a
+# preempted holder makes it worse under load. A thread-local handler (OCCT
+# 8.0, PR #980) took the system time to ~2.6 s, the wall time unchanged. PROCESSORS is what it takes, so ctest leaves it room;
 # the timeout is a hang guard: 127 s in a -j22 suite beside 22 burners.
 set_tests_properties(om615_mounting_smoke PROPERTIES LABELS "slow;asan_slow" TIMEOUT 300
                      PROCESSORS 3)
