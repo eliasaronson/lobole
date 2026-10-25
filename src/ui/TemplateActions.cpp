@@ -346,10 +346,10 @@ std::string UnlinkTemplate(AppState& state, uint64_t featureId,
   if (plain.empty())
     return Quoted(tf->GetName()) + ": " + why;
   // The instance's features take its one place in the list, and more.
-  if (const std::string why =
+  if (std::string full =
           readctx::CheckFeatureRoom(*state.document, plain.size() - 1);
-      !why.empty())
-    return why;
+      !full.empty())
+    return full;
   std::vector<nlohmann::json> features;
   for (const auto& f : plain) {
     features.push_back(DocumentIO::FeatureToJson(*f));
