@@ -141,8 +141,11 @@ void NamesOfSubShape(const CADShape& whole, const ElementMap& wholeMap,
 
 // The U and L fallback passes alone, for builders whose history already
 // seeded `map` (extrude/revolve): U — a named face names its still-unnamed
-// boundary edges "<faceName>;U<localIdx>" (localIdx counts every unique
-// boundary edge, so it is stable whether or not neighbours were named); L —
+// boundary edges "<faceName>;U<localIdx>" (localIdx is the edge's place
+// among every unique boundary edge, named or not, sorted by the edge's own
+// geometry -- its midpoint, then length, curve type and end points -- never
+// by the order the kernel handed the face back, which follows shape
+// addresses; edges whose keys tie take no U name); L —
 // an unnamed face takes its sorted boundary-edge names joined with ',' plus
 // ";L". OCC history is genuinely incomplete for lower-dimensional elements,
 // so these are what give edges (fillet spines!) their stable names.

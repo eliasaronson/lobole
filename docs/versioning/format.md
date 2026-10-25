@@ -329,6 +329,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A U name (`<face>;U<k>`) numbers a face's unnamed boundary edges by each edge's geometry -- its midpoint, then length, curve type and end points -- not by the order the kernel handed the face back, which followed shape addresses ([toponaming](../modeling/toponaming.md#how-each-operation-names-its-output)). A saved U name can now mean another edge of its face; no migration, since the old numbering was never stable to map from. Golden `vNEXT-edge-names-by-geometry` (a Fillet on `2/g605787230;U1`, the 30 mm bottom edge, where the wire order's U1 was a 20 mm one). |
 
 ## Paths in a project
 

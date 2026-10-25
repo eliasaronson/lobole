@@ -19,6 +19,9 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepTools_History.hxx>
 #include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <Precision.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -27,13 +30,17 @@
 #include <TopoDS_Compound.hxx>
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -302,24 +309,125 @@ ElementMap PropagateNames(const std::vector<NamedInput>& inputs,
   return out;
 }
 
+// Where an edge is, for the U pass's order: from its geometry alone, never
+// from the order a builder handed the face back (which follows shape
+// addresses, and so the process's allocation history). Every length is
+// quantized to kUGrid, well above the kernel's noise, so two runs that agree
+// to the kernel's tolerance give the same key. `mid` is the point at the
+// curve's parameter midpoint; the rest -- length, curve type, the two end
+// points as an unordered pair -- is only computed (`full`) for edges whose
+// midpoints tie, which on a valid face is rare.
+constexpr double kUGrid = Precision::Confusion() * 100.0;
+
+using GridPoint = std::array<long long, 3>;
+
+GridPoint Quantize(const gp_Pnt& p) {
+  return {std::llround(p.X() / kUGrid), std::llround(p.Y() / kUGrid),
+          std::llround(p.Z() / kUGrid)};
+}
+
+struct EdgeKey {
+  GridPoint mid{};
+  bool full = false;
+  long long length = 0;
+  int curveType = 0;
+  GridPoint end0{}, end1{}; // end0 <= end1: orientation does not matter
+
+  [[nodiscard]] auto Tail() const {
+    return std::tie(length, curveType, end0, end1);
+  }
+};
+
+GridPoint VertexPoint(const TopoDS_Vertex& v) {
+  return v.IsNull() ? GridPoint{} : Quantize(BRep_Tool::Pnt(v));
+}
+
+EdgeKey MidKey(const TopoDS_Edge& e) {
+  EdgeKey k;
+  if (BRep_Tool::Degenerated(e)) { // a pole: no 3D curve, only its vertex
+    k.mid = VertexPoint(TopExp::FirstVertex(e));
+    return k;
+  }
+  const BRepAdaptor_Curve c(e);
+  k.mid = Quantize(c.Value(0.5 * (c.FirstParameter() + c.LastParameter())));
+  return k;
+}
+
+void CompleteKey(const TopoDS_Edge& e, EdgeKey& k) {
+  if (k.full) {
+    return;
+  }
+  k.full = true;
+  TopoDS_Vertex v0, v1;
+  TopExp::Vertices(e, v0, v1);
+  k.end0 = VertexPoint(v0);
+  k.end1 = VertexPoint(v1);
+  if (k.end1 < k.end0) {
+    std::swap(k.end0, k.end1);
+  }
+  if (BRep_Tool::Degenerated(e)) {
+    k.curveType = -1;
+    return;
+  }
+  const BRepAdaptor_Curve c(e);
+  k.curveType = static_cast<int>(c.GetType());
+  k.length = std::llround(GCPnts_AbscissaPoint::Length(c) / kUGrid);
+}
+
 // U pass then L pass over `shape`, writing into `map` (see header).
 void FallbackPasses(const TopoDS_Shape& shape, ElementMap& map) {
   TopTools_IndexedMapOfShape resFaces, resEdges;
   MapSubshapes(shape, resFaces, resEdges);
 
-  // U: a named face names its unnamed boundary edges. localIdx counts every
-  // unique boundary edge (named or not, deduped — a closed surface's seam
-  // edge appears twice in the wire), so the index is stable.
+  // U: a named face names its unnamed boundary edges `<face>;U<k>`, k its
+  // edge's place among the face's unique boundary edges (named or not,
+  // deduped -- a closed surface's seam edge appears twice in the wire) in
+  // EdgeKey order. Edges whose keys tie are coincident geometry, which a
+  // valid face cannot have; they keep their places and neither is named,
+  // rather than one by a guess.
+  std::vector<std::optional<EdgeKey>> keys(resEdges.Extent());
+  std::vector<int> order;
+  auto less = [&](int a, int b) {
+    const EdgeKey &ka = *keys[a], &kb = *keys[b];
+    if (ka.mid != kb.mid) {
+      return ka.mid < kb.mid;
+    }
+    return ka.Tail() < kb.Tail();
+  };
   for (const auto& [faceIdx, faceName] : map.names) {
     if (faceIdx + 1 > resFaces.Extent()) {
       continue;
     }
     TopTools_IndexedMapOfShape boundary;
     TopExp::MapShapes(resFaces(faceIdx + 1), TopAbs_EDGE, boundary);
+    order.clear();
     for (int k = 1; k <= boundary.Extent(); k++) {
       const int idx = resEdges.FindIndex(boundary(k)) - 1;
-      if (idx >= 0) {
-        map.edgeNames.try_emplace(idx, faceName + ";U" + std::to_string(k - 1));
+      if (idx < 0) {
+        continue;
+      }
+      if (!keys[idx]) {
+        keys[idx] = MidKey(TopoDS::Edge(resEdges(idx + 1)));
+      }
+      order.push_back(idx);
+    }
+    // Midpoints that tie take the full key, those edges alone.
+    std::sort(order.begin(), order.end(),
+              [&](int a, int b) { return keys[a]->mid < keys[b]->mid; });
+    for (size_t i = 0; i + 1 < order.size(); i++) {
+      if (keys[order[i]]->mid == keys[order[i + 1]]->mid) {
+        CompleteKey(TopoDS::Edge(resEdges(order[i] + 1)), *keys[order[i]]);
+        CompleteKey(TopoDS::Edge(resEdges(order[i + 1] + 1)),
+                    *keys[order[i + 1]]);
+      }
+    }
+    std::sort(order.begin(), order.end(), less);
+    for (size_t i = 0; i < order.size(); i++) {
+      const bool tied = (i > 0 && !less(order[i - 1], order[i])) ||
+                        (i + 1 < order.size() && !less(order[i], order[i + 1]));
+      if (!tied) {
+        map.edgeNames.try_emplace(order[i],
+                                  faceName + ";U" + std::to_string(i));
       }
     }
   }

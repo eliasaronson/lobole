@@ -187,11 +187,11 @@
       "angle_deg": 90.0,
       "edges": [
         {
-          "element": "2/g4;U3",
+          "element": "2/g4;U2",
           "feature_id": 2
         },
         {
-          "element": "2/g3;U3",
+          "element": "2/g3;U2",
           "feature_id": 2
         }
       ],
@@ -203,7 +203,7 @@
     {
       "edges": [
         {
-          "element": "3/f0/face6;U3",
+          "element": "3/f0/face6;U2",
           "feature_id": 2
         }
       ],

@@ -4,7 +4,7 @@
 {"method":"check_geometry","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g1988795846;U3","feature_id":100}],"id":110,"name":"F1","radius":6.16,"type":"Fillet"}}}
+{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g1988795846;U2","feature_id":100}],"id":110,"name":"F1","radius":6.16,"type":"Fillet"}}}
 {"method":"check_geometry","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}

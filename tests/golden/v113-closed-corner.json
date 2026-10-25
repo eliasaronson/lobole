@@ -87,11 +87,11 @@
       "edges": [
         {
           "feature_id": 2,
-          "element": "2/g1;U3"
+          "element": "2/g1;U2"
         },
         {
           "feature_id": 2,
-          "element": "2/g4;U3"
+          "element": "2/g4;U2"
         }
       ],
       "length": 20,

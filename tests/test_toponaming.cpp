@@ -18,13 +18,27 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRep_Builder.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Wire.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 
 #include <algorithm>
 #include <array>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -958,4 +972,84 @@ TEST_CASE("Pieces nothing tells apart are numbered, and say so",
     walls++;
   }
   CHECK(walls >= 2); // OCC may split the half holding the seam once more
+}
+
+namespace {
+
+// Every edge name of `shape`'s map, by where the edge is: its parameter
+// midpoint, rounded to a micrometre.
+std::map<std::string, std::array<long, 3>>
+EdgeNamesByPlace(const TopoDS_Shape& shape, const ElementMap& map) {
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  std::map<std::string, std::array<long, 3>> out;
+  for (const auto& [idx, name] : map.edgeNames) {
+    const BRepAdaptor_Curve c(TopoDS::Edge(edges(idx + 1)));
+    const gp_Pnt p = c.Value(0.5 * (c.FirstParameter() + c.LastParameter()));
+    out[name] = {std::lround(p.X() * 1e3), std::lround(p.Y() * 1e3),
+                 std::lround(p.Z() * 1e3)};
+  }
+  return out;
+}
+
+// One planar face through `pts` in order, its wire starting at pts[start].
+TopoDS_Face PolygonFace(const std::vector<gp_Pnt>& pts, size_t start) {
+  BRepBuilderAPI_MakePolygon poly;
+  for (size_t i = 0; i < pts.size(); i++) {
+    poly.Add(pts[(start + i) % pts.size()]);
+  }
+  poly.Close();
+  return BRepBuilderAPI_MakeFace(poly.Wire(), true).Face();
+}
+
+} // namespace
+
+// The order a builder hands a face's edges back follows shape addresses
+// (docs/modeling/toponaming.md#how-each-operation-names-its-output): the same
+// face built twice can list its edges from another start. A U name must name
+// the same edge either way, so it is numbered from the edges' geometry, not
+// their wire order.
+TEST_CASE("A U name follows the edge's geometry, not the wire's order",
+          "[toponaming]") {
+  const std::vector<gp_Pnt> pts{
+      {0, 0, 0}, {5, 0, 0}, {6, 3, 0}, {2, 4, 0}, {-1, 2, 0}};
+  std::map<std::string, std::array<long, 3>> first;
+  for (size_t start = 0; start < pts.size(); start++) {
+    const TopoDS_Face face = PolygonFace(pts, start);
+    ElementMap map;
+    map.names[0] = "9/face0";
+    topo::ApplyFallbackPasses(CADShape(face), map);
+    const auto named = EdgeNamesByPlace(face, map);
+    REQUIRE(named.size() == pts.size());
+    if (start == 0) {
+      first = named;
+    }
+    INFO("wire starting at point " << start);
+    CHECK(named == first);
+  }
+}
+
+// Two edges at the same place cannot be told apart by where they are, so
+// neither is numbered: a guess would be the address order again.
+TEST_CASE("Coincident boundary edges take no U name", "[toponaming]") {
+  const gp_Pnt a(0, 0, 0), b(4, 0, 0), c(4, 4, 0), d(0, 4, 0);
+  const TopoDS_Edge twin1 = BRepBuilderAPI_MakeEdge(a, b).Edge();
+  const TopoDS_Edge twin2 = BRepBuilderAPI_MakeEdge(a, b).Edge();
+  BRep_Builder bb;
+  TopoDS_Wire wire;
+  bb.MakeWire(wire);
+  bb.Add(wire, twin1);
+  bb.Add(wire, twin2);
+  bb.Add(wire, BRepBuilderAPI_MakeEdge(b, c).Edge());
+  bb.Add(wire, BRepBuilderAPI_MakeEdge(c, d).Edge());
+  bb.Add(wire, BRepBuilderAPI_MakeEdge(d, a).Edge());
+  TopoDS_Face face = BRepBuilderAPI_MakeFace(gp_Pln()).Face();
+  TopoDS_Face plate = TopoDS::Face(face.EmptyCopied());
+  bb.Add(plate, wire);
+  ElementMap map;
+  map.names[0] = "3/face0";
+  topo::ApplyFallbackPasses(CADShape(plate), map);
+  CHECK(map.EdgeNameOf(topo::EdgeIndexOf(plate, twin1)) == nullptr);
+  CHECK(map.EdgeNameOf(topo::EdgeIndexOf(plate, twin2)) == nullptr);
+  CHECK(map.edgeNames.size() == 3);
 }

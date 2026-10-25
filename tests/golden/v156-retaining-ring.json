@@ -6,7 +6,7 @@
      "direction": [0, 0, 1], "radius": 12.5, "height": 30.0},
     {"type": "RetainingRingGroove", "name": "Groove", "id": 2,
      "face": {"feature_id": 1, "element": "1/face0"},
-     "from": {"feature_id": 1, "element": "1/face0;U2"},
+     "from": {"feature_id": 1, "element": "1/face0;U0"},
      "offset": 12.0},
     {"type": "RetainingRing", "name": "DIN 471 25x1.2", "id": 3,
      "standard": "din471", "size": 25}
