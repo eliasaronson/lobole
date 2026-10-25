@@ -146,9 +146,6 @@ them:
   `describe_document` follows: the part as a short outline (its variables,
   one line per feature saying what it does, references by intent such as
   "the top face of Block"), with no promise that it reruns.
-- **The workflow prompt's claims, tested.** The MCP `modeling-workflow`
-  prompt states gotchas an agent should avoid; each should be backed by a
-  test that fails if the gotcha stops being true, or be removed.
 - **The prompt and the design sweep.** The prompt does not mention
   `expression` requirements or `design_sweep`. Adding them changes what the
   benchmark measures, so it waits on the benchmark.

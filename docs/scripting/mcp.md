@@ -141,7 +141,7 @@ gated by the MCP host's tool approval.
 
 One MCP prompt, `modeling-workflow`, teaches the loop: variables first,
 constrain fully, read each mutating response's `regen` and `digest`, verify
-with `mass_properties` and `render_sheet`, gate assemblies on
+with `mass_properties` and `rpc('render_sheet')`, gate assemblies on
 `contact_report`, run `check_literals` on a part built from literals (and
 `extract_variables` to name them,
 [../variables/README.md](../variables/README.md#literals-that-should-be-expressions)),
@@ -151,6 +151,28 @@ ask rather than guess when it is empty, state what the design is for as
 (only `pass` is met), and run
 [the review checklist](../inspect/review-checklist.md) before delivery.
 Changing it changes what the benchmark measures.
+
+What it tells an agent it can rely on is held by a test. A claim with no
+test is taken out of the prompt rather than left in untested.
+
+| claim | pinned by |
+|---|---|
+| every call that rebuilds the part answers `regen` and a `digest`; a batch one for the whole | `rpc_digest_gate` (every handler, from the source), `workflow_claims_smoke` (`set_variable`, `batch`), `strict_inputs_smoke` |
+| a broken feature is named in the call's own `regen` | `regen_honesty_smoke` |
+| unknown fields are refused, naming the accepted vocabulary | `strict_inputs_smoke`, `refused_calls_smoke` |
+| `describe` lists every feature type's params | `mcp_formats_gate`, `mcp_smoke` |
+| `set_rollback` shows an intermediate state, its digest the bodies as of the bar | `workflow_claims_smoke` |
+| `check_literals` names a literal equal to a variable, and a sketch or frame on a world plane where a face lies | `literals_smoke` |
+| `get_state` carries `selection` and `selection_items` | `workflow_claims_smoke` |
+| the GUI-driving RPCs need a window; offscreen renders | `remote_smoke`, `offscreen_smoke` |
+| every name it uses is an announced tool or a registered RPC | `mcp_smoke` |
+
+The last row is the drift gate: `mcp_smoke` fails when a call-shaped name in
+the prompt (an `rpc('x')`, or any snake_case word) is neither a tool, an
+RPC, a key `describe` publishes, nor one of the few vocabulary words it
+lists, and checks itself on a planted unknown name. The prompt names no
+port: the human's instance is the registry's `gui` one the agent did not
+start.
 
 ## Format documentation
 
@@ -176,8 +198,11 @@ and its prose.
 - `mcp_autostart_smoke` — the autostart lifecycle (skips without the `mcp`
   SDK or a Vulkan device).
 - `mcp_smoke` (GUI) — models a dimensioned bracket end to end through the
-  SDK's stdio client, so the MCP layer itself is exercised; skips without the
-  `mcp` SDK.
+  SDK's stdio client, so the MCP layer itself is exercised, and fails when
+  the workflow prompt names something that is neither a tool nor an RPC;
+  skips without the `mcp` SDK.
+- `workflow_claims_smoke` (headless) and `rpc_digest_gate` (source, no
+  app) — the prompt's claims in the table above.
 - `packaging_smoke` — the wheel `pyproject.toml` builds, imported alone.
 
 `--only-tools a,b,c` serves only the named tools and refuses loudly if it

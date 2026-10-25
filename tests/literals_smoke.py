@@ -138,6 +138,23 @@ def main():
                f"the block's top face: {places[0]}")
         expect(lint["checked"]["fields"] > 0, lint["checked"])
 
+        # The frame half of the same claim (the workflow prompt's step 7): an
+        # explicit Frame placed in the world, on the plane the block's top
+        # face lies in and over it, is named with the face to attach it to.
+        # Taken back out after, so the dry run below sees the document above.
+        frame = d.call("add_feature", feature={
+            "type": "Frame", "name": "Mount", "kind": "explicit",
+            "origin": [0.0, 0.0, 10.0]})["id"]
+        places = d.call("check_literals")["placements"]
+        mine = [p for p in places if p["feature_id"] == frame]
+        expect(len(mine) == 1, f"the frame on the top face's plane: {places}")
+        # (The boss stands on that face, so its name carries a suffix.)
+        face = mine[0]["face"]
+        expect(face["feature_id"] == block_id
+               and face["element"].startswith(f"{block_id}/cap1"),
+               f"the frame's face is the block's top: {mine[0]}")
+        d.call("delete_feature", id=frame)
+
         # Dry run: nothing moves.
         before = features(d)
         vars_before = variables(d)

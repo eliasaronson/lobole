@@ -551,15 +551,16 @@ The loop that works — follow it every time:
    names, axis conventions); unknown fields ERROR instead of vanishing, so
    trust the error text — it names the accepted vocabulary.
 4. VERIFY after every mutating step — the order is EXECUTE, MEASURE, then
-   RENDER. Measure first: every mutating call already returns a `digest`
-   (per-body volume_mm3/bbox/solid-count plus a delta: volume_mm3 moved, bodies
-   added/removed) — read it before anything else; a cut whose delta is ~0 or
+   RENDER. Measure first: every call that rebuilds the part answers `regen`
+   and a `digest` (per-body volume_mm3/bbox/solid-count plus a delta:
+   volume_mm3 moved, bodies added/removed; a batch answers one for the
+   whole) — read it before anything else; a cut whose delta is ~0 or
    a body whose `solids` jumped to 2 is wrong NOW, not three features later.
    Check `regen.warnings` (a warning = built but likely did nothing, e.g. a
    cut whose profile missed every body). mass_properties is the oracle the
-   render cannot fake (CoM, mass, inertia). THEN look: render_sheet gives
-   four views + the kernel numbers burned into one PNG (screenshot for
-   close-ups). Do not batch-build blind, and do not trust pixels for
+   render cannot fake (CoM, mass, inertia). THEN look: rpc('render_sheet')
+   gives four views + the kernel numbers burned into one PNG (screenshot
+   for close-ups). Do not batch-build blind, and do not trust pixels for
    dimensions — cross-check them against the footer numbers.
 4b. ASSEMBLIES: after placing occurrences, gate on contact_report — the
    whole structure must be ONE component (anything in its own component is
@@ -584,8 +585,9 @@ The loop that works — follow it every time:
    edits; checkpoint_create before risky multi-step changes and
    checkpoint_restore instead of reconstructing. A feature that errors no
    longer blanks the model (regeneration continues past it) — read the
-   feature's "error", fix or suppress_feature it. set_rollback lets you
-   inspect intermediate history states. When done: save_project, and
+   feature's "error", fix or suppress_feature it. rpc('set_rollback')
+   shows an intermediate history state, and its own answer's digest is
+   the bodies as of that point. When done: save_project, and
    render_still for a presentation shot.
 7. Built a part from literals, or handed one? Run rpc('check_literals'):
    it names each number that equals a variable in scope (bind it with
@@ -618,10 +620,12 @@ empty, say so and ask; never guess which face or feature was meant.
 
 No display session of your own? Start `lobole --offscreen --remote 0` —
 a real renderer with no window or display server: screenshot, render_still,
-render_sheet, set_render_options and select_face all work (ui_action does
-not — driving the GUI needs a window, e.g. `tools/headless-preview.sh --gui
-<scratch-port>` under Xvfb). Leave port 8799 for the human's dev-watch (the
-build they review).
+set_render_options, rpc('render_sheet') and rpc('select_face') all work (the
+GUI-driving RPCs, rpc('menu_click'), rpc('key_press') and the rest, do not —
+they need a window, e.g. `tools/headless-preview.sh --gui <scratch-port>`
+under Xvfb). Never drive the human's instance — a `gui` one in the
+registry (`instances`) that you did not start, the build they review; start
+your own on a scratch port.
 
 RESEARCH REAL DIMENSIONS FIRST. When the part interfaces with a real product
 (bearings, inserts, screws, connectors, rails), web-search the datasheet
@@ -1329,7 +1333,8 @@ _reference("delete_reference_image", "Remove a sketch reference image by image_i
           "write the active document's local scope instead (it shadows a "
           "same-named project var). Redefining regenerates every "
           "expression-driven feature in every part; one undo step. Returns the "
-          "evaluated value + scope (and error if it fails). Name every driving "
+          "evaluated value + scope (and error if it fails), and the active "
+          "part's regen and digest. Name every driving "
           "dimension of the design — parameters first.")
 def set_variable(name: str, expression: str, comment: str = "",
                  scope: str = "project") -> dict:
@@ -1406,7 +1411,8 @@ _reference("suppress_feature", "Suppress or unsuppress a feature (by feature id)
 _reference("set_rollback", "Move the rollback bar: regeneration executes only "
           "features [0, index); -1 = end. Features after the bar keep their "
           "params but contribute nothing — use it to inspect intermediate "
-          "history states. Not undoable (a view, not an edit); "
+          "history states: its answer's digest is the bodies as of the bar. "
+          "Not undoable (a view, not an edit); "
           "get_state.rollback shows the position.")
 
 

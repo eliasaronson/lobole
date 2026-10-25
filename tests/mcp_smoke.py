@@ -53,6 +53,47 @@ def result(r):
     return r.content
 
 
+# Snake_case words in the workflow prompt that are not methods but the
+# vocabulary of one, with where they come from. Everything else of that
+# shape must be a tool, an RPC, or a key describe publishes.
+PROMPT_WORDS = {
+    "at_most": "a requirement's bound kind (add_requirement)",
+    "at_least": "a requirement's bound kind (add_requirement)",
+    "face_ref": "a sketch's attachment field (FEATURE_FORMATS)",
+    "flange_width": "an example of a variable name",
+}
+
+
+def prompt_unknown_names(prompt, desc, tools):
+    """The call-shaped names in `prompt` that nothing registers, sorted."""
+    import re
+    methods = {m["name"] for m in desc["methods"]}
+    known = set(desc)
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                known.add(k)
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    for m in desc["methods"]:
+        known.update(m.get("params", []))
+        # What a method answers: `returns`, where its row states it.
+        known.update(re.findall(r"[a-z][a-z0-9_]*", m.get("returns") or ""))
+        walk(m.get("request_schema", {}))
+    walk(desc["feature_types"])
+    called = set(re.findall(r"rpc\('([A-Za-z0-9_]+)'", prompt))
+    words = set(re.findall(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", prompt))
+    unknown = {w for w in words
+               if w not in methods and w not in tools and w not in known
+               and w not in PROMPT_WORDS}
+    # rpc('x') is a call whatever else x may be: it must be a method.
+    unknown |= {c for c in called if c not in methods}
+    return sorted(unknown)
+
+
 async def run(port):
     server = StdioServerParameters(
         command=sys.executable,
@@ -134,6 +175,25 @@ async def run(port):
                    "MATERIAL_SLUGS drifted from describe.material_slugs: "
                    f"prose-only {prose - set(desc['material_slugs'])}, "
                    f"app-only {set(desc['material_slugs']) - prose}")
+
+            # The workflow prompt names only what exists: every call-shaped
+            # name in it is an announced tool or an RPC the app registers
+            # (docs/scripting/mcp.md#the-workflow-prompt). It named
+            # `ui_action`, which is neither. A planted name must be caught,
+            # or the gate is blind.
+            unknown = prompt_unknown_names(lobole.mcp.WORKFLOW, desc, names)
+            expect(not unknown,
+                   f"the workflow prompt names no such tool or RPC: {unknown}")
+            planted = prompt_unknown_names(
+                lobole.mcp.WORKFLOW + "\nCall rpc('make_it_so') first.",
+                desc, names)
+            expect(planted == ["make_it_so"],
+                   f"a planted unknown name is caught: {planted}")
+            # And the text the client is served is that constant.
+            served = await session.get_prompt("modeling-workflow")
+            expect(served.messages and lobole.mcp.WORKFLOW.strip()[:60]
+                   in served.messages[0].content.text,
+                   "the served prompt is WORKFLOW")
 
             # The bracket, parameters-first (the workflow the prompt teaches)
             await call("new_project")
