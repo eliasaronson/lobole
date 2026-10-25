@@ -320,6 +320,7 @@ here; the golden corpus and git history cover them.
 | 191 | Two sketch constraint kinds: `curvature` (G2 between two curves joined end to end, at least one a spline: tangent there with equal curvature) and `arc_length` (a dimension, mm: a circular arc's radius x sweep; driven like any dimension). An older build refuses the file on the unknown kind ([curvature continuity](../sketching/README.md#curvature-continuity), [arc length](../sketching/README.md#arc-length)). Golden `v191-g2-arc-length` |
 | 192 | Direct edit: four feature types that change a body's faces in place — `DeleteFace` {body_id, faces}, `OffsetFace` {body_id, faces, distance_mm (+_expr)}, `MoveFace` {body_id, faces, translate_mm (+_expr each), rotate_deg (+_expr), axis} and `ReplaceFace` {body_id, face, target {kind: plane\|sketch\|face}}; each face ref may carry the `fingerprint` {surface, area_mm2, centroid_mm} of the face as picked ([direct edit](../modeling/README.md#direct-edit)). Goldens `v192-delete-face`, `v192-offset-face`, `v192-move-face`, `v192-replace-face` |
 | 193 | Cross-part links ([derived](../modeling/derived.md#sketches)): a Derived copies sketches (`sketches`, `sketch_names`; `snapshot.sketches` holds each one's plane and solved entities), carries `follow` (absent = true), and records `snapshot.source_key`, the content key of what it copied, in place of `source_chain_hash` (read and dropped; the key is then computed from the snapshot). A Sketch whose `plane_ref` is a Derived names the copied sketch it stands on in `plane_ref_sketch`. Golden `v193-derived-sketch`. |
+| 194 | A U name (`<face>;U<k>`) numbers a face's unnamed boundary edges by each edge's geometry -- its midpoint, then length, curve type and end points -- not by the order the kernel handed the face back, which followed shape addresses ([toponaming](../modeling/toponaming.md#how-each-operation-names-its-output)). A saved U name can now mean another edge of its face; no migration, since the old numbering was never stable to map from. Golden `v194-edge-names-by-geometry` (a Fillet on `2/g605787230;U1`, the 30 mm bottom edge, where the wire order's U1 was a 20 mm one). |
 
 ## Pending changes
 
@@ -329,7 +330,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A U name (`<face>;U<k>`) numbers a face's unnamed boundary edges by each edge's geometry -- its midpoint, then length, curve type and end points -- not by the order the kernel handed the face back, which followed shape addresses ([toponaming](../modeling/toponaming.md#how-each-operation-names-its-output)). A saved U name can now mean another edge of its face; no migration, since the old numbering was never stable to map from. Golden `vNEXT-edge-names-by-geometry` (a Fillet on `2/g605787230;U1`, the 30 mm bottom edge, where the wire order's U1 was a 20 mm one). |
 
 ## Paths in a project
 
