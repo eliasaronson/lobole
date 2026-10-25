@@ -59,6 +59,10 @@ DiskPollAnswer AnswerDiskPoll(const DiskPollRequest& request) {
     answer.remoteList = GitVault::Remotes(path);
     answer.divergence = GitVault::AheadBehind(path);
   }
+
+  // After the disk check, so a change it just saw is in the scan too.
+  if (request.conflicts && GitVault::Available())
+    answer.conflictReport = ProjectMerge::Scan(path);
   return answer;
 }
 
@@ -71,6 +75,7 @@ bool DiskPoller::Start(DiskPollRequest request, Answerer answer) {
   if (m_thread.joinable())
     return false;
   m_done.store(false);
+  m_conflicts = request.conflicts;
   m_thread = std::thread(
       [this, request = std::move(request), answer = std::move(answer)] {
         m_answer = answer(request);
@@ -83,6 +88,7 @@ std::optional<DiskPollAnswer> DiskPoller::Take() {
   if (!m_thread.joinable() || !m_done.load())
     return std::nullopt;
   m_thread.join();
+  m_conflicts = false;
   return std::move(m_answer);
 }
 
@@ -91,6 +97,22 @@ bool ApplyDiskPollAnswer(AppState& state, const DiskPollAnswer& answer) {
   bool applied = true;
   if (asked.projectPath != state.projectPath)
     return false; // another project is open; nothing here is about it
+
+  // Conflicts first: a scan that ran in this poll ran after its disk check,
+  // so a change the disk part reports is already in it.
+  bool conflictsApplied = false;
+  if (asked.conflicts) {
+    // Invalidated again (a save, a merge, a resolution) or scanned
+    // synchronously since: a newer answer is owed or already held.
+    if (state.conflictsStale || state.conflictsPath != asked.projectPath ||
+        asked.conflictsGeneration != state.conflictsGeneration) {
+      applied = false;
+    } else {
+      state.conflicts = answer.conflictReport;
+      state.conflictScans++;
+      conflictsApplied = true;
+    }
+  }
 
   if (asked.disk) {
     // A save, an open or a reload re-stamped the project after this poll
@@ -103,7 +125,7 @@ bool ApplyDiskPollAnswer(AppState& state, const DiskPollAnswer& answer) {
       // Something else wrote the project, which is the only way a conflict
       // can appear without us doing it — so this is where the conflicts scan
       // earns its keep, rather than on a timer.
-      if (answer.diskChanged && !state.diskChanged)
+      if (answer.diskChanged && !state.diskChanged && !conflictsApplied)
         state.conflictsStale = true;
       if (answer.diskChanged)
         state.diskChanged = true;
@@ -134,6 +156,11 @@ bool ApplyDiskPollAnswer(AppState& state, const DiskPollAnswer& answer) {
   return applied;
 }
 
+bool ConflictScanPending(const AppState& state) {
+  return state.conflictsStale || state.conflictsPath != state.projectPath ||
+         (state.diskPoller && state.diskPoller->ScanningConflicts());
+}
+
 void PumpDiskPoll(AppState& state) {
   if (!state.diskPoller)
     state.diskPoller = std::make_shared<DiskPoller>();
@@ -147,6 +174,10 @@ void PumpDiskPoll(AppState& state) {
   state.diskPollWasFocused = state.windowFocused;
   if (focusReturned)
     state.diskPollFocusPending = true;
+  if (state.projectPath.empty() && !state.conflictsPath.empty()) {
+    state.conflicts = ProjectMerge::Report{}; // nothing open, nothing to say
+    state.conflictsPath.clear();
+  }
   if (poller.Busy() || state.projectPath.empty())
     return;
 
@@ -190,7 +221,19 @@ void PumpDiskPoll(AppState& state) {
     request.remotesStamp = now;
   }
 
-  if (request.disk || request.history || request.remotes)
+  // The conflicts scan, whenever something could have changed its answer —
+  // an open, a save, a merge, a resolution, a change from outside. Another
+  // project's answer is dropped at once rather than drawn over this one.
+  if (state.conflictsStale || state.conflictsPath != state.projectPath) {
+    if (state.conflictsPath != state.projectPath)
+      state.conflicts = ProjectMerge::Report{};
+    state.conflictsStale = false;
+    state.conflictsPath = state.projectPath;
+    request.conflicts = true;
+    request.conflictsGeneration = state.conflictsGeneration;
+  }
+
+  if (request.disk || request.history || request.remotes || request.conflicts)
     poller.Start(std::move(request));
 }
 

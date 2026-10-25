@@ -2715,7 +2715,9 @@ struct AppState {
 
   // Conflicts (F7). A scan spawns `git` and walks the project for the
   // duplicate ids git cannot see, so it runs on an event rather than a clock
-  // (F11 G3 — see conflictsStale).
+  // (F11 G3 — see conflictsStale), and on the disk poller's worker, off the
+  // frame (ui/DiskPoller.h): `conflicts` is the last answer, which may trail
+  // the tree by a few frames — ConflictScanPending says when.
   ProjectMerge::Report conflicts;
   std::string conflictsPath;
   // Rescan when this is set, and ONLY then — no timer. A scan walks the whole
@@ -2726,6 +2728,9 @@ struct AppState {
   // what F8's poll already detects. Timing it instead cost a tree walk a
   // second, forever, for an answer that was "no" every time.
   bool conflictsStale = true;
+  // Moved by every synchronous scan (FinishMerge's): a scan the disk poller
+  // started before it is older than what the state holds, and is discarded.
+  uint64_t conflictsGeneration = 0;
   // The version the History panel is showing a diff against, and what it
   // found (F11 G2). Empty hash = no diff open; empty `diffTo` = the working
   // tree, which is "what have I changed since then".

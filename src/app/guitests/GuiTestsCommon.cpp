@@ -478,6 +478,11 @@ bool PollDiskNow(ImGuiTestContext* ctx) {
   });
 }
 
+bool WaitForConflictScan(ImGuiTestContext* ctx) {
+  return WaitFor(ctx, "the conflicts scan",
+                 [] { return !ui::ConflictScanPending(*s_App); });
+}
+
 bool WaitForJobs(ImGuiTestContext* ctx, const char* kind) {
   const std::string what = std::string("the '") + kind + "' jobs";
   return WaitFor(ctx, what.c_str(),

@@ -174,6 +174,9 @@ bool WaitForOpen(ImGuiTestContext* ctx);
 // in flight was asked before whatever the caller just did, so it is let
 // finish first. Returns at once when the banner is already up.
 bool PollDiskNow(ImGuiTestContext* ctx);
+// The conflicts scan the last action owed has landed (it runs on the disk
+// poller's worker, ui/DiskPoller.h).
+bool WaitForConflictScan(ImGuiTestContext* ctx);
 
 // The CPU time the app's MAIN thread has used, in ms. What a frame COST, for
 // a test that bounds it ("no frame ran the pass"): under load a frame's WALL

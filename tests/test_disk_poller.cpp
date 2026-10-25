@@ -164,3 +164,83 @@ TEST_CASE("Only one disk poll runs at a time", "[disk]") {
   Await(poller);
   CHECK_FALSE(poller.Busy());
 }
+
+namespace {
+
+DiskPollRequest ConflictQuestion(ui::AppState& state) {
+  // What PumpDiskPoll does when a scan is owed.
+  state.conflictsStale = false;
+  state.conflictsPath = state.projectPath;
+  DiskPollRequest request;
+  request.projectPath = state.projectPath;
+  request.conflicts = true;
+  request.conflictsGeneration = state.conflictsGeneration;
+  return request;
+}
+
+void StartHeldScan(ui::DiskPoller& poller, const DiskPollRequest& request,
+                   std::shared_future<void> gate) {
+  REQUIRE(poller.Start(request, [gate](const DiskPollRequest& asked) {
+    gate.wait();
+    DiskPollAnswer answer;
+    answer.asked = asked;
+    answer.conflictReport.conflicts.resize(1); // "one to resolve"
+    return answer;
+  }));
+}
+
+} // namespace
+
+TEST_CASE("A conflicts scan off the frame lands while nothing moved",
+          "[disk]") {
+  ui::AppState state;
+  OpenAt(state, "/projects/a.dsgn");
+  ui::DiskPoller poller;
+  std::promise<void> release;
+  StartHeldScan(poller, ConflictQuestion(state), release.get_future().share());
+  CHECK(poller.ScanningConflicts());
+  release.set_value();
+  CHECK(ui::ApplyDiskPollAnswer(state, Await(poller)));
+  CHECK(state.conflicts.conflicts.size() == 1);
+  CHECK(state.conflictScans == 1);
+  CHECK_FALSE(poller.ScanningConflicts());
+}
+
+TEST_CASE("A conflicts scan is discarded when a resolution or a "
+          "synchronous scan came after it",
+          "[disk]") {
+  ui::AppState state;
+  OpenAt(state, "/projects/a.dsgn");
+
+  SECTION("invalidated while it ran (a resolution, a save)") {
+    ui::DiskPoller poller;
+    std::promise<void> release;
+    StartHeldScan(poller, ConflictQuestion(state),
+                  release.get_future().share());
+    state.conflictsStale = true; // InvalidateConflicts
+    release.set_value();
+    CHECK_FALSE(ui::ApplyDiskPollAnswer(state, Await(poller)));
+    CHECK(state.conflicts.Empty());
+    CHECK(state.conflictsStale); // still owed: the next frame asks again
+  }
+  SECTION("FinishMerge scanned for itself while it ran") {
+    ui::DiskPoller poller;
+    std::promise<void> release;
+    StartHeldScan(poller, ConflictQuestion(state),
+                  release.get_future().share());
+    state.conflictsGeneration++; // ScanNow, which found nothing left
+    release.set_value();
+    CHECK_FALSE(ui::ApplyDiskPollAnswer(state, Await(poller)));
+    CHECK(state.conflicts.Empty()); // the newer answer stands
+  }
+  SECTION("another project opened while it ran") {
+    ui::DiskPoller poller;
+    std::promise<void> release;
+    StartHeldScan(poller, ConflictQuestion(state),
+                  release.get_future().share());
+    OpenAt(state, "/projects/b.dsgn");
+    release.set_value();
+    CHECK_FALSE(ui::ApplyDiskPollAnswer(state, Await(poller)));
+    CHECK(state.conflicts.Empty());
+  }
+}

@@ -98,6 +98,14 @@ struct Report {
 // way over rsync or a zip, with no git anywhere).
 Report Scan(const std::string& projectDir);
 
+// Tests only: every Scan holds `ms` before it looks (0: none), so a test can
+// tell whether the frame waits on one. Also LOBOLE_TEST_SCAN_MS.
+void SetTestScanHold(int ms);
+
+// Tests only: how many Scan calls are running right now. A frame that sees
+// this non-zero is a frame that did not wait on one.
+int ScansInProgress();
+
 // Take one whole side of a conflict.
 bool TakeSide(const std::string& projectDir, const Conflict& conflict,
               GitVault::MergeSide side, std::string* error = nullptr);

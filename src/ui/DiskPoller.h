@@ -26,6 +26,7 @@
 // the `project_changed` RPC each walk the directory themselves.
 
 #include "core/io/GitVault.h"
+#include "core/io/ProjectMerge.h"
 #include "core/io/ProjectStamp.h"
 
 #include <atomic>
@@ -65,6 +66,11 @@ struct DiskPollRequest {
   // The Sharing section's remotes and ahead/behind counts.
   bool remotes = false;
   double remotesStamp = -1.0; // AppState::remotesStamp when asked
+
+  // The conflicts scan (F7): git's unmerged paths plus the duplicate ids,
+  // asked when something could have changed the answer (conflictsStale).
+  bool conflicts = false;
+  uint64_t conflictsGeneration = 0; // AppState::conflictsGeneration when asked
 };
 
 struct DiskPollAnswer {
@@ -78,6 +84,8 @@ struct DiskPollAnswer {
 
   std::vector<GitVault::Remote> remoteList;
   GitVault::Divergence divergence;
+
+  ProjectMerge::Report conflictReport;
 };
 
 // The worker's half: answers `request` from the filesystem and `git`. Touches
@@ -98,6 +106,8 @@ public:
   ~DiskPoller(); // joins: quitting mid-poll waits for one git call or walk
 
   bool Busy() const { return m_thread.joinable(); }
+  // A poll is in flight and it includes the conflicts scan.
+  bool ScanningConflicts() const { return Busy() && m_conflicts; }
 
   // Starts answering `request` on a worker; refused (false) while one is in
   // flight. `answer` is AnswerDiskPoll unless a test holds it.
@@ -110,7 +120,8 @@ public:
 private:
   std::thread m_thread;
   std::atomic<bool> m_done{false};
-  DiskPollAnswer m_answer; // written by the worker before m_done
+  bool m_conflicts = false; // the poll in flight scans for conflicts
+  DiskPollAnswer m_answer;  // written by the worker before m_done
 };
 
 // Applies `answer` to `state` if it still describes what is open; returns
@@ -118,6 +129,12 @@ private:
 // Each part is checked on its own: a save between the start and the answer
 // discards the disk part but keeps the remotes.
 bool ApplyDiskPollAnswer(AppState& state, const DiskPollAnswer& answer);
+
+// True while `state.conflicts` may not describe the tree: a scan is owed
+// (stale, or for another project) or one is in flight. The Conflicts panel
+// draws the last answer meanwhile, with its row actions disabled; anything
+// that DECIDES on conflicts scans for itself (FinishMerge, the merge RPCs).
+bool ConflictScanPending(const AppState& state);
 
 // The frame's half, once a frame from the top of the UI (replacing the
 // synchronous poll): applies an answer that has arrived, then starts a poll

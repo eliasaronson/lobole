@@ -8,6 +8,7 @@
 #include "common/Logger.h"
 #include "core/io/GitVault.h"
 #include "core/io/ProjectMerge.h"
+#include "ui/DiskPoller.h"
 #include "ui/ProjectActions.h"
 
 #include "imgui.h"
@@ -24,21 +25,13 @@ namespace {
 void ScanNow(AppState& state) {
   state.conflictsPath = state.projectPath;
   state.conflictsStale = false;
+  state.conflictsGeneration++; // a scan the poller started is older now
   state.conflictScans++;
   if (state.projectPath.empty() || !GitVault::Available()) {
     state.conflicts = ProjectMerge::Report{};
     return;
   }
   state.conflicts = ProjectMerge::Scan(state.projectPath);
-}
-
-// The draw-path wrapper. No frame time involved any more: a scan happens when
-// something could have changed the answer, not on a clock.
-void RefreshConflicts(AppState& state, bool force) {
-  if (!force && !state.conflictsStale &&
-      state.conflictsPath == state.projectPath)
-    return;
-  ScanNow(state);
 }
 
 // What the button on a row should do, in one word. Every class resolves
@@ -138,7 +131,8 @@ bool AbandonMerge(AppState& state, std::string* error) {
 }
 
 void DrawConflictsPanel(AppState& state) {
-  RefreshConflicts(state, false);
+  // No scan here: the disk poller runs it off the frame when something could
+  // have changed the answer (ui/DiskPoller.h), and this draws the last one.
   // The one panel whose absence is the good news: no window at all when the
   // project is in one piece.
   if (state.conflicts.Empty())
@@ -179,6 +173,13 @@ void DrawConflictsPanel(AppState& state) {
   std::string fieldName;
   GitVault::MergeSide fieldSide = GitVault::MergeSide::Ours;
 
+  // The rows are the last scan's. While a newer one is owed (a resolution
+  // just landed, the tree moved) they may name what is already resolved, so
+  // they are shown but cannot be acted on until it arrives.
+  const bool scanPending = ConflictScanPending(state);
+  if (scanPending)
+    ImGui::TextDisabled("Checking the project again...");
+  ImGui::BeginDisabled(scanPending);
   std::string group;
   for (int i = 0; i < static_cast<int>(state.conflicts.conflicts.size()); i++) {
     const ProjectMerge::Conflict& c = state.conflicts.conflicts[i];
@@ -260,6 +261,7 @@ void DrawConflictsPanel(AppState& state) {
     }
     ImGui::Spacing();
   }
+  ImGui::EndDisabled();
 
   ImGui::Separator();
 

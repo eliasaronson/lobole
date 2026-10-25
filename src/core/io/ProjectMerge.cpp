@@ -12,11 +12,15 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
+#include <thread>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -434,7 +438,33 @@ int Report::NeedsDecision() const {
   return n;
 }
 
+namespace {
+
+std::atomic<int>& ScanHold() {
+  static std::atomic<int> ms{[] {
+    const char* env = std::getenv("LOBOLE_TEST_SCAN_MS");
+    return env ? std::atoi(env) : 0;
+  }()};
+  return ms;
+}
+
+std::atomic<int> g_scansInProgress{0};
+
+struct ScanInProgress {
+  ScanInProgress() { g_scansInProgress++; }
+  ~ScanInProgress() { g_scansInProgress--; }
+};
+
+} // namespace
+
+void SetTestScanHold(int ms) { ScanHold().store(ms); }
+
+int ScansInProgress() { return g_scansInProgress.load(); }
+
 Report Scan(const std::string& projectDir) {
+  const ScanInProgress inProgress;
+  if (const int ms = ScanHold().load(); ms > 0)
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
   Report report;
   report.inMerge = GitVault::InMerge(projectDir);
 

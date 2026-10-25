@@ -9,6 +9,7 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/CrashReports.h"
+#include "core/io/ProjectMerge.h"
 #include "core/io/ProjectStamp.h"
 #include "remote/RemoteRequirements.h"
 #include "ui/BackgroundJobs.h"
@@ -917,6 +918,47 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     std::filesystem::remove_all(dir);
   };
 
+  // A save owes a conflicts scan (the tree it wrote is new), and the scan
+  // walks the whole project and starts `git` — on Windows a hitch the size
+  // of the old disk poll after every save. It runs on the disk poller's
+  // worker now: with the scan held half a second, frames must keep coming
+  // while it is held, and its answer must still land.
+  t = IM_REGISTER_TEST(engine, "disk",
+                       "a_save_does_not_hold_the_frame_for_the_scan");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_scan_offframe.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    IM_CHECK(WaitForConflictScan(ctx));
+
+    struct HoldScans {
+      HoldScans() { ProjectMerge::SetTestScanHold(500); }
+      ~HoldScans() { ProjectMerge::SetTestScanHold(0); }
+    } hold;
+    const uint64_t before = s_App->conflictScans;
+    AddFixtureBox(ctx); // something to save
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    int framesDuringScan = 0;
+    IM_CHECK(WaitFor(ctx, "the held scan's answer", [&] {
+      if (ProjectMerge::ScansInProgress() > 0)
+        framesDuringScan++;
+      return s_App->conflictScans > before && !ui::ConflictScanPending(*s_App);
+    }));
+    ctx->LogInfo("frames drawn while the scan was held: %d", framesDuringScan);
+    IM_CHECK_GT(framesDuringScan, 0);
+    IM_CHECK(s_App->conflicts.Empty());
+    std::filesystem::remove_all(dir);
+  };
+
   // F8: the project moved on disk while the app held it in memory. This is
   // the terminal-panel scenario — the panel ships inside the app and starts
   // in the project's directory, so a `git checkout` there is a normal thing
@@ -1503,7 +1545,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     // failure.
     IM_CHECK(ui::MergeBranch(*s_App, "alt", &err));
     ui::InvalidateConflicts(*s_App);
-    ctx->Yield(3);
+    IM_CHECK(WaitForConflictScan(ctx));
+    ctx->Yield(); // the panel appears on the frame after the answer
 
     // The panel exists ONLY now: a permanent tab saying "no conflicts" every
     // day would be noise, so its appearance is the signal.
@@ -1529,11 +1572,14 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->conflicts.NeedsDecision(), 1);
 
     ctx->ItemClick("Keep theirs###cf_theirs0");
-    ctx->Yield(3);
+    ctx->Yield();
+    IM_CHECK(WaitForConflictScan(ctx));
+    ctx->Yield();
     IM_CHECK_EQ(s_App->conflicts.NeedsDecision(), 0);
 
     ctx->ItemClick("Finish###cf_finish");
-    ctx->Yield(3);
+    ctx->Yield();
+    IM_CHECK(WaitForConflictScan(ctx));
 
     // Concluded: the merge is committed, the project reopened, and the panel
     // is gone because there is nothing left to say.

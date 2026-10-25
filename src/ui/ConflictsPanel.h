@@ -17,11 +17,14 @@ namespace ui {
 void DrawConflictsPanel(AppState& state);
 
 // True when the project has anything to resolve — unmerged paths, or two
-// files claiming one id. Cheap: reads the cached scan.
+// files claiming one id. Cheap: reads the cached scan, which may trail the
+// tree by a few frames (ConflictScanPending, ui/DiskPoller.h) — so it is for
+// showing, never for deciding; a decision scans (ProjectMerge::Scan).
 bool ProjectHasConflicts(AppState& state);
 
-// Rescan on the next frame. Call after anything that resolves or creates a
-// conflict.
+// Rescan, off the frame: the disk poller starts one on the next frame and the
+// answer lands a few frames later. Call after anything that resolves or
+// creates a conflict.
 void InvalidateConflicts(AppState& state);
 
 // Conclude a merge: verify the resolved project LOADS AND REGENERATES, then
