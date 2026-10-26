@@ -24,6 +24,30 @@
   <url type="homepage">https://github.com/eliasaronson/lobole</url>
   <url type="bugtracker">https://github.com/eliasaronson/lobole/issues</url>
   <releases>
+    <release version="0.1.5" date="2026-10-26">
+      <description>
+        <p>Edit faces directly, share sketches between parts, and import more formats.</p>
+        <ul>
+          <li>Direct edits: delete, offset, move and replace faces on any body, including imported ones, from the new Direct edit toolbar group. An edit that cannot be built is refused and names the faces it could not handle</li>
+          <li>Copy a sketch into another part, optionally linked so it follows the original</li>
+          <li>Import IGES and OBJ, choose the up axis when importing, and bring DXF or SVG drawings into a sketch</li>
+          <li>Sketching: G2 curvature and arc-length constraints, rescaling a sketch by its first dimension, open-end markers, trimming along a path, and typing name = value into a dimension to make a variable that drives it</li>
+          <li>Requirements can be written as expressions, and a design sweep checks them across a range of values</li>
+          <li>Mouse navigation can be set up in Preferences, Navigation, with presets for other CAD programs</li>
+          <li>Fillet, Chamfer, Shell and the other creation tools size their defaults from the part in front of them</li>
+          <li>When the graphics device is lost the app rebuilds it and carries on, and when the renderer cannot start it says why</li>
+          <li>Fixed: large projects stuttered every few seconds, most noticeably on Windows</li>
+          <li>Fixed: on Windows, a crash inside a system library on a background thread left no crash report, and the newest crash report could be the one cleaned away</li>
+          <li>Fixed: a fillet or chamfer on a rounded face's edge could pick a different edge after the file was reopened</li>
+          <li>Fixed: a fillet that could hang, a Shell that could give different results on different runs, and face moves that could take over a minute before giving up</li>
+          <li>Fixed: files with missing or damaged values are refused with the file and the value named, instead of opening with the value quietly dropped</li>
+          <li>Fixed: two running copies of the app no longer share one unsaved-work slot</li>
+          <li>Fixed: the sheet-metal flat pattern exported to DXF now cuts the whole blank</li>
+          <li>Fixed: placing a fastener, bearing or retaining ring is a single undo step</li>
+          <li>Fixed: building on Ubuntu 24.04 and 26.04</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.4" date="2026-10-22">
       <description>
         <p>Keep the dimension you just added.</p>
