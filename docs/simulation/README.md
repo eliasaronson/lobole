@@ -209,10 +209,19 @@ numbers for them, thread regions and face names, and:
   and its placed bodies;
 - a motion study (`motion::InputKey`): the definition (name and id aside,
   the panel's Preview or Validate override included), every occurrence with
-  its placement, every mate with its current value -- a run starts from the
-  pose the document is in, so a scrub or a `leave_at` moves the next run's
+  its placement, every mate with its current value -- a run walks from the
+  pose the document is in to its first sample, and where that walk begins
+  picks a linkage's branch, so a scrub or a drag moves the next run's
   inputs --, relations, configurations and the active one, through every
-  sub-assembly, and every placed (part, configuration).
+  sub-assembly, and every placed (part, configuration). A `leave_at` is
+  the exception: the pose it writes in comes from the result's own samples,
+  on the path the result describes, so `ApplyMotionSample` re-keys that
+  study's result to the posed assembly's hash (`RekeyAfterLeave`,
+  `src/ui/MotionActions.cpp`) -- the next `run_motion_study {leave_at}` is
+  reused, the result is not stale, and a project saved there reopens with
+  it current. The hash it was run for stays in the session's store, so an
+  undo back to that pose is answered too. Another study on the assembly is
+  not re-keyed: its start pose did move.
 
 A body's B-Rep is hashed as the project reads it back: written and read
 through BinTools (the baked geometry's format), with OCC's bookkeeping
@@ -724,8 +733,8 @@ verb that names a study for context (`add_load`, `add_refinement`,
   whose reads flip a plane's frame hashes as itself read back.
 - `tests/study_jobs_smoke.py`: job ids, a job cancelled with its
   connection and one that outlives it, a cancel by id, an unknown id
-  refused, a hung-up synchronous run stopping, reuse, and `leave_at` in one
-  solve.
+  refused, a hung-up synchronous run stopping, reuse, `leave_at` in one
+  solve, and every later `leave_at` reused while a real edit runs again.
 - `tests/test_fem.cpp` (`[fem]`): element-level checks (tet10 stiffness and
   stress without a mesher), mesher cases, and analytic benchmarks — uniaxial
   bar σ = F/A, cantilever deflection against Euler–Bernoulli, a Lamé

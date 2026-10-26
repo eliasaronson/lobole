@@ -391,7 +391,11 @@ together in order.
   placed parts' geometry, materials and size bands): `reused: true`,
   nothing computed,
   `recompute: true` to run anyway. So `run_motion_study {leave_at}` after
-  a run costs one solve. The result is saved with the project
+  a run costs one solve -- and so does every one after it: a pose left from
+  the result's own samples re-keys the result to that pose
+  ([studies as jobs](../simulation/README.md#studies-as-jobs)), so measuring
+  at a dozen samples does not run the study a dozen times, while a scrub,
+  a drag or any edit is an input again. The result is saved with the project
   (`motion/<id>-<slug>.result.json` with its placements in `.result.bin`,
   v153/v154) and read back when the assembly
   is opened or its tab comes up: current when its inputs hash as they did,
@@ -1044,7 +1048,7 @@ one.
   `assembly_propagation_smoke.py`, `nested_assembly_smoke.py`,
   `bom_smoke.py`, `exploded_smoke.py`, `motion_smoke.py`,
   `study_jobs_smoke.py` (job ids, a run cancelled with its client, reuse,
-  `leave_at` in one solve),
+  `leave_at` in one solve, and a later `leave_at` reused),
   `fastener_stack_smoke.py`, `drawing_assembly_smoke.py`,
   `flexible_subassembly_smoke.py`, `part_configuration_smoke.py` (one part
   placed in two configurations and two materials: BOM lines, mass, STEP
