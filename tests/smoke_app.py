@@ -113,6 +113,17 @@ class Scope:
                 "--"]
 
 
+
+# kExitNoRenderer (src/app/StartupReport.h): the app could not create a
+# renderer and said why. A smoke that needs a device skips on it (77).
+# Matching the message instead broke when the message was rewritten: the
+# offscreen smokes FAILED in a container without an ICD, where they skip.
+EXIT_NO_RENDERER = 3
+
+
+class NoRendererError(RuntimeError):
+    """The app exited with kExitNoRenderer before it listened."""
+
 def cgroup_dir(pid):
     """The cgroup v2 directory a process lives in, or None."""
     try:
@@ -464,9 +475,17 @@ def _spawn(binary, extra_args, env, timeout, headless, scope=None,
         except OSError:
             said = ""
         shutil.rmtree(tmp, ignore_errors=True)
+        code = proc.poll()
+        if code == EXIT_NO_RENDERER:
+            # The app's own "could not start a renderer" exit. Its message
+            # names the cause in words that change; the smokes that skip
+            # without a device match this phrase, which stays.
+            raise NoRendererError(
+                f"no usable Vulkan device: lobole exited {code}, its "
+                "no-renderer exit. It said:\n" + (said or "  (nothing)"))
         raise RuntimeError(
             f"lobole never reported a port within {timeout:g}s "
-            f"(exit={proc.poll()}). It said:\n"
+            f"(exit={code}). It said:\n"
             + (said or "  (nothing)"))
 
     return proc, port, log_path, tmp

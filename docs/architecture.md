@@ -779,6 +779,16 @@ bound it:
   for this reason. What overlaps is one lane's compile with another lane's
   suite.
 
+A stock-Ubuntu container is not this machine, and the suite has to hold
+there as it is: no Vulkan device (a smoke that needs one skips, 77, when the
+app exits with its no-renderer code 3, `smoke_app.NoRendererError`, not on
+the wording of its message), no `nix/patches` in its OpenCASCADE (the `[occ]`
+cases `SKIP()`, which is Catch2's exit 4 and ctest's `SKIP_RETURN_CODE`),
+the source mounted read-only (a test writes its output to a temporary
+directory, never the checkout's `scratch/`), and an older compiler (GCC 13
+on 24.04, which frees a range-for's temporary before C++23 says to:
+[conventions](conventions.md#rules-the-source-is-scanned-for)).
+
 Each lane writes its output to `.ci-local/lanes/<lane>.out`, printed whole
 at the end in lane order, then a table of every step's seconds and how long
 each suite queued for the lock. A failed build ends its own lane and no

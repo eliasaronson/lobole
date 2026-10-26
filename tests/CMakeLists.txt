@@ -284,16 +284,19 @@ file(MAKE_DIRECTORY "${LOBOLE_TEST_HOME}/state" "${LOBOLE_TEST_HOME}/config")
 # elements, so ENVIRONMENT takes the first and the second is read as another
 # property name — and the whole thing is silently dropped. It generated tests
 # with no ENVIRONMENT at all, which looked exactly like it had worked.
+# SKIP_RETURN_CODE 4 is Catch2's exit when every case it ran SKIP()ped, which
+# for one case per ctest test is a skip: the [occ] cases on a kernel without
+# nix/patches (stock Ubuntu's) were reported FAILED.
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      TEST_SPEC "~[reader_fuzz]~[occ]"
-                     PROPERTIES ENVIRONMENT
+                     PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT
                      "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 # The reader-fuzz families (docs/versioning/README.md#reader-fuzzing) with a
 # TIMEOUT of their own: a reader that never returns is stopped here, and
 # build/reader-fuzz-last-case.<family> names the case it was reading.
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      TEST_SPEC "[reader_fuzz]"
-                     PROPERTIES TIMEOUT 1200 ENVIRONMENT
+                     PROPERTIES TIMEOUT 1200 SKIP_RETURN_CODE 4 ENVIRONMENT
                      "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 # The reader-fuzz budget is CPU time: this case's read is pinned to one CPU
 # with four contending burners, so it takes five times its CPU in wall time,
@@ -313,7 +316,7 @@ set_tests_properties(reader_fuzz_budget_under_load PROPERTIES
 # 25, where a kernel without the patch still has it.
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      TEST_SPEC "[occ]"
-                     PROPERTIES TIMEOUT 60 ENVIRONMENT
+                     PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 4 ENVIRONMENT
                      "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 
 # Release metadata smoke: --version must exit before GLFW/Vulkan initialization,

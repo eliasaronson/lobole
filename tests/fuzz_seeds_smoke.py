@@ -46,9 +46,11 @@ SEEDS = list(range(40))
 # sphere cut leaves a face BRepCheck rejects, which the app refuses. 7.9
 # answers every one of them.
 KERNEL = {
-    "7.6.": {9: "boolean_failed", 13: "identity", 14: "identity",
-             15: "identity", 20: "identity", 29: "identity", 33: "identity",
-             34: "identity"},
+    # 14, 15 and 34 left the list when edge names took geometric numbers:
+    # a fillet or chamfer in each now stops at a limit before the design
+    # reaches the sphere, so 7.6 answers them clean, as 7.9 does.
+    "7.6.": {9: "boolean_failed", 13: "identity", 20: "identity",
+             29: "identity", 33: "identity"},
 }
 
 

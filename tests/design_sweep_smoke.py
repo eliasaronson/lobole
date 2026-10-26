@@ -22,7 +22,9 @@ point is held LOBOLE_TEST_SWEEP_MS so the job is still running when asked.
 Usage: design_sweep_smoke.py <path-to-designer-binary>
 """
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +36,7 @@ from lobole.sdk import connect  # noqa: E402
 from smoke_app import launch  # noqa: E402
 
 HOLD_MS = 150
+SCRATCH = tempfile.mkdtemp(prefix="design_sweep_smoke_")
 
 
 def expect(condition, message):
@@ -44,6 +47,10 @@ def expect(condition, message):
 def build_camera(port):
     """spec.py's variables on a first part, then the camera, as
     build_tilt.py builds it."""
+    # The generator makes its output directory on import; a test's goes in a
+    # private one (as tests/generator_runs.py does), never the checkout's
+    # scratch/, which a read-only source tree (CI's container mount) refuses.
+    os.environ.setdefault("LOBOLE_SCRATCH", SCRATCH)
     import build_tilt
     import spec
     app = connect(port)
@@ -174,4 +181,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        code = main()
+    finally:
+        shutil.rmtree(SCRATCH, ignore_errors=True)
+    sys.exit(code)
