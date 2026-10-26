@@ -28,11 +28,22 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// Never throws: after a commit git may run `maintenance --auto` in the
+// background, which creates and deletes `.git/objects/maintenance.lock`
+// while the tree is being deleted (test_gitvault.cpp's ScratchRepo says the
+// same). A second pass finds the lock gone; a leak is harmless.
+void RemoveTree(const fs::path& p) {
+  std::error_code ec;
+  fs::remove_all(p, ec);
+  if (ec)
+    fs::remove_all(p, ec);
+}
+
 fs::path Scratch(const char* name) {
   const fs::path p =
       fs::temp_directory_path() /
       ("lobole-trust-" + std::to_string(::getpid()) + "-" + name);
-  fs::remove_all(p);
+  RemoveTree(p);
   fs::create_directories(p);
   return p;
 }
@@ -83,7 +94,7 @@ TEST_CASE("A path a project names must stay inside it", "[trust]") {
   // A symlink in the project that points out of it.
   fs::create_directory_symlink(fs::temp_directory_path(), root / "parts" / "L");
   CHECK_FALSE(projectpaths::InsideProject(root, "parts/L").has_value());
-  fs::remove_all(root);
+  RemoveTree(root);
 }
 
 // A STEP file or a script names a part; the name became its folder on save,
@@ -110,7 +121,7 @@ TEST_CASE("A document whose name is a path is saved in a folder of its own",
   // And it opens again under that name.
   auto r = ui::ReadProject(proj.string());
   REQUIRE(r.has_value());
-  fs::remove_all(root);
+  RemoveTree(root);
 }
 
 TEST_CASE("A project whose document lies outside it is refused", "[trust]") {
@@ -135,7 +146,7 @@ TEST_CASE("A project whose document lies outside it is refused", "[trust]") {
     REQUIRE_FALSE(r.has_value());
     CHECK(r.error().find("project") != std::string::npos);
   }
-  fs::remove_all(root);
+  RemoveTree(root);
 }
 
 // AdoptStagedImports moves a staged import into the project and deletes the
@@ -163,7 +174,7 @@ TEST_CASE("Only a staged import is moved into the project", "[trust]") {
     setenv("XDG_STATE_HOME", saved.c_str(), 1);
   else
     unsetenv("XDG_STATE_HOME");
-  fs::remove_all(root);
+  RemoveTree(root);
 }
 
 // A project that arrives with its own .git (a zip, not a clone) brings config
@@ -200,7 +211,7 @@ TEST_CASE("A repository whose config runs commands is not used",
   CHECK(GitVault::UntrustedReason(dir.string()).find("filter.x.clean") !=
         std::string::npos);
   CHECK_FALSE(fs::exists(marker));
-  fs::remove_all(dir);
+  RemoveTree(dir);
 }
 
 TEST_CASE("A .git file is not followed to another repository", "[trust][git]") {
@@ -214,7 +225,7 @@ TEST_CASE("A .git file is not followed to another repository", "[trust][git]") {
       << "gitdir: " << (root / "other" / ".git").string() << "\n";
   CHECK_FALSE(GitVault::UntrustedReason((root / "proj").string()).empty());
   CHECK_FALSE(GitVault::IsRepo((root / "proj").string()));
-  fs::remove_all(root);
+  RemoveTree(root);
 }
 
 // A hook a repository carries never runs, even in one this app trusts.
@@ -233,7 +244,7 @@ TEST_CASE("A repository's hooks do not run on save", "[trust][git]") {
   std::string error;
   CHECK(GitVault::CommitAll(dir.string(), "x", &error));
   CHECK_FALSE(fs::exists(marker));
-  fs::remove_all(dir);
+  RemoveTree(dir);
 }
 
 // A remote's name reaches git as an argument; `--upload-pack=<command>` was
@@ -263,7 +274,7 @@ TEST_CASE("A remote name is never read as an option", "[trust][git]") {
   CHECK_FALSE(GitVault::Clone("--upload-pack=touch '" + marker.string() + "'",
                               (root / "clone").string(), &error));
   CHECK_FALSE(fs::exists(marker));
-  fs::remove_all(root);
+  RemoveTree(root);
 }
 
 // An `ext::` URL is a command. Git refuses it by default; a person's own
@@ -294,5 +305,5 @@ TEST_CASE("An ext:: remote does not run, whatever the user's config says",
   else
     unsetenv("GIT_CONFIG_GLOBAL");
   fs::remove(marker);
-  fs::remove_all(root);
+  RemoveTree(root);
 }

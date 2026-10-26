@@ -160,7 +160,12 @@ TEST_CASE("Reader cases: comparing with a damaged version says why it does "
   CHECK(change.summary.find("does not load") != std::string::npos);
   CHECK(change.summary.find(feature.filename().string()) != std::string::npos);
   CHECK(change.summary.find("unknown key 'colour'") != std::string::npos);
-  fs::remove_all(dir);
+  // git may still be deleting maintenance.lock in a background
+  // `maintenance --auto` after the commits: a second pass finds it gone.
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  if (ec)
+    fs::remove_all(dir, ec);
 }
 
 // A save prunes a collection that became EMPTY, not only one that shrank:
