@@ -106,7 +106,7 @@ are upper bounds on a loaded machine; the suites print their own counts.
 | **inner loop** | `tools/test-fast.sh` | **~90 s** |
 | GUI | `./tools/gui-tests-xvfb.sh` | ~130 s |
 | the python `gui` ones | `tools/ctest -L pygui -j1` | ~110 s |
-| the big generators | `tools/ctest -C generators -L generators -j2` (generators/README.md#the-big-generators-as-tests) | ~6 min |
+| the big generators | `tools/ctest -C generators -L generators -j2` (generators/README.md#the-big-generators-as-tests) | ~45 min |
 | random designs | `tools/fuzz.py run --count 200` (docs/modeling/README.md#random-designs; background past 600 s) | ~1 min |
 | the action matrix | `tools/ctest -C action_matrix -L action_matrix -j4` (docs/modeling/README.md#action-matrix; `tools/action_matrix.py run --profile` says where the time goes) | ~16 min |
 | damaged files at every reader | `tools/reader-fuzz.py run --seed S` (docs/versioning/README.md#reader-fuzzing) | slow; the sample is in the headless suite |

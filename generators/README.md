@@ -105,7 +105,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 `XDG_STATE_HOME` and config) and writing to a private directory, never
 `scratch/`:
 
-    tools/ctest -C generators -L generators -j2      # ~6 min
+    tools/ctest -C generators -L generators -j2      # ~45 min, most of it the Strandbeest and the clock
 
 <!-- generator-tests: made by tools/generator_tests.py -->
 | test | runs | measured alone | budget |
