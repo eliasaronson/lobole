@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/MotionStudy.h"
+#include "cad/KernelThreads.h"
 #include "core/Angles.h"
 
 #include "core/CollisionCache.h"
@@ -965,7 +966,15 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
   for (size_t k = 0; k < cands.size(); k++)
     if (cands[k].repeatOf < 0)
       first.push_back(k);
-  parallel::For(first.size(), [&](size_t i) { check(first[i]); });
+  // An exact check is booleans, and on a kernel whose error-handler stack
+  // is shared, more threads of them are slower (cad/KernelThreads.h). A
+  // mesh check is arithmetic, with no lock to queue on.
+  const bool booleans =
+      exact || std::any_of(cands.begin(), cands.end(),
+                           [](const Cand& c) { return c.rigid; });
+  const size_t cap =
+      booleans ? cad::BooleanWorkers(parallel::Workers()) : parallel::Workers();
+  parallel::For(first.size(), [&](size_t i) { check(first[i]); }, cap);
   // A repeat takes its original's answer when that was clear, and is asked
   // itself when it was a clash or unknown.
   std::vector<size_t> again;
@@ -983,7 +992,7 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
       again.push_back(k);
     }
   }
-  parallel::For(again.size(), [&](size_t i) { check(again[i]); });
+  parallel::For(again.size(), [&](size_t i) { check(again[i]); }, cap);
 
   // How far the batch got: the leading samples whose every check is done.
   size_t complete = placed.size();

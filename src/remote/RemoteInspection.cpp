@@ -6,6 +6,7 @@
 #include "remote/RemotePrint.h"
 
 #include "cad/CADKernel.h"
+#include "cad/KernelThreads.h"
 #include "common/BuildInfo.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
@@ -529,10 +530,14 @@ struct SweepPlan {
 // The workers run under parallel::For, so a pair whose own check is
 // parallel inside (ExactDistance's face pairs) gets this worker's share of
 // the machine rather than a machine's worth of threads per worker.
+//
+// `booleans` says the pairs are exact checks, OpenCASCADE booleans, which a
+// kernel with a shared error-handler stack makes slower the more threads
+// run them (cad/KernelThreads.h).
 template <typename C, typename R>
 size_t RunSweep(SweepPlan& plan, double deadlineSeconds, C&& compute,
                 R&& record, const std::atomic<bool>* cancel = nullptr,
-                std::atomic<double>* fraction = nullptr) {
+                std::atomic<double>* fraction = nullptr, bool booleans = true) {
   using Result = decltype(compute(size_t{0}, size_t{0}));
   const auto start = std::chrono::steady_clock::now();
   const bool timed = deadlineSeconds > 0.0;
@@ -579,8 +584,9 @@ size_t RunSweep(SweepPlan& plan, double deadlineSeconds, C&& compute,
   // about 100, so a share of 22 / 7 left the long one on three threads for a
   // minute while the rest sat idle. Oversubscribing while several long ones
   // overlap is the cheaper error; the scheduler time-slices them.
-  const size_t threads = std::min<size_t>(n, parallel::Workers());
   const size_t whole = parallel::Workers();
+  const size_t threads =
+      std::min<size_t>(n, booleans ? cad::BooleanWorkers(whole) : whole);
   parallel::For(threads, [&](size_t) {
     const size_t was = parallel::detail::tlShare;
     parallel::detail::tlShare = whole;
@@ -2374,7 +2380,7 @@ json RunContactSweep(ContactSweep& sw, const std::atomic<bool>* cancel,
           nearMisses.push_back(std::move(miss));
         }
       },
-      cancel, fraction);
+      cancel, fraction, /*booleans=*/!sw.mesh);
 
   std::map<size_t, std::vector<std::string>> comps;
   for (size_t i = 0; i < ents.size(); ++i)
@@ -4170,7 +4176,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                   hit["press_fit_refused"] = FitsRefusedJson(a.contact);
               }
               pairs.push_back(std::move(hit));
-            });
+            },
+            nullptr, nullptr, /*booleans=*/mode != "mesh");
         // Under BOTH names, and the duplication is the point. This sweep
         // only ever pushes clashing pairs, so its `pairs` holds what
         // contact_report calls `clashes` — while contact_report's own

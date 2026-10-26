@@ -4,6 +4,7 @@
 #include "core/DesignSweep.h"
 
 #include "cad/CADKernel.h" // ArmOccSignalHandlers
+#include "cad/KernelThreads.h"
 #include "core/Parallel.h"
 #include "core/PartMeasures.h"
 #include "core/features/SketchFeature.h"
@@ -515,8 +516,11 @@ json Run(const Inputs& in, Progress& progress) {
   json base;
   std::string error;
   std::mutex errorMutex;
-  const size_t workers =
-      std::max<size_t>(1, std::min(parallel::Workers(), chunks.size()));
+  // Each chunk regenerates the document: booleans, which a kernel with a
+  // shared error-handler stack makes slower the more threads run them
+  // (cad/KernelThreads.h).
+  const size_t workers = std::max<size_t>(
+      1, std::min(cad::BooleanWorkers(parallel::Workers()), chunks.size()));
   parallel::For(workers, [&](size_t) {
     // OCC's signal handler is per thread; a pool thread has none yet.
     ArmOccSignalHandlers();

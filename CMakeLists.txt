@@ -354,6 +354,7 @@ set(core_sources
     src/cad/CADKernel.cpp
     src/cad/OccPatches.cpp
     src/cad/OccSignals.cpp
+    src/cad/KernelThreads.cpp
     src/cad/CADMeshConverter.cpp
     src/cad/CADMaterials.cpp
     src/cad/MeshExport.cpp

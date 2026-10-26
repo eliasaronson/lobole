@@ -68,11 +68,17 @@ inline size_t Workers() {
 // Calls `body(k)` for every k in [0, n). No ordering guarantee, so `body`
 // must touch nothing shared — collect into `results[k]` and merge afterwards
 // in k order, which is what keeps a response reproducible.
-template <typename F> void For(size_t n, F&& body) {
+//
+// `cap`, when given, bounds the threads below this worker's share: a loop
+// whose items are OpenCASCADE booleans passes `cad::BooleanWorkers(...)`
+// (cad/KernelThreads.h), since on a kernel that keeps one lock for every
+// thread's exception handlers, more threads of booleans are slower.
+template <typename F>
+void For(size_t n, F&& body, size_t cap = static_cast<size_t>(-1)) {
   if (n == 0)
     return;
   std::atomic<size_t> next{0};
-  const size_t budget = Workers();
+  const size_t budget = std::max<size_t>(1, std::min(Workers(), cap));
   const size_t threads = std::min<size_t>(n, budget);
   // What a For nested in `body` may use: this loop's budget split between
   // its threads, the remainder going to the first ones.
