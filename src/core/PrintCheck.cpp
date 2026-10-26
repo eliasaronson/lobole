@@ -1487,10 +1487,15 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   }
   const int nu = static_cast<int>(units.size());
   const glm::dmat4 I(1.0);
+  // Each piece's box once, not once for every pair it is in.
+  std::vector<Measure::OrientedBox> boxes;
+  boxes.reserve(units.size());
+  for (const Unit& u : units)
+    boxes.push_back(Measure::OrientedBoxOf(u.one, I));
   std::vector<std::pair<int, int>> touching;
   for (int i = 0; i < nu; ++i)
     for (int j = i + 1; j < nu; ++j) {
-      if (Measure::SeparatedByOBB(units[i].one, I, units[j].one, I, prune)) {
+      if (Measure::SeparatedByOBB(boxes[i], boxes[j], prune)) {
         r.clearance.pruned++;
         continue;
       }

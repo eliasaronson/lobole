@@ -753,14 +753,23 @@ Bnd_OBB PlacedOBB(const std::vector<Body>& bodies, const glm::dmat4& xf) {
 
 } // namespace
 
-bool SeparatedByOBB(const std::vector<Body>& a, const glm::dmat4& xfA,
-                    const std::vector<Body>& b, const glm::dmat4& xfB,
-                    double gap) {
+OrientedBox OrientedBoxOf(const std::vector<Body>& bodies,
+                          const glm::dmat4& xf) {
   try {
-    Bnd_OBB ba = PlacedOBB(a, xfA);
-    Bnd_OBB bb = PlacedOBB(b, xfB);
-    if (ba.IsVoid() || bb.IsVoid())
-      return false; // nothing to judge by: let the exact check decide
+    auto obb = std::make_shared<Bnd_OBB>(PlacedOBB(bodies, xf));
+    if (!obb->IsVoid())
+      return OrientedBox{std::move(obb)};
+  } catch (const Standard_Failure&) {
+  }
+  return {}; // nothing to judge by
+}
+
+bool SeparatedByOBB(const OrientedBox& a, const OrientedBox& b, double gap) {
+  if (!a.box || !b.box)
+    return false; // nothing to judge by: let the exact check decide
+  try {
+    Bnd_OBB ba = *a.box;
+    Bnd_OBB bb = *b.box;
     // Half the gap on each box, so two boxes exactly `gap` apart still meet.
     if (gap > 0.0) {
       ba.Enlarge(gap * 0.5);
@@ -770,6 +779,12 @@ bool SeparatedByOBB(const std::vector<Body>& a, const glm::dmat4& xfA,
   } catch (const Standard_Failure&) {
     return false; // never reject a pair because the prefilter failed
   }
+}
+
+bool SeparatedByOBB(const std::vector<Body>& a, const glm::dmat4& xfA,
+                    const std::vector<Body>& b, const glm::dmat4& xfB,
+                    double gap) {
+  return SeparatedByOBB(OrientedBoxOf(a, xfA), OrientedBoxOf(b, xfB), gap);
 }
 
 // Only explicitly annotated, matching coaxial thread spans may be relieved.

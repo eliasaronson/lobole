@@ -9,11 +9,13 @@
 #include "core/ThreadStandards.h"
 #include "core/Units.h"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+class Bnd_OBB;
 class TopoDS_Edge;
 class TopoDS_Face;
 
@@ -249,6 +251,19 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::dmat4& xf,
                                   const glm::dmat4& xfA,
                                   const std::vector<Body>& b,
                                   const glm::dmat4& xfB, double gap);
+
+// The same test with each side's box computed once: a set query over n
+// pieces asks n^2 / 2 pairs, and a box is a pass over the B-Rep's faces
+// (check_print's clearance on a 123-piece plate spent 45 s building the same
+// boxes again for every pair). `OrientedBoxOf` holds no box when the set has
+// no shape or the box could not be built, and that separates nothing.
+struct OrientedBox {
+  std::shared_ptr<const Bnd_OBB> box; // null: nothing to judge by
+};
+[[nodiscard]] OrientedBox OrientedBoxOf(const std::vector<Body>& bodies,
+                                        const glm::dmat4& xf);
+[[nodiscard]] bool SeparatedByOBB(const OrientedBox& a, const OrientedBox& b,
+                                  double gap);
 
 // V4 compare_geometry: boolean diff between two placed body sets. missing =
 // vol(A − B) (reference not covered), extra = vol(B − A) (beyond the
