@@ -317,7 +317,9 @@ ElementMap PropagateNames(const std::vector<NamedInput>& inputs,
 // curve's parameter midpoint; the rest -- length, curve type, the two end
 // points as an unordered pair -- is only computed (`full`) for edges whose
 // midpoints tie, which on a valid face is rare.
-constexpr double kUGrid = Precision::Confusion() * 100.0;
+// const, not constexpr: Precision::Confusion() is constexpr only from OCC
+// 7.8, and Ubuntu 24.04 ships 7.6.
+const double kUGrid = Precision::Confusion() * 100.0;
 
 using GridPoint = std::array<long long, 3>;
 
