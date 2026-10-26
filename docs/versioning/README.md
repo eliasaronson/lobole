@@ -686,7 +686,9 @@ line and the list.
   counts (features,
   occurrences, views, setups, …) must be the original's unless a lossy drop
   was reported; bodies only where the damage cannot change the model;
-- budget: 2 s of CPU time a case (20 s under `ENABLE_SANITIZERS`), or four
+- budget: 2 s of CPU time a case (60 s under `ENABLE_SANITIZERS`: twice
+  what the settings file's grown array costs under ASan on the slowest core,
+  28.8 s pinned there against 7.6 s on a P-core), or four
   times the unmutated input's read when that is longer (a part that rebuilds
   its blob takes its rebuild's time), plus half that for every megabyte the
   damage wrote (a grown array is 8 MB of honest parsing; a quadratic reader

@@ -894,11 +894,15 @@ std::string CaseFile(const Case& c) {
 
 } // namespace
 
-// Under ASan a read of a grown array (a million-element list) took 10 s
-// with the suite running beside it; a hang is still minutes.
+// Under ASan a read of a grown array (a million-element list) is forty
+// times its plain cost, and the core it lands on multiplies that: the
+// settings file's grown array is 7.6 s of CPU pinned to a P-core, 15.2 s on
+// an E-core and 28.8 s on this machine's slowest (2.5 GHz) cores, so 20 s
+// failed whenever ctest put it there. Twice the slowest core's; a hang is
+// still minutes.
 double Budget() {
 #ifdef LOBOLE_READER_FUZZ_SANITIZED
-  return 20.0;
+  return 60.0;
 #else
   return 2.0;
 #endif
