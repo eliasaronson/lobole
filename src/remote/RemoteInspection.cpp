@@ -17,6 +17,7 @@
 #include "core/FitBands.h"
 #include "core/FitStandards.h"
 #include "core/FrameMath.h"
+#include "core/InputHash.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/MeasureSeal.h"
@@ -37,6 +38,7 @@
 #include "core/tube/CutList.h"
 #include "core/tube/Rules.h"
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteRequirements.h"
 #include "render/ClipPlanes.h"
 #include "ui/AppState.h"
 
@@ -81,6 +83,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <set>
@@ -1489,11 +1492,16 @@ static constexpr MethodDoc InspectionMethods[] = {
      "naming it; an occurrence with matter that no step places is listed "
      "in `missing` and fails the sequence. A placed part's sections are cut "
      "once per direction and moved to each later step's path (`sections`: "
-     "{reused, cut, evicted} solids; a step's `solids`). Runs as an "
-     "assembly_sequence job, off the frame.",
+     "{reused, cut, evicted} solids; a step's `solids`). The answer is "
+     "kept under everything it reads -- the assembly, every placed part's "
+     "bodies and threads and tolerances, the sequence and its allowance -- "
+     "and a check of the same again (this RPC, the assembly_sequence "
+     "requirement, Play) is answered from it, `reused: true` and the "
+     "timings those of the run it kept. Runs as an assembly_sequence job, "
+     "off the frame.",
      "", remote::NoFlags,
      "pass:bool, allowance_mm:number, steps:object[], missing:string[], "
-     "seconds:number, sections:object"},
+     "seconds:number, sections:object, reused?:bool"},
     {"check_seal",
      "Whether two occurrences' contact SEALS (docs/inspect/README.md#seals) "
      "{a, b: top-level occurrence ids or names}: where they overlap (a "
@@ -2887,6 +2895,9 @@ struct SequenceCheck {
   std::vector<Step> steps;
   std::vector<std::string> missing; // occurrences with matter not placed
   double allowanceMm = 0.0;
+  // Everything it was read from (remote::SequenceInputKey): the answer is
+  // kept under it.
+  uint64_t key = 0;
 };
 
 namespace {
@@ -2937,6 +2948,7 @@ std::shared_ptr<const SequenceCheck> ReadSequenceCheck(ui::AppState& state) {
                              "one with set_assembly_sequence");
   auto c = std::make_shared<SequenceCheck>();
   c->allowanceMm = seq.allowanceMm;
+  c->key = SequenceInputKey(state, asmDoc);
   const assembly::PartResolver parts = ui::PartResolverFor(state);
   const assembly::AssemblyResolver assemblies = ui::AssemblyResolverFor(state);
   // The assembly at the current pose: the document itself until a pose
@@ -3229,8 +3241,59 @@ std::shared_ptr<const SequenceCheck> ReadSequenceCheck(ui::AppState& state) {
   return c;
 }
 
+namespace {
+
+// The answers of the last few sequence checks, by their input key
+// (docs/assemblies/README.md#a-check-answered-again): check_assembly_sequence,
+// the assembly_sequence requirement and Play each run the check, often one
+// after another on an assembly nothing has changed in -- the clock's
+// generator checks a stage, then states it as a requirement and checks that.
+// Written and read on whichever thread runs the check.
+struct KeptSequenceAnswers {
+  std::mutex mutex;
+  inputhash::Store<json> store{8};
+};
+
+KeptSequenceAnswers& KeptAnswers() {
+  static KeptSequenceAnswers kept;
+  return kept;
+}
+
+json ComputeSequenceCheck(const SequenceCheck& c,
+                          const std::atomic<bool>& cancel,
+                          std::atomic<double>& fraction);
+
+} // namespace
+
 json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
                       std::atomic<double>& fraction) {
+  KeptSequenceAnswers& kept = KeptAnswers();
+  if (c.key != 0) {
+    std::shared_ptr<const json> hit;
+    {
+      std::lock_guard lock(kept.mutex);
+      hit = kept.store.Find(c.key);
+    }
+    if (hit) {
+      json r = *hit;
+      r["reused"] = true;
+      fraction.store(1.0);
+      return r;
+    }
+  }
+  json r = ComputeSequenceCheck(c, cancel, fraction);
+  if (c.key != 0 && !cancel.load()) {
+    std::lock_guard lock(kept.mutex);
+    kept.store.Put(c.key, std::make_shared<const json>(r));
+  }
+  return r;
+}
+
+namespace {
+
+json ComputeSequenceCheck(const SequenceCheck& c,
+                          const std::atomic<bool>& cancel,
+                          std::atomic<double>& fraction) {
   json steps = json::array();
   bool pass = c.missing.empty();
   const auto piece = [&](int pose,
@@ -3358,6 +3421,8 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
             {"cut", cache.stats.cut},
             {"evicted", cache.stats.evicted}}}};
 }
+
+} // namespace
 
 json SealJson(const Measure::SealReport& r) {
   json rings = json::array();

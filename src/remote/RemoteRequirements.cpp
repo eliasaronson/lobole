@@ -527,6 +527,21 @@ uint64_t AssemblyKey(ui::AppState& state, const AssemblyDocument& asmDoc) {
   return h.Digest();
 }
 
+} // namespace
+
+uint64_t SequenceInputKey(ui::AppState& state, const AssemblyDocument& asmDoc) {
+  inputhash::Hasher h;
+  // The check's own version: a change to what it answers bumps it.
+  h.Str("assembly-sequence/1");
+  // Every placed part and sub-assembly, as the fit checks read them, and
+  // the sequence as saved: its steps and its allowance.
+  h.U64(AssemblyKey(state, asmDoc));
+  h.Json(DocumentIO::AssemblySequenceToJson(asmDoc.GetSequence()));
+  return h.Digest();
+}
+
+namespace {
+
 uint64_t JobKey(ui::AppState& state, const cam::JobDocument& job) {
   inputhash::Hasher h;
   h.Str("requirement-job/1");
@@ -747,9 +762,8 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
         }
       }
     } else if (kind == "assembly_sequence") {
-      // Every placed part, and the sequence itself.
-      h.U64(AssemblyKey(state, *a));
-      h.Json(DocumentIO::AssemblySequenceToJson(a->GetSequence()));
+      // The key the check's own answer is kept under.
+      h.U64(SequenceInputKey(state, *a));
     } else {
       h.U64(AssemblyKey(state, *a));
     }

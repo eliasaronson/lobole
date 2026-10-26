@@ -243,6 +243,52 @@ def poses(d):
     expect(check(d)["pass"], "and the cap still goes home at it")
 
 
+def without_reused(r):
+    return {k: v for k, v in r.items() if k != "reused"}
+
+
+def kept_answers(d, req, right, wrong):
+    """The check's answer is kept under everything it reads
+    (docs/assemblies/README.md#a-check-answered-again): asked again of the
+    same assembly it is answered from that, the requirement too; an edit to
+    the assembly, to the sequence or to a placed part checks again."""
+    d.call("set_assembly_sequence", steps=right, allowance_mm=0.03)
+    first = check(d)
+    expect(first["pass"] and "reused" not in first,
+           f"a sequence not checked before is checked: {first}")
+    again = check(d)
+    expect(again.get("reused") is True,
+           f"asked again unchanged, the answer is reused: {again}")
+    expect(without_reused(again) == first,
+           f"and it is the same answer: {again} vs {first}")
+    row = d.call("check_requirements", ids=[req])["requirements"][0]
+    expect(row["state"] == "pass"
+           and row.get("detail", {}).get("reused") is True,
+           f"the requirement reads the kept answer: {row}")
+    # The assembly: another washer, which no step places.
+    extra = d.call("add_occurrence", part="washer", name="washer 2")["id"]
+    r = check(d)
+    expect("reused" not in r and not r["pass"]
+           and r["missing"] == ["washer 2"],
+           f"an occurrence added is checked again: {r}")
+    d.call("remove_occurrence", id=extra)
+    r = check(d)
+    expect(r.get("reused") is True and without_reused(r) == first,
+           f"removed again, it is the assembly answered before: {r}")
+    # The sequence: the pin before the fork, which its head blocks.
+    d.call("set_assembly_sequence", steps=wrong, allowance_mm=0.03)
+    r = check(d)
+    expect("reused" not in r and not r["pass"],
+           f"the order changed is checked again: {r}")
+    # A placed part: the pin's head cut away, the fork comes down past it.
+    d.call("set_active_part", part="pin")
+    cylinder(d, (0, 0, 24.5), "z", 6.0, 5, "no head", mode="cut")
+    d.call("set_active_part", part="clevis")
+    r = check(d)
+    expect("reused" not in r and r["pass"],
+           f"the pin edited is checked again, and now goes: {r}")
+
+
 def main(binary):
     env = dict(os.environ)
     # Holds each check's job before it computes (tests only), so the smoke
@@ -353,6 +399,8 @@ def main(binary):
         row = d.call("check_requirements", ids=[req])["requirements"][0]
         expect(row["state"] == "fail",
                f"and fails once the order is wrong: {row}")
+
+        kept_answers(d, req, right, wrong)
 
         # ---- The split bearing -------------------------------------------
         d.call("add_part", name="block")

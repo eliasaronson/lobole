@@ -575,3 +575,40 @@ TEST_CASE("An autosave writes no study result", "[fem][studyjobs][autosave]") {
   CHECK(text.find("input_hash") == std::string::npos);
   fs::remove_all(dir);
 }
+
+// A screw goes on by its marked thread's pitch and hand
+// (docs/assemblies/README.md#a-check-answered-again), and a cosmetic Thread
+// changes those without changing the shape: a body's hash moves with its
+// thread marks, or an assembly sequence's kept answer would outlive a
+// pitch edit. A body without any keeps the hash it had.
+TEST_CASE("A body's input hash moves with its thread marks",
+          "[studyjobs][insertion]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 10, 10, 10));
+  doc.Regenerate();
+  REQUIRE(doc.GetBodies().size() == 1);
+  const auto key = [](const Body& b) {
+    inputhash::Hasher h;
+    h.Bodies({b});
+    return h.Digest();
+  };
+  Body plain = doc.GetBodies()[0];
+  const uint64_t none = key(plain);
+  Body marked = plain;
+  ThreadMark m;
+  m.face.name = "Face1";
+  m.designation = "M6x1";
+  m.majorDia = 6.0;
+  m.pitch = 1.0;
+  marked.threads.push_back(m);
+  const uint64_t m6 = key(marked);
+  CHECK(m6 != none);
+  marked.threads[0].pitch = 0.75;
+  CHECK(key(marked) != m6);
+  marked.threads[0].pitch = 1.0;
+  marked.threads[0].rightHand = false;
+  CHECK(key(marked) != m6);
+  marked.threads[0].rightHand = true;
+  CHECK(key(marked) == m6);
+}

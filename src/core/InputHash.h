@@ -48,8 +48,9 @@ public:
   // forty times writes it once.
   void Shape(const CADShape& shape);
   // Each body: name, material (with the library's numbers for it),
-  // reference flag, the thread regions a contact check reads, the face
-  // names a load resolves through, and the shape.
+  // reference flag, the thread regions a contact check reads and the
+  // thread marks a screw goes on by, the face names a load resolves
+  // through, and the shape.
   void Bodies(const std::vector<Body>& bodies);
   uint64_t Digest() const { return h_; }
 

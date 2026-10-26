@@ -94,6 +94,9 @@ std::string NoMatterWhy(ui::AppState& state, uint64_t occurrenceId);
 struct SequenceCheck;
 std::shared_ptr<const SequenceCheck> ReadSequenceCheck(ui::AppState& state);
 // {pass, allowance_mm, steps[], missing[]}; `cancel` stops it between steps.
+// A check whose inputs (remote::SequenceInputKey) are those of one answered
+// lately is answered with that answer, `reused: true` added: the RPC, the
+// assembly_sequence requirement and Play share them.
 nlohmann::json RunSequenceCheck(const SequenceCheck& c,
                                 const std::atomic<bool>& cancel,
                                 std::atomic<double>& fraction);

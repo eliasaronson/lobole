@@ -223,6 +223,27 @@ void Hasher::Bodies(const std::vector<Body>& bodies) {
           Str("printed_press");
       }
     }
+    // The threads its faces carry: a screw goes on by its marked thread's
+    // pitch and hand, which a Thread feature changes without changing the
+    // shape (a cosmetic one). Only when there are any, as above.
+    if (!b.threads.empty()) {
+      Str("threads");
+      U64(b.threads.size());
+      for (const ThreadMark& t : b.threads) {
+        U64(t.face.featureId);
+        Str(t.face.name);
+        U64(t.featureId);
+        Str(t.designation);
+        F64(t.majorDia);
+        F64(t.pitch);
+        Str(t.threadClass);
+        U64(t.rightHand ? 1 : 0);
+        U64(t.external ? 1 : 0);
+        F64(t.length);
+        U64(t.modeled ? 1 : 0);
+        F64(t.flankDeg);
+      }
+    }
     // A load or a refinement resolves its face through these.
     U64(b.createdBy);
     U64(b.elementMap.names.size());

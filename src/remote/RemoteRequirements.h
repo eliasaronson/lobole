@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 
+class AssemblyDocument;
 namespace ui {
 struct AppState;
 }
@@ -31,6 +32,16 @@ std::optional<nlohmann::json> HandleRequirementsRpc(ui::AppState& state,
                                                     const RpcParams& params);
 
 std::span<const MethodDoc> RequirementMethodDocs();
+
+// Everything an assembly sequence check reads
+// (docs/assemblies/README.md#assembly-sequences), hashed: the assembly's
+// content and every sub-assembly's, every placed part's bodies (shapes,
+// thread marks, face names) and the tolerances and print process a fit is
+// judged by, and the sequence as saved. The `assembly_sequence`
+// requirement's staleness and the check's kept answer
+// (remote::RunSequenceCheck) both read it, so what one calls fresh the
+// other does too.
+uint64_t SequenceInputKey(ui::AppState& state, const AssemblyDocument& asmDoc);
 
 // Whether `method` is one of this module's: they answer requirement rows
 // of their own.
