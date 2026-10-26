@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+#include <unistd.h>
+
 namespace fs = std::filesystem;
 
 // Determinism: the same recipe builds the same geometry, every time.
@@ -159,8 +161,10 @@ TEST_CASE("Determinism: a save/load round trip rebuilds the same bodies",
   // is only meaningful if a plain load is reproducible in the first place.
   const std::vector<fs::path> files = GoldenDocuments();
   REQUIRE(!files.empty());
+  // Named for this process: two trees running the suite at once share /tmp.
   const fs::path tmp =
-      fs::temp_directory_path() / "designer_determinism_roundtrip.json";
+      fs::temp_directory_path() / ("designer_determinism_roundtrip_" +
+                                   std::to_string(::getpid()) + ".json");
   for (const fs::path& file : files) {
     INFO("golden " << file.filename().string());
     auto original = DocumentIO::Load(file.string());
