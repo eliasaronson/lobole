@@ -442,7 +442,13 @@ lane_pixel() {
 # One lane per independent chain, listed in the order a serial run takes them
 # and the report prints them.
 lane_names=() lane_cmds=()
-add_lane() { lane_names+=("$1"); shift; lane_cmds+=("$*"); }
+# A lane's command is kept QUOTED (printf %q) and run with eval, so an
+# argument with spaces in it -- a matrix entry whose test exclusion is
+# "Assembly import plan|..." or whose extra packages are a list -- reaches the
+# lane function as the one argument it was. Stored as "$*" and expanded
+# unquoted, it was word-split: 24.04's exclusion became apt packages and
+# 26.04 lost three of its four extra packages (tools/ci-local-selftest.sh).
+add_lane() { lane_names+=("$1"); shift; lane_cmds+=("$(printf '%q ' "$@")"); }
 [ "$run_nix" = 1 ] && add_lane nix lane_nix
 [ "$run_asan" = 1 ] && add_lane asan lane_asan
 [ "$run_tsan" = 1 ] && add_lane tsan lane_tsan
@@ -475,8 +481,7 @@ run_lane() {
   failures=0  # a serial lane would otherwise start from the lanes before it
   trap 'echo "$failures" > "$lanes_dir/$lane.failures"; rm -f -- "${lanes_dir:?}/${lane:?}.alive"' EXIT
   : > "$lanes_dir/$lane.times"
-  # shellcheck disable=SC2086  # a lane function and its argument, split on purpose
-  ${lane_cmds[$1]}
+  eval "${lane_cmds[$1]}"
 }
 
 # A finished lane's failures, added to the run's: a lane that stopped without

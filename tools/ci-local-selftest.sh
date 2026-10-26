@@ -15,7 +15,9 @@
 #   - a clean run exits 0;
 #   - a lane whose build fails is reported, the other lanes still finish, and
 #     the run exits non-zero;
-#   - --serial runs one step at a time.
+#   - --serial runs one step at a time;
+#   - a matrix entry's test exclusion and extra packages reach its container
+#     whole, spaces and all (a planted entry, ubuntu:99.04, carries both).
 # An argument names another copy of the script to test (a planted break).
 set -uo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,6 +35,20 @@ run() {
   mkdir -p "$fake/tools" "$fake/.github/workflows" "$fake/tests" "$out/bin"
   cp "$script" "$fake/tools/ci-local.sh"
   cp "$repo/.github/workflows/ci.yml" "$fake/.github/workflows/"
+  # A planted matrix entry whose exclusion and package list both hold spaces:
+  # what a lane must hand its container as ONE argument each.
+  python3 - "$fake/.github/workflows/ci.yml" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "        include:\n"
+assert anchor in s, "ci.yml has no matrix include: to plant an entry in"
+s = s.replace(anchor, anchor +
+    '          - image: ubuntu:99.04\n'
+    '            exclude_tests: "Planted case one|Planted case two"\n'
+    '            extra_packages: "planted-pkg-a planted-pkg-b"\n', 1)
+open(p, "w").write(s)
+PY2
   : > "$out/events"
   export EV="$out/events" FAIL="$fail"
 
@@ -60,7 +76,8 @@ EOF
   cat > "$out/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
-  build) exec work image "${4}" 0.3 0 ;;
+  build) printf '%s\t%s\n' "$4" "$(grep '^RUN' "$5/Dockerfile")" >> "$EV.dockerfiles"
+         exec work image "${4}" 0.3 0 ;;
   ps) exit 0 ;;
   run)
     name=""; for ((i=1;i<=$#;i++)); do [ "${!i}" = --name ] && { k=$((i+1)); name="${!k}"; }; done
@@ -68,7 +85,9 @@ case "$1" in
     if [[ "$cmd" == *"cmake --build"* ]]; then
       j=$(sed -n 's/.*cmake --build \/b -j\([0-9]*\).*/\1/p' <<< "$cmd")
       exec work build "$name" 2 "$j"
-    elif [[ "$cmd" == *ctest* ]]; then exec work suite "$name" 1.5 0
+    elif [[ "$cmd" == *ctest* ]]; then
+      printf '%s\t%s\n' "$name" "$cmd" >> "$EV.suites"
+      exec work suite "$name" 1.5 0
     else exit 0; fi ;;
 esac
 EOF
@@ -125,6 +144,14 @@ check "build -j in flight <= $BUDGET (peak $pb)" "$([ "$pb" -le "$BUDGET" ]; ech
 check "one suite at a time (peak $ps)" "$([ "$ps" -le 1 ]; echo $?)"
 check "lanes overlap (peak steps at once $pa)" "$([ "$pa" -ge 2 ]; echo $?)"
 clean_ends=$ends
+planted_image="$(grep 'designer-ci-ubuntu-99-04' "$tmp/clean/events.dockerfiles")"
+planted_suite="$(grep -- '-ubuntu-99-04-suite' "$tmp/clean/events.suites")"
+check "the planted image installs both its extra packages" \
+  "$([[ "$planted_image" == *"planted-pkg-a planted-pkg-b"* ]]; echo $?)"
+check "no word of its exclusion became a package" \
+  "$([[ "$planted_image" != *Planted* ]]; echo $?)"
+check "its suite excludes the whole alternation" \
+  "$([[ "$planted_suite" == *'-E "Planted case one|Planted case two"'* ]]; echo $?)"
 
 echo "a container build that fails"
 run broken "24-04-build"

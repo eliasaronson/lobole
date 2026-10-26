@@ -782,8 +782,11 @@ with their output live, in the order the script ran before it had lanes.
 `tools/ci-local-selftest.sh` checks those promises in about a minute, on a
 copy of the script whose builds, suites and containers are stubs that sleep:
 the builds in flight stay within one build's `-j`, one suite runs at a time,
-a failed lane leaves the others to finish, and `--serial` runs one step at a
-time. It is not in any suite, since only an edit to `ci-local.sh` can break
+a failed lane leaves the others to finish, `--serial` runs one step at a
+time, and a matrix entry's test exclusion and extra packages reach its
+container whole (a planted entry carries spaces in both: a lane's command is
+kept `printf %q`-quoted and `eval`ed, and stored unquoted it was word-split,
+so 24.04's exclusion became apt packages). It is not in any suite, since only an edit to `ci-local.sh` can break
 what it checks: run it after one.
 
 ## C++ usage
