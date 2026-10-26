@@ -149,15 +149,24 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->underlayRenderer != nullptr);
     IM_CHECK_EQ(s_App->underlayRenderer->DrawCount(), (size_t)1);
 
-    // ...and a static study run, its field on the model.
+    // ...and a static study run, its field on the model. A build without
+    // Netgen (CI's GUI job) meshes nothing, so it rebuilds without a field.
+#ifdef HAVE_NETGEN
+    constexpr bool kField = true;
+#else
+    constexpr bool kField = false;
+#endif
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t studyId = s_App->simulation.activeStudyId;
-    ctx->ItemClick("//###ToolWindow/###study_run");
-    IM_CHECK(WaitForStudyResult(ctx, studyId));
-    s_App->simulation.field = ui::SimulationState::Field::VonMises;
-    IM_CHECK(WaitFor(ctx, "the field on the model", [] {
-      return s_App->fieldRenderer != nullptr && s_App->fieldRenderer->HasMesh();
-    }));
+    if (kField) {
+      ctx->ItemClick("//###ToolWindow/###study_run");
+      IM_CHECK(WaitForStudyResult(ctx, studyId));
+      s_App->simulation.field = ui::SimulationState::Field::VonMises;
+      IM_CHECK(WaitFor(ctx, "the field on the model", [] {
+        return s_App->fieldRenderer != nullptr &&
+               s_App->fieldRenderer->HasMesh();
+      }));
+    }
     // A click on the top face picks it, out of the study: before the
     // rebuild, so the setup is known to allow it, and after.
     const auto clickTop = [ctx]() -> bool {
@@ -198,11 +207,14 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       return picked;
     };
     IM_CHECK(clickTop());
-    ui::EnterSimulation(*s_App);
-    s_App->simulation.field = ui::SimulationState::Field::VonMises;
-    IM_CHECK(WaitFor(ctx, "the field on the model again", [] {
-      return s_App->fieldRenderer != nullptr && s_App->fieldRenderer->HasMesh();
-    }));
+    if (kField) {
+      ui::EnterSimulation(*s_App);
+      s_App->simulation.field = ui::SimulationState::Field::VonMises;
+      IM_CHECK(WaitFor(ctx, "the field on the model again", [] {
+        return s_App->fieldRenderer != nullptr &&
+               s_App->fieldRenderer->HasMesh();
+      }));
+    }
 
     const size_t underlays = s_App->underlayRenderer->DrawCount();
     const size_t undoDepth = s_App->commands->UndoDepth();
@@ -225,9 +237,11 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       return ui::RenderMeshesCurrent(*s_App) &&
              !s_App->gpu.documentMeshes.empty();
     }));
-    IM_CHECK(WaitFor(ctx, "the field projected again", [] {
-      return s_App->fieldRenderer != nullptr && s_App->fieldRenderer->HasMesh();
-    }));
+    if (kField)
+      IM_CHECK(WaitFor(ctx, "the field projected again", [] {
+        return s_App->fieldRenderer != nullptr &&
+               s_App->fieldRenderer->HasMesh();
+      }));
     IM_CHECK_EQ(s_App->underlayRenderer->DrawCount(), underlays);
     IM_CHECK_EQ(s_App->commands->UndoDepth(), undoDepth);
     IM_CHECK_EQ(s_App->parts.size(), tabs);
