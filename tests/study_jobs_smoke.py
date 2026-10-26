@@ -19,6 +19,8 @@ Over the RPC, on the slider-crank rig:
   `outlive_client`; a synchronous run whose caller hangs up stops too;
 - the same inputs again are `reused` in well under a second, and a moved
   input (the start pose) is run;
+- `leave_at` poses from the stored run without invalidating it: every
+  later `leave_at` is reused, while a real edit afterwards runs again;
 - `leave_at` from the stored run costs one solve.
 
 Usage: study_jobs_smoke.py <path-to-designer-binary>
@@ -154,6 +156,30 @@ def main():
                f"a value between samples, one solve: {left}")
         mate = next(m for m in d.call("list_mates")["mates"] if m["id"] == axle)
         expect(abs(mate["rotation_deg"] - 100.0) < 1e-6, f"at 100: {mate}")
+
+        # ---- leave_at does not invalidate the run it posed from ------------
+        # A pose written in from the result's own samples is on the path the
+        # result describes, so the result stays the answer from there: every
+        # later leave_at is reused, and the result is not stale. Each of
+        # these re-ran the whole study once (generators/strandbeest's
+        # check_layer_clearance, ~99 s a call on the walker).
+        for at in (12, 5, "last", "start"):
+            left = d.call("run_motion_study", study=short, leave_at=at)
+            expect(left["reused"] is True and left["left_solves"] == 1,
+                   f"leave_at {at} after a leave_at is reused: "
+                   f"{left['reused']}")
+            st = d.call("motion_status", study=short)
+            expect(not st["stale"], f"and not stale after leave_at {at}")
+        left = d.call("run_motion_study", study=short, leave_at_deg=200.0)
+        expect(left["reused"] is True, "so is leave_at_deg")
+        # A real edit afterwards is still an input: the fixed block moved.
+        block = next(o for o in d.call("list_occurrences")["occurrences"]
+                     if o.get("fixed"))
+        d.call("set_occurrence_transform", id=block["id"],
+               transform={"position": [0.0, 0.0, 5.0]})
+        edited = d.call("run_motion_study", study=short)
+        expect(edited["reused"] is False,
+               f"a moved fixed occurrence is run again: {edited['reused']}")
         try:
             d.call("run_motion_study", study=short, leave_at="last",
                    **{"async": True})

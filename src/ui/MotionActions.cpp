@@ -416,6 +416,37 @@ void WalkDriver(AppState& state, const MotionStudy& s, double target) {
   state.gpu.syncedDocumentVersion = UINT64_MAX; // the placements changed
 }
 
+// The study's result as the answer from where ApplyMotionSample just left
+// the assembly (docs/simulation/README.md#studies-as-jobs). The start pose
+// is an input -- a run walks from it to the first sample, and where that
+// walk begins picks the branch -- but a pose written in from the result's
+// own samples is on the path the result describes, so walking back from it
+// retraces that path. Without this, every leave_at after the first hashed
+// a pose the store had never seen and ran the whole study again, and the
+// result read stale. Only the result being posed from is re-keyed: another
+// study's start pose really did move. The hash it was run for stays in the
+// store, so an undo back to that pose is answered too.
+void RekeyAfterLeave(AppState& state, uint64_t studyId,
+                     const motion::Result& posedFrom) {
+  const auto it = state.motionResults.find(studyId);
+  if (it == state.motionResults.end() || posedFrom.inputHash == 0 ||
+      it->second.inputHash != posedFrom.inputHash)
+    return;
+  const MotionStudy* s = state.assembly->FindMotionStudyById(studyId);
+  if (s == nullptr)
+    return;
+  motion::Result& installed = it->second;
+  installed.inputHash = motion::InputKey(
+      *state.assembly, PartResolverFor(state), AssemblyResolverFor(state), *s);
+  const auto shared = std::make_shared<const motion::Result>(installed);
+  if (!installed.cancelled && installed.error.empty())
+    state.motionResultsByInput.Put(installed.inputHash, shared);
+  // What the project saves with the assembly: a project saved here reopens
+  // with its result current.
+  state.assembly->StoreMotionResult(studyId, shared);
+  state.motionResultRevisions[studyId] = Revision(state, studyId);
+}
+
 } // namespace
 
 bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
@@ -483,6 +514,7 @@ bool ApplyMotionSample(AppState& state, uint64_t studyId,
   SolveActiveAssemblyDriven(state, s->driverMate, s->driverDof,
                             /*diagnose=*/false, s->driverPath);
   state.gpu.syncedDocumentVersion = UINT64_MAX; // the placements changed
+  RekeyAfterLeave(state, studyId, result);
   return true;
 }
 
