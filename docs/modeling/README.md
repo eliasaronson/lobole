@@ -557,7 +557,7 @@ the feature that made them.
 
 Every direct-edit builder (Defeaturing, the offset builder, MakerVolume,
 and Move Face's booleans, through `topo::BooleanNamed`'s progress range) also
-runs under a deadline, `directedit::BuilderBudgetS` (30 s and 0.5 s a
+runs under a deadline, `directedit::BuilderBudgetS` (30 s and 1.5 s a
 face), through a `Message_ProgressIndicator` whose `UserBreak` turns true
 once it has passed: past it the edit is refused ("gave up after 30 s …").
 The builders check it only at their progress points, so a call can run
@@ -586,9 +586,11 @@ feature sits in.
 
 All 100 bores of SolidCraft's `plate_100_holes.step` delete in one feature,
 nearly all of it Defeaturing, on one thread: 17 s of CPU on a P-core of the
-development machine, 33 s on an E-core, 57 s on a low-power E-core. The
-test allows 120 s of CPU, which holds on the slowest core and, unlike the
-wall clock, does not grow with what else the machine is running.
+development machine, 33 s on an E-core, 57 s on a low-power E-core, and
+93 s there with Ubuntu 24.04's OpenCASCADE 7.6. The test allows 180 s of
+CPU, which holds on the slowest core and, unlike the wall clock, does not
+grow with what else the machine is running; the edit's own budget is 30 s
+and 1.5 s a face, 180 s for these 100.
 
 ### Offset Face
 

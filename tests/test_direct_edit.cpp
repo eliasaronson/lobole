@@ -848,8 +848,9 @@ TEST_CASE("Delete Face fills all 100 holes of a STEP plate in one feature",
   // The budget docs/modeling/README.md#delete-face states: nearly all of it
   // BRepAlgoAPI_Defeaturing, and how much CPU that is depends on the core
   // it lands on -- 17 s on a P-core here, 33 s on an E-core, 57 s on a
-  // low-power one, 62 s in a parallel suite. 120 s holds on the slowest
-  // and still fails a heal that went quadratic in the holes.
+  // low-power one, 62 s in a parallel suite, and with Ubuntu 24.04's
+  // OpenCASCADE 7.6 23 s, 41 s and 93 s. 180 s holds on the slowest and
+  // still fails a heal that went quadratic in the holes.
   INFO("100 holes deleted in " << s << " s of CPU");
-  CHECK(s < 120.0);
+  CHECK(s < 180.0);
 }
