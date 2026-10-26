@@ -296,7 +296,8 @@ config and state directory and `--autosave 0`.
 `startup/headless` and `boolean/plate-holes` at `--scale small` twice with
 `--repeats 2 --busy-ok` into a private history, checks each record against
 the schema, compares the second with the first, and has `compare` refuse a
-busy baseline and one of another build type, `run` refuse an unknown
+busy baseline and one of another build type (whichever this binary is not:
+a fixed "Debug" was build-asan's own type), `run` refuse an unknown
 workload, and a missing input skip naming its path. It never asserts a
 duration, and it writes nothing of the user's: its history, and the GPU
 cache it seeds so that it launches no `--offscreen` instance, are in a

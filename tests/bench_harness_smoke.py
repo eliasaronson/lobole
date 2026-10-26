@@ -160,9 +160,12 @@ def main():
         expect("BUSY" in said and "never a baseline" in said,
                f"a busy baseline is refused: {said}")
 
-        # Nor is a record of another build type.
-        other = baseline("debug.jsonl", busy=False, busy_reasons=[],
-                         build_type="Debug")
+        # Nor is a record of another build type: ANOTHER one, whatever this
+        # binary is. A fixed "Debug" was this build's own type under
+        # build-asan (a Debug tree), and compare rightly accepted it.
+        mine = records[0]["build"]["build_type"]
+        other = baseline("other-type.jsonl", busy=False, busy_reasons=[],
+                         build_type="Release" if mine == "Debug" else "Debug")
         _, said = run(env, "compare", *common, "--against", other, ok=(2,))
         expect("build type" in said, f"another build type is refused: "
                f"{said}")
