@@ -254,7 +254,7 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::dmat4& xf,
 
 // The same test with each side's box computed once: a set query over n
 // pieces asks n^2 / 2 pairs, and a box is a pass over the B-Rep's faces
-// (check_print's clearance on a 123-piece plate spent 45 s building the same
+// (check_print's clearance on a 123-piece plate spent 28 s building the same
 // boxes again for every pair). `OrientedBoxOf` holds no box when the set has
 // no shape or the box could not be built, and that separates nothing.
 struct OrientedBox {

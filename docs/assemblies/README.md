@@ -873,6 +873,9 @@ requirements.
   another has its boundaries far apart.
 - Parallelism is across pairs: `motion::Run` uses `parallel::For`; `RunSweep`
   (`RemoteInspection.cpp`) runs its own pool sized by `parallel::Workers()`.
+  Both run exact checks on `cad::BooleanWorkers` threads: half the machine
+  where the kernel queues its booleans on one lock
+  ([performance](../performance/README.md#the-kernels-error-handler-lock)).
   A motion run solves every sample first (in order: each solve starts from
   the last) and then checks EVERY sample's candidate pairs in one batch, so
   a pair that costs seconds at every pose -- a worm against its wheel --

@@ -290,6 +290,74 @@ startup workload it prints the `tools/profile.sh -- …` command for an
 instance instead. The profiled instance, like the harness's, has a private
 config and state directory and `--autosave 0`.
 
+## The kernel's error-handler lock
+
+The strandbeest generator's exact clash studies ran their pair checks on
+every core and spent more time in the kernel than computing; `perf` put it
+in OpenCASCADE's `Standard_ErrorHandler`.
+
+Every `OCC_CATCH_SIGNALS` scope constructs a `Standard_ErrorHandler` and
+links it into a stack; OCCT defines `OCC_CONVERT_SIGNALS` on every
+non-MSVC build, so the scopes are live on Linux and on our mingw Windows
+build. OCCT 7.6 to 7.9 keep ONE stack for all threads behind ONE mutex,
+taken in the constructor and again in `Unlink`. A boolean opens thousands
+of scopes: `GeomLib_CheckCurveOnSurface_TargetFunc::Value` opens one per
+function evaluation, and every face/face intersection runs it
+(`IntTools_FaceFace::ComputeTolReached3d`). Past a dozen threads the
+workers queue on that mutex in futex calls, and the queue is bistable: the
+same run on 22 threads took 94 s or 139 s.
+
+The leg-pair study (stage 1, `recompute`, 6516 exact pair checks), wall
+and system seconds:
+
+| threads | shared stack (stock 7.9.3) | per-thread stack (patched) |
+|---|---|---|
+| 22 | 94-139 s, 457-1537 s sys; capped to 11, 64 s | 60-62 s, 8-9 s sys |
+| 16 | 109 s, 589 s sys | |
+| 11 | 68 s, 21 s sys | 62 s, 2 s sys |
+| 8 | 73-75 s, 9 s sys | 72-76 s, 2 s sys |
+| 4 | 113 s, 3 s sys | |
+
+Ubuntu 24.04's OCCT 7.6.3 (in `tools/ci-local.sh`'s container) queues the
+same way: 150-155 s and 1184-1464 s of system time on 22 threads, 93 s and
+16 s capped to 11.
+
+Two halves to the fix:
+
+- **Every kernel we build keeps the stack per thread**
+  (`nix/patches/occt-error-handler-thread-local.patch`, in the overlay, the
+  Flatpak, the AppImage and the Windows cross build). It is the `.cxx` half
+  of upstream's OCCT#980 (in 8.0): a `thread_local` top of stack and no
+  mutex, the header and the ABI unchanged. A handler belongs to the thread
+  that made it, and a converted signal is delivered to the faulting
+  thread, so no other thread ever had business with it. Its test measures
+  a scope's CPU on every thread against one: 13 us against 37 ns on the
+  shared stack, 17 ns against 11 ns patched (`test_occ_patches`).
+- **A kernel that still shares it runs booleans on half the machine**
+  (`cad::BooleanWorkers`, `src/cad/KernelThreads.h`), since CI's stock
+  Ubuntu builds, the Debian package and anyone building against a
+  distribution's OCCT older than 8.0 do not get the patch. The loops whose
+  items are booleans -- the motion study's exact checks, the contact and
+  interference sweeps' exact pairs (`RunSweep`), the design sweep's
+  regenerations -- pass it to `parallel::For` as a cap. Where the queue
+  starts depends on the geometry: two crossed cylinders (a pin in a hole)
+  queue from two threads, 10 booleans a second on 22 threads against 42 on
+  2, where a per-thread stack gives 262; the leg pair from about sixteen.
+  So no count suits every loop, and half the hardware threads is what the
+  measurements chose: on 22 it took the leg pair from 94-139 s to 64 s and
+  the walker study (39,100 pairs) from 478 s to 344 s; on a machine of 8
+  (four cores, emulated by affinity), where nothing queued, it cost the leg
+  pair 112 s against 99 s, the second thread of a core buying little.
+  (The walker does not scale past 11 threads on either stack: 349 s
+  patched on 11, 343 s on 22.) Whether the stack is per thread is asked of
+  the running
+  library (`cad::PerThreadErrorHandlers`: a handler made on one thread is
+  unlinked from another, which only a shared stack lets it find), so a
+  build run against another kernel than it was configured with still
+  answers right; a pinned `LOBOLE_SWEEP_THREADS` is left alone. Only the
+  thread count moves: every item is done once, and every result is what a
+  one-thread run gives.
+
 ## Its own test
 
 `bench_harness_smoke` (headless suite, label `bench`) runs

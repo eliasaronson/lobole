@@ -462,7 +462,9 @@ touched. A swept value overrides the variable's expression on the copy, as
 a configuration does, so its dependents follow. A worker walks its chunks
 -- one variable's samples and then its bisections, or the corners -- in
 order on its one set of copies, the regen cache re-executing only what the
-variable reaches, on at most `parallel::Workers()` sets.
+variable reaches, on at most `cad::BooleanWorkers(parallel::Workers())`
+sets: every thread on a per-thread error-handler stack, half of them on a
+shared one ([performance](../performance/README.md#the-kernels-error-handler-lock)).
 `src/core/DesignSweep.{h,cpp}` is the planning, the walk and what a point
 records, and knows no `AppState`; the request, the copies and the job are
 `RemoteRequirements.cpp`'s.

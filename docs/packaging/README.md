@@ -230,8 +230,12 @@ backported) and one lets its deadline stop the offset's intersections
 the other three turn a fillet that never returned and three faults inside
 the kernel into ordinary failures
 ([modeling](../modeling/README.md#a-caught-kernel-fault)), each written up
-for upstream in `nix/patches/upstream/`. The Debian package builds against
-Ubuntu's own OpenCASCADE and carries none.
+for upstream in `nix/patches/upstream/`. The seventh is upstream's
+OCCT#980 without its header changes: a per-thread error-handler stack, so
+that booleans on many threads stop queueing on one mutex
+([performance](../performance/README.md#the-kernels-error-handler-lock)).
+The Debian package builds against Ubuntu's own OpenCASCADE and carries
+none.
 Patching OpenCASCADE means nixpkgs' binary cache no longer has it: the first
 `nix-shell` on a machine compiles OpenCASCADE and netgen.
 

@@ -405,7 +405,10 @@ a cancellable `design_sweep` job, one at a time. The main thread checks the
 request and writes each part the sweep rebuilds to its saved form in a
 temporary directory, with a copy of the project variables and tables; the
 sweep runs on a thread of the run's own (`SweepRun`), which reads them back
-on up to `parallel::Workers()` workers, as an open reads a project, so it
+on up to `parallel::Workers()` workers (`cad::BooleanWorkers` of them:
+half the machine on a kernel that queues booleans on one lock,
+[performance](../performance/README.md#the-kernels-error-handler-lock)),
+as an open reads a project, so it
 shares no shape with the document. Like the requirements check, the job has
 no registry thread: its `finish` is called every frame, carries the run's
 progress (`label` "cam_d = 27.5 (7 of 15)", `fraction`) to the registry,

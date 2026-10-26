@@ -399,6 +399,12 @@ by the same name drift apart without any test noticing:
   (`Workers()` is that share inside a `For`), so the other setups of a job
   inspected at once, each split into bands, divide the machine rather than
   multiply it.
+- **A loop of booleans passes `For` a cap**, `cad::BooleanWorkers`: an
+  OpenCASCADE older than 8.0 keeps every thread's exception handlers behind
+  one mutex, so booleans queue on it and more threads are slower. There it
+  is half the hardware threads; on the kernels we build (patched) and on
+  8.0 it is every thread
+  ([performance](performance/README.md#the-kernels-error-handler-lock)).
 - **OpenCASCADE is not safe to share between threads.** It fills caches
   lazily on the shape (bounding boxes, tolerances, triangulation), so every
   caller of `parallel::For` warms those single-threaded first. That is not

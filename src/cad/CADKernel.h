@@ -198,7 +198,7 @@ public:
   // boxes are apart cannot share a point, so they are gathered as a
   // compound, as a fuse would leave them; each group whose boxes meet is
   // fused in ONE boolean, never a chain. A print plate of 123 pieces fused
-  // one Union at a time re-processed the growing whole 122 times: 64 s, for
+  // one Union at a time re-processed the growing whole 122 times: 42 s, for
   // a result that was the compound. Groups keep the order of their first
   // part, so the same bodies give the same shape. Invalid when a group's
   // fuse fails, as the chain was. Writes nothing onto `parts`.

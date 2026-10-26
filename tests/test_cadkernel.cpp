@@ -1634,7 +1634,8 @@ TEST_CASE("an Import saved before up_axis existed reloads unmoved",
 // CADShape::UnionOf: the one-shape union an STL or BREP export takes of a
 // part's bodies. A print plate is a hundred pieces that touch nothing, and
 // fused one Union at a time it re-processed the growing whole for every
-// piece: 64 s of plate 4's export (docs/inspect/README.md#will-it-print).
+// piece: 42 s of plate 4's export, now 0.7 s
+// (docs/tolerances/README.md#exporting-a-printed-part).
 TEST_CASE("UnionOf fuses only what may touch, in body order, once",
           "[kernel][boolean]") {
   auto& k = CADKernel::Instance();

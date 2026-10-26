@@ -283,7 +283,10 @@ structured multi-body file still yields one shape per body.
 
 `export_stl {path, body?, stl_deflection_mm?}` and `export_brep {path, body?}`
 write the active part. Without `body` the non-reference bodies are fused
-into one shape; STL and BREP hold one shape each. STL is binary and
+into one shape, those whose boxes meet in one boolean and the rest gathered
+as the compound a fuse would leave (`CADShape::UnionOf`,
+[tolerances](../tolerances/README.md#exporting-a-printed-part)); STL and
+BREP hold one shape each. STL is binary and
 re-meshed at `stl_deflection_mm` (chord tolerance, the name `check_print`
 takes for the same deviation; `deflection` is refused, naming it), never the viewport's
 tessellation; the reply reports the deflection used, where it came from, and
