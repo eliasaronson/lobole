@@ -350,6 +350,7 @@ set(core_sources
     src/common/Watchdog.cpp
     src/render/OutlineEdges.cpp
     src/render/StillOutlines.cpp
+    src/cad/BoundedRead.cpp
     src/cad/CADKernel.cpp
     src/cad/OccPatches.cpp
     src/cad/OccSignals.cpp

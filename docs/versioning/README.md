@@ -741,7 +741,14 @@ run clean; what they found is the refusals above and the cases in
 `tests/reader_cases/`, by kind: a number past an integer's range (2^64,
 2^53 + 1, -0) read into an id; a key the writer writes only beside
 another; a list longer than the app ever writes; a feature built on a
-sketch that failed, which spun a boolean for minutes.
+sketch that failed, which spun a boolean for minutes. On Ubuntu 24.04 the
+sweep also found OpenCASCADE's own: its B-Rep readers take each section
+keyword with an unbounded `IS >> char[255]` when OCC is built as C++17, so a
+derived part's snapshot with a run of bytes dropped overran the stack
+("stack smashing detected" in `BinTools_ShapeSet::ReadGeometry`). Every
+B-Rep read from bytes that may be damaged -- a derived snapshot, the
+geometry cache, a `.brep` import -- goes through `cad/BoundedRead.h`, a
+stream that caps each word a formatted read takes.
 `tools/reader-fuzz.py case <id>` writes one case — the damaged file or tree,
 as bytes, not the id — to `tests/reader_cases/<name>/input/` with an
 `expect.json` (`refused` and the substrings its message holds, `loads` with

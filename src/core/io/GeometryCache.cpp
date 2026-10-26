@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/io/GeometryCache.h"
+#include "cad/BoundedRead.h"
 #include "core/io/ProjectPaths.h"
 #include "core/io/ReadContext.h"
 #include "core/io/Serialization.h" // ElementMapToJson
@@ -547,10 +548,9 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
     std::vector<Body> bodies;
     size_t i = 0;
     for (const json& bj : j.value("bodies", json::array())) {
-      TopoDS_Shape shape;
-      std::istringstream bytes(blobs[i]);
+      // Bounded: damaged bytes overran OCC 7.6's stack (cad/BoundedRead.h).
+      const TopoDS_Shape shape = cad::ReadBinaryBrep(blobs[i]);
       const std::string& file = files[i++];
-      BinTools::Read(shape, bytes);
       if (shape.IsNull())
         return ignore(file, "it is unreadable");
       Body body;

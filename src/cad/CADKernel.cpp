@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "cad/CADKernel.h"
+#include "cad/BoundedRead.h"
 #include "common/DesignerVersion.h"
 
 #include <array>
@@ -84,6 +85,8 @@
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_TShape.hxx>
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <limits>
 
 #include <APIHeaderSection_MakeHeader.hxx>
@@ -2072,9 +2075,15 @@ bool CADKernel::SaveBREP(const std::string& filename, const CADShape& shape) {
 bool CADKernel::LoadBREP(const std::string& filename, CADShape& shape) {
   if (!std::filesystem::exists(filename))
     return false;
-  TopoDS_Shape s;
-  BRep_Builder builder;
-  if (!BRepTools::Read(s, filename.c_str(), builder) || s.IsNull())
+  // Read as bytes and bounded: a damaged .brep overran OCC 7.6's stack
+  // (cad/BoundedRead.h).
+  std::ifstream in(filename, std::ios::binary);
+  if (!in)
+    return false;
+  const std::string bytes((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+  const TopoDS_Shape s = cad::ReadTextBrep(bytes);
+  if (s.IsNull())
     return false;
   shape = CADShape(s);
   return true;

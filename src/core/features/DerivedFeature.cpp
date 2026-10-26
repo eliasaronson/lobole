@@ -3,6 +3,8 @@
 
 #include "core/features/DerivedFeature.h"
 
+#include "cad/BoundedRead.h"
+
 #include "common/Logger.h"
 #include "core/Document.h"
 #include "core/InputHash.h"
@@ -139,21 +141,17 @@ bool DerivedFeature::Execute(RegenContext& ctx) {
                  sb.asset + "); update it from '" + sourceName + "'");
         return false;
       }
-      TopoDS_Shape shape;
-      try {
-        std::istringstream in(
-            std::string(bytesIt->second.begin(), bytesIt->second.end()),
-            std::ios::binary);
-        BinTools::Read(shape, in); // void: an unreadable stream leaves it null
-        if (shape.IsNull()) {
-          SetError("snapshot body '" + sb.name + "' (" + sb.asset +
-                   ") is unreadable; update it from '" + sourceName + "'");
-          return false;
-        }
-      } catch (const Standard_Failure& e) {
+      // Bounded: a damaged asset overran OCC 7.6's stack (cad/BoundedRead.h).
+      std::string why;
+      const TopoDS_Shape shape =
+          cad::ReadBinaryBrep(std::string_view(reinterpret_cast<const char*>(
+                                                   bytesIt->second.data()),
+                                               bytesIt->second.size()),
+                              &why);
+      if (shape.IsNull()) {
         SetError("snapshot body '" + sb.name + "' (" + sb.asset +
-                 ") is unreadable: " +
-                 (e.GetMessageString() ? e.GetMessageString() : "OCC error"));
+                 ") is unreadable" + (why.empty() ? "" : ": " + why) +
+                 "; update it from '" + sourceName + "'");
         return false;
       }
       cached = m_decoded.emplace(sb.asset, CADShape(shape)).first;
@@ -517,15 +515,9 @@ uint64_t StoredKey(const DerivedFeature& feature, const Document& host) {
         // The stored B-Rep, read as Execute reads it; an unreadable one keys
         // as nothing, which no source gives.
         TopoDS_Shape shape;
-        if (const auto* bytes = host.GetAsset(feature.snapshot[i].asset)) {
-          try {
-            std::istringstream in(std::string(bytes->begin(), bytes->end()),
-                                  std::ios::binary);
-            BinTools::Read(shape, in);
-          } catch (const Standard_Failure&) {
-            shape.Nullify();
-          }
-        }
+        if (const auto* bytes = host.GetAsset(feature.snapshot[i].asset))
+          shape = cad::ReadBinaryBrep(std::string_view(
+              reinterpret_cast<const char*>(bytes->data()), bytes->size()));
         return shape.IsNull() ? CADShape() : CADShape(shape);
       },
       feature.sketchSnapshot);
