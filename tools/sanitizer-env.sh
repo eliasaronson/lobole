@@ -34,3 +34,13 @@ SANITIZER_TEST_EXCLUDE='Topo:|femgpu|topo_smoke'
 # code under it: the CAM clearing cases that ran 11 and 20 minutes, and the
 # app smokes that ran past their timeouts.
 SANITIZER_LABEL_EXCLUDE='gui|asan_slow'
+# What one sanitized test process costs, in MB, for the suite's -j
+# (tools/build-jobs "$SANITIZER_TEST_MB", as compiles take theirs): memory,
+# not cores, is what runs out. At -j$(nproc) (22) the suite peaked at
+# 26.6 GB on a 31 GB machine. Measured by sampling every process's RSS
+# through a whole sanitized run at -j8: 20.2 GB at once at the peak, which
+# is 2.5 GB a job; one designer_tests process is 1.4 GB at the median, 2.2 GB
+# at the 99th percentile and 2.9 GB at most, a headless lobole smoke up to
+# 2.0 GB, and LeakSanitizer's addr2line, symbolizing lobole at a smoke's exit
+# to match its suppressions, 6.6 GB once. 2500 is the peak's share.
+SANITIZER_TEST_MB=2500

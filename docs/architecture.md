@@ -752,7 +752,10 @@ fixed workloads timed on this machine and compared against its own history,
 [performance](performance/README.md); only its own working is tested, by
 `bench_harness_smoke`), `tools/profile.sh` (sampling profiler),
 `-DENABLE_SANITIZERS=ON` (ASan + UBSan, runtime options compiled in via
-`src/common/SanitizerDefaults.cpp`) and `-DENABLE_TSAN=ON` (ThreadSanitizer,
+`src/common/SanitizerDefaults.cpp`; `tools/ci-local.sh --asan` runs its
+suite at a `-j` from free memory, `tools/build-jobs "$SANITIZER_TEST_MB"`,
+the per-test cost `tools/sanitizer-env.sh` states and says how it was
+measured, since at one test per core it peaked at 26.6 GB of 31) and `-DENABLE_TSAN=ON` (ThreadSanitizer,
 a separate build; Netgen's own thread pool is suppressed in
 `tools/tsan-suppressions.txt`, OpenCASCADE deliberately is not, since OCC is
 called from our workers).

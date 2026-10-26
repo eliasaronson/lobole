@@ -328,8 +328,15 @@ lane_asan() {
   source "$root/tools/sanitizer-env.sh"
   run_build asan -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON \
     -- build-asan --target designer designer_tests
+  # -j from free memory, not cores (SANITIZER_TEST_MB says what a test
+  # costs and how that was measured): at -j$(nproc) the suite peaked at
+  # 26.6 GB. Read when the suite starts, after the build has given its
+  # memory back.
   run_tests asan "sanitized suite" \
-    "$root/tools/ctest" --test-dir build-asan -LE "$SANITIZER_LABEL_EXCLUDE" -j"$(nproc)" --output-on-failure -E "$SANITIZER_TEST_EXCLUDE"
+    bash -c 'j="$("$3" "$4")"; echo "sanitized suite at -j$j ($4 MB a test)"
+             exec "$1" --test-dir build-asan -LE "$2" -j"$j" --output-on-failure -E "$5"' _ \
+    "$root/tools/ctest" "$SANITIZER_LABEL_EXCLUDE" "$root/tools/build-jobs" \
+    "$SANITIZER_TEST_MB" "$SANITIZER_TEST_EXCLUDE"
 }
 
 # ---- the race job (opt-in; separate tree, ASan and TSan cannot combine) -----
