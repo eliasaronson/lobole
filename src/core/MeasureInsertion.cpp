@@ -624,6 +624,17 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     auto t0 = Clock::now();
     std::vector<Band> bandsA, bandsB;
     if (!kept) {
+      // The fixed side only over what the moving side can come near along
+      // the axis, either way it comes, two slices to spare (a helix's last
+      // step can end a step past its travel): a fixed band outside that
+      // meets no moving band at any slide a try reads, as the kept path's
+      // window below says. A screw's line runs on through whatever else is
+      // placed along it -- the clock's rating nut goes on at the foot of a
+      // rod whose line runs up through the movement -- and cutting all of
+      // that, an exact section an event, was nearly all of the step's time.
+      double wLo = za0 - 2.0 * rep.sliceMm, wHi = za1 + 2.0 * rep.sliceMm;
+      for (bool p : sides)
+        (p ? wHi : wLo) += (p ? 1.0 : -1.0) * longest;
       const size_t n = prepA.size() + prepB.size();
       size_t k = 0;
       for (auto [prep, out, reach] : {std::tuple{&prepA, &bandsA, reachA},
@@ -631,6 +642,10 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         sections::BandOptions bo;
         bo.sliceMm = rep.sliceMm;
         bo.reachMm = reach;
+        if (prep == &prepB) {
+          bo.zLo = wLo;
+          bo.zHi = wHi;
+        }
         for (size_t i = 0; i < prep->size(); i++) {
           if (cancel && cancel->load())
             throw KernelError{"cancelled"};

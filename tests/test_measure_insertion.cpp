@@ -426,6 +426,59 @@ void Same(const Measure::InsertionReport& a,
 
 } // namespace
 
+// A check that is not kept between checks (a turned or screwed path, or
+// none given) cuts the fixed side only over the stretch the moving side can
+// reach: a solid further along the axis line, the way it does not come
+// from, adds no band and changes nothing. The clock's rating nut screws onto
+// the foot of a rod whose line runs up through the movement, and cutting
+// all of that was 93 of the step's 101 s.
+TEST_CASE("An uncached check cuts the fixed side only where the part reaches",
+          "[measure][insertion]") {
+  // The keyed hub and lugged shaft of the turned check above.
+  TopoDS_Shape s = BRepPrimAPI_MakeCylinder(Up(0), kR, 30.0).Shape();
+  s = BRepAlgoAPI_Fuse(
+          s, BRepPrimAPI_MakeBox(gp_Pnt(kR - 0.4, -0.5, 15.0), 1.4, 1.0, 15.0)
+                 .Shape())
+          .Shape();
+  const Body shaft = Make(s, "shaft");
+  TopoDS_Shape bore = BRepPrimAPI_MakeCylinder(Up(-1), kR + kGap, 12.0).Shape();
+  bore = BRepAlgoAPI_Fuse(bore, BRepPrimAPI_MakeBox(gp_Pnt(0.0, -1.0, -1.0),
+                                                    kR + 1.4, 2.0, 12.0)
+                                    .Shape())
+             .Shape();
+  const Body hub = Hub(0.0, 10.0, bore);
+  // Far down the axis, the side the hub does not come from: a herringbone
+  // block, sliced the whole of its height wherever it is cut.
+  gp_Trsf down;
+  down.SetTranslation(gp_Vec(0, 0, -80));
+  const Body far =
+      Make(BRepAlgoAPI_Cut(
+               BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, 0), 20, 20, 10).Shape(),
+               Herringbone(6.8, 10.0))
+               .Shape()
+               .Moved(TopLoc_Location(down)),
+           "far block");
+  for (const double turn : {0.0, 90.0}) {
+    CAPTURE(turn);
+    Measure::InsertionOptions o;
+    o.entry = Measure::InsertionEntry::Positive;
+    o.allowanceMm = kAllowance;
+    o.rotations = 1;
+    o.turnDeg = turn;
+    const auto alone = Measure::Insertion({hub}, I, {shaft}, I, O, Z, o);
+    const auto with = Measure::Insertion({hub}, I, {shaft, far}, I, O, Z, o);
+    REQUIRE(alone);
+    REQUIRE(with);
+    Same(*alone, *with);
+    CHECK(alone->best.interferingMm == with->best.interferingMm);
+    CHECK(alone->best.travelMm == with->best.travelMm);
+    CHECK(alone->samples == with->samples);
+    // The cost: not one band of the far block.
+    CHECK(with->bandsFixed == alone->bandsFixed);
+    CHECK(with->pairsRead == alone->pairsRead);
+  }
+}
+
 // An assembly sequence's steps slide part after part past the same placed
 // ones: their bands are kept (MeasureSections.h, BandCache) and moved to a
 // later check's axis rather than cut again -- and the answer is the one a
@@ -525,7 +578,12 @@ TEST_CASE("A short check into a long solid cuts only the stretch it reaches",
   Measure::sections::BandCache cache;
   const auto a = check(low, 1, &cache);
   // The block's bands: a stretch round the low peg, not its 100 mm.
-  CHECK(a.bandsFixed < check(low, 1, nullptr).bandsFixed);
+  Measure::sections::BandOptions whole;
+  whole.sliceMm = a.sliceMm;
+  CHECK(static_cast<size_t>(a.bandsFixed) <
+        Measure::sections::SolidBands(
+            Measure::sections::Prepare(long0.shape.GetShape()), whole, 0)
+            .size());
   Same(a, check(low, 1, nullptr));
   // Again: reused.
   CHECK(check(low, 1, &cache).solidsReused == 2);
