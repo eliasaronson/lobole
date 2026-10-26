@@ -494,12 +494,15 @@ std::optional<json> ReadFile(const fs::path& path) {
   if (!in)
     return std::nullopt;
   try {
-    const json j =
+    json j =
         readctx::ParseStrict(std::string((std::istreambuf_iterator<char>(in)),
                                          std::istreambuf_iterator<char>()));
     if (!j.is_object())
       return std::nullopt;
-    return j;
+    // In place: a plain `return j;` is ambiguous on GCC 15 with nlohmann
+    // 3.11.3 (Ubuntu 26.04), since json converts to optional<json> through
+    // its own templated conversion as well as optional's constructor.
+    return std::optional<json>(std::in_place, std::move(j));
   } catch (const std::exception&) {
     return std::nullopt;
   }
