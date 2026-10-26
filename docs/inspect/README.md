@@ -480,15 +480,18 @@ slice, moved along it a whole number of slices; otherwise it is cut
 again. Steps along one direction share one slice thickness where their
 travels allow (from a ladder of 20 µm doubled, never thicker than the
 step's own). A step whose part sweeps a short stretch of a long solid
-cuts that stretch, three times what it sweeps, and a later step reuses it
-when its own stretch lies within. The same sequences, before and after,
-on this machine:
+cuts that stretch -- its own span and the travel the way it comes, a
+slice to spare -- and a later step reuses it when its own stretch lies
+within. A solid outside it meets no moving band at any slide a try reads,
+so cutting more changes no answer, only the cost: the clock's bob step
+cut three times its stretch and took 14.5 s, against 1.3 s now. The
+same sequences, before and after, on this machine:
 
 | sequence | before | after |
 |---|---|---|
 | the engine's, as built (68 steps, a group a cylinder, two poses) | 559 s | 74 s |
 | the engine's first draft (78 steps) | 480 s | 97 s |
-| the clock's stage 2 (33 steps, one group) | 212 s (36 steps) | 84 s |
+| the clock's stage 2 (33 steps, one group) | 212 s (36 steps) | 66 s |
 | the Strandbeest's leg pair put together (37 steps, one pose) | 114 s | 19 s |
 
 **A check that keeps nothing still cuts only what it can reach.** A
@@ -503,6 +506,18 @@ rod, whose line runs up through the movement: cutting every plate and
 wheel along it was 93 of the step's 101 s, and the step is now 12 s
 (sections under a second, 262 fixed bands for 3058), its stage's
 sequence 163 s to 84 s, every step answering as before.
+
+**A path whose reach finds faces but no matter is still a check.** The
+travel comes from the fixed side's span over the faces whose box comes
+within reach; the bands keep only the matter that does. When none does
+-- the clock's centre spacer, going onto the back plate's centre beside
+the third wheel's rim, whose face's box reaches the path and whose teeth
+are 10 mm from it -- no band survives, and the check still runs: its
+tries read no pair and pass at that travel, and the boolean confirms the
+seat. Answered as clear instead (travel 0, no confirm), the answer would
+turn on whether a solid the part never reaches was cut: the plate 0.4 mm
+under the spacer's seat. Only a side with no face within reach at all is
+clear without a try.
 
 The answer: `pass`, the try reported (`entry`, `rotation_deg`,
 `travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `deeper_mm`,
@@ -880,7 +895,8 @@ run out through the end the part goes on from passes pressed its own
 length, a pivot at the running gap under the bore slides through it, a
 plain press of its own length passes and the same bore mid-shaft fails by
 the shaft it is forced along, a keyway passes a lug only turned half round
-and says so) and `insertion_smoke` (the RPC's axis from the joining mate,
+and says so, a path whose reach finds a rim's box but not its matter
+answers the same kept or not, with a plate under its seat or without) and `insertion_smoke` (the RPC's axis from the joining mate,
 a named mate and an explicit axis, the requirement passing and failing,
 and the refusals); the clock generator states one on every pressed or
 slid pair and fails its first stage-1 escape arbor. Designed overlaps: `test_thread.cpp`,

@@ -735,19 +735,18 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
           glm::dmat2 turn(1.0);
           glm::dvec3 moved(0.0);
           bool have = false;
-          // The solid's own span, the direction's frame: cut the window and
-          // as much again either side, or whole when that covers it.
+          // The solid's own span, the direction's frame: cut the window,
+          // or whole when the window covers it.
           double sLo = std::numeric_limits<double>::infinity(), sHi = -sLo;
           for (const sections::Solid::Face& f : prep[i].faces) {
             sLo = std::min({sLo, toDirZ(f.z0), toDirZ(f.z1)});
             sHi = std::max({sHi, toDirZ(f.z0), toDirZ(f.z1)});
           }
-          const double wl = dHi - dLo;
-          const bool whole = dLo - wl <= sLo && dHi + wl >= sHi;
+          const bool whole = dLo <= sLo && dHi >= sHi;
           const double cutLo = whole ? -std::numeric_limits<double>::infinity()
-                                     : dLo - wl,
+                                     : dLo,
                        cutHi = whole ? std::numeric_limits<double>::infinity()
-                                     : dHi + wl;
+                                     : dHi;
           if (key != 0) {
             if (const auto* e = opt.cache->Find(key, dir, h)) {
               // Reusable when only turned about the axis and, with slices,
@@ -810,8 +809,12 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     t0 = Clock::now();
     rep.bandsMoving = static_cast<int>(bandsA.size());
     rep.bandsFixed = static_cast<int>(bandsB.size());
-    if (bandsA.empty() || bandsB.empty())
-      return clear();
+    // No band on a side is an ordinary check, not a clear one: the spans
+    // above found something within reach, and that set the travel. Its
+    // matter is not -- a rim whose face's box comes near the path -- so the
+    // tries read no pair and pass at that travel, and the boolean confirms
+    // the seat. Answered as clear instead, the answer would turn on whether
+    // a solid the part never reaches (a plate under its seat) was cut.
 
     // Orientations tried, and every band pair's reading at each: a pair's
     // reading does not depend on the slide, only on the turn.

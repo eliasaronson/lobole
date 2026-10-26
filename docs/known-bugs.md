@@ -11,20 +11,6 @@ the heading if it is not here yet.
 
 ## Inspection
 
-### The band-cache window may miss a reach that its margin now covers
-
-- **Symptom:** none visible today. Dropping the cached insertion branch's
-  "as much again either side" margin made the clock's bob step ~13x cheaper,
-  but changed the stage-2 "centre spacer" step's answer from a 5.7 mm travel
-  with a confirm to travel 0 and no confirm. A correct window would not change
-  an answer, so the margin is likely hiding an edge case.
-- **Cause:** not known; somewhere in the band cache's "covers" / window logic.
-- **Where:** the cached branch of `Measure::Insertion` in
-  `src/core/MeasureInsertion.cpp`.
-- **Likely fix:** reproduce on the clock's saved stage-2 project with the
-  margin removed, find which bands the spacer step loses, fix the window, then
-  drop the margin (the bob step goes from ~13 s to ~1 s).
-
 ### `interference` reports a phantom clash at an exactly symmetric pose
 
 - **Symptom:** two meshing gears read *touching* at every pose of a tooth

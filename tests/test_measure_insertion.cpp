@@ -592,3 +592,67 @@ TEST_CASE("A short check into a long solid cuts only the stretch it reaches",
   CHECK(b.solidsCut == 2);
   Same(b, check(high, 3, nullptr));
 }
+
+// A part whose path nothing of the fixed side reaches, though a face's box
+// does: the clock's centre spacer, going down onto the back plate's centre
+// with the third wheel's rim beside it. The travel is from the box (it is
+// what sets the step), and the answer is an ordinary check's -- that travel,
+// and the seat confirmed by the boolean -- whether or not some solid the
+// part never reaches (the plate under its seat) is cut into bands: kept or
+// not, with the plate or without.
+TEST_CASE("A path nothing reaches answers the same whatever else is cut",
+          "[measure][insertion]") {
+  // The spacer, Ø8 over 0.4..6.8: 0.4 above the plate under it.
+  const Body spacer =
+      Make(BRepAlgoAPI_Cut(BRepPrimAPI_MakeCylinder(Up(0.4), 4.0, 6.4).Shape(),
+                           BRepPrimAPI_MakeCylinder(Up(-1.0), 2.0, 9.0).Shape())
+               .Shape(),
+           "spacer");
+  const Body plate =
+      Make(BRepPrimAPI_MakeBox(gp_Pnt(-30, -30, -4.8), 60, 60, 4.8).Shape(),
+           "plate");
+  // A rim centred at (20, 20): its outer face's box comes 2.8 from the
+  // axis, its matter 10.3 -- never within the spacer's reach.
+  const gp_Ax2 rimAxis(gp_Pnt(20, 20, 2.0), gp_Dir(0, 0, 1));
+  const Body rim =
+      Make(BRepAlgoAPI_Cut(
+               BRepPrimAPI_MakeCylinder(rimAxis, 18.0, 4.0).Shape(),
+               BRepPrimAPI_MakeCylinder(
+                   gp_Ax2(gp_Pnt(20, 20, 1.0), gp_Dir(0, 0, 1)), 16.0, 6.0)
+                   .Shape())
+               .Shape(),
+           "rim");
+  const auto check = [&](bool withPlate, bool kept) {
+    Measure::sections::BandCache cache;
+    Measure::InsertionOptions o;
+    o.entry = Measure::InsertionEntry::Positive;
+    o.allowanceMm = kAllowance;
+    std::vector<Body> fixed{rim};
+    if (withPlate)
+      fixed.push_back(plate);
+    if (kept) {
+      o.cache = &cache;
+      o.movingKeys = {1};
+      o.fixedKeys =
+          withPlate ? std::vector<uint64_t>{2, 3} : std::vector<uint64_t>{2};
+      o.movingPlaces = {I};
+      o.fixedPlaces = std::vector<glm::dmat4>(fixed.size(), I);
+    }
+    auto r = Measure::Insertion({spacer}, I, fixed, I, O, Z, o);
+    REQUIRE(r.has_value());
+    return *r;
+  };
+  for (const bool withPlate : {false, true})
+    for (const bool kept : {false, true}) {
+      CAPTURE(withPlate, kept);
+      const auto r = check(withPlate, kept);
+      CHECK(r.pass);
+      // From the seat to clear of the rim's box: 6.0 - 0.4, and the
+      // allowance.
+      CHECK(r.best.travelMm == Approx(5.6 + kAllowance).margin(0.01));
+      CHECK(r.best.interferingMm == 0.0);
+      CHECK(r.confirm.ran);
+      CHECK_FALSE(r.confirm.overlaps);
+      CHECK(r.confirm.agrees);
+    }
+}
