@@ -87,7 +87,9 @@
 #include <limits>
 
 #include <APIHeaderSection_MakeHeader.hxx>
-#include <BRepBuilderAPI_MakeShapeOnMesh.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IGESData_GlobalSection.hxx>
@@ -1904,6 +1906,44 @@ bool CADKernel::LoadIGESStructured(const std::string& filename,
   return !out.instances.empty();
 }
 
+namespace {
+// One planar face per triangle of `tri`, added to `faces`; returns how many.
+// The triangles share their vertices (one per node) and the sewing after
+// shares their edges. Built by hand rather than with
+// BRepBuilderAPI_MakeShapeOnMesh, which arrived in OCC 7.7: Ubuntu 24.04
+// ships 7.6, and its build did not compile (docs/interchange/README.md#obj).
+// A triangle too thin to span a plane is skipped, as the STL reader does.
+int AddTriangleFaces(const Handle(Poly_Triangulation) & tri,
+                     const TopLoc_Location& loc, BRep_Builder& builder,
+                     TopoDS_Compound& faces) {
+  const gp_Trsf trsf = loc.Transformation();
+  std::vector<TopoDS_Vertex> vertices(tri->NbNodes() + 1);
+  for (int i = 1; i <= tri->NbNodes(); i++)
+    vertices[i] = BRepBuilderAPI_MakeVertex(tri->Node(i).Transformed(trsf));
+  int made = 0;
+  for (int t = 1; t <= tri->NbTriangles(); t++) {
+    int a = 0, b = 0, c = 0;
+    tri->Triangle(t).Get(a, b, c);
+    if (a == b || b == c || a == c)
+      continue;
+    try {
+      BRepBuilderAPI_MakePolygon wire(vertices[a], vertices[b], vertices[c],
+                                      Standard_True);
+      if (!wire.IsDone())
+        continue;
+      BRepBuilderAPI_MakeFace face(wire.Wire(), Standard_True);
+      if (!face.IsDone())
+        continue;
+      builder.Add(faces, face.Face());
+      made++;
+    } catch (const Standard_Failure&) {
+      // collinear corners: no plane to put the face in
+    }
+  }
+  return made;
+}
+} // namespace
+
 bool CADKernel::LoadOBJStructured(const std::string& filename,
                                   ImportedModel& out) {
   out = {};
@@ -1942,12 +1982,7 @@ bool CADKernel::LoadOBJStructured(const std::string& filename,
           BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), loc);
       if (tri.IsNull())
         continue;
-      BRepBuilderAPI_MakeShapeOnMesh make(tri);
-      make.Build();
-      if (!make.IsDone() || make.Shape().IsNull())
-        continue;
-      builder.Add(faces, make.Shape().Moved(loc));
-      pieces++;
+      pieces += AddTriangleFaces(tri, loc, builder, faces);
     }
     if (pieces == 0) {
       product.shape = CADShape();

@@ -164,8 +164,10 @@ Ubuntu's `libocct-data-exchange-dev`) in `TKIGES` and `TKXDEIGES`. The
 `CADKernel::LoadOBJStructured` reads through `RWObj_CafReader` into XCAF:
 each `o` object is a product named as the file names it, coloured by its
 `usemtl` material (a visual material on its faces). Each triangulation
-becomes planar faces (`BRepBuilderAPI_MakeShapeOnMesh`), sewn and promoted
-to a solid when closed, as in `LoadSTL`; an open one is a shell and the
+becomes one planar face per triangle on shared vertices, sewn and promoted
+to a solid when closed, as in `LoadSTL`. The faces are built by hand rather
+than with `BRepBuilderAPI_MakeShapeOnMesh`, which is OCC 7.7+ and broke the
+Ubuntu 24.04 (7.6) build; a triangle too thin to span a plane is skipped; an open one is a shell and the
 warning says so. `units` applies, as for STL. No axis or unit conversion is
 asked of the reader: the import's `units` and `up_axis` do both, and `auto`
 is `none`.
