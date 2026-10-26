@@ -1428,9 +1428,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       if (const ui::CamPassProgress p = ui::CamPassProgressOf(*s_App);
           p.running && (p.total == 0 || p.done >= p.total))
         countsSane = false;
-      const double f0 = MainThreadCpuMs(); // the frame's cost, not its wait
+      // The frame's work, not its wait or its present (LastFrameWorkCpuMs).
       ctx->Yield();
-      worstMs = std::max(worstMs, MainThreadCpuMs() - f0);
+      worstMs = std::max(worstMs, LastFrameWorkCpuMs());
       frames++;
       if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(120))
         break;
@@ -1640,9 +1640,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const auto t0 = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - t0 < std::chrono::seconds(3) &&
            s_App->camPlaying) {
-      const double f0 = MainThreadCpuMs();
       ctx->Yield();
-      const double cost = MainThreadCpuMs() - f0;
+      const double cost = LastFrameWorkCpuMs();
       worstMs = std::max(worstMs, cost);
       totalMs += cost;
       frames++;
