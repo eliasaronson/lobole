@@ -25,8 +25,14 @@ bool Open(const std::filesystem::path& path, std::string* error = nullptr);
 // The file being written, or empty.
 std::filesystem::path Current();
 
-// Deletes all but the `keep` newest `*.log` in `dir` (by name, which starts
-// with the session's start time), never one named in `keepAlways`.
+// Whether the file name `a` is newer than `b`, for names that start
+// "YYYYMMDD-HHMMSS-<pid>": the '-'-separated fields compared as NUMBERS
+// where they are digits (as text, "-32" sorted ahead of "-308" in the same
+// second). Within one second the pid decides, which is stable, not true.
+bool NewerName(const std::string& a, const std::string& b);
+
+// Deletes all but the `keep` newest `*.log` in `dir` (by name, NewerName),
+// never one named in `keepAlways`.
 void Prune(const std::filesystem::path& dir, size_t keep,
            const std::vector<std::filesystem::path>& keepAlways);
 

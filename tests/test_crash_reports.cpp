@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "common/LogFile.h"
 #include "common/Platform.h"
 #include "core/io/CrashReports.h"
 
@@ -296,4 +297,64 @@ TEST_CASE("first_frame and the start time survive collection", "[crash]") {
   // Within the same second, still ordered: milliseconds.
   Write(crash::LastGoodStartFile(s.dir), "100901\n");
   CHECK(crash::EarlyDeathsInARow(s.dir) == 0);
+}
+
+// Folder names are "YYYYMMDD-HHMMSS-<pid>": as text, "-32" sorts ahead of
+// "-308" in the same second, so a fresh Wine prefix (small pids) listed the
+// older session first and pruning could delete the newest report.
+TEST_CASE("Reports in one second are ordered by start, not by name as text",
+          "[crash]") {
+  ScratchDir s("lobole-crash-same-second");
+  const fs::path older = crash::ReportsDir(s.dir) / "20260101-000000-32";
+  Write(older / "report.json", nlohmann::json{{"stem", "20260101-000000-32"},
+                                              {"reason", "older"},
+                                              {"started_ms", 100000}}
+                                   .dump());
+  // The newer session, collected now, with keep = 1: the one kept is it.
+  PlantMarker(s.dir, "20260101-000000-308", {{"started_ms", 100400}});
+  const auto collected = crash::CollectDeadSessions(s.dir, /*keep=*/1);
+  REQUIRE(collected.size() == 1);
+  const auto listed = crash::ListReports(s.dir);
+  REQUIRE(listed.size() == 1);
+  CHECK(listed.front().stem == "20260101-000000-308");
+  CHECK_FALSE(fs::exists(older));
+
+  // Listing: the later start first, whatever its pid's digits say.
+  Write(older / "report.json", nlohmann::json{{"stem", "20260101-000000-32"},
+                                              {"reason", "older"},
+                                              {"started_ms", 100000}}
+                                   .dump());
+  const auto both = crash::ListReports(s.dir);
+  REQUIRE(both.size() == 2);
+  CHECK(both[0].stem == "20260101-000000-308");
+  CHECK(both[1].stem == "20260101-000000-32");
+
+  // No start recorded (a bare folder): the name's second, then pid read as
+  // a number; and one session's second report is newer than its first.
+  const auto bare = [](const char* name) {
+    crash::Report r;
+    r.dir = fs::path("crashes") / name;
+    r.stem = name;
+    return r;
+  };
+  CHECK(crash::NewerReport(bare("20260101-000001-32"),
+                           bare("20260101-000000-308")));
+  CHECK(crash::NewerReport(bare("20260101-000000-308"),
+                           bare("20260101-000000-32")));
+  CHECK(crash::NewerReport(bare("20260101-000000-32-2"),
+                           bare("20260101-000000-32")));
+  CHECK(crash::NewerReport(bare("20260101-000000-32-10"),
+                           bare("20260101-000000-32-9")));
+}
+
+TEST_CASE("Logs in one second are pruned by pid read as a number", "[crash]") {
+  ScratchDir s("lobole-crash-logs-same-second");
+  Write(s.dir / "logs" / "20260101-000000-32.log", "x\n");
+  Write(s.dir / "logs" / "20260101-000000-308.log", "x\n");
+  logfile::Prune(s.dir / "logs", 1, {});
+  CHECK(fs::exists(s.dir / "logs" / "20260101-000000-308.log"));
+  CHECK_FALSE(fs::exists(s.dir / "logs" / "20260101-000000-32.log"));
+  CHECK(
+      logfile::NewerName("20260101-000001-32.log", "20260101-000000-308.log"));
+  CHECK(logfile::NewerName("20260101-000000-32-2", "20260101-000000-32"));
 }

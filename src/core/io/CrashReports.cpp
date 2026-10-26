@@ -20,6 +20,7 @@
 #include <limits>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <type_traits>
 
 namespace fs = std::filesystem;
@@ -402,17 +403,71 @@ std::optional<Report> Collect(const fs::path& stateDir, const fs::path& marker,
   return r;
 }
 
+// A report folder's name, "YYYYMMDD-HHMMSS-<pid>" with "-<n>" for the n-th
+// report of one session, read as NUMBERS. As text, "-32" sorted ahead of
+// "-308" in the same second, so the Windows smoke read the wrong report in a
+// fresh Wine prefix (small pids) and PruneReports could delete the newest.
+struct StemOrder {
+  int64_t startMs = 0; // the session's start; 0 = not known
+  int64_t pid = 0;
+  int n = 1;
+};
+
+std::optional<int64_t> Digits(std::string_view s) {
+  if (s.empty() || s.size() > 18)
+    return std::nullopt;
+  int64_t v = 0;
+  for (char c : s) {
+    if (c < '0' || c > '9')
+      return std::nullopt;
+    v = v * 10 + (c - '0');
+  }
+  return v;
+}
+
+StemOrder ReadStem(const std::string& name, int64_t startedMs) {
+  StemOrder o;
+  o.startMs = startedMs;
+  std::vector<std::string_view> parts;
+  std::string_view rest(name);
+  for (size_t at; (at = rest.find('-')) != std::string_view::npos;
+       rest.remove_prefix(at + 1))
+    parts.push_back(rest.substr(0, at));
+  parts.push_back(rest);
+  if (parts.size() < 3 || parts.size() > 4 || parts[0].size() != 8 ||
+      parts[1].size() != 6)
+    return o;
+  const auto date = Digits(parts[0]), time = Digits(parts[1]),
+             pid = Digits(parts[2]);
+  const auto n =
+      parts.size() == 4 ? Digits(parts[3]) : std::optional<int64_t>(1);
+  if (!date || !time || !pid || !n || *n > 1000000)
+    return o;
+  o.pid = *pid;
+  o.n = static_cast<int>(*n);
+  if (o.startMs == 0) {
+    // No start in the report (a damaged or bare folder): the name's second,
+    // in the local time it was written in.
+    std::tm tm{};
+    tm.tm_year = static_cast<int>(*date / 10000) - 1900;
+    tm.tm_mon = static_cast<int>(*date / 100 % 100) - 1;
+    tm.tm_mday = static_cast<int>(*date % 100);
+    tm.tm_hour = static_cast<int>(*time / 10000);
+    tm.tm_min = static_cast<int>(*time / 100 % 100);
+    tm.tm_sec = static_cast<int>(*time % 100);
+    tm.tm_isdst = -1;
+    const std::time_t t = std::mktime(&tm);
+    if (t > 0)
+      o.startMs = int64_t{t} * 1000;
+  }
+  return o;
+}
+
 void PruneReports(const fs::path& stateDir, size_t keep) {
   std::error_code ec;
-  std::vector<fs::path> dirs;
-  for (const auto& e : fs::directory_iterator(ReportsDir(stateDir), ec))
-    if (e.is_directory(ec))
-      dirs.push_back(e.path());
-  std::sort(dirs.begin(), dirs.end(), [](const fs::path& a, const fs::path& b) {
-    return a.filename() > b.filename();
-  });
-  for (size_t i = keep; i < dirs.size(); ++i)
-    fs::remove_all(dirs[i], ec);
+  const std::vector<Report> reports = ListReports(stateDir);
+  for (size_t i = keep; i < reports.size(); ++i)
+    fs::remove_all(reports[i].dir, ec);
 }
 
 } // namespace
@@ -585,6 +640,26 @@ std::optional<Report> ReportThisSession(const std::string& reason,
   return r;
 }
 
+bool NewerReport(const Report& a, const Report& b) {
+  const std::string an = a.dir.empty() ? a.stem : a.dir.filename().string();
+  const std::string bn = b.dir.empty() ? b.stem : b.dir.filename().string();
+  const StemOrder ao = ReadStem(an, a.startedMs);
+  const StemOrder bo = ReadStem(bn, b.startedMs);
+  if (ao.startMs != bo.startMs)
+    return ao.startMs > bo.startMs;
+  // One session's reports: the later one has the higher n.
+  if (ao.pid == bo.pid && ao.n != bo.n)
+    return ao.n > bo.n;
+  // Two sessions started in the same millisecond: nothing records which was
+  // first, and a pid is not a time. Any order, so long as it is the same one
+  // every time.
+  if (ao.pid != bo.pid)
+    return ao.pid > bo.pid;
+  if (ao.n != bo.n)
+    return ao.n > bo.n;
+  return an > bn;
+}
+
 size_t EarlyDeathsInARow(const std::vector<Report>& reports,
                          int64_t lastGoodStartMs) {
   size_t count = 0;
@@ -655,8 +730,7 @@ std::vector<Report> CollectDeadSessions(const fs::path& stateDir, size_t keep) {
     fs::remove(marker, ec);
     lock.Release();
   }
-  std::sort(out.begin(), out.end(),
-            [](const Report& a, const Report& b) { return a.stem > b.stem; });
+  std::sort(out.begin(), out.end(), NewerReport);
   PruneReports(stateDir, keep);
   logfile::Prune(stateDir / "logs", kKeepLogs, liveLogs);
   // After the reports have their copies: what is left of a dead session's
@@ -679,9 +753,7 @@ std::vector<Report> ListReports(const fs::path& stateDir) {
     }
     out.push_back(FromJson(j, e.path()));
   }
-  std::sort(out.begin(), out.end(), [](const Report& a, const Report& b) {
-    return a.dir.filename() > b.dir.filename();
-  });
+  std::sort(out.begin(), out.end(), NewerReport);
   return out;
 }
 

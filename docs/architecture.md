@@ -539,7 +539,14 @@ by the same name drift apart without any test noticing:
   once — its unsaved slot is its own, named by its stem
   ([versioning](versioning/README.md#every-instance-has-its-own-unsaved-slot)) — and only a sidecar path — a damaged marker naming another file gets
   nothing copied). A marker's or a report's fields are read one by one: a
-  damaged one loses that field, never the start. Twenty reports are kept. Nothing is sent
+  damaged one loses that field, never the start. Twenty reports are kept,
+  newest by the session's start in milliseconds (`crash::NewerReport`; a
+  folder with no start recorded falls back to its name's second), then a
+  session's "-n" for its later reports. The name is never compared as text:
+  "-32" sorted ahead of "-308" in the same second, so a fresh Wine prefix's
+  small pids listed the older report first and pruning could delete the
+  newest. Two sessions started in the same millisecond fall to pid order,
+  which is stable, not true. Nothing is sent
   anywhere, and `report.txt` says at the top that the folder may hold the
   user's design and file paths.
 - **The windowed app says so**: a "Loböle closed unexpectedly" modal with
@@ -553,7 +560,8 @@ by the same name drift apart without any test noticing:
 - **The log is the activity journal**: every session's log also goes to
   `<state>/logs/<started>-<pid>.log` (`common/LogFile.h`; same pattern and
   flush-on-every-message as stdout, which is unchanged; the ten newest are
-  kept, never a live session's). Each edit is one info line as it happens:
+  kept, by name read as numbers (`logfile::NewerName`), never a live
+  session's). Each edit is one info line as it happens:
   `edit:`/`undo:`/`redo:` with the command's description, `edit: assembly`
   (drawing, CAM job) for a snapshot, `rpc: <method>` by name only (a run of
   the same call that changed nothing is one line, so a client polling

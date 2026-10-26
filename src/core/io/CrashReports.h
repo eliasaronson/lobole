@@ -97,8 +97,16 @@ struct Report {
 std::vector<Report> CollectDeadSessions(const std::filesystem::path& stateDir,
                                         size_t keep = kKeepReports);
 
-// The reports on disk, newest first.
+// The reports on disk, newest first (NewerReport).
 std::vector<Report> ListReports(const std::filesystem::path& stateDir);
+
+// Whether `a` is newer than `b`: the later session start (startedMs, or the
+// folder name's second when the report has none), then, for one session's
+// several reports, the higher "-<n>". The folder name is read as numbers,
+// never compared as text: "...-32" sorted ahead of "...-308" in the same
+// second. Two sessions started in the same millisecond have no recorded
+// order; they fall to pid order, which is only stable, not true.
+bool NewerReport(const Report& a, const Report& b);
 std::filesystem::path ReportsDir(const std::filesystem::path& stateDir);
 
 // The reason a report made by ReportThisSession for a lost graphics device

@@ -91,6 +91,35 @@ std::filesystem::path Current() {
   return g_filePath;
 }
 
+bool NewerName(const std::string& a, const std::string& b) {
+  const auto fields = [](const std::string& name) {
+    std::vector<std::string> out;
+    const std::string stem = std::filesystem::path(name).stem().string();
+    size_t from = 0;
+    for (size_t at; (at = stem.find('-', from)) != std::string::npos;
+         from = at + 1)
+      out.push_back(stem.substr(from, at - from));
+    out.push_back(stem.substr(from));
+    return out;
+  };
+  const auto digits = [](const std::string& f) {
+    return !f.empty() && f.size() < 19 &&
+           std::all_of(
+               f.begin(), f.end(), [](char c) { return c >= '0' && c <= '9'; });
+  };
+  const std::vector<std::string> fa = fields(a), fb = fields(b);
+  for (size_t i = 0; i < std::min(fa.size(), fb.size()); ++i) {
+    if (fa[i] == fb[i])
+      continue;
+    if (digits(fa[i]) && digits(fb[i]))
+      return std::stoll(fa[i]) > std::stoll(fb[i]);
+    return fa[i] > fb[i];
+  }
+  if (fa.size() != fb.size())
+    return fa.size() > fb.size(); // "<stem>-2" after "<stem>"
+  return a > b;
+}
+
 void Prune(const std::filesystem::path& dir, size_t keep,
            const std::vector<std::filesystem::path>& keepAlways) {
   namespace fs = std::filesystem;
@@ -101,7 +130,7 @@ void Prune(const std::filesystem::path& dir, size_t keep,
       logs.push_back(e.path());
   // Newest first: the name begins with the start time, YYYYmmdd-HHMMSS.
   std::sort(logs.begin(), logs.end(), [](const fs::path& a, const fs::path& b) {
-    return a.filename() > b.filename();
+    return NewerName(a.filename().string(), b.filename().string());
   });
   const fs::path current = Current();
   for (size_t i = keep; i < logs.size(); ++i) {
