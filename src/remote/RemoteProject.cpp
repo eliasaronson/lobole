@@ -1519,9 +1519,10 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (only >= 0) {
       shape = bodies[only].shape;
     } else {
-      shape = bodies[0].shape;
-      for (size_t i = 1; i < bodies.size(); i++)
-        shape = shape.Union(bodies[i].shape);
+      std::vector<CADShape> shapes;
+      for (const Body& b : bodies)
+        shapes.push_back(b.shape);
+      shape = CADShape::UnionOf(shapes);
     }
     if (!CADKernel::Instance().SaveBREP(path, shape))
       throw std::runtime_error(

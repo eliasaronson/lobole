@@ -88,10 +88,12 @@ ExportPartStl(const Document& part, const std::string& path, int bodyIndex,
     shape = bodies[static_cast<size_t>(bodyIndex)]->shape;
     r.bodies = 1;
   } else {
-    // STL is single-shape: several bodies are fused, as every CAD does.
-    shape = bodies[0]->shape;
-    for (size_t i = 1; i < bodies.size(); i++)
-      shape = shape.Union(bodies[i]->shape);
+    // STL is single-shape: several bodies are fused, as every CAD does --
+    // those that may touch, in one boolean (CADShape::UnionOf).
+    std::vector<CADShape> shapes;
+    for (const Body* b : bodies)
+      shapes.push_back(b->shape);
+    shape = CADShape::UnionOf(shapes);
     r.bodies = bodies.size();
   }
   if (!CADKernel::Instance().SaveSTL(path, shape, r.deflectionMm,

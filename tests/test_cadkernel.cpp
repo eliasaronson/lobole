@@ -1630,3 +1630,59 @@ TEST_CASE("an Import saved before up_axis existed reloads unmoved",
   std::filesystem::remove(old);
   std::filesystem::remove(fresh);
 }
+
+// CADShape::UnionOf: the one-shape union an STL or BREP export takes of a
+// part's bodies. A print plate is a hundred pieces that touch nothing, and
+// fused one Union at a time it re-processed the growing whole for every
+// piece: 64 s of plate 4's export (docs/inspect/README.md#will-it-print).
+TEST_CASE("UnionOf fuses only what may touch, in body order, once",
+          "[kernel][boolean]") {
+  auto& k = CADKernel::Instance();
+  constexpr int kPieces = 120;
+  std::vector<CADShape> parts;
+  for (int i = 0; i < kPieces; ++i) {
+    const glm::dvec3 at(3.0 * (i % 12), 3.0 * (i / 12), 0.0);
+    parts.push_back(k.CreateBox(at, at + glm::dvec3(1.0 + 0.01 * i)));
+  }
+  // The last one overlaps the second: those two are one.
+  parts.push_back(
+      k.CreateBox(glm::dvec3(3.5, 0.0, 0.0), glm::dvec3(4.5, 1.0, 1.0)));
+
+  const std::clock_t t0 = std::clock();
+  const CADShape u = CADShape::UnionOf(parts);
+  const double cpu = double(std::clock() - t0) / CLOCKS_PER_SEC;
+  REQUIRE(u.IsValid());
+
+  const std::vector<CADShape> solids = u.SplitSolids();
+  REQUIRE(solids.size() == kPieces); // one more body, fused with another
+  double expected = 0.0;
+  for (int i = 0; i < kPieces; ++i)
+    expected += std::pow(1.0 + 0.01 * i, 3);
+  expected += 1.0 - 0.51; // the last cube, less its 0.51 inside the second
+  CHECK_THAT(u.Volume(), WithinRel(expected, 1e-6));
+  // In body order: each solid is the piece it came from, the fused pair
+  // where its first part was.
+  for (int i = 0; i < kPieces; ++i) {
+    const double alone = std::pow(1.0 + 0.01 * i, 3);
+    const double want = i == 1 ? alone + 1.0 - 0.51 : alone;
+    INFO("solid " << i);
+    CHECK_THAT(solids[static_cast<size_t>(i)].Volume(), WithinRel(want, 1e-6));
+  }
+  // The same bodies give the same shape: the same solids in the same order.
+  const std::vector<CADShape> again = CADShape::UnionOf(parts).SplitSolids();
+  REQUIRE(again.size() == solids.size());
+  for (size_t i = 0; i < again.size(); ++i)
+    CHECK(again[i].Volume() == solids[i].Volume());
+
+  // COST (CPU time; docs/ui/testing.md#tests-that-time-things): one fuse of
+  // the overlapping pair. The chain of Unions it replaced is quadratic: 0.26
+  // s of CPU on 49 of these boxes, 1.9 s on these 121; this, 0.005 s. The
+  // bound is far from both, for an E-core and the sanitizers.
+  INFO("UnionOf of " << parts.size() << " boxes: " << cpu << " s of CPU");
+  CHECK(cpu < 0.5);
+
+  // One part is itself, and an invalid one means no union, as Union does.
+  CHECK(CADShape::UnionOf({parts[0]}).GetShape().IsSame(parts[0].GetShape()));
+  CHECK_FALSE(CADShape::UnionOf({parts[0], CADShape()}).IsValid());
+  CHECK_FALSE(CADShape::UnionOf({}).IsValid());
+}

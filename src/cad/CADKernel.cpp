@@ -14,6 +14,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <map>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <unordered_map>
 
@@ -78,6 +79,7 @@
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListIteratorOfListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
@@ -697,6 +699,69 @@ CADShape CADShape::CompoundOf(const std::vector<CADShape>& parts) {
   if (added == 0)
     return CADShape();
   return CADShape(compound);
+}
+
+CADShape CADShape::UnionOf(const std::vector<CADShape>& parts) {
+  std::vector<const CADShape*> valid;
+  for (const CADShape& p : parts)
+    if (p.IsValid())
+      valid.push_back(&p);
+  if (valid.size() != parts.size() || valid.empty())
+    return CADShape(); // as Union: an invalid operand, no union
+  if (valid.size() == 1)
+    return *valid[0];
+  // Which parts may touch: their (conservative, tolerance-wide) boxes meet.
+  const size_t n = valid.size();
+  std::vector<glm::dvec3> lo(n), hi(n);
+  for (size_t i = 0; i < n; ++i) {
+    valid[i]->GetBoundingBox(lo[i], hi[i]);
+    lo[i] -= glm::dvec3(Precision::Confusion());
+    hi[i] += glm::dvec3(Precision::Confusion());
+  }
+  std::vector<size_t> parent(n);
+  std::iota(parent.begin(), parent.end(), size_t{0});
+  const auto find = [&](size_t x) {
+    while (parent[x] != x)
+      x = parent[x] = parent[parent[x]];
+    return x;
+  };
+  for (size_t i = 0; i < n; ++i)
+    for (size_t j = i + 1; j < n; ++j)
+      if (glm::all(glm::lessThanEqual(lo[i], hi[j])) &&
+          glm::all(glm::lessThanEqual(lo[j], hi[i]))) {
+        // The smaller root wins, so a group is named by its first part.
+        const size_t a = find(i), b = find(j);
+        parent[std::max(a, b)] = std::min(a, b);
+      }
+  std::vector<std::vector<size_t>> groups(n);
+  for (size_t i = 0; i < n; ++i)
+    groups[find(i)].push_back(i);
+  std::vector<CADShape> pieces;
+  for (const std::vector<size_t>& g : groups) {
+    if (g.empty())
+      continue;
+    if (g.size() == 1) {
+      pieces.push_back(*valid[g[0]]);
+      continue;
+    }
+    try {
+      TopTools_ListOfShape args, tools;
+      args.Append(valid[g[0]]->GetShape());
+      for (size_t k = 1; k < g.size(); ++k)
+        tools.Append(valid[g[k]]->GetShape());
+      BRepAlgoAPI_Fuse fuse;
+      fuse.SetArguments(args);
+      fuse.SetTools(tools);
+      fuse.SetNonDestructive(Standard_True);
+      fuse.Build();
+      if (!fuse.IsDone() || fuse.Shape().IsNull())
+        return CADShape();
+      pieces.emplace_back(fuse.Shape());
+    } catch (const Standard_Failure&) {
+      return CADShape();
+    }
+  }
+  return pieces.size() == 1 ? pieces[0] : CompoundOf(pieces);
 }
 
 std::vector<CADShape> CADShape::SplitSolids() const {

@@ -1064,9 +1064,10 @@ bool ExportActiveDocument(AppState& state, const std::string& path,
       bodies.push_back(b);
   if (bodies.empty())
     return fail("the part has only reference bodies, nothing to export");
-  CADShape shape = bodies[0].shape;
-  for (size_t i = 1; i < bodies.size(); i++)
-    shape = shape.Union(bodies[i].shape);
+  std::vector<CADShape> shapes;
+  for (const Body& b : bodies)
+    shapes.push_back(b.shape);
+  const CADShape shape = CADShape::UnionOf(shapes);
   return CADKernel::Instance().SaveBREP(path, shape) ||
          fail("could not write " + path);
 }

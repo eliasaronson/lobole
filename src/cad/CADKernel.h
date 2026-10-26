@@ -193,6 +193,17 @@ public:
   // pieces are known not to touch.
   static CADShape CompoundOf(const std::vector<CADShape>& parts);
 
+  // All of `parts` as one shape, fused where they may touch: the union a
+  // single-shape export (STL, BREP) wants of a part's bodies. Parts whose
+  // boxes are apart cannot share a point, so they are gathered as a
+  // compound, as a fuse would leave them; each group whose boxes meet is
+  // fused in ONE boolean, never a chain. A print plate of 123 pieces fused
+  // one Union at a time re-processed the growing whole 122 times: 64 s, for
+  // a result that was the compound. Groups keep the order of their first
+  // part, so the same bodies give the same shape. Invalid when a group's
+  // fuse fails, as the chain was. Writes nothing onto `parts`.
+  static CADShape UnionOf(const std::vector<CADShape>& parts);
+
   // Splits into its connected solids (one entry when the shape is a single
   // solid, several when it is a compound of disjoint solids). Empty if
   // invalid. Used to turn a fused pattern back into per-instance bodies.
