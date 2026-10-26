@@ -288,6 +288,11 @@ not fail the build. Beyond the cases above:
   throw is allowed only where reaching it is a bug, since the dispatcher
   labels it `internal` ([rpc.md](scripting/rpc.md#structured-errors));
 - every doc path a file cites exists, down to its heading;
+- no range-for iterates into a temporary through a call
+  (`for (r : Call(...).at("rows"))`): the temporary is gone before the loop
+  starts until C++23's P2718, which GCC 15 implements and Ubuntu 24.04's
+  GCC 13 does not, so it read freed memory there and nowhere else. Name the
+  result first; a member of the temporary (`f().rows`) is fine;
 - the test binary is not older than the source it is testing.
 
 A scanning test is deliberately narrow: it keys off a name family

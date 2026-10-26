@@ -372,8 +372,11 @@ struct ReqApp {
     return "";
   }
   json Row(uint64_t id) {
-    for (const json& r :
-         Call("list_requirements", json::object()).at("requirements"))
+    // Named: a range-for over Call(...).at(...) iterates a temporary that is
+    // gone before the loop starts, until C++23's P2718 (GCC 15). On GCC 13
+    // (Ubuntu 24.04) it read freed memory and found no row.
+    const json listed = Call("list_requirements", json::object());
+    for (const json& r : listed.at("requirements"))
       if (r.at("id") == id)
         return r;
     FAIL("no requirement " << id);

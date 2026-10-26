@@ -2470,8 +2470,10 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
             .get<uint64_t>();
     ctx->Yield(3);
     const auto rowState = [id] {
-      for (const nlohmann::json& r :
-           remote::RequirementRows(*s_App).at("requirements"))
+      // Named: iterating RequirementRows(...).at(...) directly outlives the
+      // temporary on a compiler before P2718 (GCC 13).
+      const nlohmann::json rows = remote::RequirementRows(*s_App);
+      for (const nlohmann::json& r : rows.at("requirements"))
         if (r.at("id") == id)
           return r.at("state").get<std::string>();
       return std::string("missing");

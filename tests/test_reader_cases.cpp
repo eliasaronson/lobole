@@ -91,8 +91,10 @@ TEST_CASE("Reader cases: every committed regression reads as it should",
       } else {
         REQUIRE(want == "loads");
         REQUIRE(o.loaded);
-        for (const auto& [what, n] :
-             expect.value("counts", json::object()).items()) {
+        // Named: items() over value()'s temporary iterated freed memory on
+        // GCC 13, before P2718 (test_conventions.cpp's range-for scan).
+        const json counts = expect.value("counts", json::object());
+        for (const auto& [what, n] : counts.items()) {
           INFO(what);
           const auto it = o.counts.find(what);
           REQUIRE(it != o.counts.end());

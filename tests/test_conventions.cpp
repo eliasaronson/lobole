@@ -2490,3 +2490,84 @@ TEST_CASE("every path that adds a feature checks the feature limit first",
        }());
   CHECK(offenders.empty());
 }
+
+TEST_CASE("no range-for iterates into a temporary through a call",
+          "[convention]") {
+  // `for (const json& r : Call(...).at("rows"))` binds the range to what
+  // at() returns, a reference into Call's result -- a temporary that is gone
+  // before the loop's first step. C++23's P2718 extends it, and GCC 15 does,
+  // so the nix build (GCC 16) and Ubuntu 26.04 passed; Ubuntu 24.04's GCC 13
+  // read freed memory: five requirement tests found no row, and the reader
+  // cases crashed in `expect.value("counts", ...).items()`. A MEMBER of
+  // the temporary (`f().rows`) is fine: that extends it in every standard.
+  // Name the result first. The accessors listed return a reference into
+  // something that outlives the loop, so are not the temporary.
+  static const std::set<std::string> intoNamed = {"GetBodies", "GetMates",
+                                                  "at"};
+  const auto check = [](const std::string& code,
+                        std::vector<std::string>* hits) {
+    static const std::regex head(R"(\bfor\s*\()");
+    for (std::sregex_iterator it(code.begin(), code.end(), head), end;
+         it != end; ++it) {
+      size_t i = static_cast<size_t>(it->position() + it->length());
+      int depth = 1;
+      size_t colon = std::string::npos;
+      const size_t from = i;
+      for (; i < code.size() && depth > 0; ++i) {
+        const char c = code[i];
+        if (c == '(' || c == '[' || c == '{')
+          ++depth;
+        else if (c == ')' || c == ']' || c == '}')
+          --depth;
+        else if (c == ';' && depth == 1)
+          break; // a plain for
+        else if (c == ':' && depth == 1 && colon == std::string::npos &&
+                 code[i - 1] != ':' && code[i + 1] != ':')
+          colon = i;
+      }
+      if (depth != 0 || colon == std::string::npos)
+        continue;
+      const std::string range = code.substr(colon + 1, i - 1 - colon - 1);
+      // name(...) followed by an accessor that returns into its result.
+      static const std::regex into(
+          R"(([A-Za-z_][A-Za-z0-9_]*)\s*\(([^()]|\([^()]*\))*\)\s*(\.|->)\s*(at|value|items|front|back)\s*\(|([A-Za-z_][A-Za-z0-9_]*)\s*\(([^()]|\([^()]*\))*\)\s*\[)");
+      for (std::sregex_iterator m(range.begin(), range.end(), into), e; m != e;
+           ++m) {
+        const std::string name =
+            (*m)[1].matched ? (*m)[1].str() : (*m)[5].str();
+        if (intoNamed.contains(name) || name == "for" || name == "if")
+          continue;
+        hits->push_back(
+            std::to_string(std::count(code.begin(), code.begin() + from, '\n') +
+                           1) +
+            ": " + range);
+      }
+    }
+  };
+  // The scan sees the case it is for, and passes what it must.
+  std::vector<std::string> probe;
+  check("for (const json& r : Call(\"x\", y).at(\"rows\")) {}\n"
+        "for (const auto& c : Scan(p).conflicts) {}\n"
+        "for (const Body& b : doc.GetBodies()[0].names) {}\n"
+        "for (int i = 0; i < f().at(0); ++i) {}\n",
+        &probe);
+  REQUIRE(probe.size() == 1);
+  CHECK(probe[0].rfind("1: ", 0) == 0);
+
+  std::vector<std::string> offenders;
+  for (const char* dir : {"src", "tests"})
+    for (const std::string& ext : {".cpp", ".h"})
+      for (const SourceFile& src : SourcesUnder(dir, ext)) {
+        std::vector<std::string> hits;
+        check(WithoutLiterals(CodeOnly(src.text)), &hits);
+        for (const std::string& h : hits)
+          offenders.push_back(Relative(src.path) + ":" + h);
+      }
+  INFO("name the call's result before the loop:\n" + [&] {
+    std::string s;
+    for (const std::string& o : offenders)
+      s += "  " + o + "\n";
+    return s;
+  }());
+  CHECK(offenders.empty());
+}
