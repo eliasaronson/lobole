@@ -1105,8 +1105,17 @@ if(UNIX AND NOT APPLE)
     if(LOBOLE_DBUS_FOUND)
         set_property(SOURCE src/app/StartupReport.cpp APPEND PROPERTY
                      COMPILE_DEFINITIONS HAVE_DBUS)
+        # Without the compiler's own directories: Ubuntu 26.04's dbus-1
+        # lists /usr/include, a source property is not filtered the way a
+        # target's directories are, and `-isystem /usr/include` breaks
+        # libstdc++'s #include_next <stdlib.h>.
+        set(lobole_dbus_includes ${LOBOLE_DBUS_INCLUDE_DIRS})
+        if(CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+            list(REMOVE_ITEM lobole_dbus_includes
+                 ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
+        endif()
         set_property(SOURCE src/app/StartupReport.cpp APPEND PROPERTY
-                     INCLUDE_DIRECTORIES ${LOBOLE_DBUS_INCLUDE_DIRS})
+                     INCLUDE_DIRECTORIES ${lobole_dbus_includes})
         target_link_libraries(designer_app PUBLIC ${LOBOLE_DBUS_LINK_LIBRARIES})
     endif()
 endif()
