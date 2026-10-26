@@ -192,7 +192,8 @@ three suites that passed alone):
 - **Cost** -- "this must not go quadratic", "a refusal costs a parse", "a
   frame does not run the pass". Read CPU time, which other work does not
   inflate: `std::clock()` for the process in a Catch2 case (Delete Face's
-  100 holes, under 120 s of CPU; the feature-limit refusal, under 5 s;
+  100 holes, under 120 s of CPU; the feature-limit refusal, under 5 s, ten times that under the
+  sanitizers as the reader-fuzz budget is;
   `FaceSnapPoints`), `MainThreadCpuMs()` in a GUI test (above), the
   reader-fuzz budget (docs/versioning/README.md#reader-fuzzing). CPU time
   still depends on the core the work lands on: a hybrid CPU's low-power

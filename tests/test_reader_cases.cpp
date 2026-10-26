@@ -251,8 +251,18 @@ TEST_CASE("Reader cases: a part past the feature limit is refused before it "
   CHECK(error.find("v01-plain-box.json") != std::string::npos);
   CHECK(error.find("a part holds at most 50 000 features; this one lists "
                    "104 857") != std::string::npos);
-  // Milliseconds of CPU: a bound a rebuild could never meet.
-  CHECK(seconds < 5.0);
+  // Milliseconds of CPU: a bound a rebuild could never meet. The sanitizers
+  // multiply the parse's cost (6 s of CPU under ASan, where the bound is
+  // 5 s), so it takes the reader-fuzz budget's factor of ten
+  // (ReaderFuzz.cpp's Budget()) there, as the RSS check below is left out:
+  // still far below the minutes a rebuild of 104 857 features would cost.
+#ifdef LOBOLE_READER_FUZZ_SANITIZED
+  constexpr double kCpuScale = 10.0;
+#else
+  constexpr double kCpuScale = 1.0;
+#endif
+  INFO("CPU seconds " << seconds);
+  CHECK(seconds < 5.0 * kCpuScale);
   // The parse is what it costs: about 90 MB for 8 MB of JSON. Not under
   // the sanitizers, whose allocator keeps what was freed.
 #ifndef LOBOLE_READER_FUZZ_SANITIZED
