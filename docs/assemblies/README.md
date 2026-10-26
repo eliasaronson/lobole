@@ -668,6 +668,23 @@ a short stretch of a long part cuts only that stretch
 The requirement kind `assembly_sequence` states it checked
 ([requirements](../requirements/README.md#measures)).
 
+### A check answered again
+
+The check's answer is kept under everything it reads
+(`remote::SequenceInputKey`, the same key the `assembly_sequence`
+requirement's staleness reads): the assembly's occurrences, mates,
+relations and configurations and every sub-assembly's, every placed
+part's bodies -- shapes, thread marks, face names, materials -- with the
+tolerances and print process a fit is judged by, and the sequence as
+saved, its steps and allowance. `check_assembly_sequence`, the
+requirement and Play all run the check through `remote::RunSequenceCheck`,
+which answers a check whose key matches one of the last eight answered in
+the session with that answer, `reused: true` added (its `seconds` are the
+run's it kept). The clock's generator checks each stage and then states it
+as a requirement and checks that: the second check was another 80 s at
+stage 1 and 165 s at stage 2, and is now a fraction of a second -- reading
+the check and hashing the assembly. A cancelled check keeps nothing.
+
 What `assembly_sequence_smoke` holds it to: a pin through a lug and a fork
 passes last, and put in before the fork the fork fails, blocked by the
 pin's head -- an earlier part, not its mate partner; a bearing cap slid
@@ -679,7 +696,11 @@ sections reused from the first wheel's step; a group with a member seated
 along another axis is refused; a cap on a crank's pin under a bar fails
 with the crank at rest and goes home after a pose step turns it; a pose
 of a mate with no such freedom is refused; groups and poses survive
-saving and opening again.
+saving and opening again. A second check of the same is reused and answers
+the same, the requirement after it too; an occurrence added, the order
+changed, or the pin's head cut away each checks again -- the last now
+passing -- and the occurrence removed again is the assembly answered
+before.
 
 ### Playing and filming a sequence
 
@@ -699,7 +720,9 @@ timeline as what is filmed.
   failing step and what it was forced against, or what no step places.
   The timeline is kept while the assembly and its parts are unchanged
   (their versions), so Play again or an export after Play does not check
-  again; an edit ends playback.
+  again; an edit ends playback. A Play after an edit undone, or after
+  `check_assembly_sequence`, is answered from the check's kept answer
+  ([a check answered again](#a-check-answered-again)).
 - **The timeline** (`core/SequenceTimeline.h`). Each step's occurrences
   appear at its turn, stand where they start for 0.35 s, travel home in a
   straight line along the path and stay there; the base is put in place.

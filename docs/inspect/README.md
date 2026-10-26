@@ -488,11 +488,21 @@ on this machine:
 |---|---|---|
 | the engine's, as built (68 steps, a group a cylinder, two poses) | 559 s | 74 s |
 | the engine's first draft (78 steps) | 480 s | 97 s |
-| the clock's stage 2 (33 steps, one group) | 212 s (36 steps) | 163 s |
+| the clock's stage 2 (33 steps, one group) | 212 s (36 steps) | 84 s |
 | the Strandbeest's leg pair put together (37 steps, one pose) | 114 s | 19 s |
 
-The clock's stage 2 keeps most of its time: its rating nut (90 s) goes on
-by its thread, whose slices are its own steps and are not kept.
+**A check that keeps nothing still cuts only what it can reach.** A
+turned or screwed path cuts its slices a step thick, its own, so its bands
+are not kept; it, and a check given no cache (`check_insertion`), cuts the
+fixed side only over the stretch of the axis the moving side can come near
+-- its own span, the longest travel either way it may come from, two
+slices to spare -- as the kept path does. A fixed band outside that meets
+no moving band at any slide a try reads, so the answer is the one a whole
+cut gives. The clock's rating nut screws onto the foot of the pendulum
+rod, whose line runs up through the movement: cutting every plate and
+wheel along it was 93 of the step's 101 s, and the step is now 12 s
+(sections under a second, 262 fixed bands for 3058), its stage's
+sequence 163 s to 84 s, every step answering as before.
 
 The answer: `pass`, the try reported (`entry`, `rotation_deg`,
 `travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `deeper_mm`,
