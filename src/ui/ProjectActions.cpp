@@ -23,6 +23,7 @@
 
 #include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
 #include <chrono>
+#include <map>
 #include <thread>
 #include <utility>
 
@@ -156,17 +157,22 @@ ReadRequirements(const std::filesystem::path& dir) {
   for (const auto& entry : fs::directory_iterator(dir / "requirements", ec))
     if (entry.path().extension() == ".json")
       files.push_back(entry.path());
-  std::set<uint64_t> ids;
+  // By name: a directory lists in the filesystem's order, which differs
+  // between machines, and a duplicate id is refused at whichever file came
+  // second.
+  std::sort(files.begin(), files.end());
+  std::map<uint64_t, std::string> ids; // each id's file
   for (const fs::path& f : files) {
-    readctx::InFile("requirements/" + f.filename().string(), [&] {
+    const std::string name = "requirements/" + f.filename().string();
+    readctx::InFile(name, [&] {
       std::ifstream in(f, std::ios::binary);
       if (!in)
         throw std::runtime_error("cannot be read");
       out.push_back(req::FromJson(
           readctx::ParseStrict(std::string((std::istreambuf_iterator<char>(in)),
                                            std::istreambuf_iterator<char>()))));
-      if (!ids.insert(out.back().id).second)
-        throw std::runtime_error("another requirement file has id " +
+      if (const auto [it, added] = ids.emplace(out.back().id, name); !added)
+        throw std::runtime_error(it->second + " also has id " +
                                  std::to_string(out.back().id));
     });
   }
