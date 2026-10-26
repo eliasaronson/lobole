@@ -1,0 +1,91 @@
+--- a/src/Standard/Standard_ErrorHandler.cxx
++++ b/src/Standard/Standard_ErrorHandler.cxx
+@@ -18,7 +18,6 @@
+ //============================================================================
+ #include <Standard_ErrorHandler.hxx>
+ #include <Standard_Failure.hxx>
+-#include <Standard_Mutex.hxx>
+ #include <Standard.hxx>
+ 
+ #ifndef _WIN32
+@@ -37,18 +36,13 @@
+ // or a longjmp, there will be a "terminating SEGV" impossible to handle.
+ 
+ //==== The top of the Errors Stack ===========================================
+-static Standard_ErrorHandler* Top = 0;
+-
+-//! A mutex to protect from concurrent access to Top.
+-//! Mutex is defined as function to avoid issues caused by
+-//! an undefined static variables initialization order across compilation units (@sa #0031681 bug).
+-//! Note that we should NOT use Sentry while in this class, as Sentry
+-//! would register mutex as callback in the current exception handler.
+-static Standard_Mutex& GetMutex()
+-{
+-  static Standard_Mutex theMutex;
+-  return theMutex;
+-}
++//! One stack per thread. A handler lives on the stack of the thread that
++//! made it and is only ever found, unlinked and jumped to from that thread
++//! (a signal converted to an exception is delivered to the thread it
++//! happened on), so no other thread can see it and the stack needs no lock.
++//! A global list behind one mutex made every OCC_CATCH_SIGNALS in every
++//! thread take the same lock twice. As OCCT 8.0 (OCCT#980) does.
++static thread_local Standard_ErrorHandler* Top = 0;
+ 
+ static inline Standard_ThreadId GetThreadID()
+ {
+@@ -71,10 +65,8 @@
+   myThread = GetThreadID();
+   memset(&myLabel, 0, sizeof(myLabel));
+ 
+-  GetMutex().Lock();
+   myPrevious = Top;
+   Top        = this;
+-  GetMutex().Unlock();
+ }
+ 
+ //============================================================================
+@@ -95,9 +87,6 @@
+ 
+ void Standard_ErrorHandler::Unlink()
+ {
+-  // put a lock on the stack
+-  GetMutex().Lock();
+-
+   Standard_ErrorHandler* aPrevious = 0;
+   Standard_ErrorHandler* aCurrent  = Top;
+ 
+@@ -110,7 +99,6 @@
+ 
+   if (aCurrent == 0)
+   {
+-    GetMutex().Unlock();
+     return;
+   }
+ 
+@@ -124,7 +112,6 @@
+     aPrevious->myPrevious = aCurrent->myPrevious;
+   }
+   myPrevious = 0;
+-  GetMutex().Unlock();
+ 
+   // unlink and destroy all registered callbacks
+   Standard_Address aPtr = aCurrent->myCallbackPtr;
+@@ -223,9 +210,6 @@
+ Standard_ErrorHandler* Standard_ErrorHandler::FindHandler(const Standard_HandlerStatus theStatus,
+                                                           const Standard_Boolean       theUnlink)
+ {
+-  // lock the stack
+-  GetMutex().Lock();
+-
+   // Find the current ErrorHandler according to thread
+   Standard_ErrorHandler* aPrevious = 0;
+   Standard_ErrorHandler* aCurrent  = Top;
+@@ -278,7 +262,6 @@
+       aStop = Standard_True;
+     }
+   }
+-  GetMutex().Unlock();
+ 
+   return anActive;
+ }

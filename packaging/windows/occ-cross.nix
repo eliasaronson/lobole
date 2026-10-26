@@ -14,6 +14,7 @@ cross.opencascade-occt.overrideAttrs (old: {
     ../../nix/patches/occt-topopebrep-unclosed-wire-iterator.patch
     ../../nix/patches/occt-offset-arc-bind-order.patch
     ../../nix/patches/occt-offset-inter3d-progress.patch
+    ../../nix/patches/occt-error-handler-thread-local.patch
   ];
   # The patches it carries, as the Linux overlay lists them.
   postInstall = (old.postInstall or "") + ''
@@ -22,6 +23,7 @@ cross.opencascade-occt.overrideAttrs (old: {
       occt-draft-null-curve-and-parallel.patch \
       occt-topopebrep-unclosed-wire-iterator.patch \
       occt-offset-arc-bind-order.patch occt-offset-inter3d-progress.patch \
+      occt-error-handler-thread-local.patch \
       > $out/share/lobole/occt-patches
   '';
   buildInputs = [ ];                       # drop tcl tk libglvnd glu libx* rapidjson

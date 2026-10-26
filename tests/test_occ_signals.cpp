@@ -22,6 +22,8 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -114,4 +116,51 @@ TEST_CASE("A later test case still catches a fault", "[occ]") {
   const auto why = FaultInScope();
   REQUIRE(why.has_value());
   CHECK_THAT(*why, Catch::Matchers::ContainsSubstring("SIGSEGV"));
+}
+
+// OpenCASCADE keeps the handler stack a fault long-jumps through: one list
+// for the whole process behind one mutex in OCCT 7.6 to 7.9, one per thread
+// in OCCT 8.0 and with nix/patches/occt-error-handler-thread-local.patch.
+// Either way a fault on one thread is that thread's failure, while every
+// other thread is inside a scope of its own, and theirs carry on.
+TEST_CASE("A fault on one thread is that thread's failure while others are "
+          "in their own scopes",
+          "[occ]") {
+  constexpr int kThreads = 8;
+  constexpr int kCalls = 200;
+  std::vector<int> caught(kThreads, 0), clean(kThreads, 0), wrong(kThreads, 0);
+  std::vector<std::thread> pool;
+  for (int t = 0; t < kThreads; ++t)
+    pool.emplace_back([&, t] {
+      for (int i = 0; i < kCalls; ++i) {
+        // Every other call faults; the rest open a nested scope and work.
+        const bool fault = (i + t) % 2 == 0;
+        bool innerFailed = false;
+        const auto why = occsig::RunCatchingOccSignals([&] {
+          if (fault) {
+            NullWrite();
+            return;
+          }
+          innerFailed = occsig::RunCatchingOccSignals([] {
+                          volatile double x = 0.0;
+                          for (int k = 0; k < 1000; ++k)
+                            x = x + std::sqrt(static_cast<double>(k));
+                        }).has_value();
+        });
+        if (fault && why && why->find("SIGSEGV") != std::string::npos)
+          caught[t]++;
+        else if (!fault && !why && !innerFailed)
+          clean[t]++;
+        else
+          wrong[t]++;
+      }
+    });
+  for (std::thread& th : pool)
+    th.join();
+  for (int t = 0; t < kThreads; ++t) {
+    INFO("thread " << t);
+    CHECK(caught[t] == kCalls / 2);
+    CHECK(clean[t] == kCalls / 2);
+    CHECK(wrong[t] == 0);
+  }
 }

@@ -30,17 +30,21 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Message_ProgressIndicator.hxx>
+#include <Standard_ErrorHandler.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <set>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -296,4 +300,47 @@ TEST_CASE("A caught kernel fault leaves the earlier bodies as they were and "
   CHECK(doc.CachedBodiesAfter(0) == nullptr);
   doc.RemoveFeature(1); // what undo does
   CHECK(snapshot() == before);
+}
+
+// occt-error-handler-thread-local.patch: every OCC_CATCH_SIGNALS scope
+// links a Standard_ErrorHandler into a stack, and OCCT 7.9 keeps ONE stack
+// for every thread, behind one mutex. A boolean opens thousands of scopes
+// (two per function evaluation of its curve-on-surface tolerance check), so
+// query booleans on 22 threads spent more time queued in the kernel's futex
+// than computing: the strandbeest's leg-pair study took 148 s wall and
+// 1468 s of system time on 22 threads, 85 s on 8.
+//
+// COST (CPU time; docs/ui/testing.md#tests-that-time-things): a scope's CPU
+// on every core at once against its CPU on one. Per thread the stack is the
+// thread's own, so the two are alike; behind the one mutex each scope pays
+// for the queue: 13 us of CPU a scope on 22 threads against 37 ns on one
+// unpatched, 17 ns against 11 ns patched. The bound leaves room for the
+// E-cores: a hybrid CPU's low-power core spends about 3.3 times a P-core's
+// CPU on the same work, and all threads land on both kinds where one lands
+// on either. Load only lowers the contention it measures, so a busy machine
+// can pass the unpatched kernel, never fail the patched one.
+TEST_CASE("Signal scopes on every thread cost what one thread's do", "[occ]") {
+  REQUIRE_PATCH("occt-error-handler-thread-local");
+  const unsigned threads = std::max(2u, std::thread::hardware_concurrency());
+  constexpr long kScopes = 400000;
+  const auto scopes = [] {
+    for (long i = 0; i < kScopes; ++i) {
+      Standard_ErrorHandler handler; // what OCC_CATCH_SIGNALS declares
+      (void)handler;
+    }
+  };
+  const auto cpuPerScope = [&](unsigned n) {
+    const std::clock_t t0 = std::clock();
+    std::vector<std::thread> pool;
+    for (unsigned t = 0; t < n; ++t)
+      pool.emplace_back(scopes);
+    for (std::thread& th : pool)
+      th.join();
+    return double(std::clock() - t0) / CLOCKS_PER_SEC / double(n * kScopes);
+  };
+  const double one = cpuPerScope(1);
+  const double all = cpuPerScope(threads);
+  INFO(threads << " threads: " << 1e9 * all << " ns of CPU a scope, against "
+               << 1e9 * one << " ns on one");
+  CHECK(all < 8.0 * one);
 }

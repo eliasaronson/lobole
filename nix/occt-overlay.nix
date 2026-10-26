@@ -34,6 +34,15 @@
 #   minutes past a deadline; the range now reaches the edge/face
 #   intersector, which asks it between its extremum searches
 #   (nix/patches/upstream/offset-inter3d-progress.md).
+# - occt-error-handler-thread-local.patch: every OCC_CATCH_SIGNALS (two in
+#   each function evaluation of GeomLib_CheckCurveOnSurface, which every
+#   boolean's face/face tolerance check runs) linked a Standard_ErrorHandler
+#   into ONE process-wide list behind ONE mutex, so query booleans on
+#   separate threads queued on it: an exact clash check spent more time in
+#   the kernel than computing. The list is now per thread; it only ever held
+#   the thread's own handlers anyway. Upstream since OCCT 8.0 (OCCT#980,
+#   which also reworks the class); this is the .cxx half alone, the ABI
+#   unchanged (docs/performance/README.md#the-kernels-error-handler-lock).
 #
 # And no IPA-CP clones: GCC 16 at -O3 miscompiles BRepClass3d_SClassifier.cxx,
 # so every point-in-solid test could call through a garbage vtable and every
@@ -53,6 +62,7 @@ let
     ./patches/occt-topopebrep-unclosed-wire-iterator.patch
     ./patches/occt-offset-arc-bind-order.patch
     ./patches/occt-offset-inter3d-progress.patch
+    ./patches/occt-error-handler-thread-local.patch
   ];
 in
 {
