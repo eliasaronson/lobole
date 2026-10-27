@@ -5,6 +5,7 @@
 
 #include "cad/SketchPlane.h"
 #include "core/Feature.h"
+#include "core/sketch/ExternalPrint.h"
 
 #include <array>
 #include <cmath>
@@ -847,6 +848,10 @@ struct ExternalGeom {
   ElementRef ref; // face (elementMap.names) or edge (edgeNames) of a body
   ExternalKind kind = ExternalKind::Face;
   std::vector<uint32_t> genIds; // generated construction entity ids (in order)
+  // An imported file's own element, as it was when first projected: a
+  // changed file renumbers, and the print is what the element under the name
+  // is checked against (docs/sketching/README.md#projecting-an-imported-part).
+  std::optional<ElementPrint> print;
 };
 
 } // namespace sketch

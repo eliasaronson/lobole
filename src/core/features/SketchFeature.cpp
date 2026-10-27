@@ -10,6 +10,7 @@
 #include "core/Angles.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/sketch/ExternalPrint.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h" // SegmentIntersect
 #include "core/sketch/SketchSolver.h"
@@ -1380,6 +1381,9 @@ void RefreshGenerated(SketchFeature& sk, sketch::ExternalGeom& ext,
 } // namespace
 
 bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
+  // Every projection of an imported element the file no longer holds: all
+  // named in one error, not the first.
+  std::vector<std::string> lost;
   for (auto& ext : external) {
     // An entity of another part's sketch, copied by a Derived
     // (docs/modeling/derived.md#sketches): put onto this plane as it is,
@@ -1414,6 +1418,7 @@ bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
     // multi-body part): the element lives on whichever of them resolves the
     // name, not on the first one. Taking the first left every element of a
     // derived servo's second body "no longer exists".
+    const bool face = ext.kind == sketch::ExternalKind::Face;
     const Body* body = nullptr;
     std::optional<int> idx;
     bool anyBody = false;
@@ -1421,9 +1426,8 @@ bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
       if (b.createdBy != ext.ref.featureId)
         continue;
       anyBody = true;
-      idx = ext.kind == sketch::ExternalKind::Face
-                ? b.elementMap.Resolve(ext.ref.name)
-                : b.elementMap.ResolveEdge(ext.ref.name);
+      idx = face ? b.elementMap.Resolve(ext.ref.name)
+                 : b.elementMap.ResolveEdge(ext.ref.name);
       if (idx) {
         body = &b;
         break;
@@ -1433,19 +1437,60 @@ bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
       SetError("external geometry's body no longer exists");
       return false;
     }
+    // An imported file's own element is named by its place in the file, and
+    // a changed file renumbers: what is under the name must still be what
+    // was projected, or the one element that is takes the reference. Never
+    // the element that now holds the index.
+    if (ext.print && ext.print->element != ext.ref.name)
+      ext.print.reset(); // taken for another name: the reference was re-picked
+    if (ext.print && sketch::IsFileOwn(ctx, ext.ref.name)) {
+      std::optional<sketch::ElementPrint> now;
+      if (body != nullptr)
+        now = sketch::PrintAt(*body, face, *idx, ext.ref.name);
+      glm::dvec3 lo, hi;
+      if (body != nullptr)
+        body->shape.GetBoundingBox(lo, hi);
+      const double diagonal =
+          body != nullptr ? std::max(1.0, glm::length(hi - lo)) : 1.0;
+      if (!now || !sketch::SamePrint(*ext.print, *now, diagonal)) {
+        const auto found =
+            sketch::FindPrinted(ctx, ext.ref.featureId, face, *ext.print);
+        if (found.size() == 1) {
+          ext.ref.name = found.front().name; // the same element, renumbered
+          ext.print->element = ext.ref.name;
+          body = found.front().body;
+          idx = found.front().index;
+        } else {
+          lost.push_back(std::string(face ? "face" : "edge") + " `" +
+                         ext.ref.name + "` (" +
+                         sketch::Describe(*ext.print, face) + ")");
+          continue;
+        }
+      }
+    }
     if (body == nullptr) {
       SetError(topo::UnresolvedReason(ctx, ext.ref,
-                                      ext.kind == sketch::ExternalKind::Face
-                                          ? topo::ElementKind::Face
-                                          : topo::ElementKind::Edge,
+                                      face ? topo::ElementKind::Face
+                                           : topo::ElementKind::Edge,
                                       "external geometry"));
       return false;
     }
+    if (!ext.print && sketch::IsFileOwn(ctx, ext.ref.name))
+      ext.print = sketch::PrintAt(*body, face, *idx, ext.ref.name);
     std::vector<sketch::Entity> proj =
         sketch::ProjectElement(body->shape, ext.kind, *idx, plane);
     for (sketch::Entity& e : proj)
       sketch::SetConstruction(e, true);
     RefreshGenerated(*this, ext, std::move(proj));
+  }
+  if (!lost.empty()) {
+    std::string list;
+    for (size_t i = 0; i < lost.size(); i++)
+      list += (i == 0 ? "" : i + 1 == lost.size() ? " and " : ", ") + lost[i];
+    SetError("projected " + list + (lost.size() == 1 ? " is" : " are") +
+             " no longer in the imported file; re-pick " +
+             (lost.size() == 1 ? "it" : "them"));
+    return false;
   }
   return true;
 }

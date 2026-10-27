@@ -77,9 +77,12 @@ the recipe, and each regeneration reads it.
   so each direct edit keeps the fingerprint of the face it was given, and a
   changed file read again that puts another face under the name fails the
   edit naming both, rather than editing the wrong face. A sketch's
-  projection of an import's edge is not fingerprinted
-  ([known bugs](../known-bugs.md#a-sketchs-projection-of-an-imported-edge-follows-its-index-not-the-edge)),
-  and our own `export_step` of an edited import numbers its faces afresh.
+  projection of an import's face or edge keeps the same kind of print: a
+  renumbered element is followed to its new name, and one the file no
+  longer holds (a hole the new file moved) fails the sketch naming every
+  such reference
+  ([projecting an imported part](../sketching/README.md#projecting-an-imported-part)).
+  Our own `export_step` of an edited import numbers its faces afresh.
   What a downloaded part takes is in [editing a downloaded part](#editing-a-downloaded-part).
 - **One parse per import.** When the caller already parsed the file (the GUI
   worker does, to decide part vs assembly), the model is handed to the

@@ -1167,6 +1167,15 @@ json FeatureToJson(const Feature& feature) {
             {"element", e.ref.name},
             {"kind", e.kind == sketch::ExternalKind::Edge ? "edge" : "face"}};
         ej["gen_ids"] = e.genIds;
+        if (e.print) { // vNEXT: an imported element as it was projected
+          const bool face = e.kind == sketch::ExternalKind::Face;
+          ej["fingerprint"] = {{"element", e.print->element},
+                               {"shape", e.print->shape},
+                               {face ? "area_mm2" : "length_mm", e.print->size},
+                               {"centroid_mm",
+                                {e.print->centroid.x, e.print->centroid.y,
+                                 e.print->centroid.z}}};
+        }
         j["external"].push_back(std::move(ej));
       }
     }
@@ -1904,10 +1913,14 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "face_ref? {feature_id, element} (sketch ON a body face), plane_ref? "
      "(the id of a DatumPlane, another Sketch or a Frame whose plane this "
      "one follows), external? "
-     "[{feature_id, element, kind: face|edge}] — live projected construction "
-     "geometry of another body, the same thing project_geometry adds to an "
-     "existing sketch (a projected hole edge is a circle, and Hole takes "
-     "circle centres, so a hole pattern needs no coordinates)",
+     "[{feature_id, element, kind: face|edge, fingerprint?}] — live "
+     "projected construction geometry of another body, the same thing "
+     "project_geometry adds to an existing sketch (a projected hole edge is a "
+     "circle, and Hole takes circle centres, so a hole pattern needs no "
+     "coordinates). An Import's element gets a fingerprint {element, shape, "
+     "length_mm|area_mm2, centroid_mm}, taken when first projected: a changed "
+     "file's renumbered element is followed by it, and one the file no longer "
+     "holds fails the sketch naming it, never the element under its index",
      "plane:object, entities?:object[], constraints?:object[], "
      "face_ref?:object, plane_ref?:int>=0, external?:object[], "
      "derived_ops?:object[], images?:object[], next_image_id?:int"},
@@ -2836,14 +2849,39 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (!sk->derived.empty())
       sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
     for (const auto& ej : j.value("external", json::array())) { // v48
-      readctx::RefuseUnknownKeys(ej,
-                                 {"feature_id", "element", "kind", "gen_ids"},
-                                 "sketch external reference");
+      readctx::RefuseUnknownKeys(
+          ej, {"feature_id", "element", "kind", "gen_ids", "fingerprint"},
+          "sketch external reference");
       sketch::ExternalGeom eg;
       eg.ref = ElementRef{ej.value("feature_id", uint64_t{0}),
                           ej.value("element", std::string{})};
       eg.kind = ExternalKindFromString(ej.value("kind", std::string("face")));
       eg.genIds = ej.value("gen_ids", std::vector<uint32_t>{});
+      if (ej.contains("fingerprint")) { // vNEXT
+        // Written whole or not at all: a part of one is damage, and read as
+        // a default it would refuse the element it was taken from.
+        const bool face = eg.kind == sketch::ExternalKind::Face;
+        const char* sizeKey = face ? "area_mm2" : "length_mm";
+        const json& p = ej.at("fingerprint");
+        readctx::RefuseUnknownKeys(p,
+                                   {"element", "shape", sizeKey, "centroid_mm"},
+                                   "projection fingerprint");
+        if (!p.contains("element") || !p.at("element").is_string() ||
+            !p.contains("shape") || !p.at("shape").is_string() ||
+            !p.contains(sizeKey) || !p.at(sizeKey).is_number() ||
+            !HasArrayOf(p, "centroid_mm", 3))
+          throw std::runtime_error(
+              std::string("a projection fingerprint is {element, shape, ") +
+              sizeKey + ", centroid_mm}, got " + p.dump().substr(0, 120));
+        sketch::ElementPrint print;
+        print.element = p.at("element").get<std::string>();
+        print.shape = p.at("shape").get<std::string>();
+        print.size = p.at(sizeKey).get<double>();
+        const json& c = p.at("centroid_mm");
+        print.centroid = {c[0].get<double>(), c[1].get<double>(),
+                          c[2].get<double>()};
+        eg.print = std::move(print);
+      }
       sk->external.push_back(std::move(eg));
     }
     for (const auto& ij : j.value("images", json::array())) { // v49 underlays

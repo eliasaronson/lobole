@@ -510,6 +510,41 @@ construction flag -- so it can be a profile -- solver-fixed and drawn violet
 such a Derived stands on the copied sketch's plane (`plane_ref_sketch` names
 which).
 
+#### Projecting an imported part
+
+An Import names its faces and edges by their place in the file
+(`1/b1/face145;U1`), and a changed file read again renumbers them: the name
+then lands on whatever the new file put there. So a projection of an
+imported file's own element -- seed an `Import`, positional, no Derived
+prefix and no step after it that a feature made or moved it -- keeps a
+**fingerprint** (`sketch::ElementPrint`, `src/core/sketch/ExternalPrint.h`):
+its shape (`line`/`circle`/`arc`/`other` for an edge, the surface kind for a
+face), its length or area, and its centre of mass (a circle's is its centre,
+wherever the file put the seam). It is taken the first time the sketch
+projects the element and saved with the reference (`fingerprint` {element,
+shape, length_mm | area_mm2, centroid_mm}). Every regeneration checks the
+element under the name against it, to 1e-6 relative on the size and 1e-6 of
+the body's diagonal on the centre, as the direct edits do
+([direct edit](../modeling/README.md#direct-edit), rule 5):
+
+- it matches: projected as always;
+- it does not, or the name is gone: the import's bodies are searched for the
+  element of that kind, itself the file's own, that matches. Exactly one is
+  the same element renumbered, and the reference follows it (its name is
+  rewritten);
+- none, or several: the sketch fails, every lost reference named in one
+  error -- "projected edge `1/b1/face145;U1` (a circle 7.854 mm long at
+  (5.05, -3.7, 18.7)) and … are no longer in the imported file; re-pick
+  them". Never the element that now holds the index.
+
+A hole the new file MOVED is a lost reference: nothing in a file says which
+of four moved holes was which, so the sketch asks for the pick again rather
+than guessing. An element an upstream feature modified (`…;M7`) is not
+fingerprinted, since that feature's parameters move it on purpose. The print
+carries the name it was taken for, so a reference re-picked with the old
+print still attached is printed afresh rather than sent looking for the old
+element.
+
 ### Reference images (underlays)
 
 A `sketch::ReferenceImage` is a raster placed on the plane to trace over. It is

@@ -554,7 +554,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "part's sketch copied by a Derived (element \"<derived id>/<sketch "
      "id>/<entity id>\", kind edge, the default for one) is projected as "
      "it is drawn there -- a profile line stays one -- solver-fixed and "
-     "following the copy (docs/modeling/derived.md#sketches). kind: "
+     "following the copy (docs/modeling/derived.md#sketches). An Import's "
+     "face or edge is fingerprinted as projected: when its file changes, a "
+     "renumbered element is followed and one the file no longer holds fails "
+     "the sketch naming it "
+     "(docs/sketching/README.md#projecting-an-imported-part). kind: "
      "face | edge; anything else is refused.",
      "element, feature_id, kind, sketch_id", remote::NeedsPart},
     {"add_reference_image",

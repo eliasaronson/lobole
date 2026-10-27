@@ -178,28 +178,6 @@ the heading if it is not here yet.
   splice the result back, which is both the speed and the stray cells; and
   build a refused edit once, not twice.
 
-### A sketch's projection of an imported edge follows its index, not the edge
-
-- **Symptom:** an adapter plate whose Hole sketch projects the four hole
-  edges of an STS3215 servo horn (`STEP/SO100/STS3215_03a.step`;
-  `external` `1/b1/face145;U1`, `;U2`, `;U5`, `;U6`). Point the Import at a
-  revised file (the same servo with its horn holes turned 20 degrees,
-  written by `export_step`): `;U2` fails "no longer exists", while `;U1`
-  resolves to an unrelated 0.87 mm line on a 0.5 mm² face across the servo
-  and the sketch takes it as one of its entities without a word. Only the
-  one failure is reported.
-- **Cause:** an import's names are positional (`<id>/b<k>/face<i>`, and
-  edges by their place in the face), and a changed file renumbers its faces
-  -- `export_step` of the edited servo put the horn's top face first. Direct
-  edits fingerprint the faces they pick for exactly this
-  ([direct edit](modeling/README.md#direct-edit), rule 5); a sketch's
-  `external` refs do not.
-- **Where:** the external-geometry resolution of `SketchFeature`
-  (`src/core/features/SketchFeature.cpp`), against `directedit::FaceFingerprint`.
-- **Likely fix:** fingerprint a projected import edge as the direct edits do
-  a face (curve kind, length, midpoint), and fail "re-pick it" when the
-  edge under the name is no longer that one.
-
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

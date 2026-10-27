@@ -330,6 +330,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A sketch's `external` entry may carry the `fingerprint` {element, shape, length_mm (an edge) \| area_mm2 (a face), centroid_mm} of an imported file's own element as first projected: a changed file's renumbered element is followed by it, one no longer in the file fails the sketch naming it ([projecting an imported part](../sketching/README.md#projecting-an-imported-part)). A fingerprint missing a key, or with one it never writes, is refused on load; an older build refuses the key. Golden `vNEXT-projection-fingerprint` |
 
 ## Paths in a project
 
