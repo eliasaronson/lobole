@@ -18,10 +18,23 @@ pieces of the body". Two causes:
    runs on through every other wall of the body that crosses it and cuts it
    into cells, each with an untouched face's probe in it, so the edit is
    refused for "pieces" the edit itself never made.
-2. **A refused edit is built twice.** `RefuseFailingDirectEdit`
+2. **An edit is built more than once.** `RefuseFailingDirectEdit`
    (`src/remote/RemoteModeling.cpp`) adds the edit to a copy of the document,
-   which regenerates, and then calls `Regenerate()` on the copy again; a
-   failed feature is not cached, so it executes a second time.
+   which regenerates, and then calls `Regenerate()` on the copy again. The
+   first execution records the imported face's fingerprint into the
+   feature, which is part of its chain hash, so the second regeneration
+   misses and builds it again. The same miss hits every accepted edit:
+   built on the copy, built again by the commit, and once more by whatever
+   regenerates next.
+3. **The checks before the builder scale with faces × edges.**
+   `directedit::FreeformNeighbour` describes every neighbour in full
+   (`Measure::DescribeFaceAt`: UV bounds over every edge, a projection, the
+   area), once per shared edge. On a refined STL (the Voron fan grill:
+   Refine to 2937 faces, then a Delete Face of 916) the planar facets carry
+   no p-curves, so each description projects every edge, and rolling the
+   tree's bar back and forward held the main thread 62.7 s before the heal
+   began. `RestoreUntouched` likewise describes each renamed face in full,
+   walking the shape to its index each time.
 
 There is no builder thread to have bypassed: `directedit::BuilderBudgetS` is
 CPU time of the thread that runs the builder, and regeneration runs on the
@@ -54,13 +67,24 @@ edit down to the neighbourhood of the face, the stall goes with it.
    whole. What the cells are built from no longer depends on the size of
    the body, so the cost does not either, and a wall the target plane
    crosses elsewhere is never cut.
-2. **Build a refused edit once.** `RefuseFailingDirectEdit` reads the error
-   the copy's own regeneration (in `AddFeature` / `ReplaceFeature`) left,
-   instead of regenerating the copy again.
+2. **Build an edit once.** `RefuseFailingDirectEdit` reads the error the
+   copy's own regeneration (in `AddFeature` / `ReplaceFeature`) left,
+   instead of regenerating the copy again. `Document::Regenerate` keys a
+   feature whose evaluation changed what it is keyed on (a fingerprint
+   recorded) afresh, the evaluation filed under both keys and every later
+   link rehashed, so the next regeneration hits. An edit that builds on the
+   copy is not built again by the commit: the document adopts the copy's
+   evaluations (`Document::AdoptEvaluations`, the same chain hashes), and a
+   hit that restores a recorded fingerprint is re-keyed the same way.
+3. **Check what the check needs.** `FreeformNeighbour` looks at each
+   neighbour once, and at its surface's type only; `RestoreUntouched`
+   indexes the faces once and compares type, area and centroid.
 
-Files: `src/core/features/ReplaceFaceFeature.cpp`,
-`src/remote/RemoteModeling.cpp`, `tests/test_direct_edit.cpp`, a smoke for
-the RPC count, docs/modeling/README.md#direct-edit, docs/known-bugs.md.
+Files: `src/core/features/ReplaceFaceFeature.cpp`, `src/core/DirectEdit.cpp`,
+`src/core/Document.{h,cpp}`, `src/remote/RemoteModeling.cpp`,
+`tests/test_direct_edit.cpp`, `tests/direct_edit_step_smoke.py`,
+docs/modeling/README.md#direct-edit, docs/architecture.md (the regen
+cache), docs/known-bugs.md.
 
 ## Verification
 
@@ -71,11 +95,16 @@ the RPC count, docs/modeling/README.md#direct-edit, docs/known-bugs.md.
   fail with a CPU spin planted in the measured interval.
 - A plate whose top's plane, extended, runs through a separate wall of the
   same body: the top offset builds (it was refused "separate pieces").
-- A refused direct edit through `add_feature` executes once: the copy's
-  regeneration count read from the log line the failure writes, or a
-  counter, in a smoke.
+- A refused direct edit through `add_feature` executes once (its failure is
+  logged once) and a kept one is not executed by the commit
+  (`get_state`'s `regen.executed` is 0), in `direct_edit_step_smoke`; an
+  edit that records a fingerprint, and what follows it, hit on the next
+  regeneration; a document adopting its copy's evaluation executes nothing.
+- A cost check on `FreeformNeighbour` over a faceted prism (2000 side
+  facets, two 2000-edge ends, no p-curves).
 - `test_direct_edit` unchanged; `direct_edit_step_smoke`'s per-edit
   outcomes (kept with the same volume, or refused) compared before and
   after; the action matrix's direct-edit rows; test-fast, the GUI suite and
   `pygui`.
-- The bracket's offsets re-run: time and outcome before and after.
+- The bracket's offsets re-run, and the fan grill's regeneration: time and
+  outcome before and after.
