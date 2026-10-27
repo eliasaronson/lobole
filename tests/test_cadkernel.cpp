@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <unistd.h>
 
 using Catch::Matchers::WithinAbs;
@@ -605,7 +606,35 @@ TEST_CASE("STL save/load roundtrip yields a SOLID with the box volume",
   REQUIRE(k.LoadSTL(path.string(), in));
   REQUIRE(in.IsValid());
   CHECK_THAT(in.Volume(), WithinRel(24.0, 1e-6));
+  // The volume reads right off loose faces too (it is a surface integral):
+  // the reader handed back a compound of unjoined triangles, on which a
+  // boolean or a Delete Face failed. One SOLID is the claim.
+  CHECK(in.SolidCount() == 1);
+  CHECK(in.GetShape().ShapeType() == TopAbs_SOLID);
+  // ... and a boolean takes it.
+  const CADShape cut = in.Difference(k.CreateBox(1.0, 1.0, 10.0));
+  CHECK(cut.SolidCount() == 1);
+  CHECK_THAT(cut.Volume(), WithinRel(20.0, 1e-6));
 
+  fs::remove(path);
+}
+
+TEST_CASE("An open STL mesh stays a surface, not a solid", "[kernel][io]") {
+  namespace fs = std::filesystem;
+  CADKernel& k = CADKernel::Instance();
+  const fs::path path =
+      fs::temp_directory_path() /
+      ("designer_open_mesh_" + std::to_string(::getpid()) + ".stl");
+  { // one triangle: nothing closes it
+    std::ofstream out(path);
+    out << "solid t\n facet normal 0 0 1\n  outer loop\n"
+           "   vertex 0 0 0\n   vertex 1 0 0\n   vertex 0 1 0\n"
+           "  endloop\n endfacet\nendsolid t\n";
+  }
+  CADShape in;
+  REQUIRE(k.LoadSTL(path.string(), in));
+  CHECK(in.SolidCount() == 0);
+  CHECK(in.FaceCount() == 1);
   fs::remove(path);
 }
 

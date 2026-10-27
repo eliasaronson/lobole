@@ -2095,20 +2095,17 @@ bool CADKernel::LoadSTL(const std::string& filename, CADShape& shape) {
 
   if (!reader.Read(occShape, filename.c_str()) || occShape.IsNull())
     return false;
-  // The reader sews the triangles into a shell of planar faces. Promote a
-  // closed (watertight) shell to a solid so volume/mass and booleans work;
-  // an open mesh stays a surface shell.
-  if (occShape.ShapeType() == TopAbs_SHELL) {
-    const TopoDS_Shell shell = TopoDS::Shell(occShape);
-    BRepCheck_Shell check(shell);
-    if (check.Closed() == BRepCheck_NoError) {
-      BRepBuilderAPI_MakeSolid make(shell);
-      if (make.IsDone()) {
-        TopoDS_Solid solid = make.Solid();
-        if (BRepLib::OrientClosedSolid(solid)) // material on the inside
-          occShape = solid;
-      }
-    }
+  // The reader returns the triangles as a COMPOUND of planar faces, not a
+  // shell: nothing joins them, so a boolean or a Delete Face saw loose
+  // faces while the volume (a surface integral) still read right. Sew them
+  // as an OBJ's are -- the reader merges coincident nodes, so the tolerance
+  // only has to absorb rounding -- and a closed shell becomes a solid with
+  // its material inside; an open mesh stays a surface.
+  if (!TopExp_Explorer(occShape, TopAbs_SOLID).More()) {
+    Bnd_Box box;
+    BRepBndLib::Add(occShape, box);
+    const double diagonal = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
+    occShape = SewAt(occShape, diagonal * 1e-7).shape;
   }
   shape = CADShape(occShape);
   return true;
