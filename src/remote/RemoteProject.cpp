@@ -74,6 +74,9 @@ static constexpr MethodDoc ProjectMethods[] = {
      "path:string", remote::NotInBatch},
     {"save_project",
      "Save the project to {path, message?, force?, overwrite_lossy?}. "
+     "`path` ends in .dsgn (a folder, versioned with git) or .json (one "
+     "file), or has no extension (a folder); any other extension is "
+     "refused, since nothing would open it as a project. "
      "Refuses when the project changed on disk since it was opened; "
      "{force:true} saves over it. Refuses, too, a save back over a project "
      "whose open_project reported a `dropped` entry that is not derived, "
@@ -721,6 +724,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // saves over a project that changed on disk (F8), which an agent that
     // just did the changing may legitimately want.
     const std::string path = p.at("path").get<std::string>();
+    // A project written under any other name is a file nothing opens as one:
+    // `--file` and File > Open would both take it for something to import.
+    if (!ui::IsProjectPath(path) &&
+        !std::filesystem::path(path).extension().empty())
+      throw std::runtime_error(
+          "'" + path +
+          "' is not a project path: save a project as .dsgn (a folder, "
+          "versioned with git), .json (one file), or a folder name with no "
+          "extension");
     // Every key read before the file is written: a `message` of the wrong
     // type used to be refused after the save had landed.
     const bool force = p.value("force", false);

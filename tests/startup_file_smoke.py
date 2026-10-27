@@ -8,7 +8,8 @@ It used to import whatever it was given: a saved project passed on the
 command line became an Import feature that failed with "not a file the import
 reads", and the project was never opened. Each project form (a flat .json, a
 .dsgn, a container's project.json) must open as the project, and a STEP must
-still arrive as an Import.
+still arrive as an Import. And `save_project` refuses a path that is not a
+project's, writing nothing, since nothing would open it as one.
 
 Usage: startup_file_smoke.py <path-to-designer-binary>
 """
@@ -39,6 +40,17 @@ def main():
             d.call("save_project", path=flat)
             d.call("save_project", path=dsgn)
             d.call("export_step", path=step)
+            odd = os.path.join(tmp, "plate.lobole")
+            try:
+                d.call("save_project", path=odd)
+                refused = ""
+            except Exception as e:  # noqa: BLE001 — the message is the result
+                refused = str(e)
+            expect(".dsgn" in refused and ".json" in refused,
+                   f"save_project to {odd}: {refused or 'saved'}, not a "
+                   "refusal naming .dsgn and .json")
+            expect(not os.path.exists(odd),
+                   f"the refused save_project wrote {odd}")
 
         for path in (flat, dsgn, os.path.join(dsgn, "project.json")
                      if os.path.isdir(dsgn) else dsgn):

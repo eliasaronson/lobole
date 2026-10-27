@@ -247,7 +247,7 @@ def main():
                   needle="'deflection' (renamed: it is 'stl_deflection_mm' "
                          "now)", tab=part["name"])
             check("save_project message", "save_project",
-                  {"path": path("late.designer"), "message": 5},
+                  {"path": path("late"), "message": 5},
                   tab=part["name"])
             check("compare_geometry second path", "compare_geometry",
                   {"a": 0, "b": 1, "missing_path": path("late-m.brep"),

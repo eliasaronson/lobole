@@ -54,7 +54,7 @@ class World:
     def settle(self):
         """Save clean, so `dirty` reports any edit after this."""
         self.n += 1
-        path = os.path.join(self.fp, f"{self.n}.designer")
+        path = os.path.join(self.fp, f"{self.n}")
         self.d.call("save_project", path=path)
         return tree(path)
 
@@ -225,7 +225,7 @@ def outside_baselines(part, setup, out, cam):
 
     every = [
         (part["name"], "save_project",
-         {"path": path("p.designer"), "message": "m"}),
+         {"path": path("p"), "message": "m"}),
         (part["name"], "export_step", {"path": path("a.step")}),
         (part["name"], "export_stl", {"path": path("a.stl")}),
         (part["name"], "export_brep", {"path": path("a.brep")}),
