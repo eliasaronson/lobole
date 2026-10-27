@@ -543,7 +543,8 @@ than guessing. An element an upstream feature modified (`…;M7`) is not
 fingerprinted, since that feature's parameters move it on purpose. The print
 carries the name it was taken for, so a reference re-picked with the old
 print still attached is printed afresh rather than sent looking for the old
-element.
+element; such a stale print is not saved, and a file whose fingerprint names
+another element than its reference is refused on load as damage.
 
 ### Reference images (underlays)
 

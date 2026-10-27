@@ -1167,7 +1167,11 @@ json FeatureToJson(const Feature& feature) {
             {"element", e.ref.name},
             {"kind", e.kind == sketch::ExternalKind::Edge ? "edge" : "face"}};
         ej["gen_ids"] = e.genIds;
-        if (e.print) { // v195: an imported element as it was projected
+        // v195: an imported element as it was projected. A print taken for
+        // another name is stale (a re-pick the next regeneration has not
+        // seen yet replaces it), and the reader refuses one that disagrees
+        // with its reference, so it is not written.
+        if (e.print && e.print->element == e.ref.name) {
           const bool face = e.kind == sketch::ExternalKind::Face;
           ej["fingerprint"] = {{"element", e.print->element},
                                {"shape", e.print->shape},
@@ -2875,6 +2879,17 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
               sizeKey + ", centroid_mm}, got " + p.dump().substr(0, 120));
         sketch::ElementPrint print;
         print.element = p.at("element").get<std::string>();
+        // The writer writes only a print taken for its reference's own name:
+        // another is damage to one of the two, and read as stale it would be
+        // dropped by the next regeneration with nothing said.
+        if (print.element != eg.ref.name)
+          throw std::runtime_error("a projection fingerprint was taken for `" +
+                                   print.element.substr(0, 80) +
+                                   "`, but its reference names `" +
+                                   eg.ref.name.substr(0, 80) +
+                                   "`; a re-pointed reference is sent "
+                                   "without its fingerprint, which the next "
+                                   "regeneration takes afresh");
         print.shape = p.at("shape").get<std::string>();
         print.size = p.at(sizeKey).get<double>();
         const json& c = p.at("centroid_mm");

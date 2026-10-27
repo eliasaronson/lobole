@@ -17,10 +17,12 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
+using json = nlohmann::json;
 namespace fs = std::filesystem;
 using sketch::ExternalKind;
 
@@ -324,4 +326,39 @@ TEST_CASE("A projection's fingerprint round-trips, and one taken for another "
   REQUIRE(ext.print.has_value());
   CHECK(ext.print->element == ext.ref.name);
   CHECK(glm::length(ext.print->centroid - p.centres[0]) < 1e-6);
+
+  // Saved before a regeneration has seen the re-pick, the stale print is
+  // not written: the reader refuses one that names another element than its
+  // reference, as damage, so writing it would make the save unreadable.
+  ext.print->element = "some/other;U9";
+  REQUIRE(testio::Save(p.doc, file.string()));
+  {
+    const json saved = json::parse(std::ifstream(file));
+    const json& first = saved.at("features").at(1).at("external").at(0);
+    CHECK_FALSE(first.contains("fingerprint"));
+    CHECK(saved.at("features")
+              .at(1)
+              .at("external")
+              .at(1)
+              .contains("fingerprint"));
+    const auto loaded = testio::Load(file.string());
+    REQUIRE(loaded != nullptr);
+  }
+  fs::remove(file);
+
+  // A spec whose fingerprint was taken for another name is refused, naming
+  // both, rather than read as a print a regeneration silently discards.
+  ext.print->element = ext.ref.name;
+  json spec = DocumentIO::FeatureToJson(*p.sketch);
+  REQUIRE(spec["external"][0].contains("fingerprint"));
+  spec["external"][0]["fingerprint"]["element"] = "some/other;U9";
+  try {
+    DocumentIO::FeatureFromJson(spec);
+    FAIL("a fingerprint for another element was read");
+  } catch (const std::exception& e) {
+    const std::string what = e.what();
+    INFO(what);
+    CHECK(what.find("`some/other;U9`") != std::string::npos);
+    CHECK(what.find("without its fingerprint") != std::string::npos);
+  }
 }

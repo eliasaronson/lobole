@@ -1,0 +1,130 @@
+{
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            40,
+            0
+          ],
+          "id": 1,
+          "type": "line"
+        },
+        {
+          "a": [
+            40,
+            0
+          ],
+          "b": [
+            40,
+            30
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            40,
+            30
+          ],
+          "b": [
+            0,
+            30
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            0,
+            30
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "id": 4,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Base",
+      "next_entity_id": 5,
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 20.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Block",
+      "sketch_id": 1,
+      "type": "Extrude"
+    },
+    {
+      "constraints": [],
+      "entities": [],
+      "external": [
+        {
+          "feature_id": 2,
+          "fingerprint": {
+            "area_mm2": 1200.0,
+            "centroid_mm": [
+              20.0,
+              15.0,
+              20.0
+            ],
+            "element": "2/cap1",
+            "shape": "plane"
+          },
+          "gen_ids": [],
+          "kind": "face"
+        }
+      ],
+      "id": 3,
+      "name": "Projection",
+      "next_entity_id": 1,
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "type": "Sketch"
+    }
+  ],
+  "format": "designer-document",
+  "version": 195
+}

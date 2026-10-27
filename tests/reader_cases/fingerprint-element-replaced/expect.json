@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v195-projection-fingerprint.json:replace_word:4",
+  "input": "v195-projection-fingerprint.json",
+  "message": [
+    "v195-projection-fingerprint.json",
+    "a projection fingerprint was taken for `2/cap1`, but its reference names"
+  ],
+  "seed": 0
+}
