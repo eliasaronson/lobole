@@ -123,8 +123,7 @@ TEST_CASE("a derived part regenerates from its snapshot with the source absent",
   // Both file forms carry the snapshot: the single file (base64 assets) and
   // the directory (assets/derived-<hash>.brep). Each reloads and regenerates
   // with no source part anywhere.
-  for (const char* file :
-       {"derived-roundtrip.json", "derived-roundtrip.dsgn"}) {
+  for (const char* file : {"derived-roundtrip.json", "derived-roundtrip.lob"}) {
     INFO(file);
     const fs::path path = TempPath(file);
     REQUIRE(testio::Save(host, path.string()));

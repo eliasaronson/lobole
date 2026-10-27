@@ -133,7 +133,7 @@ def main():
 
     # It survives the file.
     with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "rig.dsgn")
+        path = os.path.join(tmp, "rig.lob")
         with launch(binary) as app:
             sdk = App(app.client)
             a, b = rig(sdk)

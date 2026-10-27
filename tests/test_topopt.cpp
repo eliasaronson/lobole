@@ -594,8 +594,7 @@ TEST_CASE("Topology result persists and reloads through the directory format",
   doc.StoreStudyResults(studyId, std::move(rt));
   REQUIRE_FALSE(doc.StudyResultsStale(studyId));
 
-  const fs::path proj =
-      fs::temp_directory_path() / "topo_result_roundtrip.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "topo_result_roundtrip.lob";
   fs::remove_all(proj);
   REQUIRE(testio::Save(doc, proj.string()));
   CHECK(fs::exists(proj / "studies"));

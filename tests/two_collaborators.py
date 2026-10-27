@@ -83,7 +83,7 @@ def main():
         bob_proc, bob = start(binary, env)
 
         phase("Alice makes a project and shares it")
-        alice_dir = os.path.join(tmp, "alice.dsgn")
+        alice_dir = os.path.join(tmp, "alice.lob")
         alice.call("new_project")
         alice.call("add_feature", feature=box("Body", 40))
         alice.call("save_project", path=alice_dir)
@@ -94,7 +94,7 @@ def main():
         expect(alice.call("push")["status"] == "pushed", "first push")
 
         phase("Bob clones it")
-        bob_dir = os.path.join(tmp, "bob.dsgn")
+        bob_dir = os.path.join(tmp, "bob.lob")
         bob.call("clone_project", url=bare, path=bob_dir)
         state = bob.call("get_state")
         expect([f["type"] for f in state["features"]] == ["Sketch", "Extrude"],

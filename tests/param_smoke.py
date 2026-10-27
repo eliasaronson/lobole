@@ -52,7 +52,7 @@ def volume(sdk):
 def load_doc(path):
     """A saved project as one dict, whatever form it took on disk.
 
-    A multi-part project saves as a .dsgn DIRECTORY of per-feature files, so
+    A multi-part project saves as a .lob DIRECTORY of per-feature files, so
     the diff walks the tree and keys every scalar by file + path. That is a
     finer diff surface than a single blob, not a coarser one.
     """
@@ -146,7 +146,7 @@ def test_drives_geometry(binary):
 def test_perturbation(binary):
     """Nudge one variable; exactly the fields it drives may move."""
     with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "p.dsgn")
+        path = os.path.join(tmp, "p.lob")
         with launch(binary) as app:
             sdk = App(app.client)
             sdk.call("new_project")

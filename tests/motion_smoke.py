@@ -335,7 +335,7 @@ def main():
                "a result described the old definition and is gone")
 
         # ---- Round trip: the definition is in the file -------------------
-        path = os.path.join(tmp, "rig.dsgn")
+        path = os.path.join(tmp, "rig.lob")
         d.call("save_project", path=path)
         d.call("new_project")
         d.call("open_project", path=path)

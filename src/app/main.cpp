@@ -755,7 +755,10 @@ static bool CaptureForTestEngine(ImGuiID /*viewport*/, int x, int y, int w,
 #endif
 
 void printUsage(const char* programName) {
-  std::cout << "Usage: " << programName << " [OPTIONS]" << std::endl;
+  std::cout << "Usage: " << programName << " [OPTIONS] [path]" << std::endl;
+  std::cout << "  path                 The same as --file <path>: what a "
+               "desktop launcher passes"
+            << std::endl;
   std::cout << "Options:" << std::endl;
   std::cout
       << "  -f, --file <path>    Open a project, or import a CAD file, on "
@@ -920,7 +923,12 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       std::cout << "Lobole " << LOBOLE_VERSION << std::endl;
       exit(0);
     } else if (arg == "-f" || arg == "--file") {
-      if (i + 1 < argc) {
+      if (i + 1 < argc && !args.fileToLoad.empty()) {
+        std::cerr << "Error: one file at a time ('" << args.fileToLoad
+                  << "' and '" << argv[i + 1] << "')" << std::endl;
+        printUsage(argv[0]);
+        exit(1);
+      } else if (i + 1 < argc) {
         args.fileToLoad = argv[i + 1];
         i++; // Skip the next argument since we consumed it
       } else {
@@ -1087,6 +1095,16 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       args.logLevel = spdlog::level::debug;
     } else if (arg == "-vv") {
       args.logLevel = spdlog::level::trace;
+    } else if (!arg.empty() && arg[0] != '-') {
+      // A lone path is --file's: the desktop entry's `Exec=lobole %f`,
+      // where a `--file %f` would leave a bare `--file` on a plain launch.
+      if (!args.fileToLoad.empty()) {
+        std::cerr << "Error: one file at a time ('" << args.fileToLoad
+                  << "' and '" << arg << "')" << std::endl;
+        printUsage(argv[0]);
+        exit(1);
+      }
+      args.fileToLoad = arg;
     } else {
       std::cerr << "Error: Unknown option '" << arg << "'" << std::endl;
       printUsage(argv[0]);

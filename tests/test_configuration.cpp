@@ -266,7 +266,7 @@ TEST_CASE("Configurations round-trip through save/load (v31)",
   }
 
   SECTION("directory format, one file per configuration") {
-    const fs::path proj = fs::temp_directory_path() / "cfg_rt.dsgn";
+    const fs::path proj = fs::temp_directory_path() / "cfg_rt.lob";
     fs::remove_all(proj);
     std::string err;
     REQUIRE(testio::Save(doc, proj.string()));

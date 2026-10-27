@@ -46,10 +46,11 @@ namespace DocumentIO {
 
 namespace {
 
-// Path classification (F3): a `.dsgn` path or existing directory is the
-// directory format; picking the index.json inside one opens the project.
+// Path classification (F3): a project folder name (`.lob`, or the old
+// `.dsgn`) or an existing directory is the directory format; picking the
+// index.json inside one opens the project.
 bool IsDirFormatPath(const std::string& path) {
-  if (path.ends_with(".dsgn"))
+  if (IsProjectFolderName(path))
     return true;
   std::error_code ec;
   return std::filesystem::is_directory(path, ec);
@@ -58,7 +59,7 @@ bool IsDirFormatPath(const std::string& path) {
 std::string NormalizeProjectPath(const std::string& path) {
   const std::filesystem::path p(path);
   if (p.filename() == "index.json" &&
-      p.parent_path().string().ends_with(".dsgn"))
+      IsProjectFolderName(p.parent_path().string()))
     return p.parent_path().string();
   return path;
 }
@@ -2679,19 +2680,29 @@ Load(const std::string& path, const ProjectScope& scope) {
   return std::unexpected(error);
 }
 
+bool IsProjectFolderName(const std::string& path) {
+  std::string p = path;
+  while (p.size() > 1 && (p.back() == '/' || p.back() == '\\'))
+    p.pop_back();
+  return p.ends_with(kProjectExtension) || p.ends_with(kLegacyProjectExtension);
+}
+
 std::string ProjectSaveTarget(const std::string& picked) {
   if (picked.empty())
     return picked;
   const std::filesystem::path p(picked);
   const std::string ext = p.extension().string();
-  if (ext == ".dsgn")
+  if (ext == kProjectExtension)
     return picked;
-  // ".json" is REPLACED (it is the flat form we are steering away from);
-  // anything else is APPENDED to, so "hinge v2" keeps its dot and becomes
-  // "hinge v2.dsgn" rather than losing the ".2".
-  if (ext == ".json")
-    return std::filesystem::path(picked).replace_extension(".dsgn").string();
-  return picked + ".dsgn";
+  // ".json" is REPLACED (it is the flat form we are steering away from), and
+  // so is ".dsgn" (the old name, read but never written); anything else is
+  // APPENDED to, so "hinge v2" keeps its dot and becomes "hinge v2.lob"
+  // rather than losing the ".2".
+  if (ext == ".json" || ext == kLegacyProjectExtension)
+    return std::filesystem::path(picked)
+        .replace_extension(kProjectExtension)
+        .string();
+  return picked + kProjectExtension;
 }
 
 std::expected<void, std::string> SaveAssembly(const AssemblyDocument& asmDoc,

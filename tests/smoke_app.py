@@ -419,7 +419,7 @@ def _spawn(binary, extra_args, env, timeout, headless, scope=None,
     e.setdefault("XDG_CONFIG_HOME", os.path.join(tmp, "config"))
     # ...and its STATE dir, where the recently-opened list, the autosaves and
     # the instance registry live. Without it a suite run pushed temp projects
-    # (rig.dsgn, p.dsgn, single.dsgn) into the developer's "recently opened"
+    # (rig.lob, p.lob, single.lob) into the developer's "recently opened"
     # menu, and an unsaved document's recovery copy sits in that same
     # directory. A test that wants the real one — the MCP pair, which reads
     # the registry from the client side — sets it itself, and setdefault

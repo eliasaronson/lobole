@@ -204,7 +204,7 @@ def main(binary):
                a={"occurrence": carrier, "frame": "pin"},
                b={"occurrence": occ["end ring"], "origin": True},
                flipped=False)
-        path = os.path.join(tempfile.mkdtemp(), "carrier.dsgn")
+        path = os.path.join(tempfile.mkdtemp(), "carrier.lob")
         d.call("save_project", path=path)
         d.call("open_project", path=path)
         d.call("set_active_part", part="rig")

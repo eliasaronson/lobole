@@ -89,7 +89,7 @@ def main():
 
         # --- persistence: views survive; applied state does not --------------
         d.call("set_explode", view=view, factor=0.5)
-        proj = os.path.join(tmp, "stack.dsgn")
+        proj = os.path.join(tmp, "stack.lob")
         d.call("save_project", path=proj)
         expect(os.path.isdir(os.path.join(proj, "assemblies", "stack",
                                           "exploded")),

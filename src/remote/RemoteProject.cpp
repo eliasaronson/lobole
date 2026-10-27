@@ -61,7 +61,8 @@ static constexpr MethodDoc ProjectMethods[] = {
      "which instance and which project it is talking to first.",
      "", remote::NotInBatch},
     {"open_project",
-     "Open a project {path} (.json file or .dsgn directory). Returns "
+     "Open a project {path} (.lob directory, .json file, or a .dsgn -- the "
+     "extension before the rename, still read). Returns "
      "rebuilt_parts (parts whose saved geometry could not be used, so they "
      "were rebuilt from their features) and rebuild_reason when they share "
      "one; saving re-bakes them, and the next open is a load. Returns "
@@ -74,9 +75,14 @@ static constexpr MethodDoc ProjectMethods[] = {
      "path:string", remote::NotInBatch},
     {"save_project",
      "Save the project to {path, message?, force?, overwrite_lossy?}. "
-     "`path` ends in .dsgn (a folder, versioned with git) or .json (one "
+     "`path` ends in .lob (a folder, versioned with git) or .json (one "
      "file), or has no extension (a folder); any other extension is "
-     "refused, since nothing would open it as a project. "
+     "refused, since nothing would open it as a project. A .dsgn is never "
+     "written: saving the project opened from one writes the .lob beside it, "
+     "starting from a copy of the .dsgn so its git history carries on, and "
+     "the .dsgn is left as it was; a .lob already there, or any other .dsgn, "
+     "is refused. Returns `path` (where it was written) and, after that, "
+     "`migrated_from` (the .dsgn). "
      "Refuses when the project changed on disk since it was opened; "
      "{force:true} saves over it. Refuses, too, a save back over a project "
      "whose open_project reported a `dropped` entry that is not derived, "
@@ -720,7 +726,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "save_project") {
     // params: {path, message?, force?} — message becomes the git commit
-    // subject for directory (.dsgn) projects (F5); ignored otherwise. `force`
+    // subject for directory (.lob) projects (F5); ignored otherwise. `force`
     // saves over a project that changed on disk (F8), which an agent that
     // just did the changing may legitimately want.
     const std::string path = p.at("path").get<std::string>();
@@ -730,7 +736,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         !std::filesystem::path(path).extension().empty())
       throw std::runtime_error(
           "'" + path +
-          "' is not a project path: save a project as .dsgn (a folder, "
+          "' is not a project path: save a project as .lob (a folder, "
           "versioned with git), .json (one file), or a folder name with no "
           "extension");
     // Every key read before the file is written: a `message` of the wrong
@@ -749,12 +755,16 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(error);
     }
     // Also clears the autosave sidecar and commits git-backed projects.
+    // A .dsgn's project went to the .lob beside it, which is now the project.
     ui::MarkProjectSaved(state, path, message);
     json out = json::object();
+    out["path"] = state.projectPath;
+    if (state.projectPath != path)
+      out["migrated_from"] = path;
     if (losing)
       out["warning"] = "saved over what the open could not keep, which is "
                        "now gone from " +
-                       path + ":\n" + lost;
+                       state.projectPath + ":\n" + lost;
     return out;
   }
   if (m == "open_project") {

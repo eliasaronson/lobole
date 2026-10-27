@@ -110,8 +110,8 @@ TEST_CASE("A crashed session's report holds its stack, log tail and "
         "  #0 /bin/lobole+0x1234\n");
   // The session's own autosave, and one an earlier session left (older than
   // this one started) that must not be passed off as this session's work.
-  const fs::path fresh = s.dir / "work" / "Part.dsgn.autosave";
-  const fs::path dir = s.dir / "work" / "Part.dsgn.autosave.d";
+  const fs::path fresh = s.dir / "work" / "Part.lob.autosave";
+  const fs::path dir = s.dir / "work" / "Part.lob.autosave.d";
   Write(fresh, "{}");
   Write(dir / "parts" / "Stand.json", "{}");
   Write(dir / "parts" / "Old.json", "{}");
@@ -120,7 +120,7 @@ TEST_CASE("A crashed session's report holds its stack, log tail and "
                       std::chrono::clock_cast<fs::file_time_type::clock>(
                           started - std::chrono::hours(1)));
   PlantMarker(s.dir, stem,
-              {{"project", (s.dir / "work" / "Part.dsgn").string()},
+              {{"project", (s.dir / "work" / "Part.lob").string()},
                {"started_epoch", std::chrono::system_clock::to_time_t(started)},
                {"autosaves", {fresh.string(), dir.string()}}});
   Write(s.dir / "sessions" / (stem + ".dmp"), "MDMP");
@@ -139,10 +139,10 @@ TEST_CASE("A crashed session's report holds its stack, log tail and "
   CHECK(tail.rfind("line 500\n", 0) == 0);
   CHECK(tail.find("line 2499\n") != std::string::npos);
   CHECK(Read(r.dir / "crash.dmp") == "MDMP");
-  CHECK(fs::exists(r.dir / "autosave" / "Part.dsgn.autosave"));
-  CHECK(fs::exists(r.dir / "autosave" / "Part.dsgn.autosave.d" / "parts" /
+  CHECK(fs::exists(r.dir / "autosave" / "Part.lob.autosave"));
+  CHECK(fs::exists(r.dir / "autosave" / "Part.lob.autosave.d" / "parts" /
                    "Stand.json"));
-  CHECK_FALSE(fs::exists(r.dir / "autosave" / "Part.dsgn.autosave.d" / "parts" /
+  CHECK_FALSE(fs::exists(r.dir / "autosave" / "Part.lob.autosave.d" / "parts" /
                          "Old.json"));
   CHECK(r.autosaves.size() == 2);
   // The session's files are gone; the log stays (it is pruned by count).
@@ -225,7 +225,7 @@ TEST_CASE("A session's own marker is held for its life and gone after",
   // it alone.
   CHECK(crash::CollectDeadSessions(s.dir).empty());
   CHECK(fs::exists(session->marker));
-  crash::NoteProject("/some/where/Part.dsgn");
+  crash::NoteProject("/some/where/Part.lob");
   crash::EndSession();
   CHECK_FALSE(fs::exists(session->marker));
   CHECK(crash::CollectDeadSessions(s.dir).empty());

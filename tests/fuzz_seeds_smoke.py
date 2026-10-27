@@ -81,7 +81,7 @@ def main():
         with launch(os.path.abspath(sys.argv[1])) as app:
             d = app.client
             occ = d.request("ping", {}).get("occ", "")
-            d.scratch_path = os.path.join(app.tmp, "fuzz.dsgn")
+            d.scratch_path = os.path.join(app.tmp, "fuzz.lob")
             outcome, design = fd.generate_and_run(d, seed)
         limits += len(outcome["limits"])
         expected = kernel_expects(occ).get(seed, "clean")

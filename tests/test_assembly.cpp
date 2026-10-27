@@ -119,8 +119,7 @@ TEST_CASE("Assembly round-trips through the single-file form", "[assembly]") {
 
 TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
   AssemblyDocument original = SampleAssembly();
-  const fs::path dir =
-      fs::temp_directory_path() / "designer_asm_roundtrip.dsgn";
+  const fs::path dir = fs::temp_directory_path() / "designer_asm_roundtrip.lob";
   fs::remove_all(dir);
   std::string error;
   REQUIRE(testio::SaveAssembly(original, dir.string()));
@@ -543,7 +542,7 @@ TEST_CASE("Assembly with mates round-trips (single-file + directory)",
   }
 
   SECTION("directory") {
-    const fs::path dir = fs::temp_directory_path() / "designer_asm_mates.dsgn";
+    const fs::path dir = fs::temp_directory_path() / "designer_asm_mates.lob";
     fs::remove_all(dir);
     std::string error;
     REQUIRE(testio::SaveAssembly(original, dir.string()));
@@ -727,7 +726,7 @@ TEST_CASE("Exploded views round-trip (v27, single-file + directory)",
   }
 
   SECTION("directory form: file-per-view under exploded/") {
-    const fs::path dir = fs::temp_directory_path() / "designer_explode_rt.dsgn";
+    const fs::path dir = fs::temp_directory_path() / "designer_explode_rt.lob";
     fs::remove_all(dir);
     REQUIRE(testio::SaveAssembly(asmDoc, dir.string()));
     CHECK(fs::exists(dir / "exploded" /

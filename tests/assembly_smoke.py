@@ -151,7 +151,7 @@ def main():
         d.call("undo")
 
         # --- Save, reopen, verify the whole project survives ---------------
-        proj = os.path.join(tmp, "robot.dsgn")
+        proj = os.path.join(tmp, "robot.lob")
         d.call("save_project", path=proj)
 
         # On disk: project.json v2 with typed documents; the assembly dir.

@@ -93,7 +93,7 @@ def cmd_case(a):
         # tree is written as a directory of the same name.
         file_part = a.id.split(":", 1)[0].split("/")
         base = file_part[1] if family in ("part", "assembly", "drawing",
-                                          "job") else "tree.dsgn"
+                                          "job") else "tree.lob"
         out = os.path.join(tmp, base)
         rc, text = run_tests(["Reader fuzz: write one case"], {
             "LOBOLE_READER_FUZZ_CASE": a.id,

@@ -222,7 +222,7 @@ def main():
         expect(len(d.call("list_mates")["mates"]) == 1, "redo removed it again")
 
         # --- Save, reopen, verify mates + solved pose survive --------------
-        proj = os.path.join(tmp, "robot.dsgn")
+        proj = os.path.join(tmp, "robot.lob")
         d.call("save_project", path=proj)
         expect(os.path.isdir(os.path.join(proj, "assemblies", "robot", "mates")),
                "mates directory written")

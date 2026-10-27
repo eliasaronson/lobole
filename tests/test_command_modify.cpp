@@ -147,7 +147,7 @@ TEST_CASE("A feature with no id is never written to disk", "[document]") {
   doc.GetFeature(0)->SetId(0);
 
   const auto dir = std::filesystem::temp_directory_path() /
-                   ("designer_id0_" + std::to_string(::getpid()) + ".dsgn");
+                   ("designer_id0_" + std::to_string(::getpid()) + ".lob");
   std::filesystem::remove_all(dir);
 
   const auto result = DocumentIO::Save(doc, dir.string());

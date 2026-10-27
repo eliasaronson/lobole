@@ -1027,7 +1027,7 @@ TEST_CASE("A saved motion result reopens with its hash and its samples",
   r.asmDoc.StoreMotionResult(study.id,
                              std::make_shared<const motion::Result>(result));
 
-  const fs::path proj = fs::temp_directory_path() / "motion_result_reopen.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "motion_result_reopen.lob";
   fs::remove_all(proj);
   REQUIRE(testio::SaveAssembly(r.asmDoc, proj.string()));
   auto reloaded = testio::LoadAssembly(proj.string());
@@ -1149,12 +1149,11 @@ TEST_CASE("A saved motion study on an assembly with relations reopens "
                            std::make_shared<const motion::Result>(result));
 
   for (const auto& [id, doc] : parts)
-    REQUIRE(
-        testio::Save(*doc, (dir / (std::to_string(id) + ".dsgn")).string()));
-  REQUIRE(testio::SaveAssembly(asmDoc, (dir / "asm.dsgn").string()));
+    REQUIRE(testio::Save(*doc, (dir / (std::to_string(id) + ".lob")).string()));
+  REQUIRE(testio::SaveAssembly(asmDoc, (dir / "asm.lob").string()));
   Parts back;
   for (const auto& [id, doc] : parts) {
-    back[id] = testio::Load((dir / (std::to_string(id) + ".dsgn")).string());
+    back[id] = testio::Load((dir / (std::to_string(id) + ".lob")).string());
     REQUIRE(back[id] != nullptr);
     INFO("part " << id);
     inputhash::Hasher was, is;
@@ -1162,7 +1161,7 @@ TEST_CASE("A saved motion study on an assembly with relations reopens "
     is.Bodies(back[id]->GetBodies());
     CHECK(was.Digest() == is.Digest());
   }
-  auto reloaded = testio::LoadAssembly((dir / "asm.dsgn").string());
+  auto reloaded = testio::LoadAssembly((dir / "asm.lob").string());
   REQUIRE(reloaded != nullptr);
   const MotionStudy& reread = *reloaded->FindMotionStudyById(study.id);
   REQUIRE(reloaded->MotionResult(study.id) != nullptr);

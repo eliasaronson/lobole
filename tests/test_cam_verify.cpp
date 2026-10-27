@@ -1091,7 +1091,7 @@ template <class F> double BestMs(int repeat, F&& f) {
 } // namespace
 
 // Hidden: it needs a project on disk. The chess board's check, and its parts:
-//   PLANAR_BENCH_DIR    directory holding chess.dsgn and "<job> - <setup>.nc"
+//   PLANAR_BENCH_DIR    directory holding chess.lob and "<job> - <setup>.nc"
 //   PLANAR_BENCH_JOB    job directory (default Board)
 //   PLANAR_BENCH_PART   part directory (default board)
 //   PLANAR_BENCH_SETUP  the setup checked (default Top)
@@ -1107,13 +1107,13 @@ TEST_CASE("cam verify: the board's planar check, timed", "[cam][.bench]") {
   const double res = std::stod(BenchEnv("PLANAR_BENCH_RES", "0.25"));
   const int repeat = std::stoi(BenchEnv("PLANAR_BENCH_REPEAT", "3"));
 
-  auto job = DocumentIO::LoadJob(dir + "/chess.dsgn/jobs/" + jobName);
+  auto job = DocumentIO::LoadJob(dir + "/chess.lob/jobs/" + jobName);
   REQUIRE(job.has_value());
   // The project's variables first: the board is sized from the king.
   std::vector<Parameter> projectParams;
   {
     const auto index = nlohmann::json::parse(
-        BenchRead(dir + "/chess.dsgn/project.json"), nullptr, false);
+        BenchRead(dir + "/chess.lob/project.json"), nullptr, false);
     if (index.is_object())
       for (const auto& pj : index.value("parameters", nlohmann::json::array()))
         projectParams.push_back({pj.at("name").get<std::string>(),
@@ -1124,7 +1124,7 @@ TEST_CASE("cam verify: the board's planar check, timed", "[cam][.bench]") {
   }
   SymbolTable projectSymbols;
   EvaluateParameterTable(projectParams, projectSymbols, nullptr, {});
-  auto part = DocumentIO::Load(dir + "/chess.dsgn/parts/" + partName,
+  auto part = DocumentIO::Load(dir + "/chess.lob/parts/" + partName,
                                {&projectSymbols, &projectParams});
   REQUIRE(part.has_value());
   std::vector<Body> bodies;

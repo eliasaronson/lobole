@@ -181,7 +181,7 @@ def main():
             refreshed.validate()
             assert all(abs(e.radius - 9) < 1e-5 for e in refreshed.edges)
             assert all(abs(e.radius - 6) < 1e-5 for e in snap.edges)
-            saved = tmp + '/snapshot-project.dsgn'
+            saved = tmp + '/snapshot-project.lob'
             app.save_project(path=saved)
             app.open_project(path=saved)
             refusal(refreshed.validate, 'stale_snapshot')

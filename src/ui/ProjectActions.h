@@ -42,11 +42,17 @@ namespace ui {
 
 // Save/open a project directory. A multi-part project writes a project.json
 // index + one `parts/<name>/` directory each; a single-part project stays
-// the flat `.dsgn` (index.json + features/) form for backward compatibility.
+// the flat `.lob` (index.json + features/) form.
 // Open detects project.json to load all parts, else loads one part.
 // Save the project. Refuses when the project on disk changed since we last
 // read or wrote it (F8) — the write would replace someone else's work with
 // no way back — unless `overwriteExternalChanges` says to do it anyway.
+//
+// A `.dsgn` (the extension before the rename) is never written: saving the
+// project opened from one writes ProjectWriteTarget(path), the `.lob` beside
+// it, starting from a copy of the `.dsgn` so its git history comes along.
+// Any other `.dsgn` target, or a `.lob` that already exists there, is
+// refused (docs/versioning/README.md#the-dsgn-extension).
 // Every save funnels through here: Ctrl+S, Save As, naming a version, and
 // the save_project RPC, so this is the one guard that covers them all.
 //
@@ -185,17 +191,23 @@ void AdoptAssertionsAsRequirements(AppState& state);
 bool OpenProject(AppState& state, const std::string& path, std::string* error);
 
 // The project root the loaders expect for any pick: the project.json inside a
-// container project, or any file or folder inside a .dsgn, normalizes up to
-// the owning project folder.
+// container project, or any file or folder inside a .lob (or .dsgn),
+// normalizes up to the owning project folder.
 std::string NormalizeProjectPick(const std::string& path);
 
-// Does `path` name a project (a .dsgn, a container folder or its
+// Does `path` name a project (a .lob or .dsgn, a container folder or its
 // project.json, a flat .json) rather than a file to import? What `--file`
 // asks before it opens or imports.
 [[nodiscard]] bool IsProjectPath(const std::string& path);
 
+// Where a save to `path` is written: the `.lob` beside a `.dsgn`, any other
+// path itself. SaveProject writes there and MarkProjectSaved tracks it.
+std::string ProjectWriteTarget(const std::string& path);
+
 // Track the on-disk identity for dirty-state + autosave: call after every
 // clean save (also clears the autosave sidecar) / open / new. "" = unsaved.
+// Given the path SaveProject was given: a `.dsgn` is tracked as the `.lob`
+// it was written to, and the menu bar says so.
 void MarkProjectSaved(AppState& state, const std::string& path,
                       const std::string& message = "save");
 

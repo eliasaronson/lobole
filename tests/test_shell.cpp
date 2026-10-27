@@ -83,7 +83,7 @@ TEST_CASE("Shell without an open face errors", "[shell]") {
 // A draft that reshapes half the body is valid geometry and almost always a
 // mistake: 25 degrees sounds modest, but on a 2-unit wall it travels 0.93 —
 // four times the 0.25 wall it is tapering, so it cuts through into the shell
-// cavity. Found in a real model (scratch/shell_draft.dsgn), which looked like
+// cavity. Found in a real model (scratch/shell_draft.lob), which looked like
 // a loft passing through the cut-out.
 TEST_CASE("A draft that reshapes the body warns with the numbers",
           "[draft][warning]") {

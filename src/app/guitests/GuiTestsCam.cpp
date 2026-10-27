@@ -1889,7 +1889,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const std::filesystem::path dir =
         std::filesystem::temp_directory_path() / "designer_cam_generate_test";
     std::filesystem::create_directories(dir);
-    s_App->projectPath = (dir / "plate.dsgn").string();
+    s_App->projectPath = (dir / "plate.lob").string();
     ctx->ItemClick("###cam_save_gcode");
     ctx->Yield(2);
     ctx->LogInfo("wrote: %s", s_App->camLastPost.c_str());
@@ -1964,7 +1964,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const std::filesystem::path dir =
         std::filesystem::temp_directory_path() / "designer_cam_own_run_test";
     std::filesystem::create_directories(dir);
-    s_App->projectPath = (dir / "plate.dsgn").string();
+    s_App->projectPath = (dir / "plate.lob").string();
     ctx->ItemClick("//###CamGenerate/###cam_save_gcode");
     ctx->Yield(2);
     IM_CHECK(std::filesystem::exists(s_App->camLastPost));
@@ -2069,7 +2069,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const std::filesystem::path dir =
         std::filesystem::temp_directory_path() / "designer_cam_own_setup_test";
     std::filesystem::create_directories(dir);
-    s_App->projectPath = (dir / "plate.dsgn").string();
+    s_App->projectPath = (dir / "plate.lob").string();
 
     // Generate and save the top.
     ToolbarClick(ctx, "###tb_job_generate");

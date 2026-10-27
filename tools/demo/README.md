@@ -82,7 +82,7 @@ lands beside the others.
 `assembly` plays the printed engine's sequence
 ([generators/engine](../../generators/engine/README.md)), registered only
 when `LOBOLE_DEMO_ENGINE` names it; `record.sh` sets it to a copy of
-`scratch/engine/engine.dsgn` (`LOBOLE_DEMO_ENGINE_SOURCE` for another). The
+`scratch/engine/engine.lob` (`LOBOLE_DEMO_ENGINE_SOURCE` for another). The
 sequence is checked off camera (about a minute and a half), the section is
 the XZ plane through the bores and the crank, the camera looks at the cut
 from in front, a little to the right and above, and Play runs at 1.5x
@@ -104,7 +104,7 @@ generator's `--video` uses. The film moves from its first frame and stops
 on its last, so `film.sh` holds the first frame 1 s and the last 2 s
 (ffmpeg's `tpad`): every scene starts and ends still, and the crossfades
 join it like the others. It films the saved stage 1 of a generator run,
-`scratch/strandbeest-film/stage1/strandbeest_stage1.dsgn`
+`scratch/strandbeest-film/stage1/strandbeest_stage1.lob`
 (`LOBOLE_DEMO_STRANDBEEST_SOURCE` for another), made with
 
 ```

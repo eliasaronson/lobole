@@ -82,8 +82,8 @@ struct Report {
   int64_t startedMs = 0;
   // The session presented a frame before it ended (NoteFirstFrame).
   bool firstFrame = false;
-  // The copies under dir/autosave, relative to it: "Part.dsgn.autosave",
-  // "Part.dsgn.autosave.d/parts/Stand.json",
+  // The copies under dir/autosave, relative to it: "Part.lob.autosave",
+  // "Part.lob.autosave.d/parts/Stand.json",
   // "unsaved-<stem>.autosave.json" (the session's own unsaved slot).
   std::vector<std::string> autosaves;
 };

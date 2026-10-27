@@ -40,7 +40,7 @@ while [ $# -gt 0 ]; do
 done
 
 ALL=(strandbeest)
-STRANDBEEST="${LOBOLE_DEMO_STRANDBEEST_SOURCE:-$SCRATCH/strandbeest-film/stage1/strandbeest_stage1.dsgn}"
+STRANDBEEST="${LOBOLE_DEMO_STRANDBEEST_SOURCE:-$SCRATCH/strandbeest-film/stage1/strandbeest_stage1.lob}"
 [ ${#SCENES[@]} -gt 0 ] || SCENES=("${ALL[@]}")
 for s in "${SCENES[@]}"; do
   case " ${ALL[*]} " in
@@ -61,7 +61,7 @@ cleanup() {
   rm -rf "$TMP"
 }
 trap cleanup EXIT
-cp -r "$STRANDBEEST" "$TMP/strandbeest.dsgn"
+cp -r "$STRANDBEEST" "$TMP/strandbeest.lob"
 # A film of a big assembly is the costliest thing an instance does; a cap
 # keeps a runaway from taking the desktop with it.
 systemd-run --user --scope -p MemoryMax=8G -q \
@@ -79,7 +79,7 @@ port, tmp = int(sys.argv[1]), Path(sys.argv[2])
 w, h, root = int(sys.argv[3]), int(sys.argv[4]), Path(sys.argv[5])
 from lobole import Client
 d = Client(port=port, timeout=3600)
-d.call("open_project", path=str(tmp / "strandbeest.dsgn"))
+d.call("open_project", path=str(tmp / "strandbeest.lob"))
 d.call("set_active_part", name="leg pair, put together")
 sys.path.insert(0, str(root / "generators" / "strandbeest"))
 from build import film_sequence  # noqa: E402

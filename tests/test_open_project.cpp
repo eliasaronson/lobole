@@ -93,7 +93,7 @@ fs::path GoldenProject(const char* name, size_t* parts) {
        k.CreateCylinder(glm::vec3(0), glm::vec3(0, 0, 1), 3.0, 12.0)}));
   for (int i = 0; i < 8; i++) {
     const fs::path dir =
-        proj / "parts" / ("import" + std::to_string(i) + ".dsgn");
+        proj / "parts" / ("import" + std::to_string(i) + ".lob");
     fs::create_directories(dir.parent_path());
     Document doc;
     doc.AddFeature(std::make_unique<ImportFeature>("Imported", step.string()));
@@ -101,7 +101,7 @@ fs::path GoldenProject(const char* name, size_t* parts) {
     REQUIRE(testio::Save(doc, dir.string()));
     fs::remove_all(dir / "geometry"); // so it rebuilds, re-reading the STEP
     docs.push_back({{"name", "import" + std::to_string(i)},
-                    {"dir", "parts/import" + std::to_string(i) + ".dsgn"},
+                    {"dir", "parts/import" + std::to_string(i) + ".lob"},
                     {"type", "part"},
                     {"id", id++}});
   }
@@ -116,7 +116,7 @@ fs::path GoldenProject(const char* name, size_t* parts) {
 TEST_CASE("A project's parts load the same on one thread and on many",
           "[open][parallel]") {
   size_t n = 0;
-  const fs::path proj = GoldenProject("open-parallel.dsgn", &n);
+  const fs::path proj = GoldenProject("open-parallel.lob", &n);
   REQUIRE(n >= 40); // the corpus, not a token handful
 
   std::expected<ui::LoadedProject, std::string> serial =
@@ -179,7 +179,7 @@ TEST_CASE("A project's parts load the same on one thread and on many",
 
 TEST_CASE("An open that is cancelled reads nothing", "[open]") {
   size_t n = 0;
-  const fs::path proj = GoldenProject("open-cancel.dsgn", &n);
+  const fs::path proj = GoldenProject("open-cancel.lob", &n);
   std::atomic<bool> cancel{true};
   ui::OpenProgress progress;
   progress.cancel = &cancel;
@@ -194,7 +194,7 @@ TEST_CASE("An open that is cancelled reads nothing", "[open]") {
 // build, and nothing said so. The read reports how many parts it rebuilt and
 // why, which is what the menu bar's notice and open_project's answer show.
 TEST_CASE("An open says which parts it rebuilt and why", "[open][baked]") {
-  const fs::path proj = TempProject("open-rebuilt.dsgn");
+  const fs::path proj = TempProject("open-rebuilt.lob");
   fs::remove_all(proj);
   Document doc;
   doc.AddFeature(
@@ -239,8 +239,8 @@ TEST_CASE("An open says which parts it rebuilt and why", "[open][baked]") {
 // before the adopt put it right.
 TEST_CASE("A part using a project variable opens from its baked geometry",
           "[open][baked][variables]") {
-  const fs::path proj = TempProject("open-project-var.dsgn");
-  const fs::path dir = proj / "parts" / "plate.dsgn";
+  const fs::path proj = TempProject("open-project-var.lob");
+  const fs::path dir = proj / "parts" / "plate.lob";
   fs::create_directories(dir.parent_path());
   std::vector<Parameter> params{{"plate_w", "40", "", 0.0, {}}};
   SymbolTable symbols;
@@ -263,7 +263,7 @@ TEST_CASE("A part using a project variable opens from its baked geometry",
   std::ofstream(proj / "project.json")
       << nlohmann::json{{"documents",
                          {{{"name", "plate"},
-                           {"dir", "parts/plate.dsgn"},
+                           {"dir", "parts/plate.lob"},
                            {"type", "part"},
                            {"id", 1}}}},
                         {"parameters",

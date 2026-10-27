@@ -182,7 +182,7 @@ TEST_CASE("Reference image single-file round-trip preserves bytes and fields",
 TEST_CASE("Reference image directory-format round-trip stores an assets file",
           "[reference-image][serialization][dirformat]") {
   auto doc = MakeDocWithImage(nullptr);
-  const fs::path proj = fs::temp_directory_path() / "refimg_roundtrip.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "refimg_roundtrip.lob";
   fs::remove_all(proj);
   std::string error;
   REQUIRE(testio::Save(*doc, proj.string()));
@@ -335,7 +335,7 @@ TEST_CASE("A project naming an asset outside its directory is refused",
     CHECK(r.error().find("not a plain file name") != std::string::npos);
 
     // The directory form reads assets/<name>: an absolute name read any file.
-    const fs::path dir = tmp / "project.dsgn";
+    const fs::path dir = tmp / "project.lob";
     fs::remove_all(dir);
     REQUIRE(testio::Save(*doc, dir.string()));
     for (const auto& e : fs::recursive_directory_iterator(dir)) {

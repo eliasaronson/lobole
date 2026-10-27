@@ -175,7 +175,7 @@ TEST_CASE("A saved topology result is reused after a reopen, and is stale "
   REQUIRE(hash != 0);
   bar->doc.StoreStudyResults(bar->studyId, HandMadeTopology(hash));
 
-  const fs::path proj = fs::temp_directory_path() / "study_inputs_reopen.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "study_inputs_reopen.lob";
   fs::remove_all(proj);
   REQUIRE(testio::Save(bar->doc, proj.string()));
   auto reloaded = testio::Load(proj.string());
@@ -273,7 +273,7 @@ TEST_CASE("A study result of each kind reopens current, its part hashing as "
     const fem::StudyRuntime& ran = *bar->doc.StudyResults(bar->studyId);
     const uint64_t hash = ran.inputHash;
 
-    const fs::path proj = fs::temp_directory_path() / "study_kinds_reopen.dsgn";
+    const fs::path proj = fs::temp_directory_path() / "study_kinds_reopen.lob";
     fs::remove_all(proj);
     REQUIRE(testio::Save(bar->doc, proj.string()));
     auto reloaded = testio::Load(proj.string());
@@ -341,7 +341,7 @@ TEST_CASE("Meshing a body in place does not move its input hash",
   fem::MeshSettings ms;
   ms.maxSize = 4.0;
   REQUIRE(fem::Mesh(bar->doc.GetBodies()[0].shape.GetShape(), ms, &err));
-  const fs::path proj = fs::temp_directory_path() / "meshed_part_hash.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "meshed_part_hash.lob";
   fs::remove_all(proj);
   REQUIRE(testio::Save(bar->doc, proj.string()));
   auto reloaded = testio::Load(proj.string());
@@ -373,7 +373,7 @@ TEST_CASE("A part with a bore hashes the same after a save and reopen",
   REQUIRE(doc.GetFeature(2)->GetError().empty());
   inputhash::Hasher h1;
   h1.Bodies(doc.GetBodies());
-  const fs::path proj = fs::temp_directory_path() / "bored_part_hash.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "bored_part_hash.lob";
   fs::remove_all(proj);
   REQUIRE(testio::Save(doc, proj.string()));
   auto re = testio::Load(proj.string());
@@ -485,7 +485,7 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
   CHECK(kept.mesh.nodes[kept.results.maxDispNode].x ==
         f(full.mesh.nodes[full.results.maxDispNode].x));
 
-  const fs::path proj = fs::temp_directory_path() / "study_result_files.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "study_result_files.lob";
   fs::remove_all(proj);
   REQUIRE(testio::Save(bar->doc, proj.string()));
   fs::path json, bin;
@@ -549,7 +549,7 @@ TEST_CASE("An autosave writes no study result", "[fem][studyjobs][autosave]") {
 
   // The control: a real save of this document writes the result, so the
   // autosave's missing one is the autosave's doing.
-  const fs::path saved = dir / "saved.dsgn";
+  const fs::path saved = dir / "saved.lob";
   REQUIRE(testio::Save(bar->doc, saved.string()));
   bool wroteResult = false;
   for (const auto& e : fs::recursive_directory_iterator(saved))
@@ -558,7 +558,7 @@ TEST_CASE("An autosave writes no study result", "[fem][studyjobs][autosave]") {
   REQUIRE(wroteResult);
   fs::remove_all(saved);
 
-  const std::string project = (dir / "bar.dsgn").string();
+  const std::string project = (dir / "bar.lob").string();
   Autosaver saver(10.0);
   saver.Prime(0.0);
   std::string error;

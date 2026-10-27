@@ -64,7 +64,7 @@ def fresh(port, state):
                f"{said.getvalue()!r}")
         expect(not d.call("ping")["dirty"], "--fresh left a new project")
 
-        path = os.path.join(state, "kept.dsgn")
+        path = os.path.join(state, "kept.lob")
         box(d, (0, 0, 0), (10, 10, 10), "kept")
         d.call("save_project", path=path)
         box(d, (20, 0, 0), (10, 10, 10), "unsaved")

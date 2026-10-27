@@ -340,7 +340,7 @@ def main():
             {"method": "batch", "params": {"calls": []}}])
         refused(d, "batch", ["save_project", "outside", "unchanged"], calls=[
             {"method": "save_project",
-             "params": {"path": os.path.join(tmp, "x.dsgn")}}])
+             "params": {"path": os.path.join(tmp, "x.lob")}}])
         refused(d, "batch", ["export_step", "reaches outside"], calls=[
             {"method": "export_step",
              "params": {"path": os.path.join(tmp, "x.step")}}])
@@ -448,7 +448,7 @@ def main():
         d.call("set_variable", name="keep", expression="1")
         d.call("set_variable", name="later", expression="7")
         d.call("undo")  # `later` waits on redo
-        d.call("save_project", path=os.path.join(tmp, "vars.dsgn"))
+        d.call("save_project", path=os.path.join(tmp, "vars.lob"))
         scope_before = project_scope()
         # ...and an edit that names ANOTHER part lands on that tab's own
         # stashed stack, which the rollback has to reach as well.

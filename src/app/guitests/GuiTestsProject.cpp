@@ -707,7 +707,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "autosave", "recovers_every_document");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_recover.dsgn";
+        std::filesystem::temp_directory_path() / "designer_recover.lob";
     std::filesystem::remove_all(dir);
     std::filesystem::remove_all(dir.string() + ".autosave.d");
 
@@ -841,7 +841,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "conflicts", "a_clean_project_stops_scanning");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_scan_cost.dsgn";
+        std::filesystem::temp_directory_path() / "designer_scan_cost.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -879,7 +879,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "disk", "the_poll_does_not_hold_the_frame");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_disk_offframe.dsgn";
+        std::filesystem::temp_directory_path() / "designer_disk_offframe.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -927,7 +927,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
                        "a_save_does_not_hold_the_frame_for_the_scan");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_scan_offframe.dsgn";
+        std::filesystem::temp_directory_path() / "designer_scan_offframe.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -966,7 +966,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "disk", "a_moved_project_refuses_to_be_saved");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_disk_gui.dsgn";
+        std::filesystem::temp_directory_path() / "designer_disk_gui.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1030,7 +1030,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     const std::filesystem::path dir =
         std::filesystem::temp_directory_path() /
         ("designer_lossy_gui_" + std::to_string(platform::CurrentPid()) +
-         ".dsgn");
+         ".lob");
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1094,7 +1094,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "disk", "the_history_panel_says_it_moved");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_disk_banner.dsgn";
+        std::filesystem::temp_directory_path() / "designer_disk_banner.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1160,7 +1160,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       return;
     }
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_diff_gui.dsgn";
+        std::filesystem::temp_directory_path() / "designer_diff_gui.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1317,7 +1317,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       return;
     }
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_geomdiff.dsgn";
+        std::filesystem::temp_directory_path() / "designer_geomdiff.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1395,7 +1395,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       return;
     }
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_reveal.dsgn";
+        std::filesystem::temp_directory_path() / "designer_reveal.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1471,7 +1471,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       return;
     }
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_conflicts_gui.dsgn";
+        std::filesystem::temp_directory_path() / "designer_conflicts_gui.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1600,7 +1600,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       return;
     }
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_conflicts_bad.dsgn";
+        std::filesystem::temp_directory_path() / "designer_conflicts_bad.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1641,7 +1641,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       return;
     }
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_history_gui.dsgn";
+        std::filesystem::temp_directory_path() / "designer_history_gui.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -1751,7 +1751,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       return;
     }
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "designer_history_fit.dsgn";
+        std::filesystem::temp_directory_path() / "designer_history_fit.lob";
     std::filesystem::remove_all(dir);
 
     ctx->SetRef("//##MainMenuBar");
@@ -2071,8 +2071,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
                        "a_slow_open_shows_progress_and_cancels");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     namespace fs = std::filesystem;
-    const fs::path two = fs::temp_directory_path() / "designer_open_two.dsgn";
-    const fs::path one = fs::temp_directory_path() / "designer_open_one.dsgn";
+    const fs::path two = fs::temp_directory_path() / "designer_open_two.lob";
+    const fs::path one = fs::temp_directory_path() / "designer_open_one.lob";
     fs::remove_all(two);
     fs::remove_all(one);
     std::string err;

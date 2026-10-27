@@ -164,7 +164,7 @@ TEST_CASE("Drawing round-trips through single-file and directory formats",
   }
 
   SECTION("directory format, one file per view/dim") {
-    const fs::path proj = fs::temp_directory_path() / "dwg_rt.dsgn";
+    const fs::path proj = fs::temp_directory_path() / "dwg_rt.lob";
     fs::remove_all(proj);
     std::string err;
     REQUIRE(testio::SaveDrawing(dwg, proj.string()));
@@ -192,7 +192,7 @@ TEST_CASE("Drawing golden loads and round-trips (v30)",
   CheckSampleFields(*dwg);
 
   // Round-trip through the current writer (both forms), re-check semantics.
-  const fs::path tmp = fs::temp_directory_path() / "dwg_golden_rt.dsgn";
+  const fs::path tmp = fs::temp_directory_path() / "dwg_golden_rt.lob";
   fs::remove_all(tmp);
   REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
   auto reloaded = testio::LoadDrawing(tmp.string());
@@ -1409,7 +1409,7 @@ TEST_CASE("Drawing golden carries its views' saved projections (v162)",
   check(*dwg);
 
   // Written back in the directory form: the same projections reopen.
-  const fs::path tmp = fs::temp_directory_path() / "dwg_v162_rt.dsgn";
+  const fs::path tmp = fs::temp_directory_path() / "dwg_v162_rt.lob";
   fs::remove_all(tmp);
   REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
   auto again = testio::LoadDrawing(tmp.string());

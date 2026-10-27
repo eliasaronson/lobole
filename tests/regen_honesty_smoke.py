@@ -112,7 +112,7 @@ def main():
                 "and back")
 
         # --- loading is where a broken model most often ARRIVES ------------
-        proj = os.path.join(tmp, "broken.dsgn")
+        proj = os.path.join(tmp, "broken.lob")
         d.call("set_variable", name="r", expression="50")
         d.call("save_project", path=proj)
         d.call("new_project")

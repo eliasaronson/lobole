@@ -75,7 +75,7 @@ class Instance:
         args = ["--record", record] if record else []
         self.app = launch_app(binary, extra_args=args, env=env)
         self.d = Client.wait_for(self.app.port, strict=True)
-        self.d.scratch_path = os.path.join(self.app.tmp, "fuzz.dsgn")
+        self.d.scratch_path = os.path.join(self.app.tmp, "fuzz.lob")
         self.timeout = timeout
         self.deadline = None
         outer = self

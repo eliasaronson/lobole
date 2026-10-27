@@ -198,7 +198,7 @@ def main():
                 b={"occurrence": mover, "origin": True})
 
         # ---- Round-trip: the anchor is stored as a frame -----------------
-        path = os.path.join(tmp, "frames.dsgn")
+        path = os.path.join(tmp, "frames.lob")
         d.call("save_project", path=path)
         d.call("new_project")
         d.call("open_project", path=path)

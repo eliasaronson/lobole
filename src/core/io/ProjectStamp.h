@@ -42,7 +42,7 @@ struct ProjectStamp {
   }
 };
 
-// Stamp the project at `path` — a `.dsgn` directory, or a legacy single file.
+// Stamp the project at `path` — a `.lob` directory, or a legacy single file.
 //
 // Two directories are skipped, both on purpose:
 //   .git/      is not the document, and it churns on its own — the index, the

@@ -253,7 +253,7 @@ def main(binary):
                configuration=None)  # back to base for the round-trip below
 
         # --- save, reopen, and the tree is still a tree ---------------------
-        proj = os.path.join(tmp, "nested.dsgn")
+        proj = os.path.join(tmp, "nested.lob")
         d.call("save_project", path=proj)
         d.call("open_project", path=proj)
         d.call("set_active_part", name="Dock")

@@ -334,7 +334,7 @@ class Sweep:
         d = self.d
         self.part, self.occ, self.setup = build_fixture(d, self.cam, rich=True)
         self.tabs = [p["name"] for p in d.call("list_parts")["parts"]]
-        self.fixture = os.path.join(self.work, "fixture.dsgn")
+        self.fixture = os.path.join(self.work, "fixture.lob")
         d.call("save_project", path=self.fixture)
         self.features = d.call("get_state")["features"]
         self.world = World(d, self.app, self.work)
@@ -439,7 +439,7 @@ class Sweep:
                 except Exception:  # noqa: BLE001
                     pass
         for name in os.listdir(self.work):
-            if name not in ("fp", "out", "fixture.dsgn") and \
+            if name not in ("fp", "out", "fixture.lob") and \
                     not name.endswith(".autosave.d"):
                 p = os.path.join(self.work, name)
                 shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) \

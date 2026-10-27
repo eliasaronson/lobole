@@ -610,7 +610,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
       return;
     }
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "lobole_demo_history.dsgn";
+        std::filesystem::temp_directory_path() / "lobole_demo_history.lob";
     std::filesystem::remove_all(dir);
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");

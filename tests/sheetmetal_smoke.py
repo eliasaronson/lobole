@@ -408,7 +408,7 @@ def main():
                / want < 1e-4, "leaving the configuration did not refold")
 
         # And it survives the round trip through disk.
-        project = os.path.join(tmp, "sheet.dsgn")
+        project = os.path.join(tmp, "sheet.lob")
         d.call("save_project", path=project)
         d.call("open_project", path=project)
         again = d.call("get_state")["bodies"]

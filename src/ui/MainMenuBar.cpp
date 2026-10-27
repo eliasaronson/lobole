@@ -67,7 +67,7 @@ void DrawOpenRecentMenu(AppState& state) {
   for (const std::string& path : recent) {
     const bool exists = std::filesystem::exists(path);
     // The basename is what a person recognises; the full path is the
-    // tooltip, because two "bracket.dsgn" in different folders are common.
+    // tooltip, because two "bracket.lob" in different folders are common.
     std::string label = std::filesystem::path(path).filename().string();
     if (label.empty())
       label = path;
@@ -611,6 +611,14 @@ void DrawNotices(AppState& state) {
     notices.push_back(
         {"Linked copies updated###links_notice", linksTip.c_str()});
   }
+  // A project opened from a .dsgn was saved as the .lob beside it
+  // (docs/versioning/README.md#the-dsgn-extension).
+  if (state.savedAsNoticeUntil == -2.0)
+    state.savedAsNoticeUntil = ImGui::GetTime() + 20.0;
+  if (!state.savedAsNotice.empty() &&
+      ImGui::GetTime() < state.savedAsNoticeUntil)
+    notices.push_back(
+        {"Saved as .lob###saved_as_notice", state.savedAsNotice.c_str()});
   if (state.rendererRestartedNoticeUntil == -2.0)
     state.rendererRestartedNoticeUntil = ImGui::GetTime() + 20.0;
   if (!state.renderer.lost &&

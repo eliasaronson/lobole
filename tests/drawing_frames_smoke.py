@@ -217,7 +217,7 @@ def main():
         expect(chk["ok"], f"the assembly sheet checks clean: {chk['issues']}")
 
         # --- saved and opened again -----------------------------------------
-        proj = os.path.join(tmp, "frames.dsgn")
+        proj = os.path.join(tmp, "frames.lob")
         d.call("save_project", path=proj)
         d.call("open_project", path=proj)
         d.call("set_active_part", name="plate-dwg")

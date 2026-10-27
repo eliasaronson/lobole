@@ -58,8 +58,19 @@ bool WriteTextAtomic(const std::filesystem::path& target,
 bool AtomicTargetOk(const std::filesystem::path& target,
                     std::string* error = nullptr);
 
+// The project folder's extension, and the one it had before the app was
+// renamed: a `.dsgn` is still OPENED, never written
+// (docs/versioning/README.md#the-dsgn-extension).
+inline constexpr const char* kProjectExtension = ".lob";
+inline constexpr const char* kLegacyProjectExtension = ".dsgn";
+
+// Does `path` end in a project folder's extension (`.lob` or `.dsgn`, a
+// trailing separator allowed)? The one test for "this names the directory
+// form": git history, import adoption and path classification all ask it.
+[[nodiscard]] bool IsProjectFolderName(const std::string& path);
+
 // Where a NEW project picked in a save dialog should actually be written:
-// always the `.dsgn` directory form (F3). A flat single-file project is
+// always the `.lob` directory form (F3). A flat single-file project is
 // still LOADED (legacy files, the RPC, tests), but saving one from the GUI
 // created a project the folder-picking open dialog could never return —
 // pickers hand back folders, so a flat `foo.json` was only reachable through
@@ -131,7 +142,7 @@ struct SketchEntityInfo {
 std::span<const SketchEntityInfo> SketchEntityTypes();
 
 // Assembly (de)serialization (A2). Same on-disk form as a part —
-// directory (`.dsgn`, one file per occurrence) or single JSON file, dispatched
+// directory (`.lob`, one file per occurrence) or single JSON file, dispatched
 // on the path — discriminated by `kind: "assembly"`. Save returns false /
 // Load returns nullptr and fills *error on failure.
 [[nodiscard]] std::expected<void, std::string>

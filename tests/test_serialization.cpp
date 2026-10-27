@@ -329,7 +329,7 @@ TEST_CASE("Study round-trips through the single-file format",
 TEST_CASE("Study round-trips through the directory format",
           "[serialization][fem]") {
   Document doc = DocWithStudy();
-  fs::path dir = fs::temp_directory_path() / "designer_test_study.dsgn";
+  fs::path dir = fs::temp_directory_path() / "designer_test_study.lob";
   fs::remove_all(dir);
   std::string error;
   REQUIRE(testio::Save(doc, dir.string()));
@@ -364,7 +364,7 @@ TEST_CASE("A document with no studies writes no studies key or dir",
   fs::remove(path);
 
   // Directory: no studies/ subdir.
-  fs::path dir = fs::temp_directory_path() / "designer_test_nostudy.dsgn";
+  fs::path dir = fs::temp_directory_path() / "designer_test_nostudy.lob";
   fs::remove_all(dir);
   REQUIRE(testio::Save(doc, dir.string()));
   CHECK_FALSE(fs::exists(dir / "studies"));
@@ -431,13 +431,13 @@ namespace {
 fs::path MergeCaseProject(const std::string& name) {
   const fs::path dir =
       fs::temp_directory_path() /
-      ("designer_merge_" + name + "_" + std::to_string(::getpid()) + ".dsgn");
+      ("designer_merge_" + name + "_" + std::to_string(::getpid()) + ".lob");
   fs::remove_all(dir);
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("A", glm::dvec3(0), 2, 2, 2));
   doc.AddFeature(
       std::make_unique<BoxFeature>("B", glm::dvec3(5, 0, 0), 2, 2, 2));
-  REQUIRE(testio::Save(doc, dir.string())); // .dsgn ⇒ the directory format
+  REQUIRE(testio::Save(doc, dir.string())); // .lob ⇒ the directory format
   return dir;
 }
 } // namespace
@@ -511,15 +511,17 @@ TEST_CASE("Unresolved conflict markers name the file", "[io][merge]") {
 // Project could not return: that dialog picks folders, so a flat `foo.json`
 // was reachable only through Open Recent.
 TEST_CASE("A picked save target is always the directory form", "[io]") {
-  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge.dsgn") == "/tmp/hinge.dsgn");
-  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge") == "/tmp/hinge.dsgn");
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge.lob") == "/tmp/hinge.lob");
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge") == "/tmp/hinge.lob");
   // The flat form is replaced, not appended to.
-  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge.json") == "/tmp/hinge.dsgn");
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge.json") == "/tmp/hinge.lob");
   // A dot inside the NAME is not an extension to overwrite — "hinge v2" must
-  // not come back as "hinge v.dsgn".
-  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge v2") == "/tmp/hinge v2.dsgn");
+  // not come back as "hinge v.lob".
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge v2") == "/tmp/hinge v2.lob");
   CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge v1.2") ==
-        "/tmp/hinge v1.2.dsgn");
+        "/tmp/hinge v1.2.lob");
+  // So is the extension before the rename, which is read and never written.
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge.dsgn") == "/tmp/hinge.lob");
   // Nothing picked stays nothing.
   CHECK(DocumentIO::ProjectSaveTarget("").empty());
 }

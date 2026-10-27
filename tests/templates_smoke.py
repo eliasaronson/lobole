@@ -232,7 +232,7 @@ def main():
         expect(e["templates"] == ["bearing seat"], e)
         refused(d, "export_templates", "no template named",
                 path=path, names=["nope"])
-        proj = os.path.join(tmp, "templates.dsgn")
+        proj = os.path.join(tmp, "templates.lob")
         d.call("save_project", path=proj)
         d.call("new_project")
         expect(d.call("list_templates")["templates"] == [], "leaked library")

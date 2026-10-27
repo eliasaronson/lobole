@@ -127,23 +127,23 @@ def _declared():
     def from_test(name, project, set_="default", probe=None):
         fx[name] = Fixture(name, project, tests[name], set_, probe)
 
-    # --stage preview saves the project it checked as om615-unchecked.dsgn:
+    # --stage preview saves the project it checked as om615-unchecked.lob:
     # "unchecked" is the motion it did not run, not the build.
-    from_test("om615", "om615/om615-unchecked.dsgn")
-    from_test("engine", "engine/engine.dsgn")
-    from_test("hook", "hook/hook.dsgn")
-    from_test("hinge_box", "hinge_box/hinge_box.dsgn")
-    from_test("chess", "chess/chess_only.dsgn", probe=_probe_cam)
-    fx["chassis"] = Fixture("chassis", "chassis/chassis.dsgn", {
+    from_test("om615", "om615/om615-unchecked.lob")
+    from_test("engine", "engine/engine.lob")
+    from_test("hook", "hook/hook.lob")
+    from_test("hinge_box", "hinge_box/hinge_box.lob")
+    from_test("chess", "chess/chess_only.lob", probe=_probe_cam)
+    fx["chassis"] = Fixture("chassis", "chassis/chassis.lob", {
         "steps": [["{python}", "-u", "{generators}/chassis/chassis.py",
                    "--port", "{port}", "--out", "{out}/chassis",
-                   "--save", "{out}/chassis/chassis.dsgn"]],
+                   "--save", "{out}/chassis/chassis.lob"]],
         "markers": ["project saved to"],
         "instance": "headless",
         "budget_s": 900,
     })
-    from_test("clock", "clock/clock.dsgn", "big")
-    from_test("planetary", "planetary/planetary.dsgn", "big")
+    from_test("clock", "clock/clock.lob", "big")
+    from_test("planetary", "planetary/planetary.lob", "big")
     return fx
 
 

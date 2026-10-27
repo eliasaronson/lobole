@@ -218,7 +218,7 @@ void DrawCamGenerateWindow(AppState& state) {
     ImGui::SameLine();
     if (ImGui::Button("Save G-code###cam_save_gcode")) {
       // BESIDE the project, which is what this always meant to say and did
-      // not: `projectPath` is the .dsgn bundle itself, so appending to it
+      // not: `projectPath` is the .lob bundle itself, so appending to it
       // wrote the G-code INSIDE the project. `StampProject` walks every
       // regular file in there, so the job's own output changed the project's
       // disk stamp and the next save refused with "the project changed on

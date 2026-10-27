@@ -45,11 +45,11 @@ ALL=(parametric history fem cam om615 assembly)
 # name faces the way this build does (tools/demo/README.md):
 #   python3 generators/om615/om615.py --port PORT --stage preview --no-export \
 #       --out scratch/demo/om615-gen
-OM615="${LOBOLE_DEMO_OM615_SOURCE:-$SCRATCH/demo/om615-gen/om615-unchecked.dsgn}"
+OM615="${LOBOLE_DEMO_OM615_SOURCE:-$SCRATCH/demo/om615-gen/om615-unchecked.lob}"
 # assembly plays the printed engine's sequence (generators/engine/), from a
 # copy too:
 #   python3 generators/engine/build.py --port PORT --profile "K5 PLA on P1S"
-ENGINE="${LOBOLE_DEMO_ENGINE_SOURCE:-$SCRATCH/engine/engine.dsgn}"
+ENGINE="${LOBOLE_DEMO_ENGINE_SOURCE:-$SCRATCH/engine/engine.lob}"
 if [ ${#SCENES[@]} -eq 0 ]; then
   SCENES=("${ALL[@]}")
   # Without the generated models, the rest still record.
@@ -81,14 +81,14 @@ DEMO_ENV=""
 case " ${SCENES[*]} " in
   *" om615 "*)
     [ -d "$OM615" ] || { echo "record: no OM615 project at $OM615 (generators/om615/om615.py builds it)" >&2; exit 1; }
-    cp -r "$OM615" "$STATE/om615.dsgn"
-    DEMO_ENV="LOBOLE_DEMO_OM615='$STATE/om615.dsgn'" ;;
+    cp -r "$OM615" "$STATE/om615.lob"
+    DEMO_ENV="LOBOLE_DEMO_OM615='$STATE/om615.lob'" ;;
 esac
 case " ${SCENES[*]} " in
   *" assembly "*)
     [ -e "$ENGINE" ] || { echo "record: no engine project at $ENGINE (generators/engine/ builds it)" >&2; exit 1; }
-    cp -r "$ENGINE" "$STATE/engine.dsgn"
-    DEMO_ENV="$DEMO_ENV LOBOLE_DEMO_ENGINE='$STATE/engine.dsgn'" ;;
+    cp -r "$ENGINE" "$STATE/engine.lob"
+    DEMO_ENV="$DEMO_ENV LOBOLE_DEMO_ENGINE='$STATE/engine.lob'" ;;
 esac
 LOG="$OUT/record.log"
 

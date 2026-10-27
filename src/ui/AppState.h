@@ -2837,6 +2837,11 @@ struct AppState {
   // until `linksNoticeUntil` (ImGui time; -2 = from the next frame).
   std::string linksNotice;
   double linksNoticeUntil = -1.0;
+  // The menu bar's notice after a project opened from a `.dsgn` was saved as
+  // the `.lob` beside it (ui::MarkProjectSaved): "Saved as …/bracket.lob --
+  // bracket.dsgn is left as it was". Same timing as `linksNotice`.
+  std::string savedAsNotice;
+  double savedAsNoticeUntil = -1.0;
   // The menu bar's "Graphics device restarted" notice after a rebuild, said
   // once: shown until this (ImGui) time.
   double rendererRestartedNoticeUntil = -1.0;

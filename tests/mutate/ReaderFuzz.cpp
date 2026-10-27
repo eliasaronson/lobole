@@ -656,7 +656,7 @@ std::vector<Input> DirCorpus(const char* family, const fs::path& goldens,
     auto r = load(g.string());
     Require(r.has_value(), g.string() + " does not load");
     tweak(**r, g.stem().string());
-    const fs::path dir = scratch / "corpus" / (g.stem().string() + ".dsgn");
+    const fs::path dir = scratch / "corpus" / (g.stem().string() + ".lob");
     fs::remove_all(dir);
     Require(save(**r, dir.string()).has_value(), g.string() + " does not save");
     out.push_back(
@@ -728,10 +728,10 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
         noTweak);
     // The drawing whose views carry saved projections, as committed.
     const fs::path stored = g / "drawing" / "v162-stored-projection";
-    const fs::path dir = scratch / "corpus" / "v162-stored-projection.dsgn";
+    const fs::path dir = scratch / "corpus" / "v162-stored-projection.lob";
     fs::remove_all(dir);
     fs::copy(stored, dir, fs::copy_options::recursive);
-    out.push_back({"drawing-dir/v162-stored-projection.dsgn", dir, true, {}});
+    out.push_back({"drawing-dir/v162-stored-projection.lob", dir, true, {}});
     break;
   }
   case Family::JobDir:
@@ -748,7 +748,7 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
     // assembly with a saved motion result, a drawing with saved
     // projections, a job; project variables, a folder, a section cut and
     // a requirement.
-    const fs::path dir = scratch / "corpus" / "project.dsgn";
+    const fs::path dir = scratch / "corpus" / "project.lob";
     fs::remove_all(dir);
     fs::create_directories(dir);
     json docs = json::array();
@@ -819,7 +819,7 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
         {"documents", docs},
         {"requirements_next_id", 2}};
     WriteBytes(dir / "project.json", index.dump(2) + "\n");
-    out.push_back({"project/project.dsgn", dir, true, {}});
+    out.push_back({"project/project.lob", dir, true, {}});
     break;
   }
   case Family::ExternalCorpus: {
@@ -833,7 +833,8 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
       if (ec)
         break;
       const fs::path& p = it->path();
-      if (it->is_directory(ec) && p.extension() == ".dsgn") {
+      if (it->is_directory(ec) &&
+          DocumentIO::IsProjectFolderName(p.string())) { // .lob or .dsgn
         if (fs::exists(p / "project.json") || fs::exists(p / "index.json"))
           out.push_back({"corpus/" + fs::relative(p, root).generic_string(),
                          p,
@@ -1231,7 +1232,7 @@ struct Sweep::Impl {
 
   fs::path SaveTarget(const Input& in, const std::string& name) const {
     return scratch / name /
-           (in.tree ? std::string("doc.dsgn") : in.path.filename().string());
+           (in.tree ? std::string("doc.lob") : in.path.filename().string());
   }
 
   // The count rule above sees a whole item go missing only when the damage
@@ -1796,7 +1797,7 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
     const fs::path state = fixture / "state";
     const std::string stem = "20261023-120000-4242";
     const std::string old = "20261022-110000-4141";
-    WriteBytes(fixture / "project.dsgn.autosave", "{}\n");
+    WriteBytes(fixture / "project.lob.autosave", "{}\n");
     WriteBytes(state / "logs" / (stem + ".log"), "line one\nline two\n");
     const json marker = {
         {"stem", stem},
@@ -1809,9 +1810,9 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
         {"started_epoch", 1792800000},
         {"started_ms", int64_t{1792800000000}},
         {"log", (state / "logs" / (stem + ".log")).string()},
-        {"project", (fixture / "project.dsgn").string()},
+        {"project", (fixture / "project.lob").string()},
         {"autosaves",
-         json::array({(fixture / "project.dsgn.autosave").string()})}};
+         json::array({(fixture / "project.lob.autosave").string()})}};
     WriteBytes(state / "sessions" / (stem + ".json"), marker.dump(2) + "\n");
     WriteBytes(state / "sessions" / (stem + ".crash"),
                "reason: SIGSEGV\nframe 0\n");
@@ -1911,20 +1912,20 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
       const std::vector<Input> project =
           BuildCorpus(Family::Project, other.scratch);
       Require(!project.empty(), "no project fixture");
-      CopyTree(project.front().path, fixture / "box.dsgn");
+      CopyTree(project.front().path, fixture / "box.lob");
       auto p = DocumentIO::Load((GoldenDir() / "v14-boolean.json").string());
       Require(p.has_value(), "v14 does not load");
-      fs::create_directories(fixture / "box.dsgn.autosave.d" / "parts");
-      fs::create_directories(fixture / "box.dsgn.autosave.d" / "assemblies");
-      Require(DocumentIO::Save(**p, (fixture / "box.dsgn.autosave.d" / "parts" /
-                                     "Plate.json")
-                                        .string())
+      fs::create_directories(fixture / "box.lob.autosave.d" / "parts");
+      fs::create_directories(fixture / "box.lob.autosave.d" / "assemblies");
+      Require(DocumentIO::Save(
+                  **p, (fixture / "box.lob.autosave.d" / "parts" / "Plate.json")
+                           .string())
                   .has_value(),
               "a part sidecar does not save");
       auto a = DocumentIO::LoadAssembly(
           (GoldenDir() / "assembly" / "v87-motion-study.json").string());
       Require(a.has_value(), "v87 does not load");
-      Require(DocumentIO::SaveAssembly(**a, (fixture / "box.dsgn.autosave.d" /
+      Require(DocumentIO::SaveAssembly(**a, (fixture / "box.lob.autosave.d" /
                                              "assemblies" / "Crank.json")
                                                 .string())
                   .has_value(),
@@ -1936,7 +1937,7 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
     };
     topt.binary.want = topt.file.want;
     check = [](const fs::path& w, const Case& c) -> std::string {
-      for (const char* project : {"box.dsgn"}) {
+      for (const char* project : {"box.lob"}) {
         ui::AppState state;
         std::string error;
         bool ok = false;
@@ -1968,7 +1969,7 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
     }
     auto d = DocumentIO::Load((GoldenDir() / "v17-full.json").string());
     Require(d.has_value(), "v17 does not load");
-    const fs::path repo = fixture / "vault.dsgn";
+    const fs::path repo = fixture / "vault.lob";
     Require(DocumentIO::Save(**d, repo.string()).has_value(),
             "the part does not save");
     Require(GitVault::Init(repo.string()), "git init failed");
@@ -2008,7 +2009,7 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
     topt.binary.truncateSpread = 1;
     topt.everyFile = false; // one item of each kind, as a tree's files are
     check = [this](const fs::path& w, const Case& c) -> std::string {
-      const std::string project = (w / "vault.dsgn").string();
+      const std::string project = (w / "vault.lob").string();
       std::string error;
       try {
         // The damage is committed: a version of the project that is
@@ -2028,7 +2029,7 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
           bool named = false;
           for (const mutate::Edit& e : c.edits) {
             const std::string rel = fs::path(e.rel)
-                                        .lexically_relative("vault.dsgn")
+                                        .lexically_relative("vault.lob")
                                         .generic_string();
             named = named || loaded.error().find(rel) != std::string::npos ||
                     loaded.error().find("index.json") != std::string::npos;
@@ -2124,9 +2125,12 @@ Outcome ReadAs(Family family, const fs::path& path) {
     ScopedEnv state("XDG_STATE_HOME", (path / "home-state").string());
     ScopedEnv config("XDG_CONFIG_HOME", (path / "home-config").string());
     ui::AppState app;
+    // A committed case written before the rename holds box.dsgn, which
+    // still opens.
+    const fs::path project =
+        fs::exists(path / "box.dsgn") ? path / "box.dsgn" : path / "box.lob";
     try {
-      o.loaded =
-          ui::RecoverProject(app, (path / "box.dsgn").string(), &o.message);
+      o.loaded = ui::RecoverProject(app, project.string(), &o.message);
     } catch (const std::exception& e) {
       o.message = std::string("threw: ") + e.what();
     }

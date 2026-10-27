@@ -48,7 +48,7 @@ def main():
         d.call("new_project")
         cylinder(d, (0, 0, 0), "z", 4, 30, "Pin")
         cylinder(d, (20, 0, 0), "z", 3, 10, "Peg")
-        proj = os.path.join(tmp, "pin.dsgn")
+        proj = os.path.join(tmp, "pin.lob")
         d.call("save_project", path=proj)
 
         # A clean open drops nothing.
@@ -87,7 +87,7 @@ def main():
                "a refused save deleted the file it was protecting")
 
         # Saving elsewhere is never blocked.
-        copy = os.path.join(tmp, "copy.dsgn")
+        copy = os.path.join(tmp, "copy.lob")
         out = d.call("save_project", path=copy)
         expect("warning" not in out, f"a save elsewhere warned: {out}")
         expect(os.path.exists(orphan), "a save elsewhere touched the original")

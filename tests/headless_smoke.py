@@ -370,7 +370,7 @@ def main():
         # F10. This is the scenario that used to fail: Autosaver was handed
         # the ACTIVE document, so a multi-document project autosaved one part
         # and an assembly tab autosaved nothing at all.
-        multi = os.path.join(tmp, "multi.dsgn")
+        multi = os.path.join(tmp, "multi.lob")
         d.call("new_project")
         p1 = shapes.box(d, (0, 0, 0), (10, 10, 10), "PartOneBody")
         d.call("add_part", name="Second")
@@ -405,7 +405,7 @@ def main():
         # another editor writes, or a second instance saves) while the app
         # holds the documents in memory. Before this, the next Ctrl+S replaced
         # it all with no message.
-        moved = os.path.join(tmp, "moved.dsgn")
+        moved = os.path.join(tmp, "moved.lob")
         d.call("new_project")
         shapes.box(d, (0, 0, 0), (2, 2, 2), "Box 1")
         d.call("save_project", path=moved)
@@ -439,7 +439,7 @@ def main():
 
         # A Save As to a path we have never seen has nothing to compare
         # against, and must not be blocked by the stamp of a different project.
-        elsewhere = os.path.join(tmp, "elsewhere.dsgn")
+        elsewhere = os.path.join(tmp, "elsewhere.lob")
         with open(os.path.join(moved, "NOTES3.txt"), "w") as f:
             f.write("moved again\n")
         d.call("save_project", path=elsewhere)
@@ -645,7 +645,7 @@ def main():
         expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 8) < 1e-6,
                "part 1 intact after switching back")
         # Save + reload the whole multi-part project.
-        proj = os.path.join(tmp, "asm.dsgn")
+        proj = os.path.join(tmp, "asm.lob")
         d.call("save_project", path=proj)
         expect(os.path.exists(os.path.join(proj, "project.json")),
                "multi-part writes project.json")
@@ -693,7 +693,7 @@ def main():
         shapes.box(d, (0, 0, 0), (10, 10, 10), "B")
         d.call("add_assembly", name="Rig")
         d.call("create_drawing", name="Sheet")
-        proj = os.path.join(tmp, "tabkinds.dsgn")
+        proj = os.path.join(tmp, "tabkinds.lob")
         d.call("save_project", path=proj)
         for tab in ["Rig", "Sheet"]:
             d.call("set_active_part", name=tab)
@@ -755,7 +755,7 @@ def main():
         d.call("move_to_folder", part=["Rig", "Sheet"], folder="Fasteners")
 
         # Survives the round trip.
-        fproj = os.path.join(tmp, "folders.dsgn")
+        fproj = os.path.join(tmp, "folders.lob")
         d.call("save_project", path=fproj)
         d.call("new_project")
         d.call("open_project", path=fproj)
@@ -842,7 +842,7 @@ def main():
         expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 8 * 10) < 1e-3,
                "redo re-applied the project-variable edit")
         # Save + reload preserves the project scope and both geometries.
-        pvproj = os.path.join(tmp, "projvars.dsgn")
+        pvproj = os.path.join(tmp, "projvars.lob")
         d.call("save_project", path=pvproj)
         d.call("new_project")
         d.call("open_project", path=pvproj)
@@ -961,7 +961,7 @@ def main():
         # Persistence: sections survive save + reopen (they were session
         # state until P3, so a set-up cut vanished on every save).
         with tempfile.TemporaryDirectory() as td:
-            path = os.path.join(td, "sections.dsgn")
+            path = os.path.join(td, "sections.lob")
             d.call("save_project", path=path)
             d.call("new_project")
             expect(not d.call("list_sections")["sections"], "new = no cuts")
@@ -1675,7 +1675,7 @@ def main():
         expect(len(parts) == 3 and
                [p["type"] for p in parts].count("assembly") == 1,
                f"own part + imported part + assembly tab: {parts}")
-        proj = os.path.join(tmp, "miximport.dsgn")
+        proj = os.path.join(tmp, "miximport.lob")
         d.call("save_project", path=proj)
         adopted = glob.glob(os.path.join(proj, "imported", "**", "*.brep"),
                             recursive=True)
@@ -1821,7 +1821,7 @@ def main():
         # tag, restore rewinds
         d.call("new_project")
         shapes.box(d, (0, 0, 0), (2, 2, 2), "Base")
-        proj = os.path.join(tmp, "gitproj.dsgn")
+        proj = os.path.join(tmp, "gitproj.lob")
         d.call("save_project", path=proj, message="first")
         expect(os.path.isdir(proj) and
                os.path.exists(os.path.join(proj, "index.json")),
@@ -1858,7 +1858,7 @@ def main():
         shapes.box(d, (0, 0, 0), (4, 4, 4), "Base")
         d.call("add_part", name="Lid")
         shapes.box(d, (0, 0, 0), (4, 1, 4), "Plate")
-        multi = os.path.join(tmp, "multipart.dsgn")
+        multi = os.path.join(tmp, "multipart.lob")
         d.call("save_project", path=multi)
         d.call("checkpoint_create", name="both parts")
         expect([c["name"] for c in d.call("checkpoint_list")["checkpoints"]]
@@ -2649,7 +2649,7 @@ def main():
         # R4/R5/R16 (2026-08-26). Names address tabs, so duplicates refuse;
         # {part: name|id|index} is one resolver across the tab RPCs; and a
         # multi-document project saved to a .json path used to mint a
-        # history-less directory NAMED .json — refused now, naming .dsgn.
+        # history-less directory NAMED .json — refused now, naming .lob.
         first_tab = d.call("list_parts")["parts"][0]["name"]
         d.call("add_part", name="addr-a")
         try:
@@ -2684,7 +2684,7 @@ def main():
             d.call("save_project", path=os.path.join(tmp, "multi.json"))
             raise AssertionError("multi-doc .json save must refuse")
         except RuntimeError as e:
-            expect(".dsgn" in str(e), f"refusal names .dsgn: {e}")
+            expect(".lob" in str(e), f"refusal names .lob: {e}")
         expect(not os.path.exists(os.path.join(tmp, "multi.json")),
                "nothing written on the refused save")
         d.call("delete_part", part=auto["name"])

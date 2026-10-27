@@ -1584,7 +1584,7 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       REQUIRE(doc != nullptr);
 
       const fs::path proj = fs::temp_directory_path() /
-                            ("golden_dir_" + golden.stem().string() + ".dsgn");
+                            ("golden_dir_" + golden.stem().string() + ".lob");
       fs::remove_all(proj);
       REQUIRE(testio::Save(*doc, proj.string()));
       CHECK(fs::exists(proj / "index.json"));
@@ -1603,7 +1603,7 @@ TEST_CASE("Directory format: editing one feature touches one file",
   doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1, 1, 1));
   doc.AddFeature(
       std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2, 1, 1));
-  const fs::path proj = fs::temp_directory_path() / "onefile.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "onefile.lob";
   fs::remove_all(proj);
   std::string error;
   REQUIRE(testio::Save(doc, proj.string()));
@@ -1659,11 +1659,11 @@ TEST_CASE("Directory format: editing one feature touches one file",
   fs::remove_all(proj);
 }
 
-TEST_CASE("Opening the index.json inside a .dsgn opens the project",
+TEST_CASE("Opening the index.json inside a .lob opens the project",
           "[dirformat]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 2, 2, 2));
-  const fs::path proj = fs::temp_directory_path() / "viaindex.dsgn";
+  const fs::path proj = fs::temp_directory_path() / "viaindex.lob";
   fs::remove_all(proj);
   std::string error;
   REQUIRE(testio::Save(doc, proj.string()));

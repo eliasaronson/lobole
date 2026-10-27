@@ -423,7 +423,7 @@ TEST_CASE("a save, reload and regenerate gives the same geometry and names",
   const double v = Volume(doc);
   const ElementMap names = doc.GetBodies()[0].elementMap;
 
-  for (const char* form : {"templates.json", "templates.dsgn"}) {
+  for (const char* form : {"templates.json", "templates.lob"}) {
     const fs::path path = TempPath(form);
     REQUIRE(testio::Save(doc, path.string()));
     auto back = testio::Load(path.string());

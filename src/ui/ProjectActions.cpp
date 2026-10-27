@@ -320,11 +320,49 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
   return saved;
 }
 
+static bool WriteProject(AppState& state, const std::string& path,
+                         std::string* error);
+
+std::string ProjectWriteTarget(const std::string& path) {
+  namespace fs = std::filesystem;
+  std::string p = path;
+  while (p.size() > 1 && (p.back() == '/' || p.back() == '\\'))
+    p.pop_back();
+  if (!p.ends_with(DocumentIO::kLegacyProjectExtension))
+    return path;
+  return fs::path(p).replace_extension(DocumentIO::kProjectExtension).string();
+}
+
 static bool SaveProjectUnguarded(AppState& state, const std::string& path,
                                  std::string* error,
                                  bool overwriteExternalChanges,
                                  bool overwriteLossy) {
   namespace fs = std::filesystem;
+  // `.dsgn` is the extension before the rename: still opened, never written
+  // (docs/versioning/README.md#the-dsgn-extension). Saving the project that
+  // was opened from one writes `<name>.lob` beside it instead; any other
+  // `.dsgn` would be a new one, and is refused.
+  const std::string target = ProjectWriteTarget(path);
+  const bool migrating = target != path;
+  if (migrating) {
+    if (!SamePath(path, state.projectPath)) {
+      if (error)
+        *error = "'" + path +
+                 "' is a .dsgn, the project extension before the rename, "
+                 "which is read but no longer written: save to '" +
+                 target + "'";
+      return false;
+    }
+    std::error_code ec;
+    if (fs::exists(target, ec)) {
+      if (error)
+        *error = "this project was opened from '" + path +
+                 "', which is saved as '" + target +
+                 "' now -- and that already exists. Open it, or save this "
+                 "project under another name";
+      return false;
+    }
+  }
   // The open kept going past content it could not keep (a file its index
   // did not list, ...): saving back over that project would lose it for
   // good, so the save is refused, naming each, unless the caller says to
@@ -352,12 +390,41 @@ static bool SaveProjectUnguarded(AppState& state, const std::string& path,
                "or save anyway to replace what is there";
     return false;
   }
+  if (migrating) {
+    // COPIED, not moved: the .lob starts as everything the .dsgn holds --
+    // its git history, adopted imports, assets, baked geometry -- and the
+    // write below lands over the copy. Moving .git out would leave the
+    // .dsgn a project without its history; the .dsgn is never changed.
+    std::error_code ec;
+    if (fs::is_directory(path, ec)) {
+      fs::copy(path, target,
+               fs::copy_options::recursive | fs::copy_options::copy_symlinks,
+               ec);
+      if (ec) {
+        std::error_code rmEc;
+        fs::remove_all(target, rmEc); // a half copy is no project
+        if (error)
+          *error = "could not copy '" + path + "' to '" + target +
+                   "': " + ec.message() + ". Nothing was saved";
+        return false;
+      }
+    }
+    LOG_INFO("save: {} is saved as {} (the .dsgn is left as it was)", path,
+             target);
+  }
+  return WriteProject(state, target, error);
+}
+
+// The write itself, to a target the checks above have passed.
+static bool WriteProject(AppState& state, const std::string& path,
+                         std::string* error) {
+  namespace fs = std::filesystem;
   EnsureParts(state);
   // Directory-form targets can own import sidecars; adopt any still staged
   // before the write so the saved features point inside the project.
-  if (path.ends_with(".dsgn") || fs::is_directory(path))
+  if (DocumentIO::IsProjectFolderName(path) || fs::is_directory(path))
     AdoptStagedImports(state, fs::path(path));
-  // A single part keeps the flat .dsgn form (backward compatible). A lone
+  // A single part keeps the flat .lob form (index.json + features/). A lone
   // assembly, or any multi-document project, uses the project container.
   // Phase V: a single part IS the whole project, so its file carries the
   // PROJECT-scope variables. We fall back to the container form only when the
@@ -391,15 +458,15 @@ static bool SaveProjectUnguarded(AppState& state, const std::string& path,
   // A multi-document project is about to become a DIRECTORY. Writing it
   // under a .json name would work — and did: the W 170 S project saved as a
   // directory *named* w170s.json, in the full container form but WITHOUT
-  // the git vault (which keys on .dsgn), silently dropping every save
+  // the git vault (which keys on .lob), silently dropping every save
   // message. Same format, different capability, decided by a filename —
   // refuse instead: .json stays the single-document interchange form.
   if (fs::path(path).extension() == ".json") {
     if (error)
-      *error = "a multi-document project saves as a .dsgn directory "
+      *error = "a multi-document project saves as a .lob directory "
                "(per-feature files + git history); .json is the "
                "single-document interchange form — save to '" +
-               fs::path(path).stem().string() + ".dsgn'";
+               fs::path(path).stem().string() + ".lob'";
     return false;
   }
   // Multi-document: project.json (v2) + parts/<name>/ and assemblies/<name>/.
@@ -1124,7 +1191,7 @@ std::string NormalizeProjectPick(const std::string& path) {
   if (p.filename() == "project.json")
     p = p.parent_path();
   for (fs::path a = p; !a.empty() && a != a.root_path(); a = a.parent_path())
-    if (a.extension() == ".dsgn")
+    if (DocumentIO::IsProjectFolderName(a.string()))
       return a.string();
   return p.string();
 }
@@ -1133,8 +1200,8 @@ bool IsProjectPath(const std::string& path) {
   namespace fs = std::filesystem;
   const fs::path root(NormalizeProjectPick(path));
   std::error_code ec;
-  return root.extension() == ".dsgn" || root.extension() == ".json" ||
-         fs::is_directory(root, ec);
+  return DocumentIO::IsProjectFolderName(root.string()) ||
+         root.extension() == ".json" || fs::is_directory(root, ec);
 }
 
 // The stamp a slot's dirty check (and its autosave) compares against:
@@ -1285,8 +1352,19 @@ std::string WindowTitle(AppState& state) {
   return name + (ProjectDirty(state) ? "*" : "") + " - Loböle";
 }
 
-void MarkProjectSaved(AppState& state, const std::string& path,
+void MarkProjectSaved(AppState& state, const std::string& requested,
                       const std::string& message) {
+  // SaveProject wrote a .dsgn's project to the .lob beside it; from here on
+  // that is the project. The .dsgn's own sidecar goes too: what it held is
+  // saved now.
+  const std::string path = ProjectWriteTarget(requested);
+  if (path != requested) {
+    Autosaver::Clear(requested);
+    state.savedAsNotice = "Saved as " + path + " -- " +
+                          std::filesystem::path(requested).filename().string() +
+                          " is left as it was";
+    state.savedAsNoticeUntil = -2.0;
+  }
   LOG_INFO("save: {}", path);
   state.projectPath = path;
   RecentProjects::Remember(path);
@@ -1300,7 +1378,7 @@ void MarkProjectSaved(AppState& state, const std::string& path,
   Autosaver::Clear("");
   // Git-backed history (F5): a directory project is its own repository;
   // every clean save becomes a commit. No-ops without git.
-  if (path.ends_with(".dsgn") && GitVault::Available()) {
+  if (DocumentIO::IsProjectFolderName(path) && GitVault::Available()) {
     if (!GitVault::IsRepo(path)) {
       GitVault::Init(path);
     }

@@ -23,7 +23,7 @@ bool NameCurrentVersion(AppState& state, const std::string& name,
 bool RestoreVersion(AppState& state, const std::string& commit,
                     const std::string& label, std::string* error = nullptr);
 
-// True when versions are possible here: a saved `.dsgn` project directory and
+// True when versions are possible here: a saved `.lob` project directory and
 // a usable `git`. The repository itself is created by the first save, so this
 // is true one moment before a history exists.
 // Check out another line of work and reopen the project — the documents in

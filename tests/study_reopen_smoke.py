@@ -136,7 +136,7 @@ def main():
         before = d.call("study_results", study=ids["static"])
 
         # ---- Saved, and opened again ----------------------------------------
-        path = os.path.join(tmp, "reopen.dsgn")
+        path = os.path.join(tmp, "reopen.lob")
         d.call("save_project", path=path)
         for kind in ("static", "topology"):
             expect(any(f.endswith(".result.json") and f.startswith(

@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-// Git-backed project history (versioning F5 v1): the `.dsgn` project
+// Git-backed project history (versioning F5 v1): the `.lob` project
 // directory IS the repository. Shells out to the `git` binary (this
 // product's audience has git; embedding libgit2 buys nothing here). All
 // operations no-op gracefully when git is unavailable.

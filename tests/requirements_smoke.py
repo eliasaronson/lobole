@@ -238,8 +238,8 @@ def cam(d):
     # The session that built the job and one that reopened it hash the same
     # job: evidence taken before the save is current after it.
     with tempfile.TemporaryDirectory() as tmp:
-        d.call("save_project", path=os.path.join(tmp, "plate.dsgn"))
-        d.call("open_project", path=os.path.join(tmp, "plate.dsgn"))
+        d.call("save_project", path=os.path.join(tmp, "plate.lob"))
+        d.call("open_project", path=os.path.join(tmp, "plate.lob"))
         expect(rows(d)["the plate verifies"]["state"] == row["state"],
                f"reopened: {rows(d)['the plate verifies']}")
 
@@ -421,7 +421,7 @@ def studied_part(d, study):
     # ---- Both project forms carry them -----------------------------------
     with tempfile.TemporaryDirectory() as tmp:
         for path in (os.path.join(tmp, "bar.json"),
-                     os.path.join(tmp, "bar.dsgn")):
+                     os.path.join(tmp, "bar.lob")):
             before = rows(d)
             d.call("save_project", path=path)
             d.call("open_project", path=path)

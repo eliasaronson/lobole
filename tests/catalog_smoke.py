@@ -60,7 +60,7 @@ def main(binary):
         refused(lambda: c.export(Path(temp)/"blocked.json",mode="embedded"), "embedded export requires")
         assert not (Path(temp)/"blocked.json").exists()
         # Flat single-part document persists references without private rows.
-        flat = str(Path(temp) / "single.dsgn")
+        flat = str(Path(temp) / "single.lob")
         app.save_project(path=flat)
         # A suite run keeps its "recently opened" to ITSELF: the list lives in
         # the state directory, and seven temp projects from one afternoon's
@@ -69,7 +69,7 @@ def main(binary):
         recents = (Path(running.tmp) / "state" / "lobole"
                    / "recent-projects.json")
         assert recents.exists(), f"the recents went somewhere else: {recents}"
-        assert "single.dsgn" in recents.read_text()
+        assert "single.lob" in recents.read_text()
         app.new()
         app.open_project(path=flat)
         assert app.list_catalogs()["catalogs"][0]["resolved"] is False
@@ -87,7 +87,7 @@ def main(binary):
         app.undo()
         assert len(app.list_catalogs()["catalogs"]) == 1
         app.redo()
-        multi = str(Path(temp) / "multi.dsgn")
+        multi = str(Path(temp) / "multi.lob")
         app.save_project(path=multi)
         index = json.loads((Path(multi)/"project.json").read_text())
         assert "records" not in index["catalogs"][0]

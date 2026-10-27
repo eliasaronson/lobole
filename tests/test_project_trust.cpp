@@ -102,7 +102,7 @@ TEST_CASE("A path a project names must stay inside it", "[trust]") {
 TEST_CASE("A document whose name is a path is saved in a folder of its own",
           "[trust]") {
   const fs::path root = Scratch("docname");
-  const fs::path proj = root / "p.dsgn";
+  const fs::path proj = root / "p.lob";
   const fs::path outside = root / "victim";
   fs::create_directories(outside / "assets");
   std::ofstream(outside / "assets" / "keep.txt") << "mine";
@@ -126,7 +126,7 @@ TEST_CASE("A document whose name is a path is saved in a folder of its own",
 
 TEST_CASE("A project whose document lies outside it is refused", "[trust]") {
   const fs::path root = Scratch("docdir");
-  const fs::path proj = root / "p.dsgn";
+  const fs::path proj = root / "p.lob";
   {
     ui::AppState state = StateWithBox();
     std::string error;
@@ -167,7 +167,7 @@ TEST_CASE("Only a staged import is moved into the project", "[trust]") {
     state.document->AddFeature(
         std::make_unique<ImportFeature>("Import", crafted.string()));
     std::string error;
-    REQUIRE(ui::SaveProject(state, (root / "p.dsgn").string(), &error));
+    REQUIRE(ui::SaveProject(state, (root / "p.lob").string(), &error));
   }
   CHECK(fs::exists(victim));
   if (was)

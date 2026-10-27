@@ -262,7 +262,7 @@ def main():
         d.call("delete_part", part="jaw sheet")
 
         # Through disk: the copies come back without touching the source.
-        path = os.path.join(tmp, "grip.dsgn")
+        path = os.path.join(tmp, "grip.lob")
         d.call("save_project", path=path)
         d.call("new_project")
         d.call("open_project", path=path)

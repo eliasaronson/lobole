@@ -51,7 +51,7 @@ def main():
                  for f in b.get("faces", []) if f.get("kind") == "cylinder"]
         expect(faces, "the cylinder has no round face to tolerance")
         fid, face = faces[0]
-        proj = os.path.join(tmp, "pin.dsgn")
+        proj = os.path.join(tmp, "pin.lob")
 
         def saved():
             d.call("save_project", path=proj)

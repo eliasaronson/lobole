@@ -105,7 +105,7 @@ def main():
         expect(variable(d, "od")["value"] == 32, "undo restored the table")
 
         # A lone part saves flat, and its file carries the tables.
-        flat = os.path.join(tmp, "single.dsgn")
+        flat = os.path.join(tmp, "single.lob")
         d.call("save_project", path=flat)
         d.call("new_project")
         expect(d.call("list_tables")["tables"] == [], "a new project is empty")
@@ -115,7 +115,7 @@ def main():
 
         # A multi-document project keeps them in project.json.
         d.call("add_part", name="Second")
-        multi = os.path.join(tmp, "multi.dsgn")
+        multi = os.path.join(tmp, "multi.lob")
         d.call("save_project", path=multi)
         expect(os.path.isfile(os.path.join(multi, "project.json")),
                "a container project")

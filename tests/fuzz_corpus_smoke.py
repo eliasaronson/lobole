@@ -51,7 +51,7 @@ def main():
             continue
         with launch(os.path.abspath(sys.argv[1])) as app:
             d = app.client
-            d.scratch_path = os.path.join(app.tmp, "fuzz.dsgn")
+            d.scratch_path = os.path.join(app.tmp, "fuzz.lob")
             # The checks first, on the fresh instance; then the literal
             # session, after a new_project.
             outcome = fd.run_design(d, header["design"])

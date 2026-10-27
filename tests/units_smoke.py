@@ -75,7 +75,7 @@ def main():
                f"0.5cm extrude -> 5mm, volume 200: {vol}")
 
         # --- save/reopen keeps the unit text (v28) --------------------------
-        proj = os.path.join(tmp, "units.dsgn")
+        proj = os.path.join(tmp, "units.lob")
         d.call("save_project", path=proj)
         d.call("new_project")
         d.call("open_project", path=proj)

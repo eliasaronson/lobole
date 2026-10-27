@@ -721,9 +721,9 @@ void OpenReferenceImageDialog(AppState& state) {
 }
 
 void OpenProjectDialog(AppState& state) {
-  // Projects are folders (.dsgn), so this is a FOLDER picker — select the
-  // project itself and hit Open. A pick inside a project (or of the
-  // project.json) normalizes up to the project root.
+  // Projects are folders (.lob, or the old .dsgn), so this is a FOLDER
+  // picker — select the project itself and hit Open. A pick inside a project
+  // (or of the project.json) normalizes up to the project root.
   if (!NativeDialogsSafe())
     return;
   nfdu8char_t* outPath = nullptr;
@@ -750,15 +750,15 @@ void SaveProjectDialog(AppState& state) {
   if (!NativeDialogsSafe())
     return;
   nfdu8char_t* outPath = nullptr;
-  // `.dsgn` ONLY — a project saved from the GUI is always the directory form.
+  // `.lob` ONLY — a project saved from the GUI is always the directory form.
   // The flat single-file form is still loaded (legacy files, the RPC, tests),
   // but offering it here created projects that File > Open Project could
   // never return: it is a FOLDER picker, so a flat `foo.json` was reachable
   // only through Open Recent. ProjectSaveTarget enforces it for a name typed
   // by hand, which the filter alone does not.
-  const nfdu8filteritem_t filters[] = {{"Lobole project", "dsgn"}};
+  const nfdu8filteritem_t filters[] = {{"Lobole project", "lob"}};
   if (InDialog([&] {
-        return NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "project.dsgn");
+        return NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "project.lob");
       }) == NFD_OKAY) {
     std::string path = DocumentIO::ProjectSaveTarget(outPath);
     NFD_FreePathU8(outPath);
@@ -1068,10 +1068,16 @@ void SaveProjectAction(AppState& state) {
     return;
   }
   std::string error;
-  if (SaveProject(state, state.projectPath, &error))
+  if (SaveProject(state, state.projectPath, &error)) {
     MarkProjectSaved(state, state.projectPath);
-  else
+  } else {
     LOG_ERROR("Failed to save project: {}", error);
+    // A .dsgn whose .lob is already taken: the project needs another name,
+    // so ask for one rather than leave the save a line in the log.
+    if (ProjectWriteTarget(state.projectPath) != state.projectPath &&
+        !state.lossySaveBlocked && !state.diskChangeBlockedSave)
+      SaveProjectDialog(state);
+  }
 }
 
 } // namespace ui

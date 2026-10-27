@@ -51,7 +51,7 @@ TEST_CASE("Sidecar paths", "[autosave]") {
   CHECK(Autosaver::IsUnsavedSlot("unsaved-pid42.autosave.d"));
   CHECK(Autosaver::IsUnsavedSlot("unsaved.autosave.json")); // older builds
   CHECK_FALSE(Autosaver::IsUnsavedSlot("unsaved-.autosave.json"));
-  CHECK_FALSE(Autosaver::IsUnsavedSlot("Part.dsgn.autosave"));
+  CHECK_FALSE(Autosaver::IsUnsavedSlot("Part.lob.autosave"));
   CHECK_FALSE(Autosaver::IsUnsavedSlot("recent-projects.json"));
 }
 
@@ -114,7 +114,7 @@ TEST_CASE("Unsaved slots no live instance owns are pruned beyond a count",
   plant("unsaved-newest.autosave.d", 30);
   plant("unsaved-middle.autosave.json", 2);
   plant("unsaved.autosave.json", 3); // the shared slot older builds wrote
-  plant("Part.dsgn.autosave", 60);   // not an unsaved slot at all
+  plant("Part.lob.autosave", 60);    // not an unsaved slot at all
   plant("recent-projects.json", 60);
 
   Autosaver::PruneUnsavedSlots(state.string(), {"live"}, 2);
@@ -125,7 +125,7 @@ TEST_CASE("Unsaved slots no live instance owns are pruned beyond a count",
   CHECK(fs::exists(state / "unsaved-newest.autosave.d"));
   CHECK(fs::exists(state / "unsaved-middle.autosave.json"));
   CHECK_FALSE(fs::exists(state / "unsaved.autosave.json"));
-  CHECK(fs::exists(state / "Part.dsgn.autosave"));
+  CHECK(fs::exists(state / "Part.lob.autosave"));
   CHECK(fs::exists(state / "recent-projects.json"));
 
   Autosaver::PruneUnsavedSlots(state.string(), {}, 0);

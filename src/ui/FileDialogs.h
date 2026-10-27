@@ -16,7 +16,7 @@ namespace ui {
 // in the background behind a progress modal).
 void ImportFileDialog(AppState& state);
 void OpenReferenceImageDialog(AppState& state); // sketch underlay (v49)
-// Folder picker (projects are .dsgn folders): picking the project — or
+// Folder picker (projects are .lob folders): picking the project — or
 // anything inside it — opens it.
 void OpenProjectDialog(AppState& state);
 // Save As: always asks for a (new) location.

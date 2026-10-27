@@ -71,7 +71,7 @@ def main():
             d.call("new_project")
             name = f"part{i}"
             volumes[name] = build_part(d, name, 10.0 + i)
-            path = os.path.join(tmp, f"agent{i}.dsgn")
+            path = os.path.join(tmp, f"agent{i}.lob")
             d.call("save_project", path=path)
             paths.append(path)
             expect(os.path.isdir(path), f"a directory-format project: {path}")
@@ -80,7 +80,7 @@ def main():
         # The format is one file per part, so combining three agents' work is
         # copying three disjoint sets of files and one index — which is what
         # a git merge of three branches does, without reading either side.
-        merged = os.path.join(tmp, "merged.dsgn")
+        merged = os.path.join(tmp, "merged.lob")
         shutil.copytree(paths[0], merged, ignore=shutil.ignore_patterns(".git"))
         index_path = os.path.join(merged, "project.json")
         index = json.load(open(index_path))
@@ -120,7 +120,7 @@ def main():
                    f"{name} is {got}, its builder made {volume}")
 
         # ---- Two instances on ONE directory: refused, not clobbered -----
-        shared = os.path.join(tmp, "shared.dsgn")
+        shared = os.path.join(tmp, "shared.lob")
         a, b = clients[0], clients[1]
         a.call("new_project")
         build_part(a, "shared_part", 20.0)

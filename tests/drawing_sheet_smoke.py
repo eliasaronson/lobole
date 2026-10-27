@@ -170,7 +170,7 @@ def main():
         expect(">pin<" in text and ">ITEM<" in text, "the table on paper")
 
         # --- saved and opened again ----------------------------------------
-        proj = os.path.join(tmp, "sheet.dsgn")
+        proj = os.path.join(tmp, "sheet.lob")
         d.call("save_project", path=proj)
         d.call("open_project", path=proj)
         d.call("set_active_part", name="asm-dwg")

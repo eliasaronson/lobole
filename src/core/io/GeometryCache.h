@@ -12,13 +12,13 @@ namespace DocumentIO {
 // Baked geometry: the built bodies stored beside the recipe, so opening a
 // project is a load rather than a rebuild.
 //
-// A .dsgn directory is a recipe — a feature list that is re-executed on every
+// A .lob directory is a recipe — a feature list that is re-executed on every
 // open. That is honest and diffable, and on a 148-feature part it cost 259 s
 // against 0.4 s to save it (docs/versioning/README.md#baked-geometry). Every
 // commercial CAD file stores the resulting B-Rep alongside the history for
 // exactly this reason, and so does this:
 //
-//   <project>.dsgn/geometry/
+//   <project>.lob/geometry/
 //     index.json    format version, the document's tip chain hash, the OCC
 //                   version, and per body its name/material/producer plus the
 //                   element map (face and edge names, transient in memory)

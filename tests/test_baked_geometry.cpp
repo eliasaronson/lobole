@@ -61,7 +61,7 @@ fs::path TempProject(const char* name) {
 // (docs/versioning/README.md#baked-geometry). The built bodies are stored
 // beside the recipe, and a load that still matches executes nothing.
 TEST_CASE("Baked geometry loads instead of rebuilding", "[baked]") {
-  const fs::path proj = TempProject("baked-basic.dsgn");
+  const fs::path proj = TempProject("baked-basic.lob");
   auto doc = MakePart();
   const double volume = doc->GetBodies()[0].shape.Volume();
   const size_t faces = doc->GetBodies()[0].elementMap.names.size();
@@ -98,7 +98,7 @@ TEST_CASE("Baked geometry loads instead of rebuilding", "[baked]") {
 // and file watchers should still see only what actually changed — the same
 // discipline WriteTextAtomic keeps for the recipe.
 TEST_CASE("Renaming a feature does not touch its baked shape", "[baked]") {
-  const fs::path proj = TempProject("baked-rename.dsgn");
+  const fs::path proj = TempProject("baked-rename.lob");
   auto doc = MakePart();
   REQUIRE(testio::Save(*doc, proj.string()));
   const fs::path brep = proj / "geometry" / "0.brep";
@@ -123,7 +123,7 @@ TEST_CASE("Renaming a feature does not touch its baked shape", "[baked]") {
 // previous build's bodies on disk -- to come back on every open.
 TEST_CASE("A regenerated part is baked even when the blob's hash matches",
           "[baked]") {
-  const fs::path proj = TempProject("baked-rebuilt.dsgn");
+  const fs::path proj = TempProject("baked-rebuilt.lob");
   auto doc = MakePart();
   const double volume = doc->GetBodies()[0].shape.Volume();
   REQUIRE(testio::Save(*doc, proj.string()));
@@ -152,7 +152,7 @@ TEST_CASE("A regenerated part is baked even when the blob's hash matches",
 
   // Opened from one project and saved as another whose blob an older build
   // left under the same hash: the second project gets these bodies.
-  const fs::path other = TempProject("baked-rebuilt-copy.dsgn");
+  const fs::path other = TempProject("baked-rebuilt-copy.lob");
   REQUIRE(testio::Save(*rebuilt, other.string()));
   {
     auto tiny = std::make_unique<Document>();
@@ -174,7 +174,7 @@ TEST_CASE("A regenerated part is baked even when the blob's hash matches",
 // screw in a reopened tapped hole read as an exact clash of its thread's depth,
 // and a thread mill found no thread to cut.
 TEST_CASE("Threads survive a baked open", "[baked][hole]") {
-  const fs::path proj = TempProject("baked-threads.dsgn");
+  const fs::path proj = TempProject("baked-threads.lob");
   auto doc = std::make_unique<Document>();
   doc->AddFeature(
       std::make_unique<BoxFeature>("Plate", glm::vec3(0), 30, 30, 12));
@@ -215,7 +215,7 @@ TEST_CASE("Threads survive a baked open", "[baked][hole]") {
 // without carrying them the model would silently lose its advice on reopen,
 // which is the same silence the warnings exist to break.
 TEST_CASE("Advice survives a baked open", "[baked]") {
-  const fs::path proj = TempProject("baked-warning.dsgn");
+  const fs::path proj = TempProject("baked-warning.lob");
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 2, 2, 2));
   doc.AddFeature(
@@ -243,7 +243,7 @@ TEST_CASE("Advice survives a baked open", "[baked]") {
 // cleanly and put the part at the origin. The bake installs bodies and then
 // runs the datums (Feature::IsDatum), which is what this pins.
 TEST_CASE("Datums are resolved on a baked open", "[baked][frame][datum]") {
-  const fs::path proj = TempProject("baked-datums.dsgn");
+  const fs::path proj = TempProject("baked-datums.lob");
   Document doc;
   doc.AddFeature(
       std::make_unique<BoxFeature>("Plate", glm::vec3(0), 40, 10, 30));
@@ -312,7 +312,7 @@ TEST_CASE("Bends survive a baked open", "[baked][sheetmetal]") {
   // executes nothing to derive it again. Without it in the blob, a reopened
   // project exported a DXF with no bend lines (a blank with nothing saying
   // where to fold) and check_sheet_metal checked nothing while reporting ok.
-  const fs::path proj = TempProject("baked-bends.dsgn");
+  const fs::path proj = TempProject("baked-bends.lob");
   Document doc;
   sheet::SheetMetalRules rules;
   rules.material = "aluminum";
@@ -381,7 +381,7 @@ TEST_CASE("Bends survive a baked open", "[baked][sheetmetal]") {
 }
 
 TEST_CASE("A recipe edited behind the app's back is rebuilt", "[baked]") {
-  const fs::path proj = TempProject("baked-stale.dsgn");
+  const fs::path proj = TempProject("baked-stale.lob");
   auto doc = MakePart();
   REQUIRE(testio::Save(*doc, proj.string()));
 
@@ -413,7 +413,7 @@ TEST_CASE("A recipe edited behind the app's back is rebuilt", "[baked]") {
 // A blob can only ever make an open faster, never wrong: every way it can be
 // broken degrades to the rebuild the app did before it existed.
 TEST_CASE("A broken blob is ignored, not fatal", "[baked]") {
-  const fs::path proj = TempProject("baked-broken.dsgn");
+  const fs::path proj = TempProject("baked-broken.lob");
   auto doc = MakePart();
   const double volume = doc->GetBodies()[0].shape.Volume();
   REQUIRE(testio::Save(*doc, proj.string()));
@@ -453,7 +453,7 @@ TEST_CASE("A broken blob is ignored, not fatal", "[baked]") {
 }
 
 TEST_CASE("A failed model is not baked", "[baked]") {
-  const fs::path proj = TempProject("baked-broken-model.dsgn");
+  const fs::path proj = TempProject("baked-broken-model.lob");
   auto doc = MakePart();
   // A fillet with no resolvable body: the document regenerates with an error,
   // and a blob would then promise geometry the recipe does not produce.
@@ -471,7 +471,7 @@ TEST_CASE("A failed model is not baked", "[baked]") {
 }
 
 TEST_CASE("commit_geometry off removes the blob and persists", "[baked]") {
-  const fs::path proj = TempProject("baked-optout.dsgn");
+  const fs::path proj = TempProject("baked-optout.lob");
   auto doc = MakePart();
   REQUIRE(testio::Save(*doc, proj.string()));
   REQUIRE(fs::exists(proj / "geometry" / "index.json"));

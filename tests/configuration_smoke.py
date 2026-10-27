@@ -110,7 +110,7 @@ def main():
 
         # --- Save, reopen, verify configs + active survive -----------------
         d.call("set_active_configuration", id=tall)
-        proj = os.path.join(tmp, "bracket.dsgn")
+        proj = os.path.join(tmp, "bracket.lob")
         d.call("save_project", path=proj)
         with open(os.path.join(proj, "index.json")) as f:
             idx = jsonlib.load(f)
@@ -162,7 +162,7 @@ def main():
                f"Half BOM drops the suppressed occurrence: {half_qty} vs {base_qty}")
 
         # Save/reopen preserves the assembly config + active id.
-        aproj = os.path.join(tmp, "rig.dsgn")
+        aproj = os.path.join(tmp, "rig.lob")
         d.call("save_project", path=aproj)
         d.call("new_project")
         d.call("open_project", path=aproj)

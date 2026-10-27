@@ -58,6 +58,7 @@ add_executable(designer_tests
     test_recent_projects.cpp
     test_gitvault.cpp
     test_project_trust.cpp
+    test_project_extension.cpp
     test_projectmerge.cpp
     test_projectstamp.cpp
     test_disk_poller.cpp

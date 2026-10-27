@@ -165,7 +165,7 @@ def groups(d):
     steps = [{"occurrence": "gplate"},
              {"occurrences": ["wheel a", "wheel b"]}, tail]
     d.call("set_assembly_sequence", steps=steps)
-    path = os.path.join(tempfile.mkdtemp(), "groups.dsgn")
+    path = os.path.join(tempfile.mkdtemp(), "groups.lob")
     d.call("save_project", path=path)
     d.call("open_project", path=path)
     d.call("set_active_part", part="wheels")
@@ -232,7 +232,7 @@ def poses(d):
                               "rotation_deg": 10.0}],
                     "direction": down}])
     # Saved and opened again, the pose is still there and still holds.
-    path = os.path.join(tempfile.mkdtemp(), "poses.dsgn")
+    path = os.path.join(tempfile.mkdtemp(), "poses.lob")
     d.call("save_project", path=path)
     d.call("open_project", path=path)
     d.call("set_active_part", part="cranked")
@@ -379,7 +379,7 @@ def main(binary):
 
         # ---- Saved and opened again; the requirement ---------------------
         d.call("set_assembly_sequence", steps=right, allowance_mm=0.05)
-        path = os.path.join(tempfile.mkdtemp(), "sequence.dsgn")
+        path = os.path.join(tempfile.mkdtemp(), "sequence.lob")
         d.call("save_project", path=path)
         d.call("open_project", path=path)
         d.call("set_active_part", part="clevis")

@@ -101,7 +101,7 @@ def main():
             before = len(app.parts())
             refused(lambda: update('v3', lambda a: a.part('wrong')))
             assert len(app.parts()) == before
-            path = tmp+'/owned.dsgn'
+            path = tmp+'/owned.lob'
             app.save_project(path=path)
             app.open_project(path=path)
             with update('v2', never) as staged:

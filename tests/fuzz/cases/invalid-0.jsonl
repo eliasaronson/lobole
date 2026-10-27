@@ -52,7 +52,7 @@
 {"method":"redo","params":{}}
 {"method":"redo","params":{}}
 {"method":"get_state","params":{}}
-{"method":"save_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_v5qors4i/fuzz.dsgn"}}
-{"method":"open_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_v5qors4i/fuzz.dsgn"}}
+{"method":"save_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_v5qors4i/fuzz.lob"}}
+{"method":"open_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_v5qors4i/fuzz.lob"}}
 {"method":"set_active_part","params":{"part":"Part 1"}}
 {"method":"get_state","params":{}}

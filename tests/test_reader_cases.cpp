@@ -7,9 +7,9 @@
 //
 //   {"family": "part", "input": "v17-full.json",
 //    "expect": "refused", "message": ["v17-full.json", "unknown key"]}
-//   {"family": "part-dir", "input": "tree.dsgn",
+//   {"family": "part-dir", "input": "tree.lob",
 //    "expect": "loads", "counts": {"features": 3}, "dropped": ["features/"]}
-//   {"family": "settings", "input": "tree.dsgn", "expect": "passes"}
+//   {"family": "settings", "input": "tree.lob", "expect": "passes"}
 //
 // `refused`: the reader refuses it, and the message holds every substring.
 // `loads`: it loads, with those counts, and each `dropped` substring is in
@@ -128,7 +128,7 @@ TEST_CASE("Reader cases: comparing with a damaged version says why it does "
     SKIP("git is not on PATH");
   const fs::path dir =
       fs::temp_directory_path() /
-      ("lobole-compare-damaged-" + std::to_string(::getpid()) + ".dsgn");
+      ("lobole-compare-damaged-" + std::to_string(::getpid()) + ".lob");
   fs::remove_all(dir);
   ui::AppState state;
   state.document = std::make_unique<Document>();
@@ -176,7 +176,7 @@ TEST_CASE("Reader cases: a save prunes a collection emptied since the last",
           "[reader_fuzz][serialization]") {
   const fs::path dir =
       fs::temp_directory_path() /
-      ("lobole-emptied-" + std::to_string(::getpid()) + ".dsgn");
+      ("lobole-emptied-" + std::to_string(::getpid()) + ".lob");
   fs::remove_all(dir);
   Document doc;
   doc.AddFeature(
@@ -290,7 +290,7 @@ TEST_CASE("Reader cases: a part index past the feature limit is refused",
           "[reader_fuzz][serialization]") {
   const fs::path dir =
       fs::temp_directory_path() /
-      ("lobole-feature-limit-" + std::to_string(::getpid()) + ".dsgn");
+      ("lobole-feature-limit-" + std::to_string(::getpid()) + ".lob");
   fs::remove_all(dir);
   Document doc;
   doc.AddFeature(

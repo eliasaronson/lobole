@@ -409,7 +409,7 @@ TEST_CASE("a hole's point and thread depth are stated, refused and saved",
   CHECK(stated->GetBodies()[0].holes.at(0).pointAngleDeg == 140.0);
   CHECK(stated->GetBodies()[0].threads.at(0).length == 10.0);
   const std::string path =
-      (std::filesystem::temp_directory_path() / "hole-point-depth.dsgn")
+      (std::filesystem::temp_directory_path() / "hole-point-depth.lob")
           .string();
   REQUIRE(testio::Save(*stated, path));
   const auto loaded = testio::Load(path);

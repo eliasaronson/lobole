@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/HistoryPanel.h"
+#include "core/io/Serialization.h" // kProjectExtension
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 
@@ -144,9 +145,14 @@ bool MergeBranch(AppState& state, const std::string& branch,
 }
 
 bool CanVersionProject(const AppState& state) {
-  // `.dsgn` is always the directory format (Serialization: IsDirFormatPath),
-  // and only a directory can be a repository.
-  return !state.projectPath.empty() && state.projectPath.ends_with(".dsgn") &&
+  // `.lob` is always the directory format (Serialization: IsDirFormatPath),
+  // and only a directory can be a repository. A `.dsgn` is one too, but it
+  // is only read: its first save makes the `.lob` that carries its history
+  // on (docs/versioning/README.md#the-dsgn-extension), and a restore or a
+  // named version here would write into the `.dsgn`.
+  return !state.projectPath.empty() &&
+         std::string_view(state.projectPath)
+             .ends_with(DocumentIO::kProjectExtension) &&
          GitVault::Available();
 }
 
@@ -164,8 +170,9 @@ bool NameCurrentVersion(AppState& state, const std::string& name,
   if (!CanVersionProject(state)) {
     if (error)
       *error = GitVault::Available()
-                   ? "versions need a .dsgn project folder; this project is "
-                     "a single file (File > Save Project As)"
+                   ? "versions need a .lob project folder; this project is "
+                     "a single file, or a .dsgn not yet saved as .lob "
+                     "(File > Save Project As)"
                    : "versions need git on PATH";
     return false;
   }
@@ -311,9 +318,16 @@ void DrawHistoryPanel(AppState& state) {
   }
   if (!ProjectHasHistory(state)) {
     ImGui::TextWrapped(
-        "This project is not stored as a .dsgn project folder, so it has no "
-        "version history. Save it as one (File > Save Project As) to start "
-        "one.");
+        "%s",
+        std::string_view(state.projectPath)
+                .ends_with(DocumentIO::kLegacyProjectExtension)
+            ? "This project is a .dsgn, the extension before the rename, "
+              "which is read but no longer written. Saving it writes the "
+              ".lob beside it, its history carried over, and the history is "
+              "shown there."
+            : "This project is not stored as a .lob project folder, so it "
+              "has no version history. Save it as one (File > Save Project "
+              "As) to start one.");
     ImGui::End();
     return;
   }

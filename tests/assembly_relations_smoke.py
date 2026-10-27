@@ -140,7 +140,7 @@ def main():
                f"rack slid 6 mm: {mate(d, s)['offset']}")
 
         # It survives a save and a load.
-        path = os.path.join(tmp, "train.dsgn")
+        path = os.path.join(tmp, "train.lob")
         d.call("save_project", path=path)
         d.call("open_project", path=path)
         d.call("set_active_part", name="train")

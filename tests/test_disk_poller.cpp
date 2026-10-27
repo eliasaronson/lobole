@@ -73,7 +73,7 @@ TEST_CASE("A disk poll answer is applied while it still describes the "
           "project",
           "[disk]") {
   ui::AppState state;
-  OpenAt(state, "/projects/a.dsgn");
+  OpenAt(state, "/projects/a.lob");
   ui::DiskPoller poller;
   std::promise<void> release;
   StartHeld(poller, DiskQuestion(state), release.get_future().share());
@@ -92,11 +92,11 @@ TEST_CASE("A disk poll answer that arrives after another project opened is "
           "discarded",
           "[disk]") {
   ui::AppState state;
-  OpenAt(state, "/projects/a.dsgn");
+  OpenAt(state, "/projects/a.lob");
   ui::DiskPoller poller;
   std::promise<void> release;
   StartHeld(poller, DiskQuestion(state), release.get_future().share());
-  OpenAt(state, "/projects/b.dsgn"); // while the answer is held
+  OpenAt(state, "/projects/b.lob"); // while the answer is held
   release.set_value();
   CHECK_FALSE(ui::ApplyDiskPollAnswer(state, Await(poller)));
   CHECK_FALSE(state.diskChanged);
@@ -111,7 +111,7 @@ TEST_CASE("A disk poll answer that arrives after the project was saved is "
   // after the poll started, so the poll compared against a stamp that is no
   // longer ours — and the change it saw is the save.
   ui::AppState state;
-  OpenAt(state, "/projects/a.dsgn");
+  OpenAt(state, "/projects/a.lob");
   ui::DiskPoller poller;
   std::promise<void> release;
   StartHeld(poller, DiskQuestion(state), release.get_future().share());
@@ -125,7 +125,7 @@ TEST_CASE("A panel refresh after an action discards the poll's older log "
           "but not its disk answer",
           "[disk]") {
   ui::AppState state;
-  OpenAt(state, "/projects/a.dsgn");
+  OpenAt(state, "/projects/a.lob");
   state.historyPath = state.projectPath;
   state.historyStamp = 10.0;
   state.historyLog.resize(1);
@@ -155,7 +155,7 @@ TEST_CASE("A panel refresh after an action discards the poll's older log "
 
 TEST_CASE("Only one disk poll runs at a time", "[disk]") {
   ui::AppState state;
-  OpenAt(state, "/projects/a.dsgn");
+  OpenAt(state, "/projects/a.lob");
   ui::DiskPoller poller;
   std::promise<void> release;
   StartHeld(poller, DiskQuestion(state), release.get_future().share());
@@ -194,7 +194,7 @@ void StartHeldScan(ui::DiskPoller& poller, const DiskPollRequest& request,
 TEST_CASE("A conflicts scan off the frame lands while nothing moved",
           "[disk]") {
   ui::AppState state;
-  OpenAt(state, "/projects/a.dsgn");
+  OpenAt(state, "/projects/a.lob");
   ui::DiskPoller poller;
   std::promise<void> release;
   StartHeldScan(poller, ConflictQuestion(state), release.get_future().share());
@@ -210,7 +210,7 @@ TEST_CASE("A conflicts scan is discarded when a resolution or a "
           "synchronous scan came after it",
           "[disk]") {
   ui::AppState state;
-  OpenAt(state, "/projects/a.dsgn");
+  OpenAt(state, "/projects/a.lob");
 
   SECTION("invalidated while it ran (a resolution, a save)") {
     ui::DiskPoller poller;
@@ -238,7 +238,7 @@ TEST_CASE("A conflicts scan is discarded when a resolution or a "
     std::promise<void> release;
     StartHeldScan(poller, ConflictQuestion(state),
                   release.get_future().share());
-    OpenAt(state, "/projects/b.dsgn");
+    OpenAt(state, "/projects/b.lob");
     release.set_value();
     CHECK_FALSE(ui::ApplyDiskPollAnswer(state, Await(poller)));
     CHECK(state.conflicts.Empty());

@@ -315,7 +315,7 @@ def main():
         except RuntimeError as e:
             expect("non-empty" in str(e), f"note refusal: {e}")
 
-        proj = os.path.join(tmp, "gearbox.dsgn")
+        proj = os.path.join(tmp, "gearbox.lob")
         d.call("save_project", path=proj)
 
         # On disk: project.json v2 with a typed "drawing" document + its dir.

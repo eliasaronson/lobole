@@ -18,7 +18,7 @@ namespace RecentProjects {
 namespace {
 
 // Same path for the same project however it was spelled — otherwise
-// "./bracket.dsgn" and an absolute path are two entries for one file, and
+// "./bracket.lob" and an absolute path are two entries for one file, and
 // the list fills up with the same project.
 std::string Canonical(const std::string& path) {
   std::error_code ec;

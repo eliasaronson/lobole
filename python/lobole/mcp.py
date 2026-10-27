@@ -1448,10 +1448,13 @@ def open_project(path: str) -> dict:
     return _call("open_project", path=path)
 
 
-@mcp.tool(description="Save the document. A .dsgn path (the default "
+@mcp.tool(description="Save the document. A .lob path (the default "
           "format) is a project DIRECTORY, git-backed: every save commits "
           "with `message`. A .json path is the single-file interchange "
-          "form. A save back over a project whose open_project reported a "
+          "form. A .dsgn (the extension before the rename) is read, never "
+          "written: saving the project opened from one writes the .lob "
+          "beside it with its history, and the reply's `path` says where. "
+          "A save back over a project whose open_project reported a "
           "drop that is not derived is refused, naming it; "
           "overwrite_lossy: true saves anyway and the reply's `warning` "
           "says what was lost. A save to another path is never refused "
@@ -1725,7 +1728,7 @@ _reference("import_step", "Import a STEP, IGES, STL, OBJ or BREP file's "
 
 
 _reference("checkpoint_create", "Save the WHOLE project and name this state a "
-          "version (save_project to a .dsgn project first). Name a version "
+          "version (save_project to a .lob project first). Name a version "
           "before risky multi-step edits; restoring beats reconstructing.")
 
 
@@ -1738,7 +1741,7 @@ _reference("checkpoint_restore", "Put the WHOLE project back to a named version 
           "stays in history_log.")
 
 
-_reference("history_log", "History of a directory (.dsgn) project: every save "
+_reference("history_log", "History of a directory (.lob) project: every save "
           "is a version, named ones are tagged. Returns {log: [{hash, "
           "subject, unix, named}]}, newest first.")
 
