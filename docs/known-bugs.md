@@ -29,6 +29,39 @@ the heading if it is not here yet.
   re-run with the pose nudged by ±ε and treat a volume that vanishes as
   touching.
 
+### `get_state` and the digest report a STEP's box several times its size
+
+- **Symptom:** the SO-101 wrist bracket (`STEP/SO101/Wrist_Roll_Pitch_SO101.step`
+  in TheRobotStudio/SO-ARM100), imported with `keep_origin`, is 62.3 x 35.7 x
+  77.8 mm by `mass_properties`; `get_state`'s `bodies[].bbox_*` and the
+  `digest` every mutating reply carries say 164 x 345 x 156. A script reading
+  either for the part's size or a placement is off by a factor of five; the
+  help says the bound "can read ~60% over".
+- **Cause:** both are `CADShape::GetBoundingBox` without `tight`, which
+  bounds a B-spline face by its control points; an Autodesk export's faces
+  are B-splines.
+- **Where:** `BodyDigestJson` in `src/remote/RemoteHelpers.h`, the body rows
+  of `get_state` (`src/remote/RemoteDispatch.cpp`).
+- **Likely fix:** report the tight box (memoized per shape, so paid once per
+  regeneration), or name the field what it is (`bound_*`) and point at
+  `mass_properties`. The camera fit had the same cause and takes the tight
+  box now.
+
+### `check_print` passes a long bridge on a raw STL import
+
+- **Symptom:** the SO-101 bracket exported as STL and imported again, end
+  face down: `check_print`'s `bridges` passes, its worst span 7.78 mm. The
+  same body after a `Refine` fails with a 15.38 mm span, as the B-Rep it was
+  exported from does.
+- **Cause:** an STL arrives as one planar face per triangle, and the item
+  takes each downward face's inscribed diameter on its own: a ceiling of
+  twenty triangles is twenty short spans.
+- **Where:** the bridges item in `src/core/PrintCheck.cpp`
+  ([checking a print](tolerances/README.md#checking-a-print)).
+- **Likely fix:** merge coplanar neighbours first (`ShapeUpgrade_UnifySameDomain`,
+  what Refine runs) on the faces the item considers, or measure the span of
+  each connected set of ceiling faces.
+
 ## Modeling
 
 ### Two Shells of the clamp's screw are refused on every draw
@@ -124,6 +157,48 @@ the heading if it is not here yet.
 - **Where:** `CADShape::GetBoundingBox(tight)` in `src/cad/CADKernel.cpp`.
 - **Likely fix:** for a face on an elementary surface, bound the face's own
   boundary and its interior extrema, or tighten against a fine mesh.
+
+### Offset Face on an imported bracket splits it into pieces, after 40 s
+
+- **Symptom:** on the SO-101 wrist bracket (`Wrist_Roll_Pitch_SO101.step`,
+  291 faces, imported with `keep_origin`) every planar Offset Face tried is
+  refused "… onto its plane moved 0.3 mm leaves 6 separate pieces of the
+  body" -- `1/b1/face194` by 0.3, `1/b1/face192` by ±0.5, the inner plate
+  faces 192 and 197 by 1.11 -- and each refusal holds the main thread 35 to
+  45 s (the frame watchdog's "main thread stalled"): the edit is built on the
+  copy `add_feature` checks it on, then again.
+- **Cause:** a face with no tangent neighbour goes through Replace Face's
+  cells (`directedit::ReplaceOnto`): `BOPAlgo_MakerVolume` over EVERY face of
+  the body plus the extended neighbours, about 20 s here, and the probes
+  from the untouched faces land in several of the cells it makes.
+- **Where:** `ReplaceOnto` in `src/core/features/ReplaceFaceFeature.cpp`,
+  called from `OffsetFaces` (`src/core/features/OffsetFaceFeature.cpp`).
+- **Likely fix:** build the cells from the replaced face's neighbourhood only
+  (its neighbours and the faces they reach within the moved distance) and
+  splice the result back, which is both the speed and the stray cells; and
+  build a refused edit once, not twice.
+
+### A sketch's projection of an imported edge follows its index, not the edge
+
+- **Symptom:** an adapter plate whose Hole sketch projects the four hole
+  edges of an STS3215 servo horn (`STEP/SO100/STS3215_03a.step`;
+  `external` `1/b1/face145;U1`, `;U2`, `;U5`, `;U6`). Point the Import at a
+  revised file (the same servo with its horn holes turned 20 degrees,
+  written by `export_step`): `;U2` fails "no longer exists", while `;U1`
+  resolves to an unrelated 0.87 mm line on a 0.5 mm² face across the servo
+  and the sketch takes it as one of its entities without a word. Only the
+  one failure is reported.
+- **Cause:** an import's names are positional (`<id>/b<k>/face<i>`, and
+  edges by their place in the face), and a changed file renumbers its faces
+  -- `export_step` of the edited servo put the horn's top face first. Direct
+  edits fingerprint the faces they pick for exactly this
+  ([direct edit](modeling/README.md#direct-edit), rule 5); a sketch's
+  `external` refs do not.
+- **Where:** the external-geometry resolution of `SketchFeature`
+  (`src/core/features/SketchFeature.cpp`), against `directedit::FaceFingerprint`.
+- **Likely fix:** fingerprint a projected import edge as the direct edits do
+  a face (curve kind, length, midpoint), and fail "re-pick it" when the
+  edge under the name is no longer that one.
 
 ## Scripting
 
