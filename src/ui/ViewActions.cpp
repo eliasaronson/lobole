@@ -306,7 +306,8 @@ glm::vec4 LargestFreeRect(const glm::vec4& view,
   return best;
 }
 
-bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax) {
+bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax,
+                        bool tight) {
   glm::dvec3 min(DBL_MAX), max(-DBL_MAX);
   bool any = false;
   if (state.assembly) {
@@ -327,7 +328,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax) {
           inst.world;
       for (const auto& body : part->GetBodies()) {
         glm::dvec3 bmin, bmax;
-        body.shape.GetBoundingBox(bmin, bmax);
+        body.shape.GetBoundingBox(bmin, bmax, tight);
         for (int c = 0; c < 8; c++) { // transform all 8 corners
           const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
                                   (c & 2) ? bmax.y : bmin.y,
@@ -342,7 +343,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax) {
   } else if (state.document) {
     for (const auto& body : state.document->GetBodies()) {
       glm::dvec3 bmin, bmax;
-      body.shape.GetBoundingBox(bmin, bmax);
+      body.shape.GetBoundingBox(bmin, bmax, tight);
       min = glm::min(min, bmin);
       max = glm::max(max, bmax);
       any = true;
@@ -681,7 +682,7 @@ void FitCameraToDocument(AppState& state, float forAspect) {
   if (!state.camera)
     return;
   glm::vec3 min, max;
-  if (!VisibleSceneBounds(state, min, max))
+  if (!VisibleSceneBounds(state, min, max, /*tight=*/true))
     return;
   FitCameraToBox(state, min, max, forAspect);
 }

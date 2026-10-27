@@ -39,8 +39,12 @@ namespace ui {
 // bodies, or an assembly's visible (unsuppressed) occurrences in place.
 // False when there is nothing to bound. Camera fit and the section plane
 // both need it — a view feature positioned in absolute coordinates is wrong
-// for any model that is not sitting on the origin.
-bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max);
+// for any model that is not sitting on the origin. `tight` asks for the
+// shapes' exact boxes, which the camera fit takes: the conservative one
+// bounds a B-spline face by its control points, and a downloaded STEP's
+// came out five times its size, the part a speck in the framed view.
+bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max,
+                        bool tight = false);
 
 // Section views (I3). `basePlane` is 0=XY, 1=XZ, 2=YZ; `offset` is the signed
 // distance along that plane's normal; `reverse` keeps the other side. ONE

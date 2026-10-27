@@ -85,6 +85,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <BRepBuilderAPI_NurbsConvert.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepTools.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_Trsf.hxx>
+
 #include <atomic>
 #include <cfloat>
 #include <chrono>
@@ -279,6 +286,55 @@ TEST_CASE("scene bounds cover an off-origin part", "[actions][camera]") {
   CHECK_THAT(hi.x, WithinAbs(15.0f, 1e-4));
   CHECK_THAT(hi.y, WithinAbs(50.0f, 1e-4));
   CHECK_THAT(hi.z, WithinAbs(-2.0f, 1e-4));
+}
+
+// A downloaded STEP's faces are B-splines, and the conservative box bounds
+// one by its control points: the SO-101 wrist bracket (62 x 36 x 78 mm) read
+// 164 x 345 x 156, and the fit framed a speck. A NURBS cylinder turned 45
+// degrees about its axis puts its arcs' corner poles out at R*sqrt(2).
+TEST_CASE("the camera fit frames a B-spline part by its tight box",
+          "[actions][camera]") {
+  namespace fs = std::filesystem;
+  gp_Trsf turn;
+  turn.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), M_PI / 4.0);
+  const TopoDS_Shape cylinder =
+      BRepBuilderAPI_Transform(BRepPrimAPI_MakeCylinder(10.0, 10.0).Shape(),
+                               turn, /*copy=*/true)
+          .Shape();
+  const TopoDS_Shape nurbs = BRepBuilderAPI_NurbsConvert(cylinder).Shape();
+  // The same cylinder as a file, analytic or as B-splines; framed alike.
+  const auto framed = [](const TopoDS_Shape& shape, const char* tag,
+                         glm::vec3& lo, glm::vec3& hi, glm::vec3& clo,
+                         glm::vec3& chi) {
+    const fs::path path =
+        fs::temp_directory_path() / ("designer_fit_" + std::string(tag) + "_" +
+                                     std::to_string(::getpid()) + ".brep");
+    REQUIRE(BRepTools::Write(shape, path.string().c_str()));
+    ui::AppState state = MakeHeadlessState();
+    Camera camera;
+    state.camera = &camera;
+    state.viewportPos = glm::vec2(0.0f, 0.0f);
+    state.viewportSize = glm::vec2(1000.0f, 700.0f);
+    camera.SetAspectRatio(1000.0f / 700.0f);
+    auto imp = std::make_unique<ImportFeature>(tag, path.string());
+    imp->keepOrigin = true;
+    state.document->AddFeature(std::move(imp));
+    state.document->Regenerate();
+    fs::remove(path);
+    REQUIRE(state.document->GetBodies().size() == 1);
+    REQUIRE(ui::VisibleSceneBounds(state, lo, hi, /*tight=*/true));
+    REQUIRE(ui::VisibleSceneBounds(state, clo, chi));
+    ui::FitCameraToDocument(state, 0.0f);
+    return camera.GetDistance();
+  };
+  glm::vec3 lo, hi, clo, chi, plo, phi, pclo, pchi;
+  const float nurbsDistance = framed(nurbs, "nurbs", lo, hi, clo, chi);
+  const float plainDistance = framed(cylinder, "plain", plo, phi, pclo, pchi);
+  CHECK_THAT(lo.x, WithinAbs(-10.0f, 0.01));
+  CHECK_THAT(hi.y, WithinAbs(10.0f, 0.01));
+  // The premise: the conservative box is the inflated one.
+  CHECK(chi.x > 12.0f);
+  CHECK_THAT(nurbsDistance, WithinAbs(plainDistance, 0.01f * plainDistance));
 }
 
 TEST_CASE("an empty document has no bounds to frame", "[actions][camera]") {
