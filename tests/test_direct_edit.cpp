@@ -887,6 +887,21 @@ CADShape DrilledBar(int holes) {
   return CADShape(cut.Shape());
 }
 
+// A prism 20 high on an n-sided polygon of radius 30, the way a refined STL
+// arrives: planar faces built from bare wires, so none carries p-curves (each
+// is projected onto its plane when asked for), and two ends of n edges each.
+CADShape FacetedPrism(int n) {
+  BRepBuilderAPI_MakePolygon ring;
+  for (int i = 0; i < n; i++) {
+    const double a = 2.0 * kPi * i / n;
+    ring.Add(gp_Pnt(30.0 * std::cos(a), 30.0 * std::sin(a), 0.0));
+  }
+  ring.Close();
+  const TopoDS_Face base =
+      BRepBuilderAPI_MakeFace(ring.Wire(), Standard_True).Face();
+  return CADShape(BRepPrimAPI_MakePrism(base, gp_Vec(0, 0, 20)).Shape());
+}
+
 } // namespace
 
 // docs/modeling/README.md#offset-face: a planar face is moved by building
@@ -1027,6 +1042,42 @@ TEST_CASE("A document takes an evaluation its copy made instead of "
   CHECK(dynamic_cast<OffsetFaceFeature*>(Last(doc))->fingerprints.size() == 1);
   REQUIRE(doc.Regenerate());
   CHECK(doc.LastRegenStats().executed == 0);
+}
+
+// Before an edit's builder runs, its neighbours are checked for freeform
+// faces (directedit::FreeformNeighbour). That described every neighbour in
+// full, across every shared edge, and on a faceted import -- whose planar
+// facets carry no p-curves, so each description projected every edge --
+// the fan grill's 916-face Delete Face held the main thread a minute before
+// the heal began. Only the surface's type is needed. A cost check: on this
+// prism 51 s of CPU before, 0.003 s after on a P-core and 0.013 s on a
+// low-power one.
+TEST_CASE("The freeform-neighbour check costs a look at each neighbour's "
+          "surface type",
+          "[direct_edit]") {
+  Body body;
+  body.shape = FacetedPrism(2000);
+  topo::NamePrimitiveElements(body.shape, "1", body.elementMap);
+  REQUIRE(body.shape.FaceCount() == 2002);
+  // Every side facet: each one's neighbours are the two ends, 2000 edges
+  // apiece, and the facets beside it.
+  directedit::Picked picked;
+  picked.body = &body;
+  for (const auto& [i, n] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, i);
+    if (info && std::abs(info->normal.z) < 0.5) {
+      picked.indices.push_back(i);
+      picked.names.push_back(n);
+    }
+  }
+  REQUIRE(picked.indices.size() == 2000);
+  const std::clock_t t0 = std::clock();
+  const std::string why = directedit::FreeformNeighbour(picked, "Delete Face",
+                                                        "heals by extending");
+  const double s = double(std::clock() - t0) / CLOCKS_PER_SEC;
+  CHECK(why.empty());
+  INFO("checked in " << s << " s of CPU");
+  CHECK(s < 0.5);
 }
 
 // A neighbour is grown only as far as the target is from the face; a

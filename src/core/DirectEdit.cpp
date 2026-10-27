@@ -8,9 +8,12 @@
 #include "core/ElementOrigin.h"
 #include "core/Measure.h"
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_History.hxx>
+#include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Type.hxx>
 #include <TopExp.hxx>
@@ -25,6 +28,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <set>
 
 #if defined(__linux__)
@@ -303,8 +307,31 @@ void RestoreUntouched(const Body& before, const CADShape& result,
                       ElementMap& map, uint64_t tag,
                       const std::vector<std::string>& picked) {
   const std::string step = ";M" + std::to_string(tag);
-  Body after;
-  after.shape = result;
+  // Faces by index, once: Measure::DescribeFaceAt walks the shape to its
+  // index and describes far more than this compares, and a heal on a
+  // faceted import hands back hundreds of faces to look at.
+  const auto facesOf = [](const TopoDS_Shape& shape) {
+    std::vector<TopoDS_Face> out;
+    for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
+      out.push_back(TopoDS::Face(ex.Current()));
+    return out;
+  };
+  const std::vector<TopoDS_Face> facesBefore = facesOf(before.shape.GetShape());
+  const std::vector<TopoDS_Face> facesAfter = facesOf(result.GetShape());
+  struct Look {
+    GeomAbs_SurfaceType type;
+    double area;
+    gp_Pnt centroid;
+  };
+  const auto look = [](const std::vector<TopoDS_Face>& faces,
+                       int i) -> std::optional<Look> {
+    if (i < 0 || i >= static_cast<int>(faces.size()))
+      return std::nullopt;
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(faces[i], props);
+    return Look{BRepAdaptor_Surface(faces[i], Standard_False).GetType(),
+                props.Mass(), props.CentreOfMass()};
+  };
   glm::dvec3 lo, hi;
   before.shape.GetBoundingBox(lo, hi);
   const double scale = std::max(1.0, glm::length(hi - lo));
@@ -322,11 +349,11 @@ void RestoreUntouched(const Body& before, const CADShape& result,
     const auto at = before.elementMap.Resolve(was);
     if (!at)
       continue;
-    const auto a = Measure::DescribeFaceAt(before, *at);
-    const auto b = Measure::DescribeFaceAt(after, idx);
-    if (!a || !b || a->kind != b->kind ||
+    const auto a = look(facesBefore, *at);
+    const auto b = look(facesAfter, idx);
+    if (!a || !b || a->type != b->type ||
         std::abs(a->area - b->area) > 1e-9 * std::max(1.0, a->area) ||
-        glm::length(a->centroid - b->centroid) > 1e-9 * scale)
+        a->centroid.Distance(b->centroid) > 1e-9 * scale)
       continue;
     taken.erase(name);
     name = was;
@@ -470,6 +497,12 @@ std::string FreeformNeighbour(const Picked& picked, const std::string& op,
   TopTools_IndexedDataMapOfShapeListOfShape parents;
   TopExp::MapShapesAndAncestors(body.shape.GetShape(), TopAbs_EDGE, TopAbs_FACE,
                                 parents);
+  const std::set<int> mine(picked.indices.begin(), picked.indices.end());
+  // Each neighbour once, and only its surface's type: a full description
+  // (Measure::DescribeFaceAt: UV bounds over every edge, a projection, the
+  // area) of every neighbour across every shared edge was 60 s on a faceted
+  // import's 916 faces, before the builder ran.
+  std::set<int> seen;
   for (size_t k = 0; k < picked.indices.size(); k++) {
     for (TopExp_Explorer ex(all(picked.indices[k] + 1), TopAbs_EDGE); ex.More();
          ex.Next()) {
@@ -478,19 +511,26 @@ std::string FreeformNeighbour(const Picked& picked, const std::string& op,
         continue;
       for (const TopoDS_Shape& g : parents(at)) {
         const int n = all.FindIndex(g) - 1;
-        if (n < 0 || std::find(picked.indices.begin(), picked.indices.end(),
-                               n) != picked.indices.end())
+        if (n < 0 || mine.count(n) || !seen.insert(n).second)
           continue;
-        const auto info = Measure::DescribeFaceAt(body, n);
-        if (info && info->kind == "other") {
-          const std::string* name = body.elementMap.NameOf(n);
-          return op + " " + does + " the faces around " +
-                 NameList({picked.names[k]}) + ", and " +
-                 DescribeFace(body, n, name ? *name : "face") +
-                 " beside it is freeform (a thread's flank, a spline), "
-                 "which it does not extend; pick it with them, or edit the "
-                 "feature that made them";
+        switch (
+            BRepAdaptor_Surface(TopoDS::Face(g), Standard_False).GetType()) {
+        case GeomAbs_Plane:
+        case GeomAbs_Cylinder:
+        case GeomAbs_Cone:
+        case GeomAbs_Sphere:
+        case GeomAbs_Torus:
+          continue; // what Measure calls a kind; anything else is "other"
+        default:
+          break;
         }
+        const std::string* name = body.elementMap.NameOf(n);
+        return op + " " + does + " the faces around " +
+               NameList({picked.names[k]}) + ", and " +
+               DescribeFace(body, n, name ? *name : "face") +
+               " beside it is freeform (a thread's flank, a spline), "
+               "which it does not extend; pick it with them, or edit the "
+               "feature that made them";
       }
     }
   }
