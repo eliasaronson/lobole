@@ -67,6 +67,10 @@ them:
 - **Other processes:** lathe turning (4th-axis milling of a turned part
   exists, [rotary](cam/rotary.md)); laser, plasma and waterjet posts (the
   posts are milling dialects); nesting sheet blanks.
+- **A print-time estimate.** `mass_properties` weighs a print (`printed`)
+  and `export_print_job` writes the job, but nothing says how long it
+  takes: a generator that has to report it slices the job with the Bambu
+  CLI itself and reads `result.json`.
 - **Procurement data:** a material has a grade (alloy and temper), density
   and FEM constants but no cost, stock form or finish, and a BOM row has a
   standard and a designation but no price, supplier, part number or lead
@@ -94,6 +98,18 @@ them:
 - **Relations with two inputs:** a relation reads one mate; a delivery valve
   whose timing follows both the camshaft and the rack cannot be expressed.
 - **Springs** that stretch between two occurrences and follow the motion.
+- **A follower driven by contact.** A cam relation takes a lift table, so a
+  lever that pushes a rod's crank through a sliding contact needs that table
+  computed outside the app from the two shapes, and is only as right as the
+  outside model of them. A relation solved from the touching faces (the
+  follower turns until it touches, at every pose) would keep it right when
+  either part changes.
+- **The space a moving part sweeps, as geometry.** A motion study says
+  whether two parts clash at each sample; designing a part to clear a
+  housing over a whole stroke needs the region the housing leaves free in
+  the moving part's own frame (the intersection over the stroke), as a solid
+  or a section to sketch inside. A generator today samples the poses and
+  intersects the polygons itself.
 - **Undo for project-level edits.** Units, tube rules, the rollback marker,
   part renames and the folder verbs change the document with no undo step,
   so none of them can be undone, in the GUI or over RPC. A batch
@@ -105,6 +121,13 @@ them:
 
 - **FEM:** thermal, buckling and nonlinear studies; modal analysis without
   supports (free-free); VTU export of results.
+- **A support that bears like a pin in a bore.** The only support is
+  `fixed`: clamping a hub's bore face puts the study's peak stress, and the
+  `factor_of_safety` read from it, on the edge where the clamp ends -- a
+  printed lever on two pins reads a factor of 0.1 where its real stresses
+  are a fifth of yield. A pin support (compression on the loaded half, free
+  to turn), or at least a flag on a peak that sits on a support's boundary,
+  would keep the headline number honest.
 - **Tolerances:** an inferred stack-up chain (`stack_up` sums a chain the
   caller states), and general-tolerance tables (ISO 2768).
 - **Beam elements** for tube frames: `check_frame` checks the member graph,
