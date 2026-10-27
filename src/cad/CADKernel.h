@@ -419,6 +419,10 @@ public:
     std::string name; // XCAF label name ("" when unnamed)
     bool hasColor = false;
     glm::vec3 color{0.0f}; // XCAF surface/generic color when hasColor
+    // Its volume (mm³), when the reader's caller measured it already: the
+    // import job's worker does, so the feature does not measure a
+    // 100k-face mesh again on the main thread. A rigid placement keeps it.
+    std::optional<double> volume;
   };
   struct ImportedInstance {
     size_t product = 0;        // index into ImportedModel::products
@@ -453,6 +457,8 @@ public:
     enum class Phase {
       ReadingFile,  // OCC offers no hook here; fraction is always < 0
       Transferring, // XCAF transfer, with a real fraction
+      Building,     // a mesh's triangles made faces, with a real fraction
+      Sewing,       // the faces sewn into a shell, with a real fraction
     };
     virtual ~ImportProgress() = default;
     // Which phase, and how far into it (fraction < 0 = indeterminate).
@@ -477,7 +483,9 @@ public:
   // named as the file names it, coloured by its `usemtl` material, and its
   // triangles become planar faces sewn and promoted to a solid as in LoadSTL.
   // Read as millimetres; the caller scales by the unit it was drawn in.
-  bool LoadOBJStructured(const std::string& filename, ImportedModel& out);
+  // `progress` reports Building and Sewing and stops either, as for STEP.
+  bool LoadOBJStructured(const std::string& filename, ImportedModel& out,
+                         ImportProgress* progress = nullptr);
   // STEP export as another CAD system wants it
   // (docs/interchange/README.md#exporting-step): named, coloured products,
   // placed by reference, nested the way the assembly is. A part occurring
@@ -533,7 +541,11 @@ public:
   bool SaveSTEP(const std::string& filename,
                 const std::vector<CADShape>& shapes);
 
-  bool LoadSTL(const std::string& filename, CADShape& shape);
+  // `progress` reports ReadingFile, Building and Sewing, and stops each (the
+  // first two only on OCC 7.7 and later, whose reader takes a range); a
+  // cancelled read returns false.
+  bool LoadSTL(const std::string& filename, CADShape& shape,
+               ImportProgress* progress = nullptr);
   // Binary STL, re-meshed at `deflection` (smaller = finer, mm) and
   // `angularDeflectionRad`. Export quality is the caller's choice, not
   // whatever the viewport tessellated, and both bounds are passed: OCC's

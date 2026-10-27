@@ -343,7 +343,7 @@ PARKED instead (`RemoteServer::Parked`, `remote::Parking` in
 `RemoteParking.h`): the work goes to background jobs, `PollParked` asks it
 once a tick, after `ReapBackgroundJobs`, whether it is done, and the answer
 -- or a refusal, or the request put back at the head of the queue to run its
-handler from the caches -- goes out then. Four domains park: CAM, on its
+handler from the caches -- goes out then. Five domains park: CAM, on its
 toolpath passes ([cam/README.md](cam/README.md#requests-that-wait));
 drawings, on their views' projection, except on `--headless`, where the
 synchronous handler holds no frame
@@ -353,7 +353,9 @@ synchronous handler holds no frame
 `check_requirements` with something to measure, on the check's job
 ([requirements](requirements/README.md#checking-is-a-job)), and a
 synchronous `design_sweep`, on its job
-([design sweep](requirements/README.md#design-sweep)). The pump sets
+([design sweep](requirements/README.md#design-sweep)); and `import_step`,
+on the `import` job, in every mode ([long
+operations](ui/long-operations.md#import)). The pump sets
 `AppState::rpcConnection` while it asks, so a job a parked request starts
 belongs to its client.
 A parked request holds only its OWN connection's later requests, so a
@@ -445,6 +447,29 @@ by the same name drift apart without any test noticing:
   (`occ_patches`), the kernel faults caught (`kernel_faults`), the build's
   optional `features`, and `binary_replaced`
   (Linux: the executable was rebuilt under a running instance).
+
+### Stopping
+
+The windowed app dies on `SIGTERM`/`SIGINT` as it always did (the crash
+handler deletes the session marker first: a stop is not a crash).
+`--headless` and `--offscreen` stop cleanly, and within a bound
+(`src/app/StopSignal.{h,cpp}`). The handler sets a flag the loop reads once an
+iteration; on its own that never ended a main thread inside one long call
+(an `add_feature` that builds a 100k-face mesh, a boolean in an RPC), and
+the shutdown after the loop joins every background job, which a worker in an
+OpenCASCADE call with no interruption point holds -- an import needed
+`kill -9`. So the first signal also starts a clock on a thread of its own:
+if the process is still alive `stopsignal::kStopGraceSeconds` (3 s) later,
+it logs `[stop] … exiting without waiting (the main thread is in <label>)`
+with the watchdog's label, withdraws the instance's registry entry, ends
+the crash session and `_exit`s with 128 + the signal. A second signal does
+the same at once. The handlers are installed before `--file` is acted on.
+A clean stop exits 0; what a forced one leaves is what any kill leaves: the
+autosave of a dirty document, which the next start offers.
+`tests/stop_signal_smoke.py` stops an import job that can be cancelled
+(0, at once), one whose worker cannot be stopped, a main thread inside an
+Import built by `add_feature`, a `--file` import (each 143, after the grace)
+and a double signal (143, at once).
 
 ## Crashes and stalls
 

@@ -1724,7 +1724,12 @@ _reference("import_step", "Import a STEP, IGES, STL, OBJ or BREP file's "
           "lands on the origin. up_axis (default auto: read from the file's "
           "header, a SolidWorks file is +y) says which axis of the FILE is "
           "up, and turn_deg turns it about world Z after; the reply's "
-          "`up_axis` says what was applied and why.")
+          "`up_axis` says what was applied and why. An STL or OBJ is counted "
+          "first: the reply's `mesh` {triangles, expected_s, limit} says what "
+          "it was expected to cost, and past `limit` the call is refused "
+          "naming the time unless allow_large_mesh=True. The read runs as "
+          "the `import` background job: cancel_background_job "
+          "{kind: \"import\"} stops it.")
 
 
 _reference("checkpoint_create", "Save the WHOLE project and name this state a "

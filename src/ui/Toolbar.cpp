@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <filesystem>
 #include <initializer_list>
 #include <string>
 
@@ -296,19 +297,75 @@ void DrawCamRefusalModal(AppState& state) {
   ImGui::EndPopup();
 }
 
+namespace {
+
+// File > Import of a mesh past the triangle limit: what it will cost, and
+// whether to go on (AppState::importAsk).
+void DrawImportAsk(AppState& state) {
+  if (state.importAsk.path.empty())
+    return;
+  static constexpr const char* kAsk = "Import a large mesh?###import_ask";
+  if (!ImGui::IsPopupOpen(kAsk))
+    ImGui::OpenPopup(kAsk);
+  ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal(kAsk, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+  const AppState::ImportAsk ask = state.importAsk;
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 400.0f);
+  ImGui::Text("%s is a mesh of %s.",
+              std::filesystem::path(ask.path).filename().string().c_str(),
+              interchange::DescribeTriangles(ask.triangles).c_str());
+  ImGui::TextWrapped(
+      "Every triangle becomes a face and the faces are sewn: it is expected "
+      "to take %s, against %s for %s. It runs in the background and can be "
+      "cancelled; a mesh decimated below that imports in less.",
+      interchange::DescribeSeconds(ask.expectedSeconds).c_str(),
+      interchange::DescribeSeconds(interchange::kPatientImportSeconds).c_str(),
+      interchange::DescribeTriangles(interchange::MeshTriangleLimit()).c_str());
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  bool close = false;
+  if (ImGui::Button("Import anyway###import_ask_go", ImVec2(140, 0))) {
+    ImportRequest request;
+    request.path = ask.path;
+    request.allowLargeMesh = true;
+    std::string error;
+    if (!StartImport(state, request, &error))
+      state.importError = error;
+    close = true;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel###import_ask_cancel", ImVec2(120, 0)) ||
+      ImGui::IsKeyPressed(ImGuiKey_Escape))
+    close = true;
+  if (close) {
+    state.importAsk = {};
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+} // namespace
+
 void DrawImportModal(AppState& state) {
-  if (!ImportRunning(state))
+  DrawImportAsk(state);
+  // Cancelled, the modal goes at once: what is left of a mesh read may be a
+  // step that cannot be interrupted, and its result is dropped when it
+  // ends (background_jobs still lists it until then).
+  if (const BackgroundJob* running = FindBackgroundJob(state, "import");
+      !ImportRunning(state) || (running != nullptr && running->cancel.load()))
     return; // not calling BeginPopupModal is what closes it
   // Asked every frame rather than on a rising edge off a static bool. The
   // static version desynced the moment anything reset around it (the GUI
   // suite re-running this test was enough): it came back believing the popup
   // was already open, so OpenPopup never fired and the import ran with no
   // modal at all. IsPopupOpen is the actual state, so this cannot drift.
-  if (!ImGui::IsPopupOpen("Importing STEP"))
-    ImGui::OpenPopup("Importing STEP");
+  static constexpr const char* kModal = "Importing###import_modal";
+  if (!ImGui::IsPopupOpen(kModal))
+    ImGui::OpenPopup(kModal);
 
   ImGui::SetNextWindowSize(ImVec2(360, 0), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Importing STEP", nullptr,
+  if (!ImGui::BeginPopupModal(kModal, nullptr,
                               ImGuiWindowFlags_AlwaysAutoResize))
     return;
 

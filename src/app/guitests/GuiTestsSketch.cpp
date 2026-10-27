@@ -4,6 +4,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/sketch/SketchOrientation.h"
 #include "render/UnderlayRenderer.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/ImportActions.h"
 #include "ui/ImportJob.h"
 #include "ui/ProjectActions.h"
@@ -12,6 +13,8 @@
 #include "ui/SketchOverlay.h"
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
+
+#include <fstream>
 
 // Sketch GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -2648,6 +2651,107 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
     IM_CHECK(imp->upAxis == interchange::UpAxis::Auto);
     IM_CHECK(std::abs(height() - 30.0) < 1e-6);
+  };
+
+  // A mesh is the import job too (docs/ui/long-operations.md#import): it
+  // used to be read and sewn on the frame, a 100k-triangle scan holding the
+  // window for minutes with nothing to show or stop it. The modal says what
+  // it costs; Cancel takes the modal down at once and imports nothing.
+  t = IM_REGISTER_TEST(engine, "import", "a_mesh_import_runs_in_background");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CADKernel& k = CADKernel::Instance();
+    const auto stl =
+        std::filesystem::temp_directory_path() / "lobole_gui_mesh_import.stl";
+    IM_CHECK(
+        k.SaveSTL(stl.string(), k.CreateSphere({0, 0, 0}, 10.0), 0.2, 0.5));
+    const size_t before = Doc()->FeatureCount();
+    ui::HoldImportWorkerForTesting(true);
+    struct Release {
+      ~Release() { ui::HoldImportWorkerForTesting(false); }
+    } release;
+    std::string error;
+    IM_CHECK(ui::RequestImport(*s_App, stl.string(), &error));
+    IM_CHECK(ui::ImportRunning(*s_App)); // a job, not a call
+    IM_CHECK_EQ(Doc()->FeatureCount(), before);
+    IM_CHECK(WaitFor(ctx, "the import modal", [&] {
+      return ctx->ItemExists("//###import_modal/Cancel###import_cancel");
+    }));
+    IM_CHECK(ui::ImportStatusLine(*s_App).find("triangles") !=
+             std::string::npos);
+    ui::HoldImportWorkerForTesting(false);
+    IM_CHECK(WaitFor(ctx, "the import to land",
+                     [] { return !ui::ImportRunning(*s_App); }));
+    IM_CHECK(s_App->importError.empty());
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    IM_CHECK(Doc()->GetBodies().back().shape.SolidCount() == 1);
+
+    // Cancelled from the modal: it goes at once, and nothing is added.
+    ui::HoldImportWorkerForTesting(true);
+    IM_CHECK(ui::RequestImport(*s_App, stl.string(), &error));
+    IM_CHECK(WaitFor(ctx, "the second modal", [&] {
+      return ctx->ItemExists("//###import_modal/Cancel###import_cancel");
+    }));
+    ctx->ItemClick("//###import_modal/Cancel###import_cancel");
+    IM_CHECK(WaitFor(ctx, "the modal to go", [&] {
+      return !ctx->ItemExists("//###import_modal/Cancel###import_cancel");
+    }));
+    IM_CHECK(WaitFor(ctx, "the cancelled job to end",
+                     [] { return !ui::ImportRunning(*s_App); }));
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    std::filesystem::remove(stl);
+  };
+
+  // A mesh past the triangle limit (interchange::MeshTriangleLimit) asks
+  // before it starts, saying what it will cost: Cancel imports nothing,
+  // Import anyway starts the job.
+  t = IM_REGISTER_TEST(engine, "import", "a_large_mesh_asks_first");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // A binary STL just past the limit, written as bytes: the ask reads only
+    // its header, and the job is cancelled before it reads the rest.
+    const uint64_t n = interchange::MeshTriangleLimit() + 1000;
+    const auto stl =
+        std::filesystem::temp_directory_path() / "lobole_gui_large_mesh.stl";
+    {
+      std::ofstream out(stl, std::ios::binary);
+      const char header[80] = {};
+      out.write(header, 80);
+      const auto count = static_cast<uint32_t>(n);
+      out.write(reinterpret_cast<const char*>(&count), 4);
+      const std::vector<char> records(50 * n, 0);
+      out.write(records.data(), static_cast<std::streamsize>(records.size()));
+    }
+    const size_t before = Doc()->FeatureCount();
+    std::string error;
+    IM_CHECK(ui::RequestImport(*s_App, stl.string(), &error));
+    IM_CHECK(!ui::ImportRunning(*s_App)); // asked, not started
+    IM_CHECK_EQ(s_App->importAsk.triangles, n);
+    IM_CHECK(WaitFor(ctx, "the ask", [&] {
+      return ctx->ItemExists("//###import_ask/Cancel###import_ask_cancel");
+    }));
+    ctx->ItemClick("//###import_ask/Cancel###import_ask_cancel");
+    ctx->Yield(2);
+    IM_CHECK(s_App->importAsk.path.empty());
+    IM_CHECK(!ui::ImportRunning(*s_App));
+    IM_CHECK_EQ(Doc()->FeatureCount(), before);
+
+    ui::HoldImportWorkerForTesting(true);
+    struct Release {
+      ~Release() { ui::HoldImportWorkerForTesting(false); }
+    } release;
+    IM_CHECK(ui::RequestImport(*s_App, stl.string(), &error));
+    IM_CHECK(WaitFor(ctx, "the ask again", [&] {
+      return ctx->ItemExists("//###import_ask/Import anyway###import_ask_go");
+    }));
+    ctx->ItemClick("//###import_ask/Import anyway###import_ask_go");
+    IM_CHECK(WaitFor(ctx, "the job to start",
+                     [] { return ui::ImportRunning(*s_App); }));
+    ui::CancelBackgroundJobs(*s_App, "import");
+    IM_CHECK(WaitFor(ctx, "the cancelled job to end",
+                     [] { return !ui::ImportRunning(*s_App); }));
+    IM_CHECK_EQ(Doc()->FeatureCount(), before);
+    std::filesystem::remove(stl);
   };
 
   // A DXF into the sketch being edited: one undo step of baked entities,

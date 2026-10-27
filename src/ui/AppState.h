@@ -2046,6 +2046,15 @@ struct AppState {
   // reads the payload; ImportRunning asks the registry.
   std::shared_ptr<ImportJob> importJob;
   std::string importError;
+  // File > Import of a mesh past the triangle limit asks before it starts
+  // (interchange::MeshTriangleLimit): the file, its count and what it is
+  // expected to cost. Empty `path`: nothing is being asked. The modal's
+  // Import anyway starts it with the override; Cancel clears it.
+  struct ImportAsk {
+    std::string path;
+    uint64_t triangles = 0;
+    double expectedSeconds = 0.0;
+  } importAsk;
   // A project being opened off the frame ("open" in `backgroundJobs`,
   // ui/OpenJob.h), and the message left by the last one that failed, which
   // the modal shows until it is closed.

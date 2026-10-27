@@ -216,13 +216,11 @@ size_t ImportFeature::ContentHash() const {
   return h;
 }
 
-bool ImportFeature::Execute(RegenContext& ctx) {
-  auto& bodies = ctx.bodies;
-  // Structured (XCAF) read: geometry plus the names/colors STEP carries.
-  // Each instance is a body — a flat part file is identity instances; an
-  // assembly file imported into a PART places every occurrence (the
-  // assembly-document import is a separate app-level flow, I2).
-  CADKernel::ImportedModel model;
+bool ImportFeature::ReadModel(const std::string& path, units::Length unit,
+                              CADKernel::ImportedModel& model,
+                              std::string& error,
+                              CADKernel::ImportProgress* progress) {
+  model = {};
   const std::string ext = LowerExtension(path);
   const auto hasExt = [&](const char* e) { return ext == e; };
   const bool isStep = hasExt(".step") || hasExt(".stp");
@@ -231,34 +229,31 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   // STEP, and failed as one, which named the wrong problem.
   if (!isStep && !isIges && !hasExt(".stl") && !hasExt(".brep") &&
       !hasExt(".obj")) {
-    SetError("'" + path + "' is not a file the import reads (" +
-             "accepted: .step/.stp, .igs/.iges, .brep, .stl, .obj)");
+    error = "'" + path + "' is not a file the import reads (" +
+            "accepted: .step/.stp, .igs/.iges, .brep, .stl, .obj)";
     return false;
   }
   // STEP and IGES say what unit they are in, and the reader converts; a unit
   // given on top would be applied twice or contradict the file.
-  const bool takesUnits = TakesUnits(path);
-  if (!takesUnits && lengthUnit != units::Length::Millimetre) {
-    SetError("'" + path + "' is " + (isIges ? "IGES" : "STEP") +
-             ", which declares its own unit — `units` is for STL, OBJ and "
-             "BREP, which carry none");
+  if (!TakesUnits(path) && unit != units::Length::Millimetre) {
+    error = "'" + path + "' is " + (isIges ? "IGES" : "STEP") +
+            ", which declares its own unit — `units` is for STL, OBJ and "
+            "BREP, which carry none";
     return false;
   }
-  const double scale = units::MmPerLength(lengthUnit);
-  // Consumed, not kept: one Execute uses what the importer already parsed,
-  // every later one re-reads `path` as it always did (see SeedGeometry).
-  std::unique_ptr<CADKernel::ImportedModel> seed = std::move(m_seed);
-  if (seed != nullptr) {
-    model = std::move(*seed);
-  } else if (hasExt(".stl")) {
+  const double scale = units::MmPerLength(unit);
+  const auto cancelled = [&] {
+    return progress != nullptr && progress->Cancelled();
+  };
+  if (hasExt(".stl")) {
     // Triangle mesh → B-Rep: one planar face per triangle, sewn; a closed
     // mesh arrives as a solid (LoadSTL), an open one as a surface shell.
     // Fine for print round-trips and reference geometry; organic meshes get
-    // heavy — every triangle is a face.
+    // heavy — every triangle is a face (interchange::MeshImportCost).
     CADShape shape;
-    if (!CADKernel::Instance().LoadSTL(path, shape)) {
-      SetError("failed to read '" + path + "' as STL");
-      LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
+    if (!CADKernel::Instance().LoadSTL(path, shape, progress)) {
+      error =
+          cancelled() ? "cancelled" : "failed to read '" + path + "' as STL";
       return false;
     }
     if (scale != 1.0)
@@ -271,8 +266,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     // .brep, I2): one anonymous product at identity.
     CADShape shape;
     if (!CADKernel::Instance().LoadBREP(path, shape)) {
-      SetError("failed to read '" + path + "' as BREP");
-      LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
+      error = "failed to read '" + path + "' as BREP";
       return false;
     }
     if (scale != 1.0)
@@ -281,9 +275,9 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     model.instances.push_back({0, glm::dmat4(1.0), ""});
     model.origin.format = "BREP";
   } else if (hasExt(".obj")) {
-    if (!CADKernel::Instance().LoadOBJStructured(path, model)) {
-      SetError("failed to read '" + path + "' as OBJ");
-      LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
+    if (!CADKernel::Instance().LoadOBJStructured(path, model, progress)) {
+      error =
+          cancelled() ? "cancelled" : "failed to read '" + path + "' as OBJ";
       return false;
     }
     if (scale != 1.0)
@@ -291,14 +285,34 @@ bool ImportFeature::Execute(RegenContext& ctx) {
         if (product.shape.IsValid())
           product.shape.Scale(scale);
   } else if (isIges) {
-    if (!CADKernel::Instance().LoadIGESStructured(path, model)) {
-      SetError("failed to read '" + path + "' as IGES");
-      LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
+    if (!CADKernel::Instance().LoadIGESStructured(path, model, progress)) {
+      error =
+          cancelled() ? "cancelled" : "failed to read '" + path + "' as IGES";
       return false;
     }
-  } else if (!CADKernel::Instance().LoadSTEPStructured(path, model)) {
-    SetError("failed to read '" + path + "' as STEP");
-    LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
+  } else if (!CADKernel::Instance().LoadSTEPStructured(path, model, progress)) {
+    error = cancelled() ? "cancelled" : "failed to read '" + path + "' as STEP";
+    return false;
+  }
+  return true;
+}
+
+bool ImportFeature::Execute(RegenContext& ctx) {
+  auto& bodies = ctx.bodies;
+  // Structured (XCAF) read: geometry plus the names/colors STEP carries.
+  // Each instance is a body — a flat part file is identity instances; an
+  // assembly file imported into a PART places every occurrence (the
+  // assembly-document import is a separate app-level flow, I2).
+  CADKernel::ImportedModel model;
+  const bool takesUnits = TakesUnits(path);
+  // Consumed, not kept: one Execute uses what the importer already parsed,
+  // every later one re-reads `path` as it always did (see SeedGeometry).
+  std::unique_ptr<CADKernel::ImportedModel> seed = std::move(m_seed);
+  if (seed != nullptr) {
+    model = std::move(*seed);
+  } else if (std::string why; !ReadModel(path, lengthUnit, model, why)) {
+    SetError(why);
+    LOG_ERROR("ImportFeature '{}': {}", m_name, why);
     return false;
   }
 
@@ -337,7 +351,10 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       skipped.push_back(who + " (could not be placed)");
       continue;
     }
-    if (moved.Volume() <= 1e-6) {
+    // Measured by the import job's worker when it read the file: a rigid
+    // placement keeps a volume, and a 100k-face mesh is seconds to measure.
+    const std::optional<double>& known = model.products[inst.product].volume;
+    if ((known ? *known : moved.Volume()) <= 1e-6) {
       skipped.push_back(who + " (a surface, not a solid)");
       continue;
     }

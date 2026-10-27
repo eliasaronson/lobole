@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "app/HeadlessMain.h"
+#include "app/StopSignal.h"
 
 #include "ui/BackgroundJobs.h"
 
@@ -11,12 +12,14 @@
 #include "core/Document.h"
 #include "core/io/Autosaver.h"
 #include "core/io/CrashReports.h"
+#include "remote/InstanceRegistry.h"
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
 #include "ui/AppState.h"
 #include "ui/CamJobs.h" // OpenCamSurfaceStore
 #include "ui/DocumentSlots.h"
 #include "ui/ImportActions.h"
+#include "ui/ImportJob.h"
 #include "ui/MachineActions.h"
 #include "ui/PrintProfileActions.h"
 #include "ui/ProjectActions.h"
@@ -27,18 +30,9 @@
 #include <csignal>
 #include <thread>
 
-namespace {
-
-// Signal-flag pattern: handlers may only touch lock-free atomics.
-std::atomic<bool> g_stopRequested{false};
-
-void HandleStopSignal(int) { g_stopRequested = true; }
-
-} // namespace
-
 int RunHeadless(int remotePort, const std::string& fileToLoad,
                 double autosaveSeconds, const std::string& recordPath,
-                bool bindAll) {
+                bool bindAll, bool allowLargeMesh) {
   LOG_INFO("Headless mode: document engine + remote server, no GUI");
 
   // Same defaults as the GUI so view/fit_view/get_state.camera behave
@@ -76,6 +70,9 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   // All renderer/selector pointers stay null: SyncDocumentRenderers no-ops,
   // and RemoteServer degrades the GUI-dependent methods with specific errors.
 
+  // Before the startup file: a stop asked while it opens is the clean
+  // shutdown's, bounded (app/StopSignal.h), not the default's.
+  stopsignal::Install();
   if (!fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", fileToLoad);
     if (ui::IsProjectPath(fileToLoad)) {
@@ -86,7 +83,14 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
       else
         LOG_ERROR("Could not open {}: {}", root, error);
     } else {
-      ui::ImportAsFeature(state, fileToLoad);
+      // The import job, as File > Import runs it: the loop below polls it,
+      // a client sees it in background_jobs and may cancel it.
+      ui::ImportRequest request;
+      request.path = fileToLoad;
+      request.allowLargeMesh = allowLargeMesh;
+      std::string error;
+      if (!ui::StartImport(state, request, &error))
+        LOG_ERROR("Could not import {}: {}", fileToLoad, error);
     }
   }
 
@@ -105,8 +109,8 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
     return 1;
   }
 
-  std::signal(SIGINT, HandleStopSignal);
-  std::signal(SIGTERM, HandleStopSignal);
+  stopsignal::OnForcedExit(
+      [port = server.Port()] { remote::WithdrawInstance(port); });
 
   const auto start = std::chrono::steady_clock::now();
   auto seconds = [&] {
@@ -117,7 +121,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   Autosaver autosaver(autosaveSeconds);
   autosaver.Prime(seconds());
 
-  while (!g_stopRequested) {
+  while (!stopsignal::Requested()) {
     watchdog::Beat();
     crash::NoteProject(state.projectPath); // the marker names the project
     server.ProcessPending(state);

@@ -43,7 +43,9 @@ the recipe, and each regeneration reads it.
   triangles as a compound of loose faces, so `CADKernel::LoadSTL` sews them
   as an OBJ's are (`SewAt`); unsewn, the volume still read right while a
   cut removed the wrong amount and Delete Face refused every hole. Every
-  triangle is a face, so organic meshes are heavy.
+  triangle is a face, so organic meshes are heavy: what that costs, and the
+  limit past which an import asks first, are under
+  [what a mesh costs](#what-a-mesh-costs).
 - **BREP** is read as is.
 - **What is skipped is named.** A placed shape with no volume (a lone
   surface) cannot be a body; the feature's warning names each one ("skipped
@@ -224,6 +226,66 @@ is `none`.
 glTF and 3MF are not read: OpenCASCADE's glTF reader needs RapidJSON, which
 the Windows cross build turns off, and it reads no 3MF.
 
+## What a mesh costs
+
+A mesh is the expensive import: every triangle becomes a face, and the faces
+are sewn (`BRepBuilderAPI_Sewing`), whose joining of faces into shells
+(`BRepTools_Quilt::Shells`, inside `CreateSewedShape`) is most of a large
+import and grows faster than the count: a profile of a 40k-triangle import
+put two thirds of its samples there (and three quarters in the sewing as a
+whole). So before anything is built,
+`interchange::MeshImportCost` (`src/core/io/MeshImportCost.{h,cpp}`) counts
+the triangles -- a binary STL's header (believed only when the file's size
+agrees with it), an ASCII STL's `facet`s, an OBJ's `f` records with an
+n-gon as n − 2 -- and a cost law says what the import may take.
+
+Measured on this machine (22 cores, load ≈ 2), whole `import_step` calls:
+
+| mesh | triangles | seconds |
+|---|---|---|
+| closed torus | 10,000 / 19,740 / 40,000 / 79,524 / 160,000 | 0.8 / 1.6 / 4.2 / 11.4 / 30.2 |
+| scan pieces (the Stanford armadillo's first n triangles: open, many shells) | 10,000 / 20,000 / 40,000 / 70,000 / 100,000 | 1.1 / 2.5 / 7.9 / 24.2 / 61.2 |
+| the same 20,000 as OBJ | 20,000 | 4.4 |
+| the whole armadillo (a closed scan) | 345,944 | not done after 16 min of CPU, when it was stopped; the law says 15 |
+
+The law is `t = 0.36 s · (n / 10⁴)^2.2`, fitted in log-log to the scan
+pieces at 40k, 70k and 100k, where the limit falls: the slowest meshes
+measured, so it says what an import *may* take. A mesh whose triangles
+are in grid order (the torus) takes a third to a fifth of it; a real scan,
+closed as it is, took longer than the law says. The limit is solved from the law and
+`interchange::kPatientImportSeconds` (60 s, the wait a person accepts
+without being asked) -- about 102,000 triangles, written down nowhere as a
+number. Past it:
+
+- `import_step` refuses, naming the count, what it may take, the limit and
+  `allow_large_mesh: true`, which overrides it;
+- File › Import asks (above);
+- `--file` refuses in the log, naming `--allow-large-mesh`, which overrides;
+- `add_feature`, and a `modify_feature` that changes the path, of an
+  `Import` past it is refused naming `import_step`: built there it would sew
+  on the frame with nothing to cancel it. An Import already past the limit
+  keeps its other edits.
+
+Under the limit the job's label and status line still say the count and what
+it may take ("Importing scan (40,000 triangles, about 8 s)"). The worker logs
+what each mesh read took against the law (wall and CPU seconds), which is
+how the table above was read.
+
+**Progress and cancel.** `LoadSTL` and `LoadOBJStructured` take the
+`ImportProgress` the STEP reader takes, with phases `ReadingFile`,
+`Building` and `Sewing`. On OCC 7.7 and later the STL read is
+`RWStl::ReadFile` + `BRepBuilderAPI_MakeShapeOnMesh` with ranges -- exactly
+what `StlAPI_Reader` does there, so the faces and their order are the
+same; 7.6 keeps `StlAPI_Reader`, which takes none. The OBJ face loop checks
+the cancel every 4096 triangles, and the sewing gets a range. What
+OpenCASCADE reports covers the file, the faces and the sewing's own stages,
+the first third of the bar; the quilt reports nothing, so the rest of the
+bar is the time spent against what the law expects, held under the end.
+The quilt cannot be interrupted either: a cancel there is seen when it ends,
+so the RPC answers the cancel at once, the modal goes at once, and the
+worker's result is dropped when it lands (`background_jobs` lists it until
+then, and a new import is refused naming why).
+
 ## Importing an assembly
 
 A STEP or IGES with several placed instances becomes an assembly
@@ -252,28 +314,39 @@ A STEP or IGES with several placed instances becomes an assembly
 - It is not undoable; like Open, it creates documents.
 
 **In the GUI**, File > Import (Ctrl+I, `file.import`) accepts STEP, IGES,
-STL, OBJ, BREP, DXF and SVG. STL, OBJ and BREP import straight into the
-active part; DXF and SVG go into a sketch
-([sketching](../sketching/README.md#importing-dxf-and-svg)). A STEP or
-IGES runs as a background job (`src/ui/ImportJob.{h,cpp}`) with a progress modal: the
-worker reads the file (no progress available from OpenCASCADE), transfers
-it (a real percentage), and, when it has more than one placed instance,
-extracts the `.brep` files; the main thread then creates the tabs and
-occurrences a slice per frame. The worker touches only plain data; every
-document mutation stays on the main thread. The job can be cancelled until
-materializing starts, and only one import runs at a time. A STEP with one
-placed instance becomes an `Import` feature in the active part. The
-progress callback is sampled, not read per tick: OpenCASCADE's transfer
-reports hundreds of thousands of times on a large file.
+STL, OBJ, BREP, DXF and SVG. DXF and SVG go into a sketch
+([sketching](../sketching/README.md#importing-dxf-and-svg)); everything else
+runs as the `import` background job (`src/ui/ImportJob.{h,cpp}`,
+[long operations](../ui/long-operations.md#import)) under one progress
+modal, as `import_step` and `--file` do. The worker reads the file
+(`ImportFeature::ReadModel`, what the feature's own regeneration reads):
+a STEP's parse (no progress available from OpenCASCADE) and transfer (a
+real percentage), a mesh's file, faces and sewing; when a STEP has more than
+one placed instance it extracts the `.brep` files, and the main thread then
+creates the tabs and occurrences a slice per frame. A STEP with one placed
+instance, and any mesh or BREP, becomes an `Import` feature in the part the
+import was started from, seeded with what the worker read (and the volume it
+measured), so the feature does not read it again. The worker touches only
+plain data; every document mutation stays on the main thread. The job can be
+cancelled until materializing starts, and only one import runs at a time. A
+mesh past the [triangle limit](#what-a-mesh-costs) asks first: its count and
+what it may take, *Import anyway* or *Cancel*. The progress callback is
+sampled, not read per tick: OpenCASCADE's transfer reports hundreds of
+thousands of times on a large file.
 
 **Over RPC**, `import_step {path, as_assembly?, keep_origin?, units?,
-up_axis?, turn_deg?}`: without `as_assembly` it adds an `Import` feature to
-the active part and returns `{bodies, regen, digest, up_axis,
-recentred_by?, warning?}`; with it, it returns `{assembly_index,
-occurrences, parts, ok, up_axis}` plus `failed` naming every part whose
-feature did not build. Every parameter is checked before anything is read:
-an unknown extension (a DXF or SVG is pointed at `import_sketch`), `units`
-on STEP or IGES (and so with `as_assembly`), an unknown `up_axis`.
+up_axis?, turn_deg?, allow_large_mesh?}`: without `as_assembly` it adds an
+`Import` feature to the active part and returns `{bodies, regen, digest,
+up_axis, recentred_by?, warning?, mesh?}`, `mesh` being `{triangles,
+expected_s, limit}` for an STL or OBJ; with it, it returns
+`{assembly_index, occurrences, parts, ok, up_axis}` plus `failed` naming
+every part whose feature did not build. Every parameter is checked before
+anything is read: an unknown extension (a DXF or SVG is pointed at
+`import_sketch`), `units` on STEP or IGES (and so with `as_assembly`), an
+unknown `up_axis`, a mesh past the limit without `allow_large_mesh`. The
+read is the `import` job, waited on off the frame
+([long operations](../ui/long-operations.md#import)); a cancel answers the
+call with an error saying so, and a read that fails adds nothing.
 
 The part tab's feature editor exposes the import's file units, up axis and
 turn; `keep_origin` is reachable over RPC and in the feature JSON only.
@@ -381,7 +454,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 
 | RPC | module | does |
 |---|---|---|
-| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?}` | RemoteProject | STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly; replies `up_axis` |
+| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?}` | RemoteProject | STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; replies `up_axis`, and `mesh` for a mesh |
 | `import_sketch {path, sketch_id? \| plane?, units?, layers?, construction_layers?, keep_origin?}` | RemoteModeling | a DXF or SVG into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) |
 | `export_step {path, part?, body?}` | RemoteProject | structured STEP of a part or the assembly |
 | `export_stl {path, body?, stl_deflection_mm?}`, `export_brep {path, body?}` | RemoteProject | one shape of the active part |
@@ -403,6 +476,9 @@ on an assembly tab, and unknown extensions, are refused by name.
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly`; every import fixture through `import_step` / `import_sketch` with its reply read |
 | `tests/refused_calls_smoke.py` | an unknown `up_axis`, `units` on IGES, a drawing given to `import_step`, each changing nothing |
 | GUI `import/solidworks_part_stands_up_and_lies_down` | the pill, the editor's axis combo, undo |
+| `tests/test_mesh_import.cpp` `[interchange][import]` | counting a binary, an ASCII and a lying STL and an OBJ's polygons; the limit is where the law reaches the patient wait, and the refusal names the count, the time and the override; a mesh read reports its phases and stops on a cancel (STL and OBJ); a seeded import is the import of its file (bodies, names, volume, units) |
+| `tests/import_job_smoke.py` | `import_step` of a mesh as a job: listed with its triangles, its fraction moving, other calls answered; a cancel from another connection answers the call and leaves the part; a second import refused; past the limit refused naming the count, the time and `allow_large_mesh` (and `add_feature` naming `import_step`), with it started; `--file` cancellable, landing, and past the limit refused naming `--allow-large-mesh` |
+| GUI `import/a_mesh_import_runs_in_background`, `import/a_large_mesh_asks_first` | the modal says the triangles, lands, and its Cancel goes at once adding nothing; past the limit the ask's Cancel imports nothing and Import anyway starts the job |
 | `tests/visual_export_smoke.py` | parses the binary glTF: meshes, materials, instancing |
 | `tests/part_configuration_smoke.py` | one part placed in two configurations and two materials exports as two products |
 
@@ -422,6 +498,11 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
 - DXF of a drawing.
 - Mesh bodies: an STL arrives as sewn B-Rep faces, not as a lightweight
   reference mesh.
+- A faster sewing of a mesh. The faces `BRepBuilderAPI_MakeShapeOnMesh`
+  makes already share their edges, so a shell could be built from them
+  directly, in linear time, instead of through the quilt. Unless it kept
+  the faces in the sewing's order, it would rename every face of every
+  mesh import already saved.
 - Feature recognition on a mesh: a faceted hole is hundreds of planes, with
   no radius to filter, measure or project
   ([editing a downloaded part](#editing-a-downloaded-part)).

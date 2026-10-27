@@ -11,6 +11,7 @@
 #include "app/HeadlessMain.h"
 #include "app/ParentWatch.h"
 #include "app/StartupReport.h"
+#include "app/StopSignal.h"
 #include "cad/FaceSelector.h"
 #include "common/DesignerVersion.h"
 #include "common/DevicePreference.h"
@@ -23,6 +24,7 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
+#include "remote/InstanceRegistry.h"
 #ifdef HAVE_TEST_ENGINE
 #include "imgui_te_engine.h"
 #include "imgui_te_internal.h" // TestsAll, for --gui-test-shuffle
@@ -814,6 +816,10 @@ void printUsage(const char* programName) {
                "127.0.0.1 (containers only:\n                       the "
                "interface is unauthenticated and touches files)"
             << std::endl;
+  std::cout << "  --allow-large-mesh   Import a startup mesh (--file) past the "
+               "triangle limit\n                       (see "
+               "docs/interchange/README.md#what-a-mesh-costs)"
+            << std::endl;
   std::cout << "  --headless           No window/GPU: serve --remote with the "
                "document engine only"
             << std::endl;
@@ -899,6 +905,8 @@ struct CommandLineArgs {
   int remotePort = 0;
   bool remoteRequested = false;
   bool remoteBindAll = false;
+  bool allowLargeMesh = false; // --allow-large-mesh: a --file mesh past the
+                               // triangle limit is imported, not refused
   double autosaveSeconds = 60.0;
   std::string recordPath;
   bool perfHud = false;
@@ -1033,6 +1041,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       args.headless = true;
     } else if (arg == "--offscreen") {
       args.offscreen = true;
+    } else if (arg == "--allow-large-mesh") {
+      args.allowLargeMesh = true;
     } else if (arg == "--remote-bind-all") {
       // For containers: the port is useless on loopback when the network is
       // namespaced. Unauthenticated, so it is never the default.
@@ -1197,9 +1207,6 @@ static void SyncOffscreenScene() {
     g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
 }
 
-static std::atomic<bool> g_OffscreenStopRequested{false};
-static void HandleOffscreenStop(int) { g_OffscreenStopRequested = true; }
-
 static int RunOffscreen(const CommandLineArgs& args) {
   LOG_INFO("Offscreen mode: real renderer, no window or display server");
 
@@ -1235,6 +1242,9 @@ static int RunOffscreen(const CommandLineArgs& args) {
   // set_render_options writes, so the toggles below read coherent state.
   ui::ApplySettings(g_App);
 
+  // Before the startup file: a stop asked while it opens is the clean
+  // shutdown's, bounded (app/StopSignal.h), not the default's.
+  stopsignal::Install();
   if (!args.fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", args.fileToLoad);
     if (ui::IsProjectPath(args.fileToLoad)) {
@@ -1245,7 +1255,14 @@ static int RunOffscreen(const CommandLineArgs& args) {
       else
         LOG_ERROR("Could not open {}: {}", root, error);
     } else {
-      ui::ImportAsFeature(g_App, args.fileToLoad);
+      // The import job, as File > Import runs it: the loop below polls it,
+      // a client sees it in background_jobs and may cancel it.
+      ui::ImportRequest request;
+      request.path = args.fileToLoad;
+      request.allowLargeMesh = args.allowLargeMesh;
+      std::string error;
+      if (!ui::StartImport(g_App, request, &error))
+        LOG_ERROR("Could not import {}: {}", args.fileToLoad, error);
     }
   }
 
@@ -1356,8 +1373,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
     return BeginFrameCapture(offscreenTarget(), w, h, error);
   };
 
-  std::signal(SIGINT, HandleOffscreenStop);
-  std::signal(SIGTERM, HandleOffscreenStop);
+  stopsignal::OnForcedExit(
+      [port = server.Port()] { remote::WithdrawInstance(port); });
 
   const auto start = std::chrono::steady_clock::now();
   auto seconds = [&] {
@@ -1371,7 +1388,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   double last = seconds();
   double animatingSince = -1.0;
   bool lossHandled = false;
-  while (!g_OffscreenStopRequested) {
+  while (!stopsignal::Requested()) {
     watchdog::Beat();
     crash::NoteProject(g_App.projectPath);
     // The frame boundary, before the tick's requests
@@ -1794,7 +1811,8 @@ int main(int argc, char** argv) {
     // still there a moment later (hostile_params_smoke --self-test).
     ui::SetTestJobLatency(args.guiTestJobLatencyMs / 1000.0);
     return RunHeadless(args.remotePort, args.fileToLoad, args.autosaveSeconds,
-                       args.recordPath, args.remoteBindAll);
+                       args.recordPath, args.remoteBindAll,
+                       args.allowLargeMesh);
   }
 
   try {
@@ -2126,10 +2144,18 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     // A project opens off the frame, as File > Open does; anything else is
     // imported.
     std::string error;
-    if (!ui::IsProjectPath(args.fileToLoad))
-      ui::ImportAsFeature(g_App, args.fileToLoad);
-    else if (!ui::StartOpenProject(
-                 g_App, ui::NormalizeProjectPick(args.fileToLoad), &error))
+    if (!ui::IsProjectPath(args.fileToLoad)) {
+      // The import job under its modal; a mesh past the limit asks first,
+      // unless --allow-large-mesh already said yes.
+      ui::ImportRequest request;
+      request.path = args.fileToLoad;
+      request.allowLargeMesh = true;
+      if (!(args.allowLargeMesh
+                ? ui::StartImport(g_App, request, &error)
+                : ui::RequestImport(g_App, args.fileToLoad, &error)))
+        LOG_ERROR("Could not import {}: {}", args.fileToLoad, error);
+    } else if (!ui::StartOpenProject(
+                   g_App, ui::NormalizeProjectPick(args.fileToLoad), &error))
       LOG_ERROR("Could not open {}: {}", args.fileToLoad, error);
   }
 

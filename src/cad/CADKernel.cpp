@@ -65,6 +65,13 @@
 #include <Standard_Handle.hxx>
 #include <Standard_Version.hxx>
 #include <StlAPI_Reader.hxx>
+#if OCC_VERSION_HEX >= 0x070700
+// STL with a progress range: what StlAPI_Reader does from 7.7 on, spelled
+// out so a long read reports and stops (7.6's reader takes no range).
+#define LOBOLE_STL_PROGRESS 1
+#include <BRepBuilderAPI_MakeShapeOnMesh.hxx>
+#include <RWStl.hxx>
+#endif
 #include <StlAPI_Writer.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <TCollection_AsciiString.hxx>
@@ -1560,15 +1567,19 @@ glm::dmat4 TrsfToMat4(const gp_Trsf& t) {
 // vanish while still giving ~100 updates.
 class ProgressBridge : public Message_ProgressIndicator {
 public:
-  explicit ProgressBridge(CADKernel::ImportProgress* sink) : m_sink(sink) {}
+  using Phase = CADKernel::ImportProgress::Phase;
+  explicit ProgressBridge(CADKernel::ImportProgress* sink,
+                          Phase phase = Phase::Transferring)
+      : m_sink(sink), m_phase(phase) {}
 
   void Show(const Message_ProgressScope&, const Standard_Boolean) override {
     if (m_sink == nullptr)
       return;
-    if (++m_ticks % kSampleEvery != 0)
+    // The STEP transfer ticks per entity; a mesh's read and sewing tick a
+    // few hundred times in all, and every one is worth showing.
+    if (++m_ticks % (m_phase == Phase::Transferring ? kSampleEvery : 1) != 0)
       return;
-    m_sink->OnPhase(CADKernel::ImportProgress::Phase::Transferring,
-                    GetPosition());
+    m_sink->OnPhase(m_phase, GetPosition());
   }
 
   Standard_Boolean UserBreak() override {
@@ -1581,6 +1592,7 @@ public:
 private:
   static constexpr uint64_t kSampleEvery = 2000;
   CADKernel::ImportProgress* m_sink = nullptr;
+  Phase m_phase = Phase::Transferring;
   uint64_t m_ticks = 0;
 };
 
@@ -1820,13 +1832,29 @@ struct Sewn {
   int solids = 0;
   int openShells = 0;
   int freeEdges = 0;
+  bool cancelled = false; // `progress` stopped it: `shape` is null
 };
 
-Sewn SewAt(const TopoDS_Shape& faces, double tolerance) {
+// Sewing is most of a mesh import (every triangle is a face) and grows
+// faster than the count, so it reports as `Sewing` and stops on a cancel.
+Sewn SewAt(const TopoDS_Shape& faces, double tolerance,
+           CADKernel::ImportProgress* progress = nullptr) {
   Sewn out;
   BRepBuilderAPI_Sewing sew(tolerance);
   sew.Add(faces);
-  sew.Perform();
+  if (progress != nullptr) {
+    progress->OnPhase(CADKernel::ImportProgress::Phase::Sewing, 0.0);
+    Handle(ProgressBridge) bridge =
+        new ProgressBridge(progress, CADKernel::ImportProgress::Phase::Sewing);
+    Message_ProgressScope scope(bridge->Start(), nullptr, 1);
+    sew.Perform(scope.Next());
+    if (progress->Cancelled()) {
+      out.cancelled = true;
+      return out;
+    }
+  } else {
+    sew.Perform();
+  }
   out.freeEdges = sew.NbFreeEdges();
   const TopoDS_Shape sewn = sew.SewedShape();
   BRep_Builder builder;
@@ -1981,15 +2009,26 @@ namespace {
 // BRepBuilderAPI_MakeShapeOnMesh, which arrived in OCC 7.7: Ubuntu 24.04
 // ships 7.6, and its build did not compile (docs/interchange/README.md#obj).
 // A triangle too thin to span a plane is skipped, as the STL reader does.
+// `progress` hears how far through `total` triangles (`done` before these)
+// the faces are, and a cancel stops the loop: -1.
 int AddTriangleFaces(const Handle(Poly_Triangulation) & tri,
                      const TopLoc_Location& loc, BRep_Builder& builder,
-                     TopoDS_Compound& faces) {
+                     TopoDS_Compound& faces,
+                     CADKernel::ImportProgress* progress = nullptr,
+                     int done = 0, int total = 0) {
   const gp_Trsf trsf = loc.Transformation();
   std::vector<TopoDS_Vertex> vertices(tri->NbNodes() + 1);
   for (int i = 1; i <= tri->NbNodes(); i++)
     vertices[i] = BRepBuilderAPI_MakeVertex(tri->Node(i).Transformed(trsf));
   int made = 0;
   for (int t = 1; t <= tri->NbTriangles(); t++) {
+    if (progress != nullptr && t % 4096 == 0) {
+      if (progress->Cancelled())
+        return -1;
+      progress->OnPhase(CADKernel::ImportProgress::Phase::Building,
+                        total > 0 ? static_cast<double>(done + t) / total
+                                  : -1.0);
+    }
     int a = 0, b = 0, c = 0;
     tri->Triangle(t).Get(a, b, c);
     if (a == b || b == c || a == c)
@@ -2013,7 +2052,8 @@ int AddTriangleFaces(const Handle(Poly_Triangulation) & tri,
 } // namespace
 
 bool CADKernel::LoadOBJStructured(const std::string& filename,
-                                  ImportedModel& out) {
+                                  ImportedModel& out,
+                                  ImportProgress* progress) {
   out = {};
   if (!std::filesystem::exists(filename))
     return false;
@@ -2025,14 +2065,34 @@ bool CADKernel::LoadOBJStructured(const std::string& filename,
   // by the unit it is told and turns by its up axis.
   reader.SetSystemLengthUnit(0.001);
   reader.SetFileLengthUnit(0.001);
+  if (progress != nullptr)
+    progress->OnPhase(ImportProgress::Phase::ReadingFile, -1.0);
   try {
+    Handle(ProgressBridge) bridge =
+        new ProgressBridge(progress, ImportProgress::Phase::ReadingFile);
+    Message_ProgressScope scope(bridge->Start(), nullptr, 1);
     if (!reader.Perform(TCollection_AsciiString(filename.c_str()),
-                        Message_ProgressRange()))
+                        scope.Next()))
       return false;
   } catch (const Standard_Failure&) {
     return false;
   }
+  if (progress != nullptr && progress->Cancelled())
+    return false;
   out.origin.format = "OBJ";
+  // Every product's triangles, for one fraction over all of them.
+  int total = 0;
+  for (ImportedShape& product : out.products)
+    if (!product.shape.GetShape().IsNull())
+      for (TopExp_Explorer ex(product.shape.GetShape(), TopAbs_FACE); ex.More();
+           ex.Next()) {
+        TopLoc_Location loc;
+        const Handle(Poly_Triangulation) tri =
+            BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), loc);
+        if (!tri.IsNull())
+          total += tri->NbTriangles();
+      }
+  int done = 0;
   ModelFromXcaf(doc, out);
   // Each object's triangles become planar faces (one per triangle, as
   // LoadSTL makes), sewn and promoted to a solid when they close.
@@ -2050,7 +2110,14 @@ bool CADKernel::LoadOBJStructured(const std::string& filename,
           BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), loc);
       if (tri.IsNull())
         continue;
-      pieces += AddTriangleFaces(tri, loc, builder, faces);
+      const int made =
+          AddTriangleFaces(tri, loc, builder, faces, progress, done, total);
+      if (made < 0) {
+        out = {};
+        return false; // cancelled
+      }
+      pieces += made;
+      done += tri->NbTriangles();
     }
     if (pieces == 0) {
       product.shape = CADShape();
@@ -2061,7 +2128,11 @@ bool CADKernel::LoadOBJStructured(const std::string& filename,
     Bnd_Box box;
     BRepBndLib::Add(faces, box);
     const double diagonal = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
-    Sewn sewn = SewAt(faces, diagonal * 1e-7);
+    Sewn sewn = SewAt(faces, diagonal * 1e-7, progress);
+    if (sewn.cancelled) {
+      out = {};
+      return false;
+    }
     product.shape = CADShape(sewn.shape);
     if (sewn.openShells > 0)
       out.notes.push_back((product.name.empty() ? std::string("a mesh")
@@ -2089,12 +2160,42 @@ bool CADKernel::SaveSTEP(const std::string& filename,
   return writer.Write(filename.c_str()) == IFSelect_RetDone;
 }
 
-bool CADKernel::LoadSTL(const std::string& filename, CADShape& shape) {
-  StlAPI_Reader reader;
+bool CADKernel::LoadSTL(const std::string& filename, CADShape& shape,
+                        ImportProgress* progress) {
   TopoDS_Shape occShape;
-
-  if (!reader.Read(occShape, filename.c_str()) || occShape.IsNull())
-    return false;
+#ifdef LOBOLE_STL_PROGRESS
+  if (progress != nullptr) {
+    // StlAPI_Reader::Read, with the ranges it does not pass on.
+    progress->OnPhase(ImportProgress::Phase::ReadingFile, -1.0);
+    Handle(Poly_Triangulation) mesh;
+    {
+      Handle(ProgressBridge) bridge =
+          new ProgressBridge(progress, ImportProgress::Phase::ReadingFile);
+      Message_ProgressScope scope(bridge->Start(), nullptr, 1);
+      mesh = RWStl::ReadFile(filename.c_str(), scope.Next());
+    }
+    if (mesh.IsNull() || progress->Cancelled())
+      return false;
+    progress->OnPhase(ImportProgress::Phase::Building, 0.0);
+    BRepBuilderAPI_MakeShapeOnMesh converter(mesh);
+    {
+      Handle(ProgressBridge) bridge =
+          new ProgressBridge(progress, ImportProgress::Phase::Building);
+      Message_ProgressScope scope(bridge->Start(), nullptr, 1);
+      converter.Build(scope.Next());
+    }
+    if (progress->Cancelled() || !converter.IsDone())
+      return false;
+    occShape = converter.Shape();
+    if (occShape.IsNull())
+      return false;
+  } else
+#endif
+  {
+    StlAPI_Reader reader;
+    if (!reader.Read(occShape, filename.c_str()) || occShape.IsNull())
+      return false;
+  }
   // The reader returns the triangles as a COMPOUND of planar faces, not a
   // shell: nothing joins them, so a boolean or a Delete Face saw loose
   // faces while the volume (a surface integral) still read right. Sew them
@@ -2105,7 +2206,10 @@ bool CADKernel::LoadSTL(const std::string& filename, CADShape& shape) {
     Bnd_Box box;
     BRepBndLib::Add(occShape, box);
     const double diagonal = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
-    occShape = SewAt(occShape, diagonal * 1e-7).shape;
+    Sewn sewn = SewAt(occShape, diagonal * 1e-7, progress);
+    if (sewn.cancelled)
+      return false;
+    occShape = sewn.shape;
   }
   shape = CADShape(occShape);
   return true;

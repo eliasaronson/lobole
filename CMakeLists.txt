@@ -378,6 +378,7 @@ set(core_sources
     src/core/io/ProjectStamp.cpp
     src/core/io/ImportAssembly.cpp
     src/core/io/ImportUpAxis.cpp
+    src/core/io/MeshImportCost.cpp
     src/core/io/ImportDxf.cpp
     src/core/io/ImportSvg.cpp
     src/core/io/SketchImport.cpp
@@ -854,6 +855,7 @@ set(app_sources
     src/app/CrashHandler.cpp
     src/app/HeadlessMain.cpp
     src/app/ParentWatch.cpp
+    src/app/StopSignal.cpp
     src/render/IBLTextures.cpp
     src/render/MeshRenderer.cpp
     src/render/OutlineRenderer.cpp
@@ -1082,7 +1084,8 @@ list(REMOVE_ITEM app_lib_sources
      src/app/GpuOwners.cpp
      src/app/HeadlessMain.cpp
      src/app/CrashHandler.cpp
-     src/app/ParentWatch.cpp)
+     src/app/ParentWatch.cpp
+     src/app/StopSignal.cpp)
 add_library(designer_app STATIC
     ${app_lib_sources}
     ${NFD_SOURCES}
@@ -1183,7 +1186,8 @@ add_executable(designer ${SANITIZER_DEFAULTS_SRC}
     src/app/GpuOwners.cpp
     src/app/HeadlessMain.cpp
     src/app/CrashHandler.cpp
-    src/app/ParentWatch.cpp)
+    src/app/ParentWatch.cpp
+    src/app/StopSignal.cpp)
 if(HAVE_STDCXX_STACKTRACE)
     target_compile_definitions(designer PRIVATE HAVE_STDCXX_STACKTRACE)
 endif()

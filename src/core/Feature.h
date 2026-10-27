@@ -876,6 +876,15 @@ public:
     m_seed = std::make_unique<CADKernel::ImportedModel>(std::move(model));
   }
 
+  // The read Execute does before it places anything: `path` by its
+  // extension, a mesh or BREP scaled from `unit` to mm. The import job's
+  // worker calls it to make the seed above, so a seeded Execute and an
+  // unseeded one start from the same model. False with `error` set (and
+  // `out` empty) on a refusal, a failed read or a cancel through `progress`.
+  static bool ReadModel(const std::string& path, units::Length unit,
+                        CADKernel::ImportedModel& out, std::string& error,
+                        CADKernel::ImportProgress* progress = nullptr);
+
 private:
   glm::dvec3 m_shift{0.0}; // what the last Execute centred by
   interchange::UpDecision m_up; // what the last Execute turned it by

@@ -159,6 +159,7 @@ add_executable(designer_tests
     test_split.cpp
     test_refine.cpp
     test_external.cpp
+    test_mesh_import.cpp
     test_spline.cpp
     test_ellipse_arc.cpp
     test_sketch_curves.cpp
@@ -485,6 +486,21 @@ add_test(NAME startup_file_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/startup_file_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(startup_file_smoke PROPERTIES TIMEOUT 120)
+
+# Every import is the `import` job: progress, a cancel that answers the call,
+# the mesh triangle limit and its override, on import_step and --file
+# (docs/ui/long-operations.md#import).
+add_test(NAME import_job_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/import_job_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(import_job_smoke PROPERTIES TIMEOUT 300)
+
+# SIGTERM ends --headless within a bound, whether a job or the main thread is
+# inside a call that cannot be interrupted (docs/architecture.md#stopping).
+add_test(NAME stop_signal_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/stop_signal_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(stop_signal_smoke PROPERTIES TIMEOUT 300)
 
 # A web page can POST to localhost; the JSON in an HTTP body must not run.
 add_test(NAME http_on_rpc_port_smoke

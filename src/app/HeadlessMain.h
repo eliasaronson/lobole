@@ -11,6 +11,8 @@
 // `autosaveSeconds` mirrors --autosave (0 = off); `recordPath` mirrors
 // --record ("" = off). `bindAll` mirrors --remote-bind-all: serve on
 // 0.0.0.0 rather than loopback, which only makes sense inside a container.
+// `allowLargeMesh` mirrors --allow-large-mesh: a startup mesh past the
+// triangle limit is imported rather than refused.
 int RunHeadless(int remotePort, const std::string& fileToLoad,
                 double autosaveSeconds, const std::string& recordPath,
-                bool bindAll = false);
+                bool bindAll = false, bool allowLargeMesh = false);

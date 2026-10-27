@@ -4,9 +4,11 @@
 #pragma once
 
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteParking.h"
 #include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -41,6 +43,14 @@ void RequireFreshTabName(ui::AppState& state, const std::string& name);
 // "Part N" that is actually free: the parts.size()+1 default collided after
 // a deletion, and with duplicate names refused the default must never refuse.
 std::string FreshDefaultTabName(ui::AppState& state, const char* stem);
+
+// import_step, parked on its `import` job (remote/RemoteParking.h): the
+// handler checks every parameter and starts the job, and the call answers
+// when it lands. Null for any other method, or without a part (the ordinary
+// gate refuses it).
+std::unique_ptr<Parking> ParkImportRequest(ui::AppState& state,
+                                           const std::string& method,
+                                           RpcParams& params);
 
 // One row per RPC this module dispatches (for the describe endpoint).
 std::span<const MethodDoc> ProjectMethodDocs();

@@ -20,15 +20,19 @@
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
+#include "core/io/MeshImportCost.h"
 #include "core/io/ProjectMerge.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteParking.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/DocumentSlots.h"
 #include "ui/HistoryPanel.h"
 #include "ui/ImportActions.h"
+#include "ui/ImportJob.h"
 #include "ui/ProjectActions.h"
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
@@ -127,8 +131,17 @@ static constexpr MethodDoc ProjectMethods[] = {
      "file is +y and stands up on our Z — or none, +x, -x, +y, -y, -z; "
      "`turn_deg` turns about world Z after it. The reply's `up_axis` "
      "{requested, applied, turn_deg, because, system} says what was applied "
-     "and why (docs/interchange/README.md#up-axis).",
-     "as_assembly, keep_origin, path, turn_deg, units, up_axis",
+     "and why (docs/interchange/README.md#up-axis). The read runs off the "
+     "frame as the `import` job (background_jobs lists it with its progress; "
+     "cancel_background_job {kind: \"import\"} stops it and the call answers "
+     "with the cancel, the part unchanged) and the call answers when it lands. "
+     "An STL or OBJ is counted first: the reply's `mesh` {triangles, "
+     "expected_s, limit} says what it was expected to cost, and past the "
+     "triangle limit "
+     "(docs/interchange/README.md#what-a-mesh-costs) it is refused naming "
+     "the count and the expected time unless `allow_large_mesh` is true.",
+     "allow_large_mesh, as_assembly, keep_origin, path, turn_deg, units, "
+     "up_axis",
      remote::NeedsPart | remote::NotInBatch},
     {"export_step",
      "Export to STEP {path}: the active part (or {part}, from any tab), or — "
@@ -456,6 +469,153 @@ std::optional<double> DeflectionParam(const RpcParams& p, const char* key) {
   return d;
 }
 } // namespace
+
+namespace {
+
+// An import_step that waits off the frame (ParkImportRequest): the handler,
+// run with this slot set, checks every parameter, starts the job and leaves
+// it here instead of reading the file on the frame.
+struct OffFrameImport {
+  std::shared_ptr<ui::ImportJob> job;
+  size_t bodiesBefore = 0;
+  json preDigest;
+};
+thread_local OffFrameImport* g_offFrameImport = nullptr;
+
+// What an import into a part answers, synchronous or parked.
+json ImportFeatureReply(Document& doc, size_t before, const json& preDigest,
+                        const std::optional<interchange::MeshCost>& mesh) {
+  json out = {{"bodies", doc.GetBodies().size() - before},
+              {"regen", RegenSummaryJson(doc)},
+              {"digest", DigestJson(preDigest, doc)}};
+  // Centred unless told otherwise: say by how much, as add_feature does for
+  // an Import, so a caller who expected file coordinates is not left to
+  // find the move by measuring.
+  if (doc.FeatureCount() > 0)
+    if (const auto* imp = dynamic_cast<const ImportFeature*>(
+            doc.GetFeature(doc.FeatureCount() - 1));
+        imp != nullptr) {
+      if (imp->Shift() != glm::dvec3(0.0))
+        out["recentred_by"] =
+            json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
+      out["up_axis"] = interchange::ToJson(imp->UpApplied());
+      // What the reader left out or sewed, in the call that did it.
+      if (!imp->GetWarning().empty())
+        out["warning"] = imp->GetWarning();
+    }
+  if (mesh)
+    out["mesh"] = {{"triangles", mesh->triangles},
+                   {"expected_s", mesh->expectedSeconds},
+                   {"limit", interchange::MeshTriangleLimit()}};
+  return out;
+}
+
+// What an import as an assembly answers: what did NOT come through as well.
+// A STEP whose products include shapes OpenCASCADE will not rebuild leaves
+// those part tabs empty and their occurrences drawing nothing, and this was
+// visible only by opening each of 97 tabs: 12 were broken on the SO-101 arm
+// and the response said the import had succeeded (the regen-honesty rule,
+// for the one mutating RPC that was not keeping it).
+json ImportAssemblyReply(ui::AppState& state, size_t tabsBefore,
+                         const interchange::UpDecision& decided) {
+  json occs = json::array();
+  if (state.assembly)
+    for (const Occurrence& o : state.assembly->GetOccurrences())
+      occs.push_back({{"id", o.id}, {"name", o.name}});
+  json failed = json::array();
+  size_t partTabs = 0;
+  for (size_t i = tabsBefore; i < state.parts.size(); i++) {
+    const Document* part = ui::PartDocById(state, state.parts[i].id);
+    if (part == nullptr)
+      continue; // the assembly tab the import also creates
+    partTabs++;
+    for (const auto& f : part->GetFeatures())
+      if (!f->GetError().empty())
+        failed.push_back({{"part", state.parts[i].name},
+                          {"feature", f->GetName()},
+                          {"error", f->GetError()}});
+  }
+  json out{{"assembly_index", state.activePart},
+           {"occurrences", occs},
+           {"parts", partTabs},
+           {"ok", failed.empty()},
+           {"up_axis", interchange::ToJson(decided)}};
+  if (!failed.empty())
+    out["failed"] = failed;
+  return out;
+}
+
+// A parked import_step: answered when its job lands, refused when it is
+// cancelled or fails (the part is unchanged either way).
+class ImportWait : public Parking {
+public:
+  ImportWait(OffFrameImport slot, std::string refusal)
+      : m_slot(std::move(slot)), m_refusal(std::move(refusal)) {}
+  Next Poll(ui::AppState& state, const RpcParams&, json& answer) override {
+    if (!m_refusal.empty())
+      throw std::runtime_error(m_refusal);
+    const ui::ImportJob& job = *m_slot.job;
+    // Answered when the cancel is asked, not when the worker stops: the step
+    // a mesh read spends most of its time in cannot be interrupted, and its
+    // result is dropped whenever it ends.
+    const ui::BackgroundJob* bg = ui::FindBackgroundJob(state, "import");
+    const bool cancelAsked = job.outcome == ui::ImportJob::Outcome::Running &&
+                             state.importJob.get() == &job && bg != nullptr &&
+                             bg->cancel.load();
+    switch (cancelAsked ? ui::ImportJob::Outcome::Cancelled : job.outcome) {
+    case ui::ImportJob::Outcome::Running:
+      return Next::Wait;
+    case ui::ImportJob::Outcome::Cancelled:
+      throw std::runtime_error("import_step: '" + job.stepPath +
+                               "' was cancelled while it was read; nothing "
+                               "was imported");
+    case ui::ImportJob::Outcome::Failed:
+      throw std::runtime_error("import of '" + job.stepPath +
+                               "': " + job.landedError);
+    case ui::ImportJob::Outcome::Landed:
+      break;
+    }
+    if (job.kind == ui::ImportJob::Kind::Assembly) {
+      answer = ImportAssemblyReply(state, job.tabsBefore, job.decided);
+      return Next::Answer;
+    }
+    // Where it landed, the live part: no occurrence, no configuration.
+    Document* doc = ui::PartDocById(state, job.partId);
+    if (doc == nullptr)
+      throw std::runtime_error("import_step: the part it imported into was "
+                               "closed before the call answered");
+    answer = ImportFeatureReply(*doc, m_slot.bodiesBefore, m_slot.preDigest,
+                                job.mesh);
+    return Next::Answer;
+  }
+
+private:
+  OffFrameImport m_slot;
+  std::string m_refusal;
+};
+
+} // namespace
+
+std::unique_ptr<Parking> ParkImportRequest(ui::AppState& state,
+                                           const std::string& m, RpcParams& p) {
+  if (m != "import_step" || !state.document)
+    return nullptr; // without a part, the ordinary gate refuses it
+  OffFrameImport slot;
+  g_offFrameImport = &slot;
+  std::string refusal;
+  try {
+    (void)HandleProjectRpc(state, m, p);
+  } catch (const std::exception& e) {
+    refusal = e.what();
+  }
+  g_offFrameImport = nullptr;
+  if (refusal.empty() && !slot.job)
+    return nullptr;
+  // A refusal is answered from the wait, not by running the handler again on
+  // the frame: what it refused ("an import is already running") would be
+  // read synchronously there.
+  return std::make_unique<ImportWait>(std::move(slot), refusal);
+}
 
 std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
@@ -1693,7 +1853,37 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                  "'. Accepted: " + accepted);
       }
     }
-    if (p.value("as_assembly", false)) {
+    const bool asAssembly = p.value("as_assembly", false);
+    const bool allowLarge = p.value("allow_large_mesh", false);
+    const bool keepOrigin = p.value("keep_origin", false);
+    // Counted before anything is built: past the limit, refused naming what
+    // it would cost (docs/interchange/README.md#what-a-mesh-costs).
+    const std::optional<interchange::MeshCost> mesh =
+        interchange::MeshImportCost(path);
+    if (mesh && mesh->overLimit && !allowLarge)
+      throw std::runtime_error(interchange::LargeMeshRefusal(
+          path, *mesh, "`allow_large_mesh: true`"));
+    if (g_offFrameImport != nullptr) {
+      // Off the frame: the job reads the file, the wait answers.
+      ui::ImportRequest request;
+      request.path = path;
+      request.mode = asAssembly ? ui::ImportRequest::Mode::Assembly
+                                : ui::ImportRequest::Mode::Feature;
+      request.unit = unit;
+      request.keepOrigin = keepOrigin;
+      request.up = up;
+      request.turnDeg = turnDeg;
+      request.allowLargeMesh = allowLarge;
+      request.overrideName = "`allow_large_mesh: true`";
+      request.owner = state.rpcConnection;
+      g_offFrameImport->bodiesBefore = doc->GetBodies().size();
+      g_offFrameImport->preDigest = BodyDigestJson(*doc);
+      std::string error;
+      if (!ui::StartImport(state, request, &error, &g_offFrameImport->job))
+        throw std::runtime_error("import_step: " + error);
+      return json::object();
+    }
+    if (asAssembly) {
       // Product structure → part tabs + an assembly (interchange I2).
       const size_t tabsBefore = state.parts.size();
       std::string error;
@@ -1702,62 +1892,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                     &decided)) {
         throw std::runtime_error(error);
       }
-      json occs = json::array();
-      for (const Occurrence& o : state.assembly->GetOccurrences())
-        occs.push_back({{"id", o.id}, {"name", o.name}});
-      // What did NOT come through. A STEP whose products include shapes
-      // OpenCASCADE will not rebuild leaves those part tabs empty and their
-      // occurrences drawing nothing, and this was visible only by opening
-      // each of 97 tabs: 12 were broken on the SO-101 arm and the response
-      // said the import had succeeded (the regen-honesty rule, for the one
-      // mutating RPC that was not keeping it).
-      json failed = json::array();
-      size_t partTabs = 0;
-      for (size_t i = tabsBefore; i < state.parts.size(); i++) {
-        const Document* part = ui::PartDocById(state, state.parts[i].id);
-        if (part == nullptr)
-          continue; // the assembly tab the import also creates
-        partTabs++;
-        for (const auto& f : part->GetFeatures())
-          if (!f->GetError().empty())
-            failed.push_back({{"part", state.parts[i].name},
-                              {"feature", f->GetName()},
-                              {"error", f->GetError()}});
-      }
-      json out{{"assembly_index", state.activePart},
-               {"occurrences", occs},
-               {"parts", partTabs},
-               {"ok", failed.empty()},
-               {"up_axis", interchange::ToJson(decided)}};
-      if (!failed.empty())
-        out["failed"] = failed;
-      return out;
+      return ImportAssemblyReply(state, tabsBefore, decided);
     }
     const size_t before = doc->GetBodies().size();
     const json preDigest = BodyDigestJson(*doc);
     std::string error;
-    if (!ui::ImportAsFeature(state, path, nullptr, &error, unit,
-                             p.value("keep_origin", false), up, turnDeg))
+    if (!ui::ImportAsFeature(state, path, nullptr, &error, unit, keepOrigin, up,
+                             turnDeg))
       throw std::runtime_error(error);
-    json out = {{"bodies", doc->GetBodies().size() - before},
-                {"regen", RegenSummaryJson(*doc)},
-                {"digest", DigestJson(preDigest, *doc)}};
-    // Centred unless told otherwise: say by how much, as add_feature does for
-    // an Import, so a caller who expected file coordinates is not left to
-    // find the move by measuring.
-    if (doc->FeatureCount() > 0)
-      if (const auto* imp = dynamic_cast<const ImportFeature*>(
-              doc->GetFeature(doc->FeatureCount() - 1));
-          imp != nullptr) {
-        if (imp->Shift() != glm::dvec3(0.0))
-          out["recentred_by"] =
-              json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
-        out["up_axis"] = interchange::ToJson(imp->UpApplied());
-        // What the reader left out or sewed, in the call that did it.
-        if (!imp->GetWarning().empty())
-          out["warning"] = imp->GetWarning();
-      }
-    return out;
+    return ImportFeatureReply(*doc, before, preDigest, mesh);
   }
   return std::nullopt;
 }

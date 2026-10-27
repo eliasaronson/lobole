@@ -25,9 +25,10 @@
 //
 // SIGTERM, SIGINT and SIGHUP delete the session marker and die as before: a
 // process asked to stop has not crashed. (Headless and offscreen replace the
-// first two with their own clean shutdown.) On Windows the console's events
-// (Ctrl+C, Ctrl+Break, close, logoff, shutdown) do the same, through
-// SetConsoleCtrlHandler; a mode with a SIGINT handler is asked to stop.
+// first two with their own clean shutdown, bounded: app/StopSignal.h.) On
+// Windows the console's events (Ctrl+C, Ctrl+Break, close, logoff, shutdown) do
+// the same, through SetConsoleCtrlHandler; a mode with a SIGINT handler is
+// asked to stop.
 void InstallCrashHandler();
 
 // Where this session's crash file and Windows minidump go, and the marker the

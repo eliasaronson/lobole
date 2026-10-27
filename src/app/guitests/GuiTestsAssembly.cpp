@@ -405,7 +405,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->parts.size(), tabsBefore);
 
     IM_CHECK(WaitFor(ctx, "the import modal", [&] {
-      return ctx->ItemExists("//Importing STEP/Cancel###import_cancel");
+      return ctx->ItemExists("//###import_modal/Cancel###import_cancel");
     }));
     IM_CHECK(ui::ImportRunning(*s_App));
     ui::HoldImportWorkerForTesting(false);

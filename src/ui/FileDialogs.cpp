@@ -616,7 +616,7 @@ void DrawBrowserWindow(AppState& state) {
             // Background + progress modal (ui/ImportJob.h): a real assembly
             // STEP takes tens of seconds, and doing it inline froze the
             // window for all of them.
-            if (!StartImport(state, fullPath, &error))
+            if (!RequestImport(state, fullPath, &error))
               LOG_ERROR("Import failed: {}", error);
             state.showFileBrowser = false;
           }
@@ -677,7 +677,7 @@ void ImportFileDialog(AppState& state) {
   }
   nfdu8char_t* outPath = nullptr;
   // Exactly what an import reads: STEP, IGES, BREP, STL and OBJ become an
-  // Import feature, DXF and SVG a sketch (StartImport routes by extension).
+  // Import feature, DXF and SVG a sketch (RequestImport routes by extension).
   const nfdu8filteritem_t filters[] = {
       {"CAD files", "step,stp,igs,iges,stl,obj,brep,dxf,svg"}};
 
@@ -688,7 +688,7 @@ void ImportFileDialog(AppState& state) {
     NFD_FreePathU8(outPath);
     LOG_INFO("Selected file: {}", filePath);
     std::string error;
-    if (!StartImport(state, filePath, &error))
+    if (!RequestImport(state, filePath, &error))
       LOG_ERROR("Import failed: {}", error);
   } else if (result == NFD_CANCEL) {
     LOG_DEBUG("User cancelled file dialog");

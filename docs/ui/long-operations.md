@@ -84,7 +84,8 @@ solver) cannot stop mid-pass: cancelling abandons whatever is queued and lets
 the pass in flight finish, and a finished pass's result is kept because it was
 paid for. The registry entry joins its thread on destruction, so closing the
 app or a tab mid-pass blocks for the remainder of one pass, not the whole
-operation.
+operation. A `SIGTERM` to `--headless` or `--offscreen` does not wait on it
+past a few seconds ([stopping](../architecture.md#stopping)).
 
 ## CAM: toolpath passes
 
@@ -265,13 +266,47 @@ tractions, and a shape that is not the document's).
 
 ## Import
 
-A STEP or IGES import's worker reads and plans; its `finish` is first called once
+Every import that is not a sketch's is one `import` job
+(`ui::StartImport(state, ImportRequest)`, `src/ui/ImportJob.{h,cpp}`):
+File › Import of any STEP, IGES, STL, OBJ or BREP, the `import_step` RPC,
+and `--file` at startup in all three modes. An `ImportRequest` carries the
+path, the unit, `keep_origin`, the up axis and turn, the mode (`Auto`: a STEP
+with several instances is an assembly; `Feature`; `Assembly`, which is
+`as_assembly`), `allowLargeMesh` and the RPC connection that owns it (a
+disconnect cancels it). Everything that can refuse is checked before the job
+exists: another import running, no part, the feature limit, a mesh past the
+[triangle limit](../interchange/README.md#what-a-mesh-costs).
+
+The worker reads (`ImportFeature::ReadModel`, the read the feature's own
+regeneration does) and, for a feature, measures each product's volume; for an
+assembly it plans and writes the sidecars. Its `finish` is first called once
 after the join to read the verdict (a feature import, a failure, a cancel, or
 "materialize"), then once per poll, materializing a slice of parts per frame
-and returning `false` until the last. When the materialize starts it turns
-`cancellable` off, which the modal and `background_jobs` both show. The modal
-stays up across the part → assembly tab switch
-(`assembly/a_step_import_runs_in_background`).
+and returning `false` until the last. A feature lands in the part tab the
+import was started from, seeded with what the worker read, so the main
+thread's share is the placement, the box and the names: 1.2 s of a
+61 s import of 100k triangles. When the materialize starts it turns
+`cancellable` off, which the modal and `background_jobs` both show. The
+finish records how it ended (`ImportJob::outcome`: landed, failed, cancelled)
+for whoever waits on it. The modal ("Importing", `###import_modal`) stays up
+across the part → assembly tab switch
+(`assembly/a_step_import_runs_in_background`); a cancelled import takes it
+down at once, because the step a mesh read spends most of its time in (the
+sewing's quilt) cannot be interrupted, and its result is dropped whenever it
+ends. A mesh says its triangles and what it may take in the label and the
+status line; past the limit, File › Import asks first (`AppState::importAsk`,
+`###import_ask`).
+
+`import_step` waits off the frame, as the other long RPCs do
+(`remote::ParkImportRequest`, [requests that
+wait](../architecture.md#requests-that-wait)): the handler runs once with a
+slot set, checks every parameter, starts the job and leaves it in the slot;
+the call answers when the finish has run, with the reply it always gave, and
+answers a cancel the moment one is asked. `--file` starts the job before the
+loop, so a client that connects meanwhile sees it in `background_jobs` and
+can cancel it; a `--file` project still opens as before. GUI
+`import/a_mesh_import_runs_in_background`, `import/a_large_mesh_asks_first`;
+`tests/import_job_smoke.py`.
 
 ## Opening a project
 

@@ -22,6 +22,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/WormFeature.h"
+#include "core/io/MeshImportCost.h"
 #include "core/io/ReadContext.h" // kMaxPartFeatures
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchOrientation.h"
@@ -115,6 +116,25 @@ void RefuseThread(const Feature& f) {
   if (const auto* th = dynamic_cast<const ThreadFeature*>(&f))
     if (const std::string why = th->WhyRefused(); !why.empty())
       throw std::runtime_error("Thread: " + why);
+}
+
+// An Import of a mesh past the triangle limit, added or edited in: built
+// here it would sew on the frame for minutes with nothing to cancel it.
+// import_step reads it off the frame, with progress, a cancel and the
+// override (docs/interchange/README.md#what-a-mesh-costs). A mesh under the
+// limit is as before.
+void RefuseLargeMeshImport(const Feature& f) {
+  const auto* imp = dynamic_cast<const ImportFeature*>(&f);
+  if (imp == nullptr)
+    return;
+  if (const auto cost = interchange::MeshImportCost(imp->path);
+      cost && cost->overLimit)
+    throw std::runtime_error(
+        "Import: " +
+        interchange::LargeMeshRefusal(imp->path, *cost,
+                                      "import_step {allow_large_mesh: true}, "
+                                      "which reads it off the frame with "
+                                      "progress and a cancel"));
 }
 
 // A direct edit (Delete/Offset/Move/Replace Face) whose own Execute fails is
@@ -1395,6 +1415,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         throw std::runtime_error("Derived: " + why);
     }
     RefuseThread(*feature);
+    RefuseLargeMeshImport(*feature);
     if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
       throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
     }
@@ -1593,6 +1614,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const auto probe = FeatureFromJsonNamed(p.at("feature"));
       RejectUnknownFeatureFields(p.at("feature"), *probe);
       RefuseThread(*probe);
+      // A new file only: an import already past the limit (imported with
+      // the override) keeps its other edits.
+      const auto* was = dynamic_cast<const ImportFeature*>(feature);
+      const auto* now = dynamic_cast<const ImportFeature*>(probe.get());
+      if (now != nullptr && (was == nullptr || was->path != now->path))
+        RefuseLargeMeshImport(*probe);
       RefuseOnInput(*doc, *probe, index);
       RefuseFailingDirectEdit(*doc, *probe, index);
     }

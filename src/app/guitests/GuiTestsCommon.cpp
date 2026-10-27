@@ -85,6 +85,7 @@ void ResetAppForTest() {
   // it is session state rather than a preference, so the settings reset below
   // does not cover it.
   s_App->keyCaptureId.clear();
+  s_App->importAsk = {}; // an unanswered large-mesh ask is a modal over it
   // Preferences are DEFAULTS for every test: otherwise the developer's own
   // config decides whether a test passes and CI disagrees with the desk. The
   // app already skips loading them under --gui-tests; this covers a test that

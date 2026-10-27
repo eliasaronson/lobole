@@ -13,7 +13,8 @@
 // ones on a projection (remote/RemoteDrawings.h), an exact interference of
 // two named sides on its boolean (remote/RemoteInspection.h), a synchronous
 // requirements check or design sweep on its job
-// (remote/RemoteRequirements.h).
+// (remote/RemoteRequirements.h), an import_step on the import job
+// (remote/RemoteProject.h).
 
 #include <nlohmann/json.hpp>
 

@@ -360,7 +360,8 @@ void OnFatalSignal(int sig, siginfo_t* info, void*) {
 // app): somebody asked the process to stop, which is not a crash. Delete the
 // session marker so the next start does not report one, then die exactly as
 // before. The headless and offscreen loops install their own handlers for
-// SIGINT/SIGTERM and exit cleanly, which ends the session the ordinary way.
+// SIGINT/SIGTERM (app/StopSignal.h) and exit cleanly, within a bound, which
+// ends the session the ordinary way.
 void OnTerminationSignal(int sig) {
   if (g_markerPath[0])
     unlink(g_markerPath);
