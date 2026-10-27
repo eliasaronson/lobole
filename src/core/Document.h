@@ -150,6 +150,14 @@ public:
   // call site.
   static std::unique_ptr<Document> CopyWithGeometry(const Document& other);
 
+  // The evaluations `other` made that this document's regen cache lacks,
+  // filed here under the same keys. A chain hash names identical inputs all
+  // the way down whichever document computed it, so a feature built on a
+  // CopyWithGeometry of this document (add_feature's trial of a direct
+  // edit) is a hit here, not a second build. Only entries that executed:
+  // a bake's placeholders hold no bodies.
+  void AdoptEvaluations(const Document& other);
+
   size_t FeatureCount() const { return m_features.size(); }
   Feature* GetFeature(size_t index);
   [[nodiscard]] const Feature* GetFeature(size_t index) const {

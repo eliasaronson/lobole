@@ -145,7 +145,10 @@ void RefuseLargeMeshImport(const Feature& f) {
 // features, not the revision, inside a batch or out of one
 // (docs/scripting/rpc.md#a-refused-call-changes-nothing). An upstream edit
 // that later breaks a stored one is a broken feature in that edit's regen.
-// `at` is the index a modify replaces; absent, the edit is appended.
+// An edit that builds is not built again: the copy's evaluation goes into
+// the document's regen cache (Document::AdoptEvaluations), which the commit
+// then hits. `at` is the index a modify replaces; absent, the edit is
+// appended.
 bool IsDirectEdit(const Feature& f) {
   return dynamic_cast<const DeleteFaceFeature*>(&f) != nullptr ||
          dynamic_cast<const OffsetFaceFeature*>(&f) != nullptr ||
@@ -153,7 +156,7 @@ bool IsDirectEdit(const Feature& f) {
          dynamic_cast<const ReplaceFaceFeature*>(&f) != nullptr;
 }
 
-void RefuseFailingDirectEdit(const Document& doc, const Feature& f,
+void RefuseFailingDirectEdit(Document& doc, const Feature& f,
                              std::optional<size_t> at) {
   if (!IsDirectEdit(f))
     return;
@@ -168,11 +171,15 @@ void RefuseFailingDirectEdit(const Document& doc, const Feature& f,
     copy->AddFeature(std::move(probe));
     index = copy->FeatureCount() - 1;
   }
-  copy->Regenerate();
+  // Adding or replacing it regenerated the copy; regenerating again ran a
+  // failed edit -- which no cache holds -- a second time.
   const Feature* built = copy->GetFeatures()[index].get();
   if (!built->GetError().empty() && !built->ErrorAfterEarlierFailure())
     throw std::runtime_error(f.TypeName() + " refused: " + built->GetError() +
                              ". The document is unchanged");
+  // Built: the document takes the copy's evaluation instead of building the
+  // edit a second time when the call commits it.
+  doc.AdoptEvaluations(*copy);
 }
 
 // What a feature says about the bodies it would act on (Feature::WhyRefusedOn):

@@ -157,6 +157,16 @@ std::unique_ptr<Document> Document::CopyWithGeometry(const Document& other) {
 
 Document::Document(const Document& other) : Document(other, false) {}
 
+void Document::AdoptEvaluations(const Document& other) {
+  for (const auto& [hash, entry] : other.m_cache)
+    if (entry.bodiesValid && entry.executed != nullptr &&
+        m_cache.count(hash) == 0) {
+      RegenCacheEntry adopted = entry;
+      adopted.lastUse = ++m_regenClock;
+      m_cache.emplace(hash, std::move(adopted));
+    }
+}
+
 // The one copy implementation, behind both public forms. A list of members,
 // not a `= default`, for two reasons: the features are owning pointers and
 // must be CLONED, and m_instanceId must NOT come along (it is left to its
@@ -552,7 +562,9 @@ bool Document::Regenerate() {
         sheet::ReliefStyleName(r.reliefStyle) + "|" +
         std::to_string(r.reliefWidth) + "|" + std::to_string(r.reliefDepth));
   }
-  for (size_t i = 0; i < upTo; i++) {
+  const size_t seed = chain;
+  // Feature i's link of the chain, from the link before it.
+  const auto link = [&](size_t before, size_t i) {
     // Fold in the active configuration's effective suppression: the feature
     // JSON encodes only the authored `suppressed` flag, so a config that
     // suppresses feature i (without changing any field value) must still move
@@ -606,12 +618,36 @@ bool Document::Regenerate() {
       const glm::dvec3 up = PrintUp(m_printSettings);
       fj["print_up"] = {up.x, up.y, up.z};
     }
-    chain = std::hash<std::string>{}(
-        std::to_string(chain) + fj.dump() +
+    return std::hash<std::string>{}(
+        std::to_string(before) + fj.dump() +
         (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));
+  };
+  for (size_t i = 0; i < upTo; i++) {
+    chain = link(chain, i);
     hashes[i] = chain;
   }
   m_tipHash = upTo > 0 ? hashes[upTo - 1] : 0;
+  // A feature whose evaluation writes into what it is keyed on what its
+  // inputs fix (Feature::RecordsWhatItIsKeyedOn: a direct edit records the
+  // fingerprint of an imported face the first time it sees it,
+  // docs/modeling/README.md#direct-edit) is keyed afresh on what it now
+  // says, and so is every link after it, the evaluation filed under both
+  // keys. Keyed only on what it said before, the next regeneration missed
+  // and built it, and everything after it, again: an Offset Face on a
+  // 291-face import, twice.
+  const auto rekey = [&](size_t i) {
+    if (!m_features[i]->RecordsWhatItIsKeyedOn())
+      return;
+    const size_t now = link(i == 0 ? seed : hashes[i - 1], i);
+    if (now == hashes[i])
+      return;
+    if (const auto it = m_cache.find(hashes[i]); it != m_cache.end())
+      m_cache.insert_or_assign(now, it->second);
+    m_features[i]->SetDerivedFor(now);
+    hashes[i] = now;
+    for (size_t j = i + 1; j < upTo; j++)
+      hashes[j] = link(hashes[j - 1], j);
+  };
 
   // Baked geometry: if the blob the loader adopted describes exactly this
   // feature list, install it and execute nothing. The regen cache holds no
@@ -729,17 +765,23 @@ bool Document::Regenerate() {
           (suppressed || it->second.executed != nullptr ||
            f.DerivedFor() == h)) {
         RegenCacheEntry& e = it->second;
+        bool restored = false;
         e.lastUse = ++m_regenClock;
         if (suppressed) {
           f.ClearError();
           f.ClearWarning();
         } else if (e.executed != nullptr && f.DerivedFor() != h) {
           f.CopyDerivedState(*e.executed);
+          restored = true;
         } else if (e.executed != nullptr) {
           f.CopyRegenStatus(*e.executed);
         }
         f.SetDerivedFor(h);
         input = e.bodiesValid ? &e.bodiesAfter : nullptr;
+        // The evaluation restored may be one that recorded what the object
+        // had not (another document's, AdoptEvaluations).
+        if (restored)
+          rekey(i);
         m_lastStats.cached++;
         // Errors from the evaluation that made the entry still count
         // against the result.
@@ -803,13 +845,16 @@ bool Document::Regenerate() {
         FollowModifiedFaces(m_bodies);
       }
       f.SetDerivedFor(h);
-      if (!faulted)
+      if (!faulted) {
         m_cache.insert_or_assign(
             h, RegenCacheEntry{m_bodies, true,
                                suppressed
                                    ? nullptr
                                    : std::shared_ptr<const Feature>(f.Clone()),
                                ++m_regenClock});
+        if (!suppressed)
+          rekey(i);
+      }
     }
     if (!restart && input != nullptr) {
       if (input != &m_bodies)
@@ -822,6 +867,7 @@ bool Document::Regenerate() {
   }
   if (!chainOk)
     allOk = false;
+  m_tipHash = upTo > 0 ? hashes[upTo - 1] : 0;
   // The current chain. Entries past the rollback bar stay in it while the
   // features before the bar are unchanged, so rolling forward is instant.
   if (m_chain.size() < upTo ||

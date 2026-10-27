@@ -960,6 +960,75 @@ TEST_CASE("Offset Face moves a floor beside a wall its plane runs through",
   }
 }
 
+// A direct edit on an imported face records the face's fingerprint the
+// first time it sees it, which changes what the edit is keyed on: the
+// regeneration after it missed, and built the edit, and everything after
+// it, again.
+TEST_CASE("A direct edit that records a fingerprint is not built again by "
+          "the next regeneration",
+          "[direct_edit]") {
+  Document doc;
+  {
+    auto imp = std::make_unique<ImportFeature>(
+        "Bar", WriteBrep(DrilledBar(3), "bar3.brep"));
+    imp->keepOrigin = true;
+    doc.AddFeature(std::move(imp));
+  }
+  const uint64_t bar = Last(doc)->GetId();
+  const Body& b = *BodyOf(doc, bar);
+  doc.AddFeature(std::make_unique<OffsetFaceFeature>(
+      "Longer", bar, std::vector<ElementRef>{FaceRef(b, {0, 10, 5})}, 2.0));
+  REQUIRE(Last(doc)->GetError().empty());
+  REQUIRE(dynamic_cast<OffsetFaceFeature*>(Last(doc))->fingerprints.size() ==
+          1);
+  CHECK(doc.LastRegenStats().executed == 1);
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.LastRegenStats().executed == 0);
+  // ...and what follows it is keyed on the edit as it now reads.
+  auto after = std::make_unique<DatumPlaneFeature>(
+      "After", DatumPlaneKind::ThroughPoints);
+  after->p0 = {0, 0, 30};
+  after->p1 = {1, 0, 30};
+  after->p2 = {0, 1, 30};
+  doc.AddFeature(std::move(after));
+  CHECK(doc.LastRegenStats().executed == 1);
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.LastRegenStats().executed == 0);
+}
+
+// add_feature builds a direct edit on a copy of the document first, so a
+// refusal changes nothing (RefuseFailingDirectEdit); the document then takes
+// the copy's evaluation rather than building the edit a second time.
+TEST_CASE("A document takes an evaluation its copy made instead of "
+          "building it again",
+          "[direct_edit]") {
+  Document doc;
+  {
+    auto imp = std::make_unique<ImportFeature>(
+        "Bar", WriteBrep(DrilledBar(3), "bar3b.brep"));
+    imp->keepOrigin = true;
+    doc.AddFeature(std::move(imp));
+  }
+  const uint64_t bar = Last(doc)->GetId();
+  const auto edit = std::make_unique<OffsetFaceFeature>(
+      "Longer", bar,
+      std::vector<ElementRef>{FaceRef(*BodyOf(doc, bar), {0, 10, 5})}, 2.0);
+  const auto copy = Document::CopyWithGeometry(doc);
+  copy->AddFeature(edit->Clone());
+  REQUIRE(Last(*copy)->GetError().empty());
+  CHECK(copy->LastRegenStats().executed == 1);
+  doc.AdoptEvaluations(*copy);
+  doc.AddFeature(edit->Clone());
+  INFO(Last(doc)->GetError());
+  REQUIRE(Last(doc)->GetError().empty());
+  CHECK(doc.LastRegenStats().executed == 0);
+  CHECK_THAT(VolumeOf(doc, bar), WithinRel(VolumeOf(*copy, bar), 1e-12));
+  // The fingerprint came with it, and the next regeneration hits too.
+  CHECK(dynamic_cast<OffsetFaceFeature*>(Last(doc))->fingerprints.size() == 1);
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.LastRegenStats().executed == 0);
+}
+
 // A neighbour is grown only as far as the target is from the face; a
 // spherical dent whose rim is the sphere's equator must still close the
 // region above it, or the cell between the face and its new plane runs

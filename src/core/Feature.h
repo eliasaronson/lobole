@@ -483,6 +483,16 @@ public:
   // test_conventions.cpp holds the overrides to that.
   virtual void CopyDerivedState(const Feature& executed) = 0;
 
+  // Whether Execute may write into what the feature is keyed on something
+  // the inputs it ran on fix -- a direct edit records the fingerprint of an
+  // imported face the first time it sees it. Document::Regenerate then
+  // files the evaluation under the key the feature has after it, so the
+  // next regeneration hits. Not for a feature whose written value feeds its
+  // next evaluation (a sketch's solved positions solve again from where they
+  // ended): keyed afresh, that would serve the first solve where a load
+  // solves twice.
+  virtual bool RecordsWhatItIsKeyedOn() const { return false; }
+
   // The regeneration status `executed` was left with: error, warning and
   // the after-an-earlier-failure flag. Part of every CopyDerivedState, and
   // applied on its own by a hit whose object already holds that evaluation

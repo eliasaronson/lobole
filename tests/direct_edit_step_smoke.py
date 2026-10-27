@@ -6,6 +6,9 @@ every face of each file deleted alone, and offset out and in at its derived
 default. Each edit either passes its own checks and is kept, or is REFUSED
 with a face named and the document unchanged -- never stored as a broken
 feature, never a refusal that names nothing, never a write before one.
+Each is built once: a refusal on add_feature's trial copy alone (its log
+line appears once), and a kept edit not again when the call commits it
+(the commit's regeneration executes nothing).
 
 The files are tests/fixtures/step's (LICENSES.txt there); more can be named
 on the command line, which is how parts whose licence keeps them out of the
@@ -82,6 +85,9 @@ def run_file(d, path, tally):
                 regen = r.get("regen", {})
                 assert regen.get("ok", False) and not regen.get("failed"), \
                     f"{label}: accepted and broken: {regen}"
+                executed = d.call("get_state")["regen"]["executed"]
+                assert executed == 0, \
+                    f"{label}: the commit built the edit again ({executed})"
                 tally["kept"] += 1
                 d.call("undo")
 
@@ -95,10 +101,17 @@ def main():
     app = launch_app(binary)
     try:
         d = Client.wait_for(app.port)
+        refused_so_far = 0
         for path in files:
             tally = {"kept": 0, "refused": 0}
             t = time.time()
             run_file(d, path, tally)
+            failures = app.log().count("Feature 'S' failed to regenerate")
+            built = failures - refused_so_far
+            assert built == tally["refused"], \
+                f"{os.path.basename(path)}: {tally['refused']} refusals " \
+                f"built {built} times"
+            refused_so_far = failures
             print(f"direct_edit_step_smoke: {os.path.basename(path)}: "
                   f"{tally['kept']} kept, {tally['refused']} refused "
                   f"({time.time() - t:.1f} s)")

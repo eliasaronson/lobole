@@ -36,6 +36,10 @@ public:
     return std::make_unique<DeleteFaceFeature>(*this);
   }
 
+  // The fingerprints of the imported faces it picked
+  // (directedit::ResolvePicked).
+  bool RecordsWhatItIsKeyedOn() const override { return true; }
+
   void CopyDerivedState(const Feature& executed) override {
     RestoreExecuted<DeleteFaceFeature>(executed);
   }
