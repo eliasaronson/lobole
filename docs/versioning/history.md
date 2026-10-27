@@ -1,6 +1,6 @@
 # Version history, merging and sharing
 
-A `.dsgn` project is its own git repository, and every save is a commit.
+A `.lob` project is its own git repository, and every save is a commit.
 This page covers what the app does with that: the History panel, named
 versions, branches and merges, the Conflicts panel, remotes, and seeing what
 changed between versions. How a project is laid out on disk is in
@@ -18,7 +18,7 @@ their failures come back from git in git's vocabulary.
 a no-op, or answers "nothing", when git is not on `PATH`.
 
 - **Commit on save.** `ui::MarkProjectSaved` initialises the repository on
-  the first save of a `.dsgn` path and commits everything with the save's
+  the first save of a `.lob` path and commits everything with the save's
   message (default `save`; `save_project {message}` sets it). A single-file
   `.json` project has no history.
 - **Who commits.** Per field, git's own `user.name` / `user.email`, then the

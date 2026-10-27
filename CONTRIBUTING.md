@@ -249,7 +249,7 @@ as [`SECURITY.md`](SECURITY.md) describes, and never in a public issue.
 
 Include `lobole --version`, your OS and GPU, and what you did. If it
 crashed, the symbolized stack trace is on stderr (a `std::stacktrace` handler
-is installed for SIGSEGV/SIGABRT) — paste it. A `.dsgn` project that
+is installed for SIGSEGV/SIGABRT) — paste it. A `.lob` project that
 reproduces the problem is worth more than a description; the format is text,
 so it diffs and reviews cleanly.
 

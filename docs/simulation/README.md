@@ -357,8 +357,8 @@ v154 (`scratch/pantilt`):
 | pan 360 | motion | 0.60 MB | 0.38 MB (1.6x) |
 | tilt 90 | motion | 0.43 MB | 0.09 MB (5.0x) |
 
-`yoke_envelope.dsgn`'s results went from 135 MB to 13.5 MB and
-`yoke_topo.dsgn`'s from 86 MB to 6.5 MB; the rest of each project -- baked
+`yoke_envelope.lob`'s results went from 135 MB to 13.5 MB and
+`yoke_topo.lob`'s from 86 MB to 6.5 MB; the rest of each project -- baked
 geometry above all -- is untouched (147.6 MB to 26.2 MB for the envelope's
 tree). A topology result keeps its volume and shrinks least; a static one
 was nine-tenths interior. Every result reopened as it was saved, current

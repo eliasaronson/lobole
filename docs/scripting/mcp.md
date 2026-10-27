@@ -51,7 +51,7 @@ The server resolves which instance to talk to, in this order:
 It connects lazily on the first tool call and reconnects once across a
 dropped connection, so registering it before the app is running is fine.
 `describe` and `execute_script` report what they attached to (`attached`:
-"Loböle on port 9090: bracket.dsgn (unsaved changes), gui"), and the
+"Loböle on port 9090: bracket.lob (unsaved changes), gui"), and the
 `instances` tool lists what is running. That line comes from `ping`, live.
 
 ### Autostart

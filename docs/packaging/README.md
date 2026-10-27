@@ -101,6 +101,14 @@ and a 256×256 PNG) under their standard `share/` locations. The metadata
 sources are in `packaging/`; the icons are made from the master mark by
 `generators/logo/brand.py` ([assets/brand](../../assets/brand/README.md)).
 
+The desktop entry launches `lobole %f`: a lone path on the command line is
+opened as `--file` opens it (a project, or a CAD file imported), so "Open
+With" and a file dropped on the launcher reach the app. No MIME type is
+registered for projects. A project is a `.lob` FOLDER, and file managers type
+every directory `inode/directory` whatever its name, so no shared-mime-info
+glob can make one open on a double-click
+([versioning](../versioning/README.md#the-dsgn-extension)).
+
 **Every shared library the app links needs its own `install()` rule.** Every
 test runs from the build tree, where the libraries sit beside the binary, so
 a missing rule only shows in an installed build, as `cannot open shared

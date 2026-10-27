@@ -65,12 +65,14 @@ stays GPU-free.
 **The targets keep the old name; what ships does not.** Loböle is the
 wordmark and `lobole` the identifier everywhere a user or another program
 sees it: the binary (`OUTPUT_NAME lobole` on the `designer` target), the
-application id `org.lobole.Lobole`, the per-user directories
+application id `org.lobole.Lobole`, the project extension `.lob` (the old
+`.dsgn` is still opened, never written:
+[versioning](versioning/README.md#the-dsgn-extension)), the per-user directories
 (`src/common/RuntimePaths.cpp`), the instance-registry handshake
 (`{"app": "lobole"}`), the MCP server's name, and every environment
 variable and CMake option (`LOBOLE_*`; `test_conventions.cpp` fails on
 the old prefix). Never the ö in an identifier. The CMake target names,
-the C++ namespaces and the document format (`kFormat`, `.dsgn`) are
+the C++ namespaces and the document format (`kFormat`) are
 invisible outside the build and keep "designer"; the format moves only with
 a `kVersion` bump wanted for its own reasons. "designer" in prose is also the
 English noun for the person using the app, and stays.

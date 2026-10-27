@@ -351,10 +351,12 @@ until `core/io/ProjectPaths.h` says so:
 
 ## The directory form
 
-A part saved to a `.dsgn` directory (the default for a new save) is:
+A part saved to a `.lob` directory (the default for a new save; a `.dsgn`,
+the extension before the rename, is the same form and is still read:
+[README.md](README.md#the-dsgn-extension)) is:
 
 ```
-part.dsgn/
+part.lob/
   index.json                 envelope + the ordered feature-id list
   features/<id>-<type>.json  one file per feature (the type suffix is cosmetic)
   studies/  configurations/  assets/   per-kind files, absent when empty

@@ -642,7 +642,7 @@ stated; a zeroed-on-corner job plays its own verdict; the check, the compare
 and the designed surface are the one-thread answer on every core, and the
 other setups' memo hits and misses as it should. The hidden
 `cam verify: the board's planar check, timed` (`[.bench]`, `PLANAR_BENCH_DIR`
-names a directory holding `chess.dsgn` and the posted files) times the parts
+names a directory holding `chess.lob` and the posted files) times the parts
 of a check on a job on disk. The GUI cases
 `cam/simulation_plays_and_gives_it_back`, `cam/simulate_says_why_at_the_click`
 and `cam/a_rotary_part_turns_as_it_plays` run windowed, because an offscreen

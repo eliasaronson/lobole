@@ -12,20 +12,52 @@ A project has one of three shapes, chosen by `ui::SaveProject`
 
 | shape | when | layout |
 |---|---|---|
-| single file `.json` | one part saved to a `.json` path (`save_project`, scripts); the GUI's Save As always writes `.dsgn` | one JSON document, assets base64 inside it |
-| flat `.dsgn` directory | one part, no part-local variables, no tab folders, no section cuts | `index.json` + `features/` + … (see [format.md](format.md#the-directory-form)) |
-| project container `.dsgn` | anything else: several documents, or an assembly, drawing or job | `project.json` + `parts/<name>/`, `assemblies/<name>/`, `drawings/<name>/`, `jobs/<name>/`, each a document directory |
+| single file `.json` | one part saved to a `.json` path (`save_project`, scripts); the GUI's Save As always writes `.lob` | one JSON document, assets base64 inside it |
+| flat `.lob` directory | one part, no part-local variables, no tab folders, no section cuts | `index.json` + `features/` + … (see [format.md](format.md#the-directory-form)) |
+| project container `.lob` | anything else: several documents, or an assembly, drawing or job | `project.json` + `parts/<name>/`, `assemblies/<name>/`, `drawings/<name>/`, `jobs/<name>/`, each a document directory |
 
-The GUI's Save As turns any other name into `<name>.dsgn`
-(`DocumentIO::ProjectSaveTarget`: `.json` is replaced, anything else
-appended). `.json` is the
+The GUI's Save As turns any other name into `<name>.lob`
+(`DocumentIO::ProjectSaveTarget`: `.json` and `.dsgn` are replaced, anything
+else appended). `.json` is the
 single-document interchange form only: saving a multi-document project to a
-`.json` path is refused, naming the `.dsgn` path to use instead, because the
+`.json` path is refused, naming the `.lob` path to use instead, because the
 container would otherwise be a directory named `.json` without the git
-history, which keys on `.dsgn`. Open dispatches on the path: a `.dsgn` or
-any directory opens as a project (`project.json` present means the container
-form), a file as a single document. Picking an `index.json` inside a `.dsgn`
-opens the project.
+history, which keys on `.lob`. Open dispatches on the path: a `.lob` (or
+`.dsgn`) or any directory opens as a project (`project.json` present means
+the container form), a file as a single document. Picking an `index.json`
+inside a `.lob` opens the project. Every place that asks "is this a
+project?" goes through `ui::IsProjectPath` / `ui::NormalizeProjectPick`, and
+"is this the folder form?" through `DocumentIO::IsProjectFolderName`.
+
+### The .dsgn extension
+
+`.dsgn` is the project extension from before the app was renamed. A `.dsgn`
+OPENS exactly as a `.lob` does, and the app never writes one:
+
+- Saving the project that was opened from `<name>.dsgn` (Ctrl+S, naming a
+  version, `save_project` to that path) writes `<name>.lob` beside it. The
+  `.dsgn` folder is first **copied** to the `.lob` — git history, adopted
+  imports, assets, baked geometry — and the save lands over the copy and
+  commits there, so the history carries on. Copied, not moved: the `.dsgn`
+  is left exactly as it was, and an older build can still open it.
+- From then on the app tracks the `.lob`: title, recents, autosave, history.
+  The menu bar says "Saved as .lob", and `save_project` returns `path` (where
+  it went) and `migrated_from` (the `.dsgn`).
+- A `.lob` already beside it refuses the save (it is another project, or an
+  earlier migration); Ctrl+S then opens Save As. A save to any other `.dsgn`
+  is refused, naming the `.lob` to use.
+- A `.dsgn` shows no history in the History panel: a restore or a named
+  version would write into it. The first save makes the `.lob` that has it.
+
+**`.lob` is the folder form only; the single-file form stays `.json`.** One
+extension for both would leave a path that does not exist yet unable to say
+which it wants, and the two differ in capability (git history, import
+sidecars, baked geometry) — the bug class the `.json` refusal above exists
+for. Nor would a single file buy a double-click: no MIME glob reaches a
+folder, since file managers type every directory `inode/directory` whatever
+its name (`gio info -a standard::content-type x.lob`). The desktop entry
+passes a path (`Exec=lobole %f`), which the command line opens as `--file`
+does ([packaging](../packaging/README.md#the-install-layout)).
 
 In the flat form the one part's file carries the project-scope variables; in
 the container they live in `project.json` and each part's `index.json`
@@ -192,12 +224,12 @@ content for good (`ui::SaveProject`, `SaveWouldLoseDrops`):
 
 ## Baked geometry
 
-A `.dsgn` part is a recipe: a feature list re-executed on open. To make
+A `.lob` part is a recipe: a feature list re-executed on open. To make
 opening a load rather than a rebuild, a save also writes the built bodies
 beside it (`src/core/io/GeometryCache.{h,cpp}`):
 
 ```
-<part>.dsgn/geometry/
+<part>.lob/geometry/
   index.json    geometry_format, chain_hash, occ_version, and per body its
                 name, material, producing feature, element map, and what
                 the features stamped on it (bends, thread regions, ring
@@ -488,7 +520,7 @@ byte count. Coarse mtimes or clock skew on a network filesystem widen that
 window; the check degrades to "usually notices", never to "wrong".
 
 The stamp is taken in `ui::OpenProject` itself (both of its success paths:
-a single-part `.dsgn` returns early), in `SaveProject` after the write, and
+a single-part `.lob` returns early), in `SaveProject` after the write, and
 in `MarkProjectSaved` after the git commit so the app's own commit is not
 mistaken for an external write.
 

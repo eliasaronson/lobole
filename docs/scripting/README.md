@@ -178,7 +178,7 @@ hash of its geometry ([sketching](../sketching/README.md#entity-ids)).
 ## Fan-out: several agents, several parts, one project
 
 Several agents can build the parts of one project at once when the work is
-file-disjoint, which parts are: the `.dsgn` directory format is one file per
+file-disjoint, which parts are: the `.lob` directory format is one file per
 part, per mate, per occurrence, so git merges two agents' parts without
 reading either.
 
