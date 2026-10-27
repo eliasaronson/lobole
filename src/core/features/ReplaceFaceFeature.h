@@ -78,11 +78,13 @@ public:
 
 namespace directedit {
 
-// Replace Face's general case, for one face of `body`: the body's faces
-// less that one, its neighbours extended past the target, and `makeOnto`'s
-// face (the target's surface, bounded to `half` around `centre`) handed to
-// BOPAlgo_MakerVolume, keeping the cell on the inner side of the faces left
-// alone. `out` and `map` on success, else why not, naming the faces.
+// Replace Face's general case, for one face of `body`: that face, its
+// neighbours extended past the target and `makeOnto`'s face (the target's
+// surface, bounded to `half` around `centre`) handed to BOPAlgo_MakerVolume
+// -- nothing else of the body, so the cost is the face's neighbourhood's --
+// and the cells between the face and the target fused with the body or cut
+// from it (docs/modeling/README.md#replace-face). `out` and `map` on
+// success, else why not, naming the faces.
 std::string ReplaceOnto(
     const Body& body, int index, const std::string& name,
     const std::function<TopoDS_Face(const glm::dvec3&, double)>& makeOnto,
