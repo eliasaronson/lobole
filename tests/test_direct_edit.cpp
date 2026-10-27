@@ -26,16 +26,25 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepLib.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRep_Builder.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_Wire.hxx>
+#include <gp_Ax2.hxx>
 #include <gp_Pln.hxx>
 
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -853,4 +862,140 @@ TEST_CASE("Delete Face fills all 100 holes of a STEP plate in one feature",
   // still fails a heal that went quadratic in the holes.
   INFO("100 holes deleted in " << s << " s of CPU");
   CHECK(s < 180.0);
+}
+
+namespace {
+
+// A 200x20x10 bar drilled through its 20x200 faces by `holes` D1 bores in
+// two rows from x = 40 on: many faces, none of them near the end face at
+// x = 0.
+CADShape DrilledBar(int holes) {
+  TopoDS_Compound tools;
+  BRep_Builder bb;
+  bb.MakeCompound(tools);
+  const int perRow = (holes + 1) / 2;
+  for (int i = 0; i < holes; i++)
+    bb.Add(tools, BRepPrimAPI_MakeCylinder(
+                      gp_Ax2(gp_Pnt(40.0 + 155.0 * (i % perRow) /
+                                               std::max(1, perRow - 1),
+                                    i < perRow ? 6.0 : 14.0, -1.0),
+                             gp_Dir(0, 0, 1)),
+                      0.5, 12.0)
+                      .Shape());
+  BRepAlgoAPI_Cut cut(BRepPrimAPI_MakeBox(200, 20, 10).Shape(), tools);
+  REQUIRE(cut.IsDone());
+  return CADShape(cut.Shape());
+}
+
+} // namespace
+
+// docs/modeling/README.md#offset-face: a planar face is moved by building
+// the volume between it and its new plane from its neighbours, and joining
+// that to the body -- not by cutting every face of the body into cells,
+// which cost the SO-101 wrist bracket's 291 faces 25 s an offset (and
+// refused this bar: "201 separate pieces"). A cost check
+// (docs/ui/testing.md#tests-that-time-things), failed by a 10 s CPU spin
+// planted in ReplaceOnto.
+TEST_CASE("Offset Face costs what its face's neighbourhood does and not "
+          "what the body does",
+          "[direct_edit]") {
+  Document doc;
+  const std::string path = WriteBrep(DrilledBar(200), "drilled_bar.brep");
+  {
+    auto imp = std::make_unique<ImportFeature>("Bar", path);
+    imp->keepOrigin = true;
+    doc.AddFeature(std::move(imp));
+  }
+  const uint64_t bar = Last(doc)->GetId();
+  REQUIRE(Last(doc)->GetError().empty());
+  const Body& b = *BodyOf(doc, bar);
+  REQUIRE(b.shape.FaceCount() > 200);
+  const double before = b.shape.Volume();
+  const std::clock_t t0 = std::clock();
+  doc.AddFeature(std::make_unique<OffsetFaceFeature>(
+      "Longer", bar, std::vector<ElementRef>{FaceRef(b, {0, 10, 5})}, 2.0));
+  const double s = double(std::clock() - t0) / CLOCKS_PER_SEC;
+  INFO(Last(doc)->GetError());
+  REQUIRE(Last(doc)->GetError().empty());
+  CHECK_THAT(VolumeOf(doc, bar) - before, WithinRel(20.0 * 10.0 * 2.0, 1e-9));
+  // 0.6 s of CPU on a P-core here, 1.2 s on an E-core, 2.7 s on a
+  // low-power one.
+  INFO("offset in " << s << " s of CPU");
+  CHECK(s < 8.0);
+}
+
+// The whole-body cells also refused edits they should make: the target
+// plane, as large as the body, ran on through a wall standing beside the
+// face and cut it in two, and the edit was refused for leaving "separate
+// pieces" (an imported battery holder's ribs, the SO-101 bracket's plates).
+TEST_CASE("Offset Face moves a floor beside a wall its plane runs through",
+          "[direct_edit]") {
+  // A 40x30x10 base and a 5 mm wall along its far end, 30 high.
+  TopoDS_Shape l =
+      BRepAlgoAPI_Fuse(BRepPrimAPI_MakeBox(40, 30, 10).Shape(),
+                       BRepPrimAPI_MakeBox(gp_Pnt(35, 0, 0), 5, 30, 30).Shape())
+          .Shape();
+  ShapeUpgrade_UnifySameDomain unify(l, Standard_True, Standard_True,
+                                     Standard_False);
+  unify.Build();
+  Document doc;
+  {
+    auto imp = std::make_unique<ImportFeature>(
+        "L", WriteBrep(CADShape(unify.Shape()), "ell.brep"));
+    imp->keepOrigin = true;
+    doc.AddFeature(std::move(imp));
+  }
+  const uint64_t ell = Last(doc)->GetId();
+  REQUIRE(Last(doc)->GetError().empty());
+  const Body& b = *BodyOf(doc, ell);
+  const double before = b.shape.Volume();
+  for (const double d : {0.5, -0.5}) {
+    doc.AddFeature(std::make_unique<OffsetFaceFeature>(
+        "Floor", ell, std::vector<ElementRef>{FaceRef(b, {17, 15, 10})}, d));
+    INFO(d << ": " << Last(doc)->GetError());
+    REQUIRE(Last(doc)->GetError().empty());
+    CHECK_THAT(VolumeOf(doc, ell) - before, WithinRel(35.0 * 30.0 * d, 1e-9));
+    CHECK(BodyOf(doc, ell)->shape.SolidCount() == 1);
+    doc.RemoveFeature(doc.FeatureCount() - 1);
+  }
+}
+
+// A neighbour is grown only as far as the target is from the face; a
+// spherical dent whose rim is the sphere's equator must still close the
+// region above it, or the cell between the face and its new plane runs
+// down into the dent and fills it (random design 2's revolved ball).
+TEST_CASE("Offset Face keeps a hemispherical dent in the face it moves",
+          "[direct_edit]") {
+  // The sphere's poles along X, as a revolve about X makes it: its rim on
+  // the top is a meridian, no parameter line.
+  TopoDS_Shape dented =
+      BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(20, 20, 10).Shape(),
+                      BRepPrimAPI_MakeSphere(
+                          gp_Ax2(gp_Pnt(10, 10, 10), gp_Dir(1, 0, 0)), 2.5)
+                          .Shape())
+          .Shape();
+  Document doc;
+  {
+    auto imp = std::make_unique<ImportFeature>(
+        "Dented", WriteBrep(CADShape(dented), "dented.brep"));
+    imp->keepOrigin = true;
+    doc.AddFeature(std::move(imp));
+  }
+  const uint64_t part = Last(doc)->GetId();
+  REQUIRE(Last(doc)->GetError().empty());
+  const Body& b = *BodyOf(doc, part);
+  const double before = b.shape.Volume();
+  for (const double d : {0.2, -0.2}) {
+    doc.AddFeature(std::make_unique<OffsetFaceFeature>(
+        "Top", part, std::vector<ElementRef>{FaceRef(b, {2, 2, 10})}, d));
+    INFO(d << ": " << Last(doc)->GetError());
+    REQUIRE(Last(doc)->GetError().empty());
+    // The slab over the top, less what of it lies inside the sphere: a
+    // band of it from z = 10 to 10 + d, pi (r^2 h - h^3 / 3).
+    const double h = std::abs(d);
+    const double band = kPi * (6.25 * h - h * h * h / 3.0);
+    CHECK_THAT(VolumeOf(doc, part) - before,
+               WithinRel(d > 0 ? 400.0 * h - band : -(400.0 * h - band), 1e-5));
+    doc.RemoveFeature(doc.FeatureCount() - 1);
+  }
 }

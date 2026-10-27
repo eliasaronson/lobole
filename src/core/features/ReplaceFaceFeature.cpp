@@ -11,20 +11,32 @@
 #include "core/features/SketchFeature.h"
 
 #include <BOPAlgo_MakerVolume.hxx>
+#include <BOPTools_AlgoTools3D.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Section.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
-#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepGProp_Face.hxx>
 #include <BRepLib.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_History.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom_Surface.hxx>
+#include <IntTools_Context.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_DataMapOfShapeInteger.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_MapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <gp_Pln.hxx>
@@ -33,6 +45,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <optional>
 #include <set>
 
 ReplaceFaceFeature::ReplaceFaceFeature(const std::string& name, uint64_t bodyId,
@@ -111,6 +124,156 @@ bool Touches(const TopoDS_Shape& a, const TopoDS_Shape& b) {
   return ex.More();
 }
 
+// A point inside `f`, as parameters (the kernel's own search: a face's
+// parameter box can miss a thin band of a face altogether -- a shelled
+// box's rim, a thin extrusion's end).
+std::optional<gp_Pnt2d> InteriorUV(const TopoDS_Face& f) {
+  gp_Pnt p;
+  gp_Pnt2d uv;
+  const Handle(IntTools_Context) context = new IntTools_Context();
+  if (BOPTools_AlgoTools3D::PointInFace(f, p, uv, context) != 0)
+    return std::nullopt;
+  return uv;
+}
+
+// Whether `piece` (a piece of `face`, as a cell holds it) faces the way
+// `face` does in its body: the cosine of the two outward normals at a point
+// of the piece, nullopt where there is no such point.
+std::optional<double> SameSide(const TopoDS_Face& piece,
+                               const TopoDS_Face& face) {
+  const auto uv = InteriorUV(piece);
+  if (!uv)
+    return std::nullopt;
+  gp_Pnt p, q;
+  gp_Vec n, m;
+  BRepGProp_Face(piece).Normal(uv->X(), uv->Y(), p, n);
+  GeomAPI_ProjectPointOnSurf proj(p, BRep_Tool::Surface(face));
+  if (!proj.IsDone() || proj.NbPoints() == 0)
+    return std::nullopt;
+  double fu = 0.0, fv = 0.0;
+  proj.LowerDistanceParameters(fu, fv);
+  BRepGProp_Face(face).Normal(fu, fv, q, m);
+  if (n.Magnitude() < 1e-12 || m.Magnitude() < 1e-12)
+    return std::nullopt;
+  return n.Dot(m) / (n.Magnitude() * m.Magnitude());
+}
+
+// The fuse leaves each neighbour and the strip the cell added to it as two
+// faces on one surface, meeting along the replaced face's old edge, and a
+// target that crosses the face (a tilt) leaves the piece the fuse added and
+// the piece the cut uncovered as two faces on the target, meeting where it
+// crossed: each merged back into one, across those edges only. Every edge
+// and vertex of a face with no such edge is kept, so no other face is
+// rebuilt or renamed (two coplanar faces an imported body carries side by
+// side stay two).
+TopoDS_Shape MergeAcross(const TopoDS_Shape& result, const TopoDS_Face& gone,
+                         const TopoDS_Face* onto, double tolOnto,
+                         BRepTools_History& history) {
+  std::vector<TopoDS_Edge> old;
+  double tol = Precision::Confusion();
+  for (TopExp_Explorer ex(gone, TopAbs_EDGE); ex.More(); ex.Next()) {
+    old.push_back(TopoDS::Edge(ex.Current()));
+    tol = std::max(tol, BRep_Tool::Tolerance(old.back()));
+  }
+  tol = 2.0 * tol + 1e-7;
+  Bnd_Box around;
+  BRepBndLib::Add(gone, around);
+  around.Enlarge(tol);
+  const auto onOld = [&](const TopoDS_Edge& e) {
+    if (BRep_Tool::Degenerated(e))
+      return false;
+    Bnd_Box box;
+    BRepBndLib::Add(e, box);
+    if (around.IsOut(box))
+      return false;
+    BRepAdaptor_Curve c(e);
+    const gp_Pnt mid = c.Value(0.5 * (c.FirstParameter() + c.LastParameter()));
+    const TopoDS_Vertex v = BRepBuilderAPI_MakeVertex(mid);
+    for (const TopoDS_Edge& o : old) {
+      BRepExtrema_DistShapeShape dist(v, o);
+      if (dist.IsDone() && dist.Value() <= tol)
+        return true;
+    }
+    return false;
+  };
+  // Whether a face lies on the target's surface: its type first, then a
+  // point of it.
+  const Handle(Geom_Surface) target =
+      onto != nullptr ? BRep_Tool::Surface(*onto) : nullptr;
+  const GeomAbs_SurfaceType targetType =
+      onto != nullptr ? BRepAdaptor_Surface(*onto, Standard_False).GetType()
+                      : GeomAbs_OtherSurface;
+  TopTools_DataMapOfShapeInteger onTarget;
+  const auto isOnTarget = [&](const TopoDS_Shape& s) {
+    if (const int* known = onTarget.Seek(s))
+      return *known != 0;
+    const TopoDS_Face f = TopoDS::Face(s);
+    bool on = false;
+    if (BRepAdaptor_Surface(f, Standard_False).GetType() == targetType)
+      if (const auto uv = InteriorUV(f)) {
+        const gp_Pnt p = BRep_Tool::Surface(f)->Value(uv->X(), uv->Y());
+        GeomAPI_ProjectPointOnSurf proj(p, target);
+        on = proj.IsDone() && proj.NbPoints() > 0 &&
+             proj.LowerDistance() <= tolOnto;
+      }
+    onTarget.Bind(s, on ? 1 : 0);
+    return on;
+  };
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+  TopExp::MapShapesAndUniqueAncestors(result, TopAbs_EDGE, TopAbs_FACE,
+                                      edgeFaces);
+  // The faces either side of a seam, and the seams' ends: where a tilted
+  // target crossed a side, that side's edge is two pieces end to end, one
+  // again once the vertex between them is free to go.
+  TopTools_MapOfShape touched, ends;
+  for (int i = 1; i <= edgeFaces.Extent(); i++) {
+    const TopTools_ListOfShape& two = edgeFaces(i);
+    bool seam = onOld(TopoDS::Edge(edgeFaces.FindKey(i)));
+    if (!seam && onto != nullptr && two.Extent() == 2) {
+      seam = true;
+      for (const TopoDS_Shape& f : two)
+        seam = seam && isOnTarget(f);
+    }
+    if (seam) {
+      for (const TopoDS_Shape& f : two)
+        touched.Add(f);
+      for (TopExp_Explorer vx(edgeFaces.FindKey(i), TopAbs_VERTEX); vx.More();
+           vx.Next())
+        ends.Add(vx.Current());
+    }
+  }
+  if (touched.IsEmpty())
+    return TopoDS_Shape(); // nothing to merge: as it is
+  TopTools_MapOfShape keep;
+  for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
+    if (touched.Contains(ex.Current()))
+      continue;
+    for (TopExp_Explorer sx(ex.Current(), TopAbs_EDGE); sx.More(); sx.Next())
+      keep.Add(sx.Current());
+    for (TopExp_Explorer sx(ex.Current(), TopAbs_VERTEX); sx.More(); sx.Next())
+      if (!ends.Contains(sx.Current()))
+        keep.Add(sx.Current());
+  }
+  try {
+    ShapeUpgrade_UnifySameDomain unify(result, /*UnifyEdges=*/Standard_True,
+                                       /*UnifyFaces=*/Standard_True,
+                                       /*ConcatBSplines=*/Standard_False);
+    unify.KeepShapes(keep);
+    unify.Build();
+    // A merge the kernel gets wrong (a bore's strips merged into the bore of
+    // a ball knob came back invalid) leaves the strips as they are: two
+    // faces on one surface are untidy, not wrong.
+    if (unify.Shape().IsNull() || !BRepCheck_Analyzer(unify.Shape()).IsValid())
+      return TopoDS_Shape();
+    history.Merge(unify.History());
+    return unify.Shape();
+  } catch (const Standard_Failure& e) {
+    LOG_WARN("Replace Face: the strips were not merged into their faces ({})",
+             e.GetMessageString());
+    return TopoDS_Shape();
+  }
+}
+
 } // namespace
 
 namespace directedit {
@@ -121,17 +284,14 @@ std::string ReplaceOnto(
     const std::string& label, uint64_t tag, CADShape& out, ElementMap& map,
     const std::string& op) {
   const std::string described = DescribeFace(body, replaced, faceName);
-  // Otherwise: the cells of the untouched faces, the neighbours extended and
-  // the target, and the one on the untouched faces' inner side.
   glm::dvec3 lo, hi;
   body.shape.GetBoundingBox(lo, hi, /*tight=*/true);
   const double diag = glm::length(hi - lo);
   const glm::dvec3 centre = 0.5 * (lo + hi);
 
   const Copied copy = CopyFor(body, {});
-  TopTools_IndexedMapOfShape faces, edges;
+  TopTools_IndexedMapOfShape faces;
   TopExp::MapShapes(copy.shape, TopAbs_FACE, faces);
-  TopExp::MapShapes(copy.shape, TopAbs_EDGE, edges);
   const TopoDS_Face gone = FaceAt(copy.shape, replaced);
   TopTools_IndexedDataMapOfShapeListOfShape parents;
   TopExp::MapShapesAndAncestors(copy.shape, TopAbs_EDGE, TopAbs_FACE, parents);
@@ -151,96 +311,120 @@ std::string ReplaceOnto(
     return n ? *n : "face " + std::to_string(i);
   };
 
+  // The cells are built from the replaced face, its neighbours extended and
+  // the target -- nothing else of the body. Built from every face, the cost
+  // grew with the body (25 s on a 291-face bracket), and the target, as
+  // large as the body, cut every other wall that crosses it into cells of
+  // their own.
+  const TopoDS_Face onto = makeOnto(centre, 2.0 * diag);
+  if (onto.IsNull()) {
+    return op + " could not build the surface of " + label;
+  }
+  // How far a planar neighbour is grown past the face: what it takes to
+  // reach the target from the face's boundary (four times the farthest
+  // point, for a neighbour that meets it at a slant), and no more.
+  double reach = 0.0;
+  {
+    const Handle(Geom_Surface) to = BRep_Tool::Surface(onto);
+    for (TopExp_Explorer ex(gone, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const TopoDS_Edge e = TopoDS::Edge(ex.Current());
+      if (BRep_Tool::Degenerated(e))
+        continue;
+      BRepAdaptor_Curve c(e);
+      for (int k = 0; k <= 8; k++) {
+        const gp_Pnt p =
+            c.Value(c.FirstParameter() +
+                    (c.LastParameter() - c.FirstParameter()) * k / 8.0);
+        GeomAPI_ProjectPointOnSurf proj(p, to);
+        reach = proj.IsDone() && proj.NbPoints() > 0
+                    ? std::max(reach, proj.LowerDistance())
+                    : diag;
+      }
+    }
+  }
+  const double grow = std::min(diag, 4.0 * reach + 1e-3 * diag + 1e-3);
+
   TopoDS_Compound input;
   BRep_Builder builder;
   builder.MakeCompound(input);
-  ElementMap inputMap; // names on `input`, filled once it is complete
-  std::vector<std::pair<TopoDS_Shape, std::string>> named;
   std::vector<int> untouched;
   std::vector<std::pair<int, TopoDS_Face>> extended;
   for (int i = 0; i < faces.Extent(); i++) {
     if (i == replaced)
       continue;
+    if (!neighbours.count(i)) {
+      untouched.push_back(i);
+      continue;
+    }
     const TopoDS_Face f = TopoDS::Face(faces(i + 1));
-    if (neighbours.count(i)) {
-      // Extended across the edges it shares with the replaced face only:
-      // grown every way, a neighbour runs on through the faces the edit
-      // leaves alone (a cradle's end wall through the bottom) and cuts them.
-      bool uMin = false, uMax = false, vMin = false, vMax = false;
-      {
-        double u0, u1, v0, v1;
-        BRepTools::UVBounds(f, u0, u1, v0, v1);
-        const double tu = 1e-6 * (u1 - u0) + 1e-9;
-        const double tv = 1e-6 * (v1 - v0) + 1e-9;
-        bool any = false;
-        for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
-          const int at = parents.FindIndex(ex.Current());
-          if (at == 0)
-            continue;
-          bool shared = false;
-          for (const TopoDS_Shape& g : parents(at))
-            shared = shared || g.IsSame(gone);
-          if (!shared)
-            continue;
-          double eu0, eu1, ev0, ev1;
-          BRepTools::UVBounds(f, TopoDS::Edge(ex.Current()), eu0, eu1, ev0,
-                              ev1);
-          bool here = false;
-          if (eu1 - eu0 <= tu && std::abs(eu0 - u0) <= tu)
-            here = uMin = true;
-          if (eu1 - eu0 <= tu && std::abs(eu1 - u1) <= tu)
-            here = uMax = true;
-          if (ev1 - ev0 <= tv && std::abs(ev0 - v0) <= tv)
-            here = vMin = true;
-          if (ev1 - ev0 <= tv && std::abs(ev1 - v1) <= tv)
-            here = vMax = true;
-          any = any || here;
-          if (!here) // a curved boundary: no one side to grow from
-            uMin = uMax = vMin = vMax = true;
-        }
-        if (!any)
+    // Extended across the edges it shares with the replaced face only:
+    // grown every way, a neighbour runs on through the faces the edit
+    // leaves alone (a cradle's end wall through the bottom) and cuts them.
+    bool uMin = false, uMax = false, vMin = false, vMax = false;
+    {
+      double u0, u1, v0, v1;
+      BRepTools::UVBounds(f, u0, u1, v0, v1);
+      const double tu = 1e-6 * (u1 - u0) + 1e-9;
+      const double tv = 1e-6 * (v1 - v0) + 1e-9;
+      bool any = false;
+      for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
+        const int at = parents.FindIndex(ex.Current());
+        if (at == 0)
+          continue;
+        bool shared = false;
+        for (const TopoDS_Shape& g : parents(at))
+          shared = shared || g.IsSame(gone);
+        if (!shared)
+          continue;
+        double eu0, eu1, ev0, ev1;
+        BRepTools::UVBounds(f, TopoDS::Edge(ex.Current()), eu0, eu1, ev0, ev1);
+        bool here = false;
+        if (eu1 - eu0 <= tu && std::abs(eu0 - u0) <= tu)
+          here = uMin = true;
+        if (eu1 - eu0 <= tu && std::abs(eu1 - u1) <= tu)
+          here = uMax = true;
+        if (ev1 - ev0 <= tv && std::abs(ev0 - v0) <= tv)
+          here = vMin = true;
+        if (ev1 - ev0 <= tv && std::abs(ev1 - v1) <= tv)
+          here = vMax = true;
+        any = any || here;
+        if (!here) // a curved boundary: no one side to grow from
           uMin = uMax = vMin = vMax = true;
       }
-      TopoDS_Face ext;
-      const std::string why = Guarded(op, [&] {
-        BRepLib::ExtendFace(f, diag, uMin, uMax, vMin, vMax, ext);
-      });
-      if (!why.empty() || ext.IsNull()) {
-        return op + " could not extend " + DescribeFace(body, i, nameOf(i)) +
-               " to meet " + label;
-      }
-      builder.Add(input, ext);
-      named.emplace_back(ext, nameOf(i));
-      extended.emplace_back(i, ext);
-    } else {
-      builder.Add(input, f);
-      named.emplace_back(f, nameOf(i));
-      untouched.push_back(i);
+      if (!any)
+        uMin = uMax = vMin = vMax = true;
     }
-  }
-  const TopoDS_Face onto = makeOnto(centre, 2.0 * diag);
-  if (onto.IsNull()) {
-    return op + " could not build the surface of " + label;
+    // A plane is grown only as far as the target is (see `grow`): grown by
+    // the body's diagonal, a chamfer beside the face ran on through the
+    // whole volume between the face and its target and cut it into pieces,
+    // of which only the one touching the face was kept. A curved one goes
+    // all the way: a sphere's dent grown by the target's distance closes
+    // nothing near its poles, and the cell runs down into the dent.
+    const bool planar =
+        BRepAdaptor_Surface(f, Standard_False).GetType() == GeomAbs_Plane;
+    TopoDS_Face ext;
+    const std::string why = Guarded(op, [&] {
+      BRepLib::ExtendFace(f, planar ? grow : diag, uMin, uMax, vMin, vMax, ext);
+    });
+    if (!why.empty() || ext.IsNull()) {
+      return op + " could not extend " + DescribeFace(body, i, nameOf(i)) +
+             " to meet " + label;
+    }
+    builder.Add(input, ext);
+    extended.emplace_back(i, ext);
   }
   builder.Add(input, onto);
-  named.emplace_back(onto, faceName);
-  {
-    TopTools_IndexedMapOfShape inFaces, inEdges;
-    TopExp::MapShapes(input, TopAbs_FACE, inFaces);
-    TopExp::MapShapes(input, TopAbs_EDGE, inEdges);
-    for (const auto& [s, n] : named)
-      if (const int at = inFaces.FindIndex(s); at > 0)
-        inputMap.names[at - 1] = n;
-    // The untouched faces' edges are the body's own: they keep their names.
-    for (int e = 1; e <= inEdges.Extent(); e++)
-      if (const int at = edges.FindIndex(inEdges(e)); at > 0)
-        if (const std::string* n = body.elementMap.EdgeNameOf(at - 1))
-          inputMap.edgeNames[e - 1] = *n;
-  }
+  builder.Add(input, gone);
 
-  BOPAlgo_MakerVolume maker;
+  // One deadline for the cells and the booleans that splice them in.
   const Handle(Message_ProgressIndicator) deadline =
       MakeDeadline(BuilderBudgetS(1));
+  const auto gaveUp = [&] {
+    return op + " of " + described + " onto " + label + " gave up after " +
+           std::to_string(int(BuilderBudgetS(1))) +
+           " s: the faces around it are too costly to intersect";
+  };
+  BOPAlgo_MakerVolume maker;
   std::string why = Guarded(op + " of " + described, [&] {
     TopTools_ListOfShape args;
     for (TopExp_Explorer ex(input, TopAbs_FACE); ex.More(); ex.Next())
@@ -251,9 +435,7 @@ std::string ReplaceOnto(
     maker.Perform(deadline->Start());
   });
   if (why.empty() && Expired(deadline))
-    why = op + " of " + described + " onto " + label + " gave up after " +
-          std::to_string(int(BuilderBudgetS(1))) +
-          " s: the faces around it are too costly to intersect";
+    why = gaveUp();
   if (why.empty() && maker.HasErrors())
     why = op + " of " + described + " onto " + label +
           " did not build: the faces do not close a volume";
@@ -261,33 +443,57 @@ std::string ReplaceOnto(
     return why;
   }
 
-  // The cells on the inner side of the faces the edit leaves alone (the
-  // neighbours, when there is nothing else).
-  std::vector<glm::dvec3> probes;
-  {
-    const std::vector<int>& from =
-        untouched.empty()
-            ? std::vector<int>(neighbours.begin(), neighbours.end())
-            : untouched;
-    for (const int i : from) {
-      const auto in = Measure::FaceInsetAt(body, i);
-      const auto fi = Measure::DescribeFaceAt(body, i);
-      const auto thick = ThicknessUnder(body, i);
-      if (!in || !fi || !thick)
-        continue;
-      const double step = std::min(0.5 * *thick, 1e-3 * diag + 1e-4);
-      probes.push_back(in->point - glm::normalize(fi->normal) * step);
-    }
-  }
-  std::vector<TopoDS_Shape> cells;
+  // The cells between the face and its target. Which side of the face a
+  // cell lies on is told by the outward normals of its pieces against the
+  // face's own in the body, never by classifying a point, which an imported
+  // face's tolerance would blur.
+  TopTools_MapOfShape fromGone, fromOnto;
+  const auto images = [&](const TopoDS_Shape& s, TopTools_MapOfShape& into) {
+    const TopTools_ListOfShape& mods = maker.Modified(s);
+    if (mods.IsEmpty())
+      into.Add(s);
+    for (const TopoDS_Shape& m : mods)
+      into.Add(m);
+  };
+  images(gone, fromGone);
+  images(onto, fromOnto);
+  TopoDS_Compound adds, takes;
+  builder.MakeCompound(adds);
+  builder.MakeCompound(takes);
+  int nAdd = 0, nTake = 0;
   for (TopExp_Explorer ex(maker.Shape(), TopAbs_SOLID); ex.More(); ex.Next()) {
-    for (const glm::dvec3& p : probes) {
-      BRepClass3d_SolidClassifier cls(ex.Current(), gp_Pnt(p.x, p.y, p.z),
-                                      1e-7);
-      if (cls.State() == TopAbs_IN) {
-        cells.push_back(ex.Current());
-        break;
+    // Every piece of the face in the cell, and every piece of the target,
+    // the cell's outward normal against the face's own: +1 the same way,
+    // -1 the other, 0 when the pieces disagree or none can be read.
+    const auto sideOf = [&](const TopTools_MapOfShape& from) {
+      int side = 0;
+      for (TopExp_Explorer fx(ex.Current(), TopAbs_FACE); fx.More();
+           fx.Next()) {
+        if (!from.Contains(fx.Current()))
+          continue;
+        const std::optional<double> c =
+            SameSide(TopoDS::Face(fx.Current()), gone);
+        const int s = !c || std::abs(*c) < 1e-6 ? 0 : *c > 0.0 ? 1 : -1;
+        if (s == 0 || (side != 0 && s != side))
+          return 0;
+        side = s;
       }
+      return side;
+    };
+    // Between the two: a cell on the face's inner side (its piece faces the
+    // way the face does) that the target closes on the far side (its piece
+    // facing back) is material taken away, and the mirror of that material
+    // added. A cell that holds both and is not between them -- the rest of
+    // a revolved body's inside, closed by a target that runs all the way
+    // round -- is neither.
+    const int atFace = sideOf(fromGone);
+    const int atTarget = sideOf(fromOnto);
+    if (atFace == 1 && atTarget == -1) {
+      builder.Add(takes, ex.Current());
+      nTake++;
+    } else if (atFace == -1 && atTarget == 1) {
+      builder.Add(adds, ex.Current());
+      nAdd++;
     }
   }
   const auto unreached = [&]() {
@@ -297,28 +503,114 @@ std::string ReplaceOnto(
         miss.push_back(nameOf(i));
     return miss;
   };
-  if (cells.empty()) {
+  if (nAdd + nTake == 0) {
     const auto miss = unreached();
     return op + " of " + described + " onto " + label +
            (miss.empty()
                 ? std::string(" closes no volume")
                 : ": " + NameList(miss) + ", extended, do not reach it");
   }
-  if (static_cast<int>(cells.size()) != body.shape.SolidCount()) {
-    return op + " of " + described + " onto " + label + " leaves " +
-           std::to_string(cells.size()) + " separate pieces of the body";
+
+  // The target's pieces carry the face's name, moved; a neighbour's strip
+  // is not named, merging into the neighbour, which names it.
+  const std::string mine = faceName + ";M" + std::to_string(tag);
+  // Where a neighbour meets the target the edge is "<neighbour>;G<id>", as
+  // a builder's history names an edge a face generates.
+  TopTools_DataMapOfShapeInteger fromExtended;
+  for (const auto& [i, ext] : extended) {
+    const TopTools_ListOfShape& mods = maker.Modified(ext);
+    if (mods.IsEmpty())
+      fromExtended.Bind(ext, i);
+    for (const TopoDS_Shape& m : mods)
+      fromExtended.Bind(m, i);
   }
-  TopoDS_Shape resultShape = cells.front();
-  if (cells.size() > 1) {
-    TopoDS_Compound c;
-    builder.MakeCompound(c);
-    for (const TopoDS_Shape& s : cells)
-      builder.Add(c, s);
-    resultShape = c;
+  const std::string generated = ";G" + std::to_string(tag);
+  const auto cellNames = [&](const TopoDS_Shape& cells) {
+    ElementMap m;
+    TopTools_IndexedMapOfShape cf, ce;
+    TopExp::MapShapes(cells, TopAbs_FACE, cf);
+    TopExp::MapShapes(cells, TopAbs_EDGE, ce);
+    for (int k = 1; k <= cf.Extent(); k++)
+      if (fromOnto.Contains(cf(k)))
+        m.names[k - 1] = mine;
+    TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+    TopExp::MapShapesAndUniqueAncestors(cells, TopAbs_EDGE, TopAbs_FACE,
+                                        edgeFaces);
+    for (int k = 1; k <= edgeFaces.Extent(); k++) {
+      bool onTarget = false;
+      const int* by = nullptr;
+      for (const TopoDS_Shape& f : edgeFaces(k)) {
+        onTarget = onTarget || fromOnto.Contains(f);
+        if (const int* i = fromExtended.Seek(f))
+          by = i;
+      }
+      if (onTarget && by != nullptr)
+        if (const int e = ce.FindIndex(edgeFaces.FindKey(k)); e > 0)
+          m.edgeNames[e - 1] = nameOf(*by) + generated;
+    }
+    return m;
+  };
+  CADShape result = body.shape;
+  map = body.elementMap;
+  const auto splice = [&](BooleanOp bop, const TopoDS_Shape& cells,
+                          const topo::RefineResult& refine) -> std::string {
+    ElementMap next;
+    std::string err;
+    CADShape made;
+    std::string fault = Guarded(op + " of " + described, [&] {
+      made = topo::BooleanNamed(bop, result, map, CADShape(cells),
+                                cellNames(cells), tag, next, &err, 0.0, refine,
+                                deadline->Start());
+    });
+    if (fault.empty() && Expired(deadline))
+      return gaveUp();
+    if (!fault.empty())
+      return fault;
+    if (!made.IsValid())
+      return op + " of " + described + " onto " + label +
+             " did not join the body" + (err.empty() ? "" : " (" + err + ")");
+    result = made;
+    map = next;
+    return {};
+  };
+  const double tolOnto = 1e-7 * diag + Precision::Confusion();
+  // The target's two halves are merged only where it crossed the face: a
+  // face moved flush with a plateau beside it stays two faces, the
+  // plateau keeping its name.
+  const bool crossed = nAdd > 0 && nTake > 0;
+  const topo::RefineResult merge = [&](const TopoDS_Shape& r,
+                                       BRepTools_History& h) {
+    return MergeAcross(r, gone, nullptr, tolOnto, h);
+  };
+  const topo::RefineResult mergeHalves = [&](const TopoDS_Shape& r,
+                                             BRepTools_History& h) {
+    return MergeAcross(r, gone, &onto, tolOnto, h);
+  };
+  if (nAdd > 0)
+    if (std::string w = splice(BooleanOp::Union, adds, merge); !w.empty())
+      return w;
+  if (nTake > 0)
+    if (std::string w =
+            splice(BooleanOp::Subtract, takes, crossed ? mergeHalves : merge);
+        !w.empty())
+      return w;
+  for (auto& [i, n] : map.names)
+    n = CollapseSteps(n, tag);
+  // An edge this edit generated and its own merge rebuilt is still the
+  // edge it generated: "<neighbour>;G<id>", not "…;G<id>;M<id>".
+  const std::string rebuilt = generated + ";M" + std::to_string(tag);
+  for (auto& [i, n] : map.edgeNames) {
+    n = CollapseSteps(n, tag);
+    for (size_t at = n.find(rebuilt); at != std::string::npos;
+         at = n.find(rebuilt, at)) {
+      const size_t after = at + rebuilt.size();
+      if (after == n.size() || n[after] == ';' || n[after] == '[' ||
+          n[after] == '.' || n[after] == ',' || n[after] == '#')
+        n.erase(at + generated.size(), rebuilt.size() - generated.size());
+      else
+        at = after;
+    }
   }
-  const BRepTools_History history(topo::HistoryArguments(input), maker);
-  map = NameThrough(input, inputMap, history, resultShape, tag);
-  const CADShape result(resultShape);
   RestoreUntouched(body, result, map, tag, {faceName});
 
   // The untouched faces keep their names and geometry; the target must be
@@ -333,7 +625,6 @@ std::string ReplaceOnto(
                DescribeFace(body, i, nameOf(i)) +
                ", which it should leave alone";
       }
-    const std::string mine = faceName + ";M" + std::to_string(tag);
     const bool landed =
         std::any_of(map.names.begin(), map.names.end(), [&](const auto& kv) {
           return kv.second.compare(0, mine.size(), mine) == 0;

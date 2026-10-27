@@ -158,26 +158,6 @@ the heading if it is not here yet.
 - **Likely fix:** for a face on an elementary surface, bound the face's own
   boundary and its interior extrema, or tighten against a fine mesh.
 
-### Offset Face on an imported bracket splits it into pieces, after 40 s
-
-- **Symptom:** on the SO-101 wrist bracket (`Wrist_Roll_Pitch_SO101.step`,
-  291 faces, imported with `keep_origin`) every planar Offset Face tried is
-  refused "… onto its plane moved 0.3 mm leaves 6 separate pieces of the
-  body" -- `1/b1/face194` by 0.3, `1/b1/face192` by ±0.5, the inner plate
-  faces 192 and 197 by 1.11 -- and each refusal holds the main thread 35 to
-  45 s (the frame watchdog's "main thread stalled"): the edit is built on the
-  copy `add_feature` checks it on, then again.
-- **Cause:** a face with no tangent neighbour goes through Replace Face's
-  cells (`directedit::ReplaceOnto`): `BOPAlgo_MakerVolume` over EVERY face of
-  the body plus the extended neighbours, about 20 s here, and the probes
-  from the untouched faces land in several of the cells it makes.
-- **Where:** `ReplaceOnto` in `src/core/features/ReplaceFaceFeature.cpp`,
-  called from `OffsetFaces` (`src/core/features/OffsetFaceFeature.cpp`).
-- **Likely fix:** build the cells from the replaced face's neighbourhood only
-  (its neighbours and the faces they reach within the moved distance) and
-  splice the result back, which is both the speed and the stray cells; and
-  build a refused edit once, not twice.
-
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

@@ -389,6 +389,21 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
     }
     if (!why.empty())
       return why;
+    // Moving a face of area A by d adds or takes about A d: more where its
+    // neighbours flare, less where they close in or it is curved, never by
+    // a factor of three for a distance the face's own size allows. A cell
+    // builder that kept only part of the volume between the face and its
+    // target (a neighbour slicing it), or more (a dent filled), still
+    // passes every other check.
+    {
+      const double moved = next.Volume() - step.shape.Volume();
+      const double about = info->area * distance;
+      if (!(moved / about > 1.0 / 3.0 && moved / about < 3.0))
+        return op + " of " + DescribeFace(step, *at, name) + " by " +
+               Mm(distance) + " mm changed the volume by " + Mm(moved) +
+               " mm³, where moving its area that far changes it by about " +
+               Mm(about) + " mm³: OpenCASCADE built the wrong solid";
+    }
     step.shape = next;
     step.elementMap = names;
   }
