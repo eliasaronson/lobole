@@ -97,20 +97,6 @@ bool OpenProjectFile(AppState& state, const std::string& path,
   }
 }
 
-// Map any pick to the project root the loaders expect: the project.json
-// inside a container project, or any file/folder inside a .dsgn, normalizes
-// up to the owning project folder.
-std::string NormalizeProjectPick(const std::string& path) {
-  namespace fs = std::filesystem;
-  fs::path p(path);
-  if (p.filename() == "project.json")
-    p = p.parent_path();
-  for (fs::path a = p; !a.empty() && a != a.root_path(); a = a.parent_path())
-    if (a.extension() == ".dsgn")
-      return a.string();
-  return p.string();
-}
-
 // Container-aware GUI open: ui::OpenProject handles both project forms
 // (directory with project.json, flat single-document file) — unlike
 // OpenProjectFile above, which predates multi-document projects and is now

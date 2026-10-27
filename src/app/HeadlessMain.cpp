@@ -78,7 +78,16 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
 
   if (!fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", fileToLoad);
-    ui::ImportAsFeature(state, fileToLoad);
+    if (ui::IsProjectPath(fileToLoad)) {
+      std::string error;
+      const std::string root = ui::NormalizeProjectPick(fileToLoad);
+      if (ui::OpenProject(state, root, &error))
+        ui::MarkProjectOpened(state, root);
+      else
+        LOG_ERROR("Could not open {}: {}", root, error);
+    } else {
+      ui::ImportAsFeature(state, fileToLoad);
+    }
   }
 
   RemoteServer server;

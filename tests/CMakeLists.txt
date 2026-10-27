@@ -479,6 +479,12 @@ add_test(NAME refused_calls_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(refused_calls_smoke PROPERTIES TIMEOUT 300)
 
+# `--file` opens a saved project, and imports anything else.
+add_test(NAME startup_file_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/startup_file_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(startup_file_smoke PROPERTIES TIMEOUT 120)
+
 # A web page can POST to localhost; the JSON in an HTTP body must not run.
 add_test(NAME http_on_rpc_port_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/http_on_rpc_port_smoke.py

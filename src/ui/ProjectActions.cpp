@@ -1118,6 +1118,25 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
   return AdoptProject(state, std::move(*loaded), error);
 }
 
+std::string NormalizeProjectPick(const std::string& path) {
+  namespace fs = std::filesystem;
+  fs::path p(path);
+  if (p.filename() == "project.json")
+    p = p.parent_path();
+  for (fs::path a = p; !a.empty() && a != a.root_path(); a = a.parent_path())
+    if (a.extension() == ".dsgn")
+      return a.string();
+  return p.string();
+}
+
+bool IsProjectPath(const std::string& path) {
+  namespace fs = std::filesystem;
+  const fs::path root(NormalizeProjectPick(path));
+  std::error_code ec;
+  return root.extension() == ".dsgn" || root.extension() == ".json" ||
+         fs::is_directory(root, ec);
+}
+
 // The stamp a slot's dirty check (and its autosave) compares against:
 // whichever document kind the slot holds. 0 for an empty slot. A part's,
 // an assembly's and a job's is its SaveStamp, not its Version: a tolerance,

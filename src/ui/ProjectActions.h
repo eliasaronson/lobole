@@ -184,6 +184,16 @@ void AdoptAssertionsAsRequirements(AppState& state);
 // The opens a person starts go through StartOpenProject (ui/OpenJob.h).
 bool OpenProject(AppState& state, const std::string& path, std::string* error);
 
+// The project root the loaders expect for any pick: the project.json inside a
+// container project, or any file or folder inside a .dsgn, normalizes up to
+// the owning project folder.
+std::string NormalizeProjectPick(const std::string& path);
+
+// Does `path` name a project (a .dsgn, a container folder or its
+// project.json, a flat .json) rather than a file to import? What `--file`
+// asks before it opens or imports.
+[[nodiscard]] bool IsProjectPath(const std::string& path);
+
 // Track the on-disk identity for dirty-state + autosave: call after every
 // clean save (also clears the autosave sidecar) / open / new. "" = unsaved.
 void MarkProjectSaved(AppState& state, const std::string& path,

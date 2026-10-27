@@ -58,6 +58,7 @@
 #include "ui/ImportJob.h"
 #include "ui/MachineActions.h"
 #include "ui/MotionActions.h"
+#include "ui/OpenJob.h"
 #include "ui/PrintProfileActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/RendererSync.h"
@@ -756,7 +757,10 @@ static bool CaptureForTestEngine(ImGuiID /*viewport*/, int x, int y, int w,
 void printUsage(const char* programName) {
   std::cout << "Usage: " << programName << " [OPTIONS]" << std::endl;
   std::cout << "Options:" << std::endl;
-  std::cout << "  -f, --file <path>    Load STEP file on startup" << std::endl;
+  std::cout
+      << "  -f, --file <path>    Open a project, or import a CAD file, on "
+         "startup"
+      << std::endl;
   std::cout << "  -v, --verbose        Enable verbose logging (debug level)"
             << std::endl;
   std::cout
@@ -1215,7 +1219,16 @@ static int RunOffscreen(const CommandLineArgs& args) {
 
   if (!args.fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", args.fileToLoad);
-    ui::ImportAsFeature(g_App, args.fileToLoad);
+    if (ui::IsProjectPath(args.fileToLoad)) {
+      std::string error;
+      const std::string root = ui::NormalizeProjectPick(args.fileToLoad);
+      if (ui::OpenProject(g_App, root, &error))
+        ui::MarkProjectOpened(g_App, root);
+      else
+        LOG_ERROR("Could not open {}: {}", root, error);
+    } else {
+      ui::ImportAsFeature(g_App, args.fileToLoad);
+    }
   }
 
   RemoteServer server;
@@ -2092,7 +2105,14 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     LOG_WARN("Safe mode: not opening {}", args.fileToLoad);
   } else if (!args.fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", args.fileToLoad);
-    ui::ImportAsFeature(g_App, args.fileToLoad);
+    // A project opens off the frame, as File > Open does; anything else is
+    // imported.
+    std::string error;
+    if (!ui::IsProjectPath(args.fileToLoad))
+      ui::ImportAsFeature(g_App, args.fileToLoad);
+    else if (!ui::StartOpenProject(
+                 g_App, ui::NormalizeProjectPick(args.fileToLoad), &error))
+      LOG_ERROR("Could not open {}: {}", args.fileToLoad, error);
   }
 
   LOG_INFO("=== APPLICATION READY - click selects edges/faces (again: cycle, "
