@@ -726,6 +726,13 @@ std::unique_ptr<Feature> FeatureFromJsonNamed(const nlohmann::json& j) {
       nlohmann::json spec = j;
       for (const char* k : DocumentIO::kFeatureEnvelopeKeys)
         spec.erase(k);
+      // `name` is optional in the contract (kFeatureCommonContract) but the
+      // file reader requires one, so a spec without it was refused as
+      // missing a required field. Unnamed, a feature is named for its type,
+      // as the tree would show it.
+      if (!spec.contains("name") && spec.contains("type") &&
+          spec["type"].is_string())
+        spec["name"] = spec["type"];
       return DocumentIO::FeatureFromJson(spec);
     }
     return DocumentIO::FeatureFromJson(j);

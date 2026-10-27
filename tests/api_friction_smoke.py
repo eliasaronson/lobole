@@ -103,6 +103,15 @@ def part_checks(d):
             feature={"type": "Box", "on": "Top", "width": 1, "depth": 1,
                      "height": 1})
 
+    # `name` is optional in describe's contract: a spec without one builds,
+    # named for its type. It used to be refused as "missing the required
+    # field name" (the imported-edits dogfood's first Refine).
+    r = d.call("add_feature", feature={"type": "Refine", "body_id": solid})
+    expect(r["regen"]["ok"], f"an unnamed Refine builds: {r}")
+    named = [f for f in d.call("get_state")["features"] if f["id"] == r["id"]]
+    expect(named and named[0]["name"] == "Refine",
+           f"an unnamed feature is named for its type: {named}")
+
 
 def assembly_checks(d):
     def box(name, lo, size):
