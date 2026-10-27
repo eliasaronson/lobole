@@ -6,6 +6,7 @@
 
 #include "cad/CADKernel.h"
 #include "core/Document.h"
+#include "core/ElementHistory.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
@@ -1739,4 +1740,25 @@ TEST_CASE("An edge is smooth where its faces meet tangentially",
     // the top or the bottom are square, not tangent.
     CHECK(smooth == 8);
   }
+}
+
+// A multi-body import names its bodies' faces `<id>/b<k>/face<i>`, every body
+// with the same createdBy. ResolveShape stopped at the FIRST body of that
+// creator, so no face of the second body could be measured (the SO-101
+// assembly STEP: "measure: element did not resolve" on every face but b1's).
+TEST_CASE("A face on an import's second body resolves", "[measure]") {
+  CADKernel& k = CADKernel::Instance();
+  std::vector<Body> bodies(2);
+  bodies[0].createdBy = bodies[1].createdBy = 7;
+  bodies[0].shape = k.CreateBox(1.0, 1.0, 1.0);
+  bodies[1].shape = k.CreateBox(2.0, 3.0, 4.0);
+  topo::NamePrimitiveElements(bodies[0].shape, "7/b1", bodies[0].elementMap);
+  topo::NamePrimitiveElements(bodies[1].shape, "7/b2", bodies[1].elementMap);
+  const auto first = Measure::Describe(bodies, {7, "7/b1/face0"});
+  const auto second = Measure::Describe(bodies, {7, "7/b2/face0"});
+  REQUIRE(first.has_value());
+  REQUIRE(second.has_value());
+  // The 2x3x4 box's faces are 6, 8 or 12 mm^2 -- never the unit box's 1.
+  CHECK(second->area > 5.0);
+  CHECK(!Measure::Describe(bodies, {7, "7/b3/face0"}).has_value());
 }

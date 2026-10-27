@@ -118,6 +118,10 @@ TopoDS_Shape EdgeAt(const TopoDS_Shape& shape, int index) {
 
 // Resolve an ElementRef to its OCC subshape (a face or edge of the owning
 // body), via FaceAt/EdgeAt above. Fills `kind`. Null on failure.
+// Bodies can share a creator (a multi-body import's `<id>/b<k>/...`, a
+// split's pieces): the name says which, so every one is asked, not just the
+// first -- stopping there left every face of an import's second body
+// unmeasurable.
 TopoDS_Shape ResolveShape(const std::vector<Body>& bodies,
                           const ElementRef& ref, std::string& kind) {
   for (const Body& body : bodies) {
@@ -125,7 +129,7 @@ TopoDS_Shape ResolveShape(const std::vector<Body>& bodies,
       continue;
     const TopoDS_Shape& shape = body.shape.GetShape();
     if (shape.IsNull())
-      return {};
+      continue;
     if (const auto face = body.elementMap.Resolve(ref.name)) {
       const TopoDS_Shape f = FaceAt(shape, *face);
       if (!f.IsNull()) {
@@ -140,9 +144,8 @@ TopoDS_Shape ResolveShape(const std::vector<Body>& bodies,
         return e;
       }
     }
-    return {}; // owner found but name no longer resolves
   }
-  return {};
+  return {}; // no body of that creator holds the name
 }
 
 // A rigid glm placement (rotation + translation, as occurrence transforms
@@ -2761,7 +2764,7 @@ std::optional<glm::dvec3> CornerOf(const std::vector<Body>& bodies,
     const auto a = body.elementMap.ResolveEdge(edgeA.name);
     const auto b = body.elementMap.ResolveEdge(edgeB.name);
     if (!a || !b)
-      return std::nullopt;
+      continue; // another body of the same creator may hold them
     glm::dvec3 p;
     if (!body.shape.CornerPoint(*a, *b, p))
       return std::nullopt;
