@@ -1295,7 +1295,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             expect.at("import_up_axis").get<std::string>());
     CHECK(imp->turnDeg == expect.value("import_turn_deg", 0.0));
   }
-  // vNEXT: a projection's fingerprint. Lost on a round trip, a reopened part
+  // v195: a projection's fingerprint. Lost on a round trip, a reopened part
   // takes the print from whatever the file then holds under the name.
   if (expect.contains("projection_fingerprint_area_mm2")) {
     const SketchFeature* sk = nullptr;

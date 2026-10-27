@@ -204,7 +204,7 @@
   {"design": "golden/v98-tolerances", "kind": "golden", "source": "tests/golden/v98-tolerances.json"},
   {"design": "golden/v99-distance-tolerance", "kind": "golden", "source": "tests/golden/v99-distance-tolerance.json"},
   {"design": "golden/v191-g2-arc-length", "kind": "golden", "source": "tests/golden/v191-g2-arc-length.json"},
-  {"design": "golden/vNEXT-projection-fingerprint", "kind": "golden", "source": "tests/golden/vNEXT-projection-fingerprint.json"},
+  {"design": "golden/v195-projection-fingerprint", "kind": "golden", "source": "tests/golden/v195-projection-fingerprint.json"},
   {"design": "golden/v194-edge-names-by-geometry", "kind": "golden", "source": "tests/golden/v194-edge-names-by-geometry.json"},
   {"design": "generator/gear", "kind": "generator", "source": "generators/gear.py"},
   {"design": "generator/gear_train", "kind": "generator", "source": "generators/gear_train.py", "parts": ["carrier", "pinion", "idler", "wheel", "rack"]},

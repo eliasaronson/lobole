@@ -1167,7 +1167,7 @@ json FeatureToJson(const Feature& feature) {
             {"element", e.ref.name},
             {"kind", e.kind == sketch::ExternalKind::Edge ? "edge" : "face"}};
         ej["gen_ids"] = e.genIds;
-        if (e.print) { // vNEXT: an imported element as it was projected
+        if (e.print) { // v195: an imported element as it was projected
           const bool face = e.kind == sketch::ExternalKind::Face;
           ej["fingerprint"] = {{"element", e.print->element},
                                {"shape", e.print->shape},
@@ -2857,7 +2857,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                           ej.value("element", std::string{})};
       eg.kind = ExternalKindFromString(ej.value("kind", std::string("face")));
       eg.genIds = ej.value("gen_ids", std::vector<uint32_t>{});
-      if (ej.contains("fingerprint")) { // vNEXT
+      if (ej.contains("fingerprint")) { // v195
         // Written whole or not at all: a part of one is damage, and read as
         // a default it would refuse the element it was taken from.
         const bool face = eg.kind == sketch::ExternalKind::Face;
