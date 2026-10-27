@@ -65,7 +65,12 @@ framebuffer happens to be. So:
   can reproduce the projection and check its own framing.
 
 `ui::FitCameraToDocument(state, forAspect)` (`src/ui/ViewActions.cpp`) is the
-one fit; `forAspect = 0` means the camera's own. A viewport fit keeps the
+one fit; `forAspect = 0` means the camera's own. It frames the bodies'
+TIGHT boxes (`ui::VisibleSceneBounds(..., tight)`): the conservative box
+bounds a B-spline face by its control points, and a downloaded STEP bracket
+of 62 x 36 x 78 mm framed as 164 x 345 x 156, the part a speck
+(`test_actions` "the camera fit frames a B-spline part by its tight box").
+A viewport fit keeps the
 model out from under the tool window and the view cube
 ([../ui/README.md](../ui/README.md#viewport)); a fit for a picture does not,
 because a still draws no overlays and gets the whole frame. `tests/headless_smoke.py`

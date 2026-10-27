@@ -39,8 +39,11 @@ the recipe, and each regeneration reads it.
   file's header (`ImportedModel::origin`) for the [up axis](#up-axis).
 - **IGES** and **OBJ**: see [IGES](#iges) and [OBJ](#obj).
 - **STL** becomes one planar face per triangle, sewn: a closed mesh arrives
-  as a solid, an open one as a shell. Every triangle is a face, so organic
-  meshes are heavy.
+  as a solid, an open one as a shell. OpenCASCADE's reader hands back the
+  triangles as a compound of loose faces, so `CADKernel::LoadSTL` sews them
+  as an OBJ's are (`SewAt`); unsewn, the volume still read right while a
+  cut removed the wrong amount and Delete Face refused every hole. Every
+  triangle is a face, so organic meshes are heavy.
 - **BREP** is read as is.
 - **What is skipped is named.** A placed shape with no volume (a lone
   surface) cannot be a body; the feature's warning names each one ("skipped
@@ -69,15 +72,58 @@ the recipe, and each regeneration reads it.
 - **Editing an import.** An import has no history to edit, so it is changed
   by the direct edits after it: Delete, Offset, Move and Replace Face
   ([modeling](../modeling/README.md#direct-edit)) — a hole moved or filled,
-  a cosmetic round removed, a wall made thicker. Its face names are indices
-  into the file, so each such edit keeps the fingerprint of the face it was
-  given, and a changed file read again that puts another face under the
-  name fails the edit naming both, rather than editing the wrong face.
+  a cosmetic round removed, a wall made thicker — and by ordinary features
+  on top (a cut, a pad, a Hole). Its face names are indices into the file,
+  so each direct edit keeps the fingerprint of the face it was given, and a
+  changed file read again that puts another face under the name fails the
+  edit naming both, rather than editing the wrong face. A sketch's
+  projection of an import's edge is not fingerprinted
+  ([known bugs](../known-bugs.md#a-sketchs-projection-of-an-imported-edge-follows-its-index-not-the-edge)),
+  and our own `export_step` of an edited import numbers its faces afresh.
+  What a downloaded part takes is in [editing a downloaded part](#editing-a-downloaded-part).
 - **One parse per import.** When the caller already parsed the file (the GUI
   worker does, to decide part vs assembly), the model is handed to the
   feature (`SeedGeometry`) and consumed by its first regeneration. It is not
   serialized and not sticky: later regenerations re-read the path, so editing
   the source file still updates the part.
+
+## Editing a downloaded part
+
+What the imported-edits round (a Voron grill from STL, the SO-101 wrist
+bracket and an STS3215 servo from STEP) found the import takes, through the
+same RPCs an MCP client has:
+
+- **A mesh (STL) takes direct edits after a Refine.** Each triangle is a
+  face, so the face a hole sits in is a fan of triangles with no inner loop,
+  and `grow_faces` refuses ("no loop of edges in a host face bounds them").
+  `Refine` merges the coplanar ones (the grill: 5642 faces to 2937), after
+  which `grow_faces` takes a faceted hole whole (229 faces each) and Delete
+  Face fills it. It is slow: four filled holes, 916 faces, built in about
+  25 s, twice in one `add_feature` (the copy it is checked on, then the
+  part), and again on an open that has no baked geometry. A faceted hole has
+  no radius: `query_geometry`'s `radius`, a measured diameter and a Hole
+  centred on a projected edge all need a true circle, so its size and centre
+  are the caller's circle fit to the wall faces' centroids. New holes cut
+  into a mesh are true cylinders.
+- **A STEP takes direct edits where its faces are analytic.** An Autodesk
+  export blends its flats into B-spline transitions; every Delete, Offset or
+  Replace Face that would extend one is refused naming it, and on the SO-101
+  bracket a tab, the end face and an outer wall each led to one more
+  freeform face however many were added (an Offset of a wall's whole tangent
+  chain reached 61 faces). A Delete Face of a fillet whose corner blends are
+  analytic (the end's x-edge fillet and its two sphere corners) works. A cut
+  through the region is what removes it: the bracket's 4.2 mm past the servo
+  horn went with one Extrude cut on a datum plane.
+- **Placing it.** An import is centred on its box or kept where the file put
+  it (`keep_origin`), turned by `up_axis` and `turn_deg`; there is no
+  translate. A print plate is a second part holding a `Derived` of it with a
+  `placement` (and `reference: false`, or it is a ghost `check_print` will
+  not print).
+- **Measuring it.** `measure` with `distance_kind: centres` gives a
+  cylinder face's centre, which is how a hole pattern or a horn axis is
+  located: the face's own row gives its axis direction and radius, not
+  where the axis is. A multi-body import's faces (`<id>/b<k>/…`) all
+  measure; only the first body's did before.
 
 ## Up axis
 
@@ -373,5 +419,9 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
 - DXF of a drawing.
 - Mesh bodies: an STL arrives as sewn B-Rep faces, not as a lightweight
   reference mesh.
+- Feature recognition on a mesh: a faceted hole is hundreds of planes, with
+  no radius to filter, measure or project
+  ([editing a downloaded part](#editing-a-downloaded-part)).
+- Translating an imported body (a placement on the Import itself).
 - STEP PMI / AP242 GD&T.
 - Fusion 360 (no server-side feature API) and native SolidWorks.

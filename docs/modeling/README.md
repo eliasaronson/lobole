@@ -1425,4 +1425,9 @@ reference case.
   typed or dragged in the panel).
 - Dependency-graph cache invalidation: an edit re-runs everything after it,
   related or not.
-- Inserting a feature at the rollback marker.
+- Inserting a feature at the rollback marker. `add_feature` appends at the
+  end even with the bar set, so an import cannot be edited ahead of a
+  sketch that projects it.
+- A direct edit that extends a freeform neighbour: one beside a B-spline is
+  refused (`directedit::FreeformNeighbour`), which on an Autodesk STEP is
+  most faces ([editing a downloaded part](../interchange/README.md#editing-a-downloaded-part)).

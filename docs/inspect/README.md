@@ -158,7 +158,9 @@ the solve put it). Density comes from the body's material; a body with
 no material has no mass rather than an assumed density, and the BOM names it
 in `warnings`. On an assembly tab without `part` it aggregates every visible
 occurrence in world space. Its bbox is measured off the surfaces; `get_state`'s
-is a cheap conservative bound that can read well over on a swept surface.
+(and every mutating reply's `digest`) is a cheap conservative bound that can
+read well over on a swept surface, and several times over on a STEP whose
+faces are B-splines ([known bugs](../known-bugs.md#get_state-and-the-digest-report-a-steps-box-several-times-its-size)).
 A PRINTED part's bodies also carry `printed`, what the slicer's walls,
 shells and infill weigh at its slicer settings, and `total.printed` their
 sum ([printed mass](../tolerances/README.md#printed-mass)); `{why}` when a
@@ -907,6 +909,9 @@ GUI suite, and the measure parity phase in `remote_smoke`.
 ## What it does not do yet
 
 - Pick a raw vertex (corners cover the cases people ask for).
+- Say where a cylinder face's axis is: `list_elements` and `measure` give
+  its direction and radius, and its centre takes a `distance_kind:
+  centres` measure against something else.
 - `measure` and `interference` each resolve an occurrence reference (id,
   name or `"Unit/Part"` path) to world-placed bodies with near-identical
   code. They should be one function; interference's version shares a
