@@ -234,6 +234,18 @@ prefix. It runs on the calling thread.
   `history/om615-head` times it, and `LOBOLE_TEST_NO_REGEN_CACHE=1` caps it
   at zero to show that the harness sees a miss
   ([performance](performance/README.md#injected-slowdowns)).
+- **A feature that records what it is keyed on is keyed afresh.** A direct
+  edit records an imported face's fingerprint the first time it sees it,
+  and the fingerprint is in its JSON: after it executes (or a hit restores
+  an evaluation that recorded one), a feature that says so
+  (`Feature::RecordsWhatItIsKeyedOn`) is hashed again, the evaluation filed
+  under both keys, and every later link rehashed, so the next regeneration
+  hits instead of building it and everything after it again. Only one
+  whose recorded value is fixed by its inputs: a sketch writes its solved
+  positions back too, and those solve again from where they ended, so
+  `cached_evaluation_matches_from_scratch` holds a sketch to a second solve. `Document::AdoptEvaluations` files another document's evaluations
+  under their keys: `add_feature`'s trial of a direct edit on a
+  `CopyWithGeometry` is the commit's hit.
 - **Everything a feature reads must be hash-visible.** A feature exposes its
   expressions through `VisitExprs` and its references to other features
   through `VisitFeatureRefs` (pure virtual, like `Clone`); a field missing

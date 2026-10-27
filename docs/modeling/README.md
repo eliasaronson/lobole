@@ -513,7 +513,12 @@ What every one holds to:
    changes nothing, the revision included, inside a `batch` or out of one
    ([a refused call changes nothing](../scripting/rpc.md#a-refused-call-changes-nothing)).
    An upstream edit that later breaks a stored one is a broken feature,
-   named in that edit's `regen`.
+   named in that edit's `regen`. Either way the edit is built once: a
+   refusal by the copy's own regeneration alone, and an edit that builds is
+   not built again when the call commits it, the part taking the copy's
+   evaluation into its regen cache (`Document::AdoptEvaluations`: the chain
+   hashes are the same whichever document computed them).
+   `direct_edit_step_smoke` holds both.
 4. **A face gone upstream is an error, never skipped**
    (`topo::UnresolvedReason`). The tree's context menu has **Pick faces…**
    (Pick face… on a Replace), which opens the editor with the face slot
@@ -527,7 +532,11 @@ What every one holds to:
    the face under the name is no longer the fingerprint's (to 1e-6
    relative), the edit fails: "face `7/face12` is no longer the face that
    was picked (was a plane of 120 mm² at …, now …); re-pick it". A pick in
-   the editor drops the old print. A primitive's `<id>/face<i>` is
+   the editor drops the old print. Recording a print changes what the
+   edit is keyed on in the regen cache, which re-keys it
+   ([architecture](../architecture.md#the-document-model-and-regeneration))
+   rather than building it again at the next regeneration. A primitive's
+   `<id>/face<i>` is
    positional too, but a box keeps its numbering whatever its size, and
    names that say why a face exists are resized by upstream edits on
    purpose, so neither is fingerprinted.
@@ -553,10 +562,16 @@ flank, a spline), which healing would have to extend: Defeaturing's
 edge-face intersections on a thread ran for more than fifteen minutes on one
 face. Offset and Replace Face refuse the same way
 (`directedit::FreeformNeighbour`); pick the freeform faces with it, or edit
-the feature that made them.
+the feature that made them. The check reads each neighbour once and only its
+surface's type: describing every neighbour in full across every shared edge
+held the main thread a minute on a refined STL's 916-face Delete Face (the
+facets carry no p-curves, so each description projected every edge of a
+many-sided neighbour), before the heal began. Nothing else before or after
+the builder walks the faces per face: `RestoreUntouched` indexes them once.
 
 Every direct-edit builder (Defeaturing, the offset builder, MakerVolume,
-and Move Face's booleans, through `topo::BooleanNamed`'s progress range) also
+and Move Face's booleans and those that join Replace Face's cells to the
+body, through `topo::BooleanNamed`'s progress range) also
 runs under a deadline, `directedit::BuilderBudgetS` (30 s and 1.5 s a
 face), through a `Message_ProgressIndicator` whose `UserBreak` turns true
 once it has passed: past it the edit is refused ("gave up after 30 s …").
@@ -600,8 +615,10 @@ along their own surfaces, so a drafted wall stays drafted and a cylinder
 changes radius. Each face is put onto its own surface offset by the distance
 -- a plane moved, a cylinder of another radius (`Geom_OffsetSurface`, its
 canonical surface where it has one) -- by Replace Face's cells
-(`directedit::ReplaceOnto`), one face at a time, its neighbours extended or
-trimmed to meet it; a face a later step trims again keeps one `;M<id>`.
+(`directedit::ReplaceOnto`, [below](#replace-face)), one face at a time,
+its neighbours extended or trimmed to meet it; a face a later step trims
+again keeps one `;M<id>`. They are built from the face's neighbourhood, so
+an offset costs about the same on a 291-face import as on a block.
 
 A set whose faces meet one another tangentially (a top, its round and the
 wall below) goes to `BRepOffset_MakeOffset` instead (skin mode, intersection
@@ -619,8 +636,11 @@ battery holder with cradles cut across it: no error, no shape), faulted in
 action matrix's fuzz designs, where the cells answer in a fraction of a
 second.
 
-Checks: outward never removes volume, inward never adds; the bbox grows by
-at most the distance; an inward offset through the body is refused
+Checks: outward never removes volume, inward never adds; a face moved
+through Replace Face's cells changes the volume by between a third and
+three times its area times the distance (cells that kept only part of the
+volume between the face and its target, or filled a dent beside it, pass
+every other check); the bbox grows by at most the distance; an inward offset through the body is refused
 ("offsetting `4/cap1` by -20 mm consumes the body: it is 20 mm thick
 there", measured along the inward normal from the face's inside point,
 `directedit::ThicknessUnder`). A face with a tangent neighbour that is not
@@ -678,23 +698,55 @@ sketch_id}` (the sketch's plane) or `{kind: "face", face}` (any body's face:
 its whole surface); an unknown `kind` is refused naming the three. A
 parallel planar target onto a planar face is Offset Face by the signed
 distance (refused when the face already lies on it). Otherwise
-`directedit::ReplaceOnto` hands `BOPAlgo_MakerVolume`:
+`directedit::ReplaceOnto` builds the change, not the body. It hands
+`BOPAlgo_MakerVolume`:
 
-- the body's faces less the replaced one;
-- its neighbours extended past the target (`BRepLib::ExtendFace`, by the
-  body's bbox diagonal, across only the UV sides the edges they share with
-  the replaced face lie on: grown every way, a cradle's end wall ran on
-  through the bottom of the part);
+- the replaced face;
+- its neighbours extended past the target (`BRepLib::ExtendFace`, across
+  only the UV sides the edges they share with the replaced face lie on:
+  grown every way, a cradle's end wall ran on through the bottom of the
+  part). A plane is grown four times as far as the target lies from the
+  face's boundary and no further: grown by the body's diagonal, a chamfer
+  beside the face sliced the volume between the face and its target into
+  pieces. A curved neighbour is grown by the body's bbox diagonal: a
+  sphere's dent grown only that far closes nothing near its poles;
 - the target surface bounded to twice that size: a plane as a square
   centred on the body, a cylinder, cone or sphere all the way round, any
   other surface `ExtendFace`d.
 
-The cells holding a point just inside the faces the edit leaves alone are
-kept; more than the body's solid count is refused ("leaves 2 separate
-pieces"). The new face is `<replaced>;M<id>`. Checks: every untouched face
-keeps its name (one the target cuts is refused naming it); the target is
-there (a target the extended neighbours do not reach is refused naming
-them); the bbox grows by at most the diagonal. The volume may go either
+Nothing else of the body goes in, so what it costs depends on the face's
+neighbourhood and not on the body: built from every face of the body, an
+Offset Face on the SO-101 wrist bracket's 291 faces took 25 s, and the
+target, as large as the body, ran on through every other wall that crosses
+its plane and cut it into cells, so the edit was refused for "separate
+pieces" it never made. The volume between the old face and the new one is
+the cells that hold pieces of both, read by the pieces' outward normals in
+the cell against the face's own in the body: a cell whose face pieces face
+the way the face does (it lies on the inner side) and whose target pieces
+face back is material to take away, its mirror material to add, and a cell
+that holds both and is neither (the rest of a revolved body's inside,
+closed by a target that runs all the way round) is left out. No point is
+classified, which an imported face's tolerance would blur, and the point
+on a piece is the kernel's own (`BOPTools_AlgoTools3D::PointInFace`): a
+parameter box misses a shelled box's thin rim. The body is fused with the one set
+and cut by the other (`topo::BooleanNamed`, under the edit's one deadline).
+A neighbour and the strip the fuse adds to it lie on one surface; they are
+merged back into one face across the replaced face's old edges only, and
+where a target crossed the face (a tilt) the half the fuse added and the
+half the cut uncovered are merged across the line it crossed on
+(`ShapeUpgrade_UnifySameDomain` through the boolean's refine hook, every
+edge and vertex of a face with no such edge kept, so two coplanar faces an
+import carries side by side stay two, and a face moved flush with a plateau
+beside it stays its own face). A merge the kernel returns invalid is
+dropped and the strips stay, untidy and not wrong (a ball knob's bore).
+
+The new face is `<replaced>;M<id>`, each neighbour `<name>;M<id>`, and the
+edge where a neighbour meets the new face `<name>;G<id>`, as a builder's
+history names an edge a face generates.
+Checks: every untouched face keeps its name (one the change cuts is refused
+naming it); the target is there (a target the extended neighbours do not
+reach is refused naming them: a floor raised past the top of the wall
+beside it); the bbox grows by at most the diagonal. The volume may go either
 way, or not move at all (a tilt about the face's middle). The target slot
 (`###slot` `ReplaceFaceTarget`) takes a face in the viewport, or a datum
 plane's or a sketch's row in the tree; there is no numeric default.
