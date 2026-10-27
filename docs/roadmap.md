@@ -67,10 +67,13 @@ them:
 - **Other processes:** lathe turning (4th-axis milling of a turned part
   exists, [rotary](cam/rotary.md)); laser, plasma and waterjet posts (the
   posts are milling dialects); nesting sheet blanks.
-- **A print-time estimate.** `mass_properties` weighs a print (`printed`)
-  and `export_print_job` writes the job, but nothing says how long it
-  takes: a generator that has to report it slices the job with the Bambu
-  CLI itself and reads `result.json`.
+- **Driving an installed slicer.** Print time, filament and the slicer's
+  own warnings belong to the slicer, and Loböle is not one: `export_print_job`
+  writes the job, and a generator that needs those numbers runs the Bambu
+  CLI itself and reads `result.json`. A call that hands the job to the
+  slicer the user has installed (Bambu Studio, Orca, PrusaSlicer, through
+  their command lines) and returns what it reports would make that one
+  step, without estimating anything ourselves.
 - **Procurement data:** a material has a grade (alloy and temper), density
   and FEM constants but no cost, stock form or finish, and a BOM row has a
   standard and a designation but no price, supplier, part number or lead
