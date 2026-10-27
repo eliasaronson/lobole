@@ -15,7 +15,7 @@ python3 generators/bike/bike.py [--port N] [--out DIR] [--stage parts|assembly|a
 ```
 
 `--out` defaults to `scratch/bike/`; `--keep` builds into the open project.
-`all` checks, saves `bike.dsgn` and `bike.step`, and renders. The run refuses
+`all` checks, saves `bike.lob` and `bike.step`, and renders. The run refuses
 to save what it has not checked. It is not in the CI suite: `check_geometry`
 on two 36-spoke wheels alone is longer than the headless suite should take.
 

@@ -6,9 +6,9 @@
 
     python3 generators/chess/build_set.py --port N
 
-Opens scratch/chess/set.dsgn (build_board.py): places the board and the 32
+Opens scratch/chess/set.lob (build_board.py): places the board and the 32
 pieces in the starting position, checks the BOM and the FIDE fits, draws the
-six ranks on one sheet with the weight bore's fit, and saves set.dsgn.
+six ranks on one sheet with the weight bore's fit, and saves set.lob.
 """
 import argparse
 import json
@@ -155,7 +155,7 @@ def main():
     ap.add_argument("--port", type=int)
     args = ap.parse_args()
     app = connect(args.port)
-    app.call("open_project", path=str(OUT / "set.dsgn"))
+    app.call("open_project", path=str(OUT / "set.lob"))
     report = {"fits": fits(app)}
     asm, placed = assemble(app)
     report["occurrences"] = len(placed)
@@ -175,7 +175,7 @@ def main():
     except Exception as e:
         report["drawing"] = f"FAILED: {e}"
         print("drawing failed:", e)
-    app.save_project(path=str(OUT / "set.dsgn"))
+    app.save_project(path=str(OUT / "set.lob"))
     (OUT / "set_report.json").write_text(json.dumps(report, indent=1,
                                                      default=str))
 

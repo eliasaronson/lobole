@@ -6,7 +6,7 @@
 
     python3 generators/chess/cam.py --port N [--only blank_pawns ...]
 
-Opens scratch/chess/set.dsgn (run_all.sh builds it) and saves <out>.dsgn with
+Opens scratch/chess/set.lob (run_all.sh builds it) and saves <out>.lob with
 the jobs. Every blank is turned between the chuck and the tailstock, then its
 head details are cut from indexed setups; the board, the base jig and the
 pieces' undersides are 3-axis jobs on the bed. The machine's rotary mount (`rotary` below) is the
@@ -434,7 +434,7 @@ def main():
                     help="stem of the saved project and the report")
     args = ap.parse_args()
     app = connect(args.port)
-    app.call("open_project", path=str(OUT / "set.dsgn"))
+    app.call("open_project", path=str(OUT / "set.lob"))
     app.save_machine(machine=MACHINE)
     out = OUT / "nc"
     out.mkdir(exist_ok=True)
@@ -445,7 +445,7 @@ def main():
         made = fn(app)
         for job in (made if isinstance(made, list) else [made]):
             reports[f"{name}:{job.label}"] = job.run(str(out / job.label))
-    app.save_project(path=str(OUT / f"{args.out}.dsgn"))
+    app.save_project(path=str(OUT / f"{args.out}.lob"))
     (OUT / f"{args.out}_report.json").write_text(
         json.dumps(reports, indent=1, default=str))
     # Fail LOUDLY, so run_all.sh does not print `done` over a job that is not

@@ -23,7 +23,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 # requirements, the CAM job and the drawings. What each stage before it
 # saved -- the project `--from` resumes from -- is kept apart under stages/,
 # so whoever opens the output finds the head and not nine snapshots of it.
-FINAL = OUT / "pantilt.dsgn"
+FINAL = OUT / "pantilt.lob"
 STAGES = OUT / "stages"
 STAGES.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(HERE))
@@ -221,12 +221,12 @@ def ring_groove_face(part):
 
 
 def stage(name):
-    """Where the stage snapshot `name` is saved: stages/<name>.dsgn."""
-    return STAGES / f"{name}.dsgn"
+    """Where the stage snapshot `name` is saved: stages/<name>.lob."""
+    return STAGES / f"{name}.lob"
 
 
 def save(app, name):
-    """Save a stage's snapshot, stages/<name>.dsgn: what the next stage, or
+    """Save a stage's snapshot, stages/<name>.lob: what the next stage, or
     `run_all.sh --from`, opens."""
     path = stage(name)
     app.save_project(path=str(path))
@@ -234,7 +234,7 @@ def save(app, name):
 
 
 def save_final(app):
-    """Save the head's one project, pantilt.dsgn at the output's top."""
+    """Save the head's one project, pantilt.lob at the output's top."""
     app.save_project(path=str(FINAL))
     print("saved", FINAL)
 

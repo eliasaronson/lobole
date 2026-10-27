@@ -32,7 +32,7 @@ python3 generators/cncest6090/cncest6090.py --port PORT [--out /tmp/cncest6090] 
 - `--dimensions` takes a JSON object of names and values in mm, e.g.
   `{"spindle_l": 230, "guide_pitch": 125}`. Unknown names, non-finite and
   boolean values, and geometrically impossible ones are refused.
-- Outputs: `cncest6090-provisional.dsgn`, `dimensions.json` (flat, editable,
+- Outputs: `cncest6090-provisional.lob`, `dimensions.json` (flat, editable,
   and accepted back by `--dimensions`), `dimension-register.json` (each value
   with its status and note), `report.json`, `drawing-check.json` and
   `accessory-collar-draft.svg`.

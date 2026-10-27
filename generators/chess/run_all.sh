@@ -48,8 +48,8 @@ run 3 sh -c "python3 '$HERE/build_set.py' --port '$P' > '$OUT/build_set.log' 2>&
 # (tools/wait-for.sh --file scratch/chess/cam_all.log --line '^(done|failed)$').
 [ ${#ONLY[@]} -eq 0 ] && rm -f "$OUT"/nc/*.nc
 rm -f "$OUT"/cam_all.log
-# A partial run saves beside the full set, never over it: chess.dsgn is the
-# whole set's CAM, chess_only.dsgn the last `--only` run's.
+# A partial run saves beside the full set, never over it: chess.lob is the
+# whole set's CAM, chess_only.lob the last `--only` run's.
 only=() stem=chess
 if [ ${#ONLY[@]} -gt 0 ]; then only=(--only "${ONLY[@]}"); stem=chess_only; fi
 if python3 -u "$HERE/cam.py" --port "$P" --out "$stem" "${only[@]}" > "$OUT/cam_all.log" 2>&1; then

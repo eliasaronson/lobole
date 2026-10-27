@@ -962,7 +962,7 @@ def main():
     args = ap.parse_args()
 
     app = connect(args.port)
-    project = os.path.join(args.out, "fpv-drone.dsgn")
+    project = os.path.join(args.out, "fpv-drone.lob")
     if args.stage in ("shop", "fem", "cam"):
         # What happens to the parts after the model: loads and G-code, both
         # against the project as SAVED. They add STUDIES and JOB DOCUMENTS

@@ -16,7 +16,7 @@ python3 generators/watch/watch.py [--port N] [--out DIR] [--stage parts|assembly
 ```
 
 `--out` defaults to `scratch/watch/`. `parts` builds and checks the parts;
-`assembly` adds the assembly and every check and saves `watch.dsgn`; `all`
+`assembly` adds the assembly and every check and saves `watch.lob`; `all`
 also renders five stills (`dial`, `case`, `caseback`, `movement` with case,
 caseback and rotor off, `keyless` with dial and hands off). The run refuses
 to save what it has not checked, and gates on each check's RECEIPT, not on

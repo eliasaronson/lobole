@@ -13,7 +13,7 @@ reading 0000, and every piece of it is printed from the bed.
 Output goes to `scratch/counter/` (or `--out`): `counter.stl` (the plate, one
 shell per body), `counter_job.3mf` (the
 [print job](../../docs/tolerances/README.md#print-jobs), a Bambu project
-when `$LOBOLE_SLICER_CONFIGS` holds `pla.json`), `counter.dsgn` (the parts,
+when `$LOBOLE_SLICER_CONFIGS` holds `pla.json`), `counter.lob` (the parts,
 the assembly and its studies, the plate and the controls), `counter.png`
 (the plate) and `counter.json`, the receipt (every size and height, the
 print pose, the plate's place on the bed, the measured clearances, every

@@ -12,7 +12,7 @@ numbered planets orbit at the ratio engraved on the ring.
     python3 generators/planetary/build.py --port <port> --diameter 90 --study   # the built-in table
 
 Output goes to `scratch/planetary/` (or `--out`): `planetary.stl` (the plate,
-five shells), `planetary.dsgn`, `planetary.png` (the hero still),
+five shells), `planetary.lob`, `planetary.png` (the hero still),
 `planetary.json`, the receipt (tooth counts, module, ratio, gap, helix,
 measured clearances, motion verdicts, the push check and, with `--study`,
 the sun's stresses), and, on a profile that states a bed,

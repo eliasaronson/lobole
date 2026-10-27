@@ -15,7 +15,7 @@ python3 generators/fpv_drone/fpv_drone.py --port <n> [--out scratch/fpv-drone] \
 ```
 
 - `parts`, `assembly` — build up to that point.
-- `all` (default) — build, verify, save `fpv-drone.dsgn`, then the outputs,
+- `all` (default) — build, verify, save `fpv-drone.lob`, then the outputs,
   the FEM studies and the CAM jobs, and save again.
 - `drawings` — reopen the saved project and redo the sheets and exports only.
 - `shop`, `fem`, `cam` — reopen the saved project and add the load studies

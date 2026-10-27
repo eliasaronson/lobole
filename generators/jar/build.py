@@ -15,7 +15,7 @@ opening and what it holds) and from the print process's allowances
 (`print_allowance`). What it builds and checks: generators/jar/README.md.
 
 Output (generated, untracked): scratch/jar/ — jar.stl and lid.stl (PLA),
-gasket.stl (TPU), each in its print orientation; jar.dsgn; jar.png and
+gasket.stl (TPU), each in its print orientation; jar.lob; jar.png and
 jar-section.png; jar.json (the receipt: sizes, allowances, clearances, the
 measured squeeze and every check's verdict).
 """
@@ -811,7 +811,7 @@ def main():
                "seconds": round(time.perf_counter() - t0, 1)}
     (out / "jar.json").write_text(json.dumps(receipt, indent=1))
     jar.asm.activate()
-    app.save_project(path=str(out / "jar.dsgn"))
+    app.save_project(path=str(out / "jar.lob"))
     print(f"jar: done in {receipt['seconds']} s -> {out}")
     return 0
 

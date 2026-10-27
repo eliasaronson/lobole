@@ -19,7 +19,7 @@ winding before anything is printed, and the print tests the design, as the
     python3 generators/clock/build.py --port <port> --period 0.8
 
 Output, untracked, in `scratch/clock/` (or `$LOBOLE_SCRATCH/clock`, or
-`--out`): `clock.dsgn`, the receipt `clock.json`, the test card
+`--out`): `clock.lob`, the receipt `clock.json`, the test card
 `clock_card.md`, the stills, and `stage1/` and `stage2/`, one STL per
 print plate and each stage's [print job](../../docs/tolerances/README.md#print-jobs)
 (`clock_stage1_job.3mf`, `clock_stage2_job.3mf`: every piece its own

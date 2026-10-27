@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The board, the base jig, and the set: added to scratch/chess/blanks.dsgn.
+"""The board, the base jig, and the set: added to scratch/chess/blanks.lob.
 
     python3 generators/chess/build_board.py --port N
 
@@ -154,13 +154,13 @@ def main():
     ap.add_argument("--port", type=int)
     args = ap.parse_args()
     app = connect(args.port)
-    app.call("open_project", path=str(OUT / "blanks.dsgn"))
+    app.call("open_project", path=str(OUT / "blanks.lob"))
     piece = app.part("piece", create=False)
     b = board(app)
     print("board:", app.call("get_state")["regen"], b.bbox())
     j, holes = jig(app)
     print("jig:", app.call("get_state")["regen"]["ok"], j.bbox(), len(holes))
-    app.save_project(path=str(OUT / "set.dsgn"))
+    app.save_project(path=str(OUT / "set.lob"))
 
 
 if __name__ == "__main__":

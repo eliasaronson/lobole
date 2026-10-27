@@ -366,7 +366,7 @@ def main():
     cfg = configure(app, rig, mates)
     sids = studies(app, rig, mates, cfg, a.samples)
     t_build = time.perf_counter() - t0
-    app.save_project(path=os.path.join(out, "pes_pump-unchecked.dsgn"))
+    app.save_project(path=os.path.join(out, "pes_pump-unchecked.lob"))
     print(f"  built in {t_build:.1f} s", flush=True)
     if a.no_studies:
         return
@@ -428,7 +428,7 @@ def main():
         raise SystemExit(f"FAILED: {failures}")
     rig.activate()
     app.call("set_active_configuration", id=cfg["Full load"])
-    app.save_project(path=os.path.join(out, "pes_pump.dsgn"))
+    app.save_project(path=os.path.join(out, "pes_pump.lob"))
     ex = app.export_motion(study=sids["run"], path=os.path.join(out, "pes_pump.glb"),
                            _timeout=1800)
     print(f"  GLB: {ex}")

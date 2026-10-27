@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Stage 3: what turns about the tilt axis -- the tilt wheel on its shaft,
-the cradle (the camera plate) and the camera. Opens stages/worms.dsgn,
-saves stages/tilt.dsgn. The camera screw is bought, an ASME B18.3 standard
+the cradle (the camera plate) and the camera. Opens stages/worms.lob,
+saves stages/tilt.lob. The camera screw is bought, an ASME B18.3 standard
 part, and the assembly places it (build_assembly.py).
 
     python3 generators/pantilt/build_tilt.py --port N

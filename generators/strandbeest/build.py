@@ -37,7 +37,7 @@ What it builds (generators/strandbeest/README.md):
   bars on one layer.
 
 Output (generated, untracked): scratch/strandbeest/ -- stage1/ and stage2/
-with their STLs and .dsgn, and strandbeest.json, the receipt; with
+with their STLs and .lob, and strandbeest.json, the receipt; with
 --video, stage1_sequence.mp4, the leg pair's assembly sequence filmed.
 """
 import argparse
@@ -2487,7 +2487,7 @@ def main():
         receipt["stage1"]["job"] = job_receipt(export_print_job(
             d, [("stage1 plate", "stage 1")],
             o1 / "strandbeest_stage1_job.3mf", "pla"))
-        d.call("save_project", path=str(o1 / "strandbeest_stage1.dsgn"))
+        d.call("save_project", path=str(o1 / "strandbeest_stage1.lob"))
         print(f"  stage 1: one plate, {len(beds[0])} pieces -> "
               f"{receipt['stage1']['plate']['stl']}")
         if not args.no_controls:
@@ -2531,7 +2531,7 @@ def main():
             d, [(f"stage2 plate {k + 1}", f"plate {k + 1}")
                 for k in range(len(beds))],
             o2 / "strandbeest_job.3mf", "pla"))
-        d.call("save_project", path=str(o2 / "strandbeest.dsgn"))
+        d.call("save_project", path=str(o2 / "strandbeest.lob"))
 
     order = []
     if args.stage in ("1", "all"):

@@ -10,7 +10,7 @@ the rim.
     python3 generators/hinge_box/build.py --port <port> --size 80
 
 Output goes to `scratch/hinge_box/` (or `--out`): `hinge_box.stl` (the
-plate, one shell per piece), `hinge_box.dsgn` (the parts, the plate, the
+plate, one shell per piece), `hinge_box.lob` (the parts, the plate, the
 assembly and its study, the negative controls) and `hinge_box.json`, the
 receipt (every size, `check_print`'s items, the swing and the controls).
 With a profile that states a bed, the plate stands in the middle of it,

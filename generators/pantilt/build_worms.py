@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Stage 2: the worm, its bearing block and its knob. Opens stages/base.dsgn,
-saves stages/worms.dsgn.
+"""Stage 2: the worm, its bearing block and its knob. Opens stages/base.lob,
+saves stages/worms.lob.
 
     python3 generators/pantilt/build_worms.py --port N
 

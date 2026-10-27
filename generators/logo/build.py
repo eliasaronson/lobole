@@ -17,7 +17,7 @@ Builds, each in a fresh project, and renders with the path tracer:
 
 Every size derives from --mark (the mark tile's width, mm): the log, the
 brand's depth, the badge's thickness. Output (generated, untracked):
-scratch/logo/<name>.png and <name>.dsgn.
+scratch/logo/<name>.png and <name>.lob.
 """
 import argparse
 import os
@@ -102,7 +102,7 @@ class Builder:
         r = self.d.request("render_still", {
             "path": str(OUT / f"{name}.png"), "width": 1600, "height": 1000,
             "samples": self.samples, "fit": True, "outlines": False})
-        self.d.request("save_project", {"path": str(OUT / f"{name}.dsgn")})
+        self.d.request("save_project", {"path": str(OUT / f"{name}.lob")})
         print(f"{name}: {r.get('path')}")
 
     def log_end(self):

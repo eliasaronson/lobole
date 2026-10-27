@@ -11,7 +11,7 @@ cylinders only.
     python3 generators/hook/build.py --port <port> --load-kg 8 --reach 40 --screw 5
 
 Output goes to `scratch/hook/` (or `--out`): `hook_flat.stl` and
-`hook_upright.stl`, each lying on the bed as it prints; `hook.dsgn` (the
+`hook_upright.stl`, each lying on the bed as it prints; `hook.lob` (the
 two print parts and the installed `hook` with its study); `hook.json`, the
 receipt; and `hook_card.md`, the test card: per orientation the predicted
 breaking load in kg and where it breaks, how to print and load it, and a

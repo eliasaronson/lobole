@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Stage 4: the yoke. Opens stages/tilt.dsgn, saves stages/yoke.dsgn.
+"""Stage 4: the yoke. Opens stages/tilt.lob, saves stages/yoke.lob.
 
     python3 generators/pantilt/build_yoke.py --port N
 

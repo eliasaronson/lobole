@@ -112,7 +112,7 @@ sys.path.insert(0, str(HERE))
 
 from lobole.sdk import connect  # noqa: E402
 
-PROJECT = HERE.parent.parent / "scratch/smart_speaker.dsgn"
+PROJECT = HERE.parent.parent / "scratch/smart_speaker.lob"
 
 # The divider's housing in each upright, in the panel's OWN frame. A 4 mm
 # dado, and the only brace contact in this cabinet that is a face rather than

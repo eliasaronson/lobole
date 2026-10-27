@@ -307,7 +307,7 @@ def main():
     for p in app.parts():
         if p["name"] == "Part 1":
             app.call("delete_part", part=p["id"])
-    app.save_project(path=str(OUT / "piece.dsgn"))
+    app.save_project(path=str(OUT / "piece.lob"))
     for t in TIGHT:
         print("  tight inside corner (kind, x, r, fillet mm):", t)
 

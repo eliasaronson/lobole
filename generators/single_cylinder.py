@@ -412,7 +412,7 @@ def main():
     print(f"  drawing: 3 views ({'exact' if a.exact_drawing else 'fast'}) "
           f"-> {a.out}/single_cylinder.pdf")
 
-    project = os.path.join(a.out, "single_cylinder.dsgn")
+    project = os.path.join(a.out, "single_cylinder.lob")
     app.save_project(path=project)
     print(f"  project: {project}")
     return 0

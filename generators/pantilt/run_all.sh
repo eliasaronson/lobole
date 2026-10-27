@@ -5,7 +5,7 @@
 # The pan/tilt head, from nothing: every part, then the assembly with its
 # checks, studies and renders, the base plate's CAM job on the 6090, the
 # drawings and the final renders. What it makes goes to scratch/pantilt/:
-# the head's one project, pantilt.dsgn (parts, assembly, requirements, the
+# the head's one project, pantilt.lob (parts, assembly, requirements, the
 # CAM job and the drawings), the renders, drawings, reports and these logs;
 # each stage's own project, the one `--from` resumes from, under stages/.
 #
@@ -16,8 +16,8 @@
 #   generators/pantilt/run_all.sh PORT --skip yoke_topo renders
 #
 # Stages, in order: base worms tilt yoke assembly yoke_topo cam drawings
-# renders. Each opens the project the one before saved (stages/<stage>.dsgn;
-# the drawings stage saves pantilt.dsgn, which renders opens); `--from`
+# renders. Each opens the project the one before saved (stages/<stage>.lob;
+# the drawings stage saves pantilt.lob, which renders opens); `--from`
 # starts at one and reuses what the earlier ones left there; `--skip`
 # leaves stages out (no later stage opens yoke_topo's or renders' output).
 # LOBOLE_SCRATCH moves scratch/ (tests/generator_runs.py). Run it

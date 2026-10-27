@@ -553,7 +553,7 @@ def run(app, out, full=True):
     result["bom"] = app.bom()
     app.export_bom(path=str(out / "bom.csv"))
     app.export_step(path=str(out / "toolmakers-clamp.step"))
-    app.save_project(path=str(out / "toolmakers-clamp.dsgn"))
+    app.save_project(path=str(out / "toolmakers-clamp.lob"))
     register = {
         k: dict(
             value=v, source=source, tolerance=None, project_variable=k != "thread_pitch"

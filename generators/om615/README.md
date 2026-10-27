@@ -20,8 +20,8 @@ Against a private instance on a scratch port:
 ```sh
 python3 generators/om615/om615.py --port PORT [--stage preview|local|full] [--out DIR] [--samples 49] [--no-export] [--profile]
 python3 generators/om615/om615.py --port PORT --component fan --out /tmp/fan
-python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn --update-component fan --stage preview --out /tmp/fan-update
-python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn --validate-only --stage full
+python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.lob --update-component fan --stage preview --out /tmp/fan-update
+python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.lob --validate-only --stage full
 ```
 
 - **Stages.** `preview` (default) checks strict single-solid part validity,
@@ -30,9 +30,9 @@ python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn -
   contacts; `full` adds the exact motion study over two crank revolutions
   (49 samples by default; a coarse step whose joints jump is re-solved finer
   and a jump that stays is reported, docs/assemblies/README.md#branch-jumps) and the measured strokes, lifts, firing order and the injection
-  pump's turn, strokes, order and timing. `om615-unchecked.dsgn`
+  pump's turn, strokes, order and timing. `om615-unchecked.lob`
   is saved before validation so a failed gate leaves geometry to inspect;
-  `om615.dsgn` only when accepted. `--build-only` and `--no-study` are the
+  `om615.lob` only when accepted. `--build-only` and `--no-study` are the
   older names for `preview` and `local`.
 - **Components.** `--component KEY` builds one part in isolation for shape
   iteration; `--update-component KEY --project P` rebuilds one part inside a

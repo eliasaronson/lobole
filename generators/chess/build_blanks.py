@@ -6,8 +6,8 @@
 
     python3 generators/chess/build_blanks.py --port N
 
-Opens scratch/chess/piece.dsgn (build_piece.py), adds one part per blank and
-saves scratch/chess/blanks.dsgn.
+Opens scratch/chess/piece.lob (build_piece.py), adds one part per blank and
+saves scratch/chess/blanks.lob.
 Each is Derived copies of the `piece` part, each in its own configuration,
 placed base-first along +X from the chuck, joined by necks the operator saws
 through; a square grip for the chuck at x < 0 and a stub for the tailstock's
@@ -155,7 +155,7 @@ def main():
     ap.add_argument("--port", type=int)
     args = ap.parse_args()
     app = connect(args.port)
-    app.call("open_project", path=str(OUT / "piece.dsgn"))
+    app.call("open_project", path=str(OUT / "piece.lob"))
     piece = app.part("piece", create=False)
     report = {}
     for name, pieces in BLANKS.items():
@@ -168,7 +168,7 @@ def main():
         part.render(str(OUT / f"{name}.png"), view="iso")
         report[name] = {"bodies": len(bodies), "side": side,
                         "length": length}
-    app.save_project(path=str(OUT / "blanks.dsgn"))
+    app.save_project(path=str(OUT / "blanks.lob"))
     (OUT / "blanks.json").write_text(json.dumps(report, indent=1))
 
 

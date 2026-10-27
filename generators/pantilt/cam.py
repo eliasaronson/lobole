@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Stage 6: the aluminium base plate's CAM job on the 6090. Saves
-stages/cam.dsgn.
+stages/cam.lob.
 
     python3 generators/pantilt/cam.py --port N [--shots]
 
-Opens scratch/pantilt/stages/assembly.dsgn (the assembly stage put the bearing
+Opens scratch/pantilt/stages/assembly.lob (the assembly stage put the bearing
 seat's K7 on the plate), makes a job on the base plate from a saw-cut blank,
 cuts it in two vise setups, verifies and posts each, and writes the programs
 and their setup sheets to scratch/pantilt/nc/ and a report to

@@ -33,7 +33,7 @@ What it builds:
 - the negative controls, parts of their own (README).
 
 Output (generated, untracked): scratch/hinge_box/ -- hinge_box.stl,
-hinge_box.dsgn and hinge_box.json, the receipt.
+hinge_box.lob and hinge_box.json, the receipt.
 """
 import argparse
 import json
@@ -577,7 +577,7 @@ def main():
            if not prof.get("bed_mm") else
            job_receipt(export_print_job(d, [("hinge box print", "hinge box")],
                                         out / "hinge_box_job.3mf", mat)))
-    d.call("save_project", path=str(out / "hinge_box.dsgn"))
+    d.call("save_project", path=str(out / "hinge_box.lob"))
 
     # The swing.
     _, lid_occ, mate = build_assembly(d)
@@ -627,7 +627,7 @@ def main():
                "job": job, "confirm": gap.get("confirm")}
     (out / "hinge_box.json").write_text(json.dumps(receipt, indent=1,
                                                    default=str))
-    d.call("save_project", path=str(out / "hinge_box.dsgn"))
+    d.call("save_project", path=str(out / "hinge_box.lob"))
     print(f"hinge_box: {exp.get('shells')} shells -> {stl} "
           f"({time.perf_counter() - t0:.0f} s)")
     return 0

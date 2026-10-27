@@ -5,7 +5,7 @@
 """The smart_speaker cabinet, built from its parameters.
 
     python3 generators/smart_speaker/smart_speaker.py [--port N]
-            [--out scratch/smart_speaker.dsgn]
+            [--out scratch/smart_speaker.lob]
             [--stage carcass|parts|assembly|cam|all] [--no-save]
 
 A two-way floorstander: a Visaton W 170 S in an 854 mm reflex chamber, a
@@ -50,7 +50,7 @@ import veneer  # noqa: E402
 import verify  # noqa: E402
 import walls  # noqa: E402
 
-DEFAULT_OUT = HERE.parent.parent / "scratch/smart_speaker.dsgn"
+DEFAULT_OUT = HERE.parent.parent / "scratch/smart_speaker.lob"
 PHASES = []
 
 

@@ -26,7 +26,7 @@ load, so each orientation's breaking load is the allowable over the stress
 per newton.
 
 Output (generated, untracked): scratch/hook/ — hook_flat.stl and
-hook_upright.stl (each as it sits on the bed), hook.dsgn, hook.json (the
+hook_upright.stl (each as it sits on the bed), hook.lob, hook.json (the
 receipt) and hook_card.md, the test card.
 """
 import argparse
@@ -553,7 +553,7 @@ def main():
     if conv > CONVERGED:
         raise SystemExit(f"hook: the root stress moved {conv * 100:.0f} % "
                          f"between meshes; not converged")
-    d.call("save_project", path=str(out / "hook.dsgn"))
+    d.call("save_project", path=str(out / "hook.lob"))
     receipt = {"sizes": s, "process": proc, "material": mat,
                "rated_n": rated, "prediction": pred,
                "beam_formula_mpa": beam, "concentration": kt,

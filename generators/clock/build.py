@@ -18,7 +18,7 @@ modelled masses, as a compound pendulum. What it builds, checks and
 predicts: generators/clock/README.md.
 
 Output (generated, untracked): scratch/clock/ (or $LOBOLE_SCRATCH/clock,
-or --out) — clock.dsgn, clock.json (the receipt), clock_card.md (the test
+or --out) — clock.lob, clock.json (the receipt), clock_card.md (the test
 card), and stage1/ and stage2/, one STL per print plate; with --video,
 stage1_sequence.mp4 and stage2_sequence.mp4, each stage's assembly sequence
 filmed.
@@ -1496,7 +1496,7 @@ def main():
         cp = find_length(d, s, proc, args.period)
         n_parts = verify_parts(d)
         print(f"  {n_parts} parts, every one verified")
-        d.call("save_project", path=str(out / "clock.dsgn"))
+        d.call("save_project", path=str(out / "clock.lob"))
 
 
     clash = s["g"] / 5.0
@@ -1699,7 +1699,7 @@ def main():
                           f"s -> {film}")
 
     a2.activate()
-    d.call("save_project", path=str(out / "clock.dsgn"))
+    d.call("save_project", path=str(out / "clock.lob"))
     (out / "clock_card.md").write_text(card(s, pred, plates,
                                             args.profile or args.material,
                                             checks))

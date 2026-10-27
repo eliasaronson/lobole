@@ -20,7 +20,7 @@ The profile must state its bed (`bed_mm`): the plates are packed into it.
 `print_coupon.py --seed` gives the P1S profiles theirs.
 
 Output, untracked, in `scratch/engine/` (or `$LOBOLE_SCRATCH/engine`, or
-`--out`): `engine.dsgn`, the receipt `engine.json`, the test card
+`--out`): `engine.lob`, the receipt `engine.json`, the test card
 `engine_card.md`, `plate1.stl` and `plate2.stl` (PLA), `plate_tpu.stl`, the
 [print jobs](../../docs/tolerances/README.md#print-jobs) `engine_job.3mf`
 (the PLA plates, a Bambu project when `$LOBOLE_SLICER_CONFIGS` holds

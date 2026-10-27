@@ -503,7 +503,7 @@ def main():
         build_s=time.perf_counter() - start,
     )
     machine.activate()
-    app.save_project(path=str(a.out / "cncest6090-provisional.dsgn"))
+    app.save_project(path=str(a.out / "cncest6090-provisional.lob"))
     print(f'Built provisional model in {result["build_s"]:.2f}s', flush=True)
     rig.activate()
     if a.stage != "preview":
@@ -525,7 +525,7 @@ def main():
         )
     drawing(app, parts["accessory"], a.out, v)
     machine.activate()
-    app.save_project(path=str(a.out / "cncest6090-provisional.dsgn"))
+    app.save_project(path=str(a.out / "cncest6090-provisional.lob"))
     (a.out / "dimensions.json").write_text(json.dumps(v, indent=2))
     (a.out / "dimension-register.json").write_text(json.dumps(manifest(v), indent=2))
     (a.out / "report.json").write_text(json.dumps(result, indent=2))

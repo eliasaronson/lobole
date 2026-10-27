@@ -978,7 +978,7 @@ def main():
            os.path.join(args.out, "mesh-cache.json"))
     set_time(app, m, 10, 8, 37)
     os.makedirs(args.out, exist_ok=True)
-    app.save_project(path=os.path.join(args.out, "watch.dsgn"))
+    app.save_project(path=os.path.join(args.out, "watch.lob"))
     if args.stage == "all":
         with phase("renders"):
             renders(app, occ, args.out)

@@ -949,7 +949,7 @@ def main():
                                         out / "planetary_job.3mf",
                                         material_of(d, proc))))
     # The print part is saved as built; the hero still is a separate look.
-    d.call("save_project", path=str(out / "planetary.dsgn"))
+    d.call("save_project", path=str(out / "planetary.lob"))
 
     occ, mates, ratios = build_assembly(d, s, ph, args.diameter, proc)
     # One mesh cycle finely (every tooth pair passes through every phase of
@@ -1054,7 +1054,7 @@ def main():
                "print_job": job,
                "stl_shells": exp.get("shells"), "confirm": gap["confirm"]}
     (out / "planetary.json").write_text(json.dumps(receipt, indent=1))
-    d.call("save_project", path=str(out / "planetary.dsgn"))
+    d.call("save_project", path=str(out / "planetary.lob"))
     print(f"planetary: {exp.get('shells')} shells -> {stl}")
     return 0
 

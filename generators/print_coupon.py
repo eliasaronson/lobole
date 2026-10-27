@@ -780,7 +780,7 @@ def press_coupon(d, args, proc):
     r = d.call("export_stl", **exp)
     row["stl_deflection_mm"] = r.get("deflection_mm")
     row["job"] = coupon_job(d, args, proc, name, out)
-    d.call("save_project", path=str(out / f"{name}.dsgn"))
+    d.call("save_project", path=str(out / f"{name}.lob"))
     (out / f"{name}.json").write_text(json.dumps(row, indent=1))
     print(f"print_coupon: press row of {len(row['caps'])} -> {stl}")
     for c in row["caps"]:
@@ -1153,7 +1153,7 @@ def main():
     r = d.call("export_stl", **exp)
     report["stl_deflection_mm"] = r.get("deflection_mm")
     report["job"] = coupon_job(d, args, proc, name, out)
-    d.call("save_project", path=str(out / f"{name}.dsgn"))
+    d.call("save_project", path=str(out / f"{name}.lob"))
     (out / f"{name}.json").write_text(json.dumps(report, indent=1))
     print(f"print_coupon: {len(report['features'])} features -> {stl}")
     if zrow:

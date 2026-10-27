@@ -204,7 +204,7 @@ def main():
         print(f"  {line}")
 
     with phase("save"):
-        app.call("save_project", path=os.path.join(out, "bike.dsgn"))
+        app.call("save_project", path=os.path.join(out, "bike.lob"))
         app.call("export_step", path=os.path.join(out, "bike.step"))
     with phase("render"):
         verify.portraits(app, asm, out)

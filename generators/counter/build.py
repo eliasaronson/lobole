@@ -40,7 +40,7 @@ What it builds:
   old stacked layout (`control: stacked`), each of which must fail.
 
 Output (generated, untracked): scratch/counter/ -- counter.stl,
-counter_job.3mf, counter.dsgn and counter.json, the receipt.
+counter_job.3mf, counter.lob and counter.json, the receipt.
 """
 import argparse
 import json
@@ -1082,7 +1082,7 @@ def main():
            job_receipt(export_print_job(d, [("counter print", "counter")],
                                         out / "counter_job.3mf",
                                         material_of(d, proc))))
-    d.call("save_project", path=str(out / "counter.dsgn"))
+    d.call("save_project", path=str(out / "counter.lob"))
 
     occ, mates, rels = build_assembly(d, s)
     clash = g / 5.0
@@ -1247,7 +1247,7 @@ def main():
                "stl_deflection_mm": exp.get("deflection_mm"),
                "print_job": job, "confirm": gap.get("confirm")}
     (out / "counter.json").write_text(json.dumps(receipt, indent=1))
-    d.call("save_project", path=str(out / "counter.dsgn"))
+    d.call("save_project", path=str(out / "counter.lob"))
     print(f"counter: {exp.get('shells')} shells -> {stl}")
     return 0
 

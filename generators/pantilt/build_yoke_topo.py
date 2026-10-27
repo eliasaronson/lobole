@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Stage 6: the yoke under load, and what topology made of it. Opens
-stages/assembly.dsgn, saves stages/yoke_topo.dsgn (the head with the
+stages/assembly.lob, saves stages/yoke_topo.lob (the head with the
 studies, the solid yoke, the envelope and its topology result, and the print
 pieces), writes yoke_topo_report.json, the pictures and the pieces' STLs.
 
@@ -292,15 +292,15 @@ def volume(app, part):
 
 
 def topo_step(app, S, G, cases, target_volume, fresh_run, clock):
-    """The topology study, or the one `stages/yoke_envelope.dsgn` holds.
+    """The topology study, or the one `stages/yoke_envelope.lob` holds.
 
     A run is minutes on the GPU (two hours on the CPU when its solver could
     not converge), so its project is kept: when the envelope built now has
     the volume the saved one has (it is the same envelope) and the saved
     study carries the same cases, its result is reused -- pictured,
     checked and reported again, not re-run. Called last, on the session
-    saved as stages/yoke_topo.dsgn: a fresh run adds the envelope to it and
-    saves that as stages/yoke_envelope.dsgn."""
+    saved as stages/yoke_topo.lob: a fresh run adds the envelope to it and
+    saves that as stages/yoke_envelope.lob."""
     saved = common.stage("yoke_envelope")
     fresh(app, "yoke_envelope")
     env = build_yoke.yoke(app, dict(S), name="yoke_envelope",
@@ -593,7 +593,7 @@ def main():
                     help="which of solid,topo,yoke to run (default: all)")
     ap.add_argument("--fresh-topology", action="store_true",
                     help="run the topology study even when "
-                         "stages/yoke_envelope.dsgn holds a result for this "
+                         "stages/yoke_envelope.lob holds a result for this "
                          "envelope and its cases (minutes on the GPU)")
     a = ap.parse_args()
     app = common.connect(a.port)
@@ -635,7 +635,7 @@ def main():
         topo_step(app, S, G, CASES,
                   volume(app, app.part("yoke", create=False)),
                   a.fresh_topology, clock)
-    # topo_step opens and saves yoke_envelope.dsgn when it has to run, so
+    # topo_step opens and saves yoke_envelope.lob when it has to run, so
     # the head's requirements are checked on the head's project.
     app.call("open_project", path=str(common.stage("yoke_topo")))
     REPORT["requirements"], bad = common.requirements_met(app)

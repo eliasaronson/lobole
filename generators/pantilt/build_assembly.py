@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Stage 5: the head assembled, checked and moved. Opens stages/yoke.dsgn,
-saves stages/assembly.dsgn, writes assembly_report.json, the BOM and the
+"""Stage 5: the head assembled, checked and moved. Opens stages/yoke.lob,
+saves stages/assembly.lob, writes assembly_report.json, the BOM and the
 renders.
 
     python3 generators/pantilt/build_assembly.py --port N

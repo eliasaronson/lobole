@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Stage 1: the spec, the base plate and the pan wheel. Saves
-stages/base.dsgn.
+stages/base.lob.
 
     python3 generators/pantilt/build_base.py --port N
 

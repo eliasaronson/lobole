@@ -797,7 +797,7 @@ def main():
         result = validate(app, stage=a.stage, assembly=rig)
         report = result.current(app)
         write_report(a.out, 'validation-report.json', report)
-        path = os.path.join(a.out, 'om615.dsgn' if report['accepted'] else 'om615-unchecked.dsgn')
+        path = os.path.join(a.out, 'om615.lob' if report['accepted'] else 'om615-unchecked.lob')
         rig.activate()
         app.save_project(path=path)
         write_report(a.out, 'timings.json', dict(total_s=time.perf_counter()-t0))
@@ -810,7 +810,7 @@ def main():
               fingerprint=component_fingerprint(a.component))
         part.activate()
         os.makedirs(a.out, exist_ok=True)
-        path = os.path.join(a.out, f"{a.component}-unchecked.dsgn")
+        path = os.path.join(a.out, f"{a.component}-unchecked.lob")
         app.save_project(path=path)
         print(f"  component: {part.name}, {part.volume():.1f} mm3, "
               f"{time.perf_counter() - t0:.1f}s -> {path}")
@@ -861,7 +861,7 @@ def main():
     rig.activate()
     # Save before expensive validation: a failing gate must leave geometry
     # available for inspection. The filename explicitly says it is a draft.
-    draft = os.path.join(a.out, "om615-unchecked.dsgn")
+    draft = os.path.join(a.out, "om615-unchecked.lob")
     app.save_project(path=draft)
     print(f"  unchecked build: {draft}")
     with open(os.path.join(a.out, "timings.json"), "w") as f:
@@ -968,7 +968,7 @@ def main():
                       motion=dict(status='passed', report=r, scope='defined_samples'))
     write_report(a.out, 'validation-report.json', validation)
     os.makedirs(a.out, exist_ok=True)
-    project = os.path.join(a.out, "om615.dsgn")
+    project = os.path.join(a.out, "om615.lob")
     app.save_project(path=project)
     timings["total_s"] = time.perf_counter() - t0
     with open(os.path.join(a.out, "timings.json"), "w") as f:

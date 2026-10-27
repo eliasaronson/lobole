@@ -16,7 +16,7 @@ cannot enforce.
 
 ```sh
 python3 generators/smart_speaker/extract_bought.py [--port N] [--step ~/Downloads/step_files/speaker.step] [--out scratch/smart_speaker/bought]   # once
-python3 generators/smart_speaker/smart_speaker.py [--port N] [--out scratch/smart_speaker.dsgn] \
+python3 generators/smart_speaker/smart_speaker.py [--port N] [--out scratch/smart_speaker.lob] \
     [--stage carcass|parts|assembly|cam|all] [--skip-cam] [--no-save] [--deep] [--save-anyway]
 python3 generators/smart_speaker/modal.py [--port N] [--mesh 25] [--project P] [--assembly]
 ```

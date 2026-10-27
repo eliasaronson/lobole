@@ -24,7 +24,7 @@ Output goes to `scratch/strandbeest/` (or `--out`):
   one plate;
 - `stage2/stage2_plate_N.stl`: the walker, as plates for the profile's
   bed;
-- the `.dsgn` of each stage, holding the parts, the plates, the assemblies
+- the `.lob` of each stage, holding the parts, the plates, the assemblies
   and their studies;
 - `stage1/strandbeest_stage1_job.3mf` and `stage2/strandbeest_job.3mf`,
   each stage's [print job](../../docs/tolerances/README.md#print-jobs):

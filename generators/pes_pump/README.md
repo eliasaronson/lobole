@@ -21,8 +21,8 @@ python3 generators/pes_pump/pes_pump.py --port <port> [--out scratch/pes_pump] \
 
 It refuses to run against an instance with unsaved changes. `--parts` builds
 only those parts; `--no-studies` stops after the build. Outputs:
-`pes_pump-unchecked.dsgn` (written first, so a failed run leaves something to
-inspect), `pes_pump.dsgn` (only once every check passes, left on Full load),
+`pes_pump-unchecked.lob` (written first, so a failed run leaves something to
+inspect), `pes_pump.lob` (only once every check passes, left on Full load),
 `pes_pump.glb` (the camshaft study), `report.json` and the renders.
 
 ## Structure

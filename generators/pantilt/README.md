@@ -39,13 +39,13 @@ a friction round of its own; what both taught is
                                                   # (below: the pan bearing)
 
 All of it lands in `scratch/pantilt/`, and the head is ONE project there:
-`pantilt.dsgn`, the drawings stage's, holding the parts, the assembly with
+`pantilt.lob`, the drawings stage's, holding the parts, the assembly with
 its studies, the requirements, the CAM job and the drawings. Beside it the
 renders, `assembly_report.json`, the BOM, `drawings/`, `renders/`, `nc/`,
 one log per stage, and `run_all.log`, which ends in `done` or `failed`.
 Each stage opens the project the one before saved, and those snapshots --
 what `--from` resumes from -- are kept apart in `stages/`
-(`stages/<stage>.dsgn`; the yoke's studies' two, `yoke_topo` and
+(`stages/<stage>.lob`; the yoke's studies' two, `yoke_topo` and
 `yoke_envelope`, beside them), so whoever opens the output finds the head
 and not nine copies of it at different ages. A study whose inputs a previous run already solved is
 answered from its result, not run again
@@ -55,14 +55,14 @@ minutes.
 
 | script | makes | saves |
 |---|---|---|
-| `build_base.py` | the project variables (`spec.py`), the base plate (6082-T6 aluminium, `aluminum_6082_t6`: the lower pan bearing's pocket, the tapped 3/8-16 tripod hole with its Thread, four M4 tapped holes, 0.5 mm chamfers on the rims the 6090 breaks) and the pan wheel (PETG, 40 teeth, hobbed; the upper pan bearing's counterbore, four counterbored screw holes) | `stages/base.dsgn` |
-| `build_worms.py` | the worm (one part for both axes: ZA, one start, 0.25 mm backlash, spacer collars and journals), the bearing block (one part for all four bearings) and the knob | `stages/worms.dsgn` |
-| `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot) and the camera (the load, 1.5 kg, drawn as a mirrorless body and a zoom: [below](#the-camera)) | `stages/tilt.dsgn` |
-| `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `stages/yoke.dsgn` |
-| `build_assembly.py` | the assembly: mates, the camera screw as the ASME B18.3 1/4-20 it is bought as (`add_fastener`), bearings by `fit_bearing`, the two DIN 471 rings by `fit_retaining_ring`, both rings of each bearing reported by `check_seat`, screws by `fit_fastener` and `check_fasteners`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, renders; then the head's [requirements](#requirements), checked, and the stage stops on any not met | `stages/assembly.dsgn` |
-| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`), and the pan journal's own bend, which no study sees, by beam; the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `stages/yoke_envelope.dsgn`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; the lens at 3 g, a requirement per case; `yoke_topo_report.json` | `stages/yoke_topo.dsgn`, `stages/yoke_envelope.dsgn`, `yoke_print_*.stl` |
-| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm as a requirement (ok and complete, the thread and the K7 seat judged in their bands, nothing uncut but the hand-tapped M4s) and with no toolpath warning, posted, and a setup sheet for each; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `stages/cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `nc/base_plate - {Top,Underside} setup sheet.pdf`, `cam_report.json` |
-| `build_drawings.py` | three A3 sheets ([below](#drawings-and-renders)): the base plate's shop drawing, the head's assembly drawing with balloons and the parts list, and the print sheet; each exported and `check_drawing`ed, and the stage stops on a sheet that is not clean. It only draws: what the sheets order by is the model's | `pantilt.dsgn` (the head), `drawings/{base_plate,assembly,print}.{pdf,svg}`, `drawings_report.json` |
+| `build_base.py` | the project variables (`spec.py`), the base plate (6082-T6 aluminium, `aluminum_6082_t6`: the lower pan bearing's pocket, the tapped 3/8-16 tripod hole with its Thread, four M4 tapped holes, 0.5 mm chamfers on the rims the 6090 breaks) and the pan wheel (PETG, 40 teeth, hobbed; the upper pan bearing's counterbore, four counterbored screw holes) | `stages/base.lob` |
+| `build_worms.py` | the worm (one part for both axes: ZA, one start, 0.25 mm backlash, spacer collars and journals), the bearing block (one part for all four bearings) and the knob | `stages/worms.lob` |
+| `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot) and the camera (the load, 1.5 kg, drawn as a mirrorless body and a zoom: [below](#the-camera)) | `stages/tilt.lob` |
+| `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `stages/yoke.lob` |
+| `build_assembly.py` | the assembly: mates, the camera screw as the ASME B18.3 1/4-20 it is bought as (`add_fastener`), bearings by `fit_bearing`, the two DIN 471 rings by `fit_retaining_ring`, both rings of each bearing reported by `check_seat`, screws by `fit_fastener` and `check_fasteners`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, renders; then the head's [requirements](#requirements), checked, and the stage stops on any not met | `stages/assembly.lob` |
+| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`), and the pan journal's own bend, which no study sees, by beam; the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `stages/yoke_envelope.lob`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; the lens at 3 g, a requirement per case; `yoke_topo_report.json` | `stages/yoke_topo.lob`, `stages/yoke_envelope.lob`, `yoke_print_*.stl` |
+| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm as a requirement (ok and complete, the thread and the K7 seat judged in their bands, nothing uncut but the hand-tapped M4s) and with no toolpath warning, posted, and a setup sheet for each; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `stages/cam.lob`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `nc/base_plate - {Top,Underside} setup sheet.pdf`, `cam_report.json` |
+| `build_drawings.py` | three A3 sheets ([below](#drawings-and-renders)): the base plate's shop drawing, the head's assembly drawing with balloons and the parts list, and the print sheet; each exported and `check_drawing`ed, and the stage stops on a sheet that is not clean. It only draws: what the sheets order by is the model's | `pantilt.lob` (the head), `drawings/{base_plate,assembly,print}.{pdf,svg}`, `drawings_report.json` |
 | `build_renders.py` | path-traced stills of the head: hero, tilted 35 degrees by its worm, from below, exploded along its own axes | `renders/{hero,tilted,low,exploded}.png` |
 
 `spec.py` holds the derivation; `common.py` the connection, the print
@@ -352,15 +352,15 @@ load regenerates the minimum, and the requirement compares it with the bore
 the head still has.
 
 **A heavier camera.** `load_kg` 1.5 to 1.8, and every requirement reads
-stale before anything is measured, in `stages/yoke_topo.dsgn` and
-`stages/cam.dsgn` alike:
+stale before anything is measured, in `stages/yoke_topo.lob` and
+`stages/cam.lob` alike:
 the head is sized from its load. The lens is as long as makes the mass, so
 the swing (`cam_swing`, 160 to 200 mm), the arms and the tilt axis grow
 with it; the worm pair is sized from the tilt torque, so the wheel, the
 knobs, the base plate under it and its program change too; and the study's
-forces are the mass's. Checked again on `stages/yoke_topo.dsgn` (one job,
+forces are the mass's. Checked again on `stages/yoke_topo.lob` (one job,
 about nine minutes on a loaded machine: the yoke's static and both motion
-studies run again), and the plate's two on `stages/cam.dsgn` (the same):
+studies run again), and the plate's two on `stages/cam.lob` (the same):
 
 | requirement | 1.5 kg | 1.8 kg |
 |---|---|---|
@@ -415,14 +415,14 @@ the mechanism solved at no sample. Each joint now snaps to its holes' rims
 **Edits that reach less.** A requirement's own bound tightened (the
 sideways lens to 3.0 mm) reads unchecked and nothing else moves; checking
 it again answers from the stored study in 0.02 s, a fail at 3.20 mm. On
-`stages/cam.dsgn`, Top's facing pass made conventional (`climb` off) makes
+`stages/cam.lob`, Top's facing pass made conventional (`climb` off) makes
 the two plate CAM requirements stale and leaves the seven of the assembly
 current (measured before the three bearing requirements were added);
 the check measures the two (3.5 s) and they pass.
 
-The base plate's requirements are in `pantilt.dsgn` with the assembly's
-(the CAM stage opens `stages/assembly.dsgn`, and the drawings stage the CAM
-stage's), the lens's in `stages/yoke_topo.dsgn`.
+The base plate's requirements are in `pantilt.lob` with the assembly's
+(the CAM stage opens `stages/assembly.lob`, and the drawings stage the CAM
+stage's), the lens's in `stages/yoke_topo.lob`.
 
 ## The base plate on the 6090
 

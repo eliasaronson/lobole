@@ -20,7 +20,7 @@ prints in:
 | `lid.stl` | PLA | top down |
 | `gasket.stl` | TPU 95A | flat |
 
-There is also `jar.dsgn` (the parts, the assembly `screw-top jar` and the
+There is also `jar.lob` (the parts, the assembly `screw-top jar` and the
 negative controls), `jar.png` and `jar-section.png` (a cut through the
 axis), and `jar.json`, the receipt: every size, the allowances it used,
 the clearances, the measured squeeze and every check's verdict.

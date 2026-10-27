@@ -19,7 +19,7 @@ into two of the profile's beds. What it builds, checks and predicts:
 generators/engine/README.md.
 
 Output (generated, untracked): scratch/engine/ (or $LOBOLE_SCRATCH/engine,
-or --out) -- engine.dsgn, engine.json (the receipt), engine_card.md (the
+or --out) -- engine.lob, engine.json (the receipt), engine_card.md (the
 test card), plate1.stl and plate2.stl (PLA), plate_tpu.stl, and stills.
 """
 import argparse
@@ -1016,7 +1016,7 @@ def main():
         no_belt = d.call("add_configuration", name="the drive, no belt")["id"]
         d.call("set_configuration", id=no_belt,
                suppressed_occurrences=[a.occ["timing belt"]])
-        d.call("save_project", path=str(out / "engine.dsgn"))
+        d.call("save_project", path=str(out / "engine.lob"))
 
     step = args.step or (360.0 / s.z1) / 5.0
     n = int(round(720.0 / step)) + 1
@@ -1219,13 +1219,13 @@ def main():
             d.call("set_section", enabled=False)
 
     a.activate()
-    d.call("save_project", path=str(out / "engine.dsgn"))
+    d.call("save_project", path=str(out / "engine.lob"))
     # What the app sees: the file reopened, every requirement current and
     # passing WITHOUT measuring (list_requirements reads hashes). A check
     # taken on a state the file does not keep -- the belt hidden, then
     # shown and saved -- opens stale, and the panel's Check measured a
     # different engine and failed it.
-    d.call("open_project", path=str(out / "engine.dsgn"))
+    d.call("open_project", path=str(out / "engine.lob"))
     reopened = d.call("list_requirements")["requirements"]
     not_pass = [(q["name"], q["state"], q.get("note")) for q in reopened
                 if q["state"] != "pass"]

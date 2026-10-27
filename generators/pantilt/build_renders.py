@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Stage 9: the final renders of the head. Opens pantilt.dsgn; writes
+"""Stage 9: the final renders of the head. Opens pantilt.lob; writes
 scratch/pantilt/renders/ and saves nothing (it poses the head, renders,
 and puts it back).
 
