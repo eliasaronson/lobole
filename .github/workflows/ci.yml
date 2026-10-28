@@ -39,6 +39,11 @@ jobs:
   # failure exactly. See docs/ui/testing.md#independence-any-partition-is-valid.
   gui-suite:
     runs-on: ubuntu-24.04
+    # GitHub's default is 360 minutes, so a hang (a test the engine's 300 s
+    # kill does not reach: Xvfb, lavapipe, a smoke step) would hold a runner
+    # for six hours. Measured over the last 21 green runs (Oct 2026): median
+    # 25 min, slowest 85 (a cold ccache). 120 is that worst case plus ~40%.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
         with:
@@ -172,6 +177,9 @@ jobs:
 
   build-and-test:
     runs-on: ubuntu-24.04
+    # Measured over 19 green runs (Oct 2026): median 28 min, slowest 50.
+    # 90 is the worst case plus ~80%: a cold ccache rebuilds three trees here.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
@@ -314,6 +322,9 @@ jobs:
             extra_packages: ""
     name: stock-ubuntu (${{ matrix.image }})
     runs-on: ubuntu-24.04
+    # Measured over 21 green runs per image (Oct 2026): median ~35 min,
+    # slowest 64 (ubuntu:26.04). 110 is the worst case plus ~70%.
+    timeout-minutes: 110
     container: ${{ matrix.image }}
     steps:
       # ca-certificates is a CONTAINER prerequisite, not a Designer one: a
@@ -397,6 +408,10 @@ jobs:
   sanitizers:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
+    # Never measured whole here (no dispatched run in the history): the suite
+    # alone took ~98 min, and the compile is cold by construction. 300 leaves
+    # three hours for that compile and still ends a hang before the 360 default.
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v7
         with:
