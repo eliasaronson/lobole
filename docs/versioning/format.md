@@ -337,6 +337,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A static result's `reactions` carry `moment_n_mm` [x, y, z]: each support's moment about the frame's origin (the part's; world on an assembly study), N·mm. A pin over a band of its face takes moment along it, which its force alone does not show ([pin supports](../simulation/README.md#pin-supports)). A result saved before reads without it, and `study_results` then leaves it out. Golden `vNEXT-pin-reaction-moment` (a shaft on two pins with an overhung load; results are not in the single-file corpus, so their round trip is `tests/test_study_inputs.cpp`'s) |
 
 ## Paths in a project
 

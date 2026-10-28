@@ -250,6 +250,15 @@ TEST_CASE("a lever on two pins: reactions balance the load and the clamp's "
                           << -R1 << ", " << R2);
   const glm::dvec3 sum = a->forceN + b->forceN + glm::dvec3(0, -F, 0);
   CHECK(glm::length(sum) < 1e-4 * F);
+  // And their moments answer the load's: the end face's uniform push acts
+  // at its middle, (L, w/2, t/2), about the part's origin.
+  REQUIRE(a->hasMoment);
+  REQUIRE(b->hasMoment);
+  const glm::dvec3 load =
+      glm::cross(glm::dvec3(xF, w / 2, t / 2), glm::dvec3(0, -F, 0));
+  INFO("pin moments " << a->momentNmm.z << ", " << b->momentNmm.z
+                      << "; the load's " << load.z);
+  CHECK(glm::length(a->momentNmm + b->momentNmm + load) < 1e-4 * F * L);
   CHECK_THAT(a->forceN.y, WithinRel(-R1, 0.01));
   CHECK_THAT(b->forceN.y, WithinRel(R2, 0.01));
   // Each pin presses on about half its bore, not all of it.

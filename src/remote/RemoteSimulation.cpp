@@ -594,7 +594,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "no interlayer strength, and on a result saved before v172, which kept "
      "no stress tensor. A static body (and each case) also carries "
      "`reactions` [{support, type, force_n [x,y,z] N -- what the support "
-     "exerts on the part; a pin's contact_area_mm2 of face_area_mm2}], and, "
+     "exerts on the part; moment_n_mm [x,y,z] N mm, its moment about the "
+     "frame's origin (the part's; world on an assembly study), absent on a "
+     "result saved before it was kept; a pin's contact_area_mm2 of "
+     "face_area_mm2}], and, "
      "when its peak von Mises sits within one element of a support's edge "
      "(a clamp's rim, where the stress is a singularity that grows with the "
      "mesh), `peak_at_support_edge` {support, type, max_von_mises_away_mpa, "
@@ -1814,6 +1817,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         json rj = {{"support", sr.support},
                    {"type", fem::LoadTypeToString(sr.type)},
                    {"force_n", {sr.forceN.x, sr.forceN.y, sr.forceN.z}}};
+        if (sr.hasMoment)
+          rj["moment_n_mm"] = {sr.momentNmm.x, sr.momentNmm.y, sr.momentNmm.z};
         if (sr.type == fem::LoadType::Pin) {
           rj["contact_area_mm2"] = sr.contactAreaMm2;
           rj["face_area_mm2"] = sr.faceAreaMm2;

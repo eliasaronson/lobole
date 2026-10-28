@@ -85,11 +85,18 @@ struct FemResults {
   // `forceN` is the force the support exerts on the part (N, the part's
   // frame); a pin's `contactAreaMm2` is the area of its face in contact, of
   // `faceAreaMm2` (both 0 on a fixed support). Empty on a modal result and
-  // on one saved before the pin support.
+  // on one saved before the pin support. `momentNmm` is the moment of the
+  // support's nodal forces about the frame's origin (N mm): with `forceN`
+  // the whole of what it carries, so a support that holds a face along its
+  // length (a pin over a band, a clamp) shows the moment it takes, which a
+  // lever rule over its middle does not. `hasMoment` false on a result
+  // saved before vNEXT.
   struct SupportReaction {
     uint64_t support = 0; // the load id
     LoadType type = LoadType::Fixed;
     glm::dvec3 forceN{0.0};
+    glm::dvec3 momentNmm{0.0};
+    bool hasMoment = false;
     double contactAreaMm2 = 0.0;
     double faceAreaMm2 = 0.0;
   };

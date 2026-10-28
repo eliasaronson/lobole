@@ -150,12 +150,22 @@ side in tension and puts a clamp's edge on the bore's rims. A `pin` support
 - **What it reports.** Every static result lists what each support carried
   (`FemResults::reactions`, the internal force less the applied load summed
   over the support's nodes, each node counted once): its force on the part
-  in newtons, and for a pin the area of its face in contact, of the face's.
-  A lever's two pins carry its statics.
+  in newtons, its moment about the frame's origin in N·mm (`moment_n_mm`:
+  the part's frame, world on an assembly study), and for a pin the area of
+  its face in contact, of the face's. A lever's two pins carry its statics,
+  force and moment.
 - **What it costs.** Each round is a solve: a pinned study takes as many
   factorizations as rounds, where a clamped one takes one.
 - **Not modelled.** Clearance: a pin smaller than its bore presses on a
   narrower arc and raises the bearing stress, which this underestimates.
+  And a pin over a LENGTH of shaft (a bushing's sleeve, a band) holds it
+  along that length, so it takes moment as a clamp does: two such pins
+  share an overhung load as their stiffness says, not by the lever rule
+  over their middles. The woodcutter's crank, leaned on outside the left
+  bushing, rests on that bushing alone, its moment taken along the sleeve
+  (`moment_n_mm` shows it); a bushing with clearance would tilt in its bore
+  and let the far one carry its share. The bending moment between the load
+  and the near pin is the overhang's either way.
   Friction. A pin on a modal study (a mode has no load to press the part
   onto it), a topology study (it freezes the faces its fixed supports
   hold) or an assembly study (held by fixed faces and rigid contacts) is
@@ -852,7 +862,8 @@ verb that names a study for context (`add_load`, `add_refinement`,
 - `tests/test_fem_pin.cpp` (`[pin]`): a pinned lug's reaction answers the
   pull, on about half its bore, its bearing stress against
   (4/π) F/(d t) and the hole's sides against the net section F/((w − d) t);
-  a lever on two pins whose reactions are its statics, its clamped peak
+  a lever on two pins whose reactions, force and moment, are its statics,
+  its clamped peak
   growing with the mesh and flagged while the pinned one holds (`[slow]`);
   a cantilever's clamp-edge peak flagged and a hole's peak not; the
   refusals (a flat face, one free pin, two on one axis, a load that lifts

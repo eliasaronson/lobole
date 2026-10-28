@@ -1,0 +1,30 @@
+{
+  "format": "designer-document",
+  "version": 202,
+  "features": [
+    {"type": "Sketch", "name": "Section", "id": 1, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "circle", "id": 1, "center": [0, 0], "radius": 5}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Shaft", "id": 2, "sketch_id": 1,
+     "distance": 100.0, "mode": "new_body"}
+  ],
+  "studies": [
+    {"type": "Study", "id": 3, "name": "Overhung crank",
+     "loads": [
+       {"id": 4, "type": "pin",
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 0.0,
+        "region": {"normal": [0, 0, 1], "from_mm": 20, "to_mm": 30},
+        "fix_rotation": true},
+       {"id": 5, "type": "pin",
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 0.0,
+        "region": {"normal": [0, 0, 1], "from_mm": 90, "to_mm": 100}},
+       {"id": 6, "type": "remote",
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 50.0,
+        "direction": [0, -1, 0], "point": [0, 15, 5],
+        "region": {"normal": [0, 0, 1], "from_mm": 0, "to_mm": 10}}
+     ]}
+  ]
+}

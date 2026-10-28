@@ -1356,13 +1356,16 @@ void FinishSupports(const StudyJobBody& jb, FemResults& res) {
         sr = pr;
     sr.support = sf.id;
     sr.type = sf.type;
-    if (res.nodeReaction.size() == jb.mesh.nodes.size())
+    if (res.nodeReaction.size() == jb.mesh.nodes.size()) {
+      sr.hasMoment = true;
       for (int t : sf.tris)
         for (int v : jb.mesh.boundary[t].nodes)
           if (!counted[v]) {
             counted[v] = 1;
             sr.forceN += res.nodeReaction[v];
+            sr.momentNmm += glm::cross(jb.mesh.nodes[v], res.nodeReaction[v]);
           }
+    }
     res.reactions.push_back(sr);
   }
   res.nodeReaction.clear();
