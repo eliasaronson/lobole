@@ -652,6 +652,22 @@ and a double signal (143, at once).
   a stall also silences the remote, and this log line is where it is
   explained. Nothing is watched before the first beat, so start-up is not
   reported.
+- **A window that is not shown.** The present is labelled too (`presenting
+  a frame`), and on Wayland `presenting: compositor sends no frames to a
+  hidden window`: a FIFO present there waits for the compositor's frame
+  callback, a compositor sends none to a window it is not showing
+  (minimised, in sway's scratchpad, on a workspace not on screen), and the
+  present has no timeout to loop on, so the main thread stops until the
+  window is shown again and then resumes. That is a real stall — the
+  remote is silent meanwhile — and the label is what names it, where the
+  stack alone said `wl_display_dispatch_queue`. A window that is never
+  shown would wait forever, so `--hidden` is refused on Wayland at start-up
+  (exit 2), naming `--offscreen` and X11. A window MINIMISED on X11 or
+  Windows, which GLFW reports, draws nothing but still serves: requests,
+  background jobs and the autosave run on each iteration, and a
+  `screenshot` is refused saying the window is minimised. That branch used
+  to sleep and go round, beating the watchdog while answering nothing, so a
+  minimised window silenced the remote and no stall was ever reported.
 - **The stack of the stalled thread** comes from a SIGUSR2 sent to it. The
   handler only captures return addresses into preallocated memory (a static
   arena for `std::basic_stacktrace`), because the thread may be slow rather

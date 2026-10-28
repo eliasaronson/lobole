@@ -161,6 +161,28 @@ the heading if it is not here yet.
 - **Likely fix:** for a face on an elementary surface, bound the face's own
   boundary and its interior extrema, or tighten against a fine mesh.
 
+## Rendering
+
+### The remote is silent while a Wayland window is not on screen
+
+- **Symptom:** a windowed instance on a Wayland session (the human's
+  `dev-watch`, on sway) answers nothing while its window is minimised, in
+  the scratchpad or on a workspace not on screen; every call waits until
+  the window is shown. The log says `main thread stalled … (in presenting:
+  compositor sends no frames to a hidden window)`, then `resumed after`.
+- **Cause:** the swapchain is FIFO, and Mesa's Wayland FIFO present blocks
+  for the compositor's frame callback, which a compositor does not send to
+  a surface it is not showing. Wayland does not tell a client it is hidden,
+  so the loop cannot skip the present as it does for a minimised X11 window.
+  Reproduced on a nested headless sway (`WLR_BACKENDS=headless`, the window
+  moved to the scratchpad): the stall lasts exactly as long as it is hidden.
+- **Where:** `FramePresent` in `src/app/main.cpp`; the present mode in
+  `src/app/GpuOwners.cpp`.
+- **Likely fix:** a present the loop can bound: `VK_KHR_present_wait` with
+  a timeout on the previous present before the next one, or MAILBOX paced
+  by the loop itself on Wayland, skipping the frame while the last one has
+  not been shown.
+
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

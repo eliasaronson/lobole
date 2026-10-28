@@ -228,8 +228,10 @@ Every iteration that runs renders exactly as an active one does; there is no
 partial invalidation to get wrong. The 10 Hz floor means a missed activity
 signal costs at most 100 ms of staleness rather than a frozen UI, and
 background completions (jobs, git workers, autosave, the disk poll) are
-picked up without plumbing. The minimized branch (sleep 10 ms, no render) is
-unchanged.
+picked up without plumbing. A minimised window renders nothing but serves
+requests, background jobs and the autosave each iteration, waiting on events
+with a 50 ms timeout between them
+([crashes and stalls](../architecture.md#crashes-and-stalls)).
 
 `src/app/FramePacer.{h,cpp}` is the pure decision (`PacerInputs` in,
 active/idle out), headless-tested in `tests/test_frame_pacer.cpp`. Signals

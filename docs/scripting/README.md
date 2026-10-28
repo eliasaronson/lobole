@@ -55,7 +55,9 @@ a UI action under `--offscreen` says there is no GUI to drive; a GUI build
 configured with `-DENABLE_TEST_ENGINE=OFF` says the UI tier needs the test
 engine. `--offscreen` conflicts with `--headless`, `--hidden` and
 `--gui-tests` and requires `--remote`; each conflict is refused at argument
-parsing rather than resolved by precedence.
+parsing rather than resolved by precedence. `--hidden` is refused on Wayland,
+where a window never shown is never given a frame and its first present
+would wait forever ([crashes and stalls](../architecture.md#crashes-and-stalls)).
 
 An instance a program starts for its own use should die with that program:
 `--exit-with-parent`, or `LOBOLE_EXIT_WITH_PARENT=<launcher pid>`, has the

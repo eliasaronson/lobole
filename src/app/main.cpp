@@ -672,7 +672,22 @@ static bool FramePresent(ImGui_ImplVulkanH_Window* wd) {
   info.swapchainCount = 1;
   info.pSwapchains = &wd->Swapchain;
   info.pImageIndices = &wd->FrameIndex;
-  VkResult err = vkQueuePresentKHR(g_Queue, &info);
+  VkResult err;
+  {
+    // A FIFO present on Wayland waits for the compositor's frame callback,
+    // and a compositor sends none to a window it is not showing (minimised,
+    // in sway's scratchpad, on a hidden workspace): the present then blocks
+    // until the window is shown again. It has no timeout to loop on, as the
+    // acquire has, so the label is what turns "main thread stalled" with a
+    // stack in libwayland into the reason
+    // (docs/architecture.md#crashes-and-stalls).
+    // At most 63 characters: the label is a fixed buffer (Watchdog.cpp).
+    watchdog::Label label(
+        OnWayland()
+            ? "presenting: compositor sends no frames to a hidden window"
+            : "presenting a frame");
+    err = vkQueuePresentKHR(g_Queue, &info);
+  }
   if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR) {
     g_SwapChainRebuild = true;
     return false;
@@ -834,7 +849,8 @@ void printUsage(const char* programName) {
                "requests as replayable JSONL"
             << std::endl;
   std::cout << "  --hidden             Never show the window (offscreen "
-               "--remote sessions, e.g. automated tests)"
+               "--remote sessions, e.g. automated tests; X11 only, refused "
+               "on Wayland)"
             << std::endl;
   std::cout << "  --exit-with-parent   Exit (SIGTERM) when the launching "
                "process dies; for test launchers.\n                       "
@@ -1899,6 +1915,21 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     FailStartup(startup::step::kWindow, g_GlfwLastError);
   if (!args.hidden)
     ShowWindowNonBlocking(window);
+  // A Wayland compositor never sends a frame to a window that was never
+  // shown, so the first FIFO present of a --hidden one waits forever: the
+  // remote bound, answering nothing, and the watchdog's stall line was the
+  // only word of it. Refused, naming the two ways that work.
+  if (args.hidden && OnWayland()) {
+    std::cerr << "Error: --hidden cannot run on Wayland: a compositor sends "
+                 "no frames to a window it never shows, so the first present "
+                 "would wait forever. Use --offscreen (a renderer with no "
+                 "window), or run under X11 (unset WAYLAND_DISPLAY; Xvfb, as "
+                 "tools/xvfb-exec.sh does)"
+              << std::endl;
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 2;
+  }
 
   if (!glfwVulkanSupported())
     FailStartup(
@@ -2569,8 +2600,20 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
         ApplyFramebufferSize(fb_width, fb_height);
       }
     }
+    // Minimised (X11, Windows: Wayland does not say): nothing is drawn, but
+    // the CPU side of a frame still runs, as on the backstop above. This
+    // branch used to sleep 10 ms and go round, beating the watchdog while
+    // serving nothing, so a minimised window silenced the remote and no
+    // stall was ever reported (docs/architecture.md#crashes-and-stalls).
     if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) {
-      ImGui_ImplGlfw_Sleep(10);
+      remoteServer.ProcessPending(g_App);
+      if (std::string shot; remoteServer.WantsScreenshot(shot))
+        remoteServer.ScreenshotDone(
+            false, "the window is minimised, so nothing is drawn until it is "
+                   "restored (an --offscreen instance draws with no window)");
+      ui::PollBackgroundJobs(g_App);
+      ui::AutosaveProject(g_App, autosaver, glfwGetTime());
+      glfwWaitEventsTimeout(0.05);
       continue;
     }
     // F8: focus coming back is the moment to ask whether the project moved.
