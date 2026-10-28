@@ -322,6 +322,7 @@ here; the golden corpus and git history cover them.
 | 193 | Cross-part links ([derived](../modeling/derived.md#sketches)): a Derived copies sketches (`sketches`, `sketch_names`; `snapshot.sketches` holds each one's plane and solved entities), carries `follow` (absent = true), and records `snapshot.source_key`, the content key of what it copied, in place of `source_chain_hash` (read and dropped; the key is then computed from the snapshot). A Sketch whose `plane_ref` is a Derived names the copied sketch it stands on in `plane_ref_sketch`. Golden `v193-derived-sketch`. |
 | 194 | A U name (`<face>;U<k>`) numbers a face's unnamed boundary edges by each edge's geometry -- its midpoint, then length, curve type and end points -- not by the order the kernel handed the face back, which followed shape addresses ([toponaming](../modeling/toponaming.md#how-each-operation-names-its-output)). A saved U name can now mean another edge of its face; no migration, since the old numbering was never stable to map from. Golden `v194-edge-names-by-geometry` (a Fillet on `2/g605787230;U1`, the 30 mm bottom edge, where the wire order's U1 was a 20 mm one). |
 | 195 | A sketch's `external` entry may carry the `fingerprint` {element, shape, length_mm (an edge) \| area_mm2 (a face), centroid_mm} of an imported file's own element as first projected: a changed file's renumbered element is followed by it, one no longer in the file fails the sketch naming it ([projecting an imported part](../sketching/README.md#projecting-an-imported-part)). A fingerprint missing a key, with one it never writes, or naming another element than its reference, is refused on load; an older build refuses the key. Golden `v195-projection-fingerprint` |
+| 196 | A study load type `pin`: a support on a cylindrical face that holds it radially and axially where the part presses on it, free to turn unless `fix_rotation: true` (a key only a pin takes). A static result's fields carry `reactions` [{support, type, force_n, contact_area_mm2?, face_area_mm2?}] and, when the peak von Mises sits within one element of a support's edge, `support_edge_peak` {support, type, away_mpa, away_at}; a result saved before reads without them. An older build refuses the file on the unknown type ([pin supports](../simulation/README.md#pin-supports)). Golden `v196-pin-support` |
 
 ## Pending changes
 
@@ -331,7 +332,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A study load type `pin`: a support on a cylindrical face that holds it radially and axially where the part presses on it, free to turn unless `fix_rotation: true` (a key only a pin takes). A static result's fields carry `reactions` [{support, type, force_n, contact_area_mm2?, face_area_mm2?}] and, when the peak von Mises sits within one element of a support's edge, `support_edge_peak` {support, type, away_mpa, away_at}; a result saved before reads without them. An older build refuses the file on the unknown type ([pin supports](../simulation/README.md#pin-supports)). Golden `vNEXT-pin-support` |
 
 ## Paths in a project
 

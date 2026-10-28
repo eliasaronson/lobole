@@ -148,7 +148,7 @@ json StudyToJson(const fem::Study& s) {
       }
       if (l.type == fem::LoadType::Remote && l.hasPoint)
         lj["point"] = {l.point.x, l.point.y, l.point.z};
-      if (l.type == fem::LoadType::Pin && l.fixRotation) // vNEXT
+      if (l.type == fem::LoadType::Pin && l.fixRotation) // v196
         lj["fix_rotation"] = true;
       if (!l.loadCase.empty())
         lj["case"] = l.loadCase;
@@ -415,7 +415,7 @@ fem::Study StudyFromJson(const json& j) {
     if (l.type != fem::LoadType::Remote && lj.contains("point"))
       throw std::runtime_error("load " + std::to_string(l.id) +
                                ": point is a remote load's");
-    if (lj.contains("fix_rotation")) { // vNEXT
+    if (lj.contains("fix_rotation")) { // v196
       if (l.type != fem::LoadType::Pin)
         throw std::runtime_error("load " + std::to_string(l.id) +
                                  ": fix_rotation is a pin's");
@@ -670,7 +670,7 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
       flat.insert(flat.end(), st.begin(), st.end());
     out["stress"] = w.F32(flat);
   }
-  // vNEXT: what each support carried, and a peak on a support's edge.
+  // v196: what each support carried, and a peak on a support's edge.
   if (!r.reactions.empty()) {
     json rs = json::array();
     for (const fem::FemResults::SupportReaction& sr : r.reactions) {
@@ -737,7 +737,7 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
                                "' is not a support (fixed, pin)");
     return out;
   };
-  for (const json& rj : j.value("reactions", json::array())) { // vNEXT
+  for (const json& rj : j.value("reactions", json::array())) { // v196
     fem::FemResults::SupportReaction sr;
     sr.support = rj.at("support").get<uint64_t>();
     sr.type = supportType(rj.at("type"));
@@ -746,7 +746,7 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
     sr.faceAreaMm2 = rj.value("face_area_mm2", 0.0);
     r.reactions.push_back(sr);
   }
-  if (j.contains("support_edge_peak")) { // vNEXT
+  if (j.contains("support_edge_peak")) { // v196
     const json& pj = j.at("support_edge_peak");
     r.supportEdgePeak.flagged = true;
     r.supportEdgePeak.support = pj.at("support").get<uint64_t>();

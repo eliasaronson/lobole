@@ -1071,7 +1071,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       if (l.hasPoint)
         for (int k = 0; k < 3; ++k)
           CHECK(l.point[k] == want[i].at(3).at(k).get<double>());
-      // vNEXT: a fifth entry, when there is one, is a pin's fix_rotation.
+      // v196: a fifth entry, when there is one, is a pin's fix_rotation.
       if (want[i].size() > 4)
         CHECK(l.fixRotation == want[i].at(4).get<bool>());
     }
