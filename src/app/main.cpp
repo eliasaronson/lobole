@@ -2322,7 +2322,14 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
                             RemoteMode::Gui, args.remoteBindAll)) {
       LOG_ERROR("Cannot listen on port {} - is another instance using it?",
                 args.remotePort);
-      return 1;
+      // Ended as a startup failure is (EndStartup), not by returning: the
+      // return ran the renderers' and the window's teardown out of order,
+      // and on Wayland that segfaulted, so a taken port left a crash report
+      // for the next start to show.
+      crash::EndSession();
+      watchdog::Stop();
+      std::fflush(nullptr);
+      std::_Exit(1);
     }
 #ifdef HAVE_TEST_ENGINE
     remoteServer.SetTestEngine(testEngine);
