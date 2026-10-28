@@ -180,20 +180,29 @@ def lever(stroke, down_deg, up_deg, side, rod_top_z, link):
 
 # --- every size -------------------------------------------------------------------
 
-def solve(width, gap):
-    """Every size from the box's inside width (mm) and the print's gap (the
+def solve(width, gap, press=0.0):
+    """Every size from the box's inside width (mm), the print's gap (the
     whole diametral clearance two printed surfaces need to slide, from
-    print_allowance kind `gap`). Refuses what will not print."""
+    print_allowance kind `gap`) and its press (a pressed bore less its pin,
+    print_allowance kind `press`). Refuses what will not print."""
     W = float(width)
     g = gap / 2.0                      # a side
-    s = {"width": W, "gap": gap, "g": g}
-    # The box: a 30th of the width for walls (3.6 mm, nine lines, at 120),
-    # half the width deep inside. Its height is set by the cams, below.
-    s["wall"] = max(MIN_WALL_MM, W / 33.3)
+    s = {"width": W, "gap": gap, "g": g, "press": press}
+    # The pins and the pegs: a 40th of the width (Ø3 at 120), one stock.
+    s["d_pin"] = W / 40.0
+    s["d_peg"] = s["d_pin"]
+    # The box: printed panels pegged at their edges, so a panel is a peg
+    # and four lines either side of it thick (6.2 mm at 120), and never
+    # under a 33rd of the width; half the width deep inside. Its height is
+    # set by the cams, below.
+    s["wall"] = max(MIN_WALL_MM, W / 33.3, s["d_peg"] + 2.0 * MIN_WALL_MM)
     s["depth"] = 0.5 * W
     # The camshaft: Ø a 15th of the width (8 mm at 120: a printed PLA shaft
     # lying down, stiff over its span; phase 4's FEM checks it). The cams
-    # are keyed to it by a printed flat, a sixth of its diameter deep.
+    # are keyed to it by a printed flat, a sixth of its diameter deep, the
+    # whole length: the shaft prints lying on it, and a flat deeper than
+    # the round's 45-degree chord leaves no face of it looking down past
+    # 45 degrees.
     s["d_shaft"] = W / 15.0
     s["flat"] = s["d_shaft"] / 6.0
     s["d_bore"] = s["d_shaft"] + gap   # the end walls' bores, running
@@ -208,6 +217,10 @@ def solve(width, gap):
     s["d_rod"] = W / 20.0
     s["tip"] = s["d_rod"] / 2.0
     s["d_guide"] = s["d_rod"] + gap
+    # Each rod prints lying on a flat at its 45-degree chord on its -X
+    # side, which also keys it in its guide (a D bore) so its figure's link
+    # stays square to the shaft.
+    s["rod_flat"] = s["d_rod"] / 2.0 / math.sqrt(2.0)
     # The strokes: an eighth of the width for the axe, a 15th for the bird.
     s["h_axe"] = W / 8.0
     s["h_bird"] = W / 15.0
@@ -223,16 +236,69 @@ def solve(width, gap):
         s["h_bird"], bird_beta, s["tip"], PRESSURE_LIMIT_DEG)
     s["axe_base"] = max(s["hub_floor"], s["axe_base_pressure"])
     s["bird_base"] = max(s["hub_floor"], s["bird_base_pressure"])
-    # The pins: a 40th of the width (Ø3 at 120), in holes the gap larger;
-    # the plates (link, arm, bird) as thick; the figures' bodies 4/3 of it.
-    s["d_pin"] = W / 40.0
+    # The pins run in holes the gap larger and are pressed into holes the
+    # press larger; the plates (link, arm, bird) as thick as a pin; the
+    # figures' bodies 4/3 of it.
     s["d_pin_hole"] = s["d_pin"] + gap
+    s["d_pin_press"] = s["d_pin"] + press
     s["plate"] = W / 40.0
     s["body"] = W / 30.0
     s["eye"] = s["d_pin_hole"] / 2.0 + MIN_WALL_MM   # an eye's radius
+    box_parts(s)
     if s["plate"] < MIN_WALL_MM or s["d_pin"] < 2.0:
         raise SystemExit(f"woodcutter: {s['plate']:.2f} mm plates and Ø{s['d_pin']:.2f} pins at width "
                          f"{W:g} -- a wider box")
+    return s
+
+
+def box_parts(s):
+    """The panels' pegs, the camshaft's bushings and the crank, from the
+    width, the wall and the fits (README, where every size comes from)."""
+    W, t, g = s["width"], s["wall"], s["g"]
+    # A peg sits in a blind hole either side of a joint, each a panel less
+    # its four-line skin deep, and stops a gap short of each hole's floor.
+    s["peg_hole"] = t - MIN_WALL_MM
+    s["peg_len"] = 2.0 * (s["peg_hole"] - g)
+    s["d_peg_bore"] = s["d_peg"] + s["press"]
+    # The camshaft lies on its flat to print, so its journals would run on
+    # a D: each end is pressed into a printed bushing, round outside, that
+    # turns in the end wall's bore and has a flange outside the wall (the
+    # two flanges hold the shaft along its axis). Its sleeve is two
+    # four-line walls round the shaft; its flange two more, a 60th of the
+    # width thick.
+    s["r_bush"] = s["d_shaft"] / 2.0 + 2.0 * MIN_WALL_MM
+    s["r_flange"] = s["r_bush"] + 2.0 * MIN_WALL_MM
+    s["flange"] = W / 60.0
+    s["d_wall_bore"] = 2.0 * s["r_bush"] + s["gap"]
+    # The crank: a plate as thick as the figures' bodies, on the shaft's
+    # -X end outside the left bushing; its handle a quarter of the box's
+    # depth from the shaft, so the grip passes the table under the box by
+    # more than a finger's thickness (README).
+    s["crank_r"] = s["depth"] / 4.0
+    s["crank_t"] = W / 30.0
+    s["r_hub"] = s["r_bush"]
+    # The handle: a grip turning on a headed pin pressed into the crank, the
+    # pin a 24th of the width (Ø5 at 120), the grip a fifth of it long.
+    s["d_handle"] = W / 24.0
+    s["d_grip_bore"] = s["d_handle"] + s["gap"]
+    s["r_grip"] = s["d_grip_bore"] / 2.0 + 2.0 * MIN_WALL_MM
+    s["grip_len"] = W / 5.0
+    s["r_head"] = s["r_grip"]
+    s["head"] = 2.0 * MIN_WALL_MM
+    # Along the shaft (x): the left bushing's flange, then the crank.
+    s["x_bush_l"] = -t - g                       # flange's inner face
+    s["x_crank1"] = s["x_bush_l"] - s["flange"] - g   # crank's inner face
+    s["x_crank0"] = s["x_crank1"] - s["crank_t"]
+    s["x_shaft0"] = s["x_crank0"]
+    s["x_bush_r"] = W + t + g
+    s["x_shaft1"] = s["x_bush_r"] + s["flange"]
+    # The figures stand in slots through the top on a tab a 12th of the
+    # width long, the log on a rib a 30th of it wide; each tab the panel
+    # deep, pressed (the press allowance on the slot's width).
+    s["tab_len"] = W / 12.0
+    s["rib_w"] = W / 30.0
+    # Plates: pieces this far apart and from the bed's edges.
+    s["spacing"] = W / 30.0
     return s
 
 

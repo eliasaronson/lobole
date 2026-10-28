@@ -14,9 +14,13 @@ What it holds the app to, each a bug the woodcutter found:
   deflection), and the axe's drop and landing, which its loop inherits,
   are not branch jumps (nor is the loop solve's leftover where the rise
   starts from rest);
+- the cam turns on one fixed panel (the left wall) and each follower's
+  loop is grounded on another (the top): the relation is a row in the
+  loop's solve, which once moved the rod back from where it set it;
 - check_followers counts what moves with each follower: the rod, the link
-  and the lever, and not the figure fastened to the box, which here has no
-  material and was refused as "moving" for the loop's leftover;
+  and the lever with the pins pressed into them, and not the figure
+  fastened to the top, which here has no material and was refused as
+  "moving" for the loop's leftover;
 - the contact tables are built once, not again at samples where the loop
   leaves the follower a micrometre off;
 - the bird's liftoff is the closed form's neighbourhood, not a second
@@ -24,6 +28,7 @@ What it holds the app to, each a bug the woodcutter found:
 """
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -65,28 +70,32 @@ def main():
     try:
         d = Client.wait_for(app.port)
         d.call("new_project")
-        proc = {"process": "fdm", "material": "pla"}
-        s = S.solve(120.0, 0.5)
+        # The generator prints with a profile (the parts are weighed as they
+        # print): the P1S's, seeded into this instance's own config.
+        seed = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(GEN),
+                                          "print_coupon.py"),
+             "--port", str(app.port), "--seed"], capture_output=True,
+            text=True, timeout=300)
+        expect(seed.returncode == 0, f"the profiles seed: {seed.stderr}")
+        proc = {"profile": "K5 PLA on P1S"}
+        s0 = S.solve(120.0, 0.0)
+        gap = d.call("print_allowance", kind="gap", size_mm=s0["d_rod"],
+                     **proc)["allowance_mm"]
+        press = d.call("print_allowance", kind="press", size_mm=s0["d_pin"],
+                       **proc)["allowance_mm"]
+        s = S.solve(120.0, gap, press)
         S.layout(s, s["hub_floor"], s["bird_base_pressure"])
-        for name, fn, *a in (("box", P.build_box), ("camshaft", P.build_shaft),
-                             ("axe cam", P.build_cam, "axe", s["axe_base"]),
-                             ("bird cam", P.build_cam, "bird",
-                              s["bird_base"]),
-                             ("axe rod", P.build_rod, "axe"),
-                             ("bird rod", P.build_rod, "bird"),
-                             ("axe link", P.build_link, "axe"),
-                             ("bird link", P.build_link, "bird"),
-                             ("arms", P.build_arms), ("woodcutter",
-                                                      P.build_woodcutter),
-                             ("bird", P.build_bird), ("perch", P.build_perch),
-                             ("log", P.build_log)):
+        for name, fn, *a in wc.PARTS:
+            if fn is P.build_cam:
+                a = a + [s[f"{a[0]}_base"]]
             wc.build_part(d, name, proc, "pla", fn, s, *a)
-        # The figure stands fastened to the box: it does not move with the
+        # The figure stands fastened to the top: it does not move with the
         # axe's rod, so it needs no mass.
         d.call("set_active_part", part="woodcutter")
         d.call("set_material", feature_id=d.call(
             "list_elements")["bodies"][0]["created_by"], material="")
-        o, m, rel, _ = wc.build_assembly(d)
+        o, m, rel, _ = wc.build_assembly(d, s)
         turn = wc.add_study(d, m, "one crank turn", 0.0, 360.0, 49,
                             s["g"] / 5.0)
         res = d.call("run_motion_study", study=turn)
@@ -106,7 +115,8 @@ def main():
         for k, lever in (("axe", "arms"), ("bird", "bird")):
             r = by[o[f"{k} rod"]]
             moving = sorted(x["name"] for x in r["gravity"]["moving"])
-            expect(moving == sorted([f"{k} rod", f"{k} link", lever]),
+            expect(moving == sorted([f"{k} rod", f"{k} link", lever,
+                                     f"{k} rod pin", f"{k} lever pin"]),
                    f"what moves with the {k} rod: {moving}")
             expect(r["touching"], f"the {k} rod on its cam: {r['failures']}")
         bird = by[o["bird rod"]]["gravity"]

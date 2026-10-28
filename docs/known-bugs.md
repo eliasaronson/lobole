@@ -64,6 +64,26 @@ the heading if it is not here yet.
 
 ## Modeling
 
+### A cylinder added flush with the tangent of another leaves a free edge
+
+- **Symptom:** a rod (a Ø6 cylinder along Z) added to a foot (a cylinder
+  along X whose end faces sit at the rod's ±3 mm, tangent to the rod's
+  round) regenerates and `check_geometry` says *verified*, but
+  `check_print`'s `shells` fails it: *not watertight*. Lengthening the foot
+  0.4 mm past the rod each side passes. The woodcutter's rods hit it
+  (generators/woodcutter/woodcutter_parts.py, `build_rod`, which now
+  lengthens the foot).
+- **Cause:** not yet looked at. The shells item's watertightness is a
+  B-Rep free-edge scan (`Measure::AnalyzeWatertight`), so the fuse's
+  result has an edge used by one face, where the plane meets the cylinder
+  along a line of tangency; `check_geometry`'s checks do not count free
+  edges.
+- **Where:** the Extrude's `add` boolean (`src/core/features/`), and
+  `check_geometry`, which should not verify a solid with a free edge.
+- **Likely fix:** first make `check_geometry` report free edges, so the two
+  checks agree; then see whether `ShapeFix` or a fuzzy fuse closes the
+  tangent seam.
+
 ### Two Shells of the clamp's screw are refused on every draw
 
 - **Symptom:** on the toolmaker's clamp's M3 retaining screw

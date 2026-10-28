@@ -149,7 +149,11 @@ state and no format involvement — the solver needs only a residual, a
 Jacobian and a factorization.
 
 - **Components.** The mate graph is split into connected components and each
-  component with a cut mate is solved on its own. Otherwise one small loop
+  component with a cut mate is solved on its own. A relation joins its
+  mates' components into one: two fixed occurrences no mate joins are two
+  anchors, and a cam turning on one with its follower's loop on the other
+  would otherwise be two problems, the relation a row in neither, and the
+  loop's solve would move the follower back from where the relation set it. Otherwise one small loop
   would put a column for every mate in the document into the Jacobian (each
   column a full tree walk), and independent loops stay independent. Placements
   from the loop pass are **merged** into the walk's result, never substituted

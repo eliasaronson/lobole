@@ -89,8 +89,9 @@ An unprompted solve (load, `solve_assembly`) has no driven mate, so `a`
 drives `b` — deterministic, and a no-op after a driven pass because
 propagation is idempotent.
 
-**Inside a loop, as a row.** Each equality relation whose mates are all in the
-same looped component is one residual row in the loop solve
+**Inside a loop, as a row.** Each equality relation is one residual row in
+the loop solve of the component its mates are in (a relation joins its mates'
+components into one, [solver.md](solver.md#closing-loops))
 ([solver.md](solver.md#closing-loops)), `dof_b − ratio · dof_a − phase`, with
 rotation rows scaled by the component's characteristic length like the cut
 rows. A relation over several mates is one row, Σ cᵢ · dofᵢ − constant,
@@ -110,10 +111,12 @@ skipped without an error.
 After placement and the loop pass, every equality relation is checked: one
 whose `b` (for one over several mates, its last member) does not equal what
 it asks for (to 1e-4 of its magnitude, the room
-a closed loop needs) is a DOF driven twice by relations that disagree, and
-carries `not satisfied: mate N's rotation is X deg where this relation wants
-Y`. In a tree the second relation was never applied; in a loop the solver
-settled on a compromise. Either way it is said on the relation.
+a closed loop needs) carries `not satisfied: mate N's rotation is X deg
+where this relation wants Y`, and says why: *another relation drives it
+too* when one does (in a tree the second relation was never applied, in a
+loop the solver settled on a compromise), else *the mates round it hold it
+elsewhere*, a loop that closes only there or a held value. Either way it is
+said on the relation.
 
 ## Relations over several mates
 

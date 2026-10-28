@@ -32,11 +32,13 @@ whether a follower stays on at a speed
 ([relations.md](../assemblies/relations.md#contact),
 [cam-profiles.md](../modeling/cam-profiles.md),
 [the follower check](../assemblies/relations.md#the-follower-check)). The
-mechanism is built too: `generators/woodcutter/` makes the cams, the rods,
-the levers and their links in a one-body box, and checks them over a crank
-turn and across the drop, with requirements and negative controls
-([its README](../../generators/woodcutter/README.md)). What follows is the
-rest of the automaton.
+automaton is designed too: `generators/woodcutter/` makes the cams, the
+rods, the levers and their links, the box as pegged printed panels, the
+camshaft's bushings and the crank, checks the mechanism over a crank turn
+and across the drop with requirements and negative controls, checks every
+part as it prints, lays them on one P1S plate, and states the assembly
+sequence ([its README](../../generators/woodcutter/README.md)). What
+follows is the rest of the automaton.
 
 Two limits of that work shape the design below:
 
@@ -52,39 +54,12 @@ Two limits of that work shape the design below:
   relation's cam and follower by `check_followers`' cuts across the width
   ([motion studies](../assemblies/README.md#motion-studies)).
 
-## Phase 3: the box, the crank, the plates (size: M)
-
-- **The box** is printed as panels that print flat and peg together,
-  replacing the mechanism's one-body box; the guides, bores and figures'
-  seats keep the places `woodcutter_spec.py` gives them.
-  They use printed pegs, not glue or screws, sized by the coupon's press
-  fit. The end walls carry the camshaft bores. The top carries the guide
-  bores and is the figures' stage. Teardrop holes are used where a bore
-  prints sideways (`RegenContext::printUp`).
-- **The crank** is a printed handle on the camshaft's end, outside an end
-  wall: one chop per crank turn needs no gear pair. The handle turns on its
-  own revolute, and its radius is derived from the box (a stated fraction
-  of its depth).
-- **Print plates.** Every part is laid out on P1S plates by
-  `export_print_job`, a few plates in all. `check_print` must pass each
-  plate, stacking included. Each part has its print direction chosen so its
-  loaded member has its layers across the load: the rods along their length,
-  the camshaft lying down. `split_for_printing` is used where a panel is
-  over the bed. The slicer's time and filament come from the installed
-  slicer, not the app.
-- **An assembly sequence** puts the box together in printable order
-  (`check_assembly_sequence` with insertion), and the shaft goes in through
-  its bores.
-- Verified: `check_print` clean on every plate; the sequence check clean;
-  `check_followers` and the motion study still clean with the box and crank
-  in.
-
 ## Phase 4: FEM of the crank and the shaft on pins (size: S)
 
 This phase assumes the pin support (the `wtpin` branch's plan,
 fem-pin-support) has landed.
 
-- **The camshaft** sits on two pin supports at its bores. It is loaded by the
+- **The camshaft** sits on two pin supports at its bushings. It is loaded by the
   followers' contact forces at the worst sample, plus the handle torque that
   balances them. `check_followers` computes M, Q, q′ and q″ but does not yet
   report the force; this phase adds it to the reply (M q″ ω² + ½ M′ q′² ω² −
@@ -115,7 +90,8 @@ fem-pin-support) has landed.
   camera on the figures. A second cut runs with the box sectioned
   (`set_section` during motion) so the cams and followers show. It is driven
   at the hand speed (60 rpm), with the sample count high enough that the drop reads
-  as a drop. A `SequenceStep` film of the assembly order comes from phase 3.
+  as a drop. A `SequenceStep` film of the assembly order comes from the
+  generator's assembly sequence.
 - Look at the frames. The axe must meet the log on the beat, with no figure
   passing through the box.
 

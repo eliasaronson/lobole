@@ -2,41 +2,52 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The woodcutter automaton's mechanism: a hand-cranked camshaft in a
-printed box, one chop per turn. The axe cam lifts the woodcutter's arms
-slowly through a rod and a link and drops them onto the log; the bird's cam,
-phase-shifted on the same shaft, makes the bird peck while the axe is
-rising. Phase 2 of docs/plans/woodcutter-automaton.md.
+"""The woodcutter automaton: a hand-cranked camshaft in a printed box, one
+chop per turn. The axe cam lifts the woodcutter's arms slowly through a rod
+and a link and drops them onto the log; the bird's cam, phase-shifted on the
+same shaft, makes the bird peck while the axe is rising. The box is printed
+panels pegged together, the shaft turns in printed bushings, and a crank on
+its end turns it. Phases 2 and 3 of docs/plans/woodcutter-automaton.md.
 
-    python3 generators/woodcutter/build.py --port 8800
-    python3 generators/woodcutter/build.py --port 8800 --width 150
+    python3 generators/print_coupon.py --port 8800 --seed
+    python3 generators/woodcutter/build.py --port 8800 --profile "K5 PLA on P1S"
+    python3 generators/woodcutter/build.py --port 8800 --profile ... --width 150
 
 Every size derives from `--width` (the box's inside width) and the print
-process's gap (`print_allowance` kind `gap`); the cams' base radii are
-searched against CamProfile's own pressure-angle report
+profile's gap and press (`print_allowance` kinds `gap` and `press`); the
+cams' base radii are searched against CamProfile's own pressure-angle report
 (generators/woodcutter/README.md#where-every-size-comes-from).
 
 What it builds and checks (the receipt holds every number):
-- the parts, each verified by check_geometry, and the assembly: the
-  camshaft on a revolute in the end walls, the cams fastened to it, the
-  rods on sliders in the top's guides driven by `contact` relations, and
-  each figure's lever closed through a link (a mate loop);
+- the parts, each verified by check_geometry and checked as it prints
+  (check_print in its print direction), every press marked a printed press;
+- the assembly: the panels and their pegs fixed, the camshaft on a revolute
+  in the left wall with its cams, bushings and crank pressed on, the rods
+  on sliders in the top's guides driven by `contact` relations, each
+  figure's lever closed through a link (a mate loop), every pin fastened in
+  the part it is pressed into;
+- the assembly sequence, every step slid home along its way in;
 - a study over one crank turn and one across the drop (mesh clash), each
   clean, and `check_followers` over both at twice the hand speed;
 - requirements: liftoff and pressure angle per follower, the axe's
-  drop_rpm, both studies clean, the blade's clearance over the log;
+  drop_rpm, both studies clean, the sequence, the blade's clearance over
+  the log;
 - negative controls: the axe's landing dwell shortened under its fall
   fails drop_rpm, the bird's cam on too small a base fails the pressure
   angle, and a guide tilted off the cam's plane or moved off its width is
-  refused as a contact.
+  refused as a contact;
+- the print plates on the profile's bed, each checked (every item), and the
+  print job; with --slice, sliced by your Bambu Studio for its time and
+  filament.
 
 Output (generated, untracked): scratch/woodcutter/ -- woodcutter.lob,
-woodcutter.json (the receipt) and the renders.
+woodcutter.json (the receipt), woodcutter_job.3mf and the renders.
 """
 import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -46,7 +57,10 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import woodcutter_parts as P  # noqa: E402
 import woodcutter_spec as S  # noqa: E402
-from _lib import check, connect, fresh_project  # noqa: E402
+from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
+                  connect, export_print_job, fresh_project, job_receipt,
+                  pack, print_item_line, print_receipt, q_axis, q_up, qmul,
+                  turned_box)
 
 ROOT = Path(HERE).resolve().parent.parent
 OUT = Path(os.environ["LOBOLE_SCRATCH"]) / "woodcutter" if \
@@ -55,7 +69,13 @@ ASM = "woodcutter automaton"
 SPEED = S.MARGIN * S.HAND_RPM     # 120 rpm: twice the hand's turn
 # What each part looks like in a render (linear RGB; looks only, PLA all):
 # the filament colours a painted automaton might be printed in.
-LOOKS = {"box": (0.45, 0.25, 0.10), "camshaft": (0.6, 0.6, 0.6),
+BOX = ("floor", "back", "left wall", "right wall", "top")
+LOOKS = {**{k: (0.45, 0.25, 0.10) for k in BOX},
+         "peg": (0.35, 0.18, 0.07), "camshaft": (0.6, 0.6, 0.6),
+         "bushing": (0.3, 0.3, 0.3), "crank": (0.5, 0.05, 0.03),
+         "grip": (0.75, 0.55, 0.05), "handle pin": (0.3, 0.3, 0.3),
+         "rod pin": (0.3, 0.3, 0.3), "lever pin": (0.3, 0.3, 0.3),
+         "pivot pin": (0.3, 0.3, 0.3),
          "axe cam": (0.75, 0.55, 0.05), "bird cam": (0.75, 0.55, 0.05),
          "axe rod": (0.6, 0.6, 0.6), "bird rod": (0.6, 0.6, 0.6),
          "axe link": (0.3, 0.3, 0.3), "bird link": (0.3, 0.3, 0.3),
@@ -77,13 +97,26 @@ def slow(d, method, **kw):
 
 # ---- parts -----------------------------------------------------------------
 
-def new_part(d, name, proc):
-    """A part, printed by the profile when there is one. On the built-in
-    table (no layer or line width) a part has no printed mass, so it is
-    left solid in its material: the followers' check needs the masses."""
+# Bambu Studio's "0.20mm Standard" on the P1S, for every part; what is
+# loaded across its section -- the shaft, the pins, the pegs -- with four
+# walls, which at their sizes leaves them nearly solid.
+PLA_PRINT = {"walls": 2, "top_layers": 5, "bottom_layers": 3,
+             "infill_pct": 15, "infill_pattern": "grid"}
+SOLID_WALLS = ("camshaft", "peg", "rod pin", "lever pin", "pivot pin",
+               "handle pin", "axe rod", "bird rod")
+
+
+def new_part(d, name, proc, up=None):
+    """A part, printed by the profile, with its slicer settings and the way
+    up it prints (woodcutter_parts.PRINT_UP): its printed mass stacks
+    layers along it and its printed holes point their roofs up it."""
     d.call("add_part", name=name)
-    if "profile" in proc:
-        d.call("set_print_process", **proc)
+    d.call("set_print_process", **proc)
+    if up is not None:
+        settings = dict(PLA_PRINT, direction=list(up))
+        if name in SOLID_WALLS:
+            settings["walls"] = 4
+        d.call("set_print_settings", **settings)
 
 
 def material_of(d, proc):
@@ -111,10 +144,48 @@ def finish_part(d, name, mat):
     return bodies[0]["created_by"]
 
 
+def press_sizes(s, name):
+    """The round faces of a part that are pressed (the pin's, the peg's,
+    the shaft's flat ends, and the holes they go in): each diameter."""
+    pin, peg = (s["d_pin"], s["d_pin_press"]), (s["d_peg"], s["d_peg_bore"])
+    shaft = (s["d_shaft"], s["d_shaft"] + s["press"])
+    handle = (s["d_handle"], s["d_handle"] + s["press"])
+    by = {"rod pin": pin[:1], "lever pin": pin[:1], "pivot pin": pin[:1],
+          "axe rod": pin[1:], "bird rod": pin[1:], "arms": pin[1:],
+          "bird": pin[1:], "woodcutter": pin[1:], "perch": pin[1:],
+          "peg": peg[:1], "floor": peg[1:], "back": peg[1:],
+          "left wall": peg[1:], "right wall": peg[1:], "top": peg[1:],
+          "camshaft": shaft[:1], "axe cam": shaft[1:], "bird cam": shaft[1:],
+          "bushing": shaft[1:], "crank": shaft[1:] + handle[1:],
+          "handle pin": handle[:1]}
+    return by.get(name, ())
+
+
+def mark_press(d, name, dias):
+    """Each round face of those diameters a PRINTED PRESS
+    (set_tolerance printed: press, docs/tolerances/README.md#printed-press-fits):
+    its band read off the profile's press row, so the motion study's exact
+    rigid check relieves it and lists it among its press fits."""
+    n = 0
+    for b in d.call("list_elements")["bodies"]:
+        for f in b.get("faces", []):
+            if f.get("kind") != "cylinder" or not any(
+                    abs(2.0 * f.get("radius", 0.0) - x) < 1e-6 for x in dias):
+                continue
+            check(d.call("set_tolerance", feature_id=b["created_by"],
+                         element=f["name"], printed="press"),
+                  f"{name}: printed press")
+            n += 1
+    if dias and n == 0:
+        fail(f"{name} has no pressed face of {dias}")
+    return n
+
+
 def build_part(d, name, proc, mat, fn, *a):
-    new_part(d, name, proc)
+    new_part(d, name, proc, P.PRINT_UP.get(name))
     out = fn(P.Builder(d), *a)
     body = finish_part(d, name, mat)
+    mark_press(d, name, press_sizes(a[0], name) if a else ())
     return body, out
 
 
@@ -151,6 +222,23 @@ def settle_base(d, s, which, floor, proc):
     return base, rep, tried
 
 
+# Every part: (name, builder, its arguments after the sizes).
+PARTS = [("floor", P.build_floor), ("back", P.build_back),
+         ("left wall", P.build_wall, "left"),
+         ("right wall", P.build_wall, "right"), ("top", P.build_top),
+         ("peg", P.build_peg), ("camshaft", P.build_shaft),
+         ("bushing", P.build_bushing), ("crank", P.build_crank),
+         ("grip", P.build_grip), ("handle pin", P.build_handle_pin),
+         ("axe cam", P.build_cam, "axe"), ("bird cam", P.build_cam, "bird"),
+         ("axe rod", P.build_rod, "axe"), ("bird rod", P.build_rod, "bird"),
+         ("axe link", P.build_link, "axe"),
+         ("bird link", P.build_link, "bird"),
+         ("rod pin", P.build_pin, "rod"), ("lever pin", P.build_pin, "lever"),
+         ("pivot pin", P.build_pin, "pivot"), ("arms", P.build_arms),
+         ("woodcutter", P.build_woodcutter), ("bird", P.build_bird),
+         ("perch", P.build_perch), ("log", P.build_log)]
+
+
 # ---- the assembly --------------------------------------------------------------
 
 def occ(d, part, name, fixed=False):
@@ -164,21 +252,47 @@ def mate(d, kind, a, fa, b, fb, name):
     return r["id"]
 
 
-def build_assembly(d):
+def build_assembly(d, s):
+    """The panels and their pegs fixed where they stand; the mechanism on
+    its mates, each pin fastened in the part it is pressed into."""
     d.call("add_assembly", name=ASM)
     o = {}
-    o["box"] = occ(d, "box", "box", fixed=True)
+    for n in BOX:
+        o[n] = occ(d, n, n, fixed=True)
+    o["pegs"] = []
+    for i, (joint, c, axis) in enumerate(P.peg_joints(s)):
+        tr = {"position": list(c), "orientation": [0.0, 0.0, 0.0, 1.0]}
+        if axis == P.X:   # the peg's Z onto X: a quarter turn about Y
+            h = math.sqrt(0.5)
+            tr["orientation"] = [0.0, h, 0.0, h]
+        o["pegs"].append(d.call("add_occurrence", part="peg",
+                                name=f"peg {i + 1} ({joint})", fixed=True,
+                                transform=tr)["id"])
     for n in ("camshaft", "axe cam", "bird cam", "axe rod", "bird rod",
               "axe link", "bird link", "arms", "woodcutter", "bird",
-              "perch", "log"):
+              "perch", "log", "crank", "grip", "handle pin"):
         o[n] = occ(d, n, n)
+    for n in ("bushing L", "bushing R"):
+        o[n] = occ(d, "bushing", n)
+    for k in ("axe", "bird"):
+        for pin in ("rod", "lever", "pivot"):
+            o[f"{k} {pin} pin"] = occ(d, f"{pin} pin", f"{k} {pin} pin")
     m = {}
-    m["crank"] = mate(d, "revolute", o["box"], "shaft", o["camshaft"],
+    m["crank"] = mate(d, "revolute", o["left wall"], "shaft", o["camshaft"],
                       "shaft", "camshaft")
+    for n in ("bushing L", "bushing R"):
+        mate(d, "fastened", o["camshaft"], n, o[n], "bushing",
+             f"{n} pressed")
+    mate(d, "fastened", o["camshaft"], "crank", o["crank"], "crank",
+         "crank pressed")
+    mate(d, "fastened", o["crank"], "handle", o["handle pin"], "handle",
+         "handle pin pressed")
+    m["handle"] = mate(d, "revolute", o["crank"], "handle", o["grip"],
+                       "handle", "handle")
     for k in ("axe", "bird"):
         mate(d, "fastened", o["camshaft"], f"cam {k}", o[f"{k} cam"],
              f"cam {k}", f"{k} cam key")
-        m[f"{k} slide"] = mate(d, "slider", o["box"], f"guide {k}",
+        m[f"{k} slide"] = mate(d, "slider", o["top"], f"guide {k}",
                                o[f"{k} rod"], f"guide {k}", f"{k} guide")
         lever = "arms" if k == "axe" else "bird"
         body = "woodcutter" if k == "axe" else "perch"
@@ -189,9 +303,15 @@ def build_assembly(d):
         m[f"{k} pivot"] = mate(d, "revolute", o[body], f"pivot {k}",
                                o[lever], f"pivot {k}",
                                "shoulder" if k == "axe" else "bird's feet")
-        mate(d, "fastened", o["box"], f"stand {k}", o[body], f"stand {k}",
+        mate(d, "fastened", o["top"], f"stand {k}", o[body], f"stand {k}",
              f"{body} stands")
-    mate(d, "fastened", o["box"], "log", o["log"], "log", "log rests")
+        mate(d, "fastened", o[f"{k} rod"], f"rod pin {k}",
+             o[f"{k} rod pin"], "rod pin axe", f"{k} rod pin pressed")
+        mate(d, "fastened", o[lever], f"lever pin {k}",
+             o[f"{k} lever pin"], "lever pin axe", f"{k} lever pin pressed")
+        mate(d, "fastened", o[body], f"pivot {k}", o[f"{k} pivot pin"],
+             "pivot axe", f"{k} pivot pin pressed")
+    mate(d, "fastened", o["top"], "log", o["log"], "log", "log rests")
     sol = d.call("solve_assembly")
     if sol["errored_mates"] or not sol.get("loops_closed", False):
         fail(f"the assembly does not solve: {sol}")
@@ -253,6 +373,8 @@ def clash_summary(res):
             "status": res.get("collision_status"), "clashes": bad,
             "unsolved": unsolved, "touching": touching,
             "branch_jumps": res.get("branch_jumps", 0),
+            "press_fits": [(p["a_name"], p["b_name"], p.get("fit"))
+                           for p in res.get("press_fits", [])],
             "deflection_mm": res.get("deflection_mm"),
             "pairs_checked": res.get("pairs_checked")}
 
@@ -313,6 +435,10 @@ def requirements(d, s, o, rel, turn, chop):
         {"kind": "pass"}, "nothing clashes over one chop")
     req("the chop is clean", {"kind": "motion_clean", "study": chop},
         {"kind": "pass"}, "nothing clashes across the drop")
+    req("it goes together in its order",
+        {"kind": "assembly_sequence"}, {"kind": "pass"},
+        "every part slides home along its way in, nothing forced past "
+        "another")
     req("the blade stops over the log",
         {"kind": "clearance", "a": o["arms"], "b": o["log"],
          "mode": "exact", "motion_study": turn},
@@ -326,6 +452,265 @@ def check_reqs(d, ids):
     rows = {x["id"]: x for x in r["requirements"]}
     return {n: {"state": rows[i]["state"], "value": rows[i].get("value"),
                 "unit": rows[i].get("unit")} for n, i in ids.items()}
+
+
+# ---- printing -----------------------------------------------------------------------
+
+def counts(s):
+    """How many of each part the automaton takes."""
+    n = {name: 1 for name, *_ in PARTS}
+    n["peg"] = len(P.peg_joints(s))
+    for k in ("bushing", "rod pin", "lever pin", "pivot pin"):
+        n[k] = 2
+    return n
+
+
+PART_ITEMS = tuple(k for k in PRINT_ITEMS if k not in ("bed", "bed_fit"))
+
+
+def check_parts(d, s):
+    """Every part on its own, the way it prints (PRINT_UP): every
+    check_print item but the two the plates answer. A part is modelled
+    where it stands in the box, not on a bed, so `bed` (on the bed at its
+    lowest point) and `bed_fit` (where it lies on the bed, with keep-out
+    zones) are each plate's; every other item judges from the part's own
+    lowest point."""
+    out = {}
+    for name, *_ in PARTS:
+        up = P.PRINT_UP[name]
+        r = check_print(d, name, need=PART_ITEMS, quiet=True, part=name,
+                        direction=list(up))
+        mp = d.call("mass_properties", part=name)["total"]
+        out[name] = {"up": up, "orientation": P.ORIENT[name],
+                     "overhang_deg": r["overhang"].get("worst_deg"),
+                     "slender": (r["slender"].get("pieces") or
+                                 [{}])[0].get("ratio"),
+                     "mass_g": mp.get("mass_g"),
+                     "printed_g": (mp.get("printed") or {}).get("mass_g"),
+                     "print": print_receipt(r)}
+    return out
+
+
+def bbox(d, part):
+    r = d.call("mass_properties", part=part)["bbox_mm"]
+    return r["min"], r["max"]
+
+
+def make_plate(d, name, proc, rows, ids):
+    """A part of Derived copies, each piece turned the way it prints and
+    lying on the bed where the packer put it."""
+    d.call("add_part", name=name)
+    d.call("set_print_process", **proc)
+    for p in rows:
+        lo, hi = turned_box(*bbox(d, p["part"]), p["q_bed"])
+        pos = [p["at"][0] - lo[0], p["at"][1] - lo[1], -lo[2]]
+        check(d.call("add_feature", feature={
+            "type": "Derived", "name": p["label"],
+            "source_part": ids[p["part"]], "reference": False,
+            "placement": {"position": pos, "orientation": p["q_bed"]}}),
+            f"{name}: {p['label']}")
+
+
+def print_plates(d, s, proc, prof, out):
+    """Every piece the automaton takes on the profile's bed, packed into as
+    few plates as hold them, each plate checked as it prints (every item,
+    the bed's keep-out zones and stacking included)."""
+    bed = (float(prof["bed_mm"][0]), float(prof["bed_mm"][1]))
+    zones = bed_zones(prof)
+    ids = {p["name"]: p["id"] for p in d.call("list_parts")["parts"]
+           if p["type"] == "part"}
+    pcs = []
+    for name, n in counts(s).items():
+        q = q_up(P.PRINT_UP[name])
+        lo, hi = turned_box(*bbox(d, name), q)
+        if hi[2] - lo[2] > prof["bed_mm"][2]:
+            fail(f"{name} is {hi[2] - lo[2]:.0f} mm tall as it prints, over "
+                 f"the {prof['bed_mm'][2]:g} mm the printer reaches")
+        for k in range(n):
+            pcs.append({"part": name, "label": name if n == 1 else
+                        f"{name} {k + 1}", "q": q, "lo": lo, "hi": hi})
+    items = [(i, p["hi"][0] - p["lo"][0], p["hi"][1] - p["lo"][1])
+             for i, p in enumerate(pcs)]
+    try:
+        beds = pack(items, bed, s["spacing"], zones)
+    except ValueError as e:
+        # A panel over the bed would be cut by split_for_printing; at any
+        # width this generator builds, none is (README).
+        fail(f"a piece does not fit the bed: {e}")
+    plates = {}
+    for k, placed in enumerate(beds):
+        rows = []
+        for i, turned, x, y in placed:
+            p = dict(pcs[i])
+            p["q_bed"] = (qmul(q_axis((0, 0, 1), 90.0), p["q"]) if turned
+                          else p["q"])
+            p["at"] = (x, y)
+            rows.append(p)
+        name = f"plate {k + 1}"
+        make_plate(d, name, proc, rows, ids)
+        geo = d.call("check_geometry")
+        if geo["receipt"]["standing"] != "verified":
+            fail(f"{name} is not verified: {geo['receipt'].get('summary')}")
+        pr = check_print(d, f"  {name}", need=PRINT_ITEMS, quiet=True)
+        if pr["shells"]["pieces"] != len(rows):
+            fail(f"{name}: {pr['shells']['pieces']} pieces for the "
+                 f"{len(rows)} placed")
+        mp = d.call("mass_properties")["total"]
+        plates[name] = {
+            "pieces": [{"piece": p["label"], "part": p["part"],
+                        "orientation": P.ORIENT[p["part"]],
+                        "at_mm": [round(v, 1) for v in p["at"]]}
+                       for p in rows],
+            "mass_g": mp.get("mass_g"),
+            "printed_g": (mp.get("printed") or {}).get("mass_g"),
+            "print": print_receipt(pr)}
+        print(f"  {name}: {len(rows)} pieces, every check_print item passes "
+              f"({print_item_line('stacking', pr['stacking'])}; "
+              f"{print_item_line('bed_fit', pr['bed_fit'])})")
+    job = export_print_job(d, [(n, n) for n in plates],
+                           out / "woodcutter_job.3mf", material_of(d, proc),
+                           name="woodcutter automaton")
+    return plates, job
+
+
+def slicer_setup(out):
+    """With --slice and no LOBOLE_SLICER_CONFIGS: the P1S's PLA project
+    config made from your Bambu Studio's presets by tools/bambu-config.py
+    (the job's slicer_config), so the job slices on the P1S's bed. Returns
+    why not, or None."""
+    if os.environ.get("LOBOLE_SLICER_CONFIGS"):
+        return None
+    cfg = out / "slicer"
+    cfg.mkdir(exist_ok=True)
+    if not (cfg / "pla.json").exists():
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "bambu-config.py"),
+             "--printer", "Bambu Lab P1S 0.4 nozzle",
+             "--process", "0.20mm Standard @BBL X1C",
+             "--filament", "Bambu PLA Basic @BBL P1S 0.4 nozzle",
+             "-o", str(cfg / "pla.json")], capture_output=True, text=True,
+            timeout=600)
+        if r.returncode != 0:
+            return f"bambu-config: {r.stderr.strip()[-300:]}"
+    os.environ["LOBOLE_SLICER_CONFIGS"] = str(cfg)
+    return None
+
+
+def slice_job(job, out):
+    """Slice the job with your Bambu Studio's CLI (as tools/bambu-config.py
+    finds it) and read the time and filament it reports: the slicer's
+    numbers, not an estimate of the app's. None, saying why, without it."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import importlib
+    bc = importlib.import_module("bambu-config")
+    bambu = bc.find_bambu()
+    if bambu is None or not job or job.get("skipped"):
+        return {"skipped": "no Bambu Studio CLI" if bambu is None else
+                "no job written"}
+    sl = out / "sliced"
+    sl.mkdir(exist_ok=True)
+    r = subprocess.run([str(bambu), "--slice", "0", "--outputdir", str(sl),
+                        job["path"]], capture_output=True, text=True,
+                       timeout=1800)
+    res = sl / "result.json"
+    if not res.exists():
+        return {"skipped": f"Bambu made no result ({r.returncode}): "
+                           f"{r.stderr[-400:]}"}
+    result = json.loads(res.read_text())
+    for pl in result.get("sliced_plates", []):
+        pl.pop("objects", None)   # every object's box: the job says them
+    plates = []
+    for g in sorted(sl.glob("plate_*.gcode")):
+        head = {}
+        with open(g, errors="replace") as f:
+            for line in f:
+                if not line.startswith(";"):
+                    if head:
+                        break
+                    continue
+                for key in ("model printing time", "total estimated time",
+                            "total filament weight [g]",
+                            "total filament length [mm]"):
+                    if key in line:
+                        head[key] = line.split(":", 1)[-1].strip() \
+                            if ":" in line else line.split("=", 1)[-1].strip()
+        plates.append({"gcode": g.name, **head})
+    return {"return_code": result.get("return_code"),
+            "sliced_plates": result.get("sliced_plates"), "plates": plates}
+
+
+def sequence(d, s, o):
+    """How it goes together, each step slid home along its way in
+    (docs/assemblies/README.md#assembly-sequences): the panels and their
+    pegs, the shaft through the left wall with its cams already pressed on,
+    the right wall, the bushings and the crank; the rods dropped onto their
+    cams before the top goes on over them; the figures in their slots, the
+    levers, their pins, the links and theirs."""
+    X, MX, MZ = [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]
+    joints = [j for j, _, _ in P.peg_joints(s)]
+
+    def pegs(*names):
+        return [o["pegs"][i] for i, j in enumerate(joints) if j in names]
+
+    def step(occ, direction=None, note=None, distance=None):
+        st = ({"occurrences": occ} if isinstance(occ, list) else
+              {"occurrence": occ})
+        if direction is not None:
+            st["direction"] = direction
+        if distance is not None:
+            st["distance_mm"] = distance
+        if note:
+            st["note"] = note
+        return st
+    steps = [
+        step(o["floor"], note="the floor, on the bench"),
+        step(pegs("floor/back"), MZ, "the back's pegs into the floor"),
+        step(o["back"], MZ, "the back onto its pegs"),
+        step(pegs("floor/left wall", "back/left wall"), X,
+             "the left wall's pegs into the floor's and the back's edges"),
+        step(o["left wall"], X, "the left wall onto its pegs"),
+        step([o["camshaft"], o["axe cam"], o["bird cam"]], MX,
+             "the camshaft through the left wall's bore, its cams pressed "
+             "on first, each from its nearer end"),
+        step(pegs("floor/right wall", "back/right wall"), MX,
+             "the right wall's pegs"),
+        step(o["right wall"], MX, "the right wall onto its pegs and over the "
+             "shaft's end"),
+        step(o["bushing L"], X, "a bushing pressed on each end of the "
+             "shaft, into its wall's bore"),
+        step(o["bushing R"], MX),
+        step(o["crank"], X, "the crank pressed on the shaft's end"),
+        step(o["grip"], X, "the grip on, and its pin through it into the "
+             "crank"),
+        step(o["handle pin"], X),
+        step(o["axe rod"], MZ, "each rod dropped onto its cam"),
+        step(o["bird rod"], MZ),
+        step(pegs("left wall/top", "right wall/top", "back/top"), MZ,
+             "the top's pegs into the walls' and the back's top edges"),
+        step(o["top"], MZ, "the top down over the rods and onto its pegs"),
+        step(o["woodcutter"], MZ, "the figures and the log into their "
+             "slots"),
+        step(o["perch"], MZ), step(o["log"], MZ)]
+    # A pin starts its own length out, by hand at the hole: from further it
+    # would pass through the other figure, which no hand reaches past.
+    sl = s["axe_slabs"]
+    pin_len = {"rod": sl["link"][1] - sl["link"][0] + s["g"] + s["d_rod"],
+               "lever": sl["link"][1] - sl["lever"][0],
+               "pivot": sl["lever"][1] - sl["body"][0]}
+    for k, lever in (("axe", "arms"), ("bird", "bird")):
+        steps += [
+            step(o[lever], MZ, f"the {lever} beside its "
+                 f"{'woodcutter' if k == 'axe' else 'perch'}"),
+            step(o[f"{k} pivot pin"], X, "its pivot pin pressed in from "
+                 "outside", pin_len["pivot"] + s["gap"]),
+            step(o[f"{k} link"], MZ, "the link down between the lever and "
+                 "the rod"),
+            step(o[f"{k} rod pin"], MX, "the rod's pin through the rod into "
+                 "the link", pin_len["rod"] + s["gap"]),
+            step(o[f"{k} lever pin"], MX, "the lever's pin through the link "
+                 "into the lever", pin_len["lever"] + s["gap"])]
+    d.call("set_assembly_sequence", steps=steps, allowance_mm=0.0)
+    return steps
 
 
 # ---- negative controls -------------------------------------------------------------
@@ -406,7 +791,7 @@ def control_guides(d, s, proc):
     b.frame("off the width", (x + s["cam_w"] + s["d_rod"], 0.0, st), P.Z,
             P.Y)
     d.call("add_assembly", name="control: guides off the cam")
-    box = occ(d, "box", "box", fixed=True)
+    box = occ(d, "left wall", "left wall", fixed=True)
     guides = occ(d, "control guides", "guides", fixed=True)
     shaft = occ(d, "camshaft", "camshaft")
     cam = occ(d, "axe cam", "axe cam")
@@ -474,13 +859,16 @@ def main():
     ap.add_argument("--port", type=int)
     ap.add_argument("--width", type=float, default=120.0,
                     help="the box's inside width along the camshaft, mm")
-    ap.add_argument("--process", default="fdm")
-    ap.add_argument("--material", default="pla")
-    ap.add_argument("--profile", default=None,
-                    help="one of your print profiles (list_print_profiles)")
+    ap.add_argument("--profile", required=True,
+                    help="one of your print profiles (list_print_profiles), "
+                         "stating its layer, line width and bed: "
+                         "print_coupon.py --seed installs the P1S's")
     ap.add_argument("--samples", type=int, default=49,
                     help="samples over one crank turn (49: every 7.5 deg)")
     ap.add_argument("--no-render", action="store_true")
+    ap.add_argument("--slice", action="store_true",
+                    help="slice the print job with your Bambu Studio CLI "
+                         "for its time and filament (a profile with a bed)")
     ap.add_argument("--fresh", action="store_true",
                     help="start a new project first (an untitled scratch "
                          "one is discarded; a saved one with unsaved work "
@@ -501,14 +889,31 @@ def main():
     d = connect(args.port)
     if args.fresh:
         fresh_project(d)
-    proc = ({"profile": args.profile} if args.profile else
-            {"process": args.process, "material": args.material})
+    proc = {"profile": args.profile}
     mat = material_of(d, proc)
+    prof = next((p for p in d.call("list_print_profiles")["profiles"]
+                 if p["name"] == args.profile), None)
+    # Printed, so the parts are weighed as they print (the followers'
+    # liftoff depends on it) and their teardrops pointed: a profile that
+    # says no layer or line width weighs nothing, and the built-in table
+    # is no printer.
+    if prof is None:
+        fail(f"no print profile '{args.profile}'")
+    missing = [k for k in ("layer_height_mm", "line_width_mm")
+               if not prof.get(k)]
+    if missing:
+        fail(f"'{args.profile}' states no {' or '.join(missing)}: the "
+             f"printed parts cannot be weighed (save_print_profile, or "
+             f"print_coupon.py --seed for the P1S's)")
     # The sliding fits, at the rod's size: the gap two printed surfaces
     # need to come apart (docs/tolerances/README.md).
     s0 = S.solve(args.width, 0.0)
     gap = d.call("print_allowance", kind="gap", size_mm=s0["d_rod"], **proc)
-    s = S.solve(args.width, gap["allowance_mm"])
+    # The presses (pins, pegs, the parts keyed to the shaft) at the pin's
+    # size, the one the coupon's press row is printed at.
+    press = d.call("print_allowance", kind="press", size_mm=s0["d_pin"],
+                   **proc)
+    s = S.solve(args.width, gap["allowance_mm"], press["allowance_mm"])
 
     # The base radii, against CamProfile's report.
     search = {}
@@ -522,7 +927,7 @@ def main():
     print(f"woodcutter: box {s['width']:g} x {s['depth']:g} x {s['H']:.1f} "
           f"inside, walls {s['wall']:.2f}; shaft Ø{s['d_shaft']:g} at "
           f"z {s['zc']:.2f}; gap {gap['allowance_mm']:g} "
-          f"({args.profile or args.material}); axe cam base "
+          f"({args.profile}); axe cam base "
           f"{s['axe_base']:g} (hub floor {s['hub_floor']:g}), bird cam "
           f"base {s['bird_base']:g} (closed form "
           f"{s['bird_base_pressure']:g}); arm swing "
@@ -531,21 +936,16 @@ def main():
 
     # The parts.
     cams = {}
-    build_part(d, "box", proc, mat, P.build_box, s)
-    build_part(d, "camshaft", proc, mat, P.build_shaft, s)
-    for k in ("axe", "bird"):
-        body, r = build_part(d, f"{k} cam", proc, mat, P.build_cam, s, k,
-                             s[f"{k}_base"])
-        frame = next(f["id"] for f in d.call("get_state")["features"]
-                     if f.get("name") == f"cam {k}")
-        cams[k] = {"id": r["id"], "frame": frame, "report": r["report"]}
-        build_part(d, f"{k} rod", proc, mat, P.build_rod, s, k)
-        build_part(d, f"{k} link", proc, mat, P.build_link, s, k)
-    build_part(d, "arms", proc, mat, P.build_arms, s)
-    build_part(d, "woodcutter", proc, mat, P.build_woodcutter, s)
-    build_part(d, "bird", proc, mat, P.build_bird, s)
-    build_part(d, "perch", proc, mat, P.build_perch, s)
-    build_part(d, "log", proc, mat, P.build_log, s)
+    for name, fn, *a in PARTS:
+        if fn is P.build_cam:
+            k = a[0]
+            body, r = build_part(d, name, proc, mat, fn, s, k,
+                                 s[f"{k}_base"])
+            frame = next(f["id"] for f in d.call("get_state")["features"]
+                         if f.get("name") == f"cam {k}")
+            cams[k] = {"id": r["id"], "frame": frame, "report": r["report"]}
+        else:
+            build_part(d, name, proc, mat, fn, s, *a)
     for k in ("axe", "bird"):
         rep = cams[k]["report"]
         print(f"  {k} cam: base {rep['base_radius_mm']:g}, max radius "
@@ -555,10 +955,29 @@ def main():
               f"{rep['fit_deviation_mm']:.2e} mm, min convex "
               f"{rep['min_convex_radius_mm']:.2f}")
 
+    parts_print = check_parts(d, s)
+    over = {n: r["overhang_deg"] for n, r in parts_print.items()}
+    print(f"  every part checked as it prints ({len(parts_print)} parts, "
+          f"{sum(counts(s).values())} pieces): every item passes; the worst "
+          f"overhang {max(v or 0.0 for v in over.values()):.2f} deg")
     stage("base search and parts")
     # The assembly and its followers.
-    o, m, rel, sol = build_assembly(d)
-    stage("assembly and contact tables")
+    o, m, rel, sol = build_assembly(d, s)
+    sequence(d, s, o)
+    seq = slow(d, "check_assembly_sequence")
+    seq_rows = [{"step": i, "occurrence": st.get("occurrence",
+                                                  st.get("occurrences")),
+                 "pass": st.get("pass"), "press_mm": st.get("press_mm"),
+                 "interfering_mm": st.get("interfering_mm"),
+                 "worst_against": st.get("worst_against")}
+                for i, st in enumerate(seq["steps"])]
+    if not seq["pass"]:
+        bad = [r for r in seq_rows if r["pass"] is False]
+        fail(f"the assembly sequence fails: {bad[:4]} missing "
+             f"{seq.get('missing')}")
+    print(f"  assembly sequence: {len(seq['steps'])} steps, every one goes "
+          f"home ({seq['seconds']:.1f} s)")
+    stage("assembly, sequence and contact tables")
     clash = s["g"] / 5.0
     turn = add_study(d, m, "one crank turn", 0.0, 360.0, args.samples, clash)
     chop = add_study(d, m, "the chop", S.AXE_RISE_TO_DEG - 10.0,
@@ -653,6 +1072,41 @@ def main():
     shots = {} if args.no_render else renders(d, s, out, turn, offscreen)
     d.call("save_project", path=str(out / "woodcutter.lob"))
     stage("renders and save")
+    plates, job, sliced = {}, None, None
+    if prof.get("bed_mm"):
+        why = slicer_setup(out) if args.slice else None
+        if why:
+            print(f"  slicing skipped: {why}")
+        plates, job = print_plates(d, s, proc, prof, out)
+        job = job_receipt(job)
+        if shots and not shots.get("skipped"):
+            for name in plates:
+                d.call("set_active_part", part=name)
+                b = d.call("mass_properties")["bbox_mm"]
+                c = [(b["min"][i] + b["max"][i]) / 2.0 for i in range(3)]
+                d.call("set_camera", target=c,
+                       eye=[c[0], c[1] - 0.6 * prof["bed_mm"][1],
+                            c[2] + 1.2 * prof["bed_mm"][1]], up=[0, 0, 1])
+                p = out / f"woodcutter_{name.replace(' ', '_')}.png"
+                d.call("render_still", path=str(p), mode="quick",
+                       width=1600, height=1200, fit=True)
+                shots[name] = {"path": str(p)}
+        if args.slice:
+            sliced = slice_job(job, out)
+            for pl in sliced.get("plates", []):
+                print(f"  sliced by Bambu Studio, {pl['gcode']}: "
+                      f"{pl.get('total estimated time', '?')}, "
+                      f"{pl.get('total filament weight [g]', '?')} g, "
+                      f"{pl.get('total filament length [mm]', '?')} mm of "
+                      f"filament")
+            if sliced.get("skipped"):
+                print(f"  not sliced: {sliced['skipped']}")
+    else:
+        job = {"skipped": "no print profile with a bed: the built-in table "
+                          "is no printer to lay the plates on"}
+    d.call("set_active_part", part=ASM)
+    d.call("save_project", path=str(out / "woodcutter.lob"))
+    stage("plates")
     elapsed = time.perf_counter() - t0
     receipt = {"width": args.width, "process": proc,
                "gap": {"allowance_mm": gap["allowance_mm"],
@@ -677,11 +1131,17 @@ def main():
                "motion": motion, "traces": traces, "followers": nums,
                "speed_rpm": SPEED, "requirements": final,
                "negative_controls": controls, "renders": shots,
+               "parts": parts_print, "counts": counts(s),
+               "sequence": {"pass": seq["pass"], "steps": seq_rows,
+                            "seconds": seq.get("seconds")},
+               "plates": plates, "job": job, "sliced": sliced,
                "study_seconds": t_study, "stage_seconds": stages,
                "seconds": elapsed}
     (out / "woodcutter.json").write_text(json.dumps(receipt, indent=1,
                                                     default=str))
     print(f"  seconds by stage: {stages}")
+    print(f"woodcutter: {len(counts(s))} parts, "
+          f"{sum(counts(s).values())} pieces, {len(plates)} plates")
     print(f"woodcutter: every check passed -> {out / 'woodcutter.lob'} "
           f"({elapsed:.0f} s)")
     return 0
