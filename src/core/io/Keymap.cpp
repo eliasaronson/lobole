@@ -197,6 +197,8 @@ const Binding kDefaults[] = {
      "Modify", ""},
     {"part.worm_wheel", Context::Part,
      "Worm wheel (hobbed from a cylindrical blank)", "Modify", ""},
+    {"part.cam_profile", Context::Part,
+     "Cam profile (a disc cam cut from a follower motion)", "Modify", ""},
     {"part.draft", Context::Part, "Draft (taper faces)", "Modify", "D"},
     {"part.shell", Context::Part, "Shell (hollow a body)", "Modify", "K"},
     {"part.delete_face", Context::Part,

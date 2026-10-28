@@ -340,6 +340,9 @@ enum class MateDof { Rotation, Offset };
 namespace contact {
 struct Model;
 }
+namespace cammech {
+class PreparedMotion;
+}
 
 // One member of a relation over several mates (v171): the relation is
 // sum(coefficient * dof) = constant, the constant held in Relation::phase.
@@ -435,6 +438,10 @@ struct Relation {
     int slots = 0;
     std::vector<std::pair<double, double>> table;
   } intermittent;
+  // Cam only (vNEXT): the lift read from a CamProfile feature of a part on
+  // every solve instead of `lift` — the cam relation follows the motion the
+  // cam was cut for (docs/modeling/cam-profiles.md). 0 = `lift` governs.
+  uint64_t profilePart = 0, profileFeature = 0;
   // Contact only (vNEXT, docs/assemblies/relations.md#contact). The cam and
   // the follower occurrences (0 = derived: the side of mate a, and of mate
   // b, that is not rigid with the other mate's base); the body of each
@@ -446,8 +453,10 @@ struct Relation {
   uint64_t camBody = 0, followerBody = 0;
   int toward = 0;
   // Transient, set by the solve: the contact relation's geometry and table
-  // (cached on the geometry, never in the file).
+  // (cached on the geometry, never in the file), and the cam relation's
+  // motion read from its CamProfile.
   std::shared_ptr<const contact::Model> contactModel;
+  std::shared_ptr<const cammech::PreparedMotion> profileMotion;
   bool HasTerms() const {
     return kind == RelationKind::LinearN || kind == RelationKind::Epicyclic ||
            kind == RelationKind::Planet;

@@ -54,6 +54,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"part.replace_face", ICON_FA_RIGHT_LEFT},
     {"part.worm", ICON_FA_BARS_STAGGERED},
     {"part.worm_wheel", ICON_FA_DHARMACHAKRA},
+    {"part.cam_profile", ICON_FA_EGG},
     {"part.shell", ICON_DS_SHELL},
     {"part.draft", ICON_DS_DRAFT},
     {"part.split", ICON_DS_SPLIT},

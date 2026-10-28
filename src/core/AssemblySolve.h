@@ -12,6 +12,7 @@
 #include <expected>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -205,6 +206,16 @@ bool MateHasDof(MateType type, MateDof dof);
 // What a relation makes of its driving value: `ratio * a + phase` for every
 // kind but a cam, which reads its lift table instead.
 double RelationValue(const Relation& r, double drivingValue);
+
+// A cam relation's motion read from the CamProfile feature it names
+// (`profilePart`, `profileFeature`; docs/modeling/cam-profiles.md): the
+// motion and follower the feature was built with, prepared for evaluation.
+// Null with `*why` when the part, the feature or its build is missing, or
+// its follower moves another way than the relation's b (a turning follower
+// drives a rotation, a sliding one an offset).
+std::shared_ptr<const cammech::PreparedMotion>
+CamProfileMotion(const Relation& r, const PartResolver& partById,
+                 std::string* why);
 [[nodiscard]] double MateDofValue(const Mate& m, MateDof dof);
 void SetMateDof(Mate& m, MateDof dof, double value);
 

@@ -21,6 +21,7 @@
 #include "core/ThreadStandards.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CamProfileFeature.h"
 #include "core/features/CornerReliefFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
@@ -1084,6 +1085,15 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
       }
     }
     return false;
+  case PickSlot::CamHub:
+    if (item.kind != SelectionItem::Kind::Face)
+      return false;
+    if (auto* cp = dynamic_cast<CamProfileFeature*>(&f)) {
+      cp->face = item.element;
+      cp->frameId = 0;
+      return true;
+    }
+    return false;
   case PickSlot::GearBlank:
     if (item.kind != SelectionItem::Kind::Face)
       return false;
@@ -1322,6 +1332,11 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
     return {{PickSlot::ThreadFace, "Face", kFace, false,
              "Pick the cylindrical face to thread"}};
   }
+  if (dynamic_cast<const CamProfileFeature*>(&feature) != nullptr) {
+    return {{PickSlot::CamHub, "Hub", kFace, false,
+             "Pick the shaft or hub the cam goes on: its cylindrical "
+             "outside"}};
+  }
   if (dynamic_cast<const WormFeature*>(&feature) != nullptr) {
     return {{PickSlot::GearBlank, "Blank", kFace, false,
              "Pick the worm blank's cylindrical outside: its tip"}};
@@ -1477,6 +1492,10 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
       return true; // a base plane (0) or a datum
     }
     return false;
+  }
+  case PickSlot::CamHub: {
+    auto* cp = dynamic_cast<const CamProfileFeature*>(&feature);
+    return cp != nullptr && (!cp->face.name.empty() || cp->frameId != 0);
   }
   case PickSlot::GearBlank: {
     if (auto* wo = dynamic_cast<const WormFeature*>(&feature))
@@ -2012,6 +2031,80 @@ static void DrawWormRows(AppState& state, Feature& feature, size_t index,
   const ElementRef& face = wo ? wo->face : ww->face;
   PickSlotRow(state, feature, PickSlot::GearBlank,
               face.name.empty() ? "" : face.name);
+}
+
+// A cam profile's rows (docs/modeling/cam-profiles.md): its size (blank =
+// from the hub), the follower it is cut for, which way it turns and where
+// the solid goes; then what it built, read back from the last regeneration.
+static void DrawCamProfileRows(AppState& state, Feature& feature, size_t index,
+                               bool commit) {
+  auto* cp = dynamic_cast<CamProfileFeature*>(&feature);
+  const nlohmann::json rep = cp->ReportJson();
+  ExprDim(state, feature, index, commit, "Base radius", cp->baseRadiusExpr,
+          cp->baseRadius);
+  if (cp->baseRadius <= 0.0 && rep.is_object())
+    ImGui::TextDisabled("from the hub: %.3f",
+                        rep.at("base_radius_mm").get<double>());
+  ExprDim(state, feature, index, commit, "Width", cp->widthExpr, cp->width);
+  if (cp->width <= 0.0 && rep.is_object())
+    ImGui::TextDisabled("from the hub: %.3f", rep.at("width_mm").get<double>());
+  {
+    // The follower: a roller (the default, a third of the base radius), a
+    // rounded knife or a flat face, sliding radially.
+    nlohmann::json before = DocumentIO::FeatureToJson(feature);
+    const char* kinds[] = {"Roller", "Knife", "Flat"};
+    int kind = !cp->followerSet                                    ? 0
+               : cp->follower.kind == cammech::FollowerKind::Knife ? 1
+               : cp->follower.kind == cammech::FollowerKind::Flat  ? 2
+                                                                   : 0;
+    if (LabeledCombo("Follower", &kind, kinds, 3)) {
+      const double base =
+          rep.is_object() ? rep.at("base_radius_mm").get<double>() : 10.0;
+      if (!cp->followerSet) {
+        cp->followerSet = true;
+        cp->follower.radiusMm = base / 3.0;
+      }
+      cp->follower.kind = kind == 1   ? cammech::FollowerKind::Knife
+                          : kind == 2 ? cammech::FollowerKind::Flat
+                                      : cammech::FollowerKind::Roller;
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+  }
+  if (cp->followerSet && cp->follower.kind != cammech::FollowerKind::Flat)
+    HandleEdit(state, feature,
+               DragDim(state, "Follower radius", &cp->follower.radiusMm, 0.0f,
+                       nullptr, 0.0),
+               index, commit);
+  {
+    nlohmann::json before = DocumentIO::FeatureToJson(feature);
+    const char* turns[] = {"Counter-clockwise", "Clockwise"};
+    int turn = cp->ccw ? 0 : 1;
+    if (LabeledCombo("Turns", &turn, turns, 2)) {
+      cp->ccw = turn == 0;
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+  }
+  {
+    nlohmann::json before = DocumentIO::FeatureToJson(feature);
+    const char* bodies[] = {"New body", "Add to hub"};
+    int body = cp->newBody ? 0 : 1;
+    if (LabeledCombo("Body", &body, bodies, 2)) {
+      cp->newBody = body == 0;
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+  }
+  if (rep.is_object()) {
+    ImGui::TextDisabled("Rise %.3f, pressure angle up to %.1f deg at %.0f deg",
+                        rep.contains("rise_mm")
+                            ? rep.at("rise_mm").get<double>()
+                            : rep.at("rise_deg").get<double>(),
+                        rep.at("max_pressure_angle_deg").get<double>(),
+                        rep.at("max_pressure_at_deg").get<double>());
+    ImGui::TextDisabled("Fit within %.2g mm",
+                        rep.at("fit_deviation_mm").get<double>());
+  }
+  PickSlotRow(state, feature, PickSlot::CamHub,
+              cp->face.name.empty() ? "" : cp->face.name);
 }
 
 void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
@@ -2641,6 +2734,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (dynamic_cast<WormFeature*>(&feature) != nullptr ||
              dynamic_cast<WormWheelFeature*>(&feature) != nullptr) {
     DrawWormRows(state, feature, index, commit);
+  } else if (dynamic_cast<CamProfileFeature*>(&feature) != nullptr) {
+    DrawCamProfileRows(state, feature, index, commit);
   } else if (auto* th = dynamic_cast<ThreadFeature*>(&feature)) {
     // Designation combo: the ISO series + Custom (manual pitch).
     const auto& series = threads::All();

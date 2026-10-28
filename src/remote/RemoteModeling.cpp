@@ -14,6 +14,7 @@
 #include "core/Literals.h"
 #include "core/Primitives.h"
 #include "core/PrintSplit.h"
+#include "core/features/CamProfileFeature.h"
 #include "core/features/DeleteFaceFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/MoveFaceFeature.h"
@@ -1461,6 +1462,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         resp["report"] = rep;
     if (auto* w = dynamic_cast<const WormWheelFeature*>(doc->GetFeature(index)))
       if (json rep = w->ReportJson(); !rep.is_null())
+        resp["report"] = rep;
+    if (auto* c =
+            dynamic_cast<const CamProfileFeature*>(doc->GetFeature(index)))
+      if (json rep = c->ReportJson(); !rep.is_null())
         resp["report"] = rep;
     // A Thread on a PRINTED part says, in the call that made it, what the
     // print wants it modelled at (docs/tolerances/README.md#printed-parts) —

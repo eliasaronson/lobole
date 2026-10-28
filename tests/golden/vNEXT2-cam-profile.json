@@ -1,0 +1,16 @@
+{
+  "format": "designer-document",
+  "version": 197,
+  "features": [
+    {"type": "Cylinder", "name": "Hub", "id": 1, "center": [0, 0, 0],
+     "direction": [0, 0, 1], "radius": 12.0, "height": 6.0},
+    {"type": "CamProfile", "name": "Axe cam", "id": 2,
+     "face": {"feature_id": 1, "element": "1/face0"},
+     "base_radius_mm": 14.0, "turn": "ccw", "body": "add",
+     "segments": [
+       {"to_deg": 300, "rise_mm": 8.0, "law": "cycloidal"},
+       {"to_deg": 300, "rise_mm": -8.0, "law": "drop"},
+       {"to_deg": 360, "law": "dwell"}],
+     "follower": {"kind": "knife", "motion": "slide", "radius_mm": 1.5}}
+  ]
+}

@@ -64,6 +64,7 @@
 
 #include "core/DirectEdit.h"
 #include "core/ThreadStandards.h"
+#include "core/features/CamProfileFeature.h"
 #include "core/features/DeleteFaceFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/LoftFeature.h"
@@ -568,6 +569,13 @@ void CreateWorm(AppState& state) {
     return;
   BeginPreviewFeature(state, std::make_unique<WormFeature>(
                                  NextName(state, "Worm"), ElementRef{}));
+}
+
+void CreateCamProfile(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state, std::make_unique<CamProfileFeature>(
+                                 NextName(state, "Cam"), ElementRef{}));
 }
 
 void CreateWormWheel(AppState& state) {

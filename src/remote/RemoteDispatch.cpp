@@ -27,6 +27,7 @@
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/drawing/DrawingExport.h"
+#include "core/features/CamProfileFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/WormFeature.h"
@@ -2015,6 +2016,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       if (auto* w =
               dynamic_cast<const WormWheelFeature*>(stateDoc->GetFeature(i)))
         if (json rep = w->ReportJson(); !rep.is_null())
+          f["report"] = rep;
+      // A cam profile says what it cut: the pressure angle, the radii, how
+      // closely its curve fits the envelope, and what it derived.
+      if (auto* c =
+              dynamic_cast<const CamProfileFeature*>(stateDoc->GetFeature(i)))
+        if (json rep = c->ReportJson(); !rep.is_null())
           f["report"] = rep;
       features.push_back(f);
     }

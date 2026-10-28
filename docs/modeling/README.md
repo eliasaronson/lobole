@@ -16,6 +16,9 @@ Topic pages:
 - [worm-gears.md](worm-gears.md) — the Worm and the hobbed WormWheel, cut
   from cylindrical blanks: sizes, how the wheel's envelope is computed, the
   phase a pair meshes at, and self-locking.
+- [cam-profiles.md](cam-profiles.md) — the CamProfile feature: a disc cam
+  (the mechanism) cut from a follower motion as the follower's exact
+  envelope, undercut refused, and the cam relation that reads it.
 - [derived.md](derived.md) — the Derived feature: another part's bodies copied
   into this one as a snapshot.
 - [templates.md](templates.md) — feature templates: a composite saved once as
@@ -152,6 +155,7 @@ holds a spec to ([typed feature specs](../scripting/rpc.md#typed-feature-specs))
 | `Rib` | see [Rib](#rib) |
 | `Hole`, `Thread` | see [holes-and-threads.md](holes-and-threads.md) |
 | `Worm`, `WormWheel` | see [worm-gears.md](worm-gears.md) |
+| `CamProfile` | see [cam-profiles.md](cam-profiles.md) |
 | `Curve3D`, `Sweep`, `Loft`, `Pipe` | see [3D curves, sweep, loft and pipe](#3d-curves-sweep-loft-and-pipe) |
 | `Derived` | see [derived.md](derived.md) |
 | `Template` | an instance of a feature template; see [templates.md](templates.md) |

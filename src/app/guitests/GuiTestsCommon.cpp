@@ -557,7 +557,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[42] = {
+const ToolCase kToolCases[43] = {
     // The primitives stand on something: each arms a face/plane pick, and
     // the Top plane of an empty part is enough for its defaults.
     {"box", "###tb_box", Needs::Nothing, Expect::PickThenChanges},
@@ -600,6 +600,9 @@ const ToolCase kToolCases[42] = {
     {"thread", "###tb_thread", Needs::Body, Expect::RefusesUntilPicked},
     {"worm", "###tb_worm", Needs::Body, Expect::RefusesUntilPicked},
     {"worm_wheel", "###tb_worm_wheel", Needs::Body, Expect::RefusesUntilPicked},
+    // A cam goes on a hub, and which cylinder is the hub is the pick.
+    {"cam_profile", "###tb_cam_profile", Needs::Body,
+     Expect::RefusesUntilPicked},
     {"rib", "###tb_rib", Needs::BodyAndOpenSketch, Expect::Changes},
     {"hole", "###tb_hole", Needs::Body, Expect::ArmsAPick},
     {"new_sketch", "###tb_new_sketch", Needs::Nothing, Expect::ArmsAPick},

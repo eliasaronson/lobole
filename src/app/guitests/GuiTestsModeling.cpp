@@ -2808,6 +2808,56 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < blank - 100.0);
   };
 
+  // A cam on a picked hub (docs/modeling/cam-profiles.md): nothing typed,
+  // every number from the hub, and the follower changed from the window.
+  t = IM_REGISTER_TEST(engine, "cam_profile",
+                       "tool_cuts_the_default_lobe_on_a_picked_hub");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Hub", glm::vec3(0.0f), glm::vec3(0, 0, 1), 12.0, 40.0));
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_cam_profile");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0, 0, 20));
+    s_App->camera->SetUp(glm::vec3(0, 0, 1));
+    s_App->camera->SetPosition(glm::vec3(0, 0, 20) +
+                               glm::normalize(glm::vec3(1, 1, 0.3f)) * 90.0f);
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(
+        glm::normalize(glm::vec3(1, 1, 0)) * 12.0f + glm::vec3(0, 0, 20)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(3);
+    auto* cp =
+        dynamic_cast<CamProfileFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(cp != nullptr);
+    IM_CHECK(!cp->face.name.empty());
+    IM_CHECK_STR_EQ(cp->GetError().c_str(), "");
+    IM_CHECK(cp->report.valid);
+    ctx->SetRef("//Cam###ToolWindow");
+    ctx->ComboClick("###Follower/Knife");
+    ctx->Yield(3);
+    cp = dynamic_cast<CamProfileFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(cp != nullptr);
+    IM_CHECK(cp->followerSet);
+    IM_CHECK(cp->follower.kind == cammech::FollowerKind::Knife);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    const auto* kept =
+        dynamic_cast<const CamProfileFeature*>(Doc()->GetFeature(1));
+    IM_CHECK(kept != nullptr);
+    IM_CHECK_STR_EQ(kept->GetError().c_str(), "");
+    IM_CHECK(kept->report.valid);
+    // The hub's radius and length, and a lobe rising half the radius.
+    IM_CHECK(std::abs(kept->report.baseRadius - 12.0) < 1e-9);
+    IM_CHECK(std::abs(kept->report.width - 40.0) < 1e-9);
+    IM_CHECK(std::abs(kept->report.profile.maxRadiusMm - 18.0) < 1e-6);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+  };
+
   // The wheel editor: picked the same way, its rows show what the hob made
   // (the centre distance, the ratio, the throat) once it has regenerated.
   t = IM_REGISTER_TEST(engine, "worm", "wheel_editor_reports_the_pair");

@@ -274,6 +274,20 @@ typed `contract`: every field, its type and its enum values.
   "pressure_angle_deg"?: num (20), "hand"?: "right"|"left",
   "backlash"?: num (mm axial, half off each flank), "length"?: num (mm)}}
   — the response's "report" gives the lead angle and self-locking.
+- CamProfile (a disc cam, the mechanism, cut from a follower motion):
+  {{"type": "CamProfile", "name": str, "face"?: {{"feature_id", "element"}}
+  (a shaft's or hub's cylindrical outside: axis, base radius and width) |
+  "frame"?: <Frame feature id> (then base_radius_mm and width_mm are
+  required), "base_radius_mm"?: num, "width_mm"?: num, "segments"?:
+  [{{"to_deg", "rise_mm"|"rise_deg", "law":
+  "cycloidal"|"harmonic"|"poly345"|"dwell"|"drop"}}] closing at 360 |
+  "lift"?: [[angle_deg, lift]], "follower"?: {{"kind":
+  "roller"|"flat"|"knife", "motion": "slide"|"turn", "radius_mm",
+  "offset_mm"? | "pivot_mm": [x, y] + "arm_mm"}}, "turn"?: "ccw"|"cw",
+  "body"?: "new"|"add"}} — omitted motion = a cycloidal lobe rising half the
+  base radius; undercut is refused naming the base radius that clears it;
+  "report" gives the pressure angle, radii and fit deviation. A cam relation
+  reads it with add_relation type "cam" {{profile: {{part, feature}}}}.
 - WormWheel (hobbed from a cylindrical blank; the rim is the face and its
   length the face width): {{"type": "WormWheel", "name": str, "face":
   {{"feature_id", "element"}}, "teeth"?: int (40), "module"?: num (mm;

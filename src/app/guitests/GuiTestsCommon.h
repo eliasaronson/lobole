@@ -20,6 +20,7 @@
 #include "core/cam/CamPost.h"
 #include "core/drawing/DrawingValidate.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CamProfileFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/DraftFeature.h"
@@ -231,7 +232,7 @@ struct ToolCase {
   Needs needs;
   Expect expect;
 };
-extern const ToolCase kToolCases[42];
+extern const ToolCase kToolCases[43];
 const ToolCase* FindToolCase(const char* testName);
 
 // A file under tests/fixtures/ in the source tree ("images/checker16x12.png").

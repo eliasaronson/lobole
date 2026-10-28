@@ -79,6 +79,9 @@ enum class PickSlot : int {
   MoveFaceFaces,     // Face, multi
   ReplaceFaceFace,   // Face
   ReplaceFaceTarget, // Face, or a Feature row (datum plane, sketch)
+  // A cam profile's hub: the cylindrical outside of the shaft or hub the
+  // cam goes on (docs/modeling/cam-profiles.md).
+  CamHub,
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

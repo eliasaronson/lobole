@@ -419,6 +419,8 @@ set(core_sources
     src/core/Document.cpp
     src/core/Units.cpp
     src/core/Occurrence.cpp
+    src/core/CamProfileMath.cpp
+    src/core/features/CamProfileFeature.cpp
     src/core/ContactFollower.cpp
     src/core/AssemblyFlexible.cpp
     src/core/AssemblyRelations.cpp

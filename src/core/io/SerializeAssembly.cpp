@@ -822,6 +822,8 @@ json RelationToJson(const Relation& r) {
       j["table"] = std::move(t);
     }
   }
+  if (r.profilePart != 0 || r.profileFeature != 0) // vNEXT2, cam only
+    j["profile"] = {{"part", r.profilePart}, {"feature", r.profileFeature}};
   if (r.kind == RelationKind::Contact) {
     // vNEXT: the occurrences and bodies when named (absent = derived), and
     // the sense the follower is held in. Nothing derived from the geometry
@@ -998,24 +1000,19 @@ int TeethOf(const json& j, const char* key) {
 
 Relation RelationFromJson(const json& j) {
   readctx::RequireTag(j, "Relation", "relation");
-  readctx::RefuseUnknownKeys(j, {"type",          "id",
-                                 "name",          "kind",
-                                 "terms",         "constant",
-                                 "mate_a",        "mate_b",
-                                 "mate_a_path",   "mate_b_path",
-                                 "dof_a",         "dof_b",
-                                 "ratio",         "teeth_a",
-                                 "teeth_b",       "internal",
-                                 "thread_part",   "thread_feature",
-                                 "phase",         "lift",
-                                 "step",          "period_deg",
-                                 "start_deg",     "duration_deg",
-                                 "motion",        "slots",
-                                 "table",         "drives",
-                                 "lead",          "teeth",
-                                 "ride",          "cam",
-                                 "follower",      "cam_body",
-                                 "follower_body", "toward"},
+  readctx::RefuseUnknownKeys(j, {"type",        "id",          "name",
+                                 "kind",        "terms",       "constant",
+                                 "mate_a",      "mate_b",      "mate_a_path",
+                                 "mate_b_path", "dof_a",       "dof_b",
+                                 "ratio",       "teeth_a",     "teeth_b",
+                                 "internal",    "thread_part", "thread_feature",
+                                 "phase",       "lift",        "step",
+                                 "period_deg",  "start_deg",   "duration_deg",
+                                 "motion",      "slots",       "table",
+                                 "drives",      "lead",        "teeth",
+                                 "ride",        "profile",     "cam",
+                                 "follower",    "cam_body",    "follower_body",
+                                 "toward"},
                              "relation");
   Relation r;
   r.id = j.at("id").get<uint64_t>();
@@ -1111,6 +1108,15 @@ Relation RelationFromJson(const json& j) {
     im.durationDeg = j.at("duration_deg").get<double>();
     im.slots = IntermittentMotionFromJson(j);
     im.table = IntermittentTableOf(j);
+  }
+  if (j.contains("profile")) { // vNEXT2
+    if (r.kind != RelationKind::Cam)
+      throw std::runtime_error("`profile` is a cam relation's; this one is a " +
+                               std::string(RelationKindToString(r.kind)));
+    const json& pj = j.at("profile");
+    readctx::RefuseUnknownKeys(pj, {"part", "feature"}, "relation profile");
+    r.profilePart = pj.at("part").get<uint64_t>();
+    r.profileFeature = pj.at("feature").get<uint64_t>();
   }
   for (const char* k :
        {"cam", "follower", "cam_body", "follower_body", "toward"})

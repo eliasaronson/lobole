@@ -493,6 +493,7 @@ const std::vector<Command>& Table() {
     add("part.thread", IdleBody, [](AppState& s) { CreateThread(s); });
     add("part.worm", IdleBody, [](AppState& s) { CreateWorm(s); });
     add("part.worm_wheel", IdleBody, [](AppState& s) { CreateWormWheel(s); });
+    add("part.cam_profile", IdleBody, [](AppState& s) { CreateCamProfile(s); });
     add("part.draft", IdleBody, [](AppState& s) { CreateDraft(s); });
     add("part.shell", IdleBody, [](AppState& s) { CreateShell(s); });
     add("part.delete_face", IdleBody, [](AppState& s) { CreateDeleteFace(s); });

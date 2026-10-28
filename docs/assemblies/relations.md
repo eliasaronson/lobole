@@ -222,7 +222,10 @@ to radians where it is read (`RelationValue`, the loop row). The follower is
 whatever DOF mate b has: a slider slides, a revolute turns, and a cylindrical
 b takes `dof_b: offset|rotation` (offset when omitted). `{rise | rise_deg,
 duration_deg?, start_deg?}` builds a cosine lobe; `rise` on a turning follower
-or `rise_deg` on a sliding one is refused, not converted.
+or `rise_deg` on a sliding one is refused, not converted. `profile: {part,
+feature}` instead reads the motion a CamProfile feature was cut for, on every
+solve, so editing the cam moves the follower
+([../modeling/cam-profiles.md](../modeling/cam-profiles.md#the-cam-relation-reads-it)).
 
 The table is interpolated periodically (a crank past 360° sees the profile
 again) by a cubic with Fritsch–Carlson-limited tangents: the slope is

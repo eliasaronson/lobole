@@ -167,6 +167,8 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       // thread they are made like. Not a verb repeated mid-flow.
       "part.worm",
       "part.worm_wheel",
+      // A cam: cut once per follower, from the toolbar beside the worm.
+      "part.cam_profile",
       // Sheet metal: three tools used in sequence on a part that IS sheet
       // metal, in the order they appear on the toolbar — not typed mid-flow
       // the way a fillet or a hole is. Every free letter left is worth more

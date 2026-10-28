@@ -639,6 +639,8 @@ void DrawModelToolbar(AppState& state) {
   btn("###tb_worm", "part.worm", "Worm (pick a cylindrical blank's outside)");
   btn("###tb_worm_wheel", "part.worm_wheel",
       "Worm wheel (hobbed; pick a cylindrical blank's rim)");
+  btn("###tb_cam_profile", "part.cam_profile",
+      "Cam profile (a disc cam from a motion; pick the hub's outside)");
   btn("###tb_shell", "part.shell", "Shell (hollow a body; pick faces to open)");
   btn("###tb_draft", "part.draft", "Draft (taper faces for moulding)");
   btn("###tb_split", "part.split",

@@ -7,6 +7,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/features/CamProfileFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -122,6 +123,8 @@ std::string FeatureText(const Feature& f) {
   }
   if (const auto* w = dynamic_cast<const WormFeature*>(&f))
     out << " worm=" << w->ReportJson().dump();
+  if (const auto* c = dynamic_cast<const CamProfileFeature*>(&f))
+    out << " cam=" << c->ReportJson().dump();
   if (const auto* w = dynamic_cast<const WormWheelFeature*>(&f)) {
     // `reused` says whether THIS regeneration found the wheel in the
     // process-wide memo, which a from-scratch rebuild in the same process

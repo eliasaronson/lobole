@@ -91,6 +91,7 @@ add_executable(designer_tests
     test_rib.cpp
     test_thread.cpp
     test_worm.cpp
+    test_cam_profile.cpp
     test_contact_relation.cpp
     test_sheetmetal.cpp
     test_flange.cpp

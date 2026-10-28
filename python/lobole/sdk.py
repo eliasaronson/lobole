@@ -2390,6 +2390,37 @@ class Part(_Tab):
             f["length"] = length
         return self._feature(f)
 
+    def cam_profile(self, face=None, *, frame=None, segments=None, lift=None,
+                    follower=None, base_radius_mm=None, width_mm=None,
+                    turn="ccw", body="new", name="Cam") -> Feature:
+        """Cut a disc cam (the mechanism) from a follower motion
+        (docs/modeling/cam-profiles.md): on a hub's cylindrical ``face``
+        (its radius, length and axis are the defaults) or a ``frame``.
+        ``segments`` [{to_deg, rise_mm | rise_deg, law}] or ``lift``
+        [[angle_deg, lift]]; ``follower`` {kind: roller|flat|knife, motion:
+        slide|turn, radius_mm, offset_mm | pivot_mm + arm_mm}. Undercut is
+        refused with the base radius that clears it. The ``report`` carries
+        the pressure angle, radii and fit deviation."""
+        if turn not in ("ccw", "cw"):
+            raise SdkError(f"cam turn must be 'ccw' or 'cw', not {turn!r}")
+        if body not in ("new", "add"):
+            raise SdkError(f"cam body must be 'new' or 'add', not {body!r}")
+        if (face is None) == (frame is None):
+            raise SdkError("a cam is placed on a hub's face OR on a frame")
+        f = dict(type="CamProfile", name=name, turn=turn, body=body)
+        if face is not None:
+            self._gear_blank(face, "cam_profile")
+            f["face"] = face.ref
+        else:
+            f["frame"] = ref_of(frame)
+        for k, v in (("segments", segments), ("lift", lift),
+                     ("follower", follower),
+                     ("base_radius_mm", base_radius_mm),
+                     ("width_mm", width_mm)):
+            if v is not None:
+                f[k] = v
+        return self._feature(f)
+
     def worm_wheel(self, face, teeth=40, module=None, starts=1,
                    worm_diameter=None, hand="right", pressure_angle_deg=20.0,
                    name="Worm wheel") -> Feature:

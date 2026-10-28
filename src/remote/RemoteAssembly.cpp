@@ -344,7 +344,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "carrier, constant, "
      "dof_b, drives, follower, follower_body, toward, duration_deg, hand, "
      "internal, lead, "
-     "lift, motion, name, period_deg, planet, planets, ride_deg, ride_dof, "
+     "lift, motion, name, period_deg, planet, planets, profile, ride_deg, "
+     "ride_dof, "
      "ride_mate, ride_mm, "
      "ring, slots, step_deg, step_mm, sun, table, teeth, teeth_planet, "
      "teeth_ring, teeth_sun, terms, "
@@ -390,7 +391,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "period_deg?:number, slots?:int, start_deg?:number, step?:number, "
      "table?:number[][], "
      "mate_b_path?:int[], mate_a_path?:int[], internal?:bool, "
-     "lift?:any, ride?:any, teeth?:int, toward?:string, cam?:int, "
+     "lift?:any, profile?:object, ride?:any, teeth?:int, toward?:string, "
+     "cam?:int, "
      "follower?:int, cam_body?:int, follower_body?:int, contact?:object}[]"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
@@ -2704,6 +2706,37 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       // The lift is in the FOLLOWER's unit — mm for a slide, degrees for a
       // turn — and the solve converts a turn's degrees where it reads them.
       const bool turns = r.dofB == MateDof::Rotation;
+      if (p.contains("profile")) {
+        // The lift read from a CamProfile feature on every solve
+        // (docs/modeling/cam-profiles.md#the-cam-relation-reads-it).
+        // rpc-params: profile
+        for (const char* k : {"lift", "rise", "rise_deg", "duration_deg"})
+          if (p.contains(k))
+            throw std::runtime_error(
+                std::string(k) +
+                " and profile are two statements of one "
+                "motion: give the profile ({part, feature}) alone");
+        const json& pj = p.at("profile");
+        if (!pj.is_object() || !pj.contains("part") || !pj.contains("feature"))
+          throw std::runtime_error(
+              "profile is {part: the part's slot id, feature: the "
+              "CamProfile feature's id}");
+        for (const auto& [k, v] : pj.items())
+          if (k != "part" && k != "feature")
+            throw std::runtime_error("profile takes part and feature, not " +
+                                     k);
+        r.profilePart =
+            static_cast<uint64_t>(IntParam(pj.at("part"), "profile.part", 1));
+        r.profileFeature = static_cast<uint64_t>(
+            IntParam(pj.at("feature"), "profile.feature", 1));
+        std::string why;
+        const auto motion =
+            assembly::CamProfileMotion(r, ui::PartResolverFor(state), &why);
+        if (!motion)
+          throw std::runtime_error(why);
+        r.ratio = 1.0;
+        break;
+      }
       if (p.contains("lift")) {
         for (const json& pt : p.at("lift")) {
           if (!pt.is_array() || pt.size() != 2)

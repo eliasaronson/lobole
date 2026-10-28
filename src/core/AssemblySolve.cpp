@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/AssemblySolve.h"
+#include "core/CamProfileMath.h"
 #include "core/ContactFollower.h"
+#include "core/features/CamProfileFeature.h"
 
 #include "core/Angles.h"
 #include "core/ElementOrigin.h"
@@ -1074,6 +1076,46 @@ double FreewheelNotch(const Relation& r) {
 }
 } // namespace
 
+std::shared_ptr<const cammech::PreparedMotion>
+CamProfileMotion(const Relation& r, const PartResolver& partById,
+                 std::string* why) {
+  const Document* doc = partById ? partById(r.profilePart, 0) : nullptr;
+  if (doc == nullptr) {
+    *why = "the cam profile's part (" + std::to_string(r.profilePart) +
+           ") is not loaded";
+    return nullptr;
+  }
+  const CamProfileFeature* cp = nullptr;
+  for (size_t i = 0; i < doc->GetFeatures().size(); ++i) {
+    if (doc->EffectiveRollback() >= 0 &&
+        i >= static_cast<size_t>(doc->EffectiveRollback()))
+      break;
+    const auto& f = doc->GetFeatures()[i];
+    if (f->GetId() == r.profileFeature && !doc->EffectiveSuppressed(i))
+      cp = dynamic_cast<const CamProfileFeature*>(f.get());
+  }
+  if (cp == nullptr) {
+    *why = "feature " + std::to_string(r.profileFeature) +
+           " of that part is not a CamProfile (or is suppressed)";
+    return nullptr;
+  }
+  if (!cp->report.valid) {
+    *why = "the cam profile '" + cp->GetName() + "' did not build" +
+           (cp->GetError().empty() ? std::string() : ": " + cp->GetError());
+    return nullptr;
+  }
+  const bool turns =
+      cp->report.follower.motion == cammech::FollowerMotion::Turn;
+  if (turns != (r.dofB == MateDof::Rotation)) {
+    *why = std::string("the cam profile was cut for a ") +
+           (turns ? "turning" : "sliding") + " follower, and b " +
+           (r.dofB == MateDof::Rotation ? "turns" : "slides");
+    return nullptr;
+  }
+  return std::make_shared<const cammech::PreparedMotion>(cp->report.motion,
+                                                         cp->report.follower);
+}
+
 double RelationValue(const Relation& r, double a) {
   // A contact relation reads the table its geometry filled
   // (docs/assemblies/relations.md#contact).
@@ -1083,6 +1125,10 @@ double RelationValue(const Relation& r, double a) {
            r.phase;
   // A cam's table is in the follower's unit, so a turning follower's lift is
   // DEGREES and becomes the radians a rotation DOF holds here.
+  // A cam reading its CamProfile: the motion it was cut for, in b's unit
+  // already (radians for a turn).
+  if (r.kind == RelationKind::Cam && r.profileMotion)
+    return r.profileMotion->At(angles::ToDegrees(a)).s + r.phase;
   if (r.kind == RelationKind::Cam) {
     const double lift = CamLift(r.lift, a);
     return (r.dofB == MateDof::Rotation ? angles::ToRadians(lift) : lift) +
@@ -1249,7 +1295,14 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
       usable[i] = true;
       continue;
     }
-    if (r.kind == RelationKind::Cam && r.lift.size() < 2) {
+    if (r.kind == RelationKind::Cam &&
+        (r.profilePart != 0 || r.profileFeature != 0)) {
+      // Re-read on every solve, as a thread-backed screw reads its pitch:
+      // an edit to the profile moves the follower.
+      r.profileMotion = CamProfileMotion(r, partById, &r.error);
+      if (!r.profileMotion)
+        continue;
+    } else if (r.kind == RelationKind::Cam && r.lift.size() < 2) {
       r.error = "a cam relation needs a lift table of at least two "
                 "(angle, lift) points";
       continue;
@@ -1788,7 +1841,7 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
       loop.relations.push_back(
           {ia->second, ib->second, r.dofA, r.dofB, r.ratio, r.phase, r.lift});
       if (r.kind == RelationKind::Intermittent ||
-          r.kind == RelationKind::Contact)
+          r.kind == RelationKind::Contact || r.profileMotion)
         loop.relations.back().value = [r](double a) {
           return RelationValue(r, a);
         };

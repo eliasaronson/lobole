@@ -11,6 +11,7 @@
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BearingFeature.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CamProfileFeature.h"
 #include "core/features/CopeFeature.h"
 #include "core/features/CornerReliefFeature.h"
 #include "core/features/CurveFeature.h"
@@ -1742,6 +1743,55 @@ json FeatureToJson(const Feature& feature) {
       j["hand"] = "left"; // v140; absent = right, as every thread before it
     if (th->flankDeg != 30.0)
       j["flank_angle_deg"] = th->flankDeg; // v173; absent = the ISO 30
+  } else if (auto* cp = dynamic_cast<const CamProfileFeature*>(&feature)) {
+    // vNEXT2 (docs/modeling/cam-profiles.md)
+    if (!cp->face.name.empty())
+      j["face"] = {{"feature_id", cp->face.featureId},
+                   {"element", cp->face.name}};
+    if (cp->frameId != 0)
+      j["frame"] = cp->frameId;
+    if (cp->baseRadius > 0.0)
+      j["base_radius_mm"] = cp->baseRadius;
+    if (!cp->baseRadiusExpr.empty())
+      j["base_radius_mm_expr"] = cp->baseRadiusExpr;
+    if (cp->width > 0.0)
+      j["width_mm"] = cp->width;
+    if (!cp->widthExpr.empty())
+      j["width_mm_expr"] = cp->widthExpr;
+    j["turn"] = cp->ccw ? "ccw" : "cw";
+    j["body"] = cp->newBody ? "new" : "add";
+    const bool turns =
+        cp->followerSet && cp->follower.motion == cammech::FollowerMotion::Turn;
+    if (!cp->motion.lift.empty()) {
+      json lift = json::array();
+      for (const auto& [a, l] : cp->motion.lift)
+        lift.push_back({a, l});
+      j["lift"] = std::move(lift);
+    }
+    if (!cp->motion.segments.empty()) {
+      json segs = json::array();
+      for (const cammech::Segment& sg : cp->motion.segments) {
+        json sj{{"to_deg", sg.toDeg}, {"law", cammech::LawName(sg.law)}};
+        if (sg.law != cammech::Law::Dwell)
+          sj[turns ? "rise_deg" : "rise_mm"] = sg.rise;
+        segs.push_back(std::move(sj));
+      }
+      j["segments"] = std::move(segs);
+    }
+    if (cp->followerSet) {
+      const cammech::FollowerSpec& f = cp->follower;
+      json fj{{"kind", cammech::FollowerKindName(f.kind)},
+              {"motion", cammech::FollowerMotionName(f.motion)},
+              {"radius_mm", f.radiusMm}};
+      if (f.motion == cammech::FollowerMotion::Slide) {
+        if (f.offsetMm != 0.0)
+          fj["offset_mm"] = f.offsetMm;
+      } else {
+        fj["pivot_mm"] = {f.pivotXMm, f.pivotYMm};
+        fj["arm_mm"] = f.armMm;
+      }
+      j["follower"] = std::move(fj);
+    }
   } else if (auto* wo = dynamic_cast<const WormFeature*>(&feature)) {
     j["face"] = {{"feature_id", wo->face.featureId},
                  {"element", wo->face.name}};
@@ -1995,6 +2045,30 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(docs/parts/README.md)",
      "standard:string, size:string, length?:number, "
      "length_expr?:string, drive?:string"},
+    {"CamProfile", kVersionNEXT2,
+     "face (the CYLINDRICAL outside of the shaft or hub the cam goes on: its "
+     "axis, base radius and width) | frame (a Frame feature id: Z the axis, "
+     "X the cam's zero; then base_radius_mm and width_mm are required), "
+     "base_radius_mm? (+_expr; omitted = the hub's radius), width_mm? "
+     "(+_expr; omitted = the hub's length), the motion: lift? [[angle_deg, "
+     "lift_mm | lift_deg], ...] (wrapping one turn, as a cam relation's) OR "
+     "segments? [{to_deg, rise_mm | rise_deg, law: "
+     "cycloidal|harmonic|poly345|dwell|drop}] closing the turn at 360 and "
+     "rising as much as they fall (a drop is a step: to_deg where the one "
+     "before ended, rise negative) — omitted = rise half the base radius, "
+     "cycloidal 120/60/120/60; follower? {kind: roller|flat|knife, motion: "
+     "slide|turn, radius_mm (a knife's tip; 0 = sharp), offset_mm? (slide: "
+     "the line's offset from the axis), pivot_mm [x, y] and arm_mm (turn)} "
+     "— omitted = a radial roller a third of the base radius; turn? ccw|cw "
+     "(the sense the cam is driven in); body? new|add (add: fused into the "
+     "picked hub). Cuts the exact envelope as a B-spline and extrudes it; "
+     "undercut is refused with its angles and the base radius that clears "
+     "it. get_state reports the pressure angle, radii and fit deviation "
+     "(docs/modeling/cam-profiles.md)",
+     "face?:object, frame?:int, base_radius_mm?:number, "
+     "base_radius_mm_expr?:string, width_mm?:number, width_mm_expr?:string, "
+     "lift?:any, segments?:object[], follower?:object, "
+     "turn?:'ccw'|'cw', body?:'new'|'add'"},
     {"Worm", 146,
      "face (the blank's cylindrical OUTSIDE: the worm's tip), module? "
      "(+_expr) mm (axial; omitted = tip dia / 12, a diameter quotient of 10), "
@@ -2586,6 +2660,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
              {"face", "designation", "pitch", "allow_engagement",
               "minimum_engagement", "thread_class", "length", "length_expr",
               "modeled", "hand", "flank_angle_deg"}},
+            {"CamProfile",
+             {"face", "frame", "base_radius_mm", "base_radius_mm_expr",
+              "width_mm", "width_mm_expr", "lift", "segments", "follower",
+              "turn", "body"}},
             {"Worm",
              {"face", "module", "module_expr", "starts", "pressure_angle_deg",
               "hand", "backlash", "length"}},
@@ -3694,6 +3772,117 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     th->allowEngagement = j.value("allow_engagement", false);
     th->minimumEngagement = j.value("minimum_engagement", 0.0);
     out = std::move(th);
+  } else if (type == "CamProfile") { // vNEXT2
+    ElementRef face;
+    if (j.contains("face")) {
+      const json& fj = j.at("face");
+      refKeys(fj, "face");
+      face = {fj.at("feature_id").get<uint64_t>(),
+              fj.at("element").get<std::string>()};
+    }
+    auto cp = std::make_unique<CamProfileFeature>(name, face);
+    cp->frameId = j.value("frame", uint64_t{0});
+    cp->baseRadius = j.value("base_radius_mm", 0.0);
+    cp->baseRadiusExpr = j.value("base_radius_mm_expr", std::string{});
+    cp->width = j.value("width_mm", 0.0);
+    cp->widthExpr = j.value("width_mm_expr", std::string{});
+    const auto oneOf = [&](const char* key, const std::string& v,
+                           std::initializer_list<const char*> ok) {
+      std::string list;
+      for (const char* o : ok) {
+        if (v == o)
+          return;
+        list += (list.empty() ? "" : ", ") + std::string(o);
+      }
+      throw std::runtime_error("CamProfile '" + name + "': unknown " + key +
+                               " '" + v + "' (accepted: " + list + ")");
+    };
+    const std::string turn = j.value("turn", std::string("ccw"));
+    oneOf("turn", turn, {"ccw", "cw"});
+    cp->ccw = turn == "ccw";
+    const std::string body = j.value("body", std::string("new"));
+    oneOf("body", body, {"new", "add"});
+    cp->newBody = body == "new";
+    if (j.contains("follower")) {
+      const json& fj = j.at("follower");
+      readctx::RefuseUnknownKeys(
+          fj,
+          {"kind", "motion", "radius_mm", "offset_mm", "pivot_mm", "arm_mm"},
+          "CamProfile follower");
+      cammech::FollowerSpec f;
+      const std::string kind = fj.at("kind").get<std::string>();
+      oneOf("follower kind", kind, {"roller", "flat", "knife"});
+      f.kind = kind == "roller" ? cammech::FollowerKind::Roller
+               : kind == "flat" ? cammech::FollowerKind::Flat
+                                : cammech::FollowerKind::Knife;
+      const std::string motion = fj.value("motion", std::string("slide"));
+      oneOf("follower motion", motion, {"slide", "turn"});
+      f.motion = motion == "turn" ? cammech::FollowerMotion::Turn
+                                  : cammech::FollowerMotion::Slide;
+      f.radiusMm = fj.value("radius_mm", 0.0);
+      if (f.motion == cammech::FollowerMotion::Slide) {
+        for (const char* k : {"pivot_mm", "arm_mm"})
+          if (fj.contains(k))
+            throw std::runtime_error("CamProfile '" + name + "': " + k +
+                                     " is a turning follower's (motion: "
+                                     "turn)");
+        f.offsetMm = fj.value("offset_mm", 0.0);
+      } else {
+        if (fj.contains("offset_mm"))
+          throw std::runtime_error("CamProfile '" + name +
+                                   "': offset_mm is a sliding follower's");
+        if (!fj.contains("pivot_mm") || !fj.contains("arm_mm"))
+          throw std::runtime_error("CamProfile '" + name +
+                                   "': a turning follower needs pivot_mm "
+                                   "[x, y] and arm_mm");
+        const json& pv = fj.at("pivot_mm");
+        if (!pv.is_array() || pv.size() != 2)
+          throw std::runtime_error("CamProfile '" + name +
+                                   "': pivot_mm is [x, y] in the cam's plane");
+        f.pivotXMm = pv.at(0).get<double>();
+        f.pivotYMm = pv.at(1).get<double>();
+        f.armMm = fj.at("arm_mm").get<double>();
+      }
+      cp->follower = f;
+      cp->followerSet = true;
+    }
+    const bool turns =
+        cp->followerSet && cp->follower.motion == cammech::FollowerMotion::Turn;
+    for (const json& pt : j.value("lift", json::array())) {
+      if (!pt.is_array() || pt.size() != 2)
+        throw std::runtime_error("CamProfile '" + name +
+                                 "': lift is [[angle_deg, lift], ...]");
+      cp->motion.lift.emplace_back(pt.at(0).get<double>(),
+                                   pt.at(1).get<double>());
+    }
+    for (const json& sj : j.value("segments", json::array())) {
+      readctx::RefuseUnknownKeys(sj, {"to_deg", "rise_mm", "rise_deg", "law"},
+                                 "CamProfile segment");
+      cammech::Segment sg;
+      const std::string law = sj.at("law").get<std::string>();
+      if (!cammech::LawFromName(law, &sg.law))
+        throw std::runtime_error("CamProfile '" + name + "': unknown law '" +
+                                 law + "' (accepted: " + cammech::kLawNames +
+                                 ")");
+      sg.toDeg = sj.at("to_deg").get<double>();
+      const char* want = turns ? "rise_deg" : "rise_mm";
+      const char* other = turns ? "rise_mm" : "rise_deg";
+      if (sj.contains(other))
+        throw std::runtime_error("CamProfile '" + name + "': this follower " +
+                                 (turns ? "TURNS: its rise is rise_deg"
+                                        : "SLIDES: its rise is "
+                                          "rise_mm") +
+                                 ", not " + other);
+      sg.rise = sj.value(want, 0.0);
+      cp->motion.segments.push_back(sg);
+    }
+    if (!cp->motion.lift.empty() || !cp->motion.segments.empty())
+      if (std::string why = cammech::MotionError(
+              cp->motion,
+              cp->followerSet ? cp->follower : cammech::FollowerSpec{});
+          !why.empty())
+        throw std::runtime_error("CamProfile '" + name + "': " + why);
+    out = std::move(cp);
   } else if (type == "Worm" || type == "WormWheel") { // v146
     const json& fj = j.at("face");
     refKeys(fj, "face");

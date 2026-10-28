@@ -85,6 +85,9 @@ void CreateThread(AppState& state);
 // face (docs/modeling/worm-gears.md).
 void CreateWorm(AppState& state);
 void CreateWormWheel(AppState& state);
+// A disc cam (the mechanism) cut from a follower motion: pick the hub's
+// cylindrical outside (docs/modeling/cam-profiles.md).
+void CreateCamProfile(AppState& state);
 
 // Body-modifying tools whose parameters/slots already existed but that had no
 // creation path outside the script API. Each opens the normal preview with
