@@ -7,14 +7,15 @@ makes the bird peck while the axe is rising. Everything is printed and
 nothing is bought: the box is five panels pegged together, the camshaft
 turns in printed bushings, and a crank on its end turns it. This is the
 automaton designed and checked in the app, its loaded parts studied on
-pins, laid out to print, drawn and billed (phases 2 to 5 of
-[the plan](../../docs/plans/woodcutter-automaton.md)); its film and the
-print itself are the plan's later phases.
+pins, laid out to print, drawn, billed and filmed (phases 2 to 6 of
+[the plan](../../docs/plans/woodcutter-automaton.md)); the print itself is
+the plan's last phase.
 
 ```sh
 tools/headless-preview.sh --start 8800
 python3 generators/print_coupon.py --port 8800 --seed   # the P1S profiles
-python3 generators/woodcutter/build.py --port 8800 --profile "K5 PLA on P1S" [--width 120] [--slice] [--no-render] [--fresh]
+python3 generators/woodcutter/build.py --port 8800 --profile "K5 PLA on P1S" [--width 120] [--slice] [--no-render] [--film] [--fresh]
+python3 generators/woodcutter/woodcutter_film.py --port 8800   # film what build.py saved
 ```
 
 The profile is required and must state its layer and line width: the
@@ -26,6 +27,8 @@ the bird pecking, the axe raised, the raised axe from the side, and each
 print plate; the bill of materials `woodcutter_bom.csv`, and the sheets as
 PDF and SVG: `woodcutter_assembly`, `woodcutter_axe_cam` and
 `woodcutter_bird_cam`. `--no-render`, or a headless instance, skips the stills.
+`--film` adds [the films](#the-films) and their stills; it needs a
+renderer and is refused with `--no-render` or on a headless instance.
 `--slice` slices the job with your Bambu Studio CLI (the project config
 made by `tools/bambu-config.py` from its P1S presets) and reports its time
 and filament.
@@ -34,7 +37,7 @@ Files: `woodcutter_spec.py` (every size and both motions, no app),
 `woodcutter_parts.py` (one function a part, and the way each prints),
 `woodcutter_fem.py` (the studies of the camshaft, the crank and the
 handle's pin), `woodcutter_drawings.py` (the exploded view, the sheets and
-the bill),
+the bill), `woodcutter_film.py` (the films and their checks),
 `build.py` (the project, the checks, the controls, the sequence, the
 plates, the receipt), `test.json` (the
 [generator test](../README.md#the-big-generators-as-tests)).
@@ -269,7 +272,7 @@ Runtime: 115 s on a quiet machine without stills before the FEM, which
 adds about 45 s (the negative controls are the largest share: each one
 rebuilds a cam and runs a study again), 186 s with the stills and the
 slicing before the FEM; 265 s under load with it. The drawings and the
-bill add about 9 s.
+bill add about 9 s, the films about 27 s.
 
 ## Drawings and the bill
 
@@ -312,6 +315,51 @@ must pass `check_drawing` with no issue or the run stops. At W = 120:
   drop's angle and the 16.8° after it, where the tip, a tip radius wide,
   still meets the step's face (it is falling there, as check_followers
   leaves the drop's corners out).
+
+## The films
+
+`--film` (or `woodcutter_film.py` on the saved project) films the
+automaton three ways, 1280 x 720 at 60 fps, into `scratch/woodcutter/`:
+
+- `woodcutter_chop.mp4`: the crank turned three times at the hand's speed,
+  60 rpm, the camera on the figures from the open front. 181 frames, 3 s:
+  the film's time is the crank's.
+- `woodcutter_chop_section.mp4`: the same turns with the box cut down the
+  axe cam's middle (`set_section` on `yz` at the cam's X, the crank's side
+  kept), seen from the cut: the cam, the rod, the link and the arm in one
+  plane, the log beside the figure.
+- `woodcutter_sequence.mp4`: the assembly sequence going together
+  (`export_assembly_video`), each part going home along the way the
+  sequence check slid it in, the moving one lit. 1536 frames, 25.6 s.
+
+Both chops play one study, `the film`, saved with the project so the
+Motion window plays it too: three turns at a sample every 2 degrees (541
+samples). At 60 rpm and 60 fps a frame is 6 degrees of crank, so the
+drop's samples are a third of a frame apart and the drop is a drop, not a
+blend across one long interval.
+
+What the run checks, and the receipt holds (`film`, and
+`woodcutter_film.json` beside the films):
+
+- **Every turn is the clash-checked turn.** The film's study is run
+  without clash checks; its axe rod and blade repeat turn for turn to
+  3e-5 mm, so the crank-turn study above, clean with every part of the
+  box in it, is every turn of the film: no figure passes through the box.
+- **The axe meets the log on the beat**: the blade comes back to its rest
+  over the log, 1.0 mm above it, at every turn, at 228 degrees.
+- **The drop against `check_followers` at 60 rpm.** The check has the axe
+  leave the top at 209.8 degrees and fall its 15 mm in 108 ms, 38.9
+  degrees of turn, landing at 248.7 degrees inside its 140.2-degree
+  dwell. The film's blade leaves the top at 210 degrees and is on the log
+  at 228: 50 ms, 20.7 degrees (58 ms) before it would land. A motion study
+  is kinematic, and its rod comes down the cam's step face with the cam,
+  the tip sliding down it, faster than the arm falls. At 60 fps the film
+  shows the fall in three frames where the check's free fall takes six or
+  seven ([not built](../../docs/assemblies/README.md#not-built)).
+- **Stills**, by ffmpeg from the films: `woodcutter_chop_peck`, `_raised`,
+  `_top` (210 degrees), `_falling` (222), `_home` (228, the axe on the log)
+  and `_falls` (252, the first frame after the check's landing), and
+  `woodcutter_section_top`, `_falling` and `_home`.
 
 ## What the app needed (fixed with this generator)
 
@@ -391,4 +439,7 @@ holds the app to each.
   CamProfile's motion, so a cam's sheet carries the motion and the lift as
   tables the generator writes from the feature's own segments
   ([drawings, not done](../../docs/drawings/README.md#not-done)).
-- The film and the print: the plan's later phases.
+- The films do not show the axe's free fall
+  ([the films](#the-films)): a motion study is kinematic, so the axe's rod
+  comes down the step face with the cam and lands 58 ms before it would.
+- The print: the plan's last phase.

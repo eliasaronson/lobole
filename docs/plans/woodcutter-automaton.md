@@ -40,7 +40,8 @@ part as it prints, lays them on one P1S plate, states the assembly
 sequence, and studies the camshaft, the crank and the handle's pin on pin
 supports under the loads `check_followers` reports, and draws it: the
 assembly with an exploded view and its balloons, a sheet per cam, and the
-bill of materials ([its README](../../generators/woodcutter/README.md)).
+bill of materials, and films it: the chop at the hand's speed, in section,
+and the assembly sequence ([its README](../../generators/woodcutter/README.md)).
 What follows is the rest of the automaton.
 
 Two limits of that work shape the design below:
@@ -56,17 +57,6 @@ Two limits of that work shape the design below:
   studies over cam pairs run `clash_mode: mesh`, which judges a contact
   relation's cam and follower by `check_followers`' cuts across the width
   ([motion studies](../assemblies/README.md#motion-studies)).
-
-## Phase 6: the film (size: S)
-
-- `export_motion_video` of the crank turning two or three times, with the
-  camera on the figures. A second cut runs with the box sectioned
-  (`set_section` during motion) so the cams and followers show. It is driven
-  at the hand speed (60 rpm), with the sample count high enough that the drop reads
-  as a drop. A `SequenceStep` film of the assembly order comes from the
-  generator's assembly sequence.
-- Look at the frames. The axe must meet the log on the beat, with no figure
-  passing through the box.
 
 ## Phase 7: print and measure (later, when the printer is free)
 

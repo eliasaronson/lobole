@@ -1190,6 +1190,11 @@ one.
   clash statically and over motion studies. A contact relation's follower
   check adds gravity and a steady drive speed (`check_followers`), not
   springs, friction or impact.
+- A follower in free fall in a study, its Play or its film. A study is
+  kinematic: over a cam's drop its follower comes down the step face with
+  the cam, which is not how fast it falls. The woodcutter's axe lands 58
+  ms early in a film at 60 rpm, against the 108 ms `check_followers` times
+  its fall at (generators/woodcutter/README.md#the-films).
 - A version pin on an occurrence's part (`part_version`).
 - More than one level of flexibility; a GUI drag of a flexible unit's
   planar or ball mates (`set_mate` with a path poses a turn and a slide

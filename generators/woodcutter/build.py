@@ -7,7 +7,7 @@ chop per turn. The axe cam lifts the woodcutter's arms slowly through a rod
 and a link and drops them onto the log; the bird's cam, phase-shifted on the
 same shaft, makes the bird peck while the axe is rising. The box is printed
 panels pegged together, the shaft turns in printed bushings, and a crank on
-its end turns it. Phases 2 to 5 of docs/plans/woodcutter-automaton.md.
+its end turns it. Phases 2 to 6 of docs/plans/woodcutter-automaton.md.
 
     python3 generators/print_coupon.py --port 8800 --seed
     python3 generators/woodcutter/build.py --port 8800 --profile "K5 PLA on P1S"
@@ -46,7 +46,11 @@ What it builds and checks (the receipt holds every number):
   filament;
 - the bill of materials and the drawings (woodcutter_drawings.py): the
   assembly with an exploded view and its balloons, a sheet per cam, each
-  check_drawing clean.
+  check_drawing clean;
+- with --film (woodcutter_film.py), three films: the crank turned three
+  times at the hand's speed with the camera on the figures, the same in
+  section down the axe cam, and the assembly sequence going together;
+  the film's drop set beside check_followers' at the hand's speed.
 
 Output (generated, untracked): scratch/woodcutter/ -- woodcutter.lob,
 woodcutter.json (the receipt), woodcutter_job.3mf, woodcutter_bom.csv, the
@@ -67,6 +71,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import woodcutter_drawings as D  # noqa: E402
 import woodcutter_parts as P  # noqa: E402
 import woodcutter_fem as F  # noqa: E402
+import woodcutter_film as M  # noqa: E402
 import woodcutter_spec as S  # noqa: E402
 from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
                   connect, export_print_job, fresh_project, job_receipt,
@@ -880,6 +885,10 @@ def main():
     ap.add_argument("--samples", type=int, default=49,
                     help="samples over one crank turn (49: every 7.5 deg)")
     ap.add_argument("--no-render", action="store_true")
+    ap.add_argument("--film", action="store_true",
+                    help="film the chop, the chop in section and the "
+                         "assembly sequence (woodcutter_film.py; needs a "
+                         "renderer, adds about 30 s)")
     ap.add_argument("--slice", action="store_true",
                     help="slice the print job with your Bambu Studio CLI "
                          "for its time and filament (a profile with a bed)")
@@ -889,6 +898,8 @@ def main():
                          "refused)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+    if args.film and args.no_render:
+        fail("--film films with the renderer, which --no-render leaves out")
     out = Path(args.out) if args.out else OUT
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
@@ -901,6 +912,9 @@ def main():
         last[0] = now
 
     d = connect(args.port)
+    if args.film and d.call("ping").get("mode") == "headless":
+        fail("--film needs a renderer: a headless instance has none "
+             "(tools/headless-preview.sh --start PORT)")
     if args.fresh:
         fresh_project(d)
     proc = {"profile": args.profile}
@@ -1158,6 +1172,15 @@ def main():
     d.call("set_active_part", part=ASM)
     d.call("save_project", path=str(out / "woodcutter.lob"))
     stage("drawings")
+    film = None
+    if args.film:
+        # The film's study is saved with the project: the Motion window
+        # plays it at the hand's speed.
+        film = M.films(d, s, out)
+        M.report(film)
+        d.call("set_active_part", part=ASM)
+        d.call("save_project", path=str(out / "woodcutter.lob"))
+        stage("films")
     elapsed = time.perf_counter() - t0
     receipt = {"width": args.width, "process": proc,
                "gap": {"allowance_mm": gap["allowance_mm"],
@@ -1186,7 +1209,7 @@ def main():
                "sequence": {"pass": seq["pass"], "steps": seq_rows,
                             "seconds": seq.get("seconds")},
                "plates": plates, "job": job, "sliced": sliced,
-               "drawings": dw,
+               "drawings": dw, "film": film,
                "study_seconds": t_study, "stage_seconds": stages,
                "seconds": elapsed}
     (out / "woodcutter.json").write_text(json.dumps(receipt, indent=1,
