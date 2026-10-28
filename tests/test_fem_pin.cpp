@@ -110,6 +110,10 @@ fem::Load Force(Document& doc, const ElementRef& face, double n,
   return l;
 }
 
+// The solving cases need a mesh: a build without Netgen refuses every one
+// ("built without FEM support"), which test_fem.cpp checks. Only the
+// refusals that come before the mesh run there.
+#ifdef HAVE_NETGEN
 const fem::FemResults::SupportReaction* ReactionOf(const fem::FemResults& r,
                                                    uint64_t id) {
   for (const auto& sr : r.reactions)
@@ -123,8 +127,11 @@ double YieldOf(const char* material) {
              CADMaterials::MaterialLibrary::MaterialTypeFromString(material))
       .yieldMPa;
 }
+#endif // HAVE_NETGEN
 
 } // namespace
+
+#ifdef HAVE_NETGEN
 
 // A lug: a plate with a hole near one end, held by a pin in the hole and
 // pulled from the other end. The pin pushes on the half of the bore between
@@ -338,6 +345,7 @@ TEST_CASE("a peak on a support's edge is flagged, and one elsewhere is not",
     CHECK_FALSE(r.supportEdgePeak.flagged);
   }
 }
+#endif // HAVE_NETGEN
 
 // A pin that leaves a mechanism is refused, naming it -- never factored.
 TEST_CASE("a pin is refused where it cannot hold the part", "[fem][pin]") {
@@ -353,6 +361,7 @@ TEST_CASE("a pin is refused where it cannot hold the part", "[fem][pin]") {
     CHECK_FALSE(fem::RunStudy(doc, s, rt, &err));
     CHECK_THAT(err, ContainsSubstring("cylindrical face"));
   }
+#ifdef HAVE_NETGEN // found on the meshed part
   SECTION("alone and free to turn: a lever on one pin is a mechanism") {
     fem::Study& s = doc.AddStudy("One pin");
     s.meshSize = 2.0;
@@ -407,6 +416,7 @@ TEST_CASE("a pin is refused where it cannot hold the part", "[fem][pin]") {
     CHECK_FALSE(ok);
     CHECK_THAT(err, ContainsSubstring("pull it off its pins"));
   }
+#endif // HAVE_NETGEN
   SECTION("on a modal or a topology study") {
     fem::Study& s = doc.AddStudy("Modal");
     s.type = fem::AnalysisType::Modal;
@@ -420,6 +430,7 @@ TEST_CASE("a pin is refused where it cannot hold the part", "[fem][pin]") {
   }
 }
 
+#ifdef HAVE_NETGEN
 // The iterative solve agrees with the direct one on a pinned part, and an
 // external (GPU) solver offered for it declines, saying why: it applies its
 // element matrices in x, y, z, and a pin holds its nodes in their own frames.
@@ -467,3 +478,4 @@ TEST_CASE("a pinned study solves iteratively as it does directly, and the "
   CHECK(worst < 1e-5 * direct.maxDisplacement);
   CHECK_THAT(iterative.maxVonMises, WithinRel(direct.maxVonMises, 1e-4));
 }
+#endif // HAVE_NETGEN
