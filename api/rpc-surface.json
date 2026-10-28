@@ -150,7 +150,7 @@
   "history_restore": ["commit"],
   "import_catalog": ["expected_hash", "options", "path"],
   "import_sketch": ["construction_layers", "keep_origin", "layers", "path", "plane", "sketch_id", "units"],
-  "import_step": ["allow_large_mesh", "as_assembly", "keep_origin", "path", "turn_deg", "units", "up_axis"],
+  "import_step": ["allow_large_mesh", "as_assembly", "keep_origin", "min_sides", "path", "representation", "turn_deg", "units", "up_axis"],
   "import_templates": ["path", "replace"],
   "interference": ["a", "b", "deadline_s", "max_pairs", "mode", "touch_tol"],
   "item_click": ["button", "id", "ref"],

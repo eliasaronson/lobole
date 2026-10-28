@@ -208,6 +208,7 @@
   {"design": "golden/v196-pin-support", "kind": "golden", "source": "tests/golden/v196-pin-support.json"},
   {"design": "golden/v198-cam-profile", "kind": "golden", "source": "tests/golden/v198-cam-profile.json"},
   {"design": "golden/v199-follower-requirement", "kind": "golden", "source": "tests/golden/v199-follower-requirement.json"},
+  {"design": "golden/vNEXT-import-representation", "kind": "golden", "source": "tests/golden/vNEXT-import-representation.json"},
   {"design": "golden/v194-edge-names-by-geometry", "kind": "golden", "source": "tests/golden/v194-edge-names-by-geometry.json"},
   {"design": "generator/gear", "kind": "generator", "source": "generators/gear.py"},
   {"design": "generator/gear_train", "kind": "generator", "source": "generators/gear_train.py", "parts": ["carrier", "pinion", "idler", "wheel", "rack"]},

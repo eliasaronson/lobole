@@ -335,6 +335,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An `Import` of an STL takes `representation` (`facets` \| `recognize`; absent = `facets`, how every older mesh import was read) and, with `recognize`, `min_sides` (5..1024; absent = 12). Unknown values are refused. Golden `vNEXT-import-representation` |
 
 ## Paths in a project
 

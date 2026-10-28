@@ -2275,8 +2275,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     const uint64_t wasActive = state.parts[state.activePart].id;
     const size_t slot = ui::AddPart(state, name);
     const uint64_t partId = state.parts[slot].id;
+    // A topology result is a smoothed density surface, not a tessellated
+    // CAD part: there is nothing to recognise, so it stays as its facets
+    // whatever the preference says.
     if (!ui::ImportAsFeature(state, path, nullptr, &err,
-                             units::Length::Millimetre, /*keepOrigin=*/true)) {
+                             units::Length::Millimetre, /*keepOrigin=*/true,
+                             interchange::UpAxis::Auto, 0.0,
+                             mesh::Representation::Facets)) {
       // A refused call leaves no empty tab behind, and puts the caller back
       // where they were
       // (docs/scripting/rpc.md#a-refused-call-changes-nothing).

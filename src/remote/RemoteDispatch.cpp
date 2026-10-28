@@ -36,6 +36,7 @@
 #include "core/io/CrashReports.h"
 #include "core/io/GitVault.h"
 #include "core/io/Keymap.h"
+#include "core/io/RecognitionJson.h"
 #include "core/io/Serialization.h"
 #include "core/io/Settings.h"
 #include "core/sketch/SketchSolver.h"
@@ -629,6 +630,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "autosave_interval:number, devices:string[], "
      "git_user_email:string, git_user_name:string, gpu_device:string, "
      "idle_throttle:bool, keys:object, lock_lights_to_model:bool, "
+     "mesh_representation:string, "
      "nav_invert_wheel:bool, nav_orbit:string[], nav_orbit_speed:number, "
      "nav_pan:string[], nav_pan_speed:number, nav_preset:string, "
      "nav_roll:string[], nav_zoom:string[], nav_zoom_speed:number, "
@@ -2023,6 +2025,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               dynamic_cast<const CamProfileFeature*>(stateDoc->GetFeature(i)))
         if (json rep = c->ReportJson(); !rep.is_null())
           f["report"] = rep;
+      // What a mesh import became: counts only here; the import's own
+      // reply lists every surface.
+      if (auto* imp =
+              dynamic_cast<const ImportFeature*>(stateDoc->GetFeature(i)))
+        if (json rec = interchange::RecognitionJson(*imp, false);
+            !rec.is_null())
+          f["recognition"] = std::move(rec);
       features.push_back(f);
     }
     json bodies = json::array();

@@ -5,6 +5,8 @@
 
 #ifdef HAVE_OPENCASCADE
 
+#include "core/mesh/Segment.h"
+
 #include <OSD.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Solid.hxx>
@@ -423,6 +425,9 @@ public:
     // import job's worker does, so the feature does not measure a
     // 100k-face mesh again on the main thread. A rigid placement keeps it.
     std::optional<double> volume;
+    // What a recognised mesh was found to be, in the file's coordinates
+    // (docs/interchange/README.md#recognising-a-faceted-mesh).
+    std::optional<mesh::Recognition> recognition;
   };
   struct ImportedInstance {
     size_t product = 0;        // index into ImportedModel::products

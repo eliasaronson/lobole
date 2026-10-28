@@ -9,6 +9,8 @@
 #include "core/SheetMetal.h"
 #include "core/Units.h"
 #include "core/io/ImportUpAxis.h"
+#include "core/mesh/Representation.h"
+#include "core/mesh/Segment.h"
 
 #include <cstdint>
 #include <functional>
@@ -809,7 +811,9 @@ public:
       : Feature(other), path(other.path), keepOrigin(other.keepOrigin),
         lengthUnit(other.lengthUnit), upAxis(other.upAxis),
         turnDeg(other.turnDeg), hasColor(other.hasColor), color(other.color),
-        m_shift(other.m_shift), m_up(other.m_up) {}
+        representation(other.representation), minSides(other.minSides),
+        m_shift(other.m_shift), m_up(other.m_up),
+        m_recognized(other.m_recognized) {}
 
   std::string TypeName() const override { return "Import"; }
 
@@ -822,6 +826,7 @@ public:
     CopyRegenStatus(executed);
     m_shift = static_cast<const ImportFeature&>(executed).m_shift;
     m_up = static_cast<const ImportFeature&>(executed).m_up;
+    m_recognized = static_cast<const ImportFeature&>(executed).m_recognized;
   }
 
   bool Execute(RegenContext& ctx) override;
@@ -870,6 +875,29 @@ public:
   bool hasColor = false;
   glm::vec3 color{0.0f};
 
+  // What a mesh (STL; vNEXT, `representation`) becomes: its triangles sewn
+  // as facets, or the planes, cylinders, cones and spheres they were
+  // tessellated from, rebuilt
+  // (docs/interchange/README.md#recognising-a-faceted-mesh). A document that
+  // names none is `facets`, which is how its faces were named; a new import
+  // takes the `mesh_representation` preference. Refused on any other file.
+  mesh::Representation representation = mesh::Representation::Facets;
+  // With `recognize`: a curved surface's facets turn by at most 360/minSides
+  // degrees each (5..1024), so a hex nut trap stays six flats and an
+  // OpenSCAD pentagon hole is asked for with 5.
+  int minSides = mesh::kDefaultMinSides;
+  // Whether `path` is a mesh the representation applies to (.stl).
+  static bool IsMesh(const std::string& path);
+  // What the last Execute recognised, one per body it made from a mesh, in
+  // the part's coordinates; empty for facets.
+  struct Recognized {
+    std::string body;
+    mesh::Recognition recognition;
+  };
+  const std::vector<Recognized>& RecognizedBodies() const {
+    return m_recognized;
+  }
+
   // Geometry the CALLER already parsed, used by the next Execute instead of
   // re-reading `path`, then dropped.
   //
@@ -891,13 +919,27 @@ public:
   // worker calls it to make the seed above, so a seeded Execute and an
   // unseeded one start from the same model. False with `error` set (and
   // `out` empty) on a refusal, a failed read or a cancel through `progress`.
-  static bool ReadModel(const std::string& path, units::Length unit,
+  struct ReadOptions {
+    units::Length unit = units::Length::Millimetre;
+    mesh::Representation representation = mesh::Representation::Facets;
+    int minSides = mesh::kDefaultMinSides;
+  };
+  static bool ReadModel(const std::string& path, const ReadOptions& options,
                         CADKernel::ImportedModel& out, std::string& error,
                         CADKernel::ImportProgress* progress = nullptr);
+  static bool ReadModel(const std::string& path, units::Length unit,
+                        CADKernel::ImportedModel& out, std::string& error,
+                        CADKernel::ImportProgress* progress = nullptr) {
+    ReadOptions o;
+    o.unit = unit;
+    return ReadModel(path, o, out, error, progress);
+  }
+  ReadOptions Options() const { return {lengthUnit, representation, minSides}; }
 
 private:
   glm::dvec3 m_shift{0.0}; // what the last Execute centred by
   interchange::UpDecision m_up; // what the last Execute turned it by
+  std::vector<Recognized> m_recognized;
 
   std::unique_ptr<CADKernel::ImportedModel> m_seed;
 

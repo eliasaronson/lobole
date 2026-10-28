@@ -219,10 +219,40 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
   return ImportAsFeature(state, filename, nullptr, error);
 }
 
+mesh::Representation MeshRepresentationSetting(const AppState& state) {
+  return mesh::RepresentationFromString(state.settings.meshRepresentation)
+      .value_or(mesh::kDefaultRepresentation);
+}
+
+std::string ImportReferrers(const Document& doc, const ImportFeature& imp) {
+  std::string users;
+  for (const auto& f : doc.GetFeatures()) {
+    if (f->GetId() == imp.GetId())
+      continue;
+    bool refers = false;
+    f->VisitFeatureRefs([&](uint64_t id) { refers |= id == imp.GetId(); });
+    if (refers)
+      users += (users.empty() ? "" : ", ") + std::string("'") + f->GetName() +
+               "' (" + std::to_string(f->GetId()) + ")";
+  }
+  return users;
+}
+
+mesh::Representation
+ResolveRepresentation(const AppState& state, const std::string& path,
+                      std::optional<mesh::Representation> asked) {
+  if (asked)
+    return *asked;
+  return ImportFeature::IsMesh(path) ? MeshRepresentationSetting(state)
+                                     : mesh::Representation::Facets;
+}
+
 bool ImportAsFeature(AppState& state, const std::string& filename,
                      CADKernel::ImportedModel* parsed, std::string* error,
                      units::Length unit, bool keepOrigin,
-                     interchange::UpAxis up, double turnDeg) {
+                     interchange::UpAxis up, double turnDeg,
+                     std::optional<mesh::Representation> representation,
+                     int minSides) {
   if (!state.document || !state.commands) {
     if (error)
       *error = "no active part document";
@@ -242,6 +272,9 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
   feature->keepOrigin = keepOrigin;
   feature->upAxis = up;
   feature->turnDeg = turnDeg;
+  feature->representation =
+      ResolveRepresentation(state, filename, representation);
+  feature->minSides = minSides;
   // The import worker already read this file to decide it was a single
   // product; hand that over rather than parse it again (ImportFeature::
   // SeedGeometry). Only the first Execute uses it.
@@ -277,6 +310,19 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
           " was up in the file): " + imp->UpApplied().because +
           ". Change it in the import's editor.";
       state.importNoteWarn = false;
+      state.importNoteUntil = -1.0;
+    }
+  // A recognised mesh says what it found, or why it was kept as facets.
+  if (const size_t n = state.document->FeatureCount())
+    if (const auto* imp = dynamic_cast<const ImportFeature*>(
+            state.document->GetFeature(n - 1));
+        imp != nullptr && !imp->RecognizedBodies().empty()) {
+      const mesh::Recognition& r = imp->RecognizedBodies().front().recognition;
+      const std::string found = r.Summary();
+      state.importNote =
+          (r.fellBack.empty() ? "Recognised " : "") + found +
+          (state.importNote.empty() ? "" : ". " + state.importNote);
+      state.importNoteWarn = !r.fellBack.empty();
       state.importNoteUntil = -1.0;
     }
   FitCameraToDocument(state);

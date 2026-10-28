@@ -1275,6 +1275,7 @@ const char* SectionIcon(const std::string& section) {
   static const std::pair<const char*, const char*> kIcons[] = {
       {"Appearance", ICON_FA_PALETTE},
       {"General", ICON_FA_SLIDERS},
+      {"Import", ICON_FA_FILE_IMPORT},
       {"Navigation", ICON_FA_COMPUTER_MOUSE},
       {"Performance", ICON_FA_GAUGE_HIGH},
       {"Sharing", ICON_FA_CODE_BRANCH},

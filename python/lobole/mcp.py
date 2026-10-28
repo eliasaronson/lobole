@@ -417,8 +417,13 @@ typed `contract`: every field, its type and its enum values.
   bounding box; true keeps the file's coordinates), "up_axis"?:
   "auto"|"none"|"+x"|"-x"|"+y"|"-y"|"-z" (which axis OF THE FILE is up;
   default auto reads the header: a SolidWorks file is +y), "turn_deg"?:
-  number (about world Z, after the axis)}} — the reply's `up_axis` says
-  what was applied and why. A DXF or SVG goes into a sketch with
+  number (about world Z, after the axis), "representation"?:
+  "recognize"|"facets" (what an STL becomes: its holes, flats, cones and
+  spheres rebuilt as true faces, or a face per triangle; default the
+  user's preference), "min_sides"?: int (with recognize, 5-1024, default
+  12: the fewest sides a ring of facets needs to be round)}} — the reply's
+  `up_axis` says what was applied and why, and `recognition` what an STL
+  was found to be. A DXF or SVG goes into a sketch with
   rpc('import_sketch', ...).
 - Derived (a copy of another part's bodies or sketches, to draw on):
   {{"type": "Derived", "name": str, "source_part": <part slot id from

@@ -97,6 +97,11 @@ struct Settings {
   // panel costs a process the moment it is used (docs/ui/terminal.md).
   bool terminalPanel = false;
 
+  // Import: what a new STL becomes when the import names no representation
+  // -- "recognize" or "facets" (mesh::Representation,
+  // docs/interchange/README.md#recognising-a-faceted-mesh).
+  std::string meshRepresentation = "recognize";
+
   // Keyboard bindings the user changed, as command id -> chord text. Only
   // the DIFFERENCES from keymap::Defaults() are stored, so a later change to
   // a default still reaches anyone who never touched that row. Not a `Field`:

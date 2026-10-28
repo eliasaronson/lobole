@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/Feature.h"
+
+#include "cad/MeshRebuild.h"
 #include "core/ModelSpace.h"
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 
@@ -183,6 +186,10 @@ std::string LowerExtension(const std::string& path) {
 }
 } // namespace
 
+bool ImportFeature::IsMesh(const std::string& path) {
+  return LowerExtension(path) == ".stl";
+}
+
 bool ImportFeature::TakesUnits(const std::string& path) {
   const std::string ext = LowerExtension(path);
   return ext == ".stl" || ext == ".brep" || ext == ".obj";
@@ -216,11 +223,13 @@ size_t ImportFeature::ContentHash() const {
   return h;
 }
 
-bool ImportFeature::ReadModel(const std::string& path, units::Length unit,
+bool ImportFeature::ReadModel(const std::string& path,
+                              const ReadOptions& options,
                               CADKernel::ImportedModel& model,
                               std::string& error,
                               CADKernel::ImportProgress* progress) {
   model = {};
+  const units::Length unit = options.unit;
   const std::string ext = LowerExtension(path);
   const auto hasExt = [&](const char* e) { return ext == e; };
   const bool isStep = hasExt(".step") || hasExt(".stp");
@@ -241,11 +250,49 @@ bool ImportFeature::ReadModel(const std::string& path, units::Length unit,
             "BREP, which carry none";
     return false;
   }
+  // A representation is what a mesh becomes; anything else is refused
+  // rather than read as if it had not been asked.
+  if (options.representation != mesh::Representation::Facets && !IsMesh(path)) {
+    error = "'" + path + "' is not a mesh: `representation` is for STL";
+    return false;
+  }
+  if (options.minSides < mesh::kMinSidesLowest ||
+      options.minSides > mesh::kMinSidesHighest) {
+    error = "min_sides " + std::to_string(options.minSides) + " is outside " +
+            std::to_string(mesh::kMinSidesLowest) + ".." +
+            std::to_string(mesh::kMinSidesHighest);
+    return false;
+  }
   const double scale = units::MmPerLength(unit);
   const auto cancelled = [&] {
     return progress != nullptr && progress->Cancelled();
   };
-  if (hasExt(".stl")) {
+  if (hasExt(".stl") &&
+      options.representation == mesh::Representation::Recognize) {
+    // The surfaces the triangles were tessellated from, rebuilt; a mesh
+    // that fails a check is sewn as facets and the report says why
+    // (cad::LoadStlRecognized).
+    CADShape shape;
+    mesh::Recognition report;
+    cad::RecognizeOptions ro;
+    ro.minSides = options.minSides;
+    if (!cad::LoadStlRecognized(path, ro, shape, report, error, progress)) {
+      if (cancelled())
+        error = "cancelled";
+      return false;
+    }
+    if (scale != 1.0) {
+      shape.Scale(scale);
+      report.Transform(glm::dmat4(1.0), scale);
+    }
+    if (!report.fellBack.empty())
+      model.notes.push_back("recognition kept it as facets: " +
+                            report.fellBack);
+    model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
+    model.products.back().recognition = std::move(report);
+    model.instances.push_back({0, glm::dmat4(1.0), ""});
+    model.origin.format = "STL";
+  } else if (hasExt(".stl")) {
     // Triangle mesh → B-Rep: one planar face per triangle, sewn; a closed
     // mesh arrives as a solid (LoadSTL), an open one as a surface shell.
     // Fine for print round-trips and reference geometry; organic meshes get
@@ -299,6 +346,7 @@ bool ImportFeature::ReadModel(const std::string& path, units::Length unit,
 
 bool ImportFeature::Execute(RegenContext& ctx) {
   auto& bodies = ctx.bodies;
+  m_recognized.clear();
   // Structured (XCAF) read: geometry plus the names/colors STEP carries.
   // Each instance is a body — a flat part file is identity instances; an
   // assembly file imported into a PART places every occurrence (the
@@ -310,7 +358,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   std::unique_ptr<CADKernel::ImportedModel> seed = std::move(m_seed);
   if (seed != nullptr) {
     model = std::move(*seed);
-  } else if (std::string why; !ReadModel(path, lengthUnit, model, why)) {
+  } else if (std::string why; !ReadModel(path, Options(), model, why)) {
     SetError(why);
     LOG_ERROR("ImportFeature '{}': {}", m_name, why);
     return false;
@@ -330,6 +378,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     CADShape shape;
     size_t product;
     std::string name;
+    glm::dmat4 placement{1.0}; // file to part, before the centring
   };
   std::vector<Placed> placed;
   std::vector<std::string> skipped;
@@ -358,7 +407,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       skipped.push_back(who + " (a surface, not a solid)");
       continue;
     }
-    placed.push_back({std::move(moved), inst.product, inst.name});
+    placed.push_back(
+        {std::move(moved), inst.product, inst.name, turn * inst.transform});
   }
   std::string warning;
   for (const std::string& note : model.notes)
@@ -449,6 +499,12 @@ bool ImportFeature::Execute(RegenContext& ctx) {
             : (!p.name.empty() ? p.name : m_name + " " + std::to_string(added));
     bodies.push_back({bodyName, std::move(p.shape), m_material, GetId()});
     bodies.back().elementMap = std::move(map);
+    if (product.recognition) {
+      Recognized r{bodyName, *product.recognition};
+      r.recognition.Transform(
+          glm::translate(glm::dmat4(1.0), -center) * p.placement, 1.0);
+      m_recognized.push_back(std::move(r));
+    }
     if (m_material.empty()) {
       if (product.hasColor) {
         bodies.back().hasDisplayColor = true;

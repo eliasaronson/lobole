@@ -25,6 +25,7 @@
 #include "core/features/WormFeature.h"
 #include "core/io/MeshImportCost.h"
 #include "core/io/ReadContext.h" // kMaxPartFeatures
+#include "core/io/RecognitionJson.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchSolver.h"
@@ -136,6 +137,43 @@ void RefuseLargeMeshImport(const Feature& f) {
                                       "import_step {allow_large_mesh: true}, "
                                       "which reads it off the frame with "
                                       "progress and a cancel"));
+}
+
+// An Import's `representation` names a mesh, and a new mesh import that
+// names none takes the user's preference -- a saved one that names none is
+// facets, which is how its faces were named
+// (docs/interchange/README.md#recognising-a-faceted-mesh).
+void ImportRepresentationDefault(const ui::AppState& state, json& fj) {
+  if (!fj.is_object() || fj.value("type", std::string{}) != "Import")
+    return;
+  const std::string path = fj.value("path", std::string{});
+  if (!ImportFeature::IsMesh(path)) {
+    if (fj.contains("representation"))
+      throw std::runtime_error("Import: representation: '" + path +
+                               "' is not a mesh; it is for STL");
+    return;
+  }
+  if (!fj.contains("representation"))
+    fj["representation"] = mesh::ToString(ui::MeshRepresentationSetting(state));
+}
+
+// Changing what an Import's mesh becomes renumbers every face it has, so a
+// feature that names one would land on another: refused while anything in
+// the part refers to the import, naming what does.
+void RefuseReferencedRepresentationChange(const Document& doc,
+                                          const ImportFeature& was,
+                                          const ImportFeature& now) {
+  if (was.representation == now.representation &&
+      (now.representation != mesh::Representation::Recognize ||
+       was.minSides == now.minSides))
+    return;
+  const std::string users = ui::ImportReferrers(doc, was);
+  if (!users.empty())
+    throw std::runtime_error(
+        "Import '" + was.GetName() +
+        "': changing its representation or min_sides renumbers every face "
+        "it has, and " +
+        users + " refer to them; delete or re-pick those first");
 }
 
 // A direct edit (Delete/Offset/Move/Replace Face) whose own Execute fails is
@@ -1406,6 +1444,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
             ")");
       fj["configuration"] = id;
     }
+    ImportRepresentationDefault(state, fj);
     auto feature = FeatureFromJsonNamed(fj);
     RejectUnknownFeatureFields(fj, *feature);
     // The GUI refuses a tool with missing inputs; the script API used to
@@ -1455,6 +1494,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
             json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
       // Which axis was up, and how the import knows (auto reads the header).
       resp["up_axis"] = interchange::ToJson(imp->UpApplied());
+      // What a mesh became, in the call that made it.
+      if (json rec = interchange::RecognitionJson(*imp, true); !rec.is_null())
+        resp["recognition"] = std::move(rec);
     }
     // A worm or a wheel says what it built, in the call that built it.
     if (auto* w = dynamic_cast<const WormFeature*>(doc->GetFeature(index)))
@@ -1632,6 +1674,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const auto* now = dynamic_cast<const ImportFeature*>(probe.get());
       if (now != nullptr && (was == nullptr || was->path != now->path))
         RefuseLargeMeshImport(*probe);
+      if (now != nullptr && was != nullptr)
+        RefuseReferencedRepresentationChange(*doc, *was, *now);
       RefuseOnInput(*doc, *probe, index);
       RefuseFailingDirectEdit(*doc, *probe, index);
     }

@@ -41,6 +41,9 @@ struct FitResult {
   // The distance of `p` from the surface, signed: positive outside a
   // cylinder, cone or sphere, and on the normal's side of a plane.
   [[nodiscard]] double Distance(const glm::dvec3& p) const;
+  // The nearest point of the surface to `p` (a cone's: on the nappe `p` is
+  // on, or the apex).
+  [[nodiscard]] glm::dvec3 Project(const glm::dvec3& p) const;
 };
 
 // The plane through `points` (at least three, not collinear).

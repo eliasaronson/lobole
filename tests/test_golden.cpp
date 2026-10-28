@@ -1298,6 +1298,23 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             expect.at("import_up_axis").get<std::string>());
     CHECK(imp->turnDeg == expect.value("import_turn_deg", 0.0));
   }
+  // vNEXT: what an imported mesh becomes. An Import saved before it reads as
+  // facets (golden v103), which is how its faces were named; lost on a
+  // round trip, a recognised part would reload as thousands of triangles
+  // and every reference to its faces would land on another.
+  if (expect.contains("import_representation") ||
+      expect.contains("import_min_sides")) {
+    const ImportFeature* imp = nullptr;
+    for (const auto& f : doc.GetFeatures())
+      if (const auto* i = dynamic_cast<const ImportFeature*>(f.get()))
+        imp = i;
+    REQUIRE(imp != nullptr);
+    if (expect.contains("import_representation"))
+      CHECK(std::string(mesh::ToString(imp->representation)) ==
+            expect.at("import_representation").get<std::string>());
+    CHECK(imp->minSides ==
+          expect.value("import_min_sides", mesh::kDefaultMinSides));
+  }
   // v195: a projection's fingerprint. Lost on a round trip, a reopened part
   // takes the print from whatever the file then holds under the name.
   if (expect.contains("projection_fingerprint_area_mm2")) {

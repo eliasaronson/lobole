@@ -48,6 +48,7 @@ public:
   Segmentation Run();
 
 private:
+  void Tidy(Segmentation& out) const;
   void BuildPatches();
   bool Smooth(uint32_t a, uint32_t b) const {
     return glm::dot(m_patches[a].normal, m_patches[b].normal) > kSmoothCos;
@@ -376,19 +377,19 @@ Segmentation Segmenter::Run() {
     if (m_curvedOf[p] != kNone || tried[p])
       continue;
     tried[p] = true;
-    std::vector<uint32_t> near;
+    std::vector<uint32_t> smooth;
     for (uint32_t q : m_patches[p].neighbours)
       if (m_curvedOf[q] == kNone && Smooth(p, q))
-        near.push_back(q);
-    if (near.empty())
+        smooth.push_back(q);
+    if (smooth.empty())
       continue;
     std::vector<uint32_t> set;
     FitResult fit;
     int triples = 0;
-    for (size_t i = 0; i < near.size() && !fit.ok && triples < kMaxTriples;
+    for (size_t i = 0; i < smooth.size() && !fit.ok && triples < kMaxTriples;
          i++) {
-      const uint32_t q = near[i];
-      std::vector<uint32_t> third = near;
+      const uint32_t q = smooth[i];
+      std::vector<uint32_t> third = smooth;
       for (uint32_t r : m_patches[q].neighbours)
         if (m_curvedOf[r] == kNone && Smooth(q, r))
           third.push_back(r);
@@ -492,10 +493,76 @@ Segmentation Segmenter::Run() {
         break;
       }
   }
-  for (Region& r : out.regions) {
-    std::sort(r.triangles.begin(), r.triangles.end());
-    r.firstTriangle = r.triangles.front();
+  out.regionOf.assign(m_mesh.triangles.size(), kNone);
+  for (uint32_t r = 0; r < out.regions.size(); r++)
+    for (uint32_t t : out.regions[r].triangles)
+      out.regionOf[t] = r;
+  Tidy(out);
+  return out;
+}
+
+void Segmenter::Tidy(Segmentation& out) const {
+  // Where two surfaces meet, a small triangle can be on both to the file's
+  // precision and land in the wrong one: an island of one region inside
+  // another, or a notch in their boundary. A triangle with two or three
+  // neighbours in another region whose surface holds all its corners joins
+  // that region.
+  for (int pass = 0; pass < 8; pass++) {
+    bool changed = false;
+    for (uint32_t t = 0; t < m_mesh.triangles.size(); t++) {
+      const uint32_t own = out.regionOf[t];
+      uint32_t across[3];
+      for (int e = 0; e < 3; e++) {
+        const uint32_t u = m_mesh.neighbour[t][e];
+        across[e] = u == kNone ? kNone : out.regionOf[u];
+      }
+      for (int e = 0; e < 3; e++) {
+        const uint32_t other = across[e];
+        if (other == kNone || other == own)
+          continue;
+        int shared = 0;
+        for (int k = 0; k < 3; k++)
+          shared += across[k] == other;
+        if (shared < 2)
+          continue;
+        const FitResult& f = out.regions[other].fit;
+        bool on = true;
+        for (int c = 0; c < 3 && on; c++)
+          on = std::abs(f.Distance(m_mesh.Corner(t, c))) <= m_tol;
+        // Its middle too, no further off than that region's own facets
+        // stand: a disc's fan has every corner on the rim's cylinder.
+        const glm::dvec3 mid =
+            (m_mesh.Corner(t, 0) + m_mesh.Corner(t, 1) + m_mesh.Corner(t, 2)) /
+            3.0;
+        on = on &&
+             std::abs(f.Distance(mid)) <= out.regions[other].sagitta + m_tol;
+        if (!on)
+          continue;
+        out.regionOf[t] = other;
+        changed = true;
+        break;
+      }
+    }
+    if (!changed)
+      break;
   }
+  std::vector<std::vector<uint32_t>> tris(out.regions.size());
+  for (uint32_t t = 0; t < m_mesh.triangles.size(); t++)
+    tris[out.regionOf[t]].push_back(t);
+  std::vector<Region> kept;
+  for (uint32_t r = 0; r < out.regions.size(); r++) {
+    if (tris[r].empty())
+      continue;
+    Region region = std::move(out.regions[r]);
+    region.triangles = std::move(tris[r]);
+    region.area = 0.0;
+    for (uint32_t t : region.triangles)
+      region.area += m_mesh.Area(t);
+    kept.push_back(std::move(region));
+  }
+  out.regions = std::move(kept);
+  for (Region& r : out.regions)
+    r.firstTriangle = r.triangles.front();
   std::sort(out.regions.begin(), out.regions.end(),
             [](const Region& a, const Region& b) {
               return a.firstTriangle < b.firstTriangle;
@@ -504,10 +571,173 @@ Segmentation Segmenter::Run() {
   for (uint32_t r = 0; r < out.regions.size(); r++)
     for (uint32_t t : out.regions[r].triangles)
       out.regionOf[t] = r;
-  return out;
 }
 
 } // namespace
+
+namespace {
+
+void Renumber(Segmentation& s, size_t triangles) {
+  for (Region& r : s.regions) {
+    std::sort(r.triangles.begin(), r.triangles.end());
+    r.firstTriangle = r.triangles.front();
+  }
+  std::sort(s.regions.begin(), s.regions.end(),
+            [](const Region& a, const Region& b) {
+              return a.firstTriangle < b.firstTriangle;
+            });
+  s.regionOf.assign(triangles, kNone);
+  for (uint32_t r = 0; r < s.regions.size(); r++)
+    for (uint32_t t : s.regions[r].triangles)
+      s.regionOf[t] = r;
+}
+
+std::string Plural(size_t n, const char* one, const char* many) {
+  return std::to_string(n) + " " + (n == 1 ? one : many);
+}
+
+} // namespace
+
+void Demote(Segmentation& s, const TriMesh& mesh, uint32_t region) {
+  if (region >= s.regions.size() || s.regions[region].fit.kind == Kind::Plane)
+    return;
+  const std::vector<uint32_t> tris = std::move(s.regions[region].triangles);
+  s.regions.erase(s.regions.begin() + region);
+  // Within the region, coplanar triangles flood together as BuildPatches
+  // floods the whole mesh.
+  std::vector<uint32_t> order = tris;
+  std::stable_sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+    return mesh.Area(a) > mesh.Area(b);
+  });
+  std::vector<bool> inRegion(mesh.triangles.size(), false),
+      done(mesh.triangles.size(), false);
+  for (uint32_t t : tris)
+    inRegion[t] = true;
+  std::vector<uint32_t> stack;
+  for (uint32_t seed : order) {
+    if (done[seed])
+      continue;
+    const glm::dvec3 an = mesh.AreaNormal(seed);
+    const double len = glm::length(an);
+    const glm::dvec3 n = len > 0.0 ? an / len : glm::dvec3(0, 0, 1);
+    const double d = glm::dot(n, mesh.Corner(seed, 0));
+    Region r;
+    r.fit.ok = true;
+    r.fit.kind = Kind::Plane;
+    r.fit.axis = n;
+    r.fit.origin = mesh.Corner(seed, 0);
+    done[seed] = true;
+    stack.push_back(seed);
+    while (!stack.empty()) {
+      const uint32_t t = stack.back();
+      stack.pop_back();
+      r.triangles.push_back(t);
+      r.area += mesh.Area(t);
+      for (int e = 0; e < 3; e++) {
+        const uint32_t u = mesh.neighbour[t][e];
+        if (u == kNone || !inRegion[u] || done[u])
+          continue;
+        bool flat = true;
+        for (int c = 0; c < 3 && flat; c++)
+          flat = std::abs(glm::dot(n, mesh.Corner(u, c)) - d) <= s.tolerance;
+        if (!flat)
+          continue;
+        done[u] = true;
+        stack.push_back(u);
+      }
+    }
+    s.regions.push_back(std::move(r));
+    s.facetsLeft++;
+  }
+  Renumber(s, mesh.triangles.size());
+}
+
+size_t Recognition::Count(Kind k) const {
+  return static_cast<size_t>(
+      std::count_if(rounds.begin(), rounds.end(),
+                    [&](const RecognizedRound& r) { return r.kind == k; }));
+}
+
+void Recognition::Transform(const glm::dmat4& m, double scale) {
+  const glm::dmat3 rot(m);
+  const auto point = [&](const glm::dvec3& p) {
+    return glm::dvec3(m * glm::dvec4(p * scale, 1.0));
+  };
+  for (RecognizedRound& r : rounds) {
+    r.centre = point(r.centre);
+    r.axis = glm::normalize(rot * r.axis);
+    r.radius *= scale;
+    r.sagitta *= scale;
+  }
+  for (Polygon& p : polygonal) {
+    p.centre = point(p.centre);
+    p.axis = glm::normalize(rot * p.axis);
+    p.circumradius *= scale;
+  }
+  toleranceMm *= scale;
+}
+
+std::string Recognition::Summary() const {
+  std::string out;
+  const auto add = [&](size_t n, const char* one, const char* many) {
+    if (n == 0)
+      return;
+    out += (out.empty() ? "" : ", ") + Plural(n, one, many);
+  };
+  add(Count(Kind::Cylinder), "cylinder", "cylinders");
+  add(Count(Kind::Cone), "cone", "cones");
+  add(Count(Kind::Sphere), "sphere", "spheres");
+  add(planes, "plane", "planes");
+  for (const Polygon& p : polygonal)
+    out += "; a " + std::to_string(p.sides) + "-sided pocket or boss left flat";
+  if (facetsLeft > 0)
+    out += "; " + Plural(facetsLeft, "facet", "facets") + " left";
+  if (!fellBack.empty())
+    out = "kept as facets: " + fellBack;
+  return out;
+}
+
+Recognition Summarize(const TriMesh& mesh, const Segmentation& s,
+                      int minSides) {
+  Recognition out;
+  out.minSides = minSides;
+  out.triangles = mesh.triangles.size();
+  out.polygonal = s.polygonal;
+  out.facetsLeft = s.facetsLeft;
+  out.toleranceMm = s.tolerance;
+  for (const Region& r : s.regions) {
+    if (r.fit.kind == Kind::Plane) {
+      out.planes++;
+      continue;
+    }
+    RecognizedRound round;
+    round.kind = r.fit.kind;
+    round.axis = r.fit.axis;
+    round.radius = r.fit.radius;
+    round.halfAngle = r.fit.halfAngle;
+    round.sides = r.sides;
+    round.sagitta = r.sagitta;
+    round.centre = r.fit.origin;
+    if (r.fit.kind != Kind::Sphere) {
+      double lo = 0.0, hi = 0.0, widest = 0.0;
+      bool first = true;
+      for (uint32_t t : r.triangles)
+        for (int c = 0; c < 3; c++) {
+          const glm::dvec3 w = mesh.Corner(t, c) - r.fit.origin;
+          const double h = glm::dot(w, r.fit.axis);
+          widest = std::max(widest, glm::length(w - h * r.fit.axis));
+          lo = first ? h : std::min(lo, h);
+          hi = first ? h : std::max(hi, h);
+          first = false;
+        }
+      round.centre = r.fit.origin + r.fit.axis * (0.5 * (lo + hi));
+      if (r.fit.kind == Kind::Cone)
+        round.radius = widest;
+    }
+    out.rounds.push_back(round);
+  }
+  return out;
+}
 
 Segmentation SegmentAll(const TriMesh& mesh, const SegmentOptions& options) {
   if (mesh.triangles.empty() || mesh.neighbour.size() != mesh.triangles.size())

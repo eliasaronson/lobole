@@ -183,7 +183,11 @@ void Run(ImportJob* job, BackgroundJob* bg, int holdMs, bool holdDeaf) {
     CADKernel::ImportedModel model;
     std::string why;
     if (bg->cancel.load() ||
-        !ImportFeature::ReadModel(rq.path, rq.unit, model, why, &progress)) {
+        !ImportFeature::ReadModel(
+            rq.path,
+            {rq.unit, rq.representation.value_or(mesh::Representation::Facets),
+             rq.minSides},
+            model, why, &progress)) {
       // Cancelled: not an error, and reported as none.
       job->error = bg->cancel.load() ? "" : why;
       measured();
@@ -295,9 +299,9 @@ bool Finish(AppState& state, const std::shared_ptr<ImportJob>& jobPtr) {
       const ImportRequest& rq = job->request;
       CADKernel::ImportedModel parsed = std::move(job->model);
       std::string featureError;
-      const bool ok =
-          ImportAsFeature(state, rq.path, &parsed, &featureError, rq.unit,
-                          rq.keepOrigin, rq.up, rq.turnDeg);
+      const bool ok = ImportAsFeature(state, rq.path, &parsed, &featureError,
+                                      rq.unit, rq.keepOrigin, rq.up, rq.turnDeg,
+                                      rq.representation, rq.minSides);
       Ended(state, job,
             ok ? ImportJob::Outcome::Landed : ImportJob::Outcome::Failed,
             featureError);
@@ -428,8 +432,16 @@ bool StartImport(AppState& state, const ImportRequest& request,
   for (int n = 2; std::filesystem::exists(destDir); n++)
     destDir = importRoot / (asmName + "-" + std::to_string(n));
 
+  if (request.representation &&
+      *request.representation != mesh::Representation::Facets &&
+      !ImportFeature::IsMesh(path))
+    return fail("'" + path + "' is not a mesh: `representation` is for STL");
   auto job = std::make_shared<ImportJob>();
   job->request = request;
+  // Decided here, on the main thread, where the preference is: the worker
+  // reads the file as the feature it seeds will.
+  job->request.representation =
+      ResolveRepresentation(state, path, request.representation);
   job->stepPath = path;
   job->destDir = destDir.string();
   job->assemblyName = asmName;

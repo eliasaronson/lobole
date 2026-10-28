@@ -358,6 +358,7 @@ set(core_sources
     src/cad/CADMeshConverter.cpp
     src/cad/CADMaterials.cpp
     src/cad/MeshExport.cpp
+    src/cad/MeshRebuild.cpp
     src/render/IBL.cpp
     src/cad/SketchPlane.cpp
     src/cad/FaceSelector.cpp
@@ -511,6 +512,7 @@ set(core_sources
     src/core/mesh/MeshReaders.cpp
     src/core/mesh/Fit.cpp
     src/core/mesh/Segment.cpp
+    src/core/io/RecognitionJson.cpp
     src/core/MotionStudy.cpp
     src/core/InputHash.cpp
     src/core/io/GlbAnimation.cpp

@@ -7,6 +7,7 @@
 #include "core/Units.h"
 #include "core/io/ImportAssembly.h"
 #include "core/io/MeshImportCost.h"
+#include "core/mesh/Representation.h"
 
 #include <atomic>
 #include <cstdint>
@@ -35,6 +36,10 @@ struct ImportRequest {
   bool keepOrigin = false;
   interchange::UpAxis up = interchange::UpAxis::Auto;
   double turnDeg = 0.0;
+  // What a mesh becomes (ImportFeature::representation, minSides): absent,
+  // the preference, which StartImport resolves before the worker reads.
+  std::optional<mesh::Representation> representation;
+  int minSides = mesh::kDefaultMinSides;
   // Past interchange::MeshTriangleLimit a mesh is refused unless this says
   // the caller knows what it costs.
   bool allowLargeMesh = false;

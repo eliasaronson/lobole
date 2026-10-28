@@ -2653,6 +2653,51 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(height() - 30.0) < 1e-6);
   };
 
+  // A downloaded STL is recognised by default
+  // (docs/interchange/README.md#recognising-a-faceted-mesh): its holes are
+  // cylinders, the viewport's note says what was found, and the Import's
+  // editor turns it back into facets as one undoable modify.
+  t = IM_REGISTER_TEST(engine, "import", "a_downloaded_stl_is_recognised");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const size_t before = Doc()->FeatureCount();
+    std::string error;
+    IM_CHECK(ui::StartImport(*s_App, SourceFixture("mesh/nema17_mount.stl"),
+                             &error));
+    IM_CHECK(WaitFor(ctx, "the import to land",
+                     [] { return !ui::ImportRunning(*s_App); }));
+    IM_CHECK(s_App->importError.empty());
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    auto* imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(imp != nullptr);
+    IM_CHECK(imp->representation == mesh::Representation::Recognize);
+    IM_CHECK_EQ(imp->RecognizedBodies().size(), size_t{1});
+    IM_CHECK_EQ(
+        imp->RecognizedBodies()[0].recognition.Count(mesh::Kind::Cylinder),
+        size_t{9});
+    const auto faces = [] {
+      return Doc()->GetBodies().back().shape.FaceCount();
+    };
+    const int recognised = faces();
+    ctx->Yield(2);
+    IM_CHECK(s_App->importNote.find("9 cylinders") != std::string::npos);
+
+    ui::OpenFeatureEditor(*s_App, imp->GetId());
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###Mesh/facets");
+    ctx->Yield(3);
+    imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(imp->representation == mesh::Representation::Facets);
+    IM_CHECK(faces() > 10 * recognised);
+    IM_CHECK(s_App->commands->CanUndo());
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(imp->representation == mesh::Representation::Recognize);
+    IM_CHECK_EQ(faces(), recognised);
+  };
+
   // A mesh is the import job too (docs/ui/long-operations.md#import): it
   // used to be read and sewn on the frame, a 100k-triangle scan holding the
   // window for minutes with nothing to show or stop it. The modal says what

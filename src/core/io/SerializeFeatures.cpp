@@ -1320,6 +1320,11 @@ json FeatureToJson(const Feature& feature) {
       j["up_axis"] = interchange::ToString(import->upAxis);
     if (import->turnDeg != 0.0) // v190; absent = no turn
       j["turn_deg"] = import->turnDeg;
+    // vNEXT; absent = facets, how every older mesh import was read
+    if (import->representation != mesh::Representation::Facets)
+      j["representation"] = mesh::ToString(import->representation);
+    if (import->minSides != mesh::kDefaultMinSides) // vNEXT; absent = 12
+      j["min_sides"] = import->minSides;
   } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
     // v161 (docs/modeling/templates.md). The definition rides in full, so
     // the chain hash covers what the instance expands and a part rebuilds
@@ -2224,10 +2229,21 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "applied shift is reported as `recentred_by`. up_axis?: which axis OF "
      "THE FILE is up — auto (default: from the header; a SolidWorks STEP is "
      "+y), none, +x, -x, +y, -y, -z — and turn_deg?: a turn about world Z "
-     "after it; the reply's `up_axis` says what was applied and why",
+     "after it; the reply's `up_axis` says what was applied and why. "
+     "representation?: what an STL becomes -- recognize (the holes, flats, "
+     "cones and spheres its triangles were made from, rebuilt as true "
+     "faces: a hole has a diameter and an axis) or facets (a face per "
+     "triangle); absent = the user's mesh_representation preference for a "
+     "new import, facets in a saved one. min_sides?: with recognize, the "
+     "fewest sides a ring of facets has to be round (default 12, 5 to 1024: "
+     "a 6-sided nut trap stays flats; 5 takes OpenSCAD's pentagon holes). "
+     "The reply's `recognition` lists what was found, the polygons left flat "
+     "and, if the rebuild failed a check, why it was kept as facets "
+     "(docs/interchange/README.md#recognising-a-faceted-mesh)",
      "path:string, units?:'mm'|'cm'|'m'|'in', keep_origin?:bool, "
      "color?:any, up_axis?:'auto'|'none'|'+x'|'-x'|'+y'|'-y'|'-z', "
-     "turn_deg?:number"},
+     "turn_deg?:number, representation?:'facets'|'recognize', "
+     "min_sides?:int"},
     {"Derived", 84,
      "source_part (a part slot id), configuration?: the source's "
      "configuration to copy, an id (or its name, which add_feature resolves) "
@@ -2594,7 +2610,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             {"RetainingRingGroove",
              {"face", "from", "offset", "offset_expr", "standard"}},
             {"Import",
-             {"path", "keep_origin", "units", "color", "up_axis", "turn_deg"}},
+             {"path", "keep_origin", "units", "color", "up_axis", "turn_deg",
+              "representation", "min_sides"}},
             {"DeleteFace", {"body_id", "faces"}},
             {"OffsetFace",
              {"body_id", "faces", "distance_mm", "distance_mm_expr"}},
@@ -3170,6 +3187,30 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
           !std::isfinite(j.at("turn_deg").get<double>()))
         throw std::runtime_error("Import: turn_deg is a number of degrees");
       imp->turnDeg = j.at("turn_deg").get<double>();
+    }
+    if (j.contains("representation")) { // vNEXT; refused, never read as facets
+      const json& r = j.at("representation");
+      const auto rep =
+          r.is_string() ? mesh::RepresentationFromString(r.get<std::string>())
+                        : std::nullopt;
+      if (!rep)
+        throw std::runtime_error(
+            "Import: unknown representation " + r.dump() +
+            ". Accepted: " + mesh::AcceptedRepresentations());
+      imp->representation = *rep;
+    }
+    if (j.contains("min_sides")) { // vNEXT
+      const json& m = j.at("min_sides");
+      if (!m.is_number_integer() || m.get<int64_t>() < mesh::kMinSidesLowest ||
+          m.get<int64_t>() > mesh::kMinSidesHighest)
+        throw std::runtime_error(
+            "Import: min_sides is a whole number of sides, " +
+            std::to_string(mesh::kMinSidesLowest) + " to " +
+            std::to_string(mesh::kMinSidesHighest) + "; got " + m.dump());
+      if (imp->representation != mesh::Representation::Recognize)
+        throw std::runtime_error(
+            "Import: min_sides is for representation: recognize");
+      imp->minSides = m.get<int>();
     }
     out = std::move(imp);
   } else if (type == "Template") {

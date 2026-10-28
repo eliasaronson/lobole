@@ -8,6 +8,7 @@
 #include "ui/CamTool.h"
 #include "ui/DerivedActions.h"
 #include "ui/FastenerTool.h"
+#include "ui/ImportActions.h" // ImportReferrers
 #include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h" // PrintedThreadFor
 #include <functional>
@@ -2224,6 +2225,42 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       if (!up.because.empty())
         ImGui::TextWrapped("Applied %s: %s", interchange::ToString(up.applied),
                            up.because.c_str());
+    }
+    // What a mesh becomes: recognised surfaces or a face per triangle
+    // (docs/interchange/README.md#recognising-a-faceted-mesh), and with
+    // recognize the fewest sides a round needs. Either change renumbers every
+    // face, so while another feature refers to the import it is shown, not
+    // offered.
+    if (ImportFeature::IsMesh(import->path)) {
+      const std::string users = ImportReferrers(*state.document, *import);
+      ImGui::BeginDisabled(!users.empty());
+      static const char* kReps[] = {"recognize", "facets"};
+      int sel = import->representation == mesh::Representation::Facets;
+      const nlohmann::json before = DocumentIO::FeatureToJson(*import);
+      if (LabeledCombo("Mesh", &sel, kReps, 2)) {
+        import->representation = sel == 0 ? mesh::Representation::Recognize
+                                          : mesh::Representation::Facets;
+        if (import->representation == mesh::Representation::Facets)
+          import->minSides = mesh::kDefaultMinSides;
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+      if (import->representation == mesh::Representation::Recognize) {
+        LeftLabel("Min sides");
+        int sides = import->minSides;
+        ImGui::SetNextItemWidth(-1);
+        if (ExprInputInt(state, "##MinSides", &sides) &&
+            sides >= mesh::kMinSidesLowest && sides <= mesh::kMinSidesHighest &&
+            sides != import->minSides) {
+          const nlohmann::json was = DocumentIO::FeatureToJson(*import);
+          import->minSides = sides;
+          CommitDiscrete(state, feature, was, index, commit);
+        }
+      }
+      ImGui::EndDisabled();
+      if (!users.empty())
+        ImGui::TextWrapped("Fixed while %s refer to its faces.", users.c_str());
+      for (const ImportFeature::Recognized& r : import->RecognizedBodies())
+        ImGui::TextWrapped("%s", r.recognition.Summary().c_str());
     }
   } else if (auto* d = dynamic_cast<DerivedFeature*>(&feature)) {
     DrawDerivedParams(state, *d, index, commit);

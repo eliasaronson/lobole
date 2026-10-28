@@ -31,6 +31,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace mesh {
@@ -82,5 +83,46 @@ struct Segmentation {
 };
 
 Segmentation SegmentAll(const TriMesh& mesh, const SegmentOptions& options);
+
+// Puts curved region `region` back as the flat patches it was grown from,
+// each a plane, counted among the facets left: what the rebuild does with a
+// surface it cannot make a face of. Regions are renumbered.
+void Demote(Segmentation& s, const TriMesh& mesh, uint32_t region);
+
+// What an import says it recognised (the reply's `recognition`), in the
+// mesh's own coordinates until the caller places it.
+struct RecognizedRound {
+  Kind kind = Kind::Cylinder;
+  double radius = 0.0;    // mm (a cone: at its widest)
+  double halfAngle = 0.0; // a cone's, rad
+  glm::dvec3 axis{0.0, 0.0, 1.0};
+  glm::dvec3 centre{0.0}; // a cylinder's or cone's mid-length on its axis,
+                          // a sphere's centre
+  int sides = 0;          // a full turn's worth
+  double sagitta = 0.0;   // mm the facets stood off it
+};
+struct Recognition {
+  int minSides = 12;
+  size_t triangles = 0;
+  size_t planes = 0;
+  std::vector<RecognizedRound> rounds; // cylinders, cones, spheres
+  std::vector<Polygon> polygonal;
+  size_t facetsLeft = 0;
+  double toleranceMm = 0.0;
+  // Set when the rebuild failed a check and the mesh was sewn as facets:
+  // which check, and why.
+  std::string fellBack;
+  // Curved regions the rebuild could not make a face of, kept as flats.
+  size_t demoted = 0;
+
+  [[nodiscard]] size_t Count(Kind k) const;
+  // Moved by `m` (a rigid placement) after scaling by `scale` about the
+  // file's origin.
+  void Transform(const glm::dmat4& m, double scale);
+  // "12 holes, 9 planes; a 6-sided pocket left flat"
+  [[nodiscard]] std::string Summary() const;
+};
+
+Recognition Summarize(const TriMesh& mesh, const Segmentation& s, int minSides);
 
 } // namespace mesh

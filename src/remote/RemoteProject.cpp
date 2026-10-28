@@ -22,6 +22,7 @@
 #include "core/io/GitVault.h"
 #include "core/io/MeshImportCost.h"
 #include "core/io/ProjectMerge.h"
+#include "core/io/RecognitionJson.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteParking.h"
@@ -139,9 +140,20 @@ static constexpr MethodDoc ProjectMethods[] = {
      "expected_s, limit} says what it was expected to cost, and past the "
      "triangle limit "
      "(docs/interchange/README.md#what-a-mesh-costs) it is refused naming "
-     "the count and the expected time unless `allow_large_mesh` is true.",
-     "allow_large_mesh, as_assembly, keep_origin, path, turn_deg, units, "
-     "up_axis",
+     "the count and the expected time unless `allow_large_mesh` is true. "
+     "`representation` is what an STL becomes: recognize (the planes, "
+     "cylinders, cones and spheres its triangles were made from, rebuilt as "
+     "true faces, so a hole has a diameter and an axis) or facets (a face "
+     "per triangle); absent, the mesh_representation preference. "
+     "`min_sides` (with recognize; 5 to 1024, default 12) is the fewest "
+     "sides a ring of facets needs to be round: a 6-sided nut trap stays "
+     "flat, 5 takes OpenSCAD's pentagon holes. The reply's `recognition` "
+     "lists every cylinder, cone and sphere (radius, axis, centre, sides, "
+     "sagitta), the polygons left flat, and -- when the rebuilt solid failed "
+     "a check and the mesh was kept as facets -- `fell_back`, naming the "
+     "check (docs/interchange/README.md#recognising-a-faceted-mesh).",
+     "allow_large_mesh, as_assembly, keep_origin, min_sides, path, "
+     "representation, turn_deg, units, up_axis",
      remote::NeedsPart | remote::NotInBatch},
     {"export_step",
      "Export to STEP {path}: the active part (or {part}, from any tab), or — "
@@ -502,6 +514,10 @@ json ImportFeatureReply(Document& doc, size_t before, const json& preDigest,
       // What the reader left out or sewed, in the call that did it.
       if (!imp->GetWarning().empty())
         out["warning"] = imp->GetWarning();
+      // What a mesh became: the surfaces recognised, the polygons left
+      // flat, or why it was kept as facets.
+      if (json rec = interchange::RecognitionJson(*imp, true); !rec.is_null())
+        out["recognition"] = std::move(rec);
     }
   if (mesh)
     out["mesh"] = {{"triangles", mesh->triangles},
@@ -1853,6 +1869,30 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                  "'. Accepted: " + accepted);
       }
     }
+    std::optional<mesh::Representation> representation;
+    if (p.contains("representation")) {
+      const json& r = p.at("representation");
+      representation =
+          r.is_string() ? mesh::RepresentationFromString(r.get<std::string>())
+                        : std::nullopt;
+      if (!representation)
+        throw std::runtime_error(
+            "representation: unknown " + r.dump() +
+            ". Accepted: " + mesh::AcceptedRepresentations());
+      if (!ImportFeature::IsMesh(path))
+        throw std::runtime_error("representation: '" + path +
+                                 "' is not a mesh; it is for STL");
+    }
+    int minSides = mesh::kDefaultMinSides;
+    if (p.contains("min_sides")) {
+      minSides = IntParam(p.at("min_sides"), "min_sides", mesh::kMinSidesLowest,
+                          mesh::kMinSidesHighest);
+      if (ui::ResolveRepresentation(state, path, representation) !=
+          mesh::Representation::Recognize)
+        throw std::runtime_error(
+            "min_sides: it is for representation: recognize, and this "
+            "import is facets");
+    }
     const bool asAssembly = p.value("as_assembly", false);
     const bool allowLarge = p.value("allow_large_mesh", false);
     const bool keepOrigin = p.value("keep_origin", false);
@@ -1873,6 +1913,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       request.keepOrigin = keepOrigin;
       request.up = up;
       request.turnDeg = turnDeg;
+      request.representation = representation;
+      request.minSides = minSides;
       request.allowLargeMesh = allowLarge;
       request.overrideName = "`allow_large_mesh: true`";
       request.owner = state.rpcConnection;
@@ -1898,7 +1940,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const json preDigest = BodyDigestJson(*doc);
     std::string error;
     if (!ui::ImportAsFeature(state, path, nullptr, &error, unit, keepOrigin, up,
-                             turnDeg))
+                             turnDeg, representation, minSides))
       throw std::runtime_error(error);
     return ImportFeatureReply(*doc, before, preDigest, mesh);
   }

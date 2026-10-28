@@ -35,6 +35,7 @@ struct Ray;          // defined in FaceSelector.h
 
 #include "core/Units.h"
 #include "core/io/ImportUpAxis.h"
+#include "core/mesh/Representation.h"
 
 #include <nlohmann/json.hpp>
 
@@ -59,12 +60,30 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 // `up` and `turnDeg` are ImportFeature::upAxis / turnDeg: which axis of the
 // file is up (auto reads its header) and a turn about world Z after it. An
 // import that `auto` turned says so in a viewport pill (state.importNote).
-bool ImportAsFeature(AppState& state, const std::string& filename,
-                     CADKernel::ImportedModel* parsed, std::string* error,
-                     units::Length unit = units::Length::Millimetre,
-                     bool keepOrigin = false,
-                     interchange::UpAxis up = interchange::UpAxis::Auto,
-                     double turnDeg = 0.0);
+// `representation` and `minSides` are ImportFeature's, for a mesh: absent,
+// the user's `mesh_representation` preference (MeshRepresentationSetting).
+bool ImportAsFeature(
+    AppState& state, const std::string& filename,
+    CADKernel::ImportedModel* parsed, std::string* error,
+    units::Length unit = units::Length::Millimetre, bool keepOrigin = false,
+    interchange::UpAxis up = interchange::UpAxis::Auto, double turnDeg = 0.0,
+    std::optional<mesh::Representation> representation = std::nullopt,
+    int minSides = mesh::kDefaultMinSides);
+
+// What a new mesh import becomes when it names nothing: the preference
+// (docs/ui/settings.md), which the settings store keeps to the names
+// mesh::RepresentationFromString reads.
+mesh::Representation MeshRepresentationSetting(const AppState& state);
+// What `path` is imported as: `asked` when given, the preference for a mesh,
+// facets for anything else (which takes no representation).
+// The features of `doc` that refer to `imp` ("'Sketch 3' (7), 'Offset' (9)"),
+// or "": while any does, changing what its mesh becomes would renumber the
+// faces they name, so the change is refused (the RPC) or offered disabled
+// (the panel).
+std::string ImportReferrers(const Document& doc, const ImportFeature& imp);
+mesh::Representation
+ResolveRepresentation(const AppState& state, const std::string& path,
+                      std::optional<mesh::Representation> asked);
 
 // A DXF or SVG into a sketch: the import_sketch RPC and File > Import share
 // it. `sketchId` (non-zero) adds to that sketch; else a new Sketch on `plane`

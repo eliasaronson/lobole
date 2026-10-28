@@ -38,8 +38,12 @@ the recipe, and each regeneration reads it.
   `ModelFromXcaf` that IGES and OBJ share, and the reader also returns the
   file's header (`ImportedModel::origin`) for the [up axis](#up-axis).
 - **IGES** and **OBJ**: see [IGES](#iges) and [OBJ](#obj).
-- **STL** becomes one planar face per triangle, sewn: a closed mesh arrives
-  as a solid, an open one as a shell. OpenCASCADE's reader hands back the
+- **STL** is recognised by default: the planes, cylinders, cones and
+  spheres its triangles were tessellated from are rebuilt as true faces
+  ([recognising a faceted mesh](#recognising-a-faceted-mesh)). With
+  `representation: facets`, or when the rebuild fails a check, it becomes
+  one planar face per triangle, sewn: a closed mesh arrives as a solid, an
+  open one as a shell. OpenCASCADE's reader hands back the
   triangles as a compound of loose faces, so `CADKernel::LoadSTL` sews them
   as an OBJ's are (`SewAt`); unsewn, the volume still read right while a
   cut removed the wrong amount and Delete Face refused every hole. Every
@@ -98,8 +102,12 @@ What the imported-edits round (a Voron grill from STL, the SO-101 wrist
 bracket and an STS3215 servo from STEP) found the import takes, through the
 same RPCs an MCP client has:
 
-- **A mesh (STL) takes direct edits after a Refine.** Each triangle is a
-  face, so the face a hole sits in is a fan of triangles with no inner loop,
+- **A recognised STL is edited as the part it was exported from.** Its
+  holes are cylinders with a radius and an axis, its flats one face each, so
+  measure, mates, projection and the direct edits take them as they would a
+  STEP's ([recognising a faceted mesh](#recognising-a-faceted-mesh)).
+- **A mesh kept as facets takes direct edits after a Refine.** Each
+  triangle is a face, so the face a hole sits in is a fan of triangles with no inner loop,
   and `grow_faces` refuses ("no loop of edges in a host face bounds them").
   `Refine` merges the coplanar ones (the grill: 5642 faces to 2937), after
   which `grow_faces` takes a faceted hole whole (229 faces each) and Delete
@@ -342,6 +350,82 @@ so it can run on a worker thread.
   4. **What fits nothing** stays as its flat patches, such as a torus corner
      where two fillets meet. These are counted in `facetsLeft`.
 
+### Rebuilding the solid
+
+`cad::RebuildFromRegions` (`src/cad/MeshRebuild.{h,cpp}`) makes one face per
+region, on its fitted `Geom_Plane`, `Geom_CylindricalSurface`,
+`Geom_ConicalSurface` or `Geom_SphericalSurface`. It is the only OpenCASCADE
+code involved.
+
+- **Edges are shared.** The boundary between two regions is cut at its
+  corners, the vertices where three or more regions meet. Each piece becomes
+  ONE edge, used by both faces.
+  - Its curve comes from its own points, each snapped onto both surfaces by
+    alternating projection: a line when they are collinear, a circle or arc
+    when they are coplanar and concyclic, and otherwise an interpolated
+    B-spline (a hole breaking into a boss, an oblique hole's ellipse).
+  - A loop with no corner, such as a hole's rim, is a full circle with one
+    vertex.
+- **A ring needs a seam.** A cylinder or cone that goes all the way round
+  takes a straight edge from one rim to the other. The mesh already has
+  one, a generator: a run of the region's own edges along one line. Both of
+  its ends become corners, so the rims are cut there for the faces either
+  side alike, and the face is one wire: up the seam, round the other rim and
+  back.
+  - A sphere's pole is put in the middle of its region, where
+    `ShapeFix_Face` closes it with a degenerate edge.
+- **Nothing is sewn.** The faces are built on the shared edges and put into
+  shells directly, so the quilt, most of a faceted import's time, never
+  runs. `ShapeFix_Face` adds the p-curves through a shared
+  `ShapeBuild_ReShape`, so an edge it has to replace is replaced in the
+  faces either side as well.
+- **Face order is fixed.** The faces go into the shell in region order, each
+  region's lowest file triangle. The same file with the same options always
+  gives the same face names.
+- **Three checks.** The result must be valid (`BRepCheck_Analyzer`), every
+  shell closed, and its volume within what the fits allow of the mesh's: Σ
+  over curved regions of area × sagitta, plus the surface area × the
+  tolerance.
+  - A curved face that will not build, or that `BRepCheck` faults, is
+    demoted to its flat patches (`mesh::Demote`) and the rebuild is tried
+    again. The report counts it in `demoted`.
+  - A mesh that still fails is sewn as facets, as before, and the report
+    names the check in `fell_back`. Recognition never quietly hands back
+    something else.
+- **Boundary tidying.** Where two surfaces meet, a small triangle can lie on
+  both to the file's precision and land in the wrong region, leaving an
+  island or a notch. A triangle with two or three neighbours in another
+  region whose surface holds its corners and its middle joins that region
+  (`Segmenter::Tidy`). The middle matters: every corner of a disc's fan
+  triangle is on the rim's cylinder.
+
+### The Import's representation
+
+An Import of an STL takes `representation`, which is `recognize` or
+`facets`; any other value is refused, naming the two.
+
+- **Defaults.** A new import that names none takes the user's
+  `mesh_representation` preference (Preferences › Import; default
+  `recognize`, [settings](../ui/settings.md)). That covers `add_feature`,
+  `import_step`, File › Import, `--file` and the in-app browser. A saved
+  Import that names none is `facets`, how every mesh import before vNEXT was
+  read and its faces named.
+- **`topo_to_body` is always `facets`.** A topology result is a smoothed
+  density surface, with nothing in it to recognise.
+- **`min_sides`** (5 to 1024, default 12) applies with `recognize` only. It
+  is refused with `facets`, and `representation` is refused on any file that
+  is not an STL.
+- **The reply says what was recognised.** `add_feature` and `import_step`
+  answer with `recognition`: per body, every cylinder, cone and sphere
+  (radius, axis, centre, side count, sagitta), the polygons left flat,
+  `facets_left`, `tolerance_mm`, and `fell_back` when the rebuild failed a
+  check. `get_state`'s row for the feature carries the same with counts
+  only. In the GUI, the import note says the summary ("24 cylinders, 6
+  planes").
+- **A change that would renumber is refused.** Changing `representation` or
+  `min_sides` renumbers every face, so `modify_feature` refuses it while
+  another feature of the part refers to the import, naming them.
+
 What it is checked against:
 - **Generated parts.** `tests/mesh_fixtures.{h,cpp}` builds CAD parts with
   OpenCASCADE and writes them through our own `SaveSTL`, so every radius and
@@ -575,9 +659,12 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
   directly, in linear time, instead of through the quilt. Unless it kept
   the faces in the sewing's order, it would rename every face of every
   mesh import already saved.
-- Feature recognition on a mesh: a faceted hole is hundreds of planes, with
-  no radius to filter, measure or project
-  ([editing a downloaded part](#editing-a-downloaded-part)).
+- Recognition of an OBJ's meshes: only STL is recognised, and an OBJ is
+  sewn as facets.
+- Recognising a torus (the corner where two fillets meet stays as facets),
+  and a mesh noisier than the precision it was written at (a scan, or a
+  part re-saved through a mesh editor). Loosening the fits to noise belongs
+  to the scan work.
 - Translating an imported body (a placement on the Import itself).
 - STEP PMI / AP242 GD&T.
 - Fusion 360 (no server-side feature API) and native SolidWorks.

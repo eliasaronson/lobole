@@ -44,6 +44,37 @@ double FitResult::Distance(const glm::dvec3& p) const {
   return 0.0;
 }
 
+glm::dvec3 FitResult::Project(const glm::dvec3& p) const {
+  switch (kind) {
+  case Kind::Plane:
+    return p - glm::dot(p - origin, axis) * axis;
+  case Kind::Cylinder: {
+    const glm::dvec3 w = p - origin;
+    const double h = glm::dot(w, axis);
+    const glm::dvec3 r = w - h * axis;
+    const double len = glm::length(r);
+    return len > 0.0 ? origin + h * axis + r * (radius / len) : p;
+  }
+  case Kind::Cone: {
+    const glm::dvec3 w = p - origin;
+    const double h = glm::dot(w, axis);
+    const glm::dvec3 r = w - h * axis;
+    const double len = glm::length(r);
+    if (len == 0.0)
+      return p; // on the axis: every generator is as near
+    const glm::dvec3 g =
+        std::cos(halfAngle) * axis + std::sin(halfAngle) * (r / len);
+    return origin + std::max(0.0, glm::dot(w, g)) * g;
+  }
+  case Kind::Sphere: {
+    const glm::dvec3 w = p - origin;
+    const double len = glm::length(w);
+    return len > 0.0 ? origin + w * (radius / len) : p;
+  }
+  }
+  return p;
+}
+
 namespace {
 
 // Two unit vectors square to `a` and to each other.
