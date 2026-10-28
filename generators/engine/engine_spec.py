@@ -18,6 +18,8 @@ practice, and the rest is derived from those and the profile.
 """
 import math
 
+from _lib import pack  # noqa: F401  (the plates' packer, shared)
+
 NOZZLE_MM = 0.4          # the P1S's nozzle: a line is this wide (machine)
 
 
@@ -685,77 +687,6 @@ def print_footprints(s):
     ]
     del dz_block, head_h
     return items
-
-
-def pack(items, bed, gap, zones=()):
-    """MaxRects, best short side (generators/strandbeest/build.py's packer,
-    on rectangles): each (key, w, h) onto beds of bed[0] x bed[1], `gap`
-    between boxes and from the edges and from each of the bed's keep-out
-    `zones` [x0, y0, x1, y1], each turned a quarter if that fits better.
-    Returns beds of [(key, turned, x, y)], (x, y) the low corner of the
-    footprint as placed."""
-    W, H = bed[0] - gap, bed[1] - gap
-    order = sorted(items, key=lambda it: -(it[1] * it[2]))
-    beds = []
-
-    def place(free, w, h):
-        best = None
-        for fi, (fx, fy, fw, fh) in enumerate(free):
-            if w <= fw + 1e-9 and h <= fh + 1e-9:
-                score = min(fw - w, fh - h)
-                if best is None or score < best[0]:
-                    best = (score, fx, fy)
-        return best
-
-    def split(free, x, y, w, h):
-        out = []
-        for fx, fy, fw, fh in free:
-            if x >= fx + fw or x + w <= fx or y >= fy + fh or y + h <= fy:
-                out.append((fx, fy, fw, fh))
-                continue
-            if x > fx:
-                out.append((fx, fy, x - fx, fh))
-            if x + w < fx + fw:
-                out.append((x + w, fy, fx + fw - x - w, fh))
-            if y > fy:
-                out.append((fx, fy, fw, y - fy))
-            if y + h < fy + fh:
-                out.append((fx, y + h, fw, fy + fh - y - h))
-        keep = []
-        for i, a in enumerate(out):
-            inside = any(i != j and a[0] >= b[0] - 1e-9 and a[1] >= b[1] -
-                         1e-9 and a[0] + a[2] <= b[0] + b[2] + 1e-9 and
-                         a[1] + a[3] <= b[1] + b[3] + 1e-9 and
-                         (a != b or j < i) for j, b in enumerate(out))
-            if not inside:
-                keep.append(a)
-        return keep
-
-    def try_bed(b, key, w, h):
-        for turned, (bw, bh) in ((False, (w + gap, h + gap)),
-                                 (True, (h + gap, w + gap))):
-            spot = place(b["free"], bw, bh)
-            if spot:
-                _, fx, fy = spot
-                b["items"].append((key, turned, fx + gap, fy + gap))
-                b["free"] = split(b["free"], fx, fy, bw, bh)
-                return True
-        return False
-
-    for key, w, h in order:
-        if all(not try_bed(b, key, w, h) for b in beds):
-            # A box at free-space x spans the bed's x + gap .. x + w + gap,
-            # so a zone taken out from x0 - gap to x1 keeps a gap round it.
-            free = [(0.0, 0.0, W, H)]
-            for z in zones:
-                free = split(free, z[0] - gap, z[1] - gap,
-                             z[2] - z[0] + gap, z[3] - z[1] + gap)
-            b = {"free": free, "items": []}
-            if not try_bed(b, key, w, h):
-                raise ValueError(f"{key} ({w:.0f} x {h:.0f} mm) does not "
-                                 f"fit the {bed[0]:g} x {bed[1]:g} mm bed")
-            beds.append(b)
-    return [b["items"] for b in beds]
 
 
 def spacing(s):

@@ -473,3 +473,128 @@ def pin_strength(d, part, face, load_n, direction, seat, layer_normal,
             f"{part}: the pin yields: factor {fy:.2f} against the yield "
             f"under {need:g} at {load_n:.1f} N")
     return out
+
+
+# --- print plates --------------------------------------------------------------------
+# A plate is a part of Derived copies, each piece turned the way it prints
+# and moved onto the bed (engine/build.py, woodcutter/build.py). These are
+# the turns, as quaternions (x, y, z, w), and the packer that places them.
+
+def q_axis(axis, deg):
+    """A turn of `deg` about the unit `axis`."""
+    h = math.radians(deg) / 2.0
+    s = math.sin(h)
+    return [axis[0] * s, axis[1] * s, axis[2] * s, math.cos(h)]
+
+
+def q_up(up):
+    """The least turn that takes the unit vector `up` (a part's print
+    direction, in its own frame) to +Z."""
+    x, y, z = up
+    n = math.sqrt(x * x + y * y + z * z)
+    x, y, z = x / n, y / n, z / n
+    if z < -1.0 + 1e-12:
+        return q_axis((1.0, 0.0, 0.0), 180.0)
+    # axis up x Z, angle acos(up . Z): q = (up x Z, 1 + up . Z) normalised
+    q = [y, -x, 0.0, 1.0 + z]
+    m = math.sqrt(sum(c * c for c in q))
+    return [c / m for c in q]
+
+
+def qmul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return [aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz]
+
+
+def rotate(q, v):
+    x, y, z, w = q
+    vx, vy, vz = v
+    # v' = q v q*
+    tx = 2.0 * (y * vz - z * vy)
+    ty = 2.0 * (z * vx - x * vz)
+    tz = 2.0 * (x * vy - y * vx)
+    return (vx + w * tx + (y * tz - z * ty),
+            vy + w * ty + (z * tx - x * tz),
+            vz + w * tz + (x * ty - y * tx))
+
+
+def turned_box(lo, hi, q):
+    pts = [rotate(q, (x, y, z)) for x in (lo[0], hi[0])
+           for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+    return ([min(p[i] for p in pts) for i in range(3)],
+            [max(p[i] for p in pts) for i in range(3)])
+
+
+def pack(items, bed, gap, zones=()):
+    """MaxRects, best short side (generators/strandbeest/build.py's packer,
+    on rectangles): each (key, w, h) onto beds of bed[0] x bed[1], `gap`
+    between boxes and from the edges and from each of the bed's keep-out
+    `zones` [x0, y0, x1, y1], each turned a quarter if that fits better.
+    Returns beds of [(key, turned, x, y)], (x, y) the low corner of the
+    footprint as placed."""
+    W, H = bed[0] - gap, bed[1] - gap
+    order = sorted(items, key=lambda it: -(it[1] * it[2]))
+    beds = []
+
+    def place(free, w, h):
+        best = None
+        for fi, (fx, fy, fw, fh) in enumerate(free):
+            if w <= fw + 1e-9 and h <= fh + 1e-9:
+                score = min(fw - w, fh - h)
+                if best is None or score < best[0]:
+                    best = (score, fx, fy)
+        return best
+
+    def split(free, x, y, w, h):
+        out = []
+        for fx, fy, fw, fh in free:
+            if x >= fx + fw or x + w <= fx or y >= fy + fh or y + h <= fy:
+                out.append((fx, fy, fw, fh))
+                continue
+            if x > fx:
+                out.append((fx, fy, x - fx, fh))
+            if x + w < fx + fw:
+                out.append((x + w, fy, fx + fw - x - w, fh))
+            if y > fy:
+                out.append((fx, fy, fw, y - fy))
+            if y + h < fy + fh:
+                out.append((fx, y + h, fw, fy + fh - y - h))
+        keep = []
+        for i, a in enumerate(out):
+            inside = any(i != j and a[0] >= b[0] - 1e-9 and a[1] >= b[1] -
+                         1e-9 and a[0] + a[2] <= b[0] + b[2] + 1e-9 and
+                         a[1] + a[3] <= b[1] + b[3] + 1e-9 and
+                         (a != b or j < i) for j, b in enumerate(out))
+            if not inside:
+                keep.append(a)
+        return keep
+
+    def try_bed(b, key, w, h):
+        for turned, (bw, bh) in ((False, (w + gap, h + gap)),
+                                 (True, (h + gap, w + gap))):
+            spot = place(b["free"], bw, bh)
+            if spot:
+                _, fx, fy = spot
+                b["items"].append((key, turned, fx + gap, fy + gap))
+                b["free"] = split(b["free"], fx, fy, bw, bh)
+                return True
+        return False
+
+    for key, w, h in order:
+        if all(not try_bed(b, key, w, h) for b in beds):
+            # A box at free-space x spans the bed's x + gap .. x + w + gap,
+            # so a zone taken out from x0 - gap to x1 keeps a gap round it.
+            free = [(0.0, 0.0, W, H)]
+            for z in zones:
+                free = split(free, z[0] - gap, z[1] - gap,
+                             z[2] - z[0] + gap, z[3] - z[1] + gap)
+            b = {"free": free, "items": []}
+            if not try_bed(b, key, w, h):
+                raise ValueError(f"{key} ({w:.0f} x {h:.0f} mm) does not "
+                                 f"fit the {bed[0]:g} x {bed[1]:g} mm bed")
+            beds.append(b)
+    return [b["items"] for b in beds]

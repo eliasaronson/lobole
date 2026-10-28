@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import engine_parts as P  # noqa: E402
 import engine_spec as S  # noqa: E402
 from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
-                  slender_ratio,
+                  slender_ratio, qmul, turned_box,
                   export_print_job, fresh_project, job_receipt,
                   pin_strength, print_item_line, print_receipt)
 from lobole.sdk import SdkError, connect  # noqa: E402
@@ -625,37 +625,9 @@ def spring_squeeze(result, s):
 
 # --- print plates -------------------------------------------------------------------
 
-def qmul(a, b):
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return [aw * bx + ax * bw + ay * bz - az * by,
-            aw * by - ax * bz + ay * bw + az * bx,
-            aw * bz + ax * by - ay * bx + az * bw,
-            aw * bw - ax * bx - ay * by - az * bz]
-
-
-def rotate(q, v):
-    x, y, z, w = q
-    vx, vy, vz = v
-    # v' = q v q*
-    tx = 2.0 * (y * vz - z * vy)
-    ty = 2.0 * (z * vx - x * vz)
-    tz = 2.0 * (x * vy - y * vx)
-    return (vx + w * tx + (y * tz - z * ty),
-            vy + w * ty + (z * tx - x * tz),
-            vz + w * tz + (x * ty - y * tx))
-
-
 def bbox(d, part):
     r = d.call("mass_properties", part=part)["bbox_mm"]
     return r["min"], r["max"]
-
-
-def turned_box(lo, hi, q):
-    pts = [rotate(q, (x, y, z)) for x in (lo[0], hi[0])
-           for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
-    return ([min(p[i] for p in pts) for i in range(3)],
-            [max(p[i] for p in pts) for i in range(3)])
 
 
 PLA_PIECES = [("block", 1), ("bedplate", 1), ("sump", 1), ("head", 1),
