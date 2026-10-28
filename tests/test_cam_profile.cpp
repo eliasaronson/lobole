@@ -410,7 +410,7 @@ TEST_CASE("CamProfile: undercut and wrong inputs are refused by name",
 TEST_CASE("CamProfile: the golden loads and round-trips",
           "[cam_profile][golden]") {
   const fs::path golden =
-      fs::path(TestSourceDir()) / "tests/golden/vNEXT2-cam-profile.json";
+      fs::path(TestSourceDir()) / "tests/golden/v198-cam-profile.json";
   auto doc = DocumentIO::Load(golden.string());
   REQUIRE(doc.has_value());
   const auto* cam =

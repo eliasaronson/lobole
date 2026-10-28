@@ -318,7 +318,7 @@ struct ExplodedView {
 //        (v174, docs/assemblies/relations.md#intermittent)
 // contact: rotation -> offset OR rotation through the GEOMETRY of the cam
 //        and the follower: the follower stands where it first touches the
-//        cam (vNEXT, docs/assemblies/relations.md#contact)
+//        cam (v197, docs/assemblies/relations.md#contact)
 enum class RelationKind {
   Gear,
   Rack,
@@ -438,11 +438,11 @@ struct Relation {
     int slots = 0;
     std::vector<std::pair<double, double>> table;
   } intermittent;
-  // Cam only (vNEXT): the lift read from a CamProfile feature of a part on
+  // Cam only (v197): the lift read from a CamProfile feature of a part on
   // every solve instead of `lift` — the cam relation follows the motion the
   // cam was cut for (docs/modeling/cam-profiles.md). 0 = `lift` governs.
   uint64_t profilePart = 0, profileFeature = 0;
-  // Contact only (vNEXT, docs/assemblies/relations.md#contact). The cam and
+  // Contact only (v197, docs/assemblies/relations.md#contact). The cam and
   // the follower occurrences (0 = derived: the side of mate a, and of mate
   // b, that is not rigid with the other mate's base); the body of each
   // when its part has several (the feature id that created it, 0 = the

@@ -1744,7 +1744,7 @@ json FeatureToJson(const Feature& feature) {
     if (th->flankDeg != 30.0)
       j["flank_angle_deg"] = th->flankDeg; // v173; absent = the ISO 30
   } else if (auto* cp = dynamic_cast<const CamProfileFeature*>(&feature)) {
-    // vNEXT2 (docs/modeling/cam-profiles.md)
+    // v198 (docs/modeling/cam-profiles.md)
     if (!cp->face.name.empty())
       j["face"] = {{"feature_id", cp->face.featureId},
                    {"element", cp->face.name}};
@@ -2045,7 +2045,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(docs/parts/README.md)",
      "standard:string, size:string, length?:number, "
      "length_expr?:string, drive?:string"},
-    {"CamProfile", kVersionNEXT2,
+    {"CamProfile", 198,
      "face (the CYLINDRICAL outside of the shaft or hub the cam goes on: its "
      "axis, base radius and width) | frame (a Frame feature id: Z the axis, "
      "X the cam's zero; then base_radius_mm and width_mm are required), "
@@ -3772,7 +3772,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     th->allowEngagement = j.value("allow_engagement", false);
     th->minimumEngagement = j.value("minimum_engagement", 0.0);
     out = std::move(th);
-  } else if (type == "CamProfile") { // vNEXT2
+  } else if (type == "CamProfile") { // v198
     ElementRef face;
     if (j.contains("face")) {
       const json& fj = j.at("face");

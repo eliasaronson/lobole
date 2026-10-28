@@ -822,10 +822,10 @@ json RelationToJson(const Relation& r) {
       j["table"] = std::move(t);
     }
   }
-  if (r.profilePart != 0 || r.profileFeature != 0) // vNEXT2, cam only
+  if (r.profilePart != 0 || r.profileFeature != 0) // v198, cam only
     j["profile"] = {{"part", r.profilePart}, {"feature", r.profileFeature}};
   if (r.kind == RelationKind::Contact) {
-    // vNEXT: the occurrences and bodies when named (absent = derived), and
+    // v197: the occurrences and bodies when named (absent = derived), and
     // the sense the follower is held in. Nothing derived from the geometry
     // is written: the table is rebuilt on the first solve.
     if (r.camOccurrence != 0)
@@ -1109,7 +1109,7 @@ Relation RelationFromJson(const json& j) {
     im.slots = IntermittentMotionFromJson(j);
     im.table = IntermittentTableOf(j);
   }
-  if (j.contains("profile")) { // vNEXT2
+  if (j.contains("profile")) { // v198
     if (r.kind != RelationKind::Cam)
       throw std::runtime_error("`profile` is a cam relation's; this one is a " +
                                std::string(RelationKindToString(r.kind)));
@@ -1124,7 +1124,7 @@ Relation RelationFromJson(const json& j) {
       throw std::runtime_error(std::string("`") + k +
                                "` is a contact relation's; this one is a " +
                                RelationKindToString(r.kind));
-  if (r.kind == RelationKind::Contact) { // vNEXT
+  if (r.kind == RelationKind::Contact) { // v197
     r.camOccurrence = j.value("cam", uint64_t{0});
     r.followerOccurrence = j.value("follower", uint64_t{0});
     r.camBody = j.value("cam_body", uint64_t{0});

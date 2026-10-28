@@ -341,7 +341,7 @@ TEST_CASE("contact: the relation round-trips and loads from its golden",
   if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, out).has_value());
   const fs::path golden = fs::path(TestSourceDir()) /
-                          "tests/golden/assembly/vNEXT-contact-follower.json";
+                          "tests/golden/assembly/v197-contact-follower.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
   REQUIRE((*g)->RelationCount() == 1);
