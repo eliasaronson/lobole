@@ -64,22 +64,6 @@ the heading if it is not here yet.
 
 ## Modeling
 
-### `modify_feature` without a `name` answers a JSON library error
-
-- **Symptom:** `modify_feature {feature_id, feature: {type: "CamProfile",
-  ...}}` with every field but `name` answers `InternalError: [json.exception.
-  out_of_range.403] key 'name' not found` instead of changing the feature
-  or refusing in words. `add_feature` takes the same spec, naming the
-  feature for its type.
-- **Cause:** the probe (`FeatureFromJsonNamed`) fills a missing `name`, but
-  the spec the command stores and reads back (`json after = p.at("feature")`
-  in the `modify_feature` handler) is the request as sent, and the file
-  reader requires `name`.
-- **Where:** `modify_feature` in `src/remote/RemoteModeling.cpp`.
-- **Likely fix:** fill the stored spec's missing `name` with the feature's
-  current name (a replacement that does not mention the name keeps it),
-  with a case in the refusal smoke.
-
 ### A cylinder added flush with the tangent of another leaves a free edge
 
 - **Symptom:** a rod (a Ø6 cylinder along Z) added to a foot (a cylinder

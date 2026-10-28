@@ -111,6 +111,21 @@ def part_checks(d):
     named = [f for f in d.call("get_state")["features"] if f["id"] == r["id"]]
     expect(named and named[0]["name"] == "Refine",
            f"an unnamed feature is named for its type: {named}")
+    # A replacement without a name keeps the one the feature has, as one
+    # without an id keeps its identity. It used to answer the file reader's
+    # `[json.exception.out_of_range.403] key 'name' not found`.
+    spec = next(f for f in d.call("get_state")["features"]
+                if f["id"] == sketch)
+    for key in ("index", "error", "warning", "after_earlier_failure", "name",
+                "id"):
+        spec.pop(key, None)
+    r = d.call("modify_feature", feature_id=sketch, feature=spec)
+    expect(r["regen"]["ok"], f"a replacement without a name applies: {r}")
+    kept = next(f for f in d.call("get_state")["features"]
+                if f["id"] == sketch)
+    expect(kept["name"] == sk["name"],
+           f"a replacement without a name keeps it: {kept['name']} was "
+           f"{sk['name']}")
 
 
 def assembly_checks(d):

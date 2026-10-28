@@ -575,10 +575,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "one it has, so references to it (sketch_id, mates, drawing dimensions) "
      "keep resolving. Pass a different \"id\" there only to mean 'this is a "
      "different feature now', which deliberately dangles those references. "
-     "A Sketch whose dimension values changed is re-solved from its current "
-     "geometry; a value that cannot be met, or that would mirror a triangle "
-     "of distances or turn an arc inside out, is refused naming the "
-     "dimension, and the document is unchanged; a direct edit (DeleteFace, "
+     "Its name is kept the same way: omit \"name\" and it keeps the one "
+     "it has. A Sketch whose dimension values changed is re-solved from its "
+     "current geometry; a value that cannot be met, or that would mirror a "
+     "triangle of distances or turn an arc inside out, is refused naming "
+     "the dimension, and the document is unchanged; a direct edit (DeleteFace, "
      "OffsetFace, MoveFace, ReplaceFace) that would not build is refused "
      "with its error, the document unchanged, and so is a feature the "
      "bodies before it cannot take, as add_feature says "
@@ -1698,11 +1699,19 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
           "and send it back; describe feature_types[] lists the fields each "
           "type takes.");
     RefusePrimitiveSpec(p.at("feature"));
+    // A replacement that does not mention the name keeps it, as one without
+    // an `id` keeps the feature's identity (Document::ReplaceFeature): mates
+    // name a part's frames, and a name is how a script finds a feature
+    // again. It was stored without one and the file reader, which requires
+    // it, answered `[json.exception.out_of_range.403] key 'name' not found`.
+    json spec = p.at("feature");
+    if (!spec.contains("name"))
+      spec["name"] = feature->GetName();
     // Build a throwaway from the request first: validates the JSON AND lets
     // the round-trip unknown-field check run before anything is committed.
     {
-      const auto probe = FeatureFromJsonNamed(p.at("feature"));
-      RejectUnknownFeatureFields(p.at("feature"), *probe);
+      const auto probe = FeatureFromJsonNamed(spec);
+      RejectUnknownFeatureFields(spec, *probe);
       RefuseThread(*probe);
       // A new file only: an import already past the limit (imported with
       // the override) keeps its other edits.
@@ -1716,7 +1725,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       RefuseFailingDirectEdit(*doc, *probe, index);
     }
     json before = DocumentIO::FeatureToJson(*feature);
-    json after = p.at("feature");
+    json after = spec;
     // Stored, and read back by the command: without get_state's envelope.
     for (const char* k : DocumentIO::kFeatureEnvelopeKeys)
       after.erase(k);
