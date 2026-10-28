@@ -2626,7 +2626,8 @@ std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
     bg->kind = "interference";
     bg->label = "Interference (" + slot.label + ")";
     bg->cancellable = false; // one boolean: nothing to stop it between
-    bg->thread = std::thread([run, holdMs]() {
+    ui::BackgroundJob* raw = bg.get();
+    bg->thread = std::thread([run, holdMs, raw]() {
       ArmOccSignalHandlers();
       if (holdMs > 0)
         std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
@@ -2642,6 +2643,10 @@ std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
       }
       run->compute = nullptr; // the copies go on the worker, not the frame
       run->done.store(true, std::memory_order_release);
+      // Last, for the registry: without it the entry was never reaped, and
+      // background_jobs listed every exact interference ever asked as
+      // running until the app quit.
+      raw->done.store(true);
     });
     bg->finish = [](ui::AppState&) { return true; };
     ui::StartBackgroundJob(state, std::move(bg));

@@ -81,6 +81,7 @@
 #include "ui/SketchInteraction.h" // UpdateSketchStatus
 #include "ui/SyncJob.h"
 #include "ui/TerminalPanel.h"
+#include <cstdlib>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -2803,6 +2804,34 @@ TEST_CASE("a fetch runs on the registry and reports through the loop",
   std::filesystem::remove_all(dir);
 }
 
+// The cancel rule (docs/ui/long-operations.md#the-cancel-rule): git cannot be
+// interrupted, so a cancelled clone finishes its transfer -- what it fetched
+// is kept -- but the step after it that would replace the open project does
+// not run.
+TEST_CASE("a cancelled clone keeps what it cloned and does not open it",
+          "[actions][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() /
+      ("designer-sync-cancel-" + std::to_string(::getpid()));
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  const std::filesystem::path bare = root / "remote.git";
+  REQUIRE(std::system(("git init -q --bare '" + bare.string() + "'").c_str()) ==
+          0);
+  state.projectPath = (root / "open-one").string();
+  const std::string before = state.projectPath;
+  const std::filesystem::path into = root / "clone";
+  REQUIRE(ui::StartClone(state, bare.string(), into.string()));
+  REQUIRE(ui::CancelBackgroundJobs(state, "sync") == 1);
+  PumpUntil(state, [&] { return !ui::SyncRunning(state); });
+  CHECK(state.projectPath == before); // nothing opened in its place
+  CHECK_FALSE(state.syncFailed);
+  CHECK(state.syncMessage.find("not opened (cancelled)") != std::string::npos);
+  CHECK(std::filesystem::exists(into / ".git")); // the clone itself is kept
+  std::filesystem::remove_all(root);
+}
+
 // Netgen-gated: the job machinery under test is the same either way, but the
 // assertions read the RESULTS of a solve, and a build without a mesher stores
 // none (fem::Mesh returns "built without FEM support"). The stock-Ubuntu CI
@@ -2890,6 +2919,17 @@ TEST_CASE("a study solved on the registry lands in its own part, not the "
   CHECK(report->bodies[0].nodes > 0);
   CHECK(report->bodies[0].elements > 0);
   CHECK(ui::MeshReportFor(state, *state.document, studyId) == nullptr);
+
+  // Cancelled (docs/ui/long-operations.md#the-cancel-rule): the report is a
+  // question about the mesh, dropped with it; the part and its solved
+  // results are untouched.
+  const uint64_t version = barDoc->Version();
+  REQUIRE(ui::StartMeshRun(state, *barDoc, studyId, &err));
+  REQUIRE(ui::CancelBackgroundJobs(state, "mesh") == 1);
+  PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "mesh"); });
+  CHECK(ui::MeshReportFor(state, *barDoc, studyId) == nullptr);
+  CHECK(barDoc->Version() == version);
+  CHECK(barDoc->StudyResults(studyId) != nullptr);
 }
 
 #endif // HAVE_NETGEN

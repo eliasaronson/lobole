@@ -39,7 +39,7 @@ void Run(SyncJob& job) {
 }
 
 // What the join used to do: the result, applied on the main thread.
-void Apply(AppState& state, const SyncJob& job);
+void Apply(AppState& state, const SyncJob& job, bool cancelled);
 
 bool Start(AppState& state, SyncJob sync, const std::string& label) {
   if (BackgroundJobRunning(state, kKind))
@@ -50,7 +50,11 @@ bool Start(AppState& state, SyncJob sync, const std::string& label) {
   auto job = std::make_unique<BackgroundJob>();
   job->kind = kKind;
   job->label = label;
-  job->cancellable = false; // git has no interruption points from here
+  // git itself has no interruption points, so a cancel lets the transfer
+  // finish -- what it fetched or cloned is kept -- and stops the step that
+  // would change the open project after it: a pull's merge, a clone's open
+  // (docs/ui/long-operations.md#the-cancel-rule).
+  job->cancellable = true;
   BackgroundJob* raw = job.get();
   job->thread = std::thread([shared, raw] {
     Run(*shared);
@@ -58,8 +62,8 @@ bool Start(AppState& state, SyncJob sync, const std::string& label) {
     // it sees this (BackgroundJob::done is seq_cst).
     raw->done.store(true);
   });
-  job->finish = [shared](AppState& s) {
-    Apply(s, *shared);
+  job->finish = [shared, raw](AppState& s) {
+    Apply(s, *shared, raw->cancel.load());
     return true;
   };
   StartBackgroundJob(state, std::move(job));
@@ -107,7 +111,7 @@ bool StartClone(AppState& state, const std::string& url,
 }
 
 namespace {
-void Apply(AppState& state, const SyncJob& job) {
+void Apply(AppState& state, const SyncJob& job, bool cancelled) {
   // On the main thread, after the registry joined the worker: every field
   // the worker wrote is ordered before `done`, and the join orders the
   // thread's exit too.
@@ -133,6 +137,10 @@ void Apply(AppState& state, const SyncJob& job) {
           state.divergence.behind > 0
               ? std::to_string(state.divergence.behind) + " to get"
               : "Up to date";
+      return;
+    }
+    if (cancelled) {
+      state.syncMessage = "Fetched; the merge was cancelled";
       return;
     }
     // The merge half, on the main thread where it belongs: it moves the
@@ -165,6 +173,10 @@ void Apply(AppState& state, const SyncJob& job) {
                             : "Sent";
     break;
   case SyncJob::Kind::Clone: {
+    if (cancelled) {
+      state.syncMessage = "Cloned into " + dir + "; not opened (cancelled)";
+      break;
+    }
     std::string error;
     if (!OpenProject(state, dir, &error)) {
       state.syncMessage = error;

@@ -154,7 +154,10 @@ For a small team that already uses git. `GitVault` adds `Remotes`,
   only `.git/`, so the worker's whole world is a plain struct read back on
   the main thread after the join. **Merge stays on the main thread**: it
   moves the working tree under open documents. Pull is fetch, then the
-  existing `Merge`.
+  existing `Merge`. A cancel lets the transfer finish (git has nothing to
+  interrupt) and keeps what it fetched or cloned, but stops the step after
+  it that would change the open project: a pull's merge, a clone's open
+  ([the cancel rule](../ui/long-operations.md#the-cancel-rule)).
 - **A rejected push** says to get first ("pull, then push again"). The app
   never merges on the user's behalf.
 - **Tags travel**: `push --follow-tags`, which is why named versions are
