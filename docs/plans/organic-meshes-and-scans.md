@@ -67,13 +67,20 @@ five parts.
 - Douglas–Peucker simplification to a stated tolerance.
 - Triangulation of closed loops into section caps.
 
-**`Segment` and `Fit`** (the mechanical round's half)
-- Region growing on triangles by normal deviation from a seed.
+**`Segment` and `Fit`** (built by the mechanical round:
+docs/interchange/README.md#recognising-a-faceted-mesh)
+- Region growing by the fitted surface's residual, not by normal deviation
+  from a seed: a cylinder's normals turn by design. `SegmentAll` segments a
+  whole mesh; this plan adds the seeded form, `GrowFrom(mesh, seed, kind)`,
+  for `fit_primitive`.
 - Least-squares fits of plane, cylinder, sphere and cone, each with its RMS
-  and maximum residual (the mechanical round's); this plan adds RANSAC behind
-  the same `Fit` signature, because a scan has outliers.
-- The mechanical round uses them to rebuild a faceted hole as a cylinder.
-  This plan uses them to align a scan and to put datums on it.
+  and maximum residual, at a tolerance of a few quanta of the file's own
+  precision (`TriMesh::quantum`). This plan adds RANSAC behind the same `Fit`
+  signature, and a tolerance a scan's noise sets, because a scan has
+  outliers.
+- The mechanical round uses them to rebuild a faceted part as a solid of
+  true faces (`cad::RebuildFromRegions`). This plan uses them to align a scan
+  and to put datums on it.
 
 **Readers**
 - STL (binary and ASCII), OBJ, PLY and GLB all produce a `TriMesh` without
@@ -158,25 +165,25 @@ measures it or exports it.
   import projections: geometry, not index.
 
 **Import**
-- `Import` gains `representation: auto | solid | mesh`; anything else is
-  refused, naming the three. `solid` and `mesh` force the choice.
+- `Import`'s `representation` (today `facets | recognize`,
+  `mesh::Representation`) gains `mesh` and `auto`; anything else is refused,
+  naming them. `facets`, `recognize` and `mesh` force the choice.
 - `auto` is the default. It uses the stage-0 recognition cost law, with a
   limit derived from that measured cost (as `MeshImportCost` derives the
   patient-import limit), never a literal:
-  - below the limit, it recognises (`surfaces: recognize`) and builds a
-    solid. If most of the area does not fit a primitive (an organic shape),
+  - below the limit, it recognises (`recognize`) and builds a solid. If most of the area does not fit a primitive (an organic shape),
     it falls back to a mesh body;
   - at or above the limit, it goes straight to a mesh body without running
     recognition.
 - The reply says which representation it chose and why ("mesh: 346 112
   triangles, past the recognition limit of 120 000"; "mesh: 14% of the area
   fits a primitive"), as the reply does for `up_axis: auto`.
-- The default is also a user preference in the settings store
-  (docs/ui/settings.md), so a user can make `solid` or `mesh` their default.
-  A per-import `representation` overrides it.
+- The default is the existing `mesh_representation` preference
+  (docs/ui/settings.md), which gains the same two values. A per-import
+  `representation` overrides it.
 - If the stage-0 measurement shows recognition does not scale to the sizes
   that matter, `auto` instead takes `mesh` above a limit derived from the
-  measured B-Rep import cost (about 10 s) and today's solid import below it.
+  measured B-Rep import cost (about 10 s) and `recognize` below it.
   `topo_to_body` follows the same rule.
 - An open mesh is kept, reported as open with its boundary loops and the
   length of the longest. It is no longer skipped.
@@ -528,8 +535,10 @@ often the better part than a cradle, because it stays fully parametric.
 - `auto` on a mechanical fixture below the limit gives a solid with
   recognised holes; on the organic blob it gives a mesh body; at or above the
   limit it gives a mesh body and recognition never runs. The reply names the
-  choice and the reason in each case, and `solid` and `mesh` force it.
-- A user preference of `solid` or `mesh` replaces `auto` as the default, and a
+  choice and the reason in each case, and `facets`, `recognize` and `mesh`
+  force it.
+- A `mesh_representation` preference of `mesh` replaces `auto` as the
+  default, and a
   per-import value overrides it.
 - A Cradle job reports progress. Cancelling an edit leaves the document
   byte-identical with no undo step. Cancelling the build during open leaves
