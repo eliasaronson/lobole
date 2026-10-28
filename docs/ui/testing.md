@@ -249,6 +249,14 @@ on each of its 3 000 snapshots (quadratic; 19 s of CPU, now 4), and the
 reader fuzz read one 50 KB blob 25 000 times for a damaged index (7 s of CPU
 against a 9 s budget, now 0.4).
 
+Waiting for the GPU is not the test's time either. Every test that runs on
+a virtual display goes through `tools/xvfb-exec.sh`, which takes the
+machine-wide GPU lock, and a test queued behind another worktree's GUI suite
+used to wait for it inside ctest's clock: `remote_smoke` waited 9.5 of its
+600 s, and the timeout killed its display 24 s into the real run. So when
+the selection holds such a test, `tools/ctest` takes the GPU lock once for
+the whole run, before ctest starts, and says it is waiting.
+
 ## Recording a scene
 
 The test engine records video: `ctx->CaptureBeginVideo()` and

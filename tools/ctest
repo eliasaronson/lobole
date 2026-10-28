@@ -47,6 +47,30 @@ done
 [ -d "$dir" ] || [ ! -d "$root/$dir" ] || dir="$root/$dir"
 [ -d "$dir" ] || { echo "ctest: no build directory $dir" >&2; exit 2; }
 dir="$(cd "$dir" && pwd)"
+# The GPU lock tools/xvfb-exec.sh takes per test, taken here for the whole run
+# when a selected test goes through it, BEFORE ctest's clock starts: queued
+# behind another worktree's GUI suite, remote_smoke spent 9.5 of its 600 s
+# waiting inside xvfb-exec, and the timeout killed its display 24 s into the
+# real run. Taken before build/'s lock, as gui-tests-xvfb.sh does, so a run
+# waiting here does not hold up a merge.
+selected() {
+  local q=""
+  for a in ${rest[@]+"${rest[@]}"}; do q+=" $(printf '%q' "$a")"; done
+  if [ -n "${IN_NIX_SHELL:-}" ] || ! command -v nix-instantiate >/dev/null; then
+    (cd "$dir" && eval "ctest -N --show-only=json-v1$q")
+  else
+    "$root/tools/nix-run" "cd $(printf '%q' "$dir") && ctest -N --show-only=json-v1$q"
+  fi
+}
+if [ "${LOBOLE_GUI_LOCKED:-}" != "1" ] &&
+  selected 2>/dev/null | grep -q 'xvfb-exec\.sh'; then
+  exec 7>/tmp/designer-gui-gpu.lock
+  if ! flock -n 7; then
+    echo "ctest: waiting for the GPU lock (another GUI suite is running)" >&2
+    flock 7
+  fi
+  export LOBOLE_GUI_LOCKED=1
+fi
 # shellcheck source=build-lock.sh
 . "$root/tools/build-lock.sh"
 build_lock_shared "$dir" 9
@@ -115,7 +139,7 @@ for a in ${rest[@]+"${rest[@]}"}; do quoted+=" $(printf '%q' "$a")"; done
 # holding the lock. This shell holds it until ctest returns. Inside shell.nix
 # already, or on a machine without nix (CI), ctest is the one on PATH.
 if [ -n "${IN_NIX_SHELL:-}" ] || ! command -v nix-instantiate >/dev/null; then
-  cd "$dir" && eval "ctest$quoted" 9>&-
+  cd "$dir" && eval "ctest$quoted" 9>&- 7>&-
 else
-  "$root/tools/nix-run" "cd $(printf '%q' "$dir") && ctest$quoted" 9>&-
+  "$root/tools/nix-run" "cd $(printf '%q' "$dir") && ctest$quoted" 9>&- 7>&-
 fi
