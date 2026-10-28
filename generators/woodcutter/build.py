@@ -7,7 +7,7 @@ chop per turn. The axe cam lifts the woodcutter's arms slowly through a rod
 and a link and drops them onto the log; the bird's cam, phase-shifted on the
 same shaft, makes the bird peck while the axe is rising. The box is printed
 panels pegged together, the shaft turns in printed bushings, and a crank on
-its end turns it. Phases 2 to 4 of docs/plans/woodcutter-automaton.md.
+its end turns it. Phases 2 to 5 of docs/plans/woodcutter-automaton.md.
 
     python3 generators/print_coupon.py --port 8800 --seed
     python3 generators/woodcutter/build.py --port 8800 --profile "K5 PLA on P1S"
@@ -43,10 +43,14 @@ What it builds and checks (the receipt holds every number):
   refused as a contact;
 - the print plates on the profile's bed, each checked (every item), and the
   print job; with --slice, sliced by your Bambu Studio for its time and
-  filament.
+  filament;
+- the bill of materials and the drawings (woodcutter_drawings.py): the
+  assembly with an exploded view and its balloons, a sheet per cam, each
+  check_drawing clean.
 
 Output (generated, untracked): scratch/woodcutter/ -- woodcutter.lob,
-woodcutter.json (the receipt), woodcutter_job.3mf and the renders.
+woodcutter.json (the receipt), woodcutter_job.3mf, woodcutter_bom.csv, the
+sheets (PDF and SVG) and the renders.
 """
 import argparse
 import json
@@ -60,6 +64,7 @@ from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
+import woodcutter_drawings as D  # noqa: E402
 import woodcutter_parts as P  # noqa: E402
 import woodcutter_fem as F  # noqa: E402
 import woodcutter_spec as S  # noqa: E402
@@ -1131,9 +1136,28 @@ def main():
     else:
         job = {"skipped": "no print profile with a bed: the built-in table "
                           "is no printer to lay the plates on"}
+    stage("plates")
+    # The drawings and the bill (woodcutter_drawings.py), once the plates
+    # are laid out: the bill names the plate each part prints on.
+    dw = D.drawings(d, s, out, {k: v["report"] for k, v in cams.items()},
+                    f"Printed {mat.upper()} on {args.profile}. Nothing "
+                    f"bought.", bool(plates))
+    b = dw["bom"]
+    print(f"  bill of materials: {b['rows']} parts, {b['pieces']} pieces, "
+          f"all printed in {'/'.join(b['materials'])}, nothing bought: "
+          f"{b['printed_g']:.1f} g printed ({b['solid_g']:.1f} g solid) -> "
+          f"{Path(b['path']).name}")
+    a = dw["assembly"]
+    print(f"  drawing assembly: front, side and exploded, {a['balloons']} "
+          f"balloons laid out, none crossing; check_drawing clean")
+    for k in ("axe", "bird"):
+        c = dw[f"{k} cam"]
+        print(f"  drawing {k} cam: its motion and lift table; the drawn "
+              f"outline within {c['outline_vs_table_mm']:.3f} mm of the "
+              f"table; check_drawing clean")
     d.call("set_active_part", part=ASM)
     d.call("save_project", path=str(out / "woodcutter.lob"))
-    stage("plates")
+    stage("drawings")
     elapsed = time.perf_counter() - t0
     receipt = {"width": args.width, "process": proc,
                "gap": {"allowance_mm": gap["allowance_mm"],
@@ -1162,6 +1186,7 @@ def main():
                "sequence": {"pass": seq["pass"], "steps": seq_rows,
                             "seconds": seq.get("seconds")},
                "plates": plates, "job": job, "sliced": sliced,
+               "drawings": dw,
                "study_seconds": t_study, "stage_seconds": stages,
                "seconds": elapsed}
     (out / "woodcutter.json").write_text(json.dumps(receipt, indent=1,

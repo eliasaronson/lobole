@@ -38,9 +38,10 @@ camshaft's bushings and the crank, checks the mechanism over a crank turn
 and across the drop with requirements and negative controls, checks every
 part as it prints, lays them on one P1S plate, states the assembly
 sequence, and studies the camshaft, the crank and the handle's pin on pin
-supports under the loads `check_followers` reports
-([its README](../../generators/woodcutter/README.md)). What follows is the
-rest of the automaton.
+supports under the loads `check_followers` reports, and draws it: the
+assembly with an exploded view and its balloons, a sheet per cam, and the
+bill of materials ([its README](../../generators/woodcutter/README.md)).
+What follows is the rest of the automaton.
 
 Two limits of that work shape the design below:
 
@@ -55,16 +56,6 @@ Two limits of that work shape the design below:
   studies over cam pairs run `clash_mode: mesh`, which judges a contact
   relation's cam and follower by `check_followers`' cuts across the width
   ([motion studies](../assemblies/README.md#motion-studies)).
-
-## Phase 5: drawings and BOM (size: S)
-
-- An assembly drawing (front, side, an exploded view, balloons through
-  `layout_balloons`) and `export_bom`: every printed part with its material,
-  printed mass and plate. Nothing is bought, so the BOM has no fastener rows.
-- Part drawings for each cam, with its lift diagram. A drawing table of the
-  CamProfile's motion counts if one is there to use. Otherwise the gap is
-  recorded for the roadmap.
-- `check_drawing` is clean.
 
 ## Phase 6: the film (size: S)
 

@@ -7,9 +7,9 @@ makes the bird peck while the axe is rising. Everything is printed and
 nothing is bought: the box is five panels pegged together, the camshaft
 turns in printed bushings, and a crank on its end turns it. This is the
 automaton designed and checked in the app, its loaded parts studied on
-pins, and laid out to print (phases 2 to 4 of
-[the plan](../../docs/plans/woodcutter-automaton.md)); its drawings, film
-and the print itself are the plan's later phases.
+pins, laid out to print, drawn and billed (phases 2 to 5 of
+[the plan](../../docs/plans/woodcutter-automaton.md)); its film and the
+print itself are the plan's later phases.
 
 ```sh
 tools/headless-preview.sh --start 8800
@@ -23,7 +23,9 @@ no printer. Output (untracked) goes to `scratch/woodcutter/`:
 `woodcutter.lob`, the receipt `woodcutter.json` (every number below, from
 the app), the print job `woodcutter_job.3mf`, and quick stills: at rest,
 the bird pecking, the axe raised, the raised axe from the side, and each
-print plate. `--no-render`, or a headless instance, skips the stills.
+print plate; the bill of materials `woodcutter_bom.csv`, and the sheets as
+PDF and SVG: `woodcutter_assembly`, `woodcutter_axe_cam` and
+`woodcutter_bird_cam`. `--no-render`, or a headless instance, skips the stills.
 `--slice` slices the job with your Bambu Studio CLI (the project config
 made by `tools/bambu-config.py` from its P1S presets) and reports its time
 and filament.
@@ -31,7 +33,8 @@ and filament.
 Files: `woodcutter_spec.py` (every size and both motions, no app),
 `woodcutter_parts.py` (one function a part, and the way each prints),
 `woodcutter_fem.py` (the studies of the camshaft, the crank and the
-handle's pin),
+handle's pin), `woodcutter_drawings.py` (the exploded view, the sheets and
+the bill),
 `build.py` (the project, the checks, the controls, the sequence, the
 plates, the receipt), `test.json` (the
 [generator test](../README.md#the-big-generators-as-tests)).
@@ -265,7 +268,50 @@ At W = 120 on K5 PLA on the P1S:
 Runtime: 115 s on a quiet machine without stills before the FEM, which
 adds about 45 s (the negative controls are the largest share: each one
 rebuilds a cam and runs a study again), 186 s with the stills and the
-slicing before the FEM; 265 s under load with it.
+slicing before the FEM; 265 s under load with it. The drawings and the
+bill add about 9 s.
+
+## Drawings and the bill
+
+`woodcutter_drawings.py` runs once the plates are laid out, and every sheet
+must pass `check_drawing` with no issue or the run stops. At W = 120:
+
+- **The bill** (`export_bom`): 25 parts, 44 pieces, every one printed in
+  PLA and none bought (a bought row stops the run), each weighed as it
+  prints and on its plate (`plate 1 x16` for the pegs). 146.7 g printed,
+  the plates' own sum, against 342.2 g were it solid.
+- **The assembly** (A1): the front, which is the open side (the app's
+  `back`: the box's back panel stands on -Y, the app's front), and the
+  view from the crank at 1:1 down the left; the exploded view in iso at
+  2:1 beside them; the parts list on the title block, its mass as made;
+  25 balloons laid out by `layout_balloons`, none crossing. Each view is
+  placed from its own projected box with a ring round it for the balloons,
+  so another width lays itself out.
+- **The exploded view** is the assembly's own (named `drawing`, left
+  inactive on the model tab), every step from the box's sizes: the walls
+  W / 8 off the shaft's ends, the bushings, the crank, the grip and its
+  pin W / 12 further apart along it; the top H / 3 up off the rods, the
+  rods half that, the figures with their levers, links and pins H / 4 over
+  the top; each peg half way between its two panels; the camshaft and its
+  cams stay. The back drops H / 2 and comes forward half the depth: the
+  iso looks from behind (+X, -Y, +Z), so where it stood it would hide the
+  shaft and the cams.
+- **A sheet per cam** (A3, 2:1): the cam down the shaft from +X, where it
+  turns counter-clockwise, and from the side; its width, the bore's
+  diameter and its flat; the motion as the feature has it (each
+  segment's angles, law and rise) and the lift every 15° at the tip's
+  centre, both before and after the axe's drop; the base and largest radii,
+  the follower and the worst pressure angle. The lift is measured clockwise
+  from the top, where the follower stands: the follower stands at -θ on a
+  cam turning +θ.
+- **The lift table is checked against the drawn outline**: at each angle
+  the tip's centre stands base + tip + lift from the axis, and the outline
+  the exported SVG draws must pass a tip radius from it, to half the line's
+  width (0.175 mm on the sheet). It does to 0.098 mm on the axe's and 0.145
+  on the bird's, the polyline's chords on the B-spline. Left out: the
+  drop's angle and the 16.8° after it, where the tip, a tip radius wide,
+  still meets the step's face (it is falling there, as check_followers
+  leaves the drop's corners out).
 
 ## What the app needed (fixed with this generator)
 
@@ -302,6 +348,21 @@ And with the box (phase 3):
   ([known bugs](../../docs/known-bugs.md#a-cylinder-added-flush-with-the-tangent-of-another-leaves-a-free-edge));
   the foot reaches a nozzle's width past the rod instead.
 
+And with the drawings (phase 5):
+
+- A drawing could not show an exploded view: a sheet view of an assembly
+  now names one of its exploded views (`exploded_view`, vNEXT;
+  [exploded views](../../docs/drawings/README.md#exploded-views)).
+- The bill weighed every part solid, so a printed part at 15 % infill read
+  more than twice what it prints at, and nothing said which plate a part
+  prints on. A printed row now carries its printed mass and its plates, in
+  `bom`, the CSV and a sheet's parts list
+  ([bill of materials](../../docs/assemblies/README.md#bill-of-materials)).
+  The parts list wrote a pin's 0.05 g as 0.0.
+- The generator's negative controls put the cams back with
+  `modify_feature`, which replaces the whole spec: without the material in
+  it, the cams were saved with none, and the bill could not weigh them.
+
 `tests/contact_loop_smoke.py` builds this mechanism with this code and
 holds the app to each.
 
@@ -326,4 +387,8 @@ holds the app to each.
   hubs, the axe cam's base radius (the hub's floor), the bushings and the
   box's height. Which lean to design for, and whether the shaft steps up
   outside the left wall, are for the next round.
-- The drawings, the film and the print: the plan's later phases.
+- No lift diagram: the app draws no graph or generated table of a
+  CamProfile's motion, so a cam's sheet carries the motion and the lift as
+  tables the generator writes from the feature's own segments
+  ([drawings, not done](../../docs/drawings/README.md#not-done)).
+- The film and the print: the plan's later phases.
