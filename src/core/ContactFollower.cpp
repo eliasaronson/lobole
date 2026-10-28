@@ -16,6 +16,7 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepLProp_CLProps.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
+#include <GCPnts_UniformDeflection.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
@@ -31,6 +32,7 @@
 #include <map>
 #include <mutex>
 #include <numeric>
+#include <vector>
 
 namespace contact {
 
@@ -110,6 +112,42 @@ double SignedRadius(double radius, glm::dvec2 centre, glm::dvec2 p,
   return glm::dot(centre - p, nTowardOther) < 0.0 ? radius : -radius;
 }
 
+// Parameters along `c` whose chords stay within `deflection` of it.
+// GCPnts_QuasiUniformDeflection judges a span by its end tangents, and
+// before OCC 7.7 it starts from the whole curve: a section's B-spline whose
+// two ends point the same way (a snail cam's flank, which ends where it
+// began, round the axis) came back as those two ends, a chord across the
+// cam. Each chord is checked at its middle, and a sampling that strays is
+// done again uniformly.
+std::vector<double> SampleCurve(const BRepAdaptor_Curve& c, double deflection) {
+  std::vector<double> u;
+  const auto stray = [&] {
+    for (size_t i = 0; i + 1 < u.size(); i++) {
+      const gp_Pnt a = c.Value(u[i]), b = c.Value(u[i + 1]);
+      const gp_Pnt m = c.Value(0.5 * (u[i] + u[i + 1]));
+      const gp_Vec ab(a, b), am(a, m);
+      const double len = ab.Magnitude();
+      const double off =
+          len > 0.0 ? ab.Crossed(am).Magnitude() / len : am.Magnitude();
+      if (off > 10.0 * deflection)
+        return true;
+    }
+    return false;
+  };
+  GCPnts_QuasiUniformDeflection quasi(c, deflection);
+  if (quasi.IsDone())
+    for (int i = 1; i <= quasi.NbPoints(); i++)
+      u.push_back(quasi.Parameter(i));
+  if (u.size() >= 2 && !stray())
+    return u;
+  u.clear();
+  GCPnts_UniformDeflection uniform(c, deflection);
+  if (uniform.IsDone())
+    for (int i = 1; i <= uniform.NbPoints(); i++)
+      u.push_back(uniform.Parameter(i));
+  return u;
+}
+
 } // namespace
 
 Outline SectionOutline(const TopoDS_Shape& shape, double z, double deflection,
@@ -134,12 +172,12 @@ Outline SectionOutline(const TopoDS_Shape& shape, double z, double deflection,
   for (TopExp_Explorer ex(sec.Shape(), TopAbs_EDGE); ex.More(); ex.Next()) {
     const TopoDS_Edge e = TopoDS::Edge(ex.Current());
     BRepAdaptor_Curve c(e);
-    GCPnts_QuasiUniformDeflection sampler(c, deflection);
-    if (!sampler.IsDone() || sampler.NbPoints() < 2)
+    const std::vector<double> params = SampleCurve(c, deflection);
+    if (params.size() < 2)
       continue;
     const int first = static_cast<int>(o.pts.size());
-    for (int i = 1; i <= sampler.NbPoints(); i++) {
-      const double u = sampler.Parameter(i);
+    for (size_t i = 0; i < params.size(); i++) {
+      const double u = params[i];
       BRepLProp_CLProps props(c, u, 2, 1e-9);
       const gp_Pnt p = props.Value();
       o.pts.push_back({p.X(), p.Y()});
@@ -165,7 +203,7 @@ Outline SectionOutline(const TopoDS_Shape& shape, double z, double deflection,
       o.tangent.push_back(tan);
       o.lo = glm::min(o.lo, o.pts.back());
       o.hi = glm::max(o.hi, o.pts.back());
-      if (i > 1)
+      if (i > 0)
         o.segs.push_back({static_cast<int>(o.pts.size()) - 2,
                           static_cast<int>(o.pts.size()) - 1});
     }
