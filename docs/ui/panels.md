@@ -142,12 +142,15 @@ DOF fields — `DrawMateDofFields`) in the mate tool's edit mode
   place; a screw's one mate is both sides. A gear made from teeth edits its
   teeth (`###rel_teeth_a`, `###rel_teeth_b`) and shows the ratio; a relation
   over several mates shows a combo per member by role (`###rel_term_<i>`),
-  its teeth and its constant (`###rel_constant`).
+  its teeth and its constant (`###rel_constant`); a contact relation shows
+  its sense (`###rel_toward_edit`) and its table, with no ratio or phase.
 - **Add relation** (`###rel_add`, under the Relations list) opens the same
   window in create mode (`AppState::asmNewRelation`, the draft in
   `relationDraft`): a Kind combo (`###rel_kind`: gear, internal, linear,
-  epicyclic, geneva), the members, the teeth (a Geneva's `###rel_slots` and
-  `###rel_start`), and for an epicyclic a Planets list
+  epicyclic, geneva, contact), the members, the teeth (a Geneva's
+  `###rel_slots` and `###rel_start`; a cam contact's `###rel_follower_moves`,
+  Slides or Turns, and `###rel_toward`, From gravity, Positive or
+  Negative), and for an epicyclic a Planets list
   with `###rel_planet_add`. What the draft lacks is the red line
   (`asmEditRefusal`) and Accept (`###rel_new_accept`) stays disabled
   ([relations.md](../assemblies/relations.md#in-the-app)).

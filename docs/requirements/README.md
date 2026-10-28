@@ -105,7 +105,8 @@ cam with no drop); `pressure_angle_deg`, the worst over the samples;
 `deviation_mm` or `deviation_deg`, the realised motion against the one its
 CamProfile was cut for (refused for a cam that is not a CamProfile's); and
 `gap_mm` or `gap_deg`, the worst a sample stands off the cam or into it.
-A quantity in the other unit than the follower moves in is refused. The
+A quantity in the other unit than the follower moves in is refused, and so
+is a study whose driver slides. The
 study is run, or its result reused, first; the key is the study's. A design
 sweep refuses it, as it refuses the other study kinds.
 

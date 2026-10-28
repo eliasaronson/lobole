@@ -155,7 +155,7 @@ Only what `describe` cannot express:
   [sketching](../sketching/README.md#text)).
 - **Assembly verbs that mate by frame name**: `asm.place`, `fasten`,
   `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `gear`, `chain`,
-  `rack`, `screw`, `cam`, `motion`, `bolt`, and `asm.check()`, which raises
+  `rack`, `screw`, `cam`, `contact`, `motion`, `bolt`, and `asm.check()`, which raises
   on a floating occurrence, a clash or a near miss.
 - **`part.check(solids=)`** — raises on any errored feature, prints
   warnings, and optionally requires a solid count.

@@ -341,6 +341,7 @@ feature appeared.
 | Split / Refine | `###tb_split`, `###tb_refine` | `split/*`, `refine/merges_the_seam_left_by_a_union` |
 | Rib | `###tb_rib` | `rib/menu_rib_previews_and_adds_volume` |
 | Thread | `###tb_thread` | `thread/face_pick_fills_the_slot` |
+| Cam profile | `###tb_cam_profile` | `cam_profile/tool_cuts_the_default_lobe_on_a_picked_hub` (the hub's radius and length, the lobe's top) |
 | Boolean | `###tb_boolean` | tests in `GuiTestsProject.cpp` and `refine/merges_the_seam_left_by_a_union` |
 | Pattern / Mirror | `###tb_pattern`, `###tb_mirror` | `pattern/*` (including `pattern/cut_row_is_the_pattern_source`: a hole patterns as a hole, its source the cut's tree row) |
 | Sheet metal | `###tb_base_flange`, `###tb_edge_flange`, `###tb_flat_pattern`, `###tb_hem`, `###tb_jog`, `###tb_corner_relief`, `###tb_normal_cut`, `###tb_unfold`, `###tb_refold` (one flyout, `**/sheet/###more`) | `sheetmetal/edge_pick_bends_a_wall`, `sheetmetal/panel_declares_the_stock`, `sheetmetal/flat_view_on_a_sheet` |

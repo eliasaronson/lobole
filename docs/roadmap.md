@@ -101,12 +101,11 @@ them:
 - **Relations with two inputs:** a relation reads one mate; a delivery valve
   whose timing follows both the camshaft and the rack cannot be expressed.
 - **Springs** that stretch between two occurrences and follow the motion.
-- **A follower driven by contact.** A cam relation takes a lift table, so a
-  lever that pushes a rod's crank through a sliding contact needs that table
-  computed outside the app from the two shapes, and is only as right as the
-  outside model of them. A relation solved from the touching faces (the
-  follower turns until it touches, at every pose) would keep it right when
-  either part changes.
+- **Contact beyond a disc cam.** The `contact` relation solves a follower
+  from a cam's shape in the planar case only, with the cam's axle and the
+  follower's guide rigid to each other: a barrel or face cam, a follower
+  driven by another follower, and a roller that spins on its own pin are
+  not built ([relations.md](assemblies/relations.md#contact)).
 - **The space a moving part sweeps, as geometry.** A motion study says
   whether two parts clash at each sample; designing a part to clear a
   housing over a whole stroke needs the region the housing leaves free in

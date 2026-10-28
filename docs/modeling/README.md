@@ -1427,7 +1427,7 @@ Headless, one file per feature (`tests/test_extrude.cpp`,
 `test_twist_extrude`, `test_revolve`,
 `test_datum`, `test_primitives`, `test_boolean`, `test_pattern`, `test_fillet`, `test_shell`,
 `test_draft`, `test_split`, `test_refine`, `test_rib`, `test_thread`,
-`test_hole`, `test_worm`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,
+`test_hole`, `test_worm`, `test_cam_profile`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,
 `test_derived`, `test_toponaming`, and `test_direct_edit` for the four
 [direct edits](#direct-edit), on a 40×30×20 block and on real STEP files in
 `tests/fixtures/step/`, each pair equal to the file with the edit made at its

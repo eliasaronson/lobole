@@ -21,7 +21,8 @@ Either side may be a mate inside a
 [flexible sub-assembly](README.md#flexible-sub-assemblies) placement, named
 `{path, mate}` (`add_relation {a_path, b_path}`): an engine's chain drives
 its pump's own camshaft mate. Freewheels and clicks cannot, since their
-history would be per-placement state.
+history would be per-placement state, and neither can a contact relation,
+whose cam and follower are occurrences of this assembly.
 
 ## Kinds
 
@@ -279,7 +280,10 @@ motion study sees it.
 
 **The first touch** (`contact::FirstTouch`). Each section's edges are
 sampled within a chord error of an eighth of the contact tolerance, which is
-1e-5 of the smaller outline's size (0.4 µm on a 40 mm cam). The follower is
+1e-5 of the smaller body's in-plane bounding-box diagonal (usually the
+follower's: 0.11 µm for a pin of Ø8, 0.4 µm for a 40 mm one). Each body is
+cut with the section's curves approximated (OCC's walking intersection
+returns a polyline whose sagitta is a hundred times the tolerance). The follower is
 carried along its path — a translation along the slide, a rotation about the
 pivot — and every vertex of one outline is cast against the segments of the
 other; the first hit in the `toward` sense is the contact. A turning
@@ -296,12 +300,16 @@ them (three-point tangents) reproduces an exact solve at every interval's
 midpoint within a quarter of the tolerance. An interval that keeps failing
 down to a microradian and jumps by more than ten tolerances is a **drop** — a
 snail cam's step face — kept as a step the interpolation does not smooth;
-steps less than a degree apart are one drop (a follower with a rounded tip
-slides down the step face before it falls clear, which reads as a run of
-them), read linearly across.
-`list_relations` reports, per contact relation, `contact {points,
-tolerance_mm, bound_mm | bound_deg, drops [{at_deg, height_mm |
-height_deg}], bridges_deg}`.
+steps less than a degree apart are one step, read linearly across. A
+**drop**, as the follower check reads it, is the whole descent such a step
+(or a stretch falling toward the cam with the pressure angle over 75° at
+both ends: a rounded tip sliding down a step face, which no cam drives) is
+part of, from the top the follower rolls off to where it comes to rest,
+when it falls more than ten tolerances. A step met from below — the cam
+turning against the way its steps were cut — is recorded the same way and
+reported as a jam. `list_relations` reports, per contact relation,
+`contact {points, tolerance_mm, bound_mm | bound_deg, drops [{at_deg,
+to_deg, height_mm | height_deg}], bridges_deg}`.
 
 **Cached, never stored.** The table is derived state, cached on both
 bodies' geometry, the frames between the two mates and `toward`
@@ -324,6 +332,11 @@ says whether each contact relation's follower stays on its cam, answered
 from the study's STORED run (a missing or stale one is refused: run it
 first). Per relation (`follower::Check`, `src/core/FollowerCheck.{h,cpp}`,
 pure; the RPC in `src/remote/RemoteMotion.cpp`):
+
+Samples inside a drop are in free fall: they are counted
+(`samples_in_drops`) and left out of the checks below that read a contact.
+A study whose driver slides is refused (a speed in rpm needs one that
+turns).
 
 - **Touching, across the width.** The solve cuts the two bodies in the
   middle of the width they share; the check cuts them at nine heights
@@ -358,14 +371,16 @@ pure; the RPC in `src/remote/RemoteMotion.cpp`):
   name) that gives the generalised inertia M(q) = Σ m|∂x/∂q|² + ωᵀIω and
   gravity force Q(q) = Σ m g·∂x/∂q. At a steady cam speed ω contact holds
   while toward·(Q − (M q″ + ½M′q′²) ω²) ≥ 0, with q′ and q″ from exact
-  touches either side of 720 angles. Where that bracket opposes Q the
-  follower leaves above ω = √(Q / bracket); the least over the turn is
+  touches either side of 720 angles (none inside a drop). Where the bracket
+  has Q's sign — the motion asks for more acceleration toward the cam than
+  gravity gives — the follower leaves above ω = √(Q / bracket); the least over the turn is
   `liftoff_rpm`, in the study driver's rpm (the driver-to-cam ratio is read
   from the samples). Where Q itself pushes it off, `held` is false over
   `not_held_deg` — any speed. Each drop reports its height, its free-fall
   time √(2h·M/|Q|), the dwell the cam holds the landing level for (within
   ten table tolerances) and `drop_rpm`, the speed it just lands in time; at
-  `speed_rpm`, the cam's turn while it falls and whether it `lands`.
+  `speed_rpm`, the cam's turn while it falls and whether it `lands`. A
+  step met from below `jams`, and the follower then does not hold.
   Friction in the guide is not modelled, so `liftoff_rpm` is an upper
   bound.
 

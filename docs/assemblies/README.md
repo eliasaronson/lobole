@@ -10,8 +10,9 @@ Two topic pages carry the detail:
   maths, the placement pass, and the numeric pass that closes mate loops.
 - [relations.md](relations.md) — couplings between mates' degrees of
   freedom: gear (external or internal), chain, rack, screw, linear, cam,
-  freewheel, click, worm, intermittent (a carry, a Geneva), and over
-  several mates linear_n, epicyclic and planet.
+  freewheel, click, worm, intermittent (a carry, a Geneva), contact (a
+  follower solved from its cam's shape), and over several mates linear_n,
+  epicyclic and planet; and the follower check.
 
 ## Projects and documents
 
@@ -282,7 +283,9 @@ overwritten by the next solve.
 ## Relations
 
 A relation couples mates' degrees of freedom — `dof_b = ratio · dof_a +
-phase` for gear, chain, rack, screw and linear; a lift table for a cam; a
+phase` for gear, chain, rack, screw and linear; a lift table for a cam (or
+the motion a CamProfile feature was cut for); the cam's own shape for a
+contact relation, the follower standing where it first touches; a
 one-way drive for a freewheel; a pawl for a click; one step a turn, standing
 still between, for an intermittent relation (a carry); and Σ cᵢ · dofᵢ = constant
 over several mates for linear_n and an epicyclic train (Willis, and each
@@ -407,6 +410,10 @@ together in order.
   ([studies as jobs](../simulation/README.md#studies-as-jobs)).
 - `export_motion` writes an animated GLB (metres, Y-up, 24 fps) and refuses
   when any sample is unsolved.
+- `check_followers` reads a stored run for each contact relation: whether
+  the follower stays on its cam, its pressure angle, the motion against the
+  cam's design, and the speed gravity loses it at
+  ([the follower check](relations.md#the-follower-check)).
 
 Code: `src/core/MotionStudy.{h,cpp}`, `src/remote/RemoteMotion.cpp`,
 `src/ui/MotionActions.cpp`.
@@ -982,8 +989,9 @@ step.
   or Cancel. An unnamed face cannot be mated.
 - **Occurrence panel** (`src/ui/OccurrencePanel.cpp`): occurrences, mates
   (status, Flip, Rotate 90°, DOF fields, re-pick connector), relations (ratio,
-  phase, a freewheel's `lead` read-only; created over RPC only, since it needs
-  two mates picked), right-click a row to open what it references.
+  phase, a freewheel's `lead` read-only, a contact relation's sense; Add
+  relation makes a gear, internal gear, linear, epicyclic, Geneva carry or
+  cam contact), right-click a row to open what it references.
 - **Gizmo** (`src/ui/GizmoInput.cpp`): on a selected, non-fixed, non-riding
   occurrence. A free occurrence gets world translate arrows and rotate arcs; a
   mated one only its mate's free DOF, and the drag writes the mate's DOF and
@@ -1015,7 +1023,7 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
   `list_relations`.
 - Motion: `add_motion_study`, `set_motion_study`, `remove_motion_study`,
   `list_motion_studies`, `run_motion_study`, `motion_status`,
-  `set_motion_pose`, `export_motion`, `export_motion_video`,
+  `check_followers`, `set_motion_pose`, `export_motion`, `export_motion_video`,
   `motion_video_status`.
 - Exploded views: `add_exploded_view`, `remove_exploded_view`,
   `list_exploded_views`, `set_explode_step`, `auto_explode`, `set_explode`.
@@ -1030,7 +1038,8 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
 - `edit_in_context`.
 
 The Python SDK (`python/lobole/sdk.py`) wraps these on `Asm`: `gear`,
-`chain`, `rack`, `screw`, `cam`, `freewheel`, `click`, `motion`, `check`
+`chain`, `rack`, `screw`, `cam`, `contact`, `freewheel`, `click`, `worm`,
+`intermittent`, `epicyclic`, `linear_n`, `motion`, `check`
 (connectivity, declared clearances and clashes, with an `allow` map of exact
 pairs and volume ceilings for intended contact). `Occurrence.frame(name)`
 reads where a part's named frame sits in the world; `Part.frame(...)` creates
@@ -1045,6 +1054,8 @@ one.
 | `src/core/AssemblyFlexible.cpp` | flexible sub-assemblies: `ExpandFlexible`, `CollapseFlexible`, `FlexibleRefusal`, mates named `{path, mate}` |
 | `src/core/AssemblyLoopSolve.{h,cpp}` | the loop solve; `MateAdjustFor`, `DeriveMateDofs` |
 | `src/core/MotionStudy.{h,cpp}` | running a motion study |
+| `src/core/ContactFollower.{h,cpp}` | the contact relation: sections, the first touch, the table and its cache |
+| `src/core/FollowerCheck.{h,cpp}` | the follower check: the cuts across the width, pressure angle, deviation, gravity and drops |
 | `src/core/SequenceTimeline.{h,cpp}` | an assembly sequence's timeline: each step's parts in time along their path |
 | `src/core/io/SerializeAssembly.cpp`, `Serialization.cpp` | JSON and the directory layout |
 | `src/ui/AssemblyActions.{h,cpp}` | solve/undo/selection glue, staleness, in-context entry, explode |
@@ -1063,6 +1074,7 @@ one.
   partitioning, driven DOF held, which tilted connector keeps a loop open —
   `-L diagnose`), `test_assembly_relations.cpp` (every
   relation kind, propagation order, freewheel/reverser/click, loop rows),
+  `test_contact_relation.cpp`, `test_follower_check.cpp`,
   `test_assembly_flatten.cpp`, `test_motion.cpp`,
   `test_flexible_subassembly.cpp` (a parent relation into an inner mate,
   two placements posed apart, a configuration per placement, clashes per
@@ -1071,6 +1083,8 @@ one.
   placements in a configuration and a material).
 - Headless smokes: `assembly_smoke.py`, `assembly_mates_smoke.py`,
   `assembly_loops_smoke.py`, `assembly_relations_smoke.py`,
+  `contact_relation_smoke.py`, `follower_check_smoke.py` (a pin on a snail
+  cam: turned the wrong way it jams, the right way it stays on),
   `assembly_propagation_smoke.py`, `nested_assembly_smoke.py`,
   `bom_smoke.py`, `exploded_smoke.py`, `motion_smoke.py`,
   `study_jobs_smoke.py` (job ids, a run cancelled with its client, reuse,
@@ -1086,7 +1100,7 @@ one.
 - GUI (`src/app/guitests/GuiTestsAssembly.cpp`, category `assembly`): mate
   hover marker and snaps, re-pick connector, mate tool rotate, sub-assembly
   insert/open/drag, relation and mate rows, BOM through a sub-assembly, motion
-  scrub, a sequence played and stopped, and `motion_video_frames_are_the_view` (a filmed frame is the
+  scrub, a sequence played and stopped, `add_relation_cam_contact`, and `motion_video_frames_are_the_view` (a filmed frame is the
   viewport, not the window). `GuiTestsFlexible.cpp` (category `flexible`):
   tick Flexible (and the refusal for a unit with nothing fixed), pick a
   configuration, a relation side and a study driver inside the unit and run
@@ -1103,10 +1117,12 @@ one.
 - Editing into a sub-assembly from its parent.
 - A per-occurrence appearance override (a placement's `material` exists).
 - A gear relation's phase derived from the gears' geometry; creating the
-  kinds other than gear, internal gear, linear, epicyclic and a Geneva carry
-  from the GUI.
+  kinds other than gear, internal gear, linear, epicyclic, a Geneva carry
+  and a cam contact from the GUI.
 - Contact dynamics: gears and cams are kinematic relations, checked for
-  clash statically and over motion studies.
+  clash statically and over motion studies. A contact relation's follower
+  check adds gravity and a steady drive speed (`check_followers`), not
+  springs, friction or impact.
 - A version pin on an occurrence's part (`part_version`).
 - More than one level of flexibility; a GUI drag of a flexible unit's
   planar or ball mates (`set_mate` with a path poses a turn and a slide

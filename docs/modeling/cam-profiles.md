@@ -25,12 +25,14 @@ the solid). Tests: `tests/test_cam_profile.cpp`, the GUI test
   the axis). A bore is refused.
 - **`frame`**: a Frame feature instead — Z the axis, X the zero. A frame has
   no radius and no length, so `base_radius_mm` and `width_mm` are then
-  required.
+  required, and the cam is its own body (`body: add` is refused: there is
+  no hub to add it to).
 
 In the cam's frame the follower stands on +X at angle 0. A sliding follower
 moves along +X on the line y = `offset_mm`; a turning one's pivot is at
-`pivot_mm` [x, y] and its contact point swings on `arm_mm` about it, placed
-where the arm meets the base circle on the follower's side. `turn` (`ccw`,
+`pivot_mm` [x, y], and `arm_mm` runs from it to the roller's (or tip's)
+centre, which starts where that arm meets the prime circle (the base radius
+plus the follower's radius) on the follower's side. `turn` (`ccw`,
 the default, or `cw`) is the sense the cam is driven in about its axis;
 seen from the cam, the follower then stands at −θ (or +θ).
 
