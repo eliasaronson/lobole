@@ -348,6 +348,88 @@ TEST_CASE("follower check: a drop falls freely and must land in its dwell",
   CHECK_THAT(follower::Check(in).drops[0].fallS, WithinRel(want, 1e-3));
 }
 
+TEST_CASE("follower check: the contact force holds the follower's statics",
+          "[follower][contact]") {
+  // A 12 g roller on a slide held down by gravity, on the cycloidal lobe,
+  // at 120 cam rpm. The force the cam puts on it along the slide is m q''
+  // w^2 + m g, its peaks known by hand: q'' = 2 pi h / b^2 on the rise and
+  // the fall. The shaft's torque is the contact force's moment about the
+  // cam's axis; by virtual work it must be that force times dq/da, read here
+  // from the solved samples, and over a turn (no drop, a steady speed) the
+  // shaft puts in no net work.
+  Rig t = MakeRig(Lobe(), 3.0);
+  const contact::Model& md = t.Model();
+  const double m = 0.012, rpm = 120.0;
+  const double w = rpm * 2 * M_PI / 60.0;
+  follower::Input in;
+  in.model = &md;
+  in.samples = Samples(t, 360);
+  in.mass = [&](double) { return follower::MassAt{m, -m * kG, 0.0}; };
+  in.speedRpm = rpm;
+  const follower::Report r = follower::Check(in);
+  REQUIRE(r.maxForceAt >= 0);
+  REQUIRE(r.maxTorqueAt >= 0);
+  const double peakT = std::abs(r.samples[r.maxTorqueAt].camTorque);
+  std::map<size_t, double> bAt; // the solved slide, by sample
+  for (const follower::Sample& smp : in.samples)
+    bAt[smp.index] = smp.b;
+  const size_t n = in.samples.size();
+  double work = 0.0, peakRise = 0.0, peakFall = 0.0, minN = 1e9;
+  double dwellN = 0.0, dwellT = 1.0;
+  size_t known = 0;
+  for (const follower::SampleOut& o : r.samples) {
+    if (!o.forceKnown)
+      continue;
+    known++;
+    // The normal force's share along the slide is the force it needs.
+    CHECK_THAT(o.forceN * glm::dot(o.normal, md.path.dir),
+               WithinAbs(o.forceB, 1e-12 + 1e-9 * std::abs(o.forceB)));
+    // Virtual work: torque = F dq/da, dq/da from the solved samples (m/rad).
+    const double da = 2 * M_PI / n;
+    const double q1 =
+        (bAt[(o.index + 1) % n] - bAt[(o.index + n - 1) % n]) / (2 * da) * 1e-3;
+    INFO("cam " << o.camDeg << " N " << o.forceN << " torque " << o.camTorque
+                << " virtual work " << o.forceB * q1);
+    CHECK_THAT(o.camTorque, WithinAbs(o.forceB * q1, 2e-3 * peakT));
+    work += o.camTorque * da;
+    if (o.camDeg < 90.0)
+      peakRise = std::max(peakRise, o.forceB);
+    if (o.camDeg > 180.0 && o.camDeg < 225.0)
+      peakFall = std::max(peakFall, o.forceB);
+    minN = std::min(minN, o.forceN);
+    if (o.camDeg > 270.0 && o.camDeg < 350.0) {
+      dwellN = o.forceN;
+      dwellT = o.camTorque;
+    }
+  }
+  CHECK(known > 300);
+  const double h = 0.010, rise = M_PI / 2, fall = M_PI / 4;
+  const double acc = 2 * M_PI * h * w * w;
+  CHECK_THAT(peakRise, WithinRel(m * acc / (rise * rise) + m * kG, 2e-3));
+  CHECK_THAT(peakFall, WithinRel(m * acc / (fall * fall) + m * kG, 2e-3));
+  // The largest contact force is the fall's stop, steeper than its share
+  // along the slide by the pressure angle there.
+  CHECK(r.samples[r.maxForceAt].forceN >= peakFall);
+  CHECK(r.samples[r.maxForceAt].camDeg > 202.5);
+  CHECK(r.samples[r.maxForceAt].camDeg < 225.0);
+  // On the dwell it carries only its weight, and the shaft nothing.
+  CHECK_THAT(dwellN, WithinRel(m * kG, 1e-6));
+  CHECK(std::abs(dwellT) < 1e-9);
+  // The fall pulls away harder than gravity holds above 93.8 rpm: at 120
+  // the contact would have to pull, and says so.
+  CHECK(minN < 0.0);
+  // No net work over a turn: what lifting takes, the fall gives back.
+  CHECK(std::abs(work) < 1e-3 * peakT * 2 * M_PI);
+  // Slower than the liftoff, it pushes everywhere.
+  in.speedRpm = 60.0;
+  for (const follower::SampleOut& o : follower::Check(in).samples)
+    if (o.forceKnown)
+      CHECK(o.forceN > 0.0);
+  // No speed, no force.
+  in.speedRpm.reset();
+  CHECK(follower::Check(in).maxForceAt == -1);
+}
+
 TEST_CASE("follower check: where gravity pushes it off, it is not held",
           "[follower][contact]") {
   // A rocker past vertical, as its gravity moment reads: m g L sin(q - q0)

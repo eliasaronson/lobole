@@ -302,6 +302,55 @@ Report Check(const Input& in) {
       }
       r.drops.push_back(o);
     }
+    // The contact force and the shaft's torque at each sample, at the
+    // study driver's speed: the same derivatives as the liftoff, at the
+    // sample's own angle.
+    if (in.speedRpm) {
+      const double w = *in.speedRpm / ratio * kTwoPi / 60.0;
+      double bestN = -1.0, bestT = -1.0;
+      for (size_t k = 0; k < r.samples.size(); k++) {
+        SampleOut& o = r.samples[k];
+        const double a = angles::ToRadians(o.camDeg);
+        bool nearDrop = false;
+        for (const contact::Table::DropAt& dr : m.table.drops) {
+          const double span = Wrap2Pi(dr.aEnd - dr.a);
+          nearDrop = nearDrop || Wrap2Pi(a - dr.a + 4.0 * h) < span + 8.0 * h;
+        }
+        if (nearDrop)
+          continue;
+        const contact::Touch t0 = touch(a), tp = touch(a + h),
+                             tm = touch(a - h);
+        if (!t0.found || !tp.found || !tm.found)
+          continue;
+        const double cosN = glm::dot(t0.normal, t0.motion);
+        const double lever =
+            m.turn ? glm::length(t0.point - m.path.pivot) * 1e-3 : 1.0;
+        if (std::abs(cosN) * lever < 1e-9)
+          continue;
+        o.q1 = (tp.travel - tm.travel) / (2.0 * h) * unit;
+        o.q2 = (tp.travel - 2.0 * t0.travel + tm.travel) / (h * h) * unit;
+        const MassAt ms = in.mass(t0.travel);
+        o.forceB = (ms.M * o.q2 + 0.5 * ms.dM * o.q1 * o.q1) * w * w - ms.Q;
+        o.forceN = o.forceB / (lever * cosN);
+        // The follower pushes the cam with -N n at the contact; the shaft
+        // balances its moment about the axis (the plane's Z, through its
+        // origin), in the sense a turns it.
+        o.camTorque = m.camSense * o.forceN *
+                      (t0.point.x * t0.normal.y - t0.point.y * t0.normal.x) *
+                      1e-3;
+        o.point = t0.point;
+        o.normal = t0.normal;
+        o.forceKnown = true;
+        if (o.forceN > bestN) {
+          bestN = o.forceN;
+          r.maxForceAt = static_cast<int>(k);
+        }
+        if (std::abs(o.camTorque) > bestT) {
+          bestT = std::abs(o.camTorque);
+          r.maxTorqueAt = static_cast<int>(k);
+        }
+      }
+    }
     if (in.speedRpm) {
       bool ok =
           r.notHeld.empty() && (!r.liftoffRpm || *in.speedRpm <= *r.liftoffRpm);

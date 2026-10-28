@@ -237,10 +237,26 @@ constexpr MethodDoc MotionMethods[] = {
      "height_mm|height_deg, fall_s, dwell_deg, drop_rpm (the speed it just "
      "lands within its dwell), turn_deg and lands at speed_rpm, jams (a step "
      "met from below: the cam turns against the way it was cut)}; "
-     "`holds_at_speed` with a speed.",
+     "`holds_at_speed` with a speed. With a speed, the loads "
+     "(docs/assemblies/relations.md#contact-forces): per sample clear of a "
+     "drop `contact_force_n` (the normal force at the contact, (M q'' + "
+     "1/2 M' q'^2) w^2 - Q along b carried onto the normal through the "
+     "pressure angle; negative = a pull the contact cannot give), "
+     "`force_along_follower_n` (`_n_m` for a turning follower), "
+     "`cam_torque_n_mm` (what the cam's shaft puts in, about its axis in "
+     "the sense it turns), `driver_torque_n_mm` (the same at the study's "
+     "driver), `contact_mm` and `force_on_cam_n` (world, at the sample) "
+     "and `in_cam_part` {contact_mm, force_on_cam_n} (the cam part's own "
+     "frame, for a part study); per relation `forces` {speed_rpm, "
+     "samples_known, max_contact_force_n and max_driver_torque_n_mm "
+     "{value, sample, cam_deg}} (`checked: false` without a speed); and "
+     "`driver_torque` {per_sample [{sample, driver_torque_n_mm}], max} "
+     "summed over the relations, at the samples every one has a force.",
      "study:int>=0, relations?:int[], speed_rpm?:number>0, "
      "max_pressure_angle_deg?:number>0",
-     remote::NoFlags, "study:int, speed_rpm?:number, relations:object[]"},
+     remote::NoFlags,
+     "study:int, speed_rpm?:number, relations:object[], "
+     "driver_torque?:{per_sample:object[], max:object|null}"},
     {"set_motion_pose",
      "Scrub: drive the study's mate to {t} (0..1 along the range) and "
      "re-solve, so the viewport and every query show that pose. No undo "
@@ -1060,6 +1076,17 @@ std::function<follower::MassAt(double)> MassFunction(ui::AppState& state,
   };
 }
 
+// An occurrence's world placement at a stored sample (the document's own
+// where the run kept none for it).
+glm::dmat4 WorldAt(const AssemblyDocument& asmDoc, const motion::Sample& smp,
+                   uint64_t occ) {
+  for (const auto& [id, w] : smp.worlds)
+    if (id == occ)
+      return w;
+  const Occurrence* o = asmDoc.FindById(occ);
+  return o ? OccWorld(*o) : glm::dmat4(1.0);
+}
+
 json RangesJson(const std::vector<follower::Range>& rs) {
   json out = json::array();
   for (const follower::Range& r : rs)
@@ -1111,6 +1138,7 @@ json CheckFollowers(ui::AppState& state, uint64_t studyId,
   json out{{"study", studyId}, {"relations", json::array()}};
   if (speedRpm)
     out["speed_rpm"] = *speedRpm;
+  std::map<size_t, std::vector<double>> driverTorque; // N mm, by sample
   for (const Relation* r : rels) {
     if (!r->error.empty() || !r->contactModel)
       throw std::runtime_error("check_followers: relation " +
@@ -1230,6 +1258,30 @@ json CheckFollowers(ui::AppState& state, uint64_t studyId,
           ps["pressure_angle_deg"] = so.pressureDeg;
           if (rep.deviationKnown)
             ps["deviation" + sfx] = so.deviation * unit;
+          if (so.forceKnown) {
+            const auto& sm = run->samples[smp.index];
+            const glm::dmat4 plane =
+                WorldAt(asmDoc, sm, m.base) * m.planeInBase;
+            const glm::dvec3 at(plane * glm::dvec4(so.point, m.z, 1.0));
+            const glm::dvec3 onCam =
+                -so.forceN *
+                glm::normalize(glm::dvec3(plane * glm::dvec4(so.normal, 0, 0)));
+            const glm::dmat4 camInv = glm::inverse(WorldAt(asmDoc, sm, m.cam));
+            const glm::dvec3 atCam(camInv * glm::dvec4(at, 1.0));
+            const glm::dvec3 onCamPart(camInv * glm::dvec4(onCam, 0.0));
+            const double drv = so.camTorque / in.driverPerCam * 1e3;
+            ps["contact_force_n"] = so.forceN;
+            ps[turn ? "force_along_follower_n_m" : "force_along_follower_n"] =
+                so.forceB;
+            ps["cam_torque_n_mm"] = so.camTorque * 1e3;
+            ps["driver_torque_n_mm"] = drv;
+            ps["contact_mm"] = {at.x, at.y, at.z};
+            ps["force_on_cam_n"] = {onCam.x, onCam.y, onCam.z};
+            ps["in_cam_part"] = {
+                {"contact_mm", {atCam.x, atCam.y, atCam.z}},
+                {"force_on_cam_n", {onCamPart.x, onCamPart.y, onCamPart.z}}};
+            driverTorque[smp.index].push_back(drv);
+          }
         }
       perSample.push_back(std::move(ps));
     }
@@ -1293,7 +1345,49 @@ json CheckFollowers(ui::AppState& state, uint64_t studyId,
     rj["gravity"] = g;
     if (rep.holdsAtSpeed)
       rj["holds_at_speed"] = *rep.holdsAtSpeed;
+    if (speedRpm) {
+      size_t known = 0;
+      for (const follower::SampleOut& so : rep.samples)
+        known += so.forceKnown ? 1 : 0;
+      json f{{"speed_rpm", *speedRpm}, {"samples_known", known}};
+      const auto worst = [&](int k, const char* key, double v) {
+        if (k < 0)
+          return;
+        const follower::SampleOut& so = rep.samples[k];
+        f[key] = {{"value", v}, {"sample", so.index}, {"cam_deg", so.camDeg}};
+      };
+      if (rep.maxForceAt >= 0)
+        worst(rep.maxForceAt, "max_contact_force_n",
+              rep.samples[rep.maxForceAt].forceN);
+      if (rep.maxTorqueAt >= 0)
+        worst(rep.maxTorqueAt, "max_driver_torque_n_mm",
+              rep.samples[rep.maxTorqueAt].camTorque / in.driverPerCam * 1e3);
+      rj["forces"] = f;
+    } else {
+      rj["forces"] = {{"checked", false},
+                      {"why", "a contact force needs speed_rpm"}};
+    }
     out["relations"].push_back(std::move(rj));
+  }
+  // What the driver must put in at each sample: every relation's torque
+  // summed, at the samples where all of them have one.
+  if (speedRpm) {
+    json per = json::array();
+    double worst = -1.0;
+    json at = nullptr;
+    for (const auto& [idx, ts] : driverTorque) {
+      if (ts.size() != rels.size())
+        continue;
+      double sum = 0.0;
+      for (double t : ts)
+        sum += t;
+      per.push_back({{"sample", idx}, {"driver_torque_n_mm", sum}});
+      if (std::abs(sum) > worst) {
+        worst = std::abs(sum);
+        at = {{"sample", idx}, {"driver_torque_n_mm", sum}};
+      }
+    }
+    out["driver_torque"] = {{"per_sample", per}, {"max", at}};
   }
   return out;
 }
@@ -1581,6 +1675,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "check_followers") {
     // rpc-params: study, relations, speed_rpm, max_pressure_angle_deg
+    // rpc-returns-from: src/remote/RemoteMotion.cpp
     std::vector<uint64_t> rels;
     if (p.contains("relations"))
       rels = p.at("relations").get<std::vector<uint64_t>>();

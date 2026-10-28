@@ -459,8 +459,10 @@ together in order.
   when any sample is unsolved.
 - `check_followers` reads a stored run for each contact relation: whether
   the follower stays on its cam, its pressure angle, the motion against the
-  cam's design, and the speed gravity loses it at
-  ([the follower check](relations.md#the-follower-check)).
+  cam's design, the speed gravity loses it at, and at a speed the force at
+  each contact and the torque the shaft needs
+  ([the follower check](relations.md#the-follower-check),
+  [contact forces](relations.md#contact-forces)).
 
 Code: `src/core/MotionStudy.{h,cpp}`, `src/remote/RemoteMotion.cpp`,
 `src/ui/MotionActions.cpp`.

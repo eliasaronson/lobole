@@ -68,6 +68,22 @@ struct SampleOut {
   double camRadius = 0.0, followerRadius = 0.0; // signed: + convex
   bool bridge = false;
   double deviation = 0.0; // b's unit; only with a design
+  // The contact force at speedRpm, with gravity known and the sample clear
+  // of a drop by the derivatives' step (`forceKnown`): the force the cam
+  // must put on the follower along +q, F = (M q'' + 1/2 M' q'^2) w^2 - Q (N,
+  // or N m for a turn), w the cam's speed and q' q'' per radian of a; the
+  // normal force at the contact N = F / (lever (n . motion)), lever 1 for a
+  // slide and the contact's distance from the pivot (m) for a turn: positive
+  // pushes, negative is a pull the contact cannot give (it lifts off);
+  // and the torque the cam's shaft must put into it (N m about +a), the
+  // moment of the contact force about the cam's axis, which by virtual work
+  // is F q'. `point` and `normal` are the touch's (plane frame;
+  // the normal from the cam toward the follower, which the follower pushes
+  // the cam against).
+  bool forceKnown = false;
+  double forceB = 0.0, forceN = 0.0, camTorque = 0.0;
+  double q1 = 0.0, q2 = 0.0; // SI per radian of a
+  glm::dvec2 point{0.0}, normal{0.0};
 };
 
 struct DropOut {
@@ -101,6 +117,9 @@ struct Report {
   std::vector<Range> notHeld; // gravity pushes it off: any speed
   std::vector<DropOut> drops;
   std::optional<bool> holdsAtSpeed;
+  // The forces' worst samples (indices into `samples`, -1 = none known):
+  // the largest normal force and the largest |cam torque|.
+  int maxForceAt = -1, maxTorqueAt = -1;
 };
 
 Report Check(const Input& in);

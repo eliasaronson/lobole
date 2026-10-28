@@ -120,6 +120,7 @@ def main():
         d.call("run_motion_study", study=study)
         out = d.call("check_followers", study=study, speed_rpm=60.0,
                      max_pressure_angle_deg=30.0)
+        out_f = out
         r = out["relations"][0]
         expect(r["touching"], f"the pin stands on the cam: {r['failures']}")
         expect(r["deviation_mm"] <= r["fit_deviation_mm"] + 2e-3,
@@ -144,6 +145,45 @@ def main():
         unchecked = d.call("check_followers", study=study)
         expect(unchecked["relations"][0]["pressure_angle"]["ok"] ==
                "unchecked", "no limit, no verdict")
+        expect(unchecked["relations"][0]["forces"]["checked"] is False and
+               "driver_torque" not in unchecked,
+               f"no speed, no force: {unchecked['relations'][0]['forces']}")
+
+        # The contact force, statics-checked. On the dwell (where the pin
+        # pushes straight along its slide: no pressure angle) it rests on
+        # the cam with its weight, straight down, and the shaft needs no
+        # torque; everywhere the torque is the moment of the force on the
+        # cam about the axle (world Y through the origin).
+        mass_kg = sum(x["mass_g"] for x in g["moving"]) * 1e-3
+        f = r["forces"]
+        expect(f["speed_rpm"] == 60.0 and f["samples_known"] > 30 and
+               f["max_contact_force_n"]["value"] > mass_kg * 9.81,
+               f"the forces at 60 rpm: {f}")
+        dwell = 0
+        for smp in r["per_sample"]:
+            if "contact_force_n" not in smp:
+                continue
+            c, fc = smp["contact_mm"], smp["force_on_cam_n"]
+            moment = c[2] * fc[0] - c[0] * fc[2]  # (c x F) . Y, N mm
+            expect(abs(abs(moment) - abs(smp["driver_torque_n_mm"])) <
+                   1e-6 + 1e-6 * abs(moment),
+                   f"the torque is the force's moment: {smp}")
+            expect(abs(math.hypot(*fc) - abs(smp["contact_force_n"])) <
+                   1e-9, f"the force on the cam: {smp}")
+            if smp["pressure_angle_deg"] < 1e-3:
+                dwell += 1
+                expect(abs(smp["contact_force_n"] - mass_kg * 9.81) <
+                       1e-3 * mass_kg * 9.81 and
+                       abs(fc[2] + mass_kg * 9.81) < 1e-3 * mass_kg * 9.81
+                       and abs(smp["driver_torque_n_mm"]) < 1e-6,
+                       f"on the dwell it rests with its weight: {smp}")
+        expect(dwell >= 5, f"the dwell's samples: {dwell}")
+        per = {x["sample"]: x["driver_torque_n_mm"]
+               for x in out_f["driver_torque"]["per_sample"]}
+        for smp in out_f["relations"][0]["per_sample"]:
+            if "driver_torque_n_mm" in smp:
+                expect(abs(per[smp["sample"]] - smp["driver_torque_n_mm"])
+                       < 1e-12, "one follower: its torque is the driver's")
 
         # The requirement holds the liftoff speed over the study.
         asm_id = next(p["id"] for p in d.call("list_parts")["parts"]

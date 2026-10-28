@@ -406,6 +406,45 @@ turns).
 A `follower` requirement holds one of these numbers
 ([../requirements/README.md](../requirements/README.md#follower)).
 
+### Contact forces
+
+With `speed_rpm`, the check also says what each contact carries, so a
+study of the shaft or the crank reads its loads instead of estimating them.
+At each sample clear of a drop by the derivatives' step (the same exact
+touches 0.02 rad either side as the liftoff, at the sample's angle), the
+force the cam must put on the follower along b is
+
+F = (M q″ + ½ M′ q′²) ω² − Q
+
+(N, or N·m for a turning follower: `force_along_follower_n`|`_n_m`), with
+ω the cam's speed and q′, q″ per radian of cam. The normal force at the
+contact, `contact_force_n`, is F carried onto the contact normal: F /
+(lever · n·m̂), m̂ where the follower's contact point moves with +b and the
+lever 1 for a slide, the contact's distance from the pivot for a turn —
+so 1/cos of the pressure angle on a slide. Negative is a pull the contact
+cannot give: above `liftoff_rpm` the follower leaves there. The shaft's
+torque, `cam_torque_n_mm`, is the moment of the follower's push on the cam
+(−N n̂ at the contact) about the cam's axis, in the sense the cam turns;
+`driver_torque_n_mm` is the same at the study's driver (divided by the
+driver-to-cam ratio). The force is given at the contact in world
+coordinates at that sample (`contact_mm`, `force_on_cam_n`) and in the cam
+part's own frame (`in_cam_part`), which a part study of the cam or its
+shaft loads directly. Per relation `forces` names the worst samples
+(`max_contact_force_n`, `max_driver_torque_n_mm`, each {value, sample,
+cam_deg}), and the reply's `driver_torque` sums every relation's at each
+sample they all have one: what the hand on the crank feels, and its `max`.
+Without a speed there is no force (`forces.checked: false`).
+
+Not modelled: friction (in the guide and at the contact), the follower's
+landing after a drop (an impact), and the cam's own inertia. Test:
+`tests/test_follower_check.cpp`, "the contact force holds the follower's
+statics": on the cycloidal lobe at 120 rpm the force along the slide peaks
+at m·2πh/β²·ω² + mg on the rise and on the fall, the torque matches F·dq/da
+read from the solved samples (virtual work), the dwell carries the weight
+and no torque, a turn puts in no net work, and above the liftoff the force
+goes negative; `tests/follower_check_smoke.py` holds the RPC to the same
+statics in world coordinates.
+
 Code: `src/core/ContactFollower.{h,cpp}`; tests
 `tests/test_contact_relation.cpp` (an eccentric under a flat face, a roller
 and a rocker's roller against their closed forms at 1000 random angles
