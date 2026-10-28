@@ -6,6 +6,7 @@
 #include "cad/CADMaterials.h"
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
+#include "core/ContactFollower.h"
 #include "core/Measure.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
@@ -1941,6 +1942,37 @@ std::expected<std::vector<Relation>, std::string>
 DraftRelations(AppState& state) {
   const Draft& d = state.relationDraft;
   std::vector<Relation> out;
+  if (d.kind == Draft::Kind::Contact) {
+    // The follower stands where it first touches the cam
+    // (docs/assemblies/relations.md#contact): nothing typed, the shapes
+    // decide. Built here, so what is wrong is said before Accept.
+    Relation r;
+    r.kind = RelationKind::Contact;
+    r.dofA = MateDof::Rotation;
+    r.dofB = d.followerTurns ? MateDof::Rotation : MateDof::Offset;
+    r.mateA = d.a.mate;
+    r.mateB = d.b.mate;
+    r.ratio = 1.0;
+    if (d.a.mate == 0)
+      return std::unexpected("pick the cam's mate (the one it turns on)");
+    if (d.b.mate == 0)
+      return std::unexpected("pick the follower's mate");
+    if (!d.a.path.empty() || !d.b.path.empty())
+      return std::unexpected("a contact relation couples two mates of this "
+                             "assembly, not mates inside a sub-assembly");
+    const auto parts = PartResolverFor(state);
+    std::string why;
+    r.toward = d.toward;
+    if (r.toward == 0) {
+      r.toward = contact::TowardFromGravity(*state.assembly, r, parts, &why);
+      if (r.toward == 0)
+        return std::unexpected(why);
+    }
+    if (!contact::ModelFor(*state.assembly, r, parts, &why))
+      return std::unexpected(why);
+    out.push_back(std::move(r));
+    return out;
+  }
   if (d.kind == Draft::Kind::Geneva) {
     // A carry (docs/assemblies/relations.md#intermittent): its step and
     // window follow from the slots, and it is made where the parts stand.
@@ -2057,14 +2089,14 @@ DraftRelations(AppState& state) {
 void DrawAddRelationWindow(AppState& state) {
   Draft& d = state.relationDraft;
   BeginToolWindowFrame(state, "Add relation");
-  static const char* kKinds[] = {"Gear", "Internal gear", "Linear", "Epicyclic",
-                                 "Geneva carry"};
-  static const char* kKindIds[] = {"gear", "internal", "linear", "epicyclic",
-                                   "geneva"};
+  static const char* kKinds[] = {"Gear",      "Internal gear", "Linear",
+                                 "Epicyclic", "Geneva carry",  "Cam contact"};
+  static const char* kKindIds[] = {"gear",      "internal", "linear",
+                                   "epicyclic", "geneva",   "contact"};
   LeftLabel("Kind");
   const int kind = static_cast<int>(d.kind);
   if (ImGui::BeginCombo("###rel_kind", kKinds[kind])) {
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
       const std::string item =
           std::string(kKinds[i]) + "###rel_kind_" + kKindIds[i];
       if (ImGui::Selectable(item.c_str(), i == kind)) {
@@ -2084,7 +2116,9 @@ void DrawAddRelationWindow(AppState& state) {
                       "way round. Linear: one slide drives another. "
                       "Epicyclic: sun, ring and carrier by Willis, and each "
                       "planet's own turn. Geneva carry: the driver steps the "
-                      "wheel once a turn, and it stands still between.");
+                      "wheel once a turn, and it stands still between. Cam "
+                      "contact: the follower stands where it touches the "
+                      "cam's shape.");
   switch (d.kind) {
   case Draft::Kind::Gear:
   case Draft::Kind::InternalGear:
@@ -2109,6 +2143,34 @@ void DrawAddRelationWindow(AppState& state) {
         ImGui::TextDisabled("from the teeth");
     }
     NumberField(state, "Phase", "rel_new_phase", &d.phase, "%.5g");
+    break;
+  }
+  case Draft::Kind::Contact: {
+    MemberCombo(state, "Cam turns on", "rel_new_a", MateDof::Rotation, d.a.path,
+                d.a.mate, "The mate the cam turns on.");
+    {
+      LeftLabel("Follower");
+      const char* how[] = {"Slides", "Turns"};
+      int sel = d.followerTurns ? 1 : 0;
+      if (ImGui::Combo("###rel_follower_moves", &sel, how, 2)) {
+        d.followerTurns = sel == 1;
+        d.b = {};
+      }
+    }
+    MemberCombo(state, "Follower on", "rel_new_b",
+                d.followerTurns ? MateDof::Rotation : MateDof::Offset, d.b.path,
+                d.b.mate, "The mate the follower moves on.");
+    {
+      LeftLabel("Held toward");
+      const char* senses[] = {"From gravity", "Positive", "Negative"};
+      int sel = d.toward == 0 ? 0 : d.toward > 0 ? 1 : 2;
+      if (ImGui::Combo("###rel_toward", &sel, senses, 3))
+        d.toward = sel == 0 ? 0 : sel == 1 ? 1 : -1;
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The way the follower's value moves to reach the "
+                          "cam: from gravity, or stated (a spring, a "
+                          "horizontal slide).");
+    }
     break;
   }
   case Draft::Kind::Geneva: {
@@ -2462,6 +2524,28 @@ void DrawAssemblyEditWindow(AppState& state) {
           SolveActiveAssembly(state);
         }
       }
+      if (r->kind == RelationKind::Contact) {
+        // The shapes decide; what is edited is the sense it is held in,
+        // and what is shown is the table they filled.
+        LeftLabel("Held toward");
+        const char* senses[] = {"Positive", "Negative"};
+        int sel = r->toward > 0 ? 0 : 1;
+        if (ImGui::Combo("###rel_toward_edit", &sel, senses, 2) &&
+            (sel == 0 ? 1 : -1) != r->toward) {
+          SnapshotAssembly(state);
+          r->toward = sel == 0 ? 1 : -1;
+          asmDoc.BumpVersion();
+          SolveActiveAssembly(state);
+        }
+        if (r->contactModel)
+          ImGui::TextDisabled(
+              "%zu points, within %.2g %s; %zu drop(s)",
+              r->contactModel->table.nodes.size(),
+              r->contactModel->table.bound *
+                  (r->contactModel->turn ? angles::kDegPerRad : 1.0),
+              r->contactModel->turn ? "deg" : "mm",
+              r->contactModel->table.drops.size());
+      }
       if (r->kind == RelationKind::Freewheel)
         ImGui::TextDisabled("drives %s, lead %.4g deg",
                             DocumentIO::FreewheelDrivesToString(r->drives),
@@ -2496,6 +2580,7 @@ void DrawAssemblyEditWindow(AppState& state) {
           ImGui::PopStyleColor();
         }
       } else if (r->kind != RelationKind::Intermittent &&
+                 r->kind != RelationKind::Contact &&
                  ExprInputDouble(state, "Ratio###rel_ratio", &ratio, "%.5g") &&
                  ratio != 0.0 && ratio != r->ratio) {
         SnapshotAssembly(state);
@@ -2503,7 +2588,8 @@ void DrawAssemblyEditWindow(AppState& state) {
         asmDoc.BumpVersion();
         SolveActiveAssembly(state);
       }
-      if (ExprInputDouble(state, "Phase###rel_phase", &phase, "%.5g") &&
+      if (r->kind != RelationKind::Contact &&
+          ExprInputDouble(state, "Phase###rel_phase", &phase, "%.5g") &&
           phase != r->phase) {
         SnapshotAssembly(state);
         r->phase = phase;

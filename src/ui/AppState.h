@@ -1419,7 +1419,7 @@ struct AppState {
   // The same window in CREATE mode (docs/assemblies/relations.md#in-the-app):
   // the relation being drafted, made only on Accept.
   struct RelationDraft {
-    enum class Kind { Gear, InternalGear, Linear, Epicyclic, Geneva };
+    enum class Kind { Gear, InternalGear, Linear, Epicyclic, Geneva, Contact };
     struct Member {
       std::vector<uint64_t> path; // a mate inside a flexible placement
       uint64_t mate = 0;          // 0 = not picked yet
@@ -1436,6 +1436,11 @@ struct AppState {
     // in the driver's turn its window opens, degrees.
     double slots = 0.0;
     double startDeg = 0.0;
+    // A contact relation (docs/assemblies/relations.md#contact): whether the
+    // follower turns (else it slides), and the sense it is held in — 0 from
+    // gravity, +1 / -1 stated.
+    bool followerTurns = false;
+    int toward = 0;
   };
   bool asmNewRelation = false;
   RelationDraft relationDraft;

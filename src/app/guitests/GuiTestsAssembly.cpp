@@ -1675,6 +1675,81 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(r.ratio - 13.0 / 40.0) < 1e-12);
   };
 
+  // A cam contact (docs/assemblies/relations.md#contact): picked from the
+  // mates, refused while gravity cannot say which way the follower is held
+  // (its slide is horizontal), and made once the sense is stated; the
+  // follower then stands on the eccentric.
+  t = IM_REGISTER_TEST(engine, "assembly", "add_relation_cam_contact");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // An eccentric disc: radius 5, its centre 2 off the part's Z axis.
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Eccentric", glm::vec3(2, 0, 0), glm::vec3(0, 0, 1), 5.0, 4.0));
+    ctx->Yield();
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Cam rig");
+    ui::SetActivePart(*s_App, asmIdx);
+    const auto place = [](const char* name, bool fixed, glm::dquat q) {
+      Occurrence o;
+      o.name = name;
+      o.partId = s_App->parts[0].id;
+      o.fixed = fixed;
+      o.orientation = q;
+      return s_App->assembly->AddOccurrence(o);
+    };
+    const auto mate = [](MateType type, uint64_t a, uint64_t b) {
+      Mate m;
+      m.type = type;
+      m.a.occurrenceId = a;
+      m.a.anchor.origin = true;
+      m.b.occurrenceId = b;
+      m.b.anchor.origin = true;
+      m.flipped = false;
+      return s_App->assembly->AddMate(m);
+    };
+    const glm::dquat none(1, 0, 0, 0);
+    const uint64_t housing = place("Housing", true, none);
+    // The guide's Z along world +X: the follower slides across the axle.
+    const uint64_t guide =
+        place("Guide", true, glm::angleAxis(M_PI / 2, glm::dvec3(0, 1, 0)));
+    const uint64_t cam = place("Cam", false, none);
+    const uint64_t fol = place("Follower", false, none);
+    const uint64_t axle = mate(MateType::Revolute, housing, cam);
+    const uint64_t slide = mate(MateType::Slider, guide, fol);
+    ui::SolveActiveAssembly(*s_App);
+    ctx->Yield(3);
+    ctx->ItemClick("//###Model/###rel_add");
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###rel_kind/###rel_kind_contact");
+    ctx->ComboClick(RelCombo("rel_new_a", axle).c_str());
+    ctx->ComboClick(RelCombo("rel_new_b", slide).c_str());
+    ctx->Yield(2);
+    IM_CHECK(s_App->asmEditRefusal.find("toward") != std::string::npos);
+    ctx->ComboClick("###rel_toward/Negative");
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(s_App->asmEditRefusal.c_str(), "");
+    ctx->ItemClick("###rel_new_accept");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->RelationCount(), (size_t)1);
+    const Relation& r = s_App->assembly->GetRelations()[0];
+    IM_CHECK(r.kind == RelationKind::Contact);
+    IM_CHECK_EQ(r.toward, -1);
+    IM_CHECK_STR_EQ(r.error.c_str(), "");
+    // At a quarter turn the eccentric's rightmost point is 5 out.
+    s_App->assembly->FindMateById(axle)->rotation = M_PI / 2;
+    ui::SolveActiveAssemblyDriven(*s_App, axle, MateDof::Rotation);
+    IM_CHECK(std::abs(s_App->assembly->FindMateById(slide)->offset - 5.0) <
+             1e-3);
+    // Its editor has no ratio and no phase: the shapes decide.
+    const std::string row = "//###Model/###rel_row_" + std::to_string(r.id);
+    ctx->ItemDoubleClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###rel_ratio"));
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###rel_phase"));
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###rel_toward_edit"));
+  };
+
   // A Geneva carry (docs/assemblies/relations.md#intermittent): refused
   // until its slots are given, made where the parts stand, and stepping
   // the wheel once a turn of the driver.

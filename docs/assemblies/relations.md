@@ -198,8 +198,8 @@ window and edits where the window opens, with no ratio.
 
 **Add relation** (shown once the assembly has a mate that turns or slides)
 opens the same window in create mode. Its Kind combo lists what the window
-can make: Gear, Internal gear, Linear, Epicyclic and Geneva carry; the other kinds are
-made by `add_relation` or the SDK. A gear takes its two sides (started on
+can make: Gear, Internal gear, Linear, Epicyclic, Geneva carry and Cam
+contact; the other kinds are made by `add_relation` or the SDK. A gear takes its two sides (started on
 the first two mates that turn), both tooth counts (no default: a count is
 read off the part) and a phase; Linear takes two slides, a ratio and a
 phase; Epicyclic takes Sun, Ring and Carrier combos over the mates that
@@ -207,6 +207,12 @@ turn, their teeth, and a Planets list — a row per planet, Add planet, and
 the picked one's mate and teeth below it. A Geneva carry takes the driving
 mate, the Geneva's, its slots (no default) and where the window opens; its
 step and window are shown, derived, and it is made where the parts stand.
+A cam contact takes the mate the cam turns on, whether the follower slides
+or turns, its mate, and the sense it is held in (From gravity, the
+default, or Positive / Negative); the window builds it as it is drafted, so
+a follower that never touches, a slide gravity cannot orient or bases that
+move are said on the red line before Accept. Its editor shows the sense
+and the table, and no ratio or phase.
 What is wrong with the draft — a
 member not picked, one mate used twice, a tooth or slot count missing — is said on
 the window's red line and Accept stays disabled. Accept is one undo step.
