@@ -204,7 +204,8 @@ damage, rather than refusing:
   read (or whose `.bin` is not the size its json says), a drawing view's
   saved projection that does not read, and baked geometry that cannot be
   used for damage rather than age (unreadable, a link out of the project,
-  or not matching its `content_hash`). It is rebuilt.
+  one `.brep` named for two bodies, or not matching its `content_hash`). It
+  is rebuilt.
 
 A document that loaded with a drop that is not derived is not saved back
 over the path it came from by default, because that save would lose the
@@ -261,7 +262,12 @@ chain hash survived (a body list grown, an element map changed) would
 otherwise be adopted whole; it is ignored, the part rebuilds, and the load
 reports a derived drop ([a lossy load](#a-lossy-load)). A blob without one
 (an older build's) is read on the chain hash alone, and an older build
-ignores the key, so it moved no `geometry_format`. A blob that cannot be used because of damage — not
+ignores the key, so it moved no `geometry_format`. Before any `.brep` is
+read, an index that names one file for two bodies is ignored the same way:
+the writer gives every body its own, and a body list grown by copies of one
+entry would otherwise read and hash that file once per copy (25 000 copies
+of a 50 KB body, 1.25 GB) only to find the hash wrong, and, without a hash,
+load the copies as bodies. A blob that cannot be used because of damage — not
 because it is old or from another recipe — is reported the same way.
 
 A blob that no longer matches the recipe makes an open slower, never wrong.

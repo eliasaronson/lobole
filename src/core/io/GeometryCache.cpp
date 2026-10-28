@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -530,12 +531,20 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
     // Every blob's bytes first: what the content hash covers, and what the
     // shapes are read from.
     std::vector<std::string> files, blobs;
+    std::set<std::string> named;
     for (const json& bj : j.value("bodies", json::array())) {
       // A name from a shared project: a path out of geometry/ would read any
       // file into OCC's binary reader (core/io/ProjectPaths.h).
       const std::string file = bj.at("brep").get<std::string>();
       if (!projectpaths::IsPlainComponent(file))
         return ignore("index.json", "'" + file + "' is not a file in it");
+      // The writer gives every body a file of its own. A body list grown by
+      // copies of one entry named one 50 KB blob 25 000 times: 1.25 GB read
+      // and hashed before the content hash could say the index was damaged,
+      // seconds of CPU that the reader fuzz's budget caught on a loaded
+      // machine. Refused before any blob is read.
+      if (!named.insert(file).second)
+        return ignore("index.json", "it names '" + file + "' for two bodies");
       if (!inside(geom / file))
         return ignore(file, "it is a link out of the project");
       files.push_back(file);

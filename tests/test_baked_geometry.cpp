@@ -444,10 +444,26 @@ TEST_CASE("A broken blob is ignored, not fatal", "[baked]") {
     std::ofstream(index, std::ios::trunc) << j.dump(2);
   }
   SECTION("no blob at all") { fs::remove_all(proj / "geometry"); }
+  // The writer gives every body its own file. One file named twice is
+  // damage, refused before a blob is read: a body list grown to 25 000
+  // copies read and hashed one blob 25 000 times, and without a content
+  // hash (an older build's blob) it loaded a body the recipe never made.
+  SECTION("one blob named for two bodies") {
+    const fs::path index = proj / "geometry" / "index.json";
+    nlohmann::json j;
+    {
+      std::ifstream in(index);
+      j = nlohmann::json::parse(in);
+    }
+    j["bodies"].push_back(j["bodies"][0]);
+    j.erase("content_hash");
+    std::ofstream(index, std::ios::trunc) << j.dump(2);
+  }
 
   auto loaded = testio::Load(proj.string());
   REQUIRE(loaded != nullptr);
   CHECK(loaded->LastRegenStats().executed == 3); // rebuilt, no complaint
+  CHECK(loaded->GetBodies().size() == doc->GetBodies().size());
   CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(volume, 1e-9));
   fs::remove_all(proj);
 }
