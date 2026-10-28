@@ -223,6 +223,32 @@ against a planted slowdown in the path it times: a CPU spin inside the
 measured interval for a cost check (a sleep would not count, which is the
 point), a delay in the method for a responsiveness one.
 
+### A suite on a busy machine
+
+A hang guard has room for a loaded machine, not for a suite that loads it
+past full. `tools/ctest -j22` beside another worktree's build gave every test
+a third of a CPU, and five that pass alone in seconds ran past their
+`TIMEOUT` in one week (`refused_calls_smoke`, `fuzz_seeds_smoke`, the reader
+fuzz's `part directories 4/4`, `packaging_smoke`, the adaptive pocket). So
+`tools/ctest` takes the job count down to the CPUs other work leaves free,
+measured over one second of `/proc/stat` before the first test starts, never
+below a quarter of what was asked, and prints `-j22 -> -j6: 16 of 22 CPUs
+are busy with other work` when it does. `LOBOLE_CTEST_JOBS=asked` keeps the
+count as given. It is one reading at the start, so a build that begins
+halfway through the suite is not seen; and on a machine whose other work
+alone fills it, fewer jobs of ours help only as far as the quarter.
+
+Not `ctest --test-load`: it starts nothing while the load average is past
+its threshold, including when nothing of the suite is running, so a suite
+behind a long build of someone else's waits for it, and the load average
+lags a minute behind a build that has already ended.
+
+A load-only timeout is still looked at for a mechanism first. Two of the
+five had one: `refused_calls_smoke` walked every project it had saved so far
+on each of its 3 000 snapshots (quadratic; 19 s of CPU, now 4), and the
+reader fuzz read one 50 KB blob 25 000 times for a damaged index (7 s of CPU
+against a 9 s budget, now 0.4).
+
 ## Recording a scene
 
 The test engine records video: `ctx->CaptureBeginVideo()` and

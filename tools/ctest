@@ -14,6 +14,17 @@
 # It refuses to run when the app or a test binary is older than a file it is
 # built from (tools/stale-binaries.sh): build first.
 #
+# The job count is taken down to the CPUs OTHER work leaves free
+# (docs/ui/testing.md#a-suite-on-a-busy-machine): `-j22` on a machine where
+# another worktree's build keeps 16 busy runs `-j6`, and says so. The
+# TIMEOUTs are wall-clock hang guards, sized for a test that has a CPU; a
+# suite started at -j$(nproc) beside someone else's build gave every test a
+# third of one, and five tests that pass alone in seconds timed out
+# (refused_calls_smoke, fuzz_seeds_smoke, the reader fuzz, packaging_smoke,
+# the adaptive pocket). Never below a quarter of the count asked. Measured once, at the start, over a second of
+# /proc/stat -- the load average lags by a minute and counts a build that
+# just ended. LOBOLE_CTEST_JOBS=asked keeps the count as given.
+#
 # --test-dir is resolved here (against the cwd, then the repo root) and
 # handed to ctest as that ABSOLUTE path in place of the one given: ctest
 # runs from inside the build directory, where a relative --test-dir would
@@ -51,6 +62,52 @@ if [ -n "$behind" ]; then
   echo "$behind" | sed 's/^/ctest: /' >&2
   echo "ctest: build first: tools/build.sh $(printf '%q' "$dir")" >&2
   exit 2
+fi
+# CPUs busy right now, over one second, from /proc/stat: what is not
+# idle or waiting on I/O. Nothing of this suite runs yet.
+busy_cpus() {
+  local a b
+  a="$(head -1 /proc/stat)" || return 1
+  sleep 1
+  b="$(head -1 /proc/stat)" || return 1
+  awk -v a="$a" -v b="$b" -v n="$1" 'BEGIN {
+    split(a, x); split(b, y); t = 0; idle = 0
+    for (i = 2; i <= 9; i++) t += y[i] - x[i]
+    idle = (y[5] - x[5]) + (y[6] - x[6])
+    if (t <= 0) exit 1
+    printf "%d\n", (t - idle) / t * n + 0.5 }'
+}
+jobs_at=-1 jobs=""
+for ((i = 0; i < ${#rest[@]}; i++)); do
+  case "${rest[i]}" in
+    -j[0-9]*) jobs_at=$i jobs="${rest[i]#-j}" ;;
+    --parallel=*) jobs_at=$i jobs="${rest[i]#--parallel=}" ;;
+    -j | --parallel)
+      if [[ "${rest[i + 1]:-}" =~ ^[0-9]+$ ]]; then
+        rest[i]="-j${rest[i + 1]}"
+        unset 'rest[i + 1]'
+        rest=("${rest[@]}")
+        jobs_at=$i jobs="${rest[i]#-j}"
+      fi
+      ;;
+  esac
+done
+if [ "$jobs_at" -ge 0 ] && [ "${jobs:-1}" -gt 1 ] &&
+  [ "${LOBOLE_CTEST_JOBS:-}" != "asked" ] && [ -r /proc/stat ]; then
+  cpus="$(nproc)"
+  if busy="$(busy_cpus "$cpus")"; then
+    free=$((cpus - busy))
+    # A floor of a quarter of what was asked: past that the suite would
+    # crawl for a load that may be gone in a minute, and on a machine
+    # whose other work alone fills it, fewer jobs of ours buy little.
+    floor=$(((jobs + 3) / 4))
+    [ "$free" -ge "$floor" ] || free=$floor
+    if [ "$free" -lt "$jobs" ]; then
+      echo "ctest: -j$jobs -> -j$free: $busy of $cpus CPUs are busy with other" \
+        "work (LOBOLE_CTEST_JOBS=asked keeps -j$jobs)" >&2
+      rest[jobs_at]="-j$free"
+    fi
+  fi
 fi
 quoted=" --test-dir $(printf '%q' "$dir")"
 for a in ${rest[@]+"${rest[@]}"}; do quoted+=" $(printf '%q' "$a")"; done
