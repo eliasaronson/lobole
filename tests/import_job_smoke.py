@@ -167,8 +167,10 @@ def main():
             call.join()
             other.close()
 
-        # Past the limit: refused, naming the count, the time and the
-        # override; nothing changes. With the override the job starts.
+        # Past the limit, as facets: refused, naming the count, the time and
+        # the override; nothing changes. With the override the job starts.
+        # Recognised (the default) it sews nothing, so it goes ahead
+        # (docs/interchange/README.md#what-a-mesh-costs).
         big = os.path.join(tmp, "big.stl")
         n_big = torus(big, limit + 2000)
         expect(n_big > limit, f"{n_big} is not past the limit {limit}")
@@ -176,7 +178,7 @@ def main():
             d = app.client
             before = features(d)
             try:
-                d.call("import_step", path=big)
+                d.call("import_step", path=big, representation="facets")
                 refused = ""
             except Exception as e:  # noqa: BLE001
                 refused = str(e)
@@ -194,7 +196,14 @@ def main():
                    f"add_feature of the big Import: {added or 'accepted'}")
             expect(features(d) == before, "the refused add_feature changed it")
             other = Client.wait_for(app.port)
+            call = Call(d, "import_step", {"path": big})
+            jobs = wait_for(lambda: import_jobs(other), "the recognised job")
+            other.call("cancel_background_job", kind="import")
+            call.join()
+            expect(call.error and "cancelled" in call.error,
+                   f"recognised call: {call.result!r} / {call.error!r}")
             call = Call(d, "import_step", {"path": big,
+                                           "representation": "facets",
                                            "allow_large_mesh": True})
             jobs = wait_for(lambda: import_jobs(other), "the overridden job")
             expect(f"{n_big:,} triangles" in jobs[0]["label"],
@@ -220,8 +229,14 @@ def main():
             wait_for(lambda: any(f.get("type") == "Import"
                                  for f in features(d)),
                      "the --file import to land")
-        # ...and past the limit is refused in the log, naming the flag.
-        with launch(binary, ["--file", big]) as app:
+        # ...and past the limit, as facets (the preference), is refused in
+        # the log, naming the flag.
+        config = os.path.join(tmp, "facets-config")
+        os.makedirs(os.path.join(config, "lobole"), exist_ok=True)
+        with open(os.path.join(config, "lobole", "settings.json"), "w") as f:
+            f.write('{"settings_format": 1, "mesh_representation": "facets"}')
+        with launch(binary, ["--file", big],
+                    env={"XDG_CONFIG_HOME": config}) as app:
             d = app.client
             log = wait_for(lambda: "Could not import" in app.log() and
                            app.log(), "the --file refusal")

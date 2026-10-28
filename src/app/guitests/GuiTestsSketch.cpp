@@ -2747,9 +2747,11 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     std::filesystem::remove(stl);
   };
 
-  // A mesh past the triangle limit (interchange::MeshTriangleLimit) asks
-  // before it starts, saying what it will cost: Cancel imports nothing,
-  // Import anyway starts the job.
+  // A mesh past the triangle limit (interchange::MeshTriangleLimit) to be
+  // sewn as facets asks before it starts, saying what it will cost: Cancel
+  // imports nothing, Import anyway starts the job. One to be recognised
+  // sews nothing, so it starts without asking
+  // (docs/interchange/README.md#what-a-mesh-costs).
   t = IM_REGISTER_TEST(engine, "import", "a_large_mesh_asks_first");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -2769,6 +2771,24 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     }
     const size_t before = Doc()->FeatureCount();
     std::string error;
+    const std::string was = s_App->settings.meshRepresentation;
+    struct Restore {
+      std::string was;
+      ~Restore() { s_App->settings.meshRepresentation = was; }
+    } restore{was};
+    {
+      // Recognised: no ask, the job.
+      ui::HoldImportWorkerForTesting(true);
+      IM_CHECK(ui::RequestImport(*s_App, stl.string(), &error));
+      IM_CHECK(ui::ImportRunning(*s_App));
+      IM_CHECK(s_App->importAsk.path.empty());
+      ui::CancelBackgroundJobs(*s_App, "import");
+      ui::HoldImportWorkerForTesting(false);
+      IM_CHECK(WaitFor(ctx, "the recognised job to end",
+                       [] { return !ui::ImportRunning(*s_App); }));
+      IM_CHECK_EQ(Doc()->FeatureCount(), before);
+    }
+    s_App->settings.meshRepresentation = "facets";
     IM_CHECK(ui::RequestImport(*s_App, stl.string(), &error));
     IM_CHECK(!ui::ImportRunning(*s_App)); // asked, not started
     IM_CHECK_EQ(s_App->importAsk.triangles, n);

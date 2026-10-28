@@ -88,6 +88,9 @@ Segmentation SegmentAll(const TriMesh& mesh, const SegmentOptions& options);
 // each a plane, counted among the facets left: what the rebuild does with a
 // surface it cannot make a face of. Regions are renumbered.
 void Demote(Segmentation& s, const TriMesh& mesh, uint32_t region);
+// The same for several at once (indices as they are before the call).
+void Demote(Segmentation& s, const TriMesh& mesh,
+            const std::vector<uint32_t>& regions);
 
 // What an import says it recognised (the reply's `recognition`), in the
 // mesh's own coordinates until the caller places it.

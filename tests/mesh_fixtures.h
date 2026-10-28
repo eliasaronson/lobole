@@ -53,6 +53,9 @@ Part Bracket();
 Part FilletedAngle();
 // A block with one hole tipped 30° from vertical, and a hemispherical dome.
 Part ObliqueAndDome();
+// A 60 x 40 x 4 plate whose four upright corners are rounded (radius 7):
+// each corner a quarter cylinder tangent to the two walls either side.
+Part RoundedPlate();
 
 // Writes `part` as binary STL tessellated at `deflection` mm and
 // `angularRad`, into a fresh copy so an earlier tessellation does not

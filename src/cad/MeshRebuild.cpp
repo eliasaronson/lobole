@@ -14,7 +14,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <GProp_GProps.hxx>
-#include <GeomAPI_Interpolate.hxx>
+#include <GeomAPI_PointsToBSpline.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_BSplineCurve.hxx>
@@ -29,10 +29,13 @@
 #include <ShapeBuild_ReShape.hxx>
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_Shell.hxx>
+#include <ShapeFix_Wire.hxx>
 #include <Standard_Failure.hxx>
+#include <TColgp_Array1OfPnt.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_DataMapOfShapeInteger.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
@@ -52,6 +55,9 @@ namespace cad {
 namespace {
 
 constexpr double kTwoPi = 6.283185307179586;
+// Rounds of demoting what a rebuild faulted before the mesh is kept as
+// facets: each is a whole rebuild.
+constexpr int kDemoteRounds = 6;
 
 gp_Pnt Pnt(const glm::dvec3& p) { return {p.x, p.y, p.z}; }
 gp_Dir Dir(const glm::dvec3& d) { return {d.x, d.y, d.z}; }
@@ -119,6 +125,10 @@ private:
   bool BuildEdges(std::string& why);
   // The face of region `r`; null with `why` when it will not build.
   TopoDS_Face BuildFace(uint32_t r, std::string& why) const;
+  // The curved regions to demote for a fault in region `r`'s face: `r`
+  // itself when curved, else the curved regions across its edges, whose
+  // curves bound it.
+  void Blame(uint32_t r, std::vector<uint32_t>& out) const;
 
   const mesh::TriMesh& m_mesh;
   const mesh::Segmentation& m_seg;
@@ -472,6 +482,53 @@ bool Builder::BuildEdges(std::string& why) {
       glm::dvec3 centre, normal;
       double radius = 0.0;
       if (CircleThrough(pts, m_tol, centre, normal, radius)) {
+        // The circle a rim IS: square to the axis of the round surface it
+        // bounds, centred on that axis, at that surface's radius. A circle
+        // fitted to the points tilts by their noise, and a tilted rim is not
+        // an iso-line of the surface it bounds, which an edit that extends
+        // the surface from its rim reads as a curved boundary
+        // (directedit's neighbours).
+        for (const uint32_t side : {c.left, c.right}) {
+          if (side == mesh::kNone)
+            continue;
+          const mesh::FitResult& f = m_seg.regions[side].fit;
+          if (f.kind != mesh::Kind::Cylinder && f.kind != mesh::Kind::Cone &&
+              f.kind != mesh::Kind::Sphere)
+            continue;
+          glm::dvec3 axis = f.kind == mesh::Kind::Sphere
+                                ? glm::normalize(centre - f.origin)
+                                : f.axis;
+          if (f.kind == mesh::Kind::Sphere &&
+              glm::length(centre - f.origin) < m_tol)
+            axis = normal; // a great circle: the fit's own plane
+          if (std::abs(glm::dot(axis, normal)) < 1.0 - 1e-6)
+            continue; // not square to it: an ellipse's worth of tilt
+          const glm::dvec3 onAxis =
+              f.origin + axis * glm::dot(centre - f.origin, axis);
+          double r = radius;
+          if (f.kind == mesh::Kind::Cylinder)
+            r = f.radius;
+          else if (f.kind == mesh::Kind::Sphere)
+            r = std::sqrt(std::max(
+                0.0, f.radius * f.radius -
+                         glm::dot(onAxis - f.origin, onAxis - f.origin)));
+          else // a cone: its radius where the rim's plane cuts it
+            r = std::tan(f.halfAngle) *
+                std::abs(glm::dot(onAxis - f.origin, axis));
+          bool holds = r > 0.0;
+          for (size_t i = 0; i < pts.size() && holds; i++) {
+            const glm::dvec3 w = pts[i] - onAxis;
+            holds = std::abs(glm::dot(w, axis)) <= m_tol &&
+                    std::abs(glm::length(w - glm::dot(w, axis) * axis) - r) <=
+                        m_tol;
+          }
+          if (!holds)
+            continue;
+          centre = onAxis;
+          normal = glm::dot(axis, normal) > 0.0 ? axis : -axis;
+          radius = r;
+          break;
+        }
         // Turned so the chain runs the circle's way, from its first point.
         double sweep = 0.0;
         for (size_t i = 0; i + 1 < pts.size(); i++) {
@@ -495,30 +552,28 @@ bool Builder::BuildEdges(std::string& why) {
         c.edge = me.Edge();
         continue;
       }
-      // Anything else: a B-spline through the points.
-      std::vector<glm::dvec3> through = pts;
-      if (c.closed)
-        through.pop_back();
-      if (through.size() < 2) {
+      // Anything else: a B-spline within the tolerance of the points --
+      // an approximation, not an interpolation, so a boundary that wanders
+      // along a tangent junction is not followed wiggle by wiggle (a wire
+      // that crossed itself) and the curve stays small for the checks.
+      if (pts.size() < 2) {
         why = "an edge has too few points to make a curve";
         return false;
       }
-      Handle(TColgp_HArray1OfPnt) arr =
-          new TColgp_HArray1OfPnt(1, static_cast<int>(through.size()));
-      for (size_t i = 0; i < through.size(); i++)
-        arr->SetValue(static_cast<int>(i + 1), Pnt(through[i]));
-      GeomAPI_Interpolate interp(arr, c.closed, Precision::Confusion());
-      interp.Perform();
-      if (!interp.IsDone()) {
-        why = "an edge through " + std::to_string(through.size()) +
-              " points would not interpolate";
+      TColgp_Array1OfPnt arr(1, static_cast<int>(pts.size()));
+      for (size_t i = 0; i < pts.size(); i++)
+        arr.SetValue(static_cast<int>(i + 1), Pnt(pts[i]));
+      GeomAPI_PointsToBSpline approx(arr, 3, 8, GeomAbs_C2, 2.0 * m_tol);
+      if (!approx.IsDone()) {
+        why = "an edge through " + std::to_string(pts.size()) +
+              " points would not approximate";
         return false;
       }
-      Handle(Geom_BSplineCurve) curve = interp.Curve();
+      Handle(Geom_BSplineCurve) curve = approx.Curve();
       BRepBuilderAPI_MakeEdge me(curve, v0, v1, curve->FirstParameter(),
                                  curve->LastParameter());
       if (!me.IsDone()) {
-        why = "a curved edge through " + std::to_string(through.size()) +
+        why = "a curved edge through " + std::to_string(pts.size()) +
               " points would not build";
         return false;
       }
@@ -563,7 +618,22 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
       }
       if (glm::length(x) == 0.0)
         x = Square(f.axis);
-      const gp_Ax3 ax(Pnt(f.origin), Dir(f.axis), Dir(glm::normalize(x)));
+      // A cylinder's frame at the region's lowest point along its axis, so
+      // its faces run from v = 0 as a modeller's do (a cone keeps its apex,
+      // where its radius is the zero the frame needs).
+      glm::dvec3 at = f.origin;
+      if (f.kind == mesh::Kind::Cylinder) {
+        double low = 0.0;
+        bool first = true;
+        for (uint32_t t : region.triangles)
+          for (int c = 0; c < 3; c++) {
+            const double h = glm::dot(m_mesh.Corner(t, c) - f.origin, f.axis);
+            low = first ? h : std::min(low, h);
+            first = false;
+          }
+        at = f.origin + f.axis * low;
+      }
+      const gp_Ax3 ax(Pnt(at), Dir(f.axis), Dir(glm::normalize(x)));
       if (f.kind == mesh::Kind::Cylinder)
         surface = new Geom_CylindricalSurface(ax, f.radius);
       else
@@ -571,12 +641,26 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
       break;
     }
     case mesh::Kind::Sphere: {
-      // A pole in the region's middle, where the fix closes it with a
-      // degenerate edge, rather than on its rim.
+      // A patch (a corner blend) has its poles and seam well away from it:
+      // the equator through its middle, the seam behind. A dome reaches
+      // round to its rim on every side, so a pole goes in its middle,
+      // where the fix closes it with a degenerate edge, rather than on its
+      // rim.
       const glm::dvec3 m = glm::length(middle) > 0.0 ? glm::normalize(middle)
                                                      : glm::dvec3(0, 0, 1);
-      surface = new Geom_SphericalSurface(
-          gp_Ax3(Pnt(f.origin), Dir(m), Dir(Square(m))), f.radius);
+      double reach = 0.0; // the widest angle from the middle to a corner
+      for (uint32_t t : region.triangles)
+        for (int c = 0; c < 3; c++) {
+          const glm::dvec3 w = m_mesh.Corner(t, c) - f.origin;
+          const double len = glm::length(w);
+          if (len > 0.0)
+            reach = std::max(
+                reach, std::acos(std::clamp(glm::dot(w / len, m), -1.0, 1.0)));
+        }
+      const gp_Ax3 frame = reach < kTwoPi / 6 // within 60° of its middle
+                               ? gp_Ax3(Pnt(f.origin), Dir(Square(m)), Dir(-m))
+                               : gp_Ax3(Pnt(f.origin), Dir(m), Dir(Square(m)));
+      surface = new Geom_SphericalSurface(frame, f.radius);
       break;
     }
     }
@@ -657,12 +741,25 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
     addUses(wire, m_loops[r][i]);
     addWire(wire);
   }
+  // A plane needs no p-curves (OpenCASCADE projects onto a plane when it is
+  // asked) and has no seam, so only a curved face is fixed: the fix is most
+  // of a rebuild's time.
+  if (f.kind == mesh::Kind::Plane) {
+    if (!agree)
+      face.Reverse();
+    return face;
+  }
   try {
     ShapeFix_Face fix(face);
     fix.SetContext(m_context);
     fix.SetPrecision(m_tol);
     fix.SetMaxTolerance(std::max(1e3 * m_tol, 1e-4));
     fix.FixOrientationMode() = 0; // the wires' sense is the triangles'
+    // A wire that crosses itself is not mended here: the check finds it
+    // and the region goes back to flats, which is cheaper and says so.
+    fix.FixWireTool()->FixSelfIntersectionMode() = 0;
+    fix.FixWireTool()->FixIntersectingEdgesMode() = 0;
+    fix.FixWireTool()->FixNotchedEdgesMode() = 0;
     fix.Perform();
     face = fix.Face();
   } catch (const Standard_Failure& e) {
@@ -672,6 +769,24 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
   if (!agree)
     face.Reverse();
   return face;
+}
+
+void Builder::Blame(uint32_t r, std::vector<uint32_t>& out) const {
+  const auto add = [&](uint32_t region) {
+    if (region != mesh::kNone &&
+        m_seg.regions[region].fit.kind != mesh::Kind::Plane &&
+        std::find(out.begin(), out.end(), region) == out.end())
+      out.push_back(region);
+  };
+  if (m_seg.regions[r].fit.kind != mesh::Kind::Plane) {
+    add(r);
+    return;
+  }
+  for (const auto& loop : m_loops[r])
+    for (const LoopUse& use : loop) {
+      const Chain& c = m_chains[use.chain];
+      add(c.left == r ? c.right : c.left);
+    }
 }
 
 Rebuilt Builder::Run() {
@@ -700,52 +815,87 @@ Rebuilt Builder::Run() {
   std::vector<TopoDS_Shell> shells(components);
   for (TopoDS_Shell& s : shells)
     bb.MakeShell(s);
+  std::vector<TopoDS_Face> faceOf(m_seg.regions.size());
+  std::string firstWhy;
   for (uint32_t r = 0; r < m_seg.regions.size(); r++) {
     std::string why;
-    const TopoDS_Face face = BuildFace(r, why);
-    if (face.IsNull()) {
-      out.failed = "face " + std::to_string(r + 1) + " (a " +
+    faceOf[r] = BuildFace(r, why);
+    if (faceOf[r].IsNull()) {
+      if (firstWhy.empty())
+        firstWhy = "face " + std::to_string(r + 1) + " (a " +
                    mesh::KindName(m_seg.regions[r].fit.kind) +
                    ") would not build: " + why;
-      if (m_seg.regions[r].fit.kind != mesh::Kind::Plane)
-        out.badRegion = r;
-      return out;
+      Blame(r, out.badRegions);
+      continue;
     }
-    bb.Add(shells[component[m_seg.regions[r].firstTriangle]], face);
+    bb.Add(shells[component[m_seg.regions[r].firstTriangle]], faceOf[r]);
   }
+  // A face BRepCheck faults on its own (a wire that crosses itself where a
+  // boundary wandered along a tangent junction) is found before the shells
+  // are made, so a round that will be retried costs only its faces.
+  size_t faulted = 0;
+  if (firstWhy.empty()) {
+    TopoDS_Compound all;
+    bb.MakeCompound(all);
+    for (const TopoDS_Face& f : faceOf) {
+      try {
+        BRepLib::SameParameter(f, m_tol, Standard_True);
+      } catch (const Standard_Failure&) {
+      }
+      bb.Add(all, f);
+    }
+    // One analysis of them all, on OpenCASCADE's own threads; each face's
+    // verdict read from it.
+    BRepCheck_Analyzer check(all, Standard_True, Standard_True);
+    for (uint32_t r = 0; r < faceOf.size(); r++)
+      if (!check.IsValid(faceOf[r])) {
+        faulted++;
+        Blame(r, out.badRegions);
+      }
+  }
+  if (firstWhy.empty() && faulted > 0)
+    firstWhy = "the rebuilt solid is not valid (BRepCheck: " +
+               std::to_string(faulted) + " faces)";
+  if (!firstWhy.empty()) {
+    out.failed = firstWhy;
+    return out;
+  }
+  // Which region each face now in the shells is (the fix may have replaced
+  // one), for the checks to name what they find.
+  // By its surface: a face the context rebuilt keeps its surface.
+  std::map<const Geom_Surface*, uint32_t> regionOfSurface;
+  for (uint32_t r = 0; r < faceOf.size(); r++)
+    regionOfSurface[BRep_Tool::Surface(faceOf[r]).get()] = r;
+  const auto regionOf = [&](const TopoDS_Shape& face) -> uint32_t {
+    const auto it =
+        regionOfSurface.find(BRep_Tool::Surface(TopoDS::Face(face)).get());
+    return it == regionOfSurface.end() ? mesh::kNone : it->second;
+  };
+
   TopoDS_Compound compound;
   bb.MakeCompound(compound);
   TopoDS_Shape result;
+  size_t open = 0;
   for (TopoDS_Shell& shell : shells) {
     shell = TopoDS::Shell(m_context->Apply(shell));
     shell.Closed(true);
     BRepCheck_Shell check(shell);
     if (check.Closed() != BRepCheck_NoError) {
+      // Every face with an edge only it has: where the shell is open.
       TopTools_IndexedDataMapOfShapeListOfShape faces;
       TopExp::MapShapesAndUniqueAncestors(shell, TopAbs_EDGE, TopAbs_FACE,
                                           faces);
-      size_t open = 0, many = 0;
-      std::map<int, int> kinds;
       for (int i = 1; i <= faces.Extent(); i++) {
-        const int n = faces(i).Extent();
-        const bool seam =
-            n == 1 && BRep_Tool::IsClosed(TopoDS::Edge(faces.FindKey(i)),
-                                          TopoDS::Face(faces(i).First()));
-        if (n == 1 && !seam) {
-          open++;
-          const GeomAbs_SurfaceType t =
-              BRepAdaptor_Surface(TopoDS::Face(faces(i).First())).GetType();
-          kinds[t]++;
-        } else if (n > 2)
-          many++;
+        if (faces(i).Extent() != 1)
+          continue;
+        const TopoDS_Face& f = TopoDS::Face(faces(i).First());
+        if (BRep_Tool::IsClosed(TopoDS::Edge(faces.FindKey(i)), f))
+          continue; // a seam
+        open++;
+        if (const uint32_t r = regionOf(f); r != mesh::kNone)
+          Blame(r, out.badRegions);
       }
-      out.failed = "the rebuilt shell is not closed (" + std::to_string(open) +
-                   " edges on one face, " + std::to_string(many) +
-                   " on three or more; on surface types";
-      for (const auto& [k, n] : kinds)
-        out.failed += " " + std::to_string(k) + "x" + std::to_string(n);
-      out.failed += ")";
-      return out;
+      continue;
     }
     TopoDS_Solid solid;
     bb.MakeSolid(solid);
@@ -756,28 +906,37 @@ Rebuilt Builder::Run() {
     else
       bb.Add(compound, solid);
   }
+  if (open > 0) {
+    out.failed = "the rebuilt shell is not closed (" + std::to_string(open) +
+                 " edges on one face)";
+    return out;
+  }
   if (components != 1)
     result = compound;
   try {
     BRepLib::SameParameter(result, m_tol, Standard_True);
   } catch (const Standard_Failure&) {
   }
-  BRepCheck_Analyzer analyzer(result);
+  BRepCheck_Analyzer analyzer(result, Standard_True, Standard_True);
   if (!analyzer.IsValid()) {
-    out.failed = "the rebuilt solid is not valid (BRepCheck)";
-    // Name the first face it faults, and demote it if it is curved.
-    uint32_t r = 0;
-    for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next(), r++) {
+    // Every face it faults, each blamed.
+    size_t bad = 0;
+    std::string first;
+    for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
       if (BRepCheck_Analyzer(ex.Current()).IsValid())
         continue;
-      if (r < m_seg.regions.size()) {
-        out.failed += ": face " + std::to_string(r + 1) + ", a " +
-                      mesh::KindName(m_seg.regions[r].fit.kind);
-        if (m_seg.regions[r].fit.kind != mesh::Kind::Plane)
-          out.badRegion = r;
-      }
-      break;
+      bad++;
+      const uint32_t r = regionOf(ex.Current());
+      if (r == mesh::kNone)
+        continue;
+      if (first.empty())
+        first = "face " + std::to_string(r + 1) + ", a " +
+                mesh::KindName(m_seg.regions[r].fit.kind);
+      Blame(r, out.badRegions);
     }
+    out.failed =
+        "the rebuilt solid is not valid (BRepCheck: " + std::to_string(bad) +
+        " faces" + (first.empty() ? std::string() : ", first " + first) + ")";
     return out;
   }
   // The volume the facets enclose against the solid's: no further apart
@@ -816,8 +975,8 @@ Rebuilt RebuildFromRegions(const mesh::TriMesh& mesh,
 
 bool LoadStlRecognized(const std::string& path, const RecognizeOptions& options,
                        CADShape& shape, mesh::Recognition& report,
-                       std::string& error,
-                       CADKernel::ImportProgress* progress) {
+                       std::string& error, CADKernel::ImportProgress* progress,
+                       bool* facetsRefused) {
   using Phase = CADKernel::ImportProgress::Phase;
   const auto cancelled = [&] {
     return progress != nullptr && progress->Cancelled();
@@ -836,6 +995,12 @@ bool LoadStlRecognized(const std::string& path, const RecognizeOptions& options,
     report = {};
     report.minSides = options.minSides;
     report.fellBack = unread;
+    if (!options.facetsAllowed) {
+      if (facetsRefused != nullptr)
+        *facetsRefused = true;
+      error = "recognition could not read it (" + unread + ")";
+      return false;
+    }
     if (!CADKernel::Instance().LoadSTL(path, shape, progress)) {
       error =
           cancelled() ? "cancelled" : "failed to read '" + path + "' as STL";
@@ -855,16 +1020,18 @@ bool LoadStlRecognized(const std::string& path, const RecognizeOptions& options,
   }
   if (progress != nullptr)
     progress->OnPhase(Phase::Building, 0.5);
+  // A face that will not build, or that a check faults, puts its region
+  // (or, for a flat, the curved ones round it) back as flats, all at once,
+  // and the rebuild is tried again: a few rounds, each a whole rebuild.
   size_t demoted = 0;
   Rebuilt built;
-  for (;;) {
+  for (int round = 0;; round++) {
     built = RebuildFromRegions(m, seg);
-    if (!built.failed.empty() && built.badRegion != mesh::kNone) {
-      mesh::Demote(seg, m, built.badRegion);
-      demoted++;
-      continue;
-    }
-    break;
+    if (built.failed.empty() || built.badRegions.empty() ||
+        round == kDemoteRounds || cancelled())
+      break;
+    demoted += built.badRegions.size();
+    mesh::Demote(seg, m, built.badRegions);
   }
   report = mesh::Summarize(m, seg, options.minSides);
   report.demoted = demoted;
@@ -874,6 +1041,12 @@ bool LoadStlRecognized(const std::string& path, const RecognizeOptions& options,
   }
   // Sewn as facets, as before, with the reason.
   report.fellBack = built.failed;
+  if (!options.facetsAllowed) {
+    if (facetsRefused != nullptr)
+      *facetsRefused = true;
+    error = "recognition kept it as facets (" + built.failed + ")";
+    return false;
+  }
   if (!CADKernel::Instance().LoadSTL(path, shape, progress)) {
     error = cancelled() ? "cancelled" : "failed to read '" + path + "' as STL";
     return false;

@@ -49,6 +49,8 @@ public:
 
 private:
   void Tidy(Segmentation& out) const;
+  // Makes a cylinder exactly tangent to the planes it meets tangentially.
+  void Tangents(Segmentation& out) const;
   void BuildPatches();
   bool Smooth(uint32_t a, uint32_t b) const {
     return glm::dot(m_patches[a].normal, m_patches[b].normal) > kSmoothCos;
@@ -59,9 +61,10 @@ private:
                    const FitResult* prefer) const;
   bool OnSurface(const FitResult& f, uint32_t patch) const;
   void Grow(std::vector<uint32_t>& set, FitResult& fit);
-  // The most a facet of `set` turns about `fit`'s axis or centre.
-  double FacetTurn(const std::vector<uint32_t>& set,
-                   const FitResult& fit) const;
+  // The most a facet of `set` turns about `fit`'s axis or centre; `total`,
+  // when given, the sum of every facet's turn (a full ring's is a turn).
+  double FacetTurn(const std::vector<uint32_t>& set, const FitResult& fit,
+                   double* total = nullptr) const;
 
   const TriMesh& m_mesh;
   const SegmentOptions& m_opt;
@@ -302,8 +305,10 @@ void Segmenter::Grow(std::vector<uint32_t>& set, FitResult& fit) {
 }
 
 double Segmenter::FacetTurn(const std::vector<uint32_t>& set,
-                            const FitResult& fit) const {
+                            const FitResult& fit, double* total) const {
   double most = 0.0;
+  if (total != nullptr)
+    *total = 0.0;
   for (uint32_t id : set) {
     const Patch& p = m_patches[id];
     if (fit.kind == Kind::Sphere) {
@@ -343,6 +348,8 @@ double Segmenter::FacetTurn(const std::vector<uint32_t>& set,
       hi = std::max(hi, ang);
     }
     most = std::max(most, hi - lo);
+    if (total != nullptr)
+      *total += hi - lo;
   }
   return most;
 }
@@ -411,12 +418,19 @@ Segmentation Segmenter::Run() {
     if (!fit.ok)
       continue;
     Grow(set, fit);
-    const double turn = FacetTurn(set, fit);
+    double around = 0.0;
+    const double turn = FacetTurn(set, fit, &around);
     if (turn > turnLimit) {
       // Round enough to fit, too coarse to be round: a polygon, kept flat.
-      if (fit.kind != Kind::Sphere) {
+      // Listed when it is a ring of five sides or more -- a nut trap, a
+      // pentagon hole -- going at least half way round (a flat the ring
+      // shares with a neighbour may be missing), not two flats that happen
+      // to fit an arc.
+      const int sides = turn > 0.0 ? int(std::lround(kTwoPi / turn)) : 0;
+      if (fit.kind != Kind::Sphere && sides >= kMinSidesLowest &&
+          around >= kTwoPi / 2) {
         Polygon poly;
-        poly.sides = turn > 0.0 ? int(std::lround(kTwoPi / turn)) : 0;
+        poly.sides = sides;
         poly.axis = fit.axis;
         double along = 0.0, radius = 0.0;
         size_t count = 0;
@@ -436,6 +450,21 @@ Segmentation Segmenter::Run() {
         tried[id] = true;
         inPolygon[id] = true;
       }
+      continue;
+    }
+    // A region one flat of which is most of it: a wall and two narrow
+    // facets beside it fit a cylinder of a radius ninety times the part's,
+    // and that is not a surface anyone drew -- a tessellated one is facets
+    // of a size.
+    double whole = 0.0, largest = 0.0;
+    for (uint32_t id : set) {
+      whole += m_patches[id].area;
+      largest = std::max(largest, m_patches[id].area);
+    }
+    const bool dominated = largest > 0.5 * whole;
+    if (dominated) {
+      for (uint32_t id : set)
+        tried[id] = true;
       continue;
     }
     const auto region = static_cast<uint32_t>(curvedSets.size());
@@ -498,7 +527,99 @@ Segmentation Segmenter::Run() {
     for (uint32_t t : out.regions[r].triangles)
       out.regionOf[t] = r;
   Tidy(out);
+  Tangents(out);
   return out;
+}
+
+void Segmenter::Tangents(Segmentation& out) const {
+  // A fillet or a rounded corner meets its flats tangentially. Each fit is
+  // within the file's precision on its own, but two fits are not tangent to
+  // each other: the cylinder sits a hair inside or outside the plane, and an
+  // edit that extends both (Offset Face) finds them crossing twice, or not
+  // meeting, where the part had them touch. The planes are fitted to far
+  // more of the part, so the cylinder moves: its axis made square to the
+  // planes' normals and placed exactly its radius from each.
+  std::vector<std::vector<uint32_t>> touching(out.regions.size());
+  for (uint32_t t = 0; t < m_mesh.triangles.size(); t++)
+    for (int e = 0; e < 3; e++) {
+      const uint32_t u = m_mesh.neighbour[t][e];
+      if (u == kNone)
+        continue;
+      const uint32_t a = out.regionOf[t], b = out.regionOf[u];
+      if (a != b)
+        touching[a].push_back(b);
+    }
+  for (uint32_t c = 0; c < out.regions.size(); c++) {
+    FitResult& f = out.regions[c].fit;
+    if (f.kind != Kind::Cylinder)
+      continue;
+    auto& adjacent = touching[c];
+    std::sort(adjacent.begin(), adjacent.end());
+    adjacent.erase(std::unique(adjacent.begin(), adjacent.end()),
+                   adjacent.end());
+    struct Flat {
+      glm::dvec3 n;
+      double offset; // where the axis must be: n . o = offset
+    };
+    std::vector<Flat> flats;
+    for (uint32_t p : adjacent) {
+      const FitResult& pl = out.regions[p].fit;
+      if (pl.kind != Kind::Plane)
+        continue;
+      const glm::dvec3 n = glm::normalize(pl.axis);
+      // Tangent: the plane runs along the axis, a radius from it.
+      if (std::abs(glm::dot(n, f.axis)) > m_tol / std::max(f.radius, m_tol))
+        continue;
+      const double d = glm::dot(f.origin - pl.origin, n); // axis to plane
+      if (std::abs(std::abs(d) - f.radius) > m_opt.quanta * m_tol)
+        continue;
+      flats.push_back(
+          {n, glm::dot(pl.origin, n) + (d > 0 ? 1.0 : -1.0) * f.radius});
+    }
+    if (flats.empty())
+      continue;
+    // The axis square to every normal: the plane through them, or the
+    // cross of two that are not parallel.
+    glm::dvec3 axis = f.axis;
+    for (const Flat& fl : flats)
+      axis = glm::normalize(axis - glm::dot(axis, fl.n) * fl.n);
+    // Its point: least squares over the conditions n . o = offset, in the
+    // plane square to the axis through the fitted point.
+    glm::dvec3 e1 = glm::normalize(glm::cross(axis, std::abs(axis.x) < 0.6
+                                                        ? glm::dvec3(1, 0, 0)
+                                                        : glm::dvec3(0, 1, 0)));
+    glm::dvec3 e2 = glm::cross(axis, e1);
+    double a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0;
+    for (const Flat& fl : flats) {
+      const double p1 = glm::dot(fl.n, e1), p2 = glm::dot(fl.n, e2);
+      const double r = fl.offset - glm::dot(fl.n, f.origin);
+      a11 += p1 * p1, a12 += p1 * p2, a22 += p2 * p2;
+      b1 += p1 * r, b2 += p2 * r;
+    }
+    double s1 = 0.0, s2 = 0.0;
+    const double det = a11 * a22 - a12 * a12;
+    if (std::abs(det) > 1e-12) {
+      s1 = (b1 * a22 - b2 * a12) / det;
+      s2 = (a11 * b2 - a12 * b1) / det;
+    } else { // one direction only (parallel planes): along it
+      const double len = a11 + a22;
+      if (len > 0.0) {
+        s1 = b1 / len;
+        s2 = b2 / len;
+      }
+    }
+    FitResult moved = f;
+    moved.axis = glm::dot(axis, f.axis) < 0.0 ? -axis : axis;
+    moved.origin = f.origin + s1 * e1 + s2 * e2;
+    // Kept only if the region's own vertices still sit on it.
+    bool holds = true;
+    for (uint32_t t : out.regions[c].triangles)
+      for (int k = 0; k < 3 && holds; k++)
+        holds = std::abs(moved.Distance(m_mesh.Corner(t, k))) <=
+                m_opt.quanta * m_tol;
+    if (holds)
+      f = moved;
+  }
 }
 
 void Segmenter::Tidy(Segmentation& out) const {
@@ -599,12 +720,29 @@ std::string Plural(size_t n, const char* one, const char* many) {
 } // namespace
 
 void Demote(Segmentation& s, const TriMesh& mesh, uint32_t region) {
-  if (region >= s.regions.size() || s.regions[region].fit.kind == Kind::Plane)
+  Demote(s, mesh, std::vector<uint32_t>{region});
+}
+
+void Demote(Segmentation& s, const TriMesh& mesh,
+            const std::vector<uint32_t>& regions) {
+  std::vector<uint32_t> tris;
+  std::vector<bool> drop(s.regions.size(), false);
+  for (uint32_t r : regions)
+    if (r < s.regions.size() && s.regions[r].fit.kind != Kind::Plane &&
+        !drop[r]) {
+      drop[r] = true;
+      tris.insert(tris.end(), s.regions[r].triangles.begin(),
+                  s.regions[r].triangles.end());
+    }
+  if (tris.empty())
     return;
-  const std::vector<uint32_t> tris = std::move(s.regions[region].triangles);
-  s.regions.erase(s.regions.begin() + region);
-  // Within the region, coplanar triangles flood together as BuildPatches
-  // floods the whole mesh.
+  std::vector<Region> kept;
+  for (uint32_t r = 0; r < s.regions.size(); r++)
+    if (!drop[r])
+      kept.push_back(std::move(s.regions[r]));
+  s.regions = std::move(kept);
+  // Within them, coplanar triangles flood together as BuildPatches floods
+  // the whole mesh.
   std::vector<uint32_t> order = tris;
   std::stable_sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
     return mesh.Area(a) > mesh.Area(b);

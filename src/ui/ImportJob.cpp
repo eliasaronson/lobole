@@ -30,6 +30,23 @@ namespace ui {
 
 namespace {
 
+// What the worker reads the file as: the request's unit and representation,
+// and whether a recognised mesh past the triangle limit may still be sewn as
+// facets -- only when the caller said so.
+ImportFeature::ReadOptions ReadOptionsOf(const ImportRequest& rq) {
+  ImportFeature::ReadOptions o;
+  o.unit = rq.unit;
+  o.representation = rq.representation.value_or(mesh::Representation::Facets);
+  o.minSides = rq.minSides;
+  o.facetsPastLimit = rq.allowLargeMesh;
+  o.largeMeshOverride = rq.overrideName;
+  return o;
+}
+
+} // namespace
+
+namespace {
+
 // How many part tabs to create per frame while materializing. Each is an
 // AddPart + an ImportFeature regen off a small .brep — around 7 ms on the
 // 299-part file, so 8 keeps a frame near 60 ms: slow enough to be one visible
@@ -183,11 +200,8 @@ void Run(ImportJob* job, BackgroundJob* bg, int holdMs, bool holdDeaf) {
     CADKernel::ImportedModel model;
     std::string why;
     if (bg->cancel.load() ||
-        !ImportFeature::ReadModel(
-            rq.path,
-            {rq.unit, rq.representation.value_or(mesh::Representation::Facets),
-             rq.minSides},
-            model, why, &progress)) {
+        !ImportFeature::ReadModel(rq.path, ReadOptionsOf(rq), model, why,
+                                  &progress)) {
       // Cancelled: not an error, and reported as none.
       job->error = bg->cancel.load() ? "" : why;
       measured();
@@ -415,7 +429,13 @@ bool StartImport(AppState& state, const ImportRequest& request,
   }
   const std::optional<interchange::MeshCost> mesh =
       interchange::MeshImportCost(path);
-  if (mesh && mesh->overLimit && !request.allowLargeMesh)
+  // The limit prices sewing every triangle; a mesh to be recognised sews
+  // none, so it goes ahead, and the worker refuses it only if it would have
+  // to be kept as facets (ImportFeature::ReadOptions::facetsPastLimit).
+  const bool recognised =
+      ResolveRepresentation(state, path, request.representation) ==
+      mesh::Representation::Recognize;
+  if (mesh && mesh->overLimit && !request.allowLargeMesh && !recognised)
     return fail(
         interchange::LargeMeshRefusal(path, *mesh, request.overrideName));
 
@@ -488,7 +508,11 @@ bool StartImport(AppState& state, const std::string& path, std::string* error) {
 
 bool RequestImport(AppState& state, const std::string& path,
                    std::string* error) {
-  if (!IsSketchImportFile(path) && !ImportRunning(state))
+  // A mesh to be recognised is not priced by the sewing law, so nothing is
+  // asked; one that falls back to facets past the limit is refused then.
+  if (!IsSketchImportFile(path) && !ImportRunning(state) &&
+      ResolveRepresentation(state, path, std::nullopt) !=
+          mesh::Representation::Recognize)
     if (const auto mesh = interchange::MeshImportCost(path);
         mesh && mesh->overLimit) {
       state.importAsk = {path, mesh->triangles, mesh->expectedSeconds};

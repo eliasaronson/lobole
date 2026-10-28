@@ -923,6 +923,12 @@ public:
     units::Length unit = units::Length::Millimetre;
     mesh::Representation representation = mesh::Representation::Facets;
     int minSides = mesh::kDefaultMinSides;
+    // A recognised mesh past the triangle limit was let through because
+    // recognition does not sew it; should it fall back to facets, it is
+    // refused instead, naming the limit and `largeMeshOverride`
+    // (docs/interchange/README.md#what-a-mesh-costs).
+    bool facetsPastLimit = true;
+    std::string largeMeshOverride;
   };
   static bool ReadModel(const std::string& path, const ReadOptions& options,
                         CADKernel::ImportedModel& out, std::string& error,

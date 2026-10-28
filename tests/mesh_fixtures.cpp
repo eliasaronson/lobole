@@ -182,6 +182,25 @@ Part ObliqueAndDome() {
   return Finish("oblique_and_dome", s, part);
 }
 
+Part RoundedPlate() {
+  Part part;
+  TopoDS_Shape s = BRepPrimAPI_MakeBox(gp_Pnt(-30, -20, 0), 60, 40, 4).Shape();
+  BRepFilletAPI_MakeFillet fillet(s);
+  for (TopExp_Explorer ex(s, TopAbs_EDGE); ex.More(); ex.Next()) {
+    BRepAdaptor_Curve c(TopoDS::Edge(ex.Current()));
+    const gp_Pnt a = c.Value(c.FirstParameter()),
+                 b = c.Value(c.LastParameter());
+    if (std::abs(a.Z() - b.Z()) > 1.0)
+      fillet.Add(7.0, TopoDS::Edge(ex.Current()));
+  }
+  fillet.Build();
+  REQUIRE(fillet.IsDone());
+  for (double x : {-23.0, 23.0})
+    for (double y : {-13.0, 13.0})
+      part.cylinders.push_back({{x, y, 0}, {0, 0, 1}, 7.0, 0});
+  return Finish("rounded_plate", fillet.Shape(), part);
+}
+
 std::filesystem::path WriteStl(const Part& part, double deflection,
                                double angularRad, const std::string& tag) {
   const auto path = std::filesystem::temp_directory_path() /

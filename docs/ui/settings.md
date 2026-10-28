@@ -51,8 +51,10 @@ OS sweeps.
 - **A newer `settings_format` is read, not refused.** Unknown keys survive and
   missing ones default, so refusing would only lock a user out of their own
   preferences. The number moves only if an existing key changes meaning.
-- **No live reload.** Read at startup; written on change, debounced 1 s
-  (`kSaveDebounceSeconds`) so a slider drag is one write.
+- **No live reload.** Read at startup -- by a window and by `--headless`
+  alike, so an agent's instance imports as the person's preferences say --
+  and written on change, debounced 1 s (`kSaveDebounceSeconds`) so a slider
+  drag is one write.
 - Not the document format: no `kVersion` bump and no golden when a setting is
   added.
 

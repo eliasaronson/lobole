@@ -5,6 +5,7 @@
 
 #include "cad/MeshRebuild.h"
 #include "core/ModelSpace.h"
+#include "core/io/MeshImportCost.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
@@ -276,9 +277,19 @@ bool ImportFeature::ReadModel(const std::string& path,
     mesh::Recognition report;
     cad::RecognizeOptions ro;
     ro.minSides = options.minSides;
-    if (!cad::LoadStlRecognized(path, ro, shape, report, error, progress)) {
+    std::optional<interchange::MeshCost> cost;
+    if (!options.facetsPastLimit) {
+      cost = interchange::MeshImportCost(path);
+      ro.facetsAllowed = !(cost && cost->overLimit);
+    }
+    bool facetsRefused = false;
+    if (!cad::LoadStlRecognized(path, ro, shape, report, error, progress,
+                                &facetsRefused)) {
       if (cancelled())
         error = "cancelled";
+      else if (facetsRefused && cost)
+        error += "; as facets " + interchange::LargeMeshRefusal(
+                                      path, *cost, options.largeMeshOverride);
       return false;
     }
     if (scale != 1.0) {

@@ -30,9 +30,11 @@ namespace cad {
 struct Rebuilt {
   CADShape shape;     // valid when `failed` is empty
   std::string failed; // which check, and why
-  // A curved region whose face would not build: demoted and tried again
-  // (mesh::Demote) by the caller, rather than the whole mesh given up.
-  uint32_t badRegion = mesh::kNone;
+  // The curved regions to blame when it failed: a face that would not
+  // build, one with an open edge or one BRepCheck faults (or, for a flat
+  // one, the curved regions round it). The caller demotes them all
+  // (mesh::Demote) and tries again, rather than giving the whole mesh up.
+  std::vector<uint32_t> badRegions;
 };
 
 Rebuilt RebuildFromRegions(const mesh::TriMesh& mesh,
@@ -40,6 +42,11 @@ Rebuilt RebuildFromRegions(const mesh::TriMesh& mesh,
 
 struct RecognizeOptions {
   int minSides = 12;
+  // Whether a mesh the rebuild cannot take may be sewn as facets. A caller
+  // that let a mesh past the triangle limit because it would be recognised
+  // says no, and the read then fails with `facetsRefused` set, for it to
+  // refuse naming the limit (docs/interchange/README.md#what-a-mesh-costs).
+  bool facetsAllowed = true;
 };
 
 // Reads the STL at `path` and recognises it: segmented, rebuilt, checked.
@@ -50,6 +57,7 @@ struct RecognizeOptions {
 bool LoadStlRecognized(const std::string& path, const RecognizeOptions& options,
                        CADShape& shape, mesh::Recognition& report,
                        std::string& error,
-                       CADKernel::ImportProgress* progress = nullptr);
+                       CADKernel::ImportProgress* progress = nullptr,
+                       bool* facetsRefused = nullptr);
 
 } // namespace cad

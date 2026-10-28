@@ -12,6 +12,7 @@
 #include "core/Feature.h"
 #include "core/Measure.h"
 #include "core/features/OffsetFaceFeature.h"
+#include "core/io/MeshImportCost.h"
 #include "core/io/Serialization.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -19,6 +20,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -158,6 +160,44 @@ TEST_CASE("A recognised STL is the CAD part again", "[mesh_recognition]") {
   std::filesystem::remove(stl);
 }
 
+TEST_CASE("Offset Face moves a flat between rounded corners",
+          "[mesh_recognition]") {
+  // Each corner is fitted on its own, a hair off tangent to its walls; the
+  // edit extends both and found them crossing twice or not meeting, and
+  // refused ("closes no volume") where the CAD part takes it. Recognition
+  // makes a cylinder exactly tangent to the flats it meets tangentially.
+  const fixtures::Part plate = fixtures::RoundedPlate();
+  const auto stl = fixtures::WriteStl(plate, 0.01, 0.2, "rounded");
+  Document doc;
+  doc.AddFeature(Recognize(stl));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  CHECK(FaceCount(body) == 10);
+  CHECK_THAT(body.shape.Volume(), WithinRel(plate.volume, 1e-6));
+  for (const fixtures::Round& c : plate.cylinders) {
+    INFO("corner at " << c.point.x << ", " << c.point.y);
+    CHECK(Bore(body, c.point.x, c.point.y, c.radius).has_value());
+  }
+  std::string top;
+  double area = 0.0;
+  for (const auto& [i, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, i);
+    if (info && info->kind == "plane" && info->normal.z > 0.99) {
+      top = name;
+      area = info->area;
+    }
+  }
+  REQUIRE(!top.empty());
+  const double before = body.shape.Volume();
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<OffsetFaceFeature>(
+      "raise", id, std::vector<ElementRef>{{id, top}}, 1.0));
+  INFO(doc.GetFeature(1)->GetError());
+  REQUIRE(doc.GetFeature(1)->GetError().empty());
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(before + area, 1e-6));
+  std::filesystem::remove(stl);
+}
+
 TEST_CASE("Recognition lists the polygons it left flat, and min_sides "
           "rounds them",
           "[mesh_recognition]") {
@@ -222,4 +262,63 @@ TEST_CASE("A representation is refused on a file that is not a mesh",
   o.minSides = 4;
   CHECK_FALSE(ImportFeature::ReadModel("part.stl", o, model, why));
   CHECK(why.find("min_sides 4") != std::string::npos);
+}
+
+TEST_CASE("A recognised mesh past the triangle limit reads, and one that "
+          "would fall back to facets is refused naming the limit",
+          "[mesh_recognition][slow]") {
+  // The limit prices sewing every triangle (interchange::MeshImportCost),
+  // which a recognised mesh never does. Past it, the job lets a recognised
+  // import through (facetsPastLimit false) and refuses it only if the
+  // rebuild fails and it would have to be sewn after all.
+  const fixtures::Part plate = fixtures::Plate();
+  const double chord = 2.5 * (1.0 - std::cos(kPi / 640));
+  const auto stl = fixtures::WriteStl(plate, chord, 2 * kPi / 640, "large");
+  const auto cost = interchange::MeshImportCost(stl.string());
+  REQUIRE(cost.has_value());
+  INFO(cost->triangles << " triangles");
+  REQUIRE(cost->overLimit);
+
+  ImportFeature::ReadOptions o;
+  o.representation = mesh::Representation::Recognize;
+  o.facetsPastLimit = false;
+  o.largeMeshOverride = "`allow_large_mesh: true`";
+  {
+    // A CPU-time cost check (docs/ui/testing.md#tests-that-time-things):
+    // what sewing would price at minutes reads in seconds, set against the
+    // slowest core and shown to fail against a spin planted in the rebuild.
+    const std::clock_t t0 = std::clock();
+    CADKernel::ImportedModel model;
+    std::string why;
+    REQUIRE(ImportFeature::ReadModel(stl.string(), o, model, why));
+    const double cpu = double(std::clock() - t0) / CLOCKS_PER_SEC;
+    INFO(cpu << " s CPU, the sewing law says " << cost->expectedSeconds);
+    CHECK(cpu < 5.0);
+    REQUIRE(model.products.size() == 1);
+    CHECK(model.products[0].recognition->fellBack.empty());
+    CHECK(model.products[0].shape.FaceCount() == 30);
+  }
+  {
+    // The same file opened (a triangle gone): the rebuild needs a closed
+    // solid, and as facets it would be past the limit.
+    std::string bytes;
+    {
+      std::ifstream in(stl, std::ios::binary);
+      bytes.assign(std::istreambuf_iterator<char>(in), {});
+    }
+    uint32_t count = 0;
+    std::memcpy(&count, bytes.data() + 80, 4);
+    count -= 1;
+    std::memcpy(bytes.data() + 80, &count, 4);
+    bytes.resize(bytes.size() - 50);
+    std::ofstream out(stl, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  }
+  CADKernel::ImportedModel model;
+  std::string why;
+  CHECK_FALSE(ImportFeature::ReadModel(stl.string(), o, model, why));
+  INFO(why);
+  CHECK(why.find("kept it as facets") != std::string::npos);
+  CHECK(why.find("allow_large_mesh") != std::string::npos);
+  std::filesystem::remove(stl);
 }

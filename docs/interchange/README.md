@@ -294,6 +294,26 @@ so the RPC answers the cancel at once, the modal goes at once, and the
 worker's result is dropped when it lands (`background_jobs` lists it until
 then, and a new import is refused naming why).
 
+**A recognised mesh.** The law prices sewing every triangle, and a
+recognised mesh sews none: `import_step` (off the frame) and File › Import
+let one past the limit through without asking. The worker then reads it
+with `ReadOptions::facetsPastLimit` false, so a mesh the rebuild cannot
+take is refused there, naming the limit and the override, rather than sewn
+for minutes. `add_feature`, which builds on the frame, keeps refusing past
+the limit. Measured here (a recognised import is the rebuild's own
+rounds, so it grows with the faces made, not the triangles read):
+
+| mesh | triangles | facets | recognize | faces |
+|---|---|---|---|---|
+| the 24-hole plate (our own export) | 2,652 / 5,468 / 12,060 / 23,948 | 0.46 / 1.07 / 4.08 / 17.5 s | 0.21 / 0.11 / 0.10 / 0.21 s | 30 |
+| the same plate, 640-sided holes | 122,988 | the law says 90 s | 0.25 s CPU (1.1 s on the slowest core) | 30 |
+| SO-101 mounting plates and macro-pad parts | 752 to 2,096 | 0.11 to 0.22 s | 0.1 s | 22 to 35 |
+| SO-101 printed parts (Autodesk's exporter, fillets everywhere) | 5,854 to 17,036 | 0.44 to 1.62 s | 0.9 to 6.8 s | 700 to 4,934 |
+| the STS3215 servo body | 19,080 | 1.54 s | 0.45 s | 337 |
+
+`test_mesh_import_recognize.cpp` holds the 123k-triangle read under 5 s of
+CPU, shown to fail against a spin planted in the rebuild.
+
 ## Recognising a faceted mesh
 
 A downloaded mechanical part arrives as STL: every hole is a prism of
@@ -349,6 +369,20 @@ so it can run on a worker thread.
        `min_sides: 5` asks for as round.
   4. **What fits nothing** stays as its flat patches, such as a torus corner
      where two fillets meet. These are counted in `facetsLeft`.
+  5. **One flat is not a curve.** A region more than half of whose area is
+     one flat is refused: a flat wall and two narrow facets beside it fit a
+     cylinder of a radius ninety times the part's (the Seeedstudio plate's
+     walls came out as cylinders of radius 619 mm), and a tessellated
+     surface is facets of a size.
+  6. **Tangent where the part is tangent.** A rounded corner or a fillet
+     meets its flats tangentially, but two fits made on their own are not
+     tangent to each other: the cylinder sits a hair inside or outside the
+     plane. An edit that extends both (Offset Face) then found them crossing
+     twice or not meeting, and refused ("closes no volume") where the STEP
+     of the same part took it. So a cylinder is made exactly tangent to the
+     planes it meets tangentially (`Segmenter::Tangents`): its axis square
+     to their normals and its radius from each, kept only when its own
+     vertices still sit on it.
 
 ### Rebuilding the solid
 
@@ -362,8 +396,15 @@ code involved.
   ONE edge, used by both faces.
   - Its curve comes from its own points, each snapped onto both surfaces by
     alternating projection: a line when they are collinear, a circle or arc
-    when they are coplanar and concyclic, and otherwise an interpolated
-    B-spline (a hole breaking into a boss, an oblique hole's ellipse).
+    when they are coplanar and concyclic, and otherwise a B-spline within
+    twice the tolerance of them (a hole breaking into a boss, an oblique
+    hole's ellipse). An approximation, not an interpolation: a boundary that
+    wanders along a tangent junction is not followed wiggle by wiggle, and
+    the curve stays small for the checks.
+  - A rim is the circle the round surface beside it has: square to its axis,
+    centred on it, at its radius. A circle fitted to the points tilts by
+    their noise, and a tilted rim is not an iso-line of the surface, which
+    an edit extending the surface from its rim reads as a curved boundary.
   - A loop with no corner, such as a hole's rim, is a full circle with one
     vertex.
 - **A ring needs a seam.** A cylinder or cone that goes all the way round
@@ -376,9 +417,10 @@ code involved.
     `ShapeFix_Face` closes it with a degenerate edge.
 - **Nothing is sewn.** The faces are built on the shared edges and put into
   shells directly, so the quilt, most of a faceted import's time, never
-  runs. `ShapeFix_Face` adds the p-curves through a shared
-  `ShapeBuild_ReShape`, so an edge it has to replace is replaced in the
-  faces either side as well.
+  runs. `ShapeFix_Face` adds a curved face's p-curves and seams through a
+  shared `ShapeBuild_ReShape`, so an edge it has to replace is replaced in
+  the faces either side as well; a plane needs none and is not fixed, and
+  the fix does not mend a wire that crosses itself (the check finds it).
 - **Face order is fixed.** The faces go into the shell in region order, each
   region's lowest file triangle. The same file with the same options always
   gives the same face names.
@@ -386,9 +428,14 @@ code involved.
   shell closed, and its volume within what the fits allow of the mesh's: Σ
   over curved regions of area × sagitta, plus the surface area × the
   tolerance.
-  - A curved face that will not build, or that `BRepCheck` faults, is
-    demoted to its flat patches (`mesh::Demote`) and the rebuild is tried
-    again. The report counts it in `demoted`.
+  - Every face is checked on its own first, in one parallel `BRepCheck`
+    of them all, before any shell is made. A curved face that will not
+    build, that is faulted, or that leaves the shell open is demoted to its
+    flat patches (`mesh::Demote`); a faulted flat demotes the curved regions
+    round it, whose curves bound it. All of a round's are demoted at once
+    and the rebuild is tried again, up to six rounds. The report counts
+    them in `demoted`. On the SO-101 parts a round of a 17,000-triangle
+    part is about two seconds, and the worst needed four.
   - A mesh that still fails is sewn as facets, as before, and the report
     names the check in `fell_back`. Recognition never quietly hands back
     something else.
@@ -663,6 +710,18 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
   mesh import already saved.
 - Recognition of an OBJ's meshes: only STL is recognised, and an OBJ is
   sewn as facets.
+- Recognising a part with fillets everywhere as fast as sewing it: the
+  rebuild's rounds make a 17,000-triangle Autodesk export about four times
+  slower to read than its facets (6.8 s against 1.6 s), for a seventh of
+  the faces. The rounds rebuild every face; only the demoted regions and
+  their neighbours need to be.
+- The SO-101 moving jaw: after 84 demotions its rebuilt volume is 0.7 %
+  over the mesh's, past what the fits allow, and it is kept as facets,
+  saying so. Which face adds the volume is not found yet.
+- Small holes in Autodesk's export (`STLB ATF` in the header) are five- to
+  seven-sided and not quite regular: they are listed as polygons kept flat,
+  and the SO-101 upper arm's 2.1 mm hole stays one even at `min_sides: 5`,
+  its widest facet turning past 72°.
 - Recognising a torus (the corner where two fillets meet stays as facets),
   and a mesh noisier than the precision it was written at (a scan, or a
   part re-saved through a mesh editor). Loosening the fits to noise belongs

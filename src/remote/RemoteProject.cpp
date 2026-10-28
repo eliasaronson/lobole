@@ -140,8 +140,10 @@ static constexpr MethodDoc ProjectMethods[] = {
      "expected_s, limit} says what it was expected to cost, and past the "
      "triangle limit "
      "(docs/interchange/README.md#what-a-mesh-costs) it is refused naming "
-     "the count and the expected time unless `allow_large_mesh` is true. "
-     "`representation` is what an STL becomes: recognize (the planes, "
+     "the count and the expected time unless `allow_large_mesh` is true -- "
+     "except a mesh to be recognised, which sews nothing and goes ahead, "
+     "refused only if the rebuild fails and it would have to be kept as "
+     "facets. `representation` is what an STL becomes: recognize (the planes, "
      "cylinders, cones and spheres its triangles were made from, rebuilt as "
      "true faces, so a hole has a diameter and an axis) or facets (a face "
      "per triangle); absent, the mesh_representation preference. "
@@ -1900,7 +1902,14 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // it would cost (docs/interchange/README.md#what-a-mesh-costs).
     const std::optional<interchange::MeshCost> mesh =
         interchange::MeshImportCost(path);
-    if (mesh && mesh->overLimit && !allowLarge)
+    // A mesh to be recognised off the frame sews nothing, so the sewing
+    // law does not price it: the job refuses it only if it falls back to
+    // facets past the limit.
+    const bool recognisedOffFrame =
+        g_offFrameImport != nullptr &&
+        ui::ResolveRepresentation(state, path, representation) ==
+            mesh::Representation::Recognize;
+    if (mesh && mesh->overLimit && !allowLarge && !recognisedOffFrame)
       throw std::runtime_error(interchange::LargeMeshRefusal(
           path, *mesh, "`allow_large_mesh: true`"));
     if (g_offFrameImport != nullptr) {

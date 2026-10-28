@@ -12,6 +12,7 @@
 #include "core/Document.h"
 #include "core/io/Autosaver.h"
 #include "core/io/CrashReports.h"
+#include "core/io/Settings.h"
 #include "remote/InstanceRegistry.h"
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
@@ -51,6 +52,12 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   // (docs/drawings/README.md#requests-that-wait).
   state.drawingDeferProjection = false;
   ui::EnsureParts(state); // one part to start (assemblies A1)
+  // The user's preferences, as main() reads them for a window: this mode's
+  // own AppState started on the defaults, so an agent's import of an STL
+  // ignored the person's `mesh_representation` (docs/ui/settings.md), and
+  // get_settings answered with values the file did not hold.
+  state.settings = settings::Load();
+  state.settingsSaved = state.settings;
   // The machine store. main() loads it into the GUI's AppState, and this mode
   // builds its OWN -- so a headless session had no machines at all: an agent
   // could not name one, `list_machines` came back empty over a directory with
