@@ -272,6 +272,34 @@ TEST_CASE("A thin shell of the worm stops when its deadline passes",
   CHECK(took < deadline + 10.0);
 }
 
+// Random design 17's body, a 0.002 mm shell opening its blend face (face 9):
+// the arc join's intersection of two offset faces failed, and
+// BRepOffset_Tool::Inter3D read the failed pave filler's section blocks,
+// which have no edge, and faulted at address 0. It now throws.
+TEST_CASE("A thin shell whose offset faces do not intersect fails without a "
+          "fault",
+          "[occ][shell]") {
+  REQUIRE_PATCH("occt-offset-inter3d-progress");
+  const Body body = Fixture("shell-inter3d-failed.brep");
+  TopTools_ListOfShape open;
+  int k = 0;
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), k++)
+    if (k == 9)
+      open.Append(ex.Current());
+  REQUIRE(open.Extent() == 1);
+  const unsigned faults = occsig::FaultCount();
+  BRepOffsetAPI_MakeThickSolid maker;
+  const auto why = occsig::RunCatchingOccSignals([&] {
+    maker.MakeThickSolidByJoin(body.shape.GetShape(), open, -0.002, 2.0e-5,
+                               BRepOffset_Skin, false, false, GeomAbs_Arc,
+                               false);
+  });
+  REQUIRE(why);
+  CHECK_THAT(*why, ContainsSubstring("Inter3D"));
+  CHECK(occsig::FaultCount() == faults);
+}
+
 TEST_CASE("A caught kernel fault leaves the earlier bodies as they were and "
           "drops the regen cache",
           "[occ][regen]") {

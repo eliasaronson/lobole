@@ -112,23 +112,6 @@ the heading if it is not here yet.
   edges (the bore over the cap) keeps that case honest; it renames U edges
   in saved documents, so it is a format change.
 
-### A very thin Shell of random design 17 faults in the offset builder
-
-- **Symptom:** a 0.002 mm Shell of random design 17 (fuzz generator 1),
-  opening the blend face `100/g5;U0;G110;M120`, fails "shell failed inside
-  OpenCASCADE (OSD_SIGSEGV ...)". The signal is caught and the edit refused,
-  so the app lives; the action matrix records it as a `signal` finding
-  (`tests/action_matrix/open/fuzz17-shell-signal.json`).
-- **Cause:** a null dereference in `BOPDS_DS::ShapeInfo`, called from
-  `BRepOffset_Tool::Inter3D` under `BRepOffset_Inter3d::ConnexIntByArc`
-  (`BRepOffset_MakeOffset::Intersection3D`, `MakeThickSolidByJoin`, from
-  `ShellOnce`). That is the pave filler our
-  `nix/patches/occt-offset-inter3d-progress.patch` hands a progress range;
-  whether stock OCCT faults the same way is not checked.
-- **Where:** OCCT's `BRepOffset_Tool::Inter3D`; `ShellFeature::Execute`.
-- **Likely fix:** check the pave filler's errors before `Inter3D` reads its
-  data structure, in the patch if it is ours, else upstream.
-
 ### A small sphere cut beside a fillet keeps a face inside the sphere
 
 - **Symptom:** a half revolve (a 10 x 20 section through 180 degrees),

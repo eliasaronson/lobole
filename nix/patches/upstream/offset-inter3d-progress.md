@@ -38,3 +38,22 @@ ranges. Each new parameter is defaulted, so other callers are unchanged. On a
 break the intersector, the pair, `Inter3D` and `ConnexIntByArc` return with
 nothing, and `Intersection3D` reports `BRepOffset_UserBreak` as before.
 Without a break nothing changes.
+
+## A failed intersection read as if it had worked
+
+**Symptom:** `MakeThickSolidByJoin` of
+`tests/fixtures/occ/shell-inter3d-failed.brep`, its face 9 (a plane beside a
+blend) removed, a wall of 0.002 and `GeomAbs_Arc`: SIGSEGV at address 0 in
+`BOPDS_DS::ShapeInfo`, under `BRepOffset_Tool::Inter3D` from
+`BRepOffset_Inter3d::ConnexIntByArc`.
+
+**Cause:** `Inter3D` runs a `BOPAlgo_PaveFiller` of the two offset faces and
+reads its section curves without asking whether it succeeded. One that
+failed leaves pave blocks with no edge (`Edge()` is -1), and
+`pDS->Shape(-1)` is read in `CheckIntersFF` and again below it. Stock 7.9.3
+does the same; the progress range above plays no part in it.
+
+**Fix:** after `Perform`, a pave filler with errors throws
+`Standard_ConstructionError` ("intersecting two offset faces failed"), so
+the offset fails as an ordinary exception instead of reading the data
+structure.

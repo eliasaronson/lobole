@@ -226,7 +226,7 @@
    "edge:100/g5;M110;G120": "!edge.chamfer !edge.fillet",
    "edge:120/*;U*": "edge.chamfer*6 edge.fillet*6 edge.frame*6",
    "edge:140/*;U*": "edge.chamfer*1 !edge.chamfer*3 edge.fillet*1 !edge.fillet*3 edge.frame*4",
-   "face:100/*;U*": "face.delete*3 -face.delete_feature*3 face.extrude_add*3 face.extrude_cut*3 face.frame*3 face.hole*3 face.offset_in*1 -face.offset_in*2 face.offset_out*2 -face.offset_out*1 -face.replace*3 !face.shell*2 face.sketch*3",
+   "face:100/*;U*": "face.delete*3 -face.delete_feature*3 face.extrude_add*3 face.extrude_cut*3 face.frame*3 face.hole*3 face.offset_in*1 -face.offset_in*2 face.offset_out*2 -face.offset_out*1 -face.replace*3 !face.shell*3 face.sketch*3",
    "face:100/cap0": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:100/cap1;M110;M120": "face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out -face.replace !face.shell face.sketch",
    "face:100/g2;M110;M140": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out -face.replace !face.shell face.sketch",
@@ -4070,7 +4070,5 @@
   "golden/v119-tube-rules": {"body:2 body.pattern_circular": 26.7},
   "golden/v146-worm": {"edge:2/*;U* edge.chamfer": 15.0, "face:1/face1;M* face.shell": 79.8}
  },
- "known": [
-  {"action": "face.shell", "bug": "docs/known-bugs.md#a-very-thin-shell-of-random-design-17-faults-in-the-offset-builder", "class": "signal", "entity": "face:100/*;U*", "repro": "tests/action_matrix/open/fuzz17-shell-signal.json", "unit": "fuzz/17"}
- ]
+ "known": []
 }

@@ -855,8 +855,10 @@ their reproducers in `nix/patches/upstream/`, the bodies in
 `tests/fixtures/occ/`): a draft past a sphere's pole dereferenced a missing
 curve, a draft whose edge runs parallel to a face read an extremum's absent
 point, a fillet through the old boolean's wire repair freed the list it was
-walking, and a fillet beside a bore's seam walked round its vertex for ever
-inside `BRepFilletAPI_MakeFillet::Add`. Each is now an ordinary failed
+walking, a fillet beside a bore's seam walked round its vertex for ever
+inside `BRepFilletAPI_MakeFillet::Add`, and a very thin shell's arc join
+read the sections of an intersection that had failed, which have no edge
+(`BRepOffset_Tool::Inter3D`). Each is now an ordinary failed
 feature (`tests/test_occ_patches.cpp`, skipped on a kernel without the patch
 -- CI's apt OpenCASCADE).
 

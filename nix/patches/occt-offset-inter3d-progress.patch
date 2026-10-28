@@ -102,7 +102,7 @@
  {
  #ifdef DRAW
    if (AffichInter)
-@@ -1431,7 +1432,16 @@
+@@ -1431,7 +1432,22 @@
    aLS.Append(F2);
    aPF.SetArguments(aLS);
    //
@@ -116,6 +116,12 @@
 +    L1.Clear();
 +    L2.Clear();
 +    return;
++  }
++  // A pave filler that failed leaves section blocks with no edge, and reading
++  // them dereferenced a null shape: the offset fails instead.
++  if (aPF.HasErrors())
++  {
++    throw Standard_ConstructionError("BRepOffset_Tool::Inter3D: intersecting two offset faces failed");
 +  }
  
    TopTools_IndexedMapOfShape TrueEdges;
