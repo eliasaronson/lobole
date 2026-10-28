@@ -266,6 +266,33 @@ TEST_CASE("contact: an edit to the cam moves the follower, one table rebuilt",
   CHECK_THAT(Dof(t, Kind::Flat) - before, WithinAbs(2.0, 2 * mm.tolerance));
 }
 
+TEST_CASE("contact: a follower a loop's solve leaves a micrometre off "
+          "hits the cache",
+          "[assembly][relations][contact]") {
+  // A follower closed into a mate loop is placed by the loop's solve, which
+  // leaves it some 1e-5 mm from where the last solve did, and the frames
+  // the key is made of carry rounding: an exact key built the table again
+  // at samples of a study, half a minute a time.
+  Rig t = MakeRig(Kind::Roller);
+  const auto parts = t.Resolver();
+  assembly::Solve(t.asmDoc, parts);
+  const Relation& r = *t.asmDoc.FindRelationById(t.rel);
+  std::string why;
+  REQUIRE(contact::ModelFor(t.asmDoc, r, parts, &why));
+  const auto builds = contact::Stats().builds;
+  // The guide where the solve leaves it: a micrometre and the sign of a
+  // zero's rounding off where it was (the exact key printed both).
+  Occurrence* guide = t.asmDoc.FindById(t.guide);
+  const glm::dvec3 at = guide->position;
+  guide->position = at + glm::dvec3(1e-5, -1e-17, 1e-5);
+  REQUIRE(contact::ModelFor(t.asmDoc, r, parts, &why));
+  CHECK(contact::Stats().builds == builds);
+  // A guide moved by a tenth of a millimetre is another contact.
+  guide->position = at + glm::dvec3(0.1, 0.0, 0.1);
+  REQUIRE(contact::ModelFor(t.asmDoc, r, parts, &why));
+  CHECK(contact::Stats().builds == builds + 1);
+}
+
 TEST_CASE("contact: refusals say what a contact relation takes",
           "[assembly][relations][contact]") {
   SECTION("a follower sliding along the cam's axis") {

@@ -330,7 +330,18 @@ together in order.
   kept with a stored result, v180), not a clash, as exact mode calls the
   same pair
   ([touching is not a clash](../inspect/README.md#touching-is-not-a-clash)).
-  Any overlap is still a clash.
+  Any overlap is still a clash, with one exception: a `contact`
+  relation's cam and follower. They stand tangent by design, and on a
+  curved flank the tessellations pierce at the tangency whatever the
+  deflection (a concave flank's chords lie outside it: the woodcutter's
+  bird cam read as a clash at 0.05 mm and at 0.001). Where the mesh calls
+  that pair overlapping, the follower check's cuts across the width they
+  share decide at the sample's cam angle and follower value: `touching`
+  when the follower enters none of them by more than the contact
+  tolerance, a clash when it does
+  ([the follower check](relations.md#the-follower-check)). The two can only
+  meet within that width, which is what the cuts span. An exact study
+  asks the boolean, as for any pair.
 - Samples are walked in order, each solve starting from the last, so a closed
   loop stays on the branch it is on — and the first sample is WALKED to from
   wherever the document has the driver, at the study's own spacing, as the
@@ -468,6 +479,17 @@ follower at 22.5 degrees a step).
   goes straight through) changes branch without a change of rate. A
   generator that cares which branch it is on still checks it, as the
   Strandbeest checks its knees' signs.
+- **What it lets pass.** A coordinate whose change of move over the step is
+  within what a loop's solve leaves open -- 1e-3 mm (the loop's closing
+  tolerance) for a slide, 1e-4 rad for a turn -- is the solve's leftover,
+  not a branch: a link moved by a cam's rise starting from rest moves by
+  less than that over the first fine steps. And where a coordinate a
+  relation sets changes its rate at once over the step -- a cam's
+  follower dropping off a snail's step and landing, an intermittent's
+  window opening -- the loop it drives changes rate with it: that is the
+  input's kink, not a branch, and the step neither jumps nor raises the
+  loop's largest rates (generators/woodcutter: the axe's lever, swung down
+  by its rod's drop; `tests/contact_loop_smoke.py`).
 
 ### Tracing a point
 

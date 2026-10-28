@@ -70,8 +70,8 @@ struct Rig {
   }
 };
 
-Rig MakeRig(const cammech::MotionSpec& motion, double roller,
-            bool bump = false) {
+Rig MakeRig(const cammech::MotionSpec& motion, double roller, bool bump = false,
+            double stem = 0.0, double base = 30.0) {
   Rig t;
   t.parts[1] = std::make_unique<Document>();
   auto camPart = std::make_unique<Document>();
@@ -81,7 +81,7 @@ Rig MakeRig(const cammech::MotionSpec& motion, double roller,
   auto c = std::make_unique<CamProfileFeature>("Cam", ElementRef{});
   c->frameId = camPart->GetFeature(0)->GetId();
   (void)frameId;
-  c->baseRadius = 30.0;
+  c->baseRadius = base;
   c->width = 6.0;
   c->motion = motion;
   c->followerSet = true;
@@ -104,6 +104,17 @@ Rig MakeRig(const cammech::MotionSpec& motion, double roller,
   fol->AddFeature(
       std::make_unique<CylinderFeature>("Roller", glm::dvec3(1.0, 0.0, roller),
                                         glm::dvec3(-1, 0, 0), roller, 8.0));
+  if (stem > 0.0) {
+    // A rod up the slide from the roller's centre, as wide as the roller:
+    // the follower's outline as tall as a rod through its guide, which
+    // sets the contact tolerance (1e-5 of the outline's size).
+    const uint64_t roller0 = fol->GetFeature(0)->GetId();
+    fol->AddFeature(
+        std::make_unique<CylinderFeature>("Stem", glm::dvec3(-3.0, 0.0, roller),
+                                          glm::dvec3(0, 0, 1), roller, stem));
+    fol->AddFeature(std::make_unique<BooleanFeature>(
+        "Fuse", roller0, fol->GetFeature(1)->GetId(), BooleanOp::Union));
+  }
   t.parts[3] = std::move(fol);
   Occurrence f;
   f.name = "Frame";
@@ -242,6 +253,41 @@ TEST_CASE("follower check: gravity loses a follower at sqrt(g b^2 / 2 pi h)",
   CHECK(follower::Check(in).holdsAtSpeed == false);
 }
 
+TEST_CASE("follower check: a tall follower's liftoff is the closed form too",
+          "[follower][contact]") {
+  // A roller on a 60 mm stem: its outline is tall, so the contact
+  // tolerance is ten times the bare roller's. The woodcutter's bird (a
+  // knife foot on a rod, generators/woodcutter) found a liftoff in the
+  // middle of its rise at 106 rpm from a second difference over a
+  // milliradian; the derivatives now step 0.02 rad, and this holds the
+  // answer to the closed form on the same cam.
+  // The woodcutter's bird: a cycloidal peck of 8 mm up and down over 85
+  // degrees each, on a 12 mm base.
+  cammech::MotionSpec peck;
+  peck.segments = {{25, 0, Law::Dwell},
+                   {110, 8, Law::Cycloidal},
+                   {195, -8, Law::Cycloidal},
+                   {360, 0, Law::Dwell}};
+  Rig t = MakeRig(peck, 3.0, false, 60.0, 12.0);
+  const double m = 0.012;
+  follower::Input in;
+  in.model = &t.Model();
+  INFO("tolerance " << t.Model().tolerance << " mm");
+  CHECK(t.Model().tolerance > 3e-4);
+  in.mass = [&](double) { return follower::MassAt{m, -m * kG, 0.0}; };
+  in.driverPerCam = 1.0;
+  const follower::Report r = follower::Check(in);
+  REQUIRE(r.liftoffRpm.has_value());
+  INFO("liftoff " << *r.liftoffRpm << " rpm at " << r.liftoffAtDeg);
+  // sqrt(g b^2 / (2 pi h)), b = 85 degrees, h = 8 mm: 196.9 rpm, where
+  // the rise slows and the fall starts.
+  const double beta = 85.0 * M_PI / 180.0, h = 0.008;
+  const double w = std::sqrt(kG * beta * beta / (2 * M_PI * h));
+  CHECK_THAT(*r.liftoffRpm, WithinRel(w * 60.0 / (2 * M_PI), 0.01));
+  CHECK(r.liftoffAtDeg > 67.5);
+  CHECK(r.liftoffAtDeg < 152.5);
+}
+
 TEST_CASE("follower check: a drop falls freely and must land in its dwell",
           "[follower][contact]") {
   // A snail: rise 10 mm over 300 degrees, drop, dwell 60. A 10 mm free fall
@@ -285,6 +331,21 @@ TEST_CASE("follower check: a drop falls freely and must land in its dwell",
   const follower::Report fast = follower::Check(in);
   CHECK_FALSE(*fast.drops[0].lands);
   CHECK(fast.holdsAtSpeed == false);
+  // A follower whose inertia doubles over its fall, gravity's pull the
+  // same (a lever going from upright towards level carries more of its
+  // weight): the fall is the integral, not the top's closed form.
+  // t = integral of sqrt(M(s) / (2 W(s))) ds = sqrt(m / (2 m g)) *
+  // (sqrt 2 + asinh 1) * sqrt h.
+  const contact::Table::DropAt& dr = t.Model().table.drops[0];
+  in.speedRpm.reset();
+  in.mass = [&](double q) {
+    const double s = std::abs(q - dr.from) / std::abs(dr.to - dr.from);
+    return follower::MassAt{m * (1.0 + s), -m * kG, 0.0};
+  };
+  const double hSi = std::abs(dr.to - dr.from) * 1e-3;
+  const double want = std::sqrt(1.0 / (2.0 * kG)) *
+                      (std::sqrt(2.0) + std::asinh(1.0)) * std::sqrt(hSi);
+  CHECK_THAT(follower::Check(in).drops[0].fallS, WithinRel(want, 1e-3));
 }
 
 TEST_CASE("follower check: where gravity pushes it off, it is not held",

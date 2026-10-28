@@ -61,6 +61,47 @@ bool InDrop(const contact::Table& t, double a) {
 }
 } // namespace
 
+namespace {
+
+// The free fall from `from` to `to` (b's unit; `unit` to SI), from rest,
+// over the mass function. Energy is all there is: d/dt(M q'^2 / 2) =
+// Q q', so (1/2) M(q) q'^2 = W(q), gravity's work from the top, and the
+// time is the integral of dq / q'. Read at the top alone -- sqrt(2 h M /
+// |Q|) -- a lever carried through a loop stands nearest upright there,
+// with the most inertia per unit of pull, and the woodcutter's axe fell
+// in 155 ms where it falls in 106. Stepped in u = sqrt(distance fallen),
+// in which the integrand stays finite at the top, so constant M and Q
+// give the closed form exactly.
+double FallTime(const std::function<MassAt(double)>& mass, double from,
+                double to, double unit) {
+  const double h = std::abs(to - from);
+  if (h <= 0.0)
+    return 0.0;
+  const double dir = to > from ? 1.0 : -1.0;
+  constexpr int kSteps = 400;
+  constexpr int kSub = 8; // the work's sub-steps between two u nodes
+  const double du = std::sqrt(h) / kSteps;
+  double t = 0.0, work = 0.0, sPrev = 0.0;
+  for (int i = 0; i < kSteps; i++) {
+    const double u = (i + 0.5) * du;
+    const double s = u * u;
+    // Gravity's work from the last point to this one (midpoint rule).
+    for (int k = 0; k < kSub; k++) {
+      const double a = sPrev + (s - sPrev) * (k + 0.5) / kSub;
+      work += std::abs(mass(from + dir * a).Q) * (s - sPrev) / kSub * unit;
+    }
+    sPrev = s;
+    const MassAt ms = mass(from + dir * s);
+    if (work <= 0.0 || ms.M <= 0.0)
+      return std::numeric_limits<double>::infinity();
+    const double v = std::sqrt(2.0 * work / ms.M); // SI per second
+    t += 2.0 * u * du * unit / v;
+  }
+  return t;
+}
+
+} // namespace
+
 Report Check(const Input& in) {
   Report r;
   const contact::Model& m = *in.model;
@@ -184,7 +225,13 @@ Report Check(const Input& in) {
   if (in.mass) {
     r.gravityKnown = true;
     const double unit = m.turn ? 1.0 : 1e-3; // q to SI
-    const double h = 1e-3;                   // rad of cam
+    // The derivatives' step. A touch is exact to some 1e-5 mm, which a
+    // second difference over a milliradian made into +-0.03 m/rad^2 and
+    // put a liftoff in the middle of a rise (a 2.7 g follower "left" a
+    // cycloidal rise at 106 rpm). Over 0.02 rad that noise is a 400th of
+    // it, and the truncation, q'''' h^2 / 12, smaller still for any cam
+    // that can be made.
+    const double h = 0.02; // rad of cam
     const int n = 720;
     const int t = m.toward;
     double bestW = std::numeric_limits<double>::infinity();
@@ -233,10 +280,7 @@ Report Check(const Input& in) {
       o.atDeg = WrapDeg(angles::ToDegrees(dr.a));
       o.jams = m.toward * (dr.to - dr.from) < 0.0;
       o.height = std::abs(dr.from - dr.to);
-      const MassAt ms = in.mass(dr.from);
-      const double acc = ms.M > 0.0 ? std::abs(ms.Q) / ms.M : 0.0;
-      o.fallS = acc > 0.0 ? std::sqrt(2.0 * o.height * unit / acc)
-                          : std::numeric_limits<double>::infinity();
+      o.fallS = FallTime(in.mass, dr.from, dr.to, unit);
       // Landed while the cam still stands within a few tolerances of the
       // level it fell to: past that, it lands on the next rise.
       const double band = 10.0 * m.table.tolerance;

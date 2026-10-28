@@ -950,7 +950,14 @@ std::function<follower::MassAt(double)> MassFunction(ui::AppState& state,
     hi = std::max(hi, n.q);
   }
   const int grid = hi - lo > 1e-9 ? 9 : 1;
-  const double h = m.turn ? 1e-5 : 1e-3;   // b's unit
+  // The step of the central difference. A mate loop closes to
+  // kCloseTolMm (1e-3 mm) and in practice stops some 1e-5 mm short, so a
+  // step of that order read the loop's leftover as motion: a figure
+  // fastened to the box "moved" a milliradian per micrometre of the rod and
+  // swamped the inertia. A fiftieth of a millimetre (a milliradian turning)
+  // puts that leftover four orders under the step, and the central
+  // difference's own error, O(h^2), stays negligible over a cam's stroke.
+  const double h = m.turn ? 1e-3 : 2e-2;   // b's unit
   const double unit = m.turn ? 1.0 : 1e-3; // to SI
   struct Node {
     double q, M, Q;
@@ -958,25 +965,47 @@ std::function<follower::MassAt(double)> MassFunction(ui::AppState& state,
   std::vector<Node> nodes;
   std::map<uint64_t, OwnMass> masses;
   std::set<uint64_t> moved;
-  const auto poses = [&](double q) {
-    Mate* mb = copy.FindMateById(r.mateB);
+  // What is rigid with b's base (the ground the follower slides or turns
+  // on) cannot move with b, however a loop's solve leaves it.
+  std::set<uint64_t> ground;
+  if (const Mate* mb = copy.FindMateById(r.mateB)) {
+    const uint64_t base = mb->a.occurrenceId == m.follower ? mb->b.occurrenceId
+                                                           : mb->a.occurrenceId;
+    for (uint64_t id : contact::RigidGroup(copy, base))
+      ground.insert(id);
+  }
+  // Each side of the difference is solved from the same pose, the one at
+  // q, so the two carry the same starting point into the solve.
+  const auto poses = [&](AssemblyDocument& doc, double q) {
+    Mate* mb = doc.FindMateById(r.mateB);
     assembly::SetMateDof(*mb, r.dofB, q);
-    assembly::Solve(copy, parts, asms, {r.mateB, r.dofB, {}}, false);
+    assembly::Solve(doc, parts, asms, {r.mateB, r.dofB, {}}, false);
     std::map<uint64_t, glm::dmat4> out;
-    for (const Occurrence& o : copy.GetOccurrences())
+    for (const Occurrence& o : doc.GetOccurrences())
       out[o.id] = OccWorld(o);
     return out;
   };
   for (int k = 0; k < grid; k++) {
     const double q = grid == 1 ? lo : lo + (hi - lo) * k / (grid - 1);
-    const auto a = poses(q - h), b = poses(q + h);
+    poses(copy, q);
+    AssemblyDocument lower = copy, upper = copy;
+    const auto a = poses(lower, q - h), b = poses(upper, q + h);
+    // A body counts as moving with b when it moves at more than a
+    // thousandth of the follower's own rate: less is the solve's leftover.
+    double own = 0.0;
+    if (a.count(m.follower))
+      for (int c = 0; c < 4; c++)
+        own = std::max(own,
+                       glm::length(b.at(m.follower)[c] - a.at(m.follower)[c]));
     double M = 0.0, Q = 0.0;
     for (const auto& [id, wa] : a) {
+      if (ground.count(id))
+        continue;
       const glm::dmat4& wb = b.at(id);
       double diff = 0.0;
       for (int c = 0; c < 4; c++)
         diff = std::max(diff, glm::length(wb[c] - wa[c]));
-      if (diff < 1e-12)
+      if (diff < std::max(1e-12, 1e-3 * own))
         continue;
       moved.insert(id);
       auto it = masses.find(id);

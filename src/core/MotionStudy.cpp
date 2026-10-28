@@ -6,7 +6,9 @@
 #include "core/Angles.h"
 
 #include "core/CollisionCache.h"
+#include "core/ContactFollower.h"
 #include "core/Document.h"
+#include "core/FollowerCheck.h"
 #include "core/InputHash.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
@@ -422,6 +424,13 @@ constexpr double kSlowShare = 0.1;
 // a flip doubles (2), and a kink keeps 2/3 or more in one of the two steps
 // either side of it, wherever in them it falls.
 constexpr double kScaleKept = 0.6;
+// A rate change whose move over the step is within what a loop's solve
+// leaves open is the solve's leftover, not a branch: a loop closes to 1e-3
+// mm (AssemblyLoopSolve's kCloseTolMm), a ten-thousandth of a radian at a
+// 10 mm lever. A follower starting a cycloidal rise from rest moves its
+// link by less than that over the first fine steps, and read as a flip.
+constexpr double kOpenMm = 1e-3;
+constexpr double kOpenRad = 1e-4;
 
 // What Solve changes in the document a run steps: every placement and every
 // mate's value. Taken before a step, put back to take it again finer.
@@ -459,6 +468,18 @@ public:
             set.count({mates[k].id, rot}) == 0)
           m_coords.push_back({k, rot});
     m_maxRate.assign(m_coords.size(), 0.0);
+    // The inputs: what a relation sets, the driver aside. Where one of them
+    // changes its rate at once -- a cam's follower dropping off a step and
+    // landing, an intermittent's window -- the loop it drives changes its
+    // rate with it, and that is the input's kink, not a branch.
+    for (size_t k = 0; k < mates.size(); k++)
+      for (const bool rot : {true, false})
+        if (mates[k].id != driver.id &&
+            assembly::MateHasDof(mates[k].type,
+                                 rot ? MateDof::Rotation : MateDof::Offset) &&
+            set.count({mates[k].id, rot}) != 0)
+          m_inputs.push_back({k, rot});
+    m_maxInRate.assign(m_inputs.size(), 0.0);
   }
 
   // The coordinates nothing CHOOSES: the driver's, and every one a relation
@@ -536,10 +557,23 @@ public:
       rep = SolveAt(target);
       const bool solved = rep.erroredMates == 0 && rep.loopsClosed;
       const std::vector<double> now = Read();
+      const std::vector<double> nowIn = Read(m_inputs);
       const double step = target - pos;
       std::vector<double> rate(now.size());
       for (size_t k = 0; k < now.size(); k++)
         rate[k] = Move(k, now[k], (*m_last)[k]) / step;
+      std::vector<double> inRate(nowIn.size());
+      for (size_t k = 0; k < nowIn.size(); k++)
+        inRate[k] = MoveOf(m_inputs[k].second, nowIn[k], m_lastIn[k]) / step;
+      // Did an input change its rate at once over this step?
+      bool inputKink = false;
+      if (m_haveRate)
+        for (size_t k = 0; k < inRate.size(); k++)
+          if (std::abs(inRate[k] - m_lastInRate[k]) >
+                  kRateJump * std::max(m_maxInRate[k], 1e-9) &&
+              std::abs(inRate[k] - m_lastInRate[k]) * std::abs(step) >
+                  (m_inputs[k].second ? kOpenRad : kOpenMm))
+            inputKink = true;
       // The worst coordinate: its rate change against what it may be.
       double worst = 0.0;
       size_t worstK = 0;
@@ -550,6 +584,8 @@ public:
         for (size_t k = 0; k < rate.size(); k++) {
           const double ref =
               std::max({m_maxRate[k], kSlowShare * fastest, 1e-9});
+          if (std::abs(rate[k] - m_lastRate[k]) * std::abs(step) <= Open(k))
+            continue;
           const double q = std::abs(rate[k] - m_lastRate[k]) / ref;
           if (q > worst) {
             worst = q;
@@ -557,7 +593,7 @@ public:
           }
         }
       }
-      bool jumped = m_haveRate && worst > kRateJump;
+      bool jumped = m_haveRate && worst > kRateJump && !inputKink;
       if (jumped && solved && depth == maxDepth) {
         // The last rate was measured over a longer step, so a fast but
         // smooth joint (a knee near straight, a slider at its dead centre)
@@ -593,6 +629,8 @@ public:
                                        Move(k, c0[k], back2[k]) / (2.0 * step));
             const double ref =
                 std::max({m_maxRate[k], kSlowShare * fastest, 1e-9});
+            if (d1 * std::abs(step) <= Open(k))
+              continue;
             if (d1 / ref > q) {
               q = d1 / ref;
               qk = k;
@@ -642,12 +680,21 @@ public:
         // the next step measures it afresh, at the finest step.
         m_haveRate = false;
       } else {
-        for (size_t k = 0; k < rate.size(); k++)
-          m_maxRate[k] = std::max(m_maxRate[k], std::abs(rate[k]));
+        // An input's kink moves the loop at whatever rate it lands with
+        // (a lever swung down by a drop in one step): that is not a rate
+        // the loop keeps, so it does not raise what it may change by.
+        if (!inputKink) {
+          for (size_t k = 0; k < rate.size(); k++)
+            m_maxRate[k] = std::max(m_maxRate[k], std::abs(rate[k]));
+          for (size_t k = 0; k < inRate.size(); k++)
+            m_maxInRate[k] = std::max(m_maxInRate[k], std::abs(inRate[k]));
+        }
         m_lastRate = rate;
+        m_lastInRate = inRate;
         m_haveRate = true;
       }
       m_last = now;
+      m_lastIn = nowIn;
       if (last)
         return rep;
       pos = target;
@@ -659,9 +706,10 @@ public:
   assembly::SolveReport Restart(double value) {
     assembly::SolveReport rep = SolveAt(value);
     m_haveRate = false;
-    if (rep.erroredMates == 0 && rep.loopsClosed)
+    if (rep.erroredMates == 0 && rep.loopsClosed) {
       m_last = Read();
-    else
+      m_lastIn = Read(m_inputs);
+    } else
       m_last.reset();
     return rep;
   }
@@ -674,21 +722,28 @@ private:
                            {m_driver.id, m_study.driverDof},
                            /*diagnose=*/false);
   }
-  std::vector<double> Read() const {
+  std::vector<double> Read() const { return Read(m_coords); }
+  std::vector<double>
+  Read(const std::vector<std::pair<size_t, bool>>& coords) const {
     std::vector<double> v;
-    v.reserve(m_coords.size());
+    v.reserve(coords.size());
     const auto& mates = m_ex.doc.GetMates();
-    for (const auto& [k, rot] : m_coords)
+    for (const auto& [k, rot] : coords)
       v.push_back(assembly::MateDofValue(mates[k], rot ? MateDof::Rotation
                                                        : MateDof::Offset));
     return v;
   }
   // A rotation's move is the shortest way round: a solve that wraps an
   // angle has not turned it a whole turn.
-  double Move(size_t k, double now, double was) const {
+  static double MoveOf(bool rotation, double now, double was) {
     const double d = now - was;
-    return m_coords[k].second ? std::remainder(d, 2.0 * 3.14159265358979323846)
-                              : d;
+    return rotation ? std::remainder(d, 2.0 * 3.14159265358979323846) : d;
+  }
+  double Move(size_t k, double now, double was) const {
+    return MoveOf(m_coords[k].second, now, was);
+  }
+  double Open(size_t k) const {
+    return m_coords[k].second ? kOpenRad : kOpenMm;
   }
 
   assembly::FlexibleExpansion& m_ex;
@@ -699,6 +754,9 @@ private:
   std::vector<std::pair<size_t, bool>> m_coords; // mate index, rotation?
   std::optional<std::vector<double>> m_last;
   std::vector<double> m_lastRate, m_maxRate;
+  // What relations set (the driver aside), watched for their own kinks.
+  std::vector<std::pair<size_t, bool>> m_inputs;
+  std::vector<double> m_lastIn, m_lastInRate, m_maxInRate;
   bool m_haveRate = false;
 };
 
@@ -832,6 +890,75 @@ std::vector<Placed> PlaceBodies(const AssemblyDocument& asmDoc,
   return placed;
 }
 
+// A contact relation's cam and follower, as the mesh check judges them.
+// They stand tangent by design, and on a curved flank a tessellation
+// pierces at the tangency whatever its deflection (a concave flank's chords
+// lie outside it), so where the mesh calls the pair overlapping the follower
+// check's cuts across the width they share decide instead
+// (docs/assemblies/relations.md#the-follower-check): touching when the
+// follower enters none of them by more than the contact tolerance at the
+// sample's a and b, else the clash it is. The cam and the follower can
+// only meet within the width they share, which is what the cuts span.
+struct ContactPair {
+  uint64_t cam = 0, follower = 0;
+  uint64_t mateA = 0, mateB = 0;
+  bool turn = false;
+  std::shared_ptr<const contact::Model> model;
+  std::vector<follower::Level> levels;
+};
+
+std::vector<ContactPair> ContactPairs(const AssemblyDocument& asmDoc,
+                                      const assembly::PartResolver& parts) {
+  std::vector<ContactPair> out;
+  for (const Relation& r : asmDoc.GetRelations()) {
+    if (r.kind != RelationKind::Contact || asmDoc.RelationSuppressed(r.id))
+      continue;
+    std::string why;
+    auto m = contact::ModelFor(asmDoc, r, parts, &why);
+    if (!m)
+      continue; // the relation reports its own error; the mesh decides
+    ContactPair p;
+    p.cam = m->cam;
+    p.follower = m->follower;
+    p.mateA = r.mateA;
+    p.mateB = r.mateB;
+    p.turn = r.dofB == MateDof::Rotation;
+    p.levels = follower::Levels(*m, &why);
+    if (p.levels.empty())
+      continue;
+    p.model = std::move(m);
+    out.push_back(std::move(p));
+  }
+  return out;
+}
+
+// Whether a sample's pose stands the pair's follower on its cam, by the
+// cuts across the width: nullopt when the pair is no contact relation's.
+std::optional<bool> ContactTouches(const std::vector<ContactPair>& pairs,
+                                   const Key& ka, const Key& kb,
+                                   const Sample& s) {
+  if (ka.second != 0 || kb.second != 0)
+    return std::nullopt;
+  for (const ContactPair& p : pairs) {
+    if (!((ka.first == p.cam && kb.first == p.follower) ||
+          (ka.first == p.follower && kb.first == p.cam)))
+      continue;
+    std::optional<double> a, b;
+    for (const Sample::MateValue& mv : s.mates) {
+      if (!mv.path.empty())
+        continue;
+      if (mv.mate == p.mateA)
+        a = mv.rotation;
+      if (mv.mate == p.mateB)
+        b = p.turn ? mv.rotation : mv.offset;
+    }
+    if (!a || !b)
+      return std::nullopt;
+    return follower::AcrossWidth(*p.model, p.levels, *a, *b).ok;
+  }
+  return std::nullopt;
+}
+
 // Every sample's clash check, in ONE batch, into `out.samples` and the run's
 // tallies. `placed[i]` holds sample i's bodies (empty when it could not be
 // flattened); `rigidAt` is the sample the rigid pairs are checked at.
@@ -846,6 +973,7 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
                        int rigidAt, const MotionStudy& study,
                        const RelativeMotion& motion, MeshCache& meshes,
                        collide::ExactContactCache* contacts,
+                       const std::vector<ContactPair>& contactPairs,
                        const std::function<bool()>& cancelled,
                        const std::function<void(double)>& progress,
                        Result& out) {
@@ -1016,7 +1144,16 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
     if (cd.s >= complete)
       break;
     Sample& s = out.samples[cd.s];
-    const Hit& h = hits[k];
+    Hit h = hits[k];
+    if (!exact && !cd.rigid && h.hit) {
+      const Placed& qa = placed[cd.s][cd.a];
+      const Placed& qb = placed[cd.s][cd.b];
+      if (const auto on = ContactTouches(contactPairs, qa.key, qb.key, s);
+          on && *on) {
+        h.hit = false;
+        h.touching = true;
+      }
+    }
     const Placed& pa = placed[cd.s][cd.a];
     const Placed& pb = placed[cd.s][cd.b];
     const bool aFirst = pa.key == cd.key.first;
@@ -1256,9 +1393,11 @@ Result Run(const AssemblyDocument& asmDocIn,
           out.rigidCheckedAt = static_cast<int>(i);
           break;
         }
-      const size_t complete =
-          CheckAllClashes(placed, out.rigidCheckedAt, study, motion, meshes,
-                          contacts, cancelled, progress, out);
+      const size_t complete = CheckAllClashes(
+          placed, out.rigidCheckedAt, study, motion, meshes, contacts,
+          study.clashMode == "exact" ? std::vector<ContactPair>{}
+                                     : ContactPairs(asmDoc, parts),
+          cancelled, progress, out);
       if (complete < out.samples.size()) {
         out.samples.resize(complete);
         out.cancelled = true;

@@ -1022,29 +1022,44 @@ bool PathOf(const Setup& s, double widthTol, Path* path, double* camSense,
   return true;
 }
 
+// The cache's key: the two bodies' geometry, `toward` and the kind of
+// motion exactly; the frames between the mates (Frames, below) to within a
+// share of the contact tolerance. A follower closed into a mate loop is
+// placed by the loop's solve, which leaves it some 1e-5 mm from where the
+// last solve did: an exact key missed at every sample of a study and built
+// the table again, half a minute a time.
 std::string Key(const Setup& s, int toward) {
-  std::string k;
-  char b[64];
-  const auto add = [&](const glm::dmat4& m) {
-    for (int c = 0; c < 4; c++)
-      for (int r = 0; r < 3; r++) {
-        std::snprintf(b, sizeof b, "%.10g,", m[c][r]);
-        k += b;
-      }
-  };
+  char b[96];
   std::snprintf(b, sizeof b, "%p|%p|%d|%d|", s.camBody->shape.GeometryId(),
                 s.folBody->shape.GeometryId(), toward, int(s.turn));
-  k += b;
-  add(CamInPlane(s, 0.0));
-  add(CamInPlane(s, 0.1));
-  add(FollowerInPlane(s, 0.0));
-  add(FollowerInPlane(s, 0.1));
-  return k;
+  return b;
+}
+
+struct Frames {
+  glm::dmat4 m[4];
+};
+Frames FramesOf(const Setup& s) {
+  return {{CamInPlane(s, 0.0), CamInPlane(s, 0.1), FollowerInPlane(s, 0.0),
+           FollowerInPlane(s, 0.1)}};
+}
+// Within a quarter of the tolerance at the outline's size: a translation
+// by that, a rotation by that over the size (1e-5 of it, the tolerance's
+// own measure).
+bool SameFrames(const Frames& a, const Frames& b, double tolerance) {
+  const double eps = 0.25 * tolerance;
+  const double epsRot = eps / (tolerance * 1e5);
+  for (int i = 0; i < 4; i++)
+    for (int c = 0; c < 4; c++)
+      for (int r = 0; r < 3; r++)
+        if (std::abs(a.m[i][c][r] - b.m[i][c][r]) > (c == 3 ? eps : epsRot))
+          return false;
+  return true;
 }
 
 struct Entry {
   CADShape cam, follower; // held so the ids cannot be recycled
   std::shared_ptr<const Model> model;
+  Frames frames;
 };
 
 std::mutex g_mu;
@@ -1136,10 +1151,12 @@ std::shared_ptr<const Model> ModelFor(const AssemblyDocument& asmDoc,
     return nullptr;
   }
   const std::string key = Key(p->s, r.toward);
+  const Frames frames = FramesOf(p->s);
   {
     std::lock_guard<std::mutex> lock(g_mu);
     for (auto it = g_lru.begin(); it != g_lru.end(); ++it)
       if (it->first == key &&
+          SameFrames(it->second.frames, frames, it->second.model->tolerance) &&
           it->second.cam.SameGeometryAs(p->s.camBody->shape) &&
           it->second.follower.SameGeometryAs(p->s.folBody->shape)) {
         g_lru.splice(g_lru.begin(), g_lru, it);
@@ -1198,7 +1215,8 @@ std::shared_ptr<const Model> ModelFor(const AssemblyDocument& asmDoc,
   {
     std::lock_guard<std::mutex> lock(g_mu);
     g_stats.builds++;
-    g_lru.push_front({key, Entry{p->s.camBody->shape, p->s.folBody->shape, m}});
+    g_lru.push_front(
+        {key, Entry{p->s.camBody->shape, p->s.folBody->shape, m, frames}});
     if (g_lru.size() > kCapacity)
       g_lru.pop_back();
   }

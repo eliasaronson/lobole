@@ -314,7 +314,12 @@ to_deg, height_mm | height_deg}], bridges_deg}`.
 **Cached, never stored.** The table is derived state, cached on both
 bodies' geometry, the frames between the two mates and `toward`
 (`contact::ModelFor`, 64 entries): a solve, a drag frame or a motion run's
-copied document hits it, and a cam edit misses it once. The file stores the
+copied document hits it, and a cam edit misses it once. The frames match
+to a quarter of the contact tolerance, not exactly: a follower closed
+into a mate loop is placed by the loop's solve, which leaves it some 1e-5
+mm from where the last one did, and the frames carry rounding, so an
+exact key built the table again at samples of a study, half a minute a
+time. The file stores the
 relation (`toward`, and the occurrences and bodies when named) and the mate
 values as always; an opened project rebuilds the table on its first solve.
 Like a cam it drives forward only, as a value row in a mate loop.
@@ -366,18 +371,29 @@ turns).
 - **Gravity and speed.** Everything that moves with b — the follower and
   what it carries through mate loops — is found by solving a copy of the
   assembly with b pinned and the relation left out, at nine values across
-  b's travel; with each occurrence's mass as built (printed where its part
+  b's travel, each side of a central difference of 0.02 mm (a milliradian
+  turning) solved from the pose at its node. What is rigid with b's base
+  does not move with it, and a body moving at under a thousandth of the
+  follower's rate is the loop solve's leftover, not motion (a figure
+  fastened to the box and carrying the lever's pivot was counted, and
+  refused for having no material); with each occurrence's mass as built (printed where its part
   is printed, else solid from its material; one with neither is refused by
   name) that gives the generalised inertia M(q) = Σ m|∂x/∂q|² + ωᵀIω and
   gravity force Q(q) = Σ m g·∂x/∂q. At a steady cam speed ω contact holds
   while toward·(Q − (M q″ + ½M′q′²) ω²) ≥ 0, with q′ and q″ from exact
-  touches either side of 720 angles (none inside a drop). Where the bracket
+  touches 0.02 rad either side of 720 angles (none inside a drop: a touch
+  is exact to some 1e-5 mm, which a milliradian's second difference made
+  into a liftoff in the middle of a rise). Where the bracket
   has Q's sign — the motion asks for more acceleration toward the cam than
   gravity gives — the follower leaves above ω = √(Q / bracket); the least over the turn is
   `liftoff_rpm`, in the study driver's rpm (the driver-to-cam ratio is read
   from the samples). Where Q itself pushes it off, `held` is false over
   `not_held_deg` — any speed. Each drop reports its height, its free-fall
-  time √(2h·M/|Q|), the dwell the cam holds the landing level for (within
+  time (from rest over the mass function: ½M(q)q′² is gravity's work from
+  the top, and the time is ∫dq/q′; √(2h·M/|Q|) when M and Q are constant,
+  and read at the top alone it timed the woodcutter's axe, a lever carried
+  through a loop that stands nearest upright there, at 155 ms where it
+  falls in about 106), the dwell the cam holds the landing level for (within
   ten table tolerances) and `drop_rpm`, the speed it just lands in time; at
   `speed_rpm`, the cam's turn while it falls and whether it `lands`. A
   step met from below `jams`, and the follower then does not hold.
