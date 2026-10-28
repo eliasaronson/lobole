@@ -199,6 +199,23 @@ the heading if it is not here yet.
 - **Likely fix:** a `key_chars` action (the test engine's
   `KeyCharsAppend`), or an `item_click` variant that keeps the field active.
 
+## Reader fuzz
+
+### Which cases the full sweep runs depends on the machine's speed
+
+- **Symptom:** two runs of one family's every-case sweep at the same seed run
+  different case sets: `part directories 4/4` ran 13 603 cases on a quiet
+  machine and 13 238 under load. A case that failed in one run may not run
+  in the next, so "passes alone" can mean "was not run".
+- **Cause:** an input whose unmutated read costs 0.25 s of CPU or more is
+  `heavy` and runs an eighth of its cases; the cost is measured once, per
+  run, and `v198-cam-profile`'s rebuild measured 0.14 s to 0.38 s across
+  runs on this hybrid machine, so it lands on either side.
+- **Where:** `heavy` in `Sweep::Impl::RunDocument`, `tests/mutate/ReaderFuzz.cpp`.
+- **Likely fix:** decide `heavy` from the input rather than a clock (the
+  corpus entry's features, or a list kept with the corpus), so a seed names
+  one case set.
+
 ## GUI suite
 
 ### Viewport picks resolve nothing after some neighbours in a shuffled run
