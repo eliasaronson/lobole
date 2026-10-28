@@ -117,6 +117,7 @@ add_executable(designer_tests
     test_heavy_build.cpp
     test_occ_signals.cpp
     test_kernel_threads.cpp
+    test_curve_sample.cpp
     test_bounded_read.cpp
     test_occ_patches.cpp
     test_refused_on.cpp

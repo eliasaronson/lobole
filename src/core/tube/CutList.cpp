@@ -3,6 +3,7 @@
 
 #include "core/tube/CutList.h"
 
+#include "cad/CurveSample.h"
 #include "core/Document.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/PipeFeature.h"
@@ -11,7 +12,6 @@
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
-#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
@@ -74,14 +74,11 @@ std::vector<std::pair<glm::dvec3, double>> SampleCurve(const CADShape& pathEdge,
   try {
     for (const Segment& seg : SegmentsOf(pathEdge.GetShape())) {
       BRepAdaptor_Curve curve(seg.edge);
-      GCPnts_QuasiUniformDeflection sampler(curve, deflection);
-      if (!sampler.IsDone())
-        continue;
-      for (int k = 1; k <= sampler.NbPoints(); k++) {
-        const gp_Pnt p = sampler.Value(k);
-        const double at = seg.startsAt + GCPnts_AbscissaPoint::Length(
-                                             curve, curve.FirstParameter(),
-                                             sampler.Parameter(k));
+      for (const cad::CurveSample& s : cad::SampleCurve(curve, deflection)) {
+        const gp_Pnt& p = s.p;
+        const double at =
+            seg.startsAt +
+            GCPnts_AbscissaPoint::Length(curve, curve.FirstParameter(), s.u);
         // Segments meet at a shared point; keep one of each.
         if (!out.empty() && std::abs(out.back().second - at) < 1e-9)
           continue;
@@ -120,11 +117,8 @@ MetalAlongPath(const Body& body, const CADShape& pathEdge) {
       BRepAdaptor_Curve curve(TopoDS::Edge(edges(i)));
       // Deflection-based, so a long straight costs two points and a tight
       // cope curve costs as many as its curvature needs.
-      GCPnts_QuasiUniformDeflection sampler(curve, 0.05);
-      if (!sampler.IsDone())
-        continue;
-      for (int k = 1; k <= sampler.NbPoints(); k++)
-        probes.push_back(sampler.Value(k));
+      for (const cad::CurveSample& s : cad::SampleCurve(curve, 0.05))
+        probes.push_back(s.p);
     }
     if (probes.empty())
       return std::nullopt;

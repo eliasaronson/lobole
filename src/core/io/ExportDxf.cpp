@@ -3,6 +3,7 @@
 
 #include "core/io/ExportDxf.h"
 
+#include "cad/CurveSample.h"
 #include "core/sheet/Unfold.h"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -13,7 +14,6 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
-#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
@@ -176,11 +176,9 @@ void WriteEdge(Out& o, const Frame& f, const char* layer,
   // the deflection is stated rather than left to a default: 10 microns is
   // under any laser's kerf, so the approximation cannot be what makes a part
   // out of tolerance.
-  GCPnts_QuasiUniformDeflection pts(curve, 0.01);
-  if (!pts.IsDone() || pts.NbPoints() < 2)
-    return;
-  for (int i = 1; i < pts.NbPoints(); ++i)
-    WriteLine(o, f, layer, pts.Value(i), pts.Value(i + 1));
+  const std::vector<cad::CurveSample> pts = cad::SampleCurve(curve, 0.01);
+  for (size_t i = 0; i + 1 < pts.size(); ++i)
+    WriteLine(o, f, layer, pts[i].p, pts[i + 1].p);
 }
 
 void WriteHeader(Out& o) {

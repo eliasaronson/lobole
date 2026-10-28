@@ -2171,6 +2171,33 @@ TEST_CASE("OCC's signal handlers are armed in one place", "[convention]") {
   CHECK(offenders.empty());
 }
 
+TEST_CASE("a curve is sampled through cad::SampleCurve", "[convention]") {
+  // GCPnts_QuasiUniformDeflection judges a span by its end tangents, and on
+  // OCC 7.6 (what Ubuntu 24.04 ships, and CI tests) a span that ends where
+  // it began comes back as its two ends: a cam's section became a chord
+  // across the cam. cad::SampleCurve checks each chord and resamples one
+  // that strays; a direct caller would bring the collapse back unseen,
+  // because nix's OCC 7.9 does not show it.
+  const std::regex use(R"(\bGCPnts_QuasiUniformDeflection\b(?!\.hxx))");
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"})
+    for (const SourceFile& src : SourcesUnder("src", ext)) {
+      if (Relative(src.path) == "src/cad/CurveSample.cpp")
+        continue;
+      for (const auto& [n, row] : CodeLines(src.text))
+        if (std::regex_search(row, use))
+          offenders.push_back(Relative(src.path) + ":" + std::to_string(n) +
+                              ": " + row);
+    }
+  INFO("sample through cad::SampleCurve (cad/CurveSample.h) instead:\n" + [&] {
+    std::string s;
+    for (const std::string& o : offenders)
+      s += "  " + o + "\n";
+    return s;
+  }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("a deliberate refusal throws std::runtime_error", "[convention]") {
   // The dispatcher labels a logic_error (invalid_argument, out_of_range, ...)
   // `internal`: the handler fell over rather than refused

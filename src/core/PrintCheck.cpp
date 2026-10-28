@@ -3,6 +3,7 @@
 
 #include "core/PrintCheck.h"
 
+#include "cad/CurveSample.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
 
@@ -19,7 +20,6 @@
 #include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
-#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GProp_GProps.hxx>
 #include <IntCurvesFace_Intersector.hxx>
 #include <NCollection_DataMap.hxx>
@@ -198,11 +198,9 @@ Bridge CeilingSpan(FaceEval& fe, double chordMm) {
     if (BRep_Tool::Degenerated(edge))
       continue;
     BRepAdaptor_Curve c(edge);
-    GCPnts_QuasiUniformDeflection pts(c, chordMm);
-    if (!pts.IsDone() || pts.NbPoints() < 2)
-      continue;
-    for (int i = 1; i < pts.NbPoints(); ++i)
-      segs.emplace_back(V(pts.Value(i)), V(pts.Value(i + 1)));
+    const std::vector<cad::CurveSample> pts = cad::SampleCurve(c, chordMm);
+    for (size_t i = 0; i + 1 < pts.size(); ++i)
+      segs.emplace_back(V(pts[i].p), V(pts[i + 1].p));
   }
   Bridge out;
   if (segs.empty())

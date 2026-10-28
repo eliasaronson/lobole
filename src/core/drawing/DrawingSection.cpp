@@ -3,6 +3,8 @@
 
 #include "core/drawing/DrawingSection.h"
 
+#include "cad/CurveSample.h"
+
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -11,7 +13,6 @@
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
-#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -38,13 +39,8 @@ std::vector<glm::dvec3> EdgePoints(const TopoDS_Edge& edge, double deflection) {
       pts.push_back({p.X(), p.Y(), p.Z()});
     }
   } else {
-    GCPnts_QuasiUniformDeflection sampler(curve, deflection);
-    if (sampler.IsDone()) {
-      for (int i = 1; i <= sampler.NbPoints(); ++i) {
-        const gp_Pnt p = sampler.Value(i);
-        pts.push_back({p.X(), p.Y(), p.Z()});
-      }
-    }
+    for (const cad::CurveSample& s : cad::SampleCurve(curve, deflection))
+      pts.push_back({s.p.X(), s.p.Y(), s.p.Z()});
   }
   if (edge.Orientation() == TopAbs_REVERSED)
     std::reverse(pts.begin(), pts.end());

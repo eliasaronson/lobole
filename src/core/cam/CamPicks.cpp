@@ -3,6 +3,7 @@
 
 #include "core/cam/CamToolpath.h"
 
+#include "cad/CurveSample.h"
 #include "core/cam/CamToolpathInternal.h"
 
 #include "core/Measure.h"
@@ -15,7 +16,6 @@
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
-#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -98,13 +98,12 @@ std::vector<glm::dvec2> WireToLoop(const TopoDS_Wire& wire, double deflection) {
   for (; ex.More(); ex.Next()) {
     const TopoDS_Edge& edge = ex.Current();
     BRepAdaptor_Curve curve(edge);
-    GCPnts_QuasiUniformDeflection sampler(curve, deflection);
-    if (!sampler.IsDone())
-      continue;
-    const int n = sampler.NbPoints();
+    const std::vector<cad::CurveSample> sampled =
+        cad::SampleCurve(curve, deflection);
+    const size_t n = sampled.size();
     const bool reversed = edge.Orientation() == TopAbs_REVERSED;
-    for (int k = 0; k < n; k++) {
-      const gp_Pnt p = sampler.Value(reversed ? n - k : k + 1);
+    for (size_t k = 0; k < n; k++) {
+      const gp_Pnt& p = sampled[reversed ? n - 1 - k : k].p;
       const glm::dvec2 xy(p.X(), p.Y());
       // The last point of one edge is the first of the next.
       if (!pts.empty() && glm::length(pts.back() - xy) < 1e-9)

@@ -351,6 +351,7 @@ set(core_sources
     src/render/OutlineEdges.cpp
     src/render/StillOutlines.cpp
     src/cad/BoundedRead.cpp
+    src/cad/CurveSample.cpp
     src/cad/CADKernel.cpp
     src/cad/OccPatches.cpp
     src/cad/OccSignals.cpp
