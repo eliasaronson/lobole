@@ -26,6 +26,7 @@ import math
 import os
 import re
 import shutil
+import subprocess
 import sys
 from typing import Callable, Optional
 
@@ -664,6 +665,150 @@ def _fem_body(ctx):
                f"factor of safety {fos}, the saved study read {saved}")
 
 
+# mesh -----------------------------------------------------------------------
+
+# The organic fixtures (tests/mesh_organic.h) as STL, at the sizes the
+# organic-meshes plan sets its budgets from: a sculpt download (10k, 300k)
+# and a phone scan (2M). Written once by build/mesh_fixture_writer into
+# ~/.cache/lobole/bench/meshes/, keyed by the generator's own source, with
+# the fixture's known answers beside each as <file>.json.
+MESH_SIZES = (10000, 300000, 2000000)
+MESH_SRC = [os.path.join(ROOT, "tests", f) for f in
+            ("mesh_organic.h", "mesh_organic.cpp", "mesh_fixture_writer.cpp")]
+MESH_CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME")
+                          or os.path.expanduser("~/.cache"),
+                          "lobole", "bench", "meshes")
+
+
+def mesh_fixture(name, triangles):
+    """(path, answers) of the organic fixture `name` at about `triangles`,
+    written on first use."""
+    h = hashlib.sha256()
+    for f in MESH_SRC:
+        with open(f, "rb") as fh:
+            h.update(fh.read())
+    path = os.path.join(MESH_CACHE,
+                        f"{name}-{triangles}-{h.hexdigest()[:12]}.stl")
+    if not os.path.isfile(path + ".json"):
+        os.makedirs(MESH_CACHE, exist_ok=True)
+        writer = os.path.join(ROOT, "build", "mesh_fixture_writer")
+        subprocess.run([os.path.join(ROOT, "tools", "nix-run"),
+                        "ninja -C build mesh_fixture_writer"], cwd=ROOT,
+                       check=True, stdout=subprocess.DEVNULL)
+        subprocess.run([writer, name, str(triangles), path], check=True)
+    with open(path + ".json") as f:
+        return path, json.load(f)
+
+
+def _mesh_import(ctx, name, n):
+    path, answers = mesh_fixture(name, n)
+    ctx.state["answers"] = answers
+    ctx.call("new_project")
+    # keep_origin: the answers are in the file's coordinates. Past the facet
+    # import's triangle limit it is let through: what it costs is the row.
+    return ctx.call("import_step", path=path, keep_origin=True,
+                    allow_large_mesh=True)
+
+
+def _mesh_size_label(n):
+    return f"{n // 1000}k" if n < 1000000 else f"{n // 1000000}M"
+
+
+def _mesh_rows():
+    rows = []
+    for n in MESH_SIZES:
+        label = _mesh_size_label(n)
+        heavy = n >= 300000
+        # Today a big mesh is a face a triangle (or a recognised solid):
+        # the rows past 10k measure what the plan's mesh body will replace,
+        # and take long; one repeat after the warm-up.
+        reps = 1 if heavy else 3
+
+        def import_body(ctx, n=n):
+            path, answers = mesh_fixture("figurine", n)
+            r = ctx.timed("import", "import_step", path=path,
+                          keep_origin=True, allow_large_mesh=True)
+            mesh = r.get("mesh") or {}
+            ctx.note("triangles", mesh.get("triangles"))
+            ctx.note("expected_s", mesh.get("expected_s"))
+            ctx.note("representation", r.get("representation"))
+            ctx.expect(_bodies(ctx) == 1,
+                       f"the import made {_bodies(ctx)} bodies, not 1")
+
+        rows.append(Workload(
+            f"mesh/import/figurine-{label}",
+            f"import_step of the {label}-triangle metaball figure (STL)",
+            "headless", import_body, _new_project, reset=_new_project,
+            repeats=reps, set="mesh", estimate_s=5 if not heavy else 3600,
+            setup_s=10))
+
+        def sync_setup(ctx, n=n):
+            _mesh_import(ctx, "figurine", n)
+
+        def sync_body(ctx):
+            mark = ctx.log_mark()
+            ctx.timed("capture", "screenshot",
+                      path=os.path.join(ctx.work, "sync.png"))
+            ph = sync_phases(ctx.log_since(mark))
+            ctx.expect(bool(ph), "no \"... synced\" line was logged: the "
+                       "capture did not project the figure")
+            for k, v in ph.items():
+                ctx.note(k, v)
+
+        rows.append(Workload(
+            f"mesh/render-sync/figurine-{label}",
+            f"the first screenshot after importing the {label} figure, "
+            "which projects it into the renderers (tessellation, outline "
+            "adjacency, picker)", "offscreen", sync_body, sync_setup,
+            reset=sync_setup, repeats=reps, set="mesh",
+            estimate_s=10 if not heavy else 3600, setup_s=10))
+
+        def mass_setup(ctx, n=n):
+            _mesh_import(ctx, "sphere", n)
+
+        def mass_body(ctx):
+            r = ctx.timed("mass", "mass_properties")
+            a = ctx.state["answers"]
+            vol = sum(b.get("volume_mm3", 0.0) for b in r.get("bodies", []))
+            ctx.note("volume_mm3", vol)
+            ctx.expect(abs(vol - a["volume_mm3"]) <= a["volume_tolerance_mm3"],
+                       f"volume {vol} mm3, the sphere's is "
+                       f"{a['volume_mm3']} +- {a['volume_tolerance_mm3']}")
+
+        rows.append(Workload(
+            f"mesh/mass/sphere-{label}",
+            f"mass_properties of the {label}-triangle noisy sphere, held to "
+            "its analytic volume", "headless", mass_body, mass_setup,
+            repeats=reps, set="mesh", estimate_s=5 if not heavy else 600,
+            setup_s=10 if not heavy else 3600))
+
+        def section_setup(ctx, n=n):
+            _mesh_import(ctx, "figurine", n)
+            ctx.call("screenshot", path=os.path.join(ctx.work, "warm.png"))
+
+        def section_body(ctx):
+            ctx.timed("set_section", "set_section", base_plane="xy",
+                      offset=50.0)
+            ctx.timed("capture", "screenshot",
+                      path=os.path.join(ctx.work, "section.png"))
+            r = ctx.timed("section", "section", base_plane="xy", offset=50.0)
+            ctx.note("area_mm2", r.get("area_mm2"))
+            ctx.expect((r.get("area_mm2") or 0) > 0,
+                       "the cut through the figure's body has no area")
+
+        def section_reset(ctx):
+            ctx.call("set_section", enabled=False)
+
+        rows.append(Workload(
+            f"mesh/section/figurine-{label}",
+            f"a section through the {label} figure's body: the clip and its "
+            "cap drawn, and the section's area", "offscreen", section_body,
+            section_setup, reset=section_reset, repeats=reps, set="mesh",
+            estimate_s=10 if not heavy else 1800,
+            setup_s=10 if not heavy else 3600))
+    return rows
+
+
 # the table -----------------------------------------------------------------
 
 def _all():
@@ -708,6 +853,7 @@ def _all():
         "fem/hook", "run_study (recompute) of the hook's study at its saved "
         "mesh", "headless", _fem_body, _fem_setup, fixture="hook",
         estimate_s=150))
+    rows += _mesh_rows()
     return rows
 
 
@@ -716,9 +862,12 @@ _ROWS = _all()
 
 def workloads(which="default"):
     """The rows of a set: default (fixtures of the default set and no
-    fixture), big (adds the clock and planetary), all."""
+    fixture), big (adds the clock and planetary), mesh (the organic
+    meshes, by size), all."""
     if which == "all":
         return list(_ROWS)
     if which == "big":
-        return list(_ROWS)
+        return [w for w in _ROWS if w.set in ("default", "big")]
+    if which == "mesh":
+        return [w for w in _ROWS if w.set == "mesh"]
     return [w for w in _ROWS if w.set == "default"]

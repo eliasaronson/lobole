@@ -30,7 +30,8 @@ tools/bench.py fixtures                      # build the fixtures, time nothing
 
 `run` takes workload names or globs; an unknown one is refused, naming
 `list`. `--set big` adds the workloads on the clock and planetary fixtures,
-which take ten minutes or more to build. `--binary` measures another build,
+which take ten minutes or more to build. `--set mesh` is the organic-mesh
+rows alone ([mesh workloads](#mesh-workloads)). `--binary` measures another build,
 `--repeats N` overrides a row's repeats, `--history PATH` writes and reads
 another history file. `--scale small` is the cut-down form the harness's own
 test runs ([its own test](#its-own-test)); a small record is never compared
@@ -104,6 +105,10 @@ what has regressed before or what a user waits on.
 | `motion/hinge-swing` | `run_motion_study {recompute}` of the hinge box's 0-180° swing | clean, as the saved result is |
 | `cam/chess-board` | `cam_toolpath` of every setup of the board's job | per-operation move counts equal to the fixture's |
 | `fem/hook` | `run_study {recompute}` at the saved mesh | the factor of safety within 1 % of the saved result's |
+| `mesh/import/figurine-<n>` | `import_step` of the metaball figure STL | one body |
+| `mesh/render-sync/figurine-<n>` | the first `screenshot` after the import, which projects it | a "… synced" line was logged |
+| `mesh/mass/sphere-<n>` | `mass_properties` of the noisy sphere | its volume within the fixture's analytic bound |
+| `mesh/section/figurine-<n>` | `set_section` through the body, the `screenshot` with its cap, then `section` | the cut has an area |
 
 The open, render and history workloads take their fixture by name:
 `open/*` runs on every fixture of the set, `render/*` on om615 and the
@@ -133,6 +138,23 @@ Three rows are shaped by what the app does:
   what it left unchecked, so a slower build would check fewer pairs in about
   the same time. `assembly/engine` passes no deadline and fails a truncated
   sweep.
+
+### Mesh workloads
+
+The `mesh/*` rows (`--set mesh`, in no other set but `all`) run at 10k,
+300k and 2M triangles: a sculpt download and a phone scan, the sizes the
+organic-meshes plan sets its budgets from
+([plan](../plans/organic-meshes-and-scans.md)). Their inputs are the
+organic fixtures of `tests/mesh_organic.h`, written once as binary STL by
+`build/mesh_fixture_writer` (built by name on first use) into
+`~/.cache/lobole/bench/meshes/`, keyed by the generator's source, with the
+fixture's known answers beside each as `<file>.json`. An import passes
+`keep_origin` (the answers are in the file's coordinates) and
+`allow_large_mesh` (what a big mesh costs is the row). Until a mesh stays a
+mesh, the 300k and 2M rows run for hours; they are here for the stage that
+makes them run at all. A hover pick has no row: no RPC picks at a screen
+point, so it is measured in-process (`[mesh-cost-render]` in
+`tests/test_mesh_costs.cpp`).
 
 ## Fixtures
 

@@ -1356,9 +1356,10 @@ def main(argv=None):
         p.add_argument("--binary", default=DEFAULT_BINARY,
                        help="the lobole to measure (default build/lobole)")
         p.add_argument("--set", default="default",
-                       choices=("default", "big", "all"),
+                       choices=("default", "big", "mesh", "all"),
                        help="which workloads when none are named; big adds "
-                            "the clock and planetary fixtures")
+                            "the clock and planetary fixtures, mesh is the "
+                            "organic meshes by size")
         p.add_argument("--history", metavar="PATH",
                        help="the history file (default ~/.local/state/"
                             "lobole/bench/<host-key>.jsonl)")

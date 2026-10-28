@@ -167,6 +167,8 @@ add_executable(designer_tests
     mesh_fixtures.cpp
     mesh_organic.cpp
     test_mesh_organic.cpp
+    test_mesh_costs.cpp
+    test_mesh_writers.cpp
     test_mesh_fit.cpp
     test_mesh_segment.cpp
     test_mesh_files.cpp

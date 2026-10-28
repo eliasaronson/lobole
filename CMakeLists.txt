@@ -727,6 +727,13 @@ target_link_libraries(mesh_boolean_probe PRIVATE manifold glm::glm)
 if(WIN32)
     target_link_options(mesh_boolean_probe PRIVATE -static)
 endif()
+# Writes one organic fixture as STL with its answers, for the bench's mesh
+# workloads (tools/bench_workloads.py), which build it by name.
+add_executable(mesh_fixture_writer EXCLUDE_FROM_ALL
+    tests/mesh_fixture_writer.cpp tests/mesh_organic.cpp
+    src/core/mesh/TriMesh.cpp)
+target_include_directories(mesh_fixture_writer PRIVATE src tests)
+target_link_libraries(mesh_fixture_writer PRIVATE glm::glm)
 
 if(NOT ENABLE_CAM)
     message(STATUS "CAM disabled (-DENABLE_CAM=OFF)")
