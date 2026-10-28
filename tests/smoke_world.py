@@ -23,13 +23,22 @@ def tree(root, skip=(), autosaves=True):
     out = {}
     if not os.path.isdir(root):
         return out
-    for r, _dirs, files in os.walk(root):
+    for r, dirs, files in os.walk(root):
         rel = os.path.relpath(r, root)
         if any(rel == s or rel.startswith(s + os.sep) for s in skip):
             continue
         if not autosaves and any(part.endswith(".autosave.d")
                                  for part in rel.split(os.sep)):
             continue
+        # Pruned, not just skipped: `fp` gains a saved project per settle(),
+        # and walking into it to skip every file made each snapshot cost the
+        # number of saves so far -- quadratic over refused_calls_smoke's 1500
+        # calls, two thirds of its CPU, and why it outran its timeout on a
+        # loaded machine.
+        dirs[:] = [
+            x for x in dirs
+            if os.path.normpath(os.path.join(rel, x)) not in skip
+            and (autosaves or not x.endswith(".autosave.d"))]
         for f in files:
             relf = os.path.normpath(os.path.join(rel, f))
             if relf in skip:
