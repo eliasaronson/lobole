@@ -108,6 +108,7 @@ READER_FUZZ_FAMILY("instance registry", Family::Instances)
 READER_FUZZ_FAMILY("autosave recovery", Family::Recovery)
 READER_FUZZ_FAMILY("git vault and merge", Family::Vault)
 READER_FUZZ_FAMILY("images", Family::Images)
+READER_FUZZ_FAMILY("meshes", Family::Meshes)
 
 // Larger projects, opt-in: LOBOLE_READER_CORPUS=<dir> points at generator
 // output (untracked, so it never decides whether the suite passes). With

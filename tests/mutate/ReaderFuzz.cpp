@@ -23,6 +23,8 @@
 #include "core/io/ProjectPaths.h"
 #include "core/io/Serialization.h"
 #include "core/io/Settings.h"
+#include "core/mesh/MeshReaders.h"
+#include "core/mesh/Segment.h"
 #include "remote/InstanceRegistry.h"
 #include "thirdparty/stb_image.h"
 #include "thirdparty/stb_image_write.h"
@@ -553,6 +555,8 @@ const char* FamilyName(Family f) {
     return "vault";
   case Family::Images:
     return "images";
+  case Family::Meshes:
+    return "meshes";
   case Family::ExternalCorpus:
     return "corpus";
   }
@@ -1660,6 +1664,73 @@ Summary Sweep::Run() { return m->Run(); }
 // copy. A reader here never refuses the start of the app; it keeps going
 // past a bad file and says which (settings set the file aside with a note,
 // a profile store names the file it could not read).
+namespace {
+
+// A washer of `sides` as a triangle soup: two cylinders and two annuli, the
+// mesh recognition's whole subject in a few hundred bytes.
+std::vector<glm::dvec3> WasherSoup(int sides) {
+  std::vector<glm::dvec3> soup;
+  const double pi = 3.14159265358979323846;
+  const auto at = [&](double r, int i, double z) {
+    const double a = 2.0 * pi * (i % sides) / sides;
+    return glm::dvec3(r * std::cos(a), r * std::sin(a), z);
+  };
+  const auto tri = [&](glm::dvec3 a, glm::dvec3 b, glm::dvec3 c) {
+    soup.push_back(a);
+    soup.push_back(b);
+    soup.push_back(c);
+  };
+  for (int i = 0; i < sides; i++) {
+    const glm::dvec3 ob0 = at(10, i, 0), ob1 = at(10, i + 1, 0),
+                     ot0 = at(10, i, 3), ot1 = at(10, i + 1, 3),
+                     ib0 = at(4, i, 0), ib1 = at(4, i + 1, 0),
+                     it0 = at(4, i, 3), it1 = at(4, i + 1, 3);
+    tri(ob0, ob1, ot1), tri(ob0, ot1, ot0);
+    tri(ib0, it1, ib1), tri(ib0, it0, it1);
+    tri(it0, ot0, ot1), tri(it0, ot1, it1);
+    tri(ib0, ob1, ob0), tri(ib0, ib1, ob1);
+  }
+  return soup;
+}
+
+std::string BinaryStl(const std::vector<glm::dvec3>& soup) {
+  std::string out(80, '\0');
+  const auto put = [&](const void* p, size_t n) {
+    out.append(static_cast<const char*>(p), n);
+  };
+  const uint32_t count = static_cast<uint32_t>(soup.size() / 3);
+  put(&count, 4);
+  for (size_t i = 0; i < soup.size(); i += 3) {
+    const float normal[3] = {0, 0, 0};
+    put(normal, 12);
+    for (int c = 0; c < 3; c++) {
+      const float v[3] = {float(soup[i + c].x), float(soup[i + c].y),
+                          float(soup[i + c].z)};
+      put(v, 12);
+    }
+    const uint16_t attr = 0;
+    put(&attr, 2);
+  }
+  return out;
+}
+
+std::string AsciiStl(const std::vector<glm::dvec3>& soup) {
+  std::string out = "solid washer\n";
+  char line[160];
+  for (size_t i = 0; i < soup.size(); i += 3) {
+    out += "facet normal 0 0 0\n outer loop\n";
+    for (int c = 0; c < 3; c++) {
+      std::snprintf(line, sizeof line, "  vertex %.6e %.6e %.6e\n",
+                    soup[i + c].x, soup[i + c].y, soup[i + c].z);
+      out += line;
+    }
+    out += " endloop\nendfacet\n";
+  }
+  return out + "endsolid washer\n";
+}
+
+} // namespace
+
 Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
   OtherSetup o;
   o.fixture = scratch / "fixture";
@@ -2075,6 +2146,39 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
     };
     // Binary: byte-level damage only.
     topt.file.binary = true;
+    break;
+  }
+  case Family::Meshes: {
+    // STL, binary and ASCII, read by mesh::ReadStl and then segmented: a
+    // damaged file is refused naming itself, or reads into a mesh whose
+    // every index is a vertex, and the segmentation (which walks it) puts
+    // every triangle in a region.
+    const auto soup = WasherSoup(24);
+    WriteBytes(fixture / "washer.stl", BinaryStl(soup));
+    WriteBytes(fixture / "washer-ascii.stl", AsciiStl(soup));
+    check = [](const fs::path& w, const Case&) -> std::string {
+      for (const char* name : {"washer.stl", "washer-ascii.stl"}) {
+        if (!fs::exists(w / name))
+          continue;
+        mesh::TriMesh m;
+        std::string error;
+        if (!mesh::ReadStlBytes(ReadBytes(w / name), name, m, error)) {
+          if (error.find(name) == std::string::npos)
+            return std::string(name) +
+                   " refused without naming itself: " + error;
+          continue;
+        }
+        for (const auto& t : m.triangles)
+          for (uint32_t v : t)
+            if (v >= m.positions.size())
+              return std::string(name) + " reads a corner past its vertices";
+        const mesh::Segmentation s = mesh::SegmentAll(m, {});
+        for (uint32_t r : s.regionOf)
+          if (r >= s.regions.size())
+            return std::string(name) + " leaves a triangle in no region";
+      }
+      return "";
+    };
     break;
   }
   default:

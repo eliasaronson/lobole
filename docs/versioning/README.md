@@ -739,7 +739,10 @@ and a file that does not parse leaves a note naming it; a profile store
 loads every file or names it as unreadable; collecting crash reports never
 throws and copies nothing from outside the state dir; the registry never
 reports an instance with pid or port 0; a recovery refuses naming the
-sidecar; an image decodes to the size its header states, or not at all.
+sidecar; an image decodes to the size its header states, or not at all;
+a mesh (`meshes`, an STL binary and ASCII) is refused naming the file, or
+reads into a mesh whose every corner is a vertex and which segments with
+every triangle in a region.
 
 **Registration.** One `TEST_CASE` per family, so ctest runs them in
 parallel. `[reader_fuzz]` is the fixed sample: every operator at least once

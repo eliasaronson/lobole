@@ -507,6 +507,10 @@ set(core_sources
     src/core/features/FrameFeature.cpp
     src/core/Primitives.cpp
     src/core/MeshCollide.cpp
+    src/core/mesh/TriMesh.cpp
+    src/core/mesh/MeshReaders.cpp
+    src/core/mesh/Fit.cpp
+    src/core/mesh/Segment.cpp
     src/core/MotionStudy.cpp
     src/core/InputHash.cpp
     src/core/io/GlbAnimation.cpp

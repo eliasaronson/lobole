@@ -57,6 +57,7 @@ FAMILIES = {
     "recovery": "autosave recovery",
     "vault": "git vault and merge",
     "images": "images",
+    "meshes": "meshes",
 }
 
 

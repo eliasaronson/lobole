@@ -163,6 +163,10 @@ add_executable(designer_tests
     test_refine.cpp
     test_external.cpp
     test_mesh_import.cpp
+    mesh_fixtures.cpp
+    test_mesh_fit.cpp
+    test_mesh_segment.cpp
+    test_mesh_files.cpp
     test_spline.cpp
     test_ellipse_arc.cpp
     test_sketch_curves.cpp

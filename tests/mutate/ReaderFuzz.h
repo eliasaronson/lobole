@@ -38,6 +38,7 @@ enum class Family {
   Recovery,
   Vault,
   Images,
+  Meshes,
   ExternalCorpus,
 };
 

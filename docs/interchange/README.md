@@ -286,6 +286,78 @@ so the RPC answers the cancel at once, the modal goes at once, and the
 worker's result is dropped when it lands (`background_jobs` lists it until
 then, and a new import is refused naming why).
 
+## Recognising a faceted mesh
+
+A downloaded mechanical part arrives as STL: every hole is a prism of
+planar facets and every flat a fan of triangles. `src/core/mesh/` finds the
+surfaces they were tessellated from. It is pure data, with no OpenCASCADE,
+so it can run on a worker thread.
+
+- **`TriMesh`** (`TriMesh.{h,cpp}`) holds indexed triangles on double
+  positions, with edge adjacency and `Closed()` (edge-manifold, consistently
+  oriented, no boundary). It knows its volume by the divergence theorem and
+  hashes its content.
+  - **The weld is exact first.** A CAD exporter writes a shared vertex
+    bit-identically, so points equal to the bit become one vertex. Then
+    points within one `quantum` of each other are joined.
+  - **`quantum` is the precision the file was written at.** For a binary STL
+    it is the float32 spacing at the largest coordinate (2⁻¹⁸ mm at 60 mm).
+    For an ASCII STL it is the place value of the last printed digit at that
+    magnitude (OpenSCAD prints six significant digits, so 10⁻⁴ mm at 30 mm).
+    Every tolerance below is a small multiple of it, so none is a length
+    written in the code.
+- **`ReadStl`** (`MeshReaders.{h,cpp}`) reads binary and ASCII STL straight
+  into a `TriMesh`, with no B-Rep. It is the reader fuzz's `meshes` family,
+  which segments whatever it reads.
+- **`Fit`** (`Fit.{h,cpp}`) does least-squares fits of a plane, cylinder,
+  cone and sphere. Each fit reports the RMS and the largest distance of the
+  points from the surface.
+  - The axis comes from the Gauss map. A cylinder's facet normals lie on a
+    great circle and a cone's on a smaller one, so the axis is the normal of
+    the plane through their tips.
+  - Levenberg–Marquardt then refines the fit against the vertices.
+  - There is no Eigen, which `designer_core` may be built without, and no
+    RANSAC: a CAD export's vertices are on its surfaces, with no outliers.
+- **`SegmentAll`** (`Segment.{h,cpp}`) puts every triangle in exactly one
+  region. A region is a plane, cylinder, cone or sphere, and the regions are
+  ordered by their lowest file triangle.
+  1. **Flat patches.** Triangles flood together when every corner is within
+     four quanta of the patch's plane. The test is a distance, not a normal
+     angle.
+  2. **Curved regions.** Neighbouring patches that turn by less than a
+     pentagon's 72° are grown from a seed triple under a hypothesis:
+     cylinder, then cone, then sphere. Every vertex must stay on the fitted
+     surface to the same four quanta. The plane a fillet is tangent to has
+     its normal on the fillet's great circle but its vertices far from the
+     cylinder, so it is never taken.
+  3. **Round, or a polygon.** A hex nut trap's corners lie on a circle too,
+     so no fit can tell it from a hole. The tessellation can:
+     - A region is round only when no facet turns by more than
+       360°/`min_sides` (12 by default, so a 30° facet).
+     - One that fits but turns further is listed as a polygon, with its side
+       count and circumradius, and its flats stay planes, because a nut sits
+       on them.
+     - OpenSCAD's default resolution makes a small hole a pentagon, which
+       `min_sides: 5` asks for as round.
+  4. **What fits nothing** stays as its flat patches, such as a torus corner
+     where two fillets meet. These are counted in `facetsLeft`.
+
+What it is checked against:
+- **Generated parts.** `tests/mesh_fixtures.{h,cpp}` builds CAD parts with
+  OpenCASCADE and writes them through our own `SaveSTL`, so every radius and
+  axis is known. Each must come out as built
+  (`tests/test_mesh_segment.cpp`):
+  - a plate of 24 holes, at 24 sides and at 128;
+  - a bracket with a counterbore, a countersink (a cone), a boss, and
+    hexagon, octagon and decagon pockets (listed, not rounded);
+  - a filleted angle;
+  - an oblique hole and a dome.
+- **Files another program wrote.** `tests/fixtures/mesh/` holds three
+  OpenSCAD exports beside their `.scad` sources, whose headers list the
+  answers (`tests/test_mesh_files.cpp`): a motor plate with a nut trap, a
+  pipe clamp with a default-resolution pentagon hole, and a knob that is a
+  cone, a cylinder and a sphere.
+
 ## Importing an assembly
 
 A STEP or IGES with several placed instances becomes an assembly
