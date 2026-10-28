@@ -56,6 +56,7 @@ and the call a person would make agree by construction.
 | `check_fasteners` | assembly | `check_fasteners` | verdict | `allow?` [{`part?`, `why?`, `max?`}], `allow_skipped?` |
 | `check_literals` | part, parts, or none | `check_literals` | verdict | `documents?` (several parts); neither: every part |
 | `motion_clean` | assembly | `run_motion_study` | verdict | `study` |
+| `follower` | assembly | `run_motion_study`, `check_followers` | rpm, deg, mm (the quantity's) | `relation` (a contact relation), `study`, `quantity`: liftoff_rpm \| drop_rpm \| pressure_angle_deg \| deviation_mm \| deviation_deg \| gap_mm \| gap_deg, `speed_rpm?`, `max_pressure_angle_deg?` ([follower](#follower)) |
 | `cam_verify` | job | `cam_verify` | verdict | `setup`, `resolution?`, `allow_uncut?` [what prefixes] |
 | `expression` | none, or a part | the evaluator (`req::EvaluateIn`) | as `unit` says (default mm) | `expression`, `unit?`, `document?` (a part), `configuration?` (that part's; 0 = base) ([expression](#expression)) |
 
@@ -91,6 +92,22 @@ What a verdict needs to pass:
 - `cam_verify`: ok and complete, it cuts something, no operation failed,
   every thread judged in its band, every toleranced wall in its band, and
   every hole or thread the job leaves uncut matches an `allow_uncut` prefix.
+
+### Follower
+
+A `follower` requirement is one number of `check_followers` over the
+study's run ([the follower check](../assemblies/relations.md#the-follower-check)):
+`liftoff_rpm`, the study driver's speed above which gravity can no longer
+hold the follower on its cam (a follower that never leaves reads the
+largest number there is; one that gravity pushes off somewhere reads 0);
+`drop_rpm`, the slowest of its cam's drops' landing speeds (refused for a
+cam with no drop); `pressure_angle_deg`, the worst over the samples;
+`deviation_mm` or `deviation_deg`, the realised motion against the one its
+CamProfile was cut for (refused for a cam that is not a CamProfile's); and
+`gap_mm` or `gap_deg`, the worst a sample stands off the cam or into it.
+A quantity in the other unit than the follower moves in is refused. The
+study is run, or its result reused, first; the key is the study's. A design
+sweep refuses it, as it refuses the other study kinds.
 
 **A clearance over a motion study** (`motion_study`) is the smallest gap
 between the pair over that study's samples: each side's bodies moved from
@@ -249,7 +266,7 @@ exactly what the measure reads:
 | measure | input hash |
 |---|---|
 | `study_probe`, `study_result` | the study's (`fem::StudyInputKey`: the study with its expressions evaluated, the part's B-Rep, names and materials) |
-| `motion_clean`, a clearance or a seal over a study | the motion study's (`motion::InputKey`) |
+| `motion_clean`, `follower`, a clearance or a seal over a study | the motion study's (`motion::InputKey`) |
 | `clearance`, `contact`, `seal` | the two occurrences as saved and what each places |
 | the other assembly measures | the assembly's content through every sub-assembly and every placed part's bodies (`motion::AssemblyInputKey`), with each placed part's tolerances and print process |
 | `mass`, `volume` of a part | its bodies, tolerances and print process |

@@ -9,6 +9,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace ui {
 struct AppState;
@@ -25,5 +26,14 @@ std::optional<nlohmann::json> HandleMotionRpc(ui::AppState& state,
                                               const RpcParams& params);
 
 std::span<const MethodDoc> MotionMethodDocs();
+
+// check_followers (docs/assemblies/relations.md#the-follower-check): per
+// contact relation, over the study's stored run. Throws a refusal; the
+// result is {study, speed_rpm?, relations: [...]}. `relations` empty means
+// every contact relation in the active assembly.
+nlohmann::json CheckFollowers(ui::AppState& state, uint64_t study,
+                              const std::vector<uint64_t>& relations,
+                              std::optional<double> speedRpm,
+                              std::optional<double> maxPressureDeg);
 
 } // namespace remote

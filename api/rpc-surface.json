@@ -58,6 +58,7 @@
   "check_fasteners": [],
   "check_fit": ["hole", "intent", "part", "shaft", "size"],
   "check_fits": [],
+  "check_followers": ["max_pressure_angle_deg", "relations", "speed_rpm", "study"],
   "check_frame": ["part"],
   "check_geometry": ["body"],
   "check_insertion": ["a", "allowance_mm", "axis", "b", "entry", "lead_in_mm", "mate", "rotations", "samples"],

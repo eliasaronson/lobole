@@ -121,7 +121,7 @@ Outline SectionOutline(const TopoDS_Shape& shape, double z, double deflection,
                               -half, half, -half, half)
           .Face();
   BRepAlgoAPI_Section sec;
-  sec.Approximation(Standard_False);
+  sec.Approximation(Standard_True);
   sec.ComputePCurveOn1(Standard_False);
   sec.ComputePCurveOn2(Standard_False);
   if (!cad::BuildNonDestructive(sec, shape, plane) || sec.Shape().IsNull()) {
@@ -606,14 +606,30 @@ Table BuildTable(const Outline& cam, double camSense, const Outline& fol,
                           nullptr) -
                    t.midQ));
   }
-  out.nodes.reserve(n.size());
+  // Steps less than a degree apart are one drop: the intervals between
+  // them are the follower riding down the step face, read linearly.
+  const double joinGap = angles::ToRadians(1.0);
   for (size_t i = 0; i < n.size(); i++) {
+    if (!n[i].drop)
+      continue;
+    size_t j = i + 1;
+    while (j < n.size() && !n[j].drop && n[j].a - n[i + 1].a < joinGap)
+      j++;
+    if (j < n.size() && n[j].drop)
+      for (size_t k = i + 1; k < j; k++)
+        n[k].drop = true;
+  }
+  out.nodes.reserve(n.size());
+  for (size_t i = 0; i < n.size(); i++)
     out.nodes.push_back({n[i].a, n[i].q, n[i].drop});
-    if (n[i].drop) {
-      const TNode& nx = n[(i + 1) % n.size()];
-      out.drops.push_back(
-          {Wrap2Pi(n[i].a + 0.5 * Wrap2Pi(nx.a - n[i].a)), n[i].q, nx.q});
-    }
+  for (size_t i = 0; i < n.size(); i++) {
+    if (!n[i].drop || (i > 0 && n[i - 1].drop))
+      continue;
+    size_t k = i;
+    while (k + 1 < n.size() && n[k + 1].drop)
+      k++;
+    const TNode& end = n[(k + 1) % n.size()];
+    out.drops.push_back({n[i].a, n[i].q, end.q, end.a});
   }
   // Bridged ranges, from the nodes that bridge.
   for (size_t i = 0; i < n.size(); i++) {
@@ -1010,7 +1026,7 @@ struct Prepared {
   Path path;
   double camSense = 1.0;
   CADShape camPlaced, folPlaced;
-  double z = 0.0, tolerance = 0.0;
+  double z = 0.0, tolerance = 0.0, width = 0.0;
 };
 
 std::optional<Prepared> Prepare(const AssemblyDocument& asmDoc,
@@ -1036,6 +1052,7 @@ std::optional<Prepared> Prepare(const AssemblyDocument& asmDoc,
     return std::nullopt;
   }
   p.z = 0.5 * (zlo + zhi);
+  p.width = zhi - zlo;
   const double size = std::min(glm::length(glm::dvec2(chi - clo)),
                                glm::length(glm::dvec2(fhi - flo)));
   p.tolerance = 1e-5 * size;
@@ -1086,6 +1103,11 @@ std::shared_ptr<const Model> ModelFor(const AssemblyDocument& asmDoc,
         m->follower = p->s.follower;
         m->base = p->s.baseA;
         m->planeInBase = p->s.aBaseIsA ? p->s.faA : p->s.fbA;
+        m->camInPlane0 = CamInPlane(p->s, 0.0);
+        m->camPlaced = p->camPlaced;
+        m->followerPlaced = p->folPlaced;
+        m->camBody = p->s.camBody->createdBy;
+        m->followerBody = p->s.folBody->createdBy;
         return m;
       }
   }
@@ -1098,6 +1120,12 @@ std::shared_ptr<const Model> ModelFor(const AssemblyDocument& asmDoc,
   m->camSense = p->camSense;
   m->path = p->path;
   m->z = p->z;
+  m->width = p->width;
+  m->camInPlane0 = CamInPlane(p->s, 0.0);
+  m->camPlaced = p->camPlaced;
+  m->followerPlaced = p->folPlaced;
+  m->camBody = p->s.camBody->createdBy;
+  m->followerBody = p->s.folBody->createdBy;
   m->tolerance = p->tolerance;
   m->toward = r.toward;
   const double deflection = 0.125 * p->tolerance;

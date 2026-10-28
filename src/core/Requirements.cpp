@@ -101,6 +101,14 @@ const std::vector<KindSpec>& Specs() {
        "assembly",
        {"document", "study"},
        {"document", "study"}},
+      // A contact relation's follower over a motion study's run
+      // (docs/requirements/README.md#follower).
+      {"follower",
+       true,
+       "assembly",
+       {"document", "relation", "study", "quantity", "speed_rpm",
+        "max_pressure_angle_deg"},
+       {"document", "relation", "study", "quantity"}},
       {"cam_verify",
        false,
        "job",
@@ -183,6 +191,7 @@ void ValidateTypes(const std::string& kind, const char* document,
   const IdKey ids[] = {
       {"study", "a study id (list_studies)"},
       {"mate", "a mate id (list_mates)"},
+      {"relation", "a relation id (list_relations)"},
       {"motion_study", "a motion study id (list_motion_studies)"},
       {"setup", "a CAM setup id (list_cam_setups)"},
       {"configuration", "a configuration id of the part (list_configurations "
@@ -202,7 +211,8 @@ void ValidateTypes(const std::string& kind, const char* document,
   for (const char* k : {"allow_unverified", "allow_skipped"})
     if (m.contains(k) && !m.at(k).is_boolean())
       refuse(k, "true or false");
-  for (const char* k : {"offset", "resolution", "allowance_mm", "lead_in_mm"})
+  for (const char* k : {"offset", "resolution", "allowance_mm", "lead_in_mm",
+                        "speed_rpm", "max_pressure_angle_deg"})
     if (m.contains(k) && !m.at(k).is_number())
       refuse(k, "a number");
   for (const char* k : {"samples", "rotations"})
@@ -268,6 +278,9 @@ void ValidateValues(const std::string& kind, const json& m) {
       throw std::runtime_error(
           "study_probe quantity displacement_at needs `at`, the point "
           "[x, y, z] mm the face's motion is carried to");
+  } else if (kind == "follower") {
+    oneOf("quantity", {"liftoff_rpm", "drop_rpm", "pressure_angle_deg",
+                       "deviation_mm", "deviation_deg", "gap_mm", "gap_deg"});
   } else if (kind == "study_result") {
     oneOf("quantity",
           {"max_displacement", "max_von_mises", "factor_of_safety"});

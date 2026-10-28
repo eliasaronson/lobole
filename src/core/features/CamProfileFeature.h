@@ -70,6 +70,9 @@ public:
     cammech::FollowerSpec follower;
     cammech::Profile profile;  // its numbers (the points are dropped)
     double fitDeviation = 0.0; // mm: the fitted curves against the envelope
+    // The cam's frame in part space: columns X (the zero), Y, Z (the axis),
+    // origin (on the axis, at the start of the width).
+    glm::dmat4 frame{1.0};
     std::vector<std::string> derived; // which inputs came from the pick
   };
   Report report;

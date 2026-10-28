@@ -7,21 +7,29 @@
 #include "remote/RemoteHelpers.h"
 
 #include "core/AssemblySolve.h"
+#include "core/ContactFollower.h"
+#include "core/Conventions.h"
+#include "core/FollowerCheck.h"
 #include "core/InputHash.h"
+#include "core/MassProps.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
+#include "core/features/CamProfileFeature.h"
 #include "core/io/Serialization.h"
+#include "remote/RemotePrint.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/MotionActions.h"
 #include "ui/SequencePlayback.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <set>
 #include <span>
 
@@ -204,6 +212,34 @@ constexpr MethodDoc MotionMethods[] = {
      "landed (the same shape run_motion_study returns, `trace` included "
      "when asked: {study, trace}).",
      "include_poses, study, trace"},
+    {"check_followers",
+     "Whether each follower stays on its cam, over a motion study's STORED "
+     "run (run_motion_study first; a stale or missing run is refused) "
+     "(docs/assemblies/relations.md#the-follower-check). {study, "
+     "relations?: [contact relation ids] (omitted = every one), "
+     "speed_rpm? (the study driver's speed, rpm), max_pressure_angle_deg? "
+     "(the limit; omitted = unchecked)}. Per contact relation: `touching` "
+     "(at every sample the follower enters no cut across the shared width "
+     "by more than the contact tolerance — `clash_mm`|`clash_deg` the "
+     "deepest — and stands where the geometry puts it, `gap_mm`|`gap_deg`; "
+     "the samples where the study itself listed the pair as a clash), "
+     "`pressure_angle` {max_deg, at_cam_deg, limit_deg?, ok? | unchecked}, "
+     "`curvature` {min_cam_convex_mm, min_cam_concave_mm, "
+     "follower_radius_mm, bridges_deg}, for a cam cut by a CamProfile "
+     "`deviation_mm`|`deviation_deg` (the realised motion against the "
+     "designed, a constant mate zero removed; drops' corners left out) with "
+     "the profile's `fit_deviation_mm`, and `gravity` from the masses that "
+     "move with the follower (materials or printed mass; refused naming an "
+     "occurrence with none): `liftoff_rpm` (the driver speed above which "
+     "gravity can no longer hold it on; null = never; guide friction not "
+     "modelled, so an upper bound), `held` and `not_held_deg` (where its "
+     "weight pushes it off at any speed), and per drop {at_cam_deg, "
+     "height_mm|height_deg, fall_s, dwell_deg, drop_rpm (the speed it just "
+     "lands within its dwell), turn_deg and lands at speed_rpm}; "
+     "`holds_at_speed` with a speed.",
+     "study:int>=0, relations?:int[], speed_rpm?:number>0, "
+     "max_pressure_angle_deg?:number>0",
+     remote::NoFlags, "study:int, speed_rpm?:number, relations:object[]"},
     {"set_motion_pose",
      "Scrub: drive the study's mate to {t} (0..1 along the range) and "
      "re-solve, so the viewport and every query show that pose. No undo "
@@ -808,9 +844,427 @@ MotionStudy& NeedStudy(AssemblyDocument& asmDoc, const RpcParams& p) {
   return *s;
 }
 
+// ---- check_followers -------------------------------------------------------
+
+glm::dmat4 OccWorld(const Occurrence& o) {
+  return glm::translate(glm::dmat4(1.0), o.position) *
+         glm::mat4_cast(o.orientation);
+}
+
+// An occurrence's mass as built — printed where its part is printed, else
+// solid from its materials — in its part's frame: grams, the centre (mm)
+// and the inertia about it (g mm^2, part axes).
+struct OwnMass {
+  bool known = false;
+  double g = 0.0;
+  glm::dvec3 com{0.0};
+  glm::dmat3 inertia{0.0};
+  std::string why;
+};
+OwnMass MassOf(ui::AppState& state, const Occurrence& o) {
+  OwnMass out;
+  const Document* part =
+      o.refKind == OccurrenceRef::Part
+          ? ui::PartResolverFor(state)(o.partId, o.configurationId)
+          : nullptr;
+  if (part == nullptr) {
+    out.why = "it is not a part that is loaded";
+    return out;
+  }
+  std::string err;
+  const auto mass = Measure::MassOfBodies(part->GetBodies(), &err, o.material);
+  std::vector<assembly::PointInertia> bodies;
+  bool printed = false;
+  size_t i = 0;
+  for (const Body& b : part->GetBodies()) {
+    if (b.reference)
+      continue;
+    const Measure::BodyMass* bm =
+        mass && i < mass->bodies.size() ? &mass->bodies[i] : nullptr;
+    i++;
+    const json pr = PrintedMassJson(state, *part, b,
+                                    bm && bm->massKnown ? bm->density : 0.0);
+    if (pr.is_null())
+      continue;
+    printed = true;
+    if (!pr.contains("mass_g") || pr["mass_g"].is_null()) {
+      out.why =
+          pr.value("why", std::string("its filament's density is unknown"));
+      return out;
+    }
+    const double g = pr["mass_g"].get<double>();
+    const double v = pr["volume_mm3"].get<double>();
+    const auto& c = pr["center_of_mass_mm"];
+    const auto& in = pr["inertia"];
+    glm::dmat3 own(0.0);
+    for (int r = 0; r < 3; r++)
+      for (int col = 0; col < 3; col++)
+        own[col][r] = in[r][col].get<double>() * (v > 0 ? g / v : 0.0);
+    bodies.push_back(
+        {g, {c[0].get<double>(), c[1].get<double>(), c[2].get<double>()}, own});
+  }
+  if (!printed) {
+    if (!mass || !mass->massKnown) {
+      out.why = "its solid mass is unknown (a body with no material)";
+      return out;
+    }
+    size_t k = 0;
+    for (const Body& b : part->GetBodies()) {
+      if (b.reference)
+        continue;
+      const Measure::BodyMass& bm = mass->bodies[k++];
+      glm::dmat3 own(0.0);
+      for (int r = 0; r < 3; r++)
+        for (int col = 0; col < 3; col++)
+          own[col][r] = bm.inertia[r][col] * bm.density * 1e-6;
+      bodies.push_back({bm.massG, bm.centerOfMass, own});
+    }
+  }
+  for (const auto& b : bodies) {
+    out.g += b.massG;
+    out.com += b.massG * b.centre;
+  }
+  if (out.g > 0.0)
+    out.com /= out.g;
+  out.inertia = assembly::InertiaAbout(bodies, out.com);
+  out.known = true;
+  return out;
+}
+
+// The generalised inertia and gravity force on b's DOF of everything that
+// moves with it — the follower and what it carries through mate loops —
+// from the assembly solved with b pinned and the contact relation left
+// out, at a few values of b across its travel.
+std::function<follower::MassAt(double)> MassFunction(ui::AppState& state,
+                                                     const Relation& r,
+                                                     const contact::Model& m,
+                                                     json* moving) {
+  AssemblyDocument copy = *state.assembly;
+  copy.RemoveRelation(r.id);
+  const auto parts = ui::PartResolverFor(state);
+  const auto asms = ui::AssemblyResolverFor(state);
+  double lo = 1e300, hi = -1e300;
+  for (const contact::Table::Node& n : m.table.nodes) {
+    lo = std::min(lo, n.q);
+    hi = std::max(hi, n.q);
+  }
+  const int grid = hi - lo > 1e-9 ? 9 : 1;
+  const double h = m.turn ? 1e-5 : 1e-3;   // b's unit
+  const double unit = m.turn ? 1.0 : 1e-3; // to SI
+  struct Node {
+    double q, M, Q;
+  };
+  std::vector<Node> nodes;
+  std::map<uint64_t, OwnMass> masses;
+  std::set<uint64_t> moved;
+  const auto poses = [&](double q) {
+    Mate* mb = copy.FindMateById(r.mateB);
+    assembly::SetMateDof(*mb, r.dofB, q);
+    assembly::Solve(copy, parts, asms, {r.mateB, r.dofB, {}}, false);
+    std::map<uint64_t, glm::dmat4> out;
+    for (const Occurrence& o : copy.GetOccurrences())
+      out[o.id] = OccWorld(o);
+    return out;
+  };
+  for (int k = 0; k < grid; k++) {
+    const double q = grid == 1 ? lo : lo + (hi - lo) * k / (grid - 1);
+    const auto a = poses(q - h), b = poses(q + h);
+    double M = 0.0, Q = 0.0;
+    for (const auto& [id, wa] : a) {
+      const glm::dmat4& wb = b.at(id);
+      double diff = 0.0;
+      for (int c = 0; c < 4; c++)
+        diff = std::max(diff, glm::length(wb[c] - wa[c]));
+      if (diff < 1e-12)
+        continue;
+      moved.insert(id);
+      auto it = masses.find(id);
+      if (it == masses.end())
+        it = masses.emplace(id, MassOf(state, *copy.FindById(id))).first;
+      const OwnMass& om = it->second;
+      if (!om.known)
+        throw std::runtime_error(
+            "check_followers: '" + copy.FindById(id)->name +
+            "' moves with the follower and its mass is not known (" + om.why +
+            "): liftoff depends on it — give it a material");
+      const glm::dvec3 ca = glm::dvec3(wa * glm::dvec4(om.com, 1.0));
+      const glm::dvec3 cb = glm::dvec3(wb * glm::dvec4(om.com, 1.0));
+      const glm::dvec3 v = (cb - ca) * 1e-3 / (2.0 * h * unit); // m per q(SI)
+      const glm::dmat3 ra(wa), rb(wb);
+      const glm::dmat3 dr = rb * glm::transpose(ra);
+      const glm::dvec3 w{dr[1][2] - dr[2][1], dr[2][0] - dr[0][2],
+                         dr[0][1] - dr[1][0]}; // 2 sin(angle) * axis
+      const glm::dvec3 omega = 0.5 * w / (2.0 * h * unit);
+      const double kg = om.g * 1e-3;
+      const glm::dmat3 Iw = glm::dmat3(wa) * om.inertia *
+                            glm::transpose(glm::dmat3(wa)) * 1e-9; // kg m^2
+      M += kg * glm::dot(v, v) + glm::dot(omega, Iw * omega);
+      Q += kg * glm::dot(conv::kGravity, v);
+    }
+    nodes.push_back({q, M, Q});
+  }
+  if (moving) {
+    *moving = json::array();
+    for (uint64_t id : moved)
+      (*moving).push_back({{"occurrence", id},
+                           {"name", copy.FindById(id)->name},
+                           {"mass_g", masses.at(id).g}});
+  }
+  return [nodes, unit](double q) {
+    follower::MassAt out;
+    if (nodes.size() == 1) {
+      out.M = nodes[0].M;
+      out.Q = nodes[0].Q;
+      return out;
+    }
+    size_t i = 0;
+    while (i + 2 < nodes.size() && q > nodes[i + 1].q)
+      i++;
+    const Node& a = nodes[i];
+    const Node& b = nodes[i + 1];
+    const double t = (q - a.q) / (b.q - a.q);
+    out.M = a.M + t * (b.M - a.M);
+    out.Q = a.Q + t * (b.Q - a.Q);
+    out.dM = (b.M - a.M) / ((b.q - a.q) * unit);
+    return out;
+  };
+}
+
+json RangesJson(const std::vector<follower::Range>& rs) {
+  json out = json::array();
+  for (const follower::Range& r : rs)
+    out.push_back({r.fromDeg, r.toDeg});
+  return out;
+}
+
 } // namespace
 
 std::span<const MethodDoc> MotionMethodDocs() { return MotionMethods; }
+
+json CheckFollowers(ui::AppState& state, uint64_t studyId,
+                    const std::vector<uint64_t>& relationIds,
+                    std::optional<double> speedRpm,
+                    std::optional<double> maxPressureDeg) {
+  AssemblyDocument& asmDoc = NeedAssembly(state);
+  const MotionStudy* study = asmDoc.FindMotionStudyById(studyId);
+  if (!study)
+    throw std::runtime_error("check_followers: no motion study with id " +
+                             std::to_string(studyId));
+  if (study->driverDof != MateDof::Rotation)
+    throw std::runtime_error("check_followers: the study's driver slides; a "
+                             "speed in rpm needs a driver that turns");
+  const motion::Result* run = ui::MotionResultFor(state, studyId);
+  if (!run || ui::MotionResultStale(state, studyId))
+    throw std::runtime_error(
+        "check_followers answers from a stored run, and study " +
+        std::to_string(studyId) + " has " +
+        (run ? "a stale one (its inputs changed)" : "none") +
+        ": run_motion_study first");
+  std::vector<const Relation*> rels;
+  for (const Relation& r : asmDoc.GetRelations())
+    if (r.kind == RelationKind::Contact &&
+        (relationIds.empty() ||
+         std::find(relationIds.begin(), relationIds.end(), r.id) !=
+             relationIds.end()))
+      rels.push_back(&r);
+  for (uint64_t id : relationIds) {
+    const Relation* r = asmDoc.FindRelationById(id);
+    if (!r || r->kind != RelationKind::Contact)
+      throw std::runtime_error("check_followers: relation " +
+                               std::to_string(id) +
+                               " is not a contact relation here");
+  }
+  if (rels.empty())
+    throw std::runtime_error(
+        "check_followers: this assembly has no contact relation (add_relation "
+        "type contact)");
+  json out{{"study", studyId}, {"relations", json::array()}};
+  if (speedRpm)
+    out["speed_rpm"] = *speedRpm;
+  for (const Relation* r : rels) {
+    if (!r->error.empty() || !r->contactModel)
+      throw std::runtime_error("check_followers: relation " +
+                               std::to_string(r->id) +
+                               " is broken: " + r->error);
+    const contact::Model& m = *r->contactModel;
+    const bool turn = m.turn;
+    const double unit = turn ? angles::kDegPerRad : 1.0;
+    const std::string sfx = turn ? "_deg" : "_mm";
+    follower::Input in;
+    in.model = &m;
+    in.speedRpm = speedRpm;
+    in.maxPressureDeg = maxPressureDeg;
+    // The samples: the cam's angle and the follower's DOF as the run left
+    // them, and the driver's ratio to the cam from them.
+    double sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (size_t i = 0; i < run->samples.size(); i++) {
+      const motion::Sample& smp = run->samples[i];
+      if (!smp.solved)
+        continue;
+      std::optional<double> a, b;
+      for (const motion::Sample::MateValue& mv : smp.mates) {
+        if (!mv.path.empty())
+          continue;
+        if (mv.mate == r->mateA)
+          a = mv.rotation;
+        if (mv.mate == r->mateB)
+          b = r->dofB == MateDof::Rotation ? mv.rotation : mv.offset;
+      }
+      if (!a || !b)
+        continue;
+      in.samples.push_back({i, smp.value, *a, *b});
+      sx += *a;
+      sy += smp.value;
+      sxx += *a * *a;
+      sxy += *a * smp.value;
+    }
+    if (in.samples.size() < 2)
+      throw std::runtime_error("check_followers: the study's run does not "
+                               "move relation " +
+                               std::to_string(r->id) +
+                               "'s cam (fewer than two samples with it)");
+    const double n = static_cast<double>(in.samples.size());
+    const double den = n * sxx - sx * sx;
+    if (std::abs(den) < 1e-12)
+      throw std::runtime_error("check_followers: the study does not turn "
+                               "relation " +
+                               std::to_string(r->id) + "'s cam");
+    in.driverPerCam = (n * sxy - sx * sy) / den;
+    // The design, when the cam's body is a CamProfile's.
+    const Occurrence* camOcc = asmDoc.FindById(m.cam);
+    const Document* camPart =
+        camOcc ? ui::PartResolverFor(state)(camOcc->partId,
+                                            camOcc->configurationId)
+               : nullptr;
+    // The body's own CamProfile, or the one CamProfile fused into it (a
+    // cam added to its hub keeps the hub's body).
+    const CamProfileFeature* cp = nullptr;
+    int added = 0;
+    const CamProfileFeature* addedCp = nullptr;
+    if (camPart)
+      for (const auto& f : camPart->GetFeatures()) {
+        const auto* c = dynamic_cast<const CamProfileFeature*>(f.get());
+        if (!c)
+          continue;
+        if (c->GetId() == m.camBody)
+          cp = c;
+        else if (!c->newBody) {
+          added++;
+          addedCp = c;
+        }
+      }
+    if (!cp && added == 1)
+      cp = addedCp;
+    if (cp && cp->report.valid) {
+      follower::Designed d;
+      d.motion = cp->report.motion;
+      d.follower = cp->report.follower;
+      d.ccw = cp->ccw;
+      d.baseRadius = cp->report.baseRadius;
+      d.fitDeviation = cp->report.fitDeviation;
+      d.frameInCamPart = cp->report.frame;
+      in.designed = d;
+    }
+    json moving;
+    in.mass = MassFunction(state, *r, m, &moving);
+    const follower::Report rep = follower::Check(in);
+
+    // Across the width, at every sample; and the study's own clash list.
+    std::string why;
+    const auto levels = follower::Levels(m, &why);
+    double worstClash = 0.0, worstGap = 0.0;
+    json failures = json::array(), studyClashes = json::array();
+    bool touching = !levels.empty();
+    json perSample = json::array();
+    for (const follower::Sample& smp : in.samples) {
+      const follower::Across x = follower::AcrossWidth(m, levels, smp.a, smp.b);
+      worstClash = std::max(worstClash, x.clash);
+      worstGap = std::max(worstGap, x.gap);
+      if (!x.ok) {
+        touching = false;
+        if (failures.size() < 12)
+          failures.push_back({{"sample", smp.index},
+                              {"clash" + sfx, x.clash * unit},
+                              {"gap" + sfx, x.gap * unit},
+                              {"across_mm", x.atZ}});
+      }
+      for (const motion::Clash& c : run->samples[smp.index].clashes)
+        if ((c.a == m.cam && c.b == m.follower) ||
+            (c.a == m.follower && c.b == m.cam)) {
+          studyClashes.push_back(smp.index);
+          touching = false;
+        }
+      json ps{{"sample", smp.index}, {"cam_deg", angles::ToDegrees(smp.a)}};
+      for (const follower::SampleOut& so : rep.samples)
+        if (so.index == smp.index) {
+          ps["pressure_angle_deg"] = so.pressureDeg;
+          if (rep.deviationKnown)
+            ps["deviation" + sfx] = so.deviation * unit;
+        }
+      perSample.push_back(std::move(ps));
+    }
+    json rj{{"relation", r->id},
+            {"cam", m.cam},
+            {"follower", m.follower},
+            {"samples", in.samples.size()},
+            {"touching", touching},
+            {"clash" + sfx, worstClash * unit},
+            {"gap" + sfx, worstGap * unit},
+            {"tolerance_mm", m.tolerance},
+            {"failures", failures},
+            {"study_clashes", studyClashes},
+            {"per_sample", perSample}};
+    if (levels.empty())
+      rj["touching_why"] = "the cuts across the width failed: " + why;
+    json pa{{"max_deg", rep.maxPressureDeg},
+            {"at_cam_deg", rep.maxPressureAtDeg}};
+    if (maxPressureDeg) {
+      pa["limit_deg"] = *maxPressureDeg;
+      pa["ok"] = *rep.pressureOk;
+    } else {
+      pa["ok"] = "unchecked";
+    }
+    rj["pressure_angle"] = pa;
+    rj["curvature"] = {{"min_cam_convex_mm", rep.minCamConvex},
+                       {"min_cam_concave_mm", rep.minCamConcave},
+                       {"follower_radius_mm", rep.followerRadius},
+                       {"bridges_deg", RangesJson(rep.bridges)}};
+    if (rep.deviationKnown) {
+      rj["deviation" + sfx] = rep.deviation * unit;
+      rj["deviation_at_cam_deg"] = rep.deviationAtDeg;
+      rj["fit_deviation_mm"] = rep.fitDeviation;
+      rj["mate_zero" + sfx] = rep.mateZero * unit;
+    }
+    json g{
+        {"held", rep.notHeld.empty()},
+        {"not_held_deg", RangesJson(rep.notHeld)},
+        {"liftoff_rpm", rep.liftoffRpm ? json(*rep.liftoffRpm) : json(nullptr)},
+        {"liftoff_cam_rpm",
+         rep.liftoffCamRpm ? json(*rep.liftoffCamRpm) : json(nullptr)},
+        {"liftoff_at_cam_deg", rep.liftoffAtDeg},
+        {"driver_per_cam", in.driverPerCam},
+        {"moving", moving}};
+    json drops = json::array();
+    for (const follower::DropOut& d : rep.drops) {
+      json dj{{"at_cam_deg", d.atDeg},
+              {"height" + sfx, d.height * unit},
+              {"fall_s", d.fallS},
+              {"dwell_deg", d.dwellDeg},
+              {"drop_rpm", d.dropRpm}};
+      if (d.turnDeg) {
+        dj["turn_deg"] = *d.turnDeg;
+        dj["lands"] = *d.lands;
+      }
+      drops.push_back(std::move(dj));
+    }
+    g["drops"] = drops;
+    rj["gravity"] = g;
+    if (rep.holdsAtSpeed)
+      rj["holds_at_speed"] = *rep.holdsAtSpeed;
+    out["relations"].push_back(std::move(rj));
+  }
+  return out;
+}
 
 std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
                                     const RpcParams& p) {
@@ -1092,6 +1546,19 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     if (p.contains("leave_at") || atValue)
       out["left_solves"] = assembly::SolveCount() - solvesBefore;
     return out;
+  }
+  if (m == "check_followers") {
+    // rpc-params: study, relations, speed_rpm, max_pressure_angle_deg
+    std::vector<uint64_t> rels;
+    if (p.contains("relations"))
+      rels = p.at("relations").get<std::vector<uint64_t>>();
+    std::optional<double> speed, limit;
+    if (p.contains("speed_rpm"))
+      speed = p.at("speed_rpm").get<double>();
+    if (p.contains("max_pressure_angle_deg"))
+      limit = p.at("max_pressure_angle_deg").get<double>();
+    return CheckFollowers(state, p.at("study").get<uint64_t>(), rels, speed,
+                          limit);
   }
   if (m == "motion_status") {
     AssemblyDocument& asmDoc = NeedAssembly(state);

@@ -124,7 +124,14 @@ const MethodDoc RequirementMethods[] = {
      "requirement whose state it changed; an unknown name or a formula that "
      "does not compile is refused naming the scope's variables), "
      "motion_clean "
-     "{document, study}, cam_verify {document: job, setup, resolution?, "
+     "{document, study}, follower {document, relation: a contact relation "
+     "id, study: a motion study id, quantity: liftoff_rpm | drop_rpm | "
+     "pressure_angle_deg | deviation_mm | deviation_deg | gap_mm | gap_deg, "
+     "speed_rpm?, max_pressure_angle_deg?} (check_followers' number: the "
+     "study driver's rpm above which gravity loses the follower, the "
+     "slowest drop's landing speed, the worst pressure angle, the realised "
+     "motion against the CamProfile's, the worst stand-off or entry), "
+     "cam_verify {document: job, setup, resolution?, "
      "allow_uncut?: [what prefixes]}. A number is bounded at_most, at_least "
      "or within; a verdict is bounded pass. A bound value may be an "
      "expression over the project's variables. An unknown kind or key is "
@@ -735,9 +742,17 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
       return 0;
     }
     const MotionStudy* study = nullptr;
-    if (kind == "motion_clean" || ((kind == "clearance" || kind == "seal") &&
-                                   m.contains("motion_study"))) {
-      study = needStudy(kind == "motion_clean" ? "study" : "motion_study");
+    if (kind == "follower" &&
+        a->FindRelationById(m.at("relation").get<uint64_t>()) == nullptr) {
+      why = "relation " + m.at("relation").dump() + " is gone from '" +
+            state.parts[*slot].name + "'";
+      return 0;
+    }
+    if (kind == "motion_clean" || kind == "follower" ||
+        ((kind == "clearance" || kind == "seal") &&
+         m.contains("motion_study"))) {
+      study = needStudy(kind == "clearance" || kind == "seal" ? "motion_study"
+                                                              : "study");
       if (!study)
         return 0;
     }
@@ -1863,6 +1878,74 @@ Taken MeasureCheckLiterals(ui::AppState& state, const json& m) {
   return t;
 }
 
+// A contact relation's follower over a study's run
+// (docs/requirements/README.md#follower): one number of check_followers.
+Taken MeasureFollower(ui::AppState& state, const json& m, const Ctx& ctx) {
+  Taken t;
+  const uint64_t sid = m.at("study").get<uint64_t>();
+  if ((t.waitJob = RunStudy(state, "run_motion_study", "study", sid, ctx)))
+    return t;
+  const uint64_t rid = m.at("relation").get<uint64_t>();
+  const std::string q = m.at("quantity").get<std::string>();
+  std::optional<double> speed, limit;
+  if (m.contains("speed_rpm"))
+    speed = m.at("speed_rpm").get<double>();
+  if (m.contains("max_pressure_angle_deg"))
+    limit = m.at("max_pressure_angle_deg").get<double>();
+  const json all = CheckFollowers(state, sid, {rid}, speed, limit);
+  const json& r = all.at("relations").at(0);
+  const bool turn = r.contains("clash_deg");
+  const std::string sfx = turn ? "_deg" : "_mm";
+  const auto unitOf = [&](const std::string& want) {
+    if ((want == "_deg") != turn)
+      throw std::runtime_error("follower: relation " + std::to_string(rid) +
+                               "'s follower " +
+                               (turn ? "turns: its quantity is in degrees (" +
+                                           q.substr(0, q.rfind('_')) + "_deg)"
+                                     : "slides: its quantity is in mm (" +
+                                           q.substr(0, q.rfind('_')) + "_mm)"));
+  };
+  t.detail = r;
+  t.detail.erase("per_sample");
+  if (q == "liftoff_rpm") {
+    const json& l = r.at("gravity").at("liftoff_rpm");
+    // Never leaving is a reading too: no speed loses it.
+    t.value =
+        l.is_null() ? std::numeric_limits<double>::max() : l.get<double>();
+    if (!r.at("gravity").at("held").get<bool>())
+      t.value = 0.0; // gravity pushes it off somewhere at any speed
+    t.unit = "rpm";
+  } else if (q == "drop_rpm") {
+    const json& drops = r.at("gravity").at("drops");
+    if (drops.empty())
+      throw std::runtime_error("follower: relation " + std::to_string(rid) +
+                               "'s cam has no drop");
+    double worst = std::numeric_limits<double>::max();
+    for (const json& d : drops)
+      worst = std::min(worst, d.at("drop_rpm").get<double>());
+    t.value = worst;
+    t.unit = "rpm";
+  } else if (q == "pressure_angle_deg") {
+    t.value = r.at("pressure_angle").at("max_deg").get<double>();
+    t.unit = "deg";
+  } else if (q == "deviation_mm" || q == "deviation_deg") {
+    unitOf(q.substr(q.rfind('_')));
+    if (!r.contains("deviation" + sfx))
+      throw std::runtime_error(
+          "follower: relation " + std::to_string(rid) +
+          "'s cam was not cut by a CamProfile: there is no designed motion "
+          "to compare with");
+    t.value = r.at("deviation" + sfx).get<double>();
+    t.unit = turn ? "deg" : "mm";
+  } else { // gap_mm | gap_deg: the worst a sample stands off or into it
+    unitOf(q.substr(q.rfind('_')));
+    t.value = std::max(r.at("gap" + sfx).get<double>(),
+                       r.at("clash" + sfx).get<double>());
+    t.unit = turn ? "deg" : "mm";
+  }
+  return t;
+}
+
 Taken MeasureMotionClean(ui::AppState& state, const json& m, const Ctx& ctx) {
   Taken t;
   const uint64_t sid = m.at("study").get<uint64_t>();
@@ -2060,6 +2143,8 @@ Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
     return MeasureCheckFasteners(state, m);
   if (kind == "motion_clean")
     return MeasureMotionClean(state, m, ctx);
+  if (kind == "follower")
+    return MeasureFollower(state, m, ctx);
   if (kind == "cam_verify")
     return MeasureCamVerify(state, m, ctx);
   throw std::runtime_error("unknown measure kind '" + kind + "'");
@@ -3128,7 +3213,7 @@ SweepPlan PlanSweep(ui::AppState& state, const RpcParams& p) {
         why = "its part is not rebuilt, so none of the swept variables "
               "reaches it";
     } else if (kind == "study_probe" || kind == "study_result" ||
-               kind == "motion_clean") {
+               kind == "motion_clean" || kind == "follower") {
       why = "a study per point is minutes";
     } else if (kind == "cam_verify") {
       why = "a CAM job's verification per point is minutes";

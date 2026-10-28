@@ -295,7 +295,10 @@ table over one turn of a: 72 nodes, bisected until a cubic Hermite through
 them (three-point tangents) reproduces an exact solve at every interval's
 midpoint within a quarter of the tolerance. An interval that keeps failing
 down to a microradian and jumps by more than ten tolerances is a **drop** — a
-snail cam's step face — kept as a step the interpolation does not smooth.
+snail cam's step face — kept as a step the interpolation does not smooth;
+steps less than a degree apart are one drop (a follower with a rounded tip
+slides down the step face before it falls clear, which reads as a run of
+them), read linearly across.
 `list_relations` reports, per contact relation, `contact {points,
 tolerance_mm, bound_mm | bound_deg, drops [{at_deg, height_mm |
 height_deg}], bridges_deg}`.
@@ -314,11 +317,69 @@ other, a body gone or a part not loaded: the relation's `error` says which
 and it is skipped. `add_relation` builds the table before adding, so these
 are refusals there.
 
+## The follower check
+
+`check_followers {study, relations?, speed_rpm?, max_pressure_angle_deg?}`
+says whether each contact relation's follower stays on its cam, answered
+from the study's STORED run (a missing or stale one is refused: run it
+first). Per relation (`follower::Check`, `src/core/FollowerCheck.{h,cpp}`,
+pure; the RPC in `src/remote/RemoteMotion.cpp`):
+
+- **Touching, across the width.** The solve cuts the two bodies in the
+  middle of the width they share; the check cuts them at nine heights
+  across it and, at every sample, solves each cut's first touch: the
+  follower standing at the sample's b may enter none by more than the
+  contact tolerance (`clash_mm`, the deepest, and where across the width),
+  and b must be where the geometry puts it (`gap_mm`, which a run made
+  before an edit would fail). A sample where the study itself listed the
+  pair as a clash fails too (`study_clashes`). This is the check of the 2D
+  solve: a rim, a draft or a boss away from the middle is seen here. It is
+  not an exact 3D distance: a query boolean is fuzzy at 1 µm and, between a
+  B-spline cam and a pin in tangent contact at a steep pressure angle, took
+  175 s for one pair, so the exact pass is not run per sample.
+- **Pressure angle**: between the contact normal and the follower's
+  direction of motion, the worst over the samples and where. With
+  `max_pressure_angle_deg` it says `ok`; without one it says `unchecked`,
+  never a default limit.
+- **Curvature**: the cam's smallest convex and concave radii at the
+  contacts, the follower's own radius there (read from its outline, not
+  declared), and the ranges where it bridges a hollow.
+- **Deviation**, when the cam is a CamProfile's (its body's, or the one
+  CamProfile fused into its hub): the realised b against the designed lift
+  at the angle the follower actually stands on the cam (from the geometry,
+  so the cam's mounting angle needs no stating), a constant mate zero
+  (`mate_zero_mm`) removed, the drops' corners left out. A follower that is
+  not the one the cam was cut for, or an edited cam, shows here.
+- **Gravity and speed.** Everything that moves with b — the follower and
+  what it carries through mate loops — is found by solving a copy of the
+  assembly with b pinned and the relation left out, at nine values across
+  b's travel; with each occurrence's mass as built (printed where its part
+  is printed, else solid from its material; one with neither is refused by
+  name) that gives the generalised inertia M(q) = Σ m|∂x/∂q|² + ωᵀIω and
+  gravity force Q(q) = Σ m g·∂x/∂q. At a steady cam speed ω contact holds
+  while toward·(Q − (M q″ + ½M′q′²) ω²) ≥ 0, with q′ and q″ from exact
+  touches either side of 720 angles. Where that bracket opposes Q the
+  follower leaves above ω = √(Q / bracket); the least over the turn is
+  `liftoff_rpm`, in the study driver's rpm (the driver-to-cam ratio is read
+  from the samples). Where Q itself pushes it off, `held` is false over
+  `not_held_deg` — any speed. Each drop reports its height, its free-fall
+  time √(2h·M/|Q|), the dwell the cam holds the landing level for (within
+  ten table tolerances) and `drop_rpm`, the speed it just lands in time; at
+  `speed_rpm`, the cam's turn while it falls and whether it `lands`.
+  Friction in the guide is not modelled, so `liftoff_rpm` is an upper
+  bound.
+
+A `follower` requirement holds one of these numbers
+([../requirements/README.md](../requirements/README.md#follower)).
+
 Code: `src/core/ContactFollower.{h,cpp}`; tests
 `tests/test_contact_relation.cpp` (an eccentric under a flat face, a roller
 and a rocker's roller against their closed forms at 1000 random angles
 between the table's nodes; the pressure angle; an edit rebuilding one
-table; each refusal) and `tests/contact_relation_smoke.py`.
+table; each refusal), `tests/test_follower_check.cpp` (a CamProfile cut for
+a roller giving back its motion; liftoff against √(gβ²/(2πh)); a 10 mm
+drop's 45 ms; over-centre; a rim the middle cut misses),
+`tests/contact_relation_smoke.py` and `tests/follower_check_smoke.py`.
 
 ## Freewheel
 

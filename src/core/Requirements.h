@@ -62,6 +62,7 @@ inline constexpr const char* kMeasureKinds[] = {
     "motion_clean",      // run_motion_study: clean
     "cam_verify",        // cam_verify: ok and complete
     "expression",        // a formula over the variables, in its scope
+    "follower",          // check_followers: liftoff, pressure angle, gap
 };
 inline constexpr const char* kBoundKinds[] = {"at_most", "at_least", "within",
                                               "pass"};

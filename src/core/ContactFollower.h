@@ -10,6 +10,7 @@
 // once per geometry, and the assembly solve reads the table as it reads a
 // cam's.
 
+#include "cad/CADKernel.h"
 #include "core/AssemblySolve.h"
 
 #include <glm/glm.hpp>
@@ -80,8 +81,11 @@ struct Table {
     bool drop = false; // the interval to the next node is a drop
   };
   std::vector<Node> nodes; // a in [0, 2pi), rising
+  // A drop runs from `a` to `aEnd` (a step resolved no further than a
+  // microradian, or a run of them a degree apart: the follower sliding
+  // down a step face it cannot fall clear of).
   struct DropAt {
-    double a = 0.0, from = 0.0, to = 0.0;
+    double a = 0.0, from = 0.0, to = 0.0, aEnd = 0.0;
   };
   std::vector<DropAt> drops;
   std::vector<std::pair<double, double>> bridges; // driver ranges, radians
@@ -108,6 +112,14 @@ struct Model {
   Path path;
   Outline camOutline, followerOutline;
   double z = 0.0;         // the section's height in the plane frame
+  double width = 0.0;     // the width the two share along the axis, mm
+  // The cam part's coordinates in the plane frame at a = 0, and the bodies
+  // that touch (the features that made them).
+  glm::dmat4 camInPlane0{1.0};
+  // Both bodies as cut, in the plane frame (the cam at a = 0, the follower
+  // at b = 0), for the follower check's sections at other heights.
+  CADShape camPlaced, followerPlaced;
+  uint64_t camBody = 0, followerBody = 0;
   double tolerance = 0.0; // mm: 1e-5 of the smaller outline
   int toward = 1;
   Table table;

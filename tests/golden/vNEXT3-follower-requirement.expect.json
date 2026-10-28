@@ -1,0 +1,5 @@
+{"features": 2, "bodies": 1, "volumes": [72.0],
+ "requirements": [
+   {"name": "the axe never leaves its cam at a brisk turn", "kind": "follower",
+    "bound": "at_least", "revision": 1, "evidence": true}
+ ]}

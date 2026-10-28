@@ -314,6 +314,10 @@ bool CamProfileFeature::Execute(RegenContext& ctx) {
     }
     r.profile = std::move(prof);
     r.fitDeviation = dev;
+    r.frame = glm::dmat4(glm::dvec4(pl.x.X(), pl.x.Y(), pl.x.Z(), 0.0),
+                         glm::dvec4(pl.y.X(), pl.y.Y(), pl.y.Z(), 0.0),
+                         glm::dvec4(pl.z.X(), pl.z.Y(), pl.z.Z(), 0.0),
+                         glm::dvec4(pl.o.X(), pl.o.Y(), pl.o.Z(), 1.0));
     r.valid = true;
     report = std::move(r);
     return true;
