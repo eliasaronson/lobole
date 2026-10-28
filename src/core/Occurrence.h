@@ -316,6 +316,9 @@ struct ExplodedView {
 // intermittent: rotation -> rotation OR offset that steps ONCE per period of
 //        a, during a window, and stands still otherwise: a carry, a Geneva
 //        (v174, docs/assemblies/relations.md#intermittent)
+// contact: rotation -> offset OR rotation through the GEOMETRY of the cam
+//        and the follower: the follower stands where it first touches the
+//        cam (vNEXT, docs/assemblies/relations.md#contact)
 enum class RelationKind {
   Gear,
   Rack,
@@ -329,9 +332,14 @@ enum class RelationKind {
   LinearN,
   Epicyclic,
   Planet,
-  Intermittent
+  Intermittent,
+  Contact
 };
 enum class MateDof { Rotation, Offset };
+
+namespace contact {
+struct Model;
+}
 
 // One member of a relation over several mates (v171): the relation is
 // sum(coefficient * dof) = constant, the constant held in Relation::phase.
@@ -427,6 +435,19 @@ struct Relation {
     int slots = 0;
     std::vector<std::pair<double, double>> table;
   } intermittent;
+  // Contact only (vNEXT, docs/assemblies/relations.md#contact). The cam and
+  // the follower occurrences (0 = derived: the side of mate a, and of mate
+  // b, that is not rigid with the other mate's base); the body of each
+  // when its part has several (the feature id that created it, 0 = the
+  // one body); and the sense q of mate b moves in to reach the cam, +1 or
+  // -1 — derived once from gravity where the relation is made, and stored
+  // so a file re-solves to the same placement.
+  uint64_t camOccurrence = 0, followerOccurrence = 0;
+  uint64_t camBody = 0, followerBody = 0;
+  int toward = 0;
+  // Transient, set by the solve: the contact relation's geometry and table
+  // (cached on the geometry, never in the file).
+  std::shared_ptr<const contact::Model> contactModel;
   bool HasTerms() const {
     return kind == RelationKind::LinearN || kind == RelationKind::Epicyclic ||
            kind == RelationKind::Planet;

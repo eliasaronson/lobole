@@ -419,6 +419,7 @@ set(core_sources
     src/core/Document.cpp
     src/core/Units.cpp
     src/core/Occurrence.cpp
+    src/core/ContactFollower.cpp
     src/core/AssemblyFlexible.cpp
     src/core/AssemblyRelations.cpp
     src/core/AssemblySolve.cpp

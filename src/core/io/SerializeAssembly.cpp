@@ -235,7 +235,8 @@ constexpr std::pair<const char*, RelationKind> kRelationKinds[] = {
     {"linear_n", RelationKind::LinearN},
     {"epicyclic", RelationKind::Epicyclic},
     {"planet", RelationKind::Planet},
-    {"intermittent", RelationKind::Intermittent}};
+    {"intermittent", RelationKind::Intermittent},
+    {"contact", RelationKind::Contact}};
 
 template <typename T, size_t N>
 std::string NameList(const std::pair<const char*, T> (&table)[N]) {
@@ -629,6 +630,8 @@ const char* RelationKindToString(RelationKind kind) {
     return "planet";
   case RelationKind::Intermittent:
     return "intermittent";
+  case RelationKind::Contact:
+    return "contact";
   }
   return "gear";
 }
@@ -660,6 +663,8 @@ RelationKind RelationKindFromString(const std::string& s) {
     return RelationKind::Planet;
   if (s == "intermittent")
     return RelationKind::Intermittent;
+  if (s == "contact")
+    return RelationKind::Contact;
   throw std::runtime_error("unknown relation type '" + s +
                            "' (expected one of: " + NameList(kRelationKinds) +
                            ")");
@@ -816,6 +821,20 @@ json RelationToJson(const Relation& r) {
         t.push_back({f, st});
       j["table"] = std::move(t);
     }
+  }
+  if (r.kind == RelationKind::Contact) {
+    // vNEXT: the occurrences and bodies when named (absent = derived), and
+    // the sense the follower is held in. Nothing derived from the geometry
+    // is written: the table is rebuilt on the first solve.
+    if (r.camOccurrence != 0)
+      j["cam"] = r.camOccurrence;
+    if (r.followerOccurrence != 0)
+      j["follower"] = r.followerOccurrence;
+    if (r.camBody != 0)
+      j["cam_body"] = r.camBody;
+    if (r.followerBody != 0)
+      j["follower_body"] = r.followerBody;
+    j["toward"] = r.toward < 0 ? "negative" : "positive";
   }
   if (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click) {
     j["drives"] = FreewheelDrivesToString(r.drives); // v104, click v105
@@ -979,17 +998,24 @@ int TeethOf(const json& j, const char* key) {
 
 Relation RelationFromJson(const json& j) {
   readctx::RequireTag(j, "Relation", "relation");
-  readctx::RefuseUnknownKeys(j, {"type",        "id",          "name",
-                                 "kind",        "terms",       "constant",
-                                 "mate_a",      "mate_b",      "mate_a_path",
-                                 "mate_b_path", "dof_a",       "dof_b",
-                                 "ratio",       "teeth_a",     "teeth_b",
-                                 "internal",    "thread_part", "thread_feature",
-                                 "phase",       "lift",        "step",
-                                 "period_deg",  "start_deg",   "duration_deg",
-                                 "motion",      "slots",       "table",
-                                 "drives",      "lead",        "teeth",
-                                 "ride"},
+  readctx::RefuseUnknownKeys(j, {"type",          "id",
+                                 "name",          "kind",
+                                 "terms",         "constant",
+                                 "mate_a",        "mate_b",
+                                 "mate_a_path",   "mate_b_path",
+                                 "dof_a",         "dof_b",
+                                 "ratio",         "teeth_a",
+                                 "teeth_b",       "internal",
+                                 "thread_part",   "thread_feature",
+                                 "phase",         "lift",
+                                 "step",          "period_deg",
+                                 "start_deg",     "duration_deg",
+                                 "motion",        "slots",
+                                 "table",         "drives",
+                                 "lead",          "teeth",
+                                 "ride",          "cam",
+                                 "follower",      "cam_body",
+                                 "follower_body", "toward"},
                              "relation");
   Relation r;
   r.id = j.at("id").get<uint64_t>();
@@ -1085,6 +1111,26 @@ Relation RelationFromJson(const json& j) {
     im.durationDeg = j.at("duration_deg").get<double>();
     im.slots = IntermittentMotionFromJson(j);
     im.table = IntermittentTableOf(j);
+  }
+  for (const char* k :
+       {"cam", "follower", "cam_body", "follower_body", "toward"})
+    if (j.contains(k) && r.kind != RelationKind::Contact)
+      throw std::runtime_error(std::string("`") + k +
+                               "` is a contact relation's; this one is a " +
+                               RelationKindToString(r.kind));
+  if (r.kind == RelationKind::Contact) { // vNEXT
+    r.camOccurrence = j.value("cam", uint64_t{0});
+    r.followerOccurrence = j.value("follower", uint64_t{0});
+    r.camBody = j.value("cam_body", uint64_t{0});
+    r.followerBody = j.value("follower_body", uint64_t{0});
+    if (!j.contains("toward"))
+      throw std::runtime_error(
+          "a contact relation needs `toward` (positive or negative)");
+    const std::string t = j.at("toward").get<std::string>();
+    if (t != "positive" && t != "negative")
+      throw std::runtime_error("a contact relation's toward is '" + t +
+                               "'; it is positive or negative");
+    r.toward = t == "positive" ? 1 : -1;
   }
   if (r.kind == RelationKind::Freewheel ||
       r.kind == RelationKind::Click) { // v104: the direction is required

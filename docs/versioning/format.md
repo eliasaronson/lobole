@@ -332,6 +332,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A relation kind `contact`: mate b's DOF stands where the follower first touches the cam, solved from the two bodies' shapes; it carries `toward` (positive\|negative, required), and `cam`, `follower` (occurrence ids) and `cam_body`, `follower_body` (feature ids) when named. Nothing derived from the geometry is written; the table is rebuilt on the first solve. An older build refuses the unknown kind ([contact](../assemblies/relations.md#contact)). Golden `assembly/vNEXT-contact-follower` |
 
 ## Paths in a project
 

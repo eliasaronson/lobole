@@ -7,12 +7,14 @@
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
+#include "core/ContactFollower.h"
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
 #include "core/WormGear.h"
 #include "core/catalog/Catalog.h"
 #include "core/features/FrameFeature.h"
+#include "core/io/ReadContext.h"
 #include "core/io/Serialization.h"
 #include "core/parts/BearingTable.h"
 #include "core/parts/RetainingRingTable.h"
@@ -216,7 +218,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "ball_rotation?:number[], suppressed?:bool}[]"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
-     "gear|chain|rack|screw|linear|cam|freewheel|click|worm|intermittent, "
+     "gear|chain|rack|screw|linear|cam|freewheel|click|worm|intermittent|"
+     "contact, "
      "a: mate id, b: "
      "mate id}: "
      "dof_b = ratio * dof_a + phase. The ratio is DERIVED from the kind's "
@@ -304,6 +307,21 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "make that side a mate INSIDE it, by the sub-assembly's own mate id — "
      "an engine's chain driving its pump's camshaft; refused for a "
      "freewheel or a click, whose history would be per placement. "
+     "CONTACT drives b from the SHAPES of the cam and the follower, not a "
+     "table (docs/assemblies/relations.md#contact): a is the cam's turn (a "
+     "revolute or cylindrical mate), b the follower's slide (a slider) or "
+     "turn (a revolute or cylindrical); at every angle of a, b stands where "
+     "the follower first touches the cam, approached from clear. {cam?, "
+     "follower?: occurrence ids} default to the side of a, and of b, not "
+     "rigid with the other mate's base, and are needed when a mate moves "
+     "several occurrences; {cam_body?, follower_body?: feature ids} pick "
+     "the body when a part has several; {toward?: positive|negative} is "
+     "the way b's value moves to reach the cam, derived from gravity when "
+     "omitted (refused where gravity cannot say, a horizontal slide). "
+     "Refused: a ratio, phase, lift or rise; a follower off the cam's plane "
+     "(a barrel, face or conical cam is not built); bases that move "
+     "relative to each other; a follower that never touches or does not "
+     "overlap the cam along its axis. "
      "OVER SEVERAL MATES "
      "(docs/assemblies/relations.md#relations-over-several-mates) the "
      "relation is sum(coefficient * dof) = constant, "
@@ -322,8 +340,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "unsettled member is solved for; when two are left a member is HELD "
      "where it stands, the first in term order (the ring before the carrier "
      "when the sun is driven), and the relation's `held` says which.",
-     "thread_part, thread_feature, a, a_path, b, b_path, carrier, constant, "
-     "dof_b, drives, duration_deg, hand, internal, lead, "
+     "thread_part, thread_feature, a, a_path, b, b_path, cam, cam_body, "
+     "carrier, constant, "
+     "dof_b, drives, follower, follower_body, toward, duration_deg, hand, "
+     "internal, lead, "
      "lift, motion, name, period_deg, planet, planets, ride_deg, ride_dof, "
      "ride_mate, ride_mm, "
      "ring, slots, step_deg, step_mm, sun, table, teeth, teeth_planet, "
@@ -339,9 +359,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "{teeth_planet?, teeth_sun?}, and every relation over several mates "
      "{constant?} (radians) instead of a phase. An intermittent relation "
      "takes {start_deg?} (its window's timing) and {phase?}, and refuses a "
-     "ratio.",
-     "constant, id, internal, lead, name, phase, ratio, start_deg, teeth_a, "
-     "teeth_b, teeth_planet, teeth_ring, teeth_sun"},
+     "ratio. A contact relation takes {toward?, cam_body?, follower_body?} "
+     "and refuses a ratio or a phase.",
+     "cam_body, constant, follower_body, id, internal, lead, name, phase, "
+     "ratio, start_deg, teeth_a, teeth_b, teeth_planet, teeth_ring, "
+     "teeth_sun, toward"},
     {"remove_relation", "Remove a relation by id.", "id"},
     {"list_relations",
      "List relations with status/errors. A relation over several mates "
@@ -351,7 +373,13 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "relation lists its step (b's unit, degrees for a turn), period_deg, "
      "start_deg, duration_deg, motion and, for a Geneva, slots, for a table "
      "its table (fractions of the window and the step). A freewheel "
-     "with teeth lists its `teeth`.",
+     "with teeth lists its `teeth`. A contact relation lists `toward`, the "
+     "occurrences and bodies it was given (`cam`, `follower`, `cam_body`, "
+     "`follower_body`), and `contact`: the table its geometry filled "
+     "{points, tolerance_mm (the contact tolerance), bound_mm | bound_deg "
+     "(the interpolation's worst error found, in b's unit), drops: "
+     "[{at_deg, height_mm | height_deg}], bridges_deg: [[from, to]] (a's "
+     "ranges where the follower touches at two points, bridging a hollow)}.",
      "", remote::NoFlags,
      "relations:{dof_a?:string, dof_b?:string, id:int, kind:string, "
      "mate_a?:int, mate_b?:int, name:string, phase?:number, "
@@ -362,7 +390,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "period_deg?:number, slots?:int, start_deg?:number, step?:number, "
      "table?:number[][], "
      "mate_b_path?:int[], mate_a_path?:int[], internal?:bool, "
-     "lift?:any, ride?:any, teeth?:int}[]"},
+     "lift?:any, ride?:any, teeth?:int, toward?:string, cam?:int, "
+     "follower?:int, cam_body?:int, follower_body?:int, contact?:object}[]"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
      "Run the mate solver. Returns every mate with a `status` (satisfied | "
@@ -1261,6 +1290,28 @@ json FlexibleRows(ui::AppState& state, const assembly::SolveReport& rep) {
   }
   return rows;
 }
+
+namespace {
+// What a contact relation's geometry filled (list_relations): in b's unit,
+// degrees for a turning follower.
+json ContactTableJson(const contact::Model& m) {
+  const contact::Table& t = m.table;
+  const double unit = m.turn ? angles::kDegPerRad : 1.0;
+  const char* sfx = m.turn ? "_deg" : "_mm";
+  json out{{"points", t.nodes.size()}, {"tolerance_mm", m.tolerance}};
+  out[std::string("bound") + sfx] = t.bound * unit;
+  json drops = json::array();
+  for (const contact::Table::DropAt& d : t.drops)
+    drops.push_back({{"at_deg", angles::ToDegrees(d.a)},
+                     {std::string("height") + sfx, (d.from - d.to) * unit}});
+  out["drops"] = drops;
+  json bridges = json::array();
+  for (const auto& [a0, a1] : t.bridges)
+    bridges.push_back({angles::ToDegrees(a0), angles::ToDegrees(a1)});
+  out["bridges_deg"] = bridges;
+  return out;
+}
+} // namespace
 
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
@@ -2432,6 +2483,20 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
             "history (lead) would be per-placement state — gear, chain, "
             "rack, screw, linear and cam relations can name an inner mate");
     const bool samePath = r.mateAPath == r.mateBPath;
+    if (r.kind != RelationKind::Contact)
+      for (const char* k :
+           {"cam", "follower", "cam_body", "follower_body", "toward"})
+        if (p.contains(k))
+          throw std::runtime_error(std::string(k) +
+                                   " is a contact relation's (type contact), "
+                                   "not a " +
+                                   DocumentIO::RelationKindToString(r.kind) +
+                                   "'s");
+    if (r.kind == RelationKind::Contact &&
+        (!r.mateAPath.empty() || !r.mateBPath.empty()))
+      throw std::runtime_error(
+          "a contact relation couples two mates of this assembly; a_path and "
+          "b_path (a mate inside a flexible placement) are refused");
     r.name = p.value("name", std::string{});
     r.phase = p.value("phase", 0.0);
     if (p.contains("drives") && r.kind != RelationKind::Freewheel &&
@@ -2812,16 +2877,75 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       r.ratio = 1.0; // unused, but never zero (the zero check below)
       break;
     }
+    case RelationKind::Contact: {
+      // The follower stands where it first touches the cam
+      // (docs/assemblies/relations.md#contact): no number says where.
+      // rpc-params: cam, follower, cam_body, follower_body, toward
+      for (const char* k : {"ratio", "phase", "lift", "rise", "rise_deg",
+                            "dof_b", "duration_deg", "start_deg"})
+        if (p.contains(k))
+          throw std::runtime_error(
+              std::string(k) +
+              " is not a contact relation's: the follower's pose comes from "
+              "the shapes of the cam and the follower. A contact relation "
+              "takes a (the cam's turn), b (the follower's slide or turn), "
+              "and cam, follower, cam_body, follower_body, toward");
+      if (!assembly::MateHasDof(a->type, MateDof::Rotation))
+        throw std::runtime_error(
+            "a contact relation's a is the cam's turn: a revolute or "
+            "cylindrical mate (mate " +
+            std::to_string(a->id) +
+            " does not "
+            "turn)");
+      r.dofA = MateDof::Rotation;
+      r.dofB =
+          b->type == MateType::Slider ? MateDof::Offset : MateDof::Rotation;
+      const auto id = [&](const char* k) -> uint64_t {
+        if (!p.contains(k))
+          return 0;
+        if (!readctx::IsWhole(p.at(k)) || p.at(k).get<int64_t>() <= 0)
+          throw std::runtime_error(std::string(k) + ": " + p.at(k).dump() +
+                                   " is not an id");
+        return p.at(k).get<uint64_t>();
+      };
+      r.camOccurrence = id("cam");
+      r.followerOccurrence = id("follower");
+      r.camBody = id("cam_body");
+      r.followerBody = id("follower_body");
+      const auto parts = ui::PartResolverFor(state);
+      if (p.contains("toward")) {
+        const std::string t = p.at("toward").get<std::string>();
+        if (t != "positive" && t != "negative")
+          throw std::runtime_error("toward is '" + t +
+                                   "'; it is positive or negative (the way "
+                                   "b's value moves to reach the cam)");
+        r.toward = t == "positive" ? 1 : -1;
+      } else {
+        std::string why;
+        r.toward = contact::TowardFromGravity(*state.assembly, r, parts, &why);
+        if (r.toward == 0)
+          throw std::runtime_error(why);
+      }
+      // Built now, so a relation that cannot work is refused here rather
+      // than added broken; the solve below then reads it from the cache.
+      std::string why;
+      if (!contact::ModelFor(*state.assembly, r, parts, &why))
+        throw std::runtime_error("a contact relation here is refused: " + why);
+      r.ratio = 1.0; // unused, but never zero (the zero check below)
+      break;
+    }
     case RelationKind::LinearN:
     case RelationKind::Epicyclic:
     case RelationKind::Planet:
       break; // handled above, before a and b are read
     }
-    if (p.contains("ratio") && r.kind != RelationKind::Cam)
+    if (p.contains("ratio") && r.kind != RelationKind::Cam &&
+        r.kind != RelationKind::Contact)
       r.ratio = p.at("ratio").get<double>();
     else if (r.kind != RelationKind::Cam && r.kind != RelationKind::Click &&
              r.kind != RelationKind::Worm &&
              r.kind != RelationKind::Intermittent &&
+             r.kind != RelationKind::Contact &&
              !(p.contains("teeth_a") || p.contains("pitch_radius") ||
                p.contains("pitch") || r.threadPart))
       throw std::runtime_error(
@@ -3003,7 +3127,42 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       refuse("start_deg", "only an intermittent relation's");
     if (p.contains("ratio") && r->kind == RelationKind::Intermittent)
       refuse("ratio", "it steps; remove it and add one with the new step");
+    for (const char* k : {"toward", "cam_body", "follower_body"})
+      if (p.contains(k) && r->kind != RelationKind::Contact)
+        refuse(k, "only a contact relation's");
+    if (r->kind == RelationKind::Contact)
+      for (const char* k : {"ratio", "phase"})
+        if (p.contains(k))
+          refuse(k, "the follower's pose comes from the shapes; a contact "
+                    "relation takes toward, cam_body and follower_body");
     Relation edited = *r;
+    if (r->kind == RelationKind::Contact &&
+        (p.contains("toward") || p.contains("cam_body") ||
+         p.contains("follower_body"))) {
+      // rpc-params: toward, cam_body, follower_body
+      if (p.contains("toward")) {
+        const std::string t = p.at("toward").get<std::string>();
+        if (t != "positive" && t != "negative")
+          throw std::runtime_error("toward is '" + t +
+                                   "'; it is positive or negative");
+        edited.toward = t == "positive" ? 1 : -1;
+      }
+      for (const char* k : {"cam_body", "follower_body"})
+        if (p.contains(k)) {
+          const json& v = p.at(k);
+          if (!readctx::IsWhole(v) || v.get<int64_t>() < 0)
+            throw std::runtime_error(std::string(k) + ": " + v.dump() +
+                                     " is not a feature id (0 = the one "
+                                     "body)");
+          (std::string(k) == "cam_body" ? edited.camBody
+                                        : edited.followerBody) =
+              v.get<uint64_t>();
+        }
+      std::string why;
+      if (!contact::ModelFor(*state.assembly, edited,
+                             ui::PartResolverFor(state), &why))
+        throw std::runtime_error("refused: " + why);
+    }
     if (p.contains("teeth_a"))
       edited.teethA = TeethFromRequest(p.at("teeth_a"), "teeth_a");
     if (p.contains("teeth_b"))
@@ -3025,6 +3184,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (p.contains("ratio") && p.at("ratio").get<double>() == 0.0)
       throw std::runtime_error("a relation's ratio cannot be zero");
     ui::SnapshotAssembly(state);
+    r->toward = edited.toward;
+    r->camBody = edited.camBody;
+    r->followerBody = edited.followerBody;
     r->teethA = edited.teethA;
     r->teethB = edited.teethB;
     r->internal = edited.internal;
@@ -3086,6 +3248,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         rj["error"] = r.error;
       if (!r.held.empty()) // a member nothing drove, held where it stood
         rj["held"] = r.held;
+      if (r.kind == RelationKind::Contact && r.contactModel)
+        rj["contact"] = ContactTableJson(*r.contactModel);
       arr.push_back(rj);
     }
     return json{{"relations", arr}};

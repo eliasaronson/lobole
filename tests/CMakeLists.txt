@@ -91,6 +91,7 @@ add_executable(designer_tests
     test_rib.cpp
     test_thread.cpp
     test_worm.cpp
+    test_contact_relation.cpp
     test_sheetmetal.cpp
     test_flange.cpp
     test_unfold.cpp
@@ -595,6 +596,11 @@ add_test(NAME assembly_relations_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_relations_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_relations_smoke PROPERTIES TIMEOUT 120)
+
+add_test(NAME contact_relation_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/contact_relation_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(contact_relation_smoke PROPERTIES TIMEOUT 120)
 
 # Fan-out (agent-scale plan G5): three instances, three parts, one project —
 # and the refusal that makes two instances on ONE directory loud.

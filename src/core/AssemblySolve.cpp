@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/AssemblySolve.h"
+#include "core/ContactFollower.h"
 
 #include "core/Angles.h"
 #include "core/ElementOrigin.h"
@@ -1074,6 +1075,12 @@ double FreewheelNotch(const Relation& r) {
 } // namespace
 
 double RelationValue(const Relation& r, double a) {
+  // A contact relation reads the table its geometry filled
+  // (docs/assemblies/relations.md#contact).
+  if (r.kind == RelationKind::Contact)
+    return (r.contactModel ? contact::TableValue(r.contactModel->table, a)
+                           : 0.0) +
+           r.phase;
   // A cam's table is in the follower's unit, so a turning follower's lift is
   // DEGREES and becomes the radians a rotation DOF holds here.
   if (r.kind == RelationKind::Cam) {
@@ -1226,6 +1233,20 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
         r.drives != 1 && r.drives != -1) {
       r.error = "a freewheel drives positive or negative; this one has no "
                 "direction";
+      continue;
+    }
+    if (r.kind == RelationKind::Contact) {
+      // The follower's pose comes from the two bodies' shapes: the table is
+      // built once per geometry (cached) and read below like a cam's.
+      r.contactModel.reset();
+      std::string why;
+      auto model = contact::ModelFor(asmDoc, r, partById, &why);
+      if (!model) {
+        r.error = std::move(why);
+        continue;
+      }
+      r.contactModel = std::move(model);
+      usable[i] = true;
       continue;
     }
     if (r.kind == RelationKind::Cam && r.lift.size() < 2) {
@@ -1522,7 +1543,8 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
         settle(an);
         wrote++;
       } else if (bn == from && !isSettled(an) && r.kind != RelationKind::Cam &&
-                 r.kind != RelationKind::Intermittent && r.ratio != 0.0) {
+                 r.kind != RelationKind::Intermittent &&
+                 r.kind != RelationKind::Contact && r.ratio != 0.0) {
         // A cam is deliberately absent here: many angles give one lift, so
         // driving it backwards would have to pick a branch, and a plausible
         // branch is the substitution this project refuses. So is an
@@ -1765,7 +1787,8 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
         continue;
       loop.relations.push_back(
           {ia->second, ib->second, r.dofA, r.dofB, r.ratio, r.phase, r.lift});
-      if (r.kind == RelationKind::Intermittent)
+      if (r.kind == RelationKind::Intermittent ||
+          r.kind == RelationKind::Contact)
         loop.relations.back().value = [r](double a) {
           return RelationValue(r, a);
         };

@@ -45,6 +45,7 @@ or `offset`). Most kinds are one equation:
 | `epicyclic` | sun, ring and carrier rotations, by Willis | from `teeth_sun`, `teeth_ring` |
 | `planet` | a planet's turn on its carrier, from the sun's and the carrier's | from `teeth_sun` and the planet's teeth |
 | `intermittent` | rotation → rotation or offset, one step a turn | none: a step, a window and a law ([Intermittent](#intermittent)) |
+| `contact` | rotation → offset or rotation | none: the shapes of the cam and the follower ([Contact](#contact)) |
 
 The ratio is derived from the kind's own numbers when they are given (tooth
 counts, pitch radius, pitch) and otherwise taken as a bare `ratio`; a relation
@@ -230,6 +231,86 @@ never leaves the interval its neighbouring points define, so a dwell cannot
 dip below zero. A cam is not invertible — many angles give one lift — so it
 drives forward only.
 
+## Contact
+
+A contact relation drives a follower from the SHAPE of its cam: at every
+angle of a (the cam's turn, a revolute or cylindrical mate) b stands where
+the follower first touches the cam, approached from clear. b is a slider's
+offset or a revolute's or cylindrical's turn. Edit the cam and the follower
+follows the new shape; nothing about the motion is typed.
+
+**Which bodies.** The cam is the side of mate a that is not rigid with mate
+b's base, the follower the side of mate b not rigid with a's — "rigid" being
+fixed, fastened or attached (`contact::RigidGroup`). `cam` and `follower`
+(occurrence ids) name one when a mate moves several (a cam fastened to its
+shaft), and `cam_body` / `follower_body` (the feature id that made the body)
+when a part has several bodies; otherwise each is refused naming the
+candidates. The bases of the two mates must be rigid to each other — the
+cam's axle and the follower's guide may not move relative to each other — so
+a follower driven by another follower is not built; join them through a link
+and a mate loop instead.
+
+**`toward`** (`positive|negative`) is the way b's value moves to reach the
+cam. Omitted at `add_relation`, it is derived once from gravity: the sign of
+the generalised gravity force on b over the follower and everything rigid
+with it, at the current pose (`contact::TowardFromGravity`). It is refused
+where gravity is under 2% of its full weight along the motion — a
+horizontal slide, a pivot under its own mass centre — naming `toward`. It is
+stored, never re-derived, so a file re-solves to the same placement.
+
+**The planar case only.** The cam's axis is mate a's connector Z. A sliding
+follower must slide square to it and a turning one turn about an axis
+parallel to it, within the tilt that moves the contact by less than the
+contact tolerance across the width the two share; anything else (a barrel,
+face or conical cam) is refused. Both bodies are cut across the axis in the
+middle of the width they share along it (refused when they share none), the
+cam in its frame at a = 0 and the follower at b = 0. A chamfer or draft that
+reaches into the shared width is not in the cut; the exact 3D check of the
+motion study sees it.
+
+**The first touch** (`contact::FirstTouch`). Each section's edges are
+sampled within a chord error of an eighth of the contact tolerance, which is
+1e-5 of the smaller outline's size (0.4 µm on a 40 mm cam). The follower is
+carried along its path — a translation along the slide, a rotation about the
+pivot — and every vertex of one outline is cast against the segments of the
+other; the first hit in the `toward` sense is the contact. A turning
+follower is looked for within half a turn either side of b = 0. The answer
+is then solved again on the two curves' osculating circles (or lines) at the
+contact, which is exact for arcs and lines and second order on a spline, and
+gives the contact point, the common normal, both radii of curvature (signed:
+convex or concave) and a second point when one touches within the tolerance
+well apart from the first (the follower bridges a hollow).
+
+**The table** (`contact::BuildTable`). The solve reads b from a periodic
+table over one turn of a: 72 nodes, bisected until a cubic Hermite through
+them (three-point tangents) reproduces an exact solve at every interval's
+midpoint within a quarter of the tolerance. An interval that keeps failing
+down to a microradian and jumps by more than ten tolerances is a **drop** — a
+snail cam's step face — kept as a step the interpolation does not smooth.
+`list_relations` reports, per contact relation, `contact {points,
+tolerance_mm, bound_mm | bound_deg, drops [{at_deg, height_mm |
+height_deg}], bridges_deg}`.
+
+**Cached, never stored.** The table is derived state, cached on both
+bodies' geometry, the frames between the two mates and `toward`
+(`contact::ModelFor`, 64 entries): a solve, a drag frame or a motion run's
+copied document hits it, and a cam edit misses it once. The file stores the
+relation (`toward`, and the occurrences and bodies when named) and the mate
+values as always; an opened project rebuilds the table on its first solve.
+Like a cam it drives forward only, as a value row in a mate loop.
+
+**Errors, never half-applied.** A follower that never touches the cam in a
+whole turn (it would travel without end), bases that move relative to each
+other, a body gone or a part not loaded: the relation's `error` says which
+and it is skipped. `add_relation` builds the table before adding, so these
+are refusals there.
+
+Code: `src/core/ContactFollower.{h,cpp}`; tests
+`tests/test_contact_relation.cpp` (an eccentric under a flat face, a roller
+and a rocker's roller against their closed forms at 1000 random angles
+between the table's nodes; the pressure angle; an edit rebuilding one
+table; each refusal) and `tests/contact_relation_smoke.py`.
+
 ## Freewheel
 
 A one-way clutch, rotation to rotation:
@@ -379,7 +460,9 @@ simulated.
 - `add_relation {type, a, b, …}` — kind-specific parameters as above;
   returns the relation, its `error` if the first solve found one, and any
   `warnings`.
-- `set_relation {id, ratio?, phase?, name?, lead?, start_deg?}` —
+- `set_relation {id, ratio?, phase?, name?, lead?, start_deg?, toward?,
+  cam_body?, follower_body?}` — `toward` and the bodies only for a contact
+  relation, which refuses a ratio and a phase;
   `start_deg` only for an intermittent relation, which refuses a ratio;
   `lead` only for a
   freewheel or click; `ratio` refused on a thread-backed screw (edit the
@@ -391,7 +474,7 @@ simulated.
 - `set_mate` and a drag within a mate propagate from the mate they changed.
 - The occurrence panel lists, edits and makes them ([In the app](#in-the-app));
   a freewheel's `lead` is read-only there. The SDK has
-  `Asm.gear(…, internal=)/epicyclic/linear_n/chain/rack/screw/cam/freewheel/click/worm/intermittent`.
+  `Asm.gear(…, internal=)/epicyclic/linear_n/chain/rack/screw/cam/contact/freewheel/click/worm/intermittent`.
 - Stored in the assembly's `relations/` directory, one file per relation
   ([../versioning/format.md](../versioning/format.md)).
 

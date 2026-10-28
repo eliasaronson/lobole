@@ -3220,6 +3220,25 @@ class Asm(_Tab):
         return self.app.add_relation(type="cam", **_mate_ref("a", mate_a),
                                      **_mate_ref("b", mate_b), **kw)
 
+    def contact(self, mate_a, mate_b, cam=None, follower=None,
+                toward=None, **kw) -> dict[str, Any]:
+        """A follower driven by the cam's SHAPE (docs/assemblies/
+        relations.md#contact): mate_a is the cam's turn, mate_b the
+        follower's slide or turn, and b stands where the follower first
+        touches the cam. `cam`/`follower` (occurrences) are needed when a
+        mate moves several; cam_body/follower_body (feature ids) when a
+        part has several bodies; `toward` ("positive"|"negative") is
+        derived from gravity when omitted."""
+        self.activate()
+        if cam is not None:
+            kw["cam"] = ref_of(cam)
+        if follower is not None:
+            kw["follower"] = ref_of(follower)
+        if toward is not None:
+            kw["toward"] = toward
+        return self.app.add_relation(type="contact", **_mate_ref("a", mate_a),
+                                     **_mate_ref("b", mate_b), **kw)
+
     def intermittent(self, mate_a, mate_b, start_deg, slots=None,
                      **kw) -> dict[str, Any]:
         """A carry (v174): a's rotation steps b once per turn (or
