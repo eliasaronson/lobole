@@ -824,7 +824,8 @@ infill weigh (`printmass::EstimatePrinted`, `src/core/PrintedMass.{h,cpp}`).
   `assembly::InertiaAbout`) and the occurrences named each way (`printed`,
   `solid`); a printed body with no estimate makes it `{why}`. `total.mass_g`
   stays the solid sum, as a part's does (`print_job_smoke`).
-- **What reads it**: the clock's pendulum sums (its period is the printed
+- **What reads it**: the bill of materials and a drawing's parts list
+  ([the BOM](../assemblies/README.md#bill-of-materials)), the clock's pendulum sums (its period is the printed
   pendulum's, the receipt and card saying at what), FEM's self-weight and
   modal mass (the printed share of the solid, spread evenly; the stiffness
   stays the solid material's, `src/core/fem/FemStudy.cpp`), and the study

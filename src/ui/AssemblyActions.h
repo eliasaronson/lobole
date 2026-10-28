@@ -79,13 +79,35 @@ struct BomRow {
   // The top-level occurrences this row counts, one per leaf: what a balloon
   // on a drawing finds its item number by.
   std::vector<uint64_t> rootOccurrences;
+  // A part printed (set_print_process): what one weighs as it prints, its
+  // walls, shells and infill (docs/tolerances/README.md#printed-mass), or
+  // why that is unknown. `printed` false for a part not printed.
+  bool printed = false;
+  bool printedKnown = false;
+  double unitPrintedMassG = 0.0;
+  std::string printedWhy;
+  // Where its pieces print: each printed part holding Derived copies of it
+  // (a print plate), and how many
+  // (docs/assemblies/README.md#bill-of-materials).
+  std::vector<std::pair<std::string, int>> plates;
   [[nodiscard]] bool bought() const { return !standard.empty(); }
+  // What one weighs as made: printed when printed, else solid.
+  [[nodiscard]] bool madeMassKnown() const {
+    return printed ? printedKnown : massKnown;
+  }
+  [[nodiscard]] double madeMassG() const {
+    return printed ? unitPrintedMassG : unitMassG;
+  }
 };
 
 struct BomTable {
   std::vector<BomRow> rows;
   bool massKnown = true;   // false when any row's mass is unknown
   double totalMassG = 0.0; // valid when massKnown
+  // The whole as made: each printed row's printed mass, each other row's
+  // solid; valid when madeMassKnown.
+  bool madeMassKnown = true;
+  double totalMadeMassG = 0.0;
   // V2: WHY a mass is unknown ("part 'X': body 'Y' has no material"), so a
   // null total explains itself instead of silently tainting the table.
   std::vector<std::string> warnings;

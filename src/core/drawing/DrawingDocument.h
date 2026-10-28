@@ -177,6 +177,13 @@ struct DrawingView {
   // A detail view of another view (v151); its own position is where the
   // circle's centre lands on the sheet.
   DetailSpec detail;
+  // An exploded view of an ASSEMBLY source (vNEXT): the id of one of its
+  // named exploded views, each occurrence drawn displaced by its step at
+  // full factor, whatever the model tab's explode slider says. 0 = as
+  // assembled. The sheet's, not the model's: one sheet draws the assembly
+  // whole and exploded side by side
+  // (docs/drawings/README.md#exploded-views).
+  uint64_t explodedView = 0;
 };
 
 // A driven dimension: measured from projected geometry, read-only, re-measured

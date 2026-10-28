@@ -9,6 +9,7 @@
 #include "ui/CamTool.h" // RunCamVerification
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h" // JobPlacedBodies
+#include "ui/PrintJobActions.h" // PrintedMassOf (a printed row's mass)
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/ViewActions.h"
@@ -34,6 +35,7 @@
 #include "core/features/BooleanFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/DerivedFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
@@ -202,6 +204,61 @@ BomTable ComputeBomOf(AppState& state,
               "part '" + fresh.partName + "': body '" + bm.name + "' has " +
               (bm.material.empty() ? "no material" : "no density") +
               " — mass unknown");
+      // Printed: what it weighs as it prints, each body's printed share of
+      // its solid mass (docs/tolerances/README.md#printed-mass).
+      if (part->PrintProcess()) {
+        fresh.printed = true;
+        fresh.printedKnown = true;
+        size_t i = 0;
+        for (const Body& b : part->GetBodies()) {
+          if (b.reference)
+            continue;
+          const Measure::BodyMass* bm =
+              i < mass->bodies.size() ? &mass->bodies[i] : nullptr;
+          i++;
+          // mass_properties' printed mass: the body's density, else (no
+          // material) its filament's, the process's.
+          std::string why;
+          const auto pm = PrintedMassOf(state, *part, b, &why);
+          double density = bm != nullptr && bm->massKnown ? bm->density : 0.0;
+          if (pm && !(density > 0.0)) {
+            const BodyPrint bp = PrintOf(state, *part, b);
+            if (const auto f = FilamentOf(b, bp.process, &why))
+              density =
+                  CADMaterials::MaterialLibrary::GetMaterial(
+                      CADMaterials::MaterialLibrary::MaterialTypeFromString(*f))
+                      .density;
+          }
+          if (pm && density > 0.0) {
+            fresh.unitPrintedMassG += density * pm->effectiveMm3 * 1e-6;
+            continue;
+          }
+          if (why.empty())
+            why = "body '" + b.name + "' has no density";
+          fresh.printedKnown = false;
+          fresh.unitPrintedMassG = 0.0;
+          fresh.printedWhy = why;
+          table.warnings.push_back("part '" + fresh.partName +
+                                   "': no printed mass: " + why);
+          break;
+        }
+      }
+    }
+    // Its plates: every printed part holding a Derived copy of it.
+    for (const PartSlot& slot : state.parts) {
+      if (slot.kind != DocKind::Part || slot.id == inst.partId)
+        continue;
+      const Document* plate = PartDocById(state, slot.id);
+      if (plate == nullptr || !plate->PrintProcess())
+        continue;
+      int pieces = 0;
+      for (const auto& f : plate->GetFeatures())
+        if (const auto* dv = dynamic_cast<const DerivedFeature*>(f.get()))
+          if (dv->sourcePart == inst.partId && !dv->reference &&
+              !f->IsSuppressed())
+            pieces++;
+      if (pieces > 0)
+        fresh.plates.emplace_back(slot.name, pieces);
     }
     table.rows.push_back(std::move(fresh));
     rowWears.push_back(inst.material);
@@ -211,9 +268,15 @@ BomTable ComputeBomOf(AppState& state,
       table.totalMassG += r.unitMassG * r.quantity;
     else
       table.massKnown = false;
+    if (r.madeMassKnown())
+      table.totalMadeMassG += r.madeMassG() * r.quantity;
+    else
+      table.madeMassKnown = false;
   }
   if (!table.massKnown)
     table.totalMassG = 0.0;
+  if (!table.madeMassKnown)
+    table.totalMadeMassG = 0.0;
   return table;
 }
 
@@ -474,8 +537,12 @@ std::string BomToCsv(const BomTable& bom) {
   // `standard` and `designation` are the two columns a purchase order needs
   // and the panel has no room for: blank on a part somebody made, filled on
   // a bought one, so a filter on either splits the list in two.
+  // The printed columns weigh a printed part as it prints (blank for one
+  // not printed, or whose print is not stated), and `plates` says where
+  // its pieces print ("plate 1 x16; plate 2 x2").
   std::string csv = "part,configuration,quantity,standard,designation,"
-                    "material,unit_volume_mm3,unit_mass_g,total_mass_g\n";
+                    "material,unit_volume_mm3,unit_mass_g,total_mass_g,"
+                    "printed_unit_mass_g,printed_total_mass_g,plates\n";
   char buf[64];
   auto num = [&buf](double v) {
     snprintf(buf, sizeof buf, "%.6g", v);
@@ -490,12 +557,26 @@ std::string BomToCsv(const BomTable& bom) {
       csv += num(r.unitMassG) + "," + num(r.unitMassG * r.quantity);
     else
       csv += ",";
-    csv += "\n";
+    csv += ",";
+    if (r.printed && r.printedKnown)
+      csv +=
+          num(r.unitPrintedMassG) + "," + num(r.unitPrintedMassG * r.quantity);
+    else
+      csv += ",";
+    std::string plates;
+    for (const auto& [name, n] : r.plates)
+      plates += (plates.empty() ? "" : "; ") + name + " x" + std::to_string(n);
+    csv += "," + field(plates) + "\n";
   }
+  // The printed total is the whole as made: printed rows printed, the
+  // rest solid; blank when any row's is unknown.
   csv += "total,,,,,,,,";
   if (bom.massKnown)
     csv += num(bom.totalMassG);
-  csv += "\n";
+  csv += ",,";
+  if (bom.madeMassKnown)
+    csv += num(bom.totalMadeMassG);
+  csv += ",\n";
   return csv;
 }
 

@@ -889,7 +889,14 @@ out. A row carries `configuration` (its name, `""` for the part's active
 one) and `configuration_id`, quantity, material, unit and total mass (null
 when a body has no density), and for a generated standard part its
 `standard` and `designation`; the CSV has a `configuration` column after
-`part`. The per-unit BOM of a sub-assembly is the same function on its
+`part`. A printed part's row also weighs it as it prints (`printed`
+{unit_mass_g, total_mass_g}, or {why}: its walls, shells and infill, as
+`mass_properties` weighs it, [printed mass](../tolerances/README.md#printed-mass))
+and names its `plates`: each printed part holding Derived copies of it,
+with how many (`plate 1 x16`); the total's `made_mass_g` is the whole as
+made, printed rows printed and the rest solid. The CSV carries them as
+`printed_unit_mass_g`, `printed_total_mass_g` and `plates`, and a drawing's
+parts list writes the mass as made. The per-unit BOM of a sub-assembly is the same function on its
 own tab. `bom` / `export_bom {path}` (CSV); in the GUI a floating window from
 the assembly toolbar. `assembly::MassProperties` aggregates mass, volume and
 world centre of mass by the same visibility rule.

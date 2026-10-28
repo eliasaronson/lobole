@@ -70,6 +70,56 @@ def main():
         expect(fv["curves"] >= 14, f"two occurrences ~2x a single box: {fv}")
         d.call("remove_drawing_view", id=av["id"])
 
+        # --- An EXPLODED view (docs/drawings/README.md#exploded-views) ----
+        # The second block stepped 60 mm along +X in a named exploded view:
+        # the sheet view that names it draws the pair 60 mm wider at full
+        # factor, while the model tab's slider stays off, and the view
+        # beside it draws them as assembled.
+        d.call("set_active_part", part="asm")
+        occ = d.call("list_occurrences")["occurrences"]
+        ev = d.call("add_exploded_view", name="apart")["id"]
+        d.call("set_explode_step", view=ev, occurrence=occ[1]["id"],
+               offset=[60, 0, 0])
+        d.call("set_explode", view=0)
+        d.call("set_active_part", part="dwg")
+        whole = d.call("add_drawing_view", source="asm", orientation="front",
+                       scale=1.0, position=[100, 220], name="whole")["id"]
+        apart = d.call("add_drawing_view", source="asm", orientation="front",
+                       scale=1.0, position=[100, 100], name="apart",
+                       exploded_view="apart")["id"]
+        d.call("update_drawing")
+        views = {v["id"]: v for v in d.call("list_drawing_views")["views"]}
+        expect(views[apart].get("exploded_view") == ev,
+               f"the view names its exploded view: {views[apart]}")
+        expect("exploded_view" not in views[whole], "the other does not")
+
+        def width(view):
+            xs = [p[0] for e in d.call("list_drawing_geometry",
+                                       view=view)["geometry"]
+                  for p in (e.get("p1"), e.get("p2")) if p]
+            return max(xs) - min(xs)
+        expect(abs(width(whole) - 60.0) < 0.01, f"assembled: {width(whole)}")
+        expect(abs(width(apart) - 120.0) < 0.01, f"exploded: {width(apart)}")
+        # Refused, naming what there is: an exploded view the source lacks,
+        # and one on a part.
+        try:
+            d.call("set_drawing_view", id=apart, exploded_view="nope")
+            raise AssertionError("an unknown exploded view was accepted")
+        except Exception as e:  # noqa: BLE001
+            expect("apart" in str(e), f"names the views there are: {e}")
+        try:
+            d.call("add_drawing_view", source="block", orientation="front",
+                   scale=1.0, position=[300, 100], exploded_view="apart")
+            raise AssertionError("an exploded view of a part was accepted")
+        except Exception as e:  # noqa: BLE001
+            expect("assembly" in str(e), f"says why: {e}")
+        # Cleared: drawn as assembled again.
+        d.call("set_drawing_view", id=apart, exploded_view=None)
+        d.call("update_drawing")
+        expect(abs(width(apart) - 60.0) < 0.01, f"cleared: {width(apart)}")
+        d.call("remove_drawing_view", id=whole)
+        d.call("remove_drawing_view", id=apart)
+
         # --- Projected-child folding ----------------------------------------
         base = d.call("add_drawing_view", source="block", orientation="front",
                       position=[120, 200])

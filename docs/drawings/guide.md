@@ -165,11 +165,13 @@ set_drawing_sheet {size?, landscape?, title_block?}
 add_drawing_view {source, orientation?, scale?, position?, base_view?,
                   configuration?, quality?: "exact"|"fast",
                   hidden?: [occurrence ids or names | body names or feature ids],
-                  rotation_deg?, section?: {point: [x, y, z], label?}}
+                  rotation_deg?, section?: {point: [x, y, z], label?},
+                  exploded_view?: an assembly's exploded view, name or id}
 add_drawing_view {detail: {view, center: [x, y, z], radius_mm, label?},
                   scale, position, name?}   # a detail of another view
 set_drawing_view {id, position?, scale?, name?, show_hidden?, quality?,
-                  base_view?, configuration?, hidden?, rotation_deg?, section?}
+                  base_view?, configuration?, hidden?, rotation_deg?, section?,
+                  exploded_view?}
 update_drawing {budget_s?, async?}  # re-project; per-view curve counts and errors
                                # (waits off the frame; async answers at once)
 list_drawing_views             # placement, stale, and what each projection cost

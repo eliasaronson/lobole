@@ -1440,3 +1440,43 @@ TEST_CASE("Drawing golden carries its views' saved projections (v162)",
   CHECK(fromFile->SavedProjections().empty());
   fs::remove(file);
 }
+
+// vNEXT (docs/drawings/README.md#exploded-views): an assembly view may draw
+// one of its source's exploded views. A view without the key is as
+// assembled; an id that is not one is refused, never read as none.
+TEST_CASE("Drawing golden loads and round-trips (vNEXT exploded view)",
+          "[drawing][serialization][golden]") {
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
+                          "drawing" / "vNEXT-exploded-view.json";
+  REQUIRE(fs::exists(golden));
+  auto dwg = testio::LoadDrawing(golden.string());
+  REQUIRE(dwg != nullptr);
+  REQUIRE(dwg->ViewCount() == 2);
+  CHECK(dwg->GetViews()[0].explodedView == 0);
+  CHECK(dwg->GetViews()[1].explodedView == 57);
+
+  const fs::path tmp = fs::temp_directory_path() / "dwg_exploded_rt.json";
+  REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
+  auto reloaded = testio::LoadDrawing(tmp.string());
+  REQUIRE(reloaded != nullptr);
+  CHECK(reloaded->GetViews()[0].explodedView == 0);
+  CHECK(reloaded->GetViews()[1].explodedView == 57);
+  fs::remove(tmp);
+
+  std::ifstream in(golden);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  const std::string text = ss.str();
+  const std::string from = "\"exploded_view\": 57";
+  for (const char* bad :
+       {"\"exploded_view\": 0", "\"exploded_view\": -3",
+        "\"exploded_view\": 2.5", "\"exploded_view\": \"drawing\""}) {
+    INFO(bad);
+    std::string t = text;
+    t.replace(t.find(from), from.size(), bad);
+    const fs::path p = fs::temp_directory_path() / "dwg_exploded_bad.json";
+    std::ofstream(p) << t;
+    CHECK(testio::LoadDrawing(p.string()) == nullptr);
+    fs::remove(p);
+  }
+}

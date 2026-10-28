@@ -78,15 +78,20 @@ static constexpr MethodDoc DrawingMethods[] = {
      "what is nearer the reader taken away, the cut faces hatched, captioned "
      "SECTION A-A, and drawn as a lettered cutting-plane line on every other "
      "view of the source that sees the plane edge-on; `section: null` makes "
-     "it a plain view again. An edge the plane made is named by the face it "
+     "it a plain view again. `exploded_view` (name or id of one of the "
+     "SOURCE assembly's exploded views; 0 or null = as assembled) draws "
+     "every occurrence moved by its step at full factor, whatever the model "
+     "tab's explode slider says; refused on a part. An edge the plane made is "
+     "named by the face it "
      "was cut from (list_drawing_geometry's sil_face ref). A detail view "
      "takes `detail: {view?, center?, radius_mm?, label?}`, keeping what it "
      "does not name. Every view is then assembled again from its kept "
      "projection; only a change the projection reads (orientation, section, "
-     "hidden, configuration, quality, show_hidden) projects -- off the frame "
+     "hidden, configuration, exploded_view, quality, show_hidden) projects -- "
+     "off the frame "
      "on a windowed instance, the call waiting for it (see update_drawing).",
-     "base_view, configuration, detail, hidden, id, name, position, quality, "
-     "rotation_deg, scale, section, show_hidden"},
+     "base_view, configuration, detail, exploded_view, hidden, id, name, "
+     "position, quality, rotation_deg, scale, section, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}. {drawing?} (name or id) checks "
@@ -131,7 +136,9 @@ static constexpr MethodDoc DrawingMethods[] = {
      "Exact HLR is priced by surface complexity, so one swept part can "
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
-     "still draw exactly. `section: {point: [x, y, z] world mm, label?}` "
+     "still draw exactly. `exploded_view` draws one of an assembly's "
+     "exploded views (see set_drawing_view). `section: {point: [x, y, z] world "
+     "mm, label?}` "
      "makes it a section view (see set_drawing_view). "
      "`detail: {view, center: [x, y, z] world mm, radius_mm, label?}` makes "
      "it a DETAIL of another view: that view's projection (its source, "
@@ -144,8 +151,9 @@ static constexpr MethodDoc DrawingMethods[] = {
      "here; `label` defaults to the sheet's next free view letter. An "
      "auto-placed view's projection runs off the frame on a windowed "
      "instance, the call waiting for it (see update_drawing).",
-     "base_view, configuration, detail, drawing, hidden, name, orientation, "
-     "position, quality, rotation_deg, scale, section, source"},
+     "base_view, configuration, detail, drawing, exploded_view, hidden, "
+     "name, orientation, position, quality, rotation_deg, scale, section, "
+     "source"},
     {"remove_drawing_view",
      "Remove a view by id (and its dimensions and saved projection). Nothing "
      "projects; it waits for a projection in flight to land first.",
@@ -163,7 +171,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "hidden:any[], id:int, name:string, orientation:string, "
      "position:number[], quality:string, scale:number, "
      "show_hidden:bool, source_id:int, stale:bool, section?:object, "
-     "detail?:object, warnings?:string[], error?:string}[]"},
+     "detail?:object, exploded_view?:int, warnings?:string[], "
+     "error?:string}[]"},
     {"update_drawing",
      "Re-project all views from current geometry. {drawing?} names the sheet. "
      "`budget_s` bounds the WHOLE "
@@ -616,6 +625,31 @@ uint64_t ParseViewConfiguration(ui::AppState& state, const DrawingView& view,
                            " in this view's source part — " + KnownList(known));
 }
 
+// `exploded_view` (name or id of one of the SOURCE assembly's exploded
+// views; 0 or null = as assembled): the view draws it at full factor.
+uint64_t ParseExplodedView(ui::AppState& state, const DrawingView& view,
+                           const nlohmann::json& j) {
+  if (j.is_null() || (j.is_number_unsigned() && j.get<uint64_t>() == 0))
+    return 0;
+  if (!j.is_string() && !j.is_number_unsigned())
+    throw std::runtime_error("`exploded_view` is the name or id of one of "
+                             "the source assembly's exploded views");
+  const AssemblyDocument* asmDoc = ui::AssemblyDocById(state, view.sourceDocId);
+  if (asmDoc == nullptr)
+    throw std::runtime_error("`exploded_view` applies to a view of an "
+                             "assembly; this view's source is a part");
+  std::vector<std::string> known;
+  for (const ExplodedView& e : asmDoc->GetExplodedViews()) {
+    known.push_back(e.name);
+    if ((j.is_string() && e.name == j.get<std::string>()) ||
+        (j.is_number_unsigned() && e.id == j.get<uint64_t>()))
+      return e.id;
+  }
+  throw std::runtime_error("no exploded view " + j.dump() +
+                           " in this view's source assembly — " +
+                           KnownList(known));
+}
+
 // Bend lines are drawn, not projected: they carry no source edge, so they are
 // counted apart from the visible/hidden edges rather than among them.
 int CountBends(const drawing::SheetView& sv) {
@@ -727,6 +761,8 @@ DrawingView AddViewFromParams(ui::AppState& state, const RpcParams& p,
   // After the configuration: a part view's bodies are the configured part's.
   if (p.contains("hidden"))
     v.hidden = ParseHidden(state, v, p.at("hidden"));
+  if (p.contains("exploded_view"))
+    v.explodedView = ParseExplodedView(state, v, p.at("exploded_view"));
   if (p.contains("position")) {
     const json& pos = p.at("position");
     v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
@@ -760,6 +796,12 @@ DrawingView SetViewFromParams(ui::AppState& state, const DrawingView& view,
         ParseViewConfiguration(state, view, p.at("configuration"));
   if (p.contains("section"))
     v.section = ParseSection(p.at("section"));
+  if (p.contains("exploded_view")) {
+    if (view.detail.on)
+      throw std::runtime_error("a detail draws its parent's projection, so "
+                               "`exploded_view` is the parent view's");
+    v.explodedView = ParseExplodedView(state, view, p.at("exploded_view"));
+  }
   if (p.contains("detail")) {
     if (!view.detail.on)
       throw std::runtime_error("this view is not a detail; add a detail "
@@ -1209,7 +1251,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       // is not this call's to say: refused rather than silently ignored.
       for (const char* key :
            {"source", "orientation", "base_view", "section", "hidden",
-            "configuration", "rotation_deg", "quality"})
+            "configuration", "rotation_deg", "quality", "exploded_view"})
         if (p.contains(key))
           throw std::runtime_error(
               std::string("a detail draws its parent's projection, so `") +
@@ -1374,6 +1416,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                  {"quality", view.quality},
                  {"hidden", view.hidden},
                  {"configuration", view.configuration}};
+      if (view.explodedView != 0)
+        vj["exploded_view"] = view.explodedView;
       if (view.section.on)
         vj["section"] = {{"point",
                           {view.section.point.x, view.section.point.y,

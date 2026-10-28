@@ -338,6 +338,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A drawing view of an assembly takes `exploded_view`: the id of one of its source's exploded views, every occurrence drawn moved by its step at full factor. Absent = as assembled, how every older view reads; 0, a fraction or a negative number is refused. Golden `drawing/vNEXT-exploded-view` |
 
 ## Paths in a project
 

@@ -1,0 +1,40 @@
+{
+  "format": "designer-document",
+  "version": 203,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a2",
+    "landscape": true,
+    "title_block": {
+      "project": "Woodcutter automaton",
+      "document": "Assembly"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "front",
+      "source": 4,
+      "orientation": "back",
+      "scale": 1.0,
+      "position": [278.0, 345.0],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": []
+    },
+    {
+      "id": 2,
+      "name": "exploded",
+      "source": 4,
+      "orientation": "iso",
+      "scale": 1.0,
+      "position": [200.0, 110.0],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": [],
+      "exploded_view": 57
+    }
+  ],
+  "dims": [],
+  "notes": []
+}

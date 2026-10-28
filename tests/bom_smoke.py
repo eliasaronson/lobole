@@ -105,7 +105,8 @@ def main():
         expect(lines[0] ==
                "part,configuration,quantity,standard,designation,material,"
                "unit_volume_mm3,"
-               "unit_mass_g,total_mass_g",
+               "unit_mass_g,total_mass_g,printed_unit_mass_g,"
+               "printed_total_mass_g,plates",
                f"csv header: {lines[0]}")
         expect(len(lines) == 4, f"2 rows + header + total: {lines}")
         expect(lines[-1].startswith("total,"), f"total row: {lines[-1]}")
@@ -118,6 +119,57 @@ def main():
         # A part somebody modelled leaves standard and designation EMPTY —
         # which is what a purchaser filters on to split bought from made.
         expect(",2,,,aluminum," in pin_line, f"pin CSV row: {pin_line}")
+
+        # --- a PRINTED part: weighed as it prints, and its plate -----------
+        # (docs/assemblies/README.md#bill-of-materials). A 20 x 20 x 10 PLA
+        # clip at 15 % infill weighs its printed volume, not its solid, and
+        # a plate of Derived copies of it says where it prints.
+        d.call("save_print_profile", profile={
+            "name": "Smoke bom", "process": "fdm", "material": "pla",
+            "layer_height_mm": 0.2, "line_width_mm": 0.5})
+        d.call("add_part", name="clip")
+        d.call("set_print_process", profile="Smoke bom")
+        box(d, (0, 0, 0), (20, 20, 10), "Clip")
+        d.call("set_print_settings", walls=2, top_layers=3, bottom_layers=3,
+               infill_pct=15, infill_pattern="gyroid")
+        d.call("set_material", feature_id=d.call("get_state")["features"]
+               [-1]["id"], material="pla")
+        mp = d.call("mass_properties")
+        printed_g = mp["bodies"][0]["printed"]["mass_g"]
+        solid_g = mp["total"]["mass_g"]
+        expect(printed_g < 0.6 * solid_g, f"infill weighs less: {mp}")
+        clip_id = next(p["id"] for p in d.call("list_parts")["parts"]
+                       if p["name"] == "clip")
+        d.call("add_part", name="plate A")
+        d.call("set_print_process", profile="Smoke bom")
+        for k in range(3):
+            d.call("add_feature", feature={
+                "type": "Derived", "name": f"clip {k}",
+                "source_part": clip_id, "reference": False,
+                "placement": {"position": [30.0 * k, 0, 0],
+                              "orientation": [0, 0, 0, 1]}})
+        d.call("set_active_part", part="rig")
+        d.call("add_occurrence", part="clip",
+               transform={"position": [0, 40, 0], "orientation": [0, 0, 0, 1]})
+        bom = d.call("bom")
+        rows = {r["part"]: r for r in bom["rows"]}
+        expect(rows["pin"]["printed"] is None and rows["pin"]["plates"] == [],
+               f"a part not printed: {rows['pin']}")
+        clip = rows["clip"]
+        expect(abs(clip["printed"]["unit_mass_g"] - printed_g) < 1e-9 and
+               abs(clip["unit_mass_g"] - solid_g) < 1e-9,
+               f"printed as mass_properties weighs it, solid beside: {clip}")
+        expect(clip["plates"] == [{"plate": "plate A", "pieces": 3}],
+               f"its plate: {clip['plates']}")
+        made = bom["total"]["mass_g"] - solid_g + printed_g
+        expect(abs(bom["total"]["made_mass_g"] - made) < 1e-9,
+               f"the whole as made: {bom['total']} vs {made}")
+        d.call("export_bom", path=csv_path)
+        lines = open(csv_path).read().strip().splitlines()
+        clip_line = [l for l in lines if l.startswith("clip,")][0]
+        expect(clip_line.endswith(",plate A x3"), f"clip CSV row: {clip_line}")
+        expect(lines[-1].count(",") == lines[0].count(","),
+               f"total row field count: {lines[-1]}")
 
         print("bom_smoke: OK")
     finally:

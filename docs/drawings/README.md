@@ -165,6 +165,26 @@ off used to take a configuration that suppressed it.
   and the kept-projection equality (`SameProjectedDefinition`) both see the
   change, and the title block's derived MATERIAL reads only what is drawn.
 
+### Exploded views
+
+A view of an assembly with an `exploded_view` (the id of one of its
+source's exploded views, [named display offsets](../assemblies/README.md#exploded-views))
+draws every occurrence moved by its step at full factor
+(`ExplodedOffset` in `GatherSourceBodies`, `ui/DrawingActions.cpp`): a
+top-level occurrence's step moves its whole subtree, and inside a flexible
+placement a part's own step adds to it, as on the model tab. It is the
+sheet's choice, not the model's: the model tab's slider and its active view
+do not reach a sheet, so one sheet draws the assembly whole and exploded
+side by side. The offsets are inputs to the projection (the bodies'
+placements), so editing a step makes the view stale and projects it again.
+
+`add_drawing_view` and `set_drawing_view` take it by name or id (`null` or
+0 clears it); one the source does not have is refused naming those it does,
+and a part view refuses it. A detail draws its parent's. The parts list and
+the balloons are the assembly's either way, so an exploded view is where
+`layout_balloons` usually puts them: it draws most of each part in solid
+line. There is no caption of its own and no trail lines; set from RPC only.
+
 ### Projected children
 
 A view with a `baseViewId` folds from its base: when the two views map the
@@ -531,7 +551,9 @@ lines as chain lines. See [../sheetmetal/README.md](../sheetmetal/README.md).
 A note with `table: "bom"` on an ASSEMBLY view is its parts list: one row
 per part the view draws — `ITEM`, `QTY`, `PART`, `KIND` (`MADE`, `PRINTED`
 for a part with a print process, `BOUGHT` for a standard part), `MATERIAL` (its
-grade, `6082-T6`, or a generic material's name), unit `MASS g` — from `ui::ComputeBomOf` over the source's leaves less the
+grade, `6082-T6`, or a generic material's name), unit `MASS g` as made (a
+printed part's printed mass, its walls, shells and infill; two decimals
+under 10 g) — from `ui::ComputeBomOf` over the source's leaves less the
 view's `hidden` occurrences (so the camera a head carries is not listed as
 part of the head). Any note whose text holds tabs is a ruled table (rows by
 `\n`, cells by `\t`, a row with no tab spans it), standing on its
@@ -736,6 +758,10 @@ which writes once the views have landed); the format is chosen by extension and 
   with no HLR, an added view placed when it lands, one undo step); and a
   saved drawing reopened drawn from its saved projections with no HLR, a
   foreign hash projected again, an edited part missing only its views.
+- `tests/test_drawing.cpp`'s vNEXT golden: a view's `exploded_view`
+  round-trips and an id that is none is refused; `drawing_assembly_smoke.py`
+  draws an exploded view beside the assembled one at its offset, refuses an
+  unknown one and one on a part, and clears it.
 - `tests/drawing_smoke.py`, `drawing_assembly_smoke.py`,
   `drawing_quality_smoke.py`: the RPC chain headless (create, views, update,
   dimensions, dangling after an edit, cost reporting, `fast`, `hidden`,
@@ -758,7 +784,7 @@ which writes once the views have landed); the format is chosen by extension and 
 
 ## Not done
 
-- Broken, crop, offset-section and half-section views; exploded views. A
+- Broken, crop, offset-section and half-section views. A
   section plane is square to one of the seven orientations; a detail's
   boundary is a circle.
 - Multi-sheet drawings.
@@ -773,5 +799,10 @@ which writes once the views have landed); the format is chosen by extension and 
   text notes in the GUI (the GUI adds bend tables, datums, frames and
   balloons); dragging a note once it is placed.
 - Numbering bend lines to match the bend table's rows.
+- A cam's lift diagram, or a table of a CamProfile's motion generated from
+  the feature as the bend table is from a sheet-metal part: a cam's
+  drawing writes its motion and lift as typed tables (the woodcutter's,
+  [its README](../../generators/woodcutter/README.md#drawings-and-the-bill)).
+- Trail lines on an exploded view, and an exploded view set from the GUI.
 - Parallel projection of a sheet's views; reuse of cached visibility across
   differently placed instances of one shape.

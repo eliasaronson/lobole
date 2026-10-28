@@ -520,7 +520,12 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "\"\" = the part's active one) and `configuration_id`. A row generated "
      "from a standard carries {standard, designation} — the two fields a "
      "purchase order needs — and a modelled part leaves them empty, so a "
-     "filter on either splits bought from made.",
+     "filter on either splits bought from made. A printed part's row "
+     "carries `printed` {unit_mass_g, total_mass_g} (what it weighs as it "
+     "prints) or {why}, null when not printed, and `plates` [{plate, "
+     "pieces}]: the printed parts holding Derived copies of it. "
+     "`total.made_mass_g` weighs the whole as made: printed rows printed, "
+     "the rest solid.",
      ""},
     {"check_fasteners",
      "Every placed fastener re-derived against the stack it is IN, and what "
@@ -706,7 +711,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "modelled_diameter?:number, retainer?:object}[], status:string"},
     {"export_bom",
      "Export the BOM as CSV {path}: the bom rows, with a `configuration` "
-     "column after `part`.",
+     "column after `part`; for a printed part `printed_unit_mass_g` and "
+     "`printed_total_mass_g` (what it weighs as it prints) and `plates` "
+     "(the printed parts holding Derived copies of it: \"plate 1 x16\"). "
+     "The total row's printed column is the whole as made: printed rows "
+     "printed, the rest solid.",
      "path"},
     {"edit_in_context",
      "Enter in-context editing of a part within the assembly.", "occurrence",
@@ -3672,12 +3681,28 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       row["unit_mass_g"] = r.massKnown ? json(r.unitMassG) : json(nullptr);
       row["total_mass_g"] =
           r.massKnown ? json(r.unitMassG * r.quantity) : json(nullptr);
+      // A printed part: what one weighs as it prints, or why that is not
+      // known; null for a part not printed. And the plates it prints on.
+      if (r.printed)
+        row["printed"] =
+            r.printedKnown
+                ? json{{"unit_mass_g", r.unitPrintedMassG},
+                       {"total_mass_g", r.unitPrintedMassG * r.quantity}}
+                : json{{"why", r.printedWhy}};
+      else
+        row["printed"] = nullptr;
+      json plates = json::array();
+      for (const auto& [name, n] : r.plates)
+        plates.push_back({{"plate", name}, {"pieces", n}});
+      row["plates"] = plates;
       rows.push_back(row);
     }
     json out = {
         {"rows", rows},
         {"total",
-         {{"mass_g", bom.massKnown ? json(bom.totalMassG) : json(nullptr)}}}};
+         {{"mass_g", bom.massKnown ? json(bom.totalMassG) : json(nullptr)},
+          {"made_mass_g",
+           bom.madeMassKnown ? json(bom.totalMadeMassG) : json(nullptr)}}}};
     if (!bom.warnings.empty())
       out["warnings"] = bom.warnings; // V2: WHY a mass went null
     return out;

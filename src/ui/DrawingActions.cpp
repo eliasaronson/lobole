@@ -178,6 +178,26 @@ void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
   }
 }
 
+// How far an exploded view moves a leaf at full factor: its top-level
+// occurrence's step, plus, inside a FLEXIBLE placement, the step of the part
+// it places (a rigid one explodes as one block) -- the model tab's
+// ExplodeOffset and ExplodeInnerOffset at factor 1.
+static glm::dvec3 ExplodedOffset(const AssemblyDocument& asmDoc,
+                                 const ExplodedView& exploded, uint64_t rootId,
+                                 const std::vector<uint64_t>& innerIds) {
+  glm::dvec3 offset(0.0);
+  const Occurrence* unit = asmDoc.FindById(rootId);
+  const bool flexible = unit != nullptr && unit->flexible;
+  for (const ExplodeStep& s : exploded.steps) {
+    if (s.path.empty() && s.occurrenceId == rootId)
+      offset += s.offset;
+    else if (flexible && !innerIds.empty() && s.path.size() == 1 &&
+             s.path.front() == rootId && s.occurrenceId == innerIds.front())
+      offset += s.offset;
+  }
+  return offset;
+}
+
 // Gathers the projectable bodies of a drawing view's source document — a part
 // (identity placement) or an assembly (each visible occurrence's bodies at its
 // solved transform, tagged with the occurrence id). Returns false and sets
@@ -195,6 +215,11 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
       }
       // The configured copy lives in AppState's cache, so the element maps
       // and bends `out` points into outlive the projection.
+      if (view.explodedView != 0) {
+        *error = "an exploded view is of an assembly; this view's source is "
+                 "a part";
+        return false;
+      }
       const Document* doc = DrawingViewDocument(state, view, error);
       if (!doc)
         return false;
@@ -204,6 +229,10 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
     }
     if (view.configuration != 0) {
       *error = "a configuration can only be chosen for a view of a part";
+      return false;
+    }
+    if (view.explodedView != 0 && state.parts[i].kind != DocKind::Assembly) {
+      *error = "an exploded view is of an assembly";
       return false;
     }
     if (state.parts[i].kind == DocKind::Assembly) {
@@ -225,6 +254,18 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
         *error = flat.error();
         return false;
       }
+      // An exploded sheet view draws the named exploded view at full
+      // factor, whatever the model tab's slider is at
+      // (docs/drawings/README.md#exploded-views).
+      const ExplodedView* exploded = nullptr;
+      if (view.explodedView != 0) {
+        exploded = asmDoc->FindExplodedViewById(view.explodedView);
+        if (exploded == nullptr) {
+          *error = "the exploded view this view draws is gone from its "
+                   "assembly";
+          return false;
+        }
+      }
       for (const assembly::FlatInstance& inst : *flat) {
         if (!inst.visible)
           continue;
@@ -234,7 +275,14 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
         if (std::find(view.hidden.begin(), view.hidden.end(),
                       inst.rootOccurrenceId) != view.hidden.end())
           continue;
-        AppendBodies(*inst.part, inst.world, inst.rootOccurrenceId, out);
+        glm::dmat4 world = inst.world;
+        if (exploded != nullptr)
+          world = glm::translate(glm::dmat4(1.0),
+                                 ExplodedOffset(*asmDoc, *exploded,
+                                                inst.rootOccurrenceId,
+                                                inst.innerIds)) *
+                  world;
+        AppendBodies(*inst.part, world, inst.rootOccurrenceId, out);
       }
       return true;
     }
@@ -497,7 +545,8 @@ bool SameProjectedDefinition(const DrawingView& a, const DrawingView& b) {
          a.section.on == b.section.on &&
          (!a.section.on || a.section.point == b.section.point) &&
          a.hidden == b.hidden && a.configuration == b.configuration &&
-         a.quality == b.quality && a.showHidden == b.showHidden;
+         a.quality == b.quality && a.showHidden == b.showHidden &&
+         a.explodedView == b.explodedView;
 }
 
 // Assembles the active drawing's `viewId` from what it keeps (a detail from
@@ -1383,9 +1432,14 @@ std::string BomTableText(AppState& state, const BomTable& bom,
       if (!r.configuration.empty())
         kind += " (" + r.configuration + ")";
     }
+    // What one weighs as made: a printed part's printed mass, its walls,
+    // shells and infill, not the solid's (a 15 % infill part weighed as
+    // solid read twice what it prints at).
     char mass[32] = "";
-    if (r.massKnown)
-      std::snprintf(mass, sizeof mass, "%.1f", r.unitMassG);
+    // Two decimals under 10 g, so a printed pin's 0.05 g does not read 0.0.
+    if (r.madeMassKnown())
+      std::snprintf(mass, sizeof mass, r.madeMassG() < 10.0 ? "%.2f" : "%.1f",
+                    r.madeMassG());
     out += "\n" + std::to_string(i + 1) + "\t" + std::to_string(r.quantity) +
            "\t" + r.partName + "\t" + kind + "\t" +
            CADMaterials::MaterialLibrary::GradeOf(r.material) + "\t" + mass;

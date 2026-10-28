@@ -2277,16 +2277,18 @@ json DrawingViewToJson(const DrawingView& v) {
                    {"radius_mm", v.detail.radius},
                    {"label", v.detail.label}};
   }
+  if (v.explodedView != 0) // vNEXT
+    j["exploded_view"] = v.explodedView;
   return j;
 }
 
 DrawingView DrawingViewFromJson(const json& j) {
-  readctx::RefuseUnknownKeys(j,
-                             {"id", "name", "source", "orientation", "scale",
-                              "position", "show_hidden", "quality", "hidden",
-                              "base_view", "scale_expr", "configuration",
-                              "rotation_deg", "section", "detail"},
-                             "drawing view");
+  readctx::RefuseUnknownKeys(
+      j,
+      {"id", "name", "source", "orientation", "scale", "position",
+       "show_hidden", "quality", "hidden", "base_view", "scale_expr",
+       "configuration", "rotation_deg", "section", "detail", "exploded_view"},
+      "drawing view");
   DrawingView v;
   v.id = j.value("id", uint64_t{0});
   v.name = j.value("name", std::string{});
@@ -2310,6 +2312,13 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.hidden = j.value("hidden", std::vector<uint64_t>{});
   v.configuration = j.value("configuration", uint64_t{0});
   v.rotationDeg = j.value("rotation_deg", 0.0);
+  // An exploded view's id, whole, like base_view's (vNEXT).
+  if (j.contains("exploded_view") &&
+      (!readctx::IsWhole(j.at("exploded_view")) ||
+       j.at("exploded_view").get<uint64_t>() == 0))
+    throw std::runtime_error("exploded_view " + j.at("exploded_view").dump() +
+                             " is not an exploded view's id");
+  v.explodedView = j.value("exploded_view", uint64_t{0});
   if (j.contains("section")) {
     const json& sj = j.at("section");
     readctx::RefuseUnknownKeys(sj, {"point", "label"}, "section");
