@@ -2277,7 +2277,7 @@ json DrawingViewToJson(const DrawingView& v) {
                    {"radius_mm", v.detail.radius},
                    {"label", v.detail.label}};
   }
-  if (v.explodedView != 0) // vNEXT
+  if (v.explodedView != 0) // v203
     j["exploded_view"] = v.explodedView;
   return j;
 }
@@ -2312,7 +2312,7 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.hidden = j.value("hidden", std::vector<uint64_t>{});
   v.configuration = j.value("configuration", uint64_t{0});
   v.rotationDeg = j.value("rotation_deg", 0.0);
-  // An exploded view's id, whole, like base_view's (vNEXT).
+  // An exploded view's id, whole, like base_view's (v203).
   if (j.contains("exploded_view") &&
       (!readctx::IsWhole(j.at("exploded_view")) ||
        j.at("exploded_view").get<uint64_t>() == 0))

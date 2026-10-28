@@ -1441,13 +1441,13 @@ TEST_CASE("Drawing golden carries its views' saved projections (v162)",
   fs::remove(file);
 }
 
-// vNEXT (docs/drawings/README.md#exploded-views): an assembly view may draw
+// v203 (docs/drawings/README.md#exploded-views): an assembly view may draw
 // one of its source's exploded views. A view without the key is as
 // assembled; an id that is not one is refused, never read as none.
-TEST_CASE("Drawing golden loads and round-trips (vNEXT exploded view)",
+TEST_CASE("Drawing golden loads and round-trips (v203 exploded view)",
           "[drawing][serialization][golden]") {
   const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
-                          "drawing" / "vNEXT-exploded-view.json";
+                          "drawing" / "v203-exploded-view.json";
   REQUIRE(fs::exists(golden));
   auto dwg = testio::LoadDrawing(golden.string());
   REQUIRE(dwg != nullptr);

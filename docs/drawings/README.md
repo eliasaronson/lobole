@@ -758,7 +758,7 @@ which writes once the views have landed); the format is chosen by extension and 
   with no HLR, an added view placed when it lands, one undo step); and a
   saved drawing reopened drawn from its saved projections with no HLR, a
   foreign hash projected again, an edited part missing only its views.
-- `tests/test_drawing.cpp`'s vNEXT golden: a view's `exploded_view`
+- `tests/test_drawing.cpp`'s v203 golden: a view's `exploded_view`
   round-trips and an id that is none is refused; `drawing_assembly_smoke.py`
   draws an exploded view beside the assembled one at its offset, refuses an
   unknown one and one on a part, and clears it.

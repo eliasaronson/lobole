@@ -329,6 +329,7 @@ here; the golden corpus and git history cover them.
 | 200 | An `Import` of an STL takes `representation` (`facets` \| `recognize`; absent = `facets`, how every older mesh import was read) and, with `recognize`, `min_sides` (5..1024; absent = 12). Unknown values are refused. Golden `v200-import-representation` |
 | 201 | A mate connector's `face`, `snap_edge` and `snap_edge2` carry a `fingerprint` (`element`, `shape`, `area_mm2` or `length_mm`, `centroid_mm`) when they name an imported file's own element; one that disagrees with the element it sits beside is refused. A connector from an older file takes none. Golden `assembly/v201-mate-import-print` |
 | 202 | A static result's `reactions` carry `moment_n_mm` [x, y, z]: each support's moment about the frame's origin (the part's; world on an assembly study), N·mm. A pin over a band of its face takes moment along it, which its force alone does not show ([pin supports](../simulation/README.md#pin-supports)). A result saved before reads without it, and `study_results` then leaves it out. Golden `v202-pin-reaction-moment` (a shaft on two pins with an overhung load; results are not in the single-file corpus, so their round trip is `tests/test_study_inputs.cpp`'s) |
+| 203 | A drawing view of an assembly takes `exploded_view`: the id of one of its source's exploded views, every occurrence drawn moved by its step at full factor. Absent = as assembled, how every older view reads; 0, a fraction or a negative number is refused. Golden `drawing/v203-exploded-view` |
 
 ## Pending changes
 
@@ -338,7 +339,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A drawing view of an assembly takes `exploded_view`: the id of one of its source's exploded views, every occurrence drawn moved by its step at full factor. Absent = as assembled, how every older view reads; 0, a fraction or a negative number is refused. Golden `drawing/vNEXT-exploded-view` |
 
 ## Paths in a project
 

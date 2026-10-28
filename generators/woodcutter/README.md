@@ -351,7 +351,7 @@ And with the box (phase 3):
 And with the drawings (phase 5):
 
 - A drawing could not show an exploded view: a sheet view of an assembly
-  now names one of its exploded views (`exploded_view`, vNEXT;
+  now names one of its exploded views (`exploded_view`, v203;
   [exploded views](../../docs/drawings/README.md#exploded-views)).
 - The bill weighed every part solid, so a printed part at 15 % infill read
   more than twice what it prints at, and nothing said which plate a part
