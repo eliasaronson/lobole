@@ -546,9 +546,10 @@ public:
   bool SaveSTEP(const std::string& filename,
                 const std::vector<CADShape>& shapes);
 
-  // `progress` reports ReadingFile, Building and Sewing, and stops each (the
-  // first two only on OCC 7.7 and later, whose reader takes a range); a
-  // cancelled read returns false.
+  // `progress` reports ReadingFile, Building and Sewing, and a cancel stops
+  // each as it runs. Before OCC 7.7, whose reader takes a range, the read
+  // and the faces are one ReadingFile phase that a cancel stops only at its
+  // end. A cancelled read returns false.
   bool LoadSTL(const std::string& filename, CADShape& shape,
                ImportProgress* progress = nullptr);
   // Binary STL, re-meshed at `deflection` (smaller = finer, mm) and

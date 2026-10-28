@@ -295,7 +295,9 @@ how the table above was read.
 `Building` and `Sewing`. On OCC 7.7 and later the STL read is
 `RWStl::ReadFile` + `BRepBuilderAPI_MakeShapeOnMesh` with ranges -- exactly
 what `StlAPI_Reader` does there, so the faces and their order are the
-same; 7.6 keeps `StlAPI_Reader`, which takes none. The OBJ face loop checks
+same; 7.6 keeps `StlAPI_Reader`, which takes none, so there the file and
+the faces are one indeterminate `ReadingFile` and a cancel during it is
+seen as it ends. The OBJ face loop checks
 the cancel every 4096 triangles, and the sewing gets a range. What
 OpenCASCADE reports covers the file, the faces and the sewing's own stages,
 the first third of the bar; the quilt reports nothing, so the rest of the

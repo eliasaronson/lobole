@@ -2192,8 +2192,15 @@ bool CADKernel::LoadSTL(const std::string& filename, CADShape& shape,
   } else
 #endif
   {
+    // Without a range (7.6's reader takes none, and no progress was asked
+    // for) the read is one indeterminate phase that cannot stop part-way; a
+    // cancel during it is honoured as it ends.
+    if (progress != nullptr)
+      progress->OnPhase(ImportProgress::Phase::ReadingFile, -1.0);
     StlAPI_Reader reader;
     if (!reader.Read(occShape, filename.c_str()) || occShape.IsNull())
+      return false;
+    if (progress != nullptr && progress->Cancelled())
       return false;
   }
   // The reader returns the triangles as a COMPOUND of planar faces, not a
