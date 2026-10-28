@@ -331,6 +331,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A study load type `pin`: a support on a cylindrical face that holds it radially and axially where the part presses on it, free to turn unless `fix_rotation: true` (a key only a pin takes). A static result's fields carry `reactions` [{support, type, force_n, contact_area_mm2?, face_area_mm2?}] and, when the peak von Mises sits within one element of a support's edge, `support_edge_peak` {support, type, away_mpa, away_at}; a result saved before reads without them. An older build refuses the file on the unknown type ([pin supports](../simulation/README.md#pin-supports)). Golden `vNEXT-pin-support` |
 
 ## Paths in a project
 

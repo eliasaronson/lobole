@@ -148,6 +148,8 @@ json StudyToJson(const fem::Study& s) {
       }
       if (l.type == fem::LoadType::Remote && l.hasPoint)
         lj["point"] = {l.point.x, l.point.y, l.point.z};
+      if (l.type == fem::LoadType::Pin && l.fixRotation) // vNEXT
+        lj["fix_rotation"] = true;
       if (!l.loadCase.empty())
         lj["case"] = l.loadCase;
       // v183: part of the face; omitted for the whole of it.
@@ -369,7 +371,7 @@ fem::Study StudyFromJson(const json& j) {
                                {"id", "type", "magnitude", "magnitude_expr",
                                 "contact_with", "face", "occurrence",
                                 "direction", "axis_origin", "axis_dir", "point",
-                                "case", "region"},
+                                "case", "region", "fix_rotation"},
                                "study load");
     fem::Load l;
     l.id = lj.at("id").get<uint64_t>();
@@ -413,6 +415,15 @@ fem::Study StudyFromJson(const json& j) {
     if (l.type != fem::LoadType::Remote && lj.contains("point"))
       throw std::runtime_error("load " + std::to_string(l.id) +
                                ": point is a remote load's");
+    if (lj.contains("fix_rotation")) { // vNEXT
+      if (l.type != fem::LoadType::Pin)
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": fix_rotation is a pin's");
+      if (!lj.at("fix_rotation").is_boolean())
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": fix_rotation is not true or false");
+      l.fixRotation = lj.at("fix_rotation").get<bool>();
+    }
     if (l.type == fem::LoadType::Torque &&
         (lj.contains("axis_origin") || lj.contains("axis_dir"))) {
       if (!lj.contains("axis_origin") || !lj.contains("axis_dir"))
@@ -659,6 +670,27 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
       flat.insert(flat.end(), st.begin(), st.end());
     out["stress"] = w.F32(flat);
   }
+  // vNEXT: what each support carried, and a peak on a support's edge.
+  if (!r.reactions.empty()) {
+    json rs = json::array();
+    for (const fem::FemResults::SupportReaction& sr : r.reactions) {
+      json rj = {{"support", sr.support},
+                 {"type", fem::LoadTypeToString(sr.type)},
+                 {"force_n", Vec3ToJson(sr.forceN)}};
+      if (sr.type == fem::LoadType::Pin) {
+        rj["contact_area_mm2"] = sr.contactAreaMm2;
+        rj["face_area_mm2"] = sr.faceAreaMm2;
+      }
+      rs.push_back(std::move(rj));
+    }
+    out["reactions"] = std::move(rs);
+  }
+  if (r.supportEdgePeak.flagged)
+    out["support_edge_peak"] = {
+        {"support", r.supportEdgePeak.support},
+        {"type", fem::LoadTypeToString(r.supportEdgePeak.type)},
+        {"away_mpa", r.supportEdgePeak.awayMPa},
+        {"away_at", Vec3ToJson(r.supportEdgePeak.awayAt)}};
   if (!r.modes.empty()) {
     json modes = json::array();
     for (const fem::FemResults::ModeShape& m : r.modes)
@@ -697,6 +729,32 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
   for (const json& mj : j.value("modes", json::array()))
     r.modes.push_back({mj.at("frequency_hz").get<double>(),
                        f.Vec3s(mj.at("shape"), "a mode shape")});
+  const auto supportType = [](const json& v) {
+    const std::string t = v.get<std::string>();
+    fem::LoadType out;
+    if (!fem::LoadTypeFromString(t, out) || !fem::IsSupport(out))
+      throw std::runtime_error("a result's support type '" + t +
+                               "' is not a support (fixed, pin)");
+    return out;
+  };
+  for (const json& rj : j.value("reactions", json::array())) { // vNEXT
+    fem::FemResults::SupportReaction sr;
+    sr.support = rj.at("support").get<uint64_t>();
+    sr.type = supportType(rj.at("type"));
+    sr.forceN = Vec3FromJson(rj.at("force_n"));
+    sr.contactAreaMm2 = rj.value("contact_area_mm2", 0.0);
+    sr.faceAreaMm2 = rj.value("face_area_mm2", 0.0);
+    r.reactions.push_back(sr);
+  }
+  if (j.contains("support_edge_peak")) { // vNEXT
+    const json& pj = j.at("support_edge_peak");
+    r.supportEdgePeak.flagged = true;
+    r.supportEdgePeak.support = pj.at("support").get<uint64_t>();
+    r.supportEdgePeak.type = supportType(pj.at("type"));
+    r.supportEdgePeak.awayMPa = pj.value("away_mpa", 0.0);
+    if (pj.contains("away_at"))
+      r.supportEdgePeak.awayAt = Vec3FromJson(pj.at("away_at"));
+  }
   return r;
 }
 

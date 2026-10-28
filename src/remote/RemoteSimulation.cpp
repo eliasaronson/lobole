@@ -411,7 +411,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
-     "torque|remote, face, ...}. force/pressure take `magnitude`: NEWTONS "
+     "torque|remote|pin, face, ...}. force/pressure take `magnitude`: NEWTONS "
      "for a force -- the total on that face, spread over its area -- and MPa "
      "for a pressure, which pushes along the inward normal; `direction?`. "
      "`fixed` takes neither. A torque takes `torque_nmm` (N*mm, right-handed "
@@ -441,10 +441,18 @@ static constexpr MethodDoc SimulationMethods[] = {
      "radius_mm} the face within that radius of a point; applied to the "
      "face's mesh facets whose centroids are in it, the force the whole "
      "`magnitude` over them (a seat on a shaft, without a step to make it "
-     "a face; docs/simulation/README.md#loads-on-part-of-a-face).",
+     "a face; docs/simulation/README.md#loads-on-part-of-a-face). A `pin` "
+     "is a support on a CYLINDRICAL face (a bore, or a shaft in a bearing; "
+     "any other face is refused): a rigid pin on the face's axis that holds "
+     "it radially and axially only where the part presses on it -- "
+     "compression only, found by a short iteration of solves -- and lets it "
+     "turn about the axis unless `fix_rotation: true`. A part free to turn "
+     "on one pin, or one the loads lift off its pins, is refused, naming "
+     "the free motion. Static part studies only; it takes no magnitude or "
+     "direction (docs/simulation/README.md#pin-supports).",
      "axis_dir, axis_origin_mm, case, contact_with, direction, face, "
-     "force_n, magnitude, occurrence, point_mm, region, study, torque_nmm, "
-     "type"},
+     "fix_rotation, force_n, magnitude, occurrence, point_mm, region, "
+     "study, torque_nmm, type"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
@@ -584,7 +592,16 @@ static constexpr MethodDoc SimulationMethods[] = {
      "isotropic, so one solve answers every orientation "
      "(docs/simulation/README.md#printed-layers). Refused on a material with "
      "no interlayer strength, and on a result saved before v172, which kept "
-     "no stress tensor.",
+     "no stress tensor. A static body (and each case) also carries "
+     "`reactions` [{support, type, force_n [x,y,z] N -- what the support "
+     "exerts on the part; a pin's contact_area_mm2 of face_area_mm2}], and, "
+     "when its peak von Mises sits within one element of a support's edge "
+     "(a clamp's rim, where the stress is a singularity that grows with the "
+     "mesh), `peak_at_support_edge` {support, type, max_von_mises_away_mpa, "
+     "away_at, factor_of_safety_away}: the largest stress farther than that "
+     "from every support's edge. The top level carries the flag of its own "
+     "peak, and the factor of safety's receipt says so "
+     "(docs/simulation/README.md#a-peak-on-a-supports-edge).",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
@@ -844,8 +861,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           lj["occurrence"] = l.occurrenceId;
           lj["occurrence_name"] = host.OccurrenceName(l.occurrenceId);
         }
-        if (l.type != fem::LoadType::Fixed)
+        if (!fem::IsSupport(l.type))
           lj["magnitude"] = l.magnitude;
+        if (l.type == fem::LoadType::Pin)
+          lj["fix_rotation"] = l.fixRotation;
         if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote)
           lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
         if (l.type == fem::LoadType::Torque) {
@@ -1298,6 +1317,28 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       refuseKey("force_n", "");
       refuseKey("point_mm", "");
     }
+    const bool pin = l.type == fem::LoadType::Pin;
+    if (pin) {
+      refuseKey("magnitude", "");
+      refuseKey("direction", "");
+      if (host.IsAssembly())
+        throw std::runtime_error(
+            "a pin support is a part study's; an assembly study holds its "
+            "part with a fixed face or a rigid neighbour's contact");
+      const fem::AnalysisType at = host.Require(id).type;
+      if (at != fem::AnalysisType::Static)
+        throw std::runtime_error(
+            std::string("a pin support is a static study's: a ") +
+            fem::AnalysisTypeToString(at) +
+            " study holds its part with fixed supports");
+      if (p.contains("fix_rotation")) {
+        if (!p.at("fix_rotation").is_boolean())
+          throw std::runtime_error("fix_rotation is true or false");
+        l.fixRotation = p.at("fix_rotation").get<bool>();
+      }
+    } else {
+      refuseKey("fix_rotation", "");
+    }
     if (torque && !p.contains("torque_nmm"))
       throw std::runtime_error("a torque load needs torque_nmm (N*mm, "
                                "right-handed about its axis)");
@@ -1385,6 +1426,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           "face '" + l.face.name +
           "' is not cylindrical, so it has no axis of its own: a torque on "
           "it needs axis_origin_mm and axis_dir");
+    if (pin && !(faceDoc && fem::CylindricalFaceAxis(*faceDoc, l.face)))
+      throw std::runtime_error(
+          "face '" + l.face.name +
+          "' is not cylindrical: a pin support goes on a cylindrical face "
+          "(a bore or a shaft), whose axis it holds");
     if (torque && p.contains("direction"))
       throw std::runtime_error("a torque load does not take `direction`; "
                                "it turns about axis_dir");
@@ -1405,7 +1451,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         }
     }
     if (p.contains("case")) {
-      if (l.type == fem::LoadType::Fixed)
+      if (fem::IsSupport(l.type))
         throw std::runtime_error(
             "a support holds in every load case, so it names none; `case` "
             "is for a force or a pressure");
@@ -1760,6 +1806,35 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     std::string principalBody, acrossBody;
     bool missingStress = false, anyInterlayer = false, haveIlFoS = false;
     double minIlFoS = 0.0;
+    // What each support carried, and a peak that sits on a support's edge
+    // (docs/simulation/README.md#a-peak-on-a-supports-edge).
+    const auto reactionsJson = [](const fem::FemResults& r) {
+      json out = json::array();
+      for (const fem::FemResults::SupportReaction& sr : r.reactions) {
+        json rj = {{"support", sr.support},
+                   {"type", fem::LoadTypeToString(sr.type)},
+                   {"force_n", {sr.forceN.x, sr.forceN.y, sr.forceN.z}}};
+        if (sr.type == fem::LoadType::Pin) {
+          rj["contact_area_mm2"] = sr.contactAreaMm2;
+          rj["face_area_mm2"] = sr.faceAreaMm2;
+        }
+        out.push_back(std::move(rj));
+      }
+      return out;
+    };
+    const auto edgeJson = [](const fem::FemResults& r, double yield) {
+      const fem::FemResults::SupportEdgePeak& e = r.supportEdgePeak;
+      json j = {{"support", e.support},
+                {"type", fem::LoadTypeToString(e.type)},
+                {"max_von_mises_away_mpa", e.awayMPa},
+                {"away_at", {e.awayAt.x, e.awayAt.y, e.awayAt.z}}};
+      if (yield > 0 && e.awayMPa > 0)
+        j["factor_of_safety_away"] = yield / e.awayMPa;
+      return j;
+    };
+    // The flag that goes with the top-level peak: the body and case it is in.
+    json topEdge;
+    double topEdgeVm = -1.0;
     json perBody = json::array();
     for (const fem::StudyBodyResult& b : rt->bodies) {
       nodes += b.mesh.stats.nodeCount;
@@ -1770,6 +1845,18 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
           CADMaterials::MaterialLibrary::MaterialTypeFromString(
               host.BodyMaterial(*s, b.bodyIndex)));
+      if (!b.results.reactions.empty())
+        bj["reactions"] = reactionsJson(b.results);
+      for (size_t k = 0; k < std::max<size_t>(1, b.cases.size()); ++k) {
+        const fem::FemResults& r = b.Case(static_cast<int>(k));
+        if (r.maxVonMises > topEdgeVm) {
+          topEdgeVm = r.maxVonMises;
+          topEdge =
+              r.supportEdgePeak.flagged ? edgeJson(r, mp.yieldMPa) : json();
+        }
+      }
+      if (b.results.supportEdgePeak.flagged)
+        bj["peak_at_support_edge"] = edgeJson(b.results, mp.yieldMPa);
       // Factor of safety against yield, when the body's material defines one.
       if (b.results.maxVonMises > 0) {
         const double yield = mp.yieldMPa;
@@ -1852,6 +1939,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         {"stale", host.Stale(id)}};
     if (haveFoS)
       result["factor_of_safety"] = minFoS;
+    if (!topEdge.is_null())
+      result["peak_at_support_edge"] = topEdge;
     const auto peakJson = [](const fem::FieldPeak& pk, const std::string& b) {
       return json{{"value", pk.value},
                   {"at", {pk.at.x, pk.at.y, pk.at.z}},
@@ -1876,11 +1965,25 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         glm::dvec3 vmAt(0.0), dispAt(0.0);
         double fos = 0.0;
         bool caseFoS = false;
+        json caseEdge, caseReactions = json::array();
         for (const fem::StudyBodyResult& b : rt->bodies) {
           const fem::FemResults& r = b.Case(static_cast<int>(k));
+          for (json& rj : reactionsJson(r)) {
+            rj["body"] = b.bodyName;
+            caseReactions.push_back(std::move(rj));
+          }
           if (r.maxVonMises > vm) {
             vm = r.maxVonMises;
             vmAt = r.maxVmAt;
+            caseEdge =
+                r.supportEdgePeak.flagged
+                    ? edgeJson(r,
+                               CADMaterials::MaterialLibrary::GetMaterial(
+                                   CADMaterials::MaterialLibrary::
+                                       MaterialTypeFromString(
+                                           host.BodyMaterial(*s, b.bodyIndex)))
+                                   .yieldMPa)
+                    : json();
           }
           if (r.maxDisplacement > disp) {
             disp = r.maxDisplacement;
@@ -1904,6 +2007,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                     {{"value", vm}, {"at", {vmAt.x, vmAt.y, vmAt.z}}}}};
         if (caseFoS)
           cj["factor_of_safety"] = fos;
+        if (!caseEdge.is_null())
+          cj["peak_at_support_edge"] = std::move(caseEdge);
+        if (!caseReactions.empty())
+          cj["reactions"] = std::move(caseReactions);
         cases.push_back(std::move(cj));
       }
       result["cases"] = std::move(cases);
@@ -1960,6 +2067,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         c.note = "linear-elastic static solve on " + std::to_string(elements) +
                  " elements, against the library yield strength. A prediction,"
                  " not a measurement";
+        if (!topEdge.is_null())
+          c.note +=
+              ". The peak sits within one element of support " +
+              std::to_string(topEdge["support"].get<uint64_t>()) +
+              "'s edge, where a clamp's stress grows with the mesh; "
+              "away from every support's edge the largest is " +
+              std::to_string(topEdge["max_von_mises_away_mpa"].get<double>()) +
+              " MPa (peak_at_support_edge)";
         r.Add(std::move(c));
       }
       AttachReceipt(result, r);

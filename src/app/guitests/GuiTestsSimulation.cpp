@@ -948,6 +948,55 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // A pin support (docs/simulation/README.md#pin-supports): armed in the
+  // panel, a click on a flat face is refused in the red line and places
+  // nothing; on the cylinder it places a pin, held from turning when the
+  // box is ticked, tinted and hatched as a support.
+  t = IM_REGISTER_TEST(engine, "sim", "a_pin_goes_on_a_cylinder_only");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureCylinder(ctx);
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    const Body& body = Doc()->GetBodies()[0];
+    ElementRef side, flat;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const auto info = Measure::DescribeFaceAt(body, index);
+      if (info && info->kind == "cylinder")
+        side = ElementRef{body.createdBy, name};
+      else if (info)
+        flat = ElementRef{body.createdBy, name};
+    }
+    IM_CHECK_SILENT(!side.name.empty() && !flat.name.empty());
+    ctx->ItemClick("//###ToolWindow/###sim_bc_pin");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Pin);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    ui::SimulationApplyToFace(*s_App, flat);
+    ctx->Yield(2);
+    IM_CHECK(Doc()->FindStudy(sid)->loads.empty());
+    IM_CHECK(s_App->simulation.placeRefusal.find("not cylindrical") !=
+             std::string::npos);
+    ctx->ItemClick("//###ToolWindow/###sim_pin_fix_rotation");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.pendingPinFixRotation);
+    ui::SimulationApplyToFace(*s_App, side);
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(sid);
+    IM_CHECK_EQ(st->loads.size(), (size_t)1);
+    IM_CHECK(st->loads[0].type == fem::LoadType::Pin);
+    IM_CHECK(st->loads[0].fixRotation);
+    IM_CHECK(st->loads[0].loadCase.empty());
+    IM_CHECK(s_App->simulation.placeRefusal.empty());
+    std::vector<PrimVertex> prims;
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    IM_CHECK(ui::SimulationLoadLabel(st->loads[0]) == "pin, held");
+    s_App->simulation.pendingPinFixRotation = false;
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
   // A remote load: its force typed, and its point -- untyped -- off the
   // clicked face along its normal by a tenth of the body's diagonal, so the
   // default is a lever arm the picture shows.

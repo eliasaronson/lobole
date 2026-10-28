@@ -55,7 +55,9 @@ Invariants:
 
 Validation happens before the run, on `study.error`: a fixed support and a
 force or pressure load, volume fraction in (0, 1), a material with stiffness
-data, a single loaded body, the load cases' rules and the keep-outs'.
+data, a single loaded body, the load cases' rules and the keep-outs'. A
+pin support is refused: a topology study's supports are fixed
+([pin supports](../simulation/README.md#pin-supports)).
 
 ## Results
 

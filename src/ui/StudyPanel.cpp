@@ -80,6 +80,8 @@ const char* LoadLabel(fem::LoadType t) {
     return "Torque";
   case fem::LoadType::Remote:
     return "Remote";
+  case fem::LoadType::Pin:
+    return "Pin";
   }
   return "?";
 }
@@ -96,6 +98,8 @@ const char* LoadGlyph(fem::LoadType t) {
     return ICON_FA_ROTATE;
   case fem::LoadType::Remote:
     return ICON_FA_LOCATION_CROSSHAIRS;
+  case fem::LoadType::Pin:
+    return ICON_FA_THUMBTACK;
   }
   return ICON_FA_BOLT;
 }
@@ -472,7 +476,7 @@ void DrawLoadCases(AppState& state, const fem::Study& s) {
       cs.loadCases.push_back({name, 1.0, ""});
       if (first)
         for (fem::Load& l : cs.loads)
-          if (l.type != fem::LoadType::Fixed)
+          if (!fem::IsSupport(l.type))
             l.loadCase = name;
     });
     sim.pendingCase = name;
@@ -517,7 +521,18 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   arm(ICON_FA_ROTATE " Torque###sim_bc_torque", SimulationState::Tool::Torque);
   arm(ICON_FA_LOCATION_CROSSHAIRS " Remote###sim_bc_remote",
       SimulationState::Tool::Remote);
+  // A pin is a static part study's support (docs/simulation/README.md
+  // #pin-supports): offered only where it can be placed.
+  if (s.type == fem::AnalysisType::Static && !StudyHostOf(state).IsAssembly())
+    arm(ICON_FA_THUMBTACK " Pin###sim_bc_pin", SimulationState::Tool::Pin);
   ImGui::Checkbox("Labels in viewport###sim_show_labels", &sim.showLabels);
+  if (sim.tool == SimulationState::Tool::Pin) {
+    ImGui::Checkbox("Hold it from turning###sim_pin_fix_rotation",
+                    &sim.pendingPinFixRotation);
+    ImGui::TextDisabled("Click a bore or a shaft: the pin holds it where the "
+                        "part presses on it%s",
+                        sim.pendingPinFixRotation ? "" : ", free to turn");
+  }
 
   if (sim.tool == SimulationState::Tool::Torque) {
     LeftLabel("Torque (N\xC2\xB7mm)");
@@ -645,7 +660,9 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     row.glyph = LoadGlyph(l.type);
     row.label = std::string(LoadLabel(l.type)) + "  " + where + "###load_row_" +
                 std::to_string(l.id);
-    if (l.type != fem::LoadType::Fixed) {
+    if (l.type == fem::LoadType::Pin)
+      row.tail = l.fixRotation ? "held from turning" : "free to turn";
+    if (!fem::IsSupport(l.type)) {
       char buf[64];
       std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude,
                     l.type == fem::LoadType::Pressure ? " MPa" : " N");
@@ -1948,7 +1965,8 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
     if (!faceFrame(load.occurrenceId, load.face, c, n))
       continue;
     switch (load.type) {
-    case fem::LoadType::Fixed: {
+    case fem::LoadType::Fixed:
+    case fem::LoadType::Pin: {
       // The hatch repeated over the face, so "what is fixed" reads as an
       // AREA -- and each hatch stands on its own triangle's normal, which on
       // a curved face is not the average one.
@@ -2119,8 +2137,8 @@ void AppendSimulationFaceTints(AppState& state) {
   for (const fem::Load& load : s->loads)
     if (load.contactWith == 0)
       tintFace(load.occurrenceId, load.face,
-               load.type == fem::LoadType::Fixed ? MeshRenderer::kTintFixture
-                                                 : MeshRenderer::kTintLoad);
+               fem::IsSupport(load.type) ? MeshRenderer::kTintFixture
+                                         : MeshRenderer::kTintLoad);
   for (const ElementRef& keep : s->keepFaces)
     tintFace(0, keep, MeshRenderer::kTintKeep);
 
@@ -2187,6 +2205,8 @@ std::string SimulationLoadLabel(const fem::Load& load) {
   switch (load.type) {
   case fem::LoadType::Fixed:
     return "fixed";
+  case fem::LoadType::Pin:
+    return load.fixRotation ? "pin, held" : "pin";
   case fem::LoadType::Force:
     if (std::abs(load.magnitude) >= 1000.0)
       std::snprintf(buf, sizeof(buf), "%.3g kN", load.magnitude / 1000.0);
@@ -2300,6 +2320,7 @@ void DrawSimulationLabels(AppState& state) {
     const glm::vec3 n = state.faceSelector->GetFaceNormal(mesh, index);
     switch (load.type) {
     case fem::LoadType::Fixed:
+    case fem::LoadType::Pin:
       label(c, SimulationLoadLabel(load), col(kFixed));
       break;
     case fem::LoadType::Force: {
@@ -2418,6 +2439,9 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   case SimulationState::Tool::Remote:
     load.type = fem::LoadType::Remote;
     break;
+  case SimulationState::Tool::Pin:
+    load.type = fem::LoadType::Pin;
+    break;
   default:
     load.type = fem::LoadType::Pressure;
     break;
@@ -2471,6 +2495,22 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     load.magnitude = sim.pendingTorque;
     load.magnitudeExpr = sim.pendingTorqueExpr;
   }
+  if (load.type == fem::LoadType::Pin) {
+    // Refused where it can be read, and nothing placed: a pin holds a
+    // cylinder's axis, and a flat face has none.
+    if (host.IsAssembly() || s->type != fem::AnalysisType::Static) {
+      sim.placeRefusal = "A pin is a static part study's support; this "
+                         "study holds its part with fixed faces";
+      return;
+    }
+    if (!faceDoc || !fem::CylindricalFaceAxis(*faceDoc, face)) {
+      sim.placeRefusal = "'" + face.name +
+                         "' is not cylindrical: a pin goes on a bore or a "
+                         "shaft, whose axis it holds";
+      return;
+    }
+    load.fixRotation = sim.pendingPinFixRotation;
+  }
   if (load.type == fem::LoadType::Remote) {
     if (!sim.pointOverridden) {
       if (!info) {
@@ -2490,7 +2530,7 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     load.hasPoint = true;
   }
   load.id = host.AllocateId();
-  if (load.type != fem::LoadType::Fixed) {
+  if (!fem::IsSupport(load.type)) {
     if (load.type != fem::LoadType::Torque) {
       load.magnitude = sim.pendingMagnitude;
       load.magnitudeExpr = sim.pendingMagnitudeExpr;

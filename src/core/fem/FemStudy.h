@@ -39,7 +39,15 @@ enum class LoadType {
   Remote,   // a force (N) acting at a point off the face, carried by the
             // face as F/A plus the linear traction that carries its moment
             // (docs/simulation/README.md#torque-and-remote-loads)
+  Pin,      // a support on a cylindrical face: a rigid pin on its axis that
+            // holds the face radially and axially where the part presses on
+            // it (compression only), free to turn unless fixRotation
+            // (docs/simulation/README.md#pin-supports)
 };
+// A support holds the part rather than loading it.
+inline bool IsSupport(LoadType t) {
+  return t == LoadType::Fixed || t == LoadType::Pin;
+}
 
 // A per-face mesh size override (mm). size follows the value+expr convention:
 // `sizeExpr` empty means `size` is a literal, else it is the evaluated result.
@@ -141,6 +149,10 @@ struct Load {
   std::string loadCase;
   // Part of the face only (v183); Whole, the face, as ever. A part study's.
   LoadRegion region;
+  // Pin only: hold the tangential direction too, so the part cannot turn on
+  // the pin (a keyed or pressed pin). The pin's axis is its face's, kept in
+  // axisOrigin/axisDirection once CompleteLoadGeometry has run.
+  bool fixRotation = false;
 };
 
 // One load case of a study (docs/topopt/README.md#load-cases): the force and
@@ -248,7 +260,7 @@ struct Study {
 const char* LoadTypeToString(LoadType type);
 // Every load type's name, for a refusal that names what is accepted.
 inline constexpr const char* kLoadTypeNames =
-    "fixed, force, pressure, torque, remote";
+    "fixed, force, pressure, torque, remote, pin";
 [[nodiscard]] bool LoadTypeFromString(const std::string& s, LoadType& out);
 const char* AnalysisTypeToString(AnalysisType type);
 
@@ -320,7 +332,8 @@ std::optional<LoadAxis> CylindricalFaceAxis(const Document& doc,
 std::optional<LoadAxis> TorqueAxis(const Document& doc, const Load& load);
 // Completes `load` against the face it acts on, before it is meshed: a
 // torque without an axis takes the cylindrical face's, and is refused on any
-// other face; a remote load without a point is refused. Every path that
+// other face; a remote load without a point is refused; a pin takes its
+// cylindrical face's axis and is refused on any other face. Every path that
 // turns a Load into a traction calls this (part, assembly and topology
 // studies), so a file and an RPC are refused the same way. Other load types
 // pass unchanged.

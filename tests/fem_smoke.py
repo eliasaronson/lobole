@@ -40,6 +40,7 @@ from smoke_app import launch  # noqa: E402
 import smoke_shapes as shapes  # noqa: E402
 
 SKIP = 77  # ctest SKIP_RETURN_CODE: built without Netgen
+PLANE_Z0 = {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]}
 
 
 def expect(condition, message):
@@ -304,6 +305,95 @@ def torque_and_probe(d, study, created_by, fixed_face):
     d.call("remove_study", id=twist)
 
 
+def pin_support(d):
+    """A pin support over the RPCs (docs/simulation/README.md#pin-supports):
+    a lever with two bores, a pin in each, pushed at its end. The physics is
+    test_fem_pin.cpp's; this is the contract: refused on a flat face and
+    with a key it does not take, changing nothing; a lever on one free pin
+    refused as a mechanism; the reactions and fix_rotation as reported."""
+    d.call("new_project")
+    sk = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Outline", "plane": PLANE_Z0,
+        "entities": [{"type": "rect", "c1": [0, 0], "c2": [60, 12]}]})
+    lever = d.call("add_feature", feature={
+        "type": "Extrude", "name": "Lever", "sketch_id": sk["id"],
+        "distance": 6.0, "mode": "new_body"})["id"]
+    d.call("set_material", feature_id=lever, material="pla")
+    holes = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Bores", "plane": PLANE_Z0,
+        "entities": [{"type": "circle", "center": [8, 6], "radius": 2.5},
+                     {"type": "circle", "center": [30, 6], "radius": 2.5}]})
+    d.call("add_feature", feature={
+        "type": "Extrude", "name": "Bores", "sketch_id": holes["id"],
+        "distance": 6.0, "mode": "cut"})
+    els = d.call("list_elements")["bodies"][0]
+    created_by = els["created_by"]
+    bores = sorted((f for f in els["faces"] if f.get("kind") == "cylinder"),
+                   key=lambda f: f["centroid"][0])
+    expect(len(bores) == 2, f"two bores: {els['faces']}")
+    bore = [{"feature_id": created_by, "element": f["name"]} for f in bores]
+    end = [f["name"] for f in els["faces"]
+           if abs(f["normal"][0] - 1.0) < 1e-6][0]
+    study = d.call("add_study", name="Lever")["id"]
+    d.call("set_study", id=study, mesh_size=2.0)
+
+    def loads():
+        return [x for x in d.call("list_studies")["studies"]
+                if x["id"] == study][0]["loads"]
+
+    def refused(params, words):
+        before = loads()
+        try:
+            d.call("add_load", study=study, **params)
+        except RuntimeError as e:
+            for w in words:
+                expect(w in str(e), f"the refusal names {w!r}: {e}")
+        else:
+            raise AssertionError(f"accepted {params}")
+        expect(loads() == before, "a refused add_load changed the study")
+
+    refused({"type": "pin",
+             "face": {"feature_id": created_by, "element": end}},
+            ["not cylindrical", "bore"])
+    refused({"type": "pin", "face": bore[0], "magnitude": 5}, ["magnitude"])
+    refused({"type": "fixed", "face": bore[0], "fix_rotation": True},
+            ["fix_rotation"])
+    refused({"type": "pin", "face": bore[0], "fix_rotation": "yes"},
+            ["true or false"])
+
+    pin1 = d.call("add_load", study=study, type="pin", face=bore[0])["id"]
+    d.call("add_load", study=study, type="force",
+           face={"feature_id": created_by, "element": end},
+           magnitude=20, direction=[0, -1, 0])
+    try:
+        d.call("run_study", id=study)
+        raise AssertionError("a lever on one free pin solved")
+    except RuntimeError as e:
+        expect("free to turn" in str(e) and f"pin {pin1}" in str(e),
+               f"names the mechanism and the pin: {e}")
+    pin2 = d.call("add_load", study=study, type="pin", face=bore[1])["id"]
+    listed = loads()
+    expect(listed[0]["type"] == "pin" and listed[0]["fix_rotation"] is False
+           and "magnitude" not in listed[0], f"the pin as listed: {listed}")
+    res = d.call("run_study", id=study)
+    body = res["bodies"][0]
+    by = {r["support"]: r for r in body["reactions"]}
+    # Statics: about the first bore, R2 * 22 = 20 * 52.
+    r2 = 20.0 * 52.0 / 22.0
+    expect(abs(by[pin2]["force_n"][1] - r2) < 0.02 * r2
+           and abs(by[pin1]["force_n"][1] + (r2 - 20.0)) < 0.02 * r2,
+           f"the pins carry the lever's statics: {by}")
+    expect(0 < by[pin1]["contact_area_mm2"] < by[pin1]["face_area_mm2"],
+           f"a pin presses on part of its bore: {by[pin1]}")
+    expect(by[pin1]["type"] == "pin", "the reaction names its support type")
+    if "peak_at_support_edge" in res:
+        flag = res["peak_at_support_edge"]
+        expect(flag["max_von_mises_away_mpa"]
+               <= res["max_von_mises_mpa"]["value"],
+               f"the away value is under the peak: {flag}")
+    print("fem_smoke: pin support OK")
+
+
 def printed_layers(d, study, created_by, fixed_face, res):
     """The largest principal stress and the stress across a printed part's
     layers (docs/simulation/README.md#printed-layers), over the RPCs: the
@@ -520,6 +610,7 @@ def main():
             d.call("remove_study", id=plain)
 
             assembly_study(d)
+            pin_support(d)
 
             print("fem_smoke: OK")
             return 0

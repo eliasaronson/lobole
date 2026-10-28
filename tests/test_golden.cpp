@@ -1050,8 +1050,8 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   }
   // v170: torque and remote loads. Neither changes a volume, and a torque's
   // axis or a remote load's point dropped on load would solve as a different
-  // load; each [type, magnitude, axis_dir or null, point or null] of the
-  // first study must hold.
+  // load; each [type, magnitude, axis_dir or null, point or null,
+  // fix_rotation?] of the first study must hold.
   if (expect.contains("study_loads")) {
     REQUIRE_FALSE(doc.GetStudies().empty());
     const auto& loads = doc.GetStudies().front().loads;
@@ -1071,6 +1071,9 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       if (l.hasPoint)
         for (int k = 0; k < 3; ++k)
           CHECK(l.point[k] == want[i].at(3).at(k).get<double>());
+      // vNEXT: a fifth entry, when there is one, is a pin's fix_rotation.
+      if (want[i].size() > 4)
+        CHECK(l.fixRotation == want[i].at(4).get<bool>());
     }
   }
   // v168: an extrude's twist. A twisted rectangle has the prism's volume, so

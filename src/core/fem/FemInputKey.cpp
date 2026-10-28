@@ -17,7 +17,7 @@ namespace {
 // The algorithm's version: a change to what a solve computes bumps it, so no
 // answer stored before (topology results are saved with the project) is
 // handed out as one from after.
-constexpr const char* kFemAlgorithm = "fem/2";
+constexpr const char* kFemAlgorithm = "fem/3";
 
 // The study as evaluated: what the mesher and solver are handed.
 nlohmann::json Definition(const Study& study) {

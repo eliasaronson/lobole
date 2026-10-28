@@ -1939,13 +1939,17 @@ _reference("remove_refinement", "Remove the refinement on a face ({feature_id, e
 
 
 _reference("add_load", "Add a boundary condition to a study. type is 'fixed' "
-          "(zero displacement), 'force' (a total vector in N over the face), "
-          "or 'pressure' (MPa along the inward normal). face is {feature_id, "
-          "element}. magnitude is N/MPa (number or expression); direction is "
-          "[x,y,z] for a force. region? puts it on PART of its face: "
-          "{normal, from_mm, to_mm} (a band) or {center_mm, radius_mm}. "
-          "Returns {id} of the new load. Every loaded "
-          "body needs at least one fixed face.")
+          "(zero displacement), 'pin' (a rigid pin in a CYLINDRICAL face -- a "
+          "bore or a shaft -- holding it only where the part presses on it, "
+          "free to turn unless fix_rotation: true; a static part study's), "
+          "'force' (a total vector in N over the face), 'pressure' (MPa "
+          "along the inward normal), 'torque' (torque_nmm) or 'remote' "
+          "(force_n at point_mm); help('add_load') has them all. face is "
+          "{feature_id, element}. magnitude is N/MPa (number or expression); "
+          "direction is [x,y,z] for a force. region? puts it on PART of its "
+          "face: {normal, from_mm, to_mm} (a band) or {center_mm, radius_mm}. "
+          "Returns {id} of the new load. Every loaded body needs a support "
+          "(fixed or pin); a part free to turn on one pin is refused.")
 
 
 _reference("remove_load", "Remove a load (by id) from a study.")

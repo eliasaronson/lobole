@@ -1261,6 +1261,9 @@ void DrawSimulationToolbar(AppState& state) {
     case SimulationState::Tool::Remote:
       what = "remote load";
       break;
+    case SimulationState::Tool::Pin:
+      what = "pin support (a bore or a shaft)";
+      break;
     case SimulationState::Tool::Keep:
       what = "keep face";
       break;

@@ -80,6 +80,37 @@ struct FemResults {
   int maxDispNode = -1;
   glm::dvec3 maxDispAt{0, 0, 0};
 
+  // A static result: what each support carried (docs/simulation/README.md
+  // #pin-supports), one entry per support of the body in the study's order.
+  // `forceN` is the force the support exerts on the part (N, the part's
+  // frame); a pin's `contactAreaMm2` is the area of its face in contact, of
+  // `faceAreaMm2` (both 0 on a fixed support). Empty on a modal result and
+  // on one saved before the pin support.
+  struct SupportReaction {
+    uint64_t support = 0; // the load id
+    LoadType type = LoadType::Fixed;
+    glm::dvec3 forceN{0.0};
+    double contactAreaMm2 = 0.0;
+    double faceAreaMm2 = 0.0;
+  };
+  std::vector<SupportReaction> reactions;
+  // The peak von Mises within one element of a support's edge
+  // (docs/simulation/README.md#a-peak-on-a-supports-edge): `flagged` with
+  // the support and the largest von Mises farther than that from every
+  // support's edge (`awayMPa` at `awayAt`; 0 when no node is that far).
+  struct SupportEdgePeak {
+    bool flagged = false;
+    uint64_t support = 0;
+    LoadType type = LoadType::Fixed;
+    double awayMPa = 0.0;
+    glm::dvec3 awayAt{0.0};
+  };
+  SupportEdgePeak supportEdgePeak;
+  // Transient (never kept or saved): the reaction at every node, the
+  // internal force less the applied load (N), filled when a solve is asked
+  // for reactions. Zero at a node nothing holds, to the residual.
+  std::vector<glm::dvec3> nodeReaction;
+
   // Modal analysis results (empty for a static study). One entry per computed
   // mode, ascending frequency; displacement is the normalized mode shape.
   struct ModeShape {
@@ -172,6 +203,37 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
       const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
       std::string* error, const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
 
+// A node held in its own frame: local direction k is `frame[k]` (the three
+// orthonormal), held at zero when `held[k]`. A pin holds its face's nodes
+// radially and axially and leaves them free to slide round the axis.
+struct HeldNode {
+  int node = -1;
+  std::array<glm::dvec3, 3> frame{glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
+                                  glm::dvec3(0, 0, 1)};
+  std::array<bool, 3> held{false, false, false};
+};
+// What holds a mesh: whole nodes fixed in all three directions, and nodes
+// held in some directions of their own frames (a node in both is fixed).
+// `reactions` asks the solve for FemResults::nodeReaction.
+// A tie: sum_i coef_i u_i = 0 over local directions of held nodes (each
+// entry a node of `held`, its frame's direction k). A pin held from turning
+// ties its face's tangential displacements, so the face as a whole does not
+// turn about the axis while each node may still slide.
+struct Tie {
+  struct Entry {
+    int node = -1;
+    int k = 0;
+    double coef = 0.0;
+  };
+  std::vector<Entry> entries;
+};
+struct Supports {
+  std::vector<int> fixedNodes;
+  std::vector<HeldNode> held;
+  std::vector<Tie> ties;
+  bool reactions = false;
+};
+
 // Several load cases on one stiffness (docs/topopt/README.md#load-cases): K
 // is assembled and factorised once, and each case is one right-hand side —
 // its face loads plus the gravity every case shares. One result per case, in
@@ -185,6 +247,38 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
            const std::vector<std::vector<FaceLoad>>& cases, std::string* error,
            const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0),
            const SolveOptions& options = {}, SolveReport* report = nullptr);
+// The same with supports beyond fixed nodes. A held node's DOF are taken in
+// its frame (K' = T^T K T), so a held direction is eliminated exactly as a
+// fixed DOF is; a tie eliminates its largest entry's DOF in terms of the
+// others. An external (GPU) solver declines a system with held nodes:
+// it applies each element matrix in x, y, z.
+std::optional<std::vector<FemResults>>
+SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
+           const Supports& supports,
+           const std::vector<std::vector<FaceLoad>>& cases, std::string* error,
+           const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0),
+           const SolveOptions& options = {}, SolveReport* report = nullptr);
+
+// Whether constraints leave a rigid motion free: each held direction `d` at
+// a point `x` is the row [d, x x d] against the six rigid motions (a tie the
+// sum of its entries' rows), and a rank under six is a mechanism. Empty when
+// none is free; otherwise the free motion, in words ("turn about an axis along
+// (0, 0, 1) through (10, 0, 3)" or "slide along (1, 0, 0)").
+std::string FreeRigidMotion(const FemMesh& mesh, const Supports& supports,
+                            glm::dvec3* axisDir = nullptr,
+                            glm::dvec3* axisPoint = nullptr,
+                            bool* turns = nullptr);
+
+// The support-edge flag of a solved field: `supportTris` are each support's
+// boundary triangles (indices into mesh.boundary) with its id and type.
+struct SupportFacets {
+  uint64_t id = 0;
+  LoadType type = LoadType::Fixed;
+  std::vector<int> tris;
+};
+FemResults::SupportEdgePeak
+FindSupportEdgePeak(const FemMesh& mesh, const FemResults& results,
+                    const std::vector<SupportFacets>& supports);
 
 // Solves the generalized eigenproblem K phi = omega^2 M phi for the lowest
 // `numModes` natural frequencies + mode shapes (consistent mass matrix). Needs
@@ -374,6 +468,18 @@ struct StudyJobBody {
   // MeshPlannedStudy from the plan's members. Empty = `mat` throughout.
   std::vector<Material> materials;
   std::vector<int> fixedNodes;
+  // Every support's facets (fixed and pin), for the reactions and the
+  // support-edge flag, and each pin's axis (docs/simulation/README.md
+  // #pin-supports).
+  std::vector<SupportFacets> supports;
+  struct PinSupport {
+    uint64_t id = 0;
+    std::vector<int> tris; // indices into mesh.boundary
+    glm::dvec3 axisOrigin{0.0};
+    glm::dvec3 axisDirection{0.0, 0.0, 1.0};
+    bool fixRotation = false;
+  };
+  std::vector<PinSupport> pins;
   std::vector<FaceLoad> faceLoads;
   // With load cases: each case's face loads (`faceLoads` is then empty).
   std::vector<std::vector<FaceLoad>> caseLoads;

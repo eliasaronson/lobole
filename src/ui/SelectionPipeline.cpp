@@ -430,6 +430,8 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
               "Esc cancels"
         : tool == SimulationState::Tool::Remote
             ? "Pick the face that carries the remote load - Esc cancels"
+        : tool == SimulationState::Tool::Pin
+            ? "Pick the bore (or shaft) the pin holds - Esc cancels"
             : "Pick a face for the boundary condition - Esc cancels";
     return ArmedContext{KindBit(SelectionItem::Kind::Face), prompt,
                         ConsumeSimFace};

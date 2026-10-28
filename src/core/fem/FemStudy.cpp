@@ -44,6 +44,8 @@ const char* LoadTypeToString(LoadType type) {
     return "torque";
   case LoadType::Remote:
     return "remote";
+  case LoadType::Pin:
+    return "pin";
   }
   return "fixed";
 }
@@ -67,6 +69,10 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
   }
   if (s == "remote") {
     out = LoadType::Remote;
+    return true;
+  }
+  if (s == "pin") {
+    out = LoadType::Pin;
     return true;
   }
   return false;
@@ -263,7 +269,7 @@ bool ValidateLoadCases(const Study& study, std::string* error) {
   }
   std::vector<int> count(study.loadCases.size(), 0);
   for (const Load& l : study.loads) {
-    if (l.type == LoadType::Fixed) {
+    if (IsSupport(l.type)) {
       if (!l.loadCase.empty())
         return fail("load " + std::to_string(l.id) +
                     " is a support in load case '" + l.loadCase +
@@ -421,6 +427,18 @@ bool CompleteLoadGeometry(const TopoDS_Shape& face, Load& load,
                  ": a torque on a face that is not cylindrical needs an axis "
                  "(axis_origin_mm and axis_dir); a cylindrical face lends its "
                  "own";
+      return false;
+    }
+    load.axisOrigin = axis->origin;
+    load.axisDirection = axis->direction;
+  }
+  if (load.type == LoadType::Pin) {
+    const auto axis = CylindricalFaceAxis(face);
+    if (!axis) {
+      if (error)
+        *error = "load " + std::to_string(load.id) +
+                 ": a pin support goes on a cylindrical face (a bore or a "
+                 "shaft); this face is not one";
       return false;
     }
     load.axisOrigin = axis->origin;
@@ -620,7 +638,7 @@ bool PlanShapeMesh(const Document& doc, const Study& study, int bodyIndex,
   std::set<int> fixedFaces;
   std::map<int, uint64_t> loadedFaces; // face index -> a load on it
   for (const auto& [faceIndex, load] : bp.loads)
-    if (load.type == LoadType::Fixed)
+    if (IsSupport(load.type))
       fixedFaces.insert(faceIndex);
     else
       loadedFaces.emplace(faceIndex, load.id);
@@ -791,11 +809,19 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
                   (body.material.empty() ? "default" : body.material) +
                   "' has no stiffness data");
 
-    // Each loaded body needs at least one fixed support.
+    // Each loaded body needs at least one support.
     bool hasFixed = false;
-    for (const auto& [faceIndex, loadIdx] : plan.loads)
-      if (study.loads[loadIdx].type == LoadType::Fixed)
+    for (const auto& [faceIndex, loadIdx] : plan.loads) {
+      const Load& l = study.loads[loadIdx];
+      if (IsSupport(l.type))
         hasFixed = true;
+      // A pin holds only where it is pressed, and a mode has no load to
+      // press it (docs/simulation/README.md#pin-supports).
+      if (l.type == LoadType::Pin && study.type == AnalysisType::Modal)
+        return fail("load " + std::to_string(l.id) +
+                    ": a modal study's supports are fixed; a pin holds where "
+                    "a load presses the part onto it, and a mode has none");
+    }
     if (!hasFixed)
       return fail("body '" + body.name + "' has loads but no fixed support");
 
@@ -918,6 +944,8 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     // faces contribute all their boundary-tri nodes; force/pressure faces
     // contribute their tri indices.
     std::set<int> fixedSet;
+    std::vector<SupportFacets> supportFacets;
+    std::vector<StudyJobBody::PinSupport> pins;
     std::vector<FaceLoad> faceLoads;
     std::vector<std::vector<FaceLoad>> caseLoads(plan.caseNames.size());
     // A torque or remote load on a face the imprint split arrives once per
@@ -936,14 +964,46 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     for (const auto& [faceIndex, load] : bp.loads) {
       if (load.type == LoadType::Fixed) {
         size_t before = fixedSet.size();
-        for (const auto& tri : mesh->boundary)
-          if (tri.faceIndex == faceIndex && inRegion(tri, load.region))
+        SupportFacets sf{load.id, load.type, {}};
+        for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t) {
+          const auto& tri = mesh->boundary[t];
+          if (tri.faceIndex == faceIndex && inRegion(tri, load.region)) {
+            sf.tris.push_back(t);
             for (int n : tri.nodes)
               fixedSet.insert(n);
+          }
+        }
         if (!load.region.IsWhole() && fixedSet.size() == before)
           return fail("body '" + bp.bodyName + "': load " +
                       std::to_string(load.id) +
                       "'s region holds none of its face's mesh facets");
+        // A fixed support split by an imprint is one support.
+        bool merged = false;
+        for (SupportFacets& have : supportFacets)
+          if (load.id != 0 && have.id == load.id) {
+            have.tris.insert(have.tris.end(), sf.tris.begin(), sf.tris.end());
+            merged = true;
+          }
+        if (!merged)
+          supportFacets.push_back(std::move(sf));
+      } else if (load.type == LoadType::Pin) {
+        StudyJobBody::PinSupport pin;
+        pin.id = load.id;
+        pin.axisOrigin = load.axisOrigin;
+        pin.axisDirection = load.axisDirection;
+        pin.fixRotation = load.fixRotation;
+        for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
+          if (mesh->boundary[t].faceIndex == faceIndex &&
+              inRegion(mesh->boundary[t], load.region))
+            pin.tris.push_back(t);
+        if (pin.tris.empty())
+          return fail("body '" + bp.bodyName + "': pin " +
+                      std::to_string(load.id) +
+                      (load.region.IsWhole()
+                           ? "'s face meshed to no facets"
+                           : "'s region holds none of its face's mesh facets"));
+        supportFacets.push_back({load.id, load.type, pin.tris});
+        pins.push_back(std::move(pin));
       } else {
         std::vector<int> tris;
         for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
@@ -985,10 +1045,12 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
         into.push_back(std::move(fl));
       }
     }
-    if (fixedSet.empty())
+    if (fixedSet.empty() && pins.empty())
       return fail("body '" + bp.bodyName + "': fixed face meshed to no nodes");
 
     StudyJobBody jb;
+    jb.supports = std::move(supportFacets);
+    jb.pins = std::move(pins);
     jb.bodyIndex = bp.bodyIndex;
     jb.bodyName = bp.bodyName;
     jb.mat = bp.mat;
@@ -1017,6 +1079,298 @@ bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
   }
   return true;
 }
+
+namespace {
+
+// The facet's corner normal, outward as Netgen orients a boundary triangle.
+glm::dvec3 FacetCross(const FemMesh& mesh, const FemMesh::BoundaryTri& t) {
+  const glm::dvec3& a = mesh.nodes[t.nodes[0]];
+  return glm::cross(mesh.nodes[t.nodes[1]] - a, mesh.nodes[t.nodes[2]] - a);
+}
+
+// One pin as the contact iteration sees it: its facets, its nodes and each
+// node's frame (into the material, round the axis, along it).
+struct PinState {
+  const StudyJobBody::PinSupport* pin = nullptr;
+  std::vector<int> nodes;                       // unique, ascending
+  std::map<int, int> slot;                      // node -> index into nodes
+  std::vector<std::array<glm::dvec3, 3>> frame; // per node
+  std::vector<char> active;                     // per facet (pin->tris)
+  std::vector<double> nodeWeight;               // area share x radius, per node
+  double faceArea = 0.0;
+};
+
+// Solves one body with pins (docs/simulation/README.md#pin-supports): per
+// case, the facets each pin presses on are found by iterating linear solves
+// -- a facet whose nodes the pin pulls leaves the contact, one whose nodes
+// move into the pin returns -- and each iteration's constraints are tested
+// for a rigid motion they leave free before anything is factored.
+std::optional<std::vector<FemResults>>
+SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
+              const std::vector<std::vector<FaceLoad>>& rhs,
+              const glm::dvec3& g, const SolveOptions& options,
+              SolveReport& report, std::string* error) {
+  const FemMesh& mesh = jb.mesh;
+  auto fail =
+      [&](const std::string& m) -> std::optional<std::vector<FemResults>> {
+    if (error)
+      *error = m;
+    return std::nullopt;
+  };
+  std::vector<PinState> pins(jb.pins.size());
+  for (size_t p = 0; p < jb.pins.size(); ++p) {
+    PinState& ps = pins[p];
+    ps.pin = &jb.pins[p];
+    const glm::dvec3 a = glm::normalize(ps.pin->axisDirection);
+    const glm::dvec3 o = ps.pin->axisOrigin;
+    std::set<int> nodes;
+    double side = 0.0; // > 0: the face looks away from the axis (a shaft)
+    for (int t : ps.pin->tris) {
+      const auto& tri = mesh.boundary[t];
+      for (int v : tri.nodes)
+        nodes.insert(v);
+      const glm::dvec3 cr = FacetCross(mesh, tri);
+      ps.faceArea += 0.5 * glm::length(cr);
+      glm::dvec3 c = (mesh.nodes[tri.nodes[0]] + mesh.nodes[tri.nodes[1]] +
+                      mesh.nodes[tri.nodes[2]]) /
+                     3.0;
+      glm::dvec3 r = (c - o) - glm::dot(c - o, a) * a;
+      side += glm::dot(cr, r);
+    }
+    ps.nodes.assign(nodes.begin(), nodes.end());
+    for (size_t i = 0; i < ps.nodes.size(); ++i) {
+      ps.slot[ps.nodes[i]] = static_cast<int>(i);
+      const glm::dvec3 x = mesh.nodes[ps.nodes[i]];
+      glm::dvec3 r = (x - o) - glm::dot(x - o, a) * a;
+      if (glm::length(r) <= 0.0)
+        return fail("pin " + std::to_string(ps.pin->id) +
+                    ": a node of its face lies on its axis");
+      r = glm::normalize(r);
+      // Into the material: away from the axis in a bore, towards it on a
+      // shaft.
+      const glm::dvec3 m = side > 0.0 ? -r : r;
+      ps.frame.push_back({m, glm::cross(a, m), a});
+    }
+    ps.active.assign(ps.pin->tris.size(), 1);
+    // Each node's share of its facets' area (a third of each corner's, a
+    // sixth of each node's; any positive share ties the turn), times its
+    // distance from the axis: the tie is then the face's moment of slide.
+    ps.nodeWeight.assign(ps.nodes.size(), 0.0);
+    for (int t : ps.pin->tris) {
+      const auto& tri = mesh.boundary[t];
+      const double area = 0.5 * glm::length(FacetCross(mesh, tri));
+      for (int v : tri.nodes)
+        ps.nodeWeight[ps.slot.at(v)] += area / 6.0;
+    }
+    for (size_t i = 0; i < ps.nodes.size(); ++i) {
+      const glm::dvec3 x = mesh.nodes[ps.nodes[i]];
+      ps.nodeWeight[i] *= glm::length((x - o) - glm::dot(x - o, a) * a);
+    }
+  }
+  const auto pinFreeToTurn = [&](const glm::dvec3& dir, const glm::dvec3& pt,
+                                 double scale) -> const PinState* {
+    for (const PinState& ps : pins) {
+      if (ps.pin->fixRotation)
+        continue;
+      const glm::dvec3 a = glm::normalize(ps.pin->axisDirection);
+      const glm::dvec3 d = pt - ps.pin->axisOrigin;
+      if (std::abs(glm::dot(a, dir)) > 1.0 - 1e-6 &&
+          glm::length(d - glm::dot(d, a) * a) < 1e-3 * scale)
+        return &ps;
+    }
+    return nullptr;
+  };
+  glm::dvec3 lo(1e300), hi(-1e300);
+  for (const glm::dvec3& p : mesh.nodes) {
+    lo = glm::min(lo, p);
+    hi = glm::max(hi, p);
+  }
+  const double scale = glm::length(hi - lo);
+
+  constexpr int kMaxContactIterations = 30;
+  std::vector<FemResults> out;
+  for (size_t k = 0; k < rhs.size(); ++k) {
+    for (PinState& ps : pins)
+      ps.active.assign(ps.pin->tris.size(), 1);
+    const std::string inCase =
+        rhs.size() > 1 ? " in load case " + std::to_string(k + 1) : "";
+    bool settled = false, finalPass = false;
+    std::vector<std::vector<char>> seen;
+    {
+      std::vector<char> state;
+      for (const PinState& ps : pins)
+        state.insert(state.end(), ps.active.begin(), ps.active.end());
+      seen.push_back(std::move(state));
+    }
+    for (int it = 0; it < kMaxContactIterations && !settled; ++it) {
+      Supports sup;
+      sup.fixedNodes = jb.fixedNodes;
+      sup.reactions = true;
+      for (const PinState& ps : pins) {
+        std::vector<char> held(ps.nodes.size(), 0);
+        for (size_t f = 0; f < ps.pin->tris.size(); ++f)
+          if (ps.active[f])
+            for (int v : mesh.boundary[ps.pin->tris[f]].nodes)
+              held[ps.slot.at(v)] = 1;
+        // Radially and axially where the facets press on the pin. A pin
+        // held from turning ties its face's slides round the axis, weighted
+        // by the area each node stands for and its radius: the face as a
+        // whole does not turn, while each node may still slide.
+        Tie tie;
+        for (size_t i = 0; i < ps.nodes.size(); ++i)
+          if (held[i] || ps.pin->fixRotation) {
+            HeldNode h;
+            h.node = ps.nodes[i];
+            h.frame = ps.frame[i];
+            h.held = {bool(held[i]), false, bool(held[i])};
+            sup.held.push_back(h);
+            if (ps.pin->fixRotation)
+              tie.entries.push_back({ps.nodes[i], 1, ps.nodeWeight[i]});
+          }
+        if (!tie.entries.empty())
+          sup.ties.push_back(std::move(tie));
+      }
+      glm::dvec3 dir(0.0), pt(0.0);
+      bool turns = false;
+      const std::string free = FreeRigidMotion(mesh, sup, &dir, &pt, &turns);
+      if (!free.empty()) {
+        const PinState* about = turns ? pinFreeToTurn(dir, pt, scale) : nullptr;
+        if (it == 0)
+          return fail("its supports leave it free to " + free +
+                      (about ? ": pin " + std::to_string(about->pin->id) +
+                                   " turns freely, so the part needs a second "
+                                   "support, or fix_rotation on the pin"
+                             : ""));
+        return fail("the loads" + inCase +
+                    " pull it off its pins: held only where it presses on "
+                    "them, it is free to " +
+                    free);
+      }
+      SolveReport r;
+      auto one = SolveCases(mesh, mats, sup, {rhs[k]}, error, g, options, &r);
+      if (!one)
+        return std::nullopt;
+      report.solver = r.solver;
+      report.iterations += r.iterations;
+      report.worstResidual = std::max(report.worstResidual, r.worstResidual);
+      if (!r.externalDeclined.empty())
+        report.externalDeclined = r.externalDeclined;
+      FemResults& res = one->front();
+      // Thresholds: a pull smaller than a millionth of the largest reaction
+      // on the pins, a move smaller than a billionth of the largest one.
+      double maxR = 0.0;
+      for (const PinState& ps : pins)
+        for (int v : ps.nodes)
+          maxR = std::max(maxR, glm::length(res.nodeReaction[v]));
+      const double tolR = 1e-6 * maxR;
+      const double tolU = 1e-9 * std::max(res.maxDisplacement, 1e-300);
+      bool changed = false;
+      double pushed = 0.0, pulled = 0.0;
+      for (PinState& ps : pins)
+        for (size_t f = 0; f < ps.pin->tris.size(); ++f) {
+          const auto& tri = mesh.boundary[ps.pin->tris[f]];
+          double push = 0.0, into = 0.0;
+          for (int v : tri.nodes) {
+            const glm::dvec3& m = ps.frame[ps.slot.at(v)][0];
+            push += glm::dot(res.nodeReaction[v], m);
+            into += glm::dot(res.displacement[v], m);
+          }
+          if (ps.active[f]) {
+            pushed += std::max(push, 0.0);
+            pulled += std::max(-push, 0.0);
+          }
+          if (finalPass)
+            continue;
+          if (ps.active[f] && push < -tolR) {
+            ps.active[f] = 0;
+            changed = true;
+          } else if (!ps.active[f] && into / 6.0 < -tolU) {
+            ps.active[f] = 1;
+            changed = true;
+          }
+        }
+      // A facet straddling the contact's edge can flip each time: once the
+      // set repeats, only the facets every state of the cycle had in
+      // contact stay in it, and that is solved once more as the answer --
+      // the edge facets let go rather than kept pulling.
+      if (changed && !finalPass) {
+        std::vector<char> state;
+        for (const PinState& ps : pins)
+          state.insert(state.end(), ps.active.begin(), ps.active.end());
+        for (size_t h = 0; h < seen.size(); ++h)
+          if (seen[h] == state) {
+            for (size_t q = h; q < seen.size(); ++q)
+              for (size_t i = 0; i < state.size(); ++i)
+                state[i] &= seen[q][i];
+            size_t at = 0;
+            for (PinState& ps : pins)
+              for (char& c : ps.active)
+                c = state[at++];
+            finalPass = true;
+            break;
+          }
+        seen.push_back(std::move(state));
+      } else if (finalPass) {
+        changed = false;
+      }
+      // The answer holds no pull worth the name: a pin that pulls is not one.
+      if (!changed && pulled > 1e-3 * pushed)
+        return fail("the pins' contact" + inCase +
+                    " did not settle: it still pulls on the part");
+      if (!changed) {
+        settled = true;
+        // What each pin pressed on.
+        for (const PinState& ps : pins) {
+          FemResults::SupportReaction sr;
+          sr.support = ps.pin->id;
+          sr.type = LoadType::Pin;
+          sr.faceAreaMm2 = ps.faceArea;
+          for (size_t f = 0; f < ps.pin->tris.size(); ++f)
+            if (ps.active[f])
+              sr.contactAreaMm2 +=
+                  0.5 *
+                  glm::length(FacetCross(mesh, mesh.boundary[ps.pin->tris[f]]));
+          res.reactions.push_back(sr);
+        }
+        out.push_back(std::move(res));
+      }
+    }
+    if (!settled)
+      return fail("the pins' contact" + inCase + " did not settle in " +
+                  std::to_string(kMaxContactIterations) + " iterations");
+  }
+  return out;
+}
+
+// Each support's total reaction, from the nodes' (every node counted once,
+// for the first support that holds it), into the result's reaction list;
+// then the support-edge flag. Clears the per-node reactions.
+void FinishSupports(const StudyJobBody& jb, FemResults& res) {
+  std::vector<FemResults::SupportReaction> pinRows = std::move(res.reactions);
+  res.reactions.clear();
+  std::vector<char> counted(jb.mesh.nodes.size(), 0);
+  for (const SupportFacets& sf : jb.supports) {
+    FemResults::SupportReaction sr;
+    for (const auto& pr : pinRows)
+      if (pr.support == sf.id && sf.type == LoadType::Pin)
+        sr = pr;
+    sr.support = sf.id;
+    sr.type = sf.type;
+    if (res.nodeReaction.size() == jb.mesh.nodes.size())
+      for (int t : sf.tris)
+        for (int v : jb.mesh.boundary[t].nodes)
+          if (!counted[v]) {
+            counted[v] = 1;
+            sr.forceN += res.nodeReaction[v];
+          }
+    res.reactions.push_back(sr);
+  }
+  res.nodeReaction.clear();
+  res.nodeReaction.shrink_to_fit();
+  res.supportEdgePeak = FindSupportEdgePeak(jb.mesh, res, jb.supports);
+}
+
+} // namespace
 
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
                         const SolveOptions& options) {
@@ -1060,10 +1414,20 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       const std::vector<Material> mats =
           jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
       SolveReport report;
-      auto all = SolveCases(jb.mesh, mats, jb.fixedNodes, rhs, &err, g, options,
-                            &report);
+      std::optional<std::vector<FemResults>> all;
+      if (jb.pins.empty()) {
+        Supports sup;
+        sup.fixedNodes = jb.fixedNodes;
+        sup.reactions = true;
+        all = SolveCases(jb.mesh, mats, sup, rhs, &err, g, options, &report);
+      } else {
+        report.solver = kDirectSolverName;
+        all = SolveWithPins(jb, mats, rhs, g, options, report, &err);
+      }
       if (!all)
         return fail("body '" + jb.bodyName + "': " + err);
+      for (FemResults& c : *all)
+        FinishSupports(jb, c);
       // Several bodies may solve differently; the study names the
       // heaviest solver any body needed, which is the one a reader wants to
       // know about, and why an offered GPU was not it.
@@ -1139,6 +1503,11 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
     return fail(err);
   if (study.volumeFraction <= 0.0 || study.volumeFraction >= 1.0)
     return fail("volume fraction must be in (0, 1)");
+  for (const Load& l : study.loads)
+    if (l.type == LoadType::Pin)
+      return fail("load " + std::to_string(l.id) +
+                  ": a topology study's supports are fixed (it freezes the "
+                  "faces they hold); a pin is a static study's");
   if (!ValidateLoadCases(study, &err))
     return fail(err);
 
@@ -1250,7 +1619,7 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
   for (const auto& [faceIndex, loadIdx] : bodyLoads[bodyIndex])
     anchorFace.emplace(
         faceIndex,
-        (study.loads[loadIdx].type == LoadType::Fixed ? "support " : "load ") +
+        (IsSupport(study.loads[loadIdx].type) ? "support " : "load ") +
             std::to_string(study.loads[loadIdx].id));
   for (size_t i = 0; i < keepFaceIdx.size(); ++i)
     if (keepFaceIdx[i] >= 0)

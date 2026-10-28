@@ -629,7 +629,17 @@ struct SimulationState {
   // Torque and Remote place those loads; Probe reads a solved static
   // study's stress on the face under the cursor and pins what is clicked
   // (docs/simulation/README.md#probing-a-face).
-  enum class Tool { None, Fixed, Force, Pressure, Keep, Torque, Remote, Probe };
+  enum class Tool {
+    None,
+    Fixed,
+    Force,
+    Pressure,
+    Keep,
+    Torque,
+    Remote,
+    Probe,
+    Pin
+  };
   Tool tool = Tool::None;
 
   // Dragging a force arrow in the viewport to change its MAGNITUDE
@@ -663,6 +673,8 @@ struct SimulationState {
   // face's radius when it is placed, unless typed) and the axis it turns
   // about. With no axis chosen a cylindrical face lends its own and any
   // other face is refused (placeRefusal).
+  // The Pin tool: whether the next pin also holds the part from turning.
+  bool pendingPinFixRotation = false;
   double pendingTorque = 0.0;
   std::string pendingTorqueExpr;
   bool torqueAxisChosen = false;

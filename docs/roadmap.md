@@ -124,13 +124,6 @@ them:
 
 - **FEM:** thermal, buckling and nonlinear studies; modal analysis without
   supports (free-free); VTU export of results.
-- **A support that bears like a pin in a bore.** The only support is
-  `fixed`: clamping a hub's bore face puts the study's peak stress, and the
-  `factor_of_safety` read from it, on the edge where the clamp ends -- a
-  printed lever on two pins reads a factor of 0.1 where its real stresses
-  are a fifth of yield. A pin support (compression on the loaded half, free
-  to turn), or at least a flag on a peak that sits on a support's boundary,
-  would keep the headline number honest.
 - **Tolerances:** an inferred stack-up chain (`stack_up` sums a chain the
   caller states), and general-tolerance tables (ISO 2768).
 - **Beam elements** for tube frames: `check_frame` checks the member graph,

@@ -218,6 +218,11 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   if (study.type == AnalysisType::Topology)
     return fail("topology optimisation is a part study; an assembly study is "
                 "static or modal");
+  for (const Load& l : study.loads)
+    if (l.type == LoadType::Pin)
+      return fail("load " + std::to_string(l.id) +
+                  ": a pin support is a part study's; an assembly study holds "
+                  "its part with fixed faces or a rigid neighbour's contact");
   out.type = study.type;
   out.numModes = study.numModes;
   out.gravity = study.gravity;

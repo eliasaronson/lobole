@@ -21,7 +21,9 @@ A study holds:
 
 - `meshSize` (mm; 0 = auto, the body's bounding-box diagonal / 15) and
   per-face `refinements` (a target element size on one face).
-- `loads`: each a `Fixed` support, a `Force` (a total vector in newtons,
+- `loads`: each a `Fixed` support, a `Pin` support (a rigid pin in a bore
+  that holds where the part presses on it, [pin supports](#pin-supports)),
+  a `Force` (a total vector in newtons,
   spread as uniform traction over the face), a `Pressure` (MPa along the
   inward normal, positive pushes into the part), a `Torque` (N·mm about an
   axis) or a `Remote` force (newtons acting at a point off the face)
@@ -93,6 +95,99 @@ end twists by `TL/GJ` and its surface carries `√3·Tr/J`; a torque on a
 cylinder's side through `RunStudy` twists the end by `TL/2GJ`; a remote
 force's nodal loads are `F` and `(p − c) × F`, and the reactions at the
 clamp answer them; the refusals.
+
+### Pin supports
+
+A part hung on a pin is not clamped: the pin pushes on the side of the bore
+the load presses onto, the other side is free to lift away, and the part
+turns on it. Clamping the bore (`fixed`) glues it all round, holds the far
+side in tension and puts a clamp's edge on the bore's rims. A `pin` support
+(`LoadType::Pin`; SolidWorks' *bearing fixture*, Ansys' *cylindrical* or
+*compression only* support) holds it the way the pin does.
+
+- **On a cylindrical face only**: a bore, or a shaft in a bearing. Its axis
+  is the face's (`fem::CylindricalFaceAxis`, set by `CompleteLoadGeometry`
+  at the run). Any other face is refused, naming what is accepted, by
+  `add_load`, by the panel's click and by the run. A pin takes a `region`
+  like any support ([loads on part of a face](#loads-on-part-of-a-face)).
+- **What it holds.** The pin is rigid and does not move. At each node of
+  the face it holds the RADIAL displacement (from the axis) and the AXIAL
+  one, and leaves the slide ROUND the axis free: the part turns on it
+  without friction. `fixRotation` (`fix_rotation: true`) stops the face
+  turning as a whole -- the sum of its nodes' slides round the axis, each
+  weighted by its share of the face's area and its radius, is tied to zero
+  -- while each node may still slide. On a whole bore that is a pure turn;
+  on part of one (a region) it holds some slide across the axis too.
+- **Compression only.** The radial direction is signed into the material by
+  the face's outward normal, so one rule serves a bore and a shaft: the pin
+  may push the part, never pull it. Which facets it pushes on is found by
+  iterating linear solves (`SolveWithPins`, `src/core/fem/FemStudy.cpp`):
+  every facet in contact first; then a facet whose nodes' radial reactions
+  sum to a pull leaves the contact, and one out of it whose nodes move into
+  the pin on average comes back, until the set holds still (30 rounds at
+  most, else a study error; a lever takes three to eight). Decided per
+  facet, not per node, because a tri6 under a uniform pressure loads its
+  corners not at all, and a varying one a little either way. A facet on
+  the contact's edge that flips each round is let go: once the set
+  repeats, only the facets every state of the cycle had in contact stay,
+  and that is solved once more. An answer whose contact still pulls (more
+  than a thousandth of what it pushes) is refused. Each load case finds its
+  own contact.
+- **In the solver** (`fem::SolveCases` with `fem::Supports`): a node a pin
+  holds takes its DOF in its own frame (into the material, round the axis,
+  along it; `K' = Tᵀ K T` per element, loads rotated the same way, the
+  answer rotated back), so a held direction is eliminated exactly as a
+  fixed DOF is, and K stays symmetric positive definite. A tie (`fem::Tie`)
+  eliminates its largest entry's DOF in terms of the others.
+- **A mechanism is refused, never solved.** Before each solve the held
+  directions are tested against the six rigid motions (`FreeRigidMotion`:
+  the 6x6 Gram matrix of the rows `[d, (x − c) × d]`, a tie the sum of its
+  rows): a rank under six names the free motion. A lever on ONE pin free to
+  turn: "free to turn about an axis along … through …: pin N turns freely,
+  so the part needs a second support, or fix_rotation on the pin"; two
+  pins on one axis the same. A load that lifts the part off its pins (the
+  contact shrinks until nothing holds it): "the loads pull it off its pins".
+- **What it reports.** Every static result lists what each support carried
+  (`FemResults::reactions`, the internal force less the applied load summed
+  over the support's nodes, each node counted once): its force on the part
+  in newtons, and for a pin the area of its face in contact, of the face's.
+  A lever's two pins carry its statics.
+- **What it costs.** Each round is a solve: a pinned study takes as many
+  factorizations as rounds, where a clamped one takes one.
+- **Not modelled.** Clearance: a pin smaller than its bore presses on a
+  narrower arc and raises the bearing stress, which this underestimates.
+  Friction. A pin on a modal study (a mode has no load to press the part
+  onto it), a topology study (it freezes the faces its fixed supports
+  hold) or an assembly study (held by fixed faces and rigid contacts) is
+  refused, naming why.
+- **The GPU declines it.** The femgpu SpMV applies each element matrix
+  relative to its first node's translation, which holds only when every node
+  is in x, y, z; a pinned study above the iterative threshold solves on the
+  CPU's PCG, and the result's `solver` says "GPU declined: a pin support
+  holds nodes in rotated frames, which the GPU solve does not take".
+
+### A peak on a support's edge
+
+A clamp's edge is a singularity: the stress where a fixed face meets a free
+one grows as the mesh is refined, so the study's peak, and the
+`factor_of_safety` read from it, can be a property of the mesh at the clamp
+rather than of the part. Every static result checks
+(`fem::FindSupportEdgePeak`): a support's EDGE is the nodes of its facets
+that a boundary facet it does not hold also has (a clamp's rim, a bore's
+rims); if the peak von Mises node is within one element of an edge (a node
+of a tet that has an edge node), the result carries `supportEdgePeak`:
+which support, and the largest von Mises farther than one element from
+every support's edge. `study_results` reports it as `peak_at_support_edge`
+{support, type, max_von_mises_away_mpa, away_at, factor_of_safety_away}
+per body, per case and for the top-level peak, and the factor of safety's
+receipt says its peak sits on a support's edge. The headline number is
+unchanged; it is no longer silent.
+
+A printed PLA lever on two Ø5 mm bores, pushed down at its end (`[pin]`,
+"a lever on two pins"), its bores meshed at 1.0 and then 0.5 mm: clamped,
+the peak grows with the mesh (11.5, then 12.3 MPa) and is flagged on a
+bore's rim; pinned, it is the lever's bending at the second bore and holds
+still (11.3, then 11.4 MPa, against M c / I = 10.5).
 
 ### Loads on part of a face
 
@@ -236,7 +331,7 @@ or three, but the engine's one-piece camshaft (tapered lobes) drifts for
 more than eight, and hashed within eight it opened every requirement over
 the engine stale.
 
-A version string leads each hash (`motion/1`, `fem/1`); a change to what a
+A version string leads each hash (`motion/3`, `fem/3`); a change to what a
 run computes bumps it. The solver a run picks (GPU or CPU, direct or
 iterative) is not an input: every one is held to the same residual. A finished whole run is kept by its hash in the session
 (`AppState::motionResultsByInput`, 32; `studyResultsByInput`, 8; a cancelled
@@ -415,6 +510,9 @@ shared with topology optimization), namespace `fem`, GUI-free. Gated
   assembled K whichever solver produced it. That is how an
   under-constrained model is refused: an LDLT factorization can report
   success on a singular K.
+  - Supports beyond fixed nodes (a pin's) hold nodes in their own frames
+    ([pin supports](#pin-supports)); each support's reaction is the
+    internal force less the load over its nodes.
   - **The linear solver** is chosen by K's size
     (`SolveOptions`, `src/core/fem/FemSolveOptions.h`). Up to
     `kIterativeAboveDofs` (20k) free DOF it is `SimplicialLDLT`. Above it, a
@@ -459,12 +557,14 @@ shared with topology optimization), namespace `fem`, GUI-free. Gated
 Per-part bodies are independent: a part study meshes and solves each body it
 references separately, with no contact between them, and `study_results`
 reports one entry per body. Only bodies that carry a load or refinement are
-meshed; each needs a fixed support ("has loads but no fixed support" is
-checked before any factorization).
+meshed; each needs a support, fixed or pin ("has loads but no fixed
+support" is checked before any factorization).
 
 `study_results` for a static study reports `max_von_mises_mpa` and
-`max_displacement_mm` (`{value, at, body}`), the per-body breakdown, and a
-factor of safety against the material's yield strength when one is known.
+`max_displacement_mm` (`{value, at, body}`), the per-body breakdown with
+each support's `reactions`, and a factor of safety against the material's
+yield strength when one is known, flagged when its peak sits on a
+support's edge ([a peak on a support's edge](#a-peak-on-a-supports-edge)).
 With load cases the top level is the worst over them and `cases` lists each
 one's maxima and factor of safety. The
 factor travels with a receipt whose basis is *predicted*, and which is
@@ -673,7 +773,8 @@ tinted as a fixture, and bonded seams in the bond colour.
   participants table with a role per row and **Clamp here** on rigid rows.
 - In the window: analysis type, mesh size, material check, gravity (a
   checkbox that sets world-down 9.81 m/s²), and **Boundary conditions**: arm
-  Fixed, Force, Pressure, Torque or Remote and click a face; magnitude and an
+  Fixed, Force, Pressure, Torque, Remote or (on a static part study) Pin
+  and click a face; magnitude and an
   optional custom direction apply to the next placement. **Torque** takes
   "Torque (N·mm)" and an **Axis**: "From the face (cylinder)", or the choices
   a Revolve's axis offers (X/Y/Z, datum axes, construction lines, custom).
@@ -684,7 +785,11 @@ tinted as a fixture, and bonded seams in the bond colour.
   untyped point is the clicked face's centroid pushed out along its normal
   by a tenth of the body's bounding diagonal, and the point stays editable
   in the load row's menu. A torque is drawn as a circular arrow about its
-  axis, a remote load as an arrow at its point with thin lines to the face. A placed force can be dragged in the
+  axis, a remote load as an arrow at its point with thin lines to the face.
+  **Pin** takes "Hold it from turning" (unticked: free to turn); a click on
+  a face that is not a cylinder is refused in the red line and places
+  nothing; a pin is tinted and hatched as a support, its row saying "free
+  to turn" or "held from turning". A placed force can be dragged in the
   viewport to change its magnitude (one undo step on release). Run shows the
   shared progress bar. Results: mesh size, max von Mises, max displacement,
   field selector and deformation slider; for modal, the natural frequencies
@@ -713,13 +818,13 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `add_study {type?, name?}` | `type`: static \| modal \| topology (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
 | `set_study` | `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes` (a modal study's: refused on another unless the same call sets `type: modal`, which is applied first), `participants`, `load_cases`, `shape_from`, and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
-| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
+| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
 | `run_study {id, async?, recompute?, outlive_client?}` | mesh + solve; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, factor of safety; with `layer_normal`, the stress across those layers and its factor of safety ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety and `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)); with `layer_normal`, the stress across those layers and its factor of safety ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` |
 | `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `case`: which load case a static study shows |
@@ -744,6 +849,15 @@ verb that names a study for context (`add_load`, `add_refinement`,
   assembly cases (clamped nodes on the interface only, the refusals by name,
   staleness across documents, the shared cache, a bonded pair with two
   materials and an answer softer than the rigid one).
+- `tests/test_fem_pin.cpp` (`[pin]`): a pinned lug's reaction answers the
+  pull, on about half its bore, its bearing stress against
+  (4/π) F/(d t) and the hole's sides against the net section F/((w − d) t);
+  a lever on two pins whose reactions are its statics, its clamped peak
+  growing with the mesh and flagged while the pinned one holds (`[slow]`);
+  a cantilever's clamp-edge peak flagged and a hole's peak not; the
+  refusals (a flat face, one free pin, two on one axis, a load that lifts
+  the part off, modal and topology); the iterative solve against the
+  direct one, and the GPU declining.
 - `tests/fem_smoke.py`, `tests/fem_async_smoke.py`: the RPC surface
   headless, including an assembly tab; the async one also a reused run, a
   job's status by id and a cancel by id. Both skip (exit 77) on a build without
@@ -753,13 +867,15 @@ verb that names a study for context (`add_load`, `add_refinement`,
   the centre of mass, a static run against beam theory, the assembly study
   window and its clamp, the list-row editor; a torque on a cylinder, a
   torque refused on a flat face and placed with an axis, a remote load's
-  default point, a probe pinned and made a requirement.
+  default point, a pin refused on a flat face and placed on a cylinder, a
+  probe pinned and made a requirement.
 - `tests/rpc_gate_smoke.py` checks the study verbs are accepted on an
   assembly tab.
 
 ## Not done
 
-- Contact that can separate or slide, and nonlinear analysis (plasticity,
+- Contact that can separate or slide between parts (a pin against its
+  rigid pin is the one compression-only contact), and nonlinear analysis (plasticity,
   large deformation), thermal, buckling, fatigue. The escape hatch if they
   are ever wanted is an external solver such as CalculiX, not growing this
   one past linear.

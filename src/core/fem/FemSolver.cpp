@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 
 #ifdef HAVE_FEM_SOLVER
 #include "core/fem/FemSolverInternal.h"
@@ -166,6 +167,18 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
            const std::vector<std::vector<FaceLoad>>& cases, std::string* error,
            const glm::dvec3& gravityAccel, const SolveOptions& options,
            SolveReport* report) {
+  Supports supports;
+  supports.fixedNodes = fixedNodes;
+  return SolveCases(mesh, byDomain, supports, cases, error, gravityAccel,
+                    options, report);
+}
+
+std::optional<std::vector<FemResults>>
+SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
+           const Supports& supports,
+           const std::vector<std::vector<FaceLoad>>& cases, std::string* error,
+           const glm::dvec3& gravityAccel, const SolveOptions& options,
+           SolveReport* report) {
   auto fail =
       [&](const std::string& m) -> std::optional<std::vector<FemResults>> {
     if (error)
@@ -193,12 +206,98 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     return Ds[std::min(d, Ds.size() - 1)];
   };
 
-  // DOF reduction map: -1 for fixed DOFs, else a compacted free-DOF index.
-  const DofMap dofs = BuildDofMap(nNodes, fixedNodes);
+  // Nodes held in their own frames: their DOF are local, R's columns. A
+  // node also fixed is fixed (all three held, its frame immaterial).
+  std::vector<char> isFixed(nNodes, 0);
+  for (int n : supports.fixedNodes)
+    if (n >= 0 && n < nNodes)
+      isFixed[n] = 1;
+  std::vector<int> frameOf(nNodes, -1);
+  std::vector<Eigen::Matrix3d> frames;
+  std::vector<char> heldDof(3 * nNodes, 0);
+  for (int n = 0; n < nNodes; ++n)
+    if (isFixed[n])
+      heldDof[3 * n] = heldDof[3 * n + 1] = heldDof[3 * n + 2] = 1;
+  for (const HeldNode& h : supports.held) {
+    if (h.node < 0 || h.node >= nNodes || isFixed[h.node])
+      continue;
+    if (frameOf[h.node] < 0) {
+      Eigen::Matrix3d R;
+      for (int k = 0; k < 3; ++k)
+        R.col(k) = Vector3d(h.frame[k].x, h.frame[k].y, h.frame[k].z);
+      frameOf[h.node] = static_cast<int>(frames.size());
+      frames.push_back(R);
+    }
+    for (int k = 0; k < 3; ++k)
+      if (h.held[k])
+        heldDof[3 * h.node + k] = 1;
+  }
+  const bool anyFrame = !frames.empty();
+  // Ties: each one's largest free entry is the MASTER, eliminated as
+  // u_m = sum_s f_s u_s over the others (f_s = -c_s / c_m). A tie left with
+  // one free entry holds it; with none, nothing.
+  struct TieElim {
+    int master = -1;                            // full DOF index
+    std::vector<std::pair<int, double>> slaves; // full DOF, factor
+  };
+  std::vector<TieElim> elims;
+  std::vector<int> tieOfDof(3 * nNodes, -1);
+  for (const Tie& tie : supports.ties) {
+    std::vector<std::pair<int, double>> live;
+    for (const Tie::Entry& e : tie.entries) {
+      if (e.node < 0 || e.node >= nNodes || e.k < 0 || e.k > 2 ||
+          frameOf[e.node] < 0 || e.coef == 0.0)
+        continue;
+      const int d = 3 * e.node + e.k;
+      if (!heldDof[d] && tieOfDof[d] < 0)
+        live.push_back({d, e.coef});
+    }
+    if (live.empty())
+      continue;
+    if (live.size() == 1) {
+      heldDof[live[0].first] = 1;
+      continue;
+    }
+    size_t m = 0;
+    for (size_t i = 1; i < live.size(); ++i)
+      if (std::abs(live[i].second) > std::abs(live[m].second))
+        m = i;
+    TieElim te;
+    te.master = live[m].first;
+    for (size_t i = 0; i < live.size(); ++i)
+      if (i != m)
+        te.slaves.push_back({live[i].first, -live[i].second / live[m].second});
+    tieOfDof[te.master] = static_cast<int>(elims.size());
+    heldDof[te.master] = 1;
+    elims.push_back(std::move(te));
+  }
+  // DOF reduction map: -1 for held DOFs, else a compacted free-DOF index.
+  DofMap dofs;
+  dofs.map.assign(3 * nNodes, -1);
+  for (int d = 0; d < 3 * nNodes; ++d)
+    if (!heldDof[d])
+      dofs.map[d] = dofs.nFree++;
   const std::vector<int>& dofMap = dofs.map;
   const int nFree = dofs.nFree;
   if (nFree == 0)
     return fail("model is fully constrained (no free DOF)");
+  // A full DOF as free ones: itself, a tie's master as its slaves, a held
+  // one as nothing.
+  const auto expand = [&](int d, std::vector<std::pair<int, double>>& out) {
+    out.clear();
+    if (dofMap[d] >= 0)
+      out.push_back({dofMap[d], 1.0});
+    else if (tieOfDof[d] >= 0)
+      for (const auto& [sd, f] : elims[tieOfDof[d]].slaves)
+        out.push_back({dofMap[sd], f});
+  };
+  // A node's local vector from its x, y, z one, and back.
+  const auto toLocal = [&](int n, const Vector3d& v) -> Vector3d {
+    return frameOf[n] < 0 ? v : Vector3d(frames[frameOf[n]].transpose() * v);
+  };
+  const auto toGlobal = [&](int n, const Vector3d& v) -> Vector3d {
+    return frameOf[n] < 0 ? v : Vector3d(frames[frameOf[n]] * v);
+  };
 
   // Assemble the reduced stiffness matrix from element contributions, each
   // with its own domain's elasticity (S2: a bonded group of materials).
@@ -228,7 +327,36 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
           return fail("mesh has a degenerate element");
         Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D * B);
       }
-      // Scatter into the reduced system, skipping fixed DOFs.
+      // A node held in its own frame takes its rows and columns there.
+      if (anyFrame) {
+        bool rotated = false;
+        Eigen::Matrix<double, 30, 30> T =
+            Eigen::Matrix<double, 30, 30>::Identity();
+        for (int i = 0; i < 10; ++i)
+          if (frameOf[tet[i]] >= 0) {
+            T.block<3, 3>(3 * i, 3 * i) = frames[frameOf[tet[i]]];
+            rotated = true;
+          }
+        if (rotated)
+          Ke = T.transpose() * Ke * T;
+      }
+      // Scatter into the reduced system, skipping held DOFs; a tie's
+      // master spreads over its slaves.
+      bool tied = false;
+      if (!elims.empty())
+        for (int a = 0; a < 30 && !tied; ++a)
+          tied = tieOfDof[3 * tet[a / 3] + (a % 3)] >= 0;
+      if (tied) {
+        std::array<std::vector<std::pair<int, double>>, 30> ex;
+        for (int a = 0; a < 30; ++a)
+          expand(3 * tet[a / 3] + (a % 3), ex[a]);
+        for (int a = 0; a < 30; ++a)
+          for (const auto& [ga, fa] : ex[a])
+            for (int b = 0; b < 30; ++b)
+              for (const auto& [gb, fb] : ex[b])
+                triplets.emplace_back(ga, gb, fa * fb * Ke(a, b));
+        continue;
+      }
       for (int a = 0; a < 30; ++a) {
         const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
         if (ga < 0)
@@ -248,13 +376,27 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     return fail("no load case to solve");
   // Consistent nodal load vector: the gravity body force every case shares,
   // then each case's face tractions (shared with the topology loop).
-  Eigen::VectorXd F = Eigen::VectorXd::Zero(nFree);
+  // Loads are assembled over every node in x, y, z (the reactions need the
+  // whole of them), then each node's taken into its frame and reduced.
+  std::vector<int> allDofs(3 * nNodes);
+  for (int d = 0; d < 3 * nNodes; ++d)
+    allDofs[d] = d;
+  Eigen::VectorXd Fall = Eigen::VectorXd::Zero(3 * nNodes);
   auto addNodal = [&](int node, const Vector3d& fv) {
-    for (int k = 0; k < 3; ++k) {
-      const int g = dofMap[3 * node + k];
-      if (g >= 0)
-        F(g) += fv(k);
+    Fall.segment<3>(3 * node) += fv;
+  };
+  const auto reduce = [&](const Eigen::VectorXd& full) {
+    Eigen::VectorXd r = Eigen::VectorXd::Zero(nFree);
+    for (int n = 0; n < nNodes; ++n) {
+      const Vector3d v = toLocal(n, full.segment<3>(3 * n));
+      for (int k = 0; k < 3; ++k)
+        if (dofMap[3 * n + k] >= 0)
+          r(dofMap[3 * n + k]) += v(k);
+        else if (tieOfDof[3 * n + k] >= 0)
+          for (const auto& [sd, f] : elims[tieOfDof[3 * n + k]].slaves)
+            r(dofMap[sd]) += f * v(k);
     }
+    return r;
   };
 
   // Body force (gravity / self-weight): b = rho * g per unit volume, consistent
@@ -291,7 +433,12 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   // offered and takes this system; the CPU's PCG is its fallback.
   std::unique_ptr<TopoLinearSolver> external;
   std::string declined;
-  if (iterative && options.makeExternal) {
+  if (iterative && options.makeExternal && anyFrame) {
+    // The GPU's SpMV applies each element matrix relative to its first
+    // node's translation, which holds only when every node is in x, y, z.
+    declined = "a pin support holds nodes in rotated frames, which the GPU "
+               "solve does not take";
+  } else if (iterative && options.makeExternal) {
     external = options.makeExternal(&declined);
     if (external &&
         !external->SetupDomains(mesh, byDomain, dofMap, nFree, &declined))
@@ -338,14 +485,15 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   const int maxIterations = std::max(10000, nFree / 4);
   std::vector<FemResults> all;
   all.reserve(cases.size());
-  const Eigen::VectorXd Fgravity = F;
+  const Eigen::VectorXd Fgravity = Fall;
   for (const std::vector<FaceLoad>& loads : cases) {
-    Eigen::VectorXd F = Fgravity;
+    Eigen::VectorXd Fcase = Fgravity;
     {
       std::string loadErr;
-      if (!AssembleFaceLoads(mesh, loads, dofMap, F, &loadErr))
+      if (!AssembleFaceLoads(mesh, loads, allDofs, Fcase, &loadErr))
         return fail(loadErr);
     }
+    const Eigen::VectorXd F = reduce(Fcase);
     Eigen::VectorXd u;
     if (external) {
       std::vector<double> fv(F.data(), F.data() + F.size()), uv;
@@ -417,7 +565,7 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     if (report)
       report->worstResidual = std::max(report->worstResidual, residual);
 
-    // Expand to full displacement (fixed DOFs are zero).
+    // Expand to full displacement (held DOFs are zero), back in x, y, z.
     FemResults out;
     out.displacement.resize(nNodes);
     for (int n = 0; n < nNodes; ++n) {
@@ -426,9 +574,18 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
         const int g = dofMap[3 * n + k];
         if (g >= 0)
           d(k) = u(g);
+        else if (tieOfDof[3 * n + k] >= 0)
+          for (const auto& [sd, f] : elims[tieOfDof[3 * n + k]].slaves)
+            d(k) += f * u(dofMap[sd]);
       }
+      d = toGlobal(n, d);
       out.displacement[n] = glm::dvec3(d(0), d(1), d(2));
     }
+    // The internal force K u at every node, less the applied load: what the
+    // supports carry (zero, to the residual, where nothing holds).
+    Eigen::VectorXd fint;
+    if (supports.reactions)
+      fint = Eigen::VectorXd::Zero(3 * nNodes);
 
     // Nodal stress recovery: evaluate element stress at each of its 10 nodes,
     // accumulate to global nodes weighted by element volume, then average.
@@ -461,6 +618,23 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
         stressAccum[tet[i]] += vol * s;
         weight[tet[i]] += vol;
       }
+      if (supports.reactions) {
+        Eigen::Matrix<double, 30, 1> fe = Eigen::Matrix<double, 30, 1>::Zero();
+        for (const auto& g : kTetGauss) {
+          Eigen::Matrix<double, 6, 30> B;
+          const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+          fe += (kTetW * std::abs(detJ)) * (B.transpose() * (D * (B * ue)));
+        }
+        for (int i = 0; i < 10; ++i)
+          fint.segment<3>(3 * tet[i]) += fe.segment<3>(3 * i);
+      }
+    }
+    if (supports.reactions) {
+      out.nodeReaction.resize(nNodes);
+      for (int n = 0; n < nNodes; ++n) {
+        const Vector3d r = fint.segment<3>(3 * n) - Fcase.segment<3>(3 * n);
+        out.nodeReaction[n] = glm::dvec3(r(0), r(1), r(2));
+      }
     }
 
     out.vonMises.resize(nNodes, 0.0);
@@ -487,6 +661,103 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     all.push_back(std::move(out));
   }
   return all;
+}
+
+std::string FreeRigidMotion(const FemMesh& mesh, const Supports& supports,
+                            glm::dvec3* axisDir, glm::dvec3* axisPoint,
+                            bool* turns) {
+  const int nNodes = static_cast<int>(mesh.nodes.size());
+  if (nNodes == 0)
+    return "move freely (the mesh is empty)";
+  Vector3d lo(1e300, 1e300, 1e300), hi(-1e300, -1e300, -1e300),
+      c = Vector3d::Zero();
+  for (const glm::dvec3& p : mesh.nodes) {
+    const Vector3d v(p.x, p.y, p.z);
+    lo = lo.cwiseMin(v);
+    hi = hi.cwiseMax(v);
+    c += v;
+  }
+  c /= nNodes;
+  const double L = std::max((hi - lo).norm(), 1e-9);
+  // Each held direction d at x is the row [d, (x - c)/L x d]: its product
+  // with a rigid motion (t, w) is d . (t + w x (x - c)/L), the motion's
+  // displacement along d at x.
+  Eigen::Matrix<double, 6, 6> G = Eigen::Matrix<double, 6, 6>::Zero();
+  std::vector<char> fixed(nNodes, 0);
+  const auto add = [&](int n, const Vector3d& d) {
+    const glm::dvec3& p = mesh.nodes[n];
+    Eigen::Matrix<double, 6, 1> row;
+    row.head<3>() = d;
+    row.tail<3>() = ((Vector3d(p.x, p.y, p.z) - c) / L).cross(d);
+    G += row * row.transpose();
+  };
+  for (int n : supports.fixedNodes)
+    if (n >= 0 && n < nNodes && !fixed[n]) {
+      fixed[n] = 1;
+      for (int k = 0; k < 3; ++k)
+        add(n, Vector3d::Unit(k));
+    }
+  std::vector<const HeldNode*> heldOf(nNodes, nullptr);
+  for (const HeldNode& h : supports.held)
+    if (h.node >= 0 && h.node < nNodes && !fixed[h.node]) {
+      heldOf[h.node] = &h;
+      for (int k = 0; k < 3; ++k)
+        if (h.held[k])
+          add(h.node, Vector3d(h.frame[k].x, h.frame[k].y, h.frame[k].z));
+    }
+  for (const Tie& tie : supports.ties) {
+    Eigen::Matrix<double, 6, 1> row = Eigen::Matrix<double, 6, 1>::Zero();
+    for (const Tie::Entry& e : tie.entries) {
+      if (e.node < 0 || e.node >= nNodes || !heldOf[e.node] || e.k < 0 ||
+          e.k > 2)
+        continue;
+      const glm::dvec3& f = heldOf[e.node]->frame[e.k];
+      const Vector3d d(f.x, f.y, f.z);
+      const glm::dvec3& p = mesh.nodes[e.node];
+      row.head<3>() += e.coef * d;
+      row.tail<3>() += e.coef * ((Vector3d(p.x, p.y, p.z) - c) / L).cross(d);
+    }
+    G += row * row.transpose();
+  }
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 6, 6>> eig(G);
+  const auto& ev = eig.eigenvalues(); // ascending
+  if (ev(5) > 0 && ev(0) > 1e-10 * ev(5))
+    return {};
+  const Eigen::Matrix<double, 6, 1> v = eig.eigenvectors().col(0);
+  const Vector3d t = v.head<3>();
+  const Vector3d w = v.tail<3>() / L; // the rotation rate, per mm
+  char buf[200];
+  if (v.tail<3>().norm() < 1e-6 * v.norm()) {
+    const Vector3d d = t.normalized();
+    std::snprintf(buf, sizeof(buf), "slide along (%.3g, %.3g, %.3g)", d.x(),
+                  d.y(), d.z());
+    if (axisDir)
+      *axisDir = glm::dvec3(d.x(), d.y(), d.z());
+    if (turns)
+      *turns = false;
+    return buf;
+  }
+  // The point the motion turns about: where u is along w.
+  Vector3d d = w.normalized();
+  const Vector3d p = c + w.cross(t) / w.squaredNorm();
+  // Signed so the largest component is positive, as a face's axis is.
+  int big = 0;
+  for (int k = 1; k < 3; ++k)
+    if (std::abs(d(k)) > std::abs(d(big)))
+      big = k;
+  if (d(big) < 0)
+    d = -d;
+  std::snprintf(buf, sizeof(buf),
+                "turn about an axis along (%.3g, %.3g, %.3g) through "
+                "(%.4g, %.4g, %.4g) mm",
+                d.x(), d.y(), d.z(), p.x(), p.y(), p.z());
+  if (axisDir)
+    *axisDir = glm::dvec3(d.x(), d.y(), d.z());
+  if (axisPoint)
+    *axisPoint = glm::dvec3(p.x(), p.y(), p.z());
+  if (turns)
+    *turns = true;
+  return buf;
 }
 
 #ifdef HAVE_SPECTRA
@@ -751,6 +1022,20 @@ SolveModal(const FemMesh& mesh, const Material& material,
 bool SolverAvailable() { return false; }
 bool ModalAvailable() { return false; }
 
+std::string FreeRigidMotion(const FemMesh&, const Supports&, glm::dvec3*,
+                            glm::dvec3*, bool*) {
+  return {};
+}
+
+std::optional<std::vector<FemResults>>
+SolveCases(const FemMesh&, const std::vector<Material>&, const Supports&,
+           const std::vector<std::vector<FaceLoad>>&, std::string* error,
+           const glm::dvec3&, const SolveOptions&, SolveReport*) {
+  if (error)
+    *error = "built without the FEM solver (Eigen)";
+  return std::nullopt;
+}
+
 std::optional<FemResults> Solve(const FemMesh&, const std::vector<Material>&,
                                 const std::vector<int>&,
                                 const std::vector<FaceLoad>&,
@@ -963,6 +1248,64 @@ std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
   if (!any || out.area <= 0.0)
     return std::nullopt;
   out.meanMPa = weighted / out.area;
+  return out;
+}
+
+FemResults::SupportEdgePeak
+FindSupportEdgePeak(const FemMesh& mesh, const FemResults& results,
+                    const std::vector<SupportFacets>& supports) {
+  FemResults::SupportEdgePeak out;
+  const size_t nNodes = mesh.nodes.size();
+  if (results.vonMises.size() != nNodes || supports.empty())
+    return out;
+  // Which support's edge a node is near (0 = none); a support's edge is its
+  // facets' nodes that a boundary facet it does not hold also has.
+  std::vector<int> nearOf(nNodes, -1);
+  std::vector<char> edge(nNodes, 0);
+  std::vector<char> mark(nNodes, 0);
+  for (size_t si = 0; si < supports.size(); ++si) {
+    std::vector<char> on(mesh.boundary.size(), 0);
+    for (int t : supports[si].tris)
+      if (t >= 0 && static_cast<size_t>(t) < on.size())
+        on[t] = 1;
+    std::fill(mark.begin(), mark.end(), 0);
+    for (size_t t = 0; t < mesh.boundary.size(); ++t)
+      if (on[t])
+        for (int v : mesh.boundary[t].nodes)
+          mark[v] = 1;
+    std::fill(edge.begin(), edge.end(), 0);
+    bool any = false;
+    for (size_t t = 0; t < mesh.boundary.size(); ++t)
+      if (!on[t])
+        for (int v : mesh.boundary[t].nodes)
+          if (mark[v]) {
+            edge[v] = 1;
+            any = true;
+          }
+    if (!any)
+      continue;
+    // Within one element: every node of a tet that has an edge node.
+    for (const auto& tet : mesh.tets) {
+      bool touches = false;
+      for (int v : tet)
+        touches = touches || edge[v];
+      if (touches)
+        for (int v : tet)
+          if (nearOf[v] < 0)
+            nearOf[v] = static_cast<int>(si);
+    }
+  }
+  const int peak = results.maxVmNode;
+  if (peak < 0 || static_cast<size_t>(peak) >= nNodes || nearOf[peak] < 0)
+    return out;
+  out.flagged = true;
+  out.support = supports[nearOf[peak]].id;
+  out.type = supports[nearOf[peak]].type;
+  for (size_t n = 0; n < nNodes; ++n)
+    if (nearOf[n] < 0 && results.vonMises[n] > out.awayMPa) {
+      out.awayMPa = results.vonMises[n];
+      out.awayAt = mesh.nodes[n];
+    }
   return out;
 }
 
