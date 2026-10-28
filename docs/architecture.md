@@ -854,7 +854,9 @@ A stock-Ubuntu container is not this machine, and the suite has to hold
 there as it is: no Vulkan device (a smoke that needs one skips, 77, when the
 app exits with its no-renderer code 3, `smoke_app.NoRendererError`, not on
 the wording of its message), no `nix/patches` in its OpenCASCADE (the `[occ]`
-cases `SKIP()`, which is Catch2's exit 4 and ctest's `SKIP_RETURN_CODE`),
+cases `SKIP()`, which ctest reads from Catch2's summary line and never its
+exit code: 24.04's Catch2 3.4 exits with the number of failed assertions,
+so a case failing four of them looked like a skip),
 the source mounted read-only (a test writes its output to a temporary
 directory, never the checkout's `scratch/`), and an older compiler (GCC 13
 on 24.04, which frees a range-for's temporary before C++23 says to:
