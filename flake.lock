@@ -51,6 +51,23 @@
         "type": "github"
       }
     },
+    "manifold-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790331217,
+        "narHash": "sha256-O9ciIM5so9WiooNw3BfLTg6u7KPTV0vTbWVec/y0crQ=",
+        "owner": "elalish",
+        "repo": "manifold",
+        "rev": "ce50d78021d64507f89e8c9fc2c2e51018117857",
+        "type": "github"
+      },
+      "original": {
+        "owner": "elalish",
+        "repo": "manifold",
+        "rev": "ce50d78021d64507f89e8c9fc2c2e51018117857",
+        "type": "github"
+      }
+    },
     "nfd-src": {
       "flake": false,
       "locked": {
@@ -89,6 +106,7 @@
         "clipper2-src": "clipper2-src",
         "imgui-src": "imgui-src",
         "imgui-test-engine-src": "imgui-test-engine-src",
+        "manifold-src": "manifold-src",
         "nfd-src": "nfd-src",
         "nixpkgs": "nixpkgs"
       }

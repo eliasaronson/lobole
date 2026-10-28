@@ -3,14 +3,16 @@
 
 #pragma once
 
-// Meshes with known answers, generated in-test: CAD parts built here with
-// OpenCASCADE and written as STL through the app's own writer
-// (CADKernel::SaveSTL) at a chosen tessellation, so every hole's radius and
-// axis is known exactly
-// (docs/interchange/README.md#recognising-a-faceted-mesh).
+// Meshes with known answers, generated in-test. The mechanical ones (here)
+// are CAD parts built with OpenCASCADE and written as STL through the app's
+// own writer (CADKernel::SaveSTL) at a chosen tessellation, so every hole's
+// radius and axis is known exactly
+// (docs/interchange/README.md#recognising-a-faceted-mesh). The organic ones
+// -- sculpts and scans -- are in mesh_organic.h.
 
 #include "cad/CADKernel.h"
 #include "core/mesh/TriMesh.h"
+#include "mesh_organic.h" // the organic fixtures: sculpts and scans
 
 #include <glm/glm.hpp>
 

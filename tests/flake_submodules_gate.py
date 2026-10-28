@@ -4,7 +4,7 @@
 
 """Gate: flake.nix pins each submodule at the commit the repository records.
 
-The flake takes the four submodules as `flake = false` inputs, so `nix build`
+The flake takes the submodules as `flake = false` inputs, so `nix build`
 needs no `?submodules=1` (docs/packaging/README.md#the-nix-flake). That is a
 second copy of each pin, and a submodule bumped without its input builds the
 Nix package, the AppImage, the container and the Windows release from the

@@ -140,6 +140,15 @@ push so it cannot rot.
 - **Linkage:** built as a static library into Loböle (CAM polygon offsetting;
   absent with `-DENABLE_CAM=OFF`)
 
+### manifold
+
+- **Location:** `deps/manifold` submodule
+- **Revision:** v3.5.4 pin
+- **License:** Apache License 2.0
+- **Linkage:** built from its sources as a static library into Loböle
+  (mesh booleans), serial (`MANIFOLD_PAR` off, so no TBB), its CrossSection
+  on the Clipper2 above; unmodified
+
 ### nativefiledialog-extended
 
 - **Location:** `deps/nativefiledialog-extended` submodule

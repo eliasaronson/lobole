@@ -57,7 +57,7 @@ stays GPU-free.
 
 | target | contents | notes |
 |---|---|---|
-| `designer_core` | `core/`, `cad/`, `common/`, `remote/InstanceRegistry.cpp` | the unit-testable target; carries OpenCASCADE, PlaneGCS, Eigen/Spectra, Netgen (via `fem_mesher`) |
+| `designer_core` | `core/`, `cad/`, `common/`, `remote/InstanceRegistry.cpp` | the unit-testable target; carries OpenCASCADE, PlaneGCS, Eigen/Spectra, Netgen (via `fem_mesher`), and the vendored static Clipper2 and manifold (mesh booleans; `core/mesh/MeshBoolean.cpp` is its one caller) |
 | `designer_app` | `ui/`, `render/`, `remote/`, the GUI suite, ImGui | everything the app is except its entry points, so `designer_tests` can link the actions layer |
 | `designer` | `main.cpp`, `GpuOwners.cpp`, `HeadlessMain.cpp`, `CrashHandler.cpp` | links `designer_app`, `designer_core` and (when built) `fem_gpu` |
 | `fem_gpu` | `src/femgpu/` | Vulkan compute; `LOBOLE_ENABLE_FEM_GPU` |

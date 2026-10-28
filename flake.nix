@@ -18,7 +18,7 @@
   # nixpkgs provides opencascade-occt 7.9.3 (matches what the CMake config
   # package expects — the TKDE* library split is handled in CMakeLists.txt).
   #
-  # The four git submodules are pinned here as flake inputs (flake = false)
+  # The five git submodules are pinned here as flake inputs (flake = false)
   # rather than relying on `?submodules=1`, so `nix build` is reproducible from
   # a plain flake ref. planegcs and deps/fonts are vendored in-tree (git-tracked)
   # and come in with the main source. A submodule bumped without its input
@@ -44,9 +44,14 @@
       url = "github:AngusJohnson/Clipper2/ef88ee97c0e759792e43a2b2d8072def6c9244e8"; # Clipper2_1.5.4
       flake = false;
     };
+    # Mesh booleans (the cradle's subtraction); built from its sources.
+    manifold-src = {
+      url = "github:elalish/manifold/ce50d78021d64507f89e8c9fc2c2e51018117857"; # v3.5.4
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, imgui-src, imgui-test-engine-src, nfd-src, clipper2-src }:
+  outputs = { self, nixpkgs, imgui-src, imgui-test-engine-src, nfd-src, clipper2-src, manifold-src }:
     let
       system = "x86_64-linux";
       # The kernel patches Loböle carries (nix/occt-overlay.nix).
@@ -104,7 +109,8 @@
           for d in imgui:${imgui-src} \
                    imgui_test_engine:${imgui-test-engine-src} \
                    nativefiledialog-extended:${nfd-src} \
-                   clipper2:${clipper2-src}; do
+                   clipper2:${clipper2-src} \
+                   manifold:${manifold-src}; do
             name="''${d%%:*}"; path="''${d#*:}"
             rm -rf "$sourceRoot/deps/$name"
             cp -r --no-preserve=mode,ownership "$path" "$sourceRoot/deps/$name"

@@ -200,9 +200,9 @@ ends at the file rather than a hang.
 
 ## The Nix flake
 
-`flake.nix` pins nixpkgs (`nixos-unstable`, OpenCASCADE 7.9.3) and the four
-git submodules (imgui, imgui_test_engine, nativefiledialog-extended, clipper2)
-as `flake = false` inputs, so `nix build` needs no `?submodules=1`.
+`flake.nix` pins nixpkgs (`nixos-unstable`, OpenCASCADE 7.9.3) and the five
+git submodules (imgui, imgui_test_engine, nativefiledialog-extended, clipper2,
+manifold) as `flake = false` inputs, so `nix build` needs no `?submodules=1`.
 `tests/flake_submodules_gate.py` fails when one of those revisions differs
 from the commit the repository records for the submodule; a missing
 clipper2 does not fail the build, it configures CAM off. PlaneGCS, libarea
@@ -583,7 +583,7 @@ installs them with every binary.
   through it at run time. Its licence permits derivatives released under an
   OSI licence.
 - Everything else (Eigen and Spectra MPL-2.0, Boost, Clipper2 and libarea's
-  Clipper 1 BSL-1.0, glfw, spdlog, nlohmann_json, glm, imgui,
+  Clipper 1 BSL-1.0, manifold Apache-2.0, glfw, spdlog, nlohmann_json, glm, imgui,
   nativefiledialog-extended, libvterm, the fonts) is permissive.
 - The standard-parts tables in `assets/parts/` are data under their own
   licences: the fastener tables GPL-2.0-or-later, the bd_warehouse hole tables

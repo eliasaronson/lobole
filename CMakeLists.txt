@@ -661,6 +661,73 @@ target_include_directories(clipper2 SYSTEM PUBLIC ${CLIPPER2_DIR}/include)
 # struct they both pass around.
 target_compile_definitions(clipper2 PUBLIC USINGZ)
 set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# manifold (vendored submodule, Apache-2.0): exact, watertight booleans of
+# triangle meshes, and iso-surface extraction
+# (docs/plans/organic-meshes-and-scans.md). Built here from its sources, as
+# clipper2 is, rather than through its own CMakeLists, which fetches
+# dependencies, installs a static library and its headers into our packages,
+# and adds its test suite. Static (Apache-2.0 needs no relinking boundary),
+# serial (MANIFOLD_PAR off: no TBB; our parallel::For runs it on worker
+# threads), and its CrossSection on the Clipper2 above -- USINGZ and all,
+# since that define is the Point64 layout every user of the target must
+# agree on.
+set(MANIFOLD_DIR ${CMAKE_SOURCE_DIR}/deps/manifold)
+if(NOT EXISTS ${MANIFOLD_DIR}/src/boolean3.cpp)
+    message(FATAL_ERROR "deps/manifold is missing: git submodule update --init")
+endif()
+add_library(manifold STATIC
+    ${MANIFOLD_DIR}/src/boolean3.cpp
+    ${MANIFOLD_DIR}/src/boolean_result.cpp
+    ${MANIFOLD_DIR}/src/constructors.cpp
+    ${MANIFOLD_DIR}/src/csg_tree.cpp
+    ${MANIFOLD_DIR}/src/edge_op.cpp
+    ${MANIFOLD_DIR}/src/execution_impl.cpp
+    ${MANIFOLD_DIR}/src/face_op.cpp
+    ${MANIFOLD_DIR}/src/impl.cpp
+    ${MANIFOLD_DIR}/src/manifold.cpp
+    ${MANIFOLD_DIR}/src/minkowski.cpp
+    ${MANIFOLD_DIR}/src/polygon.cpp
+    ${MANIFOLD_DIR}/src/properties.cpp
+    ${MANIFOLD_DIR}/src/quickhull.cpp
+    ${MANIFOLD_DIR}/src/sdf.cpp
+    ${MANIFOLD_DIR}/src/smoothing.cpp
+    ${MANIFOLD_DIR}/src/sort.cpp
+    ${MANIFOLD_DIR}/src/subdivision.cpp
+    ${MANIFOLD_DIR}/src/tree2d.cpp
+    ${MANIFOLD_DIR}/src/cross_section/cross_section.cpp)
+target_include_directories(manifold SYSTEM PUBLIC ${MANIFOLD_DIR}/include)
+target_link_libraries(manifold PRIVATE clipper2)
+target_compile_definitions(manifold PUBLIC MANIFOLD_PAR=-1
+                                           MANIFOLD_CROSS_SECTION)
+# Its own build's floating-point flags: a fused multiply-add changes the
+# predicates' results, and manifold's robustness rests on them. -w: a
+# vendored tree's warnings are not ours to read in every build log.
+target_compile_options(manifold PRIVATE -ffp-contract=off
+                                        -fexcess-precision=standard -w)
+set_target_properties(manifold PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# Its version as its own CMakeLists states it, for the one file that says.
+file(STRINGS ${MANIFOLD_DIR}/CMakeLists.txt _manifold_version_lines
+     REGEX "^set\\(MANIFOLD_VERSION_(MAJOR|MINOR|PATCH) [0-9]+\\)")
+string(REGEX REPLACE "[^0-9;]" "" _manifold_version "${_manifold_version_lines}")
+string(REPLACE ";" "." _manifold_version "${_manifold_version}")
+list(APPEND core_sources src/core/mesh/MeshBoolean.cpp)
+set_source_files_properties(src/core/mesh/MeshBoolean.cpp PROPERTIES
+    COMPILE_DEFINITIONS "LOBOLE_MANIFOLD_VERSION=\"${_manifold_version}\"")
+# One boolean of two organic fixture meshes as a program of its own, built
+# only by name: the mingw cross build has no test suite, so this is what
+# runs manifold there, under Wine (packaging/windows/manifold-probe.nix).
+# Pure data, so no designer_core and none of its DLLs; static on Windows,
+# so the .exe runs alone.
+add_executable(mesh_boolean_probe EXCLUDE_FROM_ALL
+    tests/mesh_boolean_probe.cpp tests/mesh_organic.cpp
+    src/core/mesh/TriMesh.cpp src/core/mesh/MeshBoolean.cpp)
+target_include_directories(mesh_boolean_probe PRIVATE src tests)
+target_link_libraries(mesh_boolean_probe PRIVATE manifold glm::glm)
+if(WIN32)
+    target_link_options(mesh_boolean_probe PRIVATE -static)
+endif()
+
 if(NOT ENABLE_CAM)
     message(STATUS "CAM disabled (-DENABLE_CAM=OFF)")
 else()
@@ -777,7 +844,7 @@ set_source_files_properties(src/common/BuildInfo.cpp PROPERTIES
     COMPILE_DEFINITIONS "${BUILD_INFO_DEFINITIONS}")
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json fem_mesher)
-target_link_libraries(designer_core PUBLIC clipper2)
+target_link_libraries(designer_core PUBLIC clipper2 manifold)
 if(HAVE_CAM)
     target_compile_definitions(designer_core PUBLIC HAVE_CAM)
 endif()
