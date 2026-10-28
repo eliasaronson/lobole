@@ -588,6 +588,13 @@ ones coincide; on random design 33's chamfered, drilled body the kernel's
 edge-face intersections spent 68 s on one bore before they answered, and
 the deadline now refuses it at 30.
 
+**Off the frame.** Delete Face is a heavy feature: past an estimate of a
+quarter of a second (15 ms a face deleted, 17 faces) it builds as a
+`feature` job while the frame keeps drawing, its RPC answering when it
+lands, and a cancel rolls the edit back or leaves the feature not built
+([heavy features](../ui/long-operations.md#heavy-features)). Such an edit is
+not tried on a copy first; one whose build fails is refused when it lands.
+
 The bbox may grow by no more than the deleted faces' own extent. Defeaturing
 trims the host face's own surface, so a pocket in an imported face whose
 edges lie 5e-5 mm off its plane fills and the host stays that plane

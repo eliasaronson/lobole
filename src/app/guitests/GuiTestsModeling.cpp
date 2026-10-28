@@ -5,6 +5,7 @@
 #include "cad/NonDestructiveBoolean.h"
 #include "core/Angles.h"
 #include "core/ElementHistory.h"
+#include "core/HeavyBuild.h"
 #include "core/Measure.h"
 #include "core/Primitives.h"
 #include "core/SheetMetal.h"
@@ -23,9 +24,11 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/ReadContext.h" // kMaxPartFeatures
+#include "core/io/Serialization.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
+#include "ui/FeatureBuildJob.h"
 #include "ui/FeatureEditor.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h" // ExportActiveDocument
@@ -41,6 +44,9 @@
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
 #include "ui/ViewportHandle.h"
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBndLib.hxx>
@@ -2383,6 +2389,172 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(bodyVolume(d.body) - d.box) < 1e-9 * d.box);
     s_App->editFeatureId = 0;
     s_App->slotPick = {};
+  };
+
+  // Heavy features build off the frame
+  // (docs/ui/long-operations.md#heavy-features). The knob makes this Delete
+  // Face one (a bore is two faces, far under the estimate that sends the fan
+  // grill's 916 to a job) and holds the worker a second and a half before it
+  // heals, so the build spans frames whatever the machine.
+  static const auto heavyDelete = [](ImGuiTestContext* ctx, int delayMs) {
+    const Drilled d = drill(ctx, 0.0);
+    const glm::dvec3 c = (d.lo + d.hi) * 0.5;
+    const double r = 0.3 * (d.hi.z - d.lo.z);
+    const ElementRef bore = faceAt(d, {c.x + r, c.y, c.z});
+    heavy::SetTestOptions({true, delayMs});
+    heavy::ForgetAll();
+    s_App->selection.Clear();
+    s_App->selection.items.push_back({ui::SelectionItem::Kind::Face, 0, bore});
+    ToolbarClick(ctx, "###tb_delete_face");
+    ctx->Yield();
+    return d;
+  };
+  static const auto saved = [](const char* name) -> std::string {
+    const std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lobole-heavy-" + std::to_string(getpid()) + "-" + name + ".json"))
+            .string();
+    if (!DocumentIO::Save(*Doc(), path).has_value())
+      return "(not saved)";
+    std::ifstream in(path, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+    std::filesystem::remove(path);
+    return bytes;
+  };
+
+  // The frame keeps running while it builds, and none of those frames is
+  // held: the worker heals, the frame draws.
+  t = IM_REGISTER_TEST(engine, "direct",
+                       "a_heavy_delete_face_builds_off_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const Drilled d = heavyDelete(ctx, 1500);
+    const size_t depth = s_App->commands->UndoDepth();
+    const double a0 = MainThreadCpuMs();
+    ui::AcceptPendingFeature(*s_App);
+    const double acceptMs = MainThreadCpuMs() - a0;
+    ctx->LogInfo("the accept cost %.1f ms of main-thread time", acceptMs);
+    ctx->Yield();
+    const uint64_t slot = ui::FeatureBuildSlotOf(*s_App, Doc());
+    const Feature* del = Doc()->GetFeature(Doc()->FeatureCount() - 1);
+    IM_CHECK(Doc()->BuildStateOf(del->GetId()) ==
+             Document::BuildState::Building);
+    IM_CHECK(ui::FeatureBuildRunning(*s_App, slot));
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth + 1); // one undo step
+    // While it builds the part shows what it was, and says so.
+    IM_CHECK(bodyVolume(d.body) < d.box - 1e-3);
+    int frames = 0;
+    double worstMs = 0.0;
+    const auto t0 = std::chrono::steady_clock::now();
+    while (ui::FeatureBuildRunning(*s_App, slot)) {
+      const double f0 = MainThreadCpuMs();
+      ctx->Yield();
+      worstMs = std::max(worstMs, MainThreadCpuMs() - f0);
+      frames++;
+      if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(60))
+        break;
+    }
+    ctx->Yield(2);
+    ctx->LogInfo("%d frames while it built, worst %.1f ms", frames, worstMs);
+    IM_CHECK(!ui::FeatureBuildRunning(*s_App, slot));
+    IM_CHECK(frames >= 10);
+    // A frame's share is the poll: never the heal (1.5 s here). Judged
+    // against the build itself so a loaded machine does not fail it.
+    IM_CHECK(worstMs < 750.0);
+    IM_CHECK(Doc()->BuildStateOf(del->GetId()) == Document::BuildState::Built);
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    IM_CHECK(std::abs(bodyVolume(d.body) - d.box) < 1e-9 * d.box);
+  };
+
+  // Cancelling the build of an edit undoes the edit: the document saves
+  // byte for byte as it did before, and no undo step is left.
+  t = IM_REGISTER_TEST(engine, "direct", "cancelling_a_heavy_delete_undoes_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // The preview is not the edit: the document as it stood before the tool.
+    const Drilled d = drill(ctx, 0.0);
+    const std::string before = saved("before");
+    const size_t features = Doc()->FeatureCount();
+    const size_t depth = s_App->commands->UndoDepth();
+    {
+      const glm::dvec3 c = (d.lo + d.hi) * 0.5;
+      const double r = 0.3 * (d.hi.z - d.lo.z);
+      const ElementRef bore = faceAt(d, {c.x + r, c.y, c.z});
+      heavy::SetTestOptions({true, 60000});
+      heavy::ForgetAll();
+      s_App->selection.Clear();
+      s_App->selection.items.push_back(
+          {ui::SelectionItem::Kind::Face, 0, bore});
+      ToolbarClick(ctx, "###tb_delete_face");
+      ctx->Yield();
+    }
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    const uint64_t slot = ui::FeatureBuildSlotOf(*s_App, Doc());
+    IM_CHECK(ui::FeatureBuildRunning(*s_App, slot));
+    // The Model panel's bar, and its cancel.
+    ctx->ItemClick("//###Model/**/###feature_build_cancel");
+    IM_CHECK(WaitFor(
+        ctx, "the build to stop",
+        [&] { return !ui::FeatureBuildRunning(*s_App, slot); }, 30.0));
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), features);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth);
+    IM_CHECK(!s_App->commands->CanRedo());
+    IM_CHECK(!Doc()->HasUnbuilt());
+    IM_CHECK(saved("after") == before);
+  };
+
+  // Cancelling the build of an EXISTING feature -- an open that rebuilds,
+  // here a regeneration with every cache dropped -- leaves it not built
+  // (cancelled), what follows it waiting, until the tree's Build.
+  t = IM_REGISTER_TEST(engine, "direct",
+                       "cancelling_a_rebuild_leaves_it_not_built");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const Drilled d = heavyDelete(ctx, 0);
+    ui::AcceptPendingFeature(*s_App);
+    const uint64_t slot = ui::FeatureBuildSlotOf(*s_App, Doc());
+    IM_CHECK(WaitFor(
+        ctx, "the first build",
+        [&] {
+          return !ui::FeatureBuildRunning(*s_App, slot) && !Doc()->HasUnbuilt();
+        },
+        30.0));
+    const size_t index = Doc()->FeatureCount() - 1;
+    const Feature* del = Doc()->GetFeature(index);
+    const size_t depth = s_App->commands->UndoDepth();
+    // Rebuilt from nothing, slowly: the build of a feature nobody just edited.
+    heavy::SetTestOptions({true, 60000});
+    heavy::ForgetAll();
+    Doc()->ClearRegenCache();
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK(ui::FeatureBuildRunning(*s_App, slot));
+    const std::string row = del->GetName() + "##" + std::to_string(index);
+    ctx->ItemClick(("//###Model/" + row).c_str(), ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/###feat_cancel_build");
+    IM_CHECK(WaitFor(
+        ctx, "the build to stop",
+        [&] { return !ui::FeatureBuildRunning(*s_App, slot); }, 30.0));
+    ctx->Yield(2);
+    IM_CHECK(Doc()->BuildStateOf(del->GetId()) ==
+             Document::BuildState::Cancelled);
+    IM_CHECK_EQ(Doc()->FeatureCount(), index + 1); // still there
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth);
+    IM_CHECK(bodyVolume(d.body) < d.box - 1e-3); // not built
+    // Asked for, it builds.
+    heavy::SetTestOptions({true, 0});
+    ctx->ItemClick(("//###Model/" + row).c_str(), ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/###feat_build");
+    IM_CHECK(WaitFor(
+        ctx, "the rebuild",
+        [&] {
+          return !Doc()->HasUnbuilt() && !ui::FeatureBuildRunning(*s_App, slot);
+        },
+        30.0));
+    IM_CHECK(std::abs(bodyVolume(d.body) - d.box) < 1e-9 * d.box);
   };
 
   // Move Face with its derived default: a preselected bore moves in the

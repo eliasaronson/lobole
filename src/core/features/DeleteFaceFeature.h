@@ -46,6 +46,13 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  // Heavy past a handful of faces: Defeaturing heals the faces round every
+  // one it deletes, on one thread
+  // (docs/ui/long-operations.md#heavy-features).
+  [[nodiscard]] bool MayBuildOffFrame() const override { return true; }
+  [[nodiscard]] double
+  BuildCostS(const std::vector<Body>& input) const override;
+
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(bodyId);
     VisitRefs(faces, visit);

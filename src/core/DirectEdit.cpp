@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/DirectEdit.h"
+#include "core/HeavyBuild.h"
 
 #include "cad/OccSignals.h"
 #include "core/ElementHistory.h"
@@ -567,13 +568,17 @@ public:
       CloseHandle(m_thread);
 #endif
   }
+  // A build off the frame is also stopped by its job's cancel
+  // (heavy::Cancelled), and reports its progress to it.
   Standard_Boolean UserBreak() override {
     if (!m_expired && (std::chrono::steady_clock::now() > m_wallEnd ||
                        (m_haveClock && CpuSeconds() - m_start > m_budget)))
       m_expired = true;
-    return m_expired;
+    return m_expired || heavy::Cancelled();
   }
-  void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+  void Show(const Message_ProgressScope&, const Standard_Boolean) override {
+    heavy::ReportFraction(GetPosition());
+  }
   bool expired() const { return m_expired; }
 
 private:

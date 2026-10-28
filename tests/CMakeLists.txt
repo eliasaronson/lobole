@@ -114,6 +114,7 @@ add_executable(designer_tests
     test_hole.cpp
     test_draft.cpp
     test_direct_edit.cpp
+    test_heavy_build.cpp
     test_occ_signals.cpp
     test_kernel_threads.cpp
     test_bounded_read.cpp
@@ -505,6 +506,15 @@ add_test(NAME import_job_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/import_job_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(import_job_smoke PROPERTIES TIMEOUT 300)
+
+# A heavy feature builds off the frame: the call waits for it and answers
+# with the part as built, a cancel of an edit rolls it back, a cancelled
+# rebuild is reported not built and build_feature builds it
+# (docs/ui/long-operations.md#heavy-features).
+add_test(NAME heavy_feature_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/heavy_feature_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(heavy_feature_smoke PROPERTIES TIMEOUT 300)
 
 # SIGTERM ends --headless within a bound, whether a job or the main thread is
 # inside a call that cannot be interrupted (docs/architecture.md#stopping).

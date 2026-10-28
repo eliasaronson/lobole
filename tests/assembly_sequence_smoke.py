@@ -289,6 +289,62 @@ def kept_answers(d, req, right, wrong):
            f"the pin edited is checked again, and now goes: {r}")
 
 
+def assembly_snapshot(d):
+    """What a check must leave alone: the tabs, the occurrences and where
+    they are, the mates, the sequence and the requirements."""
+    snap = {m: d.call(m) for m in ("list_parts", "list_occurrences",
+                                    "list_mates", "list_requirements")}
+    try:
+        snap["sequence"] = d.call("get_assembly_sequence")
+    except RuntimeError as e:
+        snap["sequence"] = str(e)
+    return snap
+
+
+def cancel_assembly_sequence(d, port):
+    """An `assembly_sequence` job cancelled while check_assembly_sequence
+    waits on it (held by LOBOLE_TEST_INSERTION_MS): the call is REFUSED,
+    saying it was cancelled, and nothing in the assembly changed."""
+    other = Client.wait_for(port)
+    before = assembly_snapshot(other)
+    out = {}
+
+    def go():
+        try:
+            out["answer"] = d.call("check_assembly_sequence")
+        except RuntimeError as e:
+            out["error"] = str(e)
+
+    worker = threading.Thread(target=go)
+    worker.start()
+    job, deadline = None, time.time() + 30
+    while job is None:
+        job = next((j for j in other.call("background_jobs")["jobs"]
+                    if j["kind"] == "assembly_sequence"), None)
+        if job is None:
+            expect(worker.is_alive() and time.time() < deadline,
+                   f"no assembly_sequence job while check_assembly_sequence waited: {out}")
+            time.sleep(0.02)
+    expect(job["cancellable"] is True,
+           f"an assembly_sequence job says it can be cancelled: {job}")
+    asked = other.call("cancel_background_job", kind="assembly_sequence")
+    expect(asked.get("asked", 0) >= 1, f"the cancel reached the job: {asked}")
+    worker.join(60)
+    expect(not worker.is_alive(), "the cancelled check_assembly_sequence never answered")
+    expect("cancelled" in out.get("error", ""),
+           f"a cancelled check_assembly_sequence is refused, saying so: {out}")
+    after = assembly_snapshot(other)
+    expect(after == before,
+           f"a cancelled check_assembly_sequence changed the assembly:\n{before}\n{after}")
+    deadline = time.time() + 5
+    while any(j["kind"] == "assembly_sequence"
+              for j in other.call("background_jobs")["jobs"]):
+        expect(time.time() < deadline,
+               "the cancelled assembly_sequence job is still listed 5 s later")
+        time.sleep(0.05)
+    other.close()
+
+
 def main(binary):
     env = dict(os.environ)
     # Holds each check's job before it computes (tests only), so the smoke
@@ -331,6 +387,7 @@ def main(binary):
                  {"occurrence": "fork"}, {"occurrence": "pin"},
                  {"occurrence": "washer", "direction": [0, 0, -1]}]
         d.call("set_assembly_sequence", steps=right)
+        cancel_assembly_sequence(d, app.port)
         other = Client(app.port, timeout=60)
         answer = {}
         worker = threading.Thread(target=lambda: answer.update(check(d)))

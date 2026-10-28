@@ -13,7 +13,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 | field | meaning |
 |---|---|
 | `id` | handed out by `StartBackgroundJob` from a session counter, never reused: the handle a study job is asked about and cancelled by |
-| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"`, `"interference"`, `"design_sweep"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"`, `"interference"`, `"insertion"`, `"assembly_sequence"`, `"design_sweep"`, `"feature"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -75,6 +75,46 @@ job is also asked about and cancelled by its id, `study_status {job}` and
 it first empties the CAM queues (`CancelCamPasses`). Both work without a part
 tab. They are not called `jobs`, because on this API a job is the CAM job
 document.
+
+## The cancel rule
+
+Every cancellable kind follows one rule:
+
+> **A cancel never applies a half-finished change to the model; results
+> already paid for are kept as results.**
+
+"Paid for" means whole: a pass, a view, a sample, an iterate, a measured
+point is kept; a part of one answer is not, because a partial report reads
+as a complete one (a contact report missing pairs reads as fewer contacts).
+A kind with nothing to interrupt says `cancellable: false`, and a cancel
+asked of it changes nothing it does; such a job is recorded as `done`, not
+`cancelled`, when it runs to its end. `tests/test_conventions.cpp`, "every
+job kind states its cancel and names a test of it", fails on a kind with no
+row here, a row with no outcome, or a test named below that does not exist.
+
+| kind | what a cancel keeps | the test of it |
+|---|---|---|
+| `cam` | not cancellable mid-pass: the pass in flight finishes and is cached; the queues are emptied, the pending toolpaths say so, a waiting post or verify is refused | `an adaptive pocket is cleared off the frame and lands complete`, `cam_parked_smoke.py::main` |
+| `cam-verify` | not cancellable: the carve runs to its end; a waiting `cam_verify` is refused, and its verdict is not cached (the next call carves again) | `cam_parked_smoke.py::cancel_cam_verify` |
+| `cam-simulate` | not cancellable: the read runs to its end and the playback opens | `cam_parked_smoke.py::cancel_cam_simulate` |
+| `sync` | the transfer, which git cannot interrupt, finishes and what it fetched or cloned is kept; the step that would change the open project after it -- a pull's merge, a clone's open -- does not run | `a cancelled clone keeps what it cloned and does not open it` |
+| `topo` | its best iterate, stored as the study's result marked `cancelled` (it replaces the earlier result, and is never reused as a cached answer) | `topo_smoke.py::main` |
+| `study` | nothing: a solve cancelled is an answer nobody wants, even one a direct factorization finished after the cancel | `fem_async_smoke.py::main` |
+| `check` | the studies solved whole before the cancel; the one in flight is dropped | `topo_build_smoke.py::main` |
+| `mesh` | nothing: the report is a question about the mesh, dropped with it | `a study solved on the registry lands in its own part, not the active tab` |
+| `requirements` | the evidence each requirement already measured; the measure in flight is not landed | `requirements/a_slow_check_keeps_the_frame`, `requirements_smoke.py::off_frame` |
+| `design_sweep` | the points it measured, the answer marked cancelled; the model is never touched (it sweeps copies) | `requirements/a_sweep_by_clicking`, `design_sweep_smoke.py::main` |
+| `import` | nothing: the part is unchanged and the read dropped; once it materializes it is not cancellable and lands whole | `import/a_mesh_import_runs_in_background`, `import_job_smoke.py::main` |
+| `motion` | the leading samples whose every check landed, the result marked cancelled | `study_jobs_smoke.py::main` |
+| `motion-video` | the pose restored, no video file; the frames written stay in their folder | `motion_video_smoke.py::main` |
+| `open` | the open project, untouched: nothing in `AppState` changes until the adopt | `file/a_slow_open_shows_progress_and_cancels` |
+| `job-warm` | not cancellable: it is a warm cache, nothing a person asked for, and the open it follows is whole either way | `cam_parked_smoke.py::cancel_job_warm` |
+| `drawing` | the views that landed, with their saved projections; the rest say "projection cancelled" and resume on the next update | `a cancelled drawing projection says so and resumes`, `drawing/a_cancelled_projection_resumes` |
+| `contact` | nothing: a report of some pairs would read as the report of all of them | `contact_smoke.py::main` |
+| `interference` | not cancellable (one boolean): the waiting call answers | `contact_smoke.py::cancel_interference` |
+| `insertion` | nothing: the waiting `check_insertion` is refused | `insertion_smoke.py::cancel_insertion` |
+| `assembly_sequence` | nothing: the waiting `check_assembly_sequence` is refused | `assembly_sequence_smoke.py::cancel_assembly_sequence` |
+| `feature` | an edit's build: the edit, rolled back with no undo step; an existing feature's: the feature, marked not built (cancelled), until it is asked for ([heavy features](#heavy-features)) | `direct/cancelling_a_heavy_delete_undoes_it`, `direct/cancelling_a_rebuild_leaves_it_not_built`, `heavy_feature_smoke.py::main`, `A build stops on its cancel and keeps nothing` |
 
 ## Cancel, quit and close
 
@@ -453,6 +493,107 @@ has ended joins it and keeps its answer (the last eight, for
 is owned by the RPC connection that started it unless `outlive_client`; a
 synchronous call parks on it.
 
+## Heavy features
+
+Regeneration runs on the main thread on every path, and stays there (below).
+Only a feature that may cost seconds builds as a `feature` job: Delete Face
+of many faces today (`BRepAlgoAPI_Defeaturing` on one thread: the Voron fan
+grill's 916 faces, 14 s), and the organic meshes plan's Cradle next.
+
+**Which.** A feature declares that it may (`Feature::MayBuildOffFrame`) and
+estimates its own cost on the bodies it would act on (`BuildCostS`); it
+goes to a job when the estimate reaches `heavy::kOffFrameS`, 0.25 s.
+Delete Face estimates 15 ms a face, the grill's measured rate, so a hole's
+bore and floor build inline and the grill's four holes do not. No list of
+feature types exists.
+
+**How.** Only a part the app holds builds off the frame
+(`Document::SetBuildsOffFrame`, set on every part by the poll and before
+each RPC; `Document::BuildOffFrameScope` for the parts an open or a restore
+loads). Its regeneration, reaching a heavy feature that misses its regen
+cache, first asks the process-wide store of finished builds
+(`heavy::Find`, `core/HeavyBuild.h`), keyed by the feature's chain hash --
+everything up to and including it, so a content key across documents. A
+hit is installed like a regen-cache hit. A miss STOPS the regeneration:
+the feature is `building`, everything after it `waiting`, the bodies are
+those before it, the tip hash is withheld (nothing bakes it or hands it to
+a copy), and `Document::PendingBuild` holds a request: a clone of the
+feature and of every feature it references, its input bodies, the symbols,
+configuration, sheet-metal and print context. Any other document -- a
+copy, a trial, a test, a sweep's worker -- builds it inline as before, and
+files what it built in the store.
+
+`ui::PollFeatureBuilds` (`src/ui/FeatureBuildJob.h`, part of
+`PollBackgroundJobs`) starts one `feature` job per part with a request. On
+the main thread it deep-copies the input bodies (`heavy::Detach`:
+OpenCASCADE writes to a builder's arguments and the frame meshes the
+document's shapes); the worker runs the feature's own Execute on them
+(`heavy::Run`), its cancel and progress reachable through the direct-edit
+builders' deadline, which polls `heavy::Cancelled` at every progress point.
+The `finish` files the result in the store and the part's regen cache
+(`AdoptBuilt`) and regenerates the part, which hits it and builds what
+follows; untouched bodies keep the document's own shapes. A second heavy
+feature downstream is the next job.
+
+**An edit made while one builds** restarts it if it changes what the
+feature builds from, and otherwise waits. The request is a content key: an
+edit upstream of the feature, or to it, or an undo past it, moves its chain
+hash, and the running build could only land as an entry nobody reads, so it
+is cancelled as superseded (not a user cancel) and the new key builds. An
+edit downstream leaves the key; the job runs on and the edit is built when
+it lands. What a superseded job finished is kept in the store, so a redo
+back to it is instant.
+
+**Undo.** The edit is on the undo stack from the moment it is made; undo
+order is the order of edits, whatever is building.
+
+**The RPC.** A call that leaves its part with a feature building is parked
+(`BuildWait`, `RemoteUiActions.cpp`) and answers when the build lands, its
+`regen` and `digest` recomputed against the part as built: the regen-honesty
+rule, off the frame, as `import_step` waits on its job. A heavy direct edit
+is not tried on a copy first (the trial would be the build, on the frame);
+an `add_feature` or `modify_feature` whose own build fails is refused then,
+the call rolled back. While the active part builds, every request that
+reads its geometry -- a `NeedsPart` method that is not `Deferrable` --
+waits (`BuildGate`), so no answer describes the bodies before the feature;
+`get_state` answers at once, with each feature's `build` (`building`,
+`waiting`, `cancelled`) and `regen.unbuilt`, which also makes `regen.ok`
+false. `build_feature {feature_id}` asks for a cancelled one.
+
+**Cancel** ([the rule](#the-cancel-rule)). The build belongs to an edit
+when that edit's execution asked for it (`Command::CausedBuild`, the
+request's serial; a batch's one step, a preview accepted while it builds).
+Cancelling it while that edit is still the top of its part's undo stack
+rolls the edit back and discards it (`CommandStack::RollbackSince`): the
+features and the saved bytes as before, no undo step, and the call that
+made it, parked, is refused saying so. The part reads unsaved afterwards,
+as after any undo. Otherwise -- an open that rebuilt it, an undo, a build
+asked for, an edit no longer last, a project variable's edit (which is on
+no part's stack) -- the feature is left not built
+(cancelled) and everything after it waiting, in the tree (dimmed, saying
+why; right-click **Build**) and in `regen`. The mark is on the evaluation,
+so an edit that changes its inputs builds it again. The doc side of a
+cancel is applied by the poll, however the cancel was asked (the Model
+panel's bar, the tree's **Cancel build**, `cancel_background_job {kind:
+"feature"}`), so every path has the same outcome. A build outlives the RPC
+client that made it: it is the document's.
+
+**Saving** while one builds saves the recipe and no baked geometry for that
+part; a reopen in the session hits the store, one after a restart rebuilds
+it off the frame.
+
+On the fan grill (`scratch/imported-edits`' steps on the Voron exhaust
+grill STL, a 2937-face refined body), the `add_feature` of the 916-face
+Delete Face answers in 15 s with the part as built, and the longest the main
+thread was held meanwhile -- a second connection pinging every 20 ms -- was
+26 ms. GUI: `direct/a_heavy_delete_face_builds_off_the_frame` (frames keep
+coming, none held), `direct/cancelling_a_heavy_delete_undoes_it`,
+`direct/cancelling_a_rebuild_leaves_it_not_built`; core:
+`tests/test_heavy_build.cpp`; RPC: `tests/heavy_feature_smoke.py`. The test
+knob `LOBOLE_TEST_HEAVY_FORCE` / `LOBOLE_TEST_HEAVY_DELAY_MS`
+(`heavy::SetTestOptions`) sends every heavy-capable feature to a job and
+holds its worker first.
+
 ## What is not on the registry
 
 - **`RenderJob`**, the offline path tracer, is not a thread: it slices on the
@@ -461,7 +602,9 @@ synchronous call parks on it.
 - **Regeneration.** `Document::Regenerate` is synchronous on the calling
   thread. Making it asynchronous is a question about the document model's
   single-threaded mutation assumption, which checkpoints, undo and every RPC
-  handler rest on.
+  handler rest on. A heavy feature's build is the exception, and only the
+  build: the regeneration around it stays where it is
+  ([heavy features](#heavy-features)).
 - **Parallelism inside one operation** (parallel tessellation in
   `TessellationCache.cpp`, IBL prefiltering, `parallel::For` elsewhere) is a
   separate mechanism. A job is a user-visible operation; how it uses the

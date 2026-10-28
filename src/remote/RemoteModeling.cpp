@@ -11,6 +11,7 @@
 #include "core/Document.h"
 #include "core/ElementOrigin.h"
 #include "core/Expression.h"
+#include "core/HeavyBuild.h"
 #include "core/Literals.h"
 #include "core/Primitives.h"
 #include "core/PrintSplit.h"
@@ -199,6 +200,22 @@ void RefuseFailingDirectEdit(Document& doc, const Feature& f,
                              std::optional<size_t> at) {
   if (!IsDirectEdit(f))
     return;
+  // A heavy edit is not tried here: the trial would be the build itself, on
+  // the frame. It builds off the frame once committed, and the call, which
+  // waits for it, is refused and rolled back then if its own build fails
+  // (BuildWait, RemoteUiActions.cpp;
+  // docs/ui/long-operations.md#heavy-features). Nor is anything tried while the
+  // part is building: the copy would rebuild the whole list inline.
+  if (doc.BuildsOffFrame()) {
+    if (doc.HasUnbuilt())
+      return;
+    const std::vector<Body>* input = &doc.GetBodies();
+    if (at)
+      input = *at == 0 ? nullptr : doc.CachedBodiesAfter(*at - 1);
+    static const std::vector<Body> kNone;
+    if (heavy::BuildsOffFrame(f, input != nullptr ? *input : kNone))
+      return;
+  }
   const auto copy = Document::CopyWithGeometry(doc);
   std::unique_ptr<Feature> probe = f.Clone();
   size_t index = 0;
@@ -234,6 +251,10 @@ void RefuseOnInput(const Document& doc, const Feature& f,
   // batch's start: the feature's own Execute runs the same checks, and a
   // feature they fail is reported in the batch's `regen`, as any other.
   if (doc.InBulkEdit())
+    return;
+  // While a heavy feature builds the bodies are those before it, not the
+  // input of anything after it: the feature's own Execute checks.
+  if (doc.HasUnbuilt())
     return;
   static const std::vector<Body> kNone;
   const std::vector<Body>* input = nullptr;
@@ -457,7 +478,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "created_by; a blend whose edges start no blend; a Draft face square "
      "to the pull; a Shell wall that breaks through an open face; a Pattern "
      "or Mirror of a feature that made no body "
-     "(docs/modeling/README.md#refused-on-the-bodies).",
+     "(docs/modeling/README.md#refused-on-the-bodies). A heavy feature (a "
+     "DeleteFace of many faces) builds off the frame as a `feature` job and "
+     "the call answers when it lands; cancelled (cancel_background_job "
+     "{kind: \"feature\"}) the call is rolled back and refused "
+     "(docs/ui/long-operations.md#heavy-features).",
      "feature:object, expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
     {"import_sketch",
@@ -609,6 +634,17 @@ static constexpr MethodDoc ModelingMethods[] = {
      "Toggle suppression by feature_id; suppressed "
      "features are skipped but keep parameters.",
      "feature_id, suppressed", remote::NeedsPart | remote::Deferrable},
+    {"build_feature",
+     "Build a feature whose off-the-frame build was cancelled -- a heavy "
+     "feature, such as a Delete Face of many faces, that get_state marks "
+     "`build: cancelled` and regen lists in `unbuilt` "
+     "(docs/ui/long-operations.md#heavy-features). It builds as a "
+     "`feature` job and the call answers when it lands, with {regen, "
+     "digest}. Saved state is not edited, so there is no undo step. "
+     "Refused for a feature that is built, building or waiting behind "
+     "another, saying which.",
+     "feature_id:int>=0", remote::NeedsPart | remote::Deferrable,
+     "digest:object, regen:object"},
     {"delete_feature",
      "Delete a feature by `feature_id` (`id` is the older spelling) or "
      "`index`; one undo step; returns {regen}.",
@@ -1942,6 +1978,34 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     json after = DocumentIO::FeatureToJson(*f);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    return json{{"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
+  }
+  if (m == "build_feature") {
+    const uint64_t id = p.at("feature_id").get<uint64_t>();
+    const Feature* f = doc->FindFeatureById(id);
+    if (f == nullptr)
+      throw std::runtime_error("no feature with id " + std::to_string(id) +
+                               " (get_state lists features with their ids)");
+    switch (doc->BuildStateOf(id)) {
+    case Document::BuildState::Built:
+      throw std::runtime_error("build_feature: '" + f->GetName() +
+                               "' is built; nothing to build");
+    case Document::BuildState::Building:
+      throw std::runtime_error("build_feature: '" + f->GetName() +
+                               "' is building now (background_jobs, kind "
+                               "`feature`)");
+    case Document::BuildState::Waiting:
+      throw std::runtime_error(
+          "build_feature: '" + f->GetName() +
+          "' waits on a feature before it that is not built; build that one "
+          "(get_state: the feature whose `build` is `cancelled` or "
+          "`building`)");
+    case Document::BuildState::Cancelled:
+      break;
+    }
+    const json preDigest = BodyDigestJson(*doc);
+    doc->RequestBuild(id);
     return json{{"regen", RegenSummaryJson(*doc)},
                 {"digest", DigestJson(preDigest, *doc)}};
   }

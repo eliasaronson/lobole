@@ -43,6 +43,7 @@
   "branch_list": [],
   "branch_merge": ["name"],
   "branch_switch": ["name"],
+  "build_feature": ["feature_id"],
   "calibrate_reference_image": ["align", "distance", "image_id", "p1", "p2", "sketch_id"],
   "cam_derive_op": ["bottom_z", "climb", "corner_relief", "cut_angle_deg", "cutter_comp", "depth_mm", "drilled_bores", "edge_size", "enabled", "finish_stock", "finish_tool", "index_a_deg", "job", "lead_arcs", "lead_mm", "name", "passes", "peck", "rest_from_tool", "rotary_pattern", "sample_step_mm", "setup", "side", "stepdown", "stepover", "stock_to_leave", "tabs", "target", "targets", "tool", "top_z", "type", "use_outline", "width_mm", "z_step_mm"],
   "cam_post": ["job", "path", "post", "setup"],

@@ -111,9 +111,11 @@ same RPCs an MCP client has:
   and `grow_faces` refuses ("no loop of edges in a host face bounds them").
   `Refine` merges the coplanar ones (the grill: 5642 faces to 2937), after
   which `grow_faces` takes a faceted hole whole (229 faces each) and Delete
-  Face fills it. It is slow: four filled holes, 916 faces, built in about
-  25 s, twice in one `add_feature` (the copy it is checked on, then the
-  part), and again on an open that has no baked geometry. A faceted hole has
+  Face fills it. It is slow -- four filled holes, 916 faces, 15 s of
+  Defeaturing -- so it builds off the frame as a `feature` job, once per
+  `add_feature`, and again (as a job) on an open that has no baked
+  geometry ([heavy features](../ui/long-operations.md#heavy-features)). A
+  faceted hole has
   no radius: `query_geometry`'s `radius`, a measured diameter and a Hole
   centred on a projected edge all need a true circle, so its size and centre
   are the caller's circle fit to the wall faces' centroids. New holes cut

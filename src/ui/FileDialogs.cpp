@@ -85,6 +85,9 @@ bool NothingToSave(const AppState& state) {
 // nothing rather than marking the untouched project recovered.
 bool OpenProjectFile(AppState& state, const std::string& path,
                      std::string* error) {
+  // Becomes the live part: a heavy feature builds off the frame
+  // (docs/ui/long-operations.md#heavy-features).
+  const Document::BuildOffFrameScope offFrame;
   if (auto loaded = DocumentIO::Load(path)) {
     ReplaceDocument(state, std::move(*loaded));
     FitCameraToDocument(state);

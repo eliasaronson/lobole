@@ -16,6 +16,7 @@
 #include "common/Watchdog.h"
 #include "core/Conventions.h"
 #include "core/Expression.h"
+#include "core/HeavyBuild.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/drawing/DrawingExport.h"
@@ -53,6 +54,7 @@
 #include "ui/Commands.h" // ActiveContext (get_keymap)
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/FeatureBuildJob.h"
 #include "ui/PreviewFeature.h"
 #include "ui/ProjectActions.h"
 #include "ui/RendererSync.h"
@@ -755,6 +757,109 @@ bool RemoteServer::ClientConnected(int client) {
          m_clients.end();
 }
 
+namespace {
+
+// A request that reads the active part's geometry while a heavy feature
+// builds waits for it (docs/ui/long-operations.md#heavy-features): answered
+// from the bodies before the feature, it would describe a model the recipe
+// does not make. Dispatched as soon as nothing builds.
+class BuildGate : public remote::Parking {
+public:
+  Next Poll(ui::AppState& state, const remote::RpcParams&, json&) override {
+    if (state.document && state.document->PendingBuild() != nullptr)
+      return Next::Wait;
+    return Next::Dispatch;
+  }
+};
+
+bool ActivePartBuilding(const ui::AppState& state) {
+  return state.document && state.document->PendingBuild() != nullptr;
+}
+
+// A call that left its part with a heavy feature building answers when the
+// build lands, with the regen and digest of the part as built -- the regen
+// honesty rule, off the frame, as import_step waits on its job. A cancel of
+// the build that rolled the call's edit back answers with the refusal; a
+// heavy direct edit the call added or modified whose own build failed is
+// refused and rolled back, as the synchronous trial refused it.
+class BuildWait : public remote::Parking {
+public:
+  BuildWait(std::string method, json result, std::optional<EditMarks> marks,
+            json preDigest, uint64_t slot, uint64_t stampAfter,
+            uint64_t editedFeature, std::string building)
+      : m_method(std::move(method)), m_result(std::move(result)),
+        m_marks(std::move(marks)), m_pre(std::move(preDigest)), m_slot(slot),
+        m_stampAfter(stampAfter), m_feature(editedFeature),
+        m_building(std::move(building)) {}
+
+  Next Poll(ui::AppState& state, const remote::RpcParams&,
+            json& answer) override {
+    Document* doc = ui::FeatureBuildDoc(state, m_slot);
+    if (doc == nullptr)
+      throw std::runtime_error(m_method +
+                               ": the part it edited was closed before '" +
+                               m_building + "' finished building");
+    if (doc->PendingBuild() != nullptr)
+      return Next::Wait;
+    const auto track = state.featureBuilds.find(m_slot);
+    if (m_stampAfter != 0 && track != state.featureBuilds.end() &&
+        track->second.revertedStamp == m_stampAfter)
+      throw std::runtime_error(
+          m_method + ": the build of '" + m_building +
+          "' was cancelled, and with it the call: it was rolled back, so the "
+          "document is as it was");
+    if (m_feature != 0)
+      if (const Feature* f = doc->FindFeatureById(m_feature);
+          f != nullptr && f->MayBuildOffFrame() && !f->GetError().empty() &&
+          !f->ErrorAfterEarlierFailure() && m_marks &&
+          state.document.get() == doc) {
+        const std::string why = f->TypeName() + " refused: " + f->GetError();
+        RollBackEdits(state, *m_marks);
+        throw std::runtime_error(why + ". The document is unchanged");
+      }
+    answer = std::move(m_result);
+    if (answer.is_object()) {
+      if (answer.contains("regen")) {
+        json regen = remote::RegenSummaryJson(*doc);
+        for (const char* k : {"executed", "cached"})
+          if (answer["regen"].is_object() && answer["regen"].contains(k))
+            regen[k] = k == std::string("executed")
+                           ? doc->LastRegenStats().executed
+                           : doc->LastRegenStats().cached;
+        answer["regen"] = std::move(regen);
+      }
+      if (answer.contains("digest") && m_pre.is_array())
+        answer["digest"] = remote::DigestJson(m_pre, *doc);
+    }
+    return Next::Answer;
+  }
+
+private:
+  std::string m_method;
+  json m_result;
+  std::optional<EditMarks> m_marks;
+  json m_pre;
+  uint64_t m_slot = 0;
+  uint64_t m_stampAfter = 0;
+  uint64_t m_feature = 0;
+  std::string m_building;
+};
+
+// Whether a call on this part may leave a heavy feature building, so its
+// `digest` must be recomputed against the bodies from before it.
+bool MayBuildHeavy(const Document* doc, const std::string& method) {
+  if (doc == nullptr)
+    return false;
+  if (method == "add_feature" || method == "batch")
+    return true;
+  for (const auto& f : doc->GetFeatures())
+    if (f->MayBuildOffFrame())
+      return true;
+  return false;
+}
+
+} // namespace
+
 void RemoteServer::PollParked(ui::AppState& state) {
   std::vector<Request> resume;
   for (auto it = m_parked.begin(); it != m_parked.end();) {
@@ -1101,8 +1206,17 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
           ~Caller() { state.rpcConnection = 0; }
         } caller{state};
         state.rpcConnection = parked->request.connection;
-        parked->wait = remote::ParkCamRequest(state, parked->request.method,
-                                              *parked->params);
+        // A geometry read waits while the active part builds a heavy
+        // feature (BuildGate, above).
+        if (ActivePartBuilding(state) &&
+            (remote::MethodFlagsOf(parked->request.method) &
+             remote::NeedsPart) &&
+            !(remote::MethodFlagsOf(parked->request.method) &
+              remote::Deferrable))
+          parked->wait = std::make_unique<BuildGate>();
+        if (!parked->wait)
+          parked->wait = remote::ParkCamRequest(state, parked->request.method,
+                                                *parked->params);
         if (!parked->wait && m_mode != RemoteMode::Headless)
           parked->wait = remote::ParkDrawingRequest(
               state, parked->request.method, *parked->params);
@@ -1181,7 +1295,19 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
           !(remote::MethodFlagsOf(request.method) &
             (remote::NotInBatch | remote::UiAction)))
         marks = MarkEdits(state);
+      // What a heavy build the call may start needs to answer it
+      // (BuildWait): the part as it was, and whether the call moved it.
+      ui::OptPartsIntoOffFrameBuilds(state);
+      const Document* docBefore = state.document.get();
+      const uint64_t saveStampBefore =
+          docBefore != nullptr ? docBefore->SaveStamp() : 0;
+      const uint64_t serialBefore =
+          docBefore != nullptr ? docBefore->PendingSerial() : 0;
+      const json preDigestHeavy = MayBuildHeavy(docBefore, request.method)
+                                      ? remote::BodyDigestJson(*docBefore)
+                                      : json();
       json result = HandleSemantic(request, state, handled, params);
+      ui::OptPartsIntoOffFrameBuilds(state);
       if (!handled)
         marks.reset(); // nothing ran: what follows is a capture or the GUI
       if (handled) {
@@ -1204,6 +1330,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
           RespondError(request.client, request.id, message);
           continue;
         }
+        const std::optional<EditMarks> marksTaken = marks;
         marks.reset();
         // An expression requirement the call moved answers in the call's
         // own response, as `regen` reports a broken feature
@@ -1239,6 +1366,41 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
             took = json::array();
           for (const json& u : request.linksUpdated)
             took.push_back(u);
+        }
+        // The call left its part building a heavy feature: it answers when
+        // the build lands (BuildWait, above).
+        if (Document* doc = state.document.get();
+            doc != nullptr && doc->PendingBuild() != nullptr &&
+            (doc != docBefore || doc->SaveStamp() != saveStampBefore ||
+             doc->PendingSerial() != serialBefore)) {
+          const uint64_t slot = ui::FeatureBuildSlotOf(state, doc);
+          const bool pushed =
+              marksTaken && state.commands &&
+              state.commands->UndoDepth() > marksTaken->commandDepth;
+          const uint64_t stampAfter =
+              pushed || request.method == "batch"
+                  ? (state.commands ? state.commands->TopUndoStamp() : 0)
+                  : 0;
+          uint64_t edited = 0;
+          if ((request.method == "add_feature" ||
+               request.method == "modify_feature") &&
+              result.is_object() && result.contains("id") &&
+              result["id"].is_number_unsigned())
+            edited = result["id"].get<uint64_t>();
+          auto parked = std::make_shared<Parked>();
+          parked->request = std::move(request);
+          parked->params =
+              std::make_unique<remote::RpcParams>(parked->request.params);
+          (void)parked->params->raw(); // its keys were checked when it ran
+          parked->wait = std::make_unique<BuildWait>(
+              parked->request.method, std::move(result), marksTaken,
+              docBefore == doc ? preDigestHeavy : json::array(), slot,
+              stampAfter, edited, doc->PendingBuild()->featureName);
+          // The edit's build starts now, not at the end of the tick, so the
+          // job is listed the moment the call is parked.
+          ui::PollFeatureBuilds(state);
+          m_parked.push_back(std::move(parked));
+          continue;
         }
         Respond(request.client, request.id, result);
         continue;

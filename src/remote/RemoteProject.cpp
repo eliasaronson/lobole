@@ -258,7 +258,8 @@ static constexpr MethodDoc ProjectMethods[] = {
      "refused saying what is wrong, never stored as a different one. An "
      "expression requirement the edit moves answers in `requirements`.",
      "columns, comment, name, rows", remote::Deferrable,
-     "digest:object, regen:{failed:any[], ok:bool, warnings:any[]}, "
+     "digest:object, regen:{failed:any[], ok:bool, warnings:any[], "
+     "unbuilt?:any[]}, "
      "requirements?:object[], table:{columns:string[], name:string, "
      "rows:object[], comment?:string}"},
     {"list_tables",
@@ -1036,6 +1037,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (path.empty())
       throw std::runtime_error("no such checkpoint: " + name);
     const json preDigest = BodyDigestOf(state.document.get());
+    // Becomes the live part: a heavy feature builds off the frame.
+    const Document::BuildOffFrameScope offFrame;
     auto loaded = DocumentIO::Load(path);
     if (!loaded)
       throw std::runtime_error(loaded.error().empty()

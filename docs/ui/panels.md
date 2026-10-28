@@ -83,7 +83,11 @@ The feature tree (`src/ui/FeatureTreePanel.cpp`):
 - Double-click opens the feature's editor in the tool window (a sketch's
   double-click enters the sketch). Right-click: Edit, Rename, Suppress,
   Rollback to here / Roll to end, the derived-part verbs, re-pick verbs,
-  Delete (counted).
+  Delete (counted), and on a heavy feature Cancel build while it builds or
+  Build once its build was cancelled. A feature not built (building,
+  waiting behind one, or cancelled) is dimmed, saying which on hover, and a
+  building one's bar, with its cancel, sits under the Features heading
+  ([heavy features](long-operations.md#heavy-features)).
 - Drag a row onto another to reorder, validated on drop: a move that would
   dangle a reference is refused with a message.
 - The rollback bar (`##RollbackBar`) is a draggable divider where

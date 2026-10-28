@@ -596,6 +596,21 @@ public:
   // must never return true: its geometry is what the bake carries.
   [[nodiscard]] virtual bool IsDatum() const { return false; }
 
+  // A HEAVY feature may build off the frame
+  // (docs/ui/long-operations.md#heavy-features): on a document that builds so,
+  // a regeneration that reaches it uncached stops there and a background job
+  // runs its Execute on deep copies of `input`. It goes there when BuildCostS
+  // -- an estimate in seconds from what it would act on, never a constant per
+  // type -- reaches heavy::kOffFrameS. Its Execute must read only the context's
+  // bodies, the features it references (VisitFeatureRefs), the symbols and
+  // the configuration, sheet-metal and print context: not the assets.
+  [[nodiscard]] virtual bool MayBuildOffFrame() const { return false; }
+  [[nodiscard]] virtual double
+  BuildCostS(const std::vector<Body>& input) const {
+    (void)input;
+    return 0.0;
+  }
+
   // The tool solid a feature that CUTS or ADDS swept on its last Execute, for
   // a Pattern referencing it: neither leaves a body of its own behind to
   // replicate (a cut removes, an add fuses into a body another feature made),

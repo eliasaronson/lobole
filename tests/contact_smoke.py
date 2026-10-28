@@ -41,6 +41,51 @@ def refused(d, method, needle, **kw):
     raise AssertionError(f"{method} was accepted: {kw}")
 
 
+def cancel_interference(d, port):
+    """`interference` has no interruption points (one boolean): listed as
+    `cancellable: false`, a cancel does not stop it -- the waiting call
+    answers with its normal result -- and once it has answered, the job is
+    reaped from background_jobs (the worker marks itself done)."""
+    import threading
+    other = Client.wait_for(port)
+    out = {}
+
+    def go():
+        try:
+            out["answer"] = d.call("interference", a=0, b=1)
+        except RuntimeError as e:
+            out["error"] = str(e)
+
+    worker = threading.Thread(target=go)
+    worker.start()
+    job, deadline = None, time.time() + 30
+    while job is None:
+        job = next((j for j in other.call("background_jobs")["jobs"]
+                    if j["kind"] == "interference"), None)
+        if job is None:
+            expect(worker.is_alive() and time.time() < deadline,
+                   f"no interference job while the call waited: {out}")
+            time.sleep(0.02)
+    expect(job["cancellable"] is False,
+           f"an interference job says it cannot be cancelled: {job}")
+    asked = other.call("cancel_background_job", kind="interference")
+    expect(asked.get("cancellable") is False,
+           f"the cancel answer says it is not cancellable: {asked}")
+    worker.join(60)
+    expect(not worker.is_alive(), "the cancelled interference never answered")
+    expect("error" not in out,
+           f"a cancel does not stop an interference: {out}")
+    expect(out["answer"].get("state") == "touching",
+           f"it answers with its normal result: {out}")
+    deadline = time.time() + 5
+    while any(j["kind"] == "interference"
+              for j in other.call("background_jobs")["jobs"]):
+        expect(time.time() < deadline,
+               "the interference job is still listed 5 s after it answered")
+        time.sleep(0.05)
+    other.close()
+
+
 def main():
     binary = sys.argv[1]
     env = dict(os.environ)
@@ -101,6 +146,7 @@ def main():
                         f"({slowest:.2f} s)", expect, "contact_smoke")
         expect(answer.get("state") == "touching",
                f"the parked call answers as before: {answer}")
+        cancel_interference(d, app.port)
 
         box(d, (25, 0, 0), (10, 10, 10), "C")
         r = d.call("interference", a=1, b=2)

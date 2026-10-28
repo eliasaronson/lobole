@@ -486,7 +486,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "`insertion` and `assembly_sequence` (what a waiting check_insertion "
      "or check_assembly_sequence is waiting for), `design_sweep` "
      "(design_sweep: the model regenerated over its variables' ranges on "
-     "copies, async or what a synchronous one is waiting for). Empty when "
+     "copies, async or what a synchronous one is waiting for), `feature` "
+     "(a heavy feature -- a Delete Face of many faces -- building off the "
+     "frame, one per part; what a waiting edit, and every geometry read of "
+     "that part, is waiting for; cancelled, it rolls back the edit that "
+     "made it when that is still the part's last, else leaves the feature "
+     "not built (cancelled) until build_feature). Empty when "
      "nothing is running. Not the "
      "CAM "
      "job document -- that is list_job_parts.",
@@ -517,7 +522,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "position:number[], target:number[]}, can_redo:bool, "
      "can_undo:bool, features:object[], pending_feature_id:int, "
      "regen:{cached:int, executed:int, failed:object[], ok:bool, "
-     "warnings:object[]}, revision:{instance:int, part_id:int, "
+     "warnings:object[], unbuilt?:object[]}, revision:{instance:int, "
+     "part_id:int, "
      "session:string, version:int}, rollback:int, selected_feature:int, "
      "selection:{mesh:int, face:int, normal:number[], "
      "center:number[]}|null, selection_items:{kind:string, id?:int, "
@@ -1283,6 +1289,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // snapshot its first mutation pushed.
     const EditMarks marks = MarkEdits(state);
     const size_t undoMark = marks.commandDepth;
+    // The heavy build the batch's one regeneration may ask for is the
+    // batch's (Command::CausedBuild), noted once it is one undo step.
+    const Document* batchDoc = state.document.get();
+    const uint64_t batchSerial =
+        batchDoc != nullptr ? batchDoc->PendingSerial() : 0;
     // The batch answers geometry ONCE, for the whole: its members' digests
     // are stripped below, and this is what the batch's own is against.
     const json preDigest = remote::BodyDigestOf(state.document.get());
@@ -1485,6 +1496,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (state.commands)
       state.commands->CoalesceSince(
           undoMark, "Batch of " + std::to_string(calls.size()) + " calls");
+    if (state.commands && state.document && state.document.get() == batchDoc)
+      state.commands->NoteCausedBuild(*state.document, batchSerial);
     if (state.assemblyHistory.undo.size() > asmMark + 1) {
       state.assemblyHistory.undo.resize(asmMark + 1);
       state.assemblyHistory.undoStamps.resize(asmMark + 1);
@@ -1977,6 +1990,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           f["after_earlier_failure"] = true;
         }
       }
+      // Not built: a heavy feature building off the frame, its build
+      // cancelled, or waiting behind one
+      // (docs/ui/long-operations.md#heavy-features).
+      if (const char* b = remote::BuildStateName(
+              stateDoc->BuildStateOf(stateDoc->GetFeature(i)->GetId())))
+        f["build"] = b;
       // Non-fatal advisory (e.g. a cut that intersected nothing): the feature
       // built a valid result, but likely not the intended one.
       if (!stateDoc->GetFeature(i)->GetWarning().empty()) {

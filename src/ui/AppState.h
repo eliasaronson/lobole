@@ -2063,6 +2063,17 @@ struct AppState {
   // reads the payload; ImportRunning asks the registry.
   std::shared_ptr<ImportJob> importJob;
   std::string importError;
+  // Heavy features building off the frame (`feature` jobs, ui/
+  // FeatureBuildJob.h), one per part, by part slot id (0: the lone part of
+  // a document with no tabs yet). What the poll last saw of the part:
+  struct FeatureBuildTrack {
+    uint64_t jobId = 0;      // the running build, 0 for none
+    uint64_t serialSeen = 0; // Document::PendingSerial at the last poll
+    // The edit a user cancel last rolled back (its undo stamp), so the RPC
+    // that made it answers with the refusal (remote BuildWait).
+    uint64_t revertedStamp = 0;
+  };
+  std::map<uint64_t, FeatureBuildTrack> featureBuilds;
   // File > Import of a mesh past the triangle limit asks before it starts
   // (interchange::MeshTriangleLimit): the file, its count and what it is
   // expected to cost. Empty `path`: nothing is being asked. The modal's

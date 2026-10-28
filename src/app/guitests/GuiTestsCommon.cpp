@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "app/guitests/GuiTestsCommon.h"
+#include "core/HeavyBuild.h"
+#include "ui/FeatureBuildJob.h"
 
 #include "core/Primitives.h"
 #include "core/SheetMetal.h"
@@ -145,6 +147,11 @@ void ResetAppForTest() {
   // which turns it back on for itself
   // (docs/ui/long-operations.md#cam-toolpath-passes).
   s_App->camDeferPasses = false;
+  // A heavy-feature test's knob and its build do not outlive it
+  // (docs/ui/long-operations.md#heavy-features).
+  heavy::SetTestOptions({});
+  ui::CancelBackgroundJobs(*s_App, ui::kFeatureBuildKind);
+  ui::JoinBackgroundJobs(*s_App, ui::kFeatureBuildKind);
   // Drawing views project INLINE too, for the same reason; the deferred path
   // is drawing/a_slow_drawing_tab_does_not_stall_the_frame's subject.
   s_App->drawingDeferProjection = false;

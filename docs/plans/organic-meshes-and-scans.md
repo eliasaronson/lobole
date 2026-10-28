@@ -353,19 +353,15 @@ screw hole or a slot (a B-Rep tool body) into a cradle after it is cut:
 
 **Threading and the job**
 - The field and the boolean are pure data, and run under `parallel::For`.
-- Cradle is a known-heavy feature, so its compute runs as a background job
-  the way the import job does (docs/ui/long-operations.md): progress,
-  cancel, and a refusal past a cost budget derived from the stage-0
-  measurement. Regeneration in general stays on the main thread; only a
-  feature declared heavy takes this path.
-- The result is cached by the hash of its inputs (target, tool, clearance,
-  direction, sweep, resolution), so reopening a project reuses it.
-- **Cancel.** Cancelling an edit leaves the document exactly as before the
-  edit: no undo step, like a refused call. Cancelling the build of an
-  existing feature during open or regenerate leaves that feature marked not
-  built ("cancelled"), with its downstream unbuilt; the tree and the reply
-  show it, and it is rebuilt on request.
-- A separate small plan generalises this mechanism to other heavy features.
+- Cradle is a heavy feature (docs/ui/long-operations.md#heavy-features):
+  it declares `MayBuildOffFrame` and estimates `BuildCostS` from its cells
+  and triangles (the stage-0 cost law), and builds as a `feature` job with
+  that mechanism's progress, cancel rule and result store, keyed by its
+  chain hash (target, tool, clearance, direction, sweep, resolution are in
+  it), so reopening reuses it. Its Execute reads only its bodies, its
+  referenced features and the symbols, as that mechanism requires. Added
+  here: a refusal past a cost budget derived from the stage-0 measurement,
+  and progress reported through `heavy::ReportFraction`.
 - A refusal past the budget names what to do: a coarser `resolution_mm` (the
   value that fits the budget), a smaller target, or decimating the scan
   externally to under the triangle count that fits.

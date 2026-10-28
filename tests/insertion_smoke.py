@@ -70,6 +70,62 @@ def ring(d, name, z0, bore_r):
            f"{name} is a ring: {v}")
 
 
+def assembly_snapshot(d):
+    """What a check must leave alone: the tabs, the occurrences and where
+    they are, the mates, the sequence and the requirements."""
+    snap = {m: d.call(m) for m in ("list_parts", "list_occurrences",
+                                    "list_mates", "list_requirements")}
+    try:
+        snap["sequence"] = d.call("get_assembly_sequence")
+    except RuntimeError as e:
+        snap["sequence"] = str(e)
+    return snap
+
+
+def cancel_insertion(d, port, params):
+    """An `insertion` job cancelled while check_insertion waits on it (held
+    by LOBOLE_TEST_INSERTION_MS): the call is REFUSED, saying it was
+    cancelled, and nothing in the assembly changed."""
+    other = Client.wait_for(port)
+    before = assembly_snapshot(other)
+    out = {}
+
+    def go():
+        try:
+            out["answer"] = d.call("check_insertion", **params)
+        except RuntimeError as e:
+            out["error"] = str(e)
+
+    worker = threading.Thread(target=go)
+    worker.start()
+    job, deadline = None, time.time() + 30
+    while job is None:
+        job = next((j for j in other.call("background_jobs")["jobs"]
+                    if j["kind"] == "insertion"), None)
+        if job is None:
+            expect(worker.is_alive() and time.time() < deadline,
+                   f"no insertion job while check_insertion waited: {out}")
+            time.sleep(0.02)
+    expect(job["cancellable"] is True,
+           f"an insertion job says it can be cancelled: {job}")
+    asked = other.call("cancel_background_job", kind="insertion")
+    expect(asked.get("asked", 0) >= 1, f"the cancel reached the job: {asked}")
+    worker.join(60)
+    expect(not worker.is_alive(), "the cancelled check_insertion never answered")
+    expect("cancelled" in out.get("error", ""),
+           f"a cancelled check_insertion is refused, saying so: {out}")
+    after = assembly_snapshot(other)
+    expect(after == before,
+           f"a cancelled check_insertion changed the assembly:\n{before}\n{after}")
+    deadline = time.time() + 5
+    while any(j["kind"] == "insertion"
+              for j in other.call("background_jobs")["jobs"]):
+        expect(time.time() < deadline,
+               "the cancelled insertion job is still listed 5 s later")
+        time.sleep(0.05)
+    other.close()
+
+
 def main(binary):
     env = dict(os.environ)
     # Holds each insertion job before it computes (tests only), so the
@@ -100,6 +156,9 @@ def main(binary):
                a={"occurrence": shaft, "origin": True},
                b={"occurrence": occ["middle ring"], "origin": True},
                flipped=False)
+
+        cancel_insertion(d, app.port, {"a": "end ring", "b": shaft,
+                                       "entry": "positive"})
 
         # ---- The RPC -----------------------------------------------------
         r = d.call("check_insertion", a="end ring", b=shaft,

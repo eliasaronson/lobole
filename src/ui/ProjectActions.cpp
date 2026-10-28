@@ -851,6 +851,9 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
       progress->total.store(1);
     readctx::CollectDrops drops;
     const auto onDisk = DocumentIO::InspectGeometry(path);
+    // A heavy feature it rebuilds builds as a job once adopted
+    // (docs/ui/long-operations.md#heavy-features).
+    const Document::BuildOffFrameScope offFrame;
     auto loaded = DocumentIO::Load(path);
     if (!loaded)
       return std::unexpected(loaded.error());
@@ -949,6 +952,10 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
       }
       // This thread's own collector: a pool thread sees no other.
       readctx::CollectDrops collect;
+      // A part that rebuilds a heavy feature stops at it and builds it as a
+      // `feature` job once adopted, cancellable on its own, rather than
+      // inside the read (docs/ui/long-operations.md#heavy-features).
+      Document::BuildOffFrameScope offFrame;
       try {
         slots[i] = ReadSlot(docs[i], i, fs::path(path), &reasons[i], scope);
       } catch (const std::exception& e) {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/BackgroundJobs.h"
+#include "ui/FeatureBuildJob.h"
 
 #include "ui/AppState.h"
 #include "ui/RendererSync.h"
@@ -39,6 +40,11 @@ void PollBackgroundJobs(AppState& state) {
   // solve started on a part tab was not reaped while an assembly tab was
   // active; phase 3 gave the job its part slot id instead.)
   ReapBackgroundJobs(state);
+
+  // A part whose regeneration stopped at a heavy feature gets its `feature`
+  // job here, and a build an edit superseded or a user cancelled is settled
+  // here (ui/FeatureBuildJob.h), after the reap that landed what finished.
+  PollFeatureBuilds(state);
 
   // Not a job, and here for the same reason the jobs are: an expression
   // requirement measured in place must not depend on which panel is open
@@ -88,9 +94,13 @@ void ReapBackgroundJobs(AppState& state) {
     f.studyId = job.studyId;
     f.error = job.error;
     f.cancelReason = job.cancelReason;
-    f.outcome = !job.error.empty()  ? "failed"
-                : job.cancel.load() ? "cancelled"
-                                    : "done";
+    // A cancel a job could not act on (it is not cancellable, or stopped
+    // being so -- an import once it materializes) left it to run to its
+    // end: that is "done", not "cancelled"
+    // (docs/ui/long-operations.md#the-cancel-rule).
+    f.outcome = !job.error.empty()                     ? "failed"
+                : job.cancel.load() && job.cancellable ? "cancelled"
+                                                       : "done";
     f.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() -
                                               job.started)
                     .count();

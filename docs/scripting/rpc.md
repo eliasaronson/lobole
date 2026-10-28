@@ -204,7 +204,12 @@ the active tab never changed.
 ## What a response carries
 
 - **`regen`** on every mutating response: `{ok, failed[], warnings[]}`
-  (`get_state` adds `executed` / `cached`). `ok` reflects errors only; a
+  (`get_state` adds `executed` / `cached`), and `unbuilt[]` while a heavy
+  feature is building or its build was cancelled, each `{index, name,
+  state}` (`building`, `waiting`, `cancelled`), which makes `ok` false; a
+  call that started such a build answers when it lands
+  ([heavy features](../ui/long-operations.md#heavy-features)). Otherwise
+  `ok` reflects errors only; a
   warning means the feature built but likely did not do what was meant (a cut
   that removed no material). A mutating RPC that leaves a feature broken says
   so in its own response, never only in a later `get_state` —

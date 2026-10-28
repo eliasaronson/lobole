@@ -6,6 +6,7 @@
 
 #include "core/ElementOrigin.h"
 #include "core/FitBands.h"
+#include "core/HeavyBuild.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/RetainingRingGrooveFeature.h"
@@ -167,6 +168,45 @@ void Document::AdoptEvaluations(const Document& other) {
     }
 }
 
+namespace {
+thread_local bool t_buildOffFrameScope = false;
+} // namespace
+
+Document::BuildOffFrameScope::BuildOffFrameScope()
+    : m_saved(t_buildOffFrameScope) {
+  t_buildOffFrameScope = true;
+}
+Document::BuildOffFrameScope::~BuildOffFrameScope() {
+  t_buildOffFrameScope = m_saved;
+}
+bool Document::BuildOffFrameScopeHeld() { return t_buildOffFrameScope; }
+
+void Document::AdoptBuilt(const heavy::Result& result) {
+  if (result.hash == 0 || result.executed == nullptr)
+    return;
+  m_cache.insert_or_assign(result.hash,
+                           RegenCacheEntry{result.bodiesAfter, true,
+                                           result.executed, ++m_regenClock});
+}
+
+void Document::CancelBuild(size_t hash) {
+  if (hash == 0)
+    return;
+  m_cancelledBuilds.insert(hash);
+  Regenerate();
+}
+
+bool Document::RequestBuild(uint64_t featureId) {
+  if (BuildStateOf(featureId) != BuildState::Cancelled)
+    return false;
+  // The mark is on the evaluation, which this regeneration is about to ask
+  // for again: drop every mark, since only the one it stops at matters and
+  // any other is an evaluation no history reaches now.
+  m_cancelledBuilds.clear();
+  Regenerate();
+  return true;
+}
+
 // The one copy implementation, behind both public forms. A list of members,
 // not a `= default`, for two reasons: the features are owning pointers and
 // must be CLONED, and m_instanceId must NOT come along (it is left to its
@@ -198,6 +238,10 @@ Document::Document(const Document& other, bool reuseGeometry)
       m_projectSymbols(other.m_projectSymbols),
       m_projectParameters(other.m_projectParameters), m_nextId(other.m_nextId),
       m_rollback(other.m_rollback), m_commitGeometry(other.m_commitGeometry) {
+  // A copy is built whole, inline: it is a trial, a snapshot or a
+  // configured view, and nobody starts a job for it
+  // (docs/ui/long-operations.md#heavy-features).
+  m_buildsOffFrame = false;
   m_generator = other.m_generator;
   m_sheetMetal = other.m_sheetMetal; // every flange's thickness comes from it
   m_tube = other.m_tube;             // what check_frame and the cut list read
@@ -388,6 +432,19 @@ bool Document::Regenerate() {
   m_version++;
   bool allOk = true;
   m_lastStats = {};
+  // What this regeneration leaves not built (a heavy feature it stopped at,
+  // and what follows it) is decided afresh; the request survives only if it
+  // asks for the same evaluation again.
+  m_unbuilt.clear();
+  const size_t pendingBefore = m_pending ? m_pending->hash : 0;
+  std::shared_ptr<heavy::Request> pendingKept = std::move(m_pending);
+  m_pending.reset();
+  bool stopped = false;
+  const auto settlePending = [&] {
+    const size_t now = m_pending ? m_pending->hash : 0;
+    if (now != pendingBefore || (now == 0) != (pendingBefore == 0))
+      m_pendingSerial++;
+  };
 
   // Appearance stamp (v54): each body carries its creating feature's visual
   // override. A POST-pass keyed on createdBy (rather than plumbing through
@@ -729,6 +786,7 @@ bool Document::Regenerate() {
       stampAppearance();
       stampMaterial();
       fitband::Stamp(*this, m_bodies);
+      settlePending();
       return datumsOk;
     }
     LOG_INFO("Baked geometry does not match the recipe; rebuilding");
@@ -799,6 +857,87 @@ bool Document::Regenerate() {
         m_bodies = *input;
         input = &m_bodies;
       }
+      // A heavy feature (Feature::MayBuildOffFrame): a build another
+      // document, a job or an earlier history already paid for is installed
+      // like a hit; a document that builds off the frame stops here and asks
+      // for one (docs/ui/long-operations.md#heavy-features).
+      const bool heavyHere = !suppressed && heavy::BuildsOffFrame(f, m_bodies);
+      if (heavyHere) {
+        if (std::optional<heavy::Result> built = heavy::Find(h)) {
+          m_bodiesFromBlob = 0;
+          m_bodiesBlobSource.clear();
+          m_bodies = built->bodiesAfter;
+          f.CopyDerivedState(*built->executed);
+          f.SetDerivedFor(h);
+          m_cache.insert_or_assign(
+              h,
+              RegenCacheEntry{m_bodies, true, built->executed, ++m_regenClock});
+          rekey(i);
+          m_lastStats.cached++;
+          if (!f.GetError().empty()) {
+            f.SetErrorAfterEarlierFailure(anyFailedYet);
+            chainOk = false;
+            anyFailedYet = true;
+          }
+          continue;
+        }
+        if (m_buildsOffFrame) {
+          f.ClearError();
+          f.ClearWarning();
+          f.SetDerivedFor(0);
+          const bool cancelled = m_cancelledBuilds.count(h) != 0;
+          m_unbuilt[f.GetId()] =
+              cancelled ? BuildState::Cancelled : BuildState::Building;
+          for (size_t j = i + 1; j < upTo; j++) {
+            m_features[j]->ClearError();
+            m_features[j]->ClearWarning();
+            m_features[j]->SetDerivedFor(0);
+            m_unbuilt[m_features[j]->GetId()] = BuildState::Waiting;
+          }
+          if (!cancelled) {
+            if (pendingKept && pendingKept->hash == h &&
+                pendingKept->featureId == f.GetId()) {
+              pendingKept->index = i;
+              m_pending = std::move(pendingKept);
+            } else {
+              auto req = std::make_shared<heavy::Request>();
+              req->index = i;
+              req->featureId = f.GetId();
+              req->featureName = f.GetName();
+              req->hash = h;
+              req->estimateS = f.BuildCostS(m_bodies);
+              req->feature = f.Clone();
+              req->input = m_bodies;
+              req->symbols = m_symbols;
+              if (const Configuration* cfg = ActiveConfig())
+                req->configuration = *cfg;
+              req->sheetMetal = m_sheetMetal;
+              req->print = m_print;
+              req->printUp = PrintUp(m_printSettings);
+              // The features it names, as RegenContext::FindById would
+              // resolve them here, in history order.
+              RegenContext refCtx{m_bodies,   m_features, i,
+                                  &m_symbols, &m_assets,  nullptr};
+              refCtx.configuration = ActiveConfig();
+              std::set<uint64_t> ids;
+              f.VisitFeatureRefs([&](uint64_t id) { ids.insert(id); });
+              for (size_t k = 0; k < i; k++)
+                if (ids.count(m_features[k]->GetId()) != 0 &&
+                    refCtx.FindById(m_features[k]->GetId()) != nullptr)
+                  req->refs.push_back(m_features[k]->Clone());
+              m_pending = std::move(req);
+            }
+          }
+          LOG_INFO("Feature '{}' {} off the frame; {} feature(s) after it "
+                   "wait",
+                   f.GetName(),
+                   cancelled ? "is not built (its build was cancelled)"
+                             : "builds",
+                   upTo - i - 1);
+          stopped = true;
+          break;
+        }
+      }
       m_bodiesFromBlob = 0; // executed: the bodies are this build's now
       m_bodiesBlobSource.clear();
       f.ClearError();
@@ -854,6 +993,13 @@ bool Document::Regenerate() {
                                ++m_regenClock});
         if (!suppressed)
           rekey(i);
+        // A heavy feature built inline (a copy, a test, a worker's load):
+        // filed where every other document of the session finds it.
+        if (heavyHere) {
+          heavy::Put({h, m_bodies, m_cache.at(h).executed});
+          if (hashes[i] != h)
+            heavy::Put({hashes[i], m_bodies, m_cache.at(h).executed});
+        }
       }
     }
     if (!restart && input != nullptr) {
@@ -867,7 +1013,10 @@ bool Document::Regenerate() {
   }
   if (!chainOk)
     allOk = false;
-  m_tipHash = upTo > 0 ? hashes[upTo - 1] : 0;
+  // A list that stopped at a heavy feature has no tip: nothing may bake it
+  // or hand its bodies to a copy as the recipe's answer.
+  m_tipHash = upTo > 0 && !stopped ? hashes[upTo - 1] : 0;
+  settlePending();
   // The current chain. Entries past the rollback bar stay in it while the
   // features before the bar are unchanged, so rolling forward is instant.
   if (m_chain.size() < upTo ||
@@ -882,7 +1031,8 @@ bool Document::Regenerate() {
   // case). The feature error is transient (not serialized, not hashed), so it
   // never perturbs the cache.
   for (size_t i = 0; i < upTo; i++) {
-    if (!exprErr[i].empty() && m_features[i]->GetError().empty()) {
+    if (!exprErr[i].empty() && m_features[i]->GetError().empty() &&
+        m_unbuilt.count(m_features[i]->GetId()) == 0) {
       m_features[i]->SetError(exprErr[i]);
       allOk = false;
     }

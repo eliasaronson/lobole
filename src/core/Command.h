@@ -34,8 +34,16 @@ public:
   uint64_t Stamp() const { return m_stamp; }
   void SetStamp(uint64_t stamp) { m_stamp = stamp; }
 
+  // The heavy-feature build this edit asked for (Document::PendingSerial at
+  // its execution, 0 for none): a cancel of that build rolls this edit back
+  // while it is still the top of its stack
+  // (docs/ui/long-operations.md#heavy-features).
+  uint64_t CausedBuild() const { return m_causedBuild; }
+  void SetCausedBuild(uint64_t serial) { m_causedBuild = serial; }
+
 private:
   uint64_t m_stamp = 0;
+  uint64_t m_causedBuild = 0;
 };
 
 class AddFeatureCommand : public Command {
@@ -423,6 +431,14 @@ public:
   // How many undoable commands are on the stack — the mark a `batch` takes
   // before running so it can collapse or discard exactly what it pushed.
   size_t UndoDepth() const { return m_undo.size(); }
+
+  // The top undoable command (null when empty): what a cancelled build asks
+  // whether it was made by (Command::CausedBuild).
+  Command* Top() { return m_undo.empty() ? nullptr : m_undo.back().get(); }
+  // Records that the top command asked for the document's pending build,
+  // when it moved since `serialBefore`: for an edit whose regeneration ran
+  // after its Execute (a batch's BulkEdit).
+  void NoteCausedBuild(const Document& doc, uint64_t serialBefore);
 
   // Collapses everything pushed since `depth` into ONE undo step. Fewer than
   // two commands is a no-op (one command is already one step). The document

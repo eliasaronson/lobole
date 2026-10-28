@@ -520,6 +520,7 @@ set(core_sources
     src/core/features/RevolveFeature.cpp
     src/core/features/ShellFeature.cpp
     src/core/DirectEdit.cpp
+    src/core/HeavyBuild.cpp
     src/core/features/DeleteFaceFeature.cpp
     src/core/features/OffsetFaceFeature.cpp
     src/core/features/MoveFaceFeature.cpp
@@ -911,6 +912,7 @@ set(app_sources
     src/ui/ConflictsPanel.cpp
     src/ui/BackgroundJobs.cpp
     src/ui/ImportJob.cpp
+    src/ui/FeatureBuildJob.cpp
     src/ui/OpenJob.cpp
     src/ui/FloatingWindow.cpp
     src/ui/SyncJob.cpp

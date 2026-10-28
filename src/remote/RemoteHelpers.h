@@ -454,6 +454,22 @@ inline nlohmann::json DigestJson(const nlohmann::json& before,
 inline void AttachRegen(nlohmann::json& out, const Document* doc,
                         const nlohmann::json& before);
 
+// A feature's build state as `regen.unbuilt` and get_state's per-feature
+// `build` say it; null for a built one.
+inline const char* BuildStateName(Document::BuildState s) {
+  switch (s) {
+  case Document::BuildState::Built:
+    return nullptr;
+  case Document::BuildState::Building:
+    return "building";
+  case Document::BuildState::Waiting:
+    return "waiting";
+  case Document::BuildState::Cancelled:
+    return "cancelled";
+  }
+  return nullptr;
+}
+
 inline nlohmann::json RegenSummaryJson(const Document& doc) {
   nlohmann::json failed = nlohmann::json::array();
   nlohmann::json warnings = nlohmann::json::array();
@@ -489,9 +505,25 @@ inline nlohmann::json RegenSummaryJson(const Document& doc) {
       entry["kernel_fault"] = true;
     failed.push_back(std::move(entry));
   }
-  return {{"ok", failed.empty()},
-          {"failed", std::move(failed)},
-          {"warnings", std::move(warnings)}};
+  // A heavy feature building off the frame, or whose build was cancelled,
+  // and every feature after it: not built, so not ok -- the bodies are those
+  // before it (docs/ui/long-operations.md#heavy-features).
+  nlohmann::json unbuilt = nlohmann::json::array();
+  if (doc.HasUnbuilt())
+    for (size_t i = 0; i < features.size(); i++) {
+      const char* state =
+          BuildStateName(doc.BuildStateOf(features[i]->GetId()));
+      if (state == nullptr)
+        continue;
+      unbuilt.push_back(
+          {{"index", i}, {"name", features[i]->GetName()}, {"state", state}});
+    }
+  nlohmann::json out = {{"ok", failed.empty() && unbuilt.empty()},
+                        {"failed", std::move(failed)},
+                        {"warnings", std::move(warnings)}};
+  if (!unbuilt.empty())
+    out["unbuilt"] = std::move(unbuilt);
+  return out;
 }
 
 inline void AttachRegen(nlohmann::json& out, const Document* doc,

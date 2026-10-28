@@ -220,7 +220,10 @@ other by stable id.
 `Document::Regenerate()` re-evaluates the parameter table and every
 expression-driven field, then executes the feature list in order. If a
 feature fails, it returns false and the bodies are those of the successful
-prefix. It runs on the calling thread.
+prefix. It runs on the calling thread. The one exception is a heavy
+feature on a part the app holds (a Delete Face of many faces): the
+regeneration stops at it and its build runs as a `feature` job
+([heavy features](ui/long-operations.md#heavy-features)).
 
 - **Incremental.** The regeneration cache (`RegenCacheEntry`) keys each
   feature evaluation on the chain hash of everything up to and including it,
@@ -368,7 +371,10 @@ synchronous handler holds no frame
 synchronous `design_sweep`, on its job
 ([design sweep](requirements/README.md#design-sweep)); and `import_step`,
 on the `import` job, in every mode ([long
-operations](ui/long-operations.md#import)). The pump sets
+operations](ui/long-operations.md#import)). A request that reads a part's geometry
+while a heavy feature of it builds waits for the build, and a call that left
+its part building one answers when it lands, with the part as built
+([heavy features](ui/long-operations.md#heavy-features)). The pump sets
 `AppState::rpcConnection` while it asks, so a job a parked request starts
 belongs to its client.
 A parked request holds only its OWN connection's later requests, so a

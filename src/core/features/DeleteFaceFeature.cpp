@@ -105,6 +105,18 @@ std::string DeleteAndHeal(const Picked& picked, Healed& out,
 
 } // namespace directedit
 
+// The fan grill's measured rate: 916 faces of a refined 2937-face STL healed
+// in 14 s of Defeaturing on a P-core of the development machine, 15 ms a
+// face. A hole's bore and floor stay well under heavy::kOffFrameS (17
+// faces reach it); the grill's four holes go to a job. The body is not read:
+// the rate is per face deleted, and a face that is not on it fails at once
+// anyway.
+double DeleteFaceFeature::BuildCostS(const std::vector<Body>& input) const {
+  (void)input;
+  constexpr double kSecondsPerFace = 14.0 / 916.0;
+  return kSecondsPerFace * static_cast<double>(faces.size());
+}
+
 bool DeleteFaceFeature::Execute(RegenContext& ctx) {
   if (faces.empty()) {
     // Previewing with nothing picked yet: nothing to do (WhyIncomplete stops

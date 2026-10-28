@@ -3,8 +3,10 @@
 
 #include "ui/FeatureTreePanel.h"
 #include "core/Units.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/DerivedActions.h"
 #include "ui/DockLayout.h" // PanelHeading
+#include "ui/FeatureBuildJob.h"
 #include "ui/PanelTitles.h"
 #include "ui/TemplateActions.h"
 #include "ui/TemplatePanel.h"
@@ -242,6 +244,30 @@ void DrawFeatureTreePanel(AppState& state) {
       ImGui::TextDisabled("  ^ or click a plane / flat face in the viewport");
 
     ImGui::SeparatorText("Features");
+    // A heavy feature building off the frame: the one progress bar, with
+    // its cancel, where the feature is
+    // (docs/ui/long-operations.md#heavy-features). The rest of the tree and the
+    // viewport stay live.
+    {
+      const uint64_t slot = FeatureBuildSlotOf(state, doc);
+      const auto track = state.featureBuilds.find(slot);
+      if (const BackgroundJob* bg =
+              track != state.featureBuilds.end()
+                  ? FindBackgroundJobById(state, track->second.jobId)
+                  : nullptr;
+          bg != nullptr && !bg->reaped) {
+        JobProgress jp;
+        jp.status = FeatureBuildStatus(state);
+        jp.fraction = bg->fraction.load();
+        jp.cancellable = bg->cancellable;
+        jp.cancelAsked = bg->cancel.load();
+        jp.cancelId = "###feature_build_cancel";
+        jp.cancelTip = "Stop building: the edit that made it is undone, or "
+                       "the feature is left not built";
+        if (DrawJobProgress(jp))
+          CancelFeatureBuild(state, slot);
+      }
+    }
     // Transient refusal shown when a drag-reorder would dangle a reference
     // (fades after ~5 s). Written by the deferred-move handler below.
     static std::string moveError;
@@ -331,7 +357,13 @@ void DrawFeatureTreePanel(AppState& state) {
       // configuration turns off is off, and one it turns on (a flat pattern)
       // is on, whatever the authored model says.
       const bool suppressed = doc->EffectiveSuppressed(i);
-      const bool dimmed = suppressed || rolledPast;
+      // Not built: a heavy feature building off the frame, its build
+      // cancelled, or waiting behind one
+      // (docs/ui/long-operations.md#heavy-features). Dimmed like a rolled-past
+      // row, saying which on hover.
+      const Document::BuildState build = doc->BuildStateOf(feature->GetId());
+      const bool unbuilt = build != Document::BuildState::Built;
+      const bool dimmed = suppressed || rolledPast || unbuilt;
       const bool errored = !dimmed && !feature->GetError().empty();
       const char* badge = FeatureRowBadge(*feature, rolledPast, suppressed);
       // A warning (built, but a likely-unintended no-op) tints amber — only
@@ -502,6 +534,16 @@ void DrawFeatureTreePanel(AppState& state) {
                             derivedFeat->reference ? "Reference (ghost)"
                                                    : "Solid",
                             derivedFeat->sourceName.c_str());
+      } else if (dimmed && unbuilt && !suppressed && !rolledPast) {
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip(
+              "%s", build == Document::BuildState::Building
+                        ? "Building off the frame. Right-click > Cancel build."
+                    : build == Document::BuildState::Cancelled
+                        ? "Not built: its build was cancelled. Right-click > "
+                          "Build."
+                        : "Not built yet: waits on a feature before it");
       } else if (dimmed) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
@@ -604,6 +646,12 @@ void DrawFeatureTreePanel(AppState& state) {
           OpenSaveTemplate(state, ids);
         }
         // Rollback bar (not undoable — a view of the history, not an edit).
+        if (build == Document::BuildState::Cancelled &&
+            ImGui::MenuItem("Build###feat_build"))
+          doc->RequestBuild(feature->GetId());
+        if (build == Document::BuildState::Building &&
+            ImGui::MenuItem("Cancel build###feat_cancel_build"))
+          CancelFeatureBuild(state, FeatureBuildSlotOf(state, doc));
         if (ImGui::MenuItem("Rollback to here")) {
           doc->SetRollback(static_cast<int>(i));
         }

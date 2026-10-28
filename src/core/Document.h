@@ -105,6 +105,11 @@ void EvaluateParameterTable(
 // regenerating it. This is the single source of truth for model state — the
 // UI, scripts, and (later) files all act on the Document through Commands,
 // never on geometry directly.
+namespace heavy {
+struct Request;
+struct Result;
+} // namespace heavy
+
 class Document {
 public:
   Document() = default;
@@ -697,6 +702,59 @@ public:
   // of the session.
   uint64_t InstanceId() const { return m_instanceId; }
 
+  // ---- Heavy features off the frame -------------------------------------
+  // (docs/ui/long-operations.md#heavy-features). A document that builds
+  // heavy features off the frame stops its regeneration at one its caches
+  // miss: that feature is Building, everything after it Waiting, the bodies
+  // are those before it, and PendingBuild() says what to build. The app
+  // sets it on every part it holds; nothing else does, so a bare document,
+  // a copy or a worker's load builds everything inline as it always has.
+  // Not copied, not saved.
+  void SetBuildsOffFrame(bool on) { m_buildsOffFrame = on; }
+  bool BuildsOffFrame() const { return m_buildsOffFrame; }
+  // Documents CONSTRUCTED on this thread while a scope is held build off the
+  // frame: ReadProject's workers hold one, so an open that rebuilds a heavy
+  // feature stops at it rather than building it inside the read. A copy
+  // never does.
+  class BuildOffFrameScope {
+  public:
+    BuildOffFrameScope();
+    ~BuildOffFrameScope();
+    BuildOffFrameScope(const BuildOffFrameScope&) = delete;
+    BuildOffFrameScope& operator=(const BuildOffFrameScope&) = delete;
+
+  private:
+    bool m_saved;
+  };
+
+  enum class BuildState { Built, Building, Waiting, Cancelled };
+  // A feature's state as of the last regeneration: Built for every feature
+  // that executed, hit a cache, failed or was rolled back.
+  BuildState BuildStateOf(uint64_t featureId) const {
+    const auto it = m_unbuilt.find(featureId);
+    return it == m_unbuilt.end() ? BuildState::Built : it->second;
+  }
+  // Whether any feature is not built (Building, Waiting or Cancelled).
+  bool HasUnbuilt() const { return !m_unbuilt.empty(); }
+  // The feature the last regeneration stopped at, and what it needs; null
+  // when nothing is building. `serial` moves whenever the request is a new
+  // one (another key, or after a regeneration that asked for nothing).
+  const heavy::Request* PendingBuild() const { return m_pending.get(); }
+  std::shared_ptr<heavy::Request> PendingBuildShared() const {
+    return m_pending;
+  }
+  uint64_t PendingSerial() const { return m_pendingSerial; }
+  // Files a finished build in the regen cache, where the next regeneration
+  // hits it. Does not regenerate.
+  void AdoptBuilt(const heavy::Result& result);
+  // Marks the evaluation with chain hash `hash` not built (cancelled): a
+  // regeneration that reaches it uncached leaves it Cancelled instead of
+  // asking for it. Regenerates.
+  void CancelBuild(size_t hash);
+  // Clears a Cancelled mark on the feature, so the next regeneration asks
+  // for its build again. Regenerates. False when it carried none.
+  bool RequestBuild(uint64_t featureId);
+
   // Incremental regeneration (R3): how much of the last Regenerate came
   // from the regeneration cache vs. actually executed. Observable, not vibes.
   struct RegenStats {
@@ -904,4 +962,12 @@ private:
   uint64_t m_regenClock = 0;
   void EvictRegenCache();
   RegenStats m_lastStats;
+
+  // Heavy features off the frame (see SetBuildsOffFrame).
+  bool m_buildsOffFrame = BuildOffFrameScopeHeld();
+  static bool BuildOffFrameScopeHeld();
+  std::map<uint64_t, BuildState> m_unbuilt; // by feature id; Built omitted
+  std::shared_ptr<heavy::Request> m_pending;
+  uint64_t m_pendingSerial = 0;
+  std::set<size_t> m_cancelledBuilds; // chain hashes (CancelBuild)
 };

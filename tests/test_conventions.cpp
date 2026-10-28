@@ -42,6 +42,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <regex>
 #include <set>
@@ -1273,6 +1274,7 @@ TEST_CASE("every Document mutator of saved state moves the save stamp",
       {"SetActiveConfigurationRaw",
        "a loader's (baseline taken after) or a throwaway copy's"},
       {"RewriteProjectVarRefs", "the caller regenerates every document"},
+      {"SetBuildsOffFrame", "how the app builds the part, never saved"},
   };
   const std::string header = ReadSource("src/core/Document.h");
   const std::string impl = ReadSource("src/core/Document.cpp");
@@ -2325,6 +2327,27 @@ TEST_CASE("the version is written once, in VERSION", "[convention]") {
         std::string::npos);
 }
 
+namespace {
+// Every background-job kind the code gives a job, kind -> the file that does:
+// `->kind = "x"`, a `k...Kind = "x"` constant (a header's too), or a payload's
+// `std::string kind = "x"` default that the job copies (`insertion`).
+std::map<std::string, std::string> JobKinds() {
+  const std::regex assigned(R"re(->kind = "([a-z_-]+)";)re");
+  const std::regex constant(
+      R"re(constexpr const char\* k\w*Kind = "([a-z_-]+)";)re");
+  const std::regex member(R"re(std::string kind = "([a-z_-]+)";)re");
+  std::map<std::string, std::string> kinds;
+  for (const char* dir : {"src/ui", "src/remote"})
+    for (const char* ext : {".cpp", ".h"})
+      for (const SourceFile& f : SourcesUnder(dir, ext))
+        for (const std::regex* re : {&assigned, &constant, &member})
+          for (std::sregex_iterator it(f.text.begin(), f.text.end(), *re), end;
+               it != end; ++it)
+            kinds.emplace((*it)[1].str(), Relative(f.path));
+  return kinds;
+}
+} // namespace
+
 TEST_CASE("every background job kind is in background_jobs' row",
           "[convention]") {
   // background_jobs lists the kinds a caller can see and cancel_background_job
@@ -2332,16 +2355,7 @@ TEST_CASE("every background job kind is in background_jobs' row",
   // look up (`contact`, contact_report's async sweep, was). Every kind a
   // job is given -- `->kind = "x"` or a `k...Kind = "x"` constant -- must be
   // named in the row as `x`.
-  const std::regex assigned(R"re(->kind = "([a-z_-]+)";)re");
-  const std::regex constant(
-      R"re(constexpr const char\* k\w*Kind = "([a-z_-]+)";)re");
-  std::map<std::string, std::string> kinds; // kind -> where
-  for (const char* dir : {"src/ui", "src/remote"})
-    for (const SourceFile& f : SourcesUnder(dir, ".cpp"))
-      for (const std::regex* re : {&assigned, &constant})
-        for (std::sregex_iterator it(f.text.begin(), f.text.end(), *re), end;
-             it != end; ++it)
-          kinds.emplace((*it)[1].str(), Relative(f.path));
+  const std::map<std::string, std::string> kinds = JobKinds();
   REQUIRE(kinds.size() > 10);
 
   std::string row;
@@ -2361,6 +2375,90 @@ TEST_CASE("every background job kind is in background_jobs' row",
       missing += "  `" + kind + "` (" + where + ")\n";
   INFO("background_jobs' row does not name these job kinds:\n" << missing);
   CHECK(missing.empty());
+}
+
+TEST_CASE("every job kind states its cancel and names a test of it",
+          "[convention]") {
+  // docs/ui/long-operations.md#the-cancel-rule: one rule for every kind, and
+  // one table saying what a cancel of each keeps. A kind registered without
+  // a row is a cancel nobody decided; a row without a test is a decision
+  // nothing holds. Each row names, in backticks, at least one test that
+  // exercises the cancel: a Catch2 title, a GUI test `category/name`, or a
+  // smoke `file.py::function`.
+  const std::map<std::string, std::string> kinds = JobKinds();
+  REQUIRE(kinds.count("feature") == 1);
+  std::ifstream in(fs::path(TestSourceDir()) / "docs/ui/long-operations.md");
+  REQUIRE(in.good());
+  std::map<std::string, std::pair<std::string, std::string>> rows;
+  bool inSection = false;
+  for (std::string line; std::getline(in, line);) {
+    if (line.rfind("## ", 0) == 0)
+      inSection = line == "## The cancel rule";
+    if (!inSection || line.rfind("| `", 0) != 0)
+      continue;
+    std::vector<std::string> cells;
+    std::stringstream ss(line.substr(1));
+    for (std::string c; std::getline(ss, c, '|');)
+      cells.push_back(c);
+    if (cells.size() < 3)
+      continue;
+    std::smatch m;
+    if (std::regex_search(cells[0], m, std::regex("`([a-z_-]+)`")))
+      rows[m[1].str()] = {cells[1], cells[2]};
+  }
+  REQUIRE(rows.size() > 10);
+
+  // What the tests hold, the literals joined so a title split across two
+  // of them still reads.
+  std::string catchText, guiText;
+  for (const SourceFile& f : SourcesUnder("tests", ".cpp"))
+    catchText += std::regex_replace(f.text, std::regex("\"\\s*\n\\s*\""), "");
+  for (const SourceFile& f : SourcesUnder("src/app/guitests", ".cpp"))
+    guiText += f.text;
+  const auto resolves = [&](const std::string& ref) {
+    if (const size_t at = ref.find(".py::"); at != std::string::npos) {
+      const fs::path py =
+          fs::path(TestSourceDir()) / "tests" / (ref.substr(0, at) + ".py");
+      std::ifstream f(py);
+      const std::string text((std::istreambuf_iterator<char>(f)),
+                             std::istreambuf_iterator<char>());
+      return !text.empty() &&
+             text.find("def " + ref.substr(at + 5) + "(") != std::string::npos;
+    }
+    if (const size_t slash = ref.find('/');
+        slash != std::string::npos && ref.find(' ') == std::string::npos)
+      return std::regex_search(
+          guiText, std::regex("\"" + ref.substr(0, slash) + "\",\\s*\"" +
+                              ref.substr(slash + 1) + "\""));
+    return catchText.find("TEST_CASE(\"" + ref + "\"") != std::string::npos;
+  };
+  std::string problems;
+  for (const auto& [kind, where] : kinds) {
+    const auto row = rows.find(kind);
+    if (row == rows.end()) {
+      problems += "  `" + kind + "` (" + where + "): no row\n";
+      continue;
+    }
+    if (row->second.first.find_first_not_of(" ") == std::string::npos)
+      problems += "  `" + kind + "`: no outcome stated\n";
+    const std::string& tests = row->second.second;
+    size_t named = 0;
+    const std::regex tick("`([^`]+)`");
+    for (std::sregex_iterator it(tests.begin(), tests.end(), tick), end;
+         it != end; ++it) {
+      named++;
+      if (!resolves((*it)[1].str()))
+        problems += "  `" + kind + "`: no test `" + (*it)[1].str() + "`\n";
+    }
+    if (named == 0)
+      problems += "  `" + kind + "`: names no test of its cancel\n";
+  }
+  for (const auto& [kind, row] : rows)
+    if (kinds.count(kind) == 0)
+      problems += "  `" + kind + "`: a row for a kind no job is given\n";
+  INFO("the cancel table (docs/ui/long-operations.md#the-cancel-rule):\n"
+       << problems);
+  CHECK(problems.empty());
 }
 
 namespace {

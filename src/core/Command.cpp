@@ -476,11 +476,15 @@ void SetActiveConfigurationCommand::Undo(Document& doc) {
 // its last steps are known (docs/architecture.md#crashes-and-stalls).
 bool CommandStack::Execute(std::unique_ptr<Command> command, Document& doc) {
   LOG_INFO("edit: {}", command->Description());
+  const uint64_t serialBefore = doc.PendingSerial();
   if (!command->Execute(doc)) {
     return false;
   }
   doc.MarkEdited(); // Document::SaveStamp: every step is an unsaved change
   command->SetStamp(NextActionStamp());
+  // The heavy build its regeneration stopped at, if it asked for a new one.
+  if (doc.PendingBuild() != nullptr && doc.PendingSerial() != serialBefore)
+    command->SetCausedBuild(doc.PendingSerial());
   m_undo.push_back(std::move(command));
   m_redo.clear();
   return true;
@@ -553,10 +557,20 @@ void CommandStack::CoalesceSince(size_t depth, const std::string& description) {
   for (size_t i = depth; i < m_undo.size(); i++)
     parts.push_back(std::move(m_undo[i]));
   m_undo.resize(depth);
+  uint64_t caused = 0;
+  for (const auto& p : parts)
+    caused = std::max(caused, p->CausedBuild());
   auto composite =
       std::make_unique<CompositeCommand>(std::move(parts), description);
   composite->SetStamp(NextActionStamp());
+  composite->SetCausedBuild(caused);
   m_undo.push_back(std::move(composite));
+}
+
+void CommandStack::NoteCausedBuild(const Document& doc, uint64_t serialBefore) {
+  if (!m_undo.empty() && doc.PendingBuild() != nullptr &&
+      doc.PendingSerial() != serialBefore)
+    m_undo.back()->SetCausedBuild(doc.PendingSerial());
 }
 
 size_t CommandStack::RollbackSince(size_t depth, Document& doc) {
