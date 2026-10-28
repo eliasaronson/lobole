@@ -28,6 +28,18 @@ MARGIN = 2.0         # the followers must hold at twice it
 PRESSURE_LIMIT_DEG = 30.0  # a translating follower's usual limit: past it
 #                            the side load in the guide grows as tan(phi)
 
+# A child leaning on the crank (woodcutter_fem.py): the push that turns it, the
+# worst torque the followers need over a turn (check_followers) over the
+# crank's radius, times this. Turning takes almost nothing (a few
+# hundredths of a newton at the grip: the followers weigh grams and friction
+# is not modelled), so the factor is large: at 120 it makes the push about
+# 94 N, a 9.6 kg lean -- a small child's weight on one hand. The studies
+# must hold it with LEAN_NEED to spare, against yield and across the
+# printed layers; the camshaft at work, at its own load, with WORK_NEED.
+LEAN_FACTOR = 3000.0
+LEAN_NEED = 2.0
+WORK_NEED = 2.0
+
 # The motions, as fractions of the crank's turn (angles are not sizes).
 # The axe: a slow cycloidal rise over most of the turn, the drop, and a
 # dwell long enough for the fall to land within it at twice the hand speed.
@@ -198,7 +210,9 @@ def solve(width, gap, press=0.0):
     s["wall"] = max(MIN_WALL_MM, W / 33.3, s["d_peg"] + 2.0 * MIN_WALL_MM)
     s["depth"] = 0.5 * W
     # The camshaft: Ø a 15th of the width (8 mm at 120: a printed PLA shaft
-    # lying down, stiff over its span; phase 4's FEM checks it). The cams
+    # lying down, stiff over its span: at work it carries the followers
+    # with a factor over a thousand, woodcutter_fem.py; leaned on at the
+    # crank it does not hold, README "Not done here"). The cams
     # are keyed to it by a printed flat, a sixth of its diameter deep, the
     # whole length: the shaft prints lying on it, and a flat deeper than
     # the round's 45-degree chord leaves no face of it looking down past

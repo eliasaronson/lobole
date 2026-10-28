@@ -6,9 +6,10 @@ link and lets them drop onto the log; the bird's cam, on the same shaft,
 makes the bird peck while the axe is rising. Everything is printed and
 nothing is bought: the box is five panels pegged together, the camshaft
 turns in printed bushings, and a crank on its end turns it. This is the
-automaton designed and checked in the app and laid out to print (phases 2
-and 3 of [the plan](../../docs/plans/woodcutter-automaton.md)); its FEM,
-drawings, film and the print itself are the plan's later phases.
+automaton designed and checked in the app, its loaded parts studied on
+pins, and laid out to print (phases 2 to 4 of
+[the plan](../../docs/plans/woodcutter-automaton.md)); its drawings, film
+and the print itself are the plan's later phases.
 
 ```sh
 tools/headless-preview.sh --start 8800
@@ -29,6 +30,8 @@ and filament.
 
 Files: `woodcutter_spec.py` (every size and both motions, no app),
 `woodcutter_parts.py` (one function a part, and the way each prints),
+`woodcutter_fem.py` (the studies of the camshaft, the crank and the
+handle's pin),
 `build.py` (the project, the checks, the controls, the sequence, the
 plates, the receipt), `test.json` (the
 [generator test](../README.md#the-big-generators-as-tests)).
@@ -199,6 +202,52 @@ At W = 120 on K5 PLA on the P1S:
     (a barrel or face cam is not built; the two never meet).
   Each modifies the design and puts it back, so the last requirement check
   is on the design as saved.
+- **The loaded parts on pins** (`woodcutter_fem.py`): static studies of
+  the parts as they print, each on `pin` supports
+  ([pin supports](../../docs/simulation/README.md#pin-supports)), every
+  load read from `check_followers` at 120 rpm
+  ([contact forces](../../docs/assemblies/relations.md#contact-forces)),
+  none estimated. The worst sample of the crank turn is the one where the
+  crank needs the most torque, both followers' summed: 67.5°, 0.469 N·mm
+  (the axe's rod pushing its cam with 0.052 N at 24.3° of pressure angle,
+  the bird's with 0.021 N at 29.5°). Each study's factor against yield is
+  its receipt's claim; the stress across the printed layers
+  (`layer_normal` the part's print direction) is read beside it against
+  PLA's interlayer 17 MPa, and the smaller governs.
+  - *The camshaft at work*: on a pin over each bushing's sleeve (the left
+    one held from turning), loaded by each follower's push on its cam
+    (`in_cam_part`, a remote load at the contact spread over the cam's
+    width) and by the hand's push at the grip that balances their torque
+    (the followers' moment about the axis is check_followers' torque to
+    1 %, or the run stops). Factor 1224 against yield, 4989 across the
+    layers: turning it takes almost nothing.
+  - *A child leaning on the crank*: the push that turns it, 0.031 N at the
+    grip (the torque over the crank's radius), times `LEAN_FACTOR` 3000:
+    93.9 N, a 9.6 kg lean, straight down the crank at the top of its turn
+    (a lean that turns it turns it; the one it is held against goes
+    through the shaft). On the camshaft's crank end (the shaft on its
+    bushings), the crank (its hub on the shaft, held from turning: the D
+    keys it; pushed through its handle's bore) and the handle's pin (in
+    the crank over its thickness; the grip pushing along its length).
+    **None holds it** with `LEAN_NEED` 2 to spare: factors against yield
+    0.48, 0.44 and 0.23 (across the layers 1.25, 1.08 and 0.71), the
+    peaks on the pins' edges (1.13, 0.73 and 0.47 away from them). The
+    crank end holds 10.6 N at the grip, about 1 kg, with 2 to spare: the
+    handle's Ø5 pin bending over the grip's length governs (M = 1141 N·mm
+    at the crank's face; 103 MPa away from the pin's edge). The run
+    records this and goes on (*Not done here*); the camshaft at work, and
+    every study's statics, stop it.
+  - *The statics*: in every study what the pins carry together, force and
+    moment (`moment_n_mm`), answers the loads' within 1 % (0.000 % on the
+    shaft and the crank, 0.34 % of moment on the handle's pin, whose
+    grip's push is taken at its band's middle). The two bushings do not
+    share by the lever rule: the FEM's pin has no clearance, so a pin along
+    a sleeve takes moment, and leaned on, the left bushing carries the
+    whole 93.9 N and the overhang's 2006 N·mm about its middle (F × 21.4
+    mm, to 0.2 %), the right one 1.3 N where the lever rule says 15.9. A
+    printed bushing in its bore tilts instead; the bending moment at the
+    left bushing, which governs the shaft's crank end, is the overhang's
+    either way.
 - **The print plate**: all 44 pieces on one P1S plate, packed with W / 30
   between them clear of the bed's keep-out corner, 247.8 x 247.9 x 30 mm
   in the 256 x 256 bed (the top, standing on its stage with its bosses up,
@@ -213,9 +262,10 @@ At W = 120 on K5 PLA on the P1S:
   Studio's CLI (`--slice`, 02.08, its P1S and Bambu PLA Basic presets)
   slices the plate in 3 h 34 min, 153.1 g and 50.5 m of filament.
 
-Runtime: 115 s on a quiet machine without stills (the negative controls
-are half of it: each one rebuilds a cam and runs a study again), 186 s with
-the stills and the slicing, about 260 s under load.
+Runtime: 115 s on a quiet machine without stills before the FEM, which
+adds about 45 s (the negative controls are the largest share: each one
+rebuilds a cam and runs a study again), 186 s with the stills and the
+slicing before the FEM; 265 s under load with it.
 
 ## What the app needed (fixed with this generator)
 
@@ -268,5 +318,12 @@ holds the app to each.
   but a pivot's load turns with the lever, and a printed pin is not
   measured yet. The fits are the profile's gap and press; phase 7 measures
   them.
-- FEM of the shaft and the crank, the drawings, the film and the print:
-  the plan's later phases.
+- **The crank end is not sized for a child leaning on it.** The studies
+  above say it breaks at a 9.6 kg lean and holds about 1 kg with a factor
+  of 2. Sizing it for a lean is a design decision with a cascade: the
+  handle's pin (Ø W / 24) and the crank's plate (W / 30) are outside the
+  box, but the shaft's crank end fails too, and a thicker shaft moves the
+  hubs, the axe cam's base radius (the hub's floor), the bushings and the
+  box's height. Which lean to design for, and whether the shaft steps up
+  outside the left wall, are for the next round.
+- The drawings, the film and the print: the plan's later phases.

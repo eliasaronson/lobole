@@ -36,9 +36,11 @@ automaton is designed too: `generators/woodcutter/` makes the cams, the
 rods, the levers and their links, the box as pegged printed panels, the
 camshaft's bushings and the crank, checks the mechanism over a crank turn
 and across the drop with requirements and negative controls, checks every
-part as it prints, lays them on one P1S plate, and states the assembly
-sequence ([its README](../../generators/woodcutter/README.md)). What
-follows is the rest of the automaton.
+part as it prints, lays them on one P1S plate, states the assembly
+sequence, and studies the camshaft, the crank and the handle's pin on pin
+supports under the loads `check_followers` reports
+([its README](../../generators/woodcutter/README.md)). What follows is the
+rest of the automaton.
 
 Two limits of that work shape the design below:
 
@@ -53,26 +55,6 @@ Two limits of that work shape the design below:
   studies over cam pairs run `clash_mode: mesh`, which judges a contact
   relation's cam and follower by `check_followers`' cuts across the width
   ([motion studies](../assemblies/README.md#motion-studies)).
-
-## Phase 4: FEM of the crank and the shaft on pins (size: S)
-
-This phase assumes the pin support (the `wtpin` branch's plan,
-fem-pin-support) has landed.
-
-- **The camshaft** sits on two pin supports at its bushings. It is loaded by the
-  followers' contact forces at the worst sample, plus the handle torque that
-  balances them. `check_followers` computes M, Q, q′ and q″ but does not yet
-  report the force; this phase adds it to the reply (M q″ ω² + ½ M′ q′² ω² −
-  Q along b, carried onto the contact normal through the pressure angle, at
-  `speed_rpm`), so the loads are read, not estimated.
-- **The crank handle and the camshaft's crank end** sit on pins and are loaded by a hand's push
-  at the handle. The push is derived from the torque the followers need at
-  the worst sample, with a stated factor for a child leaning on it.
-- PLA's interlayer strength applies across layers
-  (`max_principal_mpa`, `layer_normal`) for the shaft printed lying down.
-  The pin support's flag on a support-edge peak must not be the headline.
-- Verified: the factors of safety come out of the receipt, with the reaction
-  at each pin matching the applied load's statics within 1%.
 
 ## Phase 5: drawings and BOM (size: S)
 

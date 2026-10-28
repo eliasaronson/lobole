@@ -7,7 +7,7 @@ chop per turn. The axe cam lifts the woodcutter's arms slowly through a rod
 and a link and drops them onto the log; the bird's cam, phase-shifted on the
 same shaft, makes the bird peck while the axe is rising. The box is printed
 panels pegged together, the shaft turns in printed bushings, and a crank on
-its end turns it. Phases 2 and 3 of docs/plans/woodcutter-automaton.md.
+its end turns it. Phases 2 to 4 of docs/plans/woodcutter-automaton.md.
 
     python3 generators/print_coupon.py --port 8800 --seed
     python3 generators/woodcutter/build.py --port 8800 --profile "K5 PLA on P1S"
@@ -32,6 +32,11 @@ What it builds and checks (the receipt holds every number):
 - requirements: liftoff and pressure angle per follower, the axe's
   drop_rpm, both studies clean, the sequence, the blade's clearance over
   the log;
+- the camshaft, the crank and the handle's pin as static studies on pin
+  supports, every load read from check_followers: the camshaft at work
+  must hold with its factor, and every study's pins must answer its loads'
+  force and moment (woodcutter_fem.py); a child's lean on the crank is
+  recorded, held or not;
 - negative controls: the axe's landing dwell shortened under its fall
   fails drop_rpm, the bird's cam on too small a base fails the pressure
   angle, and a guide tilted off the cam's plane or moved off its width is
@@ -56,6 +61,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import woodcutter_parts as P  # noqa: E402
+import woodcutter_fem as F  # noqa: E402
 import woodcutter_spec as S  # noqa: E402
 from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
                   connect, export_print_job, fresh_project, job_receipt,
@@ -996,7 +1002,7 @@ def main():
     traces = {t["name"]: {k: t[k] for k in ("min_mm", "max_mm",
                                             "extent_mm")}
               for t in res_turn["trace"]}
-    fr_turn, _ = followers(d, turn, rel)
+    fr_turn, fr_turn_all = followers(d, turn, rel)
     fr_chop, _ = followers(d, chop, rel)
     nums = {"turn": {k: follower_numbers(v) for k, v in fr_turn.items()},
             "chop": {k: follower_numbers(v) for k, v in fr_chop.items()}}
@@ -1068,6 +1074,23 @@ def main():
         fail(f"after the controls, requirements fail: {bad}")
 
     stage("negative controls")
+    # The parts under load, on pins, every load from check_followers.
+    fem = F.studies(d, s, fr_turn_all, rel)
+    if not fem["camshaft"]["pass"]:
+        fail(f"FEM: the camshaft does not hold its working load with "
+             f"{S.WORK_NEED:g} to spare: {fem['camshaft']['governing_factor']}")
+    if fem["unbalanced"]:
+        fail(f"FEM: the pins of {fem['unbalanced']} do not answer their "
+             f"loads' statics within {100 * F.STATICS_TOL:g} %")
+    print(f"  FEM: the camshaft holds its working load, and every study's "
+          f"pins answer its loads' force and moment within "
+          f"{100 * F.STATICS_TOL:g} %; a child's lean of "
+          f"{fem['lean']['push_n']:.1f} N "
+          + (f"breaks {', '.join(fem['lean_breaks'])} (the crank end holds "
+             f"{fem['holds_lean_n']:.1f} N with {S.LEAN_NEED:g} to spare)"
+             if fem["lean_breaks"] else "is held"))
+    d.call("set_active_part", part=ASM)
+    stage("FEM")
     offscreen = not d.call("ping").get("headless", False)
     shots = {} if args.no_render else renders(d, s, out, turn, offscreen)
     d.call("save_project", path=str(out / "woodcutter.lob"))
@@ -1130,7 +1153,7 @@ def main():
                                                   "loop_mates")},
                "motion": motion, "traces": traces, "followers": nums,
                "speed_rpm": SPEED, "requirements": final,
-               "negative_controls": controls, "renders": shots,
+               "negative_controls": controls, "fem": fem, "renders": shots,
                "parts": parts_print, "counts": counts(s),
                "sequence": {"pass": seq["pass"], "steps": seq_rows,
                             "seconds": seq.get("seconds")},
@@ -1142,8 +1165,10 @@ def main():
     print(f"  seconds by stage: {stages}")
     print(f"woodcutter: {len(counts(s))} parts, "
           f"{sum(counts(s).values())} pieces, {len(plates)} plates")
-    print(f"woodcutter: every check passed -> {out / 'woodcutter.lob'} "
-          f"({elapsed:.0f} s)")
+    lean = (f"; a child's lean breaks {', '.join(fem['lean_breaks'])} "
+            f"(README, what is not done)" if fem["lean_breaks"] else "")
+    print(f"woodcutter: every check passed{lean} -> "
+          f"{out / 'woodcutter.lob'} ({elapsed:.0f} s)")
     return 0
 
 
