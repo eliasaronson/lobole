@@ -661,6 +661,31 @@ TEST_CASE("every documented sketch entity type reaches a branch",
   }
 }
 
+// `rect` had no row, so `describe` never said what it takes, and its
+// `construction` key was accepted and dropped: a reference rectangle came
+// back as four profile lines an extrude would fill.
+TEST_CASE("a rect is described and keeps its construction flag",
+          "[serialization]") {
+  const auto types = DocumentIO::SketchEntityTypes();
+  CHECK(std::any_of(types.begin(), types.end(), [](const auto& info) {
+    return std::string_view(info.type) == "rect";
+  }));
+  for (const bool construction : {false, true}) {
+    auto f = DocumentIO::FeatureFromJson(
+        SketchWith({{"type", "rect"},
+                    {"c1", {0.0, 0.0}},
+                    {"c2", {20.0, 10.0}},
+                    {"construction", construction}}));
+    const auto* sk = dynamic_cast<const SketchFeature*>(f.get());
+    REQUIRE(sk != nullptr);
+    REQUIRE(sk->entities.size() == 4);
+    for (const sketch::Entity& e : sk->entities) {
+      CHECK(std::holds_alternative<sketch::Line>(e));
+      CHECK(sketch::IsConstruction(e) == construction);
+    }
+  }
+}
+
 TEST_CASE("a sketch entity outside the table is refused by name",
           "[serialization]") {
   REQUIRE_THROWS_WITH(

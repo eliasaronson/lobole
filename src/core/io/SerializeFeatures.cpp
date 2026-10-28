@@ -315,6 +315,13 @@ sketch::Entity EntityFromJson(const json& j) {
     t.valign = *va;
     t.spacing = j.value("spacing", 0.0);
     e = std::move(t);
+  } else if (type == "rect") {
+    // A rect is expanded into four lines where a sketch's own entity list is
+    // read (FeatureFromJson); anywhere else (a derived snapshot) holds the
+    // lines it expanded into, never the rect.
+    throw std::runtime_error(
+        "a \"rect\" entity is accepted only in a sketch's own entities[], "
+        "where it is expanded into four lines; send the lines here");
   } else {
     // "rect" is intercepted and expanded in FeatureFromJson (pre-v5 rigid
     // rectangles become four lines); anything else is unknown. Decision-
@@ -2530,6 +2537,17 @@ static constexpr SketchEntityInfo kSketchEntityTypes[] = {
     {"spline", 40,
      "poles [[x,y], ...], degree? (default 3). which k = pole k; the first "
      "and last poles are the curve's ends, and equal ones close it"},
+    // Not an entity the sketch keeps: FeatureFromJson expands it, so it is
+    // here to be documented and get_state never reports one.
+    {"rect", 1,
+     "c1 [x,y], c2 [x,y] — opposite corners of an axis-aligned rectangle; "
+     "construction? applies to all four sides. A convenience, not an "
+     "entity: it expands into FOUR line entities plus their corner "
+     "coincident, two horizontal and two vertical constraints, so each side "
+     "is editable and trimmable and get_state reports lines. add_feature "
+     "lists the four line ids at the END of entity_ids, after every non-rect "
+     "entity's, in rect order. No _expr fields: to drive a corner from a "
+     "variable, send the four lines with their _expr keys"},
     {"text", 137,
      "text (UTF-8, one line), height (the CAP height, mm), anchor [x,y], "
      "font? (sans = outline, the default; hershey = single stroke, for "
@@ -2729,7 +2747,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     // Pre-v5 rigid "rect" entities are expanded into four lines below. During
     // loading they occupy a placeholder slot (preserving order/indexing so the
     // pre-v4 index migration stays correct); their corners are remembered.
-    std::vector<std::pair<glm::dvec2, glm::dvec2>> legacyRects;
+    struct LegacyRect {
+      glm::dvec2 c1, c2;
+      bool construction;
+    };
+    std::vector<LegacyRect> legacyRects;
     std::vector<size_t> rectSlots; // placeholder positions in sk->entities
     // v38 entity coordinate expressions, collected POSITIONALLY: RPC-sent
     // entities carry no id yet (the pre-v4 migration below stamps them), so
@@ -2748,7 +2770,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         sketch::SetEntityId(ph, ej.value("id", uint32_t{0}));
         rectSlots.push_back(sk->entities.size());
         sk->entities.push_back(ph);
-        legacyRects.emplace_back(c1, c2);
+        // `construction` is accepted, so it is honoured on all four lines: it
+        // used to be read and dropped, and a reference rectangle became a
+        // profile every extrude of the sketch filled.
+        legacyRects.push_back({c1, c2, ej.value("construction", false)});
       } else {
         sketch::Entity ent = EntityFromJson(ej);
         std::map<std::string, std::string> exprs;
@@ -2902,13 +2927,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         nextMigrated = std::max(nextMigrated, sketch::EntityId(e));
       for (const uint32_t id : rectIds)
         nextMigrated = std::max(nextMigrated, id);
-      for (const auto& [c1, c2] : legacyRects) {
+      for (const auto& [c1, c2, construction] : legacyRects) {
         const std::array<uint32_t, 4> minted = sk->AddRectangle(c1, c2);
         for (const uint32_t from : minted) {
           const uint32_t to = ++nextMigrated;
           for (auto& e : sk->entities)
-            if (sketch::EntityId(e) == from)
+            if (sketch::EntityId(e) == from) {
               sketch::SetEntityId(e, to);
+              sketch::SetConstruction(e, construction);
+            }
           // AddRectangle writes eight constraints over exactly these ids.
           for (auto& c : sk->constraints) {
             if (c.a.entity == from)

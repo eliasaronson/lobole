@@ -101,7 +101,9 @@ Every entity also has `id` and `construction`. Rules that hold everywhere:
 - **Rectangles are not a primitive.** `AddRectangle` emits four lines, four
   corner coincidents, two horizontal and two vertical constraints, so every
   side is editable and trimmable. `AddRectangleCentered` adds a centre point.
-  A legacy `rect` entity in an old file is expanded the same way on load.
+  A `rect` entity (`c1`, `c2`) sent to `add_feature`, or left in an old
+  file, is expanded the same way on load, `construction` and all; it has its
+  own `describe sketch_entity_types` row but never appears in `get_state`.
 - **Construction** geometry drives constraints and snapping but is excluded
   from profiles and paths, and draws dashed.
 
