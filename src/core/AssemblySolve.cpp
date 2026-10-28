@@ -2149,14 +2149,32 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
     if (std::abs(want - got) > 1e-4 * std::max(1.0, std::abs(want))) {
       const bool rot = dofB == MateDof::Rotation;
       const double k = rot ? angles::kDegPerRad : 1.0;
+      // Name the other driver only when there is one. Said of every miss,
+      // it sent the woodcutter's author looking for a second relation when
+      // a loop's solve had moved the value (generators/woodcutter).
+      bool another = false;
+      for (const Relation& o : asmDoc.GetRelations()) {
+        if (o.id == r.id || asmDoc.RelationSuppressed(o.id))
+          continue;
+        if (o.HasTerms()) {
+          for (const RelationTerm& t : o.terms)
+            another = another || (t.mate == mateB && t.dof == dofB);
+        } else {
+          another = another || (o.mateB == mateB && o.dofB == dofB);
+        }
+      }
       char buf[256];
       std::snprintf(buf, sizeof(buf),
                     "not satisfied: mate %llu's %s is %.4f %s where this "
-                    "relation wants %.4f — another relation drives it too, "
-                    "and they disagree",
+                    "relation wants %.4f — %s",
                     static_cast<unsigned long long>(mateB),
                     rot ? "rotation" : "offset", got * k, rot ? "deg" : "mm",
-                    want * k);
+                    want * k,
+                    another ? "another relation drives it too, and they "
+                              "disagree"
+                            : "the mates round it hold it elsewhere (a "
+                              "loop that closes only there, or a held "
+                              "value)");
       r.error = buf;
       report.erroredMates++;
     }

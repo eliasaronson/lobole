@@ -233,8 +233,12 @@ TEST_CASE("Relations that disagree on one degree of freedom are reported, "
   const assembly::SolveReport rep = assembly::Solve(r.d, NoParts());
   int unsatisfied = 0;
   for (const Relation& rel : r.d.GetRelations())
-    if (rel.error.find("not satisfied") != std::string::npos)
+    if (rel.error.find("not satisfied") != std::string::npos) {
       unsatisfied++;
+      // C has two drivers, and the message says so: only then.
+      CHECK_THAT(rel.error, Catch::Matchers::ContainsSubstring(
+                                "another relation drives it too"));
+    }
   CHECK(unsatisfied == 1);
   CHECK(rep.erroredMates >= 1);
 }
