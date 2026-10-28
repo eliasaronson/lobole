@@ -444,6 +444,51 @@ TEST_CASE("Two rails on one slide leave a degree of freedom",
   CHECK_THAT(s.solved[0].offset, WithinAbs(s.solved[1].offset, 1e-4));
 }
 
+TEST_CASE("A relation from another anchor's mate drives a loop's slide",
+          "[assembly][solve][loops]") {
+  // A cam turning on one fixed occurrence (10) and a follower slide whose
+  // loop is grounded on ANOTHER fixed occurrence (30): the woodcutter's
+  // panels, each fixed. The relation sets the slide from the cam's turn; the
+  // loop (two rails, one free slide) must close around that value, not move
+  // it back to where it was seeded. The relation was dropped when its mates
+  // were in two components, and the slide stayed at 0.
+  const auto rail = [](uint64_t id, double seed) {
+    assembly::LoopMate m;
+    m.id = id;
+    m.type = MateType::Slider;
+    m.aOcc = 30;
+    m.bOcc = 40;
+    m.flipped = false;
+    m.offset = seed;
+    return m;
+  };
+  assembly::LoopProblem p;
+  p.mates.push_back(Revolute(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0), 0.5));
+  p.mates.push_back(rail(2, 0.0));
+  p.mates.push_back(rail(3, 0.0));
+  p.tree.push_back({0, 10, 20, false});
+  p.tree.push_back({1, 30, 40, false});
+  p.cut.push_back(2);
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
+  p.anchor.emplace_back(30, AtX(500.0));
+  p.pinned.push_back({0, MateDof::Rotation, 0.5});
+  assembly::LoopRelation r;
+  r.mateA = 0;
+  r.mateB = 1;
+  r.dofA = MateDof::Rotation;
+  r.dofB = MateDof::Offset;
+  r.ratio = 10.0; // mm per radian
+  p.relations.push_back(r);
+
+  const assembly::LoopSolution s = assembly::SolveLoops(p);
+  REQUIRE(s.unavailable.empty());
+  CHECK(s.converged);
+  CHECK(s.conflicting.empty());
+  CHECK_THAT(static_cast<double>(s.solved[0].rotation), WithinAbs(0.5, 1e-6));
+  CHECK_THAT(s.solved[1].offset, WithinAbs(5.0, 1e-4));
+  CHECK_THAT(s.solved[2].offset, WithinAbs(5.0, 1e-4));
+}
+
 TEST_CASE("Independent loops are solved independently",
           "[assembly][solve][loops]") {
   // Two separate carriages, each on its own pair of rails. They share no

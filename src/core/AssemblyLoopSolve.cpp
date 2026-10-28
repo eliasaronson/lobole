@@ -735,6 +735,22 @@ std::vector<Component> SplitIntoComponents(const LoopProblem& p) {
   };
   for (const LoopMate& m : p.mates)
     unite(m.aOcc, m.bOcc);
+  // A relation joins its mates' components too. Two fixed occurrences no
+  // mate joins are two anchors, so a cam turning in one and its follower's
+  // loop grounded on the other were two problems: the relation was a row in
+  // neither, and the follower's loop solve moved the slide the relation had
+  // just set back towards where the loop last closed (the woodcutter's
+  // panels, each fixed: generators/woodcutter/README.md).
+  for (const LoopRelation& r : p.relations) {
+    if (!r.terms.empty()) {
+      for (const LoopRelation::Term& t : r.terms)
+        if (t.mate < p.mates.size())
+          unite(p.mates[r.terms.front().mate].aOcc, p.mates[t.mate].aOcc);
+      continue;
+    }
+    if (r.mateA < p.mates.size() && r.mateB < p.mates.size())
+      unite(p.mates[r.mateA].aOcc, p.mates[r.mateB].aOcc);
+  }
 
   std::unordered_map<uint64_t, size_t> slot; // component root -> index
   std::vector<Component> out;
@@ -763,18 +779,16 @@ std::vector<Component> SplitIntoComponents(const LoopProblem& p) {
     out[slotFor(p.mates[i].aOcc)].sub.cut.push_back(subIndexOf[i]);
   for (const auto& [occ, at] : p.anchor)
     out[slotFor(occ)].sub.anchor.emplace_back(occ, at);
-  // A relation is a row only where both its mates live in ONE component;
-  // across components it is propagation's business (AssemblySolve.cpp).
   for (const LoopPin& pin : p.pinned) {
     if (pin.mate >= p.mates.size())
       continue;
     Component& c = out[slotFor(p.mates[pin.mate].aOcc)];
     c.sub.pinned.push_back({subIndexOf[pin.mate], pin.dof, pin.value});
   }
+  // Every relation's mates are in one component now (above); the checks
+  // stay so a relation naming a mate out of range is skipped, not a row.
   for (const LoopRelation& r : p.relations) {
     if (!r.terms.empty()) {
-      // Over several mates: a row only when EVERY member is in this one
-      // component, the same rule as two.
       const size_t s0 = slotFor(p.mates[r.terms.front().mate].aOcc);
       bool one = true;
       for (const LoopRelation::Term& t : r.terms)
