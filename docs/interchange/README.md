@@ -425,7 +425,11 @@ code involved.
   one, a generator: a run of the region's own edges along one line. Both of
   its ends become corners, so the rims are cut there for the faces either
   side alike, and the face is one wire: up the seam, round the other rim and
-  back.
+  back. The surface's X points along the seam, so u = 0 is the seam as a
+  modeller's is, and a mate's connector frame counts from it. A seam at some
+  other u differs from where a face extended from the surface is cut (the
+  strip Offset Face adds to a bore through a raised flat), and OCC 7.6
+  cannot merge the strip back into the bore.
   - A sphere's pole is put in the middle of its region, where
     `ShapeFix_Face` closes it with a degenerate edge.
 - **Nothing is sewn.** The faces are built on the shared edges and put into

@@ -590,8 +590,11 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
   const mesh::Region& region = m_seg.regions[r];
   const mesh::FitResult& f = region.fit;
   // The surface, its seam turned away from the region: the X direction
-  // points opposite the region's middle (or, for a full turn, at the first
-  // loop's start, where a seam can go).
+  // points opposite the region's middle, or, for a full turn, along the
+  // ring's seam edge, so u = 0 is the seam as a modeller's is. A ring's
+  // middle is the triangulation's noise, and a seam left at some other u
+  // differs from the u = 0 a face extended from this surface (Offset Face's
+  // strip) is cut at: OCC 7.6 then cannot merge the strip back into it.
   glm::dvec3 middle(0.0);
   for (uint32_t t : region.triangles)
     for (int c = 0; c < 3; c++) {
@@ -609,6 +612,8 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
     case mesh::Kind::Cylinder:
     case mesh::Kind::Cone: {
       glm::dvec3 x = -middle;
+      if (const auto ring = m_seams.find(r); ring != m_seams.end())
+        x = m_mesh.positions[ring->second.vA] - f.origin;
       x -= glm::dot(x, f.axis) * f.axis;
       if (glm::length(x) < 1e-6 * glm::length(middle) + 1e-300) {
         const uint32_t v =
