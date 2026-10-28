@@ -18,6 +18,7 @@
 #include "core/Document.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/sketch/ExternalPrint.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -28,6 +29,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -454,12 +456,179 @@ std::string LoopHint(const LoopDiagnosis& d, const AssemblyDocument& asmDoc) {
 using topo::Descent;
 using topo::DescentOf;
 
+// ---- prints of imported elements (vNEXT2) ---------------------------------
+//
+// A print is an OCC surface or curve analysis, and a drag solves many times
+// a second: both what an element under a name is now, and where a print
+// went, are kept per (part instance, part version), which only a
+// regeneration moves.
+struct PrintKey {
+  uint64_t doc, version;
+  size_t body;
+  bool face;
+  int index;
+  auto operator<=>(const PrintKey&) const = default;
+};
+struct FoundKey {
+  uint64_t doc, version, feature;
+  bool face;
+  std::string shape;
+  double size;
+  double x, y, z;
+  auto operator<=>(const FoundKey&) const = default;
+};
+struct FoundAt {
+  size_t body;
+  int index;
+  std::string name;
+};
+constexpr size_t kPrintCacheMax = 1u << 14;
+std::mutex g_printMutex;
+// The element at `index` as it now is: whether it is an imported file's
+// own (only those are printed), its print, and its body's diagonal, which
+// the print is compared to.
+struct PrintedNow {
+  bool own = false;
+  std::optional<sketch::ElementPrint> print;
+  double diagonal = 1.0;
+};
+
+std::map<PrintKey, PrintedNow> g_printNow;
+std::map<FoundKey, std::vector<FoundAt>> g_printFound;
+
+size_t BodyIndex(const Document& part, const Body* body) {
+  return static_cast<size_t>(body - part.GetBodies().data());
+}
+
+PrintedNow PrintNow(const Document& part, const Body& body, bool face,
+                    int index, const std::string& name) {
+  const PrintKey key{part.InstanceId(), part.Version(), BodyIndex(part, &body),
+                     face, index};
+  {
+    std::scoped_lock lock(g_printMutex);
+    if (const auto it = g_printNow.find(key); it != g_printNow.end()) {
+      PrintedNow p = it->second;
+      if (p.print)
+        p.print->element = name;
+      return p;
+    }
+  }
+  PrintedNow p;
+  p.own = sketch::IsFileOwn(
+      [&](uint64_t id) -> const Feature* { return part.FindFeatureById(id); },
+      name);
+  if (p.own) {
+    p.print = sketch::PrintAt(body, face, index, name);
+    p.diagonal = sketch::PrintDiagonal(body);
+  }
+  std::scoped_lock lock(g_printMutex);
+  if (g_printNow.size() > kPrintCacheMax)
+    g_printNow.clear();
+  g_printNow[key] = p;
+  return p;
+}
+
+std::vector<FoundAt> FindPrintedNow(const Document& part, uint64_t feature,
+                                    bool face,
+                                    const sketch::ElementPrint& was) {
+  const FoundKey key{
+      part.InstanceId(), part.Version(), feature,        face,
+      was.shape,         was.size,       was.centroid.x, was.centroid.y,
+      was.centroid.z};
+  {
+    std::scoped_lock lock(g_printMutex);
+    if (const auto it = g_printFound.find(key); it != g_printFound.end())
+      return it->second;
+  }
+  std::vector<FoundAt> out;
+  for (const sketch::Found& f : sketch::FindPrinted(
+           part.GetBodies(),
+           [&](uint64_t id) -> const Feature* {
+             return part.FindFeatureById(id);
+           },
+           feature, face, was))
+    out.push_back({BodyIndex(part, f.body), f.index, f.name});
+  std::scoped_lock lock(g_printMutex);
+  if (g_printFound.size() > kPrintCacheMax)
+    g_printFound.clear();
+  g_printFound[key] = out;
+  return out;
+}
+
+// Checks the element at `index` (named `name`) on `*body` against its
+// stored print, following it when the file moved it: `*body` and `index`
+// then say where it went. `now` receives its print as it stands (empty when
+// it is not an imported file's own element), `followed` the name it moved
+// to. False with `why` when nothing, or more than one thing, is it.
+bool CheckPrinted(const Document& part, const Body*& body, bool face,
+                  int& index, const std::string& name,
+                  const std::optional<sketch::ElementPrint>& stored,
+                  std::optional<sketch::ElementPrint>* now,
+                  std::string* followed, std::string& why) {
+  const bool checked = stored && stored->element == name;
+  if (!checked && now == nullptr)
+    return true;
+  const PrintedNow at = PrintNow(part, *body, face, index, name);
+  if (!at.own)
+    return true;
+  std::optional<sketch::ElementPrint> current = at.print;
+  if (checked &&
+      !(current && sketch::SamePrint(*stored, *current, at.diagonal))) {
+    std::vector<FoundAt> found =
+        FindPrintedNow(part, body->createdBy, face, *stored);
+    // A snap edge stays on the body its face is on.
+    if (!face)
+      std::erase_if(found, [&](const FoundAt& f) {
+        return f.body != BodyIndex(part, body);
+      });
+    const char* what = face ? "face" : "snap edge";
+    if (found.size() != 1) {
+      why = std::string("its ") + what + " '" + name +
+            "' is not the one it was picked on, " +
+            sketch::Describe(*stored, face) + ": the imported file " +
+            (found.empty() ? std::string("has no such ") + what + " now"
+                           : "now has " + std::to_string(found.size()) +
+                                 " alike, and which one is meant is not "
+                                 "known") +
+            " -- re-pick the connector";
+      return false;
+    }
+    body = &part.GetBodies()[found[0].body];
+    index = found[0].index;
+    if (followed)
+      *followed = found[0].name;
+    current = *stored;
+    current->element = found[0].name;
+  }
+  if (now)
+    *now = current;
+  return true;
+}
+
+void TakePrints(Connector& c, const ConnectorPrints& p) {
+  if (!c.anchor.takePrints)
+    return;
+  const auto take = [](const ElementRef& ref,
+                       std::optional<sketch::ElementPrint>& stored,
+                       const std::optional<sketch::ElementPrint>& now,
+                       const std::string& followed) {
+    if (!followed.empty() || !now || !ref.IsSet())
+      return; // a followed print is the stored one; nothing to take
+    if (!stored || stored->element != ref.name)
+      stored = now;
+  };
+  take(c.anchor.face, c.anchor.facePrint, p.face, p.faceFollowed);
+  take(c.anchor.snapEdge, c.anchor.snapPrint, p.snap, p.snapFollowed);
+  take(c.anchor.snapEdge2, c.anchor.snap2Print, p.snap2, p.snap2Followed);
+}
+
 } // namespace
 
 std::optional<glm::dmat4>
 ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
                     const PartResolver& partById, std::string* whyNot,
-                    const AssemblyResolver& asmById, bool followModified) {
+                    const AssemblyResolver& asmById, bool followModified,
+                    ConnectorPrints* prints) {
   const auto fail = [&](std::string why) {
     if (whyNot)
       *whyNot = std::move(why);
@@ -613,9 +782,20 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
       return fail(std::move(why));
     }
 
+    // An imported face is the one picked, or followed to where the file
+    // moved it (vNEXT2).
+    const Body* on = &body;
+    int faceAt = *faceIdx;
+    if (std::string why;
+        !CheckPrinted(*part, on, true, faceAt, ref.name, c.anchor.facePrint,
+                      prints ? &prints->face : nullptr,
+                      prints ? &prints->faceFollowed : nullptr, why))
+      return fail(std::move(why));
+    faceIdx = faceAt;
+
     glm::dvec3 origin, primary, xHint;
-    bool ok = body.shape.FacePlane(*faceIdx, origin, primary, xHint) ||
-              body.shape.FaceAxis(*faceIdx, origin, primary, xHint);
+    bool ok = on->shape.FacePlane(*faceIdx, origin, primary, xHint) ||
+              on->shape.FaceAxis(*faceIdx, origin, primary, xHint);
     if (!ok)
       return fail("face '" + ref.name +
                   "' has no connector frame (planar, cylindrical, conical, "
@@ -625,8 +805,16 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
     // edge's characteristic point (a hole center, etc.), keeping the face's Z
     // normal.
     if (c.anchor.snapEdge.IsSet()) {
-      if (const auto edgeIdx =
-              body.elementMap.ResolveEdge(c.anchor.snapEdge.name)) {
+      if (auto edgeIdx = on->elementMap.ResolveEdge(c.anchor.snapEdge.name)) {
+        // An imported edge as its face is: checked, and followed.
+        const Body* edgeOn = on;
+        int edgeAt = *edgeIdx;
+        if (std::string why;
+            !CheckPrinted(*part, edgeOn, false, edgeAt, c.anchor.snapEdge.name,
+                          c.anchor.snapPrint, prints ? &prints->snap : nullptr,
+                          prints ? &prints->snapFollowed : nullptr, why))
+          return fail(std::move(why));
+        edgeIdx = edgeAt;
         glm::dvec3 snap;
         // A CORNER (v65) when a second edge is named: the vertex the two
         // share. Falls back to the first edge's own point when they share
@@ -634,11 +822,19 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
         // and a plausible guess is worse than the point that IS well defined.
         bool cornered = false;
         if (c.anchor.snapEdge2.IsSet()) {
-          if (const auto edgeIdx2 =
-                  body.elementMap.ResolveEdge(c.anchor.snapEdge2.name))
-            cornered = body.shape.CornerPoint(*edgeIdx, *edgeIdx2, snap);
+          if (auto edgeIdx2 =
+                  on->elementMap.ResolveEdge(c.anchor.snapEdge2.name)) {
+            const Body* edge2On = on;
+            int edge2At = *edgeIdx2;
+            if (std::string why; !CheckPrinted(
+                    *part, edge2On, false, edge2At, c.anchor.snapEdge2.name,
+                    c.anchor.snap2Print, prints ? &prints->snap2 : nullptr,
+                    prints ? &prints->snap2Followed : nullptr, why))
+              return fail(std::move(why));
+            cornered = on->shape.CornerPoint(*edgeIdx, edge2At, snap);
+          }
         }
-        if (cornered || body.shape.EdgeSnapPoint(*edgeIdx, snap))
+        if (cornered || on->shape.EdgeSnapPoint(*edgeIdx, snap))
           origin = snap;
       } else {
         // Gone, the connector is NOT the face's own frame: that is a
@@ -1748,10 +1944,19 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
     if (asmDoc.MateSuppressed(mate.id))
       continue;
     std::string whyA, whyB;
+    ConnectorPrints printsA, printsB;
     const auto fa =
-        ConnectorLocalFrame(mate.a, asmDoc, partById, &whyA, asmById);
+        ConnectorLocalFrame(mate.a, asmDoc, partById, &whyA, asmById, false,
+                            mate.a.anchor.takePrints ? &printsA : nullptr);
     const auto fb =
-        ConnectorLocalFrame(mate.b, asmDoc, partById, &whyB, asmById);
+        ConnectorLocalFrame(mate.b, asmDoc, partById, &whyB, asmById, false,
+                            mate.b.anchor.takePrints ? &printsB : nullptr);
+    // A connector made now takes the prints of the imported elements it
+    // names, as they are when it is first solved (vNEXT2).
+    if (fa)
+      TakePrints(mate.a, printsA);
+    if (fb)
+      TakePrints(mate.b, printsB);
     if (!fa || !fb) {
       // Name WHICH side failed (occurrence + why), so a stale toponame is
       // fixable without probing both connectors.

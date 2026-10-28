@@ -41,14 +41,20 @@ std::string Num(double v) {
 
 } // namespace
 
-bool IsFileOwn(const RegenContext& ctx, const std::string& name) {
+bool IsFileOwn(const FeatureLookup& find, const std::string& name) {
   const topo::ElementOrigin o = topo::DecodeElementName(name);
   if (!o.ok || o.role != topo::ElementRole::Positional || !o.derived.empty() ||
       !o.modifiedBy.empty() || o.madeBy != o.seedTag)
     return false;
-  const Feature* seed = ctx.FindById(o.seedTag);
+  const Feature* seed = find(o.seedTag);
   return seed != nullptr && seed->TypeName() == "Import";
 }
+
+bool IsFileOwn(const RegenContext& ctx, const std::string& name) {
+  return IsFileOwn([&](uint64_t id) { return ctx.FindById(id); }, name);
+}
+
+double PrintDiagonal(const Body& body) { return Diagonal(body); }
 
 std::optional<ElementPrint> PrintAt(const Body& body, bool face, int index,
                                     const std::string& name) {
@@ -89,8 +95,16 @@ bool SamePrint(const ElementPrint& was, const ElementPrint& now,
 
 std::vector<Found> FindPrinted(const RegenContext& ctx, uint64_t featureId,
                                bool face, const ElementPrint& was) {
+  return FindPrinted(
+      ctx.bodies, [&](uint64_t id) { return ctx.FindById(id); }, featureId,
+      face, was);
+}
+
+std::vector<Found> FindPrinted(const std::vector<Body>& bodies,
+                               const FeatureLookup& find, uint64_t featureId,
+                               bool face, const ElementPrint& was) {
   std::vector<Found> out;
-  for (const Body& body : ctx.bodies) {
+  for (const Body& body : bodies) {
     if (body.createdBy != featureId || body.shape.GetShape().IsNull())
       continue;
     const double diagonal = Diagonal(body);
@@ -111,7 +125,7 @@ std::vector<Found> FindPrinted(const RegenContext& ctx, uint64_t featureId,
     }
     for (const auto& [index, name] : names) {
       if (index < 0 || index >= static_cast<int>(shapes.size()) ||
-          !IsFileOwn(ctx, name))
+          !IsFileOwn(find, name))
         continue;
       GProp_GProps props;
       if (face)

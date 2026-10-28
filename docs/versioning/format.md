@@ -336,6 +336,7 @@ into the history above, numbered, when the branch lands
 | v | Change |
 |---|--------|
 | vNEXT | An `Import` of an STL takes `representation` (`facets` \| `recognize`; absent = `facets`, how every older mesh import was read) and, with `recognize`, `min_sides` (5..1024; absent = 12). Unknown values are refused. Golden `vNEXT-import-representation` |
+| vNEXT2 | A mate connector's `face`, `snap_edge` and `snap_edge2` carry a `fingerprint` (`element`, `shape`, `area_mm2` or `length_mm`, `centroid_mm`) when they name an imported file's own element; one that disagrees with the element it sits beside is refused. A connector from an older file takes none. Golden `assembly/vNEXT2-mate-import-print` |
 
 ## Paths in a project
 

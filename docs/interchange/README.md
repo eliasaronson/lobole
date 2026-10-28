@@ -424,7 +424,9 @@ An Import of an STL takes `representation`, which is `recognize` or
   planes").
 - **A change that would renumber is refused.** Changing `representation` or
   `min_sides` renumbers every face, so `modify_feature` refuses it while
-  another feature of the part refers to the import, naming them.
+  another feature of the part refers to the import, naming them. A mate in
+  an assembly is protected by its print instead
+  ([a mate on an imported face](../assemblies/README.md#a-mate-on-an-imported-face)).
 
 What it is checked against:
 - **Generated parts.** `tests/mesh_fixtures.{h,cpp}` builds CAD parts with

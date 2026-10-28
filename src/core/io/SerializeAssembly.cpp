@@ -290,6 +290,49 @@ MateType MateTypeFromString(const std::string& s) {
                            "add is a RELATION, not a mate: see add_relation");
 }
 
+// An imported element's print (vNEXT2), in the shape a sketch's projection
+// writes it (v195): written only while it is the print of the element named
+// beside it -- one taken for another name is stale, and the reader refuses
+// one that disagrees.
+void PutPrint(json& ref, const std::optional<sketch::ElementPrint>& print,
+              bool face) {
+  if (!print || print->element != ref.value("element", std::string{}))
+    return;
+  ref["fingerprint"] = {
+      {"element", print->element},
+      {"shape", print->shape},
+      {face ? "area_mm2" : "length_mm", print->size},
+      {"centroid_mm",
+       {print->centroid.x, print->centroid.y, print->centroid.z}}};
+}
+
+std::optional<sketch::ElementPrint> GetPrint(const json& ref, bool face,
+                                             const char* what) {
+  if (!ref.contains("fingerprint"))
+    return std::nullopt;
+  const json& p = ref.at("fingerprint");
+  const char* sizeKey = face ? "area_mm2" : "length_mm";
+  readctx::RefuseUnknownKeys(p, {"element", "shape", sizeKey, "centroid_mm"},
+                             std::string(what) + " fingerprint");
+  sketch::ElementPrint out;
+  out.element = p.at("element").get<std::string>();
+  if (out.element != ref.value("element", std::string{}))
+    throw std::runtime_error(std::string(what) + " fingerprint is of '" +
+                             out.element + "', not of the element it names");
+  out.shape = p.at("shape").get<std::string>();
+  out.size = p.at(sizeKey).get<double>();
+  const json& c = p.at("centroid_mm");
+  if (!c.is_array() || c.size() != 3)
+    throw std::runtime_error(std::string(what) +
+                             " fingerprint's centroid_mm is [x, y, z]");
+  out.centroid = {c[0].get<double>(), c[1].get<double>(), c[2].get<double>()};
+  if (!std::isfinite(out.size) || !std::isfinite(out.centroid.x) ||
+      !std::isfinite(out.centroid.y) || !std::isfinite(out.centroid.z))
+    throw std::runtime_error(std::string(what) +
+                             " fingerprint holds a number that is not finite");
+  return out;
+}
+
 json ConnectorToJson(const Connector& c) {
   json j;
   j["occurrence"] = c.occurrenceId;
@@ -313,6 +356,11 @@ json ConnectorToJson(const Connector& c) {
     if (c.anchor.snapEdge2.IsSet())
       anchor["snap_edge2"] = {{"feature_id", c.anchor.snapEdge2.featureId},
                               {"element", c.anchor.snapEdge2.name}};
+    PutPrint(anchor["face"], c.anchor.facePrint, true); // vNEXT2
+    if (anchor.contains("snap_edge"))
+      PutPrint(anchor["snap_edge"], c.anchor.snapPrint, false);
+    if (anchor.contains("snap_edge2"))
+      PutPrint(anchor["snap_edge2"], c.anchor.snap2Print, false);
     j["anchor"] = std::move(anchor);
   }
   return j;
@@ -343,24 +391,27 @@ Connector ConnectorFromJson(const json& j) {
     c.anchor.origin = true;
   } else if (a.contains("face")) {
     const json& f = a.at("face");
-    readctx::RefuseUnknownKeys(f, {"feature_id", "element"},
+    readctx::RefuseUnknownKeys(f, {"feature_id", "element", "fingerprint"},
                                "mate anchor face");
     c.anchor.face = ElementRef{f.value("feature_id", uint64_t{0}),
                                f.value("element", std::string{})};
+    c.anchor.facePrint = GetPrint(f, true, "mate anchor face");
     if (a.contains("snap_edge")) {
       const json& s = a.at("snap_edge");
-      readctx::RefuseUnknownKeys(s, {"feature_id", "element"},
+      readctx::RefuseUnknownKeys(s, {"feature_id", "element", "fingerprint"},
                                  "mate anchor snap_edge");
       c.anchor.snapEdge = ElementRef{s.value("feature_id", uint64_t{0}),
                                      s.value("element", std::string{})};
+      c.anchor.snapPrint = GetPrint(s, false, "mate anchor snap_edge");
       RequireSetOrEmpty(c.anchor.snapEdge, "mate anchor snap_edge");
     }
     if (a.contains("snap_edge2")) {
       const json& s2 = a.at("snap_edge2");
-      readctx::RefuseUnknownKeys(s2, {"feature_id", "element"},
+      readctx::RefuseUnknownKeys(s2, {"feature_id", "element", "fingerprint"},
                                  "mate anchor snap_edge2");
       c.anchor.snapEdge2 = ElementRef{s2.value("feature_id", uint64_t{0}),
                                       s2.value("element", std::string{})};
+      c.anchor.snap2Print = GetPrint(s2, false, "mate anchor snap_edge2");
       RequireSetOrEmpty(c.anchor.snapEdge2, "mate anchor snap_edge2");
     }
   }

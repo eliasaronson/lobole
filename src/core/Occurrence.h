@@ -7,6 +7,7 @@
 #include "core/ElementMap.h"
 #include "core/Units.h"
 #include "core/fem/FemStudy.h"
+#include "core/sketch/ExternalPrint.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -189,6 +190,20 @@ struct ConnectorAnchor {
   // instead of the centroid of whatever face is nearest. When set, `origin`
   // and `face` are ignored.
   uint64_t frameId = 0;
+
+  // What `face`, `snapEdge` and `snapEdge2` were when picked, when each is
+  // an imported file's own element (vNEXT2;
+  // docs/assemblies/README.md#a-mate-on-an-imported-face). An import names
+  // its faces by their place in the file, so a changed file -- or a mesh
+  // recognised rather than faceted -- renumbers them, and a mate resolved by
+  // name alone landed on whichever face then held the number. With a print
+  // the element under the name is checked; one that moved is followed, one
+  // gone (or matched by several) refuses the mate, naming it.
+  std::optional<sketch::ElementPrint> facePrint, snapPrint, snap2Print;
+  // Whether a missing print is taken at the next solve: true for a
+  // connector made now, false for one read from a file older than prints,
+  // whose face may already have slipped -- printing it would bless that.
+  bool takePrints = true;
 };
 
 // One side of a mate: a frame on some occurrence of this assembly.

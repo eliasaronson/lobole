@@ -107,11 +107,26 @@ struct SolveReport {
 // a bolt hole's rim modifies the bore and the face round it, and neither
 // stops being the face the screw sits in). A split (`.i`), or two faces
 // claiming the name, still fails: there is no one face to sit on.
+//
+// An imported file's own face or snap edge carrying a print (vNEXT2,
+// ConnectorAnchor::facePrint,
+// docs/assemblies/README.md#a-mate-on-an-imported-face) is checked: the
+// element under the name must be the one printed. One the file renumbered is
+// followed to the one element that matches; none, or several alike, fails
+// naming it and asking for a re-pick. The prints are cached per part
+// version, so a solve, and every solve of a drag, pays for them once.
+// `prints`, when given, receives the prints as they now are and the names
+// followed, for the caller that may store them (SolveAssembly).
+struct ConnectorPrints {
+  std::optional<sketch::ElementPrint> face, snap, snap2;
+  std::string faceFollowed, snapFollowed, snap2Followed; // new names, or ""
+};
 std::optional<glm::dmat4>
 ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
                     const PartResolver& partById, std::string* whyNot = nullptr,
                     const AssemblyResolver& asmById = nullptr,
-                    bool followModified = false);
+                    bool followModified = false,
+                    ConnectorPrints* prints = nullptr);
 
 // Re-places every mated, non-`fixed` occurrence and writes the result back to
 // its transform (position + orientation). `fixed` occurrences and occurrences

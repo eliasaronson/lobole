@@ -280,6 +280,42 @@ the last solve, so this works headless too), and every part regeneration
 while editing in context. A mated, non-fixed occurrence's own transform is
 overwritten by the next solve.
 
+### A mate on an imported face
+
+An imported part names its faces and edges by their place in the file
+(`<id>/b<k>/faceN`). A changed file, or a mesh recognised instead of kept
+as facets ([interchange](../interchange/README.md#recognising-a-faceted-mesh)),
+renumbers them. A mate resolved by name alone then landed, silently, on
+whichever face held the number.
+
+**The print.** A connector's face and snap edges carry the print a sketch's
+projection of an imported element carries
+([sketching](../sketching/README.md#projecting-an-imported-part)): its kind,
+area or length, and centroid (`ConnectorAnchor::facePrint`, `snapPrint`,
+`snap2Print`; vNEXT2, `fingerprint` beside the element in the file).
+- **Taken.** A connector made now (`add_mate`, the Mate tool, a re-pick)
+  takes the prints of the imported elements it names at its first solve
+  (`TakePrints`). A face that is not an imported file's own (a feature made
+  or moved it) needs none; its name follows its history as before.
+- **Checked** every time the connector is resolved (`ConnectorLocalFrame`):
+  - the element under the name is the one printed, and the mate solves;
+  - **moved**: the one element of the import that matches is used instead,
+    so the mate follows the face to wherever the file put it;
+  - **gone**, or matched by **several** alike (two copies of a part in one
+    file): the mate is refused, and its error names the element and what
+    it was ("its face '1/b1/face6' is not the one it was picked on, a
+    cylinder face of 47.12 mm² at (-50, -30, 3): the imported file has no
+    such face now -- re-pick the connector").
+- **What it costs.** A print is an OCC surface or curve analysis. Both what
+  the element under a name is now and where a print went are cached per
+  (part instance, part version), which only a regeneration moves, so a
+  drag's solves pay a map lookup each. `test_mate_import_print.cpp` holds
+  the solve of 24 printed mates to 1.25 times the same chain without prints.
+- **Older files.** A connector read from a file older than prints has none,
+  and takes none (`takePrints` false): its face may already have slipped,
+  and printing it would bless that. It resolves by name as it always did
+  until it is re-picked.
+
 ## Relations
 
 A relation couples mates' degrees of freedom — `dof_b = ratio · dof_a +

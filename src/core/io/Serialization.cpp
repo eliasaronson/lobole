@@ -1632,6 +1632,20 @@ constexpr std::initializer_list<std::string_view> kAssemblyEnvelopeKeys = {
     "sequence",
     "exploded_views"};
 
+// A mate's connectors read from a file older than prints (vNEXT2) take none:
+// the face under a name may already be another than the one picked, and
+// printing it now would bless that. A newer file's connector without one is
+// on a face that needs none, or was never solved; it takes one when it is
+// (docs/assemblies/README.md#a-mate-on-an-imported-face).
+void PrintsFrom(AssemblyDocument& asmDoc, int version) {
+  if (version >= kVersionNEXT2)
+    return;
+  for (Mate& m : asmDoc.GetMates()) {
+    m.a.anchor.takePrints = false;
+    m.b.anchor.takePrints = false;
+  }
+}
+
 void CheckAssemblyEnvelope(const json& j) {
   CheckEnvelope(j, "assembly");
   readctx::RefuseUnknownKeys(j, kAssemblyEnvelopeKeys, "assembly");
@@ -1752,6 +1766,7 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         asmDoc->SetSequence(AssemblySequenceFromJson(index.at("sequence")));
       asmDoc->SetUnits(UnitsFromEnvelope(index)); // v64
     });
+    PrintsFrom(*asmDoc, index.value("version", 0));
 
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), dirPath);
@@ -2109,6 +2124,7 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
           if (j.contains("sequence")) // v187
             asmDoc->SetSequence(AssemblySequenceFromJson(j.at("sequence")));
           asmDoc->SetUnits(UnitsFromEnvelope(j)); // v64
+          PrintsFrom(*asmDoc, j.value("version", 0));
           LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
                    asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);
           return asmDoc;

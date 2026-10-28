@@ -13,12 +13,14 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
 struct Body;
 struct RegenContext;
+class Feature;
 
 namespace sketch {
 
@@ -36,6 +38,10 @@ struct ElementPrint {
 // that a feature made or moved it (an upstream edit moves such an element
 // on purpose, by its parameters). Only these are printed.
 bool IsFileOwn(const RegenContext& ctx, const std::string& name);
+// The same against any feature list: what an assembly's connector asks of
+// the part it names (docs/assemblies/README.md#a-mate-on-an-imported-face).
+using FeatureLookup = std::function<const Feature*(uint64_t)>;
+bool IsFileOwn(const FeatureLookup& find, const std::string& name);
 
 // The print of the face (`face`) or edge at `index` of `body`, named `name`.
 std::optional<ElementPrint> PrintAt(const Body& body, bool face, int index,
@@ -54,6 +60,11 @@ struct Found {
 };
 std::vector<Found> FindPrinted(const RegenContext& ctx, uint64_t featureId,
                                bool face, const ElementPrint& was);
+std::vector<Found> FindPrinted(const std::vector<Body>& bodies,
+                               const FeatureLookup& find, uint64_t featureId,
+                               bool face, const ElementPrint& was);
+// The print's tolerance basis: the body's bounding diagonal, at least 1 mm.
+double PrintDiagonal(const Body& body);
 
 // "a circle 7.854 mm long at (5.05, -3.7, 18.7)".
 std::string Describe(const ElementPrint& p, bool face);
