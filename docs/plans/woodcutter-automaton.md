@@ -31,8 +31,12 @@ motion, and `check_followers` (with the `follower` requirement) says
 whether a follower stays on at a speed
 ([relations.md](../assemblies/relations.md#contact),
 [cam-profiles.md](../modeling/cam-profiles.md),
-[the follower check](../assemblies/relations.md#the-follower-check)). What
-follows is the automaton itself.
+[the follower check](../assemblies/relations.md#the-follower-check)). The
+mechanism is built too: `generators/woodcutter/` makes the cams, the rods,
+the levers and their links in a one-body box, and checks them over a crank
+turn and across the drop, with requirements and negative controls
+([its README](../../generators/woodcutter/README.md)). What follows is the
+rest of the automaton.
 
 Two limits of that work shape the design below:
 
@@ -44,67 +48,15 @@ Two limits of that work shape the design below:
 - **The exact clash check is not the contact check.** A query boolean
   between a B-spline cam and a pin in tangent contact took 175 s for one
   pair at a steep pressure angle, and booleans are fuzzy at 1 µm. Motion
-  studies over cam pairs run `clash_mode: mesh`; `check_followers`' cuts
-  across the width are what says the follower is on its cam.
-
-## Phase 2: the mechanism (size: M)
-
-`generators/woodcutter/` (`build.py`, `woodcutter_spec.py`,
-`woodcutter_parts.py`, `README.md`, `test.json`). Output goes to untracked
-`scratch/woodcutter/`: `woodcutter.lob`, a receipt `woodcutter.json`, and the
-STLs and print job from phase 3.
-
-- **Sizes come from one number, the box's inside width.** It is a
-  generator argument. Everything else is derived from it and from the print
-  rules (the profile's minimum wall, the coupon's clearances):
-  - the camshaft's diameter;
-  - the cams' base radii, set by the pressure-angle limit through
-    CamProfile's report;
-  - the follower rods and their guide bores, at the print clearance that
-    `print_allowance` gives for a sliding fit;
-  - the figures' scale.
-- **The camshaft** turns on revolute mates in bores in the box's end walls.
-  Each cam is a `CamProfile` keyed to the shaft by a printed flat:
-  - the axe cam: a slow rise over most of a turn, then a `drop`;
-  - the bird's cam: a cycloidal rise and fall, phase-shifted on the shaft so
-    the bird pecks while the axe is rising, not as it drops. The two
-    motions are two steps of one `SequenceStep` timeline, which tests the
-    sequence checks on overlapping and alternating motions.
-- **Followers** are printed rods with rounded feet (knife followers with a
-  tip radius, so no roller and no pin to buy), sliding in guide bores in the
-  box's top. Each is driven by a `contact` relation with `toward` derived
-  from gravity.
-- **Figures.** The woodcutter's arms turn at the shoulder on a revolute
-  fixed to the figure, which is fastened to the box top. A link pinned to
-  the rod's top and to the arm makes a mate loop (slider, three revolutes),
-  which `AssemblyLoopSolve` closes. The log is fastened. The bird's body
-  turns on a revolute at its feet and is tipped forward by its own rod the
-  same way, so it pecks.
-- **Checks in the receipt** (all numbers, all from the app):
-  - a motion study over one crank turn (48 samples plus every drop's
-    neighbourhood, mesh clash mode) is clean, and `check_followers` finds
-    each follower touching its cam at every sample;
-  - `check_followers`: `liftoff_rpm` per follower, the maximum pressure
-    angle, `deviation_mm`, and the axe drop's fall time and `drop_rpm`;
-  - the axe's head at the bottom of the drop is a stated clearance above the
-    log (a `clearance` requirement over the study), so the blade meets the
-    log without striking it;
-  - requirements (`check_requirements`): `follower liftoff_rpm ≥ 120` for
-    each follower (twice the 60 rpm hand turn), `pressure_angle_deg ≤` the
-    limit, `motion_clean`, and the axe's `drop_rpm ≥ 120`.
-- **Negative controls**, as the hinge box keeps them:
-  - the axe cam with its drop dwell shortened below the fall time must fail
-    `drop_rpm`;
-  - a cam with too small a base radius must be refused for undercut;
-  - a follower guide moved off the cam's axis plane must be refused.
-
-Verified by `test.json` (the generator test harness) and by the receipt's
-numbers matching the closed forms for the eccentric cam within the contact
-tolerance.
+  studies over cam pairs run `clash_mode: mesh`, which judges a contact
+  relation's cam and follower by `check_followers`' cuts across the width
+  ([motion studies](../assemblies/README.md#motion-studies)).
 
 ## Phase 3: the box, the crank, the plates (size: M)
 
-- **The box** is printed as panels that print flat and peg together.
+- **The box** is printed as panels that print flat and peg together,
+  replacing the mechanism's one-body box; the guides, bores and figures'
+  seats keep the places `woodcutter_spec.py` gives them.
   They use printed pegs, not glue or screws, sized by the coupon's press
   fit. The end walls carry the camshaft bores. The top carries the guide
   bores and is the figures' stage. Teardrop holes are used where a bore

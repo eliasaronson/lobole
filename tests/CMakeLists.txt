@@ -609,6 +609,15 @@ add_test(NAME follower_check_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(follower_check_smoke PROPERTIES TIMEOUT 180)
 
+# Cam followers driving mate loops: the woodcutter automaton's mechanism,
+# built by its generator's own code, clean over a turn in mesh mode and
+# checked by check_followers (tests/contact_loop_smoke.py says what each
+# check found).
+add_test(NAME contact_loop_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/contact_loop_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(contact_loop_smoke PROPERTIES TIMEOUT 240)
+
 # Fan-out (agent-scale plan G5): three instances, three parts, one project —
 # and the refusal that makes two instances on ONE directory loud.
 add_test(NAME fanout_smoke

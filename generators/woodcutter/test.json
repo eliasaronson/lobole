@@ -1,0 +1,21 @@
+{
+  "order": 140,
+  "why": "The whole mechanism run but the stills: the cams' base radii searched against CamProfile's pressure angle, every part verified, the assembly with both followers on contact relations and both levers closed through links, the crank turn and the chop as mesh studies, check_followers over both (touching at every sample, the realised motion the designed one, liftoff, the drop's fall and dwell), the requirements, and the negative controls: the short dwell failing drop_rpm, the small base failing the pressure angle, two guides refused as contacts.",
+  "steps": [
+    ["{python}", "-u", "{generators}/woodcutter/build.py", "--port", "{port}", "--no-render", "--out", "{out}/woodcutter"]
+  ],
+  "markers": [
+    "study turn: 49 samples, mesh at .*: clean",
+    "study chop: 41 samples, mesh at .*: clean",
+    "negative control, the axe's dwell at .*requirement fail",
+    "negative control, the bird's cam on base .*requirement fail",
+    "negative control, a guide tilted: refused",
+    "woodcutter: every check passed"
+  ],
+  "instance": "headless",
+  "budget_s": 600,
+  "readme": {
+    "runs": "`woodcutter/build.py --no-render`: the base radii searched against CamProfile's pressure angle, the mechanism with both contact followers and their lever loops, the crank turn and the chop (mesh), `check_followers` over both, every requirement, and the negative controls (a short dwell, a small base, two guides off the cam)",
+    "measured": "116-250 s"
+  }
+}
