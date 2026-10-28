@@ -41,6 +41,12 @@ std::string UnknownParamError(const std::string& method,
                               const std::vector<std::string>& unknown,
                               const std::set<std::string>& accepted);
 
+// "unknown method 'x'; close: ..." -- the methods near `method` by name, and
+// for a name that looks like an import (import_stl, import_mesh, import_obj)
+// which method reads which file, since the one that reads every 3D format is
+// called import_step. The same sentence for a call and for describe/help.
+std::string UnknownMethodError(const std::string& method);
+
 // The refusal for params `method`'s describe row does not take -- a key it
 // does not list, or params that are not an object -- or nullopt when they are
 // fine (or the method is unknown, or takes a free-form spec). Checked BEFORE

@@ -1555,8 +1555,11 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         // response sent when the engine finishes the action
         return activity + parkedActivity();
       }
+      // Named close matches, as describe and help do: "unknown method:
+      // import_stl" left a caller nowhere, and the rpc tool's description
+      // promised the close matches it did not give.
       RespondError(request.client, request.id,
-                   "unknown method: " + request.method);
+                   UnknownMethodError(request.method));
     } catch (const remote::ContractError& e) {
       json diagnostic = e.diagnostic;
       // RpcParams' missing-key refusal does not know its method.

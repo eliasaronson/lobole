@@ -84,6 +84,7 @@
 #include "ui/ViewActions.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -813,6 +814,37 @@ const remote::MethodDoc* FindMethod(const std::string& m) {
   }();
   const auto it = byName.find(m);
   return it == byName.end() ? nullptr : it->second;
+}
+
+std::string UnknownMethodError(const std::string& method) {
+  std::vector<std::string> names;
+  for (const auto& t : AllMethodTables())
+    for (const auto& d : t)
+      names.emplace_back(d.name);
+  const std::vector<std::string> close = CloseNames(method, names);
+  std::string msg = "unknown method '" + method + "'";
+  if (!close.empty()) {
+    msg += "; close: ";
+    for (size_t i = 0; i < close.size(); i++)
+      msg += (i ? ", " : "") + close[i];
+  }
+  // import_stl, import_mesh, import_obj: an agent asks for the format by
+  // name, and edit distance cannot get from there to import_step.
+  std::string lower = method;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  bool importLike = lower.find("import") != std::string::npos;
+  if (lower.find("export") == std::string::npos)
+    for (const char* format :
+         {"stl", "obj", "step", "stp", "iges", "igs", "brep", "dxf", "svg"})
+      importLike = importLike || lower.find(format) != std::string::npos;
+  if (importLike)
+    msg += ". Every 3D file -- STEP, IGES, STL, OBJ, BREP -- is read by "
+           "import_step (an STL's planes, cylinders, cones and spheres "
+           "rebuilt as true faces with `representation: recognize`), and a "
+           "DXF or SVG into a sketch by import_sketch";
+  msg += ". describe with no arguments lists every method";
+  return msg;
 }
 
 // The flags of `m`, or 0 for a method we do not know. An unknown method having
@@ -1567,21 +1599,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const auto tables = AllMethodTables();
     for (const auto& t : tables)
       addDocs(t);
-    if (!only.empty() && methods.empty()) {
-      std::vector<std::string> names;
-      for (const auto& t : tables)
-        for (const auto& d : t)
-          names.emplace_back(d.name);
-      const std::vector<std::string> close = CloseNames(only, names);
-      std::string msg = "unknown method '" + only + "'";
-      if (!close.empty()) {
-        msg += "; close: ";
-        for (size_t i = 0; i < close.size(); i++)
-          msg += (i ? ", " : "") + close[i];
-      }
-      msg += ". describe with no arguments lists every method";
-      throw std::runtime_error(msg);
-    }
+    if (!only.empty() && methods.empty())
+      throw std::runtime_error(UnknownMethodError(only));
     // Narrowed: that method's row, and not the catalogue around it. The
     // type tables below are several times the size of any one row, and a
     // caller asking about add_mate wants add_mate — the dogfood's

@@ -118,10 +118,13 @@ static constexpr MethodDoc ProjectMethods[] = {
      "part_id, source_part_id, fingerprint, expected_revision, "
      "source_revision, apply"},
     {"import_step",
-     "Import a STEP, IGES, STL, OBJ or BREP file into the current project "
-     "(STEP and IGES via XCAF: names, colors, real assemblies; IGES surfaces "
-     "are sewn into solids, and what stays open is named in the feature's "
-     "warning). `units` is the length unit an STL, OBJ or BREP was drawn in "
+     "The importer for EVERY 3D file, meshes included, whatever its name "
+     "says: a STEP, IGES, STL, OBJ or BREP into the current project "
+     "(docs/interchange/README.md). A DXF or SVG goes into a sketch with "
+     "import_sketch. STEP and IGES come in via XCAF: names, colors, real "
+     "assemblies; IGES surfaces are sewn into solids, and what stays open "
+     "is named in the feature's warning. `units` is the length unit an STL, "
+     "OBJ or BREP was drawn in "
      "— mm (default), cm, m, in — since none of them carries one; refused "
      "for STEP and IGES, which declare their own. `keep_origin` keeps the "
      "file's OWN coordinates; without it the import is centred on its "

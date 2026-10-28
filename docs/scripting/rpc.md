@@ -74,6 +74,11 @@ The tables are the registry: `describe`, the part gate, the batch rules and
 the "is this a known method" check all read them, so there is no second list
 to fall out of step. An unknown method has no flags, which is why a typo
 falls through to `unknown method` rather than being told to switch tabs.
+That refusal (`UnknownMethodError`, the same sentence a call, `describe
+{method}` and `help` give) names the close matches, and for a name that
+looks like an import (`import_stl`, `import_mesh`, `load_obj`) says which
+method reads which file: every 3D format is `import_step`'s, a DXF or SVG
+`import_sketch`'s ([interchange](../interchange/README.md#rpcs)).
 
 The rows are kept true by source-scanning gates: `rpc_params_gate` (params vs
 the keys the handler reads, both directions), `rpc_returns_gate` (the

@@ -3,12 +3,21 @@
 Getting geometry into and out of Loböle. Document storage and the
 project format are in [../versioning/README.md](../versioning/README.md).
 
+**One RPC imports every 3D format: `import_step`**, despite its name. It
+reads STEP, IGES, STL, OBJ and BREP into the active part (or a STEP or IGES
+as an assembly), the same as an `Import` feature through `add_feature`; an
+STL is [recognised](#recognising-a-faceted-mesh) into true planes,
+cylinders, cones and spheres unless `representation` is `facets`. A DXF or
+SVG goes into a sketch through `import_sketch`. An unknown method that looks
+like an import (`import_stl`, `import_mesh`) is refused naming both
+([RPCs](#rpcs)).
+
 | format | import | export |
 |---|---|---|
 | STEP (`.step`, `.stp`) | names, colours, product structure; a part or a whole assembly; stood up by its [header](#up-axis) | named, coloured products placed per occurrence, nested sub-assemblies, millimetres, `Loböle` as the originating system |
 | IGES (`.igs`, `.iges`) | as STEP, and trimmed surfaces [sewn into solids](#iges) | — |
 | BREP (`.brep`) | exact | exact; one shape (a part's bodies fused, or one body) |
-| STL (`.stl`) | sewn triangles: a solid when closed, a shell when open | binary, re-meshed at a chord tolerance; one shape |
+| STL (`.stl`) | [recognised](#recognising-a-faceted-mesh): its planes, cylinders, cones and spheres rebuilt as true faces; or, with `representation: facets`, sewn triangles (a solid when closed, a shell when open) | binary, re-meshed at a chord tolerance; one shape |
 | OBJ (`.obj`) | [each object a named, coloured body](#obj), sewn as an STL | visual meshes (below) |
 | glTF (`.glb`, `.gltf`), OBJ, PLY | — | visual meshes with PBR materials, part or assembly, instanced |
 | DXF | into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) | a sheet-metal flat pattern (see [../sheetmetal/README.md](../sheetmetal/README.md)) |
@@ -542,10 +551,13 @@ sampled, not read per tick: OpenCASCADE's transfer reports hundreds of
 thousands of times on a large file.
 
 **Over RPC**, `import_step {path, as_assembly?, keep_origin?, units?,
-up_axis?, turn_deg?, allow_large_mesh?}`: without `as_assembly` it adds an
-`Import` feature to the active part and returns `{bodies, regen, digest,
-up_axis, recentred_by?, warning?, mesh?}`, `mesh` being `{triangles,
-expected_s, limit}` for an STL or OBJ; with it, it returns
+up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?}` — the
+one importer for every 3D format, STL and OBJ included: without
+`as_assembly` it adds an `Import` feature to the active part and returns
+`{bodies, regen, digest, up_axis, recentred_by?, warning?, mesh?,
+recognition?}`, `mesh` being `{triangles, expected_s, limit}` for an STL or
+OBJ and `recognition` what an STL was [found to be](#the-imports-representation);
+with it, it returns
 `{assembly_index, occurrences, parts, ok, up_axis}` plus `failed` naming
 every part whose feature did not build. Every parameter is checked before
 anything is read: an unknown extension (a DXF or SVG is pointed at
@@ -661,7 +673,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 
 | RPC | module | does |
 |---|---|---|
-| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?}` | RemoteProject | STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; replies `up_axis`, and `mesh` for a mesh |
+| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?}` | RemoteProject | every 3D format, whatever the name says: STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; an STL recognised or kept as facets (`representation`); replies `up_axis`, `mesh` for a mesh and `recognition` for a recognised STL |
 | `import_sketch {path, sketch_id? \| plane?, units?, layers?, construction_layers?, keep_origin?}` | RemoteModeling | a DXF or SVG into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) |
 | `export_step {path, part?, body?}` | RemoteProject | structured STEP of a part or the assembly |
 | `export_stl {path, body?, stl_deflection_mm?}`, `export_brep {path, body?}` | RemoteProject | one shape of the active part |

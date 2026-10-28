@@ -505,7 +505,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "DIMENSION, HATCH, ...; an SVG's text, image and hidden elements) is "
      "left out and counted in `not_imported`. One undo step. `open_ends` "
      "(sketch UV, mm) are endpoints joining nothing: why an outline will "
-     "not extrude.",
+     "not extrude. A 3D file (STEP, IGES, STL, OBJ, BREP) is import_step's.",
      "path:string, sketch_id?:int>=0, plane?:any, units?:string, "
      "layers?:string[], construction_layers?:string[], keep_origin?:bool",
      remote::NeedsPart | remote::NotInBatch,

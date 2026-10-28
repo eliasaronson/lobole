@@ -210,6 +210,23 @@ def client_checks(port):
         raise AssertionError("help accepted an unknown method")
     except RuntimeError as e:
         expect("list_mates" in str(e), f"help names close matches: {e}")
+    # A CALL to an unknown method says what describe says: it used to be a
+    # bare "unknown method: add_mat". A name that asks for a format
+    # (import_stl, import_mesh) is pointed at the one importer, import_step,
+    # which edit distance alone cannot reach from import_mesh.
+    for typo, wanted in (("add_mat", "add_mate"),
+                         ("import_stl", "import_step"),
+                         ("import_mesh", "import_step"),
+                         ("load_obj", "import_step")):
+        try:
+            d.call(typo, path="/nonexistent.stl")
+            raise AssertionError(f"{typo} was accepted")
+        except RuntimeError as e:
+            expect(f"unknown method '{typo}'" in str(e) and wanted in str(e),
+                   f"calling {typo} names {wanted}: {e}")
+            if wanted == "import_step":
+                expect("STL" in str(e) and "import_sketch" in str(e),
+                       f"{typo} is told which method reads which file: {e}")
 
     app.new()
     p = app.part("sdk verbs")

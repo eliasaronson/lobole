@@ -638,6 +638,11 @@ The loop that works — follow it every time:
    Re-checking an unchanged design costs nothing (the evidence and the
    study results are reused by input hash).
 
+IMPORTING a file: rpc('import_step', {path}) is the importer for every 3D
+format, STL and OBJ meshes included, despite its name (an STL's planes,
+cylinders, cones and spheres come back as true faces unless representation
+is "facets"); a DXF or SVG goes into a sketch with rpc('import_sketch').
+
 "This", "here", "the selected": read get_state's `selection` (and
 `selection_items`) BEFORE acting — that is what the user means. When it is
 empty, say so and ask; never guess which face or feature was meant.
@@ -691,14 +696,18 @@ mcp = FastMCP(
     instructions="Tools for driving a running Loböle CAD instance. Read the "
     "modeling-workflow prompt before modeling. The listed tools are the "
     "conversational surface; EVERY other RPC (assemblies, drawings, studies, "
-    "configurations, sketch constraints, exports, raw GUI actions) is reached "
+    "configurations, sketch constraints, imports and exports, raw GUI "
+    "actions) is reached "
     "with rpc('method', {...}) and documented by help('method'). For building "
     "a part with loops or computed arguments, execute_script (a python "
     "snippet with the client pre-bound as `d`) beats a tool call per step. "
     "For many edits at once, rpc('batch', {'calls': [...]}) runs them as ONE "
     "transaction — one regeneration, one undo step, and a rollback if any "
     "call fails; {'$ref': n} inside a call's params is the n-th call's id, "
-    "so a sketch and the extrude that names it go in one batch.",
+    "so a sketch and the extrude that names it go in one batch. A file is "
+    "imported with rpc('import_step', {'path': ...}) whatever its 3D format "
+    "(STEP, IGES, STL, OBJ, BREP; an STL's holes and flats recognised as "
+    "true faces), and a DXF or SVG into a sketch with rpc('import_sketch').",
 )
 
 _client = None
@@ -1732,9 +1741,21 @@ _reference("export_bom", "Write the active assembly's bill of materials to a "
           "column after `part`).")
 
 
-_reference("import_step", "Import a STEP, IGES, STL, OBJ or BREP file's "
-          "bodies as an Import feature (any other extension is refused; a "
-          "DXF or SVG goes into a sketch with import_sketch). `units` is the "
+_reference("import_step", "The importer for EVERY 3D file, meshes "
+          "included, whatever its name says: a STEP, IGES, STL, OBJ or BREP "
+          "file's bodies as an Import feature (any other extension is "
+          "refused; a DXF or SVG goes into a sketch with import_sketch). "
+          "as_assembly=True makes a STEP or IGES parts + an assembly. "
+          "`representation` is what an STL becomes: \"recognize\" rebuilds "
+          "the planes, cylinders, cones and spheres its triangles were made "
+          "from as true faces (a hole has a diameter and an axis), "
+          "\"facets\" keeps a face per triangle; absent, the user's "
+          "mesh_representation preference. `min_sides` (with recognize; 5 "
+          "to 1024, default 12) is the fewest sides a ring of facets needs "
+          "to be round. The reply's `recognition` lists every cylinder, cone "
+          "and sphere found, the polygons left flat, and `fell_back` when "
+          "the rebuild failed a check and the mesh was kept as facets. "
+          "`units` is the "
           "length unit an STL/OBJ/BREP was drawn in (mm default, cm, m, in) "
           "— those formats carry none; a STEP or IGES declares its own and "
           "refuses it. keep_origin=True keeps the file's OWN coordinates: "
@@ -1748,7 +1769,8 @@ _reference("import_step", "Import a STEP, IGES, STL, OBJ or BREP file's "
           "it was expected to cost, and past `limit` the call is refused "
           "naming the time unless allow_large_mesh=True. The read runs as "
           "the `import` background job: cancel_background_job "
-          "{kind: \"import\"} stops it.")
+          "{kind: \"import\"} stops it. A recognised mesh sews nothing, "
+          "so it is not held to `limit`.")
 
 
 _reference("checkpoint_create", "Save the WHOLE project and name this state a "
@@ -2194,7 +2216,10 @@ _reference("ui_action", _UI_ACTION_DOC)
           "configurations, sketch constraints, patterns, checkpoints, "
           "exports and the GUI-driving actions are all reached this way: "
           "rpc('add_mate', {...}). Use describe() for the method list and "
-          "help('add_mate') for its arguments and gotchas. Prefer this over "
+          "help('add_mate') for its arguments and gotchas. Importing a "
+          "file: rpc('import_step', {path}) reads EVERY 3D format (STEP, "
+          "IGES, STL, OBJ, BREP), rpc('import_sketch', {path}) a DXF or SVG "
+          "into a sketch. Prefer this over "
           "guessing; a wrong method name returns the list of close matches.")
 def rpc(method: str, params: dict | None = None) -> dict:
     # Straight to the app: its row is the contract, its defaults the only
@@ -2299,6 +2324,11 @@ def help(method: str = "") -> dict:
     if not method:
         return {"methods": sorted(_REFERENCE),
                 "exposed_as_tools": sorted(_EXPOSED),
+                # By file, since the method names do not say it: the one
+                # importer for every 3D format is called import_step.
+                "importing": {
+                    "STEP, IGES, STL, OBJ, BREP": "import_step",
+                    "DXF, SVG (into a sketch)": "import_sketch"},
                 "hint": "help('add_mate') for one; describe() for the "
                         "app's own authoritative type tables."}
     if method in _EXPOSED and method not in _REFERENCE:
