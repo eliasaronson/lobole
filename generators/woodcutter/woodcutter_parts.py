@@ -418,17 +418,19 @@ def build_handle_pin(b, s):
     frames(b, s, ["handle"])
 
 
-def cam_spec(s, which, base, frame_id, segments=None):
+def cam_spec(s, which, base, frame_id, segments=None, material=None):
     """The CamProfile feature: the cam cut from its motion, for a rounded
     knife of the rod's radius sliding radially, turned ccw about +X (the
-    way the crank turns it)."""
+    way the crank turns it). `material`: modify_feature replaces the whole
+    spec, so a cam modified without it loses the material it was given."""
     if segments is None:
         if which == "axe":
             _, segs = S.axe_segments()
         else:
             segs = S.bird_segments()
         segments = S.with_rise(segs, s[f"h_{which}"])
-    return {"type": "CamProfile", "name": f"{which} cam",
+    extra = {} if material is None else {"material": material}
+    return {**extra, "type": "CamProfile", "name": f"{which} cam",
             "frame": frame_id, "base_radius_mm": base,
             "width_mm": s["cam_w"], "turn": "ccw", "body": "new",
             "segments": segments,

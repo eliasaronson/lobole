@@ -727,7 +727,7 @@ def control_short_dwell(d, s, cams, rel, chop, req_id, o):
     d.call("set_active_part", part="axe cam")
     rise_to, segs = S.axe_segments(S.SHORT_DWELL_DEG)
     spec = P.cam_spec(s, "axe", s["axe_base"], cams["axe"]["frame"],
-                      S.with_rise(segs, s["h_axe"]))
+                      S.with_rise(segs, s["h_axe"]), cams["axe"]["material"])
     check(d.call("modify_feature", feature_id=cams["axe"]["id"],
                  feature=spec), "short dwell")
     d.call("set_active_part", part=ASM)
@@ -743,7 +743,8 @@ def control_short_dwell(d, s, cams, rel, chop, req_id, o):
     if drop["lands"] or drop["drop_rpm"] >= SPEED or req["state"] != "fail":
         fail(f"the short dwell passes: {out}")
     # Back to the design, and the chop study back over its drop.
-    spec = P.cam_spec(s, "axe", s["axe_base"], cams["axe"]["frame"])
+    spec = P.cam_spec(s, "axe", s["axe_base"], cams["axe"]["frame"],
+                      material=cams["axe"]["material"])
     d.call("set_active_part", part="axe cam")
     check(d.call("modify_feature", feature_id=cams["axe"]["id"],
                  feature=spec), "axe cam restored")
@@ -763,7 +764,8 @@ def control_small_base(d, s, cams, rel, turn, req_id):
     if base >= s["bird_base"]:
         fail("the bird's base is the hub's floor: no smaller base to try")
     d.call("set_active_part", part="bird cam")
-    spec = P.cam_spec(s, "bird", base, cams["bird"]["frame"])
+    spec = P.cam_spec(s, "bird", base, cams["bird"]["frame"],
+                      material=cams["bird"]["material"])
     r = check(d.call("modify_feature", feature_id=cams["bird"]["id"],
                      feature=spec), "small base")
     d.call("set_active_part", part=ASM)
@@ -778,7 +780,8 @@ def control_small_base(d, s, cams, rel, turn, req_id):
     d.call("set_active_part", part="bird cam")
     check(d.call("modify_feature", feature_id=cams["bird"]["id"],
                  feature=P.cam_spec(s, "bird", s["bird_base"],
-                                    cams["bird"]["frame"])),
+                                    cams["bird"]["frame"],
+                                    material=cams["bird"]["material"])),
           "bird cam restored")
     d.call("set_active_part", part=ASM)
     return out
@@ -949,7 +952,8 @@ def main():
                                  s[f"{k}_base"])
             frame = next(f["id"] for f in d.call("get_state")["features"]
                          if f.get("name") == f"cam {k}")
-            cams[k] = {"id": r["id"], "frame": frame, "report": r["report"]}
+            cams[k] = {"id": r["id"], "frame": frame, "report": r["report"],
+                       "material": mat}
         else:
             build_part(d, name, proc, mat, fn, s, *a)
     for k in ("axe", "bird"):
