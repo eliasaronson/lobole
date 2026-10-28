@@ -90,7 +90,7 @@ struct FemResults {
   // the whole of what it carries, so a support that holds a face along its
   // length (a pin over a band, a clamp) shows the moment it takes, which a
   // lever rule over its middle does not. `hasMoment` false on a result
-  // saved before vNEXT.
+  // saved before v202.
   struct SupportReaction {
     uint64_t support = 0; // the load id
     LoadType type = LoadType::Fixed;

@@ -295,7 +295,7 @@ TEST_CASE("A study result of each kind reopens current, its part hashing as "
     CHECK(b.density == a.density);
     CHECK(b.results.displacement == a.results.displacement);
     CHECK(b.results.vonMises == a.results.vonMises);
-    // What each support carried, its moment with it (vNEXT).
+    // What each support carried, its moment with it (v202).
     REQUIRE(b.results.reactions.size() == a.results.reactions.size());
     for (size_t k = 0; k < a.results.reactions.size(); ++k) {
       CHECK(b.results.reactions[k].forceN == a.results.reactions[k].forceN);

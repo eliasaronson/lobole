@@ -328,6 +328,7 @@ here; the golden corpus and git history cover them.
 | 199 | A requirement's measure kind `follower` {`document` (an assembly), `relation` (a contact relation), `study` (a motion study), `quantity`: `liftoff_rpm`\|`drop_rpm`\|`pressure_angle_deg`\|`deviation_mm`\|`deviation_deg`\|`gap_mm`\|`gap_deg`, `speed_rpm`?, `max_pressure_angle_deg`?}: one number of `check_followers` over the study's run ([follower](../requirements/README.md#follower)). An unknown `quantity` is refused on load; a build that does not know the kind refuses the file. Golden `v199-follower-requirement` |
 | 200 | An `Import` of an STL takes `representation` (`facets` \| `recognize`; absent = `facets`, how every older mesh import was read) and, with `recognize`, `min_sides` (5..1024; absent = 12). Unknown values are refused. Golden `v200-import-representation` |
 | 201 | A mate connector's `face`, `snap_edge` and `snap_edge2` carry a `fingerprint` (`element`, `shape`, `area_mm2` or `length_mm`, `centroid_mm`) when they name an imported file's own element; one that disagrees with the element it sits beside is refused. A connector from an older file takes none. Golden `assembly/v201-mate-import-print` |
+| 202 | A static result's `reactions` carry `moment_n_mm` [x, y, z]: each support's moment about the frame's origin (the part's; world on an assembly study), N·mm. A pin over a band of its face takes moment along it, which its force alone does not show ([pin supports](../simulation/README.md#pin-supports)). A result saved before reads without it, and `study_results` then leaves it out. Golden `v202-pin-reaction-moment` (a shaft on two pins with an overhung load; results are not in the single-file corpus, so their round trip is `tests/test_study_inputs.cpp`'s) |
 
 ## Pending changes
 
@@ -337,7 +338,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A static result's `reactions` carry `moment_n_mm` [x, y, z]: each support's moment about the frame's origin (the part's; world on an assembly study), N·mm. A pin over a band of its face takes moment along it, which its force alone does not show ([pin supports](../simulation/README.md#pin-supports)). A result saved before reads without it, and `study_results` then leaves it out. Golden `vNEXT-pin-reaction-moment` (a shaft on two pins with an overhung load; results are not in the single-file corpus, so their round trip is `tests/test_study_inputs.cpp`'s) |
 
 ## Paths in a project
 

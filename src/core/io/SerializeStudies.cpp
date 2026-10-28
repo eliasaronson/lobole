@@ -677,7 +677,7 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
       json rj = {{"support", sr.support},
                  {"type", fem::LoadTypeToString(sr.type)},
                  {"force_n", Vec3ToJson(sr.forceN)}};
-      if (sr.hasMoment) // vNEXT
+      if (sr.hasMoment) // v202
         rj["moment_n_mm"] = Vec3ToJson(sr.momentNmm);
       if (sr.type == fem::LoadType::Pin) {
         rj["contact_area_mm2"] = sr.contactAreaMm2;
@@ -744,7 +744,7 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
     sr.support = rj.at("support").get<uint64_t>();
     sr.type = supportType(rj.at("type"));
     sr.forceN = Vec3FromJson(rj.at("force_n"));
-    if (rj.contains("moment_n_mm")) { // vNEXT
+    if (rj.contains("moment_n_mm")) { // v202
       sr.momentNmm = Vec3FromJson(rj.at("moment_n_mm"));
       sr.hasMoment = true;
     }
