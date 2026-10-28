@@ -143,6 +143,12 @@ if [ "$pick_only" = 1 ]; then
   exit 0
 fi
 
+# A branch that adds a submodule (deps/manifold) leaves main's checkout of it
+# empty, and cmake fails regenerating build.ninja.
+git -C "$root" submodule status | awk '/^-/ { print $2 }' | while read -r sub; do
+  echo "merge-branch: checking out the new submodule $sub"
+  git -C "$root" submodule update --init -- "$sub"
+done
 "$root/tools/build.sh"
 # The suite's whole output, a failing test's own included, is kept: the
 # summary below is all that is printed, and a failure that passes on the
