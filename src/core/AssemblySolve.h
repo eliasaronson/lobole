@@ -108,7 +108,7 @@ struct SolveReport {
 // stops being the face the screw sits in). A split (`.i`), or two faces
 // claiming the name, still fails: there is no one face to sit on.
 //
-// An imported file's own face or snap edge carrying a print (vNEXT2,
+// An imported file's own face or snap edge carrying a print (v201,
 // ConnectorAnchor::facePrint,
 // docs/assemblies/README.md#a-mate-on-an-imported-face) is checked: the
 // element under the name must be the one printed. One the file renumbered is

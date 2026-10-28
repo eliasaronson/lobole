@@ -875,7 +875,7 @@ public:
   bool hasColor = false;
   glm::vec3 color{0.0f};
 
-  // What a mesh (STL; vNEXT, `representation`) becomes: its triangles sewn
+  // What a mesh (STL; v200, `representation`) becomes: its triangles sewn
   // as facets, or the planes, cylinders, cones and spheres they were
   // tessellated from, rebuilt
   // (docs/interchange/README.md#recognising-a-faceted-mesh). A document that

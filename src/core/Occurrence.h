@@ -192,7 +192,7 @@ struct ConnectorAnchor {
   uint64_t frameId = 0;
 
   // What `face`, `snapEdge` and `snapEdge2` were when picked, when each is
-  // an imported file's own element (vNEXT2;
+  // an imported file's own element (v201;
   // docs/assemblies/README.md#a-mate-on-an-imported-face). An import names
   // its faces by their place in the file, so a changed file -- or a mesh
   // recognised rather than faceted -- renumbers them, and a mate resolved by

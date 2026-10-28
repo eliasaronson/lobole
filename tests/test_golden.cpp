@@ -1298,7 +1298,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             expect.at("import_up_axis").get<std::string>());
     CHECK(imp->turnDeg == expect.value("import_turn_deg", 0.0));
   }
-  // vNEXT: what an imported mesh becomes. An Import saved before it reads as
+  // v200: what an imported mesh becomes. An Import saved before it reads as
   // facets (golden v103), which is how its faces were named; lost on a
   // round trip, a recognised part would reload as thousands of triangles
   // and every reference to its faces would land on another.

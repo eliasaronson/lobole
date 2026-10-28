@@ -292,7 +292,7 @@ whichever face held the number.
 projection of an imported element carries
 ([sketching](../sketching/README.md#projecting-an-imported-part)): its kind,
 area or length, and centroid (`ConnectorAnchor::facePrint`, `snapPrint`,
-`snap2Print`; vNEXT2, `fingerprint` beside the element in the file).
+`snap2Print`; v201, `fingerprint` beside the element in the file).
 - **Taken.** A connector made now (`add_mate`, the Mate tool, a re-pick)
   takes the prints of the imported elements it names at its first solve
   (`TakePrints`). A face that is not an imported file's own (a feature made

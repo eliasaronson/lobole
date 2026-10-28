@@ -326,6 +326,8 @@ here; the golden corpus and git history cover them.
 | 197 | A relation kind `contact`: mate b's DOF stands where the follower first touches the cam, solved from the two bodies' shapes; it carries `toward` (positive\|negative, required), and `cam`, `follower` (occurrence ids) and `cam_body`, `follower_body` (feature ids) when named. Nothing derived from the geometry is written; the table is rebuilt on the first solve. An older build refuses the unknown kind ([contact](../assemblies/relations.md#contact)). Golden `assembly/v197-contact-follower` |
 | 198 | A feature type `CamProfile` {face \| frame, base_radius_mm?, width_mm? (+_expr each), lift? \| segments? [{to_deg, rise_mm \| rise_deg, law}], follower? {kind, motion, radius_mm, offset_mm? \| pivot_mm + arm_mm}, turn?, body?}: a disc cam cut from a follower motion; and a cam relation's `profile` {part, feature}, read in place of `lift`. An older build refuses the unknown type and key ([cam profiles](../modeling/cam-profiles.md)). Golden `v198-cam-profile` |
 | 199 | A requirement's measure kind `follower` {`document` (an assembly), `relation` (a contact relation), `study` (a motion study), `quantity`: `liftoff_rpm`\|`drop_rpm`\|`pressure_angle_deg`\|`deviation_mm`\|`deviation_deg`\|`gap_mm`\|`gap_deg`, `speed_rpm`?, `max_pressure_angle_deg`?}: one number of `check_followers` over the study's run ([follower](../requirements/README.md#follower)). An unknown `quantity` is refused on load; a build that does not know the kind refuses the file. Golden `v199-follower-requirement` |
+| 200 | An `Import` of an STL takes `representation` (`facets` \| `recognize`; absent = `facets`, how every older mesh import was read) and, with `recognize`, `min_sides` (5..1024; absent = 12). Unknown values are refused. Golden `v200-import-representation` |
+| 201 | A mate connector's `face`, `snap_edge` and `snap_edge2` carry a `fingerprint` (`element`, `shape`, `area_mm2` or `length_mm`, `centroid_mm`) when they name an imported file's own element; one that disagrees with the element it sits beside is refused. A connector from an older file takes none. Golden `assembly/v201-mate-import-print` |
 
 ## Pending changes
 
@@ -335,8 +337,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | An `Import` of an STL takes `representation` (`facets` \| `recognize`; absent = `facets`, how every older mesh import was read) and, with `recognize`, `min_sides` (5..1024; absent = 12). Unknown values are refused. Golden `vNEXT-import-representation` |
-| vNEXT2 | A mate connector's `face`, `snap_edge` and `snap_edge2` carry a `fingerprint` (`element`, `shape`, `area_mm2` or `length_mm`, `centroid_mm`) when they name an imported file's own element; one that disagrees with the element it sits beside is refused. A connector from an older file takes none. Golden `assembly/vNEXT2-mate-import-print` |
 
 ## Paths in a project
 

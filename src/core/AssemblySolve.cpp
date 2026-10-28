@@ -456,7 +456,7 @@ std::string LoopHint(const LoopDiagnosis& d, const AssemblyDocument& asmDoc) {
 using topo::Descent;
 using topo::DescentOf;
 
-// ---- prints of imported elements (vNEXT2) ---------------------------------
+// ---- prints of imported elements (v201) ---------------------------------
 //
 // A print is an OCC surface or curve analysis, and a drag solves many times
 // a second: both what an element under a name is now, and where a print
@@ -783,7 +783,7 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
     }
 
     // An imported face is the one picked, or followed to where the file
-    // moved it (vNEXT2).
+    // moved it (v201).
     const Body* on = &body;
     int faceAt = *faceIdx;
     if (std::string why;
@@ -1952,7 +1952,7 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
         ConnectorLocalFrame(mate.b, asmDoc, partById, &whyB, asmById, false,
                             mate.b.anchor.takePrints ? &printsB : nullptr);
     // A connector made now takes the prints of the imported elements it
-    // names, as they are when it is first solved (vNEXT2).
+    // names, as they are when it is first solved (v201).
     if (fa)
       TakePrints(mate.a, printsA);
     if (fb)

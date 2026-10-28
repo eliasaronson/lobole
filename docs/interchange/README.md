@@ -455,7 +455,7 @@ An Import of an STL takes `representation`, which is `recognize` or
   `mesh_representation` preference (Preferences › Import; default
   `recognize`, [settings](../ui/settings.md)). That covers `add_feature`,
   `import_step`, File › Import, `--file` and the in-app browser. A saved
-  Import that names none is `facets`, how every mesh import before vNEXT was
+  Import that names none is `facets`, how every mesh import before v200 was
   read and its faces named.
 - **`topo_to_body` is always `facets`.** A topology result is a smoothed
   density surface, with nothing in it to recognise.

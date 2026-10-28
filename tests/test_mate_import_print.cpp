@@ -290,7 +290,7 @@ TEST_CASE("A mate's prints are saved, and an older file's connectors take "
           "[assembly][serialization]") {
   const auto root = std::filesystem::path(TestSourceDir()) / "tests/golden";
   auto loaded = DocumentIO::LoadAssembly(
-      (root / "assembly/vNEXT2-mate-import-print.json").string());
+      (root / "assembly/v201-mate-import-print.json").string());
   REQUIRE(loaded.has_value());
   const Mate& m = (*loaded)->GetMates().at(0);
   REQUIRE(m.a.anchor.facePrint.has_value());

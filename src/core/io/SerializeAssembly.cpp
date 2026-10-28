@@ -290,7 +290,7 @@ MateType MateTypeFromString(const std::string& s) {
                            "add is a RELATION, not a mate: see add_relation");
 }
 
-// An imported element's print (vNEXT2), in the shape a sketch's projection
+// An imported element's print (v201), in the shape a sketch's projection
 // writes it (v195): written only while it is the print of the element named
 // beside it -- one taken for another name is stale, and the reader refuses
 // one that disagrees.
@@ -356,7 +356,7 @@ json ConnectorToJson(const Connector& c) {
     if (c.anchor.snapEdge2.IsSet())
       anchor["snap_edge2"] = {{"feature_id", c.anchor.snapEdge2.featureId},
                               {"element", c.anchor.snapEdge2.name}};
-    PutPrint(anchor["face"], c.anchor.facePrint, true); // vNEXT2
+    PutPrint(anchor["face"], c.anchor.facePrint, true); // v201
     if (anchor.contains("snap_edge"))
       PutPrint(anchor["snap_edge"], c.anchor.snapPrint, false);
     if (anchor.contains("snap_edge2"))

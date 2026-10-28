@@ -1320,10 +1320,10 @@ json FeatureToJson(const Feature& feature) {
       j["up_axis"] = interchange::ToString(import->upAxis);
     if (import->turnDeg != 0.0) // v190; absent = no turn
       j["turn_deg"] = import->turnDeg;
-    // vNEXT; absent = facets, how every older mesh import was read
+    // v200; absent = facets, how every older mesh import was read
     if (import->representation != mesh::Representation::Facets)
       j["representation"] = mesh::ToString(import->representation);
-    if (import->minSides != mesh::kDefaultMinSides) // vNEXT; absent = 12
+    if (import->minSides != mesh::kDefaultMinSides) // v200; absent = 12
       j["min_sides"] = import->minSides;
   } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
     // v161 (docs/modeling/templates.md). The definition rides in full, so
@@ -3188,7 +3188,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         throw std::runtime_error("Import: turn_deg is a number of degrees");
       imp->turnDeg = j.at("turn_deg").get<double>();
     }
-    if (j.contains("representation")) { // vNEXT; refused, never read as facets
+    if (j.contains("representation")) { // v200; refused, never read as facets
       const json& r = j.at("representation");
       const auto rep =
           r.is_string() ? mesh::RepresentationFromString(r.get<std::string>())
@@ -3199,7 +3199,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             ". Accepted: " + mesh::AcceptedRepresentations());
       imp->representation = *rep;
     }
-    if (j.contains("min_sides")) { // vNEXT
+    if (j.contains("min_sides")) { // v200
       const json& m = j.at("min_sides");
       if (!m.is_number_integer() || m.get<int64_t>() < mesh::kMinSidesLowest ||
           m.get<int64_t>() > mesh::kMinSidesHighest)
