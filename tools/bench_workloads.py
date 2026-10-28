@@ -731,7 +731,9 @@ def _mesh_rows():
             mesh = r.get("mesh") or {}
             ctx.note("triangles", mesh.get("triangles"))
             ctx.note("expected_s", mesh.get("expected_s"))
-            ctx.note("representation", r.get("representation"))
+            # Recognised (the default preference) or sewn as facets, and why.
+            ctx.note("fell_back", (r.get("recognition") or {}).get(
+                "fell_back"))
             ctx.expect(_bodies(ctx) == 1,
                        f"the import made {_bodies(ctx)} bodies, not 1")
 

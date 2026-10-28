@@ -11,8 +11,10 @@
 //   ./tests/designer_tests "[mesh-cost-render]"
 //
 // LOBOLE_MESH_COST_SIZES (comma-separated triangle counts) narrows the
-// sizes. Every measurement runs in a forked child under a CPU cap, so one
-// that runs away is reported as such, and its peak memory is its own.
+// sizes, LOBOLE_MESH_COST_FIXTURES the recognition's fixtures, and
+// LOBOLE_MESH_COST_CAP_S sets the CPU cap (300 s). Every measurement runs in a
+// forked child under a CPU cap, so one that runs away is reported as such, and
+// its peak memory is its own.
 //
 // The cradle's distance field needs a closest-point query and a winding
 // number, which src/core/mesh/ does not have yet (MeshBvh is stage 1). The
@@ -110,6 +112,10 @@ void InChild(const std::string& label, int cpuCapS,
     close(fd[0]);
     rlimit cap{rlim_t(cpuCapS), rlim_t(cpuCapS) + 5};
     setrlimit(RLIMIT_CPU, &cap);
+    // And 6 GB of address space: a runaway allocation fails in the child
+    // (std::bad_alloc, reported) instead of pressing on the machine.
+    rlimit memory{rlim_t(6) << 30, rlim_t(6) << 30};
+    setrlimit(RLIMIT_AS, &memory);
     std::string line;
     try {
       line = body();
@@ -142,7 +148,7 @@ void InChild(const std::string& label, int cpuCapS,
 // The plate tessellated to about `triangles`: its holes take nearly all of
 // them, as many sides as the count needs (its own angular deflection).
 std::filesystem::path PlateStl(size_t triangles) {
-  static const fixtures::Part plate = fixtures::Plate();
+  const fixtures::Part plate = fixtures::Plate();
   // Each of the 24 holes' walls is two triangles a side, and its two rims
   // fan into the plate's faces about as many again: ~4 triangles a side.
   double sides = std::max(8.0, double(triangles) / 96.0);
@@ -160,6 +166,41 @@ std::filesystem::path PlateStl(size_t triangles) {
     sides *= double(triangles) / n;
   }
   return path;
+}
+
+// A bored cylinder (outer radius 20, bore 8, 30 tall) of `triangles`,
+// built straight as triangles: four rings of s vertices, 8 s triangles. A
+// mechanical part at any size without BRepMesh, whose cost at a fine
+// deflection is its own (the plate past 100k ran out of 6 GB in it).
+mesh::TriMesh Tube(size_t triangles) {
+  const int sides = std::max(8, int(triangles / 8));
+  mesh::TriMesh m;
+  const double radii[2] = {20.0, 8.0}, heights[2] = {0.0, 30.0};
+  for (double r : radii)
+    for (double z : heights)
+      for (int k = 0; k < sides; k++) {
+        const double a = 2.0 * kPi * k / sides;
+        m.positions.emplace_back(r * std::cos(a), r * std::sin(a), z);
+      }
+  // ring index: (radius 0 outer / 1 inner) * 2 + (height 0 bottom / 1 top)
+  const auto v = [&](int ring, int k) {
+    return uint32_t(ring * sides + (k % sides));
+  };
+  const auto quad = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+    m.triangles.push_back({a, b, c});
+    m.triangles.push_back({a, c, d});
+  };
+  for (int k = 0; k < sides; k++) {
+    quad(v(0, k), v(0, k + 1), v(1, k + 1), v(1, k)); // outer wall, out
+    quad(v(2, k), v(3, k), v(3, k + 1), v(2, k + 1)); // bore, facing in
+    quad(v(1, k), v(1, k + 1), v(3, k + 1), v(3, k)); // top annulus, up
+    quad(v(0, k), v(2, k), v(2, k + 1), v(0, k + 1)); // bottom, down
+  }
+  m.quantum = mesh::Float32Quantum(m.positions);
+  mesh::BuildAdjacency(m);
+  REQUIRE(m.Closed());
+  REQUIRE(m.Volume() > 0);
+  return m;
 }
 
 // Area of the planes that are facets of something unrecognised (a plane
@@ -404,12 +445,39 @@ struct Bvh {
 
 TEST_CASE("Mesh costs: recognition on the fixtures, by size",
           "[.][mesh-cost-recognition]") {
+  // LOBOLE_MESH_COST_FIXTURES narrows the fixtures (comma-separated: plate,
+  // tube, sphere, torus, figurine).
+  const char* only = std::getenv("LOBOLE_MESH_COST_FIXTURES");
+  const auto wanted = [&](const std::string& name) {
+    return only == nullptr ||
+           ("," + std::string(only) + ",").find("," + name + ",") !=
+               std::string::npos;
+  };
   for (size_t n : Sizes()) {
-    const auto plate = PlateStl(n);
-    InChild("recognize plate " + std::to_string(n), CapS(),
-            [&] { return Recognise(plate); });
-    std::filesystem::remove(plate);
+    if (wanted("plate")) {
+      // Tessellated in the child too: at a fine enough deflection BRepMesh
+      // is itself the cost, and its memory is the child's.
+      InChild("recognize plate " + std::to_string(n), CapS(), [&] {
+        const double w = Wall();
+        const auto plate = PlateStl(n);
+        const double meshS = Wall() - w;
+        const std::string line = Recognise(plate);
+        std::filesystem::remove(plate);
+        char tail[96];
+        std::snprintf(tail, sizeof tail, " | (BRepMesh and STL write %.1f s)",
+                      meshS);
+        return line + tail;
+      });
+    }
+    if (wanted("tube")) {
+      const auto path = fixtures::WriteStl(Tube(n), "costtube");
+      InChild("recognize tube " + std::to_string(n), CapS(),
+              [&] { return Recognise(path); });
+      std::filesystem::remove(path);
+    }
     for (const char* name : {"sphere", "torus", "figurine"}) {
+      if (!wanted(name))
+        continue;
       fixtures::Organic o;
       REQUIRE(fixtures::OrganicByName(name, n, o));
       const auto path = fixtures::WriteStl(o.mesh, std::string("cost") + name);

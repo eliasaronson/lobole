@@ -93,61 +93,191 @@ docs/interchange/README.md#recognising-a-faceted-mesh)
 Each stage ships on its own and is useful without the next. They are in
 order of value.
 
-### Stage 0 — measure, fixtures, and the dependency in all three builds (S)
+### Stage 0 — measured: fixtures, the dependency, and what things cost
 
-This stage settles what the later stages must not guess. It starts after the
-mechanical round has landed, so recognition exists to be measured.
+Built. What it settled, so the later stages do not guess.
 
-1. **Fixtures with known answers, generated in-test.** Stanford's models are
-   research-only, so none of the probe's files are committed. The fixtures
-   are built by `tests/mesh_fixtures.{h,cpp}`:
-   - a noisy sphere, a torus and a metaball "figurine" at 10k, 300k and 2M
-     triangles;
-   - the same blob with its bottom cut away, as a phone scan of an object on
-     a table arrives;
-   - a dirty one with duplicate vertices, flipped triangles, slivers and a
-     second component.
+**The fixtures** are `tests/mesh_organic.{h,cpp}` (pure data, no
+OpenCASCADE or Catch2; `mesh_fixtures.h` includes it), checked by
+`tests/test_mesh_organic.cpp`, the 2M sizes `[slow]`:
+- `NoisySphere` (radius 40, each vertex moved radially by at most 0.05 mm,
+  a cube-sphere of 12 n² triangles), `Torus` (30 / 10, clean) and
+  `Figurine` (eight metaball blobs, about 95 mm tall, contoured by marching
+  tetrahedra), at any count to within 6%.
+- `CutFigurine`: every triangle reaching below 3 mm cut away; open, one
+  loop.
+- `Dirty()`: a soup with near-duplicate points, 7 flipped triangles, 10
+  needles from edge splits and a second component, with each count.
+- Volume, area and radius are analytic (sphere, torus); the figure's volume
+  is integrated from its field column by column, apart from its triangles.
+  Each carries the bound its tessellation and noise allow.
+- `build/mesh_fixture_writer NAME N OUT.stl` writes one with its answers as
+  JSON, for the bench.
 
-   The volume, area and radius of each are known analytically or by
-   construction.
-2. **Bench workloads** in `tools/bench.py` (docs/performance/README.md):
-   import, render sync, a hover pick, mass properties and a section on each
-   size. These are the budgets the later cost checks are set from, against
-   the slowest core (docs/ui/testing.md#tests-that-time-things).
-3. **manifold, vendored.** manifold is Apache-2.0. nixpkgs has 3.5.4 and the
-   mingw derivation evaluates, but no Ubuntu release packages it (neither
-   noble nor resolute). It goes in as a submodule under `deps/manifold`:
-   - built static with `MANIFOLD_PAR=OFF`, against the Clipper2 that is
-     already vendored;
-   - pinned in `.gitmodules` and as a flake input
-     (`tests/flake_submodules_gate.py`), with a `THIRD_PARTY.md` entry and its
-     licence under `LICENSES/`.
+**manifold** 3.5.4 is the submodule `deps/manifold`, built from its sources
+as a static library in `CMakeLists.txt` (not through its own CMake, which
+fetches and installs), `MANIFOLD_PAR` off, its CrossSection on the vendored
+Clipper2 with that target's `USINGZ`. Pinned in `.gitmodules` and
+`flake.nix`, in `THIRD_PARTY.md` and `LICENSES/`. `mesh::Boolean`
+(`src/core/mesh/MeshBoolean.{h,cpp}`) is its one caller and refuses an open
+or non-manifold operand naming why. The proof, one sphere-minus-torus
+boolean whose volumes must add up to 1e-9 and whose results must be closed:
+- nix: `test_mesh_organic.cpp`;
+- Ubuntu 24.04 and 26.04 containers (`tools/ci-local.sh --containers`):
+  the same test, passing in both;
+- mingw: `packaging/windows/manifold-probe.nix` builds
+  `mesh_boolean_probe.exe` (static) from `cross-app.nix`, and under Wine it
+  prints the same volumes as Linux, to the last digit printed.
 
-   This is proven by building and linking it in the nix build, the stock
-   Ubuntu containers (`tools/ci-local.sh`) and the mingw cross build
-   (`packaging/windows/cross-app.nix`). The test is one boolean of two
-   fixture meshes, run on each.
-4. **Questions answered in this stage**, each written into this plan before
-   stage 1 starts:
-   - **Rendering a 2M-triangle mesh.** What do the outline adjacency
-     (`render/OutlineEdges.cpp`), the settled silhouettes and the part
-     render cache's 256 MB budget cost? Do mesh bodies draw feature edges at
-     all, or only silhouettes?
-   - **The OCC writers.** Do the glTF, OBJ and PLY writers (and STEP's
-     tessellated mode, `write.step.tessellated`) accept a face carrying only
-     a `Poly_Triangulation`? If they do, `MeshExport` takes mesh bodies
-     unchanged. If not, a mesh body gets its own writer path.
-   - **`check_print`.** Which of its nine items read the B-Rep in a way that
-     needs a per-triangle version (`src/core/PrintCheck.cpp`)?
-   - **What recognition costs.** The mechanical round's recognised import
-     (`surfaces: recognize`) is timed on the fixture meshes, 10k to 2M
-     triangles: wall time and memory of the segmentation and rebuild, and the
-     share of the area it fits, for the mechanical fixtures and for the
-     organic ones. The answer is a cost law in triangles, like
-     `MeshImportCost`'s, and it sets the limit that stage 1's `auto` uses.
-   - **The cost budget of a heavy feature job.** What a Cradle costs per
-     cell and per triangle on the fixtures, so the budget past which the job
-     refuses is derived from it (stage 2).
+**The bench** has `--set mesh` (docs/performance/README.md#mesh-workloads):
+import, render sync, mass properties and a section at 10k, 300k and 2M.
+Today, at 10k (the figure; the sphere for mass): import 3.25 s (recognised,
+the default; the facet law says 0.38 s), the first capture 0.42 s (356 ms
+of sync, 346 of it tessellation), `mass_properties` 0.93 s, a section
+0.60 s (0.54 s of it the `section` RPC). The 300k and 2M rows are for stage
+1: on today's code they run for hours (below). A hover pick has no RPC; it
+is measured in-process.
+
+How everything below was read: `tests/test_mesh_costs.cpp`, hidden cases
+`[mesh-cost-recognition]`, `[mesh-cost-render]` and `[mesh-cost-cradle]`,
+each measurement in a forked child capped at 300 s of CPU and 6 GB, on this
+machine (Core Ultra 9 185H, one thread unless said). The load moved under
+other work; the numbers quoted are the quietest run of each.
+
+#### Rendering a 2M-triangle mesh
+
+The figure at 2M triangles, as a mesh body would hand it over (shared
+vertices, 1.0M of them) and as a faceted import does today (every face its
+own vertices: 6.0M):
+
+| | mesh body | faceted today |
+|---|---|---|
+| vertex + index buffers (24 B a vertex, 4 an index) | 46 MB, counted twice against the 256 MB tessellation budget (the outline asset uploads them again): 92 MB | 160 MB, 320 MB counted: past the budget, kept because it is on screen |
+| `outline::BuildEdgeAdjacency` (once per asset, main thread) | 0.77 s, 270 MB peak | 0.46 s, 247 MB |
+| static lines (boundary + feature edges past 60°) | 21,004 indices | 12.0M indices: every triangle edge, twice, every frame |
+| smooth edges (silhouette candidates) | 3.0M | none |
+| a settled silhouette pass (render thread, once per camera settle) | 13.9 ms (most of a 60 Hz frame), 52k indices | 6.5 ms, nothing found |
+| `FaceSelector::AddMesh` / `PickFace` (brute force) | 0.20 s / 31 ms | 0.27 s / 27 ms |
+
+At 300k a mesh body is 7 MB, 0.07 s of adjacency, a 1.4 ms silhouette pass
+and a 3.8 ms pick. So a mesh body draws silhouettes and the few creases past
+60° (on the figure, marching tetrahedra's folds), not a wireframe, and fits
+the budget; what does not scale is picking: brute force costs 15.7 ns a
+triangle, a quarter of a 60 Hz frame (4.2 ms) at about 265,000 triangles,
+and the hover pick runs every frame. That size, derived from the measured
+rate and the frame, is where `FaceSelector` switches to `MeshBvh`. A plain
+median-split tree over the 2M figure builds in 1.8 s on one thread.
+
+#### The OCC writers
+
+`tests/test_mesh_writers.cpp` hands each writer a face carrying only a
+`Poly_Triangulation` (no surface, no edges) of the 10k figure and reads the
+file back:
+- `BRepMesh_IncrementalMesh` at 1, 0.1 and 0.001 mm leaves it untouched, so
+  `MeshExport::SaveVisual`'s in-place mesh call is harmless.
+- glTF, OBJ and PLY (through `MeshExport::SaveVisual`), STL
+  (`StlAPI_Writer`) and BREP (`BRepTools::Write`, read back) write every
+  triangle. `MeshExport` takes mesh bodies unchanged.
+- STEP: in the AP214 the app writes (no schema set) the face is dropped
+  silently. With `write.step.schema` AP242DIS and `write.step.tessellated`
+  On, it is written as a `TRIANGULATED_FACE` and reads back whole -- in a
+  shell; a lone face is dropped even then. On OpenCASCADE 7.6.3 (Ubuntu
+  24.04) the STEP writer CRASHED on it, and 7.6 has no PLY writer: there a
+  mesh body's `export_step` must refuse by name, and the test runs these
+  two only from 7.7.
+
+#### `check_print`
+
+Every item but one reads the B-Rep, and the whole check first meshes a copy
+(`BRepMesh_IncrementalMesh`, `PrintCheck.cpp` around line 259):
+- **needs a per-triangle version**: overhang (exact surface normals at UV
+  nodes, `FaceArea`, a UV hill climb), bridges (edge discretisation, a UV
+  grid classified by `BRepTopAdaptor_FClass2d`), stacking (rays refined on
+  the exact surface, `IntCurvesFace_Intersector` near boundaries, UV
+  sampling), clearance (BRepExtrema refinement and a `BRepAlgoAPI_Common`
+  when meshes cross; on facets the triangle distance is already exact),
+  bed fit's keep-out zones (`BRepExtrema` against a box), shells (solids by
+  `TopExp`, watertight from edge-to-face ancestors) and bed (lowest point by
+  `BRepBndLib::AddOptimal`, watertight as shells);
+- **slender** reads triangles already, except its footprint, which picks
+  downward planar faces by surface type;
+- **chords** reads no geometry: for a mesh body the facets are the
+  geometry, so it does not apply.
+
+#### What recognition costs
+
+`surfaces: recognize` (`cad::LoadStlRecognized`: read, `SegmentAll`,
+`RebuildFromRegions`) on the fixtures:
+
+| fixture | 10k | 30k | 100k | 300k | 1M | 2M |
+|---|---|---|---|---|---|---|
+| tube (bored cylinder, mechanical) | 0.09 s | | 0.72 s | 1.3 s | 2.0 s | 3.7 s, 568 MB |
+| plate (24 holes, mechanical) | 0.07 s | 0.13 s | 0.14 s | BRepMesh ran out of 6 GB writing it | | |
+| figure: segmentation | 1.4–2.0 s | 14.5–22.8 s | past 300 s | | | |
+| figure: rebuild | 1.5 s | 5.2 s | | | | |
+| sphere: segmentation | 0.07 s | 0.26 s | 1.0 s | 12.9 s | 19.3 s | 37.3 s |
+| sphere: rebuild | 3.4 s, 111 MB | 10.4 s, 302 MB | 41.6 s, 961 MB | past 300 s | past 6 GB | past 6 GB |
+| torus: segmentation | 0.06 s | 0.25 s | 1.6 s | 45.8 s | 189 s | past 300 s |
+| torus: rebuild | 1.6 s | 3.7 s | 8.2 s | 28.1 s, 1.5 GB | 11.0 s | |
+
+- **On a mechanical mesh it is linear and cheap**: segmentation about
+  0.3 µs a triangle, and a rebuild that grows with the faces made (4 for
+  the tube, 30 for the plate, whatever the count). Reading the file is most
+  of it.
+- **On an organic mesh segmentation is superlinear**, all of it in
+  `Segmenter::FitSet` trying curve hypotheses on seed triples (up to
+  `kMaxTriples`, 256, a seed). The slowest, the figure, is
+  **t = 2.0 s · (n / 10⁴)^2.2**, fitted to its 10k and 30k points (the
+  exponent from both runs, 2.1 and 2.2); it says 320 s at 100k, where the
+  run passed its 300 s cap.
+- **The rebuild costs about 1 ms and 25 KB a face made** (the sphere: 3,713
+  faces in 3.4 s and 111 MB; 39,061 in 41.6 s and 961 MB). An organic mesh
+  makes a face for nearly every other triangle: past about 500,000 faces it
+  ran out of 6 GB in OpenCASCADE.
+- **"The share of the area that fits a primitive" does not tell organic
+  from mechanical.** Seed triples of noisy facets fit small spheres and
+  cylinders within four quanta: the noisy sphere leaves only 1.9% (10k) to
+  54% (2M) of its area as facets, the torus 0%, the figure 90–94%. What
+  does tell them apart is the triangles a region holds: the tube and the
+  plate 300 to 500,000 (4 and 30 regions at any size), the clean torus 70
+  to 380, the noisy sphere 1.4 to 2.7, the figure 1.5 to 1.7. Stage 1's
+  fallback to a mesh body reads that (a mechanical part's regions hold
+  hundreds), not the fitted area.
+- **The `auto` limit** is solved from the figure's law and
+  `interchange::kPatientImportSeconds` (60 s, the wait a person accepts
+  without being asked, as the facet import's limit is): segmentation alone
+  reaches it at n = 10⁴ · (60 / 2.0)^(1/2.2), about **47,000 triangles**,
+  written down nowhere as a number. Below it, `auto` segments and, by the
+  region size, rebuilds (mechanical) or keeps a mesh body without the
+  rebuild (organic); at or above it, a mesh body without recognition.
+  Recognition does not scale to the sizes that matter for scans
+  (100k–2M). A mechanical STL past 47,000 triangles therefore arrives as a mesh
+  body under `auto` although it would recognise in a second or two (the
+  2M tube in 3.7 s); `recognize` still forces it.
+
+#### The cost budget of a Cradle
+
+Each piece of the pipeline, by what it scales with:
+
+| piece | measured | per unit |
+|---|---|---|
+| manifold's subtraction, a block minus the figure (step 5) | 0.37 s at 300k, 2.98 s and 720 MB at 2M; the result closed | 1.5 µs and 360 B a triangle |
+| `Manifold::LevelSet` on a trilinear-sampled grid (step 4) | 0.17 s at 64³, 1.36 s at 128³, 10.1 s and 1.28 GB at 256³, 38.1 s and 2.1 GB at 400³ | 0.6 µs a cell (serial: `MANIFOLD_PAR` is off) |
+| closest point on the scan, a point near the surface (step 1) | 0.6 µs at 10k, 1.6 at 300k, 4.1 at 2M | grows as log n |
+| winding number, first order (Barill), near / far (step 2) | 3.9 / 0.8 µs at 10k, 11.8 / 0.8 µs at 2M | far points stay flat |
+| the tree those queries walk | 0.24 s at 300k, 1.8 s at 2M | 0.9 µs a triangle |
+
+So a Cradle costs about **1.4 µs a grid cell** (the sign and the level set,
+everywhere in the box) plus **16 µs a cell in the band** (closest point and
+an exact winding number, at 2M) plus 2.4 µs a scan triangle (its tree and
+the subtraction of what the level set makes). Against the same 60 s budget
+that is about **4 × 10⁷ cells**, a grid of 350³, and LevelSet's own memory
+there is about 1.7 GB. A 100 mm scan at a 0.15 mm cell (half a 0.3 mm
+clearance) is 3 × 10⁸ cells: past the budget seven times over, so either the
+cell is coarsened to about 0.3 mm or the level set runs in parallel slabs
+under `parallel::For` (manifold is serial here), which stage 2 measures
+before it sets the budget it refuses past. Its `BuildCostS` is this law
+on the cells and triangles it would make.
 
 ### Stage 1 — a mesh body (L)
 
@@ -171,20 +301,21 @@ measures it or exports it.
 - `auto` is the default. It uses the stage-0 recognition cost law, with a
   limit derived from that measured cost (as `MeshImportCost` derives the
   patient-import limit), never a literal:
-  - below the limit, it recognises (`recognize`) and builds a solid. If most of the area does not fit a primitive (an organic shape),
-    it falls back to a mesh body;
+  - below the limit, it segments, and when its regions hold many triangles
+    (a mechanical part's hold hundreds, an organic one's two or three:
+    stage 0) it rebuilds a solid (`recognize`); otherwise it keeps a mesh
+    body without the rebuild;
   - at or above the limit, it goes straight to a mesh body without running
     recognition.
 - The reply says which representation it chose and why ("mesh: 346 112
-  triangles, past the recognition limit of 120 000"; "mesh: 14% of the area
-  fits a primitive"), as the reply does for `up_axis: auto`.
+  triangles, past the recognition limit of 46 900"; "mesh: 1.6 triangles a
+  region"), as the reply does for `up_axis: auto`.
 - The default is the existing `mesh_representation` preference
   (docs/ui/settings.md), which gains the same two values. A per-import
   `representation` overrides it.
-- If the stage-0 measurement shows recognition does not scale to the sizes
-  that matter, `auto` instead takes `mesh` above a limit derived from the
-  measured B-Rep import cost (about 10 s) and `recognize` below it.
-  `topo_to_body` follows the same rule.
+- Recognition does not scale to a scan's size (stage 0: superlinear on
+  organic meshes, past 300 s at 100k), so the limit is the one solved from
+  its law, about 47,000 triangles. `topo_to_body` follows the same rule.
 - An open mesh is kept, reported as open with its boundary loops and the
   length of the longest. It is no longer skipped.
 - Readers go through `mesh::` (STL and OBJ here; PLY and GLB in stage 4).
@@ -206,8 +337,9 @@ measures it or exports it.
 - `TessellationFor` (`src/ui/TessellationCache.cpp`) returns the body's own
   triangles with smooth normals split at a crease angle, and no BRepMesh.
   The part render cache keys on the mesh hash.
-- `FaceSelector` uses `MeshBvh` for meshes above a size set in stage 0,
-  instead of brute force (docs/rendering/README.md#picking already names
+- `FaceSelector` uses `MeshBvh` for meshes above the size where a brute
+  force pick takes a quarter frame (stage 0: about 265,000 triangles, from
+  15.7 ns a triangle), instead of brute force (docs/rendering/README.md#picking already names
   this). The whole mesh highlights as one range.
 - The ray tracer's re-mesh calls (`RendererSync.cpp` render-still paths)
   take the triangles.
@@ -253,10 +385,13 @@ measures it or exports it.
   `ui/PrintJobActions.cpp`'s `MeshObject`) write the triangles as they are.
   The reply says that mesh bodies were not re-meshed, and so that
   `stl_deflection_mm` did not apply to them.
-- `export_visual` uses whatever stage 0 settled.
-- `export_step` and `export_brep` either write the tessellation (if stage 0
-  shows OCC does) or are refused, naming the body and the formats that
-  carry it.
+- `export_visual` hands mesh bodies to `MeshExport` unchanged (stage 0:
+  glTF, OBJ and PLY write a triangulation-only face whole).
+- `export_brep` writes the triangulation (it round-trips). `export_step`
+  writes a mesh body as a tessellated shell in AP242 with
+  `write.step.tessellated` on, set for that write only; on OpenCASCADE
+  older than 7.7, where the writer crashed on such a face, it is refused
+  naming the body and the formats that carry it.
 
 **Everything else refuses**
 - Every feature, tool and RPC that needs a B-Rep refuses a mesh body by

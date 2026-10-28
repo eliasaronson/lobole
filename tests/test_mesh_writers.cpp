@@ -25,6 +25,7 @@
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPCAFControl_Writer.hxx>
 #include <STEPControl_Reader.hxx>
+#include <Standard_Version.hxx>
 #include <StlAPI_Writer.hxx>
 #include <TDocStd_Document.hxx>
 #include <TopExp_Explorer.hxx>
@@ -41,6 +42,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -114,7 +116,12 @@ TEST_CASE("Mesh writers: a triangulation-only face, through every writer",
     MeshExport::Item item;
     item.shape = CADShape(face);
     item.name = "figure";
-    for (const char* ext : {".glb", ".obj", ".ply"}) {
+    // PLY's writer arrived in OpenCASCADE 7.7 (MeshExport refuses it before).
+    const std::vector<const char*> exts =
+        OCC_VERSION_HEX >= 0x070700
+            ? std::vector<const char*>{".glb", ".obj", ".ply"}
+            : std::vector<const char*>{".glb", ".obj"};
+    for (const char* ext : exts) {
       const auto path = Temp(std::string("visual") + ext);
       std::string error;
       INFO(ext << ": " << error);
@@ -157,6 +164,9 @@ TEST_CASE("Mesh writers: a triangulation-only face, through every writer",
     CHECK(TrianglesOf(back) == n);
   }
 
+#if OCC_VERSION_HEX >= 0x070700
+  // Tessellated STEP is OpenCASCADE 7.7's. On 7.6.3 (Ubuntu 24.04's) the
+  // writer CRASHED on this face, so a mesh body must never reach it there.
   SECTION("STEP: nothing by default, a tessellated face in AP242") {
     const auto write = [&](const std::filesystem::path& path) {
       std::scoped_lock exchange(DataExchangeMutex());
@@ -201,4 +211,5 @@ TEST_CASE("Mesh writers: a triangulation-only face, through every writer",
     CHECK(readBack(ap242) == n);
     std::filesystem::remove(ap242);
   }
+#endif
 }
