@@ -245,7 +245,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "the first, so it stops short of 360 (a point at 360 is the one at 0, "
      "and is refused); or {rise "
      "(mm) | rise_deg, duration_deg?, start_deg?} for a cosine lobe built "
-     "for you. The follower is the DOF mate b has: a slider slides, a "
+     "for you, or {profile: {part: slot id, feature: id}}: the motion a "
+     "CamProfile feature was cut for, read on every solve "
+     "(docs/modeling/cam-profiles.md#the-cam-relation-reads-it). "
+     "The follower is the DOF mate b has: a slider slides, a "
      "revolute turns, and a cylindrical b takes {dof_b: offset|rotation} "
      "(offset when omitted). FREEWHEEL is a one-way clutch, rotation to "
      "rotation: {ratio, drives: positive|negative} — b follows a while a "
@@ -306,7 +309,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "a_path / b_path ([occurrence id] of a FLEXIBLE sub-assembly placement) "
      "make that side a mate INSIDE it, by the sub-assembly's own mate id — "
      "an engine's chain driving its pump's camshaft; refused for a "
-     "freewheel or a click, whose history would be per placement. "
+     "freewheel or a click, whose history would be per placement, and for "
+     "a contact relation, whose cam and follower are this assembly's. "
      "CONTACT drives b from the SHAPES of the cam and the follower, not a "
      "table (docs/assemblies/relations.md#contact): a is the cam's turn (a "
      "revolute or cylindrical mate), b the follower's slide (a slider) or "
@@ -1305,6 +1309,7 @@ json ContactTableJson(const contact::Model& m) {
   json drops = json::array();
   for (const contact::Table::DropAt& d : t.drops)
     drops.push_back({{"at_deg", angles::ToDegrees(d.a)},
+                     {"to_deg", angles::ToDegrees(d.aEnd)},
                      {std::string("height") + sfx, (d.from - d.to) * unit}});
   out["drops"] = drops;
   json bridges = json::array();
@@ -2800,7 +2805,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error(
             "a cam needs its profile: lift [[angle_deg, lift], ...], or "
             "rise (mm) or rise_deg + duration_deg (+ start_deg) for a cosine "
-            "lobe");
+            "lobe, or profile {part, feature} (a CamProfile's motion)");
       }
       if (r.lift.size() < 2)
         throw std::runtime_error("a cam's lift table needs at least 2 points");

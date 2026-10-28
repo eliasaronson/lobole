@@ -445,6 +445,10 @@ Touch FirstTouch(const Outline& cam, double camAngle, const Outline& fol,
 
 namespace {
 
+// Past this pressure angle a follower falling toward its cam is sliding
+// down a step face, not driven: the interval is part of a drop.
+constexpr double kDropPressureDeg = 75.0;
+
 struct TNode {
   double a = 0.0, q = 0.0;
   bool bridge = false;
@@ -622,14 +626,58 @@ Table BuildTable(const Outline& cam, double camSense, const Outline& fol,
   out.nodes.reserve(n.size());
   for (size_t i = 0; i < n.size(); i++)
     out.nodes.push_back({n[i].a, n[i].q, n[i].drop});
+  // A drop, for what follows the follower, is more than a step: a rounded
+  // tip slides down a snail's step face before it falls clear, the contact
+  // normal nearly square to its motion. A cam cannot drive a follower there,
+  // so an interval falling toward the cam with the pressure angle over
+  // kDropPressureDeg at both ends belongs to the drop it leads to.
+  std::vector<double> pressure(n.size(), 0.0);
   for (size_t i = 0; i < n.size(); i++) {
-    if (!n[i].drop || (i > 0 && n[i - 1].drop))
+    const Touch t =
+        FirstTouch(cam, camSense * n[i].a, fol, path, toward, ref, tol);
+    if (t.found)
+      pressure[i] = angles::ToDegrees(std::acos(
+          std::clamp(std::abs(glm::dot(t.normal, t.motion)), 0.0, 1.0)));
+  }
+  std::vector<bool> falling(n.size(), false);
+  for (size_t i = 0; i < n.size(); i++) {
+    const size_t j = (i + 1) % n.size();
+    falling[i] = n[i].drop || (pressure[i] > kDropPressureDeg &&
+                               pressure[j] > kDropPressureDeg &&
+                               toward * (n[j].q - n[i].q) > 0.0);
+  }
+  for (size_t i = 0; i < n.size(); i++) {
+    if (!falling[i])
+      continue;
+    size_t j = i + 1;
+    while (j < n.size() && !falling[j] && n[j].a - n[i + 1].a < joinGap)
+      j++;
+    if (j < n.size() && falling[j])
+      for (size_t k = i + 1; k < j; k++)
+        falling[k] = true;
+  }
+  for (size_t i = 0; i < n.size(); i++) {
+    if (!falling[i] || (i > 0 && falling[i - 1]))
       continue;
     size_t k = i;
-    while (k + 1 < n.size() && n[k + 1].drop)
+    while (k + 1 < n.size() && falling[k + 1])
       k++;
-    const TNode& end = n[(k + 1) % n.size()];
-    out.drops.push_back({n[i].a, n[i].q, end.q, end.a});
+    // ...and the whole descent it is part of: from the top it rolls off
+    // (a rounded tip leaves a snail's corner before the face is steep) to
+    // where it comes to rest.
+    const size_t N = n.size();
+    size_t first = i, back = 0;
+    while (back++ < N && toward * (n[first].q - n[(first + N - 1) % N].q) > 0.0)
+      first = (first + N - 1) % N;
+    size_t last = (k + 1) % N, fwd = 0;
+    while (fwd++ < N && toward * (n[(last + 1) % N].q - n[last].q) > qTol)
+      last = (last + 1) % N;
+    const TNode& top = n[first];
+    const TNode& end = n[last];
+    // A steep stretch that never steps is a fall only if it falls far: a
+    // tolerance-sized wobble at a high pressure angle is not a drop.
+    if (std::abs(end.q - top.q) > 10.0 * qTol)
+      out.drops.push_back({top.a, top.q, end.q, end.a});
   }
   // Bridged ranges, from the nodes that bridge.
   for (size_t i = 0; i < n.size(); i++) {

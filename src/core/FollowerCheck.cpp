@@ -50,6 +50,17 @@ std::vector<Range> RangesOf(const std::vector<double>& deg,
 
 } // namespace
 
+namespace {
+// Whether cam angle `a` lies in a drop, where the follower is in free fall
+// and no contact describes it.
+bool InDrop(const contact::Table& t, double a) {
+  for (const contact::Table::DropAt& d : t.drops)
+    if (Wrap2Pi(a - d.a) <= Wrap2Pi(d.aEnd - d.a))
+      return true;
+  return false;
+}
+} // namespace
+
 Report Check(const Input& in) {
   Report r;
   const contact::Model& m = *in.model;
@@ -64,6 +75,10 @@ Report Check(const Input& in) {
   r.maxPressureDeg = 0.0;
   double minConvex = 1e300, minConcave = 1e300, folR = 1e300;
   for (const Sample& s : in.samples) {
+    if (InDrop(m.table, s.a)) {
+      r.inDrop++;
+      continue;
+    }
     const contact::Touch t = touch(s.a);
     SampleOut o;
     o.index = s.index;
@@ -111,6 +126,8 @@ Report Check(const Input& in) {
     std::vector<size_t> at;
     for (size_t k = 0; k < in.samples.size(); k++) {
       const Sample& s = in.samples[k];
+      if (InDrop(m.table, s.a))
+        continue;
       const double c = std::cos(m.camSense * s.a),
                    sn = std::sin(m.camSense * s.a);
       const glm::dmat4 rz(glm::dvec4(c, sn, 0, 0), glm::dvec4(-sn, c, 0, 0),
@@ -214,6 +231,7 @@ Report Check(const Input& in) {
     for (const contact::Table::DropAt& dr : m.table.drops) {
       DropOut o;
       o.atDeg = WrapDeg(angles::ToDegrees(dr.a));
+      o.jams = m.toward * (dr.to - dr.from) < 0.0;
       o.height = std::abs(dr.from - dr.to);
       const MassAt ms = in.mass(dr.from);
       const double acc = ms.M > 0.0 ? std::abs(ms.Q) / ms.M : 0.0;
@@ -236,7 +254,7 @@ Report Check(const Input& in) {
       if (in.speedRpm) {
         const double w = *in.speedRpm / ratio * kTwoPi / 60.0;
         o.turnDeg = angles::ToDegrees(w * o.fallS);
-        o.lands = w * o.fallS <= dwell;
+        o.lands = !o.jams && w * o.fallS <= dwell;
       }
       r.drops.push_back(o);
     }
@@ -244,7 +262,7 @@ Report Check(const Input& in) {
       bool ok =
           r.notHeld.empty() && (!r.liftoffRpm || *in.speedRpm <= *r.liftoffRpm);
       for (const DropOut& o : r.drops)
-        ok = ok && o.lands.value_or(true);
+        ok = ok && !o.jams && o.lands.value_or(true);
       r.holdsAtSpeed = ok;
     }
   }
@@ -276,6 +294,10 @@ std::vector<Level> Levels(const contact::Model& m, std::string* why) {
 Across AcrossWidth(const contact::Model& m, const std::vector<Level>& levels,
                    double a, double b) {
   Across out;
+  if (InDrop(m.table, a)) {
+    out.inDrop = true;
+    return out; // in free fall: nothing to touch
+  }
   const contact::Touch mid =
       contact::FirstTouch(m.camOutline, m.camSense * a, m.followerOutline,
                           m.path, m.toward, 0.0, m.tolerance);

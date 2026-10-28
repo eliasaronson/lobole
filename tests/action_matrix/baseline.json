@@ -2985,6 +2985,16 @@
    "face:2/g4069505166": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
    "face:2/g605787230;M3": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch"
   },
+  "golden/v195-projection-fingerprint": {
+   "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
+   "edge:2/*;U*": "edge.chamfer*12 edge.fillet*12",
+   "face:2/cap0": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/cap1": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g1": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g2": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g3": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g4": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch"
+  },
   "golden/v20-loft": {
    "body:3": "body.mirror body.pattern_circular body.pattern_linear body.split",
    "edge:3/*;U*": "edge.chamfer*12 edge.fillet*12",
@@ -3363,6 +3373,26 @@
    "edge:5/*;U*": "edge.chamfer*12 edge.fillet*12",
    "face:1/face*": "curved.frame*1 curved.thread*1 -face.delete*3 -face.delete_feature*3 face.draft*2 face.extrude_add*2 face.extrude_cut*2 face.frame*2 face.hole*2 face.offset_in*3 face.offset_out*3 face.replace*2 face.shell*2 face.sketch*2",
    "face:5/face*": "-face.delete*6 -face.delete_feature*6 face.draft*6 face.extrude_add*6 face.extrude_cut*6 face.frame*6 face.hole*6 face.offset_in*6 face.offset_out*6 face.replace*6 face.shell*6 face.sketch*6"
+  },
+  "golden/vNEXT2-cam-profile": {
+   "body:1": "-body.mirror -body.pattern_circular -body.pattern_linear body.split",
+   "edge:1/*;U*": "edge.frame*2",
+   "edge:2/*;U*": "edge.chamfer*2 !edge.chamfer*4 edge.fillet*2 !edge.fillet*4",
+   "face:1/face1;M*": "face.delete*1 face.delete_feature*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.move*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 !face.shell*1 face.sketch*1",
+   "face:1/face2;M*": "face.delete*1 face.delete_feature*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.move*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 face.shell*1 face.sketch*1",
+   "face:2/face*": "-face.delete*2 -face.delete_feature*2 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 !face.shell*1 face.sketch*1",
+   "face:2/face2;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 !face.shell*1 face.sketch*1",
+   "face:2/face3;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 !face.shell*1 face.sketch*1"
+  },
+  "golden/vNEXT3-follower-requirement": {
+   "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
+   "edge:2/*;U*": "edge.chamfer*12 edge.fillet*12",
+   "face:2/cap0": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/cap1": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g1": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g2": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g3": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g4": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch"
   },
   "reference/01-box": {
    "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
@@ -4033,15 +4063,12 @@
   "golden/v97-import-keep-origin": "regen not clean: Neighbour part: failed to read 'neighbour_in_its_own_frame.step' as STEP"
  },
  "slow": {
-  "fuzz/33": {"face:100/*;U* face.delete": 31.6, "face:100/*;U* face.offset_in": 23.5, "face:100/*;U* face.offset_out": 12.0, "face:100/*;U* face.shell": 7.0, "face:100/g4;M110;M120 face.delete": 24.5, "face:130/p1/bore;M130 face.delete": 11.9, "face:130/p1/bore;M130 face.delete_feature": 11.9, "face:130/p1/bore;M130 face.move": 42.4, "face:130/p2/bore;M130 face.move": 31.7, "face:180/cap1 face.move": 37.7},
-  "generator/gear_train#idler": {"face:2/g120 face.shell": 7.7, "face:2/g42 face.shell": 6.1, "face:2/g70 face.shell": 7.6},
-  "generator/gear_train#pinion": {"face:2/cap0;M4 face.delete": 16.9, "face:2/cap1;M4 face.delete": 15.8},
-  "generator/gear_train#wheel": {"face:2/g147 face.shell": 5.4, "face:2/g175 face.shell": 5.8},
-  "golden/v117-bent-path": {"body:2 body.pattern_circular": 22.1},
-  "golden/v119-cope": {"body:2 body.pattern_circular": 24.7},
-  "golden/v119-tube-rules": {"body:2 body.pattern_circular": 30.3},
-  "golden/v146-worm": {"edge:2/*;U* edge.chamfer": 42.2, "face:1/face1;M* face.shell": 79.9},
-  "reference/25-modelled-thread": {"face:2/cap0;M3 face.replace": 5.5, "face:2/cap0;M3 face.shell": 5.1, "face:2/cap1;M3 face.replace": 5.1}
+  "fuzz/33": {"face:100/*;U* face.delete": 31.6, "face:100/*;U* face.offset_in": 24.6, "face:100/*;U* face.offset_out": 10.2, "face:100/*;U* face.shell": 6.5, "face:100/g4;M110;M120 face.delete": 24.1, "face:130/p1/bore;M130 face.delete": 11.4, "face:130/p1/bore;M130 face.delete_feature": 9.6, "face:130/p1/bore;M130 face.move": 41.2, "face:130/p2/bore;M130 face.move": 31.9, "face:180/cap1 face.move": 37.6},
+  "generator/gear_train#pinion": {"face:2/cap0;M4 face.delete": 15.1, "face:2/cap1;M4 face.delete": 14.5},
+  "golden/v117-bent-path": {"body:2 body.pattern_circular": 21.0},
+  "golden/v119-cope": {"body:2 body.pattern_circular": 20.8},
+  "golden/v119-tube-rules": {"body:2 body.pattern_circular": 26.7},
+  "golden/v146-worm": {"edge:2/*;U* edge.chamfer": 15.0, "face:1/face1;M* face.shell": 79.8}
  },
  "known": [
   {"action": "face.shell", "bug": "docs/known-bugs.md#a-very-thin-shell-of-random-design-17-faults-in-the-offset-builder", "class": "signal", "entity": "face:100/*;U*", "repro": "tests/action_matrix/open/fuzz17-shell-signal.json", "unit": "fuzz/17"}

@@ -3245,7 +3245,9 @@ class Asm(_Tab):
         table (lift in mm for a slide, degrees for a turn; angles
         0 <= angle_deg < 360, the table wrapping, so it stops short of 360),
         or {rise (mm) |
-        rise_deg, duration_deg, start_deg} for a cosine lobe. A cylindrical
+        rise_deg, duration_deg, start_deg} for a cosine lobe, or
+        profile={"part": slot id, "feature": id}: the motion a CamProfile
+        feature was cut for, read on every solve. A cylindrical
         follower takes dof_b="rotation" to turn (v88, turning v102)."""
         self.activate()
         return self.app.add_relation(type="cam", **_mate_ref("a", mate_a),

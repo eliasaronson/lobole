@@ -65,16 +65,17 @@ def main():
             "type": "CamProfile", "name": "Bad",
             "face": {"feature_id": hub, "element": side},
             "segments": [{"to_deg": 360, "rise_mm": 0, "law": "linear"}]})
-        cam = d.call("add_feature", feature={
+        spec = {
             "type": "CamProfile", "name": "Snail",
             "face": {"feature_id": hub, "element": side},
-            "base_radius_mm": 25.0, "body": "add",
+            "base_radius_mm": 25.0, "body": "add", "turn": "ccw",
             "segments": [
                 {"to_deg": 270, "rise_mm": 10.0, "law": "cycloidal"},
                 {"to_deg": 270, "rise_mm": -10.0, "law": "drop"},
                 {"to_deg": 360, "law": "dwell"}],
             "follower": {"kind": "knife", "motion": "slide",
-                         "radius_mm": 1.5}})
+                         "radius_mm": 1.5}}
+        cam = d.call("add_feature", feature=spec)
         rep = cam["report"]
         expect(rep["drops"][0]["height_mm"] == 10.0 and
                rep["fit_deviation_mm"] < 1e-3, f"the snail's report: {rep}")
@@ -99,9 +100,23 @@ def main():
                f"the pin falls onto the cam: {rel}")
         study = d.call("add_motion_study", driver=axle, samples=48,
                        check_clash=False,
-                       **{"from": 0.0, "to": 2 * math.pi})["id"]
+                       **{"from": 0.0, "to": 360.0})["id"]
 
         refused(d, "check_followers", "run_motion_study first", study=study)
+        d.call("run_motion_study", study=study)
+        # Cut to turn counter-clockwise about its own axis, the cam turns
+        # the other way here (the axle's Z points along world -Y): the pin
+        # meets the snail's step from below. A jam, not a drop.
+        wrong = d.call("check_followers", study=study, speed_rpm=60.0)
+        drop = wrong["relations"][0]["gravity"]["drops"][0]
+        expect(drop["jams"] and
+               wrong["relations"][0]["holds_at_speed"] is False,
+               f"turned the wrong way, the step jams: {drop}")
+        d.call("set_active_part", part="cam")
+        spec["turn"] = "cw"
+        d.call("modify_feature", feature_id=cam["id"], feature=spec)
+        d.call("set_active_part", part="rig")
+        refused(d, "check_followers", "stale", study=study)
         d.call("run_motion_study", study=study)
         out = d.call("check_followers", study=study, speed_rpm=60.0,
                      max_pressure_angle_deg=30.0)

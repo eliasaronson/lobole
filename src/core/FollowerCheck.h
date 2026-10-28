@@ -71,6 +71,9 @@ struct SampleOut {
 };
 
 struct DropOut {
+  // A step the follower meets from below — the cam turning against the way
+  // its steps were cut — is not a drop but a wall it is shoved up: a jam.
+  bool jams = false;
   double atDeg = 0.0;  // cam angle
   double height = 0.0; // b's unit
   double fallS = 0.0;
@@ -84,6 +87,7 @@ struct Report {
   std::string error;
   bool turn = false; // b turns: its unit is radians (degrees reported)
   std::vector<SampleOut> samples;
+  size_t inDrop = 0; // samples in a drop: in free fall, not checked
   double maxPressureDeg = 0.0, maxPressureAtDeg = 0.0;
   std::optional<bool> pressureOk; // only with a limit
   double minCamConvex = 0.0, minCamConcave = 0.0, followerRadius = 0.0;
@@ -116,9 +120,10 @@ struct Level {
 std::vector<Level> Levels(const contact::Model& m, std::string* why);
 struct Across {
   bool ok = true;
-  double clash = 0.0; // b's unit
-  double atZ = 0.0;   // mm across the shared width
-  double gap = 0.0;   // b's unit: b against the middle cut's solve
+  double clash = 0.0;  // b's unit
+  double atZ = 0.0;    // mm across the shared width
+  double gap = 0.0;    // b's unit: b against the middle cut's solve
+  bool inDrop = false; // in free fall at a: not checked
 };
 Across AcrossWidth(const contact::Model& m, const std::vector<Level>& levels,
                    double a, double b);

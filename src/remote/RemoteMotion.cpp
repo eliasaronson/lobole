@@ -235,7 +235,8 @@ constexpr MethodDoc MotionMethods[] = {
      "modelled, so an upper bound), `held` and `not_held_deg` (where its "
      "weight pushes it off at any speed), and per drop {at_cam_deg, "
      "height_mm|height_deg, fall_s, dwell_deg, drop_rpm (the speed it just "
-     "lands within its dwell), turn_deg and lands at speed_rpm}; "
+     "lands within its dwell), turn_deg and lands at speed_rpm, jams (a step "
+     "met from below: the cam turns against the way it was cut)}; "
      "`holds_at_speed` with a speed.",
      "study:int>=0, relations?:int[], speed_rpm?:number>0, "
      "max_pressure_angle_deg?:number>0",
@@ -1207,6 +1208,7 @@ json CheckFollowers(ui::AppState& state, uint64_t studyId,
             {"cam", m.cam},
             {"follower", m.follower},
             {"samples", in.samples.size()},
+            {"samples_in_drops", rep.inDrop},
             {"touching", touching},
             {"clash" + sfx, worstClash * unit},
             {"gap" + sfx, worstGap * unit},
@@ -1246,7 +1248,8 @@ json CheckFollowers(ui::AppState& state, uint64_t studyId,
         {"moving", moving}};
     json drops = json::array();
     for (const follower::DropOut& d : rep.drops) {
-      json dj{{"at_cam_deg", d.atDeg},
+      json dj{{"jams", d.jams},
+              {"at_cam_deg", d.atDeg},
               {"height" + sfx, d.height * unit},
               {"fall_s", d.fallS},
               {"dwell_deg", d.dwellDeg},
