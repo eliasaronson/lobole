@@ -345,6 +345,13 @@ bool ResolveFace(const Document& doc, const ElementRef& ref,
     if (ref.featureId != 0 && bodies[i].createdBy != ref.featureId)
       continue;
     if (const auto idx = bodies[i].elementMap.Resolve(ref.name)) {
+      // A mesh body has no faces to load or mesh: a study refuses it
+      // (docs/interchange/README.md#mesh-bodies).
+      if (bodies[i].IsMesh()) {
+        if (error)
+          *error = MeshBodyRefusal(bodies[i], what + " of a FEM study");
+        return false;
+      }
       if (ref.featureId != 0) {
         out.bodyIndex = i;
         out.faceIndex = *idx;

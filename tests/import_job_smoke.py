@@ -188,7 +188,8 @@ def main():
             expect(not import_jobs(d), "the refused import started a job")
             expect(features(d) == before, "the refused import changed the part")
             try:
-                d.call("add_feature", feature={"type": "Import", "path": big})
+                d.call("add_feature", feature={"type": "Import", "path": big,
+                                               "representation": "facets"})
                 added = ""
             except Exception as e:  # noqa: BLE001
                 added = str(e)
@@ -196,12 +197,18 @@ def main():
                    f"add_feature of the big Import: {added or 'accepted'}")
             expect(features(d) == before, "the refused add_feature changed it")
             other = Client.wait_for(app.port)
+            # The default (auto) keeps a mesh this size a mesh body, which
+            # sews nothing either (docs/interchange/README.md#mesh-bodies).
             call = Call(d, "import_step", {"path": big})
-            jobs = wait_for(lambda: import_jobs(other), "the recognised job")
+            jobs = wait_for(lambda: import_jobs(other), "the auto job")
             other.call("cancel_background_job", kind="import")
             call.join()
             expect(call.error and "cancelled" in call.error,
                    f"recognised call: {call.result!r} / {call.error!r}")
+            # Gone before the next starts: a job still listed while its
+            # worker winds down is the one the next wait would find, and the
+            # cancel would land on it instead of the next.
+            wait_for(lambda: not import_jobs(other), "the auto job to go")
             call = Call(d, "import_step", {"path": big,
                                            "representation": "facets",
                                            "allow_large_mesh": True})

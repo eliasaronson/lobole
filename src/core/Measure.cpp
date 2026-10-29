@@ -5,8 +5,13 @@
 #include "core/Angles.h"
 #include "core/FitBands.h"
 
+#include "cad/MeshShape.h"
 #include "core/MeshCollide.h"
+#include "core/MeshMeasure.h"
 #include "core/Parallel.h"
+#include "core/mesh/MeshBoolean.h"
+#include "core/mesh/MeshBvh.h"
+#include "core/mesh/Slice.h"
 
 #include "core/Conventions.h"
 #include "core/ThreadStandards.h"
@@ -2168,6 +2173,11 @@ CrossSectionRegions(const std::vector<Body>& bodies, const glm::dvec3& origin,
   std::vector<SectionRegion> out;
   if (bodies.empty())
     return out;
+  // A mesh body's regions come from its slice (MeshMeasure.h).
+  out = meshmeasure::Section(bodies, origin, normal, withLoops).regions;
+  if (std::none_of(bodies.begin(), bodies.end(),
+                   [](const Body& b) { return b.shape.IsValid(); }))
+    return out;
   try {
     const TopoDS_Face cutter =
         BuildSectionCutter(bodies, origin, glm::normalize(normal));
@@ -2284,10 +2294,17 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
                                        const glm::dvec3& normal) {
   if (bodies.empty())
     return 0.0;
+  // A mesh body's area is its closed loops' (MeshMeasure.h); an open one's
+  // cut encloses nothing and adds nothing, which the `section` RPC says.
+  const double meshArea =
+      meshmeasure::Section(bodies, origin, normal, false).area;
+  if (std::none_of(bodies.begin(), bodies.end(),
+                   [](const Body& b) { return b.shape.IsValid(); }))
+    return meshArea;
   try {
     const TopoDS_Face cutter =
         BuildSectionCutter(bodies, origin, glm::normalize(normal));
-    double area = 0.0;
+    double area = meshArea;
     for (const auto& b : bodies) {
       if (b.shape.GetShape().IsNull())
         continue;
@@ -2345,6 +2362,15 @@ std::string CapKey(const Body& b, const glm::dvec3& origin,
 constexpr size_t kMaxCapCache = 512;
 } // namespace
 
+static CADShape MeshSectionCap(const Body& body, const glm::dvec3& origin,
+                               const glm::dvec3& normal) {
+  if (!body.IsMesh() || !body.mesh->Closed())
+    return CADShape();
+  const mesh::SliceResult s = mesh::Slice(*body.mesh, origin, normal);
+  const mesh::SliceCap cap = mesh::Cap(s, origin, normal);
+  return cad::TriangulationShape(cap.positions, cap.triangles);
+}
+
 std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
                                   const glm::dvec3& origin,
                                   const glm::dvec3& normal,
@@ -2355,10 +2381,23 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
     return caps;
   if (cache != nullptr && cache->entries.size() > kMaxCapCache)
     cache->Clear(); // wholesale, never one at a time — see the header
+  // Only a B-Rep body needs the cutter; a part of mesh bodies alone has no
+  // box to size it from.
+  const bool anyBRep =
+      std::any_of(bodies.begin(), bodies.end(),
+                  [](const Body& b) { return b.shape.IsValid(); });
   try {
     const TopoDS_Face cutter =
-        BuildSectionCutter(bodies, origin, glm::normalize(normal));
+        anyBRep ? BuildSectionCutter(bodies, origin, glm::normalize(normal))
+                : TopoDS_Face();
     for (const auto& b : bodies) {
+      if (b.IsMesh()) {
+        // A closed mesh body's cap is its slice's loops, triangulated, in
+        // the plane: no boolean. An open one gets none -- its cut closes
+        // nothing (`list_sections` says so).
+        caps.push_back(MeshSectionCap(b, origin, normal));
+        continue;
+      }
       if (b.shape.GetShape().IsNull()) {
         caps.emplace_back(); // keep alignment with bodies[]
         continue;
@@ -2999,7 +3038,7 @@ std::vector<Body> TargetBodies(const Target& t) {
     if (b.shape.GetShape().IsNull())
       continue;
     Body nb = b;
-    nb.shape = b.shape.Transformed(t.xf);
+    nb = PlacedBody(b, t.xf);
     out.push_back(std::move(nb));
   }
   return out;
@@ -3297,4 +3336,136 @@ std::vector<ThreadSpan> ThreadSpansOf(const Body& body,
   return ThreadSpans(body, TopLoc_Location(ToTrsf(world)));
 }
 
+// The placed shape a target resolves to, for meshmeasure::Distance.
+TopoDS_Shape ResolveTargetShape(const Target& t) { return ResolveTarget(t); }
+
 } // namespace Measure
+
+namespace meshmeasure {
+
+namespace {
+
+// A target as triangles in its placed frame: a mesh body's own, a B-Rep's
+// tessellated (on a copy) at a thousandth of its size, which `deflection`
+// reports. Empty when there is nothing.
+std::shared_ptr<const mesh::TriMesh> TargetTriangles(const Measure::Target& t,
+                                                     double& deflection) {
+  auto out = std::make_shared<mesh::TriMesh>();
+  deflection = 0.0;
+  if (t.bodies == nullptr)
+    return nullptr;
+  const auto append = [&](const std::vector<glm::dvec3>& pos,
+                          const std::vector<std::array<uint32_t, 3>>& tris) {
+    const auto base = uint32_t(out->positions.size());
+    out->positions.insert(out->positions.end(), pos.begin(), pos.end());
+    for (const auto& tr : tris)
+      out->triangles.push_back({tr[0] + base, tr[1] + base, tr[2] + base});
+  };
+  bool brep = false;
+  for (const Body& b : *t.bodies) {
+    if (b.reference || !b.IsMesh())
+      continue;
+    if (t.ref.featureId != 0 && b.createdBy != t.ref.featureId)
+      continue;
+    if (!t.Whole() && !b.elementMap.Resolve(t.ref.name))
+      continue;
+    const mesh::TriMesh placed =
+        t.xf == glm::dmat4(1.0) ? *b.mesh : mesh::Transformed(*b.mesh, t.xf);
+    append(placed.positions, placed.triangles);
+  }
+  // The B-Rep part of the target, if any.
+  std::vector<Body> breps;
+  for (const Body& b : *t.bodies)
+    if (!b.IsMesh())
+      breps.push_back(b);
+  if (!breps.empty() && (t.Whole() || !IsMeshElement(*t.bodies, t.ref))) {
+    const TopoDS_Shape s =
+        Measure::ResolveTargetShape(Measure::Target{&breps, t.xf, t.ref});
+    if (!s.IsNull()) {
+      const CADShape shape(s);
+      glm::dvec3 lo, hi;
+      shape.GetBoundingBox(lo, hi);
+      deflection = std::max(glm::length(hi - lo) * 1e-3, 1e-6);
+      const CADShape::Mesh m = shape.GenerateMeshDetached(deflection);
+      std::vector<glm::dvec3> pos;
+      for (const auto& v : m.vertices)
+        pos.emplace_back(v.position);
+      std::vector<std::array<uint32_t, 3>> tris;
+      for (size_t k = 0; k + 2 < m.indices.size(); k += 3)
+        tris.push_back({m.indices[k], m.indices[k + 1], m.indices[k + 2]});
+      append(pos, tris);
+      brep = true;
+    }
+  }
+  (void)brep;
+  if (out->triangles.empty())
+    return nullptr;
+  return out;
+}
+
+} // namespace
+
+std::optional<Gap> Distance(const Measure::Target& a, const Measure::Target& b,
+                            std::string& why) {
+  double da = 0.0, db = 0.0;
+  const auto ma = TargetTriangles(a, da), mb = TargetTriangles(b, db);
+  if (!ma || !mb) {
+    why = std::string("side ") + (!ma ? "a" : "b") +
+          " has no geometry to measure";
+    return std::nullopt;
+  }
+  const mesh::Bvh ta(ma), tb(mb);
+  const mesh::Bvh::Gap g = ta.Distance(tb, glm::dmat4(1.0));
+  Gap out;
+  out.distance = g.distance;
+  out.pointA = g.onThis;
+  out.pointB = g.onOther;
+  out.toleranceMm = da + db;
+  return out;
+}
+
+std::optional<Overlap> Interference(const std::vector<Body>& a,
+                                    const std::vector<Body>& b,
+                                    std::string& why) {
+  for (const std::vector<Body>* side : {&a, &b})
+    for (const Body& x : *side)
+      if (x.IsMesh() && !x.mesh->Closed()) {
+        why = "body '" + x.name +
+              "' is an open mesh, which bounds no volume "
+              "to overlap: close its holes in MeshLab, Blender or the "
+              "scanning app";
+        return std::nullopt;
+      }
+  const Measure::Target ta{&a, glm::dmat4(1.0), {}};
+  const Measure::Target tb{&b, glm::dmat4(1.0), {}};
+  double da = 0.0, db = 0.0;
+  auto ma = TargetTriangles(ta, da), mb = TargetTriangles(tb, db);
+  if (!ma || !mb) {
+    why = "a side has no geometry";
+    return std::nullopt;
+  }
+  Overlap out;
+  out.toleranceMm = da + db;
+  const mesh::Bvh tra(ma), trb(mb);
+  out.distance = tra.Distance(trb, glm::dmat4(1.0)).distance;
+  // Welded, so a tessellated B-Rep (one block of vertices a face) closes.
+  const auto weld = [](const mesh::TriMesh& m) {
+    std::vector<glm::dvec3> soup;
+    soup.reserve(m.triangles.size() * 3);
+    for (uint32_t t = 0; t < m.triangles.size(); t++)
+      for (int c = 0; c < 3; c++)
+        soup.push_back(m.Corner(t, c));
+    return mesh::FromSoup(soup, mesh::Float32Quantum(m.positions));
+  };
+  const mesh::TriMesh wa = weld(*ma), wb = weld(*mb);
+  mesh::TriMesh common;
+  std::string err;
+  if (!mesh::Boolean(wa, wb, mesh::BooleanOp::Intersect, common, err)) {
+    why = "the overlap could not be computed: " + err;
+    return std::nullopt;
+  }
+  out.volume = common.triangles.empty() ? 0.0 : common.Volume();
+  return out;
+}
+
+} // namespace meshmeasure

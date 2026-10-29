@@ -54,6 +54,14 @@ struct RecognizeOptions {
 // tried again; a mesh that fails a check is sewn as facets
 // (CADKernel::LoadSTL) and `report.fellBack` says why. False only when the
 // file cannot be read at all, or on a cancel.
+// The rebuild of a mesh already read and segmented (SegmentAll's result,
+// which it demotes in place as rounds fail): true with `shape` a solid of
+// recognised faces, false with `report.fellBack` naming the check that
+// failed. `report` is filled either way.
+bool RebuildRecognized(const mesh::TriMesh& m, mesh::Segmentation& seg,
+                       int minSides, CADShape& shape, mesh::Recognition& report,
+                       const std::function<bool()>& cancelled = {});
+
 bool LoadStlRecognized(const std::string& path, const RecognizeOptions& options,
                        CADShape& shape, mesh::Recognition& report,
                        std::string& error,

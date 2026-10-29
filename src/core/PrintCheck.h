@@ -318,4 +318,14 @@ struct Report {
 [[nodiscard]] Report Check(const std::vector<const Body*>& bodies,
                            const Options& opts);
 
+// The same check over MESH bodies (docs/interchange/README.md#mesh-bodies),
+// read off their triangles: the bed by the lowest vertex, the shells by the
+// closed components, the overhang by each triangle's normal, the clearance
+// between bodies by their trees, the bed fit by the vertices. Bridges,
+// stacking and slender read a B-Rep's surfaces and are skipped, saying so;
+// chords do not apply (the facets are the geometry). Every body must be a
+// closed mesh -- the caller refuses an open one, naming its holes.
+[[nodiscard]] Report CheckMeshes(const std::vector<const Body*>& bodies,
+                                 const Options& opts);
+
 } // namespace printcheck

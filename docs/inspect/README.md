@@ -145,6 +145,47 @@ corners.
 that a measurement taken by clicking two occurrence faces and the same one
 taken over RPC give the same numbers.
 
+## Mesh bodies
+
+A [mesh body](../interchange/README.md#mesh-bodies)'s triangles are its
+geometry, so what is measured on it is exact to the mesh
+(`src/core/MeshMeasure.{h,cpp}`).
+
+- **On its own**, `measure {a: {feature_id}}` (or its one element) gives
+  `kind: mesh`, the triangles, components, `closed`, `surface_area_mm2`,
+  `size` and `boundary_loops`, and `volume_mm3` when it closes. When it is
+  open the volume is null and `volume_refused` names the loops and where to
+  close them (MeshLab, Blender, the scanning app). `list_elements` lists its
+  one element with the same statistics and the median edge length, and
+  never trips `max_faces`.
+- **A point on a body** is `{feature_id, point_mm: [x, y, z]}` on either
+  side of `measure`: snapped to the nearest surface point (a mesh's by its
+  tree, a B-Rep's exactly), and the reply's `snapped_a` / `snapped_b` give
+  the snapped point and `moved_mm`. Two points measure point to point.
+- **Between a mesh body and anything else** the minimum distance comes from
+  `mesh::Bvh`; a B-Rep side is tessellated on a copy at a thousandth of its
+  size, and that deflection is the reply's `tolerance_mm` (0 between two
+  meshes). Only the minimum and `kind: distance` are answered; anything
+  else is refused, naming them.
+- **`mass_properties`** uses the divergence theorem over the triangles
+  (`mesh::ComputeMassProperties`: volume, area, centroid, inertia) for a
+  closed mesh, and refuses an open one naming its loops.
+- **`interference`** between two bodies of a part, one a mesh, intersects
+  their triangles with manifold (the B-Rep side tessellated as above), so
+  the volume is exact to the mesh; `mode: mesh` and `tolerance_mm` say so.
+  An open mesh is refused.
+- **The Measure tool** keeps the point clicked on a mesh body (a `Point`
+  measurable, like a corner), and measures point to point or point to
+  anything.
+- **`check_print`** reads a part of mesh bodies off its triangles
+  (`printcheck::CheckMeshes`): the bed by the lowest vertex, the shells by
+  the closed components, the overhang by each triangle's normal (a ceiling
+  counts as 90°), the clearance between bodies by their trees, the bed fit
+  by the vertices. Bridges, stacking and slender read a B-Rep's surfaces and
+  are skipped saying so; chords do not apply. An open mesh body is refused
+  for printing, naming its holes and where to close them. A part mixing
+  mesh and B-Rep bodies is refused: check either set with `bodies`.
+
 ## Mass properties
 
 `mass_properties {body?, part?}` → per body `volume_mm3`, `surface_area_mm2`,
@@ -186,6 +227,10 @@ island's outline as line/arc/other segments, for recovering the shape of a
 part you did not draw. `bodies` (body names or the feature ids that created
 them; part tabs only) cuts just those bodies, and an unknown one is refused
 naming the bodies there are. An unknown `base_plane` is refused.
+
+A [mesh body](#mesh-bodies) is cut by its slice, so a scan's cross-section
+area and outline are numbers too; an open one's cut does not close, adds no
+area, and is named in `open_meshes`.
 
 ### Enclosed area
 

@@ -8,6 +8,7 @@
 #include "core/PrintSettings.h"
 #include "ui/PrintJobActions.h"
 
+#include <cstdio>
 #include <stdexcept>
 
 namespace ui {
@@ -21,7 +22,8 @@ PrintCheckRun RunPrintCheck(AppState& state, const Document& part,
   for (size_t i = 0; i < all.size(); ++i) {
     // Derived reference bodies are other parts' geometry: never printed,
     // as never exported.
-    if (all[i].reference || all[i].shape.GetShape().IsNull())
+    if (all[i].reference ||
+        (all[i].shape.GetShape().IsNull() && !all[i].IsMesh()))
       continue;
     if (only != nullptr && !only->contains(all[i].createdBy))
       continue;
@@ -33,6 +35,33 @@ PrintCheckRun RunPrintCheck(AppState& state, const Document& part,
         all.empty() ? "the part has no bodies to print"
                     : "only reference bodies (derived ghosts): nothing that "
                       "prints");
+  // A mesh body prints when it closes; an open one is refused, naming its
+  // holes. A part is checked as meshes or as B-Rep, not as both
+  // (docs/interchange/README.md#mesh-bodies).
+  size_t meshes = 0;
+  for (const Body* b : bodies) {
+    if (!b->IsMesh())
+      continue;
+    meshes++;
+    if (!b->mesh->Closed()) {
+      const std::vector<double> loops = mesh::BoundaryLoops(*b->mesh);
+      char buf[96];
+      std::snprintf(buf, sizeof buf, "%zu hole%s, the longest rim %.1f mm",
+                    loops.size(), loops.size() == 1 ? "" : "s",
+                    loops.empty() ? 0.0 : loops.front());
+      throw std::runtime_error(
+          "body '" + b->name + "' is an open mesh (" +
+          (loops.empty() ? std::string("not edge-manifold") : buf) +
+          "), which does not print: close " +
+          (loops.size() == 1 ? "it" : "them") +
+          " in MeshLab, Blender or the scanning app and re-import it");
+    }
+  }
+  if (meshes > 0 && meshes < bodies.size())
+    throw std::runtime_error(
+        "check_print reads a part of mesh bodies off their triangles and a "
+        "part of B-Rep bodies off their faces; this one mixes them: check "
+        "the mesh bodies or the others, with `bodies`");
 
   printcheck::Options& o = run.options;
   if (ask.up)
@@ -149,7 +178,8 @@ PrintCheckRun RunPrintCheck(AppState& state, const Document& part,
         printset::BrimWidening(st.brim.value_or(printset::Brim::None)));
   }
 
-  run.report = printcheck::Check(bodies, o);
+  run.report = meshes > 0 ? printcheck::CheckMeshes(bodies, o)
+                          : printcheck::Check(bodies, o);
   const std::string unprinted =
       "the part has no print process: set_print_process, or state ";
   if (!overhang) {

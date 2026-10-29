@@ -1620,6 +1620,58 @@ def main():
         d.call("import_step", path=stl, units="cm")
         expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 24000.0) < 0.1,
                "an STL read in cm is 10x per side")
+        # A mesh as a MESH BODY (docs/interchange/README.md#mesh-bodies):
+        # STL and OBJ, in each representation, the reply naming the choice;
+        # a mesh body exports as its own triangles to STL and glTF.
+        phase("Mesh bodies")
+        for ext in ("stl", "obj"):
+            ball = os.path.join(tmp, "ball." + ext)
+            n = shapes.mesh_sphere(ball, r=20.0)
+            for rep, want in (("mesh", "mesh"), ("auto", "mesh"),
+                              ("facets", "facets"),
+                              ("recognize", None)):
+                d.call("new_project")
+                r = d.call("import_step", path=ball, representation=rep)
+                chosen = r.get("representation", {}).get("chosen")
+                expect(chosen and (want is None or chosen == want) and
+                       r["representation"].get("why"),
+                       f"{ext} as {rep}: the reply names the choice ({r})")
+                bodies = d.call("get_state")["bodies"]
+                expect(len(bodies) == 1, f"{ext} as {rep}: {bodies}")
+                if want == "mesh":
+                    vol = d.call("mass_properties")["total"]["volume_mm3"]
+                    expect(abs(vol - 4 / 3 * math.pi * 20.0 ** 3) <
+                           0.01 * 4 / 3 * math.pi * 20.0 ** 3,
+                           f"{ext} mesh body weighs as the sphere: {vol}")
+            d.call("new_project")
+            d.call("import_step", path=ball, representation="mesh")
+            mstl = os.path.join(tmp, "ball-out.stl")
+            out = d.call("export_stl", path=mstl, stl_deflection_mm=1.0)
+            expect(out.get("mesh_bodies") == 1 and
+                   os.path.getsize(mstl) == 84 + 50 * n,
+                   f"a mesh body's STL is its own {n} triangles: {out}")
+            glb = os.path.join(tmp, "ball-out.glb")
+            d.call("export_visual", path=glb)
+            expect(os.path.getsize(glb) > 12 * n,
+                   f"a mesh body's glTF holds its triangles "
+                   f"({os.path.getsize(glb)} bytes)")
+        # An open scan: kept, its volume refused naming the loop.
+        open_ball = os.path.join(tmp, "open-ball.stl")
+        shapes.mesh_sphere(open_ball, r=20.0, cut_z=-15.0)
+        d.call("new_project")
+        r = d.call("import_step", path=open_ball, representation="mesh",
+                   keep_origin=True)
+        expect("1 boundary loop" in r.get("warning", ""),
+               f"an open scan is kept and reported: {r}")
+        expect_error(d, "mass_properties", "boundary loop")
+        fid = d.call("get_state")["features"][0]["id"]
+        m = d.call("measure", a={"feature_id": fid})
+        expect(m["kind"] == "mesh" and m["volume_mm3"] is None and
+               "MeshLab" in m["volume_refused"], f"measure: {m}")
+        # A point on it, snapped.
+        p = d.call("measure", a={"feature_id": fid, "point_mm": [0, 0, 50]})
+        expect(abs(p["snapped_a"]["moved_mm"] - 30.0) < 0.2, f"snap: {p}")
+
         expect_error(d, "import_step", "Accepted", path=stl, units="furlong")
         expect_error(d, "import_step", "declares its own", path=step,
                      units="in")

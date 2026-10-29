@@ -10,7 +10,11 @@
 
 #include "core/mesh/TriMesh.h"
 
+#include <glm/glm.hpp>
+
+#include <array>
 #include <string>
+#include <vector>
 
 namespace mesh {
 
@@ -23,6 +27,12 @@ enum class BooleanOp { Union, Subtract, Intersect };
 // or `b` swallows `a` (a Subtract).
 bool Boolean(const TriMesh& a, const TriMesh& b, BooleanOp op, TriMesh& out,
              std::string& error);
+
+// Triangulates planar polygons with holes (outer loops counter-clockwise,
+// holes clockwise) by manifold's triangulator. Indices count through the
+// loops' points in order. False when it cannot (a self-crossing loop).
+bool TriangulatePolygons(const std::vector<std::vector<glm::dvec2>>& loops,
+                         std::vector<std::array<uint32_t, 3>>& out);
 
 // "manifold 3.5.4": what a build carries, for `ping`'s features and logs.
 const char* BooleanLibrary();

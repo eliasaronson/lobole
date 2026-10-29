@@ -30,7 +30,7 @@ import zipfile
 
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
-from smoke_shapes import box  # noqa: E402
+from smoke_shapes import box, mesh_sphere  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROFILE = {
@@ -393,6 +393,40 @@ def main():
         expect(len(rec["plates"]) == 2, rec)
         print(f"  job: {len(objects)} objects on 2 plates, each with its "
               f"settings, read back")
+
+        # --- a mesh body on a plate (docs/interchange/README.md#mesh-bodies)
+        # Its own triangles go into the 3MF, not re-meshed; check_print
+        # reads them; an open one is refused, naming its hole.
+        ball = os.path.join(tmp, "ball.stl")
+        n = mesh_sphere(ball, center=(100.0, 100.0, 15.0), r=15.0)
+        d.call("add_part", name="scan")
+        d.call("set_print_process", profile=PROFILE["name"])
+        d.call("import_step", path=ball, representation="mesh",
+               keep_origin=True)
+        cp = d.call("check_print")
+        expect(cp["bed"]["status"] == "pass" and
+               cp["shells"]["status"] == "pass", f"a mesh body prints: {cp}")
+        scan = os.path.join(tmp, "scan.3mf")
+        r = d.call("export_print_job", path=scan, plates=[{"part": "scan"}])
+        row = r["plates"][0]["objects"][0]
+        expect(row["triangles"] == n and "mesh_note" in row,
+               f"the 3MF holds the mesh's own {n} triangles: {row}")
+        with zipfile.ZipFile(scan) as z:
+            model = z.read("3D/3dmodel.model").decode()
+        expect(model.count("<triangle ") == n,
+               f"{model.count('<triangle ')} triangles written, not {n}")
+        cut = os.path.join(tmp, "cut.stl")
+        mesh_sphere(cut, center=(100.0, 100.0, 15.0), r=15.0, cut_z=2.0)
+        d.call("add_part", name="open scan")
+        d.call("set_print_process", profile=PROFILE["name"])
+        d.call("import_step", path=cut, representation="mesh",
+               keep_origin=True)
+        try:
+            d.call("check_print")
+            raise AssertionError("an open mesh was checked for printing")
+        except RuntimeError as e:
+            expect("open mesh" in str(e) and "MeshLab" in str(e), str(e))
+        print(f"  mesh body: {n} triangles into the 3MF as they are")
 
         # --- what a job refuses ---------------------------------------------
         plate(d, "corner", [("plain", 2, 2)])

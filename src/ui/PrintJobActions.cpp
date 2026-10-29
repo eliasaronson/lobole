@@ -231,6 +231,16 @@ std::string CheckConfig(const json& c, const printfit::Profile& prof,
 
 // One body as a welded mesh in the plate's frame.
 bool MeshObject(const Body& body, double deflection, printjob::Object& o) {
+  // A mesh body's triangles as they are: not re-meshed, so the deflection
+  // does not apply (docs/interchange/README.md#mesh-bodies).
+  if (body.IsMesh()) {
+    const auto base = static_cast<uint32_t>(o.vertices.size());
+    o.vertices.insert(o.vertices.end(), body.mesh->positions.begin(),
+                      body.mesh->positions.end());
+    for (const auto& t : body.mesh->triangles)
+      o.triangles.push_back({t[0] + base, t[1] + base, t[2] + base});
+    return !o.triangles.empty();
+  }
   const CADShape::Mesh mesh = body.shape.GenerateMeshDetached(deflection);
   if (mesh.indices.size() < 3)
     return false;
@@ -348,10 +358,18 @@ BuildPrintJob(AppState& state, const std::vector<JobPlateAsk>& plates,
 
     std::vector<const Body*> bodies;
     for (const Body& b : part.GetBodies())
-      if (!b.reference && b.shape.IsValid())
+      if (!b.reference && (b.shape.IsValid() || b.IsMesh()))
         bodies.push_back(&b);
     if (bodies.empty())
       return unexpected(label + " has nothing to print");
+    // An open mesh does not print: refused, naming its holes.
+    for (const Body* b : bodies)
+      if (b->IsMesh() && !b->mesh->Closed())
+        return unexpected(
+            label + ", piece '" + b->name + "' is an open mesh (" +
+            std::to_string(mesh::BoundaryLoops(*b->mesh).size()) +
+            " holes): close them in MeshLab, Blender or the scanning app "
+            "and re-import it");
 
     // bed_fit, positional: the job puts every piece where the plate does.
     const glm::dvec3 bed((*prof.bedMm)[0], (*prof.bedMm)[1], (*prof.bedMm)[2]);
@@ -432,6 +450,9 @@ BuildPrintJob(AppState& state, const std::vector<JobPlateAsk>& plates,
                {"described", printset::Describe(bp.settings)},
                {"slicer", BambuJson(o.settings)},
                {"triangles", o.triangles.size()}};
+      if (b->IsMesh())
+        row["mesh_note"] = "a mesh body's own triangles, not re-meshed: the "
+                           "chord deviation did not apply to them";
       if (bp.source != nullptr)
         row["source_part"] = SlotName(state, bp.source);
       objects.push_back(std::move(row));

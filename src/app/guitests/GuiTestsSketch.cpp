@@ -2819,6 +2819,90 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     std::filesystem::remove(stl);
   };
 
+  // A hover pick on a 2M-triangle mesh body fits a frame
+  // (docs/rendering/README.md#picking): past FaceSelector::kPickBvhTriangles
+  // the body hands over its tree, and the pick walks it. A RESPONSIVENESS
+  // check of main-thread CPU (docs/ui/testing.md#tests-that-time-things).
+  t = IM_REGISTER_TEST(engine, "import",
+                       "a_hover_pick_on_a_2m_mesh_fits_a_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // A UV sphere of radius 40 and about 2M triangles, written as a binary
+    // STL: the size a phone scan arrives at.
+    const auto stl =
+        std::filesystem::temp_directory_path() /
+        ("lobole_gui_2m_mesh_" + std::to_string(getpid()) + ".stl");
+    const int rings = 710, segs = 2 * rings;
+    const double r = 40.0;
+    {
+      std::vector<glm::vec3> pts;
+      for (int i = 0; i <= rings; i++)
+        for (int j = 0; j < segs; j++) {
+          const double th = M_PI * i / rings, ph = 2 * M_PI * j / segs;
+          pts.emplace_back(r * std::sin(th) * std::cos(ph),
+                           r * std::sin(th) * std::sin(ph), r * std::cos(th));
+        }
+      std::vector<std::array<int, 3>> tris;
+      for (int i = 0; i < rings; i++)
+        for (int j = 0; j < segs; j++) {
+          const int a = i * segs + j, b = i * segs + (j + 1) % segs,
+                    c = (i + 1) * segs + j, e = (i + 1) * segs + (j + 1) % segs;
+          if (i > 0)
+            tris.push_back({a, c, b});
+          if (i < rings - 1)
+            tris.push_back({b, c, e});
+        }
+      std::ofstream out(stl, std::ios::binary);
+      const char header[80] = {};
+      out.write(header, 80);
+      const auto count = static_cast<uint32_t>(tris.size());
+      out.write(reinterpret_cast<const char*>(&count), 4);
+      for (const auto& tr : tris) {
+        const float n[3] = {0, 0, 0};
+        out.write(reinterpret_cast<const char*>(n), 12);
+        for (int k : tr)
+          out.write(reinterpret_cast<const char*>(&pts[k]), 12);
+        const char attr[2] = {};
+        out.write(attr, 2);
+      }
+    }
+    const size_t depth = s_App->commands->UndoDepth();
+    std::string error;
+    IM_CHECK(ui::ImportAsFeature(
+        *s_App, stl.string(), nullptr, &error, units::Length::Millimetre, false,
+        interchange::UpAxis::None, 0.0, mesh::Representation::Mesh));
+    IM_CHECK(!Doc()->GetBodies().empty() && Doc()->GetBodies().back().IsMesh());
+    const size_t triangles = Doc()->GetBodies().back().mesh->triangles.size();
+    ctx->LogInfo("a mesh body of %zu triangles", triangles);
+    IM_CHECK(triangles >= FaceSelector::kPickBvhTriangles);
+    ctx->Yield(3); // synced: the tree is built with the tessellation
+    // The pick itself, straight down onto the sphere's top.
+    const Ray down{glm::vec3(0.0f, 0.0f, 500.0f), glm::vec3(0.0f, 0.0f, -1.0f)};
+    double worstPick = 0.0;
+    for (int i = 0; i < 20; i++) {
+      const double p0 = MainThreadCpuMs();
+      const RayHit hit = s_App->faceSelector->PickFace(down);
+      worstPick = std::max(worstPick, MainThreadCpuMs() - p0);
+      IM_CHECK(hit.hit);
+      IM_CHECK(std::abs(hit.point.z - float(r)) < 0.1f);
+    }
+    // ...and the frames the cursor hovers it in.
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(0.0f, 0.0f, float(r))));
+    double worstFrame = 0.0;
+    for (int i = 0; i < 10; i++) {
+      const double f0 = MainThreadCpuMs();
+      ctx->Yield();
+      worstFrame = std::max(worstFrame, MainThreadCpuMs() - f0);
+    }
+    ctx->LogInfo("worst pick %.2f ms, worst hovered frame %.1f ms", worstPick,
+                 worstFrame);
+    IM_CHECK(worstPick < 1000.0 / 60.0);
+    while (s_App->commands->UndoDepth() > depth)
+      s_App->commands->Undo(*Doc());
+    ctx->Yield(2);
+    std::filesystem::remove(stl);
+  };
+
   // A DXF into the sketch being edited: one undo step of baked entities,
   // which close and extrude like any others.
   t = IM_REGISTER_TEST(engine, "import", "dxf_into_open_sketch_extrudes");

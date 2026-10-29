@@ -39,6 +39,9 @@ struct StlExportResult {
   // asks: how much of the smallest gap the chords can take.
   std::string warning;
   Measure::ShellReport shells; // of the SOURCE B-Rep, not the mesh
+  // Mesh bodies written as their own triangles, not re-meshed: the
+  // deflection did not apply to them (docs/interchange/README.md#mesh-bodies).
+  size_t meshBodies = 0;
 };
 
 // The non-reference bodies of `part` (only `bodyIndex`'s when >= 0), fused,

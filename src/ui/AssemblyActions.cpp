@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/AssemblyActions.h"
+#include "cad/MeshShape.h"
 #include "ui/BodyAppearance.h"
 #include "ui/DerivedActions.h" // AuditPartRead
 #include "ui/MotionActions.h"
@@ -367,10 +368,15 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
       size_t palette = static_cast<size_t>(inst.partId);
       const auto& bodies = inst.part->GetBodies();
       for (size_t bi = 0; bi < bodies.size(); bi++) {
-        if (!bodies[bi].shape.IsValid() || bodies[bi].reference)
+        if ((!bodies[bi].shape.IsValid() && !bodies[bi].IsMesh()) ||
+            bodies[bi].reference)
           continue; // a derived ghost is another part's geometry
         MeshExport::Item item;
-        item.shape = bodies[bi].shape;
+        // A mesh body as its own triangles, which the writers take whole
+        // (docs/interchange/README.md#mesh-bodies).
+        item.shape = bodies[bi].IsMesh()
+                         ? cad::TriangulationShape(*bodies[bi].mesh)
+                         : bodies[bi].shape;
         // The tree path names the item ("Gangway/Board 03"), which is what a
         // glTF consumer needs to tell two identical boards apart.
         const std::string label =
@@ -387,9 +393,10 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
     for (const Body& body : state.document->GetBodies()) {
       MeshExport::Item item;
       FillItemAppearance(body, palette, item);
-      if (!body.shape.IsValid() || body.reference)
+      if ((!body.shape.IsValid() && !body.IsMesh()) || body.reference)
         continue; // a derived ghost is another part's geometry
-      item.shape = body.shape;
+      item.shape =
+          body.IsMesh() ? cad::TriangulationShape(*body.mesh) : body.shape;
       item.name = body.name;
       items.push_back(std::move(item));
     }
@@ -631,7 +638,7 @@ std::vector<Body> OccurrenceSubtreeBodies(AppState& state,
       if (b.reference)
         continue; // a derived ghost is not the occurrence's matter
       Body nb = b;
-      nb.shape = b.shape.Transformed(inst.world);
+      nb = PlacedBody(b, inst.world);
       out.push_back(std::move(nb));
     }
   }

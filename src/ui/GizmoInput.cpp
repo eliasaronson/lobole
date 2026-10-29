@@ -791,7 +791,7 @@ bool HandleFixtureGizmo(AppState& state, const Ray& screenRay, bool clicked,
   std::vector<Body> placed = FixtureModelBodies(state, *f);
   const glm::dmat4 m(cam::FixtureTransform(*f));
   for (Body& b : placed)
-    b.shape = b.shape.Transformed(m);
+    b = PlacedBody(b, m);
   const auto planes = cam::AxisFacePlanes(placed);
   for (int a = 0; a < 3; a++)
     for (const cam::AxisFacePlane& p : planes[a])

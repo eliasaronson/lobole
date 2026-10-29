@@ -30,4 +30,15 @@ bool ReadStlBytes(const std::string& bytes, const std::string& name,
                   TriMesh& out, std::string& error,
                   const Cancelled& cancelled = {});
 
+// A Wavefront OBJ's vertices and faces (`v`, `f`; a polygon fanned into
+// triangles, negative indices counted back, texture and normal indices
+// ignored), every object in one mesh, welded at the precision of its
+// printed digits. Groups, materials and everything else are skipped. False
+// with `error` naming the line on a face naming a vertex not there.
+bool ReadObj(const std::string& path, TriMesh& out, std::string& error,
+             const Cancelled& cancelled = {});
+bool ReadObjBytes(const std::string& bytes, const std::string& name,
+                  TriMesh& out, std::string& error,
+                  const Cancelled& cancelled = {});
+
 } // namespace mesh

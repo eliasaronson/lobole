@@ -10,6 +10,7 @@
 // a scan of the file, no geometry; the cost is a law fitted to imports
 // measured on the machine the table in the doc names.
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -36,6 +37,40 @@ double ExpectedMeshImportSeconds(uint64_t triangles);
 // The largest count whose expected cost is within kPatientImportSeconds,
 // solved from the same law.
 uint64_t MeshTriangleLimit();
+
+// What recognition costs (docs/interchange/README.md#mesh-bodies). Its
+// segmentation is superlinear on an organic mesh -- the slowest fixture
+// measured, the figure, took t = 2.0 s (n / 10^4)^2.2 -- and a mechanical
+// one is cheaper, so this is what it MAY take.
+double ExpectedRecognitionSeconds(uint64_t triangles);
+// The count at which that reaches kPatientImportSeconds (about 47,000):
+// `auto` recognises below it and keeps a mesh body at or above it.
+uint64_t RecognitionTriangleLimit();
+
+// What `auto` reads off a segmentation to call a mesh mechanical (rebuilt)
+// or organic (kept a mesh body): the share of its surface that lies in
+// LARGE regions, each at least kLargeRegionShare of the whole. Measured on
+// the fixtures (the hidden test "[mesh-auto-measure]"): every mechanical
+// one 100% at any tessellation, a 12-triangle box included; the organic
+// ones 0 to 13% at 10k triangles and up, 52 to 66% at 2k; the clean torus
+// 83 to 100%. A count of triangles a region does not separate them: a
+// coarse mechanical export holds 2 to 22 a region, as an organic one holds
+// 1 to 3. Both shares are fractions, not lengths.
+inline constexpr double kLargeRegionShare = 1e-3;
+inline constexpr double kMechanicalAreaShare = 0.9;
+
+// The tessellation cache's budget (ui/AppActionsInternal.h asserts it is
+// its kTessellationCacheBudgetBytes; core/ cannot include ui/).
+inline constexpr size_t kMeshBodyBudgetBytes = 256u * 1024 * 1024;
+
+// The largest mesh body this app holds on screen: what its vertex and index
+// buffers, counted twice (the outline asset uploads them again), fit in the
+// tessellation budget. A mesh past it is refused, naming the count to
+// decimate to.
+uint64_t MeshBodyTriangleLimit();
+
+// The refusal of a mesh body past MeshBodyTriangleLimit.
+std::string MeshBodyTooLarge(const std::string& path, uint64_t triangles);
 
 // "40 s", "about 2 min", "about 3 h".
 std::string DescribeSeconds(double seconds);

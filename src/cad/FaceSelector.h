@@ -11,6 +11,9 @@
 
 struct Vertex3D;
 class Camera;
+namespace mesh {
+class Bvh;
+}
 
 // A B-Rep face: the selectable unit. Tessellation emits each face as a
 // contiguous vertex range, which highlighting relies on.
@@ -70,12 +73,25 @@ public:
   // tell "the ray is inside this body where the section cuts" from "the ray
   // is in open air" -- an imported shell gets no inferred cap rather than a
   // phantom one in front of the part.
+  //
+  // `bvh`, a tree over the same triangles in the same order (a mesh body's,
+  // mesh::Bvh), makes the pick walk it instead of every triangle. A body
+  // hands one over past kPickBvhTriangles.
   void AddMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices,
                const std::vector<uint32_t>& indices,
                const std::vector<uint32_t>& triangleFaces = {},
                const glm::mat4& transform = glm::mat4(1.0f),
                const std::vector<std::vector<glm::vec3>>& edgePolylines = {},
-               bool solid = false);
+               bool solid = false,
+               std::shared_ptr<const mesh::Bvh> bvh = nullptr);
+
+  // Where a brute-force pick stops fitting the frame: it costs 15.7 ns a
+  // triangle (measured, docs/plans/organic-meshes-and-scans.md stage 0) and
+  // the hover pick runs every frame, so a quarter of a 60 Hz frame is
+  // reached at this many triangles. Derived, not chosen.
+  static constexpr double kBruteForcePickNsPerTriangle = 15.7;
+  static constexpr size_t kPickBvhTriangles =
+      size_t(0.25 * (1e9 / 60.0) / kBruteForcePickNsPerTriangle);
   void UpdateMeshTransform(uint32_t meshId, const glm::mat4& transform);
   void RemoveMesh(uint32_t meshId);
   void Clear();
@@ -140,6 +156,7 @@ private:
     std::vector<uint32_t> triangleFaces; // B-Rep face id per triangle
     std::vector<Face> faces;
     bool solid = false; // bounds a closed volume; see AddMesh
+    std::shared_ptr<const mesh::Bvh> bvh; // see AddMesh
     // B-Rep edge polylines in edgeIndex order (untransformed, like
     // vertices); empty when the mesh has no pickable edges.
     std::vector<std::vector<glm::vec3>> edgePolylines;

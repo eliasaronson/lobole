@@ -162,6 +162,42 @@ std::string DescribeTriangles(uint64_t triangles) {
   return out + (triangles == 1 ? " triangle" : " triangles");
 }
 
+namespace {
+// The figure's segmentation, the slowest organic fixture: fitted to its 10k
+// and 30k points (docs/plans/organic-meshes-and-scans.md, stage 0).
+constexpr double kRecognitionAt10k = 2.0;
+constexpr double kRecognitionExponent = 2.2;
+// What a mesh body puts in the tessellation budget a triangle: a closed
+// mesh has about half as many vertices as triangles, a vertex is 24 bytes
+// and a triangle three 4-byte indices, and the outline asset uploads the
+// buffers again.
+constexpr double kTessellationBudgetBytes = kMeshBodyBudgetBytes;
+constexpr double kMeshBodyBytesPerTriangle = 2.0 * (0.5 * 24.0 + 12.0);
+} // namespace
+
+double ExpectedRecognitionSeconds(uint64_t triangles) {
+  return kRecognitionAt10k *
+         std::pow(double(triangles) / 1e4, kRecognitionExponent);
+}
+
+uint64_t RecognitionTriangleLimit() {
+  return uint64_t(1e4 * std::pow(kPatientImportSeconds / kRecognitionAt10k,
+                                 1.0 / kRecognitionExponent));
+}
+
+uint64_t MeshBodyTriangleLimit() {
+  return uint64_t(kTessellationBudgetBytes / kMeshBodyBytesPerTriangle);
+}
+
+std::string MeshBodyTooLarge(const std::string& path, uint64_t triangles) {
+  return "'" + path + "' is a mesh of " + DescribeTriangles(triangles) +
+         ", past the " + DescribeTriangles(MeshBodyTriangleLimit()) +
+         " a mesh body can hold on screen here: decimate it in MeshLab "
+         "(Quadric Edge Collapse Decimation) or Blender (the Decimate "
+         "modifier) to under " +
+         DescribeTriangles(MeshBodyTriangleLimit()) + " and import that";
+}
+
 std::optional<MeshCost> MeshImportCost(const std::string& path) {
   if (!IsMeshFile(path))
     return std::nullopt;

@@ -130,6 +130,10 @@ void RefuseLargeMeshImport(const Feature& f) {
   const auto* imp = dynamic_cast<const ImportFeature*>(&f);
   if (imp == nullptr)
     return;
+  // A mesh body sews nothing: its own limit is the read's.
+  if (imp->representation == mesh::Representation::Mesh ||
+      imp->representation == mesh::Representation::Auto)
+    return;
   if (const auto cost = interchange::MeshImportCost(imp->path);
       cost && cost->overLimit)
     throw std::runtime_error(
@@ -151,7 +155,7 @@ void ImportRepresentationDefault(const ui::AppState& state, json& fj) {
   if (!ImportFeature::IsMesh(path)) {
     if (fj.contains("representation"))
       throw std::runtime_error("Import: representation: '" + path +
-                               "' is not a mesh; it is for STL");
+                               "' is not a mesh; it is for STL and OBJ");
     return;
   }
   if (!fj.contains("representation"))

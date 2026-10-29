@@ -340,6 +340,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An `Import`'s `representation` takes `mesh` (a [mesh body](../interchange/README.md#mesh-bodies): the triangles kept as they are) and `auto` (recognise a mechanical mesh, keep an organic one or one past the recognition limit a mesh body, decided on each read), on an STL or an OBJ; `min_sides` applies with `auto` too. Unknown values are refused, naming the four. Baked geometry is format 7: a mesh body is `geometry/N.mesh`, named by `mesh` in the index. Golden `vNEXT-import-mesh` |
 
 ## Paths in a project
 

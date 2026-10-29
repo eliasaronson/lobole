@@ -118,7 +118,7 @@ rebuilds the device in place ([the GPU choice](#the-gpu-choice)), and
 | Sharing | `git_user_name`, `git_user_email` | Next time | who a commit is by; empty = git's own configuration |
 | General | `terminal_panel` | Live | off by default ([terminal.md](terminal.md)) |
 | General | `autosave_interval` | Next time | seconds, 0 disables |
-| Import | `mesh_representation` | Next time | `recognize` (default) or `facets`: what a new STL import becomes when it names no `representation` ([recognising a faceted mesh](../interchange/README.md#recognising-a-faceted-mesh)); a saved import keeps its own |
+| Import | `mesh_representation` | Next time | `auto` (default), `mesh`, `recognize` or `facets`: what a new STL or OBJ import becomes when it names no `representation` ([mesh bodies](../interchange/README.md#mesh-bodies), [recognising a faceted mesh](../interchange/README.md#recognising-a-faceted-mesh)); a saved import keeps its own |
 
 Render quality and font size are not in the View menu: one control per
 setting is the only way two copies cannot drift. What stays in View is session

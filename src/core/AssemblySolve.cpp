@@ -782,6 +782,11 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
       return fail(std::move(why));
     }
 
+    // A mesh body has no face to put a connector on
+    // (docs/interchange/README.md#mesh-bodies).
+    if (std::string why = MeshBodyRefusal(body, "a mate's connector");
+        !why.empty())
+      return fail(std::move(why));
     // An imported face is the one picked, or followed to where the file
     // moved it (v201).
     const Body* on = &body;

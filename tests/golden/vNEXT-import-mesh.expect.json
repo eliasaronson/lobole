@@ -1,0 +1,9 @@
+{
+  "features": 3,
+  "bodies": 1,
+  "volumes": [
+    1000.0
+  ],
+  "import_representation": "auto",
+  "import_min_sides": 8
+}

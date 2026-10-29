@@ -325,7 +325,7 @@ JobFixtureSolids(AppState& state, const cam::Setup& setup, bool enabledOnly,
     // BodiesInSetupFrame, whose frame turns the PART and not the vise.
     const glm::dmat4 m = FixtureBedTransform(state, setup, f);
     for (Body& b : bodies)
-      b.shape = b.shape.Transformed(m);
+      b = PlacedBody(b, m);
     out.push_back({f.id, f.name, std::move(bodies)});
   }
   return out;

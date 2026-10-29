@@ -236,6 +236,9 @@ beside it (`src/core/io/GeometryCache.{h,cpp}`):
                 the features stamped on it (bends, thread regions, ring
                 grips, thread and hole marks, a Derived copy's source body)
   0.brep …      one binary B-Rep per body (BinTools)
+  1.mesh …      a mesh body's own triangles: a header, the counts, double
+                positions, uint32 triangles; named by `mesh` in the index
+                (format 7, docs/interchange/README.md#mesh-bodies)
 ```
 
 The element map travels because face and edge names are transient in memory,
@@ -321,7 +324,8 @@ reads the first three without loading the bodies).
 
 **In git.** Geometry is committed by default, so a clone or an old checkout
 opens fast and the geometry is pinned against kernel drift. Every save writes
-`.gitattributes` marking `geometry/*.brep binary -merge -diff`: a conflict
+`.gitattributes` marking `geometry/*.brep` and `geometry/*.mesh` `binary
+-merge -diff`: a conflict
 on derived data is resolved by taking either side, and the hash decides
 whether it survives. `commit_geometry: false` in a part's `index.json` turns
 it off: `geometry/` is deleted and a `.gitignore` keeps it out. Adding a git
@@ -746,9 +750,10 @@ loads every file or names it as unreadable; collecting crash reports never
 throws and copies nothing from outside the state dir; the registry never
 reports an instance with pid or port 0; a recovery refuses naming the
 sidecar; an image decodes to the size its header states, or not at all;
-a mesh (`meshes`, an STL binary and ASCII) is refused naming the file, or
-reads into a mesh whose every corner is a vertex and which segments with
-every triangle in a region.
+a mesh (`meshes`, an STL binary and ASCII and an OBJ) is refused naming
+the file, or reads into a mesh whose every corner is a vertex, which
+segments with every triangle in a region, and which a mesh body slices,
+caps and weighs without walking off it.
 
 **Registration.** One `TEST_CASE` per family, so ctest runs them in
 parallel. `[reader_fuzz]` is the fixed sample: every operator at least once

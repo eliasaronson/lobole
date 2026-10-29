@@ -3,6 +3,7 @@
 
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
+#include "core/mesh/MeshBvh.h"
 #include "render/Camera.h"
 #include "render/MeshRenderer.h"
 #include <algorithm>
@@ -17,10 +18,13 @@ void FaceSelector::AddMesh(
     uint32_t meshId, const std::vector<Vertex3D>& vertices,
     const std::vector<uint32_t>& indices,
     const std::vector<uint32_t>& triangleFaces, const glm::mat4& transform,
-    const std::vector<std::vector<glm::vec3>>& edgePolylines, bool solid) {
+    const std::vector<std::vector<glm::vec3>>& edgePolylines, bool solid,
+    std::shared_ptr<const mesh::Bvh> bvh) {
   auto meshData = std::make_unique<MeshData>();
   meshData->meshId = meshId;
   meshData->solid = solid;
+  if (bvh && bvh->Mesh().triangles.size() == indices.size() / 3)
+    meshData->bvh = std::move(bvh);
   meshData->vertices = vertices;
   meshData->indices = indices;
   meshData->edgePolylines = edgePolylines;
@@ -327,6 +331,51 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
     float lastCrossing = -1.0f;
     bool lastCrossingEnters = false;
     uint32_t lastCrossingFace = 0;
+
+    // A large mesh body walks its tree instead (kPickBvhTriangles). The
+    // same two answers: the nearest hit in the kept interval, and the last
+    // crossing before the cut, found by casting back from where it starts.
+    if (mesh->bvh) {
+      const mesh::Bvh& bvh = *mesh->bvh;
+      const glm::dvec3 o(local.origin), d(local.direction);
+      const double t0 = std::max(double(tEnter), 0.0);
+      const double tMax = double(tExit) - t0;
+      if (tMax >= 0.0) {
+        const mesh::Bvh::Hit h = bvh.Ray(o + d * t0, d, tMax);
+        if (h.hit && h.t + t0 > 0.0 && float(h.t + t0) < closestHit.distance) {
+          const float distance = float(h.t + t0);
+          const glm::vec3 n(bvh.Mesh().AreaNormal(h.triangle));
+          closestHit.hit = true;
+          closestHit.cap = false;
+          closestHit.distance = distance;
+          closestHit.point = ray.origin + ray.direction * distance;
+          closestHit.normal = glm::normalize(mesh->normalToWorld * n);
+          closestHit.meshId = mesh->meshId;
+          closestHit.faceIndex = mesh->triangleFaces[h.triangle];
+        }
+      }
+      if (sectioned && mesh->solid) {
+        const mesh::Bvh::Hit back =
+            bvh.Ray(o + d * double(tEnter), -d, double(tEnter));
+        if (back.hit) {
+          lastCrossing = float(double(tEnter) - back.t);
+          lastCrossingEnters =
+              glm::dot(d, bvh.Mesh().AreaNormal(back.triangle)) < 0.0;
+          lastCrossingFace = mesh->triangleFaces[back.triangle];
+        }
+      }
+      if (sectioned && mesh->solid && lastCrossingEnters &&
+          tEnter <= closestHit.distance) {
+        closestHit.hit = true;
+        closestHit.cap = true;
+        closestHit.distance = tEnter;
+        closestHit.point = ray.origin + ray.direction * tEnter;
+        closestHit.normal = enterNormal;
+        closestHit.meshId = mesh->meshId;
+        closestHit.faceIndex = lastCrossingFace;
+      }
+      continue;
+    }
 
     // Test every triangle; the hit maps back to its B-Rep face
     for (size_t t = 0; t < mesh->triangleFaces.size(); t++) {

@@ -79,3 +79,52 @@ def sphere(d, center, r, name="Sphere", **kw):
          "offset": [center[0], center[1]], "diameter": 2.0 * float(r)}
     f.update(kw)
     return d.call("add_feature", feature=f)
+
+
+def mesh_sphere(path, center=(0.0, 0.0, 0.0), r=20.0, rings=48, cut_z=None):
+    """Writes a UV sphere of `r` about `center` as a binary STL or an OBJ
+    (by `path`'s extension) and returns its triangle count: a closed,
+    smooth mesh a scan stands in for
+    (docs/interchange/README.md#mesh-bodies). `cut_z` drops every triangle with a corner below that height,
+    leaving it open, as a table-top scan arrives. Pure Python, no geometry
+    kernel."""
+    import math
+    import struct
+    cx, cy, cz = center
+    segs = 2 * rings
+    pts = []
+    for i in range(rings + 1):
+        th = math.pi * i / rings
+        for j in range(segs):
+            ph = 2 * math.pi * j / segs
+            pts.append((cx + r * math.sin(th) * math.cos(ph),
+                        cy + r * math.sin(th) * math.sin(ph),
+                        cz + r * math.cos(th)))
+    tris = []
+    for i in range(rings):
+        for j in range(segs):
+            a = i * segs + j
+            b = i * segs + (j + 1) % segs
+            c = (i + 1) * segs + j
+            e = (i + 1) * segs + (j + 1) % segs
+            if i > 0:
+                tris.append((a, c, b))
+            if i < rings - 1:
+                tris.append((b, c, e))
+    if cut_z is not None:
+        tris = [t for t in tris if min(pts[k][2] for k in t) >= cut_z]
+    if path.endswith(".obj"):
+        with open(path, "w") as f:
+            for p in pts:
+                f.write("v %.6f %.6f %.6f\n" % p)
+            for t in tris:
+                f.write("f %d %d %d\n" % (t[0] + 1, t[1] + 1, t[2] + 1))
+    else:
+        with open(path, "wb") as f:
+            f.write(b"\0" * 80 + struct.pack("<I", len(tris)))
+            for t in tris:
+                f.write(struct.pack("<3f", 0, 0, 0))
+                for k in t:
+                    f.write(struct.pack("<3f", *pts[k]))
+                f.write(b"\0\0")
+    return len(tris)

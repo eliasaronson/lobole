@@ -312,7 +312,29 @@ struct Body {
   // feature: what a plate's piece reads its source part's per-body print
   // settings by (core/PrintSettings.h).
   uint64_t derivedFrom = 0;
+
+  // A MESH BODY's triangles (docs/interchange/README.md#mesh-bodies): an
+  // imported mesh kept as it is, in the part's coordinates. `shape` is then
+  // empty, the element map holds the one element `<id>/b<k>/mesh`, and
+  // everything that needs a B-Rep refuses the body by name
+  // (MeshBodyRefusal). Transient like the shape; shared, never written.
+  std::shared_ptr<const mesh::TriMesh> mesh;
+  [[nodiscard]] bool IsMesh() const { return mesh != nullptr; }
 };
+
+// Why `what` (a feature, a tool, an RPC: "Fillet", "a mate") cannot use
+// `body`, or "" when it can: a mesh body has no faces or edges to give it.
+// The one helper every B-Rep-only consumer asks, so the refusal names the
+// body and the way on the same way everywhere.
+std::string MeshBodyRefusal(const Body& body, const std::string& what);
+
+// The body's bounding box: its shape's, or its mesh's. False (and zeros)
+// when it has neither.
+bool BodyBounds(const Body& body, glm::dvec3& lo, glm::dvec3& hi);
+
+// `body` carried by `xf`: its shape, or its mesh. Where an assembly places
+// a part's bodies.
+Body PlacedBody(const Body& body, const glm::dmat4& xf);
 
 class Feature;
 class Document;
@@ -842,6 +864,8 @@ public:
     m_shift = static_cast<const ImportFeature&>(executed).m_shift;
     m_up = static_cast<const ImportFeature&>(executed).m_up;
     m_recognized = static_cast<const ImportFeature&>(executed).m_recognized;
+    m_chosen = static_cast<const ImportFeature&>(executed).m_chosen;
+    m_chosenWhy = static_cast<const ImportFeature&>(executed).m_chosenWhy;
   }
 
   bool Execute(RegenContext& ctx) override;
@@ -903,6 +927,11 @@ public:
   int minSides = mesh::kDefaultMinSides;
   // Whether `path` is a mesh the representation applies to (.stl).
   static bool IsMesh(const std::string& path);
+  // What the last Execute made of a mesh -- "facets", "recognize" or
+  // "mesh" -- and why (`auto`'s reason, or "asked for"); empty for a file
+  // that is not a mesh.
+  const std::string& RepresentationChosen() const { return m_chosen; }
+  const std::string& RepresentationWhy() const { return m_chosenWhy; }
   // What the last Execute recognised, one per body it made from a mesh, in
   // the part's coordinates; empty for facets.
   struct Recognized {
@@ -961,6 +990,7 @@ private:
   glm::dvec3 m_shift{0.0}; // what the last Execute centred by
   interchange::UpDecision m_up; // what the last Execute turned it by
   std::vector<Recognized> m_recognized;
+  std::string m_chosen, m_chosenWhy;
 
   std::unique_ptr<CADKernel::ImportedModel> m_seed;
 

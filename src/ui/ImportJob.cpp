@@ -432,9 +432,11 @@ bool StartImport(AppState& state, const ImportRequest& request,
   // The limit prices sewing every triangle; a mesh to be recognised sews
   // none, so it goes ahead, and the worker refuses it only if it would have
   // to be kept as facets (ImportFeature::ReadOptions::facetsPastLimit).
-  const bool recognised =
-      ResolveRepresentation(state, path, request.representation) ==
-      mesh::Representation::Recognize;
+  // A mesh body sews nothing either (`mesh`, `auto`): its own limit is the
+  // read's (docs/interchange/README.md#mesh-bodies).
+  const mesh::Representation rep =
+      ResolveRepresentation(state, path, request.representation);
+  const bool recognised = rep != mesh::Representation::Facets;
   if (mesh && mesh->overLimit && !request.allowLargeMesh && !recognised)
     return fail(
         interchange::LargeMeshRefusal(path, *mesh, request.overrideName));
@@ -511,8 +513,8 @@ bool RequestImport(AppState& state, const std::string& path,
   // A mesh to be recognised is not priced by the sewing law, so nothing is
   // asked; one that falls back to facets past the limit is refused then.
   if (!IsSketchImportFile(path) && !ImportRunning(state) &&
-      ResolveRepresentation(state, path, std::nullopt) !=
-          mesh::Representation::Recognize)
+      ResolveRepresentation(state, path, std::nullopt) ==
+          mesh::Representation::Facets)
     if (const auto mesh = interchange::MeshImportCost(path);
         mesh && mesh->overLimit) {
       state.importAsk = {path, mesh->triangles, mesh->expectedSeconds};

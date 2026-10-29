@@ -27,6 +27,7 @@
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/MeshMeasure.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
@@ -160,7 +161,7 @@ std::optional<MeasureSource> ResolveOccurrenceBodies(AppState& state,
       continue;
     for (const Body& b : inst.part->GetBodies()) {
       Body nb = b;
-      nb.shape = b.shape.Transformed(inst.world);
+      nb = PlacedBody(b, inst.world);
       store.push_back(std::move(nb));
     }
   }
@@ -289,6 +290,8 @@ std::string WholeName(AppState& state, const MeasureState::Element& e) {
 // The world-space point a CORNER measurable resolves to, if it still does.
 std::optional<glm::dvec3> CornerWorldPoint(AppState& state,
                                            const MeasureState::Element& e) {
+  if (e.kind == MeasureState::Element::Kind::Point)
+    return e.point; // picked on a mesh body, already in the world
   const auto src = ResolveMeasureSource(state, e);
   if (!src)
     return std::nullopt;
@@ -301,7 +304,7 @@ std::optional<glm::dvec3> CornerWorldPoint(AppState& state,
 MeasureOut MeasureOne(AppState& state, const MeasureState::Element& e,
                       const units::System& u) {
   MeasureOut out;
-  if (e.IsCorner()) {
+  if (e.IsPoint()) {
     // A corner IS a coordinate — the one thing no other measurable could
     // report, and the reason point picking was wanted at all.
     const auto p = CornerWorldPoint(state, e);
@@ -309,7 +312,7 @@ MeasureOut MeasureOne(AppState& state, const MeasureState::Element& e,
       out.readout = "Those two edges no longer meet at one point.";
       return out;
     }
-    out.name = "corner";
+    out.name = e.IsCorner() ? "corner" : "point";
     out.readout = "At  x " + units::FormatLength(p->x, u) + "   y " +
                   units::FormatLength(p->y, u) + "   z " +
                   units::FormatLength(p->z, u);
@@ -354,18 +357,18 @@ std::optional<Measure::DistanceResult>
 CornerPairDistance(AppState& state, const MeasureState::Element& ea,
                    const MeasureState::Element& eb,
                    Measure::DistanceKind kind) {
-  const MeasureState::Element& corner = ea.IsCorner() ? ea : eb;
-  const MeasureState::Element& other = ea.IsCorner() ? eb : ea;
+  const MeasureState::Element& corner = ea.IsPoint() ? ea : eb;
+  const MeasureState::Element& other = ea.IsPoint() ? eb : ea;
   const auto cp = CornerWorldPoint(state, corner);
   if (!cp)
     return std::nullopt;
   Measure::DistanceResult out;
-  if (other.IsCorner()) {
+  if (other.IsPoint()) {
     const auto op = CornerWorldPoint(state, other);
     if (!op)
       return std::nullopt;
-    out.pointA = ea.IsCorner() ? *cp : *op;
-    out.pointB = ea.IsCorner() ? *op : *cp;
+    out.pointA = ea.IsPoint() ? *cp : *op;
+    out.pointB = ea.IsPoint() ? *op : *cp;
     out.distance = glm::distance(*cp, *op);
     return out;
   }
@@ -376,11 +379,15 @@ CornerPairDistance(AppState& state, const MeasureState::Element& ea,
   const Resolved ro = ResolveTargetFor(state, other);
   if (!ro.ok)
     return std::nullopt;
-  const auto nearest = Measure::NearestPointOn(ro.target, *cp, kind);
+  // A mesh body answers by its tree (the minimum: a point has no far end
+  // that a mesh could disagree about).
+  const auto nearest = meshmeasure::HasMesh(ro.target)
+                           ? meshmeasure::NearestPoint(ro.target, *cp)
+                           : Measure::NearestPointOn(ro.target, *cp, kind);
   if (!nearest)
     return std::nullopt;
-  out.pointA = ea.IsCorner() ? *cp : *nearest;
-  out.pointB = ea.IsCorner() ? *nearest : *cp;
+  out.pointA = ea.IsPoint() ? *cp : *nearest;
+  out.pointB = ea.IsPoint() ? *nearest : *cp;
   out.distance = glm::distance(*cp, *nearest);
   return out;
 }
@@ -401,7 +408,7 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   // face) fall through to the general path with the corner as a degenerate
   // target — handled below.
   std::optional<Measure::DistanceResult> d;
-  if (ea.IsCorner() || eb.IsCorner()) {
+  if (ea.IsPoint() || eb.IsPoint()) {
     d = CornerPairDistance(state, ea, eb, kind);
     if (!d) {
       out.readout = "Could not measure from that corner.";
@@ -416,7 +423,7 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   // corners' edges and, worse, re-anchor the dimension onto them: two
   // diagonal corners of a face read as the 2 mm between their edges instead
   // of the 2.83 mm between the points that were picked.
-  const bool pointInvolved = ea.IsCorner() || eb.IsCorner();
+  const bool pointInvolved = ea.IsPoint() || eb.IsPoint();
   const auto ang =
       (ea.Whole() || eb.Whole() || pointInvolved)
           ? std::optional<Measure::AngleResult>{}
@@ -715,12 +722,12 @@ std::string MeasureElementLabel(AppState& state,
            (e.kind == MeasureState::Element::Kind::Occurrence ? " (part)"
                                                               : " (body)");
   }
-  if (e.IsCorner()) {
+  if (e.IsPoint()) {
     std::string where;
     if (e.occurrenceId != 0 && state.assembly)
       if (const Occurrence* occ = state.assembly->FindById(e.occurrenceId))
         where = occ->name + " - ";
-    return where + "corner";
+    return where + (e.IsCorner() ? "corner" : WholeName(state, e) + " point");
   }
   std::string out;
   if (e.occurrenceId != 0 && state.assembly)

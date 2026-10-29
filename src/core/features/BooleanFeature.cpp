@@ -43,6 +43,15 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
+  // A mesh operand has no B-Rep to run a boolean on
+  // (docs/interchange/README.md#mesh-bodies).
+  for (const Body* b : {&*target, &*tool})
+    if (const std::string why = MeshBodyRefusal(*b, "a Boolean");
+        !why.empty()) {
+      SetError(why);
+      return false;
+    }
+
   // Run the boolean with history kept alive so the operands' element names
   // propagate onto the result (toponaming T5).
   const double targetVol = target->shape.Volume();

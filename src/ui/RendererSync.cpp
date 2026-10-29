@@ -345,8 +345,7 @@ void SyncDocumentRenderers(AppState& state) {
     const auto tessStart = SyncClock::now();
     // Cached by shape identity: a body whose shape did not change keeps its
     // tessellation AND its uploaded asset across syncs and across tabs.
-    const std::shared_ptr<BodyTessellation> tess =
-        TessellationFor(state, body.shape);
+    const std::shared_ptr<BodyTessellation> tess = TessellationFor(state, body);
     tessMs += msSince(tessStart);
     if (!tess)
       continue;
@@ -402,7 +401,7 @@ void SyncDocumentRenderers(AppState& state) {
     if (state.faceSelector)
       state.faceSelector->AddMesh(meshId, tess->vertices, tess->indices,
                                   tess->triangleFaces, glm::mat4(1.0f),
-                                  tess->edges, tess->solid);
+                                  tess->edges, tess->solid, tess->bvh);
     pickMs += msSince(pickStart);
     state.gpu.documentMeshes.push_back({meshId,
                                         outlineId,
@@ -429,7 +428,7 @@ void SyncDocumentRenderers(AppState& state) {
         const glm::mat4 xf(cam::FixtureTransform(f));
         for (const Body& b : FixtureModelBodies(state, f)) {
           const std::shared_ptr<BodyTessellation> tess =
-              TessellationFor(state, b.shape);
+              TessellationFor(state, b);
           if (!tess)
             continue;
           const uint32_t id =
@@ -451,7 +450,7 @@ void SyncDocumentRenderers(AppState& state) {
     float reach = 0.0f;
     for (const auto& body : bodies) {
       glm::dvec3 mn, mx;
-      body.shape.GetBoundingBox(mn, mx);
+      BodyBounds(body, mn, mx);
       for (int i = 0; i < 3; i++)
         reach =
             std::max({reach, float(std::abs(mn[i])), float(std::abs(mx[i]))});
@@ -701,6 +700,14 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   for (const RTItem& it : rtItems) {
     const Body& body = *it.body;
     const BodyTessellation* cached = cachedBodyFor(it);
+    // A mesh body traces its own triangles, the ones the viewport draws.
+    std::shared_ptr<BodyTessellation> meshTess;
+    if (cached == nullptr && body.IsMesh()) {
+      meshTess = TessellationFor(state, body);
+      if (!meshTess)
+        continue;
+      cached = meshTess.get();
+    }
     CADShape::Mesh cadMesh;
     if (cached == nullptr) {
       cadMesh = body.shape.GenerateMesh();
@@ -1661,7 +1668,9 @@ void SyncAssemblyRenderers(AppState& state) {
         if (warm != prewarmed.end() && bodyIdx < warm->second.size() &&
             !warm->second[bodyIdx].vertices.empty())
           pre = &warm->second[bodyIdx];
-        sb.tess = LookupOrBuildTessellation(state, body.shape, pre);
+        sb.tess = body.IsMesh()
+                      ? TessellationFor(state, body)
+                      : LookupOrBuildTessellation(state, body.shape, pre);
         if (!sb.tess) {
           shared.push_back(std::move(sb)); // keep index alignment
           continue;
@@ -1740,7 +1749,7 @@ void SyncAssemblyRenderers(AppState& state) {
       if (state.faceSelector)
         state.faceSelector->AddMesh(meshId, sb.tess->vertices, sb.tess->indices,
                                     sb.tess->triangleFaces, xf, sb.tess->edges,
-                                    sb.tess->solid);
+                                    sb.tess->solid, sb.tess->bvh);
       pickMs += elapsedMsSince(pickStart);
       // localXf: the leaf's place inside the unit. xf = DisplayMatrix(occ) *
       // localXf by construction, which is what lets the drag path recompose
@@ -1908,7 +1917,7 @@ void SyncInContextGhosts(AppState& state) {
       // of the part being edited re-instances it rather than rebuilding it.
       std::vector<std::shared_ptr<BodyTessellation>> tess;
       for (const auto& body : part->GetBodies())
-        tess.push_back(TessellationFor(state, body.shape));
+        tess.push_back(TessellationFor(state, body));
       it = byPart.emplace(key, std::move(tess)).first;
     }
     const glm::mat4 xf(inv * inst.world); // to the renderer, in float

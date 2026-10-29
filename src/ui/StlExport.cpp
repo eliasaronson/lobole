@@ -4,6 +4,7 @@
 #include "ui/StlExport.h"
 
 #include "cad/CADKernel.h"
+#include "cad/MeshShape.h"
 #include "core/Document.h"
 #include "core/PrintAllowance.h"
 
@@ -83,25 +84,41 @@ ExportPartStl(const Document& part, const std::string& path, int bodyIndex,
                 Mm(r.smallestGapSideMm) + " mm a side)";
   }
 
-  CADShape shape;
   if (bodyIndex >= 0) {
-    shape = bodies[static_cast<size_t>(bodyIndex)]->shape;
-    r.bodies = 1;
-  } else {
+    const Body* only = bodies[static_cast<size_t>(bodyIndex)];
+    bodies = {only};
+  }
+  r.bodies = bodies.size();
+  // A mesh body's triangles go out as they are (its triangulation-only
+  // shape, which the mesher leaves alone); the B-Rep bodies are fused and
+  // meshed at the deflection.
+  CADShape shape;
+  std::vector<CADShape> shapes, meshes;
+  for (const Body* b : bodies) {
+    if (b->IsMesh())
+      meshes.push_back(cad::TriangulationShape(*b->mesh));
+    else
+      shapes.push_back(b->shape);
+  }
+  r.meshBodies = meshes.size();
+  if (shapes.size() == 1)
+    shape = shapes.front();
+  else if (!shapes.empty())
     // STL is single-shape: several bodies are fused, as every CAD does --
     // those that may touch, in one boolean (CADShape::UnionOf).
-    std::vector<CADShape> shapes;
-    for (const Body* b : bodies)
-      shapes.push_back(b->shape);
     shape = CADShape::UnionOf(shapes);
-    r.bodies = bodies.size();
+  if (!shapes.empty())
+    // Watertightness of the SOURCE B-Rep (not the mesh): a non-watertight
+    // input still exports -- the report says whether to trust the STL.
+    r.shells = Measure::AnalyzeWatertight(shape);
+  if (!meshes.empty()) {
+    if (shape.IsValid())
+      meshes.insert(meshes.begin(), shape);
+    shape = CADShape::CompoundOf(meshes);
   }
   if (!CADKernel::Instance().SaveSTL(path, shape, r.deflectionMm,
                                      kStlAngularDeflectionRad))
     return std::unexpected("could not write " + path);
-  // Watertightness of the SOURCE B-Rep (not the mesh): a non-watertight
-  // input still exports -- the report says whether to trust the STL.
-  r.shells = Measure::AnalyzeWatertight(shape);
   return r;
 }
 

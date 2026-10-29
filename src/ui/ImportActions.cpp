@@ -325,6 +325,19 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
       state.importNoteWarn = !r.fellBack.empty();
       state.importNoteUntil = -1.0;
     }
+  // A mesh kept as a mesh body says so, and why (`auto`'s reason).
+  if (const size_t n = state.document->FeatureCount())
+    if (const auto* imp = dynamic_cast<const ImportFeature*>(
+            state.document->GetFeature(n - 1));
+        imp != nullptr && imp->RepresentationChosen() == "mesh") {
+      state.importNote =
+          "Kept as a mesh (" + imp->RepresentationWhy() +
+          "): measure, section and export it; B-Rep features refuse it" +
+          (imp->GetWarning().empty() ? "" : ". " + imp->GetWarning()) +
+          (state.importNote.empty() ? "" : ". " + state.importNote);
+      state.importNoteWarn = !imp->GetWarning().empty();
+      state.importNoteUntil = -1.0;
+    }
   FitCameraToDocument(state);
   return true;
 }

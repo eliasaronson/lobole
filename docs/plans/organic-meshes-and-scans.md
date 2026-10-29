@@ -53,16 +53,15 @@ five parts.
 - Volume, area, centroid and inertia come from the divergence theorem, and
   are defined only when `Closed()`.
 
-**`MeshBvh`**
-- The AABB tree `collide::Mesh` already has (`src/core/MeshCollide.*`), lifted
-  out and generalised.
+**`MeshBvh`** (built in stage 1: `src/core/mesh/MeshBvh.{h,cpp}`)
+- An AABB tree like the one `collide::Mesh` has (`src/core/MeshCollide.*`).
 - Queries: ray, closest point, and the fast generalised winding number
   (Barill et al. 2018).
 - The winding number is what decides inside from outside for an OPEN mesh,
   where ray parity (`collide::Mesh::Contains`) is wrong. `collide::Mesh`
-  becomes a user of it.
+  is not yet a user of it.
 
-**`Slice`**
+**`Slice`** (built in stage 1: `src/core/mesh/Slice.{h,cpp}`)
 - Plane ∩ mesh as closed or open polylines, chained exactly.
 - Douglas–Peucker simplification to a stated tolerance.
 - Triangulation of closed loops into section caps.
@@ -83,8 +82,8 @@ docs/interchange/README.md#recognising-a-faceted-mesh)
   and to put datums on it.
 
 **Readers**
-- STL (binary and ASCII), OBJ, PLY and GLB all produce a `TriMesh` without
-  building any B-Rep.
+- STL (binary and ASCII), OBJ (both built), PLY and GLB all produce a
+  `TriMesh` without building any B-Rep.
 - Every reader joins `tests/test_reader_fuzz.cpp`
   (docs/versioning/README.md#reader-fuzzing).
 
@@ -235,25 +234,15 @@ Every item but one reads the B-Rep, and the whole check first meshes a copy
   makes a face for nearly every other triangle: past about 500,000 faces it
   ran out of 6 GB in OpenCASCADE.
 - **"The share of the area that fits a primitive" does not tell organic
-  from mechanical.** Seed triples of noisy facets fit small spheres and
-  cylinders within four quanta: the noisy sphere leaves only 1.9% (10k) to
-  54% (2M) of its area as facets, the torus 0%, the figure 90–94%. What
-  does tell them apart is the triangles a region holds: the tube and the
-  plate 300 to 500,000 (4 and 30 regions at any size), the clean torus 70
-  to 380, the noisy sphere 1.4 to 2.7, the figure 1.5 to 1.7. Stage 1's
-  fallback to a mesh body reads that (a mechanical part's regions hold
-  hundreds), not the fitted area.
+  from mechanical**, and neither does the count of triangles a region
+  holds, once coarse exports are measured: a coarse mechanical export holds
+  2 to 22 a region, as an organic one holds 1 to 3. What separates them is
+  the share of the surface in large regions; stage 1's `auto` reads that
+  ([what auto chooses](../interchange/README.md#mesh-bodies)).
 - **The `auto` limit** is solved from the figure's law and
-  `interchange::kPatientImportSeconds` (60 s, the wait a person accepts
-  without being asked, as the facet import's limit is): segmentation alone
-  reaches it at n = 10⁴ · (60 / 2.0)^(1/2.2), about **47,000 triangles**,
-  written down nowhere as a number. Below it, `auto` segments and, by the
-  region size, rebuilds (mechanical) or keeps a mesh body without the
-  rebuild (organic); at or above it, a mesh body without recognition.
-  Recognition does not scale to the sizes that matter for scans
-  (100k–2M). A mechanical STL past 47,000 triangles therefore arrives as a mesh
-  body under `auto` although it would recognise in a second or two (the
-  2M tube in 3.7 s); `recognize` still forces it.
+  `interchange::kPatientImportSeconds`: segmentation alone reaches the
+  patient wait at about 47,000 triangles (`RecognitionTriangleLimit`).
+  Recognition does not scale to the sizes that matter for scans (100k–2M).
 
 #### The cost budget of a Cradle
 
@@ -279,128 +268,20 @@ under `parallel::For` (manifold is serial here), which stage 2 measures
 before it sets the budget it refuses past. Its `BuildCostS` is this law
 on the cells and triangles it would make.
 
-### Stage 1 — a mesh body (L)
+### Stage 1 — a mesh body
 
-An imported mesh stays a mesh and works everywhere a person looks at it,
-measures it or exports it.
-
-**The model**
-- `Body` (`src/core/Feature.h`) gains `std::shared_ptr<const mesh::TriMesh>
-  mesh`. A mesh body has an empty `CADShape`, and `Body::IsMesh()` says so.
-- A mesh body has one element, `<id>/b<k>/mesh`. It has no faces or edges in
-  the `ElementMap`.
-- A pick on it carries the hit point (and, inside the session only, the
-  triangle). A reference stored in the document is a point and the body,
-  never a triangle index, following the precedent of the fingerprinted
-  import projections: geometry, not index.
-
-**Import**
-- `Import`'s `representation` (today `facets | recognize`,
-  `mesh::Representation`) gains `mesh` and `auto`; anything else is refused,
-  naming them. `facets`, `recognize` and `mesh` force the choice.
-- `auto` is the default. It uses the stage-0 recognition cost law, with a
-  limit derived from that measured cost (as `MeshImportCost` derives the
-  patient-import limit), never a literal:
-  - below the limit, it segments, and when its regions hold many triangles
-    (a mechanical part's hold hundreds, an organic one's two or three:
-    stage 0) it rebuilds a solid (`recognize`); otherwise it keeps a mesh
-    body without the rebuild;
-  - at or above the limit, it goes straight to a mesh body without running
-    recognition.
-- The reply says which representation it chose and why ("mesh: 346 112
-  triangles, past the recognition limit of 46 900"; "mesh: 1.6 triangles a
-  region"), as the reply does for `up_axis: auto`.
-- The default is the existing `mesh_representation` preference
-  (docs/ui/settings.md), which gains the same two values. A per-import
-  `representation` overrides it.
-- Recognition does not scale to a scan's size (stage 0: superlinear on
-  organic meshes, past 300 s at 100k), so the limit is the one solved from
-  its law, about 47,000 triangles. `topo_to_body` follows the same rule.
-- An open mesh is kept, reported as open with its boundary loops and the
-  length of the longest. It is no longer skipped.
-- Readers go through `mesh::` (STL and OBJ here; PLY and GLB in stage 4).
-- Where the mesh is past what can be worked with here, the refusal names
-  what to do externally and the target: decimate in MeshLab or Blender to
-  under N triangles (the cost limit), or close the named holes in the
-  scanning app or Blender.
-- The file stays the recipe, as for every import: staged into `imported/`
-  and re-read on regeneration, with `ContentHash` unchanged.
-- `vNEXT` adds a `vNEXT-import-mesh.json` golden.
-
-**Baked geometry**
-- `src/core/io/GeometryCache.cpp` stores a mesh body as `N.mesh`, a small
-  binary of a header, double positions and `uint32` indices. This bumps
-  `kGeometryFormat`.
-- An open project therefore does not re-parse a 2M-triangle file.
-
-**Rendering and picking**
-- `TessellationFor` (`src/ui/TessellationCache.cpp`) returns the body's own
-  triangles with smooth normals split at a crease angle, and no BRepMesh.
-  The part render cache keys on the mesh hash.
-- `FaceSelector` uses `MeshBvh` for meshes above the size where a brute
-  force pick takes a quarter frame (stage 0: about 265,000 triangles, from
-  15.7 ns a triangle), instead of brute force (docs/rendering/README.md#picking already names
-  this). The whole mesh highlights as one range.
-- The ray tracer's re-mesh calls (`RendererSync.cpp` render-still paths)
-  take the triangles.
-
-**Section**
-- The raster clip already works on any triangles.
-- Caps of a closed mesh body come from `mesh::Slice`, not from
-  `Measure::SectionCaps`' OCC boolean.
-- An open mesh gets no cap, and `list_sections` says so for that body.
-- The `section` RPC (area, regions, loops, enclosed) reads the same slice,
-  so a scan's cross-section area and outline are numbers.
-
-**Measure**
-- `measure` of a mesh body gives the bounding size and area, and volume
-  when it is closed. When it is open, the volume is refused, naming the
-  boundary loops.
-- The new `{feature_id, point_mm: [x, y, z]}` names a point on a body. It is
-  snapped to the nearest surface point, and the reply gives the snapped
-  point and how far it moved, so point-to-point is the existing `{a, b}`
-  distance.
-- Between a mesh body and anything else the distance comes from `MeshBvh`.
-  The answer is exact to the mesh (its triangles are the geometry), so
-  `tolerance_mm` is the B-Rep side's deflection only.
-- The GUI Measure tool records the hit point on a mesh and measures point to
-  point.
-- `mass_properties` uses the divergence theorem, for closed meshes only.
-- `list_elements` on a mesh body lists its one element with its statistics
-  (triangles, components, loops, edge-length median), instead of tripping
-  `max_faces`.
-
-**Interference and clashes**
-- `collide::Mesh` is built from the body's triangles, with deflection 0.
-
-**`check_print`**
-- Each item stage 0 found reads the B-Rep switches to triangles.
-- Overhang is by triangle normal.
-- "One piece per solid" is the closed-component count. An open mesh body is
-  refused for printing, naming its holes and saying to close them in an
-  external tool (MeshLab, Blender or the scanning app), or to Cradle it.
-
-**Export**
-- `export_stl` and `export_print_job` (`PrintJob3mf`, through
-  `ui/PrintJobActions.cpp`'s `MeshObject`) write the triangles as they are.
-  The reply says that mesh bodies were not re-meshed, and so that
-  `stl_deflection_mm` did not apply to them.
-- `export_visual` hands mesh bodies to `MeshExport` unchanged (stage 0:
-  glTF, OBJ and PLY write a triangulation-only face whole).
-- `export_brep` writes the triangulation (it round-trips). `export_step`
-  writes a mesh body as a tessellated shell in AP242 with
-  `write.step.tessellated` on, set for that write only; on OpenCASCADE
-  older than 7.7, where the writer crashed on such a face, it is refused
-  naming the body and the formats that carry it.
-
-**Everything else refuses**
-- Every feature, tool and RPC that needs a B-Rep refuses a mesh body by
-  name, through one helper (`RequireBRepBody(body, what)`): fillet, shell,
-  sketch on a face, project_geometry, a mate, a drawing view, FEM, CAM.
-  None of them substitutes something else or yields an empty result.
-- The way this is checked is the action matrix and the random-design fuzz
-  run with a mesh body present. That is how a site the helper missed is
-  found.
+Built: an imported mesh stays a mesh body (`representation: mesh`, and
+`auto` choosing), measured, sectioned, checked for printing, baked and
+exported as its triangles, and refused by name by every B-Rep feature
+([mesh bodies](../interchange/README.md#mesh-bodies),
+[measuring one](../inspect/README.md#mesh-bodies),
+[drawing one](../rendering/README.md#mesh-bodies)). `MeshBvh` and `Slice`
+below are its. What the later stages still need of it:
+- the action matrix and `tools/fuzz.py` run with a mesh body in the part,
+  which is how a B-Rep consumer `MeshBodyRefusal` misses is found;
+- a GUI test reading `MainThreadCpuMs()` for a hover pick on the 2M mesh;
+- a mesh body in an assembly is drawn, picked and measured, but clashes
+  and contact sweeps there still read B-Rep shapes only.
 
 ### Stage 2 — the cradle (L)
 
@@ -578,33 +459,23 @@ often the better part than a cradle, because it stays fully parametric.
 ## Files
 
 **Core**
-- `src/core/mesh/` (new): `TriMesh`, `MeshBvh`, `Slice`, `Segment`, `Fit`,
-  `Field` (grid, winding number, sweep), `MeshReaders` (STL, OBJ, PLY,
-  GLB) and `MeshBoolean` (the one manifold caller).
+- `src/core/mesh/`: `Field` (grid, winding number, sweep) new; `MeshReaders`
+  gains PLY and GLB; `Segment` gains `GrowFrom`; `Fit` gains RANSAC.
 - `src/core/MeshCollide.*` becomes a user of `MeshBvh`.
-- `src/core/Feature.{h,cpp}`: `Body::mesh`, Import's `representation`,
-  `placement` and `scale`.
+- `src/core/Feature.{h,cpp}`: Import's `placement` and `scale`.
 - New feature: `src/core/features/CradleFeature.*`, and its heavy-feature
   job beside `src/ui/ImportJob.*`.
-- The settings table row for the default `representation`
-  (`docs/ui/settings.md`).
 - Changed features: `BooleanFeature.cpp`, `DatumPlaneFeature.*`,
   `DatumAxisFeature.*`.
-- `src/core/Measure.cpp`, `src/core/MassProps.cpp`, `src/core/PrintCheck.cpp`
-  and `src/core/sketch/` (the projected section).
+- `src/core/sketch/` (the projected section).
 
 **Serialization**
-- `src/core/io/SerializeFeatures.cpp`, `src/core/io/GeometryCache.cpp`
-  (`kGeometryFormat`) and `src/core/io/SerializationInternal.h`
+- `src/core/io/SerializeFeatures.cpp` and `src/core/io/SerializationInternal.h`
   (`kVersionPending`).
 - `tests/golden/vNEXT-*.json`.
 
 **Rendering, picking and export**
-- `src/cad/CADKernel.cpp` (readers move out), `src/cad/FaceSelector.cpp`
-  (BVH) and `src/cad/MeshExport.cpp`.
-- `src/ui/TessellationCache.cpp`, `src/ui/RendererSync.cpp`,
-  `src/ui/StlExport.cpp`, `src/ui/PrintJobActions.cpp` and
-  `src/ui/ImportActions.cpp`.
+- `src/ui/ImportActions.cpp` (placement).
 - New tools: Align, Cradle and Fit, and "To sketch" in the
   Section tool, each in its own `ui/` file.
 
@@ -621,20 +492,13 @@ often the better part than a cradle, because it stays fully parametric.
 
 **Docs**
 - `docs/interchange/README.md`, `docs/ui/long-operations.md`,
-  `docs/ui/settings.md`, `docs/inspect/README.md`,
-  `docs/modeling/README.md`, `docs/rendering/README.md`,
+  `docs/inspect/README.md`, `docs/modeling/README.md`,
   `docs/architecture.md` (libraries), `docs/versioning/format.md` and
   `docs/roadmap.md`.
 
 ## Verified by
 
 **Unit tests against the fixtures, checking the outcome**
-- A sphere's volume, area and centroid against the analytic values, from
-  `TriMesh` and through `mass_properties`.
-- The open blob reports its loop, and its volume is refused.
-- The dirty mesh welds to the expected components.
-- A section of the sphere is a circle of the right radius.
-- A point measure snaps onto the surface.
 - **Cradle of a sphere of radius r, clearance c:**
   - the pocket wall is at r + c, to within the reported deviation;
   - with `sweep`, the pocket's width above the equator stays 2(r + c) all
@@ -650,27 +514,15 @@ often the better part than a cradle, because it stays fully parametric.
 - `align_import floor` lands the cut face on z = 0.
 
 **Refusals**
-- A mesh past the limit is refused with the external-tool instruction and a
-  numeric target (triangle count, or the holes to close).
 - Each new enum or mode refused with its list.
-- Each B-Rep-only feature refused on a mesh body by name.
 - A Cradle with no clearance and no print process refused.
 - A refused call changes nothing (`refused_calls_smoke`).
 
 **Goldens and readers**
-- Every `vNEXT` golden, and a save and reopen that keeps the baked mesh with
-  no re-parse.
-- The reader fuzz over STL, OBJ, PLY and GLB.
+- Every `vNEXT` golden.
+- The reader fuzz over PLY and GLB.
 
-**Representation and the job**
-- `auto` on a mechanical fixture below the limit gives a solid with
-  recognised holes; on the organic blob it gives a mesh body; at or above the
-  limit it gives a mesh body and recognition never runs. The reply names the
-  choice and the reason in each case, and `facets`, `recognize` and `mesh`
-  force it.
-- A `mesh_representation` preference of `mesh` replaces `auto` as the
-  default, and a
-  per-import value overrides it.
+**The job**
 - A Cradle job reports progress. Cancelling an edit leaves the document
   byte-identical with no undo step. Cancelling the build during open leaves
   the feature "cancelled" with its downstream unbuilt, visible in the tree
@@ -680,21 +532,12 @@ often the better part than a cradle, because it stays fully parametric.
 
 **Cost checks** (CPU time, a bound per budget from stage 0, each shown to
 fail against a planted spin)
-- Import of the 2M fixture, and recognition on the largest fixture it runs on.
-- Mass properties.
 - A Cradle at the default resolution.
-- A section cap.
-
-**Responsiveness check**
-- A hover pick on the 2M mesh stays under a frame, in a GUI test reading
-  `MainThreadCpuMs()`.
 
 **Smokes and suites**
-- `headless_smoke.py` imports each format in each representation and
-  exports STL, 3MF and glTF.
+- `headless_smoke.py` imports PLY and GLB in each representation.
 - The action matrix and `tools/fuzz.py` run with a mesh body in the part.
 - A GUI test per tool, plus the `defaults/*` suite.
-- `render_pixel_smoke.py` re-run, since `RendererSync.cpp` changes.
 - `tools/ci-local.sh` for the Ubuntu containers, and the mingw build for
   the vendored libraries.
 

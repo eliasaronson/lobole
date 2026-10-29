@@ -121,6 +121,9 @@ struct Candidate {
   bool cap = false;
   glm::vec3 capPoint{0.0f};
   glm::vec3 capNormal{0.0f};
+  // Face candidates: where the ray met it. On a MESH body this is what the
+  // measure tool keeps (a point; the mesh has no faces to name).
+  glm::vec3 hitPoint{0.0f};
 };
 
 // Candidates under the cursor, best first, restricted to `kinds`. Edges
@@ -253,7 +256,9 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
           // the same element name (v76).
           if (const Body* body = BodyOfMesh(state, face.meshId))
             item.jobPartId = body->jobPartId;
-          out.push_back({std::move(item), face.meshId, face.faceIndex});
+          Candidate fc{std::move(item), face.meshId, face.faceIndex};
+          fc.hitPoint = face.point;
+          out.push_back(std::move(fc));
         }
       }
       if (kinds & KindBit(SelectionItem::Kind::Body)) {
@@ -383,6 +388,14 @@ void ConsumeMeasure(AppState& state, const Candidate& c) {
     e.ref = c.item.element;
     e.occurrenceId = c.item.id;
     e.jobPartId = c.item.jobPartId;
+    // A mesh body's one element is the whole mesh: what was clicked is the
+    // point on it (docs/inspect/README.md#mesh-bodies).
+    if (const Body* body = BodyOfMesh(state, c.meshId);
+        body != nullptr && body->IsMesh() && !state.assembly) {
+      e = MeasureState::Element::OfPoint(body->createdBy,
+                                         glm::dvec3(c.hitPoint));
+      e.jobPartId = c.item.jobPartId;
+    }
     break;
   }
   MeasureElementClicked(state, e);

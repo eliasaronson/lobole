@@ -360,6 +360,7 @@ set(core_sources
     src/cad/CADMaterials.cpp
     src/cad/MeshExport.cpp
     src/cad/MeshRebuild.cpp
+    src/cad/MeshShape.cpp
     src/render/IBL.cpp
     src/cad/SketchPlane.cpp
     src/cad/FaceSelector.cpp
@@ -395,6 +396,7 @@ set(core_sources
     src/core/FitBands.cpp
     src/core/PrintAllowance.cpp
     src/core/PrintCheck.cpp
+    src/core/PrintCheckMesh.cpp
     src/core/PrintSettings.cpp
     src/core/PrintedMass.cpp
     src/core/SheetMetal.cpp
@@ -509,10 +511,13 @@ set(core_sources
     src/core/features/FrameFeature.cpp
     src/core/Primitives.cpp
     src/core/MeshCollide.cpp
+    src/core/MeshMeasure.cpp
     src/core/mesh/TriMesh.cpp
     src/core/mesh/MeshReaders.cpp
     src/core/mesh/Fit.cpp
     src/core/mesh/Segment.cpp
+    src/core/mesh/MeshBvh.cpp
+    src/core/mesh/Slice.cpp
     src/core/io/RecognitionJson.cpp
     src/core/MotionStudy.cpp
     src/core/InputHash.cpp

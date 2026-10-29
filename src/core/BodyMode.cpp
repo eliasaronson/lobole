@@ -429,17 +429,38 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     glm::dvec3 pmin, pmax;
     shape.GetBoundingBox(pmin, pmax);
     int target = -1;
+    // A mesh body is never fused into (it has no faces to fuse); a tool that
+    // overlaps only mesh bodies is refused naming one, rather than landing
+    // as matter nobody asked to keep apart.
+    const Body* meshOnly = nullptr;
     for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
       if (bodies[i].reference)
         continue;
+      glm::dvec3 bmin, bmax;
+      BodyBounds(bodies[i], bmin, bmax);
+      if (bodies[i].IsMesh()) {
+        if (meshOnly == nullptr && BoxesOverlap(pmin, pmax, bmin, bmax))
+          meshOnly = &bodies[i];
+        continue;
+      }
       if (target < 0)
         target = i; // the last non-reference body, unless one overlaps
-      glm::dvec3 bmin, bmax;
-      bodies[i].shape.GetBoundingBox(bmin, bmax);
       if (BoxesOverlap(pmin, pmax, bmin, bmax)) {
         target = i;
+        meshOnly = nullptr;
         break;
       }
+    }
+    if (meshOnly != nullptr && target >= 0) {
+      glm::dvec3 bmin, bmax;
+      BodyBounds(bodies[target], bmin, bmax);
+      if (BoxesOverlap(pmin, pmax, bmin, bmax))
+        meshOnly = nullptr;
+    }
+    if (meshOnly != nullptr) {
+      Fail(error, MeshBodyRefusal(*meshOnly, "an Add") +
+                      " (make the solid a new body: mode new_body)");
+      return false;
     }
     if (target < 0) {
       if (!bodies.empty())
@@ -512,7 +533,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     // cover's cavity, extended by a loft that runs inside the outer shell,
     // swallowed the shell it was meant to hollow.
     for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
-      if (i == target || bodies[i].reference)
+      if (i == target || bodies[i].reference || bodies[i].IsMesh())
         continue;
       glm::dvec3 bmin, bmax;
       bodies[i].shape.GetBoundingBox(bmin, bmax);
@@ -547,9 +568,26 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     // Reference bodies are not matter: a cut passes through a Derived ghost
     // as if it were not there, and a part that has only ghosts has nothing
     // to cut into.
+    // A cut that reaches a mesh body is refused naming it: passing through
+    // it as if it were not there would leave the scan whole, a cut that
+    // quietly did nothing to what it crossed.
+    {
+      glm::dvec3 pmin, pmax;
+      shape.GetBoundingBox(pmin, pmax);
+      for (const Body& b : bodies) {
+        if (b.reference || !b.IsMesh())
+          continue;
+        glm::dvec3 bmin, bmax;
+        BodyBounds(b, bmin, bmax);
+        if (BoxesOverlap(pmin, pmax, bmin, bmax)) {
+          Fail(error, MeshBodyRefusal(b, "a Cut"));
+          return false;
+        }
+      }
+    }
     const bool anySolid =
         std::any_of(bodies.begin(), bodies.end(),
-                    [](const Body& b) { return !b.reference; });
+                    [](const Body& b) { return !b.reference && !b.IsMesh(); });
     if (!anySolid) {
       Fail(error, bodies.empty()
                       ? "cut with no bodies — nothing exists yet to cut into "
@@ -571,7 +609,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     std::string retried; // the fuzzy retries this cut needed, if any
     for (size_t i = 0; i < bodies.size(); i++) {
       Body& body = bodies[i];
-      if (body.reference)
+      if (body.reference || body.IsMesh())
         continue;
       CheckedBoolean cut =
           CheckedBooleanNamed(name, BooleanOp::Subtract, body.name, body.shape,
@@ -602,8 +640,9 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     // Drop bodies the cut fully consumed.
     bodies.erase(std::remove_if(bodies.begin(), bodies.end(),
                                 [](const Body& b) {
-                                  return !b.shape.IsValid() ||
-                                         b.shape.Volume() < 1e-9;
+                                  return !b.IsMesh() &&
+                                         (!b.shape.IsValid() ||
+                                          b.shape.Volume() < 1e-9);
                                 }),
                  bodies.end());
     double volAfter = 0.0;

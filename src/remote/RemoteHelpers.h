@@ -382,7 +382,22 @@ inline nlohmann::json BodyDigestJson(const Document& doc) {
   nlohmann::json arr = nlohmann::json::array();
   for (const Body& b : doc.GetBodies()) {
     glm::dvec3 mn(0.0), mx(0.0);
-    b.shape.GetBoundingBox(mn, mx);
+    BodyBounds(b, mn, mx);
+    if (b.IsMesh()) {
+      // A mesh body (docs/interchange/README.md#mesh-bodies): its triangles'
+      // volume when they close, 0 when they do not -- and it says which.
+      const bool closed = b.mesh->Closed();
+      arr.push_back(
+          {{"name", b.name},
+           {"created_by", b.createdBy},
+           {"volume_mm3", closed ? b.mesh->Volume() : 0.0},
+           {"bbox_min", Vec3ToJson(mn)},
+           {"bbox_max", Vec3ToJson(mx)},
+           {"solids", 0},
+           {"mesh",
+            {{"triangles", b.mesh->triangles.size()}, {"closed", closed}}}});
+      continue;
+    }
     arr.push_back({{"name", b.name},
                    {"created_by", b.createdBy},
                    {"volume_mm3", b.shape.Volume()},

@@ -428,6 +428,10 @@ public:
     // What a recognised mesh was found to be, in the file's coordinates
     // (docs/interchange/README.md#recognising-a-faceted-mesh).
     std::optional<mesh::Recognition> recognition;
+    // A mesh body's triangles (representation mesh or auto), in the file's
+    // coordinates; `shape` is then empty
+    // (docs/interchange/README.md#mesh-bodies).
+    std::shared_ptr<const mesh::TriMesh> mesh;
   };
   struct ImportedInstance {
     size_t product = 0;        // index into ImportedModel::products
@@ -450,6 +454,10 @@ public:
     // What the reader did that the caller should say: faces sewn into a
     // solid, a shell left open. One sentence each.
     std::vector<std::string> notes;
+    // What a mesh became and why ("mesh", "past the recognition limit of
+    // 46,900 triangles"), for the import's reply; empty for anything else.
+    std::string representation;
+    std::string representationWhy;
   };
   // How a long STEP read reports itself and how it is stopped. Both hooks are
   // called ON THE READING THREAD, so an implementation that a UI thread also

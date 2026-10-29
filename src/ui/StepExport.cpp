@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/StepExport.h"
+#include "cad/MeshShape.h"
+#include "cad/XcafDocument.h" // DataExchangeMutex
 #include "ui/DerivedActions.h"
 
 #include "core/AssemblySolve.h"
@@ -10,6 +12,8 @@
 #include "ui/AssemblyActions.h"    // PartResolverFor, AssemblyResolverFor
 #include "ui/BodyAppearance.h"
 #include "ui/DocumentSlots.h" // SlotIndexById
+
+#include <Interface_Static.hxx>
 
 #include <functional>
 #include <map>
@@ -47,7 +51,16 @@ std::vector<CADKernel::StepBody> PartBodies(const Document& part,
   for (const Body& b : part.GetBodies()) {
     // a placement of another material than its part exports as that
     const BodyLook look = ResolveBodyLook(b, palette, wears);
-    if (b.reference || !b.shape.IsValid())
+    if (b.reference)
+      continue;
+    // A mesh body as its triangulation: a tessellated shell in AP242
+    // (ExportStep sets the schema for the write).
+    if (b.IsMesh()) {
+      out.push_back(
+          {cad::TriangulationShape(*b.mesh), b.name, look.Color(), {}});
+      continue;
+    }
+    if (!b.shape.IsValid())
       continue;
     out.push_back({b.shape, b.name, look.Color(), FaceColors(b, look)});
   }
@@ -81,7 +94,10 @@ BuildPartStepModel(const Document& part, const std::string& name,
     const bool wanted =
         bodyIndex < 0 || listed == static_cast<size_t>(bodyIndex);
     listed++;
-    if (wanted && b.shape.IsValid())
+    if (wanted && b.IsMesh())
+      bodies.push_back(
+          {cad::TriangulationShape(*b.mesh), b.name, look.Color(), {}});
+    else if (wanted && b.shape.IsValid())
       bodies.push_back({b.shape, b.name, look.Color(), FaceColors(b, look)});
   }
   if (bodies.empty())
@@ -220,8 +236,38 @@ ExportStep(AppState& state, const Document* part, int bodyIndex,
   }
   if (!model)
     return std::unexpected(model.error());
+  // A mesh body goes out as a tessellated shell, which only AP242 with
+  // tessellation on carries: set for this write and put back
+  // (docs/interchange/README.md#mesh-bodies). OpenCASCADE 7.6's writer
+  // crashed on one, so there it is refused, naming the body.
+  std::string meshName;
+  for (const auto& pt : model->parts)
+    for (const auto& b : pt.bodies)
+      if (meshName.empty() && cad::IsTriangulationShape(b.shape))
+        meshName = b.name;
+  if (!meshName.empty() && !cad::StepWritesTessellation())
+    return std::unexpected(
+        "body '" + meshName +
+        "' is a mesh, and this build's OpenCASCADE (older than 7.7) cannot "
+        "write a mesh to STEP: export it as STL, 3MF (export_print_job), "
+        "glTF, OBJ or PLY (export_visual) or BREP");
   std::string why;
-  if (!CADKernel::Instance().SaveSTEPModel(path, *model, &why))
+  bool saved = false;
+  {
+    std::scoped_lock exchange(DataExchangeMutex());
+    const int schema = Interface_Static::IVal("write.step.schema");
+    const int tess = Interface_Static::IVal("write.step.tessellated");
+    if (!meshName.empty()) {
+      Interface_Static::SetIVal("write.step.schema", 5);      // AP242DIS
+      Interface_Static::SetIVal("write.step.tessellated", 1); // On
+    }
+    saved = CADKernel::Instance().SaveSTEPModel(path, *model, &why);
+    if (!meshName.empty()) {
+      Interface_Static::SetIVal("write.step.schema", schema);
+      Interface_Static::SetIVal("write.step.tessellated", tess);
+    }
+  }
+  if (!saved)
     return std::unexpected("STEP export failed writing " + path + ": " + why);
   return CountStepModel(*model);
 }

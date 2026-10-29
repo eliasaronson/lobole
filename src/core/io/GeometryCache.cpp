@@ -10,6 +10,7 @@
 #include "common/Logger.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/mesh/TriMesh.h"
 
 #include <nlohmann/json.hpp>
 
@@ -18,6 +19,7 @@
 #include <Standard_Version.hxx>
 #include <TopoDS_Shape.hxx>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -60,7 +62,68 @@ namespace {
 // part's per-body print settings; baked without it, a reopened copy of a
 // printed pin read its press as a clash, and a plate printed the copy at
 // the part's settings rather than the source body's.
-constexpr int kGeometryFormat = 6;
+// 7: mesh bodies. A body that is a mesh
+// (docs/interchange/README.md#mesh-bodies) is `N.mesh` -- its own triangles --
+// not `N.brep`, named in the index by `mesh` where a B-Rep is named by `brep`;
+// a 6 reader would have found no shape in it and rebuilt.
+constexpr int kGeometryFormat = 7;
+
+// A mesh body's blob: a header, the counts, double positions and uint32
+// triangles, little-endian as written (the blob is this machine's cache,
+// and a foreign one is rebuilt, not read). Checked whole before any of it
+// is used: the counts against the size, every index against the count.
+constexpr char kMeshMagic[8] = {'L', 'O', 'B', 'M', 'E', 'S', 'H', '1'};
+
+std::string MeshBlob(const mesh::TriMesh& m) {
+  const uint64_t nv = m.positions.size(), nt = m.triangles.size();
+  std::string out;
+  out.reserve(8 + 24 + nv * 24 + nt * 12);
+  out.append(kMeshMagic, 8);
+  const auto put = [&](const void* p, size_t n) {
+    out.append(static_cast<const char*>(p), n);
+  };
+  put(&nv, 8);
+  put(&nt, 8);
+  put(&m.quantum, 8);
+  put(m.positions.data(), nv * sizeof(glm::dvec3));
+  put(m.triangles.data(), nt * sizeof(m.triangles[0]));
+  return out;
+}
+
+// False with `why` on anything that is not a whole blob of ours.
+bool MeshFromBlob(const std::string& blob, mesh::TriMesh& m, std::string& why) {
+  if (blob.size() < 32 || std::memcmp(blob.data(), kMeshMagic, 8) != 0) {
+    why = "it is not a mesh blob";
+    return false;
+  }
+  uint64_t nv = 0, nt = 0;
+  std::memcpy(&nv, blob.data() + 8, 8);
+  std::memcpy(&nt, blob.data() + 16, 8);
+  std::memcpy(&m.quantum, blob.data() + 24, 8);
+  // Each count bounded by the size before it is multiplied.
+  if (nv > blob.size() / 24 || nt > blob.size() / 12 ||
+      blob.size() != 32 + nv * 24 + nt * 12 || nt == 0) {
+    why = "its counts do not match its size";
+    return false;
+  }
+  m.positions.resize(nv);
+  m.triangles.resize(nt);
+  std::memcpy(m.positions.data(), blob.data() + 32, nv * 24);
+  std::memcpy(m.triangles.data(), blob.data() + 32 + nv * 24, nt * 12);
+  for (const glm::dvec3& p : m.positions)
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) {
+      why = "it holds a position that is not a number";
+      return false;
+    }
+  for (const auto& t : m.triangles)
+    for (uint32_t v : t)
+      if (v >= nv) {
+        why = "a triangle names a vertex it does not hold";
+        return false;
+      }
+  mesh::BuildAdjacency(m);
+  return true;
+}
 
 // What the index's `content_hash` covers: the index itself without that key
 // (as nlohmann writes it: sorted, compact) and every blob it names, in its
@@ -376,10 +439,21 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
     std::vector<std::string> wanted;
     size_t i = 0;
     for (const Body& body : doc.GetBodies()) {
-      const std::string file = std::to_string(i++) + ".brep";
+      const std::string file =
+          std::to_string(i++) + (body.IsMesh() ? ".mesh" : ".brep");
       const fs::path target = geom / file;
       const fs::path tmp = geom / (file + ".tmp");
-      if (!BinTools::Write(body.shape.GetShape(), tmp.string().c_str())) {
+      if (body.IsMesh()) {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        const std::string blob = MeshBlob(*body.mesh);
+        out.write(blob.data(), std::streamsize(blob.size()));
+        if (!out) {
+          if (error)
+            *error = "could not write " + file;
+          return false;
+        }
+      } else if (!BinTools::Write(body.shape.GetShape(),
+                                  tmp.string().c_str())) {
         if (error)
           *error = "could not write " + file;
         return false;
@@ -395,7 +469,7 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
       } else {
         fs::rename(tmp, target);
       }
-      json entry{{"brep", file},
+      json entry{{body.IsMesh() ? "mesh" : "brep", file},
                  {"name", body.name},
                  {"material", body.material},
                  {"created_by", body.createdBy},
@@ -475,7 +549,8 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator(geom, ec)) {
       const std::string name = entry.path().filename().string();
-      if (entry.path().extension() == ".brep" &&
+      if ((entry.path().extension() == ".brep" ||
+           entry.path().extension() == ".mesh") &&
           std::find(wanted.begin(), wanted.end(), name) == wanted.end()) {
         fs::remove(entry.path(), ec);
       }
@@ -535,7 +610,9 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
     for (const json& bj : j.value("bodies", json::array())) {
       // A name from a shared project: a path out of geometry/ would read any
       // file into OCC's binary reader (core/io/ProjectPaths.h).
-      const std::string file = bj.at("brep").get<std::string>();
+      const std::string file = bj.contains("mesh")
+                                   ? bj.at("mesh").get<std::string>()
+                                   : bj.at("brep").get<std::string>();
       if (!projectpaths::IsPlainComponent(file))
         return ignore("index.json", "'" + file + "' is not a file in it");
       // The writer gives every body a file of its own. A body list grown by
@@ -557,14 +634,23 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
     std::vector<Body> bodies;
     size_t i = 0;
     for (const json& bj : j.value("bodies", json::array())) {
-      // Bounded: damaged bytes overran OCC 7.6's stack (cad/BoundedRead.h).
-      const TopoDS_Shape shape = cad::ReadBinaryBrep(blobs[i]);
-      const std::string& file = files[i++];
-      if (shape.IsNull())
-        return ignore(file, "it is unreadable");
       Body body;
+      const std::string& file = files[i];
+      if (bj.contains("mesh")) {
+        auto m = std::make_shared<mesh::TriMesh>();
+        std::string why;
+        if (!MeshFromBlob(blobs[i++], *m, why))
+          return ignore(file, why);
+        body.mesh = std::move(m);
+      } else {
+        // Bounded: damaged bytes overran OCC 7.6's stack
+        // (cad/BoundedRead.h).
+        const TopoDS_Shape shape = cad::ReadBinaryBrep(blobs[i++]);
+        if (shape.IsNull())
+          return ignore(file, "it is unreadable");
+        body.shape = CADShape(shape);
+      }
       body.name = bj.value("name", std::string{});
-      body.shape = CADShape(shape);
       body.material = bj.value("material", std::string{});
       body.createdBy = bj.value("created_by", uint64_t{0});
       body.elementMap =
@@ -634,7 +720,8 @@ bool WriteRepositoryHints(const std::string& dir, bool commit,
     const std::string attributes =
         "# Written by Lobole. Baked geometry is derived data: binary, and\n"
         "# never merged — a conflicted .brep is resolved by rebuilding.\n"
-        "geometry/*.brep binary -merge -diff\n";
+        "geometry/*.brep binary -merge -diff\n"
+        "geometry/*.mesh binary -merge -diff\n";
     {
       std::ofstream out(root / ".gitattributes", std::ios::trunc);
       out << attributes;

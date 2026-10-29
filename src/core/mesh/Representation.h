@@ -11,19 +11,32 @@
 //                was read before, and what a document that names none reads
 //   recognize -- the planes, cylinders, cones and spheres it was tessellated
 //                from, rebuilt as a solid of those faces
+//   mesh      -- the triangles kept as they are, a mesh body
+//                (docs/interchange/README.md#mesh-bodies)
+//   auto      -- recognize a mechanical mesh, keep an organic one (or one
+//                past the recognition limit) a mesh body, decided on each
+//                read from what the file holds
 //
-// One enum for the feature and the preference, so a later representation
-// (a mesh body, or `auto` choosing between them) is a value added here.
+// One enum for the feature and the preference.
 
 #include <optional>
 #include <string>
 
 namespace mesh {
 
-enum class Representation { Facets, Recognize };
+enum class Representation { Facets, Recognize, Mesh, Auto };
 
 inline const char* ToString(Representation r) {
-  return r == Representation::Recognize ? "recognize" : "facets";
+  switch (r) {
+  case Representation::Recognize:
+    return "recognize";
+  case Representation::Mesh:
+    return "mesh";
+  case Representation::Auto:
+    return "auto";
+  default:
+    return "facets";
+  }
 }
 
 inline std::optional<Representation>
@@ -32,16 +45,21 @@ RepresentationFromString(const std::string& s) {
     return Representation::Facets;
   if (s == "recognize")
     return Representation::Recognize;
+  if (s == "mesh")
+    return Representation::Mesh;
+  if (s == "auto")
+    return Representation::Auto;
   return std::nullopt;
 }
 
-// "facets, recognize": what a refusal names.
-inline const char* AcceptedRepresentations() { return "facets, recognize"; }
+// What a refusal names.
+inline const char* AcceptedRepresentations() {
+  return "facets, recognize, mesh, auto";
+}
 
 // What a new import takes when it names none, and the side count a curved
 // surface's facets must reach to be one (mesh::SegmentOptions::minSides).
-inline constexpr Representation kDefaultRepresentation =
-    Representation::Recognize;
+inline constexpr Representation kDefaultRepresentation = Representation::Auto;
 inline constexpr int kDefaultMinSides = 12;
 
 } // namespace mesh

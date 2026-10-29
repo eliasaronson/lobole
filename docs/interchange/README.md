@@ -465,20 +465,21 @@ code involved.
 
 ### The Import's representation
 
-An Import of an STL takes `representation`, which is `recognize` or
-`facets`; any other value is refused, naming the two.
+An Import of an STL or OBJ takes `representation`: `facets`, `recognize`,
+`mesh` ([a mesh body](#mesh-bodies)) or `auto`; any other value is refused,
+naming the four.
 
 - **Defaults.** A new import that names none takes the user's
-  `mesh_representation` preference (Preferences › Import; default
-  `recognize`, [settings](../ui/settings.md)). That covers `add_feature`,
+  `mesh_representation` preference (Preferences › Import; default `auto`,
+  [settings](../ui/settings.md)). That covers `add_feature`,
   `import_step`, File › Import, `--file` and the in-app browser. A saved
   Import that names none is `facets`, how every mesh import before v200 was
   read and its faces named.
 - **`topo_to_body` is always `facets`.** A topology result is a smoothed
   density surface, with nothing in it to recognise.
-- **`min_sides`** (5 to 1024, default 12) applies with `recognize` only. It
-  is refused with `facets`, and `representation` is refused on any file that
-  is not an STL.
+- **`min_sides`** (5 to 1024, default 12) applies with `recognize` and
+  `auto`. It is refused with `facets` and `mesh`, and `representation` is
+  refused on any file that is not an STL or an OBJ.
 - **The reply says what was recognised.** `add_feature` and `import_step`
   answer with `recognition`: per body, every cylinder, cone and sphere
   (radius, axis, centre, side count, sagitta), the polygons left flat,
@@ -507,6 +508,118 @@ What it is checked against:
   answers (`tests/test_mesh_files.cpp`): a motor plate with a nut trap, a
   pipe clamp with a default-resolution pentagon hole, and a knob that is a
   cone, a cylinder and a sphere.
+
+## Mesh bodies
+
+A scan or a sculpt (100k to 2M triangles) cannot be a B-Rep: every triangle
+would be a face, and an import of 100k took 560 s and 1.1 GB. A **mesh
+body** keeps the triangles as they are (`representation: mesh`). It is
+measured, sectioned, checked for printing and exported; every feature that
+needs faces or edges refuses it by name.
+
+**The model.** `Body::mesh` (`src/core/Feature.h`) holds a shared
+`mesh::TriMesh`, and its `shape` is empty (`Body::IsMesh()`). Its one
+element is `<id>/b<k>/mesh`, the element map's face 0, so a pick, a
+highlight and a selection treat the whole body as one thing; it has no
+edges. A point on it is stored as a point (`point_mm`) and the body, never
+a triangle index.
+
+**What `auto` chooses**, on every read of the file (the file stays the
+recipe). The reply's `representation` says `{chosen, why}`:
+- **At or past the recognition limit, a mesh body**, and recognition never
+  runs ("51,840 triangles, past the recognition limit of …").
+  The limit is solved from the slowest segmentation measured, the
+  organic figure's t = 2.0 s (n / 10⁴)^2.2, against the 60 s
+  `interchange::kPatientImportSeconds` (`RecognitionTriangleLimit`), and is
+  written down nowhere as a number.
+- **Below it, the mesh is segmented, and the regions decide.** A mechanical
+  part is mostly large surfaces; an organic one is a few triangles a
+  region. `auto` rebuilds a solid (`recognize`) when at least 90% of the
+  surface lies in regions each at least 0.1% of it, and keeps a mesh body
+  otherwise, without the rebuild ("57.3% of the surface in regions of at
+  least 0.1% of it: organic"). Measured on the fixtures (the hidden test
+  `[mesh-auto-measure]` in `tests/test_mesh_body_import.cpp` prints it):
+
+  | fixture | triangles | in large regions |
+  |---|---|---|
+  | plate, bracket, filleted angle, oblique and dome, rounded plate (two tessellations each) | 116 to 2,652 | 100% |
+  | a 12-triangle box | 12 | 100% |
+  | clean torus | 2k / 10k / 40k | 100 / 100 / 83% |
+  | figure, cut figure | 2k | 52 / 66% |
+  | figure, cut figure | 10k / 40k | 4.5 to 13% |
+  | noisy sphere | any | 0% |
+
+  The count of triangles a region holds does not separate them: a coarse
+  mechanical export holds 2 to 22 a region (the box 2), as an organic one
+  holds 1 to 3.
+- **A rebuild that fails a check keeps a mesh body**, saying which check.
+- A mechanical STL past the limit therefore arrives as a mesh body under
+  `auto` although it would recognise in seconds (the 2M tube in 3.7 s);
+  `recognize` forces it.
+
+**What a mesh body holds.** Past `interchange::MeshBodyTriangleLimit()` a
+mesh is refused before it is read: the triangles whose vertex and index
+buffers, counted twice (the outline uploads them again), fill the 256 MB
+tessellation budget, about 5.6M. The refusal says to decimate in MeshLab
+(Quadric Edge Collapse Decimation) or Blender (the Decimate modifier) to
+under that count.
+
+**An open mesh is kept**, the normal case for a scan of an object standing
+on a table: the import's warning says "the mesh is open: 1 boundary loop,
+the longest 212.4 mm". Its volume, its print check and its section caps are
+refused or absent, each saying so.
+
+**Readers.** STL and OBJ are read by `mesh::ReadStl` and `mesh::ReadObj`
+(`src/core/mesh/MeshReaders.cpp`) straight into a `TriMesh`, no B-Rep. An
+OBJ is every object in one mesh, its polygons fanned, welded at half its
+printed digit so integer corners stay apart.
+
+**Baked geometry.** A mesh body bakes as `geometry/N.mesh` (a header, the
+counts, double positions and `uint32` triangles), named in the index by
+`mesh` where a B-Rep is `brep`; geometry format 7. Reopening reads it, not
+the file: a 2M-triangle project opens without re-parsing.
+
+**Export.** Every writer takes the triangles unchanged, through
+`cad::TriangulationShape` (`src/cad/MeshShape.{h,cpp}`): a shell of one face
+holding only a `Poly_Triangulation`, which BRepMesh leaves alone.
+- `export_stl` and `export_print_job` write the triangles as they are; the
+  reply's `mesh_bodies` / `mesh_note` say `stl_deflection_mm` did not apply
+  to them.
+- `export_visual` (glTF, OBJ, PLY) and `export_brep` write them whole.
+- `export_step` writes a mesh body as a tessellated shell in AP242 with
+  `write.step.tessellated` on, set for that write only. On OpenCASCADE older
+  than 7.7 (Ubuntu 24.04's 7.6.3), whose writer crashed on such a face, it is
+  refused naming the body and the formats that carry it.
+
+**What refuses it.** `MeshBodyRefusal(body, what)` is the one sentence:
+"<what> needs a B-Rep, and body 'scan 1' is a mesh (…)". It is asked by:
+- every feature that names an element of it, through
+  `topo::FindOwningBody` and `topo::UnresolvedReason` (fillet, chamfer,
+  shell, draft, thread, split, a sketch or an extrude end on its face,
+  `project_geometry`);
+- a Boolean with a mesh operand;
+- an extrude or revolve Cut that reaches it, and an Add that reaches only
+  mesh bodies (an Add elsewhere skips it; a new body beside it is fine);
+- a mate's connector, a drawing view (unless `hidden` leaves it off), a FEM
+  study's load or refinement, and `add_job_part`.
+
+How it is checked:
+- `tests/test_mesh_body.cpp`: the tree, the slice and its cap, and the mass
+  properties, against the analytic fixtures.
+- `tests/test_mesh_body_import.cpp`: the import, `auto`'s three choices,
+  the open scan, the bake reopened with nothing executed, the export, the
+  refusals; and two `[slow]` CPU cost checks, each shown to fail against a
+  spin planted in what it times. The 2M figure imports in 10.5 s, weighs in
+  0.32 s and caps in 0.075 s of a low-power E-core's CPU (2.7, 0.065 and
+  0.017 s on a P-core), against bounds of 30, 2 and 1 s; `auto` reads and
+  rebuilds a 43,116-triangle plate in 0.44 s (bound 5 s).
+- `headless_smoke.py` (STL and OBJ in each representation, the STL and glTF
+  of a mesh body, an open scan's refused volume and a snapped point),
+  `print_job_smoke.py` (a mesh body's own triangles in the 3MF; an open one
+  refused by `check_print`), the reader fuzz's `meshes` family (an OBJ, and
+  a mesh body's slice and mass of whatever it read).
+- GUI `import/a_hover_pick_on_a_2m_mesh_fits_a_frame`: the pick on a
+  2M-triangle mesh body, in main-thread CPU, under a 60 Hz frame.
 
 ## Importing an assembly
 
@@ -679,7 +792,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 
 | RPC | module | does |
 |---|---|---|
-| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?}` | RemoteProject | every 3D format, whatever the name says: STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; an STL recognised or kept as facets (`representation`); replies `up_axis`, `mesh` for a mesh and `recognition` for a recognised STL |
+| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?}` | RemoteProject | every 3D format, whatever the name says: STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; a mesh as facets, recognised, a [mesh body](#mesh-bodies) or `auto` (`representation`); replies `up_axis`, `mesh` for a mesh, `representation` {chosen, why} and `recognition` for a recognised one |
 | `import_sketch {path, sketch_id? \| plane?, units?, layers?, construction_layers?, keep_origin?}` | RemoteModeling | a DXF or SVG into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) |
 | `export_step {path, part?, body?}` | RemoteProject | structured STEP of a part or the assembly |
 | `export_stl {path, body?, stl_deflection_mm?}`, `export_brep {path, body?}` | RemoteProject | one shape of the active part |

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <unordered_map>
 
 namespace mesh {
@@ -253,6 +254,118 @@ size_t Components(const TriMesh& m, std::vector<uint32_t>& componentOf) {
     }
   }
   return count;
+}
+
+std::vector<double> BoundaryLoops(const TriMesh& m) {
+  std::unordered_multimap<uint32_t, uint32_t> next; // from -> to
+  for (uint32_t t = 0; t < m.triangles.size() && t < m.neighbour.size(); t++)
+    for (int e = 0; e < 3; e++)
+      if (m.neighbour[t][e] == kNone)
+        next.emplace(m.triangles[t][(e + 1) % 3], m.triangles[t][e]);
+  std::vector<double> loops;
+  while (!next.empty()) {
+    auto it = next.begin();
+    const uint32_t start = it->first;
+    uint32_t at = start;
+    double length = 0.0;
+    do {
+      const uint32_t to = it->second;
+      length += glm::length(m.positions[to] - m.positions[at]);
+      next.erase(it);
+      at = to;
+      it = next.find(at);
+    } while (at != start && it != next.end());
+    loops.push_back(length);
+  }
+  std::sort(loops.begin(), loops.end(), std::greater<>());
+  return loops;
+}
+
+MassProperties ComputeMassProperties(const TriMesh& m) {
+  // Tonon (2004) / Eberly: per tetrahedron (origin, a, b, c), accumulated as
+  // the integrals of 1, x, y, z, x², y², z², xy, yz, zx.
+  MassProperties r;
+  double intg[10] = {0};
+  const auto sub = [](double w0, double w1, double w2, double& f1, double& f2,
+                      double& f3, double& g0, double& g1, double& g2) {
+    const double t0 = w0 + w1;
+    f1 = t0 + w2;
+    const double t1 = w0 * w0, t2 = t1 + w1 * t0;
+    f2 = t2 + w2 * f1;
+    f3 = w0 * t1 + w1 * t2 + w2 * f2;
+    g0 = f2 + w0 * (f1 + w0);
+    g1 = f2 + w1 * (f1 + w1);
+    g2 = f2 + w2 * (f1 + w2);
+  };
+  for (uint32_t t = 0; t < m.triangles.size(); t++) {
+    const glm::dvec3 p0 = m.Corner(t, 0), p1 = m.Corner(t, 1),
+                     p2 = m.Corner(t, 2);
+    r.area += m.Area(t);
+    const glm::dvec3 d = glm::cross(p1 - p0, p2 - p0);
+    double f1x, f2x, f3x, g0x, g1x, g2x, f1y, f2y, f3y, g0y, g1y, g2y, f1z, f2z,
+        f3z, g0z, g1z, g2z;
+    sub(p0.x, p1.x, p2.x, f1x, f2x, f3x, g0x, g1x, g2x);
+    sub(p0.y, p1.y, p2.y, f1y, f2y, f3y, g0y, g1y, g2y);
+    sub(p0.z, p1.z, p2.z, f1z, f2z, f3z, g0z, g1z, g2z);
+    intg[0] += d.x * f1x;
+    intg[1] += d.x * f2x;
+    intg[2] += d.y * f2y;
+    intg[3] += d.z * f2z;
+    intg[4] += d.x * f3x;
+    intg[5] += d.y * f3y;
+    intg[6] += d.z * f3z;
+    intg[7] += d.x * (p0.y * g0x + p1.y * g1x + p2.y * g2x);
+    intg[8] += d.y * (p0.z * g0y + p1.z * g1y + p2.z * g2y);
+    intg[9] += d.z * (p0.x * g0z + p1.x * g1z + p2.x * g2z);
+  }
+  const double mult[10] = {1.0 / 6,  1.0 / 24, 1.0 / 24,  1.0 / 24,  1.0 / 60,
+                           1.0 / 60, 1.0 / 60, 1.0 / 120, 1.0 / 120, 1.0 / 120};
+  for (int i = 0; i < 10; i++)
+    intg[i] *= mult[i];
+  r.volume = intg[0];
+  if (r.volume == 0.0)
+    return r;
+  const glm::dvec3 c(intg[1] / r.volume, intg[2] / r.volume,
+                     intg[3] / r.volume);
+  r.centroid = c;
+  const double V = r.volume;
+  const double xx = intg[5] + intg[6] - V * (c.y * c.y + c.z * c.z);
+  const double yy = intg[4] + intg[6] - V * (c.z * c.z + c.x * c.x);
+  const double zz = intg[4] + intg[5] - V * (c.x * c.x + c.y * c.y);
+  const double xy = -(intg[7] - V * c.x * c.y);
+  const double yz = -(intg[8] - V * c.y * c.z);
+  const double zx = -(intg[9] - V * c.z * c.x);
+  r.inertia = glm::dmat3(xx, xy, zx, xy, yy, yz, zx, yz, zz);
+  return r;
+}
+
+TriMesh Transformed(const TriMesh& m, const glm::dmat4& xf) {
+  TriMesh out;
+  out.quantum = m.quantum;
+  out.positions.reserve(m.positions.size());
+  for (const glm::dvec3& p : m.positions)
+    out.positions.push_back(glm::dvec3(xf * glm::dvec4(p, 1.0)));
+  out.triangles = m.triangles;
+  if (glm::determinant(glm::dmat3(xf)) < 0.0)
+    for (auto& t : out.triangles)
+      std::swap(t[1], t[2]);
+  // A scale scales the precision the file was written at too.
+  out.quantum *= std::cbrt(std::abs(glm::determinant(glm::dmat3(xf))));
+  BuildAdjacency(out);
+  return out;
+}
+
+double MedianEdgeLength(const TriMesh& m) {
+  std::vector<double> lengths;
+  lengths.reserve(m.triangles.size() * 3);
+  for (uint32_t t = 0; t < m.triangles.size(); t++)
+    for (int e = 0; e < 3; e++)
+      lengths.push_back(glm::length(m.Corner(t, (e + 1) % 3) - m.Corner(t, e)));
+  if (lengths.empty())
+    return 0.0;
+  auto mid = lengths.begin() + lengths.size() / 2;
+  std::nth_element(lengths.begin(), mid, lengths.end());
+  return *mid;
 }
 
 } // namespace mesh

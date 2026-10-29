@@ -76,6 +76,28 @@ void BuildAdjacency(TriMesh& m);
 // 0 in order of each component's first triangle. Returns the count.
 size_t Components(const TriMesh& m, std::vector<uint32_t>& componentOf);
 
+// The boundary loops of `m` (adjacency built): each loop's length in mm,
+// longest first.
+std::vector<double> BoundaryLoops(const TriMesh& m);
+
+// Volume, area, centroid and the inertia tensor about the centroid (unit
+// density, mm^5), by the divergence theorem over the triangles. The volume
+// terms mean something only when `m` is Closed().
+struct MassProperties {
+  double volume = 0.0; // mm^3
+  double area = 0.0;   // mm^2
+  glm::dvec3 centroid{0.0};
+  glm::dmat3 inertia{0.0};
+};
+MassProperties ComputeMassProperties(const TriMesh& m);
+
+// A copy carried by `xf` (rigid or scaled; a mirror reverses the winding
+// back so the copy stays outward), adjacency rebuilt.
+TriMesh Transformed(const TriMesh& m, const glm::dmat4& xf);
+
+// What `list_elements` says of a mesh: the median edge length (mm).
+double MedianEdgeLength(const TriMesh& m);
+
 // The float32 spacing at the largest coordinate of `positions`: what a
 // binary STL can say.
 double Float32Quantum(const std::vector<glm::dvec3>& positions);

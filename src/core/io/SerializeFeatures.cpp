@@ -2237,19 +2237,25 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "THE FILE is up — auto (default: from the header; a SolidWorks STEP is "
      "+y), none, +x, -x, +y, -y, -z — and turn_deg?: a turn about world Z "
      "after it; the reply's `up_axis` says what was applied and why. "
-     "representation?: what an STL becomes -- recognize (the holes, flats, "
-     "cones and spheres its triangles were made from, rebuilt as true "
-     "faces: a hole has a diameter and an axis) or facets (a face per "
-     "triangle); absent = the user's mesh_representation preference for a "
-     "new import, facets in a saved one. min_sides?: with recognize, the "
-     "fewest sides a ring of facets has to be round (default 12, 5 to 1024: "
-     "a 6-sided nut trap stays flats; 5 takes OpenSCAD's pentagon holes). "
-     "The reply's `recognition` lists what was found, the polygons left flat "
-     "and, if the rebuild failed a check, why it was kept as facets "
-     "(docs/interchange/README.md#recognising-a-faceted-mesh)",
+     "representation?: what an STL or OBJ becomes -- recognize (the holes, "
+     "flats, cones and spheres its triangles were made from, rebuilt as true "
+     "faces: a hole has a diameter and an axis), facets (a face per "
+     "triangle), mesh (a mesh body: the triangles kept as they are, "
+     "measured, sectioned and exported, refused by B-Rep features; for a "
+     "scan or a sculpt) or auto (recognize a mechanical mesh, keep an "
+     "organic one or one past the recognition limit a mesh body); absent = "
+     "the user's mesh_representation preference for a new import (auto by "
+     "default), facets in a saved one. min_sides?: with recognize or auto, "
+     "the fewest sides a ring of facets has to be round (default 12, 5 to "
+     "1024: a 6-sided nut trap stays flats; 5 takes OpenSCAD's pentagon "
+     "holes). The reply's `representation` says what was chosen and why, "
+     "and `recognition` lists what was found, the polygons left flat and, "
+     "if the rebuild failed a check, why it was kept as facets "
+     "(docs/interchange/README.md#mesh-bodies)",
      "path:string, units?:'mm'|'cm'|'m'|'in', keep_origin?:bool, "
      "color?:any, up_axis?:'auto'|'none'|'+x'|'-x'|'+y'|'-y'|'-z', "
-     "turn_deg?:number, representation?:'facets'|'recognize', "
+     "turn_deg?:number, "
+     "representation?:'facets'|'recognize'|'mesh'|'auto', "
      "min_sides?:int"},
     {"Derived", 84,
      "source_part (a part slot id), configuration?: the source's "
@@ -3234,9 +3240,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "Import: min_sides is a whole number of sides, " +
             std::to_string(mesh::kMinSidesLowest) + " to " +
             std::to_string(mesh::kMinSidesHighest) + "; got " + m.dump());
-      if (imp->representation != mesh::Representation::Recognize)
+      if (imp->representation != mesh::Representation::Recognize &&
+          imp->representation != mesh::Representation::Auto) // vNEXT
         throw std::runtime_error(
-            "Import: min_sides is for representation: recognize");
+            "Import: min_sides is for representation: recognize or auto");
       imp->minSides = m.get<int>();
     }
     out = std::move(imp);

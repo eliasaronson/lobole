@@ -4,6 +4,7 @@
 #include "core/mesh/MeshBoolean.h"
 
 #include <manifold/manifold.h>
+#include <manifold/polygon.h>
 
 #include <algorithm>
 #include <string>
@@ -113,6 +114,28 @@ bool Boolean(const TriMesh& a, const TriMesh& b, BooleanOp op, TriMesh& out,
   BuildAdjacency(result);
   out = std::move(result);
   return true;
+}
+
+bool TriangulatePolygons(const std::vector<std::vector<glm::dvec2>>& loops,
+                         std::vector<std::array<uint32_t, 3>>& out) {
+  manifold::PolygonsIdx polys;
+  int index = 0;
+  for (const auto& loop : loops) {
+    manifold::SimplePolygonIdx poly;
+    for (const glm::dvec2& p : loop)
+      poly.push_back({manifold::vec2(p.x, p.y), index++});
+    polys.push_back(std::move(poly));
+  }
+  try {
+    const std::vector<manifold::ivec3> tris = manifold::TriangulateIdx(polys);
+    out.clear();
+    out.reserve(tris.size());
+    for (const manifold::ivec3& t : tris)
+      out.push_back({uint32_t(t[0]), uint32_t(t[1]), uint32_t(t[2])});
+  } catch (const std::exception&) {
+    return false;
+  }
+  return !out.empty();
 }
 
 const char* BooleanLibrary() { return "manifold " LOBOLE_MANIFOLD_VERSION; }

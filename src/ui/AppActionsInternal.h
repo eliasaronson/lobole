@@ -20,6 +20,11 @@
 #include <unordered_map>
 #include <vector>
 
+struct Body;
+namespace mesh {
+class Bvh;
+}
+
 class Document;
 class SketchFeature;
 class AssemblyDocument;
@@ -77,6 +82,10 @@ extern const glm::vec3 kBodyPalette[5];
 // id cannot be recycled under the cache.
 struct BodyTessellation {
   CADShape shape; // the exact key, and what keeps GeometryId() valid
+  // A mesh body's triangles instead (the key, by address), and the tree a
+  // pick walks when it is past FaceSelector::kPickBvhTriangles.
+  std::shared_ptr<const mesh::TriMesh> mesh;
+  std::shared_ptr<const mesh::Bvh> bvh;
   std::vector<Vertex3D> vertices;
   std::vector<uint32_t> indices;
   std::vector<uint32_t> triangleFaces;
@@ -114,6 +123,11 @@ inline constexpr size_t kTessellationCacheBudgetBytes = 256u * 1024 * 1024;
 // TrimTessellationCache; callers use it within one sync.
 std::shared_ptr<BodyTessellation> TessellationFor(AppState& state,
                                                   const CADShape& shape);
+// A body's: its shape's, or a mesh body's own triangles with smooth normals
+// split at the outline's crease angle, and no BRepMesh
+// (docs/rendering/README.md#mesh-bodies).
+std::shared_ptr<BodyTessellation> TessellationFor(AppState& state,
+                                                  const Body& body);
 // The outline asset for an entry, created on first use. 0 without an
 // outline renderer.
 uint32_t OutlineAssetFor(AppState& state, BodyTessellation& entry);

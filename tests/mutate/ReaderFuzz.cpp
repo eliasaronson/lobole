@@ -25,6 +25,7 @@
 #include "core/io/Settings.h"
 #include "core/mesh/MeshReaders.h"
 #include "core/mesh/Segment.h"
+#include "core/mesh/Slice.h"
 #include "remote/InstanceRegistry.h"
 #include "thirdparty/stb_image.h"
 #include "thirdparty/stb_image_write.h"
@@ -2156,13 +2157,32 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
     const auto soup = WasherSoup(24);
     WriteBytes(fixture / "washer.stl", BinaryStl(soup));
     WriteBytes(fixture / "washer-ascii.stl", AsciiStl(soup));
+    // OBJ, read by mesh::ReadObj into a mesh body's TriMesh
+    // (docs/interchange/README.md#mesh-bodies).
+    {
+      std::string obj = "o washer\n";
+      char line[96];
+      for (const glm::dvec3& p : soup) {
+        std::snprintf(line, sizeof line, "v %.6f %.6f %.6f\n", p.x, p.y, p.z);
+        obj += line;
+      }
+      for (size_t t = 0; t + 2 < soup.size(); t += 3) {
+        std::snprintf(line, sizeof line, "f %zu %zu %zu\n", t + 1, t + 2,
+                      t + 3);
+        obj += line;
+      }
+      WriteBytes(fixture / "washer.obj", obj);
+    }
     check = [](const fs::path& w, const Case&) -> std::string {
-      for (const char* name : {"washer.stl", "washer-ascii.stl"}) {
+      for (const char* name :
+           {"washer.stl", "washer-ascii.stl", "washer.obj"}) {
         if (!fs::exists(w / name))
           continue;
         mesh::TriMesh m;
         std::string error;
-        if (!mesh::ReadStlBytes(ReadBytes(w / name), name, m, error)) {
+        const bool obj = std::string(name).ends_with(".obj");
+        if (!(obj ? mesh::ReadObjBytes(ReadBytes(w / name), name, m, error)
+                  : mesh::ReadStlBytes(ReadBytes(w / name), name, m, error))) {
           if (error.find(name) == std::string::npos)
             return std::string(name) +
                    " refused without naming itself: " + error;
@@ -2176,6 +2196,15 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
         for (uint32_t r : s.regionOf)
           if (r >= s.regions.size())
             return std::string(name) + " leaves a triangle in no region";
+        // What a mesh body asks of whatever it read: a slice, its loops and
+        // its mass, none of which may walk off the mesh.
+        glm::dvec3 lo, hi;
+        m.Bounds(lo, hi);
+        const mesh::SliceResult cut =
+            mesh::Slice(m, (lo + hi) / 2.0, {0, 0, 1});
+        (void)mesh::Cap(cut, (lo + hi) / 2.0, {0, 0, 1});
+        (void)mesh::BoundaryLoops(m);
+        (void)mesh::ComputeMassProperties(m);
       }
       return "";
     };

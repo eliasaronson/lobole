@@ -1281,6 +1281,21 @@ namespace {
 
 // A body's box in the bed's frame (x on the bed, z up `up`).
 void BedBox(const Body& b, const gp_Trsf& t, double box[6]) {
+  if (b.IsMesh()) {
+    // The vertices are the geometry: their box, in the bed's frame.
+    box[0] = box[1] = box[2] = std::numeric_limits<double>::max();
+    box[3] = box[4] = box[5] = -std::numeric_limits<double>::max();
+    for (const glm::dvec3& p : b.mesh->positions) {
+      gp_Pnt q(p.x, p.y, p.z);
+      q.Transform(t);
+      const double c[3] = {q.X(), q.Y(), q.Z()};
+      for (int k = 0; k < 3; k++) {
+        box[k] = std::min(box[k], c[k]);
+        box[k + 3] = std::max(box[k + 3], c[k]);
+      }
+    }
+    return;
+  }
   Bnd_Box bb;
   BRepBndLib::AddOptimal(b.shape.GetShape().Moved(TopLoc_Location(t)), bb,
                          false, false);
@@ -1356,6 +1371,25 @@ BedFit FitOnBed(const std::vector<const Body*>& bodies, const glm::dvec3& upIn,
           // The boxes meet; the piece itself must, too. A rod laid along
           // the bed's diagonal has a box over the whole bed and misses a
           // corner by a hand's width.
+          if (bodies[i]->IsMesh()) {
+            // A mesh in the zone: a vertex of it inside the rectangle, or
+            // one of its triangles' boxes across it.
+            bool in = false;
+            const mesh::TriMesh& m = *bodies[i]->mesh;
+            for (uint32_t t2 = 0; t2 < m.triangles.size() && !in; t2++) {
+              glm::dvec2 tlo(std::numeric_limits<double>::max()), thi = -tlo;
+              for (int c = 0; c < 3; c++) {
+                tlo = glm::min(tlo, glm::dvec2(m.Corner(t2, c)));
+                thi = glm::max(thi, glm::dvec2(m.Corner(t2, c)));
+              }
+              in = std::min(thi.x, r[2]) - std::max(tlo.x, r[0]) > kBedTolMm &&
+                   std::min(thi.y, r[3]) - std::max(tlo.y, r[1]) > kBedTolMm;
+            }
+            if (in)
+              f.intrusions.push_back(
+                  {static_cast<int>(i), static_cast<int>(z), lo, hi, ox * oy});
+            continue;
+          }
           const double z0 = b[2] - 1.0, z1 = b[5] + 1.0;
           const TopoDS_Shape zone = BRepPrimAPI_MakeBox(gp_Pnt(r[0], r[1], z0),
                                                         gp_Pnt(r[2], r[3], z1))

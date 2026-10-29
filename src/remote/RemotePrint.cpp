@@ -109,7 +109,8 @@ static constexpr MethodDoc PrintMethods[] = {
      "(tools/bambu-config.py makes one) and for this bed, keep-out zone "
      "and filament. Without it a job is one plate, which Bambu opens with "
      "your own presets. The answer lists every object with what it prints "
-     "with, and `form` project | model.",
+     "with, and `form` project | model. A mesh body prints as its own "
+     "triangles (`mesh_note`); an open one is refused, naming its holes.",
      "path:string, plates:object[], slicer_config?:string|object, "
      "name?:string",
      remote::NotInBatch},

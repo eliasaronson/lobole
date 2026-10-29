@@ -65,6 +65,8 @@
 #include <glm/gtc/matrix_transform.hpp> // glm::translate
 #include <glm/gtc/quaternion.hpp>       // glm::mat4_cast
 
+#include "core/io/MeshImportCost.h" // kMeshBodyBudgetBytes
+#include "core/mesh/MeshBvh.h"
 #include "ui/AppActionsInternal.h"
 #include "ui/AppState.h"
 #include <algorithm>
@@ -148,6 +150,114 @@ size_t TessellationBytes(const BodyTessellation& entry) {
 std::shared_ptr<BodyTessellation> TessellationFor(AppState& state,
                                                   const CADShape& shape) {
   return LookupOrBuildTessellation(state, shape, nullptr);
+}
+
+static_assert(interchange::kMeshBodyBudgetBytes ==
+                  kTessellationCacheBudgetBytes,
+              "the mesh body limit is solved from this budget");
+
+namespace {
+
+// A mesh body's own triangles, in its own order, with smooth normals split
+// where neighbouring triangles turn by more than the outline's crease angle
+// (60°, render/OutlineEdges.h's featureCos): the facets of a scan shade
+// smooth, and a fold stays a fold.
+void MeshBodyVertices(const mesh::TriMesh& m, std::vector<Vertex3D>& vertices,
+                      std::vector<uint32_t>& indices) {
+  constexpr double kCreaseCos = 0.5;
+  const size_t nv = m.positions.size(), nt = m.triangles.size();
+  std::vector<glm::dvec3> faceN(nt);
+  for (uint32_t t = 0; t < nt; t++)
+    faceN[t] = m.AreaNormal(t);
+  // Triangles round each vertex, compressed.
+  std::vector<uint32_t> start(nv + 1, 0), around(nt * 3);
+  for (const auto& tri : m.triangles)
+    for (uint32_t v : tri)
+      start[v + 1]++;
+  for (size_t v = 0; v < nv; v++)
+    start[v + 1] += start[v];
+  {
+    std::vector<uint32_t> fill(start.begin(), start.end() - 1);
+    for (uint32_t t = 0; t < nt; t++)
+      for (uint32_t v : m.triangles[t])
+        around[fill[v]++] = t;
+  }
+  vertices.clear();
+  indices.clear();
+  vertices.reserve(nv + nv / 8);
+  indices.reserve(nt * 3);
+  // Per vertex, the corners already emitted: (normal, index).
+  std::vector<std::vector<std::pair<glm::vec3, uint32_t>>> emitted(nv);
+  for (uint32_t t = 0; t < nt; t++) {
+    const double lt = glm::length(faceN[t]);
+    const glm::dvec3 nt0 = lt > 0.0 ? faceN[t] / lt : glm::dvec3(0, 0, 1);
+    for (uint32_t v : m.triangles[t]) {
+      glm::dvec3 sum(0.0);
+      for (uint32_t k = start[v]; k < start[v + 1]; k++) {
+        const glm::dvec3& o = faceN[around[k]];
+        const double lo = glm::length(o);
+        if (lo > 0.0 && glm::dot(o / lo, nt0) >= kCreaseCos)
+          sum += o;
+      }
+      const double ls = glm::length(sum);
+      const glm::vec3 n = glm::vec3(ls > 0.0 ? sum / ls : nt0);
+      uint32_t index = mesh::kNone;
+      for (const auto& [en, ei] : emitted[v])
+        if (en == n) {
+          index = ei;
+          break;
+        }
+      if (index == mesh::kNone) {
+        index = uint32_t(vertices.size());
+        vertices.push_back({glm::vec3(m.positions[v]), n});
+        emitted[v].emplace_back(n, index);
+      }
+      indices.push_back(index);
+    }
+  }
+}
+
+} // namespace
+
+std::shared_ptr<BodyTessellation> TessellationFor(AppState& state,
+                                                  const Body& body) {
+  if (!body.IsMesh())
+    return TessellationFor(state, body.shape);
+  if (!state.meshRenderer || body.mesh->triangles.empty())
+    return nullptr;
+  if (!state.tessellationCache)
+    state.tessellationCache = std::make_shared<BodyTessellationCache>();
+  BodyTessellationCache& cache = *state.tessellationCache;
+  auto& bucket = cache.byShape[body.mesh.get()];
+  for (const std::shared_ptr<BodyTessellation>& entry : bucket) {
+    if (entry->mesh != body.mesh)
+      continue;
+    entry->lastSerial = cache.serial;
+    if (entry->meshAsset == 0) {
+      entry->meshAsset =
+          state.meshRenderer->CreateAsset(entry->vertices, entry->indices);
+      state.meshRenderer->RetainAsset(entry->meshAsset);
+      entry->bytes = TessellationBytes(*entry);
+      cache.bytes += entry->bytes;
+    }
+    return entry;
+  }
+  auto entry = std::make_shared<BodyTessellation>();
+  entry->mesh = body.mesh;
+  entry->solid = body.mesh->Closed();
+  MeshBodyVertices(*body.mesh, entry->vertices, entry->indices);
+  // One face: the whole body picks and highlights as its one element.
+  entry->triangleFaces.assign(body.mesh->triangles.size(), 0u);
+  if (body.mesh->triangles.size() >= FaceSelector::kPickBvhTriangles)
+    entry->bvh = mesh::Bvh::For(body.mesh);
+  entry->meshAsset =
+      state.meshRenderer->CreateAsset(entry->vertices, entry->indices);
+  state.meshRenderer->RetainAsset(entry->meshAsset);
+  entry->bytes = TessellationBytes(*entry);
+  entry->lastSerial = cache.serial;
+  cache.bytes += entry->bytes;
+  bucket.push_back(entry);
+  return entry;
 }
 
 uint32_t OutlineAssetFor(AppState& state, BodyTessellation& entry) {

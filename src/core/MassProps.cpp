@@ -4,6 +4,7 @@
 #include "core/MassProps.h"
 
 #include "cad/CADMaterials.h"
+#include "core/mesh/TriMesh.h"
 
 namespace Measure {
 
@@ -16,7 +17,28 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
     if (body.reference)
       continue; // a Derived ghost weighs nothing here (it is another part)
     CADShape::MassProps mp;
-    if (!body.shape.ComputeMassProps(mp)) {
+    if (body.IsMesh()) {
+      // A mesh body's own triangles, by the divergence theorem: defined only
+      // when they close (docs/interchange/README.md#mesh-bodies).
+      if (!body.mesh->Closed()) {
+        if (error) {
+          const std::vector<double> loops = mesh::BoundaryLoops(*body.mesh);
+          *error = "body " + body.name + " is an open mesh (" +
+                   std::to_string(loops.size()) + " boundary loop" +
+                   (loops.size() == 1 ? "" : "s") +
+                   "), which encloses no volume: close the holes in "
+                   "MeshLab, Blender or the scanning app and re-import it";
+        }
+        return std::nullopt;
+      }
+      const mesh::MassProperties m = mesh::ComputeMassProperties(*body.mesh);
+      mp.volume = m.volume;
+      mp.surfaceArea = m.area;
+      mp.centerOfMass = m.centroid;
+      for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++)
+          mp.inertia[r][c] = m.inertia[r][c];
+    } else if (!body.shape.ComputeMassProps(mp)) {
       if (error)
         *error = "mass properties failed for body " + body.name;
       return std::nullopt;

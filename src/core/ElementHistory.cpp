@@ -1051,6 +1051,11 @@ UnresolvedReason(const std::vector<Body>& bodies, const ElementRef& ref,
   for (const Body& b : bodies) {
     if (ref.featureId != 0 && b.createdBy != ref.featureId)
       continue; // 0: whichever body has it
+    // A mesh body's one element names the whole mesh: it is no face or edge
+    // (docs/interchange/README.md#mesh-bodies).
+    if (b.IsMesh())
+      if (const std::string* n = b.elementMap.NameOf(0); n && *n == ref.name)
+        return MeshBodyRefusal(b, "the " + what + " '" + ref.name + "'");
     std::string r = UnresolvedReason(b.elementMap, ref.name, kind, what, label);
     if (r.find("' was split by ") != std::string::npos)
       return r;
@@ -1112,8 +1117,17 @@ const Body* FindOwningBody(const std::vector<Body>& bodies,
     if (Resolves(b, ref.name, kind))
       resolving.push_back(&b);
   }
-  if (resolving.size() == 1)
+  if (resolving.size() == 1) {
+    // A mesh body's one element is the mesh: nothing that wants a face or an
+    // edge of it can have one (docs/interchange/README.md#mesh-bodies).
+    if (resolving.front()->IsMesh()) {
+      if (why)
+        *why = MeshBodyRefusal(*resolving.front(),
+                               "the " + what + " '" + ref.name + "'");
+      return nullptr;
+    }
     return resolving.front();
+  }
   if (resolving.size() > 1) {
     if (why)
       *why = what + " '" + ref.name + "' is on " +

@@ -24,6 +24,7 @@
 #include "core/MeasureSeal.h"
 #include "core/MeasureSections.h"
 #include "core/MeshCollide.h"
+#include "core/MeshMeasure.h"
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
 #include "core/ThreadStandards.h"
@@ -924,7 +925,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "layers | process; a process that is not FDM skips it); an "
      "unprinted part skips what has no limit unless it is stated. `ok` is "
      "every item that ran passing. Read-only; `part` reads any part from "
-     "any tab.",
+     "any tab. A part of MESH bodies is read off its triangles (overhang by "
+     "triangle normal, shells by closed components; bridges, stacking and "
+     "slender skipped saying so); an open mesh is refused naming its holes, "
+     "and a part mixing mesh and B-Rep bodies is refused "
+     "(docs/inspect/README.md#mesh-bodies).",
      "part?:string|int, bodies?:any[], direction?:number[3], "
      "max_overhang_deg?:number>0<90, overhang_allowance_mm2?:number>=0, "
      "max_bridge_mm?:number>0, min_gap_mm?:number>0, "
@@ -1262,7 +1267,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "{mass_g, center_of_mass_mm} or {why}; solid otherwise), and, when one "
      "is printed, `total.printed` weighs the assembly as built: {mass_g, "
      "center_of_mass_mm, inertia_g_mm2 (about that centre, world axes), "
-     "printed[], solid[] (the occurrences weighed each way)} or {why}.",
+     "printed[], solid[] (the occurrences weighed each way)} or {why}. A "
+     "closed mesh body is weighed off its triangles; an open one is "
+     "refused, naming its loops (docs/inspect/README.md#mesh-bodies).",
      "part?:string|int, body?:int", remote::NoFlags,
      "bodies?:{bbox_max:number[], bbox_min:number[], body:int, "
      "center_of_mass_mm:number[], inertia:number[][], "
@@ -1300,7 +1307,15 @@ static constexpr MethodDoc InspectionMethods[] = {
      "deflections summed, since each can err its own way), for when an "
      "exact "
      "one is pathological (two lofted propellers 151 mm apart take 55 s, "
-     "because every face pair is equally far and nothing prunes).",
+     "because every face pair is equally far and nothing prunes). "
+     "A side may be {feature_id, point_mm: [x,y,z]}: a point snapped onto "
+     "that body's surface (`snapped_a`/`snapped_b` give the point and "
+     "`moved_mm`). A MESH body (docs/inspect/README.md#mesh-bodies) on its "
+     "own gives kind 'mesh': triangles, components, closed, area, size, "
+     "boundary loops, and volume_mm3 only when it closes (open: null and "
+     "`volume_refused` naming the loops); to anything else, the minimum "
+     "distance off its triangles, exact to the mesh, `tolerance_mm` being "
+     "a B-Rep side's tessellation only.",
      "a:object, b?:object, kind?:'distance'|'angle'|'both', "
      "distance_kind?:string, mode?:'exact'|'mesh', part?:string|int"},
     {"frame",
@@ -1379,7 +1394,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "walls: true adds each body's `thinnest_wall_mm`: from a point well "
      "inside each face, along its inward normal, to where the line leaves "
      "the solid, the least over its faces -- what the Shell tool's default "
-     "wall is a tenth of (docs/modeling/README.md#refused-on-the-bodies).",
+     "wall is a tenth of (docs/modeling/README.md#refused-on-the-bodies). "
+     "A mesh body lists its one element (kind 'mesh') with its triangles, "
+     "components, closed, boundary loops, median edge and area.",
      "part?:string|int, configuration?:string|int, body?:int, entity?:int>=0, "
      "made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0, "
      "walls?:bool",
@@ -1581,7 +1598,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "volume_mm3}]. A round overlap beside a banded face that is NOT a fit "
      "(past the band, a clearance fit, no band on one side, off-axis) stays "
      "a clash with `press_fit_refused` [{fit, reason, excess_mm?}]. Mesh "
-     "mode relieves none of these, and says so in `relieves`.",
+     "mode relieves none of these, and says so in `relieves`. On a part, a "
+     "MESH body's pair is intersected off the triangles by manifold, exact "
+     "to the mesh (`mode` mesh, `tolerance_mm` the B-Rep side's "
+     "tessellation); an open mesh is refused.",
      "a?:string|int, b?:string|int, mode?:'exact'|'mesh', max_pairs?:int>=0, "
      "deadline_s?:number, touch_tol?:number"},
     {"contact_report",
@@ -1730,7 +1750,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`enclosed_note`. {bodies: [names or feature ids]} cuts only those bodies "
      "of a "
      "part (the outer walls, not the slab under them); an unknown one is "
-     "refused naming the bodies there are.",
+     "refused naming the bodies there are. A mesh body is cut by its own "
+     "triangles' slice; an open one's cut closes nothing, adds no area and "
+     "is named in `open_meshes` (docs/inspect/README.md#mesh-bodies).",
      "base_plane, bodies, enclosed, loops, normal, offset, origin, part, "
      "regions"},
     {"set_section",
@@ -1758,11 +1780,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Every section cut: id, source (base plane / datum / face, with "
      "resolved:false when a named datum/face is gone — such a cut stops "
      "cutting), offset, tilt, reverse, visible, and the cut plane "
-     "{normal, d}.",
+     "{normal, d}. `uncapped` names the open mesh bodies the cut draws with "
+     "no cap: an open mesh has no inside to fill.",
      "", remote::NoFlags,
      "sections:{d:number, id:int, normal:number[], offset:number, "
      "reverse:bool, source:object, tilt_u:number, tilt_v:number, "
-     "visible:bool}[]"},
+     "uncapped?:string[], uncapped_why?:string, visible:bool}[]"},
     {"update_section",
      "Change one cut {id, base_plane?, plane_id?, offset? (mm along the "
      "normal), tilt_u?, tilt_v? (degrees), reverse? (false keeps the half "
@@ -3603,6 +3626,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                  {"visible", sec.visible},
                  {"normal", {plane.x, plane.y, plane.z}},
                  {"d", plane.w}};
+      // An open mesh body is drawn cut with no cap: its cut closes nothing
+      // (docs/rendering/README.md#mesh-bodies).
+      if (doc != nullptr) {
+        json uncapped = json::array();
+        for (const Body& b : doc->GetBodies())
+          if (b.IsMesh() && !b.mesh->Closed())
+            uncapped.push_back(b.name);
+        if (!uncapped.empty()) {
+          sj["uncapped"] = std::move(uncapped);
+          sj["uncapped_why"] = "an open mesh body has no inside to fill";
+        }
+      }
       // The source, named the way the tool window names it, so a script and
       // the window describe the same cut in the same words.
       if (sec.face.IsSet())
@@ -3711,7 +3746,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           if (b.reference)
             continue; // a derived ghost is not the occurrence's matter
           Body nb = b;
-          nb.shape = b.shape.Transformed(xf);
+          nb = PlacedBody(b, xf);
           placed.push_back(std::move(nb));
         }
       }
@@ -3724,6 +3759,20 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const partmeasure::Section cut = partmeasure::SectionOf(
         *bodies, origin, normal, p.value("enclosed", false));
     json out{{"area_mm2", cut.area}};
+    // An open mesh body's cut runs out at its holes and encloses nothing:
+    // named, and not in the area (docs/inspect/README.md#mesh-bodies).
+    if (std::any_of(bodies->begin(), bodies->end(),
+                    [](const Body& b) { return b.IsMesh(); })) {
+      const meshmeasure::Cut mc =
+          meshmeasure::Section(*bodies, origin, normal, false);
+      if (!mc.openBodies.empty()) {
+        out["open_meshes"] = mc.openBodies;
+        out["open_meshes_note"] =
+            "an open mesh's cut does not close, so it encloses no area and "
+            "is not counted; close its holes in MeshLab, Blender or the "
+            "scanning app to measure it";
+      }
+    }
     if (derived)
       out["offset"] = usedOffset; // say where it chose to cut
     // The area the cut RINGS, not the area it crosses: the floor inside the
@@ -3995,7 +4044,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                     if (b.reference)
                       continue;
                     Body nb = b;
-                    nb.shape = b.shape.Transformed(hit->world * inst.world);
+                    nb = PlacedBody(b, hit->world * inst.world);
                     t.bodies.push_back(std::move(nb));
                   }
             }
@@ -4005,7 +4054,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               if (b.reference)
                 continue;
               Body nb = b;
-              nb.shape = b.shape.Transformed(hit->world);
+              nb = PlacedBody(b, hit->world);
               t.bodies.push_back(std::move(nb));
             }
           }
@@ -4246,6 +4295,23 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     std::vector<Body> va(1), vb(1);
     va[0] = bodies[ia];
     vb[0] = bodies[ib];
+    // A mesh body: its triangles against the other's (a B-Rep tessellated),
+    // intersected by manifold -- exact to the mesh, which is its geometry
+    // (docs/inspect/README.md#mesh-bodies).
+    if (va[0].IsMesh() || vb[0].IsMesh()) {
+      std::string why;
+      const auto ov = meshmeasure::Interference(va, vb, why);
+      if (!ov)
+        throw std::runtime_error("interference: " + why);
+      return json{{"clash", ov->volume > 1e-9},
+                  {"volume_mm3", ov->volume},
+                  {"distance", ov->distance},
+                  {"state", ov->volume > 1e-9          ? "overlapping"
+                            : ov->distance <= touchTol ? "touching"
+                                                       : "clear"},
+                  {"mode", "mesh"},
+                  {"tolerance_mm", ov->toleranceMm}};
+    }
     return ExactPair(va, vb, touchTol, json::object(),
                      va[0].name + " / " + vb[0].name);
   }
@@ -4441,7 +4507,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             continue;
           for (const Body& b : inst.part->GetBodies()) {
             Body nb;
-            nb.shape = b.shape.Transformed(inst.world);
+            nb = PlacedBody(b, inst.world);
             placed.push_back(std::move(nb));
           }
         }
@@ -4503,7 +4569,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         const glm::dmat4 xf = ui::OccurrenceMatrix(*found);
         for (const Body& b : pd->GetBodies()) {
           Body nb;
-          nb.shape = b.shape.Transformed(xf);
+          nb = PlacedBody(b, xf);
           placed.push_back(std::move(nb));
         }
         return placed;
@@ -6508,6 +6574,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const std::vector<Body>* bodies = nullptr;
       ElementRef ref; // name empty => the whole set
       std::string label;
+      // {feature_id, point_mm}: a point on a body, snapped onto its surface
+      // (docs/inspect/README.md#mesh-bodies).
+      std::optional<glm::dvec3> point;
+      json snapped;
     };
     auto resolveSide = [&](const json& r, const char* which) {
       auto side = std::make_unique<Side>();
@@ -6562,14 +6632,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               continue;
             for (const Body& b : inst.part->GetBodies()) {
               Body nb = b;
-              nb.shape = b.shape.Transformed(inst.world);
+              nb = PlacedBody(b, inst.world);
               side->owned.push_back(std::move(nb));
             }
           }
         } else if (const Document* pd = ui::OccurrencePartDoc(state, *occ)) {
           for (const Body& b : pd->GetBodies()) {
             Body nb = b;
-            nb.shape = b.shape.Transformed(world);
+            nb = PlacedBody(b, world);
             side->owned.push_back(std::move(nb));
           }
         }
@@ -6590,6 +6660,31 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       // no `element` either, and featureId 0 means every body under it.
       side->ref = ElementRef{r.value("feature_id", uint64_t{0}),
                              r.value("element", std::string{})};
+      // A mesh body's one element is the body.
+      if (meshmeasure::IsMeshElement(*side->bodies, side->ref))
+        side->ref.name.clear();
+      if (r.contains("point_mm")) {
+        if (r.contains("element"))
+          throw std::runtime_error(std::string("measure: ") + which +
+                                   " names a point_mm or an element, not both");
+        const json& pj = r.at("point_mm");
+        if (!pj.is_array() || pj.size() != 3 || !pj[0].is_number() ||
+            !pj[1].is_number() || !pj[2].is_number())
+          throw std::runtime_error(std::string("measure: ") + which +
+                                   ".point_mm is [x, y, z] in mm");
+        const glm::dvec3 asked(pj[0].get<double>(), pj[1].get<double>(),
+                               pj[2].get<double>());
+        std::string why;
+        const auto snap = meshmeasure::SnapPoint(
+            *side->bodies, side->ref.featureId, asked, why);
+        if (!snap)
+          throw std::runtime_error(std::string("measure: ") + which + ": " +
+                                   why);
+        side->point = snap->point;
+        side->snapped = {
+            {"point_mm", {snap->point.x, snap->point.y, snap->point.z}},
+            {"moved_mm", snap->moved}};
+      }
       return side;
     };
     // Geometry queries over stable element names (I1). params:
@@ -6603,6 +6698,58 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (p.contains("b")) {
       const auto sideB = resolveSide(p.at("b"), "b");
       const Measure::Target tb{sideB->bodies, glm::dmat4(1.0), sideB->ref};
+      // A point, or a mesh body, on either side: the distance is to the
+      // triangles (exact to a mesh, which IS its geometry) or between the
+      // points (docs/inspect/README.md#mesh-bodies).
+      if (sideA->point || sideB->point || meshmeasure::HasMesh(ta) ||
+          meshmeasure::HasMesh(tb)) {
+        const std::string kind = p.value("kind", "distance");
+        if (kind != "distance")
+          throw std::runtime_error(
+              "measure: a point or a mesh body measures a DISTANCE: a mesh "
+              "has no face to take an angle against, and a point has no "
+              "direction (kind: distance)");
+        if (p.contains("distance_kind") &&
+            p.at("distance_kind") != json("minimum"))
+          throw std::runtime_error(
+              "measure: a point or a mesh body measures the minimum "
+              "distance (distance_kind: minimum)");
+        glm::dvec3 pa(0.0), pb(0.0);
+        double tolerance = 0.0;
+        if (sideA->point && sideB->point) {
+          pa = *sideA->point;
+          pb = *sideB->point;
+        } else if (sideA->point || sideB->point) {
+          const glm::dvec3 from = sideA->point ? *sideA->point : *sideB->point;
+          const auto on =
+              meshmeasure::NearestPoint(sideA->point ? tb : ta, from);
+          if (!on)
+            throw std::runtime_error("measure: an element did not resolve");
+          pa = sideA->point ? from : *on;
+          pb = sideA->point ? *on : from;
+        } else {
+          std::string why;
+          const auto gap = meshmeasure::Distance(ta, tb, why);
+          if (!gap)
+            throw std::runtime_error("measure: " + why);
+          pa = gap->pointA;
+          pb = gap->pointB;
+          tolerance = gap->toleranceMm;
+        }
+        json out{{"distance", glm::distance(pa, pb)},
+                 {"distance_kind", "minimum"},
+                 {"point_a", {pa.x, pa.y, pa.z}},
+                 {"point_b", {pb.x, pb.y, pb.z}},
+                 {"delta", {pb.x - pa.x, pb.y - pa.y, pb.z - pa.z}},
+                 // A mesh's triangles are its geometry: the only tolerance is
+                 // a B-Rep side's tessellation.
+                 {"tolerance_mm", tolerance}};
+        if (sideA->point)
+          out["snapped_a"] = sideA->snapped;
+        if (sideB->point)
+          out["snapped_b"] = sideB->snapped;
+        return out;
+      }
       // What to measure between them. Refused, never substituted: a request
       // for an angle answered with a distance is plausible and wrong, and a
       // typo'd kind must not silently become the default.
@@ -6726,6 +6873,41 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error(
           "measure: `kind` and `distance_kind` choose what to measure BETWEEN "
           "two things — pass `b` as well, or drop them for a's own measure.");
+    }
+    if (sideA->point)
+      return json{{"kind", "point"}, {"snapped_a", sideA->snapped}};
+    // A mesh body on its own: what its triangles are, and its volume only
+    // when they close (docs/inspect/README.md#mesh-bodies).
+    if (ta.Whole() && meshmeasure::HasMesh(ta)) {
+      std::vector<const Body*> meshes;
+      bool brep = false;
+      for (const Body& b : *ta.bodies)
+        if (!b.reference &&
+            (ta.ref.featureId == 0 || b.createdBy == ta.ref.featureId))
+          (b.IsMesh() ? meshes.push_back(&b) : void(brep = true));
+      if (brep || meshes.size() != 1)
+        throw std::runtime_error(
+            "measure: name one mesh body (its feature_id) to read its "
+            "statistics; a set mixing mesh and B-Rep bodies has no one "
+            "volume to give");
+      const meshmeasure::Stats s = meshmeasure::Describe(*meshes[0]->mesh);
+      json out{{"kind", "mesh"},
+               {"name", meshes[0]->name},
+               {"triangles", s.triangles},
+               {"components", s.components},
+               {"closed", s.closed},
+               {"surface_area_mm2", s.area},
+               {"size", {s.hi.x - s.lo.x, s.hi.y - s.lo.y, s.hi.z - s.lo.z}},
+               {"boundary_loops", s.loops.size()}};
+      if (s.volume) {
+        out["volume_mm3"] = *s.volume;
+      } else {
+        out["volume_mm3"] = nullptr;
+        out["volume_refused"] = meshmeasure::OpenWhy(s);
+        if (!s.loops.empty())
+          out["longest_loop_mm"] = s.loops.front();
+      }
+      return out;
     }
     // A WHOLE body or occurrence on its own reports what a part HAS.
     if (ta.Whole()) {
@@ -7237,6 +7419,23 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           continue;
         matchedFaces++;
         json f = {{"index", idx}, {"name", name}};
+        // A mesh body's one element, with what its triangles are
+        // (docs/interchange/README.md#mesh-bodies).
+        if (bodies[i].IsMesh()) {
+          const meshmeasure::Stats s = meshmeasure::Describe(*bodies[i].mesh);
+          f["kind"] = "mesh";
+          f["triangles"] = s.triangles;
+          f["vertices"] = s.vertices;
+          f["components"] = s.components;
+          f["closed"] = s.closed;
+          f["boundary_loops"] = s.loops.size();
+          if (!s.loops.empty())
+            f["longest_loop_mm"] = s.loops.front();
+          f["median_edge_mm"] = s.medianEdge;
+          f["area_mm2"] = s.area;
+          faces.push_back(f);
+          continue;
+        }
         OriginJson(origin, f);
         PieceJson(name, origin, f);
         if (const auto fi = Measure::DescribeFaceAt(bodies[i], idx)) {

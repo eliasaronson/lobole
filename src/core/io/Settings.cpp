@@ -92,8 +92,8 @@ constexpr std::array<float, 4> kFontScales{0.85f, 1.0f, 1.2f, 1.4f};
 constexpr std::array<float, 2> kShadowMaps{1024.0f, 2048.0f};
 constexpr std::array<const char* const, 3> kSsao{"off", "half", "full"};
 // mesh::Representation's names (core/mesh/Representation.h), in its order.
-constexpr std::array<const char* const, 2> kMeshRepresentations{"recognize",
-                                                                "facets"};
+constexpr std::array<const char* const, 4> kMeshRepresentations{
+    "auto", "mesh", "recognize", "facets"};
 
 // Rows are grouped by section. Each section is one Preferences category, in
 // the order it first appears here; the window no longer depends on the rows
@@ -362,15 +362,18 @@ const Field kFields[] = {
      {},
      0.0f,
      3600.0f},
-    // What a new STL import becomes
-    // (docs/interchange/README.md#recognising-a-faceted-mesh); an Import that
-    // names its own representation keeps it.
+    // What a new STL or OBJ import becomes
+    // (docs/interchange/README.md#mesh-bodies); an Import that names its
+    // own representation keeps it.
     {"mesh_representation",
      "Import",
-     "Meshes (STL)",
-     "Recognize finds the holes, flats, cones and spheres a downloaded part's "
-     "triangles were made from, so a hole has a diameter and an axis. Facets "
-     "keeps every triangle as a face.",
+     "Meshes (STL, OBJ)",
+     "Auto recognises a mechanical part and keeps a scan or a sculpt as a "
+     "mesh. Mesh keeps the triangles as they are: measured, sectioned and "
+     "exported, but no B-Rep features. Recognize finds the holes, flats, "
+     "cones and spheres a downloaded part's triangles were made from, so a "
+     "hole has a diameter and an axis. Facets keeps every triangle as a "
+     "face.",
      Tier::NextTime,
      &Settings::meshRepresentation,
      {},

@@ -223,4 +223,122 @@ bool ReadStl(const std::string& path, TriMesh& out, std::string& error,
   return ReadStlBytes(bytes, path, out, error, cancelled);
 }
 
+namespace {
+
+// The quantum of numbers printed with `digits` significant digits, at the
+// largest magnitude in `soup` -- or float32's, whichever is coarser.
+double PrintedQuantum(const std::vector<glm::dvec3>& soup, int digits) {
+  double quantum = Float32Quantum(soup);
+  double largest = 0.0;
+  for (const glm::dvec3& p : soup)
+    largest = std::max({largest, std::abs(p.x), std::abs(p.y), std::abs(p.z)});
+  if (largest > 0.0 && digits > 0)
+    quantum = std::max(quantum, std::pow(10.0, std::floor(std::log10(largest)) +
+                                                   1.0 - digits));
+  return quantum;
+}
+
+} // namespace
+
+bool ReadObjBytes(const std::string& bytes, const std::string& name,
+                  TriMesh& out, std::string& error,
+                  const Cancelled& cancelled) {
+  out = {};
+  std::vector<glm::dvec3> verts, soup;
+  int digits = 0;
+  size_t line = 0, faces = 0;
+  std::string_view text(bytes);
+  size_t pos = 0;
+  std::vector<int64_t> corner;
+  while (pos < text.size()) {
+    size_t end = text.find('\n', pos);
+    if (end == std::string_view::npos)
+      end = text.size();
+    const std::string_view ln = text.substr(pos, end - pos);
+    pos = end + 1;
+    line++;
+    AsciiReader r{ln};
+    const std::string_view key = r.Word();
+    if (key == "v") {
+      glm::dvec3 p;
+      for (int k = 0; k < 3; k++) {
+        const std::string_view num = r.Word();
+        if (!ParseDouble(num, p[k])) {
+          error = "'" + name + "' line " + std::to_string(line) +
+                  ": a vertex coordinate that is not a number (`" +
+                  std::string(num.substr(0, 32)) + "`)";
+          return false;
+        }
+        digits = std::max(digits, SignificantDigits(num));
+      }
+      verts.push_back(p);
+    } else if (key == "f") {
+      corner.clear();
+      for (std::string_view w = r.Word(); !w.empty(); w = r.Word()) {
+        const std::string_view idx = w.substr(0, w.find('/'));
+        int64_t i = 0;
+        const auto res =
+            std::from_chars(idx.data(), idx.data() + idx.size(), i);
+        if (res.ec != std::errc() || res.ptr != idx.data() + idx.size() ||
+            i == 0) {
+          error = "'" + name + "' line " + std::to_string(line) +
+                  ": a face corner that is not a vertex number (`" +
+                  std::string(w.substr(0, 32)) + "`)";
+          return false;
+        }
+        const int64_t at = i > 0 ? i - 1 : int64_t(verts.size()) + i;
+        if (at < 0 || at >= int64_t(verts.size())) {
+          error = "'" + name + "' line " + std::to_string(line) +
+                  ": a face names vertex " + std::to_string(i) + " of " +
+                  std::to_string(verts.size());
+          return false;
+        }
+        corner.push_back(at);
+      }
+      if (corner.size() < 3) {
+        error = "'" + name + "' line " + std::to_string(line) +
+                ": a face of fewer than three corners";
+        return false;
+      }
+      for (size_t k = 1; k + 1 < corner.size(); k++) {
+        soup.push_back(verts[size_t(corner[0])]);
+        soup.push_back(verts[size_t(corner[k])]);
+        soup.push_back(verts[size_t(corner[k + 1])]);
+      }
+      if (++faces % kCancelEvery == 0 && cancelled && cancelled()) {
+        error = "cancelled";
+        return false;
+      }
+    }
+  }
+  if (soup.empty()) {
+    error = "'" + name + "' holds no faces";
+    return false;
+  }
+  // An OBJ shares its vertices by index, so the soup welds back exactly;
+  // the second weld is only half a printed digit, which never joins two
+  // values printed differently (a cube of integer corners stays a cube).
+  // The precision the fits read is still the printed digit's.
+  const double printed = PrintedQuantum(soup, digits);
+  out = FromSoup(soup, 0.5 * printed);
+  out.quantum = printed;
+  if (out.triangles.empty()) {
+    error = "'" + name + "' holds only degenerate triangles";
+    return false;
+  }
+  return true;
+}
+
+bool ReadObj(const std::string& path, TriMesh& out, std::string& error,
+             const Cancelled& cancelled) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    error = "'" + path + "' cannot be read";
+    return false;
+  }
+  const std::string bytes((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+  return ReadObjBytes(bytes, path, out, error, cancelled);
+}
+
 } // namespace mesh

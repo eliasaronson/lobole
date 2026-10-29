@@ -978,6 +978,32 @@ Rebuilt RebuildFromRegions(const mesh::TriMesh& mesh,
   }
 }
 
+bool RebuildRecognized(const mesh::TriMesh& m, mesh::Segmentation& seg,
+                       int minSides, CADShape& shape, mesh::Recognition& report,
+                       const std::function<bool()>& cancelled) {
+  // A face that will not build, or that a check faults, puts its region
+  // (or, for a flat, the curved ones round it) back as flats, all at once,
+  // and the rebuild is tried again: a few rounds, each a whole rebuild.
+  size_t demoted = 0;
+  Rebuilt built;
+  for (int round = 0;; round++) {
+    built = RebuildFromRegions(m, seg);
+    if (built.failed.empty() || built.badRegions.empty() ||
+        round == kDemoteRounds || (cancelled && cancelled()))
+      break;
+    demoted += built.badRegions.size();
+    mesh::Demote(seg, m, built.badRegions);
+  }
+  report = mesh::Summarize(m, seg, minSides);
+  report.demoted = demoted;
+  if (built.failed.empty()) {
+    shape = built.shape;
+    return true;
+  }
+  report.fellBack = built.failed;
+  return false;
+}
+
 bool LoadStlRecognized(const std::string& path, const RecognizeOptions& options,
                        CADShape& shape, mesh::Recognition& report,
                        std::string& error, CADKernel::ImportProgress* progress,
@@ -1025,31 +1051,13 @@ bool LoadStlRecognized(const std::string& path, const RecognizeOptions& options,
   }
   if (progress != nullptr)
     progress->OnPhase(Phase::Building, 0.5);
-  // A face that will not build, or that a check faults, puts its region
-  // (or, for a flat, the curved ones round it) back as flats, all at once,
-  // and the rebuild is tried again: a few rounds, each a whole rebuild.
-  size_t demoted = 0;
-  Rebuilt built;
-  for (int round = 0;; round++) {
-    built = RebuildFromRegions(m, seg);
-    if (built.failed.empty() || built.badRegions.empty() ||
-        round == kDemoteRounds || cancelled())
-      break;
-    demoted += built.badRegions.size();
-    mesh::Demote(seg, m, built.badRegions);
-  }
-  report = mesh::Summarize(m, seg, options.minSides);
-  report.demoted = demoted;
-  if (built.failed.empty()) {
-    shape = built.shape;
+  if (RebuildRecognized(m, seg, options.minSides, shape, report, cancelled))
     return true;
-  }
   // Sewn as facets, as before, with the reason.
-  report.fellBack = built.failed;
   if (!options.facetsAllowed) {
     if (facetsRefused != nullptr)
       *facetsRefused = true;
-    error = "recognition kept it as facets (" + built.failed + ")";
+    error = "recognition kept it as facets (" + report.fellBack + ")";
     return false;
   }
   if (!CADKernel::Instance().LoadSTL(path, shape, progress)) {

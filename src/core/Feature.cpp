@@ -6,6 +6,7 @@
 #include "cad/MeshRebuild.h"
 #include "core/ModelSpace.h"
 #include "core/io/MeshImportCost.h"
+#include "core/mesh/MeshReaders.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
@@ -188,8 +189,72 @@ std::string LowerExtension(const std::string& path) {
 } // namespace
 
 bool ImportFeature::IsMesh(const std::string& path) {
-  return LowerExtension(path) == ".stl";
+  const std::string ext = LowerExtension(path);
+  return ext == ".stl" || ext == ".obj";
 }
+
+std::string MeshBodyRefusal(const Body& body, const std::string& what) {
+  if (!body.IsMesh())
+    return "";
+  return what + " needs a B-Rep, and body '" + body.name + "' is a mesh (" +
+         std::to_string(body.mesh->triangles.size()) +
+         " triangles, no faces or edges): measure, section and export it as "
+         "it is, or re-import a mechanical part with representation "
+         "`recognize` to rebuild its faces";
+}
+
+bool BodyBounds(const Body& body, glm::dvec3& lo, glm::dvec3& hi) {
+  lo = hi = glm::dvec3(0.0);
+  if (body.IsMesh()) {
+    if (body.mesh->positions.empty())
+      return false;
+    body.mesh->Bounds(lo, hi);
+    return true;
+  }
+  if (!body.shape.IsValid())
+    return false;
+  body.shape.GetBoundingBox(lo, hi);
+  return true;
+}
+
+Body PlacedBody(const Body& body, const glm::dmat4& xf) {
+  Body out = body;
+  if (body.IsMesh())
+    out.mesh = std::make_shared<const mesh::TriMesh>(
+        mesh::Transformed(*body.mesh, xf));
+  else
+    out.shape = body.shape.Transformed(xf);
+  return out;
+}
+
+namespace {
+
+bool ReadTriMesh(const std::string& path, mesh::TriMesh& m, std::string& error,
+                 const mesh::Cancelled& cancelled) {
+  return LowerExtension(path) == ".obj"
+             ? mesh::ReadObj(path, m, error, cancelled)
+             : mesh::ReadStl(path, m, error, cancelled);
+}
+
+// A mesh kept as a mesh body: scaled to mm, one product, no shape.
+void PushMeshProduct(CADKernel::ImportedModel& model, mesh::TriMesh m,
+                     double scale, const std::string& format) {
+  if (scale != 1.0)
+    m = mesh::Transformed(m, glm::dmat4(glm::dmat3(scale)));
+  CADKernel::ImportedShape product;
+  product.mesh = std::make_shared<const mesh::TriMesh>(std::move(m));
+  model.products.push_back(std::move(product));
+  model.instances.push_back({0, glm::dmat4(1.0), ""});
+  model.origin.format = format;
+}
+
+std::string Fixed1(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.1f", v);
+  return buf;
+}
+
+} // namespace
 
 bool ImportFeature::TakesUnits(const std::string& path) {
   const std::string ext = LowerExtension(path);
@@ -254,7 +319,7 @@ bool ImportFeature::ReadModel(const std::string& path,
   // A representation is what a mesh becomes; anything else is refused
   // rather than read as if it had not been asked.
   if (options.representation != mesh::Representation::Facets && !IsMesh(path)) {
-    error = "'" + path + "' is not a mesh: `representation` is for STL";
+    error = "'" + path + "' is not a mesh: `representation` is for STL and OBJ";
     return false;
   }
   if (options.minSides < mesh::kMinSidesLowest ||
@@ -268,6 +333,131 @@ bool ImportFeature::ReadModel(const std::string& path,
   const auto cancelled = [&] {
     return progress != nullptr && progress->Cancelled();
   };
+  using Rep = mesh::Representation;
+  const Rep rep = options.representation;
+  const std::string format = hasExt(".obj") ? "OBJ" : "STL";
+  if (IsMesh(path)) {
+    model.representation = mesh::ToString(rep);
+    model.representationWhy = "the import names it";
+  }
+  // A mesh body, or `auto` deciding between one and a recognised solid
+  // (docs/interchange/README.md#mesh-bodies). Counted first: a mesh past
+  // what a mesh body can hold is refused before it is read, and `auto`
+  // past the recognition limit never segments.
+  if (IsMesh(path) && (rep == Rep::Mesh || rep == Rep::Auto ||
+                       (rep == Rep::Recognize && hasExt(".obj")))) {
+    const std::optional<uint64_t> counted =
+        interchange::CountMeshTriangles(path);
+    if (counted && *counted > interchange::MeshBodyTriangleLimit() &&
+        rep != Rep::Recognize) {
+      error = interchange::MeshBodyTooLarge(path, *counted);
+      return false;
+    }
+    if (progress != nullptr)
+      progress->OnPhase(CADKernel::ImportProgress::Phase::ReadingFile, -1.0);
+    const uint64_t limit = interchange::RecognitionTriangleLimit();
+    if (rep == Rep::Auto && counted && *counted >= limit) {
+      model.representation = "mesh";
+      model.representationWhy = interchange::DescribeTriangles(*counted) +
+                                ", past the recognition limit of " +
+                                interchange::DescribeTriangles(limit);
+    }
+    mesh::TriMesh m;
+    std::string unread;
+    if (!ReadTriMesh(path, m, unread, cancelled)) {
+      error = cancelled() ? "cancelled"
+                          : "failed to read '" + path + "' as " + format +
+                                ": " + unread;
+      return false;
+    }
+    if (m.triangles.size() > interchange::MeshBodyTriangleLimit() &&
+        rep != Rep::Recognize) {
+      error = interchange::MeshBodyTooLarge(path, m.triangles.size());
+      return false;
+    }
+    if (rep == Rep::Mesh ||
+        (rep == Rep::Auto && model.representation == "mesh")) {
+      PushMeshProduct(model, std::move(m), scale, format);
+      return true;
+    }
+    // Segmented, then rebuilt when its regions say it is mechanical.
+    if (progress != nullptr)
+      progress->OnPhase(CADKernel::ImportProgress::Phase::Building, 0.0);
+    mesh::SegmentOptions so;
+    so.minSides = options.minSides;
+    so.cancelled = cancelled;
+    mesh::Segmentation seg = mesh::SegmentAll(m, so);
+    if (seg.cancelled || cancelled()) {
+      error = "cancelled";
+      return false;
+    }
+    // Mechanical or organic: how much of the surface the large regions
+    // hold (interchange::kMechanicalAreaShare).
+    double total = 0.0, large = 0.0;
+    for (const mesh::Region& r : seg.regions)
+      total += r.area;
+    for (const mesh::Region& r : seg.regions)
+      if (r.area >= interchange::kLargeRegionShare * total)
+        large += r.area;
+    const double share = total > 0.0 ? large / total : 0.0;
+    const std::string shareText =
+        Fixed1(100.0 * share) + "% of the surface in regions of at least " +
+        Fixed1(100.0 * interchange::kLargeRegionShare) + "% of it";
+    if (rep == Rep::Auto && share < interchange::kMechanicalAreaShare) {
+      model.representation = "mesh";
+      model.representationWhy =
+          shareText + ": organic (a mechanical part has " +
+          Fixed1(100.0 * interchange::kMechanicalAreaShare) + "% or more)";
+      PushMeshProduct(model, std::move(m), scale, format);
+      return true;
+    }
+    if (progress != nullptr)
+      progress->OnPhase(CADKernel::ImportProgress::Phase::Building, 0.5);
+    CADShape shape;
+    mesh::Recognition report;
+    if (!cad::RebuildRecognized(m, seg, options.minSides, shape, report,
+                                cancelled)) {
+      if (cancelled()) {
+        error = "cancelled";
+        return false;
+      }
+      if (rep == Rep::Auto) {
+        // A mesh `auto` cannot rebuild stays a mesh, as it is.
+        model.representation = "mesh";
+        model.representationWhy =
+            "recognition failed a check (" + report.fellBack + ")";
+        PushMeshProduct(model, std::move(m), scale, format);
+        return true;
+      }
+      // An OBJ asked to be recognised: its facets, as before, and why.
+      model.notes.push_back("recognition kept it as facets: " +
+                            report.fellBack);
+      if (!CADKernel::Instance().LoadOBJStructured(path, model, progress)) {
+        error =
+            cancelled() ? "cancelled" : "failed to read '" + path + "' as OBJ";
+        return false;
+      }
+      model.representation = "facets";
+      model.representationWhy = "recognition failed a check";
+      for (auto& product : model.products)
+        if (product.shape.IsValid() && scale != 1.0)
+          product.shape.Scale(scale);
+      return true;
+    }
+    if (rep == Rep::Auto) {
+      model.representation = "recognize";
+      model.representationWhy = shareText + ": mechanical";
+    }
+    if (scale != 1.0) {
+      shape.Scale(scale);
+      report.Transform(glm::dmat4(1.0), scale);
+    }
+    model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
+    model.products.back().recognition = std::move(report);
+    model.instances.push_back({0, glm::dmat4(1.0), ""});
+    model.origin.format = format;
+    return true;
+  }
   if (hasExt(".stl") &&
       options.representation == mesh::Representation::Recognize) {
     // The surfaces the triangles were tessellated from, rebuilt; a mesh
@@ -296,9 +486,12 @@ bool ImportFeature::ReadModel(const std::string& path,
       shape.Scale(scale);
       report.Transform(glm::dmat4(1.0), scale);
     }
-    if (!report.fellBack.empty())
+    if (!report.fellBack.empty()) {
       model.notes.push_back("recognition kept it as facets: " +
                             report.fellBack);
+      model.representation = "facets";
+      model.representationWhy = "recognition failed a check";
+    }
     model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
     model.products.back().recognition = std::move(report);
     model.instances.push_back({0, glm::dmat4(1.0), ""});
@@ -338,6 +531,9 @@ bool ImportFeature::ReadModel(const std::string& path,
           cancelled() ? "cancelled" : "failed to read '" + path + "' as OBJ";
       return false;
     }
+    // The reader starts the model afresh: say again what it became.
+    model.representation = "facets";
+    model.representationWhy = "the import names it";
     if (scale != 1.0)
       for (auto& product : model.products)
         if (product.shape.IsValid())
@@ -358,6 +554,8 @@ bool ImportFeature::ReadModel(const std::string& path,
 bool ImportFeature::Execute(RegenContext& ctx) {
   auto& bodies = ctx.bodies;
   m_recognized.clear();
+  m_chosen.clear();
+  m_chosenWhy.clear();
   // Structured (XCAF) read: geometry plus the names/colors STEP carries.
   // Each instance is a body — a flat part file is identity instances; an
   // assembly file imported into a PART places every occurrence (the
@@ -374,6 +572,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     LOG_ERROR("ImportFeature '{}': {}", m_name, why);
     return false;
   }
+  m_chosen = model.representation;
+  m_chosenWhy = model.representationWhy;
 
   // Which axis of the file is up, decided from its header (or as asked) and
   // applied as a turn about the FILE origin, before the centring: the shift
@@ -390,10 +590,38 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     size_t product;
     std::string name;
     glm::dmat4 placement{1.0}; // file to part, before the centring
+    std::shared_ptr<mesh::TriMesh> mesh; // a mesh body's, placed
   };
   std::vector<Placed> placed;
   std::vector<std::string> skipped;
+  std::vector<std::string> openNotes;
   for (const auto& inst : model.instances) {
+    // A mesh body: kept whether or not it closes. An open scan is the
+    // normal case (the table it stood on), so it is reported, not skipped.
+    if (const auto& m = model.products[inst.product].mesh) {
+      auto moved = std::make_shared<mesh::TriMesh>(
+          mesh::Transformed(*m, turn * inst.transform));
+      if (!moved->Closed()) {
+        const std::vector<double> loops = mesh::BoundaryLoops(*moved);
+        char buf[160];
+        if (!loops.empty())
+          std::snprintf(buf, sizeof buf,
+                        "the mesh is open: %zu boundary loop%s, the longest "
+                        "%.1f mm",
+                        loops.size(), loops.size() == 1 ? "" : "s",
+                        loops.front());
+        else
+          std::snprintf(buf, sizeof buf,
+                        "the mesh is not a closed solid: %zu edges on three "
+                        "or more triangles, %zu joining triangles facing "
+                        "opposite ways",
+                        moved->nonManifoldEdges, moved->flippedEdges);
+        openNotes.push_back(buf);
+      }
+      placed.push_back({CADShape(), inst.product, inst.name,
+                        turn * inst.transform, std::move(moved)});
+      continue;
+    }
     const CADShape& src = model.products[inst.product].shape;
     const std::string& label = !model.products[inst.product].name.empty()
                                    ? model.products[inst.product].name
@@ -424,6 +652,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   std::string warning;
   for (const std::string& note : model.notes)
     warning += (warning.empty() ? "" : "; ") + note;
+  for (const std::string& note : openNotes)
+    warning += (warning.empty() ? "" : "; ") + note;
   if (!skipped.empty()) {
     std::string list;
     for (const std::string& s : skipped)
@@ -440,7 +670,10 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   bool haveBounds = false;
   for (const auto& p : placed) {
     glm::dvec3 min, max;
-    p.shape.GetBoundingBox(min, max);
+    if (p.mesh)
+      p.mesh->Bounds(min, max);
+    else
+      p.shape.GetBoundingBox(min, max);
     combinedMin = haveBounds ? glm::min(combinedMin, min) : min;
     combinedMax = haveBounds ? glm::max(combinedMax, max) : max;
     haveBounds = true;
@@ -492,14 +725,23 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   for (auto& p : placed) {
     if (added >= kMaxShapes)
       break;
-    p.shape.Translate(-center);
     added++;
     // All import bodies share createdBy, so the prefix carries the body
     // ordinal — otherwise two bodies' identical face names would resolve
     // against whichever body is found first.
+    const std::string prefix =
+        std::to_string(GetId()) + "/b" + std::to_string(added);
     ElementMap map;
-    topo::NamePrimitiveElements(
-        p.shape, std::to_string(GetId()) + "/b" + std::to_string(added), map);
+    if (p.mesh) {
+      // A mesh body has one element, the mesh; the whole body picks and
+      // highlights as it (docs/interchange/README.md#mesh-bodies).
+      for (glm::dvec3& v : p.mesh->positions)
+        v -= center;
+      map.names[0] = prefix + "/mesh";
+    } else {
+      p.shape.Translate(-center);
+      topo::NamePrimitiveElements(p.shape, prefix, map);
+    }
     // The PRODUCT name labels the body ("Widget", not the writer's
     // auto-generated instance name "Widget:1"); instance names matter for
     // assembly occurrences (I2), not part bodies.
@@ -510,6 +752,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
             : (!p.name.empty() ? p.name : m_name + " " + std::to_string(added));
     bodies.push_back({bodyName, std::move(p.shape), m_material, GetId()});
     bodies.back().elementMap = std::move(map);
+    if (p.mesh)
+      bodies.back().mesh = std::move(p.mesh);
     if (product.recognition) {
       Recognized r{bodyName, *product.recognition};
       r.recognition.Transform(

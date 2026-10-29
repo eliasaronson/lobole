@@ -475,7 +475,9 @@ struct MeasureState {
     // or an Occurrence is a whole placed shape, and "how far apart are these
     // two parts" is the most natural question in an assembly — one the
     // engine has answered since I4 while the tool refused the pick.
-    enum class Kind : uint8_t { Face, Edge, Body, Occurrence, Corner };
+    // Point: a picked spot on a MESH body, which has no faces or edges to
+    // name (docs/interchange/README.md#mesh-bodies); `point` holds it.
+    enum class Kind : uint8_t { Face, Edge, Body, Occurrence, Corner, Point };
     Kind kind = Kind::Face;
     // Face/Edge: the stable element name. Body: {createdBy, ""}. Occurrence:
     // {0, ""} — the occurrence id below is its whole identity.
@@ -496,6 +498,8 @@ struct MeasureState {
 
     bool IsEdge() const { return kind == Kind::Edge; }
     bool IsCorner() const { return kind == Kind::Corner; }
+    // A measurable that is one point: a corner, or a point on a mesh.
+    bool IsPoint() const { return kind == Kind::Corner || kind == Kind::Point; }
     // A whole placed shape rather than one named element of one.
     bool Whole() const {
       return kind == Kind::Body || kind == Kind::Occurrence;
@@ -503,7 +507,8 @@ struct MeasureState {
     bool operator==(const Element& o) const {
       return kind == o.kind && ref.featureId == o.ref.featureId &&
              ref.name == o.ref.name && ref2.name == o.ref2.name &&
-             occurrenceId == o.occurrenceId && jobPartId == o.jobPartId;
+             occurrenceId == o.occurrenceId && jobPartId == o.jobPartId &&
+             point == o.point;
     }
 
     // Named constructors, because the four kinds fill different fields and a
@@ -524,6 +529,14 @@ struct MeasureState {
                             uint64_t occ = 0) {
       return {Kind::Corner, a, b, occ};
     }
+    // `p` in world space, on the mesh body `createdBy` made.
+    static Element OfPoint(uint64_t createdBy, const glm::dvec3& p,
+                           uint64_t occ = 0) {
+      Element e{Kind::Point, ElementRef{createdBy, ""}, ElementRef{}, occ};
+      e.point = p;
+      return e;
+    }
+    glm::dvec3 point{0.0}; // Point only, world space
   };
   std::vector<Element> picked;
   std::string readout; // formatted result ("" = nothing measured yet)

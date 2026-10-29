@@ -1690,6 +1690,13 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const uint64_t cfg =
         SourceConfiguration(state, sourceId, sourceName,
                             p.value("configuration", nlohmann::json(nullptr)));
+    // A mesh body has no faces for a toolpath to follow
+    // (docs/interchange/README.md#mesh-bodies).
+    if (const Document* src = ui::PartDocById(state, sourceId))
+      for (const Body& b : src->GetBodies())
+        if (const std::string why = MeshBodyRefusal(b, "a CAM job");
+            !why.empty() && !b.reference)
+          throw std::runtime_error("add_job_part: " + why);
     const uint64_t id = job->AddPart(sourceId, sourceName);
     job->FindPart(id)->configuration = cfg;
     job->BumpVersion();

@@ -144,10 +144,19 @@ struct SourceBody {
 // Appends one part document's bodies at the given world placement, less any
 // whose creating feature is in `hidden` (a part view's `hidden`; null for an
 // assembly's occurrences, which leave whole parts off before this).
-void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
-                  std::vector<SourceBody>& out,
-                  const std::vector<uint64_t>* hidden = nullptr) {
+// Returns why it cannot (a mesh body on the sheet), or "".
+std::string AppendBodies(const Document& doc, const glm::dmat4& xf,
+                         uint64_t occId, std::vector<SourceBody>& out,
+                         const std::vector<uint64_t>* hidden = nullptr) {
   for (const Body& body : doc.GetBodies()) {
+    // A mesh body has no edges to project: refused by name, not left off
+    // the sheet as if it were not there
+    // (docs/interchange/README.md#mesh-bodies).
+    if (const std::string why = MeshBodyRefusal(body, "a drawing view");
+        !why.empty() &&
+        (hidden == nullptr || std::find(hidden->begin(), hidden->end(),
+                                        body.createdBy) == hidden->end()))
+      return why + " (leave it off the view with hidden)";
     if (body.shape.GetShape().IsNull())
       continue;
     // Left off this sheet: the ground under a house, a fixture beside the
@@ -176,6 +185,7 @@ void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
     sb.whole = sb.input.shape;
     out.push_back(std::move(sb));
   }
+  return "";
 }
 
 // How far an exploded view moves a leaf at full factor: its top-level
@@ -224,7 +234,12 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
       if (!doc)
         return false;
       *sourceVersion = SlotDoc(state, i)->Version();
-      AppendBodies(*doc, glm::dmat4(1.0), 0, out, &view.hidden);
+      if (std::string why =
+              AppendBodies(*doc, glm::dmat4(1.0), 0, out, &view.hidden);
+          !why.empty()) {
+        *error = why;
+        return false;
+      }
       return true;
     }
     if (view.configuration != 0) {
@@ -282,7 +297,12 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
                                                 inst.rootOccurrenceId,
                                                 inst.innerIds)) *
                   world;
-        AppendBodies(*inst.part, world, inst.rootOccurrenceId, out);
+        if (std::string why =
+                AppendBodies(*inst.part, world, inst.rootOccurrenceId, out);
+            !why.empty()) {
+          *error = why;
+          return false;
+        }
       }
       return true;
     }

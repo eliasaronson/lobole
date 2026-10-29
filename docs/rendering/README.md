@@ -646,10 +646,39 @@ what it is. A section's clip planes are half-spaces, so what they leave of a
 ray is one interval, computed once per ray; each triangle hit then costs two
 float compares against it rather than a dot product per plane.
 
-There is no BVH inside a mesh: every triangle of every mesh the ray's box
-test admits is tested. `collide::Mesh` (`core/MeshCollide.cpp`) has a
-triangle BVH that could be reused. The same slab-test-first prune is used by
-fastener axis traversal (`parts::TraverseAxis`).
+A B-Rep tessellation is picked triangle by triangle. A mesh at or past
+`FaceSelector::kPickBvhTriangles` hands over its `mesh::Bvh`
+(`core/mesh/MeshBvh.h`, over the same triangles in the same order) and the
+pick walks the tree instead. The size is derived, not chosen: brute force
+costs 15.7 ns a triangle (measured on the 2M figure), and a quarter of a
+60 Hz frame is reached at about 265,000 triangles. With a section the tree
+answers the same two questions the loop does: the nearest hit in the kept
+interval, and the last crossing before the cut (a ray cast back from it).
+The same slab-test-first prune is used by fastener axis traversal
+(`parts::TraverseAxis`).
+
+## Mesh bodies
+
+A [mesh body](../interchange/README.md#mesh-bodies) is drawn from its own
+triangles: `TessellationFor(state, body)` (`src/ui/TessellationCache.cpp`)
+runs no BRepMesh. Normals are smooth and split where neighbouring
+triangles turn by more than 60°, the outline's crease angle, so a scan
+shades smooth and a fold stays a fold. The cache keys on the shared mesh,
+so a body that did not change keeps its asset across syncs and tabs. Every
+triangle is face 0, so the whole body highlights as one range and picks as
+its one element; past `kPickBvhTriangles` the entry carries the tree the
+pick walks. The outline draws silhouettes and the few creases past 60°, not
+a wireframe (stage 0 measured 21,004 static line indices and a 13.9 ms
+settled silhouette pass on the 2M figure).
+
+The path tracer takes the same triangles (`SyncRayTracingScene`).
+
+A section cuts a mesh body like any other triangles. A closed one's cap
+is its slice (`mesh::Slice`, `core/mesh/Slice.h`: the plane's crossings
+chained by the mesh edge they lie on, so the loops close exactly) triangulated
+by manifold's triangulator, in the plane, with no boolean; the other active
+planes do not trim it. An open mesh gets no cap, and `list_sections` names
+it in `uncapped`.
 
 ## Offscreen mode and lazy projection
 

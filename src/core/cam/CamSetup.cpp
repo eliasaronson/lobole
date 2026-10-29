@@ -457,7 +457,7 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
     const glm::dmat4 m = BodyToSetup(setup, b.jobPartId);
     Body copy = b; // keeps createdBy and the element map: names must survive
     if (b.shape.IsValid())
-      copy.shape = b.shape.Transformed(m);
+      copy = PlacedBody(b, m);
     out.push_back(std::move(copy));
   }
   return out;

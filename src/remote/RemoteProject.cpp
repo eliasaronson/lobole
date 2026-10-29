@@ -12,6 +12,7 @@
 
 #include "cad/CADKernel.h"
 #include "cad/MeshExport.h"
+#include "cad/MeshShape.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Measure.h"
@@ -146,11 +147,18 @@ static constexpr MethodDoc ProjectMethods[] = {
      "the count and the expected time unless `allow_large_mesh` is true -- "
      "except a mesh to be recognised, which sews nothing and goes ahead, "
      "refused only if the rebuild fails and it would have to be kept as "
-     "facets. `representation` is what an STL becomes: recognize (the planes, "
-     "cylinders, cones and spheres its triangles were made from, rebuilt as "
-     "true faces, so a hole has a diameter and an axis) or facets (a face "
-     "per triangle); absent, the mesh_representation preference. "
-     "`min_sides` (with recognize; 5 to 1024, default 12) is the fewest "
+     "facets. `representation` is what an STL or OBJ becomes: recognize (the "
+     "planes, cylinders, cones and spheres its triangles were made from, "
+     "rebuilt as true faces, so a hole has a diameter and an axis), facets "
+     "(a face per triangle), mesh (a mesh body: the triangles as they are, "
+     "for a scan or a sculpt; past what a mesh body holds it is refused "
+     "naming the count to decimate to) or auto (a mechanical mesh "
+     "recognised, an organic one or one past the recognition limit kept a "
+     "mesh body); absent, the mesh_representation preference (auto). The "
+     "reply's `representation` {chosen, why} says which and why "
+     "(docs/interchange/README.md#mesh-bodies). "
+     "`min_sides` (with recognize or auto; 5 to 1024, default 12) is the "
+     "fewest "
      "sides a ring of facets needs to be round: a 6-sided nut trap stays "
      "flat, 5 takes OpenSCAD's pentagon holes. The reply's `recognition` "
      "lists every cylinder, cone and sphere (radius, axis, centre, sides, "
@@ -185,11 +193,14 @@ static constexpr MethodDoc ProjectMethods[] = {
      "chord deviation used and where it came from (asked, profile, "
      "material, gap, default), and the SOURCE B-Rep's watertightness. The "
      "name is check_print's for the same deviation; `deflection` is refused, "
-     "naming it.",
+     "naming it. A mesh body is written as its own triangles, not "
+     "re-meshed: `mesh_bodies` and `mesh_note` say so "
+     "(docs/interchange/README.md#mesh-bodies).",
      "body, path, stl_deflection_mm", remote::NeedsPart | remote::NotInBatch,
      "bodies:int, deflection_from:string, deflection_mm:number, "
      "free_edges:int, path:string, shells:int, watertight:bool, "
-     "chord_share?:number, smallest_gap_side_mm?:number, warning?:string"},
+     "chord_share?:number, smallest_gap_side_mm?:number, warning?:string, "
+     "mesh_bodies?:int, mesh_note?:string"},
     {"export_brep",
      "Export to BREP {path}: the exact solid, so no `deflection` (that is "
      "export_stl's tessellation tolerance).",
@@ -520,6 +531,11 @@ json ImportFeatureReply(Document& doc, size_t before, const json& preDigest,
       // What the reader left out or sewed, in the call that did it.
       if (!imp->GetWarning().empty())
         out["warning"] = imp->GetWarning();
+      // What a mesh became and why: `auto`'s choice, or the one asked for
+      // (docs/interchange/README.md#mesh-bodies).
+      if (!imp->RepresentationChosen().empty())
+        out["representation"] = {{"chosen", imp->RepresentationChosen()},
+                                 {"why", imp->RepresentationWhy()}};
       // What a mesh became: the surfaces recognised, the polygons left
       // flat, or why it was kept as facets.
       if (json rec = interchange::RecognitionJson(*imp, true); !rec.is_null())
@@ -1703,6 +1719,12 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       }
       if (!r->warning.empty())
         out["warning"] = r->warning;
+      if (r->meshBodies > 0) {
+        out["mesh_bodies"] = r->meshBodies;
+        out["mesh_note"] = "mesh bodies were written as their own "
+                           "triangles, not re-meshed: deflection_mm did not "
+                           "apply to them";
+      }
       return out;
     }
     // Derived reference bodies are other parts' geometry: never exported.
@@ -1721,14 +1743,26 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("body index out of range");
     // BREP is single-shape; a whole-document export of several bodies fuses
     // them (the usual CAD behavior) so one file holds the whole part.
+    // A mesh body is written as its triangulation, which BREP keeps whole
+    // (docs/interchange/README.md#mesh-bodies), beside the fused B-Rep.
     CADShape shape;
-    if (only >= 0) {
-      shape = bodies[only].shape;
-    } else {
-      std::vector<CADShape> shapes;
-      for (const Body& b : bodies)
-        shapes.push_back(b.shape);
+    std::vector<CADShape> shapes, meshes;
+    for (int i = 0; i < static_cast<int>(bodies.size()); i++) {
+      if (only >= 0 && i != only)
+        continue;
+      if (bodies[i].IsMesh())
+        meshes.push_back(cad::TriangulationShape(*bodies[i].mesh));
+      else
+        shapes.push_back(bodies[i].shape);
+    }
+    if (shapes.size() == 1)
+      shape = shapes.front();
+    else if (!shapes.empty())
       shape = CADShape::UnionOf(shapes);
+    if (!meshes.empty()) {
+      if (shape.IsValid())
+        meshes.insert(meshes.begin(), shape);
+      shape = CADShape::CompoundOf(meshes);
     }
     if (!CADKernel::Instance().SaveBREP(path, shape))
       throw std::runtime_error(
@@ -1889,17 +1923,20 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
             ". Accepted: " + mesh::AcceptedRepresentations());
       if (!ImportFeature::IsMesh(path))
         throw std::runtime_error("representation: '" + path +
-                                 "' is not a mesh; it is for STL");
+                                 "' is not a mesh; it is for STL and OBJ");
     }
+    const mesh::Representation resolved =
+        ui::ResolveRepresentation(state, path, representation);
     int minSides = mesh::kDefaultMinSides;
     if (p.contains("min_sides")) {
       minSides = IntParam(p.at("min_sides"), "min_sides", mesh::kMinSidesLowest,
                           mesh::kMinSidesHighest);
-      if (ui::ResolveRepresentation(state, path, representation) !=
-          mesh::Representation::Recognize)
+      if (resolved != mesh::Representation::Recognize &&
+          resolved != mesh::Representation::Auto)
         throw std::runtime_error(
-            "min_sides: it is for representation: recognize, and this "
-            "import is facets");
+            std::string("min_sides: it is for representation: recognize or "
+                        "auto, and this import is ") +
+            mesh::ToString(resolved));
     }
     const bool asAssembly = p.value("as_assembly", false);
     const bool allowLarge = p.value("allow_large_mesh", false);
@@ -1911,11 +1948,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // A mesh to be recognised off the frame sews nothing, so the sewing
     // law does not price it: the job refuses it only if it falls back to
     // facets past the limit.
-    const bool recognisedOffFrame =
-        g_offFrameImport != nullptr &&
-        ui::ResolveRepresentation(state, path, representation) ==
-            mesh::Representation::Recognize;
-    if (mesh && mesh->overLimit && !allowLarge && !recognisedOffFrame)
+    const bool recognisedOffFrame = g_offFrameImport != nullptr &&
+                                    resolved == mesh::Representation::Recognize;
+    // A mesh body sews nothing either: `mesh` and `auto` answer to the
+    // mesh body's own limit, which the read checks
+    // (docs/interchange/README.md#mesh-bodies).
+    const bool meshBody = resolved == mesh::Representation::Mesh ||
+                          resolved == mesh::Representation::Auto;
+    if (mesh && mesh->overLimit && !allowLarge && !recognisedOffFrame &&
+        !meshBody)
       throw std::runtime_error(interchange::LargeMeshRefusal(
           path, *mesh, "`allow_large_mesh: true`"));
     if (g_offFrameImport != nullptr) {
