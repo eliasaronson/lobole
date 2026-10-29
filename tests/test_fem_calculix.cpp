@@ -540,6 +540,34 @@ TEST_CASE("a ccx .dat is read to every node, whatever its exponent",
 // Each study is planned and meshed once; the one mesh is solved in-house and
 // on CalculiX, and the two answers compared.
 
+// Used by the planning refusals below, which need no mesh, as well as by
+// the runs.
+namespace {
+
+ElementRef FaceWhere(const Body& body, const std::string& kind,
+                     const std::function<bool(const glm::dvec3&)>& at) {
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, index);
+    if (info && info->kind == kind && at(info->centroid))
+      return {body.createdBy, name};
+  }
+  return {};
+}
+
+fem::Load MakeLoad(Document& doc, fem::LoadType type, const ElementRef& face,
+                   double magnitude = 0.0,
+                   glm::dvec3 direction = glm::dvec3(0, 0, -1)) {
+  fem::Load l;
+  l.id = doc.AllocateId();
+  l.type = type;
+  l.face = face;
+  l.magnitude = magnitude;
+  l.direction = direction;
+  return l;
+}
+
+} // namespace
+
 #ifdef HAVE_NETGEN
 namespace {
 
@@ -602,28 +630,6 @@ fem::StudyJobInput Meshed(Document& doc, fem::Study& s) {
   INFO(err);
   REQUIRE(ok);
   return input;
-}
-
-ElementRef FaceWhere(const Body& body, const std::string& kind,
-                     const std::function<bool(const glm::dvec3&)>& at) {
-  for (const auto& [index, name] : body.elementMap.names) {
-    const auto info = Measure::DescribeFaceAt(body, index);
-    if (info && info->kind == kind && at(info->centroid))
-      return {body.createdBy, name};
-  }
-  return {};
-}
-
-fem::Load MakeLoad(Document& doc, fem::LoadType type, const ElementRef& face,
-                   double magnitude = 0.0,
-                   glm::dvec3 direction = glm::dvec3(0, 0, -1)) {
-  fem::Load l;
-  l.id = doc.AllocateId();
-  l.type = type;
-  l.face = face;
-  l.magnitude = magnitude;
-  l.direction = direction;
-  return l;
 }
 
 } // namespace
