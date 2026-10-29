@@ -2,7 +2,8 @@
 
 Structural analysis of parts and assemblies: static stress and
 displacement, natural frequencies and linear buckling, and on CalculiX
-large deformation and snap-through ([nonlinear static](#nonlinear-static)). Topology optimization is the third
+large deformation and snap-through ([nonlinear static](#nonlinear-static))
+and contact ([contact](#contact)). Topology optimization is the third
 kind of study and has its own page, [../topopt/README.md](../topopt/README.md).
 
 ## The model
@@ -27,6 +28,9 @@ A study holds:
   ([a peak that has settled](#a-peak-that-has-settled)).
 - `loads`: each a `Fixed` support, a `Pin` support (a rigid pin in a bore
   that holds where the part presses on it, [pin supports](#pin-supports)),
+  a `Contact` support (the face rests on the ground or on a rigid
+  occurrence, pushed and never pulled, with friction, solved on CalculiX:
+  [contact](#contact)),
   a `Force` (a total vector in newtons,
   spread as uniform traction over the face), a `Pressure` (MPa along the
   inward normal, positive pushes into the part), a `Torque` (N·mm about an
@@ -174,7 +178,9 @@ side in tension and puts a clamp's edge on the bore's rims. A `pin` support
   Friction. A pin on a modal study (a mode has no load to press the part
   onto it), a topology study (it freezes the faces its fixed supports
   hold) or an assembly study (held by fixed faces and rigid contacts) is
-  refused, naming why.
+  refused, naming why. A pin beside a CalculiX [contact](#contact) is
+  refused too: its contact set is found in-house, which cannot hold the
+  other ([contact and pins](#contact-and-pins)).
 - **The GPU declines it.** The femgpu SpMV applies each element matrix
   relative to its first node's translation, which holds only when every node
   is in x, y, z; a pinned study above the iterative threshold solves on the
@@ -1054,15 +1060,17 @@ results and checks -- answered by a second, independent program. The code is
 `src/core/fem/Calculix.{h,cpp}`. A [buckling](#buckling) study solves there
 too, as its cross-check, and a static study solved past linear -- large
 deformation, snap-through -- solves only there
-([nonlinear static](#nonlinear-static)). Contact, plasticity and thermal
-are what is left ([the plan](../plans/calculix-bridge.md)).
+([nonlinear static](#nonlinear-static)), as does a study with a
+[contact](#contact). Plasticity and thermal are what is left
+([the plan](../plans/calculix-bridge.md)).
 
 ### The solver choice
 
 A study's `solver` is `auto`, `in_house` or `calculix` (`fem::Solver`;
 absent from the file when `auto`, v204). `auto` and `in_house` solve every
-linear analysis in-house; a [nonlinear](#nonlinear-static) study on `auto`
-solves on CalculiX (`fem::EffectiveSolver`), and on `in_house` is refused. `calculix` solves a **static** or **buckling** study only:
+linear analysis in-house; a [nonlinear](#nonlinear-static) study, or one
+with a [contact](#contact), on `auto` solves on CalculiX
+(`fem::EffectiveSolver`), and on `in_house` is refused. `calculix` solves a **static** or **buckling** study only:
 on a modal or topology study it is refused (`fem::SolverRefusal`) by
 `set_study`, by the panel, by the file reader and by the run, never quietly
 solved in-house. The
@@ -1410,6 +1418,203 @@ then its snap-through peak below the linear factor and its receipt);
 `refused_calls_smoke` (in-house, an unknown key, no large_deformation,
 modal, load cases, converge always on a snap, a run that stops converging).
 
+## Contact
+
+A part that rests on something -- a block on a floor, a ball on a plate --
+is held only where it presses: rock it and one edge comes away. A `fixed`
+support glues the face and holds it in tension; a contact holds it the way
+the floor does, pushing and never pulling, with friction or without. A
+contact is nonlinear by nature (which part of the face carries the load
+depends on the load), so a study with one solves on [CalculiX](#calculix)
+only, through the [nonlinear](#nonlinear-static) path: `auto` picks it,
+`in_house` is refused. The code is `src/core/fem/Calculix.cpp` (the deck
+and the run), `FemStudy.cpp` (the part study's ground, the mesh) and
+`AssemblyStudy.cpp` (the pairs on an assembly).
+
+### Two kinds
+
+- **A contact support** (`LoadType::Contact`; `add_load {type: contact,
+  friction?}`, the panel's **Contact** tool, an assembly row's **Rest on
+  it**). It is a support: it holds the part, its row in `reactions` is what
+  it carried.
+  - On a part study, or on a face of the meshed occurrence of an assembly
+    study, the face rests on **the ground**: the plane a flat face lies on.
+    A curved face is refused, naming the assembly route. The ground is a
+    box on the face's outer side (`fem::GroundUnder`), reaching past the
+    face by a quarter of its larger side on every side and as deep, meshed
+    at that size, every node fixed: it is rigid, so its mesh has only to
+    hold the plane, which any mesh of a flat face does.
+  - On an assembly study with `contact_with` a rigid participant, the
+    meshed occurrence rests **on that occurrence**, where their faces face
+    each other. Its bodies are meshed twice as coarse as the meshed body
+    (`kRigidCoarsen`), their contact faces at the body's own size so a
+    curved partner keeps the shape of the face it meets, every node fixed.
+- **A contact participant** (role `contact`, with `friction`): meshed apart
+  from the meshed occurrence, in its own material, and in contact with it
+  where their faces face each other -- two parts that touch, press, slide
+  and lift off. Loads, supports and refinements go on its faces as on the
+  meshed one's (`occurrence` names it). Its mesh joins the body's as
+  domains of its own, sharing no node, so the result reports one body, as
+  a bonded group does. This lifts the one-meshed-occurrence rule, for
+  CalculiX studies only. A contact participant is in contact with one body
+  of the meshed occurrence and nothing else (not another participant, not
+  a rigid one); a contact beside bonded participants is refused, because
+  the bonded group is meshed as one fused shape whose contacts are not
+  looked for.
+
+`friction` is the coefficient (unitless, 0 or more; 0 and the default is
+frictionless). Refused, by `add_load`, `set_study`, the panel, the file
+reader and the run (`fem::ContactRefusal`): in-house, on any analysis but
+static, with load cases (where a contact closes depends on the whole load,
+so its answer is not a sum of cases), with `snap_through` (the seed is an
+in-house buckling mode, and the in-house solver cannot hold a contact),
+with `converge: always` (below), beside a pin (below), on a study of a
+topology shape, with a `region`, and with a friction below 0.
+
+### Which faces
+
+Two faces are a pair when they come within 5 % of the smaller body's
+bounding-box diagonal of each other (`kContactClearanceFraction`) and face
+each other there: their outward normals more than 60 degrees opposed at
+the nearest points (`kContactFacing`). The whole of each face is paired,
+so a contact that closes beyond where the parts first touch is held. The
+assembly's fuse is not what finds them: it imprints the faces two parts
+SHARE, and a ball on a plate touches at a point, a roller along a line --
+they share none. The facing test keeps a block standing on a plate from
+pairing its sides, which meet the plate along an edge without facing it.
+
+### The deck
+
+The nonlinear deck ([the run](#the-run)) with, per pair:
+
+- `*CONTACT PAIR, TYPE=SURFACE TO SURFACE`: face-to-face penalty contact,
+  the body's facets the slave surface, the partner's the master; a rigid
+  partner's nodes and tets written after the mesh's, `*BOUNDARY` on all of
+  them.
+- `*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR` with the slope (the
+  penalty, pressure per overclosure) `K = 5 E / h` (`fem::ContactPenalty`,
+  `kContactPenalty`): `E` the softer side's modulus, `h` the mean edge of
+  the body's contact facets. An overclosure is then a fifth of what the
+  same pressure strains one element by, a compliance at the contact that
+  shrinks with the mesh. ccx's own default is for node-to-face contact
+  only -- 50 times the first material's modulus whatever the element,
+  which reads as per millimetre and so is bound to the units -- and
+  face-to-face contact has none; its manual's range is 5 to 50 times the
+  modulus. Measured on the Hertz case below (the ball on a rigid flat, its
+  cap at a/6), the soft end is the closest:
+
+  | penalty | contact radius | peak pressure | ccx run |
+  |---|---|---|---|
+  | 5 E / h | +0.94 % | +1.70 % | 153 s |
+  | 15 E / h | -1.64 % | +3.36 % | 169 s |
+  | 50 E / h | -3.26 % | +4.04 % | 199 s |
+
+  The stiffer the penalty, the more the pressure gathers on the
+  integration points that close first. The kern case below reads the
+  same at every one of them (-0.04 %).
+- `*FRICTION` with `friction` and the stick slope `K / 100`
+  (`kStickSlopeRatio`), ccx's manual's advice ("about 100 times smaller
+  than the spring constant"; its default, the first modulus over 2, is
+  again unit-bound). A frictionless pair writes none.
+- Without `large_deformation` the steps are plain `*STATIC` (no NLGEOM)
+  and every load is the nodal forces the in-house solve applies; with it,
+  the large-deformation deck. The default `increments` is 10.
+- `*CONTACT PRINT` each increment: each pair's statistics (CF: the force
+  and moment on the body's side, the area in contact, the normal and shear
+  force) and the pressure at every contact integration point (CSTR).
+- A run with a contact does not look for snaps: a contact closing or
+  opening changes the stiffness by design.
+
+### A part held by a contact alone
+
+A part whose only support is a contact -- a ball on a plate, a block on
+the floor -- has nothing holding it until its contact closes. A ball
+touching at a point closes nothing in the first iteration and falls
+through its partner under its first increment of load (measured: 2.2 m on
+the Hertz case below, its contact never found). Every node of such a part
+(a part of the mesh with no fixed node and no pin) takes springs to the
+ground in each direction:
+
+- **settling springs** (`fem::SettleSprings`) through the first step, the
+  first tenth of the load (or the first increment, when that is less): all
+  together they would move the part a tenth of the mean edge of the body's
+  contact facets under the whole load of that step (`kSettleMotion`), so
+  its contact closes and takes the load as it does. They are removed
+  (`*MODEL CHANGE, TYPE=ELEMENT, REMOVE`) for the rest of the load.
+- **weak springs** all through: `1e-6 E L` summed over the part's nodes, `L`
+  its bounding-box diagonal (`kStabilization`), holding what a frictionless
+  contact leaves free with nothing pushing it there: a block on a
+  frictionless floor under a load straight down is free to slide, and
+  nothing makes it.
+
+What the weak springs carry at the factor reported, over the load, is the
+result's `stabilization`, and it is part of the equilibrium check. Past
+`kNonlinearBalance` (1e-3) the answer is refused: the springs are holding
+a part nothing else holds -- a frictionless contact under a sideways load
+-- and the refusal names friction or another support as the way out.
+Measured: 3e-6 to 6e-6 of the load on every case below.
+
+### What a contact reports
+
+Per body, `contacts` (`StudyBodyResult::ContactResult`, saved with the
+result): for each pair, its support's load id or its participant's
+occurrence, the partner's name ("ground" or the occurrence), the friction
+and penalty, the area of its faces on the body's side and how much of it
+is closed (ccx's area in contact; the rest is open), the force and moment
+(about the frame's origin) the partner exerts on that side, its normal and
+shear parts, and the pressure: the largest at any contact integration
+point, and the mean over the closed area. A contact support's `reactions`
+row carries the same force and moment and its closed area of its face's.
+The equilibrium check counts each rigid partner's reaction, so a contact
+that lost load fails it. The fields are the small-deformation stress
+(`fem::SmallDeformationFields`) without `large_deformation`, the Cauchy
+stress with it. The panel lists each contact's closed area, force and
+peak pressure.
+
+### Converging on a contact
+
+`converge` ([a peak that has settled](#a-peak-that-has-settled)) refines
+the faces a stress peak lies on, one ccx run a step, and a contact's peak lies on a contact face, whose partner is meshed apart
+from it: refining one side of a contact and not the other does not settle
+it. `auto` reports it not checked with that reason, and `always` is
+refused.
+
+### Contact and pins
+
+A [pin](#pin-supports) is the in-house solver's one compression-only
+contact: a rigid pin on a bore's axis, frictionless, never meshed, its
+contact set found by iterating linear solves (`SolveWithPins`). A CalculiX
+contact is the general case -- a flat face on the ground, any face on a
+rigid occurrence or a meshed one, with friction -- solved by ccx's penalty
+method. They do not mix: a pin's contact set is found in-house, which
+cannot hold a contact as well, so a study with both is refused. A pin
+stays the support for a part on a pin in a linear in-house study, and the
+base state a buckling study holds.
+
+### Measured
+
+`tests/test_fem_calculix.cpp` (`[contact]`, ccx 2.23):
+
+| case | answer | closed form |
+|---|---|---|
+| a 20 x 20 x 40 steel block on a frictionless ground, 4 kN down e = b/12 off its axis (a remote load), 4 mm, 2 468 nodes, 2 increments, 2.2 s | the whole base closed (399.99 of 400 mm²), peak pressure 14.994 MPa, the ground's resultant 1.66590 mm off the axis | inside the kern: closed, P/A (1 + 6e/b) = 15.000 MPa (-0.04 %), e = 1.66667 (-0.05 %) |
+| the same, e = b/4, 3.4 s | 277.7 mm² closed, peak 26.4 MPa, resultant at 4.99752 mm | past the kern (b/6) it lifts off; e = 5 (-0.05 %). A rigid block on a Winkler bed would close 3 (b/2 - e) b = 300 mm² |
+| a steel ball, R 10, on a rigid flat (a rigid occurrence), 29.3 kN for a = R/10, its cap refined to a/6, 11 371 nodes, 10 increments, 153 s (`[slow]`) | contact radius 1.0094 mm, peak pressure 14 230 MPa | Hertz: a = 1 mm (+0.94 %), p0 = 13 992 MPa (+1.7 %) |
+| a 20 x 20 x 30 steel block, a contact participant (friction 0.2), standing on a clamped aluminium slab, 3 kN down 3 mm off its axis, 5 mm, 2 197 nodes, 3.4 s | 2 999.99 N at 2.99991 mm; 399.4 mm² of the block's 400 closed | statics: P at e (-0.003 %) |
+
+The weak springs carried 3e-6 to 6e-6 of the load in each. Two meshed parts
+converge with the mesh as any contact does, and refining a face refines
+all of it: a steel ball on a steel block, the ball's cap and the block's
+whole top refined to a/2.5, read the radius 15 % short (18 278 nodes, 453
+s, at a penalty of 50 E / h), where the rigid flat needs no refining at
+all.
+
+The kern case is exact for a frictionless floor: a prism under a linear
+end traction keeps its sections plane, its base presses everywhere with
+the linear pressure while e <= b/6, and the penalty, uniform over the
+face, keeps it linear. Past the kern the base lifts, and statics alone
+puts the floor's resultant on the load's line.
+
 ## Assembly studies
 
 A study on an `AssemblyDocument` names **occurrences**, each in one role
@@ -1417,9 +1622,10 @@ A study on an `AssemblyDocument` names **occurrences**, each in one role
 
 | role | cost | meaning |
 |---|---|---|
-| `meshed` | mesh + solve | the part being analysed; exactly one per study |
+| `meshed` | mesh + solve | the part being analysed; exactly one per study (a `contact` participant is solved beside it) |
 | `bonded` | mesh + solve | meshed too, and glued to the meshed part where they touch, with its own material |
 | `rigid` | one boolean | a support; its contact patch can be clamped |
+| `contact` | mesh + solve | meshed apart from the meshed part, in its own material, and in contact with it where their faces face each other; solved on CalculiX ([contact](#contact)) |
 | `ignored` | nothing | not in the analysis (also: any occurrence not listed) |
 
 Left out and rigid bracket the truth: a neighbour left out is a lower bound
@@ -1433,7 +1639,10 @@ load or refinement). A fixed support may instead anchor on a **contact**
 touches the meshed group. That patch exists in neither part, so it is
 re-derived every time the study meshes, and a clamp on a rigid support that
 touches nothing meshed is refused by name. Being rigid does not clamp
-anything by itself; the clamp is a load.
+anything by itself; the clamp is a load. A contact support may anchor on a
+rigid participant the same way (`add_load {type: contact, contact_with}`):
+the meshed part rests on it, pushed and never pulled
+([contact](#contact)).
 
 How it is built (`src/core/fem/AssemblyStudy.cpp`, `fem::PlanAssemblyStudy`):
 
@@ -1459,9 +1668,11 @@ How it is built (`src/core/fem/AssemblyStudy.cpp`, `fem::PlanAssemblyStudy`):
 - **Bonding is declared, not inferred.** T-nuts, drivers and press fits are
   not glue, and fusing a line-to-line fit produces slivers that fail to mesh.
 - **Refusals before meshing**: not exactly one meshed occurrence; a meshed,
-  bonded or rigid pair that interpenetrates (checked with `interference`;
-  `ignored` is the way out); a bonded member sharing no face with the group; a
-  contact anchor whose support does not touch.
+  bonded, contact or rigid pair that interpenetrates (checked with
+  `interference`; `ignored` is the way out); a bonded member sharing no face
+  with the group; a contact anchor whose support does not touch; a contact
+  participant that faces no face of the meshed part, or faces two of its
+  bodies; a contact beside bonded participants.
 - Anchors on split faces are mapped onto the imprinted faces; a force's total
   is divided among them by area.
 
@@ -1510,15 +1721,17 @@ tinted as a fixture, and bonded seams in the bond colour.
   study is edited, run and read in the floating **Simulation** window.
 - On an assembly tab, `assembly.simulation` opens the Simulation tool window,
   a viewport mode beside explode and motion; it holds the study list and a
-  participants table with a role per row and **Clamp here** on rigid rows.
+  participants table with a role per row, **Clamp here** and **Rest on
+  it** (a [contact](#contact) support on it) on rigid rows, and a
+  **Friction** field on contact rows.
 - A static study's window has a **Solver** combo (Auto, In-house,
   CalculiX with the version found, or "not found"): CalculiX stays choosable
   without ccx, and Run then refuses in the window's red text with how to
   install it ([CalculiX](#calculix)).
 - In the window: analysis type, mesh size, material check, gravity (a
   checkbox that sets world-down 9.81 m/s²), and **Boundary conditions**: arm
-  Fixed, Force, Pressure, Torque, Remote or (on a static part study) Pin
-  and click a face; magnitude and an
+  Fixed, Force, Pressure, Torque, Remote, (on a static part study) Pin or
+  (on a static study) Contact and click a face; magnitude and an
   optional custom direction apply to the next placement. **Torque** takes
   "Torque (N·mm)" and an **Axis**: "From the face (cylinder)", or the choices
   a Revolve's axis offers (X/Y/Z, datum axes, construction lines, custom).
@@ -1533,7 +1746,13 @@ tinted as a fixture, and bonded seams in the bond colour.
   **Pin** takes "Hold it from turning" (unticked: free to turn); a click on
   a face that is not a cylinder is refused in the red line and places
   nothing; a pin is tinted and hatched as a support, its row saying "free
-  to turn" or "held from turning". A placed force can be dragged in the
+  to turn" or "held from turning". **Contact** takes "Friction (μ)"; a
+  click on a face that is not flat is refused in the red line and places
+  nothing, and on a flat one it places a contact support on the ground,
+  hatched as a support, its row saying "on the ground, friction 0.25". A
+  solved contact study lists each contact's closed area, normal and shear
+  force and peak pressure, and what its stabilization carried
+  ([contact](#contact)). A placed force can be dragged in the
   viewport to change its magnitude (one undo step on release). Run shows the
   shared progress bar. Results: mesh size, max von Mises, max displacement,
   field selector and deformation slider; for modal, the natural frequencies
@@ -1564,15 +1783,15 @@ verb that names a study for context (`add_load`, `add_refinement`,
 |---|---|
 | `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants`, `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
-| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
 | `run_study {id, async?, recompute?, outlive_client?, timeout_s?, converge?, layer_normal?}` | mesh + solve, and on a static study settle its peak ([a peak that has settled](#a-peak-that-has-settled)): `converge` overrides the study's for this run, `layer_normal` is the build direction whose across-layers peak a printed part's check settles; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)); a nonlinear run that stops converging is refused with the load it reached ([nonlinear static](#nonlinear-static)) |
 | `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static study would run, meshed now, no ccx needed ([the deck](#the-deck)); a large-deformation study's NLGEOM deck, a snap-through one's refused ([nonlinear static](#nonlinear-static)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended -- a nonlinear run's `load_fraction` ([the run](#the-run)); cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)) |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)) |
 | `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows |
@@ -1625,6 +1844,13 @@ verb that names a study for context (`add_load`, `add_refinement`,
   pull that buckles nothing, the refusals, the saved result's round trip,
   and the 217k-DOF cost check (`[slow]`); `tests/buckling_smoke.py` over
   the RPCs ([buckling](#buckling)).
+- `tests/test_fem_calculix.cpp` (`[contact]`): a block on the ground
+  lifting off only past its kern, a steel ball on a rigid flat against
+  Hertz (`[slow]`), a block standing on a slab as a contact participant,
+  the refusals, the ground under a flat face only, and the contact rows'
+  round trip; `tests/nonlinear_smoke.py` (a column standing on the ground
+  over the RPCs), `refused_calls_smoke`, and the GUI's
+  `sim/a_contact_rests_a_flat_face_only` ([contact](#contact)).
 - `tests/test_fem_calculix.cpp` (`[nonlinear]`): the elastica, a shallow
   arch's snap, a seeded column's approach to its linear factor (`[slow]`
   both), a small load against the linear answer, the refusals and the
@@ -1646,11 +1872,14 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 ## Not done
 
-- Contact that can separate or slide between parts (a pin against its
-  rigid pin is the one compression-only contact), plasticity, thermal,
-  fatigue. They come through [CalculiX](#calculix), as
-  [large deformation and snap-through](#nonlinear-static) did, not by
-  growing this solver past linear ([the plan](../plans/calculix-bridge.md)).
+- Plasticity, thermal, fatigue. They come through [CalculiX](#calculix),
+  as [large deformation, snap-through](#nonlinear-static) and
+  [contact](#contact) did, not by growing this solver past linear
+  ([the plan](../plans/calculix-bridge.md)).
+- Contact between two contact participants, between a contact participant
+  and a rigid occurrence, beside bonded participants, a curved face on the
+  ground (it rests on a rigid occurrence instead), and an interference fit
+  (parts that overlap are refused).
 - The path past a peak: ccx 2.23 has no arc-length method (`*STATIC, RIKS`
   is read as a plain `*STATIC`, with a warning), so a snap-through run
   reports the peak and not the branch after it.

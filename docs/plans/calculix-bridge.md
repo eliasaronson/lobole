@@ -3,12 +3,12 @@
 ## The problem
 
 Linear static, modal, buckling and topology studies are solved in-house and
-stay that way. Everything past linear is not built: large deformation,
-contact that separates or slides, plasticity and thermal
-(docs/simulation/README.md#not-done). That section already names an
-external solver as the way to add them, rather than growing ours. A curved
-wall loaded across its curve snaps through below its linear buckling
-factor, which a linear study cannot see.
+stay that way. Plasticity and thermal are not built
+(docs/simulation/README.md#not-done). That section names an external
+solver as the way to add them, rather than growing ours, as large
+deformation, snap-through and contact were added. A part loaded past
+yield carries its load by spreading the yield, which a linear study
+cannot see.
 
 CalculiX (`ccx`) does all of these on the element we already mesh. Its
 C3D10 tetrahedron has the same node order as `FemMesh::tets` (corners 0–3,
@@ -24,12 +24,13 @@ directory, the refusals and the residual check
 ([docs/simulation/README.md#calculix](../simulation/README.md#calculix)).
 Linear buckling is solved in-house, with CalculiX's `*BUCKLE` as its
 cross-check ([docs/simulation/README.md#buckling](../simulation/README.md#buckling)),
-and large deformation and snap-through are `static`'s `nonlinear` option on
+large deformation and snap-through are `static`'s `nonlinear` option on
 CalculiX
-([docs/simulation/README.md#nonlinear-static](../simulation/README.md#nonlinear-static)).
-What is left is shipping the binary, then contact, plasticity and thermal,
-each a `nonlinear` key on the same path. Nothing falls back to the in-house
-solver or to another analysis.
+([docs/simulation/README.md#nonlinear-static](../simulation/README.md#nonlinear-static)),
+and contact is a support and a participant role solved on the same path
+([docs/simulation/README.md#contact](../simulation/README.md#contact)).
+What is left is plasticity and thermal, each a `nonlinear` key on the same
+path. Nothing falls back to the in-house solver or to another analysis.
 
 ## What was measured
 
@@ -95,15 +96,10 @@ adds its keys under its own `v208`.
 
 Each stage is useful alone and lands with its docs. Stages 1 (discovery, the
 deck, linear static on CalculiX), 3 (shipping ccx in the packages,
-[docs/packaging/README.md#the-bundled-calculix](../packaging/README.md#the-bundled-calculix))
-and 4 (large deformation, snap-through) are built, and linear buckling with
-them (in-house, `*BUCKLE` its cross-check).
+[docs/packaging/README.md#the-bundled-calculix](../packaging/README.md#the-bundled-calculix)),
+4 (large deformation, snap-through) and 5 (contact) are built, and linear
+buckling with them (in-house, `*BUCKLE` its cross-check).
 
-
-**Stage 5: contact**, ~1 500 lines.
-- A compression-only support against a rigid occurrence or the ground: the partner is meshed coarse and fixed, with `*CONTACT PAIR`.
-- An assembly participant role `contact`: meshed separately rather than fused, its touching faces found by the same fuse `PlanAssemblyStudy` already runs, joined by `*CONTACT PAIR` with `friction` (unitless μ). This lifts the one-meshed-occurrence rule for CalculiX studies only.
-- Results: contact pressure and the open/closed area per pair, beside the existing reactions.
 
 **Stage 6: plasticity**, ~800 lines.
 - `nonlinear.plasticity: true`, with `*PLASTIC` from the material library.
@@ -119,12 +115,13 @@ them (in-house, `*BUCKLE` its cross-check).
 ## Verification
 
 **Closed forms, through `run_study`, tagged `[calculix]`:**
-- **Stage 5.** Hertz contact width for a sphere on a block; a block lifting off a rigid floor under a moment.
 - **Stage 6.** A bar past yield (uniform, exact), and a rectangular beam's collapse load M_p = σ_y b h²/4.
 
 **Refusals, in `refused_calls_smoke` and `tests/test_fem_calculix.cpp`:**
 each new key refused where `nonlinear` already is (in-house, another
 analysis, load cases), and a material without hardening data (Stage 6).
+Contact's are in place (docs/simulation/README.md#contact): the plasticity
+and thermal keys join them.
 
 **Docs:**
 - docs/simulation/README.md's "CalculiX" section gains each stage, and "Not done" loses it.
@@ -132,7 +129,7 @@ analysis, load cases), and a material without hardening data (Stage 6).
 
 ## Files
 
-- `src/core/fem/Calculix.{h,cpp}`: the contact, plastic and thermal deck keys, reading PE; `tests/test_fem_calculix.cpp`.
+- `src/core/fem/Calculix.{h,cpp}`: the plastic and thermal deck keys, reading PE; `tests/test_fem_calculix.cpp`.
 - `src/core/fem/FemStudy.{h,cpp}`: the `nonlinear` keys and their refusals.
 - `src/core/io/SerializeStudies.cpp`, `src/core/io/SerializationInternal.h`, `docs/versioning/format.md`, a golden per stage.
 - `src/remote/RemoteSimulation.cpp`: rows and handlers.

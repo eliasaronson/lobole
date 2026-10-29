@@ -212,8 +212,10 @@ both open means nothing):
     ([playing and filming a sequence](../assemblies/README.md#playing-and-filming-a-sequence)).
 - **Simulation** (`###tb_asm_simulation`) — `DrawSimulationToolWindow` (in
   `StudyPanel.cpp`): the studies over `ui::StudyHost`, plus a participants
-  table (each top-level occurrence's role: Ignored, Rigid, Meshed or Bonded;
-  "Clamp here" on a rigid row). Close leaves simulation mode.
+  table (each top-level occurrence's role: Ignored, Rigid, Meshed, Bonded
+  or Contact; "Clamp here" and "Rest on it" on a rigid row, a friction
+  field on a contact row: [contact](../simulation/README.md#contact)).
+  Close leaves simulation mode.
 - **Bill of materials** (`###tb_asm_bom`, `assembly.bom`, B) —
   `DrawBomWindow`, floating below the tool window: name, quantity, material,
   mass and total as sortable columns with the total mass in the header, plus
