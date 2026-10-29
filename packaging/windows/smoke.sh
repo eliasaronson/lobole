@@ -12,7 +12,8 @@
 # NixOS, which Nix's Xvfb and Wine need for GLX and Vulkan; $LAVAPIPE_ICD
 # names lavapipe's ICD file):
 #   - tools/release-smoke.py: it starts, models with OpenCASCADE, solves a
-#     sketch;
+#     sketch, and finds the ccx.exe beside lobole.exe, which then solves a
+#     deck under Wine (--calculix; this build has no Netgen to mesh a study);
 #   - tools/release-smoke.py --system-faults: a fault the system catches
 #     itself leaves the app running, and one it does not, on a worker thread,
 #     leaves a crash report;
@@ -51,7 +52,7 @@ wineboot --init
 wineserver --wait
 
 python3 "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
-  -- wine "$exe"
+  --calculix -- wine "$exe"
 python3 "$repo/tools/release-smoke.py" --port 8437 --system-faults \
   -- wine "$exe"
 
