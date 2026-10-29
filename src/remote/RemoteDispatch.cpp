@@ -60,6 +60,7 @@
 #include "remote/RpcParams.h"
 #include "ui/TemplateActions.h"
 
+#include "core/fem/Calculix.h" // FindCalculix, for ping's features
 #include "render/Camera.h"
 #include "render/FrameTimer.h"
 #include "render/MeshRenderer.h"
@@ -395,7 +396,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "OpenCASCADE version this build was compiled against. `features` "
      "is what this BUILD contains (cam, cam_adaptive, fem, mesher) and "
      "whether ffmpeg is on PATH (ffmpeg: export_motion_video's mp4, webm "
-     "and gif). "
+     "and gif), and `calculix`: {path, version} of the ccx a study solved "
+     "on CalculiX would run now, or null "
+     "(docs/simulation/README.md#calculix). "
      "`occ_patches` lists the kernel patches this build's OpenCASCADE "
      "carries (nix/patches/, comma-separated; empty for a distro's). "
      "`kernel_faults` counts the faults inside OpenCASCADE this process "
@@ -634,7 +637,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "hud, renders, reset, window", remote::NeedsRenderer},
     {"get_settings", "Read the user preferences (docs/ui/settings.md).", "",
      remote::NoFlags,
-     "autosave_interval:number, devices:string[], "
+     "autosave_interval:number, calculix_path:string, devices:string[], "
      "git_user_email:string, git_user_name:string, gpu_device:string, "
      "idle_throttle:bool, keys:object, lock_lights_to_model:bool, "
      "mesh_representation:string, "
@@ -1803,7 +1806,17 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               },
               // Not compiled in: an external program on PATH, looked for
               // now, which export_motion_video needs for mp4/webm/gif.
-              {"ffmpeg", !ui::FfmpegPath().empty()}}},
+              {"ffmpeg", !ui::FfmpegPath().empty()},
+              // The CalculiX a study set to it would run now
+              // (docs/simulation/README.md#calculix), or null.
+              {"calculix",
+               [&]() -> json {
+                 const auto ccx =
+                     fem::FindCalculix(state.settings.calculixPath, nullptr);
+                 if (!ccx)
+                   return nullptr;
+                 return json{{"path", ccx->path}, {"version", ccx->Version()}};
+               }()}}},
             // Whether this instance is still running the binary that is on
             // disk. A rebuild REPLACES the file; a process already running
             // keeps the old inode, serves happily, and answers questions

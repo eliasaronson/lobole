@@ -538,6 +538,37 @@ def main():
                      f"a refused finish_stock changed the operations: "
                      f"{ops} -> {after}")
 
+            # CalculiX (docs/simulation/README.md#calculix): each refused
+            # before anything starts -- no job, no run directory, no file.
+            d.call("set_active_part", part=part["name"])
+            static = d.call("add_study", name="On CalculiX")["id"]
+            modal = d.call("add_study", name="Modes", type="modal")["id"]
+            check("calculix on a modal study", "set_study",
+                  {"id": modal, "solver": "calculix"},
+                  needle="solved in-house", tab=part["name"])
+            check("a solver that is none", "set_study",
+                  {"id": static, "solver": "ccx"},
+                  needle="auto, in_house, calculix", tab=part["name"])
+            check("timeout_s on an in-house study", "run_study",
+                  {"id": static, "timeout_s": 5},
+                  needle="timeout_s bounds a CalculiX run", tab=part["name"])
+            check("a deck into no folder", "export_study_inp",
+                  {"id": static, "path": path(os.path.join("no", "x.inp"))},
+                  needle="does not exist", tab=part["name"])
+            check("a deck of a modal study", "export_study_inp",
+                  {"id": modal, "path": path("m.inp")},
+                  needle="static study", tab=part["name"])
+            d.call("set_study", id=static, solver="calculix")
+            d.call("set_settings",
+                   calculix_path=os.path.join(work, "no-ccx-here"))
+            check("no ccx", "run_study", {"id": static},
+                  needle="sudo apt install calculix-ccx", tab=part["name"])
+            check("no ccx, async", "run_study", {"id": static, "async": True},
+                  needle="calculix_path setting", tab=part["name"])
+            d.call("set_settings", calculix_path="")
+            d.call("remove_study", id=modal)
+            d.call("remove_study", id=static)
+
             if problems:
                 print("refused_calls_smoke: FAILED")
                 for p in problems:

@@ -10,6 +10,7 @@
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/Units.h"
+#include "core/fem/Calculix.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
@@ -28,9 +29,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -356,7 +360,8 @@ static constexpr MethodDoc SimulationMethods[] = {
     {"add_study",
      "Add a study {type: static|modal|topology, name?}. `kind` is accepted "
      "for the same thing — the enum, the file and `list_studies` all say "
-     "`type`, and so do add_mate/add_load/add_cam_op/add_relation.",
+     "`type`, and so do add_mate/add_load/add_cam_op/add_relation. A new "
+     "study's solver is auto (in-house); set_study `solver` changes it.",
      "kind, name, type"},
     {"remove_study",
      "Remove a study {id}. `study` names the same thing here and in every "
@@ -372,7 +377,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "keep_faces?:int, keep_outs?:object[], load_cases?:object[], "
      "loads:object[], max_iterations?:int, mesh_size:number, "
      "name:string, refinements:int, stale:bool, type:string, "
-     "volume_fraction?:number, shape_from?:object, "
+     "volume_fraction?:number, shape_from?:object, solver?:string, "
      "participants?:object[]}[]"},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
@@ -405,9 +410,15 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`num_modes` is a modal study's, and `volume_fraction`, "
      "`filter_radius` and `max_iterations` a topology study's: each is "
      "refused on another type unless the same call sets that type (type "
-     "is applied first).",
+     "is applied first). `solver` is auto|in_house|calculix: auto and "
+     "in_house solve every type in-house; calculix solves a STATIC study on "
+     "CalculiX (ccx, an external program: refused on modal or topology, and "
+     "at run_study when no ccx is found, naming how to install one) on the "
+     "same mesh, loads and supports, as a second, independent answer whose "
+     "displacement is checked against this study's own stiffness "
+     "(docs/simulation/README.md#calculix).",
      "filter_radius, gravity, id, load_cases, max_iterations, mesh_size, "
-     "name, num_modes, participants, shape_from, study, type, "
+     "name, num_modes, participants, shape_from, solver, study, type, "
      "volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
@@ -536,9 +547,18 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`reused: true` and nothing computed -- a reopened project's result "
      "of any kind included; `input_hash` names the inputs, `recompute: true` "
      "runs anyway. Takes "
-     "`id` (or `study`, the same thing here) — see remove_study.",
+     "`id` (or `study`, the same thing here) — see remove_study. A study "
+     "whose solver is calculix runs ccx in its own directory under the "
+     "cache ($XDG_CACHE_HOME/lobole/calculix/<pid>-<n>, removed on success, "
+     "kept and named in the refusal on failure); it is refused before "
+     "anything starts when no ccx is found (naming every way to install "
+     "one) or when its memory estimate exceeds what the machine has free, "
+     "and a ccx failure is refused with ccx's first *ERROR line. "
+     "`timeout_s` (seconds, CalculiX runs only; refused on an in-house "
+     "study) kills ccx past it and refuses the run "
+     "(docs/simulation/README.md#calculix).",
      "id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, "
-     "recompute?:bool"},
+     "recompute?:bool, timeout_s?:number>0"},
     {"cancel_study",
      "Cancel a running study: {job} (the id run_study, run_motion_study, "
      "mesh_study, check_requirements or design_sweep answered -- any study "
@@ -560,7 +580,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "cancellable, outlives_client} while it runs, {running: false, outcome "
      "(done|cancelled|failed), error?, cancel_reason?, seconds} once it has "
      "ended; an id that names no study job is refused, naming those there "
-     "are.",
+     "are. A running CalculiX study also says `memory_estimate_bytes` once "
+     "its mesh is made, and its `solver` names the phase (writing the deck, "
+     "solving, checking the answer).",
      "id, job, study"},
     {"study_results",
      "Result summary: {type, elements, nodes, stale} plus a `bodies` "
@@ -604,7 +626,18 @@ static constexpr MethodDoc SimulationMethods[] = {
      "away_at, factor_of_safety_away}: the largest stress farther than that "
      "from every support's edge. The top level carries the flag of its own "
      "peak, and the factor of safety's receipt says so "
-     "(docs/simulation/README.md#a-peak-on-a-supports-edge).",
+     "(docs/simulation/README.md#a-peak-on-a-supports-edge). A static "
+     "result names its `solver`; one solved on CalculiX says \"calculix "
+     "2.NN\", carries `calculix` {residual, residual_floor, "
+     "energy_residual} (its displacement's |K u - f| / |f| against this "
+     "study's own stiffness, the part of it the printed precision accounts "
+     "for, and |u . (K u - f)| / |u . f|, which the precision barely moves "
+     "and which is held to 1e-6), and, when the "
+     "session holds an in-house result of the same study, "
+     "`in_house_agreement` {max_displacement_rel, max_von_mises_rel}: "
+     "reported beside the answer, never folded into its receipt, which "
+     "stays a prediction with oracle calculix/static "
+     "(docs/simulation/README.md#calculix).",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
@@ -648,6 +681,20 @@ static constexpr MethodDoc SimulationMethods[] = {
      "pulling the face's printed layers apart "
      "(docs/simulation/README.md#printed-layers).",
      "at, case, face, id, layer_normal, study"},
+    {"export_study_inp",
+     "Write the CalculiX deck a STATIC study would run {id (or study), "
+     "path, body?, case?}: our Netgen mesh as C3D10 elements (one ELSET per "
+     "bonded member), a material per domain (E and density in MPa and "
+     "t/mm^3: the deck is mm, N, MPa), the assembled nodal forces as *CLOAD "
+     "(every load kind, gravity included, as the in-house solve applies "
+     "them), fixed supports as *BOUNDARY and a pin's nodes in a cylindrical "
+     "*TRANSFORM held where the in-house contact iteration found the pin "
+     "pressing. Meshes now; needs no ccx. A study meshing several bodies "
+     "names one with `body`; one with load cases names `case` (its name or "
+     "0-based index): each is its own deck. Refused on a modal or topology "
+     "study (docs/simulation/README.md#calculix).",
+     "body, case, id, path, study", remote::NotInBatch,
+     "body:string, bytes:int, elements:int, nodes:int, path:string"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
      "on, study"},
     {"export_topo_stl", "Export the optimized topology as STL.",
@@ -669,6 +716,111 @@ static constexpr MethodDoc SimulationMethods[] = {
 std::span<const MethodDoc> SimulationMethodDocs() { return SimulationMethods; }
 
 namespace {
+
+// export_study_inp (docs/simulation/README.md#calculix): the deck a static
+// study would hand CalculiX, for body `body` and load case `case`, meshed
+// here. Needs no ccx. Every parameter is read, and the deck written into
+// memory, before the file is touched.
+json ExportStudyInp(ui::AppState& state, Host& host, const RpcParams& p) {
+  const uint64_t id =
+      StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                   p.contains("study"), p.value("study", uint64_t{0}));
+  fem::Study* s = &host.Require(id);
+  if (s->type != fem::AnalysisType::Static)
+    throw std::runtime_error(
+        std::string("a CalculiX deck is written for a static study; this one "
+                    "is ") +
+        fem::AnalysisTypeToString(s->type));
+  if (!p.contains("path") || !p.at("path").is_string() ||
+      p.at("path").get<std::string>().empty())
+    throw std::runtime_error("path is required: the .inp file to write");
+  const std::filesystem::path path = p.at("path").get<std::string>();
+  std::error_code ec;
+  const std::filesystem::path parent =
+      path.has_parent_path() ? path.parent_path() : std::filesystem::path(".");
+  if (!std::filesystem::is_directory(parent, ec))
+    throw std::runtime_error("path: the folder " + parent.string() +
+                             " does not exist");
+  fem::StudyPlan plan;
+  std::string err;
+  const bool planned = host.IsAssembly()
+                           ? fem::PlanAssemblyStudy(
+                                 *host.asmDoc, *s,
+                                 ui::AssemblyStudyContextFor(state), plan, &err)
+                           : fem::PlanStudy(*host.part, *s, plan, &err);
+  fem::StudyJobInput input;
+  if (!planned || !fem::MeshPlannedStudy(plan, input, &err))
+    throw std::runtime_error(err);
+  // Which body: by name, or the only one.
+  size_t body = 0;
+  if (p.contains("body")) {
+    const std::string want = p.at("body").get<std::string>();
+    std::string names;
+    bool found = false;
+    for (size_t i = 0; i < input.bodies.size(); ++i) {
+      names += (i ? ", " : "") + input.bodies[i].bodyName;
+      if (input.bodies[i].bodyName == want) {
+        body = i;
+        found = true;
+      }
+    }
+    if (!found)
+      throw std::runtime_error("body '" + want +
+                               "' is not one this study meshes: " + names);
+  } else if (input.bodies.size() > 1) {
+    std::string names;
+    for (size_t i = 0; i < input.bodies.size(); ++i)
+      names += (i ? ", " : "") + input.bodies[i].bodyName;
+    throw std::runtime_error("this study meshes " +
+                             std::to_string(input.bodies.size()) +
+                             " bodies, each its own deck: name one with "
+                             "`body` (" +
+                             names + ")");
+  }
+  // Which case: by name or 0-based index, or the only one.
+  size_t caseIndex = 0;
+  if (p.contains("case")) {
+    const json& c = p.at("case");
+    bool found = false;
+    for (size_t k = 0; k < input.caseNames.size(); ++k)
+      if ((c.is_string() && c.get<std::string>() == input.caseNames[k]) ||
+          (c.is_number_unsigned() && c.get<size_t>() == k)) {
+        caseIndex = k;
+        found = true;
+      }
+    if (!found)
+      throw std::runtime_error(
+          "case " + c.dump() +
+          (input.caseNames.empty()
+               ? std::string(" names a load case, and this study has none")
+               : " is not one of this study's load cases"));
+  } else if (input.caseNames.size() > 1) {
+    std::string names;
+    for (size_t k = 0; k < input.caseNames.size(); ++k)
+      names += (k ? ", " : "") + input.caseNames[k];
+    throw std::runtime_error("each load case is its own deck: name one with "
+                             "`case` (" +
+                             names + ")");
+  }
+  std::ostringstream deck;
+  std::string title =
+      "study '" + s->name + "', body '" + input.bodies[body].bodyName + "'";
+  if (!input.caseNames.empty())
+    title += ", load case '" + input.caseNames[caseIndex] + "'";
+  if (!fem::WriteStudyDeck(input, body, caseIndex, deck, title, &err))
+    throw std::runtime_error(err);
+  const std::string text = deck.str();
+  std::ofstream out(path, std::ios::binary);
+  out << text;
+  out.close();
+  if (!out)
+    throw std::runtime_error("could not write " + path.string());
+  return json{{"path", path.string()},
+              {"body", input.bodies[body].bodyName},
+              {"nodes", input.bodies[body].mesh.nodes.size()},
+              {"elements", input.bodies[body].mesh.tets.size()},
+              {"bytes", text.size()}};
+}
 
 // check_topology (docs/topopt/README.md#a-static-study-of-the-optimised-shape):
 // the topology result's shape and its solid design domain, each a static
@@ -934,6 +1086,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       }
       if (eval.shapeFrom.study != 0)
         sj["shape_from"] = ShapeFromJson(eval.shapeFrom);
+      if (s.solver != fem::Solver::Auto)
+        sj["solver"] = fem::SolverToString(s.solver);
       studies.push_back(std::move(sj));
     }
     return json{{"studies", studies}};
@@ -992,6 +1146,22 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             "analysis type must be static, modal, or topology");
       if (s.type == fem::AnalysisType::Topology && host.IsAssembly())
         topoOnly();
+      // Which program solves it (docs/simulation/README.md#calculix), after
+      // `type`, so one call can set both; a pair that does not go together
+      // is refused whichever key moved.
+      if (p.contains("solver")) {
+        const std::string want = p.at("solver").get<std::string>();
+        if (!fem::SolverFromString(want, s.solver))
+          throw std::runtime_error("solver '" + want +
+                                   "' is not one of: " + fem::kSolverNames);
+      }
+      if (const std::string why = fem::SolverRefusal(s.solver, s.type);
+          !why.empty())
+        throw std::runtime_error(
+            why + (p.contains("solver")
+                       ? std::string()
+                       : "; this study's solver is calculix, so set solver: "
+                         "auto in the same call"));
       // Assembly studies (S1): who takes part, and how. The whole list at
       // once — a role table is one statement, not a sequence of edits.
       if (p.contains("participants")) {
@@ -1254,6 +1424,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
   if (m == "check_topology") {
     // rpc-returns-from: src/remote/RemoteSimulation.cpp
     return CheckTopology(state, host, doc, p);
+  }
+  if (m == "export_study_inp") {
+    // rpc-returns-from: src/remote/RemoteSimulation.cpp
+    return ExportStudyInp(state, host, p);
   }
   if (m == "add_refinement") {
     const uint64_t id = p.at("study").get<uint64_t>();
@@ -1584,11 +1758,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                     {"meshing", true},
                     {"elapsed_seconds", mrs.elapsedSeconds}};
       const ui::StudyRunStatus srs = ui::GetStudyRunStatus(state, id);
-      if (srs.running)
-        return json{{"running", true},
-                    {"job", jobId},
-                    {"solver", srs.solver},
-                    {"elapsed_seconds", srs.elapsedSeconds}};
+      if (srs.running) {
+        json out{{"running", true},
+                 {"job", jobId},
+                 {"solver", srs.solver},
+                 {"elapsed_seconds", srs.elapsedSeconds}};
+        // A CalculiX run's memory estimate, once its mesh said how big
+        // (docs/simulation/README.md#calculix).
+        if (srs.memoryEstimateBytes > 0)
+          out["memory_estimate_bytes"] = srs.memoryEstimateBytes;
+        return out;
+      }
       const ui::TopoRunStatus st = ui::GetTopologyStatus(state, id);
       if (st.running)
         return json{{"running", true},
@@ -1638,6 +1818,15 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       ui::JobStart start;
       start.recompute = p.value("recompute", false);
       start.owner = p.value("outlive_client", false) ? 0 : state.rpcConnection;
+      // A deadline bounds a CalculiX run only (an in-house solve has its
+      // own cancel and no deadline), refused here before anything starts.
+      if (p.contains("timeout_s")) {
+        start.timeoutSeconds = p.at("timeout_s").get<double>();
+        if (s->solver != fem::Solver::Calculix)
+          throw std::runtime_error(
+              "timeout_s bounds a CalculiX run, and this study is solved "
+              "in-house (set_study solver: calculix to run it on CalculiX)");
+      }
       const auto started = [&](const char* kind) {
         return json{{"started", true},
                     {"running", true},
@@ -1676,8 +1865,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         std::string err;
         const bool ran =
             host.IsAssembly()
-                ? ui::RunAssemblyStudyAndCache(state, *host.asmDoc, id, &err)
-                : ui::RunStudyAndCache(*doc, id, &err);
+                ? ui::RunAssemblyStudyAndCache(state, *host.asmDoc, id, &err,
+                                               start.timeoutSeconds)
+                : ui::RunStudyAndCache(state, *doc, id, &err,
+                                       start.timeoutSeconds);
         if (!ran)
           throw std::runtime_error(err);
         if (const fem::StudyRuntime* done = host.Results(id))
@@ -1946,6 +2137,39 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       result["factor_of_safety"] = minFoS;
     if (!topEdge.is_null())
       result["peak_at_support_edge"] = topEdge;
+    // Which program solved it (docs/simulation/README.md#calculix). A
+    // CalculiX answer says how well it holds against our own K, and, when
+    // the session has an in-house answer to the same study, how far the two
+    // are apart: reported beside it, never folded into its receipt.
+    const bool onCalculix = rt->solver.rfind("calculix", 0) == 0;
+    if (!rt->solver.empty())
+      result["solver"] = rt->solver;
+    if (onCalculix && rt->residual > 0)
+      result["calculix"] = {{"residual", rt->residual},
+                            {"residual_floor", rt->residualFloor},
+                            {"energy_residual", rt->energyResidual}};
+    if (onCalculix) {
+      fem::Study twin = *s;
+      twin.solver = fem::Solver::Auto;
+      const uint64_t twinHash =
+          host.IsAssembly()
+              ? fem::AssemblyStudyInputKey(*host.asmDoc, twin,
+                                           ui::AssemblyStudyContextFor(state))
+              : fem::StudyInputKey(*doc, twin);
+      if (const auto own = twinHash != 0
+                               ? state.studyResultsByInput.Find(twinHash)
+                               : nullptr) {
+        const auto rel = [](double a, double b) {
+          const double m = std::max(std::abs(a), std::abs(b));
+          return m > 0 ? std::abs(a - b) / m : 0.0;
+        };
+        result["in_house_agreement"] = {
+            {"input_hash", inputhash::Hex(twinHash)},
+            {"max_displacement_rel",
+             rel(rt->maxDisplacement, own->maxDisplacement)},
+            {"max_von_mises_rel", rel(rt->maxVonMises, own->maxVonMises)}};
+      }
+    }
     const auto peakJson = [](const fem::FieldPeak& pk, const std::string& b) {
       return json{{"value", pk.value},
                   {"at", {pk.at.x, pk.at.y, pk.at.z}},
@@ -2036,8 +2260,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // measured, so the basis travels with it and the receipt can never roll
       // up better than Provisional.
       receipt::Receipt r;
-      const receipt::Oracle solver{"designer/fem-static",
-                                   rt->solver.empty() ? "cpu" : rt->solver};
+      // A CalculiX answer names its own oracle and version: a second,
+      // independent answer, held to the same basis as an in-house one.
+      const receipt::Oracle solver =
+          onCalculix ? receipt::Oracle{"calculix/static",
+                                       rt->solver.substr(
+                                           std::string("calculix ").size())}
+                     : receipt::Oracle{"designer/fem-static",
+                                       rt->solver.empty() ? "cpu" : rt->solver};
       const bool stale = host.Stale(id);
       if (stale) {
         // The numbers are real; they are just answers about a part that no
@@ -2072,6 +2302,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         c.note = "linear-elastic static solve on " + std::to_string(elements) +
                  " elements, against the library yield strength. A prediction,"
                  " not a measurement";
+        if (onCalculix)
+          c.note += ". Solved by CalculiX " + solver.version +
+                    " on this study's own mesh and loads: a second, "
+                    "independent answer, not a stronger one";
         if (!topEdge.is_null())
           c.note +=
               ". The peak sits within one element of support " +
