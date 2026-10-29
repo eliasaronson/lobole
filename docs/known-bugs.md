@@ -270,6 +270,27 @@ the heading if it is not here yet.
 - **Likely fix:** a `key_chars` action (the test engine's
   `KeyCharsAppend`), or an `item_click` variant that keeps the field active.
 
+### mypy before 2.1 reads a partial feature dict as a CamProfile spec
+
+- **Symptom:** under mypy 1.9 (Ubuntu 24.04's apt package),
+  `app.add_feature(feature={"type": "Box"})` is an error naming
+  `Literal['CamProfile']`, where the documented promise is that a plain dict
+  passes and only a spec annotated as one is checked
+  ([rpc.md](scripting/rpc.md#typed-feature-specs)). A complete spec of any
+  type passes.
+- **Cause:** `CamProfileSpec` is the one generated spec whose only required
+  key is `type`, because a cam is placed by `face` OR `frame` and the
+  contract grammar can say only that each is optional. mypy 1.9 picks a
+  TypedDict from a union by keys alone, and a dict whose keys fit exactly one
+  spec is held to it; mypy 2.1 also matches the `type` literal. CI's typing
+  gate runs mypy 2.1, as the nix shell does.
+- **Where:** CamProfile's `contract` in `kFeatureTypes`
+  (`src/core/io/SerializeFeatures.cpp`); the grammar in
+  `src/remote/RpcContract.cpp` and `tools/rpc_contract.py`.
+- **Likely fix:** a "one of these keys" form in the contract grammar, which
+  the generator emits as one TypedDict per alternative and the schema as
+  `oneOf`; the server then refuses a cam with neither or both at the call.
+
 ## Reader fuzz
 
 ### Which cases the full sweep runs depends on the machine's speed

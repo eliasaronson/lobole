@@ -205,6 +205,11 @@ jobs:
           # license check, where the runner's is older.
           python3 -m pip install --user --break-system-packages \
             'setuptools>=77' 'packaging>=24.2'
+          # The typing gate's checker is the nix shell's (mypy 2.1). 24.04's
+          # apt mypy 1.9 matches a dict literal to a TypedDict by its keys
+          # alone, so `{"type": "Box"}` is read as CamProfileSpec, the one
+          # spec that requires nothing else (docs/known-bugs.md).
+          python3 -m pip install --user --break-system-packages 'mypy==2.1.0'
 
       # See the gui-suite job: the save half runs on failure too, so a red
       # test step still leaves a warm compile cache behind.
