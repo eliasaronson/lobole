@@ -18,7 +18,9 @@
 // POSIX spawns with posix_spawn and a pipe; Windows runs the resolved program
 // through _popen with the arguments quoted for cmd.exe.
 
+#include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace proc {
@@ -27,6 +29,17 @@ namespace proc {
 // is not there. Read at every call: PATH is the environment's, not the
 // build's.
 std::string FindOnPath(const std::string& name);
+
+// How a child is started beyond its arguments: a solver that writes its
+// files beside its input runs in a directory of its own, says what it has
+// to say on stdout, and takes its thread count from its environment
+// (docs/simulation/README.md#calculix).
+struct ChildOptions {
+  std::string cwd;        // empty: this process's
+  std::string stdoutPath; // empty: /dev/null; else this file, truncated
+  // Set in the child's environment, over this process's.
+  std::vector<std::pair<std::string, std::string>> env;
+};
 
 class PipedChild {
 public:
@@ -39,7 +52,17 @@ public:
   // Start `program` (a full path, as FindOnPath returns) with `args`.
   // False, with `error`, when it cannot be started at all.
   bool Start(const std::string& program, const std::vector<std::string>& args,
-             std::string* error);
+             std::string* error, const ChildOptions& options = {});
+  // Whether it has ended, without waiting: true once it has, with its exit
+  // code in `code` (-1 when it died of a signal), and it is then reaped as
+  // Finish would. On Windows, where _popen gives no process to poll, this
+  // waits for it.
+  bool Poll(int* code);
+  // The process id while it runs (0 when there is none, and on Windows).
+  long Pid() const;
+  // The most memory it held at once, in bytes, once it has been reaped by
+  // Poll or Finish (0 where the platform does not say).
+  uint64_t PeakBytes() const { return m_peakBytes; }
   // Write all of `n` bytes to its stdin. False once the child has gone away
   // (it exited, or closed its input): the caller stops and reads Finish.
   // Blocks while the child is behind; call it off the main thread.
@@ -56,6 +79,8 @@ public:
 private:
   bool m_started = false;
   bool m_finished = false;
+  int m_exitCode = -1;
+  uint64_t m_peakBytes = 0;
   std::string m_stderrPath;
 #if defined(_WIN32)
   void* m_pipe = nullptr; // FILE*

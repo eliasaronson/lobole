@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <spawn.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -161,12 +162,21 @@ PipedChild::~PipedChild() {
 #if defined(_WIN32)
 
 bool PipedChild::Start(const std::string& program,
-                       const std::vector<std::string>& args,
-                       std::string* error) {
+                       const std::vector<std::string>& args, std::string* error,
+                       const ChildOptions& options) {
   m_stderrPath = StderrPath();
-  std::string cmd = QuoteArg(program);
+  // cmd.exe carries what posix_spawn's file actions do: the directory, the
+  // environment and where stdout goes, ahead of the program.
+  std::string cmd;
+  if (!options.cwd.empty())
+    cmd += "cd /d " + QuoteArg(options.cwd) + " && ";
+  for (const auto& [key, value] : options.env)
+    cmd += "set \"" + key + "=" + value + "\" && ";
+  cmd += QuoteArg(program);
   for (const std::string& a : args)
     cmd += " " + QuoteArg(a);
+  if (!options.stdoutPath.empty())
+    cmd += " >" + QuoteArg(options.stdoutPath);
   cmd += " 2>" + QuoteArg(m_stderrPath);
   // cmd.exe /c strips the first and last quote of a line that starts with
   // one; an outer pair gives it those to strip.
@@ -190,16 +200,25 @@ bool PipedChild::Write(const void* data, size_t n) {
 }
 
 int PipedChild::Finish(std::string* stderrTail) {
-  int code = -1;
   if (m_pipe != nullptr) {
-    code = ::_pclose(static_cast<FILE*>(m_pipe));
+    m_exitCode = ::_pclose(static_cast<FILE*>(m_pipe));
     m_pipe = nullptr;
   }
   m_finished = true;
   if (stderrTail)
     *stderrTail = Tail(m_stderrPath);
-  return code;
+  return m_exitCode;
 }
+
+bool PipedChild::Poll(int* code) {
+  // _popen gives no process to ask: waiting is the only way to know.
+  const int c = Running() ? Finish(nullptr) : m_exitCode;
+  if (code)
+    *code = c;
+  return true;
+}
+
+long PipedChild::Pid() const { return 0; }
 
 void PipedChild::Kill() {
   // _popen gives no process handle: closing the input ends an encoder, which
@@ -210,8 +229,8 @@ void PipedChild::Kill() {
 #else // POSIX
 
 bool PipedChild::Start(const std::string& program,
-                       const std::vector<std::string>& args,
-                       std::string* error) {
+                       const std::vector<std::string>& args, std::string* error,
+                       const ChildOptions& options) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -225,11 +244,21 @@ bool PipedChild::Start(const std::string& program,
   posix_spawn_file_actions_t actions;
   posix_spawn_file_actions_init(&actions);
   posix_spawn_file_actions_adddup2(&actions, fds[0], STDIN_FILENO);
-  posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null",
-                                   O_WRONLY, 0);
+  if (options.stdoutPath.empty())
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null",
+                                     O_WRONLY, 0);
+  else
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO,
+                                     options.stdoutPath.c_str(),
+                                     O_WRONLY | O_CREAT | O_TRUNC, 0600);
   posix_spawn_file_actions_addopen(&actions, STDERR_FILENO,
                                    m_stderrPath.c_str(),
                                    O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  // The file actions run in order, after the child exists: the output files
+  // above are opened where this process stands, and only then does the
+  // child move to its own directory.
+  if (!options.cwd.empty())
+    posix_spawn_file_actions_addchdir_np(&actions, options.cwd.c_str());
   // The child starts with default signal handling, whatever this process
   // set: an encoder that inherits SIGPIPE ignored behaves differently.
   posix_spawnattr_t attr;
@@ -251,9 +280,27 @@ bool PipedChild::Start(const std::string& program,
   for (const std::string& a : args)
     argv.push_back(const_cast<char*>(a.c_str()));
   argv.push_back(nullptr);
+  // This process's environment with the options' keys set over it.
+  std::vector<std::string> envStore;
+  for (char** e = environ; e != nullptr && *e != nullptr; ++e) {
+    const std::string entry(*e);
+    bool replaced = false;
+    for (const auto& [key, value] : options.env)
+      if (entry.size() > key.size() && entry.compare(0, key.size(), key) == 0 &&
+          entry[key.size()] == '=')
+        replaced = true;
+    if (!replaced)
+      envStore.push_back(entry);
+  }
+  for (const auto& [key, value] : options.env)
+    envStore.push_back(key + "=" + value);
+  std::vector<char*> envp;
+  for (std::string& e : envStore)
+    envp.push_back(e.data());
+  envp.push_back(nullptr);
   pid_t pid = -1;
   const int rc = ::posix_spawn(&pid, program.c_str(), &actions, &attr,
-                               argv.data(), environ);
+                               argv.data(), envp.data());
   posix_spawn_file_actions_destroy(&actions);
   posix_spawnattr_destroy(&attr);
   ::close(fds[0]);
@@ -299,27 +346,59 @@ bool PipedChild::Write(const void* data, size_t n) {
   return ok;
 }
 
+namespace {
+
+// Reaps `pid` (waiting when `block`), keeping its exit code and the most
+// memory it held. False when it has not ended (only without `block`).
+bool Reap(int pid, bool block, int& exitCode, uint64_t& peakBytes) {
+  int status = 0;
+  struct rusage usage{};
+  pid_t r;
+  do {
+    r = ::wait4(pid, &status, block ? 0 : WNOHANG, &usage);
+  } while (r < 0 && errno == EINTR);
+  if (r == 0)
+    return false;
+  exitCode = r == pid && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  if (r == pid)
+    peakBytes = static_cast<uint64_t>(usage.ru_maxrss) * 1024; // KiB on Linux
+  return true;
+}
+
+} // namespace
+
 int PipedChild::Finish(std::string* stderrTail) {
   if (m_stdin >= 0) {
     ::close(m_stdin);
     m_stdin = -1;
   }
-  int code = -1;
   if (m_pid > 0) {
-    int status = 0;
-    pid_t r;
-    do {
-      r = ::waitpid(m_pid, &status, 0);
-    } while (r < 0 && errno == EINTR);
-    if (r == m_pid && WIFEXITED(status))
-      code = WEXITSTATUS(status);
+    Reap(m_pid, true, m_exitCode, m_peakBytes);
     m_pid = -1;
   }
   m_finished = true;
   if (stderrTail)
     *stderrTail = Tail(m_stderrPath);
-  return code;
+  return m_exitCode;
 }
+
+bool PipedChild::Poll(int* code) {
+  if (m_pid > 0) {
+    if (!Reap(m_pid, false, m_exitCode, m_peakBytes))
+      return false;
+    m_pid = -1;
+    if (m_stdin >= 0) {
+      ::close(m_stdin);
+      m_stdin = -1;
+    }
+    m_finished = true;
+  }
+  if (code)
+    *code = m_exitCode;
+  return true;
+}
+
+long PipedChild::Pid() const { return m_pid > 0 ? m_pid : 0; }
 
 void PipedChild::Kill() {
   if (m_pid > 0)
