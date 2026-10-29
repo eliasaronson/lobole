@@ -591,7 +591,7 @@ after the setting and `LOBOLE_CCX`: beside itself.
 
 | package | ccx | where | its source, attached to the release |
 |---|---|---|---|
-| GUI AppImage | Ubuntu 24.04's `calculix-ccx` (2.21), with SPOOLES, ARPACK and the OpenMPI it links, BLAS, LAPACK and libgfortran | `usr/lib/lobole/ccx`, its libraries placed by linuxdeploy (`--executable`) | `calculix-ccx-<version>-source.tar`: Ubuntu's source package of exactly that version (`.dsc`, upstream tarball, Debian changes), fetched by `build.sh` with `apt-get source` |
+| GUI AppImage | Ubuntu 24.04's `calculix-ccx` (2.21), with SPOOLES, ARPACK and the OpenMPI it links, BLAS, LAPACK and libgfortran | `usr/lib/lobole/ccx`, a link to `usr/bin/ccx`: linuxdeploy (`--executable`) points an executable's rpath at `usr/lib` only from `usr/bin`, and given the `lib/lobole` path it wrote `$ORIGIN`, so that copy found none of its libraries | `calculix-ccx-<version>-source.tar`: Ubuntu's source package of exactly that version (`.dsc`, upstream tarball, Debian changes), fetched by `build.sh` with `apt-get source` |
 | Flatpak | 2.23, built in the manifest against reference BLAS/LAPACK, ARPACK and a static SPOOLES (with nixpkgs' three patches, `packaging/flatpak/patches/`) | `/app/lib/lobole/ccx` | built from source; the manifest pins it |
 | Windows zip and installer | dhondt.de's `ccx_static.exe` 2.23, from `calculix_2.23_4win.zip` (sha256 pinned in `installer.nix`), with SPOOLES and PaStiX linked in and no DLL; nixpkgs cannot cross-build ccx for mingw | `bin\ccx.exe` | `ccx_2.23.src.tar.bz2`, pinned in `installer.nix` |
 | `.deb`, AUR, Nix | not bundled: the distribution's own (`Suggests: calculix-ccx`; Nix's `calculix-ccx`) | | |

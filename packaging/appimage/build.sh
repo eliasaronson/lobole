@@ -56,12 +56,14 @@ cmake --build "$work/build" -j"$jobs" --target designer
 rm -rf "$work/AppDir"
 DESTDIR="$work/AppDir" cmake --install "$work/build"
 
-# CalculiX, where fem::FindCalculix looks beside the app; linuxdeploy below
-# brings its libraries (SPOOLES, ARPACK and the OpenMPI it links, BLAS,
-# LAPACK, libgfortran). Its source package, at exactly the version inside,
-# goes beside the AppImage for the release to attach (GPL-2 section 3).
+# CalculiX; linuxdeploy below brings its libraries (SPOOLES, ARPACK and the
+# OpenMPI it links, BLAS, LAPACK, libgfortran). It goes in usr/bin, where
+# linuxdeploy points an executable's rpath at usr/lib ($ORIGIN/../lib): given
+# usr/lib/lobole/ccx it wrote $ORIGIN and the copy found none of them. Its
+# source package, at exactly the version inside, goes beside the AppImage
+# for the release to attach (GPL-2 section 3).
 ccx_version="$(dpkg-query -W -f='${source:Version}' calculix-ccx)"
-install -D -m755 "$(readlink -f /usr/bin/ccx)" "$work/AppDir/usr/lib/lobole/ccx"
+install -D -m755 "$(readlink -f /usr/bin/ccx)" "$work/AppDir/usr/bin/ccx"
 install -D -m644 /usr/share/doc/calculix-ccx/copyright \
   "$work/AppDir/usr/share/doc/calculix-ccx/copyright"
 rm -rf "$work/ccx-src" && mkdir -p "$work/ccx-src"
@@ -92,11 +94,16 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 # chain is named too; nothing else loads it.
 LD_LIBRARY_PATH="$deps/lib" "$linuxdeploy" --appdir "$work/AppDir" \
   --executable "$work/AppDir/usr/bin/lobole" \
-  --executable "$work/AppDir/usr/lib/lobole/ccx" \
+  --executable "$work/AppDir/usr/bin/ccx" \
   --desktop-file "$work/AppDir/usr/share/applications/org.lobole.Lobole.desktop" \
   --icon-file "$work/AppDir/usr/share/icons/hicolor/256x256/apps/org.lobole.Lobole.png" \
   --exclude-library 'libvulkan.so*' --exclude-library 'libdbus-1.so*' \
   --exclude-library 'libsystemd.so*' --exclude-library 'libgcrypt.so*'
+
+# Where fem::FindCalculix looks beside the app. A link: the loader takes
+# $ORIGIN from the file it resolves to, usr/bin.
+mkdir -p "$work/AppDir/usr/lib/lobole"
+ln -sfn ../../bin/ccx "$work/AppDir/usr/lib/lobole/ccx"
 
 ARCH=x86_64 VERSION="$version" "$appimagetool" --no-appstream "$work/AppDir" \
   "$out/lobole-$version-x86_64.AppImage"
