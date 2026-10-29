@@ -1159,7 +1159,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(6).get<std::string>());
     }
   }
-  // vNEXT: a plastic study (docs/simulation/README.md#plasticity). Read
+  // v210: a plastic study (docs/simulation/README.md#plasticity). Read
   // back without it, the study is an elastic one that solves; each [study
   // name, plasticity, large_deformation, solver it runs on].
   if (expect.contains("study_plasticity")) {

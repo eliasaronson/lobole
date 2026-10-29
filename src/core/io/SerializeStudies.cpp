@@ -111,7 +111,7 @@ json StudyToJson(const fem::Study& s) {
     json n = json::object();
     if (nl.largeDeformation)
       n["large_deformation"] = true;
-    if (nl.plasticity) // vNEXT
+    if (nl.plasticity) // v210
       n["plasticity"] = true;
     if (nl.increments > 0)
       n["increments"] = nl.increments;
@@ -410,7 +410,7 @@ fem::Study StudyFromJson(const json& j) {
                                "study nonlinear");
     fem::Nonlinear& nl = s.nonlinear;
     nl.largeDeformation = n.value("large_deformation", false);
-    nl.plasticity = n.value("plasticity", false); // vNEXT
+    nl.plasticity = n.value("plasticity", false); // v210
     nl.increments = n.value("increments", 0);
     nl.snapThrough = n.value("snap_through", false);
     nl.hasImperfection = n.contains("imperfection_mm");
@@ -783,7 +783,7 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
       flat.insert(flat.end(), st.begin(), st.end());
     out["stress"] = w.F32(flat);
   }
-  // vNEXT: a plastic result's plastic strain, and what unloading left.
+  // v210: a plastic result's plastic strain, and what unloading left.
   if (!r.plasticStrain.empty()) {
     out["plastic_strain"] = w.F32(r.plasticStrain);
     out["max_plastic_strain"] = r.maxPlasticStrain;
@@ -849,14 +849,14 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
       for (int k = 0; k < 6; ++k)
         r.stress[i][k] = flat[6 * i + k];
   }
-  if (j.contains("plastic_strain")) { // vNEXT
+  if (j.contains("plastic_strain")) { // v210
     r.plasticStrain = f.Reals(j.at("plastic_strain"), "plastic_strain");
     r.maxPlasticStrain = j.value("max_plastic_strain", 0.0);
     r.maxPeNode = j.value("max_pe_node", -1);
     if (j.contains("max_pe_at"))
       r.maxPeAt = Vec3FromJson(j.at("max_pe_at"));
   }
-  if (j.contains("residual_displacement")) { // vNEXT
+  if (j.contains("residual_displacement")) { // v210
     r.residualDisplacement =
         f.Vec3s(j.at("residual_displacement"), "residual_displacement");
     r.maxResidualDisplacement = j.value("max_residual_displacement", 0.0);
@@ -1074,7 +1074,7 @@ json NonlinearToJson(const fem::StudyBodyResult::Nonlinear& n) {
     out["large_deformation"] = false;
   if (n.stabilization > 0)
     out["stabilization"] = n.stabilization;
-  // A plastic run's (vNEXT).
+  // A plastic run's (v210).
   if (n.plasticity) {
     json p = {{"unloaded", n.unloaded}, {"strain_limit", n.strainLimit}};
     if (n.collapsed)
@@ -1116,7 +1116,7 @@ fem::StudyBodyResult::Nonlinear NonlinearFromJson(const json& j,
   n.firstYieldFactor = j.value("first_yield_factor", 0.0);
   n.largeDeformation = j.value("large_deformation", true);
   n.stabilization = j.value("stabilization", 0.0);
-  if (j.contains("plasticity")) { // vNEXT
+  if (j.contains("plasticity")) { // v210
     const json& p = j.at("plasticity");
     readctx::RefuseUnknownKeys(p,
                                {"unloaded", "strain_limit", "collapse_bracket"},
