@@ -196,7 +196,7 @@ jobs:
             libocct-data-exchange-dev libocct-modeling-algorithms-dev \
             libocct-modeling-data-dev libocct-foundation-dev \
             libocct-ocaf-dev libocct-visualization-dev libtbb-dev \
-            libvterm-dev \
+            libvterm-dev calculix-ccx \
             python3-mypy python3-pip
           # The wheel's build system wants setuptools>=77 (an SPDX license,
           # PEP 639); 24.04's apt has 68. Into the user site, which python3
@@ -313,13 +313,17 @@ jobs:
             exclude_tests: ""
             # Netgen and Spectra, so the FEM tests run against what the .deb
             # ships with. netgen and python3-netgen only because Ubuntu's
-            # NetgenConfig.cmake checks for their files.
-            extra_packages: "libnglib-dev netgen python3-netgen libspectra-dev"
+            # NetgenConfig.cmake checks for their files. calculix-ccx (2.21)
+            # is the oldest CalculiX a study runs on, so the [calculix]
+            # tests run against it (docs/simulation/README.md#calculix).
+            extra_packages: "libnglib-dev netgen python3-netgen libspectra-dev calculix-ccx"
           - image: ubuntu:24.04
             # XCAF STEP import placement, and a shell 7.6 refuses where 7.9
             # makes a no-op. See the README's OpenCASCADE section.
             exclude_tests: "Assembly import plan|Shell that removes no material"
-            extra_packages: ""
+            # Without Netgen only the [calculix] tests on a hand-made mesh
+            # run, on 24.04's ccx 2.21.
+            extra_packages: "calculix-ccx"
     name: stock-ubuntu (${{ matrix.image }})
     runs-on: ubuntu-24.04
     # Measured over 21 green runs per image (Oct 2026): median ~35 min,

@@ -112,6 +112,11 @@ panel can be switched off (`-DENABLE_CAM=OFF`, `-DENABLE_TERMINAL=OFF`), and
 then they do not exist at all. Without **Netgen** there is no FEM meshing,
 and without **Spectra** no modal analysis; Ubuntu has both from 26.04 on,
 and every release download except Windows carries them.
+**CalculiX** (`ccx` 2.21 or later; `calculix-ccx` on Ubuntu and in Nix) is
+a separate program found when a study asks for it, not a build dependency: a
+static study can be solved on it as a second, independent answer
+([docs/simulation](docs/simulation/README.md#calculix)). CI installs it on
+both Ubuntu images.
 
 On OpenCASCADE 7.6 (Ubuntu 24.04), PLY export is missing and some booleans
 come out wrong ([details](docs/packaging/README.md#opencascade-76)).

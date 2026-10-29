@@ -29,6 +29,10 @@ pkgs.mkShell {
     # program, never linked); here so the smoke always has it. The headless
     # build carries libx264, libvpx and the gif encoder without X or SDL.
     ffmpeg-headless
+    # A static study can be solved on CalculiX too, run as an external
+    # program on PATH like ffmpeg (docs/simulation/README.md#calculix); here
+    # so the [calculix] tests run on it rather than skip.
+    calculix-ccx
 
     # Vulkan
     vulkan-headers
