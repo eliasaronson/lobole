@@ -1110,7 +1110,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(1).get<std::string>());
     }
   }
-  // vNEXT: a buckling study, its number of factors and its base state's
+  // v207: a buckling study, its number of factors and its base state's
   // converge. A study read back as static would answer a factor of safety
   // where a buckling factor was asked for; each [study name, analysis,
   // num_modes, converge] must hold, the default number of factors included.

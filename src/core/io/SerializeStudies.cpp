@@ -44,7 +44,7 @@ json StudyToJson(const fem::Study& s) {
   // before -- and its input hash -- is what it was.
   if (s.solver != fem::Solver::Auto)
     j["solver"] = fem::SolverToString(s.solver);
-  // Buckling (vNEXT): num_modes is its number of factors.
+  // Buckling (v207): num_modes is its number of factors.
   if (s.type == fem::AnalysisType::Modal ||
       s.type == fem::AnalysisType::Buckling)
     j["num_modes"] = s.numModes;
@@ -738,7 +738,7 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
     for (const fem::FemResults::ModeShape& m : r.modes) {
       json mj = {{"frequency_hz", m.frequencyHz},
                  {"shape", w.F32(m.displacement)}};
-      if (m.factor != 0.0) // vNEXT: a buckling mode's load factor
+      if (m.factor != 0.0) // v207: a buckling mode's load factor
         mj["factor"] = m.factor;
       modes.push_back(std::move(mj));
     }
@@ -869,7 +869,7 @@ void CheckBody(const fem::StudyBodyResult& b, const std::string& what) {
 
 namespace {
 
-// What a buckling body's result says beyond its modes (vNEXT).
+// What a buckling body's result says beyond its modes (v207).
 json BucklingToJson(const fem::StudyBodyResult::Buckling& k) {
   json out = {{"buckling_factor", k.buckles ? json(k.factor) : json()},
               {"knockdown", k.knockdown},
