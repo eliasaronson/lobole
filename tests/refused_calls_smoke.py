@@ -89,7 +89,10 @@ def main():
     try:
         with launch(binary) as app:
             d = app.client
-            cam = d.call("ping").get("features", {}).get("cam", True)
+            features = d.call("ping").get("features", {})
+            cam = features.get("cam", True)
+            # Without a mesher a run is refused before ccx would start.
+            mesher = features.get("mesher", True)
             part, occ, setup = build_fixture(d, cam)
             world = World(d, app, work)
             methods = d.call("describe")["methods"]
@@ -645,9 +648,11 @@ def main():
                 f.write(STALLING_CCX)
             os.chmod(stalls, 0o755)
             d.call("set_settings", calculix_path=stalls)
-            check("a nonlinear run that stops converging", "run_study",
-                  {"id": nl}, needle="stopped converging at 40 % of the load",
-                  tab=part["name"])
+            if mesher:
+                check("a nonlinear run that stops converging", "run_study",
+                      {"id": nl},
+                      needle="stopped converging at 40 % of the load",
+                      tab=part["name"])
             listed = [x for x in d.call("list_studies")["studies"]
                       if x["id"] == nl][0]
             note(not listed["has_results"],

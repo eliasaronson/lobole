@@ -2859,6 +2859,9 @@ TEST_CASE("a study solved on the registry lands in its own part, not the "
   };
   fem::Study& s = doc.AddStudy("Bar");
   s.meshSize = 6.0;
+  // One solve: this is about where the job lands, and under `auto` the
+  // refinement steps outlast the poll on a loaded machine.
+  s.converge = fem::ConvergeMode::Never;
   fem::Load fx;
   fx.id = doc.AllocateId();
   fx.type = fem::LoadType::Fixed;
