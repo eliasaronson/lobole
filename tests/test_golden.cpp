@@ -1159,7 +1159,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(6).get<std::string>());
     }
   }
-  // vNEXT: a study's contact supports (docs/simulation/README.md#contact).
+  // v209: a study's contact supports (docs/simulation/README.md#contact).
   // A contact read back as another support, or its friction dropped, is a
   // different study that solves; each [study name, [[load type, friction]]
   // of its supports, its nonlinear increments, the solver it runs on] must
