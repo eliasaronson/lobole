@@ -55,6 +55,17 @@ namespace {
 
 bool Patched(const char* name) { return occpatch::Carries(name); }
 
+// This thread's CPU seconds: the clock directedit::MakeDeadline counts.
+// Elsewhere the process's, which is the same for a single-threaded builder.
+double ThreadCpuSeconds() {
+#if defined(__linux__)
+  timespec ts{};
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0)
+    return static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1e9;
+#endif
+  return static_cast<double>(std::clock()) / CLOCKS_PER_SEC;
+}
+
 #define REQUIRE_PATCH(name)                                                    \
   do {                                                                         \
     if (!Patched(name))                                                        \
@@ -256,19 +267,20 @@ TEST_CASE("A thin shell of the worm stops when its deadline passes",
   const double deadline = 15.0;
   const Handle(Message_ProgressIndicator) stop =
       directedit::MakeDeadline(deadline);
-  const auto t0 = std::chrono::steady_clock::now();
+  // Timed on the deadline's own clock, this thread's CPU: on the wall a
+  // loaded machine stretches the 15 CPU seconds before it expires too, and
+  // a contended run read 24 s "late" that had stopped on time.
+  const double t0 = ThreadCpuSeconds();
   BRepOffsetAPI_MakeThickSolid maker;
   maker.MakeThickSolidByJoin(worm.shape.GetShape(), open, -0.02, 2.0e-4,
                              BRepOffset_Skin, false, false, GeomAbs_Arc, false,
                              stop->Start());
-  const double took =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
-          .count();
+  const double took = ThreadCpuSeconds() - t0;
   CHECK(directedit::Expired(stop));
   CHECK_FALSE(maker.IsDone());
-  INFO("stopped " << took - deadline << " s after its deadline");
-  // Ten times the longest silence measured: room for a loaded machine, and
-  // a tenth of what an unheard deadline overran by.
+  INFO("stopped " << took - deadline << " CPU s after its deadline");
+  // Ten times the longest silence measured, and a tenth of what an unheard
+  // deadline overran by.
   CHECK(took < deadline + 10.0);
 }
 
