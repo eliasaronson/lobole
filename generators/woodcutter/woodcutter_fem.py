@@ -10,10 +10,13 @@ estimated.
 - **The camshaft at work**: on a pin at each bushing, loaded by both
   followers' pushes on their cams at the sample where the crank needs the
   most torque, and by the hand's push at the grip that balances them.
-- **A child leaning on the crank**: the same torque's push at the grip
-  (torque / crank radius) times `S.LEAN_FACTOR`, straight down the crank
-  at the top of its turn, on the camshaft's crank end (the shaft on its
-  bushings), the crank (on the shaft) and the handle's pin (in the crank).
+- **A child leaning on the crank**: the design lean `S.LEAN_N`, straight
+  down the crank at the top of its turn, on the handle's pin (in the
+  crank), the crank (on the shaft), the camshaft's crank end (the shaft on
+  its bushings) and the left bushing (in its wall). The pin is the weak
+  link: it must hold the lean with `S.LEAN_NEED` to spare, and every part
+  behind it the pin's breaking load (the lean times the pin's factor) with
+  `S.OUTLAST` to spare.
 
 - **Buckling**: the crank and the handle's pin leaned on, each also as a
   buckling study of the same loads (docs/simulation/README.md#buckling),
@@ -30,9 +33,14 @@ The shaft's two bushings share as the FEM's stiffness says (a pin with no
 clearance takes moment along its band): each one's share against the
 lever rule is recorded beside it, not held to.
 
-The camshaft at work must hold with S.WORK_NEED to spare and every study
-must balance, or the run stops; the lean's verdict is recorded either way
-(generators/woodcutter/README.md, "Not done here").
+A part's factor is the smaller of the two; where its peak sits on a pin's
+edge, a singularity that grows as the mesh refines
+(docs/simulation/README.md#a-peak-on-a-supports-edge), the factor away
+from that edge is the one sized to, and the headline is recorded beside it.
+
+The camshaft at work must hold with S.WORK_NEED to spare, the lean as
+above, the crank and the pin must not buckle under twice the lean, and
+every study must balance, or the run stops.
 
 Every part is modelled in the box frame where it stands at rest, and the
 cams, the crank and the bushings are fastened to the shaft at frames that
@@ -51,6 +59,11 @@ from _lib import _run_static  # noqa: E402
 
 X = [1.0, 0.0, 0.0]
 STATICS_TOL = 0.01
+# How a static study settles its peak (docs/simulation/README.md#a-peak-
+# that-has-settled): None leaves each study's own (`auto`); build.py's
+# --converge sets it, and --fem-timeout bounds each study's run.
+CONVERGE = None
+TIMEOUT_S = 900.0
 
 
 def fail(msg):
@@ -174,8 +187,9 @@ def run(d, part, name, loads, layer_normal, mesh_mm):
     st = d.call("add_study", type="static", name=name)
     sid = st.get("id", st.get("study"))
     ids = {k: d.call("add_load", study=sid, **kw)["id"] for k, kw in loads}
-    d.call("set_study", study=sid, mesh_size=float(mesh_mm))
-    _run_static(d, sid, 900.0)
+    kw = {} if CONVERGE is None else {"converge": CONVERGE}
+    d.call("set_study", study=sid, mesh_size=float(mesh_mm), **kw)
+    _run_static(d, sid, TIMEOUT_S)
     r = d.call("study_results", study=sid, layer_normal=list(layer_normal))
     return sid, ids, r
 
@@ -292,7 +306,17 @@ def verdict(r, name, need):
                         else "yield (von Mises)")
     out["governing_at"] = ac_at if il < fos else vm_at
     out["governing_factor"] = min(fos, il)
-    out["pass"] = out["governing_factor"] >= need
+    # The factor sized to: away from a pin's edge where the peak is on one.
+    away = (edge or {}).get("factor_of_safety_away")
+    out["factor"] = away if away is not None else out["governing_factor"]
+    out["factor_reads"] = ("away from a pin's edge" if away is not None
+                           else "the peak")
+    cv = r.get("convergence") or {}
+    out["convergence"] = {k: cv.get(k) for k in (
+        "status", "stopped", "stopped_seconds", "last_change_pct", "why",
+        "reason") if cv.get(k) is not None}
+    out["convergence"]["steps"] = len(cv.get("steps") or [])
+    out["pass"] = out["factor"] >= need
     return out
 
 
@@ -304,11 +328,17 @@ def report(name, v, st):
     at = v["governing_at"]
     where = (f" at ({at[0]:.1f}, {at[1]:.1f}, {at[2]:.1f})"
              if at else "")
+    cv = v["convergence"]
+    note += (f"; {cv.get('status', 'convergence not reported')}"
+             + (f" ({cv['last_change_pct']:.1f} % on its last step, "
+                f"{cv['steps']} steps)"
+                if cv.get("last_change_pct") is not None else ""))
     print(f"  FEM {name}: factor {v['factor_of_safety']:.1f} against yield "
           f"({v['max_von_mises_mpa']:.3g} MPa), "
           f"{v['interlayer_factor_of_safety']:.1f} across the layers "
           f"({v['max_across_layers_mpa']:.3g} MPa); governs: "
-          f"{v['governing']}{where}; the pins answer the loads' force to "
+          f"{v['governing']}{where}; factor {v['factor']:.2f} "
+          f"({v['factor_reads']}); the pins answer the loads' force to "
           f"{100 * st['force_error']:.3f} % and moment to "
           f"{100 * st['moment_error']:.3f} %" +
           "".join(f"; {k} carries {norm(p['force_n']):.3g} N, the lever "
@@ -325,17 +355,20 @@ def studies(d, s, fr_turn, rel):
     idx, t_worst, fl = follower_loads(fr_turn, rel)
     r_shaft = s["d_shaft"] / 2.0
     shaft = round_faces(d, "camshaft", r_shaft)
-    # The bushings' sleeves turn in the walls: that is where the shaft is
-    # held, each a pin over the sleeve's length in its wall. The FEM's pin
+    # Each bushing is pressed on the shaft over its whole bore, flange and
+    # sleeve, and turns in its wall: the shaft is held there, a pin over
+    # the bushing's bore. (Over the sleeve alone, the shaft's peak was the
+    # pin contact's end inside the band, a reading that moved 3.1, 3.4, 2.8
+    # with the mesh halved twice, not the shaft's bending.) The FEM's pin
     # has no clearance, so each takes moment along its band as well as
     # force, and the two share the load as their stiffness says rather than
     # by the lever rule over their middles (recorded beside the reactions).
     # A bushing with the print's gap tilts in its bore instead; the bending
-    # moment at the left bushing, which governs the shaft's crank end, is
-    # the overhang's either way.
+    # moment where the shaft leaves the left bushing, which governs the
+    # crank end, is the overhang's either way.
     mesh_shaft = s["d_shaft"] / 4.0
-    bush_l = (s["x_bush_l"], -s["g"])
-    bush_r = (s["width"] + s["g"], s["x_bush_r"])
+    bush_l = (s["x_bush_l"] - s["flange"], -s["g"])
+    bush_r = (s["width"] + s["g"], s["x_bush_r"] + s["flange"])
     xl, xr = sum(bush_l) / 2.0, sum(bush_r) / 2.0
     crank_end = (s["x_crank0"], s["x_crank1"])
     layers_shaft = print_up("camshaft")
@@ -378,40 +411,25 @@ def studies(d, s, fr_turn, rel):
     out["camshaft"] = {"study": sid, "hand_n": hand, "grip_mm": grip,
                        "followers_turn_n_mm": -turning, **v, "statics": st}
 
-    # A child leaning on the crank: straight down it at the top of its
-    # turn. A lean that turns the crank turns it (the followers hold back
-    # only the torque above); the push the crank is held against is the
-    # one through the shaft.
+    # A child leaning on the crank: the design lean, straight down it at
+    # the top of its turn. A lean that turns the crank turns it (the
+    # followers hold back only the torque above); the push the crank is
+    # held against is the one through the shaft.
     push = abs(t_worst) / s["crank_r"]
-    lean = S.LEAN_FACTOR * push
+    lean = S.LEAN_N
     down = [0.0, 0.0, -lean]
-    out["lean"] = {"turning_push_n": push, "factor": S.LEAN_FACTOR,
-                   "push_n": lean, "lean_kg": lean / S.G,
-                   "direction": [0.0, 0.0, -1.0], "at_mm": grip}
+    out["lean"] = {"push_n": lean, "lean_kg": lean / S.G,
+                   "turning_push_n": push, "times_turning": lean / push,
+                   "direction": [0.0, 0.0, -1.0], "at_mm": grip,
+                   "pin_need": S.LEAN_NEED, "outlast": S.OUTLAST,
+                   "sized_for": {k: s[k] for k in (
+                       "pin_break_n", "pin_bound_n", "outlast_n",
+                       "lean_arm_mm",
+                       "strength")}}
     print(f"  FEM loads: at sample {idx} the crank needs "
           f"{t_worst:.3g} N mm ({push:.3g} N at the grip); a child's lean "
-          f"{S.LEAN_FACTOR:g} times that, {lean:.1f} N ({lean / S.G:.1f} kg)")
-    loads = spread("hand", shaft,
-                   {"type": "remote", "direction": [0.0, 0.0, -1.0],
-                    "point_mm": grip, "region": band(*crank_end)}, lean)
-    loads += bushings
-    sid, ids, r = run(d, "camshaft", "camshaft's crank end, leaned on",
-                      loads, layers_shaft, mesh_shaft)
-    st = statics(r, ids, [(down, grip)],
-                 lever_rule([(down, grip)], xl, xr, s["zc"]))
-    v = verdict(r, "camshaft's crank end", S.LEAN_NEED)
-    report("camshaft's crank end, leaned on", v, st)
-    out["shaft_end"] = {"study": sid, **v, "statics": st}
-
-    # The crank: on the shaft (its hub's bore a pin that cannot turn: the
-    # D keys it), pushed through its handle's bore by the pin.
-    loads, mesh_crank = crank_loads(d, s, lean, grip)
-    sid, ids, r = run(d, "crank", "crank, leaned on", loads,
-                      print_up("crank"), mesh_crank)
-    st = statics(r, ids, [(down, grip)])
-    v = verdict(r, "crank", S.LEAN_NEED)
-    report("crank, leaned on", v, st)
-    out["crank"] = {"study": sid, **v, "statics": st}
+          f"of {lean:g} N ({lean / S.G:.1f} kg), {lean / push:.0f} times "
+          f"that")
 
     # The handle's pin: pressed in the crank (a pin over the crank's
     # thickness, held from turning), the grip pushing on it over its length.
@@ -426,38 +444,103 @@ def studies(d, s, fr_turn, rel):
     v = verdict(r, "handle pin", S.LEAN_NEED)
     report("handle pin, leaned on", v, st)
     out["handle_pin"] = {"study": sid, **v, "statics": st}
+    # Where the pin breaks: the larger of the study's reading (away from
+    # the seat's rim, a quarter of the bore's radius inside the crank) and
+    # beam bending at the crank's face, where its moment peaks
+    # (woodcutter_spec.lean_sizes) -- the larger, so what outlasts it
+    # outlasts either. Every part behind it holds that load with OUTLAST.
+    out["pin_breaks_n"] = max(lean * v["factor"], s["pin_break_n"])
+    out["handle_pin"]["factor_by_bending"] = s["pin_break_n"] / lean
+    behind = S.OUTLAST * out["pin_breaks_n"] / lean
+
+    # The crank: on the shaft (its hub's bore a pin that cannot turn: the
+    # D keys it), pushed through its handle's bore by the pin.
+    loads, mesh_crank = crank_loads(d, s, lean, grip)
+    sid, ids, r = run(d, "crank", "crank, leaned on", loads,
+                      print_up("crank"), mesh_crank)
+    st = statics(r, ids, [(down, grip)])
+    v = verdict(r, "crank", behind)
+    report("crank, leaned on", v, st)
+    out["crank"] = {"study": sid, **v, "statics": st}
+
+    # The camshaft's crank end: the lean through the crank's hub, the
+    # shaft on its bushings.
+    loads = spread("hand", shaft,
+                   {"type": "remote", "direction": [0.0, 0.0, -1.0],
+                    "point_mm": grip, "region": band(*crank_end)}, lean)
+    loads += bushings
+    sid, ids, r = run(d, "camshaft", "camshaft's crank end, leaned on",
+                      loads, layers_shaft, mesh_shaft)
+    st = statics(r, ids, [(down, grip)],
+                 lever_rule([(down, grip)], xl, xr, s["zc"]))
+    v = verdict(r, "camshaft's crank end", behind)
+    report("camshaft's crank end, leaned on", v, st)
+    out["shaft_end"] = {"study": sid, **v, "statics": st}
+
+    # The left bushing: the shaft study puts the whole lean and its
+    # overhang's moment on it (a bushing tilting in its bore would hand
+    # some of the moment to the far one for a little more force). It is
+    # held as the shaft study holds the shaft: on a pin over its bore (the
+    # shaft, compression only, held from turning: no torque comes through),
+    # with the wall's answer to the lean on its sleeve.
+    loads, mesh_bush = bushing_loads(d, s, lean, grip)
+    sid, ids, r = run(d, "bushing", "left bushing, leaned on", loads,
+                      print_up("bushing"), mesh_bush)
+    st = statics(r, ids, [([0.0, 0.0, lean], grip)])
+    v = verdict(r, "left bushing", behind)
+    report("left bushing, leaned on", v, st)
+    out["bushing"] = {"study": sid, **v, "statics": st}
 
     # Whether the crank and the handle's pin are buckling-limited at the
     # lean (docs/simulation/README.md#buckling).
     out["buckling"] = leaned_buckling(d, s, lean, grip)
 
-    # What each part leaned on does hold, with its factor to spare: the
-    # study is linear, so the push scales with the governing factor.
+    # Each part behind the pin holds its breaking load with its factor
+    # scaled to that load (the studies are linear).
     for k in LEANED:
         v = out[k]
-        v["holds_push_n"] = lean * v["governing_factor"] / v["need"]
-        edge = v.get("peak_at_support_edge")
-        if edge and edge.get("factor_of_safety_away") is not None:
-            v["holds_push_away_from_pins_n"] = lean * min(
-                edge["factor_of_safety_away"],
-                v["interlayer_factor_of_safety"]) / v["need"]
-        if not v["pass"]:
-            print(f"  FEM {k.replace('_', ' ')}: does NOT hold the lean with "
-                  f"{v['need']:g} to spare: it holds "
-                  f"{v['holds_push_n']:.1f} N at the grip "
-                  f"({v['holds_push_n'] / S.G:.2f} kg)")
+        v["breaks_at_n"] = lean * v["factor"]
+        if k != "handle_pin":
+            v["at_pin_break"] = v["breaks_at_n"] / out["pin_breaks_n"]
+        held = (v["factor"] >= S.LEAN_NEED if k == "handle_pin"
+                else v["at_pin_break"] >= S.OUTLAST)
+        if not held:
+            print(f"  FEM {k.replace('_', ' ')}: does NOT hold: factor "
+                  f"{v['factor']:.2f} at the lean, "
+                  + (f"need {S.LEAN_NEED:g}" if k == "handle_pin" else
+                     f"{v['at_pin_break']:.2f} at the pin's breaking "
+                     f"load, need {S.OUTLAST:g}"))
     keys = ("camshaft",) + LEANED
     out["unbalanced"] = [k for k in keys if not out[k]["statics"]["ok"]]
     out["lean_breaks"] = [k for k in LEANED if not out[k]["pass"]]
-    out["holds_lean_n"] = min(out[k]["holds_push_n"] for k in LEANED)
-    # The gate: the camshaft holds its working load, and every study's pins
-    # answer its loads. The lean is the design question the studies answer,
-    # recorded either way (README, "Not done here").
-    out["pass"] = out["camshaft"]["pass"] and not out["unbalanced"]
+    out["buckles"] = [k for k, v in out["buckling"].items()
+                      if not v["buckling_factor"] or v["buckling_factor"]
+                      * v["knockdown"]["value"] < S.LEAN_NEED]
+    # The gate: the camshaft holds its working load, the pin the lean and
+    # everything behind it the pin's breaking load, nothing buckles under
+    # twice the lean, and every study's pins answer its loads.
+    out["pass"] = (out["camshaft"]["pass"] and not out["unbalanced"]
+                   and not out["lean_breaks"] and not out["buckles"])
     return out
 
 
-LEANED = ("shaft_end", "crank", "handle_pin")
+LEANED = ("handle_pin", "crank", "shaft_end", "bushing")
+
+
+def bushing_loads(d, s, lean, grip):
+    """The left bushing leaned on: held on a pin over its bore (the shaft,
+    held from turning), the wall's answer to the lean -- up, at the grip --
+    on its sleeve. A pin on the sleeve with the lean through the bore is
+    the same statics, but its contact does not settle under the tilt
+    (README, what the app needed). Meshed at half the flange's thickness.
+    Returns (loads, mesh size)."""
+    bore = round_faces(d, "bushing", (s["d_shaft"] + s["press"]) / 2.0)
+    sleeve = round_faces(d, "bushing", s["r_bush"])
+    loads = spread("wall", sleeve, {"type": "remote",
+                                    "direction": [0.0, 0.0, 1.0],
+                                    "point_mm": grip}, lean)
+    loads += pins("shaft", bore, None, fix_rotation=True)
+    return loads, s["flange"] / 2.0
 
 
 def crank_loads(d, s, lean, grip):

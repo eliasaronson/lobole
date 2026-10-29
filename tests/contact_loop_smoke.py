@@ -79,12 +79,15 @@ def main():
             text=True, timeout=300)
         expect(seed.returncode == 0, f"the profiles seed: {seed.stderr}")
         proc = {"profile": "K5 PLA on P1S"}
-        s0 = S.solve(120.0, 0.0)
+        # The crank end is sized for a lean against the material's strength.
+        mat = d.call("describe")["materials"]["pla"]
+        strength = {k: mat[k] for k in ("yield_mpa", "interlayer_mpa")}
+        s0 = S.solve(120.0, 0.0, 0.0, strength)
         gap = d.call("print_allowance", kind="gap", size_mm=s0["d_rod"],
                      **proc)["allowance_mm"]
         press = d.call("print_allowance", kind="press", size_mm=s0["d_pin"],
                        **proc)["allowance_mm"]
-        s = S.solve(120.0, gap, press)
+        s = S.solve(120.0, gap, press, strength)
         S.layout(s, s["hub_floor"], s["bird_base_pressure"])
         for name, fn, *a in wc.PARTS:
             if fn is P.build_cam:

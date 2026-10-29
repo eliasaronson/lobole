@@ -28,16 +28,22 @@ MARGIN = 2.0         # the followers must hold at twice it
 PRESSURE_LIMIT_DEG = 30.0  # a translating follower's usual limit: past it
 #                            the side load in the guide grows as tan(phi)
 
-# A child leaning on the crank (woodcutter_fem.py): the push that turns it, the
-# worst torque the followers need over a turn (check_followers) over the
-# crank's radius, times this. Turning takes almost nothing (a few
-# hundredths of a newton at the grip: the followers weigh grams and friction
-# is not modelled), so the factor is large: at 120 it makes the push about
-# 94 N, a 9.6 kg lean -- a small child's weight on one hand. The studies
-# must hold it with LEAN_NEED to spare, against yield and across the
-# printed layers; the camshaft at work, at its own load, with WORK_NEED.
-LEAN_FACTOR = 3000.0
+# A child leaning on the crank (woodcutter_fem.py): the design lean, 35 N
+# straight down the crank at the top of its turn -- about 3.5 kg on one
+# hand, the middle of the 30-40 N a small child leans with. It is a load
+# stated, not a multiple of what turning takes: turning takes a few
+# hundredths of a newton at the grip (the followers weigh grams and
+# friction is not modelled), so a factor on it says nothing about a hand.
+LEAN_N = 35.0
+# The handle's pin is the deliberate weak link: it holds the lean with
+# LEAN_NEED to spare, against yield and across the printed layers, and
+# breaks first. Everything behind it -- the crank, the camshaft's crank
+# end, the left bushing -- holds the load the pin breaks at (its factor-1
+# load) with OUTLAST to spare, so a lean that breaks something breaks the
+# pin, which is the cheapest piece to print again.
 LEAN_NEED = 2.0
+OUTLAST = 1.5
+# The camshaft at work, at its own load (check_followers'), holds with this.
 WORK_NEED = 2.0
 
 # The motions, as fractions of the crank's turn (angles are not sizes).
@@ -134,6 +140,99 @@ def liftoff_rod_rpm(h, beta):
     return math.sqrt(G / a) * 60.0 / (2 * math.pi)
 
 
+# --- sizing for the lean -------------------------------------------------------
+
+def d_section_modulus(d, flat_from_centre, n=2000):
+    """The elastic section modulus (mm^3) of a D -- a circle of diameter d
+    cut by a chord `flat_from_centre` from its centre -- in its weaker
+    bending direction, so it holds whichever way the flat faces the load:
+    I about the centroid over the farthest fibre, for bending about the
+    axis along the flat and about the one across it."""
+    r, h = d / 2.0, flat_from_centre
+    dz = (r + h) / n
+    a = sz = szz = iyy = 0.0
+    for i in range(n):
+        z = -h + (i + 0.5) * dz
+        w = 2.0 * math.sqrt(max(r * r - z * z, 0.0))
+        a += w * dz
+        sz += w * z * dz
+        szz += w * z * z * dz
+        iyy += w ** 3 / 12.0 * dz
+    zc = sz / a
+    along = (szz - a * zc * zc) / max(r - zc, zc + h)
+    across = iyy / r
+    return min(along, across)
+
+
+def diameter_for(z_need, flat_ratio):
+    """The least D diameter (its flat `flat_ratio` of the radius from the
+    centre) whose section modulus is z_need: Z grows as d^3."""
+    z1 = d_section_modulus(1.0, 0.5 * flat_ratio)
+    return (z_need / z1) ** (1.0 / 3.0)
+
+
+def up_tenth(x):
+    """Rounded up to a tenth of a millimetre."""
+    return math.ceil(x * 10.0 - 1e-9) / 10.0
+
+
+def lean_sizes(s, strength):
+    """The handle's pin, the crank's plate and the camshaft, sized for the
+    lean by beam bending against the material's yield (`strength`
+    {yield_mpa, interlayer_mpa}, as the app's studies read it); each is
+    floored by its share of the width, and the studies confirm all of them
+    (woodcutter_fem.py). Diameters grow as the cube root of the moment.
+
+    - The pin, the weak link: a cantilever out of the crank's face, the
+      grip's push at its middle, with LEAN_NEED to spare. The load it
+      breaks at by the same sum is `pin_break_n`; what is behind it is
+      sized for `pin_bound_n`, the load its full round would break at (its
+      flat only weakens it), so it outlasts the pin however the pin's
+      strength is read -- the study reads it a little over the sum.
+    - The crank, OUTLAST times that bound: the grip's push stands off the
+      plate, so the plate bends across its thickness, and its narrowest
+      section is the one through the handle's bore. And at least the pin's
+      diameter thick: a pressed pin is held over at least its own diameter,
+      or its seat, not its section, is what gives.
+    - The camshaft, OUTLAST times that bound: the overhang from the grip to
+      where the shaft leaves the left bushing (pressed on it over its whole
+      bore, flange and sleeve).
+    The crank's width is the bushing's (the shaft's), and the shaft's
+    overhang is the crank's thickness: solved together."""
+    W, g = s["width"], s["g"]
+    sy = strength["yield_mpa"]
+    s["strength"] = dict(strength)
+    s["grip_len"] = W / 5.0
+    pin_arm = g + s["grip_len"] / 2.0       # the crank's face to the push
+    pin_flat = 1.0 / math.sqrt(2.0)         # its flat at the 45-degree chord
+    s["d_handle"] = up_tenth(max(W / 24.0, diameter_for(
+        LEAN_NEED * LEAN_N * pin_arm / sy, pin_flat)))
+    z_pin = d_section_modulus(s["d_handle"], s["d_handle"] / 2.0 * pin_flat)
+    s["pin_break_n"] = sy * z_pin / pin_arm
+    s["pin_bound_n"] = sy * math.pi * s["d_handle"] ** 3 / 32.0 / pin_arm
+    s["outlast_n"] = OUTLAST * s["pin_bound_n"]
+    f = s["outlast_n"]
+    d_shaft, t = W / 15.0, W / 30.0
+    for _ in range(50):
+        r_hub = d_shaft / 2.0 + 2.0 * MIN_WALL_MM
+        net = 2.0 * r_hub - (s["d_handle"] + s["press"])
+        # sy t^2 net / 6 = f (pin_arm + t / 2): the positive root.
+        a, b, c = sy * net / 6.0, -f / 2.0, -f * pin_arm
+        t_bend = (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
+        t_new = up_tenth(max(W / 30.0, s["d_handle"], t_bend))
+        arm = g + t_new + g + s["grip_len"] / 2.0
+        d_new = up_tenth(max(W / 15.0, diameter_for(f * arm / sy,
+                                                     2.0 / 3.0)))
+        if (d_new, t_new) == (d_shaft, t):
+            break
+        d_shaft, t = d_new, t_new
+    s["d_shaft"], s["crank_t"] = d_shaft, t
+    s["crank_t_bending"] = t_bend
+    s["lean_arm_mm"] = {"handle pin": pin_arm, "camshaft": arm,
+                        "crank": pin_arm + t / 2.0}
+    return s
+
+
 # --- the levers -----------------------------------------------------------------
 
 def lever(stroke, down_deg, up_deg, side, rod_top_z, link):
@@ -192,11 +291,13 @@ def lever(stroke, down_deg, up_deg, side, rod_top_z, link):
 
 # --- every size -------------------------------------------------------------------
 
-def solve(width, gap, press=0.0):
+def solve(width, gap, press, strength):
     """Every size from the box's inside width (mm), the print's gap (the
     whole diametral clearance two printed surfaces need to slide, from
-    print_allowance kind `gap`) and its press (a pressed bore less its pin,
-    print_allowance kind `press`). Refuses what will not print."""
+    print_allowance kind `gap`), its press (a pressed bore less its pin,
+    print_allowance kind `press`) and the material's strength (the app's
+    `describe` materials row: yield_mpa, interlayer_mpa), which sizes the
+    crank end for the lean. Refuses what will not print."""
     W = float(width)
     g = gap / 2.0                      # a side
     s = {"width": W, "gap": gap, "g": g, "press": press}
@@ -209,15 +310,15 @@ def solve(width, gap, press=0.0):
     # set by the cams, below.
     s["wall"] = max(MIN_WALL_MM, W / 33.3, s["d_peg"] + 2.0 * MIN_WALL_MM)
     s["depth"] = 0.5 * W
-    # The camshaft: Ø a 15th of the width (8 mm at 120: a printed PLA shaft
-    # lying down, stiff over its span: at work it carries the followers
-    # with a factor over a thousand, woodcutter_fem.py; leaned on at the
-    # crank it does not hold, README "Not done here"). The cams
+    # The camshaft: at least a 15th of the width, and what holds the
+    # handle's pin's breaking load leaned on at the crank (lean_sizes, with
+    # the handle's pin and the crank's plate): at work it carries the
+    # followers with a factor in the thousands, woodcutter_fem.py. The cams
     # are keyed to it by a printed flat, a sixth of its diameter deep, the
     # whole length: the shaft prints lying on it, and a flat deeper than
     # the round's 45-degree chord leaves no face of it looking down past
     # 45 degrees.
-    s["d_shaft"] = W / 15.0
+    lean_sizes(s, strength)
     s["flat"] = s["d_shaft"] / 6.0
     s["d_bore"] = s["d_shaft"] + gap   # the end walls' bores, running
     # The cams: a tenth of the width wide, at a quarter and three quarters
@@ -284,19 +385,17 @@ def box_parts(s):
     s["r_flange"] = s["r_bush"] + 2.0 * MIN_WALL_MM
     s["flange"] = W / 60.0
     s["d_wall_bore"] = 2.0 * s["r_bush"] + s["gap"]
-    # The crank: a plate as thick as the figures' bodies, on the shaft's
+    # The crank: a plate (lean_sizes), on the shaft's
     # -X end outside the left bushing; its handle a quarter of the box's
     # depth from the shaft, so the grip passes the table under the box by
     # more than a finger's thickness (README).
     s["crank_r"] = s["depth"] / 4.0
-    s["crank_t"] = W / 30.0
     s["r_hub"] = s["r_bush"]
-    # The handle: a grip turning on a headed pin pressed into the crank, the
-    # pin a 24th of the width (Ø5 at 120), the grip a fifth of it long.
-    s["d_handle"] = W / 24.0
+    # The handle: a grip a fifth of the width long turning on a headed pin
+    # pressed into the crank; the pin's diameter and the crank's thickness
+    # are the lean's (lean_sizes).
     s["d_grip_bore"] = s["d_handle"] + s["gap"]
     s["r_grip"] = s["d_grip_bore"] / 2.0 + 2.0 * MIN_WALL_MM
-    s["grip_len"] = W / 5.0
     s["r_head"] = s["r_grip"]
     s["head"] = 2.0 * MIN_WALL_MM
     # Along the shaft (x): the left bushing's flange, then the crank.

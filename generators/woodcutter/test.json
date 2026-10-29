@@ -1,6 +1,6 @@
 {
   "order": 140,
-  "why": "The whole run but the stills, on the P1S's K5 profile seeded into the instance's own config: the base radii searched against CamProfile's pressure angle, every part verified and checked as it prints (check_print, in its print direction), the pegged panels, the bushings and the crank, the assembly with both followers on contact relations and both levers closed through links, the assembly sequence, the crank turn and the chop as mesh studies with every press relieved, check_followers over both, the requirements, the negative controls (the short dwell failing drop_rpm, the small base failing the pressure angle, two guides refused as contacts), the FEM of the camshaft, the crank and the handle's pin on pins with every load from check_followers and every study's statics to 1 %, the print plate's every check_print item, the bill of materials (every part printed, weighed as it prints, on its plate) and the drawings: the assembly sheet with an exploded view and its balloons, and a sheet per cam whose drawn outline is checked against its lift table, every sheet's check_drawing clean.",
+  "why": "The whole run but the stills, on the P1S's K5 profile seeded into the instance's own config: the base radii searched against CamProfile's pressure angle, every part verified and checked as it prints (check_print, in its print direction), the pegged panels, the bushings and the crank, the assembly with both followers on contact relations and both levers closed through links, the assembly sequence, the crank turn and the chop as mesh studies with every press relieved, check_followers over both, the requirements, the negative controls (the short dwell failing drop_rpm, the small base failing the pressure angle, two guides refused as contacts), the FEM of the camshaft at work on pins with every load from check_followers, a child's 35 N lean on the handle's pin (the weak link, factor 2) and on the crank, the shaft's crank end and the left bushing (each outlasting the pin by 1.5), none buckling, every study's statics to 1 %, the print plate's every check_print item, the bill of materials (every part printed, weighed as it prints, on its plate) and the drawings: the assembly sheet with an exploded view and its balloons, and a sheet per cam whose drawn outline is checked against its lift table, every sheet's check_drawing clean.",
   "steps": [
     ["{python}", "-u", "{generators}/print_coupon.py", "--port", "{port}", "--seed"],
     ["{python}", "-u", "{generators}/woodcutter/build.py", "--port", "{port}", "--profile", "K5 PLA on P1S", "--no-render", "--out", "{out}/woodcutter"]
@@ -13,7 +13,7 @@
     "negative control, the axe's dwell at .*requirement fail",
     "negative control, the bird's cam on base .*requirement fail",
     "negative control, a guide tilted: refused",
-    "FEM: the camshaft holds its working load, and every study's pins answer its loads' force and moment within 1 %",
+    "FEM: the camshaft holds its working load, and every study's pins answer its loads' force and moment within 1 %; a child's lean of 35 N: the handle's pin holds it with",
     "plate 1: 44 pieces, every check_print item passes",
     "bill of materials: 25 parts, 44 pieces, all printed in pla, nothing bought",
     "drawing assembly: front, side and exploded, 25 balloons laid out, none crossing; check_drawing clean",
@@ -24,7 +24,7 @@
   "instance": "headless",
   "budget_s": 600,
   "readme": {
-    "runs": "`woodcutter/build.py --no-render` on the seeded P1S profile: the base radii searched against CamProfile's pressure angle, every part checked as it prints, the pegged box, bushings and crank, the mechanism with both contact followers and their lever loops, the assembly sequence, the crank turn and the chop (mesh, every press relieved), `check_followers` over both, every requirement, the negative controls (a short dwell, a small base, two guides off the cam), the FEM of the loaded parts on pins and their statics, and the print plate's `check_print`, the bill of materials, and the drawings (the assembly with an exploded view and balloons, a sheet per cam), each `check_drawing` clean",
+    "runs": "`woodcutter/build.py --no-render` on the seeded P1S profile: the base radii searched against CamProfile's pressure angle, every part checked as it prints, the pegged box, bushings and crank, the mechanism with both contact followers and their lever loops, the assembly sequence, the crank turn and the chop (mesh, every press relieved), `check_followers` over both, every requirement, the negative controls (a short dwell, a small base, two guides off the cam), the FEM of the loaded parts on pins and their statics (a child's lean breaking the handle's pin first), and the print plate's `check_print`, the bill of materials, and the drawings (the assembly with an exploded view and balloons, a sheet per cam), each `check_drawing` clean",
     "measured": "160-300 s"
   }
 }

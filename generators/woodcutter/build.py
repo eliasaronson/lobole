@@ -13,9 +13,10 @@ its end turns it. Phases 2 to 6 of docs/plans/woodcutter-automaton.md.
     python3 generators/woodcutter/build.py --port 8800 --profile "K5 PLA on P1S"
     python3 generators/woodcutter/build.py --port 8800 --profile ... --width 150
 
-Every size derives from `--width` (the box's inside width) and the print
-profile's gap and press (`print_allowance` kinds `gap` and `press`); the
-cams' base radii are searched against CamProfile's own pressure-angle report
+Every size derives from `--width` (the box's inside width), the print
+profile's gap and press (`print_allowance` kinds `gap` and `press`), and,
+for the crank end, a child's design lean against the material's strength;
+the cams' base radii are searched against CamProfile's own pressure-angle report
 (generators/woodcutter/README.md#where-every-size-comes-from).
 
 What it builds and checks (the receipt holds every number):
@@ -32,11 +33,12 @@ What it builds and checks (the receipt holds every number):
 - requirements: liftoff and pressure angle per follower, the axe's
   drop_rpm, both studies clean, the sequence, the blade's clearance over
   the log;
-- the camshaft, the crank and the handle's pin as static studies on pin
-  supports, every load read from check_followers: the camshaft at work
-  must hold with its factor, and every study's pins must answer its loads'
-  force and moment (woodcutter_fem.py); a child's lean on the crank is
-  recorded, held or not;
+- the camshaft, the crank, the handle's pin and the left bushing as static
+  studies on pin supports: the camshaft at work, its loads read from
+  check_followers, must hold with its factor; leaned on, the handle's pin
+  must hold the lean with its factor and every part behind it the pin's
+  breaking load with its own, none buckling; and every study's pins must
+  answer its loads' force and moment (woodcutter_fem.py);
 - negative controls: the axe's landing dwell shortened under its fall
   fails drop_rpm, the bird's cam on too small a base fails the pressure
   angle, and a guide tilted off the cam's plane or moved off its width is
@@ -896,8 +898,15 @@ def main():
                     help="start a new project first (an untitled scratch "
                          "one is discarded; a saved one with unsaved work "
                          "refused)")
+    ap.add_argument("--converge", choices=("auto", "always", "never"),
+                    help="how the static studies settle their peaks "
+                         "(default: each study's own, auto); never while "
+                         "iterating sizes")
+    ap.add_argument("--fem-timeout", type=float, default=F.TIMEOUT_S,
+                    help="seconds each static study may run")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+    F.CONVERGE, F.TIMEOUT_S = args.converge, args.fem_timeout
     if args.film and args.no_render:
         fail("--film films with the renderer, which --no-render leaves out")
     out = Path(args.out) if args.out else OUT
@@ -935,13 +944,22 @@ def main():
              f"print_coupon.py --seed for the P1S's)")
     # The sliding fits, at the rod's size: the gap two printed surfaces
     # need to come apart (docs/tolerances/README.md).
-    s0 = S.solve(args.width, 0.0)
+    # The material's strength, as the studies read it: the crank end is
+    # sized from it for the lean (woodcutter_spec.lean_sizes).
+    strength = d.call("describe")["materials"].get(mat)
+    if not strength or not all(strength.get(k) for k in
+                               ("yield_mpa", "interlayer_mpa")):
+        fail(f"the app states no yield and interlayer strength for "
+             f"'{mat}': the crank end cannot be sized for the lean")
+    strength = {k: strength[k] for k in ("yield_mpa", "interlayer_mpa")}
+    s0 = S.solve(args.width, 0.0, 0.0, strength)
     gap = d.call("print_allowance", kind="gap", size_mm=s0["d_rod"], **proc)
     # The presses (pins, pegs, the parts keyed to the shaft) at the pin's
     # size, the one the coupon's press row is printed at.
     press = d.call("print_allowance", kind="press", size_mm=s0["d_pin"],
                    **proc)
-    s = S.solve(args.width, gap["allowance_mm"], press["allowance_mm"])
+    s = S.solve(args.width, gap["allowance_mm"], press["allowance_mm"],
+                strength)
 
     # The base radii, against CamProfile's report.
     search = {}
@@ -1101,17 +1119,25 @@ def main():
     fem = F.studies(d, s, fr_turn_all, rel)
     if not fem["camshaft"]["pass"]:
         fail(f"FEM: the camshaft does not hold its working load with "
-             f"{S.WORK_NEED:g} to spare: {fem['camshaft']['governing_factor']}")
+             f"{S.WORK_NEED:g} to spare: {fem['camshaft']['factor']}")
     if fem["unbalanced"]:
         fail(f"FEM: the pins of {fem['unbalanced']} do not answer their "
              f"loads' statics within {100 * F.STATICS_TOL:g} %")
+    if fem["lean_breaks"] or fem["buckles"]:
+        fail(f"FEM: leaned on, {fem['lean_breaks']} do not hold and "
+             f"{fem['buckles']} buckle (the pin must hold "
+             f"{S.LEAN_N:g} N with {S.LEAN_NEED:g} to spare, every part "
+             f"behind it the pin's breaking load with {S.OUTLAST:g})")
+    pin = fem["handle_pin"]
     print(f"  FEM: the camshaft holds its working load, and every study's "
           f"pins answer its loads' force and moment within "
           f"{100 * F.STATICS_TOL:g} %; a child's lean of "
-          f"{fem['lean']['push_n']:.1f} N "
-          + (f"breaks {', '.join(fem['lean_breaks'])} (the crank end holds "
-             f"{fem['holds_lean_n']:.1f} N with {S.LEAN_NEED:g} to spare)"
-             if fem["lean_breaks"] else "is held"))
+          f"{fem['lean']['push_n']:g} N: the handle's pin holds it with "
+          f"{pin['factor']:.2f} and breaks at {fem['pin_breaks_n']:.0f} N, "
+          f"which " + ", ".join(
+              f"the {k.replace('_', ' ')} holds with "
+              f"{fem[k]['at_pin_break']:.2f}"
+              for k in F.LEANED if k != "handle_pin"))
     d.call("set_active_part", part=ASM)
     stage("FEM")
     offscreen = not d.call("ping").get("headless", False)
@@ -1217,9 +1243,7 @@ def main():
     print(f"  seconds by stage: {stages}")
     print(f"woodcutter: {len(counts(s))} parts, "
           f"{sum(counts(s).values())} pieces, {len(plates)} plates")
-    lean = (f"; a child's lean breaks {', '.join(fem['lean_breaks'])} "
-            f"(README, what is not done)" if fem["lean_breaks"] else "")
-    print(f"woodcutter: every check passed{lean} -> "
+    print(f"woodcutter: every check passed -> "
           f"{out / 'woodcutter.lob'} ({elapsed:.0f} s)")
     return 0
 

@@ -35,8 +35,8 @@ and filament.
 
 Files: `woodcutter_spec.py` (every size and both motions, no app),
 `woodcutter_parts.py` (one function a part, and the way each prints),
-`woodcutter_fem.py` (the studies of the camshaft, the crank and the
-handle's pin), `woodcutter_drawings.py` (the exploded view, the sheets and
+`woodcutter_fem.py` (the studies of the camshaft, the crank, the
+handle's pin and the left bushing), `woodcutter_drawings.py` (the exploded view, the sheets and
 the bill), `woodcutter_film.py` (the films and their checks),
 `build.py` (the project, the checks, the controls, the sequence, the
 plates, the receipt), `test.json` (the
@@ -97,28 +97,30 @@ plates, the receipt), `test.json` (the
 From `--width` W (the box's inside width along the shaft, 120 by default),
 the print's gap (`print_allowance` kind `gap` at the rod's size: 0.3 mm on
 K5 PLA, the whole clearance) and its press (kind `press` at the pin's
-size: 0 on K5, which has no press row, so the built-in default), nothing
-else in millimetres:
+size: 0 on K5, which has no press row, so the built-in default), and for
+the crank end a child's lean against the material's strength
+([sized for a child's lean](#sized-for-a-childs-lean)), nothing else in
+millimetres:
 
 | size | rule | at 120 |
 |---|---|---|
 | panels | a peg and four lines either side (so a peg fits an edge), at least W / 33.3 | 6.2 |
 | inside depth | W / 2 | 60 |
-| camshaft | Ø W / 15, a flat a sixth of it deep (past the 45-degree chord) | Ø8, 1.33 |
+| camshaft | Ø W / 15, or what outlasts the handle's pin leaned on ([the lean](#sized-for-a-childs-lean)); a flat a sixth of it deep (past the 45-degree chord) | Ø9, 1.5 |
 | guides, running pin holes | the size plus the gap | Ø6.3, Ø3.3 |
-| pressed holes (pins, pegs, the shaft's D) | the size plus the press | Ø3, Ø8 |
+| pressed holes (pins, pegs, the shaft's D) | the size plus the press | Ø3, Ø9 |
 | cams | W / 10 wide, at W / 4 and 3W / 4 | 12 |
 | rods and knife tips | Ø W / 20, tip its radius | Ø6, r3 |
 | strokes | axe W / 8, bird W / 15 | 15, 8 |
-| base radii | the least whose CamProfile reports ≤ 30° of pressure, at least the hub's (the bore and two walls) | axe 7.45 (the hub), bird 12.05 |
-| shaft height | the larger cam plus W / 20 | 28.35 |
+| base radii | the least whose CamProfile reports ≤ 30° of pressure, at least the hub's (the bore and two walls) | axe 7.85 (the hub), bird 12.05 |
+| shaft height | the larger cam plus W / 20 | 28.85 |
 | guide bosses | three rods long | 18 |
-| inside height | the highest foot at full lift, W / 40 under the boss | 71.5 |
+| inside height | the highest foot at full lift, W / 40 under the boss | 72.5 |
 | pins, pegs, plates | Ø W / 40; plates W / 40 thick, bodies W / 30 | Ø3, 3, 4 |
 | pegs | in a blind hole a panel less four lines deep each side, a gap short of each floor | 4.6, 8.9 long |
-| bushings | two four-line walls round the shaft, the flange two more and W / 60 thick; the wall's bore the bushing plus the gap | Ø14.4, Ø20.8 x 2, Ø14.7 |
-| crank | a quarter of the inside depth; a plate W / 30 thick | 15, 4 |
-| handle | pin Ø W / 24, grip W / 5 long and two walls round the pin's running hole | Ø5, 24, Ø11.7 |
+| bushings | two four-line walls round the shaft, the flange two more and W / 60 thick; the wall's bore the bushing plus the gap | Ø15.4, Ø21.8 x 2, Ø15.7 |
+| crank | a quarter of the inside depth; a plate as thick as the handle's pin, or what outlasts the pin bending across it, at least W / 30 ([the lean](#sized-for-a-childs-lean)) | 15, 6.2 |
+| handle | pin Ø what holds the lean ([the lean](#sized-for-a-childs-lean)), at least W / 24; grip W / 5 long and two walls round the pin's running hole | Ø6.2, 24, Ø12.9 |
 | figures' tabs, the log's rib | W / 12 long, W / 30 wide; the panel deep | 10, 4 |
 | plate spacing | W / 30 between pieces and from the bed's edges | 4 |
 | figures | the arm W × 0.3 to the axe's eye, the axe's head W / 15 | 36, 8 |
@@ -127,12 +129,55 @@ else in millimetres:
 
 The base radii are searched against CamProfile's own report in a scratch
 part (in 0.05 mm steps from the closed form), then the box is laid out
-round the cams. The crank's quarter of the depth puts the grip 13.7 mm
+round the cams. The crank's quarter of the depth puts the grip 13.6 mm
 over the table at the bottom of its turn, a finger's room: a third of the
-depth left 8.7 mm. The arm reaches 70.1° rather than the 80° asked: the link
+depth would leave 8.6 mm. The arm reaches 70.1° rather than the 80° asked: the link
 tilts. The motions' angles are design choices: a slow rise over most of
 the turn, a dwell long enough for the drop at twice the hand speed, and a
 peck clear of the drop.
+
+### Sized for a child's lean
+
+The design lean is `LEAN_N` (`woodcutter_spec.py`), 35 N straight down the
+crank at the top of its turn: about 3.5 kg on one hand, the middle of the
+30-40 N a small child leans with. It is a load stated, not a multiple of
+what turning takes: turning takes 0.031 N at the grip (the followers
+weigh grams and friction is not modelled), so a factor on it says nothing
+about a hand. A lean that turns the crank turns it; the one it is held
+against goes through the shaft.
+
+**The handle's pin is the weak link.** It holds the lean with `LEAN_NEED`
+2, against yield and across the printed layers, and everything behind it
+(the crank, the camshaft where it leaves the left bushing, the left
+bushing) holds the load the pin breaks at with `OUTLAST` 1.5: a lean that
+breaks something breaks the pin, the cheapest piece to print again.
+
+`lean_sizes` sizes each by beam bending against the yield the app states
+for the profile's material (`describe`'s `materials`: PLA's 48 MPa), each
+floored by the share of the width it had before; a diameter goes as the
+cube root of its moment, and the three are solved together, since the
+crank's width is the bushing's (the shaft's) and the shaft's overhang
+holds the crank's thickness:
+
+- **The pin**: a cantilever out of the crank's face, the grip's push at
+  its middle, 12.15 mm out; its D section (the flat at the 45-degree
+  chord) at half the yield: Ø6.11, Ø6.2 to the tenth above. By the same
+  sum it breaks at 73 N. What is behind it is sized for 92 N, where its
+  full round would break: the flat only weakens it, so that bounds the
+  pin however its strength is read (the study reads it a little over the
+  sum, below).
+- **The crank**: as thick as the pin, 6.2 mm, because a pressed pin is
+  held over at least its own diameter or its seat gives before its
+  section; bending across the plate at the handle's bore, 1.5 x 92 N
+  standing off it 15.25 mm, asks only 5.3.
+- **The camshaft**: the same 1.5 x 92 N over the 18.5 mm from the grip to
+  where the shaft leaves the left bushing: Ø9.0.
+
+The shaft's extra millimetre cascades through the rules above: the hubs
+and the bushings (Ø15.4, the walls' bores Ø15.7), the axe cam's base (the
+hub's floor, 7.85), the shaft's height (28.85) and the box's (72.5 mm
+inside); the crank and the grip stand 2.2 mm further out. Every check
+below passes on it, and it prints 3 g heavier.
 
 ## What is checked every run
 
@@ -159,9 +204,8 @@ At W = 120 on K5 PLA on the P1S:
   at the pin, which FDM prints small). Every pressed face is a printed
   press (`set_tolerance printed: press`), so each study's exact rigid
   check relieves and lists all 44 (`press_fits`).
-- **The cams' reports**: axe base 7.35 (the hub, which the press bore
-  narrows from phase 2's 7.45), 22.35 to the top, 26.38° worst pressure
-  angle at 86°; bird base 12.05 (the closed form for a cycloidal rise
+- **The cams' reports**: axe base 7.85 (the hub), 22.85 to the top,
+  25.65° worst pressure angle at 87°; bird base 12.05 (the closed form for a cycloidal rise
   under 30° gives 12.03), 20.05 to the top, 29.97° at 64°; both fits
   within 3e-7 mm.
 - **The assembly sequence**, 30 steps, each slid home along its way in
@@ -191,8 +235,8 @@ At W = 120 on K5 PLA on the P1S:
   upright), the bird's at 166 (the bare rod's closed form, √(gβ²/2πh), is
   198: the bird takes some of gravity's hold). The axe's drop: 15 mm,
   falling in 108 ms (free fall would be 55: the arm carries most of the
-  inertia and, near upright, little of the weight), 140.2° of dwell to
-  land in, `drop_rpm` 216, so at 120 rpm it lands after 78° of turn.
+  inertia and, near upright, little of the weight), 141.2° of dwell to
+  land in, `drop_rpm` 218, so at 120 rpm it lands after 78° of turn.
 - **Requirements**, as they lie in the saved project, all passing: each
   follower's `liftoff_rpm` ≥ 120 and `pressure_angle_deg` ≤ 30, the axe's
   `drop_rpm` ≥ 120 over the chop, both studies `motion_clean`, the
@@ -213,73 +257,93 @@ At W = 120 on K5 PLA on the P1S:
   ([pin supports](../../docs/simulation/README.md#pin-supports)), every
   load read from `check_followers` at 120 rpm
   ([contact forces](../../docs/assemblies/relations.md#contact-forces)),
-  none estimated. The worst sample of the crank turn is the one where the
-  crank needs the most torque, both followers' summed: 67.5°, 0.469 N·mm
-  (the axe's rod pushing its cam with 0.052 N at 24.3° of pressure angle,
-  the bird's with 0.021 N at 29.5°). Each study's factor against yield is
+  none estimated but the lean. The worst sample of the crank turn is the
+  one where the crank needs the most torque, both followers' summed:
+  67.5°, 0.471 N·mm (the axe's rod pushing its cam with 0.051 N at 23.5°
+  of pressure angle, the bird's with 0.021 N at 29.5°). Each study's factor against yield is
   its receipt's claim; the stress across the printed layers
   (`layer_normal` the part's print direction) is read beside it against
-  PLA's interlayer 17 MPa, and the smaller governs.
-  - *The camshaft at work*: on a pin over each bushing's sleeve (the left
+  PLA's interlayer 17 MPa, and the smaller governs. Where a peak sits on
+  a pin's edge, a singularity that grows as the mesh refines
+  ([a peak on a support's edge](../../docs/simulation/README.md#a-peak-on-a-supports-edge)),
+  the factor sized to is the one away from it, and the headline is
+  recorded beside it.
+  - *The camshaft at work*: on a pin over each bushing's bore (the left
     one held from turning), loaded by each follower's push on its cam
     (`in_cam_part`, a remote load at the contact spread over the cam's
     width) and by the hand's push at the grip that balances their torque
     (the followers' moment about the axis is check_followers' torque to
-    1 %, or the run stops). Factor 1224 against yield, 4989 across the
+    1 %, or the run stops). Factor 1488 against yield, 4562 across the
     layers: turning it takes almost nothing.
-  - *A child leaning on the crank*: the push that turns it, 0.031 N at the
-    grip (the torque over the crank's radius), times `LEAN_FACTOR` 3000:
-    93.9 N, a 9.6 kg lean, straight down the crank at the top of its turn
-    (a lean that turns it turns it; the one it is held against goes
-    through the shaft). On the camshaft's crank end (the shaft on its
-    bushings), the crank (its hub on the shaft, held from turning: the D
-    keys it; pushed through its handle's bore) and the handle's pin (in
-    the crank over its thickness; the grip pushing along its length).
-    **None holds it** with `LEAN_NEED` 2 to spare: factors against yield
-    0.48, 0.44 and 0.23 (across the layers 1.25, 1.08 and 0.71), the
-    peaks on the pins' edges (1.13, 0.73 and 0.47 away from them). The
-    crank end holds 10.6 N at the grip, about 1 kg, with 2 to spare: the
-    handle's Ø5 pin bending over the grip's length governs (M = 1141 N·mm
-    at the crank's face; 103 MPa away from the pin's edge). The run
-    records this and goes on (*Not done here*); the camshaft at work, and
-    every study's statics, stop it.
+  - *A child leaning on the crank*: 35 N straight down the crank at the
+    top of its turn ([sized for a child's lean](#sized-for-a-childs-lean)),
+    on the handle's pin (in the crank over its thickness, held from
+    turning; the grip pushing along its length), the crank (its hub on the
+    shaft, held from turning: the D keys it; pushed through its handle's
+    bore), the camshaft's crank end (the shaft on its bushings, each a pin
+    over the bushing's whole bore, since each is pressed on over flange
+    and sleeve) and the left bushing (held on its bore, the wall's answer
+    on its sleeve: the other way round, its pin contact does not settle,
+    [known bugs](../../docs/known-bugs.md#a-pin-on-a-short-sleeve-does-not-settle-when-the-load-tilts-the-part)).
+    With `--converge never` at the generator's meshes:
+
+    | part | yield (headline) | across the layers | factor, away from the pins' edges | breaks at | at the pin's breaking load |
+    |---|---|---|---|---|---|
+    | handle's pin | 0.63 | 4.19 | 2.33 | 81 N | -- |
+    | crank | 2.85 | 9.29 | 4.37 | 153 N | 1.88 |
+    | camshaft's crank end | 2.48 | 7.71 | 3.91 | 137 N | 1.68 |
+    | left bushing | 2.67 | 6.45 | 4.42 | 155 N | 1.90 |
+
+    The pin holds the lean with 2.33 to spare (its beam sum says 2.09) and
+    breaks at 81 N, the larger of the two readings; each part behind it
+    holds that with at least 1.68. The run stops if the pin is under
+    `LEAN_NEED` or a part behind it under `OUTLAST`. Every headline under
+    the pin's is a peak on a pin's edge: the pin's own, 76.6 MPa where it
+    enters the crank, is the seat's rim (20.6 MPa a quarter of its radius
+    inside, and the beam sum at the crank's face 23.0). The camshaft's
+    across-the-layers peak sits at the end of the hand's load band, the
+    shaft's end inside the crank's hub, where a remote load spread over a
+    band ends (docs/simulation/README.md#a-peak-that-has-settled): 2.2 MPa
+    here, a factor of 7.7, read and not sized to.
   - *Buckling*: the crank and the handle's pin leaned on, each also as a
     [buckling](../../docs/simulation/README.md#buckling) study of the same
     loads, its base state solved once (`converge: never`; the static study
     beside it settles the stress). **Neither is buckling-limited**: the
-    crank buckles at 9.44 times the lean (flat, no knockdown) and the
-    pin at 7.17, against yield factors of 0.435 and 0.226, so yield
-    governs both (governing 0.416 and 0.219, Rankine-Gordon). The crank's
-    first mode is flagged local at the shaft pin's edge (crippling of the
-    thin arm where the hub holds it, not the arm buckling); 3.5 s and 17 s
-    (3 999 and 7 564 nodes).
+    crank buckles at 58.4 times the lean and the pin at 23.6 (flat, no
+    knockdown), both far over `LEAN_NEED`, which the run holds them to;
+    each first mode is flagged local where a load enters (crippling at the
+    load's edge, not the member buckling); 3 s and 19 s (2 449 and 7 126
+    nodes).
   - *The statics*: in every study what the pins carry together, force and
     moment (`moment_n_mm`), answers the loads' within 1 % (0.000 % on the
-    shaft and the crank, 0.34 % of moment on the handle's pin, whose
-    grip's push is taken at its band's middle). The two bushings do not
-    share by the lever rule: the FEM's pin has no clearance, so a pin along
-    a sleeve takes moment, and leaned on, the left bushing carries the
-    whole 93.9 N and the overhang's 2006 N·mm about its middle (F × 21.4
-    mm, to 0.2 %), the right one 1.3 N where the lever rule says 15.9. A
-    printed bushing in its bore tilts instead; the bending moment at the
-    left bushing, which governs the shaft's crank end, is the overhang's
-    either way.
+    shaft, the crank and the bushing, 0.49 % of moment on the handle's
+    pin, whose grip's push is taken at its band's middle). The two
+    bushings do not share by the lever rule: the FEM's pin has no
+    clearance, so a pin along a bore takes moment, and leaned on, the left
+    bushing carries the whole 35 N and the overhang's 791 N·mm about its
+    middle (F × 22.6 mm), the right one nothing where the lever rule says
+    6.2 N. A printed bushing in its bore tilts instead; the bending moment
+    where the shaft leaves the left bushing, which governs its crank end,
+    is the overhang's either way.
 - **The print plate**: all 44 pieces on one P1S plate, packed with W / 30
-  between them clear of the bed's keep-out corner, 247.8 x 247.9 x 30 mm
+  between them clear of the bed's keep-out corner, 247.9 x 247.0 x 30 mm
   in the 256 x 256 bed (the top, standing on its stage with its bosses up,
   is the tallest piece); `check_print` passes every item on the plate,
   stacking and the keep-out zone included. No panel is over the bed, so
   nothing is split (`split_for_printing` is not called; a width whose
   piece will not fit the bed is refused). `export_print_job` writes it as
   one Bambu job.
-- **What it weighs and takes to print**: 146.7 g of PLA as the app weighs
+- **What it weighs and takes to print**: 149.7 g of PLA as the app weighs
   each part printed (0.20 mm Standard: two walls, four on the shaft, the
-  rods, the pins and the pegs; 15 % grid), 342 g were it solid. Bambu
-  Studio's CLI (`--slice`, 02.08, its P1S and Bambu PLA Basic presets)
-  slices the plate in 3 h 34 min, 153.1 g and 50.5 m of filament.
+  rods, the pins and the pegs; 15 % grid), 348 g were it solid; 3.0 g of
+  it is the crank end sized for the lean (146.7 g before). Bambu Studio's
+  CLI (`--slice`, 02.08, its P1S and Bambu PLA Basic presets) sliced the
+  plate before that in 3 h 34 min, 153.1 g and 50.5 m of filament; not
+  sliced again since.
 
 Runtime: 115 s on a quiet machine without stills before the FEM, which
-adds about 45 s (the negative controls are the largest share: each one
+added about 45 s with three leaned-on parts (four now, and 211 s with
+`--converge never` on a machine busy with CI) (the negative controls are the largest share: each one
 rebuilds a cam and runs a study again), 186 s with the stills and the
 slicing before the FEM; 265 s under load with it. The drawings and the
 bill add about 9 s, the films about 27 s.
@@ -291,8 +355,8 @@ must pass `check_drawing` with no issue or the run stops. At W = 120:
 
 - **The bill** (`export_bom`): 25 parts, 44 pieces, every one printed in
   PLA and none bought (a bought row stops the run), each weighed as it
-  prints and on its plate (`plate 1 x16` for the pegs). 146.7 g printed,
-  the plates' own sum, against 342.2 g were it solid.
+  prints and on its plate (`plate 1 x16` for the pegs). 149.7 g printed,
+  the plates' own sum, against 348.4 g were it solid.
 - **The assembly** (A1): the front, which is the open side (the app's
   `back`: the box's back panel stands on -Y, the app's front), and the
   view from the crank at 1:1 down the left; the exploded view in iso at
@@ -421,6 +485,14 @@ And with the drawings (phase 5):
   `modify_feature`, which replaces the whole spec: without the material in
   it, the cams were saved with none, and the bill could not weigh them.
 
+And with the crank end sized for a lean:
+
+- Logged, not fixed: the left bushing on a pin over its sleeve, loaded
+  through its bore by the lean, does not settle, the tilt seemingly
+  cycling its contact
+  ([known bugs](../../docs/known-bugs.md#a-pin-on-a-short-sleeve-does-not-settle-when-the-load-tilts-the-part));
+  the study holds it the other way round.
+
 `tests/contact_loop_smoke.py` builds this mechanism with this code and
 holds the app to each.
 
@@ -437,14 +509,28 @@ holds the app to each.
   but a pivot's load turns with the lever, and a printed pin is not
   measured yet. The fits are the profile's gap and press; phase 7 measures
   them.
-- **The crank end is not sized for a child leaning on it.** The studies
-  above say it breaks at a 9.6 kg lean and holds about 1 kg with a factor
-  of 2. Sizing it for a lean is a design decision with a cascade: the
-  handle's pin (Ø W / 24) and the crank's plate (W / 30) are outside the
-  box, but the shaft's crank end fails too, and a thicker shaft moves the
-  hubs, the axe cam's base radius (the hub's floor), the bushings and the
-  box's height. Which lean to design for, and whether the shaft steps up
-  outside the left wall, are for the next round.
+- The leaned-on studies' peaks are not settled: the generator's run
+  solves each once (`converge` left at each study's own, `auto`, which at
+  the 10 s default stops after the first step or two), and the factors
+  above are at `--converge never`. Run again with `converge: auto` and
+  `converge_auto_s` at 300 s: the crank settles (4.61 away from its pins,
+  1.0 % on its third step, 233 s); the bushing stops for time after one
+  refinement (4.66, its peak moving 5 %; 729 s); the camshaft's crank end
+  fails its first refinement (its pins' contact does not settle; 3.91 at
+  the first step); and the handle's pin stops for time after one (383 s)
+  with its peak away from the seat's rim at 28.6 MPa, 1.68, where the
+  first step read 20.6. That peak, like the shaft's, sits where the
+  compression-only pin's contact ends inside its seat, 2.3 mm from the
+  crank's inner face, not where the pin's moment peaks at the crank's
+  face, where beam bending reads 23.0 MPa, 2.09
+  ([a peak that has settled](../../docs/simulation/README.md#a-peak-that-has-settled)).
+  A pressed pin is held all round by its press, which the pin support
+  does not model; were the 1.68 the pin's, it would still be the weak
+  link, breaking at 59 N, and Ø6.6 would hold the lean with 2.
+- Not studied leaned on: the end wall round the left bushing (its bore
+  takes the bushing's tilt), the grip (a sleeve on the pin, pushed by the
+  hand), and the crank's hub on the shaft's flat beyond the crank study's
+  pin.
 - No lift diagram: the app draws no graph or generated table of a
   CamProfile's motion, so a cam's sheet carries the motion and the lift as
   tables the generator writes from the feature's own segments
