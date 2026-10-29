@@ -281,10 +281,14 @@ jobs:
         with:
           path: ~/.cache/ccache
           key: ccache-appimage-${{ github.sha }}
+      # The AppImage, and the source package of the ccx inside it, which a
+      # release attaches (docs/packaging/README.md#the-bundled-calculix).
       - uses: actions/upload-artifact@v7
         with:
           name: appimage
-          path: dist/*.AppImage
+          path: |
+            dist/*.AppImage
+            dist/calculix-ccx-*-source.tar
 
   # Run where it was not built: the oldest glibc it promises, and two other
   # distributions, each with only what a desktop already has.
@@ -410,7 +414,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir files
-          cp linux/*.AppImage appimage/*.AppImage windows/* deb/*.deb source/* python/* files/
+          # windows/ holds ccx_2.23.src.tar.bz2 and appimage/ the Ubuntu
+          # source package of its ccx: the GPL source of each ccx we ship.
+          cp linux/*.AppImage appimage/*.AppImage appimage/calculix-ccx-*-source.tar \
+            windows/* deb/*.deb source/* python/* files/
           (cd files && sha256sum -- * > SHA256SUMS)
           {
             cat notes/notes.md

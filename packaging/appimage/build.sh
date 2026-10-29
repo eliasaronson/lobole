@@ -10,8 +10,12 @@
 # AppImage runs on. Installs the build dependencies, builds OpenCASCADE and
 # Netgen into $LOBOLE_DEPS (default /opt/lobole-deps) unless they are
 # already there, builds the app, and bundles every library except glibc and
-# the graphics stack, which come from the host. Writes
-# OUTDIR/lobole-VERSION-x86_64.AppImage.
+# the graphics stack, which come from the host. Bundles Ubuntu's CalculiX
+# (ccx) where the app looks for one beside it, usr/lib/lobole/ccx. Writes
+# OUTDIR/lobole-VERSION-x86_64.AppImage and, because ccx is GPL and we
+# distribute it, OUTDIR/calculix-ccx-<debian version>-source.tar: the exact
+# Ubuntu source package of the ccx inside
+# (docs/packaging/README.md#the-bundled-calculix).
 set -euo pipefail
 
 version="$1"
@@ -26,8 +30,10 @@ work="${LOBOLE_APPIMAGE_WORK:-$(mktemp -d)}"
 # The stock-ubuntu CI job's list without OpenCASCADE (24.04 has 7.6) and
 # GTK (the file dialogs use the portal), plus what deps.sh and OCC's glTF
 # reader need, Spectra, and the bundlers' own needs (file, the
-# desktop-file check), and ccache, which CMake uses when it is there.
+# desktop-file check), ccache, which CMake uses when it is there, and the
+# ccx the AppImage carries. deb-src too, for that ccx's source package.
 export DEBIAN_FRONTEND=noninteractive
+sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates git curl file python3 desktop-file-utils \
@@ -36,7 +42,7 @@ apt-get install -y --no-install-recommends \
   libspdlog-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
   libtbb-dev libvterm-dev libdbus-1-dev libx11-dev \
   libfreetype-dev libfontconfig-dev rapidjson-dev libspectra-dev \
-  libgl-dev libxi-dev libxmu-dev zlib1g-dev ccache
+  libgl-dev libxi-dev libxmu-dev zlib1g-dev ccache calculix-ccx
 # CMake reads the commit with git, which refuses a checkout another user
 # owns ("dubious ownership"): CI's container runs as root over the runner's.
 git config --global --add safe.directory "$repo"
@@ -49,6 +55,19 @@ cmake -S "$repo" -B "$work/build" -G Ninja \
 cmake --build "$work/build" -j"$jobs" --target designer
 rm -rf "$work/AppDir"
 DESTDIR="$work/AppDir" cmake --install "$work/build"
+
+# CalculiX, where fem::FindCalculix looks beside the app; linuxdeploy below
+# brings its libraries (SPOOLES, ARPACK and the OpenMPI it links, BLAS,
+# LAPACK, libgfortran). Its source package, at exactly the version inside,
+# goes beside the AppImage for the release to attach (GPL-2 section 3).
+ccx_version="$(dpkg-query -W -f='${source:Version}' calculix-ccx)"
+install -D -m755 "$(readlink -f /usr/bin/ccx)" "$work/AppDir/usr/lib/lobole/ccx"
+install -D -m644 /usr/share/doc/calculix-ccx/copyright \
+  "$work/AppDir/usr/share/doc/calculix-ccx/copyright"
+rm -rf "$work/ccx-src" && mkdir -p "$work/ccx-src"
+(cd "$work/ccx-src" && apt-get source --download-only "calculix-ccx=$ccx_version")
+tar -C "$work/ccx-src" --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -cf "$out/calculix-ccx-$ccx_version-source.tar" .
 
 # Pinned bundlers, checked, run extracted (a container has no FUSE).
 tool() {  # url sha256
@@ -73,6 +92,7 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 # chain is named too; nothing else loads it.
 LD_LIBRARY_PATH="$deps/lib" "$linuxdeploy" --appdir "$work/AppDir" \
   --executable "$work/AppDir/usr/bin/lobole" \
+  --executable "$work/AppDir/usr/lib/lobole/ccx" \
   --desktop-file "$work/AppDir/usr/share/applications/org.lobole.Lobole.desktop" \
   --icon-file "$work/AppDir/usr/share/icons/hicolor/256x256/apps/org.lobole.Lobole.png" \
   --exclude-library 'libvulkan.so*' --exclude-library 'libdbus-1.so*' \

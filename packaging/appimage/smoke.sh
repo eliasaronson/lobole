@@ -11,7 +11,7 @@
 # the Vulkan loader with Mesa's lavapipe, X11, fontconfig, D-Bus) and Xvfb,
 # with whichever package manager the image has, then:
 #   - tools/release-smoke.py: it starts, models with OpenCASCADE, solves a
-#     sketch;
+#     sketch, finds the ccx it carries and solves a study on it (--calculix);
 #   - a GUI test (app/boots_and_renders) in a window on Xvfb: the host's
 #     Vulkan driver loads into the bundled app and renders, which is what
 #     the nix bundle could not do;
@@ -40,7 +40,7 @@ fi
 
 export APPIMAGE_EXTRACT_AND_RUN=1
 python3 "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
-  -- "$appimage"
+  --calculix -- "$appimage"
 
 Xvfb :99 -screen 0 1600x1000x24 &
 xvfb=$!
