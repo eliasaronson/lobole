@@ -330,6 +330,7 @@ here; the golden corpus and git history cover them.
 | 201 | A mate connector's `face`, `snap_edge` and `snap_edge2` carry a `fingerprint` (`element`, `shape`, `area_mm2` or `length_mm`, `centroid_mm`) when they name an imported file's own element; one that disagrees with the element it sits beside is refused. A connector from an older file takes none. Golden `assembly/v201-mate-import-print` |
 | 202 | A static result's `reactions` carry `moment_n_mm` [x, y, z]: each support's moment about the frame's origin (the part's; world on an assembly study), N·mm. A pin over a band of its face takes moment along it, which its force alone does not show ([pin supports](../simulation/README.md#pin-supports)). A result saved before reads without it, and `study_results` then leaves it out. Golden `v202-pin-reaction-moment` (a shaft on two pins with an overhung load; results are not in the single-file corpus, so their round trip is `tests/test_study_inputs.cpp`'s) |
 | 203 | A drawing view of an assembly takes `exploded_view`: the id of one of its source's exploded views, every occurrence drawn moved by its step at full factor. Absent = as assembled, how every older view reads; 0, a fraction or a negative number is refused. Golden `drawing/v203-exploded-view` |
+| 204 | A study takes `solver`: `auto` (absent, how every older study reads), `in_house` or `calculix`; `calculix` solves a static study on CalculiX, and on a modal or topology study it is refused, as is a name that is none of the three. A CalculiX result carries `solver` ("calculix 2.NN"); an in-house one writes none ([CalculiX](../simulation/README.md#calculix)). Golden `v204-calculix-solver` (results are not in the single-file corpus, so their round trip is `tests/test_fem_calculix.cpp`'s) |
 
 ## Pending changes
 
@@ -339,7 +340,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A study takes `solver`: `auto` (absent, how every older study reads), `in_house` or `calculix`; `calculix` solves a static study on CalculiX, and on a modal or topology study it is refused, as is a name that is none of the three. A CalculiX result carries `solver` ("calculix 2.NN"); an in-house one writes none ([CalculiX](../simulation/README.md#calculix)). Golden `vNEXT-calculix-solver` (results are not in the single-file corpus, so their round trip is `tests/test_fem_calculix.cpp`'s) |
 
 ## Paths in a project
 

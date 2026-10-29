@@ -694,7 +694,7 @@ bridge was built for and are not built yet
 ### The solver choice
 
 A study's `solver` is `auto`, `in_house` or `calculix` (`fem::Solver`;
-absent from the file when `auto`, vNEXT). `auto` and `in_house` solve every
+absent from the file when `auto`, v204). `auto` and `in_house` solve every
 analysis in-house. `calculix` solves a **static** study only: on a modal or
 topology study it is refused (`fem::SolverRefusal`) by `set_study`, by the
 panel, by the file reader and by the run, never quietly solved in-house. The

@@ -1076,7 +1076,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
         CHECK(l.fixRotation == want[i].at(4).get<bool>());
     }
   }
-  // vNEXT: which program solves each study
+  // v204: which program solves each study
   // (docs/simulation/README.md#calculix). A solver dropped on load would
   // solve a CalculiX study in-house and say nothing; each [study name,
   // solver] must hold, auto included.

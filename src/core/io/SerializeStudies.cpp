@@ -40,7 +40,7 @@ json StudyToJson(const fem::Study& s) {
   // v31 static studies stay byte-identical.
   if (s.type != fem::AnalysisType::Static)
     j["analysis"] = fem::AnalysisTypeToString(s.type);
-  // Which program solves it (vNEXT): absent when auto, so every study saved
+  // Which program solves it (v204): absent when auto, so every study saved
   // before -- and its input hash -- is what it was.
   if (s.solver != fem::Solver::Auto)
     j["solver"] = fem::SolverToString(s.solver);
@@ -854,7 +854,7 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
   // whose inputs hash the same, and reads it stale when they do not.
   if (rt.inputHash != 0)
     out["input_hash"] = inputhash::Hex(rt.inputHash);
-  // A CalculiX answer says so, with the version (vNEXT): it is a second,
+  // A CalculiX answer says so, with the version (v204): it is a second,
   // independent answer, and its receipt names that oracle after a reopen
   // too (docs/simulation/README.md#calculix). An in-house result writes
   // nothing here, so every one saved before re-saves byte for byte.
