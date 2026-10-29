@@ -224,7 +224,10 @@ the heading if it is not here yet.
   1.6 mm mesh, "did not settle in 30 iterations" at 1.2 mm. The same force
   through the sleeve's middle (no tilt) solves in 3 s, and so does the same
   statics held the other way round: a pin over its bore, the reaction on
-  its sleeve (what generators/woodcutter does).
+  its sleeve (what generators/woodcutter does). The woodcutter's camshaft,
+  on pins over its two bushings' bores and leaned on at the crank, solves
+  at its generator's mesh and fails its first `converge` refinement the
+  same way ("did not settle in 30 iterations").
 - **Cause:** not found. The tilt presses the sleeve at its two ends on
   opposite sides; the facet-wise contact set seems to cycle between them.
 - **Where:** `SolveWithPins` in `src/core/fem/FemStudy.cpp`.

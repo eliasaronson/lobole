@@ -667,14 +667,20 @@ crank end took 9 s at its generator's 2 mm and 9 minutes at 1 mm. That is
 why the default is `auto`: it reports such a study unconverged with its
 reason instead of making every run wait.
 
-The woodcutter's leaned-on pin studies (crank end, crank, handle pin) do
-not settle within a 300 s step: the crank's von Mises away from its pins
-moves 3 % on its second refinement (66.2, 66.0, 64.0 MPa), but its stress
-across the layers and the other two parts' peaks move 15-85 % a step. The
-peaks they chase are not a support's rim: a compression-only pin's
-contact ends inside its band, and the camshaft's hand load is a band that
-runs to the shaft's end, where its across-layers peak sits (13.6 MPa at
-2 mm, 25.2 at 1 mm). Neither edge is a support's, so neither is read
+The woodcutter's leaned-on pin studies (a 35 N lean on a Ø6.2 handle
+pin, a 6.2 mm crank and a Ø9 shaft) show both ends of it, with
+`converge_auto_s` at 300 s. The crank settles in three steps (its von
+Mises away from its pins 10.98, 10.51, 10.41 MPa; 233 s). The handle pin
+does not: its peak away from the seat's rim moves 20.6 to 28.6 MPa on the
+first refinement and the next step is not started (383 s), and the
+camshaft's crank end fails its first refinement (its pins' contact does
+not settle). The peaks they chase are not a support's rim: a
+compression-only pin's contact ends inside its band (the pin's at 2.3 mm
+from the crank's inner face, the shaft's inside the bushing), and the
+camshaft's hand load is a band that runs to the shaft's end, where its
+across-layers peak sits (a factor of 7.5, 4.3 and 3.9 across the layers
+meshed at a quarter, a sixth and an eighth of the shaft's diameter).
+Neither edge is a support's, so neither is read
 away, and the result says "not converged" with the step it stopped at. A static
 study of a topology result solves the result's own tets, which cannot be
 refined, and reports "not checked" with that reason.
