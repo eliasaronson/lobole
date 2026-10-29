@@ -28,6 +28,18 @@ Loböle dynamically links the following LGPL-family libraries:
   with the patches in `nix/patches/` applied (`nix/occt-overlay.nix` says
   what each one changes).
 
+The GUI AppImage, the Flatpak and the Windows packages also carry
+**CalculiX** (`ccx`), GPL-2.0-or-later, a separate program Loböle runs. Its
+source is attached to every release that ships it, next to the binaries:
+
+- `ccx_2.23.src.tar.bz2`, upstream's source of the 2.23 the Windows packages
+  and the Flatpak carry (<https://www.dhondt.de/ccx_2.23.src.tar.bz2>). The
+  Windows `ccx.exe` is upstream's `ccx_static.exe` from
+  `calculix_2.23_4win.zip`, built by a third party with SPOOLES and PaStiX
+  linked in, unmodified by us;
+- `calculix-ccx-<version>-source.tar`, Ubuntu's source package of exactly
+  the version the AppImage carries: upstream's tarball and Debian's changes.
+
 The shipped libraries remain separate shared objects. Users may replace them
 with compatible modified builds. For PlaneGCS, configure Loböle against the
 replacement library or replace `libplanegcs.so` while preserving its ABI; the

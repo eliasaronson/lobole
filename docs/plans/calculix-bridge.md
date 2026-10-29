@@ -123,9 +123,8 @@ Each stage adds its keys under its own `vNEXT`.
 
 Each stage is useful alone and lands with its docs. Stage 1 (discovery, the
 deck, linear static on CalculiX) is built, and linear buckling with it
-(in-house, `*BUCKLE` its cross-check). Stage 4 comes before Stage 3, which
-ships the binary: until a nonlinear study exists, nothing a user needs
-requires a bundled ccx.
+(in-house, `*BUCKLE` its cross-check), and so is shipping ccx in the
+packages ([docs/packaging/README.md#the-bundled-calculix](../packaging/README.md#the-bundled-calculix)).
 
 **Stage 4: nonlinear static, large deformation**, ~1 000 lines.
 - `static` gains `nonlinear: {large_deformation: true, increments?}`, which maps to `NLGEOM` and `INC`.
@@ -141,18 +140,6 @@ requires a bundled ccx.
   load factor it reached: the answer for an arch or a curved wall loaded
   across its curve, which linear buckling cannot see.
 - Supporting work: progress from `.sta`, the non-convergence refusal, and the equilibrium check.
-
-**Stage 3: shipping the binary**, ~300 lines plus packaging. It lands with
-Stage 4: until a nonlinear study exists, nothing a user needs requires a
-bundled ccx.
-- **AppImage.** Bundle Ubuntu 24.04's `ccx` and its libraries via linuxdeploy `--executable`.
-- **Flatpak.** A ccx 2.23 module.
-- **Windows.** The installer carries `ccx_static.exe` as `ccx.exe`, pinned by
-  sha256; `packaging/windows/smoke.sh` runs a deck under Wine.
-  `PipedChild::Poll` blocks on Windows today, so `timeout_s` and cancel cannot
-  interrupt a run there, and dead run directories are not swept: both are
-  fixed here.
-- **Licensing.** `THIRD_PARTY.md` and `SOURCE-OFFER.md` rows, and the ccx source tarball attached to each release. `release-smoke.py` asserts `ping` finds the bundled solver.
 
 **Stage 5: contact**, ~1 500 lines.
 - A compression-only support against a rigid occurrence or the ground: the partner is meshed coarse and fixed, with `*CONTACT PAIR`.
@@ -183,7 +170,6 @@ bundled ccx.
 
 **Docs:**
 - docs/simulation/README.md's "CalculiX" section gains each stage, and "Not done" loses it.
-- docs/packaging/README.md gains the bundled solver (Stage 3).
 - The RPC `describe` rows each stage touches.
 
 ## Files
@@ -195,5 +181,3 @@ bundled ccx.
 - `src/core/Requirements.cpp`, `src/remote/RemoteRequirements.cpp` (Stage 6's quantity).
 - `src/ui/StudyPanel.cpp`.
 - The python client's `rpc.py` and `rpc-surface.json`, regenerated.
-- `packaging/appimage/*`, `packaging/flatpak/org.lobole.Lobole.yaml`, `packaging/windows/{installer.nix,installer.nsi,smoke.sh}`, `src/common/ChildProcess.cpp` (Windows polling).
-- `THIRD_PARTY.md`, `LICENSES/SOURCE-OFFER.md`.

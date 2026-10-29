@@ -1072,7 +1072,11 @@ is not `auto`: every result saved before keeps its hash.
    version found);
 2. `LOBOLE_CCX`;
 3. a `ccx` shipped beside the app (`<prefix>/lib/lobole/ccx`, or `ccx.exe`
-   beside `lobole.exe`);
+   beside `lobole.exe`). The GUI AppImage (`usr/lib/lobole/ccx`, Ubuntu's
+   2.21), the Flatpak (`/app/lib/lobole/ccx`, 2.23 built in it) and the
+   Windows zip and installer (`bin\ccx.exe`, dhondt.de's 2.23) carry one
+   there; the `.deb`, the AUR package and Nix leave it to the distribution
+   ([packaging](../packaging/README.md#the-bundled-calculix));
 4. `ccx` on PATH.
 
 It runs `ccx -v` once per path, size and modification time, reads "This is
@@ -1120,11 +1124,14 @@ deck per body and per load case; `NotInBatch`).
 - **The run directory** is `$XDG_CACHE_HOME/lobole/calculix/<pid>-<n>/`, never
   inside the project. It is removed when the run succeeds or is cancelled,
   and kept and named in the refusal when it fails. A run sweeps the
-  directories of processes that are no longer running.
+  directories of processes that are no longer running, on Windows as on
+  Linux.
 - **Threads.** `OMP_NUM_THREADS` and `CCX_NPROC_*` are the machine's worker
   count. The nixpkgs ccx factors with SPOOLES on one core whatever they say.
 - **Cancel.** `cancel_study`, or the starting connection closing, kills the
-  process within 20 ms; its directory goes with it.
+  process within 20 ms; its directory goes with it. On Windows too: the
+  child is a `CreateProcessW` process that is polled, not waited for
+  ([packaging](../packaging/README.md#windows)).
 - **Deadline.** `run_study {timeout_s}` kills ccx past it and refuses the run,
   naming the limit. It is refused on an in-house study. Without it a run goes
   until it is done or cancelled.

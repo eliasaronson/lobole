@@ -642,7 +642,7 @@ the capture, the encoder and the job are one, and only the poses differ
 Code: `src/ui/MotionVideo.cpp`, `src/render/FrameStream.{h,cpp}`, the
 capture in `src/app/main.cpp` (`ViewportFrameCapture`),
 `src/common/ChildProcess.{h,cpp}` (PATH lookup and a child fed on stdin:
-`posix_spawn`, or `_popen` on Windows).
+`posix_spawn`, or `CreateProcessW` on Windows).
 
 ## Assembly sequences
 

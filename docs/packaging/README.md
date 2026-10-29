@@ -69,7 +69,9 @@ makes it model: a 4 mm box must be 64 mm³ (OpenCASCADE works) and a circle
 drawn at r 1 and constrained to r 2 must extrude to 8π mm³ (the sketch
 solver is linked; a build that loses Boost configures PlaneGCS off without
 a word). With `--version` it also checks that the binary's `--version` is
-the release's. The two GUI builds also open a window and render one frame
+the release's, and with `--calculix`, on the two packages that carry ccx,
+that `ping` finds that copy and it solves ([The bundled
+CalculiX](#the-bundled-calculix)). The two GUI builds also open a window and render one frame
 (`app/boots_and_renders`, on Xvfb with Mesa's lavapipe): the AppImage in
 fresh images (`packaging/appimage/smoke.sh`), the Windows zip under Wine
 from a folder named `Loböle`, as the installer names it
@@ -374,9 +376,10 @@ and modal analysis included (Netgen and the header-only Spectra).
   so it cannot drift from the link line. By hand only what is run rather
   than linked: Recommends `mesa-vulkan-drivers, git`; Suggests
   `ffmpeg, python3, calculix-ccx` (CalculiX, which a static study can be
-  solved on: [simulation](../simulation/README.md#calculix)). The Nix
-  shell carries `calculix-ccx` and CI installs it on both Ubuntu images, so
-  the `[calculix]` tests run on 2.23 and 2.21; no release bundles it yet.
+  solved on: [simulation](../simulation/README.md#calculix)), which the
+  `.deb` leaves to apt rather than bundling. The Nix shell carries
+  `calculix-ccx` and CI installs it on both Ubuntu images, so the
+  `[calculix]` tests run on 2.23 and 2.21.
 - **Netgen** is Ubuntu's `libnglib-dev`. Its `NetgenConfig.cmake` checks
   that every target's file exists, the `netgen` binary and the Python
   modules included, and stops configure without them, so the build also
@@ -457,9 +460,8 @@ dir` source would otherwise copy them into itself.
   export to mp4, webm or gif needs an `ffmpeg` inside it; without one the
   export refuses by name (`ping`'s `features.ffmpeg` is false) and PNG frames
   still work. If ffmpeg is ever bundled, it must be an LGPL build shipped
-  with a source offer. CalculiX is the same: a host `ccx` is not visible, so
-  a study set to it is refused with how to install one (`ping`'s
-  `features.calculix` is null) until a ccx module ships inside.
+  with a source offer. A host `ccx` is not visible either, so CalculiX is
+  built inside ([The bundled CalculiX](#the-bundled-calculix)).
 
 ## Windows
 
@@ -495,6 +497,9 @@ on a 30 GB machine.
   that name for every window's title bar and taskbar button, and as the
   executable's only icon it is also the one Explorer and a shortcut show.
   The installer and uninstaller carry it too (`Icon` in `installer.nsi`).
+- **`ccx.exe`** beside `lobole.exe` is dhondt.de's `ccx_static.exe`,
+  pinned by sha256 in `installer.nix` ([The bundled
+  CalculiX](#the-bundled-calculix)).
 - The NSIS installer is 32-bit; testing install-then-run under Wine needs
   WoW64 (or the 32-bit `pkgs.wine` for the installer and `wine64` for the
   app).
@@ -561,6 +566,14 @@ cross-builds it and runs `packaging/windows/smoke.sh` on it under Wine):
   `MiniDumpWriteDump` from `dbghelp`), `common/Platform` (`LockFileEx`,
   `ShellExecuteW`), the remote server (Winsock), `GitVault` (`nul`,
   `_pclose`), `_getpid`.
+- **A child process is `CreateProcessW`'s** (`common/ChildProcess`), with
+  its input a pipe and only that pipe and its two output files inherited.
+  `_popen`, which it replaced, gives no process: polling it waited for the
+  child, so a CalculiX `timeout_s` or cancel could not stop a run, and the
+  run directory had no pid to be swept by. Under Wine a finished child's
+  working directory stays locked for a moment after its process is
+  signalled; a run directory that could not be removed then is swept by the
+  next instance.
 - `shutdown()` does not wake a `recv` blocked on another thread on Windows;
   `RemoteServer::Stop` cancels the socket's I/O (`CancelIoEx`) too, or a
   headless instance asked to stop with a client connected waited for good.
@@ -568,6 +581,42 @@ cross-builds it and runs `packaging/windows/smoke.sh` on it under Wine):
   components, not string prefixes.
 - A second non-inline definition of a function that also exists inline links
   silently on ELF and fails on PE/COFF.
+
+## The bundled CalculiX
+
+A static or buckling study can be solved on CalculiX
+([simulation](../simulation/README.md#calculix)). The packages whose
+users cannot easily add a program to them carry one where the app looks
+after the setting and `LOBOLE_CCX`: beside itself.
+
+| package | ccx | where | its source, attached to the release |
+|---|---|---|---|
+| GUI AppImage | Ubuntu 24.04's `calculix-ccx` (2.21), with SPOOLES, ARPACK and the OpenMPI it links, BLAS, LAPACK and libgfortran | `usr/lib/lobole/ccx`, its libraries placed by linuxdeploy (`--executable`) | `calculix-ccx-<version>-source.tar`: Ubuntu's source package of exactly that version (`.dsc`, upstream tarball, Debian changes), fetched by `build.sh` with `apt-get source` |
+| Flatpak | 2.23, built in the manifest against reference BLAS/LAPACK, ARPACK and a static SPOOLES (with nixpkgs' three patches, `packaging/flatpak/patches/`) | `/app/lib/lobole/ccx` | built from source; the manifest pins it |
+| Windows zip and installer | dhondt.de's `ccx_static.exe` 2.23, from `calculix_2.23_4win.zip` (sha256 pinned in `installer.nix`), with SPOOLES and PaStiX linked in and no DLL; nixpkgs cannot cross-build ccx for mingw | `bin\ccx.exe` | `ccx_2.23.src.tar.bz2`, pinned in `installer.nix` |
+| `.deb`, AUR, Nix | not bundled: the distribution's own (`Suggests: calculix-ccx`; Nix's `calculix-ccx`) | | |
+
+`LICENSES/GPL-2.0.txt` ships with every package already. In
+`share/doc/calculix-ccx/` the Windows packages also carry dhondt.de's
+`README_Install`, which names the binary's builder and the solvers linked
+in, and the AppImage carries Ubuntu's `copyright` file.
+
+**Checked before release** by `tools/release-smoke.py --calculix`: `ping`'s
+`features.calculix` must be the copy beside the app, not one on the host.
+The AppImage, which has Netgen, then solves a bar pulled along its length as
+a static study on CalculiX and in-house, which must agree; the Windows
+build has no Netgen to mesh a study, so the `ccx.exe` it found solves a
+one-element deck under Wine, a unit cube in uniform tension whose answer is
+exact. The Windows build therefore carries a working ccx that no study can
+use until Netgen builds there ([Windows](#windows)).
+
+**What the release does with the sources.** The `appimage` job uploads the
+source package beside the AppImage, `installer.nix` writes
+`ccx_2.23.src.tar.bz2` beside the zip and the installer, and the
+`github-release` job attaches both. The Windows binary was built by a third
+party (the README names him) from that ccx source with SPOOLES and PaStiX;
+the release offers the ccx source, but not that build's exact PaStiX
+version or makefile, which upstream does not publish.
 
 ## Licensing
 
@@ -590,6 +639,11 @@ installs them with every binary.
 - Everything else (Eigen and Spectra MPL-2.0, Boost, Clipper2 and libarea's
   Clipper 1 BSL-1.0, manifold Apache-2.0, glfw, spdlog, nlohmann_json, glm, imgui,
   nativefiledialog-extended, libvterm, the fonts) is permissive.
+- CalculiX (`ccx`, GPL-2.0-or-later), shipped in the GUI AppImage, the
+  Flatpak and the Windows packages, is a separate program the app runs and
+  talks to only through files, so it does not touch Loböle's licence. Whoever
+  distributes a GPL binary offers its exact source, so a release attaches
+  each ccx's ([The bundled CalculiX](#the-bundled-calculix)).
 - The standard-parts tables in `assets/parts/` are data under their own
   licences: the fastener tables GPL-2.0-or-later, the bd_warehouse hole tables
   Apache-2.0, with texts and the attribution notice in `LICENSES/`.
@@ -625,7 +679,7 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
   the SVG icon, confirm the renderer on the runtime's Mesa / llvmpipe (only
   NVIDIA has run it), narrow `--filesystem=host` toward the portal, and
   submit.
-- Windows: Netgen, regular real-hardware QA (it has been tested by hand,
+- Windows: Netgen (and with it a CalculiX study there), regular real-hardware QA (it has been tested by hand,
   not per release), code signing (an unsigned installer
   trips SmartScreen) and a stripped bundle. A release cross-builds and
   smokes it under Wine; nothing builds it on a push.
