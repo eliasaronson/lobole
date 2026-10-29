@@ -32,10 +32,14 @@ fi
 # one compiler per core otherwise.
 JOBS="$("$REPO/tools/build-jobs")"
 
+# Without rofiles-fuse: a run that dies (or `flatpak-builder --run`) leaves
+# its FUSE mount behind, and every later build then fails to set up its
+# build directory. The copy it saves is only disk.
+
 exec nix-shell -p flatpak flatpak-builder appstream --run "bash -euc '
   flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
   flatpak-builder \
-    --user --force-clean --ccache --jobs=$JOBS \
+    --user --force-clean --ccache --jobs=$JOBS --disable-rofiles-fuse \
     --install-deps-from=flathub \
     --state-dir=\"$STATEDIR\" \
     --install \
