@@ -1542,21 +1542,21 @@ std::vector<int> SupportEdgeZones(const FemMesh& mesh,
       if (zone[n] >= 0)
         continue;
       const auto k = key(mesh.nodes[n]);
-      bool near = false;
-      for (long long dx = -1; dx <= 1 && !near; ++dx)
-        for (long long dy = -1; dy <= 1 && !near; ++dy)
-          for (long long dz = -1; dz <= 1 && !near; ++dz) {
+      bool inReach = false;
+      for (long long dx = -1; dx <= 1 && !inReach; ++dx)
+        for (long long dy = -1; dy <= 1 && !inReach; ++dy)
+          for (long long dz = -1; dz <= 1 && !inReach; ++dz) {
             const auto it = grid.find({k[0] + dx, k[1] + dy, k[2] + dz});
             if (it == grid.end())
               continue;
             for (int s : it->second)
               if (SegmentDistance(mesh.nodes[n], rim[s].first, rim[s].second) <=
                   reach) {
-                near = true;
+                inReach = true;
                 break;
               }
           }
-      if (near)
+      if (inReach)
         zone[n] = static_cast<int>(si);
     }
   }
