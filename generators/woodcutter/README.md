@@ -243,6 +243,16 @@ At W = 120 on K5 PLA on the P1S:
     at the crank's face; 103 MPa away from the pin's edge). The run
     records this and goes on (*Not done here*); the camshaft at work, and
     every study's statics, stop it.
+  - *Buckling*: the crank and the handle's pin leaned on, each also as a
+    [buckling](../../docs/simulation/README.md#buckling) study of the same
+    loads, its base state solved once (`converge: never`; the static study
+    beside it settles the stress). **Neither is buckling-limited**: the
+    crank buckles at 9.44 times the lean (flat, no knockdown) and the
+    pin at 7.17, against yield factors of 0.435 and 0.226, so yield
+    governs both (governing 0.416 and 0.219, Rankine-Gordon). The crank's
+    first mode is flagged local at the shaft pin's edge (crippling of the
+    thin arm where the hub holds it, not the arm buckling); 3.5 s and 17 s
+    (3 999 and 7 564 nodes).
   - *The statics*: in every study what the pins carry together, force and
     moment (`moment_n_mm`), answers the loads' within 1 % (0.000 % on the
     shaft and the crank, 0.34 % of moment on the handle's pin, whose

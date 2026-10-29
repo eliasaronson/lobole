@@ -15,6 +15,12 @@ estimated.
   at the top of its turn, on the camshaft's crank end (the shaft on its
   bushings), the crank (on the shaft) and the handle's pin (in the crank).
 
+- **Buckling**: the crank and the handle's pin leaned on, each also as a
+  buckling study of the same loads (docs/simulation/README.md#buckling),
+  its base state solved once: whether either is buckling-limited at the
+  lean -- its knocked-down elastic factor below its yield and interlayer
+  ones -- and the governing factor of the two together.
+
 Each study's factor of safety against yield is the receipt's claim; the
 stress across the printed layers (`layer_normal`, the part's print
 direction) is read beside it against PLA's interlayer strength. The pins'
@@ -399,14 +405,9 @@ def studies(d, s, fr_turn, rel):
 
     # The crank: on the shaft (its hub's bore a pin that cannot turn: the
     # D keys it), pushed through its handle's bore by the pin.
-    hub = round_faces(d, "crank", r_shaft + s["press"] / 2.0)
-    bore = round_faces(d, "crank", (s["d_handle"] + s["press"]) / 2.0)
-    loads = spread("hand", bore, {"type": "remote",
-                                  "direction": [0.0, 0.0, -1.0],
-                                  "point_mm": grip}, lean)
-    loads += pins("shaft", hub, None, fix_rotation=True)
+    loads, mesh_crank = crank_loads(d, s, lean, grip)
     sid, ids, r = run(d, "crank", "crank, leaned on", loads,
-                      print_up("crank"), s["crank_t"] / 3.0)
+                      print_up("crank"), mesh_crank)
     st = statics(r, ids, [(down, grip)])
     v = verdict(r, "crank", S.LEAN_NEED)
     report("crank, leaned on", v, st)
@@ -414,14 +415,10 @@ def studies(d, s, fr_turn, rel):
 
     # The handle's pin: pressed in the crank (a pin over the crank's
     # thickness, held from turning), the grip pushing on it over its length.
-    shank = round_faces(d, "handle pin", s["d_handle"] / 2.0)
     x1 = s["x_crank0"] - s["g"]
-    loads = spread("hand", shank,
-                   {"type": "force", "direction": [0.0, 0.0, -1.0],
-                    "region": band(x1 - s["grip_len"], x1)}, lean)
-    loads += pins("crank", shank, band(*crank_end), fix_rotation=True)
+    loads, mesh_pin = pin_loads(d, s, lean)
     sid, ids, r = run(d, "handle pin", "handle pin, leaned on", loads,
-                      print_up("handle pin"), s["d_handle"] / 4.0)
+                      print_up("handle pin"), mesh_pin)
     # The grip's push on the pin, uniform over its length: at the band's
     # middle, on the plane of symmetry through the pin's axis.
     st = statics(r, ids, [(down, [x1 - s["grip_len"] / 2.0, 0.0,
@@ -429,6 +426,10 @@ def studies(d, s, fr_turn, rel):
     v = verdict(r, "handle pin", S.LEAN_NEED)
     report("handle pin, leaned on", v, st)
     out["handle_pin"] = {"study": sid, **v, "statics": st}
+
+    # Whether the crank and the handle's pin are buckling-limited at the
+    # lean (docs/simulation/README.md#buckling).
+    out["buckling"] = leaned_buckling(d, s, lean, grip)
 
     # What each part leaned on does hold, with its factor to spare: the
     # study is linear, so the push scales with the governing factor.
@@ -457,6 +458,94 @@ def studies(d, s, fr_turn, rel):
 
 
 LEANED = ("shaft_end", "crank", "handle_pin")
+
+
+def crank_loads(d, s, lean, grip):
+    """The crank leaned on: on the shaft (its hub's bore a pin that cannot
+    turn: the D keys it), pushed through its handle's bore by the pin.
+    Returns (loads, mesh size)."""
+    r_shaft = s["d_shaft"] / 2.0
+    hub = round_faces(d, "crank", r_shaft + s["press"] / 2.0)
+    bore = round_faces(d, "crank", (s["d_handle"] + s["press"]) / 2.0)
+    loads = spread("hand", bore, {"type": "remote",
+                                  "direction": [0.0, 0.0, -1.0],
+                                  "point_mm": grip}, lean)
+    loads += pins("shaft", hub, None, fix_rotation=True)
+    return loads, s["crank_t"] / 3.0
+
+
+def pin_loads(d, s, lean):
+    """The handle's pin leaned on: pressed in the crank (a pin over the
+    crank's thickness, held from turning), the grip pushing on it over its
+    length. Returns (loads, mesh size)."""
+    shank = round_faces(d, "handle pin", s["d_handle"] / 2.0)
+    x1 = s["x_crank0"] - s["g"]
+    loads = spread("hand", shank,
+                   {"type": "force", "direction": [0.0, 0.0, -1.0],
+                    "region": band(x1 - s["grip_len"], x1)}, lean)
+    loads += pins("crank", shank, band(s["x_crank0"], s["x_crank1"]),
+                  fix_rotation=True)
+    return loads, s["d_handle"] / 4.0
+
+
+def buckle(d, part, name, loads, layer_normal, mesh_mm, timeout_s=1200.0):
+    """A buckling study of `part` under `loads` (the static study's), its
+    base state solved once (converge: never: the static study beside it
+    settles the stress), read with the print direction. Returns what it
+    says, and the seconds it took."""
+    import time
+    d.call("set_active_part", part=part)
+    st = d.call("add_study", type="buckling", name=name)
+    sid = st.get("id", st.get("study"))
+    for _, kw in loads:
+        d.call("add_load", study=sid, **kw)
+    d.call("set_study", study=sid, mesh_size=float(mesh_mm), converge="never")
+    t0 = time.monotonic()
+    _run_static(d, sid, timeout_s)
+    seconds = time.monotonic() - t0
+    r = d.call("study_results", study=sid, layer_normal=list(layer_normal))
+    b = r["bodies"][0]
+    knocked = (b["buckling_factor"] or 0.0) * b["knockdown"]["value"]
+    plastic = min(v for v in (b["yield_factor"], b["interlayer_factor"])
+                  if v) if (b["yield_factor"] or b["interlayer_factor"]) \
+        else None
+    return {"study": sid, "seconds": seconds, "nodes": r["nodes"],
+            "buckling_factors": b["buckling_factors"],
+            "buckling_factor": b["buckling_factor"],
+            "why_none": b.get("why_none"),
+            "knockdown": b["knockdown"],
+            "yield_factor": b["yield_factor"],
+            "interlayer_factor": b["interlayer_factor"],
+            "governing_factor": r["governing_factor"],
+            # Buckling-limited: the knocked-down elastic factor is below the
+            # material's own.
+            "buckling_limited": bool(knocked and plastic and knocked < plastic),
+            "warnings": r.get("warnings", [])}
+
+
+def leaned_buckling(d, s, lean, grip):
+    """The crank and the handle's pin leaned on, as buckling studies: is
+    either buckling-limited at the lean?"""
+    out = {}
+    for key, part, name, (loads, mesh) in (
+            ("crank", "crank", "crank, leaned on, buckling",
+             crank_loads(d, s, lean, grip)),
+            ("handle_pin", "handle pin", "handle pin, leaned on, buckling",
+             pin_loads(d, s, lean))):
+        v = buckle(d, part, name, loads, print_up(part), mesh)
+        out[key] = v
+        bf = v["buckling_factor"]
+        print(f"  FEM {name}: "
+              + (f"buckles at {bf:.3g} x the lean (knockdown "
+                 f"{v['knockdown']['value']:.3g}, {v['knockdown']['class']})"
+                 if bf else f"does not buckle ({v['why_none']})")
+              + f"; governing {v['governing_factor']:.3g} with yield "
+              f"{v['yield_factor']}, across the layers "
+              f"{v['interlayer_factor']}: "
+              + ("buckling-limited" if v["buckling_limited"]
+                 else "not buckling-limited")
+              + f" ({v['seconds']:.0f} s, {v['nodes']} nodes)")
+    return out
 
 
 def lever_rule(applied, xl, xr, zc):
