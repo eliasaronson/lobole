@@ -223,6 +223,95 @@ glm::dvec3 LayerNormalOf(const json& v) {
 
 // A static study's `converge` (docs/simulation/README.md
 // #a-peak-that-has-settled): one of the three, or refused naming them.
+// One body's nonlinear run, as study_results reports it.
+json NonlinearBodyJson(const fem::StudyBodyResult::Nonlinear& n,
+                       double yieldMPa) {
+  json curve = json::array();
+  for (const auto& [f, u] : n.curve)
+    curve.push_back({{"factor", f}, {"max_displacement_mm", u}});
+  json out = {{"factor", n.factor},
+              {"increments", n.increments},
+              {"ccx_runs", n.ccxRuns},
+              {"curve", std::move(curve)},
+              {"equilibrium",
+               {{"residual_criterion", n.residualCriterion},
+                {"imbalance", n.imbalance},
+                {"tolerance", fem::kNonlinearBalance}}}};
+  if (n.firstYieldFactor > 0)
+    out["first_yield_factor"] = n.firstYieldFactor;
+  else if (yieldMPa > 0)
+    out["first_yield_factor"] = nullptr;
+  if (n.snapped)
+    out["snapped"] = {{"from_factor", n.snappedFrom},
+                      {"to_factor", n.snappedTo}};
+  if (n.snapThrough) {
+    out["max_factor"] = n.maxFactor;
+    out["linear_factor"] = n.linearFactor;
+    out["imperfection_mm"] = n.imperfectionMm;
+    out["imperfection"] = n.imperfectionGiven
+                              ? "stated"
+                              : "derived: a tenth of the wall the first mode "
+                                "bends (a thousandth of the part's size where "
+                                "no wall is measured)";
+    out["deflection_limit_mm"] = n.deflectionLimitMm;
+    out["peak_at"] = n.peakAt;
+    if (n.peakAt == "none") {
+      out["peak_factor"] = nullptr;
+      out["why_none"] = n.none;
+    } else {
+      out["peak_factor"] = n.peakFactor;
+      out["peak_bracket"] = {n.peakLow, n.peakHigh};
+    }
+  }
+  return out;
+}
+
+// set_study's `nonlinear` (docs/simulation/README.md#nonlinear-static):
+// null or false is linear; an object states the whole of it.
+fem::Nonlinear NonlinearOf(const json& v) {
+  fem::Nonlinear nl;
+  if (v.is_null() || (v.is_boolean() && !v.get<bool>()))
+    return nl;
+  if (!v.is_object())
+    throw std::runtime_error(
+        "nonlinear is {large_deformation: true, increments?, snap_through?, "
+        "imperfection_mm?, deflection_limit_mm?}, or null for a linear study");
+  for (const auto& [k, _] : v.items())
+    if (k != "large_deformation" && k != "increments" && k != "snap_through" &&
+        k != "imperfection_mm" && k != "deflection_limit_mm")
+      throw std::runtime_error("nonlinear has no key '" + k +
+                               "' (it takes large_deformation, increments, "
+                               "snap_through, imperfection_mm, "
+                               "deflection_limit_mm)");
+  const auto flag = [&](const char* k) {
+    if (!v.contains(k))
+      return false;
+    if (!v.at(k).is_boolean())
+      throw std::runtime_error(std::string("nonlinear ") + k +
+                               " is true or false");
+    return v.at(k).get<bool>();
+  };
+  const auto mm = [&](const char* k, bool& has) {
+    has = v.contains(k);
+    if (!has)
+      return 0.0;
+    if (!v.at(k).is_number())
+      throw std::runtime_error(std::string("nonlinear ") + k +
+                               " is a number of millimetres");
+    return v.at(k).get<double>();
+  };
+  nl.largeDeformation = flag("large_deformation");
+  nl.snapThrough = flag("snap_through");
+  if (v.contains("increments")) {
+    nl.increments = IntParam(v.at("increments"), "nonlinear increments");
+    if (nl.increments < 1)
+      throw std::runtime_error("nonlinear increments is at least 1");
+  }
+  nl.imperfectionMm = mm("imperfection_mm", nl.hasImperfection);
+  nl.deflectionLimitMm = mm("deflection_limit_mm", nl.hasDeflectionLimit);
+  return nl;
+}
+
 fem::ConvergeMode ConvergeOf(const json& v) {
   fem::ConvergeMode mode;
   if (!v.is_string() ||
@@ -472,7 +561,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "loads:object[], max_iterations?:int, mesh_size:number, "
      "name:string, num_modes?:int, refinements:int, stale:bool, type:string, "
      "volume_fraction?:number, shape_from?:object, solver?:string, "
-     "participants?:object[]}[]"},
+     "nonlinear?:object, participants?:object[]}[]"},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
      "and filter_radius are MILLIMETRES; `gravity` is metres per second "
@@ -518,10 +607,26 @@ static constexpr MethodDoc SimulationMethods[] = {
      "state) study's: auto (the default) | always | never -- whether a run "
      "refines round its peak stress until it settles "
      "(docs/simulation/README.md#a-peak-that-has-settled); anything else is "
-     "refused, naming the three.",
+     "refused, naming the three.\n"
+     "`nonlinear` solves a STATIC study past linear, on CalculiX (auto picks "
+     "it; in_house is refused): {large_deformation: true (required), "
+     "increments? (the step's largest increment is its load over this many; "
+     "default 10, 20 on a snap-through run), snap_through? (seed the shape "
+     "with the first linear buckling mode and step the load up to its PEAK: "
+     "the answer for an arch or a curved wall loaded across its curve, "
+     "which linear buckling cannot see), imperfection_mm? (the seed's peak "
+     "motion, MILLIMETRES; default a tenth of the wall the mode bends; 0 = "
+     "the perfect shape), deflection_limit_mm? (MILLIMETRES of motion past "
+     "which the part counts as failed; default a tenth of its size)}, or "
+     "null for linear. Large deformation steps the load up on the deformed "
+     "part: a pressure follows its face, a force keeps its direction, a "
+     "torque or remote load is carried from a reference node "
+     "(docs/simulation/README.md#nonlinear-static). Refused with load "
+     "cases, on another analysis type, with an unknown key, and with "
+     "converge always on a snap-through run.",
      "converge, filter_radius, gravity, id, load_cases, max_iterations, "
-     "mesh_size, name, num_modes, participants, shape_from, solver, study, "
-     "type, "
+     "mesh_size, name, nonlinear, num_modes, participants, shape_from, "
+     "solver, study, type, "
      "volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
@@ -673,7 +778,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "and a ccx failure is refused with ccx's first *ERROR line. "
      "`timeout_s` (seconds, CalculiX runs only; refused on an in-house "
      "study) kills ccx past it and refuses the run "
-     "(docs/simulation/README.md#calculix).",
+     "(docs/simulation/README.md#calculix). A NONLINEAR study (set_study "
+     "nonlinear) runs on CalculiX the same way; one whose solve stops "
+     "converging before its load is refused with the fraction of the load it "
+     "reached and nothing stored; a snap-through run stops at its peak, and "
+     "a jump or the deflection limit is bracketed by a second ccx run "
+     "(docs/simulation/README.md#nonlinear-static).",
      "id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, "
      "recompute?:bool, timeout_s?:number>0, converge?:string, "
      "layer_normal?:number[]"},
@@ -700,7 +810,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "ended; an id that names no study job is refused, naming those there "
      "are. A running CalculiX study also says `memory_estimate_bytes` once "
      "its mesh is made, and its `solver` names the phase (writing the deck, "
-     "solving, checking the answer).",
+     "solving, checking the answer); a nonlinear one also `load_fraction` "
+     "(the load reached over the load it runs to, from ccx's .sta, as each "
+     "increment lands).",
      "id, job, study"},
     {"study_results",
      "Result summary: {type, elements, nodes, stale} plus a `bodies` "
@@ -787,7 +899,28 @@ static constexpr MethodDoc SimulationMethods[] = {
      "it). The top level has buckling_factor, governing_factor, "
      "factor_of_safety (= governing_factor), `notes`, `warnings`, "
      "`convergence` of the base state, and a receipt with oracle "
-     "in_house/buckle (calculix/buckle on CalculiX), basis predicted.",
+     "in_house/buckle (calculix/buckle on CalculiX), basis predicted. A "
+     "NONLINEAR result (set_study nonlinear) carries per body `nonlinear` "
+     "{factor (the load factor its fields are at: 1, or the peak), "
+     "increments, ccx_runs, curve [{factor, max_displacement_mm}] (every "
+     "converged increment), equilibrium {residual_criterion (ccx's largest "
+     "residual over the mean nodal force), imbalance (the supports' total "
+     "reaction against the load applied there, a pressure on the deformed "
+     "faces, over the load carried), tolerance}, first_yield_factor (the "
+     "factor the peak von Mises first reaches yield at; null when it does "
+     "not), snapped? {from_factor, to_factor} (a large-deformation run "
+     "that jumped to another branch on its way: warned), and on a "
+     "snap-through run linear_factor, imperfection_mm, imperfection, "
+     "deflection_limit_mm, max_factor (the cap: twice the linear factor), "
+     "peak_at (limit_point | snap | deflection_limit | none), peak_factor, "
+     "peak_bracket [low, high] (null with why_none at none)}; the top level "
+     "has `nonlinear` {kind: large_deformation | snap_through, peak_factor, "
+     "governing_factor (the peak, or the first yield when earlier), peak_at, "
+     "body}, `notes` and `warnings`. A snap-through study's "
+     "factor_of_safety is its governing factor, with a receipt claim "
+     "\"peak load factor >= 1\" (oracle calculix/nonlinear); a "
+     "large-deformation one's is yield over the Cauchy stress at the load "
+     "(docs/simulation/README.md#nonlinear-static).",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
@@ -834,7 +967,11 @@ static constexpr MethodDoc SimulationMethods[] = {
      "at, case, face, id, layer_normal, study"},
     {"export_study_inp",
      "Write the CalculiX deck a STATIC study would run {id (or study), "
-     "path, body?, case?}: our Netgen mesh as C3D10 elements (one ELSET per "
+     "path, body?, case?} -- a nonlinear one's large-deformation deck "
+     "(NLGEOM steps, a pressure as a follower *DLOAD, a torque or remote load "
+     "on a *COUPLING reference node; a snap-through run's is refused, its "
+     "seed and cap being found when it runs): our Netgen mesh as C3D10 "
+     "elements (one ELSET per "
      "bonded member), a material per domain (E and density in MPa and "
      "t/mm^3: the deck is mm, N, MPa), the assembled nodal forces as *CLOAD "
      "(every load kind, gravity included, as the in-house solve applies "
@@ -1211,6 +1348,18 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                  {"stale", host.Stale(s.id)}};
       if (SettlesStress(s.type))
         sj["converge"] = fem::ConvergeModeToString(s.converge);
+      if (s.nonlinear.On()) {
+        json n = {{"large_deformation", true}};
+        if (s.nonlinear.increments > 0)
+          n["increments"] = s.nonlinear.increments;
+        if (s.nonlinear.snapThrough)
+          n["snap_through"] = true;
+        if (s.nonlinear.hasImperfection)
+          n["imperfection_mm"] = s.nonlinear.imperfectionMm;
+        if (s.nonlinear.hasDeflectionLimit)
+          n["deflection_limit_mm"] = s.nonlinear.deflectionLimitMm;
+        sj["nonlinear"] = std::move(n);
+      }
       if (s.type == fem::AnalysisType::Modal ||
           s.type == fem::AnalysisType::Buckling)
         sj["num_modes"] = s.numModes;
@@ -1517,6 +1666,18 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           s.shapeFrom = src;
         }
       }
+      // Solved past linear (docs/simulation/README.md#nonlinear-static),
+      // and checked against everything else this call left the study with.
+      if (p.contains("nonlinear"))
+        s.nonlinear = NonlinearOf(p.at("nonlinear"));
+      if (const std::string why = fem::NonlinearRefusal(
+              s.solver, s.type, s.nonlinear, s.loadCases.size(), s.converge);
+          !why.empty())
+        throw std::runtime_error(
+            why + (p.contains("nonlinear")
+                       ? std::string()
+                       : "; this study is nonlinear, so set nonlinear: null "
+                         "in the same call to make it linear"));
     });
     return json::object();
   }
@@ -1952,6 +2113,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         // (docs/simulation/README.md#calculix).
         if (srs.memoryEstimateBytes > 0)
           out["memory_estimate_bytes"] = srs.memoryEstimateBytes;
+        // A nonlinear run's progress (docs/simulation/README.md
+        // #nonlinear-static): the load reached, from ccx's .sta.
+        if (srs.loadFraction >= 0)
+          out["load_fraction"] = srs.loadFraction;
         return out;
       }
       const ui::TopoRunStatus st = ui::GetTopologyStatus(state, id);
@@ -2007,7 +2172,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // own cancel and no deadline), refused here before anything starts.
       if (p.contains("timeout_s")) {
         start.timeoutSeconds = p.at("timeout_s").get<double>();
-        if (s->solver != fem::Solver::Calculix)
+        if (fem::EffectiveSolver(s->solver, s->nonlinear) !=
+            fem::Solver::Calculix)
           throw std::runtime_error(
               "timeout_s bounds a CalculiX run, and this study is solved "
               "in-house (set_study solver: calculix to run it on CalculiX)");
@@ -2020,8 +2186,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
               std::string("converge and layer_normal settle a static or "
                           "buckling study's peak; this study is ") +
               fem::AnalysisTypeToString(s->type));
-        if (p.contains("converge"))
-          start.converge = static_cast<int>(ConvergeOf(p.at("converge")));
+        if (p.contains("converge")) {
+          const fem::ConvergeMode mode = ConvergeOf(p.at("converge"));
+          if (const std::string why = fem::NonlinearRefusal(
+                  s->solver, s->type, s->nonlinear, s->loadCases.size(), mode);
+              !why.empty())
+            throw std::runtime_error(why);
+          start.converge = static_cast<int>(mode);
+        }
         if (p.contains("layer_normal")) {
           if (host.IsAssembly())
             throw std::runtime_error(
@@ -2362,7 +2534,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                  "knockdown and the yield interaction (Rankine-Gordon) "
                  "correct for. Snap-through -- an arch or a curved wall "
                  "loaded across its curve -- needs a nonlinear run, which "
-                 "linear buckling does not see";
+                 "linear buckling does not see: a static study with "
+                 "nonlinear {large_deformation: true, snap_through: true} "
+                 "reports its peak load factor";
         if (onCalculix)
           c.note += ". Solved by CalculiX " + solver.version +
                     " on this study's own mesh and loads: a second, "
@@ -2479,6 +2653,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
               host.BodyMaterial(*s, b.bodyIndex)));
       if (!b.results.reactions.empty())
         bj["reactions"] = reactionsJson(b.results);
+      if (b.nonlinear.solved)
+        bj["nonlinear"] = NonlinearBodyJson(b.nonlinear, mp.yieldMPa);
       for (size_t k = 0; k < std::max<size_t>(1, b.cases.size()); ++k) {
         const fem::FemResults& r = b.Case(static_cast<int>(k));
         if (r.maxVonMises > topEdgeVm) {
@@ -2611,7 +2787,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       result["calculix"] = {{"residual", rt->residual},
                             {"residual_floor", rt->residualFloor},
                             {"energy_residual", rt->energyResidual}};
-    if (onCalculix) {
+    if (onCalculix && !s->nonlinear.On()) {
       fem::Study twin = *s;
       twin.solver = fem::Solver::Auto;
       const uint64_t twinHash =
@@ -2636,6 +2812,92 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // Whether the peak has settled (docs/simulation/README.md
     // #a-peak-that-has-settled).
     result["convergence"] = ConvergenceJson(rt->convergence);
+    // Solved past linear (docs/simulation/README.md#nonlinear-static): how
+    // the run went, and on a snap-through run the peak, which is then what
+    // a factor of safety reads -- the first yield on the way, if earlier.
+    std::vector<std::string> nlWarnings;
+    bool snapRun = false, havePeak = false;
+    double peak = 0.0, governing = 0.0;
+    std::string peakBody, peakAt, whyNoPeak;
+    for (const fem::StudyBodyResult& b : rt->bodies) {
+      const fem::StudyBodyResult::Nonlinear& n = b.nonlinear;
+      if (!n.solved)
+        continue;
+      if (n.snapped)
+        nlWarnings.push_back(
+            "body '" + b.bodyName + "' SNAPPED THROUGH between factor " +
+            std::to_string(n.snappedFrom) + " and " +
+            std::to_string(n.snappedTo) +
+            " of the load: the fields are of the branch it landed on, and a "
+            "snap-through run (nonlinear snap_through: true) reports the peak");
+      if (n.firstYieldFactor > 0)
+        nlWarnings.push_back("body '" + b.bodyName + "' reaches yield at " +
+                             std::to_string(n.firstYieldFactor) +
+                             " of the load, past which this elastic answer "
+                             "does not hold");
+      if (!n.snapThrough)
+        continue;
+      snapRun = true;
+      if (n.peakAt == "none") {
+        if (whyNoPeak.empty())
+          whyNoPeak = n.none;
+        continue;
+      }
+      double g = n.peakFactor;
+      if (n.firstYieldFactor > 0 && n.firstYieldFactor < g)
+        g = n.firstYieldFactor;
+      if (!havePeak || g < governing) {
+        governing = g;
+        peak = n.peakFactor;
+        peakBody = b.bodyName;
+        peakAt = n.peakAt;
+        havePeak = true;
+      }
+    }
+    if (snapRun) {
+      json nj = {{"kind", "snap_through"},
+                 {"peak_factor", havePeak ? json(peak) : json()},
+                 {"governing_factor", havePeak ? json(governing) : json()}};
+      if (havePeak) {
+        nj["peak_at"] = peakAt;
+        nj["body"] = peakBody;
+        result["factor_of_safety"] = governing;
+      } else {
+        nj["why_none"] = whyNoPeak;
+        result.erase("factor_of_safety");
+      }
+      result["nonlinear"] = std::move(nj);
+    } else if (s->nonlinear.On()) {
+      result["nonlinear"] = {{"kind", "large_deformation"}};
+    }
+    if (s->nonlinear.On()) {
+      json notes = json::array();
+      notes.push_back(
+          "large deformation (NLGEOM): the load is stepped up and each "
+          "increment is solved on the part as it has deformed; the stress "
+          "is the Cauchy stress of the deformed part");
+      notes.push_back("a force keeps its direction (a dead load); a "
+                      "pressure follows its face as it turns; a torque or "
+                      "remote load is carried from a reference node by its "
+                      "face (*COUPLING, *DISTRIBUTING)");
+      for (const fem::Load& l : s->loads)
+        if (l.type == fem::LoadType::Pin) {
+          notes.push_back("each pin is held where the linear solve of the "
+                          "same load presses on it, at every increment");
+          break;
+        }
+      if (snapRun)
+        notes.push_back(
+            "a snap-through run seeds the shape with the first linear "
+            "buckling mode and steps every load up together until the solve "
+            "stops converging as the stiffness runs out, an increment jumps "
+            "to another branch, or the motion passes the deflection limit; "
+            "CalculiX has no arc-length method, so the path past a peak is "
+            "not followed");
+      result["notes"] = std::move(notes);
+      if (!nlWarnings.empty())
+        result["warnings"] = nlWarnings;
+    }
     const auto peakJson = [](const fem::FieldPeak& pk, const std::string& b) {
       return json{{"value", pk.value},
                   {"at", {pk.at.x, pk.at.y, pk.at.z}},
@@ -2753,6 +3015,30 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         r.Unverifiable("the optimization converged", solver,
                        "the run stopped at the iteration cap without reaching "
                        "the change tolerance");
+      } else if (snapRun) {
+        const receipt::Oracle nlOracle{"calculix/nonlinear", solver.version};
+        if (!havePeak) {
+          r.Unverifiable("peak load factor", nlOracle,
+                         whyNoPeak.empty() ? std::string("no peak was found")
+                                           : whyNoPeak);
+        } else {
+          receipt::Claim c("peak load factor >= 1", nlOracle,
+                           governing >= 1.0 ? receipt::Verdict::Pass
+                                            : receipt::Verdict::Fail);
+          c.basis = receipt::Basis::Predicted;
+          c.value = governing;
+          c.unit = "x";
+          c.note = "snap-through run on CalculiX " + solver.version +
+                   " (large deformation, the shape seeded with its first "
+                   "buckling mode) on " +
+                   std::to_string(elements) +
+                   " elements: the load steps up "
+                   "until the part stops carrying more (" +
+                   peakAt + "). Elastic: the first yield on the way bounds it";
+          for (const std::string& w : nlWarnings)
+            c.note += ". " + w;
+          r.Add(std::move(c));
+        }
       } else if (!haveFoS) {
         r.Unverifiable("factor of safety against yield", solver,
                        "no body in this study has a material with a yield "
@@ -2765,9 +3051,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         c.basis = receipt::Basis::Predicted;
         c.value = minFoS;
         c.unit = "x";
-        c.note = "linear-elastic static solve on " + std::to_string(elements) +
+        c.note = std::string(s->nonlinear.On()
+                                 ? "large-deformation (NLGEOM) static solve"
+                                 : "linear-elastic static solve") +
+                 " on " + std::to_string(elements) +
                  " elements, against the library yield strength. A prediction,"
                  " not a measurement";
+        for (const std::string& w : nlWarnings)
+          c.note += ". " + w;
         if (onCalculix)
           c.note += ". Solved by CalculiX " + solver.version +
                     " on this study's own mesh and loads: a second, "

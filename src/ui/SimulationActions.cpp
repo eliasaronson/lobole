@@ -119,7 +119,12 @@ bool CalculixRunFor(const AppState& state, const fem::Study& s,
   if (const std::string why = fem::SolverRefusal(s.solver, s.type);
       !why.empty())
     return fail(why);
-  if (s.solver != fem::Solver::Calculix) {
+  if (const std::string why = fem::NonlinearRefusal(
+          s.solver, s.type, s.nonlinear, s.loadCases.size(), s.converge);
+      !why.empty())
+    return fail(why);
+  // A nonlinear study set to auto solves on CalculiX.
+  if (fem::EffectiveSolver(s.solver, s.nonlinear) != fem::Solver::Calculix) {
     if (timeoutSeconds > 0)
       return fail("timeout_s bounds a CalculiX run, and this study is solved "
                   "in-house (set_study solver: calculix to run it on "
@@ -289,14 +294,21 @@ fem::SolveOptions JobSolveOptions(const AppState& state, BackgroundJob* raw,
   return o;
 }
 
-// A CalculiX run that tells `job` its memory estimate, for study_status.
+// A CalculiX run that tells `job` its memory estimate and a nonlinear
+// run's progress (the load reached over the load it runs to), for
+// study_status and the job's bar.
 std::shared_ptr<const fem::CalculixRun>
 WithEstimateTo(const std::shared_ptr<const fem::CalculixRun>& run,
-               StudyJob* job) {
+               StudyJob* job, BackgroundJob* raw = nullptr) {
   if (!run)
     return nullptr;
   auto told = std::make_shared<fem::CalculixRun>(*run);
   told->estimated = [job](uint64_t bytes) { job->memoryEstimate.store(bytes); };
+  told->progress = [job, raw](double f) {
+    job->loadFraction.store(f);
+    if (raw)
+      raw->fraction.store(f);
+  };
   return told;
 }
 
@@ -603,7 +615,7 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   BackgroundJob* raw = bg.get();
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
-  solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get());
+  solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get(), raw);
   bg->thread = std::thread([job, raw, solveOptions, converge]() {
     ArmOccSignalHandlers(); // OCC's handlers are per thread
     std::string err;
@@ -867,6 +879,7 @@ StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
   const char* now = job->solverNow.load();
   st.solver = now != nullptr ? now : fem::CpuSolverName(job->plan.type);
   st.memoryEstimateBytes = job->memoryEstimate.load();
+  st.loadFraction = job->loadFraction.load();
   return st;
 }
 
@@ -1247,7 +1260,7 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
   BackgroundJob* raw = bg.get();
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
-  solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get());
+  solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get(), raw);
   bg->thread = std::thread([job, raw, solveOptions, converge]() {
     ArmOccSignalHandlers();
     std::string err;

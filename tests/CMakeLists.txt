@@ -1393,6 +1393,16 @@ add_test(NAME buckling_smoke
 set_tests_properties(buckling_smoke PROPERTIES TIMEOUT 300
                      SKIP_RETURN_CODE 77)
 
+# A nonlinear static study over the RPCs alone
+# (docs/simulation/README.md#nonlinear-static): large deformation with its
+# deck and progress, a column's snap-through peak below its linear factor,
+# the receipt, the refusals. Self-skips (77) without Netgen or ccx.
+add_test(NAME nonlinear_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/nonlinear_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(nonlinear_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
+
 # Async topology optimization over JSON-RPC (TO2): start a run, poll
 # study_status to completion, cancel a second run.
 add_test(NAME topo_smoke

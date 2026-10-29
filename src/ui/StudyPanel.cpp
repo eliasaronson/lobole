@@ -1052,7 +1052,7 @@ void DrawResults(AppState& state, const fem::Study& s) {
       ImGui::SetTooltip("%s", s.error.c_str());
     // A CalculiX study's refusal is read, not hovered for: it says how to
     // install the solver, or what the solver said.
-    if (s.solver == fem::Solver::Calculix) {
+    if (fem::EffectiveSolver(s.solver, s.nonlinear) == fem::Solver::Calculix) {
       ImGui::PushStyleColor(ImGuiCol_Text, kError);
       ImGui::TextWrapped("%s", s.error.c_str());
       ImGui::PopStyleColor();
@@ -1112,6 +1112,35 @@ void DrawResults(AppState& state, const fem::Study& s) {
     return;
   }
 
+  // A nonlinear run (docs/simulation/README.md#nonlinear-static): its peak,
+  // or the load it reached, and what it says about itself.
+  for (const auto& b : rt->bodies) {
+    const fem::StudyBodyResult::Nonlinear& n = b.nonlinear;
+    if (!n.solved)
+      continue;
+    if (n.snapThrough) {
+      if (n.peakAt == "none")
+        MessageText(kMuted, "No peak: " + n.none);
+      else
+        ImGui::Text("Peak load factor:  x %.4g (%s)", n.peakFactor,
+                    n.peakAt.c_str());
+      ImGui::TextColored(kMuted,
+                         "Linear buckling x %.4g; seeded %.3g mm; %d "
+                         "increments",
+                         n.linearFactor, n.imperfectionMm, n.increments);
+    } else {
+      ImGui::TextColored(kMuted, "Large deformation: %d increments",
+                         n.increments);
+    }
+    if (n.snapped)
+      MessageText(kStale, "Snapped through between factor " +
+                              std::to_string(n.snappedFrom) + " and " +
+                              std::to_string(n.snappedTo) + ".");
+    if (n.firstYieldFactor > 0)
+      ImGui::TextColored(kStale, "Yields at x %.3g of the load",
+                         n.firstYieldFactor);
+    break;
+  }
   if (s.shapeFrom.study != 0)
     ImGui::TextColored(kMuted, "Shape of study %llu at %.2f: %.0f mm3",
                        static_cast<unsigned long long>(s.shapeFrom.study),
@@ -1479,7 +1508,9 @@ void DrawSolverCombo(AppState& state, const fem::Study& s) {
   const auto& ccx = CalculixHere(state, &why);
   const std::string calculix =
       ccx ? "CalculiX " + ccx->Version() : std::string("CalculiX (not found)");
-  const char* labels[] = {"Auto (in-house)", "In-house", calculix.c_str()};
+  const char* labels[] = {s.nonlinear.On() ? "Auto (CalculiX: nonlinear)"
+                                           : "Auto (in-house)",
+                          "In-house", calculix.c_str()};
   int idx = s.solver == fem::Solver::InHouse    ? 1
             : s.solver == fem::Solver::Calculix ? 2
                                                 : 0;
@@ -1488,7 +1519,10 @@ void DrawSolverCombo(AppState& state, const fem::Study& s) {
     const fem::Solver ns = idx == 1   ? fem::Solver::InHouse
                            : idx == 2 ? fem::Solver::Calculix
                                       : fem::Solver::Auto;
-    if (ns != s.solver)
+    // A nonlinear study is not solved in-house: that pick changes nothing.
+    if (ns != s.solver && fem::NonlinearRefusal(ns, s.type, s.nonlinear,
+                                                s.loadCases.size(), s.converge)
+                              .empty())
       ModifyStudy(state, s.id, "Set solver",
                   [&](fem::Study& cs) { cs.solver = ns; });
   }
@@ -1651,6 +1685,53 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
           "Auto refines round the peak stress until it moves under 2 %%,\n"
           "while a solve takes under the Preferences limit (Simulation).\n"
           "Always refines whatever it costs; Never solves once.");
+    // Past linear, on CalculiX (docs/simulation/README.md#nonlinear-static).
+    if (s->type == fem::AnalysisType::Static) {
+      const auto refused = [&](const fem::Nonlinear& nl) {
+        return fem::NonlinearRefusal(s->solver, s->type, nl,
+                                     s->loadCases.size(), s->converge);
+      };
+      fem::Nonlinear large;
+      large.largeDeformation = true;
+      const std::string whyNot = refused(large);
+      bool on = s->nonlinear.On();
+      ImGui::BeginDisabled(!on && !whyNot.empty());
+      if (ImGui::Checkbox("Large deformation###study_nonlinear", &on))
+        ModifyStudy(state, s->id, "Set large deformation", [&](fem::Study& cs) {
+          cs.nonlinear = on ? large : fem::Nonlinear{};
+        });
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip(
+            "%s", !whyNot.empty() && !on
+                      ? whyNot.c_str()
+                      : "Solved on CalculiX with the load stepped up on the "
+                        "deformed part:\na pressure follows its face, a "
+                        "force keeps its direction.");
+      if (s->nonlinear.On()) {
+        fem::Nonlinear snapped = s->nonlinear;
+        snapped.snapThrough = !snapped.snapThrough;
+        if (!snapped.snapThrough) {
+          snapped.hasImperfection = snapped.hasDeflectionLimit = false;
+          snapped.imperfectionMm = snapped.deflectionLimitMm = 0.0;
+        }
+        const std::string whySnap = refused(snapped);
+        bool snap = s->nonlinear.snapThrough;
+        ImGui::BeginDisabled(!whySnap.empty());
+        if (ImGui::Checkbox("Snap-through (peak load)###study_snap", &snap))
+          ModifyStudy(state, s->id, "Set snap-through",
+                      [&](fem::Study& cs) { cs.nonlinear = snapped; });
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip(
+              "%s", !whySnap.empty()
+                        ? whySnap.c_str()
+                        : "Seeds the shape with the first buckling mode and "
+                          "steps the load up\nuntil the part stops carrying "
+                          "more: the answer for an arch or a\ncurved wall "
+                          "loaded across its curve.");
+      }
+    }
     // Static: an optional gravity / self-weight load.
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
     if (ImGui::Checkbox("Gravity (self-weight)###study_gravity", &on)) {

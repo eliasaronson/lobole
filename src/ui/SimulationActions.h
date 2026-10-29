@@ -40,6 +40,8 @@ struct StudyRunStatus {
   // A CalculiX run's memory estimate (bytes) once its mesh said how big it
   // is; 0 otherwise (docs/simulation/README.md#calculix).
   uint64_t memoryEstimateBytes = 0;
+  // A nonlinear run's load reached over the load it runs to; -1 = none yet.
+  double loadFraction = -1.0;
 };
 
 // Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter

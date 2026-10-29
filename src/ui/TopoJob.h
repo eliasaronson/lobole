@@ -72,6 +72,10 @@ struct StudyJob {
   // A CalculiX run's memory estimate (bytes), once its mesh said how big
   // it is (docs/simulation/README.md#calculix); 0 until then, and in-house.
   std::atomic<uint64_t> memoryEstimate{0};
+  // A nonlinear CalculiX run's load reached over the load it runs to, as
+  // its increments land (docs/simulation/README.md#nonlinear-static); -1
+  // until one has.
+  std::atomic<double> loadFraction{-1.0};
 };
 
 // mesh_study off the frame: the same plan/mesh split, no solve. What it

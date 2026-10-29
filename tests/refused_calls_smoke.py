@@ -46,6 +46,24 @@ BOGUS = "__not_a_parameter__"
 BAD = {"__bad__": True}  # an object: no scalar key accepts it
 
 
+# A stand-in ccx (docs/simulation/README.md#nonlinear-static): it converges
+# one increment, to 40 % of the load, and then stops converging, saying so
+# as ccx does.
+STALLING_CCX = r"""#!/bin/sh
+if [ "$1" = "-v" ]; then echo; echo 'This is Version 2.23'; exit 201; fi
+nodes=$(awk '/^\*NODE, NSET=NALL/{on=1;next} /^\*/{on=0} on{sub(/,.*/,"");print}' job.inp)
+sup=$(awk '/^\*NSET, NSET=NSUP/{on=1;next} /^\*/{on=0} on{gsub(/,/," ");print}' job.inp)
+{ echo; echo ' displacements (vx,vy,vz) for set NALL and time  4.0000000E-01'
+  echo; for n in $nodes; do echo "  $n  0.0E+00  0.0E+00  0.0E+00"; done; echo
+  echo ' forces (fx,fy,fz) for set NSUP and time  4.0000000E-01'
+  echo; for n in $sup; do echo "  $n  0.0E+00  0.0E+00  0.0E+00"; done
+  echo; } > job.dat
+printf '  STEP INC ATT ITRS TOT STEP INC\n     1  1  1  3  4.0E-01  4.0E-01  4.0E-01\n' > job.sta
+echo ' *ERROR: increment size smaller than minimum'
+exit 201
+"""
+
+
 def expect(cond, msg):
     if not cond:
         raise AssertionError(msg)
@@ -578,6 +596,64 @@ def main():
                   {"type": "bucking"},
                   needle="static, modal, topology, buckling", tab=part["name"])
             d.call("remove_study", id=buck)
+            # Nonlinear (docs/simulation/README.md#nonlinear-static): what a
+            # study cannot take is refused by set_study, and a run that stops
+            # converging is refused with the load it reached, nothing stored.
+            nl = d.call("add_study", name="Nonlinear")["id"]
+            large = {"large_deformation": True}
+            check("a nonlinear study in-house", "set_study",
+                  {"id": nl, "solver": "in_house", "nonlinear": large},
+                  needle="in-house solver is linear", tab=part["name"])
+            check("nonlinear without large_deformation", "set_study",
+                  {"id": nl, "nonlinear": {"snap_through": True}},
+                  needle="large_deformation: true", tab=part["name"])
+            check("a nonlinear key that is none", "set_study",
+                  {"id": nl, "nonlinear": {"large_deformation": True,
+                                           "riks": True}},
+                  needle="has no key 'riks'", tab=part["name"])
+            check("nonlinear on a modal study", "set_study",
+                  {"id": nl, "type": "modal", "nonlinear": large},
+                  needle="a static study's", tab=part["name"])
+            check("nonlinear with load cases", "set_study",
+                  {"id": nl, "nonlinear": large,
+                   "load_cases": [{"name": "a"}]},
+                  needle="takes no load cases", tab=part["name"])
+            d.call("set_study", id=nl, mesh_size=5.0,
+                   nonlinear={"large_deformation": True,
+                              "snap_through": True})
+            check("in_house on a nonlinear study", "set_study",
+                  {"id": nl, "solver": "in_house"},
+                  needle="in-house solver is linear", tab=part["name"])
+            check("converge always on a snap-through run", "run_study",
+                  {"id": nl, "converge": "always"},
+                  needle="peak load factor", tab=part["name"])
+            d.call("set_study", id=nl, nonlinear=large)
+            cube = [b for b in d.call("list_elements")["bodies"]
+                    if b["name"] == "Cube"][0]
+
+            def face(sign):
+                return {"feature_id": cube["created_by"],
+                        "element": [f["name"] for f in cube["faces"]
+                                    if abs(f["normal"][2] - sign) < 1e-6][0]}
+            d.call("set_material", feature_id=cube["created_by"],
+                   material="steel")
+            d.call("add_load", study=nl, type="fixed", face=face(-1.0))
+            d.call("add_load", study=nl, type="force", face=face(1.0),
+                   magnitude=100.0, direction=[1, 0, 0])
+            stalls = os.path.join(work, "stalling-ccx")
+            with open(stalls, "w") as f:
+                f.write(STALLING_CCX)
+            os.chmod(stalls, 0o755)
+            d.call("set_settings", calculix_path=stalls)
+            check("a nonlinear run that stops converging", "run_study",
+                  {"id": nl}, needle="stopped converging at 40 % of the load",
+                  tab=part["name"])
+            listed = [x for x in d.call("list_studies")["studies"]
+                      if x["id"] == nl][0]
+            note(not listed["has_results"],
+                 f"a refused nonlinear run stored a result: {listed}")
+            d.call("set_settings", calculix_path="")
+            d.call("remove_study", id=nl)
 
             if problems:
                 print("refused_calls_smoke: FAILED")
