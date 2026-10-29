@@ -277,11 +277,13 @@ exported as its triangles, and refused by name by every B-Rep feature
 [measuring one](../inspect/README.md#mesh-bodies),
 [drawing one](../rendering/README.md#mesh-bodies)). `MeshBvh` and `Slice`
 below are its. What the later stages still need of it:
-- the action matrix and `tools/fuzz.py` run with a mesh body in the part,
-  which is how a B-Rep consumer `MeshBodyRefusal` misses is found;
-- a GUI test reading `MainThreadCpuMs()` for a hover pick on the 2M mesh;
-- a mesh body in an assembly is drawn, picked and measured, but clashes
-  and contact sweeps there still read B-Rep shapes only.
+- the action matrix run with a mesh body in the part (`tools/fuzz.py run
+  --mesh-body` does it for random designs), which is how a B-Rep consumer
+  `MeshBodyRefusal` misses is found;
+- a mesh body in an assembly is drawn, picked and measured, but clashes,
+  contact sweeps and motion studies there still read B-Rep shapes only;
+- a frame with a 2M-triangle mesh body costs about 26 ms of main-thread
+  time with or without the cursor on it, not yet profiled.
 
 ### Stage 2 — the cradle (L)
 
@@ -536,7 +538,7 @@ fail against a planted spin)
 
 **Smokes and suites**
 - `headless_smoke.py` imports PLY and GLB in each representation.
-- The action matrix and `tools/fuzz.py` run with a mesh body in the part.
+- The action matrix run with a mesh body in the part.
 - A GUI test per tool, plus the `defaults/*` suite.
 - `tools/ci-local.sh` for the Ubuntu containers, and the mingw build for
   the vendored libraries.
