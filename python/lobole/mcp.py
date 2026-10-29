@@ -731,7 +731,7 @@ class _Server(MCPServer):
 
     async def call_tool(self, name, arguments, context=None):
         if self._lock is None:
-            import anyio
+            import anyio  # type: ignore[import-not-found,unused-ignore]
             self._lock = anyio.Lock()
         async with self._lock:
             try:
@@ -2427,7 +2427,7 @@ def _restrict_tools(keep):
     arm into a duplicate of the arm it is being compared against, and the run
     would look valid. So it also checks that what is left is exactly `keep`.
     """
-    import anyio
+    import anyio  # type: ignore[import-not-found,unused-ignore]
     registered = {t.name for t in anyio.run(mcp.list_tools)}
     missing = [t for t in keep if t not in registered]
     if missing:
