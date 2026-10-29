@@ -653,6 +653,42 @@ def main():
             note(not listed["has_results"],
                  f"a refused nonlinear run stored a result: {listed}")
             d.call("set_settings", calculix_path="")
+            # Plasticity (docs/simulation/README.md#plasticity): refused
+            # where nonlinear is, and on a material with no hardening curve
+            # -- never run perfectly plastic.
+            plastic = {"plasticity": True}
+            check("a plastic study in-house", "set_study",
+                  {"id": nl, "solver": "in_house", "nonlinear": plastic},
+                  needle="a plastic study solves on CalculiX",
+                  tab=part["name"])
+            check("plasticity on a modal study", "set_study",
+                  {"id": nl, "type": "modal", "nonlinear": plastic},
+                  needle="a static study's", tab=part["name"])
+            check("plasticity with load cases", "set_study",
+                  {"id": nl, "nonlinear": plastic,
+                   "load_cases": [{"name": "a"}]},
+                  needle="takes no load cases", tab=part["name"])
+            check("plasticity that is not a flag", "set_study",
+                  {"id": nl, "nonlinear": {"plasticity": "yes"}},
+                  needle="plasticity is true or false", tab=part["name"])
+            d.call("set_study", id=nl, nonlinear=plastic)
+            check("converge always on a plastic run", "run_study",
+                  {"id": nl, "converge": "always"},
+                  needle="plastic strain", tab=part["name"])
+            d.call("set_material", feature_id=cube["created_by"],
+                   material="pla")
+            # A ccx is there (the stand-in), so the material is what refuses.
+            d.call("set_settings", calculix_path=stalls)
+            check("a plastic run on a material with no hardening curve",
+                  "run_study", {"id": nl},
+                  needle="has no hardening curve", tab=part["name"])
+            d.call("set_settings", calculix_path="")
+            listed = [x for x in d.call("list_studies")["studies"]
+                      if x["id"] == nl][0]
+            note(not listed["has_results"],
+                 f"a refused plastic run stored a result: {listed}")
+            d.call("set_material", feature_id=cube["created_by"],
+                   material="steel")
             d.call("remove_study", id=nl)
             # Contact (docs/simulation/README.md#contact): refused where a
             # nonlinear study is -- in-house, another analysis, load cases

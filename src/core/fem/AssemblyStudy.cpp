@@ -241,7 +241,8 @@ struct RigidBodyRef {
 };
 
 bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
-                const glm::dvec3& gravity, Material& out, std::string* error) {
+                const glm::dvec3& gravity, bool plastic, Material& out,
+                std::string* error) {
   const auto matType =
       CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
   const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
@@ -263,8 +264,19 @@ bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
                ")";
     return false;
   }
-  out = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12,
-                 mp.yieldMPa, mp.interlayerMPa};
+  out = Material{mp.youngGPa * 1000.0, mp.poisson,       mp.density * 1e-12,
+                 mp.yieldMPa,          mp.interlayerMPa, mp.hardening};
+  // A plastic study runs each material along its own curve, or not at all
+  // (docs/simulation/README.md#plasticity).
+  if (plastic)
+    if (const std::string why = HardeningRefusal(
+            out, Quote(label) + "'s material " + mp.name,
+            CADMaterials::MaterialLibrary::HardeningSlugList());
+        !why.empty()) {
+      if (error)
+        *error = why;
+      return false;
+    }
   return true;
 }
 
@@ -671,8 +683,15 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     StudyBodyPlan bp;
     bp.bodyIndex = bi;
     bp.bodyName = bodyLabel;
-    bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12,
-                      mp.yieldMPa, mp.interlayerMPa};
+    bp.mat =
+        Material{mp.youngGPa * 1000.0, mp.poisson,       mp.density * 1e-12,
+                 mp.yieldMPa,          mp.interlayerMPa, mp.hardening};
+    if (study.nonlinear.plasticity)
+      if (const std::string why = HardeningRefusal(
+              bp.mat, Quote(bodyLabel) + "'s material " + mp.name,
+              CADMaterials::MaterialLibrary::HardeningSlugList());
+          !why.empty())
+        return fail(why);
     bp.shape = imprinted;
     bp.settings.maxSize =
         meshed->meshSize > 0.0 ? meshed->meshSize : study.meshSize;
@@ -851,8 +870,8 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
         pt.name = label;
         pt.shape = theirShape;
         std::string why;
-        if (!MaterialOf(ts.bodies[tb], label, study.type, study.gravity, pt.mat,
-                        &why))
+        if (!MaterialOf(ts.bodies[tb], label, study.type, study.gravity,
+                        study.nonlinear.plasticity, pt.mat, &why))
           return fail(why);
         pt.settings.maxSize =
             ts.p->meshSize > 0.0 ? ts.p->meshSize : study.meshSize;
@@ -963,7 +982,8 @@ static bool PlanBondedGroup(const AssemblyDocument& asmDoc, Study& study,
       if (!MaterialOf(bodies[bi],
                       occ->name +
                           (bodies.size() > 1 ? "/" + bodies[bi].name : ""),
-                      study.type, study.gravity, m.mat, &why))
+                      study.type, study.gravity, study.nonlinear.plasticity,
+                      m.mat, &why))
         return fail(why);
       m.original = BRepBuilderAPI_Copy(bodies[bi].shape.GetShape()).Shape();
       m.originalFaces = FacesOf(m.original);

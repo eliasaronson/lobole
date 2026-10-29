@@ -85,9 +85,11 @@ const MethodDoc RequirementMethods[] = {
      "study, or a formula over several faces' readings and the project's "
      "variables), "
      "study_result {document, study, quantity: max_displacement|"
-     "max_von_mises|factor_of_safety|buckling_factor, case?} (on a "
-     "buckling study buckling_factor and factor_of_safety both read its "
-     "governing factor), clearance {document: "
+     "max_von_mises|factor_of_safety|buckling_factor|max_plastic_strain, "
+     "case?} (on a buckling study buckling_factor and factor_of_safety "
+     "both read its governing factor; max_plastic_strain, unitless, is a "
+     "plastic study's -- nonlinear plasticity: true -- and refused on any "
+     "other), clearance {document: "
      "assembly, a, b: occurrence ids, mode?: mesh|exact, motion_study?: the "
      "smallest gap over that study's samples}, contact {document, a, b, "
      "expect: clear|touching|not_clashing}, seal {document: assembly, a, "
@@ -1212,6 +1214,21 @@ Taken MeasureStudyResult(ui::AppState& state, const json& m, const Ctx& ctx) {
         "a buckling study answers buckling_factor and factor_of_safety (both "
         "its governing factor); " +
         q + " is a static study's");
+  if (q == "max_plastic_strain") {
+    // A plastic study's (docs/simulation/README.md#plasticity): the peak
+    // equivalent plastic strain, 0 where nothing yielded.
+    if (!r.contains("max_plastic_strain"))
+      throw std::runtime_error(
+          "max_plastic_strain is read from a plastic study (set_study "
+          "nonlinear {plasticity: true}), and this one is elastic");
+    t.value = r.at("max_plastic_strain").at("value").get<double>();
+    t.unit = "";
+    t.detail = {{"at", r.at("max_plastic_strain").at("at")},
+                {"body", r.at("max_plastic_strain").at("body")}};
+    if (r.contains("warnings"))
+      t.detail["warnings"] = r.at("warnings");
+    return t;
+  }
   if (q != "max_displacement")
     NoteConvergence(r, t);
   if (q == "buckling_factor") {

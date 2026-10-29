@@ -147,6 +147,12 @@ struct MaterialProperties {
   // pulls a layer off the one below (docs/simulation/README.md
   // #printed-layers). 0 = not a printed material, or unknown.
   double interlayerMPa = 0.0;
+  // The hardening curve a plastic study reads (docs/simulation/README.md
+  // #plasticity): the von Mises stress (MPa) against the equivalent plastic
+  // strain, (yieldMPa, 0) first. Empty where no source for one is cited
+  // beside the data: a plastic study on such a material is refused, never
+  // run perfectly plastic.
+  std::vector<std::pair<double, double>> hardening;
 
   // Procedural surface figure. Both fields are pattern-relative, and are 0
   // exactly when pattern is Flat:
@@ -216,6 +222,9 @@ public:
   // AllSlugs() joined with ", ", for refusal messages (cf.
   // cam::OpTypeNameList()).
   static const std::string& SlugList();
+  // The slugs of the materials with a hardening curve, joined with ", ":
+  // what a plastic study's refusal names.
+  static const std::string& HardeningSlugList();
   // The generic material a grade row is one of ("aluminum_6061_t6" ->
   // "aluminum"), and any other slug itself: what a consumer that knows
   // materials only by family (CAM's cutting data) looks up. Not used where

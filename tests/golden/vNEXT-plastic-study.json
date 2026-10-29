@@ -1,0 +1,29 @@
+{
+  "format": "designer-document",
+  "version": 210,
+  "features": [
+    {"type": "Sketch", "name": "Section", "id": 1, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "circle", "id": 1, "center": [0, 0], "radius": 5}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Strut", "id": 2, "sketch_id": 1,
+     "distance": 100.0, "mode": "new_body"}
+  ],
+  "studies": [
+    {"type": "Study", "id": 3, "name": "Yield",
+     "nonlinear": {"plasticity": true},
+     "loads": [
+       {"id": 4, "type": "fixed",
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 0.0}
+     ]},
+    {"type": "Study", "id": 5, "name": "Yield large",
+     "nonlinear": {"large_deformation": true, "plasticity": true,
+                   "increments": 20},
+     "loads": []},
+    {"type": "Study", "id": 6, "name": "Elastic",
+     "nonlinear": {"large_deformation": true},
+     "loads": []}
+  ]
+}

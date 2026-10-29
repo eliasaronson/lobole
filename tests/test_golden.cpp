@@ -1159,6 +1159,25 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(6).get<std::string>());
     }
   }
+  // vNEXT: a plastic study (docs/simulation/README.md#plasticity). Read
+  // back without it, the study is an elastic one that solves; each [study
+  // name, plasticity, large_deformation, solver it runs on].
+  if (expect.contains("study_plasticity")) {
+    for (const auto& want : expect.at("study_plasticity")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("study " << name);
+      const fem::Study* found = nullptr;
+      for (const fem::Study& st : doc.GetStudies())
+        if (st.name == name)
+          found = &st;
+      REQUIRE(found != nullptr);
+      CHECK(found->nonlinear.plasticity == want.at(1).get<bool>());
+      CHECK(found->nonlinear.largeDeformation == want.at(2).get<bool>());
+      const fem::Solver runs = fem::EffectiveSolver(*found);
+      CHECK((runs == fem::Solver::Calculix ? "calculix" : "in_house") ==
+            want.at(3).get<std::string>());
+    }
+  }
   // v209: a study's contact supports (docs/simulation/README.md#contact).
   // A contact read back as another support, or its friction dropped, is a
   // different study that solves; each [study name, [[load type, friction]]

@@ -453,6 +453,35 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::PLYWOOD_PINE, 8.0f, 0.30f, 45.0f);
   elastic(MaterialType::MDF, 3.6f, 0.25f, 18.0f);
 
+  // Hardening curves, for a plastic study (docs/simulation/README.md
+  // #plasticity): (von Mises stress MPa, equivalent plastic strain) from
+  // (yield, 0). Only where a source is cited here; every other material has
+  // none, and a plastic study on it is refused rather than run perfectly
+  // plastic or on a guessed slope.
+  //
+  // Structural steel: EN 1993-1-5:2006 Annex C.6(2), Figure C.2 c),
+  // "elastic-plastic with linear strain hardening": past f_y the
+  // stress-strain line has the slope E/100. In plastic strain that is the
+  // hardening modulus H = E (E/100) / (E - E/100) = E/99. The curve stops at
+  // 5 % plastic strain, the principal strain limit C.8(1) Note 1
+  // recommends; past its end CalculiX holds the stress at the last point,
+  // which a result warns of. The library's steel is the generic structural
+  // grade (f_y 250 MPa), to which the model applies.
+  auto linearHardening = [&](MaterialType t, double tangentOverE,
+                             double lastStrain) {
+    MaterialProperties& m = materials[t];
+    const double e = 1000.0 * m.youngGPa;
+    const double et = tangentOverE * e;
+    const double h = e * et / (e - et);
+    m.hardening = {{m.yieldMPa, 0.0},
+                   {m.yieldMPa + h * lastStrain, lastStrain}};
+  };
+  linearHardening(MaterialType::STEEL, 1.0 / 100.0, 0.05);
+  // Every other metal is left without one: stainless steel (EN 1993-1-4's
+  // Ramberg-Osgood model), the aluminium alloys (EN 1999-1-1 Annex E) and
+  // the rest have published curves, but none is cited here yet. The printed
+  // plastics' datasheets give a yield and a break, not a curve between them.
+
   // Procedural surface figure: which pattern, its scale per local unit, and
   // its contrast (0..1). Shaded from local object-space position by
   // src/shaders/grain.glsl; MDF stays Flat, and so does every material not
@@ -620,6 +649,17 @@ std::string MaterialLibrary::GradeOf(const std::string& slug) {
     return out;
   }
   return GetMaterial(t).grade;
+}
+
+const std::string& MaterialLibrary::HardeningSlugList() {
+  static const std::string list = [] {
+    std::string s;
+    for (const MaterialType t : AllTypes())
+      if (!GetMaterial(t).hardening.empty())
+        s += (s.empty() ? "" : ", ") + Slug(t);
+    return s;
+  }();
+  return list;
 }
 
 const std::string& MaterialLibrary::SlugList() {

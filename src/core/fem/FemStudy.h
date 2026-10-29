@@ -240,9 +240,13 @@ inline constexpr const char* kSolverNames = "auto, in_house, calculix";
 // #nonlinear-static), on CalculiX: large deformation (NLGEOM, the load
 // stepped up in increments, a pressure following its face), and on request
 // a snap-through run that seeds the shape with the first buckling mode and
-// steps the load up until the part stops carrying more. Off = linear.
+// steps the load up until the part stops carrying more. Plasticity
+// (docs/simulation/README.md#plasticity): each material past its yield
+// along its own hardening curve, with or without large deformation, and the
+// load taken off again for the deformation it leaves. Off = linear.
 struct Nonlinear {
   bool largeDeformation = false;
+  bool plasticity = false;
   // The step's largest increment is its load over this many (0 = the
   // default: kNonlinearIncrements, kSnapIncrements on a snap-through run).
   int increments = 0;
@@ -256,7 +260,7 @@ struct Nonlinear {
   bool hasImperfection = false;
   double deflectionLimitMm = 0.0;
   bool hasDeflectionLimit = false;
-  bool On() const { return largeDeformation; }
+  bool On() const { return largeDeformation || plasticity; }
   bool operator==(const Nonlinear&) const = default;
 };
 inline constexpr int kNonlinearIncrements = 10;
@@ -353,11 +357,13 @@ Solver EffectiveSolver(const Study& study);
 // Empty when a study of `type` on `solver` with `loadCases` cases can take
 // `nonlinear` (and, with `contact`, a contact) with `converge`; otherwise
 // why not, naming what can: a static study only, never in_house, a
-// nonlinear option needs large_deformation or a contact, a snap-through run
-// needs large_deformation, one load set and no contact, increments are at
+// nonlinear option needs large_deformation, plasticity or a contact, a
+// snap-through run needs large_deformation, one load set and no contact,
+// increments are at
 // least 1, a stated imperfection and deflection limit are not negative (the
 // limit positive), and converge always is refused on a snap-through run and
-// on a contact, whose answers refining round a stress peak does not settle.
+// on a contact, whose answers refining round a stress peak does not settle,
+// and on a plastic run, whose stress yield holds down.
 std::string NonlinearRefusal(Solver solver, AnalysisType type,
                              const Nonlinear& nonlinear, size_t loadCases,
                              ConvergeMode converge, bool contact);

@@ -142,6 +142,12 @@ struct DeckNonlinear {
   // the load -- while its contact closes, removed (*MODEL CHANGE) for the
   // rest. Empty: none, and no settling step.
   std::vector<double> settlePerNode;
+  // Plasticity (docs/simulation/README.md#plasticity): each material's
+  // hardening curve as *PLASTIC, the stress and equivalent plastic strain
+  // printed at every integration point of the body (*EL PRINT S, PEEQ) each
+  // increment; and with `unload`, a last step that takes every load off.
+  bool plasticity = false;
+  bool unload = false;
 };
 // The settling step's springs (DeckNonlinear::settlePerNode): a part held
 // only by a contact that touches at a point closes nothing in the first
@@ -277,6 +283,13 @@ inline constexpr double kNonlinearBalance = 1e-3;
 struct NonlinearRequest {
   bool nlgeom = true; // large deformation; false: a contact run's small one
   bool snapThrough = false;
+  // Each material past yield along its hardening curve
+  // (docs/simulation/README.md#plasticity): the fields are read from the
+  // stress and plastic strain ccx prints; a run that stops converging as
+  // its stiffness runs out has collapsed there, which is its answer; and
+  // one that reaches its load (not a snap-through run) takes it off again
+  // for the deformation left behind.
+  bool plasticity = false;
   double maxFactor = 1.0;
   int increments = 10;
   double deflectionLimitMm = 0.0; // a snap-through run's

@@ -1155,9 +1155,29 @@ void DrawResults(AppState& state, const fem::Study& s) {
                          n.linearFactor, n.imperfectionMm, n.increments);
     } else {
       ImGui::TextColored(kMuted, "%s: %d increments",
-                         n.largeDeformation ? "Large deformation"
-                                            : "Contact, small deformation",
+                         n.plasticity         ? (n.largeDeformation
+                                                     ? "Plastic, large deformation"
+                                                     : "Plastic, small deformation")
+                         : n.largeDeformation ? "Large deformation"
+                                              : "Contact, small deformation",
                          n.increments);
+    }
+    // A plastic run (docs/simulation/README.md#plasticity): how much it
+    // yielded, what is left once the load is off, or where it collapsed.
+    if (n.plasticity) {
+      if (n.collapsed)
+        MessageText(kStale, "Collapses at x " + std::to_string(n.factor) +
+                                " of the load (between x " +
+                                std::to_string(n.factor) + " and x " +
+                                std::to_string(n.collapseHigh) + ").");
+      ImGui::Text("Plastic strain up to %.3g", b.results.maxPlasticStrain);
+      if (n.unloaded)
+        ImGui::Text("Left deformed by %.4g mm once unloaded",
+                    b.results.maxResidualDisplacement);
+      if (n.strainLimit > 0 && b.results.maxPlasticStrain > n.strainLimit)
+        MessageText(kStale, "Past the end of the hardening data (" +
+                                std::to_string(n.strainLimit) +
+                                "): extrapolated.");
     }
     // Each contact (docs/simulation/README.md#contact): how much of its
     // faces closed, and how hard it pressed there.
@@ -1789,15 +1809,26 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
                                      s->loadCases.size(), s->converge,
                                      fem::HasContact(*s));
       };
-      fem::Nonlinear large;
-      large.largeDeformation = true;
+      // Each switch keeps the other; off together, the study is linear.
+      const auto toggled = [&](bool fem::Nonlinear::* key) {
+        fem::Nonlinear nl = s->nonlinear;
+        nl.*key = !(nl.*key);
+        if (!nl.largeDeformation) {
+          nl.snapThrough = false;
+          nl.hasImperfection = nl.hasDeflectionLimit = false;
+          nl.imperfectionMm = nl.deflectionLimitMm = 0.0;
+        }
+        if (!nl.On() && !fem::HasContact(*s))
+          nl = fem::Nonlinear{};
+        return nl;
+      };
+      const fem::Nonlinear large = toggled(&fem::Nonlinear::largeDeformation);
       const std::string whyNot = refused(large);
-      bool on = s->nonlinear.On();
+      bool on = s->nonlinear.largeDeformation;
       ImGui::BeginDisabled(!on && !whyNot.empty());
       if (ImGui::Checkbox("Large deformation###study_nonlinear", &on))
-        ModifyStudy(state, s->id, "Set large deformation", [&](fem::Study& cs) {
-          cs.nonlinear = on ? large : fem::Nonlinear{};
-        });
+        ModifyStudy(state, s->id, "Set large deformation",
+                    [&](fem::Study& cs) { cs.nonlinear = large; });
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip(
@@ -1806,7 +1837,23 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
                       : "Solved on CalculiX with the load stepped up on the "
                         "deformed part:\na pressure follows its face, a "
                         "force keeps its direction.");
-      if (s->nonlinear.On()) {
+      const fem::Nonlinear plastic = toggled(&fem::Nonlinear::plasticity);
+      const std::string whyPlastic = refused(plastic);
+      bool yields = s->nonlinear.plasticity;
+      ImGui::BeginDisabled(!yields && !whyPlastic.empty());
+      if (ImGui::Checkbox("Plasticity###study_plasticity", &yields))
+        ModifyStudy(state, s->id, "Set plasticity",
+                    [&](fem::Study& cs) { cs.nonlinear = plastic; });
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip(
+            "%s", !whyPlastic.empty() && !yields
+                      ? whyPlastic.c_str()
+                      : "Solved on CalculiX past yield, along the material's "
+                        "hardening curve;\nthe load is then taken off for "
+                        "the deformation it leaves.\nA material with no "
+                        "curve is refused when the study runs.");
+      if (s->nonlinear.largeDeformation) {
         fem::Nonlinear snapped = s->nonlinear;
         snapped.snapThrough = !snapped.snapThrough;
         if (!snapped.snapThrough) {

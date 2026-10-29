@@ -283,7 +283,7 @@ void ValidateValues(const std::string& kind, const json& m) {
                        "deviation_mm", "deviation_deg", "gap_mm", "gap_deg"});
   } else if (kind == "study_result") {
     oneOf("quantity", {"max_displacement", "max_von_mises", "factor_of_safety",
-                       "buckling_factor"});
+                       "buckling_factor", "max_plastic_strain"});
   } else if (kind == "clearance" || kind == "contact" || kind == "seal" ||
              kind == "insertion") {
     if (kind == "clearance")

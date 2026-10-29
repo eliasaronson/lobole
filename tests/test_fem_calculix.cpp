@@ -2256,4 +2256,412 @@ TEST_CASE("a nonlinear result is saved and read back with its run",
   j["kind"] = "modal";
   CHECK_THROWS(DocumentIO::StudyResultFromJson(j));
 }
+
+// ---- Plasticity (docs/simulation/README.md#plasticity) ---------------------
+
+TEST_CASE("a plastic study is refused where a nonlinear one is, and on a "
+          "material without a hardening curve",
+          "[fem][calculix][plasticity]") {
+  using fem::AnalysisType;
+  using fem::ConvergeMode;
+  using fem::Solver;
+  fem::Nonlinear nl;
+  nl.plasticity = true;
+  // Plasticity alone is a nonlinear study, at small deformation.
+  CHECK(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, nl, 0,
+                              ConvergeMode::Auto, false)
+            .empty());
+  fem::Study st;
+  st.nonlinear = nl;
+  CHECK(fem::IsNonlinear(st));
+  CHECK(fem::EffectiveSolver(st) == Solver::Calculix);
+  CHECK_THAT(fem::NonlinearRefusal(Solver::InHouse, AnalysisType::Static, nl, 0,
+                                   ConvergeMode::Auto, false),
+             ContainsSubstring("a plastic study solves on CalculiX"));
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Modal, nl, 0,
+                                   ConvergeMode::Auto, false),
+             ContainsSubstring("a static study's"));
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Buckling, nl, 0,
+                                   ConvergeMode::Auto, false),
+             ContainsSubstring("a static study's"));
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, nl, 2,
+                                   ConvergeMode::Auto, false),
+             ContainsSubstring("takes no load cases"));
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, nl, 0,
+                                   ConvergeMode::Always, false),
+             ContainsSubstring("plastic strain"));
+  fem::Nonlinear snap = nl;
+  snap.snapThrough = true;
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, snap, 0,
+                                   ConvergeMode::Auto, false),
+             ContainsSubstring("large_deformation: true"));
+
+  // The library's steel carries EN 1993-1-5's linear hardening, E/100 past
+  // yield, to 5 %: in plastic strain the modulus E/99.
+  const auto& steel = Steel();
+  REQUIRE(steel.hardening.size() == 2);
+  const double E = steel.youngGPa * 1000.0;
+  CHECK(steel.hardening[0].first == steel.yieldMPa);
+  CHECK(steel.hardening[0].second == 0.0);
+  CHECK(steel.hardening[1].second == 0.05);
+  CHECK_THAT((steel.hardening[1].first - steel.hardening[0].first) / 0.05,
+             Catch::Matchers::WithinRel(E / 99.0, 1e-12));
+  fem::Material m;
+  m.youngMPa = E;
+  m.yieldMPa = steel.yieldMPa;
+  m.hardening = steel.hardening;
+  CHECK(fem::HardeningRefusal(m, "steel", "steel").empty());
+  // A curve that does not start at the yield, or falls, is refused.
+  fem::Material off = m;
+  off.hardening[0].first = 240.0;
+  CHECK_THAT(fem::HardeningRefusal(off, "steel", "steel"),
+             ContainsSubstring("does not start at its yield"));
+  fem::Material falls = m;
+  falls.hardening[1].first = 200.0;
+  CHECK_THAT(fem::HardeningRefusal(falls, "steel", "steel"),
+             ContainsSubstring("does not fall"));
+  // A printed plastic has none: refused, naming the materials that do.
+  CHECK(CADMaterials::MaterialLibrary::HardeningSlugList() == "steel");
+  const auto& pla = CADMaterials::MaterialLibrary::GetMaterial(
+      CADMaterials::MaterialLibrary::MaterialTypeFromString("pla"));
+  CHECK(pla.hardening.empty());
+
+  // A run on a body of it is refused before anything is meshed.
+  Document doc;
+  auto box =
+      std::make_unique<BoxFeature>("Bar", glm::dvec3(0), 10.0, 10.0, 50.0);
+  box->SetMaterial("pla");
+  doc.AddFeature(std::move(box));
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Yield");
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  s.loads.push_back(
+      MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", isZ(0.0))));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Force,
+                             FaceWhere(body, "plane", isZ(50.0)), 1000.0));
+  s.nonlinear.plasticity = true;
+  fem::StudyPlan plan;
+  std::string err;
+  CHECK_FALSE(fem::PlanStudy(doc, s, plan, &err));
+  CHECK_THAT(err, ContainsSubstring("has no hardening curve"));
+  CHECK_THAT(err, ContainsSubstring("PLA"));
+  CHECK_THAT(err, ContainsSubstring("the library has one for: steel"));
+  CHECK(plan.bodies.empty());
+}
+
+TEST_CASE("under its yield a plastic run reads CalculiX's own stress, which "
+          "is the elastic one",
+          "[fem][calculix][plasticity]") {
+  REQUIRE_CCX(ccx);
+  // The stress of a plastic run is read at the Gauss points, not computed
+  // from U: below yield it must be the elastic stress of the same U, node
+  // for node -- which holds every point's corner and component to its own.
+  Scratch scratch;
+  Document doc;
+  auto box =
+      std::make_unique<BoxFeature>("Beam", glm::dvec3(0), 6.0, 8.0, 60.0);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Under yield");
+  s.meshSize = 3.0;
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  s.loads.push_back(
+      MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", isZ(0.0))));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Force,
+                             FaceWhere(body, "plane", isZ(60.0)), 50.0,
+                             glm::dvec3(1, 0.5, 0.2)));
+  s.nonlinear.plasticity = true;
+  s.nonlinear.increments = 2;
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunNonlinear(doc, s, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult& b = rt.bodies[0];
+  REQUIRE(b.nonlinear.solved);
+  REQUIRE_FALSE(b.mesh.tets.empty());
+  fem::Material steel;
+  steel.youngMPa = Steel().youngGPa * 1000.0;
+  steel.poisson = Steel().poisson;
+  const fem::FemResults own =
+      fem::SmallDeformationFields(b.mesh, {steel}, b.results.displacement);
+  double worst = 0.0;
+  for (size_t n = 0; n < own.stress.size(); ++n)
+    for (int k = 0; k < 6; ++k)
+      worst =
+          std::max(worst, std::abs(own.stress[n][k] - b.results.stress[n][k]));
+  std::printf("plastic run under yield, %zu nodes, %.1f s: largest stress "
+              "difference %.3e MPa of a peak von Mises %.6g (elastic %.6g); "
+              "plastic strain %.3g, residual %.3g mm\n",
+              b.mesh.stats.nodeCount, seconds, worst, b.results.maxVonMises,
+              own.maxVonMises, b.results.maxPlasticStrain,
+              b.results.maxResidualDisplacement);
+  CHECK(b.results.maxVonMises < Steel().yieldMPa);
+  // U is read back at the seven digits ccx prints, and a stress computed
+  // from it carries that rounding amplified by the element's stiffness
+  // (docs/simulation/README.md#reading-the-answer-back); measured 3.8e-4
+  // of the peak here. A point read at the wrong corner, or xz read as yz,
+  // is over 1e-2 (the shear is 2.5 % of the peak).
+  CHECK(worst < 1e-3 * own.maxVonMises);
+  CHECK_THAT(b.results.maxVonMises,
+             Catch::Matchers::WithinRel(own.maxVonMises, 1e-5));
+  CHECK(b.results.maxPlasticStrain == 0.0);
+  CHECK(b.nonlinear.unloaded);
+  // Elastic all the way: nothing is left once the load is off.
+  CHECK(b.results.maxResidualDisplacement < 1e-6 * b.results.maxDisplacement);
+  CHECK(b.nonlinear.firstYieldFactor == 0.0);
+  CHECK(EntriesIn(scratch.dir / "runs") == 0);
+}
+
+TEST_CASE("a bar pressed past its yield yields uniformly, as its hardening "
+          "line says, and is left shorter by its plastic strain",
+          "[fem][calculix][plasticity]") {
+  REQUIRE_CCX(ccx);
+  // A 10 x 10 x 40 steel bar standing on a frictionless ground, pressed
+  // down on its top face to sigma = 300 MPa. Nothing holds its sides or
+  // its base against spreading, so the stress is uniaxial and the same
+  // everywhere: von Mises sigma, and past f_y the plastic strain on the
+  // library's line, (sigma - f_y) / H with H = E/99, exactly. Unloaded,
+  // the bar keeps that strain: shorter by L eps_p, wider by b eps_p / 2
+  // (plastic flow keeps the volume).
+  constexpr double b = 10.0, L = 40.0, sigma = 300.0;
+  Scratch scratch;
+  Document doc;
+  auto box = std::make_unique<BoxFeature>(
+      "Bar", glm::dvec3(-b / 2, -b / 2, 0.0), b, b, L);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Past yield");
+  s.meshSize = 5.0;
+  s.nonlinear.plasticity = true;
+  s.nonlinear.increments = 6;
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Contact,
+                             FaceWhere(body, "plane", isZ(0.0))));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Force,
+                             FaceWhere(body, "plane", isZ(L)), sigma * b * b,
+                             glm::dvec3(0, 0, -1)));
+  fem::StudyPlan plan;
+  std::string err;
+  REQUIRE(fem::PlanStudy(doc, s, plan, &err));
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunContact(plan, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult& r = rt.bodies[0];
+  const auto& steel = Steel();
+  const double E = steel.youngGPa * 1000.0, fy = steel.yieldMPa;
+  const double H = (steel.hardening[1].first - steel.hardening[0].first) /
+                   steel.hardening[1].second;
+  const double epsP = (sigma - fy) / H;
+  double peMin = 1e300, peMax = 0.0, vmMin = 1e300, vmMax = 0.0;
+  double topZ = 0.0, botZ = 0.0, sideX = 0.0;
+  int nTop = 0, nBot = 0, nSide = 0;
+  const auto& m = r.mesh;
+  for (size_t n = 0; n < m.nodes.size(); ++n) {
+    peMin = std::min(peMin, r.results.plasticStrain[n]);
+    peMax = std::max(peMax, r.results.plasticStrain[n]);
+    vmMin = std::min(vmMin, r.results.vonMises[n]);
+    vmMax = std::max(vmMax, r.results.vonMises[n]);
+    const glm::dvec3 u = r.results.residualDisplacement[n];
+    if (std::abs(m.nodes[n].z - L) < 1e-6) {
+      topZ += u.z;
+      ++nTop;
+    } else if (std::abs(m.nodes[n].z) < 1e-6) {
+      botZ += u.z;
+      ++nBot;
+    }
+    if (std::abs(m.nodes[n].x - b / 2) < 1e-6) {
+      sideX += u.x;
+      ++nSide;
+    } else if (std::abs(m.nodes[n].x + b / 2) < 1e-6) {
+      sideX -= u.x;
+      ++nSide;
+    }
+  }
+  REQUIRE(nTop > 0);
+  REQUIRE(nBot > 0);
+  REQUIRE(nSide > 0);
+  const double shorter = botZ / nBot - topZ / nTop;
+  const double wider = 2.0 * sideX / nSide;
+  std::printf("plastic bar, sigma %.0f MPa, %zu nodes, %d increments, %.1f "
+              "s: plastic strain %.7f..%.7f (closed form %.7f, %+.2e), von "
+              "Mises %.4f..%.4f; unloaded %.6f mm shorter (L eps_p %.6f, "
+              "%+.2e), %.6f mm wider (b eps_p / 2 %.6f, %+.2e); springs "
+              "%.1e, imbalance %.1e\n",
+              sigma, r.mesh.stats.nodeCount, r.nonlinear.increments, seconds,
+              peMin, peMax, epsP, peMax / epsP - 1.0, vmMin, vmMax, shorter,
+              L * epsP, shorter / (L * epsP) - 1.0, wider, b * epsP / 2.0,
+              wider / (b * epsP / 2.0) - 1.0, r.nonlinear.stabilization,
+              r.nonlinear.imbalance);
+  (void)E;
+  REQUIRE(r.nonlinear.plasticity);
+  CHECK(r.nonlinear.unloaded);
+  CHECK_FALSE(r.nonlinear.collapsed);
+  CHECK(r.nonlinear.factor == 1.0);
+  // Exact but for what the weak springs that hold a part on a contact
+  // alone carry (stabilization, 1.5e-4 of the load measured): taken from
+  // the stress near the base, 0.05 MPa there, it is 2.6e-5 of plastic
+  // strain on a hardening modulus of 2020 MPa -- 1e-3 of it.
+  CHECK(r.nonlinear.stabilization < 3e-4);
+  CHECK_THAT(peMin, Catch::Matchers::WithinRel(epsP, 2e-3));
+  CHECK_THAT(peMax, Catch::Matchers::WithinRel(epsP, 2e-3));
+  CHECK_THAT(r.results.maxPlasticStrain,
+             Catch::Matchers::WithinRel(epsP, 2e-3));
+  CHECK_THAT(vmMin, Catch::Matchers::WithinRel(sigma, 3e-4));
+  CHECK_THAT(vmMax, Catch::Matchers::WithinRel(sigma, 3e-4));
+  CHECK_THAT(shorter, Catch::Matchers::WithinRel(L * epsP, 2e-3));
+  CHECK_THAT(wider, Catch::Matchers::WithinRel(b * epsP / 2.0, 2e-3));
+  CHECK(r.nonlinear.firstYieldFactor > 0.0);
+  CHECK_THAT(r.nonlinear.firstYieldFactor,
+             Catch::Matchers::WithinRel(fy / sigma, 1e-3));
+  CHECK(r.nonlinear.strainLimit == 0.05);
+  CHECK(r.nonlinear.imbalance < fem::kNonlinearBalance);
+}
+
+TEST_CASE("a rectangular bar bent past its yield collapses at its plastic "
+          "moment, M_p = f_y b h^2 / 4",
+          "[fem][calculix][plasticity][slow]") {
+  REQUIRE_CCX(ccx);
+  // A b x h x L bar clamped at one end and bent by a moment M about x at
+  // the other (a torque about a transverse axis: the linear traction of
+  // pure bending, exactly), put in through a head twice its width and
+  // depth: at the bar's own end face that traction yields the face itself
+  // from 2/3 M_p on, and the run collapsed there, 17 % low. A perfectly plastic
+  // section carries at most M_p = f_y b h^2 / 4, 1.5 times its first yield, and
+  // the moment is the same all along, so the bar collapses at M_p where it is
+  // free to: away from the clamp, whose face holds the section from spreading
+  // across its width and so raises its strength (a tip force, whose moment
+  // peaks at the clamp, collapsed 13 % high at L = 10 h and 6 % at 30 h).
+  // Loaded to 1.25 M_p, the run stops converging there -- the collapse load is
+  // that factor. The curve is stated flat here: the closed form is for perfect
+  // plasticity, and the library's steel hardens, which at small
+  // deformation has no collapse.
+  constexpr double b = 10.0, h = 10.0, L = 60.0, over = 1.25;
+  Scratch scratch;
+  Document doc;
+  auto box = std::make_unique<BoxFeature>("Bar", glm::dvec3(0), b, h, L);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const uint64_t bar = doc.GetFeature(0)->GetId();
+  auto head = std::make_unique<BoxFeature>(
+      "Head", glm::dvec3(-b / 2, -h / 2, L), 2 * b, 2 * h, h);
+  head->SetMaterial("steel");
+  doc.AddFeature(std::move(head));
+  const uint64_t top = doc.GetFeature(1)->GetId();
+  auto joined =
+      std::make_unique<BooleanFeature>("Join", bar, top, BooleanOp::Union);
+  joined->SetMaterial("steel");
+  doc.AddFeature(std::move(joined));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  const double fy = Steel().yieldMPa;
+  const double Mp = fy * b * h * h / 4.0;
+  fem::Study& s = doc.AddStudy("Collapse");
+  s.meshSize = 3.4;
+  s.nonlinear.plasticity = true;
+  s.nonlinear.increments = 10;
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  s.loads.push_back(
+      MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", isZ(0.0))));
+  fem::Load m = MakeLoad(doc, fem::LoadType::Torque,
+                         FaceWhere(body, "plane", isZ(L + h)), over * Mp);
+  m.axisOrigin = glm::dvec3(b / 2, h / 2, L + h);
+  m.axisDirection = glm::dvec3(1, 0, 0);
+  s.loads.push_back(m);
+  fem::StudyPlan plan;
+  std::string err;
+  REQUIRE(fem::PlanStudy(doc, s, plan, &err));
+  REQUIRE(plan.bodies.size() == 1);
+  plan.bodies[0].mat.hardening = {{fy, 0.0}, {fy, 1.0}};
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunContact(plan, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult& r = rt.bodies[0];
+  const double Mc = r.nonlinear.factor * over * Mp;
+  std::printf("plastic collapse, %g x %g x %g bar in bending, %zu nodes, %d "
+              "increments, %.1f s: collapses at factor %.5f [%.5f, %.5f] of "
+              "1.25 M_p, M = %.0f N mm (M_p = f_y b h^2 / 4 = %.0f N mm, "
+              "%+.2f %%); first yield at %.4f (2/3 / 1.25 = %.4f); peak "
+              "plastic strain %.3g at z = %.1f; imbalance %.1e\n",
+              b, h, L, r.mesh.stats.nodeCount, r.nonlinear.increments, seconds,
+              r.nonlinear.factor, r.nonlinear.factor, r.nonlinear.collapseHigh,
+              Mc, Mp, 100.0 * (Mc / Mp - 1.0), r.nonlinear.firstYieldFactor,
+              (2.0 / 3.0) / over, r.results.maxPlasticStrain,
+              r.results.maxPeAt.z, r.nonlinear.imbalance);
+  REQUIRE(r.nonlinear.collapsed);
+  CHECK_FALSE(r.nonlinear.unloaded);
+  CHECK(r.results.residualDisplacement.empty());
+  CHECK(r.nonlinear.collapseHigh > r.nonlinear.factor);
+  // At 2.5 mm it read +0.42 % (6 670 nodes, 70 s).
+  CHECK_THAT(Mc, Catch::Matchers::WithinRel(Mp, 0.02));
+  // It yields first where the head's corner concentrates the stress, below
+  // the bar's own first yield at 2/3 M_p, and then nowhere near collapse.
+  CHECK(r.nonlinear.firstYieldFactor > 0.0);
+  CHECK(r.nonlinear.firstYieldFactor < (2.0 / 3.0) / over);
+  // The hinge forms in the bar, away from its clamp and its head.
+  CHECK(r.results.maxPeAt.z > h);
+  CHECK(r.results.maxPeAt.z < L - h);
+  CHECK(r.nonlinear.imbalance < fem::kNonlinearBalance);
+}
+
+TEST_CASE("a plastic result is saved and read back with its plastic strain "
+          "and what unloading left",
+          "[fem][calculix][plasticity]") {
+  fem::StudyRuntime rt;
+  fem::StudyBodyResult b;
+  b.bodyName = "Bar";
+  b.mesh = BoxMesh(2, 1, 1, 5.0);
+  const size_t n = b.mesh.nodes.size();
+  b.results.displacement.assign(n, glm::dvec3(0.01));
+  b.results.vonMises.assign(n, 300.0);
+  b.results.stress.assign(n, fem::Stress{});
+  b.results.plasticStrain.assign(n, 0.02475);
+  b.results.maxPlasticStrain = 0.02475;
+  b.results.maxPeNode = 3;
+  b.results.maxPeAt = b.mesh.nodes[3];
+  b.results.residualDisplacement.assign(n, glm::dvec3(0.0, 0.0, -0.99));
+  b.results.maxResidualDisplacement = 0.99;
+  b.nonlinear.solved = true;
+  b.nonlinear.factor = 0.8;
+  b.nonlinear.plasticity = true;
+  b.nonlinear.collapsed = true;
+  b.nonlinear.collapseHigh = 0.80002;
+  b.nonlinear.unloaded = false;
+  b.nonlinear.strainLimit = 0.05;
+  b.nonlinear.largeDeformation = false;
+  const glm::dvec3 peakAt = b.mesh.nodes[3];
+  rt.bodies.push_back(std::move(b));
+  rt.solver = "calculix 2.23";
+  nlohmann::json j;
+  REQUIRE(DocumentIO::StudyResultToJson(rt, j));
+  const fem::StudyRuntime back = DocumentIO::StudyResultFromJson(j);
+  REQUIRE(back.bodies.size() == 1);
+  const auto& nl = back.bodies[0].nonlinear;
+  CHECK(nl.plasticity);
+  CHECK(nl.collapsed);
+  CHECK(nl.collapseHigh == 0.80002);
+  CHECK_FALSE(nl.unloaded);
+  CHECK(nl.strainLimit == 0.05);
+  // Kept as the rest of the fields are: the surface's nodes and the peaks'
+  // (this hand-made mesh has no surface, so the peaks' alone).
+  const auto& r = back.bodies[0].results;
+  const size_t kept = back.bodies[0].mesh.nodes.size();
+  REQUIRE(kept > 0);
+  REQUIRE(r.plasticStrain.size() == kept);
+  REQUIRE(r.displacement.size() == kept);
+  CHECK_THAT(r.plasticStrain[0], Catch::Matchers::WithinRel(0.02475, 1e-6));
+  CHECK(r.maxPlasticStrain == 0.02475);
+  REQUIRE(r.maxPeNode >= 0);
+  REQUIRE(static_cast<size_t>(r.maxPeNode) < kept);
+  CHECK(glm::length(back.bodies[0].mesh.nodes[r.maxPeNode] - peakAt) < 1e-5);
+  REQUIRE(r.residualDisplacement.size() == kept);
+  CHECK_THAT(r.residualDisplacement[0].z,
+             Catch::Matchers::WithinRel(-0.99, 1e-6));
+  CHECK(r.maxResidualDisplacement == 0.99);
+}
 #endif // HAVE_NETGEN

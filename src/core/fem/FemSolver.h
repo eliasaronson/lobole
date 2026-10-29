@@ -41,7 +41,19 @@ struct Material {
   // interlayer factors are (docs/simulation/README.md#buckling).
   double yieldMPa = 0.0;
   double interlayerMPa = 0.0;
+  // The library's hardening curve (docs/simulation/README.md#plasticity):
+  // the von Mises stress (MPa) against the equivalent plastic strain, from
+  // (yield, 0) up; empty = none, and a plastic study is refused rather than
+  // assume one. Read only by a plastic run (*PLASTIC).
+  std::vector<std::pair<double, double>> hardening;
 };
+
+// Empty when a plastic study can take `m` (the material of `label`): it has
+// a yield strength and a hardening curve that starts at it, its plastic
+// strain rising and its stress not falling. Otherwise why not, naming the
+// materials the library has a curve for (`withCurves`).
+std::string HardeningRefusal(const Material& m, const std::string& label,
+                             const std::string& withCurves);
 
 // A traction boundary condition on one B-Rep face, given as the boundary
 // triangles (indices into FemMesh::boundary) that lie on it.
@@ -84,6 +96,18 @@ struct FemResults {
   double maxDisplacement = 0.0;
   int maxDispNode = -1;
   glm::dvec3 maxDispAt{0, 0, 0};
+
+  // A plastic result (docs/simulation/README.md#plasticity): the equivalent
+  // plastic strain at each node, extrapolated from the integration points
+  // as the stress is, and its peak; and the deformation left once the load
+  // is taken off again (mm, each node), and its peak. Empty on any other.
+  std::vector<double> plasticStrain;
+  double maxPlasticStrain = 0.0;
+  int maxPeNode = -1;
+  glm::dvec3 maxPeAt{0, 0, 0};
+  std::vector<glm::dvec3> residualDisplacement;
+  double maxResidualDisplacement = 0.0;
+  glm::dvec3 maxResidualAt{0, 0, 0};
 
   // A static result: what each support carried (docs/simulation/README.md
   // #pin-supports), one entry per support of the body in the study's order.
@@ -371,6 +395,21 @@ FemResults SmallDeformationFields(const FemMesh& mesh,
                                   const std::vector<Material>& byDomain,
                                   const std::vector<glm::dvec3>& displacement);
 
+// The fields of an answer whose stress was not computed from `displacement`
+// but given at each tet's four Gauss points (kTetGauss's, point k nearest
+// corner k, in the tet's own corner order): a plastic run's, whose stress
+// depends on the path. Each tet's points are fitted with the linear field
+// through them, which is exact for a tet10's elastic stress, read at its
+// corners (its midsides the mean of their two), and averaged to the node
+// by element volume as the linear recovery is. `ipScalar` (empty: none) is
+// read the same way into plasticStrain, not below 0. Von Mises and the
+// maxima follow.
+FemResults
+IntegrationPointFields(const FemMesh& mesh,
+                       const std::vector<glm::dvec3>& displacement,
+                       const std::vector<std::array<Stress, 4>>& ipStress,
+                       const std::vector<std::array<double, 4>>& ipScalar);
+
 // True when the build links Eigen (static solver) / Spectra (modal).
 bool SolverAvailable();
 bool ModalAvailable();
@@ -545,6 +584,18 @@ struct StudyBodyResult {
     // the factor reported, over the load (0 = none were needed).
     bool largeDeformation = true;
     double stabilization = 0.0;
+    // A plastic run (docs/simulation/README.md#plasticity). `collapsed`:
+    // the solve stopped converging as the part's stiffness ran out before
+    // the load, at `factor`, the collapse load in [factor, collapseHigh].
+    // `unloaded`: the load was taken off again, and the result's residual
+    // displacement is what it left. `strainLimit` is where the hardening
+    // data ends (the smallest last strain of the body's curves), past which
+    // CalculiX holds the stress at the last point.
+    bool plasticity = false;
+    bool collapsed = false;
+    double collapseHigh = 0.0;
+    bool unloaded = false;
+    double strainLimit = 0.0;
   };
   Nonlinear nonlinear;
   // Each contact of the body (docs/simulation/README.md#contact): a contact

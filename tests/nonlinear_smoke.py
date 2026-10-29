@@ -15,7 +15,10 @@ refuses a snap-through one; the refusals name what they refuse. A column
 standing on the ground (a contact support,
 docs/simulation/README.md#contact) solves at small deformation with its
 base closed, the ground's row in `contacts` and `reactions` carrying the
-load.
+load. Pulled past its yield (docs/simulation/README.md#plasticity), it
+yields on the library steel's hardening line and is left longer once
+unloaded; a requirement reads its max_plastic_strain; in PLA, which has no
+hardening curve, the run is refused.
 
 The physics (the elastica, a shallow arch's snap, the column's approach to
 its linear factor) is tests/test_fem_calculix.cpp's. This is the contract
@@ -214,6 +217,57 @@ def main():
                   f"{contact['closed_area_mm2']:.4g} of "
                   f"{contact['area_mm2']:.4g} mm^2, peak pressure "
                   f"{contact['max_pressure_mpa']:.4g} MPa")
+
+            # Plasticity (docs/simulation/README.md#plasticity): the column
+            # pulled to 300 MPa, past its 250 MPa yield, on the library
+            # steel's hardening line; its deck carries *PLASTIC and an
+            # unloading step, its result the plastic strain, what unloading
+            # left, and a requirement reads max_plastic_strain.
+            pid = d.call("add_study", name="Past yield")["id"]
+            d.call("set_study", id=pid, mesh_size=5.0, converge="never",
+                   nonlinear={"plasticity": True, "increments": 4})
+            d.call("add_load", study=pid, type="fixed", face=end(-1.0))
+            d.call("add_load", study=pid, type="force", face=end(1.0),
+                   magnitude=30000.0, direction=[0, 0, 1])
+            listed = [s for s in d.call("list_studies")["studies"]
+                      if s["id"] == pid][0]
+            expect(listed.get("nonlinear", {}).get("plasticity") is True,
+                   f"list_studies says plasticity: {listed}")
+            deck = os.path.join(work, "plastic.inp")
+            d.call("export_study_inp", id=pid, path=deck)
+            with open(deck) as f:
+                text = f.read()
+            expect("*PLASTIC" in text and "*CLOAD, OP=NEW" in text and
+                   "NLGEOM" not in text,
+                   "the exported deck is plastic, unloads, small deformation")
+            doc = d.call("list_parts")["parts"][0]["id"]
+            d.call("add_requirement", name="yields little",
+                   measure={"kind": "study_result", "document": doc,
+                            "study": pid, "quantity": "max_plastic_strain"},
+                   bound={"kind": "at_most", "value": 0.05},
+                   source="EN 1993-1-5 C.8's 5 % strain limit")
+            res = d.call("run_study", id=pid)
+            expect(res["nonlinear"]["kind"] == "plasticity",
+                   f"a plastic result: {res.get('nonlinear')}")
+            body = res["bodies"][0]
+            pe = res["max_plastic_strain"]["value"]
+            # (300 - 250) / (E / 99) away from the clamp.
+            expect(0.02 < pe < 0.05, f"the plastic strain: {pe}")
+            left = res["max_residual_displacement_mm"]["value"]
+            expect(left > 0.9 * 150 * 0.02475,
+                   f"what unloading left: {left} mm")
+            expect(body["nonlinear"]["plasticity"]["unloaded"] is True and
+                   body["nonlinear"]["plasticity"]["strain_limit"] == 0.05,
+                   f"the run: {body['nonlinear']}")
+            row = d.call("check_requirements")["requirements"][0]
+            expect(row["state"] == "pass" and abs(row["value"] - pe) < 1e-12,
+                   f"checked against max_plastic_strain: {row}")
+            # The same column in PLA: no hardening curve, refused.
+            d.call("set_material", feature_id=fid, material="pla")
+            refused(d, "run_study", "has no hardening curve", id=pid)
+            d.call("set_material", feature_id=fid, material="steel")
+            print(f"nonlinear_smoke: plastic strain {pe:.5f}, "
+                  f"{left:.4f} mm left once unloaded")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("nonlinear_smoke: OK")

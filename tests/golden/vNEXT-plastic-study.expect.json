@@ -1,0 +1,8 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [7853.98],
+  "study_plasticity": [["Yield", true, false, "calculix"],
+                       ["Yield large", true, true, "calculix"],
+                       ["Elastic", false, true, "calculix"]]
+}

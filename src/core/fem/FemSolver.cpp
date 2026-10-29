@@ -980,6 +980,86 @@ FemResults LargeDeformationFields(const FemMesh& mesh,
   return DeformationFields(mesh, byDomain, displacement, true);
 }
 
+FemResults
+IntegrationPointFields(const FemMesh& mesh,
+                       const std::vector<glm::dvec3>& displacement,
+                       const std::vector<std::array<Stress, 4>>& ipStress,
+                       const std::vector<std::array<double, 4>>& ipScalar) {
+  FemResults out;
+  const size_t nNodes = mesh.nodes.size();
+  out.displacement = displacement;
+  out.displacement.resize(nNodes, glm::dvec3(0.0));
+  const bool scalar = !ipScalar.empty();
+  std::vector<Eigen::Matrix<double, 7, 1>> accum(
+      nNodes, Eigen::Matrix<double, 7, 1>::Zero());
+  std::vector<double> weight(nNodes, 0.0);
+  // The point nearest corner j has barycentric kGA there and kGB at the
+  // others: a linear field c has the value kGB sum(c) + (kGA - kGB) c_j.
+  constexpr int kMid[6][2] = {{0, 1}, {1, 2}, {2, 0}, {0, 3}, {1, 3}, {2, 3}};
+  for (size_t ti = 0; ti < mesh.tets.size() && ti < ipStress.size(); ++ti) {
+    const auto& tet = mesh.tets[ti];
+    Vector3d X[10];
+    for (int i = 0; i < 10; ++i) {
+      const glm::dvec3& p = mesh.nodes[tet[i]];
+      X[i] = Vector3d(p.x, p.y, p.z);
+    }
+    double vol = 0.0;
+    for (const auto& g : kTetGauss) {
+      Eigen::Matrix<double, 6, 30> B;
+      vol += kTetW * std::abs(StrainDisp(X, g[0], g[1], g[2], B));
+    }
+    Eigen::Matrix<double, 7, 1> ip[4],
+        sum = Eigen::Matrix<double, 7, 1>::Zero();
+    for (int k = 0; k < 4; ++k) {
+      for (int c = 0; c < 6; ++c)
+        ip[k](c) = ipStress[ti][k][c];
+      ip[k](6) = scalar && ti < ipScalar.size() ? ipScalar[ti][k] : 0.0;
+      sum += ip[k];
+    }
+    Eigen::Matrix<double, 7, 1> at[10];
+    for (int j = 0; j < 4; ++j)
+      at[j] = (ip[j] - kGB * sum) / (kGA - kGB);
+    for (int m = 0; m < 6; ++m)
+      at[4 + m] = 0.5 * (at[kMid[m][0]] + at[kMid[m][1]]);
+    for (int i = 0; i < 10; ++i) {
+      accum[tet[i]] += vol * at[i];
+      weight[tet[i]] += vol;
+    }
+  }
+  out.vonMises.assign(nNodes, 0.0);
+  out.stress.assign(nNodes, Stress{});
+  if (scalar)
+    out.plasticStrain.assign(nNodes, 0.0);
+  for (size_t n = 0; n < nNodes; ++n) {
+    if (weight[n] > 0) {
+      const Eigen::Matrix<double, 7, 1> v = accum[n] / weight[n];
+      const Eigen::Matrix<double, 6, 1> sv = v.head<6>();
+      out.vonMises[n] = VonMises(sv);
+      for (int k = 0; k < 6; ++k)
+        out.stress[n][k] = v(k);
+      if (scalar)
+        out.plasticStrain[n] = std::max(0.0, v(6));
+    }
+    if (out.vonMises[n] > out.maxVonMises) {
+      out.maxVonMises = out.vonMises[n];
+      out.maxVmNode = static_cast<int>(n);
+      out.maxVmAt = mesh.nodes[n];
+    }
+    if (scalar && out.plasticStrain[n] > out.maxPlasticStrain) {
+      out.maxPlasticStrain = out.plasticStrain[n];
+      out.maxPeNode = static_cast<int>(n);
+      out.maxPeAt = mesh.nodes[n];
+    }
+    const double dmag = glm::length(out.displacement[n]);
+    if (dmag > out.maxDisplacement) {
+      out.maxDisplacement = dmag;
+      out.maxDispNode = static_cast<int>(n);
+      out.maxDispAt = mesh.nodes[n];
+    }
+  }
+  return out;
+}
+
 FemResults SmallDeformationFields(const FemMesh& mesh,
                                   const std::vector<Material>& byDomain,
                                   const std::vector<glm::dvec3>& displacement) {
@@ -1430,6 +1510,14 @@ bool ModalAvailable() { return false; }
 
 FemResults SmallDeformationFields(const FemMesh&, const std::vector<Material>&,
                                   const std::vector<glm::dvec3>& displacement) {
+  FemResults out;
+  out.displacement = displacement;
+  return out;
+}
+FemResults IntegrationPointFields(const FemMesh&,
+                                  const std::vector<glm::dvec3>& displacement,
+                                  const std::vector<std::array<Stress, 4>>&,
+                                  const std::vector<std::array<double, 4>>&) {
   FemResults out;
   out.displacement = displacement;
   return out;

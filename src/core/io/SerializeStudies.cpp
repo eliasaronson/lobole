@@ -111,6 +111,8 @@ json StudyToJson(const fem::Study& s) {
     json n = json::object();
     if (nl.largeDeformation)
       n["large_deformation"] = true;
+    if (nl.plasticity) // vNEXT
+      n["plasticity"] = true;
     if (nl.increments > 0)
       n["increments"] = nl.increments;
     if (nl.snapThrough)
@@ -402,12 +404,13 @@ fem::Study StudyFromJson(const json& j) {
   if (j.contains("nonlinear")) { // v208
     const json& n = j.at("nonlinear");
     readctx::RefuseUnknownKeys(n,
-                               {"large_deformation", "increments",
+                               {"large_deformation", "plasticity", "increments",
                                 "snap_through", "imperfection_mm",
                                 "deflection_limit_mm"},
                                "study nonlinear");
     fem::Nonlinear& nl = s.nonlinear;
     nl.largeDeformation = n.value("large_deformation", false);
+    nl.plasticity = n.value("plasticity", false); // vNEXT
     nl.increments = n.value("increments", 0);
     nl.snapThrough = n.value("snap_through", false);
     nl.hasImperfection = n.contains("imperfection_mm");
@@ -780,6 +783,18 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
       flat.insert(flat.end(), st.begin(), st.end());
     out["stress"] = w.F32(flat);
   }
+  // vNEXT: a plastic result's plastic strain, and what unloading left.
+  if (!r.plasticStrain.empty()) {
+    out["plastic_strain"] = w.F32(r.plasticStrain);
+    out["max_plastic_strain"] = r.maxPlasticStrain;
+    out["max_pe_node"] = r.maxPeNode;
+    out["max_pe_at"] = Vec3ToJson(r.maxPeAt);
+  }
+  if (!r.residualDisplacement.empty()) {
+    out["residual_displacement"] = w.F32(r.residualDisplacement);
+    out["max_residual_displacement"] = r.maxResidualDisplacement;
+    out["max_residual_at"] = Vec3ToJson(r.maxResidualAt);
+  }
   // v196: what each support carried, and a peak on a support's edge.
   if (!r.reactions.empty()) {
     json rs = json::array();
@@ -833,6 +848,20 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
     for (size_t i = 0; i < r.stress.size(); ++i)
       for (int k = 0; k < 6; ++k)
         r.stress[i][k] = flat[6 * i + k];
+  }
+  if (j.contains("plastic_strain")) { // vNEXT
+    r.plasticStrain = f.Reals(j.at("plastic_strain"), "plastic_strain");
+    r.maxPlasticStrain = j.value("max_plastic_strain", 0.0);
+    r.maxPeNode = j.value("max_pe_node", -1);
+    if (j.contains("max_pe_at"))
+      r.maxPeAt = Vec3FromJson(j.at("max_pe_at"));
+  }
+  if (j.contains("residual_displacement")) { // vNEXT
+    r.residualDisplacement =
+        f.Vec3s(j.at("residual_displacement"), "residual_displacement");
+    r.maxResidualDisplacement = j.value("max_residual_displacement", 0.0);
+    if (j.contains("max_residual_at"))
+      r.maxResidualAt = Vec3FromJson(j.at("max_residual_at"));
   }
   r.maxVonMises = j.value("max_von_mises", 0.0);
   r.maxVmNode = j.value("max_vm_node", -1);
@@ -919,6 +948,12 @@ void CheckBody(const fem::StudyBodyResult& b, const std::string& what) {
     if (!r.displacement.empty() && r.displacement.size() != n)
       fail("has " + std::to_string(r.displacement.size()) +
            " displacements for " + std::to_string(n) + " nodes");
+    if (!r.plasticStrain.empty() && r.plasticStrain.size() != n)
+      fail("has " + std::to_string(r.plasticStrain.size()) +
+           " plastic strains for " + std::to_string(n) + " nodes");
+    if (!r.residualDisplacement.empty() && r.residualDisplacement.size() != n)
+      fail("has " + std::to_string(r.residualDisplacement.size()) +
+           " residual displacements for " + std::to_string(n) + " nodes");
     if (!r.vonMises.empty() && r.vonMises.size() != n)
       fail("has " + std::to_string(r.vonMises.size()) + " stresses for " +
            std::to_string(n) + " nodes");
@@ -1039,6 +1074,13 @@ json NonlinearToJson(const fem::StudyBodyResult::Nonlinear& n) {
     out["large_deformation"] = false;
   if (n.stabilization > 0)
     out["stabilization"] = n.stabilization;
+  // A plastic run's (vNEXT).
+  if (n.plasticity) {
+    json p = {{"unloaded", n.unloaded}, {"strain_limit", n.strainLimit}};
+    if (n.collapsed)
+      p["collapse_bracket"] = {n.factor, n.collapseHigh};
+    out["plasticity"] = std::move(p);
+  }
   if (n.snapped)
     out["snapped"] = {n.snappedFrom, n.snappedTo};
   if (n.snapThrough)
@@ -1055,12 +1097,12 @@ json NonlinearToJson(const fem::StudyBodyResult::Nonlinear& n) {
 
 fem::StudyBodyResult::Nonlinear NonlinearFromJson(const json& j,
                                                   const std::string& what) {
-  readctx::RefuseUnknownKeys(j,
-                             {"factor", "max_factor", "increments", "ccx_runs",
-                              "curve", "residual_criterion", "imbalance",
-                              "first_yield_factor", "snapped", "snap_through",
-                              "large_deformation", "stabilization"},
-                             what + " nonlinear");
+  readctx::RefuseUnknownKeys(
+      j,
+      {"factor", "max_factor", "increments", "ccx_runs", "curve",
+       "residual_criterion", "imbalance", "first_yield_factor", "snapped",
+       "snap_through", "large_deformation", "stabilization", "plasticity"},
+      what + " nonlinear");
   fem::StudyBodyResult::Nonlinear n;
   n.solved = true;
   n.factor = j.at("factor").get<double>();
@@ -1074,6 +1116,19 @@ fem::StudyBodyResult::Nonlinear NonlinearFromJson(const json& j,
   n.firstYieldFactor = j.value("first_yield_factor", 0.0);
   n.largeDeformation = j.value("large_deformation", true);
   n.stabilization = j.value("stabilization", 0.0);
+  if (j.contains("plasticity")) { // vNEXT
+    const json& p = j.at("plasticity");
+    readctx::RefuseUnknownKeys(p,
+                               {"unloaded", "strain_limit", "collapse_bracket"},
+                               what + " plasticity");
+    n.plasticity = true;
+    n.unloaded = p.value("unloaded", false);
+    n.strainLimit = p.value("strain_limit", 0.0);
+    if (p.contains("collapse_bracket")) {
+      n.collapsed = true;
+      n.collapseHigh = p.at("collapse_bracket").at(1).get<double>();
+    }
+  }
   if (j.contains("snapped")) {
     n.snapped = true;
     n.snappedFrom = j.at("snapped").at(0).get<double>();

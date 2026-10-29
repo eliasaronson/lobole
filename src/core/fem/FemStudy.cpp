@@ -171,10 +171,10 @@ std::string NonlinearRefusal(Solver solver, AnalysisType type,
                    nl.hasImperfection || nl.hasDeflectionLimit;
   if (!any && !contact)
     return {};
-  if (any && !nl.largeDeformation && !contact)
-    return "nonlinear needs large_deformation: true -- it is the analysis "
-           "every other nonlinear option belongs to (a study with a contact "
-           "is nonlinear without it)";
+  if (any && !nl.largeDeformation && !nl.plasticity && !contact)
+    return "nonlinear needs large_deformation: true or plasticity: true -- "
+           "the analyses every other nonlinear option belongs to (a study "
+           "with a contact is nonlinear without them)";
   if (type != AnalysisType::Static)
     return contact ? std::string("a contact is a static study's (solved "
                                  "nonlinear, on CalculiX); this one is ") +
@@ -185,8 +185,11 @@ std::string NonlinearRefusal(Solver solver, AnalysisType type,
   if (solver == Solver::InHouse)
     return contact ? "the in-house solver is linear: a study with a contact "
                      "solves on CalculiX (solver auto or calculix)"
-                   : "the in-house solver is linear: a nonlinear study "
-                     "solves on CalculiX (solver auto or calculix)";
+           : nl.plasticity
+               ? "the in-house solver is linear and elastic: a plastic study "
+                 "solves on CalculiX (solver auto or calculix)"
+               : "the in-house solver is linear: a nonlinear study "
+                 "solves on CalculiX (solver auto or calculix)";
   if (nl.increments < 0)
     return "nonlinear increments is at least 1 (0 or absent: the default)";
   if (nl.snapThrough && !nl.largeDeformation)
@@ -215,12 +218,45 @@ std::string NonlinearRefusal(Solver solver, AnalysisType type,
     return "converge: always refines round a stress peak, and a snap-through "
            "run's answer is its peak load factor, which that does not "
            "settle: use converge auto or never";
+  if (nl.plasticity && converge == ConvergeMode::Always)
+    return "converge: always refines round a stress peak, and a plastic "
+           "run's stress is held down by the yield where it concentrates -- "
+           "what concentrates is the plastic strain, which that does not "
+           "settle: use converge auto (which reports it not checked) or "
+           "never";
   if (contact && converge == ConvergeMode::Always)
     return "converge: always refines the faces a stress peak lies on, and a "
            "contact's peak lies on a contact face whose partner is meshed "
            "apart from it, so refining one side of the contact does not "
            "settle it: use converge auto (which reports it not checked) or "
            "never";
+  return {};
+}
+
+std::string HardeningRefusal(const Material& m, const std::string& label,
+                             const std::string& withCurves) {
+  const std::string names = withCurves.empty()
+                                ? std::string("none has one yet")
+                                : "the library has one for: " + withCurves;
+  if (m.hardening.empty())
+    return label +
+           " has no hardening curve -- its stress past yield against its "
+           "plastic strain -- so a plastic study cannot run on it, and none "
+           "is assumed (perfect plasticity would carry no load past yield "
+           "that the part does carry, a guessed slope any it does not); " +
+           names;
+  if (!(m.yieldMPa > 0.0))
+    return label + " has no yield strength for its hardening curve to "
+                   "start at";
+  if (std::abs(m.hardening.front().first - m.yieldMPa) > 1e-9 * m.yieldMPa ||
+      m.hardening.front().second != 0.0)
+    return label + "'s hardening curve does not start at its yield, " +
+           std::to_string(m.yieldMPa) + " MPa at zero plastic strain";
+  for (size_t i = 1; i < m.hardening.size(); ++i)
+    if (!(m.hardening[i].second > m.hardening[i - 1].second) ||
+        !(m.hardening[i].first >= m.hardening[i - 1].first))
+      return label + "'s hardening curve is not a rising plastic strain "
+                     "under a stress that does not fall";
   return {};
 }
 
@@ -1189,8 +1225,17 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     StudyBodyPlan bp;
     bp.bodyIndex = bodyIndex;
     bp.bodyName = body.name;
-    bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12,
-                      mp.yieldMPa, mp.interlayerMPa};
+    bp.mat =
+        Material{mp.youngGPa * 1000.0, mp.poisson,       mp.density * 1e-12,
+                 mp.yieldMPa,          mp.interlayerMPa, mp.hardening};
+    // A plastic study runs the material along its own hardening curve, or
+    // not at all (docs/simulation/README.md#plasticity).
+    if (study.nonlinear.plasticity)
+      if (const std::string why = HardeningRefusal(
+              bp.mat, "body '" + body.name + "': material " + mp.name,
+              CADMaterials::MaterialLibrary::HardeningSlugList());
+          !why.empty())
+        return fail(why);
     bp.interlayerMPa = mp.interlayerMPa;
     // A PRINTED part weighs what its walls, shells and infill weigh
     // (docs/tolerances/README.md#printed-mass): its self-weight and modal
@@ -2225,6 +2270,7 @@ bool SolveNonlinearBody(StudyJobBody& jb, const std::vector<Material>& mats,
   // A contact alone is solved at small deformation.
   req.nlgeom = nl.largeDeformation;
   req.snapThrough = nl.snapThrough;
+  req.plasticity = nl.plasticity;
   req.increments = nl.increments > 0 ? nl.increments
                                      : (nl.snapThrough ? kSnapIncrements
                                                        : kNonlinearIncrements);
@@ -2283,6 +2329,10 @@ bool SolveNonlinearBody(StudyJobBody& jb, const std::vector<Material>& mats,
       jb.mesh.nodes[n] += imperfection * first->displacement[n];
     req.maxFactor = 2.0 * linear;
     req.deflectionLimitMm = limit;
+  }
+  // The factor the path first yields at: a snap-through run's, and a
+  // plastic run's, whose answer is past it.
+  if (nl.snapThrough || nl.plasticity) {
     req.yieldAt.assign(nNodes, 0.0);
     for (size_t t = 0; t < mesh.tets.size(); ++t) {
       const size_t d = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t];
@@ -2745,6 +2795,10 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
   if (planIn.nonlinear.snapThrough)
     return notChecked("a snap-through run's answer is its peak load factor, "
                       "which refining round a stress peak does not settle");
+  if (planIn.nonlinear.plasticity)
+    return notChecked("a plastic run's stress is held down by the yield "
+                      "where it concentrates, and its plastic strain, which "
+                      "is what concentrates there, is not refined round");
   if (contact)
     return notChecked("a contact's peak lies on a contact face whose partner "
                       "is meshed apart from it, and refining one side of a "
@@ -3251,6 +3305,8 @@ void RoundFields(FemResults& r) {
   RoundAll(r.displacement);
   RoundAll(r.vonMises);
   RoundAll(r.stress);
+  RoundAll(r.plasticStrain);
+  RoundAll(r.residualDisplacement);
   for (FemResults::ModeShape& m : r.modes)
     RoundAll(m.displacement);
 }
@@ -3262,6 +3318,10 @@ bool PerNode(const FemResults& r, size_t n) {
   if (!r.vonMises.empty() && r.vonMises.size() != n)
     return false;
   if (!r.stress.empty() && r.stress.size() != n)
+    return false;
+  if (!r.plasticStrain.empty() && r.plasticStrain.size() != n)
+    return false;
+  if (!r.residualDisplacement.empty() && r.residualDisplacement.size() != n)
     return false;
   for (const FemResults::ModeShape& m : r.modes)
     if (m.displacement.size() != n)
@@ -3285,10 +3345,14 @@ void Renumber(FemResults& r, const std::vector<int>& kept,
   Gather(r.displacement, kept);
   Gather(r.vonMises, kept);
   Gather(r.stress, kept);
+  Gather(r.plasticStrain, kept);
+  Gather(r.residualDisplacement, kept);
   for (FemResults::ModeShape& m : r.modes)
     Gather(m.displacement, kept);
   if (r.maxVmNode >= 0)
     r.maxVmNode = newIndex[r.maxVmNode];
+  if (r.maxPeNode >= 0)
+    r.maxPeNode = newIndex[r.maxPeNode];
   if (r.maxDispNode >= 0)
     r.maxDispNode = newIndex[r.maxDispNode];
 }
@@ -3310,7 +3374,7 @@ void KeepSurface(StudyBodyResult& b) {
       else
         used[v] = 1;
   const auto peak = [&](const FemResults& r) {
-    for (int v : {r.maxVmNode, r.maxDispNode})
+    for (int v : {r.maxVmNode, r.maxDispNode, r.maxPeNode})
       if (v >= 0 && static_cast<size_t>(v) < n)
         used[v] = 1;
   };
@@ -3318,7 +3382,7 @@ void KeepSurface(StudyBodyResult& b) {
   for (const FemResults& c : b.cases)
     peak(c);
   const auto valid = [&](const FemResults& r) {
-    for (int v : {r.maxVmNode, r.maxDispNode})
+    for (int v : {r.maxVmNode, r.maxDispNode, r.maxPeNode})
       if (v >= 0 && static_cast<size_t>(v) >= n)
         return false;
     return true;

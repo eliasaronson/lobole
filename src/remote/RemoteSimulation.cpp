@@ -245,6 +245,15 @@ json NonlinearBodyJson(const fem::StudyBodyResult::Nonlinear& n,
   out["large_deformation"] = n.largeDeformation;
   if (n.stabilization > 0)
     out["stabilization"] = n.stabilization;
+  // A plastic run (docs/simulation/README.md#plasticity).
+  if (n.plasticity) {
+    json p = {{"unloaded", n.unloaded},
+              {"strain_limit", n.strainLimit},
+              {"collapsed", n.collapsed}};
+    if (n.collapsed)
+      p["collapse_bracket"] = {n.factor, n.collapseHigh};
+    out["plasticity"] = std::move(p);
+  }
   if (n.snapped)
     out["snapped"] = {{"from_factor", n.snappedFrom},
                       {"to_factor", n.snappedTo}};
@@ -278,14 +287,16 @@ fem::Nonlinear NonlinearOf(const json& v) {
     return nl;
   if (!v.is_object())
     throw std::runtime_error(
-        "nonlinear is {large_deformation: true, increments?, snap_through?, "
-        "imperfection_mm?, deflection_limit_mm?}, or null for a linear study");
+        "nonlinear is {large_deformation?, plasticity?, increments?, "
+        "snap_through?, imperfection_mm?, deflection_limit_mm?}, or null for "
+        "a linear study");
   for (const auto& [k, _] : v.items())
-    if (k != "large_deformation" && k != "increments" && k != "snap_through" &&
-        k != "imperfection_mm" && k != "deflection_limit_mm")
+    if (k != "large_deformation" && k != "plasticity" && k != "increments" &&
+        k != "snap_through" && k != "imperfection_mm" &&
+        k != "deflection_limit_mm")
       throw std::runtime_error("nonlinear has no key '" + k +
-                               "' (it takes large_deformation, increments, "
-                               "snap_through, imperfection_mm, "
+                               "' (it takes large_deformation, plasticity, "
+                               "increments, snap_through, imperfection_mm, "
                                "deflection_limit_mm)");
   const auto flag = [&](const char* k) {
     if (!v.contains(k))
@@ -305,6 +316,7 @@ fem::Nonlinear NonlinearOf(const json& v) {
     return v.at(k).get<double>();
   };
   nl.largeDeformation = flag("large_deformation");
+  nl.plasticity = flag("plasticity");
   nl.snapThrough = flag("snap_through");
   if (v.contains("increments")) {
     nl.increments = IntParam(v.at("increments"), "nonlinear increments");
@@ -620,8 +632,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(docs/simulation/README.md#a-peak-that-has-settled); anything else is "
      "refused, naming the three.\n"
      "`nonlinear` solves a STATIC study past linear, on CalculiX (auto picks "
-     "it; in_house is refused): {large_deformation: true (required), "
-     "increments? (the step's largest increment is its load over this many; "
+     "it; in_house is refused): {large_deformation? (NLGEOM), plasticity? "
+     "(each material past its yield along its library hardening curve; a "
+     "material with none -- every one but steel today -- is refused, never "
+     "run perfectly plastic; docs/simulation/README.md#plasticity), at least "
+     "one of the two (or a contact), increments? (the step's largest increment "
+     "is its load over this many; "
      "default 10, 20 on a snap-through run), snap_through? (seed the shape "
      "with the first linear buckling mode and step the load up to its PEAK: "
      "the answer for an arch or a curved wall loaded across its curve, "
@@ -634,7 +650,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "torque or remote load is carried from a reference node "
      "(docs/simulation/README.md#nonlinear-static). Refused with load "
      "cases, on another analysis type, with an unknown key, and with "
-     "converge always on a snap-through run. A study with a CONTACT (a "
+     "converge always on a snap-through or plastic run. snap_through needs "
+     "large_deformation. A study with a CONTACT (a "
      "contact support, or a contact participant) is nonlinear by that "
      "alone, and takes `nonlinear` {increments?} without large_deformation "
      "(solved at small deformation) or with it; it is refused in_house, on "
@@ -961,7 +978,21 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`reactions` row its contact_area_mm2 of face_area_mm2, `nonlinear` "
      "{large_deformation, stabilization? (what the weak springs holding a "
      "part held only by a contact carried, over the load)}, and the top "
-     "level `nonlinear` {kind: contact} (docs/simulation/README.md#contact).",
+     "level `nonlinear` {kind: contact} (docs/simulation/README.md#contact). "
+     "A PLASTIC study (nonlinear plasticity: true) carries per body "
+     "max_plastic_strain (the peak equivalent plastic strain, unitless), "
+     "max_residual_displacement_mm (what is left once the load is taken off "
+     "again; absent when it collapsed), and in `nonlinear` `plasticity` "
+     "{unloaded, strain_limit (where its hardening data ends), collapsed, "
+     "collapse_bracket? [low, high]}; the top level max_plastic_strain "
+     "{value, at, body}, max_residual_displacement_mm {value, at, body}, "
+     "and `nonlinear` {kind: plasticity, collapse_factor?}. Its stress is "
+     "CalculiX's own at each Gauss point, carried to the nodes. A run that "
+     "stops converging as its stiffness runs out has COLLAPSED below its "
+     "load: that factor is its factor_of_safety (receipt \"collapse load "
+     "factor >= 1\"); one that carries its load keeps yield over the peak "
+     "von Mises. A plastic strain past strain_limit is warned "
+     "(docs/simulation/README.md#plasticity).",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
@@ -1396,6 +1427,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // and `contact` says why it solves on CalculiX.
       if (fem::IsNonlinear(s) || s.nonlinear.increments > 0) {
         json n = {{"large_deformation", s.nonlinear.largeDeformation}};
+        if (s.nonlinear.plasticity)
+          n["plasticity"] = true;
         if (fem::HasContact(s))
           n["contact"] = true;
         if (s.nonlinear.increments > 0)
@@ -2742,6 +2775,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     const fem::FemResults* topEdgeResults = nullptr;
     double topEdgeYield = 0.0;
     json perBody = json::array();
+    bool plasticPeak = false, residualPeak = false;
+    double plasticMax = 0.0, residualMax = 0.0;
+    glm::dvec3 plasticAt(0.0), residualAt(0.0);
+    std::string plasticBody, residualBody;
     for (const fem::StudyBodyResult& b : rt->bodies) {
       nodes += b.mesh.stats.nodeCount;
       elements += b.mesh.stats.tetCount;
@@ -2755,6 +2792,25 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         bj["reactions"] = reactionsJson(b.results);
       if (b.nonlinear.solved)
         bj["nonlinear"] = NonlinearBodyJson(b.nonlinear, mp.yieldMPa);
+      // A plastic body: its peak plastic strain, and what unloading left.
+      if (!b.results.plasticStrain.empty()) {
+        bj["max_plastic_strain"] = b.results.maxPlasticStrain;
+        if (!plasticPeak || b.results.maxPlasticStrain > plasticMax) {
+          plasticPeak = true;
+          plasticMax = b.results.maxPlasticStrain;
+          plasticAt = b.results.maxPeAt;
+          plasticBody = b.bodyName;
+        }
+      }
+      if (!b.results.residualDisplacement.empty()) {
+        bj["max_residual_displacement_mm"] = b.results.maxResidualDisplacement;
+        if (!residualPeak || b.results.maxResidualDisplacement > residualMax) {
+          residualPeak = true;
+          residualMax = b.results.maxResidualDisplacement;
+          residualAt = b.results.maxResidualAt;
+          residualBody = b.bodyName;
+        }
+      }
       // Each contact at the factor reported (docs/simulation/README.md
       // #contact): its pressure, and how much of its faces it closed.
       if (!b.contacts.empty()) {
@@ -2893,6 +2949,16 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         {"stale", host.Stale(id)}};
     if (haveFoS)
       result["factor_of_safety"] = minFoS;
+    if (plasticPeak)
+      result["max_plastic_strain"] = {
+          {"value", plasticMax},
+          {"at", {plasticAt.x, plasticAt.y, plasticAt.z}},
+          {"body", plasticBody}};
+    if (residualPeak)
+      result["max_residual_displacement_mm"] = {
+          {"value", residualMax},
+          {"at", {residualAt.x, residualAt.y, residualAt.z}},
+          {"body", residualBody}};
     if (topEdgeResults != nullptr)
       topEdge = withAcross(std::move(topEdge), *topEdgeResults, topEdgeYield,
                            topAcross);
@@ -2938,6 +3004,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // the run went, and on a snap-through run the peak, which is then what
     // a factor of safety reads -- the first yield on the way, if earlier.
     std::vector<std::string> nlWarnings;
+    bool haveCollapse = false;
+    double collapse = 0.0, collapseHigh = 0.0;
+    std::string collapseBody;
     bool snapRun = false, havePeak = false;
     double peak = 0.0, governing = 0.0;
     std::string peakBody, peakAt, whyNoPeak;
@@ -2952,11 +3021,35 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             std::to_string(n.snappedTo) +
             " of the load: the fields are of the branch it landed on, and a "
             "snap-through run (nonlinear snap_through: true) reports the peak");
-      if (n.firstYieldFactor > 0)
+      if (n.firstYieldFactor > 0 && !n.plasticity)
         nlWarnings.push_back("body '" + b.bodyName + "' reaches yield at " +
                              std::to_string(n.firstYieldFactor) +
                              " of the load, past which this elastic answer "
                              "does not hold");
+      if (n.plasticity && n.collapsed) {
+        nlWarnings.push_back(
+            "body '" + b.bodyName + "' COLLAPSED at " +
+            std::to_string(n.factor) +
+            " of the load: the solve stopped converging there as its "
+            "stiffness ran out, and the fields are of the last increment "
+            "before it");
+        if (!haveCollapse || n.factor < collapse) {
+          haveCollapse = true;
+          collapse = n.factor;
+          collapseHigh = n.collapseHigh;
+          collapseBody = b.bodyName;
+        }
+      }
+      if (n.plasticity && n.strainLimit > 0 &&
+          b.results.maxPlasticStrain > n.strainLimit)
+        nlWarnings.push_back(
+            "body '" + b.bodyName + "' reaches a plastic strain of " +
+            std::to_string(b.results.maxPlasticStrain) +
+            ", past the end of its material's hardening data (" +
+            std::to_string(n.strainLimit) +
+            "), where CalculiX holds the stress at the curve's last point: "
+            "past it the answer is the data's extrapolation, not the "
+            "material's");
       if (!n.snapThrough)
         continue;
       snapRun = true;
@@ -2989,6 +3082,15 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         result.erase("factor_of_safety");
       }
       result["nonlinear"] = std::move(nj);
+    } else if (s->nonlinear.plasticity) {
+      json nj = {{"kind", "plasticity"}};
+      if (haveCollapse) {
+        nj["collapse_factor"] = collapse;
+        nj["collapse_bracket"] = {collapse, collapseHigh};
+        nj["body"] = collapseBody;
+        result["factor_of_safety"] = collapse;
+      }
+      result["nonlinear"] = std::move(nj);
     } else if (s->nonlinear.On()) {
       result["nonlinear"] = {{"kind", "large_deformation"}};
     } else if (fem::HasContact(*s)) {
@@ -2996,7 +3098,16 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     }
     if (fem::IsNonlinear(*s)) {
       json notes = json::array();
-      if (s->nonlinear.On()) {
+      if (s->nonlinear.plasticity)
+        notes.push_back(
+            "plasticity: each material past its yield along its library "
+            "hardening curve (isotropic, von Mises), the stress and the "
+            "equivalent plastic strain CalculiX's own at each Gauss point, "
+            "carried to the nodes; the load is then taken off again, and "
+            "what it leaves is the residual displacement. A run that stops "
+            "converging as its stiffness runs out has collapsed there (load "
+            "control cannot pass a peak)");
+      if (s->nonlinear.largeDeformation) {
         notes.push_back(
             "large deformation (NLGEOM): the load is stepped up and each "
             "increment is solved on the part as it has deformed; the stress "
@@ -3173,6 +3284,25 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             c.note += ". " + w;
           r.Add(std::move(c));
         }
+      } else if (haveCollapse) {
+        const receipt::Oracle nlOracle{"calculix/nonlinear", solver.version};
+        receipt::Claim c("collapse load factor >= 1", nlOracle,
+                         collapse >= 1.0 ? receipt::Verdict::Pass
+                                         : receipt::Verdict::Fail);
+        c.basis = receipt::Basis::Predicted;
+        c.value = collapse;
+        c.unit = "x";
+        c.note = "elastic-plastic run on CalculiX " + solver.version + " on " +
+                 std::to_string(elements) +
+                 " elements, each material along its library hardening "
+                 "curve: the solve stopped converging as body '" +
+                 collapseBody + "' ran out of stiffness, between factor " +
+                 std::to_string(collapse) + " and " +
+                 std::to_string(collapseHigh) +
+                 " (load control cannot pass a peak)";
+        for (const std::string& w : nlWarnings)
+          c.note += ". " + w;
+        r.Add(std::move(c));
       } else if (!haveFoS) {
         r.Unverifiable("factor of safety against yield", solver,
                        "no body in this study has a material with a yield "
@@ -3185,7 +3315,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         c.basis = receipt::Basis::Predicted;
         c.value = minFoS;
         c.unit = "x";
-        c.note = std::string(s->nonlinear.On()
+        c.note = std::string(s->nonlinear.plasticity
+                                 ? "elastic-plastic static solve (past yield "
+                                   "the stress follows the hardening curve, "
+                                   "so this reads how far past yield the peak "
+                                   "is; max_plastic_strain says how much it "
+                                   "yielded)"
+                             : s->nonlinear.On()
                                  ? "large-deformation (NLGEOM) static solve"
                              : fem::HasContact(*s)
                                  ? "contact (nonlinear) static solve"

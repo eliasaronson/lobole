@@ -345,6 +345,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A static study's `nonlinear` takes `plasticity`: true (written only when true): solved past yield on CalculiX along each material's hardening curve ([plasticity](../simulation/README.md#plasticity)), with or without `large_deformation`, which is no longer required beside it; absent, elastic, how every older study reads. Refused where `nonlinear` is (in-house, another analysis, load cases) and with `converge: always`. A saved static result's fields gain `plastic_strain` (one a node in the `.result.bin`), `max_plastic_strain`, `max_pe_node`, `max_pe_at`, and `residual_displacement`, `max_residual_displacement`, `max_residual_at` (what unloading left); its body's `nonlinear` gains `plasticity` {`unloaded`, `strain_limit`, `collapse_bracket`?}. Golden `vNEXT-plastic-study` (three studies: plastic at small deformation, plastic with large deformation and increments, and an elastic large-deformation one; results are not in the single-file corpus, so their round trip is `tests/test_fem_calculix.cpp`'s) |
 
 ## Paths in a project
 

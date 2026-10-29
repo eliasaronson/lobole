@@ -622,8 +622,34 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
           << "\nCF\n";
     if (!contacts.empty())
       out << "*CONTACT PRINT\nCSTR\n";
+    if (nl.plasticity)
+      out << "*EL PRINT, ELSET=EBODY\nS, PEEQ\n";
     out << "*END STEP\n";
     from = st.toFactor;
+  }
+  // A plastic run takes its load off again, over as long as it took to put
+  // on: what is left is the deformation the yield left behind. Every load
+  // goes (*CLOAD and *DLOAD, OP=NEW, ramped down); the supports and
+  // contacts stay.
+  if (nl.unload && !nl.steps.empty()) {
+    const double period = nl.steps.back().toFactor;
+    const double inc = std::min(nl.steps.back().maxIncrement, period);
+    out << "*STEP" << (nl.nlgeom ? ", NLGEOM" : "")
+        << ", INC=" << nl.maxIncrements << "\n*STATIC\n"
+        << Num(inc) << ", " << Num(period) << ", "
+        << Num(std::min(nl.minIncrement, inc)) << ", " << Num(inc) << "\n";
+    out << "*CONTROLS, PARAMETERS=FIELD\n"
+        << Num(kNonlinearResidual) << ", , , , " << Num(kNonlinearResidual)
+        << "\n";
+    out << "*CLOAD, OP=NEW\n";
+    if (!pressures.empty())
+      out << "*DLOAD, OP=NEW\n";
+    out << "*NODE PRINT, NSET=NALL, GLOBAL=YES\nU\n";
+    if (!held.empty())
+      out << "*NODE PRINT, NSET=NSUP, GLOBAL=YES\nRF\n";
+    for (size_t k = 0; k < partners.size(); ++k)
+      out << "*NODE PRINT, NSET=P" << k + 1 << ", TOTALS=ONLY\nRF\n";
+    out << "*END STEP\n";
   }
   if (!out)
     return fail("the deck could not be written");
@@ -753,12 +779,36 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
     const Material& m = byDomain[std::min(d, byDomain.size() - 1)];
     out << "*MATERIAL, NAME=M" << d + 1 << "\n*ELASTIC\n"
         << Num(m.youngMPa) << ", " << Num(m.poisson) << "\n";
+    // A plastic run's hardening curve: von Mises stress against the
+    // equivalent plastic strain, isotropic hardening (ccx's default).
+    if (nonlinear && nonlinear->plasticity) {
+      if (m.hardening.empty())
+        return fail("a plastic deck needs every material's hardening curve");
+      out << "*PLASTIC\n";
+      for (const auto& [stress, strain] : m.hardening)
+        out << Num(stress) << ", " << Num(strain) << "\n";
+    }
     if (m.densityTPerMM3 > 0)
       out << "*DENSITY\n" << Num(m.densityTPerMM3) << "\n";
     out << "*SOLID SECTION, ELSET=D" << d + 1 << ", MATERIAL=M" << d + 1
         << "\n";
   }
 
+  // The body's elements, whose stress and plastic strain a plastic run
+  // prints at every integration point.
+  if (nonlinear && nonlinear->plasticity) {
+    std::vector<int> sets;
+    for (size_t d = 0; d < nDomains; ++d)
+      for (size_t t = 0; t < mesh.tets.size(); ++t)
+        if ((mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t]) == d) {
+          sets.push_back(static_cast<int>(d));
+          break;
+        }
+    out << "*ELSET, ELSET=EBODY\n";
+    for (size_t i = 0; i < sets.size(); ++i)
+      out << "D" << sets[i] + 1
+          << ((i + 1) % 8 == 0 || i + 1 == sets.size() ? "\n" : ", ");
+  }
   // A pin's nodes in its cylinder: one transform per pin.
   for (size_t p = 0; p < pins.size(); ++p) {
     std::vector<int> ids;
@@ -1238,9 +1288,9 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
                         pinRows, &err))
     return fail(err);
   if (in.nonlinear.On() || !jb.contacts.empty()) {
-    // A large-deformation or contact run's deck (docs/simulation/README.md
-    // #nonlinear-static, #contact): what NonlinearOnCalculix's first run
-    // writes.
+    // A large-deformation, plastic or contact run's deck
+    // (docs/simulation/README.md#nonlinear-static, #plasticity, #contact):
+    // what NonlinearOnCalculix's first run writes.
     if (in.nonlinear.snapThrough)
       return fail("a snap-through run's deck is seeded with the first "
                   "buckling mode and capped at twice its factor, both found "
@@ -1252,6 +1302,8 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
     deck.contacts = &jb.contacts;
     deck.partners = &jb.rigidPartners;
     deck.stabilized = &jb.stabilized;
+    deck.plasticity = in.nonlinear.plasticity;
+    deck.unload = in.nonlinear.plasticity;
     for (const FaceLoad& l : rhs[caseIndex])
       (l.type == LoadType::Force || !deck.nlgeom ? dead : deck.loads)
           .push_back(l);
@@ -1502,6 +1554,15 @@ struct DatBlock {
   // its centre and mean normal, the moment about that centre, and its area
   // in contact, normal force (+ = tension) and shear force.
   std::vector<double> values;
+  // *EL PRINT rows (kind "stresses" or "peeq"): an element, its integration
+  // point (1-4) and the values -- the stress as ccx prints it, xx yy zz xy
+  // xz yz, or the equivalent plastic strain first.
+  struct IpRow {
+    long elem = 0;
+    int ip = 0;
+    std::array<double, 6> v{};
+  };
+  std::vector<IpRow> ip;
 };
 
 std::string Trim(const std::string& s) {
@@ -1550,6 +1611,21 @@ private:
     const size_t time = line.find(" and time ");
     const size_t stats = line.find("statistics for slave set ");
     const size_t cstr = line.find("contact stress (slave element+face");
+    // ccx writes no space before this one's "for set".
+    const size_t peeq = line.find("equivalent plastic strain (elem");
+    if (peeq != std::string::npos &&
+        line.find(" and time ") != std::string::npos) {
+      Close(out);
+      cur_ = DatBlock{};
+      cur_.kind = "peeq";
+      const size_t fs = line.find("for set ");
+      const size_t at = line.find(" and time ");
+      if (fs != std::string::npos && fs < at)
+        cur_.set = Trim(line.substr(fs + 8, at - fs - 8));
+      ParseFortran(Trim(line.substr(at + 10)), cur_.time);
+      open_ = true;
+      return;
+    }
     const size_t set = line.find(" for set ");
     if (time != std::string::npos &&
         (stats != std::string::npos || cstr != std::string::npos ||
@@ -1591,8 +1667,27 @@ private:
       return;
     }
     if (tok.empty()) {
-      if (!cur_.rows.empty())
+      if (!cur_.rows.empty() || !cur_.ip.empty())
         Close(out);
+      return;
+    }
+    if (cur_.kind == "stresses" || cur_.kind == "peeq") {
+      const size_t want = cur_.kind == "stresses" ? 8 : 3;
+      DatBlock::IpRow r;
+      char *e1 = nullptr, *e2 = nullptr;
+      bool ok = tok.size() == want;
+      if (ok) {
+        r.elem = std::strtol(tok[0].c_str(), &e1, 10);
+        r.ip = static_cast<int>(std::strtol(tok[1].c_str(), &e2, 10));
+        ok = *e1 == '\0' && *e2 == '\0';
+      }
+      for (size_t i = 2; ok && i < want; ++i)
+        ok = ParseFortran(tok[i], r.v[i - 2]);
+      if (!ok) {
+        Close(out);
+        return;
+      }
+      cur_.ip.push_back(r);
       return;
     }
     glm::dvec3 v(0.0);
@@ -1621,7 +1716,8 @@ private:
     cur_.rows.push_back({node, v});
   }
   void Close(std::vector<DatBlock>& out) {
-    if (open_ && (!cur_.rows.empty() || cur_.values.size() >= 18))
+    if (open_ &&
+        (!cur_.rows.empty() || !cur_.ip.empty() || cur_.values.size() >= 18))
       out.push_back(std::move(cur_));
     cur_ = DatBlock{};
     open_ = false;
@@ -1686,6 +1782,11 @@ struct Increment {
   std::vector<glm::dvec3> partnerRf;
   std::vector<std::vector<double>> stats;
   std::vector<double> maxPressure;
+  // A plastic run's: each tet's stress and equivalent plastic strain at its
+  // four Gauss points, in its own corner order (IntegrationPointFields).
+  std::vector<std::array<Stress, 4>> ipStress;
+  std::vector<std::array<double, 4>> ipPeeq;
+  bool HasIp() const { return !ipStress.empty(); }
 };
 
 // How one ccx run of a nonlinear deck went.
@@ -1697,6 +1798,10 @@ struct PassOutcome {
   double afterFactor = 0; // Jump, Deflection: the increment that ended it
   double afterMaxU = 0;
   bool haveBefore = false;
+  // A plastic run's last increment of its unloading step: the deformation
+  // the load left behind (haveUnloaded false when it did not finish).
+  Increment unloaded;
+  bool haveUnloaded = false;
   // A large-deformation run's jump on the way, kept going.
   bool snapped = false;
   double snappedFrom = 0.0, snappedTo = 0.0;
@@ -1722,6 +1827,14 @@ struct PathWatch {
   // changes the stiffness by design.
   size_t partners = 0, pairs = 0;
   std::map<long, int> pairOf;
+  // A plastic run (docs/simulation/README.md#plasticity): its increments
+  // carry the stress and plastic strain ccx printed at each Gauss point,
+  // and are taken whole as a contact run's are. `corner[t][k]` is the
+  // corner of tet t (ours) nearest the deck's integration point k + 1.
+  // Increments past `cap` are the unloading step's.
+  bool plastic = false;
+  double cap = 1.0;
+  std::vector<std::array<int, 4>> corner;
   std::optional<Increment> pendingInc;
   Increment prev, prev2;
   bool havePrev = false;
@@ -1753,6 +1866,10 @@ struct PathWatch {
       inc.partnerRf.assign(partners, glm::dvec3(0.0));
       inc.stats.assign(pairs, {});
       inc.maxPressure.assign(pairs, 0.0);
+      if (plastic) {
+        inc.ipStress.assign(corner.size(), {});
+        inc.ipPeeq.assign(corner.size(), {});
+      }
       pendingInc = std::move(inc);
       return;
     }
@@ -1771,6 +1888,20 @@ struct PathWatch {
       const size_t k = std::strtoul(b.set.c_str() + 1, nullptr, 10);
       if (k >= 1 && k <= pairs)
         inc.stats[k - 1] = b.values;
+    } else if ((b.kind == "stresses" || b.kind == "peeq") && plastic &&
+               b.set == "EBODY") {
+      const bool stress = b.kind == "stresses";
+      for (const DatBlock::IpRow& r : b.ip) {
+        if (r.elem < 1 || static_cast<size_t>(r.elem) > corner.size() ||
+            r.ip < 1 || r.ip > 4)
+          continue;
+        const size_t t = static_cast<size_t>(r.elem - 1);
+        const int c = corner[t][r.ip - 1];
+        if (stress) // ccx: xx yy zz xy xz yz; ours: xx yy zz xy yz zx
+          inc.ipStress[t][c] = {r.v[0], r.v[1], r.v[2], r.v[3], r.v[5], r.v[4]};
+        else
+          inc.ipPeeq[t][c] = r.v[0];
+      }
     } else if (b.kind == "contact") {
       for (const auto& [code, v] : b.rows)
         if (const auto it = pairOf.find(code); it != pairOf.end())
@@ -1789,7 +1920,7 @@ struct PathWatch {
     for (DatBlock& b : blocks) {
       if (ended)
         break;
-      if (pairs > 0) {
+      if (pairs > 0 || plastic) {
         FeedContact(b);
         continue;
       }
@@ -1820,10 +1951,19 @@ struct PathWatch {
   }
 
   void Take(Increment inc) {
+    // A plastic run's unloading step: kept apart from the path.
+    if (plastic && inc.factor > cap * (1.0 + 1e-9)) {
+      out->unloaded = std::move(inc);
+      out->haveUnloaded = true;
+      return;
+    }
     out->curve.push_back({inc.factor, inc.maxU});
-    // The first yield on the path, interpolated in the factor.
+    // The first yield on the path, interpolated in the factor: on a
+    // plastic run from the stress ccx printed, which is elastic up to it.
     if (!req->yieldAt.empty() && out->firstYield == 0.0) {
-      const FemResults f = LargeDeformationFields(*mesh, *mats, inc.u);
+      const FemResults f =
+          inc.HasIp() ? IntegrationPointFields(*mesh, inc.u, inc.ipStress, {})
+                      : LargeDeformationFields(*mesh, *mats, inc.u);
       double ratio = 0.0;
       for (size_t n = 0; n < f.vonMises.size(); ++n)
         if (req->yieldAt[n] > 0)
@@ -1897,7 +2037,9 @@ struct PathWatch {
   void Finish() {
     if (!ended && pendingInc)
       TakePending();
-    if (ended || !candidate)
+    // A plastic run's last increment that turned compliant is the yield
+    // spreading, not a jump: one counts only with an increment after it.
+    if (ended || !candidate || plastic)
       return;
     if (req->snapThrough)
       End(PassOutcome::End::Jump, std::move(prev2), candidateFactor,
@@ -1999,6 +2141,8 @@ bool NonlinearOnCalculix(
     deck.contacts = &jb.contacts;
     deck.partners = &jb.rigidPartners;
     deck.stabilized = &jb.stabilized;
+    deck.plasticity = req.plasticity;
+    deck.unload = req.plasticity && !req.snapThrough;
     if (steps.size() >= 2 && !settle.empty())
       deck.settlePerNode = settle;
     fs::path dir;
@@ -2026,6 +2170,16 @@ bool NonlinearOnCalculix(
     watch.partners = jb.rigidPartners.size();
     watch.pairs = jb.contacts.size();
     watch.pairOf = pairOf;
+    watch.plastic = req.plasticity;
+    watch.cap = cap;
+    if (req.plasticity) {
+      watch.corner.resize(mesh.tets.size());
+      for (size_t t = 0; t < mesh.tets.size(); ++t) {
+        const std::array<int, 10> w = WrittenOrder(mesh, t);
+        for (int k = 0; k < 4; ++k)
+          watch.corner[t][k] = w[k];
+      }
+    }
     std::vector<DatBlock> blocks;
     auto lastPoll = std::chrono::steady_clock::now();
     const auto keepGoing = [&]() {
@@ -2131,7 +2285,40 @@ bool NonlinearOnCalculix(
     return fail("CalculiX converged no increment of the load" +
                 (reported->ccxError.empty() ? std::string()
                                             : " (" + reported->ccxError + ")"));
-  if (!req.snapThrough && reported->end == PassOutcome::End::Stopped)
+  // A plastic run that carried its load and then stopped converging was
+  // taking it off again.
+  const bool unloadStopped = req.plasticity && !req.snapThrough &&
+                             reported->end == PassOutcome::End::Stopped &&
+                             reported->haveBefore &&
+                             reported->before.factor >= cap * (1.0 - 1e-9);
+  if (unloadStopped)
+    return fail("the part carried its load, and taking the load off again "
+                "stopped converging at " +
+                (reported->haveUnloaded
+                     ? pct(reported->unloaded.factor / cap - 1.0)
+                     : std::string("the start")) +
+                " of it (CalculiX: " + reported->ccxError +
+                "), so the deformation it leaves is not known: more "
+                "increments may carry it. Nothing was stored");
+  // A plastic run that stopped converging as its stiffness ran out has
+  // collapsed there: load control cannot go past the peak (ccx 2.23 has no
+  // arc-length method), so the factor it stopped at is the collapse load,
+  // as a snap-through run's limit point is.
+  const auto stiffnessRanOut = [&](const PassOutcome& r) {
+    double c0 = 0.0, c1 = 0.0;
+    if (r.curve.size() >= 2) {
+      c0 = r.curve[0].second / std::max(r.curve[0].first, 1e-300);
+      const auto& a = r.curve[r.curve.size() - 2];
+      const auto& b = r.curve.back();
+      c1 = (b.second - a.second) / std::max(b.first - a.first, 1e-300);
+    }
+    return c1 > kSnapJumpRatio * c0;
+  };
+  const bool collapsed = req.plasticity && !req.snapThrough &&
+                         reported->end == PassOutcome::End::Stopped &&
+                         stiffnessRanOut(*reported);
+  if (!req.snapThrough && reported->end == PassOutcome::End::Stopped &&
+      !collapsed)
     return fail(
         "the nonlinear solve stopped converging at " +
         pct(reported->before.factor / cap) + " of the load (factor " +
@@ -2150,19 +2337,26 @@ bool NonlinearOnCalculix(
   summary.snapped = r.snapped;
   summary.snappedFrom = r.snappedFrom;
   summary.snappedTo = r.snappedTo;
+  summary.plasticity = req.plasticity;
+  if (req.plasticity) {
+    summary.strainLimit = 0.0;
+    for (const Material& m : mats)
+      if (!m.hardening.empty() &&
+          (summary.strainLimit == 0.0 ||
+           m.hardening.back().second < summary.strainLimit))
+        summary.strainLimit = m.hardening.back().second;
+  }
+  if (collapsed) {
+    summary.collapsed = true;
+    summary.collapseHigh =
+        at.factor + (r.failedIncrement > 0 ? r.failedIncrement : 1e-5 * cap);
+  }
   if (req.snapThrough) {
     switch (r.end) {
     case PassOutcome::End::Stopped: {
       // A limit point: the solve stops converging where the stiffness runs
       // out. Its last increment is far more compliant than its first.
-      double c0 = 0.0, c1 = 0.0;
-      if (r.curve.size() >= 2) {
-        c0 = r.curve[0].second / std::max(r.curve[0].first, 1e-300);
-        const auto& a = r.curve[r.curve.size() - 2];
-        const auto& b = r.curve.back();
-        c1 = (b.second - a.second) / std::max(b.first - a.first, 1e-300);
-      }
-      if (!(c1 > kSnapJumpRatio * c0))
+      if (!stiffnessRanOut(r))
         return fail("the nonlinear solve stopped converging at factor " +
                     fmt(at.factor) + " (" + pct(at.factor / cap) +
                     " of the run's cap; CalculiX: " + r.ccxError +
@@ -2235,8 +2429,32 @@ bool NonlinearOnCalculix(
   glm::dvec3 balance = refTotal;
   double scale = glm::length(refTotal);
   double carried = 0.0;
-  result = req.nlgeom ? LargeDeformationFields(mesh, mats, at.u)
-                      : SmallDeformationFields(mesh, mats, at.u);
+  // A plastic run's stress depends on its path, so it is not recomputed
+  // from U: ccx's own, at each Gauss point, carried to the nodes.
+  if (req.plasticity && !at.HasIp())
+    return fail("CalculiX printed no stress for the plastic run's factor " +
+                fmt(at.factor) + ", which its fields are read from");
+  result = req.plasticity
+               ? IntegrationPointFields(mesh, at.u, at.ipStress, at.ipPeeq)
+           : req.nlgeom ? LargeDeformationFields(mesh, mats, at.u)
+                        : SmallDeformationFields(mesh, mats, at.u);
+  if (req.plasticity && !req.snapThrough && !collapsed) {
+    if (r.end != PassOutcome::End::Completed || !r.haveUnloaded ||
+        r.unloaded.factor < 2.0 * cap * (1.0 - 1e-9))
+      return fail("the plastic run carried its load, and CalculiX did not "
+                  "report taking it off again, so the deformation it leaves "
+                  "is not known. Nothing was stored");
+    result.residualDisplacement = r.unloaded.u;
+    result.residualDisplacement.resize(nNodes, glm::dvec3(0.0));
+    for (size_t n = 0; n < nNodes; ++n) {
+      const double d = glm::length(result.residualDisplacement[n]);
+      if (d > result.maxResidualDisplacement) {
+        result.maxResidualDisplacement = d;
+        result.maxResidualAt = mesh.nodes[n];
+      }
+    }
+    summary.unloaded = true;
+  }
   result.nodeReaction.assign(nNodes, glm::dvec3(0.0));
   // A contact's rigid partners carry what they press back with, and the
   // weak springs what they hold.

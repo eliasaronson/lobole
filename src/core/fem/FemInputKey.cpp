@@ -3,6 +3,7 @@
 
 // The input hash of an FEM run (docs/simulation/README.md#studies-as-jobs).
 
+#include "cad/CADMaterials.h"
 #include "core/Document.h"
 #include "core/InputHash.h"
 #include "core/Occurrence.h"
@@ -27,6 +28,25 @@ nlohmann::json Definition(const Study& study) {
   return j;
 }
 
+// A plastic study also reads each body's hardening curve
+// (docs/simulation/README.md#plasticity). Only then, so every other study
+// keeps the hash it had before the library had curves.
+void HashHardening(inputhash::Hasher& h, const Study& study,
+                   const std::vector<Body>& bodies) {
+  if (!study.nonlinear.plasticity)
+    return;
+  h.Str("hardening");
+  for (const Body& b : bodies) {
+    const CADMaterials::MaterialProperties& m =
+        CADMaterials::MaterialLibrary::GetMaterialOrDefault(b.material);
+    h.U64(m.hardening.size());
+    for (const auto& [stress, strain] : m.hardening) {
+      h.F64(stress);
+      h.F64(strain);
+    }
+  }
+}
+
 } // namespace
 
 uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
@@ -38,6 +58,7 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
   h.Str(kFemAlgorithm);
   h.Json(Definition(study));
   h.Bodies(doc.GetBodies());
+  HashHardening(h, study, doc.GetBodies());
   // A static study of a topology result reads that result: its density is
   // an input (docs/topopt/README.md#a-static-study-of-the-optimised-shape).
   if (study.shapeFrom.study != 0) {
@@ -103,8 +124,11 @@ uint64_t AssemblyStudyInputKey(const AssemblyDocument& asmDoc,
       continue;
     }
     h.Json(DocumentIO::OccurrenceToJson(*occ));
-    if (ctx.placedBodies)
-      h.Bodies(ctx.placedBodies(pt.occurrenceId));
+    if (ctx.placedBodies) {
+      const std::vector<Body> bodies = ctx.placedBodies(pt.occurrenceId);
+      h.Bodies(bodies);
+      HashHardening(h, study, bodies);
+    }
   }
   return h.Digest();
 }
