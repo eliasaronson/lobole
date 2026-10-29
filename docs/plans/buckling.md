@@ -122,6 +122,28 @@ Stage 4).
   - the governing factor, its class and the flags are shown as text.
 - `set_result_display {mode}` selects a buckling mode.
 
+### Agents run it
+
+Agents designing printed parts did not run studies at all, so a load-bearing
+part was delivered with no check of either strength or stability. A tool
+nobody calls catches nothing. The modeling-workflow prompt
+(`WORKFLOW` in python/lobole/mcp.py) gains a step beside "state the
+requirements":
+- A part that carries a load gets, before it is called done:
+  - a static study of each way it is loaded;
+  - a buckling study of each load that compresses something;
+  - requirements on `factor_of_safety` and `buckling_factor`, both read as
+    the governing values.
+- The step names the shapes that buckle (struts, ribs, thin walls, tubes,
+  levers in compression). It says a curved wall loaded across its curve can
+  snap through, which linear buckling does not see, and names the nonlinear
+  study for that once it exists.
+- `help('add_study')` and the `add_study` describe row say the same in one
+  line.
+
+`check_requirements` already reports a study requirement that was never run
+as `unchecked`, which the prompt tells the agent to report as not met.
+
 ### Format
 
 The study key `analysis: "buckling"` and the result keys are `vNEXT`.
@@ -205,4 +227,6 @@ design lean.
 - `tests/test_fem_buckling.cpp`, `tests/test_fem_calculix.cpp`,
   `tests/buckling_smoke.py`.
 - `generators/woodcutter/woodcutter_fem.py`.
+- `python/lobole/mcp.py` (the workflow step, the `add_study` reference),
+  docs/scripting/mcp.md.
 - `rpc.py` and `rpc-surface.json`, regenerated.
