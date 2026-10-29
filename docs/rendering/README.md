@@ -663,13 +663,25 @@ A [mesh body](../interchange/README.md#mesh-bodies) is drawn from its own
 triangles: `TessellationFor(state, body)` (`src/ui/TessellationCache.cpp`)
 runs no BRepMesh. Normals are smooth and split where neighbouring
 triangles turn by more than 60°, the outline's crease angle, so a scan
-shades smooth and a fold stays a fold. The cache keys on the shared mesh,
+shades smooth and a fold stays a fold. The corners round a vertex are
+grouped across the edges that do not turn that far, one vertex and one
+normal a group, so two triangles on a smooth edge share its vertices: the
+outline finds edges by vertex index, and a split by a normal computed per
+corner made every slightly uneven edge a seam, and a scan drew covered in
+hairs. The cache keys on the shared mesh,
 so a body that did not change keeps its asset across syncs and tabs. Every
 triangle is face 0, so the whole body highlights as one range and picks as
 its one element; past `kPickBvhTriangles` the entry carries the tree the
 pick walks. The outline draws silhouettes and the few creases past 60°, not
 a wireframe (stage 0 measured 21,004 static line indices and a 13.9 ms
 settled silhouette pass on the 2M figure).
+
+Measured by the GUI test `import/a_hover_pick_on_a_2m_mesh_fits_a_frame`
+on a 2M-triangle body (the RTX 4060 laptop, under Xvfb): the tree pick takes
+under the main-thread clock's resolution, and a hovered frame costs what a
+frame with the cursor off the body does, about 26 ms of main-thread time.
+That 26 ms is the frame of a 2M-triangle body, not the pick; what it is
+spent on is not yet profiled.
 
 The path tracer takes the same triangles (`SyncRayTracingScene`).
 

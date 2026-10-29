@@ -256,7 +256,7 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
       if (body.createdBy != ref.featureId)
         continue;
       glm::dvec3 bmin, bmax;
-      body.shape.GetBoundingBox(bmin, bmax);
+      BodyBounds(body, bmin, bmax);
       away = P - (bmin + bmax) * 0.5;
       away -= glm::dot(away, T) * T;
       break;

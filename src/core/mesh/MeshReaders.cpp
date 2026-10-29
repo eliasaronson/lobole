@@ -203,7 +203,12 @@ bool ReadStlBytes(const std::string& bytes, const std::string& name,
       quantum = std::max(quantum, place);
     }
   }
-  out = FromSoup(soup, quantum);
+  // An ASCII file welds at half its printed digit: two values printed
+  // differently are a whole digit apart, and welding at the full digit
+  // joined them -- a cube of whole-millimetre corners 1 mm apart collapsed
+  // into a tetrahedron. The precision the fits read is still the digit's.
+  out = FromSoup(soup, binary ? quantum : 0.5 * quantum);
+  out.quantum = quantum;
   if (out.triangles.empty()) {
     error = "'" + name + "' holds only degenerate triangles";
     return false;

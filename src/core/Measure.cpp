@@ -2091,7 +2091,7 @@ TopoDS_Face BuildSectionCutter(const std::vector<Body>& bodies,
   glm::dvec3 lo(1e30), hi(-1e30);
   for (const auto& b : bodies) {
     glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
+    BodyBounds(b, bmin, bmax);
     lo = glm::min(lo, bmin);
     hi = glm::max(hi, bmax);
   }
@@ -2445,7 +2445,7 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
           glm::dvec3 lo(1e30), hi(-1e30);
           for (const auto& bb : bodies) {
             glm::dvec3 bmin, bmax;
-            bb.shape.GetBoundingBox(bmin, bmax);
+            BodyBounds(bb, bmin, bmax);
             lo = glm::min(lo, bmin);
             hi = glm::max(hi, bmax);
           }
@@ -3060,7 +3060,7 @@ std::optional<SetMeasure> DescribeTarget(const Target& t) {
     }
     out.solids += b.shape.SolidCount();
     glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
+    BodyBounds(b, bmin, bmax);
     lo = glm::min(lo, bmin);
     hi = glm::max(hi, bmax);
   }

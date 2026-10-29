@@ -156,7 +156,7 @@ float DocumentReach(AppState& state) {
   float reach = 0.0f;
   for (const auto& body : doc->GetBodies()) {
     glm::dvec3 mn, mx;
-    body.shape.GetBoundingBox(mn, mx);
+    BodyBounds(body, mn, mx);
     for (int i = 0; i < 3; i++)
       reach = std::max({reach, float(std::abs(mn[i])), float(std::abs(mx[i]))});
   }
@@ -384,7 +384,7 @@ glm::dvec3 DatumQuadCentre(AppState& state, const DatumPlaneFeature& datum) {
     if (!b.shape.IsValid())
       continue;
     glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax); // memoized on the shape
+    BodyBounds(b, bmin, bmax); // memoized on the shape
     lo = glm::min(lo, bmin);
     hi = glm::max(hi, bmax);
     any = true;

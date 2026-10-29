@@ -398,7 +398,7 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
     if (doc != nullptr) {
       for (const Body& b : doc->GetBodies()) {
         glm::dvec3 bmn(0.0), bmx(0.0);
-        b.shape.GetBoundingBox(bmn, bmx);
+        BodyBounds(b, bmn, bmx);
         mn = haveBox ? glm::min(mn, bmn) : bmn;
         mx = haveBox ? glm::max(mx, bmx) : bmx;
         haveBox = true;

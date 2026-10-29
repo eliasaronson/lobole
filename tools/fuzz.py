@@ -253,7 +253,8 @@ def cmd_run(args):
         procs.append(subprocess.Popen(
             [sys.executable, os.path.abspath(__file__), "_worker",
              "--binary", args.binary, "--out", out, "--timeout",
-             str(args.timeout), "--seeds", ",".join(map(str, mine))]))
+             str(args.timeout), "--seeds", ",".join(map(str, mine))] +
+            (["--mesh-body"] if args.mesh_body else [])))
     print(f"fuzz: {len(seeds)} seeds on {len(procs)} workers "
           f"(pids {' '.join(str(p.pid) for p in procs)}) into {out}",
           flush=True)
@@ -421,6 +422,8 @@ def main():
     r.add_argument("--count", type=int, default=1000)
     r.add_argument("--jobs", type=int, default=0)
     r.add_argument("--out", default="")
+    r.add_argument("--mesh-body", action="store_true",
+                   help="every design gets a mesh body as its second step")
     o = sub.add_parser("one", parents=[common])
     o.add_argument("seed", type=int)
     o.add_argument("--minimise", action="store_true")
@@ -438,7 +441,9 @@ def main():
     w = sub.add_parser("_worker", parents=[common])
     w.add_argument("--seeds", required=True)
     w.add_argument("--out", required=True)
+    w.add_argument("--mesh-body", action="store_true")
     args = ap.parse_args()
+    fd.MESH_BODY = getattr(args, "mesh_body", False)
     args.binary = os.path.abspath(getattr(args, "binary", default_binary()))
     if args.cmd == "run":
         return cmd_run(args)

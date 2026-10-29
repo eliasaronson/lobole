@@ -407,7 +407,7 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   glm::dvec3 lo(1e30), hi(-1e30);
   for (const auto& b : ctx.bodies) {
     glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
+    BodyBounds(b, bmin, bmax);
     lo = glm::min(lo, glm::dvec3(bmin));
     hi = glm::max(hi, glm::dvec3(bmax));
   }

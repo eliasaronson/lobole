@@ -330,7 +330,10 @@ std::string MeshBodyRefusal(const Body& body, const std::string& what);
 
 // The body's bounding box: its shape's, or its mesh's. False (and zeros)
 // when it has neither.
-bool BodyBounds(const Body& body, glm::dvec3& lo, glm::dvec3& hi);
+// `tight` is CADShape::GetBoundingBox's, for a B-Rep; a mesh's box is its
+// vertices', always tight.
+bool BodyBounds(const Body& body, glm::dvec3& lo, glm::dvec3& hi,
+                bool tight = false);
 
 // `body` carried by `xf`: its shape, or its mesh. Where an assembly places
 // a part's bodies.

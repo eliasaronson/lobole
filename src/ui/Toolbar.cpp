@@ -992,7 +992,7 @@ double NextInsertX(AppState& state, uint64_t slotId, OccurrenceRef kind) {
           continue;
         for (const Body& b : inst.part->GetBodies()) {
           glm::dvec3 bmin, bmax;
-          b.shape.GetBoundingBox(bmin, bmax);
+          BodyBounds(b, bmin, bmax);
           for (int c = 0; c < 8; c++) {
             const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
                                     (c & 2) ? bmax.y : bmin.y,
@@ -1009,7 +1009,7 @@ double NextInsertX(AppState& state, uint64_t slotId, OccurrenceRef kind) {
       return false;
     for (const Body& b : doc->GetBodies()) {
       glm::dvec3 bmin, bmax;
-      b.shape.GetBoundingBox(bmin, bmax);
+      BodyBounds(b, bmin, bmax);
       addBox(bmin, bmax);
     }
     return out.lo <= out.hi;

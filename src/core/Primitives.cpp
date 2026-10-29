@@ -181,7 +181,7 @@ double PartSize(const Document& doc) {
     if (b.reference || !b.shape.IsValid())
       continue;
     glm::dvec3 a, c;
-    b.shape.GetBoundingBox(a, c);
+    BodyBounds(b, a, c);
     lo = glm::min(lo, a);
     hi = glm::max(hi, c);
     any = true;

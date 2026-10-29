@@ -328,7 +328,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax,
           inst.world;
       for (const auto& body : part->GetBodies()) {
         glm::dvec3 bmin, bmax;
-        body.shape.GetBoundingBox(bmin, bmax, tight);
+        BodyBounds(body, bmin, bmax, tight);
         for (int c = 0; c < 8; c++) { // transform all 8 corners
           const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
                                   (c & 2) ? bmax.y : bmin.y,
@@ -343,7 +343,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax,
   } else if (state.document) {
     for (const auto& body : state.document->GetBodies()) {
       glm::dvec3 bmin, bmax;
-      body.shape.GetBoundingBox(bmin, bmax, tight);
+      BodyBounds(body, bmin, bmax, tight);
       min = glm::min(min, bmin);
       max = glm::max(max, bmax);
       any = true;
@@ -358,7 +358,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax,
     // much bigger than it is, the jig pushed up against the top edge.
     for (const Body& body : JobPlacedBodies(state)) {
       glm::dvec3 bmin, bmax;
-      body.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
+      BodyBounds(body, bmin, bmax, /*tight=*/true);
       min = glm::min(min, bmin);
       max = glm::max(max, bmax);
       any = true;
@@ -389,7 +389,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax,
           if (body.reference || !body.shape.IsValid())
             continue;
           glm::dvec3 bmin, bmax;
-          body.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
+          BodyBounds(body, bmin, bmax, /*tight=*/true);
           for (int c = 0; c < 8; c++) {
             const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
                                     (c & 2) ? bmax.y : bmin.y,
@@ -717,7 +717,7 @@ void FitCameraToSelection(AppState& state) {
       if (body.createdBy != createdBy)
         continue;
       glm::dvec3 bmin, bmax;
-      body.shape.GetBoundingBox(bmin, bmax);
+      BodyBounds(body, bmin, bmax);
       addBox(bmin, bmax, glm::mat4(1.0f));
     }
   };
@@ -759,7 +759,7 @@ void FitCameraToSelection(AppState& state) {
       const glm::mat4 xf = DisplayMatrix(state, *occ);
       for (const auto& body : part->GetBodies()) {
         glm::dvec3 bmin, bmax;
-        body.shape.GetBoundingBox(bmin, bmax);
+        BodyBounds(body, bmin, bmax);
         addBox(bmin, bmax, xf);
       }
       break;

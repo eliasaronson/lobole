@@ -445,7 +445,7 @@ bool BuildPlacementGizmoSpec(AppState& state, uint64_t jobPartId,
     if (b.jobPartId != jobPartId)
       continue;
     glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
+    BodyBounds(b, bmin, bmax);
     lo = glm::min(lo, bmin);
     hi = glm::max(hi, bmax);
     any = true;
@@ -523,7 +523,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& screenRay, bool clicked,
           if (b.jobPartId == g.jobPartId)
             continue;
           glm::dvec3 bmin, bmax;
-          b.shape.GetBoundingBox(bmin, bmax);
+          BodyBounds(b, bmin, bmax);
           lines.push_back(bmin[ax]);
           lines.push_back(bmax[ax]);
         }
@@ -589,7 +589,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& screenRay, bool clicked,
     if (b.jobPartId != part)
       continue;
     glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
+    BodyBounds(b, bmin, bmax);
     g.startBoxMin = glm::min(g.startBoxMin, bmin);
     g.startBoxMax = glm::max(g.startBoxMax, bmax);
   }
@@ -632,7 +632,7 @@ bool FixtureDrawnBox(AppState& state, const cam::Fixture& f, glm::dvec3& lo,
   bool any = false;
   for (const Body& b : FixtureModelBodies(state, f)) {
     glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
+    BodyBounds(b, bmin, bmax);
     for (int c = 0; c < 8; c++) {
       const glm::dvec3 p((c & 1) ? bmax.x : bmin.x, (c & 2) ? bmax.y : bmin.y,
                          (c & 4) ? bmax.z : bmin.z);
@@ -1140,7 +1140,7 @@ bool AutoExplode(AppState& state, uint64_t viewId) {
       if (body.reference)
         continue; // a ghost does not set the assembly's extent
       glm::dvec3 mn, mx;
-      body.shape.GetBoundingBox(mn, mx);
+      BodyBounds(body, mn, mx);
       for (int c = 0; c < 8; c++) {
         const glm::dvec3 corner((c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y,
                                 (c & 4) ? mx.z : mn.z);

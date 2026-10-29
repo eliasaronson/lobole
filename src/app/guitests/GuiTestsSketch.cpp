@@ -2670,7 +2670,10 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
     auto* imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
     IM_CHECK(imp != nullptr);
-    IM_CHECK(imp->representation == mesh::Representation::Recognize);
+    // The default, auto, finds it mechanical and rebuilds it
+    // (docs/interchange/README.md#mesh-bodies).
+    IM_CHECK(imp->representation == mesh::Representation::Auto);
+    IM_CHECK(imp->RepresentationChosen() == "recognize");
     IM_CHECK_EQ(imp->RecognizedBodies().size(), size_t{1});
     IM_CHECK_EQ(
         imp->RecognizedBodies()[0].recognition.Count(mesh::Kind::Cylinder),
@@ -2694,7 +2697,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ui::GlobalUndo(*s_App);
     ctx->Yield(3);
     imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
-    IM_CHECK(imp->representation == mesh::Representation::Recognize);
+    IM_CHECK(imp->representation == mesh::Representation::Auto);
     IM_CHECK_EQ(faces(), recognised);
   };
 
@@ -2729,7 +2732,11 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
                      [] { return !ui::ImportRunning(*s_App); }));
     IM_CHECK(s_App->importError.empty());
     IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
-    IM_CHECK(Doc()->GetBodies().back().shape.SolidCount() == 1);
+    // A whole sphere recognises as one region with no boundary to bound a
+    // face with, so the default, auto, keeps it a mesh body
+    // (docs/interchange/README.md#mesh-bodies).
+    IM_CHECK(Doc()->GetBodies().back().IsMesh());
+    IM_CHECK(Doc()->GetBodies().back().mesh->Closed());
 
     // Cancelled from the modal: it goes at once, and nothing is added.
     ui::HoldImportWorkerForTesting(true);
@@ -2889,11 +2896,28 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     // ...and the frames the cursor hovers it in.
     ctx->MouseMoveToPos(WorldToWindow(glm::vec3(0.0f, 0.0f, float(r))));
     double worstFrame = 0.0;
+    std::string frames;
     for (int i = 0; i < 10; i++) {
       const double f0 = MainThreadCpuMs();
       ctx->Yield();
-      worstFrame = std::max(worstFrame, MainThreadCpuMs() - f0);
+      const double ms = MainThreadCpuMs() - f0;
+      worstFrame = std::max(worstFrame, ms);
+      char buf[16];
+      std::snprintf(buf, sizeof buf, " %.1f", ms);
+      frames += buf;
     }
+    ctx->LogInfo("hovered frames (ms):%s", frames.c_str());
+    // ...against frames with the cursor off it: what hovering adds.
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(0.0f, 0.0f, float(3 * r))));
+    std::string idle;
+    for (int i = 0; i < 10; i++) {
+      const double f0 = MainThreadCpuMs();
+      ctx->Yield();
+      char buf[16];
+      std::snprintf(buf, sizeof buf, " %.1f", MainThreadCpuMs() - f0);
+      idle += buf;
+    }
+    ctx->LogInfo("frames off it (ms):%s", idle.c_str());
     ctx->LogInfo("worst pick %.2f ms, worst hovered frame %.1f ms", worstPick,
                  worstFrame);
     IM_CHECK(worstPick < 1000.0 / 60.0);

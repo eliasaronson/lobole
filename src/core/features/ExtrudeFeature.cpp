@@ -271,7 +271,7 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     double reach = 0.0;
     for (const auto& b : ctx.bodies) {
       glm::dvec3 lo, hi;
-      b.shape.GetBoundingBox(lo, hi);
+      BodyBounds(b, lo, hi);
       for (int c = 0; c < 8; ++c) {
         const glm::dvec3 corner{c & 1 ? hi.x : lo.x, c & 2 ? hi.y : lo.y,
                                 c & 4 ? hi.z : lo.z};

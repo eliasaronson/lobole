@@ -178,7 +178,7 @@ bool RibFeature::Execute(RegenContext& ctx) {
     glm::dvec3 lo(DBL_MAX), hi(-DBL_MAX);
     for (const Body& b : ctx.bodies) {
       glm::dvec3 mn, mx;
-      b.shape.GetBoundingBox(mn, mx);
+      BodyBounds(b, mn, mx);
       lo = glm::min(lo, mn);
       hi = glm::max(hi, mx);
     }
@@ -205,7 +205,7 @@ bool RibFeature::Execute(RegenContext& ctx) {
       target = static_cast<int>(ctx.bodies.size()) - 1;
       for (int i = static_cast<int>(ctx.bodies.size()) - 1; i >= 0; i--) {
         glm::dvec3 bmin, bmax;
-        ctx.bodies[i].shape.GetBoundingBox(bmin, bmax);
+        BodyBounds(ctx.bodies[i], bmin, bmax);
         const bool overlap = smin.x <= bmax.x && smax.x >= bmin.x &&
                              smin.y <= bmax.y && smax.y >= bmin.y &&
                              smin.z <= bmax.z && smax.z >= bmin.z;

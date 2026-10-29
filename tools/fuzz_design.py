@@ -32,12 +32,37 @@ V(A u B) + V(A n B) = V(A) + V(B) and V(A - B) = V(A) - V(A n B).
 import copy
 import json
 import math
+import os
 import random
 import re
+import sys
 
 # Bumped whenever a change makes a seed build something else: a seed list
 # (tests/fuzz_seeds_smoke.py) is only meaningful against one version.
 GENERATOR_VERSION = 1
+
+# `fuzz.py run --mesh-body`: every design gets a closed mesh body beside or
+# across its base, as its second step, so a feature that reads a B-Rep meets
+# one it must refuse by name (docs/interchange/README.md#mesh-bodies). The
+# STL is written once per process.
+MESH_BODY = False
+_MESH_STL = {}
+
+
+def mesh_body_stl(x):
+    """A closed sphere of radius 10 centred at (x, 0, 5), written once."""
+    if x not in _MESH_STL:
+        import atexit
+        import tempfile
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "tests"))
+        from smoke_shapes import mesh_sphere
+        fd_, path = tempfile.mkstemp(prefix="lobole-fuzz-mesh-", suffix=".stl")
+        os.close(fd_)
+        mesh_sphere(path, center=(x, 0.0, 5.0), r=10.0, rings=24)
+        atexit.register(lambda p=path: os.path.exists(p) and os.remove(p))
+        _MESH_STL[x] = path
+    return _MESH_STL[x]
 
 GRID = 2.5
 # The failure classes, and which of them are findings (docs: the outcome
@@ -182,6 +207,16 @@ class Generator:
                         "axis": {"kind": "custom", "origin": [0, 0, 0],
                                  "direction": [0, 0, 1]},
                         "angle_deg": angle, "mode": "new_body"}}}]}
+
+    def mesh_body(self):
+        """A closed mesh sphere of radius 10, imported as a mesh body at a
+        place the base overlaps, touches or misses."""
+        x = self.rng.choice([0.0, 20.0, 80.0])
+        return {"op": "mesh body", "expect": "new_body", "deps": [],
+                "calls": [{"method": "add_feature", "params": {"feature": {
+                    "type": "Import", "name": "Scan", "id": fid(1),
+                    "path": mesh_body_stl(x), "representation": "mesh",
+                    "keep_origin": True}}}]}
 
     def next(self, k, state, last):
         """Step k from `state` (sorted bodies with faces and edges) and the
@@ -557,7 +592,12 @@ def check_step(step, before, answer, geometry, part_volume, boxes=None):
         v = b.get("volume_mm3")
         if v is None or not math.isfinite(v) or v <= 0:
             raise Failure("invalid", f"body {b.get('name')} has volume {v}")
-        if b.get("solids", 1) < 1:
+        # A mesh body has triangles, not solids: closed is its whole
+        # (docs/interchange/README.md#mesh-bodies).
+        if "mesh" in b:
+            if not b["mesh"].get("closed"):
+                raise Failure("invalid", f"mesh body {b.get('name')} opened")
+        elif b.get("solids", 1) < 1:
             raise Failure("invalid", f"body {b.get('name')} has no solid")
     if geometry is not None and not geometry.get("valid", True):
         bad = [(b.get("name"), b.get("reasons")) for b in
@@ -742,7 +782,10 @@ class Runner:
             # A profile whose loops overlap is the sketch's fault, and the
             # extrude says so.
             bad_profile = "profile sweeps to an invalid solid" in msg
-            if names & LIMIT_TYPES or empty or bad_profile:
+            # A mesh body refused by name is the refusal it should be
+            # (docs/interchange/README.md#mesh-bodies).
+            mesh_refused = "needs a B-Rep, and body" in msg
+            if names & LIMIT_TYPES or empty or bad_profile or mesh_refused:
                 # A fillet, chamfer, shell, draft or hole that cannot build
                 # says why; undo it and go on.
                 for _ in sent:
@@ -789,7 +832,9 @@ def generate_and_run(d, seed, max_steps=8, log=None):
         n_steps = gen.rng.randint(1, max_steps)
         last = None
         for k in range(n_steps + 1):
-            if k > 0:
+            if k == 1 and MESH_BODY:
+                step = gen.mesh_body()
+            elif k > 0:
                 state = summarise(run.elements(), before)
                 step = gen.next(k, state, last)
                 if step is None:

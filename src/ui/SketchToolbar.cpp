@@ -866,7 +866,7 @@ DefaultExtrudeDistance(const std::vector<Body>& bodies,
       if (!b.shape.IsValid())
         continue;
       glm::dvec3 bmin, bmax;
-      b.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
+      BodyBounds(b, bmin, bmax, /*tight=*/true);
       for (int c = 0; c < 8; c++) {
         const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
                                 (c & 2) ? bmax.y : bmin.y,

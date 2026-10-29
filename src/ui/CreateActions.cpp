@@ -179,7 +179,7 @@ std::optional<std::pair<glm::dvec3, glm::dvec3>> BodyBox(const AppState& state,
     if (b.createdBy != bodyId || !b.shape.IsValid())
       continue;
     glm::dvec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
+    BodyBounds(b, bmin, bmax, /*tight=*/true);
     lo = glm::min(lo, bmin);
     hi = glm::max(hi, bmax);
     any = true;
@@ -226,7 +226,7 @@ void CreateDatumPlane(AppState& state) {
     for (const Body& b :
          state.document ? state.document->GetBodies() : std::vector<Body>{}) {
       glm::dvec3 bmin, bmax;
-      b.shape.GetBoundingBox(bmin, bmax);
+      BodyBounds(b, bmin, bmax);
       for (int c = 0; c < 8; c++) {
         const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
                                 (c & 2) ? bmax.y : bmin.y,
@@ -911,7 +911,7 @@ void RecenterSplitOffset(AppState& state, SplitFeature& split) {
     if (b.createdBy != split.bodyId && b.createdBy != split.GetId())
       continue;
     glm::dvec3 lo, hi;
-    b.shape.GetBoundingBox(lo, hi);
+    BodyBounds(b, lo, hi);
     bmin = glm::min(bmin, lo);
     bmax = glm::max(bmax, hi);
     found = true;

@@ -162,58 +162,80 @@ namespace {
 // where neighbouring triangles turn by more than the outline's crease angle
 // (60°, render/OutlineEdges.h's featureCos): the facets of a scan shade
 // smooth, and a fold stays a fold.
+//
+// The corners round a vertex are grouped across the edges that do NOT turn
+// that far (a union of the corners either side of each smooth edge), and
+// each group is one vertex with one normal. So two triangles meeting on a
+// smooth edge share both its vertices: the outline, which finds edges by
+// vertex index, sees no seam there. Grouping by a normal computed per
+// corner instead left every edge whose two sides averaged slightly
+// different neighbourhoods looking like a boundary, and a scan drew as
+// though covered in hairs.
 void MeshBodyVertices(const mesh::TriMesh& m, std::vector<Vertex3D>& vertices,
                       std::vector<uint32_t>& indices) {
   constexpr double kCreaseCos = 0.5;
-  const size_t nv = m.positions.size(), nt = m.triangles.size();
-  std::vector<glm::dvec3> faceN(nt);
-  for (uint32_t t = 0; t < nt; t++)
-    faceN[t] = m.AreaNormal(t);
-  // Triangles round each vertex, compressed.
-  std::vector<uint32_t> start(nv + 1, 0), around(nt * 3);
-  for (const auto& tri : m.triangles)
-    for (uint32_t v : tri)
-      start[v + 1]++;
-  for (size_t v = 0; v < nv; v++)
-    start[v + 1] += start[v];
-  {
-    std::vector<uint32_t> fill(start.begin(), start.end() - 1);
-    for (uint32_t t = 0; t < nt; t++)
-      for (uint32_t v : m.triangles[t])
-        around[fill[v]++] = t;
+  const size_t nt = m.triangles.size();
+  std::vector<glm::dvec3> areaN(nt), unitN(nt);
+  for (uint32_t t = 0; t < nt; t++) {
+    areaN[t] = m.AreaNormal(t);
+    const double l = glm::length(areaN[t]);
+    unitN[t] = l > 0.0 ? areaN[t] / l : glm::dvec3(0.0);
   }
+  // Union-find over corners (3 t + c).
+  std::vector<uint32_t> parent(nt * 3);
+  for (uint32_t i = 0; i < parent.size(); i++)
+    parent[i] = i;
+  const auto find = [&](uint32_t x) {
+    while (parent[x] != x)
+      x = parent[x] = parent[parent[x]];
+    return x;
+  };
+  const auto unite = [&](uint32_t a, uint32_t b) {
+    a = find(a);
+    b = find(b);
+    if (a != b)
+      parent[std::max(a, b)] = std::min(a, b);
+  };
+  const auto cornerOf = [&](uint32_t t, uint32_t v) -> int {
+    for (int c = 0; c < 3; c++)
+      if (m.triangles[t][c] == v)
+        return c;
+    return -1;
+  };
+  const bool adjacency = m.neighbour.size() == nt;
+  for (uint32_t t = 0; adjacency && t < nt; t++)
+    for (int e = 0; e < 3; e++) {
+      const uint32_t u = m.neighbour[t][e];
+      if (u == mesh::kNone || u < t)
+        continue;
+      if (glm::dot(unitN[t], unitN[u]) < kCreaseCos)
+        continue; // a crease: the corners either side stay apart
+      for (int k = 0; k < 2; k++) {
+        const uint32_t v = m.triangles[t][(e + k) % 3];
+        const int cu = cornerOf(u, v);
+        if (cu >= 0)
+          unite(t * 3 + uint32_t((e + k) % 3), u * 3 + uint32_t(cu));
+      }
+    }
+  // Each group's normal, and one vertex for it.
+  std::vector<glm::dvec3> groupN(nt * 3, glm::dvec3(0.0));
+  for (uint32_t i = 0; i < nt * 3; i++)
+    groupN[find(i)] += areaN[i / 3];
+  std::vector<uint32_t> vertexOf(nt * 3, mesh::kNone);
   vertices.clear();
   indices.clear();
-  vertices.reserve(nv + nv / 8);
+  vertices.reserve(m.positions.size() + m.positions.size() / 8);
   indices.reserve(nt * 3);
-  // Per vertex, the corners already emitted: (normal, index).
-  std::vector<std::vector<std::pair<glm::vec3, uint32_t>>> emitted(nv);
-  for (uint32_t t = 0; t < nt; t++) {
-    const double lt = glm::length(faceN[t]);
-    const glm::dvec3 nt0 = lt > 0.0 ? faceN[t] / lt : glm::dvec3(0, 0, 1);
-    for (uint32_t v : m.triangles[t]) {
-      glm::dvec3 sum(0.0);
-      for (uint32_t k = start[v]; k < start[v + 1]; k++) {
-        const glm::dvec3& o = faceN[around[k]];
-        const double lo = glm::length(o);
-        if (lo > 0.0 && glm::dot(o / lo, nt0) >= kCreaseCos)
-          sum += o;
-      }
-      const double ls = glm::length(sum);
-      const glm::vec3 n = glm::vec3(ls > 0.0 ? sum / ls : nt0);
-      uint32_t index = mesh::kNone;
-      for (const auto& [en, ei] : emitted[v])
-        if (en == n) {
-          index = ei;
-          break;
-        }
-      if (index == mesh::kNone) {
-        index = uint32_t(vertices.size());
-        vertices.push_back({glm::vec3(m.positions[v]), n});
-        emitted[v].emplace_back(n, index);
-      }
-      indices.push_back(index);
+  for (uint32_t i = 0; i < nt * 3; i++) {
+    const uint32_t g = find(i);
+    if (vertexOf[g] == mesh::kNone) {
+      const double l = glm::length(groupN[g]);
+      const glm::dvec3 n = l > 0.0 ? groupN[g] / l : unitN[i / 3];
+      vertexOf[g] = uint32_t(vertices.size());
+      vertices.push_back(
+          {glm::vec3(m.positions[m.triangles[i / 3][i % 3]]), glm::vec3(n)});
     }
+    indices.push_back(vertexOf[g]);
   }
 }
 

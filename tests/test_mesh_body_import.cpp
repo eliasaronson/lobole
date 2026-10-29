@@ -455,3 +455,30 @@ TEST_CASE("auto recognises the largest mechanical fixture below the limit "
   CHECK(s < 5.0);
   fs::remove(stl);
 }
+
+// An ASCII STL of whole-number corners 1 mm apart is a cube, not the
+// tetrahedron welding at the full printed digit made of it.
+TEST_CASE("An ASCII STL of whole-millimetre corners keeps every corner",
+          "[mesh_body]") {
+  const int c[8][3] = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0},
+                       {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
+  const int f[12][3] = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7},
+                        {0, 1, 5}, {0, 5, 4}, {1, 2, 6}, {1, 6, 5},
+                        {2, 3, 7}, {2, 7, 6}, {3, 0, 4}, {3, 4, 7}};
+  std::string text = "solid cube\n";
+  for (const auto& t : f) {
+    text += "facet normal 0 0 0\nouter loop\n";
+    for (int k : t)
+      text += "vertex " + std::to_string(c[k][0]) + " " +
+              std::to_string(c[k][1]) + " " + std::to_string(c[k][2]) + "\n";
+    text += "endloop\nendfacet\n";
+  }
+  text += "endsolid cube\n";
+  mesh::TriMesh m;
+  std::string err;
+  REQUIRE(mesh::ReadStlBytes(text, "cube.stl", m, err));
+  CHECK(m.positions.size() == 8);
+  CHECK(m.triangles.size() == 12);
+  CHECK(m.Closed());
+  CHECK_THAT(m.Volume(), WithinRel(1.0, 1e-12));
+}

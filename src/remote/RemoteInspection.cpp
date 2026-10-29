@@ -863,7 +863,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "connectivity pass entirely.",
      "body?:int", remote::NeedsPart,
      "bodies:{bad_edges:int, bad_faces:int, bad_wires:int, body:int, "
-     "name:string, reasons:string[], valid:bool}[], "
+     "name:string, reasons:string[], valid:bool, mesh?:object}[], "
      "body_components?:string[][], body_count:int, connected?:bool, "
      "feature_errors:{error:string, index:int, name:string, "
      "after_earlier_failure?:bool}[], ok:bool, "
@@ -2000,9 +2000,20 @@ void AddMeasuredBox(Bnd_Box& box, const std::vector<Body>& bodies,
   t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));
   t.SetTranslationPart(gp_Vec(world[3][0], world[3][1], world[3][2]));
   const TopLoc_Location loc(t);
-  for (const Body& b : bodies)
-    if (!b.reference && !b.shape.GetShape().IsNull())
+  for (const Body& b : bodies) {
+    if (b.reference)
+      continue;
+    if (b.IsMesh()) {
+      // A mesh's vertices are its geometry: their box is the measured one.
+      for (const glm::dvec3& p : b.mesh->positions) {
+        const glm::dvec3 w = glm::dvec3(world * glm::dvec4(p, 1.0));
+        box.Add(gp_Pnt(w.x, w.y, w.z));
+      }
+      continue;
+    }
+    if (!b.shape.GetShape().IsNull())
       BRepBndLib::AddOptimal(b.shape.GetShape().Moved(loc), box, false, false);
+  }
 }
 
 json BoxJson(const Bnd_Box& box) {
@@ -5173,7 +5184,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       {
         if (which < bodies.size()) {
           glm::dvec3 bmin, bmax;
-          bodies[which].shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
+          BodyBounds(bodies[which], bmin, bmax, /*tight=*/true);
           entry["bbox_min"] = {bmin.x, bmin.y, bmin.z};
           entry["bbox_max"] = {bmax.x, bmax.y, bmax.z};
         }
@@ -5247,6 +5258,34 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     for (size_t i = 0; i < bodies.size(); i++) {
       if (only >= 0 && static_cast<int>(i) != only)
         continue;
+      // A mesh body is checked as a mesh: well formed when it is
+      // edge-manifold and consistently oriented. Open is not invalid -- a
+      // scan arrives open -- and says so
+      // (docs/interchange/README.md#mesh-bodies).
+      if (bodies[i].IsMesh()) {
+        const mesh::TriMesh& m = *bodies[i].mesh;
+        const bool wellFormed = m.nonManifoldEdges == 0 && m.flippedEdges == 0;
+        json reasons = json::array();
+        if (m.nonManifoldEdges)
+          reasons.push_back(std::to_string(m.nonManifoldEdges) +
+                            " edges on three or more triangles");
+        if (m.flippedEdges)
+          reasons.push_back(std::to_string(m.flippedEdges) +
+                            " edges joining triangles facing opposite ways");
+        allValid = allValid && wellFormed;
+        rows.push_back({{"body", i},
+                        {"name", bodies[i].name},
+                        {"valid", wellFormed},
+                        {"mesh",
+                         {{"triangles", m.triangles.size()},
+                          {"closed", m.Closed()},
+                          {"boundary_edges", m.boundaryEdges}}},
+                        {"bad_faces", 0},
+                        {"bad_edges", 0},
+                        {"bad_wires", 0},
+                        {"reasons", reasons}});
+        continue;
+      }
       const Measure::GeometryReport r = Measure::CheckGeometry(bodies[i].shape);
       allValid = allValid && r.valid;
       rows.push_back({{"body", i},

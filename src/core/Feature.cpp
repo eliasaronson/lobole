@@ -203,7 +203,7 @@ std::string MeshBodyRefusal(const Body& body, const std::string& what) {
          "`recognize` to rebuild its faces";
 }
 
-bool BodyBounds(const Body& body, glm::dvec3& lo, glm::dvec3& hi) {
+bool BodyBounds(const Body& body, glm::dvec3& lo, glm::dvec3& hi, bool tight) {
   lo = hi = glm::dvec3(0.0);
   if (body.IsMesh()) {
     if (body.mesh->positions.empty())
@@ -213,7 +213,7 @@ bool BodyBounds(const Body& body, glm::dvec3& lo, glm::dvec3& hi) {
   }
   if (!body.shape.IsValid())
     return false;
-  body.shape.GetBoundingBox(lo, hi);
+  body.shape.GetBoundingBox(lo, hi, tight);
   return true;
 }
 

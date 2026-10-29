@@ -340,7 +340,10 @@ so it can run on a worker thread.
   hashes its content.
   - **The weld is exact first.** A CAD exporter writes a shared vertex
     bit-identically, so points equal to the bit become one vertex. Then
-    points within one `quantum` of each other are joined.
+    points within one `quantum` of each other are joined: a binary file's
+    float32 spacing, or half an ASCII file's printed digit (two values
+    printed differently are a whole digit apart, and a whole-millimetre
+    cube of 1 mm sides welded at the full digit became a tetrahedron).
   - **`quantum` is the precision the file was written at.** For a binary STL
     it is the float32 spacing at the largest coordinate (2⁻¹⁸ mm at 60 mm).
     For an ASCII STL it is the place value of the last printed digit at that

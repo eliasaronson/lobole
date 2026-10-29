@@ -521,7 +521,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "part?:string|int", remote::NoFlags,
      "bodies:{bbox_max:number[], bbox_min:number[], created_by:int, "
      "material:string, name:string, volume_mm3:number, reference?:bool, "
-     "mesh?:int, face_appearance?:object[], appearance?:object}[], "
+     "mesh?:int, mesh_body?:object, face_appearance?:object[], "
+     "appearance?:object}[], "
      "camera:{aspect:number, distance:number, fov_deg:number, "
      "position:number[], target:number[]}, can_redo:bool, "
      "can_undo:bool, features:object[], pending_feature_id:int, "
@@ -2108,7 +2109,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // from 1.6 s to 5.8 s — and a bound that cannot be too SMALL is what
       // most callers of this field want. `mass_properties` returns the
       // measured box for the times you want a size.
-      body.shape.GetBoundingBox(min, max);
+      BodyBounds(body, min, max);
       // `created_by` is here because it is FREE here and expensive
       // anywhere else: it was only ever readable from list_elements, which
       // enumerates every face and edge of the body to hand back one
@@ -2121,6 +2122,14 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           {"bbox_min", Vec3ToJson(min)}, {"bbox_max", Vec3ToJson(max)}};
       if (body.reference) // a Derived ghost: drawn on, weighed as nothing
         entry["reference"] = true;
+      // A mesh body: its triangles' volume when they close, and what it is
+      // (docs/interchange/README.md#mesh-bodies).
+      if (body.IsMesh()) {
+        const bool closed = body.mesh->Closed();
+        entry["volume_mm3"] = closed ? body.mesh->Volume() : 0.0;
+        entry["mesh_body"] = {{"triangles", body.mesh->triangles.size()},
+                              {"closed", closed}};
+      }
       if (body.appearance.Any()) { // v54 visual override, set_appearance
         json a = json::object();
         if (body.appearance.color)

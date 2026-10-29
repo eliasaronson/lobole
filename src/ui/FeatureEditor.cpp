@@ -2226,25 +2226,37 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         ImGui::TextWrapped("Applied %s: %s", interchange::ToString(up.applied),
                            up.because.c_str());
     }
-    // What a mesh becomes: recognised surfaces or a face per triangle
-    // (docs/interchange/README.md#recognising-a-faceted-mesh), and with
-    // recognize the fewest sides a round needs. Either change renumbers every
-    // face, so while another feature refers to the import it is shown, not
-    // offered.
+    // What a mesh becomes: auto's choice, a mesh body, recognised surfaces
+    // or a face per triangle (docs/interchange/README.md#mesh-bodies), and
+    // with recognize or auto the fewest sides a round needs. Any change
+    // renumbers every face, so while another feature refers to the import
+    // it is shown, not offered.
     if (ImportFeature::IsMesh(import->path)) {
       const std::string users = ImportReferrers(*state.document, *import);
       ImGui::BeginDisabled(!users.empty());
-      static const char* kReps[] = {"recognize", "facets"};
-      int sel = import->representation == mesh::Representation::Facets;
+      static const char* kReps[] = {"auto", "mesh", "recognize", "facets"};
+      static const mesh::Representation kRepValues[] = {
+          mesh::Representation::Auto, mesh::Representation::Mesh,
+          mesh::Representation::Recognize, mesh::Representation::Facets};
+      int sel = 0;
+      for (int i = 0; i < 4; i++)
+        if (kRepValues[i] == import->representation)
+          sel = i;
       const nlohmann::json before = DocumentIO::FeatureToJson(*import);
-      if (LabeledCombo("Mesh", &sel, kReps, 2)) {
-        import->representation = sel == 0 ? mesh::Representation::Recognize
-                                          : mesh::Representation::Facets;
-        if (import->representation == mesh::Representation::Facets)
+      if (LabeledCombo("Mesh", &sel, kReps, 4)) {
+        import->representation = kRepValues[sel];
+        if (import->representation == mesh::Representation::Facets ||
+            import->representation == mesh::Representation::Mesh)
           import->minSides = mesh::kDefaultMinSides;
         CommitDiscrete(state, feature, before, index, commit);
       }
-      if (import->representation == mesh::Representation::Recognize) {
+      if (!import->RepresentationChosen().empty() &&
+          import->representation == mesh::Representation::Auto)
+        ImGui::TextWrapped("Auto chose %s: %s",
+                           import->RepresentationChosen().c_str(),
+                           import->RepresentationWhy().c_str());
+      if (import->representation == mesh::Representation::Recognize ||
+          import->representation == mesh::Representation::Auto) {
         LeftLabel("Min sides");
         int sides = import->minSides;
         ImGui::SetNextItemWidth(-1);

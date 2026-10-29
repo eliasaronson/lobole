@@ -1204,6 +1204,11 @@ addresses, for which the fresh instance was only a luckier draw).
 A message's **gist** is its class and first
 60 characters less digits, and the report groups seeds by it.
 
+`run --mesh-body` makes every design's second step a closed
+[mesh body](../interchange/README.md#mesh-bodies) (a sphere of radius 10,
+across, beside or clear of the base), so every feature that reads a B-Rep
+meets one it must refuse by name.
+
     tools/fuzz.py run --from 0 --count 1000 [--jobs N] [--timeout 90] [--out DIR]
     tools/fuzz.py one SEED [--design] [--minimise] [--asan] [--keep]
     tools/fuzz.py replay CASE.jsonl
