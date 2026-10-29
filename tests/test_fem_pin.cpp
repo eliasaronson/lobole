@@ -227,6 +227,11 @@ TEST_CASE("a lever on two pins: reactions balance the load and the clamp's "
     fem::Study& s =
         doc.AddStudy(type == fem::LoadType::Pin ? "Pins" : "Clamps");
     s.meshSize = 2.0;
+    // The bores' sizes below ARE the comparison: a run that refined round
+    // its peak (converge: auto, the default) would refine the coarse one
+    // as far as the time allows, and the clamp's spike then reads against
+    // the machine's load, not the mesh.
+    s.converge = fem::ConvergeMode::Never;
     for (const ElementRef& bore : p->bores)
       s.refinements.push_back({bore, boreSize, "", 0});
     s.loads.push_back(Support(doc, type, p->bores[0]));
