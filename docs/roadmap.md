@@ -129,6 +129,14 @@ them:
   optimiser is a larger step: spurious modes in near-void elements, repeated
   eigenvalues and an adjoint per mode. Sized only if the check-and-rerun loop
   proves too blunt.
+- **A topology result as a part.**
+  - First, the smoothed result as a mesh body (organic meshes, Stage 1).
+  - Then a hybrid: the organic bulk unioned with the original part's exact
+    keep faces (bores, bolt faces, mating surfaces), so it prints, bolts on
+    and can be studied again. Netgen meshing a closed triangle surface for
+    that study is measured first, on a real result.
+  - A truly parametric rebuild (a strut skeleton as editable sweeps) is the
+    far end, for machining and hand-editing.
 - **Tolerances:** an inferred stack-up chain (`stack_up` sums a chain the
   caller states), and general-tolerance tables (ISO 2768).
 - **Beam elements** for tube frames: `check_frame` checks the member graph,
