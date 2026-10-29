@@ -1086,9 +1086,9 @@ is not `auto`: every result saved before keeps its hash.
 2. `LOBOLE_CCX`;
 3. a `ccx` shipped beside the app (`<prefix>/lib/lobole/ccx`, or `ccx.exe`
    beside `lobole.exe`). The GUI AppImage (`usr/lib/lobole/ccx`, Ubuntu's
-   2.21), the Flatpak (`/app/lib/lobole/ccx`, 2.23 built in it) and the
-   Windows zip and installer (`bin\ccx.exe`, dhondt.de's 2.23) carry one
-   there; the `.deb`, the AUR package and Nix leave it to the distribution
+   2.21) and the Flatpak (`/app/lib/lobole/ccx`, 2.23 built in it) carry
+   one there; the `.deb`, the AUR package and Nix leave it to the
+   distribution, and on Windows the user installs it
    ([packaging](../packaging/README.md#the-bundled-calculix));
 4. `ccx` on PATH.
 

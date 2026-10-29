@@ -414,8 +414,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir files
-          # windows/ holds ccx_2.23.src.tar.bz2 and appimage/ the Ubuntu
-          # source package of its ccx: the GPL source of each ccx we ship.
+          # appimage/ holds the Ubuntu source package of the ccx the AppImage
+          # carries: the GPL source of the one ccx a release ships as a file
+          # (the Flatpak builds its own from the source its manifest pins).
           cp linux/*.AppImage appimage/*.AppImage appimage/calculix-ccx-*-source.tar \
             windows/* deb/*.deb source/* python/* files/
           (cd files && sha256sum -- * > SHA256SUMS)

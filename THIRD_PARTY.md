@@ -185,7 +185,6 @@ Loböle's licence.
 | --- | --- | --- |
 | GUI AppImage | Ubuntu 24.04 `calculix-ccx` 2.21, with SPOOLES 2.2 (public domain), ARPACK (BSD-3-Clause), Open MPI, hwloc and libevent (BSD-3-Clause) with the libudev (LGPL-2.1-or-later) and libcap (BSD-3-Clause) Open MPI links, reference BLAS/LAPACK (BSD-3-Clause) and libgfortran (GPL-3.0 with the GCC runtime library exception) as its shared libraries | GPL-2.0-or-later (Debian's `copyright` says GPL-2) |
 | Flatpak | 2.23 from source, linking SPOOLES 2.2 (public domain, with nixpkgs' MIT patches), ARPACK-NG 3.9.1 and reference LAPACK 3.12.1 (BSD-3-Clause) | GPL-2.0-or-later |
-| Windows | dhondt.de's `ccx_static.exe` 2.23, with SPOOLES (public domain) and PaStiX (CeCILL-C) linked in | GPL-2.0-or-later |
 
 The licence text is `LICENSES/GPL-2.0.txt`; the source offer is in
 `LICENSES/SOURCE-OFFER.md`.

@@ -497,9 +497,6 @@ on a 30 GB machine.
   that name for every window's title bar and taskbar button, and as the
   executable's only icon it is also the one Explorer and a shortcut show.
   The installer and uninstaller carry it too (`Icon` in `installer.nsi`).
-- **`ccx.exe`** beside `lobole.exe` is dhondt.de's `ccx_static.exe`,
-  pinned by sha256 in `installer.nix` ([The bundled
-  CalculiX](#the-bundled-calculix)).
 - The NSIS installer is 32-bit; testing install-then-run under Wine needs
   WoW64 (or the 32-bit `pkgs.wine` for the installer and `wine64` for the
   app).
@@ -593,30 +590,29 @@ after the setting and `LOBOLE_CCX`: beside itself.
 |---|---|---|---|
 | GUI AppImage | Ubuntu 24.04's `calculix-ccx` (2.21), with SPOOLES, ARPACK and the OpenMPI it links, BLAS, LAPACK and libgfortran | `usr/lib/lobole/ccx`, a link to `usr/bin/ccx`: linuxdeploy (`--executable`) points an executable's rpath at `usr/lib` only from `usr/bin`, and given the `lib/lobole` path it wrote `$ORIGIN`, so that copy found none of its libraries | `calculix-ccx-<version>-source.tar`: Ubuntu's source package of exactly that version (`.dsc`, upstream tarball, Debian changes), fetched by `build.sh` with `apt-get source` |
 | Flatpak | 2.23, built in the manifest against reference BLAS/LAPACK, ARPACK and a static SPOOLES (with nixpkgs' three patches, `packaging/flatpak/patches/`) | `/app/lib/lobole/ccx` | built from source; the manifest pins it |
-| Windows zip and installer | dhondt.de's `ccx_static.exe` 2.23, from `calculix_2.23_4win.zip` (sha256 pinned in `installer.nix`), with SPOOLES and PaStiX linked in and no DLL; nixpkgs cannot cross-build ccx for mingw | `bin\ccx.exe` | `ccx_2.23.src.tar.bz2`, pinned in `installer.nix` |
 | `.deb`, AUR, Nix | not bundled: the distribution's own (`Suggests: calculix-ccx`; Nix's `calculix-ccx`) | | |
+| Windows zip and installer | not bundled: the user installs dhondt.de's build and points `calculix_path` at it | | |
 
-`LICENSES/GPL-2.0.txt` ships with every package already. In
-`share/doc/calculix-ccx/` the Windows packages also carry dhondt.de's
-`README_Install`, which names the binary's builder and the solvers linked
-in, and the AppImage carries Ubuntu's `copyright` file.
+`LICENSES/GPL-2.0.txt` ships with every package already, and the
+AppImage carries Ubuntu's `copyright` file in `share/doc/calculix-ccx/`.
+
+Windows carries none. Its build has no Netgen to mesh a study
+([Windows](#windows)), so a bundled ccx would be one no study could use, and
+the only Windows build there is (dhondt.de's `ccx_static.exe`) was made by a
+third party with PaStiX linked in, whose exact build is not published: we
+could not offer its corresponding source. A Windows user installs that
+build and points `calculix_path` at it.
 
 **Checked before release** by `tools/release-smoke.py --calculix`: `ping`'s
 `features.calculix` must be the copy beside the app, not one on the host.
 The AppImage, which has Netgen, then solves a bar pulled along its length as
-a static study on CalculiX and in-house, which must agree; the Windows
-build has no Netgen to mesh a study, so the `ccx.exe` it found solves a
-one-element deck under Wine, a unit cube in uniform tension whose answer is
-exact. The Windows build therefore carries a working ccx that no study can
-use until Netgen builds there ([Windows](#windows)).
+a static study on CalculiX and in-house, which must agree. On a build
+without Netgen the ccx it found solves a one-element deck instead, a unit
+cube in uniform tension whose answer is exact.
 
-**What the release does with the sources.** The `appimage` job uploads the
-source package beside the AppImage, `installer.nix` writes
-`ccx_2.23.src.tar.bz2` beside the zip and the installer, and the
-`github-release` job attaches both. The Windows binary was built by a third
-party (the README names him) from that ccx source with SPOOLES and PaStiX;
-the release offers the ccx source, but not that build's exact PaStiX
-version or makefile, which upstream does not publish.
+**What the release does with the source.** The `appimage` job uploads the
+source package beside the AppImage, and the `github-release` job attaches
+it. The Flatpak's ccx is built from the upstream source its manifest pins.
 
 ## Licensing
 
