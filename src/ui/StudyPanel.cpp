@@ -84,6 +84,8 @@ const char* LoadLabel(fem::LoadType t) {
     return "Remote";
   case fem::LoadType::Pin:
     return "Pin";
+  case fem::LoadType::Contact:
+    return "Contact";
   }
   return "?";
 }
@@ -102,6 +104,8 @@ const char* LoadGlyph(fem::LoadType t) {
     return ICON_FA_LOCATION_CROSSHAIRS;
   case fem::LoadType::Pin:
     return ICON_FA_THUMBTACK;
+  case fem::LoadType::Contact:
+    return ICON_FA_ARROWS_DOWN_TO_LINE;
   }
   return ICON_FA_BOLT;
 }
@@ -531,7 +535,21 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   // #pin-supports): offered only where it can be placed.
   if (s.type == fem::AnalysisType::Static && !StudyHostOf(state).IsAssembly())
     arm(ICON_FA_THUMBTACK " Pin###sim_bc_pin", SimulationState::Tool::Pin);
+  // A contact (docs/simulation/README.md#contact) is a static study's,
+  // solved on CalculiX: the face rests on the ground.
+  if (s.type == fem::AnalysisType::Static)
+    arm(ICON_FA_ARROWS_DOWN_TO_LINE " Contact###sim_bc_contact",
+        SimulationState::Tool::Contact);
   ImGui::Checkbox("Labels in viewport###sim_show_labels", &sim.showLabels);
+  if (sim.tool == SimulationState::Tool::Contact) {
+    LeftLabel("Friction (\xCE\xBC)");
+    ExprInputDouble(state, "###sim_contact_friction",
+                    &sim.pendingContactFriction, "%.3g");
+    if (sim.pendingContactFriction < 0.0)
+      sim.pendingContactFriction = 0.0;
+    ImGui::TextDisabled("Click a flat face: it rests on the ground, which "
+                        "pushes it and never pulls; solved on CalculiX");
+  }
   if (sim.tool == SimulationState::Tool::Pin) {
     ImGui::Checkbox("Hold it from turning###sim_pin_fix_rotation",
                     &sim.pendingPinFixRotation);
@@ -668,6 +686,13 @@ void DrawLoads(AppState& state, const fem::Study& s) {
                 std::to_string(l.id);
     if (l.type == fem::LoadType::Pin)
       row.tail = l.fixRotation ? "held from turning" : "free to turn";
+    if (l.type == fem::LoadType::Contact) {
+      char buf[64];
+      std::snprintf(buf, sizeof(buf), "%s, friction %.3g",
+                    l.contactWith != 0 ? "on a rigid part" : "on the ground",
+                    l.friction);
+      row.tail = buf;
+    }
     if (!fem::IsSupport(l.type)) {
       char buf[64];
       std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude,
@@ -1052,7 +1077,7 @@ void DrawResults(AppState& state, const fem::Study& s) {
       ImGui::SetTooltip("%s", s.error.c_str());
     // A CalculiX study's refusal is read, not hovered for: it says how to
     // install the solver, or what the solver said.
-    if (fem::EffectiveSolver(s.solver, s.nonlinear) == fem::Solver::Calculix) {
+    if (fem::EffectiveSolver(s) == fem::Solver::Calculix) {
       ImGui::PushStyleColor(ImGuiCol_Text, kError);
       ImGui::TextWrapped("%s", s.error.c_str());
       ImGui::PopStyleColor();
@@ -1129,9 +1154,25 @@ void DrawResults(AppState& state, const fem::Study& s) {
                          "increments",
                          n.linearFactor, n.imperfectionMm, n.increments);
     } else {
-      ImGui::TextColored(kMuted, "Large deformation: %d increments",
+      ImGui::TextColored(kMuted, "%s: %d increments",
+                         n.largeDeformation ? "Large deformation"
+                                            : "Contact, small deformation",
                          n.increments);
     }
+    // Each contact (docs/simulation/README.md#contact): how much of its
+    // faces closed, and how hard it pressed there.
+    for (const fem::StudyBodyResult::ContactResult& c : b.contacts) {
+      ImGui::Text("%s %s: %.4g of %.4g mm2 closed",
+                  c.participant ? "Contact with" : "Rests on", c.name.c_str(),
+                  c.closedMm2, c.areaMm2);
+      ImGui::TextColored(kMuted,
+                         "  %.4g N normal, %.4g N shear; pressure up to %.4g "
+                         "MPa",
+                         c.normalN, c.shearN, c.maxPressureMPa);
+    }
+    if (n.stabilization > 0)
+      ImGui::TextColored(kMuted, "Stabilization carried %.2g of the load",
+                         n.stabilization);
     if (n.snapped)
       MessageText(kStale, "Snapped through between factor " +
                               std::to_string(n.snappedFrom) + " and " +
@@ -1289,23 +1330,25 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
   // All four roles. Bonded (S2) was missing: the GUI could not bond a
   // participant, and one bonded over the RPC read here as "Ignored", because
   // the index below fell through to 0.
-  const char* kRoles[] = {"Ignored", "Rigid", "Meshed", "Bonded"};
+  const char* kRoles[] = {"Ignored", "Rigid", "Meshed", "Bonded", "Contact"};
   // No PushID(int) around the rows: every widget carries its occurrence id
   // in its own ###label, which is what a test path can address (a PushID
   // scope is not — docs/ui/testing.md#making-a-widget-addressable).
   for (const Occurrence& occ : host.asmDoc->GetOccurrences()) {
     const fem::Participant* pt = s.FindParticipant(occ.id);
-    int role = !pt                                        ? 0
-               : pt->role == fem::ParticipantRole::Meshed ? 2
-               : pt->role == fem::ParticipantRole::Rigid  ? 1
-               : pt->role == fem::ParticipantRole::Bonded ? 3
-                                                          : 0;
+    int role = !pt                                         ? 0
+               : pt->role == fem::ParticipantRole::Meshed  ? 2
+               : pt->role == fem::ParticipantRole::Rigid   ? 1
+               : pt->role == fem::ParticipantRole::Bonded  ? 3
+               : pt->role == fem::ParticipantRole::Contact ? 4
+                                                           : 0;
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
     const std::string comboId = "###role_" + std::to_string(occ.id);
-    if (ImGui::Combo(comboId.c_str(), &role, kRoles, 4)) {
+    if (ImGui::Combo(comboId.c_str(), &role, kRoles, 5)) {
       const uint64_t id = occ.id;
       const fem::ParticipantRole want =
-          role == 3   ? fem::ParticipantRole::Bonded
+          role == 4   ? fem::ParticipantRole::Contact
+          : role == 3 ? fem::ParticipantRole::Bonded
           : role == 2 ? fem::ParticipantRole::Meshed
           : role == 1 ? fem::ParticipantRole::Rigid
                       : fem::ParticipantRole::Ignored;
@@ -1376,6 +1419,59 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
                           "patch is found by imprinting when the study "
                           "meshes; it exists in neither part.",
                           occ.name.c_str());
+      // Or rest on it: a contact support, pressed and never pulled
+      // (docs/simulation/README.md#contact).
+      bool rests = false;
+      for (const fem::Load& l : s.loads)
+        rests = rests ||
+                (l.contactWith == occ.id && l.type == fem::LoadType::Contact);
+      ImGui::SameLine();
+      const std::string restId =
+          std::string(rests ? ICON_FA_ARROWS_DOWN_TO_LINE " Rests on it###rest_"
+                            : ICON_FA_ARROWS_DOWN_TO_LINE
+                          " Rest on it###rest_") +
+          std::to_string(occ.id);
+      if (ImGui::SmallButton(restId.c_str())) {
+        const uint64_t id = occ.id;
+        ModifyStudy(state, s.id, rests ? "Lift off contact" : "Rest on contact",
+                    [&](fem::Study& cs) {
+                      if (rests) {
+                        cs.loads.erase(
+                            std::remove_if(cs.loads.begin(), cs.loads.end(),
+                                           [&](const fem::Load& l) {
+                                             return l.contactWith == id &&
+                                                    l.type ==
+                                                        fem::LoadType::Contact;
+                                           }),
+                            cs.loads.end());
+                        return;
+                      }
+                      fem::Load rest;
+                      rest.id = host.AllocateId();
+                      rest.type = fem::LoadType::Contact;
+                      rest.contactWith = id;
+                      cs.loads.push_back(rest);
+                    });
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The meshed part rests on %s where they face each "
+                          "other: pressed, never pulled, solved on CalculiX.",
+                          occ.name.c_str());
+    }
+    if (pt && pt->role == fem::ParticipantRole::Contact) {
+      double mu = pt->friction;
+      LeftLabel("Friction (\xCE\xBC)");
+      const std::string muId = "###part_friction_" + std::to_string(occ.id);
+      ExprInputDouble(state, muId.c_str(), &mu, "%.3g");
+      if (ImGui::IsItemDeactivatedAfterEdit() && mu != pt->friction &&
+          mu >= 0.0) {
+        const uint64_t id = occ.id;
+        ModifyStudy(state, s.id, "Set contact friction", [&](fem::Study& cs) {
+          for (fem::Participant& x : cs.participants)
+            if (x.occurrenceId == id)
+              x.friction = mu;
+        });
+      }
     }
     if (pt && pt->role == fem::ParticipantRole::Meshed) {
       double size = pt->meshSize;
@@ -1508,8 +1604,8 @@ void DrawSolverCombo(AppState& state, const fem::Study& s) {
   const auto& ccx = CalculixHere(state, &why);
   const std::string calculix =
       ccx ? "CalculiX " + ccx->Version() : std::string("CalculiX (not found)");
-  const char* labels[] = {s.nonlinear.On() ? "Auto (CalculiX: nonlinear)"
-                                           : "Auto (in-house)",
+  const char* labels[] = {fem::IsNonlinear(s) ? "Auto (CalculiX: nonlinear)"
+                                              : "Auto (in-house)",
                           "In-house", calculix.c_str()};
   int idx = s.solver == fem::Solver::InHouse    ? 1
             : s.solver == fem::Solver::Calculix ? 2
@@ -1520,9 +1616,10 @@ void DrawSolverCombo(AppState& state, const fem::Study& s) {
                            : idx == 2 ? fem::Solver::Calculix
                                       : fem::Solver::Auto;
     // A nonlinear study is not solved in-house: that pick changes nothing.
-    if (ns != s.solver && fem::NonlinearRefusal(ns, s.type, s.nonlinear,
-                                                s.loadCases.size(), s.converge)
-                              .empty())
+    if (ns != s.solver &&
+        fem::NonlinearRefusal(ns, s.type, s.nonlinear, s.loadCases.size(),
+                              s.converge, fem::HasContact(s))
+            .empty())
       ModifyStudy(state, s.id, "Set solver",
                   [&](fem::Study& cs) { cs.solver = ns; });
   }
@@ -1689,7 +1786,8 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
     if (s->type == fem::AnalysisType::Static) {
       const auto refused = [&](const fem::Nonlinear& nl) {
         return fem::NonlinearRefusal(s->solver, s->type, nl,
-                                     s->loadCases.size(), s->converge);
+                                     s->loadCases.size(), s->converge,
+                                     fem::HasContact(*s));
       };
       fem::Nonlinear large;
       large.largeDeformation = true;
@@ -2243,7 +2341,8 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       continue;
     switch (load.type) {
     case fem::LoadType::Fixed:
-    case fem::LoadType::Pin: {
+    case fem::LoadType::Pin:
+    case fem::LoadType::Contact: {
       // The hatch repeated over the face, so "what is fixed" reads as an
       // AREA -- and each hatch stands on its own triangle's normal, which on
       // a curved face is not the average one.
@@ -2484,6 +2583,8 @@ std::string SimulationLoadLabel(const fem::Load& load) {
     return "fixed";
   case fem::LoadType::Pin:
     return load.fixRotation ? "pin, held" : "pin";
+  case fem::LoadType::Contact:
+    return "contact";
   case fem::LoadType::Force:
     if (std::abs(load.magnitude) >= 1000.0)
       std::snprintf(buf, sizeof(buf), "%.3g kN", load.magnitude / 1000.0);
@@ -2598,6 +2699,7 @@ void DrawSimulationLabels(AppState& state) {
     switch (load.type) {
     case fem::LoadType::Fixed:
     case fem::LoadType::Pin:
+    case fem::LoadType::Contact:
       label(c, SimulationLoadLabel(load), col(kFixed));
       break;
     case fem::LoadType::Force: {
@@ -2719,6 +2821,9 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   case SimulationState::Tool::Pin:
     load.type = fem::LoadType::Pin;
     break;
+  case SimulationState::Tool::Contact:
+    load.type = fem::LoadType::Contact;
+    break;
   default:
     load.type = fem::LoadType::Pressure;
     break;
@@ -2787,6 +2892,24 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
       return;
     }
     load.fixRotation = sim.pendingPinFixRotation;
+  }
+  if (load.type == fem::LoadType::Contact) {
+    // Refused where it can be read, and nothing placed: on the ground a
+    // face rests on the plane it lies on, which only a flat face has.
+    if (!info || info->kind != "plane") {
+      sim.placeRefusal = "'" + face.name +
+                         "' is not flat: a contact support rests a flat face "
+                         "on the ground (a curved one rests on a rigid "
+                         "occurrence: Rest on it, on an assembly study)";
+      return;
+    }
+    load.friction = sim.pendingContactFriction;
+    fem::Study with = *s;
+    with.loads.push_back(load);
+    if (const std::string why = fem::ContactRefusal(with); !why.empty()) {
+      sim.placeRefusal = why;
+      return;
+    }
   }
   if (load.type == fem::LoadType::Remote) {
     if (!sim.pointOverridden) {

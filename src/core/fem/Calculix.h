@@ -116,6 +116,14 @@ bool NodalForces(const FemMesh& mesh, const std::vector<Material>& byDomain,
 // moment its in-house traction sums to, spread over its face by
 // *COUPLING/*DISTRIBUTING. ccx's residual criterion is tightened to
 // kNonlinearResidual, and each increment prints U and the supports' RF.
+//
+// Without `nlgeom` (a contact solved at small deformation) the steps are
+// plain *STATIC, and every load is in `nodalForces`. Each of `contacts` is
+// a face-to-face penalty *CONTACT PAIR (docs/simulation/README.md#contact):
+// the body's facets as the slave surface against the partner's, a rigid
+// partner of `partners` written after the mesh with every node fixed; each
+// pair prints its contact statistics and pressures every increment. The
+// nodes of `stabilized` take weak grounded springs.
 struct NonlinearStep {
   double toFactor = 1.0;
   double maxIncrement = 0.1; // in load factor
@@ -125,7 +133,53 @@ struct DeckNonlinear {
   std::vector<NonlinearStep> steps;
   double minIncrement = 1e-5;
   int maxIncrements = 1000;
+  bool nlgeom = true;
+  const std::vector<StudyJobBody::ContactPair>* contacts = nullptr;
+  const std::vector<FemMesh>* partners = nullptr;
+  const std::vector<StudyJobBody::Stabilized>* stabilized = nullptr;
+  // Per group of `stabilized`, the stiffer springs (N/mm per node) that hold
+  // it through the first step -- the settling step, the first increment of
+  // the load -- while its contact closes, removed (*MODEL CHANGE) for the
+  // rest. Empty: none, and no settling step.
+  std::vector<double> settlePerNode;
 };
+// The settling step's springs (DeckNonlinear::settlePerNode): a part held
+// only by a contact that touches at a point closes nothing in the first
+// iteration, and under the weak springs alone its first increment of load
+// would throw it right through its partner. Through the first increment
+// (`firstFactor` of `loads` and gravity) each group's springs, summed over
+// its nodes, move it kSettleMotion of the mean edge of its contact's
+// facets under the whole of that increment's load; they are removed once
+// the contact holds it.
+inline constexpr double kSettleMotion = 0.1;
+std::vector<double> SettleSprings(const StudyJobBody& jb,
+                                  const std::vector<Material>& mats,
+                                  const std::vector<FaceLoad>& loads,
+                                  const glm::dvec3& gravityAccel,
+                                  double firstFactor);
+
+// Contact (docs/simulation/README.md#contact). The penalty -- the contact
+// pressure per overclosure, MPa/mm -- is kContactPenalty times the softer
+// side's Young's modulus over the mean edge of the body's contact facets:
+// an overclosure of 1/kContactPenalty of what that pressure strains one
+// element by. ccx's own default for node-to-face contact is 50 times the
+// first material's modulus whatever the element size (unit-bound: it reads
+// as per mm); face-to-face has none, and its manual's range is 5 to 50.
+// Measured on a steel ball on a rigid flat at a/6 (the [contact] Hertz
+// case): 5 reads the contact radius +0.9 % and the peak pressure +1.7 %,
+// 15 -1.6 % and +3.4 %, 50 -3.3 % and +4.0 % -- the stiffer, the more the
+// pressure gathers on the points that close first -- so the soft end. The
+// stick slope is the penalty over
+// kStickSlopeRatio, as ccx's manual advises ("about 100 times smaller than
+// the spring constant"). A part held only by a contact takes weak springs
+// whose stiffness, summed over its nodes, is kStabilization times its
+// modulus times its bounding-box diagonal in each direction.
+inline constexpr double kContactPenalty = 5.0;
+inline constexpr double kStickSlopeRatio = 100.0;
+inline constexpr double kStabilization = 1e-6;
+// The pressure per overclosure of a pair (MPa/mm): `youngMPa` the softer
+// side's modulus, `edgeMm` the mean edge of the body's contact facets.
+double ContactPenalty(double youngMPa, double edgeMm);
 // ccx's equilibrium criterion on a nonlinear run (*CONTROLS R_n and R_p:
 // the largest residual force over the mean nodal force; its default is
 // 0.005). Measured on a shallow arch to its snap, 1e-6 took 98 iterations
@@ -221,6 +275,7 @@ bool BucklingOnCalculix(
 inline constexpr double kSnapJumpRatio = 4.0;
 inline constexpr double kNonlinearBalance = 1e-3;
 struct NonlinearRequest {
+  bool nlgeom = true; // large deformation; false: a contact run's small one
   bool snapThrough = false;
   double maxFactor = 1.0;
   int increments = 10;
@@ -232,13 +287,19 @@ struct NonlinearRequest {
 // `jb.mesh` is the shape solved (a snap-through run's seeded one), under
 // `supports`; `loads` every face load of the case. `out` gets the fields at
 // the factor reported and each support node's reaction (nodeReaction);
-// `summary` how the run went.
+// `summary` how the run went, and `contacts` each of `jb.contacts` there.
+//
+// A contact's partner carries its share of the equilibrium check (a rigid
+// partner's reaction, the springs' force); springs that carry more than
+// kNonlinearBalance of the load are holding a part nothing else holds, and
+// the answer is refused, naming it.
 bool NonlinearOnCalculix(
     const StudyJobBody& jb, const std::vector<Material>& mats,
     const Supports& supports, const std::vector<FaceLoad>& loads,
     const glm::dvec3& gravityAccel, const NonlinearRequest& request,
     const SolveOptions& options, FemResults& out,
-    StudyBodyResult::Nonlinear& summary, std::string* error);
+    StudyBodyResult::Nonlinear& summary, std::string* error,
+    std::vector<StudyBodyResult::ContactResult>* contacts = nullptr);
 
 // The deck the study would run for body `body` and case `caseIndex` of a
 // meshed study (export_study_inp): what SolveBodyOnCalculix writes, with no

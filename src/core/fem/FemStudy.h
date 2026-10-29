@@ -43,10 +43,15 @@ enum class LoadType {
             // holds the face radially and axially where the part presses on
             // it (compression only), free to turn unless fixRotation
             // (docs/simulation/README.md#pin-supports)
+  Contact,  // a compression-only support solved on CalculiX
+            // (docs/simulation/README.md#contact): the face rests on the
+            // ground (a part study: the plane a flat face lies on) or on a
+            // rigid occurrence (`contactWith`), which push it and never
+            // pull, with `friction`
 };
 // A support holds the part rather than loading it.
 inline bool IsSupport(LoadType t) {
-  return t == LoadType::Fixed || t == LoadType::Pin;
+  return t == LoadType::Fixed || t == LoadType::Pin || t == LoadType::Contact;
 }
 
 // A per-face mesh size override (mm). size follows the value+expr convention:
@@ -71,6 +76,10 @@ enum class ParticipantRole {
   // Bonding is declared, not inferred — T-nuts, drivers and press fits are
   // not glue.
   Bonded,
+  // Meshed SEPARATELY and in contact with the meshed occurrence where they
+  // touch (docs/simulation/README.md#contact): it presses on it and may lift
+  // off or slide, with `friction`. Solved on CalculiX.
+  Contact,
 };
 struct Participant {
   uint64_t occurrenceId = 0; // a TOP-LEVEL occurrence of the assembly
@@ -79,6 +88,9 @@ struct Participant {
   // panel and a 60 mm brace do not want one number. value+expr convention.
   double meshSize = 0.0;
   std::string meshSizeExpr;
+  // Contact only: the friction coefficient against the meshed occurrence
+  // (unitless; 0 = frictionless).
+  double friction = 0.0;
 };
 const char* ParticipantRoleToString(ParticipantRole role);
 [[nodiscard]] bool ParticipantRoleFromString(const std::string& s,
@@ -123,7 +135,8 @@ struct Load {
   LoadType type = LoadType::Fixed;
   ElementRef face;
   uint64_t occurrenceId = 0; // 0 on a part study
-  uint64_t contactWith = 0; // Fixed only: clamped where this occurrence touches
+  // Fixed: clamped where this occurrence touches; Contact: resting on it.
+  uint64_t contactWith = 0;
   double magnitude = 0.0;
   std::string magnitudeExpr;
   // Down, for a load whose face could not be resolved. Every path that HAS a
@@ -153,6 +166,8 @@ struct Load {
   // the pin (a keyed or pressed pin). The pin's axis is its face's, kept in
   // axisOrigin/axisDirection once CompleteLoadGeometry has run.
   bool fixRotation = false;
+  // Contact only: the friction coefficient (unitless; 0 = frictionless).
+  double friction = 0.0;
 };
 
 // One load case of a study (docs/topopt/README.md#load-cases): the force and
@@ -326,24 +341,35 @@ struct Study {
 // what can: CalculiX solves static and buckling studies (modal and topology
 // are in-house), and auto and in_house solve every type there is.
 std::string SolverRefusal(Solver solver, AnalysisType type);
+// Whether the study has a contact (docs/simulation/README.md#contact): a
+// contact support, or a participant in the contact role.
+bool HasContact(const Study& study);
+// Solved past linear: large deformation, or a contact.
+bool IsNonlinear(const Study& study);
 // The program that solves a study: its `solver`, except that a nonlinear
-// study set to auto solves on CalculiX (the in-house solver is linear).
-Solver EffectiveSolver(Solver solver, const Nonlinear& nonlinear);
+// study (large deformation, or a contact) set to auto solves on CalculiX
+// (the in-house solver is linear).
+Solver EffectiveSolver(const Study& study);
 // Empty when a study of `type` on `solver` with `loadCases` cases can take
-// `nonlinear` with `converge`; otherwise why not, naming what can: a static
-// study only, never in_house, a snap-through run needs large_deformation
-// and one load set, increments are at least 1, a stated imperfection and
-// deflection limit are not negative (the limit positive), and converge
-// always is refused on a snap-through run, whose answer is a factor that
-// refining round a stress peak does not settle.
+// `nonlinear` (and, with `contact`, a contact) with `converge`; otherwise
+// why not, naming what can: a static study only, never in_house, a
+// nonlinear option needs large_deformation or a contact, a snap-through run
+// needs large_deformation, one load set and no contact, increments are at
+// least 1, a stated imperfection and deflection limit are not negative (the
+// limit positive), and converge always is refused on a snap-through run and
+// on a contact, whose answers refining round a stress peak does not settle.
 std::string NonlinearRefusal(Solver solver, AnalysisType type,
                              const Nonlinear& nonlinear, size_t loadCases,
-                             ConvergeMode converge);
+                             ConvergeMode converge, bool contact);
+// NonlinearRefusal of `study`, then what only its contacts say: a friction
+// that is negative or not a number, a contact support with a pin or on a
+// study of a topology shape, on a modal or buckling study.
+std::string ContactRefusal(const Study& study);
 
 const char* LoadTypeToString(LoadType type);
 // Every load type's name, for a refusal that names what is accepted.
 inline constexpr const char* kLoadTypeNames =
-    "fixed, force, pressure, torque, remote, pin";
+    "fixed, force, pressure, torque, remote, pin, contact";
 [[nodiscard]] bool LoadTypeFromString(const std::string& s, LoadType& out);
 const char* AnalysisTypeToString(AnalysisType type);
 // Every analysis type's name, for a refusal that names what is accepted.

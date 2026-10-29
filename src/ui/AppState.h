@@ -651,7 +651,8 @@ struct SimulationState {
     Torque,
     Remote,
     Probe,
-    Pin
+    Pin,
+    Contact // a compression-only support: the face rests on the ground
   };
   Tool tool = Tool::None;
 
@@ -688,6 +689,9 @@ struct SimulationState {
   // other face is refused (placeRefusal).
   // The Pin tool: whether the next pin also holds the part from turning.
   bool pendingPinFixRotation = false;
+  // The Contact tool: the next contact support's friction coefficient
+  // (unitless; 0 = frictionless).
+  double pendingContactFriction = 0.0;
   double pendingTorque = 0.0;
   std::string pendingTorqueExpr;
   bool torqueAxisChosen = false;

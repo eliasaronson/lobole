@@ -17,10 +17,18 @@
 #include "core/fem/FemStudy.h"
 
 #include <BOPAlgo_Builder.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <Geom_Surface.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -128,6 +136,83 @@ double AreaOf(const TopoDS_Shape& face) {
 
 std::string Quote(const std::string& s) { return "«" + s + "»"; }
 
+// Contact (docs/simulation/README.md#contact). Two faces are a contact's
+// candidates when they come within this fraction of the smaller body's
+// bounding-box diagonal of each other and face each other there (their
+// outward normals more than kContactFacing opposed): a sphere on a block
+// touches at a point and shares no face, which an imprint would need, and a
+// block's side meets a plate it stands on along an edge without facing it.
+constexpr double kContactClearanceFraction = 0.05;
+constexpr double kContactFacing = 0.5; // cos 60 deg
+// A rigid partner is meshed this many times coarser than the meshed body,
+// its contact faces at the body's size.
+constexpr double kRigidCoarsen = 2.0;
+
+double DiagonalOf(const TopoDS_Shape& s) {
+  Bnd_Box b;
+  BRepBndLib::Add(s, b);
+  if (b.IsVoid())
+    return 0.0;
+  return std::sqrt(b.SquareExtent());
+}
+
+// The outward normal of `face` at the point of it nearest `p`; zero when
+// the surface has none there (a pole), looked for a little way off it.
+glm::dvec3 OutwardNormalNear(const TopoDS_Shape& face, const gp_Pnt& p) {
+  const Handle(Geom_Surface) surf = BRep_Tool::Surface(TopoDS::Face(face));
+  if (surf.IsNull())
+    return glm::dvec3(0.0);
+  GeomAPI_ProjectPointOnSurf proj(p, surf);
+  if (proj.NbPoints() == 0)
+    return glm::dvec3(0.0);
+  double u = 0, v = 0;
+  proj.LowerDistanceParameters(u, v);
+  double u0, u1, v0, v1;
+  surf->Bounds(u0, u1, v0, v1);
+  const double cu = std::isfinite(u0 + u1) ? 0.5 * (u0 + u1) : u;
+  const double cv = std::isfinite(v0 + v1) ? 0.5 * (v0 + v1) : v;
+  for (double t : {0.0, 1e-4, 1e-3, 1e-2}) {
+    GeomLProp_SLProps props(surf, u + t * (cu - u), v + t * (cv - v), 1, 1e-9);
+    if (!props.IsNormalDefined())
+      continue;
+    gp_Dir n = props.Normal();
+    if (face.Orientation() == TopAbs_REVERSED)
+      n.Reverse();
+    return glm::dvec3(n.X(), n.Y(), n.Z());
+  }
+  return glm::dvec3(0.0);
+}
+
+// The faces of `a` and of `b` that are a contact's candidates.
+void FacingFaces(const std::vector<TopoDS_Shape>& a,
+                 const std::vector<TopoDS_Shape>& b, double clearance,
+                 std::set<int>& onA, std::set<int>& onB) {
+  std::vector<Bnd_Box> boxA(a.size()), boxB(b.size());
+  for (size_t i = 0; i < a.size(); ++i) {
+    BRepBndLib::Add(a[i], boxA[i]);
+    boxA[i].Enlarge(clearance);
+  }
+  for (size_t j = 0; j < b.size(); ++j)
+    BRepBndLib::Add(b[j], boxB[j]);
+  for (size_t i = 0; i < a.size(); ++i)
+    for (size_t j = 0; j < b.size(); ++j) {
+      if (boxA[i].IsOut(boxB[j]))
+        continue;
+      BRepExtrema_DistShapeShape d(a[i], b[j]);
+      if (!d.IsDone() || d.NbSolution() == 0 || d.Value() > clearance)
+        continue;
+      for (int k = 1; k <= d.NbSolution(); ++k) {
+        const glm::dvec3 na = OutwardNormalNear(a[i], d.PointOnShape1(k));
+        const glm::dvec3 nb = OutwardNormalNear(b[j], d.PointOnShape2(k));
+        if (glm::dot(na, nb) < -kContactFacing) {
+          onA.insert(static_cast<int>(i));
+          onB.insert(static_cast<int>(j));
+          break;
+        }
+      }
+    }
+}
+
 // A participant with its placed bodies: a rigid support, or a bonded member.
 struct RigidSet {
   const Participant* p = nullptr;
@@ -224,13 +309,10 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
       return fail("load " + std::to_string(l.id) +
                   ": a pin support is a part study's; an assembly study holds "
                   "its part with fixed faces or a rigid neighbour's contact");
-  if (const std::string why =
-          NonlinearRefusal(study.solver, study.type, study.nonlinear,
-                           study.loadCases.size(), study.converge);
-      !why.empty())
+  if (const std::string why = ContactRefusal(study); !why.empty())
     return fail(why);
   out.type = study.type;
-  out.solver = EffectiveSolver(study.solver, study.nonlinear);
+  out.solver = EffectiveSolver(study);
   out.nonlinear = study.nonlinear;
   out.numModes = study.numModes;
   out.gravity = study.gravity;
@@ -241,6 +323,7 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   const Occurrence* meshedOcc = nullptr;
   std::vector<RigidSet> rigid;
   std::vector<RigidSet> bonded; // S2: meshed AND glued to the group
+  std::vector<RigidSet> touching; // meshed apart, in contact with it
   for (const Participant& pt : study.participants) {
     const Occurrence* occ = asmDoc.FindById(pt.occurrenceId);
     if (!occ)
@@ -260,6 +343,9 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
       break;
     case ParticipantRole::Bonded:
       bonded.push_back({&pt, occ, {}});
+      break;
+    case ParticipantRole::Contact:
+      touching.push_back({&pt, occ, {}});
       break;
     case ParticipantRole::Ignored:
       break;
@@ -281,6 +367,12 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     b.bodies = ctx.placedBodies(b.p->occurrenceId);
     if (b.bodies.empty())
       return fail("bonded participant " + Quote(b.occ->name) +
+                  " has no bodies");
+  }
+  for (RigidSet& c : touching) {
+    c.bodies = ctx.placedBodies(c.p->occurrenceId);
+    if (c.bodies.empty())
+      return fail("contact participant " + Quote(c.occ->name) +
                   " has no bodies");
   }
 
@@ -328,10 +420,28 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
                         bonded[j].occ->name, bonded[j].bodies, kBondRule))
         return false;
   }
+  constexpr const char* kContactRule =
+      "parts in contact touch, they do not share volume (a press fit is an "
+      "interference, which a contact does not model). Fix the placement";
+  for (const RigidSet& c : touching) {
+    if (!overlapCheck(meshedOcc->name, meshedBodies, c.occ->name, c.bodies,
+                      kContactRule))
+      return false;
+    for (const RigidSet& r : rigid)
+      if (!overlapCheck(c.occ->name, c.bodies, r.occ->name, r.bodies,
+                        kContactRule))
+        return false;
+  }
   // S2: with bonded neighbours the group is ONE mesh; its own planner.
-  if (!bonded.empty())
+  if (!bonded.empty()) {
+    if (HasContact(study))
+      return fail("a contact beside bonded participants is not built: the "
+                  "bonded group is meshed as one shape, and its contacts are "
+                  "not looked for on it. Make the bonded neighbours rigid or "
+                  "ignored, or solve the contact in a study without them");
     return PlanBondedGroup(asmDoc, study, meshed, meshedOcc, meshedBodies,
                            bonded, rigid, out, error);
+  }
 
   // Resolve every anchor before any geometry work, so a bad reference is
   // refused in a millisecond rather than after a fuse.
@@ -373,14 +483,69 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     std::vector<std::pair<int, size_t>> loads; // (original face, load index)
     std::vector<std::pair<int, double>> faceSizes;
     std::vector<size_t> contactLoads; // loads anchored on a contact
+    std::vector<size_t> restsOn;      // contact supports on a rigid one
+    std::vector<std::pair<int, size_t>> grounds; // (face, contact support)
   };
   std::map<int, BodyPlanning> perBody;
+  // A contact participant's anchors (docs/simulation/README.md#contact):
+  // the loads and refinements on its faces, by (set, body).
+  struct Touching {
+    std::vector<std::pair<int, size_t>> loads; // (face, load index)
+    std::vector<std::pair<int, double>> faceSizes;
+  };
+  std::map<std::pair<size_t, int>, Touching> onTouching;
+  const auto touchingOf = [&](uint64_t occurrenceId) -> int {
+    for (size_t k = 0; k < touching.size(); ++k)
+      if (touching[k].p->occurrenceId == occurrenceId)
+        return static_cast<int>(k);
+    return -1;
+  };
+  // A face of a contact participant: its body and face index.
+  const auto resolveTouching = [&](const ElementRef& ref, size_t set,
+                                   const std::string& what, Anchor& a) {
+    const std::vector<Body>& bodies = touching[set].bodies;
+    for (int i = 0; i < static_cast<int>(bodies.size()); ++i) {
+      if (ref.featureId != 0 && bodies[i].createdBy != ref.featureId)
+        continue;
+      if (const auto idx = bodies[i].elementMap.Resolve(ref.name)) {
+        a.body = i;
+        a.face = *idx;
+        return true;
+      }
+    }
+    return fail(what + ": face '" + ref.name + "' is not on " +
+                Quote(touching[set].occ->name));
+  };
   for (size_t i = 0; i < study.loads.size(); ++i) {
     const Load& l = study.loads[i];
-    if (l.contactWith != 0) {
-      if (l.type != LoadType::Fixed)
+    if (l.type == LoadType::Contact && l.contactWith == 0 &&
+        touchingOf(l.occurrenceId) < 0) {
+      // The ground under a flat face of the meshed occurrence.
+      Anchor a;
+      if (!resolveOn(l.face, l.occurrenceId, "load " + std::to_string(i + 1),
+                     a))
+        return false;
+      perBody[a.body].grounds.push_back({a.face, i});
+      continue;
+    }
+    if (l.contactWith == 0 && touchingOf(l.occurrenceId) >= 0) {
+      if (l.type == LoadType::Contact)
         return fail("load " + std::to_string(i + 1) +
-                    ": only a fixed support anchors on a contact");
+                    ": a contact participant takes its contact from its "
+                    "role; a contact support belongs on the meshed "
+                    "occurrence");
+      Anchor a;
+      const size_t set = static_cast<size_t>(touchingOf(l.occurrenceId));
+      if (!resolveTouching(l.face, set, "load " + std::to_string(i + 1), a))
+        return false;
+      onTouching[{set, a.body}].loads.push_back({a.face, i});
+      continue;
+    }
+    if (l.contactWith != 0) {
+      if (l.type != LoadType::Fixed && l.type != LoadType::Contact)
+        return fail("load " + std::to_string(i + 1) +
+                    ": only a fixed support or a contact support anchors "
+                    "on a contact");
       bool known = false;
       for (const RigidSet& r : rigid)
         known = known || r.p->occurrenceId == l.contactWith;
@@ -392,7 +557,9 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
       }
       // Every meshed body may touch it; assigned after the imprint.
       for (int b = 0; b < static_cast<int>(meshedBodies.size()); ++b)
-        perBody[b].contactLoads.push_back(i);
+        (l.type == LoadType::Contact ? perBody[b].restsOn
+                                     : perBody[b].contactLoads)
+            .push_back(i);
       continue;
     }
     Anchor a;
@@ -419,6 +586,15 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   }
   for (size_t i = 0; i < study.refinements.size(); ++i) {
     Anchor a;
+    if (const int set = touchingOf(study.refinements[i].occurrenceId);
+        set >= 0) {
+      if (!resolveTouching(study.refinements[i].face, static_cast<size_t>(set),
+                           "refinement " + std::to_string(i + 1), a))
+        return false;
+      onTouching[{static_cast<size_t>(set), a.body}].faceSizes.push_back(
+          {a.face, study.refinements[i].size});
+      continue;
+    }
     if (!resolveOn(study.refinements[i].face, study.refinements[i].occurrenceId,
                    "refinement " + std::to_string(i + 1), a))
       return false;
@@ -428,6 +604,7 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
 
   // Imprint, per meshed body, against every rigid body; then map anchors.
   std::set<size_t> contactLoadsSatisfied;
+  std::set<std::pair<size_t, int>> touchingPlaced; // (set, body)
   for (auto& [bi, planning] : perBody) {
     const Body& body = meshedBodies[bi];
     const auto matType =
@@ -589,10 +766,120 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
       if (!patch.meshedFaces.empty())
         out.contacts.push_back(std::move(patch));
     }
+    // Contact (docs/simulation/README.md#contact): each pair this body's
+    // faces against a partner's that come near and face them.
+    const double h =
+        bp.settings.maxSize > 0 ? bp.settings.maxSize : AutoMeshSize(imprinted);
+    const double bodyDiagonal = DiagonalOf(original);
+    int faceOffset = static_cast<int>(imprintedFaces.size());
+    const auto addContact = [&](uint64_t id, bool participant, double friction,
+                                const std::set<int>& mine,
+                                StudyBodyPlan::ContactPartner partner) {
+      StudyBodyPlan::Contact c;
+      c.id = id;
+      c.participant = participant;
+      c.faces.assign(mine.begin(), mine.end());
+      c.partner = static_cast<int>(bp.partners.size());
+      c.friction = friction;
+      bp.partners.push_back(std::move(partner));
+      bp.contacts.push_back(std::move(c));
+      hasFixed = true;
+    };
+    // On a rigid occurrence: its bodies, meshed coarse and fixed.
+    for (size_t li : planning.restsOn) {
+      const Load& l = study.loads[li];
+      for (size_t k = 0; k < rigidOriginals.size(); ++k) {
+        const RigidSet& rs = rigid[rigidOwner[k].first];
+        if (rs.p->occurrenceId != l.contactWith)
+          continue;
+        const std::vector<TopoDS_Shape> theirs = FacesOf(rigidOriginals[k]);
+        std::set<int> mine, onTheirs;
+        FacingFaces(imprintedFaces, theirs,
+                    kContactClearanceFraction *
+                        std::min(bodyDiagonal, DiagonalOf(rigidOriginals[k])),
+                    mine, onTheirs);
+        if (mine.empty())
+          continue;
+        StudyBodyPlan::ContactPartner pt;
+        pt.rigid = true;
+        pt.name = rs.occ->name;
+        pt.shape = rigidOriginals[k];
+        pt.settings.maxSize = kRigidCoarsen * h;
+        for (int f : onTheirs)
+          pt.settings.faceSizes.push_back({f, h});
+        pt.faces.assign(onTheirs.begin(), onTheirs.end());
+        contactLoadsSatisfied.insert(li);
+        addContact(l.id, false, l.friction, mine, std::move(pt));
+      }
+    }
+    // On the ground under a flat face.
+    for (const auto& [face, li] : planning.grounds) {
+      const Load& l = study.loads[li];
+      StudyBodyPlan::ContactPartner ground;
+      std::string why;
+      if (face < 0 || face >= static_cast<int>(originalFaces.size()) ||
+          !GroundUnder(originalFaces[face], ground, &why))
+        return fail("load " + std::to_string(li + 1) + ": " + why);
+      const std::vector<int> pieces = piecesOf(face);
+      addContact(l.id, false, l.friction,
+                 std::set<int>(pieces.begin(), pieces.end()),
+                 std::move(ground));
+    }
+    // Against a contact participant: meshed with this body, apart from it.
+    for (size_t set = 0; set < touching.size(); ++set) {
+      const RigidSet& ts = touching[set];
+      for (int tb = 0; tb < static_cast<int>(ts.bodies.size()); ++tb) {
+        const TopoDS_Shape theirShape =
+            BRepBuilderAPI_Copy(ts.bodies[tb].shape.GetShape()).Shape();
+        const std::vector<TopoDS_Shape> theirs = FacesOf(theirShape);
+        std::set<int> mine, onTheirs;
+        FacingFaces(imprintedFaces, theirs,
+                    kContactClearanceFraction *
+                        std::min(bodyDiagonal, DiagonalOf(theirShape)),
+                    mine, onTheirs);
+        if (mine.empty())
+          continue;
+        const std::string label =
+            ts.occ->name +
+            (ts.bodies.size() > 1 ? "/" + ts.bodies[tb].name : "");
+        if (!touchingPlaced.insert({set, tb}).second)
+          return fail(Quote(label) + " touches two bodies of " +
+                      Quote(meshedOcc->name) +
+                      "; a contact participant is in contact with one");
+        StudyBodyPlan::ContactPartner pt;
+        pt.rigid = false;
+        pt.name = label;
+        pt.shape = theirShape;
+        std::string why;
+        if (!MaterialOf(ts.bodies[tb], label, study.type, study.gravity, pt.mat,
+                        &why))
+          return fail(why);
+        pt.settings.maxSize =
+            ts.p->meshSize > 0.0 ? ts.p->meshSize : study.meshSize;
+        pt.faces.assign(onTheirs.begin(), onTheirs.end());
+        pt.faceOffset = faceOffset;
+        faceOffset += static_cast<int>(theirs.size());
+        if (const auto it = onTouching.find({set, tb});
+            it != onTouching.end()) {
+          pt.settings.faceSizes = it->second.faceSizes;
+          for (const auto& [face, li] : it->second.loads) {
+            Load ld = study.loads[li];
+            if (ld.type != LoadType::Force && face >= 0 &&
+                face < static_cast<int>(theirs.size()) &&
+                !CompleteLoadGeometry(theirs[face], ld, &why))
+              return fail(why);
+            bp.loads.push_back({face + pt.faceOffset, ld});
+          }
+        }
+        addContact(ts.p->occurrenceId, true, ts.p->friction, mine,
+                   std::move(pt));
+      }
+    }
+
     // A body only a contact could have clamped, and nothing touches: it is
     // not in this analysis (a multi-body part's loose piece). A body that
     // carries loads and no support is the same refusal a part study makes.
-    if (bp.loads.empty())
+    if (bp.loads.empty() && bp.contacts.empty())
       continue;
     if (!hasFixed) {
       // The honest reason first: a contact anchor whose support does not
@@ -612,7 +899,8 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   }
   for (size_t li = 0; li < study.loads.size(); ++li) {
     const Load& l = study.loads[li];
-    if (l.contactWith == 0 || contactLoadsSatisfied.count(li))
+    if (l.contactWith == 0 || l.type == LoadType::Contact ||
+        contactLoadsSatisfied.count(li))
       continue;
     const Occurrence* o = asmDoc.FindById(l.contactWith);
     return fail("load " + std::to_string(li + 1) + ": " +
@@ -620,6 +908,28 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
                 " does not touch " + Quote(meshedOcc->name) +
                 " (no shared face after imprinting at 1e-3 mm), so there is "
                 "nothing to clamp");
+  }
+  for (size_t li = 0; li < study.loads.size(); ++li) {
+    const Load& l = study.loads[li];
+    if (l.type != LoadType::Contact || l.contactWith == 0 ||
+        contactLoadsSatisfied.count(li))
+      continue;
+    const Occurrence* o = asmDoc.FindById(l.contactWith);
+    return fail("load " + std::to_string(li + 1) + ": " +
+                Quote(o ? o->name : std::to_string(l.contactWith)) +
+                " does not touch " + Quote(meshedOcc->name) +
+                " where a face of it faces one of its own, so there is "
+                "nothing for it to rest on");
+  }
+  for (size_t set = 0; set < touching.size(); ++set) {
+    bool placed = false;
+    for (const auto& [ts, tb] : touchingPlaced)
+      placed = placed || ts == set;
+    if (!placed)
+      return fail("contact participant " + Quote(touching[set].occ->name) +
+                  " does not touch " + Quote(meshedOcc->name) +
+                  " where a face of it faces one of its own; mark it "
+                  "ignored, or fix the placement");
   }
   if (out.bodies.empty())
     return fail(Quote(meshedOcc->name) + ": nothing to solve");

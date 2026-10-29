@@ -79,6 +79,10 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
 // instead of a generic meshing failure.
 bool Available();
 
+// The element size Mesh() uses for `shape` when its settings leave maxSize
+// at 0: a fifteenth of its bounding-box diagonal.
+double AutoMeshSize(const TopoDS_Shape& shape);
+
 // How many entries Netgen's process-wide shape property table holds for
 // `shape` or any of its sub-shapes. Mesh() takes out every entry it made
 // before it returns, so this reads 0 after a mesh (a test's check; 0 without

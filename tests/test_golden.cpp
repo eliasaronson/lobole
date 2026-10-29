@@ -1154,9 +1154,39 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       CHECK(nl.hasDeflectionLimit == !want.at(5).is_null());
       if (!want.at(5).is_null())
         CHECK(nl.deflectionLimitMm == want.at(5).get<double>());
-      const fem::Solver runs = fem::EffectiveSolver(found->solver, nl);
+      const fem::Solver runs = fem::EffectiveSolver(*found);
       CHECK((runs == fem::Solver::Calculix ? "calculix" : "in_house") ==
             want.at(6).get<std::string>());
+    }
+  }
+  // vNEXT: a study's contact supports (docs/simulation/README.md#contact).
+  // A contact read back as another support, or its friction dropped, is a
+  // different study that solves; each [study name, [[load type, friction]]
+  // of its supports, its nonlinear increments, the solver it runs on] must
+  // hold -- auto with a contact is CalculiX.
+  if (expect.contains("study_contacts")) {
+    for (const auto& want : expect.at("study_contacts")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("study " << name);
+      const fem::Study* found = nullptr;
+      for (const fem::Study& st : doc.GetStudies())
+        if (st.name == name)
+          found = &st;
+      REQUIRE(found != nullptr);
+      std::vector<std::pair<std::string, double>> supports;
+      for (const fem::Load& l : found->loads)
+        if (fem::IsSupport(l.type))
+          supports.push_back({fem::LoadTypeToString(l.type), l.friction});
+      const auto& ws = want.at(1);
+      REQUIRE(supports.size() == ws.size());
+      for (size_t i = 0; i < ws.size(); ++i) {
+        CHECK(supports[i].first == ws.at(i).at(0).get<std::string>());
+        CHECK(supports[i].second == ws.at(i).at(1).get<double>());
+      }
+      CHECK(found->nonlinear.increments == want.at(2).get<int>());
+      const fem::Solver runs = fem::EffectiveSolver(*found);
+      CHECK((runs == fem::Solver::Calculix ? "calculix" : "in_house") ==
+            want.at(3).get<std::string>());
     }
   }
   // v168: an extrude's twist. A twisted rectangle has the prism's volume, so

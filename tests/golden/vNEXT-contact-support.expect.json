@@ -1,0 +1,8 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [7853.98],
+  "study_contacts": [["Rests", [["contact", 0.3]], 12, "calculix"],
+                     ["Frictionless", [["contact", 0.0], ["fixed", 0.0]], 0,
+                      "calculix"]]
+}

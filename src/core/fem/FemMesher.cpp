@@ -143,6 +143,8 @@ std::string DescribeFace(const TopTools_IndexedMapOfShape& faceMap,
 
 } // namespace
 
+double AutoMeshSize(const TopoDS_Shape& shape) { return AutoSize(shape); }
+
 #ifdef HAVE_NETGEN
 
 namespace {

@@ -880,9 +880,14 @@ std::string FreeRigidMotion(const FemMesh& mesh, const Supports& supports,
   return buf;
 }
 
-FemResults LargeDeformationFields(const FemMesh& mesh,
-                                  const std::vector<Material>& byDomain,
-                                  const std::vector<glm::dvec3>& displacement) {
+namespace {
+
+// LargeDeformationFields, or with `large` false the small-deformation
+// stress of the same displacement (SmallDeformationFields).
+FemResults DeformationFields(const FemMesh& mesh,
+                             const std::vector<Material>& byDomain,
+                             const std::vector<glm::dvec3>& displacement,
+                             bool large) {
   FemResults out;
   const size_t nNodes = mesh.nodes.size();
   out.displacement = displacement;
@@ -920,6 +925,16 @@ FemResults LargeDeformationFields(const FemMesh& mesh,
       for (int i = 0; i < 10; ++i)
         F +=
             U[i] * (invJt * Vector3d(dN[i][0], dN[i][1], dN[i][2])).transpose();
+      if (!large) {
+        // The linear strain and Hooke's law, as SolveCases recovers them.
+        const Eigen::Matrix3d G = F - Eigen::Matrix3d::Identity();
+        const Eigen::Matrix3d eps = 0.5 * (G + G.transpose());
+        accum[tet[k]] +=
+            vol *
+            (lam * eps.trace() * Eigen::Matrix3d::Identity() + 2.0 * mu * eps);
+        weight[tet[k]] += vol;
+        continue;
+      }
       const Eigen::Matrix3d E =
           0.5 * (F.transpose() * F - Eigen::Matrix3d::Identity());
       const Eigen::Matrix3d S =
@@ -955,6 +970,20 @@ FemResults LargeDeformationFields(const FemMesh& mesh,
     }
   }
   return out;
+}
+
+} // namespace
+
+FemResults LargeDeformationFields(const FemMesh& mesh,
+                                  const std::vector<Material>& byDomain,
+                                  const std::vector<glm::dvec3>& displacement) {
+  return DeformationFields(mesh, byDomain, displacement, true);
+}
+
+FemResults SmallDeformationFields(const FemMesh& mesh,
+                                  const std::vector<Material>& byDomain,
+                                  const std::vector<glm::dvec3>& displacement) {
+  return DeformationFields(mesh, byDomain, displacement, false);
 }
 
 #ifdef HAVE_SPECTRA
@@ -1399,6 +1428,12 @@ SolveBuckling(const FemMesh&, const std::vector<Material>&, const Supports&,
 bool SolverAvailable() { return false; }
 bool ModalAvailable() { return false; }
 
+FemResults SmallDeformationFields(const FemMesh&, const std::vector<Material>&,
+                                  const std::vector<glm::dvec3>& displacement) {
+  FemResults out;
+  out.displacement = displacement;
+  return out;
+}
 FemResults LargeDeformationFields(const FemMesh&, const std::vector<Material>&,
                                   const std::vector<glm::dvec3>& displacement) {
   FemResults out;

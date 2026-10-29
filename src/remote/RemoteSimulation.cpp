@@ -241,6 +241,10 @@ json NonlinearBodyJson(const fem::StudyBodyResult::Nonlinear& n,
     out["first_yield_factor"] = n.firstYieldFactor;
   else if (yieldMPa > 0)
     out["first_yield_factor"] = nullptr;
+  // A contact run (docs/simulation/README.md#contact).
+  out["large_deformation"] = n.largeDeformation;
+  if (n.stabilization > 0)
+    out["stabilization"] = n.stabilization;
   if (n.snapped)
     out["snapped"] = {{"from_factor", n.snappedFrom},
                       {"to_factor", n.snappedTo}};
@@ -570,11 +574,18 @@ static constexpr MethodDoc SimulationMethods[] = {
      "are counts. Takes `id` (or `study`, the same thing here) — see "
      "remove_study.\n"
      "On an ASSEMBLY, `participants` is the study: a list of {occurrence, "
-     "role: meshed|bonded|rigid|ignored, mesh_size?}. Exactly one occurrence "
+     "role: meshed|bonded|contact|rigid|ignored, mesh_size?, friction?}. "
+     "Exactly one occurrence "
      "is `meshed`; `bonded` is meshed AND glued to it where they touch, with "
-     "its own material; `rigid` is not meshed and holds the meshed part "
-     "where they touch — but only once CLAMPED, which is a load "
-     "(add_load {type: fixed, contact_with}), not a consequence of the role. "
+     "its own material; `contact` is meshed APART from it and in contact "
+     "with it where their faces face each other -- it presses on it and may "
+     "lift off or slide, with `friction` (the coefficient, unitless; default "
+     "0, frictionless), solved on CalculiX "
+     "(docs/simulation/README.md#contact); `rigid` is not meshed and holds "
+     "the meshed part where they touch — but only once CLAMPED, which is a "
+     "load (add_load {type: fixed, contact_with}) or rests it on it "
+     "(add_load {type: contact, contact_with}), not a consequence of the "
+     "role. "
      "A clamp is resolved against the whole group, so a rigid support that "
      "touches only a bonded member holds it just the same; one that touches "
      "nothing meshed is refused by name.\n"
@@ -623,14 +634,20 @@ static constexpr MethodDoc SimulationMethods[] = {
      "torque or remote load is carried from a reference node "
      "(docs/simulation/README.md#nonlinear-static). Refused with load "
      "cases, on another analysis type, with an unknown key, and with "
-     "converge always on a snap-through run.",
+     "converge always on a snap-through run. A study with a CONTACT (a "
+     "contact support, or a contact participant) is nonlinear by that "
+     "alone, and takes `nonlinear` {increments?} without large_deformation "
+     "(solved at small deformation) or with it; it is refused in_house, on "
+     "another analysis, with load cases, with snap_through, and with "
+     "converge always (docs/simulation/README.md#contact).",
      "converge, filter_radius, gravity, id, load_cases, max_iterations, "
      "mesh_size, name, nonlinear, num_modes, participants, shape_from, "
      "solver, study, type, "
      "volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
-     "torque|remote|pin, face, ...}. force/pressure take `magnitude`: NEWTONS "
+     "torque|remote|pin|contact, face, ...}. force/pressure take `magnitude`: "
+     "NEWTONS "
      "for a force -- the total on that face, spread over its area -- and MPa "
      "for a pressure, which pushes along the inward normal; `direction?`. "
      "`fixed` takes neither. A torque takes `torque_nmm` (N*mm, right-handed "
@@ -670,10 +687,20 @@ static constexpr MethodDoc SimulationMethods[] = {
      "the free motion. Static and buckling part studies only (a buckling "
      "study holds the contact its base state settled on, at every factor); "
      "it takes no magnitude or "
-     "direction (docs/simulation/README.md#pin-supports).",
+     "direction (docs/simulation/README.md#pin-supports). A `contact` is a "
+     "COMPRESSION-ONLY support solved on CalculiX: the face rests on the "
+     "ground -- the plane a FLAT face lies on (a curved one is refused) -- "
+     "or, on an assembly study, with `contact_with` a rigid participant, on "
+     "that occurrence where their faces face each other; it pushes and "
+     "never pulls, the part may lift off it, and `friction` is its "
+     "coefficient (unitless, 0 or more; default 0, frictionless). It takes "
+     "no magnitude, direction or region, and is refused where a nonlinear "
+     "study is (in_house, another analysis, load cases) and beside a pin; "
+     "study_results reports each contact's closed and open area, its "
+     "pressure and its force (docs/simulation/README.md#contact).",
      "axis_dir, axis_origin_mm, case, contact_with, direction, face, "
-     "fix_rotation, force_n, magnitude, occurrence, point_mm, region, "
-     "study, torque_nmm, type"},
+     "fix_rotation, force_n, friction, magnitude, occurrence, point_mm, "
+     "region, study, torque_nmm, type"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
@@ -920,7 +947,21 @@ static constexpr MethodDoc SimulationMethods[] = {
      "factor_of_safety is its governing factor, with a receipt claim "
      "\"peak load factor >= 1\" (oracle calculix/nonlinear); a "
      "large-deformation one's is yield over the Cauchy stress at the load "
-     "(docs/simulation/README.md#nonlinear-static).",
+     "(docs/simulation/README.md#nonlinear-static). A study with a CONTACT "
+     "also carries per body `contacts` [{support | occurrence (the contact "
+     "support's load id, or the contact participant's occurrence), kind: "
+     "support | participant, name (ground, or the partner), friction "
+     "(unitless), penalty_mpa_per_mm (the derived contact stiffness: "
+     "pressure per overclosure), area_mm2 (the pair's faces on the body's "
+     "side), closed_area_mm2 and open_area_mm2 (of those, in contact and "
+     "not), force_n [x,y,z] N and moment_n_mm [x,y,z] N mm (what the "
+     "partner exerts on that side, the moment about the frame's origin), "
+     "normal_force_n, shear_force_n, max_pressure_mpa, mean_pressure_mpa "
+     "(normal force over the closed area)}], a contact support's "
+     "`reactions` row its contact_area_mm2 of face_area_mm2, `nonlinear` "
+     "{large_deformation, stabilization? (what the weak springs holding a "
+     "part held only by a contact carried, over the load)}, and the top "
+     "level `nonlinear` {kind: contact} (docs/simulation/README.md#contact).",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
@@ -1310,6 +1351,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           lj["magnitude"] = l.magnitude;
         if (l.type == fem::LoadType::Pin)
           lj["fix_rotation"] = l.fixRotation;
+        if (l.type == fem::LoadType::Contact)
+          lj["friction"] = l.friction;
         if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote)
           lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
         if (l.type == fem::LoadType::Torque) {
@@ -1348,8 +1391,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                  {"stale", host.Stale(s.id)}};
       if (SettlesStress(s.type))
         sj["converge"] = fem::ConvergeModeToString(s.converge);
-      if (s.nonlinear.On()) {
-        json n = {{"large_deformation", true}};
+      // A contact makes a study nonlinear by itself
+      // (docs/simulation/README.md#contact): its increments are listed,
+      // and `contact` says why it solves on CalculiX.
+      if (fem::IsNonlinear(s) || s.nonlinear.increments > 0) {
+        json n = {{"large_deformation", s.nonlinear.largeDeformation}};
+        if (fem::HasContact(s))
+          n["contact"] = true;
         if (s.nonlinear.increments > 0)
           n["increments"] = s.nonlinear.increments;
         if (s.nonlinear.snapThrough)
@@ -1371,6 +1419,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                      {"role", fem::ParticipantRoleToString(pt.role)}};
           if (pt.meshSize > 0.0)
             pj["mesh_size"] = pt.meshSize;
+          if (pt.role == fem::ParticipantRole::Contact)
+            pj["friction"] = pt.friction;
           parts.push_back(std::move(pj));
         }
         sj["participants"] = parts;
@@ -1493,7 +1543,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         if (!list.is_array())
           throw std::runtime_error(
               "participants is a list of {occurrence, role: "
-              "meshed|bonded|rigid|ignored, mesh_size?}");
+              "meshed|bonded|contact|rigid|ignored, mesh_size?, friction?}");
         s.participants.clear();
         for (const json& pj : list) {
           if (!pj.is_object() || !pj.contains("occurrence"))
@@ -1506,7 +1556,16 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           if (!fem::ParticipantRoleFromString(role, pt.role))
             throw std::runtime_error(
                 "participant role '" + role +
-                "' is not one of meshed, bonded, rigid, ignored");
+                "' is not one of meshed, bonded, contact, rigid, ignored");
+          if (pj.contains("friction")) {
+            if (pt.role != fem::ParticipantRole::Contact)
+              throw std::runtime_error(
+                  "friction is a contact participant's (role: contact)");
+            if (!pj.at("friction").is_number())
+              throw std::runtime_error(
+                  "friction is a number: the coefficient, unitless");
+            pt.friction = pj.at("friction").get<double>();
+          }
           if (pj.contains("mesh_size")) {
             const json& v = pj.at("mesh_size");
             if (v.is_string())
@@ -1670,11 +1729,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // and checked against everything else this call left the study with.
       if (p.contains("nonlinear"))
         s.nonlinear = NonlinearOf(p.at("nonlinear"));
-      if (const std::string why = fem::NonlinearRefusal(
-              s.solver, s.type, s.nonlinear, s.loadCases.size(), s.converge);
-          !why.empty())
+      if (const std::string why = fem::ContactRefusal(s); !why.empty())
         throw std::runtime_error(
-            why + (p.contains("nonlinear")
+            why + (p.contains("nonlinear") || !s.nonlinear.On()
                        ? std::string()
                        : "; this study is nonlinear, so set nonlinear: null "
                          "in the same call to make it linear"));
@@ -1862,6 +1919,21 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     } else {
       refuseKey("fix_rotation", "");
     }
+    // A compression-only support (docs/simulation/README.md#contact).
+    const bool contact = l.type == fem::LoadType::Contact;
+    if (contact) {
+      refuseKey("magnitude", "");
+      refuseKey("direction", "");
+      refuseKey("region", "");
+      if (p.contains("friction")) {
+        if (!p.at("friction").is_number())
+          throw std::runtime_error(
+              "friction is a number: the coefficient, unitless");
+        l.friction = p.at("friction").get<double>();
+      }
+    } else {
+      refuseKey("friction", "");
+    }
     if (torque && !p.contains("torque_nmm"))
       throw std::runtime_error("a torque load needs torque_nmm (N*mm, "
                                "right-handed about its axis)");
@@ -1897,10 +1969,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // no face to name because the patch exists in neither part.
     const Document* faceDoc = doc;
     if (p.contains("contact_with")) {
-      if (l.type != fem::LoadType::Fixed)
+      if (l.type != fem::LoadType::Fixed && !contact)
         throw std::runtime_error(
-            "only a fixed support anchors on a contact; a force or pressure "
-            "names a face (occurrence + face)");
+            "only a fixed support or a contact support anchors on a contact; "
+            "a force or pressure names a face (occurrence + face)");
+      if (!host.IsAssembly())
+        throw std::runtime_error(
+            "contact_with names an occurrence of an assembly study; on a "
+            "part a contact support rests on the ground under its face");
       l.contactWith =
           host.OccurrenceOf(p.at("contact_with"), "contact_with").id;
       const fem::Study& study = host.Require(id);
@@ -1949,6 +2025,21 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           "face '" + l.face.name +
           "' is not cylindrical, so it has no axis of its own: a torque on "
           "it needs axis_origin_mm and axis_dir");
+    // On the ground: the plane a flat face lies on.
+    if (contact && l.contactWith == 0 && faceDoc) {
+      fem::ResolvedFace rf;
+      std::string why;
+      if (!fem::ResolveFace(*faceDoc, l.face, "contact support", rf, &why))
+        throw std::runtime_error(why);
+      const auto info = Measure::DescribeFaceAt(
+          faceDoc->GetBodies()[rf.bodyIndex], rf.faceIndex);
+      if (!info || info->kind != "plane")
+        throw std::runtime_error(
+            "face '" + l.face.name +
+            "' is not flat: a contact support without contact_with rests on "
+            "the ground, the plane a flat face lies on; a curved face rests "
+            "on a rigid occurrence in an assembly study (contact_with)");
+    }
     if (pin && !(faceDoc && fem::CylindricalFaceAxis(*faceDoc, l.face)))
       throw std::runtime_error(
           "face '" + l.face.name +
@@ -1997,6 +2088,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             "region: a topology study freezes whole faces, so its loads "
             "are on whole faces");
       l.region = DocumentIO::LoadRegionFromJson(p.at("region"), "add_load");
+    }
+    // What the study would be with it: a contact refused where a nonlinear
+    // study is (in-house, another analysis, load cases), a pin beside one.
+    {
+      fem::Study with = host.Require(id);
+      with.loads.push_back(l);
+      if (const std::string why = fem::ContactRefusal(with); !why.empty())
+        throw std::runtime_error(why);
     }
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
     return json{{"id", l.id}};
@@ -2172,8 +2271,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // own cancel and no deadline), refused here before anything starts.
       if (p.contains("timeout_s")) {
         start.timeoutSeconds = p.at("timeout_s").get<double>();
-        if (fem::EffectiveSolver(s->solver, s->nonlinear) !=
-            fem::Solver::Calculix)
+        if (fem::EffectiveSolver(*s) != fem::Solver::Calculix)
           throw std::runtime_error(
               "timeout_s bounds a CalculiX run, and this study is solved "
               "in-house (set_study solver: calculix to run it on CalculiX)");
@@ -2189,7 +2287,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         if (p.contains("converge")) {
           const fem::ConvergeMode mode = ConvergeOf(p.at("converge"));
           if (const std::string why = fem::NonlinearRefusal(
-                  s->solver, s->type, s->nonlinear, s->loadCases.size(), mode);
+                  s->solver, s->type, s->nonlinear, s->loadCases.size(), mode,
+                  fem::HasContact(*s));
               !why.empty())
             throw std::runtime_error(why);
           start.converge = static_cast<int>(mode);
@@ -2572,7 +2671,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                    {"force_n", {sr.forceN.x, sr.forceN.y, sr.forceN.z}}};
         if (sr.hasMoment)
           rj["moment_n_mm"] = {sr.momentNmm.x, sr.momentNmm.y, sr.momentNmm.z};
-        if (sr.type == fem::LoadType::Pin) {
+        if (sr.type == fem::LoadType::Pin ||
+            sr.type == fem::LoadType::Contact) {
           rj["contact_area_mm2"] = sr.contactAreaMm2;
           rj["face_area_mm2"] = sr.faceAreaMm2;
         }
@@ -2655,6 +2755,28 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         bj["reactions"] = reactionsJson(b.results);
       if (b.nonlinear.solved)
         bj["nonlinear"] = NonlinearBodyJson(b.nonlinear, mp.yieldMPa);
+      // Each contact at the factor reported (docs/simulation/README.md
+      // #contact): its pressure, and how much of its faces it closed.
+      if (!b.contacts.empty()) {
+        json cs = json::array();
+        for (const fem::StudyBodyResult::ContactResult& c : b.contacts)
+          cs.push_back(
+              {{c.participant ? "occurrence" : "support", c.id},
+               {"kind", c.participant ? "participant" : "support"},
+               {"name", c.name},
+               {"friction", c.friction},
+               {"penalty_mpa_per_mm", c.penaltyMPaPerMm},
+               {"area_mm2", c.areaMm2},
+               {"closed_area_mm2", c.closedMm2},
+               {"open_area_mm2", std::max(0.0, c.areaMm2 - c.closedMm2)},
+               {"force_n", {c.forceN.x, c.forceN.y, c.forceN.z}},
+               {"moment_n_mm", {c.momentNmm.x, c.momentNmm.y, c.momentNmm.z}},
+               {"normal_force_n", c.normalN},
+               {"shear_force_n", c.shearN},
+               {"max_pressure_mpa", c.maxPressureMPa},
+               {"mean_pressure_mpa", c.meanPressureMPa}});
+        bj["contacts"] = std::move(cs);
+      }
       for (size_t k = 0; k < std::max<size_t>(1, b.cases.size()); ++k) {
         const fem::FemResults& r = b.Case(static_cast<int>(k));
         if (r.maxVonMises > topEdgeVm) {
@@ -2787,7 +2909,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       result["calculix"] = {{"residual", rt->residual},
                             {"residual_floor", rt->residualFloor},
                             {"energy_residual", rt->energyResidual}};
-    if (onCalculix && !s->nonlinear.On()) {
+    if (onCalculix && !fem::IsNonlinear(*s)) {
       fem::Study twin = *s;
       twin.solver = fem::Solver::Auto;
       const uint64_t twinHash =
@@ -2869,17 +2991,29 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       result["nonlinear"] = std::move(nj);
     } else if (s->nonlinear.On()) {
       result["nonlinear"] = {{"kind", "large_deformation"}};
+    } else if (fem::HasContact(*s)) {
+      result["nonlinear"] = {{"kind", "contact"}};
     }
-    if (s->nonlinear.On()) {
+    if (fem::IsNonlinear(*s)) {
       json notes = json::array();
-      notes.push_back(
-          "large deformation (NLGEOM): the load is stepped up and each "
-          "increment is solved on the part as it has deformed; the stress "
-          "is the Cauchy stress of the deformed part");
-      notes.push_back("a force keeps its direction (a dead load); a "
-                      "pressure follows its face as it turns; a torque or "
-                      "remote load is carried from a reference node by its "
-                      "face (*COUPLING, *DISTRIBUTING)");
+      if (s->nonlinear.On()) {
+        notes.push_back(
+            "large deformation (NLGEOM): the load is stepped up and each "
+            "increment is solved on the part as it has deformed; the stress "
+            "is the Cauchy stress of the deformed part");
+        notes.push_back("a force keeps its direction (a dead load); a "
+                        "pressure follows its face as it turns; a torque or "
+                        "remote load is carried from a reference node by its "
+                        "face (*COUPLING, *DISTRIBUTING)");
+      }
+      if (fem::HasContact(*s))
+        notes.push_back(
+            "contact: face-to-face penalty contact on CalculiX, pressed and "
+            "never pulled, the load stepped up as each contact closes or "
+            "opens; a part held by a contact alone is held by weak springs "
+            "while it closes (their share of the load is `stabilization`); "
+            "each contact's closed area, pressure and force are per body "
+            "under `contacts`");
       for (const fem::Load& l : s->loads)
         if (l.type == fem::LoadType::Pin) {
           notes.push_back("each pin is held where the linear solve of the "
@@ -3053,6 +3187,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         c.unit = "x";
         c.note = std::string(s->nonlinear.On()
                                  ? "large-deformation (NLGEOM) static solve"
+                             : fem::HasContact(*s)
+                                 ? "contact (nonlinear) static solve"
                                  : "linear-elastic static solve") +
                  " on " + std::to_string(elements) +
                  " elements, against the library yield strength. A prediction,"

@@ -1266,6 +1266,9 @@ void DrawSimulationToolbar(AppState& state) {
     case SimulationState::Tool::Pin:
       what = "pin support (a bore or a shaft)";
       break;
+    case SimulationState::Tool::Contact:
+      what = "contact support (a flat face on the ground)";
+      break;
     case SimulationState::Tool::Keep:
       what = "keep face";
       break;

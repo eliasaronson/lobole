@@ -104,10 +104,13 @@ json StudyToJson(const fem::Study& s) {
   if (s.converge != fem::ConvergeMode::Auto)
     j["converge"] = fem::ConvergeModeToString(s.converge);
   // Solved past linear (v208): absent when linear, so every study saved
-  // before -- and its input hash -- is what it was.
-  if (s.nonlinear.On()) {
+  // before -- and its input hash -- is what it was. A contact study's
+  // increments without large deformation (vNEXT).
+  if (s.nonlinear.On() || s.nonlinear.increments > 0) {
     const fem::Nonlinear& nl = s.nonlinear;
-    json n = {{"large_deformation", true}};
+    json n = json::object();
+    if (nl.largeDeformation)
+      n["large_deformation"] = true;
     if (nl.increments > 0)
       n["increments"] = nl.increments;
     if (nl.snapThrough)
@@ -130,6 +133,8 @@ json StudyToJson(const fem::Study& s) {
         pj["mesh_size"] = pt.meshSize;
       if (!pt.meshSizeExpr.empty())
         pj["mesh_size_expr"] = pt.meshSizeExpr;
+      if (pt.role == fem::ParticipantRole::Contact && pt.friction != 0.0)
+        pj["friction"] = pt.friction; // vNEXT
       j["participants"].push_back(std::move(pj));
     }
   }
@@ -175,6 +180,8 @@ json StudyToJson(const fem::Study& s) {
         lj["point"] = {l.point.x, l.point.y, l.point.z};
       if (l.type == fem::LoadType::Pin && l.fixRotation) // v196
         lj["fix_rotation"] = true;
+      if (l.type == fem::LoadType::Contact && l.friction != 0.0) // vNEXT
+        lj["friction"] = l.friction;
       if (!l.loadCase.empty())
         lj["case"] = l.loadCase;
       // v183: part of the face; omitted for the whole of it.
@@ -407,14 +414,13 @@ fem::Study StudyFromJson(const json& j) {
     nl.imperfectionMm = n.value("imperfection_mm", 0.0);
     nl.hasDeflectionLimit = n.contains("deflection_limit_mm");
     nl.deflectionLimitMm = n.value("deflection_limit_mm", 0.0);
-    if (!nl.largeDeformation)
-      throw std::runtime_error("study " + std::to_string(s.id) +
-                               ": nonlinear without large_deformation: true");
+    // Without large_deformation, refused below unless the study has a
+    // contact (NonlinearRefusal).
   }
 
   for (const json& pj : j.value("participants", json::array())) {
     readctx::RefuseUnknownKeys(
-        pj, {"occurrence", "role", "mesh_size", "mesh_size_expr"},
+        pj, {"occurrence", "role", "mesh_size", "mesh_size_expr", "friction"},
         "study participant");
     fem::Participant pt;
     pt.occurrenceId = pj.at("occurrence").get<uint64_t>();
@@ -423,9 +429,21 @@ fem::Study StudyFromJson(const json& j) {
     const std::string roleStr = pj.value("role", std::string{});
     if (!fem::ParticipantRoleFromString(roleStr, pt.role))
       throw std::runtime_error("unknown participant role '" + roleStr +
-                               "' (expected one of: meshed, rigid, ignored)");
+                               "' (expected one of: meshed, rigid, bonded, "
+                               "contact, ignored)");
     pt.meshSize = pj.value("mesh_size", 0.0);
     pt.meshSizeExpr = pj.value("mesh_size_expr", std::string{});
+    if (pj.contains("friction")) { // vNEXT
+      if (pt.role != fem::ParticipantRole::Contact)
+        throw std::runtime_error("participant " +
+                                 std::to_string(pt.occurrenceId) +
+                                 ": friction is a contact participant's");
+      if (!pj.at("friction").is_number())
+        throw std::runtime_error("participant " +
+                                 std::to_string(pt.occurrenceId) +
+                                 ": friction is not a number");
+      pt.friction = pj.at("friction").get<double>();
+    }
     s.participants.push_back(std::move(pt));
   }
 
@@ -447,7 +465,7 @@ fem::Study StudyFromJson(const json& j) {
                                {"id", "type", "magnitude", "magnitude_expr",
                                 "contact_with", "face", "occurrence",
                                 "direction", "axis_origin", "axis_dir", "point",
-                                "case", "region", "fix_rotation"},
+                                "case", "region", "fix_rotation", "friction"},
                                "study load");
     fem::Load l;
     l.id = lj.at("id").get<uint64_t>();
@@ -462,9 +480,11 @@ fem::Study StudyFromJson(const json& j) {
       readctx::RefuseUnknownKeys(lj.at("face"), {"feature_id", "element"},
                                  "study load face");
       l.face = ElementRefFromJson(lj.at("face"));
-    } else if (l.type != fem::LoadType::Fixed)
+    } else if (l.type != fem::LoadType::Fixed &&
+               l.type != fem::LoadType::Contact)
       throw std::runtime_error("load " + std::to_string(l.id) +
-                               ": only a fixed support anchors on a contact");
+                               ": only a fixed support or a contact "
+                               "support anchors on a contact");
     l.magnitude = lj.value("magnitude", 0.0);
     l.magnitudeExpr = lj.value("magnitude_expr", std::string{});
     l.loadCase = lj.value("case", std::string{});
@@ -500,6 +520,15 @@ fem::Study StudyFromJson(const json& j) {
                                  ": fix_rotation is not true or false");
       l.fixRotation = lj.at("fix_rotation").get<bool>();
     }
+    if (lj.contains("friction")) { // vNEXT
+      if (l.type != fem::LoadType::Contact)
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": friction is a contact support's");
+      if (!lj.at("friction").is_number())
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": friction is not a number");
+      l.friction = lj.at("friction").get<double>();
+    }
     if (l.type == fem::LoadType::Torque &&
         (lj.contains("axis_origin") || lj.contains("axis_dir"))) {
       if (!lj.contains("axis_origin") || !lj.contains("axis_dir"))
@@ -525,11 +554,10 @@ fem::Study StudyFromJson(const json& j) {
           LoadRegionFromJson(lj.at("region"), "load " + std::to_string(l.id));
     s.loads.push_back(std::move(l));
   }
-  // A nonlinear option the study cannot take (an in-house solver, load
-  // cases, another analysis) is refused here as set_study refuses it.
-  if (const std::string why = fem::NonlinearRefusal(
-          s.solver, s.type, s.nonlinear, s.loadCases.size(), s.converge);
-      !why.empty())
+  // A nonlinear option or a contact the study cannot take (an in-house
+  // solver, load cases, another analysis) is refused here as set_study
+  // refuses it.
+  if (const std::string why = fem::ContactRefusal(s); !why.empty())
     throw std::runtime_error("study " + std::to_string(s.id) + ": " + why);
   return s;
 }
@@ -935,6 +963,64 @@ json BucklingToJson(const fem::StudyBodyResult::Buckling& k) {
   return out;
 }
 
+// Each contact of a body (vNEXT; docs/simulation/README.md#contact).
+json ContactsToJson(
+    const std::vector<fem::StudyBodyResult::ContactResult>& contacts) {
+  json out = json::array();
+  for (const auto& c : contacts)
+    out.push_back(
+        {{"id", c.id},
+         {"participant", c.participant},
+         {"name", c.name},
+         {"friction", c.friction},
+         {"penalty_mpa_per_mm", c.penaltyMPaPerMm},
+         {"area_mm2", c.areaMm2},
+         {"closed_mm2", c.closedMm2},
+         {"force_n", {c.forceN.x, c.forceN.y, c.forceN.z}},
+         {"moment_n_mm", {c.momentNmm.x, c.momentNmm.y, c.momentNmm.z}},
+         {"normal_n", c.normalN},
+         {"shear_n", c.shearN},
+         {"max_pressure_mpa", c.maxPressureMPa},
+         {"mean_pressure_mpa", c.meanPressureMPa}});
+  return out;
+}
+
+std::vector<fem::StudyBodyResult::ContactResult>
+ContactsFromJson(const json& j, const std::string& what) {
+  std::vector<fem::StudyBodyResult::ContactResult> out;
+  const auto vec = [&](const json& v, const char* key) {
+    if (!v.is_array() || v.size() != 3)
+      throw std::runtime_error(what + ": a contact's " + key +
+                               " is not [x, y, z]");
+    return glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
+                      v.at(2).get<double>());
+  };
+  for (const json& cj : j) {
+    readctx::RefuseUnknownKeys(cj,
+                               {"id", "participant", "name", "friction",
+                                "penalty_mpa_per_mm", "area_mm2", "closed_mm2",
+                                "force_n", "moment_n_mm", "normal_n", "shear_n",
+                                "max_pressure_mpa", "mean_pressure_mpa"},
+                               what + " contact");
+    fem::StudyBodyResult::ContactResult c;
+    c.id = cj.at("id").get<uint64_t>();
+    c.participant = cj.value("participant", false);
+    c.name = cj.value("name", std::string{});
+    c.friction = cj.value("friction", 0.0);
+    c.penaltyMPaPerMm = cj.value("penalty_mpa_per_mm", 0.0);
+    c.areaMm2 = cj.value("area_mm2", 0.0);
+    c.closedMm2 = cj.value("closed_mm2", 0.0);
+    c.forceN = vec(cj.at("force_n"), "force_n");
+    c.momentNmm = vec(cj.at("moment_n_mm"), "moment_n_mm");
+    c.normalN = cj.value("normal_n", 0.0);
+    c.shearN = cj.value("shear_n", 0.0);
+    c.maxPressureMPa = cj.value("max_pressure_mpa", 0.0);
+    c.meanPressureMPa = cj.value("mean_pressure_mpa", 0.0);
+    out.push_back(c);
+  }
+  return out;
+}
+
 // How a nonlinear body's run went (v208).
 json NonlinearToJson(const fem::StudyBodyResult::Nonlinear& n) {
   json curve = json::array();
@@ -947,6 +1033,12 @@ json NonlinearToJson(const fem::StudyBodyResult::Nonlinear& n) {
       {"imbalance", n.imbalance}};
   if (n.firstYieldFactor > 0)
     out["first_yield_factor"] = n.firstYieldFactor;
+  // A contact run's (vNEXT): solved at small deformation, and what its
+  // stabilizing springs carried.
+  if (!n.largeDeformation)
+    out["large_deformation"] = false;
+  if (n.stabilization > 0)
+    out["stabilization"] = n.stabilization;
   if (n.snapped)
     out["snapped"] = {n.snappedFrom, n.snappedTo};
   if (n.snapThrough)
@@ -966,7 +1058,8 @@ fem::StudyBodyResult::Nonlinear NonlinearFromJson(const json& j,
   readctx::RefuseUnknownKeys(j,
                              {"factor", "max_factor", "increments", "ccx_runs",
                               "curve", "residual_criterion", "imbalance",
-                              "first_yield_factor", "snapped", "snap_through"},
+                              "first_yield_factor", "snapped", "snap_through",
+                              "large_deformation", "stabilization"},
                              what + " nonlinear");
   fem::StudyBodyResult::Nonlinear n;
   n.solved = true;
@@ -979,6 +1072,8 @@ fem::StudyBodyResult::Nonlinear NonlinearFromJson(const json& j,
   n.residualCriterion = j.value("residual_criterion", 0.0);
   n.imbalance = j.value("imbalance", 0.0);
   n.firstYieldFactor = j.value("first_yield_factor", 0.0);
+  n.largeDeformation = j.value("large_deformation", true);
+  n.stabilization = j.value("stabilization", 0.0);
   if (j.contains("snapped")) {
     n.snapped = true;
     n.snappedFrom = j.at("snapped").at(0).get<double>();
@@ -1238,6 +1333,8 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
       bj["buckling"] = BucklingToJson(b.buckling);
     if (b.nonlinear.solved)
       bj["nonlinear"] = NonlinearToJson(b.nonlinear);
+    if (!b.contacts.empty())
+      bj["contacts"] = ContactsToJson(b.contacts);
     bodies.push_back(std::move(bj));
   }
   out["bodies"] = std::move(bodies);
@@ -1390,6 +1487,13 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
                                  "' carries a nonlinear summary, which is a "
                                  "static result's");
       b.nonlinear = NonlinearFromJson(bj.at("nonlinear"), what);
+    }
+    if (bj.contains("contacts")) {
+      if (kind != "static")
+        throw std::runtime_error(what + ": body '" + b.bodyName +
+                                 "' carries contacts, which are a static "
+                                 "result's");
+      b.contacts = ContactsFromJson(bj.at("contacts"), what);
     }
     if (kind == "buckling") {
       if (!bj.contains("buckling"))

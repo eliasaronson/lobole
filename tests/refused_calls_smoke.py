@@ -654,6 +654,63 @@ def main():
                  f"a refused nonlinear run stored a result: {listed}")
             d.call("set_settings", calculix_path="")
             d.call("remove_study", id=nl)
+            # Contact (docs/simulation/README.md#contact): refused where a
+            # nonlinear study is -- in-house, another analysis, load cases
+            # -- and with what only a contact says: a curved face on the
+            # ground, a negative friction, a pin beside it.
+            ct = d.call("add_study", name="Contact")["id"]
+            check("a contact on the ground", "add_load",
+                  {"study": ct, "type": "contact", "face": face(-1.0)},
+                  must_refuse=False, tab=part["name"])
+            listed = [x for x in d.call("list_studies")["studies"]
+                      if x["id"] == ct][0]
+            rest = [ld for ld in listed["loads"]
+                    if ld["type"] == "contact"][0]["id"]
+            check("in_house on a contact study", "set_study",
+                  {"id": ct, "solver": "in_house"},
+                  needle="a study with a contact solves on CalculiX",
+                  tab=part["name"])
+            check("a contact study made modal", "set_study",
+                  {"id": ct, "type": "modal"},
+                  needle="a contact is a static study's", tab=part["name"])
+            check("load cases on a contact study", "set_study",
+                  {"id": ct, "load_cases": [{"name": "a"}]},
+                  needle="takes no load cases", tab=part["name"])
+            check("converge always on a contact study", "run_study",
+                  {"id": ct, "converge": "always"},
+                  needle="converge: always", tab=part["name"])
+            check("snap-through on a contact study", "set_study",
+                  {"id": ct, "nonlinear": {"large_deformation": True,
+                                           "snap_through": True}},
+                  needle="cannot hold a contact", tab=part["name"])
+            check("a negative friction", "add_load",
+                  {"study": ct, "type": "contact", "face": face(1.0),
+                   "friction": -0.2},
+                  needle="friction is a coefficient", tab=part["name"])
+            check("a contact with a magnitude", "add_load",
+                  {"study": ct, "type": "contact", "face": face(1.0),
+                   "magnitude": 3.0},
+                  needle="does not take `magnitude`", tab=part["name"])
+            check("friction on a fixed support", "add_load",
+                  {"study": ct, "type": "fixed", "face": face(1.0),
+                   "friction": 0.3},
+                  needle="does not take `friction`", tab=part["name"])
+            check("contact_with on a part study", "add_load",
+                  {"study": ct, "type": "contact", "contact_with": 1},
+                  needle="assembly study", tab=part["name"])
+            d.call("remove_load", study=ct, id=rest)
+            mod = d.call("add_study", name="Contact modes", type="modal")["id"]
+            check("a contact on a modal study", "add_load",
+                  {"study": mod, "type": "contact", "face": face(-1.0)},
+                  needle="a contact is a static study's", tab=part["name"])
+            ih = d.call("add_study", name="In-house")["id"]
+            d.call("set_study", id=ih, solver="in_house")
+            check("a contact on an in-house study", "add_load",
+                  {"study": ih, "type": "contact", "face": face(-1.0)},
+                  needle="a study with a contact solves on CalculiX",
+                  tab=part["name"])
+            for sid in (ct, mod, ih):
+                d.call("remove_study", id=sid)
 
             if problems:
                 print("refused_calls_smoke: FAILED")

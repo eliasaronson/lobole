@@ -1,0 +1,29 @@
+{
+  "format": "designer-document",
+  "version": 209,
+  "features": [
+    {"type": "Sketch", "name": "Section", "id": 1, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "circle", "id": 1, "center": [0, 0], "radius": 5}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Strut", "id": 2, "sketch_id": 1,
+     "distance": 100.0, "mode": "new_body"}
+  ],
+  "studies": [
+    {"type": "Study", "id": 3, "name": "Rests",
+     "nonlinear": {"increments": 12},
+     "loads": [
+       {"id": 4, "type": "contact", "friction": 0.3,
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 0.0}
+     ]},
+    {"type": "Study", "id": 5, "name": "Frictionless", "solver": "calculix",
+     "loads": [
+       {"id": 6, "type": "contact",
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 0.0},
+       {"id": 7, "type": "fixed",
+        "face": {"feature_id": 2, "element": "2/g2"}, "magnitude": 0.0}
+     ]}
+  ]
+}

@@ -344,6 +344,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A study's load `type` may be `contact` ([contact](../simulation/README.md#contact)): a compression-only support, the face resting on the ground (a part study, or a face of the meshed occurrence) or on a rigid participant (`contact_with`), with `friction` (unitless, written when not 0; refused on any other type, and when not a number). A participant's `role` may be `contact`, with `friction` the same way. A study with a contact may carry `nonlinear` {`increments`} without `large_deformation` (written then without it); a contact on an in-house study, another analysis, with load cases, with `snap_through`, with `converge: always` or beside a pin is refused. A saved static result's body gains `contacts` [{`id`, `participant`, `name`, `friction`, `penalty_mpa_per_mm`, `area_mm2`, `closed_mm2`, `force_n`, `moment_n_mm`, `normal_n`, `shear_n`, `max_pressure_mpa`, `mean_pressure_mpa`}], and its `nonlinear` `large_deformation` (written only when false) and `stabilization`. Golden `vNEXT-contact-support` (two part studies: a contact with friction and increments, and a frictionless one beside a fixed support; results are not in the single-file corpus, so their round trip is `tests/test_fem_calculix.cpp`'s) |
 
 ## Paths in a project
 

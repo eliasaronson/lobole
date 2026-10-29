@@ -119,12 +119,11 @@ bool CalculixRunFor(const AppState& state, const fem::Study& s,
   if (const std::string why = fem::SolverRefusal(s.solver, s.type);
       !why.empty())
     return fail(why);
-  if (const std::string why = fem::NonlinearRefusal(
-          s.solver, s.type, s.nonlinear, s.loadCases.size(), s.converge);
-      !why.empty())
+  if (const std::string why = fem::ContactRefusal(s); !why.empty())
     return fail(why);
-  // A nonlinear study set to auto solves on CalculiX.
-  if (fem::EffectiveSolver(s.solver, s.nonlinear) != fem::Solver::Calculix) {
+  // A nonlinear study (large deformation, or a contact) set to auto solves
+  // on CalculiX.
+  if (fem::EffectiveSolver(s) != fem::Solver::Calculix) {
     if (timeoutSeconds > 0)
       return fail("timeout_s bounds a CalculiX run, and this study is solved "
                   "in-house (set_study solver: calculix to run it on "

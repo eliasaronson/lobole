@@ -325,49 +325,190 @@ bool LoadResultant(const FemMesh& mesh, const FaceLoad& load,
   return true;
 }
 
+// A tet's ten nodes in the order the deck writes them: ccx wants the
+// corners positively oriented (Netgen gives them the other way), so a
+// negative one has its corners 1 and 2 swapped, and the midsides with them.
+// Ours: corners 0-3, then (0,1) (1,2) (0,2) (0,3) (1,3) (2,3), which is
+// ccx's order; swapped: corners 0 2 1 3, then (0,2) (2,1) (1,0) (0,3)
+// (2,3) (1,3).
+std::array<int, 10> WrittenOrder(const FemMesh& mesh, size_t t) {
+  const auto& q = mesh.tets[t];
+  const glm::dvec3 &x0 = mesh.nodes[q[0]], &x1 = mesh.nodes[q[1]],
+                   &x2 = mesh.nodes[q[2]], &x3 = mesh.nodes[q[3]];
+  const bool positive = glm::dot(glm::cross(x1 - x0, x2 - x0), x3 - x0) > 0.0;
+  return positive ? std::array<int, 10>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+                  : std::array<int, 10>{0, 2, 1, 3, 6, 5, 4, 7, 9, 8};
+}
+
+// Each boundary facet of `mesh` as the deck names it: (element, face) with
+// the element numbered t + 1 + `elemOffset` and ccx's faces of a C3D10 in
+// its written corners' order, S1 (1 2 3), S2 (1 4 2), S3 (2 4 3), S4
+// (3 4 1). (0, 0) for a facet that is the face of no tet.
+std::vector<std::pair<int, int>> FacetFaces(const FemMesh& mesh,
+                                            int elemOffset) {
+  static constexpr int kFace[4][3] = {
+      {0, 1, 2}, {0, 3, 1}, {1, 3, 2}, {2, 3, 0}};
+  std::map<std::array<int, 3>, std::pair<int, int>> faceOf;
+  for (size_t t = 0; t < mesh.tets.size(); ++t) {
+    const std::array<int, 10> order = WrittenOrder(mesh, t);
+    for (int f = 0; f < 4; ++f) {
+      std::array<int, 3> k = {mesh.tets[t][order[kFace[f][0]]],
+                              mesh.tets[t][order[kFace[f][1]]],
+                              mesh.tets[t][order[kFace[f][2]]]};
+      std::sort(k.begin(), k.end());
+      faceOf[k] = {static_cast<int>(t) + 1 + elemOffset, f + 1};
+    }
+  }
+  std::vector<std::pair<int, int>> out(mesh.boundary.size(), {0, 0});
+  for (size_t b = 0; b < mesh.boundary.size(); ++b) {
+    const auto& tri = mesh.boundary[b];
+    std::array<int, 3> k = {tri.nodes[0], tri.nodes[1], tri.nodes[2]};
+    std::sort(k.begin(), k.end());
+    if (const auto it = faceOf.find(k); it != faceOf.end())
+      out[b] = it->second;
+  }
+  return out;
+}
+
+// A real number as *SPRING reads one: with a decimal point, which is how it
+// tells a stiffness from a degree of freedom.
+std::string Real(double v) {
+  char buf[40];
+  std::snprintf(buf, sizeof(buf), "%.12E", v);
+  return buf;
+}
+
 // The steps of a nonlinear deck (WriteDeck's `nonlinear`), from the
-// boundaries on.
+// boundaries on: first the model a contact adds (its rigid partners, its
+// surfaces and pairs, the stabilizing springs), then the steps.
 bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
-                         const Supports& supports,
+                         const std::vector<Material>& byDomain,
                          const std::vector<char>& fixed,
                          const std::vector<int>& frameOf,
                          const std::vector<int>& pinOf,
                          const std::vector<StudyJobBody::PinSupport>& pins,
                          const std::vector<glm::dvec3>& nodalForces,
-                         const std::vector<std::array<int, 4>>& written,
                          const DeckNonlinear& nl, std::string* error) {
-  (void)supports;
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
     return false;
   };
   const int nNodes = static_cast<int>(mesh.nodes.size());
-  // ccx's faces of a C3D10 in its corners' order: S1 (1 2 3), S2 (1 4 2),
-  // S3 (2 4 3), S4 (3 4 1).
-  static constexpr int kFace[4][3] = {
-      {0, 1, 2}, {0, 3, 1}, {1, 3, 2}, {2, 3, 0}};
-  std::map<std::array<int, 3>, std::pair<int, int>> faceOf;
-  for (size_t t = 0; t < written.size(); ++t)
-    for (int f = 0; f < 4; ++f) {
-      std::array<int, 3> k = {written[t][kFace[f][0]], written[t][kFace[f][1]],
-                              written[t][kFace[f][2]]};
-      std::sort(k.begin(), k.end());
-      faceOf[k] = {static_cast<int>(t) + 1, f + 1};
-    }
-  const auto facesOf = [&](const FaceLoad& l,
-                           std::vector<std::pair<int, int>>& faces) {
-    for (int ti : l.tris) {
-      const auto& tri = mesh.boundary[ti];
-      std::array<int, 3> k = {tri.nodes[0], tri.nodes[1], tri.nodes[2]};
-      std::sort(k.begin(), k.end());
-      const auto it = faceOf.find(k);
-      if (it == faceOf.end())
+  const std::vector<std::pair<int, int>> faces = FacetFaces(mesh, 0);
+  const auto facesOf = [&](const std::vector<int>& tris,
+                           std::vector<std::pair<int, int>>& into) {
+    for (int ti : tris) {
+      if (ti < 0 || ti >= static_cast<int>(faces.size()) ||
+          faces[ti].first == 0)
         return fail("a loaded boundary facet is the face of no tet");
-      faces.push_back(it->second);
+      into.push_back(faces[ti]);
     }
     return true;
   };
+
+  // A contact (docs/simulation/README.md#contact): each rigid partner's
+  // nodes and tets after the mesh's, every node fixed.
+  static const std::vector<StudyJobBody::ContactPair> kNoContacts;
+  static const std::vector<FemMesh> kNoPartners;
+  static const std::vector<StudyJobBody::Stabilized> kNoSprings;
+  const auto& contacts = nl.contacts ? *nl.contacts : kNoContacts;
+  const auto& partners = nl.partners ? *nl.partners : kNoPartners;
+  const auto& springs = nl.stabilized ? *nl.stabilized : kNoSprings;
+  int nextNode = nNodes + 1;
+  int nextElem = static_cast<int>(mesh.tets.size()) + 1;
+  std::vector<int> partnerNode(partners.size()), partnerElem(partners.size());
+  if (!partners.empty()) {
+    const Material& m = byDomain.front();
+    out << "*MATERIAL, NAME=MR\n*ELASTIC\n"
+        << Num(m.youngMPa) << ", " << Num(m.poisson) << "\n";
+  }
+  for (size_t k = 0; k < partners.size(); ++k) {
+    const FemMesh& pm = partners[k];
+    if (pm.nodes.empty() || pm.tets.empty())
+      return fail("a contact's rigid partner meshed to nothing");
+    partnerNode[k] = nextNode;
+    partnerElem[k] = nextElem;
+    out << "*NODE, NSET=P" << k + 1 << "\n";
+    for (size_t n = 0; n < pm.nodes.size(); ++n)
+      out << nextNode + static_cast<int>(n) << ", " << Num(pm.nodes[n].x)
+          << ", " << Num(pm.nodes[n].y) << ", " << Num(pm.nodes[n].z) << "\n";
+    out << "*ELEMENT, TYPE=C3D10, ELSET=R" << k + 1 << "\n";
+    for (size_t t = 0; t < pm.tets.size(); ++t) {
+      out << nextElem + static_cast<int>(t);
+      for (int i : WrittenOrder(pm, t))
+        out << ", " << nextNode + pm.tets[t][i];
+      out << "\n";
+    }
+    out << "*SOLID SECTION, ELSET=R" << k + 1 << ", MATERIAL=MR\n";
+    out << "*BOUNDARY\nP" << k + 1 << ", 1, 3\n";
+    nextNode += static_cast<int>(pm.nodes.size());
+    nextElem += static_cast<int>(pm.tets.size());
+  }
+  // Each pair: the body's facets the slave surface, the partner's the
+  // master, face-to-face penalty contact.
+  for (size_t k = 0; k < contacts.size(); ++k) {
+    const StudyJobBody::ContactPair& c = contacts[k];
+    if (c.slaveTris.empty() || c.masterTris.empty())
+      return fail("contact " + std::to_string(c.id) + " (" + c.name +
+                  ") has no facets on one of its sides");
+    if (!(c.penalty > 0.0) || !(c.friction >= 0.0))
+      return fail("contact " + std::to_string(c.id) +
+                  " has no penalty or a negative friction");
+    std::vector<std::pair<int, int>> slave, master;
+    if (!facesOf(c.slaveTris, slave))
+      return false;
+    if (c.partner >= 0) {
+      if (c.partner >= static_cast<int>(partners.size()))
+        return fail("contact " + std::to_string(c.id) + " has no partner");
+      const std::vector<std::pair<int, int>> pf =
+          FacetFaces(partners[c.partner], partnerElem[c.partner] - 1);
+      for (int ti : c.masterTris) {
+        if (ti < 0 || ti >= static_cast<int>(pf.size()) || pf[ti].first == 0)
+          return fail("a contact partner's facet is the face of no tet");
+        master.push_back(pf[ti]);
+      }
+    } else if (!facesOf(c.masterTris, master)) {
+      return false;
+    }
+    out << "*SURFACE, NAME=S" << k + 1 << "\n";
+    for (const auto& [e, f] : slave)
+      out << e << ", S" << f << "\n";
+    out << "*SURFACE, NAME=M" << k + 1 << "\n";
+    for (const auto& [e, f] : master)
+      out << e << ", S" << f << "\n";
+    out << "*SURFACE INTERACTION, NAME=I" << k + 1
+        << "\n*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR\n"
+        << Num(c.penalty) << "\n";
+    if (c.friction > 0.0)
+      out << "*FRICTION\n"
+          << Num(c.friction) << ", " << Num(c.penalty / kStickSlopeRatio)
+          << "\n";
+    out << "*CONTACT PAIR, INTERACTION=I" << k + 1
+        << ", TYPE=SURFACE TO SURFACE\nS" << k + 1 << ", M" << k + 1 << "\n";
+  }
+  // Weak springs to the ground, each direction, on every node of a part
+  // nothing but a contact holds; and the settling step's stiffer ones.
+  const bool settle = !nl.settlePerNode.empty();
+  if (settle &&
+      (nl.settlePerNode.size() != springs.size() || nl.steps.size() < 2))
+    return fail("a settling step needs its springs and a step after it");
+  std::string settleSets;
+  for (size_t g = 0; g < springs.size(); ++g)
+    for (int d = 1; d <= 3; ++d)
+      for (int kind = 0; kind < (settle ? 2 : 1); ++kind) {
+        const std::string set = std::string(kind ? "KS" : "K") +
+                                std::to_string(g + 1) + "D" + std::to_string(d);
+        out << "*ELEMENT, TYPE=SPRING1, ELSET=" << set << "\n";
+        for (int n : springs[g].nodes)
+          out << nextElem++ << ", " << n + 1 << "\n";
+        out << "*SPRING, ELSET=" << set << "\n"
+            << d << "\n"
+            << Real(kind ? nl.settlePerNode[g] : springs[g].kPerNode) << "\n";
+        if (kind)
+          settleSets += (settleSets.empty() ? "" : "\n") + set;
+      }
+
   // The pressures, and a reference node per torque or remote load.
   struct Pressure {
     double mpa;
@@ -381,19 +522,19 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
   std::vector<Reference> refs;
   std::vector<std::vector<std::pair<int, int>>> refFaces;
   for (const FaceLoad& l : nl.loads) {
-    std::vector<std::pair<int, int>> faces;
-    if (!facesOf(l, faces))
+    std::vector<std::pair<int, int>> lf;
+    if (!facesOf(l.tris, lf))
       return false;
     if (l.type == LoadType::Pressure) {
-      pressures.push_back({l.magnitude, std::move(faces)});
+      pressures.push_back({l.magnitude, std::move(lf)});
     } else if (l.type == LoadType::Torque || l.type == LoadType::Remote) {
       Reference r;
-      r.node = nNodes + 1 + static_cast<int>(refs.size());
+      r.node = nextNode + static_cast<int>(refs.size());
       r.at = l.origin;
       if (!LoadResultant(mesh, l, r.at, r.force, r.moment, error))
         return false;
       refs.push_back(r);
-      refFaces.push_back(std::move(faces));
+      refFaces.push_back(std::move(lf));
     } else {
       return fail(std::string("a nonlinear deck writes a ") +
                   LoadTypeToString(l.type) + " as nodal forces");
@@ -414,22 +555,28 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
   for (int n = 0; n < nNodes; ++n)
     if (fixed[n] || frameOf[n] >= 0)
       held.push_back(n);
-  if (held.empty())
+  if (held.empty() && contacts.empty())
     return fail("a nonlinear run needs a support");
-  out << "*NSET, NSET=NSUP\n";
-  WriteIdLines(out, held);
+  if (!held.empty()) {
+    out << "*NSET, NSET=NSUP\n";
+    WriteIdLines(out, held);
+  }
   double from = 0.0;
-  for (const NonlinearStep& st : nl.steps) {
+  for (size_t si = 0; si < nl.steps.size(); ++si) {
+    const NonlinearStep& st = nl.steps[si];
     const double period = st.toFactor - from;
     if (!(period > 0.0) || !(st.maxIncrement > 0.0))
       return fail("a nonlinear step runs the load up");
     const double inc = std::min(st.maxIncrement, period);
-    out << "*STEP, NLGEOM, INC=" << nl.maxIncrements << "\n*STATIC\n"
+    out << "*STEP" << (nl.nlgeom ? ", NLGEOM" : "")
+        << ", INC=" << nl.maxIncrements << "\n*STATIC\n"
         << Num(inc) << ", " << Num(period) << ", "
         << Num(std::min(nl.minIncrement, inc)) << ", " << Num(inc) << "\n";
     out << "*CONTROLS, PARAMETERS=FIELD\n"
         << Num(kNonlinearResidual) << ", , , , " << Num(kNonlinearResidual)
         << "\n";
+    if (settle && si == 1)
+      out << "*MODEL CHANGE, TYPE=ELEMENT, REMOVE\n" << settleSets << "\n";
     const double lambda = st.toFactor;
     bool anyLoad = false;
     const auto cload = [&](int node, int dof, double v) {
@@ -465,8 +612,17 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
         for (const auto& [e, f] : pr.faces)
           out << e << ", P" << f << ", " << Num(lambda * pr.mpa) << "\n";
     }
-    out << "*NODE PRINT, NSET=NALL, GLOBAL=YES\nU\n"
-           "*NODE PRINT, NSET=NSUP, GLOBAL=YES\nRF\n*END STEP\n";
+    out << "*NODE PRINT, NSET=NALL, GLOBAL=YES\nU\n";
+    if (!held.empty())
+      out << "*NODE PRINT, NSET=NSUP, GLOBAL=YES\nRF\n";
+    for (size_t k = 0; k < partners.size(); ++k)
+      out << "*NODE PRINT, NSET=P" << k + 1 << ", TOTALS=ONLY\nRF\n";
+    for (size_t k = 0; k < contacts.size(); ++k)
+      out << "*CONTACT PRINT, SLAVE=S" << k + 1 << ", MASTER=M" << k + 1
+          << "\nCF\n";
+    if (!contacts.empty())
+      out << "*CONTACT PRINT\nCSTR\n";
+    out << "*END STEP\n";
     from = st.toFactor;
   }
   if (!out)
@@ -571,11 +727,8 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
     out << n + 1 << ", " << Num(p.x) << ", " << Num(p.y) << ", " << Num(p.z)
         << "\n";
   }
-  // One ELSET per domain. ccx wants the corners positively oriented (Netgen
-  // gives them the other way): corners 1 and 2 swap, and the midsides with
-  // them.
-  // Each tet's corners as written, for the faces a nonlinear run loads.
-  std::vector<std::array<int, 4>> written(nonlinear ? mesh.tets.size() : 0);
+  // One ELSET per domain, each tet's corners positively oriented
+  // (WrittenOrder).
   size_t nDomains = 1;
   for (int d : mesh.tetDomain)
     nDomains = std::max(nDomains, static_cast<size_t>(d) + 1);
@@ -590,21 +743,8 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
         any = true;
       }
       const auto& q = mesh.tets[t];
-      const glm::dvec3 &x0 = mesh.nodes[q[0]], &x1 = mesh.nodes[q[1]],
-                       &x2 = mesh.nodes[q[2]], &x3 = mesh.nodes[q[3]];
-      const bool positive =
-          glm::dot(glm::cross(x1 - x0, x2 - x0), x3 - x0) > 0.0;
-      // Ours: corners 0-3, then (0,1) (1,2) (0,2) (0,3) (1,3) (2,3), which
-      // is ccx's order; swapped: corners 0 2 1 3, then (0,2) (2,1) (1,0)
-      // (0,3) (2,3) (1,3).
-      const std::array<int, 10> order =
-          positive ? std::array<int, 10>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-                   : std::array<int, 10>{0, 2, 1, 3, 6, 5, 4, 7, 9, 8};
-      if (nonlinear)
-        for (int c = 0; c < 4; ++c)
-          written[t][c] = q[order[c]];
       out << t + 1;
-      for (int i : order)
+      for (int i : WrittenOrder(mesh, t))
         out << ", " << q[i] + 1;
       out << "\n";
     }
@@ -698,8 +838,8 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
   }
 
   if (nonlinear)
-    return WriteNonlinearSteps(out, mesh, supports, fixed, frameOf, pinOf, pins,
-                               nodalForces, written, *nonlinear, error);
+    return WriteNonlinearSteps(out, mesh, byDomain, fixed, frameOf, pinOf, pins,
+                               nodalForces, *nonlinear, error);
   // A buckling run's step: its factors to the accuracy the in-house
   // eigensolve holds (ccx's default is 1 %).
   if (buckleFactors > 0)
@@ -1097,9 +1237,10 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
   if (!StaticSupportsOf(jb, mats, {rhs[caseIndex]}, g, SolveOptions{}, sups,
                         pinRows, &err))
     return fail(err);
-  if (in.nonlinear.On()) {
-    // A large-deformation run's deck (docs/simulation/README.md
-    // #nonlinear-static): what NonlinearOnCalculix's first run writes.
+  if (in.nonlinear.On() || !jb.contacts.empty()) {
+    // A large-deformation or contact run's deck (docs/simulation/README.md
+    // #nonlinear-static, #contact): what NonlinearOnCalculix's first run
+    // writes.
     if (in.nonlinear.snapThrough)
       return fail("a snap-through run's deck is seeded with the first "
                   "buckling mode and capped at twice its factor, both found "
@@ -1107,8 +1248,13 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
                   "large-deformation deck: set nonlinear snap_through false");
     std::vector<FaceLoad> dead;
     DeckNonlinear deck;
+    deck.nlgeom = in.nonlinear.largeDeformation;
+    deck.contacts = &jb.contacts;
+    deck.partners = &jb.rigidPartners;
+    deck.stabilized = &jb.stabilized;
     for (const FaceLoad& l : rhs[caseIndex])
-      (l.type == LoadType::Force ? dead : deck.loads).push_back(l);
+      (l.type == LoadType::Force || !deck.nlgeom ? dead : deck.loads)
+          .push_back(l);
     std::vector<glm::dvec3> forces;
     if (!NodalForces(jb.mesh, mats, dead, g, forces, &err))
       return fail(err);
@@ -1116,6 +1262,12 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
                                                        : kNonlinearIncrements;
     deck.steps = {{1.0, 1.0 / increments}};
     deck.maxIncrements = 100 * increments + 1000;
+    const double settleFactor =
+        std::min(1.0 / increments, 1.0 / kNonlinearIncrements);
+    deck.settlePerNode =
+        SettleSprings(jb, mats, rhs[caseIndex], g, settleFactor);
+    if (!deck.settlePerNode.empty())
+      deck.steps.insert(deck.steps.begin(), {settleFactor, settleFactor});
     return WriteDeck(out, jb.mesh, mats, sups.front(), jb.pins, forces, title,
                      error, 0, &deck);
   }
@@ -1297,15 +1449,59 @@ uint64_t CalculixNonlinearMemoryEstimate(size_t dofs) {
       1.1 * static_cast<double>(CalculixStaticMemoryEstimate(dofs)));
 }
 
+double ContactPenalty(double youngMPa, double edgeMm) {
+  return edgeMm > 0.0 ? kContactPenalty * youngMPa / edgeMm : 0.0;
+}
+
+std::vector<double> SettleSprings(const StudyJobBody& jb,
+                                  const std::vector<Material>& mats,
+                                  const std::vector<FaceLoad>& loads,
+                                  const glm::dvec3& gravityAccel,
+                                  double firstFactor) {
+  std::vector<double> out;
+  if (jb.stabilized.empty() || jb.contacts.empty())
+    return out;
+  std::vector<glm::dvec3> f;
+  std::string err;
+  if (!NodalForces(jb.mesh, mats, loads, gravityAccel, f, &err))
+    return out;
+  double total = 0.0;
+  for (const glm::dvec3& v : f)
+    total += glm::length(v);
+  double edge = 0.0;
+  size_t n = 0;
+  for (const auto& c : jb.contacts)
+    for (int t : c.slaveTris) {
+      const auto& tri = jb.mesh.boundary[t];
+      for (int a = 0; a < 3; ++a)
+        edge += glm::length(jb.mesh.nodes[tri.nodes[a]] -
+                            jb.mesh.nodes[tri.nodes[(a + 1) % 3]]);
+      n += 3;
+    }
+  if (!(total > 0.0) || n == 0 || !(edge > 0.0))
+    return out;
+  const double motion = kSettleMotion * edge / static_cast<double>(n);
+  for (const auto& st : jb.stabilized)
+    out.push_back(firstFactor * total / motion /
+                  static_cast<double>(std::max<size_t>(1, st.nodes.size())));
+  return out;
+}
+
 namespace {
 
 // One block of a ccx .dat, as *NODE PRINT writes it: "displacements
 // (vx,vy,vz) for set NALL and time  0.25", a blank line, a row per node.
 struct DatBlock {
-  std::string kind; // displacements, forces
+  std::string kind; // displacements, forces, total, statistics, contact
   std::string set;
   double time = 0.0;
+  // A node's row (a total's has node 0); a contact stress row is its slave
+  // element * 10 + face, and (pressure, shear 1, shear 2).
   std::vector<std::pair<long, glm::dvec3>> rows;
+  // A contact pair's statistics: the force and moment on the slave surface,
+  // its centre and mean normal, the moment about that centre, and its area
+  // in contact, normal force (+ = tension) and shear force.
+  std::vector<double> values;
 };
 
 std::string Trim(const std::string& s) {
@@ -1351,14 +1547,27 @@ public:
 
 private:
   void Line(const std::string& line, std::vector<DatBlock>& out) {
-    const size_t set = line.find(" for set ");
     const size_t time = line.find(" and time ");
-    if (set != std::string::npos && time != std::string::npos && time > set) {
+    const size_t stats = line.find("statistics for slave set ");
+    const size_t cstr = line.find("contact stress (slave element+face");
+    const size_t set = line.find(" for set ");
+    if (time != std::string::npos &&
+        (stats != std::string::npos || cstr != std::string::npos ||
+         (set != std::string::npos && time > set))) {
       Close(out);
       cur_ = DatBlock{};
-      std::istringstream ls(line);
-      ls >> cur_.kind;
-      cur_.set = Trim(line.substr(set + 9, time - set - 9));
+      if (stats != std::string::npos) {
+        cur_.kind = "statistics";
+        const size_t from = stats + 25;
+        const size_t comma = line.find(',', from);
+        cur_.set = Trim(line.substr(from, comma - from));
+      } else if (cstr != std::string::npos) {
+        cur_.kind = "contact";
+      } else {
+        std::istringstream ls(line);
+        ls >> cur_.kind;
+        cur_.set = Trim(line.substr(set + 9, time - set - 9));
+      }
       ParseFortran(Trim(line.substr(time + 10)), cur_.time);
       open_ = true;
       return;
@@ -1366,24 +1575,53 @@ private:
     if (!open_)
       return;
     std::istringstream ls(line);
-    std::string a, b, c, d;
-    if (!(ls >> a)) {
+    std::vector<std::string> tok;
+    for (std::string t; ls >> t;)
+      tok.push_back(t);
+    if (cur_.kind == "statistics") {
+      // Lines of numbers between lines of words, 18 numbers in all.
+      std::vector<double> v(tok.size());
+      bool numbers = !tok.empty();
+      for (size_t i = 0; i < tok.size() && numbers; ++i)
+        numbers = ParseFortran(tok[i], v[i]);
+      if (numbers)
+        cur_.values.insert(cur_.values.end(), v.begin(), v.end());
+      if (cur_.values.size() >= 18)
+        Close(out);
+      return;
+    }
+    if (tok.empty()) {
       if (!cur_.rows.empty())
         Close(out);
       return;
     }
-    char* end = nullptr;
-    const long node = std::strtol(a.c_str(), &end, 10);
     glm::dvec3 v(0.0);
-    if (!(ls >> b >> c >> d) || *end != '\0' || !ParseFortran(b, v.x) ||
-        !ParseFortran(c, v.y) || !ParseFortran(d, v.z)) {
+    long node = 0;
+    bool ok = false;
+    if (cur_.kind == "total" && tok.size() == 3) {
+      ok = ParseFortran(tok[0], v.x) && ParseFortran(tok[1], v.y) &&
+           ParseFortran(tok[2], v.z);
+    } else if (cur_.kind == "contact" && tok.size() == 5) {
+      char *e1 = nullptr, *e2 = nullptr;
+      const long elem = std::strtol(tok[0].c_str(), &e1, 10);
+      const long face = std::strtol(tok[1].c_str(), &e2, 10);
+      node = elem * 10 + face;
+      ok = *e1 == '\0' && *e2 == '\0' && ParseFortran(tok[2], v.x) &&
+           ParseFortran(tok[3], v.y) && ParseFortran(tok[4], v.z);
+    } else if (tok.size() == 4) {
+      char* end = nullptr;
+      node = std::strtol(tok[0].c_str(), &end, 10);
+      ok = *end == '\0' && ParseFortran(tok[1], v.x) &&
+           ParseFortran(tok[2], v.y) && ParseFortran(tok[3], v.z);
+    }
+    if (!ok) {
       Close(out);
       return;
     }
     cur_.rows.push_back({node, v});
   }
   void Close(std::vector<DatBlock>& out) {
-    if (open_ && !cur_.rows.empty())
+    if (open_ && (!cur_.rows.empty() || cur_.values.size() >= 18))
       out.push_back(std::move(cur_));
     cur_ = DatBlock{};
     open_ = false;
@@ -1443,6 +1681,11 @@ struct Increment {
   double maxU = 0.0;
   std::vector<glm::dvec3> u;
   std::vector<glm::dvec3> rf; // per node, zero off the supports
+  // A contact run's: each rigid partner's total reaction, each pair's
+  // statistics (DatBlock::values) and its largest contact pressure.
+  std::vector<glm::dvec3> partnerRf;
+  std::vector<std::vector<double>> stats;
+  std::vector<double> maxPressure;
 };
 
 // How one ccx run of a nonlinear deck went.
@@ -1472,6 +1715,14 @@ struct PathWatch {
   const NonlinearRequest* req = nullptr;
   double above = 0.0;
   PassOutcome* out = nullptr;
+  // A contact run: its partners and pairs, and which pair each slave
+  // element face (element * 10 + face) belongs to. Its increments are
+  // taken whole, once the next one starts (contact blocks follow the
+  // nodes'), and it looks for no snaps: a contact that closes or opens
+  // changes the stiffness by design.
+  size_t partners = 0, pairs = 0;
+  std::map<long, int> pairOf;
+  std::optional<Increment> pendingInc;
   Increment prev, prev2;
   bool havePrev = false;
   double prevCompliance = -1.0;
@@ -1481,11 +1732,67 @@ struct PathWatch {
   std::optional<DatBlock> pendingU;
   bool ended = false;
 
+  bool SameTime(double a, double b) const {
+    return std::abs(a - b) <= 1e-9 * std::max(1.0, std::abs(b));
+  }
+  // A contact run's increment, filled as its blocks land.
+  void FeedContact(DatBlock& b) {
+    const size_t n = mesh->nodes.size();
+    if (b.kind == "displacements" && b.set == "NALL") {
+      if (pendingInc)
+        TakePending();
+      Increment inc;
+      inc.factor = b.time;
+      inc.u.assign(n, glm::dvec3(0.0));
+      for (const auto& [node, v] : b.rows)
+        if (node >= 1 && static_cast<size_t>(node) <= n)
+          inc.u[node - 1] = v;
+      for (const glm::dvec3& u : inc.u)
+        inc.maxU = std::max(inc.maxU, glm::length(u));
+      inc.rf.assign(n, glm::dvec3(0.0));
+      inc.partnerRf.assign(partners, glm::dvec3(0.0));
+      inc.stats.assign(pairs, {});
+      inc.maxPressure.assign(pairs, 0.0);
+      pendingInc = std::move(inc);
+      return;
+    }
+    if (!pendingInc || !SameTime(pendingInc->factor, b.time))
+      return;
+    Increment& inc = *pendingInc;
+    if (b.kind == "forces" && b.set == "NSUP") {
+      for (const auto& [node, v] : b.rows)
+        if (node >= 1 && static_cast<size_t>(node) <= n)
+          inc.rf[node - 1] = v;
+    } else if (b.kind == "total" && b.set.size() > 1 && b.set[0] == 'P') {
+      const size_t k = std::strtoul(b.set.c_str() + 1, nullptr, 10);
+      if (k >= 1 && k <= partners && !b.rows.empty())
+        inc.partnerRf[k - 1] = b.rows.front().second;
+    } else if (b.kind == "statistics" && b.set.size() > 1 && b.set[0] == 'S') {
+      const size_t k = std::strtoul(b.set.c_str() + 1, nullptr, 10);
+      if (k >= 1 && k <= pairs)
+        inc.stats[k - 1] = b.values;
+    } else if (b.kind == "contact") {
+      for (const auto& [code, v] : b.rows)
+        if (const auto it = pairOf.find(code); it != pairOf.end())
+          inc.maxPressure[it->second] =
+              std::max(inc.maxPressure[it->second], v.x);
+    }
+  }
+  void TakePending() {
+    Increment inc = std::move(*pendingInc);
+    pendingInc.reset();
+    Take(std::move(inc));
+  }
+
   // Feeds blocks; false once an event says the run has what it needs.
   bool Feed(std::vector<DatBlock>& blocks) {
     for (DatBlock& b : blocks) {
       if (ended)
         break;
+      if (pairs > 0) {
+        FeedContact(b);
+        continue;
+      }
       if (b.kind == "displacements" && b.set == "NALL") {
         pendingU = std::move(b);
       } else if (b.kind == "forces" && b.set == "NSUP" && pendingU &&
@@ -1537,7 +1844,7 @@ struct PathWatch {
       du = std::max(
           du, glm::length(inc.u[n] - (havePrev ? prev.u[n] : glm::dvec3(0.0))));
     const double compliance = df > 0 ? du / df : 0.0;
-    const bool counts = inc.factor > above * (1.0 + 1e-12);
+    const bool counts = inc.factor > above * (1.0 + 1e-12) && pairs == 0;
     // A snap is an increment far more compliant than the one before it
     // AND than the one after: the part jumped, and landed on a stiffer
     // branch. A path that only steepens (an imperfect column nearing its
@@ -1588,6 +1895,8 @@ struct PathWatch {
   // At the end of the run: a jump on its last increment, with nothing
   // after it to land on, still counts.
   void Finish() {
+    if (!ended && pendingInc)
+      TakePending();
     if (ended || !candidate)
       return;
     if (req->snapThrough)
@@ -1613,7 +1922,8 @@ bool NonlinearOnCalculix(
     const Supports& supports, const std::vector<FaceLoad>& loads,
     const glm::dvec3& gravityAccel, const NonlinearRequest& req,
     const SolveOptions& options, FemResults& result,
-    StudyBodyResult::Nonlinear& summary, std::string* error) {
+    StudyBodyResult::Nonlinear& summary, std::string* error,
+    std::vector<StudyBodyResult::ContactResult>* contactsOut) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -1625,11 +1935,13 @@ bool NonlinearOnCalculix(
   const FemMesh& mesh = jb.mesh;
   const size_t nNodes = mesh.nodes.size();
   std::string err;
-  // Dead loads as nodal forces; a pressure, a torque and a remote load
-  // through the deck's own keywords.
+  // Dead loads as nodal forces; under large deformation a pressure, a
+  // torque and a remote load through the deck's own keywords, and at small
+  // deformation (a contact run) as the nodal forces the in-house solve
+  // applies.
   std::vector<FaceLoad> dead, other;
   for (const FaceLoad& l : loads)
-    (l.type == LoadType::Force ? dead : other).push_back(l);
+    (l.type == LoadType::Force || !req.nlgeom ? dead : other).push_back(l);
   std::vector<glm::dvec3> forces;
   if (!NodalForces(mesh, mats, dead, gravityAccel, forces, &err))
     return fail(err);
@@ -1658,9 +1970,24 @@ bool NonlinearOnCalculix(
                 " is free: its solver has no out-of-core mode, so the run was "
                 "not started. A coarser mesh_size solves it");
 
+  // Which pair each slave element face is (the contact stress rows).
+  std::map<long, int> pairOf;
+  if (!jb.contacts.empty()) {
+    const std::vector<std::pair<int, int>> faces = FacetFaces(mesh, 0);
+    for (size_t k = 0; k < jb.contacts.size(); ++k)
+      for (int t : jb.contacts[k].slaveTris)
+        if (t >= 0 && t < static_cast<int>(faces.size()))
+          pairOf[faces[t].first * 10L + faces[t].second] = static_cast<int>(k);
+  }
   const double cap = req.maxFactor;
   const int increments = std::max(1, req.increments);
   // One ccx run over `steps`, watched.
+  const double settleFactor =
+      std::min(cap / increments, cap / kNonlinearIncrements);
+  const std::vector<double> settle =
+      req.snapThrough
+          ? std::vector<double>{}
+          : SettleSprings(jb, mats, loads, gravityAccel, settleFactor);
   const auto pass = [&](const std::vector<NonlinearStep>& steps, double above,
                         PassOutcome& po) -> bool {
     DeckNonlinear deck;
@@ -1668,6 +1995,12 @@ bool NonlinearOnCalculix(
     deck.steps = steps;
     deck.minIncrement = 1e-5 * cap;
     deck.maxIncrements = 100 * increments + 1000;
+    deck.nlgeom = req.nlgeom;
+    deck.contacts = &jb.contacts;
+    deck.partners = &jb.rigidPartners;
+    deck.stabilized = &jb.stabilized;
+    if (steps.size() >= 2 && !settle.empty())
+      deck.settlePerNode = settle;
     fs::path dir;
     if (!MakeRunDir(run, dir, &err))
       return fail(err);
@@ -1690,6 +2023,9 @@ bool NonlinearOnCalculix(
     watch.req = &req;
     watch.above = above;
     watch.out = &po;
+    watch.partners = jb.rigidPartners.size();
+    watch.pairs = jb.contacts.size();
+    watch.pairOf = pairOf;
     std::vector<DatBlock> blocks;
     auto lastPoll = std::chrono::steady_clock::now();
     const auto keepGoing = [&]() {
@@ -1762,8 +2098,12 @@ bool NonlinearOnCalculix(
   constexpr int kMaxRuns = 4;
   std::vector<PassOutcome> runs;
   double windowLo = 0.0, windowHi = 0.0;
+  // A part held by a contact alone settles onto it through the first
+  // increment, held by stiffer springs (SettleSprings).
   for (int k = 0; k < kMaxRuns; ++k) {
     std::vector<NonlinearStep> steps;
+    if (!settle.empty())
+      steps.push_back({settleFactor, settleFactor});
     if (windowHi > windowLo) {
       steps.push_back({windowLo, coarse});
       steps.push_back({windowHi, (windowHi - windowLo) / 10.0});
@@ -1895,8 +2235,24 @@ bool NonlinearOnCalculix(
   glm::dvec3 balance = refTotal;
   double scale = glm::length(refTotal);
   double carried = 0.0;
-  result = LargeDeformationFields(mesh, mats, at.u);
+  result = req.nlgeom ? LargeDeformationFields(mesh, mats, at.u)
+                      : SmallDeformationFields(mesh, mats, at.u);
   result.nodeReaction.assign(nNodes, glm::dvec3(0.0));
+  // A contact's rigid partners carry what they press back with, and the
+  // weak springs what they hold.
+  for (const glm::dvec3& r : at.partnerRf) {
+    balance += r;
+    carried += glm::length(r);
+  }
+  glm::dvec3 springs(0.0);
+  double springCarried = 0.0;
+  for (const StudyJobBody::Stabilized& st : jb.stabilized)
+    for (int n : st.nodes)
+      if (n >= 0 && static_cast<size_t>(n) < nNodes) {
+        springs -= st.kPerNode * at.u[n];
+        springCarried += st.kPerNode * glm::length(at.u[n]);
+      }
+  balance += springs;
   for (size_t n = 0; n < nNodes; ++n) {
     if (isHeld[n]) {
       balance += at.rf[n];
@@ -1909,6 +2265,8 @@ bool NonlinearOnCalculix(
   }
   scale = std::max(scale, carried);
   summary.imbalance = scale > 0 ? glm::length(balance) / scale : 0.0;
+  summary.largeDeformation = req.nlgeom;
+  summary.stabilization = scale > 0 ? springCarried / scale : 0.0;
   if (!(summary.imbalance <= kNonlinearBalance))
     return fail("CalculiX's answer at factor " + fmt(at.factor) +
                 " does not balance: the supports carry the applied load to " +
@@ -1916,6 +2274,46 @@ bool NonlinearOnCalculix(
                 pct(kNonlinearBalance) +
                 " its residual criterion allows, so the deck and the study "
                 "it was written from differ. Nothing was stored");
+  if (summary.stabilization > kNonlinearBalance)
+    return fail("the weak springs that hold a part while its contact closes "
+                "carry " +
+                pct(summary.stabilization) + " of the load at factor " +
+                fmt(at.factor) +
+                ", so nothing else holds it there: a frictionless contact "
+                "leaves a part free to slide along it and turn on it. Give "
+                "the contact friction, or the part another support. Nothing "
+                "was stored");
+  if (contactsOut) {
+    contactsOut->clear();
+    for (size_t k = 0; k < jb.contacts.size(); ++k) {
+      const StudyJobBody::ContactPair& c = jb.contacts[k];
+      StudyBodyResult::ContactResult cr;
+      cr.id = c.id;
+      cr.participant = c.participant;
+      cr.name = c.name;
+      cr.friction = c.friction;
+      cr.penaltyMPaPerMm = c.penalty;
+      for (int t : c.slaveTris) {
+        const auto& tri = mesh.boundary[t];
+        cr.areaMm2 +=
+            0.5 * glm::length(glm::cross(
+                      mesh.nodes[tri.nodes[1]] - mesh.nodes[tri.nodes[0]],
+                      mesh.nodes[tri.nodes[2]] - mesh.nodes[tri.nodes[0]]));
+      }
+      if (k < at.stats.size() && at.stats[k].size() >= 18) {
+        const std::vector<double>& v = at.stats[k];
+        cr.forceN = glm::dvec3(v[0], v[1], v[2]);
+        cr.momentNmm = glm::dvec3(v[3], v[4], v[5]);
+        cr.closedMm2 = v[15];
+        cr.normalN = -v[16]; // ccx: + = tension
+        cr.shearN = v[17];
+      }
+      if (k < at.maxPressure.size())
+        cr.maxPressureMPa = at.maxPressure[k];
+      cr.meanPressureMPa = cr.closedMm2 > 0 ? cr.normalN / cr.closedMm2 : 0.0;
+      contactsOut->push_back(cr);
+    }
+  }
   return true;
 }
 

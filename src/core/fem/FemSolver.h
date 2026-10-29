@@ -363,6 +363,13 @@ uint64_t BucklingMemoryEstimate(size_t freeDofs);
 FemResults LargeDeformationFields(const FemMesh& mesh,
                                   const std::vector<Material>& byDomain,
                                   const std::vector<glm::dvec3>& displacement);
+// The same for a small-deformation answer: the linear strain and stress
+// SolveCases recovers, averaged to the node by element volume. A contact
+// solved without large deformation (docs/simulation/README.md#contact) is
+// read through this.
+FemResults SmallDeformationFields(const FemMesh& mesh,
+                                  const std::vector<Material>& byDomain,
+                                  const std::vector<glm::dvec3>& displacement);
 
 // True when the build links Eigen (static solver) / Spectra (modal).
 bool SolverAvailable();
@@ -532,8 +539,35 @@ struct StudyBodyResult {
     // the applied load at the factor reported, relative to the load.
     double residualCriterion = 0.0;
     double imbalance = 0.0;
+    // A contact run (docs/simulation/README.md#contact): whether it was
+    // solved under large deformation, and what the weak springs that hold
+    // a part with no support of its own while its contact closes carried at
+    // the factor reported, over the load (0 = none were needed).
+    bool largeDeformation = true;
+    double stabilization = 0.0;
   };
   Nonlinear nonlinear;
+  // Each contact of the body (docs/simulation/README.md#contact): a contact
+  // support or a contact participant, at the factor reported. `areaMm2` is
+  // the area of the pair's faces on the body's side, `closedMm2` the part of
+  // it in contact; the force is what the partner exerts on that side (N,
+  // the frame's), split into its normal and shear parts; pressures in MPa.
+  struct ContactResult {
+    uint64_t id = 0; // the support's load id, or the participant's occurrence
+    bool participant = false;
+    std::string name; // "ground", or the partner occurrence's name
+    double friction = 0.0;
+    double penaltyMPaPerMm = 0.0;
+    double areaMm2 = 0.0;
+    double closedMm2 = 0.0;
+    glm::dvec3 forceN{0.0};
+    glm::dvec3 momentNmm{0.0}; // about the frame's origin
+    double normalN = 0.0;
+    double shearN = 0.0;
+    double maxPressureMPa = 0.0;
+    double meanPressureMPa = 0.0; // normal force over the closed area
+  };
+  std::vector<ContactResult> contacts;
   // The results of case `k` (the only ones when there are no cases).
   const FemResults& Case(int k) const {
     return k >= 0 && k < static_cast<int>(cases.size()) ? cases[k] : results;
@@ -704,6 +738,32 @@ struct StudyJobBody {
     bool fixRotation = false;
   };
   std::vector<PinSupport> pins;
+  // Contact (docs/simulation/README.md#contact). Each pair is the body's
+  // facets on one side (`slaveTris`) against a partner's: a rigid one's
+  // (`partner`, an index into `rigidPartners`, whose every node is fixed;
+  // `masterTris` index its boundary) or a contact participant's, meshed
+  // into this mesh as domains of its own (`partner` -1; `masterTris` index
+  // mesh.boundary). `penalty` is the pressure per overclosure (MPa/mm).
+  struct ContactPair {
+    uint64_t id = 0;
+    bool participant = false;
+    std::string name;
+    std::vector<int> slaveTris;
+    std::vector<int> masterTris;
+    int partner = -1;
+    double friction = 0.0;
+    double penalty = 0.0;
+  };
+  std::vector<ContactPair> contacts;
+  std::vector<FemMesh> rigidPartners;
+  // A part of the mesh with no support of its own -- held only by a
+  // contact -- is held while its contact closes by weak springs to the
+  // ground at every node, `kPerNode` (N/mm) in each direction.
+  struct Stabilized {
+    std::vector<int> nodes;
+    double kPerNode = 0.0;
+  };
+  std::vector<Stabilized> stabilized;
   std::vector<FaceLoad> faceLoads;
   // With load cases: each case's face loads (`faceLoads` is then empty).
   std::vector<std::vector<FaceLoad>> caseLoads;
@@ -766,6 +826,30 @@ struct StudyBodyPlan {
   // material): a convergence check then also settles the stress across the
   // layers.
   double interlayerMPa = 0.0;
+  // Contact (docs/simulation/README.md#contact). A partner is a rigid body
+  // (the ground under a flat face, or a rigid occurrence's body) meshed
+  // coarse with every node fixed, or a contact participant meshed into this
+  // body's mesh with its own material, its faces numbered from
+  // `faceOffset` (its loads are in `loads` under those numbers). `faces`
+  // are the partner's own faces the pair holds.
+  struct ContactPartner {
+    bool rigid = true;
+    std::string name;
+    TopoDS_Shape shape; // a copy, owned here
+    MeshSettings settings;
+    std::vector<int> faces;
+    Material mat;
+    int faceOffset = 0;
+  };
+  std::vector<ContactPartner> partners;
+  struct Contact {
+    uint64_t id = 0; // the support's load id, or the participant occurrence
+    bool participant = false;
+    std::vector<int> faces; // this body's faces
+    int partner = 0;        // index into `partners`
+    double friction = 0.0;
+  };
+  std::vector<Contact> contacts;
 };
 // Where a meshed body touches a rigid support, as the imprint found it: the
 // faces of the meshed body's imprinted shape that it shares with the rigid
@@ -806,6 +890,12 @@ struct StudyPlan {
 };
 bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
                std::string* error);
+// The ground a flat `face` rests on (docs/simulation/README.md#contact): a
+// rigid box on the face's outer side whose face against the part lies on
+// the face's plane, past the face on every side. Refused for a face that is
+// not flat, naming the alternative.
+bool GroundUnder(const TopoDS_Shape& face, StudyBodyPlan::ContactPartner& out,
+                 std::string* error);
 bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
                       std::string* error);
 

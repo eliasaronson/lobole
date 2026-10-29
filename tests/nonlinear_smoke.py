@@ -11,7 +11,11 @@ snap-through run of a column reports a peak load factor below its linear
 buckling factor, with the path, the equilibrium check and a receipt whose
 oracle is calculix/nonlinear; an async run's `study_status` reports the
 load reached; `export_study_inp` writes a large-deformation deck and
-refuses a snap-through one; the refusals name what they refuse.
+refuses a snap-through one; the refusals name what they refuse. A column
+standing on the ground (a contact support,
+docs/simulation/README.md#contact) solves at small deformation with its
+base closed, the ground's row in `contacts` and `reactions` carrying the
+load.
 
 The physics (the elastica, a shallow arch's snap, the column's approach to
 its linear factor) is tests/test_fem_calculix.cpp's. This is the contract
@@ -98,16 +102,17 @@ def main():
                 text = f.read()
             expect("*STEP, NLGEOM" in text and "NSET=NSUP" in text,
                    "the exported deck steps the load under NLGEOM")
-            def run_async(**params):
+            def run_async(study=None, **params):
                 """Runs the study as a job and waits for it: a synchronous
                 run on a loaded machine outlasts the client's socket. The
                 largest load_fraction study_status reported on the way."""
-                job = d.call("run_study", id=sid, **{"async": True},
+                study = study or sid
+                job = d.call("run_study", id=study, **{"async": True},
                              **params)["job"]
                 seen = -1.0
                 deadline = time.monotonic() + 250
                 while time.monotonic() < deadline:
-                    st = d.call("study_status", id=sid)
+                    st = d.call("study_status", id=study)
                     if not st.get("running"):
                         break
                     seen = max(seen, st.get("load_fraction", -1.0))
@@ -160,6 +165,55 @@ def main():
             print(f"nonlinear_smoke: snap-through peak {b['peak_factor']:.4g} "
                   f"against linear {b['linear_factor']:.4g}, "
                   f"{b['ccx_runs']} ccx runs")
+
+            # Contact (docs/simulation/README.md#contact): the column
+            # standing on the ground, pushed down inside its kern -- a
+            # nonlinear study by its contact alone, solved on CalculiX at
+            # small deformation, its whole base closed.
+            cid = d.call("add_study", name="Standing")["id"]
+            refused(d, "set_study", "large_deformation: true", id=cid,
+                    nonlinear={"increments": 2})
+            d.call("add_load", study=cid, type="contact", face=end(-1.0),
+                   friction=0.0)
+            d.call("set_study", id=cid, mesh_size=5.0, converge="never",
+                   nonlinear={"increments": 2})
+            d.call("add_load", study=cid, type="remote", face=end(1.0),
+                   force_n=2000.0, direction=[0, 0, -1],
+                   point_mm=[5.0 + 10.0 / 12.0, 5.0, 150.0])
+            listed = [s for s in d.call("list_studies")["studies"]
+                      if s["id"] == cid][0]
+            rest = [ld for ld in listed["loads"] if ld["type"] == "contact"]
+            expect(rest and rest[0]["friction"] == 0.0,
+                   f"list_studies lists the contact: {listed['loads']}")
+            deck = os.path.join(work, "contact.inp")
+            d.call("export_study_inp", id=cid, path=deck)
+            with open(deck) as f:
+                text = f.read()
+            expect("TYPE=SURFACE TO SURFACE" in text and
+                   "NLGEOM" not in text,
+                   "the exported deck pairs the contact, without NLGEOM")
+            run_async(cid)
+            res = d.call("study_results", id=cid)
+            expect(res["nonlinear"]["kind"] == "contact",
+                   f"a contact result: {res.get('nonlinear')}")
+            body = res["bodies"][0]
+            contact = body["contacts"][0]
+            expect(contact["kind"] == "support" and
+                   contact["name"] == "ground",
+                   f"the ground: {contact}")
+            expect(abs(contact["normal_force_n"] - 2000.0) < 2.0,
+                   f"the ground carries the load: {contact}")
+            expect(contact["closed_area_mm2"] > 0.99 * contact["area_mm2"],
+                   f"inside its kern the base stays closed: {contact}")
+            expect(body["nonlinear"]["large_deformation"] is False,
+                   f"solved at small deformation: {body['nonlinear']}")
+            row = [r for r in body["reactions"] if r["type"] == "contact"][0]
+            expect(abs(row["force_n"][2] - 2000.0) < 2.0,
+                   f"the support's reaction row says so: {row}")
+            print(f"nonlinear_smoke: contact closed "
+                  f"{contact['closed_area_mm2']:.4g} of "
+                  f"{contact['area_mm2']:.4g} mm^2, peak pressure "
+                  f"{contact['max_pressure_mpa']:.4g} MPa")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("nonlinear_smoke: OK")

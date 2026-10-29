@@ -1078,6 +1078,56 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // A contact support (docs/simulation/README.md#contact): armed in the
+  // panel, a click on the curved face is refused in the red line and places
+  // nothing (the ground is the plane a flat face lies on); on a flat end it
+  // places a contact with the friction typed, hatched as a support, and the
+  // study now solves on CalculiX.
+  t = IM_REGISTER_TEST(engine, "sim", "a_contact_rests_a_flat_face_only");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureCylinder(ctx);
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    const Body& body = Doc()->GetBodies()[0];
+    ElementRef side, flat;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const auto info = Measure::DescribeFaceAt(body, index);
+      if (info && info->kind == "cylinder")
+        side = ElementRef{body.createdBy, name};
+      else if (info && info->kind == "plane")
+        flat = ElementRef{body.createdBy, name};
+    }
+    IM_CHECK_SILENT(!side.name.empty() && !flat.name.empty());
+    ctx->ItemClick("//###ToolWindow/###sim_bc_contact");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Contact);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    ui::SimulationApplyToFace(*s_App, side);
+    ctx->Yield(2);
+    IM_CHECK(Doc()->FindStudy(sid)->loads.empty());
+    IM_CHECK(s_App->simulation.placeRefusal.find("not flat") !=
+             std::string::npos);
+    ctx->ItemInputValue("//###ToolWindow/###sim_contact_friction", 0.25f);
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.pendingContactFriction == 0.25);
+    ui::SimulationApplyToFace(*s_App, flat);
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(sid);
+    IM_CHECK_EQ(st->loads.size(), (size_t)1);
+    IM_CHECK(st->loads[0].type == fem::LoadType::Contact);
+    IM_CHECK(st->loads[0].friction == 0.25);
+    IM_CHECK(s_App->simulation.placeRefusal.empty());
+    IM_CHECK(fem::EffectiveSolver(*st) == fem::Solver::Calculix);
+    std::vector<PrimVertex> prims;
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    IM_CHECK(ui::SimulationLoadLabel(st->loads[0]) == "contact");
+    s_App->simulation.pendingContactFriction = 0.0;
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
   // A remote load: its force typed, and its point -- untyped -- off the
   // clicked face along its normal by a tenth of the body's diagonal, so the
   // default is a lever arm the picture shows.

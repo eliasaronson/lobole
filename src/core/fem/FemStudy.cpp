@@ -6,15 +6,20 @@
 #include "core/PrintedMass.h"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
 #include <TopAbs_State.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <gp_Ax2.hxx>
 #include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Sphere.hxx>
 
@@ -51,6 +56,8 @@ const char* LoadTypeToString(LoadType type) {
     return "remote";
   case LoadType::Pin:
     return "pin";
+  case LoadType::Contact:
+    return "contact";
   }
   return "fixed";
 }
@@ -78,6 +85,10 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
   }
   if (s == "pin") {
     out = LoadType::Pin;
+    return true;
+  }
+  if (s == "contact") {
+    out = LoadType::Contact;
     return true;
   }
   return false;
@@ -134,28 +145,52 @@ std::string SolverRefusal(Solver solver, AnalysisType type) {
   return {};
 }
 
-Solver EffectiveSolver(Solver solver, const Nonlinear& nonlinear) {
-  return nonlinear.On() && solver == Solver::Auto ? Solver::Calculix : solver;
+bool HasContact(const Study& study) {
+  for (const Load& l : study.loads)
+    if (l.type == LoadType::Contact)
+      return true;
+  for (const Participant& p : study.participants)
+    if (p.role == ParticipantRole::Contact)
+      return true;
+  return false;
+}
+
+bool IsNonlinear(const Study& study) {
+  return study.nonlinear.On() || HasContact(study);
+}
+
+Solver EffectiveSolver(const Study& study) {
+  return IsNonlinear(study) && study.solver == Solver::Auto ? Solver::Calculix
+                                                            : study.solver;
 }
 
 std::string NonlinearRefusal(Solver solver, AnalysisType type,
                              const Nonlinear& nl, size_t loadCases,
-                             ConvergeMode converge) {
+                             ConvergeMode converge, bool contact) {
   const bool any = nl.On() || nl.snapThrough || nl.increments != 0 ||
                    nl.hasImperfection || nl.hasDeflectionLimit;
-  if (!any)
+  if (!any && !contact)
     return {};
-  if (!nl.largeDeformation)
+  if (any && !nl.largeDeformation && !contact)
     return "nonlinear needs large_deformation: true -- it is the analysis "
-           "every other nonlinear option belongs to";
+           "every other nonlinear option belongs to (a study with a contact "
+           "is nonlinear without it)";
   if (type != AnalysisType::Static)
-    return std::string("nonlinear is a static study's; this one is ") +
-           AnalysisTypeToString(type);
+    return contact ? std::string("a contact is a static study's (solved "
+                                 "nonlinear, on CalculiX); this one is ") +
+                         AnalysisTypeToString(type)
+                   : std::string("nonlinear is a static study's; this one "
+                                 "is ") +
+                         AnalysisTypeToString(type);
   if (solver == Solver::InHouse)
-    return "the in-house solver is linear: a nonlinear study solves on "
-           "CalculiX (solver auto or calculix)";
+    return contact ? "the in-house solver is linear: a study with a contact "
+                     "solves on CalculiX (solver auto or calculix)"
+                   : "the in-house solver is linear: a nonlinear study "
+                     "solves on CalculiX (solver auto or calculix)";
   if (nl.increments < 0)
     return "nonlinear increments is at least 1 (0 or absent: the default)";
+  if (nl.snapThrough && !nl.largeDeformation)
+    return "snap_through needs large_deformation: true";
   if (!nl.snapThrough && (nl.hasImperfection || nl.hasDeflectionLimit))
     return "imperfection_mm and deflection_limit_mm are a snap-through run's: "
            "set snap_through: true";
@@ -164,13 +199,66 @@ std::string NonlinearRefusal(Solver solver, AnalysisType type,
   if (nl.hasDeflectionLimit && !(nl.deflectionLimitMm > 0.0))
     return "deflection_limit_mm is positive";
   if (loadCases > 0)
-    return "a nonlinear answer is not a sum of cases, and a snap-through run "
-           "scales ONE load set to its peak, so a nonlinear study takes no "
-           "load cases: make a study for each way the part is loaded";
+    return contact ? "a contact's answer is not a sum of cases -- where it "
+                     "closes depends on the whole load -- so a study with a "
+                     "contact takes no load cases: make a study for each "
+                     "way the part is loaded"
+                   : "a nonlinear answer is not a sum of cases, and a "
+                     "snap-through run scales ONE load set to its peak, so a "
+                     "nonlinear study takes no load cases: make a study for "
+                     "each way the part is loaded";
+  if (nl.snapThrough && contact)
+    return "a snap-through run seeds its shape with the first buckling mode, "
+           "solved in-house, and the in-house solver cannot hold a contact: "
+           "a study with a contact steps its load up with snap_through false";
   if (nl.snapThrough && converge == ConvergeMode::Always)
     return "converge: always refines round a stress peak, and a snap-through "
            "run's answer is its peak load factor, which that does not "
            "settle: use converge auto or never";
+  if (contact && converge == ConvergeMode::Always)
+    return "converge: always refines the faces a stress peak lies on, and a "
+           "contact's peak lies on a contact face whose partner is meshed "
+           "apart from it, so refining one side of the contact does not "
+           "settle it: use converge auto (which reports it not checked) or "
+           "never";
+  return {};
+}
+
+std::string ContactRefusal(const Study& study) {
+  const bool contact = HasContact(study);
+  if (const std::string why =
+          NonlinearRefusal(study.solver, study.type, study.nonlinear,
+                           study.loadCases.size(), study.converge, contact);
+      !why.empty())
+    return why;
+  if (!contact)
+    return {};
+  const auto friction = [](double mu) {
+    return std::isfinite(mu) && mu >= 0.0;
+  };
+  for (const Load& l : study.loads) {
+    if (l.type == LoadType::Contact) {
+      if (!friction(l.friction))
+        return "contact support " + std::to_string(l.id) +
+               ": friction is a coefficient, 0 or more (0: frictionless)";
+      if (!l.region.IsWhole())
+        return "contact support " + std::to_string(l.id) +
+               ": a contact takes its whole face, so it has no region";
+    }
+    if (l.type == LoadType::Pin)
+      return "pin " + std::to_string(l.id) +
+             ": a pin's contact is found by the in-house solver, which cannot "
+             "hold a contact as well; hold the part with fixed supports and "
+             "contacts";
+  }
+  for (const Participant& p : study.participants)
+    if (p.role == ParticipantRole::Contact && !friction(p.friction))
+      return "contact participant " + std::to_string(p.occurrenceId) +
+             ": friction is a coefficient, 0 or more (0: frictionless)";
+  if (study.shapeFrom.study != 0)
+    return "a static study of a topology result solves the result's own "
+           "tets, and a contact's partner is meshed from a shape: a study "
+           "with a contact meshes its body";
   return {};
 }
 
@@ -240,6 +328,8 @@ const char* ParticipantRoleToString(ParticipantRole role) {
     return "ignored";
   case ParticipantRole::Bonded:
     return "bonded";
+  case ParticipantRole::Contact:
+    return "contact";
   }
   return "rigid";
 }
@@ -259,6 +349,10 @@ bool ParticipantRoleFromString(const std::string& s, ParticipantRole& out) {
   }
   if (s == "bonded") {
     out = ParticipantRole::Bonded;
+    return true;
+  }
+  if (s == "contact") {
+    out = ParticipantRole::Contact;
     return true;
   }
   return false;
@@ -547,7 +641,80 @@ CurvedFacesOf(const TopoDS_Shape& shape) {
   }
   return out;
 }
+
+// The ground under a flat face (docs/simulation/README.md#contact): a box on
+// the face's outer side, its face against the part on the face's plane,
+// reaching past the face's extent by this fraction of its larger side on
+// every side, and as deep. Rigid, so its depth and mesh size (the same) only
+// have to hold the face's plane, which any mesh of a flat face does.
+constexpr double kGroundMargin = 0.25;
+
 } // namespace
+
+bool GroundUnder(const TopoDS_Shape& face, StudyBodyPlan::ContactPartner& out,
+                 std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (face.IsNull() || face.ShapeType() != TopAbs_FACE)
+    return fail("its face is not on the body");
+  BRepAdaptor_Surface surf(TopoDS::Face(face));
+  if (surf.GetType() != GeomAbs_Plane)
+    return fail("on a part the ground is the plane a flat face lies on, and "
+                "this face is not flat; a curved face rests on a rigid "
+                "occurrence in an assembly study (contact_with)");
+  const gp_Pln pl = surf.Plane();
+  gp_Dir n = pl.Axis().Direction();
+  if (face.Orientation() == TopAbs_REVERSED)
+    n.Reverse();
+  const gp_Dir u = pl.XAxis().Direction();
+  const gp_Dir v = n.Crossed(u);
+  const gp_Pnt o = pl.Location();
+  Bnd_Box box;
+  BRepBndLib::Add(face, box);
+  if (box.IsVoid())
+    return fail("its face has no extent");
+  double x0, y0, z0, x1, y1, z1;
+  box.Get(x0, y0, z0, x1, y1, z1);
+  double umin = 1e300, umax = -1e300, vmin = 1e300, vmax = -1e300;
+  for (int c = 0; c < 8; ++c) {
+    const gp_Vec d(o,
+                   gp_Pnt(c & 1 ? x1 : x0, c & 2 ? y1 : y0, c & 4 ? z1 : z0));
+    umin = std::min(umin, d.Dot(gp_Vec(u)));
+    umax = std::max(umax, d.Dot(gp_Vec(u)));
+    vmin = std::min(vmin, d.Dot(gp_Vec(v)));
+    vmax = std::max(vmax, d.Dot(gp_Vec(v)));
+  }
+  const double extent = std::max(umax - umin, vmax - vmin);
+  if (!(extent > 0.0))
+    return fail("its face has no extent");
+  const double margin = kGroundMargin * extent;
+  const gp_Pnt corner =
+      o.Translated(gp_Vec(u) * (umin - margin) + gp_Vec(v) * (vmin - margin));
+  BRepPrimAPI_MakeBox mk(gp_Ax2(corner, n, u), umax - umin + 2 * margin,
+                         vmax - vmin + 2 * margin, margin);
+  mk.Build();
+  if (!mk.IsDone())
+    return fail("the ground under it could not be made");
+  out = StudyBodyPlan::ContactPartner{};
+  out.rigid = true;
+  out.name = "ground";
+  out.shape = mk.Shape();
+  out.settings.maxSize = margin;
+  int i = 0;
+  for (TopExp_Explorer ex(out.shape, TopAbs_FACE); ex.More(); ex.Next(), ++i) {
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(ex.Current(), props);
+    const gp_Vec d(o, props.CentreOfMass());
+    if (std::abs(d.Dot(gp_Vec(n))) < 1e-9 * extent)
+      out.faces.push_back(i);
+  }
+  if (out.faces.size() != 1)
+    return fail("the ground under it has no face on its plane");
+  return true;
+}
 
 std::optional<LoadAxis> CylindricalFaceAxis(const TopoDS_Shape& face) {
   if (face.IsNull() || face.ShapeType() != TopAbs_FACE)
@@ -931,13 +1098,10 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     return fail(err);
   if (!ValidateLoadCases(study, &err))
     return fail(err);
-  if (const std::string why =
-          NonlinearRefusal(study.solver, study.type, study.nonlinear,
-                           study.loadCases.size(), study.converge);
-      !why.empty())
+  if (const std::string why = ContactRefusal(study); !why.empty())
     return fail(why);
   out.type = study.type;
-  out.solver = EffectiveSolver(study.solver, study.nonlinear);
+  out.solver = EffectiveSolver(study);
   out.nonlinear = study.nonlinear;
   out.numModes = study.numModes;
   out.gravity = study.gravity;
@@ -1046,6 +1210,26 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     bp.settings = plan.settings;
     for (const auto& [faceIndex, loadIdx] : plan.loads) {
       Load l = study.loads[loadIdx];
+      if (l.type == LoadType::Contact) {
+        // A part rests on the ground: the plane its flat face lies on
+        // (docs/simulation/README.md#contact).
+        if (l.contactWith != 0)
+          return fail("contact support " + std::to_string(l.id) +
+                      ": contact_with names an occurrence, and a part study "
+                      "has none -- on a part the contact is with the ground");
+        StudyBodyPlan::ContactPartner ground;
+        if (!GroundUnder(FaceByIndex(body.shape.GetShape(), faceIndex), ground,
+                         &err))
+          return fail("contact support " + std::to_string(l.id) + ": " + err);
+        StudyBodyPlan::Contact c;
+        c.id = l.id;
+        c.faces = {faceIndex};
+        c.partner = static_cast<int>(bp.partners.size());
+        c.friction = l.friction;
+        bp.partners.push_back(std::move(ground));
+        bp.contacts.push_back(std::move(c));
+        continue;
+      }
       if (!CompleteLoadGeometry(FaceByIndex(body.shape.GetShape(), faceIndex),
                                 l, &err))
         return fail(err);
@@ -1123,6 +1307,57 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
                       "': a mesh domain lies in none of the bonded members");
         known[d] = true;
       }
+    }
+
+    // A contact participant (docs/simulation/README.md#contact) is meshed
+    // on its own and joins this mesh as domains of its own, not sharing a
+    // node: its faces numbered from its offset, its loads already under
+    // those numbers.
+    const size_t mainNodes = mesh->nodes.size();
+    std::vector<std::pair<size_t, size_t>> memberNodes(bp.partners.size(),
+                                                       {0, 0});
+    for (size_t k = 0; k < bp.partners.size(); ++k) {
+      const StudyBodyPlan::ContactPartner& pt = bp.partners[k];
+      if (pt.rigid)
+        continue;
+      auto m = Mesh(pt.shape, pt.settings, &err);
+      if (!m)
+        return fail("contact participant '" + pt.name + "': " + err);
+      if (materials.empty()) {
+        int domains = 0;
+        for (int d : mesh->tetDomain)
+          domains = std::max(domains, d + 1);
+        materials.assign(std::max(domains, 1), bp.mat);
+      }
+      if (mesh->tetDomain.empty())
+        mesh->tetDomain.assign(mesh->tets.size(), 0);
+      const int base = static_cast<int>(mesh->nodes.size());
+      const int domainBase = static_cast<int>(materials.size());
+      int domains = 1;
+      for (int d : m->tetDomain)
+        domains = std::max(domains, d + 1);
+      for (int d = 0; d < domains; ++d)
+        materials.push_back(pt.mat);
+      mesh->nodes.insert(mesh->nodes.end(), m->nodes.begin(), m->nodes.end());
+      for (size_t t = 0; t < m->tets.size(); ++t) {
+        std::array<int, 10> q = m->tets[t];
+        for (int& v : q)
+          v += base;
+        mesh->tets.push_back(q);
+        mesh->tetDomain.push_back(domainBase +
+                                  (m->tetDomain.empty() ? 0 : m->tetDomain[t]));
+      }
+      for (FemMesh::BoundaryTri tri : m->boundary) {
+        for (int& v : tri.nodes)
+          v += base;
+        tri.faceIndex += pt.faceOffset;
+        mesh->boundary.push_back(tri);
+      }
+      mesh->stats.nodeCount = mesh->nodes.size();
+      mesh->stats.tetCount = mesh->tets.size();
+      mesh->stats.worstQuality =
+          std::min(mesh->stats.worstQuality, m->stats.worstQuality);
+      memberNodes[k] = {static_cast<size_t>(base), mesh->nodes.size()};
     }
 
     // Build fixed-node set and face tractions from the resolved faces. Fixed
@@ -1237,10 +1472,115 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
         into.push_back(std::move(fl));
       }
     }
-    if (fixedSet.empty() && pins.empty())
+    if (fixedSet.empty() && pins.empty() && bp.contacts.empty())
       return fail("body '" + bp.bodyName + "': fixed face meshed to no nodes");
 
+    // Each contact: the body's facets against its partner's, a rigid
+    // partner meshed coarse here with every node fixed.
+    std::vector<StudyJobBody::ContactPair> contacts;
+    std::vector<FemMesh> rigidPartners;
+    std::vector<int> rigidIndex(bp.partners.size(), -1);
+    for (const StudyBodyPlan::Contact& c : bp.contacts) {
+      if (c.partner < 0 || c.partner >= static_cast<int>(bp.partners.size()))
+        return fail("body '" + bp.bodyName + "': a contact has no partner");
+      const StudyBodyPlan::ContactPartner& pt = bp.partners[c.partner];
+      StudyJobBody::ContactPair pair;
+      pair.id = c.id;
+      pair.participant = c.participant;
+      pair.name = pt.name;
+      pair.friction = c.friction;
+      pair.partner = -1;
+      const std::set<int> mine(c.faces.begin(), c.faces.end());
+      for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
+        if (mine.count(mesh->boundary[t].faceIndex) &&
+            static_cast<size_t>(mesh->boundary[t].nodes[0]) < mainNodes)
+          pair.slaveTris.push_back(t);
+      if (pt.rigid) {
+        if (rigidIndex[c.partner] < 0) {
+          auto m = Mesh(pt.shape, pt.settings, &err);
+          if (!m)
+            return fail("body '" + bp.bodyName + "': the rigid partner '" +
+                        pt.name + "' of its contact: " + err);
+          rigidIndex[c.partner] = static_cast<int>(rigidPartners.size());
+          rigidPartners.push_back(std::move(*m));
+        }
+        pair.partner = rigidIndex[c.partner];
+        const FemMesh& pm = rigidPartners[pair.partner];
+        const std::set<int> theirs(pt.faces.begin(), pt.faces.end());
+        for (int t = 0; t < static_cast<int>(pm.boundary.size()); ++t)
+          if (theirs.count(pm.boundary[t].faceIndex))
+            pair.masterTris.push_back(t);
+      } else {
+        std::set<int> theirs;
+        for (int f : pt.faces)
+          theirs.insert(f + pt.faceOffset);
+        for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
+          if (theirs.count(mesh->boundary[t].faceIndex))
+            pair.masterTris.push_back(t);
+      }
+      const std::string what =
+          (c.participant
+               ? "contact with '"
+               : "contact support " + std::to_string(c.id) + " against '") +
+          pt.name + "'";
+      if (pair.slaveTris.empty())
+        return fail("body '" + bp.bodyName + "': " + what +
+                    ": its faces on the body meshed to no facets");
+      if (pair.masterTris.empty())
+        return fail("body '" + bp.bodyName + "': " + what +
+                    ": its partner's faces meshed to no facets");
+      // The penalty from the softer side and the body's facets there.
+      double edge = 0.0;
+      for (int t : pair.slaveTris) {
+        const auto& tri = mesh->boundary[t];
+        for (int a = 0; a < 3; ++a)
+          edge += glm::length(mesh->nodes[tri.nodes[a]] -
+                              mesh->nodes[tri.nodes[(a + 1) % 3]]);
+      }
+      edge /= 3.0 * pair.slaveTris.size();
+      const double soft = pt.rigid ? bp.mat.youngMPa
+                                   : std::min(bp.mat.youngMPa, pt.mat.youngMPa);
+      pair.penalty = ContactPenalty(soft, edge);
+      if (!c.participant)
+        supportFacets.push_back(
+            {c.id, LoadType::Contact, pair.slaveTris,
+             SupportAwayMm(*mesh, pair.slaveTris, LoadType::Fixed,
+                           glm::dvec3(0.0), glm::dvec3(0.0))});
+      contacts.push_back(std::move(pair));
+    }
+    // A part no fixed support or pin holds -- held by a contact alone --
+    // takes weak springs while its contact closes.
+    std::vector<StudyJobBody::Stabilized> stabilized;
+    if (!contacts.empty()) {
+      const auto spring = [&](size_t from, size_t to, double youngMPa) {
+        if (to <= from)
+          return;
+        glm::dvec3 lo(1e300), hi(-1e300);
+        for (size_t n = from; n < to; ++n) {
+          if (fixedSet.count(static_cast<int>(n)))
+            return;
+          lo = glm::min(lo, mesh->nodes[n]);
+          hi = glm::max(hi, mesh->nodes[n]);
+        }
+        StudyJobBody::Stabilized st;
+        for (size_t n = from; n < to; ++n)
+          st.nodes.push_back(static_cast<int>(n));
+        st.kPerNode = kStabilization * youngMPa * glm::length(hi - lo) /
+                      static_cast<double>(to - from);
+        stabilized.push_back(std::move(st));
+      };
+      if (pins.empty())
+        spring(0, mainNodes, bp.mat.youngMPa);
+      for (size_t k = 0; k < bp.partners.size(); ++k)
+        if (!bp.partners[k].rigid)
+          spring(memberNodes[k].first, memberNodes[k].second,
+                 bp.partners[k].mat.youngMPa);
+    }
+
     StudyJobBody jb;
+    jb.contacts = std::move(contacts);
+    jb.rigidPartners = std::move(rigidPartners);
+    jb.stabilized = std::move(stabilized);
     jb.supports = std::move(supportFacets);
     jb.pins = std::move(pins);
     jb.bodyIndex = bp.bodyIndex;
@@ -1866,6 +2206,7 @@ bool SolveNonlinearBody(StudyJobBody& jb, const std::vector<Material>& mats,
                         const std::vector<FaceLoad>& loads, const glm::dvec3& g,
                         const Nonlinear& nl, const SolveOptions& options,
                         FemResults& out, StudyBodyResult::Nonlinear& summary,
+                        std::vector<StudyBodyResult::ContactResult>& contacts,
                         std::string* error) {
   const auto fail = [&](const std::string& m) {
     if (error)
@@ -1881,6 +2222,8 @@ bool SolveNonlinearBody(StudyJobBody& jb, const std::vector<Material>& mats,
   if (!StaticSupportsOf(jb, mats, {loads}, g, own, sups, pinRows, &err))
     return fail(err);
   NonlinearRequest req;
+  // A contact alone is solved at small deformation.
+  req.nlgeom = nl.largeDeformation;
   req.snapThrough = nl.snapThrough;
   req.increments = nl.increments > 0 ? nl.increments
                                      : (nl.snapThrough ? kSnapIncrements
@@ -1951,7 +2294,7 @@ bool SolveNonlinearBody(StudyJobBody& jb, const std::vector<Material>& mats,
     }
   }
   if (!NonlinearOnCalculix(jb, mats, sups.front(), loads, g, req, options, out,
-                           summary, &err))
+                           summary, &err, &contacts))
     return fail(err);
   summary.linearFactor = linear;
   summary.imperfectionMm = imperfection;
@@ -1988,11 +2331,17 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
   if (in.solver == Solver::Calculix && !options.calculix)
     return fail("this study solves on CalculiX, and this run was given no "
                 "ccx to run it with");
+  bool anyContact = false;
+  for (const StudyJobBody& jb : in.bodies)
+    anyContact = anyContact || !jb.contacts.empty();
   if (const std::string why =
           NonlinearRefusal(in.solver, in.type, in.nonlinear,
-                           in.caseNames.size(), ConvergeMode::Auto);
+                           in.caseNames.size(), ConvergeMode::Auto, anyContact);
       !why.empty())
     return fail(why);
+  if (anyContact && !options.calculix)
+    return fail("a study with a contact solves on CalculiX, and this run was "
+                "given no ccx to run it with");
   for (StudyJobBody& jb : in.bodies) {
     StudyBodyResult sbr;
     sbr.bodyIndex = jb.bodyIndex;
@@ -2044,10 +2393,10 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       std::vector<Supports> settled;
       SolveReport report;
       std::optional<std::vector<FemResults>> all;
-      if (in.nonlinear.On()) {
+      if (in.nonlinear.On() || !jb.contacts.empty()) {
         FemResults res;
         if (SolveNonlinearBody(jb, mats, jb.faceLoads, g, in.nonlinear, options,
-                               res, sbr.nonlinear, &err))
+                               res, sbr.nonlinear, sbr.contacts, &err))
           all = std::vector<FemResults>{std::move(res)};
         report.solver = options.calculix ? options.calculix->ccx.Name() : "";
       } else if (in.solver == Solver::Calculix) {
@@ -2080,8 +2429,21 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
         o.type = e.type;
         sbr.edgeOwners.push_back(o);
       }
-      for (FemResults& c : *all)
+      for (FemResults& c : *all) {
         FinishSupports(jb, sbr.supportEdgeZone, sbr.edgeOwners, c);
+        // A contact support carried what its pair says it pressed with
+        // (docs/simulation/README.md#contact).
+        for (FemResults::SupportReaction& r : c.reactions)
+          if (r.type == LoadType::Contact)
+            for (const StudyBodyResult::ContactResult& cr : sbr.contacts)
+              if (!cr.participant && cr.id == r.support) {
+                r.forceN = cr.forceN;
+                r.momentNmm = cr.momentNmm;
+                r.hasMoment = true;
+                r.contactAreaMm2 = cr.closedMm2;
+                r.faceAreaMm2 = cr.areaMm2;
+              }
+      }
       if (buckling) {
         // Held as the base state was: linear theory scales the load
         // without turning it, so a pin's contact set holds at every factor.
@@ -2349,9 +2711,12 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
                     StudyRuntime& rt, const ConvergeOptions& converge,
                     std::string* error, const SolveOptions& options) {
   auto started = std::chrono::steady_clock::now();
+  bool contact = false;
+  for (const StudyBodyPlan& bp : planIn.bodies)
+    contact = contact || !bp.contacts.empty();
   if (const std::string why =
           NonlinearRefusal(planIn.solver, planIn.type, planIn.nonlinear,
-                           planIn.caseNames.size(), converge.mode);
+                           planIn.caseNames.size(), converge.mode, contact);
       !why.empty()) {
     if (error)
       *error = why;
@@ -2380,6 +2745,10 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
   if (planIn.nonlinear.snapThrough)
     return notChecked("a snap-through run's answer is its peak load factor, "
                       "which refining round a stress peak does not settle");
+  if (contact)
+    return notChecked("a contact's peak lies on a contact face whose partner "
+                      "is meshed apart from it, and refining one side of a "
+                      "contact does not settle it");
   for (const StudyBodyPlan& bp : planIn.bodies)
     if (bp.premeshed)
       return notChecked("a static study of a topology result solves the "
@@ -2522,6 +2891,10 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
       return fail("load " + std::to_string(l.id) +
                   ": a topology study's supports are fixed (it freezes the "
                   "faces they hold); a pin is a static study's");
+  // A contact (or a nonlinear option) is a static study's, never read as
+  // a fixed support here.
+  if (const std::string why = ContactRefusal(study); !why.empty())
+    return fail(why);
   if (!ValidateLoadCases(study, &err))
     return fail(err);
 

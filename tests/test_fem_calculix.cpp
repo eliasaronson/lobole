@@ -28,6 +28,9 @@
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
+#include <catch2/catch_approx.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <atomic>
@@ -1211,37 +1214,39 @@ TEST_CASE("a nonlinear study is refused in-house, on another analysis, with "
   using fem::ConvergeMode;
   using fem::Solver;
   CHECK(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, nl, 0,
-                              ConvergeMode::Auto)
+                              ConvergeMode::Auto, false)
             .empty());
-  CHECK(fem::EffectiveSolver(Solver::Auto, nl) == Solver::Calculix);
-  CHECK(fem::EffectiveSolver(Solver::Auto, fem::Nonlinear{}) == Solver::Auto);
+  fem::Study st;
+  st.nonlinear = nl;
+  CHECK(fem::EffectiveSolver(st) == Solver::Calculix);
+  CHECK(fem::EffectiveSolver(fem::Study{}) == Solver::Auto);
   CHECK_THAT(fem::NonlinearRefusal(Solver::InHouse, AnalysisType::Static, nl, 0,
-                                   ConvergeMode::Auto),
+                                   ConvergeMode::Auto, false),
              ContainsSubstring("in-house solver is linear"));
   CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Modal, nl, 0,
-                                   ConvergeMode::Auto),
+                                   ConvergeMode::Auto, false),
              ContainsSubstring("a static study's"));
   CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, nl, 2,
-                                   ConvergeMode::Auto),
+                                   ConvergeMode::Auto, false),
              ContainsSubstring("takes no load cases"));
   fem::Nonlinear snap = nl;
   snap.snapThrough = true;
   CHECK(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, snap, 0,
-                              ConvergeMode::Never)
+                              ConvergeMode::Never, false)
             .empty());
   CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, snap, 0,
-                                   ConvergeMode::Always),
+                                   ConvergeMode::Always, false),
              ContainsSubstring("peak load factor"));
   fem::Nonlinear half;
   half.snapThrough = true;
   CHECK_THAT(fem::NonlinearRefusal(Solver::Calculix, AnalysisType::Static, half,
-                                   0, ConvergeMode::Auto),
+                                   0, ConvergeMode::Auto, false),
              ContainsSubstring("large_deformation: true"));
   fem::Nonlinear seeded = nl;
   seeded.hasImperfection = true;
   seeded.imperfectionMm = 0.1;
   CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, seeded,
-                                   0, ConvergeMode::Auto),
+                                   0, ConvergeMode::Auto, false),
              ContainsSubstring("snap_through: true"));
 
   // The run refuses it as set_study does: a file can carry it.
@@ -1281,6 +1286,154 @@ TEST_CASE("a nonlinear run that stops converging is refused with the load "
   CHECK_THAT(err, ContainsSubstring("increment size smaller than minimum"));
   CHECK_THAT(err, ContainsSubstring("Nothing was stored"));
   CHECK(rt.bodies.empty());
+}
+
+TEST_CASE("a contact is refused where a nonlinear study is: in-house, on "
+          "another analysis, with load cases, beside a pin, with a negative "
+          "friction",
+          "[fem][calculix][contact]") {
+  using fem::AnalysisType;
+  using fem::Solver;
+  fem::Study s;
+  fem::Load c;
+  c.id = 1;
+  c.type = fem::LoadType::Contact;
+  s.loads.push_back(c);
+  CHECK(fem::ContactRefusal(s).empty());
+  CHECK(fem::HasContact(s));
+  CHECK(fem::IsNonlinear(s));
+  // A contact on auto solves on CalculiX, and without large deformation.
+  CHECK(fem::EffectiveSolver(s) == Solver::Calculix);
+  {
+    fem::Study t = s;
+    t.solver = Solver::InHouse;
+    CHECK_THAT(fem::ContactRefusal(t),
+               ContainsSubstring("a study with a contact solves on CalculiX"));
+  }
+  for (AnalysisType type :
+       {AnalysisType::Modal, AnalysisType::Buckling, AnalysisType::Topology}) {
+    fem::Study t = s;
+    t.type = type;
+    CHECK_THAT(fem::ContactRefusal(t),
+               ContainsSubstring("a contact is a static study's"));
+  }
+  {
+    fem::Study t = s;
+    t.loadCases.push_back({"up", 1.0, ""});
+    CHECK_THAT(fem::ContactRefusal(t),
+               ContainsSubstring("takes no load cases"));
+  }
+  {
+    fem::Study t = s;
+    t.converge = fem::ConvergeMode::Always;
+    CHECK_THAT(fem::ContactRefusal(t), ContainsSubstring("converge: always"));
+    t.converge = fem::ConvergeMode::Never;
+    CHECK(fem::ContactRefusal(t).empty());
+  }
+  {
+    fem::Study t = s;
+    t.nonlinear.largeDeformation = true;
+    CHECK(fem::ContactRefusal(t).empty());
+    t.nonlinear.snapThrough = true;
+    CHECK_THAT(fem::ContactRefusal(t),
+               ContainsSubstring("cannot hold a contact"));
+  }
+  {
+    // Increments alone belong to a contact; without one they are refused.
+    fem::Study t = s;
+    t.nonlinear.increments = 4;
+    CHECK(fem::ContactRefusal(t).empty());
+    t.loads.clear();
+    CHECK_THAT(fem::ContactRefusal(t),
+               ContainsSubstring("large_deformation: true"));
+  }
+  {
+    fem::Study t = s;
+    t.loads[0].friction = -0.1;
+    CHECK_THAT(fem::ContactRefusal(t), ContainsSubstring("friction"));
+    t.loads[0].friction = std::nan("");
+    CHECK_THAT(fem::ContactRefusal(t), ContainsSubstring("friction"));
+  }
+  {
+    fem::Study t = s;
+    fem::Load pin;
+    pin.id = 2;
+    pin.type = fem::LoadType::Pin;
+    t.loads.push_back(pin);
+    CHECK_THAT(fem::ContactRefusal(t), ContainsSubstring("in-house solver"));
+  }
+  {
+    fem::Study t;
+    t.participants.push_back({7, fem::ParticipantRole::Meshed});
+    fem::Participant touching;
+    touching.occurrenceId = 8;
+    touching.role = fem::ParticipantRole::Contact;
+    touching.friction = -1.0;
+    t.participants.push_back(touching);
+    CHECK(fem::HasContact(t));
+    CHECK_THAT(fem::ContactRefusal(t), ContainsSubstring("friction"));
+    t.participants.back().friction = 0.2;
+    CHECK(fem::ContactRefusal(t).empty());
+    t.solver = Solver::InHouse;
+    CHECK_THAT(fem::ContactRefusal(t), ContainsSubstring("CalculiX"));
+  }
+
+  // The run refuses it as set_study does: a file can carry it.
+  fem::StudyJobInput in;
+  in.type = AnalysisType::Static;
+  in.solver = Solver::InHouse;
+  in.bodies.push_back(HandCantilever());
+  fem::StudyJobBody::ContactPair pair;
+  pair.id = 1;
+  in.bodies.back().contacts.push_back(pair);
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::SolvePreparedStudy(in, rt, &err));
+  CHECK_THAT(err, ContainsSubstring("a study with a contact solves on"));
+  CHECK(rt.bodies.empty());
+}
+
+TEST_CASE("a part rests on the ground under a flat face only",
+          "[fem][calculix][contact]") {
+  Document doc;
+  auto roller = std::make_unique<CylinderFeature>(
+      "Roller", glm::dvec3(0), glm::dvec3(0, 0, 1), 10.0, 30.0);
+  roller->SetMaterial("steel");
+  doc.AddFeature(std::move(roller));
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Rests");
+  fem::Load c = MakeLoad(
+      doc, fem::LoadType::Contact,
+      FaceWhere(body, "cylinder", [](const glm::dvec3&) { return true; }));
+  s.loads.push_back(c);
+  fem::StudyPlan plan;
+  std::string err;
+  CHECK_FALSE(fem::PlanStudy(doc, s, plan, &err));
+  CHECK_THAT(err, ContainsSubstring("not flat"));
+  // The flat end rests on a box under it: its face on the end's plane,
+  // reaching past it.
+  double low = 1e300;
+  for (const auto& [index, name] : body.elementMap.names)
+    if (const auto info = Measure::DescribeFaceAt(body, index);
+        info && info->kind == "plane")
+      low = std::min(low, info->centroid.z);
+  s.loads[0].face = FaceWhere(body, "plane", [low](const glm::dvec3& c) {
+    return std::abs(c.z - low) < 1e-6;
+  });
+  REQUIRE(fem::PlanStudy(doc, s, plan, &err));
+  REQUIRE(plan.bodies.size() == 1);
+  REQUIRE(plan.bodies[0].contacts.size() == 1);
+  const auto& ground = plan.bodies[0].partners[0];
+  CHECK(ground.rigid);
+  CHECK(ground.name == "ground");
+  Bnd_Box box;
+  BRepBndLib::Add(ground.shape, box);
+  double x0, y0, z0, x1, y1, z1;
+  box.Get(x0, y0, z0, x1, y1, z1);
+  CHECK(x0 < -10.0);
+  CHECK(x1 > 10.0);
+  CHECK(z1 == Catch::Approx(low).margin(1e-6));
+  CHECK(z0 < low);
 }
 
 #ifdef HAVE_NETGEN
@@ -1699,6 +1852,338 @@ TEST_CASE("calibrate the CalculiX nonlinear memory estimate",
   }
 }
 
+namespace {
+
+// A contact study run as run_study runs one (docs/simulation/README.md
+// #contact), the time it took in `seconds`.
+fem::StudyRuntime RunContact(const fem::StudyPlan& plan,
+                             const fem::CalculixInstall& ccx,
+                             const Scratch& scratch, double* seconds) {
+  fem::SolveOptions options;
+  options.calculix = RunWith(ccx, scratch.dir / "runs");
+  fem::ConvergeOptions converge;
+  converge.mode = fem::ConvergeMode::Never;
+  fem::StudyJobInput input;
+  fem::StudyRuntime rt;
+  std::string err;
+  const auto t0 = std::chrono::steady_clock::now();
+  const bool ok = fem::SolveConverged(plan, input, rt, converge, &err, options);
+  *seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  INFO(err);
+  REQUIRE(ok);
+  REQUIRE(rt.bodies.size() == 1);
+  CHECK(EntriesIn(scratch.dir / "runs") == 0);
+  return rt;
+}
+
+} // namespace
+
+TEST_CASE("a block on the ground lifts off under a moment only past its "
+          "kern, its contact carrying the load where statics says",
+          "[fem][calculix][contact]") {
+  REQUIRE_CCX(ccx);
+  // A 20 x 20 x 40 steel block standing on a frictionless rigid floor, a
+  // force P down at the top, e off the axis (a remote load: P/A plus the
+  // linear traction of its moment, exactly). Plane sections in a prism
+  // under end traction stay plane, and a frictionless floor holds only
+  // normal to it, so while the whole base presses, the contact pressure
+  // is linear: P/A (1 + 12 e x / b^2), its peak P/A (1 + 6 e / b), and the
+  // base closes everywhere exactly when e <= b/6 (the kern). Past it the
+  // base lifts off; wherever it lands, statics puts the floor's resultant
+  // on the load's line, x = e.
+  constexpr double b = 20.0, H = 40.0, P = 4000.0, A = b * b;
+  for (const double e : {b / 12.0, b / 4.0}) {
+    Scratch scratch;
+    Document doc;
+    auto box = std::make_unique<BoxFeature>(
+        "Block", glm::dvec3(-b / 2, -b / 2, 0.0), b, b, H);
+    box->SetMaterial("steel");
+    doc.AddFeature(std::move(box));
+    const Body& body = doc.GetBodies()[0];
+    fem::Study& s = doc.AddStudy("Rocking");
+    s.meshSize = 4.0;
+    s.nonlinear.increments = 2;
+    const auto isZ = [](double z) {
+      return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+    };
+    fem::Load floor = MakeLoad(doc, fem::LoadType::Contact,
+                               FaceWhere(body, "plane", isZ(0.0)));
+    s.loads.push_back(floor);
+    fem::Load push =
+        MakeLoad(doc, fem::LoadType::Remote, FaceWhere(body, "plane", isZ(H)),
+                 P, glm::dvec3(0, 0, -1));
+    push.point = glm::dvec3(e, 0.0, H);
+    push.hasPoint = true;
+    s.loads.push_back(push);
+    fem::StudyPlan plan;
+    std::string err;
+    REQUIRE(fem::PlanStudy(doc, s, plan, &err));
+    double seconds = 0.0;
+    const fem::StudyRuntime rt = RunContact(plan, *ccx, scratch, &seconds);
+    const fem::StudyBodyResult& r = rt.bodies[0];
+    REQUIRE(r.contacts.size() == 1);
+    const auto& c = r.contacts[0];
+    const double arm = -c.momentNmm.y / c.forceN.z;
+    const double peak = P / A * (1.0 + 6.0 * e / b);
+    std::printf("contact: block on the ground, e = b/%.0f, %zu nodes, %.1f s: "
+                "normal %.6g N (P %g), arm %.5f mm (e %.5f, %+.3f %%), closed "
+                "%.2f of %.2f mm^2, max pressure %.4f MPa (linear %.4f, "
+                "%+.2f %%), penalty %.4g MPa/mm, springs %.2e, imbalance "
+                "%.2e\n",
+                b / e, r.mesh.stats.nodeCount, seconds, c.normalN, P, arm, e,
+                100.0 * (arm / e - 1.0), c.closedMm2, c.areaMm2,
+                c.maxPressureMPa, peak, 100.0 * (c.maxPressureMPa / peak - 1.0),
+                c.penaltyMPaPerMm, r.nonlinear.stabilization,
+                r.nonlinear.imbalance);
+    CHECK_THAT(c.areaMm2, Catch::Matchers::WithinRel(A, 1e-6));
+    CHECK_THAT(c.normalN, Catch::Matchers::WithinRel(P, 1e-3));
+    CHECK_THAT(c.forceN.z, Catch::Matchers::WithinRel(P, 1e-3));
+    CHECK_THAT(arm, Catch::Matchers::WithinRel(e, 5e-3));
+    CHECK(r.nonlinear.imbalance < fem::kNonlinearBalance);
+    CHECK(r.nonlinear.stabilization < 1e-4);
+    CHECK_FALSE(r.nonlinear.largeDeformation);
+    // The support's own row says the same.
+    REQUIRE(r.results.reactions.size() == 1);
+    CHECK(r.results.reactions[0].type == fem::LoadType::Contact);
+    CHECK(r.results.reactions[0].contactAreaMm2 == c.closedMm2);
+    if (e <= b / 6.0) {
+      CHECK_THAT(c.closedMm2, Catch::Matchers::WithinRel(A, 1e-3));
+      CHECK_THAT(c.maxPressureMPa, Catch::Matchers::WithinRel(peak, 0.03));
+    } else {
+      CHECK(c.closedMm2 < 0.9 * A);
+      CHECK(c.closedMm2 > 0.3 * A);
+    }
+  }
+}
+
+namespace {
+
+// Two parts placed as they are, for an assembly study.
+struct TwoParts {
+  std::unique_ptr<Document> a = std::make_unique<Document>();
+  std::unique_ptr<Document> b = std::make_unique<Document>();
+  AssemblyDocument asmDoc;
+  uint64_t occA = 0, occB = 0;
+  fem::AssemblyStudyContext ctx;
+  void Place(const char* nameA, const char* nameB) {
+    Occurrence oa;
+    oa.name = nameA;
+    oa.partId = 1;
+    oa.fixed = true;
+    occA = asmDoc.AddOccurrence(oa);
+    Occurrence ob;
+    ob.name = nameB;
+    ob.partId = 2;
+    occB = asmDoc.AddOccurrence(ob);
+    ctx.placedBodies = [this](uint64_t occ) {
+      return (occ == occA ? a : b)->GetBodies();
+    };
+  }
+};
+
+// A ball's cap under a stem: a sphere of radius R touching z = `at` from
+// above, cut to its lowest `cap` mm, and a cylinder of the cap's rim
+// radius `stem` mm tall on it -- so the curved face is only the cap, and
+// refining it refines no more than the contact needs.
+void AddBall(Document& doc, double R, double at, double cap, double stem) {
+  auto sphere =
+      std::make_unique<SphereFeature>("Ball", glm::dvec3(0, 0, at + R), R);
+  sphere->SetMaterial("steel");
+  doc.AddFeature(std::move(sphere));
+  const uint64_t ball = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<BoxFeature>("Cap", glm::dvec3(-R, -R, at),
+                                              2 * R, 2 * R, cap));
+  const uint64_t box = doc.GetFeature(1)->GetId();
+  doc.AddFeature(std::make_unique<BooleanFeature>("Keep", ball, box,
+                                                  BooleanOp::Intersect));
+  const uint64_t kept = doc.GetFeature(2)->GetId();
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Stem", glm::dvec3(0, 0, at + cap), glm::dvec3(0, 0, 1),
+      std::sqrt(2.0 * R * cap - cap * cap), stem));
+  const uint64_t st = doc.GetFeature(3)->GetId();
+  doc.AddFeature(
+      std::make_unique<BooleanFeature>("Join", kept, st, BooleanOp::Union));
+}
+
+} // namespace
+
+TEST_CASE("a steel ball pressed on a rigid flat touches over Hertz's "
+          "circle",
+          "[fem][calculix][contact][slow]") {
+  REQUIRE_CCX(ccx);
+  // Hertz: a sphere of radius R pressed with F on a rigid flat touches over
+  // a circle of radius a = (3 F R / 4 E*)^(1/3), E* = E / (1 - nu^2), its
+  // pressure peaking at 3 F / (2 pi a^2) in the middle. The ball (meshed)
+  // rests on a rigid block (a contact support on it); F is chosen for
+  // a = R / 10, and the cap reaches out to 2a.
+  constexpr double R = 10.0, top = 4.0;
+  const double E = Steel().youngGPa * 1000.0, nu = Steel().poisson;
+  const double Estar = E / (1.0 - nu * nu);
+  const double aWant = R / 10.0;
+  const double F = 4.0 * Estar * aWant * aWant * aWant / (3.0 * R);
+  const double cap = 4.0 * aWant * aWant / (2.0 * R);
+  Scratch scratch;
+  TwoParts parts;
+  {
+    auto box = std::make_unique<BoxFeature>("Block", glm::dvec3(-6, -6, 0),
+                                            12.0, 12.0, top);
+    box->SetMaterial("steel");
+    parts.a->AddFeature(std::move(box));
+  }
+  AddBall(*parts.b, R, top, cap, 3.0);
+  REQUIRE(parts.b->GetBodies().size() == 1);
+  parts.Place("Block", "Ball");
+  const Body& ball = parts.b->GetBodies()[0];
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& p) { return std::abs(p.z - z) < 1e-6; };
+  };
+  fem::Study s;
+  s.id = 2;
+  s.name = "Hertz";
+  s.meshSize = 1.0;
+  s.participants.push_back({parts.occB, fem::ParticipantRole::Meshed});
+  s.participants.push_back({parts.occA, fem::ParticipantRole::Rigid});
+  fem::Load rest;
+  rest.id = 20;
+  rest.type = fem::LoadType::Contact;
+  rest.contactWith = parts.occA;
+  s.loads.push_back(rest);
+  fem::Load press;
+  press.id = 21;
+  press.type = fem::LoadType::Force;
+  press.occurrenceId = parts.occB;
+  press.face = FaceWhere(ball, "plane", isZ(top + cap + 3.0));
+  press.magnitude = F;
+  press.direction = glm::dvec3(0, 0, -1);
+  s.loads.push_back(press);
+  s.refinements.push_back(
+      {FaceWhere(ball, "sphere", [](const glm::dvec3&) { return true; }),
+       aWant / 6.0, "", parts.occB});
+  fem::StudyPlan plan;
+  std::string err;
+  const bool planned =
+      fem::PlanAssemblyStudy(parts.asmDoc, s, parts.ctx, plan, &err);
+  INFO(err);
+  REQUIRE(planned);
+  REQUIRE(plan.bodies.size() == 1);
+  REQUIRE(plan.bodies[0].contacts.size() == 1);
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunContact(plan, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult& r = rt.bodies[0];
+  REQUIRE(r.contacts.size() == 1);
+  const auto& k = r.contacts[0];
+  CHECK_FALSE(k.participant);
+  const double a = std::sqrt(k.closedMm2 / kPiNl);
+  const double p0 = 3.0 * F / (2.0 * kPiNl * aWant * aWant);
+  std::printf("contact: Hertz, a steel ball R %g on a rigid flat, F %.5g N, "
+              "%zu nodes, %.1f s: contact radius %.4f mm (Hertz %.4f, %+.2f "
+              "%%), normal %.6g N, max pressure %.5g MPa (Hertz %.5g, %+.2f "
+              "%%), penalty %.4g MPa/mm, springs %.2e, imbalance %.2e\n",
+              R, F, r.mesh.stats.nodeCount, seconds, a, aWant,
+              100.0 * (a / aWant - 1.0), k.normalN, k.maxPressureMPa, p0,
+              100.0 * (k.maxPressureMPa / p0 - 1.0), k.penaltyMPaPerMm,
+              r.nonlinear.stabilization, r.nonlinear.imbalance);
+  CHECK_THAT(k.normalN, Catch::Matchers::WithinRel(F, 1e-3));
+  CHECK_THAT(a, Catch::Matchers::WithinRel(aWant, 0.05));
+  CHECK(r.nonlinear.imbalance < fem::kNonlinearBalance);
+  CHECK(r.nonlinear.stabilization < 1e-4);
+  // The support's row carries the force the flat pressed back with.
+  REQUIRE(r.results.reactions.size() == 1);
+  CHECK(r.results.reactions[0].type == fem::LoadType::Contact);
+  CHECK_THAT(r.results.reactions[0].forceN.z,
+             Catch::Matchers::WithinRel(F, 1e-3));
+}
+
+TEST_CASE("a block standing on a slab, each meshed, presses where statics "
+          "says",
+          "[fem][calculix][contact]") {
+  REQUIRE_CCX(ccx);
+  // A contact participant: a 20 x 20 x 30 steel block (meshed apart, held
+  // by its contact alone) standing on a 40 x 40 x 10 aluminium slab clamped
+  // at its base, pushed down off its axis. Whatever the two deform to,
+  // statics puts the slab's push on the load's line.
+  constexpr double b = 20.0, H = 30.0, T = 10.0, P = 3000.0, e = 3.0;
+  Scratch scratch;
+  TwoParts parts;
+  {
+    auto slab = std::make_unique<BoxFeature>("Slab", glm::dvec3(-20, -20, 0),
+                                             40.0, 40.0, T);
+    slab->SetMaterial("aluminum");
+    parts.a->AddFeature(std::move(slab));
+    auto block = std::make_unique<BoxFeature>(
+        "Block", glm::dvec3(-b / 2, -b / 2, T), b, b, H);
+    block->SetMaterial("steel");
+    parts.b->AddFeature(std::move(block));
+  }
+  parts.Place("Slab", "Block");
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& p) { return std::abs(p.z - z) < 1e-6; };
+  };
+  fem::Study s;
+  s.id = 2;
+  s.name = "Standing";
+  s.meshSize = 5.0;
+  s.nonlinear.increments = 2;
+  s.participants.push_back({parts.occA, fem::ParticipantRole::Meshed});
+  fem::Participant standing;
+  standing.occurrenceId = parts.occB;
+  standing.role = fem::ParticipantRole::Contact;
+  standing.friction = 0.2;
+  s.participants.push_back(standing);
+  fem::Load fix;
+  fix.id = 20;
+  fix.type = fem::LoadType::Fixed;
+  fix.occurrenceId = parts.occA;
+  fix.face = FaceWhere(parts.a->GetBodies()[0], "plane", isZ(0.0));
+  s.loads.push_back(fix);
+  fem::Load push;
+  push.id = 21;
+  push.type = fem::LoadType::Remote;
+  push.occurrenceId = parts.occB;
+  push.face = FaceWhere(parts.b->GetBodies()[0], "plane", isZ(T + H));
+  push.magnitude = P;
+  push.direction = glm::dvec3(0, 0, -1);
+  push.point = glm::dvec3(e, 0.0, T + H);
+  push.hasPoint = true;
+  s.loads.push_back(push);
+  fem::StudyPlan plan;
+  std::string err;
+  const bool planned =
+      fem::PlanAssemblyStudy(parts.asmDoc, s, parts.ctx, plan, &err);
+  INFO(err);
+  REQUIRE(planned);
+  REQUIRE(plan.bodies.size() == 1);
+  REQUIRE(plan.bodies[0].contacts.size() == 1);
+  CHECK(plan.bodies[0].contacts[0].participant);
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunContact(plan, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult& r = rt.bodies[0];
+  REQUIRE(r.contacts.size() == 1);
+  const auto& k = r.contacts[0];
+  // The force on the slab's side, from the block: down, at x = e.
+  const double arm = -k.momentNmm.y / k.forceN.z;
+  std::printf("contact: a block standing on a slab, %zu nodes, %.1f s: "
+              "normal %.6g N (P %g), arm %.5f mm (e %g, %+.3f %%), closed "
+              "%.2f of %.2f mm^2, max pressure %.4f MPa, springs %.2e, "
+              "imbalance %.2e\n",
+              r.mesh.stats.nodeCount, seconds, k.normalN, P, arm, e,
+              100.0 * (arm / e - 1.0), k.closedMm2, k.areaMm2, k.maxPressureMPa,
+              r.nonlinear.stabilization, r.nonlinear.imbalance);
+  CHECK(k.participant);
+  CHECK(k.name == "Block");
+  CHECK_THAT(k.normalN, Catch::Matchers::WithinRel(P, 1e-3));
+  CHECK_THAT(-k.forceN.z, Catch::Matchers::WithinRel(P, 1e-3));
+  CHECK_THAT(arm, Catch::Matchers::WithinRel(e, 1e-2));
+  CHECK(k.closedMm2 > 0.0);
+  CHECK(k.closedMm2 <= k.areaMm2 * (1.0 + 1e-6));
+  CHECK(r.nonlinear.imbalance < fem::kNonlinearBalance);
+  CHECK(r.nonlinear.stabilization < 1e-4);
+  // One body: the slab's domain and the block's, each its own material.
+  REQUIRE(r.mesh.stats.nodeCount > 0);
+}
+
 TEST_CASE("a nonlinear result is saved and read back with its run",
           "[fem][calculix][nonlinear]") {
   fem::StudyRuntime rt;
@@ -1725,6 +2210,22 @@ TEST_CASE("a nonlinear result is saved and read back with its run",
   b.nonlinear.firstYieldFactor = 0.3;
   b.nonlinear.residualCriterion = fem::kNonlinearResidual;
   b.nonlinear.imbalance = 2e-6;
+  b.nonlinear.largeDeformation = false;
+  b.nonlinear.stabilization = 3e-6;
+  fem::StudyBodyResult::ContactResult contact;
+  contact.id = 9;
+  contact.name = "ground";
+  contact.friction = 0.2;
+  contact.penaltyMPaPerMm = 2.5e6;
+  contact.areaMm2 = 400.0;
+  contact.closedMm2 = 212.5;
+  contact.forceN = glm::dvec3(0.5, 0.0, 4000.0);
+  contact.momentNmm = glm::dvec3(0.0, -2.0e4, 0.0);
+  contact.normalN = 4000.0;
+  contact.shearN = 0.5;
+  contact.maxPressureMPa = 31.0;
+  contact.meanPressureMPa = 18.8;
+  b.contacts.push_back(contact);
   rt.bodies.push_back(std::move(b));
   rt.solver = "calculix 2.23";
   nlohmann::json j;
@@ -1741,6 +2242,16 @@ TEST_CASE("a nonlinear result is saved and read back with its run",
   CHECK(n.firstYieldFactor == 0.3);
   CHECK(n.ccxRuns == 2);
   CHECK(n.linearFactor == 0.95);
+  CHECK_FALSE(n.largeDeformation);
+  CHECK(n.stabilization == 3e-6);
+  REQUIRE(back.bodies[0].contacts.size() == 1);
+  const auto& k = back.bodies[0].contacts[0];
+  CHECK(k.id == 9);
+  CHECK(k.name == "ground");
+  CHECK(k.friction == 0.2);
+  CHECK(k.closedMm2 == 212.5);
+  CHECK(k.momentNmm.y == -2.0e4);
+  CHECK(k.maxPressureMPa == 31.0);
   // A summary on a result that is not static is refused.
   j["kind"] = "modal";
   CHECK_THROWS(DocumentIO::StudyResultFromJson(j));
