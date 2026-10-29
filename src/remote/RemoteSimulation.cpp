@@ -913,7 +913,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "for, and |u . (K u - f)| / |u . f|, which the precision barely moves "
      "and which is held to 1e-6), and, when the "
      "session holds an in-house result of the same study, "
-     "`in_house_agreement` {max_displacement_rel, max_von_mises_rel}: "
+     "`in_house_agreement` {max_displacement_rel, max_von_mises_rel}, or "
+     "{not_compared: why} when the two runs ended on different meshes: "
      "reported beside the answer, never folded into its receipt, which "
      "stays a prediction with oracle calculix/static "
      "(docs/simulation/README.md#calculix). A static "
@@ -2990,11 +2991,32 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           const double m = std::max(std::abs(a), std::abs(b));
           return m > 0 ? std::abs(a - b) / m : 0.0;
         };
-        result["in_house_agreement"] = {
-            {"input_hash", inputhash::Hex(twinHash)},
-            {"max_displacement_rel",
-             rel(rt->maxDisplacement, own->maxDisplacement)},
-            {"max_von_mises_rel", rel(rt->maxVonMises, own->maxVonMises)}};
+        // Agreement is a same-mesh comparison. A converging run refines
+        // until its peak settles or its time runs out, so the two solvers
+        // can end on different meshes; their difference is then the mesh's,
+        // and is not reported as agreement.
+        const auto nodes = [](const fem::StudyRuntime& r) {
+          size_t n = 0;
+          for (const auto& b : r.bodies)
+            n += b.mesh.nodes.size();
+          return n;
+        };
+        const size_t ours = nodes(*own), theirs = nodes(*rt);
+        if (ours == theirs)
+          result["in_house_agreement"] = {
+              {"input_hash", inputhash::Hex(twinHash)},
+              {"max_displacement_rel",
+               rel(rt->maxDisplacement, own->maxDisplacement)},
+              {"max_von_mises_rel", rel(rt->maxVonMises, own->maxVonMises)}};
+        else
+          result["in_house_agreement"] = {
+              {"input_hash", inputhash::Hex(twinHash)},
+              {"not_compared",
+               "the two runs ended on different meshes (" +
+                   std::to_string(ours) + " nodes in-house, " +
+                   std::to_string(theirs) +
+                   " on CalculiX): each refined until its peak settled or "
+                   "its time ran out"}};
       }
     }
     // Whether the peak has settled (docs/simulation/README.md

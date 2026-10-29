@@ -1202,7 +1202,11 @@ reading as an answer.
   `calculix/static` and the version. When the session holds an in-house result
   of the same study (its input hash with `solver: auto`), `study_results` adds
   `in_house_agreement` {`max_displacement_rel`, `max_von_mises_rel`}: reported
-  beside the answer, never folded into the claim.
+  beside the answer, never folded into the claim. It is a same-mesh
+  comparison: under `converge` each run refines until its peak settles or
+  its time runs out, so a slower ccx can stop a step earlier, and two runs
+  that ended on different meshes report `not_compared` with both node
+  counts rather than a difference that is the mesh's.
 
 **Measured** (`[calculix]`, the nixpkgs ccx 2.23, each study meshed once and
 solved both ways):

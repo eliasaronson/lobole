@@ -74,7 +74,9 @@ def main():
 
             def study(name, solver=None):
                 sid = d.call("add_study", name=name)["id"]
-                d.call("set_study", id=sid, mesh_size=4.0,
+                # converge: never, so both solvers answer on one mesh
+                # whatever their speed: a converging run stops by time.
+                d.call("set_study", id=sid, mesh_size=4.0, converge="never",
                        **({"solver": solver} if solver else {}))
                 d.call("add_load", study=sid, type="fixed",
                        face={"feature_id": created_by, "element": end(-1.0)})
