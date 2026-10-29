@@ -28,9 +28,11 @@ large deformation and snap-through are `static`'s `nonlinear` option on
 CalculiX
 ([docs/simulation/README.md#nonlinear-static](../simulation/README.md#nonlinear-static)),
 and contact is a support and a participant role solved on the same path
-([docs/simulation/README.md#contact](../simulation/README.md#contact)).
-What is left is plasticity and thermal, each a `nonlinear` key on the same
-path. Nothing falls back to the in-house solver or to another analysis.
+([docs/simulation/README.md#contact](../simulation/README.md#contact)),
+and plasticity is a `nonlinear` key on the same path
+([docs/simulation/README.md#plasticity](../simulation/README.md#plasticity)).
+What is left is thermal, a `nonlinear` key on that path too. Nothing falls
+back to the in-house solver or to another analysis.
 
 ## What was measured
 
@@ -85,54 +87,39 @@ existing build and the nixpkgs ccx, with no code changes.
 
 ## The shape of the fix
 
-Each remaining analysis is a key of `static`'s `nonlinear` object, solved by
+The remaining analysis is a key of `static`'s `nonlinear` object, solved by
 `fem::NonlinearOnCalculix` as large deformation is: the deck from the
 study's own mesh, the run watched through the `.dat` and `.sta`, the
 non-convergence refusal with the load reached, and the equilibrium check.
-`in_house` with any of them is refused, as `nonlinear` is now. Each stage
-adds its keys under its own `v208`.
+`in_house` with it is refused, as `nonlinear` is now. It adds its keys
+under a format bump of its own.
 
 ## Stages
 
 Each stage is useful alone and lands with its docs. Stages 1 (discovery, the
 deck, linear static on CalculiX), 3 (shipping ccx in the packages,
 [docs/packaging/README.md#the-bundled-calculix](../packaging/README.md#the-bundled-calculix)),
-4 (large deformation, snap-through) and 5 (contact) are built, and linear
-buckling with them (in-house, `*BUCKLE` its cross-check).
-
-
-**Stage 6: plasticity**, ~800 lines.
-- `nonlinear.plasticity: true`, with `*PLASTIC` from the material library.
-  The path past a peak is not followed (ccx 2.23 has no arc-length method:
-  `*STATIC, RIKS` is read as a plain `*STATIC` with a warning), so a
-  collapse load is the factor the load-controlled run stops at, as a
-  snap-through run's limit point is.
-- Metals gain hardening data. A material without it is refused rather than assumed perfectly plastic.
-- Results: `max_plastic_strain`, a requirement quantity of the same name, and the residual deformation from an unload step.
+4 (large deformation, snap-through), 5 (contact) and 6 (plasticity) are
+built, and linear buckling with them (in-house, `*BUCKLE` its cross-check).
 
 **Stage 7: thermal**: steady heat transfer, then thermal stress. Sized when it is next.
 
 ## Verification
 
-**Closed forms, through `run_study`, tagged `[calculix]`:**
-- **Stage 6.** A bar past yield (uniform, exact), and a rectangular beam's collapse load M_p = σ_y b h²/4.
-
 **Refusals, in `refused_calls_smoke` and `tests/test_fem_calculix.cpp`:**
-each new key refused where `nonlinear` already is (in-house, another
-analysis, load cases), and a material without hardening data (Stage 6).
-Contact's are in place (docs/simulation/README.md#contact): the plasticity
-and thermal keys join them.
+the thermal keys refused where `nonlinear` already is (in-house, another
+analysis, load cases), beside contact's and plasticity's
+(docs/simulation/README.md#contact, #plasticity).
 
 **Docs:**
-- docs/simulation/README.md's "CalculiX" section gains each stage, and "Not done" loses it.
-- The RPC `describe` rows each stage touches.
+- docs/simulation/README.md gains thermal, and "Not done" loses it.
+- The RPC `describe` rows it touches.
 
 ## Files
 
-- `src/core/fem/Calculix.{h,cpp}`: the plastic and thermal deck keys, reading PE; `tests/test_fem_calculix.cpp`.
+- `src/core/fem/Calculix.{h,cpp}`: the thermal deck keys; `tests/test_fem_calculix.cpp`.
 - `src/core/fem/FemStudy.{h,cpp}`: the `nonlinear` keys and their refusals.
-- `src/core/io/SerializeStudies.cpp`, `src/core/io/SerializationInternal.h`, `docs/versioning/format.md`, a golden per stage.
+- `src/core/io/SerializeStudies.cpp`, `src/core/io/SerializationInternal.h`, `docs/versioning/format.md`, a golden.
 - `src/remote/RemoteSimulation.cpp`: rows and handlers.
-- `src/core/Requirements.cpp`, `src/remote/RemoteRequirements.cpp` (Stage 6's quantity).
 - `src/ui/StudyPanel.cpp`.
 - The python client's `rpc.py` and `rpc-surface.json`, regenerated.

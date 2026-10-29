@@ -121,10 +121,12 @@ them:
 
 ## 4. Analysis
 
-- **FEM:** thermal studies, contact and plasticity (large deformation and
-  snap-through are built on CalculiX:
-  [nonlinear static](simulation/README.md#nonlinear-static)); modal analysis
-  without supports (free-free); VTU export of results.
+- **FEM:** thermal studies (large deformation, snap-through, contact and
+  plasticity are built on CalculiX:
+  [nonlinear static](simulation/README.md#nonlinear-static),
+  [plasticity](simulation/README.md#plasticity)); hardening curves for the
+  metals other than steel; modal analysis without supports (free-free); VTU
+  export of results.
 - **Buckling on a topology result:** a buckling study whose shape comes from
   a topology study (`shape_from`, as a static study's can), so an optimised
   shape's slender struts are checked. Buckling as a constraint inside the

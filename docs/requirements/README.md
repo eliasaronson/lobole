@@ -41,7 +41,7 @@ and the call a person would make agree by construction.
 | kind | document | through | reads | keys besides `document` |
 |---|---|---|---|---|
 | `study_probe` | part | `run_study`, `probe_study` | mm, deg, MPa (or as `unit` says) | `study`, `case?`, and one face (`face`, `at?`, `quantity?`: translation \| rotation \| displacement_at \| von_mises_max \| von_mises_mean) or a formula (`readings`, `expression`, `unit?`) |
-| `study_result` | part | `run_study`, `study_results` | mm, MPa, or a factor | `study`, `quantity`: max_displacement \| max_von_mises \| factor_of_safety, `case?` |
+| `study_result` | part | `run_study`, `study_results` | mm, MPa, a factor, or a strain | `study`, `quantity`: max_displacement \| max_von_mises \| factor_of_safety \| buckling_factor \| max_plastic_strain, `case?` |
 | `clearance` | assembly | the gap `interference` measures | mm | `a`, `b` (top-level occurrences), `mode?`: mesh \| exact, `motion_study?` |
 | `contact` | assembly | `interference` | verdict | `a`, `b`, `expect`: clear \| touching \| not_clashing |
 | `seal` | assembly | `check_seal` | mm, the widest closed ring's narrowest trace (0 when none closes) | `a`, `b` (top-level occurrences), `motion_study?` (the worst of its samples) |
@@ -278,6 +278,13 @@ exactly what the measure reads:
 A body's B-Rep is hashed as a reopened project reads it back
 ([studies as jobs](../simulation/README.md#studies-as-jobs)), so evidence
 saved with the project reads current after the reopen.
+
+`max_plastic_strain` is a [plastic](../simulation/README.md#plasticity)
+study's peak equivalent plastic strain (unitless; 0 where nothing yielded),
+refused on an elastic study rather than read as 0; its detail carries
+where it is and the run's warnings (a strain past the end of the
+material's hardening data among them). It is not checked for a settled
+peak: a plastic run's convergence is reported not checked.
 
 A `study_result` reading of `max_von_mises` or `factor_of_safety`, and a
 `study_probe` of `von_mises_max` or `von_mises_mean`, rest on a peak

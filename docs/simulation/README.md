@@ -1061,8 +1061,8 @@ results and checks -- answered by a second, independent program. The code is
 too, as its cross-check, and a static study solved past linear -- large
 deformation, snap-through -- solves only there
 ([nonlinear static](#nonlinear-static)), as does a study with a
-[contact](#contact). Plasticity and thermal are what is left
-([the plan](../plans/calculix-bridge.md)).
+[contact](#contact) and one past yield ([plasticity](#plasticity)).
+Thermal is what is left ([the plan](../plans/calculix-bridge.md)).
 
 ### The solver choice
 
@@ -1241,12 +1241,13 @@ buckling cannot see. A static study takes `nonlinear` (`fem::Nonlinear`,
 (`fem::NonlinearOnCalculix`, `src/core/fem/Calculix.cpp`); `auto` picks it
 and `in_house` is refused, since the in-house solver is linear.
 
-`set_study {nonlinear: {large_deformation: true, increments?, snap_through?,
-imperfection_mm?, deflection_limit_mm?}}` (null for linear); the panel has
-**Large deformation** and **Snap-through (peak load)** checkboxes under
-**Converge peak**. Refused, by `set_study`, the panel, the file reader and
-the run (`fem::NonlinearRefusal`): without `large_deformation: true`, on any
-analysis but static, with `solver: in_house`, with load cases (a nonlinear
+`set_study {nonlinear: {large_deformation?, plasticity?, increments?,
+snap_through?, imperfection_mm?, deflection_limit_mm?}}` (null for linear;
+[plasticity](#plasticity) has its own section); the panel has **Large
+deformation**, **Plasticity** and **Snap-through (peak load)** checkboxes
+under **Converge peak**. Refused, by `set_study`, the panel, the file reader
+and the run (`fem::NonlinearRefusal`): without `large_deformation: true` or
+`plasticity: true` (or a contact), on any analysis but static, with `solver: in_house`, with load cases (a nonlinear
 answer is not a sum of cases, and a snap-through run scales one load set),
 an unknown key, `increments` under 1, a seed or limit without
 `snap_through`, a negative seed, a limit that is not positive, and
@@ -1615,6 +1616,152 @@ the linear pressure while e <= b/6, and the penalty, uniform over the
 face, keeps it linear. Past the kern the base lifts, and statics alone
 puts the floor's resultant on the load's line.
 
+## Plasticity
+
+A part loaded past its yield does not fail there: the yield spreads, the
+part carries more by it, and it stays bent once the load is off. A linear
+study reports a factor of safety under 1 and stops. `nonlinear.plasticity:
+true` (`fem::Nonlinear::plasticity`) solves the study past yield, on
+[CalculiX](#calculix), through the [nonlinear](#nonlinear-static) path:
+`auto` picks it and `in_house` is refused. On its own it is solved at small
+deformation (plain `*STATIC`); with `large_deformation` under NLGEOM, and
+with a [contact](#contact) beside it. The panel has a **Plasticity**
+checkbox under **Large deformation**.
+
+### Hardening curves
+
+Each material runs along its own hardening curve
+(`CADMaterials::MaterialProperties::hardening`, `fem::Material::hardening`):
+the von Mises stress against the equivalent plastic strain, from (yield, 0),
+written as `*PLASTIC` (isotropic hardening, ccx's default). A curve is in
+the library only where a source is cited beside it:
+
+| material | curve | source |
+|---|---|---|
+| `steel` (structural, f_y 250 MPa, E 200 GPa) | linear hardening, the stress-strain slope E/100 past f_y (in plastic strain H = E/99 = 2020 MPa), to 5 % plastic strain: (250, 0), (351.0, 0.05) | EN 1993-1-5:2006 Annex C.6(2), Figure C.2 c), "elastic-plastic with linear strain hardening"; the 5 % is C.8(1) Note 1's recommended principal strain limit |
+
+Every other material has none, and a plastic study on it is **refused** --
+by the run, before anything is meshed (`fem::HardeningRefusal`), naming the
+material and the ones that have a curve -- never run perfectly plastic,
+which carries no load past yield that the part does carry, nor on a guessed
+slope. Stainless steel (EN 1993-1-4's Ramberg-Osgood model) and the
+aluminium alloys (EN 1999-1-1 Annex E) have published curves that are not
+cited here yet. The printed plastics (PLA, PETG, TPU) get none: their
+datasheets give a yield and a break and nothing between, so a plastic study
+of a printed part is refused with "has no hardening curve".
+
+Past the end of its curve CalculiX holds the stress at the last point. A
+result whose plastic strain passes it (`strain_limit`, the smallest last
+strain of the body's curves) is warned: there it is the data's
+extrapolation, not the material's -- and for steel it is past the 5 %
+limit EN 1993-1-5 C.8 puts on a plated structure anyway.
+
+The study's input hash takes each body's curve when, and only when, the
+study is plastic, so every other study kept its hash when steel gained one.
+
+### Reading the answer
+
+With plastic strain in it, the stress cannot be recomputed from U, as the
+elastic answers' is ([reading the answer back](#reading-the-answer-back),
+the [large-deformation](#large-deformation) Cauchy stress): it depends on
+the path. The deck prints CalculiX's own at every Gauss point of the body,
+each increment (`*EL PRINT, ELSET=EBODY` S, PEEQ: the Cauchy stress, and the
+equivalent plastic strain), and `fem::IntegrationPointFields` carries it to
+the nodes: each tet's four points (ccx's C3D10 rule is our `kTetGauss`,
+point k nearest written corner k, mapped back through a swapped tet's
+corners; ccx prints xz before yz) fitted with the linear field through
+them, read at its corners and midsides, and averaged by element volume as
+the linear recovery is. A tet10's elastic stress is linear, so below yield
+this is the elastic stress of the same U, which `[plasticity]` holds to
+(3.8e-4 of the peak, the rounding of the U read back at seven digits). The
+plastic strain is read the same way, never below 0.
+
+### Unloading
+
+A run that reaches its load takes it off again in one more step
+(`*CLOAD, OP=NEW` and `*DLOAD, OP=NEW`, ramped down over as long as it took
+to put on; supports and contacts stay). The displacement at its end is what
+the yield left: `residual_displacement`, saved with the result. A run whose
+unloading stops converging is refused (the deformation it leaves is not
+known); a snap-through run is not unloaded.
+
+### Collapse
+
+ccx 2.23 has no arc-length method, so the path past a peak is not followed
+([snap-through](#snap-through)). Under load control a part that runs out of
+stiffness stops converging; when its last increment is at least four times
+as compliant as its first, as a [snap-through](#snap-through) run's limit
+point is, a plastic run reports it as its answer rather than refusing it:
+the part **collapsed** at that factor, between it and the smallest
+increment ccx tried beyond (`collapse_bracket`). The fields are of the last
+converged increment, where a mechanism is forming and the plastic strain is
+unbounded. Nothing is unloaded. The study's `factor_of_safety` is then the
+collapse factor, its receipt claims "collapse load factor >= 1" (oracle
+`calculix/nonlinear`, basis predicted). To find a collapse load above the
+working load, load the study past it: the run answers the fraction.
+
+A plastic run that carries its load keeps yield over the peak von Mises as
+its factor of safety (under 1 once it yields, and how far under says how
+far past yield the peak is); `max_plastic_strain` says how much it yielded,
+and is a requirement quantity of `study_result`
+([requirements](../requirements/README.md)).
+
+`converge`: a plastic run's stress is held down by the yield where it
+concentrates, and the plastic strain that concentrates there is not
+refined round: `auto` reports it not checked with that reason, and
+`always` is refused.
+
+Refused, by `set_study`, the panel, the file reader and the run, where
+`nonlinear` is (`fem::NonlinearRefusal`): `in_house`, any analysis but
+static, load cases (a plastic answer depends on its path, not a sum of
+cases), and with `converge: always`; and by the run, a material without a
+hardening curve.
+
+### What a plastic result reports
+
+Per body, `max_plastic_strain`, `max_residual_displacement_mm` (absent on a
+collapse), and in `nonlinear` `plasticity` {`unloaded`, `strain_limit`,
+`collapsed`, `collapse_bracket`?}; `first_yield_factor` is where the path
+first yielded (from ccx's own stress), and is not warned of as an elastic
+run's is. The top level has `max_plastic_strain` and
+`max_residual_displacement_mm` {value, at, body}, and `nonlinear` {kind:
+plasticity, collapse_factor?, collapse_bracket?, body?}. The panel shows
+the peak plastic strain, what is left once unloaded, and a collapse.
+
+### Measured
+
+`tests/test_fem_calculix.cpp` (`[plasticity]`, ccx 2.23):
+
+| case | answer | closed form |
+|---|---|---|
+| a 10 x 10 x 40 steel bar on a frictionless ground, pressed to 300 MPa, 5 mm, 610 nodes, 6 increments, 3.4 s | plastic strain 0.024724 to 0.024748 at every node, von Mises 299.947 to 299.996; unloaded, 0.98946 mm shorter and 0.123683 mm wider | (300 - 250) / H = 0.02475 (-1.1e-3 at the least); L eps_p = 0.99 (-5.5e-4), b eps_p / 2 = 0.12375 (-5.4e-4) |
+| a 6 x 8 x 60 steel cantilever under its yield, 3 mm, 1 313 nodes, 0.7 s | ccx's stress, carried to the nodes, within 3.8e-4 of the peak of the elastic stress of the same U; peak von Mises the same to 1e-5; nothing left once unloaded | the elastic answer |
+| a 10 x 10 x 60 bar, clamped, bent by 1.25 M_p through a head twice its section, the curve stated flat, 3.4 mm, 2 516 nodes, 17.5 s (`[slow]`) | collapses at 0.80803 [0.80803, 0.80804] of it: M = 63 128 N mm, the hinge mid-bar | M_p = f_y b h^2 / 4 = 62 500 N mm (+1.0 %; +0.42 % at 2.5 mm, 6 670 nodes, 70 s) |
+
+The bar is exact but for the weak springs that hold a part on a contact
+alone ([a part held by a contact alone](#a-part-held-by-a-contact-alone)):
+plastic flow shortens it by a millimetre, and the springs carried 1.5e-4 of
+the load there, which near the base is 0.05 MPa of stress and so 2.6e-5 of
+plastic strain on a hardening modulus of 2020 MPa.
+
+The collapse case's closed form is for perfect plasticity, so the test
+states the curve flat on its plan; the library's steel hardens, and at
+small deformation has no collapse. How the moment goes in decides what is
+measured:
+
+- a tip force on a clamped cantilever collapses 13.4 % high at L = 10 h
+  (2.5 mm; 16.7 % at 5 mm) and 6.4 % at 30 h: its moment peaks at the
+  clamp, whose face holds the section from spreading across its width --
+  towards plane strain, whose yield is 2/sqrt(3) = 1.155 times -- so the
+  hinge forms where the moment is lower;
+- a moment put in as the linear traction of pure bending on the bar's own
+  end face collapses at that face, 17 % low: the dead traction there
+  passes f_y from 2/3 M_p on, which no stress field of a perfectly plastic
+  material can carry;
+- the same moment through a head twice the bar's width and depth leaves
+  the bar's middle the weakest place, uniform in moment, and collapses at
+  M_p.
+
 ## Assembly studies
 
 A study on an `AssemblyDocument` names **occurrences**, each in one role
@@ -1851,6 +1998,11 @@ verb that names a study for context (`add_load`, `add_refinement`,
   round trip; `tests/nonlinear_smoke.py` (a column standing on the ground
   over the RPCs), `refused_calls_smoke`, and the GUI's
   `sim/a_contact_rests_a_flat_face_only` ([contact](#contact)).
+- `tests/test_fem_calculix.cpp` (`[plasticity]`): a bar past yield, under
+  its yield the elastic stress, a bar's collapse at M_p (`[slow]`), the
+  refusals and the result's round trip; `tests/nonlinear_smoke.py` (a column
+  pulled past yield over the RPCs, its requirement, PLA refused) and
+  `refused_calls_smoke` ([plasticity](#plasticity)).
 - `tests/test_fem_calculix.cpp` (`[nonlinear]`): the elastica, a shallow
   arch's snap, a seeded column's approach to its linear factor (`[slow]`
   both), a small load against the linear answer, the refusals and the
@@ -1872,10 +2024,14 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 ## Not done
 
-- Plasticity, thermal, fatigue. They come through [CalculiX](#calculix),
-  as [large deformation, snap-through](#nonlinear-static) and
-  [contact](#contact) did, not by growing this solver past linear
+- Thermal, fatigue. Thermal comes through [CalculiX](#calculix), as
+  [large deformation, snap-through](#nonlinear-static), [contact](#contact)
+  and [plasticity](#plasticity) did, not by growing this solver past linear
   ([the plan](../plans/calculix-bridge.md)).
+- Hardening curves for any material but steel ([plasticity](#plasticity)):
+  a plastic study on one is refused until a cited curve is in the library.
+  Kinematic hardening (a part loaded back and forth), and a plastic strain
+  field in the viewport (the panel and the RPCs report its peak).
 - Contact between two contact participants, between a contact participant
   and a rigid occurrence, beside bonded participants, a curved face on the
   ground (it rests on a rigid occurrence instead), and an interference fit
