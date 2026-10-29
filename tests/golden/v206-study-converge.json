@@ -1,6 +1,6 @@
 {
   "format": "designer-document",
-  "version": 205,
+  "version": 206,
   "features": [
     {"type": "Sketch", "name": "Section", "id": 1, "next_entity_id": 2,
      "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},

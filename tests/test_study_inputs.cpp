@@ -157,7 +157,7 @@ TEST_CASE("An FEM run's input hash moves with every input",
   bar->doc.Regenerate();
   REQUIRE(Key(*bar) == base);
 
-  // How a run checks its peak has settled (vNEXT): the study's mode, a
+  // How a run checks its peak has settled (v206): the study's mode, a
   // run's override of it, and the layer normal the check reads.
   StudyOf(*bar).converge = fem::ConvergeMode::Never;
   const uint64_t never = Key(*bar);
@@ -327,7 +327,7 @@ TEST_CASE("A study result of each kind reopens current, its part hashing as "
     if (type == fem::AnalysisType::Static)
       CHECK_FALSE(a.results.reactions.empty());
     // Which support's edge each node lies near, and the convergence check
-    // (vNEXT).
+    // (v206).
     CHECK(b.supportEdgeZone == a.supportEdgeZone);
     REQUIRE(b.edgeOwners.size() == a.edgeOwners.size());
     for (size_t k = 0; k < a.edgeOwners.size(); ++k) {

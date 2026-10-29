@@ -97,7 +97,7 @@ json StudyToJson(const fem::Study& s) {
   j["mesh_size"] = s.meshSize;
   if (!s.meshSizeExpr.empty())
     j["mesh_size_expr"] = s.meshSizeExpr;
-  // Whether a run checks its peak has settled (vNEXT): absent at the
+  // Whether a run checks its peak has settled (v206): absent at the
   // default, auto, so earlier files re-save byte-identically.
   if (s.converge != fem::ConvergeMode::Auto)
     j["converge"] = fem::ConvergeModeToString(s.converge);
@@ -355,7 +355,7 @@ fem::Study StudyFromJson(const json& j) {
   }
   s.meshSize = j.value("mesh_size", 0.0);
   s.meshSizeExpr = j.value("mesh_size_expr", std::string{});
-  if (j.contains("converge")) { // vNEXT
+  if (j.contains("converge")) { // v206
     const std::string c = j.at("converge").get<std::string>();
     if (!fem::ConvergeModeFromString(c, s.converge))
       throw std::runtime_error("study converge '" + c +
@@ -850,7 +850,7 @@ void CheckBody(const fem::StudyBodyResult& b, const std::string& what) {
 
 namespace {
 
-// A static run's convergence check (vNEXT), saved with its result.
+// A static run's convergence check (v206), saved with its result.
 json ConvergenceToJson(const fem::Convergence& c) {
   json out = {{"checked", c.checked}};
   if (!c.why.empty())
@@ -1021,7 +1021,7 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
       bj["tet_domain"] = w.Index(b.mesh.tetDomain);
     if (b.mesh.stats.worstQuality != 0.0)
       bj["worst_quality"] = b.mesh.stats.worstQuality;
-    // vNEXT: which support's edge each node lies near, one past its index
+    // v206: which support's edge each node lies near, one past its index
     // (0 = none), so a field read later is flagged as von Mises was.
     if (b.supportEdgeZone.size() == b.mesh.nodes.size() &&
         !b.supportEdgeZone.empty()) {
@@ -1086,7 +1086,7 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
                                "' (a saved result names only a CalculiX "
                                "solve, as 'calculix 2.NN')");
   }
-  if (j.contains("convergence")) // vNEXT
+  if (j.contains("convergence")) // v206
     rt.convergence = ConvergenceFromJson(j.at("convergence"));
   if (j.contains("maxima")) {
     const json& m = j.at("maxima");
@@ -1159,7 +1159,7 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     b.mesh.stats.worstQuality = bj.value("worst_quality", 0.0);
     if (bj.contains("density"))
       b.density = f.Reals(bj.at("density"), "density");
-    if (bj.contains("support_edge_zone")) { // vNEXT
+    if (bj.contains("support_edge_zone")) { // v206
       b.supportEdgeZone =
           f.Indices(bj.at("support_edge_zone"), "support_edge_zone");
       if (b.supportEdgeZone.size() != b.mesh.nodes.size())

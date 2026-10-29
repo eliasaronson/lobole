@@ -411,7 +411,7 @@ struct StudyBodyResult {
   // two filled) whose edge the node lies near, else -1 (SupportEdgeZones),
   // so any field read later -- the stress across layers along a direction
   // given then -- is flagged the way von Mises was. Empty on a result saved
-  // before vNEXT.
+  // before v206.
   std::vector<int> supportEdgeZone;
   std::vector<FemResults::SupportReaction> edgeOwners;
   // The results of case `k` (the only ones when there are no cases).

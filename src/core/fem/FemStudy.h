@@ -278,7 +278,7 @@ struct Study {
   // Static only: mesh a topology result instead of the body.
   ShapeSource shapeFrom;
 
-  // Static only: whether a run checks its peak has settled (vNEXT).
+  // Static only: whether a run checks its peak has settled (v206).
   ConvergeMode converge = ConvergeMode::Auto;
 
   // Transient: the most recent mesh/solve error (dangling ref, no fixed

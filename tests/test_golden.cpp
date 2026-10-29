@@ -1093,7 +1093,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(1).get<std::string>());
     }
   }
-  // vNEXT: a static study's `converge`. It changes no volume, and a mode
+  // v206: a static study's `converge`. It changes no volume, and a mode
   // dropped on load would quietly run the check the file turned off (or
   // skip one it asked for); each [study name, converge] must hold, the
   // default included.
