@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "app/guitests/GuiTestsCommon.h"
+#include "common/ChildProcess.h"
 #include "core/sketch/SketchOrientation.h"
 #include "render/UnderlayRenderer.h"
 #include "ui/BackgroundJobs.h"
@@ -2838,7 +2839,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     // STL: the size a phone scan arrives at.
     const auto stl =
         std::filesystem::temp_directory_path() /
-        ("lobole_gui_2m_mesh_" + std::to_string(getpid()) + ".stl");
+        ("lobole_gui_2m_mesh_" + std::to_string(proc::CurrentPid()) + ".stl");
     const int rings = 710, segs = 2 * rings;
     const double r = 40.0;
     {
