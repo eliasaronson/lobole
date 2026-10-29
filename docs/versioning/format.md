@@ -331,6 +331,7 @@ here; the golden corpus and git history cover them.
 | 202 | A static result's `reactions` carry `moment_n_mm` [x, y, z]: each support's moment about the frame's origin (the part's; world on an assembly study), N·mm. A pin over a band of its face takes moment along it, which its force alone does not show ([pin supports](../simulation/README.md#pin-supports)). A result saved before reads without it, and `study_results` then leaves it out. Golden `v202-pin-reaction-moment` (a shaft on two pins with an overhung load; results are not in the single-file corpus, so their round trip is `tests/test_study_inputs.cpp`'s) |
 | 203 | A drawing view of an assembly takes `exploded_view`: the id of one of its source's exploded views, every occurrence drawn moved by its step at full factor. Absent = as assembled, how every older view reads; 0, a fraction or a negative number is refused. Golden `drawing/v203-exploded-view` |
 | 204 | A study takes `solver`: `auto` (absent, how every older study reads), `in_house` or `calculix`; `calculix` solves a static study on CalculiX, and on a modal or topology study it is refused, as is a name that is none of the three. A CalculiX result carries `solver` ("calculix 2.NN"); an in-house one writes none ([CalculiX](../simulation/README.md#calculix)). Golden `v204-calculix-solver` (results are not in the single-file corpus, so their round trip is `tests/test_fem_calculix.cpp`'s) |
+| 205 | An `Import`'s `representation` takes `mesh` (a [mesh body](../interchange/README.md#mesh-bodies): the triangles kept as they are) and `auto` (recognise a mechanical mesh, keep an organic one or one past the recognition limit a mesh body, decided on each read), on an STL or an OBJ; `min_sides` applies with `auto` too. Unknown values are refused, naming the four. Baked geometry is format 7: a mesh body is `geometry/N.mesh`, named by `mesh` in the index. Golden `v205-import-mesh` |
 
 ## Pending changes
 
@@ -340,7 +341,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | An `Import`'s `representation` takes `mesh` (a [mesh body](../interchange/README.md#mesh-bodies): the triangles kept as they are) and `auto` (recognise a mechanical mesh, keep an organic one or one past the recognition limit a mesh body, decided on each read), on an STL or an OBJ; `min_sides` applies with `auto` too. Unknown values are refused, naming the four. Baked geometry is format 7: a mesh body is `geometry/N.mesh`, named by `mesh` in the index. Golden `vNEXT-import-mesh` |
 
 ## Paths in a project
 

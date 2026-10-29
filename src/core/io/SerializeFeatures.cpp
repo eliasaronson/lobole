@@ -3241,7 +3241,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             std::to_string(mesh::kMinSidesLowest) + " to " +
             std::to_string(mesh::kMinSidesHighest) + "; got " + m.dump());
       if (imp->representation != mesh::Representation::Recognize &&
-          imp->representation != mesh::Representation::Auto) // vNEXT
+          imp->representation != mesh::Representation::Auto) // v205
         throw std::runtime_error(
             "Import: min_sides is for representation: recognize or auto");
       imp->minSides = m.get<int>();

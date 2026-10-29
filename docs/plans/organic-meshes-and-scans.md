@@ -521,7 +521,7 @@ often the better part than a cradle, because it stays fully parametric.
 - A refused call changes nothing (`refused_calls_smoke`).
 
 **Goldens and readers**
-- Every `vNEXT` golden.
+- Every `v205` golden.
 - The reader fuzz over PLY and GLB.
 
 **The job**
