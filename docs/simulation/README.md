@@ -1,7 +1,8 @@
 # Simulation (FEM)
 
-Linear structural analysis of parts and assemblies: static stress and
-displacement, and natural frequencies. Topology optimization is the third
+Structural analysis of parts and assemblies: static stress and
+displacement, natural frequencies and linear buckling, and on CalculiX
+large deformation and snap-through ([nonlinear static](#nonlinear-static)). Topology optimization is the third
 kind of study and has its own page, [../topopt/README.md](../topopt/README.md).
 
 ## The model
@@ -789,7 +790,8 @@ The receipt's claim is "governing buckling factor >= 1", basis `predicted`,
 oracle `in_house/buckle` (`calculix/buckle` on CalculiX). Its note says that
 linear buckling is an upper bound the knockdown and the interaction correct,
 and that snap-through -- an arch or a curved wall loaded across its curve --
-needs a nonlinear run (the plan's Stage 4, [calculix-bridge](../plans/calculix-bridge.md)).
+needs a nonlinear run: a static study with `nonlinear {large_deformation:
+true, snap_through: true}` ([nonlinear static](#nonlinear-static)).
 
 ### Solver choice
 
@@ -1050,14 +1052,17 @@ A static study can be solved on CalculiX (`ccx`) instead of in-house:
 same study -- the same Netgen mesh, loads, supports and materials, the same
 results and checks -- answered by a second, independent program. The code is
 `src/core/fem/Calculix.{h,cpp}`. A [buckling](#buckling) study solves there
-too, as its cross-check. Nonlinear analysis is what the bridge was built for
-and is not built yet ([the plan](../plans/calculix-bridge.md)).
+too, as its cross-check, and a static study solved past linear -- large
+deformation, snap-through -- solves only there
+([nonlinear static](#nonlinear-static)). Contact, plasticity and thermal
+are what is left ([the plan](../plans/calculix-bridge.md)).
 
 ### The solver choice
 
 A study's `solver` is `auto`, `in_house` or `calculix` (`fem::Solver`;
 absent from the file when `auto`, v204). `auto` and `in_house` solve every
-analysis in-house. `calculix` solves a **static** or **buckling** study only:
+linear analysis in-house; a [nonlinear](#nonlinear-static) study on `auto`
+solves on CalculiX (`fem::EffectiveSolver`), and on `in_house` is refused. `calculix` solves a **static** or **buckling** study only:
 on a modal or topology study it is refused (`fem::SolverRefusal`) by
 `set_study`, by the panel, by the file reader and by the run, never quietly
 solved in-house. The
@@ -1218,6 +1223,193 @@ drives it over the RPCs alone, gated on `ping`'s `features.calculix`, and runs
 ccx on the exported deck; `refused_calls_smoke` holds the refusals to
 changing nothing.
 
+## Nonlinear static
+
+A part that bends a long way, or a curved wall loaded across its curve, is
+not answered by a linear study: the first stiffens or softens as it moves,
+and the second snaps through below its linear buckling factor, which linear
+buckling cannot see. A static study takes `nonlinear` (`fem::Nonlinear`,
+`src/core/fem/FemStudy.h`) and is then solved on [CalculiX](#calculix)
+(`fem::NonlinearOnCalculix`, `src/core/fem/Calculix.cpp`); `auto` picks it
+and `in_house` is refused, since the in-house solver is linear.
+
+`set_study {nonlinear: {large_deformation: true, increments?, snap_through?,
+imperfection_mm?, deflection_limit_mm?}}` (null for linear); the panel has
+**Large deformation** and **Snap-through (peak load)** checkboxes under
+**Converge peak**. Refused, by `set_study`, the panel, the file reader and
+the run (`fem::NonlinearRefusal`): without `large_deformation: true`, on any
+analysis but static, with `solver: in_house`, with load cases (a nonlinear
+answer is not a sum of cases, and a snap-through run scales one load set),
+an unknown key, `increments` under 1, a seed or limit without
+`snap_through`, a negative seed, a limit that is not positive, and
+`converge: always` on a snap-through run.
+
+### Large deformation
+
+`*STEP, NLGEOM` and `*STATIC`, the load stepped up from 0 to the study's,
+the step's largest increment its load over `increments` (default 10;
+`fem::kNonlinearIncrements`). Each increment is solved on the part as it has
+deformed. The loads (`WriteDeck` with `DeckNonlinear`):
+
+- a **force** and **gravity** keep their direction (dead loads): the nodal
+  forces the in-house solve applies, as `*CLOAD`, scaled by the step;
+- a **pressure** follows its face as it turns: `*DLOAD P<n>` on each
+  loaded facet's tet face (a boundary tri6 maps to the face S1-S4 of the
+  tet that has its corners, in the order the deck writes them);
+- a **torque** or **remote** load is a reference node at its axis origin or
+  point carrying the force and moment its in-house traction sums to (so
+  the two are statically the same), spread over its face by
+  `*COUPLING`/`*DISTRIBUTING`;
+- a **pin** is held where the in-house solve of the same load presses on
+  it, as a [buckling](#buckling) study holds it, and the notes say so.
+
+The answer's stress is the Cauchy stress of the deformed part
+(`fem::LargeDeformationFields`): the Green-Lagrange strain from U through
+the St Venant-Kirchhoff law ccx's linear elastic material is under NLGEOM,
+pushed forward, averaged to the nodes as the linear recovery is. The factor
+of safety is yield over its peak, with the receipt saying it was a
+large-deformation solve.
+
+A run that stops converging before its load (ccx's "increment size smaller
+than minimum", or "solution seems to diverge") is **refused** with the
+fraction of the load it reached, ccx's words, and the hint that the part
+may lose its stiffness there (a snap-through run reports that peak) or the
+load steps too far; nothing is stored. A converged increment that **jumps**
+to another branch -- far more compliant than the increment before and the
+one after, kSnapJumpRatio (4) times each -- is a snap on the way: the run
+goes on to its load, and the result carries `snapped` {from_factor,
+to_factor} and a warning that the fields are of the branch it landed on.
+
+### Snap-through
+
+`snap_through: true` asks for the load factor the part stops carrying more
+at. The run:
+
+1. solves the study's load linearly and its first [buckling](#buckling)
+   mode in-house (the buckling memory estimate refuses one that will not
+   fit), and refuses a load that buckles nothing, which has no mode to seed;
+2. seeds the shape with that mode scaled to `imperfection_mm`, by default
+   a tenth of the wall the mode bends (`wall_mm`, measured as the knockdown
+   measures it; a thousandth of the part's size where none is measured). A
+   stated 0 is the perfect shape;
+3. steps every load up together, under load control, to a cap of twice the
+   linear factor, stopping at the first of:
+   - **limit_point**: the solve stops converging where the part's
+     stiffness has run out (the last increment's compliance at least four
+     times the first's -- otherwise it is refused as non-convergence). The
+     peak lies between the last converged factor and that plus the
+     smallest increment ccx tried (1e-5 of the cap at the least);
+   - **snap**: a converged increment jumped to another branch, as above;
+   - **deflection_limit**: the motion passed `deflection_limit_mm`, by
+     default a tenth of the part's bounding-box diagonal. An elastic column
+     does not peak -- its load rises slowly past the Euler load on the
+     elastica -- so for a stable path this is the answer: the factor at
+     which the part has moved that far, interpolated.
+4. A snap or a deflection limit is bracketed again: the run repeats with
+   that increment cut in ten and goes on past it to the cap, so a candidate
+   the finer increments do not bear out lets the run continue (at most four
+   ccx runs). The cap reached with none of these is `peak_at: none` with the
+   reason.
+
+ccx 2.23 has **no arc-length method**: `*STATIC, RIKS` is read as a plain
+`*STATIC` with "parameter not recognized", so the path past a peak is not
+followed. Load control past a limit point either stops converging (the
+limit point) or converges on the far branch in one increment (the snap,
+which is why the jump test exists: a shallow arch at eps 3 jumped its crown
+from 1.7 to 6.5 mm in one increment, past its limit, and converged).
+
+The result's `nonlinear` per body: `linear_factor`, `imperfection_mm`,
+`deflection_limit_mm`, `max_factor`, `peak_at`, `peak_factor`,
+`peak_bracket`, and `first_yield_factor` (the factor the peak von Mises
+first reaches yield at on the path, each increment's Cauchy stress against
+the weakest material at the node). The study's `factor_of_safety` is the
+governing factor, the peak or the first yield when that comes first, and
+its receipt claims "peak load factor >= 1", oracle `calculix/nonlinear`,
+basis `predicted`. Its fields are of the increment at the peak.
+
+`converge` (a peak that has settled): a large-deformation study refines
+round its stress peak as a static one does, a ccx run a step. A
+snap-through run's answer is a load factor, which refining round a stress
+peak does not settle: `auto` reports it not checked with that reason, and
+`always` is refused.
+
+### The run
+
+- **Progress.** The watcher reads the `.sta` every 200 ms; the load reached
+  over the load the run goes to is `study_status`'s `load_fraction` and
+  the job's bar.
+- **Increments.** Each increment's U and the supports' RF are read from
+  the `.dat` as ccx writes them (it flushes per increment), a whole block
+  at a time; a run is stopped (killed) as soon as an event says it has
+  what it needs.
+- **Equilibrium.** ccx's residual criterion is tightened from its 0.5 % of
+  the mean force to `kNonlinearResidual` (1e-6: on a shallow arch to its
+  snap that took 98 Newton iterations where the default took 103). At the
+  factor reported the supports' total reaction is checked against the load
+  applied there -- the dead loads scaled, a pressure integrated on the
+  deformed faces, each reference node's force: `equilibrium` {residual_criterion,
+  imbalance, tolerance}, the imbalance over the load carried. Past
+  `kNonlinearBalance` (1e-3) the answer is refused as a deck that differs
+  from its study. Measured imbalances are 1e-9 to 1e-8.
+- **Memory.** Refused as a static run is, before ccx starts, naming both
+  numbers (`fem::CalculixNonlinearMemoryEstimate`): a tenth over the static
+  estimate. Measured on the 10 x 10 x 200 column's large-deformation deck
+  (a 2 kN sideways pull, ten increments; the hidden
+  `[calculix-nl-calibrate]` case), the nonlinear peak is 1.02-1.10 times
+  the linear one, which the static estimate bounds by as little as 7 %:
+
+  | mesh | DOF | ccx peak | estimate | ccx time |
+  |---|---|---|---|---|
+  | 5 mm | 5 658 | 58 MB | 74 MB | 4.1 s |
+  | 3.5 mm | 16 029 | 68 MB | 114 MB | 16.8 s |
+  | 2.5 mm | 30 321 | 124 MB | 183 MB | 40 s |
+  | 1.8 mm | 65 577 | 290 MB | 394 MB | 109 s |
+  | 1.4 mm | 196 821 | 1.24 GB | 1.45 GB | 667 s |
+  | 1.2 mm | 240 717 | 1.55 GB | 1.87 GB | 921 s |
+
+  Time is what grows: ten increments of a few Newton iterations each, a
+  SPOOLES factor every iteration on one core, cost 20 to 46 times the
+  linear run's.
+- `export_study_inp` writes a large-deformation study's deck; a
+  snap-through one's is refused, since its seed and cap are found when it
+  runs.
+
+A tet whose curved midside nodes turn its Jacobian negative (Netgen's
+sliver with all four corners on a cylinder's surface, seen on a 12 mm shaft
+at 3 mm) is refused by ccx, linear or not ("nonpositive jacobian"), where
+the in-house solver integrates |det J| and does not notice; another mesh
+size meshes it without one.
+
+### Measured
+
+`tests/test_fem_calculix.cpp` (`[nonlinear]`, ccx 2.23):
+
+| case | answer | closed form |
+|---|---|---|
+| the elastica: a 5 x 5 x 100 steel cantilever, a dead tip load at PL²/EI = 1, 2.5 mm, 1 911 nodes, 10 increments, 5 s | tip 0.30089 L along the load, 0.05619 L back | Bisshopp-Drucker 0.30172 (-0.27 %), 0.05643 (-0.44 %); linear 1/3 |
+| a shallow circular arch between pins, 200 x 4 x 4 mm, eps 4 (rise 4.475), a uniform pressure on its crown, 4 mm, 7 484 nodes, 146 s (`[slow]`) | limit point at 0.47088 [0.47088, 0.47094] | shallow-arch theory's 0.47115 (-0.06 %); linear buckling 1.0316 |
+| a 10 x 10 x 200 column, 1 kN, seeded 1 mm, 5 mm, 1 911 nodes, 15 s (`[slow]`) | deflection limit (20 mm) at 9.836, 4.48 % below | linear 10.297; Southwell's 1 - a/delta: 5 % |
+| the same, seeded 0.1 mm, 20 s | 10.275, 0.21 % below | 0.5 % |
+| a shaft under a torque, a remote load and a pressure, a thousandth of a working load, 3 854 nodes | 9.5e-5 of the peak motion from the linear in-house answer; von Mises 5e-6 | the linear answer |
+
+The arch's closed form is Timoshenko and Gere's (sec. 7.6) for a sinusoidal
+pin-ended arch, its first harmonic: a circle of rise e is the sine of rise
+32e/pi³, a uniform load q its harmonic 4q/pi, and with r = h/sqrt(12) and
+eps = e1/r the limit is at xi² = (eps² - 4)/3, symmetric below
+eps = sqrt(22). The arch's linear stiffness is 4.5 % under that theory's
+(the pins' bearing compliance, measured at 8 mm wide), so a closer match
+than that is partly luck; the test holds it to 5 %. The arch snaps at 46 %
+of its linear buckling factor.
+
+Tests: those, plus the refusals (each `NonlinearRefusal` case; a run with a
+stand-in ccx that converges 40 % of the load and stops, refused with that
+fraction and nothing stored), the result's round trip, and the memory
+calibration (hidden, `[calculix-nl-calibrate]`); `tests/nonlinear_smoke.py`
+over the RPCs (a column's large-deformation deck and run with its progress,
+then its snap-through peak below the linear factor and its receipt);
+`refused_calls_smoke` (in-house, an unknown key, no large_deformation,
+modal, load cases, converge always on a snap, a run that stops converging).
+
 ## Assembly studies
 
 A study on an `AssemblyDocument` names **occurrences**, each in one role
@@ -1372,15 +1564,15 @@ verb that names a study for context (`add_load`, `add_refinement`,
 |---|---|
 | `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants`, `load_cases`, `shape_from`, and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants`, `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
-| `run_study {id, async?, recompute?, outlive_client?, timeout_s?, converge?, layer_normal?}` | mesh + solve, and on a static study settle its peak ([a peak that has settled](#a-peak-that-has-settled)): `converge` overrides the study's for this run, `layer_normal` is the build direction whose across-layers peak a printed part's check settles; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)) |
-| `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static study would run, meshed now, no ccx needed ([the deck](#the-deck)) |
-| `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)) |
+| `run_study {id, async?, recompute?, outlive_client?, timeout_s?, converge?, layer_normal?}` | mesh + solve, and on a static study settle its peak ([a peak that has settled](#a-peak-that-has-settled)): `converge` overrides the study's for this run, `layer_normal` is the build direction whose across-layers peak a printed part's check settles; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)); a nonlinear run that stops converging is refused with the load it reached ([nonlinear static](#nonlinear-static)) |
+| `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static study would run, meshed now, no ccx needed ([the deck](#the-deck)); a large-deformation study's NLGEOM deck, a snap-through one's refused ([nonlinear static](#nonlinear-static)) |
+| `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended -- a nonlinear run's `load_fraction` ([the run](#the-run)); cancel stops it |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)) |
 | `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows |
@@ -1433,6 +1625,11 @@ verb that names a study for context (`add_load`, `add_refinement`,
   pull that buckles nothing, the refusals, the saved result's round trip,
   and the 217k-DOF cost check (`[slow]`); `tests/buckling_smoke.py` over
   the RPCs ([buckling](#buckling)).
+- `tests/test_fem_calculix.cpp` (`[nonlinear]`): the elastica, a shallow
+  arch's snap, a seeded column's approach to its linear factor (`[slow]`
+  both), a small load against the linear answer, the refusals and the
+  result's round trip; `tests/nonlinear_smoke.py` over the RPCs
+  ([nonlinear static](#nonlinear-static)).
 - `tests/fem_smoke.py`, `tests/fem_async_smoke.py`: the RPC surface
   headless, including an assembly tab; the async one also a reused run, a
   job's status by id and a cancel by id. Both skip (exit 77) on a build without
@@ -1450,11 +1647,13 @@ verb that names a study for context (`add_load`, `add_refinement`,
 ## Not done
 
 - Contact that can separate or slide between parts (a pin against its
-  rigid pin is the one compression-only contact), and nonlinear analysis
-  (plasticity, large deformation, snap-through and post-buckling), thermal,
-  fatigue. They come through
-  [CalculiX](#calculix), not by growing this solver past linear
-  ([the plan](../plans/calculix-bridge.md)).
+  rigid pin is the one compression-only contact), plasticity, thermal,
+  fatigue. They come through [CalculiX](#calculix), as
+  [large deformation and snap-through](#nonlinear-static) did, not by
+  growing this solver past linear ([the plan](../plans/calculix-bridge.md)).
+- The path past a peak: ccx 2.23 has no arc-length method (`*STATIC, RIKS`
+  is read as a plain `*STATIC`, with a warning), so a snap-through run
+  reports the peak and not the branch after it.
 - Free-free modal analysis (a modal study needs a support).
 - Shell and beam elements; adaptive refinement over the whole field (the
   convergence check refines only the faces its peaks lie on).

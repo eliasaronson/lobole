@@ -22,11 +22,14 @@ The bridge itself is built: a static study solves on CalculiX as a second,
 independent answer, through the study API, with discovery, the deck, the run
 directory, the refusals and the residual check
 ([docs/simulation/README.md#calculix](../simulation/README.md#calculix)).
-What is left is what it was built for: the nonlinear analyses we do not
-have, as options on `static`, solved on CalculiX through that bridge. Linear
-buckling is solved in-house, with CalculiX's `*BUCKLE` as its cross-check
-([docs/simulation/README.md#buckling](../simulation/README.md#buckling)).
-Nothing falls back to the in-house solver or to another analysis.
+Linear buckling is solved in-house, with CalculiX's `*BUCKLE` as its
+cross-check ([docs/simulation/README.md#buckling](../simulation/README.md#buckling)),
+and large deformation and snap-through are `static`'s `nonlinear` option on
+CalculiX
+([docs/simulation/README.md#nonlinear-static](../simulation/README.md#nonlinear-static)).
+What is left is shipping the binary, then contact, plasticity and thermal,
+each a `nonlinear` key on the same path. Nothing falls back to the in-house
+solver or to another analysis.
 
 ## What was measured
 
@@ -81,65 +84,21 @@ existing build and the nixpkgs ccx, with no code changes.
 
 ## The shape of the fix
 
-Linear buckling is solved in-house
-([docs/simulation/README.md#buckling](../simulation/README.md#buckling)), with
-CalculiX as its test oracle and as an optional second answer. What is left
-here is the nonlinear analyses, which stay CalculiX's.
-
-### Study options and solver choice
-
-- `static` gains `nonlinear: {...}` options (Stage 4 on). `auto` becomes
-  CalculiX for any study that sets one, and `fem::SolverRefusal` gains the
-  refusal of `in_house` on a nonlinear option.
-- A nonlinear option's input key carries it, through the serialized study, as
-  `solver` does.
-
-### Running it
-
-The job, the run directory, threads, cancel, `timeout_s`, the memory refusal
-and ccx's `*ERROR` lines are built (docs/simulation/README.md#calculix). Left:
-- **Progress.** A nonlinear step's fraction is its step time, read from `.sta`
-  as each increment lands.
-- **Memory.** A nonlinear run's per-DOF cost is calibrated from the Stage 4
-  cost test, and it refuses as a static run's does.
-- **Non-convergence.** A nonlinear run that stops converging is refused with
-  the load fraction it reached. That fraction is information, not a result, so
-  nothing is stored.
-
-### Results
-
-- U, S (Cauchy stress at the final increment) and, for plasticity, PE are read
-  from the `.frd`. ccx's equilibrium tolerance is its own (`*CONTROLS`, default
-  0.5 % of the mean force), not ours. So the deck tightens it, and the result
-  states the criterion it met and checks that the reactions balance the
-  applied load to that tolerance.
-- The field renderer, deformed shape and result display are unchanged.
-
-### Format
-
-Each stage adds its keys under its own `vNEXT`.
+Each remaining analysis is a key of `static`'s `nonlinear` object, solved by
+`fem::NonlinearOnCalculix` as large deformation is: the deck from the
+study's own mesh, the run watched through the `.dat` and `.sta`, the
+non-convergence refusal with the load reached, and the equilibrium check.
+`in_house` with any of them is refused, as `nonlinear` is now. Each stage
+adds its keys under its own `vNEXT`.
 
 ## Stages
 
-Each stage is useful alone and lands with its docs. Stage 1 (discovery, the
-deck, linear static on CalculiX) is built, and linear buckling with it
-(in-house, `*BUCKLE` its cross-check), and so is shipping ccx in the
-packages ([docs/packaging/README.md#the-bundled-calculix](../packaging/README.md#the-bundled-calculix)).
+Each stage is useful alone and lands with its docs. Stages 1 (discovery, the
+deck, linear static on CalculiX), 3 (shipping ccx in the packages,
+[docs/packaging/README.md#the-bundled-calculix](../packaging/README.md#the-bundled-calculix))
+and 4 (large deformation, snap-through) are built, and linear buckling with
+them (in-house, `*BUCKLE` its cross-check).
 
-**Stage 4: nonlinear static, large deformation**, ~1 000 lines.
-- `static` gains `nonlinear: {large_deformation: true, increments?}`, which maps to `NLGEOM` and `INC`.
-- Loads:
-  - pressure becomes a follower `*DLOAD P` on element faces. A boundary tri6 maps to its tet's face S1–S4, which needs a face map;
-  - a remote load or torque becomes `*COUPLING`/`*DISTRIBUTING` on a reference node;
-  - a force stays a dead load, and the docs say so.
-- **Snap-through and post-buckling.** An option seeds the geometry with the
-  first buckling mode
-  ([docs/simulation/README.md#buckling](../simulation/README.md#buckling))
-  scaled to a stated
-  imperfection, and steps with `*STATIC, RIKS`. The result reports the peak
-  load factor it reached: the answer for an arch or a curved wall loaded
-  across its curve, which linear buckling cannot see.
-- Supporting work: progress from `.sta`, the non-convergence refusal, and the equilibrium check.
 
 **Stage 5: contact**, ~1 500 lines.
 - A compression-only support against a rigid occurrence or the ground: the partner is meshed coarse and fixed, with `*CONTACT PAIR`.
@@ -148,6 +107,10 @@ packages ([docs/packaging/README.md#the-bundled-calculix](../packaging/README.md
 
 **Stage 6: plasticity**, ~800 lines.
 - `nonlinear.plasticity: true`, with `*PLASTIC` from the material library.
+  The path past a peak is not followed (ccx 2.23 has no arc-length method:
+  `*STATIC, RIKS` is read as a plain `*STATIC` with a warning), so a
+  collapse load is the factor the load-controlled run stops at, as a
+  snap-through run's limit point is.
 - Metals gain hardening data. A material without it is refused rather than assumed perfectly plastic.
 - Results: `max_plastic_strain`, a requirement quantity of the same name, and the residual deformation from an unload step.
 
@@ -156,17 +119,12 @@ packages ([docs/packaging/README.md#the-bundled-calculix](../packaging/README.md
 ## Verification
 
 **Closed forms, through `run_study`, tagged `[calculix]`:**
-- **Stage 4.**
-  - The elastica: a cantilever's end deflection at PL²/EI = 1 against the
-    Bisshopp–Drucker solution.
-  - A shallow arch's snap-through load against its closed form.
-  - A column seeded with its first mode reaches a peak load factor below its
-    linear one and approaching it as the imperfection shrinks.
 - **Stage 5.** Hertz contact width for a sphere on a block; a block lifting off a rigid floor under a moment.
 - **Stage 6.** A bar past yield (uniform, exact), and a rectangular beam's collapse load M_p = σ_y b h²/4.
 
 **Refusals, in `refused_calls_smoke` and `tests/test_fem_calculix.cpp`:**
-`in_house` on a nonlinear option; non-convergence.
+each new key refused where `nonlinear` already is (in-house, another
+analysis, load cases), and a material without hardening data (Stage 6).
 
 **Docs:**
 - docs/simulation/README.md's "CalculiX" section gains each stage, and "Not done" loses it.
@@ -174,8 +132,8 @@ packages ([docs/packaging/README.md#the-bundled-calculix](../packaging/README.md
 
 ## Files
 
-- `src/core/fem/Calculix.{h,cpp}`: the nonlinear deck keys, `.sta` progress, reading S and PE; `tests/test_fem_calculix.cpp`.
-- `src/core/fem/FemStudy.{h,cpp}`: the options, their refusals, the solve branch.
+- `src/core/fem/Calculix.{h,cpp}`: the contact, plastic and thermal deck keys, reading PE; `tests/test_fem_calculix.cpp`.
+- `src/core/fem/FemStudy.{h,cpp}`: the `nonlinear` keys and their refusals.
 - `src/core/io/SerializeStudies.cpp`, `src/core/io/SerializationInternal.h`, `docs/versioning/format.md`, a golden per stage.
 - `src/remote/RemoteSimulation.cpp`: rows and handlers.
 - `src/core/Requirements.cpp`, `src/remote/RemoteRequirements.cpp` (Stage 6's quantity).
