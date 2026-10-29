@@ -123,6 +123,12 @@ them:
 
 - **FEM:** thermal, buckling and nonlinear studies; modal analysis without
   supports (free-free); VTU export of results.
+- **Buckling on a topology result:** a buckling study whose shape comes from
+  a topology study (`shape_from`, as a static study's can), so an optimised
+  shape's slender struts are checked. Buckling as a constraint inside the
+  optimiser is a larger step: spurious modes in near-void elements, repeated
+  eigenvalues and an adjoint per mode. Sized only if the check-and-rerun loop
+  proves too blunt.
 - **Tolerances:** an inferred stack-up chain (`stack_up` sums a chain the
   caller states), and general-tolerance tables (ISO 2768).
 - **Beam elements** for tube frames: `check_frame` checks the member graph,
