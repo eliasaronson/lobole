@@ -59,8 +59,8 @@ from _lib import _run_static  # noqa: E402
 
 X = [1.0, 0.0, 0.0]
 STATICS_TOL = 0.01
-# How a static study settles its peak (docs/simulation/README.md#a-peak-
-# that-has-settled): None leaves each study's own (`auto`); build.py's
+# How a static study settles its peak
+# (docs/simulation/README.md#a-peak-that-has-settled): None leaves each study's own (`auto`); build.py's
 # --converge sets it, and --fem-timeout bounds each study's run.
 CONVERGE = None
 TIMEOUT_S = 900.0
