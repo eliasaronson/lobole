@@ -342,6 +342,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A study's `analysis` may be `buckling` ([buckling](../simulation/README.md#buckling)): `num_modes` is then its number of factors (written always; 3 when absent), `converge` and pin supports are taken as on a static study, and `load_cases` are refused. A saved buckling result has `kind: "buckling"`; its body's `results` are the base state with `modes` that each carry their load `factor`, and the body gains `buckling` {`buckling_factor` (null when nothing buckles, with `why_none`), `knockdown`, `class`, `face`, `radius_mm`, `wall_mm`, `yield_factor`, `interlayer_factor`, `governing_factor`, `wall_layers`, `mode_at_load_edge`}. Golden `vNEXT-buckling-study` (three buckling studies: a number of factors given, defaulted, and with CalculiX; results are not in the single-file corpus, so their round trip is `tests/test_fem_buckling.cpp`'s) |
 
 ## Paths in a project
 

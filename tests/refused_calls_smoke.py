@@ -568,6 +568,16 @@ def main():
             d.call("set_settings", calculix_path="")
             d.call("remove_study", id=modal)
             d.call("remove_study", id=static)
+            # Buckling (docs/simulation/README.md#buckling): a factor scales
+            # one load set.
+            buck = d.call("add_study", name="Buckle", type="buckling")["id"]
+            check("load cases on a buckling study", "set_study",
+                  {"id": buck, "load_cases": [{"name": "a"}]},
+                  needle="takes no load cases", tab=part["name"])
+            check("an analysis that is none", "add_study",
+                  {"type": "bucking"},
+                  needle="static, modal, topology, buckling", tab=part["name"])
+            d.call("remove_study", id=buck)
 
             if problems:
                 print("refused_calls_smoke: FAILED")

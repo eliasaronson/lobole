@@ -98,14 +98,16 @@ bool NodalForces(const FemMesh& mesh, const std::vector<Material>& byDomain,
 // held directions as *BOUNDARY in it, a tie as one *EQUATION in those
 // frames, and `nodalForces` as *CLOAD (in a transformed node's frame). One
 // *STATIC step printing U to the .dat (to the precision ReadDatDisplacements
-// reads) and the .frd. A held node's frame is the pin's of `pins` whose
-// facets have it. Refused, before anything is written, for what it cannot
-// express (a node of two pins' faces held in a frame).
+// reads) and the .frd -- or, with `buckleFactors` > 0, a *BUCKLE step for
+// that many factors, the forces its reference load. A held node's frame is the
+// pin's of `pins` whose facets have it. Refused, before anything is written,
+// for what it cannot express (a node of two pins' faces held in a frame).
 bool WriteDeck(std::ostream& out, const FemMesh& mesh,
                const std::vector<Material>& byDomain, const Supports& supports,
                const std::vector<StudyJobBody::PinSupport>& pins,
                const std::vector<glm::dvec3>& nodalForces,
-               const std::string& title, std::string* error);
+               const std::string& title, std::string* error,
+               int buckleFactors = 0);
 
 // The relative precision of a displacement ReadDatDisplacements reads: ccx
 // prints U as E13.6, seven significant digits.
@@ -115,6 +117,13 @@ inline constexpr double kCalculixDatPrecision = 5e-7;
 // one or a node.
 bool ReadDatDisplacements(const std::string& path, size_t nNodes,
                           std::vector<glm::dvec3>& out, std::string* error);
+// A *BUCKLE run's .dat: its factors (in the order ccx printed them) and
+// each mode's shape (every node, numbered 1..nNodes). False with `error`
+// when the file lacks the table or a node of a mode.
+bool ReadDatBuckling(const std::string& path, size_t nNodes,
+                     std::vector<double>& factors,
+                     std::vector<std::vector<glm::dvec3>>& shapes,
+                     std::string* error);
 // The first line of `text` that carries "*ERROR", trimmed; empty when none.
 std::string FirstCalculixError(const std::string& text);
 // Removes the run directories under `root` whose process (<pid>-<n>) is no
@@ -147,7 +156,19 @@ bool SolveBodyOnCalculix(const StudyJobBody& jb,
                          const glm::dvec3& gravityAccel,
                          const SolveOptions& options,
                          std::vector<FemResults>& out, SolveReport& report,
-                         std::string* error);
+                         std::string* error,
+                         std::vector<Supports>* supportsOut = nullptr);
+
+// A buckling study's modes solved on CalculiX (docs/simulation/README.md
+// #buckling): the deck WriteDeck writes under `supports` (the base state's,
+// a pin's contact set held), with a *BUCKLE step for `numFactors` factors
+// in place of *STATIC. The factors are read from the .dat and the mode
+// shapes from the .frd; `modes` ascend by |factor| as SolveBuckling's do.
+bool BucklingOnCalculix(
+    const StudyJobBody& jb, const std::vector<Material>& mats,
+    const Supports& supports, const std::vector<FaceLoad>& loads,
+    const glm::dvec3& gravityAccel, int numFactors, const SolveOptions& options,
+    std::vector<FemResults::ModeShape>& modes, std::string* error);
 
 // The deck the study would run for body `body` and case `caseIndex` of a
 // meshed study (export_study_inp): what SolveBodyOnCalculix writes, with no

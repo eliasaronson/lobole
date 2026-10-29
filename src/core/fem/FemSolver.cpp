@@ -20,8 +20,10 @@
 #endif
 
 #ifdef HAVE_SPECTRA
+#include <Spectra/MatOp/SparseCholesky.h>
 #include <Spectra/MatOp/SparseSymMatProd.h>
 #include <Spectra/SymGEigsShiftSolver.h>
+#include <Spectra/SymGEigsSolver.h>
 #endif
 
 namespace fem {
@@ -160,6 +162,184 @@ PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
   return PcgOutcome::Capped;
 }
 
+// What holds a mesh, as the reduced system SolveCases and SolveBuckling both
+// solve in: each held node's DOF in its own frame (R's columns; a node also
+// fixed is fixed, all three held, its frame immaterial), a tie's master
+// eliminated in terms of its slaves, and the free DOF compacted.
+struct TieElim {
+  int master = -1;                            // full DOF index
+  std::vector<std::pair<int, double>> slaves; // full DOF, factor
+};
+struct Reduction {
+  int nNodes = 0;
+  std::vector<int> frameOf;
+  std::vector<Eigen::Matrix3d> frames;
+  std::vector<TieElim> elims;
+  std::vector<int> tieOfDof;
+  DofMap dofs;
+  bool AnyFrame() const { return !frames.empty(); }
+  // A full DOF as free ones: itself, a tie's master as its slaves, a held
+  // one as nothing.
+  void Expand(int d, std::vector<std::pair<int, double>>& out) const {
+    out.clear();
+    if (dofs.map[d] >= 0)
+      out.push_back({dofs.map[d], 1.0});
+    else if (tieOfDof[d] >= 0)
+      for (const auto& [sd, f] : elims[tieOfDof[d]].slaves)
+        out.push_back({dofs.map[sd], f});
+  }
+  // A node's local vector from its x, y, z one, and back.
+  Vector3d ToLocal(int n, const Vector3d& v) const {
+    return frameOf[n] < 0 ? v : Vector3d(frames[frameOf[n]].transpose() * v);
+  }
+  Vector3d ToGlobal(int n, const Vector3d& v) const {
+    return frameOf[n] < 0 ? v : Vector3d(frames[frameOf[n]] * v);
+  }
+  // An element matrix in x, y, z scattered into the reduced system: a node
+  // held in its own frame takes its rows and columns there, held DOF are
+  // skipped, and a tie's master spreads over its slaves. `lowerOnly` keeps
+  // the entries on and below the diagonal.
+  void Scatter(const std::array<int, 10>& tet, Eigen::Matrix<double, 30, 30> Ke,
+               std::vector<Eigen::Triplet<double>>& out, bool lowerOnly) const {
+    if (AnyFrame()) {
+      bool rotated = false;
+      Eigen::Matrix<double, 30, 30> T =
+          Eigen::Matrix<double, 30, 30>::Identity();
+      for (int i = 0; i < 10; ++i)
+        if (frameOf[tet[i]] >= 0) {
+          T.block<3, 3>(3 * i, 3 * i) = frames[frameOf[tet[i]]];
+          rotated = true;
+        }
+      if (rotated)
+        Ke = T.transpose() * Ke * T;
+    }
+    bool tied = false;
+    if (!elims.empty())
+      for (int a = 0; a < 30 && !tied; ++a)
+        tied = tieOfDof[3 * tet[a / 3] + (a % 3)] >= 0;
+    if (tied) {
+      std::array<std::vector<std::pair<int, double>>, 30> ex;
+      for (int a = 0; a < 30; ++a)
+        Expand(3 * tet[a / 3] + (a % 3), ex[a]);
+      for (int a = 0; a < 30; ++a)
+        for (const auto& [ga, fa] : ex[a])
+          for (int b = 0; b < 30; ++b)
+            for (const auto& [gb, fb] : ex[b])
+              if (!lowerOnly || gb <= ga)
+                out.emplace_back(ga, gb, fa * fb * Ke(a, b));
+      return;
+    }
+    for (int a = 0; a < 30; ++a) {
+      const int ga = dofs.map[3 * tet[a / 3] + (a % 3)];
+      if (ga < 0)
+        continue;
+      for (int b = 0; b < 30; ++b) {
+        const int gb = dofs.map[3 * tet[b / 3] + (b % 3)];
+        if (gb < 0 || (lowerOnly && gb > ga))
+          continue;
+        out.emplace_back(ga, gb, Ke(a, b));
+      }
+    }
+  }
+  // A vector over every node in x, y, z, reduced.
+  Eigen::VectorXd Reduce(const Eigen::VectorXd& full) const {
+    Eigen::VectorXd r = Eigen::VectorXd::Zero(dofs.nFree);
+    for (int n = 0; n < nNodes; ++n) {
+      const Vector3d v = ToLocal(n, full.segment<3>(3 * n));
+      for (int k = 0; k < 3; ++k)
+        if (dofs.map[3 * n + k] >= 0)
+          r(dofs.map[3 * n + k]) += v(k);
+        else if (tieOfDof[3 * n + k] >= 0)
+          for (const auto& [sd, f] : elims[tieOfDof[3 * n + k]].slaves)
+            r(dofs.map[sd]) += f * v(k);
+    }
+    return r;
+  }
+  // Node `n`'s displacement in x, y, z from a reduced one (a held DOF is
+  // zero).
+  glm::dvec3 NodeDisplacement(const Eigen::VectorXd& u, int n) const {
+    Vector3d d(0, 0, 0);
+    for (int k = 0; k < 3; ++k) {
+      const int g = dofs.map[3 * n + k];
+      if (g >= 0)
+        d(k) = u(g);
+      else if (tieOfDof[3 * n + k] >= 0)
+        for (const auto& [sd, f] : elims[tieOfDof[3 * n + k]].slaves)
+          d(k) += f * u(dofs.map[sd]);
+    }
+    d = ToGlobal(n, d);
+    return glm::dvec3(d(0), d(1), d(2));
+  }
+};
+
+Reduction MakeReduction(const FemMesh& mesh, const Supports& supports) {
+  Reduction red;
+  const int nNodes = static_cast<int>(mesh.nodes.size());
+  red.nNodes = nNodes;
+  std::vector<char> isFixed(nNodes, 0);
+  for (int n : supports.fixedNodes)
+    if (n >= 0 && n < nNodes)
+      isFixed[n] = 1;
+  red.frameOf.assign(nNodes, -1);
+  std::vector<char> heldDof(3 * nNodes, 0);
+  for (int n = 0; n < nNodes; ++n)
+    if (isFixed[n])
+      heldDof[3 * n] = heldDof[3 * n + 1] = heldDof[3 * n + 2] = 1;
+  for (const HeldNode& h : supports.held) {
+    if (h.node < 0 || h.node >= nNodes || isFixed[h.node])
+      continue;
+    if (red.frameOf[h.node] < 0) {
+      Eigen::Matrix3d R;
+      for (int k = 0; k < 3; ++k)
+        R.col(k) = Vector3d(h.frame[k].x, h.frame[k].y, h.frame[k].z);
+      red.frameOf[h.node] = static_cast<int>(red.frames.size());
+      red.frames.push_back(R);
+    }
+    for (int k = 0; k < 3; ++k)
+      if (h.held[k])
+        heldDof[3 * h.node + k] = 1;
+  }
+  // Ties: each one's largest free entry is the MASTER, eliminated as
+  // u_m = sum_s f_s u_s over the others (f_s = -c_s / c_m). A tie left with
+  // one free entry holds it; with none, nothing.
+  red.tieOfDof.assign(3 * nNodes, -1);
+  for (const Tie& tie : supports.ties) {
+    std::vector<std::pair<int, double>> live;
+    for (const Tie::Entry& e : tie.entries) {
+      if (e.node < 0 || e.node >= nNodes || e.k < 0 || e.k > 2 ||
+          red.frameOf[e.node] < 0 || e.coef == 0.0)
+        continue;
+      const int d = 3 * e.node + e.k;
+      if (!heldDof[d] && red.tieOfDof[d] < 0)
+        live.push_back({d, e.coef});
+    }
+    if (live.empty())
+      continue;
+    if (live.size() == 1) {
+      heldDof[live[0].first] = 1;
+      continue;
+    }
+    size_t m = 0;
+    for (size_t i = 1; i < live.size(); ++i)
+      if (std::abs(live[i].second) > std::abs(live[m].second))
+        m = i;
+    TieElim te;
+    te.master = live[m].first;
+    for (size_t i = 0; i < live.size(); ++i)
+      if (i != m)
+        te.slaves.push_back({live[i].first, -live[i].second / live[m].second});
+    red.tieOfDof[te.master] = static_cast<int>(red.elims.size());
+    heldDof[te.master] = 1;
+    red.elims.push_back(std::move(te));
+  }
+  // DOF reduction map: -1 for held DOFs, else a compacted free-DOF index.
+  red.dofs.map.assign(3 * nNodes, -1);
+  for (int d = 0; d < 3 * nNodes; ++d)
+    if (!heldDof[d])
+      red.dofs.map[d] = red.dofs.nFree++;
+  return red;
+}
+
 } // namespace
 
 std::optional<std::vector<FemResults>>
@@ -207,97 +387,14 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     return Ds[std::min(d, Ds.size() - 1)];
   };
 
-  // Nodes held in their own frames: their DOF are local, R's columns. A
-  // node also fixed is fixed (all three held, its frame immaterial).
-  std::vector<char> isFixed(nNodes, 0);
-  for (int n : supports.fixedNodes)
-    if (n >= 0 && n < nNodes)
-      isFixed[n] = 1;
-  std::vector<int> frameOf(nNodes, -1);
-  std::vector<Eigen::Matrix3d> frames;
-  std::vector<char> heldDof(3 * nNodes, 0);
-  for (int n = 0; n < nNodes; ++n)
-    if (isFixed[n])
-      heldDof[3 * n] = heldDof[3 * n + 1] = heldDof[3 * n + 2] = 1;
-  for (const HeldNode& h : supports.held) {
-    if (h.node < 0 || h.node >= nNodes || isFixed[h.node])
-      continue;
-    if (frameOf[h.node] < 0) {
-      Eigen::Matrix3d R;
-      for (int k = 0; k < 3; ++k)
-        R.col(k) = Vector3d(h.frame[k].x, h.frame[k].y, h.frame[k].z);
-      frameOf[h.node] = static_cast<int>(frames.size());
-      frames.push_back(R);
-    }
-    for (int k = 0; k < 3; ++k)
-      if (h.held[k])
-        heldDof[3 * h.node + k] = 1;
-  }
-  const bool anyFrame = !frames.empty();
-  // Ties: each one's largest free entry is the MASTER, eliminated as
-  // u_m = sum_s f_s u_s over the others (f_s = -c_s / c_m). A tie left with
-  // one free entry holds it; with none, nothing.
-  struct TieElim {
-    int master = -1;                            // full DOF index
-    std::vector<std::pair<int, double>> slaves; // full DOF, factor
-  };
-  std::vector<TieElim> elims;
-  std::vector<int> tieOfDof(3 * nNodes, -1);
-  for (const Tie& tie : supports.ties) {
-    std::vector<std::pair<int, double>> live;
-    for (const Tie::Entry& e : tie.entries) {
-      if (e.node < 0 || e.node >= nNodes || e.k < 0 || e.k > 2 ||
-          frameOf[e.node] < 0 || e.coef == 0.0)
-        continue;
-      const int d = 3 * e.node + e.k;
-      if (!heldDof[d] && tieOfDof[d] < 0)
-        live.push_back({d, e.coef});
-    }
-    if (live.empty())
-      continue;
-    if (live.size() == 1) {
-      heldDof[live[0].first] = 1;
-      continue;
-    }
-    size_t m = 0;
-    for (size_t i = 1; i < live.size(); ++i)
-      if (std::abs(live[i].second) > std::abs(live[m].second))
-        m = i;
-    TieElim te;
-    te.master = live[m].first;
-    for (size_t i = 0; i < live.size(); ++i)
-      if (i != m)
-        te.slaves.push_back({live[i].first, -live[i].second / live[m].second});
-    tieOfDof[te.master] = static_cast<int>(elims.size());
-    heldDof[te.master] = 1;
-    elims.push_back(std::move(te));
-  }
-  // DOF reduction map: -1 for held DOFs, else a compacted free-DOF index.
-  DofMap dofs;
-  dofs.map.assign(3 * nNodes, -1);
-  for (int d = 0; d < 3 * nNodes; ++d)
-    if (!heldDof[d])
-      dofs.map[d] = dofs.nFree++;
-  const std::vector<int>& dofMap = dofs.map;
-  const int nFree = dofs.nFree;
+  const Reduction red = MakeReduction(mesh, supports);
+  const std::vector<int>& dofMap = red.dofs.map;
+  const int nFree = red.dofs.nFree;
+  const bool anyFrame = red.AnyFrame();
   if (nFree == 0)
     return fail("model is fully constrained (no free DOF)");
-  // A full DOF as free ones: itself, a tie's master as its slaves, a held
-  // one as nothing.
-  const auto expand = [&](int d, std::vector<std::pair<int, double>>& out) {
-    out.clear();
-    if (dofMap[d] >= 0)
-      out.push_back({dofMap[d], 1.0});
-    else if (tieOfDof[d] >= 0)
-      for (const auto& [sd, f] : elims[tieOfDof[d]].slaves)
-        out.push_back({dofMap[sd], f});
-  };
-  // A node's local vector from its x, y, z one, and back.
-  const auto toLocal = [&](int n, const Vector3d& v) -> Vector3d {
-    return frameOf[n] < 0 ? v : Vector3d(frames[frameOf[n]].transpose() * v);
-  };
-  const auto toGlobal = [&](int n, const Vector3d& v) -> Vector3d {
-    return frameOf[n] < 0 ? v : Vector3d(frames[frameOf[n]] * v);
+  const auto toLocal = [&](int n, const Vector3d& v) {
+    return red.ToLocal(n, v);
   };
 
   // Assemble the reduced stiffness matrix from element contributions, each
@@ -328,47 +425,7 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
           return fail("mesh has a degenerate element");
         Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D * B);
       }
-      // A node held in its own frame takes its rows and columns there.
-      if (anyFrame) {
-        bool rotated = false;
-        Eigen::Matrix<double, 30, 30> T =
-            Eigen::Matrix<double, 30, 30>::Identity();
-        for (int i = 0; i < 10; ++i)
-          if (frameOf[tet[i]] >= 0) {
-            T.block<3, 3>(3 * i, 3 * i) = frames[frameOf[tet[i]]];
-            rotated = true;
-          }
-        if (rotated)
-          Ke = T.transpose() * Ke * T;
-      }
-      // Scatter into the reduced system, skipping held DOFs; a tie's
-      // master spreads over its slaves.
-      bool tied = false;
-      if (!elims.empty())
-        for (int a = 0; a < 30 && !tied; ++a)
-          tied = tieOfDof[3 * tet[a / 3] + (a % 3)] >= 0;
-      if (tied) {
-        std::array<std::vector<std::pair<int, double>>, 30> ex;
-        for (int a = 0; a < 30; ++a)
-          expand(3 * tet[a / 3] + (a % 3), ex[a]);
-        for (int a = 0; a < 30; ++a)
-          for (const auto& [ga, fa] : ex[a])
-            for (int b = 0; b < 30; ++b)
-              for (const auto& [gb, fb] : ex[b])
-                triplets.emplace_back(ga, gb, fa * fb * Ke(a, b));
-        continue;
-      }
-      for (int a = 0; a < 30; ++a) {
-        const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
-        if (ga < 0)
-          continue;
-        for (int b = 0; b < 30; ++b) {
-          const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
-          if (gb < 0)
-            continue;
-          triplets.emplace_back(ga, gb, Ke(a, b));
-        }
-      }
+      red.Scatter(tet, Ke, triplets, false);
     }
     K.setFromTriplets(triplets.begin(), triplets.end());
   }
@@ -387,17 +444,7 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     Fall.segment<3>(3 * node) += fv;
   };
   const auto reduce = [&](const Eigen::VectorXd& full) {
-    Eigen::VectorXd r = Eigen::VectorXd::Zero(nFree);
-    for (int n = 0; n < nNodes; ++n) {
-      const Vector3d v = toLocal(n, full.segment<3>(3 * n));
-      for (int k = 0; k < 3; ++k)
-        if (dofMap[3 * n + k] >= 0)
-          r(dofMap[3 * n + k]) += v(k);
-        else if (tieOfDof[3 * n + k] >= 0)
-          for (const auto& [sd, f] : elims[tieOfDof[3 * n + k]].slaves)
-            r(dofMap[sd]) += f * v(k);
-    }
-    return r;
+    return red.Reduce(full);
   };
 
   // Body force (gravity / self-weight): b = rho * g per unit volume, consistent
@@ -521,7 +568,7 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
           const int dof = 3 * n + k;
           if (dofMap[dof] >= 0)
             u(dofMap[dof]) = l(k);
-          else if (tieOfDof[dof] < 0 && std::abs(l(k)) > heldMove) {
+          else if (red.tieOfDof[dof] < 0 && std::abs(l(k)) > heldMove) {
             heldMove = std::abs(l(k));
             heldNode = n;
           }
@@ -652,19 +699,8 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     // Expand to full displacement (held DOFs are zero), back in x, y, z.
     FemResults out;
     out.displacement.resize(nNodes);
-    for (int n = 0; n < nNodes; ++n) {
-      Vector3d d(0, 0, 0);
-      for (int k = 0; k < 3; ++k) {
-        const int g = dofMap[3 * n + k];
-        if (g >= 0)
-          d(k) = u(g);
-        else if (tieOfDof[3 * n + k] >= 0)
-          for (const auto& [sd, f] : elims[tieOfDof[3 * n + k]].slaves)
-            d(k) += f * u(dofMap[sd]);
-      }
-      d = toGlobal(n, d);
-      out.displacement[n] = glm::dvec3(d(0), d(1), d(2));
-    }
+    for (int n = 0; n < nNodes; ++n)
+      out.displacement[n] = red.NodeDisplacement(u, n);
     // The internal force K u at every node, less the applied load: what the
     // supports carry (zero, to the residual, where nothing holds).
     Eigen::VectorXd fint;
@@ -1079,6 +1115,179 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
   }
   return modes;
 }
+
+std::optional<std::vector<FemResults::ModeShape>>
+SolveBuckling(const FemMesh& mesh, const std::vector<Material>& byDomain,
+              const Supports& supports,
+              const std::vector<glm::dvec3>& baseDisplacement, int numFactors,
+              std::string* error) {
+  auto fail = [&](const std::string& m)
+      -> std::optional<std::vector<FemResults::ModeShape>> {
+    if (error)
+      *error = m;
+    return std::nullopt;
+  };
+  const int nNodes = static_cast<int>(mesh.nodes.size());
+  if (nNodes == 0 || mesh.tets.empty())
+    return fail("empty mesh");
+  if (byDomain.empty())
+    return fail("no material");
+  for (const Material& m : byDomain)
+    if (m.youngMPa <= 0)
+      return fail("material has no stiffness data");
+  if (baseDisplacement.size() != mesh.nodes.size())
+    return fail("the base state is not one displacement per node");
+  std::vector<Eigen::Matrix<double, 6, 6>> Ds;
+  for (const Material& m : byDomain)
+    Ds.push_back(Elasticity(m.youngMPa, m.poisson));
+  numFactors = std::max(numFactors, 1);
+
+  const Reduction red = MakeReduction(mesh, supports);
+  const int nFree = red.dofs.nFree;
+  if (nFree == 0)
+    return fail("model is fully constrained (no free DOF)");
+  if (nFree < numFactors + 2)
+    return fail("mesh too small for the requested buckling factors");
+
+  // K and the geometric stiffness K_G, LOWER triangles only (all the
+  // Cholesky factor and SparseSymMatProd<Lower> read), each in a scoped
+  // pass. K_G at each of the four Gauss points: the base state's stress
+  // sigma = D B u_e, and for every pair of nodes grad N_a . sigma . grad N_b
+  // dV on the identity block -- the rule CalculiX's C3D10 uses.
+  Eigen::SparseMatrix<double> K(nFree, nFree), A(nFree, nFree);
+  for (int pass = 0; pass < 2; ++pass) {
+    std::vector<Eigen::Triplet<double>> trip;
+    trip.reserve(mesh.tets.size() * 465);
+    for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+      const auto& tet = mesh.tets[ti];
+      const size_t dom =
+          mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[ti];
+      const Eigen::Matrix<double, 6, 6>& D = Ds[std::min(dom, Ds.size() - 1)];
+      Vector3d X[10];
+      Eigen::Matrix<double, 30, 1> ue;
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh.nodes[tet[i]];
+        X[i] = Vector3d(p.x, p.y, p.z);
+        const auto& d = baseDisplacement[tet[i]];
+        ue(3 * i + 0) = d.x;
+        ue(3 * i + 1) = d.y;
+        ue(3 * i + 2) = d.z;
+      }
+      Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B;
+        const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+        if (std::abs(detJ) < 1e-12)
+          return fail("mesh has a degenerate element");
+        const double w = kTetW * std::abs(detJ);
+        if (pass == 0) {
+          Ke += w * (B.transpose() * D * B);
+          continue;
+        }
+        const Eigen::Matrix<double, 6, 1> s = D * (B * ue);
+        Eigen::Matrix3d sig;
+        sig << s(0), s(3), s(5), s(3), s(1), s(4), s(5), s(4), s(2);
+        // The physical gradients, read back off B's diagonal entries.
+        Eigen::Matrix<double, 3, 10> G;
+        for (int i = 0; i < 10; ++i)
+          G.col(i) = Vector3d(B(0, 3 * i), B(1, 3 * i + 1), B(2, 3 * i + 2));
+        const Eigen::Matrix<double, 10, 10> S = G.transpose() * sig * G;
+        // -K_G: the matrix whose largest eigenvalues are 1 / the smallest
+        // positive factors.
+        for (int a = 0; a < 10; ++a)
+          for (int b = 0; b < 10; ++b)
+            for (int k = 0; k < 3; ++k)
+              Ke(3 * a + k, 3 * b + k) -= w * S(a, b);
+      }
+      red.Scatter(tet, Ke, trip, true);
+    }
+    (pass == 0 ? K : A).setFromTriplets(trip.begin(), trip.end());
+  }
+  K.makeCompressed();
+  A.makeCompressed();
+
+  // -K_G phi = mu K phi: K is the B matrix, positive definite once held,
+  // and -K_G may be indefinite, which the Cholesky mode takes as it is.
+  // lambda = 1 / mu; the largest |mu| are the factors nearest zero, of
+  // either sign.
+  using OpType = Spectra::SparseSymMatProd<double>;
+  using BOpType = Spectra::SparseCholesky<double>;
+  BOpType Bop(K);
+  if (Bop.info() != Spectra::CompInfo::Successful)
+    return fail(
+        "model is insufficiently constrained (singular stiffness matrix)");
+  OpType op(A);
+  const auto solve = [&](Spectra::SortRule rule, int nev, Eigen::VectorXd& mu,
+                         Eigen::MatrixXd& phi, std::string* why) {
+    nev = std::min(nev, nFree - 2);
+    const int ncv = std::min(std::max(2 * nev + 1, 20), nFree);
+    Spectra::SymGEigsSolver<OpType, BOpType, Spectra::GEigsMode::Cholesky>
+        geigs(op, Bop, nev, ncv);
+    try {
+      geigs.init();
+      geigs.compute(rule, 1000, 1e-10, rule);
+    } catch (const std::exception& e) {
+      *why = std::string("the buckling eigensolve failed: ") + e.what();
+      return false;
+    }
+    if (geigs.info() != Spectra::CompInfo::Successful) {
+      *why = "the buckling eigensolve did not converge";
+      return false;
+    }
+    mu = geigs.eigenvalues();
+    phi = geigs.eigenvectors();
+    return true;
+  };
+  Eigen::VectorXd mu;
+  Eigen::MatrixXd phi;
+  std::string why;
+  if (!solve(Spectra::SortRule::LargestMagn, numFactors, mu, phi, &why))
+    return fail(why);
+  // Rounding leaves a mu of a few parts in 1e10 of the largest where there
+  // is none (pure tension): below this it is no factor at all.
+  double scale = 0.0;
+  for (int m = 0; m < mu.size(); ++m)
+    scale = std::max(scale, std::abs(mu(m)));
+  if (!(scale > 0.0))
+    return std::vector<FemResults::ModeShape>{}; // no stress, nothing buckles
+  const double tiny = 1e-8 * scale;
+  bool positive = false;
+  for (int m = 0; m < mu.size(); ++m)
+    positive = positive || mu(m) > tiny;
+  // Every factor nearest zero is negative (the load mostly pulls): the
+  // smallest positive one, if the load has one, is looked for on its own.
+  std::vector<std::pair<double, Eigen::VectorXd>> found;
+  for (int m = 0; m < mu.size(); ++m)
+    if (std::abs(mu(m)) > tiny)
+      found.push_back({mu(m), phi.col(m)});
+  if (!positive) {
+    Eigen::VectorXd mu2;
+    Eigen::MatrixXd phi2;
+    if (solve(Spectra::SortRule::LargestAlge, 1, mu2, phi2, &why) &&
+        mu2.size() > 0 && mu2(0) > tiny)
+      found.push_back({mu2(0), phi2.col(0)});
+  }
+  // Ascending by |factor|, i.e. descending by |mu|.
+  std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) {
+    return std::abs(a.first) > std::abs(b.first);
+  });
+  std::vector<FemResults::ModeShape> modes;
+  for (const auto& [m, v] : found) {
+    FemResults::ModeShape mode;
+    mode.factor = 1.0 / m;
+    mode.displacement.resize(nNodes);
+    double maxMag = 0.0;
+    for (int n = 0; n < nNodes; ++n) {
+      mode.displacement[n] = red.NodeDisplacement(v, n);
+      maxMag = std::max(maxMag, glm::length(mode.displacement[n]));
+    }
+    if (maxMag > 0)
+      for (auto& u : mode.displacement)
+        u /= maxMag;
+    modes.push_back(std::move(mode));
+  }
+  return modes;
+}
 #else  // !HAVE_SPECTRA
 // Both overloads, and the single-material one delegates exactly as the real
 // implementation does: a stub that covers only one of them links on a build
@@ -1098,6 +1307,13 @@ SolveModal(const FemMesh& mesh, const Material& material,
            std::string* error) {
   return SolveModal(mesh, std::vector<Material>{material}, fixedNodes, numModes,
                     error);
+}
+std::optional<std::vector<FemResults::ModeShape>>
+SolveBuckling(const FemMesh&, const std::vector<Material>&, const Supports&,
+              const std::vector<glm::dvec3>&, int, std::string* error) {
+  if (error)
+    *error = "built without buckling support (Spectra not found)";
+  return std::nullopt;
 }
 #endif // HAVE_SPECTRA
 
@@ -1162,6 +1378,14 @@ SolveModal(const FemMesh& mesh, const Material& material,
            std::string* error) {
   return SolveModal(mesh, std::vector<Material>{material}, fixedNodes, numModes,
                     error);
+}
+
+std::optional<std::vector<FemResults::ModeShape>>
+SolveBuckling(const FemMesh&, const std::vector<Material>&, const Supports&,
+              const std::vector<glm::dvec3>&, int, std::string* error) {
+  if (error)
+    *error = "built without buckling support (Eigen not found)";
+  return std::nullopt;
 }
 
 #endif // HAVE_FEM_SOLVER
@@ -1598,6 +1822,26 @@ FindSupportEdgePeak(const FemMesh& mesh, const FemResults& results,
   }
   return PeakAwayFromEdges(mesh, results.vonMises, results.maxVmNode,
                            SupportEdgeZones(mesh, supports), ids);
+}
+
+// Peak resident memory of a buckling run (mesh, base state, K, K_G, the
+// Cholesky factor and the Lanczos basis), measured over the process's start
+// (getrusage ru_maxrss) on the 10 x 10 x 200 steel column meshed by our
+// pipeline at 5 to 1.35 mm, three factors: 5.7k DOF 45 MB, 16k 109 MB, 31k
+// 186 MB, 66k 423 MB, 143k 1.17 GB, 205k 2.01 GB
+// (test_fem_buckling.cpp's hidden "[buckling-calibrate]" case prints them).
+// The factor fills in faster than the DOF count grows -- DOF^1.45 through the
+// largest runs -- plus what is held before the matrix, and a tenth more,
+// bounds every measured run from above (by 1.1x at 16k-205k, 1.35x at 5.7k).
+uint64_t BucklingMemoryEstimate(size_t freeDofs) {
+  constexpr double kBaseBytes = 60e6;
+  constexpr double kCoefficient = 39.0; // bytes per DOF^1.45
+  constexpr double kExponent = 1.45;
+  constexpr double kMargin = 1.1;
+  return static_cast<uint64_t>(
+      kMargin *
+      (kBaseBytes +
+       kCoefficient * std::pow(static_cast<double>(freeDofs), kExponent)));
 }
 
 } // namespace fem

@@ -13,8 +13,10 @@
 #include <TopAbs_State.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Sphere.hxx>
 
 #include "cad/CADMaterials.h"
 #include "core/Document.h"
@@ -87,6 +89,8 @@ const char* AnalysisTypeToString(AnalysisType type) {
     return "modal";
   case AnalysisType::Topology:
     return "topology";
+  case AnalysisType::Buckling:
+    return "buckling";
   case AnalysisType::Static:
     break;
   }
@@ -122,8 +126,9 @@ bool SolverFromString(const std::string& s, Solver& out) {
 }
 
 std::string SolverRefusal(Solver solver, AnalysisType type) {
-  if (solver == Solver::Calculix && type != AnalysisType::Static)
-    return std::string("CalculiX solves static studies here; a ") +
+  if (solver == Solver::Calculix && type != AnalysisType::Static &&
+      type != AnalysisType::Buckling)
+    return std::string("CalculiX solves static and buckling studies here; a ") +
            AnalysisTypeToString(type) +
            " study is solved in-house (solver auto or in_house)";
   return {};
@@ -135,6 +140,8 @@ const char* CpuSolverName(AnalysisType type) {
     return "cpu (Eigen SimplicialLDLT, shift-invert)";
   case AnalysisType::Topology:
     return "cpu (Eigen CG-IC)";
+  case AnalysisType::Buckling:
+    return "cpu (Eigen SimplicialLDLT; Spectra, Cholesky mode)";
   case AnalysisType::Static:
     break;
   }
@@ -152,6 +159,10 @@ bool AnalysisTypeFromString(const std::string& s, AnalysisType& out) {
   }
   if (s == "topology") {
     out = AnalysisType::Topology;
+    return true;
+  }
+  if (s == "buckling") {
+    out = AnalysisType::Buckling;
     return true;
   }
   return false;
@@ -317,6 +328,10 @@ bool ValidateLoadCases(const Study& study, std::string* error) {
   if (study.type == AnalysisType::Modal)
     return fail("a modal study has no loads to put in load cases; load cases "
                 "belong to static and topology studies");
+  if (study.type == AnalysisType::Buckling)
+    return fail("a buckling factor scales ONE load set, so a buckling study "
+                "takes no load cases: make a buckling study for each way the "
+                "part is loaded");
   for (size_t i = 0; i < study.loadCases.size(); ++i) {
     const LoadCase& c = study.loadCases[i];
     if (c.name.empty())
@@ -440,6 +455,57 @@ TopoDS_Shape FaceByIndex(const TopoDS_Shape& shape, int index) {
     if (i == index)
       return ex.Current();
   return {};
+}
+
+// Every cylindrical, conical and spherical face of `shape`, by its index:
+// what a buckling mode's knockdown reads (docs/simulation/README.md
+// #buckling).
+std::map<int, StudyJobBody::CurvedFace>
+CurvedFacesOf(const TopoDS_Shape& shape) {
+  std::map<int, StudyJobBody::CurvedFace> out;
+  if (shape.IsNull())
+    return out;
+  const auto v = [](const gp_Pnt& p) {
+    return glm::dvec3(p.X(), p.Y(), p.Z());
+  };
+  const auto d = [](const gp_Dir& p) {
+    return glm::dvec3(p.X(), p.Y(), p.Z());
+  };
+  int i = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next(), ++i) {
+    BRepAdaptor_Surface surf(TopoDS::Face(ex.Current()));
+    StudyJobBody::CurvedFace f;
+    switch (surf.GetType()) {
+    case GeomAbs_Cylinder: {
+      const gp_Cylinder c = surf.Cylinder();
+      f.kind = "cylinder";
+      f.origin = v(c.Location());
+      f.axis = d(c.Axis().Direction());
+      f.radius = c.Radius();
+      break;
+    }
+    case GeomAbs_Cone: {
+      const gp_Cone c = surf.Cone();
+      f.kind = "cone";
+      f.origin = v(c.Location());
+      f.axis = d(c.Axis().Direction());
+      f.radius = c.RefRadius();
+      f.semiAngle = c.SemiAngle();
+      break;
+    }
+    case GeomAbs_Sphere: {
+      const gp_Sphere c = surf.Sphere();
+      f.kind = "sphere";
+      f.origin = v(c.Location());
+      f.radius = c.Radius();
+      break;
+    }
+    default:
+      continue;
+    }
+    out[i] = f;
+  }
+  return out;
 }
 } // namespace
 
@@ -913,7 +979,8 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     StudyBodyPlan bp;
     bp.bodyIndex = bodyIndex;
     bp.bodyName = body.name;
-    bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+    bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12,
+                      mp.yieldMPa, mp.interlayerMPa};
     bp.interlayerMPa = mp.interlayerMPa;
     // A PRINTED part weighs what its walls, shells and infill weigh
     // (docs/tolerances/README.md#printed-mass): its self-weight and modal
@@ -1136,6 +1203,8 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     jb.fixedNodes.assign(fixedSet.begin(), fixedSet.end());
     jb.faceLoads = std::move(faceLoads);
     jb.caseLoads = std::move(caseLoads);
+    if (plan.type == AnalysisType::Buckling)
+      jb.curvedFaces = CurvedFacesOf(bp.shape);
     jb.mesh = std::move(*mesh);
     out.bodies.push_back(std::move(jb));
   }
@@ -1458,6 +1527,256 @@ void FinishSupports(const StudyJobBody& jb, const std::vector<int>& zones,
       PeakAwayFromEdges(jb.mesh, res.vonMises, res.maxVmNode, zones, owners);
 }
 
+// ---- Buckling: what is read off the modes ----------------------------------
+// (docs/simulation/README.md#buckling)
+
+// The wall at boundary node `node`: the distance along its inward normal
+// (its facets' area-weighted, outward as Netgen orients them, reversed) to
+// the nearest other boundary facet. 0 when the ray meets none.
+double WallAt(const FemMesh& mesh, int node,
+              const std::vector<std::vector<int>>& facetsOf) {
+  glm::dvec3 n(0.0);
+  for (int t : facetsOf[node])
+    n += FacetCross(mesh, mesh.boundary[t]);
+  if (!(glm::length(n) > 0.0))
+    return 0.0;
+  const glm::dvec3 dir = -glm::normalize(n);
+  const glm::dvec3 o = mesh.nodes[node];
+  double best = 0.0;
+  for (size_t t = 0; t < mesh.boundary.size(); ++t) {
+    const auto& tri = mesh.boundary[t];
+    if (std::find(tri.nodes.begin(), tri.nodes.end(), node) != tri.nodes.end())
+      continue;
+    // Moller-Trumbore on the facet's corners.
+    const glm::dvec3 a = mesh.nodes[tri.nodes[0]];
+    const glm::dvec3 e1 = mesh.nodes[tri.nodes[1]] - a;
+    const glm::dvec3 e2 = mesh.nodes[tri.nodes[2]] - a;
+    const glm::dvec3 pv = glm::cross(dir, e2);
+    const double det = glm::dot(e1, pv);
+    if (std::abs(det) < 1e-18)
+      continue;
+    const glm::dvec3 tv = o - a;
+    const double u = glm::dot(tv, pv) / det;
+    if (u < -1e-9 || u > 1 + 1e-9)
+      continue;
+    const glm::dvec3 qv = glm::cross(tv, e1);
+    const double w = glm::dot(dir, qv) / det;
+    if (w < -1e-9 || u + w > 1 + 1e-9)
+      continue;
+    const double dist = glm::dot(e2, qv) / det;
+    if (dist > 1e-9 && (best == 0.0 || dist < best))
+      best = dist;
+  }
+  return best;
+}
+
+// The mean corner-to-corner edge of the tets that use `node`.
+double ElementSizeAt(const FemMesh& mesh, int node) {
+  double sum = 0.0;
+  int n = 0;
+  for (const auto& tet : mesh.tets) {
+    if (std::find(tet.begin(), tet.end(), node) == tet.end())
+      continue;
+    for (int a = 0; a < 4; ++a)
+      for (int b = a + 1; b < 4; ++b) {
+        sum += glm::length(mesh.nodes[tet[a]] - mesh.nodes[tet[b]]);
+        ++n;
+      }
+  }
+  return n > 0 ? sum / n : 0.0;
+}
+
+constexpr double kThinShellRatio = 10.0; // R/t from which a wall is a shell
+
+// NASA SP-8007's knockdown for a curved wall of radius R and thickness t.
+double Sp8007Knockdown(double radius, double wall) {
+  const double phi = std::sqrt(radius / wall) / 16.0;
+  return 1.0 - 0.901 * (1.0 - std::exp(-phi));
+}
+
+// Everything the result says of a buckling body beyond its factors: the
+// knockdown, the yield and interlayer factors, the governing factor and
+// the flags. `modes` ascend by |factor|.
+StudyBodyResult::Buckling ReadBuckling(const StudyJobBody& jb,
+                                       const std::vector<Material>& mats,
+                                       const FemResults& base) {
+  StudyBodyResult::Buckling out;
+  out.solved = true;
+  const FemMesh& mesh = jb.mesh;
+  const FemResults::ModeShape* first = nullptr;
+  for (const FemResults::ModeShape& m : base.modes)
+    if (m.factor > 0.0 && (!first || m.factor < first->factor))
+      first = &m;
+  if (first) {
+    out.buckles = true;
+    out.factor = first->factor;
+  } else {
+    out.none = base.modes.empty()
+                   ? "nothing in this load buckles: no part of it is in "
+                     "compression"
+                   : "nothing in this load buckles: it buckles only under "
+                     "the reversed load";
+  }
+
+  // Yield and interlayer factors from the base state; a node's strength is
+  // the weakest of the materials of the tets that use it.
+  const size_t nNodes = mesh.nodes.size();
+  std::vector<double> yieldAt(nNodes, 0.0), interAt(nNodes, 0.0);
+  for (size_t t = 0; t < mesh.tets.size(); ++t) {
+    const size_t d = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t];
+    const Material& m = mats[std::min(d, mats.size() - 1)];
+    for (int v : mesh.tets[t]) {
+      if (m.yieldMPa > 0 && (yieldAt[v] == 0.0 || m.yieldMPa < yieldAt[v]))
+        yieldAt[v] = m.yieldMPa;
+      if (m.interlayerMPa > 0 &&
+          (interAt[v] == 0.0 || m.interlayerMPa < interAt[v]))
+        interAt[v] = m.interlayerMPa;
+    }
+  }
+  double worstYield = 0.0, worstInter = 0.0; // stress / strength
+  const std::vector<double> tension = MaxPrincipalField(base);
+  for (size_t n = 0; n < nNodes; ++n) {
+    if (yieldAt[n] > 0 && n < base.vonMises.size())
+      worstYield = std::max(worstYield, base.vonMises[n] / yieldAt[n]);
+    if (interAt[n] > 0 && n < tension.size())
+      worstInter = std::max(worstInter, tension[n] / interAt[n]);
+  }
+  if (worstYield > 0)
+    out.yieldFactor = 1.0 / worstYield;
+  if (worstInter > 0)
+    out.interlayerFactor = 1.0 / worstInter;
+
+  if (first) {
+    // Where the first mode's motion peaks, on a node inside one face (an
+    // edge node's normal is no wall's): its face carries the knockdown and
+    // the wall the through-thickness check reads.
+    std::vector<std::vector<int>> facetsOf(nNodes);
+    for (size_t t = 0; t < mesh.boundary.size(); ++t)
+      for (int v : mesh.boundary[t].nodes)
+        facetsOf[v].push_back(static_cast<int>(t));
+    int peak = -1;
+    double peakU = -1.0;
+    std::vector<std::pair<double, int>> inside; // (motion, node)
+    for (size_t n = 0; n < nNodes; ++n) {
+      const double u = glm::length(first->displacement[n]);
+      if (u > peakU) {
+        peakU = u;
+        peak = static_cast<int>(n);
+      }
+      if (facetsOf[n].empty())
+        continue;
+      bool oneFace = true;
+      for (int t : facetsOf[n])
+        oneFace = oneFace && mesh.boundary[t].faceIndex ==
+                                 mesh.boundary[facetsOf[n][0]].faceIndex;
+      if (oneFace)
+        inside.push_back({u, static_cast<int>(n)});
+    }
+    // The wall the mode bends is the thinnest one where it moves most: of
+    // the nodes inside one face moving at least nine tenths of the peak,
+    // the one with the thinnest wall (an even sample of them, when there
+    // are many: each is a ray through every boundary facet).
+    std::sort(inside.begin(), inside.end(), std::greater<>());
+    size_t moving = 0;
+    while (moving < inside.size() &&
+           inside[moving].first >= 0.9 * inside.front().first)
+      ++moving;
+    constexpr size_t kWallSamples = 512;
+    const size_t stride = std::max<size_t>(1, moving / kWallSamples);
+    int at = peak;
+    double wall = 0.0;
+    for (size_t i = 0; i < moving; i += stride) {
+      const double w = WallAt(mesh, inside[i].second, facetsOf);
+      if (w > 0 && (wall == 0.0 || w < wall)) {
+        wall = w;
+        at = inside[i].second;
+      }
+    }
+    if (at >= 0 && !facetsOf[at].empty()) {
+      out.face = mesh.boundary[facetsOf[at][0]].faceIndex;
+      out.wallMm = wall > 0 ? wall : WallAt(mesh, at, facetsOf);
+      const double h = ElementSizeAt(mesh, at);
+      if (out.wallMm > 0 && h > 0)
+        out.wallLayers =
+            std::max(1, static_cast<int>(std::lround(out.wallMm / h)));
+    }
+    out.shapeClass = "flat";
+    if (auto it = jb.curvedFaces.find(out.face);
+        it != jb.curvedFaces.end() && at >= 0) {
+      const StudyJobBody::CurvedFace& f = it->second;
+      const glm::dvec3 p = mesh.nodes[at];
+      double r = f.radius;
+      if (f.kind == "cone") {
+        const glm::dvec3 a = glm::normalize(f.axis);
+        const glm::dvec3 q = (p - f.origin) - glm::dot(p - f.origin, a) * a;
+        r = glm::length(q) / std::max(std::cos(f.semiAngle), 1e-6);
+      }
+      out.radiusMm = r;
+      // A thin shell, R/t at least ten (thin-shell theory's bound, and
+      // where SP-8007's tests begin), is knocked down; anything thicker is
+      // a member, which an imperfection does not knock down the way it does
+      // a shell.
+      if (out.wallMm > 0 && r >= kThinShellRatio * out.wallMm) {
+        out.shapeClass = f.kind;
+        out.knockdown = Sp8007Knockdown(r, out.wallMm);
+      } else {
+        out.shapeClass = "member";
+      }
+    }
+
+    // Crippling where a load enters: the peak motion at a support's or
+    // load's edge, and the mode local there -- every node moving half the
+    // peak or more lies within twice that edge's reach of the peak, and
+    // within a quarter of the part's size. A column's end moves most too,
+    // but its whole length moves with it.
+    std::vector<SupportFacets> edges = jb.supports;
+    for (const FaceLoad& fl : jb.faceLoads) {
+      if (fl.tris.empty())
+        continue;
+      SupportFacets sf;
+      sf.type = fl.type;
+      sf.tris = fl.tris;
+      sf.awayMm = SupportAwayMm(mesh, fl.tris, LoadType::Fixed, glm::dvec3(0.0),
+                                glm::dvec3(0.0));
+      edges.push_back(std::move(sf));
+    }
+    const std::vector<int> zones = SupportEdgeZones(mesh, edges);
+    if (peak >= 0 && static_cast<size_t>(peak) < zones.size() &&
+        zones[peak] >= 0) {
+      const SupportFacets& e = edges[zones[peak]];
+      double extent = 0.0;
+      for (size_t n = 0; n < nNodes; ++n)
+        if (glm::length(first->displacement[n]) >= 0.5 * peakU)
+          extent =
+              std::max(extent, glm::length(mesh.nodes[n] - mesh.nodes[peak]));
+      const double reach = e.awayMm > 0 ? e.awayMm : ElementSizeAt(mesh, peak);
+      glm::dvec3 lo(1e300), hi(-1e300);
+      for (const glm::dvec3& p : mesh.nodes) {
+        lo = glm::min(lo, p);
+        hi = glm::max(hi, p);
+      }
+      if (extent <= std::min(2.0 * reach, 0.25 * glm::length(hi - lo))) {
+        out.atLoadEdge = true;
+        out.edgeLoad = e.id;
+        out.edgeType = LoadTypeToString(e.type);
+        out.edgeFace = mesh.boundary[e.tris.front()].faceIndex;
+      }
+    }
+  }
+
+  // 1/governing = 1/(knockdown x buckling) + 1/min(yield, interlayer).
+  double plastic = out.yieldFactor;
+  if (out.interlayerFactor > 0 &&
+      (plastic == 0 || out.interlayerFactor < plastic))
+    plastic = out.interlayerFactor;
+  const double elastic = out.buckles ? out.knockdown * out.factor : 0.0;
+  if (elastic > 0 && plastic > 0)
+    out.governingFactor = 1.0 / (1.0 / elastic + 1.0 / plastic);
+  else
+    out.governingFactor = elastic > 0 ? elastic : plastic;
+  return out;
+}
+
 } // namespace
 
 bool StaticSupportsOf(
@@ -1537,11 +1856,38 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
               : jb.caseLoads;
       const std::vector<Material> mats =
           jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
+      const bool buckling = in.type == AnalysisType::Buckling;
+      if (buckling) {
+        // The direct factor of K is what a buckling solve cannot do
+        // without, and it fills in steeply: a run that will not fit is
+        // refused before anything is solved.
+        const size_t n = jb.mesh.nodes.size();
+        const size_t dofs = 3 * (n - std::min(n, jb.fixedNodes.size()));
+        const uint64_t estimate = BucklingMemoryEstimate(dofs);
+        const uint64_t available = options.availableBytes
+                                       ? options.availableBytes
+                                       : AvailableMemoryBytes();
+        if (available > 0 && estimate > available) {
+          char buf[320];
+          std::snprintf(
+              buf, sizeof(buf),
+              "body '%s': a buckling solve of %zu degrees of freedom would "
+              "need about %.2f GB, and %.2f GB is free -- its eigensolve "
+              "factors the stiffness directly, so it was not started. A "
+              "coarser mesh_size solves it",
+              jb.bodyName.c_str(), dofs, estimate / 1e9, available / 1e9);
+          return fail(buf);
+        }
+      }
+      // A buckling study's base state: the supports it was solved under,
+      // a pin's contact set held as it settled.
+      std::vector<Supports> settled;
       SolveReport report;
       std::optional<std::vector<FemResults>> all;
       if (in.solver == Solver::Calculix) {
         std::vector<FemResults> res;
-        if (SolveBodyOnCalculix(jb, mats, rhs, g, options, res, report, &err))
+        if (SolveBodyOnCalculix(jb, mats, rhs, g, options, res, report, &err,
+                                buckling ? &settled : nullptr))
           all = std::move(res);
         rt.residual = std::max(rt.residual, report.worstResidual);
         rt.residualFloor =
@@ -1553,9 +1899,11 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
         sup.fixedNodes = jb.fixedNodes;
         sup.reactions = true;
         all = SolveCases(jb.mesh, mats, sup, rhs, &err, g, options, &report);
+        settled.assign(rhs.size(), sup);
       } else {
         report.solver = kDirectSolverName;
-        all = SolveWithPins(jb, mats, rhs, g, options, report, &err);
+        all = SolveWithPins(jb, mats, rhs, g, options, report, &err,
+                            buckling ? &settled : nullptr);
       }
       if (!all)
         return fail("body '" + jb.bodyName + "': " + err);
@@ -1568,6 +1916,33 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       }
       for (FemResults& c : *all)
         FinishSupports(jb, sbr.supportEdgeZone, sbr.edgeOwners, c);
+      if (buckling) {
+        // Held as the base state was: linear theory scales the load
+        // without turning it, so a pin's contact set holds at every factor.
+        if (settled.empty())
+          return fail("body '" + jb.bodyName +
+                      "': the base state left no supports to buckle about");
+        if (options.cancelled && options.cancelled())
+          return fail("cancelled");
+        if (options.solving)
+          options.solving(in.solver == Solver::Calculix
+                              ? "calculix: buckling"
+                              : "buckling eigensolve");
+        std::optional<std::vector<FemResults::ModeShape>> modes;
+        if (in.solver == Solver::Calculix) {
+          std::vector<FemResults::ModeShape> theirs;
+          if (BucklingOnCalculix(jb, mats, settled.front(), jb.faceLoads, g,
+                                 in.numModes, options, theirs, &err))
+            modes = std::move(theirs);
+        } else {
+          modes = SolveBuckling(jb.mesh, mats, settled.front(),
+                                all->front().displacement, in.numModes, &err);
+        }
+        if (!modes)
+          return fail("body '" + jb.bodyName + "': " + err);
+        all->front().modes = std::move(*modes);
+        sbr.buckling = ReadBuckling(jb, mats, all->front());
+      }
       // Several bodies may solve differently; the study names the
       // heaviest solver any body needed, which is the one a reader wants to
       // know about, and why an offered GPU was not it.
@@ -1822,7 +2197,8 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
     rt.convergence = conv;
     return true;
   };
-  if (planIn.type != AnalysisType::Static)
+  if (planIn.type != AnalysisType::Static &&
+      planIn.type != AnalysisType::Buckling)
     return notChecked("a " + std::string(AnalysisTypeToString(planIn.type)) +
                       " study has no peak stress to settle");
   if (converge.mode == ConvergeMode::Never)

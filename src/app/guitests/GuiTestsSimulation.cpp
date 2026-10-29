@@ -339,6 +339,43 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(rt->maxVonMises < 31.5);
   };
 
+  // A buckling study, clicked (docs/simulation/README.md#buckling): the
+  // analysis combo makes the cantilever's study a buckling one with its
+  // three factors, Run solves it, the window lists the factors in place of
+  // frequencies with the governing factor beside them, and picking one
+  // shows its mode.
+  t = IM_REGISTER_TEST(engine, "sim", "a_buckling_run_lists_its_factors");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###ToolWindow/###study_analysis");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Buckling").c_str());
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(studyId);
+    IM_CHECK(st->type == fem::AnalysisType::Buckling);
+    IM_CHECK_EQ(st->numModes, fem::kBucklingFactorsDefault);
+    // CalculiX solves buckling too: the solver combo stays.
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_solver"));
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, studyId));
+    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    IM_CHECK(rt != nullptr && !rt->bodies.empty());
+    IM_CHECK(rt->bodies[0].buckling.solved);
+    IM_CHECK(rt->bodies[0].results.modes.size() >= 2);
+    IM_CHECK(rt->bodies[0].buckling.governingFactor > 0.0);
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###buckle_mode_0"));
+    ctx->ItemClick("//###ToolWindow/###buckle_mode_1");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->simulation.activeMode, 1);
+    IM_CHECK(s_App->simulation.field ==
+             ui::SimulationState::Field::Displacement);
+  };
+
   // The solver combo (docs/simulation/README.md#calculix): there on a
   // static study, CalculiX choosable even where it is not found, and Run
   // then refuses in the window, saying how to install it, starting nothing.
@@ -488,10 +525,11 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   };
 
 #else  // !HAVE_NETGEN
-  LOG_WARN("GUI suite: 3 sim cases NOT registered "
-           "(a_static_run_matches_beam_theory, topology_holds_its_volume_"
-           "target, a_probe_pins_a_face_and_holds_it) — this build has no "
-           "Netgen, so a study cannot be meshed");
+  LOG_WARN("GUI suite: 4 sim cases NOT registered "
+           "(a_static_run_matches_beam_theory, a_buckling_run_lists_its_"
+           "factors, topology_holds_its_volume_target, a_probe_pins_a_face_"
+           "and_holds_it) — this build has no Netgen, so a study cannot be "
+           "meshed");
 #endif // HAVE_NETGEN
 
   // A pressure is a FIELD: one arrow per cell of the face, each standing ON

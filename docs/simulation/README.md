@@ -15,14 +15,14 @@ suppression. On a part the list is read-only: an edit is a command
 though not its version, so it reads unsaved
 ([versioning](../versioning/README.md#unsaved-changes)); a solve writes the
 study's transient fields through `StudyForRun`. Its analysis `type` is
-`static`, `modal` or `topology`.
+`static`, `modal`, `topology` or `buckling` ([buckling](#buckling)).
 
 A study holds:
 
 - `meshSize` (mm; 0 = auto, the body's bounding-box diagonal / 15) and
   per-face `refinements` (a target element size on one face).
-- `converge` (a static study's): `auto`, `always` or `never`, whether a run
-  refines round its peak stress until it settles
+- `converge` (a static or buckling study's): `auto`, `always` or `never`,
+  whether a run refines round its peak stress until it settles
   ([a peak that has settled](#a-peak-that-has-settled)).
 - `loads`: each a `Fixed` support, a `Pin` support (a rigid pin in a bore
   that holds where the part presses on it, [pin supports](#pin-supports)),
@@ -31,8 +31,9 @@ A study holds:
   inward normal, positive pushes into the part), a `Torque` (N·mm about an
   axis) or a `Remote` force (newtons acting at a point off the face)
   ([torque and remote loads](#torque-and-remote-loads)).
-- `gravity` (static only; m/s² in world axes, 0 = off; needs a material
-  density) and `numModes` (modal only; default 6).
+- `gravity` (static and buckling; m/s² in world axes, 0 = off; needs a
+  material density) and `numModes` (modal: default 6; buckling: its number
+  of factors, default 3).
 - `loadCases` (static and topology): forces and pressures grouped into
   cases, each solved on its own over the same supports
   ([load cases](../topopt/README.md#load-cases)).
@@ -671,11 +672,207 @@ away, and the result says "not converged" with the step it stopped at. A static
 study of a topology result solves the result's own tets, which cannot be
 refined, and reports "not checked" with that reason.
 
+## Buckling
+
+A part that fails by buckling passes a static study with a comfortable
+factor of safety: a slender strut, a thin printed wall, a rib, a web or a
+tube looks finished. A **buckling** study (`type: buckling`,
+`fem::AnalysisType::Buckling`) answers by what factor the loads can grow
+before the part loses stability, and in what shape. It is solved in-house,
+with no outside dependency; [CalculiX](#calculix) is its test oracle and a
+second answer on request.
+
+### The method
+
+`fem::SolvePreparedStudy` (`src/core/fem/FemStudy.cpp`), for each body:
+
+1. **The base state** is the study's linear static solve at factor 1, on
+   whichever solver a static study of its size would use (direct, PCG or
+   GPU). A pin's contact set is the one the
+   [pin iteration](#pin-supports) settles on, then held bilaterally: linear
+   theory scales the load without turning it, so the set holds at every
+   factor, and the result's `notes` say so. Gravity is part of the load set
+   and is scaled with the rest, and the notes say that too.
+2. **The geometric stiffness** K_G (`fem::SolveBuckling`,
+   `src/core/fem/FemSolver.cpp`) is assembled from the base state's stress:
+   at each of a tet10's four Gauss points, with stress tensor σ, each pair of
+   nodes adds ∫ ∇N_a · σ · ∇N_b dV to the 3×3 identity block. CalculiX's C3D10
+   uses the same rule, so the same mesh gives the same matrix. A held DOF
+   leaves K_G exactly as it leaves K: both are scattered through one
+   reduction of the supports (the pins' frames and ties included).
+3. **The eigenproblem** −K_G φ = μ K φ is solved for the largest |μ|, with
+   λ = 1/μ: K is the B matrix (positive definite once held) and K_G may be
+   indefinite, which Spectra's `SymGEigsSolver` in Cholesky mode takes as it
+   is (`Spectra::SparseCholesky`, a `SimplicialLLT` of K's lower triangle).
+   The largest positive μ give the smallest positive factors, which govern;
+   a negative one is the factor under the reversed load. When every factor
+   found is negative, the largest algebraic μ is looked for on its own; when
+   there is none either, the body answers `buckling_factor: null` with the
+   reason ("nothing in this load buckles"), never a number picked for it.
+
+`num_modes` is the number of factors and defaults to 3
+(`fem::kBucklingFactorsDefault`): a symmetric section has two equal first
+modes. `load_cases` are refused on a buckling study, by `set_study`, the run
+and the file reader: a factor scales one load set, so each way the part is
+loaded is a study of its own.
+
+**Memory.** The direct factor of K is the limit, and it fills in faster than
+the DOF count grows. `fem::BucklingMemoryEstimate` is calibrated from measured
+runs (the steel column at 5 to 1.35 mm, peak resident memory over the
+process's start: 5.7k DOF 45 MB, 31k 186 MB, 66k 423 MB, 143k 1.17 GB, 205k
+2.01 GB; the hidden `[buckling-calibrate]` case prints them): 1.1 × (60 MB +
+39 B × DOF^1.45), above every measured run. A run it says will not fit is
+refused before anything is solved, naming both numbers: "a buckling solve of
+N degrees of freedom would need about X GB, and Y GB is free". (A modal study
+has no such estimate.)
+
+### What the result says
+
+Each body gets `buckling_factors` (every factor found, signed, ascending by
+magnitude), `buckling_factor` (the smallest positive one) and its mode shapes,
+stored as modal ones are (`ModeShape::factor` beside `frequencyHz`) and shown
+with the deform slider and the mode list. The base state's peak von Mises and
+displacement come beside them (`base_state`).
+
+**The governing number.** Elastic buckling alone over-promises in three ways,
+and each correction is derived from the part (`ReadBuckling`,
+`src/core/fem/FemStudy.cpp`):
+
+- **Imperfection.** A curved wall buckles at a fraction of its linear load.
+  The knockdown is NASA SP-8007's, γ = 1 − 0.901 (1 − e^(−φ)) with
+  φ = √(R/t)/16, where R is the radius of curvature of the cylindrical,
+  conical (r / cos α) or spherical B-Rep face the first mode's motion peaks
+  on, and t is the wall there, measured through the mesh along the inward
+  normal: of the nodes inside one face moving at least nine tenths of the
+  peak, the thinnest wall. A wall with R/t of at least 10 (thin-shell
+  theory's bound, and where SP-8007's tests begin) is a shell of its kind;
+  anything thicker is a `member` and a flat face is `flat`, both with γ = 1:
+  plates and struts are not imperfection-sensitive the way shells are, and
+  the interaction below covers what imperfection does to a stocky strut.
+  `knockdown` {value, class, face, radius_mm, wall_mm}.
+- **Yield.** `yield_factor` = yield ÷ the base state's peak von Mises (each
+  node against the weakest material of the tets that use it). For a printed
+  material also `interlayer_factor` = interlayer strength ÷ the peak tension:
+  the largest principal stress, which bounds the stress across the layers in
+  every direction, or with `layer_normal` the stress across them
+  (`interlayer_from`).
+- **Interaction.** A member near the transition between yielding and
+  buckling fails below both. The factor that governs is Rankine–Gordon's,
+  1/λ_gov = 1/(γ λ_b) + 1/λ_yield, with λ_yield the smaller of the yield and
+  interlayer factors: `governing_factor`, with its three inputs beside it.
+  With no positive buckling factor it is λ_yield; with no strength, γ λ_b.
+
+`factor_of_safety` on a buckling study is its governing factor, and so is
+the requirement quantity `buckling_factor` (`study_result`, used with
+`at_least`), which carries the `not_converged` warning a static peak does.
+A sweep lists it as not swept, as it does every study requirement.
+
+**Honesty flags**, the counterpart of the
+[support-edge flag](#a-peak-on-a-supports-edge):
+
+- `mode_at_load_edge` {load, type, face}: the first mode's peak motion lies
+  at a support's or a load face's edge (within that face's reach, as the
+  support-edge flag measures it), and the mode is local there -- every node
+  moving half the peak or more lies within twice that reach of the peak and
+  within a quarter of the part's size. That is crippling where the load
+  enters, not member buckling. A column's free end moves most too, but its
+  whole length moves with it, so a column is not flagged.
+- `through_thickness`: the first mode bends a wall with one element through
+  it (`wall_layers`, round(wall / element size) where the motion peaks). It
+  is a warning, not a refinement, because measured it reads close: below.
+- **Base-state convergence** follows the study's `converge`, as a static
+  study's does ([a peak that has settled](#a-peak-that-has-settled)): its
+  peaks are the base state's, each refinement re-solves the buckling too,
+  and `convergence` is reported the same way.
+
+The receipt's claim is "governing buckling factor >= 1", basis `predicted`,
+oracle `in_house/buckle` (`calculix/buckle` on CalculiX). Its note says that
+linear buckling is an upper bound the knockdown and the interaction correct,
+and that snap-through -- an arch or a curved wall loaded across its curve --
+needs a nonlinear run (the plan's Stage 4, [calculix-bridge](../plans/calculix-bridge.md)).
+
+### Solver choice
+
+`auto` and `in_house` solve buckling here. `calculix` solves the base state
+as a static CalculiX study does (the answer checked against our K), then runs
+a second deck: `fem::WriteDeck` with a `*BUCKLE` step for `num_modes` factors
+(accuracy 1e-10, where ccx's default is 1 %), under the base state's
+supports and contact set (`fem::BucklingOnCalculix`). The factors and each
+mode's shape are read from the `.dat` (`fem::ReadDatBuckling`; ccx prints the
+modes there as well as in the `.frd`, to seven digits), and the same keys are
+reported with oracle `calculix/buckle`. `export_study_inp` on a buckling study
+writes that deck.
+
+### Measured
+
+**Closed forms** (`tests/test_fem_buckling.cpp`, `[buckling]`, in-house, so
+they run where ccx is absent):
+
+| case | answer | closed form |
+|---|---|---|
+| Euler, fixed–free, 10×10×200 steel, 2.5 mm, 10 204 nodes | 10.2876 | π²EI/4L² = 10.2808 (+0.07 %) |
+| the same 10×20: strong over weak axis | 3.968 | 4 (I ratio; shear takes the rest) |
+| wide cantilever plate, 60×20×1, 2 mm, 4 479 nodes | 67.313 | Et³/12(1−ν²) per width: 67.786 (−0.70 %) |
+| thin cylinder, R/t 25, capped, 2 mm, 33 283 nodes | 730.98; knockdown 0.758 (`cylinder`, the bore's R 24.5 over a 0.98 mm wall) | classical Et/(R√(3(1−ν²))): 760.55 (−3.9 %); SP-8007 at that R/t, exactly |
+| stocky strut, 10×10×128 at 10 kN | buckling 2.508, yield 1.895, governing 1.079 | Rankine–Gordon, to 1e-12 |
+| pure tension | `null`, "nothing in this load buckles" | |
+
+**Through the thickness**, measured before anything was built on it: the
+60×20×1 mm plate's first factor at one element through the wall and at two
+(a refinement on both faces sized to half the wall; the hidden
+`[buckling-measure]` case, `LOBOLE_MEASURE="b L size refine; ..."`).
+
+| mesh | elements through | nodes | factor | against two layers |
+|---|---|---|---|---|
+| 3 mm | 1 | 2 173 | 67.683 | +1.33 % |
+| 2 mm | 1 | 4 479 | 67.313 | +0.77 % |
+| 1.5 mm | 1 | 7 630 | 67.141 | +0.51 % |
+| 1 mm | 1 | 17 108 | 67.022 | +0.33 % |
+| 2 mm, faces at 0.7 | 1 | 33 073 | 66.891 | +0.14 % |
+| 2 mm, faces at 0.5 | 2 | 97 399 | 66.800 | |
+
+One layer is within 2 % of two at every size, and what moves it is the
+in-plane size, not the layers (one layer with faces at 0.7 mm is 0.14 % from
+two), while two layers cost 22 times the nodes and 450 times the time. So a
+buckling study does not refine through the wall: the `through_thickness`
+warning is the only consequence.
+
+**Against CalculiX on the same mesh** (`tests/test_fem_calculix.cpp`,
+`[buckling][calculix]`, solver `auto` against solver `calculix`; the first
+three factors):
+
+| study | nodes | in-house | ccx 2.23 | worst rel. diff. |
+|---|---|---|---|---|
+| column, clamped, pushed and weighed | 2 458 | 10.2909, 10.3401, 83.8821 | 10.29088, 10.34013, 83.88213 | 4.7e-7 |
+| bracket on a pin held from turning | 2 775 | 21.2170, 187.756, 372.208 | 21.21698, 187.7564, 372.2085 | 2.3e-7 |
+| shaft under a torque and a remote load | 4 254 | 48.9415, 49.1254, 294.871 | 48.94147, 49.12543, 294.871 | 6.0e-8 |
+| steel column bonded to aluminium (assembly) | 2 936 | 6.27630, 6.27748, 79.6168 | 6.276302, 6.277484, 79.61677 | 6.4e-8 |
+
+The same element and rule are used on both sides, so this measures K_G and
+the eigensolve, not the physics; the agreement is the seven digits ccx
+prints.
+
+**Cost**: the column at 1.28 mm, 216 921 DOF (Netgen's nearest to 240k),
+three factors, mesh to modes: 177 s of CPU on a P-core and 602 s pinned to an
+E-core, peak 2.12 GB against an estimate of 2.41 GB. The `[slow]` cost check
+bounds it at twice the E-core's, 1200 s. A direct factor of a tet10 mesh is
+what it costs: a static study that size solves iteratively in a fraction of
+it, and the eigensolve cannot.
+
+Tests: `tests/test_fem_buckling.cpp` (the closed forms, the refusals -- load
+cases, a run over the memory free -- and the result's round trip),
+`tests/test_fem_calculix.cpp` (the cross-check), `tests/buckling_smoke.py`
+(a column through the RPCs alone: the study, a `buckling_factor`
+requirement unchecked then checked, the factor, the receipt),
+`refused_calls_smoke` (load cases on a buckling study, an unknown analysis
+type).
+
 ## The solver
 
 `src/core/fem/FemSolver.{h,cpp}` and `FemSolverInternal.h` (the element math
 shared with topology optimization), namespace `fem`, GUI-free. Gated
-`HAVE_FEM_SOLVER` on Eigen and `HAVE_SPECTRA` on Spectra (modal only).
+`HAVE_FEM_SOLVER` on Eigen and `HAVE_SPECTRA` on Spectra (modal and
+buckling).
 
 - **Static** (`fem::Solve`, or `fem::SolveCases` for several load cases on
   one K): tet10 isotropic elasticity, 4-point Gauss rule, triplet assembly
@@ -852,17 +1049,18 @@ A static study can be solved on CalculiX (`ccx`) instead of in-house:
 `set_study {solver: calculix}`, or the panel's **Solver** combo. It is the
 same study -- the same Netgen mesh, loads, supports and materials, the same
 results and checks -- answered by a second, independent program. The code is
-`src/core/fem/Calculix.{h,cpp}`. Buckling and nonlinear analysis are what the
-bridge was built for and are not built yet
-([the plan](../plans/calculix-bridge.md)).
+`src/core/fem/Calculix.{h,cpp}`. A [buckling](#buckling) study solves there
+too, as its cross-check. Nonlinear analysis is what the bridge was built for
+and is not built yet ([the plan](../plans/calculix-bridge.md)).
 
 ### The solver choice
 
 A study's `solver` is `auto`, `in_house` or `calculix` (`fem::Solver`;
 absent from the file when `auto`, v204). `auto` and `in_house` solve every
-analysis in-house. `calculix` solves a **static** study only: on a modal or
-topology study it is refused (`fem::SolverRefusal`) by `set_study`, by the
-panel, by the file reader and by the run, never quietly solved in-house. The
+analysis in-house. `calculix` solves a **static** or **buckling** study only:
+on a modal or topology study it is refused (`fem::SolverRefusal`) by
+`set_study`, by the panel, by the file reader and by the run, never quietly
+solved in-house. The
 serialized study carries the key, so the input hash moves with it only when it
 is not `auto`: every result saved before keeps its hash.
 
@@ -1085,10 +1283,11 @@ deformation scale (so the slider needs no re-upload) and coloured through an
 analytic Turbo colormap. It shares the scene's clip planes, so a section
 cuts a stress plot like everything else. While a field is shown it stands in
 for the solved body (or every solved occurrence of an assembly study).
-Fields: von Mises, displacement magnitude, a modal mode shape, and the
-topology views. The legend names the study and analysis, the quantity with
-quarter ticks, the deformation factor, the mode and frequency of a modal
-result, and where the maximum is, marked in the viewport by a cross.
+Fields: von Mises, displacement magnitude, a modal or buckling mode shape,
+and the topology views. The legend names the study and analysis, the
+quantity with quarter ticks, the deformation factor, the mode and frequency
+of a modal result (its load factor for a buckling one), and where the
+maximum is, marked in the viewport by a cross.
 
 `set_result_display` colours the raster viewport, which is what `screenshot`
 captures. `render_still` renders the model, not the field.
@@ -1139,8 +1338,11 @@ tinted as a fixture, and bonded seams in the bond colour.
   viewport to change its magnitude (one undo step on release). Run shows the
   shared progress bar. Results: mesh size, max von Mises, max displacement,
   field selector and deformation slider; for modal, the natural frequencies
-  (selecting one shows its mode shape) and a mode-shape toggle. The factor of
-  safety is reported over RPC only.
+  (selecting one shows its mode shape) and a mode-shape toggle; for
+  buckling, the **Buckling factors** list (selecting one shows its mode),
+  the governing factor with the knockdown and its class, the yield and
+  interlayer factors, and the flags as text. The factor of safety is
+  reported over RPC only.
 - **Probes** (a solved static part study): arm **Probe**, hover a face to
   read its max and mean von Mises at the cursor, click to pin it. Each pin
   is a row, "<face>  max 2.1  mean 1.4 MPa" in the case shown, with a small
@@ -1161,9 +1363,9 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 | method | what it does |
 |---|---|
-| `add_study {type?, name?}` | `type`: static \| modal \| topology (`kind` accepted) |
+| `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's: refused on another unless the same call sets `type: modal`, which is applied first), `participants`, `load_cases`, `shape_from`, and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants`, `load_cases`, `shape_from`, and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
@@ -1171,10 +1373,10 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `run_study {id, async?, recompute?, outlive_client?, timeout_s?, converge?, layer_normal?}` | mesh + solve, and on a static study settle its peak ([a peak that has settled](#a-peak-that-has-settled)): `converge` overrides the study's for this run, `layer_normal` is the build direction whose across-layers peak a printed part's check settles; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)) |
 | `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static study would run, meshed now, no ccx needed ([the deck](#the-deck)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)) |
 | `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
-| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `case`: which load case a static study shows |
+| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows |
 | `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
 
 ## Tests
@@ -1218,6 +1420,12 @@ verb that names a study for context (`add_load`, `add_refinement`,
   % across auto, 1.5 and 0.75 mm (`[slow]`); a support's reach; the stress
   across layers read away from a clamp, before and after the result is cut
   to its surface.
+- `tests/test_fem_buckling.cpp` (`[buckling]`): Euler's column and its
+  strong axis, a wide plate's stiffness, a thin cylinder's classical load
+  and its SP-8007 knockdown (`[slow]`), Rankine-Gordon on a stocky strut, a
+  pull that buckles nothing, the refusals, the saved result's round trip,
+  and the 217k-DOF cost check (`[slow]`); `tests/buckling_smoke.py` over
+  the RPCs ([buckling](#buckling)).
 - `tests/fem_smoke.py`, `tests/fem_async_smoke.py`: the RPC surface
   headless, including an assembly tab; the async one also a reused run, a
   job's status by id and a cancel by id. Both skip (exit 77) on a build without
@@ -1235,8 +1443,9 @@ verb that names a study for context (`add_load`, `add_refinement`,
 ## Not done
 
 - Contact that can separate or slide between parts (a pin against its
-  rigid pin is the one compression-only contact), and nonlinear analysis (plasticity,
-  large deformation), thermal, buckling, fatigue. They come through
+  rigid pin is the one compression-only contact), and nonlinear analysis
+  (plasticity, large deformation, snap-through and post-buckling), thermal,
+  fatigue. They come through
   [CalculiX](#calculix), not by growing this solver past linear
   ([the plan](../plans/calculix-bridge.md)).
 - Free-free modal analysis (a modal study needs a support).

@@ -340,6 +340,8 @@ bool AddStudyCommand::Execute(Document& doc) {
   if (m_id == 0) {
     fem::Study& s = doc.AddStudy(m_name);
     s.type = m_type; // AddStudy stamped; the type is part of the same edit
+    if (m_type == fem::AnalysisType::Buckling)
+      s.numModes = fem::kBucklingFactorsDefault;
     m_id = s.id;
     m_name = s.name; // capture the auto-generated name for redo/description
   } else {
@@ -349,6 +351,8 @@ bool AddStudyCommand::Execute(Document& doc) {
     s.id = m_id;
     s.name = m_name;
     s.type = m_type;
+    if (m_type == fem::AnalysisType::Buckling)
+      s.numModes = fem::kBucklingFactorsDefault;
     doc.RestoreStudy(std::move(s));
   }
   return true;

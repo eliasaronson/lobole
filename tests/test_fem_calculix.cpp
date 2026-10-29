@@ -290,8 +290,11 @@ TEST_CASE("no CalculiX: every way to install it is named, and nothing starts",
   CHECK(rt.bodies.empty());
 }
 
-TEST_CASE("CalculiX solves static studies only", "[fem][calculix]") {
+TEST_CASE("CalculiX solves static and buckling studies only",
+          "[fem][calculix]") {
   CHECK(fem::SolverRefusal(fem::Solver::Calculix, fem::AnalysisType::Static)
+            .empty());
+  CHECK(fem::SolverRefusal(fem::Solver::Calculix, fem::AnalysisType::Buckling)
             .empty());
   CHECK_THAT(
       fem::SolverRefusal(fem::Solver::Calculix, fem::AnalysisType::Modal),
@@ -863,6 +866,227 @@ TEST_CASE("the deck export_study_inp writes is one ccx runs",
   for (const glm::dvec3& d : u)
     peak = std::max(peak, glm::length(d));
   CHECK(peak > 0.0);
+}
+
+// ---- Buckling on the same mesh
+// -----------------------------------------------
+//
+// The same element and Gauss rule on both sides, so this measures K_G and
+// the eigensolve (docs/simulation/README.md#buckling), not the physics:
+// the first three factors agree to 1e-4.
+
+namespace {
+
+void BucklingBoth(fem::StudyJobInput input, const fem::CalculixInstall& ccx,
+                  const char* what) {
+  Scratch scratch;
+  input.type = fem::AnalysisType::Buckling;
+  input.numModes = fem::kBucklingFactorsDefault;
+  fem::StudyJobInput onCcx = input;
+  input.solver = fem::Solver::Auto;
+  onCcx.solver = fem::Solver::Calculix;
+  fem::StudyRuntime own, theirs;
+  std::string err;
+  const bool ownOk = fem::SolvePreparedStudy(input, own, &err);
+  INFO(err);
+  REQUIRE(ownOk);
+  fem::SolveOptions options;
+  options.calculix = RunWith(ccx, scratch.dir / "runs");
+  const bool theirOk = fem::SolvePreparedStudy(onCcx, theirs, &err, options);
+  INFO(err);
+  REQUIRE(theirOk);
+  REQUIRE(own.bodies.size() == theirs.bodies.size());
+  for (size_t b = 0; b < own.bodies.size(); ++b) {
+    const auto& a = own.bodies[b].results.modes;
+    const auto& c = theirs.bodies[b].results.modes;
+    REQUIRE(a.size() >= 3);
+    REQUIRE(c.size() >= 3);
+    double worst = 0.0;
+    std::string line;
+    for (size_t m = 0; m < 3; ++m) {
+      // ccx's factor nearest ours: the two may order a pair of equal ones
+      // differently.
+      double best = 1e300;
+      for (const auto& theirsMode : c)
+        best = std::min(best, Rel(a[m].factor, theirsMode.factor));
+      worst = std::max(worst, best);
+      char buf[96];
+      std::snprintf(buf, sizeof(buf), " %.9g/%.9g", a[m].factor, c[m].factor);
+      line += buf;
+    }
+    std::printf("calculix buckling %s (%zu nodes): factors in-house/ccx%s, "
+                "worst rel %.2e\n",
+                what, own.bodies[b].mesh.stats.nodeCount, line.c_str(), worst);
+    CHECK(worst < 1e-4);
+    CHECK(theirs.bodies[b].buckling.solved);
+  }
+  CHECK(EntriesIn(scratch.dir / "runs") == 0);
+}
+
+} // namespace
+
+TEST_CASE("CalculiX and the in-house solver buckle a column at the same "
+          "factors",
+          "[fem][calculix][buckling][run]") {
+  REQUIRE_CCX(ccx);
+  Document doc;
+  auto box =
+      std::make_unique<BoxFeature>("Column", glm::dvec3(0), 10.0, 10.0, 200.0);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const Body& body = doc.GetBodies()[0];
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  fem::Study& s = doc.AddStudy("Column");
+  s.type = fem::AnalysisType::Buckling;
+  s.meshSize = 4.0;
+  s.loads.push_back(
+      MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", isZ(0.0))));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Force,
+                             FaceWhere(body, "plane", isZ(200.0)), 1000.0,
+                             glm::dvec3(0.1, 0, -1)));
+  s.gravity = glm::dvec3(0, 0, -9.81);
+  BucklingBoth(Meshed(doc, s), *ccx, "column");
+}
+
+TEST_CASE("CalculiX and the in-house solver buckle a bracket on a pin at the "
+          "same factors",
+          "[fem][calculix][buckling][run]") {
+  REQUIRE_CCX(ccx);
+  Document doc;
+  auto plate =
+      std::make_unique<BoxFeature>("Plate", glm::dvec3(0), 80.0, 20.0, 4.0);
+  plate->SetMaterial("aluminum");
+  doc.AddFeature(std::move(plate));
+  const uint64_t solid = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::dvec3(12.0, 10.0, -1.0), glm::dvec3(0, 0, 1), 4.0, 6.0));
+  const uint64_t tool = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  doc.AddFeature(std::make_unique<BooleanFeature>("Bore", solid, tool,
+                                                  BooleanOp::Subtract));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Bracket");
+  s.type = fem::AnalysisType::Buckling;
+  s.meshSize = 3.0;
+  fem::Load pin = MakeLoad(
+      doc, fem::LoadType::Pin,
+      FaceWhere(body, "cylinder", [](const glm::dvec3&) { return true; }));
+  pin.fixRotation = true;
+  s.loads.push_back(pin);
+  // Pushed along its length from the far end: onto the pin, and buckling
+  // out of its plane.
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Force,
+                             FaceWhere(body, "plane",
+                                       [](const glm::dvec3& c) {
+                                         return std::abs(c.x - 80.0) < 1e-6;
+                                       }),
+                             200.0, glm::dvec3(-1, 0, 0)));
+  BucklingBoth(Meshed(doc, s), *ccx, "bracket on a pin");
+}
+
+TEST_CASE("CalculiX and the in-house solver buckle a shaft under a torque "
+          "and a remote load at the same factors",
+          "[fem][calculix][buckling][run]") {
+  REQUIRE_CCX(ccx);
+  Document doc;
+  auto cyl = std::make_unique<CylinderFeature>("Shaft", glm::dvec3(0, 0, 0),
+                                               glm::dvec3(0, 0, 1), 3.0, 80.0);
+  cyl->SetMaterial("steel");
+  doc.AddFeature(std::move(cyl));
+  const Body& body = doc.GetBodies()[0];
+  const ElementRef side =
+      FaceWhere(body, "cylinder", [](const glm::dvec3&) { return true; });
+  const ElementRef bottom =
+      FaceWhere(body, "plane", [](const glm::dvec3& c) { return c.z < 40.0; });
+  const ElementRef top =
+      FaceWhere(body, "plane", [](const glm::dvec3& c) { return c.z > 40.0; });
+  fem::Study& s = doc.AddStudy("Twist");
+  s.type = fem::AnalysisType::Buckling;
+  s.meshSize = 1.5;
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Fixed, bottom));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Torque, side, 2000.0));
+  fem::Load remote =
+      MakeLoad(doc, fem::LoadType::Remote, top, 100.0, glm::dvec3(0, 0.2, -1));
+  remote.point = glm::dvec3(5.0, 0.0, 90.0);
+  remote.hasPoint = true;
+  s.loads.push_back(remote);
+  BucklingBoth(Meshed(doc, s), *ccx, "torque and remote load");
+}
+
+TEST_CASE("CalculiX and the in-house solver buckle a steel column bonded to "
+          "an aluminium one at the same factors",
+          "[fem][calculix][buckling][run]") {
+  REQUIRE_CCX(ccx);
+  auto lower = std::make_unique<Document>();
+  auto upper = std::make_unique<Document>();
+  for (auto [d, mat] :
+       {std::pair{lower.get(), "aluminum"}, std::pair{upper.get(), "steel"}}) {
+    auto box = std::make_unique<BoxFeature>("Block", glm::vec3(0.0f), 10.0,
+                                            10.0, 80.0);
+    box->SetMaterial(mat);
+    d->AddFeature(std::move(box));
+  }
+  AssemblyDocument asmDoc;
+  Occurrence lo;
+  lo.name = "Lower";
+  lo.partId = 1;
+  lo.fixed = true;
+  const uint64_t lowerOcc = asmDoc.AddOccurrence(lo);
+  Occurrence up;
+  up.name = "Upper";
+  up.partId = 2;
+  up.position = glm::vec3(0.0f, 0.0f, 80.0f);
+  const uint64_t upperOcc = asmDoc.AddOccurrence(up);
+  fem::AssemblyStudyContext ctx;
+  ctx.placedBodies = [&](uint64_t occId) {
+    std::vector<Body> out;
+    const Document* part = occId == lowerOcc ? lower.get() : upper.get();
+    const glm::mat4 world = glm::translate(
+        glm::mat4(1.0f),
+        occId == lowerOcc ? glm::vec3(0.0f) : glm::vec3(0.0f, 0.0f, 80.0f));
+    for (const Body& b : part->GetBodies()) {
+      Body nb = b;
+      nb.shape = b.shape.Transformed(world);
+      out.push_back(std::move(nb));
+    }
+    return out;
+  };
+  const auto faceAtZ = [](const Document& d, double z) {
+    return FaceWhere(d.GetBodies()[0], "plane", [z](const glm::dvec3& c) {
+      return std::abs(c.z - z) < 1e-6;
+    });
+  };
+  fem::Study s;
+  s.id = 2;
+  s.name = "bonded";
+  s.type = fem::AnalysisType::Buckling;
+  s.meshSize = 4.0;
+  s.participants.push_back({upperOcc, fem::ParticipantRole::Meshed, 0.0, ""});
+  s.participants.push_back({lowerOcc, fem::ParticipantRole::Bonded, 0.0, ""});
+  fem::Load fix;
+  fix.id = 20;
+  fix.type = fem::LoadType::Fixed;
+  fix.occurrenceId = lowerOcc;
+  fix.face = ElementRef{0, faceAtZ(*lower, 0.0).name};
+  s.loads.push_back(fix);
+  fem::Load press;
+  press.id = 21;
+  press.type = fem::LoadType::Force;
+  press.occurrenceId = upperOcc;
+  press.face = ElementRef{0, faceAtZ(*upper, 80.0).name};
+  press.magnitude = 1000.0;
+  press.direction = glm::dvec3(0, 0, -1);
+  s.loads.push_back(press);
+  fem::StudyPlan plan;
+  std::string err;
+  REQUIRE(fem::PlanAssemblyStudy(asmDoc, s, ctx, plan, &err));
+  fem::StudyJobInput input;
+  REQUIRE(fem::MeshPlannedStudy(plan, input, &err));
+  REQUIRE(input.bodies.size() == 1);
+  REQUIRE(input.bodies[0].materials.size() == 2);
+  BucklingBoth(input, *ccx, "bonded steel on aluminium");
 }
 #endif // HAVE_NETGEN
 

@@ -36,6 +36,11 @@ struct Material {
   // frequencies come out in rad/s -> Hz). Convert the library's kg/m^3 by
   // *1e-12. 0 = unused (static without gravity).
   double densityTPerMM3 = 0.0;
+  // The library's strengths, MPa (0 = none): yield, and across a printed
+  // part's layers. Not read by a solve; a buckling study's yield and
+  // interlayer factors are (docs/simulation/README.md#buckling).
+  double yieldMPa = 0.0;
+  double interlayerMPa = 0.0;
 };
 
 // A traction boundary condition on one B-Rep face, given as the boundary
@@ -121,9 +126,12 @@ struct FemResults {
 
   // Modal analysis results (empty for a static study). One entry per computed
   // mode, ascending frequency; displacement is the normalized mode shape.
+  // A buckling study's modes carry their load factor (signed: a negative
+  // one buckles under the reversed load) and no frequency.
   struct ModeShape {
     double frequencyHz = 0.0;
     std::vector<glm::dvec3> displacement; // normalized (max |u| = 1)
+    double factor = 0.0;
   };
   std::vector<ModeShape> modes;
 };
@@ -327,6 +335,25 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
            const std::vector<int>& fixedNodes, int numModes,
            std::string* error);
 
+// Linear buckling (docs/simulation/README.md#buckling) about the base state
+// `baseDisplacement` (the static answer under `supports`, one per node):
+// the geometric stiffness K_G is assembled from its stress at each tet10's
+// four Gauss points, and -K_G phi = mu K phi solved for the largest |mu|
+// (K is factored by Cholesky; K_G may be indefinite), lambda = 1 / mu. Up
+// to `numFactors` modes, ascending by |factor|, each with its signed factor
+// and its shape normalized to max |u| = 1. When every one found is negative
+// the smallest positive one is looked for on its own. Empty when the load
+// has no positive factor (nothing in it buckles) -- or only negative ones.
+std::optional<std::vector<FemResults::ModeShape>>
+SolveBuckling(const FemMesh& mesh, const std::vector<Material>& byDomain,
+              const Supports& supports,
+              const std::vector<glm::dvec3>& baseDisplacement, int numFactors,
+              std::string* error);
+// The memory a buckling solve of `freeDofs` free DOF is estimated to take,
+// bytes: K, K_G and the Cholesky factor of K, which fills in steeply.
+// Calibrated from measured runs: the comment at its definition says which.
+uint64_t BucklingMemoryEstimate(size_t freeDofs);
+
 // True when the build links Eigen (static solver) / Spectra (modal).
 bool SolverAvailable();
 bool ModalAvailable();
@@ -414,6 +441,44 @@ struct StudyBodyResult {
   // before v206.
   std::vector<int> supportEdgeZone;
   std::vector<FemResults::SupportReaction> edgeOwners;
+  // A buckling body (docs/simulation/README.md#buckling): `results` is the
+  // base state and its modes the buckling modes; this is what was read off
+  // them.
+  struct Buckling {
+    bool solved = false;
+    // The smallest positive factor; none (`buckles` false, `none` the
+    // reason) when nothing in the load buckles.
+    bool buckles = false;
+    double factor = 0.0;
+    std::string none;
+    // The imperfection knockdown (NASA SP-8007) of the face the first
+    // mode's peak motion lies on: its class (flat, member, cylinder, cone,
+    // sphere), radius and wall there; 1 on a flat face or a member.
+    std::string shapeClass;
+    double knockdown = 1.0;
+    int face = -1;
+    double radiusMm = 0.0;
+    double wallMm = 0.0;
+    // yield / peak von Mises, and interlayer strength / peak tension (the
+    // largest principal stress, which bounds the stress across the layers
+    // in every direction) of the base state; 0 = no such strength.
+    double yieldFactor = 0.0;
+    double interlayerFactor = 0.0;
+    // 1/governing = 1/(knockdown x factor) + 1/min(yield, interlayer).
+    double governingFactor = 0.0;
+    // The first mode's peak motion lies at a support's or load's edge, and
+    // the mode is local there: crippling where the load enters.
+    bool atLoadEdge = false;
+    uint64_t edgeLoad = 0;
+    std::string edgeType;
+    int edgeFace = -1;
+    // Elements through the wall the first mode bends, where its motion
+    // peaks (round(wall / element size)); 0 = not measured. One is a
+    // warning, not a refinement: measured on a 1 mm plate, one element
+    // through it reads within 1.3 % of two.
+    int wallLayers = 0;
+  };
+  Buckling buckling;
   // The results of case `k` (the only ones when there are no cases).
   const FemResults& Case(int k) const {
     return k >= 0 && k < static_cast<int>(cases.size()) ? cases[k] : results;
@@ -587,6 +652,17 @@ struct StudyJobBody {
   std::vector<FaceLoad> faceLoads;
   // With load cases: each case's face loads (`faceLoads` is then empty).
   std::vector<std::vector<FaceLoad>> caseLoads;
+  // A buckling study: each curved face of the meshed shape (its index),
+  // for the knockdown of the face a mode peaks on. Read off the shape where
+  // it is meshed.
+  struct CurvedFace {
+    std::string kind;       // cylinder, cone, sphere
+    glm::dvec3 origin{0.0}; // a point on the axis, or the sphere's centre
+    glm::dvec3 axis{0.0, 0.0, 1.0};
+    double radius = 0.0;    // cylinder, sphere
+    double semiAngle = 0.0; // cone, radians
+  };
+  std::map<int, CurvedFace> curvedFaces;
 };
 struct StudyJobInput {
   AnalysisType type = AnalysisType::Static;

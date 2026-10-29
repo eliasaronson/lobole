@@ -85,7 +85,9 @@ const MethodDoc RequirementMethods[] = {
      "study, or a formula over several faces' readings and the project's "
      "variables), "
      "study_result {document, study, quantity: max_displacement|"
-     "max_von_mises|factor_of_safety, case?}, clearance {document: "
+     "max_von_mises|factor_of_safety|buckling_factor, case?} (on a "
+     "buckling study buckling_factor and factor_of_safety both read its "
+     "governing factor), clearance {document: "
      "assembly, a, b: occurrence ids, mode?: mesh|exact, motion_study?: the "
      "smallest gap over that study's samples}, contact {document, a, b, "
      "expect: clear|touching|not_clashing}, seal {document: assembly, a, "
@@ -191,7 +193,12 @@ const MethodDoc RequirementMethods[] = {
      "study peak that has not converged (docs/simulation/README.md"
      "#a-peak-that-has-settled) is judged on the value it has, carries "
      "`not_converged` (the reason) in its detail, and is listed again "
-     "under `not_converged`.",
+     "under `not_converged`. A buckling study's buckling_factor and "
+     "factor_of_safety are its governing factor (buckling knocked down and "
+     "met with yield; docs/simulation/README.md#buckling), its warnings "
+     "(a mode local at a load's edge, one element through a wall) in the "
+     "detail. A study requirement whose study was never run is `unchecked`: "
+     "not met.",
      "async, ids, outlive_client, recompute", NotInBatch,
      "all_pass?:bool, checked?:int, receipt?:{claims:object[], "
      "schema:string, standing:string, summary:string}, "
@@ -1195,8 +1202,33 @@ Taken MeasureStudyResult(ui::AppState& state, const json& m, const Ctx& ctx) {
       throw std::runtime_error("the study has no load case " + want.dump());
   }
   const std::string q = m.at("quantity").get<std::string>();
+  const bool buckling = r.value("type", std::string()) == "buckling";
+  if (q == "buckling_factor" && !buckling)
+    throw std::runtime_error("buckling_factor is read from a buckling "
+                             "study, and this one is " +
+                             r.value("type", std::string("static")));
+  if (buckling && q != "buckling_factor" && q != "factor_of_safety")
+    throw std::runtime_error(
+        "a buckling study answers buckling_factor and factor_of_safety (both "
+        "its governing factor); " +
+        q + " is a static study's");
   if (q != "max_displacement")
     NoteConvergence(r, t);
+  if (q == "buckling_factor") {
+    // The governing factor (docs/simulation/README.md#buckling): buckling
+    // knocked down for imperfection, with yield, Rankine-Gordon.
+    if (!r.contains("governing_factor") || r.at("governing_factor").is_null())
+      throw std::runtime_error(
+          r.value("why_none", std::string("no buckling factor")) +
+          ", and no material has a yield strength to bound it");
+    t.value = r.at("governing_factor").get<double>();
+    if (!t.detail.is_object())
+      t.detail = json::object();
+    t.detail["buckling_factor"] = r.at("buckling_factor");
+    if (r.contains("warnings"))
+      t.detail["warnings"] = r.at("warnings");
+    return t;
+  }
   if (q == "max_displacement") {
     t.value = src->at("max_displacement_mm").at("value").get<double>();
     t.unit = "mm";

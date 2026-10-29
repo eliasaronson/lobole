@@ -1110,6 +1110,26 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(1).get<std::string>());
     }
   }
+  // vNEXT: a buckling study, its number of factors and its base state's
+  // converge. A study read back as static would answer a factor of safety
+  // where a buckling factor was asked for; each [study name, analysis,
+  // num_modes, converge] must hold, the default number of factors included.
+  if (expect.contains("study_buckling")) {
+    for (const auto& want : expect.at("study_buckling")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("study " << name);
+      const fem::Study* found = nullptr;
+      for (const fem::Study& st : doc.GetStudies())
+        if (st.name == name)
+          found = &st;
+      REQUIRE(found != nullptr);
+      CHECK(std::string(fem::AnalysisTypeToString(found->type)) ==
+            want.at(1).get<std::string>());
+      CHECK(found->numModes == want.at(2).get<int>());
+      CHECK(std::string(fem::ConvergeModeToString(found->converge)) ==
+            want.at(3).get<std::string>());
+    }
+  }
   // v168: an extrude's twist. A twisted rectangle has the prism's volume, so
   // the volumes above cannot see a twist dropped on load; each [extrude
   // name, twist_deg, twist_expr, herringbone] must hold.

@@ -1,0 +1,8 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [7853.98],
+  "study_buckling": [["Buckle", "buckling", 3, "auto"],
+                     ["Defaulted", "buckling", 3, "never"],
+                     ["Five", "buckling", 5, "auto"]]
+}

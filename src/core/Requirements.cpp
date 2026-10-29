@@ -282,8 +282,8 @@ void ValidateValues(const std::string& kind, const json& m) {
     oneOf("quantity", {"liftoff_rpm", "drop_rpm", "pressure_angle_deg",
                        "deviation_mm", "deviation_deg", "gap_mm", "gap_deg"});
   } else if (kind == "study_result") {
-    oneOf("quantity",
-          {"max_displacement", "max_von_mises", "factor_of_safety"});
+    oneOf("quantity", {"max_displacement", "max_von_mises", "factor_of_safety",
+                       "buckling_factor"});
   } else if (kind == "clearance" || kind == "contact" || kind == "seal" ||
              kind == "insertion") {
     if (kind == "clearance")

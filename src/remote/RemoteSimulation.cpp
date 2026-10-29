@@ -44,6 +44,13 @@ namespace remote {
 
 namespace {
 
+// A study whose loads make a stress to settle and whose supports may be
+// pins: a static one, and a buckling one, whose base state is a static
+// solve (docs/simulation/README.md#buckling).
+bool SettlesStress(fem::AnalysisType t) {
+  return t == fem::AnalysisType::Static || t == fem::AnalysisType::Buckling;
+}
+
 // Which study a verb that ACTS ON one is addressing.
 //
 // `id` is what every other object in this API answers to — a mate, a
@@ -439,10 +446,15 @@ static constexpr MethodDoc SimulationMethods[] = {
      "study"},
     {"exit_simulation", "Leave simulation mode.", ""},
     {"add_study",
-     "Add a study {type: static|modal|topology, name?}. `kind` is accepted "
-     "for the same thing — the enum, the file and `list_studies` all say "
-     "`type`, and so do add_mate/add_load/add_cam_op/add_relation. A new "
-     "study's solver is auto (in-house); set_study `solver` changes it.",
+     "Add a study {type: static|modal|topology|buckling, name?}. `kind` is "
+     "accepted for the same thing — the enum, the file and `list_studies` "
+     "all say `type`, and so do add_mate/add_load/add_cam_op/add_relation. "
+     "A new study's solver is auto (in-house); set_study `solver` changes "
+     "it. A part that carries a load gets a static study of each way it is "
+     "loaded AND a buckling study of each load that compresses something "
+     "(struts, ribs, thin walls, tubes, levers in compression), with "
+     "requirements on factor_of_safety and buckling_factor: a part that "
+     "buckles passes its static study (docs/simulation/README.md#buckling).",
      "kind, name, type"},
     {"remove_study",
      "Remove a study {id}. `study` names the same thing here and in every "
@@ -458,7 +470,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "id:int, "
      "keep_faces?:int, keep_outs?:object[], load_cases?:object[], "
      "loads:object[], max_iterations?:int, mesh_size:number, "
-     "name:string, refinements:int, stale:bool, type:string, "
+     "name:string, num_modes?:int, refinements:int, stale:bool, type:string, "
      "volume_fraction?:number, shape_from?:object, solver?:string, "
      "participants?:object[]}[]"},
     {"set_study",
@@ -489,7 +501,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "true} (every tet of its design domain, the solid reference); null "
      "clears it "
      "(docs/topopt/README.md#a-static-study-of-the-optimised-shape). "
-     "`num_modes` is a modal study's, and `volume_fraction`, "
+     "`num_modes` is a modal study's (its frequencies) or a buckling "
+     "study's (its factors; default 3, as a symmetric section has two "
+     "equal first modes), and `volume_fraction`, "
      "`filter_radius` and `max_iterations` a topology study's: each is "
      "refused on another type unless the same call sets that type (type "
      "is applied first). `solver` is auto|in_house|calculix: auto and "
@@ -498,10 +512,13 @@ static constexpr MethodDoc SimulationMethods[] = {
      "at run_study when no ccx is found, naming how to install one) on the "
      "same mesh, loads and supports, as a second, independent answer whose "
      "displacement is checked against this study's own stiffness "
-     "(docs/simulation/README.md#calculix). `converge` is a static "
-     "study's: auto (the default) | always | never -- whether a run refines "
-     "round its peak stress until it settles (docs/simulation/README.md"
-     "#a-peak-that-has-settled); anything else is refused, naming the three.",
+     "(docs/simulation/README.md#calculix); it solves a BUCKLING study "
+     "there too (*BUCKLE). A buckling study takes no `load_cases` (a factor "
+     "scales one load set). `converge` is a static or buckling (its base "
+     "state) study's: auto (the default) | always | never -- whether a run "
+     "refines round its peak stress until it settles "
+     "(docs/simulation/README.md#a-peak-that-has-settled); anything else is "
+     "refused, naming the three.",
      "converge, filter_radius, gravity, id, load_cases, max_iterations, "
      "mesh_size, name, num_modes, participants, shape_from, solver, study, "
      "type, "
@@ -545,7 +562,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "compression only, found by a short iteration of solves -- and lets it "
      "turn about the axis unless `fix_rotation: true`. A part free to turn "
      "on one pin, or one the loads lift off its pins, is refused, naming "
-     "the free motion. Static part studies only; it takes no magnitude or "
+     "the free motion. Static and buckling part studies only (a buckling "
+     "study holds the contact its base state settled on, at every factor); "
+     "it takes no magnitude or "
      "direction (docs/simulation/README.md#pin-supports).",
      "axis_dir, axis_origin_mm, case, contact_with, direction, face, "
      "fix_rotation, force_n, magnitude, occurrence, point_mm, region, "
@@ -748,13 +767,34 @@ static constexpr MethodDoc SimulationMethods[] = {
      "[{refined [{body, face, size_mm}], nodes, seconds, peaks [{body, "
      "quantity, away_from_support_edge, mpa}]}]} "
      "(docs/simulation/README.md#a-peak-that-has-settled), and the receipt "
-     "says whether its peak converged.",
+     "says whether its peak converged. A BUCKLING result "
+     "(docs/simulation/README.md#buckling) carries, per body, "
+     "`buckling_factors` (every factor found, signed -- a negative one "
+     "buckles under the reversed load -- ascending by magnitude), "
+     "`buckling_factor` (the smallest positive; null with `why_none` when "
+     "nothing in the load buckles), `knockdown` {value, class: flat | "
+     "member | cylinder | cone | sphere, face?, radius_mm?, wall_mm?} (NASA "
+     "SP-8007 on a curved wall the first mode peaks on; 1 on a flat face "
+     "or a member), `yield_factor` (yield / peak von Mises of the base "
+     "state, factor 1), `interlayer_factor` (a printed material: interlayer "
+     "strength / peak tension, `interlayer_from` max_principal, or "
+     "across_layers with `layer_normal`), `governing_factor` (1/g = "
+     "1/(knockdown x buckling) + 1/min(yield, interlayer): Rankine-Gordon), "
+     "`base_state` {max_von_mises_mpa, max_displacement_mm}, and the flags "
+     "`mode_at_load_edge` {load, type, face} (the first mode is local "
+     "where a load enters: crippling, not member buckling) and "
+     "`through_thickness` (the mode bends a wall with one element through "
+     "it). The top level has buckling_factor, governing_factor, "
+     "factor_of_safety (= governing_factor), `notes`, `warnings`, "
+     "`convergence` of the base state, and a receipt with oracle "
+     "in_house/buckle (calculix/buckle on CalculiX), basis predicted.",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
      "the deformation {study, field: von_mises|displacement|shape|density|"
-     "none, deform_scale?, mode? (0-based, which mode shape for a modal "
-     "study), threshold?}. It colours the raster viewport, which is what "
+     "none, deform_scale?, mode? (0-based, which mode shape for a modal or "
+     "buckling study), threshold?}. It colours the raster viewport, which is "
+     "what "
      "`screenshot` captures. It does NOT reach `render_still`: the path "
      "tracer renders the MODEL, so a still taken after this shows the "
      "undeformed part in its own material and looks like the call silently "
@@ -837,10 +877,11 @@ json ExportStudyInp(ui::AppState& state, Host& host, const RpcParams& p) {
       StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
                    p.contains("study"), p.value("study", uint64_t{0}));
   fem::Study* s = &host.Require(id);
-  if (s->type != fem::AnalysisType::Static)
+  if (s->type != fem::AnalysisType::Static &&
+      s->type != fem::AnalysisType::Buckling)
     throw std::runtime_error(
-        std::string("a CalculiX deck is written for a static study; this one "
-                    "is ") +
+        std::string("a CalculiX deck is written for a static study or a "
+                    "buckling one; this one is ") +
         fem::AnalysisTypeToString(s->type));
   if (!p.contains("path") || !p.at("path").is_string() ||
       p.at("path").get<std::string>().empty())
@@ -1089,7 +1130,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                                  ? p.at("type").get<std::string>()
                                  : p.value("kind", std::string{});
     if (hasKind && !fem::AnalysisTypeFromString(want, type))
-      throw std::runtime_error("study type must be static, modal, or topology");
+      throw std::runtime_error("study type '" + want +
+                               "' is not one of: " + fem::kAnalysisTypeNames);
     if (hasKind && type == fem::AnalysisType::Topology)
       topoOnly();
     const fem::Study* s = &host.Add(p.value("name", std::string{}), type);
@@ -1167,8 +1209,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                  {"refinements", eval.refinements.size()},
                  {"has_results", host.Results(s.id) != nullptr},
                  {"stale", host.Stale(s.id)}};
-      if (s.type == fem::AnalysisType::Static)
+      if (SettlesStress(s.type))
         sj["converge"] = fem::ConvergeModeToString(s.converge);
+      if (s.type == fem::AnalysisType::Modal ||
+          s.type == fem::AnalysisType::Buckling)
+        sj["num_modes"] = s.numModes;
       if (!eval.participants.empty()) {
         json parts = json::array();
         for (const fem::Participant& pt : eval.participants) {
@@ -1253,10 +1298,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           s.meshSizeExpr.clear();
         }
       }
+      const fem::AnalysisType typeWas = s.type;
       if (p.contains("type") &&
           !fem::AnalysisTypeFromString(p.at("type").get<std::string>(), s.type))
-        throw std::runtime_error(
-            "analysis type must be static, modal, or topology");
+        throw std::runtime_error("analysis type '" +
+                                 p.at("type").get<std::string>() +
+                                 "' is not one of: " + fem::kAnalysisTypeNames);
+      // A study made buckling takes its own default number of factors
+      // unless the call gives one.
+      if (s.type == fem::AnalysisType::Buckling &&
+          typeWas != fem::AnalysisType::Buckling && !p.contains("num_modes"))
+        s.numModes = fem::kBucklingFactorsDefault;
       if (s.type == fem::AnalysisType::Topology && host.IsAssembly())
         topoOnly();
       // Which program solves it (docs/simulation/README.md#calculix), after
@@ -1277,10 +1329,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                          "auto in the same call"));
       if (p.contains("converge")) {
         const fem::ConvergeMode mode = ConvergeOf(p.at("converge"));
-        if (s.type != fem::AnalysisType::Static)
+        if (!SettlesStress(s.type))
           throw std::runtime_error(
-              std::string("converge applies to a static study, and this "
-                          "one is ") +
+              std::string("converge applies to a static or buckling study, "
+                          "and this one is ") +
               fem::AnalysisTypeToString(s.type) +
               "; set type: static (in this call or before it)");
         s.converge = mode;
@@ -1325,13 +1377,18 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // refuses it in a file, so it is refused here, where it is said.
       // After `type`, so one call can make a study modal and size it.
       if (p.contains("num_modes")) {
-        if (s.type != fem::AnalysisType::Modal)
+        if (s.type != fem::AnalysisType::Modal &&
+            s.type != fem::AnalysisType::Buckling)
           throw std::runtime_error(
-              std::string("num_modes applies to a modal study, and this one "
-                          "is ") +
+              std::string("num_modes applies to a modal study (its "
+                          "frequencies) or a buckling one (its factors), and "
+                          "this one is ") +
               fem::AnalysisTypeToString(s.type) +
-              "; set type: modal (in this call or before it)");
-        s.numModes = IntParam(p.at("num_modes"), "num_modes");
+              "; set type: modal or buckling (in this call or before it)");
+        const int n = IntParam(p.at("num_modes"), "num_modes");
+        if (n < 1)
+          throw std::runtime_error("num_modes is at least 1");
+        s.numModes = n;
       }
       if (p.contains("gravity")) {
         s.gravity = remote::Vec3Param(p.at("gravity"), "gravity");
@@ -1405,6 +1462,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         if (!cases.empty() && s.type == fem::AnalysisType::Modal)
           throw std::runtime_error("a modal study has no loads to put in "
                                    "load cases");
+        if (!cases.empty() && s.type == fem::AnalysisType::Buckling)
+          throw std::runtime_error(
+              "a buckling factor scales ONE load set, so a buckling study "
+              "takes no load cases: make a buckling study for each way the "
+              "part is loaded");
         // A load may not be left naming a case that is gone.
         for (const fem::Load& l : s.loads) {
           if (l.loadCase.empty())
@@ -1626,9 +1688,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             "a pin support is a part study's; an assembly study holds its "
             "part with a fixed face or a rigid neighbour's contact");
       const fem::AnalysisType at = host.Require(id).type;
-      if (at != fem::AnalysisType::Static)
+      if (!SettlesStress(at))
         throw std::runtime_error(
-            std::string("a pin support is a static study's: a ") +
+            std::string("a pin support is a static or buckling study's: a ") +
             fem::AnalysisTypeToString(at) +
             " study holds its part with fixed supports");
       if (p.contains("fix_rotation")) {
@@ -1953,10 +2015,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // This run's convergence check (docs/simulation/README.md
       // #a-peak-that-has-settled), read before anything runs.
       if (p.contains("converge") || p.contains("layer_normal")) {
-        if (s->type != fem::AnalysisType::Static)
+        if (!SettlesStress(s->type))
           throw std::runtime_error(
-              std::string("converge and layer_normal settle a static "
-                          "study's peak; this study is ") +
+              std::string("converge and layer_normal settle a static or "
+                          "buckling study's peak; this study is ") +
               fem::AnalysisTypeToString(s->type));
         if (p.contains("converge"))
           start.converge = static_cast<int>(ConvergeOf(p.at("converge")));
@@ -2030,11 +2092,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // answer is built, so a bad one refuses the whole call.
     std::optional<glm::dvec3> layerNormal;
     if (m == "study_results" && p.contains("layer_normal")) {
-      if (s->type != fem::AnalysisType::Static)
-        throw std::runtime_error(
-            std::string("layer_normal reads a static study's stresses; this "
-                        "study is ") +
-            fem::AnalysisTypeToString(s->type));
+      if (!SettlesStress(s->type))
+        throw std::runtime_error(std::string("layer_normal reads a static or "
+                                             "buckling study's stresses; this "
+                                             "study is ") +
+                                 fem::AnalysisTypeToString(s->type));
       if (host.IsAssembly())
         throw std::runtime_error(
             "layer_normal is one PART's build direction, and an assembly "
@@ -2133,6 +2195,187 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                {"stale", host.Stale(id)}};
       if (!roles.empty())
         out["participants"] = roles;
+      return stamp(out);
+    }
+
+    // Buckling studies (docs/simulation/README.md#buckling): each body's
+    // factors, the corrections that make the governing one, and the flags.
+    if (s->type == fem::AnalysisType::Buckling) {
+      std::size_t nodes = 0, elements = 0;
+      json bodies = json::array();
+      bool any = false, anyBuckles = false;
+      double governing = 0.0, buckling = 0.0;
+      std::string governingBody, bucklingBody, whyNone;
+      std::vector<std::string> warnings;
+      bool anyPin = false;
+      for (const fem::Load& l : s->loads)
+        anyPin = anyPin || l.type == fem::LoadType::Pin;
+      const auto orNull = [](double v) { return v > 0 ? json(v) : json(); };
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        nodes += b.mesh.stats.nodeCount;
+        elements += b.mesh.stats.tetCount;
+        const fem::StudyBodyResult::Buckling& k = b.buckling;
+        const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
+            CADMaterials::MaterialLibrary::MaterialTypeFromString(
+                host.BodyMaterial(*s, b.bodyIndex)));
+        json factors = json::array();
+        for (const auto& mode : b.results.modes)
+          factors.push_back(mode.factor);
+        // The stress across the layers, when the build direction is given;
+        // the largest principal stress bounds it otherwise.
+        double interlayer = k.interlayerFactor;
+        std::string interlayerFrom = "max_principal";
+        if (layerNormal && mp.interlayerMPa > 0 && !b.results.stress.empty()) {
+          const fem::FieldPeak lk = fem::PeakOf(
+              b.mesh, fem::AcrossLayersField(b.results, *layerNormal));
+          interlayer =
+              lk.node >= 0 && lk.value > 0 ? mp.interlayerMPa / lk.value : 0.0;
+          interlayerFrom = "across_layers";
+        }
+        double plastic = k.yieldFactor;
+        if (interlayer > 0 && (plastic == 0 || interlayer < plastic))
+          plastic = interlayer;
+        const double elastic = k.buckles ? k.knockdown * k.factor : 0.0;
+        const double gov = elastic > 0 && plastic > 0
+                               ? 1.0 / (1.0 / elastic + 1.0 / plastic)
+                               : (elastic > 0 ? elastic : plastic);
+        json bj = {
+            {"body", b.bodyName},
+            {"buckling_factors", factors},
+            {"buckling_factor", k.buckles ? json(k.factor) : json()},
+            {"knockdown", {{"value", k.knockdown}, {"class", k.shapeClass}}},
+            {"yield_factor", orNull(k.yieldFactor)},
+            {"interlayer_factor", orNull(interlayer)},
+            {"governing_factor", orNull(gov)},
+            {"base_state",
+             {{"max_von_mises_mpa", b.results.maxVonMises},
+              {"max_displacement_mm", b.results.maxDisplacement}}}};
+        if (interlayer > 0)
+          bj["interlayer_from"] = interlayerFrom;
+        if (k.face >= 0)
+          bj["knockdown"]["face"] = k.face;
+        if (k.radiusMm > 0)
+          bj["knockdown"]["radius_mm"] = k.radiusMm;
+        if (k.wallMm > 0)
+          bj["knockdown"]["wall_mm"] = k.wallMm;
+        if (!k.buckles)
+          bj["why_none"] = k.none;
+        if (k.atLoadEdge) {
+          bj["mode_at_load_edge"] = {
+              {"load", k.edgeLoad}, {"type", k.edgeType}, {"face", k.edgeFace}};
+          warnings.push_back(
+              "body '" + b.bodyName +
+              "': the first mode is local where a load enters (face " +
+              std::to_string(k.edgeFace) +
+              "): crippling at the load's edge, not the member buckling");
+        }
+        if (k.wallLayers > 0)
+          bj["wall_layers"] = k.wallLayers;
+        if (k.wallLayers == 1) {
+          char wall[32];
+          std::snprintf(wall, sizeof(wall), "%.3g", k.wallMm);
+          bj["through_thickness"] =
+              "the first mode bends a wall with one element through it";
+          warnings.push_back(
+              "body '" + b.bodyName + "': the first mode bends a " + wall +
+              " mm wall (face " + std::to_string(k.face) +
+              ") with one element through it, which reads a little stiff "
+              "(within 1.3 % of two on a 1 mm plate); add_refinement on that "
+              "face at half the wall confirms it");
+        }
+        if (!k.buckles && whyNone.empty())
+          whyNone = k.none;
+        if (k.buckles && (!anyBuckles || k.factor < buckling)) {
+          buckling = k.factor;
+          bucklingBody = b.bodyName;
+          anyBuckles = true;
+        }
+        if (gov > 0 && (!any || gov < governing)) {
+          governing = gov;
+          governingBody = b.bodyName;
+          any = true;
+        }
+        bodies.push_back(std::move(bj));
+      }
+      json out{{"type", "buckling"},
+               {"nodes", nodes},
+               {"elements", elements},
+               {"bodies", bodies},
+               {"buckling_factor", anyBuckles ? json(buckling) : json()},
+               {"governing_factor", any ? json(governing) : json()},
+               {"stale", host.Stale(id)},
+               {"convergence", ConvergenceJson(rt->convergence)}};
+      if (!anyBuckles)
+        out["why_none"] = whyNone;
+      // What a factor of safety reads on a buckling study: the governing
+      // factor, buckling and yield together.
+      if (any)
+        out["factor_of_safety"] = governing;
+      if (!rt->solver.empty())
+        out["solver"] = rt->solver;
+      const bool onCalculix = rt->solver.rfind("calculix", 0) == 0;
+      if (onCalculix && rt->residual > 0)
+        out["calculix"] = {{"residual", rt->residual},
+                           {"residual_floor", rt->residualFloor},
+                           {"energy_residual", rt->energyResidual}};
+      json notes = json::array();
+      notes.push_back("every load scales together by the factor" +
+                      std::string(glm::length(s->gravity) > 0
+                                      ? ", gravity with the rest"
+                                      : ""));
+      if (anyPin)
+        notes.push_back("each pin is held where the base state presses on "
+                        "it, at every factor: a linear factor scales the "
+                        "load without turning it");
+      out["notes"] = std::move(notes);
+      if (!warnings.empty())
+        out["warnings"] = warnings;
+      if (!roles.empty())
+        out["participants"] = roles;
+      receipt::Receipt r;
+      const receipt::Oracle solver =
+          onCalculix ? receipt::Oracle{"calculix/buckle",
+                                       rt->solver.substr(
+                                           std::string("calculix ").size())}
+                     : receipt::Oracle{"in_house/buckle",
+                                       rt->solver.empty() ? "cpu" : rt->solver};
+      if (host.Stale(id)) {
+        r.Unverifiable("the results describe the current geometry", solver,
+                       "the part changed after this study was solved — these "
+                       "numbers are the previous geometry's. Re-run the study "
+                       "before believing them");
+      } else if (!any) {
+        r.Unverifiable("governing buckling factor", solver,
+                       whyNone.empty()
+                           ? std::string("no factor was found")
+                           : whyNone + ", and no material has a yield "
+                                       "strength to bound it");
+      } else {
+        receipt::Claim c("governing buckling factor >= 1", solver,
+                         governing >= 1.0 ? receipt::Verdict::Pass
+                                          : receipt::Verdict::Fail);
+        c.basis = receipt::Basis::Predicted;
+        c.value = governing;
+        c.unit = "x";
+        c.note = "linear buckling on " + std::to_string(elements) +
+                 " elements: an upper bound, which the imperfection "
+                 "knockdown and the yield interaction (Rankine-Gordon) "
+                 "correct for. Snap-through -- an arch or a curved wall "
+                 "loaded across its curve -- needs a nonlinear run, which "
+                 "linear buckling does not see";
+        if (onCalculix)
+          c.note += ". Solved by CalculiX " + solver.version +
+                    " on this study's own mesh and loads: a second, "
+                    "independent answer, not a stronger one";
+        const std::string unsettled = NotConvergedWhy(rt->convergence);
+        if (!unsettled.empty())
+          c.note +=
+              ". Its base state's peak is NOT converged (" + unsettled + ")";
+        for (const std::string& w : warnings)
+          c.note += ". " + w;
+        r.Add(std::move(c));
+      }
+      AttachReceipt(out, r);
       return stamp(out);
     }
 

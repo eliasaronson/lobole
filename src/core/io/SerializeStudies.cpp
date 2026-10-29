@@ -44,7 +44,9 @@ json StudyToJson(const fem::Study& s) {
   // before -- and its input hash -- is what it was.
   if (s.solver != fem::Solver::Auto)
     j["solver"] = fem::SolverToString(s.solver);
-  if (s.type == fem::AnalysisType::Modal)
+  // Buckling (vNEXT): num_modes is its number of factors.
+  if (s.type == fem::AnalysisType::Modal ||
+      s.type == fem::AnalysisType::Buckling)
     j["num_modes"] = s.numModes;
   if (s.gravity.x != 0 || s.gravity.y != 0 || s.gravity.z != 0)
     j["gravity"] = {s.gravity.x, s.gravity.y, s.gravity.z};
@@ -263,7 +265,8 @@ fem::Study StudyFromJson(const json& j) {
   const std::string analysisStr = j.value("analysis", std::string{"static"});
   if (!fem::AnalysisTypeFromString(analysisStr, s.type))
     throw std::runtime_error("unknown study analysis type '" + analysisStr +
-                             "' (expected one of: static, modal, topology)");
+                             "' (expected one of: " + fem::kAnalysisTypeNames +
+                             ")");
   // Each analysis's own keys are written only for it: on another, the next
   // save would drop them (a modal study that lost its `analysis` line read
   // as static, its num_modes gone).
@@ -277,7 +280,11 @@ fem::Study StudyFromJson(const json& j) {
                                  fem::AnalysisTypeToString(type) +
                                  " study's, and this one is " + analysisStr);
   };
-  refuseUnless(fem::AnalysisType::Modal, {"num_modes"});
+  if (j.contains("num_modes") && s.type != fem::AnalysisType::Modal &&
+      s.type != fem::AnalysisType::Buckling)
+    throw std::runtime_error("study num_modes is a modal study's (or a "
+                             "buckling one's), and this one is " +
+                             analysisStr);
   if (j.contains("solver")) {
     const std::string solverStr = j.at("solver").get<std::string>();
     if (!fem::SolverFromString(solverStr, s.solver))
@@ -292,7 +299,9 @@ fem::Study StudyFromJson(const json& j) {
                {"volume_fraction", "volume_fraction_expr", "filter_radius",
                 "filter_radius_expr", "max_iterations", "keep_faces",
                 "keep_outs"});
-  s.numModes = j.value("num_modes", 6);
+  s.numModes = j.value("num_modes", s.type == fem::AnalysisType::Buckling
+                                        ? fem::kBucklingFactorsDefault
+                                        : 6);
   if (j.contains("gravity")) {
     const auto& g = j.at("gravity");
     s.gravity = glm::dvec3(g.at(0).get<double>(), g.at(1).get<double>(),
@@ -360,9 +369,11 @@ fem::Study StudyFromJson(const json& j) {
     if (!fem::ConvergeModeFromString(c, s.converge))
       throw std::runtime_error("study converge '" + c +
                                "' is not one of: " + fem::kConvergeModeNames);
-    if (s.type != fem::AnalysisType::Static)
+    if (s.type != fem::AnalysisType::Static &&
+        s.type != fem::AnalysisType::Buckling)
       throw std::runtime_error("study " + std::to_string(s.id) +
-                               ": only a static study takes converge");
+                               ": only a static or buckling study takes "
+                               "converge");
   }
 
   for (const json& pj : j.value("participants", json::array())) {
@@ -724,9 +735,13 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
         {"away_at", Vec3ToJson(r.supportEdgePeak.awayAt)}};
   if (!r.modes.empty()) {
     json modes = json::array();
-    for (const fem::FemResults::ModeShape& m : r.modes)
-      modes.push_back(
-          {{"frequency_hz", m.frequencyHz}, {"shape", w.F32(m.displacement)}});
+    for (const fem::FemResults::ModeShape& m : r.modes) {
+      json mj = {{"frequency_hz", m.frequencyHz},
+                 {"shape", w.F32(m.displacement)}};
+      if (m.factor != 0.0) // vNEXT: a buckling mode's load factor
+        mj["factor"] = m.factor;
+      modes.push_back(std::move(mj));
+    }
     out["modes"] = std::move(modes);
   }
   return out;
@@ -759,7 +774,8 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
     r.maxDispAt = Vec3FromJson(j.at("max_disp_at"));
   for (const json& mj : j.value("modes", json::array()))
     r.modes.push_back({mj.at("frequency_hz").get<double>(),
-                       f.Vec3s(mj.at("shape"), "a mode shape")});
+                       f.Vec3s(mj.at("shape"), "a mode shape"),
+                       mj.value("factor", 0.0)});
   const auto supportType = [](const json& v) {
     const std::string t = v.get<std::string>();
     fem::LoadType out;
@@ -796,6 +812,9 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
 const char* KindOf(const fem::StudyRuntime& rt) {
   if (rt.topology)
     return "topology";
+  for (const fem::StudyBodyResult& b : rt.bodies)
+    if (b.buckling.solved)
+      return "buckling";
   for (const fem::StudyBodyResult& b : rt.bodies)
     if (!b.results.modes.empty())
       return "modal";
@@ -849,6 +868,60 @@ void CheckBody(const fem::StudyBodyResult& b, const std::string& what) {
 } // namespace
 
 namespace {
+
+// What a buckling body's result says beyond its modes (vNEXT).
+json BucklingToJson(const fem::StudyBodyResult::Buckling& k) {
+  json out = {{"buckling_factor", k.buckles ? json(k.factor) : json()},
+              {"knockdown", k.knockdown},
+              {"class", k.shapeClass},
+              {"yield_factor", k.yieldFactor},
+              {"interlayer_factor", k.interlayerFactor},
+              {"governing_factor", k.governingFactor}};
+  if (!k.buckles)
+    out["why_none"] = k.none;
+  if (k.face >= 0)
+    out["face"] = k.face;
+  if (k.radiusMm > 0)
+    out["radius_mm"] = k.radiusMm;
+  if (k.wallMm > 0)
+    out["wall_mm"] = k.wallMm;
+  if (k.wallLayers > 0)
+    out["wall_layers"] = k.wallLayers;
+  if (k.atLoadEdge)
+    out["mode_at_load_edge"] = {
+        {"load", k.edgeLoad}, {"type", k.edgeType}, {"face", k.edgeFace}};
+  return out;
+}
+
+fem::StudyBodyResult::Buckling BucklingFromJson(const json& j,
+                                                const std::string& what) {
+  fem::StudyBodyResult::Buckling k;
+  k.solved = true;
+  if (!j.contains("buckling_factor"))
+    throw std::runtime_error(what +
+                             ": a buckling summary without buckling_factor");
+  k.buckles = !j.at("buckling_factor").is_null();
+  if (k.buckles)
+    k.factor = j.at("buckling_factor").get<double>();
+  k.none = j.value("why_none", std::string{});
+  k.knockdown = j.value("knockdown", 1.0);
+  k.shapeClass = j.value("class", std::string{});
+  k.yieldFactor = j.value("yield_factor", 0.0);
+  k.interlayerFactor = j.value("interlayer_factor", 0.0);
+  k.governingFactor = j.value("governing_factor", 0.0);
+  k.face = j.value("face", -1);
+  k.radiusMm = j.value("radius_mm", 0.0);
+  k.wallMm = j.value("wall_mm", 0.0);
+  k.wallLayers = j.value("wall_layers", 0);
+  if (j.contains("mode_at_load_edge")) {
+    const json& e = j.at("mode_at_load_edge");
+    k.atLoadEdge = true;
+    k.edgeLoad = e.value("load", uint64_t{0});
+    k.edgeType = e.value("type", std::string{});
+    k.edgeFace = e.value("face", -1);
+  }
+  return k;
+}
 
 // A static run's convergence check (v206), saved with its result.
 json ConvergenceToJson(const fem::Convergence& c) {
@@ -1047,6 +1120,8 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
     } else if (!b.results.displacement.empty() || !b.results.modes.empty()) {
       bj["results"] = FieldsToJson(b.results, w);
     }
+    if (b.buckling.solved)
+      bj["buckling"] = BucklingToJson(b.buckling);
     bodies.push_back(std::move(bj));
   }
   out["bodies"] = std::move(bodies);
@@ -1059,9 +1134,11 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
   fem::StudyRuntime rt;
   const std::string kind =
       j.value("kind", std::string(j.contains("topology") ? "topology" : ""));
-  if (kind != "topology" && kind != "static" && kind != "modal")
+  if (kind != "topology" && kind != "static" && kind != "modal" &&
+      kind != "buckling")
     throw std::runtime_error("study result: kind '" + kind +
-                             "' (expected one of: static, modal, topology)");
+                             "' (expected one of: static, modal, topology, "
+                             "buckling)");
   const std::string what = kind + " result";
   const ResultArrayReader bin(j, what);
   const FieldReader f{bin};
@@ -1191,6 +1268,12 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
       b.results = b.cases.front();
     else if (bj.contains("results"))
       b.results = FieldsFromJson(bj.at("results"), f);
+    if (kind == "buckling") {
+      if (!bj.contains("buckling"))
+        throw std::runtime_error(what + ": body '" + b.bodyName +
+                                 "' has no buckling summary");
+      b.buckling = BucklingFromJson(bj.at("buckling"), what);
+    }
     CheckBody(b, what);
     rt.bodies.push_back(std::move(b));
   }

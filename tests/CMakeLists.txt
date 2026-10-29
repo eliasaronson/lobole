@@ -208,6 +208,7 @@ add_executable(designer_tests
     test_fem.cpp
     test_fem_loads.cpp
     test_fem_pin.cpp
+    test_fem_buckling.cpp
     test_fem_calculix.cpp
     test_fem_converge.cpp
     test_topopt.cpp
@@ -1380,6 +1381,16 @@ add_test(NAME calculix_static_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/calculix_static_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(calculix_static_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
+
+# A buckling study over the RPCs alone (docs/simulation/README.md#buckling):
+# a column built, studied and required not to buckle; the factor against
+# Euler's, the governing factor, the receipt, the requirement unchecked then
+# checked. Self-skips (77) without Netgen.
+add_test(NAME buckling_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/buckling_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(buckling_smoke PROPERTIES TIMEOUT 300
                      SKIP_RETURN_CODE 77)
 
 # Async topology optimization over JSON-RPC (TO2): start a run, poll

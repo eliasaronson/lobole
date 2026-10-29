@@ -178,7 +178,8 @@ bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
                ")";
     return false;
   }
-  out = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+  out = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12,
+                 mp.yieldMPa, mp.interlayerMPa};
   return true;
 }
 
@@ -487,7 +488,8 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     StudyBodyPlan bp;
     bp.bodyIndex = bi;
     bp.bodyName = bodyLabel;
-    bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+    bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12,
+                      mp.yieldMPa, mp.interlayerMPa};
     bp.shape = imprinted;
     bp.settings.maxSize =
         meshed->meshSize > 0.0 ? meshed->meshSize : study.meshSize;

@@ -197,11 +197,16 @@ const char* ConvergeModeToString(ConvergeMode mode);
 [[nodiscard]] bool ConvergeModeFromString(const std::string& s,
                                           ConvergeMode& out);
 
+inline constexpr int kBucklingFactorsDefault = 3;
+
 // What a study solves for.
 enum class AnalysisType {
   Static,   // linear-static: stress + displacement under loads
   Modal,    // natural frequencies + mode shapes (no external loads)
   Topology, // generative: SIMP compliance minimization -> a density field
+  // Linear buckling (docs/simulation/README.md#buckling): by what factor the
+  // loads can grow before the part loses stability, and in what shape.
+  Buckling,
 };
 
 // Which program solves a study (docs/simulation/README.md#calculix). Auto
@@ -247,7 +252,9 @@ struct Study {
   // axes; 0 = off). Needs the body's material density.
   glm::dvec3 gravity{0.0, 0.0, 0.0};
 
-  // Modal only: how many lowest natural frequencies to compute.
+  // Modal: how many lowest natural frequencies to compute. Buckling: how
+  // many factors (kBucklingFactorsDefault when not given: a symmetric
+  // section has two equal first modes).
   int numModes = 6;
 
   // Topology only. The optimizer removes material from the loaded body down to
@@ -287,8 +294,8 @@ struct Study {
 };
 
 // Empty when `solver` can solve a study of `type`; otherwise why not, naming
-// what can: CalculiX solves static studies only (modal and topology are
-// in-house), and auto and in_house solve every type there is.
+// what can: CalculiX solves static and buckling studies (modal and topology
+// are in-house), and auto and in_house solve every type there is.
 std::string SolverRefusal(Solver solver, AnalysisType type);
 
 const char* LoadTypeToString(LoadType type);
@@ -297,6 +304,9 @@ inline constexpr const char* kLoadTypeNames =
     "fixed, force, pressure, torque, remote, pin";
 [[nodiscard]] bool LoadTypeFromString(const std::string& s, LoadType& out);
 const char* AnalysisTypeToString(AnalysisType type);
+// Every analysis type's name, for a refusal that names what is accepted.
+inline constexpr const char* kAnalysisTypeNames =
+    "static, modal, topology, buckling";
 
 // The CPU solver a study of this type runs, as study_status, study_results and
 // the receipt name it: static and modal factor K directly (SimplicialLDLT;

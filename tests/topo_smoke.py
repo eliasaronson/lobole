@@ -96,7 +96,7 @@ def main():
             d.call("add_study", name="bogus", kind="banana")
             raise AssertionError("unknown study kind must error")
         except RuntimeError as e:
-            expect("static, modal, or topology" in str(e),
+            expect("static, modal, topology, buckling" in str(e),
                    f"kind error lists options: {e}")
         d.call("add_load", study=study, type="fixed",
                face={"feature_id": created_by, "element": fixed_face})

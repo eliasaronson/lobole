@@ -301,6 +301,8 @@ const char* StudyGlyph(fem::AnalysisType type) {
     return ICON_FA_WAVE_SQUARE;
   case fem::AnalysisType::Topology:
     return ICON_FA_CIRCLE_NODES;
+  case fem::AnalysisType::Buckling:
+    return ICON_FA_COMPRESS;
   }
   return ICON_FA_WEIGHT_HANGING;
 }
@@ -410,7 +412,9 @@ void DrawMaterialCheck(AppState& state) {
 void DrawLoadCases(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
   const StudyHost host = StudyHostOf(state);
-  if (host.IsAssembly() || s.type == fem::AnalysisType::Modal)
+  // A buckling factor scales one load set: no cases.
+  if (host.IsAssembly() || s.type == fem::AnalysisType::Modal ||
+      s.type == fem::AnalysisType::Buckling)
     return;
   ImGui::SeparatorText("Load cases");
   if (s.loadCases.empty())
@@ -927,6 +931,72 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   }
 }
 
+// A buckling study's answer (docs/simulation/README.md#buckling): each
+// body's factors as a selectable list (picking one shows its mode), the
+// governing factor with what made it, and the flags as text.
+void DrawBucklingResults(AppState& state, const fem::Study& s,
+                         const fem::StudyRuntime& rt) {
+  (void)s;
+  SimulationState& sim = state.simulation;
+  ImGui::SeparatorText("Buckling factors");
+  const fem::StudyBodyResult* b = nullptr;
+  for (const auto& br : rt.bodies)
+    if (br.buckling.solved) {
+      b = &br;
+      break;
+    }
+  if (!b) {
+    ImGui::TextColored(kMuted, "No buckling result.");
+    return;
+  }
+  for (int i = 0; i < (int)b->results.modes.size(); ++i) {
+    char lbl[64];
+    std::snprintf(lbl, sizeof(lbl), "Mode %d:  x %.4g###buckle_mode_%d", i + 1,
+                  b->results.modes[i].factor, i);
+    if (ImGui::Selectable(lbl, sim.activeMode == i)) {
+      sim.activeMode = i;
+      sim.field = SimulationState::Field::Displacement; // show the shape
+    }
+  }
+  const fem::StudyBodyResult::Buckling& k = b->buckling;
+  const auto fmt = [](const char* f, double v) {
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), f, v);
+    return std::string(buf);
+  };
+  if (!k.buckles)
+    MessageText(kMuted, k.none);
+  ImGui::SeparatorText("Governing");
+  if (k.governingFactor > 0)
+    ImGui::Text("Governing factor:  x %.3g", k.governingFactor);
+  else
+    MessageText(kMuted, "No governing factor: no yield strength.");
+  if (k.buckles)
+    ImGui::Text("Knockdown:  %.3g (%s)", k.knockdown, k.shapeClass.c_str());
+  if (k.yieldFactor > 0)
+    ImGui::Text("Yield factor:  x %.3g", k.yieldFactor);
+  if (k.interlayerFactor > 0)
+    ImGui::Text("Interlayer factor:  x %.3g", k.interlayerFactor);
+  if (k.atLoadEdge)
+    MessageText(kStale, "The first mode is local where a load enters (face " +
+                            std::to_string(k.edgeFace) +
+                            "): crippling at its edge, not the member "
+                            "buckling.");
+  if (k.wallLayers == 1)
+    MessageText(kStale,
+                fmt("The first mode bends a %.2g mm wall with one element "
+                    "through it.",
+                    k.wallMm));
+  ImGui::SeparatorText("Display");
+  bool showing = sim.field != SimulationState::Field::None;
+  if (ImGui::Checkbox("Show mode shape###buckle_show", &showing))
+    sim.field = showing ? SimulationState::Field::Displacement
+                        : SimulationState::Field::None;
+  LeftLabel("Deform");
+  ImGui::SliderFloat("###buckle_deform", &sim.deformScale, 0.0f, 100.0f,
+                     "%.0fx");
+}
+
 void DrawResults(AppState& state, const fem::Study& s) {
   const StudyHost host = StudyHostOf(state);
   SimulationState& sim = state.simulation;
@@ -1006,6 +1076,10 @@ void DrawResults(AppState& state, const fem::Study& s) {
   }
   ImGui::Text("Mesh: %zu nodes / %zu elements", nodes, elements);
 
+  if (s.type == fem::AnalysisType::Buckling) {
+    DrawBucklingResults(state, s, *rt);
+    return;
+  }
   if (s.type == fem::AnalysisType::Modal) {
     // Natural frequencies: a selectable list; picking one shows that mode
     // shape in the viewport.
@@ -1397,7 +1471,9 @@ const std::optional<fem::CalculixInstall>& CalculixHere(const AppState& state,
 // it is not installed -- Run then refuses with how to install it, rather
 // than the choice vanishing.
 void DrawSolverCombo(AppState& state, const fem::Study& s) {
-  if (s.type != fem::AnalysisType::Static && s.solver != fem::Solver::Calculix)
+  if (s.type != fem::AnalysisType::Static &&
+      s.type != fem::AnalysisType::Buckling &&
+      s.solver != fem::Solver::Calculix)
     return;
   std::string why;
   const auto& ccx = CalculixHere(state, &why);
@@ -1437,19 +1513,23 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
   }
   // Analysis type: Static (stress), Modal (frequencies), or Topology
   // (generative shape).
-  const char* kTypes[] = {"Static", "Modal", "Topology"};
+  const char* kTypes[] = {"Static", "Modal", "Topology", "Buckling"};
   int typeIdx = s->type == fem::AnalysisType::Modal      ? 1
                 : s->type == fem::AnalysisType::Topology ? 2
+                : s->type == fem::AnalysisType::Buckling ? 3
                                                          : 0;
   LeftLabel("Analysis");
-  if (ImGui::Combo("###study_analysis", &typeIdx, kTypes, 3)) {
+  if (ImGui::Combo("###study_analysis", &typeIdx, kTypes, 4)) {
     const auto nt = typeIdx == 1   ? fem::AnalysisType::Modal
                     : typeIdx == 2 ? fem::AnalysisType::Topology
+                    : typeIdx == 3 ? fem::AnalysisType::Buckling
                                    : fem::AnalysisType::Static;
     // CalculiX solves static studies only: a study switched to another
     // type goes back to the in-house solver with it, in the same step,
     // rather than becoming a study no file could hold.
     ModifyStudy(state, s->id, "Set analysis type", [&](fem::Study& cs) {
+      if (nt == fem::AnalysisType::Buckling && cs.type != nt)
+        cs.numModes = fem::kBucklingFactorsDefault;
       cs.type = nt;
       if (!fem::SolverRefusal(cs.solver, cs.type).empty())
         cs.solver = fem::Solver::Auto;
@@ -1479,9 +1559,10 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
       cs.meshSizeExpr = meshExpr;
     });
 
-  if (s->type == fem::AnalysisType::Modal) {
+  if (s->type == fem::AnalysisType::Modal ||
+      s->type == fem::AnalysisType::Buckling) {
     int nm = s->numModes;
-    LeftLabel("Modes");
+    LeftLabel(s->type == fem::AnalysisType::Buckling ? "Factors" : "Modes");
     const bool nmChanged = ExprInputInt(state, "###study_modes", &nm);
     if ((nmChanged || ImGui::IsItemDeactivatedAfterEdit()) && nm >= 1 &&
         nm != s->numModes)
@@ -1670,7 +1751,9 @@ void DrawFieldLegend(AppState& state) {
   if (!rt)
     return;
   const fem::Study* study = host.Find(sim.activeStudyId);
-  const bool modal = study && study->type == fem::AnalysisType::Modal;
+  const bool buckling = study && study->type == fem::AnalysisType::Buckling;
+  const bool modal =
+      study && (study->type == fem::AnalysisType::Modal || buckling);
   const bool density = sim.field == SimulationState::Field::Density;
   // A stress/displacement colorbar over a topology result (or a density one
   // over a static result) describes a field that study never computed.
@@ -1701,9 +1784,10 @@ void DrawFieldLegend(AppState& state) {
   std::vector<std::string> head;
   if (study) {
     head.push_back(study->name + "  " +
-                   (modal  ? "modal"
-                    : topo ? "topology"
-                           : "static"));
+                   (buckling ? "buckling"
+                    : modal  ? "modal"
+                    : topo   ? "topology"
+                             : "static"));
   }
   if (modal) {
     const fem::FemResults::ModeShape* mode = nullptr;
@@ -1718,9 +1802,14 @@ void DrawFieldLegend(AppState& state) {
     }
     if (mode) {
       char buf[96];
-      std::snprintf(buf, sizeof(buf), "mode %d of %zu  %.4g Hz",
-                    std::clamp(sim.activeMode, 0, (int)modes - 1) + 1, modes,
-                    mode->frequencyHz);
+      if (buckling)
+        std::snprintf(buf, sizeof(buf), "mode %d of %zu  factor x %.4g",
+                      std::clamp(sim.activeMode, 0, (int)modes - 1) + 1, modes,
+                      mode->factor);
+      else
+        std::snprintf(buf, sizeof(buf), "mode %d of %zu  %.4g Hz",
+                      std::clamp(sim.activeMode, 0, (int)modes - 1) + 1, modes,
+                      mode->frequencyHz);
       head.push_back(buf);
     }
   }

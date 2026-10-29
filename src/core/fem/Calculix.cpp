@@ -321,7 +321,8 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
                const std::vector<Material>& byDomain, const Supports& supports,
                const std::vector<StudyJobBody::PinSupport>& pins,
                const std::vector<glm::dvec3>& nodalForces,
-               const std::string& title, std::string* error) {
+               const std::string& title, std::string* error,
+               int buckleFactors) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -532,7 +533,12 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
     }
   }
 
-  out << "*STEP\n*STATIC\n";
+  // A buckling run's step: its factors to the accuracy the in-house
+  // eigensolve holds (ccx's default is 1 %).
+  if (buckleFactors > 0)
+    out << "*STEP\n*BUCKLE\n" << buckleFactors << ", 1e-10\n";
+  else
+    out << "*STEP\n*STATIC\n";
   bool anyLoad = false;
   for (int n = 0; n < nNodes; ++n) {
     if (fixed[n])
@@ -667,6 +673,26 @@ void SweepDeadRunDirs(const std::string& root) {
 
 namespace {
 
+std::atomic<unsigned> gRunCounter{0};
+
+// A fresh run directory under the run root, <pid>-<n>; the dead ones
+// swept first.
+bool MakeRunDir(const CalculixRun& run, fs::path& dir, std::string* error) {
+  std::error_code ec;
+  fs::create_directories(run.runRoot, ec);
+  SweepDeadRunDirs(run.runRoot);
+  dir = fs::path(run.runRoot) / (std::to_string(ThisPid()) + "-" +
+                                 std::to_string(gRunCounter.fetch_add(1)));
+  fs::remove_all(dir, ec);
+  if (!fs::create_directories(dir, ec)) {
+    if (error)
+      *error = "could not make the run directory " + dir.string() + ": " +
+               ec.message();
+    return false;
+  }
+  return true;
+}
+
 std::string Gb(uint64_t bytes) {
   char buf[32];
   std::snprintf(buf, sizeof(buf), "%.2f GB", static_cast<double>(bytes) / 1e9);
@@ -681,9 +707,9 @@ std::string Seconds(double s) {
 
 // Runs ccx on `dir`/job.inp; the displacement it printed into `u`. False
 // with `error` (and `keep` saying whether the directory is worth keeping).
-bool RunCcx(const CalculixRun& run, const fs::path& dir, size_t nNodes,
-            const SolveOptions& options, std::vector<glm::dvec3>& u, bool& keep,
-            std::string* error) {
+bool RunCcx(const CalculixRun& run, const fs::path& dir,
+            const SolveOptions& options, bool& keep, std::string* error,
+            const std::function<bool(std::string*)>& read) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -733,7 +759,7 @@ bool RunCcx(const CalculixRun& run, const fs::path& dir, size_t nNodes,
     return fail("CalculiX exited with status " + std::to_string(code) +
                 (last.empty() ? std::string() : ": " + last));
   }
-  if (!ReadDatDisplacements((dir / "job.dat").string(), nNodes, u, &err))
+  if (!read(&err))
     return fail(err);
   return true;
 }
@@ -746,7 +772,8 @@ bool SolveBodyOnCalculix(const StudyJobBody& jb,
                          const glm::dvec3& gravityAccel,
                          const SolveOptions& options,
                          std::vector<FemResults>& out, SolveReport& report,
-                         std::string* error) {
+                         std::string* error,
+                         std::vector<Supports>* supportsOut) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -764,7 +791,8 @@ bool SolveBodyOnCalculix(const StudyJobBody& jb,
   std::string err;
   if (!StaticSupportsOf(jb, mats, rhs, gravityAccel, own, sups, pinRows, &err))
     return fail(err);
-  static std::atomic<unsigned> counter{0};
+  if (supportsOut)
+    *supportsOut = sups;
   const size_t nNodes = jb.mesh.nodes.size();
   out.clear();
   report = SolveReport{};
@@ -792,15 +820,9 @@ bool SolveBodyOnCalculix(const StudyJobBody& jb,
                   "was not started. A coarser mesh_size, or the in-house "
                   "solver, solves it");
     std::error_code ec;
-    fs::create_directories(run.runRoot, ec);
-    SweepDeadRunDirs(run.runRoot);
-    const fs::path dir =
-        fs::path(run.runRoot) / (std::to_string(ThisPid()) + "-" +
-                                 std::to_string(counter.fetch_add(1)));
-    fs::remove_all(dir, ec);
-    if (!fs::create_directories(dir, ec))
-      return fail("could not make the run directory " + dir.string() + ": " +
-                  ec.message());
+    fs::path dir;
+    if (!MakeRunDir(run, dir, &err))
+      return fail(err);
     if (options.solving)
       options.solving("calculix: writing the deck");
     {
@@ -818,7 +840,10 @@ bool SolveBodyOnCalculix(const StudyJobBody& jb,
       options.solving("calculix: solving");
     std::vector<glm::dvec3> u;
     bool keep = true;
-    if (!RunCcx(run, dir, nNodes, options, u, keep, &err)) {
+    if (!RunCcx(run, dir, options, keep, &err, [&](std::string* why) {
+          return ReadDatDisplacements((dir / "job.dat").string(), nNodes, u,
+                                      why);
+        })) {
       if (!keep) {
         fs::remove_all(dir, ec);
         return fail(err);
@@ -866,9 +891,9 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
       *error = m;
     return false;
   };
-  if (in.type != AnalysisType::Static)
-    return fail(std::string("a CalculiX deck is written for a static study; "
-                            "this one is ") +
+  if (in.type != AnalysisType::Static && in.type != AnalysisType::Buckling)
+    return fail(std::string("a CalculiX deck is written for a static study "
+                            "or a buckling one; this one is ") +
                 AnalysisTypeToString(in.type));
   if (body >= in.bodies.size())
     return fail("no such body");
@@ -890,8 +915,164 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
   std::vector<glm::dvec3> forces;
   if (!NodalForces(jb.mesh, mats, rhs[caseIndex], g, forces, &err))
     return fail(err);
-  return WriteDeck(out, jb.mesh, mats, sups.front(), jb.pins, forces, title,
-                   error);
+  return WriteDeck(
+      out, jb.mesh, mats, sups.front(), jb.pins, forces, title, error,
+      in.type == AnalysisType::Buckling ? std::max(in.numModes, 1) : 0);
+}
+
+bool ReadDatBuckling(const std::string& path, size_t nNodes,
+                     std::vector<double>& factors,
+                     std::vector<std::vector<glm::dvec3>>& shapes,
+                     std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  std::ifstream in(path);
+  if (!in)
+    return fail("CalculiX wrote no " + fs::path(path).filename().string());
+  factors.clear();
+  shapes.clear();
+  std::string line;
+  // The factors' table, then a displacement block per mode, each after its
+  // "E I G E N V A L U E   N U M B E R" line.
+  enum class At { Before, Factors, Mode, Shape } at = At::Before;
+  std::vector<char> seen;
+  size_t count = 0;
+  const auto endShape = [&]() {
+    if (at == At::Shape && count != nNodes)
+      return false;
+    return true;
+  };
+  while (std::getline(in, line)) {
+    if (line.find("B U C K L I N G   F A C T O R") != std::string::npos) {
+      at = At::Factors;
+      continue;
+    }
+    if (line.find("E I G E N V A L U E    N U M B E R") != std::string::npos) {
+      if (!endShape())
+        return fail("CalculiX printed buckling mode " +
+                    std::to_string(shapes.size()) + " at " +
+                    std::to_string(count) + " of " + std::to_string(nNodes) +
+                    " nodes");
+      at = At::Mode;
+      continue;
+    }
+    std::istringstream ls(line);
+    std::string a, b, c, d;
+    if (at == At::Factors) {
+      if (!(ls >> a >> b))
+        continue;
+      char* end = nullptr;
+      std::strtol(a.c_str(), &end, 10);
+      double f = 0.0;
+      if (*end == '\0' && ParseFortran(b, f))
+        factors.push_back(f);
+      continue;
+    }
+    if (at == At::Mode) {
+      if (line.find("displacements (vx,vy,vz)") != std::string::npos) {
+        shapes.emplace_back(nNodes, glm::dvec3(0.0));
+        seen.assign(nNodes, 0);
+        count = 0;
+        at = At::Shape;
+      }
+      continue;
+    }
+    if (at != At::Shape || !(ls >> a >> b >> c >> d))
+      continue;
+    char* end = nullptr;
+    const long node = std::strtol(a.c_str(), &end, 10);
+    double x = 0, y = 0, z = 0;
+    if (*end != '\0' || !ParseFortran(b, x) || !ParseFortran(c, y) ||
+        !ParseFortran(d, z))
+      continue;
+    if (node < 1 || static_cast<size_t>(node) > nNodes)
+      return fail("CalculiX printed a mode shape at node " +
+                  std::to_string(node) + ", which the deck does not have");
+    shapes.back()[node - 1] = glm::dvec3(x, y, z);
+    if (!seen[node - 1])
+      ++count;
+    seen[node - 1] = 1;
+  }
+  if (!endShape())
+    return fail("CalculiX printed buckling mode " +
+                std::to_string(shapes.size()) + " at " + std::to_string(count) +
+                " of " + std::to_string(nNodes) + " nodes");
+  if (factors.empty())
+    return fail("CalculiX's " + fs::path(path).filename().string() +
+                " holds no buckling factors");
+  if (shapes.size() != factors.size())
+    return fail("CalculiX printed " + std::to_string(factors.size()) +
+                " buckling factors and " + std::to_string(shapes.size()) +
+                " mode shapes");
+  return true;
+}
+
+bool BucklingOnCalculix(
+    const StudyJobBody& jb, const std::vector<Material>& mats,
+    const Supports& supports, const std::vector<FaceLoad>& loads,
+    const glm::dvec3& gravityAccel, int numFactors, const SolveOptions& options,
+    std::vector<FemResults::ModeShape>& modes, std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (!options.calculix)
+    return fail("this study solves on CalculiX, and the run was given none");
+  const CalculixRun& run = *options.calculix;
+  const size_t nNodes = jb.mesh.nodes.size();
+  std::string err;
+  std::vector<glm::dvec3> forces;
+  if (!NodalForces(jb.mesh, mats, loads, gravityAccel, forces, &err))
+    return fail(err);
+  fs::path dir;
+  if (!MakeRunDir(run, dir, &err))
+    return fail(err);
+  std::error_code ec;
+  {
+    std::ofstream deck(dir / "job.inp");
+    if (!WriteDeck(deck, jb.mesh, mats, supports, jb.pins, forces,
+                   "body '" + jb.bodyName + "', buckling", &err,
+                   std::max(numFactors, 1))) {
+      fs::remove_all(dir, ec);
+      return fail(err);
+    }
+  }
+  std::vector<double> factors;
+  std::vector<std::vector<glm::dvec3>> shapes;
+  bool keep = true;
+  if (!RunCcx(run, dir, options, keep, &err, [&](std::string* why) {
+        return ReadDatBuckling((dir / "job.dat").string(), nNodes, factors,
+                               shapes, why);
+      })) {
+    if (!keep) {
+      fs::remove_all(dir, ec);
+      return fail(err);
+    }
+    return fail(err + " (the run is kept in " + dir.string() + ")");
+  }
+  modes.clear();
+  for (size_t m = 0; m < factors.size(); ++m) {
+    FemResults::ModeShape mode;
+    mode.factor = factors[m];
+    mode.displacement = std::move(shapes[m]);
+    double peak = 0.0;
+    for (const glm::dvec3& u : mode.displacement)
+      peak = std::max(peak, glm::length(u));
+    if (peak > 0)
+      for (glm::dvec3& u : mode.displacement)
+        u /= peak;
+    modes.push_back(std::move(mode));
+  }
+  std::stable_sort(modes.begin(), modes.end(),
+                   [](const auto& a, const auto& b) {
+                     return std::abs(a.factor) < std::abs(b.factor);
+                   });
+  fs::remove_all(dir, ec);
+  return true;
 }
 
 } // namespace fem

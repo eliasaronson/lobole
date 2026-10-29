@@ -9,6 +9,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -61,6 +62,10 @@ struct SolveOptions {
   std::shared_ptr<const std::vector<std::vector<glm::dvec3>>> given;
   double givenPrecision = 0.0;
   std::string givenName; // the solver it came from, as the report names it
+  // What the machine has free, bytes, for a run that refuses one that will
+  // not fit (a buckling study's factor); 0 = read MemAvailable then. A test
+  // sets it.
+  uint64_t availableBytes = 0;
 };
 
 // What a solve did, for the study's result and its status.

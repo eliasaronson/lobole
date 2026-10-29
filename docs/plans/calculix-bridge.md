@@ -2,14 +2,13 @@
 
 ## The problem
 
-Linear static, modal and topology studies are solved in-house and stay that
-way. Everything past linear is not built: buckling, large deformation,
+Linear static, modal, buckling and topology studies are solved in-house and
+stay that way. Everything past linear is not built: large deformation,
 contact that separates or slides, plasticity and thermal
 (docs/simulation/README.md#not-done). That section already names an
-external solver as the way to add them, rather than growing ours. A part
-that fails by buckling (a slender strut, a thin printed wall, a tube frame
-member) currently passes a static study with a comfortable factor of safety.
-That is the worst kind of wrong answer, because it looks finished.
+external solver as the way to add them, rather than growing ours. A curved
+wall loaded across its curve snaps through below its linear buckling
+factor, which a linear study cannot see.
 
 CalculiX (`ccx`) does all of these on the element we already mesh. Its
 C3D10 tetrahedron has the same node order as `FemMesh::tets` (corners 0–3,
@@ -25,8 +24,9 @@ directory, the refusals and the residual check
 ([docs/simulation/README.md#calculix](../simulation/README.md#calculix)).
 What is left is what it was built for: the nonlinear analyses we do not
 have, as options on `static`, solved on CalculiX through that bridge. Linear
-buckling is solved in-house instead (docs/plans/buckling.md). Nothing falls back to the in-house solver or to
-another analysis.
+buckling is solved in-house, with CalculiX's `*BUCKLE` as its cross-check
+([docs/simulation/README.md#buckling](../simulation/README.md#buckling)).
+Nothing falls back to the in-house solver or to another analysis.
 
 ## What was measured
 
@@ -81,9 +81,10 @@ existing build and the nixpkgs ccx, with no code changes.
 
 ## The shape of the fix
 
-Linear buckling is solved in-house (docs/plans/buckling.md), with CalculiX as
-its test oracle and as an optional second answer. What is left here is the
-nonlinear analyses, which stay CalculiX's.
+Linear buckling is solved in-house
+([docs/simulation/README.md#buckling](../simulation/README.md#buckling)), with
+CalculiX as its test oracle and as an optional second answer. What is left
+here is the nonlinear analyses, which stay CalculiX's.
 
 ### Study options and solver choice
 
@@ -121,8 +122,10 @@ Each stage adds its keys under its own `vNEXT`.
 ## Stages
 
 Each stage is useful alone and lands with its docs. Stage 1 (discovery, the
-deck, linear static on CalculiX) is built. Buckling is
-docs/plans/buckling.md.
+deck, linear static on CalculiX) is built, and linear buckling with it
+(in-house, `*BUCKLE` its cross-check). Stage 4 comes before Stage 3, which
+ships the binary: until a nonlinear study exists, nothing a user needs
+requires a bundled ccx.
 
 **Stage 4: nonlinear static, large deformation**, ~1 000 lines.
 - `static` gains `nonlinear: {large_deformation: true, increments?}`, which maps to `NLGEOM` and `INC`.
@@ -131,7 +134,9 @@ docs/plans/buckling.md.
   - a remote load or torque becomes `*COUPLING`/`*DISTRIBUTING` on a reference node;
   - a force stays a dead load, and the docs say so.
 - **Snap-through and post-buckling.** An option seeds the geometry with the
-  first buckling mode (docs/plans/buckling.md) scaled to a stated
+  first buckling mode
+  ([docs/simulation/README.md#buckling](../simulation/README.md#buckling))
+  scaled to a stated
   imperfection, and steps with `*STATIC, RIKS`. The result reports the peak
   load factor it reached: the answer for an arch or a curved wall loaded
   across its curve, which linear buckling cannot see.

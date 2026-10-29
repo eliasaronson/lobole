@@ -1515,7 +1515,9 @@ void SyncFieldRenderer(AppState& state) {
   // --- Scalar field via the FieldRenderer (von Mises / displacement /
   // density).
   removeIso();
-  const bool modal = study && study->type == fem::AnalysisType::Modal;
+  // A buckling study shows its modes as a modal one does.
+  const bool modal = study && (study->type == fem::AnalysisType::Modal ||
+                               study->type == fem::AnalysisType::Buckling);
   const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
   const bool density = topo && sim.field == SimulationState::Field::Density;
 
