@@ -23,9 +23,9 @@ The bridge itself is built: a static study solves on CalculiX as a second,
 independent answer, through the study API, with discovery, the deck, the run
 directory, the refusals and the residual check
 ([docs/simulation/README.md#calculix](../simulation/README.md#calculix)).
-What is left is what it was built for: the analyses we do not have. A study
-gains a type (`buckling`, then nonlinear options on `static`), solved on
-CalculiX through that bridge. Nothing falls back to the in-house solver or to
+What is left is what it was built for: the nonlinear analyses we do not
+have, as options on `static`, solved on CalculiX through that bridge. Linear
+buckling is solved in-house instead (docs/plans/buckling.md). Nothing falls back to the in-house solver or to
 another analysis.
 
 ## What was measured
@@ -81,107 +81,48 @@ existing build and the nixpkgs ccx, with no code changes.
 
 ## The shape of the fix
 
-### Study type and solver choice
+Linear buckling is solved in-house (docs/plans/buckling.md), with CalculiX as
+its test oracle and as an optional second answer. What is left here is the
+nonlinear analyses, which stay CalculiX's.
 
-- `AnalysisType` gains `Buckling` (src/core/fem/FemStudy.h).
-- `auto` becomes CalculiX for buckling and for any nonlinear option (Stage 4
-  on); it stays in-house for static, modal and topology. `fem::SolverRefusal`
-  gains the refusal of `in_house` on buckling or nonlinear, beside the one of
-  `calculix` on modal or topology it has. Modal could map to `*FREQUENCY`
-  later; until it does, that stays refused.
-- `num_modes` is reused as the number of buckling factors. It defaults to 3, because a symmetric section has two equal first modes, as the square column did.
-- `load_cases` is refused on a buckling study: the factor scales one load set.
-- A buckling study's input key carries its type and `num_modes` (it does
-  through the serialized study, as `solver` does).
+### Study options and solver choice
 
-### The deck
-
-`fem::WriteDeck` writes the mesh, materials, supports and nodal forces a
-static run takes (docs/simulation/README.md#calculix). A buckling study adds:
-
-| ours | `.inp` |
-|---|---|
-| buckling | `*STEP` / `*BUCKLE` with `num_modes` and accuracy 1e-4 (default 0.01) |
-| outputs | `*NODE FILE` U, plus RF for nonlinear runs; `*EL FILE` S, and PE for plasticity |
-
-A pin's contact set is the one the in-house `SolveWithPins` iteration finds
-on the same load (`fem::StaticSupportsOf`, which a static run on CalculiX
-already uses), held bilaterally. Linear theory scales the load without
-changing its direction, so the set holds at every factor. The result says the
-set was found that way.
+- `static` gains `nonlinear: {...}` options (Stage 4 on). `auto` becomes
+  CalculiX for any study that sets one, and `fem::SolverRefusal` gains the
+  refusal of `in_house` on a nonlinear option.
+- A nonlinear option's input key carries it, through the serialized study, as
+  `solver` does.
 
 ### Running it
 
-The job, the run directory, threads, cancel, `timeout_s`, the memory
-refusal and ccx's `*ERROR` lines are built (docs/simulation/README.md
-#calculix). Left:
-- **Progress.** The job label names the eigenvalue phase; a nonlinear
-  step's fraction is its step time, read from `.sta` as each increment
-  lands.
-- **Memory.** A buckling run's per-DOF cost is calibrated from the Stage 2
-  cost test and refuses as a static run's does.
+The job, the run directory, threads, cancel, `timeout_s`, the memory refusal
+and ccx's `*ERROR` lines are built (docs/simulation/README.md#calculix). Left:
+- **Progress.** A nonlinear step's fraction is its step time, read from `.sta`
+  as each increment lands.
+- **Memory.** A nonlinear run's per-DOF cost is calibrated from the Stage 4
+  cost test, and it refuses as a static run's does.
 - **Non-convergence.** A nonlinear run that stops converging is refused with
-  the load fraction it reached. That fraction is information, not a result,
-  so nothing is stored.
+  the load fraction it reached. That fraction is information, not a result, so
+  nothing is stored.
 
-### Results: the same shape, checked the same way
+### Results
 
-- **Buckling's base state** is a linear static run, read and checked as a
-  static run on CalculiX is (U from the `.dat`, held to the energy balance
-  and the residual against our K).
-- **Buckling.** Each body gets:
-  - `buckling_factors`: every factor ccx returns, signed. A negative one is the same shape under the reversed load.
-  - `buckling_factor`: the smallest positive factor, the governing one. If none of the requested modes is positive, the result says so instead of picking one.
-  - mode shapes, stored as modal ones are (`ModeShape` with `factor` beside `frequencyHz`; `KeepWhatIsRead` trims them to boundary nodes).
-- **Buckling's honesty rules**, the counterpart of `peak_at_support_edge`:
-  - `yield_factor` = yield / peak von Mises of the base (factor 1) state, which is computed anyway. When it is below `buckling_factor`, `yields_first` says the part yields at that multiple before the elastic buckling load is reached. The governing factor is the smaller of the two, and the reply names which.
-  - `mode_at_load_edge`: when the first mode's peak motion lies within one element of a support's or a load face's edge, the mode is local crippling where the load enters, not a member buckling. The reply says so and names the face.
-  - The receipt's claim is basis `predicted`, with oracle `calculix/buckle` and its version. Its note says linear buckling is an upper bound for imperfection-sensitive shapes (thin shells, tubes).
-- **Nonlinear runs (Stage 4 on).** U, S (Cauchy stress at the final increment) and, for plasticity, PE are read from the `.frd`. ccx's equilibrium tolerance is its own (`*CONTROLS`, default 0.5 % of the mean force), not our 1e-6. So the deck tightens it, and the result states the criterion it met and checks that the reactions balance the applied load to that tolerance.
-- **The rest is shared.**
-  - `set_result_display {mode}` selects a buckling mode the way it selects a modal one.
-  - The field renderer, deformed shape and mode animation are unchanged.
-
-### Requirements and sweeps
-
-- `study_result` gains the quantity `buckling_factor`, used with `at_least` (src/core/Requirements.cpp, `MeasureStudyResult` in src/remote/RemoteRequirements.cpp).
-- `factor_of_safety` on a buckling study reads `yield_factor`.
-- Sweeps already list study requirements as not swept ("a study per point is minutes"), and a buckling one joins that list with the same reason.
-
-### GUI
-
-`StudyPanel.cpp` gets:
-- **Study type.** `Buckling` in the type combo; the solver combo (built) offers CalculiX for it.
-- **Buckling results.** A "Buckling factors" list in place of "Natural frequencies". Selecting one shows its mode with the deform slider. The governing factor and `yields_first`/`mode_at_load_edge` are shown as text.
+- U, S (Cauchy stress at the final increment) and, for plasticity, PE are read
+  from the `.frd`. ccx's equilibrium tolerance is its own (`*CONTROLS`, default
+  0.5 % of the mean force), not ours. So the deck tightens it, and the result
+  states the criterion it met and checks that the reactions balance the
+  applied load to that tolerance.
+- The field renderer, deformed shape and result display are unchanged.
 
 ### Format
 
-These changes write `vNEXT`:
-- the study key `analysis: "buckling"`;
-- the result keys `buckling_factors`, `yield_factor` and a mode's `factor`.
-
-Plumbing for the bump:
-- raise `kVersionPending`;
-- goldens `tests/golden/vNEXT-buckling-study.json` and `.expect.json`;
-- a row in format.md's pending table.
-
-Stage 4 onward add the nonlinear keys under their own `vNEXT`.
+Each stage adds its keys under its own `vNEXT`.
 
 ## Stages
 
-Each stage is useful alone and lands with its docs.
-
-Stage 1 (discovery, the deck, linear static on CalculiX) is built.
-
-**Stage 2: buckling**, ~1 000 lines.
-- The analysis type, the pin contact set, the results and their honesty flags, the requirement quantity, the GUI list and mode display, `vNEXT`, and docs/simulation/README.md's new section.
-- The "Not done" list drops buckling.
-
-**Stage 3: shipping the binary**, ~300 lines plus packaging.
-- **AppImage.** Bundle Ubuntu 24.04's `ccx` and its libraries via linuxdeploy `--executable`.
-- **Flatpak.** A ccx 2.23 module.
-- **Windows.** The installer carries `ccx_static.exe` as `ccx.exe`, pinned by sha256; `packaging/windows/smoke.sh` runs a buckling deck under Wine.
-- **Licensing.** `THIRD_PARTY.md` and `SOURCE-OFFER.md` rows, and the ccx source tarball attached to each release. `release-smoke.py` asserts `ping` finds the bundled solver.
+Each stage is useful alone and lands with its docs. Stage 1 (discovery, the
+deck, linear static on CalculiX) is built. Buckling is
+docs/plans/buckling.md.
 
 **Stage 4: nonlinear static, large deformation**, ~1 000 lines.
 - `static` gains `nonlinear: {large_deformation: true, increments?}`, which maps to `NLGEOM` and `INC`.
@@ -189,7 +130,24 @@ Stage 1 (discovery, the deck, linear static on CalculiX) is built.
   - pressure becomes a follower `*DLOAD P` on element faces. A boundary tri6 maps to its tet's face S1–S4, which needs a face map;
   - a remote load or torque becomes `*COUPLING`/`*DISTRIBUTING` on a reference node;
   - a force stays a dead load, and the docs say so.
+- **Snap-through and post-buckling.** An option seeds the geometry with the
+  first buckling mode (docs/plans/buckling.md) scaled to a stated
+  imperfection, and steps with `*STATIC, RIKS`. The result reports the peak
+  load factor it reached: the answer for an arch or a curved wall loaded
+  across its curve, which linear buckling cannot see.
 - Supporting work: progress from `.sta`, the non-convergence refusal, and the equilibrium check.
+
+**Stage 3: shipping the binary**, ~300 lines plus packaging. It lands with
+Stage 4: until a nonlinear study exists, nothing a user needs requires a
+bundled ccx.
+- **AppImage.** Bundle Ubuntu 24.04's `ccx` and its libraries via linuxdeploy `--executable`.
+- **Flatpak.** A ccx 2.23 module.
+- **Windows.** The installer carries `ccx_static.exe` as `ccx.exe`, pinned by
+  sha256; `packaging/windows/smoke.sh` runs a deck under Wine.
+  `PipedChild::Poll` blocks on Windows today, so `timeout_s` and cancel cannot
+  interrupt a run there, and dead run directories are not swept: both are
+  fixed here.
+- **Licensing.** `THIRD_PARTY.md` and `SOURCE-OFFER.md` rows, and the ccx source tarball attached to each release. `release-smoke.py` asserts `ping` finds the bundled solver.
 
 **Stage 5: contact**, ~1 500 lines.
 - A compression-only support against a rigid occurrence or the ground: the partner is meshed coarse and fixed, with `*CONTACT PAIR`.
@@ -198,7 +156,7 @@ Stage 1 (discovery, the deck, linear static on CalculiX) is built.
 
 **Stage 6: plasticity**, ~800 lines.
 - `nonlinear.plasticity: true`, with `*PLASTIC` from the material library.
-- Metals gain hardening data. A material without it is refused rather than assumed perfectly plastic (see the questions).
+- Metals gain hardening data. A material without it is refused rather than assumed perfectly plastic.
 - Results: `max_plastic_strain`, a requirement quantity of the same name, and the residual deformation from an unload step.
 
 **Stage 7: thermal**: steady heat transfer, then thermal stress. Sized when it is next.
@@ -206,45 +164,31 @@ Stage 1 (discovery, the deck, linear static on CalculiX) is built.
 ## Verification
 
 **Closed forms, through `run_study`, tagged `[calculix]`:**
-- **Euler column.**
-  - Fixed–free 10×10×200 steel to within 0.5 % of π²EI/4L² (measured: +0.06 % at a 2.5 mm mesh).
-  - A 10×20 section: the first two factors in the ratio (b/h)² = 4.
-- **Thin walls.** A static study's mesh puts one element through a 0.8–2 mm
-  wall at the auto size, and that is within 1 % for bending
-  ([fem-mesh-quality.md](fem-mesh-quality.md)). Buckling is checked the same
-  way: a 1 mm plate's factor at one layer against two or more layers (Netgen
-  `closeedgefac` 2, measured at 5–14× the elements). If one layer is off by
-  more than 2 %, a buckling study meshes with `closeedgefac`, and that is the
-  only change to its mesh.
-- **Wide cantilever plate.** The factor carries the plate stiffness Et³/12(1−ν²), not the beam's EI, to within 2 %. A classical simply supported plate needs a one-direction (roller) support that the study does not have.
-- **Stage 4.** The elastica: a cantilever's end deflection at PL²/EI = 1 against the Bisshopp–Drucker solution.
+- **Stage 4.**
+  - The elastica: a cantilever's end deflection at PL²/EI = 1 against the
+    Bisshopp–Drucker solution.
+  - A shallow arch's snap-through load against its closed form.
+  - A column seeded with its first mode reaches a peak load factor below its
+    linear one and approaching it as the imperfection shrinks.
 - **Stage 5.** Hertz contact width for a sphere on a block; a block lifting off a rigid floor under a moment.
 - **Stage 6.** A bar past yield (uniform, exact), and a rectangular beam's collapse load M_p = σ_y b h²/4.
 
 **Refusals, in `refused_calls_smoke` and `tests/test_fem_calculix.cpp`:**
-`in_house` on buckling; load cases on buckling; non-convergence (Stage 4).
-
-**The MCP-only path:** `tests/calculix_smoke.py` builds a column, adds a buckling study and a `buckling_factor` requirement, and reads the factor and `check_requirements`, using RPCs only. It is gated on `ping`'s `features.calculix`.
-
-**Cost:**
-- A `[slow]` CPU-time check of a ~240 k-DOF buckling run, against the measured ~48 s.
-- A buckling run's memory coefficients are taken from the same run, so its estimate cannot drift from what the solver costs.
+`in_house` on a nonlinear option; non-convergence.
 
 **Docs:**
-- docs/simulation/README.md's "CalculiX" section gains buckling (its honesty rules) and loses buckling (later, the rest) from "Not done".
-- docs/packaging/README.md gains the bundled solver.
-- The RPC `describe` rows for `add_study`, `set_study`, `study_results` and `set_result_display`.
+- docs/simulation/README.md's "CalculiX" section gains each stage, and "Not done" loses it.
+- docs/packaging/README.md gains the bundled solver (Stage 3).
+- The RPC `describe` rows each stage touches.
 
 ## Files
 
-- New: `tests/calculix_smoke.py`; the goldens.
-- `src/core/fem/Calculix.{h,cpp}`: `*BUCKLE`, the factors read from the `.dat`, the mode shapes from the `.frd`; `tests/test_fem_calculix.cpp`.
-- `src/core/fem/FemStudy.{h,cpp}`: the type, its refusals, the solve branch.
-- `src/core/fem/FemSolver.h`: `ModeShape::factor`, buckling fields.
-- `src/core/io/SerializeStudies.cpp`, `src/core/io/SerializationInternal.h`, `docs/versioning/format.md`.
+- `src/core/fem/Calculix.{h,cpp}`: the nonlinear deck keys, `.sta` progress, reading S and PE; `tests/test_fem_calculix.cpp`.
+- `src/core/fem/FemStudy.{h,cpp}`: the options, their refusals, the solve branch.
+- `src/core/io/SerializeStudies.cpp`, `src/core/io/SerializationInternal.h`, `docs/versioning/format.md`, a golden per stage.
 - `src/remote/RemoteSimulation.cpp`: rows and handlers.
-- `src/core/Requirements.cpp`, `src/remote/RemoteRequirements.cpp`.
+- `src/core/Requirements.cpp`, `src/remote/RemoteRequirements.cpp` (Stage 6's quantity).
 - `src/ui/StudyPanel.cpp`.
 - The python client's `rpc.py` and `rpc-surface.json`, regenerated.
-- `packaging/appimage/*`, `packaging/flatpak/org.lobole.Lobole.yaml`, `packaging/windows/{installer.nix,installer.nsi,smoke.sh}`.
+- `packaging/appimage/*`, `packaging/flatpak/org.lobole.Lobole.yaml`, `packaging/windows/{installer.nix,installer.nsi,smoke.sh}`, `src/common/ChildProcess.cpp` (Windows polling).
 - `THIRD_PARTY.md`, `LICENSES/SOURCE-OFFER.md`.
