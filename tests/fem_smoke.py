@@ -450,6 +450,12 @@ def main():
             d = app.client
             expect(d.call("ping")["ok"], "ping")
 
+            # The convergence check is test_fem_converge.cpp's: here every
+            # static run stops it after the first solve (converge_auto_s 0;
+            # this app's config is the smoke's own), which the first run
+            # below says, and the surface is checked at one solve a run.
+            d.call("set_settings", converge_auto_s=0.0)
+
             study, created_by, fixed_face, _ = build_bar(d)
 
             studies = d.call("list_studies")["studies"]
@@ -468,6 +474,20 @@ def main():
             # CLOSE it is to F/A is test_fem.cpp's assertion, not this one.
             expect(sigma > 0, f"a positive von Mises came back: {sigma}")
             expect("factor_of_safety" in res, "steel yield gives a FoS")
+            conv = res["convergence"]
+            expect(conv["status"] == "not converged"
+                   and conv["stopped"] == "time"
+                   and "converge_auto_s" in conv["reason"],
+                   f"auto under a 0 s limit stops for time: {conv}")
+            once = d.call("run_study", study=study, converge="never",
+                          recompute=True)["convergence"]
+            expect(once["status"] == "not checked", f"never: {once}")
+            try:
+                d.call("run_study", study=study, converge="sometimes")
+                raise AssertionError("an unknown converge ran")
+            except RuntimeError as e:
+                expect("auto, always, never" in str(e),
+                       f"refused naming the three: {e}")
 
             # study_results reads the cache without re-solving.
             again = d.call("study_results", study=study)

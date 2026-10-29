@@ -311,6 +311,22 @@ const Field kFields[] = {
      1.0f,
      "",
      true},
+    // A static study's convergence check on `auto`
+    // (docs/simulation/README.md#a-peak-that-has-settled).
+    {"converge_auto_s",
+     "Simulation",
+     "Converge peaks under",
+     "Seconds. A static study on 'auto' refines round its peak stress until "
+     "it settles while a solve takes less than this; a longer one is "
+     "reported unconverged instead of waiting.",
+     Tier::NextTime,
+     &Settings::convergeAutoS,
+     {},
+     {},
+     0.0f,
+     3600.0f,
+     1.0f,
+     "s"},
     // Sharing (F9 C1). Empty is the right answer for anyone who has
     // configured git — these fill the gap for anyone who has not, and never
     // override what git already knows.
@@ -362,22 +378,6 @@ const Field kFields[] = {
      {},
      0.0f,
      3600.0f},
-    // A static study's convergence check on `auto`
-    // (docs/simulation/README.md#a-peak-that-has-settled).
-    {"converge_auto_s",
-     "Simulation",
-     "Converge peaks under",
-     "Seconds. A static study on 'auto' refines round its peak stress until "
-     "it settles while a solve takes less than this; a longer one is "
-     "reported unconverged instead of waiting.",
-     Tier::NextTime,
-     &Settings::convergeAutoS,
-     {},
-     {},
-     0.0f,
-     3600.0f,
-     1.0f,
-     "s"},
     // What a new STL or OBJ import becomes
     // (docs/interchange/README.md#mesh-bodies); an Import that names its
     // own representation keeps it.
