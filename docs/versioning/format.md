@@ -343,6 +343,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A static study takes `nonlinear` {`large_deformation`: true (required), `increments`?, `snap_through`?, `imperfection_mm`?, `deflection_limit_mm`?}: solved past linear on CalculiX ([nonlinear static](../simulation/README.md#nonlinear-static)); absent, linear, how every older study reads. It is refused on another analysis type, with `solver: in_house`, with load cases, without `large_deformation: true`, with an unknown key, and on a snap-through run with `converge: always`. A saved static result's body gains `nonlinear` {`factor`, `max_factor`, `increments`, `ccx_runs`, `curve` [[factor, max motion mm]], `residual_criterion`, `imbalance`, `first_yield_factor`?, `snapped`? [from, to], `snap_through`? {`linear_factor`, `imperfection_mm`, `imperfection_given`, `deflection_limit_mm`, `peak_at`: limit_point \| snap \| deflection_limit \| none, `peak_factor`, `peak_bracket`, `why_none`}}. Golden `vNEXT-nonlinear-study` (four studies: large deformation, stepped on calculix, a snap-through run with its seed and limit stated, and a linear one; results are not in the single-file corpus, so their round trip is `tests/test_fem_calculix.cpp`'s) |
 
 ## Paths in a project
 

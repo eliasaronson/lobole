@@ -103,6 +103,21 @@ json StudyToJson(const fem::Study& s) {
   // default, auto, so earlier files re-save byte-identically.
   if (s.converge != fem::ConvergeMode::Auto)
     j["converge"] = fem::ConvergeModeToString(s.converge);
+  // Solved past linear (vNEXT): absent when linear, so every study saved
+  // before -- and its input hash -- is what it was.
+  if (s.nonlinear.On()) {
+    const fem::Nonlinear& nl = s.nonlinear;
+    json n = {{"large_deformation", true}};
+    if (nl.increments > 0)
+      n["increments"] = nl.increments;
+    if (nl.snapThrough)
+      n["snap_through"] = true;
+    if (nl.hasImperfection)
+      n["imperfection_mm"] = nl.imperfectionMm;
+    if (nl.hasDeflectionLimit)
+      n["deflection_limit_mm"] = nl.deflectionLimitMm;
+    j["nonlinear"] = std::move(n);
+  }
 
   // Assembly studies (v106): the participants and their roles. Absent on a
   // part study, so every earlier study file re-saves byte-identically.
@@ -251,6 +266,7 @@ fem::Study StudyFromJson(const json& j) {
                               "mesh_size",
                               "mesh_size_expr",
                               "converge",
+                              "nonlinear",
                               "participants",
                               "refinements",
                               "loads"},
@@ -376,6 +392,26 @@ fem::Study StudyFromJson(const json& j) {
                                "converge");
   }
 
+  if (j.contains("nonlinear")) { // vNEXT
+    const json& n = j.at("nonlinear");
+    readctx::RefuseUnknownKeys(n,
+                               {"large_deformation", "increments",
+                                "snap_through", "imperfection_mm",
+                                "deflection_limit_mm"},
+                               "study nonlinear");
+    fem::Nonlinear& nl = s.nonlinear;
+    nl.largeDeformation = n.value("large_deformation", false);
+    nl.increments = n.value("increments", 0);
+    nl.snapThrough = n.value("snap_through", false);
+    nl.hasImperfection = n.contains("imperfection_mm");
+    nl.imperfectionMm = n.value("imperfection_mm", 0.0);
+    nl.hasDeflectionLimit = n.contains("deflection_limit_mm");
+    nl.deflectionLimitMm = n.value("deflection_limit_mm", 0.0);
+    if (!nl.largeDeformation)
+      throw std::runtime_error("study " + std::to_string(s.id) +
+                               ": nonlinear without large_deformation: true");
+  }
+
   for (const json& pj : j.value("participants", json::array())) {
     readctx::RefuseUnknownKeys(
         pj, {"occurrence", "role", "mesh_size", "mesh_size_expr"},
@@ -489,6 +525,12 @@ fem::Study StudyFromJson(const json& j) {
           LoadRegionFromJson(lj.at("region"), "load " + std::to_string(l.id));
     s.loads.push_back(std::move(l));
   }
+  // A nonlinear option the study cannot take (an in-house solver, load
+  // cases, another analysis) is refused here as set_study refuses it.
+  if (const std::string why = fem::NonlinearRefusal(
+          s.solver, s.type, s.nonlinear, s.loadCases.size(), s.converge);
+      !why.empty())
+    throw std::runtime_error("study " + std::to_string(s.id) + ": " + why);
   return s;
 }
 
@@ -893,6 +935,78 @@ json BucklingToJson(const fem::StudyBodyResult::Buckling& k) {
   return out;
 }
 
+// How a nonlinear body's run went (vNEXT).
+json NonlinearToJson(const fem::StudyBodyResult::Nonlinear& n) {
+  json curve = json::array();
+  for (const auto& [f, u] : n.curve)
+    curve.push_back({f, u});
+  json out = {
+      {"factor", n.factor},         {"max_factor", n.maxFactor},
+      {"increments", n.increments}, {"ccx_runs", n.ccxRuns},
+      {"curve", std::move(curve)},  {"residual_criterion", n.residualCriterion},
+      {"imbalance", n.imbalance}};
+  if (n.firstYieldFactor > 0)
+    out["first_yield_factor"] = n.firstYieldFactor;
+  if (n.snapped)
+    out["snapped"] = {n.snappedFrom, n.snappedTo};
+  if (n.snapThrough)
+    out["snap_through"] = {{"linear_factor", n.linearFactor},
+                           {"imperfection_mm", n.imperfectionMm},
+                           {"imperfection_given", n.imperfectionGiven},
+                           {"deflection_limit_mm", n.deflectionLimitMm},
+                           {"peak_at", n.peakAt},
+                           {"peak_factor", n.peakFactor},
+                           {"peak_bracket", {n.peakLow, n.peakHigh}},
+                           {"why_none", n.none}};
+  return out;
+}
+
+fem::StudyBodyResult::Nonlinear NonlinearFromJson(const json& j,
+                                                  const std::string& what) {
+  readctx::RefuseUnknownKeys(j,
+                             {"factor", "max_factor", "increments", "ccx_runs",
+                              "curve", "residual_criterion", "imbalance",
+                              "first_yield_factor", "snapped", "snap_through"},
+                             what + " nonlinear");
+  fem::StudyBodyResult::Nonlinear n;
+  n.solved = true;
+  n.factor = j.at("factor").get<double>();
+  n.maxFactor = j.value("max_factor", 1.0);
+  n.increments = j.value("increments", 0);
+  n.ccxRuns = j.value("ccx_runs", 0);
+  for (const json& p : j.value("curve", json::array()))
+    n.curve.push_back({p.at(0).get<double>(), p.at(1).get<double>()});
+  n.residualCriterion = j.value("residual_criterion", 0.0);
+  n.imbalance = j.value("imbalance", 0.0);
+  n.firstYieldFactor = j.value("first_yield_factor", 0.0);
+  if (j.contains("snapped")) {
+    n.snapped = true;
+    n.snappedFrom = j.at("snapped").at(0).get<double>();
+    n.snappedTo = j.at("snapped").at(1).get<double>();
+  }
+  if (j.contains("snap_through")) {
+    const json& s = j.at("snap_through");
+    n.snapThrough = true;
+    n.linearFactor = s.value("linear_factor", 0.0);
+    n.imperfectionMm = s.value("imperfection_mm", 0.0);
+    n.imperfectionGiven = s.value("imperfection_given", false);
+    n.deflectionLimitMm = s.value("deflection_limit_mm", 0.0);
+    n.peakAt = s.value("peak_at", std::string{});
+    n.peakFactor = s.value("peak_factor", 0.0);
+    if (s.contains("peak_bracket")) {
+      n.peakLow = s.at("peak_bracket").at(0).get<double>();
+      n.peakHigh = s.at("peak_bracket").at(1).get<double>();
+    }
+    n.none = s.value("why_none", std::string{});
+    if (n.peakAt != "limit_point" && n.peakAt != "snap" &&
+        n.peakAt != "deflection_limit" && n.peakAt != "none")
+      throw std::runtime_error(what + ": a snap-through peak_at '" + n.peakAt +
+                               "' (expected one of: limit_point, snap, "
+                               "deflection_limit, none)");
+  }
+  return n;
+}
+
 fem::StudyBodyResult::Buckling BucklingFromJson(const json& j,
                                                 const std::string& what) {
   fem::StudyBodyResult::Buckling k;
@@ -1122,6 +1236,8 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
     }
     if (b.buckling.solved)
       bj["buckling"] = BucklingToJson(b.buckling);
+    if (b.nonlinear.solved)
+      bj["nonlinear"] = NonlinearToJson(b.nonlinear);
     bodies.push_back(std::move(bj));
   }
   out["bodies"] = std::move(bodies);
@@ -1268,6 +1384,13 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
       b.results = b.cases.front();
     else if (bj.contains("results"))
       b.results = FieldsFromJson(bj.at("results"), f);
+    if (bj.contains("nonlinear")) {
+      if (kind != "static")
+        throw std::runtime_error(what + ": body '" + b.bodyName +
+                                 "' carries a nonlinear summary, which is a "
+                                 "static result's");
+      b.nonlinear = NonlinearFromJson(bj.at("nonlinear"), what);
+    }
     if (kind == "buckling") {
       if (!bj.contains("buckling"))
         throw std::runtime_error(what + ": body '" + b.bodyName +

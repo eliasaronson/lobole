@@ -354,6 +354,16 @@ SolveBuckling(const FemMesh& mesh, const std::vector<Material>& byDomain,
 // Calibrated from measured runs: the comment at its definition says which.
 uint64_t BucklingMemoryEstimate(size_t freeDofs);
 
+// The fields of a large-deformation answer `displacement` (one per node):
+// the Cauchy stress at each node, from the Green-Lagrange strain through
+// the material's St Venant-Kirchhoff law -- what CalculiX's linear elastic
+// material is under NLGEOM -- pushed forward to the deformed part, and
+// averaged to the node by element volume as the linear recovery is; its von
+// Mises, and the maxima. No reactions.
+FemResults LargeDeformationFields(const FemMesh& mesh,
+                                  const std::vector<Material>& byDomain,
+                                  const std::vector<glm::dvec3>& displacement);
+
 // True when the build links Eigen (static solver) / Spectra (modal).
 bool SolverAvailable();
 bool ModalAvailable();
@@ -479,6 +489,51 @@ struct StudyBodyResult {
     int wallLayers = 0;
   };
   Buckling buckling;
+  // A nonlinear static body (docs/simulation/README.md#nonlinear-static):
+  // `results` is the state at the factor reported (1 on a large-deformation
+  // run, the peak on a snap-through one), its stress the Cauchy stress of
+  // the deformed part; this is how the run went.
+  struct Nonlinear {
+    bool solved = false;
+    bool snapThrough = false;
+    // The factor the fields are at, and the load the run was asked to reach
+    // (1, or a snap-through run's cap: twice the linear factor).
+    double factor = 0.0;
+    double maxFactor = 1.0;
+    int increments = 0; // converged increments of the run reported
+    int ccxRuns = 0;    // a snap's peak is bracketed by a second run
+    // The path: the factor and the largest motion (mm) at each converged
+    // increment.
+    std::vector<std::pair<double, double>> curve;
+    // Snap-through: the first linear factor and the seed, the motion limit,
+    // and how the run ended -- limit_point (the solve stopped converging
+    // as the stiffness ran out), snap (a converged increment jumped to
+    // another branch), deflection_limit, or none (it reached the cap). The
+    // peak lies in [peakLow, peakHigh]; `peakFactor` is the low end (the
+    // deflection limit's: interpolated between the increments either side).
+    double linearFactor = 0.0;
+    double imperfectionMm = 0.0;
+    bool imperfectionGiven = false;
+    double deflectionLimitMm = 0.0;
+    std::string peakAt;
+    double peakFactor = 0.0;
+    double peakLow = 0.0, peakHigh = 0.0;
+    std::string none; // why there is no peak (peakAt none)
+    // The factor at which the peak von Mises reached yield (0 = not reached
+    // by the factor reported, or no yield strength).
+    double firstYieldFactor = 0.0;
+    // A large-deformation run that jumped between two factors on its way
+    // to the load: the part snapped through, and the fields are of the
+    // branch it landed on.
+    bool snapped = false;
+    double snappedFrom = 0.0, snappedTo = 0.0;
+    // The equilibrium check: ccx's residual criterion (largest residual
+    // over the mean nodal force), and the supports' total reaction against
+    // the applied load at the factor reported, relative to the load.
+    double residualCriterion = 0.0;
+    double imbalance = 0.0;
+  };
+  Nonlinear nonlinear;
   // The results of case `k` (the only ones when there are no cases).
   const FemResults& Case(int k) const {
     return k >= 0 && k < static_cast<int>(cases.size()) ? cases[k] : results;
@@ -667,6 +722,7 @@ struct StudyJobBody {
 struct StudyJobInput {
   AnalysisType type = AnalysisType::Static;
   Solver solver = Solver::Auto;
+  Nonlinear nonlinear;
   std::vector<std::string> caseNames;
   int numModes = 8;
   glm::dvec3 gravity{0.0};
@@ -733,7 +789,8 @@ struct BondPatch {
 };
 struct StudyPlan {
   AnalysisType type = AnalysisType::Static;
-  Solver solver = Solver::Auto;
+  Solver solver = Solver::Auto; // EffectiveSolver: a nonlinear auto is calculix
+  Nonlinear nonlinear;
   std::vector<std::string> caseNames; // empty = one case
   // A shape study (ShapeSource): what the runtime reports of the cut.
   uint64_t sourceDigest = 0;

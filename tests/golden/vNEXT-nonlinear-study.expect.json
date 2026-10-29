@@ -1,0 +1,9 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [7853.98],
+  "study_nonlinear": [["Bend", true, 0, false, null, null, "calculix"],
+                      ["Stepped", true, 40, false, null, null, "calculix"],
+                      ["Snap", true, 0, true, 0.05, 12.5, "calculix"],
+                      ["Linear", false, 0, false, null, null, "in_house"]]
+}

@@ -41,6 +41,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1164,3 +1165,584 @@ TEST_CASE("calibrate the CalculiX memory estimate", "[.][calculix-calibrate]") {
   }
 }
 #endif
+
+// ---- Nonlinear static (docs/simulation/README.md#nonlinear-static) --------
+
+namespace {
+
+// A stand-in ccx that converges one increment, to `factor` of the load,
+// and then stops converging: what it prints is what a real one does.
+std::string StallingCcx(const fs::path& dir, double factor) {
+  char t[32];
+  std::snprintf(t, sizeof(t), "%.7E", factor);
+  return FakeCcx(
+      dir,
+      std::string(
+          "nodes=$(awk '/^\\*NODE, NSET=NALL/{on=1;next} /^\\*/{on=0} "
+          "on{sub(/,.*/,\"\");print}' job.inp)\n"
+          "sup=$(awk '/^\\*NSET, NSET=NSUP/{on=1;next} /^\\*/{on=0} "
+          "on{gsub(/,/,\" \");print}' job.inp)\n"
+          "{ echo; echo ' displacements (vx,vy,vz) for set NALL and time  ") +
+          t +
+          "'; echo; for n in $nodes; do echo \"  $n  0.0E+00  0.0E+00  "
+          "0.0E+00\"; done; echo;\n"
+          "  echo ' forces (fx,fy,fz) for set NSUP and time  " +
+          t +
+          "'; echo; for n in $sup; do echo \"  $n  0.0E+00  0.0E+00  "
+          "0.0E+00\"; done; echo; } > job.dat\n"
+          "printf 'SUMMARY OF JOB INFORMATION\\n  STEP INC ATT ITRS TOT STEP "
+          "INC\\n"
+          "     1  1  1  3  " +
+          t + "  " + t + "  " + t + "\\n     1  2  1U  9  " + t + "  " + t +
+          "  1.0E-06\\n' > job.sta\n"
+          "echo ' *ERROR: increment size smaller than minimum'\n"
+          "echo ' best solution and residuals are in the frd file'\n"
+          "exit 201");
+}
+
+} // namespace
+
+TEST_CASE("a nonlinear study is refused in-house, on another analysis, with "
+          "load cases, and a snap-through run with converge always",
+          "[fem][calculix][nonlinear]") {
+  fem::Nonlinear nl;
+  nl.largeDeformation = true;
+  using fem::AnalysisType;
+  using fem::ConvergeMode;
+  using fem::Solver;
+  CHECK(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, nl, 0,
+                              ConvergeMode::Auto)
+            .empty());
+  CHECK(fem::EffectiveSolver(Solver::Auto, nl) == Solver::Calculix);
+  CHECK(fem::EffectiveSolver(Solver::Auto, fem::Nonlinear{}) == Solver::Auto);
+  CHECK_THAT(fem::NonlinearRefusal(Solver::InHouse, AnalysisType::Static, nl, 0,
+                                   ConvergeMode::Auto),
+             ContainsSubstring("in-house solver is linear"));
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Modal, nl, 0,
+                                   ConvergeMode::Auto),
+             ContainsSubstring("a static study's"));
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, nl, 2,
+                                   ConvergeMode::Auto),
+             ContainsSubstring("takes no load cases"));
+  fem::Nonlinear snap = nl;
+  snap.snapThrough = true;
+  CHECK(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, snap, 0,
+                              ConvergeMode::Never)
+            .empty());
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, snap, 0,
+                                   ConvergeMode::Always),
+             ContainsSubstring("peak load factor"));
+  fem::Nonlinear half;
+  half.snapThrough = true;
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Calculix, AnalysisType::Static, half,
+                                   0, ConvergeMode::Auto),
+             ContainsSubstring("large_deformation: true"));
+  fem::Nonlinear seeded = nl;
+  seeded.hasImperfection = true;
+  seeded.imperfectionMm = 0.1;
+  CHECK_THAT(fem::NonlinearRefusal(Solver::Auto, AnalysisType::Static, seeded,
+                                   0, ConvergeMode::Auto),
+             ContainsSubstring("snap_through: true"));
+
+  // The run refuses it as set_study does: a file can carry it.
+  fem::StudyJobInput in;
+  in.type = AnalysisType::Static;
+  in.solver = Solver::InHouse;
+  in.nonlinear = nl;
+  in.bodies.push_back(HandCantilever());
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::SolvePreparedStudy(in, rt, &err));
+  CHECK_THAT(err, ContainsSubstring("in-house solver is linear"));
+  CHECK(rt.bodies.empty());
+}
+
+TEST_CASE("a nonlinear run that stops converging is refused with the load "
+          "it reached, and nothing is stored",
+          "[fem][calculix][nonlinear]") {
+  Scratch scratch;
+  fem::CalculixInstall ccx;
+  ccx.path = StallingCcx(scratch.dir, 0.4);
+  ccx.major = 2;
+  ccx.minor = 23;
+  fem::StudyJobInput in;
+  in.type = fem::AnalysisType::Static;
+  in.solver = fem::Solver::Calculix;
+  in.nonlinear.largeDeformation = true;
+  in.bodies.push_back(HandCantilever());
+  in.gravity = kHeavy / 1000.0; // m/s^2
+  fem::SolveOptions options;
+  options.calculix = RunWith(ccx, scratch.dir / "runs");
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::SolvePreparedStudy(in, rt, &err, options));
+  INFO(err);
+  CHECK_THAT(err, ContainsSubstring("stopped converging at 40 % of the load"));
+  CHECK_THAT(err, ContainsSubstring("increment size smaller than minimum"));
+  CHECK_THAT(err, ContainsSubstring("Nothing was stored"));
+  CHECK(rt.bodies.empty());
+}
+
+#ifdef HAVE_NETGEN
+namespace {
+
+constexpr double kPiNl = 3.14159265358979323846;
+
+// A study run as run_study runs one: planned, meshed and solved on ccx,
+// its peak's convergence check off.
+fem::StudyRuntime RunNonlinear(Document& doc, fem::Study& s,
+                               const fem::CalculixInstall& ccx,
+                               const Scratch& scratch, double* seconds) {
+  fem::StudyPlan plan;
+  std::string err;
+  const bool planned = fem::PlanStudy(doc, s, plan, &err);
+  INFO(err);
+  REQUIRE(planned);
+  fem::SolveOptions options;
+  options.calculix = RunWith(ccx, scratch.dir / "runs");
+  fem::ConvergeOptions converge;
+  converge.mode = fem::ConvergeMode::Never;
+  fem::StudyJobInput input;
+  fem::StudyRuntime rt;
+  const auto t0 = std::chrono::steady_clock::now();
+  const bool ok = fem::SolveConverged(plan, input, rt, converge, &err, options);
+  if (seconds)
+    *seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+            .count();
+  INFO(err);
+  REQUIRE(ok);
+  REQUIRE(rt.bodies.size() == 1);
+  return rt;
+}
+
+// The elastica of a cantilever under a dead tip load P normal to its axis,
+// k = P L^2 / EI: theta'' = -k cos(theta) on s in [0, 1], theta(0) = 0,
+// theta'(1) = 0, shot on theta'(0) (Bisshopp and Drucker's elliptic
+// integrals, evaluated). The tip's motion along the load and back along the
+// axis, over L.
+std::pair<double, double> Elastica(double k) {
+  const auto shoot = [k](double d0, double* along, double* back) {
+    const int n = 4000;
+    const double h = 1.0 / n;
+    double th = 0.0, w = d0, x = 0.0, y = 0.0;
+    for (int i = 0; i < n; ++i) {
+      const double k1t = w, k1w = -k * std::cos(th);
+      const double k2t = w + h / 2 * k1w, k2w = -k * std::cos(th + h / 2 * k1t);
+      const double k3t = w + h / 2 * k2w, k3w = -k * std::cos(th + h / 2 * k2t);
+      const double k4t = w + h * k3w, k4w = -k * std::cos(th + h * k3t);
+      const double a1 = th, a2 = th + h / 2 * k1t, a3 = th + h / 2 * k2t,
+                   a4 = th + h * k3t;
+      x += h / 6 *
+           (std::cos(a1) + 2 * std::cos(a2) + 2 * std::cos(a3) + std::cos(a4));
+      y += h / 6 *
+           (std::sin(a1) + 2 * std::sin(a2) + 2 * std::sin(a3) + std::sin(a4));
+      th += h / 6 * (k1t + 2 * k2t + 2 * k3t + k4t);
+      w += h / 6 * (k1w + 2 * k2w + 2 * k3w + k4w);
+    }
+    if (along)
+      *along = y;
+    if (back)
+      *back = 1.0 - x;
+    return w; // theta'(1)
+  };
+  double lo = 0.0, hi = 2.0 * k + 1.0;
+  for (int i = 0; i < 80; ++i) {
+    const double mid = 0.5 * (lo + hi);
+    (shoot(mid, nullptr, nullptr) > 0 ? hi : lo) = mid;
+  }
+  double along = 0.0, back = 0.0;
+  shoot(0.5 * (lo + hi), &along, &back);
+  return {along, back};
+}
+
+const CADMaterials::MaterialProperties& Steel() {
+  return CADMaterials::MaterialLibrary::GetMaterial(
+      CADMaterials::MaterialLibrary::MaterialTypeFromString("steel"));
+}
+
+} // namespace
+
+TEST_CASE("a cantilever at P L^2 / EI = 1 bends as Bisshopp and Drucker's "
+          "elastica, where linear theory is 10 % out",
+          "[fem][calculix][nonlinear]") {
+  REQUIRE_CCX(ccx);
+  Scratch scratch;
+  Document doc;
+  constexpr double L = 100.0, a = 5.0;
+  auto box = std::make_unique<BoxFeature>("Beam", glm::dvec3(0), a, a, L);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const Body& body = doc.GetBodies()[0];
+  const double E = Steel().youngGPa * 1000.0;
+  const double I = a * a * a * a / 12.0;
+  const double P = E * I / (L * L); // k = 1
+  fem::Study& s = doc.AddStudy("Elastica");
+  s.meshSize = 2.5;
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  const ElementRef tip = FaceWhere(body, "plane", isZ(L));
+  s.loads.push_back(
+      MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", isZ(0.0))));
+  s.loads.push_back(
+      MakeLoad(doc, fem::LoadType::Force, tip, P, glm::dvec3(1, 0, 0)));
+  s.nonlinear.largeDeformation = true;
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunNonlinear(doc, s, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult& b = rt.bodies[0];
+  REQUIRE(b.nonlinear.solved);
+  fem::ResolvedFace rf;
+  std::string err;
+  REQUIRE(fem::ResolveFace(doc, tip, "tip", rf, &err));
+  const auto motion =
+      fem::FitFaceMotion(b.mesh, b.results.displacement, rf.faceIndex);
+  REQUIRE(motion.has_value());
+  const auto [along, back] = Elastica(1.0);
+  const double ux = motion->translation.x / L, uz = -motion->translation.z / L;
+  std::printf("nonlinear elastica, PL^2/EI = 1, %zu nodes, %d increments, "
+              "%.1f s: tip along %.5f L (elastica %.5f, %+.2f %%), back "
+              "%.5f L (elastica %.5f, %+.2f %%); linear theory 1/3; "
+              "imbalance %.2e\n",
+              b.mesh.stats.nodeCount, b.nonlinear.increments, seconds, ux,
+              along, 100.0 * (ux / along - 1.0), uz, back,
+              100.0 * (uz / back - 1.0), b.nonlinear.imbalance);
+  CHECK_THAT(along, Catch::Matchers::WithinRel(0.30172, 1e-4));
+  CHECK_THAT(back, Catch::Matchers::WithinRel(0.05643, 1e-3));
+  CHECK_THAT(ux, Catch::Matchers::WithinRel(along, 0.01));
+  CHECK_THAT(uz, Catch::Matchers::WithinRel(back, 0.02));
+  CHECK(b.nonlinear.factor == 1.0);
+  CHECK(b.nonlinear.imbalance < fem::kNonlinearBalance);
+  CHECK_FALSE(b.nonlinear.snapped);
+  // The clamp carries the dead load back.
+  REQUIRE(b.results.reactions.size() == 1);
+  CHECK_THAT(b.results.reactions[0].forceN.x,
+             Catch::Matchers::WithinRel(-P, 2e-3));
+  CHECK(EntriesIn(scratch.dir / "runs") == 0);
+  // The Cauchy stress at the root: the moment P (L - u along the axis is
+  // not it: the arm is the deflected tip's x from the root, L (1 - back)).
+  // The root's peak sits on the clamp's edge, so the away value is read.
+  CHECK(b.results.maxVonMises > 0.0);
+}
+
+TEST_CASE("at a load too small to deform it, a large-deformation run answers "
+          "the linear one: a pressure, a torque, a remote load and a pin",
+          "[fem][calculix][nonlinear]") {
+  REQUIRE_CCX(ccx);
+  Scratch scratch;
+  // A shaft under a torque and a remote load, a plate under a pressure on a
+  // pin: every load the deck writes its own way.
+  Document doc;
+  auto cyl = std::make_unique<CylinderFeature>("Shaft", glm::dvec3(0, 0, 0),
+                                               glm::dvec3(0, 0, 1), 6.0, 80.0);
+  cyl->SetMaterial("steel");
+  doc.AddFeature(std::move(cyl));
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Small");
+  s.meshSize = 2.5;
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  s.loads.push_back(
+      MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", isZ(0.0))));
+  fem::Load t = MakeLoad(doc, fem::LoadType::Torque,
+                         FaceWhere(body, "plane", isZ(80.0)), 20.0);
+  t.axisOrigin = glm::dvec3(0, 0, 80);
+  t.axisDirection = glm::dvec3(0, 0, 1);
+  s.loads.push_back(t);
+  fem::Load r =
+      MakeLoad(doc, fem::LoadType::Remote, FaceWhere(body, "plane", isZ(80.0)),
+               1.0, glm::dvec3(1, 0, 0));
+  r.point = glm::dvec3(0, 0, 100);
+  r.hasPoint = true;
+  s.loads.push_back(r);
+  s.loads.push_back(MakeLoad(
+      doc, fem::LoadType::Pressure,
+      FaceWhere(body, "cylinder", [](const glm::dvec3&) { return true; }),
+      0.001));
+  fem::StudyRuntime own;
+  {
+    fem::ConvergeOptions never;
+    never.mode = fem::ConvergeMode::Never;
+    std::string err;
+    REQUIRE(fem::RunStudy(doc, s, own, never, &err));
+  }
+  s.nonlinear.largeDeformation = true;
+  const fem::StudyRuntime theirs = RunNonlinear(doc, s, *ccx, scratch, nullptr);
+  const auto& a = own.bodies[0].results;
+  const auto& b = theirs.bodies[0].results;
+  REQUIRE(a.displacement.size() == b.displacement.size());
+  double worst = 0.0;
+  for (size_t n = 0; n < a.displacement.size(); ++n)
+    worst = std::max(worst, glm::length(a.displacement[n] - b.displacement[n]));
+  const double rel = worst / a.maxDisplacement;
+  std::printf("nonlinear at a small load, shaft (%zu nodes): largest nodal "
+              "difference %.3e of the peak %.6g mm; peak von Mises %.6g vs "
+              "%.6g MPa; imbalance %.2e\n",
+              a.displacement.size(), rel, a.maxDisplacement, b.maxVonMises,
+              a.maxVonMises, theirs.bodies[0].nonlinear.imbalance);
+  CHECK(rel < 1e-3);
+  CHECK_THAT(b.maxVonMises, Catch::Matchers::WithinRel(a.maxVonMises, 1e-3));
+}
+
+TEST_CASE("a shallow arch snaps through at its closed form's load, half its "
+          "linear buckling factor",
+          "[fem][calculix][nonlinear][slow]") {
+  REQUIRE_CCX(ccx);
+  Scratch scratch;
+  // A circular arch between two pins, a rectangular h x b section, rise e
+  // over the span L between the pins' axes, under a uniform pressure on its
+  // crown. Shallow-arch theory (Timoshenko and Gere, sec. 7.6, with a
+  // sinusoidal arch's first harmonic): a circle of rise e is the sine
+  // e1 sin(pi x / L) with e1 = 32 e / pi^3, a uniform load q its harmonic
+  // 4 q / pi, and with r = h / sqrt(12), eps = e1 / r and k = pi / L the
+  // load on the harmonic is EI k^4 r [(eps - xi) + (eps^2 - xi^2) xi / 4]
+  // at crown motion (eps - xi) r: a limit point at xi^2 = (eps^2 - 4) / 3,
+  // symmetric for 2 < eps < sqrt(22).
+  constexpr double L = 200.0, h = 4.0, b = 4.0, d = 1.6, over = 3.0;
+  const double r = h / std::sqrt(12.0);
+  constexpr double eps = 4.0;
+  const double e = eps * r * kPiNl * kPiNl * kPiNl / 32.0;
+  const double R = (L * L / 4.0 + e * e) / (2.0 * e);
+  const double zc = e - R; // the centre line's centre
+  Document doc;
+  auto outer = std::make_unique<CylinderFeature>(
+      "Outer", glm::dvec3(L / 2, 0, zc), glm::dvec3(0, 1, 0), R + h / 2, b);
+  outer->SetMaterial("steel");
+  doc.AddFeature(std::move(outer));
+  uint64_t solid = doc.GetFeature(0)->GetId();
+  const auto cut = [&](std::unique_ptr<Feature> tool) {
+    doc.AddFeature(std::move(tool));
+    const uint64_t t = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+    doc.AddFeature(
+        std::make_unique<BooleanFeature>("Cut", solid, t, BooleanOp::Subtract));
+    solid = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  };
+  cut(std::make_unique<CylinderFeature>("Inner", glm::dvec3(L / 2, -1, zc),
+                                        glm::dvec3(0, 1, 0), R - h / 2, b + 2));
+  const double big = 4.0 * R;
+  cut(std::make_unique<BoxFeature>("Left", glm::dvec3(-over - big, -1, -big),
+                                   big, b + 2, 2 * big));
+  cut(std::make_unique<BoxFeature>("Right", glm::dvec3(L + over, -1, -big), big,
+                                   b + 2, 2 * big));
+  cut(std::make_unique<BoxFeature>("Below", glm::dvec3(-big, -1, -big - 20),
+                                   2 * big, b + 2, big));
+  for (double x : {0.0, L})
+    cut(std::make_unique<CylinderFeature>("Pin", glm::dvec3(x, -1, 0),
+                                          glm::dvec3(0, 1, 0), d / 2, b + 2));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  // The crown is every face of the outer cylinder: its seam may split it.
+  ElementRef pins[2];
+  std::vector<ElementRef> crown;
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, index);
+    REQUIRE(info.has_value());
+    if (info->kind != "cylinder")
+      continue;
+    const ElementRef ref{body.createdBy, name};
+    if (std::abs(info->radius - d / 2) < 1e-6)
+      pins[std::abs(info->centroid.x) < 1.0 ? 0 : 1] = ref;
+    else if (std::abs(info->radius - (R + h / 2)) < 1e-6)
+      crown.push_back(ref);
+  }
+  REQUIRE_FALSE(pins[0].name.empty());
+  REQUIRE_FALSE(pins[1].name.empty());
+  REQUIRE_FALSE(crown.empty());
+  fem::Study& s = doc.AddStudy("Arch");
+  s.meshSize =
+      std::getenv("ARCH_MESH") ? std::atof(std::getenv("ARCH_MESH")) : 3.0;
+  for (const ElementRef& p : pins)
+    s.loads.push_back(MakeLoad(doc, fem::LoadType::Pin, p));
+  constexpr double p0 = 1.0; // MPa
+  for (const ElementRef& c : crown)
+    s.loads.push_back(MakeLoad(doc, fem::LoadType::Pressure, c, p0));
+  s.nonlinear.largeDeformation = true;
+  s.nonlinear.snapThrough = true;
+  s.nonlinear.hasImperfection = true; // the perfect arch theory describes
+  s.nonlinear.imperfectionMm = 0.0;
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunNonlinear(doc, s, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult::Nonlinear& n = rt.bodies[0].nonlinear;
+  const double E = Steel().youngGPa * 1000.0;
+  const double I = b * h * h * h / 12.0;
+  const double k = kPiNl / L;
+  const double xi = std::sqrt((eps * eps - 4.0) / 3.0);
+  const double q1 = E * I * std::pow(k, 4) * r *
+                    ((eps - xi) + (eps * eps - xi * xi) * xi / 4);
+  const double closed = kPiNl / 4.0 * q1 / b / p0; // the factor on p0
+  std::printf("nonlinear arch, eps %.1f (rise %.3f mm over %.0f), %zu nodes, "
+              "%d ccx runs, %.1f s: peak %.5g (%s, [%.5g, %.5g]) against the "
+              "closed form %.5g (%+.2f %%); linear buckling %.5g; imbalance "
+              "%.2e\n",
+              eps, e, L, rt.bodies[0].mesh.stats.nodeCount, n.ccxRuns, seconds,
+              n.peakFactor, n.peakAt.c_str(), n.peakLow, n.peakHigh, closed,
+              100.0 * (n.peakFactor / closed - 1.0), n.linearFactor,
+              n.imbalance);
+  REQUIRE(n.solved);
+  CHECK((n.peakAt == "limit_point" || n.peakAt == "snap"));
+  CHECK_THAT(n.peakFactor, Catch::Matchers::WithinRel(closed, 0.05));
+  CHECK(n.peakHigh - n.peakLow < 0.02 * n.peakFactor);
+  // What linear buckling cannot see: the arch snaps well below it.
+  CHECK(n.peakFactor < 0.7 * n.linearFactor);
+  CHECK(n.imbalance < fem::kNonlinearBalance);
+}
+
+TEST_CASE("a column seeded with its first mode peaks below its linear factor, "
+          "and nearer it as the seed shrinks",
+          "[fem][calculix][nonlinear][slow]") {
+  REQUIRE_CCX(ccx);
+  std::vector<double> peaks;
+  double linear = 0.0;
+  for (double seed : {1.0, 0.1}) {
+    Scratch scratch;
+    Document doc;
+    auto box = std::make_unique<BoxFeature>("Column", glm::dvec3(0), 10.0, 10.0,
+                                            200.0);
+    box->SetMaterial("steel");
+    doc.AddFeature(std::move(box));
+    const Body& body = doc.GetBodies()[0];
+    fem::Study& s = doc.AddStudy("Column");
+    s.meshSize = 5.0;
+    s.loads.push_back(MakeLoad(
+        doc, fem::LoadType::Fixed,
+        FaceWhere(body, "plane", [](auto c) { return std::abs(c.z) < 1e-6; })));
+    s.loads.push_back(
+        MakeLoad(doc, fem::LoadType::Force,
+                 FaceWhere(body, "plane",
+                           [](auto c) { return std::abs(c.z - 200.0) < 1e-6; }),
+                 1000.0, glm::dvec3(0, 0, -1)));
+    s.nonlinear.largeDeformation = true;
+    s.nonlinear.snapThrough = true;
+    s.nonlinear.hasImperfection = true;
+    s.nonlinear.imperfectionMm = seed;
+    double seconds = 0.0;
+    const fem::StudyRuntime rt = RunNonlinear(doc, s, *ccx, scratch, &seconds);
+    const fem::StudyBodyResult::Nonlinear& n = rt.bodies[0].nonlinear;
+    REQUIRE(n.solved);
+    std::printf("nonlinear column, seed %.2g mm, %zu nodes, %d ccx runs, %.1f "
+                "s: peak %.5g (%s at %.3g mm, [%.5g, %.5g]), linear %.5g "
+                "(%.2f %% below); imbalance %.2e\n",
+                seed, rt.bodies[0].mesh.stats.nodeCount, n.ccxRuns, seconds,
+                n.peakFactor, n.peakAt.c_str(), n.deflectionLimitMm, n.peakLow,
+                n.peakHigh, n.linearFactor,
+                100.0 * (1.0 - n.peakFactor / n.linearFactor), n.imbalance);
+    CHECK(n.peakAt == "deflection_limit");
+    CHECK(n.peakFactor < n.linearFactor);
+    CHECK_THAT(n.deflectionLimitMm,
+               Catch::Matchers::WithinRel(
+                   0.1 * std::sqrt(200.0 * 200.0 + 200.0), 1e-3));
+    CHECK(n.imbalance < fem::kNonlinearBalance);
+    peaks.push_back(n.peakFactor);
+    linear = n.linearFactor;
+  }
+  CHECK(peaks[1] > peaks[0]);
+  CHECK(peaks[1] > 0.98 * linear);
+}
+
+// The nonlinear memory estimate's data: ccx's peak resident memory on the
+// 10 x 10 x 200 column's large-deformation deck (a sideways pull, ten
+// increments), by mesh size. Prints; the estimate must bound each.
+TEST_CASE("calibrate the CalculiX nonlinear memory estimate",
+          "[.][calculix-nl-calibrate]") {
+  REQUIRE_CCX(ccx);
+  const char* sizes = std::getenv("LOBOLE_CALIBRATE_SIZES");
+  std::vector<double> list;
+  for (std::istringstream in(sizes ? sizes : "5 3.5 2.5 1.8 1.4 1.2");;) {
+    double v = 0;
+    if (!(in >> v))
+      break;
+    list.push_back(v);
+  }
+  for (double size : list) {
+    Scratch scratch;
+    Document doc;
+    auto box = std::make_unique<BoxFeature>("Column", glm::dvec3(0), 10.0, 10.0,
+                                            200.0);
+    box->SetMaterial("steel");
+    doc.AddFeature(std::move(box));
+    const Body& body = doc.GetBodies()[0];
+    fem::Study& s = doc.AddStudy("Column");
+    s.meshSize = size;
+    s.nonlinear.largeDeformation = true;
+    s.loads.push_back(MakeLoad(
+        doc, fem::LoadType::Fixed,
+        FaceWhere(body, "plane", [](auto c) { return std::abs(c.z) < 1e-6; })));
+    s.loads.push_back(
+        MakeLoad(doc, fem::LoadType::Force,
+                 FaceWhere(body, "plane",
+                           [](auto c) { return std::abs(c.z - 200.0) < 1e-6; }),
+                 2000.0, glm::dvec3(1, 0, 0)));
+    const fem::StudyJobInput input = Meshed(doc, s);
+    std::string err;
+    {
+      std::ofstream deck(scratch.dir / "job.inp");
+      REQUIRE(fem::WriteStudyDeck(input, 0, 0, deck, "calibration", &err));
+    }
+    proc::PipedChild child;
+    proc::ChildOptions co;
+    co.cwd = scratch.dir.string();
+    co.stdoutPath = (scratch.dir / "job.out").string();
+    const auto t0 = std::chrono::steady_clock::now();
+    REQUIRE(child.Start(ccx->path, {"-i", "job"}, &err, co));
+    REQUIRE(child.Finish(nullptr) == 0);
+    const double secs =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+            .count();
+    const size_t dofs = 3 * (input.bodies[0].mesh.nodes.size() -
+                             input.bodies[0].fixedNodes.size());
+    std::printf("nonlinear mesh %.2f mm: %zu dof, ccx peak %.1f MB in %.1f s, "
+                "estimate %.1f MB\n",
+                size, dofs, child.PeakBytes() / 1e6, secs,
+                fem::CalculixNonlinearMemoryEstimate(dofs) / 1e6);
+    CHECK(fem::CalculixNonlinearMemoryEstimate(dofs) >= child.PeakBytes());
+  }
+}
+
+TEST_CASE("a nonlinear result is saved and read back with its run",
+          "[fem][calculix][nonlinear]") {
+  fem::StudyRuntime rt;
+  fem::StudyBodyResult b;
+  b.bodyName = "Arch";
+  b.mesh = BoxMesh(2, 1, 1, 5.0);
+  b.results.displacement.assign(b.mesh.nodes.size(), glm::dvec3(0.01));
+  b.results.vonMises.assign(b.mesh.nodes.size(), 1.0);
+  b.results.stress.assign(b.mesh.nodes.size(), fem::Stress{});
+  b.nonlinear.solved = true;
+  b.nonlinear.snapThrough = true;
+  b.nonlinear.factor = 0.48;
+  b.nonlinear.maxFactor = 1.9;
+  b.nonlinear.increments = 17;
+  b.nonlinear.ccxRuns = 2;
+  b.nonlinear.curve = {{0.1, 0.2}, {0.48, 2.1}};
+  b.nonlinear.linearFactor = 0.95;
+  b.nonlinear.imperfectionMm = 0.4;
+  b.nonlinear.deflectionLimitMm = 20.0;
+  b.nonlinear.peakAt = "snap";
+  b.nonlinear.peakFactor = 0.48;
+  b.nonlinear.peakLow = 0.48;
+  b.nonlinear.peakHigh = 0.483;
+  b.nonlinear.firstYieldFactor = 0.3;
+  b.nonlinear.residualCriterion = fem::kNonlinearResidual;
+  b.nonlinear.imbalance = 2e-6;
+  rt.bodies.push_back(std::move(b));
+  rt.solver = "calculix 2.23";
+  nlohmann::json j;
+  REQUIRE(DocumentIO::StudyResultToJson(rt, j));
+  const fem::StudyRuntime back = DocumentIO::StudyResultFromJson(j);
+  REQUIRE(back.bodies.size() == 1);
+  const auto& n = back.bodies[0].nonlinear;
+  CHECK(n.solved);
+  CHECK(n.snapThrough);
+  CHECK(n.peakAt == "snap");
+  CHECK(n.peakFactor == 0.48);
+  CHECK(n.peakHigh == 0.483);
+  CHECK(n.curve.size() == 2);
+  CHECK(n.firstYieldFactor == 0.3);
+  CHECK(n.ccxRuns == 2);
+  CHECK(n.linearFactor == 0.95);
+  // A summary on a result that is not static is refused.
+  j["kind"] = "modal";
+  CHECK_THROWS(DocumentIO::StudyResultFromJson(j));
+}
+#endif // HAVE_NETGEN

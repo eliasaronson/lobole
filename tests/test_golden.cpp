@@ -1130,6 +1130,35 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(3).get<std::string>());
     }
   }
+  // vNEXT: a static study's nonlinear options. A study read back linear
+  // would answer a small-deflection stress where a large one was asked
+  // for; each [study name, large_deformation, increments, snap_through,
+  // imperfection_mm | null, deflection_limit_mm | null, the solver it runs
+  // on] must hold -- auto with a nonlinear option is CalculiX.
+  if (expect.contains("study_nonlinear")) {
+    for (const auto& want : expect.at("study_nonlinear")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("study " << name);
+      const fem::Study* found = nullptr;
+      for (const fem::Study& st : doc.GetStudies())
+        if (st.name == name)
+          found = &st;
+      REQUIRE(found != nullptr);
+      const fem::Nonlinear& nl = found->nonlinear;
+      CHECK(nl.largeDeformation == want.at(1).get<bool>());
+      CHECK(nl.increments == want.at(2).get<int>());
+      CHECK(nl.snapThrough == want.at(3).get<bool>());
+      CHECK(nl.hasImperfection == !want.at(4).is_null());
+      if (!want.at(4).is_null())
+        CHECK(nl.imperfectionMm == want.at(4).get<double>());
+      CHECK(nl.hasDeflectionLimit == !want.at(5).is_null());
+      if (!want.at(5).is_null())
+        CHECK(nl.deflectionLimitMm == want.at(5).get<double>());
+      const fem::Solver runs = fem::EffectiveSolver(found->solver, nl);
+      CHECK((runs == fem::Solver::Calculix ? "calculix" : "in_house") ==
+            want.at(6).get<std::string>());
+    }
+  }
   // v168: an extrude's twist. A twisted rectangle has the prism's volume, so
   // the volumes above cannot see a twist dropped on load; each [extrude
   // name, twist_deg, twist_expr, herringbone] must hold.

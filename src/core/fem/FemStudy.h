@@ -221,6 +221,32 @@ const char* SolverToString(Solver solver);
 inline constexpr const char* kSolverNames = "auto, in_house, calculix";
 [[nodiscard]] bool SolverFromString(const std::string& s, Solver& out);
 
+// A static study solved past linear (docs/simulation/README.md
+// #nonlinear-static), on CalculiX: large deformation (NLGEOM, the load
+// stepped up in increments, a pressure following its face), and on request
+// a snap-through run that seeds the shape with the first buckling mode and
+// steps the load up until the part stops carrying more. Off = linear.
+struct Nonlinear {
+  bool largeDeformation = false;
+  // The step's largest increment is its load over this many (0 = the
+  // default: kNonlinearIncrements, kSnapIncrements on a snap-through run).
+  int increments = 0;
+  bool snapThrough = false;
+  // Snap-through: the first mode's peak motion seeded into the shape (mm),
+  // and the motion past which the part is taken to have failed (mm). Not
+  // stated (`has*` false): derived from the part (a tenth of the wall the
+  // mode bends, a tenth of the part's size). A stated 0 imperfection is the
+  // perfect shape.
+  double imperfectionMm = 0.0;
+  bool hasImperfection = false;
+  double deflectionLimitMm = 0.0;
+  bool hasDeflectionLimit = false;
+  bool On() const { return largeDeformation; }
+  bool operator==(const Nonlinear&) const = default;
+};
+inline constexpr int kNonlinearIncrements = 10;
+inline constexpr int kSnapIncrements = 20;
+
 // A single-part analysis definition (linear static or modal).
 struct Study {
   uint64_t id = 0;
@@ -288,6 +314,9 @@ struct Study {
   // Static only: whether a run checks its peak has settled (v206).
   ConvergeMode converge = ConvergeMode::Auto;
 
+  // Static only: solved past linear, on CalculiX (vNEXT).
+  Nonlinear nonlinear;
+
   // Transient: the most recent mesh/solve error (dangling ref, no fixed
   // support, singular matrix, ...). Never serialized. Empty when healthy.
   std::string error;
@@ -297,6 +326,19 @@ struct Study {
 // what can: CalculiX solves static and buckling studies (modal and topology
 // are in-house), and auto and in_house solve every type there is.
 std::string SolverRefusal(Solver solver, AnalysisType type);
+// The program that solves a study: its `solver`, except that a nonlinear
+// study set to auto solves on CalculiX (the in-house solver is linear).
+Solver EffectiveSolver(Solver solver, const Nonlinear& nonlinear);
+// Empty when a study of `type` on `solver` with `loadCases` cases can take
+// `nonlinear` with `converge`; otherwise why not, naming what can: a static
+// study only, never in_house, a snap-through run needs large_deformation
+// and one load set, increments are at least 1, a stated imperfection and
+// deflection limit are not negative (the limit positive), and converge
+// always is refused on a snap-through run, whose answer is a factor that
+// refining round a stress peak does not settle.
+std::string NonlinearRefusal(Solver solver, AnalysisType type,
+                             const Nonlinear& nonlinear, size_t loadCases,
+                             ConvergeMode converge);
 
 const char* LoadTypeToString(LoadType type);
 // Every load type's name, for a refusal that names what is accepted.

@@ -134,6 +134,46 @@ std::string SolverRefusal(Solver solver, AnalysisType type) {
   return {};
 }
 
+Solver EffectiveSolver(Solver solver, const Nonlinear& nonlinear) {
+  return nonlinear.On() && solver == Solver::Auto ? Solver::Calculix : solver;
+}
+
+std::string NonlinearRefusal(Solver solver, AnalysisType type,
+                             const Nonlinear& nl, size_t loadCases,
+                             ConvergeMode converge) {
+  const bool any = nl.On() || nl.snapThrough || nl.increments != 0 ||
+                   nl.hasImperfection || nl.hasDeflectionLimit;
+  if (!any)
+    return {};
+  if (!nl.largeDeformation)
+    return "nonlinear needs large_deformation: true -- it is the analysis "
+           "every other nonlinear option belongs to";
+  if (type != AnalysisType::Static)
+    return std::string("nonlinear is a static study's; this one is ") +
+           AnalysisTypeToString(type);
+  if (solver == Solver::InHouse)
+    return "the in-house solver is linear: a nonlinear study solves on "
+           "CalculiX (solver auto or calculix)";
+  if (nl.increments < 0)
+    return "nonlinear increments is at least 1 (0 or absent: the default)";
+  if (!nl.snapThrough && (nl.hasImperfection || nl.hasDeflectionLimit))
+    return "imperfection_mm and deflection_limit_mm are a snap-through run's: "
+           "set snap_through: true";
+  if (nl.hasImperfection && !(nl.imperfectionMm >= 0.0))
+    return "imperfection_mm is not negative (0: the perfect shape)";
+  if (nl.hasDeflectionLimit && !(nl.deflectionLimitMm > 0.0))
+    return "deflection_limit_mm is positive";
+  if (loadCases > 0)
+    return "a nonlinear answer is not a sum of cases, and a snap-through run "
+           "scales ONE load set to its peak, so a nonlinear study takes no "
+           "load cases: make a study for each way the part is loaded";
+  if (nl.snapThrough && converge == ConvergeMode::Always)
+    return "converge: always refines round a stress peak, and a snap-through "
+           "run's answer is its peak load factor, which that does not "
+           "settle: use converge auto or never";
+  return {};
+}
+
 const char* CpuSolverName(AnalysisType type) {
   switch (type) {
   case AnalysisType::Modal:
@@ -891,8 +931,14 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     return fail(err);
   if (!ValidateLoadCases(study, &err))
     return fail(err);
+  if (const std::string why =
+          NonlinearRefusal(study.solver, study.type, study.nonlinear,
+                           study.loadCases.size(), study.converge);
+      !why.empty())
+    return fail(why);
   out.type = study.type;
-  out.solver = study.solver;
+  out.solver = EffectiveSolver(study.solver, study.nonlinear);
+  out.nonlinear = study.nonlinear;
   out.numModes = study.numModes;
   out.gravity = study.gravity;
   for (const LoadCase& c : study.loadCases)
@@ -1024,6 +1070,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
   out = StudyJobInput{};
   out.type = plan.type;
   out.solver = plan.solver;
+  out.nonlinear = plan.nonlinear;
   out.numModes = plan.numModes;
   out.gravity = plan.gravity;
   out.caseNames = plan.caseNames;
@@ -1808,6 +1855,114 @@ bool StaticSupportsOf(
   return supports.size() == rhs.size();
 }
 
+namespace {
+
+// One body of a nonlinear static study on CalculiX
+// (docs/simulation/README.md#nonlinear-static): a pin's contact found by
+// the in-house iteration and held; a snap-through run's shape seeded with
+// the first linear buckling mode of the same load first. On a snap-through
+// run `jb.mesh` becomes the seeded shape, which is what was solved.
+bool SolveNonlinearBody(StudyJobBody& jb, const std::vector<Material>& mats,
+                        const std::vector<FaceLoad>& loads, const glm::dvec3& g,
+                        const Nonlinear& nl, const SolveOptions& options,
+                        FemResults& out, StudyBodyResult::Nonlinear& summary,
+                        std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  SolveOptions own = options;
+  own.calculix = nullptr;
+  own.given = nullptr;
+  std::vector<Supports> sups;
+  std::vector<std::vector<FemResults::SupportReaction>> pinRows;
+  std::string err;
+  if (!StaticSupportsOf(jb, mats, {loads}, g, own, sups, pinRows, &err))
+    return fail(err);
+  NonlinearRequest req;
+  req.snapThrough = nl.snapThrough;
+  req.increments = nl.increments > 0 ? nl.increments
+                                     : (nl.snapThrough ? kSnapIncrements
+                                                       : kNonlinearIncrements);
+  const FemMesh& mesh = jb.mesh;
+  const size_t nNodes = mesh.nodes.size();
+  glm::dvec3 lo(1e300), hi(-1e300);
+  for (const glm::dvec3& p : mesh.nodes) {
+    lo = glm::min(lo, p);
+    hi = glm::max(hi, p);
+  }
+  const double diagonal = nNodes ? glm::length(hi - lo) : 0.0;
+  double linear = 0.0, imperfection = 0.0, limit = 0.0;
+  if (nl.snapThrough) {
+    // The first mode of the same load, linearly: what the shape is seeded
+    // with, and the factor the run's cap is twice.
+    const size_t dofs = 3 * (nNodes - std::min(nNodes, jb.fixedNodes.size()));
+    const uint64_t estimate = BucklingMemoryEstimate(dofs);
+    const uint64_t available = options.availableBytes ? options.availableBytes
+                                                      : AvailableMemoryBytes();
+    if (available > 0 && estimate > available) {
+      char buf[320];
+      std::snprintf(buf, sizeof(buf),
+                    "a snap-through run seeds its shape with the first "
+                    "buckling mode, whose solve of %zu degrees of freedom "
+                    "would need about %.2f GB, and %.2f GB is free. A coarser "
+                    "mesh_size solves it",
+                    dofs, estimate / 1e9, available / 1e9);
+      return fail(buf);
+    }
+    Supports sup = sups.front();
+    sup.reactions = false;
+    auto base = SolveCases(mesh, mats, sup, {loads}, &err, g, own);
+    if (!base)
+      return fail("the linear base state: " + err);
+    auto modes = SolveBuckling(mesh, mats, sup, base->front().displacement,
+                               kBucklingFactorsDefault, &err);
+    if (!modes)
+      return fail("the first buckling mode: " + err);
+    FemResults withModes = base->front();
+    withModes.modes = std::move(*modes);
+    const StudyBodyResult::Buckling b = ReadBuckling(jb, mats, withModes);
+    if (!b.buckles)
+      return fail(b.none + ", so a snap-through run has no mode to seed its "
+                           "shape with: a large-deformation run "
+                           "(snap_through false) steps this load up as it is");
+    linear = b.factor;
+    const FemResults::ModeShape* first = nullptr;
+    for (const FemResults::ModeShape& m : withModes.modes)
+      if (m.factor > 0.0 && (!first || m.factor < first->factor))
+        first = &m;
+    imperfection = nl.hasImperfection ? nl.imperfectionMm
+                   : b.wallMm > 0     ? 0.1 * b.wallMm
+                                      : 1e-3 * diagonal;
+    limit = nl.hasDeflectionLimit ? nl.deflectionLimitMm : 0.1 * diagonal;
+    for (size_t n = 0; n < nNodes; ++n)
+      jb.mesh.nodes[n] += imperfection * first->displacement[n];
+    req.maxFactor = 2.0 * linear;
+    req.deflectionLimitMm = limit;
+    req.yieldAt.assign(nNodes, 0.0);
+    for (size_t t = 0; t < mesh.tets.size(); ++t) {
+      const size_t d = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t];
+      const Material& m = mats[std::min(d, mats.size() - 1)];
+      for (int v : mesh.tets[t])
+        if (m.yieldMPa > 0 &&
+            (req.yieldAt[v] == 0.0 || m.yieldMPa < req.yieldAt[v]))
+          req.yieldAt[v] = m.yieldMPa;
+    }
+  }
+  if (!NonlinearOnCalculix(jb, mats, sups.front(), loads, g, req, options, out,
+                           summary, &err))
+    return fail(err);
+  summary.linearFactor = linear;
+  summary.imperfectionMm = imperfection;
+  summary.imperfectionGiven = nl.hasImperfection;
+  summary.deflectionLimitMm = limit;
+  out.reactions = pinRows.front();
+  return true;
+}
+
+} // namespace
+
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
                         const SolveOptions& options) {
   rt = StudyRuntime{};
@@ -1833,6 +1988,11 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
   if (in.solver == Solver::Calculix && !options.calculix)
     return fail("this study solves on CalculiX, and this run was given no "
                 "ccx to run it with");
+  if (const std::string why =
+          NonlinearRefusal(in.solver, in.type, in.nonlinear,
+                           in.caseNames.size(), ConvergeMode::Auto);
+      !why.empty())
+    return fail(why);
   for (StudyJobBody& jb : in.bodies) {
     StudyBodyResult sbr;
     sbr.bodyIndex = jb.bodyIndex;
@@ -1884,7 +2044,13 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       std::vector<Supports> settled;
       SolveReport report;
       std::optional<std::vector<FemResults>> all;
-      if (in.solver == Solver::Calculix) {
+      if (in.nonlinear.On()) {
+        FemResults res;
+        if (SolveNonlinearBody(jb, mats, jb.faceLoads, g, in.nonlinear, options,
+                               res, sbr.nonlinear, &err))
+          all = std::vector<FemResults>{std::move(res)};
+        report.solver = options.calculix ? options.calculix->ccx.Name() : "";
+      } else if (in.solver == Solver::Calculix) {
         std::vector<FemResults> res;
         if (SolveBodyOnCalculix(jb, mats, rhs, g, options, res, report, &err,
                                 buckling ? &settled : nullptr))
@@ -2183,6 +2349,14 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
                     StudyRuntime& rt, const ConvergeOptions& converge,
                     std::string* error, const SolveOptions& options) {
   auto started = std::chrono::steady_clock::now();
+  if (const std::string why =
+          NonlinearRefusal(planIn.solver, planIn.type, planIn.nonlinear,
+                           planIn.caseNames.size(), converge.mode);
+      !why.empty()) {
+    if (error)
+      *error = why;
+    return false;
+  }
   if (!MeshPlannedStudy(planIn, in, error) ||
       (options.cancelled && options.cancelled()))
     return false;
@@ -2203,6 +2377,9 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
                       " study has no peak stress to settle");
   if (converge.mode == ConvergeMode::Never)
     return notChecked("converge: never");
+  if (planIn.nonlinear.snapThrough)
+    return notChecked("a snap-through run's answer is its peak load factor, "
+                      "which refining round a stress peak does not settle");
   for (const StudyBodyPlan& bp : planIn.bodies)
     if (bp.premeshed)
       return notChecked("a static study of a topology result solves the "

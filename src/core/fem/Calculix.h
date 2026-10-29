@@ -74,6 +74,9 @@ struct CalculixRun {
   uint64_t availableBytes = 0;
   // Told each run's memory estimate (bytes) before ccx starts.
   std::function<void(uint64_t)> estimated;
+  // A nonlinear run's progress: the load it has reached over the load it
+  // runs to, as each increment lands in the .sta.
+  std::function<void(double)> progress;
 };
 
 // The memory a linear static ccx run of `dofs` degrees of freedom is
@@ -81,6 +84,9 @@ struct CalculixRun {
 // out-of-core mode). Calibrated from measured runs: the comment at its
 // definition says which.
 uint64_t CalculixStaticMemoryEstimate(size_t dofs);
+// The same for a nonlinear (NLGEOM) run, which also holds the tangent
+// stiffness it rebuilds each iteration.
+uint64_t CalculixNonlinearMemoryEstimate(size_t dofs);
 // MemAvailable, in bytes; 0 when the platform does not say.
 uint64_t AvailableMemoryBytes();
 
@@ -102,12 +108,35 @@ bool NodalForces(const FemMesh& mesh, const std::vector<Material>& byDomain,
 // that many factors, the forces its reference load. A held node's frame is the
 // pin's of `pins` whose facets have it. Refused, before anything is written,
 // for what it cannot express (a node of two pins' faces held in a frame).
+//
+// With `nonlinear`, the steps are *STATIC under NLGEOM instead, each running
+// the load up to its factor: `nodalForces` (the dead loads) scaled by it,
+// each pressure of `nonlinear->loads` a follower *DLOAD on its tets' faces,
+// and each torque or remote load a reference node carrying the force and
+// moment its in-house traction sums to, spread over its face by
+// *COUPLING/*DISTRIBUTING. ccx's residual criterion is tightened to
+// kNonlinearResidual, and each increment prints U and the supports' RF.
+struct NonlinearStep {
+  double toFactor = 1.0;
+  double maxIncrement = 0.1; // in load factor
+};
+struct DeckNonlinear {
+  std::vector<FaceLoad> loads; // the pressures, torques and remote loads
+  std::vector<NonlinearStep> steps;
+  double minIncrement = 1e-5;
+  int maxIncrements = 1000;
+};
+// ccx's equilibrium criterion on a nonlinear run (*CONTROLS R_n and R_p:
+// the largest residual force over the mean nodal force; its default is
+// 0.005). Measured on a shallow arch to its snap, 1e-6 took 98 iterations
+// where the default took 103: Newton's last iteration is quadratic.
+inline constexpr double kNonlinearResidual = 1e-6;
 bool WriteDeck(std::ostream& out, const FemMesh& mesh,
                const std::vector<Material>& byDomain, const Supports& supports,
                const std::vector<StudyJobBody::PinSupport>& pins,
                const std::vector<glm::dvec3>& nodalForces,
                const std::string& title, std::string* error,
-               int buckleFactors = 0);
+               int buckleFactors = 0, const DeckNonlinear* nonlinear = nullptr);
 
 // The relative precision of a displacement ReadDatDisplacements reads: ccx
 // prints U as E13.6, seven significant digits.
@@ -169,6 +198,47 @@ bool BucklingOnCalculix(
     const Supports& supports, const std::vector<FaceLoad>& loads,
     const glm::dvec3& gravityAccel, int numFactors, const SolveOptions& options,
     std::vector<FemResults::ModeShape>& modes, std::string* error);
+
+// A nonlinear static run (docs/simulation/README.md#nonlinear-static) of one
+// body, on CalculiX: the load is stepped up under NLGEOM to `maxFactor`
+// (1 for a large-deformation run; a snap-through run's cap), its largest
+// increment maxFactor / increments. Each increment's U and the supports' RF
+// are read from the .dat as ccx writes them.
+//
+// A snap-through run stops at the first of: the solve no longer converging
+// where the part's stiffness has run out (a limit point), a converged
+// increment that jumps to another branch (a snap: its compliance
+// kSnapJumpRatio times the increment before's), or the motion passing
+// `deflectionLimitMm`. A snap or the deflection limit is bracketed again by
+// a second run over that one increment, at a tenth of it. A
+// large-deformation run goes to its load; one that stops converging on the
+// way is refused with the factor it reached, and a snap on the way is
+// reported, not hidden.
+//
+// The answer is checked for equilibrium at the factor it reports: the
+// supports' total reaction against the load applied there (a pressure on
+// the deformed faces), within kNonlinearBalance of the load carried.
+inline constexpr double kSnapJumpRatio = 4.0;
+inline constexpr double kNonlinearBalance = 1e-3;
+struct NonlinearRequest {
+  bool snapThrough = false;
+  double maxFactor = 1.0;
+  int increments = 10;
+  double deflectionLimitMm = 0.0; // a snap-through run's
+  // Each node's yield strength (MPa; 0 none), for the factor the path first
+  // yields at. Empty: not looked for.
+  std::vector<double> yieldAt;
+};
+// `jb.mesh` is the shape solved (a snap-through run's seeded one), under
+// `supports`; `loads` every face load of the case. `out` gets the fields at
+// the factor reported and each support node's reaction (nodeReaction);
+// `summary` how the run went.
+bool NonlinearOnCalculix(
+    const StudyJobBody& jb, const std::vector<Material>& mats,
+    const Supports& supports, const std::vector<FaceLoad>& loads,
+    const glm::dvec3& gravityAccel, const NonlinearRequest& request,
+    const SolveOptions& options, FemResults& out,
+    StudyBodyResult::Nonlinear& summary, std::string* error);
 
 // The deck the study would run for body `body` and case `caseIndex` of a
 // meshed study (export_study_inp): what SolveBodyOnCalculix writes, with no

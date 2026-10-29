@@ -880,6 +880,83 @@ std::string FreeRigidMotion(const FemMesh& mesh, const Supports& supports,
   return buf;
 }
 
+FemResults LargeDeformationFields(const FemMesh& mesh,
+                                  const std::vector<Material>& byDomain,
+                                  const std::vector<glm::dvec3>& displacement) {
+  FemResults out;
+  const size_t nNodes = mesh.nodes.size();
+  out.displacement = displacement;
+  out.displacement.resize(nNodes, glm::dvec3(0.0));
+  std::vector<Eigen::Matrix3d> accum(nNodes, Eigen::Matrix3d::Zero());
+  std::vector<double> weight(nNodes, 0.0);
+  for (size_t ti = 0; ti < mesh.tets.size() && !byDomain.empty(); ++ti) {
+    const size_t d = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[ti];
+    const Material& m = byDomain[std::min(d, byDomain.size() - 1)];
+    const double lam =
+        m.youngMPa * m.poisson / ((1 + m.poisson) * (1 - 2 * m.poisson));
+    const double mu = m.youngMPa / (2 * (1 + m.poisson));
+    const auto& tet = mesh.tets[ti];
+    Vector3d X[10], U[10];
+    for (int i = 0; i < 10; ++i) {
+      const glm::dvec3& p = mesh.nodes[tet[i]];
+      const glm::dvec3& u = out.displacement[tet[i]];
+      X[i] = Vector3d(p.x, p.y, p.z);
+      U[i] = Vector3d(u.x, u.y, u.z);
+    }
+    double vol = 0.0;
+    for (const auto& g : kTetGauss) {
+      Eigen::Matrix<double, 6, 30> B;
+      vol += kTetW * std::abs(StrainDisp(X, g[0], g[1], g[2], B));
+    }
+    for (int k = 0; k < 10; ++k) {
+      double dN[10][3];
+      TetShapeGrad(kNodeRST[k][0], kNodeRST[k][1], kNodeRST[k][2], dN);
+      Eigen::Matrix3d J = Eigen::Matrix3d::Zero();
+      for (int i = 0; i < 10; ++i)
+        J += X[i] * Vector3d(dN[i][0], dN[i][1], dN[i][2]).transpose();
+      const Eigen::Matrix3d invJt = J.inverse().transpose();
+      // F = I + du/dX, with dN/dX = J^-T dN/d(rst).
+      Eigen::Matrix3d F = Eigen::Matrix3d::Identity();
+      for (int i = 0; i < 10; ++i)
+        F +=
+            U[i] * (invJt * Vector3d(dN[i][0], dN[i][1], dN[i][2])).transpose();
+      const Eigen::Matrix3d E =
+          0.5 * (F.transpose() * F - Eigen::Matrix3d::Identity());
+      const Eigen::Matrix3d S =
+          lam * E.trace() * Eigen::Matrix3d::Identity() + 2.0 * mu * E;
+      const double detF = F.determinant();
+      if (!(std::abs(detF) > 0.0))
+        continue;
+      accum[tet[k]] += vol * (F * S * F.transpose()) / detF;
+      weight[tet[k]] += vol;
+    }
+  }
+  out.vonMises.assign(nNodes, 0.0);
+  out.stress.assign(nNodes, Stress{});
+  for (size_t n = 0; n < nNodes; ++n) {
+    if (weight[n] > 0) {
+      const Eigen::Matrix3d c = accum[n] / weight[n];
+      Eigen::Matrix<double, 6, 1> v;
+      v << c(0, 0), c(1, 1), c(2, 2), c(0, 1), c(1, 2), c(2, 0);
+      out.vonMises[n] = VonMises(v);
+      for (int k = 0; k < 6; ++k)
+        out.stress[n][k] = v(k);
+    }
+    if (out.vonMises[n] > out.maxVonMises) {
+      out.maxVonMises = out.vonMises[n];
+      out.maxVmNode = static_cast<int>(n);
+      out.maxVmAt = mesh.nodes[n];
+    }
+    const double dmag = glm::length(out.displacement[n]);
+    if (dmag > out.maxDisplacement) {
+      out.maxDisplacement = dmag;
+      out.maxDispNode = static_cast<int>(n);
+      out.maxDispAt = mesh.nodes[n];
+    }
+  }
+  return out;
+}
+
 #ifdef HAVE_SPECTRA
 namespace {
 // (K - sigma*M)^-1 by CHOLESKY, which is what the shift-invert eigensolve
@@ -1321,6 +1398,13 @@ SolveBuckling(const FemMesh&, const std::vector<Material>&, const Supports&,
 
 bool SolverAvailable() { return false; }
 bool ModalAvailable() { return false; }
+
+FemResults LargeDeformationFields(const FemMesh&, const std::vector<Material>&,
+                                  const std::vector<glm::dvec3>& displacement) {
+  FemResults out;
+  out.displacement = displacement;
+  return out;
+}
 
 std::string FreeRigidMotion(const FemMesh&, const Supports&, glm::dvec3*,
                             glm::dvec3*, bool*) {

@@ -224,8 +224,14 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
       return fail("load " + std::to_string(l.id) +
                   ": a pin support is a part study's; an assembly study holds "
                   "its part with fixed faces or a rigid neighbour's contact");
+  if (const std::string why =
+          NonlinearRefusal(study.solver, study.type, study.nonlinear,
+                           study.loadCases.size(), study.converge);
+      !why.empty())
+    return fail(why);
   out.type = study.type;
-  out.solver = study.solver;
+  out.solver = EffectiveSolver(study.solver, study.nonlinear);
+  out.nonlinear = study.nonlinear;
   out.numModes = study.numModes;
   out.gravity = study.gravity;
 
