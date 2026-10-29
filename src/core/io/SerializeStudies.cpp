@@ -103,7 +103,7 @@ json StudyToJson(const fem::Study& s) {
   // default, auto, so earlier files re-save byte-identically.
   if (s.converge != fem::ConvergeMode::Auto)
     j["converge"] = fem::ConvergeModeToString(s.converge);
-  // Solved past linear (vNEXT): absent when linear, so every study saved
+  // Solved past linear (v208): absent when linear, so every study saved
   // before -- and its input hash -- is what it was.
   if (s.nonlinear.On()) {
     const fem::Nonlinear& nl = s.nonlinear;
@@ -392,7 +392,7 @@ fem::Study StudyFromJson(const json& j) {
                                "converge");
   }
 
-  if (j.contains("nonlinear")) { // vNEXT
+  if (j.contains("nonlinear")) { // v208
     const json& n = j.at("nonlinear");
     readctx::RefuseUnknownKeys(n,
                                {"large_deformation", "increments",
@@ -935,7 +935,7 @@ json BucklingToJson(const fem::StudyBodyResult::Buckling& k) {
   return out;
 }
 
-// How a nonlinear body's run went (vNEXT).
+// How a nonlinear body's run went (v208).
 json NonlinearToJson(const fem::StudyBodyResult::Nonlinear& n) {
   json curve = json::array();
   for (const auto& [f, u] : n.curve)

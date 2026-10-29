@@ -1130,7 +1130,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(3).get<std::string>());
     }
   }
-  // vNEXT: a static study's nonlinear options. A study read back linear
+  // v208: a static study's nonlinear options. A study read back linear
   // would answer a small-deflection stress where a large one was asked
   // for; each [study name, large_deformation, increments, snap_through,
   // imperfection_mm | null, deflection_limit_mm | null, the solver it runs

@@ -314,7 +314,7 @@ struct Study {
   // Static only: whether a run checks its peak has settled (v206).
   ConvergeMode converge = ConvergeMode::Auto;
 
-  // Static only: solved past linear, on CalculiX (vNEXT).
+  // Static only: solved past linear, on CalculiX (v208).
   Nonlinear nonlinear;
 
   // Transient: the most recent mesh/solve error (dangling ref, no fixed

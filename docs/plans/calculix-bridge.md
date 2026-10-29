@@ -89,7 +89,7 @@ Each remaining analysis is a key of `static`'s `nonlinear` object, solved by
 study's own mesh, the run watched through the `.dat` and `.sta`, the
 non-convergence refusal with the load reached, and the equilibrium check.
 `in_house` with any of them is refused, as `nonlinear` is now. Each stage
-adds its keys under its own `vNEXT`.
+adds its keys under its own `v208`.
 
 ## Stages
 
