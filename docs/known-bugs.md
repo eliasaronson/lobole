@@ -183,6 +183,40 @@ the heading if it is not here yet.
   by the loop itself on Wayland, skipping the frame while the last one has
   not been shown.
 
+## Simulation
+
+### A diverging solve is reported as an unconstrained part
+
+- **Symptom:** a 60×20×2 mm steel plate clamped on one end, meshed at 0.4 mm
+  (about 500 k DOF), is refused as "insufficiently constrained (singular)".
+  The CPU iterative solve's residual grew to 4.8 and then 21.7: it diverged,
+  it did not stall. The same plate at 0.75 mm solves.
+- **Cause:** not found. The refusal reads a failed iterative solve as a
+  singular matrix, whatever made it fail.
+- **Where:** the iterative path in `src/core/fem/FemSolver.cpp`.
+- **Likely fix:** tell the two apart. A diverging residual is refused as a
+  solver failure that names the residual; "singular" is kept for a matrix
+  that is singular.
+
+### The GPU solve's failures are hidden, and a synchronous run never tries it
+
+- **Symptom:** on the same 500 k DOF plate:
+  - a synchronous `run_study` went straight to the CPU solve, while an
+    async one tried the GPU first;
+  - on an identical mesh, the async GPU solve failed 2 times (plus one
+    probable) in 7, on a busy machine;
+  - the reason the GPU gave up is dropped from the error;
+  - `study_status.iterations` reads 0 during a GPU solve.
+- **Cause:** not found.
+- **Where:** the solver choice in `src/core/fem/FemStudy.cpp`, and the
+  femgpu solve it calls.
+- **Likely fix:**
+  - one solver choice for both paths;
+  - carry the GPU's reason into the result's `solver` text and into the
+    error;
+  - report the GPU's iteration count;
+  - then find the intermittent failure with the failing mesh.
+
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused
