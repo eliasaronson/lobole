@@ -24,7 +24,9 @@ import tempfile
 
 # The wheel depends on the SDK, but the repo's own type check also runs where
 # it is absent (CI's apt mypy): ignored there, harmless where it is installed.
-from mcp.server.fastmcp import FastMCP, Image  # type: ignore[import-not-found,unused-ignore]
+from mcp.server.mcpserver import MCPServer, Image  # type: ignore[import-not-found,unused-ignore]
+from mcp.server.mcpserver.exceptions import (  # type: ignore[import-not-found,unused-ignore]
+    ToolError, UnexpectedToolError)
 
 from lobole.client import Client  # noqa: E402
 
@@ -691,7 +693,41 @@ see every knob, and an explicit offer to adjust any of them.
 # Connection
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP(
+class _Server(MCPServer):
+    """MCPServer with the two guarantees the tools below are written against.
+
+    ONE CALL AT A TIME. mcp 2 runs each request as its own task and a sync
+    tool on a worker thread, so two calls a client sends together would share
+    the one app connection (and the autostart) from two threads, interleaving
+    their JSON-RPC. The lock keeps calls in the order they started.
+
+    A REFUSAL KEEPS ITS TEXT. mcp 2 passes a tool's own message on only for
+    ToolError; anything else is a crash, and the model reads just "Error
+    executing tool <name>". Every refusal here arrives as a RuntimeError
+    (lobole.errors.Refused and the rest of LoboleError are ones), a ValueError
+    or an OSError (the app gone), and its text, naming what IS accepted, is
+    the point of refusing, so those keep it. Any other exception is a bug in
+    this file and stays a crash, logged with its traceback.
+    """
+
+    _lock = None
+
+    async def call_tool(self, name, arguments, context=None):
+        if self._lock is None:
+            import anyio
+            self._lock = anyio.Lock()
+        async with self._lock:
+            try:
+                return await super().call_tool(name, arguments, context)
+            except UnexpectedToolError as e:
+                cause = e.__cause__
+                if isinstance(cause, (RuntimeError, ValueError, OSError)):
+                    raise ToolError(
+                        f"Error executing tool {name}: {cause}") from cause
+                raise
+
+
+mcp = _Server(
     "lobole",
     instructions="Tools for driving a running Loböle CAD instance. Read the "
     "modeling-workflow prompt before modeling. The listed tools are the "
@@ -1031,7 +1067,8 @@ def _reference(method, description):
 
 
 # The tools this server announces, for help()'s index. Kept next to the
-# meta tools rather than derived from the FastMCP registry, which is private.
+# meta tools rather than derived from the server's registry, so the index says
+# what the surface is MEANT to be, and --only-tools narrows only the schemas.
 _EXPOSED = {
     "describe", "get_state", "check_geometry", "measure", "mass_properties",
     "list_elements", "list_variables", "set_variable", "screenshot",
@@ -2360,23 +2397,24 @@ def modeling_workflow() -> str:
 def _restrict_tools(keep):
     """Hide every tool but `keep`. Used by benchmark arms.
 
-    Reaches into FastMCP's registry because it exposes no supported way to
-    unregister. So it REFUSES loudly if that registry ever moves: serving the
-    full surface after being asked for six tools would silently turn a
-    benchmark arm into a duplicate of the arm it is being compared against,
-    and the run would look valid.
+    Refuses an unknown name rather than serving the rest: serving the full
+    surface after being asked for six tools would silently turn a benchmark
+    arm into a duplicate of the arm it is being compared against, and the run
+    would look valid. So it also checks that what is left is exactly `keep`.
     """
-    registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
-    if not isinstance(registry, dict):
-        raise SystemExit("--only-tools: FastMCP's tool registry moved; refusing "
-                         "to serve the full surface as if it were restricted")
-    missing = [t for t in keep if t not in registry]
+    import anyio
+    registered = {t.name for t in anyio.run(mcp.list_tools)}
+    missing = [t for t in keep if t not in registered]
     if missing:
         raise SystemExit(f"--only-tools: no such tool(s): {', '.join(missing)}. "
-                         f"Known: {', '.join(sorted(registry))}")
-    for name in list(registry):
-        if name not in keep:
-            del registry[name]
+                         f"Known: {', '.join(sorted(registered))}")
+    for name in registered - set(keep):
+        mcp.remove_tool(name)
+    left = {t.name for t in anyio.run(mcp.list_tools)}
+    if left != set(keep):
+        raise SystemExit("--only-tools: the server still lists "
+                         f"{', '.join(sorted(left - set(keep)))}; refusing to "
+                         "serve the full surface as if it were restricted")
 
 
 def main():

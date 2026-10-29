@@ -40,9 +40,9 @@ def expect(condition, message):
 
 def result(r):
     """Unwrap a CallToolResult into plain data."""
-    if r.isError:
+    if r.is_error:
         raise RuntimeError(r.content[0].text if r.content else "tool error")
-    sc = r.structuredContent
+    sc = r.structured_content
     if isinstance(sc, dict):
         return sc.get("result", sc)
     if r.content and r.content[0].type == "text":
@@ -281,7 +281,7 @@ async def run(port):
 
             # The agent's eyes: screenshot returns inline image content
             shot = await session.call_tool("screenshot", {"view": "iso"})
-            expect(not shot.isError, "screenshot tool ok")
+            expect(not shot.is_error, "screenshot tool ok")
             imgs = [c for c in shot.content if c.type == "image"]
             expect(len(imgs) == 1, "screenshot returns one image block")
             png = base64.b64decode(imgs[0].data)
@@ -290,7 +290,7 @@ async def run(port):
 
             # Errors surface as tool errors, not hangs or crashes
             bad = await session.call_tool("view", {"name": "sideways"})
-            expect(bad.isError, "bad view name reports a tool error")
+            expect(bad.is_error, "bad view name reports a tool error")
             # Refused by view's contract, naming the views it takes.
             expect("'name' must be one of: front" in bad.content[0].text,
                    f"error is passed on: {bad.content[0].text}")

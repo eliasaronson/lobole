@@ -2,8 +2,8 @@
 
 `lobole.mcp` (`python/lobole/mcp.py`) exposes a running Loböle instance to
 any MCP client (Claude Code, Claude Desktop, a custom agent). It is a stdio
-server built on the official MCP Python SDK's `FastMCP`, a thin layer over
-`lobole.client`: every tool ends in an RPC ([rpc.md](rpc.md)).
+server built on the official MCP Python SDK's `MCPServer` (mcp 2.x), a thin
+layer over `lobole.client`: every tool ends in an RPC ([rpc.md](rpc.md)).
 
 ## Setup
 
@@ -30,10 +30,11 @@ claude mcp add lobole -- lobole-mcp
 ```
 
 A release publishes it to PyPI (`uv tool install lobole`); between releases,
-install from a path or a git URL. `mcp` is pinned
-`<2`: mcp 2.x renamed `FastMCP` and changed other APIs, and the pin is lifted
-by migrating the server, not by loosening it. `packaging_smoke` builds the
-wheel and imports every module from it alone.
+install from a path or a git URL. `mcp` is pinned to the 2.x line
+(`>=2,<3`), the SDK `shell.nix` gives and so the one every test here runs:
+1.x has no `MCPServer`, and the next major is a migration of the server, not
+a loosened pin. `packaging_smoke` builds the wheel and imports every module
+from it alone.
 
 ## Finding the app
 
@@ -115,6 +116,16 @@ reached with **`rpc(method, params)`** and documented by **`help(method)`**.
   passes only the ones given, so every default is the app's;
   `mcp_formats_gate` holds each tool's signature to its row.
 - `screenshot` and `render_still` return the image inline.
+- A refusal reaches the model with its text (`Error executing tool <name>:
+  <the app's message>`), naming what is accepted. mcp 2 passes a tool's own
+  message on only for its `ToolError` and reduces anything else to the bare
+  prefix, so `_Server.call_tool` turns the `RuntimeError` (every
+  `lobole.errors` refusal is one), `ValueError` and `OSError` the tools raise
+  into one; any other exception is a bug here and stays a logged crash.
+- Tool calls run one at a time, in the order they arrive. mcp 2 runs each
+  request as its own task and a sync tool on a worker thread, and two calls
+  sharing the one app connection from two threads would interleave their
+  JSON-RPC.
 
 Keeping most RPCs behind `rpc`/`help` keeps the schema bulk every client loads
 up front small; the `rpc-only` benchmark arm measures that trade
@@ -206,6 +217,6 @@ and its prose.
 - `packaging_smoke` — the wheel `pyproject.toml` builds, imported alone.
 
 `--only-tools a,b,c` serves only the named tools and refuses loudly if it
-cannot (an unknown name, or FastMCP's registry having moved), because a
+cannot (an unknown name, or a tool still listed after `remove_tool`), because a
 restriction that silently served the full surface would make a benchmark arm
 a duplicate of another.

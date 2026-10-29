@@ -19,10 +19,12 @@ dynamic = ["version"]
 description = "Drive a running Loböle CAD instance: JSON-RPC client, SDK and MCP server"
 requires-python = ">=3.11"  # typing.Self, NotRequired, Unpack
 license = "AGPL-3.0-or-later"
-# <2: mcp 2.x renamed FastMCP to MCPServer and changed other APIs; the server
-# is written against 1.x, which is also what nixpkgs pins. Lift the pin only
-# by migrating lobole/mcp.py (and shell.nix) together, not by loosening it.
-dependencies = ["mcp>=1.0,<2"]
+# The 2.x line: lobole/mcp.py is written against mcp 2's MCPServer, which is
+# what shell.nix's nixpkgs gives and so what every test here runs, and the
+# wheel must ship the SDK the tests ran. 1.x lacks MCPServer; <3 because a
+# major moves the API (2.0 renamed FastMCP and removed it), and the move to
+# the next one is a migration of lobole/mcp.py, not a loosened pin.
+dependencies = ["mcp>=2,<3"]
 
 [project.scripts]
 lobole-mcp = "lobole.mcp:main"

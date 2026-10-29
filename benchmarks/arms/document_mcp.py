@@ -33,10 +33,10 @@ import os
 import sys
 import tempfile
 
-from mcp.server.fastmcp import FastMCP  # noqa: E402
+from mcp.server.mcpserver import MCPServer  # noqa: E402
 from lobole.client import Client  # noqa: E402
 
-mcp = FastMCP("designer-document")
+mcp = MCPServer("designer-document")
 _PORT = None
 
 

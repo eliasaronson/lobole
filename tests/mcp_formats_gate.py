@@ -34,25 +34,25 @@ def load_mcp_constants():
         return lobole.mcp
     except ImportError:
         pass
-    # No SDK: satisfy `from mcp.server.fastmcp import FastMCP, Image` with
-    # inert stand-ins. Only module-level constants are read below.
-    fastmcp = types.ModuleType("mcp.server.fastmcp")
+    # No SDK: satisfy `from mcp.server.mcpserver import MCPServer, Image`
+    # with inert stand-ins. Only module-level constants are read below.
+    mcpserver = types.ModuleType("mcp.server.mcpserver")
 
-    class _FastMCP:
+    class _MCPServer:
         def __init__(self, *a, **k):
             pass
 
         def __getattr__(self, name):
             return lambda *a, **k: (lambda f: f)
 
-    fastmcp.FastMCP = _FastMCP
-    fastmcp.Image = object
+    mcpserver.MCPServer = _MCPServer
+    mcpserver.Image = object
     server = types.ModuleType("mcp.server")
-    server.fastmcp = fastmcp
+    server.mcpserver = mcpserver
     mcp = types.ModuleType("mcp")
     mcp.server = server
     sys.modules.update({"mcp": mcp, "mcp.server": server,
-                        "mcp.server.fastmcp": fastmcp})
+                        "mcp.server.mcpserver": mcpserver})
     import lobole.mcp
     return lobole.mcp
 
