@@ -217,6 +217,91 @@ modules:
         tag: v6.2.2605
         disable-submodules: true   # pybind11 submodule only needed for USE_PYTHON
 
+  # ---- CalculiX (ccx), the second static solver -----------------------------
+  # docs/packaging/README.md#the-bundled-calculix. The sandbox hides a host
+  # ccx, so it is built here, at /app/lib/lobole/ccx where fem::FindCalculix
+  # looks beside the app. Its solver stack first: reference BLAS/LAPACK and
+  # ARPACK (shared, in /app/lib) and SPOOLES 2.2 (static, linked into ccx).
+  - name: lapack
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DCBLAS=OFF
+      - -DLAPACKE=OFF
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: archive
+        url: https://github.com/Reference-LAPACK/lapack/archive/refs/tags/v3.12.1.tar.gz
+        sha256: 2ca6407a001a474d4d4d35f3a61550156050c48016d949f0da0529c0aa052422
+
+  - name: arpack-ng
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DMPI=OFF
+      - -DICB=OFF
+      - -DEXAMPLES=OFF
+      - -DTESTS=OFF
+    sources:
+      - type: archive
+        url: https://github.com/opencollab/arpack-ng/archive/refs/tags/3.9.1.tar.gz
+        sha256: f6641deb07fa69165b7815de9008af3ea47eb39b2bb97521fbf74c97aba6e844
+
+  # Public domain. The tarball has no top directory. The patches are
+  # nixpkgs': GCC 14 errors (NULL as an int) and an int overflow in a hash.
+  - name: spooles
+    buildsystem: simple
+    build-commands:
+      # The patched Make.inc names c99, which the SDK has no wrapper for.
+      - make lib CC=gcc
+      - install -Dm644 libspooles.a /app/lib/libspooles.a
+      - |
+        for h in *.h; do
+          [ "$h" = MPI.h ] && continue
+          install -Dm644 "$h" "/app/include/spooles/$h"
+          d="${h%.h}"
+          if [ -d "$d" ]; then
+            mkdir -p "/app/include/spooles/$d"
+            cp "$d"/*.h "/app/include/spooles/$d/"
+          fi
+        done
+    sources:
+      - type: archive
+        url: https://netlib.org/linalg/spooles/spooles.2.2.tgz
+        sha256: a84559a0e987a1e423055ef4fdf3035d55b65bbe4bf915efaa1a35bef7f8c5dd
+        strip-components: 0
+      - type: patch
+        path: patches/spooles-spooles.patch
+      - type: patch
+        path: patches/spooles-transform.patch
+      - type: patch
+        path: patches/spooles-allocate.patch
+
+  # GPL-2.0-or-later: the same source tarball the Windows build's ccx is
+  # built from, and the one the release attaches. Its Makefile names LIBS as
+  # prerequisites too, so they are files, not -l flags.
+  - name: ccx
+    buildsystem: simple
+    build-commands:
+      - >-
+        cd CalculiX/ccx_2.23/src &&
+        make -j${FLATPAK_BUILDER_N_JOBS} ccx_2.23
+        CFLAGS='-Wall -O2 -I/app/include/spooles -DARCH="Linux" -DSPOOLES
+        -DARPACK -DMATRIXSTORAGE -DNETWORKOUT -Wno-return-mismatch'
+        FFLAGS='-Wall -O2 -cpp -std=legacy'
+        LIBS='/app/lib/libspooles.a /app/lib/libarpack.so /app/lib/liblapack.so
+        /app/lib/libblas.so'
+      - install -Dm755 CalculiX/ccx_2.23/src/ccx_2.23 /app/lib/lobole/ccx
+    sources:
+      - type: archive
+        url: https://www.dhondt.de/ccx_2.23.src.tar.bz2
+        sha256: 9c88385c10fb04f5dc6c4e98027a51bebdd8aee3920e05190d6c1dd08357d6e7
+        strip-components: 0
+
   # ---- Loböle itself --------------------------------------------------------
   - name: lobole
     buildsystem: cmake-ninja
