@@ -293,6 +293,24 @@ const Field kFields[] = {
      {},
      0.0f,
      0.0f},
+    // The CalculiX solver a study set to it runs
+    // (docs/simulation/README.md#calculix). A path that is not ccx 2.21 or
+    // later is refused at the run, naming it, rather than passed over for
+    // another one.
+    {"calculix_path",
+     "Simulation",
+     "CalculiX (ccx)",
+     "The ccx a study solved on CalculiX runs. Empty finds one: LOBOLE_CCX, "
+     "a copy beside Loböle, then PATH.",
+     Tier::Live,
+     &Settings::calculixPath,
+     {},
+     {},
+     0.0f,
+     0.0f,
+     1.0f,
+     "",
+     true},
     // Sharing (F9 C1). Empty is the right answer for anyone who has
     // configured git — these fill the gap for anyone who has not, and never
     // override what git already knows.
@@ -544,6 +562,7 @@ bool Settings::operator==(const Settings& other) const {
          autosaveInterval == other.autosaveInterval &&
          terminalPanel == other.terminalPanel &&
          meshRepresentation == other.meshRepresentation &&
+         calculixPath == other.calculixPath &&
          gitUserName == other.gitUserName &&
          gitUserEmail == other.gitUserEmail && keys == other.keys &&
          window == other.window;

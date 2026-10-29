@@ -224,6 +224,7 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
                   ": a pin support is a part study's; an assembly study holds "
                   "its part with fixed faces or a rigid neighbour's contact");
   out.type = study.type;
+  out.solver = study.solver;
   out.numModes = study.numModes;
   out.gravity = study.gravity;
 

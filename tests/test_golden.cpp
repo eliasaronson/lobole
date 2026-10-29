@@ -1076,6 +1076,23 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
         CHECK(l.fixRotation == want[i].at(4).get<bool>());
     }
   }
+  // vNEXT: which program solves each study
+  // (docs/simulation/README.md#calculix). A solver dropped on load would
+  // solve a CalculiX study in-house and say nothing; each [study name,
+  // solver] must hold, auto included.
+  if (expect.contains("study_solvers")) {
+    for (const auto& want : expect.at("study_solvers")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("study " << name);
+      const fem::Study* st = nullptr;
+      for (const fem::Study& s : doc.GetStudies())
+        if (s.name == name)
+          st = &s;
+      REQUIRE(st != nullptr);
+      CHECK(std::string(fem::SolverToString(st->solver)) ==
+            want.at(1).get<std::string>());
+    }
+  }
   // v168: an extrude's twist. A twisted rectangle has the prism's volume, so
   // the volumes above cannot see a twist dropped on load; each [extrude
   // name, twist_deg, twist_expr, herringbone] must hold.

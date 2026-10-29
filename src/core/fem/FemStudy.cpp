@@ -19,6 +19,7 @@
 #include "cad/CADMaterials.h"
 #include "core/Document.h"
 #include "core/Measure.h"
+#include "core/fem/Calculix.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemTopo.h"
 
@@ -88,6 +89,42 @@ const char* AnalysisTypeToString(AnalysisType type) {
     break;
   }
   return "static";
+}
+
+const char* SolverToString(Solver solver) {
+  switch (solver) {
+  case Solver::InHouse:
+    return "in_house";
+  case Solver::Calculix:
+    return "calculix";
+  case Solver::Auto:
+    break;
+  }
+  return "auto";
+}
+
+bool SolverFromString(const std::string& s, Solver& out) {
+  if (s == "auto") {
+    out = Solver::Auto;
+    return true;
+  }
+  if (s == "in_house") {
+    out = Solver::InHouse;
+    return true;
+  }
+  if (s == "calculix") {
+    out = Solver::Calculix;
+    return true;
+  }
+  return false;
+}
+
+std::string SolverRefusal(Solver solver, AnalysisType type) {
+  if (solver == Solver::Calculix && type != AnalysisType::Static)
+    return std::string("CalculiX solves static studies here; a ") +
+           AnalysisTypeToString(type) +
+           " study is solved in-house (solver auto or in_house)";
+  return {};
 }
 
 const char* CpuSolverName(AnalysisType type) {
@@ -758,6 +795,7 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   if (!ValidateLoadCases(study, &err))
     return fail(err);
   out.type = study.type;
+  out.solver = study.solver;
   out.numModes = study.numModes;
   out.gravity = study.gravity;
   for (const LoadCase& c : study.loadCases)
@@ -886,6 +924,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
                       std::string* error) {
   out = StudyJobInput{};
   out.type = plan.type;
+  out.solver = plan.solver;
   out.numModes = plan.numModes;
   out.gravity = plan.gravity;
   out.caseNames = plan.caseNames;
@@ -1109,7 +1148,8 @@ std::optional<std::vector<FemResults>>
 SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
               const std::vector<std::vector<FaceLoad>>& rhs,
               const glm::dvec3& g, const SolveOptions& options,
-              SolveReport& report, std::string* error) {
+              SolveReport& report, std::string* error,
+              std::vector<Supports>* settledSupports = nullptr) {
   const FemMesh& mesh = jb.mesh;
   auto fail =
       [&](const std::string& m) -> std::optional<std::vector<FemResults>> {
@@ -1319,6 +1359,8 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
                     " did not settle: it still pulls on the part");
       if (!changed) {
         settled = true;
+        if (settledSupports)
+          settledSupports->push_back(sup);
         // What each pin pressed on.
         for (const PinState& ps : pins) {
           FemResults::SupportReaction sr;
@@ -1375,6 +1417,35 @@ void FinishSupports(const StudyJobBody& jb, FemResults& res) {
 
 } // namespace
 
+bool StaticSupportsOf(
+    const StudyJobBody& jb, const std::vector<Material>& mats,
+    const std::vector<std::vector<FaceLoad>>& rhs,
+    const glm::dvec3& gravityAccel, const SolveOptions& options,
+    std::vector<Supports>& supports,
+    std::vector<std::vector<FemResults::SupportReaction>>& pinRows,
+    std::string* error) {
+  supports.clear();
+  pinRows.clear();
+  if (jb.pins.empty()) {
+    Supports sup;
+    sup.fixedNodes = jb.fixedNodes;
+    sup.reactions = true;
+    supports.assign(rhs.size(), sup);
+    pinRows.assign(rhs.size(), {});
+    return true;
+  }
+  // The contact each case settles on, found in-house: a pin pushes, never
+  // pulls, and which facets it pushes on is what the iteration decides.
+  SolveReport report;
+  auto all = SolveWithPins(jb, mats, rhs, gravityAccel, options, report, error,
+                           &supports);
+  if (!all)
+    return false;
+  for (const FemResults& r : *all)
+    pinRows.push_back(r.reactions);
+  return supports.size() == rhs.size();
+}
+
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
                         const SolveOptions& options) {
   rt = StudyRuntime{};
@@ -1393,6 +1464,13 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       *error = m;
     return false;
   };
+  // CalculiX solves static studies only, and a study set to it is never
+  // solved in-house instead (docs/simulation/README.md#calculix).
+  if (const std::string why = SolverRefusal(in.solver, in.type); !why.empty())
+    return fail(why);
+  if (in.solver == Solver::Calculix && !options.calculix)
+    return fail("this study solves on CalculiX, and this run was given no "
+                "ccx to run it with");
   for (StudyJobBody& jb : in.bodies) {
     StudyBodyResult sbr;
     sbr.bodyIndex = jb.bodyIndex;
@@ -1418,7 +1496,16 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
           jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
       SolveReport report;
       std::optional<std::vector<FemResults>> all;
-      if (jb.pins.empty()) {
+      if (in.solver == Solver::Calculix) {
+        std::vector<FemResults> res;
+        if (SolveBodyOnCalculix(jb, mats, rhs, g, options, res, report, &err))
+          all = std::move(res);
+        rt.residual = std::max(rt.residual, report.worstResidual);
+        rt.residualFloor =
+            std::max(rt.residualFloor, report.worstResidualFloor);
+        rt.energyResidual =
+            std::max(rt.energyResidual, report.worstEnergyResidual);
+      } else if (jb.pins.empty()) {
         Supports sup;
         sup.fixedNodes = jb.fixedNodes;
         sup.reactions = true;

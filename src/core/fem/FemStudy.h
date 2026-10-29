@@ -193,11 +193,26 @@ enum class AnalysisType {
   Topology, // generative: SIMP compliance minimization -> a density field
 };
 
+// Which program solves a study (docs/simulation/README.md#calculix). Auto
+// is the in-house solver for every analysis there is today; CalculiX solves
+// a static study as a second, independent answer.
+enum class Solver {
+  Auto,
+  InHouse,
+  Calculix,
+};
+const char* SolverToString(Solver solver);
+inline constexpr const char* kSolverNames = "auto, in_house, calculix";
+[[nodiscard]] bool SolverFromString(const std::string& s, Solver& out);
+
 // A single-part analysis definition (linear static or modal).
 struct Study {
   uint64_t id = 0;
   std::string name;
   AnalysisType type = AnalysisType::Static;
+  // Absent from the file when Auto, so every study saved before it hashes
+  // and re-saves as it did.
+  Solver solver = Solver::Auto;
 
   // Global maximum element size (mm); 0 = auto from the body bounding box.
   double meshSize = 0.0;
@@ -256,6 +271,11 @@ struct Study {
   // support, singular matrix, ...). Never serialized. Empty when healthy.
   std::string error;
 };
+
+// Empty when `solver` can solve a study of `type`; otherwise why not, naming
+// what can: CalculiX solves static studies only (modal and topology are
+// in-house), and auto and in_house solve every type there is.
+std::string SolverRefusal(Solver solver, AnalysisType type);
 
 const char* LoadTypeToString(LoadType type);
 // Every load type's name, for a refusal that names what is accepted.

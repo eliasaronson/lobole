@@ -553,6 +553,9 @@ set(core_sources
     src/core/fem/AssemblyStudy.cpp
     src/core/fem/FemSolver.cpp
     src/core/fem/FemTopo.cpp
+    # CalculiX as a study solver: a separate process fed a deck
+    # (docs/simulation/README.md#calculix).
+    src/core/fem/Calculix.cpp
 )
 
 find_package(nlohmann_json 3 REQUIRED)
@@ -1698,13 +1701,14 @@ if(LOBOLE_PACKAGE_DEB)
     # Depends comes from what the binary links (dpkg-shlibdeps), so it cannot
     # drift from the link line. What is run rather than linked is by hand:
     # a Vulkan driver and git (project history) recommended; ffmpeg (motion
-    # video) and python3 (the bundled client and MCP server) suggested.
+    # video), python3 (the bundled client and MCP server) and calculix-ccx
+    # (a static study solved on CalculiX) suggested.
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
     # Our own planegcs and designer_adaptive, found through RUNPATH.
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
         "${CMAKE_BINARY_DIR}")
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "mesa-vulkan-drivers, git")
-    set(CPACK_DEBIAN_PACKAGE_SUGGESTS "ffmpeg, python3")
+    set(CPACK_DEBIAN_PACKAGE_SUGGESTS "ffmpeg, python3, calculix-ccx")
     include(CPack)
 endif()
 

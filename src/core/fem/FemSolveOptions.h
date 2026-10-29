@@ -7,13 +7,17 @@
 // which linear solver, and how a caller stops one in flight. Its own header
 // so a job runner can fill one in without the solver's declarations.
 
+#include <glm/glm.hpp>
+
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace fem {
 
 class TopoLinearSolver;
+struct CalculixRun;
 
 // Free DOF above which a static study is solved by preconditioned conjugate
 // gradients instead of a sparse LDLT factorisation. A direct factor of a
@@ -40,6 +44,18 @@ struct SolveOptions {
   // never pays for a device.
   std::function<std::unique_ptr<TopoLinearSolver>(std::string* why)>
       makeExternal;
+  // A static study whose solver is CalculiX solves through this run
+  // (docs/simulation/README.md#calculix); null, such a study is refused
+  // rather than solved in-house.
+  std::shared_ptr<const CalculixRun> calculix;
+  // An answer solved elsewhere: every node's displacement (mm, x y z), one
+  // list per case. SolveCases then factors nothing. It holds the answer to
+  // the residual rule against its own K, with the floor the answer's
+  // printed precision puts under it (`givenPrecision`, relative, per
+  // value), and computes the stresses and reactions from it.
+  std::shared_ptr<const std::vector<std::vector<glm::dvec3>>> given;
+  double givenPrecision = 0.0;
+  std::string givenName; // the solver it came from, as the report names it
 };
 
 // What a solve did, for the study's result and its status.
@@ -47,6 +63,14 @@ struct SolveReport {
   std::string solver;
   int iterations = 0;         // conjugate-gradient iterations, all cases
   double worstResidual = 0.0; // max over cases of |K u - f| / |f|
+  // A given answer's: the largest residual its printed precision alone
+  // can leave, |K| |u| x precision / |f|, over the cases (0 otherwise).
+  double worstResidualFloor = 0.0;
+  // A given answer's energy balance, |u . (K u - f)| / |u . f|, worst over
+  // the cases: what the printed precision barely touches (it moves it by
+  // delta . f, first order in the precision), where a deck that differs
+  // from the study moves it first order in the difference.
+  double worstEnergyResidual = 0.0;
   // Why the external solver was not used, when one was offered and an
   // iterative solve ran on the CPU instead. Empty otherwise.
   std::string externalDeclined;

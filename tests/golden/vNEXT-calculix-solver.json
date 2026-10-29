@@ -1,0 +1,35 @@
+{
+  "format": "designer-document",
+  "version": 204,
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [100, 0]},
+       {"type": "line", "id": 2, "a": [100, 0], "b": [100, 10]},
+       {"type": "line", "id": 3, "a": [100, 10], "b": [0, 10]},
+       {"type": "line", "id": 4, "a": [0, 10], "b": [0, 0]}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Bar", "id": 2, "sketch_id": 1,
+     "distance": 10.0, "mode": "new_body"}
+  ],
+  "studies": [
+    {"type": "Study", "id": 3, "name": "On CalculiX", "solver": "calculix",
+     "mesh_size": 4.0,
+     "loads": [
+       {"id": 4, "type": "fixed",
+        "face": {"feature_id": 2, "element": "2/cap0"}, "magnitude": 0.0},
+       {"id": 5, "type": "force",
+        "face": {"feature_id": 2, "element": "2/cap1"},
+        "magnitude": 500.0, "direction": [0, 0, -1]}
+     ]},
+    {"type": "Study", "id": 6, "name": "In-house", "solver": "in_house",
+     "mesh_size": 4.0,
+     "loads": [
+       {"id": 7, "type": "fixed",
+        "face": {"feature_id": 2, "element": "2/cap0"}, "magnitude": 0.0}
+     ]},
+    {"type": "Study", "id": 8, "name": "Auto", "mesh_size": 4.0}
+  ]
+}

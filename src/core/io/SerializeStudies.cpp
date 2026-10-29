@@ -40,6 +40,10 @@ json StudyToJson(const fem::Study& s) {
   // v31 static studies stay byte-identical.
   if (s.type != fem::AnalysisType::Static)
     j["analysis"] = fem::AnalysisTypeToString(s.type);
+  // Which program solves it (vNEXT): absent when auto, so every study saved
+  // before -- and its input hash -- is what it was.
+  if (s.solver != fem::Solver::Auto)
+    j["solver"] = fem::SolverToString(s.solver);
   if (s.type == fem::AnalysisType::Modal)
     j["num_modes"] = s.numModes;
   if (s.gravity.x != 0 || s.gravity.y != 0 || s.gravity.z != 0)
@@ -226,6 +230,7 @@ fem::Study StudyFromJson(const json& j) {
                               "id",
                               "name",
                               "analysis",
+                              "solver",
                               "num_modes",
                               "gravity",
                               "volume_fraction",
@@ -268,6 +273,16 @@ fem::Study StudyFromJson(const json& j) {
                                  " study's, and this one is " + analysisStr);
   };
   refuseUnless(fem::AnalysisType::Modal, {"num_modes"});
+  if (j.contains("solver")) {
+    const std::string solverStr = j.at("solver").get<std::string>();
+    if (!fem::SolverFromString(solverStr, s.solver))
+      throw std::runtime_error("unknown study solver '" + solverStr +
+                               "' (expected one of: " + fem::kSolverNames +
+                               ")");
+    if (const std::string why = fem::SolverRefusal(s.solver, s.type);
+        !why.empty())
+      throw std::runtime_error("study " + std::to_string(s.id) + ": " + why);
+  }
   refuseUnless(fem::AnalysisType::Topology,
                {"volume_fraction", "volume_fraction_expr", "filter_radius",
                 "filter_radius_expr", "max_iterations", "keep_faces",
@@ -839,6 +854,12 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
   // whose inputs hash the same, and reads it stale when they do not.
   if (rt.inputHash != 0)
     out["input_hash"] = inputhash::Hex(rt.inputHash);
+  // A CalculiX answer says so, with the version (vNEXT): it is a second,
+  // independent answer, and its receipt names that oracle after a reopen
+  // too (docs/simulation/README.md#calculix). An in-house result writes
+  // nothing here, so every one saved before re-saves byte for byte.
+  if (rt.solver.rfind("calculix", 0) == 0)
+    out["solver"] = rt.solver;
   if (!rt.topology)
     out["maxima"] = {{"von_mises", rt.maxVonMises},
                      {"von_mises_at", Vec3ToJson(rt.maxVmAt)},
@@ -957,6 +978,13 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     throw std::runtime_error(what + ": input_hash " +
                              j.at("input_hash").dump() +
                              " is not 0x and 16 hex digits");
+  if (j.contains("solver")) {
+    rt.solver = j.at("solver").get<std::string>();
+    if (rt.solver.rfind("calculix ", 0) != 0)
+      throw std::runtime_error(what + ": solver '" + rt.solver +
+                               "' (a saved result names only a CalculiX "
+                               "solve, as 'calculix 2.NN')");
+  }
   if (j.contains("maxima")) {
     const json& m = j.at("maxima");
     rt.maxVonMises = m.value("von_mises", 0.0);

@@ -1,0 +1,10 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [10000.0],
+  "study_solvers": [
+    ["On CalculiX", "calculix"],
+    ["In-house", "in_house"],
+    ["Auto", "auto"]
+  ]
+}

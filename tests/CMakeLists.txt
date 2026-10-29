@@ -206,6 +206,7 @@ add_executable(designer_tests
     test_fem.cpp
     test_fem_loads.cpp
     test_fem_pin.cpp
+    test_fem_calculix.cpp
     test_topopt.cpp
     test_topo_build.cpp
     test_study_inputs.cpp
@@ -1367,6 +1368,16 @@ add_test(NAME fem_async_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fem_async_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(fem_async_smoke PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# A static study solved on CalculiX, over the RPCs alone
+# (docs/simulation/README.md#calculix): the solver named, the residual and
+# the agreement reported, the receipt's oracle, an exported deck ccx runs.
+# Self-skips (77) without Netgen or without a ccx `ping` can find.
+add_test(NAME calculix_static_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/calculix_static_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(calculix_static_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
 
 # Async topology optimization over JSON-RPC (TO2): start a run, poll
 # study_status to completion, cancel a second run.

@@ -85,6 +85,11 @@ struct Settings {
   // headroom.
   bool idleThrottle = true;
 
+  // Simulation: the CalculiX solver to run (docs/simulation/README.md
+  // #calculix). Empty finds one: LOBOLE_CCX, a copy beside the executable,
+  // then PATH.
+  std::string calculixPath;
+
   // Sharing — who a commit is BY. Empty means "whatever git is configured
   // with", which is the right answer for anyone who has configured it; these
   // exist for people who have not (F9 C1).

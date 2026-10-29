@@ -403,9 +403,18 @@ struct StudyRuntime {
 
   // Provenance of the solve — transient (NOT serialized; a reloaded result
   // reads empty/zero): which linear solver ran ("gpu: <device>" /
-  // "cpu (...)") and the wall time of the whole optimization.
+  // "cpu (...)") and the wall time of the whole optimization. The one
+  // exception is a CalculiX answer's "calculix 2.NN", which is saved: its
+  // receipt names that oracle after a reopen.
   std::string solver;
   double solveSeconds = 0.0;
+  // A CalculiX run's check against our K (docs/simulation/README.md
+  // #calculix): the worst |K u - f| / |f| over bodies and cases, and the
+  // part of it the answer's printed precision alone accounts for. Transient
+  // like `solver`; 0 for an in-house run.
+  double residual = 0.0;
+  double residualFloor = 0.0;
+  double energyResidual = 0.0; // |u . (K u - f)| / |u . f|
 
   // Load cases (static and topology), in the study's order; empty without.
   std::vector<std::string> caseNames;
@@ -493,6 +502,7 @@ struct StudyJobBody {
 };
 struct StudyJobInput {
   AnalysisType type = AnalysisType::Static;
+  Solver solver = Solver::Auto;
   std::vector<std::string> caseNames;
   int numModes = 8;
   glm::dvec3 gravity{0.0};
@@ -555,6 +565,7 @@ struct BondPatch {
 };
 struct StudyPlan {
   AnalysisType type = AnalysisType::Static;
+  Solver solver = Solver::Auto;
   std::vector<std::string> caseNames; // empty = one case
   // A shape study (ShapeSource): what the runtime reports of the cut.
   uint64_t sourceDigest = 0;

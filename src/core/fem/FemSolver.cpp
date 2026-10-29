@@ -428,7 +428,9 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   // Direct below the threshold: factorise once, every case one right-hand
   // side. Above it, PCG per case on K with one incomplete-Cholesky
   // preconditioner. Both are held to the same residual below.
-  const bool iterative = nFree > options.iterativeAboveDofs;
+  // An answer solved elsewhere (CalculiX) is checked, not solved for.
+  const bool given = options.given != nullptr;
+  const bool iterative = !given && nFree > options.iterativeAboveDofs;
   // An iterative solve goes to the external (GPU) solver when one is
   // offered and takes this system; the CPU's PCG is its fallback.
   std::unique_ptr<TopoLinearSolver> external;
@@ -447,11 +449,11 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   const char* solverName = !iterative ? kDirectSolverName
                            : external ? kGpuSolverName
                                       : kIterativeSolverName;
-  if (options.solving)
+  if (options.solving && !given)
     options.solving(solverName);
   if (report) {
     *report = SolveReport{};
-    report->solver = solverName;
+    report->solver = given ? options.givenName : std::string(solverName);
     if (iterative && !external && options.makeExternal)
       report->externalDeclined = declined;
   }
@@ -474,7 +476,7 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   if (iterative) {
     if (!external && !prepareIc())
       return fail(kSingular);
-  } else {
+  } else if (!given) {
     direct.compute(K);
     if (direct.info() != Eigen::Success)
       return fail(kSingular);
@@ -495,7 +497,85 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     }
     const Eigen::VectorXd F = reduce(Fcase);
     Eigen::VectorXd u;
-    if (external) {
+    const size_t caseIndex = all.size();
+    if (given) {
+      // The answer in this system's DOF: each node's displacement in its
+      // frame, its free directions kept. A direction this study holds that
+      // the answer moved is not this study's answer; one the printed
+      // precision moved is.
+      const std::string& who = options.givenName;
+      if (caseIndex >= options.given->size() ||
+          (*options.given)[caseIndex].size() != static_cast<size_t>(nNodes))
+        return fail("the answer from " + who +
+                    " is not one displacement per node");
+      const std::vector<glm::dvec3>& gu = (*options.given)[caseIndex];
+      u = Eigen::VectorXd::Zero(nFree);
+      double scale = 0.0, heldMove = 0.0;
+      int heldNode = -1;
+      for (int n = 0; n < nNodes; ++n) {
+        const Vector3d d(gu[n].x, gu[n].y, gu[n].z);
+        scale = std::max(scale, d.norm());
+        const Vector3d l = toLocal(n, d);
+        for (int k = 0; k < 3; ++k) {
+          const int dof = 3 * n + k;
+          if (dofMap[dof] >= 0)
+            u(dofMap[dof]) = l(k);
+          else if (tieOfDof[dof] < 0 && std::abs(l(k)) > heldMove) {
+            heldMove = std::abs(l(k));
+            heldNode = n;
+          }
+        }
+      }
+      if (!u.allFinite())
+        return fail("the answer from " + who + " is not finite");
+      if (heldMove > (1e-6 + 4.0 * options.givenPrecision) * scale)
+        return fail("the answer from " + who + " moves node " +
+                    std::to_string(heldNode + 1) + " by " +
+                    std::to_string(heldMove) +
+                    " mm along a direction this study holds");
+      // Held to the in-house rule against our own K. Printed to a few
+      // digits, an exact answer leaves a residual of its own, at most
+      // |K| |u| times the precision: the floor the rule stands on.
+      const double fn = F.norm();
+      const double residual = fn > 0 ? (K * u - F).norm() / fn : 0.0;
+      const double floor = fn > 0 ? (K.cwiseAbs() * u.cwiseAbs()).norm() *
+                                        options.givenPrecision / fn
+                                  : 0.0;
+      if (!(residual <= 1e-6 + floor))
+        return fail("the answer from " + who +
+                    " does not solve this study's own stiffness: |K u - f| / "
+                    "|f| = " +
+                    std::to_string(residual) + ", above 1e-6 plus the " +
+                    std::to_string(floor) +
+                    " its printed precision accounts for, so the deck and "
+                    "the study it was written from differ");
+      // That floor is wide: rounding is high-frequency noise, which K
+      // amplifies. The energy balance is not: u . (K u - f) moves by
+      // delta . f under rounding delta, first order in the precision, and
+      // first order in any difference between the deck and the study.
+      const double work = u.dot(F);
+      const double energy =
+          work != 0.0 ? std::abs(u.dot(K * u - F)) / std::abs(work) : 0.0;
+      const double energyFloor =
+          work != 0.0 ? 4.0 * options.givenPrecision *
+                            u.cwiseAbs().dot(F.cwiseAbs()) / std::abs(work)
+                      : 0.0;
+      if (!(energy <= 1e-6 + energyFloor))
+        return fail("the answer from " + who +
+                    " does not balance this study's own stiffness: |u . (K "
+                    "u - f)| / |u . f| = " +
+                    std::to_string(energy) + ", above 1e-6 plus the " +
+                    std::to_string(energyFloor) +
+                    " its printed precision accounts for, so the deck and "
+                    "the study it was written from differ");
+      if (report) {
+        report->worstResidual = std::max(report->worstResidual, residual);
+        report->worstResidualFloor =
+            std::max(report->worstResidualFloor, floor);
+        report->worstEnergyResidual =
+            std::max(report->worstEnergyResidual, energy);
+      }
+    } else if (external) {
       std::vector<double> fv(F.data(), F.data() + F.size()), uv;
       LinearSolveControl control;
       // A decade inside the acceptance below.
@@ -548,7 +628,7 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
         return fail("the iterative solve did not converge in " +
                     std::to_string(its) + " iterations (relative residual " +
                     std::to_string(rel) + ")");
-    } else if (!iterative) {
+    } else if (!iterative && !given) {
       u = direct.solve(F);
       if (direct.info() != Eigen::Success)
         return fail("linear solve failed");
@@ -559,11 +639,14 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     // satisfies K u = F, an under-constrained one does not. The iterative
     // answer is held to the same test, recomputed rather than trusted from
     // its recurrence.
-    const double residual = F.norm() > 0 ? (K * u - F).norm() / F.norm() : 0.0;
-    if (!u.allFinite() || residual > 1e-6)
-      return fail(kSingular);
-    if (report)
-      report->worstResidual = std::max(report->worstResidual, residual);
+    if (!given) {
+      const double residual =
+          F.norm() > 0 ? (K * u - F).norm() / F.norm() : 0.0;
+      if (!u.allFinite() || residual > 1e-6)
+        return fail(kSingular);
+      if (report)
+        report->worstResidual = std::max(report->worstResidual, residual);
+    }
 
     // Expand to full displacement (held DOFs are zero), back in x, y, z.
     FemResults out;
