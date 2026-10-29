@@ -639,6 +639,23 @@ The loop that works — follow it every time:
    edited since -- report every one of those as NOT met, with its note.
    Re-checking an unchanged design costs nothing (the evidence and the
    study results are reused by input hash).
+8b. A PART THAT CARRIES A LOAD IS NOT DONE WITHOUT ITS STUDIES. Before you
+   call it done it gets: a static study of each way it is loaded; a
+   buckling study (add_study {type: 'buckling'}) of each load that
+   compresses something; and requirements on factor_of_safety (static) and
+   buckling_factor (buckling) -- both read as the governing values. A part
+   that buckles passes its static study with a comfortable margin, so the
+   static study alone says nothing about it. The shapes that buckle:
+   struts and posts, ribs and webs, thin walls, tubes, levers and links in
+   compression. buckling_factor is the governing factor: the elastic factor
+   knocked down for a curved wall's imperfections and met with yield
+   (docs/simulation/README.md#buckling); read its warnings (a mode local
+   where a load enters, one element through a wall). A curved wall loaded
+   across its curve (an arch, a dome, a clip) can SNAP THROUGH, which
+   linear buckling does not see: say so, and name the nonlinear study for
+   it -- it does not exist yet -- rather than calling the part done on the
+   linear factor. A requirement on a study never run is `unchecked`:
+   report it as NOT met.
 
 IMPORTING a file: rpc('import_step', {path}) is the importer for every 3D
 format, STL and OBJ meshes included, despite its name (an STL's planes,
@@ -1976,8 +1993,12 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
 
 
 _reference("add_study", "Create a FEM study on the active part. kind = "
-          "'static' (default) | 'modal' | 'topology'. Returns {id, name, "
-          "kind}. A study fixes/loads faces and solves for stress.")
+          "'static' (default) | 'modal' | 'topology' | 'buckling'. Returns "
+          "{id, name, kind}. A study fixes/loads faces and solves for "
+          "stress. A loaded part gets a static study of each way it is "
+          "loaded and a buckling study of each load that compresses "
+          "something, with requirements on factor_of_safety and "
+          "buckling_factor (both the governing values).")
 
 
 _reference("remove_study", "Delete a study (by id) and its cached results.")
@@ -1990,9 +2011,10 @@ _reference("list_studies", "List studies: id, name, evaluated mesh_size, loads, 
 
 _reference("set_study", "Set a study's name, global mesh size, analysis type, or "
           "loads. mesh_size (mm; 0 = auto) may be a number or an expression "
-          "string. type is 'static' (stress), 'modal' (natural frequencies), or "
-          "'topology' (generative shape). num_modes sets how many modes a modal "
-          "study computes. gravity ([x,y,z] m/s^2, e.g. [0,0,-9.81]) applies "
+          "string. type is 'static' (stress), 'modal' (natural frequencies), "
+          "'topology' (generative shape) or 'buckling' (load factors). "
+          "num_modes sets how many modes a modal study computes, or how many "
+          "factors a buckling one does (default 3). gravity ([x,y,z] m/s^2, e.g. [0,0,-9.81]) applies "
           "self-weight to a static study (needs a material density). For a "
           "topology study: volume_fraction (0..1 target kept, number or "
           "expression), filter_radius (mm minimum member size; 0 = auto), and "
@@ -2041,7 +2063,9 @@ _reference("run_study", "Mesh + solve a study now (explicit; never automatic). "
           "A static study returns nodes, elements, max_von_mises_mpa {value, "
           "at, body}, max_displacement_mm, factor_of_safety (vs yield), and "
           "stale:false. A modal study returns per-body frequencies_hz (the "
-          "natural frequencies). A TOPOLOGY study runs ASYNC (minutes on a "
+          "natural frequencies). A buckling study returns per-body "
+          "buckling_factors, buckling_factor, knockdown, yield_factor and "
+          "governing_factor, and governing_factor at the top. A TOPOLOGY study runs ASYNC (minutes on a "
           "worker thread): it returns {started:true} immediately — poll "
           "study_status until running:false, then read study_results. "
           "async_run=True runs a static/modal study the same way — use it "
@@ -2086,7 +2110,8 @@ _reference("set_result_display", "Show a study's result overlay in the viewport 
           "screenshot). field is 'von_mises', 'displacement', or 'none' for a "
           "static/modal study, or 'shape' (grey optimized iso-surface) / "
           "'density' (colormap) for a topology study. deform_scale exaggerates "
-          "the deformed shape (0 = undeformed). For a modal study, mode selects "
+          "the deformed shape (0 = undeformed). For a modal or buckling study, "
+          "mode selects "
           "which mode shape (0-based). For a topology 'shape' view, threshold "
           "(0..1, 0 = auto) sets the iso-surface level. Enters simulation mode; "
           "display-only, like set_explode.")

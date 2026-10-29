@@ -159,7 +159,10 @@ with `mass_properties` and `rpc('render_sheet')`, gate assemblies on
 read `get_state`'s selection before acting on "this" or "the selected" and
 ask rather than guess when it is empty, state what the design is for as
 [requirements](../requirements/README.md) and check them before delivering
-(only `pass` is met), and run
+(only `pass` is met), give a part that carries a load a static study of each
+way it is loaded and a [buckling](../simulation/README.md#buckling) study of
+each load that compresses something, with requirements on
+`factor_of_safety` and `buckling_factor`, and run
 [the review checklist](../inspect/review-checklist.md) before delivery.
 Changing it changes what the benchmark measures.
 
@@ -175,6 +178,7 @@ test is taken out of the prompt rather than left in untested.
 | `set_rollback` shows an intermediate state, its digest the bodies as of the bar | `workflow_claims_smoke` |
 | `check_literals` names a literal equal to a variable, and a sketch or frame on a world plane where a face lies | `literals_smoke` |
 | `get_state` carries `selection` and `selection_items` | `workflow_claims_smoke` |
+| a buckling study's `buckling_factor` (and `factor_of_safety`) is its governing factor; a study requirement never checked is `unchecked` | `buckling_smoke` |
 | the GUI-driving RPCs need a window; offscreen renders | `remote_smoke`, `offscreen_smoke` |
 | every name it uses is an announced tool or a registered RPC | `mcp_smoke` |
 

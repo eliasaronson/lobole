@@ -61,6 +61,10 @@ PROMPT_WORDS = {
     "at_least": "a requirement's bound kind (add_requirement)",
     "face_ref": "a sketch's attachment field (FEATURE_FORMATS)",
     "flange_width": "an example of a variable name",
+    "factor_of_safety": "a study_result requirement's quantity "
+                        "(add_requirement)",
+    "buckling_factor": "a study_result requirement's quantity "
+                       "(add_requirement)",
 }
 
 
