@@ -279,6 +279,19 @@ A body's B-Rep is hashed as a reopened project reads it back
 ([studies as jobs](../simulation/README.md#studies-as-jobs)), so evidence
 saved with the project reads current after the reopen.
 
+A `study_result` reading of `max_von_mises` or `factor_of_safety`, and a
+`study_probe` of `von_mises_max` or `von_mises_mean`, rest on a peak
+stress, and a peak is only as good as the mesh under it. When the study's
+peak has not settled
+([a peak that has settled](../simulation/README.md#a-peak-that-has-settled):
+the loop ran out of refinements, stopped for time, or never ran), the
+requirement is judged on the value it has and its detail carries
+`not_converged` with the reason. `req::FindingLines` shows it under the row
+whether the row passes or fails, so the panel and the log say it, and
+`list_requirements` and `check_requirements` list those rows again under
+`not_converged` {id, name, state, reason}: a green result that rests on an
+unsettled peak is not hidden among the settled ones.
+
 Every hash also takes the values of every variable a bound's or a formula's
 expression reads. So a heavier camera makes the yoke's deflection requirement stale (its
 study's loads read `load_kg`) and leaves the base plate's CAM requirement

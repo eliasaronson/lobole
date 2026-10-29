@@ -118,6 +118,7 @@ rebuilds the device in place ([the GPU choice](#the-gpu-choice)), and
 | Sharing | `git_user_name`, `git_user_email` | Next time | who a commit is by; empty = git's own configuration |
 | General | `terminal_panel` | Live | off by default ([terminal.md](terminal.md)) |
 | General | `autosave_interval` | Next time | seconds, 0 disables |
+| Simulation | `converge_auto_s` | Next time | seconds, 10 by default: a static study on `auto` refines round its peak while a solve takes less than this ([a peak that has settled](../simulation/README.md#a-peak-that-has-settled)) |
 | Import | `mesh_representation` | Next time | `auto` (default), `mesh`, `recognize` or `facets`: what a new STL or OBJ import becomes when it names no `representation` ([mesh bodies](../interchange/README.md#mesh-bodies), [recognising a faceted mesh](../interchange/README.md#recognising-a-faceted-mesh)); a saved import keeps its own |
 
 Render quality and font size are not in the View menu: one control per

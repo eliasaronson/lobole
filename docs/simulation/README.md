@@ -21,6 +21,9 @@ A study holds:
 
 - `meshSize` (mm; 0 = auto, the body's bounding-box diagonal / 15) and
   per-face `refinements` (a target element size on one face).
+- `converge` (a static study's): `auto`, `always` or `never`, whether a run
+  refines round its peak stress until it settles
+  ([a peak that has settled](#a-peak-that-has-settled)).
 - `loads`: each a `Fixed` support, a `Pin` support (a rigid pin in a bore
   that holds where the part presses on it, [pin supports](#pin-supports)),
   a `Force` (a total vector in newtons,
@@ -182,16 +185,43 @@ A clamp's edge is a singularity: the stress where a fixed face meets a free
 one grows as the mesh is refined, so the study's peak, and the
 `factor_of_safety` read from it, can be a property of the mesh at the clamp
 rather than of the part. Every static result checks
-(`fem::FindSupportEdgePeak`): a support's EDGE is the nodes of its facets
-that a boundary facet it does not hold also has (a clamp's rim, a bore's
-rims); if the peak von Mises node is within one element of an edge (a node
-of a tet that has an edge node), the result carries `supportEdgePeak`:
-which support, and the largest von Mises farther than one element from
-every support's edge. `study_results` reports it as `peak_at_support_edge`
-{support, type, max_von_mises_away_mpa, away_at, factor_of_safety_away}
-per body, per case and for the top-level peak, and the factor of safety's
-receipt says its peak sits on a support's edge. The headline number is
-unchanged; it is no longer silent.
+(`fem::SupportEdgeZones`, `fem::PeakAwayFromEdges`): a support's EDGE is
+its rim, the facet edges it shares with boundary facets it does not hold
+(a clamp's rim, a bore's rims). A node lies ON that edge when it is within
+the support's **reach** of the rim, in millimetres, derived from the
+support (`fem::SupportAwayMm`):
+
+- a pin: a quarter of its bore's radius;
+- a fixed face: a quarter of its facets' largest extent along their
+  principal axes (5 mm for a cantilever's 20 x 2 mm root).
+
+A mesh coarser than that uses at least one element (every node of a tet
+that has a rim node), as the rule did before it was a distance. Measured by
+elements alone, "away" shrank as the mesh refined and crept toward the
+singularity with it: a clamped plate's 40.7 MPa at the auto size became
+44.7 at 0.4 mm. Measured by reach it is 40.6, 41.0, 41.2 and 41.3 MPa at
+auto, 1.5, 0.75 and 0.4 mm (1.6 % over the four), against 41.25 for
+M c / I at 5 mm from the root. The
+quarter of the clamped face's SMALLEST side (its 2 mm thickness) was tried
+first and crept as before (40.7, 43.2, 44.2): the stress a clamped member
+carries changes along it over the size of the section, not of its
+thinnest side.
+
+If the peak von Mises node lies in a support's zone, the result carries
+`supportEdgePeak`: which support, and the largest von Mises outside every
+zone. Each static body keeps its zones (`supportEdgeZone`, saved with the
+result), so a field read later is flagged the same way: `study_results`
+with `layer_normal` reads the stress across the layers away from the edge
+too (`max_across_layers_away_mpa`). `study_results` reports it as
+`peak_at_support_edge` {support, type, max_von_mises_away_mpa, away_at,
+max_across_layers_away_mpa?, across_layers_away_at?,
+factor_of_safety_away, governing?} per body, per case and for the top-level
+peak: `factor_of_safety_away` is the governing (smaller) of the factor
+against yield and the factor across the layers, and `governing` names
+which. The factor of safety's receipt says its peak sits on a support's
+edge. The headline number is unchanged; it is no longer silent, and the
+convergence check reads the away value instead
+([a peak that has settled](#a-peak-that-has-settled)).
 
 A printed PLA lever on two Ø5 mm bores, pushed down at its end (`[pin]`,
 "a lever on two pins"), its bores meshed at 1.0 and then 0.5 mm: clamped,
@@ -497,6 +527,48 @@ triangulation onto the faces it meshes, so `PlanStudyMesh` / `PlanStudy`
 deep-copy each shape on the main thread and the worker meshes the copies;
 the document's shape is never written under the renderer.
 
+Netgen meshes as well as gmsh at a comparable node count (worst tet within
+±0.1 of gmsh's on five parts; gmsh's default optimiser left slivers on thin
+plates), and second-order tets with midside nodes on the true surface bend
+right with ONE element through a thin wall: a cantilever plate 60 x 20 x t
+at the auto size (4.2 mm), t = 2, 1 and 0.8 mm, has its tip deflection
+within 0.9 % and its mid-span bending stress within 0.6 % of a converged
+mesh. A thin wall needs no special sizing for a static study.
+
+**Refinements** (`MeshSettings::faceSizes`, a study's `refinements`) go
+through Netgen's shape properties: each sets
+`OCCGeometry::GetProperties(face).maxh` before the geometry is built (its
+constructor copies each face's properties then), the route Netgen's python
+`face.maxh` takes, and Netgen grades that size into the face's edges and
+the volume behind it. Any refinement also takes Netgen's `grading` from 0.3
+to 0.2. The legacy `OCCGeometry::SetFaceMaxH` array sized the face's own
+triangles and nothing else, so a fine face met coarse tets head on. A
+steel plate 100 x 40 x 5 with a Ø10 hole in tension, its bore refined at
+the auto global size (a converged mesh gives 24.55 MPa there):
+
+| bore refinement | before: worst tet, peak | now: nodes, worst tet, peak |
+|---|---|---|
+| 0.3 mm | 0.014, **36.79 MPa** (+50 %, a fake) | 55.8 k, 0.188, 24.55 MPa |
+| 0.2 mm | "volume meshing failed" | 122 k, 0.381, 24.56 MPa |
+| 0.15 mm | fails | 202 k, 0.332, 24.57 MPa |
+
+The properties live in a STATIC table keyed by shape
+(`global_shape_property_indices`), shared by every mesh in the process,
+and `OCCGeometry::MeshFace` adds an entry for every face it meshes,
+refined or not. So `fem::Mesh`:
+
+- holds one mutex from setting the properties until the volume mesh and its
+  second order are done: two study jobs meshing at once would otherwise
+  write the table together (our faces are deep copies, so their keys never
+  collide, but the table is not thread-safe);
+- takes its entries out on every way it returns, a failure's and an
+  exception's included. Netgen has no remove call, so each entry of ours is
+  reset to the default properties and the indexed map is rebuilt without
+  our shapes. Otherwise the table grew with every run, held every meshed
+  copy alive, and a refinement left on a shape sized its next mesh.
+  `fem::NetgenPropertyEntries` counts what is left of a shape, for the
+  tests.
+
 A mesh failure is reported as the study error, naming the face when Netgen
 says which, and its shortest edge when that is under a micrometre: the usual
 cause, and one no picture and no BRepCheck shows: two faces meant to
@@ -505,6 +577,99 @@ edges that short (the pan/tilt yoke's arm and base did, while sketch planes
 were single precision). There is no defeaturing step: suppress cosmetic features before meshing,
 or, on an imported part, remove them with Delete Face
 ([modeling](../modeling/README.md#delete-face)).
+
+## A peak that has settled
+
+A peak at a hole or a fillet read at the auto size is about 5 % low (the
+plate above: 23.41 MPa against 24.55; a 26 -> 20 bar's r 2 shoulder: 19.83
+against 20.83), and shrinking the GLOBAL size does not find it: Netgen's
+curvature sizing already sets the size there, so steps of 5, 3, 2, 1.5 and
+1 mm moved the plate's peak under 2 % each while it stayed low, and it
+arrived only at 0.75 mm over the whole part (353 k nodes, 40 s). Refining
+the face the peak is on converges in two steps at 3.5-11 k nodes in a few
+seconds. So a static run refines where its peak is
+(`fem::SolveConverged`, `src/core/fem/FemStudy.cpp`):
+
+1. Take the governing peaks of each body, the worst over its load cases:
+   von Mises, and for a printed material (one with an interlayer strength)
+   the stress across the layers along the run's `layer_normal`, or without
+   one the largest principal stress, which bounds it in every direction. A
+   peak that lies on a support's edge is a singularity and never settles,
+   so its away value is used instead
+   ([a peak on a support's edge](#a-peak-on-a-supports-edge)).
+2. Find the B-Rep face each peak node lies on: of the faces its facets
+   belong to, the smallest (the bore rather than the flat it meets); an
+   interior node takes the nearest boundary node's. Every boundary node
+   within 90 % of the peak (off the support edges, for an away value) adds
+   its face too: a bar with two shoulder fillets peaks on both alike, and
+   refining one only moved the peak to its twin, which read as settled
+   (0.7 % on one step, 3.7 % low).
+3. Halve that face's element size, starting from the size its elements have
+   now (the mean edge length of its facets), and re-mesh and re-solve.
+4. Stop when every governing peak moves by less than 2 %, or after four
+   refinements.
+
+The refinements belong to the run: they are never written into the study.
+A study's `converge` says when it runs, and `run_study {converge}`
+overrides it for one run; any other value is refused, naming the three:
+
+- `auto` (the default) runs it while the first solve took less than the
+  `converge_auto_s` preference (10 s by default; Preferences > Simulation,
+  `set_settings`), and keeps refining while each step does: a step costs at
+  least what the last one did, so one after a step that took longer is not
+  started, and the result says `stopped: "time"` with the time that step
+  took.
+- `always` runs it whatever it costs.
+- `never` skips it, and the result says the peak was not checked, so a peak
+  never checked does not look like one that was.
+
+Taking the run's own time needs no estimate: the study that just ran is the
+measurement. The mode and the layer normal are inputs (`fem::RunInputKey`),
+so a run with them is not answered from a stored result without.
+`study_results` (and a synchronous `run_study`) reports `convergence`
+{status: converged | not converged | not checked, converged, stopped?
+(time | steps | failed), stopped_seconds?, why?, reason?, last_change_pct,
+layer_normal?, steps [{refined [{body, face, size_mm}], nodes, seconds,
+peaks [{body, quantity, away_from_support_edge, mpa}]}]}, saved with the
+result. The factor of safety's receipt says whether its peak converged, and
+a requirement read from an unsettled peak (the loop ran out, stopped for
+time, or never ran) is judged on the value it has and carries
+`not_converged` with the reason, listed again under its own heading
+([requirements](../requirements/README.md#evidence)). The Simulation panel has a
+Converge peak combo on a static study and a line under its result.
+
+Measured, `always` at the auto size:
+
+| part | refinements | nodes at the end | peak | converged | handbook |
+|---|---|---|---|---|---|
+| hole plate | 2 | 11.7 k | 23.41 -> 24.62 MPa | 24.55 | 24.22 (Heywood) |
+| shoulder fillet | 2 | 17.7 k | 19.83 -> 20.78 MPa | 20.83 | 20.48 (Peterson, ±3-5 %) |
+
+5-7 s each. It also catches the kind of fake a bad mesh made: a peak
+that jumps 50 % on one step and back on the next does not converge, and is
+flagged.
+
+What it costs: each step re-meshes and re-solves every body of the study,
+on the study's own solver: a CalculiX study runs ccx once a step.
+On the hole and the fillet that is a few seconds a step. A pin-supported
+study solves on the CPU (the GPU declines a pin) once per contact round,
+and a shaft is often ONE cylindrical face under its pins and its loads, so
+halving that face refines the whole shaft: the woodcutter's camshaft
+crank end took 9 s at its generator's 2 mm and 9 minutes at 1 mm. That is
+why the default is `auto`: it reports such a study unconverged with its
+reason instead of making every run wait.
+
+The woodcutter's leaned-on pin studies (crank end, crank, handle pin) do
+not settle within a 300 s step: the crank's von Mises away from its pins
+moves 3 % on its second refinement (66.2, 66.0, 64.0 MPa), but its stress
+across the layers and the other two parts' peaks move 15-85 % a step. The
+peaks they chase are not a support's rim: a compression-only pin's
+contact ends inside its band, and the camshaft's hand load is a band that
+runs to the shaft's end, where its across-layers peak sits (13.6 MPa at
+2 mm, 25.2 at 1 mm). Neither edge is a support's, so neither is read
+away, and the result says "not converged" with the step it stopped at. A static
+study of a topology result solves the result's own tets, which cannot be
+refined, and reports "not checked" with that reason.
 
 ## The solver
 
@@ -998,15 +1163,15 @@ verb that names a study for context (`add_load`, `add_refinement`,
 |---|---|
 | `add_study {type?, name?}` | `type`: static \| modal \| topology (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes` (a modal study's: refused on another unless the same call sets `type: modal`, which is applied first), `participants`, `load_cases`, `shape_from`, and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's: refused on another unless the same call sets `type: modal`, which is applied first), `participants`, `load_cases`, `shape_from`, and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
-| `run_study {id, async?, recompute?, outlive_client?, timeout_s?}` | mesh + solve; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)) |
+| `run_study {id, async?, recompute?, outlive_client?, timeout_s?, converge?, layer_normal?}` | mesh + solve, and on a static study settle its peak ([a peak that has settled](#a-peak-that-has-settled)): `converge` overrides the study's for this run, `layer_normal` is the build direction whose across-layers peak a printed part's check settles; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)) |
 | `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static study would run, meshed now, no ccx needed ([the deck](#the-deck)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety and `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers and its factor of safety ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` |
 | `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `case`: which load case a static study shows |
@@ -1041,6 +1206,18 @@ verb that names a study for context (`add_load`, `add_refinement`,
   refusals (a flat face, one free pin, two on one axis, a load that lifts
   the part off, modal and topology); the iterative solve against the
   direct one, and the GPU declining.
+- `tests/test_fem_converge.cpp` (`[converge]`, `[mesher]`): Netgen's
+  property table left empty after a mesh, a failed one included, a shape
+  refined then meshed plain giving the plain mesh, and two meshes at once
+  each giving its own; the hole plate's bore refined to 0.3, 0.2 and 0.15
+  mm meshing with no tet worse than 0.1 and reading 24.55 MPa within 1 %
+  (`[slow]`); the hole and the fillet converging within 1 % of their
+  converged values and their handbooks' tolerance in at most three
+  refinements; `never` not checked and `auto` stopping for time; a clamped
+  cantilever settling away from its clamp; the clamp's away value within 3
+  % across auto, 1.5 and 0.75 mm (`[slow]`); a support's reach; the stress
+  across layers read away from a clamp, before and after the result is cut
+  to its surface.
 - `tests/fem_smoke.py`, `tests/fem_async_smoke.py`: the RPC surface
   headless, including an assembly tab; the async one also a reused run, a
   job's status by id and a cancel by id. Both skip (exit 77) on a build without
@@ -1063,7 +1240,8 @@ verb that names a study for context (`add_load`, `add_refinement`,
   [CalculiX](#calculix), not by growing this solver past linear
   ([the plan](../plans/calculix-bridge.md)).
 - Free-free modal analysis (a modal study needs a support).
-- Shell and beam elements; adaptive refinement.
+- Shell and beam elements; adaptive refinement over the whole field (the
+  convergence check refines only the faces its peaks lie on).
 - Defeaturing for analysis. Mesh size is set by the smallest features, so a
   whole cabinet of 16 mm panels with fastener holes meshes to millions of
   DOF; per-panel studies are the practical route until holes can be
