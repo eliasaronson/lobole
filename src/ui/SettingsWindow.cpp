@@ -12,6 +12,7 @@
 #include "core/Units.h"
 #include "core/cam/CamMachine.h"
 #include "core/cam/CamPost.h"
+#include "core/fem/Calculix.h"
 #include "core/io/Keymap.h"
 #include "core/io/Serialization.h" // the machine store
 #include "core/io/Settings.h"
@@ -1279,6 +1280,7 @@ const char* SectionIcon(const std::string& section) {
       {"Navigation", ICON_FA_COMPUTER_MOUSE},
       {"Performance", ICON_FA_GAUGE_HIGH},
       {"Sharing", ICON_FA_CODE_BRANCH},
+      {"Simulation", ICON_FA_CHART_AREA},
   };
   for (const auto& [name, icon] : kIcons)
     if (section == name)
@@ -1354,6 +1356,19 @@ bool DrawRow(AppState& state, const settings::Field& f) {
       ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s",
                          state.gpuPreferenceNote.c_str());
     }
+    ImGui::PopTextWrapPos();
+  } else if (std::string(f.key) == "calculix_path") {
+    // Which ccx a CalculiX study would run now, or why there is none
+    // (docs/simulation/README.md#calculix).
+    std::string why;
+    const auto ccx = fem::FindCalculix(state.settings.calculixPath, &why);
+    DrawBlurb(f);
+    ImGui::PushTextWrapPos(0.0f);
+    if (ccx)
+      ImGui::TextDisabled("Found: CalculiX %s at %s", ccx->Version().c_str(),
+                          ccx->path.c_str());
+    else
+      ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s", why.c_str());
     ImGui::PopTextWrapPos();
   } else {
     DrawBlurb(f);

@@ -339,6 +339,49 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(rt->maxVonMises < 31.5);
   };
 
+  // The solver combo (docs/simulation/README.md#calculix): there on a
+  // static study, CalculiX choosable even where it is not found, and Run
+  // then refuses in the window, saying how to install it, starting nothing.
+  // A switch to a type CalculiX does not solve takes the study back
+  // in-house.
+  t = IM_REGISTER_TEST(engine, "sim", "calculix_is_chosen_and_refused_visibly");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    const std::string before = s_App->settings.calculixPath;
+    s_App->settings.calculixPath = "/nonexistent/lobole-test/ccx";
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_solver"));
+    ctx->ItemClick("//###ToolWindow/###study_solver");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick(
+        (std::string("//") + popup->Name + "/**/CalculiX (not found)").c_str());
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(studyId);
+    IM_CHECK(st != nullptr && st->solver == fem::Solver::Calculix);
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    ctx->Yield(2);
+    st = Doc()->FindStudy(studyId);
+    IM_CHECK(st->error.find("calculix_path setting") != std::string::npos);
+    IM_CHECK(st->error.find("sudo apt install calculix-ccx") !=
+             std::string::npos);
+    IM_CHECK(!ui::BackgroundJobRunning(*s_App, "study"));
+    IM_CHECK(Doc()->StudyResults(studyId) == nullptr);
+
+    ctx->ItemClick("//###ToolWindow/###study_analysis");
+    ctx->Yield();
+    popup = ctx->UiContext->OpenPopupStack.back().Window;
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Modal").c_str());
+    ctx->Yield(2);
+    st = Doc()->FindStudy(studyId);
+    IM_CHECK(st->type == fem::AnalysisType::Modal);
+    IM_CHECK(st->solver == fem::Solver::Auto);
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###study_solver"));
+    s_App->settings.calculixPath = before;
+  };
+
   // Load cases (docs/topopt/README.md#load-cases), clicked: the first case
   // takes the force there is, a force placed while a second is chosen goes
   // in it, and the run answers each case, the viewport showing the one

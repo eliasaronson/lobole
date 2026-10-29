@@ -11,6 +11,7 @@
 #include "core/Measure.h"
 #include "core/Requirements.h"
 #include "core/features/DatumAxisFeature.h"
+#include "core/fem/Calculix.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -38,6 +39,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
 #include <cstdio>
 #include <functional>
 #include <optional>
@@ -978,6 +980,13 @@ void DrawResults(AppState& state, const fem::Study& s) {
     ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION);
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("%s", s.error.c_str());
+    // A CalculiX study's refusal is read, not hovered for: it says how to
+    // install the solver, or what the solver said.
+    if (s.solver == fem::Solver::Calculix) {
+      ImGui::PushStyleColor(ImGuiCol_Text, kError);
+      ImGui::TextWrapped("%s", s.error.c_str());
+      ImGui::PopStyleColor();
+    }
   }
 
   DrawReuseNote(s.id);
@@ -1339,6 +1348,60 @@ void DrawKeepOuts(AppState& state, const fem::Study& s) {
                       "removed before the run.");
 }
 
+// The ccx this machine has, asked at most every two seconds: the combo is
+// drawn every frame, and finding it walks PATH.
+const std::optional<fem::CalculixInstall>& CalculixHere(const AppState& state,
+                                                        std::string* why) {
+  static std::optional<fem::CalculixInstall> found;
+  static std::string whyNot, forSetting;
+  static std::chrono::steady_clock::time_point asked{};
+  const auto now = std::chrono::steady_clock::now();
+  if (asked == std::chrono::steady_clock::time_point{} ||
+      now - asked > std::chrono::seconds(2) ||
+      forSetting != state.settings.calculixPath) {
+    asked = now;
+    forSetting = state.settings.calculixPath;
+    whyNot.clear();
+    found = fem::FindCalculix(forSetting, &whyNot);
+  }
+  if (why)
+    *why = whyNot;
+  return found;
+}
+
+// Which program solves the study (docs/simulation/README.md#calculix), shown
+// only where there is a choice: a static study can be solved on CalculiX
+// too; modal and topology are in-house only. CalculiX stays choosable when
+// it is not installed -- Run then refuses with how to install it, rather
+// than the choice vanishing.
+void DrawSolverCombo(AppState& state, const fem::Study& s) {
+  if (s.type != fem::AnalysisType::Static && s.solver != fem::Solver::Calculix)
+    return;
+  std::string why;
+  const auto& ccx = CalculixHere(state, &why);
+  const std::string calculix =
+      ccx ? "CalculiX " + ccx->Version() : std::string("CalculiX (not found)");
+  const char* labels[] = {"Auto (in-house)", "In-house", calculix.c_str()};
+  int idx = s.solver == fem::Solver::InHouse    ? 1
+            : s.solver == fem::Solver::Calculix ? 2
+                                                : 0;
+  LeftLabel("Solver");
+  if (ImGui::Combo("###study_solver", &idx, labels, 3)) {
+    const fem::Solver ns = idx == 1   ? fem::Solver::InHouse
+                           : idx == 2 ? fem::Solver::Calculix
+                                      : fem::Solver::Auto;
+    if (ns != s.solver)
+      ModifyStudy(state, s.id, "Set solver",
+                  [&](fem::Study& cs) { cs.solver = ns; });
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("%s",
+                      ccx ? "CalculiX solves the same mesh and loads as a "
+                            "second, independent answer; its displacement "
+                            "is checked against this study's own stiffness."
+                          : why.c_str());
+}
+
 void DrawStudyBody(AppState& state, const fem::Study* s) {
   ImGui::Spacing();
   char name[128];
@@ -1361,8 +1424,14 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
     const auto nt = typeIdx == 1   ? fem::AnalysisType::Modal
                     : typeIdx == 2 ? fem::AnalysisType::Topology
                                    : fem::AnalysisType::Static;
-    ModifyStudy(state, s->id, "Set analysis type",
-                [&](fem::Study& cs) { cs.type = nt; });
+    // CalculiX solves static studies only: a study switched to another
+    // type goes back to the in-house solver with it, in the same step,
+    // rather than becoming a study no file could hold.
+    ModifyStudy(state, s->id, "Set analysis type", [&](fem::Study& cs) {
+      cs.type = nt;
+      if (!fem::SolverRefusal(cs.solver, cs.type).empty())
+        cs.solver = fem::Solver::Auto;
+    });
     // The displayed field belongs to the analysis that produced it. Leaving
     // "von Mises" selected across a switch to Topology left a colorbar on
     // screen titled von Mises with a 0 MPa maximum — a legend for a field
@@ -1370,6 +1439,7 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
     state.simulation.field = SimulationState::Field::None;
     state.simulation.activeMode = 0;
   }
+  DrawSolverCombo(state, *s);
   // Numeric fields commit on deactivation (Enter OR clicking away), not only on
   // Enter — so typing a value then clicking Run applies it instead of
   // reverting.

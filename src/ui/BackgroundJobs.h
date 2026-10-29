@@ -133,6 +133,9 @@ struct JobStart {
   uint64_t owner = 0;
   uint64_t jobId = 0;
   bool reused = false;
+  // A CalculiX run's deadline (run_study timeout_s; 0 = none): past it the
+  // solver is killed and the run refused (docs/simulation/README.md#calculix).
+  double timeoutSeconds = 0.0;
 };
 
 } // namespace ui

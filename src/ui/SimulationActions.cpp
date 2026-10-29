@@ -8,9 +8,12 @@
 #include "ui/StudyHost.h"
 
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/MassProps.h"
+#include "core/Parallel.h"
+#include "core/fem/Calculix.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "render/Camera.h"
@@ -104,6 +107,74 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
   return true;
 }
 
+bool CalculixRunFor(const AppState& state, const fem::Study& s,
+                    double timeoutSeconds, fem::SolveOptions& options,
+                    std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (const std::string why = fem::SolverRefusal(s.solver, s.type);
+      !why.empty())
+    return fail(why);
+  if (s.solver != fem::Solver::Calculix) {
+    if (timeoutSeconds > 0)
+      return fail("timeout_s bounds a CalculiX run, and this study is solved "
+                  "in-house (set_study solver: calculix to run it on "
+                  "CalculiX)");
+    options.calculix = nullptr;
+    return true;
+  }
+  std::string why;
+  const auto ccx = fem::FindCalculix(state.settings.calculixPath, &why);
+  if (!ccx)
+    return fail(why);
+  auto run = std::make_shared<fem::CalculixRun>();
+  run->ccx = *ccx;
+  run->runRoot = (RuntimePaths::UserCacheDir() / "calculix").string();
+  run->threads = static_cast<int>(parallel::MachineWorkers());
+  run->timeoutSeconds = timeoutSeconds;
+  options.calculix = std::move(run);
+  return true;
+}
+
+bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
+                      std::string* error, double timeoutSeconds) {
+  fem::Study* s = doc.StudyForRun(studyId);
+  if (!s) {
+    if (error)
+      *error = "no such study";
+    return false;
+  }
+  fem::SolveOptions options;
+  if (!CalculixRunFor(state, *s, timeoutSeconds, options, error)) {
+    s->error = error ? *error : "";
+    return false;
+  }
+  if (!options.calculix)
+    return RunStudyAndCache(doc, studyId, error);
+  // On CalculiX: the in-house pipeline up to the solve, then ccx.
+  const uint64_t inputHash = fem::StudyInputKey(doc, *s);
+  fem::StudyJobInput input;
+  fem::StudyRuntime rt;
+  if (!fem::PrepareStudy(doc, *s, input, error))
+    return false;
+  options.cancelled = state.rpcCallerGone;
+  const auto started = std::chrono::steady_clock::now();
+  if (!fem::SolvePreparedStudy(input, rt, error, options)) {
+    s->error = error ? *error : "solve failed";
+    return false;
+  }
+  rt.solvedAtVersion = doc.Version();
+  rt.inputHash = inputHash;
+  rt.solveSeconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
+          .count();
+  doc.StoreStudyResults(studyId, std::move(rt));
+  return true;
+}
+
 uint64_t StudyInputHash(AppState& state, const Document* doc,
                         const AssemblyDocument* asmDoc, uint64_t studyId) {
   if (doc != nullptr) {
@@ -187,6 +258,17 @@ fem::SolveOptions JobSolveOptions(const AppState& state, BackgroundJob* raw,
   (void)state;
 #endif
   return o;
+}
+
+// A CalculiX run that tells `job` its memory estimate, for study_status.
+std::shared_ptr<const fem::CalculixRun>
+WithEstimateTo(const std::shared_ptr<const fem::CalculixRun>& run,
+               StudyJob* job) {
+  if (!run)
+    return nullptr;
+  auto told = std::make_shared<fem::CalculixRun>(*run);
+  told->estimated = [job](uint64_t bytes) { job->memoryEstimate.store(bytes); };
+  return told;
 }
 
 // The solver a result records: the one that ran, which a static solve
@@ -458,6 +540,14 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
       BackgroundJobRunning(state, "study") ||
       BackgroundJobRunning(state, "check"))
     return fail("a study run is already in progress");
+  // The solver, before anything starts: a CalculiX study with no ccx is
+  // refused here, saying how to install one, and the panel shows why.
+  fem::SolveOptions calculix;
+  if (!CalculixRunFor(state, *s, jobStart ? jobStart->timeoutSeconds : 0.0,
+                      calculix, error)) {
+    s->error = error ? *error : "";
+    return false;
+  }
   const uint64_t inputHash = fem::StudyInputKey(doc, *s);
 
   // Plan on this thread — expressions, face refs, materials need the
@@ -483,6 +573,7 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   BackgroundJob* raw = bg.get();
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
+  solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get());
   bg->thread = std::thread([job, raw, solveOptions]() {
     ArmOccSignalHandlers(); // OCC's handlers are per thread
     std::string err;
@@ -746,6 +837,7 @@ StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
   // here before the thread starts and the worker only reads it.
   const char* now = job->solverNow.load();
   st.solver = now != nullptr ? now : fem::CpuSolverName(job->plan.type);
+  st.memoryEstimateBytes = job->memoryEstimate.load();
   return st;
 }
 
@@ -1046,9 +1138,18 @@ bool PlanForRun(AppState& state, AssemblyDocument& asmDoc, uint64_t studyId,
 } // namespace
 
 bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
-                              uint64_t studyId, std::string* error) {
+                              uint64_t studyId, std::string* error,
+                              double timeoutSeconds) {
   fem::StudyPlan plan;
   fem::Study* s = nullptr;
+  fem::SolveOptions options;
+  if (fem::Study* found = asmDoc.FindStudy(studyId);
+      found != nullptr &&
+      !CalculixRunFor(state, *found, timeoutSeconds, options, error)) {
+    found->error = error ? *error : "";
+    return false;
+  }
+  options.cancelled = state.rpcCallerGone;
   if (!PlanForRun(state, asmDoc, studyId, plan, &s, error))
     return false;
   const auto partVersions = AssemblyStudyPartVersions(state, asmDoc, *s);
@@ -1058,7 +1159,7 @@ bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
   fem::StudyRuntime rt;
   std::string err;
   if (!fem::MeshPlannedStudy(plan, input, &err) ||
-      !fem::SolvePreparedStudy(input, rt, &err)) {
+      !fem::SolvePreparedStudy(input, rt, &err, options)) {
     s->error = err;
     if (error)
       *error = err;
@@ -1088,6 +1189,14 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
       BackgroundJobRunning(state, "study") ||
       BackgroundJobRunning(state, "check"))
     return fail("a study run is already in progress");
+  fem::SolveOptions calculix;
+  if (fem::Study* found = asmDoc.FindStudy(studyId);
+      found != nullptr &&
+      !CalculixRunFor(state, *found, jobStart ? jobStart->timeoutSeconds : 0.0,
+                      calculix, error)) {
+    found->error = error ? *error : "";
+    return false;
+  }
   auto job = std::make_shared<StudyJob>();
   fem::Study* s = nullptr;
   if (!PlanForRun(state, asmDoc, studyId, job->plan, &s, error))
@@ -1108,6 +1217,7 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
   BackgroundJob* raw = bg.get();
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
+  solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get());
   bg->thread = std::thread([job, raw, solveOptions]() {
     ArmOccSignalHandlers();
     std::string err;

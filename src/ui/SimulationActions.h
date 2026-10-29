@@ -37,6 +37,9 @@ struct StudyRunStatus {
   bool running = false;
   double elapsedSeconds = 0.0;
   const char* solver = ""; // fem::CpuSolverName of the running study's type
+  // A CalculiX run's memory estimate (bytes) once its mesh said how big it
+  // is; 0 otherwise (docs/simulation/README.md#calculix).
+  uint64_t memoryEstimateBytes = 0;
 };
 
 // Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter
@@ -67,8 +70,10 @@ AssemblyStudyPartVersions(AppState& state, const AssemblyDocument& asmDoc,
 bool AssemblyStudyStale(AppState& state, const AssemblyDocument& asmDoc,
                         uint64_t studyId);
 // Plan + mesh + solve on this thread, stamping and storing the result.
+// `timeoutSeconds` bounds a CalculiX run (0 = none).
 bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
-                              uint64_t studyId, std::string* error);
+                              uint64_t studyId, std::string* error,
+                              double timeoutSeconds = 0.0);
 // The same on a worker: the plan (imprint included) is made here, the mesh
 // and solve run on the thread, and the result lands on the assembly tab it
 // was started from when the job is reaped.
@@ -95,6 +100,21 @@ void ResetSimulationDisplay(AppState& state);
 // failure — the one source of truth shared by the panel Run button and the
 // run_study RPC. Defined in AppActions.cpp.
 bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error);
+// The same with what a CalculiX study needs from the app (the solver found,
+// its cache directory) and `timeoutSeconds` (0 = none; CalculiX runs only).
+bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
+                      std::string* error, double timeoutSeconds);
+
+// The CalculiX run study `s` needs (docs/simulation/README.md#calculix),
+// into `options`: nothing for an in-house study; for a CalculiX one, the
+// ccx found (the calculix_path setting, LOBOLE_CCX, beside the executable,
+// PATH), its run directory under the cache, the thread budget and
+// `timeoutSeconds`. False with `error` when it is refused: a solver that
+// cannot solve this type, no ccx (naming every way to install it), or a
+// timeout on an in-house study. Nothing is started either way.
+bool CalculixRunFor(const AppState& state, const fem::Study& s,
+                    double timeoutSeconds, fem::SolveOptions& options,
+                    std::string* error);
 
 // --- Results keyed by inputs (docs/simulation/README.md#studies-as-jobs) ---
 //
