@@ -20,6 +20,15 @@ checks after it are the ones a broken package has failed before:
 `--version` also checks that `CMD --version` names the version being
 released, so a tag cannot ship a binary built from another one.
 
+`--calculix` (a package that bundles ccx: the GUI AppImage, the Windows zip)
+checks that `ping` finds the copy shipped beside the app, not a host's, and
+that it solves (docs/packaging/README.md#the-bundled-calculix):
+
+- with Netgen in the build, a bar pulled along its length is solved as a
+  static study on CalculiX and in-house, and the two must agree;
+- without it (Windows), the ccx `ping` named runs a one-element deck, a unit
+  cube in uniform tension, whose answer is exact.
+
 `--system-faults` (Windows, run by packaging/windows/smoke.sh) checks the
 crash handler with faults in the system's own code, on a worker thread,
 through `debug_crash` (docs/architecture.md#crashes-and-stalls):
@@ -37,8 +46,10 @@ import math
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent /
@@ -86,6 +97,134 @@ def check_models(port):
         sys.exit(f"FAIL: a circle constrained to r 2, extruded 2 mm, is "
                  f"{vol:.4f} mm³, not {8 * math.pi:.4f}: the sketch solver "
                  "is not working in this build")
+
+
+# A unit cube of one C3D8 element in uniform tension, held on three faces
+# only as symmetry needs: E 1000 MPa, nu 0.3, 1 N over the top. The stress
+# is uniform, so the full-integration hex is exact: the top rises 1e-3 mm
+# and the far corner moves in by 3e-4 mm in x and y.
+CUBE_DECK = """*NODE, NSET=NALL
+1, 0, 0, 0
+2, 1, 0, 0
+3, 1, 1, 0
+4, 0, 1, 0
+5, 0, 0, 1
+6, 1, 0, 1
+7, 1, 1, 1
+8, 0, 1, 1
+*ELEMENT, TYPE=C3D8, ELSET=EALL
+1, 1, 2, 3, 4, 5, 6, 7, 8
+*BOUNDARY
+1, 1, 3
+2, 2, 3
+3, 3, 3
+4, 1, 1
+4, 3, 3
+*MATERIAL, NAME=M
+*ELASTIC
+1000., 0.3
+*SOLID SECTION, ELSET=EALL, MATERIAL=M
+*STEP
+*STATIC
+*CLOAD
+5, 3, 0.25
+6, 3, 0.25
+7, 3, 0.25
+8, 3, 0.25
+*NODE PRINT, NSET=NALL
+U
+*END STEP
+"""
+
+
+def bundled_ccx(path):
+    """Whether `path` is the ccx a package ships beside the app:
+    <prefix>/lib/lobole/ccx, or ccx.exe beside lobole.exe."""
+    p = path.replace("\\", "/")
+    return p.endswith("/lib/lobole/ccx") or p.lower().endswith("/bin/ccx.exe")
+
+
+def check_calculix_study(c, ccx):
+    c.call("new_project")
+    fid = c.call("add_feature", feature={
+        "type": "Box", "name": "Bar", "on": "Top", "width": 10, "height": 10,
+        "depth": 60})["id"]
+    c.call("set_material", feature_id=fid, material="steel")
+    els = c.call("list_elements")["bodies"][0]
+    faces = {}
+    for f in els["faces"]:
+        n = f["normal"]
+        if abs(abs(n[2]) - 1) < 1e-6:
+            faces[n[2] > 0] = f["name"]
+    if len(faces) != 2:
+        sys.exit(f"FAIL: the bar's two ends were not found: {els['faces']}")
+
+    def solve(solver):
+        sid = c.call("add_study", name=solver)["id"]
+        c.call("set_study", id=sid, mesh_size=5.0, solver=solver)
+        c.call("add_load", study=sid, type="fixed",
+               face={"feature_id": els["created_by"], "element": faces[False]})
+        c.call("add_load", study=sid, type="force",
+               face={"feature_id": els["created_by"], "element": faces[True]},
+               magnitude=1000.0, direction=[0, 0, 1])
+        return c.call("run_study", id=sid,
+                      **({"timeout_s": 300} if solver == "calculix" else {}))
+
+    own = solve("in_house")
+    theirs = solve("calculix")
+    if theirs.get("solver") != f"calculix {ccx['version']}":
+        sys.exit(f"FAIL: the study was not solved on the bundled ccx: "
+                 f"{theirs.get('solver')}")
+    a = own["max_displacement_mm"]["value"]
+    b = theirs["max_displacement_mm"]["value"]
+    if not a > 0 or abs(a - b) / a > 1e-5:
+        sys.exit(f"FAIL: CalculiX moved the bar's end {b} mm, in-house {a}")
+    return f"a static study on it agrees with in-house to {abs(a - b) / a:.1e}"
+
+
+def check_calculix_deck(launcher, ccx):
+    """Run the ccx the app named on CUBE_DECK, through the same launcher the
+    app was started with (wine, for a Windows path)."""
+    work = tempfile.mkdtemp(prefix="lobole-ccx-smoke-")
+    try:
+        with open(os.path.join(work, "cube.inp"), "w") as f:
+            f.write(CUBE_DECK)
+        run = subprocess.run(launcher + [ccx["path"], "-i", "cube"], cwd=work,
+                             capture_output=True, text=True, timeout=300)
+        dat = os.path.join(work, "cube.dat")
+        if run.returncode != 0 or "*ERROR" in run.stdout or \
+                not os.path.exists(dat):
+            sys.exit(f"FAIL: the bundled ccx did not run a deck "
+                     f"({run.returncode}): {(run.stdout + run.stderr)[-800:]}")
+        u = {}
+        for line in open(dat, encoding="utf-8", errors="replace"):
+            parts = line.split()
+            if len(parts) == 4 and parts[0].isdigit():
+                u[int(parts[0])] = [float(v) for v in parts[1:]]
+        want = [-3e-4, -3e-4, 1e-3]
+        got = u.get(7)
+        if got is None or any(abs(g - w) > 1e-9 for g, w in zip(got, want)):
+            sys.exit(f"FAIL: the bundled ccx moved the cube's far corner "
+                     f"{got}, not {want}")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return "it solves a unit cube in tension exactly"
+
+
+def check_calculix(port, launcher):
+    c = Client(port)
+    ping = c.call("ping")
+    ccx = ping.get("features", {}).get("calculix")
+    if not ccx:
+        sys.exit("FAIL: ping finds no ccx; the package should bundle one")
+    if not bundled_ccx(ccx["path"]):
+        sys.exit(f"FAIL: ping finds {ccx['path']}, not the ccx shipped "
+                 "beside the app")
+    if ping.get("features", {}).get("mesher"):
+        how = check_calculix_study(c, ccx)
+    else:
+        how = check_calculix_deck(launcher, ccx)
+    return f"finds the bundled ccx {ccx['version']} ({ccx['path']}); {how}"
 
 
 def start(cmd, port, env=None):
@@ -179,6 +318,9 @@ def main():
     ap.add_argument("--system-faults", action="store_true",
                     help="check faults in system code on a worker thread "
                          "(Windows) instead of modeling")
+    ap.add_argument("--calculix", action="store_true",
+                    help="the package bundles ccx: ping must find that copy, "
+                         "and it must solve")
     ap.add_argument("cmd", nargs="*", help="the app's command line")
     args = ap.parse_args()
     if args.attach == bool(args.cmd):
@@ -206,11 +348,15 @@ def main():
         if ping.get("app") != "lobole":
             sys.exit(f"FAIL: port {args.port} is not Loböle: {ping}")
         check_models(args.port)
+        solver = (check_calculix(args.port, args.cmd[:-1])
+                  if args.calculix else None)
     finally:
         if proc is not None:
             stop(proc)
     print(f"release-smoke: {' '.join(args.cmd) or f'port {args.port}'} "
           f"answers, models a box and solves a sketch")
+    if solver:
+        print(f"release-smoke: CalculiX: {solver}")
 
 
 if __name__ == "__main__":
