@@ -47,12 +47,21 @@ def load_mcp_constants():
 
     mcpserver.MCPServer = _MCPServer
     mcpserver.Image = object
+    # ...and `from mcp.server.mcpserver.exceptions import ToolError, ...`,
+    # which needs the stand-in to be a package.
+    mcpserver.__path__ = []
+    exceptions = types.ModuleType("mcp.server.mcpserver.exceptions")
+    exceptions.ToolError = type("ToolError", (Exception,), {})
+    exceptions.UnexpectedToolError = type("UnexpectedToolError",
+                                          (Exception,), {})
+    mcpserver.exceptions = exceptions
     server = types.ModuleType("mcp.server")
     server.mcpserver = mcpserver
     mcp = types.ModuleType("mcp")
     mcp.server = server
     sys.modules.update({"mcp": mcp, "mcp.server": server,
-                        "mcp.server.mcpserver": mcpserver})
+                        "mcp.server.mcpserver": mcpserver,
+                        "mcp.server.mcpserver.exceptions": exceptions})
     import lobole.mcp
     return lobole.mcp
 
