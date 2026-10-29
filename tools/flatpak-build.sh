@@ -28,10 +28,14 @@ if [[ "${1:-}" == "--run" ]]; then
   exec nix-shell -p flatpak --run "flatpak --user run $APP_ID ${*:2}"
 fi
 
+# Jobs by free memory, not cores (tools/build-jobs): flatpak-builder runs
+# one compiler per core otherwise.
+JOBS="$("$REPO/tools/build-jobs")"
+
 exec nix-shell -p flatpak flatpak-builder appstream --run "bash -euc '
   flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
   flatpak-builder \
-    --user --force-clean --ccache \
+    --user --force-clean --ccache --jobs=$JOBS \
     --install-deps-from=flathub \
     --state-dir=\"$STATEDIR\" \
     --install \
