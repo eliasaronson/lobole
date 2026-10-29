@@ -15,8 +15,10 @@
 // and its TAIL is handed back, because a non-zero exit with no words is the
 // refusal nobody can act on.
 //
-// POSIX spawns with posix_spawn and a pipe; Windows runs the resolved program
-// through _popen with the arguments quoted for cmd.exe.
+// POSIX spawns with posix_spawn and a pipe; Windows with CreateProcessW and a
+// pipe, the arguments quoted for the C runtime's argv parser. Either way there
+// is a process to poll and to end, so a solver's deadline and its cancel
+// interrupt it on both (docs/simulation/README.md#calculix).
 
 #include <cstdint>
 #include <string>
@@ -29,6 +31,12 @@ namespace proc {
 // is not there. Read at every call: PATH is the environment's, not the
 // build's.
 std::string FindOnPath(const std::string& name);
+
+// This process's id, as Pid() reports a child's.
+long CurrentPid();
+// Whether a process with this id is running now. A pid the system no longer
+// knows is not; one that exists but this user may not inspect is.
+bool ProcessAlive(long pid);
 
 // How a child is started beyond its arguments: a solver that writes its
 // files beside its input runs in a directory of its own, says what it has
@@ -54,14 +62,14 @@ public:
   bool Start(const std::string& program, const std::vector<std::string>& args,
              std::string* error, const ChildOptions& options = {});
   // Whether it has ended, without waiting: true once it has, with its exit
-  // code in `code` (-1 when it died of a signal), and it is then reaped as
-  // Finish would. On Windows, where _popen gives no process to poll, this
-  // waits for it.
+  // code in `code` (-1 when it died of a signal, or on Windows of an
+  // exception), and it is then reaped as Finish would.
   bool Poll(int* code);
-  // The process id while it runs (0 when there is none, and on Windows).
+  // The process id while it runs (0 when there is none).
   long Pid() const;
   // The most memory it held at once, in bytes, once it has been reaped by
-  // Poll or Finish (0 where the platform does not say).
+  // Poll or Finish: its peak resident set, on Windows its peak working set
+  // (0 where the platform does not say, as Wine does not).
   uint64_t PeakBytes() const { return m_peakBytes; }
   // Write all of `n` bytes to its stdin. False once the child has gone away
   // (it exited, or closed its input): the caller stops and reads Finish.
@@ -83,7 +91,10 @@ private:
   uint64_t m_peakBytes = 0;
   std::string m_stderrPath;
 #if defined(_WIN32)
-  void* m_pipe = nullptr; // FILE*
+  void* m_stdin = nullptr;   // HANDLE: our end of its input pipe
+  void* m_process = nullptr; // HANDLE
+  long m_pid = 0;
+  bool Reap(bool block);
 #else
   int m_stdin = -1;
   int m_pid = -1;

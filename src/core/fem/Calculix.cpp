@@ -27,11 +27,6 @@
 #include <sstream>
 #include <thread>
 
-#if !defined(_WIN32)
-#include <csignal>
-#include <unistd.h>
-#endif
-
 namespace fs = std::filesystem;
 
 namespace fem {
@@ -54,13 +49,7 @@ std::string CalculixInstallSentence() {
 
 namespace {
 
-long ThisPid() {
-#if defined(_WIN32)
-  return 0;
-#else
-  return static_cast<long>(::getpid());
-#endif
-}
+long ThisPid() { return proc::CurrentPid(); }
 
 std::string ReadFile(const fs::path& p) {
   std::ifstream in(p, std::ios::binary);
@@ -653,7 +642,6 @@ std::string FirstCalculixError(const std::string& text) {
 }
 
 void SweepDeadRunDirs(const std::string& root) {
-#if !defined(_WIN32)
   std::error_code ec;
   if (!fs::is_directory(root, ec))
     return;
@@ -663,12 +651,9 @@ void SweepDeadRunDirs(const std::string& root) {
     const long pid = std::strtol(name.c_str(), &end, 10);
     if (pid <= 0 || end == name.c_str() || *end != '-' || pid == ThisPid())
       continue;
-    if (::kill(static_cast<pid_t>(pid), 0) != 0 && errno == ESRCH)
+    if (!proc::ProcessAlive(pid))
       fs::remove_all(entry.path(), ec);
   }
-#else
-  (void)root;
-#endif
 }
 
 namespace {
