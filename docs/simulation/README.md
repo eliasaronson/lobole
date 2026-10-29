@@ -681,6 +681,173 @@ against the yield, stops the run. The Strandbeest's crank pins, handle,
 joint pins and frame pivots (under its legs' statics), the clock's barrel
 arbor and the engine's wrist pin state theirs in their receipts.
 
+## CalculiX
+
+A static study can be solved on CalculiX (`ccx`) instead of in-house:
+`set_study {solver: calculix}`, or the panel's **Solver** combo. It is the
+same study -- the same Netgen mesh, loads, supports and materials, the same
+results and checks -- answered by a second, independent program. The code is
+`src/core/fem/Calculix.{h,cpp}`. Buckling and nonlinear analysis are what the
+bridge was built for and are not built yet
+([the plan](../plans/calculix-bridge.md)).
+
+### The solver choice
+
+A study's `solver` is `auto`, `in_house` or `calculix` (`fem::Solver`;
+absent from the file when `auto`, vNEXT). `auto` and `in_house` solve every
+analysis in-house. `calculix` solves a **static** study only: on a modal or
+topology study it is refused (`fem::SolverRefusal`) by `set_study`, by the
+panel, by the file reader and by the run, never quietly solved in-house. The
+serialized study carries the key, so the input hash moves with it only when it
+is not `auto`: every result saved before keeps its hash.
+
+### Finding ccx
+
+`fem::FindCalculix` looks, in order:
+
+1. the `calculix_path` setting (Preferences > Simulation, which shows the
+   version found);
+2. `LOBOLE_CCX`;
+3. a `ccx` shipped beside the app (`<prefix>/lib/lobole/ccx`, or `ccx.exe`
+   beside `lobole.exe`);
+4. `ccx` on PATH.
+
+It runs `ccx -v` once per path, size and modification time, reads "This is
+Version 2.NN", and refuses anything older than 2.21, the oldest version the
+suites run (Ubuntu 24.04's; the Nix shell has 2.23). A path the setting or
+`LOBOLE_CCX` names is the one asked for: when it is not a ccx it is refused by
+name, never passed over for the next. `ping`'s `features.calculix` is `{path,
+version}` of the ccx a study would run now, or null. With none, `run_study`
+is refused before anything starts, in one sentence naming every way to get
+one: `sudo apt install calculix-ccx`, Nix's `calculix-ccx`, the dhondt.de
+Windows zip, or the setting. Opening a project and reading a saved CalculiX
+result never need ccx; a run whose inputs match a stored result is answered
+from it, as any run is.
+
+### The deck
+
+The bridge reuses everything up to the solve, so a load means exactly what it
+means in-house: `PlanStudy` on the main thread, `MeshPlannedStudy` on the
+worker, and the `StudyJobBody` it makes. `fem::WriteDeck` writes, per body
+and load case:
+
+| ours | `.inp` |
+|---|---|
+| nodes (mm), tet10 | `*NODE`; `*ELEMENT, TYPE=C3D10`, one ELSET per `tetDomain` (an assembly's bonded members). The node order is ours; a tet Netgen orients negatively has its corners 1 and 2 swapped, with their midsides |
+| material per domain | `*MATERIAL` / `*ELASTIC` (MPa) / `*DENSITY` (t/mm³) / `*SOLID SECTION` |
+| force, pressure, torque, remote load, region, gravity | the nodal forces the in-house solve applies (`fem::NodalForces`: the same Gauss rules), as `*CLOAD`; every load kind and `region` maps identically |
+| fixed (and a rigid participant's clamp) | `*BOUNDARY n, 1, 3` |
+| pin: a node held radially and axially in its own frame | the pin's nodes in a cylindrical `*TRANSFORM` about its axis, the held directions as `*BOUNDARY` in it, and those nodes' loads given in it |
+| pin `fix_rotation` (`fem::Tie`) | one `*EQUATION` over the tangential directions, the tie's own coefficients, its largest first |
+| output | `*NODE PRINT, GLOBAL=YES` U to the `.dat`, and `*NODE FILE` U to the `.frd` for a person to look at |
+
+A pin pushes and never pulls, so which of its facets it holds is found by the
+in-house iteration (`SolveWithPins`) on the same loads, and that contact set is
+held in the deck (`fem::StaticSupportsOf`). A node on two pins' faces is
+refused: one node has one frame. `export_study_inp {id, path, body?, case?}`
+writes the deck a study would run, meshing it there and needing no ccx (one
+deck per body and per load case; `NotInBatch`).
+
+### Running it
+
+- **The job** is the study's own (`StartStudyRun`, or the synchronous
+  `run_study`): the worker meshes, then for each body and case writes the deck
+  and runs `ccx -i job` through `proc::PipedChild` with its working directory
+  set (`proc::ChildOptions`).
+- **The run directory** is `$XDG_CACHE_HOME/lobole/calculix/<pid>-<n>/`, never
+  inside the project. It is removed when the run succeeds or is cancelled,
+  and kept and named in the refusal when it fails. A run sweeps the
+  directories of processes that are no longer running.
+- **Threads.** `OMP_NUM_THREADS` and `CCX_NPROC_*` are the machine's worker
+  count. The nixpkgs ccx factors with SPOOLES on one core whatever they say.
+- **Cancel.** `cancel_study`, or the starting connection closing, kills the
+  process within 20 ms; its directory goes with it.
+- **Deadline.** `run_study {timeout_s}` kills ccx past it and refuses the run,
+  naming the limit. It is refused on an in-house study. Without it a run goes
+  until it is done or cancelled.
+- **Memory.** SPOOLES factorises in core, and an out-of-memory host takes the
+  agent with it, so a run whose estimate exceeds `MemAvailable` is refused
+  before ccx starts, naming both numbers. `study_status` reports
+  `memory_estimate_bytes` once the mesh is made. The estimate
+  (`fem::CalculixStaticMemoryEstimate`) is 55 MB + 166 B × DOF^1.3: a
+  direct factor of a 3D mesh fills in faster than the DOF count grows. It was
+  fitted to ccx 2.23's peak resident memory on a 10 × 10 × 200 steel column
+  meshed by our pipeline (the hidden `[calculix-calibrate]` case prints
+  them), and bounds every run from above:
+
+  | mesh | DOF | ccx peak | estimate | ccx time |
+  |---|---|---|---|---|
+  | 5 mm | 5 658 | 57 MB | 68 MB | 0.2 s |
+  | 3.5 mm | 16 029 | 62 MB | 104 MB | 0.6 s |
+  | 2.5 mm | 30 321 | 116 MB | 166 MB | 1.3 s |
+  | 1.8 mm | 65 577 | 272 MB | 358 MB | 2.6 s |
+  | 1.4 mm | 196 821 | 1.18 GB | 1.32 GB | 15.7 s |
+  | 1.2 mm | 240 717 | 1.48 GB | 1.70 GB | 20.0 s |
+- **Errors.** A ccx that writes an `*ERROR` line, or exits non-zero, is
+  refused with its first `*ERROR` line verbatim (else its last output) and the
+  run directory.
+
+### Reading the answer back
+
+Only U is read, from the `.dat`: ccx prints it with seven significant digits
+(`E13.6`; the `.frd` has six). `SolveCases` takes it as a given answer
+(`SolveOptions::given`) and holds it to the in-house rule against our own
+assembled K -- same element, same Gauss rule, the supports in the same frames:
+`‖Ku − f‖ ≤ 1e-6 ‖f‖`, plus the floor the printed precision puts under an
+exact answer, `‖|K| |u|‖ · 5e-7 / ‖f‖`. That floor is wide: seven digits
+are rounding noise of high frequency, which K amplifies, and an exact answer
+printed so leaves `‖Ku − f‖ / ‖f‖` of 1e-4 to 1 (measured below), so the norm
+alone could not tell a wrong deck from rounding. The check that can is the
+**energy balance**, `|u · (Ku − f)| ≤ 1e-6 |u · f|` plus `4 · 5e-7 · Σ|u||f|`
+over `|u · f|`: rounding moves it by `δ · f`, first order in the precision,
+and a deck that differs from the study moves it first order in the
+difference. A deck whose material is 0.1 % stiffer than the study's is
+refused by it (`[calculix]`). A direction the study holds that the answer
+moves is refused too. Then stresses, reactions, the support-edge flag,
+the largest principal stress, printed layers and probes are computed by the
+code an in-house answer goes through. A deck that differs from the study (a
+load lost, a wrong frame, a material swapped) fails this check rather than
+reading as an answer.
+
+### Results and receipts
+
+- `study_results` names `solver` ("calculix 2.23"; the result saves it, so a
+  reopened one still says so), and `calculix` {`residual`, `residual_floor`,
+  `energy_residual`} for a run this session made.
+- A CalculiX answer is a **second, independent answer, not a stronger one.**
+  Its factor of safety's receipt keeps basis `predicted`, with oracle
+  `calculix/static` and the version. When the session holds an in-house result
+  of the same study (its input hash with `solver: auto`), `study_results` adds
+  `in_house_agreement` {`max_displacement_rel`, `max_von_mises_rel`}: reported
+  beside the answer, never folded into the claim.
+
+**Measured** (`[calculix]`, the nixpkgs ccx 2.23, each study meshed once and
+solved both ways):
+
+| study | nodes | peak displacement, rel. diff. | peak von Mises, rel. diff. | ‖Ku − f‖/‖f‖ | energy |
+|---|---|---|---|---|---|
+| column, clamped, pushed sideways and weighed | 10 204 | 2.6e-7 | 2.0e-7 | 1.2 | 1.1e-6 |
+| lug on a pin held from turning (a tie) | 8 316 | 6.8e-11 | 2.9e-7 | 1.9e-3 | 8.0e-9 |
+| lever on two free pins | 8 316 | 2.3e-7 | 1.8e-6 | 4.0e-3 | 2.9e-8 |
+| shaft under a torque and a remote load | 5 835 | 1.4e-8 | 2.3e-7 | 1.3e-3 | 2.9e-9 |
+| a pull on part of a face (`region`) | 5 947 | 2.8e-7 | 2.2e-8 | 2.6e-3 | 9.6e-9 |
+| steel bonded to aluminium (assembly) | 2 353 | 1.1e-7 | 4.1e-8 | 8.1e-5 | 5.5e-9 |
+| a hand-made mesh, no Netgen | 525 | 5.7e-8 | 2.1e-7 | 4.0e-3 | 1.1e-8 |
+
+The agreement is the precision ccx prints at; the column's norm residual
+exceeds `‖f‖` because its load (100 N sideways and its weight) is small
+against the internal forces the rounding disturbs.
+
+Tests: `tests/test_fem_calculix.cpp` (`[calculix]`): the same-mesh agreement
+above; a hand-made mesh with no Netgen (which runs on every CI image);
+refusals with a stand-in ccx (a shell script) -- none found, its `*ERROR`
+line and kept directory, `timeout_s`, cancel leaving no process and no
+directory, the memory estimate, an answer that does not solve our K; the
+`.dat` reader; the result's `solver` round trip. `tests/calculix_static_smoke.py`
+drives it over the RPCs alone, gated on `ping`'s `features.calculix`, and runs
+ccx on the exported deck; `refused_calls_smoke` holds the refusals to
+changing nothing.
+
 ## Assembly studies
 
 A study on an `AssemblyDocument` names **occurrences**, each in one role
@@ -781,6 +948,10 @@ tinted as a fixture, and bonded seams in the bond colour.
 - On an assembly tab, `assembly.simulation` opens the Simulation tool window,
   a viewport mode beside explode and motion; it holds the study list and a
   participants table with a role per row and **Clamp here** on rigid rows.
+- A static study's window has a **Solver** combo (Auto, In-house,
+  CalculiX with the version found, or "not found"): CalculiX stays choosable
+  without ccx, and Run then refuses in the window's red text with how to
+  install it ([CalculiX](#calculix)).
 - In the window: analysis type, mesh size, material check, gravity (a
   checkbox that sets world-down 9.81 m/s²), and **Boundary conditions**: arm
   Fixed, Force, Pressure, Torque, Remote or (on a static part study) Pin
@@ -827,14 +998,15 @@ verb that names a study for context (`add_load`, `add_refinement`,
 |---|---|
 | `add_study {type?, name?}` | `type`: static \| modal \| topology (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes` (a modal study's: refused on another unless the same call sets `type: modal`, which is applied first), `participants`, `load_cases`, `shape_from`, and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes` (a modal study's: refused on another unless the same call sets `type: modal`, which is applied first), `participants`, `load_cases`, `shape_from`, and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
-| `run_study {id, async?, recompute?, outlive_client?}` | mesh + solve; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)) |
+| `run_study {id, async?, recompute?, outlive_client?, timeout_s?}` | mesh + solve; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)) |
+| `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static study would run, meshed now, no ccx needed ([the deck](#the-deck)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety and `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)); with `layer_normal`, the stress across those layers and its factor of safety ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety and `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers and its factor of safety ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` |
 | `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `case`: which load case a static study shows |
@@ -887,9 +1059,9 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 - Contact that can separate or slide between parts (a pin against its
   rigid pin is the one compression-only contact), and nonlinear analysis (plasticity,
-  large deformation), thermal, buckling, fatigue. The escape hatch if they
-  are ever wanted is an external solver such as CalculiX, not growing this
-  one past linear.
+  large deformation), thermal, buckling, fatigue. They come through
+  [CalculiX](#calculix), not by growing this solver past linear
+  ([the plan](../plans/calculix-bridge.md)).
 - Free-free modal analysis (a modal study needs a support).
 - Shell and beam elements; adaptive refinement.
 - Defeaturing for analysis. Mesh size is set by the smallest features, so a

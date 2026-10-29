@@ -373,7 +373,10 @@ and modal analysis included (Netgen and the header-only Spectra).
 - **Depends** comes from `dpkg-shlibdeps`, read off what the binary links,
   so it cannot drift from the link line. By hand only what is run rather
   than linked: Recommends `mesa-vulkan-drivers, git`; Suggests
-  `ffmpeg, python3`.
+  `ffmpeg, python3, calculix-ccx` (CalculiX, which a static study can be
+  solved on: [simulation](../simulation/README.md#calculix)). The Nix
+  shell carries `calculix-ccx` and CI installs it on both Ubuntu images, so
+  the `[calculix]` tests run on 2.23 and 2.21; no release bundles it yet.
 - **Netgen** is Ubuntu's `libnglib-dev`. Its `NetgenConfig.cmake` checks
   that every target's file exists, the `netgen` binary and the Python
   modules included, and stops configure without them, so the build also
@@ -454,7 +457,9 @@ dir` source would otherwise copy them into itself.
   export to mp4, webm or gif needs an `ffmpeg` inside it; without one the
   export refuses by name (`ping`'s `features.ffmpeg` is false) and PNG frames
   still work. If ffmpeg is ever bundled, it must be an LGPL build shipped
-  with a source offer.
+  with a source offer. CalculiX is the same: a host `ccx` is not visible, so
+  a study set to it is refused with how to install one (`ping`'s
+  `features.calculix` is null) until a ccx module ships inside.
 
 ## Windows
 

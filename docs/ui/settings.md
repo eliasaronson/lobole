@@ -114,6 +114,7 @@ rebuilds the device in place ([the GPU choice](#the-gpu-choice)), and
 | Performance | `ssao` | Live | `off`, `half`, `full` |
 | Performance | `idle_throttle` | Live | rest at ~10 Hz when nothing is happening (docs/rendering) |
 | Performance | `shadow_map` | Live | 1024 or 2048 |
+| Simulation | `calculix_path` | Live | the ccx a study solved on CalculiX runs; empty finds one (`LOBOLE_CCX`, beside the app, PATH); the row shows the version found, or why there is none ([CalculiX](../simulation/README.md#calculix)) |
 | Sharing | `git_user_name`, `git_user_email` | Next time | who a commit is by; empty = git's own configuration |
 | General | `terminal_panel` | Live | off by default ([terminal.md](terminal.md)) |
 | General | `autosave_interval` | Next time | seconds, 0 disables |
@@ -187,7 +188,7 @@ selected page on the right under its title, and a footer under both.
 statement of their order:
 
 - one per table section, in the order `kFields` first names it — Appearance,
-  Navigation, Performance, Sharing, General, Import — each listing its rows;
+  Navigation, Performance, Simulation, Sharing, General, Import — each listing its rows;
 - then the hand-written pages in `kHandPages` (SettingsWindow.cpp): **Keyboard**
   ([keybindings.md](keybindings.md)), **Machines**, the user's CAM machine
   profiles, and **Print profiles**, the user's printing allowances.

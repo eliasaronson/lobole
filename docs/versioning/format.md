@@ -339,6 +339,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A study takes `solver`: `auto` (absent, how every older study reads), `in_house` or `calculix`; `calculix` solves a static study on CalculiX, and on a modal or topology study it is refused, as is a name that is none of the three. A CalculiX result carries `solver` ("calculix 2.NN"); an in-house one writes none ([CalculiX](../simulation/README.md#calculix)). Golden `vNEXT-calculix-solver` (results are not in the single-file corpus, so their round trip is `tests/test_fem_calculix.cpp`'s) |
 
 ## Paths in a project
 
