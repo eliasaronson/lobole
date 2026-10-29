@@ -31,6 +31,9 @@ struct MeshSettings {
   double maxSize = 0.0;
   // Per-face overrides keyed by TopExp_Explorer(TopAbs_FACE) 0-based index
   // (the same face order picking, ElementMap and the rest of the code use).
+  // Set as the face's Netgen shape property, which grades the size into its
+  // edges and the volume behind it; any refinement also takes Netgen's
+  // grading from 0.3 to 0.2.
   std::vector<std::pair<int, double>> faceSizes;
 };
 
@@ -75,5 +78,11 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
 // True when the build links Netgen; lets callers surface a clear message
 // instead of a generic meshing failure.
 bool Available();
+
+// How many entries Netgen's process-wide shape property table holds for
+// `shape` or any of its sub-shapes. Mesh() takes out every entry it made
+// before it returns, so this reads 0 after a mesh (a test's check; 0 without
+// Netgen). docs/simulation/README.md#meshing.
+int NetgenPropertyEntries(const TopoDS_Shape& shape);
 
 } // namespace fem

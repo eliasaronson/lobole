@@ -5,6 +5,7 @@
 
 #include <filesystem>
 
+#include "core/fem/FemSolveOptions.h" // kConvergeAutoSecondsDefault
 #include "core/io/Keymap.h"
 #include "core/io/MouseNav.h"
 #include "core/io/WindowGeometry.h"
@@ -101,6 +102,11 @@ struct Settings {
   // Off by default: a CAD app should not open with a shell in it, and the
   // panel costs a process the moment it is used (docs/ui/terminal.md).
   bool terminalPanel = false;
+
+  // Simulation: a static run's convergence check on `auto` runs while the
+  // first solve, and each refinement step, takes less than this many seconds
+  // (docs/simulation/README.md#a-peak-that-has-settled).
+  double convergeAutoS = fem::kConvergeAutoSecondsDefault;
 
   // Import: what a new STL or OBJ becomes when the import names no
   // representation -- "auto", "mesh", "recognize" or "facets"

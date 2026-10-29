@@ -136,6 +136,14 @@ struct JobStart {
   // A CalculiX run's deadline (run_study timeout_s; 0 = none): past it the
   // solver is killed and the run refused (docs/simulation/README.md#calculix).
   double timeoutSeconds = 0.0;
+  // A static run's convergence check for this run only
+  // (docs/simulation/README.md#a-peak-that-has-settled): an override of the
+  // study's `converge` (a fem::ConvergeMode, -1 = the study's own), and the
+  // build direction to settle a printed part's stress across its layers
+  // along. Both are inputs: a run with them hashes apart from one without.
+  int converge = -1;
+  bool hasLayerNormal = false;
+  double layerNormal[3] = {0.0, 0.0, 1.0};
 };
 
 } // namespace ui

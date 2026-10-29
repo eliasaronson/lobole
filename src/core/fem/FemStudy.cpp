@@ -25,6 +25,8 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -152,6 +154,28 @@ bool AnalysisTypeFromString(const std::string& s, AnalysisType& out) {
     out = AnalysisType::Topology;
     return true;
   }
+  return false;
+}
+
+const char* ConvergeModeToString(ConvergeMode mode) {
+  switch (mode) {
+  case ConvergeMode::Always:
+    return "always";
+  case ConvergeMode::Never:
+    return "never";
+  case ConvergeMode::Auto:
+    break;
+  }
+  return "auto";
+}
+
+bool ConvergeModeFromString(const std::string& s, ConvergeMode& out) {
+  for (ConvergeMode m :
+       {ConvergeMode::Auto, ConvergeMode::Always, ConvergeMode::Never})
+    if (s == ConvergeModeToString(m)) {
+      out = m;
+      return true;
+    }
   return false;
 }
 
@@ -890,6 +914,7 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     bp.bodyIndex = bodyIndex;
     bp.bodyName = body.name;
     bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+    bp.interlayerMPa = mp.interlayerMPa;
     // A PRINTED part weighs what its walls, shells and infill weigh
     // (docs/tolerances/README.md#printed-mass): its self-weight and modal
     // mass take the printed estimate's share of the solid, spread evenly.
@@ -1032,6 +1057,10 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
           }
         if (!merged)
           supportFacets.push_back(std::move(sf));
+        for (SupportFacets& have : supportFacets)
+          if (have.id == load.id)
+            have.awayMm = SupportAwayMm(*mesh, have.tris, LoadType::Fixed,
+                                        glm::dvec3(0.0), glm::dvec3(0.0));
       } else if (load.type == LoadType::Pin) {
         StudyJobBody::PinSupport pin;
         pin.id = load.id;
@@ -1048,7 +1077,10 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
                       (load.region.IsWhole()
                            ? "'s face meshed to no facets"
                            : "'s region holds none of its face's mesh facets"));
-        supportFacets.push_back({load.id, load.type, pin.tris});
+        supportFacets.push_back(
+            {load.id, load.type, pin.tris,
+             SupportAwayMm(*mesh, pin.tris, LoadType::Pin, pin.axisOrigin,
+                           pin.axisDirection)});
         pins.push_back(std::move(pin));
       } else {
         std::vector<int> tris;
@@ -1393,8 +1425,11 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
 
 // Each support's total reaction, from the nodes' (every node counted once,
 // for the first support that holds it), into the result's reaction list;
-// then the support-edge flag. Clears the per-node reactions.
-void FinishSupports(const StudyJobBody& jb, FemResults& res) {
+// then the support-edge flag against `zones` (SupportEdgeZones). Clears the
+// per-node reactions.
+void FinishSupports(const StudyJobBody& jb, const std::vector<int>& zones,
+                    const std::vector<FemResults::SupportReaction>& owners,
+                    FemResults& res) {
   std::vector<FemResults::SupportReaction> pinRows = std::move(res.reactions);
   res.reactions.clear();
   std::vector<char> counted(jb.mesh.nodes.size(), 0);
@@ -1419,7 +1454,8 @@ void FinishSupports(const StudyJobBody& jb, FemResults& res) {
   }
   res.nodeReaction.clear();
   res.nodeReaction.shrink_to_fit();
-  res.supportEdgePeak = FindSupportEdgePeak(jb.mesh, res, jb.supports);
+  res.supportEdgePeak =
+      PeakAwayFromEdges(jb.mesh, res.vonMises, res.maxVmNode, zones, owners);
 }
 
 } // namespace
@@ -1523,8 +1559,15 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       }
       if (!all)
         return fail("body '" + jb.bodyName + "': " + err);
+      sbr.supportEdgeZone = SupportEdgeZones(jb.mesh, jb.supports);
+      for (const SupportFacets& e : jb.supports) {
+        FemResults::SupportReaction o;
+        o.support = e.id;
+        o.type = e.type;
+        sbr.edgeOwners.push_back(o);
+      }
       for (FemResults& c : *all)
-        FinishSupports(jb, c);
+        FinishSupports(jb, sbr.supportEdgeZone, sbr.edgeOwners, c);
       // Several bodies may solve differently; the study names the
       // heaviest solver any body needed, which is the one a reader wants to
       // know about, and why an offered GPU was not it.
@@ -1559,14 +1602,335 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
 
 bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
               std::string* error) {
-  StudyJobInput input;
-  if (!PrepareStudy(doc, study, input, error))
+  ConvergeOptions converge;
+  converge.mode = study.converge;
+  return RunStudy(doc, study, rt, converge, error);
+}
+
+bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
+              const ConvergeOptions& converge, std::string* error) {
+  StudyPlan plan;
+  if (!PlanStudy(doc, study, plan, error))
     return false;
-  if (!SolvePreparedStudy(input, rt, error)) {
-    // Solve failures set study.error too, matching the pre-split behavior.
-    study.error = error ? *error : "solve failed";
+  StudyJobInput input;
+  std::string err;
+  if (!SolveConverged(plan, input, rt, converge, &err)) {
+    // Mesh and solve failures set study.error too, as they always have.
+    study.error = err.empty() ? "solve failed" : err;
+    if (error)
+      *error = study.error;
     return false;
   }
+  return true;
+}
+
+// ---- A peak that has settled ------------------------------------------------
+// (docs/simulation/README.md#a-peak-that-has-settled)
+
+namespace {
+
+constexpr int kMaxRefinements = 4;
+constexpr double kSettledChange = 0.02; // every peak moves under 2 %
+
+// One governing peak of one body: the worst over its load cases, read away
+// from a support's edge when it sits on one, and the node it is at.
+struct GoverningPeak {
+  int body = 0; // index into the runtime's (and the plan's) bodies
+  std::string quantity;
+  bool away = false;
+  double mpa = 0.0;
+  int node = -1;
+  // Every node (off the edges, for an away value) within kHotShare of the
+  // peak: a part with two fillets, or a hole, peaks on each of them alike,
+  // and refining one only moves the peak to its twin, which reads as
+  // settled when it is not.
+  std::vector<int> hot;
+};
+constexpr double kHotShare = 0.9;
+
+// The field's peak, or, when that node is on a support's edge, its largest
+// value off every edge.
+GoverningPeak PeakOfField(const std::vector<double>& field,
+                          const std::vector<int>& zones) {
+  const auto hot = [&](GoverningPeak& g, bool offEdges) {
+    for (size_t i = 0; i < field.size(); ++i)
+      if (field[i] >= kHotShare * g.mpa && (!offEdges || zones[i] < 0))
+        g.hot.push_back(static_cast<int>(i));
+  };
+  GoverningPeak p;
+  for (size_t i = 0; i < field.size(); ++i)
+    if (p.node < 0 || field[i] > p.mpa) {
+      p.mpa = field[i];
+      p.node = static_cast<int>(i);
+    }
+  if (p.node < 0 || zones.size() != field.size() || zones[p.node] < 0) {
+    if (p.node >= 0)
+      hot(p, false);
+    return p;
+  }
+  GoverningPeak away;
+  away.away = true;
+  for (size_t i = 0; i < field.size(); ++i)
+    if (zones[i] < 0 && (away.node < 0 || field[i] > away.mpa)) {
+      away.mpa = field[i];
+      away.node = static_cast<int>(i);
+    }
+  if (away.node < 0) {
+    hot(p, false);
+    return p;
+  }
+  hot(away, true);
+  return away;
+}
+
+std::vector<GoverningPeak> GoverningPeaks(const StudyRuntime& rt,
+                                          const StudyPlan& plan,
+                                          const ConvergeOptions& converge) {
+  std::vector<GoverningPeak> out;
+  for (size_t b = 0; b < rt.bodies.size(); ++b) {
+    const StudyBodyResult& body = rt.bodies[b];
+    const bool printed =
+        b < plan.bodies.size() && plan.bodies[b].interlayerMPa > 0.0;
+    const char* layers =
+        converge.hasLayerNormal ? "across_layers" : "max_principal";
+    GoverningPeak vm, il;
+    vm.node = il.node = -1;
+    for (size_t k = 0; k < std::max<size_t>(1, body.cases.size()); ++k) {
+      const FemResults& r = body.Case(static_cast<int>(k));
+      GoverningPeak p = PeakOfField(r.vonMises, body.supportEdgeZone);
+      if (p.node >= 0 && (vm.node < 0 || p.mpa > vm.mpa))
+        vm = p;
+      if (!printed)
+        continue;
+      const std::vector<double> f =
+          converge.hasLayerNormal ? AcrossLayersField(r, converge.layerNormal)
+                                  : MaxPrincipalField(r);
+      p = PeakOfField(f, body.supportEdgeZone);
+      if (p.node >= 0 && (il.node < 0 || p.mpa > il.mpa))
+        il = p;
+    }
+    if (vm.node >= 0 && vm.mpa > 0.0) {
+      vm.body = static_cast<int>(b);
+      vm.quantity = "von_mises";
+      out.push_back(vm);
+    }
+    if (il.node >= 0 && il.mpa > 0.0) {
+      il.body = static_cast<int>(b);
+      il.quantity = layers;
+      out.push_back(il);
+    }
+  }
+  return out;
+}
+
+// The B-Rep face a peak node lies on: of the faces whose facets use it, the
+// smallest (a bore or a fillet rather than the flat it meets); an interior
+// node takes the nearest boundary node's. Built once a mesh.
+struct FaceLookup {
+  const FemMesh& mesh;
+  std::vector<int> faceOf; // per node: its smallest face, -1 if interior
+  explicit FaceLookup(const FemMesh& m) : mesh(m), faceOf(m.nodes.size(), -1) {
+    std::map<int, double> area;
+    for (const FemMesh::BoundaryTri& t : m.boundary) {
+      const glm::dvec3 a = m.nodes[t.nodes[0]];
+      area[t.faceIndex] +=
+          0.5 * glm::length(glm::cross(m.nodes[t.nodes[1]] - a,
+                                       m.nodes[t.nodes[2]] - a));
+    }
+    for (const FemMesh::BoundaryTri& t : m.boundary)
+      for (int v : t.nodes)
+        if (faceOf[v] < 0 || area[t.faceIndex] < area[faceOf[v]])
+          faceOf[v] = t.faceIndex;
+  }
+  bool OnBoundary(int node) const {
+    return node >= 0 && static_cast<size_t>(node) < faceOf.size() &&
+           faceOf[node] >= 0;
+  }
+  int Face(int node) const {
+    if (node < 0 || static_cast<size_t>(node) >= faceOf.size())
+      return -1;
+    if (faceOf[node] >= 0)
+      return faceOf[node];
+    double best = 1e300;
+    int face = -1;
+    for (size_t v = 0; v < faceOf.size(); ++v)
+      if (faceOf[v] >= 0) {
+        const double d = glm::length(mesh.nodes[v] - mesh.nodes[node]);
+        if (d < best) {
+          best = d;
+          face = faceOf[v];
+        }
+      }
+    return face;
+  }
+};
+
+// The size the face's elements have now: the mean edge length of its
+// facets (corner to corner).
+double FaceElementSize(const FemMesh& mesh, int face) {
+  double sum = 0.0;
+  int n = 0;
+  for (const FemMesh::BoundaryTri& t : mesh.boundary) {
+    if (t.faceIndex != face)
+      continue;
+    for (int k = 0; k < 3; ++k) {
+      sum += glm::length(mesh.nodes[t.nodes[k]] -
+                         mesh.nodes[t.nodes[(k + 1) % 3]]);
+      ++n;
+    }
+  }
+  return n > 0 ? sum / n : 0.0;
+}
+
+std::size_t NodeCount(const StudyRuntime& rt) {
+  std::size_t n = 0;
+  for (const StudyBodyResult& b : rt.bodies)
+    n += b.mesh.nodes.size();
+  return n;
+}
+
+std::vector<ConvergencePeak> Record(const StudyRuntime& rt,
+                                    const std::vector<GoverningPeak>& peaks) {
+  std::vector<ConvergencePeak> out;
+  for (const GoverningPeak& p : peaks)
+    out.push_back({rt.bodies[p.body].bodyName, p.quantity, p.away, p.mpa});
+  return out;
+}
+
+double Seconds(std::chrono::steady_clock::time_point since) {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - since)
+      .count();
+}
+
+} // namespace
+
+bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
+                    StudyRuntime& rt, const ConvergeOptions& converge,
+                    std::string* error, const SolveOptions& options) {
+  auto started = std::chrono::steady_clock::now();
+  if (!MeshPlannedStudy(planIn, in, error) ||
+      (options.cancelled && options.cancelled()))
+    return false;
+  if (!SolvePreparedStudy(in, rt, error, options))
+    return false;
+  Convergence conv;
+  conv.hasLayerNormal = converge.hasLayerNormal;
+  conv.layerNormal = converge.layerNormal;
+  const double first = Seconds(started);
+  const auto notChecked = [&](const std::string& why) {
+    conv.why = why;
+    rt.convergence = conv;
+    return true;
+  };
+  if (planIn.type != AnalysisType::Static)
+    return notChecked("a " + std::string(AnalysisTypeToString(planIn.type)) +
+                      " study has no peak stress to settle");
+  if (converge.mode == ConvergeMode::Never)
+    return notChecked("converge: never");
+  for (const StudyBodyPlan& bp : planIn.bodies)
+    if (bp.premeshed)
+      return notChecked("a static study of a topology result solves the "
+                        "result's own tets, which cannot be refined");
+  std::vector<GoverningPeak> peaks = GoverningPeaks(rt, planIn, converge);
+  if (peaks.empty())
+    return notChecked("no body carries a stress to settle");
+  conv.checked = true;
+  conv.steps.push_back({{}, NodeCount(rt), first, Record(rt, peaks)});
+  StudyPlan plan = planIn;
+  double last = first;
+  for (int step = 1; step <= kMaxRefinements; ++step) {
+    if (options.cancelled && options.cancelled())
+      break;
+    // On auto a step costs at least what the last one did: one that would
+    // run past the limit is not started.
+    if (converge.mode == ConvergeMode::Auto && last >= converge.autoSeconds) {
+      conv.stopped = "time";
+      conv.stoppedSeconds = last;
+      break;
+    }
+    // Halve the element size on each face a governing peak lies on.
+    StudyPlan next = plan;
+    ConvergenceStep rec;
+    std::vector<std::pair<int, int>> where; // (body, face), each once
+    for (const GoverningPeak& p : peaks) {
+      const FaceLookup faces(rt.bodies[p.body].mesh);
+      std::vector<int> nodes{p.node};
+      for (int n : p.hot)
+        if (n != p.node && faces.OnBoundary(n))
+          nodes.push_back(n);
+      for (int n : nodes) {
+        const std::pair<int, int> bf{p.body, faces.Face(n)};
+        if (bf.second >= 0 &&
+            std::find(where.begin(), where.end(), bf) == where.end())
+          where.push_back(bf);
+      }
+    }
+    for (const auto& [body, face] : where) {
+      const FemMesh& mesh = rt.bodies[body].mesh;
+      const std::string& bodyName = rt.bodies[body].bodyName;
+      const double size = 0.5 * FaceElementSize(mesh, face);
+      if (size <= 0.0)
+        continue;
+      bool dup = false;
+      for (const ConvergenceRefinement& r : rec.refined)
+        dup = dup || (r.body == bodyName && r.face == face);
+      if (dup)
+        continue;
+      auto& sizes = next.bodies[body].settings.faceSizes;
+      bool set = false;
+      for (auto& [f, s] : sizes)
+        if (f == face) {
+          s = std::min(s, size);
+          set = true;
+        }
+      if (!set)
+        sizes.emplace_back(face, size);
+      rec.refined.push_back({bodyName, face, size});
+    }
+    if (rec.refined.empty()) {
+      conv.stopped = "failed";
+      conv.why = "no face to refine under the peak";
+      break;
+    }
+    started = std::chrono::steady_clock::now();
+    StudyJobInput nextIn;
+    StudyRuntime nextRt;
+    std::string err;
+    if (!MeshPlannedStudy(next, nextIn, &err) ||
+        (options.cancelled && options.cancelled()) ||
+        !SolvePreparedStudy(nextIn, nextRt, &err, options)) {
+      if (options.cancelled && options.cancelled())
+        break;
+      conv.stopped = "failed";
+      conv.why = "refinement " + std::to_string(step) + " failed: " + err;
+      break;
+    }
+    last = Seconds(started);
+    std::vector<GoverningPeak> now = GoverningPeaks(nextRt, next, converge);
+    // How far each peak moved: matched by body and quantity.
+    double change = 0.0;
+    for (const GoverningPeak& p : now)
+      for (const GoverningPeak& q : peaks)
+        if (p.body == q.body && p.quantity == q.quantity && q.mpa > 0.0)
+          change = std::max(change, std::abs(p.mpa - q.mpa) / q.mpa);
+    rec.nodes = NodeCount(nextRt);
+    rec.seconds = last;
+    rec.peaks = Record(nextRt, now);
+    conv.steps.push_back(std::move(rec));
+    conv.lastChangePct = 100.0 * change;
+    rt = std::move(nextRt);
+    in = std::move(nextIn);
+    plan = std::move(next);
+    peaks = std::move(now);
+    if (change < kSettledChange) {
+      conv.converged = true;
+      break;
+    }
+  }
+  if (!conv.converged && conv.stopped.empty() &&
+      !(options.cancelled && options.cancelled()))
+    conv.stopped = "steps";
+  rt.convergence = std::move(conv);
   return true;
 }
 
@@ -2053,6 +2417,8 @@ void KeepSurface(StudyBodyResult& b) {
     Renumber(b.results, kept, newIndex);
     for (FemResults& c : b.cases)
       Renumber(c, kept, newIndex);
+    if (b.supportEdgeZone.size() == n)
+      Gather(b.supportEdgeZone, kept);
   }
   m.tets.clear();
   m.tets.shrink_to_fit();

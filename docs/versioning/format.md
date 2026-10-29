@@ -341,6 +341,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A static study's `converge`: `auto` (the default, not written), `always` or `never`, whether a run refines round its peak stress until it settles ([a peak that has settled](../simulation/README.md#a-peak-that-has-settled)); any other value, or the key on another analysis type, is refused. A saved static result gains `convergence` (the check's record: `checked`, `converged`, `stopped`, `last_change_pct`, `layer_normal`, `steps` with each step's refined faces, nodes, seconds and peaks) and, per body, `support_edge_zone` in the `.result.bin` (one past the index of the support whose edge each node lies near, 0 for none), so a field read later is flagged as von Mises was ([a peak on a support's edge](../simulation/README.md#a-peak-on-a-supports-edge)). A result saved before reads as not checked, and `study_results` then gives no across-layers away value. Golden `vNEXT-study-converge` (three studies, one per mode; results are not in the single-file corpus, so their round trip is `tests/test_study_inputs.cpp`'s) |
 
 ## Paths in a project
 

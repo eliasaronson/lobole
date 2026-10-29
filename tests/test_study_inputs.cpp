@@ -157,6 +157,27 @@ TEST_CASE("An FEM run's input hash moves with every input",
   bar->doc.Regenerate();
   REQUIRE(Key(*bar) == base);
 
+  // How a run checks its peak has settled (vNEXT): the study's mode, a
+  // run's override of it, and the layer normal the check reads.
+  StudyOf(*bar).converge = fem::ConvergeMode::Never;
+  const uint64_t never = Key(*bar);
+  CHECK(never != base);
+  StudyOf(*bar).converge = fem::ConvergeMode::Auto;
+  REQUIRE(Key(*bar) == base);
+  fem::ConvergeOptions run;
+  CHECK(fem::RunInputKey(bar->doc, StudyOf(*bar), run) == base);
+  run.mode = fem::ConvergeMode::Never;
+  CHECK(fem::RunInputKey(bar->doc, StudyOf(*bar), run) == never);
+  run.mode = fem::ConvergeMode::Auto;
+  run.hasLayerNormal = true;
+  const uint64_t layered = fem::RunInputKey(bar->doc, StudyOf(*bar), run);
+  CHECK(layered != base);
+  run.layerNormal = glm::dvec3(1, 0, 0);
+  CHECK(fem::RunInputKey(bar->doc, StudyOf(*bar), run) != layered);
+  // A run that checks nothing reads no layer normal.
+  run.mode = fem::ConvergeMode::Never;
+  CHECK(fem::RunInputKey(bar->doc, StudyOf(*bar), run) == never);
+
   // The geometry.
   auto longer = MakeBar(fem::AnalysisType::Static);
   auto* box = dynamic_cast<BoxFeature*>(longer->doc.GetFeature(0));
@@ -305,6 +326,31 @@ TEST_CASE("A study result of each kind reopens current, its part hashing as "
     }
     if (type == fem::AnalysisType::Static)
       CHECK_FALSE(a.results.reactions.empty());
+    // Which support's edge each node lies near, and the convergence check
+    // (vNEXT).
+    CHECK(b.supportEdgeZone == a.supportEdgeZone);
+    REQUIRE(b.edgeOwners.size() == a.edgeOwners.size());
+    for (size_t k = 0; k < a.edgeOwners.size(); ++k) {
+      CHECK(b.edgeOwners[k].support == a.edgeOwners[k].support);
+      CHECK(b.edgeOwners[k].type == a.edgeOwners[k].type);
+    }
+    CHECK(got->convergence.checked == ran.convergence.checked);
+    CHECK(got->convergence.why == ran.convergence.why);
+    CHECK(got->convergence.converged == ran.convergence.converged);
+    CHECK(got->convergence.stopped == ran.convergence.stopped);
+    REQUIRE(got->convergence.steps.size() == ran.convergence.steps.size());
+    for (size_t k = 0; k < ran.convergence.steps.size(); ++k) {
+      CHECK(got->convergence.steps[k].nodes == ran.convergence.steps[k].nodes);
+      REQUIRE(got->convergence.steps[k].peaks.size() ==
+              ran.convergence.steps[k].peaks.size());
+      for (size_t q = 0; q < ran.convergence.steps[k].peaks.size(); ++q)
+        CHECK(got->convergence.steps[k].peaks[q].mpa ==
+              ran.convergence.steps[k].peaks[q].mpa);
+    }
+    if (type == fem::AnalysisType::Static) {
+      CHECK_FALSE(a.supportEdgeZone.empty());
+      CHECK(ran.convergence.checked);
+    }
     REQUIRE(b.results.modes.size() == a.results.modes.size());
     for (size_t m = 0; m < a.results.modes.size(); ++m) {
       CHECK(b.results.modes[m].frequencyHz == a.results.modes[m].frequencyHz);

@@ -1042,6 +1042,28 @@ void DrawResults(AppState& state, const fem::Study& s) {
     ImGui::TextColored(kMuted, "Shape of study %llu at %.2f: %.0f mm3",
                        static_cast<unsigned long long>(s.shapeFrom.study),
                        rt->shapeThreshold, rt->shapeVolume);
+  // Whether the peak has settled: the line a reader checks before quoting it.
+  {
+    const fem::Convergence& c = rt->convergence;
+    if (c.checked && c.converged)
+      ImGui::TextColored(kMuted, "Peak converged: %.1f %% on refinement %d",
+                         c.lastChangePct, static_cast<int>(c.steps.size()) - 1);
+    else if (c.checked && c.stopped == "time")
+      ImGui::TextColored(kStale,
+                         "Peak not converged: a step took %.0f s (limit in "
+                         "Preferences)",
+                         c.stoppedSeconds);
+    else if (c.checked && c.stopped == "failed")
+      ImGui::TextColored(kStale, "Peak not converged: %s", c.why.c_str());
+    else if (c.checked)
+      ImGui::TextColored(kStale,
+                         "Peak not converged: still moving %.1f %% after %d "
+                         "refinements",
+                         c.lastChangePct, static_cast<int>(c.steps.size()) - 1);
+    else
+      ImGui::TextColored(kMuted, "Peak not checked%s%s",
+                         c.why.empty() ? "" : ": ", c.why.c_str());
+  }
   if (rt->caseNames.empty()) {
     ImGui::Text("Max von Mises: %.3g MPa", rt->maxVonMises);
     ImGui::Text("Max displacement: %.4g mm", rt->maxDisplacement);
@@ -1533,6 +1555,21 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
       });
     DrawKeepOuts(state, *s);
   } else {
+    // Static: whether a run refines round its peak until it settles
+    // (docs/simulation/README.md#a-peak-that-has-settled).
+    const char* kConverge[] = {"Auto", "Always", "Never"};
+    int conv = static_cast<int>(s->converge);
+    LeftLabel("Converge peak");
+    if (ImGui::Combo("###study_converge", &conv, kConverge, 3) &&
+        conv != static_cast<int>(s->converge))
+      ModifyStudy(state, s->id, "Set converge", [&](fem::Study& cs) {
+        cs.converge = static_cast<fem::ConvergeMode>(conv);
+      });
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip(
+          "Auto refines round the peak stress until it moves under 2 %%,\n"
+          "while a solve takes under the Preferences limit (Simulation).\n"
+          "Always refines whatever it costs; Never solves once.");
     // Static: an optional gravity / self-weight load.
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
     if (ImGui::Checkbox("Gravity (self-weight)###study_gravity", &on)) {

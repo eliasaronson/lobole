@@ -73,7 +73,8 @@ bool AssemblyStudyStale(AppState& state, const AssemblyDocument& asmDoc,
 // `timeoutSeconds` bounds a CalculiX run (0 = none).
 bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
                               uint64_t studyId, std::string* error,
-                              double timeoutSeconds = 0.0);
+                              double timeoutSeconds = 0.0,
+                              const JobStart* job = nullptr);
 // The same on a worker: the plan (imprint included) is made here, the mesh
 // and solve run on the thread, and the result lands on the assembly tab it
 // was started from when the job is reaped.
@@ -99,11 +100,14 @@ void ResetSimulationDisplay(AppState& state);
 // (stamped with the current Version). Returns false and fills *error on any
 // failure — the one source of truth shared by the panel Run button and the
 // run_study RPC. Defined in AppActions.cpp.
-bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error);
+bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error,
+                      const fem::ConvergeOptions& converge = {});
 // The same with what a CalculiX study needs from the app (the solver found,
-// its cache directory) and `timeoutSeconds` (0 = none; CalculiX runs only).
+// its cache directory), `timeoutSeconds` (0 = none; CalculiX runs only) and
+// the run's convergence options from `job` (ConvergeOptionsFor).
 bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
-                      std::string* error, double timeoutSeconds);
+                      std::string* error, double timeoutSeconds,
+                      const JobStart* job = nullptr);
 
 // The CalculiX run study `s` needs (docs/simulation/README.md#calculix),
 // into `options`: nothing for an in-house study; for a CalculiX one, the
@@ -116,12 +120,22 @@ bool CalculixRunFor(const AppState& state, const fem::Study& s,
                     double timeoutSeconds, fem::SolveOptions& options,
                     std::string* error);
 
+// How a run of `study` checks its peak has settled
+// (docs/simulation/README.md#a-peak-that-has-settled): the study's
+// `converge` unless `job` overrides it, the converge_auto_s preference, and
+// the job's layer normal.
+fem::ConvergeOptions ConvergeOptionsFor(const AppState& state,
+                                        const fem::Study& study,
+                                        const JobStart* job);
+
 // --- Results keyed by inputs (docs/simulation/README.md#studies-as-jobs) ---
 //
 // The input hash of study `studyId` on the part `doc` or, with `doc` null,
 // the assembly `asmDoc` (fem::StudyInputKey / AssemblyStudyInputKey).
+// A run's convergence options (`job`) are inputs too (fem::RunInputKey).
 uint64_t StudyInputHash(AppState& state, const Document* doc,
-                        const AssemblyDocument* asmDoc, uint64_t studyId);
+                        const AssemblyDocument* asmDoc, uint64_t studyId,
+                        const JobStart* job = nullptr);
 // A result for exactly the study's current inputs -- its own (a reopened
 // topology result carries the hash it was saved with) or one the session
 // holds -- installed as the study's fresh result, so nothing is computed;

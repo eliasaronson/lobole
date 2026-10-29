@@ -1,0 +1,7 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [7853.98],
+  "study_converge": [["Settled", "auto"], ["Once", "never"],
+                     ["Always", "always"]]
+}

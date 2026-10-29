@@ -214,6 +214,87 @@ glm::dvec3 LayerNormalOf(const json& v) {
   return n / len;
 }
 
+// A static study's `converge` (docs/simulation/README.md
+// #a-peak-that-has-settled): one of the three, or refused naming them.
+fem::ConvergeMode ConvergeOf(const json& v) {
+  fem::ConvergeMode mode;
+  if (!v.is_string() ||
+      !fem::ConvergeModeFromString(v.get<std::string>(), mode))
+    throw std::runtime_error("converge " + v.dump() +
+                             " is not one of: " + fem::kConvergeModeNames);
+  return mode;
+}
+
+// Why a result's peak is not settled, in words; empty when it is.
+std::string NotConvergedWhy(const fem::Convergence& c) {
+  if (!c.checked)
+    return "not checked: " +
+           (c.why.empty() ? std::string("no check ran") : c.why);
+  if (c.converged)
+    return {};
+  if (c.stopped == "time") {
+    char buf[160];
+    std::snprintf(buf, sizeof buf,
+                  "stopped for time: a step took %.1f s, past "
+                  "converge_auto_s",
+                  c.stoppedSeconds);
+    return buf;
+  }
+  if (c.stopped == "failed")
+    return "a refinement failed: " + c.why;
+  char buf[160];
+  std::snprintf(buf, sizeof buf, "still moving %.1f %% after %d refinements",
+                c.lastChangePct, static_cast<int>(c.steps.size()) - 1);
+  return buf;
+}
+
+// What a static result says of its convergence check, `convergence`
+// {status: converged | not converged | not checked, ...}.
+json ConvergenceJson(const fem::Convergence& c) {
+  json out;
+  if (!c.checked) {
+    out["status"] = "not checked";
+    out["why"] = c.why.empty() ? "the result was solved without a "
+                                 "convergence check (saved before it, or "
+                                 "a static study of a topology result)"
+                               : c.why;
+    out["reason"] = "not checked: " + out["why"].get<std::string>();
+    return out;
+  }
+  out["status"] = c.converged ? "converged" : "not converged";
+  out["converged"] = c.converged;
+  if (!c.converged)
+    out["reason"] = NotConvergedWhy(c);
+  if (!c.stopped.empty())
+    out["stopped"] = c.stopped;
+  if (c.stopped == "time")
+    out["stopped_seconds"] = c.stoppedSeconds;
+  if (!c.why.empty())
+    out["why"] = c.why;
+  out["last_change_pct"] = c.lastChangePct;
+  if (c.hasLayerNormal)
+    out["layer_normal"] = {c.layerNormal.x, c.layerNormal.y, c.layerNormal.z};
+  json steps = json::array();
+  for (const fem::ConvergenceStep& st : c.steps) {
+    json refined = json::array();
+    for (const fem::ConvergenceRefinement& r : st.refined)
+      refined.push_back(
+          {{"body", r.body}, {"face", r.face}, {"size_mm", r.sizeMm}});
+    json peaks = json::array();
+    for (const fem::ConvergencePeak& pk : st.peaks)
+      peaks.push_back({{"body", pk.body},
+                       {"quantity", pk.quantity},
+                       {"away_from_support_edge", pk.away},
+                       {"mpa", pk.mpa}});
+    steps.push_back({{"refined", std::move(refined)},
+                     {"nodes", st.nodes},
+                     {"seconds", st.seconds},
+                     {"peaks", std::move(peaks)}});
+  }
+  out["steps"] = std::move(steps);
+  return out;
+}
+
 // Where the studies live: the active PART, or the active ASSEMBLY
 // (docs/simulation/README.md#assembly-studies). One handler, two homes — the
 // study record is the same, and the verbs are the same; what differs is how
@@ -373,7 +454,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`study`, because there `id` would mean the load or the refinement.",
      "id, study"},
     {"list_studies", "List studies with status.", "", remote::NoFlags,
-     "studies:{filter_radius?:number, has_results:bool, id:int, "
+     "studies:{converge?:string, filter_radius?:number, has_results:bool, "
+     "id:int, "
      "keep_faces?:int, keep_outs?:object[], load_cases?:object[], "
      "loads:object[], max_iterations?:int, mesh_size:number, "
      "name:string, refinements:int, stale:bool, type:string, "
@@ -416,9 +498,13 @@ static constexpr MethodDoc SimulationMethods[] = {
      "at run_study when no ccx is found, naming how to install one) on the "
      "same mesh, loads and supports, as a second, independent answer whose "
      "displacement is checked against this study's own stiffness "
-     "(docs/simulation/README.md#calculix).",
-     "filter_radius, gravity, id, load_cases, max_iterations, mesh_size, "
-     "name, num_modes, participants, shape_from, solver, study, type, "
+     "(docs/simulation/README.md#calculix). `converge` is a static "
+     "study's: auto (the default) | always | never -- whether a run refines "
+     "round its peak stress until it settles (docs/simulation/README.md"
+     "#a-peak-that-has-settled); anything else is refused, naming the three.",
+     "converge, filter_radius, gravity, id, load_cases, max_iterations, "
+     "mesh_size, name, num_modes, participants, shape_from, solver, study, "
+     "type, "
      "volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
@@ -546,7 +632,19 @@ static constexpr MethodDoc SimulationMethods[] = {
      "occurrences and their placed bodies) is answered from it with "
      "`reused: true` and nothing computed -- a reopened project's result "
      "of any kind included; `input_hash` names the inputs, `recompute: true` "
-     "runs anyway. Takes "
+     "runs anyway. A static run checks its peak has settled "
+     "(docs/simulation/README.md#a-peak-that-has-settled): it halves the "
+     "element size on the face each governing peak lies on (von Mises; for "
+     "a printed material also the stress across the layers along "
+     "`layer_normal` [x, y, z], the build direction in the part's frame, "
+     "unitless -- without one, the largest principal stress), re-meshes "
+     "and re-solves until every peak moves under 2 % or four refinements "
+     "are spent; a peak on a support's edge is read away from it. "
+     "`converge`: auto | always | never overrides the study's for this run "
+     "(auto runs the check while a solve takes under the converge_auto_s "
+     "preference, seconds). The refinements belong to the run and never to "
+     "the study; the answer's `convergence` says what happened. Both are "
+     "inputs, so a run with them is not answered from one without. Takes "
      "`id` (or `study`, the same thing here) — see remove_study. A study "
      "whose solver is calculix runs ccx in its own directory under the "
      "cache ($XDG_CACHE_HOME/lobole/calculix/<pid>-<n>, removed on success, "
@@ -558,7 +656,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "study) kills ccx past it and refuses the run "
      "(docs/simulation/README.md#calculix).",
      "id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, "
-     "recompute?:bool, timeout_s?:number>0"},
+     "recompute?:bool, timeout_s?:number>0, converge?:string, "
+     "layer_normal?:number[]"},
     {"cancel_study",
      "Cancel a running study: {job} (the id run_study, run_motion_study, "
      "mesh_study, check_requirements or design_sweep answered -- any study "
@@ -623,8 +722,13 @@ static constexpr MethodDoc SimulationMethods[] = {
      "when its peak von Mises sits within one element of a support's edge "
      "(a clamp's rim, where the stress is a singularity that grows with the "
      "mesh), `peak_at_support_edge` {support, type, max_von_mises_away_mpa, "
-     "away_at, factor_of_safety_away}: the largest stress farther than that "
-     "from every support's edge. The top level carries the flag of its own "
+     "away_at, factor_of_safety_away}: the largest stress farther than the "
+     "support's reach from every support's edge (a quarter of a pin's bore "
+     "radius; a quarter of a fixed face's largest extent; never less than "
+     "one element). With layer_normal it adds max_across_layers_away_mpa "
+     "and across_layers_away_at, the stress across the layers read the "
+     "same way, and factor_of_safety_away is the governing (smaller) of the "
+     "two, named by `governing`. The top level carries the flag of its own "
      "peak, and the factor of safety's receipt says so "
      "(docs/simulation/README.md#a-peak-on-a-supports-edge). A static "
      "result names its `solver`; one solved on CalculiX says \"calculix "
@@ -637,7 +741,14 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`in_house_agreement` {max_displacement_rel, max_von_mises_rel}: "
      "reported beside the answer, never folded into its receipt, which "
      "stays a prediction with oracle calculix/static "
-     "(docs/simulation/README.md#calculix).",
+     "(docs/simulation/README.md#calculix). A static "
+     "result also carries `convergence` {status: converged | not converged "
+     "| not checked, converged, stopped? (time | steps | failed), "
+     "stopped_seconds?, why?, last_change_pct, layer_normal?, steps "
+     "[{refined [{body, face, size_mm}], nodes, seconds, peaks [{body, "
+     "quantity, away_from_support_edge, mpa}]}]} "
+     "(docs/simulation/README.md#a-peak-that-has-settled), and the receipt "
+     "says whether its peak converged.",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
@@ -1056,6 +1167,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                  {"refinements", eval.refinements.size()},
                  {"has_results", host.Results(s.id) != nullptr},
                  {"stale", host.Stale(s.id)}};
+      if (s.type == fem::AnalysisType::Static)
+        sj["converge"] = fem::ConvergeModeToString(s.converge);
       if (!eval.participants.empty()) {
         json parts = json::array();
         for (const fem::Participant& pt : eval.participants) {
@@ -1162,6 +1275,16 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                        ? std::string()
                        : "; this study's solver is calculix, so set solver: "
                          "auto in the same call"));
+      if (p.contains("converge")) {
+        const fem::ConvergeMode mode = ConvergeOf(p.at("converge"));
+        if (s.type != fem::AnalysisType::Static)
+          throw std::runtime_error(
+              std::string("converge applies to a static study, and this "
+                          "one is ") +
+              fem::AnalysisTypeToString(s.type) +
+              "; set type: static (in this call or before it)");
+        s.converge = mode;
+      }
       // Assembly studies (S1): who takes part, and how. The whole list at
       // once — a role table is one statement, not a sequence of edits.
       if (p.contains("participants")) {
@@ -1827,6 +1950,28 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
               "timeout_s bounds a CalculiX run, and this study is solved "
               "in-house (set_study solver: calculix to run it on CalculiX)");
       }
+      // This run's convergence check (docs/simulation/README.md
+      // #a-peak-that-has-settled), read before anything runs.
+      if (p.contains("converge") || p.contains("layer_normal")) {
+        if (s->type != fem::AnalysisType::Static)
+          throw std::runtime_error(
+              std::string("converge and layer_normal settle a static "
+                          "study's peak; this study is ") +
+              fem::AnalysisTypeToString(s->type));
+        if (p.contains("converge"))
+          start.converge = static_cast<int>(ConvergeOf(p.at("converge")));
+        if (p.contains("layer_normal")) {
+          if (host.IsAssembly())
+            throw std::runtime_error(
+                "layer_normal is one PART's build direction, and an "
+                "assembly study bonds several parts each printed its own "
+                "way -- study the part, loaded as the assembly loads it");
+          const glm::dvec3 n = LayerNormalOf(p.at("layer_normal"));
+          start.hasLayerNormal = true;
+          for (int k = 0; k < 3; ++k)
+            start.layerNormal[k] = n[k];
+        }
+      }
       const auto started = [&](const char* kind) {
         return json{{"started", true},
                     {"running", true},
@@ -1866,9 +2011,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         const bool ran =
             host.IsAssembly()
                 ? ui::RunAssemblyStudyAndCache(state, *host.asmDoc, id, &err,
-                                               start.timeoutSeconds)
+                                               start.timeoutSeconds, &start)
                 : ui::RunStudyAndCache(state, *doc, id, &err,
-                                       start.timeoutSeconds);
+                                       start.timeoutSeconds, &start);
         if (!ran)
           throw std::runtime_error(err);
         if (const fem::StudyRuntime* done = host.Results(id))
@@ -2028,9 +2173,57 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         j["factor_of_safety_away"] = yield / e.awayMPa;
       return j;
     };
+    // The stress across the layers read away from a support's edge, as von
+    // Mises is (docs/simulation/README.md#a-peak-on-a-supports-edge): it
+    // joins a body's (or the top level's) peak_at_support_edge, and
+    // factor_of_safety_away is then the governing one of the two.
+    struct AcrossAway {
+      bool any = false;
+      double peak = 0.0;
+      double away = 0.0;
+      glm::dvec3 at{0.0};
+      fem::FemResults::SupportEdgePeak edge;
+      double interlayer = 0.0;
+    };
+    const auto withAcross = [](json edge, const fem::FemResults& r,
+                               double yield, const AcrossAway& a) {
+      if (!a.any)
+        return edge;
+      if (edge.is_null()) {
+        if (!a.edge.flagged)
+          return edge;
+        // Only the across-layers peak sits on an edge; von Mises does not.
+        edge = {{"support", a.edge.support},
+                {"type", fem::LoadTypeToString(a.edge.type)},
+                {"max_von_mises_away_mpa", r.maxVonMises},
+                {"away_at", {r.maxVmAt.x, r.maxVmAt.y, r.maxVmAt.z}}};
+      }
+      edge["max_across_layers_away_mpa"] = a.away;
+      edge["across_layers_away_at"] = {a.at.x, a.at.y, a.at.z};
+      const double vm = edge.value("max_von_mises_away_mpa", 0.0);
+      double fos = 0.0;
+      std::string governs;
+      if (yield > 0 && vm > 0) {
+        fos = yield / vm;
+        governs = "von_mises";
+      }
+      if (a.interlayer > 0 && a.away > 0 &&
+          (governs.empty() || a.interlayer / a.away < fos)) {
+        fos = a.interlayer / a.away;
+        governs = "across_layers";
+      }
+      if (!governs.empty()) {
+        edge["factor_of_safety_away"] = fos;
+        edge["governing"] = governs;
+      }
+      return edge;
+    };
+    AcrossAway topAcross;
     // The flag that goes with the top-level peak: the body and case it is in.
     json topEdge;
     double topEdgeVm = -1.0;
+    const fem::FemResults* topEdgeResults = nullptr;
+    double topEdgeYield = 0.0;
     json perBody = json::array();
     for (const fem::StudyBodyResult& b : rt->bodies) {
       nodes += b.mesh.stats.nodeCount;
@@ -2047,12 +2240,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         const fem::FemResults& r = b.Case(static_cast<int>(k));
         if (r.maxVonMises > topEdgeVm) {
           topEdgeVm = r.maxVonMises;
+          topEdgeResults = &r;
+          topEdgeYield = mp.yieldMPa;
           topEdge =
               r.supportEdgePeak.flagged ? edgeJson(r, mp.yieldMPa) : json();
         }
       }
-      if (b.results.supportEdgePeak.flagged)
-        bj["peak_at_support_edge"] = edgeJson(b.results, mp.yieldMPa);
+      AcrossAway bodyAcross;
       // Factor of safety against yield, when the body's material defines one.
       if (b.results.maxVonMises > 0) {
         const double yield = mp.yieldMPa;
@@ -2084,10 +2278,25 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           bj["max_principal_mpa"] = pk.value;
         if (!layerNormal)
           continue;
-        const fem::FieldPeak lk =
-            fem::PeakOf(b.mesh, fem::AcrossLayersField(r, *layerNormal));
+        const std::vector<double> acrossField =
+            fem::AcrossLayersField(r, *layerNormal);
+        const fem::FieldPeak lk = fem::PeakOf(b.mesh, acrossField);
         if (lk.node < 0)
           continue;
+        {
+          AcrossAway a;
+          a.any = true;
+          a.peak = lk.value;
+          a.interlayer = mp.interlayerMPa;
+          a.edge = fem::PeakAwayFromEdges(b.mesh, acrossField, lk.node,
+                                          b.supportEdgeZone, b.edgeOwners);
+          a.away = a.edge.flagged ? a.edge.awayMPa : lk.value;
+          a.at = a.edge.flagged ? a.edge.awayAt : lk.at;
+          if (!bodyAcross.any || a.away > bodyAcross.away)
+            bodyAcross = a;
+          if (!topAcross.any || a.peak > topAcross.peak)
+            topAcross = a;
+        }
         if (across.node < 0 || lk.value > across.value) {
           across = lk;
           acrossBody = b.bodyName;
@@ -2095,6 +2304,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         if (!bj.contains("max_across_layers_mpa") ||
             lk.value > bj["max_across_layers_mpa"].get<double>())
           bj["max_across_layers_mpa"] = lk.value;
+      }
+      {
+        json edge = b.results.supportEdgePeak.flagged
+                        ? edgeJson(b.results, mp.yieldMPa)
+                        : json();
+        edge = withAcross(std::move(edge), b.results, mp.yieldMPa, bodyAcross);
+        if (!edge.is_null())
+          bj["peak_at_support_edge"] = std::move(edge);
       }
       if (layerNormal && mp.interlayerMPa > 0) {
         anyInterlayer = true;
@@ -2135,6 +2352,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         {"stale", host.Stale(id)}};
     if (haveFoS)
       result["factor_of_safety"] = minFoS;
+    if (topEdgeResults != nullptr)
+      topEdge = withAcross(std::move(topEdge), *topEdgeResults, topEdgeYield,
+                           topAcross);
     if (!topEdge.is_null())
       result["peak_at_support_edge"] = topEdge;
     // Which program solved it (docs/simulation/README.md#calculix). A
@@ -2170,6 +2390,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             {"max_von_mises_rel", rel(rt->maxVonMises, own->maxVonMises)}};
       }
     }
+    // Whether the peak has settled (docs/simulation/README.md
+    // #a-peak-that-has-settled).
+    result["convergence"] = ConvergenceJson(rt->convergence);
     const auto peakJson = [](const fem::FieldPeak& pk, const std::string& b) {
       return json{{"value", pk.value},
                   {"at", {pk.at.x, pk.at.y, pk.at.z}},
@@ -2308,12 +2531,22 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                     "independent answer, not a stronger one";
         if (!topEdge.is_null())
           c.note +=
-              ". The peak sits within one element of support " +
+              ". The peak sits on support " +
               std::to_string(topEdge["support"].get<uint64_t>()) +
               "'s edge, where a clamp's stress grows with the mesh; "
               "away from every support's edge the largest is " +
               std::to_string(topEdge["max_von_mises_away_mpa"].get<double>()) +
               " MPa (peak_at_support_edge)";
+        const std::string unsettled = NotConvergedWhy(rt->convergence);
+        if (unsettled.empty())
+          c.note += ". Its peak converged: it moved " +
+                    std::to_string(rt->convergence.lastChangePct) +
+                    " % on the last of " +
+                    std::to_string(rt->convergence.steps.size() - 1) +
+                    " refinements round it";
+        else
+          c.note += ". Its peak is NOT converged (" + unsettled +
+                    "): a finer mesh may move it";
         r.Add(std::move(c));
       }
       AttachReceipt(result, r);

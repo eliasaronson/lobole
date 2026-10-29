@@ -209,6 +209,7 @@ add_executable(designer_tests
     test_fem_loads.cpp
     test_fem_pin.cpp
     test_fem_calculix.cpp
+    test_fem_converge.cpp
     test_topopt.cpp
     test_topo_build.cpp
     test_study_inputs.cpp

@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <map>
 
 #ifdef HAVE_FEM_SOLVER
 #include "core/fem/FemSolverInternal.h"
@@ -1334,62 +1335,269 @@ std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
   return out;
 }
 
-FemResults::SupportEdgePeak
-FindSupportEdgePeak(const FemMesh& mesh, const FemResults& results,
-                    const std::vector<SupportFacets>& supports) {
-  FemResults::SupportEdgePeak out;
+namespace {
+
+// The eigenvectors of a symmetric 3x3 matrix (columns of `v`), by Jacobi
+// rotations: enough for a facet cloud's principal axes.
+void SymmetricEigen3(double a[3][3], double v[3][3]) {
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j)
+      v[i][j] = i == j ? 1.0 : 0.0;
+  for (int sweep = 0; sweep < 50; ++sweep) {
+    const double off =
+        std::abs(a[0][1]) + std::abs(a[0][2]) + std::abs(a[1][2]);
+    if (off < 1e-30)
+      return;
+    for (int p = 0; p < 2; ++p)
+      for (int q = p + 1; q < 3; ++q) {
+        if (std::abs(a[p][q]) < 1e-300)
+          continue;
+        const double theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+        const double t = (theta >= 0 ? 1.0 : -1.0) /
+                         (std::abs(theta) + std::sqrt(theta * theta + 1.0));
+        const double c = 1.0 / std::sqrt(t * t + 1.0), s = t * c;
+        for (int k = 0; k < 3; ++k) {
+          const double akp = a[k][p], akq = a[k][q];
+          a[k][p] = c * akp - s * akq;
+          a[k][q] = s * akp + c * akq;
+        }
+        for (int k = 0; k < 3; ++k) {
+          const double apk = a[p][k], aqk = a[q][k];
+          a[p][k] = c * apk - s * aqk;
+          a[q][k] = s * apk + c * aqk;
+        }
+        for (int k = 0; k < 3; ++k) {
+          const double vkp = v[k][p], vkq = v[k][q];
+          v[k][p] = c * vkp - s * vkq;
+          v[k][q] = s * vkp + c * vkq;
+        }
+      }
+  }
+}
+
+// A support's rim as segments: each tri6 edge it shares with a boundary
+// facet it does not hold, in two halves through the edge's midside node.
+std::vector<std::pair<glm::dvec3, glm::dvec3>>
+SupportRim(const FemMesh& mesh, const std::vector<int>& tris) {
+  std::vector<char> on(mesh.boundary.size(), 0);
+  for (int t : tris)
+    if (t >= 0 && static_cast<size_t>(t) < on.size())
+      on[t] = 1;
+  // A facet edge by its corner pair: whether a held and a free facet use it.
+  std::map<std::pair<int, int>, std::pair<int, int>> uses; // -> held, mid
+  std::map<std::pair<int, int>, bool> free;
+  static const int kEdge[3][3] = {{0, 1, 3}, {1, 2, 4}, {2, 0, 5}};
+  for (size_t t = 0; t < mesh.boundary.size(); ++t) {
+    const auto& n = mesh.boundary[t].nodes;
+    for (const auto& e : kEdge) {
+      const std::pair<int, int> key{std::min(n[e[0]], n[e[1]]),
+                                    std::max(n[e[0]], n[e[1]])};
+      if (on[t]) {
+        auto& u = uses[key];
+        u.first += 1;
+        u.second = n[e[2]];
+      } else {
+        free[key] = true;
+      }
+    }
+  }
+  std::vector<std::pair<glm::dvec3, glm::dvec3>> out;
+  for (const auto& [key, u] : uses)
+    if (free.count(key)) {
+      const glm::dvec3 mid = mesh.nodes[u.second];
+      out.emplace_back(mesh.nodes[key.first], mid);
+      out.emplace_back(mid, mesh.nodes[key.second]);
+    }
+  return out;
+}
+
+double SegmentDistance(const glm::dvec3& p, const glm::dvec3& a,
+                       const glm::dvec3& b) {
+  const glm::dvec3 ab = b - a;
+  const double len2 = glm::dot(ab, ab);
+  const double t =
+      len2 > 0.0 ? std::clamp(glm::dot(p - a, ab) / len2, 0.0, 1.0) : 0.0;
+  return glm::length(p - (a + t * ab));
+}
+
+} // namespace
+
+double SupportAwayMm(const FemMesh& mesh, const std::vector<int>& tris,
+                     LoadType type, const glm::dvec3& axisOrigin,
+                     const glm::dvec3& axisDirection) {
+  std::vector<glm::dvec3> pts;
+  for (int t : tris)
+    if (t >= 0 && static_cast<size_t>(t) < mesh.boundary.size())
+      for (int k = 0; k < 3; ++k)
+        pts.push_back(mesh.nodes[mesh.boundary[t].nodes[k]]);
+  if (pts.empty())
+    return 0.0;
+  if (type == LoadType::Pin) {
+    // A quarter of the bore's radius: the facets' mean distance from the
+    // axis.
+    const double len = glm::length(axisDirection);
+    if (len <= 0.0)
+      return 0.0;
+    const glm::dvec3 d = axisDirection / len;
+    double r = 0.0;
+    for (const glm::dvec3& p : pts) {
+      const glm::dvec3 v = p - axisOrigin;
+      r += glm::length(v - glm::dot(v, d) * d);
+    }
+    return 0.25 * r / static_cast<double>(pts.size());
+  }
+  // A fixed face: a quarter of its facets' extent along their principal
+  // axes, the largest of the three. A clamp's singular zone is the size of
+  // the section it holds, not of its thinnest side, and the bending stress
+  // a clamped member carries changes along it over that length too.
+  glm::dvec3 c(0.0);
+  for (const glm::dvec3& p : pts)
+    c += p;
+  c /= static_cast<double>(pts.size());
+  double cov[3][3] = {};
+  for (const glm::dvec3& p : pts) {
+    const glm::dvec3 q = p - c;
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j)
+        cov[i][j] += q[i] * q[j];
+  }
+  double axes[3][3];
+  SymmetricEigen3(cov, axes);
+  double largest = 0.0;
+  for (int k = 0; k < 3; ++k) {
+    const glm::dvec3 a(axes[0][k], axes[1][k], axes[2][k]);
+    double lo = 1e300, hi = -1e300;
+    for (const glm::dvec3& p : pts) {
+      const double s = glm::dot(p, a);
+      lo = std::min(lo, s);
+      hi = std::max(hi, s);
+    }
+    largest = std::max(largest, hi - lo);
+  }
+  return 0.25 * largest;
+}
+
+std::vector<int> SupportEdgeZones(const FemMesh& mesh,
+                                  const std::vector<SupportFacets>& supports) {
   const size_t nNodes = mesh.nodes.size();
-  if (results.vonMises.size() != nNodes || supports.empty())
-    return out;
-  // Which support's edge a node is near (0 = none); a support's edge is its
-  // facets' nodes that a boundary facet it does not hold also has.
-  std::vector<int> nearOf(nNodes, -1);
-  std::vector<char> edge(nNodes, 0);
-  std::vector<char> mark(nNodes, 0);
+  std::vector<int> zone(nNodes, -1);
+  if (supports.empty())
+    return {};
+  bool anyRim = false;
   for (size_t si = 0; si < supports.size(); ++si) {
-    std::vector<char> on(mesh.boundary.size(), 0);
-    for (int t : supports[si].tris)
-      if (t >= 0 && static_cast<size_t>(t) < on.size())
-        on[t] = 1;
-    std::fill(mark.begin(), mark.end(), 0);
-    for (size_t t = 0; t < mesh.boundary.size(); ++t)
-      if (on[t])
-        for (int v : mesh.boundary[t].nodes)
-          mark[v] = 1;
-    std::fill(edge.begin(), edge.end(), 0);
-    bool any = false;
-    for (size_t t = 0; t < mesh.boundary.size(); ++t)
-      if (!on[t])
-        for (int v : mesh.boundary[t].nodes)
-          if (mark[v]) {
-            edge[v] = 1;
-            any = true;
-          }
-    if (!any)
+    const auto rim = SupportRim(mesh, supports[si].tris);
+    if (rim.empty())
       continue;
-    // Within one element: every node of a tet that has an edge node.
+    anyRim = true;
+    // At least one element: every node of a tet that has a rim node.
+    std::vector<char> edge(nNodes, 0);
+    {
+      std::vector<char> on(mesh.boundary.size(), 0);
+      for (int t : supports[si].tris)
+        if (t >= 0 && static_cast<size_t>(t) < on.size())
+          on[t] = 1;
+      std::vector<char> held(nNodes, 0);
+      for (size_t t = 0; t < mesh.boundary.size(); ++t)
+        if (on[t])
+          for (int v : mesh.boundary[t].nodes)
+            held[v] = 1;
+      for (size_t t = 0; t < mesh.boundary.size(); ++t)
+        if (!on[t])
+          for (int v : mesh.boundary[t].nodes)
+            if (held[v])
+              edge[v] = 1;
+    }
     for (const auto& tet : mesh.tets) {
       bool touches = false;
       for (int v : tet)
         touches = touches || edge[v];
       if (touches)
         for (int v : tet)
-          if (nearOf[v] < 0)
-            nearOf[v] = static_cast<int>(si);
+          if (zone[v] < 0)
+            zone[v] = static_cast<int>(si);
+    }
+    // Within the support's reach of its rim, in millimetres: a grid of
+    // cells that size holds the rim's segments, so a node looks in its own
+    // cell and the 26 round it.
+    const double reach = supports[si].awayMm;
+    if (reach <= 0.0)
+      continue;
+    const double cell = reach;
+    const auto key = [&](const glm::dvec3& p) {
+      return std::array<long long, 3>{
+          static_cast<long long>(std::floor(p.x / cell)),
+          static_cast<long long>(std::floor(p.y / cell)),
+          static_cast<long long>(std::floor(p.z / cell))};
+    };
+    std::map<std::array<long long, 3>, std::vector<int>> grid;
+    for (size_t s = 0; s < rim.size(); ++s) {
+      const auto a = key(glm::min(rim[s].first, rim[s].second));
+      const auto b = key(glm::max(rim[s].first, rim[s].second));
+      for (long long x = a[0]; x <= b[0]; ++x)
+        for (long long y = a[1]; y <= b[1]; ++y)
+          for (long long z = a[2]; z <= b[2]; ++z)
+            grid[{x, y, z}].push_back(static_cast<int>(s));
+    }
+    for (size_t n = 0; n < nNodes; ++n) {
+      if (zone[n] >= 0)
+        continue;
+      const auto k = key(mesh.nodes[n]);
+      bool near = false;
+      for (long long dx = -1; dx <= 1 && !near; ++dx)
+        for (long long dy = -1; dy <= 1 && !near; ++dy)
+          for (long long dz = -1; dz <= 1 && !near; ++dz) {
+            const auto it = grid.find({k[0] + dx, k[1] + dy, k[2] + dz});
+            if (it == grid.end())
+              continue;
+            for (int s : it->second)
+              if (SegmentDistance(mesh.nodes[n], rim[s].first, rim[s].second) <=
+                  reach) {
+                near = true;
+                break;
+              }
+          }
+      if (near)
+        zone[n] = static_cast<int>(si);
     }
   }
-  const int peak = results.maxVmNode;
-  if (peak < 0 || static_cast<size_t>(peak) >= nNodes || nearOf[peak] < 0)
+  if (!anyRim)
+    return {};
+  return zone;
+}
+
+FemResults::SupportEdgePeak
+PeakAwayFromEdges(const FemMesh& mesh, const std::vector<double>& field,
+                  int peakNode, const std::vector<int>& zones,
+                  const std::vector<FemResults::SupportReaction>& supports) {
+  FemResults::SupportEdgePeak out;
+  const size_t n = mesh.nodes.size();
+  if (zones.size() != n || field.size() != n || peakNode < 0 ||
+      static_cast<size_t>(peakNode) >= n || zones[peakNode] < 0 ||
+      static_cast<size_t>(zones[peakNode]) >= supports.size())
     return out;
   out.flagged = true;
-  out.support = supports[nearOf[peak]].id;
-  out.type = supports[nearOf[peak]].type;
-  for (size_t n = 0; n < nNodes; ++n)
-    if (nearOf[n] < 0 && results.vonMises[n] > out.awayMPa) {
-      out.awayMPa = results.vonMises[n];
-      out.awayAt = mesh.nodes[n];
+  out.support = supports[zones[peakNode]].support;
+  out.type = supports[zones[peakNode]].type;
+  for (size_t i = 0; i < n; ++i)
+    if (zones[i] < 0 && field[i] > out.awayMPa) {
+      out.awayMPa = field[i];
+      out.awayAt = mesh.nodes[i];
     }
   return out;
+}
+
+FemResults::SupportEdgePeak
+FindSupportEdgePeak(const FemMesh& mesh, const FemResults& results,
+                    const std::vector<SupportFacets>& supports) {
+  std::vector<FemResults::SupportReaction> ids;
+  for (const SupportFacets& sf : supports) {
+    FemResults::SupportReaction r;
+    r.support = sf.id;
+    r.type = sf.type;
+    ids.push_back(r);
+  }
+  return PeakAwayFromEdges(mesh, results.vonMises, results.maxVmNode,
+                           SupportEdgeZones(mesh, supports), ids);
 }
 
 } // namespace fem

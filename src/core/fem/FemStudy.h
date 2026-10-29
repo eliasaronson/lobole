@@ -186,6 +186,17 @@ struct ShapeSource {
   bool whole = false;
 };
 
+// Whether a static run checks that its peak has settled
+// (docs/simulation/README.md#a-peak-that-has-settled): Auto runs the
+// refinement loop when the first solve took under the converge_auto_s
+// preference and keeps refining while each step does; Always runs it
+// whatever it costs; Never skips it, and the result says "not checked".
+enum class ConvergeMode { Auto, Always, Never };
+inline constexpr const char* kConvergeModeNames = "auto, always, never";
+const char* ConvergeModeToString(ConvergeMode mode);
+[[nodiscard]] bool ConvergeModeFromString(const std::string& s,
+                                          ConvergeMode& out);
+
 // What a study solves for.
 enum class AnalysisType {
   Static,   // linear-static: stress + displacement under loads
@@ -266,6 +277,9 @@ struct Study {
 
   // Static only: mesh a topology result instead of the body.
   ShapeSource shapeFrom;
+
+  // Static only: whether a run checks its peak has settled (vNEXT).
+  ConvergeMode converge = ConvergeMode::Auto;
 
   // Transient: the most recent mesh/solve error (dangling ref, no fixed
   // support, singular matrix, ...). Never serialized. Empty when healthy.

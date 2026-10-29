@@ -171,6 +171,12 @@ std::string StateOf(const Requirement& r, const std::string& unresolvedWhy,
 // shows these lines and the check logs them, so the two say the same.
 std::string BoundText(const nlohmann::json& row);
 std::vector<std::string> FindingLines(const nlohmann::json& row);
+// A row judged on a study peak that has not settled
+// (docs/simulation/README.md#a-peak-that-has-settled) carries the reason in
+// its evidence's detail, `not_converged`; this is the warning line for it,
+// empty for any other row. FindingLines includes it, for a passing row too,
+// so a green result that rests on an unsettled peak is visible.
+std::string NotConvergedText(const nlohmann::json& row);
 
 // ---- The `expression` measure (docs/requirements/README.md#expression) ----
 //

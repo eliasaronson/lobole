@@ -171,7 +171,8 @@ const MethodDoc RequirementMethods[] = {
      "evidence_revision?:int, input_hash?:string, limit?:number, "
      "unit?:string, value?:number, limit_max?:number, "
      "limit_min?:number}[], summary:{fail:int, pass:int, stale:int, "
-     "unchecked:int, unresolved:int}"},
+     "unchecked:int, unresolved:int}, not_converged?:{id:int, "
+     "name:string, reason:string, state:string}[]"},
     {"check_requirements",
      "Check the requirements {ids?: some of them, async?, recompute?, "
      "outlive_client?}: measure each through the RPC that computes it and "
@@ -186,7 +187,11 @@ const MethodDoc RequirementMethods[] = {
      "without it the call waits for the job and answers with the rows. "
      "Either is cancelled with its client unless outlive_client; nothing "
      "to measure answers at once. A check visits each requirement's tab "
-     "and comes back to the one it started on.",
+     "and comes back to the one it started on. A requirement read from a "
+     "study peak that has not converged (docs/simulation/README.md"
+     "#a-peak-that-has-settled) is judged on the value it has, carries "
+     "`not_converged` (the reason) in its detail, and is listed again "
+     "under `not_converged`.",
      "async, ids, outlive_client, recompute", NotInBatch,
      "all_pass?:bool, checked?:int, receipt?:{claims:object[], "
      "schema:string, standing:string, summary:string}, "
@@ -196,7 +201,8 @@ const MethodDoc RequirementMethods[] = {
      "source?:string, state:string, unit?:string, value?:number, "
      "limit_max?:number, limit_min?:number, note?:string}[], "
      "reused?:int, summary:{fail:int, pass:int, stale:int, "
-     "unchecked:int, unresolved:int}, checking?:int, job?:int, "
+     "unchecked:int, unresolved:int}, not_converged?:{id:int, "
+     "name:string, reason:string, state:string}[], checking?:int, job?:int, "
      "kind?:string, started?:bool"},
     {"design_sweep",
      "Regenerate the model over ranges of its variables, on copies, and say "
@@ -877,6 +883,20 @@ json RowsJson(ui::AppState& state, const std::vector<uint64_t>* only) {
     if (!only || std::find(only->begin(), only->end(), r.id) != only->end())
       rows.push_back(Row(state, r));
   json out{{"requirements", rows}, {"summary", Summary(rows)}};
+  // Requirements judged on a study peak that has not settled, under their
+  // own heading (docs/simulation/README.md#a-peak-that-has-settled): a
+  // green row that rests on one is not hidden among the settled.
+  json unsettled = json::array();
+  for (const json& r : rows) {
+    const std::string why = req::NotConvergedText(r);
+    if (!why.empty())
+      unsettled.push_back({{"id", r.at("id")},
+                           {"name", r.at("name")},
+                           {"state", r.at("state")},
+                           {"reason", r.at("detail").at("not_converged")}});
+  }
+  if (!unsettled.empty())
+    out["not_converged"] = std::move(unsettled);
   bool all = !rows.empty();
   for (const json& r : rows)
     all = all && r.at("state") == "pass";
@@ -1050,6 +1070,20 @@ double Magnitude(const json& v) {
   return std::sqrt(s);
 }
 
+// A reading of a study's peak stress whose peak has not settled
+// (docs/simulation/README.md#a-peak-that-has-settled) is judged on the value
+// it has, and carries the reason as `not_converged` in its detail.
+void NoteConvergence(const json& results, Taken& t) {
+  if (!results.contains("convergence"))
+    return;
+  const json& c = results.at("convergence");
+  if (c.value("status", std::string()) == "converged")
+    return;
+  if (!t.detail.is_object())
+    t.detail = json::object();
+  t.detail["not_converged"] = c.value("reason", std::string("not converged"));
+}
+
 Taken MeasureStudyProbe(ui::AppState& state, const json& m, const Ctx& ctx) {
   Taken t;
   const uint64_t sid = m.at("study").get<uint64_t>();
@@ -1101,6 +1135,8 @@ Taken MeasureStudyProbe(ui::AppState& state, const json& m, const Ctx& ctx) {
     }
     if (r.contains("displacement_at_mm"))
       t.detail["displacement_at_mm"] = r.at("displacement_at_mm");
+    if (q == "von_mises_max" || q == "von_mises_mean")
+      NoteConvergence(Call(state, "study_results", {{"id", sid}}), t);
   } else {
     // A formula over several faces' readings: what a mechanism carried by
     // more than one face did (the pan/tilt head's lens, held by two bearing
@@ -1159,6 +1195,8 @@ Taken MeasureStudyResult(ui::AppState& state, const json& m, const Ctx& ctx) {
       throw std::runtime_error("the study has no load case " + want.dump());
   }
   const std::string q = m.at("quantity").get<std::string>();
+  if (q != "max_displacement")
+    NoteConvergence(r, t);
   if (q == "max_displacement") {
     t.value = src->at("max_displacement_mm").at("value").get<double>();
     t.unit = "mm";

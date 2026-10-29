@@ -17,6 +17,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <mutex>
+#include <vector>
 
 #ifdef HAVE_NETGEN
 // Netgen's C++ meshing interface. Every netgen symbol is confined to this
@@ -143,7 +145,70 @@ std::string DescribeFace(const TopTools_IndexedMapOfShape& faceMap,
 
 #ifdef HAVE_NETGEN
 
+namespace {
+
+// Netgen keeps every shape's meshing properties (a face's maxh among them)
+// in a STATIC table keyed by shape (OCCGeometry::global_shape_property_
+// indices / global_shape_properties), shared by every mesh in the process
+// and not thread-safe. OCCGeometry's constructor copies a shape's entry into
+// its own GeometryFace, and OCCGeometry::MeshFace adds an entry for every
+// face it meshes, refined or not. So one lock covers a whole Mesh() -- from
+// setting the properties until the volume mesh and its second order are done
+// -- and every entry for a shape of ours is taken out again when it returns
+// (docs/simulation/README.md#meshing).
+std::mutex& NetgenTableMutex() {
+  static std::mutex m;
+  return m;
+}
+
+// Netgen has no remove call: the indexed map is rebuilt without the shapes
+// of `shape`, each dropped entry reset to the default properties first, so
+// nothing of ours outlives the mesh (the table would otherwise grow with
+// every run and hold every meshed copy alive). Caller holds the lock.
+void ForgetNetgenProperties(const TopoDS_Shape& shape) {
+  TopTools_IndexedMapOfShape ours;
+  TopExp::MapShapes(shape, ours);
+  ours.Add(shape);
+  auto& index = netgen::OCCGeometry::global_shape_property_indices;
+  auto& props = netgen::OCCGeometry::global_shape_properties;
+  bool any = false;
+  for (int i = 1; i <= index.Extent() && !any; ++i)
+    any = ours.Contains(index(i));
+  if (!any)
+    return;
+  TopTools_IndexedMapOfShape keptIndex;
+  std::vector<netgen::ShapeProperties> keptProps;
+  for (int i = 1; i <= index.Extent(); ++i) {
+    if (ours.Contains(index(i))) {
+      if (static_cast<size_t>(i - 1) < props.size())
+        props[i - 1] = netgen::ShapeProperties{};
+      continue;
+    }
+    keptIndex.Add(index(i));
+    keptProps.push_back(static_cast<size_t>(i - 1) < props.size()
+                            ? std::move(props[i - 1])
+                            : netgen::ShapeProperties{});
+  }
+  index = std::move(keptIndex);
+  props = std::move(keptProps);
+}
+
+} // namespace
+
 bool Available() { return true; }
+
+int NetgenPropertyEntries(const TopoDS_Shape& shape) {
+  std::lock_guard<std::mutex> lock(NetgenTableMutex());
+  TopTools_IndexedMapOfShape ours;
+  TopExp::MapShapes(shape, ours);
+  ours.Add(shape);
+  const auto& index = netgen::OCCGeometry::global_shape_property_indices;
+  int n = 0;
+  for (int i = 1; i <= index.Extent(); ++i)
+    if (ours.Contains(index(i)))
+      ++n;
+  return n;
+}
 
 std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
                             const MeshSettings& settings, std::string* error) {
@@ -161,20 +226,41 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
   TopTools_IndexedMapOfShape faceMap;
   TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
 
-  try {
-    netgen::OCCGeometry geo(shape);
+  // The property table, held for the whole mesh and emptied of our shapes
+  // on every way out, an exception's included.
+  std::lock_guard<std::mutex> lock(NetgenTableMutex());
+  struct Forget {
+    const TopoDS_Shape& shape;
+    ~Forget() { ForgetNetgenProperties(shape); }
+  } forget{shape};
 
+  try {
     netgen::MeshingParameters mp;
     mp.maxh = settings.maxSize > 0 ? settings.maxSize : AutoSize(shape);
     mp.uselocalh = true;
     mp.optsteps3d = 3;
 
-    // Per-face size overrides (faceIndex is 0-based explorer order; netgen's
-    // SetFaceMaxH is 1-based over the same fmap).
+    // Per-face refinements through the face's shape properties, as Netgen's
+    // python `face.maxh` sets them: Netgen grades that size into the face's
+    // edges and the volume behind it. The legacy SetFaceMaxH array sized the
+    // face's own triangles only, so a fine face met coarse tets head on and
+    // left slivers (one gave a peak 50 % high). Set BEFORE the geometry is
+    // built: OCCGeometry's constructor copies each face's properties then.
+    // A refinement also takes the grading from Netgen's 0.3 to 0.2, which
+    // lifts the worst tet of a refined hole from ~0.13-0.25 to ~0.35.
+    bool refined = false;
     for (const auto& [faceIndex, size] : settings.faceSizes) {
-      if (size > 0 && faceIndex >= 0 && faceIndex < geo.fmap.Extent())
-        geo.SetFaceMaxH(faceIndex + 1, size, mp);
+      if (size <= 0 || faceIndex < 0 || faceIndex >= faceMap.Extent())
+        continue;
+      netgen::ShapeProperties& prop =
+          netgen::OCCGeometry::GetProperties(faceMap(faceIndex + 1));
+      prop.maxh = std::min(prop.maxh, size);
+      refined = true;
     }
+    if (refined)
+      mp.grading = 0.2;
+
+    netgen::OCCGeometry geo(shape);
 
     auto ngmesh = std::make_shared<netgen::Mesh>();
     // Non-owning geometry handle: the mesh must not free our stack geometry.
@@ -275,6 +361,8 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
 #else // !HAVE_NETGEN
 
 bool Available() { return false; }
+
+int NetgenPropertyEntries(const TopoDS_Shape&) { return 0; }
 
 std::optional<FemMesh> Mesh(const TopoDS_Shape&, const MeshSettings&,
                             std::string* error) {

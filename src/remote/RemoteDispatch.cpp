@@ -638,7 +638,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "hud, renders, reset, window", remote::NeedsRenderer},
     {"get_settings", "Read the user preferences (docs/ui/settings.md).", "",
      remote::NoFlags,
-     "autosave_interval:number, calculix_path:string, devices:string[], "
+     "autosave_interval:number, calculix_path:string, converge_auto_s:number, "
+     "devices:string[], "
      "git_user_email:string, git_user_name:string, gpu_device:string, "
      "idle_throttle:bool, keys:object, lock_lights_to_model:bool, "
      "mesh_representation:string, "

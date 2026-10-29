@@ -97,6 +97,10 @@ json StudyToJson(const fem::Study& s) {
   j["mesh_size"] = s.meshSize;
   if (!s.meshSizeExpr.empty())
     j["mesh_size_expr"] = s.meshSizeExpr;
+  // Whether a run checks its peak has settled (vNEXT): absent at the
+  // default, auto, so earlier files re-save byte-identically.
+  if (s.converge != fem::ConvergeMode::Auto)
+    j["converge"] = fem::ConvergeModeToString(s.converge);
 
   // Assembly studies (v106): the participants and their roles. Absent on a
   // part study, so every earlier study file re-saves byte-identically.
@@ -244,6 +248,7 @@ fem::Study StudyFromJson(const json& j) {
                               "shape_from",
                               "mesh_size",
                               "mesh_size_expr",
+                              "converge",
                               "participants",
                               "refinements",
                               "loads"},
@@ -350,6 +355,15 @@ fem::Study StudyFromJson(const json& j) {
   }
   s.meshSize = j.value("mesh_size", 0.0);
   s.meshSizeExpr = j.value("mesh_size_expr", std::string{});
+  if (j.contains("converge")) { // vNEXT
+    const std::string c = j.at("converge").get<std::string>();
+    if (!fem::ConvergeModeFromString(c, s.converge))
+      throw std::runtime_error("study converge '" + c +
+                               "' is not one of: " + fem::kConvergeModeNames);
+    if (s.type != fem::AnalysisType::Static)
+      throw std::runtime_error("study " + std::to_string(s.id) +
+                               ": only a static study takes converge");
+  }
 
   for (const json& pj : j.value("participants", json::array())) {
     readctx::RefuseUnknownKeys(
@@ -834,6 +848,76 @@ void CheckBody(const fem::StudyBodyResult& b, const std::string& what) {
 
 } // namespace
 
+namespace {
+
+// A static run's convergence check (vNEXT), saved with its result.
+json ConvergenceToJson(const fem::Convergence& c) {
+  json out = {{"checked", c.checked}};
+  if (!c.why.empty())
+    out["why"] = c.why;
+  if (!c.checked)
+    return out;
+  out["converged"] = c.converged;
+  if (!c.stopped.empty())
+    out["stopped"] = c.stopped;
+  if (c.stoppedSeconds > 0.0)
+    out["stopped_seconds"] = c.stoppedSeconds;
+  out["last_change_pct"] = c.lastChangePct;
+  if (c.hasLayerNormal)
+    out["layer_normal"] = Vec3ToJson(c.layerNormal);
+  json steps = json::array();
+  for (const fem::ConvergenceStep& st : c.steps) {
+    json refined = json::array();
+    for (const fem::ConvergenceRefinement& r : st.refined)
+      refined.push_back(
+          {{"body", r.body}, {"face", r.face}, {"size_mm", r.sizeMm}});
+    json peaks = json::array();
+    for (const fem::ConvergencePeak& p : st.peaks) {
+      json pj = {{"body", p.body}, {"quantity", p.quantity}, {"mpa", p.mpa}};
+      if (p.away)
+        pj["away"] = true;
+      peaks.push_back(std::move(pj));
+    }
+    steps.push_back({{"refined", std::move(refined)},
+                     {"nodes", st.nodes},
+                     {"seconds", st.seconds},
+                     {"peaks", std::move(peaks)}});
+  }
+  out["steps"] = std::move(steps);
+  return out;
+}
+
+fem::Convergence ConvergenceFromJson(const json& j) {
+  fem::Convergence c;
+  c.checked = j.value("checked", false);
+  c.why = j.value("why", std::string{});
+  c.converged = j.value("converged", false);
+  c.stopped = j.value("stopped", std::string{});
+  c.stoppedSeconds = j.value("stopped_seconds", 0.0);
+  c.lastChangePct = j.value("last_change_pct", 0.0);
+  if (j.contains("layer_normal")) {
+    c.hasLayerNormal = true;
+    c.layerNormal = Vec3FromJson(j.at("layer_normal"));
+  }
+  for (const json& sj : j.value("steps", json::array())) {
+    fem::ConvergenceStep st;
+    for (const json& rj : sj.value("refined", json::array()))
+      st.refined.push_back({rj.at("body").get<std::string>(),
+                            rj.at("face").get<int>(),
+                            rj.at("size_mm").get<double>()});
+    st.nodes = sj.value("nodes", std::size_t{0});
+    st.seconds = sj.value("seconds", 0.0);
+    for (const json& pj : sj.value("peaks", json::array()))
+      st.peaks.push_back({pj.at("body").get<std::string>(),
+                          pj.at("quantity").get<std::string>(),
+                          pj.value("away", false), pj.at("mpa").get<double>()});
+    c.steps.push_back(std::move(st));
+  }
+  return c;
+}
+
+} // namespace
+
 bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
   if (runtime.bodies.empty())
     return false; // nothing was solved
@@ -860,6 +944,8 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
   // nothing here, so every one saved before re-saves byte for byte.
   if (rt.solver.rfind("calculix", 0) == 0)
     out["solver"] = rt.solver;
+  if (rt.convergence.checked || !rt.convergence.why.empty())
+    out["convergence"] = ConvergenceToJson(rt.convergence);
   if (!rt.topology)
     out["maxima"] = {{"von_mises", rt.maxVonMises},
                      {"von_mises_at", Vec3ToJson(rt.maxVmAt)},
@@ -935,6 +1021,21 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
       bj["tet_domain"] = w.Index(b.mesh.tetDomain);
     if (b.mesh.stats.worstQuality != 0.0)
       bj["worst_quality"] = b.mesh.stats.worstQuality;
+    // vNEXT: which support's edge each node lies near, one past its index
+    // (0 = none), so a field read later is flagged as von Mises was.
+    if (b.supportEdgeZone.size() == b.mesh.nodes.size() &&
+        !b.supportEdgeZone.empty()) {
+      std::vector<int> zone(b.supportEdgeZone.size());
+      for (size_t i = 0; i < zone.size(); ++i)
+        zone[i] = b.supportEdgeZone[i] + 1;
+      bj["support_edge_zone"] = w.Index(zone);
+      // Whose edge each zone is: a support's, or a load's on part of a face.
+      json owners = json::array();
+      for (const fem::FemResults::SupportReaction& o : b.edgeOwners)
+        owners.push_back(
+            {{"load", o.support}, {"type", fem::LoadTypeToString(o.type)}});
+      bj["support_edge_owners"] = std::move(owners);
+    }
     if (rt.topology) {
       bj["density"] = w.F32(b.density);
     } else if (!b.cases.empty()) {
@@ -985,6 +1086,8 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
                                "' (a saved result names only a CalculiX "
                                "solve, as 'calculix 2.NN')");
   }
+  if (j.contains("convergence")) // vNEXT
+    rt.convergence = ConvergenceFromJson(j.at("convergence"));
   if (j.contains("maxima")) {
     const json& m = j.at("maxima");
     rt.maxVonMises = m.value("von_mises", 0.0);
@@ -1056,6 +1159,32 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     b.mesh.stats.worstQuality = bj.value("worst_quality", 0.0);
     if (bj.contains("density"))
       b.density = f.Reals(bj.at("density"), "density");
+    if (bj.contains("support_edge_zone")) { // vNEXT
+      b.supportEdgeZone =
+          f.Indices(bj.at("support_edge_zone"), "support_edge_zone");
+      if (b.supportEdgeZone.size() != b.mesh.nodes.size())
+        throw std::runtime_error(what + ": body '" + b.bodyName + "' has " +
+                                 std::to_string(b.supportEdgeZone.size()) +
+                                 " support-edge zones for " +
+                                 std::to_string(b.mesh.nodes.size()) +
+                                 " nodes");
+      for (int& z : b.supportEdgeZone)
+        z -= 1;
+      for (const json& oj : bj.value("support_edge_owners", json::array())) {
+        fem::FemResults::SupportReaction o;
+        o.support = oj.at("load").get<uint64_t>();
+        const std::string t = oj.at("type").get<std::string>();
+        if (!fem::LoadTypeFromString(t, o.type))
+          throw std::runtime_error(what + ": an edge's load type '" + t +
+                                   "' is not one of: " + fem::kLoadTypeNames);
+        b.edgeOwners.push_back(o);
+      }
+      for (int z : b.supportEdgeZone)
+        if (z >= static_cast<int>(b.edgeOwners.size()))
+          throw std::runtime_error(
+              what + ": body '" + b.bodyName + "' names edge " +
+              std::to_string(z) + " of " + std::to_string(b.edgeOwners.size()));
+    }
     for (const json& cj : bj.value("cases", json::array()))
       b.cases.push_back(FieldsFromJson(cj, f));
     if (!b.cases.empty())

@@ -1093,6 +1093,23 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
             want.at(1).get<std::string>());
     }
   }
+  // vNEXT: a static study's `converge`. It changes no volume, and a mode
+  // dropped on load would quietly run the check the file turned off (or
+  // skip one it asked for); each [study name, converge] must hold, the
+  // default included.
+  if (expect.contains("study_converge")) {
+    for (const auto& want : expect.at("study_converge")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("study " << name);
+      const fem::Study* found = nullptr;
+      for (const fem::Study& st : doc.GetStudies())
+        if (st.name == name)
+          found = &st;
+      REQUIRE(found != nullptr);
+      CHECK(std::string(fem::ConvergeModeToString(found->converge)) ==
+            want.at(1).get<std::string>());
+    }
+  }
   // v168: an extrude's twist. A twisted rectangle has the prism's volume, so
   // the volumes above cannot see a twist dropped on load; each [extrude
   // name, twist_deg, twist_expr, herringbone] must hold.

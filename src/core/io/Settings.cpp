@@ -362,6 +362,22 @@ const Field kFields[] = {
      {},
      0.0f,
      3600.0f},
+    // A static study's convergence check on `auto`
+    // (docs/simulation/README.md#a-peak-that-has-settled).
+    {"converge_auto_s",
+     "Simulation",
+     "Converge peaks under",
+     "Seconds. A static study on 'auto' refines round its peak stress until "
+     "it settles while a solve takes less than this; a longer one is "
+     "reported unconverged instead of waiting.",
+     Tier::NextTime,
+     &Settings::convergeAutoS,
+     {},
+     {},
+     0.0f,
+     3600.0f,
+     1.0f,
+     "s"},
     // What a new STL or OBJ import becomes
     // (docs/interchange/README.md#mesh-bodies); an Import that names its
     // own representation keeps it.
@@ -563,6 +579,7 @@ bool Settings::operator==(const Settings& other) const {
          ssao == other.ssao && shadowMap == other.shadowMap &&
          idleThrottle == other.idleThrottle &&
          autosaveInterval == other.autosaveInterval &&
+         convergeAutoS == other.convergeAutoS &&
          terminalPanel == other.terminalPanel &&
          meshRepresentation == other.meshRepresentation &&
          calculixPath == other.calculixPath &&

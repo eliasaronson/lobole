@@ -17,7 +17,7 @@ namespace {
 // The algorithm's version: a change to what a solve computes bumps it, so no
 // answer stored before (topology results are saved with the project) is
 // handed out as one from after.
-constexpr const char* kFemAlgorithm = "fem/3";
+constexpr const char* kFemAlgorithm = "fem/4";
 
 // The study as evaluated: what the mesher and solver are handed.
 nlohmann::json Definition(const Study& study) {
@@ -45,6 +45,26 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
     h.U64(src != nullptr ? src->densityDigest : 0);
   }
   return h.Digest();
+}
+
+uint64_t RunInputKey(uint64_t studyKeyWithMode,
+                     const ConvergeOptions& converge) {
+  if (studyKeyWithMode == 0 || !converge.hasLayerNormal ||
+      converge.mode == ConvergeMode::Never)
+    return studyKeyWithMode;
+  inputhash::Hasher h;
+  h.U64(studyKeyWithMode);
+  h.Str("layer_normal");
+  for (int k = 0; k < 3; ++k)
+    h.F64(converge.layerNormal[k]);
+  return h.Digest();
+}
+
+uint64_t RunInputKey(const Document& doc, const Study& study,
+                     const ConvergeOptions& converge) {
+  Study withMode = study;
+  withMode.converge = converge.mode;
+  return RunInputKey(StudyInputKey(doc, withMode), converge);
 }
 
 void RestampByInputs(Document& doc) {

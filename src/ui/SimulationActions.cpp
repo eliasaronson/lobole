@@ -85,7 +85,8 @@ void AppendStudyMarker(const AppState& state,
     lines.push_back(LineVertex(at + a * L, col));
   }
 }
-bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
+bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error,
+                      const fem::ConvergeOptions& converge) {
   fem::Study* s = doc.StudyForRun(studyId);
   if (!s) {
     if (error)
@@ -93,12 +94,12 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
     return false;
   }
   fem::StudyRuntime rt;
-  const uint64_t inputHash = fem::StudyInputKey(doc, *s);
+  const uint64_t inputHash = fem::RunInputKey(doc, *s, converge);
   // A topology study runs the SIMP optimizer (minutes, serialized result); a
   // static/modal study runs the linear solver (seconds, transient result).
   const bool ok = s->type == fem::AnalysisType::Topology
                       ? fem::RunTopology(doc, *s, rt, error)
-                      : fem::RunStudy(doc, *s, rt, error);
+                      : fem::RunStudy(doc, *s, rt, converge, error);
   if (!ok)
     return false;
   rt.solvedAtVersion = doc.Version();
@@ -140,29 +141,33 @@ bool CalculixRunFor(const AppState& state, const fem::Study& s,
 }
 
 bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
-                      std::string* error, double timeoutSeconds) {
+                      std::string* error, double timeoutSeconds,
+                      const JobStart* job) {
   fem::Study* s = doc.StudyForRun(studyId);
   if (!s) {
     if (error)
       *error = "no such study";
     return false;
   }
+  const fem::ConvergeOptions converge = ConvergeOptionsFor(state, *s, job);
   fem::SolveOptions options;
   if (!CalculixRunFor(state, *s, timeoutSeconds, options, error)) {
     s->error = error ? *error : "";
     return false;
   }
   if (!options.calculix)
-    return RunStudyAndCache(doc, studyId, error);
-  // On CalculiX: the in-house pipeline up to the solve, then ccx.
-  const uint64_t inputHash = fem::StudyInputKey(doc, *s);
+    return RunStudyAndCache(doc, studyId, error, converge);
+  // On CalculiX: the in-house pipeline up to the solve, then ccx, and the
+  // convergence check re-solving on ccx at each step.
+  const uint64_t inputHash = fem::RunInputKey(doc, *s, converge);
+  fem::StudyPlan plan;
+  if (!fem::PlanStudy(doc, *s, plan, error))
+    return false;
   fem::StudyJobInput input;
   fem::StudyRuntime rt;
-  if (!fem::PrepareStudy(doc, *s, input, error))
-    return false;
   options.cancelled = state.rpcCallerGone;
   const auto started = std::chrono::steady_clock::now();
-  if (!fem::SolvePreparedStudy(input, rt, error, options)) {
+  if (!fem::SolveConverged(plan, input, rt, converge, error, options)) {
     s->error = error ? *error : "solve failed";
     return false;
   }
@@ -175,17 +180,41 @@ bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
   return true;
 }
 
+fem::ConvergeOptions ConvergeOptionsFor(const AppState& state,
+                                        const fem::Study& study,
+                                        const JobStart* job) {
+  fem::ConvergeOptions o;
+  o.mode = job != nullptr && job->converge >= 0
+               ? static_cast<fem::ConvergeMode>(job->converge)
+               : study.converge;
+  o.autoSeconds = state.settings.convergeAutoS;
+  if (job != nullptr && job->hasLayerNormal) {
+    o.hasLayerNormal = true;
+    o.layerNormal = glm::dvec3(job->layerNormal[0], job->layerNormal[1],
+                               job->layerNormal[2]);
+  }
+  return o;
+}
+
 uint64_t StudyInputHash(AppState& state, const Document* doc,
-                        const AssemblyDocument* asmDoc, uint64_t studyId) {
+                        const AssemblyDocument* asmDoc, uint64_t studyId,
+                        const JobStart* job) {
   if (doc != nullptr) {
     const fem::Study* s = doc->FindStudy(studyId);
-    return s ? fem::StudyInputKey(*doc, *s) : 0;
+    return s ? fem::RunInputKey(*doc, *s, ConvergeOptionsFor(state, *s, job))
+             : 0;
   }
   if (asmDoc != nullptr) {
     const fem::Study* s = asmDoc->FindStudy(studyId);
-    return s ? fem::AssemblyStudyInputKey(*asmDoc, *s,
-                                          AssemblyStudyContextFor(state))
-             : 0;
+    if (s == nullptr)
+      return 0;
+    const fem::ConvergeOptions o = ConvergeOptionsFor(state, *s, job);
+    fem::Study withMode = *s;
+    withMode.converge = o.mode;
+    return fem::RunInputKey(
+        fem::AssemblyStudyInputKey(*asmDoc, withMode,
+                                   AssemblyStudyContextFor(state)),
+        o);
   }
   return 0;
 }
@@ -194,7 +223,7 @@ bool ReuseStudyResult(AppState& state, Document* doc, AssemblyDocument* asmDoc,
                       uint64_t studyId, JobStart* job) {
   if (job != nullptr && job->recompute)
     return false;
-  const uint64_t hash = StudyInputHash(state, doc, asmDoc, studyId);
+  const uint64_t hash = StudyInputHash(state, doc, asmDoc, studyId, job);
   if (hash == 0)
     return false;
   // The study's own result first (a reopened project's topology result is
@@ -548,7 +577,8 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
     s->error = error ? *error : "";
     return false;
   }
-  const uint64_t inputHash = fem::StudyInputKey(doc, *s);
+  const fem::ConvergeOptions converge = ConvergeOptionsFor(state, *s, jobStart);
+  const uint64_t inputHash = fem::RunInputKey(doc, *s, converge);
 
   // Plan on this thread — expressions, face refs, materials need the
   // Document. The worker meshes the plan's copied shapes and solves; it
@@ -574,15 +604,14 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
   solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get());
-  bg->thread = std::thread([job, raw, solveOptions]() {
+  bg->thread = std::thread([job, raw, solveOptions, converge]() {
     ArmOccSignalHandlers(); // OCC's handlers are per thread
     std::string err;
-    if (!fem::MeshPlannedStudy(job->plan, job->input, &err))
-      job->error = err.empty() ? "meshing failed" : err;
-    else if (!raw->cancel.load() &&
-             !fem::SolvePreparedStudy(job->input, job->runtime, &err,
-                                      solveOptions) &&
-             !raw->cancel.load()) // a cancel inside the solve is a cancel
+    // Mesh, solve, and settle the peak (docs/simulation/README.md
+    // #a-peak-that-has-settled); a cancel inside it is a cancel.
+    if (!fem::SolveConverged(job->plan, job->input, job->runtime, converge,
+                             &err, solveOptions) &&
+        !raw->cancel.load())
       job->error = err.empty() ? "solve failed" : err;
     raw->error = job->error;
     raw->done.store(true); // last
@@ -1139,7 +1168,7 @@ bool PlanForRun(AppState& state, AssemblyDocument& asmDoc, uint64_t studyId,
 
 bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
                               uint64_t studyId, std::string* error,
-                              double timeoutSeconds) {
+                              double timeoutSeconds, const JobStart* job) {
   fem::StudyPlan plan;
   fem::Study* s = nullptr;
   fem::SolveOptions options;
@@ -1154,12 +1183,12 @@ bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
     return false;
   const auto partVersions = AssemblyStudyPartVersions(state, asmDoc, *s);
   const uint64_t inputHash =
-      fem::AssemblyStudyInputKey(asmDoc, *s, AssemblyStudyContextFor(state));
+      StudyInputHash(state, nullptr, &asmDoc, studyId, job);
+  const fem::ConvergeOptions converge = ConvergeOptionsFor(state, *s, job);
   fem::StudyJobInput input;
   fem::StudyRuntime rt;
   std::string err;
-  if (!fem::MeshPlannedStudy(plan, input, &err) ||
-      !fem::SolvePreparedStudy(input, rt, &err, options)) {
+  if (!fem::SolveConverged(plan, input, rt, converge, &err, options)) {
     s->error = err;
     if (error)
       *error = err;
@@ -1202,7 +1231,8 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
   if (!PlanForRun(state, asmDoc, studyId, job->plan, &s, error))
     return false;
   const uint64_t inputHash =
-      fem::AssemblyStudyInputKey(asmDoc, *s, AssemblyStudyContextFor(state));
+      StudyInputHash(state, nullptr, &asmDoc, studyId, jobStart);
+  const fem::ConvergeOptions converge = ConvergeOptionsFor(state, *s, jobStart);
   job->studyId = studyId;
   job->assemblySlotId = ActiveSlotId(state);
   job->partVersions = AssemblyStudyPartVersions(state, asmDoc, *s);
@@ -1218,15 +1248,12 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
   solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get());
-  bg->thread = std::thread([job, raw, solveOptions]() {
+  bg->thread = std::thread([job, raw, solveOptions, converge]() {
     ArmOccSignalHandlers();
     std::string err;
-    if (!fem::MeshPlannedStudy(job->plan, job->input, &err))
-      job->error = err.empty() ? "meshing failed" : err;
-    else if (!raw->cancel.load() &&
-             !fem::SolvePreparedStudy(job->input, job->runtime, &err,
-                                      solveOptions) &&
-             !raw->cancel.load()) // a cancel inside the solve is a cancel
+    if (!fem::SolveConverged(job->plan, job->input, job->runtime, converge,
+                             &err, solveOptions) &&
+        !raw->cancel.load()) // a cancel inside the solve is a cancel
       job->error = err.empty() ? "solve failed" : err;
     raw->error = job->error;
     raw->done.store(true);

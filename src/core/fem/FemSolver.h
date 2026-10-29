@@ -101,10 +101,11 @@ struct FemResults {
     double faceAreaMm2 = 0.0;
   };
   std::vector<SupportReaction> reactions;
-  // The peak von Mises within one element of a support's edge
+  // The peak von Mises near a support's edge
   // (docs/simulation/README.md#a-peak-on-a-supports-edge): `flagged` with
-  // the support and the largest von Mises farther than that from every
-  // support's edge (`awayMPa` at `awayAt`; 0 when no node is that far).
+  // the support and the largest von Mises farther than that support's reach
+  // (SupportAwayMm) from every support's edge (`awayMPa` at `awayAt`; 0 when
+  // no node is that far).
   struct SupportEdgePeak {
     bool flagged = false;
     uint64_t support = 0;
@@ -282,10 +283,36 @@ struct SupportFacets {
   uint64_t id = 0;
   LoadType type = LoadType::Fixed;
   std::vector<int> tris;
+  // How far from its edge a node still counts as ON it, mm (SupportAwayMm);
+  // 0 = one element.
+  double awayMm = 0.0;
 };
 FemResults::SupportEdgePeak
 FindSupportEdgePeak(const FemMesh& mesh, const FemResults& results,
                     const std::vector<SupportFacets>& supports);
+
+// How far a support's edge singularity reaches, in mm, derived from the
+// support (docs/simulation/README.md#a-peak-on-a-supports-edge): a pin
+// (`axis` its axis, origin and unit direction) a quarter of its bore's
+// radius; a fixed face a quarter of its facets' largest extent.
+double SupportAwayMm(const FemMesh& mesh, const std::vector<int>& tris,
+                     LoadType type, const glm::dvec3& axisOrigin,
+                     const glm::dvec3& axisDirection);
+// Per node, the index (into `supports`, which is also the result's
+// `reactions` order) of the support whose edge it lies near, else -1: within
+// the support's awayMm of an edge node, and never less than one element (a
+// node of a tet that has an edge node). Needs the tets; a solved mesh has
+// them.
+std::vector<int> SupportEdgeZones(const FemMesh& mesh,
+                                  const std::vector<SupportFacets>& supports);
+// A field's peak against those zones: flagged when the node `peakNode`
+// lies in one, with the support (`supports[zone]`, a result's reactions) and
+// the field's largest value outside every zone. Unflagged when the zones are
+// empty or do not match the field.
+FemResults::SupportEdgePeak
+PeakAwayFromEdges(const FemMesh& mesh, const std::vector<double>& field,
+                  int peakNode, const std::vector<int>& zones,
+                  const std::vector<FemResults::SupportReaction>& supports);
 
 // Solves the generalized eigenproblem K phi = omega^2 M phi for the lowest
 // `numModes` natural frequencies + mode shapes (consistent mass matrix). Needs
@@ -324,6 +351,49 @@ std::array<double, 6> Tet10Stress(const std::array<glm::dvec3, 10>& nodes,
 
 // ---- Study orchestration --------------------------------------------------
 
+// A static run's convergence check (docs/simulation/README.md
+// #a-peak-that-has-settled). Step 0 is the first solve; each later step
+// halved the element size on the faces its governing peaks lie on, re-meshed
+// and re-solved. A governing peak is von Mises and, for a printed material,
+// the stress across the layers (along the run's layer normal; without one,
+// the largest principal stress, which bounds it in every direction); a peak
+// on a support's edge is read as its away value.
+struct ConvergencePeak {
+  std::string body;
+  std::string quantity; // von_mises | across_layers | max_principal
+  bool away = false;    // the value away from a support's edge
+  double mpa = 0.0;
+};
+struct ConvergenceRefinement {
+  std::string body;
+  int face = -1; // the body's face index (TopExp_Explorer order)
+  double sizeMm = 0.0;
+};
+struct ConvergenceStep {
+  std::vector<ConvergenceRefinement> refined; // empty on step 0
+  std::size_t nodes = 0;                      // over every body
+  double seconds = 0.0;                       // meshing and solving
+  std::vector<ConvergencePeak> peaks;
+};
+struct Convergence {
+  // false: the loop did not run, and `why` says why ("not asked" for
+  // converge: never, a modal study, a shape study, ...).
+  bool checked = false;
+  std::string why;
+  bool converged = false;
+  // Why it ended unconverged: "time" (the next step would run past
+  // converge_auto_s; `stoppedSeconds` is the step that set that), "steps"
+  // (four refinements and still moving), "failed" (a step did not mesh or
+  // solve; `why` says what, and the result is the last step that did).
+  std::string stopped;
+  double stoppedSeconds = 0.0;
+  double lastChangePct = 0.0; // the largest peak's change over the last step
+  // The direction the across-layers peak was read along, when one was given.
+  bool hasLayerNormal = false;
+  glm::dvec3 layerNormal{0.0};
+  std::vector<ConvergenceStep> steps;
+};
+
 // One body of a study: its mesh and solved fields (all derived/transient).
 // For a topology study `results` is empty and `density` carries the optimized
 // per-tet density (parallel to mesh.tets); for static/modal `density` is empty.
@@ -336,6 +406,14 @@ struct StudyBodyResult {
   // A static study with load cases: one result per case, in the study's
   // order; `results` is a copy of the first. Empty without cases.
   std::vector<FemResults> cases;
+  // A static body: per node, the support (an index into `edgeOwners`, its
+  // supports in the study's order with their load id and type -- only those
+  // two filled) whose edge the node lies near, else -1 (SupportEdgeZones),
+  // so any field read later -- the stress across layers along a direction
+  // given then -- is flagged the way von Mises was. Empty on a result saved
+  // before vNEXT.
+  std::vector<int> supportEdgeZone;
+  std::vector<FemResults::SupportReaction> edgeOwners;
   // The results of case `k` (the only ones when there are no cases).
   const FemResults& Case(int k) const {
     return k >= 0 && k < static_cast<int>(cases.size()) ? cases[k] : results;
@@ -400,6 +478,11 @@ struct StudyRuntime {
   bool cancelled = false;
   double volumeFractionAchieved = 0.0;
   std::vector<double> complianceHistory;
+
+  // A static study's convergence check (docs/simulation/README.md
+  // #a-peak-that-has-settled): the refinements the run added round its
+  // governing peaks and what each step read. Saved with the result.
+  Convergence convergence;
 
   // Provenance of the solve — transient (NOT serialized; a reloaded result
   // reads empty/zero): which linear solver ran ("gpu: <device>" /
@@ -470,6 +553,11 @@ void KeepWhatIsRead(StudyRuntime& rt);
 // the caller stamps solvedAtVersion and stores it in the Document cache).
 bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
               std::string* error);
+// The same under explicit convergence options (the study's `converge` is
+// what the plain form uses). ConvergeOptions is declared below.
+struct ConvergeOptions;
+bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
+              const ConvergeOptions& converge, std::string* error);
 
 // RunStudy, split at the thread boundary (the TopoInput pattern): everything
 // Document-bound — expression evaluation, face resolution, validation, and
@@ -542,6 +630,10 @@ struct StudyBodyPlan {
   // A static study of a topology result (ShapeSource): the mesh to solve,
   // already cut from the result — nothing is meshed. `shape` is then null.
   std::shared_ptr<const FemMesh> premeshed;
+  // The material's strength across printed layers (MPa; 0 = not a printed
+  // material): a convergence check then also settles the stress across the
+  // layers.
+  double interlayerMPa = 0.0;
 };
 // Where a meshed body touches a rigid support, as the imprint found it: the
 // faces of the meshed body's imprinted shape that it shares with the rigid
@@ -636,6 +728,35 @@ struct StudyRuntimeCache {
 // `options`, and rt.solver says which solver ran.
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
                         const SolveOptions& options = {});
+
+// How a run checks that its peak has settled (docs/simulation/README.md
+// #a-peak-that-has-settled): the study's `converge` or a run's override,
+// the converge_auto_s preference, and the build direction to settle the
+// stress across a printed part's layers along.
+struct ConvergeOptions {
+  ConvergeMode mode = ConvergeMode::Auto;
+  double autoSeconds = kConvergeAutoSecondsDefault;
+  bool hasLayerNormal = false;
+  glm::dvec3 layerNormal{0.0, 0.0, 1.0};
+};
+// MeshPlannedStudy + SolvePreparedStudy, then, on a static study, the
+// convergence loop: the governing peaks' faces halved, re-meshed and
+// re-solved until every peak moves under 2 % or four refinements are spent
+// (or, on auto, the next step would run past autoSeconds). `rt.convergence`
+// records it; the refinements belong to this run and never to the study.
+// `in` is left holding the last step's input. Fails as the two do; a step
+// after the first that fails ends the loop with the last good result.
+bool SolveConverged(const StudyPlan& plan, StudyJobInput& in, StudyRuntime& rt,
+                    const ConvergeOptions& converge, std::string* error,
+                    const SolveOptions& options = {});
+// The input hash of a run of `study` under `converge`: the study hashed with
+// the run's mode in place of its own (StudyInputKey of `doc`, or of the
+// assembly through `assemblyKey`), the layer normal mixed in when the loop
+// reads one. A run's override is an input like any other.
+uint64_t RunInputKey(const Document& doc, const Study& study,
+                     const ConvergeOptions& converge);
+uint64_t RunInputKey(uint64_t studyKeyWithMode,
+                     const ConvergeOptions& converge);
 
 // Meshes the study's single loaded body (v1) and runs SIMP topology
 // optimization on it (the study's Force/Pressure loads + fixed supports; keep

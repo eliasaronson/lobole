@@ -16,6 +16,11 @@
 
 namespace fem {
 
+// The converge_auto_s preference's default, seconds
+// (docs/simulation/README.md#a-peak-that-has-settled): on `auto`, a static
+// run refines round its peak while a solve takes less than this.
+inline constexpr double kConvergeAutoSecondsDefault = 10.0;
+
 class TopoLinearSolver;
 struct CalculixRun;
 

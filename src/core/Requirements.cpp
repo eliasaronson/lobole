@@ -767,6 +767,18 @@ std::string BoundText(const json& row) {
   return "passes";
 }
 
+std::string NotConvergedText(const json& row) {
+  const std::string st = row.value("state", std::string());
+  if (st != "pass" && st != "fail")
+    return {};
+  const json detail = row.value("detail", json::object());
+  if (!detail.is_object() || !detail.contains("not_converged") ||
+      !detail.at("not_converged").is_string())
+    return {};
+  return "judged on a peak that has not converged (" +
+         detail.at("not_converged").get<std::string>() + ")";
+}
+
 std::vector<std::string> FindingLines(const json& row) {
   std::vector<std::string> lines;
   const std::string st = row.value("state", std::string());
@@ -774,8 +786,13 @@ std::vector<std::string> FindingLines(const json& row) {
     lines.push_back(row.value("note", std::string("could not be measured")));
     return lines;
   }
+  const std::string unsettled = NotConvergedText(row);
+  if (st == "pass" && !unsettled.empty())
+    lines.push_back(unsettled);
   if (st != "fail")
     return lines;
+  if (!unsettled.empty())
+    lines.push_back(unsettled);
   const std::string unit = row.value("unit", std::string());
   const json measure = row.value("measure", json::object());
   if (measure.value("kind", std::string()) == "expression" &&
