@@ -215,6 +215,23 @@ the heading if it is not here yet.
   solver failure that names the residual; "singular" is kept for a matrix
   that is singular.
 
+### A pin on a short sleeve does not settle when the load tilts the part
+
+- **Symptom:** the woodcutter's left bushing (a Ø14.8 x 6.2 mm sleeve
+  under a 2 mm flange), on a `pin` over its sleeve and loaded through its
+  bore by a remote force 22 mm off the sleeve's middle (35 N), is refused:
+  "the pins' contact did not settle: it still pulls on the part" at a
+  1.6 mm mesh, "did not settle in 30 iterations" at 1.2 mm. The same force
+  through the sleeve's middle (no tilt) solves in 3 s, and so does the same
+  statics held the other way round: a pin over its bore, the reaction on
+  its sleeve (what generators/woodcutter does).
+- **Cause:** not found. The tilt presses the sleeve at its two ends on
+  opposite sides; the facet-wise contact set seems to cycle between them.
+- **Where:** `SolveWithPins` in `src/core/fem/FemStudy.cpp`.
+- **Likely fix:** first a regression case (a short tube pinned on its
+  outside, a remote load off its end); then see whether the set cycles or
+  ends on a pull above the thousandth.
+
 ### The GPU solve's failures are hidden, and a synchronous run never tries it
 
 - **Symptom:** on the same 500 k DOF plate:
