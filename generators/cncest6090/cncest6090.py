@@ -69,7 +69,7 @@ def cyl(p, x, y, z, d, h, name, mode="new_body"):
     return profile(p, "xy", z, name, lambda s: s.circle((x, y), d=d), h, mode)
 
 
-def finish(p, material="aluminum"):
+def finish(p, material="aluminum_6061_t6"):
     p.frame("origin", origin=(0, 0, 0))
     p.material(material).check(solids=1)
     r = p.app.check_geometry()

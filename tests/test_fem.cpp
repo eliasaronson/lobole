@@ -1904,7 +1904,7 @@ TEST_CASE("S2: a bonded neighbour joins the mesh with its own material, and "
           "[fem][assembly]") {
   TwoBlocks world(16.0f);
   // Two materials, so the domain-to-member mapping is visible in the answer.
-  world.lower->GetFeature(0)->SetMaterial("aluminum");
+  world.lower->GetFeature(0)->SetMaterial("aluminum_6061_t6");
   world.lower->Regenerate();
   std::string err;
 

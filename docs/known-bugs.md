@@ -81,6 +81,21 @@ the heading if it is not here yet.
 
 ## Modeling
 
+### Sheet metal: 6061-T6's bend radius is unsourced
+
+- **Symptom:** a sheet of `aluminum_6061_t6` bends at 1.5 t by default and
+  takes the 0.41/0.46/0.50 K bands, numbers the table carried for the
+  generic aluminium row before it left the library (a 5052-class sheet).
+  6061-T6 cracks sooner than 5052 at a tight radius, and its minimum grows
+  with thickness, so the default may be too tight for a thick 6061-T6
+  sheet.
+- **Cause:** the generic row's sheet data moved to the only aluminium sheet
+  grade the library has; no 6061-T6 bend table is cited.
+- **Where:** `MinRadiusMultiple` and `BandsFor` in `src/core/SheetMetal.cpp`.
+- **Likely fix:** cite a 6061-T6 bend-radius table by thickness (the
+  Aluminum Association's), or add a 5052-H32 row with cited data and move
+  the sheet table to it.
+
 ### A cylinder added flush with the tangent of another leaves a free edge
 
 - **Symptom:** a rod (a Ø6 cylinder along Z) added to a foot (a cylinder

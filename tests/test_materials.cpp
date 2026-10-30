@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <set>
+#include <stdexcept>
 #include <string>
 
 using CADMaterials::MaterialLibrary;
@@ -270,18 +271,28 @@ TEST_CASE("A grade is its own row and prints as the grade",
   // grade, and a generic row its name, which says no grade was chosen.
   CHECK(MaterialLibrary::GradeOf("aluminum_6061_t6") == "6061-T6");
   CHECK(MaterialLibrary::GradeOf("aluminum_6082_t6") == "6082-T6");
-  CHECK(MaterialLibrary::GradeOf("aluminum") == "ALUMINUM");
+  CHECK(MaterialLibrary::GradeOf("steel") == "STEEL");
   CHECK(MaterialLibrary::GradeOf("petg") == "PETG");
   CHECK(MaterialLibrary::GradeOf("").empty());
-  // A grade carries its specification's minimum yield, not the generic
-  // row's, and its family's density and look.
+  // A grade carries its specification's minimum yield, and the two grades
+  // share a density and a look.
   const MaterialProperties& g6082 =
       MaterialLibrary::GetMaterial(MaterialType::ALUMINUM_6082_T6);
-  const MaterialProperties& generic =
-      MaterialLibrary::GetMaterial(MaterialType::ALUMINUM);
+  const MaterialProperties& g6061 =
+      MaterialLibrary::GetMaterial(MaterialType::ALUMINUM_6061_T6);
   CHECK(g6082.yieldMPa == 240.0);
-  CHECK(g6082.density == generic.density);
-  CHECK(g6082.baseColor == generic.baseColor);
+  CHECK(g6082.density == g6061.density);
+  CHECK(g6082.baseColor == g6061.baseColor);
+  // There is no generic aluminium: its conductivity and yield depend on the
+  // alloy, so a document naming one is refused, naming the grades.
+  MaterialType t{};
+  CHECK_FALSE(MaterialLibrary::TryMaterialTypeFromString("aluminum", t));
+  try {
+    (void)MaterialLibrary::MaterialTypeFromString("aluminum");
+    FAIL("generic aluminum accepted");
+  } catch (const std::runtime_error& e) {
+    CHECK(std::string(e.what()).find("aluminum_6061_t6") != std::string::npos);
+  }
   // A consumer that knows only families (CAM's chiploads) reads it as
   // aluminium; every other slug is its own family.
   CHECK(MaterialLibrary::FamilySlug("aluminum_6061_t6") == "aluminum");

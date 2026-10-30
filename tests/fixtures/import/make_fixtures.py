@@ -99,7 +99,7 @@ def flat_pattern(d):
     """Our own flat pattern: aluminium 1.5 mm, 100 x 60 with a 20 mm flange
     and a 10 mm hole, unfolded and written by export_dxf."""
     d.call("new_project")
-    d.call("set_sheet_metal_rules", material="aluminum", gauge="1.5mm")
+    d.call("set_sheet_metal_rules", material="aluminum_6061_t6", gauge="1.5mm")
     d.call("add_feature", feature={
         "type": "Sketch", "name": "Blank",
         "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],

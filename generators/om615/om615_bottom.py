@@ -38,7 +38,7 @@ def plane_span(z0, z1):
     return z1 - z0
 
 
-def casting_finish(p, material="aluminum", color=None):
+def casting_finish(p, material="aluminum_6061_t6", color=None):
     """A casting's physical material. How it LOOKS is om615_finish.py's
     table, applied once the engine is built; `color` is ignored."""
     p.material(material)
@@ -888,7 +888,7 @@ def piston(app):
     for sy, nm in ((1, "clip_r"), (-1, "clip_f")):
         p.frame(nm, origin=(0, sy * (GUDGEON_L / 2.0 - 3.0), 0), z=(0, 1, 0),
                 x=(1, 0, 0))
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.check()
     return p
 
@@ -1169,7 +1169,7 @@ def rear_seal_carrier(app):
     p.extrude(holes.add(), 20.0, mode="cut", name="Bolt holes")
     p.frame("face", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("seal", origin=(0, 9.0, 0), z=(0, 1, 0), x=(1, 0, 0))
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.check()
     return p
 
@@ -1576,7 +1576,7 @@ def oil_pump(app):
     inlet = p.sketch(Plane.xz(y1 - 6.0), name="Inlet")
     inlet.circle((PICKUP_X, OIL_PUMP_Z - OIL_BODY_H), d=18.0)
     p.extrude(inlet.add(), 12.0, mode="cut", name="Inlet")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("mount", origin=(0, BLOCK_Y0, OIL_PUMP_Z), z=(0, 0, 1),
             x=(1, 0, 0))
     p.frame("drive", origin=(0, OIL_DRIVE_Y, OIL_PUMP_Z), z=(0, 1, 0),
@@ -1616,7 +1616,7 @@ def oil_pump_cover(app):
     sk.rect((-OIL_GEAR_TIP - 8.0, OIL_PUMP_Z - OIL_BODY_H),
             (OIL_GEAR_X[1] + OIL_GEAR_TIP + 8.0, OIL_PUMP_Z + OIL_BODY_H))
     p.extrude(sk.add(), 4.0, mode="new_body", name="Cover")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("face", origin=(0, OIL_BODY_Y[0], OIL_PUMP_Z), z=(0, 0, 1),
             x=(1, 0, 0))
     p.check()
@@ -1795,7 +1795,7 @@ def water_pump(app):
     shaft = p.sketch(Plane.xz(y1 + 1.0), name="Shaft bore")
     shaft.circle((0, WATER_PUMP_Z), d=WP_SHAFT_D + FIT)
     p.extrude(shaft.add(), y1 - y0 + 2.0, mode="cut", name="Shaft bore")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("face", origin=(0, y1, WATER_PUMP_Z), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("inlet", origin=(0, WP_INLET_Y, neck_z + od), z=(0, 0, 1),
             x=(1, 0, 0))

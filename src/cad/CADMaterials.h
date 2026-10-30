@@ -4,6 +4,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -12,7 +13,6 @@ namespace CADMaterials {
 
 enum class MaterialType {
   // Metals
-  ALUMINUM,
   STEEL,
   STAINLESS_STEEL,
   BRASS,
@@ -22,11 +22,12 @@ enum class MaterialType {
   GOLD,
   SILVER,
   TITANIUM,
-  // Aluminium alloys by grade (EN 573 / AA designation and temper): their
-  // own rows because a grade is what a drawing orders and what a study's
-  // yield is -- 6061-T6's 276 MPa is nearly three times the generic row's
-  // 95. One appearance with ALUMINUM; CAM cuts them as aluminium
-  // (FamilySlug).
+  // Aluminium alloys by grade (EN 573 / AA designation and temper), and
+  // only by grade: a grade is what a drawing orders, what a study's yield is
+  // and what its conductivity is, and across alloys those run 95 to 500 MPa
+  // and 120 to 237 W/(m K). There is no generic aluminium row; a document
+  // naming one is refused, naming these. One appearance; CAM cuts them as
+  // aluminium (FamilySlug).
   ALUMINUM_6061_T6,
   ALUMINUM_6082_T6,
 
@@ -154,6 +155,23 @@ struct MaterialProperties {
   // run perfectly plastic.
   std::vector<std::pair<double, double>> hardening;
 
+  // Thermal numbers (docs/simulation/README.md#thermal), each entered only
+  // with its source cited beside it; 0 = unknown, and a thermal study or a
+  // thermal load on the material is refused rather than guessed.
+  // Conductivity at room temperature, W/(m K); the linear expansion
+  // coefficient, 1/K.
+  double conductivityWmK = 0.0;
+  double expansionPerK = 0.0;
+  // The conductivity is the bulk resin's, and a part printed from it
+  // conducts less (air between its roads and layers).
+  bool bulkConductivity = false;
+  // The temperature (degrees C) past which the material no longer holds its
+  // room-temperature stiffness and strength, and what that number is (for a
+  // printed plastic, its heat deflection temperature at 0.45 MPa, ISO 75-2
+  // method B). NaN = none given; `serviceBasis` is then empty.
+  double serviceMaxC = std::numeric_limits<double>::quiet_NaN();
+  std::string serviceBasis;
+
   // Procedural surface figure. Both fields are pattern-relative, and are 0
   // exactly when pattern is Flat:
   //   Wood     scale = rings per local unit, contrast = late-wood darkening
@@ -172,7 +190,7 @@ struct MaterialProperties {
 
   // What a drawing's parts list and title block write for it (v151): the
   // grade a shop orders ("6061-T6", "PETG"), or the material's name in
-  // capitals for a generic row ("ALUMINUM") -- which then says, truthfully,
+  // capitals for a generic row ("STEEL") -- which then says, truthfully,
   // that no grade was chosen.
   std::string grade;
 };
@@ -225,6 +243,11 @@ public:
   // The slugs of the materials with a hardening curve, joined with ", ":
   // what a plastic study's refusal names.
   static const std::string& HardeningSlugList();
+  // The same for the materials with a thermal conductivity, and with an
+  // expansion coefficient: what a thermal study's and a thermal load's
+  // refusals name.
+  static const std::string& ConductivitySlugList();
+  static const std::string& ExpansionSlugList();
   // The generic material a grade row is one of ("aluminum_6061_t6" ->
   // "aluminum"), and any other slug itself: what a consumer that knows
   // materials only by family (CAM's cutting data) looks up. Not used where

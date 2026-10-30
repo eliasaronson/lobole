@@ -47,7 +47,7 @@ const double kQuarter = std::numbers::pi / 2.0;
 
 sheet::SheetMetalRules AluRules() {
   sheet::SheetMetalRules r;
-  r.material = "aluminum";
+  r.material = "aluminum_6061_t6";
   r.gauge = "1.5mm";
   r.thickness = kT;
   return r;

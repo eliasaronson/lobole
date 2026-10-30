@@ -14,13 +14,17 @@ void MaterialLibrary::InitializeMaterials() {
     return;
 
   // Metals - High metallic, low roughness, realistic colors
-  materials[MaterialType::ALUMINUM] = {
+  // Aluminium is graded rows only: its conductivity runs from 120 to 237
+  // W/(m K) across alloys and its yield from under 100 MPa to over 500, so
+  // no generic row could carry either honestly. The two grades share one
+  // appearance.
+  materials[MaterialType::ALUMINUM_6061_T6] = {
       glm::vec3(0.91f, 0.92f, 0.92f), // Light silver-white
       1.0f,                           // Fully metallic
       0.1f,                           // Very smooth
       0.9f,                           // High specular
       0.04f,                          // Standard metal reflectance
-      "Aluminum"};
+      "Aluminium 6061-T6"};
 
   materials[MaterialType::STEEL] = {
       glm::vec3(0.65f, 0.67f, 0.68f), // Dark metallic gray
@@ -94,10 +98,8 @@ void MaterialLibrary::InitializeMaterials() {
       0.04f,                          // Standard metal reflectance
       "Titanium"};
 
-  // Grades look like the generic row: one appearance, three alloys.
-  materials[MaterialType::ALUMINUM_6061_T6] = materials[MaterialType::ALUMINUM];
-  materials[MaterialType::ALUMINUM_6061_T6].name = "Aluminium 6061-T6";
-  materials[MaterialType::ALUMINUM_6082_T6] = materials[MaterialType::ALUMINUM];
+  materials[MaterialType::ALUMINUM_6082_T6] =
+      materials[MaterialType::ALUMINUM_6061_T6];
   materials[MaterialType::ALUMINUM_6082_T6].name = "Aluminium 6082-T6";
 
   // Non-metals - Low metallic, varied roughness
@@ -311,12 +313,12 @@ void MaterialLibrary::InitializeMaterials() {
       "MDF"};
 
   // Default material
-  materials[MaterialType::DEFAULT] = materials[MaterialType::ALUMINUM];
+  materials[MaterialType::DEFAULT] = materials[MaterialType::ALUMINUM_6061_T6];
+  materials[MaterialType::DEFAULT].name = "Default";
 
   // Densities (kg/m^3), for mass properties (inspection I2). Set after the
   // DEFAULT copy above so DEFAULT keeps density 0 = unknown: an unassigned
   // body reports no mass instead of a silently-guessed aluminum one.
-  materials[MaterialType::ALUMINUM].density = 2700.0f;
   materials[MaterialType::ALUMINUM_6061_T6].density = 2700.0f;
   materials[MaterialType::ALUMINUM_6082_T6].density = 2700.0f;
   materials[MaterialType::STEEL].density = 7850.0f;
@@ -383,7 +385,6 @@ void MaterialLibrary::InitializeMaterials() {
     materials[t].poisson = nu;
     materials[t].yieldMPa = yield;
   };
-  elastic(MaterialType::ALUMINUM, 69.0f, 0.33f, 95.0f);
   // A grade's yield is its specification's MINIMUM for plate, which is what
   // a design may count on (a datasheet's typical 276 MPa for 6061-T6 is not):
   // ASTM B209 6061-T6/T651 plate 6.3-100 mm, 35 ksi (240 MPa); EN 485-2
@@ -482,6 +483,60 @@ void MaterialLibrary::InitializeMaterials() {
   // the rest have published curves, but none is cited here yet. The printed
   // plastics' datasheets give a yield and a break, not a curve between them.
 
+  // Thermal numbers (docs/simulation/README.md#thermal): a conductivity at
+  // room temperature, W/(m K), and a linear expansion coefficient, 1/K. Only
+  // where a source is cited here; every other material has none, and a
+  // thermal study or thermal load on it is refused rather than guessed.
+  auto thermal = [&](MaterialType t, double conductivity, double expansion) {
+    materials[t].conductivityWmK = conductivity;
+    materials[t].expansionPerK = expansion;
+  };
+  // Structural steel: EN 1993-1-2:2005 §3.4.1.3(1), eq. (3.3a), lambda_a =
+  // 54 - 3.33e-2 theta_a W/(m K) for 20 <= theta_a < 800 C, at 20 C 53.33;
+  // EN 1993-1-1:2005 §3.2.6(1), alpha = 12e-6 per K for T <= 100 C.
+  thermal(MaterialType::STEEL, 54.0 - 3.33e-2 * 20.0, 12e-6);
+  // Stainless 1.4301 (the library's stainless): SCI P413, Design Manual for
+  // Structural Stainless Steel, 4th ed. (2017), §2.4 Table 2.7, room
+  // temperature, annealed: 15 W/(m C), and 16e-6 per C over 20-100 C.
+  thermal(MaterialType::STAINLESS_STEEL, 15.0, 16e-6);
+  // The 6xxx alloys: EN 1999-1-2:2007 §3.3.1.3(1), lambda = 0.07 theta + 190
+  // W/(m C) for 3xxx and 6xxx alloys, at 20 C 191.4 (read in the English
+  // column of DSTU-N B EN 1999-1-2:2010, its Ukrainian adoption; the 2023
+  // edition was not checked); EN 1999-1-1 §3.2.5, alpha = 23e-6 per K for
+  // T < 100 C (as SCIA's EN 1999-1-1 training manual, 2015, p. 12 quotes
+  // it).
+  thermal(MaterialType::ALUMINUM_6061_T6, 0.07 * 20.0 + 190.0, 23e-6);
+  thermal(MaterialType::ALUMINUM_6082_T6, 0.07 * 20.0 + 190.0, 23e-6);
+  // PLA, BULK: NatureWorks, "Engineering Properties of Ingeo Biopolymer"
+  // (NWPD001_080311), page 1: 0.130 W/(m K) at 25 C for amorphous sheet (a
+  // printed part is amorphous). No expansion coefficient: NatureWorks
+  // publishes no measured one (its Moldflow report MAT2238's 8.5e-5 is
+  // marked a generic estimate), so a thermal load on PLA is refused.
+  thermal(MaterialType::PLA, 0.130, 0.0);
+  materials[MaterialType::PLA].bulkConductivity = true;
+  // PETG, BULK: Eastman, "Eastar copolyester 6763 technical information"
+  // (MBS-80Q 2/12), Table 2: thermal conductivity 0.21 W/(m K) (ASTM C177),
+  // linear expansion 5.1e-5 per C (ASTM D696, -30 to 40 C).
+  thermal(MaterialType::PETG, 0.21, 5.1e-5);
+  materials[MaterialType::PETG].bulkConductivity = true;
+  // Service temperature: a printed plastic's heat deflection temperature at
+  // 0.45 MPa (ISO 75, method B's stress), from the datasheets its
+  // interlayer strength cites. Metals get none: their reduction factors
+  // start far above where a printed part fails (EN 1993-1-2's yield factor
+  // is 1.0 to 400 C), and no number is added without a source.
+  // Prusament PLA TDS v1.1 (27-07-2022), "Heat Deflection Temperature (0.45
+  // MPa) 55 C, ISO 75".
+  materials[MaterialType::PLA].serviceMaxC = 55.0;
+  materials[MaterialType::PLA].serviceBasis =
+      "heat deflection temperature, 0.45 MPa, ISO 75 (Prusament PLA "
+      "datasheet v1.1)";
+  // Prusament PETG TDS v1.1 (16-02-2022), "Heat Deflection Temperature
+  // (0.45 MPa) 68 C, ISO 75".
+  materials[MaterialType::PETG].serviceMaxC = 68.0;
+  materials[MaterialType::PETG].serviceBasis =
+      "heat deflection temperature, 0.45 MPa, ISO 75 (Prusament PETG "
+      "datasheet v1.1)";
+
   // Procedural surface figure: which pattern, its scale per local unit, and
   // its contrast (0..1). Shaded from local object-space position by
   // src/shaders/grain.glsl; MDF stays Flat, and so does every material not
@@ -547,7 +602,6 @@ namespace {
 // is the empty-slug fallback, not a user-picked material).
 const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
   static const std::vector<std::pair<MaterialType, const char*>> table = {
-      {MaterialType::ALUMINUM, "aluminum"},
       {MaterialType::STEEL, "steel"},
       {MaterialType::STAINLESS_STEEL, "stainless_steel"},
       {MaterialType::BRASS, "brass"},
@@ -656,6 +710,28 @@ const std::string& MaterialLibrary::HardeningSlugList() {
     std::string s;
     for (const MaterialType t : AllTypes())
       if (!GetMaterial(t).hardening.empty())
+        s += (s.empty() ? "" : ", ") + Slug(t);
+    return s;
+  }();
+  return list;
+}
+
+const std::string& MaterialLibrary::ConductivitySlugList() {
+  static const std::string list = [] {
+    std::string s;
+    for (const MaterialType t : AllTypes())
+      if (GetMaterial(t).conductivityWmK > 0.0)
+        s += (s.empty() ? "" : ", ") + Slug(t);
+    return s;
+  }();
+  return list;
+}
+
+const std::string& MaterialLibrary::ExpansionSlugList() {
+  static const std::string list = [] {
+    std::string s;
+    for (const MaterialType t : AllTypes())
+      if (GetMaterial(t).expansionPerK > 0.0)
         s += (s.empty() ? "" : ", ") + Slug(t);
     return s;
   }();

@@ -756,7 +756,7 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs, float k) {
     // The stock, set straight on the document: declaring it is setup, not
     // something the tool under test is supposed to do for itself.
     sheet::SheetMetalRules rules;
-    rules.material = "aluminum";
+    rules.material = "aluminum_6061_t6";
     rules.thickness = 1.5 * k;
     rules.gauge = std::format("{:g}mm", rules.thickness);
     Doc()->SetSheetMetal(rules);

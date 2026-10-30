@@ -255,7 +255,7 @@ def alternator(app):
         sk = front.sketch(Plane.xy(17), name=f"Pivot bore {i + 1}")
         sk.circle((0, (-1 if i == 0 else 1) * ALT_LUG), d=10.5)
         front.extrude(sk.add(), 19, mode="cut", name=f"Pivot bore {i + 1}")
-    front.material("aluminum")
+    front.material("aluminum_6061_t6")
     front.frame("shaft", origin=(0, 0, 0))
     front.frame("mount", origin=(0, 0, 0))
     verify(front)
@@ -296,7 +296,7 @@ def alternator(app):
         ],
         name="Rear casting section",
     )
-    rear.material("aluminum")
+    rear.material("aluminum_6061_t6")
     verify(rear)
     rotor = app.part("alternator rotor and shaft")
     annulus(rotor, "Rotor shaft", 9, 0, -21, 138)
@@ -481,7 +481,7 @@ def pump_housing(app):
     p.frame("cam", origin=(*CAM_CENTER, 8))
     p.frame("pivot", origin=(0, 30, 24), z=(1, 0, 0), x=(0, 1, 0))
     p.frame("diaphragm", origin=(0, 10, 50), z=(0, 0, -1), x=(1, 0, 0))
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     verify(p)
     return p
 
@@ -518,7 +518,7 @@ def vacuum_parts(app):
         sk.circle((x, y), r=4.6)
         lid.extrude(sk.add(), 14, mode="cut", name="Cover screw spotface")
         lid.frame(f"screw_{i}", origin=(x, y, 56.3), z=(0, 0, -1), x=(1, 0, 0))
-    lid.material("aluminum")
+    lid.material("aluminum_6061_t6")
     verify(lid)
     diaphragm = app.part("vacuum pump diaphragm centre")
     annulus(diaphragm, "Diaphragm centre plate", 30, 0, 0, 1.5)
@@ -994,7 +994,7 @@ def oil_filter_housing(app):
                OIL_FILTER_BOLT_D + 1.0, "Bolt hole", over=0.0)
     B.bore(p, (fx - out * 1.0, fy, fz), tuple(back + d * 2.0),
            OIL_FILTER_PORT_D, "Port", over=0.0)
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("pad", origin=OIL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
     p.frame("filter", origin=tuple(seat), z=(0, 0, 1), x=(1, 0, 0))
     return verify(p)
@@ -1327,7 +1327,7 @@ def line_clamp(app, name, outlets, z):
     for c in (lo, hi):
         B.disc(p, (c[0], c[1]), LINE_OD + 0.1, lo[2] - 1.0,
                lo[2] + CLAMP_T + 1.0, "Line bore", mode="cut")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("seat", origin=tuple(a), z=tuple(up), x=tuple(outlets[0].x))
     return verify(p)
 

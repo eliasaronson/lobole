@@ -3,7 +3,7 @@
   "version": 116,
   "sheet_metal": {
     "gauge": "1.5mm",
-    "material": "aluminum",
+    "material": "aluminum_6061_t6",
     "thickness": 1.5
   },
   "features": [

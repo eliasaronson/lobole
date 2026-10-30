@@ -5,7 +5,7 @@
     9000.0
   ],
   "sheet_metal": {
-    "material": "aluminum",
+    "material": "aluminum_6061_t6",
     "gauge": "1.5mm",
     "thickness": 1.5,
     "bend_radius": 3.0,

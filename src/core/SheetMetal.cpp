@@ -15,7 +15,7 @@ namespace {
 // radius cracks, and the part looks fine until it is made.
 const std::vector<std::string>& SheetMaterials() {
   static const std::vector<std::string> v = {
-      "aluminum", "steel", "stainless_steel", "brass", "copper"};
+      "aluminum_6061_t6", "steel", "stainless_steel", "brass", "copper"};
   return v;
 }
 
@@ -33,7 +33,7 @@ const std::vector<double>& MetricThicknesses() {
 //
 // steel: Manufacturers' Standard Gauge for sheet steel.
 // stainless_steel: US Standard Gauge for stainless sheet.
-// aluminum/brass/copper: Brown & Sharpe (AWG).
+// aluminum_6061_t6/brass/copper: Brown & Sharpe (AWG).
 struct GaugeRow {
   const char* designation;
   double mm;
@@ -68,7 +68,7 @@ const std::vector<GaugeRow>& GaugesForMaterial(const std::string& material) {
     return SteelGauges();
   if (material == "stainless_steel")
     return StainlessGauges();
-  return BrownSharpeGauges(); // aluminum, brass, copper
+  return BrownSharpeGauges(); // aluminum_6061_t6, brass, copper
 }
 
 std::string MetricDesignation(double mm) {
@@ -78,13 +78,13 @@ std::string MetricDesignation(double mm) {
 }
 
 // How tight this material bends, as a multiple of thickness. Conservative
-// where the alloy matters: "aluminum" here is a 5052-class sheet, and a
+// where the alloy matters: "aluminum_6061_t6" here is a 5052-class sheet, and a
 // 6061-T6 part wants 3t — which the user sets explicitly rather than
 // discovering at the brake.
 double MinRadiusMultiple(const std::string& material) {
   if (material == "steel" || material == "brass" || material == "copper")
     return 1.0;
-  return 1.5; // aluminum, stainless_steel
+  return 1.5; // aluminum_6061_t6, stainless_steel
 }
 
 // The three-band K chart, by material hardness class.
@@ -99,7 +99,7 @@ KBands BandsFor(const std::string& material) {
     return {0.35, 0.41, 0.45}; // soft
   if (material == "stainless_steel")
     return {0.45, 0.50, 0.50}; // hard
-  return {0.41, 0.46, 0.50};   // aluminum, steel
+  return {0.41, 0.46, 0.50};   // aluminum_6061_t6, steel
 }
 
 const char* BandName(double radius, double t) {

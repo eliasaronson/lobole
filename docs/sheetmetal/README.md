@@ -18,13 +18,13 @@ the history) nor a configuration (it is not a variant).
 | field | unset (0) derives |
 |---|---|
 | `material` + `gauge` | required; together they fix `thickness` |
-| `bend_radius_mm` | the material's minimum: 1 × t for steel, brass, copper; 1.5 × t for aluminium and stainless |
+| `bend_radius_mm` | the material's minimum: 1 × t for steel, brass, copper; 1.5 × t for 6061-T6 and stainless (6061-T6's is not yet sourced: [known-bugs](../known-bugs.md#sheet-metal-6061-t6s-bend-radius-is-unsourced)) |
 | `k_factor` | the R/t band of the material's chart (R < 2t, 2t ≤ R < 4t, R ≥ 4t) |
 | `relief` | `rectangular` (also `none`, `obround`, `tear`; anything else refused) |
 | `relief_width_mm`, `relief_depth_mm` | max(1.5 t, 1 mm) wide; R + t deep, which reaches past the tangent line |
 
 **Thickness comes from a gauge, not a literal.** The gauge table
-(`sheet::GaugeTable`) carries `aluminum`, `steel`, `stainless_steel`,
+(`sheet::GaugeTable`) carries `aluminum_6061_t6`, `steel`, `stainless_steel`,
 `brass` and `copper`, each designated either as a US gauge ("16ga") or a
 metric thickness ("1.5mm"); a gauge differs by material (16ga steel is
 1.519 mm, 16ga aluminium 1.291). An unstocked designation is refused naming

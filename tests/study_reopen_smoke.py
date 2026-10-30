@@ -188,7 +188,7 @@ def main():
 
         # ---- An input moved: stale, and computed again ----------------------
         a.part("bar", create=False).activate()
-        d.call("set_material", feature_id=r["id"], material="aluminum")
+        d.call("set_material", feature_id=r["id"], material="aluminum_6061_t6")
         expect(studies(d)[ids["static"]]["stale"],
                "a moved input makes the reopened result stale")
         moved = d.call("run_study", study=ids["static"])

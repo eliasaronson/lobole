@@ -76,8 +76,8 @@ TEST_CASE("A body keeps its material through a union and a subtract",
   SECTION("a material set on the target AFTER the booleans reaches them") {
     // The edit is a cache hit (material is out of the chain hash), so no
     // Boolean executes: only the stamp can carry it through.
-    SetMaterialOf(doc, a, "aluminum");
-    CheckAllBodiesAre(doc, "aluminum");
+    SetMaterialOf(doc, a, "aluminum_6061_t6");
+    CheckAllBodiesAre(doc, "aluminum_6061_t6");
   }
   SECTION("a Boolean's own material wins over its target's") {
     SetMaterialOf(doc, u, "brass");

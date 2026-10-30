@@ -6,7 +6,7 @@
     {
       "method": "set_sheet_metal_rules",
       "params": {
-        "material": "aluminum",
+        "material": "aluminum_6061_t6",
         "gauge": "1.5mm",
         "bend_radius_mm": 3,
         "k_factor": 0.41

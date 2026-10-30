@@ -58,7 +58,7 @@ def _rim(part, S):
 # — the same finish as the chainguard beside them — not the mirror of chrome
 # plate. A roadster of this vintage could have either, and it is worth 1.4 kg:
 # change this one word and the bicycle weighs what a steel-rimmed one weighs.
-RIM_MATERIAL = "aluminum"
+RIM_MATERIAL = "aluminum_6061_t6"
 
 
 def _tyre(part, S):

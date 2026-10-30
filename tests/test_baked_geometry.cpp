@@ -315,7 +315,7 @@ TEST_CASE("Bends survive a baked open", "[baked][sheetmetal]") {
   const fs::path proj = TempProject("baked-bends.lob");
   Document doc;
   sheet::SheetMetalRules rules;
-  rules.material = "aluminum";
+  rules.material = "aluminum_6061_t6";
   rules.gauge = "1.5mm";
   rules.thickness = 1.5;
   doc.SetSheetMetal(rules);

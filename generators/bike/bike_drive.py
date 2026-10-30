@@ -287,7 +287,7 @@ def chainguard(app, S):
     bracket = tube(part, stay, (top[0], y, foot[1] + 3.0), 6.0, 0.0,
                    "Guard bracket")
     union(part, [plate, tail_id, lip, bracket], "Guard")
-    shop.finish(part, "aluminum", "dull_alloy")
+    shop.finish(part, "aluminum_6061_t6", "dull_alloy")
     seat_frame(part)
     shop.verified(part, 1)
     return part

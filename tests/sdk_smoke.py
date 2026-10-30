@@ -981,7 +981,7 @@ def main():
             refused(lambda: f.check(solids=invalid), "non-negative integer")
 
         # material(): a part made of one thing, in one call.
-        f.material("aluminum")
+        f.material("aluminum_6061_t6")
         expect(f.volume() > 0, "still measurable after a material")
         # ---- part(name) creates; opening another's is asked for ---------
         check_part_is_a_choice(app)

@@ -29,7 +29,7 @@ constexpr double kD = 60.0;
 
 sheet::SheetMetalRules AluRules() {
   sheet::SheetMetalRules r;
-  r.material = "aluminum";
+  r.material = "aluminum_6061_t6";
   r.gauge = "1.5mm";
   r.thickness = kT;
   return r;
@@ -225,5 +225,5 @@ TEST_CASE("a radius the material stopped taking is caught",
         return x.kind == "bend_below_minimum_radius";
       });
   CHECK_THAT(v.required, Catch::Matchers::WithinAbs(1.5 * kT, 1e-9));
-  CHECK(v.message.find("aluminum") != std::string::npos);
+  CHECK(v.message.find("aluminum_6061_t6") != std::string::npos);
 }

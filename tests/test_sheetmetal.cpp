@@ -40,7 +40,7 @@ TEST_CASE("one gauge number is three thicknesses", "[sheetmetal]") {
              WithinAbs(1.519, 1e-9));
   CHECK_THAT(*sheet::LookupGauge("stainless_steel", "16ga", nullptr),
              WithinAbs(1.587, 1e-9));
-  CHECK_THAT(*sheet::LookupGauge("aluminum", "16ga", nullptr),
+  CHECK_THAT(*sheet::LookupGauge("aluminum_6061_t6", "16ga", nullptr),
              WithinAbs(1.291, 1e-9));
   // Metric stock is the same designation shape, so a shop that orders by
   // thickness never touches the gauge column.
@@ -60,7 +60,7 @@ TEST_CASE("an unstocked gauge is refused naming what is stocked",
   why.clear();
   CHECK_FALSE(sheet::LookupGauge("titanium", "16ga", &why).has_value());
   CHECK(why.find("titanium") != std::string::npos);
-  CHECK(why.find("aluminum") != std::string::npos);
+  CHECK(why.find("aluminum_6061_t6") != std::string::npos);
 }
 
 TEST_CASE("every stocked designation resolves", "[sheetmetal]") {
@@ -175,7 +175,7 @@ TEST_CASE("an unknown relief style is refused", "[sheetmetal]") {
 TEST_CASE("rules round-trip through a document", "[sheetmetal]") {
   Document doc;
   CHECK_FALSE(doc.SheetMetal().has_value());
-  sheet::SheetMetalRules r = Rules("aluminum", "1.5mm");
+  sheet::SheetMetalRules r = Rules("aluminum_6061_t6", "1.5mm");
   r.bendRadius = 3.0;
   r.reliefStyle = sheet::ReliefStyle::Obround;
   doc.SetSheetMetal(r);
@@ -188,7 +188,7 @@ TEST_CASE("rules round-trip through a document", "[sheetmetal]") {
   Document& reloaded = **loaded;
   REQUIRE(reloaded.SheetMetal().has_value());
   const sheet::SheetMetalRules& got = *reloaded.SheetMetal();
-  CHECK(got.material == "aluminum");
+  CHECK(got.material == "aluminum_6061_t6");
   CHECK(got.gauge == "1.5mm");
   CHECK_THAT(got.thickness, WithinAbs(1.5, 1e-12));
   CHECK_THAT(got.bendRadius, WithinAbs(3.0, 1e-12));
@@ -235,15 +235,15 @@ TEST_CASE("changing the gauge invalidates the regen cache", "[sheetmetal]") {
 TEST_CASE("setting rules undoes as one step", "[sheetmetal]") {
   Document doc;
   CommandStack stack;
-  stack.Execute(
-      std::make_unique<SetSheetMetalRulesCommand>(Rules("aluminum", "16ga")),
-      doc);
+  stack.Execute(std::make_unique<SetSheetMetalRulesCommand>(
+                    Rules("aluminum_6061_t6", "16ga")),
+                doc);
   REQUIRE(doc.SheetMetal().has_value());
   CHECK(doc.SheetMetal()->gauge == "16ga");
 
-  stack.Execute(
-      std::make_unique<SetSheetMetalRulesCommand>(Rules("aluminum", "18ga")),
-      doc);
+  stack.Execute(std::make_unique<SetSheetMetalRulesCommand>(
+                    Rules("aluminum_6061_t6", "18ga")),
+                doc);
   CHECK(doc.SheetMetal()->gauge == "18ga");
   stack.Undo(doc);
   CHECK(doc.SheetMetal()->gauge == "16ga");

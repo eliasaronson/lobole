@@ -191,7 +191,7 @@ def body(app):
     ph = p.sketch(Plane.yz(BRACKET_X - 1.0), name="Pivot bore")
     ph.circle((GROUND, SPINDLE_Z), d=6.2)
     p.extrude(ph.add(), 13.0, mode="cut", name="Pivot bore")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     # Z points the way the BODY grows, so mating it to a port frame needs no
     # flip — the same rule the head's own ports follow.
     p.frame("mount", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))

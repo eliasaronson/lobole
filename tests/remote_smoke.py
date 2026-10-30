@@ -1102,7 +1102,7 @@ def main():
         expect("angle_deg" in
                next(m for m in desc["methods"] if m["name"] == "pattern")["doc"],
                "the sketch pattern names its angle unit")
-        expect("aluminum" in desc["material_slugs"], "material slugs")
+        expect("aluminum_6061_t6" in desc["material_slugs"], "material slugs")
         expect("through_all" in desc["extrude_end_modes"],
                "extrude end modes are described")
         expect({"hole_callout", "pattern_callout"} <=

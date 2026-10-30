@@ -32,7 +32,7 @@ constexpr double kDepth = 60.0;     // along Y
 
 sheet::SheetMetalRules AluRules() {
   sheet::SheetMetalRules r;
-  r.material = "aluminum";
+  r.material = "aluminum_6061_t6";
   r.gauge = "1.5mm";
   r.thickness = kThickness;
   return r;
@@ -93,7 +93,7 @@ TEST_CASE("a base flange is the profile one gauge thick", "[sheetmetal]") {
              WithinRel(kWidth * kDepth * kThickness, 1e-9));
   // It wears the sheet's material without being told, because the wall is
   // made OF the sheet.
-  CHECK(doc.GetBodies()[0].material == "aluminum");
+  CHECK(doc.GetBodies()[0].material == "aluminum_6061_t6");
   CHECK(doc.GetBodies()[0].bends.empty());
 }
 
@@ -140,8 +140,9 @@ TEST_CASE("an edge flange bends a wall up and records the bend",
   CHECK_THAT(bend.angle, WithinAbs(quarter, 1e-9));
   // K is the table's, and says so — a bend whose K nobody can trace is a
   // bend nobody can argue with when the part comes back the wrong length.
-  CHECK_THAT(bend.kFactor, WithinAbs(0.41, 1e-9)); // aluminum, R/t = 1.5
-  CHECK(bend.kSource == "table:aluminum R/t<2");
+  CHECK_THAT(bend.kFactor,
+             WithinAbs(0.41, 1e-9)); // aluminum_6061_t6, R/t = 1.5
+  CHECK(bend.kSource == "table:aluminum_6061_t6 R/t<2");
   // The axis runs along the picked edge, one radius clear of the panel face
   // that was picked — and this edge is on the UNDERSIDE (z = 0), so the wall
   // folds down. Which of a rim's two edges you pick is the whole of how the

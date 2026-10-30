@@ -41,7 +41,7 @@ const double kPi = std::numbers::pi;
 
 uint64_t Blank(Document& doc) {
   sheet::SheetMetalRules r;
-  r.material = "aluminum";
+  r.material = "aluminum_6061_t6";
   r.gauge = "1.5mm";
   r.thickness = kT;
   doc.SetSheetMetal(r);

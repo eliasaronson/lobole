@@ -57,7 +57,7 @@ an unknown material, a negative straight or tail, a thinning limit outside
 (0, 1) and a former under what the stock takes, at the RPC and at load.
 
 The stock table (`tube::SizeTable`) carries `steel`, `stainless_steel`,
-`aluminum` and `titanium`, each size designated `ODxwall` ("25.4x2.4") the way
+`aluminum_6061_t6` and `titanium`, each size designated `ODxwall` ("25.4x2.4") the way
 round tube is ordered. `LookupSize` refuses an unstocked size naming the
 nearest ones; it never rounds to a neighbour.
 

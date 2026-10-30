@@ -79,7 +79,7 @@ def _fender(app, S, name, from_deg, to_deg, stay_deg, bolt=None):
         cut(part, body, tube(part, tuple(V(at) - V(along) * 30.0),
                              tuple(V(at) + V(along) * 30.0), 16.0, 0.0,
                              "Brake bolt hole"), "Brake bolt hole")
-    shop.finish(part, "aluminum", "alloy")
+    shop.finish(part, "aluminum_6061_t6", "alloy")
     axle_frame(part, "axle", (0, 0, 0), (0, 0, 1), x=(1, 0, 0))
     shop.verified(part, 1)
     return part
@@ -137,7 +137,7 @@ def rear_rack(app, S):
     ids.append(tube(part, (back, -half, top), (back, half, top), 9.0, 1.0,
                     "Tail bar", weld=(5, 5)))
     union(part, ids, "Rack build")
-    shop.finish(part, "aluminum", "dull_alloy")
+    shop.finish(part, "aluminum_6061_t6", "dull_alloy")
     seat_frame(part)
     axle_frame(part, "reflector", (back - 3.0, 0.0, top - 12.0), (-1, 0, 0),
                x=(0, 0, 1))

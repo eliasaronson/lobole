@@ -306,11 +306,11 @@ def standoff(app):
         p.thread(face, "M3", allow_engagement=True, minimum_engagement=4.0)
     p.frame("Bottom", origin=(0, 0, 0))
     p.frame("Top", origin=(0, 0, STANDOFF_LEN))
-    return p.material("aluminum").check(solids=1)
+    return p.material("aluminum_6061_t6").check(solids=1)
 
 
 def tapped_spacer(app, name, d, length, thread, tap_d, depth,
-                  material="aluminum"):
+                  material="aluminum_6061_t6"):
     """A female-female standoff: a screw into each end, no nut anywhere."""
     p = app.part(name)
     sk = p.sketch(Plane.xy(0), "Outline")
@@ -512,7 +512,7 @@ def capacitor(app):
     p = app.part("Capacitor 35V 1000uF")
     p.cylinder("Right", d=CAP_D, height=CAP_H, name="Can")
     p.frame("Origin", origin=(0, 0, 0))
-    return p.material("aluminum").check(solids=1)
+    return p.material("aluminum_6061_t6").check(solids=1)
 
 
 def buzzer(app):
@@ -568,7 +568,7 @@ def motor(app):
         p.thread(face, "M5", allow_engagement=True, minimum_engagement=3.0)
     p.frame("Mount face", origin=(0, 0, 0))
     p.frame("Prop seat", origin=(0, 0, MOTOR_PROP_SEAT_Z))
-    return p.material("aluminum").check(solids=1)
+    return p.material("aluminum_6061_t6").check(solids=1)
 
 
 def prop_nut(app):
@@ -586,7 +586,7 @@ def prop_nut(app):
     for face in p.faces(kind="cylinder", radius=2.1):
         p.thread(face, "M5", allow_engagement=True, minimum_engagement=3.0)
     p.frame("Seat", origin=(0, 0, 0))
-    return p.material("aluminum").check(solids=1)
+    return p.material("aluminum_6061_t6").check(solids=1)
 
 
 # --- propeller --------------------------------------------------------------

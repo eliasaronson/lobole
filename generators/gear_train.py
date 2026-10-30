@@ -124,7 +124,7 @@ def main():
     d.call("add_feature", feature={
         "type": "Box", "name": "Rail block", "on": top, "height": 8,
         **box_on_face(d, top, (114, -43, 0), 4, 8)})
-    d.call("set_material", feature_id=plate, material="aluminum")
+    d.call("set_material", feature_id=plate, material="aluminum_6061_t6")
 
     gear = os.path.join(ROOT, "generators", "gear.py")
     for name, z, _ in gears:

@@ -150,7 +150,7 @@ TEST_CASE("An FEM run's input hash moves with every input",
   REQUIRE(Key(*bar) == base);
 
   // The material.
-  bar->doc.GetFeature(0)->SetMaterial("aluminum");
+  bar->doc.GetFeature(0)->SetMaterial("aluminum_6061_t6");
   bar->doc.Regenerate();
   CHECK(Key(*bar) != base);
   bar->doc.GetFeature(0)->SetMaterial("steel");
@@ -371,7 +371,7 @@ TEST_CASE("A study result of each kind reopens current, its part hashing as "
     CHECK_FALSE(reloaded->StudyResultsStale(bar->studyId));
 
     // An input moved after the save: stale on reopen, and not restamped.
-    reloaded->GetFeature(0)->SetMaterial("aluminum");
+    reloaded->GetFeature(0)->SetMaterial("aluminum_6061_t6");
     reloaded->Regenerate();
     fem::RestampByInputs(*reloaded);
     CHECK(reloaded->StudyResultsStale(bar->studyId));

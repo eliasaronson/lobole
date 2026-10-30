@@ -47,7 +47,7 @@ const double kPi = std::numbers::pi;
 
 uint64_t Blank(Document& doc) {
   sheet::SheetMetalRules r;
-  r.material = "aluminum";
+  r.material = "aluminum_6061_t6";
   r.gauge = "1.5mm";
   r.thickness = kT;
   doc.SetSheetMetal(r);
@@ -122,7 +122,8 @@ double Sector(double angle, double r, double span) {
 }
 
 double Allowance(double angle, double r) {
-  return sheet::BendAllowance(angle, r, sheet::KFactor("aluminum", r, kT), kT);
+  return sheet::BendAllowance(angle, r,
+                              sheet::KFactor("aluminum_6061_t6", r, kT), kT);
 }
 
 // Unfold every bend, check the blank is one gauge thick, fold it back, and
@@ -184,7 +185,7 @@ TEST_CASE("a closed hem folds the edge back on itself", "[sheetmetal][hem]") {
   // material's minimum radius — which it is far under.
   REQUIRE(doc.GetBodies()[0].bends.size() == 1);
   CHECK(doc.GetBodies()[0].bends[0].radius <
-        sheet::MinBendRadius("aluminum", kT));
+        sheet::MinBendRadius("aluminum_6061_t6", kT));
 }
 
 TEST_CASE("a hem stops short of the wall beside it", "[sheetmetal][hem]") {

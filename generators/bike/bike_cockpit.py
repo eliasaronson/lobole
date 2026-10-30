@@ -182,7 +182,7 @@ def brake_lever(app, S):
                           "sketch_id": ref_of(sk.add()), "mode": "new_body",
                           "distance": 12.0})["id"])
     union(part, ids, "Lever build")
-    shop.finish(part, "aluminum", "alloy")
+    shop.finish(part, "aluminum_6061_t6", "alloy")
     axle_frame(part, "axis", (0, 0, 0), (0, 0, 1), x=(1, 0, 0))
     shop.verified(part, 1)
     return part

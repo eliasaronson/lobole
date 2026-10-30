@@ -88,7 +88,7 @@ def main():
         d.call("set_active_part", index=parts["pin"]["index"])
         pin_feat = [f for f in d.call("get_state")["features"]
                     if f["type"] == "Extrude"][0]
-        d.call("set_material", feature_id=pin_feat["id"], material="aluminum")
+        d.call("set_material", feature_id=pin_feat["id"], material="aluminum_6061_t6")
         d.call("set_active_part", index=parts["rig"]["index"])
         bom = d.call("bom")
         rows = {r["part"]: r for r in bom["rows"]}
@@ -118,7 +118,7 @@ def main():
         pin_line = [l for l in lines if l.startswith("pin,")][0]
         # A part somebody modelled leaves standard and designation EMPTY —
         # which is what a purchaser filters on to split bought from made.
-        expect(",2,,,aluminum," in pin_line, f"pin CSV row: {pin_line}")
+        expect(",2,,,aluminum_6061_t6," in pin_line, f"pin CSV row: {pin_line}")
 
         # --- a PRINTED part: weighed as it prints, and its plate -----------
         # (docs/assemblies/README.md#bill-of-materials). A 20 x 20 x 10 PLA

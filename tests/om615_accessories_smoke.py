@@ -80,14 +80,14 @@ def main():
             assert not before.data["accepted"]
 
             def recolour(a):
-                return A.fan(a).material("aluminum")
+                return A.fan(a).material("aluminum_6061_t6")
 
             started = time.perf_counter()
             with plan(
                 app,
                 namespace="accessory-test",
                 key="fan",
-                fingerprint="aluminum",
+                fingerprint="aluminum_6061_t6",
                 builder=recolour,
             ) as update:
                 assert update.apply().id == fan.id
@@ -96,7 +96,7 @@ def main():
                 f"staged fan recolour: {time.perf_counter() - started:.3f}s", flush=True
             )
             assert [f["id"] for f in fan.state()["features"]] == old_features
-            assert fan.state()["bodies"][0]["material"] == "aluminum"
+            assert fan.state()["bodies"][0]["material"] == "aluminum_6061_t6"
             assert rig.occurrences()[0].id == occurrence.id
             assert before.current(app)["status"] == "stale"
 
@@ -108,7 +108,7 @@ def main():
                 app,
                 namespace="accessory-test",
                 key="fan",
-                fingerprint="aluminum",
+                fingerprint="aluminum_6061_t6",
                 builder=never,
             ) as update:
                 assert update.report["action"] == "reuse"

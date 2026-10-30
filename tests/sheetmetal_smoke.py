@@ -60,7 +60,7 @@ def straight_edge(d, want_mid):
 def blank(d):
     """A fresh part: aluminium 1.5 mm, a 100 x 60 base flange."""
     d.call("new_project")
-    d.call("set_sheet_metal_rules", material="aluminum", gauge="1.5mm")
+    d.call("set_sheet_metal_rules", material="aluminum_6061_t6", gauge="1.5mm")
     sk = d.call("add_feature", feature={
         "type": "Sketch", "name": "Blank",
         "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
@@ -256,11 +256,11 @@ def main():
         # agent finds out what it may ask for.
         state = d.call("get_sheet_metal_rules")
         expect(state["rules"] is None, state)
-        expect("aluminum" in state["stock"], state["stock"].keys())
+        expect("aluminum_6061_t6" in state["stock"], state["stock"].keys())
         gauges = {g["gauge"]: g["thickness_mm"] for g in state["stock"]["steel"]}
         expect(abs(gauges["16ga"] - 1.519) < 1e-9, gauges["16ga"])
         alu = {g["gauge"]: g["thickness_mm"]
-               for g in state["stock"]["aluminum"]}
+               for g in state["stock"]["aluminum_6061_t6"]}
         # The trap the table exists for: one gauge number, three thicknesses.
         expect(abs(alu["16ga"] - 1.291) < 1e-9, alu["16ga"])
 
@@ -295,13 +295,13 @@ def main():
 
         # Now the stock. The derived fields come back RESOLVED, each labelled
         # with where the number came from.
-        r = d.call("set_sheet_metal_rules", material="aluminum",
+        r = d.call("set_sheet_metal_rules", material="aluminum_6061_t6",
                    gauge="1.5mm")
         rules = r["rules"]
         expect(abs(rules["thickness_mm"] - THICKNESS) < 1e-9, rules)
         expect(abs(rules["bend_radius_mm"] - MIN_RADIUS) < 1e-9, rules)
         expect(rules["bend_radius_source"] == "table:minimum", rules)
-        expect(rules["k_factor_source"] == "table:aluminum R/t<2", rules)
+        expect(rules["k_factor_source"] == "table:aluminum_6061_t6 R/t<2", rules)
         expect(abs(rules["k_factor"] - 0.41) < 1e-9, rules)
 
         # The blank rebuilt itself the moment the stock was declared.
@@ -414,7 +414,7 @@ def main():
         again = d.call("get_state")["bodies"]
         expect(abs(again[0]["volume_mm3"] - want) / want < 1e-4, again[0])
         back = d.call("get_sheet_metal_rules")["rules"]
-        expect(back["gauge"] == "1.5mm" and back["material"] == "aluminum",
+        expect(back["gauge"] == "1.5mm" and back["material"] == "aluminum_6061_t6",
                back)
         # ...including the BENDS. A reopened project loads baked geometry and
         # executes nothing, so a bend record that the blob does not carry is

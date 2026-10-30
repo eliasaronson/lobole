@@ -72,7 +72,7 @@ std::string EdgeAlongX(const Body& body, double y, double z) {
 // `flatFeatureOut`); the document stays in its base configuration.
 uint64_t FlangedPart(Document& doc, uint64_t* flatFeatureOut = nullptr) {
   sheet::SheetMetalRules rules;
-  rules.material = "aluminum";
+  rules.material = "aluminum_6061_t6";
   rules.gauge = "1.5mm";
   rules.thickness = kT;
   doc.SetSheetMetal(rules);
@@ -107,9 +107,9 @@ uint64_t FlangedPart(Document& doc, uint64_t* flatFeatureOut = nullptr) {
 // The bend allowance this part's one bend eats, from the same functions the
 // feature used — a literal here would agree with the code by luck.
 double Allowance() {
-  const double r = sheet::MinBendRadius("aluminum", kT);
+  const double r = sheet::MinBendRadius("aluminum_6061_t6", kT);
   return sheet::BendAllowance(std::numbers::pi / 2.0, r,
-                              sheet::KFactor("aluminum", r, kT), kT);
+                              sheet::KFactor("aluminum_6061_t6", r, kT), kT);
 }
 
 size_t BendLines(const drawing::SheetView& sv) {
@@ -306,13 +306,14 @@ TEST_CASE("a bend table lists the bends of its view's part",
   // The numbers are the PART's, not a rounding of something near them: the
   // radius the flange used and the allowance the unfolder ate, formatted the
   // way the rest of the sheet formats lengths.
-  const double radius = sheet::MinBendRadius("aluminum", kT);
+  const double radius = sheet::MinBendRadius("aluminum_6061_t6", kT);
   CHECK(rn.text.find("R " + units::FormatLength(radius, {})) !=
         std::string::npos);
   CHECK(rn.text.find("BA " + units::FormatLength(Allowance(), {})) !=
         std::string::npos);
   char k[32];
-  std::snprintf(k, sizeof k, "K %.3f", sheet::KFactor("aluminum", radius, kT));
+  std::snprintf(k, sizeof k, "K %.3f",
+                sheet::KFactor("aluminum_6061_t6", radius, kT));
   CHECK(rn.text.find(k) != std::string::npos);
   CHECK(rn.text.find("B2") == std::string::npos);
 

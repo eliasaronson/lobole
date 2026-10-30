@@ -36,7 +36,7 @@ constexpr double kR = 2.25;
 
 uint64_t Profile(Document& doc, const std::vector<glm::vec2>& pts) {
   sheet::SheetMetalRules r;
-  r.material = "aluminum";
+  r.material = "aluminum_6061_t6";
   r.gauge = "1.5mm";
   r.thickness = kT;
   doc.SetSheetMetal(r);

@@ -758,7 +758,7 @@ def cam_cap(app):
     for sx in (-1, 1):
         bolts.circle((sx * CAM_CAP_BOLT_X, 0), d=CAM_CAP_BOLT_D + 0.5)
     p.extrude(bolts.add(), 24.0, mode="cut", name="Bolt holes")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
@@ -1506,7 +1506,7 @@ def intake_manifold(app):
         p, (shaft_x + ms * 16.0, lever_y + 2.0, lz + 20.0),
         (shaft_x + ms * 16.0, lever_y + 12.0, lz + 20.0), 6.0, "Lever pin"))
     _stud_holes(p, "intake")
-    B.casting_finish(p, "aluminum")
+    B.casting_finish(p, "aluminum_6061_t6")
     p.frame("face", origin=(ms * HEAD_X, 0, PORT_Z), z=(0, 0, 1),
             x=(1, 0, 0))
     p.frame("throttle", origin=(tb_end, 0.0, lz), z=(ms, 0, 0), x=(0, 1, 0))

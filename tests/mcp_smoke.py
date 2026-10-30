@@ -263,7 +263,7 @@ async def run(port):
             # know (set_material's signature has no body_name) reaches the
             # app instead of dying as a Python TypeError in the wrapper.
             await call("rpc", method="set_material",
-                       params=dict(material="aluminum",
+                       params=dict(material="aluminum_6061_t6",
                                    body_name=state["bodies"][0]["name"]))
 
             # Round one corner; the volume drop pins the arc really extruded

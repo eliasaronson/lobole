@@ -198,7 +198,7 @@ def barrel(app):
     p.extrude(holes.add(), 30.0, mode="cut", name="Head bolt holes")
     # Aluminium, which is WHY it is finned like that: the fins are there to
     # move heat into the air, and the alloy is half the reason that works.
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("crank_axis", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("bore_axis", origin=(0, 0, BARREL_Z), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("deck", origin=(0, 0, DECK), z=(0, 0, 1), x=(1, 0, 0))
@@ -291,7 +291,7 @@ def head(app):
     for x, y in bolt_xy():
         access.circle((x, y), d=20.0)
     p.extrude(access.add(), 34.0, mode="cut", name="Bolt access")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     # ---- cam towers -----------------------------------------------------
     # Pillars from the head's top face up to the cam axis, each ending in an
     # OPEN saddle. Open because the lobes are bigger than the shaft (20 mm
@@ -415,7 +415,7 @@ def cam_cap(app):
     # shaft, not the fit. Same lesson as the main bearings.
     bore.circle((0, 0), d=CAM_SHAFT_D + 8.0)
     p.extrude(bore.add(), 2 * CAM_BEARING_W + 4, mode="cut", name="Saddle")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     # Its own origin is ON the shaft axis, so it mates to the head's cap frame
     # without an offset anybody has to remember.
     p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
@@ -480,7 +480,7 @@ def crankcase(app):
     for x, y in bolt_xy():
         holes.circle((x, y), d=11.0)
     p.extrude(holes.add(), 26.0, mode="cut", name="Barrel bolt holes")
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("main", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("deck", origin=(0, 0, deck), z=(0, 0, 1), x=(1, 0, 0))
     # ON THE Y AXIS. Written (0, 0, DRIVE_Y) first, which put the timing
@@ -711,7 +711,7 @@ def piston(app):
     p.extrude(slot.add(), 40.0, mode="cut", name="Rod slot")
     # Aluminium: a piston is the one reciprocating part where mass costs
     # you twice, at both ends of every stroke.
-    p.material("aluminum")
+    p.material("aluminum_6061_t6")
     p.frame("wrist_pin", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("slide", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()

@@ -176,7 +176,7 @@ def main():
 
         phase("Mass properties")
         # Mass properties: aluminum bracket, analytic mass/CoM (I2)
-        d.call("set_material", feature_id=pad["id"], material="aluminum")
+        d.call("set_material", feature_id=pad["id"], material="aluminum_6061_t6")
         mp = d.call("mass_properties")
         b = mp["bodies"][0]
         expect(abs(b["volume_mm3"] - expected_volume) < 1e-2, "massprops volume")
@@ -995,7 +995,7 @@ def main():
         # seats them flush (contact only) and the clash clears.
         d.call("new_project")
         boxf = shapes.box(d, (0, 0, 0), (2, 2, 2), "Cube")
-        d.call("set_material", feature_id=boxf["id"], material="aluminum")
+        d.call("set_material", feature_id=boxf["id"], material="aluminum_6061_t6")
         cube = d.call("list_elements")["bodies"][0]
         # #8: every face reports its outward unit surface normal. A box's six
         # planar faces point along ±X/±Y/±Z; check magnitude ~1 and that the
@@ -1041,7 +1041,7 @@ def main():
         expect(len(amp["occurrences"]) == 2, f"two occurrence rows: {amp}")
         expect(abs(amp["total"]["volume_mm3"] - 16.0) < 1e-3,
                f"assembly total volume 16: {amp['total']}")
-        one_mass = 2700 * 8 * 1e-6  # aluminum, 8 mm^3
+        one_mass = 2700 * 8 * 1e-6  # aluminum_6061_t6, 8 mm^3
         expect(abs(amp["total"]["mass_g"] - 2 * one_mass) < 1e-6,
                f"assembly total mass = 2x the part: {amp['total']}")
         com = amp["total"]["center_of_mass_mm"]

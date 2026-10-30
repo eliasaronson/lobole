@@ -314,7 +314,7 @@ def housing(app):
     for i, x in enumerate(CLAMP_X):
         p.frame(f"clamp{i + 1}", origin=(x, 0, H_TOP), z=(0, 0, 1),
                 x=(1, 0, 0))
-    finish(p, "aluminum", CASTING, **CASTING_FINISH)
+    finish(p, "aluminum_6061_t6", CASTING, **CASTING_FINISH)
     p.check(solids=1)
     return p
 
@@ -328,7 +328,7 @@ def window_cover(app):
             (x, UP_Y1 + 6.0, (RACK_GALLERY_Z0 + RACK_GALLERY_Z1) / 2.0),
             8.0, f"Screw head {x:+.0f}")
     p.frame("origin", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
-    finish(p, "aluminum", CASTING, **CASTING_FINISH)
+    finish(p, "aluminum_6061_t6", CASTING, **CASTING_FINISH)
     p.check(solids=1)
     return p
 
@@ -960,7 +960,7 @@ def governor_housing(app):
     p.frame("mount", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
     p.frame("filler", origin=(FILLER_X, -GOV_Y, FILLER_Z - GOV_Z),
             z=(0, 0, 1), x=(1, 0, 0))
-    finish(p, "aluminum", CASTING, **CASTING_FINISH)
+    finish(p, "aluminum_6061_t6", CASTING, **CASTING_FINISH)
     p.check(solids=1)
     return p
 
@@ -984,7 +984,7 @@ def governor_cover(app):
                   d=GOV_SCREW_D)
     p.extrude(sk.add(), 2.0, mode="add", name="Rim screws")
     p.frame("mount", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
-    finish(p, "aluminum", CASTING, **CASTING_FINISH)
+    finish(p, "aluminum_6061_t6", CASTING, **CASTING_FINISH)
     p.check(solids=1)
     return p
 
@@ -1028,7 +1028,7 @@ def nameplate(app):
         rod(p, (cx, PLATE_PAD_Y - NAMEPLATE_T, z),
             (cx, PLATE_PAD_Y - NAMEPLATE_T - 0.8, z), 2.2, f"Rivet {z:+.0f}")
     p.frame("mount", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
-    finish(p, "aluminum", (0.55, 0.55, 0.52), roughness=0.3, metallic=0.9)
+    finish(p, "aluminum_6061_t6", (0.55, 0.55, 0.52), roughness=0.3, metallic=0.9)
     p.check(solids=1)
     return p
 

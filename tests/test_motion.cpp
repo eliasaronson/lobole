@@ -1171,7 +1171,7 @@ TEST_CASE("A saved motion study on an assembly with relations reopens "
 
   // An input moved after the reopen reads otherwise: a part's material,
   // then the relation's ratio.
-  back[3]->GetFeature(0)->SetMaterial("aluminum");
+  back[3]->GetFeature(0)->SetMaterial("aluminum_6061_t6");
   back[3]->Regenerate();
   CHECK(motion::InputKey(*reloaded, over(back), nullptr, reread) !=
         result.inputHash);

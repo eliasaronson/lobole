@@ -62,7 +62,7 @@ const std::vector<SizeRow>& StructuralRounds() {
 
 const std::vector<std::string>& TubeMaterials() {
   static const std::vector<std::string> m = {"steel", "stainless_steel",
-                                             "aluminum", "titanium"};
+                                             "aluminum_6061_t6", "titanium"};
   return m;
 }
 
@@ -107,7 +107,7 @@ bool ParseDesignation(const std::string& s, double& od, double& wall) {
 double MaterialFactor(const std::string& material) {
   if (material == "stainless_steel")
     return 1.2;
-  if (material == "aluminum")
+  if (material == "aluminum_6061_t6")
     return 1.15;
   if (material == "titanium")
     return 1.5;
