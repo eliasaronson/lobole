@@ -522,8 +522,6 @@ std::unique_ptr<Bushing> MakeBushing(double od, double len, double fd,
     REQUIRE(info.has_value());
     if (info->kind != "cylinder")
       continue;
-    const double r = std::hypot(info->centroid.x, info->centroid.y);
-    (void)r;
     if (std::abs(info->radius - od / 2) < 1e-6)
       b->sleeve = {body.createdBy, name};
     else if (std::abs(info->radius - bd / 2) < 1e-6)
