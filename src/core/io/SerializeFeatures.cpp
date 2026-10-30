@@ -1564,7 +1564,7 @@ json FeatureToJson(const Feature& feature) {
     j["tool_id"] = boo->toolId;
     j["op"] = BooleanOpToString(boo->op);
   } else if (auto* cr = dynamic_cast<const CradleFeature*>(&feature)) {
-    j["target_id"] = cr->targetId; // vNEXT
+    j["target_id"] = cr->targetId; // v211
     j["tool_id"] = cr->toolId;
     if (cr->hasClearance) {
       j["clearance_mm"] = cr->clearanceMm;
@@ -2375,7 +2375,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "union|subtract|intersect",
      "target_id:int>=0, tool_id:int>=0, "
      "op?:'union'|'subtract'|'intersect'"},
-    {"Cradle", kVersionNEXT,
+    {"Cradle", 211,
      "target_id (the block's created_by), tool_id (the scan's: a mesh body, "
      "open or closed, or a B-Rep): the block less the scan grown by "
      "clearance_mm (+_expr; unset = the print process's gap a side, refused "
@@ -3620,7 +3620,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::make_unique<BooleanFeature>(
         name, IdField(j, "target_id", true), IdField(j, "tool_id", true),
         BooleanOpFromString(j.value("op", "union")));
-  } else if (type == "Cradle") { // vNEXT
+  } else if (type == "Cradle") { // v211
     auto cr = std::make_unique<CradleFeature>(
         name, IdField(j, "target_id", true), IdField(j, "tool_id", true));
     if (j.contains("clearance_mm") || j.contains("clearance_mm_expr")) {

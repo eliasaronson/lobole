@@ -948,7 +948,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   }
   std::vector<double> volumes;
   for (const auto& body : doc.GetBodies())
-    // A mesh body's volume is its triangles' (a Cradle's result, vNEXT).
+    // A mesh body's volume is its triangles' (a Cradle's result, v211).
     volumes.push_back(body.IsMesh() ? body.mesh->Volume()
                                     : body.shape.Volume());
   std::sort(volumes.begin(), volumes.end());

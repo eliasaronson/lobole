@@ -891,7 +891,7 @@ cut figure, an open scan that cradles where a mesh Boolean refuses it by
 name; the clearance from the print process and its refusal without one,
 each bad input refused naming what is accepted, the budget's refusal
 naming the resolution that fits, a mesh Boolean putting a B-Rep screw hole
-into a cradle; the goldens `vNEXT-cradle` and `vNEXT-mesh-boolean`;
+into a cradle; the goldens `v211-cradle` and `v211-mesh-boolean`;
 `refused_calls_smoke.py` (a refused Cradle changes nothing); the GUI tests
 `cradle/a_block_cut_to_a_ball_off_the_frame` (the toolbar's defaults, one
 undo step, built as a job, undone) and `defaults/cradle`.
