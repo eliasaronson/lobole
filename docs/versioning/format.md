@@ -346,6 +346,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | `Cradle` feature: a block less a scan grown by a clearance and swept along the way it is lowered in (`target_id`, `tool_id`, `clearance_mm?`, `direction?`, `sweep?`, `resolution_mm?`); the block becomes a mesh body. A `Boolean` with a mesh operand runs on triangles. Goldens `vNEXT-cradle`, `vNEXT-mesh-boolean` |
 
 ## Paths in a project
 

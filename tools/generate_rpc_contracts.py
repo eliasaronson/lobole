@@ -60,7 +60,9 @@ def feature_contracts():
     table = src[src.index("kFeatureTypes[] = {"):]
     table = table[:table.index("\n};")]
     out = {}
-    for m in re.finditer(r'\{\s*"([A-Za-z0-9]+)",\s*(?:\d+|192\d*|197\d*),((?:\s*"(?:[^"\\]|\\.)*")+)'
+    # A row's version is a number, or kVersionNEXT on a branch whose format
+    # bump has not landed (docs/versioning/format.md).
+    for m in re.finditer(r'\{\s*"([A-Za-z0-9]+)",\s*(?:\d+|kVersionNEXT\d*),((?:\s*"(?:[^"\\]|\\.)*")+)'
                          r'\s*,((?:\s*"(?:[^"\\]|\\.)*")+)\s*\}', table):
         out[m.group(1)] = (f"type:'{m.group(1)}', {common}, "
                            + literal(m.group(3)))

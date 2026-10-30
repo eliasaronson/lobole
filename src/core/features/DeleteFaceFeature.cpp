@@ -111,8 +111,10 @@ std::string DeleteAndHeal(const Picked& picked, Healed& out,
 // faces reach it); the grill's four holes go to a job. The body is not read:
 // the rate is per face deleted, and a face that is not on it fails at once
 // anyway.
-double DeleteFaceFeature::BuildCostS(const std::vector<Body>& input) const {
+double DeleteFaceFeature::BuildCostS(const std::vector<Body>& input,
+                                     const printfit::Process* print) const {
   (void)input;
+  (void)print;
   constexpr double kSecondsPerFace = 14.0 / 916.0;
   return kSecondsPerFace * static_cast<double>(faces.size());
 }

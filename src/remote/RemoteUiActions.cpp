@@ -20,6 +20,7 @@
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/drawing/DrawingExport.h"
+#include "core/features/CradleFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Autosaver.h"
@@ -830,6 +831,12 @@ public:
       }
       if (answer.contains("digest") && m_pre.is_array())
         answer["digest"] = remote::DigestJson(m_pre, *doc);
+      // What a heavy feature reports of its build (a Cradle's resolution
+      // and deviation) exists only now that it has built.
+      if (const auto* cr = dynamic_cast<const CradleFeature*>(
+              m_feature != 0 ? doc->FindFeatureById(m_feature) : nullptr))
+        if (json rep = cr->ReportJson(); !rep.is_null())
+          answer["report"] = std::move(rep);
     }
     return Next::Answer;
   }

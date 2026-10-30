@@ -152,6 +152,20 @@ typed `contract`: every field, its type and its enum values.
   "symmetric"?: bool, "reversed"?: bool, "mode": "new_body"|"add"|"cut"}}
 - Boolean: {{"type": "Boolean", "name": str, "target_id": <feature id>,
   "tool_id": <feature id>, "op": "union"|"subtract"|"intersect"}}
+  A mesh operand (an imported mesh body, a Cradle's result) runs on
+  triangles: both must be closed; a B-Rep operand is tessellated at a
+  deflection derived from its size (the reply's report says it), and the
+  result is a mesh body.
+- Cradle: {{"type": "Cradle", "name": str, "target_id": <the block's
+  feature id>, "tool_id": <the scan's>, "clearance_mm"?: number (unset = the
+  print process's gap a side; refused without a process),
+  "direction"?: [x, y, z] (the way the object moves in, default [0, 0, -1]),
+  "sweep"?: bool (default true: no undercuts, it lifts out; false keeps
+  them, a snap-in grip), "resolution_mm"?: number (default half the
+  clearance)}} — a holder shaped to a scan, which may be open. The block
+  becomes a mesh body, so do fillets and bosses BEFORE it. Builds off the
+  frame; refused past its cost budget naming the resolution or triangle
+  count that fits; the reply's report gives the resolution and deviation.
 - Pattern: {{"type": "Pattern", "name": str,
   "kind": "mirror"|"linear"|"circular", "source_id": <feature id>, ...}}
   source either CREATES a new body (Box, Revolve, a new-body Extrude, ...) —

@@ -15,7 +15,9 @@
 #include "core/Literals.h"
 #include "core/Primitives.h"
 #include "core/PrintSplit.h"
+#include "core/features/BooleanFeature.h"
 #include "core/features/CamProfileFeature.h"
+#include "core/features/CradleFeature.h"
 #include "core/features/DeleteFaceFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/MoveFaceFeature.h"
@@ -482,8 +484,12 @@ static constexpr MethodDoc ModelingMethods[] = {
      "created_by; a blend whose edges start no blend; a Draft face square "
      "to the pull; a Shell wall that breaks through an open face; a Pattern "
      "or Mirror of a feature that made no body "
-     "(docs/modeling/README.md#refused-on-the-bodies). A heavy feature (a "
-     "DeleteFace of many faces) builds off the frame as a `feature` job and "
+     "(docs/modeling/README.md#refused-on-the-bodies). A Cradle returns "
+     "`report` {clearance_mm, clearance_from, resolution_mm, deviation_mm, "
+     "cells, estimate_s, triangles}, and a Boolean with a mesh operand "
+     "{mesh, triangles, target_deflection_mm?, tool_deflection_mm?} "
+     "(docs/modeling/README.md#cradle). A heavy feature (a DeleteFace of "
+     "many faces, a Cradle) builds off the frame as a `feature` job and "
      "the call answers when it lands; cancelled (cancel_background_job "
      "{kind: \"feature\"}) the call is rolled back and refused "
      "(docs/ui/long-operations.md#heavy-features).",
@@ -1549,6 +1555,14 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (auto* c =
             dynamic_cast<const CamProfileFeature*>(doc->GetFeature(index)))
       if (json rep = c->ReportJson(); !rep.is_null())
+        resp["report"] = rep;
+    // A Cradle says what clearance and resolution it cut at, and the
+    // deviation that implies (docs/modeling/README.md#cradle).
+    if (auto* c = dynamic_cast<const CradleFeature*>(doc->GetFeature(index)))
+      if (json rep = c->ReportJson(); !rep.is_null())
+        resp["report"] = rep;
+    if (auto* b = dynamic_cast<const BooleanFeature*>(doc->GetFeature(index)))
+      if (json rep = b->ReportJson(); !rep.is_null())
         resp["report"] = rep;
     // A Thread on a PRINTED part says, in the call that made it, what the
     // print wants it modelled at (docs/tolerances/README.md#printed-parts) —

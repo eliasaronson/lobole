@@ -51,7 +51,8 @@ public:
   // (docs/ui/long-operations.md#heavy-features).
   [[nodiscard]] bool MayBuildOffFrame() const override { return true; }
   [[nodiscard]] double
-  BuildCostS(const std::vector<Body>& input) const override;
+  BuildCostS(const std::vector<Body>& input,
+             const printfit::Process* print) const override;
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(bodyId);

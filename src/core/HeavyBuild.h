@@ -38,7 +38,8 @@ inline constexpr double kOffFrameS = 0.25;
 // Whether `f`, acting on `input`, builds off the frame on a document that
 // builds heavy features so (Feature::MayBuildOffFrame, BuildCostS).
 [[nodiscard]] bool BuildsOffFrame(const Feature& f,
-                                  const std::vector<Body>& input);
+                                  const std::vector<Body>& input,
+                                  const printfit::Process* print = nullptr);
 
 // The evaluation a build produced: the bodies after the feature and the
 // feature as its Execute left it -- exactly a regen cache entry.

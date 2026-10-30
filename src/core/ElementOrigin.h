@@ -44,6 +44,10 @@ enum class ElementRole {
   RingSide,
   GrooveFloor,
   GrooveFlank,
+  // A mesh body's one element, the whole body
+  // (docs/interchange/README.md#mesh-bodies): "<id>/b<k>/mesh" from an
+  // import, "<id>/mesh" from a Cradle or a mesh Boolean.
+  Mesh,
   Unknown, // a seed this decoder does not know
 };
 

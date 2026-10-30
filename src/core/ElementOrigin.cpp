@@ -42,6 +42,7 @@ constexpr RoleSpelling kRoles[] = {
     {ElementRole::RingSide, "ring_side"},
     {ElementRole::GrooveFloor, "groove_floor"},
     {ElementRole::GrooveFlank, "groove_flank"},
+    {ElementRole::Mesh, "mesh"},
 };
 
 bool AllDigits(const std::string& s) {
@@ -203,6 +204,12 @@ bool DecodeSeed(const std::vector<std::string>& words, ElementOrigin& o) {
       }
       return false;
     }
+  }
+  // A mesh body's one element, maybe behind an import's body segment.
+  if (last == "mesh" &&
+      (words.size() == 1 || (words.size() == 2 && Numbered(words[0], "b")))) {
+    o.role = ElementRole::Mesh;
+    return true;
   }
   // Positional: "face<i>", maybe behind a sub-body segment (b<k>, j<k>,
   // bend<k>, f<k> -- a split, a jog, a bend, a flange).

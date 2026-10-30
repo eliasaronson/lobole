@@ -52,12 +52,13 @@ TestOptions& TestOptionsLocked() {
 
 } // namespace
 
-bool BuildsOffFrame(const Feature& f, const std::vector<Body>& input) {
+bool BuildsOffFrame(const Feature& f, const std::vector<Body>& input,
+                    const printfit::Process* print) {
   if (!f.MayBuildOffFrame())
     return false;
   if (GetTestOptions().force)
     return true;
-  return f.BuildCostS(input) >= kOffFrameS;
+  return f.BuildCostS(input, print) >= kOffFrameS;
 }
 
 void Detach(Request& request) {

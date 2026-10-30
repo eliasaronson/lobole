@@ -3,8 +3,9 @@
 
 #pragma once
 
-// Booleans of closed triangle meshes, by manifold (deps/manifold): the one
-// file that calls it (docs/plans/organic-meshes-and-scans.md). Pure data
+// Booleans of closed triangle meshes, by manifold (deps/manifold), which
+// core/mesh/Field.cpp also calls for its level set
+// (docs/modeling/README.md#mesh-booleans). Pure data
 // and no OpenCASCADE, so it runs on any thread; manifold is built serial
 // (MANIFOLD_PAR off), so one call is one thread.
 

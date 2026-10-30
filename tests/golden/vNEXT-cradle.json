@@ -1,0 +1,32 @@
+{
+  "format": "designer-document",
+  "version": 211,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Blank",
+      "id": 1,
+      "position": [-8, -8, -8],
+      "width": 16,
+      "height": 16,
+      "depth": 10
+    },
+    {
+      "type": "Sphere",
+      "name": "Scan",
+      "id": 2,
+      "center": [0, 0, 0],
+      "radius": 5
+    },
+    {
+      "type": "Cradle",
+      "name": "Holder",
+      "id": 3,
+      "target_id": 1,
+      "tool_id": 2,
+      "clearance_mm": 1,
+      "direction": [0, 0, -1],
+      "resolution_mm": 1
+    }
+  ]
+}

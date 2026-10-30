@@ -338,8 +338,18 @@ TEST_CASE("Every B-Rep feature refuses a mesh body by name", "[mesh_body]") {
     doc.AddFeature(
         std::make_unique<BoxFeature>("Block", glm::vec3(0), 10, 10, 10));
     const uint64_t box = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
-    refusedNaming(std::make_unique<BooleanFeature>("Subtract", box, scan,
-                                                   BooleanOp::Subtract));
+    // A Boolean is not refused: with a mesh operand it runs on triangles
+    // (docs/modeling/README.md#mesh-booleans). The block lies inside the
+    // sphere, so their union is the sphere, a mesh body.
+    doc.AddFeature(
+        std::make_unique<BooleanFeature>("Union", box, scan, BooleanOp::Union));
+    const Feature* boo = doc.GetFeature(doc.FeatureCount() - 1);
+    INFO(boo->GetError());
+    CHECK(boo->GetError().empty());
+    REQUIRE(doc.GetBodies().size() == 1);
+    CHECK(doc.GetBodies()[0].IsMesh());
+    CHECK(std::abs(doc.GetBodies()[0].mesh->Volume() - s.volume) <=
+          s.volumeTolerance);
   }
   fs::remove(stl);
 }

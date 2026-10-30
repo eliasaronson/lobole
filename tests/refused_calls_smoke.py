@@ -38,7 +38,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from smoke_app import launch  # noqa: E402
-from smoke_shapes import cylinder  # noqa: E402
+from smoke_shapes import cylinder, sphere  # noqa: E402
 from smoke_world import (World, build_fixture, changed,  # noqa: E402
                          outside_baselines)
 
@@ -428,6 +428,25 @@ def main():
                       {"feature": dict(m6, designation=bad)},
                       needle="not in the ISO metric thread table",
                       tab=part["name"])
+            # A Cradle (docs/modeling/README.md#cradle) refused on its
+            # inputs before it is stored: the boss as the block, a ball
+            # inside it as the scan (removed again after).
+            boss = d.call("get_state")["bodies"][-1]["created_by"]
+            ball = sphere(d, (80, 0, 6), 2.0, name="Cradle scan")
+            scan = d.call("get_state")["bodies"][-1]["created_by"]
+            cradle = {"type": "Cradle", "target_id": boss, "tool_id": scan,
+                      "clearance_mm": 0.5}
+            check("cradle direction zero", "add_feature",
+                  {"feature": dict(cradle, direction=[0, 0, 0])},
+                  needle="non-zero", tab=part["name"])
+            check("cradle past the budget", "add_feature",
+                  {"feature": dict(cradle, resolution_mm=1e-4)},
+                  needle="cost budget", tab=part["name"])
+            check("cradle sweep not a bool", "add_feature",
+                  {"feature": dict(cradle, sweep="no")},
+                  needle="sweep", tab=part["name"])
+            for fid in ball.get("ids", [ball["id"]]):  # the solid first
+                d.call("delete_feature", feature_id=fid)
             tid = d.call("add_feature", feature=m6)["id"]
             check("thread designation on modify", "modify_feature",
                   {"feature_id": tid,

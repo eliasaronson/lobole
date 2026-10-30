@@ -7,6 +7,7 @@
 #include "core/ElementOrigin.h"
 #include "core/FitBands.h"
 #include "core/HeavyBuild.h"
+#include "core/features/CradleFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/RetainingRingGrooveFeature.h"
@@ -861,7 +862,9 @@ bool Document::Regenerate() {
       // document, a job or an earlier history already paid for is installed
       // like a hit; a document that builds off the frame stops here and asks
       // for one (docs/ui/long-operations.md#heavy-features).
-      const bool heavyHere = !suppressed && heavy::BuildsOffFrame(f, m_bodies);
+      const bool heavyHere =
+          !suppressed &&
+          heavy::BuildsOffFrame(f, m_bodies, m_print ? &*m_print : nullptr);
       if (heavyHere) {
         if (std::optional<heavy::Result> built = heavy::Find(h)) {
           m_bodiesFromBlob = 0;
@@ -905,7 +908,8 @@ bool Document::Regenerate() {
               req->featureId = f.GetId();
               req->featureName = f.GetName();
               req->hash = h;
-              req->estimateS = f.BuildCostS(m_bodies);
+              req->estimateS =
+                  f.BuildCostS(m_bodies, m_print ? &*m_print : nullptr);
               req->feature = f.Clone();
               req->input = m_bodies;
               req->symbols = m_symbols;
@@ -1397,6 +1401,9 @@ static bool PrintDrivesGeometry(const Feature& f) {
   // its floor to print at d2 (docs/parts/README.md#the-groove).
   if (dynamic_cast<const RetainingRingGrooveFeature*>(&f) != nullptr)
     return true;
+  // A Cradle with no clearance of its own takes the process's gap.
+  if (const auto* cr = dynamic_cast<const CradleFeature*>(&f))
+    return !cr->hasClearance;
   const auto* hole = dynamic_cast<const HoleFeature*>(&f);
   // A printed hole is refused without a process, and its flat is the
   // process's bridge.

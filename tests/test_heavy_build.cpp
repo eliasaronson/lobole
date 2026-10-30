@@ -109,7 +109,7 @@ TEST_CASE("A heavy feature's estimate is derived from what it would act on",
   // The grill's four holes, 916 faces: well past a frame.
   auto many = std::make_unique<DeleteFaceFeature>(
       "Many", body, std::vector<ElementRef>(916, ElementRef{body, "x"}));
-  CHECK(many->BuildCostS(doc.GetBodies()) > 10.0);
+  CHECK(many->BuildCostS(doc.GetBodies(), nullptr) > 10.0);
   CHECK(heavy::BuildsOffFrame(*many, doc.GetBodies()));
   // A feature that does not declare itself heavy never is.
   CHECK_FALSE(doc.GetFeature(0)->MayBuildOffFrame());

@@ -440,6 +440,7 @@ FEATURE_SCHEMAS: dict[str, dict[str, Any]] = {
     'Frame': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Frame']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string', 'enum': ['explicit', 'from_element', 'offset']}, 'origin': {'type': 'array', 'items': {'type': 'number'}}, 'origin_expr': {'type': 'array', 'items': {'type': 'string'}}, 'z_axis': {'type': 'array', 'items': {'type': 'number'}}, 'x_axis': {'type': 'array', 'items': {'type': 'number'}}, 'elements': {'type': 'array', 'items': {'type': 'object'}}, 'parent_id': {'type': 'integer', 'minimum': 0.0}, 'offset': {'type': 'array', 'items': {'type': 'number'}}, 'offset_expr': {'type': 'array', 'items': {'type': 'string'}}, 'rotation_deg': {'type': 'array', 'items': {'type': 'number'}}, 'flip': {'type': 'boolean'}}, 'required': ['type', 'kind'], 'additionalProperties': False},
     'Curve3D': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Curve3D']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string', 'enum': ['fit_spline', 'control_poly', 'bent_path', 'helix']}, 'points': {'type': 'array', 'items': {}}, 'degree': {'type': 'integer'}, 'closed': {'type': 'boolean'}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}, 'origin': {'type': 'array', 'items': {'type': 'number'}}, 'axis': {'type': 'array', 'items': {'type': 'number'}}, 'pitch': {'type': 'number'}, 'pitch_expr': {'type': 'string'}, 'turns': {'type': 'number'}, 'turns_expr': {'type': 'string'}, 'left_handed': {'type': 'boolean'}, 'start_deg': {'type': 'number'}, 'start_deg_expr': {'type': 'string'}}, 'required': ['type', 'kind'], 'additionalProperties': False},
     'Boolean': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Boolean']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'target_id': {'type': 'integer', 'minimum': 0.0}, 'tool_id': {'type': 'integer', 'minimum': 0.0}, 'op': {'type': 'string', 'enum': ['union', 'subtract', 'intersect']}}, 'required': ['type', 'target_id', 'tool_id'], 'additionalProperties': False},
+    'Cradle': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Cradle']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'target_id': {'type': 'integer', 'minimum': 0.0}, 'tool_id': {'type': 'integer', 'minimum': 0.0}, 'clearance_mm': {'type': 'number'}, 'clearance_mm_expr': {'type': 'string'}, 'direction': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3}, 'sweep': {'type': 'boolean'}, 'resolution_mm': {'type': 'number'}, 'resolution_mm_expr': {'type': 'string'}}, 'required': ['type', 'target_id', 'tool_id'], 'additionalProperties': False},
     'Split': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Split']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'knife': {'type': 'string', 'enum': ['plane', 'face']}, 'datum_id': {'type': 'integer', 'minimum': 0.0}, 'base_plane': {'type': 'string', 'enum': ['xy', 'xz', 'yz']}, 'offset': {'type': 'number'}, 'offset_expr': {'type': 'string'}, 'face': {'type': 'object'}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
     'Refine': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Refine']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
     'Fillet': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Fillet']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}}, 'required': ['type', 'edges'], 'additionalProperties': False},
@@ -986,6 +987,24 @@ BooleanSpec = TypedDict('BooleanSpec', {
     'op': NotRequired[Literal['union', 'subtract', 'intersect']],
 })
 
+CradleSpec = TypedDict('CradleSpec', {
+    'type': Literal['Cradle'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'target_id': int,
+    'tool_id': int,
+    'clearance_mm': NotRequired[float],
+    'clearance_mm_expr': NotRequired[str],
+    'direction': NotRequired[Sequence[float]],
+    'sweep': NotRequired[bool],
+    'resolution_mm': NotRequired[float],
+    'resolution_mm_expr': NotRequired[str],
+})
+
 SplitSpec = TypedDict('SplitSpec', {
     'type': Literal['Split'],
     'name': NotRequired[str],
@@ -1268,7 +1287,7 @@ PatternSpec = TypedDict('PatternSpec', {
     'axis': NotRequired[Mapping[str, Any]],
 })
 
-FeatureSpec = SketchSpec | ExtrudeSpec | BoxSpec | SphereSpec | CylinderSpec | FastenerSpec | CamProfileSpec | WormSpec | WormWheelSpec | BearingSpec | RetainingRingSpec | RetainingRingGrooveSpec | BaseFlangeSpec | EdgeFlangeSpec | FlatPatternSpec | UnfoldSpec | RefoldSpec | HemSpec | JogSpec | CornerReliefSpec | NormalCutSpec | ImportSpec | DerivedSpec | TemplateSpec | DatumPlaneSpec | RevolveSpec | DatumAxisSpec | FrameSpec | Curve3DSpec | BooleanSpec | SplitSpec | RefineSpec | FilletSpec | ChamferSpec | ShellSpec | LoftSpec | SweepSpec | PipeSpec | RibSpec | ThreadSpec | HoleSpec | DeleteFaceSpec | OffsetFaceSpec | MoveFaceSpec | ReplaceFaceSpec | DraftSpec | CopeSpec | PatternSpec
+FeatureSpec = SketchSpec | ExtrudeSpec | BoxSpec | SphereSpec | CylinderSpec | FastenerSpec | CamProfileSpec | WormSpec | WormWheelSpec | BearingSpec | RetainingRingSpec | RetainingRingGrooveSpec | BaseFlangeSpec | EdgeFlangeSpec | FlatPatternSpec | UnfoldSpec | RefoldSpec | HemSpec | JogSpec | CornerReliefSpec | NormalCutSpec | ImportSpec | DerivedSpec | TemplateSpec | DatumPlaneSpec | RevolveSpec | DatumAxisSpec | FrameSpec | Curve3DSpec | BooleanSpec | CradleSpec | SplitSpec | RefineSpec | FilletSpec | ChamferSpec | ShellSpec | LoftSpec | SweepSpec | PipeSpec | RibSpec | ThreadSpec | HoleSpec | DeleteFaceSpec | OffsetFaceSpec | MoveFaceSpec | ReplaceFaceSpec | DraftSpec | CopeSpec | PatternSpec
 
 
 

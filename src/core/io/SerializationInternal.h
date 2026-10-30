@@ -43,7 +43,7 @@ inline constexpr const char* kFormat = "designer-document";
 // the other then never conflict.
 inline constexpr int kVersionLanded = 210;
 
-inline constexpr int kVersionPending = 0;
+inline constexpr int kVersionPending = 1;
 inline constexpr int kVersion = kVersionLanded + kVersionPending;
 
 // What a branch's loader migration compares against, `if (version <

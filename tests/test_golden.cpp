@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "TestPaths.h"
+#include "core/mesh/TriMesh.h"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -946,7 +948,9 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   }
   std::vector<double> volumes;
   for (const auto& body : doc.GetBodies())
-    volumes.push_back(body.shape.Volume());
+    // A mesh body's volume is its triangles' (a Cradle's result, vNEXT).
+    volumes.push_back(body.IsMesh() ? body.mesh->Volume()
+                                    : body.shape.Volume());
   std::sort(volumes.begin(), volumes.end());
   auto expected = expect.at("volumes").get<std::vector<double>>();
   std::sort(expected.begin(), expected.end());

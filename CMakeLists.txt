@@ -512,6 +512,7 @@ set(core_sources
     src/core/Primitives.cpp
     src/core/MeshCollide.cpp
     src/core/MeshMeasure.cpp
+    src/core/MeshOperand.cpp
     src/core/mesh/TriMesh.cpp
     src/core/mesh/MeshReaders.cpp
     src/core/mesh/Fit.cpp
@@ -545,6 +546,7 @@ set(core_sources
     src/core/features/DatumAxisFeature.cpp
     src/core/features/CurveFeature.cpp
     src/core/features/BooleanFeature.cpp
+    src/core/features/CradleFeature.cpp
     src/core/features/SplitFeature.cpp
     src/core/features/RefineFeature.cpp
     src/core/ElementHistory.cpp
@@ -720,7 +722,7 @@ file(STRINGS ${MANIFOLD_DIR}/CMakeLists.txt _manifold_version_lines
      REGEX "^set\\(MANIFOLD_VERSION_(MAJOR|MINOR|PATCH) [0-9]+\\)")
 string(REGEX REPLACE "[^0-9;]" "" _manifold_version "${_manifold_version_lines}")
 string(REPLACE ";" "." _manifold_version "${_manifold_version}")
-list(APPEND core_sources src/core/mesh/MeshBoolean.cpp)
+list(APPEND core_sources src/core/mesh/MeshBoolean.cpp src/core/mesh/Field.cpp)
 set_source_files_properties(src/core/mesh/MeshBoolean.cpp PROPERTIES
     COMPILE_DEFINITIONS "LOBOLE_MANIFOLD_VERSION=\"${_manifold_version}\"")
 # One boolean of two organic fixture meshes as a program of its own, built

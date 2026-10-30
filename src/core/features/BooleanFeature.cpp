@@ -8,6 +8,8 @@
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
+#include "core/MeshOperand.h"
+#include "core/mesh/MeshBoolean.h"
 
 #include <algorithm>
 #include <cmath>
@@ -43,14 +45,10 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  // A mesh operand has no B-Rep to run a boolean on
-  // (docs/interchange/README.md#mesh-bodies).
-  for (const Body* b : {&*target, &*tool})
-    if (const std::string why = MeshBodyRefusal(*b, "a Boolean");
-        !why.empty()) {
-      SetError(why);
-      return false;
-    }
+  m_meshReport = MeshReport{};
+  // A mesh operand runs on triangles, through manifold.
+  if (target->IsMesh() || tool->IsMesh())
+    return ExecuteMesh(ctx, target, tool);
 
   // Run the boolean with history kept alive so the operands' element names
   // propagate onto the result (toponaming T5).
@@ -132,4 +130,77 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
   bodies.push_back({m_name, std::move(result), material, GetId()});
   bodies.back().elementMap = std::move(map);
   return true;
+}
+
+bool BooleanFeature::ExecuteMesh(RegenContext& ctx,
+                                 std::vector<Body>::iterator target,
+                                 std::vector<Body>::iterator tool) {
+  auto& bodies = ctx.bodies;
+  double dTarget = 0.0, dTool = 0.0;
+  const auto a = meshop::Triangles(*target, 0.0, dTarget);
+  const auto b = meshop::Triangles(*tool, 0.0, dTool);
+  for (const auto& [m, body] :
+       {std::pair{a.get(), &*target}, {b.get(), &*tool}})
+    if (const std::string why =
+            meshop::OpenOperandRefusal(*m, body->name, "A mesh Boolean");
+        !why.empty()) {
+      SetError(why);
+      return false;
+    }
+  const mesh::BooleanOp kind = op == BooleanOp::Union ? mesh::BooleanOp::Union
+                               : op == BooleanOp::Subtract
+                                   ? mesh::BooleanOp::Subtract
+                                   : mesh::BooleanOp::Intersect;
+  mesh::TriMesh result;
+  std::string error;
+  if (!mesh::Boolean(*a, *b, kind, result, error)) {
+    SetError("the mesh boolean failed: " + error);
+    return false;
+  }
+  if (result.triangles.empty()) {
+    SetError("operation produced an empty solid (are the bodies disjoint?)");
+    return false;
+  }
+  const double before = a->Volume(), after = result.Volume();
+  if ((op == BooleanOp::Subtract || op == BooleanOp::Union) &&
+      std::abs(after - before) < 1e-6 * std::max(before, 1.0))
+    SetWarning(op == BooleanOp::Subtract
+                   ? "subtract removed no material — the tool body does not "
+                     "intersect the target"
+                   : "union added no material — the bodies are disjoint or "
+                     "the tool is inside the target");
+  m_meshReport.mesh = true;
+  m_meshReport.targetDeflectionMm = dTarget;
+  m_meshReport.toolDeflectionMm = dTool;
+  m_meshReport.triangles = result.TriangleCount();
+  // The target's meshSince carries on; a B-Rep target is made a mesh here.
+  const std::string since = target->IsMesh()
+                                ? target->meshSince
+                                : "Boolean '" + m_name + "' (a mesh operand)";
+  const std::string material =
+      m_material.empty() ? target->material : m_material;
+  if (target > tool)
+    std::swap(target, tool);
+  bodies.erase(tool);
+  bodies.erase(target);
+  Body out;
+  out.name = m_name;
+  out.material = material;
+  out.createdBy = GetId();
+  out.mesh = std::make_shared<const mesh::TriMesh>(std::move(result));
+  out.elementMap.names[0] = std::to_string(GetId()) + "/mesh";
+  out.meshSince = since;
+  bodies.push_back(std::move(out));
+  return true;
+}
+
+nlohmann::json BooleanFeature::ReportJson() const {
+  if (!m_meshReport.mesh)
+    return nullptr;
+  nlohmann::json j = {{"mesh", true}, {"triangles", m_meshReport.triangles}};
+  if (m_meshReport.targetDeflectionMm > 0.0)
+    j["target_deflection_mm"] = m_meshReport.targetDeflectionMm;
+  if (m_meshReport.toolDeflectionMm > 0.0)
+    j["tool_deflection_mm"] = m_meshReport.toolDeflectionMm;
+  return j;
 }

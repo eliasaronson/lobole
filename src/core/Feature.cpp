@@ -196,11 +196,19 @@ bool ImportFeature::IsMesh(const std::string& path) {
 std::string MeshBodyRefusal(const Body& body, const std::string& what) {
   if (!body.IsMesh())
     return "";
-  return what + " needs a B-Rep, and body '" + body.name + "' is a mesh (" +
-         std::to_string(body.mesh->triangles.size()) +
-         " triangles, no faces or edges): measure, section and export it as "
-         "it is, or re-import a mechanical part with representation "
-         "`recognize` to rebuild its faces";
+  const std::string head = what + " needs a B-Rep, and body '" + body.name +
+                           "' is a mesh (" +
+                           std::to_string(body.mesh->triangles.size()) +
+                           " triangles, no faces or edges)";
+  // Made one by a feature of this part: the B-Rep work belongs before it
+  // (docs/modeling/README.md#after-a-cradle).
+  if (!body.meshSince.empty())
+    return head + " since " + body.meshSince +
+           ": move this before it -- do the B-Rep work (fillets, chamfers, "
+           "bosses) first, and the cradle and mesh-tool booleans last";
+  return head + ": measure, section and export it as it is, or re-import a "
+                "mechanical part with representation `recognize` to rebuild "
+                "its faces";
 }
 
 bool BodyBounds(const Body& body, glm::dvec3& lo, glm::dvec3& hi, bool tight) {

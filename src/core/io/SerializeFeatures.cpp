@@ -14,6 +14,7 @@
 #include "core/features/CamProfileFeature.h"
 #include "core/features/CopeFeature.h"
 #include "core/features/CornerReliefFeature.h"
+#include "core/features/CradleFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -1562,6 +1563,22 @@ json FeatureToJson(const Feature& feature) {
     j["target_id"] = boo->targetId;
     j["tool_id"] = boo->toolId;
     j["op"] = BooleanOpToString(boo->op);
+  } else if (auto* cr = dynamic_cast<const CradleFeature*>(&feature)) {
+    j["target_id"] = cr->targetId; // vNEXT
+    j["tool_id"] = cr->toolId;
+    if (cr->hasClearance) {
+      j["clearance_mm"] = cr->clearanceMm;
+      if (!cr->clearanceExpr.empty())
+        j["clearance_mm_expr"] = cr->clearanceExpr;
+    }
+    j["direction"] = {cr->direction.x, cr->direction.y, cr->direction.z};
+    if (!cr->sweep)
+      j["sweep"] = false;
+    if (cr->hasResolution) {
+      j["resolution_mm"] = cr->resolutionMm;
+      if (!cr->resolutionExpr.empty())
+        j["resolution_mm_expr"] = cr->resolutionExpr;
+    }
   } else if (auto* sp = dynamic_cast<const SplitFeature*>(&feature)) {
     j["body_id"] = sp->bodyId;
     if (sp->knife == SplitKnifeKind::Face) {
@@ -2358,6 +2375,20 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "union|subtract|intersect",
      "target_id:int>=0, tool_id:int>=0, "
      "op?:'union'|'subtract'|'intersect'"},
+    {"Cradle", kVersionNEXT,
+     "target_id (the block's created_by), tool_id (the scan's: a mesh body, "
+     "open or closed, or a B-Rep): the block less the scan grown by "
+     "clearance_mm (+_expr; unset = the print process's gap a side, refused "
+     "without one) and swept along direction [x, y, z] (default [0, 0, -1], "
+     "the way the object moves in) so it lifts out; sweep: false keeps the "
+     "undercuts (a snap-in grip); resolution_mm (+_expr; default half the "
+     "clearance, coarsened to the cost budget, refused past the clearance). "
+     "The block becomes a mesh body; the scan stays. Builds off the frame; "
+     "refused past the cost budget, naming the resolution or triangle count "
+     "that fits",
+     "target_id:int>=0, tool_id:int>=0, clearance_mm?:number, "
+     "clearance_mm_expr?:string, direction?:number[3], sweep?:bool, "
+     "resolution_mm?:number, resolution_mm_expr?:string"},
     {"Split", 39,
      "body_id, knife: \"plane\" (default) with datum_id or base_plane, "
      "offset (+_expr); or \"face\" with face {feature_id, element}",
@@ -2665,6 +2696,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
               "origin", "axis", "pitch", "pitch_expr", "turns", "turns_expr",
               "left_handed", "start_deg", "start_deg_expr"}},
             {"Boolean", {"target_id", "tool_id", "op"}},
+            {"Cradle",
+             {"target_id", "tool_id", "clearance_mm", "clearance_mm_expr",
+              "direction", "sweep", "resolution_mm", "resolution_mm_expr"}},
             {"Split",
              {"body_id", "knife", "face", "datum_id", "base_plane", "offset",
               "offset_expr"}},
@@ -3586,6 +3620,36 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::make_unique<BooleanFeature>(
         name, IdField(j, "target_id", true), IdField(j, "tool_id", true),
         BooleanOpFromString(j.value("op", "union")));
+  } else if (type == "Cradle") { // vNEXT
+    auto cr = std::make_unique<CradleFeature>(
+        name, IdField(j, "target_id", true), IdField(j, "tool_id", true));
+    if (j.contains("clearance_mm") || j.contains("clearance_mm_expr")) {
+      cr->hasClearance = true;
+      cr->clearanceMm = j.value("clearance_mm", 0.0);
+      cr->clearanceExpr = j.value("clearance_mm_expr", std::string{});
+    }
+    if (j.contains("direction")) {
+      const json& d = j.at("direction");
+      if (!d.is_array() || d.size() != 3 || !d[0].is_number() ||
+          !d[1].is_number() || !d[2].is_number())
+        throw std::runtime_error(
+            "Cradle direction is [x, y, z]: the way the object moves into "
+            "the cradle, e.g. [0, 0, -1] (down)");
+      cr->direction = {d[0].get<double>(), d[1].get<double>(),
+                       d[2].get<double>()};
+    }
+    if (j.contains("sweep")) {
+      if (!j.at("sweep").is_boolean())
+        throw std::runtime_error("Cradle sweep is true or false, not " +
+                                 j.at("sweep").dump());
+      cr->sweep = j.at("sweep").get<bool>();
+    }
+    if (j.contains("resolution_mm") || j.contains("resolution_mm_expr")) {
+      cr->hasResolution = true;
+      cr->resolutionMm = j.value("resolution_mm", 0.0);
+      cr->resolutionExpr = j.value("resolution_mm_expr", std::string{});
+    }
+    out = std::move(cr);
   } else if (type == "Split") { // v39
     auto sp = std::make_unique<SplitFeature>(name, IdField(j, "body_id", true));
     // Refused, never read as a plane: "plne" or {"face": …} would otherwise

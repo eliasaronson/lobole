@@ -320,6 +320,11 @@ struct Body {
   // (MeshBodyRefusal). Transient like the shape; shared, never written.
   std::shared_ptr<const mesh::TriMesh> mesh;
   [[nodiscard]] bool IsMesh() const { return mesh != nullptr; }
+  // The feature that made a B-Rep body a mesh -- "Cradle 'Holder'", a
+  // Boolean with a mesh operand -- or empty for an imported one: what
+  // MeshBodyRefusal names, since the way on then is to move the B-Rep work
+  // before it (docs/modeling/README.md#after-a-cradle). Transient.
+  std::string meshSince;
 };
 
 // Why `what` (a feature, a tool, an RPC: "Fillet", "a mate") cannot use
@@ -629,10 +634,14 @@ public:
   // type -- reaches heavy::kOffFrameS. Its Execute must read only the context's
   // bodies, the features it references (VisitFeatureRefs), the symbols and
   // the configuration, sheet-metal and print context: not the assets.
+  // `print` is the part's print process (RegenContext::print), or null: a
+  // feature whose size comes from it (a Cradle's clearance) is costed at it.
   [[nodiscard]] virtual bool MayBuildOffFrame() const { return false; }
   [[nodiscard]] virtual double
-  BuildCostS(const std::vector<Body>& input) const {
+  BuildCostS(const std::vector<Body>& input,
+             const printfit::Process* print) const {
     (void)input;
+    (void)print;
     return 0.0;
   }
 
