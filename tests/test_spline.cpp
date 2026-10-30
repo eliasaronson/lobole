@@ -233,8 +233,10 @@ TEST_CASE("The v217 golden's closed spline is two edges and weighs its area",
   doc->Regenerate();
   INFO(doc->GetFeature(2)->GetError());
   CHECK(doc->GetFeature(2)->GetError().empty());
+  // The fillet takes about 7.4 mm^3; OpenCASCADE 7.6 and 7.9 agree on it to
+  // 1.2e-3 mm^3, so the bound is kernel-wide and still names the round.
   CHECK_THAT(doc->GetBodies().at(0).shape.Volume(),
-             WithinAbs(4516.701355, 1e-3));
+             WithinAbs(4516.701355, 1e-2));
 }
 
 TEST_CASE("A lone closed spline's pad shells", "[spline][extrude]") {

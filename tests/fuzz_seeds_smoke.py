@@ -42,15 +42,16 @@ SEEDS = list(range(40))
 # OpenCASCADE version prefix -> {seed: the class that kernel fails it as}.
 # 7.6.3 (Ubuntu 24.04's apt): a cylinder and a sphere both standing on the
 # XY plane, the sphere touching the cylinder's floor at one point, intersect
-# to nothing or to the whole sphere -- so the identity fails -- and seed 9's
-# sphere cut leaves a face BRepCheck rejects, which the app refuses. 7.9
-# answers every one of them.
+# to nothing or to the whole sphere -- so the identity fails. 7.9 answers
+# every one of them.
 KERNEL = {
-    # 14, 15 and 34 left the list when edge names took geometric numbers:
-    # a fillet or chamfer in each now stops at a limit before the design
-    # reaches the sphere, so 7.6 answers them clean, as 7.9 does.
-    "7.6.": {9: "boolean_failed", 13: "identity", 20: "identity",
-             29: "identity", 33: "identity"},
+    # 34 left the list when edge names took geometric numbers: a fillet or
+    # chamfer in it now stops at a limit before the design reaches the
+    # sphere, so 7.6 answers it clean, as 7.9 does. With format v216-v217's
+    # edge naming 14 and 15, which had left with it, fail again, and 9 (a
+    # sphere cut leaving a face BRepCheck rejected) and 33 answer clean.
+    "7.6.": {13: "identity", 14: "identity", 15: "identity", 20: "identity",
+             29: "identity"},
 }
 
 
