@@ -838,26 +838,29 @@ they run where ccx is absent):
 
 | case | answer | closed form |
 |---|---|---|
-| Euler, fixed–free, 10×10×200 steel, 2.5 mm, 10 204 nodes | 10.2876 | π²EI/4L² = 10.2808 (+0.07 %) |
+| Euler, fixed–free, 10×10×200 steel, 2.5 mm, 10 204 nodes | 10.802 | π²EI/4L² = 10.7949 (+0.07 %) |
 | the same 10×20: strong over weak axis | 3.968 | 4 (I ratio; shear takes the rest) |
-| wide cantilever plate, 60×20×1, 2 mm, 4 479 nodes | 67.313 | Et³/12(1−ν²) per width: 67.786 (−0.70 %) |
-| thin cylinder, R/t 25, capped, 2 mm, 33 283 nodes | 730.98; knockdown 0.758 (`cylinder`, the bore's R 24.5 over a 0.98 mm wall) | classical Et/(R√(3(1−ν²))): 760.55 (−3.9 %); SP-8007 at that R/t, exactly |
-| stocky strut, 10×10×128 at 10 kN | buckling 2.508, yield 1.895, governing 1.079 | Rankine–Gordon, to 1e-12 |
+| wide cantilever plate, 60×20×1, 2 mm, 4 479 nodes | 70.679 | Et³/12(1−ν²) per width: 71.175 (−0.70 %) |
+| thin cylinder, R/t 25, capped, 2 mm, 33 283 nodes | 767.53; knockdown 0.758 (`cylinder`, the bore's R 24.5 over a 0.98 mm wall) | classical Et/(R√(3(1−ν²))): 798.58 (−3.9 %); SP-8007 at that R/t, exactly |
+| stocky strut, 10×10×131.4 at 10 kN (its Euler load its squash load) | buckling 2.499, yield 1.891, governing 1.077 | Rankine–Gordon, to 1e-12 |
 | pure tension | `null`, "nothing in this load buckles" | |
 
 **Through the thickness**, measured before anything was built on it: the
 60×20×1 mm plate's first factor at one element through the wall and at two
 (a refinement on both faces sized to half the wall; the hidden
-`[buckling-measure]` case, `LOBOLE_MEASURE="b L size refine; ..."`).
+`[buckling-measure]` case, `LOBOLE_MEASURE="b L size refine; ..."`). Measured
+at E 200 GPa and scaled to the library's 210: a buckling factor of one
+material under a force is proportional to E, which the plate's 2 mm row
+re-measured bears out (70.679 against 67.313 × 1.05 = 70.679).
 
 | mesh | elements through | nodes | factor | against two layers |
 |---|---|---|---|---|
-| 3 mm | 1 | 2 173 | 67.683 | +1.33 % |
-| 2 mm | 1 | 4 479 | 67.313 | +0.77 % |
-| 1.5 mm | 1 | 7 630 | 67.141 | +0.51 % |
-| 1 mm | 1 | 17 108 | 67.022 | +0.33 % |
-| 2 mm, faces at 0.7 | 1 | 33 073 | 66.891 | +0.14 % |
-| 2 mm, faces at 0.5 | 2 | 97 399 | 66.800 | |
+| 3 mm | 1 | 2 173 | 71.067 | +1.33 % |
+| 2 mm | 1 | 4 479 | 70.679 | +0.77 % |
+| 1.5 mm | 1 | 7 630 | 70.498 | +0.51 % |
+| 1 mm | 1 | 17 108 | 70.373 | +0.33 % |
+| 2 mm, faces at 0.7 | 1 | 33 073 | 70.236 | +0.14 % |
+| 2 mm, faces at 0.5 | 2 | 97 399 | 70.140 | |
 
 One layer is within 2 % of two at every size, and what moves it is the
 in-plane size, not the layers (one layer with faces at 0.7 mm is 0.14 % from
@@ -871,10 +874,10 @@ three factors):
 
 | study | nodes | in-house | ccx 2.23 | worst rel. diff. |
 |---|---|---|---|---|
-| column, clamped, pushed and weighed | 2 458 | 10.2909, 10.3401, 83.8821 | 10.29088, 10.34013, 83.88213 | 4.7e-7 |
-| bracket on a pin held from turning | 2 775 | 21.2170, 187.756, 372.208 | 21.21698, 187.7564, 372.2085 | 2.3e-7 |
-| shaft under a torque and a remote load | 4 254 | 48.9415, 49.1254, 294.871 | 48.94147, 49.12543, 294.871 | 6.0e-8 |
-| steel column bonded to aluminium (assembly) | 2 936 | 6.27630, 6.27748, 79.6168 | 6.276302, 6.277484, 79.61677 | 6.4e-8 |
+| column, clamped, pushed and weighed | 2 458 | 10.8054, 10.8571, 88.0762 | 10.80542, 10.85713, 88.07624 | 1.6e-7 |
+| bracket on a pin held from turning | 2 775 | 21.1862, 187.484, 371.669 | 21.18623, 187.4843, 371.6691 | 1.9e-7 |
+| shaft under a torque and a remote load | 4 254 | 51.3885, 51.5817, 309.615 | 51.38854, 51.5817, 309.6146 | 1.1e-7 |
+| steel column bonded to aluminium (assembly) | 2 936 | 6.28721, 6.28840, 80.6135 | 6.287206, 6.288397, 80.61352 | 7.4e-8 |
 
 The same element and rule are used on both sides, so this measures K_G and
 the eigensolve, not the physics; the agreement is the seven digits ccx
@@ -1470,9 +1473,9 @@ size meshes it without one.
 | case | answer | closed form |
 |---|---|---|
 | the elastica: a 5 x 5 x 100 steel cantilever, a dead tip load at PL²/EI = 1, 2.5 mm, 1 911 nodes, 10 increments, 5 s | tip 0.30089 L along the load, 0.05619 L back | Bisshopp-Drucker 0.30172 (-0.27 %), 0.05643 (-0.44 %); linear 1/3 |
-| a shallow circular arch between pins, 200 x 4 x 4 mm, eps 4 (rise 4.475), a uniform pressure on its crown, 4 mm, 7 484 nodes, 146 s (`[slow]`) | limit point at 0.47088 [0.47088, 0.47094] | shallow-arch theory's 0.47115 (-0.06 %); linear buckling 1.0316 |
-| a 10 x 10 x 200 column, 1 kN, seeded 1 mm, 5 mm, 1 911 nodes, 15 s (`[slow]`) | deflection limit (20 mm) at 9.836, 4.48 % below | linear 10.297; Southwell's 1 - a/delta: 5 % |
-| the same, seeded 0.1 mm, 20 s | 10.275, 0.21 % below | 0.5 % |
+| a shallow circular arch between pins, 200 x 4 x 4 mm, eps 4 (rise 4.475), a uniform pressure on its crown, 4 mm, 7 484 nodes, 146 s (`[slow]`) | limit point at 0.49443 [0.49443, 0.49449] | shallow-arch theory's 0.49471 (-0.06 %); linear buckling 1.0832 |
+| a 10 x 10 x 200 column, 1 kN, seeded 1 mm, 5 mm, 1 911 nodes, 15 s (`[slow]`) | deflection limit (20 mm) at 10.328, 4.48 % below | linear 10.812; Southwell's 1 - a/delta: 5 % |
+| the same, seeded 0.1 mm, 20 s | 10.789, 0.21 % below | 0.5 % |
 | a PETG arch latch over the RPCs (`generators/tea_alarm`), 60 between pins, 1.2 x 1.2, eps 4, at 0.9 mm | limit point at 0.9985 of the closed form's load (-0.15 %); no yield on the way; at eps 1.5 no limit point, the run ends at its deflection limit | shallow-arch theory, as below |
 | a shaft under a torque, a remote load and a pressure, a thousandth of a working load, 3 854 nodes | 9.5e-5 of the peak motion from the linear in-house answer; von Mises 5e-6 | the linear answer |
 
@@ -1677,10 +1680,10 @@ base state a buckling study holds.
 
 | case | answer | closed form |
 |---|---|---|
-| a 20 x 20 x 40 steel block on a frictionless ground, 4 kN down e = b/12 off its axis (a remote load), 4 mm, 2 468 nodes, 2 increments, 2.2 s | the whole base closed (399.99 of 400 mm²), peak pressure 14.994 MPa, the ground's resultant 1.66590 mm off the axis | inside the kern: closed, P/A (1 + 6e/b) = 15.000 MPa (-0.04 %), e = 1.66667 (-0.05 %) |
-| the same, e = b/4, 3.4 s | 277.7 mm² closed, peak 26.4 MPa, resultant at 4.99752 mm | past the kern (b/6) it lifts off; e = 5 (-0.05 %). A rigid block on a Winkler bed would close 3 (b/2 - e) b = 300 mm² |
-| a steel ball, R 10, on a rigid flat (a rigid occurrence), 29.3 kN for a = R/10, its cap refined to a/6, 11 371 nodes, 10 increments, 153 s (`[slow]`) | contact radius 1.0094 mm, peak pressure 14 230 MPa | Hertz: a = 1 mm (+0.94 %), p0 = 13 992 MPa (+1.7 %) |
-| a 20 x 20 x 30 steel block, a contact participant (friction 0.2), standing on a clamped aluminium slab, 3 kN down 3 mm off its axis, 5 mm, 2 197 nodes, 3.4 s | 2 999.99 N at 2.99991 mm; 399.4 mm² of the block's 400 closed | statics: P at e (-0.003 %) |
+| a 20 x 20 x 40 steel block on a frictionless ground, 4 kN down e = b/12 off its axis (a remote load), 4 mm, 2 468 nodes, 2 increments, 2.2 s | the whole base closed (399.99 of 400 mm²), peak pressure 14.994 MPa, the ground's resultant 1.66592 mm off the axis | inside the kern: closed, P/A (1 + 6e/b) = 15.000 MPa (-0.04 %), e = 1.66667 (-0.05 %) |
+| the same, e = b/4, 3.4 s | 277.7 mm² closed, peak 26.4 MPa, resultant at 4.99761 mm | past the kern (b/6) it lifts off; e = 5 (-0.05 %). A rigid block on a Winkler bed would close 3 (b/2 - e) b = 300 mm² |
+| a steel ball, R 10, on a rigid flat (a rigid occurrence), 30.8 kN for a = R/10, its cap refined to a/6, 11 371 nodes, 10 increments, 153 s (`[slow]`) | contact radius 1.0094 mm, peak pressure 14 941 MPa | Hertz: a = 1 mm (+0.94 %), p0 = 14 691 MPa (+1.7 %) |
+| a 20 x 20 x 30 steel block, a contact participant (friction 0.2), standing on a clamped aluminium slab, 3 kN down 3 mm off its axis, 5 mm, 2 197 nodes, 3.4 s | 2 999.97 N at 2.99969 mm; 399.4 mm² of the block's 400 closed | statics: P at e (-0.010 %) |
 
 The weak springs carried 3e-6 to 6e-6 of the load in each. Two meshed parts
 converge with the mesh as any contact does, and refining a face refines
@@ -1717,7 +1720,7 @@ the library only where a source is cited beside it:
 
 | material | curve | source |
 |---|---|---|
-| `steel` (structural, f_y 250 MPa, E 200 GPa) | linear hardening, the stress-strain slope E/100 past f_y (in plastic strain H = E/99 = 2020 MPa), to 5 % plastic strain: (250, 0), (351.0, 0.05) | EN 1993-1-5:2006 Annex C.6(2), Figure C.2 c), "elastic-plastic with linear strain hardening"; the 5 % is C.8(1) Note 1's recommended principal strain limit |
+| `steel` (structural, f_y 250 MPa, E 210 GPa) | linear hardening, the stress-strain slope E/100 past f_y (in plastic strain H = E/99 = 2121.2 MPa), to 5 % plastic strain: (250, 0), (356.06, 0.05) | EN 1993-1-5:2006 Annex C.6(2), Figure C.2 c), "elastic-plastic with linear strain hardening"; the 5 % is C.8(1) Note 1's recommended principal strain limit |
 
 Every other material has none, and a plastic study on it is **refused** --
 by the run, before anything is meshed (`fem::HardeningRefusal`), naming the
@@ -1789,7 +1792,7 @@ Does a hardening steel ever report a collapse? At small deformation, no:
 the tea alarm's bracket (`generators/tea_alarm/ta_cases.py`, library steel,
 an upright between thickened ends under a uniform moment F a and F along
 it) reaches 1.25 times its M_p load and is unloaded. With
-`large_deformation` the same bracket collapses at 0.691 of that load: the
+`large_deformation` the same bracket collapses at 0.695 of that load: the
 upright bends toward its load, which lengthens its arm faster than the
 hardening (H = E/99) stiffens it, so the path peaks. A collapse under
 NLGEOM is the geometry's as much as the material's.
@@ -1829,7 +1832,7 @@ the peak plastic strain, what is left once unloaded, and a collapse.
 
 | case | answer | closed form |
 |---|---|---|
-| a 10 x 10 x 40 steel bar on a frictionless ground, pressed to 300 MPa, 5 mm, 610 nodes, 6 increments, 3.4 s | plastic strain 0.024724 to 0.024748 at every node, von Mises 299.947 to 299.996; unloaded, 0.98946 mm shorter and 0.123683 mm wider | (300 - 250) / H = 0.02475 (-1.1e-3 at the least); L eps_p = 0.99 (-5.5e-4), b eps_p / 2 = 0.12375 (-5.4e-4) |
+| a 10 x 10 x 40 steel bar on a frictionless ground, pressed to 300 MPa, 5 mm, 610 nodes, 6 increments, 3.4 s | plastic strain 0.023557 to 0.023570 at every node, von Mises 299.968 to 299.998; unloaded, 0.94255 mm shorter and 0.117819 mm wider | (300 - 250) / H = 0.023571 (-6e-4 at the least); L eps_p = 0.94286 (-3.3e-4), b eps_p / 2 = 0.117857 (-3.2e-4) |
 | a 6 x 8 x 60 steel cantilever under its yield, 3 mm, 1 313 nodes, 0.7 s | ccx's stress, carried to the nodes, within 3.8e-4 of the peak of the elastic stress of the same U; peak von Mises the same to 1e-5; nothing left once unloaded | the elastic answer |
 | a 10 x 10 x 60 bar, clamped, bent by 1.25 M_p through a head twice its section, the curve stated flat, 3.4 mm, 2 516 nodes, 17.5 s (`[slow]`) | collapses at 0.80803 [0.80803, 0.80804] of it: M = 63 128 N mm, the hinge mid-bar | M_p = f_y b h^2 / 4 = 62 500 N mm (+1.0 %; +0.42 % at 2.5 mm, 6 670 nodes, 70 s) |
 
@@ -2038,17 +2041,17 @@ thermostats", J. Opt. Soc. Am. 11, 233–255, 1925)
 
     1/ρ = 6 (α₂ − α₁) ΔT (1 + m)² / ( h [3 (1 + m)² + (1 + m n)(m² + 1/(m n))] )
 
-with m = 1 and n = 200/110.3 is 8.447e-4 /mm, a tip rotation L/ρ =
-0.03379 rad and a drop L²/2ρ = 0.6758 mm:
+with m = 1 and n = 210/110.3 is 8.4143e-4 /mm, a tip rotation L/ρ =
+0.033657 rad and a drop L²/2ρ = 0.67315 mm:
 
 | case | answer | closed form |
 |---|---|---|
-| a hand-made two-domain mesh (80 × 5 × 2 tet10 hexes, 8 855 nodes), `[thermal]` | curvature between x = 10 and 30: 8.4773e-4 /mm; tip rotation 0.034437 rad, drop 0.70033 mm | +0.35 %; +1.92 %, +3.63 % |
+| a hand-made two-domain mesh (80 × 5 × 2 tet10 hexes, 8 855 nodes), `[thermal]` | curvature between x = 10 and 30: 8.4467e-4 /mm; tip rotation 0.034317 rad, drop 0.69790 mm | +0.38 %; +1.96 %, +3.68 % |
 | the same, both layers steel | the end grows 0.038687 mm, turns 1.1e-5 rad | α ΔT L = 0.038400 (+0.75 %, the clamp's Poisson hold); a thousandth of the pair's turn (the structured mesh's asymmetry) |
-| the bonded assembly at 0.5 mm (Netgen, 19 294 nodes), `[thermal][calculix]` | tip rotation 0.034417 rad, drop 0.69960 mm, in-house and on CalculiX on the same mesh (displacement within 6.5e-9, von Mises 1.2e-7) | +1.86 %, +3.52 % |
-| the same over the RPCs (`generators/tea_alarm`), the end read by `probe_study` | tip rotation 0.034382 rad, drop 0.69943 mm; CalculiX within 2.0e-8 | +1.75 %, +3.50 % |
+| the bonded assembly at 0.5 mm (Netgen, 19 294 nodes), `[thermal][calculix]` | tip rotation 0.034296 rad, drop 0.69718 mm, in-house and on CalculiX on the same mesh (displacement within 6.7e-8, von Mises 9.8e-8) | +1.90 %, +3.57 % |
+| the same over the RPCs (`generators/tea_alarm`), the end read by `probe_study` | tip rotation 0.034261 rad, drop 0.69700 mm; CalculiX within 5.8e-8 | +1.79 %, +3.54 % |
 
-Away from the clamp the strip curves as the closed form says (+0.35 %). The
+Away from the clamp the strip curves as the closed form says (+0.38 %). The
 clamp holds both layers' ends across the width and the thickness, and the
 root turns a little more than the free span (the clamp's own end effect
 over about a thickness): +1.9 % on the tip's rotation, +3.6 % on its drop,
@@ -2104,9 +2107,9 @@ a body of it is **refused**, naming the missing ratio
 motion is read from the maker's constants, not a layer model. A thermal
 study of it runs.
 
-The library's `steel` row cites EN 1993-1-1:2005 §3.2.6 for its expansion;
-that clause gives E = 210 GPa and the row has 200
-([known bugs](../known-bugs.md#the-steel-rows-modulus-is-not-its-cited-clauses)).
+The library's `steel` row takes its modulus and Poisson's ratio from the
+clause it cites for its expansion, EN 1993-1-1:2005 §3.2.6(1): E = 210 000
+N/mm², ν = 0.3.
 
 **Printed plastics are bulk values, and the result says so** (above). No
 measured printed-specimen value is substituted for a cited one.
@@ -2169,8 +2172,8 @@ unless named (a 100 × 10 × 10 bar at 5 mm, k = 50 W/(m·K), 1 025 nodes):
 | the bar free, held statically determinately, 50 K across its depth | no stress (under 1e-6 MPa); the ends' axial motions differ across the depth by κ L h to 1e-9 | κ = α ΔT / h |
 
 The Netgen bar of `from_study` (ends held at 100 and 20 °C, both clamped in
-all three directions) carries 9 945 N at its ends, against E α (T̄ − T₀) A =
-9 600 N for a bar free across its axis: the clamped faces hold its Poisson
+all three directions) carries 10 442 N at its ends, against E α (T̄ − T₀) A =
+10 080 N for a bar free across its axis: the clamped faces hold its Poisson
 spread.
 
 CalculiX 2.23 on the same mesh, `tests/test_fem_calculix.cpp`
@@ -2181,7 +2184,7 @@ CalculiX 2.23 on the same mesh, `tests/test_fem_calculix.cpp`
 | the fin above, with a 0.5 W flux into its tip and 1 W made through it | 1 025 | temperatures within 7.3e-8, every flow within 6.7e-7 of the throughput; ‖K_T T − Q‖/‖Q‖ 9.6e-7 (floor 3.1e-5), energy 1.6e-8 |
 | a thermal study of the Netgen bar, solver auto and calculix | 849 | temperatures within 1.9e-7, flows within 1.6e-7 (4.266720 against 4.266719 W) |
 | the static study clamped under that study's temperature | 849 | peak displacement 3.1e-7, peak von Mises 2.7e-8; residual 2.9e-6 (floor 2.3e-5), energy 6.4e-9 |
-| a 10 × 10 × 40 steel bar between two frictionless grounds, heated 200 K past yield (plasticity) and cooled | 610 | plastic strain 0.0010573 to 0.0010590 against 0.0010577; cooled, 0.042324 mm shorter against L εp = 0.042307 (+4.0e-4) |
+| a 10 × 10 × 40 steel bar between two frictionless grounds, heated 200 K past yield (plasticity) and cooled | 610 | plastic strain 0.0011200 to 0.0011216 against 0.0011204; cooled, 0.044831 mm shorter against L εp = 0.044815 (+3.5e-4) |
 | a heat deck whose conductivity is 0.1 % off its study's | 1 025 | refused (the heat balance) |
 
 The plastic bar's closed form is `(α ΔT − f_y/E − 2 f_y/(k_p L)) / (1 + H/E

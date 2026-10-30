@@ -409,7 +409,10 @@ void MaterialLibrary::InitializeMaterials() {
   // Moduli: the Aluminum Association's 68.9 GPa, EN 755-2's 70 GPa.
   elastic(MaterialType::ALUMINUM_6061_T6, 68.9f, 0.33f, 240.0f);
   elastic(MaterialType::ALUMINUM_6082_T6, 70.0f, 0.33f, 240.0f);
-  elastic(MaterialType::STEEL, 200.0f, 0.30f, 250.0f);
+  // Structural steel: EN 1993-1-1:2005 §3.2.6(1), E = 210 000 N/mm^2 and
+  // nu = 0.3, the clause its expansion is cited from too (below); f_y 250
+  // MPa, the generic structural grade the hardening curve applies to.
+  elastic(MaterialType::STEEL, 210.0, 0.30, 250.0);
   // Stainless 1.4301: SCI P413, Design Manual for Structural Stainless
   // Steel, 4th ed. (2017), §2.3.1: E = 200 GPa, nu = 0.3 (G = 76.9 GPa);
   // Table 2.2: f_y = 230 MPa for 1.4301 cold-rolled strip, t <= 8 mm (f_u

@@ -251,10 +251,10 @@ def main():
                    f"a plastic result: {res.get('nonlinear')}")
             body = res["bodies"][0]
             pe = res["max_plastic_strain"]["value"]
-            # (300 - 250) / (E / 99) away from the clamp.
+            # (300 - 250) / (E / 99) away from the clamp, E 210 GPa.
             expect(0.02 < pe < 0.05, f"the plastic strain: {pe}")
             left = res["max_residual_displacement_mm"]["value"]
-            expect(left > 0.9 * 150 * 0.02475,
+            expect(left > 0.9 * 150 * 50.0 * 99.0 / 210000.0,
                    f"what unloading left: {left} mm")
             expect(body["nonlinear"]["plasticity"]["unloaded"] is True and
                    body["nonlinear"]["plasticity"]["strain_limit"] == 0.05,

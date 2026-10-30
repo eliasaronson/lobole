@@ -238,22 +238,6 @@ the heading if it is not here yet.
 
 ## Simulation
 
-### The steel row's modulus is not its cited clause's
-
-- **Symptom:** the library's `steel` row has E = 200 GPa; the clause it
-  cites for its expansion, EN 1993-1-1:2005 §3.2.6, gives E = 210 000
-  N/mm² (and ν = 0.3). Every static, modal and buckling answer on library
-  steel is 5 % softer than the clause it names.
-- **Cause:** the modulus was entered as a handbook value before the row was
-  cited, and the [plasticity] hardening curve (H = E/99, EN 1993-1-5
-  C.6(2)) and its closed forms were written from it.
-- **Where:** `elastic(MaterialType::STEEL, ...)` in
-  `src/cad/CADMaterials.cpp`.
-- **Likely fix:** take 210 GPa with its clause, and move the [plasticity],
-  [thermal] and [fem] closed forms that read 200 with it (they read the
-  library, so most move by themselves; the cases that state 200 by hand do
-  not).
-
 ### A contact's weak springs hold a soft part instead of its contact
 
 - **Symptom:** a 0.5 mm 1.4301 spring clip held only by its contact with a

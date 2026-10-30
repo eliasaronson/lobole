@@ -101,7 +101,7 @@ def main():
         expect(len(factors) >= 2, f"factors listed: {factors}")
         expect(abs(factors[0] - factors[1]) < 1e-3 * factors[0],
                f"a square section's two first modes: {factors}")
-        euler = math.pi ** 2 * 200000.0 * (10 ** 4 / 12.0) / (
+        euler = math.pi ** 2 * 210000.0 * (10 ** 4 / 12.0) / (
             4 * 200.0 ** 2) / force
         expect(abs(body["buckling_factor"] / euler - 1) < 0.01,
                f"Euler's {euler}: {body['buckling_factor']}")

@@ -430,14 +430,17 @@ fem::FaceMotion HeatedStrip(const fem::Material& lower,
 TEST_CASE("a steel and brass strip heated from flat curls as Timoshenko's "
           "bimetal, and a steel pair does not",
           "[fem][thermal]") {
-  // The library's steel (E 200 GPa, 12e-6/K: EN 1993-1-1) under C26000
-  // brass (E 110.3 GPa, nu 0.333, 19.2e-6/K: Wieland Concast's datasheet).
-  const fem::Material steel = Layer(200000.0, 0.3, 12e-6);
+  // The library's steel (E 210 GPa, nu 0.3, 12e-6/K: EN 1993-1-1 §3.2.6)
+  // under C26000 brass (E 110.3 GPa, nu 0.333, 19.2e-6/K: Wieland
+  // Concast's datasheet).
+  const fem::Material steel = Layer(210000.0, 0.3, 12e-6);
   const fem::Material brass = Layer(110300.0, 16000.0 / 12000.0 - 1.0, 19.2e-6);
   const double L = 40.0;
   const double kappa =
-      TimoshenkoCurvature(0.5, 0.5, 200000.0, 110300.0, 12e-6, 19.2e-6, 80.0);
-  CHECK_THAT(kappa, WithinRel(8.448e-4, 1e-3)); // the plan's number
+      TimoshenkoCurvature(0.5, 0.5, 210000.0, 110300.0, 12e-6, 19.2e-6, 80.0);
+  // By hand: m = 1, n = 210/110.3, 6 (19.2 - 12)e-6 80 4 / (1 mm (12 +
+  // (1 + n)(1 + 1/n))).
+  CHECK_THAT(kappa, WithinRel(8.4143e-4, 1e-4));
   size_t nodes = 0;
   double span = 0.0;
   const fem::FaceMotion fm = HeatedStrip(steel, brass, &nodes, &span);
@@ -828,7 +831,7 @@ TEST_CASE("a static study takes a thermal study's temperature on its own mesh",
   for (const auto& r : b0.results.reactions)
     if (r.support == b.id)
       fx = r.forceN.x;
-  const double expect = 200000.0 * 12e-6 * 40.0 * 100.0;
+  const double expect = 210000.0 * 12e-6 * 40.0 * 100.0; // library steel
   std::printf("thermal: clamped bar end force %.3f N (E alpha dT A %.3f)\n",
               -fx, expect);
   CHECK(std::abs(fx) > 0.9 * expect);

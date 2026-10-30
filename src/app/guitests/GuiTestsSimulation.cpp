@@ -329,11 +329,11 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
 
-    // Euler-Bernoulli for a uniformly distributed load, steel E = 200 GPa:
+    // Euler-Bernoulli for a uniformly distributed load, steel E = 210 GPa:
     // I = b h^3/12 = 20*10^3/12 = 1666.7 mm^4, w = 100/200 = 0.5 N/mm, so
-    // the tip deflection w L^4 / (8 E I) = 0.300 mm. Measured: 0.2961.
-    IM_CHECK(rt->maxDisplacement > 0.255);
-    IM_CHECK(rt->maxDisplacement < 0.345);
+    // the tip deflection w L^4 / (8 E I) = 0.2857 mm, held to 15 %.
+    IM_CHECK(rt->maxDisplacement > 0.243);
+    IM_CHECK(rt->maxDisplacement < 0.329);
     // The peak stress sits at the clamp; the coarse mesh samples it at the
     // first node inboard (x = 10.6), where w(L-x)^2/2 * c/I = 26.9 MPa.
     // Measured: 27.1. A load along the wrong axis misses this by far more

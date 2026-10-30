@@ -95,14 +95,14 @@ checked on a pair whose layers are all cited: a library `steel` layer under
 a C26000 `brass` one, 0.5 × 5 × 40 mm each, bonded in an assembly
 (`strip_check.lob`), clamped across one end and heated from 20 to 100 °C (a
 [uniform thermal load on an assembly](../../docs/simulation/README.md#a-thermal-load-on-an-assembly)).
-Timoshenko's curvature, with m = 1 and n = 200/110.3, is 8.447e-4 /mm: a
-tip rotation of 0.03379 rad and a drop of 0.6758 mm. The free end, read by
+Timoshenko's curvature, with m = 1 and n = 210/110.3, is 8.4143e-4 /mm: a
+tip rotation of 0.033657 rad and a drop of 0.67315 mm. The free end, read by
 `probe_study` as a rigid body (on an assembly study, by its occurrence):
 
 | | tip rotation | drop |
 |---|---|---|
-| in-house, 0.5 mm mesh | 0.034382 rad (+1.75 %) | 0.69943 mm (+3.50 %) |
-| CalculiX, the same mesh | within 2.0e-8 | |
+| in-house, 0.5 mm mesh | 0.034261 rad (+1.79 %) | 0.69700 mm (+3.54 %) |
+| CalculiX, the same mesh | within 5.8e-8 | |
 | control, both layers steel | 5.4e-6 rad | |
 
 Away from the clamp the strip curves as the closed form says (+0.35 % in
@@ -259,14 +259,14 @@ control.
   clamped, a load 5 depths off the upright; the upright's span, 12 depths
   between a thickened base and head, carries a uniform moment F a and F
   along it. At 1.25 × the load whose moment is M_p, plastic, at small
-  deformation: it reaches its load; the span's outer fibre 0.0507 plastic
-  against the bilinear section's 0.0496 (+2.1 %, the library's curve, EN
-  1993-1-5 C.6(2), H = E/99); the head left turned 1.079 rad against that
-  curvature unloaded and integrated over the span, 1.124 (−4.0 %). First
+  deformation: it reaches its load; the span's outer fibre 0.04828 plastic
+  against the bilinear section's 0.04728 (+2.1 %, the library's curve, EN
+  1993-1-5 C.6(2), H = E/99); the head left turned 1.028 rad against that
+  curvature unloaded and integrated over the span, 1.070 (−4.0 %). First
   yield, though, is the app's peak over the whole bracket: 0.459 of the
   load against the span's 0.516 (−11 %), because the span's ends, where it
   meets its thickened base and head, yield first. With large deformation a
-  collapse **is** reported, at 0.691 of the load: the upright bends toward
+  collapse **is** reported, at 0.695 of the load: the upright bends toward
   its load and lengthens its arm (geometric softening), which the hardening
   does not outrun. The control, under first yield: no plastic strain,
   nothing left.
@@ -314,8 +314,10 @@ bought); the drawings, each `check_drawing` clean. It ends with
 - **`first_yield_factor` is the whole part's**: the bracket's thickened
   ends yield first, 11 % before its span; the span's own first yield is
   the closed form's.
-- **The library's steel row** has E = 200 GPa against its cited clause's
-  210 ([known bugs](../../docs/known-bugs.md#the-steel-rows-modulus-is-not-its-cited-clauses)).
+- **The library's steel row** had E = 200 GPa against its cited clause's
+  210; it takes the clause's 210 now (EN 1993-1-1 §3.2.6), which moved the
+  strip check's closed form (n = 210/110.3) and the bracket's plastic
+  strains and turns; every check still passes.
 - **Brass and stainless were re-cited**; no generator read brass's factor
   of safety or stainless's yield, and stainless parts weigh 1.25 % less
   (7 900 kg/m³ for 8 000).

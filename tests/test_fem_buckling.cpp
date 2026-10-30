@@ -115,7 +115,7 @@ fem::Study& Column(Document& doc, double w, double d, double length,
 TEST_CASE("a fixed-free column buckles at Euler's load, a 10 x 20 one in its "
           "weak and strong axes four apart",
           "[fem][buckling]") {
-  constexpr double E = 200000.0, L = 200.0, P = 1000.0;
+  constexpr double E = 210000.0, L = 200.0, P = 1000.0; // library steel
   {
     Document doc;
     fem::Study& s = Column(doc, 10.0, 10.0, L, P, 2.5);
@@ -192,7 +192,7 @@ TEST_CASE("a thin cylinder buckles at the classical load, and is knocked "
   // clamped at its base and closed by a 5 mm cap it is pushed down on: the
   // cap holds the loaded edge round, as the classical case's support does.
   constexpr double R = 25.0, t = 1.0, L = 40.0, P = 1000.0;
-  constexpr double E = 200000.0, nu = 0.3;
+  constexpr double E = 210000.0, nu = 0.3; // library steel
   Document doc;
   auto outer = std::make_unique<CylinderFeature>(
       "Tube", glm::dvec3(0, 0, 0), glm::dvec3(0, 0, 1), R + t / 2, L + 5.0);
@@ -264,7 +264,7 @@ TEST_CASE("a wide cantilever plate buckles at its plate stiffness",
   const fem::StudyRuntime rt = Run(doc, s);
   const auto& k = rt.bodies[0].buckling;
   REQUIRE(k.buckles);
-  const double D = 200000.0 * t * t * t / (12.0 * (1.0 - 0.09));
+  const double D = 210000.0 * t * t * t / (12.0 * (1.0 - 0.09));
   const double plate = kPi * kPi * D * b / (4.0 * L * L) / P;
   std::printf("buckling: wide plate %.6g against the plate's %.6g (%.2f %%), "
               "%d element(s) through, %zu nodes\n",
@@ -294,10 +294,11 @@ TEST_CASE("a pull buckles nothing, and says so", "[fem][buckling]") {
 TEST_CASE("a stocky strut fails below both its buckling and its yield "
           "factor, by Rankine-Gordon",
           "[fem][buckling]") {
-  // Euler's load of a 10 x 10 steel post 128 mm tall, fixed-free, is its
-  // squash load at 250 MPa: the two meet.
+  // Euler's load of a 10 x 10 steel post 131.4 mm tall, fixed-free, is its
+  // squash load at 250 MPa (pi^2 E I / (4 L^2) = 25 kN at E 210 GPa): the
+  // two meet.
   Document doc;
-  fem::Study& s = Column(doc, 10.0, 10.0, 128.0, 10000.0, 2.5);
+  fem::Study& s = Column(doc, 10.0, 10.0, 131.4, 10000.0, 2.5);
   const fem::StudyRuntime rt = Run(doc, s);
   const auto& k = rt.bodies[0].buckling;
   REQUIRE(k.buckles);
@@ -396,7 +397,7 @@ TEST_CASE("measure: a 1 mm plate's factor at one and two elements through",
           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
               .count();
       const auto& k = rt.bodies[0].buckling;
-      const double D = 200000.0 / (12.0 * (1 - 0.09));
+      const double D = 210000.0 / (12.0 * (1 - 0.09));
       const double plate = kPi * kPi * D * b / (4.0 * L * L) / 100.0;
       std::printf("plate b=%g L=%g size=%g refine=%g: factor %.6g, plate "
                   "%.6g (%.2f %%), layers %d, wall %.3g, %zu nodes, %.1f "

@@ -2513,7 +2513,7 @@ TEST_CASE("a bar pressed past its yield yields uniformly, as its hardening "
   // Exact but for what the weak springs that hold a part on a contact
   // alone carry (stabilization, 1.5e-4 of the load measured): taken from
   // the stress near the base, 0.05 MPa there, it is 2.6e-5 of plastic
-  // strain on a hardening modulus of 2020 MPa -- 1e-3 of it.
+  // strain on a hardening modulus of 2121 MPa (E/99) -- 1e-3 of it.
   CHECK(r.nonlinear.stabilization < 3e-4);
   CHECK_THAT(peMin, Catch::Matchers::WithinRel(epsP, 2e-3));
   CHECK_THAT(peMax, Catch::Matchers::WithinRel(epsP, 2e-3));
@@ -3089,7 +3089,7 @@ TEST_CASE("a steel and brass strip bonded in an assembly curls as "
   }
   REQUIRE(tipFaces.size() == 2);
   const double kappaRaw = [&] {
-    const double m = 1.0, n = 200.0 / 110.3, h = 2 * t;
+    const double m = 1.0, n = 210.0 / 110.3, h = 2 * t;
     return 6.0 * (19.2e-6 - 12e-6) * 80.0 * (1 + m) * (1 + m) /
            (h *
             (3.0 * (1 + m) * (1 + m) + (1 + m * n) * (m * m + 1.0 / (m * n))));
