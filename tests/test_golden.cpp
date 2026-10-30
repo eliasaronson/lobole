@@ -1478,7 +1478,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     CHECK(imp->minSides ==
           expect.value("import_min_sides", mesh::kDefaultMinSides));
   }
-  // vNEXT: where an Import is put. Lost on a round trip, an aligned scan
+  // v213: where an Import is put. Lost on a round trip, an aligned scan
   // reloads tilted, off its floor and at the photogrammetry's scale.
   if (expect.contains("import_translate_mm") ||
       expect.contains("import_rotate_deg") || expect.contains("import_scale")) {

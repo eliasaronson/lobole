@@ -940,7 +940,7 @@ public:
   int minSides = mesh::kDefaultMinSides;
   // Whether `path` is a mesh the representation applies to (.stl).
   static bool IsMesh(const std::string& path);
-  // Where the import is put (vNEXT, `placement` {translate_mm, rotate_deg}
+  // Where the import is put (v213, `placement` {translate_mm, rotate_deg}
   // and `scale`): scaled about the part origin, turned about the world
   // axes, moved -- after the up axis and the centring, so a scan that
   // arrived tilted, off-centre or at a photogrammetry scale is placed

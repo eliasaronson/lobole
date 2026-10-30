@@ -1333,12 +1333,12 @@ json FeatureToJson(const Feature& feature) {
       j["representation"] = mesh::ToString(import->representation);
     if (import->minSides != mesh::kDefaultMinSides) // v200; absent = 12
       j["min_sides"] = import->minSides;
-    // vNEXT; absent = where the up axis and the centring put it
+    // v213; absent = where the up axis and the centring put it
     const importplace::Placement& pl = import->placement;
     if (pl.translateMm != glm::dvec3(0.0) || pl.rotateDeg != glm::dvec3(0.0))
       j["placement"] = {{"translate_mm", Vec3ToJson(pl.translateMm)},
                         {"rotate_deg", Vec3ToJson(pl.rotateDeg)}};
-    if (pl.scale != 1.0) // vNEXT; absent = 1
+    if (pl.scale != 1.0) // v213; absent = 1
       j["scale"] = pl.scale;
   } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
     // v161 (docs/modeling/templates.md). The definition rides in full, so
@@ -3292,9 +3292,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "Import: min_sides is for representation: recognize or auto");
       imp->minSides = m.get<int>();
     }
-    if (j.contains("placement")) // vNEXT
+    if (j.contains("placement")) // v213
       importplace::ReadPlacement(j.at("placement"), imp->placement, "Import");
-    if (j.contains("scale")) // vNEXT
+    if (j.contains("scale")) // v213
       importplace::ReadScale(j.at("scale"), imp->placement, "Import");
     out = std::move(imp);
   } else if (type == "Template") {

@@ -216,7 +216,7 @@ scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`)
   placement, so it changes no topology: a B-Rep keeps its face names, a
   mesh body its triangles and their winding (moved in place), and a
   recognised mesh's report moves with it. Written only when not the
-  defaults (vNEXT, [format](../versioning/format.md#pending-changes)); a
+  defaults (v213, [format](../versioning/format.md#pending-changes)); a
   key the placement does not take, a vector that is not three finite
   numbers or a scale of 0 or less is refused. `import_step` takes both
   (not with `as_assembly`, whose parts are placed as occurrences), and the
@@ -902,7 +902,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 | `tests/fixtures/import/` | the fixtures and `make_fixtures.py` / `make_iges.cpp`, which wrote them: our box under real SolidWorks 2024 and Autodesk headers, IGES as a solid, as surfaces and with a SolidWorks system ID, ezdxf DXFs, SVGs, an OBJ |
 | `tests/golden/v190-import-up-axis.json` | `up_axis` and `turn_deg` round-trip; v97 and v103 reload as `none` |
 | `tests/test_import_align.cpp` `[align]` | a placement's angles read back; composing an alignment is the matrix product; a mesh body and a B-Rep placed (moved vertices, volume, face names kept); the keys written, read and refused; floor on a tilted box as a mesh and as facets, then scaled by a known edge with the floor kept; three points; principal axes; the rim of an open scan on z = 0 with the figure standing; each refusal |
-| `tests/golden/vNEXT-import-placement.json` | `placement` and `scale` round-trip |
+| `tests/golden/v213-import-placement.json` | `placement` and `scale` round-trip |
 | GUI `align/a_floor_picked_on_a_scan_is_one_undo_step` | the tool waits for a pick with Accept disabled, a click on the face previews it on the floor, Accept is one undo step and Undo puts it back; principal previews with no pick and Cancel puts it back |
 | `tests/test_assembly_flatten.cpp` | `Flatten`'s levels compose to exactly its world placement |
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly`; every import fixture through `import_step` / `import_sketch` with its reply read |
