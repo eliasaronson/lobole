@@ -509,7 +509,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Refuses a kind that is not running, naming what is.",
      "kind"},
     {"get_state",
-     "Full snapshot: features (with errors), bodies (volume_mm3, bbox), "
+     "Full snapshot: features (with errors), bodies (volume_mm3, the bbox "
+     "measured off the surfaces, as mass_properties'), "
      "selection, camera (its `distance` in mm), undo/redo, rollback, regen "
      "summary. `part` (a slot "
      "name, stable id or index) reads ANOTHER part without switching to it — "
@@ -2134,14 +2135,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     for (size_t i = 0; i < stateDoc->GetBodies().size(); i++) {
       const auto& body = stateDoc->GetBodies()[i];
       glm::dvec3 min, max;
-      // The CHEAP box, which is conservative rather than exact: a swept
-      // surface is bounded by its control points, so a helical spring reads
-      // about sixty per cent bigger than it is. get_state is called after
-      // every edit — asking for the exact one here took an engine's build
-      // from 1.6 s to 5.8 s — and a bound that cannot be too SMALL is what
-      // most callers of this field want. `mass_properties` returns the
-      // measured box for the times you want a size.
-      BodyBounds(body, min, max);
+      // The MEASURED box, off the surfaces. The conservative one bounds a
+      // B-spline face by its control points, and an exported part's faces
+      // are B-splines: a 62 x 36 x 78 bracket read 164 x 345 x 156, and a
+      // script reading this field for a size or a placement was off five
+      // times. The tight box is memoized on the shape (and by TShape and
+      // location, CADShape::GetBoundingBox), so a body pays for it once per
+      // regeneration, not per call; the digest every mutating reply carries
+      // reads the same one.
+      BodyBounds(body, min, max, /*tight=*/true);
       // `created_by` is here because it is FREE here and expensive
       // anywhere else: it was only ever readable from list_elements, which
       // enumerates every face and edge of the body to hand back one

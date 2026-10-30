@@ -382,7 +382,9 @@ inline nlohmann::json BodyDigestJson(const Document& doc) {
   nlohmann::json arr = nlohmann::json::array();
   for (const Body& b : doc.GetBodies()) {
     glm::dvec3 mn(0.0), mx(0.0);
-    BodyBounds(b, mn, mx);
+    // The MEASURED box, as get_state's: memoized on the shape, so each
+    // body pays it once per regeneration (BodyBounds, get_state).
+    BodyBounds(b, mn, mx, /*tight=*/true);
     if (b.IsMesh()) {
       // A mesh body (docs/interchange/README.md#mesh-bodies): its triangles'
       // volume when they close, 0 when they do not -- and it says which.

@@ -222,10 +222,12 @@ of everything it weighed together (on an assembly, every visible leaf where
 the solve put it). Density comes from the body's material; a body with
 no material has no mass rather than an assumed density, and the BOM names it
 in `warnings`. On an assembly tab without `part` it aggregates every visible
-occurrence in world space. Its bbox is measured off the surfaces; `get_state`'s
-(and every mutating reply's `digest`) is a cheap conservative bound that can
-read well over on a swept surface, and several times over on a STEP whose
-faces are B-splines ([known bugs](../known-bugs.md#get_state-and-the-digest-report-a-steps-box-several-times-its-size)).
+occurrence in world space. Its bbox is measured off the surfaces, and so are
+`get_state`'s and every mutating reply's `digest`: the conservative bound
+wraps a B-spline face by its control points, which read a STEP bracket's box
+five times its size. The measured box is memoized on the shape, so a body
+pays for it once per regeneration
+([bounding boxes](../modeling/README.md#bounding-boxes-are-memoized-on-the-shape)).
 A PRINTED part's bodies also carry `printed`, what the slicer's walls,
 shells and infill weigh at its slicer settings, and `total.printed` their
 sum ([printed mass](../tolerances/README.md#printed-mass)); `{why}` when a

@@ -29,24 +29,6 @@ the heading if it is not here yet.
   re-run with the pose nudged by ±ε and treat a volume that vanishes as
   touching.
 
-### `get_state` and the digest report a STEP's box several times its size
-
-- **Symptom:** the SO-101 wrist bracket (`STEP/SO101/Wrist_Roll_Pitch_SO101.step`
-  in TheRobotStudio/SO-ARM100), imported with `keep_origin`, is 62.3 x 35.7 x
-  77.8 mm by `mass_properties`; `get_state`'s `bodies[].bbox_*` and the
-  `digest` every mutating reply carries say 164 x 345 x 156. A script reading
-  either for the part's size or a placement is off by a factor of five; the
-  help says the bound "can read ~60% over".
-- **Cause:** both are `CADShape::GetBoundingBox` without `tight`, which
-  bounds a B-spline face by its control points; an Autodesk export's faces
-  are B-splines.
-- **Where:** `BodyDigestJson` in `src/remote/RemoteHelpers.h`, the body rows
-  of `get_state` (`src/remote/RemoteDispatch.cpp`).
-- **Likely fix:** report the tight box (memoized per shape, so paid once per
-  regeneration), or name the field what it is (`bound_*`) and point at
-  `mass_properties`. The camera fit had the same cause and takes the tight
-  box now.
-
 ### `check_print` passes a long bridge on a raw STL import
 
 - **Symptom:** the SO-101 bracket exported as STL and imported again, end

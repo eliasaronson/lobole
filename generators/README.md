@@ -263,10 +263,10 @@ know:
   and still be the wrong shape; looking is the check that sees it, so
   `Part.render(path)` screenshots one part, fitted (it needs a renderer, and
   a `--headless` instance refuses).
-- `Part.bbox()` is the measured extent from `mass_properties`. `get_state`'s
-  box is a cheap conservative bound that wraps a swept surface by its control
-  points (a helical spring reads about sixty per cent over): right for a
-  broad phase, wrong for a person.
+- `Part.bbox()` is the measured extent from `mass_properties`, the same box
+  `get_state` and the digest report: measured off the surfaces, not bounded
+  by a B-spline's control points (a helical spring read about sixty per cent
+  over that way).
 - `modify_feature` takes `feature_id` as well as `index`, since an id is what
   every other call hands back; not `id`, which inside the spec already means
   the feature's own identity. `list_parts` returns `active_id` beside the

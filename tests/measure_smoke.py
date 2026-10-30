@@ -261,6 +261,30 @@ def main():
             except RuntimeError as e:
                 expect(want in str(e), f"the refusal explains: {e}")
 
+        # get_state's box, and the digest's, are the MEASURED box, not a
+        # bound: a helical spring's swept face, bounded by its B-spline's
+        # control points, read -24.8..15.3 across where it is +-12.6 (and a
+        # STEP bracket's B-spline faces five times its size).
+        d.call("new_project")
+        helix = d.call("add_feature", feature={
+            "type": "Curve3D", "name": "Helix", "kind": "helix",
+            "origin": [0, 0, 0], "axis": [0, 0, 1], "radius": 11,
+            "pitch": 7, "turns": 4})
+        made = d.call("add_feature", feature={
+            "type": "Pipe", "name": "Spring", "path_id": helix["id"],
+            "outer_diameter": 3.2})
+        mp = d.call("mass_properties")["bodies"][0]
+        state = d.call("get_state")["bodies"][0]
+        digest = made["digest"]["bodies"][0]
+        for name, got in (("get_state", state), ("digest", digest)):
+            for key in ("bbox_min", "bbox_max"):
+                for i in range(3):
+                    expect(abs(got[key][i] - mp[key][i]) < 1e-6,
+                           f"{name}'s {key} is the measured one: "
+                           f"{got[key]} vs {mp[key]}")
+        expect(state["bbox_max"][0] < 12.7 and state["bbox_min"][0] > -12.7,
+               f"the spring's box is its size, +-12.6: {state}")
+
         print("measure_smoke: OK")
     finally:
         app.terminate()

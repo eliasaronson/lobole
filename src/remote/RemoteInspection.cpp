@@ -1255,10 +1255,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "warned:int"},
     {"mass_properties",
      "Mass (`mass_g`), `volume_mm3`, `center_of_mass_mm`, bbox per body and "
-     "`bbox_mm` {min, max, size} of everything measured together (density "
+     "`bbox_mm` {min, max, size} in mm of everything measured together "
+     "(a body's `density` in kg/m^3, "
      "from "
-     "materials). The bbox here is MEASURED off the surfaces; get_state's is "
-     "a cheap conservative bound that can read ~60% over on a swept surface. "
+     "materials). The bbox here is MEASURED off the surfaces, the same box "
+     "get_state and the digest report. "
      "`part` reads another part without switching to it; from an assembly tab "
      "with no `part`, aggregates every visible occurrence in world space. "
      "A PRINTED part's bodies also carry `printed`: the estimate of what the "
@@ -5407,9 +5408,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                     {"inertia", inertia},
                     {"material", bm.material}};
       // The MEASURED box, evaluated off the surfaces rather than bounded by
-      // their control points. get_state's is the cheap conservative one
-      // because it is recomputed after every edit; this call is the one that
-      // exists to measure, so it pays for the exact answer.
+      // their control points -- the same box get_state and the digest
+      // report, memoized on the shape.
       {
         if (which < bodies.size()) {
           glm::dvec3 bmin, bmax;
