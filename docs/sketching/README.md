@@ -608,7 +608,7 @@ stable ids, as any projection's is.
   re-scan, the section under it does.
 
 Saved as `{kind: "section", fit, bodies?, tolerance_mm?, gen_ids}` in the
-sketch's `external` (format vNEXT); `bodies` and `tolerance_mm` are written
+sketch's `external` (format v214); `bodies` and `tolerance_mm` are written
 only when given.
 
 #### What a section costs
@@ -1172,7 +1172,7 @@ link; `modify_feature` with an edited sketch JSON covers them.
   B-Rep box's section following the box as it grows, and failing named when
   the plane leaves it; an open scan's open chains; the fits on a dense
   ellipse at three tolerances, each closing into one loop of the ellipse's
-  area; the saved form and its refusals; the vNEXT golden. The section
+  area; the saved form and its refusals; the v214 golden. The section
   tool's "To sketch" is the GUI test `section/to_sketch_draws_the_cut`;
   `project_section` through the RPC, offset and extruded, is in
   `headless_smoke.py`, and its refusals in `refused_calls_smoke.py`.

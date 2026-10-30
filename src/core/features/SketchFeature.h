@@ -844,7 +844,7 @@ struct DerivedOp {
 // them survive; the solver holds them FIXED (their position is owned by the
 // source, not the solve).
 //
-// A Section (vNEXT, docs/sketching/README.md#a-section-into-a-sketch) is not
+// A Section (v214, docs/sketching/README.md#a-section-into-a-sketch) is not
 // an element: it is where this sketch's plane cuts the bodies before it --
 // mesh or B-Rep -- refitted every regeneration to `toleranceMm` as lines,
 // lines and arcs, or B-splines (`fit`). It keeps no index into anything, so a

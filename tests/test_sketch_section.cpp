@@ -289,12 +289,12 @@ TEST_CASE("The fits hold a stated tolerance on a dense cut", "[sketch]") {
   }
 }
 
-TEST_CASE("The vNEXT golden's section is drawn on load", "[sketch][golden]") {
-  // tests/golden/vNEXT-sketch-section.json: a box cut through its middle,
+TEST_CASE("The v214 golden's section is drawn on load", "[sketch][golden]") {
+  // tests/golden/v214-sketch-section.json: a box cut through its middle,
   // the section saved with the four sides it drew, drawn again by the load's
   // regeneration onto the same ids.
   auto doc = testio::Load(std::string(TestSourceDir()) +
-                          "/tests/golden/vNEXT-sketch-section.json");
+                          "/tests/golden/v214-sketch-section.json");
   REQUIRE(doc != nullptr);
   auto& s = *dynamic_cast<SketchFeature*>(doc->GetFeature(1));
   INFO(s.GetError());

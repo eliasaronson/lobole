@@ -627,7 +627,7 @@ sketch::ExternalKind ExternalKindFromString(const std::string& kind) {
     return sketch::ExternalKind::Face;
   if (kind == "edge")
     return sketch::ExternalKind::Edge;
-  if (kind == "section") // vNEXT
+  if (kind == "section") // v214
     return sketch::ExternalKind::Section;
   throw std::runtime_error("unknown sketch external reference kind: " + kind +
                            "; kinds: face, edge, section");
@@ -1174,7 +1174,7 @@ json FeatureToJson(const Feature& feature) {
     if (!sk->external.empty()) { // v48: live projected geometry
       j["external"] = json::array();
       for (const auto& e : sk->external) {
-        if (e.kind == sketch::ExternalKind::Section) { // vNEXT
+        if (e.kind == sketch::ExternalKind::Section) { // v214
           json ej = {{"kind", "section"},
                      {"fit", sketch::ToString(e.fit)},
                      {"gen_ids", e.genIds}};
@@ -3051,7 +3051,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
     for (const auto& ej : j.value("external", json::array())) { // v48
       if (ej.is_object() && ej.value("kind", std::string()) == "section") {
-        // vNEXT: where the sketch's plane cuts the bodies
+        // v214: where the sketch's plane cuts the bodies
         // (docs/sketching/README.md#a-section-into-a-sketch).
         readctx::RefuseUnknownKeys(
             ej, {"kind", "fit", "bodies", "tolerance_mm", "gen_ids"},
