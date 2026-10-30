@@ -108,6 +108,29 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error,
   return true;
 }
 
+// The one solver choice, for a run on the frame and a job alike: a solve
+// large enough to go iterative tries the GPU first, under the rules
+// topology's does (StartTopologyRun): LOBOLE_TOPO_GPU=0 keeps it on the
+// CPU, =1 admits a software device, and the user's preferred device is
+// asked for. The device is made on the solving thread, and only for a
+// solve that wants one. A synchronous run once went straight to the CPU.
+static void OfferGpuSolver(const AppState& state, fem::SolveOptions& o) {
+#ifdef HAVE_FEM_GPU
+  const char* pref = std::getenv("LOBOLE_TOPO_GPU");
+  if (!pref || std::string(pref) != "0") {
+    const bool allowSoftware = pref && std::string(pref) == "1";
+    o.makeExternal =
+        [allowSoftware, device = state.settings.gpuDevice](
+            std::string* why) -> std::unique_ptr<fem::TopoLinearSolver> {
+      return gpu::TopoGpuSolver::Create(allowSoftware, why, device);
+    };
+  }
+#else
+  (void)state;
+  (void)o;
+#endif
+}
+
 bool CalculixRunFor(const AppState& state, const fem::Study& s,
                     double timeoutSeconds, fem::SolveOptions& options,
                     std::string* error) {
@@ -159,10 +182,13 @@ bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
     s->error = error ? *error : "";
     return false;
   }
-  if (!options.calculix)
+  if (!options.calculix && s->type == fem::AnalysisType::Topology)
     return RunStudyAndCache(doc, studyId, error, converge);
-  // On CalculiX: the in-house pipeline up to the solve, then ccx, and the
-  // convergence check re-solving on ccx at each step.
+  // The pipeline a job runs, on the frame: in-house with the solver a job
+  // would choose (OfferGpuSolver), or on CalculiX, the convergence check
+  // re-solving on ccx at each step.
+  if (!options.calculix)
+    OfferGpuSolver(state, options);
   const uint64_t inputHash = fem::RunInputKey(doc, *s, converge);
   fem::StudyPlan plan;
   if (!fem::PlanStudy(doc, *s, plan, error))
@@ -171,8 +197,11 @@ bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
   fem::StudyRuntime rt;
   options.cancelled = state.rpcCallerGone;
   const auto started = std::chrono::steady_clock::now();
-  if (!fem::SolveConverged(plan, input, rt, converge, error, options)) {
-    s->error = error ? *error : "solve failed";
+  std::string err;
+  if (!fem::SolveConverged(plan, input, rt, converge, &err, options)) {
+    s->error = err.empty() ? "solve failed" : err;
+    if (error)
+      *error = s->error;
     return false;
   }
   rt.solvedAtVersion = doc.Version();
@@ -266,30 +295,17 @@ namespace {
 
 // What a study job's worker solves with: an iterative solve stops when the
 // job is cancelled (a factorisation still cannot), the job learns which
-// solver it is waiting on, and a solve large enough to go iterative tries
-// the GPU first, under the rules topology's does (StartTopologyRun):
-// LOBOLE_TOPO_GPU=0 keeps it on the CPU, =1 admits a software device, and
-// the user's preferred device is asked for. The device is made on the
-// worker, and only for a solve that wants one.
+// solver it is waiting on and how many iterations it has made, and the GPU
+// is offered (OfferGpuSolver).
 fem::SolveOptions JobSolveOptions(const AppState& state, BackgroundJob* raw,
                                   StudyJob* job) {
   fem::SolveOptions o;
   o.cancelled = [raw] { return raw->cancel.load(); };
-  if (job != nullptr)
+  if (job != nullptr) {
     o.solving = [job](const char* name) { job->solverNow.store(name); };
-#ifdef HAVE_FEM_GPU
-  const char* pref = std::getenv("LOBOLE_TOPO_GPU");
-  if (!pref || std::string(pref) != "0") {
-    const bool allowSoftware = pref && std::string(pref) == "1";
-    o.makeExternal =
-        [allowSoftware, device = state.settings.gpuDevice](
-            std::string* why) -> std::unique_ptr<fem::TopoLinearSolver> {
-      return gpu::TopoGpuSolver::Create(allowSoftware, why, device);
-    };
+    o.iterated = [job](int n) { job->iterations.store(n); };
   }
-#else
-  (void)state;
-#endif
+  OfferGpuSolver(state, o);
   return o;
 }
 
@@ -879,6 +895,7 @@ StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
   st.solver = now != nullptr ? now : fem::CpuSolverName(job->plan.type);
   st.memoryEstimateBytes = job->memoryEstimate.load();
   st.loadFraction = job->loadFraction.load();
+  st.iterations = job->iterations.load();
   return st;
 }
 
@@ -1193,6 +1210,8 @@ bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
     found->error = error ? *error : "";
     return false;
   }
+  if (!options.calculix)
+    OfferGpuSolver(state, options);
   options.cancelled = state.rpcCallerGone;
   if (!PlanForRun(state, asmDoc, studyId, plan, &s, error))
     return false;

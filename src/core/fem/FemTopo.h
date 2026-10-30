@@ -102,6 +102,8 @@ struct LinearSolveControl {
   std::function<bool()> cancelled;
   double achieved = 0.0; // out: the relative residual reached
   int iterations = 0;    // out: the implementation's iterations, all levels
+  // Told the iterations so far, between steps (a running job's status).
+  std::function<void(int)> iterated;
 };
 
 class TopoLinearSolver {

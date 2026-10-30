@@ -1019,7 +1019,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "its mesh is made, and its `solver` names the phase (writing the deck, "
      "solving, checking the answer); a nonlinear one also `load_fraction` "
      "(the load reached over the load it runs to, from ccx's .sta, as each "
-     "increment lands).",
+     "increment lands). A running in-house static study says `iterations`: "
+     "its iterative solve's so far, on the CPU or the GPU (0 for a direct "
+     "one).",
      "id, job, study"},
     {"study_results",
      "Result summary: {type, elements, nodes, stale} plus a `bodies` "
@@ -2583,6 +2585,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         // #nonlinear-static): the load reached, from ccx's .sta.
         if (srs.loadFraction >= 0)
           out["load_fraction"] = srs.loadFraction;
+        // An iterative solve's iterations so far, on the CPU or the GPU.
+        out["iterations"] = srs.iterations;
         return out;
       }
       const ui::TopoRunStatus st = ui::GetTopologyStatus(state, id);

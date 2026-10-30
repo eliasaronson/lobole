@@ -313,25 +313,6 @@ the heading if it is not here yet.
   outside, a remote load off its end); then see whether the set cycles or
   ends on a pull above the thousandth.
 
-### The GPU solve's failures are hidden, and a synchronous run never tries it
-
-- **Symptom:** on the same 500 k DOF plate:
-  - a synchronous `run_study` went straight to the CPU solve, while an
-    async one tried the GPU first;
-  - on an identical mesh, the async GPU solve failed 2 times (plus one
-    probable) in 7, on a busy machine;
-  - the reason the GPU gave up is dropped from the error;
-  - `study_status.iterations` reads 0 during a GPU solve.
-- **Cause:** not found.
-- **Where:** the solver choice in `src/core/fem/FemStudy.cpp`, and the
-  femgpu solve it calls.
-- **Likely fix:**
-  - one solver choice for both paths;
-  - carry the GPU's reason into the result's `solver` text and into the
-    error;
-  - report the GPU's iteration count;
-  - then find the intermittent failure with the failing mesh.
-
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

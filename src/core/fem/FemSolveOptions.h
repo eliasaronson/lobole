@@ -55,6 +55,10 @@ struct SolveOptions {
   // Told which solver was chosen once K's size is known (a static string,
   // CpuSolverName's kind), so a running job can say what it is waiting on.
   std::function<void(const char*)> solving;
+  // Told an iterative solve's iterations so far (the CPU's PCG, or the
+  // GPU's inner iterations over every refinement step), summed over the
+  // cases solved, as they run: what a running job's status reports.
+  std::function<void(int)> iterated;
   // Makes the external (GPU) solver an iterative solve tries first; null, or
   // a null answer with `why` set, solves on the CPU. Called on the solving
   // thread, only once the solve is known to be iterative, so a small study

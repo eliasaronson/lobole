@@ -937,13 +937,31 @@ buckling).
       lower the energy by less than fp64 can tell from rounding ("stopped
       gaining"), when a step is not finite ("broke down"), or at
       `max(10000, DOF/4)` iterations ("did not converge").
+    - A case the GPU falls short on is finished on the CPU from where the
+      GPU got to (a start worse than zero is dropped), and the rest of the
+      cases on the CPU. The result's `solver` names the CPU with `GPU
+      declined: <why>`, and if the CPU fails too its error ends "the GPU
+      solve before it: <why>".
+    - The GPU's own arithmetic is not reproducible run to run (its SpMV
+      scatters each element's product with an fp32 `atomicAdd`, in
+      whatever order the device schedules it):
+      the same plate's maximum displacement differs in the tenth digit
+      between runs, and its inner iterations by one or two in 230. A solve
+      near the edge of what the GPU reaches can therefore fall short in one
+      run of several; it then finishes on the CPU as above rather than
+      failing the study.
+    - A synchronous `run_study` makes the same choice as a job: both offer
+      the GPU (`OfferGpuSolver`). A synchronous run once went straight to
+      the CPU.
   - **Measured** on a 100 x 20 x 20 beam, CPU only: 33.5k DOF, LDLT 4.9 s
     and PCG 1.7 s; 202k DOF, 423 s against 26 s. A printed gear's sun at
     111k tets (512k DOF), meshing included: PCG 120 s, the GPU 31 s. At 47k
     tets, which LDLT took 15 minutes and 9 GB to factor, the GPU took 11 s.
   - `study_status.solver` names the solver a running job chose once its
-    mesh said how big K is, and the stored result names the one that ran,
-    with `GPU declined: <why>` when a GPU was offered and not used. Stresses are evaluated at each
+    mesh said how big K is, and `study_status.iterations` its iterations
+    so far (the GPU's inner iterations over its refinement steps, then the
+    CPU's); the stored result names the one that ran, with `GPU declined:
+    <why>` when a GPU was offered and not used. Stresses are evaluated at each
   element's nodes and averaged to the mesh nodes weighted by element volume;
   von Mises per node, and the maxima with their locations.
 - **Modal** (`fem::SolveModal`): `K φ = ω² M φ` with a consistent mass

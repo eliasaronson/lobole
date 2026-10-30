@@ -69,6 +69,8 @@ struct StudyJob {
   // The linear solver the worker chose, once the mesh said how big K is (a
   // static string; null until then), for the status of a running solve.
   std::atomic<const char*> solverNow{nullptr};
+  // An iterative solve's iterations so far (CPU or GPU), for its status.
+  std::atomic<int> iterations{0};
   // A CalculiX run's memory estimate (bytes), once its mesh said how big
   // it is (docs/simulation/README.md#calculix); 0 until then, and in-house.
   std::atomic<uint64_t> memoryEstimate{0};

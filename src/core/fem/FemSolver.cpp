@@ -524,6 +524,9 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   // few hundred to a few thousand iterations; a thin plate at 900k DOF
   // several thousand).
   const int maxIterations = std::max(10000, nFree / 4);
+  // Why the GPU gave a case up, carried into the CPU's error.
+  std::string gpuWhy;
+  int iterationsSoFar = 0; // every case's, for options.iterated
   std::vector<FemResults> all;
   all.reserve(cases.size());
   const Eigen::VectorXd Fgravity = Fall;
@@ -536,6 +539,7 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     }
     const Eigen::VectorXd F = reduce(Fcase);
     Eigen::VectorXd u;
+    bool gpuSolved = false;
     const size_t caseIndex = all.size();
     if (given) {
       // The answer in this system's DOF: each node's displacement in its
@@ -620,8 +624,13 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
       // A decade inside the acceptance below.
       control.tolerance = 1e-7;
       control.cancelled = options.cancelled;
+      if (options.iterated)
+        control.iterated = [&](int n) {
+          options.iterated(iterationsSoFar + n);
+        };
       std::string why;
       const bool ok = external->SolveStrict(fv, uv, control, &why);
+      iterationsSoFar += control.iterations;
       if (report)
         report->iterations += control.iterations;
       if (options.cancelled && options.cancelled())
@@ -633,9 +642,12 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
                     "); run it again");
       if (ok && static_cast<int>(uv.size()) == nFree) {
         u = Eigen::Map<const Eigen::VectorXd>(uv.data(), nFree);
+        gpuSolved = true;
       } else {
-        // Not an answer: finish this case and the rest on the CPU, and say
-        // why the result names the CPU.
+        // Not an answer: finish this case and the rest on the CPU, from
+        // where the GPU got to (Pcg drops a start worse than zero), and say
+        // why the result names the CPU -- and the error, if the CPU fails
+        // too.
         external.reset();
         if (options.solving)
           options.solving(kIterativeSolverName);
@@ -643,24 +655,32 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
           report->solver = kIterativeSolverName;
           report->externalDeclined = why;
         }
+        gpuWhy = "; the GPU solve before it: " + why;
+        if (static_cast<int>(uv.size()) == nFree)
+          u = Eigen::Map<const Eigen::VectorXd>(uv.data(), nFree);
         if (!prepareIc())
           return fail("the CPU's preconditioner (an incomplete Cholesky "
-                      "factor of K) could not be built");
+                      "factor of K) could not be built" +
+                      gpuWhy);
       }
     }
-    if (u.size() == 0 && iterative) {
+    if (iterative && !given && !gpuSolved) {
       int its = 0;
       double rel = 0.0;
       // Two decades under the acceptance below, so the check never decides
       // a converged solve.
-      const PcgOutcome o =
-          Pcg(K, ic, F, u, 1e-8, maxIterations, options.cancelled, &its, &rel);
+      std::function<void(int)> iterated;
+      if (options.iterated)
+        iterated = [&](int n) { options.iterated(iterationsSoFar + n); };
+      const PcgOutcome o = Pcg(K, ic, F, u, 1e-8, maxIterations,
+                               options.cancelled, &its, &rel, iterated);
+      iterationsSoFar += its;
       if (report)
         report->iterations += its;
       if (o == PcgOutcome::Cancelled)
         return fail("cancelled");
       if (o != PcgOutcome::Converged)
-        return fail(PcgFailure(o, its, rel));
+        return fail(PcgFailure(o, its, rel) + gpuWhy);
     } else if (!iterative && !given) {
       u = direct.solve(F);
       if (direct.info() != Eigen::Success)

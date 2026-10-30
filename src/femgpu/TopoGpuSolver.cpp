@@ -412,6 +412,8 @@ bool TopoGpuSolver::Refine(const std::vector<double>& scale,
                       /*lastIterate=*/true))
       return false;
     innerIters += st.iterations;
+    if (strict && strict->iterated)
+      strict->iterated(innerIters);
     for (int i = 0; i < n; ++i)
       d[i] = static_cast<double>(im.dF[i]) * rNorm;
     th = clk::now();

@@ -42,6 +42,9 @@ struct StudyRunStatus {
   uint64_t memoryEstimateBytes = 0;
   // A nonlinear run's load reached over the load it runs to; -1 = none yet.
   double loadFraction = -1.0;
+  // An in-house iterative solve's iterations so far, CPU or GPU; 0 before
+  // one starts (and for a direct one).
+  int iterations = 0;
 };
 
 // Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter

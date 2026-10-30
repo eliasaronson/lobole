@@ -225,7 +225,8 @@ template <class Precond>
 inline PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
                       const Eigen::VectorXd& f, Eigen::VectorXd& u, double tol,
                       int maxIterations, const std::function<bool()>& cancelled,
-                      int* iterations, double* relResidual) {
+                      int* iterations, double* relResidual,
+                      const std::function<void(int)>& iterated = {}) {
   constexpr int kCancelEvery = 32;
   constexpr int kStallIterations = 2000;
   const double fNorm = f.norm();
@@ -284,8 +285,12 @@ inline PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
     slot = gain;
     if (it >= kStallIterations && !(windowGain > 1e-13 * std::abs(energy)))
       return PcgOutcome::Stalled;
-    if (cancelled && it % kCancelEvery == 0 && cancelled())
-      return PcgOutcome::Cancelled;
+    if (it % kCancelEvery == 0) {
+      if (iterated)
+        iterated(it);
+      if (cancelled && cancelled())
+        return PcgOutcome::Cancelled;
+    }
     z = M.solve(r);
     const double rzNext = r.dot(z);
     p = z + (rzNext / rz) * p;

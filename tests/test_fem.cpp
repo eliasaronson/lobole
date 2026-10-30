@@ -14,6 +14,7 @@
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "core/fem/FemTopo.h"
 #include "core/io/Serialization.h"
 
 #include <BOPAlgo_Builder.hxx>
@@ -622,6 +623,100 @@ TEST_CASE("Solver: the iterative solve refuses an under-constrained model",
   fem::SolveReport report;
   CHECK_FALSE(beam.Solve(iterative, &report, &err).has_value());
   CHECK(report.iterations == 0);
+}
+
+namespace {
+// An external (GPU) solver that falls short: it hands back `partial` (the
+// answer in x, y, z per node, reduced by the map SetupDomains is given) and
+// fails, naming why, as a GPU short of its tolerance does.
+class ShortSolver : public fem::TopoLinearSolver {
+public:
+  explicit ShortSolver(std::vector<glm::dvec3> partial)
+      : m_partial(std::move(partial)) {}
+  bool Setup(const fem::FemMesh&, const fem::Material&, const std::vector<int>&,
+             int, std::string*) override {
+    return false;
+  }
+  bool Solve(const std::vector<double>&, const std::vector<double>&,
+             std::vector<double>&, std::string*) override {
+    return false;
+  }
+  bool SetupDomains(const fem::FemMesh&, const std::vector<fem::Material>&,
+                    const std::vector<int>& dofMap, int nFree,
+                    std::string*) override {
+    m_map = dofMap;
+    m_nFree = nFree;
+    return true;
+  }
+  bool SolveStrict(const std::vector<double>&, std::vector<double>& u,
+                   fem::LinearSolveControl& control,
+                   std::string* error) override {
+    u.assign(m_nFree, 0.0);
+    for (size_t d = 0; d < m_map.size(); ++d)
+      if (m_map[d] >= 0)
+        u[m_map[d]] = m_partial[d / 3][d % 3];
+    control.iterations = 7;
+    if (control.iterated)
+      control.iterated(7);
+    if (error)
+      *error = "fell short of its tolerance (a test's)";
+    return false;
+  }
+
+private:
+  std::vector<glm::dvec3> m_partial;
+  std::vector<int> m_map;
+  int m_nFree = 0;
+};
+} // namespace
+
+TEST_CASE("Solver: a GPU solve that falls short is finished on the CPU from "
+          "where it got to, and says why",
+          "[fem][solver]") {
+  TwoMaterialBeam beam;
+  fem::SolveOptions cold;
+  cold.iterativeAboveDofs = 0;
+  fem::SolveReport coldReport;
+  std::string err;
+  const auto exact = beam.Solve(cold, &coldReport, &err);
+  INFO(err);
+  REQUIRE(exact);
+  std::vector<std::vector<glm::dvec3>> partial;
+  for (const fem::FemResults& r : *exact) {
+    partial.push_back(r.displacement);
+    for (glm::dvec3& d : partial.back())
+      d *= 0.999; // a part in a thousand short
+  }
+  size_t made = 0;
+  fem::SolveOptions warm = cold;
+  warm.makeExternal =
+      [&](std::string*) -> std::unique_ptr<fem::TopoLinearSolver> {
+    return std::make_unique<ShortSolver>(partial[std::min(made++, size_t{0})]);
+  };
+  std::vector<int> seen;
+  warm.iterated = [&](int n) { seen.push_back(n); };
+  fem::SolveReport report;
+  const auto finished = beam.Solve(warm, &report, &err);
+  INFO(err);
+  REQUIRE(finished);
+  CHECK(report.solver == fem::kIterativeSolverName);
+  CHECK(report.externalDeclined == "fell short of its tolerance (a test's)");
+  // The first case starts from the GPU's answer: fewer iterations than
+  // from nothing (the second, on the CPU from the start, the same).
+  INFO("cold " << coldReport.iterations << ", warm " << report.iterations);
+  CHECK(report.iterations < coldReport.iterations);
+  for (size_t c = 0; c < exact->size(); ++c) {
+    double worst = 0.0;
+    for (size_t n = 0; n < (*exact)[c].displacement.size(); ++n)
+      worst = std::max(worst, glm::length((*exact)[c].displacement[n] -
+                                          (*finished)[c].displacement[n]));
+    CHECK(worst <= 1e-5 * (*exact)[c].maxDisplacement);
+  }
+  // A running job's iteration count: the GPU's, then the CPU's on top.
+  REQUIRE_FALSE(seen.empty());
+  CHECK(seen.front() == 7);
+  CHECK(std::is_sorted(seen.begin(), seen.end()));
+  CHECK(seen.back() <= report.iterations);
 }
 
 TEST_CASE("Solver: an iterative solve stops when cancelled", "[fem][solver]") {
