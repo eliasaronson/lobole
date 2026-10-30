@@ -24,6 +24,55 @@
   <url type="homepage">https://github.com/eliasaronson/lobole</url>
   <url type="bugtracker">https://github.com/eliasaronson/lobole/issues</url>
   <releases>
+    <release version="0.2.0" date="2026-10-30">
+      <description>
+        <p>Simulation past linear static: buckling, thermal, large deformation, contact and plasticity. Scans and meshes you can work with as they are.</p>
+        <ul>
+          <li>Buckling studies: the load factor at which a part loses stability, and its shape, with one governing factor that also accounts for yield, layer strength and how sensitive a curved wall is to imperfections</li>
+          <li>Thermal studies: a part's temperature from fixed temperatures, heat flows and convection, and the stress a temperature change causes in a part or across an assembly</li>
+          <li>Studies can be solved on CalculiX, which the Linux AppImage and the Flatpak now include. On Windows, install it and point Preferences, Simulation at it</li>
+          <li>Large deformation and snap-through: an arch or a curved wall pressed across its curve reports the load it snaps at, which a linear study cannot see</li>
+          <li>Contact: a part resting on the ground or on another part, with friction, reports the contact area, force and pressure</li>
+          <li>Plasticity: steel yields and hardens, a part reports its plastic strain and the shape it keeps after unloading, and an overload reports its collapse load</li>
+          <li>Static studies refine the mesh around the highest stress until it settles, and say whether it did. A stress peak right at a support's edge, which grows as the mesh gets finer, is flagged and read a short distance away instead</li>
+          <li>Pin supports that only push where the part presses on the pin, with each support's reaction moment</li>
+          <li>Every material's numbers are cited to their source, with conductivity, expansion and a service temperature. Stainless 1.4301 and a thermostatic bimetal strip are new, and brass loses its uncited yield strength. Generic aluminium is gone, because its strength and conductivity depend on the alloy: a project naming it is refused on open, naming 6061-T6 and 6082-T6 to choose from</li>
+          <li>Meshes can be kept as meshes: an STL, OBJ, PLY or glTF imports as a mesh body you can measure, section, check for printing and export. Auto chooses between that and rebuilding the true faces</li>
+          <li>Imported STLs of mechanical parts are recognised: holes, flats, cones and spheres become true faces, so a hole has a diameter and an axis, and mates on them survive a reimport</li>
+          <li>Scans can be placed: an import takes a position, rotation and scale, and the Align tool sets a scan on its floor and centres it</li>
+          <li>Fit a plane, cylinder, cone or sphere to a scan where you click, robust to noise and lumps. A datum plane or axis made from a fit refits when the scan is replaced, and parts can be mated to it and sketches drawn on it</li>
+          <li>The Cradle tool cuts a holder shaped to a scan, and booleans take a mesh as the tool</li>
+          <li>A section of a body can become a sketch, refitted every time the model rebuilds</li>
+          <li>Every import runs in the background with progress and cancel, and heavy features build without freezing the window, with one cancel rule for all of them</li>
+          <li>Disc cams: a CamProfile feature cuts a cam from a follower's motion, a contact relation drives the follower from the cam's shape, and a check reports whether the follower stays on its cam and the forces involved</li>
+          <li>Drawings can show an assembly's exploded view, and the bill of materials gives printed parts their printed weight</li>
+          <li>Projects are saved as .lob. Older .dsgn projects open and save as the .lob beside them</li>
+          <li>The MCP workflow asks an agent to run static and buckling studies on any part that carries a load before calling it done</li>
+          <li>Fixed: steel's stiffness is 210 GPa, as Eurocode 3 gives it, instead of 200 GPa. Steel parts deflect about 5 % less than before</li>
+          <li>Fixed: a slow-converging solve is no longer reported as an unconstrained model, and a model that really is unconstrained names the motion it is free in</li>
+          <li>Fixed: a study run directly uses the GPU solver as a background run does, and a GPU failure is reported instead of hidden</li>
+          <li>Fixed: a load set by a variable shows its value in the panel and on the label, instead of 0 N</li>
+          <li>Fixed: a part held by contact alone is no longer refused because the contact's stabilising springs were too stiff for it</li>
+          <li>Fixed: refining a face no longer produces false stress peaks or fails at fine sizes</li>
+          <li>Fixed: an ASCII STL or OBJ written with whole-number coordinates is read at its real precision, so it is recognised and rebuilt correctly</li>
+          <li>Fixed: the bounding box in the project state is the measured one, instead of a box several times a curved part's size</li>
+          <li>Fixed: the print check measures a long bridge on an imported STL as one span, instead of passing it triangle by triangle</li>
+          <li>Fixed: a measured box hugs a part cut by a sphere</li>
+          <li>Fixed: a small sphere cut beside a fillet on a revolved part no longer leaves a stray face</li>
+          <li>Fixed: Check geometry reports open edges, and no longer counts the seam where two tangent cylinders are joined as one</li>
+          <li>Fixed: an edge between two named faces keeps the same name from one rebuild to the next, so a fillet on it does not move</li>
+          <li>Fixed: an extrusion of a single closed spline has the right volume</li>
+          <li>Fixed: Python type checkers before mypy 2.1 accept a CamProfile spec</li>
+          <li>Fixed: an imported STL is sewn into a solid when it is closed</li>
+          <li>Fixed: a sketch projection of an imported edge follows its geometry when the import changes, and a mate on an imported face follows it when the faces are renumbered</li>
+          <li>Fixed: a damaged geometry file is refused before anything is read from it</li>
+          <li>Fixed: Fit view frames a part tightly</li>
+          <li>Fixed: the MCP server works with the current MCP SDK</li>
+          <li>Fixed: on Wayland, starting on a port already in use no longer crashes, and the app keeps answering remote requests while minimised</li>
+          <li>Fixed: curves and cam sections are drawn within their tolerance with older OpenCASCADE versions (Ubuntu 24.04)</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.5" date="2026-10-26">
       <description>
         <p>Edit faces directly, share sketches between parts, and import more formats.</p>
