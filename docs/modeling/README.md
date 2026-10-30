@@ -1029,7 +1029,7 @@ noise half a millimetre over, the same to the bit after a cold
 regeneration, read back as written with every bad kind refused, failing
 by name off the scan and on a flat, a sketch standing on the fitted top,
 and a part mated to the fitted axis standing on it; the golden
-`vNEXT-datum-from-fit` (a shaft's axis and top fitted to its own B-Rep);
+`v215-datum-from-fit` (a shaft's axis and top fitted to its own B-Rep);
 the GUI tests `fit/a_plane_picked_on_a_body_is_one_undo_step` and
 `defaults/fit_primitive`; `refused_calls_smoke.py`.
 

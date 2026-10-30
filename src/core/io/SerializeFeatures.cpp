@@ -811,13 +811,13 @@ DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
     return DatumPlaneKind::Angled;
   if (s == "through_points")
     return DatumPlaneKind::ThroughPoints;
-  if (s == "from_fit") // vNEXT
+  if (s == "from_fit") // v215
     return DatumPlaneKind::FromFit;
   throw std::runtime_error("unknown datum plane kind: " + s +
                            "; kinds: offset, angled, through_points, from_fit");
 }
 
-// vNEXT: a datum fitted to a body's triangles
+// v215: a datum fitted to a body's triangles
 // (docs/modeling/README.md#datums-on-a-scan), as {body_id, point_mm, kind,
 // tolerance_mm?}. `kinds` is what this datum accepts; anything else -- auto
 // among them, which would let a re-scan change what the datum is -- is
@@ -923,7 +923,7 @@ DatumAxisKind DatumAxisKindFromString(const std::string& s) {
     return DatumAxisKind::GlobalY;
   if (s == "global_z")
     return DatumAxisKind::GlobalZ;
-  if (s == "from_fit") // vNEXT
+  if (s == "from_fit") // v215
     return DatumAxisKind::FromFit;
   throw std::runtime_error("unknown datum axis kind: " + s +
                            "; kinds: two_points, sketch_line, global_x, "

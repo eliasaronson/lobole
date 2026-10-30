@@ -276,13 +276,13 @@ TEST_CASE("A part mated to a scan's fitted axis stands on that axis",
   CHECK(glm::length(glm::dvec3(f[2]) - s.Axis().Direction()) < 1e-12);
 }
 
-TEST_CASE("The vNEXT golden's datums are fitted on load",
+TEST_CASE("The v215 golden's datums are fitted on load",
           "[datum][fit][golden]") {
-  // tests/golden/vNEXT-datum-from-fit.json: a 10 mm shaft 30 long on the
+  // tests/golden/v215-datum-from-fit.json: a 10 mm shaft 30 long on the
   // origin, its axis and its top fitted to its own tessellation -- a datum
   // from_fit takes a B-Rep body as it takes a scan.
   auto doc = testio::Load(std::string(TestSourceDir()) +
-                          "/tests/golden/vNEXT-datum-from-fit.json");
+                          "/tests/golden/v215-datum-from-fit.json");
   REQUIRE(doc != nullptr);
   const auto& axis = *dynamic_cast<const DatumAxisFeature*>(doc->GetFeature(2));
   INFO(axis.GetError());
