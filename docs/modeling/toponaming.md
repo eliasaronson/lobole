@@ -200,7 +200,7 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   to the rim fails instead of resolving to one of the cap's outer edges. The
   other face's U name for the edge is kept as an alias
   (`ElementMap::edgeAliases`): never handed out, but resolved, so a
-  reference saved before vNEXT, when the face order chose, still finds its
+  reference saved before v216, when the face order chose, still finds its
   edge. An alias follows the edge through later operations as its name does
   (`<alias>;M<tag>`, a qualified piece), by the name it became.
 - **Primitives and rebuilt shapes** (`topo::NamePrimitiveElements`): every face

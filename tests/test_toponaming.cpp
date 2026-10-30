@@ -1120,13 +1120,13 @@ TEST_CASE("A shared edge's U name does not follow the result's face order",
       CHECK(mapB.ResolveEdge(faceName + ";U" + std::to_string(k)));
   }
 }
-TEST_CASE("The vNEXT golden's hole rim is a U name of its bore",
+TEST_CASE("The v216 golden's hole rim is a U name of its bore",
           "[toponaming][golden]") {
-  // tests/golden/vNEXT-u-name-by-fewer-edges.json: a plate with a hole, a
+  // tests/golden/v216-u-name-by-fewer-edges.json: a plate with a hole, a
   // Fillet on the top rim by the name the bore gives it (its three edges
   // against the cap's five); the cap's U name for the rim is an alias.
   auto doc = testio::Load(std::string(TestSourceDir()) +
-                          "/tests/golden/vNEXT-u-name-by-fewer-edges.json");
+                          "/tests/golden/v216-u-name-by-fewer-edges.json");
   REQUIRE(doc != nullptr);
   INFO(doc->GetFeature(2)->GetError());
   CHECK(doc->GetFeature(2)->GetError().empty());

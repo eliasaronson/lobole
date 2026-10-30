@@ -207,13 +207,13 @@ TEST_CASE("An unconstrained B-spline solves without moving",
 
 #endif // HAVE_PLANEGCS
 
-TEST_CASE("The vNEXT2 golden's closed spline is two edges and weighs its area",
+TEST_CASE("The v217 golden's closed spline is two edges and weighs its area",
           "[spline][golden]") {
-  // tests/golden/vNEXT2-closed-spline-two-edges.json: one spline fitted
+  // tests/golden/v217-closed-spline-two-edges.json: one spline fitted
   // round a 30 x 12 ellipse, padded 4 mm, its top outline filleted by the
   // two U names the cap gives its two halves.
   auto doc = testio::Load(std::string(TestSourceDir()) +
-                          "/tests/golden/vNEXT2-closed-spline-two-edges.json");
+                          "/tests/golden/v217-closed-spline-two-edges.json");
   REQUIRE(doc != nullptr);
   INFO(doc->GetFeature(2)->GetError());
   CHECK(doc->GetFeature(2)->GetError().empty());
