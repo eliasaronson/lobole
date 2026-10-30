@@ -23,6 +23,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
@@ -253,6 +254,50 @@ TEST_CASE("A glTF's nodes are placed, its metres read as mm",
   CHECK_FALSE(mesh::ReadGltf(gltf.string(), m, err));
   CHECK_THAT(err, ContainsSubstring("nodes-buffer.bin"));
   CHECK_THAT(err, ContainsSubstring(gltf.string()));
+  fs::remove(gltf);
+}
+
+TEST_CASE("A .gltf whose .bin alone changes reads the new geometry",
+          "[mesh_body][import]") {
+  // The JSON stays byte for byte; only the buffer beside it is rewritten,
+  // a 10 mm cube becoming a 20 mm one. The read cache and the chain hash
+  // both key on the import's content, which must cover the .bin.
+  scanfiles::GltfOptions g;
+  g.meshes = {Box({0, 0, 0}, {0.01, 0.01, 0.01})};
+  const auto [json, bin] = scanfiles::GltfWithBin(g, "bin-only-buffer.bin");
+  const fs::path gltf = Write("bin-only.gltf", json);
+  const fs::path binPath = gltf.parent_path() / "bin-only-buffer.bin";
+  std::ofstream(binPath, std::ios::binary) << bin;
+  CHECK(mesh::GltfExternalFiles(gltf.string()) ==
+        std::vector<std::string>{binPath.string()});
+
+  Document doc;
+  doc.AddFeature(Import(gltf, mesh::Representation::Mesh));
+  INFO(doc.GetFeature(0)->GetError());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].mesh->Volume(), WithinRel(1000.0, 1e-6));
+  const size_t before = LastImport(doc).ContentHash();
+
+  g.meshes = {Box({0, 0, 0}, {0.02, 0.02, 0.02})};
+  const auto [json2, bin2] = scanfiles::GltfWithBin(g, "bin-only-buffer.bin");
+  REQUIRE(bin2.size() == bin.size());
+  std::ofstream(binPath, std::ios::binary | std::ios::trunc) << bin2;
+  // The same size, so the stamp tells them apart by mtime alone; moved on
+  // past the filesystem clock's tick, which two writes inside one can share.
+  fs::last_write_time(binPath,
+                      fs::last_write_time(binPath) + std::chrono::seconds(2));
+  CHECK(LastImport(doc).ContentHash() != before);
+  doc.Regenerate();
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].mesh->Volume(), WithinRel(8000.0, 1e-6));
+
+  // A buffer that goes missing is a change too, and the read names it.
+  fs::remove(binPath);
+  CHECK(LastImport(doc).ContentHash() != before);
+  doc.Regenerate();
+  CHECK(doc.GetBodies().empty());
+  CHECK_THAT(doc.GetFeature(0)->GetError(),
+             ContainsSubstring("bin-only-buffer.bin"));
   fs::remove(gltf);
 }
 

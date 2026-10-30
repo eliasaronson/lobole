@@ -918,7 +918,9 @@ public:
   // sits: saving a project adopts staged imports into the project directory
   // and rewrites `path`, and with the path in the hash every Derived copy of
   // an imported part read stale after the first save (the SO-101 gripper
-  // dogfood). 0 when the file cannot be read.
+  // dogfood). A glTF's buffer files are part of it
+  // (mesh::GltfExternalFiles): a changed .bin is a changed import, and the
+  // read cache in Execute keys on this too. 0 when the file cannot be read.
   size_t ContentHash() const;
   // Display color for the imported bodies. Assembly import (I2) extracts
   // per-part .brep sidecars, which carry no color — the import plan passes
@@ -1016,8 +1018,15 @@ private:
 
   std::unique_ptr<CADKernel::ImportedModel> m_seed;
 
+  // What the cached hash was read from: the file and every file it reads
+  // besides (a glTF's buffers), each by size + mtime.
+  struct FileStamp {
+    std::string path;
+    uintmax_t size = 0;
+    long long mtime = 0;
+    bool operator==(const FileStamp&) const = default;
+  };
   mutable std::string m_hashPath;
-  mutable uintmax_t m_hashSize = 0;
-  mutable long long m_hashMtime = 0;
+  mutable std::vector<FileStamp> m_hashStamps;
   mutable size_t m_hashValue = 0;
 };

@@ -90,7 +90,7 @@ the recipe, and each regeneration reads it.
 - **The chain hash keys on the file's bytes**, not its path
   (`ImportFeature::ContentHash`, cached by path + size + mtime), so moving a
   staged file into the project on save does not invalidate anything built on
-  it.
+  it. A glTF's buffer files are hashed with it ([PLY and glTF](#ply-and-gltf)).
 - **Editing an import.** An import has no history to edit, so it is changed
   by the direct edits after it: Delete, Offset, Move and Replace Face
   ([modeling](../modeling/README.md#direct-edit)) — a hole moved or filled,
@@ -382,8 +382,14 @@ off, so it would read nowhere there.
   re-export uncompressed. A skinned mesh (posed by its joints) and one
   shown blended with a morph target are refused too: what a viewer draws
   of them is not the positions stored.
-- The import's file hash is the `.gltf`'s own bytes, not its buffers'
-  (`ImportFeature::ContentHash`).
+- **Its buffers are part of the import's content.** A `.gltf` reads its
+  `.bin` (and any other buffer named by a relative uri) from beside it, so
+  `ImportFeature::ContentHash` hashes those files' bytes with its own
+  (`mesh::GltfExternalFiles`, resolved as cgltf resolves them) and stamps
+  each by size and mtime: a `.bin` rewritten alone, or gone, is a changed
+  import, and the chain hash and the one-entry read cache in `Execute`,
+  which both key on it, read the file again rather than keep the old
+  triangles. An embedded (`data:`) buffer is in the JSON already.
 
 **Counting**, before the read: a PLY's face element count from its header
 (a polygon counted once), a glTF's triangles from its accessors over the
@@ -393,7 +399,8 @@ checks the true count against what a mesh body holds again.
 Checked by `tests/test_mesh_scan_import.cpp` (each PLY encoding to the same
 body, quads fanned, a uniform colour kept and a varied one warned of, every
 representation of a PLY and a GLB, nodes placed and mirrored, a `.gltf`
-with its `.bin` and without it, each refusal, a cancel), by the round trip
+with its `.bin` and without it, a `.bin` changed alone read again,
+each refusal, a cancel), by the round trip
 of our own `export_visual` in `tests/test_cadkernel.cpp`, by the reader
 fuzz's `meshes` family, and by `headless_smoke.py` (both formats in each
 representation through `import_step`). The files the tests read are

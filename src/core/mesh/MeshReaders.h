@@ -85,4 +85,12 @@ bool ReadGltf(const std::string& path, TriMesh& out, std::string& error,
 std::optional<uint64_t> CountPlyFaces(const std::string& path);
 std::optional<uint64_t> CountGltfTriangles(const std::string& path);
 
+// The files a glTF reads besides itself: each buffer named by a relative
+// uri, resolved beside it as cgltf_load_buffers resolves it. An embedded
+// (data:) buffer and a .glb's own chunk are not files. Empty when the JSON
+// cannot be parsed; the read then refuses it. The import's content hash
+// covers these (ImportFeature::ContentHash), so a changed .bin is a changed
+// import.
+std::vector<std::string> GltfExternalFiles(const std::string& path);
+
 } // namespace mesh

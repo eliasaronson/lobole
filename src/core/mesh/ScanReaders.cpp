@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <set>
@@ -692,6 +693,31 @@ std::optional<uint64_t> CountGltfTriangles(const std::string& path) {
       triangles += PrimitiveTriangles(prim.type, n);
     }
   return triangles;
+}
+
+std::vector<std::string> GltfExternalFiles(const std::string& path) {
+  cgltf_options options{};
+  cgltf_data* raw = nullptr;
+  if (cgltf_parse_file(&options, path.c_str(), &raw) != cgltf_result_success) {
+    cgltf_free(raw);
+    return {};
+  }
+  GltfData data(raw);
+  std::vector<std::string> files;
+  for (cgltf_size i = 0; i < data->buffers_count; i++) {
+    const char* uri = data->buffers[i].uri;
+    // A .glb's own chunk has no uri; an embedded one is data:, and anything
+    // with a scheme cgltf_load_buffers refuses. The rest it reads from beside
+    // the file, the uri percent-decoded, as resolved here.
+    if (uri == nullptr || std::strncmp(uri, "data:", 5) == 0 ||
+        std::strstr(uri, "://") != nullptr)
+      continue;
+    std::string decoded(uri);
+    decoded.resize(cgltf_decode_uri(decoded.data()));
+    files.push_back(
+        (std::filesystem::path(path).parent_path() / decoded).string());
+  }
+  return files;
 }
 
 } // namespace mesh

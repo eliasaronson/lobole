@@ -281,29 +281,59 @@ bool ImportFeature::TakesUnits(const std::string& path) {
 }
 
 size_t ImportFeature::ContentHash() const {
-  std::error_code ec;
-  const std::filesystem::path fp(path);
-  const uintmax_t size = std::filesystem::file_size(fp, ec);
-  if (ec)
+  // Stamped: absent files carry a size of -1, so one appearing is a change.
+  const auto stampOf = [](const std::string& p) {
+    std::error_code ec;
+    FileStamp st{p, static_cast<uintmax_t>(-1), 0};
+    const uintmax_t size = std::filesystem::file_size(p, ec);
+    if (ec)
+      return st;
+    const auto mtime = std::filesystem::last_write_time(p, ec);
+    if (ec)
+      return st;
+    st.size = size;
+    st.mtime = mtime.time_since_epoch().count();
+    return st;
+  };
+  const FileStamp own = stampOf(path);
+  if (own.size == static_cast<uintmax_t>(-1))
     return 0;
-  const auto mtime = std::filesystem::last_write_time(fp, ec);
-  if (ec)
+  if (m_hashValue != 0 && m_hashPath == path && !m_hashStamps.empty() &&
+      m_hashStamps[0] == own) {
+    bool same = true;
+    for (size_t i = 1; i < m_hashStamps.size() && same; i++)
+      same = stampOf(m_hashStamps[i].path) == m_hashStamps[i];
+    if (same)
+      return m_hashValue;
+  }
+  const auto readAll = [](const std::string& p, std::string& bytes) {
+    std::ifstream in(p, std::ios::binary);
+    if (!in)
+      return false;
+    bytes.assign(std::istreambuf_iterator<char>(in),
+                 std::istreambuf_iterator<char>());
+    return true;
+  };
+  std::string bytes;
+  if (!readAll(path, bytes))
     return 0;
-  const long long stamp = mtime.time_since_epoch().count();
-  if (m_hashValue != 0 && m_hashPath == path && m_hashSize == size &&
-      m_hashMtime == stamp)
-    return m_hashValue;
-  std::ifstream in(fp, std::ios::binary);
-  if (!in)
-    return 0;
-  std::string bytes((std::istreambuf_iterator<char>(in)),
-                    std::istreambuf_iterator<char>());
   size_t h = std::hash<std::string>{}(bytes);
+  std::vector<FileStamp> stamps{own};
+  // A glTF reads its buffers from beside it: their bytes are the geometry,
+  // so they are the import's content as much as the JSON is.
+  if (interchange::FormatOf(path) == interchange::ImportFormat::Gltf)
+    for (const std::string& dep : mesh::GltfExternalFiles(path)) {
+      stamps.push_back(stampOf(dep));
+      std::string depBytes;
+      const size_t dh = readAll(dep, depBytes)
+                            ? std::hash<std::string>{}(depBytes)
+                            : size_t{0x9e3779b97f4a7c15ull}; // absent
+      h ^= dh + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+    }
   if (h == 0)
     h = 1; // 0 means "unreadable"
   m_hashPath = path;
-  m_hashSize = size;
-  m_hashMtime = stamp;
+  m_hashStamps = std::move(stamps);
   m_hashValue = h;
   return h;
 }
