@@ -593,15 +593,28 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
                     " its printed precision accounts for, so the deck and "
                     "the study it was written from differ");
       // That floor is wide: rounding is high-frequency noise, which K
-      // amplifies. The energy balance is not: u . (K u - f) moves by
-      // delta . f under rounding delta, first order in the precision, and
-      // first order in any difference between the deck and the study.
+      // amplifies. The energy balance is not: under rounding delta,
+      // u . (K u - f) moves by delta . f + delta . K delta -- first order in
+      // the precision, and first order in any difference between the deck
+      // and the study -- plus the second-order term, which is what a soft
+      // part shows: a 0.5 mm bent sheet stores little energy for how stiff
+      // its elements are, and the exact answer rounded to the 7 digits ccx
+      // prints read 8e-6 against a first-order floor of 2e-6
+      // (docs/simulation/README.md#reading-the-answer-back). The first
+      // term is bounded, |delta . f| <= p |u| . |f|; the second is a sum
+      // over K's entries of independent roundings, whose cross terms
+      // average out: its size is the diagonal's, p^2 sum K_ii u_i^2. (Every
+      // entry's |K_ij| |u_i| |u_j| bounds it too, but forty neighbours a
+      // row over, which let a deck 0.1 % stiffer than the study through.)
       const double work = u.dot(F);
       const double energy =
           work != 0.0 ? std::abs(u.dot(K * u - F)) / std::abs(work) : 0.0;
+      const double p = options.givenPrecision;
       const double energyFloor =
-          work != 0.0 ? 4.0 * options.givenPrecision *
-                            u.cwiseAbs().dot(F.cwiseAbs()) / std::abs(work)
+          work != 0.0 ? 4.0 *
+                            (p * u.cwiseAbs().dot(F.cwiseAbs()) +
+                             p * p * u.cwiseAbs2().dot(K.diagonal())) /
+                            std::abs(work)
                       : 0.0;
       if (!(energy <= 1e-6 + energyFloor))
         return fail("the answer from " + who +

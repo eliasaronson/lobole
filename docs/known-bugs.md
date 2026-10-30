@@ -236,27 +236,6 @@ the heading if it is not here yet.
   by the loop itself on Wayland, skipping the frame while the last one has
   not been shown.
 
-## Simulation
-
-### CalculiX does not balance the in-house stiffness on a thin bent sheet
-
-- **Symptom:** a linear static study of the tea alarm's clip (0.5 mm
-  1.4301 sheet, two 90 degree bends at R 0.75, meshed at 0.5 mm with the
-  bends at 0.25) solved on CalculiX is refused: "|u . (K u - f)| / |u . f|
-  = 0.000042, above 1e-6 plus the 0.000002 its printed precision accounts
-  for, so the deck and the study it was written from differ". The same
-  study in-house solves, and its tip moves within 1 % of beam theory.
-- **Cause:** not found. The likeliest is an element ccx integrates
-  differently from the in-house code: a tet10 whose curved midside nodes
-  on a bend's tight cylinder distort it (the in-house code integrates
-  |det J|; ccx refuses a negative one, but a small positive one it
-  integrates as it is).
-- **Where:** the energy check in `src/core/fem/Calculix.cpp`; the mesh
-  from `src/core/fem/FemMesher.cpp`.
-- **Likely fix:** report the worst element's Jacobian ratio with the
-  refusal, and refuse (or re-mesh straight-sided) elements below a bound
-  before either solver sees them.
-
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

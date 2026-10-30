@@ -3222,3 +3222,111 @@ TEST_CASE("a steel and brass strip bonded in an assembly curls as "
   }
 }
 #endif // HAVE_NETGEN
+
+#ifdef HAVE_NETGEN
+TEST_CASE("an exact answer printed to ccx's seven digits balances a thin bent "
+          "sheet's stiffness, and a deck that differs still does not",
+          "[fem][calculix]") {
+  // A 0.5 mm 1.4301 sheet with a 90 degree bend at R 0.75 (1.5 t), each
+  // leg 20 mm, meshed at its thickness and its bend at half: a soft part,
+  // little energy for how stiff its elements are. Its exact answer
+  // rounded to the seven digits ccx prints read 8e-6 on the energy check,
+  // whose floor counted only rounding's first-order term (2e-6): it was
+  // refused as "the deck and the study differ", and so was the tea
+  // alarm's clip on CalculiX, whose answer was right.
+  constexpr double t = 0.5, Ri = 1.5 * t, Ro = Ri + t, W = 6.0, Lg = 20.0;
+  Document doc;
+  auto a = std::make_unique<BoxFeature>("A", glm::dvec3(-Lg, 0, 0), Lg, W, t);
+  a->SetMaterial("stainless_steel");
+  doc.AddFeature(std::move(a));
+  uint64_t solid = doc.GetFeature(0)->GetId();
+  const auto add = [&](std::unique_ptr<Feature> f) {
+    doc.AddFeature(std::move(f));
+    return doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  };
+  const uint64_t co = add(std::make_unique<CylinderFeature>(
+      "Co", glm::dvec3(0, -1, Ro), glm::dvec3(0, 1, 0), Ro, W + 2));
+  const uint64_t ci = add(std::make_unique<CylinderFeature>(
+      "Ci", glm::dvec3(0, -2, Ro), glm::dvec3(0, 1, 0), Ri, W + 4));
+  const uint64_t ring = add(
+      std::make_unique<BooleanFeature>("Ring", co, ci, BooleanOp::Subtract));
+  const uint64_t q =
+      add(std::make_unique<BoxFeature>("Q", glm::dvec3(0, 0, 0), Ro, W, Ro));
+  const uint64_t bend = add(
+      std::make_unique<BooleanFeature>("Bend", ring, q, BooleanOp::Intersect));
+  solid = add(
+      std::make_unique<BooleanFeature>("AB", solid, bend, BooleanOp::Union));
+  const uint64_t legB =
+      add(std::make_unique<BoxFeature>("B", glm::dvec3(Ri, 0, Ro), t, W, Lg));
+  solid = add(
+      std::make_unique<BooleanFeature>("Sheet", solid, legB, BooleanOp::Union));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Bent");
+  s.meshSize = t;
+  s.converge = fem::ConvergeMode::Never;
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Fixed,
+                             FaceWhere(body, "plane", [&](const glm::dvec3& c) {
+                               return std::abs(c.x + Lg) < 1e-6;
+                             })));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Force,
+                             FaceWhere(body, "plane",
+                                       [&](const glm::dvec3& c) {
+                                         return std::abs(c.z - (Ro + Lg)) <
+                                                1e-6;
+                                       }),
+                             0.5, glm::dvec3(-1, 0, 0)));
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, index);
+    if (info && info->kind == "cylinder")
+      s.refinements.push_back({ElementRef{body.createdBy, name}, t / 2, ""});
+  }
+  REQUIRE(s.refinements.size() == 2);
+  const fem::StudyJobInput in = Meshed(doc, s);
+  const fem::StudyJobBody& jb = in.bodies[0];
+  const std::vector<fem::Material> mats{jb.mat};
+  fem::Supports sup;
+  sup.fixedNodes = jb.fixedNodes;
+  const auto printed = [&](double stiffer) {
+    std::vector<fem::Material> m = mats;
+    m[0].youngMPa *= stiffer;
+    fem::SolveOptions direct;
+    direct.iterativeAboveDofs = 1 << 30;
+    std::string err;
+    auto exact = fem::SolveCases(jb.mesh, m, sup, {jb.faceLoads}, &err,
+                                 glm::dvec3(0), direct);
+    REQUIRE(exact);
+    std::vector<glm::dvec3> u = exact->front().displacement;
+    for (glm::dvec3& d : u)
+      for (int k = 0; k < 3; ++k) {
+        char buf[40];
+        std::snprintf(buf, sizeof(buf), "%.6E", d[k]); // ccx's E13.6
+        d[k] = std::atof(buf);
+      }
+    return u;
+  };
+  const auto check = [&](const std::vector<glm::dvec3>& u, std::string* err,
+                         fem::SolveReport* rep) {
+    fem::SolveOptions o;
+    o.given = std::make_shared<const std::vector<std::vector<glm::dvec3>>>(
+        std::vector<std::vector<glm::dvec3>>{u});
+    o.givenPrecision = fem::kCalculixDatPrecision;
+    o.givenName = "the printed answer";
+    return fem::SolveCases(jb.mesh, mats, sup, {jb.faceLoads}, err,
+                           glm::dvec3(0), o, rep)
+        .has_value();
+  };
+  std::string err;
+  fem::SolveReport rep;
+  const bool ok = check(printed(1.0), &err, &rep);
+  INFO(err);
+  std::printf("calculix: thin bent sheet, %zu nodes: the exact answer printed "
+              "to seven digits balances to %.2e\n",
+              jb.mesh.nodes.size(), rep.worstEnergyResidual);
+  CHECK(ok);
+  CHECK(rep.worstEnergyResidual > 2e-6); // past the first-order floor alone
+  // The control: an answer from a material 0.1 % stiffer than the study's.
+  CHECK_FALSE(check(printed(1.001), &err, nullptr));
+  CHECK_THAT(err, ContainsSubstring("does not balance"));
+}
+#endif

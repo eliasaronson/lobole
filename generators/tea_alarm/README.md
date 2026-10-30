@@ -219,8 +219,11 @@ R 7.2 former 218.7 mm from the foot, then the run, cut 239.0 mm.
   its thickness and its bends at half of it, moves the tip 3.083 mm
   against the wall's 3.113 (−0.95 %); peak 187 MPa against 1.4301's 230
   (beam theory 153 at the root; the peak is in the bend). The same study
-  on CalculiX is refused, its answer not balancing the in-house stiffness
-  to 4e-5 ([known bugs](../../docs/known-bugs.md#calculix-does-not-balance-the-in-house-stiffness-on-a-thin-bent-sheet)).
+  on CalculiX moves the tip the same 3.083 mm; it was refused, its answer
+  balancing the in-house stiffness only to 4.2e-5, and that was our check's
+  bug: the seven digits ccx prints leave a second-order term on a part
+  this soft that its floor did not count
+  ([reading the answer back](../../docs/simulation/README.md#reading-the-answer-back)).
 - **The contact study** (the `clip on the rim` assembly): the clip meshed,
   its inner leaf held where the rod clamps it, its jaw (the outer leaf's
   tip) pressed onto the vessel's curved outside by the grip, frictionless,

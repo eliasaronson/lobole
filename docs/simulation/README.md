@@ -1254,11 +1254,21 @@ exact answer, `‖|K| |u|‖ · 5e-7 / ‖f‖`. That floor is wide: seven digit
 are rounding noise of high frequency, which K amplifies, and an exact answer
 printed so leaves `‖Ku − f‖ / ‖f‖` of 1e-4 to 1 (measured below), so the norm
 alone could not tell a wrong deck from rounding. The check that can is the
-**energy balance**, `|u · (Ku − f)| ≤ 1e-6 |u · f|` plus `4 · 5e-7 · Σ|u||f|`
-over `|u · f|`: rounding moves it by `δ · f`, first order in the precision,
-and a deck that differs from the study moves it first order in the
-difference. A deck whose material is 0.1 % stiffer than the study's is
-refused by it (`[calculix]`). A direction the study holds that the answer
+**energy balance**, `|u · (Ku − f)| ≤ 1e-6 |u · f|` plus `4 (p |u| · |f| +
+p² Σ K_ii u_i²)` over `|u · f|`, p = 5e-7: rounding δ moves it by `δ · f +
+δ · K δ`, first order in the precision plus a second-order term (a sum of
+independent roundings, whose cross terms average out, so its size is the
+diagonal's), and a deck
+that differs from the study moves it first order in the difference. The
+second-order term is what a soft part shows: a 0.5 mm bent sheet stores
+little energy for how stiff its elements are, and the exact in-house answer
+rounded to ccx's seven digits read 8e-6 against the first-order floor of
+2e-6 alone -- which is how the tea alarm's clip was refused on CalculiX,
+whose answer was right (its energy residual 4.2e-5 is inside the floor
+now, and its tip moves the in-house 3.083 mm). The same rounding is in the
+stress recomputed from U: on that bent sheet the peak von Mises from ccx's
+U reads 4.6e-4 off the in-house one, where a chunky part agrees to 1e-6. A deck whose material is 0.1 % stiffer than the
+study's is still refused by it (`[calculix]`). A direction the study holds that the answer
 moves is refused too. Then stresses, reactions, the support-edge flag,
 the largest principal stress, printed layers and probes are computed by the
 code an in-house answer goes through. A deck that differs from the study (a
