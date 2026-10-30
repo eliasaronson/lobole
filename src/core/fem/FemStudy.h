@@ -384,7 +384,7 @@ struct Study {
   // Static only: solved past linear, on CalculiX (v208).
   Nonlinear nonlinear;
 
-  // Static only: thermal expansion under a temperature field (vNEXT).
+  // Static only: thermal expansion under a temperature field (v212).
   ThermalLoad thermalLoad;
 
   // Transient: the most recent mesh/solve error (dangling ref, no fixed

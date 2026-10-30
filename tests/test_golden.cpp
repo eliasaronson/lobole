@@ -1118,7 +1118,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   // converge. A study read back as static would answer a factor of safety
   // where a buckling factor was asked for; each [study name, analysis,
   // num_modes, converge] must hold, the default number of factors included.
-  // vNEXT: a thermal study and a static study's thermal_load. A thermal
+  // v212: a thermal study and a static study's thermal_load. A thermal
   // study read back as static would answer a stress where a temperature was
   // asked for; each [study name, analysis, load count, thermal_load kind]
   // must hold, and every thermal load keep its quantities.

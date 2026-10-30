@@ -123,7 +123,7 @@ json StudyToJson(const fem::Study& s) {
       n["deflection_limit_mm"] = nl.deflectionLimitMm;
     j["nonlinear"] = std::move(n);
   }
-  // A thermal load (vNEXT): absent without one.
+  // A thermal load (v212): absent without one.
   if (s.thermalLoad.On()) {
     const fem::ThermalLoad& tl = s.thermalLoad;
     json t = json::object();
@@ -196,7 +196,7 @@ json StudyToJson(const fem::Study& s) {
         lj["fix_rotation"] = true;
       if (l.type == fem::LoadType::Contact && l.friction != 0.0) // v209
         lj["friction"] = l.friction;
-      // A thermal load's quantities (vNEXT), each only where given.
+      // A thermal load's quantities (v212), each only where given.
       const auto given = [&](const char* key, double v) {
         if (!std::isnan(v))
           lj[key] = v;
@@ -446,7 +446,7 @@ fem::Study StudyFromJson(const json& j) {
     // Without large_deformation, refused below unless the study has a
     // contact (NonlinearRefusal).
   }
-  if (j.contains("thermal_load")) { // vNEXT
+  if (j.contains("thermal_load")) { // v212
     const json& t = j.at("thermal_load");
     readctx::RefuseUnknownKeys(t, {"from_study", "uniform_c", "stress_free_c"},
                                "study thermal_load");
@@ -615,7 +615,7 @@ fem::Study StudyFromJson(const json& j) {
     if (lj.contains("region")) // v183
       l.region =
           LoadRegionFromJson(lj.at("region"), "load " + std::to_string(l.id));
-    // A thermal load's quantities (vNEXT), each its own type's.
+    // A thermal load's quantities (v212), each its own type's.
     const auto thermalKey = [&](const char* key, fem::LoadType type1,
                                 fem::LoadType type2, double& into) {
       if (!lj.contains(key))
@@ -889,7 +889,7 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
     out["max_residual_displacement"] = r.maxResidualDisplacement;
     out["max_residual_at"] = Vec3ToJson(r.maxResidualAt);
   }
-  // vNEXT: a thermal result's temperature (C) and heat flux (W/m^2).
+  // v212: a thermal result's temperature (C) and heat flux (W/m^2).
   if (!r.temperature.empty())
     out["temperature"] = w.F32(r.temperature);
   if (!r.heatFlux.empty())
@@ -962,7 +962,7 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
     if (j.contains("max_residual_at"))
       r.maxResidualAt = Vec3FromJson(j.at("max_residual_at"));
   }
-  if (j.contains("temperature")) // vNEXT
+  if (j.contains("temperature")) // v212
     r.temperature = f.Reals(j.at("temperature"), "temperature");
   if (j.contains("heat_flux"))
     r.heatFlux = f.Vec3s(j.at("heat_flux"), "heat_flux");
@@ -1081,7 +1081,7 @@ void CheckBody(const fem::StudyBodyResult& b, const std::string& what) {
 namespace {
 
 // What a buckling body's result says beyond its modes (v207).
-// A thermal body's summary (vNEXT): what was read off its field.
+// A thermal body's summary (v212): what was read off its field.
 json ThermalToJson(const fem::StudyBodyResult::Thermal& t) {
   json j = {{"max_c", t.maxC},
             {"max_at", Vec3ToJson(t.maxAt)},
@@ -1576,7 +1576,7 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
     }
     if (b.buckling.solved)
       bj["buckling"] = BucklingToJson(b.buckling);
-    if (b.thermal.solved || b.thermal.load) // vNEXT
+    if (b.thermal.solved || b.thermal.load) // v212
       bj["thermal"] = ThermalToJson(b.thermal);
     if (b.nonlinear.solved)
       bj["nonlinear"] = NonlinearToJson(b.nonlinear);
@@ -1742,7 +1742,7 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
                                  "result's");
       b.contacts = ContactsFromJson(bj.at("contacts"), what);
     }
-    if (bj.contains("thermal")) { // vNEXT
+    if (bj.contains("thermal")) { // v212
       if (kind != "thermal" && kind != "static")
         throw std::runtime_error(what + ": body '" + b.bodyName +
                                  "' carries a thermal summary, which is a "
