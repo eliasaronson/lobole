@@ -283,8 +283,9 @@ At W = 120 on K5 PLA on the P1S:
     bore), the camshaft's crank end (the shaft on its bushings, each a pin
     over the bushing's whole bore, since each is pressed on over flange
     and sleeve) and the left bushing (held on its bore, the wall's answer
-    on its sleeve: the other way round, its pin contact does not settle,
-    [known bugs](../../docs/known-bugs.md#a-pin-on-a-short-sleeve-does-not-settle-when-the-load-tilts-the-part)).
+    on its sleeve: the other way round, chosen while a pin over its
+    sleeve did not settle under the tilt; it does now,
+    [pin supports](../../docs/simulation/README.md#pin-supports)).
     With `--converge never` at the generator's meshes:
 
     | part | yield (headline) | across the layers | factor, away from the pins' edges | breaks at | at the pin's breaking load |
@@ -487,11 +488,12 @@ And with the drawings (phase 5):
 
 And with the crank end sized for a lean:
 
-- Logged, not fixed: the left bushing on a pin over its sleeve, loaded
-  through its bore by the lean, does not settle, the tilt seemingly
-  cycling its contact
-  ([known bugs](../../docs/known-bugs.md#a-pin-on-a-short-sleeve-does-not-settle-when-the-load-tilts-the-part));
-  the study holds it the other way round.
+- Fixed since: the left bushing on a pin over its sleeve, loaded through
+  its bore by the lean, did not settle, the tilt cycling its contact
+  between the sleeve's two ends; the contact set now moves one side at a
+  time where it cycles
+  ([pin supports](../../docs/simulation/README.md#pin-supports)). The
+  study still holds it the other way round, as it was built.
 
 `tests/contact_loop_smoke.py` builds this mechanism with this code and
 holds the app to each.

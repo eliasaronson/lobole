@@ -293,26 +293,6 @@ the heading if it is not here yet.
   refusal, and refuse (or re-mesh straight-sided) elements below a bound
   before either solver sees them.
 
-### A pin on a short sleeve does not settle when the load tilts the part
-
-- **Symptom:** the woodcutter's left bushing (a Ø14.8 x 6.2 mm sleeve
-  under a 2 mm flange), on a `pin` over its sleeve and loaded through its
-  bore by a remote force 22 mm off the sleeve's middle (35 N), is refused:
-  "the pins' contact did not settle: it still pulls on the part" at a
-  1.6 mm mesh, "did not settle in 30 iterations" at 1.2 mm. The same force
-  through the sleeve's middle (no tilt) solves in 3 s, and so does the same
-  statics held the other way round: a pin over its bore, the reaction on
-  its sleeve (what generators/woodcutter does). The woodcutter's camshaft,
-  on pins over its two bushings' bores and leaned on at the crank, solves
-  at its generator's mesh and fails its first `converge` refinement the
-  same way ("did not settle in 30 iterations").
-- **Cause:** not found. The tilt presses the sleeve at its two ends on
-  opposite sides; the facet-wise contact set seems to cycle between them.
-- **Where:** `SolveWithPins` in `src/core/fem/FemStudy.cpp`.
-- **Likely fix:** first a regression case (a short tube pinned on its
-  outside, a remote load off its end); then see whether the set cycles or
-  ends on a pull above the thousandth.
-
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

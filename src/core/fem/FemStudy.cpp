@@ -2271,7 +2271,14 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
   }
   const double scale = glm::length(hi - lo);
 
-  constexpr int kMaxContactIterations = 30;
+  // Each iteration changes the set, and a repeat ends it (below): the cap
+  // is a guard, the undamped iterations and then one per pin facet.
+  size_t pinFacets = 0;
+  for (const PinState& ps : pins)
+    pinFacets += ps.pin->tris.size();
+  constexpr int kUndampedIterations = 30;
+  const int kMaxContactIterations =
+      kUndampedIterations + static_cast<int>(pinFacets);
   std::vector<FemResults> out;
   for (size_t k = 0; k < rhs.size(); ++k) {
     for (PinState& ps : pins)
@@ -2279,6 +2286,9 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
     const std::string inCase =
         rhs.size() > 1 ? " in load case " + std::to_string(k + 1) : "";
     bool settled = false, finalPass = false;
+    // Whether the set moves one side at a time (below); from the first
+    // repeat, or after kUndampedIterations.
+    bool damped = false;
     std::vector<std::vector<char>> seen;
     {
       std::vector<char> state;
@@ -2350,6 +2360,28 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
       const double tolU = 1e-9 * std::max(res.maxDisplacement, 1e-300);
       bool changed = false;
       double pushed = 0.0, pulled = 0.0;
+      // Every facet that pulls lets go and every one the part moves into is
+      // taken back, in one step: fast where the contact is one patch (a
+      // lug's bore). Where that cycles, or has not settled in
+      // kUndampedIterations, the set moves one side at a time
+      // (docs/simulation/README.md#pin-supports): while any facet pulls,
+      // those pulling at least half as hard as the worst let go and none is
+      // taken back; once none pulls, every facet the part moves into is
+      // taken back. A short bushing leaned on 22 mm off its middle, pressed
+      // at its two ends on opposite sides, cycled undamped and never
+      // settled.
+      double maxPull = 0.0;
+      for (const PinState& ps : pins)
+        for (size_t f = 0; f < ps.pin->tris.size(); ++f) {
+          if (!ps.active[f])
+            continue;
+          double push = 0.0;
+          for (int v : mesh.boundary[ps.pin->tris[f]].nodes)
+            push += glm::dot(res.nodeReaction[v], ps.frame[ps.slot.at(v)][0]);
+          maxPull = std::max(maxPull, -push);
+        }
+      const bool anyPull = maxPull > tolR;
+      const double letGo = damped ? std::max(tolR, 0.5 * maxPull) : tolR;
       for (PinState& ps : pins)
         for (size_t f = 0; f < ps.pin->tris.size(); ++f) {
           const auto& tri = mesh.boundary[ps.pin->tris[f]];
@@ -2365,10 +2397,11 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
           }
           if (finalPass)
             continue;
-          if (ps.active[f] && push < -tolR) {
+          if (ps.active[f] && push < -letGo) {
             ps.active[f] = 0;
             changed = true;
-          } else if (!ps.active[f] && into / 6.0 < -tolU) {
+          } else if ((!damped || !anyPull) && !ps.active[f] &&
+                     into / 6.0 < -tolU) {
             ps.active[f] = 1;
             changed = true;
           }
@@ -2381,6 +2414,13 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
         std::vector<char> state;
         for (const PinState& ps : pins)
           state.insert(state.end(), ps.active.begin(), ps.active.end());
+        bool repeat = false;
+        for (const auto& old : seen)
+          repeat = repeat || old == state;
+        if (!damped && (repeat || it + 1 >= kUndampedIterations)) {
+          damped = true;
+          seen.clear();
+        }
         for (size_t h = 0; h < seen.size(); ++h)
           if (seen[h] == state) {
             for (size_t q = h; q < seen.size(); ++q)

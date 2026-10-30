@@ -484,3 +484,101 @@ TEST_CASE("a pinned study solves iteratively as it does directly, and the "
   CHECK_THAT(iterative.maxVonMises, WithinRel(direct.maxVonMises, 1e-4));
 }
 #endif // HAVE_NETGEN
+
+#ifdef HAVE_NETGEN
+namespace {
+// A flanged bushing: a sleeve of diameter `od` and length `len` along +z
+// from z = 0, a flange of diameter `fd` and thickness `ft` above it, and a
+// bore of diameter `bd` through both.
+struct Bushing {
+  Document doc;
+  ElementRef sleeve, bore;
+};
+std::unique_ptr<Bushing> MakeBushing(double od, double len, double fd,
+                                     double ft, double bd,
+                                     const char* material) {
+  auto b = std::make_unique<Bushing>();
+  Document& doc = b->doc;
+  auto sleeve = std::make_unique<CylinderFeature>(
+      "Sleeve", glm::dvec3(0), glm::dvec3(0, 0, 1), od / 2, len);
+  sleeve->SetMaterial(material);
+  doc.AddFeature(std::move(sleeve));
+  const uint64_t s = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Flange", glm::dvec3(0, 0, len), glm::dvec3(0, 0, 1), fd / 2, ft));
+  const uint64_t f = doc.GetFeature(1)->GetId();
+  doc.AddFeature(
+      std::make_unique<BooleanFeature>("Join", s, f, BooleanOp::Union));
+  const uint64_t j = doc.GetFeature(2)->GetId();
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::dvec3(0, 0, -1), glm::dvec3(0, 0, 1), bd / 2, len + ft + 2));
+  const uint64_t h = doc.GetFeature(3)->GetId();
+  doc.AddFeature(
+      std::make_unique<BooleanFeature>("Bore", j, h, BooleanOp::Subtract));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, index);
+    REQUIRE(info.has_value());
+    if (info->kind != "cylinder")
+      continue;
+    const double r = std::hypot(info->centroid.x, info->centroid.y);
+    (void)r;
+    if (std::abs(info->radius - od / 2) < 1e-6)
+      b->sleeve = {body.createdBy, name};
+    else if (std::abs(info->radius - bd / 2) < 1e-6)
+      b->bore = {body.createdBy, name};
+  }
+  REQUIRE_FALSE(b->sleeve.name.empty());
+  REQUIRE_FALSE(b->bore.name.empty());
+  return b;
+}
+} // namespace
+
+TEST_CASE("a short sleeve on a pin, leaned on off its end, settles on its "
+          "two ends",
+          "[fem][pin]") {
+  // The woodcutter's left bushing: a 14.8 x 6.2 mm sleeve under a 2 mm
+  // flange, on a pin over its sleeve held from turning, loaded through its
+  // bore by 35 N 22 mm off the sleeve's middle. The load tilts it, pressing
+  // the sleeve at its two ends on opposite sides; the contact set once
+  // cycled between them and never settled ("did not settle in 30
+  // iterations" at 1.6 mm, and in 131 it ended still pulling).
+  constexpr double P = 35.0, off = 22.0;
+  for (const double h : {1.6}) {
+    auto b = MakeBushing(14.8, 6.2, 20.0, 2.0, 8.0, "pla");
+    Document& doc = b->doc;
+    fem::Study& s = doc.AddStudy("Bushing");
+    s.meshSize = h;
+    s.converge = fem::ConvergeMode::Never;
+    const fem::Load pin = Support(doc, fem::LoadType::Pin, b->sleeve, true);
+    s.loads.push_back(pin);
+    fem::Load r;
+    r.id = doc.AllocateId();
+    r.type = fem::LoadType::Remote;
+    r.face = b->bore;
+    r.magnitude = P;
+    r.direction = glm::dvec3(1, 0, 0);
+    r.point = glm::dvec3(0, 0, 3.1 + off);
+    r.hasPoint = true;
+    s.loads.push_back(r);
+    fem::StudyRuntime rt;
+    std::string err;
+    const bool ok = fem::RunStudy(doc, s, rt, &err);
+    INFO("mesh " << h << " mm: " << err);
+    REQUIRE(ok);
+    const fem::FemResults::SupportReaction* sr =
+        ReactionOf(rt.bodies[0].results, pin.id);
+    REQUIRE(sr != nullptr);
+    std::printf("pin: bushing at %.1f mm, reaction (%.4f, %.4f, %.4f) N, "
+                "pressing over %.2f of %.2f mm^2\n",
+                h, sr->forceN.x, sr->forceN.y, sr->forceN.z, sr->contactAreaMm2,
+                sr->faceAreaMm2);
+    // The pin answers the load, and presses on part of the sleeve only.
+    CHECK_THAT(sr->forceN.x, WithinRel(-P, 1e-3));
+    CHECK(std::abs(sr->forceN.y) < 1e-3 * P);
+    CHECK(sr->contactAreaMm2 > 0.0);
+    CHECK(sr->contactAreaMm2 < 0.5 * sr->faceAreaMm2);
+  }
+}
+#endif

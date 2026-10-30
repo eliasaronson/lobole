@@ -134,10 +134,19 @@ side in tension and puts a clamp's edge on the bore's rims. A `pin` support
   iterating linear solves (`SolveWithPins`, `src/core/fem/FemStudy.cpp`):
   every facet in contact first; then a facet whose nodes' radial reactions
   sum to a pull leaves the contact, and one out of it whose nodes move into
-  the pin on average comes back, until the set holds still (30 rounds at
-  most, else a study error; a lever takes three to eight). Decided per
-  facet, not per node, because a tri6 under a uniform pressure loads its
-  corners not at all, and a varying one a little either way. A facet on
+  the pin on average comes back, until the set holds still (a lever takes
+  three to eight rounds). Decided per facet, not per node, because a tri6
+  under a uniform pressure loads its corners not at all, and a varying one
+  a little either way. Where that cycles, or has not settled in 30 rounds,
+  the set moves **one side at a time**: while any facet pulls, those
+  pulling at least half as hard as the worst let go and none comes back;
+  once none pulls, every facet the part moves into comes back. A short
+  sleeve on a pin leaned on off its end -- pressed at its two ends on
+  opposite sides -- threw the one-step set between them for good (the
+  woodcutter's bushing, 22 mm off a 6.2 mm sleeve: "did not settle"); one
+  side at a time it settles at 1.6 mm, the pin answering the load to 1e-3
+  over 6 % of the sleeve (`[pin]`). The rounds
+  are capped at 30 plus one per pin facet, else a study error. A facet on
   the contact's edge that flips each round is let go: once the set
   repeats, only the facets every state of the cycle had in contact stay,
   and that is solved once more. An answer whose contact still pulls (more
