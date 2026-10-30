@@ -381,14 +381,19 @@ std::string Real(double v) {
 
 // Every node's temperature at `lambda` of the way from the stress-free one
 // to the field's (*TEMPERATURE), for a step that takes the thermal load to
-// that factor.
+// that factor. The `partners` rigid partners (node sets P1..) stay at the
+// stress-free temperature, and say so: they carry an initial temperature,
+// and ccx 2.21 refuses a node with an initial one and no final one
+// ("checktemp: no final temperature").
 void WriteTemperatures(std::ostream& out, const NodalTemperature& thermal,
-                       double lambda, bool opNew) {
+                       double lambda, bool opNew, size_t partners = 0) {
   out << "*TEMPERATURE" << (opNew ? ", OP=NEW" : "") << "\n";
   const double t0 = thermal.stressFreeC;
   for (size_t n = 0; n < thermal.temperature.size(); ++n)
     out << n + 1 << ", " << Num(t0 + lambda * (thermal.temperature[n] - t0))
         << "\n";
+  for (size_t k = 0; k < partners; ++k)
+    out << "P" << k + 1 << ", " << Num(t0) << "\n";
 }
 
 // The steps of a nonlinear deck (WriteDeck's `nonlinear`), from the
@@ -635,7 +640,7 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
           out << e << ", P" << f << ", " << Num(lambda * pr.mpa) << "\n";
     }
     if (thermal)
-      WriteTemperatures(out, *thermal, lambda, false);
+      WriteTemperatures(out, *thermal, lambda, false, partners.size());
     out << "*NODE PRINT, NSET=NALL, GLOBAL=YES\nU\n";
     if (!held.empty())
       out << "*NODE PRINT, NSET=NSUP, GLOBAL=YES\nRF\n";
@@ -671,7 +676,7 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
     // Cooled back to where it was stress-free: what is left is what heating
     // and cooling left.
     if (thermal)
-      WriteTemperatures(out, *thermal, 0.0, true);
+      WriteTemperatures(out, *thermal, 0.0, true, partners.size());
     out << "*NODE PRINT, NSET=NALL, GLOBAL=YES\nU\n";
     if (!held.empty())
       out << "*NODE PRINT, NSET=NSUP, GLOBAL=YES\nRF\n";
