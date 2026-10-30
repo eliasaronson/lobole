@@ -258,8 +258,8 @@ top-level.
 
 A mate joins two **connector frames**, one on each occurrence, with one mate
 type: fastened, revolute, slider, cylindrical, planar or ball. The frame is
-derived from the part at solve time (a face, a named Frame feature, or the part
-origin), never stored, so a part edit that moves a hole moves the bolt mated to
+derived from the part at solve time (a face, a named Frame feature or datum,
+or the part origin), never stored, so a part edit that moves a hole moves the bolt mated to
 it. The mate stores its DOF values, so a file re-solves to identical
 placements.
 

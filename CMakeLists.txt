@@ -519,6 +519,8 @@ set(core_sources
     src/core/MeshMeasure.cpp
     src/core/MeshOperand.cpp
     src/core/ImportAlign.cpp
+    src/core/MeshFit.cpp
+    src/core/DatumFrame.cpp
     src/core/ImportPlacement.cpp
     src/core/mesh/Align.cpp
     src/core/mesh/TriMesh.cpp
@@ -527,6 +529,7 @@ set(core_sources
     src/thirdparty/miniply.cpp
     src/core/mesh/Fit.cpp
     src/core/mesh/Segment.cpp
+    src/core/mesh/Grow.cpp
     src/core/mesh/MeshBvh.cpp
     src/core/mesh/Slice.cpp
     src/core/io/RecognitionJson.cpp
@@ -686,8 +689,8 @@ set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # manifold (vendored submodule, Apache-2.0): exact, watertight booleans of
 # triangle meshes, and iso-surface extraction
-# (docs/plans/organic-meshes-and-scans.md). Built here from its sources, as
-# clipper2 is, rather than through its own CMakeLists, which fetches
+# (docs/architecture.md#libraries-and-targets). Built here from its sources,
+# as clipper2 is, rather than through its own CMakeLists, which fetches
 # dependencies, installs a static library and its headers into our packages,
 # and adds its test suite. Static (Apache-2.0 needs no relinking boundary),
 # serial (MANIFOLD_PAR off: no TBB; our parallel::For runs it on worker
@@ -1033,6 +1036,7 @@ set(app_sources
     src/ui/RendererSync.cpp
     src/ui/MeasureActions.cpp
     src/ui/AlignTool.cpp
+    src/ui/FitTool.cpp
     src/ui/SectionToSketch.cpp
     src/ui/CreateActions.cpp
     src/ui/DocumentSlots.cpp

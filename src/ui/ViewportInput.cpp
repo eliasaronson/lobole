@@ -5,6 +5,7 @@
 #include "ui/AlignTool.h"
 #include "ui/AssemblyActions.h"
 #include "ui/DrawingPanel.h"
+#include "ui/FitTool.h"
 #include "ui/ListSelection.h"
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
@@ -322,6 +323,9 @@ void HandleViewportInput(AppState& state) {
     }
   } else if (state.alignTool.open && esc) {
     CancelAlignTool(state); // puts the import back where it stood
+    escUsed = true;
+  } else if (state.fitTool.open && esc) {
+    CancelFitTool(state);
     escUsed = true;
   } else if (state.editFeatureId != 0 && esc) {
     state.editFeatureId = 0; // Escape closes the editor session

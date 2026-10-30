@@ -133,6 +133,7 @@
   "fillet": ["line1", "line2", "radius", "sketch_id"],
   "fit_bearing": ["designation", "dry_run", "mate_other", "seat", "series"],
   "fit_fastener": ["drive", "dry_run", "far_end", "nut", "rim", "size", "standard", "washer", "washer_under_head", "washer_under_nut"],
+  "fit_primitive": ["feature_id", "kind", "part", "point_mm", "tolerance_mm"],
   "fit_retaining_ring": ["dry_run", "groove"],
   "fit_view": ["height", "width"],
   "focus_panel": ["name"],

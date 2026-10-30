@@ -1477,8 +1477,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
       // Whatever else it is, the click must have DONE something. A toolbar
       // button that is enabled and silently does nothing is the same bug in
-      // its earliest form.
-      IM_CHECK(ui::HasPendingFeature(*s_App));
+      // its earliest form. A session that adds its feature only on Accept
+      // (the Fit tool) is open instead.
+      IM_CHECK(ui::HasPendingFeature(*s_App) || s_App->fitTool.open);
 
       if (tc->expect == Expect::RefusesUntilPicked) {
         const ImGuiTestItemInfo accept =
@@ -2566,6 +2567,114 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(import()->placement.IsIdentity());
     IM_CHECK(std::abs(zSpan().second - zSpan().first - 10.0) < 1e-4);
     IM_CHECK_EQ(s_App->commands->UndoDepth(), undone);
+    std::filesystem::remove(stl);
+  };
+
+  // The Fit tool (docs/modeling/README.md#datums-on-a-scan): a 40 x 20 x 10
+  // box read as a mesh body. The toolbar arms a point pick with Accept
+  // disabled; a click on the +X end fits (Auto) that end's plane, and Accept
+  // adds a DatumPlane from_fit standing on it as one undo step, which Undo
+  // takes away; Escape closes a second session with nothing recorded.
+  t = IM_REGISTER_TEST(engine, "fit",
+                       "a_plane_picked_on_a_body_is_one_undo_step");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto stl =
+        std::filesystem::temp_directory_path() /
+        ("lobole_gui_fit_" + std::to_string(proc::CurrentPid()) + ".stl");
+    {
+      std::vector<glm::vec3> corners;
+      for (int i = 0; i < 8; i++)
+        corners.emplace_back((i & 1) ? 20.0f : -20.0f, (i & 2) ? 10.0f : -10.0f,
+                             (i & 4) ? 5.0f : -5.0f);
+      const int quads[6][4] = {{0, 2, 6, 4}, {1, 3, 7, 5}, {0, 1, 5, 4},
+                               {2, 3, 7, 6}, {0, 1, 3, 2}, {4, 5, 7, 6}};
+      std::ofstream out(stl, std::ios::binary);
+      const char header[80] = {};
+      out.write(header, 80);
+      const uint32_t count = 12;
+      out.write(reinterpret_cast<const char*>(&count), 4);
+      for (const auto& q : quads)
+        for (const std::array<int, 3> tri :
+             {std::array<int, 3>{q[0], q[1], q[2]},
+              std::array<int, 3>{q[0], q[2], q[3]}}) {
+          glm::vec3 a = corners[tri[0]], b = corners[tri[1]],
+                    c = corners[tri[2]];
+          if (glm::dot(glm::cross(b - a, c - a), a + b + c) < 0.0f)
+            std::swap(b, c); // wound outward
+          const float n[3] = {0, 0, 0};
+          out.write(reinterpret_cast<const char*>(n), 12);
+          for (const glm::vec3& p : {a, b, c})
+            out.write(reinterpret_cast<const char*>(&p), 12);
+          const char attr[2] = {};
+          out.write(attr, 2);
+        }
+    }
+    auto imp = std::make_unique<ImportFeature>("scan", stl.string());
+    imp->upAxis = interchange::UpAxis::None;
+    imp->representation = mesh::Representation::Mesh;
+    Doc()->AddFeature(std::move(imp));
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), size_t{1});
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+    const size_t depth = s_App->commands->UndoDepth();
+    const size_t features = Doc()->FeatureCount();
+
+    ToolbarClick(ctx, "###tb_fit_primitive");
+    ctx->Yield();
+    IM_CHECK(s_App->fitTool.open);
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kFitToolSlot);
+    IM_CHECK((ctx->ItemInfo("//###ToolWindow/###tw_accept").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+    const auto clickEnd = [&] {
+      const glm::vec3 end(20.0f, 0.0f, 0.0f);
+      s_App->camera->StopAnimation();
+      s_App->camera->SetTarget(end);
+      s_App->camera->SetUp(conv::kWorldUpF);
+      s_App->camera->SetPosition(end + glm::vec3(80.0f, 0.0f, 0.0f));
+      ctx->Yield(2);
+      ctx->MouseMoveToPos(WorldToWindow(end + glm::vec3(0.0f, 3.0f, 1.0f)));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+    };
+    clickEnd();
+    IM_CHECK_EQ(s_App->fitTool.bodyFeatureId, id);
+    IM_CHECK_EQ(s_App->fitTool.fittedKind, int(mesh::Kind::Plane));
+    IM_CHECK(s_App->fitTool.error.empty());
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth); // nothing yet
+    ctx->ItemClick("//###ToolWindow/###tw_accept");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->fitTool.open);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth + 1);
+    IM_CHECK_EQ(Doc()->FeatureCount(), features + 1);
+    const auto* dp =
+        dynamic_cast<const DatumPlaneFeature*>(Doc()->GetFeature(features));
+    IM_CHECK(dp != nullptr);
+    if (dp != nullptr) {
+      IM_CHECK(dp->kind == DatumPlaneKind::FromFit);
+      IM_CHECK(dp->fit.kind == mesh::Kind::Plane); // never auto
+      IM_CHECK(dp->GetError().empty());
+      const SketchPlane& p = dp->OutputPlane();
+      IM_CHECK(glm::length(p.GetNormal() - glm::dvec3(1, 0, 0)) < 1e-6);
+      IM_CHECK(std::abs(p.GetOrigin().x - 20.0) < 1e-4);
+    }
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), features);
+
+    ToolbarClick(ctx, "###tb_fit_primitive");
+    ctx->Yield();
+    clickEnd();
+    IM_CHECK(s_App->fitTool.open);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->fitTool.open);
+    IM_CHECK_EQ(Doc()->FeatureCount(), features);
     std::filesystem::remove(stl);
   };
 

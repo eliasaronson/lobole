@@ -186,6 +186,30 @@ geometry, so what is measured on it is exact to the mesh
   for printing, naming its holes and where to close them. A part mixing
   mesh and B-Rep bodies is refused: check either set with `bodies`.
 
+## Datums
+
+A scan is measured through the datums fitted to it
+([datums on a scan](../modeling/README.md#datums-on-a-scan)): a side of
+`measure` may be `{datum: <id or name>}`, a DatumPlane or DatumAxis of the
+part (on its tab, or with `part`), measured exactly as the plane or line it
+is (`MeasureDatums`, `src/remote/RemoteInspection.cpp`).
+
+- **On its own**: its `kind` (plane or axis), `origin_mm` and `normal` or
+  `direction`.
+- **Against a bare point** `{point_mm: [x, y, z]}` (a point in space, not
+  snapped to a body): the distance to the plane or line, the foot of the
+  perpendicular as the closest point, and for a plane `signed_mm` (positive
+  on the normal's side). `kind: distance` only.
+- **Against another datum**: `angle_deg` -- two planes between their
+  normals (0-180), two lines unsigned in 0-90 (an axis's sense is
+  arbitrary), a line against a plane 0-90 -- and `basis` saying which;
+  the minimum distance (0 where they meet or cross, the offset when
+  parallel) with the closest points; and `parallel`.
+
+A face, edge or body against a datum is refused naming the sides that are
+accepted, as is a datum with an `occurrence` (in an assembly, `frame`
+`{occurrence, frame: <datum>}` gives it placed in the world).
+
 ## Mass properties
 
 `mass_properties {body?, part?}` → per body `volume_mm3`, `surface_area_mm2`,
@@ -958,6 +982,8 @@ GUI suite, and the measure parity phase in `remote_smoke`.
 
 ## What it does not do yet
 
+- Measure a face, edge or body against a datum, or a datum of an
+  occurrence in world space (`frame` places one; `measure` does not yet).
 - Pick a raw vertex (corners cover the cases people ask for).
 - Say where a cylinder face's axis is: `list_elements` and `measure` give
   its direction and radius, and its centre takes a `distance_kind:

@@ -149,6 +149,8 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       // An import is aligned once, after it arrives, from the toolbar or its
       // editor.
       "part.align",
+      // A scan's datums are fitted a few times, after it is aligned.
+      "part.fit",
       "view.reset_layout",
       "view.controls_help",
       // The sketch "more constraints" flyout: a constraint used once a month

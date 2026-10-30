@@ -350,6 +350,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A `DatumPlane` or `DatumAxis` may be `kind: "from_fit"` with `fit` {`body_id`, `point_mm`, `kind`, `tolerance_mm`?}: a plane (a DatumPlane) or a cylinder's or cone's axis (a DatumAxis) refitted every regeneration to the triangles round the point on the bodies feature `body_id` made ([datums on a scan](../modeling/README.md#datums-on-a-scan)). A kind the datum does not fit (`auto` among them), a `body_id` of 0, a tolerance not above 0 or an unknown key in `fit` is refused. Golden `vNEXT-datum-from-fit` |
 
 ## Paths in a project
 

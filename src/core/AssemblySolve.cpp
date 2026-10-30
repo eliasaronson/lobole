@@ -11,6 +11,7 @@
 #include "core/ThreadStandards.h"
 #include "core/features/ThreadFeature.h"
 
+#include "core/DatumFrame.h"
 #include "core/FrameMath.h"
 #include "core/features/FrameFeature.h"
 
@@ -697,27 +698,21 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
   // against the part's history; an errored frame refuses the mate rather
   // than handing it a stale matrix.
   if (c.anchor.frameId != 0) {
-    const FrameFeature* fr = nullptr;
-    std::string frames;
-    for (const auto& f : part->GetFeatures()) {
-      const auto* cand = dynamic_cast<const FrameFeature*>(f.get());
-      if (cand == nullptr)
-        continue;
-      if (cand->GetId() == c.anchor.frameId)
-        fr = cand;
-      if (!frames.empty())
-        frames += ", ";
-      frames += std::to_string(cand->GetId()) + " (" + cand->GetName() + ")";
-    }
+    // Or a DatumPlane / DatumAxis: a scan's fitted datums
+    // (docs/modeling/README.md#datums-on-a-scan).
+    std::string anchors;
+    const Feature* fr =
+        datumframe::Find(*part, nlohmann::json(c.anchor.frameId), anchors);
     if (fr == nullptr) {
       return fail("frame " + std::to_string(c.anchor.frameId) +
-                  " is not a Frame feature of its part; frames there: " +
-                  (frames.empty() ? std::string("none") : frames));
+                  " is not a Frame, DatumPlane or DatumAxis of its part; "
+                  "there: " +
+                  (anchors.empty() ? std::string("none") : anchors));
     }
     if (!fr->GetError().empty())
-      return fail("frame '" + fr->GetName() +
-                  "' did not resolve: " + fr->GetError());
-    return innerXf * fr->Matrix();
+      return fail(std::string(datumframe::KindLabel(*fr)) + " '" +
+                  fr->GetName() + "' did not resolve: " + fr->GetError());
+    return innerXf * datumframe::Matrix(*fr);
   }
 
   const ElementRef& ref = c.anchor.face;

@@ -1,0 +1,79 @@
+{
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "center": [
+            0.0,
+            0.0
+          ],
+          "id": 11,
+          "radius": 10.0,
+          "type": "circle"
+        }
+      ],
+      "id": 1,
+      "name": "Shaft sketch",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 30.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Shaft",
+      "sketch_id": 1,
+      "type": "Extrude"
+    },
+    {
+      "fit": {
+        "body_id": 2,
+        "kind": "cylinder",
+        "point_mm": [
+          10.0,
+          0.0,
+          15.0
+        ]
+      },
+      "id": 3,
+      "kind": "from_fit",
+      "name": "Shaft axis",
+      "type": "DatumAxis"
+    },
+    {
+      "fit": {
+        "body_id": 2,
+        "kind": "plane",
+        "point_mm": [
+          3.0,
+          2.0,
+          30.0
+        ],
+        "tolerance_mm": 0.05
+      },
+      "id": 4,
+      "kind": "from_fit",
+      "name": "Shaft top",
+      "type": "DatumPlane"
+    }
+  ],
+  "format": "designer-document",
+  "version": 215
+}

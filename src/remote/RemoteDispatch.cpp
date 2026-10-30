@@ -28,6 +28,8 @@
 #include "core/Measure.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/features/CamProfileFeature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/WormFeature.h"
@@ -517,7 +519,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "hidden bodies, the measure session and the explode state, which on "
      "somebody's running instance is their work. `revision` is what a "
      "guarded write (add_feature, modify_feature, delete_feature, "
-     "set_material, batch) names as expect_revision.",
+     "set_material, batch) names as expect_revision. A datum fitted to a "
+     "body (from_fit) carries `fitted`, what its last regeneration fitted "
+     "(fit_primitive's reply).",
      "part?:string|int", remote::NoFlags,
      "bodies:{bbox_max:number[], bbox_min:number[], created_by:int, "
      "material:string, name:string, volume_mm3:number, reference?:bool, "
@@ -2056,6 +2060,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       if (!stateDoc->GetFeature(i)->UnresolvedFaceLooks().empty())
         f["face_appearance_unresolved"] =
             stateDoc->GetFeature(i)->UnresolvedFaceLooks();
+      // A datum fitted to a body says what the last regeneration fitted
+      // (docs/modeling/README.md#datums-on-a-scan): fit_primitive's reply.
+      if (const auto* dp =
+              dynamic_cast<const DatumPlaneFeature*>(stateDoc->GetFeature(i));
+          dp != nullptr && dp->FitReport().is_object())
+        f["fitted"] = dp->FitReport();
+      if (const auto* da =
+              dynamic_cast<const DatumAxisFeature*>(stateDoc->GetFeature(i));
+          da != nullptr && da->FitReport().is_object())
+        f["fitted"] = da->FitReport();
       // A Derived copy says whether its source has moved (v84): true/false,
       // or null when the source is not loaded — unknown is not fresh.
       if (auto* d =

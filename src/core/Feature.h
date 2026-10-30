@@ -623,8 +623,11 @@ public:
   // resolves to the identity — the model loads, looks plausible and is
   // wrong. So Regenerate executes these on a baked open too. They are pure
   // arithmetic plus at most a face lookup, which is why this costs nothing
-  // against the rebuild the bake avoids. A feature that CONTRIBUTES A BODY
-  // must never return true: its geometry is what the bake carries.
+  // against the rebuild the bake avoids -- except a datum fitted to a mesh
+  // (`from_fit`), which refits its region on the baked bodies: a grow and a
+  // fit over the triangles round its point, not a rebuild. A feature that
+  // CONTRIBUTES A BODY must never return true: its geometry is what the bake
+  // carries.
   [[nodiscard]] virtual bool IsDatum() const { return false; }
 
   // A HEAVY feature may build off the frame

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace mesh {
@@ -73,6 +74,30 @@ glm::dvec3 FitResult::Project(const glm::dvec3& p) const {
   }
   }
   return p;
+}
+
+glm::dvec3 FitResult::Normal(const glm::dvec3& p) const {
+  switch (kind) {
+  case Kind::Plane:
+    return axis;
+  case Kind::Sphere: {
+    const glm::dvec3 w = p - origin;
+    const double l = glm::length(w);
+    return l > 0.0 ? w / l : glm::dvec3(0.0);
+  }
+  case Kind::Cylinder:
+  case Kind::Cone: {
+    const glm::dvec3 w = p - origin;
+    const glm::dvec3 r = w - glm::dot(w, axis) * axis;
+    const double l = glm::length(r);
+    if (!(l > 0.0))
+      return glm::dvec3(0.0);
+    if (kind == Kind::Cylinder)
+      return r / l;
+    return std::cos(halfAngle) * (r / l) - std::sin(halfAngle) * axis;
+  }
+  }
+  return glm::dvec3(0.0);
 }
 
 namespace {
@@ -209,6 +234,7 @@ void Residuals(FitResult& f, const std::vector<glm::dvec3>& pts) {
   }
   f.rms = pts.empty() ? 0.0 : std::sqrt(sum / double(pts.size()));
   f.max = worst;
+  f.inliers = pts.size();
   f.ok = std::isfinite(f.rms) && std::isfinite(f.max);
 }
 
@@ -526,6 +552,364 @@ FitResult FitSphere(const std::vector<glm::dvec3>& points, double giveUpAbove) {
   Residuals(f, points);
   f.ok = f.ok && f.radius > 0.0;
   return f;
+}
+
+namespace {
+
+// splitmix64: a generator whose sequence is the same on every platform,
+// unlike std::uniform_int_distribution's.
+struct Rng {
+  uint64_t state;
+  uint64_t Next() {
+    uint64_t x = (state += 0x9e3779b97f4a7c15ull);
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+  }
+  size_t Below(size_t n) { return static_cast<size_t>(Next() % n); }
+};
+
+// FNV-1a over the points' bits: the seed, so the input decides the samples.
+uint64_t SeedOf(Kind kind, const std::vector<glm::dvec3>& points) {
+  uint64_t h = 0xcbf29ce484222325ull ^ static_cast<uint64_t>(kind);
+  for (const glm::dvec3& p : points)
+    for (int i = 0; i < 3; i++) {
+      uint64_t bits = 0;
+      std::memcpy(&bits, &p[i], sizeof bits);
+      h = (h ^ bits) * 0x100000001b3ull;
+    }
+  return h;
+}
+
+// How many points a hypothesis is drawn from.
+int SampleSize(Kind k) {
+  switch (k) {
+  case Kind::Plane:
+  case Kind::Cone:
+    return 3;
+  case Kind::Cylinder:
+  case Kind::Sphere:
+    return 2;
+  }
+  return 3;
+}
+
+// The surface through the oriented points `p[i]`, `n[i]` (unit), or a
+// failed result when they do not define one.
+FitResult Hypothesis(Kind kind, const glm::dvec3* p, const glm::dvec3* n) {
+  FitResult f;
+  f.kind = kind;
+  switch (kind) {
+  case Kind::Plane: {
+    const glm::dvec3 c = glm::cross(p[1] - p[0], p[2] - p[0]);
+    const double len = glm::length(c);
+    const double span =
+        std::max(glm::length(p[1] - p[0]), glm::length(p[2] - p[0]));
+    if (!(len > 1e-9 * span * span))
+      return f;
+    f.origin = (p[0] + p[1] + p[2]) / 3.0;
+    f.axis = c / len;
+    f.ok = true;
+    return f;
+  }
+  case Kind::Sphere: {
+    // The centre is where the two normal lines come closest.
+    const glm::dvec3 w = p[0] - p[1];
+    const double b = glm::dot(n[0], n[1]), d = glm::dot(n[0], w),
+                 e = glm::dot(n[1], w), den = 1.0 - b * b;
+    if (!(den > 1e-9))
+      return f;
+    const double s = (b * e - d) / den, t = (e - b * d) / den;
+    const glm::dvec3 c = 0.5 * ((p[0] + s * n[0]) + (p[1] + t * n[1]));
+    f.origin = c;
+    f.radius = 0.5 * (glm::length(p[0] - c) + glm::length(p[1] - c));
+    f.ok = f.radius > 0.0;
+    return f;
+  }
+  case Kind::Cylinder: {
+    // Both normals are square to the axis; in the plane square to it the
+    // two normal lines meet on the axis.
+    glm::dvec3 a = glm::cross(n[0], n[1]);
+    const double len = glm::length(a);
+    if (!(len > 1e-6))
+      return f;
+    a /= len;
+    const auto flat = [&](const glm::dvec3& v) {
+      return v - glm::dot(v, a) * a;
+    };
+    const glm::dvec3 q0 = flat(p[0]), q1 = flat(p[1]);
+    const glm::dvec3 m0 = glm::normalize(flat(n[0])),
+                     m1 = glm::normalize(flat(n[1]));
+    const glm::dvec3 w = q0 - q1;
+    const double b = glm::dot(m0, m1), d = glm::dot(m0, w), e = glm::dot(m1, w),
+                 den = 1.0 - b * b;
+    if (!(den > 1e-9))
+      return f;
+    const double s = (b * e - d) / den, t = (e - b * d) / den;
+    const glm::dvec3 c = 0.5 * ((q0 + s * m0) + (q1 + t * m1));
+    f.origin = c;
+    f.axis = a;
+    f.radius = 0.5 * (glm::length(q0 - c) + glm::length(q1 - c));
+    f.ok = f.radius > 0.0;
+    return f;
+  }
+  case Kind::Cone: {
+    // The apex is on all three tangent planes; the unit directions from it
+    // to the points lie on a circle about the axis.
+    std::vector<double> m(9), b(3);
+    for (int i = 0; i < 3; i++) {
+      for (int k = 0; k < 3; k++)
+        m[i * 3 + k] = n[i][k];
+      b[i] = glm::dot(n[i], p[i]);
+    }
+    if (!Solve(m, b, 3))
+      return f;
+    const glm::dvec3 apex(b[0], b[1], b[2]);
+    glm::dvec3 u[3];
+    for (int i = 0; i < 3; i++) {
+      const glm::dvec3 d = p[i] - apex;
+      const double l = glm::length(d);
+      if (!(l > 0.0))
+        return f;
+      u[i] = d / l;
+    }
+    glm::dvec3 a = glm::cross(u[1] - u[0], u[2] - u[0]);
+    const double len = glm::length(a);
+    if (!(len > 1e-9))
+      return f;
+    a /= len;
+    if (glm::dot(a, u[0] + u[1] + u[2]) < 0.0)
+      a = -a;
+    double beta = 0.0;
+    for (const glm::dvec3& v : u)
+      beta += std::acos(std::clamp(glm::dot(a, v), -1.0, 1.0));
+    beta /= 3.0;
+    if (!(beta > 0.0 && beta < M_PI / 2.0))
+      return f;
+    f.origin = apex;
+    f.axis = a;
+    f.halfAngle = beta;
+    f.ok =
+        std::isfinite(apex.x) && std::isfinite(apex.y) && std::isfinite(apex.z);
+    return f;
+  }
+  }
+  return f;
+}
+
+// The least-squares fit of `kind` over `pts`, started from `start`.
+FitResult Refit(Kind kind, const FitResult& start,
+                const std::vector<glm::dvec3>& pts,
+                const std::vector<glm::dvec3>& at,
+                const std::vector<glm::dvec3>& nrm) {
+  switch (kind) {
+  case Kind::Plane: {
+    FitResult f = FitPlane(pts);
+    if (f.ok && glm::dot(f.axis, start.axis) < 0.0)
+      f.axis = -f.axis;
+    return f;
+  }
+  case Kind::Cylinder:
+    return FitCylinder(pts, start.axis);
+  case Kind::Cone:
+    return nrm.size() < 3 ? FitResult{} : FitCone(pts, nrm, at, start.axis);
+  case Kind::Sphere:
+    return FitSphere(pts);
+  }
+  return {};
+}
+
+} // namespace
+
+FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
+                    const std::vector<glm::dvec3>& facetCentres,
+                    const std::vector<glm::dvec3>& facetNormals,
+                    double toleranceMm, const glm::dvec3* through) {
+  FitResult none;
+  none.kind = kind;
+  const size_t n = points.size(), nf = facetCentres.size();
+  const int s = SampleSize(kind);
+  const bool oriented = !facetNormals.empty();
+  // A plane draws its hypotheses from the points (three on one face of a
+  // coarse mesh exist where three triangle centres may not); the curved
+  // kinds from the oriented samples.
+  const bool fromPoints = kind == Kind::Plane;
+  if ((oriented ? facetNormals.size() != nf : kind != Kind::Plane) ||
+      n < static_cast<size_t>(std::max(s, 6)) || !(toleranceMm > 0.0) ||
+      (oriented && nf < static_cast<size_t>(s)))
+    return none;
+  Rng rng{SeedOf(kind, points) * 0x9e3779b97f4a7c15ull +
+          SeedOf(kind, facetCentres)};
+  // Hypotheses are scored on a fixed sample of the points: past a few
+  // thousand the inlier share is known as well as it needs to be.
+  constexpr size_t kScored = 4096;
+  const auto strided = [&](size_t count) {
+    std::vector<size_t> out;
+    const size_t take = std::min(count, kScored);
+    out.reserve(take);
+    for (size_t i = 0; i < take; i++)
+      out.push_back(take == count ? i : i * count / take);
+    return out;
+  };
+  const std::vector<size_t> scored = strided(n);
+  const std::vector<size_t> scoredFacets =
+      oriented ? strided(nf) : std::vector<size_t>{};
+  const auto passes = [&](const FitResult& f) {
+    return through == nullptr || std::abs(f.Distance(*through)) <= toleranceMm;
+  };
+  // MSAC: each point costs its squared distance, and an outlier the
+  // tolerance's square, so of two hypotheses keeping as many points the
+  // tighter wins -- one tilted towards a lump keeps a few more of its foot
+  // and fits the rest worse. And how well the oriented samples on the
+  // surface agree with its normal: what tells two of equal cost apart -- a
+  // box's face from the diagonal plane through the same corners.
+  const double tol2 = toleranceMm * toleranceMm;
+  const auto costOf = [&](const FitResult& f, const std::vector<size_t>* which,
+                          size_t& in) {
+    double c = 0.0;
+    in = 0;
+    const size_t count = which ? which->size() : n;
+    for (size_t k = 0; k < count; k++) {
+      const double d = f.Distance(points[which ? (*which)[k] : k]);
+      if (std::abs(d) <= toleranceMm) {
+        in++;
+        c += d * d;
+      } else {
+        c += tol2;
+      }
+    }
+    return c;
+  };
+  const auto score = [&](const FitResult& f, double& agree, size_t& in) {
+    const double cost = costOf(f, &scored, in);
+    agree = 0.0;
+    for (size_t i : scoredFacets)
+      if (std::abs(f.Distance(facetCentres[i])) <= toleranceMm)
+        agree += std::abs(glm::dot(facetNormals[i], f.Normal(facetCentres[i])));
+    return cost;
+  };
+  // Enough draws that a sample of inliers only is drawn with 99.9%
+  // certainty at the best inlier share seen so far.
+  constexpr int kLeast = 64, kMost = 4000;
+  FitResult best;
+  size_t bestIn = 0;
+  double bestCost = std::numeric_limits<double>::max(), bestAgree = 0.0;
+  int needed = kMost;
+  const size_t pool = fromPoints ? n : nf;
+  for (int it = 0; it < needed && it < kMost; it++) {
+    size_t pick[3] = {0, 0, 0};
+    for (int k = 0; k < s; k++) {
+      pick[k] = rng.Below(pool);
+      for (int j = 0; j < k; j++)
+        if (pick[j] == pick[k])
+          pick[k] = rng.Below(pool);
+    }
+    glm::dvec3 p[3], q[3];
+    bool usable = true;
+    for (int k = 0; k < s; k++) {
+      if (fromPoints) {
+        p[k] = points[pick[k]];
+        continue;
+      }
+      p[k] = facetCentres[pick[k]];
+      const double l = glm::length(facetNormals[pick[k]]);
+      usable = usable && l > 0.0;
+      q[k] = usable ? facetNormals[pick[k]] / l : glm::dvec3(0.0);
+    }
+    if (!usable)
+      continue;
+    const FitResult h = Hypothesis(kind, p, q);
+    if (!h.ok || !passes(h))
+      continue;
+    double agree = 0.0;
+    size_t in = 0;
+    const double cost = score(h, agree, in);
+    // Equal to a millionth of the tolerance: a float file's rounding must
+    // not decide between a face and the diagonal through its corners.
+    const double tie = 1e-6 * tol2 * double(scored.size());
+    if (cost < bestCost - tie ||
+        (cost <= bestCost + tie && agree > bestAgree)) {
+      bestIn = in;
+      bestCost = cost;
+      bestAgree = agree;
+      best = h;
+      const double w = double(in) / double(scored.size());
+      const double miss = 1.0 - std::pow(w, s);
+      needed = miss <= 0.0
+                   ? kLeast
+                   : std::max(kLeast, static_cast<int>(std::ceil(
+                                          std::log(1e-3) / std::log(miss))));
+    }
+  }
+  if (!best.ok || bestIn < static_cast<size_t>(s))
+    return none;
+  if (kind == Kind::Plane && oriented) {
+    glm::dvec3 facing(0.0);
+    for (const glm::dvec3& v : facetNormals)
+      facing += v;
+    if (glm::dot(facing, best.axis) < 0.0)
+      best.axis = -best.axis;
+  }
+  // A cone's least squares starts from the tangent planes of the samples on
+  // it.
+  const auto inliersOf = [&](const FitResult& f, std::vector<glm::dvec3>& pts) {
+    pts.clear();
+    for (size_t i = 0; i < n; i++)
+      if (std::abs(f.Distance(points[i])) <= toleranceMm)
+        pts.push_back(points[i]);
+  };
+  const auto planesOf = [&](const FitResult& f, std::vector<glm::dvec3>& at,
+                            std::vector<glm::dvec3>& nrm) {
+    at.clear();
+    nrm.clear();
+    for (size_t i = 0; i < nf && oriented; i++)
+      if (std::abs(f.Distance(facetCentres[i])) <= toleranceMm) {
+        at.push_back(facetCentres[i]);
+        nrm.push_back(glm::normalize(facetNormals[i]));
+      }
+  };
+  // Least squares over the inliers, and again over the inliers of that,
+  // while the whole cost (MSAC's, over every point) falls.
+  std::vector<glm::dvec3> pts, at, nrm;
+  inliersOf(best, pts);
+  FitResult kept = best;
+  size_t keptIn = 0;
+  double keptCost = costOf(kept, nullptr, keptIn);
+  Residuals(kept, pts);
+  for (int round = 0; round < 8; round++) {
+    if (kind == Kind::Cone)
+      planesOf(kept, at, nrm);
+    FitResult f = Refit(kind, kept, pts, at, nrm);
+    if (!f.ok || !passes(f))
+      break;
+    size_t in = 0;
+    const double cost = costOf(f, nullptr, in);
+    if (!(cost < keptCost))
+      break;
+    std::vector<glm::dvec3> next;
+    inliersOf(f, next);
+    Residuals(f, next);
+    if (!f.ok)
+      break;
+    const bool settled = cost > keptCost * (1.0 - 1e-9);
+    kept = f;
+    keptCost = cost;
+    pts = std::move(next);
+    if (settled)
+      break;
+  }
+  kept.kind = kind;
+  return kept;
+}
+
+FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
+                    const std::vector<glm::dvec3>& normals, double toleranceMm,
+                    const glm::dvec3* through) {
+  if (!normals.empty() && normals.size() != points.size())
+    return FitResult{};
+  return FitRobust(kind, points,
+                   normals.empty() ? std::vector<glm::dvec3>{} : points,
+                   normals, toleranceMm, through);
 }
 
 } // namespace mesh

@@ -115,6 +115,11 @@ inline constexpr uint64_t kBearingToolSlot = ~4ull;
 // SlotPickClicked routes these to AlignPointPicked.
 inline constexpr uint64_t kAlignToolSlot = ~5ull;
 
+// And the Fit tool (ui/FitTool.h): its pick is a POINT on a body, the seed a
+// primitive is grown and fitted from. SlotPickClicked routes it to
+// FitPointPicked.
+inline constexpr uint64_t kFitToolSlot = ~6ull;
+
 // --- the tool-session registry ----------------------------------------------
 //
 // A sentinel is not a value, it is a SESSION, and every session has to answer

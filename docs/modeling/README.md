@@ -899,6 +899,140 @@ into a cradle; the goldens `v211-cradle` and `v211-mesh-boolean`;
 `cradle/a_block_cut_to_a_ball_off_the_frame` (the toolbar's defaults, one
 undo step, built as a job, undone) and `defaults/cradle`.
 
+## Fitting a primitive to a mesh
+
+`fit_primitive {feature_id, point_mm, kind?, tolerance_mm?, part?}`
+(`src/core/MeshFit.{h,cpp}`, the region in `src/core/mesh/Grow.cpp`, the
+fit in `src/core/mesh/Fit.cpp`) fits a plane, cylinder, cone or sphere to
+the triangles round a point on the bodies feature `feature_id` made: a
+scan's mesh body, or a B-Rep's tessellation (a thousandth of its
+diagonal). It changes nothing; it is what the [datums](#datums-on-a-scan)
+below refit, and what the Fit tool previews.
+
+1. The point picks the nearest triangle of the nearest body; a point
+   farther than a fiftieth of the bodies' diagonal from every triangle is
+   refused as a mistake in the coordinates.
+2. **The tolerance** a vertex may stand off the surface is the scan's own
+   noise unless `tolerance_mm` is given (`mesh::ScanTolerance`): over the
+   mesh, how far the far corner of the triangle across each edge stands
+   off a triangle's plane, at the median, times 3 × 1.4826 (a robust three
+   sigma), leaving out creases (an edge turning past a pentagon's 72°: a
+   feature, not noise) and edges flat to four quanta of the file's
+   precision (a CAD export's flats, which would put its curved facets'
+   bend below the median), never less than those four quanta. On a scan
+   with ±0.05 mm of noise that is about 0.18 mm; on a clean CAD export it
+   is the facets' own bend.
+3. **The region** (`mesh::GrowFrom`) starts as a disk of rings round the
+   seed, grown until a curved kind's curvature stands above the noise (the
+   disk's best plane misses a vertex by three tolerances); it is fitted
+   robustly, grown across edges while every corner of a triangle lies
+   within the tolerance and it faces the seed's side of the surface,
+   refitted each time it doubles, then grown once more from the seed
+   against the final fit so it does not depend on the order it was
+   reached in, and fitted again. `rms_mm` and `max_mm` are over every
+   vertex of the region.
+4. **The fit is robust** (`mesh::FitRobust`, RANSAC): hypotheses are drawn
+   from the region's triangles, each its centre and unit normal -- a plane
+   from three, a sphere from two normal lines' closest approach, a
+   cylinder from two normals (their cross product is the axis), a cone
+   from three tangent planes (their meeting point is the apex) -- and
+   scored by the vertices within the tolerance; a tie goes to the one the
+   triangles' normals agree with (a box's face beats the diagonal plane
+   through the same four corners). Only a surface through the seed
+   triangle's centre is taken. The best is refitted by least squares over
+   its inliers until they stop changing. The samples come from splitmix64
+   seeded with the points' own bits, so the same triangles give the same
+   surface to the bit on every regeneration and every platform.
+5. A curved kind whose region is flat to the tolerance is refused, naming
+   the plane: the radius it gave would be the noise's.
+
+`kind` is `plane | cylinder | cone | sphere | auto`; any other is refused,
+naming them. `auto` grows each and keeps the one covering the most area,
+or a simpler one (plane, sphere, cylinder, cone, in that order) covering at
+least 95% as much (`meshfit::kAutoShare`) -- a cone fits a cylinder's
+triangles as well as the cylinder does, with a half angle of nearly
+nothing -- and the reply's `tried` lists each with its area or why it
+failed. The reply: a plane's `origin_mm` and `normal` (the way the
+triangles face), a cylinder's `origin_mm` on the axis, `axis` (its largest
+component positive: a cylinder's axis has no sense of its own, and a refit
+must not flip it) and `radius_mm`, a cone's `apex_mm`, `axis` (from the
+apex into the cone) and `half_angle_deg`, a sphere's `centre_mm` and
+`radius_mm`; with `rms_mm`, `max_mm`, `tolerance_mm`, `triangles`,
+`area_mm2`, `body` and `seed_distance_mm`.
+
+**How well it fits** (`tests/test_mesh_fit_scan.cpp`, on a turned post
+scanned at 60k triangles with ±0.05 mm of noise along the normal and a
+1.5 mm lump on its side, tilted off Z): the cylinder's radius 12.003
+against 12, its axis 0.001° and 0.007 mm off the generated one; the cone's
+half angle 33.690° against 33.690°, its apex 0.002 mm off; the top and the
+bottom exactly their own triangles; a noisy sphere's radius 39.9999
+against 40. Least squares over the side with the lump in it puts the axis
+0.059 mm off; the robust fit 0.008 mm.
+
+**What it costs** (hidden `[fit-cost]`, one thread): a region is linear in
+its triangles, the fits capped at 65,536 points and the hypotheses scored
+on 4,096. A noisy sphere grown whole takes 12 ms at 10k triangles, 0.24 s
+at 300k and 1.3 s at 2M; the noise tolerance is a stride through at most
+200,000 edges, under 20 ms at any size. A datum refits this on every
+regeneration that reaches it.
+
+### Datums on a scan
+
+A scan has no faces to sketch on, mate to or measure from, so it takes part
+through datums fitted to it. A `DatumPlane` or `DatumAxis` of `kind:
+"from_fit"` stores `fit {body_id, point_mm, kind, tolerance_mm?}` -- the
+feature whose body it fits, the seed point, the kind and the tolerance if
+one was given -- and refits on every regeneration, so the datum follows a
+re-scan: replace the import's file with a new scan standing in the same
+place (aligned the same way) and the datum moves onto it.
+
+- A DatumPlane fits a `plane`: its origin is the seed projected onto it,
+  its normal the way the triangles face, its in-plane X the world's X laid
+  into it (the world's Y when the normal is near X).
+- A DatumAxis fits a `cylinder` (origin the axis point nearest the seed,
+  sense with its largest component positive) or a `cone` (origin the
+  apex, from the apex into the cone).
+- The kind is stored, never `auto`, so a re-scan cannot turn a datum into
+  another kind; a kind the datum does not fit is refused on load, naming
+  the ones it does. A sphere makes no datum (it has no plane or axis);
+  `fit_primitive` reports it.
+- The seed is a world point. A scan moved after its datums were fitted
+  (a new `align_import`) leaves the seed where it was; one now off the
+  surface fails the datum with the distance, never a fit somewhere else.
+- A datum that cannot fit -- its body gone, the seed off the surface, a
+  curved kind on a flat -- fails with the reason, and its output is the
+  default, never the last good one ([the datum
+  contract](#regeneration)). `get_state` and the editor show what the
+  last regeneration fitted (`FitReport`).
+- Datums execute on a baked open too ([baked
+  geometry](../versioning/README.md#baked-geometry)), so a from_fit datum
+  refits there: one grow and fit over the triangles round its point.
+
+Through them: a **sketch** on a fitted plane (`plane_ref` the datum, as
+on any datum plane); a **mate** anchored to one (`add_mate` connector
+`{occurrence, frame: <datum id or name>}`, `src/core/DatumFrame.{h,cpp}`:
+a DatumPlane's frame is its origin, X and normal as Z; a DatumAxis's its
+origin and direction as Z with X the world's X laid square to it -- an
+axis fixes no turn about itself, so a mate that needs one takes the
+world's); the **`frame`** query, which reports the same frame; and
+**`measure`** with a `{datum}` side ([measuring a
+datum](../inspect/README.md#datums)). The Fit tool (`###tb_fit_primitive`,
+`src/ui/FitTool.{h,cpp}`) picks the point, previews the fit in its window
+with its kind (Auto by default) and tolerance (the scan's noise unless
+"Own tolerance"), and Accept adds the datum as one undo step; a sphere is
+shown and Accept stays disabled, saying why.
+
+How it is checked: `tests/test_datum_from_fit.cpp` through a real
+regeneration of an imported scan -- the axis and the top within 0.1° and
+0.05 mm of the generated ones, following a re-scan of other triangles and
+noise half a millimetre over, the same to the bit after a cold
+regeneration, read back as written with every bad kind refused, failing
+by name off the scan and on a flat, a sketch standing on the fitted top,
+and a part mated to the fitted axis standing on it; the golden
+`vNEXT-datum-from-fit` (a shaft's axis and top fitted to its own B-Rep);
+the GUI tests `fit/a_plane_picked_on_a_body_is_one_undo_step` and
+`defaults/fit_primitive`; `refused_calls_smoke.py`.
+
 ## Sizes past the model space are refused
 
 `kModelSpaceMm` (`src/core/ModelSpace.h`) is a kilometre: OpenCASCADE's
@@ -1257,6 +1391,7 @@ pieces interfere fails outright.
 | `src/core/sketch/SketchProfile.{h,cpp}` | loops, profile faces, named prism/revolve builders |
 | `src/core/AxisRef.h` | the shared axis reference |
 | `src/core/features/CradleFeature.{h,cpp}`, `src/core/mesh/Field.{h,cpp}`, `src/core/MeshOperand.{h,cpp}` | the Cradle, its pocket, a body as triangles for a mesh operation |
+| `src/core/MeshFit.{h,cpp}`, `src/core/mesh/Grow.cpp`, `src/core/mesh/Fit.cpp` (`FitRobust`), `src/core/DatumFrame.{h,cpp}`, `src/ui/FitTool.{h,cpp}` | a primitive fitted from a point, the datums that keep it, a datum as a mate's frame, the Fit tool |
 | `src/core/io/SerializeFeatures.cpp` | feature JSON, `kFeatureTypes` |
 | `src/cad/CADKernel.{h,cpp}`, `src/cad/FaceSelector.cpp` | OCC wrapper, face/edge picking |
 | `src/remote/RemoteModeling.cpp` | modeling RPCs |
@@ -1275,7 +1410,8 @@ feature; a Boolean, pattern or Split's body continues its source's material:
 `extract_variables`
 ([../variables/README.md](../variables/README.md#literals-that-should-be-expressions));
 `list_elements`, `curve_points`,
-`tube_schedule` and `grow_faces` ([Delete Face](#delete-face))
+`tube_schedule`, `grow_faces` ([Delete Face](#delete-face)) and
+`fit_primitive` ([fitting a primitive to a mesh](#fitting-a-primitive-to-a-mesh))
 (`src/remote/RemoteInspection.cpp`). A direct edit that would not build is
 refused by `add_feature` and `modify_feature` ([Direct edit](#direct-edit)). `get_state` lists each
 feature with its error, warning, `suppressed` and, for a Derived, `stale`.
@@ -1612,6 +1748,12 @@ reference case.
 
 ## Not built
 
+- A datum (or a Frame) as a mate's anchor in the GUI mate tool, which
+  picks faces: a scan is mated through its datums by `add_mate` only
+  ([datums on a scan](#datums-on-a-scan)).
+- A seed that moves with its scan: a from_fit datum's point is a world
+  point, so re-aligning the scan after fitting leaves it behind (the datum
+  then fails by name).
 - Splitting by a sketch (sketch as knife).
 - A body sub-ordinal: split pieces and pattern copies share one `createdBy`,
   and a reference finds its body by the name it carries

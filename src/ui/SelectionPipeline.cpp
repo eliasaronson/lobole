@@ -4,6 +4,7 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/AlignTool.h"
 #include "ui/AssemblyActions.h"
+#include "ui/FitTool.h"
 #include "ui/StudyPanel.h"
 
 #include "cad/FaceSelector.h"
@@ -1040,6 +1041,7 @@ void OpenFeatureEditor(AppState& state, uint64_t featureId) {
   if (!state.document || state.document->FindFeatureById(featureId) == nullptr)
     return;
   CancelAlignTool(state); // one session at a time
+  CancelFitTool(state);
   SelectFeature(state, featureId);
   state.editFeatureId = featureId; // the Tool window shows the editor session
 }

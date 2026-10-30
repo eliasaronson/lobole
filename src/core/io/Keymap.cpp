@@ -220,6 +220,8 @@ const Binding kDefaults[] = {
     {"part.align", Context::Part,
      "Align an import (floor, three points, principal axes, scale)", "Modify",
      ""},
+    {"part.fit", Context::Part,
+     "Fit a primitive to a body from a point, kept as a datum", "Modify", ""},
     {"part.mirror", Context::Part, "Mirror a body", "Modify", "M"},
     {"part.pattern", Context::Part, "Pattern (linear / circular)", "Modify",
      "P"},

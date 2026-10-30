@@ -232,7 +232,7 @@ struct ToolCase {
   Needs needs;
   Expect expect;
 };
-extern const ToolCase kToolCases[44];
+extern const ToolCase kToolCases[45];
 const ToolCase* FindToolCase(const char* testName);
 
 // A file under tests/fixtures/ in the source tree ("images/checker16x12.png").

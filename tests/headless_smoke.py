@@ -1717,15 +1717,45 @@ def main():
                r["fit"] == "arcs" and r["gen_ids"] and r["regen"].get("ok"),
                f"project_section draws the scan's outline: {r}")
         d.call("offset", sketch_id=sk, chain=r["gen_ids"], distance=2.0)
-        d.call("add_feature", feature={
+        stand = d.call("add_feature", feature={
             "type": "Extrude", "name": "Stand", "sketch_id": sk,
-            "distance": 3.0, "mode": "new_body"})
+            "distance": 3.0, "mode": "new_body"})["id"]
         vol = d.call("get_state")["bodies"][1]["volume_mm3"]
         reff = math.sqrt(vol / (3.0 * math.pi))
         expect(abs(abs(reff - 20.0) - 2.0) < 0.15,
                f"the offset outline extrudes 2 mm off the cut: r {reff}")
         expect_error(d, "project_section", "polyline, arcs, spline",
                      sketch_id=sk, fit="smooth")
+        # Fits and datums on a mesh
+        # (docs/modeling/README.md#datums-on-a-scan): the open scan is a
+        # ball of radius 20 to auto, the stand's top a plane at z = 3 and
+        # its side a cylinder round Z, kept as datums and measured through.
+        ball = d.call("get_state")["features"][0]["id"]
+        f = d.call("fit_primitive", feature_id=ball, point_mm=[20, 0, 0])
+        expect(f["kind"] == "sphere" and abs(f["radius_mm"] - 20) < 0.05 and
+               max(abs(c) for c in f["centre_mm"]) < 0.05 and f["tried"],
+               f"fit_primitive auto finds the scan's sphere: {f}")
+        top = d.call("add_feature", feature={
+            "type": "DatumPlane", "name": "Stand top", "kind": "from_fit",
+            "fit": {"body_id": stand, "point_mm": [5, 0, 3],
+                    "kind": "plane"}})["id"]
+        # The side is the outline's arcs, drawn within 0.05 mm of the cut:
+        # one cylinder only to about that, which the tolerance says.
+        axis = d.call("add_feature", feature={
+            "type": "DatumAxis", "name": "Stand axis", "kind": "from_fit",
+            "fit": {"body_id": stand, "point_mm": [reff, 0, 1.5],
+                    "kind": "cylinder", "tolerance_mm": 0.1}})["id"]
+        m = d.call("measure", a={"datum": top}, b={"datum": axis},
+                   kind="both")
+        expect(abs(m["angle_deg"] - 90) < 0.05 and
+               max(abs(c) for c in m["point_b"][:2]) < 0.05 and
+               abs(m["point_b"][2] - 3) < 1e-6,
+               f"the fitted top stands square to the fitted axis: {m}")
+        m = d.call("measure", a={"datum": axis}, b={"point_mm": [0, 0, 7]})
+        expect(m["distance"] < 0.05,
+               f"the fitted axis passes through the stand's centre: {m}")
+        expect_error(d, "measure", "against a datum", a={"datum": top},
+                     b={"feature_id": stand})
 
         expect_error(d, "import_step", "Accepted", path=stl, units="furlong")
         expect_error(d, "import_step", "declares its own", path=step,

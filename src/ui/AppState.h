@@ -1829,6 +1829,20 @@ struct AppState {
     std::string error;   // why the last alignment failed
     std::string summary; // what it fitted, one line
   } alignTool;
+  // The Fit tool (ui/FitTool.h): a primitive fitted to a body's triangles
+  // from a picked point, kept as a datum from_fit.
+  struct FitTool {
+    bool open = false;
+    const Document* document = nullptr; // ids are per document
+    int kind = 0;                       // 0 auto, then mesh::Kind + 1
+    uint64_t bodyFeatureId = 0;         // the feature whose body was picked
+    std::optional<glm::dvec3> point;
+    bool ownTolerance = false;
+    double toleranceMm = 0.0;
+    int fittedKind = -1; // mesh::Kind of the last fit, -1 none
+    std::string error;   // why the last fit failed, or why no datum keeps it
+    std::string summary; // what it fitted
+  } fitTool;
   // Which row owns the viewport drag arrow (0 = the first section).
   uint64_t sectionActiveId = 0;
   // Section cap fills (I3 v2, C4): the planes at the last cap rebuild. A cap

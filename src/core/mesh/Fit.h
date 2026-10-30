@@ -9,9 +9,11 @@
 // surface with the residual of every point: the RMS and the largest.
 //
 // No Eigen: designer_core builds without it (HAVE_EIGEN is optional), and
-// the solves here are 3x3 to 6x6. No RANSAC either: a CAD export's vertices
-// are ON its surfaces, with no outliers. A scan's are not, and the scan
-// round adds a robust fit behind the same result.
+// the solves here are 3x3 to 6x6. A CAD export's vertices are ON its
+// surfaces, with no outliers, so least squares is enough for recognition. A
+// scan's are not: FitRobust (RANSAC, then least squares over the points it
+// keeps) gives the same result for those
+// (docs/modeling/README.md#fitting-a-primitive-to-a-mesh).
 
 #include <glm/glm.hpp>
 
@@ -37,6 +39,9 @@ struct FitResult {
   double halfAngle = 0.0; // cone: between the axis and a generator (rad)
   double rms = 0.0;       // of the points' distances to the surface
   double max = 0.0;
+  // The points the rms and max are over: every point given to a least
+  // squares fit, the inliers of a robust one.
+  size_t inliers = 0;
 
   // The distance of `p` from the surface, signed: positive outside a
   // cylinder, cone or sphere, and on the normal's side of a plane.
@@ -44,6 +49,9 @@ struct FitResult {
   // The nearest point of the surface to `p` (a cone's: on the nappe `p` is
   // on, or the apex).
   [[nodiscard]] glm::dvec3 Project(const glm::dvec3& p) const;
+  // The unit normal at `p` on the side Distance counts positive (the
+  // gradient of Distance); zero on a cylinder's or cone's axis.
+  [[nodiscard]] glm::dvec3 Normal(const glm::dvec3& p) const;
 };
 
 // The plane through `points` (at least three, not collinear).
@@ -68,6 +76,38 @@ FitResult FitCone(const std::vector<glm::dvec3>& points,
 // The sphere through `points` (at least five, not coplanar).
 FitResult FitSphere(const std::vector<glm::dvec3>& points,
                     double giveUpAbove = 0.0);
+
+// The surface of `kind` through most of `points`, robust to outliers: a scan
+// has stray points (a lump, a hand in the frame, the table) that drag a
+// least-squares fit through them. RANSAC over minimal samples of oriented
+// points -- each point with its unit surface normal, `normals[i]` -- makes
+// hypotheses (a plane from three points, a sphere or a cylinder from two, a
+// cone from three tangent planes), each scored as MSAC does: a point costs
+// its squared distance, one past `toleranceMm` the tolerance's square, so
+// the tighter of two that keep as many points wins. The best is refitted
+// by least squares over the points it keeps while the cost falls. rms, max and
+// `inliers` are over those points. A plane takes no normals (empty): it is
+// turned to face the way the normals do when they are given.
+//
+// Deterministic: the samples come from a generator seeded by the points
+// themselves, so the same points give the same surface every time -- a
+// datum refitted on regeneration does not move.
+//
+// With `through`, only a surface passing within the tolerance of that point
+// is taken: a region grown from a picked triangle must be the surface THAT
+// triangle is on, not a larger one beside it (a box's next face).
+FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
+                    const std::vector<glm::dvec3>& normals, double toleranceMm,
+                    const glm::dvec3* through = nullptr);
+// The same with the hypotheses drawn from oriented samples apart from the
+// points scored and fitted: a mesh region's triangle centres and their unit
+// normals beside its vertices. A facet's normal is its surface's where a
+// vertex's, at a sharp edge, averages two surfaces' -- a CAD cylinder's
+// vertices are all on its rims.
+FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
+                    const std::vector<glm::dvec3>& facetCentres,
+                    const std::vector<glm::dvec3>& facetNormals,
+                    double toleranceMm, const glm::dvec3* through = nullptr);
 
 // The Gauss map of a cylinder or a cone: unit facet `normals`, each weighted
 // (by area), lie on a circle of the unit sphere -- a great circle for a

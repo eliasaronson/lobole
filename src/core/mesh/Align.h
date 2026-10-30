@@ -27,14 +27,16 @@ struct PlaneRegion {
   [[nodiscard]] bool FromLoop() const { return !loop.empty(); }
 };
 
-// The plane of the flat triangle `seed` (adjacency built) lies in: grown
-// across edges while every corner of a triangle lies within `toleranceMm`
-// of the plane fitted to the region so far and the triangle faces the same
-// side, then grown once more from the seed against the final fit, so the
-// region does not depend on the order it was reached in. When `seed` has
-// an edge on a boundary, the plane is fitted to that boundary loop instead:
-// a scan of an object on a table is open where the table was, and the rim
-// of that hole is its floor.
+// The plane of the flat triangle `seed` (adjacency built) lies in: the
+// region GrowFrom grows for a plane from it at `toleranceMm` -- a disk round
+// the seed fitted robustly (FitRobust), grown across edges while every
+// corner lies within the tolerance and the triangle faces the same side,
+// then grown once more against the final fit -- so a stray lump the region
+// took in does not tilt it. When `seed` has an edge on a boundary, the
+// plane is fitted to that boundary loop instead: a scan of an object on a
+// table is open where the table was, and the rim of that hole is its
+// floor. A rim's plane is least squares, since a rim is ragged by about an
+// edge length all the way round and has no band of inliers to find.
 PlaneRegion GrowPlane(const TriMesh& m, uint32_t seed, double toleranceMm);
 
 // The boundary loop through one of triangle `t`'s boundary edges, its

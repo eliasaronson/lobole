@@ -392,6 +392,35 @@ def main():
                      "distance_mm")]:
                 check(label, "align_import", dict(params, feature_id=imp),
                       needle=needle, tab=part["name"])
+            # A primitive fitted from a point, and the datums that keep it
+            # (docs/modeling/README.md#datums-on-a-scan): refused on the
+            # inputs and on the geometry, the datum before it is added.
+            for label, method, params, needle in [
+                    ("fit_primitive unknown kind", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "kind": "cylindre"},
+                     "plane, cylinder, cone, sphere, auto"),
+                    ("fit_primitive zero tolerance", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "tolerance_mm": 0}, "must be a number > 0"),
+                    ("fit_primitive a point off the import", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [5000, 0, 0]},
+                     "nearest surface"),
+                    ("fit_primitive no such feature", "fit_primitive",
+                     {"feature_id": 987654, "point_mm": [0, 0, 0]},
+                     "no feature with id"),
+                    ("DatumAxis from_fit of a plane", "add_feature",
+                     {"feature": {
+                         "type": "DatumAxis", "name": "Bad", "kind": "from_fit",
+                         "fit": {"body_id": imp, "point_mm": [0, 0, 0],
+                                 "kind": "plane"}}},
+                     "accepted: cylinder, cone"),
+                    ("DatumPlane from_fit auto", "add_feature",
+                     {"feature": {
+                         "type": "DatumPlane", "name": "Bad", "kind": "from_fit",
+                         "fit": {"body_id": imp, "point_mm": [0, 0, 0],
+                                 "kind": "auto"}}}, "accepted: plane")]:
+                check(label, method, params, needle=needle, tab=part["name"])
             d.call("delete_feature", feature_id=imp)
 
             # An expression requirement and a design sweep

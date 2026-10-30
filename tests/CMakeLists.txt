@@ -178,6 +178,8 @@ add_executable(designer_tests
     test_mesh_costs.cpp
     test_mesh_writers.cpp
     test_mesh_fit.cpp
+    test_mesh_fit_scan.cpp
+    test_datum_from_fit.cpp
     test_mesh_segment.cpp
     test_mesh_files.cpp
     test_mesh_rebuild.cpp

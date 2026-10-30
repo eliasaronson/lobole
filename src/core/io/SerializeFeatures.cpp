@@ -798,6 +798,8 @@ const char* DatumPlaneKindToString(DatumPlaneKind kind) {
     return "angled";
   case DatumPlaneKind::ThroughPoints:
     return "through_points";
+  case DatumPlaneKind::FromFit:
+    return "from_fit";
   }
   return "offset";
 }
@@ -809,8 +811,63 @@ DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
     return DatumPlaneKind::Angled;
   if (s == "through_points")
     return DatumPlaneKind::ThroughPoints;
+  if (s == "from_fit") // vNEXT
+    return DatumPlaneKind::FromFit;
   throw std::runtime_error("unknown datum plane kind: " + s +
-                           "; kinds: offset, angled, through_points");
+                           "; kinds: offset, angled, through_points, from_fit");
+}
+
+// vNEXT: a datum fitted to a body's triangles
+// (docs/modeling/README.md#datums-on-a-scan), as {body_id, point_mm, kind,
+// tolerance_mm?}. `kinds` is what this datum accepts; anything else -- auto
+// among them, which would let a re-scan change what the datum is -- is
+// refused naming them.
+json FitRefToJson(const meshfit::FitRef& f) {
+  json j{{"body_id", f.bodyFeatureId},
+         {"point_mm", Vec3ToJson(f.pointMm)},
+         {"kind", mesh::KindName(f.kind)}};
+  if (f.toleranceMm)
+    j["tolerance_mm"] = *f.toleranceMm;
+  return j;
+}
+
+meshfit::FitRef FitRefFromJson(const json& j, const char* what,
+                               std::initializer_list<mesh::Kind> kinds) {
+  readctx::RefuseUnknownKeys(j, {"body_id", "point_mm", "kind", "tolerance_mm"},
+                             what);
+  meshfit::FitRef f;
+  f.bodyFeatureId = IdField(j, "body_id", true);
+  if (f.bodyFeatureId == 0)
+    throw std::runtime_error(std::string(what) +
+                             ": body_id is the id of the feature whose body "
+                             "it fits");
+  f.pointMm = Vec3FromJson(j.at("point_mm"));
+  std::string accepted;
+  for (mesh::Kind k : kinds)
+    accepted += std::string(accepted.empty() ? "" : ", ") + mesh::KindName(k);
+  const json& kj = j.at("kind");
+  const std::string name = kj.is_string() ? kj.get<std::string>() : kj.dump();
+  bool found = false;
+  for (mesh::Kind k : kinds)
+    if (name == mesh::KindName(k)) {
+      f.kind = k;
+      found = true;
+    }
+  if (!found)
+    throw std::runtime_error(std::string(what) + ": kind " + name +
+                             " is not one it fits (accepted: " + accepted +
+                             "; a datum keeps the kind it was fitted as, "
+                             "so `auto` is fit_primitive's alone)");
+  if (j.contains("tolerance_mm")) {
+    const json& t = j.at("tolerance_mm");
+    if (!t.is_number() || !std::isfinite(t.get<double>()) ||
+        !(t.get<double>() > 0.0))
+      throw std::runtime_error(std::string(what) +
+                               ": tolerance_mm is a number of mm greater "
+                               "than 0 (leave it out for the scan's noise)");
+    f.toleranceMm = t.get<double>();
+  }
+  return f;
 }
 
 const char* FrameKindToString(FrameKind kind) {
@@ -849,6 +906,8 @@ const char* DatumAxisKindToString(DatumAxisKind kind) {
     return "global_y";
   case DatumAxisKind::GlobalZ:
     return "global_z";
+  case DatumAxisKind::FromFit:
+    return "from_fit";
   }
   return "two_points";
 }
@@ -864,7 +923,11 @@ DatumAxisKind DatumAxisKindFromString(const std::string& s) {
     return DatumAxisKind::GlobalY;
   if (s == "global_z")
     return DatumAxisKind::GlobalZ;
-  throw std::runtime_error("Unknown datum axis kind: " + s);
+  if (s == "from_fit") // vNEXT
+    return DatumAxisKind::FromFit;
+  throw std::runtime_error("unknown datum axis kind: " + s +
+                           "; kinds: two_points, sketch_line, global_x, "
+                           "global_y, global_z, from_fit");
 }
 
 const char* Curve3DKindToString(Curve3DKind kind) {
@@ -1448,7 +1511,8 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* dp = dynamic_cast<const DatumPlaneFeature*>(&feature)) {
     j["kind"] = DatumPlaneKindToString(dp->kind);
     // Parent (Offset/Angled): earlier datum by id, or a base plane.
-    if (dp->kind != DatumPlaneKind::ThroughPoints) {
+    if (dp->kind != DatumPlaneKind::ThroughPoints &&
+        dp->kind != DatumPlaneKind::FromFit) {
       if (dp->parentId != 0)
         j["parent_id"] = dp->parentId;
       else
@@ -1472,6 +1536,9 @@ json FeatureToJson(const Feature& feature) {
     case DatumPlaneKind::ThroughPoints:
       j["points"] = {Vec3ToJson(dp->p0), Vec3ToJson(dp->p1),
                      Vec3ToJson(dp->p2)};
+      break;
+    case DatumPlaneKind::FromFit:
+      j["fit"] = FitRefToJson(dp->fit);
       break;
     }
   } else if (auto* rev = dynamic_cast<const RevolveFeature*>(&feature)) {
@@ -1500,6 +1567,9 @@ json FeatureToJson(const Feature& feature) {
     case DatumAxisKind::GlobalY:
     case DatumAxisKind::GlobalZ:
       break; // kind string is sufficient
+    case DatumAxisKind::FromFit:
+      j["fit"] = FitRefToJson(da->fit);
+      break;
     }
   } else if (auto* fr = dynamic_cast<const FrameFeature*>(&feature)) { // v86
     j["kind"] = FrameKindToString(fr->kind);
@@ -2351,14 +2421,19 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "template:string, parameters?:object, on?:string|object, "
      "definition?:object, ids?:any[], revision?:int"},
     {"DatumPlane", 1,
-     "kind: offset|angled|through_points; offset and angled take base_plane: "
-     "xy|xz|yz or parent_id; offset: offset (+_expr), flip?; angled: axis "
-     "{kind: x|y|z|sketch_line|datum_axis|custom}, the same as Revolve's, "
-     "angle_deg (+_expr); through_points: points [[x,y,z] x3] (mm)",
-     "kind:'offset'|'angled'|'through_points', "
+     "kind: offset|angled|through_points|from_fit; offset and angled take "
+     "base_plane: xy|xz|yz or parent_id; offset: offset (+_expr), flip?; "
+     "angled: axis {kind: x|y|z|sketch_line|datum_axis|custom}, the same as "
+     "Revolve's, angle_deg (+_expr); through_points: points [[x,y,z] x3] "
+     "(mm); from_fit: fit {body_id (the feature whose body it fits), "
+     "point_mm [x,y,z] on it, kind: plane, tolerance_mm? (default the "
+     "scan's own noise)} -- a plane refitted to the triangles round the "
+     "point every regeneration, so it follows a re-scan "
+     "(docs/modeling/README.md#datums-on-a-scan; fit_primitive previews it)",
+     "kind:'offset'|'angled'|'through_points'|'from_fit', "
      "base_plane?:'xy'|'xz'|'yz', parent_id?:int>=0, offset?:number, "
      "offset_expr?:string, flip?:bool, axis?:object, angle_deg?:number, "
-     "angle_expr?:string, points?:any[]"},
+     "angle_expr?:string, points?:any[], fit?:object"},
     {"Revolve", 1,
      "sketch_id, axis {kind: x|y|z (world axes THROUGH THE WORLD ORIGIN)|"
      "sketch_line {sketch_id, entity_id}|datum_axis {datum_axis_id}|custom "
@@ -2372,8 +2447,17 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "sketch_id:int>=0, axis:object, angle_deg?:number, "
      "angle_expr?:string, mode?:'new_body'|'add'|'cut', reversed?:bool, "
      "symmetric?:bool, regions?:any[]"},
-    {"DatumAxis", 1, "kind, points?/sketch_id?/entity_id?",
-     "kind:string, points?:any[], sketch_id?:int>=0, entity_id?:int>=0"},
+    {"DatumAxis", 1,
+     "kind: two_points (points [[x,y,z] x2] mm)|sketch_line (sketch_id, "
+     "entity_id)|global_x|global_y|global_z|from_fit (fit {body_id, point_mm "
+     "[x,y,z], kind: cylinder|cone, tolerance_mm?}: the axis of the "
+     "cylinder or cone refitted round the point every regeneration -- a "
+     "cylinder's sense has its largest component positive, a cone's points "
+     "from the apex, which is its origin; "
+     "docs/modeling/README.md#datums-on-a-scan)",
+     "kind:'two_points'|'sketch_line'|'global_x'|'global_y'|'global_z'|"
+     "'from_fit', points?:any[], sketch_id?:int>=0, entity_id?:int>=0, "
+     "fit?:object"},
     {"Frame", 86,
      "kind: explicit|from_element|offset — a NAMED datum frame (origin + "
      "axes) that mates anchor to by name ({occurrence, frame: <id|name>}) "
@@ -2717,11 +2801,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
               "reference", "snapshot"}},
             {"DatumPlane",
              {"kind", "parent_id", "base_plane", "offset", "offset_expr",
-              "flip", "axis", "angle_deg", "angle_expr", "points"}},
+              "flip", "axis", "angle_deg", "angle_expr", "points", "fit"}},
             {"Revolve",
              {"sketch_id", "axis", "angle_deg", "angle_expr", "symmetric",
               "reversed", "mode", "regions"}},
-            {"DatumAxis", {"kind", "points", "sketch_id", "entity_id"}},
+            {"DatumAxis", {"kind", "points", "sketch_id", "entity_id", "fit"}},
             {"Frame",
              {"kind", "origin", "origin_expr", "z_axis", "x_axis", "elements",
               "flip", "parent_id", "offset", "offset_expr", "rotation_deg",
@@ -3539,6 +3623,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       dp->p2 = Vec3FromJson(pts.at(2));
       break;
     }
+    case DatumPlaneKind::FromFit:
+      dp->fit =
+          FitRefFromJson(j.at("fit"), "DatumPlane fit", {mesh::Kind::Plane});
+      break;
     }
     out = std::move(dp);
   } else if (type == "Revolve") {
@@ -3569,6 +3657,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     case DatumAxisKind::GlobalX:
     case DatumAxisKind::GlobalY:
     case DatumAxisKind::GlobalZ:
+      break;
+    case DatumAxisKind::FromFit:
+      da->fit = FitRefFromJson(j.at("fit"), "DatumAxis fit",
+                               {mesh::Kind::Cylinder, mesh::Kind::Cone});
       break;
     }
     out = std::move(da);

@@ -5,7 +5,7 @@
 
 // Organic meshes with known answers, generated in-test: what a sculpt
 // download or a phone scan is, built straight as triangles
-// (docs/plans/organic-meshes-and-scans.md). No file is committed: the
+// (docs/interchange/README.md#mesh-bodies). No file is committed: the
 // Stanford models are research-only. Pure data -- no OpenCASCADE and no
 // Catch2 -- so the manifold probe (tests/mesh_boolean_probe.cpp) and the
 // fixture writer the bench calls build them too.
@@ -59,6 +59,28 @@ Organic Figurine(size_t triangles);
 // phone scan of an object standing on a table arrives: open, one boundary
 // loop round the cut.
 Organic CutFigurine(size_t triangles);
+
+// A scanned turned part, for fitting primitives to: a flat base, a
+// cylinder of radius 12 and height 40, a cone narrowing to radius 4 over
+// 12 mm and a flat top, its axis tilted off Z and moved off the origin.
+// Every vertex is moved along the surface normal by a deterministic noise
+// of at most `noise` mm, and a smooth lump `lump` mm high stands on the
+// cylinder -- the stray matter a least-squares fit is dragged by. Closed.
+struct Post {
+  Organic organic;
+  glm::dvec3 base{0.0};                // the axis point on the bottom face
+  glm::dvec3 axis{0.0, 0.0, 1.0};      // unit, bottom to top
+  double radius = 12.0, height = 40.0; // the cylinder
+  double coneHeight = 12.0, topRadius = 4.0;
+  double noise = 0.0;
+  [[nodiscard]] glm::dvec3 Apex() const;  // where the cone's sides meet
+  [[nodiscard]] double HalfAngle() const; // the cone's, rad
+  // Points on each surface, clear of its edges and of the lump.
+  glm::dvec3 onCylinder{0.0}, onCone{0.0}, onTop{0.0}, onBottom{0.0};
+  glm::dvec3 onLump{0.0}; // the lump's crest
+  double lumpSigma = 0.0; // its width (mm, a Gaussian's sigma)
+};
+Post ScannedPost(size_t triangles, double noise = 0.05, double lump = 1.5);
 
 // A triangle soup with what a bad file has, and how many of each.
 struct DirtySoup {

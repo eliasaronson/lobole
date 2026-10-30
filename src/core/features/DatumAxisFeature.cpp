@@ -17,6 +17,7 @@ bool DatumAxisFeature::Execute(RegenContext& ctx) {
   // -- never the last good one, which a dependent would build on.
   m_origin = glm::dvec3(0.0);
   m_dir = glm::dvec3(1.0, 0.0, 0.0);
+  m_fitReport = nlohmann::json();
   switch (kind) {
   case DatumAxisKind::GlobalX:
     m_origin = glm::dvec3(0.0);
@@ -50,6 +51,31 @@ bool DatumAxisFeature::Execute(RegenContext& ctx) {
       SetError("sketch line not found or degenerate");
       return false;
     }
+    return true;
+  }
+  case DatumAxisKind::FromFit: {
+    if (fit.kind != mesh::Kind::Cylinder && fit.kind != mesh::Kind::Cone) {
+      SetError(std::string("a datum axis fits a cylinder or a cone, not a ") +
+               mesh::KindName(fit.kind) +
+               (fit.kind == mesh::Kind::Plane
+                    ? " (a plane is a DatumPlane from_fit)"
+                    : " (a sphere has no axis: fit_primitive gives its "
+                      "centre)"));
+      return false;
+    }
+    meshfit::Result r;
+    std::string error;
+    if (!meshfit::Refit(ctx, fit, r, error)) {
+      SetError(error);
+      return false;
+    }
+    const mesh::FitResult& f = r.region.fit;
+    m_dir = glm::normalize(meshfit::CanonicalAxis(f));
+    // A cone's apex; a cylinder's axis point nearest the seed.
+    m_origin = f.kind == mesh::Kind::Cone
+                   ? f.origin
+                   : f.origin + glm::dot(fit.pointMm - f.origin, m_dir) * m_dir;
+    m_fitReport = meshfit::ResultJson(r);
     return true;
   }
   }

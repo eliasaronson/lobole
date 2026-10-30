@@ -107,6 +107,7 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
   // What a failed evaluation leaves is the default, as on a fresh object
   // -- never the last good one, which a dependent would build on.
   m_outPlane = SketchPlane(PlaneType::XY);
+  m_fitReport = nlohmann::json();
   switch (kind) {
   case DatumPlaneKind::Offset: {
     const auto parent = ResolveParentPlane(ctx, parentId, basePlane);
@@ -149,6 +150,30 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
       return false;
     }
     m_outPlane = SketchPlane(p0, glm::normalize(n), glm::normalize(p1 - p0));
+    return true;
+  }
+  case DatumPlaneKind::FromFit: {
+    if (fit.kind != mesh::Kind::Plane) {
+      SetError(std::string("a datum plane fits a plane, not a ") +
+               mesh::KindName(fit.kind) +
+               " (a cylinder's or cone's axis is a DatumAxis from_fit)");
+      return false;
+    }
+    meshfit::Result r;
+    std::string error;
+    if (!meshfit::Refit(ctx, fit, r, error)) {
+      SetError(error);
+      return false;
+    }
+    const glm::dvec3 normal = glm::normalize(r.region.fit.axis);
+    // The plane's own X: the world's X laid into it, else the world's Y --
+    // fixed by the world, so a refit turns it only as far as the normal.
+    glm::dvec3 u = glm::dvec3(1, 0, 0) - normal.x * normal;
+    if (glm::length(u) < 0.5)
+      u = glm::dvec3(0, 1, 0) - normal.y * normal;
+    m_outPlane = SketchPlane(r.region.fit.Project(fit.pointMm), normal,
+                             glm::normalize(u));
+    m_fitReport = meshfit::ResultJson(r);
     return true;
   }
   }

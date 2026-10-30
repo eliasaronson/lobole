@@ -6,18 +6,22 @@
 #include "cad/SketchPlane.h"
 #include "core/AxisRef.h"
 #include "core/Feature.h"
+#include "core/MeshFit.h"
 
 #include <optional>
 #include <string>
 
-enum class DatumPlaneKind { Offset, Angled, ThroughPoints };
+enum class DatumPlaneKind { Offset, Angled, ThroughPoints, FromFit };
 
 // Model-level reference plane (modeling M1). Produces a SketchPlane that
 // downstream sketches reference by this feature's stable id (see
 // SketchFeature::planeRef), so upstream edits move dependent sketches —
 // unlike the baked face-planes this replaces. All variants are
 // toponaming-free: parents are base planes or earlier datums by id, axes are
-// global axes or sketch lines by stable ids.
+// global axes or sketch lines by stable ids. FromFit refits a plane to a
+// body's triangles round a stored point every regeneration
+// (docs/modeling/README.md#datums-on-a-scan), so the datum follows a
+// re-scan.
 //
 // Contributes no bodies. A missing/degenerate input fails Execute (same
 // contract as ExtrudeFeature's missing sketch) and leaves the output plane at
@@ -42,6 +46,7 @@ public:
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(parentId); // the plane this one is offset/angled from
     VisitRefs(axis, visit);
+    visit(fit.bodyFeatureId); // FromFit: the body's feature
   }
 
   [[nodiscard]] bool IsDatum() const override { return true; }
@@ -74,8 +79,15 @@ public:
   // ThroughPoints: three non-collinear world-space points.
   glm::dvec3 p0{0.0}, p1{1.0, 0.0, 0.0}, p2{0.0, 1.0, 0.0};
 
+  // FromFit: the body, the seed point and the kind (plane only).
+  meshfit::FitRef fit;
+  // What the last Execute fitted ({} when it failed or is not FromFit):
+  // meshfit::ResultJson, for get_state and the reply.
+  [[nodiscard]] const nlohmann::json& FitReport() const { return m_fitReport; }
+
 private:
   SketchPlane m_outPlane{PlaneType::XY};
+  nlohmann::json m_fitReport;
 };
 
 // The parent plane a datum builds on: base plane when parentId == 0, else an

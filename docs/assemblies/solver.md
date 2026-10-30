@@ -23,7 +23,7 @@ stored, so a part edit moves the connector with the geometry.
 | anchor | frame |
 |---|---|
 | `origin: true` | the part's coordinate frame |
-| `frame: <id>` | a named Frame feature of the part — the mate as designed (a bolt-circle centre, a shaft axis). An errored Frame refuses the mate. |
+| `frame: <id>` | a named Frame feature of the part — the mate as designed (a bolt-circle centre, a shaft axis) — or a DatumPlane (origin, X, normal as Z) or DatumAxis (origin, direction as Z, X the world's X laid square to it), which is how a scan is mated ([datums on a scan](../modeling/README.md#datums-on-a-scan)). An errored one refuses the mate. |
 | `face: {feature_id, element}` planar | origin at the face centroid, Z the outward normal, X a deterministic in-plane axis (`CADShape::FacePlane`) |
 | … cylindrical | Z the axis, origin the face centroid projected onto the axis, X the cylinder's **seam** (`CADShape::FaceAxis`; see below) |
 | … conical | Z the axis, origin the apex, X the cone's seam |

@@ -43,7 +43,9 @@ in the file; the UI and expressions show degrees.
 sketch is attached to a body face and `Execute` re-derives the plane from the
 resolved face every regeneration; when `planeRef` names a datum plane,
 another sketch (its plane) or a Frame (its XY plane, X as U) earlier in the
-history the plane is refreshed from it. A reference that is gone,
+history the plane is refreshed from it -- a datum plane fitted to a scan
+([datums on a scan](../modeling/README.md#datums-on-a-scan)) among them,
+which is how a sketch stands on a scan's flat. A reference that is gone,
 suppressed or itself in error is a regeneration error naming it, never a
 fall-back to the last plane; a feature built on a failed sketch (Extrude,
 Revolve, Loft, Rib, Hole, Normal Cut, Jog, Base Flange, Sweep's profile)

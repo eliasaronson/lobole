@@ -128,4 +128,32 @@ struct Recognition {
 
 Recognition Summarize(const TriMesh& mesh, const Segmentation& s, int minSides);
 
+// ---- one region, from a picked point (fit_primitive, a datum's from_fit) --
+
+// The tolerance a scan's own noise sets: how far a vertex stands off the
+// plane of the triangle across an edge from it, at the median over the
+// mesh's edges that are neither creases (turning more than a pentagon's
+// 72°, kMinSidesLowest) nor flat to four quanta of the file's precision,
+// times three (a robust three sigma), never less than those four quanta. A
+// clean CAD export's is its curved facets' own bend; a box's, its
+// precision.
+double ScanTolerance(const TriMesh& mesh);
+
+// The surface of `kind` that triangle `seed` (adjacency built) lies on,
+// grown out from it (docs/modeling/README.md#fitting-a-primitive-to-a-mesh):
+//  1. a disk of rings round the seed, until a curved kind's curvature
+//     stands above the noise (the disk's best plane misses a vertex by
+//     three tolerances) -- a plane's needs only a few rings;
+//  2. a robust fit (FitRobust) of the disk's vertices and normals;
+//  3. growth across edges, taking a triangle when every corner lies within
+//     `toleranceMm` of the surface and it faces the seed's side of it,
+//     refitted each time the region doubles;
+//  4. grown once more from the seed against the final fit, so the region
+//     does not depend on the order it was reached in, and fitted robustly
+//     again. rms and max are over every vertex of the region.
+// A curved kind whose region is flat to within the tolerance is refused:
+// the radius it gives is the noise's. A failed result carries `why`.
+Region GrowFrom(const TriMesh& mesh, uint32_t seed, Kind kind,
+                double toleranceMm, std::string* why = nullptr);
+
 } // namespace mesh

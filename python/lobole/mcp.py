@@ -181,12 +181,17 @@ typed `contract`: every field, its type and its enum values.
   circular: "axis": <axis ref>, "count": int, "count_expr"?: str,
             "angle_deg": num, "angle_expr"?: str
 - DatumPlane: {{"type": "DatumPlane", "name": str,
-  "kind": "offset"|"angled"|"through_points", ...}}
+  "kind": "offset"|"angled"|"through_points"|"from_fit", ...}}
   offset/angled parent: "parent_id"?: <DatumPlane id> or
   "base_plane": "xy"|"xz"|"yz" (Z is up: xy = Top, xz = Front, yz = Right)
   offset: "offset": num, "offset_expr"?: str, "flip"?: bool
   angled: "axis": <axis ref>, "angle_deg": num, "angle_expr"?: str
   through_points: "points": [[x,y,z],[x,y,z],[x,y,z]]
+  from_fit: "fit": {{"body_id": <feature whose body>, "point_mm": [x,y,z]
+            on it, "kind": "plane", "tolerance_mm"?: num}} — a plane fitted
+            to a SCAN's triangles round the point, refitted every
+            regeneration so it follows a re-scan (preview with
+            rpc('fit_primitive', ...)); sketch on it, mate to it, measure it
 - Frame (a NAMED datum frame — origin + axes — that a mate anchors to by
   name and the `frame` query reports; the way to position without
   transcribing a coordinate): {{"type": "Frame", "name": str, "kind":
@@ -203,11 +208,16 @@ typed `contract`: every field, its type and its enum values.
             (+"offset_expr"), "rotation_deg": [rx,ry,rz] (+"rotation_expr")
   Mate to one with add_mate a/b = {{"occurrence": <id|name>,
   "frame": <Frame id or name>}}; then moving the geometry the frame was
-  built from moves the mate with it.
+  built from moves the mate with it. "frame" may name a DatumPlane or
+  DatumAxis too: how a scan, which has no faces, is mated.
 - DatumAxis: {{"type": "DatumAxis", "name": str, "kind":
-  "two_points"|"sketch_line"|"global_x"|"global_y"|"global_z", ...}}
+  "two_points"|"sketch_line"|"global_x"|"global_y"|"global_z"|"from_fit",
+  ...}}
   two_points: "points": [[x,y,z],[x,y,z]]
   sketch_line: "sketch_id": <feature id>, "entity_id": <line id>
+  from_fit: "fit": {{"body_id", "point_mm", "kind": "cylinder"|"cone",
+            "tolerance_mm"?}} — the axis of a scan's bore, boss or cone,
+            refitted every regeneration
 - Fillet / Chamfer (3D, on B-Rep edges): {{"type": "Fillet"|"Chamfer",
   "name": str, "radius": num, "radius_expr"?: str,
   "edges": [{{"feature_id": <the body's created_by feature id>,
@@ -1272,6 +1282,19 @@ _reference("project_section", "Draw a scan's (or any body's) outline into a "
           "gen_ids, distance}) grows the outline by the clearance into real "
           "geometry, then extrude it -- a fully parametric 2.5-D part, where "
           "Cradle is the one shaped in 3-D.")
+_reference("fit_primitive", "Fit a plane, cylinder, cone or sphere to a "
+          "scan's (or any body's) triangles from a point on it, robust to a "
+          "scan's outliers; changes nothing. params: feature_id (the "
+          "feature whose body), point_mm, kind? ('auto', the default | "
+          "'plane' | 'cylinder' | 'cone' | 'sphere'), tolerance_mm? "
+          "(default the scan's own noise). Returns the surface (plane "
+          "origin_mm + normal, cylinder origin_mm + axis + radius_mm, cone "
+          "apex_mm + axis + half_angle_deg, sphere centre_mm + radius_mm), "
+          "rms_mm, max_mm, triangles, area_mm2, and for auto `tried`. Keep "
+          "it as a datum that follows a re-scan: add_feature DatumPlane "
+          "(plane) or DatumAxis (cylinder, cone) with kind 'from_fit' and "
+          "fit {body_id, point_mm, kind}; then sketch on it, mate to it "
+          "(add_mate frame: <datum>) or measure it ({datum: id}).")
 
 
 @mcp.tool(description="Measure geometry over stable element names (from "
@@ -1280,8 +1303,10 @@ _reference("project_section", "Draw a scan's (or any body's) outline into a "
           "distance between the two elements (faces or edges). Each ref is "
           "{feature_id, element}. Optional `part` (slot name or stable id) "
           "measures against that part WITHOUT switching the active tab — "
-          "works from an assembly tab too. Verify dimensions with this "
-          "instead of trusting your inputs.")
+          "works from an assembly tab too. A ref may also be {datum: <DatumPlane "
+          "or DatumAxis id|name>} (a scan's fitted datums), against another "
+          "datum (angle_deg, distance) or a bare {point_mm}. Verify "
+          "dimensions with this instead of trusting your inputs.")
 def measure(a: dict, b: dict | None = None, kind: str | None = None,
             distance_kind: str | None = None, mode: str | None = None,
             part: str | int | None = None) -> dict:

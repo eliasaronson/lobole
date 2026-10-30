@@ -386,6 +386,118 @@ Organic NoisySphere(size_t triangles, double radius, double noise) {
   return o;
 }
 
+glm::dvec3 Post::Apex() const {
+  return base + axis * (height + coneHeight * radius / (radius - topRadius));
+}
+
+double Post::HalfAngle() const {
+  return std::atan((radius - topRadius) / coneHeight);
+}
+
+Post ScannedPost(size_t triangles, double noise, double lump) {
+  Post post;
+  post.noise = noise;
+  post.axis = glm::normalize(glm::dvec3(0.3, -0.2, 1.0));
+  post.base = {5.0, -3.0, 2.0};
+  const double R = post.radius, H = post.height, h = post.coneHeight,
+               r2 = post.topRadius;
+  const double slant = std::hypot(R - r2, h);
+  const double length = R + H + slant + r2;
+  // 2 nTheta nProfile triangles at one edge length e along both.
+  const double e = std::sqrt(2.0 * 2.0 * kPi * R * length /
+                             double(std::max<size_t>(triangles, 200)));
+  const int nTheta = std::max(12, int(std::lround(2.0 * kPi * R / e)));
+  // The profile as (r, z) samples with their normals, corner to corner.
+  struct Sample {
+    double r, z;
+    glm::dvec2 n; // (radial, axial)
+  };
+  std::vector<Sample> prof;
+  const auto segment = [&](glm::dvec2 a, glm::dvec2 b, glm::dvec2 n,
+                           bool last) {
+    const int k = std::max(1, int(std::lround(glm::length(b - a) / e)));
+    for (int i = 0; i < k + (last ? 1 : 0); i++) {
+      const glm::dvec2 q = a + (b - a) * (double(i) / k);
+      prof.push_back({q.x, q.y, n});
+    }
+  };
+  const glm::dvec2 coneN = glm::normalize(glm::dvec2(h, R - r2));
+  segment({0, 0}, {R, 0}, {0, -1}, false);
+  segment({R, 0}, {R, H}, {1, 0}, false);
+  segment({R, H}, {r2, H + h}, coneN, false);
+  segment({r2, H + h}, {0, H + h}, {0, 1}, true);
+  // The frame: local z along the axis.
+  glm::dvec3 ex = glm::normalize(glm::cross(glm::dvec3(0, 1, 0), post.axis));
+  const glm::dvec3 ey = glm::cross(post.axis, ex);
+  const auto world = [&](double r, double z, double th) {
+    return post.base + ex * (r * std::cos(th)) + ey * (r * std::sin(th)) +
+           post.axis * z;
+  };
+  const auto normalAt = [&](const glm::dvec2& n, double th) {
+    return ex * (n.x * std::cos(th)) + ey * (n.x * std::sin(th)) +
+           post.axis * n.y;
+  };
+  // The lump: on the cylinder at theta 0, half way up.
+  const double lumpZ = H / 2.0, sigma = 3.0;
+  post.lumpSigma = sigma;
+  post.onLump = world(R + lump, lumpZ, 0.0);
+  mesh::TriMesh m;
+  std::vector<std::vector<uint32_t>> ring(prof.size());
+  uint64_t key = 0x5ca9;
+  for (size_t i = 0; i < prof.size(); i++) {
+    const Sample& sm = prof[i];
+    const bool pole = sm.r < 1e-12;
+    const int count = pole ? 1 : nTheta;
+    for (int j = 0; j < count; j++) {
+      const double th = 2.0 * kPi * j / nTheta;
+      glm::dvec3 p = world(sm.r, sm.z, th);
+      const glm::dvec3 n = normalAt(sm.n, th);
+      p += n * (noise * Noise(key++));
+      if (std::abs(sm.r - R) < 1e-12 && sm.z > 0.0 && sm.z < H) {
+        const double arc = std::remainder(th, 2.0 * kPi) * R, dz = sm.z - lumpZ;
+        p += n *
+             (lump * std::exp(-(arc * arc + dz * dz) / (2.0 * sigma * sigma)));
+      }
+      ring[i].push_back(uint32_t(m.positions.size()));
+      m.positions.push_back(p);
+    }
+  }
+  for (size_t i = 0; i + 1 < prof.size(); i++) {
+    const auto& a = ring[i];
+    const auto& b = ring[i + 1];
+    for (int j = 0; j < nTheta; j++) {
+      const int k = (j + 1) % nTheta;
+      if (a.size() == 1)
+        m.triangles.push_back({a[0], b[size_t(j)], b[size_t(k)]});
+      else if (b.size() == 1)
+        m.triangles.push_back({a[size_t(j)], b[0], a[size_t(k)]});
+      else {
+        m.triangles.push_back({a[size_t(j)], b[size_t(j)], b[size_t(k)]});
+        m.triangles.push_back({a[size_t(j)], b[size_t(k)], a[size_t(k)]});
+      }
+    }
+  }
+  mesh::BuildAdjacency(m);
+  if (m.Volume() < 0.0) {
+    for (auto& t : m.triangles)
+      std::swap(t[1], t[2]);
+    mesh::BuildAdjacency(m);
+  }
+  m.quantum = mesh::Float32Quantum(m.positions);
+  post.onCylinder = world(R, H * 0.4, kPi);
+  post.onCone = world(0.5 * (R + r2), H + 0.5 * h, kPi * 0.5);
+  post.onTop = world(r2 * 0.4, H + h, kPi * 0.25);
+  post.onBottom = world(R * 0.5, 0.0, kPi * 1.25);
+  Organic& o = post.organic;
+  o.name = "post";
+  o.volume = kPi * R * R * H + kPi * h / 3.0 * (R * R + R * r2 + r2 * r2);
+  o.area =
+      kPi * R * R + 2.0 * kPi * R * H + kPi * (R + r2) * slant + kPi * r2 * r2;
+  m.Bounds(o.lo, o.hi);
+  o.mesh = std::move(m);
+  return post;
+}
+
 Organic Torus(size_t triangles) {
   const double R = 30.0, r = 10.0;
   const int nv = std::max(3, int(std::lround(std::sqrt(triangles / 6.0))));

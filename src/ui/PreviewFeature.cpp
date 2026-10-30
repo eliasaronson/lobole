@@ -4,6 +4,7 @@
 #include "ui/PreviewFeature.h"
 #include "common/Logger.h"
 #include "ui/AlignTool.h"
+#include "ui/FitTool.h"
 #include "ui/FloatingWindow.h"
 #include "ui/SectionToSketch.h"
 #include "ui/SelectionPipeline.h"
@@ -52,6 +53,7 @@ uint64_t BeginPreviewFeature(AppState& state,
   // every edit: the session's activity journal.
   LOG_INFO("tool: {} started", feature->TypeName());
   CancelAlignTool(state); // one session at a time
+  CancelFitTool(state);
   state.document->AddFeature(std::move(feature));
   const size_t idx = state.document->FeatureCount() - 1;
   Feature* added = state.document->GetFeature(idx);
@@ -210,6 +212,7 @@ void CancelPendingFeature(AppState& state) {
   // An alignment's preview is off the undo stack too: put back before a tab
   // is stashed, as a pending feature is removed.
   CancelAlignTool(state);
+  CancelFitTool(state);
   size_t idx = 0;
   if (Feature* f = ResolvePendingFeature(state, &idx)) {
     LOG_INFO("tool: {} cancelled", f->TypeName());
@@ -644,6 +647,11 @@ void DrawToolWindow(AppState& state) {
     // The Align tool previews on a committed Import (ui/AlignTool.h).
     if (state.alignTool.open) {
       DrawAlignToolWindow(state);
+      return;
+    }
+    // The Fit tool picks a point on a body and adds a datum (ui/FitTool.h).
+    if (state.fitTool.open) {
+      DrawFitToolWindow(state);
       return;
     }
     // Committed-feature editor session (U7e): same window, live commits.

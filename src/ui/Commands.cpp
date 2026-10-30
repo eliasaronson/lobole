@@ -24,6 +24,7 @@
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
+#include "ui/FitTool.h"
 #include "ui/JobActions.h"
 #include "ui/MeasureActions.h"
 #include "ui/PreviewFeature.h"
@@ -515,6 +516,9 @@ const std::vector<Command>& Table() {
         [](AppState& s) { return Idle(s) && HasImportToAlign(s); },
         [](AppState& s) { OpenAlignTool(s); });
     add(
+        "part.fit", [](AppState& s) { return Idle(s) && Producers(s) >= 1; },
+        [](AppState& s) { OpenFitTool(s); });
+    add(
         "part.mirror", [](AppState& s) { return Idle(s) && Producers(s) >= 1; },
         [](AppState& s) { CreateMirror(s); });
     add(
@@ -977,6 +981,11 @@ void DispatchShortcuts(AppState& state) {
   if (state.alignTool.open &&
       (Pressed(keys.Get("edit.undo")) || Pressed(keys.Alt("edit.undo")))) {
     CancelAlignTool(state);
+    return;
+  }
+  if (state.fitTool.open &&
+      (Pressed(keys.Get("edit.undo")) || Pressed(keys.Alt("edit.undo")))) {
+    CancelFitTool(state);
     return;
   }
 

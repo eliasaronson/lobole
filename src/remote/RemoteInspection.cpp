@@ -8,9 +8,11 @@
 #include "cad/CADKernel.h"
 #include "cad/KernelThreads.h"
 #include "common/BuildInfo.h"
+#include "core/Angles.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Configuration.h"
+#include "core/DatumFrame.h"
 #include "core/DirectEdit.h"
 #include "core/Document.h"
 #include "core/ElementHistory.h"
@@ -24,12 +26,15 @@
 #include "core/MeasureSeal.h"
 #include "core/MeasureSections.h"
 #include "core/MeshCollide.h"
+#include "core/MeshFit.h"
 #include "core/MeshMeasure.h"
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
 #include "core/ThreadStandards.h"
 #include "core/ToleranceStack.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/PatternFeature.h"
@@ -1287,6 +1292,37 @@ static constexpr MethodDoc InspectionMethods[] = {
     // guessing, so a row that promises a branch nobody wrote is the
     // "refuse, don't substitute" rule inverted — we refuse the call and
     // advertise the capability. It now names exactly what runs.
+    {"fit_primitive",
+     "Fit a plane, cylinder, cone or sphere to a body's triangles from a "
+     "point on it (docs/modeling/README.md#fitting-a-primitive-to-a-mesh): "
+     "a region is grown from the triangle nearest `point_mm` on the bodies "
+     "feature `feature_id` made -- a scan's mesh body or a B-Rep's "
+     "tessellation -- under a robust (RANSAC) fit, every corner within "
+     "`tolerance_mm` of the surface (default: what the scan's own noise "
+     "sets, three times the median stand-off of a vertex from its "
+     "neighbour's plane). `kind`: plane | cylinder | cone | sphere | auto "
+     "(default auto: each is grown and the one covering the most area "
+     "wins, a simpler kind when it covers 95% as much; `tried` lists them). "
+     "Any other kind is refused, naming these. Changes nothing: returns "
+     "the fit -- plane {origin_mm, normal (the way the triangles face)}, "
+     "cylinder {origin_mm on the axis, axis (largest component positive), "
+     "radius_mm}, cone {apex_mm, axis (apex into the cone), "
+     "half_angle_deg}, sphere {centre_mm, radius_mm} -- with rms_mm and "
+     "max_mm over the region's vertices, the region's triangles and "
+     "area_mm2, the body, and seed_distance_mm (how far the point was off "
+     "the triangles; refused past a fiftieth of the body's diagonal). A "
+     "curved kind on a flat region is refused (its radius would be the "
+     "noise's). The datum that keeps the fit is add_feature DatumPlane "
+     "(plane) or DatumAxis (cylinder, cone) with kind from_fit and the "
+     "same feature_id, point_mm and kind.",
+     "feature_id:int>=1, point_mm:number[3], kind?:string, "
+     "tolerance_mm?:number>0, part?:string|int",
+     remote::NeedsPart,
+     "kind:string, origin_mm?:number[], normal?:number[], axis?:number[], "
+     "apex_mm?:number[], centre_mm?:number[], radius_mm?:number, "
+     "half_angle_deg?:number, rms_mm:number, max_mm:number, "
+     "tolerance_mm:number, triangles:int, area_mm2:number, body:string, "
+     "seed_distance_mm:number, tried?:object[], feature_id:int"},
     {"measure",
      "Geometry queries over stable element names. Each of {a} and {b} names "
      "one thing: {feature_id, element} for a face or edge, {feature_id} alone "
@@ -1321,7 +1357,9 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"frame",
      "The frame of a thing — origin, unit x/y/z, and a column-major 4x4 "
      "`matrix` — in PART space on a part tab, or in WORLD space with "
-     "{occurrence}. {frame: <Frame id|name>} = a named datum frame (v86); "
+     "{occurrence}. {frame: <Frame id|name>} = a named datum frame (v86), "
+     "or a DatumPlane (origin, X, normal as Z) or DatumAxis (origin, "
+     "direction as Z, X the world's X laid square to it); "
      "{feature_id, element} = a planar face (centroid + outward normal + "
      "in-plane x), a cylindrical/conical/spherical face or a circular edge "
      "(centre + axis); {occurrence: id|name|path} alone = that occurrence's "
@@ -3497,6 +3535,197 @@ json SealJson(const Measure::SealReport& r) {
                   "to where it started: a helix (a thread) is not a seal";
   return out;
 }
+
+namespace {
+
+// measure with a datum on either side (docs/inspect/README.md#datums): a
+// DatumPlane or DatumAxis -- what a scan is measured through, its fitted
+// datums -- against another datum or a point. Exact: a plane and a line
+// are their equations.
+struct DatumSide {
+  bool plane = false;               // else an axis (a line)
+  glm::dvec3 origin{0.0}, dir{0.0}; // the plane's normal, the line's direction
+  std::string label;
+  std::optional<glm::dvec3> point; // a {point_mm} side instead
+};
+
+json Vec(const glm::dvec3& v) { return {v.x, v.y, v.z}; }
+
+DatumSide ResolveDatumSide(const Document& doc, const json& r,
+                           const char* which) {
+  DatumSide d;
+  const std::string w = std::string("measure: ") + which;
+  if (r.contains("datum")) {
+    for (const char* k : {"element", "feature_id", "point_mm", "occurrence"})
+      if (r.contains(k))
+        throw std::runtime_error(
+            w + " names a datum; `" + k +
+            "` is another kind of side (a datum is measured on its part "
+            "tab or with {part}; in an assembly, `frame` with {occurrence, "
+            "frame: <datum>} gives it placed)");
+    std::string listing;
+    const Feature* f = datumframe::Find(doc, r.at("datum"), listing);
+    const auto* dp = dynamic_cast<const DatumPlaneFeature*>(f);
+    const auto* da = dynamic_cast<const DatumAxisFeature*>(f);
+    if (dp == nullptr && da == nullptr) {
+      std::string datums;
+      for (const auto& g : doc.GetFeatures())
+        if (dynamic_cast<const DatumPlaneFeature*>(g.get()) ||
+            dynamic_cast<const DatumAxisFeature*>(g.get()))
+          datums += (datums.empty() ? "" : ", ") + std::to_string(g->GetId()) +
+                    " (" + g->GetName() + ")";
+      throw std::runtime_error(
+          w + ".datum " + r.at("datum").dump() +
+          " is not a DatumPlane or DatumAxis of this part; datums: " +
+          (datums.empty() ? std::string("none") : datums));
+    }
+    if (!f->GetError().empty())
+      throw std::runtime_error(w + ": datum '" + f->GetName() +
+                               "' did not resolve: " + f->GetError());
+    d.label = f->GetName();
+    if (dp != nullptr) {
+      d.plane = true;
+      d.origin = dp->OutputPlane().GetOrigin();
+      d.dir = glm::normalize(dp->OutputPlane().GetNormal());
+    } else {
+      d.origin = da->Origin();
+      d.dir = glm::normalize(da->Direction());
+    }
+    return d;
+  }
+  if (r.contains("point_mm") && !r.contains("element") &&
+      !r.contains("feature_id") && !r.contains("occurrence")) {
+    const json& pj = r.at("point_mm");
+    if (!pj.is_array() || pj.size() != 3 || !pj[0].is_number() ||
+        !pj[1].is_number() || !pj[2].is_number())
+      throw std::runtime_error(w + ".point_mm is [x, y, z] in mm");
+    d.point = glm::dvec3(pj[0].get<double>(), pj[1].get<double>(),
+                         pj[2].get<double>());
+    return d;
+  }
+  throw std::runtime_error(
+      w + ": against a datum, a side is another {datum} or a bare "
+          "{point_mm: [x, y, z]} (a point in space); a face, edge or body "
+          "against a datum is not measured yet");
+}
+
+json MeasureDatums(const Document& doc, const RpcParams& p) {
+  const DatumSide a = ResolveDatumSide(doc, p.at("a"), "a");
+  const auto describe = [](const DatumSide& d) {
+    json j{{"datum", d.label},
+           {"kind", d.plane ? "plane" : "axis"},
+           {"origin_mm", Vec(d.origin)}};
+    j[d.plane ? "normal" : "direction"] = Vec(d.dir);
+    return j;
+  };
+  if (!p.contains("b")) {
+    if (p.contains("kind") || p.contains("distance_kind"))
+      throw std::runtime_error(
+          "measure: `kind` and `distance_kind` choose what to measure "
+          "BETWEEN two things -- pass `b` as well");
+    return describe(a);
+  }
+  const DatumSide b = ResolveDatumSide(doc, p.at("b"), "b");
+  if (a.point && b.point)
+    throw std::runtime_error("measure: two bare points need no datum -- "
+                             "name a datum on one side");
+  const std::string kind = p.value("kind", "distance");
+  if (kind != "distance" && kind != "angle" && kind != "both")
+    throw std::runtime_error("measure: unknown kind '" + kind +
+                             "'. Accepted: distance, angle, both.");
+  if (p.contains("distance_kind") && p.at("distance_kind") != json("minimum"))
+    throw std::runtime_error("measure: a datum measures the minimum "
+                             "distance (distance_kind: minimum): a plane and "
+                             "a line have no farthest point");
+  if (p.contains("mode") && p.at("mode") != json("exact"))
+    throw std::runtime_error("measure: a datum is exact (mode: exact)");
+  json out;
+  if (a.point || b.point) {
+    if (kind != "distance")
+      throw std::runtime_error("measure: a point has no direction to take "
+                               "an angle against (kind: distance)");
+    const DatumSide& d = a.point ? b : a;
+    const glm::dvec3 q = a.point ? *a.point : *b.point;
+    const glm::dvec3 w = q - d.origin;
+    const glm::dvec3 on = d.plane ? q - glm::dot(w, d.dir) * d.dir
+                                  : d.origin + glm::dot(w, d.dir) * d.dir;
+    const glm::dvec3 pa = a.point ? q : on, pb = a.point ? on : q;
+    out = {{"distance", glm::distance(pa, pb)},
+           {"distance_kind", "minimum"},
+           {"point_a", Vec(pa)},
+           {"point_b", Vec(pb)},
+           {"delta", Vec(pb - pa)}};
+    if (d.plane) // on the normal's side or not
+      out["signed_mm"] = glm::dot(w, d.dir) * (a.point ? -1.0 : 1.0);
+    return out;
+  }
+  // Two datums. An axis's sense is arbitrary (a cylinder's has none), so
+  // an angle with a line is unsigned in 0-90; two planes read between their
+  // normals, 0-180.
+  const double c = std::clamp(glm::dot(a.dir, b.dir), -1.0, 1.0);
+  const double between = angles::ToDegrees(std::acos(c));
+  double angle = between;
+  std::string basis = "normals";
+  if (a.plane && b.plane) {
+    basis = "normals";
+  } else if (!a.plane && !b.plane) {
+    angle = std::min(between, 180.0 - between);
+    basis = "lines";
+  } else {
+    angle = std::abs(90.0 - between); // the line against the plane
+    basis = "line and plane";
+  }
+  const double s = std::sqrt(std::max(0.0, 1.0 - c * c));
+  const bool parallel = (a.plane == b.plane) ? s < 1e-9 : std::abs(c) < 1e-9;
+  glm::dvec3 pa = a.origin, pb = b.origin;
+  if (a.plane && b.plane) {
+    if (parallel) {
+      pb = a.origin + glm::dot(b.origin - a.origin, a.dir) * a.dir;
+    } else { // they meet: the point of the line they meet on nearest a's
+      const double beta = glm::dot(b.dir, b.origin - a.origin) / (1.0 - c * c);
+      pb = a.origin - c * beta * a.dir + beta * b.dir;
+      pa = pb;
+    }
+  } else if (!a.plane && !b.plane) {
+    // The closest points of two lines.
+    const glm::dvec3 w = a.origin - b.origin;
+    const double bb = glm::dot(a.dir, b.dir), d = glm::dot(a.dir, w),
+                 e = glm::dot(b.dir, w), den = 1.0 - bb * bb;
+    const double t = den > 1e-12 ? (bb * e - d) / den : 0.0;
+    const double u = den > 1e-12 ? (e - bb * d) / den : e;
+    pa = a.origin + t * a.dir;
+    pb = b.origin + u * b.dir;
+  } else {
+    const DatumSide& pl = a.plane ? a : b;
+    const DatumSide& ln = a.plane ? b : a;
+    glm::dvec3 onLine = ln.origin, onPlane;
+    if (!parallel) { // the line pierces the plane
+      const double t =
+          glm::dot(pl.origin - ln.origin, pl.dir) / glm::dot(ln.dir, pl.dir);
+      onLine = ln.origin + t * ln.dir;
+      onPlane = onLine;
+    } else {
+      onPlane = onLine - glm::dot(onLine - pl.origin, pl.dir) * pl.dir;
+    }
+    pa = a.plane ? onPlane : onLine;
+    pb = a.plane ? onLine : onPlane;
+  }
+  if (kind != "angle") {
+    out["distance"] = glm::distance(pa, pb);
+    out["distance_kind"] = "minimum";
+    out["point_a"] = Vec(pa);
+    out["point_b"] = Vec(pb);
+    out["delta"] = Vec(pb - pa);
+  }
+  if (kind != "distance") {
+    out["angle_deg"] = angle;
+    out["basis"] = basis;
+  }
+  out["parallel"] = parallel;
+  return out;
+}
+
+} // namespace
 
 std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                         const std::string& m,
@@ -6596,7 +6825,66 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     return out;
   }
+  if (m == "fit_primitive") {
+    // Read-only: every input checked, then the fit; nothing changes.
+    const Document* part = p.contains("part")
+                               ? ResolvePartParam(state, p.at("part"))
+                               : &RequirePartDoc(doc, "fit_primitive");
+    const json& fj = p.at("feature_id");
+    if (!fj.is_number_integer())
+      throw std::runtime_error("feature_id is the id of the feature whose "
+                               "body to fit (get_state lists them)");
+    const uint64_t fid = fj.get<uint64_t>();
+    const Feature* feature = part->FindFeatureById(fid);
+    if (feature == nullptr)
+      throw std::runtime_error("no feature with id " + std::to_string(fid) +
+                               " -- get_state lists every feature with its id");
+    meshfit::Request request;
+    const json& pj = p.at("point_mm");
+    if (!pj.is_array() || pj.size() != 3 || !pj[0].is_number() ||
+        !pj[1].is_number() || !pj[2].is_number())
+      throw std::runtime_error("point_mm is [x, y, z] in mm, not " + pj.dump());
+    request.pointMm = {pj[0].get<double>(), pj[1].get<double>(),
+                       pj[2].get<double>()};
+    if (p.contains("kind")) {
+      const json& kj = p.at("kind");
+      if (!kj.is_string() ||
+          !meshfit::KindFromString(kj.get<std::string>(), request.kind))
+        throw std::runtime_error("kind: unknown " + kj.dump() +
+                                 ". Accepted: " + meshfit::AcceptedKinds());
+    }
+    if (p.contains("tolerance_mm")) {
+      if (!p.at("tolerance_mm").is_number())
+        throw std::runtime_error("tolerance_mm is a number of mm");
+      request.toleranceMm = p.at("tolerance_mm").get<double>();
+    }
+    meshfit::CheckRequest(request);
+    const std::vector<const Body*> bodies =
+        meshfit::BodiesOf(part->GetBodies(), fid);
+    if (bodies.empty())
+      throw std::runtime_error("feature " + std::to_string(fid) + " ('" +
+                               feature->GetName() +
+                               "') made no body to fit (a sketch, a datum, "
+                               "or it failed: see its error)");
+    meshfit::Result result;
+    std::string error;
+    if (!meshfit::Fit(bodies, request, result, error))
+      throw std::runtime_error("fit_primitive: " + error);
+    json out = meshfit::ResultJson(result);
+    out["feature_id"] = fid;
+    return out;
+  }
   if (m == "measure") {
+    // A datum on either side: measured as the plane or line it is.
+    const auto namesDatum = [&](const char* k) {
+      return p.contains(k) && p.at(k).is_object() && p.at(k).contains("datum");
+    };
+    if (namesDatum("a") || namesDatum("b")) {
+      const Document* dd = p.contains("part")
+                               ? ResolvePartParam(state, p.at("part"))
+                               : &RequirePartDoc(doc, "measure");
+      return MeasureDatums(*dd, p);
+    }
     // What ONE side of a measurement names. Each of `a` and `b` carries its
     // own {part} / {occurrence}, so a measurement can span two parts or two
     // occurrences — which the GUI has done since assembly measure shipped
@@ -7007,30 +7295,22 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                 std::string& source) -> glm::dmat4 {
       if (p.contains("frame")) {
         const json& fv = p.at("frame");
-        const FrameFeature* hit = nullptr;
         std::string frames;
-        for (const auto& f : part.GetFeatures()) {
-          const auto* fr = dynamic_cast<const FrameFeature*>(f.get());
-          if (fr == nullptr)
-            continue;
-          if ((fv.is_number() && fr->GetId() == fv.get<uint64_t>()) ||
-              (fv.is_string() && fr->GetName() == fv.get<std::string>()))
-            hit = fr;
-          if (!frames.empty())
-            frames += ", ";
-          frames += std::to_string(fr->GetId()) + " (" + fr->GetName() + ")";
-        }
+        const Feature* hit = datumframe::Find(part, fv, frames);
         if (hit == nullptr)
           throw std::runtime_error(
-              "no Frame " + fv.dump() + " here; frames: " +
-              (frames.empty() ? std::string("none (add_feature type Frame)")
+              "no Frame, DatumPlane or DatumAxis " + fv.dump() +
+              " here; there: " +
+              (frames.empty() ? std::string("none (add_feature type Frame, "
+                                            "DatumPlane or DatumAxis)")
                               : frames));
         if (!hit->GetError().empty())
-          throw std::runtime_error("frame '" + hit->GetName() +
+          throw std::runtime_error(std::string(datumframe::KindLabel(*hit)) +
+                                   " '" + hit->GetName() +
                                    "' did not resolve: " + hit->GetError());
-        source = "frame " + std::to_string(hit->GetId()) + " (" +
-                 hit->GetName() + ")";
-        return hit->Matrix();
+        source = std::string(datumframe::KindLabel(*hit)) + " " +
+                 std::to_string(hit->GetId()) + " (" + hit->GetName() + ")";
+        return datumframe::Matrix(*hit);
       }
       if (p.contains("feature_id") || p.contains("element")) {
         if (!p.contains("feature_id") || !p.contains("element"))

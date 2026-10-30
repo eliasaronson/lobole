@@ -9,6 +9,7 @@
 #include "ui/CamTool.h"
 #include "ui/DerivedActions.h"
 #include "ui/FastenerTool.h"
+#include "ui/FitTool.h"
 #include "ui/ImportActions.h" // ImportReferrers
 #include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h" // PrintedThreadFor
@@ -601,6 +602,31 @@ void DrawFeatureRefCombo(AppState& state, Feature& owner, const char* label,
   }
 }
 
+// A datum fitted to a body (from_fit,
+// docs/modeling/README.md#datums-on-a-scan): the body and the kind, shown;
+// the seed point, editable; and what the last regeneration fitted there.
+void DrawFitRefParams(AppState& state, Feature& f, meshfit::FitRef& fit,
+                      const nlohmann::json& report, size_t index, bool commit) {
+  const Feature* body = state.document->FindFeatureById(fit.bodyFeatureId);
+  ImGui::Text("Fitted %s on %s", mesh::KindName(fit.kind),
+              body != nullptr ? body->GetName().c_str() : "(missing)");
+  HandleEdit(state, f, DragFloat3Row(state, "Point", &fit.pointMm.x), index,
+             commit);
+  if (fit.toleranceMm)
+    ImGui::TextDisabled("Tolerance %.4g mm (its own)", *fit.toleranceMm);
+  if (report.is_object()) {
+    ImGui::TextDisabled(
+        "%zu triangles, %.3g mm RMS (%.3g max) within %.3g mm",
+        report.value("triangles", size_t{0}), report.value("rms_mm", 0.0),
+        report.value("max_mm", 0.0), report.value("tolerance_mm", 0.0));
+    if (report.contains("radius_mm"))
+      ImGui::TextDisabled("Radius %.4g mm", report.value("radius_mm", 0.0));
+    if (report.contains("half_angle_deg"))
+      ImGui::TextDisabled("Half angle %.4g deg",
+                          report.value("half_angle_deg", 0.0));
+  }
+}
+
 // Properties widgets for a datum plane: variant selector, parent (Offset/
 // Angled), and the variant's expression-driven fields. Parent/kind/axis are
 // discrete combos committed like the extrude Mode combo.
@@ -610,6 +636,11 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
     CommitDiscrete(state, dp, before, index, commit);
   };
 
+  // A plane fitted to a body: its seed point, and what it fitted.
+  if (dp.kind == DatumPlaneKind::FromFit) {
+    DrawFitRefParams(state, dp, dp.fit, dp.FitReport(), index, commit);
+    return;
+  }
   // Variant.
   const char* kinds[] = {"Offset", "Angled", "Through 3 Points"};
   int kind = std::to_underlying(dp.kind);
@@ -678,6 +709,10 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
 // fields (world points, or the referenced sketch line shown read-only).
 void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
                          bool commit) {
+  if (da.kind == DatumAxisKind::FromFit) {
+    DrawFitRefParams(state, da, da.fit, da.FitReport(), index, commit);
+    return;
+  }
   const char* kinds[] = {"Two Points", "Sketch Line", "Global X", "Global Y",
                          "Global Z"};
   int kind = std::to_underlying(da.kind);
@@ -705,6 +740,7 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
   case DatumAxisKind::GlobalX:
   case DatumAxisKind::GlobalY:
   case DatumAxisKind::GlobalZ:
+  case DatumAxisKind::FromFit:
     break; // fully defined by the kind
   }
 }
@@ -1733,6 +1769,12 @@ const ToolSession kToolSessions[] = {
               s.alignTool.document == s.document.get();
      },
      [](AppState& s, const SelectionItem& i) { AlignPointPicked(s, i); }},
+    {kFitToolSlot,
+     [](const AppState& s) {
+       return s.document != nullptr && s.fitTool.open &&
+              s.fitTool.document == s.document.get();
+     },
+     [](AppState& s, const SelectionItem& i) { FitPointPicked(s, i); }},
 };
 } // namespace
 

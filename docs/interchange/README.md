@@ -236,13 +236,16 @@ scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`)
   import already has. The modes:
   - `floor` {`point_mm`, `tolerance_mm`?}: the plane of the flat grown from
     the triangle under the point (`mesh::GrowPlane`, `src/core/mesh/Align.h`:
-    across edges while every corner stays within the tolerance of the plane
-    fitted so far, then once more from the seed against the final fit),
+    the region `fit_primitive` grows for a plane, fitted robustly so a stray
+    lump the region took in does not tilt it --
+    [fitting a primitive to a mesh](../modeling/README.md#fitting-a-primitive-to-a-mesh)),
     laid on z = 0 facing down. The tolerance defaults to a five-hundredth of
     the import's bounding diagonal, never under four quanta of the file's
     precision. On an open scan, a point on a triangle at the rim of the hole
     where the table was fits that rim instead (`fitted: boundary_loop`): the
-    rim is the floor. A point farther than a fiftieth of the diagonal from
+    rim is the floor; a rim's plane is least squares, since a rim is
+    ragged by about an edge length all the way round and has no band of
+    inliers for a robust fit to find. A point farther than a fiftieth of the diagonal from
     every surface is refused.
   - `three_points` {`points_mm` [3]}: the plane through them, laid on z = 0;
     three in a line are refused.
@@ -489,6 +492,20 @@ rounds, so it grows with the faces made, not the triangles read):
 `test_mesh_import_recognize.cpp` holds the 123k-triangle read under 5 s of
 CPU, shown to fail against a spin planted in the rebuild.
 
+**What recognition costs** (the hidden `[mesh-cost-recognition]` in
+`tests/test_mesh_costs.cpp`). On a mechanical mesh it is linear and cheap:
+segmentation is about 0.3 µs a triangle, and the rebuild grows with the
+faces made (4 for a bored tube, 30 for the 24-hole plate, whatever the
+count; the 2M tube in 3.7 s and 568 MB), so reading the file is most of
+it. On an organic mesh segmentation is superlinear, all of it in
+`Segmenter::FitSet` trying curve hypotheses on seed triples (up to
+`kMaxTriples`, 256, a seed): the figure's t = 2.0 s · (n / 10⁴)^2.2, which
+`auto`'s limit is solved from. The rebuild costs about 1 ms and 25 KB a
+face made; an organic mesh makes a face for nearly every other triangle,
+and past about 500,000 faces OpenCASCADE ran out of 6 GB. The share of the
+area that fits a primitive does not separate organic from mechanical; the
+share in large regions does ([what auto chooses](#mesh-bodies)).
+
 ## Recognising a faceted mesh
 
 A downloaded mechanical part arrives as STL: every hole is a prism of
@@ -522,8 +539,11 @@ so it can run on a worker thread.
     great circle and a cone's on a smaller one, so the axis is the normal of
     the plane through their tips.
   - Levenberg–Marquardt then refines the fit against the vertices.
-  - There is no Eigen, which `designer_core` may be built without, and no
-    RANSAC: a CAD export's vertices are on its surfaces, with no outliers.
+  - There is no Eigen, which `designer_core` may be built without.
+    Recognition uses least squares, since a CAD export's vertices are on
+    its surfaces, with no outliers; a scan's are not, and `fit_primitive`
+    fits them robustly (RANSAC,
+    [fitting a primitive to a mesh](../modeling/README.md#fitting-a-primitive-to-a-mesh)).
 - **`SegmentAll`** (`Segment.{h,cpp}`) puts every triangle in exactly one
   region. A region is a plane, cylinder, cone or sphere, and the regions are
   ordered by their lowest file triangle.
@@ -757,7 +777,10 @@ holding only a `Poly_Triangulation`, which BRepMesh leaves alone.
 - `export_step` writes a mesh body as a tessellated shell in AP242 with
   `write.step.tessellated` on, set for that write only. On OpenCASCADE older
   than 7.7 (Ubuntu 24.04's 7.6.3), whose writer crashed on such a face, it is
-  refused naming the body and the formats that carry it.
+  refused naming the body and the formats that carry it. In the AP214 the
+  app writes otherwise, such a face is dropped without a word, and even in
+  AP242 a lone face is dropped, which is why it goes as a shell
+  (`tests/test_mesh_writers.cpp` reads every writer's file back).
 
 **What refuses it.** `MeshBodyRefusal(body, what)` is the one sentence:
 "<what> needs a B-Rep, and body 'scan 1' is a mesh (…)". It is asked by:
@@ -778,6 +801,23 @@ not refused: it runs on triangles, through manifold, when both operands
 are closed.
 
 How it is checked:
+- `tests/mesh_organic.{h,cpp}`: the organic fixtures, pure data (no
+  OpenCASCADE, no Catch2), so the bench's `build/mesh_fixture_writer NAME
+  N OUT.stl` and the manifold probe build them too, each at any triangle
+  count to within 6%: `NoisySphere` (radius 40, each vertex moved radially
+  by at most 0.05 mm; a cube-sphere of 12 n² triangles), `Torus` (30 / 10,
+  clean), `Figurine` (eight metaball blobs about 100 mm tall, contoured by
+  marching tetrahedra), `CutFigurine` (every triangle reaching below 3 mm
+  cut away: open, one loop), `ScannedPost` (a turned post with a cylinder,
+  a cone and two flats, noisy, with a lump), and `Dirty()` (a soup with
+  near-duplicate points, flipped triangles, slivers and a second
+  component, each counted). Volume, area and radius are analytic, or for
+  the figure integrated from its field column by column, apart from its
+  triangles, each with the bound its tessellation and noise allow. No scan
+  file is committed: the Stanford models are research-only.
+  `tests/test_mesh_organic.cpp` checks that each carries its answers (the
+  2M sizes `[slow]`), and that manifold's sphere-minus-torus volumes add up
+  to 1e-9 with every result closed.
 - `tests/test_mesh_body.cpp`: the tree, the slice and its cap, and the mass
   properties, against the analytic fixtures.
 - `tests/test_mesh_body_import.cpp`: the import, `auto`'s three choices,
@@ -1036,7 +1076,10 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
   its widest facet turning past 72°.
 - Recognising a torus (the corner where two fillets meet stays as facets),
   and a mesh noisier than the precision it was written at (a scan, or a
-  part re-saved through a mesh editor). Loosening the fits to noise belongs
-  to the scan work.
+  part re-saved through a mesh editor). Recognition's tolerance is quanta
+  of the file's precision; one region at a time, a scan's noise is taken by
+  `fit_primitive` and the datums fitted to it
+  ([fitting a primitive to a mesh](../modeling/README.md#fitting-a-primitive-to-a-mesh)),
+  but `SegmentAll` is not loosened to it.
 - STEP PMI / AP242 GD&T.
 - Fusion 360 (no server-side feature API) and native SolidWorks.

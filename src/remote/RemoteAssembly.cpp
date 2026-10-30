@@ -8,6 +8,7 @@
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/ContactFollower.h"
+#include "core/DatumFrame.h"
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
@@ -154,7 +155,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Add a mate {type: fastened|revolute|slider|cylindrical|planar|ball, "
      "a, b: connectors}. A connector is {occurrence: id|name, frame: <Frame "
      "id|name of that part>} (v86 — the mate as DESIGNED: a bolt-circle "
-     "centre, a shaft axis), {occurrence, face: {feature_id, element}, "
+     "centre, a shaft axis; or a DatumPlane / DatumAxis of it, how a scan "
+     "with no faces is mated: docs/modeling/README.md#datums-on-a-scan), "
+     "{occurrence, face: {feature_id, element}, "
      "snap_edge?} (a face's centroid + normal, or a snapped hole centre), or "
      "{occurrence, origin: true}; inner_path? reaches into a sub-assembly. "
      "The mate's starting position along whatever it leaves free is "
@@ -2005,25 +2008,18 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           throw std::runtime_error("the part of '" + o->name +
                                    "' is not loaded");
         const json& fv = c.at("frame");
-        const FrameFeature* hit = nullptr;
+        // A Frame, or a DatumPlane / DatumAxis: what a scanned part, which
+        // has no faces to mate, is mated by
+        // (docs/modeling/README.md#datums-on-a-scan).
         std::string frames;
-        for (const auto& f : part->GetFeatures()) {
-          const auto* fr = dynamic_cast<const FrameFeature*>(f.get());
-          if (fr == nullptr)
-            continue;
-          if ((fv.is_number() && fr->GetId() == fv.get<uint64_t>()) ||
-              (fv.is_string() && fr->GetName() == fv.get<std::string>()))
-            hit = fr;
-          if (!frames.empty())
-            frames += ", ";
-          frames += std::to_string(fr->GetId()) + " (" + fr->GetName() + ")";
-        }
+        const Feature* hit = datumframe::Find(*part, fv, frames);
         if (hit == nullptr)
           throw std::runtime_error(
-              "no Frame " + fv.dump() + " on the part of '" + o->name +
-              "'; frames there: " +
+              "no Frame, DatumPlane or DatumAxis " + fv.dump() +
+              " on the part of '" + o->name + "'; there: " +
               (frames.empty()
-                   ? std::string("none (add_feature type Frame on that part)")
+                   ? std::string("none (add_feature type Frame, or a "
+                                 "DatumPlane / DatumAxis, on that part)")
                    : frames));
         anchor = {{"frame", hit->GetId()}};
       } else if (c.value("origin", false))

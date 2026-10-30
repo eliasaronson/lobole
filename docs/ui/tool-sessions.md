@@ -62,7 +62,7 @@ Conditional slots appear only in the mode that uses them (the extrude end
 face for Up-to-face, the split knife face for Face-knife mode).
 
 A slot armed by something that is not a feature — a mate, section, a CAM
-verb, the fastener tool, the Align tool's points — carries a sentinel in
+verb, the fastener tool, the Align and Fit tools' points — carries a sentinel in
 `slotPick.featureId`, and
 `kToolSessions` (`FeatureEditor.cpp`) says, for each sentinel, whether the
 session is still alive (checked every frame, so a dead session disarms) and
@@ -70,7 +70,7 @@ who consumes a pick. Adding such a session is one row there;
 `test_conventions.cpp` checks every `k*Slot` sentinel appears. A session
 that takes a POINT rather than an element reads where the click met the
 face, `slotPick.hitPoint`, which the pipeline sets before handing the pick
-on (the Align tool's floor and points).
+on (the Align tool's floor and points, the Fit tool's seed).
 
 ## The tool window
 
@@ -184,6 +184,13 @@ origin that misses the body. Examples in the code:
   field with it. Its scale's true distance starts as the distance measured
   between the two picks, so nothing scales until it is typed
   ([placing an import](../interchange/README.md#placing-an-import)).
+- The Fit tool's tolerance is the picked body's own noise
+  (`mesh::ScanTolerance`), as `fit_primitive`'s; ticking *Own tolerance*
+  keeps the value it last used. With no point it arms the pick, Accept
+  disabled and the window asking for it (`defaults/fit_primitive`,
+  `RefusesUntilPicked`); a sphere it fits is shown and
+  refused as a datum, saying why
+  ([datums on a scan](../modeling/README.md#datums-on-a-scan)).
 - The placement rule (`src/ui/Placement.h`, `ClearOffset`) keeps a new item's
   span clear of the ones already taken, with a gap scaled to the item; the
   occurrence insert and drawing-view placement use it.

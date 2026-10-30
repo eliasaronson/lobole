@@ -3,76 +3,13 @@
 
 #include "core/mesh/Align.h"
 
+#include "core/mesh/Segment.h"
+
 #include <algorithm>
 #include <cmath>
-#include <deque>
 #include <unordered_map>
 
 namespace mesh {
-
-namespace {
-
-// The plane through the corners of `region`, its normal turned to the side
-// the triangles face.
-FitResult FitRegion(const TriMesh& m, const std::vector<uint32_t>& region) {
-  std::vector<uint8_t> seen(m.positions.size(), 0);
-  std::vector<glm::dvec3> pts;
-  glm::dvec3 facing(0.0);
-  for (uint32_t t : region) {
-    facing += m.AreaNormal(t);
-    for (uint32_t v : m.triangles[t])
-      if (!seen[v]) {
-        seen[v] = 1;
-        pts.push_back(m.positions[v]);
-      }
-  }
-  FitResult f = FitPlane(pts);
-  if (f.ok && glm::dot(f.axis, facing) < 0.0)
-    f.axis = -f.axis;
-  return f;
-}
-
-// The triangles reached from `seed` across edges, each facing the plane's
-// side with every corner within `tol` of it; with `refit`, the plane is
-// fitted again each time the region doubles.
-std::vector<uint32_t> Grow(const TriMesh& m, uint32_t seed, FitResult plane,
-                           double tol, bool refit) {
-  std::vector<uint8_t> in(m.triangles.size(), 0);
-  std::vector<uint32_t> region{seed};
-  std::deque<uint32_t> queue{seed};
-  in[seed] = 1;
-  size_t nextFit = 8;
-  const auto fits = [&](uint32_t t) {
-    if (glm::dot(m.AreaNormal(t), plane.axis) <= 0.0)
-      return false;
-    for (uint32_t v : m.triangles[t])
-      if (std::abs(glm::dot(m.positions[v] - plane.origin, plane.axis)) > tol)
-        return false;
-    return true;
-  };
-  while (!queue.empty()) {
-    const uint32_t t = queue.front();
-    queue.pop_front();
-    for (int e = 0; e < 3; e++) {
-      const uint32_t u = m.neighbour[t][e];
-      if (u == kNone || in[u] || !fits(u))
-        continue;
-      in[u] = 1;
-      region.push_back(u);
-      queue.push_back(u);
-      if (refit && region.size() >= nextFit) {
-        const FitResult f = FitRegion(m, region);
-        if (f.ok)
-          plane = f;
-        nextFit *= 2;
-      }
-    }
-  }
-  std::sort(region.begin(), region.end());
-  return region;
-}
-
-} // namespace
 
 std::vector<uint32_t> BoundaryLoopAt(const TriMesh& m, uint32_t t) {
   if (t >= m.triangles.size() || t >= m.neighbour.size())
@@ -113,6 +50,9 @@ PlaneRegion GrowPlane(const TriMesh& m, uint32_t seed, double toleranceMm) {
     pts.reserve(loop.size());
     for (uint32_t v : loop)
       pts.push_back(m.positions[v]);
+    // Least squares, not robust: a rim is ragged by about an edge length
+    // all the way round where the scan stopped, so there is no band of
+    // inliers within a tolerance to find -- the mean plane is the floor.
     r.fit = FitPlane(pts);
     if (r.fit.ok) {
       r.loop = std::move(loop);
@@ -122,23 +62,23 @@ PlaneRegion GrowPlane(const TriMesh& m, uint32_t seed, double toleranceMm) {
   const glm::dvec3 n = m.AreaNormal(seed);
   if (!(glm::length(n) > 0.0))
     return r;
-  FitResult start;
-  start.ok = true;
-  start.kind = Kind::Plane;
-  start.origin =
-      (m.Corner(seed, 0) + m.Corner(seed, 1) + m.Corner(seed, 2)) / 3.0;
-  start.axis = glm::normalize(n);
-  const std::vector<uint32_t> first =
-      Grow(m, seed, start, toleranceMm, /*refit=*/true);
-  FitResult settled = first.size() >= 2 ? FitRegion(m, first) : start;
-  if (!settled.ok)
-    settled = start;
-  r.triangles = Grow(m, seed, settled, toleranceMm, /*refit=*/false);
-  r.fit = FitRegion(m, r.triangles);
-  if (!r.fit.ok) { // one triangle: its own plane, exactly
-    r.fit = start;
-    r.fit.rms = r.fit.max = 0.0;
+  // The region fit_primitive grows for a plane: a disk round the seed
+  // fitted robustly, grown under it and refitted (GrowFrom).
+  const Region grown = GrowFrom(m, seed, Kind::Plane, toleranceMm);
+  if (grown.fit.ok) {
+    r.fit = grown.fit;
+    r.triangles = grown.triangles;
+    r.areaMm2 = grown.area;
+    return r;
   }
+  // Too few triangles round it to fit: the seed's own plane, exactly.
+  r.fit.ok = true;
+  r.fit.kind = Kind::Plane;
+  r.fit.origin =
+      (m.Corner(seed, 0) + m.Corner(seed, 1) + m.Corner(seed, 2)) / 3.0;
+  r.fit.axis = glm::normalize(n);
+  r.fit.inliers = 3;
+  r.triangles = {seed};
   for (uint32_t t : r.triangles)
     r.areaMm2 += m.Area(t);
   return r;
