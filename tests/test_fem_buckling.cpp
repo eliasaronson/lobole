@@ -187,7 +187,7 @@ TEST_CASE("a buckling result is saved and read back as it was",
 
 TEST_CASE("a thin cylinder buckles at the classical load, and is knocked "
           "down by SP-8007 at its R/t",
-          "[fem][buckling][slow]") {
+          "[fem][buckling][slow][asan_slow]") {
   // A steel tube of mean radius 25 and wall 1 (R/t 25), 40 long, open and
   // clamped at its base and closed by a 5 mm cap it is pushed down on: the
   // cap holds the loaded edge round, as the classical case's support does.

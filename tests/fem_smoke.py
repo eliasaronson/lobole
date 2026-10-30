@@ -335,7 +335,9 @@ def pin_support(d):
     end = [f["name"] for f in els["faces"]
            if abs(f["normal"][0] - 1.0) < 1e-6][0]
     study = d.call("add_study", name="Lever")["id"]
-    d.call("set_study", id=study, mesh_size=2.0)
+    # One solve, as test_fem_pin.cpp's: the reactions are the statics on any
+    # mesh, and refining round the peak took a sanitized run past its timeout.
+    d.call("set_study", id=study, mesh_size=2.0, converge="never")
 
     def loads():
         return [x for x in d.call("list_studies")["studies"]

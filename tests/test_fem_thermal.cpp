@@ -851,7 +851,7 @@ TEST_CASE("a static study takes a thermal study's temperature on its own mesh",
 // (docs/ui/testing.md#tests-that-time-things).
 constexpr double kThermalCostBoundSeconds = 200.0;
 TEST_CASE("a thermal study of 228k nodes costs what it was measured to",
-          "[fem][thermal][slow]") {
+          "[fem][thermal][slow][asan_slow]") {
   Document doc;
   auto bar =
       std::make_unique<BoxFeature>("Bar", glm::dvec3(0), 100.0, 20.0, 20.0);

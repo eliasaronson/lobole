@@ -216,7 +216,7 @@ TEST_CASE("a pinned lug bears on the loaded half of its bore",
 // says something else, on the rim of a bore, and is flagged for it.
 TEST_CASE("a lever on two pins: reactions balance the load and the clamp's "
           "spike is gone",
-          "[fem][pin][run][slow]") {
+          "[fem][pin][run][slow][asan_slow]") {
   const double L = 100.0, w = 12.0, t = 6.0, d = 5.0, x1 = 8.0, x2 = 30.0,
                F = 20.0;
   auto p = MakePlate(L, w, t, d, {x1, x2}, "pla");
