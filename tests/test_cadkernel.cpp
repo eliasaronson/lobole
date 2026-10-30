@@ -8,8 +8,15 @@
 #include "cad/CADKernel.h"
 
 #include "cad/MeshExport.h"
+#include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRep_Tool.hxx>
+#include <Poly_Triangulation.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
 #include <algorithm>
 #include <ctime>
+#include <gp_Ax2.hxx>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -386,6 +393,44 @@ TEST_CASE("the two bounding-box flavours keep their own memo",
   s.GetBoundingBox(again, againHi, /*tight=*/true);
   CHECK(again == tLo);
   CHECK(againHi == tHi);
+}
+
+TEST_CASE("the tight box of a cut sphere is the body's", "[kernel][bbox]") {
+  // A box cut by a sphere whose axis lies across Z (a Revolve's, about a
+  // sketch line), the cut patterned five times about Z: the measured box
+  // stood 4.5 mm off the body (tests/fuzz/cases/wrong_way-373.jsonl),
+  // because AddOptimal bounds each spherical face over its UV rectangle,
+  // more of the sphere than the cut kept. The truth is a fine tessellation's
+  // nodes, every one on the body.
+  CADShape cut = CADKernel::Instance().CreateBox(glm::dvec3(-10, -20, 0),
+                                                 glm::dvec3(10, 20, 30));
+  const CADShape sphere(
+      BRepPrimAPI_MakeSphere(gp_Ax2(gp_Pnt(10, 10, 10), gp_Dir(0, 1, 0)), 10.0)
+          .Shape());
+  for (int i = 0; i < 5; i++)
+    cut = cut.Difference(sphere.Transformed(glm::rotate(
+        glm::dmat4(1.0), glm::radians(72.0 * i), glm::dvec3(0, 0, 1))));
+  REQUIRE(cut.IsValid());
+
+  TopoDS_Shape copy = cut.GetShape();
+  BRepMesh_IncrementalMesh mesh(copy, 0.002, false, 0.05);
+  glm::dvec3 mLo(1e300), mHi(-1e300);
+  for (TopExp_Explorer f(copy, TopAbs_FACE); f.More(); f.Next()) {
+    TopLoc_Location loc;
+    const auto tri = BRep_Tool::Triangulation(TopoDS::Face(f.Current()), loc);
+    REQUIRE_FALSE(tri.IsNull());
+    for (int i = 1; i <= tri->NbNodes(); ++i) {
+      const gp_Pnt p = tri->Node(i).Transformed(loc.Transformation());
+      mLo = glm::min(mLo, glm::dvec3(p.X(), p.Y(), p.Z()));
+      mHi = glm::max(mHi, glm::dvec3(p.X(), p.Y(), p.Z()));
+    }
+  }
+  glm::dvec3 lo(0.0), hi(0.0);
+  cut.GetBoundingBox(lo, hi, /*tight=*/true);
+  for (int a = 0; a < 3; a++) {
+    CHECK_THAT(lo[a], WithinAbs(mLo[a], 0.01));
+    CHECK_THAT(hi[a], WithinAbs(mHi[a], 0.01));
+  }
 }
 
 TEST_CASE("a quarter-turned copy carries the tight box, and it is exact",

@@ -1359,7 +1359,13 @@ volume cache does, so an address it keys on is never reused while the entry
 lives; it is a bounded ring (1024), and opening a project empties it.
 
 The conservative box uses `BRepBndLib::Add` with `useTriangulation = false` and
-the tight one `AddOptimal`. Neither is mesh-derived: a box from the
+the tight one `AddOptimal`, face by face. `AddOptimal` bounds a face's surface
+over its UV rectangle, which on a trimmed sphere holds more of the sphere than
+the face keeps (a sphere cut patterned about Z read 4.5 mm past the body), so a
+face on a plane, cylinder, cone or sphere is bounded by its edges and vertices
+instead: a coordinate has no extreme inside such a face that its boundary does
+not reach, except a sphere's six points centre ± r along an axis, which count
+when they lie on the face. Any other surface is `AddOptimal`'s. Neither is mesh-derived: a box from the
 tessellation is inflated by the deflection, so a part's size would change the
 first time anything drew it.
 

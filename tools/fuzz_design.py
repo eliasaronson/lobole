@@ -733,8 +733,8 @@ class Runner:
         sent = []
         answer = {}
         elements = None
-        # A cut is judged against MEASURED boxes: get_state's and the
-        # digest's are a cheap bound that can stand off a curved face.
+        # A cut is judged against MEASURED boxes (mass_properties', which
+        # get_state's and the digest's now are too).
         tight_before = self.tight_box() if step["expect"] == "cut" else None
         for c in step["calls"]:
             params = c["params"]

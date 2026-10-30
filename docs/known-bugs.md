@@ -129,20 +129,6 @@ the heading if it is not here yet.
   remedy would go (a retry with the tool turned about its axis, so the seam
   falls elsewhere).
 
-### The measured box can stand off a cut sphere
-
-- **Symptom:** a box cut by a Sphere and that cut patterned round the Z axis:
-  `mass_properties` reports the body's `bbox_min.y` as -25.7 where every
-  point of it (its mesh) is within -21.25. The box called MEASURED is not.
-  `tools/fuzz.py` reports it as `wrong_way` ("a pattern circular grew the
-  bbox").
-- **Case:** `tests/fuzz/open/wrong_way-373.jsonl`.
-- **Cause:** `BRepBndLib::AddOptimal` without a triangulation bounds a
-  trimmed spherical face by more of the sphere than the face keeps.
-- **Where:** `CADShape::GetBoundingBox(tight)` in `src/cad/CADKernel.cpp`.
-- **Likely fix:** for a face on an elementary surface, bound the face's own
-  boundary and its interior extrema, or tighten against a fine mesh.
-
 ### An extrusion of a lone closed spline weighs wrong
 
 - **Symptom:** a profile that is one B-spline closed on itself (first pole

@@ -41,9 +41,11 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepTools.hxx>
+#include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <ElSLib.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAbs_CurveType.hxx>
@@ -65,6 +67,7 @@
 #include <Standard_Handle.hxx>
 #include <Standard_Version.hxx>
 #include <StlAPI_Reader.hxx>
+#include <gp_Sphere.hxx>
 #if OCC_VERSION_HEX >= 0x070700
 // STL with a progress range: what StlAPI_Reader does from 7.7 on, spelled
 // out so a long read reports and stops (7.6's reader takes no range).
@@ -402,6 +405,90 @@ bool CADShape::ComputeMassProps(MassProps& out) const {
   return true;
 }
 
+namespace {
+
+// The tight box, face by face. `AddOptimal` bounds a face's surface over the
+// face's UV RECTANGLE, which on a trimmed elementary surface holds more of
+// the surface than the face keeps: a sphere's cap left by a cut, turned 72
+// degrees by a pattern, read 4.5 mm past every point of the body. On a
+// plane, cylinder or cone a linear function (a coordinate) has no critical
+// point inside a face that is not also reached on its boundary (it is linear
+// along every ruling), so the face's edges and vertices bound it exactly; on
+// a sphere the only interior extremes are the six points centre +- r along
+// an axis, kept when they are on the face. Every other surface (torus,
+// B-spline, revolution, offset) is bounded by AddOptimal as before.
+void AddTightFace(const TopoDS_Face& face, Bnd_Box& box,
+                  TopTools_IndexedMapOfShape& edges) {
+  BRepAdaptor_Surface surf(face, /*restriction=*/Standard_False);
+  const GeomAbs_SurfaceType type = surf.GetType();
+  bool bounded = false;
+  if (type == GeomAbs_Plane || type == GeomAbs_Cylinder ||
+      type == GeomAbs_Cone || type == GeomAbs_Sphere) {
+    // The edges go to `edges`, each bounded once though two faces hold it.
+    for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next()) {
+      const TopoDS_Edge& edge = TopoDS::Edge(e.Current());
+      if (BRep_Tool::Degenerated(edge))
+        continue;
+      edges.Add(edge);
+      bounded = true;
+    }
+    for (TopExp_Explorer v(face, TopAbs_VERTEX); v.More(); v.Next()) {
+      box.Add(BRep_Tool::Pnt(TopoDS::Vertex(v.Current())));
+      bounded = true;
+    }
+  }
+  if (!bounded) { // another surface, or no boundary to bound it by
+    BRepBndLib::AddOptimal(face, box, /*useTriangulation=*/Standard_False,
+                           /*useShapeTolerance=*/Standard_False);
+    return;
+  }
+  if (type != GeomAbs_Sphere)
+    return;
+  const gp_Sphere sphere = surf.Sphere();
+  BRepTopAdaptor_FClass2d inside(face, Precision::PConfusion());
+  // The face's u may run past 2 pi (a periodic face is not wrapped).
+  double u0, u1, v0, v1;
+  BRepTools::UVBounds(face, u0, u1, v0, v1);
+  for (int axis = 0; axis < 3; ++axis)
+    for (const double sign : {-1.0, 1.0}) {
+      gp_XYZ d(0.0, 0.0, 0.0);
+      d.SetCoord(axis + 1, sign * sphere.Radius());
+      const gp_Pnt p(sphere.Location().XYZ() + d);
+      double u = 0.0, v = 0.0;
+      ElSLib::Parameters(sphere, p, u, v);
+      bool on = false;
+      for (const double shift : {-2.0 * M_PI, 0.0, 2.0 * M_PI}) {
+        const double uu = u + shift;
+        if (uu < u0 - Precision::PConfusion() ||
+            uu > u1 + Precision::PConfusion())
+          continue;
+        const TopAbs_State st = inside.Perform(gp_Pnt2d(uu, v));
+        if (st == TopAbs_IN || st == TopAbs_ON) {
+          on = true;
+          break;
+        }
+      }
+      if (on)
+        box.Add(p);
+    }
+}
+
+void AddTight(const TopoDS_Shape& shape, Bnd_Box& box) {
+  TopTools_IndexedMapOfShape edges;
+  for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next())
+    AddTightFace(TopoDS::Face(f.Current()), box, edges);
+  for (int i = 1; i <= edges.Extent(); ++i)
+    BRepBndLib::AddOptimal(edges(i), box, /*useTriangulation=*/Standard_False,
+                           /*useShapeTolerance=*/Standard_False);
+  // What no face holds, as AddOptimal takes it: free edges, then vertices.
+  for (TopExp_Explorer e(shape, TopAbs_EDGE, TopAbs_FACE); e.More(); e.Next())
+    BRepBndLib::AddOptimal(e.Current(), box, Standard_False, Standard_False);
+  for (TopExp_Explorer v(shape, TopAbs_VERTEX, TopAbs_EDGE); v.More(); v.Next())
+    box.Add(BRep_Tool::Pnt(TopoDS::Vertex(v.Current())));
+}
+
+} // namespace
+
 // Memoized ON THE SHAPE, one slot per flavour (see the header for why a
 // remembered box cannot go stale, and for the warm-single-threaded rule).
 //
@@ -457,8 +544,10 @@ void CADShape::GetBoundingBox(glm::dvec3& min, glm::dvec3& max,
     // 4.2 s. The memo above pays the first ask back on every later one, but a
     // build asks about each new shape ONCE, so the flag still earns its place
     // — see the header.
-    BRepBndLib::AddOptimal(m_shape, box, /*useTriangulation=*/Standard_False,
-                           /*useShapeTolerance=*/Standard_False);
+    //
+    // Face by face (AddTight): AddOptimal bounds a trimmed elementary face
+    // by its UV rectangle, more of the sphere than a cut left.
+    AddTight(m_shape, box);
   } else {
     BRepBndLib::Add(m_shape, box, /*useTriangulation=*/Standard_False);
   }
