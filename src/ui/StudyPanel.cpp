@@ -772,7 +772,10 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   // Rows, as every list (ui::ListRow): the face as the label, the magnitude
   // as the tail, and Remove in the row's menu instead of a trash button.
   uint64_t removeLoad = 0;
-  for (const fem::Load& l : s.loads) {
+  // Evaluated: a magnitude typed as a variable shows what it is now, not
+  // what the study's last run left in the stored value.
+  const fem::Study shown = host.Shown(s);
+  for (const fem::Load& l : shown.loads) {
     std::string where;
     // An assembly study's anchor says whose face, or whose contact (S1).
     if (l.contactWith != 0)
@@ -2475,7 +2478,9 @@ bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
       glm::vec3(load->direction.x, load->direction.y, load->direction.z));
   sim.loadDrag.active = true;
   sim.loadDrag.loadId = load->id;
-  sim.loadDrag.startMagnitude = load->magnitude;
+  // From the value the arrow shows, which a variable-driven load's stored
+  // magnitude need not be until the study runs.
+  sim.loadDrag.startMagnitude = host.Shown(*load).magnitude;
   sim.loadDrag.startParam =
       RayAxisParam(ray.origin, ray.direction, glm::vec3(0.0f), dir);
   sim.loadDrag.beforeJson = DocumentIO::StudyToJson(*study).dump();
@@ -2677,7 +2682,8 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
   const float spacing = len * 1.6f;
   constexpr int kMaxGlyphsPerFace = 160;
 
-  for (const fem::Load& load : s->loads) {
+  const fem::Study shown = host.Shown(*s); // a torque's sign, evaluated
+  for (const fem::Load& load : shown.loads) {
     if (load.contactWith != 0)
       continue; // a contact anchor is drawn as its tinted patch, below
     glm::vec3 c(0.0f), n(0.0f);
@@ -3036,7 +3042,8 @@ void DrawSimulationLabels(AppState& state) {
   const auto col = [](const glm::vec4& c) {
     return IM_COL32(int(c.r * 255), int(c.g * 255), int(c.b * 255), 255);
   };
-  for (const fem::Load& load : s->loads) {
+  const fem::Study shown = host.Shown(*s);
+  for (const fem::Load& load : shown.loads) {
     if (load.contactWith != 0) {
       // At the first contact face the imprint found on the support.
       for (const fem::ContactPatch& patch : SimulationContacts(state)) {

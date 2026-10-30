@@ -10,6 +10,7 @@
 #include "ui/SimulationActions.h"
 #include "ui/StudyHost.h" // ModifyStudy, SimulationContacts, StudyStale
 #include "ui/StudyPanel.h"
+#include "ui/VariableActions.h"    // SetProjectVariable
 #include "ui/ViewportHandleDraw.h" // DrawViewportHandles
 
 #include <limits>
@@ -907,6 +908,64 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##DockHost");
     IM_CHECK(ctx->ItemExists("**/###tb_box")); // the model toolbar is back
     ctx->SetRef("//##MainMenuBar");
+  };
+
+  // A load typed as a variable shows the variable's value. A study's
+  // stored magnitude is evaluated at its run, so before one (or when the run
+  // reuses a twin's answer) it holds whatever was there, and the panel's row
+  // and the viewport's label read 0.0 N on the SECOND project built the same
+  // way in one instance (docs/simulation/README.md#gui).
+  t = IM_REGISTER_TEST(engine, "sim",
+                       "a_variable_driven_force_shows_its_value");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    for (int round = 0; round < 2; ++round) {
+      ctx->SetRef("//##MainMenuBar");
+      ctx->MenuClick("File/New");
+      ctx->Yield(2);
+      IM_CHECK_SILENT(ui::SetProjectVariable(*s_App, "load_n", "10000", ""));
+      AddFixtureBox(ctx);
+      ui::EnterSimulation(*s_App);
+      ctx->Yield(2);
+      const uint64_t id = s_App->simulation.activeStudyId;
+      IM_CHECK_SILENT(Doc()->FindStudy(id) != nullptr);
+      const Body& body = Doc()->GetBodies()[0];
+      std::vector<ElementRef> faces;
+      for (const auto& [index, name] : body.elementMap.names)
+        faces.push_back(ElementRef{body.createdBy, name});
+      IM_CHECK_SILENT(faces.size() >= 2);
+      uint64_t forceId = 0;
+      ui::ModifyStudy(*s_App, id, "loads", [&](fem::Study& st) {
+        fem::Load fixed;
+        fixed.id = Doc()->AllocateId();
+        fixed.type = fem::LoadType::Fixed;
+        fixed.face = faces[0];
+        st.loads.push_back(fixed);
+        fem::Load force;
+        force.id = forceId = Doc()->AllocateId();
+        force.type = fem::LoadType::Force;
+        force.face = faces[1];
+        force.magnitudeExpr = "load_n";
+        st.loads.push_back(force);
+      });
+      ctx->Yield(3);
+      const fem::Study* st = Doc()->FindStudy(id);
+      IM_CHECK_SILENT(st != nullptr);
+      const fem::Load* force = nullptr;
+      for (const fem::Load& l : st->loads)
+        if (l.id == forceId)
+          force = &l;
+      IM_CHECK_SILENT(force != nullptr);
+      ctx->LogInfo("round %d: stored magnitude %g", round, force->magnitude);
+      // What the row, the label and a drag start from.
+      const fem::Load shown = ui::StudyHostOf(*s_App).Shown(*force);
+      IM_CHECK_EQ(shown.magnitude, 10000.0);
+      IM_CHECK_STR_EQ(ui::SimulationLoadLabel(shown).c_str(), "10 kN");
+      IM_CHECK(ctx->ItemExists(
+          ("//###ToolWindow/**/###load_row_" + std::to_string(forceId))
+              .c_str()));
+      ui::ExitSimulation(*s_App);
+      ctx->Yield();
+    }
   };
 
   // A study is a row in the part's dock (ui::ListRow): click selects it, its

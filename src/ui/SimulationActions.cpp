@@ -1012,7 +1012,10 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
 }
 
 StudyHost StudyHostOf(AppState& state) {
-  return StudyHost{state.document.get(), state.assembly.get()};
+  const SymbolTable* symbols = state.document   ? &state.document->Symbols()
+                               : state.assembly ? &state.projectSymbols
+                                                : nullptr;
+  return StudyHost{state.document.get(), state.assembly.get(), symbols};
 }
 
 bool StudyStale(AppState& state, uint64_t studyId) {

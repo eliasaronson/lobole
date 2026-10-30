@@ -2302,8 +2302,12 @@ tinted as a fixture, and bonded seams in the bond colour.
   hatched as a support, its row saying "on the ground, friction 0.25". A
   solved contact study lists each contact's closed area, normal and shear
   force and peak pressure, and what its stabilization carried
-  ([contact](#contact)). A placed force can be dragged in the
-  viewport to change its magnitude (one undo step on release). Run shows the
+  ([contact](#contact)). A magnitude typed as an expression (`load_n`)
+  is shown, in its row and its viewport label, as what it evaluates to now:
+  a study's stored values are evaluated only at its run
+  (`StudyHost::Shown`). A placed force can be dragged in the
+  viewport to change its magnitude, from the value it shows (one undo step
+  on release). Run shows the
   shared progress bar. Results: mesh size, max von Mises, max displacement,
   field selector and deformation slider; for modal, the natural frequencies
   (selecting one shows its mode shape) and a mode-shape toggle; for

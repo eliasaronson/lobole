@@ -27,6 +27,9 @@ struct AppState;
 struct StudyHost {
   Document* part = nullptr;
   AssemblyDocument* asmDoc = nullptr;
+  // What a study's expressions read: the part's symbols (which fall back to
+  // the project's), or the project's on an assembly tab.
+  const SymbolTable* symbols = nullptr;
 
   explicit operator bool() const {
     return part != nullptr || asmDoc != nullptr;
@@ -55,6 +58,25 @@ struct StudyHost {
   }
   uint64_t Version() const {
     return part ? part->Version() : asmDoc->Version();
+  }
+  // `s` with every expression-driven field (a load's magnitude, a mesh
+  // size) evaluated against the current variables, for DISPLAY: a study's
+  // stored values are evaluated lazily, at its run, so a load typed as
+  // "load_n" holds whatever its last run left there (0 before any run, or
+  // when the run's answer was reused from a twin's). The panel, the
+  // viewport's labels and a drag's starting value read this; the stored
+  // study is not touched. A field that does not evaluate keeps its stored
+  // value.
+  fem::Study Shown(const fem::Study& s) const {
+    fem::Study out = s;
+    if (symbols != nullptr)
+      (void)fem::EvaluateStudyExprs(out, *symbols, nullptr);
+    return out;
+  }
+  fem::Load Shown(const fem::Load& l) const {
+    fem::Study one;
+    one.loads.push_back(l);
+    return Shown(one).loads[0];
   }
   // The name of an occurrence of the assembly (its id as text when there is
   // no assembly, or no such occurrence).
