@@ -161,7 +161,11 @@ def check_calculix_study(c, ccx):
 
     def solve(solver):
         sid = c.call("add_study", name=solver)["id"]
-        c.call("set_study", id=sid, mesh_size=5.0, solver=solver)
+        # converge: never, so both answer on one mesh: a converging run
+        # refines until a time budget, which a slow runner reaches sooner,
+        # and two meshes differ by more than the tolerance below.
+        c.call("set_study", id=sid, mesh_size=5.0, solver=solver,
+               converge="never")
         c.call("add_load", study=sid, type="fixed",
                face={"feature_id": els["created_by"], "element": faces[False]})
         c.call("add_load", study=sid, type="force",
