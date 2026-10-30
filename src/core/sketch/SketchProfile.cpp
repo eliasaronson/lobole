@@ -499,15 +499,41 @@ TopoDS_Wire MakeLoopWireImpl(const SketchPlane& plane, const Loop& loop,
     // tolerances — keep them as tight as the geometry allows).
     const size_t n = loop.edges.size();
 
-    // A lone closed spline is its own loop: build the closed curve directly,
-    // no shared-vertex chaining (like a circle/ellipse loop).
+    // A lone closed spline is its own loop, built as TWO edges split at its
+    // middle parameter and sharing both vertices. One clamped edge closed on
+    // its own vertex made a face whose volume BRepGProp integrated 1.5% off
+    // (an ellipse-like 1131 mm2 read 1113 mm3 a millimetre tall, 1013 with
+    // an adaptive tolerance), the curve itself right; the same curve as two
+    // edges reads its area, as a section's closed cut already drew it
+    // (sketch::FitSplines).
     if (n == 1 && loop.edges[0].spline) {
       Handle(Geom_BSplineCurve) curve =
           MakeBSplineCurve(plane, *loop.edges[0].spline);
-      BRepBuilderAPI_MakeEdge me(curve);
-      if (!me.IsDone())
+      const double t0 = curve->FirstParameter(), t1 = curve->LastParameter();
+      const double tm = 0.5 * (t0 + t1);
+      const gp_Pnt p0 = curve->Value(t0), pm = curve->Value(tm);
+      BRep_Builder builder;
+      TopoDS_Vertex v0, vm;
+      builder.MakeVertex(
+          v0, p0,
+          std::max(Precision::Confusion(),
+                   p0.Distance(curve->Value(t1)) + Precision::Confusion()));
+      builder.MakeVertex(vm, pm, Precision::Confusion());
+      // Each half its own curve: two edges trimming one shared curve swept
+      // into two side faces on one surface, which the offset handed back
+      // unchanged (every Shell of such a pad had no effect).
+      Handle(Geom_BSplineCurve) a =
+          Handle(Geom_BSplineCurve)::DownCast(curve->Copy());
+      Handle(Geom_BSplineCurve) b =
+          Handle(Geom_BSplineCurve)::DownCast(curve->Copy());
+      a->Segment(t0, tm);
+      b->Segment(tm, t1);
+      BRepBuilderAPI_MakeEdge first(a, v0, vm);
+      BRepBuilderAPI_MakeEdge second(b, vm, v0);
+      if (!first.IsDone() || !second.IsDone())
         return TopoDS_Wire();
-      wire.Add(me.Edge());
+      wire.Add(first.Edge());
+      wire.Add(second.Edge());
       if (!wire.IsDone())
         return TopoDS_Wire();
       ShapeFix_Wire fix;

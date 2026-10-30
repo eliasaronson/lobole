@@ -464,7 +464,8 @@ TEST_CASE("A filleted spline head fused to a turned base names every edge",
   REQUIRE(doc.Regenerate());
   REQUIRE(doc.GetBodies().size() == 1);
 
-  // The two side outlines: curved edges lying in z = +-5.5.
+  // The two side outlines: curved edges lying in z = +-5.5, each of two
+  // edges (a lone closed spline is built split at its middle parameter).
   std::vector<ElementRef> outlines;
   {
     const Body& body = doc.GetBodies().at(0);
@@ -481,7 +482,7 @@ TEST_CASE("A filleted spline head fused to a turned base names every edge",
         outlines.push_back({body.createdBy, *name});
     }
   }
-  REQUIRE(outlines.size() == 2);
+  REQUIRE(outlines.size() == 4);
   doc.AddFeature(std::make_unique<FilletFeature>("Round", outlines, 1.5));
   REQUIRE(doc.Regenerate());
   const auto* fil = doc.GetFeature(4);

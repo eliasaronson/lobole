@@ -588,8 +588,8 @@ stable ids, as any projection's is.
   - `spline`: the sketch's own cubic B-splines (clamped, uniform knots),
     least squares with the ends pinned and as many poles as the tolerance
     needs; a chain past a sketch spline's 255 poles is split into pieces
-    that meet, and a closed chain is always two (a lone closed spline
-    extrudes to a wrong mass: [known bugs](../known-bugs.md#an-extrusion-of-a-lone-closed-spline-weighs-wrong)).
+    that meet, and a closed chain is always two (as a lone closed spline
+    is built: [profiles](#profiles)).
 - **The deviation** (`ExternalGeom::deviationMm`, `deviation_mm` in the
   reply): the largest distance from a point of the true cut to what was
   drawn (for a spline, both ways). The fit holds it within the tolerance;
@@ -929,8 +929,14 @@ lists; open chains are discarded with a warning. An outline text label adds
 each glyph contour as a loop of its own, never chained with other geometry;
 single-stroke text is skipped silently (an extrude or revolve whose region
 picks it, or whose sketch has nothing else, is refused naming the label and
-its font). Every wire goes through `ShapeFix_Wire` (reorder, reconnect,
-close) before face building. Loops are grouped by **containment depth**
+its font). A lone closed spline (one spline whose ends meet) is built as two
+edges split at its middle parameter, sharing both vertices, each half its
+own curve (halves trimming one shared curve swept into side faces on one
+surface, and every Shell of the pad came back unchanged): as one edge
+closed on its own vertex, its face weighed 1.5% off (`BRepGProp` integrating
+over that face's domain; the curve was right), and its extrusion has two side
+faces named from their cap edges. Every wire goes through `ShapeFix_Wire`
+(reorder, reconnect, close) before face building. Loops are grouped by **containment depth**
 (`ClassifyLoops`): a loop inside an even number of others is an outer
 boundary, inside an odd number a hole of its innermost container, so a
 letter's counter is a hole and an island inside a hole is an outer again.

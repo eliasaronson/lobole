@@ -5,10 +5,14 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "TestIO.h"
+#include "TestPaths.h"
 #include "core/Document.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchProfile.h"
+#include "core/sketch/SketchSection.h"
 #include "core/sketch/SketchSolver.h"
 
 #include <filesystem>
@@ -125,6 +129,30 @@ TEST_CASE("A closed spline extrudes to a solid whose volume matches its area",
   CHECK_THAT(prism.Volume(), WithinRel(area * height, 1e-2));
 }
 
+TEST_CASE("A lone closed spline extrudes to its own area",
+          "[spline][extrude]") {
+  // One spline fitted round a 30 x 12 ellipse, its ends meeting: built as
+  // one clamped edge closed on its own vertex, the face weighed 1113 mm3 a
+  // millimetre tall where the ellipse is 1131 (and 1426 with an adaptive
+  // tolerance), the curve itself right. Built as two edges split at its
+  // middle parameter it weighs its area.
+  std::vector<glm::dvec2> pts;
+  for (int k = 0; k <= 6000; k++) {
+    const double t = 2.0 * M_PI * k / 6000.0;
+    pts.push_back({30.0 * std::cos(t), 12.0 * std::sin(t)});
+  }
+  const double tol = 0.002;
+  const std::vector<BSpline> fit = sketch::FitSplines(pts, false, tol);
+  REQUIRE(fit.size() == 1);
+  REQUIRE(glm::length(fit[0].poles.front() - fit[0].poles.back()) < tol);
+  const auto loops = sketch::BuildLoops({fit[0]});
+  REQUIRE(loops.size() == 1);
+  const CADShape prism = sketch::BuildPrism(kXY, loops, 1.0, false);
+  REQUIRE(prism.IsValid());
+  // To the fit's tolerance round its perimeter (about 134 mm).
+  CHECK_THAT(prism.Volume(), WithinAbs(M_PI * 30.0 * 12.0, 134.0 * tol));
+}
+
 TEST_CASE("A spline closed by a line forms one loop and extrudes",
           "[spline][extrude]") {
   // A "D": an open spline bulge from (0,0) to (4,0), closed by a straight line.
@@ -178,3 +206,45 @@ TEST_CASE("An unconstrained B-spline solves without moving",
 }
 
 #endif // HAVE_PLANEGCS
+
+TEST_CASE("The vNEXT2 golden's closed spline is two edges and weighs its area",
+          "[spline][golden]") {
+  // tests/golden/vNEXT2-closed-spline-two-edges.json: one spline fitted
+  // round a 30 x 12 ellipse, padded 4 mm, its top outline filleted by the
+  // two U names the cap gives its two halves.
+  auto doc = testio::Load(std::string(TestSourceDir()) +
+                          "/tests/golden/vNEXT2-closed-spline-two-edges.json");
+  REQUIRE(doc != nullptr);
+  INFO(doc->GetFeature(2)->GetError());
+  CHECK(doc->GetFeature(2)->GetError().empty());
+  const std::vector<Body>* pad = doc->CachedBodiesAfter(1);
+  REQUIRE(pad != nullptr);
+  CHECK_THAT(pad->at(0).shape.Volume(),
+             WithinAbs(4.0 * M_PI * 30.0 * 12.0, 4.0 * 134.0 * 0.002));
+}
+
+TEST_CASE("A lone closed spline's pad shells", "[spline][extrude]") {
+  // Split in two halves trimming ONE shared curve, the pad's two side faces
+  // lay on one surface and every Shell of it came back unchanged: each half
+  // is its own curve.
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("Base", kXY);
+  BSpline s;
+  s.poles = {{2, 0}, {2, 2}, {-2, 2}, {-2, -2}, {2, -2}, {2, 0}};
+  sk->AddEntity(s);
+  doc.AddFeature(std::move(sk));
+  const uint64_t sketchId = doc.GetFeature(0)->GetId();
+  auto pad = std::make_unique<ExtrudeFeature>("Pad", sketchId, 3.0,
+                                              ExtrudeMode::NewBody);
+  doc.AddFeature(std::move(pad));
+  const uint64_t padId = doc.GetFeature(1)->GetId();
+  REQUIRE(doc.Regenerate());
+  const double solid = doc.GetBodies().at(0).shape.Volume();
+  doc.AddFeature(std::make_unique<ShellFeature>(
+      "Shell", padId,
+      std::vector<ElementRef>{{padId, std::to_string(padId) + "/cap1"}}, 0.2));
+  doc.Regenerate();
+  INFO(doc.GetFeature(2)->GetError());
+  CHECK(doc.GetFeature(2)->GetError().empty());
+  CHECK(doc.GetBodies().at(0).shape.Volume() < 0.5 * solid);
+}

@@ -352,6 +352,7 @@ into the history above, numbered, when the branch lands
 | v | Change |
 |---|--------|
 | vNEXT | An edge two named faces share takes its U name (`<face>;U<k>`) from the face with fewer boundary edges, then the lesser name, not the first in the result's face order, which a builder can hand back in shape-address order ([toponaming](../modeling/toponaming.md#how-each-operation-names-its-output)). A reference saved under the other face's U name still resolves, as an alias of the edge, wherever the edge's name carries; no migration. A FACE named from such an edge (a blend's `<edge>;G<tag>`) takes the new name, and a reference to it saved before is not followed. Golden `vNEXT-u-name-by-fewer-edges` (a Fillet on a plate's hole rim, a U name of the bore) |
+| vNEXT2 | A lone closed spline (one spline whose ends meet) is built as two edges split at its middle parameter, sharing both vertices, not one edge closed on its own vertex, whose face `BRepGProp` weighed 1.5% off. Its extrusion has two side faces where it had one, each named from its cap edges (`<cap>;U<k>,...;L`), and each cap two U edges: a reference to the old single side face or cap edge is not followed ([profiles](../sketching/README.md#profiles)). Golden `vNEXT2-closed-spline-two-edges` (a fitted ellipse padded 4 mm, its top outline filleted by both halves) |
 
 ## Paths in a project
 

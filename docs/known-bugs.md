@@ -69,27 +69,6 @@ the heading if it is not here yet.
   cost a second build of every honest refusal. The fix belongs upstream, in
   the offset's intersections, not in the order.
 
-### An extrusion of a lone closed spline weighs wrong
-
-- **Symptom:** a profile that is one B-spline closed on itself (first pole
-  equal to last) extrudes to a solid whose volume `BRepGProp` reads about
-  1.5% low or high, and differently with an adaptive tolerance: an
-  ellipse-like closed spline of 1131 mm² read 1113 mm³ a millimetre tall
-  (fixed Gauss) and 1013 (adaptive). The same curve split into two splines
-  that meet at both ends reads 1131.
-- **Cause:** not pinned down. The face is built from one clamped,
-  non-periodic edge closed on its own vertex (`MakeLoopWire`'s lone-spline
-  branch, then `ShapeFix_Wire`); the integration over that face's domain
-  is what goes wrong, not the curve (its shoelace area is right).
-- **Where:** `MakeLoopWire` in `src/core/sketch/SketchProfile.cpp`.
-- **Likely fix:** build the lone closed spline as two edges split at its
-  middle parameter, sharing both vertices; a regression test extruding a
-  closed spline against its shoelace area. A section's spline fit already
-  draws a closed cut as two splines for this reason
-  (`sketch::FitSplines`). Changing it renames the side faces of every
-  saved extrusion of a closed spline (one edge becomes two), so it needs
-  a look at what refers to them.
-
 ## Performance
 
 ### The bench's big mesh rows are priced as faceted imports
