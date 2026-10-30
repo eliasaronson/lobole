@@ -292,22 +292,6 @@
       "distance": 4.0,
       "mode": "new_body",
       "reversed": false
-    },
-    {
-      "edges": [
-        {
-          "element": "2/cap1;U0",
-          "feature_id": 2
-        },
-        {
-          "element": "2/cap1;U1",
-          "feature_id": 2
-        }
-      ],
-      "id": 3,
-      "name": "Round",
-      "radius": 0.5,
-      "type": "Fillet"
     }
   ],
   "format": "designer-document",

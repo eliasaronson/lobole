@@ -8,6 +8,7 @@
 #include "TestPaths.h"
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/FilletFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
@@ -210,17 +211,30 @@ TEST_CASE("An unconstrained B-spline solves without moving",
 TEST_CASE("The v217 golden's closed spline is two edges and weighs its area",
           "[spline][golden]") {
   // tests/golden/v217-closed-spline-two-edges.json: one spline fitted
-  // round a 30 x 12 ellipse, padded 4 mm, its top outline filleted by the
-  // two U names the cap gives its two halves.
+  // round a 30 x 12 ellipse, padded 4 mm. Its top outline is filleted here,
+  // by the two U names the cap gives its two halves, and not in the golden:
+  // every golden is the reader fuzz's input, and a fillet after a damaged
+  // spline walks for minutes (docs/known-bugs.md).
   auto doc = testio::Load(std::string(TestSourceDir()) +
                           "/tests/golden/v217-closed-spline-two-edges.json");
   REQUIRE(doc != nullptr);
-  INFO(doc->GetFeature(2)->GetError());
-  CHECK(doc->GetFeature(2)->GetError().empty());
+  INFO(doc->GetFeature(1)->GetError());
+  CHECK(doc->GetFeature(1)->GetError().empty());
   const std::vector<Body>* pad = doc->CachedBodiesAfter(1);
   REQUIRE(pad != nullptr);
   CHECK_THAT(pad->at(0).shape.Volume(),
              WithinAbs(4.0 * M_PI * 30.0 * 12.0, 4.0 * 134.0 * 0.002));
+  const uint64_t padId = doc->GetFeature(1)->GetId();
+  const std::string cap = std::to_string(padId) + "/cap1";
+  doc->AddFeature(std::make_unique<FilletFeature>(
+      "Round",
+      std::vector<ElementRef>{{padId, cap + ";U0"}, {padId, cap + ";U1"}},
+      0.5));
+  doc->Regenerate();
+  INFO(doc->GetFeature(2)->GetError());
+  CHECK(doc->GetFeature(2)->GetError().empty());
+  CHECK_THAT(doc->GetBodies().at(0).shape.Volume(),
+             WithinAbs(4516.701355, 1e-3));
 }
 
 TEST_CASE("A lone closed spline's pad shells", "[spline][extrude]") {

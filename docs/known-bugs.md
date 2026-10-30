@@ -31,6 +31,28 @@ the heading if it is not here yet.
 
 ## Modeling
 
+### A fillet after a damaged closed spline walks for minutes
+
+- **Symptom:** the reader fuzz's every-case sweep of part directories
+  timed out (ctest's 1200 s) on
+  `part-dir/v217-closed-spline-two-edges/features/1-sketch.json:drop_run:2`
+  with a 0.5 mm fillet of the pad's top outline in the golden: the damage
+  turns one pole's x into 83 229 mm, and the open's rebuild then spends
+  minutes in the fillet. A 0.5 mm fillet along a straight 100 m edge takes
+  6 ms, so it is not the edge's length: `perf` puts the time in
+  `ChFi3d_Builder` evaluating B-splines (`BSplCLib::Bohm`, `Eval`), the
+  blend walking round the spike.
+- **Cause:** OpenCASCADE's blend walk has no bound of its own, and the
+  rebuild on open has none either; in the app the rebuild is a job that can
+  be cancelled, but the reader fuzz allows a read 2 s of CPU.
+- **Where:** `topo::EdgeBlendNamed` / `BRepFilletAPI_MakeFillet`; the
+  golden's fillet now lives in `tests/test_spline.cpp` ("The v217 golden's
+  closed spline…") so every golden stays a reader-fuzz input that reads in
+  seconds.
+- **Likely fix:** a bound the blend can be stopped by (the build's
+  `Message_ProgressRange`, polled against a budget the caller sets), then
+  the fillet back in the golden.
+
 ### Sheet metal: 6061-T6's bend radius is unsourced
 
 - **Symptom:** a sheet of `aluminum_6061_t6` bends at 1.5 t by default and
