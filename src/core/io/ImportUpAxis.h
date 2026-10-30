@@ -42,7 +42,8 @@ struct UpDecision {
 // is applied as asked; `Auto` reads the table: SolidWorks named in any header
 // field (case-blind) is +y, Loböle is none, and any other writer is none
 // because it is not one known to write Y up. A format without a header (STL,
-// BREP, OBJ) is none, and says so.
+// BREP, OBJ, PLY) is none, and says so; glTF is +y, as its specification
+// says, whatever its generator.
 [[nodiscard]] UpDecision DecideUpAxis(UpAxis requested,
                                       const CADKernel::FileHeader& header,
                                       double turnDeg = 0.0);

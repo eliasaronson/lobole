@@ -17,6 +17,7 @@
 #include "common/Watchdog.h"
 #include "core/io/Autosaver.h"
 #include "core/io/CrashReports.h"
+#include "core/io/ImportFormats.h"
 #include "core/io/Serialization.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
@@ -135,9 +136,9 @@ void UpdateDirectoryContents(AppState& state) {
           std::string ext = entry.path().extension().string();
           std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-          if (ext == ".step" || ext == ".stp" || ext == ".stl" ||
-              ext == ".brep" || ext == ".igs" || ext == ".iges" ||
-              ext == ".obj" || ext == ".dxf" || ext == ".svg") {
+          if (interchange::FormatOf(filename) !=
+                  interchange::ImportFormat::None ||
+              ext == ".dxf" || ext == ".svg") {
             state.directoryContents.push_back("[CAD] " + filename);
           } else {
             state.directoryContents.push_back(filename);
@@ -679,10 +680,11 @@ void ImportFileDialog(AppState& state) {
     return;
   }
   nfdu8char_t* outPath = nullptr;
-  // Exactly what an import reads: STEP, IGES, BREP, STL and OBJ become an
-  // Import feature, DXF and SVG a sketch (RequestImport routes by extension).
+  // Exactly what an import reads: STEP, IGES, BREP, STL, OBJ, PLY and glTF
+  // become an Import feature, DXF and SVG a sketch (RequestImport routes by
+  // extension).
   const nfdu8filteritem_t filters[] = {
-      {"CAD files", "step,stp,igs,iges,stl,obj,brep,dxf,svg"}};
+      {"CAD files", "step,stp,igs,iges,stl,obj,ply,glb,gltf,brep,dxf,svg"}};
 
   nfdresult_t result =
       InDialog([&] { return NFD_OpenDialogU8(&outPath, filters, 1, nullptr); });

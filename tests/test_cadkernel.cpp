@@ -1601,6 +1601,53 @@ TEST_CASE(
   CHECK_THAT(total, WithinRel(1216.0 * 1000.0, 1e-6));
 }
 
+TEST_CASE("our own glTF and PLY read back where they were written",
+          "[kernel][import]") {
+  // export_visual's writer (MeshExport::SaveVisual) and the import's
+  // readers agree: a glTF written in metres and Y up comes back in mm and
+  // Z up, a PLY as it was written, each at its placement and closed
+  // (docs/interchange/README.md#ply-and-gltf).
+  CADKernel& k = CADKernel::Instance();
+  MeshExport::Item item;
+  item.shape = k.CreateBox(10.0, 20.0, 30.0);
+  item.name = "Box";
+  item.transform = glm::translate(glm::mat4(1.0f), {5.0f, 6.0f, 7.0f});
+  glm::dvec3 lo0, hi0;
+  item.shape.GetBoundingBox(lo0, hi0, true);
+  lo0 += glm::dvec3(5, 6, 7);
+  hi0 += glm::dvec3(5, 6, 7);
+  for (const char* ext : {".glb", ".ply"}) {
+    INFO(ext);
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("lobole_own_visual_" + std::to_string(::getpid()) + ext);
+    std::string error;
+    if (!MeshExport::SaveVisual(path.string(), {item}, 0.1, &error)) {
+      // OpenCASCADE 7.6 (Ubuntu 24.04) has no PLY writer, and says so.
+      CHECK(std::string(ext) == ".ply");
+      CHECK(error.find("OpenCASCADE 7.7") != std::string::npos);
+      continue;
+    }
+    Document doc;
+    auto f = std::make_unique<ImportFeature>("own", path.string());
+    f->keepOrigin = true;
+    f->representation = mesh::Representation::Mesh;
+    doc.AddFeature(std::move(f));
+    INFO(doc.GetFeature(0)->GetError());
+    REQUIRE(doc.GetBodies().size() == 1);
+    const Body& b = doc.GetBodies()[0];
+    REQUIRE(b.IsMesh());
+    CHECK(b.mesh->Closed());
+    CHECK_THAT(b.mesh->Volume(), WithinRel(6000.0, 1e-5));
+    glm::dvec3 lo, hi;
+    b.mesh->Bounds(lo, hi);
+    for (int i = 0; i < 3; i++) {
+      CHECK_THAT(lo[i], WithinAbs(lo0[i], 1e-4));
+      CHECK_THAT(hi[i], WithinAbs(hi0[i], 1e-4));
+    }
+    std::filesystem::remove(path);
+  }
+}
+
 TEST_CASE("our own STEP names Loböle as its writer", "[kernel][import]") {
   CADKernel& k = CADKernel::Instance();
   CADKernel::ImportedModel m;

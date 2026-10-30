@@ -441,10 +441,11 @@ public:
   // What a file says about who wrote it, for deciding which axis is up
   // (interchange::DecideUpAxis, docs/interchange/README.md#up-axis). Each
   // field is labelled as a person would find it in the file: {"FILE_NAME
-  // originating_system", "SolidWorks 2024"}. A format without a header (STL,
-  // BREP, OBJ) leaves `fields` empty.
+  // originating_system", "SolidWorks 2024"}, a glTF's {"asset generator",
+  // ...}. A format without a header naming its writer (STL, BREP, OBJ, PLY)
+  // leaves `fields` empty.
   struct FileHeader {
-    std::string format; // "STEP", "IGES", "STL", "BREP", "OBJ"
+    std::string format; // "STEP", "IGES", "STL", "BREP", "OBJ", "PLY", "glTF"
     std::vector<std::pair<std::string, std::string>> fields;
   };
   struct ImportedModel {
@@ -499,6 +500,13 @@ public:
   // `progress` reports Building and Sewing and stops either, as for STEP.
   bool LoadOBJStructured(const std::string& filename, ImportedModel& out,
                          ImportProgress* progress = nullptr);
+  // A mesh already read (a PLY or glTF,
+  // docs/interchange/README.md#ply-and-gltf) as facets: one planar face per
+  // triangle, sewn as an OBJ's are and promoted to a solid when they close.
+  // An open one stays a shell and `note` says so. False on a cancel or when
+  // no triangle spans a plane.
+  bool FacetsFromMesh(const mesh::TriMesh& m, CADShape& shape,
+                      std::string& note, ImportProgress* progress = nullptr);
   // STEP export as another CAD system wants it
   // (docs/interchange/README.md#exporting-step): named, coloured products,
   // placed by reference, nested the way the assembly is. A part occurring

@@ -378,12 +378,12 @@ const Field kFields[] = {
      {},
      0.0f,
      3600.0f},
-    // What a new STL or OBJ import becomes
+    // What a new STL, OBJ, PLY or glTF import becomes
     // (docs/interchange/README.md#mesh-bodies); an Import that names its
     // own representation keeps it.
     {"mesh_representation",
      "Import",
-     "Meshes (STL, OBJ)",
+     "Meshes (STL, OBJ, PLY, glTF)",
      "Auto recognises a mechanical part and keeps a scan or a sculpt as a "
      "mesh. Mesh keeps the triangles as they are: measured, sectioned and "
      "exported, but no B-Rep features. Recognize finds the holes, flats, "

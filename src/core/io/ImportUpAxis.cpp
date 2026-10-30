@@ -90,6 +90,13 @@ UpDecision DecideUpAxis(UpAxis requested, const CADKernel::FileHeader& header,
     d.because = std::string("asked for ") + ToString(requested);
     return d;
   }
+  // glTF is Y up by its specification, whoever wrote it (our own export
+  // turns Z up to it), so the format decides before any writer does.
+  if (header.format == "glTF") {
+    d.applied = UpAxis::PosY;
+    d.because = "glTF is Y up by its specification";
+    return d;
+  }
   d.applied = UpAxis::None;
   if (header.fields.empty()) {
     const std::string fmt = header.format.empty() ? "this file" : header.format;

@@ -27,6 +27,7 @@
 #include "core/mesh/Segment.h"
 #include "core/mesh/Slice.h"
 #include "remote/InstanceRegistry.h"
+#include "scan_files.h"
 #include "thirdparty/stb_image.h"
 #include "thirdparty/stb_image_write.h"
 #include "ui/AppActionsInternal.h" // SlotDoc and its kin
@@ -2173,16 +2174,49 @@ Sweep::Impl::OtherSetup Sweep::Impl::SetupOther() {
       }
       WriteBytes(fixture / "washer.obj", obj);
     }
+    // PLY in each encoding and a GLB, read by mesh::ReadPly and ReadGltf
+    // (docs/interchange/README.md#ply-and-gltf) through their vendored
+    // parsers, which see the damage first.
+    {
+      const mesh::TriMesh washer = mesh::FromSoup(soup, 1e-9);
+      scanfiles::PlyOptions ascii;
+      ascii.colours = {{200, 100, 50}};
+      WriteBytes(fixture / "washer.ply", scanfiles::Ply(washer, ascii));
+      WriteBytes(
+          fixture / "washer-le.ply",
+          scanfiles::Ply(washer, {scanfiles::PlyEncoding::BinaryLittle}));
+      WriteBytes(fixture / "washer-be.ply",
+                 scanfiles::Ply(washer, {scanfiles::PlyEncoding::BinaryBig}));
+      scanfiles::GltfOptions g;
+      mesh::TriMesh metres = washer;
+      for (glm::dvec3& p : metres.positions)
+        p *= 0.001;
+      g.meshes = {metres};
+      WriteBytes(fixture / "washer.glb", scanfiles::Glb(g));
+    }
     check = [](const fs::path& w, const Case&) -> std::string {
       for (const char* name :
-           {"washer.stl", "washer-ascii.stl", "washer.obj"}) {
+           {"washer.stl", "washer-ascii.stl", "washer.obj", "washer.ply",
+            "washer-le.ply", "washer-be.ply", "washer.glb"}) {
         if (!fs::exists(w / name))
           continue;
         mesh::TriMesh m;
         std::string error;
-        const bool obj = std::string(name).ends_with(".obj");
-        if (!(obj ? mesh::ReadObjBytes(ReadBytes(w / name), name, m, error)
-                  : mesh::ReadStlBytes(ReadBytes(w / name), name, m, error))) {
+        const std::string n(name);
+        const bool read =
+            n.ends_with(".obj")
+                ? mesh::ReadObjBytes(ReadBytes(w / name), name, m, error)
+            : n.ends_with(".ply") ? mesh::ReadPly((w / name).string(), m, error)
+            : n.ends_with(".glb")
+                ? mesh::ReadGltf((w / name).string(), m, error)
+                : mesh::ReadStlBytes(ReadBytes(w / name), name, m, error);
+        if (n.ends_with(".ply") || n.ends_with(".glb")) {
+          // The counter the import prices a mesh by reads the same header.
+          (void)(n.ends_with(".ply")
+                     ? mesh::CountPlyFaces((w / name).string())
+                     : mesh::CountGltfTriangles((w / name).string()));
+        }
+        if (!read) {
           if (error.find(name) == std::string::npos)
             return std::string(name) +
                    " refused without naming itself: " + error;

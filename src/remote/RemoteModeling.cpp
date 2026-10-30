@@ -158,7 +158,8 @@ void ImportRepresentationDefault(const ui::AppState& state, json& fj) {
   if (!ImportFeature::IsMesh(path)) {
     if (fj.contains("representation"))
       throw std::runtime_error("Import: representation: '" + path +
-                               "' is not a mesh; it is for STL and OBJ");
+                               "' is not a mesh; it is for STL, OBJ, PLY "
+                               "and glTF");
     return;
   }
   if (!fj.contains("representation"))

@@ -3,6 +3,9 @@
 
 #include "core/io/MeshImportCost.h"
 
+#include "core/io/ImportFormats.h"
+#include "core/mesh/MeshReaders.h"
+
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -13,13 +16,6 @@
 namespace interchange {
 
 namespace {
-
-std::string LowerExt(const std::string& path) {
-  std::string ext = std::filesystem::path(path).extension().string();
-  for (char& c : ext)
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  return ext;
-}
 
 // The law, t = kCostAt10k * (n / 10^4)^kCostExponent seconds, fitted (least
 // squares in log-log) to the whole `import_step` calls of the slowest meshes
@@ -115,17 +111,22 @@ std::optional<uint64_t> CountObj(const std::string& path) {
 } // namespace
 
 bool IsMeshFile(const std::string& path) {
-  const std::string ext = LowerExt(path);
-  return ext == ".stl" || ext == ".obj";
+  return IsMeshFormat(FormatOf(path));
 }
 
 std::optional<uint64_t> CountMeshTriangles(const std::string& path) {
-  const std::string ext = LowerExt(path);
-  if (ext == ".stl")
+  switch (FormatOf(path)) {
+  case ImportFormat::Stl:
     return CountStl(path);
-  if (ext == ".obj")
+  case ImportFormat::Obj:
     return CountObj(path);
-  return std::nullopt;
+  case ImportFormat::Ply:
+    return mesh::CountPlyFaces(path);
+  case ImportFormat::Gltf:
+    return mesh::CountGltfTriangles(path);
+  default:
+    return std::nullopt;
+  }
 }
 
 double ExpectedMeshImportSeconds(uint64_t triangles) {

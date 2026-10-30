@@ -2143,6 +2143,46 @@ bool CADKernel::LoadOBJStructured(const std::string& filename,
   return !out.instances.empty();
 }
 
+bool CADKernel::FacetsFromMesh(const mesh::TriMesh& m, CADShape& shape,
+                               std::string& note, ImportProgress* progress) {
+  shape = CADShape();
+  note.clear();
+  if (m.triangles.empty())
+    return false;
+  Handle(Poly_Triangulation) tri = new Poly_Triangulation(
+      static_cast<int>(m.positions.size()),
+      static_cast<int>(m.triangles.size()), Standard_False);
+  for (size_t i = 0; i < m.positions.size(); i++)
+    tri->SetNode(static_cast<int>(i + 1),
+                 gp_Pnt(m.positions[i].x, m.positions[i].y, m.positions[i].z));
+  for (size_t t = 0; t < m.triangles.size(); t++)
+    tri->SetTriangle(static_cast<int>(t + 1),
+                     Poly_Triangle(static_cast<int>(m.triangles[t][0] + 1),
+                                   static_cast<int>(m.triangles[t][1] + 1),
+                                   static_cast<int>(m.triangles[t][2] + 1)));
+  BRep_Builder builder;
+  TopoDS_Compound faces;
+  builder.MakeCompound(faces);
+  const int total = static_cast<int>(m.triangles.size());
+  const int made = AddTriangleFaces(tri, TopLoc_Location(), builder, faces,
+                                    progress, 0, total);
+  if (made <= 0)
+    return false; // cancelled, or nothing spans a plane
+  // The mesh is welded, so the triangles meet exactly; the tolerance only
+  // has to absorb rounding, as an OBJ's.
+  Bnd_Box box;
+  BRepBndLib::Add(faces, box);
+  const double diagonal = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
+  Sewn sewn = SewAt(faces, diagonal * 1e-7, progress);
+  if (sewn.cancelled)
+    return false;
+  shape = CADShape(sewn.shape);
+  if (sewn.openShells > 0)
+    note = "the mesh is not closed (" + std::to_string(sewn.freeEdges) +
+           " free edges): kept as a surface, not a solid";
+  return true;
+}
+
 bool CADKernel::SaveSTEP(const std::string& filename,
                          const std::vector<CADShape>& shapes) {
   if (shapes.empty())

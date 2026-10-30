@@ -457,7 +457,9 @@ bool StartImport(AppState& state, const ImportRequest& request,
   if (request.representation &&
       *request.representation != mesh::Representation::Facets &&
       !ImportFeature::IsMesh(path))
-    return fail("'" + path + "' is not a mesh: `representation` is for STL");
+    return fail("'" + path +
+                "' is not a mesh: `representation` is for STL, OBJ, PLY and "
+                "glTF");
   auto job = std::make_shared<ImportJob>();
   job->request = request;
   // Decided here, on the main thread, where the preference is: the worker

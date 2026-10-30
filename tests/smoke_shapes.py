@@ -82,8 +82,10 @@ def sphere(d, center, r, name="Sphere", **kw):
 
 
 def mesh_sphere(path, center=(0.0, 0.0, 0.0), r=20.0, rings=48, cut_z=None):
-    """Writes a UV sphere of `r` about `center` as a binary STL or an OBJ
-    (by `path`'s extension) and returns its triangle count: a closed,
+    """Writes a UV sphere of `r` about `center` as a binary STL, an OBJ, a
+    binary PLY or a GLB in metres (by `path`'s extension;
+    docs/interchange/README.md#ply-and-gltf) and returns its triangle
+    count: a closed,
     smooth mesh a scan stands in for
     (docs/interchange/README.md#mesh-bodies). `cut_z` drops every triangle with a corner below that height,
     leaving it open, as a table-top scan arrives. Pure Python, no geometry
@@ -113,7 +115,49 @@ def mesh_sphere(path, center=(0.0, 0.0, 0.0), r=20.0, rings=48, cut_z=None):
                 tris.append((b, c, e))
     if cut_z is not None:
         tris = [t for t in tris if min(pts[k][2] for k in t) >= cut_z]
-    if path.endswith(".obj"):
+    if path.endswith(".ply"):
+        with open(path, "wb") as f:
+            f.write(("ply\nformat binary_little_endian 1.0\n"
+                     "element vertex %d\nproperty float x\nproperty float y\n"
+                     "property float z\nelement face %d\n"
+                     "property list uchar int vertex_indices\nend_header\n"
+                     % (len(pts), len(tris))).encode())
+            for p in pts:
+                f.write(struct.pack("<3f", *p))
+            for t in tris:
+                f.write(struct.pack("<B3i", 3, *t))
+    elif path.endswith(".glb"):
+        import json
+        pos = b"".join(struct.pack("<3f", *(c / 1000.0 for c in p))
+                       for p in pts)
+        idx = b"".join(struct.pack("<3I", *t) for t in tris)
+        lo = [min(p[k] for p in pts) / 1000.0 for k in range(3)]
+        hi = [max(p[k] for p in pts) / 1000.0 for k in range(3)]
+        doc = {"asset": {"version": "2.0", "generator": "smoke_shapes"},
+               "scene": 0, "scenes": [{"nodes": [0]}],
+               "nodes": [{"mesh": 0}],
+               "meshes": [{"primitives": [{"attributes": {"POSITION": 0},
+                                           "indices": 1}]}],
+               "accessors": [
+                   {"bufferView": 0, "componentType": 5126,
+                    "count": len(pts), "type": "VEC3", "min": lo, "max": hi},
+                   {"bufferView": 1, "componentType": 5125,
+                    "count": 3 * len(tris), "type": "SCALAR"}],
+               "bufferViews": [
+                   {"buffer": 0, "byteOffset": 0, "byteLength": len(pos)},
+                   {"buffer": 0, "byteOffset": len(pos),
+                    "byteLength": len(idx)}],
+               "buffers": [{"byteLength": len(pos) + len(idx)}]}
+        text = json.dumps(doc).encode()
+        text += b" " * (-len(text) % 4)
+        binary = pos + idx
+        binary += b"\0" * (-len(binary) % 4)
+        with open(path, "wb") as f:
+            f.write(struct.pack("<3I", 0x46546C67, 2,
+                                12 + 8 + len(text) + 8 + len(binary)))
+            f.write(struct.pack("<2I", len(text), 0x4E4F534A) + text)
+            f.write(struct.pack("<2I", len(binary), 0x004E4942) + binary)
+    elif path.endswith(".obj"):
         with open(path, "w") as f:
             for p in pts:
                 f.write("v %.6f %.6f %.6f\n" % p)

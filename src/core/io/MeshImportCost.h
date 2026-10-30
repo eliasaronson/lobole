@@ -21,13 +21,14 @@ namespace interchange {
 // property of any mesh: the one number the limit below is solved from.
 inline constexpr double kPatientImportSeconds = 60.0;
 
-// .stl or .obj, any case.
+// .stl, .obj, .ply, .glb or .gltf, any case.
 bool IsMeshFile(const std::string& path);
 
 // Triangles in a mesh file: a binary STL's header count (when the file's size
 // agrees with it), an ASCII STL's `facet`s, an OBJ's faces with a polygon of
-// n corners counted as n - 2. Nullopt when `path` is not a mesh or cannot be
-// read.
+// n corners counted as n - 2, a PLY's header face count, a glTF's placed
+// primitives' (mesh::CountPlyFaces, CountGltfTriangles). Nullopt when `path` is
+// not a mesh or cannot be read.
 std::optional<uint64_t> CountMeshTriangles(const std::string& path);
 
 // Seconds an import of `triangles` may take: read, faces, sewing and the

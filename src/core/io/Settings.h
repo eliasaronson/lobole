@@ -108,7 +108,7 @@ struct Settings {
   // (docs/simulation/README.md#a-peak-that-has-settled).
   double convergeAutoS = fem::kConvergeAutoSecondsDefault;
 
-  // Import: what a new STL or OBJ becomes when the import names no
+  // Import: what a new STL, OBJ, PLY or glTF becomes when the import names no
   // representation -- "auto", "mesh", "recognize" or "facets"
   // (mesh::Representation, docs/interchange/README.md#mesh-bodies).
   std::string meshRepresentation = "auto";

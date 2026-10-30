@@ -897,8 +897,8 @@ public:
   // small. STEP declares its own unit and REFUSES this. Storage stays mm: the
   // shape is scaled once, as it is read.
   units::Length lengthUnit = units::Length::Millimetre;
-  // Whether `lengthUnit` means anything for this path: .stl, .obj or .brep,
-  // any case.
+  // Whether `lengthUnit` means anything for this path: .stl, .obj, .ply or
+  // .brep, any case (interchange::TakesUnits).
   static bool TakesUnits(const std::string& path);
   // Which axis OF THE FILE is up (v190, `up_axis`), and a turn about world Z
   // applied after it (`turn_deg`). `Auto` decides from the file's header
@@ -927,9 +927,9 @@ public:
   bool hasColor = false;
   glm::vec3 color{0.0f};
 
-  // What a mesh (STL; v200, `representation`) becomes: its triangles sewn
-  // as facets, or the planes, cylinders, cones and spheres they were
-  // tessellated from, rebuilt
+  // What a mesh (STL, OBJ, PLY, glTF; v200, `representation`) becomes: its
+  // triangles sewn as facets, or the planes, cylinders, cones and spheres they
+  // were tessellated from, rebuilt
   // (docs/interchange/README.md#recognising-a-faceted-mesh). A document that
   // names none is `facets`, which is how its faces were named; a new import
   // takes the `mesh_representation` preference. Refused on any other file.
@@ -938,7 +938,8 @@ public:
   // degrees each (5..1024), so a hex nut trap stays six flats and an
   // OpenSCAD pentagon hole is asked for with 5.
   int minSides = mesh::kDefaultMinSides;
-  // Whether `path` is a mesh the representation applies to (.stl).
+  // Whether `path` is a mesh the representation applies to: .stl, .obj,
+  // .ply, .glb or .gltf (interchange::IsMeshFormat).
   static bool IsMesh(const std::string& path);
   // Where the import is put (v213, `placement` {translate_mm, rotate_deg}
   // and `scale`): scaled about the part origin, turned about the world

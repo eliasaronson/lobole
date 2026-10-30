@@ -5,6 +5,7 @@
 
 #include "cad/MeshRebuild.h"
 #include "core/ModelSpace.h"
+#include "core/io/ImportFormats.h"
 #include "core/io/MeshImportCost.h"
 #include "core/mesh/MeshReaders.h"
 #include <glm/gtc/matrix_transform.hpp>
@@ -177,21 +178,8 @@ ImportFeature::ImportFeature(const std::string& name, const std::string& path)
   m_name = name;
 }
 
-namespace {
-// Lower-cased, so ".STL" — how half the world's scanners and slicers write
-// it — imports like ".stl" instead of falling through to the STEP reader.
-std::string LowerExtension(const std::string& path) {
-  std::string ext = std::filesystem::path(path).extension().string();
-  for (char& c : ext)
-    if (c >= 'A' && c <= 'Z')
-      c = static_cast<char>(c - 'A' + 'a');
-  return ext;
-}
-} // namespace
-
 bool ImportFeature::IsMesh(const std::string& path) {
-  const std::string ext = LowerExtension(path);
-  return ext == ".stl" || ext == ".obj";
+  return interchange::IsMeshFormat(interchange::FormatOf(path));
 }
 
 std::string MeshBodyRefusal(const Body& body, const std::string& what) {
@@ -239,10 +227,33 @@ Body PlacedBody(const Body& body, const glm::dmat4& xf) {
 namespace {
 
 bool ReadTriMesh(const std::string& path, mesh::TriMesh& m, std::string& error,
-                 const mesh::Cancelled& cancelled) {
-  return LowerExtension(path) == ".obj"
-             ? mesh::ReadObj(path, m, error, cancelled)
-             : mesh::ReadStl(path, m, error, cancelled);
+                 const mesh::Cancelled& cancelled, mesh::ReadExtras& extras) {
+  extras = {};
+  switch (interchange::FormatOf(path)) {
+  case interchange::ImportFormat::Obj:
+    return mesh::ReadObj(path, m, error, cancelled);
+  case interchange::ImportFormat::Ply:
+    return mesh::ReadPly(path, m, error, cancelled, &extras);
+  case interchange::ImportFormat::Gltf:
+    return mesh::ReadGltf(path, m, error, cancelled, &extras);
+  default:
+    return mesh::ReadStl(path, m, error, cancelled);
+  }
+}
+
+// What a PLY or glTF said besides its triangles, onto the model: its notes,
+// its header, and a uniform colour onto every product.
+void ApplyExtras(CADKernel::ImportedModel& model,
+                 const mesh::ReadExtras& extras) {
+  for (const std::string& note : extras.notes)
+    model.notes.push_back(note);
+  for (const auto& field : extras.header)
+    model.origin.fields.push_back(field);
+  if (extras.color)
+    for (auto& product : model.products) {
+      product.hasColor = true;
+      product.color = *extras.color;
+    }
 }
 
 // A mesh kept as a mesh body: scaled to mm, one product, no shape.
@@ -266,8 +277,7 @@ std::string Fixed1(double v) {
 } // namespace
 
 bool ImportFeature::TakesUnits(const std::string& path) {
-  const std::string ext = LowerExtension(path);
-  return ext == ".stl" || ext == ".brep" || ext == ".obj";
+  return interchange::TakesUnits(interchange::FormatOf(path));
 }
 
 size_t ImportFeature::ContentHash() const {
@@ -305,30 +315,32 @@ bool ImportFeature::ReadModel(const std::string& path,
                               CADKernel::ImportProgress* progress) {
   model = {};
   const units::Length unit = options.unit;
-  const std::string ext = LowerExtension(path);
-  const auto hasExt = [&](const char* e) { return ext == e; };
-  const bool isStep = hasExt(".step") || hasExt(".stp");
-  const bool isIges = hasExt(".igs") || hasExt(".iges");
+  using interchange::ImportFormat;
+  const ImportFormat fileFormat = interchange::FormatOf(path);
+  const auto hasExt = [&](const char* e) {
+    return interchange::LowerExtension(path) == e;
+  };
+  const bool isIges = fileFormat == ImportFormat::Iges;
   // Refused, naming what is read: a file with another extension was read as
   // STEP, and failed as one, which named the wrong problem.
-  if (!isStep && !isIges && !hasExt(".stl") && !hasExt(".brep") &&
-      !hasExt(".obj")) {
-    error = "'" + path + "' is not a file the import reads (" +
-            "accepted: .step/.stp, .igs/.iges, .brep, .stl, .obj)";
+  if (fileFormat == ImportFormat::None) {
+    error = "'" + path + "' is not a file the import reads (accepted: " +
+            interchange::kImportExtensions + ")";
     return false;
   }
-  // STEP and IGES say what unit they are in, and the reader converts; a unit
-  // given on top would be applied twice or contradict the file.
+  // STEP and IGES say what unit they are in, and the reader converts, as
+  // the glTF reader converts its metres; a unit given on top would be
+  // applied twice or contradict the file.
   if (!TakesUnits(path) && unit != units::Length::Millimetre) {
-    error = "'" + path + "' is " + (isIges ? "IGES" : "STEP") +
-            ", which declares its own unit — `units` is for STL, OBJ and "
-            "BREP, which carry none";
+    error = "'" + path + "' is " + interchange::DeclaredUnit(fileFormat) +
+            " — `units` is for STL, OBJ, PLY and BREP, which carry none";
     return false;
   }
   // A representation is what a mesh becomes; anything else is refused
   // rather than read as if it had not been asked.
   if (options.representation != mesh::Representation::Facets && !IsMesh(path)) {
-    error = "'" + path + "' is not a mesh: `representation` is for STL and OBJ";
+    error = "'" + path +
+            "' is not a mesh: `representation` is for STL, OBJ, PLY and glTF";
     return false;
   }
   if (options.minSides < mesh::kMinSidesLowest ||
@@ -344,7 +356,11 @@ bool ImportFeature::ReadModel(const std::string& path,
   };
   using Rep = mesh::Representation;
   const Rep rep = options.representation;
-  const std::string format = hasExt(".obj") ? "OBJ" : "STL";
+  const std::string format = interchange::FormatName(fileFormat);
+  // PLY and glTF are read only into a TriMesh: every representation starts
+  // there, facets included (docs/interchange/README.md#ply-and-gltf).
+  const bool scanFormat =
+      fileFormat == ImportFormat::Ply || fileFormat == ImportFormat::Gltf;
   if (IsMesh(path)) {
     model.representation = mesh::ToString(rep);
     model.representationWhy = "the import names it";
@@ -353,12 +369,13 @@ bool ImportFeature::ReadModel(const std::string& path,
   // (docs/interchange/README.md#mesh-bodies). Counted first: a mesh past
   // what a mesh body can hold is refused before it is read, and `auto`
   // past the recognition limit never segments.
-  if (IsMesh(path) && (rep == Rep::Mesh || rep == Rep::Auto ||
-                       (rep == Rep::Recognize && hasExt(".obj")))) {
+  if (IsMesh(path) &&
+      (scanFormat || rep == Rep::Mesh || rep == Rep::Auto ||
+       (rep == Rep::Recognize && fileFormat == ImportFormat::Obj))) {
     const std::optional<uint64_t> counted =
         interchange::CountMeshTriangles(path);
     if (counted && *counted > interchange::MeshBodyTriangleLimit() &&
-        rep != Rep::Recognize) {
+        (rep == Rep::Mesh || rep == Rep::Auto)) {
       error = interchange::MeshBodyTooLarge(path, *counted);
       return false;
     }
@@ -373,21 +390,51 @@ bool ImportFeature::ReadModel(const std::string& path,
     }
     mesh::TriMesh m;
     std::string unread;
-    if (!ReadTriMesh(path, m, unread, cancelled)) {
+    mesh::ReadExtras extras;
+    if (!ReadTriMesh(path, m, unread, cancelled, extras)) {
       error = cancelled() ? "cancelled"
                           : "failed to read '" + path + "' as " + format +
                                 ": " + unread;
       return false;
     }
     if (m.triangles.size() > interchange::MeshBodyTriangleLimit() &&
-        rep != Rep::Recognize) {
+        (rep == Rep::Mesh || rep == Rep::Auto)) {
       error = interchange::MeshBodyTooLarge(path, m.triangles.size());
       return false;
     }
+    // Whatever it becomes below, what the file said besides its triangles
+    // goes with it.
+    const auto landed = [&] {
+      ApplyExtras(model, extras);
+      return true;
+    };
+    // Facets of a PLY or glTF: its triangles as planar faces, sewn
+    // (CADKernel::FacetsFromMesh), scaled as an STL's are.
+    const auto pushFacets = [&](const mesh::TriMesh& mm) {
+      if (progress != nullptr)
+        progress->OnPhase(CADKernel::ImportProgress::Phase::Building, 0.0);
+      CADShape shape;
+      std::string open;
+      if (!CADKernel::Instance().FacetsFromMesh(mm, shape, open, progress)) {
+        error = cancelled() ? "cancelled"
+                            : "failed to build facets of '" + path + "'";
+        return false;
+      }
+      if (!open.empty())
+        model.notes.push_back(open);
+      if (scale != 1.0)
+        shape.Scale(scale);
+      model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
+      model.instances.push_back({0, glm::dmat4(1.0), ""});
+      model.origin.format = format;
+      return true;
+    };
+    if (rep == Rep::Facets)
+      return pushFacets(m) && landed();
     if (rep == Rep::Mesh ||
         (rep == Rep::Auto && model.representation == "mesh")) {
       PushMeshProduct(model, std::move(m), scale, format);
-      return true;
+      return landed();
     }
     // Segmented, then rebuilt when its regions say it is mechanical.
     if (progress != nullptr)
@@ -418,7 +465,7 @@ bool ImportFeature::ReadModel(const std::string& path,
           shareText + ": organic (a mechanical part has " +
           Fixed1(100.0 * interchange::kMechanicalAreaShare) + "% or more)";
       PushMeshProduct(model, std::move(m), scale, format);
-      return true;
+      return landed();
     }
     if (progress != nullptr)
       progress->OnPhase(CADKernel::ImportProgress::Phase::Building, 0.5);
@@ -436,11 +483,29 @@ bool ImportFeature::ReadModel(const std::string& path,
         model.representationWhy =
             "recognition failed a check (" + report.fellBack + ")";
         PushMeshProduct(model, std::move(m), scale, format);
-        return true;
+        return landed();
       }
-      // An OBJ asked to be recognised: its facets, as before, and why.
+      // An OBJ, PLY or glTF asked to be recognised: its facets, as before,
+      // and why.
       model.notes.push_back("recognition kept it as facets: " +
                             report.fellBack);
+      if (scanFormat) {
+        // Priced by the sewing law, as an STL's fallback is.
+        if (!options.facetsPastLimit)
+          if (const auto cost = interchange::MeshImportCost(path);
+              cost && cost->overLimit) {
+            error = "recognition kept it as facets (" + report.fellBack +
+                    "); as facets " +
+                    interchange::LargeMeshRefusal(path, *cost,
+                                                  options.largeMeshOverride);
+            return false;
+          }
+        if (!pushFacets(m))
+          return false;
+        model.representation = "facets";
+        model.representationWhy = "recognition failed a check";
+        return landed();
+      }
       if (!CADKernel::Instance().LoadOBJStructured(path, model, progress)) {
         error =
             cancelled() ? "cancelled" : "failed to read '" + path + "' as OBJ";
@@ -451,7 +516,7 @@ bool ImportFeature::ReadModel(const std::string& path,
       for (auto& product : model.products)
         if (product.shape.IsValid() && scale != 1.0)
           product.shape.Scale(scale);
-      return true;
+      return landed();
     }
     if (rep == Rep::Auto) {
       model.representation = "recognize";
@@ -465,7 +530,7 @@ bool ImportFeature::ReadModel(const std::string& path,
     model.products.back().recognition = std::move(report);
     model.instances.push_back({0, glm::dmat4(1.0), ""});
     model.origin.format = format;
-    return true;
+    return landed();
   }
   if (hasExt(".stl") &&
       options.representation == mesh::Representation::Recognize) {
@@ -760,8 +825,9 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       std::snprintf(across, sizeof across, "%.3g", largest);
       SetWarning((warning.empty() ? std::string() : warning + "; ") + "only " +
                  across + " mm across, read as " + units::ToString(lengthUnit) +
-                 " — an STL, OBJ or BREP carries no unit; if it was drawn "
-                 "in metres or inches, set the import's units (m, in, cm)");
+                 " — an STL, OBJ, PLY or BREP carries no unit; if it was "
+                 "drawn in metres or inches, set the import's units (m, "
+                 "in, cm)");
     }
   }
   // Centre on the combined box, unless the caller asked to keep the file's

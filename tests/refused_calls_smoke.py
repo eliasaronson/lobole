@@ -38,7 +38,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from smoke_app import launch  # noqa: E402
-from smoke_shapes import cylinder, sphere  # noqa: E402
+from smoke_shapes import cylinder, mesh_sphere, sphere  # noqa: E402
 from smoke_world import (World, build_fixture, changed,  # noqa: E402
                          outside_baselines)
 
@@ -294,6 +294,8 @@ def main():
             # docs/sketching/README.md#importing-dxf-and-svg): every one read
             # and checked before a feature, a sketch or a tab exists.
             fx = os.path.join(HERE, "fixtures", "import")
+            glb = os.path.join(work, "refuse-units.glb")
+            mesh_sphere(glb)
             for label, method, params, needle in [
                     ("import_step unknown up_axis", "import_step",
                      {"path": os.path.join(fx, "box-solidworks.step"),
@@ -301,6 +303,9 @@ def main():
                     ("import_step units on IGES", "import_step",
                      {"path": os.path.join(fx, "box-solid.igs"),
                       "units": "in"}, "IGES, which declares its own unit"),
+                    ("import_step units on glTF", "import_step",
+                     {"path": glb, "units": "m"},
+                     "metres by its specification"),
                     ("import_step a drawing", "import_step",
                      {"path": os.path.join(fx, "unitless.dxf")},
                      "import_sketch"),

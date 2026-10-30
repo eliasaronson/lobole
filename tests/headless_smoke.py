@@ -1621,10 +1621,11 @@ def main():
         expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 24000.0) < 0.1,
                "an STL read in cm is 10x per side")
         # A mesh as a MESH BODY (docs/interchange/README.md#mesh-bodies):
-        # STL and OBJ, in each representation, the reply naming the choice;
-        # a mesh body exports as its own triangles to STL and glTF.
+        # STL, OBJ, PLY and glTF, in each representation, the reply naming
+        # the choice; a mesh body exports as its own triangles to STL and
+        # glTF.
         phase("Mesh bodies")
-        for ext in ("stl", "obj"):
+        for ext in ("stl", "obj", "ply", "glb"):
             ball = os.path.join(tmp, "ball." + ext)
             n = shapes.mesh_sphere(ball, r=20.0)
             for rep, want in (("mesh", "mesh"), ("auto", "mesh"),

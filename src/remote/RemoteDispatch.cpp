@@ -840,11 +840,14 @@ std::string UnknownMethodError(const std::string& method) {
                  [](unsigned char c) { return std::tolower(c); });
   bool importLike = lower.find("import") != std::string::npos;
   if (lower.find("export") == std::string::npos)
-    for (const char* format :
-         {"stl", "obj", "step", "stp", "iges", "igs", "brep", "dxf", "svg"})
+    // Not "ply": every apply_* would look like an import (import_ply has
+    // "import" in it already).
+    for (const char* format : {"stl", "obj", "glb", "gltf", "step", "stp",
+                               "iges", "igs", "brep", "dxf", "svg"})
       importLike = importLike || lower.find(format) != std::string::npos;
   if (importLike)
-    msg += ". Every 3D file -- STEP, IGES, STL, OBJ, BREP -- is read by "
+    msg += ". Every 3D file -- STEP, IGES, STL, OBJ, PLY, glTF, BREP -- is "
+           "read by "
            "import_step (an STL's planes, cylinders, cones and spheres "
            "rebuilt as true faces with `representation: recognize`), and a "
            "DXF or SVG into a sketch by import_sketch";

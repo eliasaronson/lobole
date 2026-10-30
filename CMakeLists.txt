@@ -177,6 +177,10 @@ set_source_files_properties(
     ${IMGUI_TEST_ENGINE_DIR}/imgui_te_perftool.cpp
     ${IMGUI_TEST_ENGINE_DIR}/imgui_te_utils.cpp
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-result")
+# Vendored PLY parser (src/thirdparty, THIRD_PARTY.md): not ours to warn
+# about.
+set_source_files_properties(src/thirdparty/miniply.cpp
+                            PROPERTIES COMPILE_OPTIONS "-w")
 # The capture tool would compile its own stb_image_write, and
 # render/Screenshot.cpp already does; stb's functions are extern "C", so two
 # copies clash at link time whatever namespace one is in. The engine uses
@@ -518,6 +522,8 @@ set(core_sources
     src/core/mesh/Align.cpp
     src/core/mesh/TriMesh.cpp
     src/core/mesh/MeshReaders.cpp
+    src/core/mesh/ScanReaders.cpp
+    src/thirdparty/miniply.cpp
     src/core/mesh/Fit.cpp
     src/core/mesh/Segment.cpp
     src/core/mesh/MeshBvh.cpp

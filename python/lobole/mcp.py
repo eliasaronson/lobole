@@ -426,9 +426,10 @@ typed `contract`: every field, its type and its enum values.
 - Refold (fold an Unfold's bends back up): {{"type": "Refold", "name": str,
   "unfold_id": <the Unfold's id>}} — through-cuts made in between are
   wrapped onto the bend; a partial-depth cut across a crease is refused.
-- Import (STEP, IGES, STL, OBJ, BREP): {{"type": "Import", "name": str,
-  "path": str, "units"?: "mm"|"cm"|"m"|"in" (what an STL, OBJ or BREP was
-  drawn in; refused on STEP and IGES, which declare their own),
+- Import (STEP, IGES, STL, OBJ, PLY, glTF, BREP): {{"type": "Import",
+  "name": str, "path": str, "units"?: "mm"|"cm"|"m"|"in" (what an STL, OBJ,
+  PLY or BREP was drawn in; refused on STEP and IGES, which declare their
+  own, and on glTF, which is metres),
   "keep_origin"?: bool (default false: the import is centred on its
   bounding box; true keeps the file's coordinates), "up_axis"?:
   "auto"|"none"|"+x"|"-x"|"+y"|"-y"|"-z" (which axis OF THE FILE is up;
@@ -682,9 +683,9 @@ The loop that works — follow it every time:
    long before a stress fails it.
 
 IMPORTING a file: rpc('import_step', {path}) is the importer for every 3D
-format, STL and OBJ meshes included, despite its name (an STL's planes,
-cylinders, cones and spheres come back as true faces unless representation
-is "facets"); a DXF or SVG goes into a sketch with rpc('import_sketch').
+format, STL, OBJ, PLY and glTF meshes included, despite its name (an STL's
+planes, cylinders, cones and spheres come back as true faces unless
+representation is "facets"); a DXF or SVG goes into a sketch with rpc('import_sketch').
 
 "This", "here", "the selected": read get_state's `selection` (and
 `selection_items`) BEFORE acting — that is what the user means. When it is
@@ -783,7 +784,8 @@ mcp = _Server(
     "call fails; {'$ref': n} inside a call's params is the n-th call's id, "
     "so a sketch and the extrude that names it go in one batch. A file is "
     "imported with rpc('import_step', {'path': ...}) whatever its 3D format "
-    "(STEP, IGES, STL, OBJ, BREP; an STL's holes and flats recognised as "
+    "(STEP, IGES, STL, OBJ, PLY, glTF, BREP; an STL's holes and flats "
+    "recognised as "
     "true faces), and a DXF or SVG into a sketch with rpc('import_sketch').",
 )
 
@@ -1820,7 +1822,8 @@ _reference("export_bom", "Write the active assembly's bill of materials to a "
 
 
 _reference("import_step", "The importer for EVERY 3D file, meshes "
-          "included, whatever its name says: a STEP, IGES, STL, OBJ or BREP "
+          "included, whatever its name says: a STEP, IGES, STL, OBJ, PLY, "
+          "glTF (.glb/.gltf) or BREP "
           "file's bodies as an Import feature (any other extension is "
           "refused; a DXF or SVG goes into a sketch with import_sketch). "
           "as_assembly=True makes a STEP or IGES parts + an assembly. "
@@ -1834,15 +1837,16 @@ _reference("import_step", "The importer for EVERY 3D file, meshes "
           "and sphere found, the polygons left flat, and `fell_back` when "
           "the rebuild failed a check and the mesh was kept as facets. "
           "`units` is the "
-          "length unit an STL/OBJ/BREP was drawn in (mm default, cm, m, in) "
-          "— those formats carry none; a STEP or IGES declares its own and "
-          "refuses it. keep_origin=True keeps the file's OWN coordinates: "
+          "length unit an STL/OBJ/PLY/BREP was drawn in (mm default, cm, m, "
+          "in) — those formats carry none; a STEP or IGES declares its own "
+          "and a glTF is metres (read as mm, its Y up stood on our Z), and "
+          "each refuses it. keep_origin=True keeps the file's OWN coordinates: "
           "without it the import is centred on its bounding box, so a bought "
           "part loses the placement it was exported at and every one of them "
           "lands on the origin. up_axis (default auto: read from the file's "
           "header, a SolidWorks file is +y) says which axis of the FILE is "
           "up, and turn_deg turns it about world Z after; the reply's "
-          "`up_axis` says what was applied and why. An STL or OBJ is counted "
+          "`up_axis` says what was applied and why. A mesh is counted "
           "first: the reply's `mesh` {triangles, expected_s, limit} says what "
           "it was expected to cost, and past `limit` the call is refused "
           "naming the time unless allow_large_mesh=True. The read runs as "
@@ -2312,7 +2316,8 @@ _reference("ui_action", _UI_ACTION_DOC)
           "rpc('add_mate', {...}). Use describe() for the method list and "
           "help('add_mate') for its arguments and gotchas. Importing a "
           "file: rpc('import_step', {path}) reads EVERY 3D format (STEP, "
-          "IGES, STL, OBJ, BREP), rpc('import_sketch', {path}) a DXF or SVG "
+          "IGES, STL, OBJ, PLY, glTF, BREP), rpc('import_sketch', {path}) a "
+          "DXF or SVG "
           "into a sketch. Prefer this over "
           "guessing; a wrong method name returns the list of close matches.")
 def rpc(method: str, params: dict | None = None) -> dict:
@@ -2421,7 +2426,7 @@ def help(method: str = "") -> dict:
                 # By file, since the method names do not say it: the one
                 # importer for every 3D format is called import_step.
                 "importing": {
-                    "STEP, IGES, STL, OBJ, BREP": "import_step",
+                    "STEP, IGES, STL, OBJ, PLY, glTF, BREP": "import_step",
                     "DXF, SVG (into a sketch)": "import_sketch"},
                 "hint": "help('add_mate') for one; describe() for the "
                         "app's own authoritative type tables."}

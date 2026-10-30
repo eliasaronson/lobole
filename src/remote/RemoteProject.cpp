@@ -22,6 +22,7 @@
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
+#include "core/io/ImportFormats.h"
 #include "core/io/MeshImportCost.h"
 #include "core/io/ProjectMerge.h"
 #include "core/io/RecognitionJson.h"
@@ -121,34 +122,41 @@ static constexpr MethodDoc ProjectMethods[] = {
      "source_revision, apply"},
     {"import_step",
      "The importer for EVERY 3D file, meshes included, whatever its name "
-     "says: a STEP, IGES, STL, OBJ or BREP into the current project "
+     "says: a STEP, IGES, STL, OBJ, PLY, glTF (.glb, .gltf) or BREP into "
+     "the current project "
      "(docs/interchange/README.md). A DXF or SVG goes into a sketch with "
      "import_sketch. STEP and IGES come in via XCAF: names, colors, real "
      "assemblies; IGES surfaces are sewn into solids, and what stays open "
-     "is named in the feature's warning. `units` is the length unit an STL, "
-     "OBJ or BREP was drawn in "
+     "is named in the feature's warning. A PLY (ASCII or binary) keeps a "
+     "uniform vertex colour; a glTF's default scene is flattened, its nodes "
+     "placed, its metres read as mm and its Y up stood on our Z "
+     "(docs/interchange/README.md#ply-and-gltf). `units` is the length unit "
+     "an STL, OBJ, PLY or BREP was drawn in "
      "— mm (default), cm, m, in — since none of them carries one; refused "
-     "for STEP and IGES, which declare their own. `keep_origin` keeps the "
+     "for STEP and IGES, which declare their own, and for glTF, which is "
+     "metres. `keep_origin` keeps the "
      "file's OWN coordinates; without it the import is centred on its "
      "bounding box, which loses the placement a bought part was exported at "
      "and stacks every one of them on the origin — and the reply's "
      "`recentred_by` [x, y, z] (mm) says by how much. `up_axis` is which "
      "axis OF THE FILE is up: auto (default) reads the header — a SolidWorks "
-     "file is +y and stands up on our Z — or none, +x, -x, +y, -y, -z; "
+     "file is +y and stands up on our Z, a glTF is +y — or none, +x, -x, +y, "
+     "-y, -z; "
      "`turn_deg` turns about world Z after it. The reply's `up_axis` "
      "{requested, applied, turn_deg, because, system} says what was applied "
      "and why (docs/interchange/README.md#up-axis). The read runs off the "
      "frame as the `import` job (background_jobs lists it with its progress; "
      "cancel_background_job {kind: \"import\"} stops it and the call answers "
      "with the cancel, the part unchanged) and the call answers when it lands. "
-     "An STL or OBJ is counted first: the reply's `mesh` {triangles, "
+     "A mesh (STL, OBJ, PLY, glTF) is counted first: the reply's `mesh` "
+     "{triangles, "
      "expected_s, limit} says what it was expected to cost, and past the "
      "triangle limit "
      "(docs/interchange/README.md#what-a-mesh-costs) it is refused naming "
      "the count and the expected time unless `allow_large_mesh` is true -- "
      "except a mesh to be recognised, which sews nothing and goes ahead, "
      "refused only if the rebuild fails and it would have to be kept as "
-     "facets. `representation` is what an STL or OBJ becomes: recognize (the "
+     "facets. `representation` is what a mesh becomes: recognize (the "
      "planes, cylinders, cones and spheres its triangles were made from, "
      "rebuilt as true faces, so a hole has a diameter and an axis), facets "
      "(a face per triangle), mesh (a mesh body: the triangles as they are, "
@@ -1876,17 +1884,14 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // Every parameter is checked before anything is read or created: a
     // refused call changes nothing.
     const std::string path = p.at("path").get<std::string>();
-    std::string ext = std::filesystem::path(path).extension().string();
-    for (char& c : ext)
-      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    const bool structured =
-        ext == ".step" || ext == ".stp" || ext == ".igs" || ext == ".iges";
-    if (!structured && ext != ".stl" && ext != ".obj" && ext != ".brep")
+    const interchange::ImportFormat format = interchange::FormatOf(path);
+    const bool structured = format == interchange::ImportFormat::Step ||
+                            format == interchange::ImportFormat::Iges;
+    if (format == interchange::ImportFormat::None)
       throw std::runtime_error(
-          "path: '" + path +
-          "' is not a file import_step reads (accepted: .step/.stp, "
-          ".igs/.iges, .stl, .obj, .brep; a .dxf or .svg goes into a sketch "
-          "with import_sketch)");
+          "path: '" + path + "' is not a file import_step reads (accepted: " +
+          interchange::kImportExtensions +
+          "; a .dxf or .svg goes into a sketch with import_sketch)");
     if (p.value("as_assembly", false) && !structured)
       throw std::runtime_error("as_assembly: an assembly import reads STEP or "
                                "IGES, which carry product structure");
@@ -1906,12 +1911,10 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     }
     units::Length unit = units::Length::Millimetre;
     if (p.contains("units")) {
-      if (structured)
-        throw std::runtime_error(
-            "units: '" + path + "' is " +
-            (ext == ".igs" || ext == ".iges" ? "IGES" : "STEP") +
-            ", which declares its own unit — `units` is for STL, OBJ and "
-            "BREP");
+      if (!interchange::TakesUnits(format))
+        throw std::runtime_error("units: '" + path + "' is " +
+                                 interchange::DeclaredUnit(format) +
+                                 " — `units` is for STL, OBJ, PLY and BREP");
       const std::string u = p.at("units").get<std::string>();
       if (!units::LengthFromString(u, unit)) {
         std::string accepted;
@@ -1933,7 +1936,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
             ". Accepted: " + mesh::AcceptedRepresentations());
       if (!ImportFeature::IsMesh(path))
         throw std::runtime_error("representation: '" + path +
-                                 "' is not a mesh; it is for STL and OBJ");
+                                 "' is not a mesh; it is for STL, OBJ, PLY "
+                                 "and glTF");
     }
     const mesh::Representation resolved =
         ui::ResolveRepresentation(state, path, representation);
