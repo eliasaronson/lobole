@@ -160,6 +160,23 @@ push so it cannot rot.
 - **Location:** `src/thirdparty/`
 - **License:** MIT or public domain, at the recipient's choice
 
+### miniply
+
+- **Location:** `src/thirdparty/miniply.{h,cpp}`
+- **Revision:** `1a235c70390fadf789695c9ccbf285ae712416b3` (vilya/miniply)
+- **License:** MIT (`LICENSES/miniply.txt`)
+- **Linkage:** compiled into Loböle (the PLY reader); two patches marked
+  `Loboele patch` in the source, so a damaged file is refused rather than
+  read past or allocated for
+
+### cgltf
+
+- **Location:** `src/thirdparty/cgltf.h`
+- **Revision:** v1.15
+- **License:** MIT (`LICENSES/cgltf.txt`)
+- **Linkage:** one header, its implementation compiled into Loböle (the
+  glTF reader); unmodified
+
 ## Fonts and generated icon declarations
 
 | Component | Location | License |

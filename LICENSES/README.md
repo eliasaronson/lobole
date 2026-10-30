@@ -18,6 +18,8 @@ versions, linkage, and source locations are listed in `THIRD_PARTY.md`.
 | `spdlog.txt`, `fmt.txt` | spdlog and fmt |
 | `nlohmann-json.txt` | JSON for Modern C++ |
 | `stb.txt` | stb_image and stb_image_write |
+| `miniply.txt` | miniply (the PLY reader) |
+| `cgltf.txt` | cgltf (the glTF reader) |
 | `Font-Awesome-Free.txt` | Font Awesome 6 Free font |
 | `IconFontCppHeaders.txt` | generated Font Awesome codepoint header |
 | `Roboto-Apache-2.0.txt` | Roboto font |
