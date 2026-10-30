@@ -63,22 +63,26 @@ cache hit) still reaches every body.
 
 ### Grades
 
-A shop orders an alloy and a temper, not "aluminium", so a grade is a row
-of its own: `aluminum_6061_t6` and `aluminum_6082_t6`. Each carries its
-specification's MINIMUM yield for plate (240 MPa: ASTM B209 for 6061-T6/T651
-at 6.3-100 mm, EN 485-2 for 6082-T6/T651 at 12.5-100 mm), which is what a
-design may count on, against the generic row's 95; its modulus (68.9 and
-70 GPa); and the generic row's density and look. Every row has a `grade`,
+A shop orders an alloy and a temper, not "aluminium", so aluminium is
+graded rows only: `aluminum_6061_t6` and `aluminum_6082_t6`. There is no
+generic `aluminum`: across alloys the yield runs from under 100 MPa to over
+500 and the conductivity from 120 to 237 W/(m·K), so no one row is right,
+and a document naming it is refused at load, naming the grades. Each grade
+carries its specification's MINIMUM yield for plate (240 MPa: ASTM B209 for
+6061-T6/T651 at 6.3-100 mm, EN 485-2 for 6082-T6/T651 at 12.5-100 mm), which
+is what a design may count on; its modulus (68.9 and 70 GPa); its thermal
+numbers ([../simulation/README.md](../simulation/README.md#thermal)); and
+one density and look. Every row has a `grade`,
 what a drawing's parts list and title block print: a grade row its grade
-(`6082-T6`), a generic row its name in capitals (`ALUMINUM`), which says
+(`6082-T6`), a generic row its name in capitals (`STEEL`), which says
 that no grade was chosen (`MaterialLibrary::GradeOf`,
 [../drawings/README.md](../drawings/README.md#parts-lists-and-balloons)).
 
 `MaterialLibrary::FamilySlug` reads a grade as its family (`aluminum`) for
 a consumer that knows materials only that way: CAM's chipload classes
 (`cam::CutClassOf`). Sheet metal's bend data and the tube rules are for one
-alloy each, and refuse a grade they do not carry rather than bend 6061-T6
-with a 5052 sheet's radii.
+alloy each (6061-T6 among the aluminium grades), and refuse a grade they
+do not carry.
 
 ### Building materials
 

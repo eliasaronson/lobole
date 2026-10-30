@@ -41,7 +41,7 @@ and the call a person would make agree by construction.
 | kind | document | through | reads | keys besides `document` |
 |---|---|---|---|---|
 | `study_probe` | part | `run_study`, `probe_study` | mm, deg, MPa (or as `unit` says) | `study`, `case?`, and one face (`face`, `at?`, `quantity?`: translation \| rotation \| displacement_at \| von_mises_max \| von_mises_mean) or a formula (`readings`, `expression`, `unit?`) |
-| `study_result` | part | `run_study`, `study_results` | mm, MPa, a factor, or a strain | `study`, `quantity`: max_displacement \| max_von_mises \| factor_of_safety \| buckling_factor \| max_plastic_strain, `case?` |
+| `study_result` | part | `run_study`, `study_results` | mm, MPa, a factor, a strain, °C or K | `study`, `quantity`: max_displacement \| max_von_mises \| factor_of_safety \| buckling_factor \| max_plastic_strain \| max_temperature \| temperature_margin, `case?` |
 | `clearance` | assembly | the gap `interference` measures | mm | `a`, `b` (top-level occurrences), `mode?`: mesh \| exact, `motion_study?` |
 | `contact` | assembly | `interference` | verdict | `a`, `b`, `expect`: clear \| touching \| not_clashing |
 | `seal` | assembly | `check_seal` | mm, the widest closed ring's narrowest trace (0 when none closes) | `a`, `b` (top-level occurrences), `motion_study?` (the worst of its samples) |
@@ -285,6 +285,16 @@ refused on an elastic study rather than read as 0; its detail carries
 where it is and the run's warnings (a strain past the end of the
 material's hardening data among them). It is not checked for a settled
 peak: a plastic run's convergence is reported not checked.
+
+`max_temperature` (°C) and `temperature_margin` (K) are a
+[thermal](../simulation/README.md#thermal) study's: its peak temperature,
+and its material's service temperature less that peak (for a printed
+plastic, its heat deflection temperature at 0.45 MPa), state it `at_least`
+a margin. Both are refused on any other study, and the margin where no
+body's material has a service temperature; each carries `not_converged`
+the way a stress peak does, and the margin's detail names its basis. A
+printed part beside a heat source is one thermal study and
+`temperature_margin at_least 10`.
 
 A `study_result` reading of `max_von_mises` or `factor_of_safety`, and a
 `study_probe` of `von_mises_max` or `von_mises_mean`, rest on a peak

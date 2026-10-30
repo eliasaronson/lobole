@@ -3,7 +3,8 @@
 Structural analysis of parts and assemblies: static stress and
 displacement, natural frequencies and linear buckling, and on CalculiX
 large deformation and snap-through ([nonlinear static](#nonlinear-static))
-and contact ([contact](#contact)). Topology optimization is the third
+and contact ([contact](#contact)); and steady heat conduction, with the
+thermal expansion it puts into a static study ([thermal](#thermal)). Topology optimization is the third
 kind of study and has its own page, [../topopt/README.md](../topopt/README.md).
 
 ## The model
@@ -1067,8 +1068,10 @@ results and checks -- answered by a second, independent program. The code is
 too, as its cross-check, and a static study solved past linear -- large
 deformation, snap-through -- solves only there
 ([nonlinear static](#nonlinear-static)), as does a study with a
-[contact](#contact) and one past yield ([plasticity](#plasticity)).
-Thermal is what is left ([the plan](../plans/calculix-bridge.md)).
+[contact](#contact) and one past yield ([plasticity](#plasticity)). A
+[thermal](#thermal) study is solved in-house with CalculiX's `*HEAT
+TRANSFER` as its cross-check, as buckling is, and a thermal load reaches
+every CalculiX path as `*EXPANSION` and `*TEMPERATURE`.
 
 ### The solver choice
 
@@ -1076,7 +1079,7 @@ A study's `solver` is `auto`, `in_house` or `calculix` (`fem::Solver`;
 absent from the file when `auto`, v204). `auto` and `in_house` solve every
 linear analysis in-house; a [nonlinear](#nonlinear-static) study, or one
 with a [contact](#contact), on `auto` solves on CalculiX
-(`fem::EffectiveSolver`), and on `in_house` is refused. `calculix` solves a **static** or **buckling** study only:
+(`fem::EffectiveSolver`), and on `in_house` is refused. `calculix` solves a **static**, **buckling** or **thermal** study only:
 on a modal or topology study it is refused (`fem::SolverRefusal`) by
 `set_study`, by the panel, by the file reader and by the run, never quietly
 solved in-house. The
@@ -1772,6 +1775,278 @@ measured:
   the bar's middle the weakest place, uniform in moment, and collapses at
   M_p.
 
+## Thermal
+
+Nothing in a part knew a temperature: a part beside a motor, a hot end, a
+resistor or a sunlit window was designed blind to how hot it gets, to what
+heat does to it, and -- for a printed part -- to where it stops being a
+part (PLA softens in the mid-50s °C, long before a stress fails it). A
+**thermal** study (`fem::AnalysisType::Thermal`, `type: thermal`) solves
+steady conduction; a static study's **thermal load** expands the part under
+a temperature; and the material library carries the numbers both read, each
+cited. The code is `src/core/fem/FemThermal.{h,cpp}`.
+
+### The thermal study
+
+Steady conduction is linear, `K_T T = Q`: the scalar Laplace problem on the
+tet10 mesh a static study makes, assembled with the same element and Gauss
+rules (`K_T` at the four tet points, a film's `h N Nᵀ` and a flux's `q N`
+at the three triangle points), and solved in-house on the solvers
+`SolveCases` uses -- `SimplicialLDLT` below `kIterativeAboveDofs` free
+nodes, the incomplete-Cholesky PCG above (`fem::SolveHeat`). It meshes every
+body that carries a thermal load and takes the study's `mesh_size`,
+`refinements`, `converge` and `solver`. A part study's only: an assembly
+study does not solve heat yet ([not done](#not-done)).
+
+Four load types (`fem::LoadType`), each refused on any other analysis, and
+every structural load refused on a thermal study, naming the types that
+belong (`fem::ThermalRefusal`):
+
+| type | on | keys | in the solve |
+|---|---|---|---|
+| `temperature` | a face | `temperature_c` | held: the face's nodes eliminated, as a fixed support's DOF are |
+| `heat_flux` | a face | `power_w` (the total, spread uniformly, as a force is) or `flux_w_m2`, exactly one | `∫ q N dA`, into the part when positive |
+| `convection` | a face | `film_w_m2k`, `ambient_c` | `∫ h N Nᵀ dA` into `K_T`, `∫ h T∞ N dA` into `Q` |
+| `heat_generation` | a body (`body`, its name) | `power_w` (the body's total) | `∫ (P/V) N dV` |
+
+All but `heat_generation` take `region`. The solver stays mm–N–s with power
+in mW: a conductivity in W/(m·K) is the same number in mW/(mm·K), a flux or
+film coefficient per m² is ×1e-3 per mm², and watts ×1e3, converted once
+where a load is meshed (`MeshPlannedStudy`).
+
+**No literal defaults.** A held temperature, a film coefficient and an
+ambient are not derivable from the part, so none has one: `add_load`
+refuses without them, and the panel's tools start empty and refuse visibly
+until a value is typed. The refusal for a missing film coefficient quotes
+Incropera's Table 1.1 (free convection in gases 2–25 W/(m²·K), forced
+25–250, liquids higher) so the caller can choose.
+
+**Refused** by `add_load`, `set_study`, the panel, the file reader and the
+run, each naming what is accepted: an unknown type or key; a temperature
+below −273.15 °C; a film coefficient that is not positive; both or neither
+of `power_w` and `flux_w_m2`; a convection without `film_w_m2k` or
+`ambient_c`; load cases, gravity, `nonlinear`, `shape_from` or
+`thermal_load` on a thermal study. At the run, before meshing: a body whose
+heat has nowhere to go (no `temperature` and no `convection`, which leaves
+`K_T` singular), and a body whose material has no conductivity, naming the
+materials that have one (`fem::ThermalMaterialRefusal`). Two held faces that
+meet at different temperatures are refused when meshed: the temperature
+cannot jump at an edge.
+
+### What a thermal result says
+
+Per body (`StudyBodyResult::Thermal`, saved with the result):
+
+- **The field.** `FemResults::temperature` (°C) and `heatFlux` (`−k ∇T`,
+  W/m², per node, averaged by element volume as the stress is), kept on the
+  boundary surface as float by `KeepWhatIsRead`.
+- **Heat through each load** (`flows`, W, signed out of the part): a held
+  face's from `K_T T − Q` at its nodes, each node counted once; a
+  convecting face's `∫ h (T − T∞) dA` at the same Gauss points; a flux face
+  and a source their applied power, exactly. ccx's own `RFL` totals are not
+  used: a set's total includes its own nodal heat load, so it is not the
+  heat through the face.
+- **The balance** {in_w, out_w, imbalance_w}: in-house held to 1e-6 of the
+  throughput (`kHeatBalance`), a CalculiX answer within that plus the floor
+  its printed precision puts under it. Past it the answer is refused.
+- **Peaks.** `max_temperature_c` and `min_temperature_c` {value, at},
+  `max_heat_flux_w_m2`; against the material's service temperature,
+  `temperature_margin_k` = `serviceMaxC` − the body's peak (the hottest node
+  of each material's domain against its own limit; absent where none has a
+  limit), with its basis.
+- **A settled peak.** The [converge loop](#a-peak-that-has-settled) runs on
+  the peak temperature **rise**, the peak over the lowest held or ambient
+  temperature: a 2 % change in °C is an offset's artefact. The face refined
+  is the peak node's (an interior peak, a source's, takes its nearest
+  boundary face). Heat flux peaks at a re-entrant edge, which never
+  settles, so it is reported and not chased.
+- **Warnings.** A printed material's conductivity is its bulk resin's (air
+  between roads and layers makes a printed part conduct less), so its hot
+  spots run hotter than predicted and its gradients steeper; a body past
+  its service temperature.
+
+The receipt claims "peak temperature below the material's service
+temperature", oracle `in_house/heat` (`calculix/heat` on CalculiX), basis
+predicted. `study_result` takes two requirement quantities:
+`max_temperature` (°C) and `temperature_margin` (K), read from a thermal
+study and refused on any other, the margin refused where no body has a
+service limit; both carry `not_converged` the way a stress peak does
+([requirements](../requirements/README.md)). A printed part beside a heat
+source is then one thermal study and `temperature_margin at_least 10`.
+
+### The thermal load on a static study
+
+`set_study {thermal_load: {from_study, stress_free_c?} | {uniform_c,
+stress_free_c} | null}` (`fem::ThermalLoad`). The thermal strain is
+`α (T − T₀) [1 1 1 0 0 0]`, `T₀` the stress-free temperature; its load
+vector is `∫ Bᵀ D ε_th dV` at the four Gauss points with `T` interpolated by
+the tet10 shape functions (ccx does the same), and the stress is
+`D (B u − ε_th)` (`SolveOptions::thermal`, `fem::NodalTemperature`). The
+large- and small-deformation recoveries of a nonlinear answer subtract the
+same strain.
+
+- **`from_study` re-solves the heat on the static study's own mesh**, from
+  the thermal study's loads, rather than interpolating a stored field onto
+  another mesh: the conduction solve costs a fraction of the elastic one,
+  every refinement and converge step gets the temperature that belongs to
+  it, and the input hash takes the thermal study's definition, never its
+  result, so there is no digest to go stale. The thermal study must load
+  the same bodies, refused otherwise, naming both sets.
+- **`stress_free_c`** defaults, with `from_study`, to the thermal study's
+  ambient when every convection in it shares one: the part was at ambient
+  before it was heated. Otherwise it is required and refused without, as
+  `uniform_c` always requires it.
+- **Every case** of a study with load cases carries it, as gravity does.
+  Refused on modal, topology, buckling and thermal studies, with a
+  snap-through run (its seed is an in-house buckling mode), beside a
+  contact participant, and on a body whose material has no expansion
+  coefficient. A contact *support* takes it: the grounds hold the part,
+  and ccx carries the temperature through the contact run.
+- **On CalculiX** the temperature comes from ccx's own heat run on the same
+  mesh (held to `K_T` as below), written into the static deck as
+  `*EXPANSION, ZERO=T₀`, `*INITIAL CONDITIONS, TYPE=TEMPERATURE` at `T₀`
+  (the rigid partners' nodes too), and `*TEMPERATURE` per node in each
+  step. A nonlinear step ramps it with the load; a plastic run's unloading
+  step returns it to `T₀` (`*TEMPERATURE, OP=NEW`), so the residual
+  deformation is what heating and cooling left. The linear answer's
+  residual check is unchanged: `f` is ours, thermal part included.
+- **The result** reports `temperature` {min_c, max_c, stress_free_c,
+  from_study?}, keeps the temperature field for `set_result_display
+  {field: temperature}`, and warns, per body, when its peak is above its
+  material's `serviceMaxC`: the stiffness and strength it was solved with
+  are room temperature's and do not hold there.
+
+The input hash takes a body's conductivity, expansion, service limit and
+bulk flag only when the study is thermal or carries a thermal load
+(`HashThermal`), so every other study keeps its hash.
+
+### Material data
+
+`CADMaterials::MaterialProperties` carries `conductivityWmK`,
+`expansionPerK`, `bulkConductivity`, and `serviceMaxC` with `serviceBasis`;
+`fem::Material` carries them all. 0 (NaN for the service limit) is unknown,
+and a thermal study or thermal load on a material without its number is
+refused by name, listing the materials that have it. Each value is cited
+beside it in `src/cad/CADMaterials.cpp`:
+
+| material | conductivity W/(m·K) | expansion 1/K | source |
+|---|---|---|---|
+| `steel` | 53.33 (at 20 °C) | 12e-6 | EN 1993-1-2:2005 §3.4.1.3(1), λ = 54 − 3.33e-2 θ; EN 1993-1-1:2005 §3.2.6(1) |
+| `stainless_steel` (1.4301) | 15 | 16e-6 (20–100 °C) | SCI P413, *Design Manual for Structural Stainless Steel*, 4th ed. (2017), Table 2.7 (EN 10088-1 itself was not read) |
+| `aluminum_6061_t6`, `aluminum_6082_t6` | 191.4 (at 20 °C) | 23e-6 | EN 1999-1-2:2007 §3.3.1.3(1), λ = 0.07 θ + 190 for 3xxx and 6xxx (read in the English column of its Ukrainian adoption, DSTU-N B EN 1999-1-2:2010; the 2023 edition was not checked); EN 1999-1-1 §3.2.5 (as SCIA's EN 1999-1-1 training manual quotes it) |
+| `pla` (bulk) | 0.130 (amorphous, 25 °C) | none | NatureWorks, *Engineering Properties of Ingeo Biopolymer* (NWPD001_080311). NatureWorks publishes no measured expansion coefficient (its Moldflow report's 8.5e-5 is marked a generic estimate), so a thermal load on PLA is refused |
+| `petg` (bulk) | 0.21 | 5.1e-5 (−30 to 40 °C) | Eastman, *Eastar copolyester 6763 technical information* (MBS-80Q 2/12), Table 2 (ASTM C177, ASTM D696) |
+
+Copper, brass, bronze, titanium, the other plastics and the woods have none
+until one is cited (wood conducts differently along and across the grain,
+which an isotropic study cannot hold). Specific heat is not added: it is
+transient's.
+
+**Generic `aluminum` left the library.** Its conductivity runs from 120 to
+237 W/(m·K) across alloys and its yield from under 100 MPa to over 500, so
+no one value is right; the graded rows say which alloy a part is. A
+document naming it is refused at load, naming the grades (no migration:
+there are no users yet). Every generator, fixture, golden and test that
+used it names `aluminum_6061_t6`; sheet metal's and the tube rules'
+aluminium row is 6061-T6 too, its sheet bend radius carried over unsourced
+([known bugs](../known-bugs.md#sheet-metal-6061-t6s-bend-radius-is-unsourced)).
+
+**Printed plastics are bulk values, and the result says so** (above). No
+measured printed-specimen value is substituted for a cited one.
+
+**Service temperature.** `serviceMaxC` is where a material stops holding
+its room-temperature stiffness and strength; for an amorphous plastic,
+where it softens. PLA and PETG take their datasheet's heat deflection
+temperature at 0.45 MPa (ISO 75; 0.45 MPa is method B's stress): Prusament
+PLA 55 °C (TDS v1.1, 27-07-2022) and Prusament PETG 68 °C (TDS v1.1,
+16-02-2022), the documents their interlayer strength cites. Both sheets
+give the same value at 1.80 MPa, which is implausible for PETG (Eastman's
+resin reads 70 and 64 °C); the 0.45 MPa figures are taken as the maker
+states them. Metals get none: their reduction factors start well above
+where the printed parts fail (EN 1993-1-2's yield factor is 1.0 to 400 °C).
+
+### On CalculiX
+
+`solver: calculix` solves a thermal study on ccx as a second answer
+(`fem::HeatOnCalculix`): the deck (`fem::WriteHeatDeck`) carries the mesh,
+`*CONDUCTIVITY` per domain, the held nodes as `*BOUNDARY` on DOF 11, our
+nodal heat (`fem::HeatNodalLoads`) as `*CFLUX`, each convecting facet a
+`*FILM` on its tet's face (F1–F4, the map a follower pressure uses), and
+one `*HEAT TRANSFER, STEADY STATE` step (`1., 1.`, without which ccx warns)
+printing NT to the `.dat`. NT is read back (`fem::ReadDatTemperatures`) and
+held to our `K_T` and `Q` the way a displacement is held to K: a held node
+it moves, `‖K_T T − Q‖ / ‖Q‖` above 1e-6 plus its precision's floor, an
+energy balance off by more, or a heat balance off past its floor, is
+refused. The floor is wide here (temperatures are printed to seven digits
+of an offset, and `K_T` cancels the offset), so it is the heat balance
+that refuses a deck a tenth of a percent off in conductivity. Flows,
+fluxes and peaks are then computed by the in-house code. The memory
+estimate `fem::CalculixHeatMemoryEstimate` (55 MB + 45.7 B × nodes^1.39) is
+fitted to two measured ccx 2.23 runs (a 100 × 20 × 20 bar held at its ends:
+44 541 nodes, 187 MB; 337 881 nodes, 2.29 GB), and a run past
+`MemAvailable` is refused as a static one is. `export_study_inp` writes the
+heat deck of a thermal study, and a thermally loaded static study's deck
+with its temperatures (a `from_study` field solved in-house for it).
+
+Thermal **buckling** is not solved: ccx refuses temperature in a linear
+`*BUCKLE` step ("temperature loading is not allowed in a linear buckling
+step; perform a static step"), so its cross-check needs a preloaded
+perturbation step this bridge does not write, and `thermal_load` on a
+buckling study is refused ([not done](#not-done)).
+
+### Measured
+
+In-house, `tests/test_fem_thermal.cpp` (`[thermal]`), hand-made meshes
+unless named (a 100 × 10 × 10 bar at 5 mm, k = 50 W/(m·K), 1 025 nodes):
+
+| case | answer | closed form |
+|---|---|---|
+| held at 100 and 20 °C | T linear and both ends' heat k A ΔT / L to 1e-9 | 4.000 W |
+| heated through its volume, 0.01 mW/mm³, ends at 20 °C | T = 20 + q x (L − x) / 2k to 1e-9 at every node | q L² / 8k |
+| 0.5 mW/mm² into one end, the other at 20 °C | T to 1e-9 | T₀ + q L / k |
+| a fin: base 100 °C, other faces 25 W/(m²·K) to 20 °C | 65.8516 °C mid-length, 55.6129 at the tip, 5.0637 W through the base | 1-D fin with a convecting tip: 65.8552 (−0.005 %), 55.6094 (+0.006 %), 5.0663 W (−0.05 %) |
+| a steel pipe (Netgen, 2.5 mm, 17 621 nodes), bore 10 at 100 °C, outside 20 at 25 W/(m²·K) to 20 °C, 40 long | 9.988193 W out of the outside, the same into the bore | 2π L ΔT / (ln(rₒ/rᵢ)/k + 1/(h rₒ)) = 9.988191 W |
+| a PLA rod (Netgen, R 10, 40 long) making 0.5 W, cooled at 25 W/(m²·K) to 20 °C, converge always | 35.6085 °C at its axis, settled in two steps | 20 + q R²/4k + q R/2h = 35.6094 (−0.003 %) |
+| the bar clamped along its axis (symmetry planes across), 100 K | σxx −240 MPa to 1e-9, σyy and σzz under 1e-9 of it; the end carries σ A | −E α ΔT |
+| a 30 mm cube held on every face, 50 K | every normal stress to 1e-9 | −E α ΔT / (1 − 2ν) |
+| the bar free, held statically determinately, 50 K across its depth | no stress (under 1e-6 MPa); the ends' axial motions differ across the depth by κ L h to 1e-9 | κ = α ΔT / h |
+
+The Netgen bar of `from_study` (ends held at 100 and 20 °C, both clamped in
+all three directions) carries 9 945 N at its ends, against E α (T̄ − T₀) A =
+9 600 N for a bar free across its axis: the clamped faces hold its Poisson
+spread.
+
+CalculiX 2.23 on the same mesh, `tests/test_fem_calculix.cpp`
+(`[thermal][calculix]`):
+
+| case | nodes | agreement |
+|---|---|---|
+| the fin above, with a 0.5 W flux into its tip and 1 W made through it | 1 025 | temperatures within 7.3e-8, every flow within 6.7e-7 of the throughput; ‖K_T T − Q‖/‖Q‖ 9.6e-7 (floor 3.1e-5), energy 1.6e-8 |
+| a thermal study of the Netgen bar, solver auto and calculix | 849 | temperatures within 1.9e-7, flows within 1.6e-7 (4.266720 against 4.266719 W) |
+| the static study clamped under that study's temperature | 849 | peak displacement 3.1e-7, peak von Mises 2.7e-8; residual 2.9e-6 (floor 2.3e-5), energy 6.4e-9 |
+| a 10 × 10 × 40 steel bar between two frictionless grounds, heated 200 K past yield (plasticity) and cooled | 610 | plastic strain 0.0010573 to 0.0010590 against 0.0010577; cooled, 0.042324 mm shorter against L εp = 0.042307 (+4.0e-4) |
+| a heat deck whose conductivity is 0.1 % off its study's | 1 025 | refused (the heat balance) |
+
+The plastic bar's closed form is `(α ΔT − f_y/E − 2 f_y/(k_p L)) / (1 + H/E
++ 2H/(k_p L))`: the grounds are penalty contacts, each end overclosing by
+σ/k_p, which the bar's length gives back. Without that compliance in series
+the textbook `(α ΔT − f_y/E)/(1 + H/E)` reads 7 % high.
+
+### The GUI
+
+The Simulation window's **Analysis** combo has **Thermal**. On a thermal
+study the tools are **Temperature**, **Heat flux** (a total in W, or per
+area), **Convection** (film and ambient) and **Heat source** (click a face
+of the body that makes it), each with its fields empty until typed and
+refusing the click, visibly and with nothing placed, until then; the
+results list each body's peak and lowest temperature, its peak flux, its
+margin (red when negative, the basis on hover), the heat through each load
+and the balance, and the display offers **Temperature** and **Heat flux**,
+the legend in °C or W/m² over the field's range. A static study has
+**Thermal load**: none, uniform, or one of the part's thermal studies, with
+the stress-free temperature seeded where it is derived; its display gains
+**Temperature** when it has one.
+
 ## Assembly studies
 
 A study on an `AssemblyDocument` names **occurrences**, each in one role
@@ -1938,20 +2213,20 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 | method | what it does |
 |---|---|
-| `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling (`kind` accepted) |
+| `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling \| thermal (`kind` accepted; thermal a part study's) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
-| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)); a thermal study's `temperature` {face, temperature_c}, `heat_flux` {face, power_w \| flux_w_m2}, `convection` {face, film_w_m2k, ambient_c} and `heat_generation` {body, power_w} ([thermal](#thermal)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
 | `run_study {id, async?, recompute?, outlive_client?, timeout_s?, converge?, layer_normal?}` | mesh + solve, and on a static study settle its peak ([a peak that has settled](#a-peak-that-has-settled)): `converge` overrides the study's for this run, `layer_normal` is the build direction whose across-layers peak a printed part's check settles; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)); a nonlinear run that stops converging is refused with the load it reached ([nonlinear static](#nonlinear-static)) |
-| `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static study would run, meshed now, no ccx needed ([the deck](#the-deck)); a large-deformation study's NLGEOM deck, a snap-through one's refused ([nonlinear static](#nonlinear-static)) |
+| `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static, buckling or thermal study would run (a thermal study's heat deck, a thermally loaded static study's with its temperatures: [thermal](#on-calculix)), meshed now, no ccx needed ([the deck](#the-deck)); a large-deformation study's NLGEOM deck, a snap-through one's refused ([nonlinear static](#nonlinear-static)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended -- a nonlinear run's `load_fraction` ([the run](#the-run)); cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)) |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)); thermal: the peaks, `flows`, `balance`, `temperature_margin_k`, and a static study's `temperature` under a thermal load ([thermal](#what-a-thermal-result-says)) |
 | `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
-| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows |
+| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| temperature \| heat_flux \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows |
 | `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
 
 ## Tests
@@ -2013,6 +2288,17 @@ verb that names a study for context (`add_load`, `add_refinement`,
   refusals and the result's round trip; `tests/nonlinear_smoke.py` (a column
   pulled past yield over the RPCs, its requirement, PLA refused) and
   `refused_calls_smoke` ([plasticity](#plasticity)).
+- `tests/test_fem_thermal.cpp` (`[thermal]`): the closed forms above, the
+  refusals, the iterative solve against the direct one, the library's
+  cited numbers, a rod's peak settling, the result's round trip, and a
+  static study under a thermal study's temperature with its input hash,
+  and a 228k-node study's CPU time, bounded at twice the 99 s it took on an
+  E-core (`[slow]`);
+  `tests/test_fem_calculix.cpp` (`[thermal][calculix]`) the same-mesh
+  agreement above; `tests/thermal_smoke.py` over the RPCs (a PLA block's
+  peak and margin, its requirement, a static study under its temperature,
+  the field shown, and with ccx the study and its exported deck);
+  `refused_calls_smoke`; and the GUI's `sim` cases ([thermal](#thermal)).
 - `tests/test_fem_calculix.cpp` (`[nonlinear]`): the elastica, a shallow
   arch's snap, a seeded column's approach to its linear factor (`[slow]`
   both), a small load against the linear answer, the refusals and the
@@ -2034,10 +2320,15 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 ## Not done
 
-- Thermal, fatigue. Thermal comes through [CalculiX](#calculix), as
-  [large deformation, snap-through](#nonlinear-static), [contact](#contact)
-  and [plasticity](#plasticity) did, not by growing this solver past linear
-  ([the plan](../plans/calculix-bridge.md)).
+- Fatigue.
+- Thermal ([thermal](#thermal)) leaves out: transient heat, radiation,
+  heat across a contact, temperature-dependent properties, a heated modal
+  study, heat on an assembly study, and thermal buckling (a clamped part's
+  critical temperature rise: ccx takes no temperature in a linear buckling
+  step, so its cross-check needs a preloaded perturbation step the deck
+  does not write). Conductivity, expansion and service temperature for
+  every material without a cited source (copper, brass, titanium, the
+  woods, the other plastics), and an expansion coefficient for PLA.
 - Hardening curves for any material but steel ([plasticity](#plasticity)):
   a plastic study on one is refused until a cited curve is in the library.
   Kinematic hardening (a part loaded back and forth), and a plastic strain

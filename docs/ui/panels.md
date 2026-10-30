@@ -298,7 +298,7 @@ closes an open editor; an editor takes the window from a verb.
 ## Simulation: the Study panel and window
 
 On a part tab the studies are listed in the dock as `ListRow`s (a glyph for
-static, modal or topology, the name, and the state — solved, stale, failed —
+static, modal, topology, buckling or thermal, the name, and the state — solved, stale, failed —
 as the tail). A double-click, or the toolbar's Run (`###tb_sim_run`), opens
 the study in the floating Simulation window, where it is edited, run and read
 with the solve in the shared progress bar. Loads and kept faces are rows with
@@ -329,6 +329,12 @@ flagged in the panel before Run, with the material combo in place
 (`###material_<body creator id>`). The load list shows each load's magnitude
 and direction. The `--offscreen` instance builds no overlays, so a study's
 picture needs a windowed instance.
+
+A thermal study's tools (**Temperature**, **Heat flux**, **Convection**,
+**Heat source**) have no derivable default: a held temperature, a film
+coefficient and an ambient are the caller's. Their fields start empty and
+the click is refused, with the reason in the window and nothing placed,
+until each is typed ([../simulation/README.md](../simulation/README.md#the-gui)).
 
 ## Drawing tab: the Drawing panel
 
