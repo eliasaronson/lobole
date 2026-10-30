@@ -182,14 +182,44 @@ inline constexpr double kTriW = (1.0 / 3) * (1.0 / 2);
 // heat solve's scalar K_T), written out rather
 // than Eigen's ConjugateGradient so it can be cancelled mid-solve (Eigen's
 // would have to be restarted in chunks, losing its search directions each
-// time) and so a stall is seen as one.
+// time) and so its progress is judged by the measure CG minimises.
 //
-// Converged at |K u - f| <= tol |f|. Fails "cancelled" when asked, and
-// "stalled" when the best residual has not improved by a tenth in
-// kStallIterations: the signature of a singular K (an under-constrained
-// model has a rigid-body mode CG cannot resolve), which would otherwise
-// iterate to the cap.
-enum class PcgOutcome { Converged, Cancelled, Stalled, Capped };
+// Converged at |K u - f| <= tol |f|. Starts from `u` when it is f's size
+// (a warm start: what another solver reached), else from zero.
+//
+// Progress is the potential energy Pi(u) = u.K.u/2 - f.u, which every step
+// lowers by exactly alpha (r.z)/2. The residual's 2-norm is NOT CG's
+// measure and is not monotone: on a thin plate in bending it climbs to 20
+// times |f| over the first thousand iterations of a solve that converges
+// (docs/simulation/README.md#the-solver). So:
+//  - Stalled: the last kStallIterations together lowered Pi by less than
+//    fp64 can tell from rounding (1e-13 of |Pi|): the solve has reached the
+//    floor of what it can do, short of tol;
+//  - BrokeDown: a non-finite residual, or a direction with p.K.p <= 0,
+//    which an SPD K and preconditioner cannot give;
+//  - Capped: maxIterations.
+// None of these says K is singular: a free rigid motion is found by
+// FreeRigidMotion before a solve, from the supports, not guessed from a
+// residual.
+enum class PcgOutcome { Converged, Cancelled, Stalled, BrokeDown, Capped };
+
+// What an outcome that is not Converged or Cancelled reads as, for an error.
+inline std::string PcgFailure(PcgOutcome o, int iterations, double rel) {
+  const std::string at = "a relative residual of " + std::to_string(rel) +
+                         " after " + std::to_string(iterations) + " iterations";
+  switch (o) {
+  case PcgOutcome::Stalled:
+    return "the iterative solve stopped gaining (its energy no longer "
+           "falls) at " +
+           at;
+  case PcgOutcome::BrokeDown:
+    return "the iterative solve broke down (a non-finite step) at " + at;
+  case PcgOutcome::Capped:
+    return "the iterative solve did not converge: " + at;
+  default:
+    return "the iterative solve failed at " + at;
+  }
+}
 
 template <class Precond>
 inline PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
@@ -199,36 +229,61 @@ inline PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
   constexpr int kCancelEvery = 32;
   constexpr int kStallIterations = 2000;
   const double fNorm = f.norm();
-  u = Eigen::VectorXd::Zero(f.size());
   *iterations = 0;
   *relResidual = 0.0;
-  if (fNorm == 0.0)
+  if (fNorm == 0.0) {
+    u = Eigen::VectorXd::Zero(f.size());
     return PcgOutcome::Converged;
-  Eigen::VectorXd r = f; // u = 0
+  }
+  Eigen::VectorXd r;
+  double energy = 0.0; // Pi(u)
+  if (u.size() == f.size() && u.allFinite()) {
+    const Eigen::VectorXd Ku = K * u;
+    r = f - Ku;
+    energy = 0.5 * u.dot(Ku) - f.dot(u);
+    // A start worse than zero is no start.
+    if (!(energy < 0.0)) {
+      u = Eigen::VectorXd::Zero(f.size());
+      r = f;
+      energy = 0.0;
+    }
+  } else {
+    u = Eigen::VectorXd::Zero(f.size());
+    r = f;
+  }
+  double rel = r.norm() / fNorm;
+  *relResidual = rel;
+  if (rel <= tol)
+    return PcgOutcome::Converged;
   Eigen::VectorXd z = M.solve(r);
   Eigen::VectorXd p = z;
   Eigen::VectorXd Kp(f.size());
   double rz = r.dot(z);
-  double best = 1.0;
-  int bestAt = 0;
+  // The energy gained over the current window, and where the window began.
+  std::vector<double> gains(kStallIterations, 0.0);
+  double windowGain = 0.0;
   for (int it = 1; it <= maxIterations; ++it) {
     Kp.noalias() = K * p;
-    const double alpha = rz / p.dot(Kp);
+    const double pKp = p.dot(Kp);
+    if (!(pKp > 0.0) || !std::isfinite(pKp))
+      return PcgOutcome::BrokeDown;
+    const double alpha = rz / pKp;
     u.noalias() += alpha * p;
     r.noalias() -= alpha * Kp;
-    const double rel = r.norm() / fNorm;
+    rel = r.norm() / fNorm;
     *iterations = it;
     *relResidual = rel;
     if (!std::isfinite(rel))
-      return PcgOutcome::Stalled;
+      return PcgOutcome::BrokeDown;
     if (rel <= tol)
       return PcgOutcome::Converged;
-    if (rel < 0.9 * best) {
-      best = rel;
-      bestAt = it;
-    } else if (it - bestAt > kStallIterations) {
+    const double gain = 0.5 * alpha * rz;
+    energy -= gain;
+    double& slot = gains[it % kStallIterations];
+    windowGain += gain - slot;
+    slot = gain;
+    if (it >= kStallIterations && !(windowGain > 1e-13 * std::abs(energy)))
       return PcgOutcome::Stalled;
-    }
     if (cancelled && it % kCancelEvery == 0 && cancelled())
       return PcgOutcome::Cancelled;
     z = M.solve(r);

@@ -615,6 +615,13 @@ TEST_CASE("Solver: the iterative solve refuses an under-constrained model",
   std::string err;
   CHECK_FALSE(beam.Solve(iterative, nullptr, &err).has_value());
   CHECK(err.find("constrained") != std::string::npos);
+  // Read from the supports before any solve, naming what they leave free:
+  // a failed iterative solve says nothing about why it failed, and a slow
+  // one is not a singular one.
+  CHECK(err.find("free to turn about an axis") != std::string::npos);
+  fem::SolveReport report;
+  CHECK_FALSE(beam.Solve(iterative, &report, &err).has_value());
+  CHECK(report.iterations == 0);
 }
 
 TEST_CASE("Solver: an iterative solve stops when cancelled", "[fem][solver]") {

@@ -530,3 +530,68 @@ TEST_CASE("a pull on half a cantilever's end bends it by its eccentricity",
 }
 
 #endif // HAVE_NETGEN && HAVE_FEM_SOLVER
+
+namespace {
+// A cantilever of n Euler-Bernoulli (Hermite) beam elements, unit EI and
+// length, clamped at x = 0: K over (w, theta) of the free nodes, and a unit
+// tip force. Its condition number grows as n^4 -- a slender part in
+// bending, as a thin plate is -- which is what CG converges slowly on.
+struct HermiteCantilever {
+  Eigen::SparseMatrix<double> K;
+  Eigen::VectorXd f;
+  explicit HermiteCantilever(int n) {
+    const double h = 1.0 / n;
+    const double k[4][4] = {{12, 6 * h, -12, 6 * h},
+                            {6 * h, 4 * h * h, -6 * h, 2 * h * h},
+                            {-12, -6 * h, 12, -6 * h},
+                            {6 * h, 2 * h * h, -6 * h, 4 * h * h}};
+    std::vector<Eigen::Triplet<double>> t;
+    for (int e = 0; e < n; ++e)
+      for (int a = 0; a < 4; ++a)
+        for (int b = 0; b < 4; ++b) {
+          const int ra = 2 * e + a - 2, cb = 2 * e + b - 2;
+          if (ra >= 0 && cb >= 0)
+            t.emplace_back(ra, cb, k[a][b] / (h * h * h));
+        }
+    K.resize(2 * n, 2 * n);
+    K.setFromTriplets(t.begin(), t.end());
+    f = Eigen::VectorXd::Zero(2 * n);
+    f(2 * n - 2) = 1.0;
+  }
+};
+} // namespace
+
+TEST_CASE("CG is judged by its energy: a slender part's climbing residual is "
+          "not a stall, and a floor is not a singular matrix",
+          "[fem][solver]") {
+  // 300 beam elements, Jacobi-preconditioned: the residual's 2-norm climbs
+  // to 5 times |f| and stays above 0.9 |f| for the first 2000 iterations,
+  // which the old stall test (no tenth gained in 2000) refused as a
+  // singular K. CG lowers the energy every step all the while, and
+  // converges: the tip moves L^3 / (3 EI) = 1/3.
+  HermiteCantilever b(300);
+  Eigen::DiagonalPreconditioner<double> M(b.K);
+  Eigen::VectorXd u;
+  int its = 0;
+  double rel = 0.0;
+  const auto o =
+      fem::internal::Pcg(b.K, M, b.f, u, 1e-6, 100000, {}, &its, &rel);
+  INFO(its << " iterations, relative residual " << rel);
+  CHECK(o == fem::internal::PcgOutcome::Converged);
+  CHECK(its > 2000);
+  CHECK_THAT(u(2 * 300 - 2), WithinRel(1.0 / 3.0, 1e-6));
+  // Asked for more than fp64 holds on a condition number of ~1e10, it
+  // stops where its energy no longer falls, and says so in those words.
+  const auto floor =
+      fem::internal::Pcg(b.K, M, b.f, u, 1e-12, 100000, {}, &its, &rel);
+  CHECK(floor == fem::internal::PcgOutcome::Stalled);
+  CHECK_THAT(u(2 * 300 - 2), WithinRel(1.0 / 3.0, 1e-6));
+  const std::string why = fem::internal::PcgFailure(floor, its, rel);
+  CHECK_THAT(why, ContainsSubstring("stopped gaining"));
+  CHECK_THAT(why, !ContainsSubstring("constrained"));
+  // A warm start from an answer that close needs a handful of iterations.
+  Eigen::VectorXd start = u;
+  CHECK(fem::internal::Pcg(b.K, M, b.f, start, 1e-6, 100000, {}, &its, &rel) ==
+        fem::internal::PcgOutcome::Converged);
+  CHECK(its < 10);
+}

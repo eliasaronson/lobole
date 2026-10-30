@@ -488,6 +488,17 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     return fail("cancelled");
   constexpr const char* kSingular =
       "model is insufficiently constrained (singular stiffness matrix)";
+  // A rigid motion no support resists makes K singular, and is read from
+  // the supports, exactly, before any solver is asked: a failed iterative
+  // solve says nothing about why it failed, and a slow one is not a
+  // singular one (docs/simulation/README.md#the-solver). An answer solved
+  // elsewhere is checked against K whatever holds it (a contact's springs).
+  if (!given) {
+    const std::string free = FreeRigidMotion(mesh, supports);
+    if (!free.empty())
+      return fail(std::string(kSingular) + ": its supports leave it free to " +
+                  free);
+  }
   Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> direct;
   Eigen::IncompleteCholesky<double> ic;
   bool icReady = false;
@@ -502,15 +513,16 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   };
   if (iterative) {
     if (!external && !prepareIc())
-      return fail(kSingular);
+      return fail("the CPU's preconditioner (an incomplete Cholesky factor "
+                  "of K) could not be built");
   } else if (!given) {
     direct.compute(K);
     if (direct.info() != Eigen::Success)
       return fail(kSingular);
   }
   // A cap no converging solve comes near (a well-posed tet10 model takes a
-  // few hundred to a few thousand iterations); the stall test ends a
-  // singular one long before it.
+  // few hundred to a few thousand iterations; a thin plate at 900k DOF
+  // several thousand).
   const int maxIterations = std::max(10000, nFree / 4);
   std::vector<FemResults> all;
   all.reserve(cases.size());
@@ -632,7 +644,8 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
           report->externalDeclined = why;
         }
         if (!prepareIc())
-          return fail(kSingular);
+          return fail("the CPU's preconditioner (an incomplete Cholesky "
+                      "factor of K) could not be built");
       }
     }
     if (u.size() == 0 && iterative) {
@@ -646,15 +659,8 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
         report->iterations += its;
       if (o == PcgOutcome::Cancelled)
         return fail("cancelled");
-      if (o == PcgOutcome::Stalled)
-        return fail(std::string(kSingular) +
-                    ": the iterative solve stalled at a relative residual of " +
-                    std::to_string(rel) + " after " + std::to_string(its) +
-                    " iterations");
-      if (o == PcgOutcome::Capped)
-        return fail("the iterative solve did not converge in " +
-                    std::to_string(its) + " iterations (relative residual " +
-                    std::to_string(rel) + ")");
+      if (o != PcgOutcome::Converged)
+        return fail(PcgFailure(o, its, rel));
     } else if (!iterative && !given) {
       u = direct.solve(F);
       if (direct.info() != Eigen::Success)
@@ -669,8 +675,14 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     if (!given) {
       const double residual =
           F.norm() > 0 ? (K * u - F).norm() / F.norm() : 0.0;
+      // The supports were checked above: a direct factor that misses is a
+      // singular K they do not explain (a piece of the mesh nothing holds);
+      // an iterative answer is held to its own tolerance before this.
       if (!u.allFinite() || residual > 1e-6)
-        return fail(kSingular);
+        return fail(iterative ? "the iterative solve's answer does not "
+                                "satisfy K u = f: relative residual " +
+                                    std::to_string(residual)
+                              : std::string(kSingular));
       if (report)
         report->worstResidual = std::max(report->worstResidual, residual);
     }

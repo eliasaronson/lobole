@@ -329,9 +329,10 @@ def clip_linear(d, s, mesh_mm=None):
     d.call("set_study", id=sid, mesh_size=mesh_mm or s["clip_t"],
            converge="never")
     d.call("add_load", study=sid, type="fixed", face=f["rod side"])
-    # The bends meshed at half the sheet: at the sheet's own size their
-    # tets are poor, and the iterative solve stalled on them once
-    # (docs/known-bugs.md#a-diverging-solve-is-reported-as-an-unconstrained-part).
+    # The bends meshed at half the sheet. At the sheet's own size the CPU's
+    # iterative solve was once refused on it as unconstrained: a slow
+    # solve read as a stalled one, after the GPU fell short
+    # (docs/simulation/README.md#the-solver).
     for b in faces_where(d, "clip", lambda x: x["kind"] == "cylinder"):
         d.call("set_active_part", part="clip")
         d.call("add_refinement", study=sid, face=b["name"],

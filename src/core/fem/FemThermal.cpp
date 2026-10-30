@@ -342,15 +342,13 @@ bool SolveHeat(const FemMesh& mesh, const std::vector<Material>& byDomain,
         return fail(kSingular);
       int its = 0;
       double rel = 0.0;
+      Tf.resize(0); // from zero, not from whatever the vector held
       const PcgOutcome o = Pcg(Kff, ic, F, Tf, 1e-8, std::max(10000, nFree / 4),
                                options.cancelled, &its, &rel);
       if (o == PcgOutcome::Cancelled)
         return fail("cancelled");
       if (o != PcgOutcome::Converged)
-        return fail(std::string(kSingular) +
-                    ": the iterative solve stopped at a relative residual of " +
-                    std::to_string(rel) + " after " + std::to_string(its) +
-                    " iterations");
+        return fail(PcgFailure(o, its, rel));
     } else {
       Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> direct(Kff);
       if (direct.info() != Eigen::Success)

@@ -898,9 +898,13 @@ buckling).
   into a sparse K, fixed nodes eliminated (all three DOF), consistent nodal
   loads from face tractions (equal splitting is visibly wrong on tet10).
   Every answer is held to `‖Ku − F‖ ≤ 1e-6 ‖F‖`, recomputed on the
-  assembled K whichever solver produced it. That is how an
-  under-constrained model is refused: an LDLT factorization can report
-  success on a singular K.
+  assembled K whichever solver produced it: an LDLT factorization can
+  report success on a singular K.
+  - **An under-constrained model** is refused before any solver is asked,
+    from its supports (`fem::FreeRigidMotion`: each held direction against
+    the six rigid motions), naming the motion they leave free -- "free to
+    turn about an axis along (1, 0, 0) through ...". A failed iterative
+    solve is never read as a singular K: a slow one is not a singular one.
   - Supports beyond fixed nodes (a pin's) hold nodes in their own frames
     ([pin supports](#pin-supports)); each support's reaction is the
     internal force less the load over its nodes.
@@ -921,10 +925,18 @@ buckling).
       ([../topopt/README.md](../topopt/README.md#the-gpu-solver)).
     - Otherwise, or when the GPU declines or falls short, on the CPU:
       preconditioned conjugate gradients with an incomplete-Cholesky
-      preconditioner, to 1e-8, written out so it can be cancelled and so a
-      stall (no tenfold gain in 2000 iterations, the signature of a
-      singular K) is refused as under-constrained rather than run to the
-      cap.
+      preconditioner, to 1e-8, written out so it can be cancelled and
+      judged by what CG minimises (`fem::internal::Pcg`). Its progress is
+      the potential energy, which every step lowers; the residual's 2-norm
+      is not monotone, and on a 60 x 20 x 2 plate clamped at one end and
+      meshed at 0.4 mm (890k DOF) it climbs to 19 times |F| in the first
+      thousand iterations of a solve that converges in 3 103. (A stall
+      test on the residual -- no tenth gained in 2000 -- refused that
+      plate as "insufficiently constrained".) It fails, as a solver
+      failure naming the residual and the iterations, when 2000 iterations
+      lower the energy by less than fp64 can tell from rounding ("stopped
+      gaining"), when a step is not finite ("broke down"), or at
+      `max(10000, DOF/4)` iterations ("did not converge").
   - **Measured** on a 100 x 20 x 20 beam, CPU only: 33.5k DOF, LDLT 4.9 s
     and PCG 1.7 s; 202k DOF, 423 s against 26 s. A printed gear's sun at
     111k tets (512k DOF), meshing included: PCG 120 s, the GPU 31 s. At 47k

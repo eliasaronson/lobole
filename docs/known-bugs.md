@@ -274,24 +274,6 @@ the heading if it is not here yet.
   Until then the generator holds the clip's inner leaf as the rod does and
   presses the jaw onto the wall (generators/tea_alarm/README.md).
 
-### A diverging solve is reported as an unconstrained part
-
-- **Symptom:** a 60×20×2 mm steel plate clamped on one end, meshed at 0.4 mm
-  (about 500 k DOF), is refused as "insufficiently constrained (singular)".
-  The CPU iterative solve's residual grew to 4.8 and then 21.7: it diverged,
-  it did not stall. The same plate at 0.75 mm solves.
-  The tea alarm's 0.5 mm stainless clip, meshed at its thickness, solved
-  in-house (on the GPU) in two runs and in a third was refused the same
-  way, the CPU's iterative solve stalled at a relative residual of 0.95
-  after 2001 iterations. The generator now meshes the clip's bends at half
-  the sheet.
-- **Cause:** not found. The refusal reads a failed iterative solve as a
-  singular matrix, whatever made it fail.
-- **Where:** the iterative path in `src/core/fem/FemSolver.cpp`.
-- **Likely fix:** tell the two apart. A diverging residual is refused as a
-  solver failure that names the residual; "singular" is kept for a matrix
-  that is singular.
-
 ### CalculiX does not balance the in-house stiffness on a thin bent sheet
 
 - **Symptom:** a linear static study of the tea alarm's clip (0.5 mm
