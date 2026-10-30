@@ -276,8 +276,12 @@ stresses and moduli MPa) with mass in tonnes, so frequencies come out in Hz.
 The material library (`src/cad/CADMaterials.h`) stores `youngGPa`, `poisson`,
 `yieldMPa`, `interlayerMPa` (a printed material's strength across its
 layers, [printed layers](#printed-layers)) and `density` (kg/m³), each 0
-when unknown; `describe` lists them as `materials`. A body whose material
-has no stiffness is refused ("has no stiffness data"); a modal study or a
+when unknown; `describe` lists them as `materials` (with the thermal
+numbers, `conductivity_w_mk`, `expansion_per_k` and `service_max_c`, and a
+bimetal's constants under `bimetal`; a field the library does not know is
+left out). A body whose material
+has no stiffness is refused ("has no stiffness data"), and so is one with no
+Poisson's ratio (the bimetal row, [material data](#material-data)); a modal study or a
 gravity load on a material with no density is refused too. The library's
 default material has none of these, so an unassigned body cannot be analysed
 by accident.
@@ -1004,10 +1008,28 @@ line), the ledge's motion carried to the worm's axis (the wheel's turn), and
 the lens's lever from the tilt axis.
 
 A study with load cases is probed in one, `case` (its name or index; the
-first when omitted). It reads a part study's static result; it refuses a stale one (a face named
-now may not be the face that was meshed), an assembly study (its mesh is
-the imprinted fuse, whose faces are not the parts'), and modal or topology
-ones. Tests: `[probe]` in `tests/test_fem.cpp` (a rigid motion recovered
+first when omitted). It refuses a stale result (a face named now may not
+be the face that was meshed), and modal or topology ones.
+
+**On an assembly study** the mesh is the imprinted fuse, whose faces are
+not the parts', so the face is named with its `occurrence`: the part's
+face, placed, and the solved mesh's facets that lie on it (all six nodes
+within a millionth of the mesh's size of it, and never under 1e-4 mm: the
+placement's float rounding). An imprint that split the face is read as one
+face again (`fem::FitFaceMotion` and `fem::FaceStressOf` take several mesh
+faces). Answers are in world coordinates. An assembly study without
+`occurrence`, a part study with one, and a face on no meshed surface are
+refused. The tea alarm's strip check reads its bonded strip's free end
+this way (`generators/tea_alarm/ta_fem.py`).
+
+**Plastic results.** On a [plastic](#plasticity) result the probe adds the
+face's equivalent plastic strain (`plastic_strain_max`, its place, and
+`plastic_strain_mean`) and its rigid motion once the load is off
+(`residual_translation_mm`, `residual_rotation_rad`): what a span's outer
+fibre yielded and how far an end is left turned, where the global peak
+sits in a corner.
+
+Tests: `[probe]` in `tests/test_fem.cpp` (a rigid motion recovered
 exactly; a cantilever's end face turning by the tip slope, P L² / 2EI).
 
 ### Printed layers
@@ -1412,6 +1434,7 @@ size meshes it without one.
 | a shallow circular arch between pins, 200 x 4 x 4 mm, eps 4 (rise 4.475), a uniform pressure on its crown, 4 mm, 7 484 nodes, 146 s (`[slow]`) | limit point at 0.47088 [0.47088, 0.47094] | shallow-arch theory's 0.47115 (-0.06 %); linear buckling 1.0316 |
 | a 10 x 10 x 200 column, 1 kN, seeded 1 mm, 5 mm, 1 911 nodes, 15 s (`[slow]`) | deflection limit (20 mm) at 9.836, 4.48 % below | linear 10.297; Southwell's 1 - a/delta: 5 % |
 | the same, seeded 0.1 mm, 20 s | 10.275, 0.21 % below | 0.5 % |
+| a PETG arch latch over the RPCs (`generators/tea_alarm`), 60 between pins, 1.2 x 1.2, eps 4, at 0.9 mm | limit point at 0.9985 of the closed form's load (-0.15 %); no yield on the way; at eps 1.5 no limit point, the run ends at its deflection limit | shallow-arch theory, as below |
 | a shaft under a torque, a remote load and a pressure, a thousandth of a working load, 3 854 nodes | 9.5e-5 of the peak motion from the linear in-house answer; von Mises 5e-6 | the linear answer |
 
 The arch's closed form is Timoshenko and Gere's (sec. 7.6) for a sinusoidal
@@ -1566,7 +1589,11 @@ result's `stabilization`, and it is part of the equilibrium check. Past
 `kNonlinearBalance` (1e-3) the answer is refused: the springs are holding
 a part nothing else holds -- a frictionless contact under a sideways load
 -- and the refusal names friction or another support as the way out.
-Measured: 3e-6 to 6e-6 of the load on every case below.
+Measured: 3e-6 to 6e-6 of the load on every case below. The weak springs
+are scaled by the modulus and the part's size, not by its own stiffness, so
+a thin spring part held by its contact alone is softer than they are and is
+refused (a 0.5 mm stainless clip: they carried 62 % of its grip;
+[known bugs](../known-bugs.md#a-contacts-weak-springs-hold-a-soft-part-instead-of-its-contact)).
 
 ### What a contact reports
 
@@ -1718,6 +1745,22 @@ its factor of safety (under 1 once it yields, and how far under says how
 far past yield the peak is); `max_plastic_strain` says how much it yielded,
 and is a requirement quantity of `study_result`
 ([requirements](../requirements/README.md)).
+
+Does a hardening steel ever report a collapse? At small deformation, no:
+the tea alarm's bracket (`generators/tea_alarm/ta_cases.py`, library steel,
+an upright between thickened ends under a uniform moment F a and F along
+it) reaches 1.25 times its M_p load and is unloaded. With
+`large_deformation` the same bracket collapses at 0.691 of that load: the
+upright bends toward its load, which lengthens its arm faster than the
+hardening (H = E/99) stiffens it, so the path peaks. A collapse under
+NLGEOM is the geometry's as much as the material's.
+
+`first_yield_factor` is the whole body's first yield: on that bracket the
+span's ends, where it meets its thickened base and head, yield at 0.459 of
+the load, 11 % before the span's own 0.516. The span's plastic strain and
+its end's residual turn are read with `probe_study` on the span's faces
+([probing a face](#probing-a-face)): +2.1 % and −4.0 % against the
+bilinear section's moment-curvature under the library's curve.
 
 `converge`: a plastic run's stress is held down by the yield where it
 concentrates, and the plastic strain that concentrates there is not
@@ -1920,6 +1963,59 @@ The input hash takes a body's conductivity, expansion, service limit and
 bulk flag only when the study is thermal or carries a thermal load
 (`HashThermal`), so every other study keeps its hash.
 
+### A thermal load on an assembly
+
+A bimetal is two metals that expand differently, bonded: one material per
+layer, heated together. A part study meshes each body on its own, so two
+touching bodies in a part are not bonded; an [assembly study](#assembly-studies)
+bonds occurrences into one conforming mesh, each member its own material
+by domain. So a static assembly study takes a **uniform** thermal load,
+`set_study {thermal_load: {uniform_c, stress_free_c}}`, and each meshed or
+bonded member expands by its own material's coefficient: the per-domain
+materials already reach the solver (`matOf(ti).expansionPerK` in
+`FemSolver.cpp`), and the CalculiX deck writes `*EXPANSION` per domain.
+It works in-house and on CalculiX, on one meshed occurrence or a bonded
+group, beside rigid supports, and with `nonlinear` as on a part.
+
+Refused (`fem::AssemblyThermalRefusal`, then `fem::ThermalRefusal`, by
+`set_study`, the planner and the panel), each naming why:
+
+- a thermal study, or a thermal study's load, on an assembly: an assembly
+  study does not solve heat yet ([not done](#not-done));
+- `from_study`: it would re-solve a heat the assembly cannot;
+- beside a contact participant, and on a buckling, modal or topology
+  study, as on a part;
+- a member whose material has no expansion coefficient, naming the member
+  and the materials that have one.
+
+The input hash takes each participant's expansion only under a thermal load
+(`HashThermal`, as on a part). The panel's **Thermal load** combo shows
+None and Uniform on an assembly study.
+
+**The strip check.** A library `steel` layer under a C26000 `brass` one,
+each 0.5 × 5 × 40 mm, bonded, clamped across one end and heated from 20 to
+100 °C. Timoshenko's curvature (S. Timoshenko, "Analysis of bi-metal
+thermostats", J. Opt. Soc. Am. 11, 233–255, 1925)
+
+    1/ρ = 6 (α₂ − α₁) ΔT (1 + m)² / ( h [3 (1 + m)² + (1 + m n)(m² + 1/(m n))] )
+
+with m = 1 and n = 200/110.3 is 8.447e-4 /mm, a tip rotation L/ρ =
+0.03379 rad and a drop L²/2ρ = 0.6758 mm:
+
+| case | answer | closed form |
+|---|---|---|
+| a hand-made two-domain mesh (80 × 5 × 2 tet10 hexes, 8 855 nodes), `[thermal]` | curvature between x = 10 and 30: 8.4773e-4 /mm; tip rotation 0.034437 rad, drop 0.70033 mm | +0.35 %; +1.92 %, +3.63 % |
+| the same, both layers steel | the end grows 0.038687 mm, turns 1.1e-5 rad | α ΔT L = 0.038400 (+0.75 %, the clamp's Poisson hold); a thousandth of the pair's turn (the structured mesh's asymmetry) |
+| the bonded assembly at 0.5 mm (Netgen, 19 294 nodes), `[thermal][calculix]` | tip rotation 0.034417 rad, drop 0.69960 mm, in-house and on CalculiX on the same mesh (displacement within 6.5e-9, von Mises 1.2e-7) | +1.86 %, +3.52 % |
+| the same over the RPCs (`generators/tea_alarm`), the end read by `probe_study` | tip rotation 0.034382 rad, drop 0.69943 mm; CalculiX within 2.0e-8 | +1.75 %, +3.50 % |
+
+Away from the clamp the strip curves as the closed form says (+0.35 %). The
+clamp holds both layers' ends across the width and the thickness, and the
+root turns a little more than the free span (the clamp's own end effect
+over about a thickness): +1.9 % on the tip's rotation, +3.6 % on its drop,
+at L/b = 8. The tests hold the free span's curvature to 1 %, the rotation
+to 2 % and the drop to 4 %.
+
 ### Material data
 
 `CADMaterials::MaterialProperties` carries `conductivityWmK`,
@@ -1933,11 +2029,13 @@ beside it in `src/cad/CADMaterials.cpp`:
 |---|---|---|---|
 | `steel` | 53.33 (at 20 °C) | 12e-6 | EN 1993-1-2:2005 §3.4.1.3(1), λ = 54 − 3.33e-2 θ; EN 1993-1-1:2005 §3.2.6(1) |
 | `stainless_steel` (1.4301) | 15 | 16e-6 (20–100 °C) | SCI P413, *Design Manual for Structural Stainless Steel*, 4th ed. (2017), Table 2.7 (EN 10088-1 itself was not read) |
+| `brass` (C26000 cartridge brass) | 121.2 (at 20 °C) | 19.2e-6 (20–300 °C) | Wieland Concast, *C26000* datasheet, "Physical properties provided by CDA" |
+| `bimetal_kanthal_94s` | 12 | none (a bimetal is two; its motion is its specific curvature's) | Kanthal, *Thermostatic Bimetal Handbook*, catalogue 3-A-1-3, the KANTHAL 94S page (p. 40) |
 | `aluminum_6061_t6`, `aluminum_6082_t6` | 191.4 (at 20 °C) | 23e-6 | EN 1999-1-2:2007 §3.3.1.3(1), λ = 0.07 θ + 190 for 3xxx and 6xxx (read in the English column of its Ukrainian adoption, DSTU-N B EN 1999-1-2:2010; the 2023 edition was not checked); EN 1999-1-1 §3.2.5 (as SCIA's EN 1999-1-1 training manual quotes it) |
 | `pla` (bulk) | 0.130 (amorphous, 25 °C) | none | NatureWorks, *Engineering Properties of Ingeo Biopolymer* (NWPD001_080311). NatureWorks publishes no measured expansion coefficient (its Moldflow report's 8.5e-5 is marked a generic estimate), so a thermal load on PLA is refused |
 | `petg` (bulk) | 0.21 | 5.1e-5 (−30 to 40 °C) | Eastman, *Eastar copolyester 6763 technical information* (MBS-80Q 2/12), Table 2 (ASTM C177, ASTM D696) |
 
-Copper, brass, bronze, titanium, the other plastics and the woods have none
+Copper, bronze, titanium, the other plastics and the woods have none
 until one is cited (wood conducts differently along and across the grain,
 which an isotropic study cannot hold). Specific heat is not added: it is
 transient's.
@@ -1950,6 +2048,26 @@ there are no users yet). Every generator, fixture, golden and test that
 used it names `aluminum_6061_t6`; sheet metal's and the tube rules'
 aluminium row is 6061-T6 too, its sheet bend radius carried over unsourced
 ([known bugs](../known-bugs.md#sheet-metal-6061-t6s-bend-radius-is-unsourced)).
+
+**The re-cited elastic rows.** Each value is cited beside it, as the thermal
+ones are:
+
+| row | values | source |
+|---|---|---|
+| `stainless_steel` (1.4301) | E 200 GPa, ν 0.3 (G 76.9 GPa); f_y 230 MPa (cold-rolled strip, t ≤ 8 mm; f_u 540); 7 900 kg/m³ | SCI P413 (2017): §2.3.1; Table 2.2; Table 2.7. It was 193 GPa, 215 MPa and 8 000 kg/m³, uncited |
+| `brass` (C26000) | E 110.3 GPa (16 000 ksi), G 41.37 GPa (6 000 ksi), so ν = E/2G − 1 = 0.333; 8 530 kg/m³; **no yield** | Wieland Concast, *C26000*. Its yields are ASTM B927 rod's only (H01 205 to H04 345 MPa under ½"), a temper and a product form, so the row keeps none and a factor of safety on brass is not given. It was 100 GPa, 0.34 and 200 MPa, uncited |
+| `bimetal_kanthal_94s` (new) | E 190 GPa at 20 °C, **no ν**; 8 100 kg/m³; specific curvature k 17.8e-6 /K ± 4 %, specific deflection a 9.5e-6 /K, linear from 0 to 200 °C (`describe` lists them under `bimetal`) | Kanthal, *Thermostatic Bimetal Handbook*, p. 40 and the type table (pp. 17–18) |
+
+Kanthal publishes no Poisson's ratio and no layer data, so the bimetal row
+is for the strip's mass, conductivity and stiffness: a structural study of
+a body of it is **refused**, naming the missing ratio
+(`CADMaterials::ElasticDataRefusal`, by every study planner), and a strip's
+motion is read from the maker's constants, not a layer model. A thermal
+study of it runs.
+
+The library's `steel` row cites EN 1993-1-1:2005 §3.2.6 for its expansion;
+that clause gives E = 210 GPa and the row has 200
+([known bugs](../known-bugs.md#the-steel-rows-modulus-is-not-its-cited-clauses)).
 
 **Printed plastics are bulk values, and the result says so** (above). No
 measured printed-specimen value is substituted for a cited one.
@@ -2215,7 +2333,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 |---|---|
 | `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling \| thermal (`kind` accepted; thermal a part study's) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study); on an assembly, uniform only: [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)); a thermal study's `temperature` {face, temperature_c}, `heat_flux` {face, power_w \| flux_w_m2}, `convection` {face, film_w_m2k, ambient_c} and `heat_generation` {body, power_w} ([thermal](#thermal)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
@@ -2224,7 +2342,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static, buckling or thermal study would run (a thermal study's heat deck, a thermally loaded static study's with its temperatures: [thermal](#on-calculix)), meshed now, no ccx needed ([the deck](#the-deck)); a large-deformation study's NLGEOM deck, a snap-through one's refused ([nonlinear static](#nonlinear-static)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended -- a nonlinear run's `load_fraction` ([the run](#the-run)); cancel stops it |
 | `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)); thermal: the peaks, `flows`, `balance`, `temperature_margin_k`, and a static study's `temperature` under a thermal load ([thermal](#what-a-thermal-result-says)) |
-| `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
+| `probe_study {id, face, occurrence?, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at`; on a plastic result its plastic strain and residual motion; on an assembly study the face of `occurrence` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| temperature \| heat_flux \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows |
 | `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
@@ -2293,9 +2411,17 @@ verb that names a study for context (`add_load`, `add_refinement`,
   cited numbers, a rod's peak settling, the result's round trip, and a
   static study under a thermal study's temperature with its input hash,
   and a 228k-node study's CPU time, bounded at twice the 99 s it took on an
-  E-core (`[slow]`);
+  E-core (`[slow]`); a steel/brass strip on a hand-made two-domain mesh
+  against Timoshenko and its steel/steel control, and the re-cited
+  stainless, brass and bimetal rows with the bimetal's refusal
+  (`[materials]`);
   `tests/test_fem_calculix.cpp` (`[thermal][calculix]`) the same-mesh
-  agreement above; `tests/thermal_smoke.py` over the RPCs (a PLA block's
+  agreement above, and the bonded steel/brass strip in an assembly against
+  Timoshenko, in-house and on CalculiX; `tests/test_fem.cpp`
+  (`[assembly][thermal]`) a uniform thermal load taken on a bonded pair
+  and a rigid-supported part, and the assembly's refusals (a member
+  without expansion, a thermal study, `from_study`, beside a contact
+  participant, a modal study, a bimetal member); `tests/thermal_smoke.py` over the RPCs (a PLA block's
   peak and margin, its requirement, a static study under its temperature,
   the field shown, and with ccx the study and its exported deck);
   `refused_calls_smoke`; and the GUI's `sim` cases ([thermal](#thermal)).
@@ -2323,12 +2449,15 @@ verb that names a study for context (`add_load`, `add_refinement`,
 - Fatigue.
 - Thermal ([thermal](#thermal)) leaves out: transient heat, radiation,
   heat across a contact, temperature-dependent properties, a heated modal
-  study, heat on an assembly study, and thermal buckling (a clamped part's
+  study, a thermal study on an assembly (so a temperature field across
+  bodies or occurrences: an assembly takes a uniform thermal load only,
+  [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and
+  thermal buckling (a clamped part's
   critical temperature rise: ccx takes no temperature in a linear buckling
   step, so its cross-check needs a preloaded perturbation step the deck
   does not write). Conductivity, expansion and service temperature for
-  every material without a cited source (copper, brass, titanium, the
-  woods, the other plastics), and an expansion coefficient for PLA.
+  every material without a cited source (copper, titanium, the woods, the
+  other plastics), and an expansion coefficient for PLA.
 - Hardening curves for any material but steel ([plasticity](#plasticity)):
   a plastic study on one is refused until a cited curve is in the library.
   Kinematic hardening (a part loaded back and forth), and a plastic strain

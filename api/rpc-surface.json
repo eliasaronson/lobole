@@ -216,7 +216,7 @@
   "popup_items": ["button", "id", "ref"],
   "preview_catalog": ["options", "path"],
   "print_allowance": ["designation", "kind", "material", "part", "process", "profile", "size_mm", "stl_deflection_mm"],
-  "probe_study": ["at", "case", "face", "id", "layer_normal", "study"],
+  "probe_study": ["at", "case", "face", "id", "layer_normal", "occurrence", "study"],
   "project_changed_on_disk": [],
   "project_geometry": ["element", "feature_id", "kind", "sketch_id"],
   "pull": ["remote"],

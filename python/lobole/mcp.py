@@ -566,7 +566,8 @@ point-to-line distance: refs = [[point entity, which], [line entity, 0]] —
 also the parallel-lines distance (use an endpoint of the first line)."""
 
 MATERIAL_SLUGS = ("steel, stainless_steel, brass, bronze, copper, "
-                  "chrome, gold, silver, titanium, aluminum_6061_t6, "
+                  "chrome, gold, silver, titanium, bimetal_kanthal_94s, "
+                  "aluminum_6061_t6, "
                   "aluminum_6082_t6, plastic_white, "
                   "plastic_black, petg, pla, tpu, carbon_fibre, rubber, glass, ruby, concrete, "
                   "epoxy, brick, roof_tile, plaster, roofing_felt, render, "

@@ -217,6 +217,42 @@ the heading if it is not here yet.
 
 ## Simulation
 
+### The steel row's modulus is not its cited clause's
+
+- **Symptom:** the library's `steel` row has E = 200 GPa; the clause it
+  cites for its expansion, EN 1993-1-1:2005 §3.2.6, gives E = 210 000
+  N/mm² (and ν = 0.3). Every static, modal and buckling answer on library
+  steel is 5 % softer than the clause it names.
+- **Cause:** the modulus was entered as a handbook value before the row was
+  cited, and the [plasticity] hardening curve (H = E/99, EN 1993-1-5
+  C.6(2)) and its closed forms were written from it.
+- **Where:** `elastic(MaterialType::STEEL, ...)` in
+  `src/cad/CADMaterials.cpp`.
+- **Likely fix:** take 210 GPa with its clause, and move the [plasticity],
+  [thermal] and [fem] closed forms that read 200 with it (they read the
+  library, so most move by themselves; the cases that state 200 by hand do
+  not).
+
+### A contact's weak springs hold a soft part instead of its contact
+
+- **Symptom:** a 0.5 mm 1.4301 spring clip held only by its contact with a
+  rigid vessel (the tea alarm's clip, pulled onto the mug's wall by its
+  inner leaf) is refused: "the weak springs that hold a part while its
+  contact closes carry 62.1 % of the load". It was 11 minutes of ccx
+  before the refusal.
+- **Cause:** the weak springs are `1e-6 E L` summed over the part's nodes
+  (`kStabilization`), a stiffness set by the modulus and the part's size,
+  not by the part's own stiffness. A thin spring is far softer than that
+  (the clip moves 3 mm under 0.76 N; the springs give 11 N/mm), so the
+  springs, not the contact, carry the load.
+- **Where:** `fem::SettleSprings` and the stabilization in
+  `src/core/fem/Calculix.cpp`.
+- **Likely fix:** scale the weak springs from the part's own stiffness (a
+  fraction of the stiffest support-free mode's, or of the assembled
+  diagonal's mean) rather than `E L`, and keep the equilibrium refusal.
+  Until then the generator holds the clip's inner leaf as the rod does and
+  presses the jaw onto the wall (generators/tea_alarm/README.md).
+
 ### A variable-driven force reads 0.0 N in the study panel
 
 - **Symptom:** in a windowed instance, `new_project`, `set_variable load_n
@@ -241,12 +277,36 @@ the heading if it is not here yet.
   (about 500 k DOF), is refused as "insufficiently constrained (singular)".
   The CPU iterative solve's residual grew to 4.8 and then 21.7: it diverged,
   it did not stall. The same plate at 0.75 mm solves.
+  The tea alarm's 0.5 mm stainless clip, meshed at its thickness, solved
+  in-house (on the GPU) in two runs and in a third was refused the same
+  way, the CPU's iterative solve stalled at a relative residual of 0.95
+  after 2001 iterations. The generator now meshes the clip's bends at half
+  the sheet.
 - **Cause:** not found. The refusal reads a failed iterative solve as a
   singular matrix, whatever made it fail.
 - **Where:** the iterative path in `src/core/fem/FemSolver.cpp`.
 - **Likely fix:** tell the two apart. A diverging residual is refused as a
   solver failure that names the residual; "singular" is kept for a matrix
   that is singular.
+
+### CalculiX does not balance the in-house stiffness on a thin bent sheet
+
+- **Symptom:** a linear static study of the tea alarm's clip (0.5 mm
+  1.4301 sheet, two 90 degree bends at R 0.75, meshed at 0.5 mm with the
+  bends at 0.25) solved on CalculiX is refused: "|u . (K u - f)| / |u . f|
+  = 0.000042, above 1e-6 plus the 0.000002 its printed precision accounts
+  for, so the deck and the study it was written from differ". The same
+  study in-house solves, and its tip moves within 1 % of beam theory.
+- **Cause:** not found. The likeliest is an element ccx integrates
+  differently from the in-house code: a tet10 whose curved midside nodes
+  on a bend's tight cylinder distort it (the in-house code integrates
+  |det J|; ccx refuses a negative one, but a small positive one it
+  integrates as it is).
+- **Where:** the energy check in `src/core/fem/Calculix.cpp`; the mesh
+  from `src/core/fem/FemMesher.cpp`.
+- **Likely fix:** report the worst element's Jacobian ratio with the
+  refusal, and refuse (or re-mesh straight-sided) elements below a bound
+  before either solver sees them.
 
 ### A pin on a short sleeve does not settle when the load tilts the part
 

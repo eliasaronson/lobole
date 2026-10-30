@@ -832,6 +832,21 @@ def main():
                   {"id": heat}, needle="nowhere to go", tab=part["name"])
             d.call("remove_study", id=heat)
             d.call("remove_study", id=stat)
+            # An assembly takes a uniform thermal load only
+            # (docs/simulation/README.md#a-thermal-load-on-an-assembly).
+            d.call("set_active_part", part="Asm")
+            ast = d.call("add_study", name="Heated")["id"]
+            check("a thermal study on an assembly", "set_study",
+                  {"id": ast, "type": "thermal"},
+                  needle="does not solve heat", tab="Asm")
+            check("thermal_load from_study on an assembly", "set_study",
+                  {"id": ast, "thermal_load": {"from_study": ast}},
+                  needle="uniform", tab="Asm")
+            check("probe_study on an assembly without its occurrence",
+                  "probe_study", {"id": ast, "face": "1/face0"},
+                  needle="needs `occurrence`", tab="Asm")
+            d.call("set_active_part", part="Asm")
+            d.call("remove_study", id=ast)
             check("generic aluminium", "set_material",
                   {"feature_id": cube["created_by"], "material": "aluminum"},
                   needle="aluminum_6061_t6", tab=part["name"])
