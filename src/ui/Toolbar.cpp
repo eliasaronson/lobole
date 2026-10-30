@@ -625,6 +625,8 @@ void DrawModelToolbar(AppState& state) {
   // Body combinators (need existing bodies).
   btn("###tb_boolean", "part.boolean",
       "Boolean (union / subtract / intersect)");
+  btn("###tb_cradle", "part.cradle",
+      "Cradle (a holder shaped to a scan, which lifts in and out)");
   btn("###tb_mirror", "part.mirror", "Mirror a body");
   btn("###tb_pattern", "part.pattern", "Pattern (linear / circular)");
 

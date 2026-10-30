@@ -377,6 +377,7 @@ feature appeared.
 | Thread | `###tb_thread` | `thread/face_pick_fills_the_slot` |
 | Cam profile | `###tb_cam_profile` | `cam_profile/tool_cuts_the_default_lobe_on_a_picked_hub` (the hub's radius and length, the lobe's top) |
 | Boolean | `###tb_boolean` | tests in `GuiTestsProject.cpp` and `refine/merges_the_seam_left_by_a_union` |
+| Cradle | `###tb_cradle` | `cradle/a_block_cut_to_a_ball_off_the_frame`, `defaults/cradle` (refused without a print process) |
 | Pattern / Mirror | `###tb_pattern`, `###tb_mirror` | `pattern/*` (including `pattern/cut_row_is_the_pattern_source`: a hole patterns as a hole, its source the cut's tree row) |
 | Sheet metal | `###tb_base_flange`, `###tb_edge_flange`, `###tb_flat_pattern`, `###tb_hem`, `###tb_jog`, `###tb_corner_relief`, `###tb_normal_cut`, `###tb_unfold`, `###tb_refold` (one flyout, `**/sheet/###more`) | `sheetmetal/edge_pick_bends_a_wall`, `sheetmetal/panel_declares_the_stock`, `sheetmetal/flat_view_on_a_sheet` |
 | Datum plane / axis | `###tb_datum_plane`, `###tb_datum_axis` | `datum/plane_offset_then_sketch_on_its_row` |

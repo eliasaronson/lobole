@@ -35,6 +35,7 @@
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CornerReliefFeature.h"
+#include "core/features/CradleFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -460,6 +461,34 @@ void CreateBoolean(AppState& state) {
   BeginPreviewFeature(
       state, std::make_unique<BooleanFeature>(NextName(state, "Boolean"),
                                               target, tool, BooleanOp::Union));
+}
+
+void CreateCradle(AppState& state) {
+  if (!state.document)
+    return;
+  auto producers =
+      BodyProducers(*state.document, state.document->FeatureCount());
+  if (producers.size() < 2)
+    return; // the menu gates this, but guard anyway
+  // The scan: the newest body that is a mesh, else the newest body; the
+  // block: the newest other one. Picks replace either.
+  uint64_t tool = producers.back().first;
+  const auto& bodies = state.document->GetBodies();
+  for (auto it = bodies.rbegin(); it != bodies.rend(); ++it)
+    if (it->IsMesh() && !it->reference) {
+      tool = it->createdBy;
+      break;
+    }
+  uint64_t target = 0;
+  for (auto it = producers.rbegin(); it != producers.rend(); ++it)
+    if (it->first != tool) {
+      target = it->first;
+      break;
+    }
+  // The clearance and resolution stay unset: the print process's gap and
+  // half of it, refused visibly without a process.
+  BeginPreviewFeature(state, std::make_unique<CradleFeature>(
+                                 NextName(state, "Cradle"), target, tool));
 }
 
 void CreateMirror(AppState& state) {

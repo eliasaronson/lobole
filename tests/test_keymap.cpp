@@ -144,6 +144,8 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "part.offset_face",
       "part.move_face",
       "part.replace_face",
+      // A cradle is cut once a part, near its end, from a toolbar button.
+      "part.cradle",
       "view.reset_layout",
       "view.controls_help",
       // The sketch "more constraints" flyout: a constraint used once a month

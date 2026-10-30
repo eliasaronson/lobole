@@ -564,7 +564,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[43] = {
+const ToolCase kToolCases[44] = {
     // The primitives stand on something: each arms a face/plane pick, and
     // the Top plane of an empty part is enough for its defaults.
     {"box", "###tb_box", Needs::Nothing, Expect::PickThenChanges},
@@ -587,6 +587,10 @@ const ToolCase kToolCases[43] = {
     {"pipe", "###tb_pipe", Needs::ProfileAndPath, Expect::Changes},
     {"loft", "###tb_loft", Needs::TwoSketches, Expect::RefusesUntilPicked},
     {"boolean", "###tb_boolean", Needs::TwoBodies, Expect::Changes},
+    // Its clearance comes from the print process, which a new part has
+    // none of: refused visibly, naming set_print_process and clearance_mm
+    // (docs/modeling/README.md#cradle).
+    {"cradle", "###tb_cradle", Needs::TwoBodies, Expect::RefusesUntilPicked},
     {"mirror", "###tb_mirror", Needs::Body, Expect::Changes},
     {"pattern", "###tb_pattern", Needs::Body, Expect::Changes},
     {"split", "###tb_split", Needs::Body, Expect::Changes},

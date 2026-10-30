@@ -507,6 +507,9 @@ const std::vector<Command>& Table() {
         [](AppState& s) { return Idle(s) && Producers(s) >= 2; },
         [](AppState& s) { CreateBoolean(s); });
     add(
+        "part.cradle", [](AppState& s) { return Idle(s) && Producers(s) >= 2; },
+        [](AppState& s) { CreateCradle(s); });
+    add(
         "part.mirror", [](AppState& s) { return Idle(s) && Producers(s) >= 1; },
         [](AppState& s) { CreateMirror(s); });
     add(

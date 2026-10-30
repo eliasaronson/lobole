@@ -24,6 +24,7 @@
 #include "core/features/BooleanFeature.h"
 #include "core/features/CamProfileFeature.h"
 #include "core/features/CornerReliefFeature.h"
+#include "core/features/CradleFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -830,6 +831,84 @@ void DrawBooleanParams(AppState& state, BooleanFeature& boo, size_t index,
   operandCombo("Tool (list)", boo.toolId);
 }
 
+// A cradle: its block and scan, the clearance (the print process's gap
+// unless set), the direction the object moves in, the sweep and the
+// resolution (half the clearance unless set), and what the last build used.
+void DrawCradleParams(AppState& state, CradleFeature& cr, size_t index,
+                      bool commit) {
+  PickSlotRow(state, cr, PickSlot::CradleTarget,
+              BodyRefLabel(state, cr.targetId));
+  PickSlotRow(state, cr, PickSlot::CradleTool, BodyRefLabel(state, cr.toolId));
+  const auto toggle = [&](const char* label, bool& set, double& value,
+                          double seed) {
+    bool own = set;
+    if (ImGui::Checkbox(label, &own)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(cr);
+      set = own;
+      if (own && !(value > 0.0))
+        value = seed;
+      CommitDiscrete(state, cr, before, index, commit);
+    }
+  };
+  const nlohmann::json report = cr.ReportJson();
+  double usedC = report.is_object() ? report.value("clearance_mm", 0.0) : 0.0;
+  double usedH = report.is_object() ? report.value("resolution_mm", 0.0) : 0.0;
+  // Seeded from what the last build used, else from the scan's own size (a
+  // five-hundredth of its diagonal), never a literal.
+  double scanDiag = 0.0;
+  for (const Body& b : state.document->GetBodies())
+    if (b.createdBy == cr.toolId) {
+      glm::dvec3 lo, hi;
+      if (BodyBounds(b, lo, hi))
+        scanDiag = std::max(scanDiag, glm::length(hi - lo));
+    }
+  if (usedC <= 0.0)
+    usedC = scanDiag / 500.0;
+  if (usedH <= 0.0)
+    usedH = usedC / 2.0;
+  toggle("Own clearance", cr.hasClearance, cr.clearanceMm, usedC);
+  if (cr.hasClearance)
+    ExprDim(state, cr, index, commit, "Clearance (mm)", cr.clearanceExpr,
+            cr.clearanceMm, 0.001);
+  else
+    ImGui::TextDisabled("Clearance: the print process's gap a side");
+  // The direction the object moves in: one of the six axes; another vector
+  // (set over RPC) shows as custom.
+  const char* dirs[] = {"Down (-Z)", "Up (+Z)", "-X", "+X", "-Y", "+Y"};
+  const glm::dvec3 axes[] = {{0, 0, -1}, {0, 0, 1},  {-1, 0, 0},
+                             {1, 0, 0},  {0, -1, 0}, {0, 1, 0}};
+  int sel = -1;
+  for (int i = 0; i < 6; i++)
+    if (glm::length(glm::normalize(cr.direction) - axes[i]) < 1e-9)
+      sel = i;
+  if (sel < 0)
+    ImGui::TextDisabled("Direction: custom [%g, %g, %g]", cr.direction.x,
+                        cr.direction.y, cr.direction.z);
+  if (LabeledCombo("Moves in", &sel, dirs, 6) && sel >= 0) {
+    nlohmann::json before = DocumentIO::FeatureToJson(cr);
+    cr.direction = axes[sel];
+    CommitDiscrete(state, cr, before, index, commit);
+  }
+  {
+    bool sweep = cr.sweep;
+    if (ImGui::Checkbox("Lifts out (no undercuts)", &sweep)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(cr);
+      cr.sweep = sweep;
+      CommitDiscrete(state, cr, before, index, commit);
+    }
+  }
+  toggle("Own resolution", cr.hasResolution, cr.resolutionMm, usedH);
+  if (cr.hasResolution)
+    ExprDim(state, cr, index, commit, "Resolution (mm)", cr.resolutionExpr,
+            cr.resolutionMm, 0.001);
+  if (report.is_object())
+    ImGui::TextDisabled("Cut at %.3g mm clearance, %.3g mm cells: within "
+                        "%.3g mm of the scan",
+                        report.value("clearance_mm", 0.0),
+                        report.value("resolution_mm", 0.0),
+                        report.value("deviation_mm", 0.0));
+}
+
 // A combo listing earlier body-producing features; sets `sourceId`.
 void SourceBodyCombo(AppState& state, Feature& owner, uint64_t& sourceId,
                      size_t index, bool commit) {
@@ -980,6 +1059,14 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
     if (auto* boo = dynamic_cast<BooleanFeature*>(&f);
         boo != nullptr && item.kind == SelectionItem::Kind::Body) {
       (slot == PickSlot::BooleanTarget ? boo->targetId : boo->toolId) = item.id;
+      return true;
+    }
+    return false;
+  case PickSlot::CradleTarget:
+  case PickSlot::CradleTool:
+    if (auto* cr = dynamic_cast<CradleFeature*>(&f);
+        cr != nullptr && item.kind == SelectionItem::Kind::Body) {
+      (slot == PickSlot::CradleTarget ? cr->targetId : cr->toolId) = item.id;
       return true;
     }
     return false;
@@ -1288,6 +1375,12 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
          "Pick the target body"},
         {PickSlot::BooleanTool, "Tool", kBody, false, "Pick the tool body"}};
   }
+  if (dynamic_cast<const CradleFeature*>(&feature) != nullptr) {
+    return {{PickSlot::CradleTarget, "Block", kBody, false,
+             "Pick the block to cut the cradle from"},
+            {PickSlot::CradleTool, "Scan", kBody, false,
+             "Pick the scan to shape it to"}};
+  }
   if (dynamic_cast<const PatternFeature*>(&feature) != nullptr) {
     return {{PickSlot::PatternSource, "Source", kBody, false,
              "Pick the body to pattern, or a cut's tree row to pattern "
@@ -1431,6 +1524,12 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
     auto* boo = dynamic_cast<const BooleanFeature*>(&feature);
     return boo != nullptr &&
            (slot == PickSlot::BooleanTarget ? boo->targetId : boo->toolId) != 0;
+  }
+  case PickSlot::CradleTarget:
+  case PickSlot::CradleTool: {
+    auto* cr = dynamic_cast<const CradleFeature*>(&feature);
+    return cr != nullptr &&
+           (slot == PickSlot::CradleTarget ? cr->targetId : cr->toolId) != 0;
   }
   case PickSlot::PatternSource: {
     auto* pat = dynamic_cast<const PatternFeature*>(&feature);
@@ -2428,6 +2527,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                     : std::to_string(rev->regions.size()) + " selected");
   } else if (auto* boo = dynamic_cast<BooleanFeature*>(&feature)) {
     DrawBooleanParams(state, *boo, index, commit);
+  } else if (auto* cr = dynamic_cast<CradleFeature*>(&feature)) {
+    DrawCradleParams(state, *cr, index, commit);
   } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {
     DrawPatternParams(state, *pat, index, commit);
   } else if (auto* dr = dynamic_cast<DraftFeature*>(&feature)) {

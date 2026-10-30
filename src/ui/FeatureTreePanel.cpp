@@ -109,6 +109,7 @@ const char* FeatureIcon(const std::string& type) {
       {"Sphere", "part.sphere"},
       {"Cylinder", "part.cylinder"},
       {"Boolean", "part.boolean"},
+      {"Cradle", "part.cradle"},
       {"Pattern", "part.pattern"},
       {"DatumPlane", "part.datum_plane"},
       {"DatumAxis", "part.datum_axis"},

@@ -8,8 +8,10 @@
 #include "core/HeavyBuild.h"
 #include "core/Measure.h"
 #include "core/Primitives.h"
+#include "core/PrintAllowance.h"
 #include "core/SheetMetal.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CradleFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/DeleteFaceFeature.h"
@@ -2389,6 +2391,64 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(bodyVolume(d.body) - d.box) < 1e-9 * d.box);
     s_App->editFeatureId = 0;
     s_App->slotPick = {};
+  };
+
+  // The Cradle tool (docs/modeling/README.md#cradle): a block and a ball on
+  // a printed part; the toolbar opens it on the two, its defaults take the
+  // print process's gap, the accept is one undo step, it builds off the
+  // frame as a `feature` job, and the block comes back a closed mesh body.
+  t = IM_REGISTER_TEST(engine, "cradle", "a_block_cut_to_a_ball_off_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "Blank", glm::dvec3(-15, -15, -15), 30.0, 30.0, 19.0));
+    Doc()->AddFeature(
+        std::make_unique<SphereFeature>("Ball", glm::dvec3(0.0), 10.0));
+    Doc()->SetPrintProcess(printfit::Process{"fdm", "petg", std::nullopt});
+    Doc()->Regenerate();
+    ctx->Yield();
+    const uint64_t blockId = Doc()->GetFeature(0)->GetId();
+    const uint64_t ballId = Doc()->GetFeature(1)->GetId();
+    const size_t depth = s_App->commands->UndoDepth();
+    ToolbarClick(ctx, "###tb_cradle");
+    ctx->Yield();
+    auto* cr = dynamic_cast<CradleFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(cr != nullptr);
+    IM_CHECK_EQ(cr->targetId, blockId);
+    IM_CHECK_EQ(cr->toolId, ballId);
+    IM_CHECK(!cr->hasClearance); // the print process's gap
+    // The preview builds as a job too; wait for it before accepting.
+    IM_CHECK(WaitFor(
+        ctx, "the preview to build", [&] { return !Doc()->HasUnbuilt(); },
+        60.0));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth + 1);
+    IM_CHECK(WaitFor(
+        ctx, "the cradle to build", [&] { return !Doc()->HasUnbuilt(); },
+        60.0));
+    ctx->Yield(2);
+    const Feature* made = Doc()->GetFeature(Doc()->FeatureCount() - 1);
+    IM_CHECK(made->GetError().empty());
+    const Body* block = nullptr;
+    for (const Body& b : Doc()->GetBodies())
+      if (b.createdBy == blockId)
+        block = &b;
+    IM_CHECK(block != nullptr && block->IsMesh());
+    IM_CHECK(block->mesh->Closed());
+    // PETG's gap is 0.6 on the diameter: 0.3 a side.
+    const auto* built = dynamic_cast<const CradleFeature*>(made);
+    IM_CHECK(std::abs(built->ReportJson().value("clearance_mm", 0.0) - 0.3) <
+             1e-12);
+    // Undo gives the block back as a B-Rep.
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    for (const Body& b : Doc()->GetBodies())
+      if (b.createdBy == blockId)
+        IM_CHECK(!b.IsMesh());
   };
 
   // Heavy features build off the frame

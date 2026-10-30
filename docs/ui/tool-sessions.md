@@ -169,6 +169,12 @@ origin that misses the body. Examples in the code:
   (`DefaultFaceMove`). Delete and Replace Face have no number to default:
   they refuse until their faces (and Replace's target) are picked
   ([modeling](../modeling/README.md#direct-edit)).
+- A Cradle's clearance is the print process's gap a side and its
+  resolution half of that, coarsened to the cost budget; with no process it
+  opens refused, naming `set_print_process` and `clearance_mm`
+  (`defaults/cradle`; [modeling](../modeling/README.md#cradle)). Ticking
+  *Own clearance* seeds it from the last build, else a five-hundredth of
+  the scan's diagonal.
 - The placement rule (`src/ui/Placement.h`, `ClearOffset`) keeps a new item's
   span clear of the ones already taken, with a gap scaled to the item; the
   occurrence insert and drawing-view placement use it.

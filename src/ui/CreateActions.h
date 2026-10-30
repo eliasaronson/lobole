@@ -65,6 +65,10 @@ bool HasCurveOrSketch(const Document& doc);
 
 // Starts a preview of a boolean combining the two most-recent body producers.
 void CreateBoolean(AppState& state);
+// A holder shaped to a scan (docs/modeling/README.md#cradle): the newest
+// mesh body (else the newest body) is the scan, the body made before it the
+// block.
+void CreateCradle(AppState& state);
 
 // Starts a preview of a mirror / linear pattern of the most-recent body.
 void CreateMirror(AppState& state);

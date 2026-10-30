@@ -82,6 +82,9 @@ enum class PickSlot : int {
   // A cam profile's hub: the cylindrical outside of the shaft or hub the
   // cam goes on (docs/modeling/cam-profiles.md).
   CamHub,
+  // A cradle's block and scan (docs/modeling/README.md#cradle).
+  CradleTarget, // Body
+  CradleTool,   // Body
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —
