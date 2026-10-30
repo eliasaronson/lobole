@@ -50,6 +50,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -652,7 +653,13 @@ struct SimulationState {
     Remote,
     Probe,
     Pin,
-    Contact // a compression-only support: the face rests on the ground
+    Contact, // a compression-only support: the face rests on the ground
+    // A thermal study's loads (docs/simulation/README.md#thermal): each
+    // places on a clicked face (a heat source on the body that has it).
+    Temperature,
+    HeatFlux,
+    Convection,
+    HeatSource
   };
   Tool tool = Tool::None;
 
@@ -692,6 +699,17 @@ struct SimulationState {
   // The Contact tool: the next contact support's friction coefficient
   // (unitless; 0 = frictionless).
   double pendingContactFriction = 0.0;
+  // The thermal tools' values, NaN until typed: a held temperature, a film
+  // coefficient and an ambient are not derivable from the part, so the tool
+  // refuses visibly until it has them (docs/ui/tool-sessions.md
+  // #defaults-and-refusals). Heat flux: the total (W) when
+  // `pendingFluxPerArea` is false, else W/m^2.
+  double pendingTemperatureC = std::numeric_limits<double>::quiet_NaN();
+  double pendingHeatW = std::numeric_limits<double>::quiet_NaN();
+  double pendingFluxWm2 = std::numeric_limits<double>::quiet_NaN();
+  bool pendingFluxPerArea = false;
+  double pendingFilmWm2K = std::numeric_limits<double>::quiet_NaN();
+  double pendingAmbientC = std::numeric_limits<double>::quiet_NaN();
   double pendingTorque = 0.0;
   std::string pendingTorqueExpr;
   bool torqueAxisChosen = false;
@@ -717,7 +735,17 @@ struct SimulationState {
   // Result overlay display. VonMises/Displacement are static/modal fields;
   // Shape (the optimized iso-surface as a grey body) and Density (a colormap
   // of the density field) are topology views.
-  enum class Field { None, VonMises, Displacement, Shape, Density };
+  // Temperature and HeatFlux are a thermal study's (a static study under a
+  // thermal load shows its Temperature too).
+  enum class Field {
+    None,
+    VonMises,
+    Displacement,
+    Shape,
+    Density,
+    Temperature,
+    HeatFlux
+  };
   Field field = Field::None;
   float deformScale = 0.0f; // shader-side warp multiplier (0 = undeformed)
   // Value-and-unit labels beside every boundary-condition glyph ("1.2 kN",

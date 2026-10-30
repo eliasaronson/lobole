@@ -61,6 +61,9 @@ DIMENSIONAL = {
     "stress", "modulus", "yield",
     # torque, a force times a length
     "torque", "moment",
+    # heat (docs/simulation/README.md#thermal)
+    "temperature", "flux", "power", "film", "conductivity", "expansion",
+    "ambient",
     # rate / time
     "feed", "plunge", "speed", "rpm", "duration", "timeout", "budget",
     "deadline", "frequency",
@@ -73,7 +76,7 @@ DIMENSIONAL = {
 # max_von_mises_mpa, feed_mm_min, deflection_mm, budget_s.
 UNIT_SUFFIX = re.compile(
     r"_(mm|mm2|mm3|cm|m|in|deg|rad|g|kg|lb|s|ms|n|n_mm|nmm|n_m|mpa|gpa|hz|rpm|"
-    r"mm_min|m_s|px|pct)$")
+    r"mm_min|m_s|px|pct|c|k|w|w_m2|w_m2k)$")
 
 # Unit words a row's prose can use, in any case — rows shout MILLIMETRES and
 # RADIANS where the confusion has actually bitten, and that has to count.

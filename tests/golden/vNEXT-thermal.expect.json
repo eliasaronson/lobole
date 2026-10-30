@@ -1,0 +1,9 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [7853.98],
+  "study_thermal": [["Heat", "thermal", 4, "none"],
+                    ["Flux per area", "thermal", 1, "none"],
+                    ["Expanded", "static", 1, "from_study"],
+                    ["Uniform", "static", 1, "uniform"]]
+}

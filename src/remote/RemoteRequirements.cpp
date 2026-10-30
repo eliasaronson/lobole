@@ -85,11 +85,16 @@ const MethodDoc RequirementMethods[] = {
      "study, or a formula over several faces' readings and the project's "
      "variables), "
      "study_result {document, study, quantity: max_displacement|"
-     "max_von_mises|factor_of_safety|buckling_factor|max_plastic_strain, "
+     "max_von_mises|factor_of_safety|buckling_factor|max_plastic_strain|"
+     "max_temperature|temperature_margin, "
      "case?} (on a buckling study buckling_factor and factor_of_safety "
      "both read its governing factor; max_plastic_strain, unitless, is a "
      "plastic study's -- nonlinear plasticity: true -- and refused on any "
-     "other), clearance {document: "
+     "other; max_temperature, degrees C, and temperature_margin, K -- the "
+     "material's service temperature less the peak, at_least it -- are a "
+     "thermal study's, the margin refused where no body's material has a "
+     "service temperature: docs/simulation/README.md#thermal), clearance "
+     "{document: "
      "assembly, a, b: occurrence ids, mode?: mesh|exact, motion_study?: the "
      "smallest gap over that study's samples}, contact {document, a, b, "
      "expect: clear|touching|not_clashing}, seal {document: assembly, a, "
@@ -1205,6 +1210,42 @@ Taken MeasureStudyResult(ui::AppState& state, const json& m, const Ctx& ctx) {
   }
   const std::string q = m.at("quantity").get<std::string>();
   const bool buckling = r.value("type", std::string()) == "buckling";
+  const bool thermal = r.value("type", std::string()) == "thermal";
+  // A thermal study's (docs/simulation/README.md#thermal): the peak
+  // temperature, and its margin to the material's service temperature.
+  if ((q == "max_temperature" || q == "temperature_margin") != thermal)
+    throw std::runtime_error(
+        thermal ? "a thermal study answers max_temperature and "
+                  "temperature_margin; " +
+                      q + " is a structural study's"
+                : q + " is read from a thermal study, and this one is " +
+                      r.value("type", std::string("static")));
+  if (thermal) {
+    NoteConvergence(r, t);
+    if (!t.detail.is_object())
+      t.detail = json::object();
+    if (q == "max_temperature") {
+      t.value = r.at("max_temperature_c").at("value").get<double>();
+      t.unit = "C";
+      t.detail["at"] = r.at("max_temperature_c").at("at");
+      t.detail["body"] = r.at("max_temperature_c").at("body");
+    } else {
+      if (!r.contains("temperature_margin_k"))
+        throw std::runtime_error(
+            "temperature_margin reads a material's service temperature, and "
+            "no body of this study has one (the printed plastics carry their "
+            "heat deflection temperature)");
+      const json& mj = r.at("temperature_margin_k");
+      t.value = mj.at("value").get<double>();
+      t.unit = "K";
+      t.detail["body"] = mj.at("body");
+      t.detail["service_max_c"] = mj.at("service_max_c");
+      t.detail["basis"] = mj.at("basis");
+    }
+    if (r.contains("warnings"))
+      t.detail["warnings"] = r.at("warnings");
+    return t;
+  }
   if (q == "buckling_factor" && !buckling)
     throw std::runtime_error("buckling_factor is read from a buckling "
                              "study, and this one is " +

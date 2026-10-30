@@ -50,6 +50,11 @@ namespace {
 bool SettlesStress(fem::AnalysisType t) {
   return t == fem::AnalysisType::Static || t == fem::AnalysisType::Buckling;
 }
+// A study whose run refines round a peak until it settles: a stress's, or
+// a thermal study's temperature rise.
+bool Converges(fem::AnalysisType t) {
+  return SettlesStress(t) || t == fem::AnalysisType::Thermal;
+}
 
 // Which study a verb that ACTS ON one is addressing.
 //
@@ -328,6 +333,67 @@ fem::Nonlinear NonlinearOf(const json& v) {
   return nl;
 }
 
+// set_study's thermal_load: {from_study, stress_free_c?}, {uniform_c,
+// stress_free_c}, or null. A from_study that names no thermal study of the
+// part is refused here, naming those it has.
+fem::ThermalLoad ThermalLoadOf(const json& v, const Document& doc,
+                               uint64_t self) {
+  fem::ThermalLoad tl;
+  if (v.is_null())
+    return tl;
+  if (!v.is_object())
+    throw std::runtime_error(
+        "thermal_load is {from_study, stress_free_c?} (a thermal study's "
+        "temperature), {uniform_c, stress_free_c}, or null for none");
+  for (const auto& [key, _] : v.items())
+    if (key != "from_study" && key != "uniform_c" && key != "stress_free_c")
+      throw std::runtime_error("thermal_load does not take `" + key +
+                               "`; it takes from_study, uniform_c and "
+                               "stress_free_c");
+  if (v.contains("from_study") == v.contains("uniform_c"))
+    throw std::runtime_error("thermal_load is EITHER {from_study} (a thermal "
+                             "study's temperature) OR {uniform_c, "
+                             "stress_free_c} (one temperature everywhere)");
+  const auto number = [&](const char* key) {
+    if (!v.at(key).is_number())
+      throw std::runtime_error(std::string("thermal_load ") + key +
+                               " is a number, degrees C");
+    return v.at(key).get<double>();
+  };
+  if (v.contains("from_study")) {
+    tl.kind = fem::ThermalLoad::Kind::FromStudy;
+    tl.fromStudy = v.at("from_study").get<uint64_t>();
+    const fem::Study* src = doc.FindStudy(tl.fromStudy);
+    if (src == nullptr || src->type != fem::AnalysisType::Thermal ||
+        tl.fromStudy == self) {
+      std::string names;
+      for (const fem::Study& st : doc.GetStudies())
+        if (st.type == fem::AnalysisType::Thermal)
+          names += (names.empty() ? "" : ", ") + std::to_string(st.id) + " ('" +
+                   st.name + "')";
+      throw std::runtime_error(
+          "thermal_load from_study " + std::to_string(tl.fromStudy) +
+          " is not a thermal study of this part (it has: " +
+          (names.empty() ? "none" : names) + ")");
+    }
+  } else {
+    tl.kind = fem::ThermalLoad::Kind::Uniform;
+    tl.uniformC = number("uniform_c");
+  }
+  if (v.contains("stress_free_c")) {
+    tl.hasStressFree = true;
+    tl.stressFreeC = number("stress_free_c");
+  } else if (tl.kind == fem::ThermalLoad::Kind::FromStudy &&
+             !fem::DerivedStressFree(*doc.FindStudy(tl.fromStudy))) {
+    throw std::runtime_error(
+        "thermal_load needs stress_free_c: thermal study " +
+        std::to_string(tl.fromStudy) +
+        "'s convections do not share one ambient for the part to have been "
+        "at before it was heated");
+  }
+  return tl;
+}
+
 fem::ConvergeMode ConvergeOf(const json& v) {
   fem::ConvergeMode mode;
   if (!v.is_string() ||
@@ -551,7 +617,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "study"},
     {"exit_simulation", "Leave simulation mode.", ""},
     {"add_study",
-     "Add a study {type: static|modal|topology|buckling, name?}. `kind` is "
+     "Add a study {type: static|modal|topology|buckling|thermal, name?} "
+     "(thermal: steady heat conduction, a part study's; "
+     "docs/simulation/README.md#thermal). `kind` is "
      "accepted for the same thing — the enum, the file and `list_studies` "
      "all say `type`, and so do add_mate/add_load/add_cam_op/add_relation. "
      "A new study's solver is auto (in-house); set_study `solver` changes "
@@ -656,10 +724,26 @@ static constexpr MethodDoc SimulationMethods[] = {
      "alone, and takes `nonlinear` {increments?} without large_deformation "
      "(solved at small deformation) or with it; it is refused in_house, on "
      "another analysis, with load cases, with snap_through, and with "
-     "converge always (docs/simulation/README.md#contact).",
+     "converge always (docs/simulation/README.md#contact).\n"
+     "`thermal_load` expands a STATIC part study under a "
+     "temperature: {from_study: <a thermal study's id>, stress_free_c?} "
+     "re-solves that study's heat on this study's own mesh (both must load "
+     "the same bodies; stress_free_c, degrees C, defaults to its one "
+     "convection ambient and is required when it has none or several), or "
+     "{uniform_c, stress_free_c} (degrees C, one temperature everywhere), "
+     "or null for none. The thermal strain is alpha (T - T0) with the "
+     "material's expansion coefficient (one without is refused, naming the "
+     "materials that have one); every load case carries it, as gravity is. "
+     "Refused on any other study (thermal buckling is not solved yet), with "
+     "snap_through, "
+     "beside a contact participant, and with an unknown key "
+     "(docs/simulation/README.md#the-thermal-load-on-a-static-study). A "
+     "THERMAL study takes converge (on its peak temperature rise) and "
+     "solver (calculix solves it with *HEAT TRANSFER as a cross-check), and "
+     "refuses load_cases, gravity, nonlinear, shape_from and thermal_load.",
      "converge, filter_radius, gravity, id, load_cases, max_iterations, "
      "mesh_size, name, nonlinear, num_modes, participants, shape_from, "
-     "solver, study, type, "
+     "solver, study, thermal_load, type, "
      "volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
@@ -714,10 +798,24 @@ static constexpr MethodDoc SimulationMethods[] = {
      "no magnitude, direction or region, and is refused where a nonlinear "
      "study is (in_house, another analysis, load cases) and beside a pin; "
      "study_results reports each contact's closed and open area, its "
-     "pressure and its force (docs/simulation/README.md#contact).",
-     "axis_dir, axis_origin_mm, case, contact_with, direction, face, "
-     "fix_rotation, force_n, friction, magnitude, occurrence, point_mm, "
-     "region, study, torque_nmm, type"},
+     "pressure and its force (docs/simulation/README.md#contact). A THERMAL "
+     "study's loads (each refused on any other study, and every structural "
+     "load refused on a thermal one): `temperature` {face, temperature_c} "
+     "holds the face at that many degrees C; `heat_flux` {face, power_w | "
+     "flux_w_m2} puts heat into it -- exactly one of the total in watts, "
+     "spread uniformly, or watts per square metre (negative: out); "
+     "`convection` {face, film_w_m2k, ambient_c} cools it by a fluid at "
+     "ambient_c with that film coefficient, W/(m^2 K) (Incropera's Table "
+     "1.1: free convection in gases 2-25, forced 25-250, liquids higher); "
+     "`heat_generation` {body, power_w} makes that many watts through the "
+     "body named, spread over its volume. None has a default: each value "
+     "is required, a temperature below -273.15 C and a film coefficient "
+     "that is not positive are refused. All but heat_generation take "
+     "`region` (docs/simulation/README.md#thermal).",
+     "ambient_c, axis_dir, axis_origin_mm, body, case, contact_with, "
+     "direction, face, film_w_m2k, fix_rotation, flux_w_m2, force_n, "
+     "friction, magnitude, occurrence, point_mm, power_w, region, study, "
+     "temperature_c, torque_nmm, type"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
@@ -993,13 +1091,31 @@ static constexpr MethodDoc SimulationMethods[] = {
      "load: that factor is its factor_of_safety (receipt \"collapse load "
      "factor >= 1\"); one that carries its load keeps yield over the peak "
      "von Mises. A plastic strain past strain_limit is warned "
-     "(docs/simulation/README.md#plasticity).",
+     "(docs/simulation/README.md#plasticity). A THERMAL result carries per "
+     "body max_temperature_c, min_temperature_c and max_heat_flux_w_m2 "
+     "{value, at}, `flows` [{load, type, watts_out}] (the heat through each "
+     "load, W, positive out of the part: a held face's from K_T T - Q at its "
+     "nodes, a convecting face's integral of h (T - T_amb), a flux face's "
+     "and a source's their applied power), `balance` {in_w, out_w, "
+     "imbalance_w}, and where the material has a service temperature "
+     "temperature_margin_k, service_max_c and service_basis; the top level "
+     "the peaks {value, at, body}, temperature_margin_k {value, body, "
+     "service_max_c, basis}, `convergence` (on the peak temperature rise), "
+     "`warnings` (a printed material's conductivity is its bulk resin's), "
+     "and a receipt claiming \"peak temperature below the material's "
+     "service temperature\" (oracle in_house/heat or calculix/heat). A "
+     "static result under a thermal_load adds `temperature` {min_c, max_c, "
+     "stress_free_c, from_study?} and warns of a body past its service "
+     "temperature (docs/simulation/README.md#thermal).",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
      "the deformation {study, field: von_mises|displacement|shape|density|"
-     "none, deform_scale?, mode? (0-based, which mode shape for a modal or "
-     "buckling study), threshold?}. It colours the raster viewport, which is "
+     "temperature|heat_flux|none, deform_scale?, mode? (0-based, which mode "
+     "shape for a modal or buckling study), threshold?} (temperature: a "
+     "thermal study's, or a static one's under a thermal_load, its legend in "
+     "degrees C; heat_flux: a thermal study's, W/m^2). It colours the raster "
+     "viewport, which is "
      "what "
      "`screenshot` captures. It does NOT reach `render_still`: the path "
      "tracer renders the MODEL, so a still taken after this shows the "
@@ -1039,7 +1155,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(docs/simulation/README.md#printed-layers).",
      "at, case, face, id, layer_normal, study"},
     {"export_study_inp",
-     "Write the CalculiX deck a STATIC study would run {id (or study), "
+     "Write the CalculiX deck a STATIC, BUCKLING or THERMAL study would run "
+     "{id (or study), "
      "path, body?, case?} -- a nonlinear one's large-deformation deck "
      "(NLGEOM steps, a pressure as a follower *DLOAD, a torque or remote load "
      "on a *COUPLING reference node; a snap-through run's is refused, its "
@@ -1052,8 +1169,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "*TRANSFORM held where the in-house contact iteration found the pin "
      "pressing. Meshes now; needs no ccx. A study meshing several bodies "
      "names one with `body`; one with load cases names `case` (its name or "
-     "0-based index): each is its own deck. Refused on a modal or topology "
-     "study (docs/simulation/README.md#calculix).",
+     "0-based index): each is its own deck. A thermal study's is its heat "
+     "deck (*HEAT TRANSFER, STEADY STATE: *CONDUCTIVITY, held nodes on "
+     "degree of freedom 11, the nodal heat as *CFLUX, *FILM on the "
+     "convecting faces; mm, mW, degrees C); a static study's under a "
+     "thermal_load carries *EXPANSION and the nodes' *TEMPERATURE. Refused "
+     "on a modal or topology study (docs/simulation/README.md#calculix).",
      "body, case, id, path, study", remote::NotInBatch,
      "body:string, bytes:int, elements:int, nodes:int, path:string"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
@@ -1088,10 +1209,11 @@ json ExportStudyInp(ui::AppState& state, Host& host, const RpcParams& p) {
                    p.contains("study"), p.value("study", uint64_t{0}));
   fem::Study* s = &host.Require(id);
   if (s->type != fem::AnalysisType::Static &&
-      s->type != fem::AnalysisType::Buckling)
+      s->type != fem::AnalysisType::Buckling &&
+      s->type != fem::AnalysisType::Thermal)
     throw std::runtime_error(
-        std::string("a CalculiX deck is written for a static study or a "
-                    "buckling one; this one is ") +
+        std::string("a CalculiX deck is written for a static, buckling or "
+                    "thermal study; this one is ") +
         fem::AnalysisTypeToString(s->type));
   if (!p.contains("path") || !p.at("path").is_string() ||
       p.at("path").get<std::string>().empty())
@@ -1344,6 +1466,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                                "' is not one of: " + fem::kAnalysisTypeNames);
     if (hasKind && type == fem::AnalysisType::Topology)
       topoOnly();
+    if (type == fem::AnalysisType::Thermal && host.IsAssembly())
+      throw std::runtime_error(
+          "a thermal study is a part study's: an assembly study does not "
+          "solve heat yet (docs/simulation/README.md#not-done)");
     const fem::Study* s = &host.Add(p.value("name", std::string{}), type);
     return json{{"id", s->id},
                 {"name", s->name},
@@ -1379,7 +1505,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           lj["occurrence"] = l.occurrenceId;
           lj["occurrence_name"] = host.OccurrenceName(l.occurrenceId);
         }
-        if (!fem::IsSupport(l.type))
+        if (fem::IsThermalLoad(l.type)) {
+          lj.erase("face");
+          const auto given = [&](const char* key, double v) {
+            if (!std::isnan(v))
+              lj[key] = v;
+          };
+          given("temperature_c", l.temperatureC);
+          given("power_w", l.powerW);
+          given("flux_w_m2", l.fluxWm2);
+          given("film_w_m2k", l.filmWm2K);
+          given("ambient_c", l.ambientC);
+          if (l.type == fem::LoadType::HeatGeneration)
+            lj["body"] = l.body;
+          else
+            lj["face"] = {{"feature_id", l.face.featureId},
+                          {"element", l.face.name}};
+        } else if (!fem::IsSupport(l.type))
           lj["magnitude"] = l.magnitude;
         if (l.type == fem::LoadType::Pin)
           lj["fix_rotation"] = l.fixRotation;
@@ -1421,8 +1563,18 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                  {"refinements", eval.refinements.size()},
                  {"has_results", host.Results(s.id) != nullptr},
                  {"stale", host.Stale(s.id)}};
-      if (SettlesStress(s.type))
+      if (Converges(s.type))
         sj["converge"] = fem::ConvergeModeToString(s.converge);
+      if (s.thermalLoad.On()) {
+        json t = json::object();
+        if (s.thermalLoad.kind == fem::ThermalLoad::Kind::FromStudy)
+          t["from_study"] = s.thermalLoad.fromStudy;
+        else
+          t["uniform_c"] = s.thermalLoad.uniformC;
+        if (s.thermalLoad.hasStressFree)
+          t["stress_free_c"] = s.thermalLoad.stressFreeC;
+        sj["thermal_load"] = std::move(t);
+      }
       // A contact makes a study nonlinear by itself
       // (docs/simulation/README.md#contact): its increments are listed,
       // and `contact` says why it solves on CalculiX.
@@ -1562,10 +1714,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                          "auto in the same call"));
       if (p.contains("converge")) {
         const fem::ConvergeMode mode = ConvergeOf(p.at("converge"));
-        if (!SettlesStress(s.type))
+        if (!Converges(s.type))
           throw std::runtime_error(
-              std::string("converge applies to a static or buckling study, "
-                          "and this one is ") +
+              std::string("converge applies to a static, buckling or "
+                          "thermal study, and this one is ") +
               fem::AnalysisTypeToString(s.type) +
               "; set type: static (in this call or before it)");
         s.converge = mode;
@@ -1769,6 +1921,16 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                        ? std::string()
                        : "; this study is nonlinear, so set nonlinear: null "
                          "in the same call to make it linear"));
+      // Thermal expansion under a temperature field
+      // (docs/simulation/README.md#the-thermal-load-on-a-static-study).
+      if (p.contains("thermal_load"))
+        s.thermalLoad = ThermalLoadOf(p.at("thermal_load"), *doc, s.id);
+      if (s.type == fem::AnalysisType::Thermal && host.IsAssembly())
+        throw std::runtime_error(
+            "a thermal study is a part study's: an assembly study does not "
+            "solve heat yet (docs/simulation/README.md#not-done)");
+      if (const std::string why = fem::ThermalRefusal(s); !why.empty())
+        throw std::runtime_error(why);
     });
     return json::object();
   }
@@ -1907,6 +2069,101 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       throw std::runtime_error("unknown load type '" +
                                p.at("type").get<std::string>() +
                                "' (accepted: " + fem::kLoadTypeNames + ")");
+    // A thermal study's load (docs/simulation/README.md#thermal): its own
+    // keys, each in the unit its name says, and nothing a structural load
+    // takes.
+    static constexpr const char* kThermalKeys[] = {
+        "temperature_c", "power_w",   "flux_w_m2",
+        "film_w_m2k",    "ambient_c", "body"};
+    if (fem::IsThermalLoad(l.type)) {
+      // rpc-params: ambient_c, film_w_m2k, flux_w_m2, power_w, temperature_c
+      for (const char* key :
+           {"magnitude", "direction", "torque_nmm", "force_n", "point_mm",
+            "axis_origin_mm", "axis_dir", "fix_rotation", "friction", "case",
+            "contact_with"})
+        if (p.contains(key))
+          throw std::runtime_error(
+              std::string("a ") + fem::LoadTypeToString(l.type) +
+              " load does not take `" + key + "`: it takes " +
+              (l.type == fem::LoadType::Temperature ? "temperature_c"
+               : l.type == fem::LoadType::HeatFlux  ? "power_w or flux_w_m2"
+               : l.type == fem::LoadType::Convection
+                   ? "film_w_m2k and ambient_c"
+                   : "power_w and body"));
+      if (host.IsAssembly())
+        throw std::runtime_error(
+            "thermal loads are a part study's: an assembly study does not "
+            "solve heat yet (docs/simulation/README.md#not-done)");
+      const auto number = [&](const char* key, double& into) {
+        if (!p.contains(key))
+          return;
+        if (!p.at(key).is_number())
+          throw std::runtime_error(std::string("`") + key + "` is a number");
+        into = p.at(key).get<double>();
+      };
+      const auto only = [&](const char* key, fem::LoadType a, fem::LoadType b) {
+        if (p.contains(key) && l.type != a && l.type != b)
+          throw std::runtime_error(
+              std::string("`") + key + "` is a " + fem::LoadTypeToString(a) +
+              (a != b ? std::string(" or ") + fem::LoadTypeToString(b) : "") +
+              " load's, not a " + fem::LoadTypeToString(l.type) + "'s");
+      };
+      using LT = fem::LoadType;
+      only("temperature_c", LT::Temperature, LT::Temperature);
+      only("power_w", LT::HeatFlux, LT::HeatGeneration);
+      only("flux_w_m2", LT::HeatFlux, LT::HeatFlux);
+      only("film_w_m2k", LT::Convection, LT::Convection);
+      only("ambient_c", LT::Convection, LT::Convection);
+      only("body", LT::HeatGeneration, LT::HeatGeneration);
+      number("temperature_c", l.temperatureC);
+      number("power_w", l.powerW);
+      number("flux_w_m2", l.fluxWm2);
+      number("film_w_m2k", l.filmWm2K);
+      number("ambient_c", l.ambientC);
+      if (l.type == LT::HeatGeneration) {
+        if (p.contains("face") || p.contains("region"))
+          throw std::runtime_error(
+              "a heat_generation heats a whole body, named by `body`; it "
+              "takes no face or region");
+        if (!p.contains("body") || !p.at("body").is_string())
+          throw std::runtime_error(
+              "a heat_generation names the body it heats: `body`, its name");
+        l.body = p.at("body").get<std::string>();
+        std::string names;
+        bool found = false;
+        for (const Body& b : doc->GetBodies()) {
+          if (b.reference)
+            continue;
+          names += (names.empty() ? "'" : ", '") + b.name + "'";
+          found = found || b.name == l.body;
+        }
+        if (!found)
+          throw std::runtime_error("the part has no body '" + l.body +
+                                   "' (it has " + names + ")");
+      } else {
+        l.face = studyFaceOf(p.at("face"));
+        fem::ResolvedFace rf;
+        std::string why;
+        if (!fem::ResolveFace(*doc, l.face, "load", rf, &why))
+          throw std::runtime_error(why);
+        if (p.contains("region"))
+          l.region = DocumentIO::LoadRegionFromJson(p.at("region"), "add_load");
+      }
+      if (const std::string why = fem::ThermalLoadRefusal(l); !why.empty())
+        throw std::runtime_error(why);
+      fem::Study with = host.Require(id);
+      with.loads.push_back(l);
+      if (const std::string why = fem::ThermalRefusal(with); !why.empty())
+        throw std::runtime_error(why);
+      modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
+      return json{{"id", l.id}};
+    }
+    for (const char* key : kThermalKeys)
+      if (p.contains(key))
+        throw std::runtime_error(std::string("`") + key +
+                                 "` is a thermal load's (" +
+                                 fem::kThermalLoadTypeNames + "), not a " +
+                                 fem::LoadTypeToString(l.type) + "'s");
     // Each type's own keys; a key another type takes is refused rather than
     // ignored, because its unit is another unit (a torque's `magnitude`
     // read as newtons would be a thousand times off on a 1 m lever).
@@ -2124,11 +2381,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       l.region = DocumentIO::LoadRegionFromJson(p.at("region"), "add_load");
     }
     // What the study would be with it: a contact refused where a nonlinear
-    // study is (in-house, another analysis, load cases), a pin beside one.
+    // study is (in-house, another analysis, load cases), a pin beside one; a
+    // structural load on a thermal study.
     {
       fem::Study with = host.Require(id);
       with.loads.push_back(l);
       if (const std::string why = fem::ContactRefusal(with); !why.empty())
+        throw std::runtime_error(why);
+      if (const std::string why = fem::ThermalRefusal(with); !why.empty())
         throw std::runtime_error(why);
     }
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
@@ -2500,6 +2760,146 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                {"stale", host.Stale(id)}};
       if (!roles.empty())
         out["participants"] = roles;
+      return stamp(out);
+    }
+
+    // Thermal studies (docs/simulation/README.md#thermal): each body's
+    // temperature range, its flux peak, the heat through each load and the
+    // balance, and its margin to its material's service temperature.
+    if (s->type == fem::AnalysisType::Thermal) {
+      std::size_t nodes = 0, elements = 0;
+      json bodies = json::array();
+      const auto at = [](const glm::dvec3& v) { return json{v.x, v.y, v.z}; };
+      bool first = true, haveMargin = false, bulk = false;
+      json maxT, minT, maxFlux, margin;
+      double maxV = 0, minV = 0, fluxV = 0, marginV = 0;
+      std::vector<std::string> warnings;
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        nodes += b.mesh.stats.nodeCount;
+        elements += b.mesh.stats.tetCount;
+        const fem::StudyBodyResult::Thermal& t = b.thermal;
+        json flows = json::array();
+        for (const fem::HeatFlow& f : t.flows)
+          flows.push_back({{"load", f.id},
+                           {"type", fem::LoadTypeToString(f.type)},
+                           {"watts_out", f.watts}});
+        json bj = {
+            {"body", b.bodyName},
+            {"max_temperature_c", {{"value", t.maxC}, {"at", at(t.maxAt)}}},
+            {"min_temperature_c", {{"value", t.minC}, {"at", at(t.minAt)}}},
+            {"max_heat_flux_w_m2",
+             {{"value", t.maxFluxWm2}, {"at", at(t.maxFluxAt)}}},
+            {"flows", flows},
+            {"balance",
+             {{"in_w", t.inW},
+              {"out_w", t.outW},
+              {"imbalance_w", t.imbalanceW}}}};
+        if (t.hasService) {
+          bj["temperature_margin_k"] = t.marginK;
+          bj["service_max_c"] = t.serviceMaxC;
+          bj["service_basis"] = t.serviceBasis;
+          if (t.marginK < 0)
+            warnings.push_back("body '" + b.bodyName +
+                               "' runs past its material's service "
+                               "temperature (" +
+                               t.serviceBasis + "): it softens there");
+          if (!haveMargin || t.marginK < marginV) {
+            haveMargin = true;
+            marginV = t.marginK;
+            margin = {{"value", t.marginK},
+                      {"body", b.bodyName},
+                      {"service_max_c", t.serviceMaxC},
+                      {"basis", t.serviceBasis}};
+          }
+        }
+        if (t.bulkConductivity) {
+          bj["bulk_conductivity"] = true;
+          bulk = true;
+        }
+        if (first || t.maxC > maxV) {
+          maxV = t.maxC;
+          maxT = {{"value", t.maxC}, {"at", at(t.maxAt)}, {"body", b.bodyName}};
+        }
+        if (first || t.minC < minV) {
+          minV = t.minC;
+          minT = {{"value", t.minC}, {"at", at(t.minAt)}, {"body", b.bodyName}};
+        }
+        if (first || t.maxFluxWm2 > fluxV) {
+          fluxV = t.maxFluxWm2;
+          maxFlux = {{"value", t.maxFluxWm2},
+                     {"at", at(t.maxFluxAt)},
+                     {"body", b.bodyName}};
+        }
+        first = false;
+        bodies.push_back(std::move(bj));
+      }
+      if (bulk)
+        warnings.push_back(
+            "a printed material's conductivity is its bulk resin's, and a "
+            "printed part conducts less (air between its roads and layers): "
+            "its hot spots run hotter than predicted and its gradients "
+            "steeper");
+      json out{{"type", "thermal"},
+               {"nodes", nodes},
+               {"elements", elements},
+               {"bodies", bodies},
+               {"max_temperature_c", maxT},
+               {"min_temperature_c", minT},
+               {"max_heat_flux_w_m2", maxFlux},
+               {"stale", host.Stale(id)},
+               {"convergence", ConvergenceJson(rt->convergence)}};
+      if (haveMargin)
+        out["temperature_margin_k"] = margin;
+      if (!rt->solver.empty())
+        out["solver"] = rt->solver;
+      const bool onCalculix = rt->solver.rfind("calculix", 0) == 0;
+      if (onCalculix && rt->residual > 0)
+        out["calculix"] = {{"residual", rt->residual},
+                           {"residual_floor", rt->residualFloor},
+                           {"energy_residual", rt->energyResidual}};
+      out["notes"] = json::array(
+          {"steady conduction with each material's room-temperature "
+           "conductivity; heat flux peaks at a re-entrant edge, which "
+           "refining never settles, so it is reported and not chased"});
+      if (!warnings.empty())
+        out["warnings"] = warnings;
+      receipt::Receipt r;
+      const receipt::Oracle solver =
+          onCalculix ? receipt::Oracle{"calculix/heat",
+                                       rt->solver.substr(
+                                           std::string("calculix ").size())}
+                     : receipt::Oracle{"in_house/heat",
+                                       rt->solver.empty() ? "cpu" : rt->solver};
+      if (host.Stale(id)) {
+        r.Unverifiable("the results describe the current geometry", solver,
+                       "the part changed after this study was solved — these "
+                       "numbers are the previous geometry's. Re-run the study "
+                       "before believing them");
+      } else if (!haveMargin) {
+        r.Unverifiable("peak temperature below the material's service "
+                       "temperature",
+                       solver,
+                       "no body's material has a service temperature in the "
+                       "library (the printed plastics carry their heat "
+                       "deflection temperature)");
+      } else {
+        receipt::Claim c(
+            "peak temperature below the material's service temperature", solver,
+            marginV >= 0.0 ? receipt::Verdict::Pass : receipt::Verdict::Fail);
+        c.basis = receipt::Basis::Predicted;
+        c.value = marginV;
+        c.unit = "K";
+        c.note = "steady conduction on " + std::to_string(elements) +
+                 " elements; the margin is against " +
+                 margin.at("basis").get<std::string>();
+        const std::string unsettled = NotConvergedWhy(rt->convergence);
+        if (!unsettled.empty())
+          c.note += ". Its peak is NOT converged (" + unsettled + ")";
+        for (const std::string& w : warnings)
+          c.note += ". " + w;
+        r.Add(std::move(c));
+      }
+      AttachReceipt(out, r);
       return stamp(out);
     }
 
@@ -3165,6 +3565,39 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (!nlWarnings.empty())
         result["warnings"] = nlWarnings;
     }
+    // A thermal load (docs/simulation/README.md
+    // #the-thermal-load-on-a-static-study): the temperature range it put on
+    // the part, and each body that runs past its service temperature, where
+    // the room-temperature stiffness and strength it was solved with do not
+    // hold.
+    if (s->thermalLoad.On()) {
+      bool firstT = true;
+      double lo = 0, hi = 0, t0 = 0;
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        if (!b.thermal.load)
+          continue;
+        if (firstT || b.thermal.minC < lo)
+          lo = b.thermal.minC;
+        if (firstT || b.thermal.maxC > hi)
+          hi = b.thermal.maxC;
+        t0 = b.thermal.stressFreeC;
+        firstT = false;
+        if (b.thermal.hasService && b.thermal.marginK < 0)
+          nlWarnings.push_back(
+              "body '" + b.bodyName + "' reaches " +
+              std::to_string(b.thermal.maxC) +
+              " C, past its material's service temperature (" +
+              b.thermal.serviceBasis +
+              "): the stiffness and strength it was solved with are room "
+              "temperature's and do not hold there");
+      }
+      json t = {{"min_c", lo}, {"max_c", hi}, {"stress_free_c", t0}};
+      if (s->thermalLoad.kind == fem::ThermalLoad::Kind::FromStudy)
+        t["from_study"] = s->thermalLoad.fromStudy;
+      result["temperature"] = std::move(t);
+      if (!nlWarnings.empty())
+        result["warnings"] = nlWarnings;
+    }
     const auto peakJson = [](const fem::FieldPeak& pk, const std::string& b) {
       return json{{"value", pk.value},
                   {"at", {pk.at.x, pk.at.y, pk.at.z}},
@@ -3678,12 +4111,16 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       field = ui::SimulationState::Field::Shape;
     else if (f == "density")
       field = ui::SimulationState::Field::Density;
+    else if (f == "temperature")
+      field = ui::SimulationState::Field::Temperature;
+    else if (f == "heat_flux")
+      field = ui::SimulationState::Field::HeatFlux;
     else if (f == "none")
       field = ui::SimulationState::Field::None;
     else
       throw std::runtime_error("unknown field: " + f +
                                "; fields: von_mises, displacement, shape, "
-                               "density, none");
+                               "density, temperature, heat_flux, none");
     std::optional<float> deformScale, threshold;
     std::optional<int> mode, caseIndex;
     // Float on the display side: a scale past its range would be infinity,

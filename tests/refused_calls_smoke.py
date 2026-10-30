@@ -597,7 +597,7 @@ def main():
                   needle="does not exist", tab=part["name"])
             check("a deck of a modal study", "export_study_inp",
                   {"id": modal, "path": path("m.inp")},
-                  needle="static study", tab=part["name"])
+                  needle="static, buckling or thermal", tab=part["name"])
             d.call("set_study", id=static, solver="calculix")
             d.call("set_settings",
                    calculix_path=os.path.join(work, "no-ccx-here"))
@@ -714,6 +714,80 @@ def main():
             d.call("set_material", feature_id=cube["created_by"],
                    material="steel")
             d.call("remove_study", id=nl)
+            # Thermal (docs/simulation/README.md#thermal): each refused by
+            # the call that says it, naming what is accepted; nothing is
+            # defaulted.
+            heat = d.call("add_study", name="Heat", type="thermal")["id"]
+            hot = {"study": heat, "face": face(1.0)}
+            check("a thermal load type that is none", "add_load",
+                  dict(hot, type="heat"), needle="heat_flux, convection",
+                  tab=part["name"])
+            check("a thermal key that is none", "add_load",
+                  dict(hot, type="temperature", temperature_c=20.0,
+                       emissivity=0.9),
+                  needle="emissivity", tab=part["name"])
+            check("a structural load on a thermal study", "add_load",
+                  dict(hot, type="force", magnitude=10.0),
+                  needle="a structural load", tab=part["name"])
+            check("a temperature below absolute zero", "add_load",
+                  dict(hot, type="temperature", temperature_c=-300.0),
+                  needle="absolute zero", tab=part["name"])
+            check("both power_w and flux_w_m2", "add_load",
+                  dict(hot, type="heat_flux", power_w=1.0, flux_w_m2=5.0),
+                  needle="exactly one", tab=part["name"])
+            check("a convection without its film coefficient", "add_load",
+                  dict(hot, type="convection", ambient_c=20.0),
+                  needle="film_w_m2k", tab=part["name"])
+            check("load cases on a thermal study", "set_study",
+                  {"id": heat, "load_cases": [{"name": "a"}]},
+                  needle="takes no load cases", tab=part["name"])
+            stat = d.call("add_study", name="Expanded")["id"]
+            check("a thermal load on a static study", "add_load",
+                  {"study": stat, "face": face(1.0), "type": "temperature",
+                   "temperature_c": 20.0},
+                  needle="study of type thermal", tab=part["name"])
+            modes = d.call("add_study", name="Modes", type="modal")["id"]
+            check("thermal_load on a modal study", "set_study",
+                  {"id": modes, "thermal_load": {"uniform_c": 50.0,
+                                                 "stress_free_c": 20.0}},
+                  needle="a static study's", tab=part["name"])
+            d.call("remove_study", id=modes)
+            buckle = d.call("add_study", name="Buckle", type="buckling")["id"]
+            check("thermal_load on a buckling study", "set_study",
+                  {"id": buckle, "thermal_load": {"uniform_c": 50.0,
+                                                  "stress_free_c": 20.0}},
+                  needle="thermal buckling", tab=part["name"])
+            d.call("remove_study", id=buckle)
+            check("a uniform thermal_load without stress_free_c", "set_study",
+                  {"id": stat, "thermal_load": {"uniform_c": 50.0}},
+                  needle="stress_free_c", tab=part["name"])
+            check("thermal_load from a study that is not thermal",
+                  "set_study", {"id": stat, "thermal_load": {"from_study": stat}},
+                  needle="not a thermal study", tab=part["name"])
+            d.call("add_load", study=heat, type="temperature", face=face(1.0),
+                   temperature_c=80.0)
+            check("thermal_load whose stress-free temperature cannot be "
+                  "derived", "set_study",
+                  {"id": stat, "thermal_load": {"from_study": heat}},
+                  needle="stress_free_c", tab=part["name"])
+            d.call("set_material", feature_id=cube["created_by"],
+                   material="copper")
+            check("a thermal run on a material with no conductivity",
+                  "run_study", {"id": heat},
+                  needle="aluminum_6061_t6", tab=part["name"])
+            d.call("set_material", feature_id=cube["created_by"],
+                   material="steel")
+            d.call("remove_study", id=heat)
+            heat = d.call("add_study", name="Heat", type="thermal")["id"]
+            d.call("add_load", study=heat, type="heat_flux", face=face(1.0),
+                   power_w=1.0)
+            check("a body whose heat has nowhere to go", "run_study",
+                  {"id": heat}, needle="nowhere to go", tab=part["name"])
+            d.call("remove_study", id=heat)
+            d.call("remove_study", id=stat)
+            check("generic aluminium", "set_material",
+                  {"feature_id": cube["created_by"], "material": "aluminum"},
+                  needle="aluminum_6061_t6", tab=part["name"])
             # Contact (docs/simulation/README.md#contact): refused where a
             # nonlinear study is -- in-house, another analysis, load cases
             # -- and with what only a contact says: a curved face on the

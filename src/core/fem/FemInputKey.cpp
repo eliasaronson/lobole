@@ -11,6 +11,8 @@
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 
+#include <cmath>
+
 namespace fem {
 
 namespace {
@@ -47,6 +49,25 @@ void HashHardening(inputhash::Hasher& h, const Study& study,
   }
 }
 
+// A thermal study, or a study under a thermal load, also reads each body's
+// conductivity, expansion and service limit (docs/simulation/README.md
+// #thermal). Only then, so every other study keeps its hash.
+void HashThermal(inputhash::Hasher& h, const Study& study,
+                 const std::vector<Body>& bodies) {
+  if (study.type != AnalysisType::Thermal && !study.thermalLoad.On())
+    return;
+  h.Str("thermal");
+  for (const Body& b : bodies) {
+    const CADMaterials::MaterialProperties& m =
+        CADMaterials::MaterialLibrary::GetMaterialOrDefault(b.material);
+    h.F64(m.conductivityWmK);
+    h.F64(m.expansionPerK);
+    h.F64(std::isnan(m.serviceMaxC) ? -1e300 : m.serviceMaxC);
+    h.Str(m.serviceBasis);
+    h.U64(m.bulkConductivity ? 1 : 0);
+  }
+}
+
 } // namespace
 
 uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
@@ -59,6 +80,20 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
   h.Json(Definition(study));
   h.Bodies(doc.GetBodies());
   HashHardening(h, study, doc.GetBodies());
+  HashThermal(h, study, doc.GetBodies());
+  // A static study under a thermal study's temperature reads that study's
+  // definition -- never its result, which it re-solves on its own mesh.
+  if (study.thermalLoad.kind == ThermalLoad::Kind::FromStudy) {
+    const Study* src = doc.FindStudy(study.thermalLoad.fromStudy);
+    if (src == nullptr) {
+      h.U64(0);
+    } else {
+      Study heat = *src;
+      if (!EvaluateStudyExprs(heat, doc.Symbols(), &err))
+        return 0;
+      h.Json(Definition(heat));
+    }
+  }
   // A static study of a topology result reads that result: its density is
   // an input (docs/topopt/README.md#a-static-study-of-the-optimised-shape).
   if (study.shapeFrom.study != 0) {
@@ -128,6 +163,7 @@ uint64_t AssemblyStudyInputKey(const AssemblyDocument& asmDoc,
       const std::vector<Body> bodies = ctx.placedBodies(pt.occurrenceId);
       h.Bodies(bodies);
       HashHardening(h, study, bodies);
+      HashThermal(h, study, bodies);
     }
   }
   return h.Digest();

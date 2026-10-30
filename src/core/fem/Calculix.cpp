@@ -5,6 +5,7 @@
 // ccx, writing the deck, running it and reading its answer back.
 
 #include "core/fem/Calculix.h"
+#include "core/fem/FemThermal.h"
 
 #include "common/ChildProcess.h"
 #include "common/RuntimePaths.h"
@@ -378,6 +379,18 @@ std::string Real(double v) {
   return buf;
 }
 
+// Every node's temperature at `lambda` of the way from the stress-free one
+// to the field's (*TEMPERATURE), for a step that takes the thermal load to
+// that factor.
+void WriteTemperatures(std::ostream& out, const NodalTemperature& thermal,
+                       double lambda, bool opNew) {
+  out << "*TEMPERATURE" << (opNew ? ", OP=NEW" : "") << "\n";
+  const double t0 = thermal.stressFreeC;
+  for (size_t n = 0; n < thermal.temperature.size(); ++n)
+    out << n + 1 << ", " << Num(t0 + lambda * (thermal.temperature[n] - t0))
+        << "\n";
+}
+
 // The steps of a nonlinear deck (WriteDeck's `nonlinear`), from the
 // boundaries on: first the model a contact adds (its rigid partners, its
 // surfaces and pairs, the stabilizing springs), then the steps.
@@ -388,7 +401,8 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
                          const std::vector<int>& pinOf,
                          const std::vector<StudyJobBody::PinSupport>& pins,
                          const std::vector<glm::dvec3>& nodalForces,
-                         const DeckNonlinear& nl, std::string* error) {
+                         const DeckNonlinear& nl, std::string* error,
+                         const NodalTemperature* thermal) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -561,6 +575,14 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
     out << "*NSET, NSET=NSUP\n";
     WriteIdLines(out, held);
   }
+  // A thermal load's initial temperature, every node: the body's (NALL)
+  // and each rigid partner's, whose elements ccx checks too.
+  if (thermal) {
+    out << "*INITIAL CONDITIONS, TYPE=TEMPERATURE\nNALL, "
+        << Num(thermal->stressFreeC) << "\n";
+    for (size_t k = 0; k < partners.size(); ++k)
+      out << "P" << k + 1 << ", " << Num(thermal->stressFreeC) << "\n";
+  }
   double from = 0.0;
   for (size_t si = 0; si < nl.steps.size(); ++si) {
     const NonlinearStep& st = nl.steps[si];
@@ -612,6 +634,8 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
         for (const auto& [e, f] : pr.faces)
           out << e << ", P" << f << ", " << Num(lambda * pr.mpa) << "\n";
     }
+    if (thermal)
+      WriteTemperatures(out, *thermal, lambda, false);
     out << "*NODE PRINT, NSET=NALL, GLOBAL=YES\nU\n";
     if (!held.empty())
       out << "*NODE PRINT, NSET=NSUP, GLOBAL=YES\nRF\n";
@@ -644,6 +668,10 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
     out << "*CLOAD, OP=NEW\n";
     if (!pressures.empty())
       out << "*DLOAD, OP=NEW\n";
+    // Cooled back to where it was stress-free: what is left is what heating
+    // and cooling left.
+    if (thermal)
+      WriteTemperatures(out, *thermal, 0.0, true);
     out << "*NODE PRINT, NSET=NALL, GLOBAL=YES\nU\n";
     if (!held.empty())
       out << "*NODE PRINT, NSET=NSUP, GLOBAL=YES\nRF\n";
@@ -663,7 +691,8 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
                const std::vector<StudyJobBody::PinSupport>& pins,
                const std::vector<glm::dvec3>& nodalForces,
                const std::string& title, std::string* error, int buckleFactors,
-               const DeckNonlinear* nonlinear) {
+               const DeckNonlinear* nonlinear,
+               const NodalTemperature* thermal) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -676,6 +705,8 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
     return fail("no material");
   if (nodalForces.size() != mesh.nodes.size())
     return fail("one force per node is needed");
+  if (thermal && thermal->temperature.size() != mesh.nodes.size())
+    return fail("one temperature per node is needed");
 
   // The supports as SolveCases reads them: a fixed node is fixed whatever
   // else holds it; a held node takes its first frame and every direction any
@@ -790,6 +821,10 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
     }
     if (m.densityTPerMM3 > 0)
       out << "*DENSITY\n" << Num(m.densityTPerMM3) << "\n";
+    // A thermal load's expansion, from the stress-free temperature.
+    if (thermal)
+      out << "*EXPANSION, ZERO=" << Num(thermal->stressFreeC) << "\n"
+          << Num(m.expansionPerK) << "\n";
     out << "*SOLID SECTION, ELSET=D" << d + 1 << ", MATERIAL=M" << d + 1
         << "\n";
   }
@@ -887,9 +922,14 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
     }
   }
 
+  // A thermal load's nodes start where the part is stress-free (a
+  // nonlinear deck writes it with its partners' nodes).
+  if (thermal && !nonlinear)
+    out << "*INITIAL CONDITIONS, TYPE=TEMPERATURE\nNALL, "
+        << Num(thermal->stressFreeC) << "\n";
   if (nonlinear)
     return WriteNonlinearSteps(out, mesh, byDomain, fixed, frameOf, pinOf, pins,
-                               nodalForces, *nonlinear, error);
+                               nodalForces, *nonlinear, error, thermal);
   // A buckling run's step: its factors to the accuracy the in-house
   // eigensolve holds (ccx's default is 1 %).
   if (buckleFactors > 0)
@@ -917,6 +957,8 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
         out << n + 1 << ", " << k + 1 << ", " << Num(f[k]) << "\n";
       }
   }
+  if (thermal)
+    WriteTemperatures(out, *thermal, 1.0, false);
   out << "*NODE PRINT, NSET=NALL, GLOBAL=YES\nU\n*NODE FILE\nU\n*END STEP\n";
   if (!out)
     return fail("the deck could not be written");
@@ -1205,8 +1247,8 @@ bool SolveBodyOnCalculix(const StudyJobBody& jb,
       std::string title = "body '" + jb.bodyName + "'";
       if (rhs.size() > 1)
         title += ", load case " + std::to_string(k + 1);
-      if (!WriteDeck(deck, jb.mesh, mats, sups[k], jb.pins, forces, title,
-                     &err)) {
+      if (!WriteDeck(deck, jb.mesh, mats, sups[k], jb.pins, forces, title, &err,
+                     0, nullptr, options.thermal.get())) {
         fs::remove_all(dir, ec);
         return fail(err);
       }
@@ -1258,6 +1300,230 @@ bool SolveBodyOnCalculix(const StudyJobBody& jb,
   return true;
 }
 
+uint64_t CalculixHeatMemoryEstimate(size_t nodes) {
+  // Fitted, as CalculixStaticMemoryEstimate is, to measured runs of ccx
+  // 2.23 on a 100 x 20 x 20 bar held at its ends (docs/simulation/README.md
+  // #thermal): 44 541 nodes, 187 MB; 337 881 nodes, 2.29 GB.
+  constexpr double kBaseBytes = 55e6;
+  constexpr double kCoefficient = 45.7; // bytes per node^1.39
+  constexpr double kExponent = 1.39;
+  return static_cast<uint64_t>(
+      kBaseBytes +
+      kCoefficient * std::pow(static_cast<double>(nodes), kExponent));
+}
+
+bool WriteHeatDeck(std::ostream& out, const FemMesh& mesh,
+                   const std::vector<Material>& byDomain,
+                   const HeatLoads& loads, const std::string& title,
+                   std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  const int nNodes = static_cast<int>(mesh.nodes.size());
+  if (nNodes == 0 || mesh.tets.empty())
+    return fail("empty mesh");
+  if (byDomain.empty())
+    return fail("no material");
+  std::vector<double> q;
+  std::string err;
+  if (!HeatNodalLoads(mesh, loads, q, &err))
+    return fail(err);
+  out << "** " << title << "\n";
+  out << "** Written by Loboele from its own study: the Netgen mesh, a "
+         "material per domain, the assembled nodal heat.\n";
+  out << "** Units: mm, mW, degrees C (a conductivity in W/(m K) is the same "
+         "number in mW/(mm K)).\n";
+  out << "*NODE, NSET=NALL\n";
+  for (int n = 0; n < nNodes; ++n) {
+    const glm::dvec3& p = mesh.nodes[n];
+    out << n + 1 << ", " << Num(p.x) << ", " << Num(p.y) << ", " << Num(p.z)
+        << "\n";
+  }
+  size_t nDomains = 1;
+  for (int d : mesh.tetDomain)
+    nDomains = std::max(nDomains, static_cast<size_t>(d) + 1);
+  for (size_t d = 0; d < nDomains; ++d) {
+    bool any = false;
+    for (size_t t = 0; t < mesh.tets.size(); ++t) {
+      const size_t td = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t];
+      if (td != d)
+        continue;
+      if (!any) {
+        out << "*ELEMENT, TYPE=C3D10, ELSET=D" << d + 1 << "\n";
+        any = true;
+      }
+      const auto& tet = mesh.tets[t];
+      out << t + 1;
+      for (int i : WrittenOrder(mesh, t))
+        out << ", " << tet[i] + 1;
+      out << "\n";
+    }
+    if (!any)
+      continue;
+    const Material& m = byDomain[std::min(d, byDomain.size() - 1)];
+    if (!(m.conductivityWmK > 0.0))
+      return fail("a heat deck needs every material's conductivity");
+    out << "*MATERIAL, NAME=M" << d + 1 << "\n*CONDUCTIVITY\n"
+        << Num(m.conductivityWmK) << "\n";
+    out << "*SOLID SECTION, ELSET=D" << d + 1 << ", MATERIAL=M" << d + 1
+        << "\n";
+  }
+  // The held nodes, each once at its first load's temperature (SolveHeat's
+  // rule).
+  std::vector<int> heldBy(nNodes, -1);
+  for (size_t k = 0; k < loads.held.size(); ++k)
+    for (int t : loads.held[k].tris)
+      for (int v : mesh.boundary[t].nodes)
+        if (heldBy[v] < 0)
+          heldBy[v] = static_cast<int>(k);
+  out << "*STEP\n*HEAT TRANSFER, STEADY STATE\n1., 1.\n";
+  bool anyHeld = false;
+  for (int n = 0; n < nNodes; ++n)
+    if (heldBy[n] >= 0) {
+      if (!anyHeld)
+        out << "*BOUNDARY\n";
+      anyHeld = true;
+      out << n + 1 << ", 11, 11, " << Num(loads.held[heldBy[n]].temperatureC)
+          << "\n";
+    }
+  bool anyFlux = false;
+  for (int n = 0; n < nNodes; ++n)
+    if (heldBy[n] < 0 && q[n] != 0.0) {
+      if (!anyFlux)
+        out << "*CFLUX\n";
+      anyFlux = true;
+      out << n + 1 << ", 11, " << Num(q[n]) << "\n";
+    }
+  if (!loads.films.empty()) {
+    const std::vector<std::pair<int, int>> faces = FacetFaces(mesh, 0);
+    out << "*FILM\n";
+    for (const HeatLoads::Film& f : loads.films)
+      for (int t : f.tris) {
+        if (faces[t].first == 0)
+          return fail("convection " + std::to_string(f.id) +
+                      ": a facet of its face is the face of no element");
+        out << faces[t].first << ", F" << faces[t].second << ", "
+            << Num(f.ambientC) << ", " << Num(f.hMWmm2K) << "\n";
+      }
+  }
+  out << "*NODE PRINT, NSET=NALL\nNT\n*NODE FILE\nNT\n*END STEP\n";
+  if (!out)
+    return fail("the deck could not be written");
+  return true;
+}
+
+bool ReadDatTemperatures(const std::string& path, size_t nNodes,
+                         std::vector<double>& out, std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  std::ifstream in(path);
+  if (!in)
+    return fail("CalculiX wrote no " + fs::path(path).filename().string());
+  out.assign(nNodes, 0.0);
+  std::vector<char> seen(nNodes, 0);
+  std::string line;
+  bool inBlock = false, started = false;
+  size_t count = 0;
+  while (std::getline(in, line)) {
+    if (!inBlock) {
+      if (line.find("temperatures for set") != std::string::npos)
+        inBlock = true;
+      continue;
+    }
+    std::istringstream ls(line);
+    std::string a, b;
+    if (!(ls >> a)) {
+      if (started)
+        break;
+      continue;
+    }
+    if (!(ls >> b))
+      break;
+    char* end = nullptr;
+    const long node = std::strtol(a.c_str(), &end, 10);
+    double t = 0.0;
+    if (*end != '\0' || !ParseFortran(b, t))
+      break;
+    started = true;
+    if (node < 1 || static_cast<size_t>(node) > nNodes)
+      return fail("CalculiX printed a temperature for node " +
+                  std::to_string(node) + ", which the deck does not have");
+    out[node - 1] = t;
+    if (!seen[node - 1])
+      ++count;
+    seen[node - 1] = 1;
+  }
+  if (!started)
+    return fail("CalculiX's " + fs::path(path).filename().string() +
+                " holds no temperatures");
+  if (count != nNodes)
+    return fail("CalculiX printed the temperature of " + std::to_string(count) +
+                " of " + std::to_string(nNodes) + " nodes");
+  return true;
+}
+
+bool HeatOnCalculix(const FemMesh& mesh, const std::vector<Material>& mats,
+                    const HeatLoads& loads, const std::string& bodyName,
+                    const SolveOptions& options,
+                    std::vector<double>& temperature, std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (!options.calculix)
+    return fail("this study solves on CalculiX, and the run was given none");
+  const CalculixRun& run = *options.calculix;
+  const size_t nNodes = mesh.nodes.size();
+  const uint64_t estimate = CalculixHeatMemoryEstimate(nNodes);
+  if (run.estimated)
+    run.estimated(estimate);
+  const uint64_t available =
+      run.availableBytes ? run.availableBytes : AvailableMemoryBytes();
+  if (available > 0 && estimate > available)
+    return fail("CalculiX would need about " + Gb(estimate) +
+                " for a heat run of " + std::to_string(nNodes) +
+                " nodes, and " + Gb(available) +
+                " is free: its solver has no out-of-core mode, so the run was "
+                "not started. A coarser mesh_size, or the in-house solver, "
+                "solves it");
+  std::string err;
+  fs::path dir;
+  if (!MakeRunDir(run, dir, &err))
+    return fail(err);
+  std::error_code ec;
+  if (options.solving)
+    options.solving("calculix: writing the heat deck");
+  {
+    std::ofstream deck(dir / "job.inp");
+    if (!WriteHeatDeck(deck, mesh, mats, loads, "body '" + bodyName + "', heat",
+                       &err)) {
+      fs::remove_all(dir, ec);
+      return fail(err);
+    }
+  }
+  if (options.solving)
+    options.solving("calculix: solving the heat");
+  bool keep = true;
+  if (!RunCcx(run, dir, options, keep, &err, [&](std::string* why) {
+        return ReadDatTemperatures((dir / "job.dat").string(), nNodes,
+                                   temperature, why);
+      })) {
+    if (!keep) {
+      fs::remove_all(dir, ec);
+      return fail(err);
+    }
+    return fail(err + " (the run is kept in " + dir.string() + ")");
+  }
+  fs::remove_all(dir, ec);
+  return true;
+}
+
 bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
                     std::ostream& out, const std::string& title,
                     std::string* error) {
@@ -1266,13 +1532,21 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
       *error = m;
     return false;
   };
-  if (in.type != AnalysisType::Static && in.type != AnalysisType::Buckling)
-    return fail(std::string("a CalculiX deck is written for a static study "
-                            "or a buckling one; this one is ") +
+  if (in.type != AnalysisType::Static && in.type != AnalysisType::Buckling &&
+      in.type != AnalysisType::Thermal)
+    return fail(std::string("a CalculiX deck is written for a static, "
+                            "buckling or thermal study; this one is ") +
                 AnalysisTypeToString(in.type));
   if (body >= in.bodies.size())
     return fail("no such body");
   const StudyJobBody& jb = in.bodies[body];
+  if (in.type == AnalysisType::Thermal) {
+    if (caseIndex != 0)
+      return fail("no such load case");
+    const std::vector<Material> mats =
+        jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
+    return WriteHeatDeck(out, jb.mesh, mats, jb.heat, title, error);
+  }
   const std::vector<std::vector<FaceLoad>> rhs =
       jb.caseLoads.empty() ? std::vector<std::vector<FaceLoad>>{jb.faceLoads}
                            : jb.caseLoads;
@@ -1281,11 +1555,28 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
   const std::vector<Material> mats =
       jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
   const glm::dvec3 g = in.gravity * 1000.0; // m/s^2 -> mm/s^2
+  std::string err;
+  // A thermal load's temperature: a uniform one as it is, a thermal study's
+  // solved in-house on this mesh (the run solves it on CalculiX, and holds
+  // that answer to the same K_T).
+  SolveOptions opts;
+  if (jb.thermalLoad.On()) {
+    auto field = std::make_shared<NodalTemperature>();
+    field->stressFreeC = jb.thermalLoad.stressFreeC;
+    if (jb.thermalLoad.kind == ThermalLoad::Kind::Uniform) {
+      field->temperature.assign(jb.mesh.nodes.size(), jb.thermalLoad.uniformC);
+    } else {
+      HeatSolution hs;
+      if (!SolveHeat(jb.mesh, mats, jb.heat, SolveOptions{}, hs, &err))
+        return fail("the thermal load: " + err);
+      field->temperature = std::move(hs.temperature);
+    }
+    opts.thermal = field;
+  }
   std::vector<Supports> sups;
   std::vector<std::vector<FemResults::SupportReaction>> pinRows;
-  std::string err;
-  if (!StaticSupportsOf(jb, mats, {rhs[caseIndex]}, g, SolveOptions{}, sups,
-                        pinRows, &err))
+  if (!StaticSupportsOf(jb, mats, {rhs[caseIndex]}, g, opts, sups, pinRows,
+                        &err))
     return fail(err);
   if (in.nonlinear.On() || !jb.contacts.empty()) {
     // A large-deformation, plastic or contact run's deck
@@ -1321,14 +1612,15 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
     if (!deck.settlePerNode.empty())
       deck.steps.insert(deck.steps.begin(), {settleFactor, settleFactor});
     return WriteDeck(out, jb.mesh, mats, sups.front(), jb.pins, forces, title,
-                     error, 0, &deck);
+                     error, 0, &deck, opts.thermal.get());
   }
   std::vector<glm::dvec3> forces;
   if (!NodalForces(jb.mesh, mats, rhs[caseIndex], g, forces, &err))
     return fail(err);
   return WriteDeck(
       out, jb.mesh, mats, sups.front(), jb.pins, forces, title, error,
-      in.type == AnalysisType::Buckling ? std::max(in.numModes, 1) : 0);
+      in.type == AnalysisType::Buckling ? std::max(in.numModes, 1) : 0, nullptr,
+      opts.thermal.get());
 }
 
 bool ReadDatBuckling(const std::string& path, size_t nNodes,
@@ -1447,7 +1739,7 @@ bool BucklingOnCalculix(
     std::ofstream deck(dir / "job.inp");
     if (!WriteDeck(deck, jb.mesh, mats, supports, jb.pins, forces,
                    "body '" + jb.bodyName + "', buckling", &err,
-                   std::max(numFactors, 1))) {
+                   std::max(numFactors, 1), nullptr, options.thermal.get())) {
       fs::remove_all(dir, ec);
       return fail(err);
     }
@@ -2152,7 +2444,8 @@ bool NonlinearOnCalculix(
     {
       std::ofstream f(dir / "job.inp");
       if (!WriteDeck(f, mesh, mats, supports, jb.pins, forces,
-                     "body '" + jb.bodyName + "', nonlinear", &err, 0, &deck)) {
+                     "body '" + jb.bodyName + "', nonlinear", &err, 0, &deck,
+                     options.thermal.get())) {
         fs::remove_all(dir, ec);
         return fail(err);
       }
@@ -2434,10 +2727,12 @@ bool NonlinearOnCalculix(
   if (req.plasticity && !at.HasIp())
     return fail("CalculiX printed no stress for the plastic run's factor " +
                 fmt(at.factor) + ", which its fields are read from");
-  result = req.plasticity
-               ? IntegrationPointFields(mesh, at.u, at.ipStress, at.ipPeeq)
-           : req.nlgeom ? LargeDeformationFields(mesh, mats, at.u)
-                        : SmallDeformationFields(mesh, mats, at.u);
+  result =
+      req.plasticity
+          ? IntegrationPointFields(mesh, at.u, at.ipStress, at.ipPeeq)
+      : req.nlgeom
+          ? LargeDeformationFields(mesh, mats, at.u, options.thermal.get())
+          : SmallDeformationFields(mesh, mats, at.u, options.thermal.get());
   if (req.plasticity && !req.snapThrough && !collapsed) {
     if (r.end != PassOutcome::End::Completed || !r.haveUnloaded ||
         r.unloaded.factor < 2.0 * cap * (1.0 - 1e-9))

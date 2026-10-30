@@ -26,7 +26,9 @@
 #include "core/fem/Calculix.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "core/fem/FemThermal.h"
 #include "core/io/Serialization.h"
+#include "topo_testmesh.h"
 
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
@@ -665,7 +667,7 @@ TEST_CASE("CalculiX and the in-house solver agree on a lug on a pin held from "
   Document doc;
   auto plate =
       std::make_unique<BoxFeature>("Plate", glm::dvec3(0), 80.0, 20.0, 5.0);
-  plate->SetMaterial("aluminum");
+  plate->SetMaterial("aluminum_6061_t6");
   doc.AddFeature(std::move(plate));
   uint64_t solid = doc.GetFeature(0)->GetId();
   for (double x : {12.0, 40.0}) {
@@ -770,8 +772,8 @@ TEST_CASE("CalculiX and the in-house solver agree on a steel block bonded to "
   REQUIRE_CCX(ccx);
   auto lower = std::make_unique<Document>();
   auto upper = std::make_unique<Document>();
-  for (auto [d, mat] :
-       {std::pair{lower.get(), "aluminum"}, std::pair{upper.get(), "steel"}}) {
+  for (auto [d, mat] : {std::pair{lower.get(), "aluminum_6061_t6"},
+                        std::pair{upper.get(), "steel"}}) {
     auto box = std::make_unique<BoxFeature>("Block", glm::vec3(0.0f), 60.0,
                                             60.0, 16.0);
     box->SetMaterial(mat);
@@ -967,7 +969,7 @@ TEST_CASE("CalculiX and the in-house solver buckle a bracket on a pin at the "
   Document doc;
   auto plate =
       std::make_unique<BoxFeature>("Plate", glm::dvec3(0), 80.0, 20.0, 4.0);
-  plate->SetMaterial("aluminum");
+  plate->SetMaterial("aluminum_6061_t6");
   doc.AddFeature(std::move(plate));
   const uint64_t solid = doc.GetFeature(0)->GetId();
   doc.AddFeature(std::make_unique<CylinderFeature>(
@@ -1031,8 +1033,8 @@ TEST_CASE("CalculiX and the in-house solver buckle a steel column bonded to "
   REQUIRE_CCX(ccx);
   auto lower = std::make_unique<Document>();
   auto upper = std::make_unique<Document>();
-  for (auto [d, mat] :
-       {std::pair{lower.get(), "aluminum"}, std::pair{upper.get(), "steel"}}) {
+  for (auto [d, mat] : {std::pair{lower.get(), "aluminum_6061_t6"},
+                        std::pair{upper.get(), "steel"}}) {
     auto box = std::make_unique<BoxFeature>("Block", glm::vec3(0.0f), 10.0,
                                             10.0, 80.0);
     box->SetMaterial(mat);
@@ -2116,7 +2118,7 @@ TEST_CASE("a block standing on a slab, each meshed, presses where statics "
   {
     auto slab = std::make_unique<BoxFeature>("Slab", glm::dvec3(-20, -20, 0),
                                              40.0, 40.0, T);
-    slab->SetMaterial("aluminum");
+    slab->SetMaterial("aluminum_6061_t6");
     parts.a->AddFeature(std::move(slab));
     auto block = std::make_unique<BoxFeature>(
         "Block", glm::dvec3(-b / 2, -b / 2, T), b, b, H);
@@ -2670,4 +2672,320 @@ TEST_CASE("a plastic result is saved and read back with its plastic strain "
              Catch::Matchers::WithinRel(-0.99, 1e-6));
   CHECK(r.maxResidualDisplacement == 0.99);
 }
+#endif // HAVE_NETGEN
+
+// ---- Thermal (docs/simulation/README.md#thermal) ----------------------------
+// Each heat run is held to our own K_T and Q (SolveHeat with the answer
+// given), and its temperatures and flows compared with the in-house solve of
+// the same mesh.
+
+namespace {
+
+// The fin of the plan's measurements: a 100 x 10 x 10 bar at 5 mm, k = 50,
+// its base held at 100 C, every other face cooled at 25 W/(m^2 K) to 20 C;
+// and a source of 1 W through it.
+void HeatFin(fem::FemMesh& mesh, fem::HeatLoads& loads,
+             std::vector<fem::Material>& mats) {
+  mesh = GenerateBoxMesh(20, 2, 2, 100.0, 10.0, 10.0);
+  loads = {};
+  loads.held.push_back({1, TrisAtPlane(mesh, 0, 0.0, 1e-9), 100.0});
+  fem::HeatLoads::Film film;
+  film.id = 2;
+  film.hMWmm2K = 25.0 * fem::kWm2ToMWmm2;
+  film.ambientC = 20.0;
+  for (int t = 0; t < static_cast<int>(mesh.boundary.size()); ++t)
+    if (mesh.boundary[t].faceIndex != 0 && mesh.boundary[t].faceIndex != 1)
+      film.tris.push_back(t);
+  loads.films.push_back(film);
+  fem::HeatLoads::Flux flux;
+  flux.id = 3;
+  flux.tris = TrisAtPlane(mesh, 0, 100.0, 1e-9);
+  flux.total = true;
+  flux.totalMW = 500.0;
+  loads.fluxes.push_back(flux);
+  loads.sources.push_back({4, {}, 1000.0});
+  fem::Material m;
+  m.conductivityWmK = 50.0;
+  mats = {m};
+}
+
+} // namespace
+
+TEST_CASE("CalculiX and the in-house solver agree on a fin's heat",
+          "[fem][calculix][thermal]") {
+  REQUIRE_CCX(ccx);
+  Scratch scratch;
+  fem::FemMesh mesh;
+  fem::HeatLoads loads;
+  std::vector<fem::Material> mats;
+  HeatFin(mesh, loads, mats);
+  fem::HeatSolution own;
+  std::string err;
+  REQUIRE(fem::SolveHeat(mesh, mats, loads, {}, own, &err));
+  fem::SolveOptions options;
+  options.calculix = RunWith(*ccx, scratch.dir / "runs");
+  std::vector<double> T;
+  REQUIRE(fem::HeatOnCalculix(mesh, mats, loads, "Fin", options, T, &err));
+  INFO(err);
+  fem::GivenTemperatures given;
+  given.temperature = &T;
+  given.precision = fem::kCalculixDatPrecision;
+  given.name = ccx->Name();
+  fem::HeatSolution theirs;
+  REQUIRE(fem::SolveHeat(mesh, mats, loads, {}, theirs, &err, &given));
+  double worstT = 0.0;
+  for (size_t n = 0; n < T.size(); ++n)
+    worstT = std::max(worstT, std::abs(T[n] - own.temperature[n]) /
+                                  std::abs(own.temperature[n]));
+  double worstFlow = 0.0;
+  for (size_t k = 0; k < own.flows.size(); ++k)
+    worstFlow = std::max(worstFlow,
+                         std::abs(theirs.flows[k].watts - own.flows[k].watts) /
+                             std::max(own.inW, own.outW));
+  std::printf("calculix heat: fin of %zu nodes, temperatures within %.2e, "
+              "flows within %.2e of the throughput; residual %.2e, floor "
+              "%.2e, energy %.2e, imbalance %.2e W (floor %.2e)\n",
+              mesh.nodes.size(), worstT, worstFlow, theirs.residual,
+              theirs.residualFloor, theirs.energyResidual, theirs.imbalanceW,
+              theirs.imbalanceFloorW);
+  CHECK(worstT < 1e-6);
+  CHECK(worstFlow < 1e-5);
+  CHECK(EntriesIn(scratch.dir / "runs") == 0);
+}
+
+TEST_CASE("a heat deck a tenth of a percent away from its study is refused",
+          "[fem][calculix][thermal]") {
+  REQUIRE_CCX(ccx);
+  Scratch scratch;
+  fem::FemMesh mesh;
+  fem::HeatLoads loads;
+  std::vector<fem::Material> mats;
+  HeatFin(mesh, loads, mats);
+  std::vector<fem::Material> off = mats;
+  off[0].conductivityWmK *= 1.001;
+  fem::SolveOptions options;
+  options.calculix = RunWith(*ccx, scratch.dir / "runs");
+  std::vector<double> T;
+  std::string err;
+  REQUIRE(fem::HeatOnCalculix(mesh, off, loads, "Fin", options, T, &err));
+  fem::GivenTemperatures given;
+  given.temperature = &T;
+  given.precision = fem::kCalculixDatPrecision;
+  given.name = ccx->Name();
+  fem::HeatSolution theirs;
+  CHECK_FALSE(fem::SolveHeat(mesh, mats, loads, {}, theirs, &err, &given));
+  CHECK_THAT(err, Catch::Matchers::ContainsSubstring("differ"));
+}
+
+#ifdef HAVE_NETGEN
+
+namespace {
+
+// A steel bar 100 x 10 x 10 along x, its ends held at 100 and 20 C (thermal
+// study `heat`), and a static study clamping both ends under its temperature,
+// stress-free at 20 C.
+struct HeatedBar {
+  Document doc;
+  uint64_t heat = 0, clamped = 0;
+  HeatedBar(double mesh) {
+    auto bar =
+        std::make_unique<BoxFeature>("Bar", glm::dvec3(0), 100.0, 10.0, 10.0);
+    bar->SetMaterial("steel");
+    doc.AddFeature(std::move(bar));
+    const Body& body = doc.GetBodies()[0];
+    const auto atX = [](double x) {
+      return [x](const glm::dvec3& c) { return std::abs(c.x - x) < 1e-6; };
+    };
+    fem::Study& h = doc.AddStudy("Heat");
+    h.type = fem::AnalysisType::Thermal;
+    h.meshSize = mesh;
+    fem::Load hot = MakeLoad(doc, fem::LoadType::Temperature,
+                             FaceWhere(body, "plane", atX(0.0)));
+    hot.temperatureC = 100.0;
+    fem::Load cold = MakeLoad(doc, fem::LoadType::Temperature,
+                              FaceWhere(body, "plane", atX(100.0)));
+    cold.temperatureC = 20.0;
+    h.loads = {hot, cold};
+    heat = h.id;
+    fem::Study& st = doc.AddStudy("Clamped");
+    st.meshSize = mesh;
+    st.loads = {
+        MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", atX(0.0))),
+        MakeLoad(doc, fem::LoadType::Fixed,
+                 FaceWhere(body, "plane", atX(100.0)))};
+    st.thermalLoad.kind = fem::ThermalLoad::Kind::FromStudy;
+    st.thermalLoad.fromStudy = heat;
+    st.thermalLoad.hasStressFree = true;
+    st.thermalLoad.stressFreeC = 20.0;
+    clamped = st.id;
+  }
+  fem::StudyRuntime Run(uint64_t id, fem::Solver solver,
+                        const fem::CalculixInstall* ccx,
+                        const Scratch* scratch) {
+    fem::Study* s = doc.StudyForRun(id);
+    s->solver = solver;
+    fem::StudyPlan plan;
+    std::string err;
+    REQUIRE(fem::PlanStudy(doc, *s, plan, &err));
+    fem::SolveOptions options;
+    if (ccx)
+      options.calculix = RunWith(*ccx, scratch->dir / "runs");
+    fem::ConvergeOptions converge;
+    converge.mode = fem::ConvergeMode::Never;
+    fem::StudyJobInput input;
+    fem::StudyRuntime rt;
+    const bool ok =
+        fem::SolveConverged(plan, input, rt, converge, &err, options);
+    INFO(err);
+    REQUIRE(ok);
+    return rt;
+  }
+};
+
+} // namespace
+
+TEST_CASE("CalculiX and the in-house solver agree on a thermal study and a "
+          "static one under its temperature",
+          "[fem][calculix][thermal]") {
+  REQUIRE_CCX(ccx);
+  Scratch scratch;
+  HeatedBar bar(5.0);
+  const fem::StudyRuntime own =
+      bar.Run(bar.heat, fem::Solver::InHouse, nullptr, nullptr);
+  const fem::StudyRuntime theirs =
+      bar.Run(bar.heat, fem::Solver::Calculix, &*ccx, &scratch);
+  CHECK(theirs.solver == ccx->Name());
+  const auto& a = own.bodies[0];
+  const auto& b = theirs.bodies[0];
+  REQUIRE(a.results.temperature.size() == b.results.temperature.size());
+  double worst = 0.0;
+  for (size_t n = 0; n < a.results.temperature.size(); ++n)
+    worst = std::max(
+        worst, std::abs(a.results.temperature[n] - b.results.temperature[n]) /
+                   a.results.temperature[n]);
+  double flow = 0.0;
+  for (size_t k = 0; k < a.thermal.flows.size(); ++k)
+    flow = std::max(
+        flow, std::abs(a.thermal.flows[k].watts - b.thermal.flows[k].watts) /
+                  std::abs(a.thermal.flows[k].watts));
+  std::printf("calculix thermal study: %zu nodes, temperatures within %.2e, "
+              "flows within %.2e (%.6f W in-house, %.6f W ccx)\n",
+              a.mesh.stats.nodeCount, worst, flow, a.thermal.flows[0].watts,
+              b.thermal.flows[0].watts);
+  CHECK(worst < 1e-6);
+  CHECK(flow < 1e-5);
+
+  const fem::StudyRuntime sOwn =
+      bar.Run(bar.clamped, fem::Solver::InHouse, nullptr, nullptr);
+  const fem::StudyRuntime sTheirs =
+      bar.Run(bar.clamped, fem::Solver::Calculix, &*ccx, &scratch);
+  const double dRel = Rel(sTheirs.bodies[0].results.maxDisplacement,
+                          sOwn.bodies[0].results.maxDisplacement);
+  const double vRel = Rel(sTheirs.bodies[0].results.maxVonMises,
+                          sOwn.bodies[0].results.maxVonMises);
+  std::printf("calculix static under a thermal study's temperature: max "
+              "displacement %.9g vs %.9g (rel %.2e), max von Mises %.9g vs "
+              "%.9g (rel %.2e), residual %.2e floor %.2e energy %.2e\n",
+              sTheirs.bodies[0].results.maxDisplacement,
+              sOwn.bodies[0].results.maxDisplacement, dRel,
+              sTheirs.bodies[0].results.maxVonMises,
+              sOwn.bodies[0].results.maxVonMises, vRel, sTheirs.residual,
+              sTheirs.residualFloor, sTheirs.energyResidual);
+  CHECK(dRel < 1e-5);
+  CHECK(vRel < 1e-5);
+  CHECK(sTheirs.bodies[0].thermal.load);
+}
+
+TEST_CASE("a steel bar clamped along its axis, heated past yield and cooled, "
+          "keeps the plastic strain its hardening line says",
+          "[fem][calculix][thermal][plasticity]") {
+  REQUIRE_CCX(ccx);
+  // A 10 x 10 x 40 steel bar between two frictionless grounds, heated
+  // uniformly by 200 K: held along its axis and free across it, its strain
+  // is alpha dT, which past f_y / E is taken up plastically on the
+  // library's line, (alpha dT - f_y / E) / (1 + H / E). Cooled back to where
+  // it was stress-free, it keeps that strain.
+  constexpr double b = 10.0, L = 40.0, dT = 200.0;
+  Scratch scratch;
+  Document doc;
+  auto box = std::make_unique<BoxFeature>(
+      "Bar", glm::dvec3(-b / 2, -b / 2, 0.0), b, b, L);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Heated past yield");
+  s.meshSize = 5.0;
+  s.nonlinear.plasticity = true;
+  s.nonlinear.increments = 8;
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Contact,
+                             FaceWhere(body, "plane", isZ(0.0))));
+  s.loads.push_back(
+      MakeLoad(doc, fem::LoadType::Contact, FaceWhere(body, "plane", isZ(L))));
+  s.thermalLoad.kind = fem::ThermalLoad::Kind::Uniform;
+  s.thermalLoad.uniformC = 20.0 + dT;
+  s.thermalLoad.hasStressFree = true;
+  s.thermalLoad.stressFreeC = 20.0;
+  fem::StudyPlan plan;
+  std::string err;
+  REQUIRE(fem::PlanStudy(doc, s, plan, &err));
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunContact(plan, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult& r = rt.bodies[0];
+  const auto& steel = Steel();
+  const double E = steel.youngGPa * 1000.0, fy = steel.yieldMPa;
+  const double H = (steel.hardening[1].first - steel.hardening[0].first) /
+                   steel.hardening[1].second;
+  const double alpha = steel.expansionPerK;
+  // The grounds are penalty contacts: each end overcloses by sigma / k_p
+  // (k_p the pair's pressure per overclosure), which the bar's length gives
+  // back -- so the closed form with that compliance in series:
+  // eps_p (1 + H/E + 2H/(k_p L)) = alpha dT - f_y/E - 2 f_y/(k_p L).
+  REQUIRE(r.contacts.size() == 2);
+  const double kp = r.contacts[0].penaltyMPaPerMm;
+  REQUIRE(kp > 0.0);
+  const double epsP = (alpha * dT - fy / E - 2.0 * fy / (kp * L)) /
+                      (1.0 + H / E + 2.0 * H / (kp * L));
+  double peMin = 1e300, peMax = 0.0, vmMax = 0.0;
+  for (size_t n = 0; n < r.mesh.nodes.size(); ++n) {
+    peMin = std::min(peMin, r.results.plasticStrain[n]);
+    peMax = std::max(peMax, r.results.plasticStrain[n]);
+    vmMax = std::max(vmMax, r.results.vonMises[n]);
+  }
+  std::printf("calculix thermal plasticity: %zu nodes, %.1f s, plastic "
+              "strain %.7f..%.7f (closed form %.7f, %+.2e), von Mises max "
+              "%.4f (f_y + H eps_p %.4f), springs %.1e, imbalance %.1e\n",
+              r.mesh.stats.nodeCount, seconds, peMin, peMax, epsP,
+              peMax / epsP - 1.0, vmMax, fy + H * epsP,
+              r.nonlinear.stabilization, r.nonlinear.imbalance);
+  REQUIRE(r.nonlinear.plasticity);
+  CHECK(r.nonlinear.unloaded);
+  CHECK_THAT(peMin, Catch::Matchers::WithinRel(epsP, 5e-3));
+  CHECK_THAT(peMax, Catch::Matchers::WithinRel(epsP, 5e-3));
+  CHECK_THAT(vmMax, Catch::Matchers::WithinRel(fy + H * epsP, 5e-3));
+  // Cooled, it pulls away from the grounds, which only push: free, it is
+  // left shorter by L eps_p.
+  double topZ = 0.0, botZ = 0.0;
+  int nTop = 0, nBot = 0;
+  for (size_t n = 0; n < r.mesh.nodes.size(); ++n) {
+    const double uz = r.results.residualDisplacement[n].z;
+    if (std::abs(r.mesh.nodes[n].z - L) < 1e-6) {
+      topZ += uz;
+      ++nTop;
+    } else if (std::abs(r.mesh.nodes[n].z) < 1e-6) {
+      botZ += uz;
+      ++nBot;
+    }
+  }
+  REQUIRE(nTop > 0);
+  REQUIRE(nBot > 0);
+  const double shorter = botZ / nBot - topZ / nTop;
+  std::printf("calculix thermal plasticity: cooled, %.6f mm shorter (L eps_p "
+              "%.6f, %+.2e)\n",
+              shorter, L * epsP, shorter / (L * epsP) - 1.0);
+  CHECK_THAT(shorter, Catch::Matchers::WithinRel(L * epsP, 5e-3));
+}
+
 #endif // HAVE_NETGEN

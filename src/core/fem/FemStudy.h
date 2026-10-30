@@ -19,6 +19,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -48,7 +49,20 @@ enum class LoadType {
             // ground (a part study: the plane a flat face lies on) or on a
             // rigid occurrence (`contactWith`), which push it and never
             // pull, with `friction`
+  // A thermal study's loads (docs/simulation/README.md#thermal), each
+  // refused on any other analysis:
+  Temperature,    // a face held at `temperatureC`
+  HeatFlux,       // heat into a face: `powerW` in all, or `fluxWm2`
+  Convection,     // a face cooled by a fluid: `filmWm2K` to `ambientC`
+  HeatGeneration, // heat made through a body (`body`): `powerW` in all
 };
+// A thermal study's load, not a structural one.
+inline bool IsThermalLoad(LoadType t) {
+  return t == LoadType::Temperature || t == LoadType::HeatFlux ||
+         t == LoadType::Convection || t == LoadType::HeatGeneration;
+}
+// The lowest temperature there is, degrees C.
+inline constexpr double kAbsoluteZeroC = -273.15;
 // A support holds the part rather than loading it.
 inline bool IsSupport(LoadType t) {
   return t == LoadType::Fixed || t == LoadType::Pin || t == LoadType::Contact;
@@ -168,6 +182,18 @@ struct Load {
   bool fixRotation = false;
   // Contact only: the friction coefficient (unitless; 0 = frictionless).
   double friction = 0.0;
+  // The thermal loads' quantities, as given (W, W/m^2, W/(m^2 K), degrees
+  // C); NaN = not given, which ThermalRefusal names. Temperature:
+  // temperatureC. HeatFlux: exactly one of powerW and fluxWm2.
+  // Convection: filmWm2K and ambientC. HeatGeneration: powerW, through the
+  // body named `body` (a part study; `face` is empty), or the occurrence's
+  // (an assembly study).
+  double temperatureC = std::numeric_limits<double>::quiet_NaN();
+  double powerW = std::numeric_limits<double>::quiet_NaN();
+  double fluxWm2 = std::numeric_limits<double>::quiet_NaN();
+  double filmWm2K = std::numeric_limits<double>::quiet_NaN();
+  double ambientC = std::numeric_limits<double>::quiet_NaN();
+  std::string body;
 };
 
 // One load case of a study (docs/topopt/README.md#load-cases): the force and
@@ -222,6 +248,9 @@ enum class AnalysisType {
   // Linear buckling (docs/simulation/README.md#buckling): by what factor the
   // loads can grow before the part loses stability, and in what shape.
   Buckling,
+  // Steady heat conduction (docs/simulation/README.md#thermal): the
+  // temperature under held, convecting, heated and heat-making loads.
+  Thermal,
 };
 
 // Which program solves a study (docs/simulation/README.md#calculix). Auto
@@ -264,6 +293,25 @@ struct Nonlinear {
   bool operator==(const Nonlinear&) const = default;
 };
 inline constexpr int kNonlinearIncrements = 10;
+
+// A static study's thermal load (docs/simulation/README.md
+// #the-thermal-load-on-a-static-study): thermal expansion from a
+// temperature field, against the temperature the part is stress-free at.
+// FromStudy re-solves the heat of thermal study `fromStudy` on the static
+// study's own mesh; Uniform takes `uniformC` everywhere. `stressFreeC` is
+// required for Uniform; with FromStudy it may be left out (`hasStressFree`
+// false) when every convection of the thermal study has one ambient, which
+// it then is.
+struct ThermalLoad {
+  enum class Kind { None, FromStudy, Uniform };
+  Kind kind = Kind::None;
+  uint64_t fromStudy = 0;
+  double uniformC = 0.0;
+  double stressFreeC = 0.0;
+  bool hasStressFree = false;
+  bool On() const { return kind != Kind::None; }
+  bool operator==(const ThermalLoad&) const = default;
+};
 inline constexpr int kSnapIncrements = 20;
 
 // A single-part analysis definition (linear static or modal).
@@ -336,6 +384,9 @@ struct Study {
   // Static only: solved past linear, on CalculiX (v208).
   Nonlinear nonlinear;
 
+  // Static only: thermal expansion under a temperature field (vNEXT).
+  ThermalLoad thermalLoad;
+
   // Transient: the most recent mesh/solve error (dangling ref, no fixed
   // support, singular matrix, ...). Never serialized. Empty when healthy.
   std::string error;
@@ -371,16 +422,37 @@ std::string NonlinearRefusal(Solver solver, AnalysisType type,
 // that is negative or not a number, a contact support with a pin or on a
 // study of a topology shape, on a modal or buckling study.
 std::string ContactRefusal(const Study& study);
+// Empty when the study's thermal side can be run; otherwise why not, naming
+// what is accepted (docs/simulation/README.md#thermal): a thermal load on a
+// study that is not thermal, a structural load on one that is, a load's
+// missing or impossible quantity (a temperature below absolute zero, a film
+// coefficient that is not positive, both or neither of power_w and
+// flux_w_m2), load cases, gravity, nonlinear or shape_from on a thermal
+// study, and a thermal_load where it cannot go (any study but static, a
+// snap-through run, beside a contact participant) or without its stress-free
+// temperature where none can be derived. Checked without the document: a
+// from_study that names no thermal study is the planner's.
+std::string ThermalRefusal(const Study& study);
+// One thermal load's own refusal (its quantities), for add_load before it
+// is added; empty when it can be applied. `type` must be thermal.
+std::string ThermalLoadRefusal(const Load& load);
+// The stress-free temperature a from_study thermal load derives: the
+// ambient every convection of `thermal` shares. nullopt when it has none,
+// or several.
+std::optional<double> DerivedStressFree(const Study& thermal);
 
 const char* LoadTypeToString(LoadType type);
 // Every load type's name, for a refusal that names what is accepted.
 inline constexpr const char* kLoadTypeNames =
-    "fixed, force, pressure, torque, remote, pin, contact";
+    "fixed, force, pressure, torque, remote, pin, contact, temperature, "
+    "heat_flux, convection, heat_generation";
+inline constexpr const char* kThermalLoadTypeNames =
+    "temperature, heat_flux, convection, heat_generation";
 [[nodiscard]] bool LoadTypeFromString(const std::string& s, LoadType& out);
 const char* AnalysisTypeToString(AnalysisType type);
 // Every analysis type's name, for a refusal that names what is accepted.
 inline constexpr const char* kAnalysisTypeNames =
-    "static, modal, topology, buckling";
+    "static, modal, topology, buckling, thermal";
 
 // The CPU solver a study of this type runs, as study_status, study_results and
 // the receipt name it: static and modal factor K directly (SimplicialLDLT;

@@ -15,7 +15,9 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -25,6 +27,9 @@
 
 class AssemblyDocument;
 struct Body;
+namespace CADMaterials {
+struct MaterialProperties;
+}
 
 namespace fem {
 
@@ -46,7 +51,29 @@ struct Material {
   // (yield, 0) up; empty = none, and a plastic study is refused rather than
   // assume one. Read only by a plastic run (*PLASTIC).
   std::vector<std::pair<double, double>> hardening;
+  // The library's thermal numbers (docs/simulation/README.md#thermal), 0 =
+  // unknown: the conductivity in W/(m K), which is mW/(mm K) in the
+  // solver's units, read by a heat solve; the linear expansion coefficient,
+  // 1/K, read by a thermal load. And the service temperature (degrees C)
+  // with what it is, which a thermal result's margin reads; NaN = none.
+  double conductivityWmK = 0.0;
+  double expansionPerK = 0.0;
+  double serviceMaxC = std::numeric_limits<double>::quiet_NaN();
+  std::string serviceBasis;
+  // The conductivity is the bulk resin's and a printed part conducts less
+  // (air between its roads and layers): a thermal result warns.
+  bool bulkConductivity = false;
 };
+
+// The solver's material for a library row: every number in solver units.
+Material MaterialFromLibrary(const CADMaterials::MaterialProperties& mp);
+
+// Empty when a thermal study (`needConductivity`) or a thermal load
+// (`needExpansion`) can take `m` (the material of `label`); otherwise why
+// not, naming the materials the library has the number for (`with`).
+std::string ThermalMaterialRefusal(const Material& m, const std::string& label,
+                                   bool needConductivity, bool needExpansion,
+                                   const std::string& with);
 
 // Empty when a plastic study can take `m` (the material of `label`): it has
 // a yield strength and a hardening curve that starts at it, its plastic
@@ -74,6 +101,59 @@ struct FaceLoad {
 // A load's traction as the solver takes it, its triangles left to the caller.
 // The load's geometry must be complete (CompleteLoadGeometry).
 FaceLoad MakeFaceLoad(const Load& load);
+
+// The thermal loads of one mesh, in solver units.
+struct HeatLoads {
+  // A face held at a temperature: its nodes eliminated, as a fixed
+  // support's DOF are.
+  struct Held {
+    uint64_t id = 0;
+    std::vector<int> tris; // indices into FemMesh::boundary
+    double temperatureC = 0.0;
+  };
+  // Heat into a face, mW: `totalMW` spread uniformly when `total`, else
+  // `fluxMWmm2` per mm^2. Positive into the part.
+  struct Flux {
+    uint64_t id = 0;
+    std::vector<int> tris;
+    bool total = true;
+    double totalMW = 0.0;
+    double fluxMWmm2 = 0.0;
+  };
+  // A face cooled (or warmed) by a fluid at `ambientC`: h (T - T_amb) out,
+  // h in mW/(mm^2 K).
+  struct Film {
+    uint64_t id = 0;
+    std::vector<int> tris;
+    double hMWmm2K = 0.0;
+    double ambientC = 0.0;
+  };
+  // Heat generated through a body, `powerMW` in all, spread uniformly over
+  // its volume. `tets` (indices into FemMesh::tets) are the body's; empty =
+  // the whole mesh.
+  struct Source {
+    uint64_t id = 0;
+    std::vector<int> tets;
+    double powerMW = 0.0;
+  };
+  std::vector<Held> held;
+  std::vector<Flux> fluxes;
+  std::vector<Film> films;
+  std::vector<Source> sources;
+  bool Empty() const {
+    return held.empty() && fluxes.empty() && films.empty() && sources.empty();
+  }
+};
+
+// The heat through one thermal load, W, signed OUT of the part: a held
+// face's from K_T T - Q at its nodes (each node counted once, the first load
+// that holds it), a convecting face's integral of h (T - T_amb), a flux face
+// and a source their applied power (negative: into the part).
+struct HeatFlow {
+  uint64_t id = 0;
+  LoadType type = LoadType::Temperature;
+  double watts = 0.0;
+};
 
 // A nodal stress in Voigt order [xx, yy, zz, xy, yz, zx], MPa.
 using Stress = std::array<double, 6>;
@@ -158,6 +238,13 @@ struct FemResults {
     double factor = 0.0;
   };
   std::vector<ModeShape> modes;
+
+  // A thermal result (docs/simulation/README.md#thermal): the temperature
+  // at each node (degrees C), and the heat flux -k grad T (W/m^2), averaged
+  // to the node by element volume as the stress is. A static result under a
+  // thermal load keeps its temperature too. Empty on any other.
+  std::vector<double> temperature;
+  std::vector<glm::dvec3> heatFlux;
 };
 
 // How a face moved, as a rigid body: the small-displacement fit of its
@@ -384,16 +471,20 @@ uint64_t BucklingMemoryEstimate(size_t freeDofs);
 // material is under NLGEOM -- pushed forward to the deformed part, and
 // averaged to the node by element volume as the linear recovery is; its von
 // Mises, and the maxima. No reactions.
+// Under a thermal load (`thermal`, null: none) the strain the stress is
+// read from is less the thermal strain alpha (T - T0) I at each node.
 FemResults LargeDeformationFields(const FemMesh& mesh,
                                   const std::vector<Material>& byDomain,
-                                  const std::vector<glm::dvec3>& displacement);
+                                  const std::vector<glm::dvec3>& displacement,
+                                  const NodalTemperature* thermal = nullptr);
 // The same for a small-deformation answer: the linear strain and stress
 // SolveCases recovers, averaged to the node by element volume. A contact
 // solved without large deformation (docs/simulation/README.md#contact) is
 // read through this.
 FemResults SmallDeformationFields(const FemMesh& mesh,
                                   const std::vector<Material>& byDomain,
-                                  const std::vector<glm::dvec3>& displacement);
+                                  const std::vector<glm::dvec3>& displacement,
+                                  const NodalTemperature* thermal = nullptr);
 
 // The fields of an answer whose stress was not computed from `displacement`
 // but given at each tet's four Gauss points (kTetGauss's, point k nearest
@@ -619,6 +710,34 @@ struct StudyBodyResult {
     double meanPressureMPa = 0.0; // normal force over the closed area
   };
   std::vector<ContactResult> contacts;
+  // A thermal body (docs/simulation/README.md#thermal): what was read off
+  // its field. A static body under a thermal load fills the field range,
+  // its stress-free temperature and its source, and the service limit.
+  struct Thermal {
+    bool solved = false; // a thermal study's body
+    bool load = false;   // a static body under a thermal load
+    std::vector<HeatFlow> flows;
+    double inW = 0.0, outW = 0.0, imbalanceW = 0.0;
+    double maxC = 0.0, minC = 0.0;
+    glm::dvec3 maxAt{0.0}, minAt{0.0};
+    double maxFluxWm2 = 0.0;
+    glm::dvec3 maxFluxAt{0.0};
+    // The lowest held or ambient temperature: what the peak's rise, which
+    // the converge loop settles, is over.
+    double baseC = 0.0;
+    // The material's service temperature and what it is; `hasService`
+    // false where it has none. margin = serviceMaxC - maxC.
+    bool hasService = false;
+    double serviceMaxC = 0.0;
+    std::string serviceBasis;
+    double marginK = 0.0;
+    // The conductivity is a bulk resin's on a printed material.
+    bool bulkConductivity = false;
+    // A static body's thermal load.
+    double stressFreeC = 0.0;
+    uint64_t fromStudy = 0;
+  };
+  Thermal thermal;
   // The results of case `k` (the only ones when there are no cases).
   const FemResults& Case(int k) const {
     return k >= 0 && k < static_cast<int>(cases.size()) ? cases[k] : results;
@@ -829,11 +948,19 @@ struct StudyJobBody {
     double semiAngle = 0.0; // cone, radians
   };
   std::map<int, CurvedFace> curvedFaces;
+  // A thermal study's loads; on a static study under a from_study thermal
+  // load, the thermal study's loads on this mesh, solved first for the
+  // temperature the static solve takes.
+  HeatLoads heat;
+  // The static study's thermal load, on this body (Kind None: none).
+  ThermalLoad thermalLoad;
+  double baseC = 0.0; // the lowest held or ambient temperature of `heat`
 };
 struct StudyJobInput {
   AnalysisType type = AnalysisType::Static;
   Solver solver = Solver::Auto;
   Nonlinear nonlinear;
+  ThermalLoad thermalLoad;
   std::vector<std::string> caseNames;
   int numModes = 8;
   glm::dvec3 gravity{0.0};
@@ -861,6 +988,10 @@ struct StudyBodyPlan {
   MeshSettings settings;
   Material mat;
   std::vector<std::pair<int, Load>> loads; // (face index, the load)
+  // A static study under a from_study thermal load: the thermal study's
+  // loads on this body, meshed with it (face -1: a heat_generation, through
+  // the body or, in a bonded group, the member `Load::body` names).
+  std::vector<std::pair<int, Load>> heatLoads;
   // A bonded group (S2): `shape` is then a compound of these imprinted
   // solids, which share the faces where they touch so one mesh spans them,
   // and each carries its own material. Empty for a single solid.
@@ -926,6 +1057,7 @@ struct StudyPlan {
   AnalysisType type = AnalysisType::Static;
   Solver solver = Solver::Auto; // EffectiveSolver: a nonlinear auto is calculix
   Nonlinear nonlinear;
+  ThermalLoad thermalLoad;
   std::vector<std::string> caseNames; // empty = one case
   // A shape study (ShapeSource): what the runtime reports of the cut.
   uint64_t sourceDigest = 0;

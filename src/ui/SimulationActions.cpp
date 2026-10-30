@@ -1469,11 +1469,25 @@ void SyncFieldRenderer(AppState& state) {
   // across an analysis-type switch (e.g. view modal displacement, then change
   // the study to topology) — reading the empty arrays would be out of bounds.
   // Treat a mismatched field as "off".
+  // A thermal field (docs/simulation/README.md#thermal): a thermal study's
+  // temperature and heat flux, or a thermally loaded static study's
+  // temperature.
+  bool anyTemperature = false, anyFlux = false;
+  for (const fem::StudyBodyResult& b : rt->bodies) {
+    anyTemperature = anyTemperature || !b.results.temperature.empty();
+    anyFlux = anyFlux || !b.results.heatFlux.empty();
+  }
+  const bool temperature = sim.field == SimulationState::Field::Temperature;
+  const bool heatFlux = sim.field == SimulationState::Field::HeatFlux;
+  const bool thermalStudy = study && study->type == fem::AnalysisType::Thermal;
   const bool applicable =
-      topo ? (sim.field == SimulationState::Field::Shape ||
-              sim.field == SimulationState::Field::Density)
-           : (sim.field == SimulationState::Field::VonMises ||
-              sim.field == SimulationState::Field::Displacement);
+      temperature ? anyTemperature
+      : heatFlux  ? anyFlux
+      : topo      ? (sim.field == SimulationState::Field::Shape ||
+                sim.field == SimulationState::Field::Density)
+                  : !thermalStudy &&
+                   (sim.field == SimulationState::Field::VonMises ||
+                    sim.field == SimulationState::Field::Displacement);
   if (!applicable) {
     restoreBodies();
     removeIso();
@@ -1547,6 +1561,21 @@ void SyncFieldRenderer(AppState& state) {
     return;
   }
 
+  // A thermal field spans its own range: lowest to highest temperature, 0
+  // to the peak flux.
+  double tLo = 0.0, tHi = 0.0, fluxHi = 0.0;
+  if (temperature || heatFlux) {
+    bool first = true;
+    for (const fem::StudyBodyResult& b : rt->bodies) {
+      for (double t : b.results.temperature) {
+        tLo = first ? t : std::min(tLo, t);
+        tHi = first ? t : std::max(tHi, t);
+        first = false;
+      }
+      for (const glm::dvec3& q : b.results.heatFlux)
+        fluxHi = std::max(fluxHi, glm::length(q));
+    }
+  }
   // The scale is the case on show's own maximum (the study's, without
   // cases).
   double fmax = vm ? rt->maxVonMises : rt->maxDisplacement;
@@ -1599,6 +1628,15 @@ void SyncFieldRenderer(AppState& state) {
         if (density) {
           fv.displacement = glm::vec3(0.0f);
           fv.scalar = static_cast<float>(std::clamp(nodeDensity[n], 0.0, 1.0));
+        } else if (temperature || heatFlux) {
+          // No deformation: the scalar alone.
+          fv.displacement = glm::vec3(0.0f);
+          double val = 0.0;
+          if (temperature && n < static_cast<int>(shown.temperature.size()))
+            val = tHi > tLo ? (shown.temperature[n] - tLo) / (tHi - tLo) : 0.0;
+          if (heatFlux && n < static_cast<int>(shown.heatFlux.size()))
+            val = fluxHi > 0 ? glm::length(shown.heatFlux[n]) / fluxHi : 0.0;
+          fv.scalar = static_cast<float>(std::clamp(val, 0.0, 1.0));
         } else {
           const glm::dvec3& d = (*disp)[n];
           const double val = vm ? shown.vonMises[n] : glm::length(d);

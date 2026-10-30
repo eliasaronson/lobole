@@ -102,66 +102,6 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
 
 namespace {
 
-// Preconditioned conjugate gradients on the assembled K, written out rather
-// than Eigen's ConjugateGradient so it can be cancelled mid-solve (Eigen's
-// would have to be restarted in chunks, losing its search directions each
-// time) and so a stall is seen as one.
-//
-// Converged at |K u - f| <= tol |f|. Fails "cancelled" when asked, and
-// "stalled" when the best residual has not improved by a tenth in
-// kStallIterations: the signature of a singular K (an under-constrained
-// model has a rigid-body mode CG cannot resolve), which would otherwise
-// iterate to the cap.
-enum class PcgOutcome { Converged, Cancelled, Stalled, Capped };
-
-template <class Precond>
-PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
-               const Eigen::VectorXd& f, Eigen::VectorXd& u, double tol,
-               int maxIterations, const std::function<bool()>& cancelled,
-               int* iterations, double* relResidual) {
-  constexpr int kCancelEvery = 32;
-  constexpr int kStallIterations = 2000;
-  const double fNorm = f.norm();
-  u = Eigen::VectorXd::Zero(f.size());
-  *iterations = 0;
-  *relResidual = 0.0;
-  if (fNorm == 0.0)
-    return PcgOutcome::Converged;
-  Eigen::VectorXd r = f; // u = 0
-  Eigen::VectorXd z = M.solve(r);
-  Eigen::VectorXd p = z;
-  Eigen::VectorXd Kp(f.size());
-  double rz = r.dot(z);
-  double best = 1.0;
-  int bestAt = 0;
-  for (int it = 1; it <= maxIterations; ++it) {
-    Kp.noalias() = K * p;
-    const double alpha = rz / p.dot(Kp);
-    u.noalias() += alpha * p;
-    r.noalias() -= alpha * Kp;
-    const double rel = r.norm() / fNorm;
-    *iterations = it;
-    *relResidual = rel;
-    if (!std::isfinite(rel))
-      return PcgOutcome::Stalled;
-    if (rel <= tol)
-      return PcgOutcome::Converged;
-    if (rel < 0.9 * best) {
-      best = rel;
-      bestAt = it;
-    } else if (it - bestAt > kStallIterations) {
-      return PcgOutcome::Stalled;
-    }
-    if (cancelled && it % kCancelEvery == 0 && cancelled())
-      return PcgOutcome::Cancelled;
-    z = M.solve(r);
-    const double rzNext = r.dot(z);
-    p = z + (rzNext / rz) * p;
-    rz = rzNext;
-  }
-  return PcgOutcome::Capped;
-}
-
 // What holds a mesh, as the reduced system SolveCases and SolveBuckling both
 // solve in: each held node's DOF in its own frame (R's columns; a node also
 // fixed is fixed, all three held, its frame immaterial), a tie's master
@@ -473,6 +413,45 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     }
   }
 
+  // A thermal load (docs/simulation/README.md
+  // #the-thermal-load-on-a-static-study): the strain alpha (T - T0) on the
+  // volumetric components, T interpolated at each Gauss point, its load
+  // integral B^T D eps_th shared by every case as gravity is.
+  const NodalTemperature* thermal = options.thermal.get();
+  if (thermal && thermal->temperature.size() != static_cast<size_t>(nNodes))
+    return fail("the temperature field is not one temperature per node");
+  const auto thermalStrain = [&](size_t ti, const double N[10]) {
+    Eigen::Matrix<double, 6, 1> e = Eigen::Matrix<double, 6, 1>::Zero();
+    double T = 0.0;
+    for (int i = 0; i < 10; ++i)
+      T += N[i] * thermal->temperature[mesh.tets[ti][i]];
+    const double v = matOf(ti).expansionPerK * (T - thermal->stressFreeC);
+    e(0) = e(1) = e(2) = v;
+    return e;
+  };
+  if (thermal) {
+    for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+      if (matOf(ti).expansionPerK == 0.0)
+        continue;
+      const auto& tet = mesh.tets[ti];
+      Vector3d X[10];
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh.nodes[tet[i]];
+        X[i] = Vector3d(p.x, p.y, p.z);
+      }
+      Eigen::Matrix<double, 30, 1> fe = Eigen::Matrix<double, 30, 1>::Zero();
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B;
+        const double dV = kTetW * std::abs(StrainDisp(X, g[0], g[1], g[2], B));
+        double N[10];
+        TetShape(g[0], g[1], g[2], N);
+        fe += dV * (B.transpose() * (DOf(ti) * thermalStrain(ti, N)));
+      }
+      for (int i = 0; i < 10; ++i)
+        addNodal(tet[i], fe.segment<3>(3 * i));
+    }
+  }
+
   // Direct below the threshold: factorise once, every case one right-hand
   // side. Above it, PCG per case on K with one incomplete-Cholesky
   // preconditioner. Both are held to the same residual below.
@@ -734,7 +713,14 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
       for (int i = 0; i < 10; ++i) {
         Eigen::Matrix<double, 6, 30> B;
         StrainDisp(X, kNodeRST[i][0], kNodeRST[i][1], kNodeRST[i][2], B);
-        const Eigen::Matrix<double, 6, 1> s = D * (B * ue);
+        Eigen::Matrix<double, 6, 1> strain = B * ue;
+        if (thermal) {
+          // At its own node the field is that node's temperature.
+          double Ni[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+          Ni[i] = 1.0;
+          strain -= thermalStrain(ti, Ni);
+        }
+        const Eigen::Matrix<double, 6, 1> s = D * strain;
         stressAccum[tet[i]] += vol * s;
         weight[tet[i]] += vol;
       }
@@ -887,7 +873,7 @@ namespace {
 FemResults DeformationFields(const FemMesh& mesh,
                              const std::vector<Material>& byDomain,
                              const std::vector<glm::dvec3>& displacement,
-                             bool large) {
+                             bool large, const NodalTemperature* thermal) {
   FemResults out;
   const size_t nNodes = mesh.nodes.size();
   out.displacement = displacement;
@@ -925,10 +911,16 @@ FemResults DeformationFields(const FemMesh& mesh,
       for (int i = 0; i < 10; ++i)
         F +=
             U[i] * (invJt * Vector3d(dN[i][0], dN[i][1], dN[i][2])).transpose();
+      // The thermal strain at this node, alpha (T - T0) I.
+      Eigen::Matrix3d eth = Eigen::Matrix3d::Zero();
+      if (thermal && thermal->temperature.size() == nNodes)
+        eth = m.expansionPerK *
+              (thermal->temperature[tet[k]] - thermal->stressFreeC) *
+              Eigen::Matrix3d::Identity();
       if (!large) {
         // The linear strain and Hooke's law, as SolveCases recovers them.
         const Eigen::Matrix3d G = F - Eigen::Matrix3d::Identity();
-        const Eigen::Matrix3d eps = 0.5 * (G + G.transpose());
+        const Eigen::Matrix3d eps = 0.5 * (G + G.transpose()) - eth;
         accum[tet[k]] +=
             vol *
             (lam * eps.trace() * Eigen::Matrix3d::Identity() + 2.0 * mu * eps);
@@ -936,7 +928,7 @@ FemResults DeformationFields(const FemMesh& mesh,
         continue;
       }
       const Eigen::Matrix3d E =
-          0.5 * (F.transpose() * F - Eigen::Matrix3d::Identity());
+          0.5 * (F.transpose() * F - Eigen::Matrix3d::Identity()) - eth;
       const Eigen::Matrix3d S =
           lam * E.trace() * Eigen::Matrix3d::Identity() + 2.0 * mu * E;
       const double detF = F.determinant();
@@ -976,8 +968,9 @@ FemResults DeformationFields(const FemMesh& mesh,
 
 FemResults LargeDeformationFields(const FemMesh& mesh,
                                   const std::vector<Material>& byDomain,
-                                  const std::vector<glm::dvec3>& displacement) {
-  return DeformationFields(mesh, byDomain, displacement, true);
+                                  const std::vector<glm::dvec3>& displacement,
+                                  const NodalTemperature* thermal) {
+  return DeformationFields(mesh, byDomain, displacement, true, thermal);
 }
 
 FemResults
@@ -1062,8 +1055,9 @@ IntegrationPointFields(const FemMesh& mesh,
 
 FemResults SmallDeformationFields(const FemMesh& mesh,
                                   const std::vector<Material>& byDomain,
-                                  const std::vector<glm::dvec3>& displacement) {
-  return DeformationFields(mesh, byDomain, displacement, false);
+                                  const std::vector<glm::dvec3>& displacement,
+                                  const NodalTemperature* thermal) {
+  return DeformationFields(mesh, byDomain, displacement, false, thermal);
 }
 
 #ifdef HAVE_SPECTRA
@@ -1509,7 +1503,8 @@ bool SolverAvailable() { return false; }
 bool ModalAvailable() { return false; }
 
 FemResults SmallDeformationFields(const FemMesh&, const std::vector<Material>&,
-                                  const std::vector<glm::dvec3>& displacement) {
+                                  const std::vector<glm::dvec3>& displacement,
+                                  const NodalTemperature*) {
   FemResults out;
   out.displacement = displacement;
   return out;
@@ -1523,7 +1518,8 @@ FemResults IntegrationPointFields(const FemMesh&,
   return out;
 }
 FemResults LargeDeformationFields(const FemMesh&, const std::vector<Material>&,
-                                  const std::vector<glm::dvec3>& displacement) {
+                                  const std::vector<glm::dvec3>& displacement,
+                                  const NodalTemperature*) {
   FemResults out;
   out.displacement = displacement;
   return out;

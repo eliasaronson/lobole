@@ -12,6 +12,8 @@
 #include "ui/StudyPanel.h"
 #include "ui/ViewportHandleDraw.h" // DrawViewportHandles
 
+#include <limits>
+
 // Simulation GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
 // Test names and categories are UNCHANGED: tools/gui-tests-xvfb.sh builds its
@@ -1124,6 +1126,97 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!prims.empty());
     IM_CHECK(ui::SimulationLoadLabel(st->loads[0]) == "contact");
     s_App->simulation.pendingContactFriction = 0.0;
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // A thermal study, clicked (docs/simulation/README.md#thermal): the
+  // analysis combo makes it thermal and its tools replace the structural
+  // ones; each refuses the click, visibly and placing nothing, until its
+  // values are typed (a held temperature, a film coefficient and an ambient
+  // have no default), and places once they are; Run solves it, and the
+  // temperature field is shown with its legend in degrees C.
+  t = IM_REGISTER_TEST(engine, "sim", "a_thermal_tool_refuses_until_typed");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureCylinder(ctx);
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield(2);
+    const uint64_t createdBy = Doc()->GetBodies()[0].createdBy;
+    ctx->ItemClick(
+        ("//###ToolWindow/###material_" + std::to_string(createdBy)).c_str());
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Steel").c_str());
+    ctx->Yield(2);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###ToolWindow/###study_analysis");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    popup = ctx->UiContext->OpenPopupStack.back().Window;
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Thermal").c_str());
+    ctx->Yield(2);
+    IM_CHECK(Doc()->FindStudy(sid)->type == fem::AnalysisType::Thermal);
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###sim_bc_fixed"));
+    const Body& body = Doc()->GetBodies()[0];
+    ElementRef side, flat;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const auto info = Measure::DescribeFaceAt(body, index);
+      if (info && info->kind == "cylinder")
+        side = ElementRef{body.createdBy, name};
+      else if (info && info->kind == "plane" && flat.name.empty())
+        flat = ElementRef{body.createdBy, name};
+    }
+    IM_CHECK_SILENT(!side.name.empty() && !flat.name.empty());
+    // Convection, untyped: refused, naming the ranges to choose from.
+    ctx->ItemClick("//###ToolWindow/###sim_bc_convection");
+    ctx->Yield();
+    ui::SimulationApplyToFace(*s_App, side);
+    ctx->Yield(2);
+    IM_CHECK(Doc()->FindStudy(sid)->loads.empty());
+    IM_CHECK(s_App->simulation.placeRefusal.find("Incropera") !=
+             std::string::npos);
+    ctx->ItemInputValue("//###ToolWindow/###sim_film_w_m2k", "10");
+    ctx->ItemInputValue("//###ToolWindow/###sim_ambient_c", "25");
+    ctx->Yield();
+    ui::SimulationApplyToFace(*s_App, side);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FindStudy(sid)->loads.size(), (size_t)1);
+    IM_CHECK(Doc()->FindStudy(sid)->loads[0].filmWm2K == 10.0);
+    // A heat source on the body whose face is clicked.
+    ctx->ItemClick("//###ToolWindow/###sim_bc_heat_source");
+    ctx->Yield();
+    ui::SimulationApplyToFace(*s_App, flat);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FindStudy(sid)->loads.size(), (size_t)1);
+    IM_CHECK(s_App->simulation.placeRefusal.find("power_w") !=
+             std::string::npos);
+    ctx->ItemInputValue("//###ToolWindow/###sim_source_power_w", "0.2");
+    ctx->Yield();
+    ui::SimulationApplyToFace(*s_App, flat);
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(sid);
+    IM_CHECK_EQ(st->loads.size(), (size_t)2);
+    IM_CHECK(st->loads[1].type == fem::LoadType::HeatGeneration);
+    IM_CHECK(st->loads[1].body == body.name);
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid));
+    const fem::StudyRuntime* rt = Doc()->StudyResults(sid);
+    IM_CHECK(rt != nullptr && !rt->bodies.empty());
+    IM_CHECK(rt->bodies[0].thermal.solved);
+    IM_CHECK(rt->bodies[0].thermal.maxC > 25.0);
+    ctx->Yield(2);
+    ctx->ItemClick("//###ToolWindow/###thermal_field_temperature");
+    ctx->Yield(3);
+    IM_CHECK(s_App->simulation.field ==
+             ui::SimulationState::Field::Temperature);
+    s_App->simulation.pendingFilmWm2K =
+        std::numeric_limits<double>::quiet_NaN();
+    s_App->simulation.pendingAmbientC =
+        std::numeric_limits<double>::quiet_NaN();
+    s_App->simulation.pendingHeatW = std::numeric_limits<double>::quiet_NaN();
     ui::ExitSimulation(*s_App);
     ctx->Yield();
   };

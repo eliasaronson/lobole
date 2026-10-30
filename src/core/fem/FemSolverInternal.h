@@ -18,7 +18,10 @@
 
 #include <Eigen/Dense>
 
+#include <Eigen/Sparse>
+
 #include <cmath>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -174,6 +177,67 @@ inline constexpr double kTetW = 1.0 / 24.0; // (1/4 weight) * (1/6 ref volume)
 inline constexpr double kTriGauss[3][2] = {
     {1.0 / 6, 1.0 / 6}, {2.0 / 3, 1.0 / 6}, {1.0 / 6, 2.0 / 3}};
 inline constexpr double kTriW = (1.0 / 3) * (1.0 / 2);
+
+// Preconditioned conjugate gradients on an assembled K (SolveCases, and the
+// heat solve's scalar K_T), written out rather
+// than Eigen's ConjugateGradient so it can be cancelled mid-solve (Eigen's
+// would have to be restarted in chunks, losing its search directions each
+// time) and so a stall is seen as one.
+//
+// Converged at |K u - f| <= tol |f|. Fails "cancelled" when asked, and
+// "stalled" when the best residual has not improved by a tenth in
+// kStallIterations: the signature of a singular K (an under-constrained
+// model has a rigid-body mode CG cannot resolve), which would otherwise
+// iterate to the cap.
+enum class PcgOutcome { Converged, Cancelled, Stalled, Capped };
+
+template <class Precond>
+inline PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
+                      const Eigen::VectorXd& f, Eigen::VectorXd& u, double tol,
+                      int maxIterations, const std::function<bool()>& cancelled,
+                      int* iterations, double* relResidual) {
+  constexpr int kCancelEvery = 32;
+  constexpr int kStallIterations = 2000;
+  const double fNorm = f.norm();
+  u = Eigen::VectorXd::Zero(f.size());
+  *iterations = 0;
+  *relResidual = 0.0;
+  if (fNorm == 0.0)
+    return PcgOutcome::Converged;
+  Eigen::VectorXd r = f; // u = 0
+  Eigen::VectorXd z = M.solve(r);
+  Eigen::VectorXd p = z;
+  Eigen::VectorXd Kp(f.size());
+  double rz = r.dot(z);
+  double best = 1.0;
+  int bestAt = 0;
+  for (int it = 1; it <= maxIterations; ++it) {
+    Kp.noalias() = K * p;
+    const double alpha = rz / p.dot(Kp);
+    u.noalias() += alpha * p;
+    r.noalias() -= alpha * Kp;
+    const double rel = r.norm() / fNorm;
+    *iterations = it;
+    *relResidual = rel;
+    if (!std::isfinite(rel))
+      return PcgOutcome::Stalled;
+    if (rel <= tol)
+      return PcgOutcome::Converged;
+    if (rel < 0.9 * best) {
+      best = rel;
+      bestAt = it;
+    } else if (it - bestAt > kStallIterations) {
+      return PcgOutcome::Stalled;
+    }
+    if (cancelled && it % kCancelEvery == 0 && cancelled())
+      return PcgOutcome::Cancelled;
+    z = M.solve(r);
+    const double rzNext = r.dot(z);
+    p = z + (rzNext / rz) * p;
+    rz = rzNext;
+  }
+  return PcgOutcome::Capped;
+}
 
 // ---- System-building helpers shared by Solve and the topology loop --------
 

@@ -28,6 +28,7 @@
 #include "core/Measure.h"
 #include "core/fem/Calculix.h"
 #include "core/fem/FemSolver.h"
+#include "core/fem/FemThermal.h"
 #include "core/fem/FemTopo.h"
 
 #include <algorithm>
@@ -58,6 +59,14 @@ const char* LoadTypeToString(LoadType type) {
     return "pin";
   case LoadType::Contact:
     return "contact";
+  case LoadType::Temperature:
+    return "temperature";
+  case LoadType::HeatFlux:
+    return "heat_flux";
+  case LoadType::Convection:
+    return "convection";
+  case LoadType::HeatGeneration:
+    return "heat_generation";
   }
   return "fixed";
 }
@@ -91,6 +100,22 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
     out = LoadType::Contact;
     return true;
   }
+  if (s == "temperature") {
+    out = LoadType::Temperature;
+    return true;
+  }
+  if (s == "heat_flux") {
+    out = LoadType::HeatFlux;
+    return true;
+  }
+  if (s == "convection") {
+    out = LoadType::Convection;
+    return true;
+  }
+  if (s == "heat_generation") {
+    out = LoadType::HeatGeneration;
+    return true;
+  }
   return false;
 }
 
@@ -102,6 +127,8 @@ const char* AnalysisTypeToString(AnalysisType type) {
     return "topology";
   case AnalysisType::Buckling:
     return "buckling";
+  case AnalysisType::Thermal:
+    return "thermal";
   case AnalysisType::Static:
     break;
   }
@@ -138,8 +165,9 @@ bool SolverFromString(const std::string& s, Solver& out) {
 
 std::string SolverRefusal(Solver solver, AnalysisType type) {
   if (solver == Solver::Calculix && type != AnalysisType::Static &&
-      type != AnalysisType::Buckling)
-    return std::string("CalculiX solves static and buckling studies here; a ") +
+      type != AnalysisType::Buckling && type != AnalysisType::Thermal)
+    return std::string("CalculiX solves static, buckling and thermal studies "
+                       "here; a ") +
            AnalysisTypeToString(type) +
            " study is solved in-house (solver auto or in_house)";
   return {};
@@ -298,6 +326,220 @@ std::string ContactRefusal(const Study& study) {
   return {};
 }
 
+Material MaterialFromLibrary(const CADMaterials::MaterialProperties& mp) {
+  // GPa -> MPa; density kg/m^3 -> tonne/mm^3 for the consistent mm-N-t-s
+  // system; a conductivity in W/(m K) is the same number in mW/(mm K).
+  Material m{mp.youngGPa * 1000.0, mp.poisson,       mp.density * 1e-12,
+             mp.yieldMPa,          mp.interlayerMPa, mp.hardening};
+  m.conductivityWmK = mp.conductivityWmK;
+  m.expansionPerK = mp.expansionPerK;
+  m.serviceMaxC = mp.serviceMaxC;
+  m.serviceBasis = mp.serviceBasis;
+  m.bulkConductivity = mp.bulkConductivity;
+  return m;
+}
+
+std::string ThermalMaterialRefusal(const Material& m, const std::string& label,
+                                   bool needConductivity, bool needExpansion,
+                                   const std::string& with) {
+  const std::string names = with.empty() ? std::string("none has one yet")
+                                         : "the library has one for: " + with;
+  if (needConductivity && !(m.conductivityWmK > 0.0))
+    return label +
+           " has no thermal conductivity in the library (none is entered "
+           "without a cited source), so a thermal study cannot solve it; " +
+           names;
+  if (needExpansion && !(m.expansionPerK > 0.0))
+    return label +
+           " has no thermal expansion coefficient in the library (none is "
+           "entered without a cited source), so a thermal load cannot "
+           "expand it; " +
+           names;
+  return {};
+}
+
+namespace {
+bool Given(double v) { return !std::isnan(v); }
+} // namespace
+
+std::string ThermalLoadRefusal(const Load& l) {
+  const std::string what =
+      std::string(LoadTypeToString(l.type)) + " " + std::to_string(l.id);
+  const auto temperature = [&](double c, const char* key) -> std::string {
+    if (!std::isfinite(c))
+      return what + ": " + key + " is a number, degrees C";
+    if (c < kAbsoluteZeroC)
+      return what + ": " + key + " " + std::to_string(c) +
+             " is below absolute zero (" + std::to_string(kAbsoluteZeroC) +
+             " C)";
+    return {};
+  };
+  // A quantity another type takes is refused, not carried: the file writes
+  // what is given, and its reader refuses it on the wrong type.
+  const auto stray = [&](const char* key, double v, bool mine) {
+    return !mine && Given(v) ? what + " does not take " + key : std::string();
+  };
+  using LT = LoadType;
+  for (const std::string& why :
+       {stray("temperature_c", l.temperatureC, l.type == LT::Temperature),
+        stray("power_w", l.powerW,
+              l.type == LT::HeatFlux || l.type == LT::HeatGeneration),
+        stray("flux_w_m2", l.fluxWm2, l.type == LT::HeatFlux),
+        stray("film_w_m2k", l.filmWm2K, l.type == LT::Convection),
+        stray("ambient_c", l.ambientC, l.type == LT::Convection),
+        std::string(!l.body.empty() && l.type != LT::HeatGeneration
+                        ? what + " does not take body"
+                        : "")})
+    if (!why.empty())
+      return why;
+  switch (l.type) {
+  case LoadType::Temperature:
+    if (!Given(l.temperatureC))
+      return what + " holds its face at temperature_c, which it needs: a "
+                    "held temperature is not derivable from the part";
+    return temperature(l.temperatureC, "temperature_c");
+  case LoadType::HeatFlux:
+    if (Given(l.powerW) == Given(l.fluxWm2))
+      return what + " takes exactly one of power_w (the total into the face, "
+                    "W) and flux_w_m2 (per area, W/m^2)";
+    if (!std::isfinite(Given(l.powerW) ? l.powerW : l.fluxWm2))
+      return what + ": its heat is a number";
+    return {};
+  case LoadType::Convection:
+    if (!Given(l.filmWm2K))
+      return what +
+             " needs film_w_m2k, the film coefficient: it is not derivable "
+             "from the part. Incropera's Table 1.1 gives free convection in "
+             "gases 2-25 W/(m^2 K), forced convection in gases 25-250, and "
+             "liquids higher (free 50-1000, forced 100-20000)";
+    if (!(std::isfinite(l.filmWm2K) && l.filmWm2K > 0.0))
+      return what + ": film_w_m2k is positive, W/(m^2 K)";
+    if (!Given(l.ambientC))
+      return what + " needs ambient_c, the temperature of the fluid it "
+                    "convects to: it is not derivable from the part";
+    return temperature(l.ambientC, "ambient_c");
+  case LoadType::HeatGeneration:
+    if (!Given(l.powerW))
+      return what + " needs power_w, the heat the body makes in all (W)";
+    if (!std::isfinite(l.powerW))
+      return what + ": power_w is a number";
+    if (l.body.empty() && l.occurrenceId == 0)
+      return what + " names the body it heats (body, its name; occurrence "
+                    "on an assembly)";
+    if (!l.region.IsWhole())
+      return what + " heats its whole body, so it has no region";
+    return {};
+  default:
+    break;
+  }
+  return {};
+}
+
+std::optional<double> DerivedStressFree(const Study& thermal) {
+  std::optional<double> ambient;
+  for (const Load& l : thermal.loads)
+    if (l.type == LoadType::Convection && Given(l.ambientC)) {
+      if (ambient && *ambient != l.ambientC)
+        return std::nullopt;
+      ambient = l.ambientC;
+    }
+  return ambient;
+}
+
+std::string ThermalRefusal(const Study& study) {
+  const bool thermal = study.type == AnalysisType::Thermal;
+  for (const Load& l : study.loads) {
+    const std::string what =
+        "load " + std::to_string(l.id) + " (" + LoadTypeToString(l.type) + ")";
+    if (thermal && !IsThermalLoad(l.type))
+      return what + " is a structural load, and a thermal study takes " +
+             kThermalLoadTypeNames +
+             " loads: a thermal load on a static study expands the part "
+             "(thermal_load)";
+    if (!thermal && IsThermalLoad(l.type))
+      return what + " is a thermal study's, and this is a " +
+             AnalysisTypeToString(study.type) +
+             " study: put it on a study of type thermal";
+    if (IsThermalLoad(l.type))
+      if (std::string why = ThermalLoadRefusal(l); !why.empty())
+        return why;
+  }
+  if (thermal) {
+    if (!study.loadCases.empty())
+      return "a thermal study takes no load cases: its loads all act "
+             "together; make a study for each way the part is heated";
+    if (study.gravity != glm::dvec3(0.0))
+      return "gravity is a static study's load; a thermal study takes "
+             "temperature, heat_flux, convection and heat_generation loads";
+    if (study.nonlinear.On() || study.nonlinear.snapThrough)
+      return "nonlinear is a static study's; a thermal study solves steady "
+             "conduction, which is linear";
+    if (study.shapeFrom.study != 0)
+      return "shape_from is a static study's; a thermal study meshes its "
+             "body";
+    if (study.thermalLoad.On())
+      return "thermal_load is a static study's: a thermal study solves for "
+             "the temperature it would take";
+    for (const Participant& p : study.participants) {
+      if (p.role == ParticipantRole::Contact)
+        return "contact participant " + std::to_string(p.occurrenceId) +
+               ": no heat crosses a contact here (it has no conductance); "
+               "bond it to conduct across the joint, or leave it out";
+      if (p.role == ParticipantRole::Rigid)
+        return "rigid participant " + std::to_string(p.occurrenceId) +
+               ": a rigid part is a support, and is not a heat sink unless "
+               "a load says so -- hold the face it touches at a temperature "
+               "or cool it by convection, and leave the part out";
+    }
+    for (const Load& l : study.loads)
+      if (!l.region.IsWhole() && l.type == LoadType::HeatGeneration)
+        return "heat_generation " + std::to_string(l.id) +
+               " heats its whole body, so it has no region";
+    return {};
+  }
+  const ThermalLoad& tl = study.thermalLoad;
+  if (!tl.On())
+    return {};
+  if (study.type == AnalysisType::Buckling)
+    return "thermal_load is a static study's: thermal buckling (a clamped "
+           "part's critical temperature rise) is not solved yet -- CalculiX "
+           "takes no temperature in a linear buckling step, so its "
+           "cross-check needs a preloaded perturbation step this bridge does "
+           "not write (docs/simulation/README.md#not-done)";
+  if (study.type != AnalysisType::Static)
+    return std::string("thermal_load is a static study's; this one is ") +
+           AnalysisTypeToString(study.type);
+  if (tl.kind == ThermalLoad::Kind::Uniform) {
+    if (!tl.hasStressFree)
+      return "a uniform thermal_load needs stress_free_c, the temperature "
+             "the part is stress-free at: it is not derivable from the part";
+    if (!std::isfinite(tl.uniformC) || tl.uniformC < kAbsoluteZeroC)
+      return "thermal_load uniform_c is a temperature, not below absolute "
+             "zero";
+  }
+  if (tl.kind == ThermalLoad::Kind::FromStudy && tl.fromStudy == 0)
+    return "thermal_load from_study names the thermal study whose "
+           "temperature it takes";
+  if (tl.hasStressFree &&
+      (!std::isfinite(tl.stressFreeC) || tl.stressFreeC < kAbsoluteZeroC))
+    return "thermal_load stress_free_c is a temperature, not below absolute "
+           "zero";
+  if (study.nonlinear.snapThrough)
+    return "a snap-through run seeds its shape with an in-house buckling mode, "
+           "which does not take a thermal load: run it as a large-deformation "
+           "study (snap_through false)";
+  for (const Participant& p : study.participants)
+    if (p.role == ParticipantRole::Contact)
+      return "contact participant " + std::to_string(p.occurrenceId) +
+             ": a thermal load is not solved beside a contact participant -- "
+             "no heat crosses the contact, so the partner's temperature is "
+             "not known";
+  if (study.shapeFrom.study != 0 && tl.kind == ThermalLoad::Kind::FromStudy)
+    return "a static study of a topology result has no faces to take a "
+           "thermal study's loads; use a uniform thermal_load";
+  return {};
+}
+
 const char* CpuSolverName(AnalysisType type) {
   switch (type) {
   case AnalysisType::Modal:
@@ -306,6 +548,8 @@ const char* CpuSolverName(AnalysisType type) {
     return "cpu (Eigen CG-IC)";
   case AnalysisType::Buckling:
     return "cpu (Eigen SimplicialLDLT; Spectra, Cholesky mode)";
+  case AnalysisType::Thermal:
+    return "cpu (Eigen SimplicialLDLT, scalar conduction)";
   case AnalysisType::Static:
     break;
   }
@@ -327,6 +571,10 @@ bool AnalysisTypeFromString(const std::string& s, AnalysisType& out) {
   }
   if (s == "buckling") {
     out = AnalysisType::Buckling;
+    return true;
+  }
+  if (s == "thermal") {
+    out = AnalysisType::Thermal;
     return true;
   }
   return false;
@@ -869,6 +1117,19 @@ bool PlanStudyMesh(const Document& doc, Study& study, MeshPlan& out,
   };
 
   for (size_t i = 0; i < study.loads.size(); ++i) {
+    // A heat source names its body.
+    if (study.loads[i].type == LoadType::HeatGeneration) {
+      const auto& bodies = doc.GetBodies();
+      int found = -1;
+      for (size_t b = 0; b < bodies.size(); ++b)
+        if (!bodies[b].reference && bodies[b].name == study.loads[i].body)
+          found = static_cast<int>(b);
+      if (found < 0)
+        return fail("heat_generation " + std::to_string(study.loads[i].id) +
+                    ": no body is named '" + study.loads[i].body + "'");
+      touch(found);
+      continue;
+    }
     ResolvedFace rf;
     if (!ResolveFace(doc, study.loads[i].face, "load " + std::to_string(i + 1),
                      rf, &err))
@@ -1136,9 +1397,12 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     return fail(err);
   if (const std::string why = ContactRefusal(study); !why.empty())
     return fail(why);
+  if (const std::string why = ThermalRefusal(study); !why.empty())
+    return fail(why);
   out.type = study.type;
   out.solver = EffectiveSolver(study);
   out.nonlinear = study.nonlinear;
+  out.thermalLoad = study.thermalLoad;
   out.numModes = study.numModes;
   out.gravity = study.gravity;
   for (const LoadCase& c : study.loadCases)
@@ -1154,10 +1418,36 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   };
   std::map<int, BodyPlan> perBody;
 
+  // A heat source names its body, not a face.
+  const auto bodyNamed = [&](const Load& l, int& index) {
+    std::string names;
+    index = -1;
+    for (size_t b = 0; b < bodies.size(); ++b) {
+      if (bodies[b].reference)
+        continue;
+      names += (names.empty() ? "" : ", ") + ("'" + bodies[b].name + "'");
+      if (bodies[b].name == l.body) {
+        if (index >= 0) {
+          err = "heat_generation " + std::to_string(l.id) +
+                ": two bodies are named '" + l.body +
+                "'; rename one so the source names one body";
+          return false;
+        }
+        index = static_cast<int>(b);
+      }
+    }
+    if (index < 0)
+      err = "heat_generation " + std::to_string(l.id) + ": no body is named '" +
+            l.body + "' (the part has: " + names + ")";
+    return index >= 0;
+  };
   for (size_t i = 0; i < study.loads.size(); ++i) {
     ResolvedFace rf;
-    if (!ResolveFace(doc, study.loads[i].face, "load " + std::to_string(i + 1),
-                     rf, &err))
+    if (study.loads[i].type == LoadType::HeatGeneration) {
+      if (!bodyNamed(study.loads[i], rf.bodyIndex))
+        return fail(err);
+    } else if (!ResolveFace(doc, study.loads[i].face,
+                            "load " + std::to_string(i + 1), rf, &err))
       return fail(err);
     BodyPlan& bp = perBody[rf.bodyIndex];
     bp.settings.maxSize = study.meshSize;
@@ -1165,6 +1455,71 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   }
   if (perBody.empty())
     return fail("study has no loads to solve");
+
+  // A static study under a from_study thermal load: the thermal study's
+  // loads, on the same bodies, re-solved on this study's mesh.
+  const bool thermalStudy = study.type == AnalysisType::Thermal;
+  std::map<int, std::vector<std::pair<int, Load>>> heatOf;
+  if (study.thermalLoad.kind == ThermalLoad::Kind::FromStudy) {
+    const Study* src = doc.FindStudy(study.thermalLoad.fromStudy);
+    if (!src || src->type != AnalysisType::Thermal) {
+      std::string names;
+      for (const Study& st : doc.GetStudies())
+        if (st.type == AnalysisType::Thermal)
+          names += (names.empty() ? "" : ", ") + std::to_string(st.id);
+      return fail(
+          "thermal_load from_study " +
+          std::to_string(study.thermalLoad.fromStudy) +
+          (src ? " is a " + std::string(AnalysisTypeToString(src->type)) +
+                     " study, not a thermal one"
+               : " names no study") +
+          " (thermal studies: " + (names.empty() ? "none" : names) + ")");
+    }
+    Study heat = *src;
+    if (!EvaluateStudyExprs(heat, doc.Symbols(), &err))
+      return fail("thermal_load's study: " + err);
+    if (const std::string why = ThermalRefusal(heat); !why.empty())
+      return fail("thermal_load's study: " + why);
+    if (!study.thermalLoad.hasStressFree) {
+      const std::optional<double> ambient = DerivedStressFree(heat);
+      if (!ambient)
+        return fail("thermal_load needs stress_free_c: the thermal study's "
+                    "convections do not share one ambient for the part to "
+                    "have been at before it was heated");
+      out.thermalLoad.stressFreeC = *ambient;
+      out.thermalLoad.hasStressFree = true;
+    }
+    std::set<int> theirs, ours;
+    for (const auto& [b, plan] : perBody)
+      ours.insert(b);
+    for (size_t i = 0; i < heat.loads.size(); ++i) {
+      ResolvedFace rf;
+      if (heat.loads[i].type == LoadType::HeatGeneration) {
+        if (!bodyNamed(heat.loads[i], rf.bodyIndex))
+          return fail("thermal_load's study: " + err);
+      } else if (!ResolveFace(doc, heat.loads[i].face,
+                              "the thermal study's load " +
+                                  std::to_string(i + 1),
+                              rf, &err))
+        return fail(err);
+      theirs.insert(rf.bodyIndex);
+      heatOf[rf.bodyIndex].push_back({rf.faceIndex, heat.loads[i]});
+    }
+    if (theirs != ours) {
+      const auto list = [&](const std::set<int>& set) {
+        std::string s;
+        for (int b : set)
+          s += (s.empty() ? "'" : ", '") + bodies[b].name + "'";
+        return s.empty() ? std::string("none") : s;
+      };
+      return fail("thermal_load from_study " +
+                  std::to_string(study.thermalLoad.fromStudy) +
+                  " heats the bodies " + list(theirs) +
+                  ", and this study loads " + list(ours) +
+                  ": a thermal load takes the temperature of the bodies it "
+                  "solves, so both studies must load the same ones");
+    }
+  }
 
   for (size_t i = 0; i < study.refinements.size(); ++i) {
     ResolvedFace rf;
@@ -1181,17 +1536,32 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   for (auto& [bodyIndex, plan] : perBody) {
     const Body& body = bodies[bodyIndex];
 
-    // Material must have stiffness data (0 = unknown, like density).
+    // Material must have stiffness data (0 = unknown, like density); a
+    // thermal study's, a conductivity instead.
     const auto matType =
         CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
     const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
-    if (mp.youngGPa <= 0.0f)
+    if (mp.youngGPa <= 0.0f && !thermalStudy)
       return fail("body '" + body.name + "': material '" +
                   (body.material.empty() ? "default" : body.material) +
                   "' has no stiffness data");
 
-    // Each loaded body needs at least one support.
-    bool hasFixed = false;
+    // Each loaded body needs at least one support; a thermal body somewhere
+    // for its heat to go (a held temperature or a convection), without
+    // which its temperature is not determined.
+    if (thermalStudy) {
+      bool sink = false;
+      for (const auto& [faceIndex, loadIdx] : plan.loads)
+        sink = sink || study.loads[loadIdx].type == LoadType::Temperature ||
+               study.loads[loadIdx].type == LoadType::Convection;
+      if (!sink)
+        return fail("body '" + body.name +
+                    "': its heat has nowhere to go -- no face of it is held "
+                    "at a temperature or cooled by convection, so its "
+                    "temperature is not determined; add a temperature or a "
+                    "convection load");
+    }
+    bool hasFixed = thermalStudy;
     for (const auto& [faceIndex, loadIdx] : plan.loads) {
       const Load& l = study.loads[loadIdx];
       if (IsSupport(l.type))
@@ -1225,9 +1595,19 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     StudyBodyPlan bp;
     bp.bodyIndex = bodyIndex;
     bp.bodyName = body.name;
-    bp.mat =
-        Material{mp.youngGPa * 1000.0, mp.poisson,       mp.density * 1e-12,
-                 mp.yieldMPa,          mp.interlayerMPa, mp.hardening};
+    bp.mat = MaterialFromLibrary(mp);
+    if (thermalStudy || study.thermalLoad.kind == ThermalLoad::Kind::FromStudy)
+      if (const std::string why = ThermalMaterialRefusal(
+              bp.mat, "body '" + body.name + "': material " + mp.name, true,
+              false, CADMaterials::MaterialLibrary::ConductivitySlugList());
+          !why.empty())
+        return fail(why);
+    if (study.thermalLoad.On())
+      if (const std::string why = ThermalMaterialRefusal(
+              bp.mat, "body '" + body.name + "': material " + mp.name, false,
+              true, CADMaterials::MaterialLibrary::ExpansionSlugList());
+          !why.empty())
+        return fail(why);
     // A plastic study runs the material along its own hardening curve, or
     // not at all (docs/simulation/README.md#plasticity).
     if (study.nonlinear.plasticity)
@@ -1253,8 +1633,14 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     // meshes, and this shape may be meshed on a worker while the document's
     // own is being drawn.
     bp.settings = plan.settings;
+    if (auto it = heatOf.find(bodyIndex); it != heatOf.end())
+      bp.heatLoads = it->second;
     for (const auto& [faceIndex, loadIdx] : plan.loads) {
       Load l = study.loads[loadIdx];
+      if (IsThermalLoad(l.type)) {
+        bp.loads.push_back({faceIndex, std::move(l)});
+        continue;
+      }
       if (l.type == LoadType::Contact) {
         // A part rests on the ground: the plane its flat face lies on
         // (docs/simulation/README.md#contact).
@@ -1300,6 +1686,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
   out.type = plan.type;
   out.solver = plan.solver;
   out.nonlinear = plan.nonlinear;
+  out.thermalLoad = plan.thermalLoad;
   out.numModes = plan.numModes;
   out.gravity = plan.gravity;
   out.caseNames = plan.caseNames;
@@ -1325,6 +1712,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     // answered by geometry — a tet's centroid is inside exactly one — not
     // by trusting the mesher's numbering.
     std::vector<Material> materials;
+    std::vector<int> memberOfDomain; // a bonded group's: domain -> member
     if (!bp.members.empty()) {
       int domains = 0;
       for (int d : mesh->tetDomain)
@@ -1339,10 +1727,13 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
         const glm::dvec3 c = 0.25 * (mesh->nodes[tet[0]] + mesh->nodes[tet[1]] +
                                      mesh->nodes[tet[2]] + mesh->nodes[tet[3]]);
         bool found = false;
-        for (const StudyBodyPlan::Member& m : bp.members) {
+        memberOfDomain.resize(materials.size(), -1);
+        for (size_t mi = 0; mi < bp.members.size(); ++mi) {
+          const StudyBodyPlan::Member& m = bp.members[mi];
           BRepClass3d_SolidClassifier cls(m.solid, gp_Pnt(c.x, c.y, c.z), 1e-6);
           if (cls.State() == TopAbs_IN) {
             materials[d] = m.mat;
+            memberOfDomain[d] = static_cast<int>(mi);
             found = true;
             break;
           }
@@ -1426,7 +1817,97 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
         c += mesh->nodes[tri.nodes[k]];
       return region.Contains(c / 3.0);
     };
+    // Thermal loads (docs/simulation/README.md#thermal), into the solver's
+    // units here, once: W -> mW, per m^2 -> per mm^2.
+    HeatLoads heat;
+    double baseC = std::numeric_limits<double>::infinity();
+    const auto addHeat = [&](int faceIndex, const Load& load) -> bool {
+      std::vector<int> tris;
+      if (load.type != LoadType::HeatGeneration) {
+        for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
+          if (mesh->boundary[t].faceIndex == faceIndex &&
+              inRegion(mesh->boundary[t], load.region))
+            tris.push_back(t);
+        if (tris.empty()) {
+          err = "body '" + bp.bodyName + "': " + LoadTypeToString(load.type) +
+                " " + std::to_string(load.id) +
+                (load.region.IsWhole()
+                     ? "'s face meshed to no facets"
+                     : "'s region holds none of its face's mesh facets");
+          return false;
+        }
+      }
+      // A face an imprint split arrives once per piece: one load.
+      const auto merge = [&](auto& list) {
+        for (auto& have : list)
+          if (load.id != 0 && have.id == load.id) {
+            have.tris.insert(have.tris.end(), tris.begin(), tris.end());
+            return true;
+          }
+        return false;
+      };
+      switch (load.type) {
+      case LoadType::Temperature:
+        baseC = std::min(baseC, load.temperatureC);
+        if (!merge(heat.held))
+          heat.held.push_back({load.id, tris, load.temperatureC});
+        break;
+      case LoadType::HeatFlux: {
+        if (merge(heat.fluxes))
+          break;
+        HeatLoads::Flux f;
+        f.id = load.id;
+        f.tris = tris;
+        f.total = !std::isnan(load.powerW);
+        f.totalMW = f.total ? load.powerW * kMilliwattsPerWatt : 0.0;
+        f.fluxMWmm2 = f.total ? 0.0 : load.fluxWm2 * kWm2ToMWmm2;
+        heat.fluxes.push_back(std::move(f));
+        break;
+      }
+      case LoadType::Convection:
+        baseC = std::min(baseC, load.ambientC);
+        if (!merge(heat.films))
+          heat.films.push_back(
+              {load.id, tris, load.filmWm2K * kWm2ToMWmm2, load.ambientC});
+        break;
+      case LoadType::HeatGeneration: {
+        HeatLoads::Source src;
+        src.id = load.id;
+        src.powerMW = load.powerW * kMilliwattsPerWatt;
+        if (!memberOfDomain.empty()) {
+          // A bonded group: the member the source names.
+          for (size_t t = 0; t < mesh->tets.size(); ++t) {
+            const int d = mesh->tetDomain.empty() ? 0 : mesh->tetDomain[t];
+            const int mi = d < static_cast<int>(memberOfDomain.size())
+                               ? memberOfDomain[d]
+                               : -1;
+            if (mi >= 0 && bp.members[mi].name == load.body)
+              src.tets.push_back(static_cast<int>(t));
+          }
+          if (src.tets.empty()) {
+            err = "body '" + bp.bodyName + "': heat_generation " +
+                  std::to_string(load.id) + " names '" + load.body +
+                  "', which is none of its bonded members";
+            return false;
+          }
+        }
+        heat.sources.push_back(std::move(src));
+        break;
+      }
+      default:
+        break;
+      }
+      return true;
+    };
+    for (const auto& [faceIndex, load] : bp.heatLoads)
+      if (!addHeat(faceIndex, load))
+        return fail(err);
     for (const auto& [faceIndex, load] : bp.loads) {
+      if (IsThermalLoad(load.type)) {
+        if (!addHeat(faceIndex, load))
+          return fail(err);
+        continue;
+      }
       if (load.type == LoadType::Fixed) {
         size_t before = fixedSet.size();
         SupportFacets sf{load.id, load.type, {}};
@@ -1517,7 +1998,8 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
         into.push_back(std::move(fl));
       }
     }
-    if (fixedSet.empty() && pins.empty() && bp.contacts.empty())
+    if (fixedSet.empty() && pins.empty() && bp.contacts.empty() &&
+        plan.type != AnalysisType::Thermal)
       return fail("body '" + bp.bodyName + "': fixed face meshed to no nodes");
 
     // Each contact: the body's facets against its partner's, a rigid
@@ -1635,6 +2117,9 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     jb.fixedNodes.assign(fixedSet.begin(), fixedSet.end());
     jb.faceLoads = std::move(faceLoads);
     jb.caseLoads = std::move(caseLoads);
+    jb.heat = std::move(heat);
+    jb.baseC = std::isfinite(baseC) ? baseC : 0.0;
+    jb.thermalLoad = plan.thermalLoad;
     if (plan.type == AnalysisType::Buckling)
       jb.curvedFaces = CurvedFacesOf(bp.shape);
     jb.mesh = std::move(*mesh);
@@ -2354,6 +2839,91 @@ bool SolveNonlinearBody(StudyJobBody& jb, const std::vector<Material>& mats,
   return true;
 }
 
+// The heat of one body (docs/simulation/README.md#thermal): solved
+// in-house, or on CalculiX and held to our K_T.
+bool SolveBodyHeat(const StudyJobBody& jb, const std::vector<Material>& mats,
+                   bool onCalculix, const SolveOptions& options,
+                   HeatSolution& out, std::string* error) {
+  SolveOptions own = options;
+  own.calculix = nullptr;
+  own.given = nullptr;
+  own.thermal = nullptr;
+  if (!onCalculix)
+    return SolveHeat(jb.mesh, mats, jb.heat, own, out, error);
+  if (!options.calculix) {
+    if (error)
+      *error = "this study solves on CalculiX, and this run was given no ccx "
+               "to run it with";
+    return false;
+  }
+  std::vector<double> T;
+  if (!HeatOnCalculix(jb.mesh, mats, jb.heat, jb.bodyName, options, T, error))
+    return false;
+  if (options.solving)
+    options.solving("calculix: checking the answer");
+  GivenTemperatures given;
+  given.temperature = &T;
+  given.precision = kCalculixDatPrecision;
+  given.name = options.calculix->ccx.Name();
+  own.solving = nullptr;
+  return SolveHeat(jb.mesh, mats, jb.heat, own, out, error, &given);
+}
+
+// What a body's temperature field says: its range and flux peak, and
+// against each material's service temperature, the margin of the most
+// pressed (the hottest node of each domain against its own limit).
+StudyBodyResult::Thermal ReadThermal(const StudyJobBody& jb,
+                                     const std::vector<Material>& mats,
+                                     const std::vector<double>& T,
+                                     const std::vector<glm::dvec3>* flux) {
+  StudyBodyResult::Thermal th;
+  const FemMesh& mesh = jb.mesh;
+  th.baseC = jb.baseC;
+  bool first = true;
+  for (size_t n = 0; n < T.size() && n < mesh.nodes.size(); ++n) {
+    if (first || T[n] > th.maxC) {
+      th.maxC = T[n];
+      th.maxAt = mesh.nodes[n];
+    }
+    if (first || T[n] < th.minC) {
+      th.minC = T[n];
+      th.minAt = mesh.nodes[n];
+    }
+    first = false;
+    if (flux && n < flux->size()) {
+      const double f = glm::length((*flux)[n]);
+      if (f > th.maxFluxWm2) {
+        th.maxFluxWm2 = f;
+        th.maxFluxAt = mesh.nodes[n];
+      }
+    }
+  }
+  // The hottest node of each domain.
+  std::vector<double> hottest(mats.size(),
+                              -std::numeric_limits<double>::infinity());
+  for (size_t t = 0; t < mesh.tets.size(); ++t) {
+    const size_t d =
+        std::min(mesh.tetDomain.empty() ? size_t{0} : (size_t)mesh.tetDomain[t],
+                 mats.size() - 1);
+    for (int v : mesh.tets[t])
+      if (static_cast<size_t>(v) < T.size())
+        hottest[d] = std::max(hottest[d], T[v]);
+  }
+  for (size_t d = 0; d < mats.size(); ++d) {
+    th.bulkConductivity = th.bulkConductivity || mats[d].bulkConductivity;
+    if (std::isnan(mats[d].serviceMaxC) || !std::isfinite(hottest[d]))
+      continue;
+    const double margin = mats[d].serviceMaxC - hottest[d];
+    if (!th.hasService || margin < th.marginK) {
+      th.hasService = true;
+      th.marginK = margin;
+      th.serviceMaxC = mats[d].serviceMaxC;
+      th.serviceBasis = mats[d].serviceBasis;
+    }
+  }
+  return th;
+}
+
 } // namespace
 
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
@@ -2397,7 +2967,27 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
     sbr.bodyIndex = jb.bodyIndex;
     sbr.bodyName = jb.bodyName;
 
-    if (in.type == AnalysisType::Modal) {
+    if (in.type == AnalysisType::Thermal) {
+      const std::vector<Material> mats =
+          jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
+      HeatSolution hs;
+      if (!SolveBodyHeat(jb, mats, in.solver == Solver::Calculix, options, hs,
+                         &err))
+        return fail("body '" + jb.bodyName + "': " + err);
+      sbr.thermal = ReadThermal(jb, mats, hs.temperature, &hs.heatFlux);
+      sbr.thermal.solved = true;
+      sbr.thermal.flows = hs.flows;
+      sbr.thermal.inW = hs.inW;
+      sbr.thermal.outW = hs.outW;
+      sbr.thermal.imbalanceW = hs.imbalanceW;
+      sbr.results.temperature = std::move(hs.temperature);
+      sbr.results.heatFlux = std::move(hs.heatFlux);
+      if (rt.solver.empty() || rt.solver == kDirectSolverName)
+        rt.solver = hs.solver;
+      rt.residual = std::max(rt.residual, hs.residual);
+      rt.residualFloor = std::max(rt.residualFloor, hs.residualFloor);
+      rt.energyResidual = std::max(rt.energyResidual, hs.energyResidual);
+    } else if (in.type == AnalysisType::Modal) {
       auto modes =
           jb.materials.empty()
               ? SolveModal(jb.mesh, jb.mat, jb.fixedNodes, in.numModes, &err)
@@ -2415,6 +3005,31 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
               : jb.caseLoads;
       const std::vector<Material> mats =
           jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
+      // A thermal load (docs/simulation/README.md
+      // #the-thermal-load-on-a-static-study): the temperature this mesh
+      // takes, every case carrying it.
+      SolveOptions opts = options;
+      std::shared_ptr<NodalTemperature> field;
+      if (jb.thermalLoad.On()) {
+        field = std::make_shared<NodalTemperature>();
+        field->stressFreeC = jb.thermalLoad.stressFreeC;
+        if (jb.thermalLoad.kind == ThermalLoad::Kind::Uniform) {
+          field->temperature.assign(jb.mesh.nodes.size(),
+                                    jb.thermalLoad.uniformC);
+        } else {
+          HeatSolution hs;
+          if (opts.solving)
+            opts.solving("the thermal load's heat");
+          if (!SolveBodyHeat(jb, mats, in.solver == Solver::Calculix, opts, hs,
+                             &err))
+            return fail("body '" + jb.bodyName + "': the thermal load: " + err);
+          field->temperature = std::move(hs.temperature);
+          rt.residual = std::max(rt.residual, hs.residual);
+          rt.residualFloor = std::max(rt.residualFloor, hs.residualFloor);
+          rt.energyResidual = std::max(rt.energyResidual, hs.energyResidual);
+        }
+        opts.thermal = field;
+      }
       const bool buckling = in.type == AnalysisType::Buckling;
       if (buckling) {
         // The direct factor of K is what a buckling solve cannot do
@@ -2423,9 +3038,8 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
         const size_t n = jb.mesh.nodes.size();
         const size_t dofs = 3 * (n - std::min(n, jb.fixedNodes.size()));
         const uint64_t estimate = BucklingMemoryEstimate(dofs);
-        const uint64_t available = options.availableBytes
-                                       ? options.availableBytes
-                                       : AvailableMemoryBytes();
+        const uint64_t available =
+            opts.availableBytes ? opts.availableBytes : AvailableMemoryBytes();
         if (available > 0 && estimate > available) {
           char buf[320];
           std::snprintf(
@@ -2445,13 +3059,13 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       std::optional<std::vector<FemResults>> all;
       if (in.nonlinear.On() || !jb.contacts.empty()) {
         FemResults res;
-        if (SolveNonlinearBody(jb, mats, jb.faceLoads, g, in.nonlinear, options,
+        if (SolveNonlinearBody(jb, mats, jb.faceLoads, g, in.nonlinear, opts,
                                res, sbr.nonlinear, sbr.contacts, &err))
           all = std::vector<FemResults>{std::move(res)};
-        report.solver = options.calculix ? options.calculix->ccx.Name() : "";
+        report.solver = opts.calculix ? opts.calculix->ccx.Name() : "";
       } else if (in.solver == Solver::Calculix) {
         std::vector<FemResults> res;
-        if (SolveBodyOnCalculix(jb, mats, rhs, g, options, res, report, &err,
+        if (SolveBodyOnCalculix(jb, mats, rhs, g, opts, res, report, &err,
                                 buckling ? &settled : nullptr))
           all = std::move(res);
         rt.residual = std::max(rt.residual, report.worstResidual);
@@ -2463,11 +3077,11 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
         Supports sup;
         sup.fixedNodes = jb.fixedNodes;
         sup.reactions = true;
-        all = SolveCases(jb.mesh, mats, sup, rhs, &err, g, options, &report);
+        all = SolveCases(jb.mesh, mats, sup, rhs, &err, g, opts, &report);
         settled.assign(rhs.size(), sup);
       } else {
         report.solver = kDirectSolverName;
-        all = SolveWithPins(jb, mats, rhs, g, options, report, &err,
+        all = SolveWithPins(jb, mats, rhs, g, opts, report, &err,
                             buckling ? &settled : nullptr);
       }
       if (!all)
@@ -2478,6 +3092,14 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
         o.support = e.id;
         o.type = e.type;
         sbr.edgeOwners.push_back(o);
+      }
+      if (field) {
+        for (FemResults& c : *all)
+          c.temperature = field->temperature;
+        sbr.thermal = ReadThermal(jb, mats, field->temperature, nullptr);
+        sbr.thermal.load = true;
+        sbr.thermal.stressFreeC = field->stressFreeC;
+        sbr.thermal.fromStudy = jb.thermalLoad.fromStudy;
       }
       for (FemResults& c : *all) {
         FinishSupports(jb, sbr.supportEdgeZone, sbr.edgeOwners, c);
@@ -2500,17 +3122,16 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
         if (settled.empty())
           return fail("body '" + jb.bodyName +
                       "': the base state left no supports to buckle about");
-        if (options.cancelled && options.cancelled())
+        if (opts.cancelled && opts.cancelled())
           return fail("cancelled");
-        if (options.solving)
-          options.solving(in.solver == Solver::Calculix
-                              ? "calculix: buckling"
-                              : "buckling eigensolve");
+        if (opts.solving)
+          opts.solving(in.solver == Solver::Calculix ? "calculix: buckling"
+                                                     : "buckling eigensolve");
         std::optional<std::vector<FemResults::ModeShape>> modes;
         if (in.solver == Solver::Calculix) {
           std::vector<FemResults::ModeShape> theirs;
           if (BucklingOnCalculix(jb, mats, settled.front(), jb.faceLoads, g,
-                                 in.numModes, options, theirs, &err))
+                                 in.numModes, opts, theirs, &err))
             modes = std::move(theirs);
         } else {
           modes = SolveBuckling(jb.mesh, mats, settled.front(),
@@ -2642,6 +3263,20 @@ std::vector<GoverningPeak> GoverningPeaks(const StudyRuntime& rt,
   std::vector<GoverningPeak> out;
   for (size_t b = 0; b < rt.bodies.size(); ++b) {
     const StudyBodyResult& body = rt.bodies[b];
+    if (body.thermal.solved) {
+      // A thermal body's peak temperature RISE over its lowest held or
+      // ambient temperature: a change in degrees C is an offset's artefact.
+      std::vector<double> rise = body.results.temperature;
+      for (double& t : rise)
+        t -= body.thermal.baseC;
+      GoverningPeak p = PeakOfField(rise, {});
+      if (p.node >= 0 && p.mpa > 0.0) {
+        p.body = static_cast<int>(b);
+        p.quantity = "temperature_rise";
+        out.push_back(p);
+      }
+      continue;
+    }
     const bool printed =
         b < plan.bodies.size() && plan.bodies[b].interlayerMPa > 0.0;
     const char* layers =
@@ -2787,7 +3422,8 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
     return true;
   };
   if (planIn.type != AnalysisType::Static &&
-      planIn.type != AnalysisType::Buckling)
+      planIn.type != AnalysisType::Buckling &&
+      planIn.type != AnalysisType::Thermal)
     return notChecked("a " + std::string(AnalysisTypeToString(planIn.type)) +
                       " study has no peak stress to settle");
   if (converge.mode == ConvergeMode::Never)
@@ -2809,7 +3445,10 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
                         "result's own tets, which cannot be refined");
   std::vector<GoverningPeak> peaks = GoverningPeaks(rt, planIn, converge);
   if (peaks.empty())
-    return notChecked("no body carries a stress to settle");
+    return notChecked(planIn.type == AnalysisType::Thermal
+                          ? "no body rises above its lowest held or ambient "
+                            "temperature"
+                          : "no body carries a stress to settle");
   conv.checked = true;
   conv.steps.push_back({{}, NodeCount(rt), first, Record(rt, peaks)});
   StudyPlan plan = planIn;
@@ -3307,6 +3946,8 @@ void RoundFields(FemResults& r) {
   RoundAll(r.stress);
   RoundAll(r.plasticStrain);
   RoundAll(r.residualDisplacement);
+  RoundAll(r.temperature);
+  RoundAll(r.heatFlux);
   for (FemResults::ModeShape& m : r.modes)
     RoundAll(m.displacement);
 }
@@ -3322,6 +3963,10 @@ bool PerNode(const FemResults& r, size_t n) {
   if (!r.plasticStrain.empty() && r.plasticStrain.size() != n)
     return false;
   if (!r.residualDisplacement.empty() && r.residualDisplacement.size() != n)
+    return false;
+  if (!r.temperature.empty() && r.temperature.size() != n)
+    return false;
+  if (!r.heatFlux.empty() && r.heatFlux.size() != n)
     return false;
   for (const FemResults::ModeShape& m : r.modes)
     if (m.displacement.size() != n)
@@ -3347,6 +3992,8 @@ void Renumber(FemResults& r, const std::vector<int>& kept,
   Gather(r.stress, kept);
   Gather(r.plasticStrain, kept);
   Gather(r.residualDisplacement, kept);
+  Gather(r.temperature, kept);
+  Gather(r.heatFlux, kept);
   for (FemResults::ModeShape& m : r.modes)
     Gather(m.displacement, kept);
   if (r.maxVmNode >= 0)

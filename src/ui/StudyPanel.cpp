@@ -40,8 +40,12 @@
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
+#include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -86,6 +90,14 @@ const char* LoadLabel(fem::LoadType t) {
     return "Pin";
   case fem::LoadType::Contact:
     return "Contact";
+  case fem::LoadType::Temperature:
+    return "Temperature";
+  case fem::LoadType::HeatFlux:
+    return "Heat flux";
+  case fem::LoadType::Convection:
+    return "Convection";
+  case fem::LoadType::HeatGeneration:
+    return "Heat source";
   }
   return "?";
 }
@@ -106,6 +118,14 @@ const char* LoadGlyph(fem::LoadType t) {
     return ICON_FA_THUMBTACK;
   case fem::LoadType::Contact:
     return ICON_FA_ARROWS_DOWN_TO_LINE;
+  case fem::LoadType::Temperature:
+    return ICON_FA_TEMPERATURE_HALF;
+  case fem::LoadType::HeatFlux:
+    return ICON_FA_ARROW_RIGHT_TO_BRACKET;
+  case fem::LoadType::Convection:
+    return ICON_FA_WIND;
+  case fem::LoadType::HeatGeneration:
+    return ICON_FA_FIRE;
   }
   return ICON_FA_BOLT;
 }
@@ -307,6 +327,8 @@ const char* StudyGlyph(fem::AnalysisType type) {
     return ICON_FA_CIRCLE_NODES;
   case fem::AnalysisType::Buckling:
     return ICON_FA_COMPRESS;
+  case fem::AnalysisType::Thermal:
+    return ICON_FA_TEMPERATURE_HALF;
   }
   return ICON_FA_WEIGHT_HANGING;
 }
@@ -507,6 +529,71 @@ void DrawLoadCases(AppState& state, const fem::Study& s) {
   }
 }
 
+// A value with no default (docs/ui/tool-sessions.md#defaults-and-refusals):
+// empty, showing what it wants, until a number is typed; NaN while empty.
+void OptionalNumber(const char* label, const char* id, const char* hint,
+                    double& v) {
+  static std::map<std::string, std::string> text;
+  std::string& t = text[id];
+  if (std::isnan(v))
+    t.clear();
+  else if (t.empty())
+    t = [&] {
+      char b[48];
+      std::snprintf(b, sizeof(b), "%.6g", v);
+      return std::string(b);
+    }();
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%s", t.c_str());
+  LeftLabel(label);
+  if (ImGui::InputTextWithHint(id, hint, buf, sizeof(buf))) {
+    t = buf;
+    char* end = nullptr;
+    const double d = std::strtod(buf, &end);
+    v = (end != buf && *end == '\0' && std::isfinite(d))
+            ? d
+            : std::numeric_limits<double>::quiet_NaN();
+  }
+}
+
+// A thermal study's tools (docs/simulation/README.md#thermal): each with its
+// values, empty until typed.
+void DrawThermalTools(AppState& state) {
+  SimulationState& sim = state.simulation;
+  using T = SimulationState::Tool;
+  if (sim.tool == T::Temperature) {
+    OptionalNumber("Temperature (\xC2\xB0"
+                   "C)",
+                   "###sim_temperature_c", "type it", sim.pendingTemperatureC);
+    ImGui::TextDisabled("Click a face: it is held at this temperature");
+  }
+  if (sim.tool == T::HeatFlux) {
+    ImGui::Checkbox("Per area (W/m\xC2\xB2)###sim_flux_per_area",
+                    &sim.pendingFluxPerArea);
+    if (sim.pendingFluxPerArea)
+      OptionalNumber("Flux (W/m\xC2\xB2)", "###sim_flux_w_m2", "type it",
+                     sim.pendingFluxWm2);
+    else
+      OptionalNumber("Power (W)", "###sim_flux_power_w", "type it",
+                     sim.pendingHeatW);
+    ImGui::TextDisabled("Click a face: heat goes into it (negative: out)");
+  }
+  if (sim.tool == T::Convection) {
+    OptionalNumber("Film (W/m\xC2\xB2K)", "###sim_film_w_m2k",
+                   "air 2-25 free, 25-250 forced", sim.pendingFilmWm2K);
+    OptionalNumber("Ambient (\xC2\xB0"
+                   "C)",
+                   "###sim_ambient_c", "type it", sim.pendingAmbientC);
+    ImGui::TextDisabled("Click a face: it is cooled by a fluid at the "
+                        "ambient");
+  }
+  if (sim.tool == T::HeatSource) {
+    OptionalNumber("Power (W)", "###sim_source_power_w", "type it",
+                   sim.pendingHeatW);
+    ImGui::TextDisabled("Click a face of the body that makes the heat");
+  }
+}
+
 void DrawLoads(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
 
@@ -524,13 +611,26 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     if (armed)
       ImGui::PopStyleColor();
   };
-  arm(ICON_FA_LOCK " Fixed###sim_bc_fixed", SimulationState::Tool::Fixed);
-  arm(ICON_FA_BOLT " Force###sim_bc_force", SimulationState::Tool::Force);
-  arm(ICON_FA_DOWN_LONG " Pressure###sim_bc_pressure",
-      SimulationState::Tool::Pressure);
-  arm(ICON_FA_ROTATE " Torque###sim_bc_torque", SimulationState::Tool::Torque);
-  arm(ICON_FA_LOCATION_CROSSHAIRS " Remote###sim_bc_remote",
-      SimulationState::Tool::Remote);
+  const bool thermal = s.type == fem::AnalysisType::Thermal;
+  if (thermal) {
+    arm(ICON_FA_TEMPERATURE_HALF " Temperature###sim_bc_temperature",
+        SimulationState::Tool::Temperature);
+    arm(ICON_FA_ARROW_RIGHT_TO_BRACKET " Heat flux###sim_bc_heat_flux",
+        SimulationState::Tool::HeatFlux);
+    arm(ICON_FA_WIND " Convection###sim_bc_convection",
+        SimulationState::Tool::Convection);
+    arm(ICON_FA_FIRE " Heat source###sim_bc_heat_source",
+        SimulationState::Tool::HeatSource);
+  } else {
+    arm(ICON_FA_LOCK " Fixed###sim_bc_fixed", SimulationState::Tool::Fixed);
+    arm(ICON_FA_BOLT " Force###sim_bc_force", SimulationState::Tool::Force);
+    arm(ICON_FA_DOWN_LONG " Pressure###sim_bc_pressure",
+        SimulationState::Tool::Pressure);
+    arm(ICON_FA_ROTATE " Torque###sim_bc_torque",
+        SimulationState::Tool::Torque);
+    arm(ICON_FA_LOCATION_CROSSHAIRS " Remote###sim_bc_remote",
+        SimulationState::Tool::Remote);
+  }
   // A pin is a static part study's support (docs/simulation/README.md
   // #pin-supports): offered only where it can be placed.
   if (s.type == fem::AnalysisType::Static && !StudyHostOf(state).IsAssembly())
@@ -541,6 +641,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     arm(ICON_FA_ARROWS_DOWN_TO_LINE " Contact###sim_bc_contact",
         SimulationState::Tool::Contact);
   ImGui::Checkbox("Labels in viewport###sim_show_labels", &sim.showLabels);
+  DrawThermalTools(state);
   if (sim.tool == SimulationState::Tool::Contact) {
     LeftLabel("Friction (\xCE\xBC)");
     ExprInputDouble(state, "###sim_contact_friction",
@@ -678,12 +779,16 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       where = "contact with " + host.OccurrenceName(l.contactWith);
     else if (l.occurrenceId != 0)
       where = host.OccurrenceName(l.occurrenceId) + " " + l.face.name;
+    else if (l.type == fem::LoadType::HeatGeneration)
+      where = l.body; // a heat source names its body, not a face
     else
       where = l.face.name;
     ListRowSpec row;
     row.glyph = LoadGlyph(l.type);
     row.label = std::string(LoadLabel(l.type)) + "  " + where + "###load_row_" +
                 std::to_string(l.id);
+    if (fem::IsThermalLoad(l.type))
+      row.tail = SimulationLoadLabel(l);
     if (l.type == fem::LoadType::Pin)
       row.tail = l.fixRotation ? "held from turning" : "free to turn";
     if (l.type == fem::LoadType::Contact) {
@@ -693,7 +798,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
                     l.friction);
       row.tail = buf;
     }
-    if (!fem::IsSupport(l.type)) {
+    if (!fem::IsSupport(l.type) && !fem::IsThermalLoad(l.type)) {
       char buf[64];
       std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude,
                     l.type == fem::LoadType::Pressure ? " MPa" : " N");
@@ -1022,6 +1127,54 @@ void DrawBucklingResults(AppState& state, const fem::Study& s,
                      "%.0fx");
 }
 
+// A thermal study's answer (docs/simulation/README.md#thermal): each
+// body's peak and lowest temperature, its margin to its material's service
+// temperature, the heat through each load and the balance.
+void DrawThermalResults(AppState& state, const fem::StudyRuntime& rt) {
+  SimulationState& sim = state.simulation;
+  for (const fem::StudyBodyResult& b : rt.bodies) {
+    const fem::StudyBodyResult::Thermal& t = b.thermal;
+    ImGui::SeparatorText(b.bodyName.c_str());
+    ImGui::Text("Peak:  %.4g \xC2\xB0"
+                "C   lowest:  %.4g \xC2\xB0"
+                "C",
+                t.maxC, t.minC);
+    ImGui::Text("Peak heat flux:  %.4g W/m\xC2\xB2", t.maxFluxWm2);
+    if (t.hasService) {
+      ImGui::TextColored(t.marginK >= 0 ? kMuted : kError,
+                         "Margin:  %.3g K below %.4g \xC2\xB0"
+                         "C",
+                         t.marginK, t.serviceMaxC);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", t.serviceBasis.c_str());
+    }
+    if (t.bulkConductivity)
+      MessageText(kStale, "A printed part conducts less than its resin: its "
+                          "hot spots run hotter than predicted.");
+    for (const fem::HeatFlow& f : t.flows)
+      ImGui::Text("%s %llu:  %.4g W %s", LoadLabel(f.type),
+                  static_cast<unsigned long long>(f.id), std::abs(f.watts),
+                  f.watts >= 0 ? "out" : "in");
+    ImGui::TextColored(kMuted, "Balance:  %.4g W in, %.4g W out", t.inW,
+                       t.outW);
+  }
+  ImGui::SeparatorText("Display");
+  int field = std::to_underlying(sim.field);
+  WrapRow row;
+  row.Next(RadioWidth("Off"));
+  bool changed = ImGui::RadioButton("Off###thermal_field_off", &field, 0);
+  row.Next(RadioWidth("Temperature"));
+  changed |= ImGui::RadioButton(
+      "Temperature###thermal_field_temperature", &field,
+      std::to_underlying(SimulationState::Field::Temperature));
+  row.Next(RadioWidth("Heat flux"));
+  changed |=
+      ImGui::RadioButton("Heat flux###thermal_field_heat_flux", &field,
+                         std::to_underlying(SimulationState::Field::HeatFlux));
+  if (changed)
+    sim.field = static_cast<SimulationState::Field>(field);
+}
+
 void DrawResults(AppState& state, const fem::Study& s) {
   const StudyHost host = StudyHostOf(state);
   SimulationState& sim = state.simulation;
@@ -1103,6 +1256,10 @@ void DrawResults(AppState& state, const fem::Study& s) {
 
   if (s.type == fem::AnalysisType::Buckling) {
     DrawBucklingResults(state, s, *rt);
+    return;
+  }
+  if (s.type == fem::AnalysisType::Thermal) {
+    DrawThermalResults(state, *rt);
     return;
   }
   if (s.type == fem::AnalysisType::Modal) {
@@ -1264,6 +1421,12 @@ void DrawResults(AppState& state, const fem::Study& s) {
   changed |= ImGui::RadioButton(
       "Displacement###field_displacement", &field,
       std::to_underlying(SimulationState::Field::Displacement));
+  if (s.thermalLoad.On()) {
+    fieldRow.Next(RadioWidth("Temperature"));
+    changed |= ImGui::RadioButton(
+        "Temperature###field_temperature", &field,
+        std::to_underlying(SimulationState::Field::Temperature));
+  }
   if (changed)
     sim.field = static_cast<SimulationState::Field>(field);
   LeftLabel("Deform");
@@ -1610,6 +1773,94 @@ const std::optional<fem::CalculixInstall>& CalculixHere(const AppState& state,
   return found;
 }
 
+// A static study's thermal load (docs/simulation/README.md
+// #the-thermal-load-on-a-static-study): none, one temperature everywhere,
+// or a thermal study's, with the stress-free temperature seeded where it is
+// derived (the thermal study's one ambient). A choice the study cannot take
+// is refused where it is made, saying why.
+void DrawThermalLoad(AppState& state, const fem::Study& s) {
+  const StudyHost host = StudyHostOf(state);
+  if (host.IsAssembly())
+    return;
+  std::vector<const fem::Study*> thermals;
+  for (const fem::Study& o : host.Studies())
+    if (o.type == fem::AnalysisType::Thermal)
+      thermals.push_back(&o);
+  const fem::ThermalLoad& tl = s.thermalLoad;
+  std::string current = "None";
+  if (tl.kind == fem::ThermalLoad::Kind::Uniform)
+    current = "Uniform";
+  for (const fem::Study* t : thermals)
+    if (tl.kind == fem::ThermalLoad::Kind::FromStudy && tl.fromStudy == t->id)
+      current = t->name;
+  static std::string refusal;
+  const auto apply = [&](fem::ThermalLoad next) {
+    fem::Study with = s;
+    with.thermalLoad = next;
+    refusal = fem::ThermalRefusal(with);
+    if (refusal.empty())
+      ModifyStudy(state, s.id, "Set thermal load",
+                  [&](fem::Study& cs) { cs.thermalLoad = next; });
+  };
+  LeftLabel("Thermal load");
+  if (ImGui::BeginCombo("###study_thermal_load", current.c_str())) {
+    if (ImGui::Selectable("None###thermal_none", !tl.On()))
+      apply({});
+    if (ImGui::Selectable("Uniform###thermal_uniform",
+                          tl.kind == fem::ThermalLoad::Kind::Uniform)) {
+      fem::ThermalLoad next;
+      next.kind = fem::ThermalLoad::Kind::Uniform;
+      next.uniformC = tl.uniformC;
+      next.stressFreeC = tl.stressFreeC;
+      next.hasStressFree = tl.hasStressFree;
+      apply(next);
+    }
+    for (const fem::Study* t : thermals) {
+      const std::string id =
+          t->name + "###thermal_from_" + std::to_string(t->id);
+      if (ImGui::Selectable(id.c_str(), current == t->name)) {
+        fem::ThermalLoad next;
+        next.kind = fem::ThermalLoad::Kind::FromStudy;
+        next.fromStudy = t->id;
+        if (const auto ambient = fem::DerivedStressFree(*t)) {
+          next.stressFreeC = *ambient;
+          next.hasStressFree = true;
+        }
+        apply(next);
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (tl.On()) {
+    if (tl.kind == fem::ThermalLoad::Kind::Uniform) {
+      double t = tl.uniformC;
+      LeftLabel("Temperature (\xC2\xB0"
+                "C)");
+      if (ExprInputDouble(state, "###thermal_uniform_c", &t, "%.4g") ||
+          ImGui::IsItemDeactivatedAfterEdit())
+        if (t != tl.uniformC) {
+          fem::ThermalLoad next = tl;
+          next.uniformC = t;
+          apply(next);
+        }
+    }
+    double t0 = tl.hasStressFree ? tl.stressFreeC
+                                 : std::numeric_limits<double>::quiet_NaN();
+    const double was = t0;
+    OptionalNumber("Stress-free (\xC2\xB0"
+                   "C)",
+                   "###thermal_stress_free_c", "type it", t0);
+    if (!(t0 == was) && !(std::isnan(t0) && std::isnan(was))) {
+      fem::ThermalLoad next = tl;
+      next.hasStressFree = !std::isnan(t0);
+      next.stressFreeC = std::isnan(t0) ? 0.0 : t0;
+      apply(next);
+    }
+  }
+  if (!refusal.empty())
+    MessageText(kError, refusal);
+}
+
 // Which program solves the study (docs/simulation/README.md#calculix), shown
 // only where there is a choice: a static study can be solved on CalculiX
 // too; modal and topology are in-house only. CalculiX stays choosable when
@@ -1618,7 +1869,7 @@ const std::optional<fem::CalculixInstall>& CalculixHere(const AppState& state,
 void DrawSolverCombo(AppState& state, const fem::Study& s) {
   if (s.type != fem::AnalysisType::Static &&
       s.type != fem::AnalysisType::Buckling &&
-      s.solver != fem::Solver::Calculix)
+      s.type != fem::AnalysisType::Thermal && s.solver != fem::Solver::Calculix)
     return;
   std::string why;
   const auto& ccx = CalculixHere(state, &why);
@@ -1664,16 +1915,18 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
   }
   // Analysis type: Static (stress), Modal (frequencies), or Topology
   // (generative shape).
-  const char* kTypes[] = {"Static", "Modal", "Topology", "Buckling"};
+  const char* kTypes[] = {"Static", "Modal", "Topology", "Buckling", "Thermal"};
   int typeIdx = s->type == fem::AnalysisType::Modal      ? 1
                 : s->type == fem::AnalysisType::Topology ? 2
                 : s->type == fem::AnalysisType::Buckling ? 3
+                : s->type == fem::AnalysisType::Thermal  ? 4
                                                          : 0;
   LeftLabel("Analysis");
-  if (ImGui::Combo("###study_analysis", &typeIdx, kTypes, 4)) {
+  if (ImGui::Combo("###study_analysis", &typeIdx, kTypes, 5)) {
     const auto nt = typeIdx == 1   ? fem::AnalysisType::Modal
                     : typeIdx == 2 ? fem::AnalysisType::Topology
                     : typeIdx == 3 ? fem::AnalysisType::Buckling
+                    : typeIdx == 4 ? fem::AnalysisType::Thermal
                                    : fem::AnalysisType::Static;
     // CalculiX solves static studies only: a study switched to another
     // type goes back to the in-house solver with it, in the same step,
@@ -1786,7 +2039,19 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
             cs.keepFaces.end());
       });
     DrawKeepOuts(state, *s);
+  } else if (s->type == fem::AnalysisType::Thermal) {
+    // Whether a run refines round its peak temperature rise until it
+    // settles (docs/simulation/README.md#thermal).
+    const char* kConverge[] = {"Auto", "Always", "Never"};
+    int conv = static_cast<int>(s->converge);
+    LeftLabel("Converge peak");
+    if (ImGui::Combo("###thermal_converge", &conv, kConverge, 3) &&
+        conv != static_cast<int>(s->converge))
+      ModifyStudy(state, s->id, "Set converge", [&](fem::Study& cs) {
+        cs.converge = static_cast<fem::ConvergeMode>(conv);
+      });
   } else {
+    DrawThermalLoad(state, *s);
     // Static: whether a run refines round its peak until it settles
     // (docs/simulation/README.md#a-peak-that-has-settled).
     const char* kConverge[] = {"Auto", "Always", "Never"};
@@ -1987,15 +2252,41 @@ void DrawFieldLegend(AppState& state) {
   if (topo != density)
     return;
   const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
+  // A thermal field: the temperature's range in degrees C, or the heat
+  // flux in W/m^2 (docs/simulation/README.md#thermal).
+  const bool temp = sim.field == SimulationState::Field::Temperature;
+  const bool flux = sim.field == SimulationState::Field::HeatFlux;
+  double tLo = 0.0, tHi = 0.0, fHi = 0.0;
+  bool anyT = false;
+  for (const fem::StudyBodyResult& b : rt->bodies) {
+    if (!b.thermal.solved && !b.thermal.load)
+      continue;
+    tLo = anyT ? std::min(tLo, b.thermal.minC) : b.thermal.minC;
+    tHi = anyT ? std::max(tHi, b.thermal.maxC) : b.thermal.maxC;
+    fHi = std::max(fHi, b.thermal.maxFluxWm2);
+    anyT = true;
+  }
+  if ((temp || flux) && !anyT)
+    return;
   // Modal shows a normalized mode shape (0..1); density is 0..1; static shows
   // the real field.
-  const double maxVal =
-      (modal || density) ? 1.0 : (vm ? rt->maxVonMises : rt->maxDisplacement);
-  const char* unit = (modal || density) ? "" : (vm ? "MPa" : "mm");
-  const char* title = density ? "density"
-                      : modal ? "mode shape"
-                      : vm    ? "von Mises"
-                              : "displacement";
+  const double maxVal = temp   ? tHi
+                        : flux ? fHi
+                        : (modal || density)
+                            ? 1.0
+                            : (vm ? rt->maxVonMises : rt->maxDisplacement);
+  const double minVal = temp ? tLo : 0.0;
+  const char* unit = temp                 ? "\xC2\xB0"
+                                            "C"
+                     : flux               ? "W/m\xC2\xB2"
+                     : (modal || density) ? ""
+                                          : (vm ? "MPa" : "mm");
+  const char* title = temp      ? "temperature"
+                      : flux    ? "heat flux"
+                      : density ? "density"
+                      : modal   ? "mode shape"
+                      : vm      ? "von Mises"
+                                : "displacement";
 
   // What the picture is a picture OF, above the bar: the study and its
   // analysis, the mode and its frequency, the factor the deformation is
@@ -2010,10 +2301,11 @@ void DrawFieldLegend(AppState& state) {
   std::vector<std::string> head;
   if (study) {
     head.push_back(study->name + "  " +
-                   (buckling ? "buckling"
-                    : modal  ? "modal"
-                    : topo   ? "topology"
-                             : "static"));
+                   (buckling                                    ? "buckling"
+                    : modal                                     ? "modal"
+                    : topo                                      ? "topology"
+                    : study->type == fem::AnalysisType::Thermal ? "thermal"
+                                                                : "static"));
   }
   if (modal) {
     const fem::FemResults::ModeShape* mode = nullptr;
@@ -2070,14 +2362,16 @@ void DrawFieldLegend(AppState& state) {
     const float yk = y1 - barH * (k / 4.0f);
     dl->AddLine(ImVec2(x + barW, yk), ImVec2(x + barW + 4, yk),
                 IM_COL32(255, 255, 255, 160));
-    std::snprintf(buf, sizeof(buf), "%.3g", maxVal * (k / 4.0));
+    std::snprintf(buf, sizeof(buf), "%.3g",
+                  minVal + (maxVal - minVal) * (k / 4.0));
     dl->AddText(ImVec2(x + barW + 8, yk - lineH * 0.5f),
                 IM_COL32(255, 255, 255, 200), buf);
   }
-  dl->AddText(ImVec2(x + barW + 6, y1 - 6), IM_COL32_WHITE, "0");
+  std::snprintf(buf, sizeof(buf), "%.3g", minVal);
+  dl->AddText(ImVec2(x + barW + 6, y1 - 6), IM_COL32_WHITE, buf);
   // Where the maximum is, in world millimetres and on which body: the
   // magenta cross in the viewport marks it, and this is its caption.
-  if (!modal && !density) {
+  if (!modal && !density && !temp && !flux) {
     const glm::dvec3 at = vm ? rt->maxVmAt : rt->maxDispAt;
     const std::string& body = vm ? rt->maxVmBody : rt->maxDispBody;
     std::snprintf(buf, sizeof(buf), "max at (%.1f, %.1f, %.1f)%s%s", at.x, at.y,
@@ -2467,6 +2761,8 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
         ui::AppendPrimLine(p, fs.point, 1.0f, kRemote, out);
       break;
     }
+    default: // a thermal load: its face is tinted and labelled
+      break;
     }
   }
   for (const ElementRef& keep : s->keepFaces) {
@@ -2653,6 +2949,27 @@ std::string SimulationLoadLabel(const fem::Load& load) {
     else
       std::snprintf(buf, sizeof(buf), "%.3g N at a point", load.magnitude);
     return buf;
+  case fem::LoadType::Temperature:
+    std::snprintf(buf, sizeof(buf),
+                  "%.4g \xC2\xB0"
+                  "C",
+                  load.temperatureC);
+    return buf;
+  case fem::LoadType::HeatFlux:
+    if (std::isnan(load.powerW))
+      std::snprintf(buf, sizeof(buf), "%.4g W/m\xC2\xB2", load.fluxWm2);
+    else
+      std::snprintf(buf, sizeof(buf), "%.4g W in", load.powerW);
+    return buf;
+  case fem::LoadType::Convection:
+    std::snprintf(buf, sizeof(buf),
+                  "%.4g W/m\xC2\xB2K to %.4g \xC2\xB0"
+                  "C",
+                  load.filmWm2K, load.ambientC);
+    return buf;
+  case fem::LoadType::HeatGeneration:
+    std::snprintf(buf, sizeof(buf), "%.4g W", load.powerW);
+    return buf;
   }
   return "";
 }
@@ -2771,6 +3088,12 @@ void DrawSimulationLabels(AppState& state) {
             col(kRemote));
       break;
     }
+    case fem::LoadType::Temperature:
+    case fem::LoadType::HeatFlux:
+    case fem::LoadType::Convection:
+    case fem::LoadType::HeatGeneration:
+      label(c + n * len * 0.4f, SimulationLoadLabel(load), col(kPressure));
+      break;
     }
   }
   for (const ElementRef& keep : s->keepFaces) {
@@ -2849,6 +3172,64 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     });
     sim.tool = SimulationState::Tool::None;
     return;
+  }
+
+  // A thermal study's loads (docs/simulation/README.md#thermal): refused,
+  // visibly and with nothing placed, until the tool has its values.
+  {
+    using T = SimulationState::Tool;
+    fem::Load th;
+    th.type = sim.tool == T::Temperature  ? fem::LoadType::Temperature
+              : sim.tool == T::HeatFlux   ? fem::LoadType::HeatFlux
+              : sim.tool == T::Convection ? fem::LoadType::Convection
+              : sim.tool == T::HeatSource ? fem::LoadType::HeatGeneration
+                                          : fem::LoadType::Fixed;
+    if (fem::IsThermalLoad(th.type)) {
+      if (host.IsAssembly()) {
+        sim.placeRefusal = "A thermal load is a part study's";
+        return;
+      }
+      // Only the quantities this type takes: the others' fields may hold
+      // values typed for another tool.
+      if (th.type == fem::LoadType::Temperature)
+        th.temperatureC = sim.pendingTemperatureC;
+      if (th.type == fem::LoadType::Convection) {
+        th.filmWm2K = sim.pendingFilmWm2K;
+        th.ambientC = sim.pendingAmbientC;
+      }
+      if (th.type == fem::LoadType::HeatFlux && sim.pendingFluxPerArea)
+        th.fluxWm2 = sim.pendingFluxWm2;
+      else if (th.type == fem::LoadType::HeatFlux ||
+               th.type == fem::LoadType::HeatGeneration)
+        th.powerW = sim.pendingHeatW;
+      if (th.type == fem::LoadType::HeatGeneration) {
+        fem::ResolvedFace rf;
+        if (!faceDoc ||
+            !fem::ResolveFace(*faceDoc, face, "heat source", rf, nullptr)) {
+          sim.placeRefusal = "'" + face.name + "' is on no body of this part";
+          return;
+        }
+        th.body = faceDoc->GetBodies()[rf.bodyIndex].name;
+      } else {
+        th.face = face;
+      }
+      if (const std::string why = fem::ThermalLoadRefusal(th); !why.empty()) {
+        sim.placeRefusal = why;
+        return;
+      }
+      fem::Study with = *s;
+      with.loads.push_back(th);
+      if (const std::string why = fem::ThermalRefusal(with); !why.empty()) {
+        sim.placeRefusal = why;
+        return;
+      }
+      th.id = host.AllocateId();
+      ModifyStudy(state, s->id,
+                  std::string("Add ") + LoadLabel(th.type) + " load",
+                  [&](fem::Study& cs) { cs.loads.push_back(th); });
+      sim.tool = SimulationState::Tool::None;
+      return;
+    }
   }
 
   fem::Load load;

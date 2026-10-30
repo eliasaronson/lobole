@@ -210,6 +210,7 @@ add_executable(designer_tests
     test_fem_loads.cpp
     test_fem_pin.cpp
     test_fem_buckling.cpp
+    test_fem_thermal.cpp
     test_fem_calculix.cpp
     test_fem_converge.cpp
     test_topopt.cpp
@@ -1392,6 +1393,17 @@ add_test(NAME buckling_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/buckling_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(buckling_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
+
+# A thermal study over the RPCs alone (docs/simulation/README.md#thermal):
+# a PLA block's peak and margin, a temperature_margin requirement unchecked
+# then checked, a static study under its temperature, the field displayed,
+# and with ccx the study on CalculiX and its exported heat deck. Self-skips
+# (77) without Netgen; its CalculiX half without ccx.
+add_test(NAME thermal_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/thermal_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(thermal_smoke PROPERTIES TIMEOUT 300
                      SKIP_RETURN_CODE 77)
 
 # A nonlinear static study over the RPCs alone

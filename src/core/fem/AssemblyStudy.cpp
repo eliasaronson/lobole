@@ -264,8 +264,7 @@ bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
                ")";
     return false;
   }
-  out = Material{mp.youngGPa * 1000.0, mp.poisson,       mp.density * 1e-12,
-                 mp.yieldMPa,          mp.interlayerMPa, mp.hardening};
+  out = MaterialFromLibrary(mp);
   // A plastic study runs each material along its own curve, or not at all
   // (docs/simulation/README.md#plasticity).
   if (plastic)
@@ -323,6 +322,10 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
                   "its part with fixed faces or a rigid neighbour's contact");
   if (const std::string why = ContactRefusal(study); !why.empty())
     return fail(why);
+  // Heat is a part study's (docs/simulation/README.md#not-done).
+  if (study.type == AnalysisType::Thermal || study.thermalLoad.On())
+    return fail("a thermal study, or a thermal load, is a part study's: an "
+                "assembly study does not solve heat yet");
   out.type = study.type;
   out.solver = EffectiveSolver(study);
   out.nonlinear = study.nonlinear;
@@ -683,9 +686,7 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     StudyBodyPlan bp;
     bp.bodyIndex = bi;
     bp.bodyName = bodyLabel;
-    bp.mat =
-        Material{mp.youngGPa * 1000.0, mp.poisson,       mp.density * 1e-12,
-                 mp.yieldMPa,          mp.interlayerMPa, mp.hardening};
+    bp.mat = MaterialFromLibrary(mp);
     if (study.nonlinear.plasticity)
       if (const std::string why = HardeningRefusal(
               bp.mat, Quote(bodyLabel) + "'s material " + mp.name,

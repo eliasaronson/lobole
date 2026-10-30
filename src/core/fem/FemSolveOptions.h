@@ -33,6 +33,17 @@ struct CalculixRun;
 // is quicker and is the oracle PCG is tested against.
 inline constexpr int kIterativeAboveDofs = 20000;
 
+// A temperature field a static solve takes (docs/simulation/README.md
+// #the-thermal-load-on-a-static-study): one temperature per node (degrees C),
+// and the temperature the part is stress-free at. The thermal strain is
+// alpha (T - T0) [1 1 1 0 0 0], T interpolated by the tet10 shape functions
+// at the four Gauss points; its load is the integral of B^T D eps_th, and the
+// stress D (B u - eps_th). Every case of the solve carries it, as gravity is.
+struct NodalTemperature {
+  std::vector<double> temperature;
+  double stressFreeC = 0.0;
+};
+
 struct SolveOptions {
   // Solve iteratively above this many free DOF (0 = always, a large number
   // = never).
@@ -66,6 +77,9 @@ struct SolveOptions {
   // not fit (a buckling study's factor); 0 = read MemAvailable then. A test
   // sets it.
   uint64_t availableBytes = 0;
+  // A static solve under a thermal load: the temperature at every node of
+  // the mesh it solves. Null: none.
+  std::shared_ptr<const NodalTemperature> thermal;
 };
 
 // What a solve did, for the study's result and its status.

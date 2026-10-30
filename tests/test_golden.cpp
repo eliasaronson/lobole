@@ -1118,6 +1118,33 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   // converge. A study read back as static would answer a factor of safety
   // where a buckling factor was asked for; each [study name, analysis,
   // num_modes, converge] must hold, the default number of factors included.
+  // vNEXT: a thermal study and a static study's thermal_load. A thermal
+  // study read back as static would answer a stress where a temperature was
+  // asked for; each [study name, analysis, load count, thermal_load kind]
+  // must hold, and every thermal load keep its quantities.
+  if (expect.contains("study_thermal")) {
+    for (const auto& want : expect.at("study_thermal")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("study " << name);
+      const fem::Study* found = nullptr;
+      for (const fem::Study& st : doc.GetStudies())
+        if (st.name == name)
+          found = &st;
+      REQUIRE(found != nullptr);
+      CHECK(std::string(fem::AnalysisTypeToString(found->type)) ==
+            want.at(1).get<std::string>());
+      CHECK(found->loads.size() == want.at(2).get<size_t>());
+      const fem::ThermalLoad& tl = found->thermalLoad;
+      const std::string kind =
+          tl.kind == fem::ThermalLoad::Kind::FromStudy ? "from_study"
+          : tl.kind == fem::ThermalLoad::Kind::Uniform ? "uniform"
+                                                       : "none";
+      CHECK(kind == want.at(3).get<std::string>());
+      for (const fem::Load& l : found->loads)
+        if (fem::IsThermalLoad(l.type))
+          CHECK(fem::ThermalLoadRefusal(l).empty());
+    }
+  }
   if (expect.contains("study_buckling")) {
     for (const auto& want : expect.at("study_buckling")) {
       const std::string name = want.at(0).get<std::string>();

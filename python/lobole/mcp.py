@@ -558,7 +558,7 @@ and "0.785rad" all mean 45 degrees. distance_pl is the perpendicular
 point-to-line distance: refs = [[point entity, which], [line entity, 0]] —
 also the parallel-lines distance (use an endpoint of the first line)."""
 
-MATERIAL_SLUGS = ("aluminum, steel, stainless_steel, brass, bronze, copper, "
+MATERIAL_SLUGS = ("steel, stainless_steel, brass, bronze, copper, "
                   "chrome, gold, silver, titanium, aluminum_6061_t6, "
                   "aluminum_6082_t6, plastic_white, "
                   "plastic_black, petg, pla, tpu, carbon_fibre, rubber, glass, ruby, concrete, "
@@ -669,7 +669,11 @@ The loop that works — follow it every time:
    linear buckling does not see: say so, and name the nonlinear study for
    it -- it does not exist yet -- rather than calling the part done on the
    linear factor. A requirement on a study never run is `unchecked`:
-   report it as NOT met.
+   report it as NOT met. A part beside heat (a motor, a hot end, a lamp)
+   gets a thermal study (add_study {type: 'thermal'}) and a requirement
+   that its peak stays under its material's service temperature, with a
+   margin: a printed plastic softens at its heat deflection temperature
+   long before a stress fails it.
 
 IMPORTING a file: rpc('import_step', {path}) is the importer for every 3D
 format, STL and OBJ meshes included, despite its name (an STL's planes,
@@ -2007,7 +2011,9 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
 
 
 _reference("add_study", "Create a FEM study on the active part. kind = "
-          "'static' (default) | 'modal' | 'topology' | 'buckling'. Returns "
+          "'static' (default) | 'modal' | 'topology' | 'buckling' | "
+          "'thermal' (steady heat: temperature, heat_flux, convection and "
+          "heat_generation loads; docs/simulation/README.md#thermal). Returns "
           "{id, name, kind}. A study fixes/loads faces and solves for "
           "stress. A loaded part gets a static study of each way it is "
           "loaded and a buckling study of each load that compresses "
@@ -2026,7 +2032,10 @@ _reference("list_studies", "List studies: id, name, evaluated mesh_size, loads, 
 _reference("set_study", "Set a study's name, global mesh size, analysis type, or "
           "loads. mesh_size (mm; 0 = auto) may be a number or an expression "
           "string. type is 'static' (stress), 'modal' (natural frequencies), "
-          "'topology' (generative shape) or 'buckling' (load factors). "
+          "'topology' (generative shape), 'buckling' (load factors) or "
+          "'thermal' (temperature). thermal_load {from_study, stress_free_c?} "
+          "or {uniform_c, stress_free_c} expands a static study under a "
+          "temperature. "
           "num_modes sets how many modes a modal study computes, or how many "
           "factors a buckling one does (default 3). gravity ([x,y,z] m/s^2, e.g. [0,0,-9.81]) applies "
           "self-weight to a static study (needs a material density). For a "

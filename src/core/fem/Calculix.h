@@ -87,6 +87,9 @@ uint64_t CalculixStaticMemoryEstimate(size_t dofs);
 // The same for a nonlinear (NLGEOM) run, which also holds the tangent
 // stiffness it rebuilds each iteration.
 uint64_t CalculixNonlinearMemoryEstimate(size_t dofs);
+// The same for a steady heat run of `nodes` nodes (one degree of freedom
+// each), which ccx solves as Newton iterations on the same solver.
+uint64_t CalculixHeatMemoryEstimate(size_t nodes);
 // MemAvailable, in bytes; 0 when the platform does not say.
 uint64_t AvailableMemoryBytes();
 
@@ -191,12 +194,43 @@ double ContactPenalty(double youngMPa, double edgeMm);
 // 0.005). Measured on a shallow arch to its snap, 1e-6 took 98 iterations
 // where the default took 103: Newton's last iteration is quadratic.
 inline constexpr double kNonlinearResidual = 1e-6;
+//
+// Under a thermal load (`thermal`, docs/simulation/README.md
+// #the-thermal-load-on-a-static-study) each material carries *EXPANSION,
+// ZERO=T0, the nodes start at T0 (*INITIAL CONDITIONS, TYPE=TEMPERATURE),
+// and each step sets every node's temperature (*TEMPERATURE), which a
+// nonlinear step ramps with its load; a plastic run's unloading step returns
+// them to T0. `nodalForces` are then the mechanical loads alone: ccx makes
+// the thermal one.
 bool WriteDeck(std::ostream& out, const FemMesh& mesh,
                const std::vector<Material>& byDomain, const Supports& supports,
                const std::vector<StudyJobBody::PinSupport>& pins,
                const std::vector<glm::dvec3>& nodalForces,
                const std::string& title, std::string* error,
-               int buckleFactors = 0, const DeckNonlinear* nonlinear = nullptr);
+               int buckleFactors = 0, const DeckNonlinear* nonlinear = nullptr,
+               const NodalTemperature* thermal = nullptr);
+
+// A steady heat deck (docs/simulation/README.md#thermal): the nodes, the
+// C3D10 elements per domain each with its *CONDUCTIVITY, the held nodes as
+// *BOUNDARY on degree of freedom 11, the flux faces' and sources' nodal heat
+// (HeatNodalLoads) as *CFLUX, each convecting facet a *FILM on its tet's face
+// (F1-F4), and one *HEAT TRANSFER, STEADY STATE step printing NT. Units mm,
+// mW, degrees C.
+bool WriteHeatDeck(std::ostream& out, const FemMesh& mesh,
+                   const std::vector<Material>& byDomain,
+                   const HeatLoads& loads, const std::string& title,
+                   std::string* error);
+// Every node's temperature from the first NT block of a ccx .dat.
+bool ReadDatTemperatures(const std::string& path, size_t nNodes,
+                         std::vector<double>& out, std::string* error);
+// The heat of one mesh solved on CalculiX: the deck written, ccx run in a
+// run directory of its own as SolveBodyOnCalculix runs one, NT read back
+// into `temperature` (every node). The caller holds it to K_T (SolveHeat
+// with the answer given). Refused past the memory free as a static run is.
+bool HeatOnCalculix(const FemMesh& mesh, const std::vector<Material>& mats,
+                    const HeatLoads& loads, const std::string& bodyName,
+                    const SolveOptions& options,
+                    std::vector<double>& temperature, std::string* error);
 
 // The relative precision of a displacement ReadDatDisplacements reads: ccx
 // prints U as E13.6, seven significant digits.

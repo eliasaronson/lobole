@@ -560,6 +560,7 @@ set(core_sources
     src/core/fem/AssemblyStudy.cpp
     src/core/fem/FemSolver.cpp
     src/core/fem/FemTopo.cpp
+    src/core/fem/FemThermal.cpp
     # CalculiX as a study solver: a separate process fed a deck
     # (docs/simulation/README.md#calculix).
     src/core/fem/Calculix.cpp
