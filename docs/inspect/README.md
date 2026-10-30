@@ -262,6 +262,11 @@ source plane's in-plane axes), flip, and visibility.
 
 - The tilt pivots about the cut's offset point, so tilting does not also
   slide the cut off the model.
+- **To sketch** (part tabs) starts a new sketch on the active cut's plane
+  with the cut drawn in it, lines, lines and arcs, or splines as the combo
+  beside it says, and opens it for editing: the same section
+  `project_section` adds ([a section into a sketch](../sketching/README.md#a-section-into-a-sketch)).
+  A cut that crosses no body is refused in the window and makes nothing.
 - Datum- and face-sourced cuts resolve live every frame: move the datum and
   the cut follows. A source that stops resolving stops its cut — the row says
   "source missing — this cut is off" and `list_sections` reports

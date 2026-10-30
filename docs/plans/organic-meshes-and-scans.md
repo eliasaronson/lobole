@@ -308,26 +308,12 @@ Built: PLY and glTF read into a mesh body or any other representation
 ([PLY and glTF](../interchange/README.md#ply-and-gltf)), by vendored miniply
 and cgltf.
 
-### Stage 5 — a section into a sketch (M)
+### Stage 5 — a section into a sketch
 
-This is the B-Rep route to a holder. For a stand, an outline-shaped pocket or
-a profile-following rim, a 2.5-D part from a sketch of the scan's outline is
-often the better part than a cradle, because it stays fully parametric.
-
-- **A sketch gains a projected section**: `project_section {sketch, bodies?,
-  tolerance_mm?, fit?}`, where `fit` is `polyline | arcs | spline`.
-  - The sketch's plane cuts the bodies (`mesh::Slice`, or the existing
-    `Measure` section loops for B-Rep).
-  - The cut is simplified to `tolerance_mm` (default derived from the body's
-    size) and drawn as locked construction geometry that follows the source,
-    as `project_geometry` does.
-  - It is refitted on every regeneration from the geometry, never kept as an
-    index.
-- The reply gives the maximum deviation of what was drawn from the true
-  cut.
-- The clearance is the sketch's existing offset tool.
-- The Section tool gains "To sketch" for the active cut.
-- `vNEXT` adds a golden.
+Built: `project_section` and the Section tool's "To sketch", lines, lines
+and arcs, or splines within a tolerance, refitted every regeneration, the
+offset taking the outline as the clearance
+([a section into a sketch](../sketching/README.md#a-section-into-a-sketch)).
 
 ### Stage 6 — fits and datums on a mesh (M; mostly the mechanical round's)
 
@@ -346,7 +332,6 @@ often the better part than a cradle, because it stays fully parametric.
 - `src/core/mesh/`: `Segment` gains `GrowFrom`; `Fit` gains RANSAC.
 - `src/core/MeshCollide.*` becomes a user of `MeshBvh`.
 - Changed features: `DatumPlaneFeature.*`, `DatumAxisFeature.*`.
-- `src/core/sketch/` (the projected section).
 
 **Serialization**
 - `src/core/io/SerializeFeatures.cpp` and `src/core/io/SerializationInternal.h`
@@ -354,8 +339,7 @@ often the better part than a cradle, because it stays fully parametric.
 - `tests/golden/vNEXT-*.json`.
 
 **Rendering, picking and export**
-- New tools: Fit, and "To sketch" in the Section tool, each in
-  its own `ui/` file.
+- A new tool, Fit, in its own `ui/` file.
 
 **RPC**
 - `src/remote/Remote{Project,Modeling,Inspection}.cpp` and their

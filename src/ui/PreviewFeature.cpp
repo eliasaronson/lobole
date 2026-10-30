@@ -5,6 +5,7 @@
 #include "common/Logger.h"
 #include "ui/AlignTool.h"
 #include "ui/FloatingWindow.h"
+#include "ui/SectionToSketch.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/StudyPanel.h" // DrawSimulationToolWindow
 
@@ -552,6 +553,8 @@ void DrawSectionToolWindow(AppState& state) {
       ImGui::TextDisabled("model spans %.3g to %.3g along this normal", lo, hi);
     }
   }
+  ImGui::Separator();
+  DrawSectionToSketchRow(state);
   ImGui::Separator();
   if (ImGui::Button("Clear all###clear"))
     ClearSections(state);

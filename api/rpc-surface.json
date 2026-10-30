@@ -219,6 +219,7 @@
   "probe_study": ["at", "case", "face", "id", "layer_normal", "occurrence", "study"],
   "project_changed_on_disk": [],
   "project_geometry": ["element", "feature_id", "kind", "sketch_id"],
+  "project_section": ["bodies", "fit", "sketch_id", "tolerance_mm"],
   "pull": ["remote"],
   "push": ["remote"],
   "query_catalog": ["catalog", "designation", "hash", "limit", "offset", "revision"],

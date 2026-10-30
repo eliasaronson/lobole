@@ -104,6 +104,7 @@ COLUMNS: dict[str, str] = {
     'orient_to_face': '',
     'ping': '',
     'project_changed_on_disk': '',
+    'project_section': 'sketch_id:int>=1, bodies?:any[], tolerance_mm?:number>0, fit?:string',
     'redo': '',
     'remote_list': '',
     'remove_mate': 'id:int>=0',
@@ -320,6 +321,12 @@ class ModifyFeatureParams(TypedDict):
 
 class OpenProjectParams(TypedDict):
     path: str
+
+class ProjectSectionParams(TypedDict):
+    sketch_id: int
+    bodies: NotRequired[Sequence[Any]]
+    tolerance_mm: NotRequired[float]
+    fit: NotRequired[str]
 
 class RemoveMateParams(TypedDict):
     id: int
@@ -1380,6 +1387,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'list_variables': {'type': 'object', 'properties': {'variables': {'type': 'array', 'items': {'type': 'object', 'properties': {'comment': {'type': 'string'}, 'expression': {'type': 'string'}, 'name': {'type': 'string'}, 'scope': {'type': 'string'}, 'value': {'type': 'number'}, 'error': {'type': 'string'}}, 'required': ['expression', 'name', 'scope', 'value'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['variables'], 'additionalProperties': False},
     'mass_properties': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'body': {'type': 'integer'}, 'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'inertia': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'surface_area_mm2': {'type': 'number'}, 'volume_mm3': {'type': 'number'}, 'density': {'type': 'number'}, 'printed': {'anyOf': [{'type': 'object'}, {'type': 'null'}]}}, 'required': ['bbox_max', 'bbox_min', 'body', 'center_of_mass_mm', 'inertia', 'mass_g', 'material', 'name', 'surface_area_mm2', 'volume_mm3'], 'additionalProperties': False}}, 'bbox_mm': {'anyOf': [{'type': 'object', 'properties': {'max': {'type': 'array', 'items': {'type': 'number'}}, 'min': {'type': 'array', 'items': {'type': 'number'}}, 'size': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['max', 'min', 'size'], 'additionalProperties': False}, {'type': 'null'}]}, 'total': {'type': 'object', 'properties': {'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'volume_mm3': {'type': 'number'}, 'printed': {'type': 'object'}}, 'required': ['center_of_mass_mm', 'mass_g', 'volume_mm3'], 'additionalProperties': False}, 'occurrences': {'type': 'array', 'items': {'type': 'object', 'properties': {'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'name': {'type': 'string'}, 'occurrence': {'type': 'integer'}, 'part_id': {'type': 'integer'}, 'volume_mm3': {'type': 'number'}, 'mass_from': {'type': 'string'}, 'printed': {'type': 'object'}}, 'required': ['center_of_mass_mm', 'mass_g', 'name', 'occurrence', 'part_id', 'volume_mm3', 'mass_from'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['bbox_mm', 'total'], 'additionalProperties': False},
     'print_allowance': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'basic_mm': {'type': 'number'}, 'confirm': {'type': 'string'}, 'designation': {'type': 'string'}, 'kind': {'type': 'string'}, 'material': {'type': 'string'}, 'model_mm': {'type': 'number'}, 'pitch': {'type': 'number'}, 'process': {'type': 'string'}, 'source': {'type': 'string'}, 'stl_chord_loss_mm': {'type': 'number'}, 'stl_deflection_mm': {'type': 'number'}, 'stl_note': {'type': 'string'}, 'profile': {'type': 'string'}, 'note': {'type': 'string'}, 'from': {'type': 'string'}, 'interference_side_mm': {'type': 'number'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['allowance_mm', 'basic_mm', 'confirm', 'kind', 'material', 'model_mm', 'process', 'source', 'stl_chord_loss_mm', 'stl_deflection_mm', 'stl_note'], 'additionalProperties': False},
+    'project_section': {'type': 'object', 'properties': {'external_index': {'type': 'integer'}, 'gen_ids': {'type': 'array', 'items': {'type': 'integer'}}, 'tolerance_mm': {'type': 'number'}, 'deviation_mm': {'type': 'number'}, 'chains': {'type': 'integer'}, 'open_chains': {'type': 'integer'}, 'fit': {'type': 'string'}, 'regen': {'type': 'object'}, 'digest': {'type': 'object'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['external_index', 'gen_ids', 'tolerance_mm', 'deviation_mm', 'chains', 'open_chains', 'fit', 'regen', 'digest'], 'additionalProperties': False},
     'remove_requirement': {'type': 'object', 'properties': {'removed': {'type': 'integer'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['removed'], 'additionalProperties': False},
     'save_print_profile': {'type': 'object', 'properties': {'conditions': {'type': 'string'}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'process': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'from_mm': {'type': 'number'}, 'kind': {'type': 'string'}, 'source': {'type': 'string'}, 'to_mm': {'type': 'number'}}, 'required': ['allowance_mm', 'from_mm', 'kind'], 'additionalProperties': False}}, 'stl_deflection_mm': {'type': 'number'}, 'stl_deflection_stated': {'type': 'boolean'}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'bed_exclude_mm': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'line_width_mm': {'type': 'number'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['material', 'name', 'process', 'rows', 'stl_deflection_mm', 'stl_deflection_stated'], 'additionalProperties': False},
     'save_template': {'type': 'object', 'properties': {'suggestions': {'type': 'object', 'properties': {'literals': {'type': 'array', 'items': {}}, 'references': {'type': 'array', 'items': {'type': 'string'}}, 'variables': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['literals', 'references', 'variables'], 'additionalProperties': False}, 'template': {'type': 'object', 'properties': {'features': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'parameters': {'type': 'array', 'items': {'type': 'object'}}, 'revision': {'type': 'integer'}, 'comment': {'type': 'string'}}, 'required': ['features', 'name', 'parameters', 'revision'], 'additionalProperties': False}, 'instances_marked': {'type': 'array', 'items': {'type': 'object', 'properties': {'feature_id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'revision': {'type': 'integer'}, 'template_changed': {'type': 'boolean'}}, 'required': ['feature_id', 'name', 'part', 'part_id', 'revision', 'template_changed'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['template'], 'additionalProperties': False},
@@ -3295,6 +3303,18 @@ PrintAllowanceResult = TypedDict('PrintAllowanceResult', {
     'interference_side_mm': NotRequired[float],
 })
 
+ProjectSectionResult = TypedDict('ProjectSectionResult', {
+    'external_index': int,
+    'gen_ids': list[int],
+    'tolerance_mm': float,
+    'deviation_mm': float,
+    'chains': int,
+    'open_chains': int,
+    'fit': str,
+    'regen': dict[str, Any],
+    'digest': dict[str, Any],
+})
+
 RemoveRequirementResult = TypedDict('RemoveRequirementResult', {
     'removed': int,
 })
@@ -3927,6 +3947,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def project_changed_on_disk(self, _timeout: float | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def project_section(self, _timeout: float | None = None, **params: Unpack[ProjectSectionParams]) -> ProjectSectionResult:
         raise NotImplementedError
 
     def redo(self, _timeout: float | None = None) -> dict[str, Any]:

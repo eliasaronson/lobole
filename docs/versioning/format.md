@@ -349,6 +349,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A sketch's `external` takes a section, `{kind: "section", fit: polyline\|arcs\|spline, bodies?, tolerance_mm?, gen_ids}`: where the sketch's plane cuts the bodies, refitted every regeneration ([a section into a sketch](../sketching/README.md#a-section-into-a-sketch)). An unknown fit, a tolerance not above 0 or a face/edge key on one is refused. Golden `vNEXT-sketch-section` |
 
 ## Paths in a project
 

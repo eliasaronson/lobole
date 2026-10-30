@@ -502,6 +502,7 @@ set(core_sources
     src/core/sketch/SketchInference.cpp
     src/core/sketch/SketchOrientation.cpp
     src/core/sketch/SketchText.cpp
+    src/core/sketch/SketchSection.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/sketch/ExternalPrint.cpp
     src/core/features/ExtrudeFeature.cpp
@@ -1032,6 +1033,7 @@ set(app_sources
     src/ui/RendererSync.cpp
     src/ui/MeasureActions.cpp
     src/ui/AlignTool.cpp
+    src/ui/SectionToSketch.cpp
     src/ui/CreateActions.cpp
     src/ui/DocumentSlots.cpp
     src/ui/ViewActions.cpp

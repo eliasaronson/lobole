@@ -679,8 +679,10 @@ What it is checked against:
 A scan or a sculpt (100k to 2M triangles) cannot be a B-Rep: every triangle
 would be a face, and an import of 100k took 560 s and 1.1 GB. A **mesh
 body** keeps the triangles as they are (`representation: mesh`). It is
-measured, sectioned, checked for printing and exported; every feature that
-needs faces or edges refuses it by name.
+measured, sectioned, drawn into a sketch by a section
+([a section into a sketch](../sketching/README.md#a-section-into-a-sketch)),
+checked for printing and exported; every feature that needs faces or edges
+refuses it by name.
 
 **The model.** `Body::mesh` (`src/core/Feature.h`) holds a shared
 `mesh::TriMesh`, and its `shape` is empty (`Body::IsMesh()`). Its one

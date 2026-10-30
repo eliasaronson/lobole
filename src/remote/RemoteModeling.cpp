@@ -32,6 +32,7 @@
 #include "core/io/RecognitionJson.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchOrientation.h"
+#include "core/sketch/SketchSection.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h" // PrintedThreadJson
@@ -54,11 +55,13 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -700,6 +703,28 @@ static constexpr MethodDoc ModelingMethods[] = {
      "(docs/sketching/README.md#projecting-an-imported-part). kind: "
      "face | edge; anything else is refused.",
      "element, feature_id, kind, sketch_id", remote::NeedsPart},
+    {"project_section",
+     "Draw where a sketch's plane cuts the bodies before it -- a scan's mesh "
+     "body or a B-Rep -- into the sketch as locked construction geometry "
+     "that follows them: refitted from the cut on every regeneration, never "
+     "kept as an index, so a re-scan or an upstream edit draws the new cut "
+     "(docs/sketching/README.md#a-section-into-a-sketch). `bodies` (names or "
+     "creating-feature ids; default every body before the sketch); "
+     "`tolerance_mm` (default 1/1000 of the cut bodies' bounding diagonal); "
+     "`fit`: polyline | arcs (default; lines and arcs) | spline (the "
+     "sketch's cubic B-splines); anything else is refused. Returns "
+     "{external_index, gen_ids, tolerance_mm, deviation_mm (the largest "
+     "distance from the true cut to what was drawn), chains, open_chains (an "
+     "open scan's cut does not close), regen, digest}. A plane that cuts "
+     "none of the bodies is refused and changes nothing. The clearance round "
+     "it is the sketch's `offset`, which takes this construction outline "
+     "and makes real geometry.",
+     "sketch_id:int>=1, bodies?:any[], tolerance_mm?:number>0, "
+     "fit?:string",
+     remote::NeedsPart,
+     "external_index:int, gen_ids:int[], tolerance_mm:number, "
+     "deviation_mm:number, chains:int, open_chains:int, fit:string, "
+     "regen:object, digest:object"},
     {"add_reference_image",
      "Attach an image underlay to a sketch from an image file (`path`: PNG, "
      "JPEG or BMP, up to 16384 px a side; anything else is refused). "
@@ -2266,6 +2291,71 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     resp["digest"] = DigestJson(preDigest, *doc);
     return resp;
   }
+  if (m == "project_section") {
+    // The sketch's plane through the bodies, refitted every regeneration
+    // (docs/sketching/README.md#a-section-into-a-sketch). Every parameter is
+    // read and checked before the sketch is touched.
+    size_t index = 0;
+    const uint64_t sketchId = p.at("sketch_id").get<uint64_t>();
+    auto* sk =
+        dynamic_cast<SketchFeature*>(doc->FindFeatureById(sketchId, &index));
+    if (!sk)
+      throw std::runtime_error(
+          "no sketch with id " + std::to_string(sketchId) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
+    sketch::SectionFit fit = sketch::SectionFit::Arcs;
+    if (p.contains("fit")) {
+      const std::string name =
+          p.at("fit").is_string() ? p.at("fit").get<std::string>() : "";
+      const auto parsed = sketch::SectionFitFromString(name);
+      if (!parsed)
+        throw std::runtime_error(
+            "project_section: fit " + p.at("fit").dump() +
+            " is not one (accepted: " + sketch::kSectionFits + ")");
+      fit = *parsed;
+    }
+    double toleranceMm = 0.0;
+    if (p.contains("tolerance_mm")) {
+      const json& t = p.at("tolerance_mm");
+      if (!t.is_number() || !std::isfinite(t.get<double>()) ||
+          !(t.get<double>() > 0.0))
+        throw std::runtime_error(
+            "project_section: tolerance_mm is millimetres above 0; got " +
+            t.dump());
+      toleranceMm = t.get<double>();
+    }
+    std::vector<uint64_t> bodies;
+    if (p.contains("bodies")) {
+      const std::set<uint64_t> chosen =
+          ResolvePartBodies(*doc, p.at("bodies"), "bodies");
+      bodies.assign(chosen.begin(), chosen.end());
+    }
+    json before = DocumentIO::FeatureToJson(*sk);
+    const size_t ei = sk->AddSectionGeometry(bodies, toleranceMm, fit);
+    doc->Regenerate();
+    if (!sk->GetError().empty()) { // nothing cut, or a body after it
+      const std::string err = sk->GetError();
+      sk->RemoveExternalGeometry(ei);
+      doc->Regenerate();
+      throw std::runtime_error("project_section: " + err);
+    }
+    const sketch::ExternalGeom& ext = sk->external[ei];
+    json resp = {{"external_index", ei},
+                 {"gen_ids", ext.genIds},
+                 {"tolerance_mm", ext.usedToleranceMm},
+                 {"deviation_mm", ext.deviationMm},
+                 {"chains", ext.sectionChains},
+                 {"open_chains", ext.sectionOpen},
+                 {"fit", sketch::ToString(ext.fit)}};
+    json after = DocumentIO::FeatureToJson(*sk);
+    const json preDigest = BodyDigestJson(*doc);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    resp["regen"] = RegenSummaryJson(*doc);
+    resp["digest"] = DigestJson(preDigest, *doc);
+    return resp;
+  }
   if (m == "add_constraint" || m == "add_constraints") {
     // Append one constraint (add_constraint: {sketch_id, kind, refs, value?/
     // expr?}) or MANY (add_constraints: {sketch_id, constraints: [{kind,
@@ -2524,8 +2614,15 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       std::vector<uint32_t> chain;
       for (const auto& s : p.at("chain"))
         chain.push_back(s.get<uint32_t>());
-      result["generated"] = sk->OffsetChain(
+      const std::vector<uint32_t> made = sk->OffsetChain(
           chain, p.at("distance").get<double>(), p.value("join_arc", true));
+      // Loud, as fillet is: an empty list read as success to a script.
+      if (made.empty())
+        throw std::runtime_error(
+            "offset failed: the chain is not one closed loop of this "
+            "sketch's entities, the distance is 0, or OpenCASCADE could not "
+            "offset it (an inward offset past the loop's own size)");
+      result["generated"] = made;
     } else {
       std::string whyNot;
       const uint32_t arcId = sk->FilletCorner(

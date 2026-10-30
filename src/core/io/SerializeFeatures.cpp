@@ -52,6 +52,7 @@
 #include "core/features/UnfoldFeature.h"
 #include "core/features/WormFeature.h"
 #include "core/sketch/SketchOrientation.h"
+#include "core/sketch/SketchSection.h"
 #include "core/sketch/SketchText.h"
 
 #include <nlohmann/json.hpp>
@@ -626,8 +627,10 @@ sketch::ExternalKind ExternalKindFromString(const std::string& kind) {
     return sketch::ExternalKind::Face;
   if (kind == "edge")
     return sketch::ExternalKind::Edge;
+  if (kind == "section") // vNEXT
+    return sketch::ExternalKind::Section;
   throw std::runtime_error("unknown sketch external reference kind: " + kind +
-                           "; kinds: face, edge");
+                           "; kinds: face, edge, section");
 }
 
 sketch::DerivedOp DerivedOpFromJson(const json& j) {
@@ -1171,6 +1174,17 @@ json FeatureToJson(const Feature& feature) {
     if (!sk->external.empty()) { // v48: live projected geometry
       j["external"] = json::array();
       for (const auto& e : sk->external) {
+        if (e.kind == sketch::ExternalKind::Section) { // vNEXT
+          json ej = {{"kind", "section"},
+                     {"fit", sketch::ToString(e.fit)},
+                     {"gen_ids", e.genIds}};
+          if (!e.sectionBodies.empty())
+            ej["bodies"] = e.sectionBodies;
+          if (e.toleranceMm > 0.0)
+            ej["tolerance_mm"] = e.toleranceMm;
+          j["external"].push_back(std::move(ej));
+          continue;
+        }
         json ej = {
             {"feature_id", e.ref.featureId},
             {"element", e.ref.name},
@@ -2003,14 +2017,19 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "face_ref? {feature_id, element} (sketch ON a body face), plane_ref? "
      "(the id of a DatumPlane, another Sketch or a Frame whose plane this "
      "one follows), external? "
-     "[{feature_id, element, kind: face|edge, fingerprint?}] — live "
+     "[{feature_id, element, kind: face|edge, fingerprint?} | {kind: "
+     "section, fit: polyline|arcs|spline, bodies?, tolerance_mm?}] — live "
      "projected construction geometry of another body, the same thing "
      "project_geometry adds to an existing sketch (a projected hole edge is a "
      "circle, and Hole takes circle centres, so a hole pattern needs no "
      "coordinates). An Import's element gets a fingerprint {element, shape, "
      "length_mm|area_mm2, centroid_mm}, taken when first projected: a changed "
      "file's renumbered element is followed by it, and one the file no longer "
-     "holds fails the sketch naming it, never the element under its index",
+     "holds fails the sketch naming it, never the element under its index. "
+     "A section is where the sketch's plane cuts the bodies (creating-feature "
+     "ids; absent = every body before it), refitted every regeneration to "
+     "tolerance_mm (absent = derived from their size), what project_section "
+     "adds",
      "plane:object, entities?:object[], constraints?:object[], "
      "face_ref?:object, plane_ref?:int>=0, external?:object[], "
      "derived_ops?:object[], images?:object[], next_image_id?:int"},
@@ -3031,6 +3050,35 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (!sk->derived.empty())
       sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
     for (const auto& ej : j.value("external", json::array())) { // v48
+      if (ej.is_object() && ej.value("kind", std::string()) == "section") {
+        // vNEXT: where the sketch's plane cuts the bodies
+        // (docs/sketching/README.md#a-section-into-a-sketch).
+        readctx::RefuseUnknownKeys(
+            ej, {"kind", "fit", "bodies", "tolerance_mm", "gen_ids"},
+            "sketch section");
+        sketch::ExternalGeom eg;
+        eg.kind = sketch::ExternalKind::Section;
+        const std::string fit = ej.value("fit", std::string("arcs"));
+        const auto parsed = sketch::SectionFitFromString(fit);
+        if (!parsed)
+          throw std::runtime_error(
+              "a sketch section's fit '" + fit.substr(0, 40) +
+              "' is not one (fits: " + sketch::kSectionFits + ")");
+        eg.fit = *parsed;
+        if (ej.contains("tolerance_mm")) {
+          const json& t = ej.at("tolerance_mm");
+          if (!t.is_number() || !std::isfinite(t.get<double>()) ||
+              !(t.get<double>() > 0.0))
+            throw std::runtime_error(
+                "a sketch section's tolerance_mm is a number above 0, got " +
+                t.dump().substr(0, 40));
+          eg.toleranceMm = t.get<double>();
+        }
+        eg.sectionBodies = ej.value("bodies", std::vector<uint64_t>{});
+        eg.genIds = ej.value("gen_ids", std::vector<uint32_t>{});
+        sk->external.push_back(std::move(eg));
+        continue;
+      }
       readctx::RefuseUnknownKeys(
           ej, {"feature_id", "element", "kind", "gen_ids", "fingerprint"},
           "sketch external reference");

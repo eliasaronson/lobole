@@ -77,7 +77,10 @@ typed `contract`: every field, its type and its enum values.
   "entities": [<entity>, ...], "constraints"?: [<constraint>, ...] (as
   add_constraint takes them, solved with the sketch), "external"?:
   [{{"feature_id", "element", "kind": "face"|"edge"}}] (live projected
-  construction geometry of another body, as project_geometry adds)}} .
+  construction geometry of another body, as project_geometry adds) or
+  {{"kind": "section", "fit"?: "polyline"|"arcs"|"spline", "bodies"?: [ids],
+  "tolerance_mm"?}} (where the sketch's plane cuts the bodies -- a scan's
+  outline -- as project_section adds)}} .
   Entity formats (2D UV coords on the plane):
     {{"type": "point", "p": [u,v]}}
     {{"type": "line", "a": [u,v], "b": [u,v]}}
@@ -1253,6 +1256,22 @@ _reference("project_geometry", "Project external geometry into a sketch (FreeCAD
           "(from list_elements). Use it to align new geometry to existing "
           "edges/holes. params: sketch_id, feature_id (the body's producer), "
           "element, kind ('face' or 'edge').")
+
+
+_reference("project_section", "Draw a scan's (or any body's) outline into a "
+          "sketch: where the sketch's plane cuts the bodies before it, as "
+          "LOCKED construction geometry refitted from the cut on every "
+          "regeneration, so it follows a re-scan or an upstream edit. "
+          "params: sketch_id, bodies? (names or creating-feature ids; "
+          "default every body before the sketch), tolerance_mm? (default "
+          "1/1000 of their bounding diagonal), fit? ('polyline' | 'arcs', "
+          "the default | 'spline'). Returns {external_index, gen_ids, "
+          "tolerance_mm, deviation_mm (largest distance from the true cut "
+          "to what was drawn), chains, open_chains}. For a stand or a "
+          "pocket shaped to the object, rpc('offset', {sketch_id, chain: "
+          "gen_ids, distance}) grows the outline by the clearance into real "
+          "geometry, then extrude it -- a fully parametric 2.5-D part, where "
+          "Cradle is the one shaped in 3-D.")
 
 
 @mcp.tool(description="Measure geometry over stable element names (from "

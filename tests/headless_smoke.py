@@ -1699,6 +1699,33 @@ def main():
         expect(r.get("scale") == 1.5 and
                r.get("placement", {}).get("translate_mm") == [0, 0, 5],
                f"import_step echoes its placement: {r}")
+        # A section into a sketch
+        # (docs/sketching/README.md#a-section-into-a-sketch): the open scan's
+        # outline at its equator drawn within the tolerance, grown 2 mm by
+        # the sketch's offset into real geometry and extruded 3 mm: a ring
+        # 2 mm off the cut, to the tolerance and the tessellation's sag.
+        d.call("new_project")
+        d.call("import_step", path=open_ball, representation="mesh",
+               keep_origin=True)
+        sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Outline",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]}, "entities": []})["id"]
+        r = d.call("project_section", sketch_id=sk, tolerance_mm=0.05)
+        expect(r["deviation_mm"] <= 0.05 and r["tolerance_mm"] == 0.05 and
+               r["chains"] == 1 and r["open_chains"] == 0 and
+               r["fit"] == "arcs" and r["gen_ids"] and r["regen"].get("ok"),
+               f"project_section draws the scan's outline: {r}")
+        d.call("offset", sketch_id=sk, chain=r["gen_ids"], distance=2.0)
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Stand", "sketch_id": sk,
+            "distance": 3.0, "mode": "new_body"})
+        vol = d.call("get_state")["bodies"][1]["volume_mm3"]
+        reff = math.sqrt(vol / (3.0 * math.pi))
+        expect(abs(abs(reff - 20.0) - 2.0) < 0.15,
+               f"the offset outline extrudes 2 mm off the cut: r {reff}")
+        expect_error(d, "project_section", "polyline, arcs, spline",
+                     sketch_id=sk, fit="smooth")
 
         expect_error(d, "import_step", "Accepted", path=stl, units="furlong")
         expect_error(d, "import_step", "declares its own", path=step,

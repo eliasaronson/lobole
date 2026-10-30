@@ -290,6 +290,29 @@ def main():
                   {"name": "nope", "scope": "projct"}, needle="scope",
                   tab=part["name"])
 
+            # A section into a sketch
+            # (docs/sketching/README.md#a-section-into-a-sketch): every
+            # parameter checked before the sketch is touched, and a plane
+            # that cuts nothing rolled back.
+            d.call("set_active_part", part=part["name"])
+            probe = d.call("add_feature", feature={
+                "type": "Sketch", "name": "Section probe",
+                "plane": {"origin": [0, 0, 500], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]}, "entities": []})["id"]
+            for label, params, needle in [
+                    ("project_section unknown fit",
+                     {"sketch_id": probe, "fit": "smooth"}, "smooth"),
+                    ("project_section zero tolerance",
+                     {"sketch_id": probe, "tolerance_mm": 0},
+                     "tolerance_mm"),
+                    ("project_section unknown body",
+                     {"sketch_id": probe, "bodies": ["Nope"]}, "Nope"),
+                    ("project_section a plane that cuts nothing",
+                     {"sketch_id": probe}, "cuts none")]:
+                check(label, "project_section", params, needle=needle,
+                      tab=part["name"])
+            d.call("delete_feature", feature_id=probe)
+
             # Imports (docs/interchange/README.md#up-axis,
             # docs/sketching/README.md#importing-dxf-and-svg): every one read
             # and checked before a feature, a sketch or a tab exists.

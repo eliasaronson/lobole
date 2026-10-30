@@ -17,6 +17,7 @@ in the file; the UI and expressions show degrees.
 | the curvature equation of a G2 joint, a `GCS::Constraint` of our own | `src/core/sketch/ConstraintEndCurvature.{h,cpp}` |
 | orientations a value edit must keep, `MeasureDimension` (pure geometry) | `src/core/sketch/SketchOrientation.{h,cpp}` |
 | loops, open ends, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
+| a section into a sketch: the cut of mesh and B-Rep bodies, its fits | `src/core/sketch/SketchSection.{h,cpp}`; the Section tool's "To sketch" in `src/ui/SectionToSketch.{h,cpp}` |
 | text labels: fonts, glyph layout, box corners | `src/core/sketch/SketchText.{h,cpp}`, the Hershey data `src/core/sketch/HersheyRomanSimplex.inc` |
 | snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
 | box-select hit test (pure) | `src/core/sketch/SketchSelection.{h,cpp}` |
@@ -548,6 +549,85 @@ print still attached is printed afresh rather than sent looking for the old
 element; such a stale print is not saved, and a file whose fingerprint names
 another element than its reference is refused on load as damage.
 
+### A section into a sketch
+
+The B-Rep route to a part shaped to a scanned object: a stand, an
+outline-shaped pocket, a rim that follows a profile. A 2.5-D part drawn from
+the object's outline stays fully parametric, which a
+[Cradle](../modeling/README.md#cradle) does not.
+
+`AddSectionGeometry(bodies, toleranceMm, fit)` (RPC `project_section`; the
+Section tool's **To sketch**) adds an `ExternalGeom` of kind `Section`:
+where the sketch's own plane cuts the bodies before it. It is not an
+element and keeps no index into anything: every regeneration cuts the
+bodies again and refits the cut (`RegenerateSection` in
+`src/core/features/SketchFeature.cpp`), so a re-scan, an
+[align](../interchange/README.md#placing-an-import) or an upstream edit draws
+the new cut. What it draws is solver-fixed construction geometry with
+stable ids, as any projection's is.
+
+- **The cut** (`sketch::CutBodies`): a mesh body by `mesh::Slice`, its
+  chains exact; a B-Rep body by a non-destructive `BRepAlgoAPI_Section`
+  against a face of the plane, its edges chained into wires
+  (`ShapeAnalysis_FreeBounds`) and sampled by `cad::SampleCurve` to a
+  twentieth of the tolerance. Reference (ghost) bodies are not cut. An open
+  scan's cut is drawn as the open chains it is.
+- **The bodies**: `bodies` names them by creating-feature id (names or ids
+  over the RPC); none means every body before the sketch.
+- **The tolerance** is `tolerance_mm`, or 1/1000 of the cut bodies'
+  bounding diagonal (`sketch::kSectionToleranceShare`): 0.1 mm on a 100 mm
+  scan.
+- **The fit** (`sketch::FitSection`), each within the tolerance:
+  - `polyline`: Douglas-Peucker, one line per kept span;
+  - `arcs` (the default): from each point the longest line or three-point
+    arc that keeps every point, and every segment between them, within the
+    tolerance, greedily; a round outline is a few arcs where a polyline is
+    a hundred lines;
+  - `spline`: the sketch's own cubic B-splines (clamped, uniform knots),
+    least squares with the ends pinned and as many poles as the tolerance
+    needs; a chain past a sketch spline's 255 poles is split into pieces
+    that meet, and a closed chain is always two (a lone closed spline
+    extrudes to a wrong mass: [known bugs](../known-bugs.md#an-extrusion-of-a-lone-closed-spline-weighs-wrong)).
+- **The deviation** (`ExternalGeom::deviationMm`, `deviation_mm` in the
+  reply): the largest distance from a point of the true cut to what was
+  drawn (for a spline, both ways). The fit holds it within the tolerance;
+  the reply says what it came to.
+- **Refused or failed, named**: a plane that cuts none of the bodies, a
+  body that is not before the sketch, a sketch with no body before it.
+  Over the RPC the section is then rolled back and the call changes
+  nothing; on a regeneration (the bodies moved away) it is the sketch's
+  error. An unknown `fit` and a tolerance not above 0 are refused, here
+  and on load.
+- **The clearance** is the sketch's `offset`: `OffsetChain` reads a
+  construction chain as drawn and makes real, non-construction geometry
+  of it, so the offset outline is the profile to extrude. An offset of a
+  spline outline comes back from OpenCASCADE as offset curves, fitted back
+  into sketch splines at 1e-5 of the loop's size; an edge that cannot be
+  turned back into sketch geometry fails the offset rather than leave a
+  gap. The offset bakes, as every offset does: it does not follow a
+  re-scan, the section under it does.
+
+Saved as `{kind: "section", fit, bodies?, tolerance_mm?, gen_ids}` in the
+sketch's `external` (format vNEXT); `bodies` and `tolerance_mm` are written
+only when given.
+
+#### What a section costs
+
+Measured by `tests/test_sketch_section.cpp`'s hidden "What a section into a
+sketch costs" on the figure fixture, cut across its middle and upright, at
+the default tolerance (0.13 mm on its 129 mm diagonal):
+
+| triangles | the cut | lines | lines and arcs | splines | entities (lines / arcs / splines) |
+|---|---|---|---|---|---|
+| 10k | 0.1-0.2 ms | under 0.1 ms | 0.1 ms | 3-25 ms | 117 / 81 / 4 upright |
+| 300k | 2-2.5 ms | 0.1 ms | 0.3-0.7 ms | 2-24 ms | 107 / 43 / 4 upright |
+| 2M | 12-13 ms | 0.3 ms | 1-2 ms | 5-48 ms | 108 / 44 / 4 upright |
+
+The cut is linear in the triangles; the fit grows with the points the cut
+holds (6,254 upright at 2M), not with the mesh. Loading the result into the
+solver, every entity held, is under a millisecond. So a section is cheap
+enough to redo on every regeneration at any size a mesh body holds.
+
 ### Reference images (underlays)
 
 A `sketch::ReferenceImage` is a raster placed on the plane to trace over. It is
@@ -748,7 +828,10 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   The circular angle is the per-step angle.
 - **OffsetChain(chain, distance, joinArc)** — offsets one closed loop through
   OCC `BRepOffsetAPI_MakeOffset` (arc or intersection joins) and converts the
-  result back to entities. Always baked.
+  result back to entities: lines and arcs as they are, any other curve
+  fitted as sketch splines. The chain may be construction (a projection, a
+  [section](#a-section-into-a-sketch)); the offset never is. Always baked;
+  the `offset` RPC refuses an offset that made nothing.
 
 ## Solving
 
@@ -1063,6 +1146,7 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
 | `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |
 | `project_geometry` | `sketch_id, feature_id, element, kind` | live external geometry; returns `gen_ids` |
+| `project_section` | `sketch_id, bodies?, tolerance_mm?, fit?` | [a section into a sketch](#a-section-into-a-sketch); returns `gen_ids`, `tolerance_mm`, `deviation_mm`, `chains`, `open_chains` |
 | `add_reference_image` | `sketch_id, path, at? \| origin?, opacity?, units_per_pixel?, rotation \| rotation_deg, show_always?` | returns `image_id`, `at`, `origin`; turned about its centre |
 | `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, show_always?, at? \| origin?, units_per_pixel?, rotation \| rotation_deg` | returns `at`, `origin`; a turn keeps the centre |
 | `calibrate_reference_image` | `sketch_id, image_id, p1, p2, distance, align?` | `distance` in sketch mm |
@@ -1082,6 +1166,16 @@ link; `modify_feature` with an edited sketch JSON covers them.
 
 ## Tests
 
+- `tests/test_sketch_section.cpp` `[sketch]` — a noisy scan's section in
+  each fit within its tolerance and on the true circle; its outline offset
+  by a clearance and extruded to the ring it asked for, in each fit; a
+  B-Rep box's section following the box as it grows, and failing named when
+  the plane leaves it; an open scan's open chains; the fits on a dense
+  ellipse at three tolerances, each closing into one loop of the ellipse's
+  area; the saved form and its refusals; the vNEXT golden. The section
+  tool's "To sketch" is the GUI test `section/to_sketch_draws_the_cut`;
+  `project_section` through the RPC, offset and extruded, is in
+  `headless_smoke.py`, and its refusals in `refused_calls_smoke.py`.
 - `tests/test_sketch_import.cpp` `[import]` — the conic image (similarity,
   mirror, skew) exact; each DXF mapping row's entity and geometry (a bulge
   arc's radius and side; a non-uniform spline's Bézier pieces equal to it at

@@ -1364,6 +1364,58 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     s_App->sectionToolOpen = false;
   };
 
+  // "To sketch" (docs/sketching/README.md#a-section-into-a-sketch): the
+  // active cut becomes a sketch on its plane with the cut drawn in it as
+  // locked construction, opened for editing. A cut that crosses no body is
+  // refused in the window and makes nothing.
+  t = IM_REGISTER_TEST(engine, "section", "to_sketch_draws_the_cut");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_section");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
+    s_App->sectionActiveId = s_App->sections[0].id;
+    s_App->sections[0].offset = 500.0f; // above everything
+    ctx->Yield();
+    const size_t before = Doc()->FeatureCount();
+    ctx->SetRef("//Section###ToolWindow");
+    ctx->ItemClick("**/###tosketch");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), before);
+    IM_CHECK(s_App->sectionSketchMsg.find("crosses no body") !=
+             std::string::npos);
+
+    s_App->sections[0].offset = 10.0f;
+    ctx->Yield();
+    const glm::vec4 cut = ui::SectionPlaneOf(*s_App, s_App->sections[0]);
+    ctx->ItemClick("**/###tosketch");
+    ctx->Yield(3);
+    IM_CHECK(s_App->sectionSketchMsg.empty());
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    const auto* sk =
+        dynamic_cast<const SketchFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(sk != nullptr);
+    if (sk == nullptr)
+      return;
+    IM_CHECK(sk->GetError().empty());
+    IM_CHECK_EQ(s_App->sketchEdit.activeSketchId, sk->GetId());
+    IM_CHECK_EQ(sk->external.size(), (size_t)1);
+    IM_CHECK(sk->external[0].kind == sketch::ExternalKind::Section);
+    IM_CHECK_EQ(sk->external[0].genIds.size(), (size_t)4); // the box's sides
+    for (uint32_t id : sk->external[0].genIds)
+      IM_CHECK(sketch::IsConstruction(sk->entities[sk->IndexOfEntity(id)]));
+    // On the cut: its normal, and its distance.
+    const glm::dvec3 n = sk->plane.GetNormal();
+    IM_CHECK(glm::length(n - glm::dvec3(glm::vec3(cut))) < 1e-6);
+    IM_CHECK(std::abs(glm::dot(sk->plane.GetOrigin(), n) - cut.w) < 1e-4);
+    s_App->sketchEdit = ui::SketchEditState{};
+    ui::ClearSections(*s_App);
+    s_App->sectionToolOpen = false;
+  };
+
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_the_cut");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

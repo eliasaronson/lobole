@@ -843,10 +843,30 @@ struct DerivedOp {
 // kept stable across regens (like DerivedOp::Inst) so a user's constraints to
 // them survive; the solver holds them FIXED (their position is owned by the
 // source, not the solve).
-enum class ExternalKind { Face, Edge };
+//
+// A Section (vNEXT, docs/sketching/README.md#a-section-into-a-sketch) is not
+// an element: it is where this sketch's plane cuts the bodies before it --
+// mesh or B-Rep -- refitted every regeneration to `toleranceMm` as lines,
+// lines and arcs, or B-splines (`fit`). It keeps no index into anything, so a
+// re-scan or an edit upstream draws the new cut. `ref` is unused.
+enum class ExternalKind { Face, Edge, Section };
+enum class SectionFit { Polyline, Arcs, Spline };
 struct ExternalGeom {
   ElementRef ref; // face (elementMap.names) or edge (edgeNames) of a body
   ExternalKind kind = ExternalKind::Face;
+  // Section only: the bodies cut, by creating-feature id (empty = every body
+  // before the sketch); the tolerance in mm (0 = derived from the cut
+  // bodies' size, sketch::DefaultSectionTolerance); the fit.
+  std::vector<uint64_t> sectionBodies;
+  double toleranceMm = 0.0;
+  SectionFit fit = SectionFit::Arcs;
+  // What the last regeneration drew (not saved): the tolerance it used, the
+  // largest distance from the true cut to the drawing, and the chains cut,
+  // of which `sectionOpen` do not close (an open scan's cut).
+  double usedToleranceMm = 0.0;
+  double deviationMm = 0.0;
+  int sectionChains = 0;
+  int sectionOpen = 0;
   std::vector<uint32_t> genIds; // generated construction entity ids (in order)
   // An imported file's own element, as it was when first projected: a
   // changed file renumbers, and the print is what the element under the name
@@ -894,8 +914,11 @@ public:
     VisitRefs(faceRef, visit); // ...or a body face it is attached to
     for (const sketch::DerivedOp& op : derived)
       visit(op.sourceSketchId); // LinkedCopy across sketches
-    for (const sketch::ExternalGeom& e : external)
+    for (const sketch::ExternalGeom& e : external) {
       VisitRefs(e.ref, visit); // live projected geometry
+      for (uint64_t id : e.sectionBodies)
+        visit(id); // a section's bodies
+    }
   }
 
   // Dimensional-constraint (value, expression) pairs PLUS the
@@ -1068,6 +1091,12 @@ public:
   // geometry. The projection materialises on the next Execute; returns the
   // index into `external`. The body/element must resolve during regeneration.
   size_t AddExternalGeometry(const ElementRef& ref, sketch::ExternalKind kind);
+  // Adds a section of `bodies` (creating-feature ids; empty = every body
+  // before this sketch) by this sketch's plane, drawn on the next Execute
+  // (docs/sketching/README.md#a-section-into-a-sketch). `toleranceMm` 0 is
+  // derived from the bodies' size. Returns the index into `external`.
+  size_t AddSectionGeometry(std::vector<uint64_t> bodies, double toleranceMm,
+                            sketch::SectionFit fit);
 
   // Removes external ref `extIndex` and the construction entities it generated.
   // No-op if out of range.

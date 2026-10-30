@@ -221,6 +221,7 @@
   {"design": "golden/v211-mesh-boolean", "kind": "golden", "source": "tests/golden/v211-mesh-boolean.json"},
   {"design": "golden/v212-thermal", "kind": "golden", "source": "tests/golden/v212-thermal.json"},
   {"design": "golden/v213-import-placement", "kind": "golden", "source": "tests/golden/v213-import-placement.json"},
+  {"design": "golden/vNEXT-sketch-section", "kind": "golden", "source": "tests/golden/vNEXT-sketch-section.json"},
   {"design": "golden/v194-edge-names-by-geometry", "kind": "golden", "source": "tests/golden/v194-edge-names-by-geometry.json"},
   {"design": "generator/gear", "kind": "generator", "source": "generators/gear.py"},
   {"design": "generator/gear_train", "kind": "generator", "source": "generators/gear_train.py", "parts": ["carrier", "pinion", "idler", "wheel", "rack"]},

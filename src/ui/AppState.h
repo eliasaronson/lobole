@@ -1802,6 +1802,10 @@ struct AppState {
   // The Section tool window is open. The sections outlive it: closing the
   // tool does not undo the cut you set up.
   bool sectionToolOpen = false;
+  // The Section tool's "To sketch" (ui/SectionToSketch.h): the fit it draws
+  // the active cut with, and why the last press drew nothing.
+  sketch::SectionFit sectionSketchFit = sketch::SectionFit::Arcs;
+  std::string sectionSketchMsg;
   // The Align tool (docs/interchange/README.md#placing-an-import): an
   // Import's placement from a floor, three points, its principal axes or a
   // known distance. The preview writes the placement onto the feature with

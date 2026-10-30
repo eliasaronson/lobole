@@ -5,6 +5,7 @@
 #include "core/ElementHistory.h"
 #include "core/ModelSpace.h"
 #include "core/features/DerivedFeature.h"
+#include "core/sketch/SketchSection.h"
 
 #include "common/Logger.h"
 #include "core/Angles.h"
@@ -1339,7 +1340,22 @@ void SketchFeature::RemoveDerivedOp(size_t opIndex) {
 
 size_t SketchFeature::AddExternalGeometry(const ElementRef& ref,
                                           sketch::ExternalKind kind) {
-  external.push_back({ref, kind, {}}); // projected on the next Execute
+  sketch::ExternalGeom e;
+  e.ref = ref;
+  e.kind = kind;
+  external.push_back(std::move(e)); // projected on the next Execute
+  return external.size() - 1;
+}
+
+size_t SketchFeature::AddSectionGeometry(std::vector<uint64_t> bodies,
+                                         double toleranceMm,
+                                         sketch::SectionFit fit) {
+  sketch::ExternalGeom e;
+  e.kind = sketch::ExternalKind::Section;
+  e.sectionBodies = std::move(bodies);
+  e.toleranceMm = toleranceMm;
+  e.fit = fit;
+  external.push_back(std::move(e)); // cut on the next Execute
   return external.size() - 1;
 }
 
@@ -1364,6 +1380,12 @@ void RefreshGenerated(SketchFeature& sk, sketch::ExternalGeom& ext,
     if (existing != SIZE_MAX) {
       sketch::SetEntityId(proj[i], ext.genIds[i]);
       sk.entities[existing] = std::move(proj[i]);
+    } else if (i < ext.genIds.size() && ext.genIds[i] != 0) {
+      // Its id kept, the entity drawn again: a file that lost the drawn
+      // entities (they are outputs) reads back as it was saved, and a
+      // constraint naming one still finds it.
+      sketch::SetEntityId(proj[i], ext.genIds[i]);
+      sk.entities.push_back(std::move(proj[i]));
     } else {
       const uint32_t id = sk.AddEntity(std::move(proj[i]));
       if (i < ext.genIds.size())
@@ -1378,6 +1400,73 @@ void RefreshGenerated(SketchFeature& sk, sketch::ExternalGeom& ext,
   }
 }
 
+// A section of the bodies before the sketch by its plane, refitted
+// (docs/sketching/README.md#a-section-into-a-sketch). Empty on success, else
+// why, naming what is missing.
+std::string RegenerateSection(SketchFeature& sk, const RegenContext& ctx,
+                              sketch::ExternalGeom& ext) {
+  std::vector<const Body*> bodies;
+  if (ext.sectionBodies.empty()) {
+    for (const Body& b : ctx.bodies)
+      if (!b.reference)
+        bodies.push_back(&b);
+    if (bodies.empty())
+      return "the section has no body before this sketch to cut";
+  } else {
+    for (uint64_t id : ext.sectionBodies) {
+      const size_t before = bodies.size();
+      for (const Body& b : ctx.bodies)
+        if (b.createdBy == id)
+          bodies.push_back(&b);
+      if (bodies.size() == before) {
+        const Feature* f = ctx.FindById(id);
+        return "the section's body " +
+               (f != nullptr ? "'" + f->GetName() + "' (feature " +
+                                   std::to_string(id) + ")"
+                             : "of feature " + std::to_string(id)) +
+               " is not before this sketch" +
+               (f != nullptr ? std::string(" or makes no body")
+                             : std::string(": the feature is gone"));
+      }
+    }
+  }
+  glm::dvec3 lo(std::numeric_limits<double>::infinity()),
+      hi(-std::numeric_limits<double>::infinity());
+  for (const Body* b : bodies) {
+    glm::dvec3 a, z;
+    if (BodyBounds(*b, a, z)) {
+      lo = glm::min(lo, a);
+      hi = glm::max(hi, z);
+    }
+  }
+  const double diagonal = lo.x <= hi.x ? glm::length(hi - lo) : 0.0;
+  const double tol = ext.toleranceMm > 0.0
+                         ? ext.toleranceMm
+                         : sketch::DefaultSectionTolerance(diagonal);
+  if (!(tol > 0.0))
+    return "the section's bodies have no size to derive a tolerance from";
+  // The B-Rep curves sampled well inside the tolerance, so what is measured
+  // against them is the fit's deviation and not the sampling's.
+  const sketch::SectionCut cut =
+      sketch::CutBodies(bodies, sk.plane, tol * 0.05);
+  if (!cut.error.empty())
+    return cut.error;
+  if (cut.chains.empty())
+    return "the sketch's plane cuts none of the section's bodies (move the "
+           "sketch's plane into them)";
+  sketch::FittedSection fitted = sketch::FitSection(cut.chains, ext.fit, tol);
+  for (sketch::Entity& e : fitted.entities)
+    sketch::SetConstruction(e, true);
+  ext.usedToleranceMm = tol;
+  ext.deviationMm = fitted.deviation;
+  ext.sectionChains = static_cast<int>(cut.chains.size());
+  ext.sectionOpen = static_cast<int>(
+      std::count_if(cut.chains.begin(), cut.chains.end(),
+                    [](const sketch::CutChain& c) { return !c.closed; }));
+  RefreshGenerated(sk, ext, std::move(fitted.entities));
+  return {};
+}
+
 } // namespace
 
 bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
@@ -1385,6 +1474,14 @@ bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
   // named in one error, not the first.
   std::vector<std::string> lost;
   for (auto& ext : external) {
+    if (ext.kind == sketch::ExternalKind::Section) {
+      if (const std::string why = RegenerateSection(*this, ctx, ext);
+          !why.empty()) {
+        SetError(why);
+        return false;
+      }
+      continue;
+    }
     // An entity of another part's sketch, copied by a Derived
     // (docs/modeling/derived.md#sketches): put onto this plane as it is,
     // construction or not, so a profile can be drawn of it. Solver-fixed
@@ -2024,8 +2121,15 @@ SketchFeature::OffsetChain(const std::vector<uint32_t>& chainIds,
   std::vector<sketch::Entity> chain;
   for (uint32_t id : chainIds) {
     const size_t i = IndexOfEntity(id);
-    if (i != std::numeric_limits<size_t>::max())
-      chain.push_back(entities[i]);
+    if (i != std::numeric_limits<size_t>::max()) {
+      // Offsetting reference geometry -- a projected outline, a section
+      // (docs/sketching/README.md#a-section-into-a-sketch) -- is how real
+      // geometry is made from it, so the chain is read as drawn and the
+      // offset is never construction.
+      sketch::Entity e = entities[i];
+      sketch::SetConstruction(e, false);
+      chain.push_back(std::move(e));
+    }
   }
   for (auto& e : sketch::OffsetLoop(plane, chain, distance, joinArc))
     gen.push_back(AddEntity(e));

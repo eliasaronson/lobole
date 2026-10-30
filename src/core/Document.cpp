@@ -665,9 +665,31 @@ bool Document::Regenerate() {
     // on (Execute refuses rather than fall back to it when the reference
     // fails to resolve, so leaving it out cannot make two inputs one).
     if (const auto* sk =
-            dynamic_cast<const SketchFeature*>(m_features[i].get()))
+            dynamic_cast<const SketchFeature*>(m_features[i].get())) {
       if (sk->faceRef.IsSet() || sk->planeRef != 0)
         fj.erase("plane");
+      // A section's drawing is an OUTPUT too: the cut of the bodies before
+      // it, refitted every regeneration
+      // (docs/sketching/README.md#a-section-into-a-sketch). Keyed on, an
+      // upstream edit set back missed, because the entities still held the
+      // edited cut.
+      std::set<uint32_t> drawn;
+      for (const sketch::ExternalGeom& e : sk->external)
+        if (e.kind == sketch::ExternalKind::Section)
+          drawn.insert(e.genIds.begin(), e.genIds.end());
+      if (!drawn.empty()) {
+        nlohmann::json kept = nlohmann::json::array();
+        for (const nlohmann::json& e :
+             fj.value("entities", nlohmann::json::array()))
+          if (!e.contains("id") || !e.at("id").is_number_unsigned() ||
+              drawn.count(e.at("id").get<uint32_t>()) == 0)
+            kept.push_back(e);
+        fj["entities"] = std::move(kept);
+        for (nlohmann::json& e : fj["external"])
+          if (e.value("kind", std::string()) == "section")
+            e.erase("gen_ids");
+      }
+    }
     if (m_print && PrintDrivesGeometry(*m_features[i]))
       fj["print"] = printfit::Fingerprint(*m_print);
     // A teardrop's roof points up the print direction: an input of the

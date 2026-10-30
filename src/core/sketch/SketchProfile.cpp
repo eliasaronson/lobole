@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/sketch/SketchProfile.h"
+#include "cad/CurveSample.h"
+#include "core/sketch/SketchSection.h"
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
@@ -1381,9 +1383,39 @@ std::vector<Entity> OffsetLoop(const SketchPlane& plane,
     mk.Perform(distance);
     if (!mk.IsDone())
       return out;
-    for (TopExp_Explorer ex(mk.Shape(), TopAbs_EDGE); ex.More(); ex.Next())
-      if (auto e = EdgeToSketchEntity(TopoDS::Edge(ex.Current()), plane))
+    // An offset of a spline (or of an arc of one) is no line or circle:
+    // sampled and fitted back as the sketch's own B-splines, to a tolerance
+    // far under anything drawn. An edge that comes back as nothing fails
+    // the offset rather than leave a gap in its loop.
+    glm::dvec2 lo(std::numeric_limits<double>::infinity()), hi(-lo);
+    for (const LoopEdge& le : loops[0].edges) {
+      lo = glm::min(lo, glm::min(le.a, le.b));
+      hi = glm::max(hi, glm::max(le.a, le.b));
+    }
+    double size = loops[0].edges.empty() ? 0.0 : glm::length(hi - lo);
+    if (loops[0].circle)
+      size = 2.0 * loops[0].circle->radius;
+    if (loops[0].ellipse)
+      size = 2.0 * loops[0].ellipse->rMajor;
+    const double fitTol = std::max(1e-6, 1e-5 * (size + std::abs(distance)));
+    for (TopExp_Explorer ex(mk.Shape(), TopAbs_EDGE); ex.More(); ex.Next()) {
+      const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+      if (auto e = EdgeToSketchEntity(edge, plane)) {
         out.push_back(*e);
+        continue;
+      }
+      BRepAdaptor_Curve curve(edge);
+      std::vector<glm::dvec2> pts;
+      for (const cad::CurveSample& q : cad::SampleCurve(curve, fitTol * 0.1))
+        pts.push_back(
+            plane.WorldToPlane(glm::dvec3(q.p.X(), q.p.Y(), q.p.Z())));
+      if (pts.size() < 2) {
+        LOG_ERROR("Sketch offset: an offset edge could not be sampled");
+        return {};
+      }
+      for (BSpline& s : FitSplines(pts, false, fitTol))
+        out.push_back(std::move(s));
+    }
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Sketch offset: OCCT error: {}", e.GetMessageString());
     out.clear();

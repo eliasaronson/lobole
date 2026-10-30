@@ -767,7 +767,10 @@ plane's or a sketch's row in the tree; there is no numeric default.
 A **Cradle** cuts a holder shaped to a scan out of a block: the block less
 the scan grown by a clearance and swept along the direction the object is
 lowered in, so it lifts in and out (`src/core/features/CradleFeature.{h,cpp}`,
-the pocket in `src/core/mesh/Field.{h,cpp}`).
+the pocket in `src/core/mesh/Field.{h,cpp}`). Where a 2.5-D part will do --
+a stand, an outline-shaped pocket, a rim -- the scan's outline drawn into a
+sketch and offset by the clearance is the parametric route
+([a section into a sketch](../sketching/README.md#a-section-into-a-sketch)).
 
 `Cradle {target_id, tool_id, clearance_mm?, direction?, sweep?,
 resolution_mm?}`:
