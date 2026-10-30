@@ -217,6 +217,24 @@ the heading if it is not here yet.
 
 ## Simulation
 
+### A variable-driven force reads 0.0 N in the study panel
+
+- **Symptom:** in a windowed instance, `new_project`, `set_variable load_n
+  10000`, a box, a static study with `add_load type: force, magnitude:
+  "load_n"`, then `enter_simulation`: the panel's force row, and the
+  viewport's load label, read `0.0 N`, while `list_studies` reports
+  `magnitude: 10000` and a run solves at 10 kN. The FIRST such project in a
+  fresh instance reads 10000.0 N; a second one built the same way in the
+  same instance reads 0.0 N.
+- **Cause:** not found. The row prints the load's stored `magnitude`
+  (`DrawStudyPanel`'s load list), which on the second project has not been
+  evaluated from its expression when the panel draws.
+- **Where:** the load rows in `src/ui/StudyPanel.cpp`; the evaluation of a
+  load's magnitude expression.
+- **Likely fix:** show the value the expression evaluates to where the row
+  is drawn (as `list_studies` does), with a GUI test that builds the study
+  twice in one instance.
+
 ### A diverging solve is reported as an unconstrained part
 
 - **Symptom:** a 60×20×2 mm steel plate clamped on one end, meshed at 0.4 mm
