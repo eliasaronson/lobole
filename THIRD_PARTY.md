@@ -174,8 +174,8 @@ push so it cannot rot.
 
 ## CalculiX — a separate solver program, in some packages
 
-The GUI AppImage, the Flatpak and the Windows zip and installer ship `ccx`,
-CalculiX's solver, which a static or buckling study can be solved on
+The GUI AppImage and the Flatpak ship `ccx`, CalculiX's solver, which a
+study can be solved on; on Windows a user installs it
 (docs/packaging/README.md#the-bundled-calculix). It is a separate executable
 that Loböle starts and talks to only through files (an `.inp` deck in, a
 `.dat` out): aggregation, not a combined work, so it does not change
