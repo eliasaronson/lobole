@@ -29,21 +29,6 @@ the heading if it is not here yet.
   re-run with the pose nudged by ±ε and treat a volume that vanishes as
   touching.
 
-### `check_print` passes a long bridge on a raw STL import
-
-- **Symptom:** the SO-101 bracket exported as STL and imported again, end
-  face down: `check_print`'s `bridges` passes, its worst span 7.78 mm. The
-  same body after a `Refine` fails with a 15.38 mm span, as the B-Rep it was
-  exported from does.
-- **Cause:** an STL arrives as one planar face per triangle, and the item
-  takes each downward face's inscribed diameter on its own: a ceiling of
-  twenty triangles is twenty short spans.
-- **Where:** the bridges item in `src/core/PrintCheck.cpp`
-  ([checking a print](tolerances/README.md#checking-a-print)).
-- **Likely fix:** merge coplanar neighbours first (`ShapeUpgrade_UnifySameDomain`,
-  what Refine runs) on the faces the item considers, or measure the span of
-  each connected set of ceiling faces.
-
 ## Modeling
 
 ### Sheet metal: 6061-T6's bend radius is unsourced

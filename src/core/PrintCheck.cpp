@@ -17,14 +17,18 @@
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepTools.hxx>
+#include <BRepTools_History.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
+#include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <ElSLib.hxx>
 #include <GProp_GProps.hxx>
 #include <IntCurvesFace_Intersector.hxx>
 #include <NCollection_DataMap.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Precision.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -32,6 +36,7 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Lin.hxx>
@@ -239,6 +244,107 @@ Bridge CeilingSpan(FaceEval& fe, double chordMm) {
   return out;
 }
 
+// A planar ceiling face, before its coplanar neighbours are merged.
+struct Ceiling {
+  int faceIndex = -1;
+  TopoDS_Face face;
+  double hMin = 0.0;
+};
+
+// The ceilings of one body, each connected set of coplanar faces measured
+// as the one face it is. A mesh import arrives as a face per triangle, and a
+// ceiling of twenty triangles measured face by face was twenty short spans:
+// a 15.4 mm bridge passed at 7.8 mm. The merge is the unifier Refine runs,
+// on the ceiling faces alone, so a B-Rep's ceilings (one face each already)
+// measure as before. A merged span names the original face holding its
+// centre, so the face shown is one of the body's own.
+void MeasureCeilings(const std::vector<Ceiling>& ceilings, int body,
+                     double bedMm, double chordMm, Report& r) {
+  const auto push = [&](const TopoDS_Face& measured, const Ceiling& named,
+                        double areaMm2, double hMin) {
+    FaceEval fe(measured);
+    Bridge b = CeilingSpan(fe, chordMm);
+    b.where.body = body;
+    b.where.face = named.faceIndex;
+    b.areaMm2 = areaMm2;
+    b.heightMm = hMin - bedMm;
+    r.bridges.areaMm2 += b.areaMm2;
+    r.bridges.faces.push_back(b);
+    return b;
+  };
+  std::vector<std::vector<size_t>> groups;
+  std::vector<TopoDS_Face> merged;
+  if (ceilings.size() > 1) {
+    try {
+      BRep_Builder bb;
+      TopoDS_Compound all;
+      bb.MakeCompound(all);
+      for (const Ceiling& c : ceilings)
+        bb.Add(all, c.face);
+      ShapeUpgrade_UnifySameDomain unify(all, /*UnifyEdges=*/true,
+                                         /*UnifyFaces=*/true,
+                                         /*ConcatBSplines=*/false);
+      unify.Build();
+      const Handle(BRepTools_History) history = unify.History();
+      NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> slot;
+      for (TopExp_Explorer ex(unify.Shape(), TopAbs_FACE); ex.More();
+           ex.Next()) {
+        slot.Bind(ex.Current(), static_cast<int>(merged.size()));
+        merged.push_back(TopoDS::Face(ex.Current()));
+      }
+      groups.assign(merged.size(), {});
+      for (size_t i = 0; i < ceilings.size(); ++i) {
+        const TopoDS_Shape& f = ceilings[i].face;
+        const int* at = nullptr;
+        if (!history.IsNull())
+          for (const TopoDS_Shape& m : history->Modified(f))
+            if ((at = slot.Seek(m)) != nullptr)
+              break;
+        if (at == nullptr)
+          at = slot.Seek(f);
+        if (at == nullptr)
+          throw Standard_Failure("a ceiling face the unifier lost");
+        groups[size_t(*at)].push_back(i);
+      }
+    } catch (const Standard_Failure&) {
+      groups.clear(); // measured face by face, as they came
+      merged.clear();
+    }
+  }
+  if (groups.empty()) {
+    for (const Ceiling& c : ceilings)
+      push(c.face, c, FaceArea(c.face), c.hMin);
+    return;
+  }
+  for (size_t g = 0; g < groups.size(); ++g) {
+    if (groups[g].empty())
+      continue;
+    double area = 0.0, hMin = std::numeric_limits<double>::infinity();
+    for (size_t i : groups[g]) {
+      area += FaceArea(ceilings[i].face);
+      hMin = std::min(hMin, ceilings[i].hMin);
+    }
+    const Ceiling& first = ceilings[groups[g].front()];
+    const Bridge b = push(merged[g], first, area, hMin);
+    if (groups[g].size() == 1)
+      continue;
+    // Name the original face the span's centre lies on.
+    for (size_t i : groups[g]) {
+      FaceEval fe(ceilings[i].face);
+      if (fe.surf.GetType() != GeomAbs_Plane)
+        continue;
+      double u = 0.0, v = 0.0;
+      ElSLib::Parameters(
+          fe.surf.Plane(),
+          gp_Pnt(b.where.point.x, b.where.point.y, b.where.point.z), u, v);
+      if (fe.Inside(u, v)) {
+        r.bridges.faces.back().where.face = ceilings[i].faceIndex;
+        break;
+      }
+    }
+  }
+}
+
 void CheckFaces(const std::vector<const Body*>& bodies, const Options& o,
                 double bedMm, Report& r, std::vector<TopoDS_Shape>& meshed) {
   const glm::dvec3 up = o.up;
@@ -257,6 +363,7 @@ void CheckFaces(const std::vector<const Body*>& bodies, const Options& o,
     BRepMesh_IncrementalMesh mesh(shape, lin, false, 0.25, false);
     meshed.push_back(shape); // stacking samples the same tessellation
     int faceIndex = -1;
+    std::vector<Ceiling> ceilings;
     for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
       ++faceIndex;
       const TopoDS_Face& face = TopoDS::Face(ex.Current());
@@ -293,13 +400,7 @@ void CheckFaces(const std::vector<const Body*>& bodies, const Options& o,
           continue; // on the bed
         }
         if (ang >= 90.0 - kCeilingDeg) {
-          Bridge b = CeilingSpan(fe, std::max(1e-3, lin / 4.0));
-          b.where.body = static_cast<int>(bi);
-          b.where.face = faceIndex;
-          b.areaMm2 = FaceArea(face);
-          b.heightMm = hMin - bedMm;
-          r.bridges.areaMm2 += b.areaMm2;
-          r.bridges.faces.push_back(b);
+          ceilings.push_back({faceIndex, face, hMin}); // MeasureCeilings
           continue;
         }
         // A sloped plane: exact, and whole. Its worst point is its lowest.
@@ -416,6 +517,8 @@ void CheckFaces(const std::vector<const Body*>& bodies, const Options& o,
             {Where{static_cast<int>(bi), faceIndex, wp}, faceWorst, 0.0});
       }
     }
+    MeasureCeilings(ceilings, static_cast<int>(bi), bedMm,
+                    std::max(1e-3, lin / 4.0), r);
   }
 }
 

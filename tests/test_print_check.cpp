@@ -8,12 +8,20 @@
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
+#include <Poly_Triangulation.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -119,6 +127,53 @@ TEST_CASE("A ceiling is a bridge with its span", "[print][check]") {
   CHECK(Run({arch}, o).bridges.status == printcheck::Status::Pass);
   // The ceiling is not an overhang.
   CHECK(r.overhang.areaMm2 == 0.0);
+}
+
+// The arch as a raw mesh import arrives: one planar face per triangle,
+// sewn into a solid.
+TopoDS_Shape Faceted(const TopoDS_Shape& s) {
+  BRepMesh_IncrementalMesh mesh(s, 0.1);
+  BRepBuilderAPI_Sewing sew(1e-6);
+  for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+    const TopoDS_Face& f = TopoDS::Face(ex.Current());
+    TopLoc_Location loc;
+    const Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(f, loc);
+    for (int t = 1; t <= tri->NbTriangles(); ++t) {
+      int a, b, c;
+      tri->Triangle(t).Get(a, b, c);
+      if (f.Orientation() == TopAbs_REVERSED)
+        std::swap(b, c);
+      BRepBuilderAPI_MakePolygon poly(tri->Node(a), tri->Node(b), tri->Node(c),
+                                      Standard_True);
+      sew.Add(BRepBuilderAPI_MakeFace(poly.Wire(), Standard_True).Face());
+    }
+  }
+  sew.Perform();
+  return BRepBuilderAPI_MakeSolid(TopoDS::Shell(sew.SewedShape())).Solid();
+}
+
+TEST_CASE("A faceted ceiling is one bridge, not a span per triangle",
+          "[print][check]") {
+  // The arch above, as an STL import arrives. Measured a triangle at a
+  // time, its 12 x 10 ceiling was two spans of 6.4 and passed a 9 mm limit.
+  const TopoDS_Shape block = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 32, 10, 10);
+  const TopoDS_Shape slot = BRepPrimAPI_MakeBox(gp_Pnt(10, -1, 0), 12, 12, 5);
+  const TopoDS_Shape arch = Faceted(BRepAlgoAPI_Cut(block, slot).Shape());
+  int faces = 0;
+  for (TopExp_Explorer ex(arch, TopAbs_FACE); ex.More(); ex.Next())
+    faces++;
+  REQUIRE(faces > 20); // a face per triangle
+  printcheck::Options o;
+  o.maxBridgeMm = 9.0;
+  const auto r = Run({Make(arch, "arch")}, o);
+  REQUIRE(r.bridges.faces.size() == 1);
+  CHECK(r.bridges.worstSpanMm == Approx(10.0).margin(0.05));
+  CHECK(r.bridges.faces[0].heightMm == Approx(5.0));
+  CHECK(r.bridges.areaMm2 == Approx(120.0));
+  CHECK(r.bridges.status == printcheck::Status::Fail);
+  // It names one of the body's own faces, the one under the span's centre.
+  CHECK(r.bridges.faces[0].where.face >= 0);
+  CHECK(r.bridges.faces[0].where.face < faces);
 }
 
 TEST_CASE("Print-in-place bodies keep the gap, and touching ones fuse",
