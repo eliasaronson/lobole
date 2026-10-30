@@ -114,21 +114,6 @@ the heading if it is not here yet.
   edges (the bore over the cap) keeps that case honest; it renames U edges
   in saved documents, so it is a format change.
 
-### A small sphere cut beside a fillet keeps a face inside the sphere
-
-- **Symptom:** a half revolve (a 10 x 20 section through 180 degrees),
-  two of its edges filleted r2.79, then a d2.5 Sphere cut on its flat face
-  next to the blend: the exact cut and the fuzzy retry both leave a face of
-  the body INSIDE the sphere, and the boolean check refuses the cut ("made
-  body 'Base' WRONG though it passes BRepCheck").
-- **Case:** `tests/fuzz/open/boolean_failed-779.jsonl` (`tools/fuzz.py
-  replay` it; it moves to `tests/fuzz/cases/` with the fix).
-- **Cause:** OpenCASCADE's cut, where the sphere's seam meets the fillet's
-  surface; the check is right to refuse it.
-- **Where:** `CheckedBooleanNamed` in `src/core/BodyMode.cpp` is where a
-  remedy would go (a retry with the tool turned about its axis, so the seam
-  falls elsewhere).
-
 ### An extrusion of a lone closed spline weighs wrong
 
 - **Symptom:** a profile that is one B-spline closed on itself (first pole

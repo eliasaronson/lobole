@@ -10,6 +10,7 @@
 
 #include <glm/geometric.hpp>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 RevolveFeature::RevolveFeature(const std::string& name, uint64_t sketchId,
                                double angleDeg, ExtrudeMode mode, bool reversed)
@@ -92,6 +93,42 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
   if (mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add) {
     m_tool = solid; // for a Pattern of this cut or add (ToolShape)
     m_toolMap = map;
+  }
+  // A full turn's seam is its profile, which lies in the sketch plane -- and
+  // a sketch drawn on a face of the body puts it IN that face: a d2.5 sphere
+  // cut centred on a half revolve's cap beside a fillet left the cap inside
+  // the sphere, exact and fuzzy alike, and was refused. A solid of a full
+  // revolution is the same point set turned about its axis, so a refused cut
+  // or add is tried once more with the solid turned a quarter, which takes
+  // the seam out of the plane. The names are the solid's (the turn shares its
+  // topology); a refused retry reports the first refusal.
+  const bool fullTurn = std::abs(std::abs(angleDeg) - 360.0) < 1e-9;
+  if (fullTurn && (mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add)) {
+    // A refused cut or add leaves the bodies as they were (ApplyBodyMode),
+    // so the retry starts from the same ones.
+    std::string warning, error;
+    if (ApplyBodyMode(ctx.bodies, solid, map, mode, GetName(), GetMaterial(),
+                      GetId(), &warning, &error)) {
+      if (!warning.empty())
+        SetWarning(warning);
+      return true;
+    }
+    const glm::dmat4 turn =
+        glm::translate(glm::dmat4(1.0), axisOrigin) *
+        glm::rotate(glm::dmat4(1.0), glm::half_pi<double>(), axisDir) *
+        glm::translate(glm::dmat4(1.0), -axisOrigin);
+    std::string turnedWarning, turnedError;
+    if (ApplyBodyMode(ctx.bodies, solid.Transformed(turn), map, mode, GetName(),
+                      GetMaterial(), GetId(), &turnedWarning, &turnedError)) {
+      LOG_INFO("revolve '{}': kept with its seam turned a quarter about the "
+               "axis; as drawn: {}",
+               GetName(), error);
+      if (!turnedWarning.empty())
+        SetWarning(turnedWarning);
+      return true;
+    }
+    SetError(error.empty() ? "body operation failed" : error);
+    return false;
   }
   return ApplyBodyModeReporting(ctx.bodies, std::move(solid), std::move(map),
                                 mode, *this);

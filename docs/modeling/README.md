@@ -1318,6 +1318,15 @@ inherit.
 A test counts the curve representations on the operands' edges across a
 retry, and checks the same count sees the exact build's writes.
 
+A full revolve's cut or add has one more: its seam is its profile, which
+lies in the sketch plane, and a sketch drawn on a face of the body puts the
+seam IN that face. A d2.5 sphere cut centred on a half revolve's cap beside
+a fillet left the cap inside the sphere, exact and fuzzy alike. A solid of a
+full turn is the same point set turned about its axis, so a refused one is
+tried once more turned a quarter (`RevolveFeature::Execute`), which takes
+the seam out of the plane; its names are the solid's. If that is refused
+too, the first refusal is what the feature reports.
+
 A retry runs only after a refusal, so a document that builds cleanly pays
 nothing for it.
 
