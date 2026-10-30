@@ -359,12 +359,6 @@ void MeshRenderer::UpdateMesh(uint32_t instanceId,
   UpdateAsset(instance->assetId, vertices, indices);
 }
 
-void MeshRenderer::UpdateCamera(const glm::mat4& view,
-                                const glm::mat4& projection) {
-  m_viewMatrix = view;
-  m_projectionMatrix = projection;
-}
-
 void MeshRenderer::WaitDeviceIdleOnce() {
   if (m_deviceIdle || m_device == VK_NULL_HANDLE)
     return;
@@ -372,8 +366,8 @@ void MeshRenderer::WaitDeviceIdleOnce() {
   m_deviceIdle = true;
 }
 
-void MeshRenderer::Render(VkCommandBuffer commandBuffer,
-                          uint32_t currentFrame) {
+void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+                          const SceneView& view) {
   // A batch left open would mean drawing from buffers whose staging copy has
   // not executed — garbage geometry. Never happens on the paired path; this
   // makes "assets are uploaded before anything draws them" an invariant of the
@@ -383,17 +377,17 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
   m_deviceIdle = false;
   // Update uniform buffer
   UniformBufferObject ubo{};
-  ubo.view = m_viewMatrix;
-  ubo.proj = m_projectionMatrix;
+  ubo.view = view.view;
+  ubo.proj = view.proj;
 
   // Extract camera position from inverse view matrix
-  glm::mat4 invView = glm::inverse(m_viewMatrix);
+  glm::mat4 invView = glm::inverse(view.view);
   ubo.viewPos = glm::vec4(invView[3][0], invView[3][1], invView[3][2], 1.0f);
 
   // The rig (core/LightRig.h): placed from the camera, or frozen at the
   // home view when locked to the model; the colours are core/Conventions.h,
   // shared with the stock block and the ray tracer.
-  const conv::LightRig rig = Rig();
+  const conv::LightRig rig = Rig(view.view);
   ubo.primaryLight.direction = glm::vec4(rig.key, conv::kKeyLight.a);
   ubo.primaryLight.color = glm::vec4(glm::vec3(conv::kKeyLight), 1.0f);
   ubo.fillLight.direction = glm::vec4(rig.fill, conv::kFillLight.a);
@@ -406,7 +400,7 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
   // Section clip plane is global (same for every instance), so it rides in
   // the shared UBO rather than per-draw push constants.
   for (int i = 0; i < kMaxClipPlanes; i++)
-    ubo.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
+    ubo.clipPlanes[i] = view.clips[static_cast<size_t>(i)];
 
   // Key-light shadow map (S1): per-frame light fit from the ShadowRenderer
   // (via SetShadowState). Strength 0.75 and a ~1.5-texel normal-offset bias
@@ -423,23 +417,25 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
   // affine remap between those rectangles aligns them exactly, whatever the
   // aspect or AO resolution. xy = scale, zw = offset; the enable flag rides
   // in aoParams2.x.
-  ubo.aoParams = ViewportToTargetUV(m_viewportX, m_viewportY, m_viewportWidth,
-                                    m_viewportHeight);
+  const int32_t vpX = view.viewport.x, vpY = view.viewport.y;
+  const uint32_t vpW = static_cast<uint32_t>(view.viewport.z),
+                 vpH = static_cast<uint32_t>(view.viewport.w);
+  ubo.aoParams = ViewportToTargetUV(vpX, vpY, vpW, vpH);
   ubo.aoParams2 = glm::vec4(m_aoEnabled ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
 
   // Set viewport to the central region (excludes the side panels)
   VkViewport viewport{};
-  viewport.x = static_cast<float>(m_viewportX);
-  viewport.y = static_cast<float>(m_viewportY);
-  viewport.width = static_cast<float>(m_viewportWidth);
-  viewport.height = static_cast<float>(m_viewportHeight);
+  viewport.x = static_cast<float>(vpX);
+  viewport.y = static_cast<float>(vpY);
+  viewport.width = static_cast<float>(vpW);
+  viewport.height = static_cast<float>(vpH);
   viewport.minDepth = 0.0f;
   viewport.maxDepth = 1.0f;
   vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
   VkRect2D scissor{};
-  scissor.offset = {m_viewportX, m_viewportY};
-  scissor.extent = {m_viewportWidth, m_viewportHeight};
+  scissor.offset = {vpX, vpY};
+  scissor.extent = {vpW, vpH};
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
   // One slot per swapchain image, indexed directly — see
@@ -654,14 +650,6 @@ void MeshRenderer::ClearFaceHover() {
       instance->hoverRange = glm::uvec2(0);
     }
   }
-}
-
-void MeshRenderer::SetViewport(int32_t x, int32_t y, uint32_t width,
-                               uint32_t height) {
-  m_viewportX = x;
-  m_viewportY = y;
-  m_viewportWidth = width;
-  m_viewportHeight = height;
 }
 
 bool MeshRenderer::GetShadowCasters(std::vector<ShadowCaster>& out,

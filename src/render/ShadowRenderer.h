@@ -30,16 +30,14 @@ public:
                   VkCommandPool commandPool);
   void Shutdown();
 
-  // Section clip plane (world): xyz = normal, w = distance; 0 = off. Same
-  // convention as MeshRenderer::SetClipPlane — sectioned-away material must
-  // not cast.
-  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
-
-  // Records the depth-only shadow pass: fits the light frustum to `scene`'s
-  // combined bounds and draws every opaque (visible, non-ghost) instance.
-  // Call before the main render pass begins, then hand LightViewProj() and
-  // the texel sizes to MeshRenderer::SetShadowState.
-  void RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene);
+  // Records the depth-only shadow pass for the main pass that will draw
+  // `view`: the key light is `scene`'s rig for that camera, the frustum is
+  // fit to `scene`'s combined bounds, and every opaque (visible, non-ghost)
+  // instance draws, cut by `view.clips` -- sectioned-away material must not
+  // cast. Call before the main render pass begins, then hand LightViewProj()
+  // and the texel sizes to MeshRenderer::SetShadowState.
+  void RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene,
+                        const SceneView& view);
 
   // For MeshRenderer::SetShadowMap — must be wired BEFORE the mesh
   // renderer's Initialize (its descriptor sets bind these at creation).
@@ -80,7 +78,6 @@ private:
   VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
   VkPipeline m_pipeline = VK_NULL_HANDLE;
 
-  ClipPlaneArray m_clipPlanes = NoClipPlanes(); // section view
   glm::mat4 m_lightViewProj = glm::mat4(1.0f);
   float m_texelWorld = 0.0f; // world size of one shadow-map texel
   uint32_t m_resolution = kDefaultResolution;

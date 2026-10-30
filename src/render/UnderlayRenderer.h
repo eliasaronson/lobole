@@ -42,18 +42,6 @@ public:
                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
   void Shutdown() override;
 
-  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
-    m_view = view;
-    m_proj = proj;
-  }
-  void SetViewportSize(uint32_t w, uint32_t h) { SetViewport(0, 0, w, h); }
-  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) override {
-    m_viewportX = x;
-    m_viewportY = y;
-    m_viewportWidth = w;
-    m_viewportHeight = h;
-  }
-
   // Replace this frame's draw list. Decodes + uploads any asset not yet cached
   // (a one-time synchronous upload); cached assets are reused.
   void SetImages(const std::vector<UnderlayDraw>& images);
@@ -66,7 +54,8 @@ public:
   // texture is never freed while a frame in flight may still sample it.
   void ReleaseTextures();
 
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+              const SceneView& view) override;
   bool IsInitialized() const { return m_initialized; }
 
 private:
@@ -139,11 +128,5 @@ private:
   std::vector<Vertex> m_verts;  // this frame's quad vertices
   std::vector<DrawRec> m_draws; // this frame's per-image draws
 
-  glm::mat4 m_view = glm::mat4(1.0f);
-  glm::mat4 m_proj = glm::mat4(1.0f);
-  int32_t m_viewportX = 0;
-  int32_t m_viewportY = 0;
-  uint32_t m_viewportWidth = 1280;
-  uint32_t m_viewportHeight = 720;
   bool m_initialized = false;
 };

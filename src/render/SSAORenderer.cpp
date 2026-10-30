@@ -184,7 +184,8 @@ bool SSAORenderer::SetFullResolution(bool fullRes) {
 }
 
 void SSAORenderer::RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
-                                    MeshRenderer& scene) {
+                                    MeshRenderer& scene,
+                                    const SceneView& sceneView) {
   glm::vec3 bbMin, bbMax;
   const bool haveGeometry = scene.GetShadowCasters(m_casters, bbMin, bbMax);
   const float diag =
@@ -193,14 +194,14 @@ void SSAORenderer::RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
 
   // One slot per swapchain image, indexed directly (FramesInFlight.h).
   const uint32_t frame = render::FrameSlot(currentFrame, "SSAORenderer");
-  const glm::mat4& view = scene.ViewMatrix();
-  const glm::mat4& proj = scene.ProjectionMatrix();
+  const glm::mat4& view = sceneView.view;
+  const glm::mat4& proj = sceneView.proj;
 
   PrepassUBO pre{};
   pre.view = view;
   pre.proj = proj;
   for (int i = 0; i < kMaxClipPlanes; i++)
-    pre.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
+    pre.clipPlanes[i] = sceneView.clips[static_cast<size_t>(i)];
   memcpy(m_prepassUBOMapped[frame], &pre, sizeof(pre));
 
   SSAOParamsUBO ao{};

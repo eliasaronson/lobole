@@ -102,34 +102,24 @@ public:
   // playback has not put in yet (ui/SequencePlayback.h).
   void SetMeshVisible(uint32_t meshId, bool visible);
 
-  // Camera and rendering
-  void UpdateCamera(const glm::mat4& view,
-                    const glm::mat4& projection) override;
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
+  // Rendering. Each Render also notes where `view` puts the camera: a
+  // significant move since the last draw restarts the silhouette settle
+  // clock. The section planes in `view.clips` cut the edges.
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+              const SceneView& view) override;
   // A capture (screenshot, quick render) is a picture of the camera at rest:
-  // count it as settled now, so the next Render classifies silhouettes
-  // instead of drawing the static edges a moving camera gets. The settle
-  // clock is wall time, and a capture that follows a camera move by less
-  // than silhouetteSettleMs used to lose its silhouettes -- invisible while
-  // every capture spent a second in readback first.
-  void SettleSilhouettes() { m_lastCameraMove = {}; }
+  // count the NEXT Render as settled, after it has noted its camera, so it
+  // classifies silhouettes instead of drawing the static edges a moving
+  // camera gets. The settle clock is wall time, and a capture that follows a
+  // camera move by less than silhouetteSettleMs used to lose its silhouettes
+  // -- invisible while every capture spent a second in readback first.
+  void SettleSilhouettes() { m_settleNextRender = true; }
 
   // Settings
   void SetOutlineSettings(const OutlineSettings& settings) {
     m_settings = settings;
   }
   const OutlineSettings& GetOutlineSettings() const { return m_settings; }
-  void SetViewportSize(uint32_t width, uint32_t height) {
-    SetViewport(0, 0, width, height);
-  }
-
-  // Section clip plane (world): xyz = normal, w = distance; edges past it
-  // are discarded. Zero = disabled (default).
-  void SetClipPlanes(const ClipPlaneArray& planes) override {
-    m_clipPlanes = planes;
-  }
-  void SetViewport(int32_t x, int32_t y, uint32_t width,
-                   uint32_t height) override;
 
   bool IsInitialized() const { return m_isInitialized; }
   // The widest line this device rasterizes (1 without the wideLines
@@ -219,9 +209,12 @@ private:
   void DropToStaticEdges();
 
   // Rendering helpers
-  void UpdateUniformBuffers(uint32_t currentFrame);
-  void RenderOutlines(VkCommandBuffer commandBuffer, uint32_t currentFrame);
-  void RenderWireframes(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+  void NoteCamera(const glm::mat4& view);
+  void UpdateUniformBuffers(uint32_t currentFrame, const SceneView& view);
+  void RenderOutlines(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+                      const SceneView& view);
+  void RenderWireframes(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+                        const SceneView& view);
 
   // Utility functions
 
@@ -272,10 +265,11 @@ private:
   [[nodiscard]] const OutlineAsset* AssetOf(const OutlineMesh& mesh) const;
   uint32_t m_nextMeshId = 1;
 
-  // Camera data
-  glm::mat4 m_viewMatrix = glm::mat4(1.0f);
-  glm::mat4 m_projectionMatrix = glm::mat4(1.0f);
+  // The camera of the last draw: what a move is measured from, and where
+  // the silhouettes are classified from.
+  glm::mat4 m_lastView = glm::mat4(1.0f);
   glm::vec3 m_cameraPosition = glm::vec3(0.0f);
+  bool m_settleNextRender = false; // SettleSilhouettes
 
   // Silhouette settle state: while the camera moves only static edges draw;
   // one classification pass runs after it has been still for the configured
@@ -285,15 +279,8 @@ private:
   bool m_silhouettesDirty = true;
   outline::SilhouetteScratch m_silhouetteScratch;
 
-  // Viewport
-  int32_t m_viewportX = 0;
-  int32_t m_viewportY = 0;
-  uint32_t m_viewportWidth = 1280;
-  uint32_t m_viewportHeight = 720;
-
   // Settings
   OutlineSettings m_settings;
-  ClipPlaneArray m_clipPlanes = NoClipPlanes(); // section view
 
   // Line widths the device can draw (from its features and limits).
   bool m_wideLines = false;

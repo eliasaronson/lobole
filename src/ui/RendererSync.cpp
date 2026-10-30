@@ -536,7 +536,6 @@ void ForgetGpuProjection(AppState& state, const RendererSet& set) {
   state.underlayRenderer = set.underlay;
   state.fieldRenderer = set.field;
   state.stockRenderer = set.stock;
-  state.sceneRenderers = set.scene;
   state.rayTracer = set.rayTracer;
   state.faceSelector = set.faceSelector;
   state.ibl = set.ibl;

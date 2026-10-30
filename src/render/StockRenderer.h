@@ -76,27 +76,13 @@ public:
   // derives the same rig from the same camera as the part beside it.
   void SetLightsLockedToModel(bool locked) { m_lightsLocked = locked; }
 
-  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
-    m_view = view;
-    m_proj = proj;
-  }
-  void SetClipPlanes(const ClipPlaneArray& planes) override {
-    m_clipPlanes = planes;
-  }
-  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) override {
-    m_vx = x;
-    m_vy = y;
-    m_vw = w;
-    m_vh = h;
-  }
-  // What it is actually drawing into, so a test can assert this renderer was
-  // pointed at the same rectangle as the rest of the scene rather than
-  // recomputing the caller's arithmetic.
-  [[nodiscard]] glm::ivec4 Viewport() const {
-    return {m_vx, m_vy, static_cast<int32_t>(m_vw), static_cast<int32_t>(m_vh)};
-  }
+  // The rectangle the last Render was handed, so a test can assert what this
+  // renderer actually drew into rather than recomputing the caller's
+  // arithmetic. A record of the last draw, never an input to the next.
+  [[nodiscard]] glm::ivec4 Viewport() const { return m_drawnViewport; }
 
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+              const SceneView& view) override;
   [[nodiscard]] bool IsInitialized() const { return m_initialized; }
 
 private:
@@ -164,11 +150,7 @@ private:
 
   glm::vec4 m_color = glm::vec4(0.62f, 0.64f, 0.68f, 1.0f);
   glm::mat4 m_model = glm::mat4(1.0f);
-  glm::mat4 m_view = glm::mat4(1.0f);
-  glm::mat4 m_proj = glm::mat4(1.0f);
   bool m_lightsLocked = false;
-  ClipPlaneArray m_clipPlanes = NoClipPlanes();
-  int32_t m_vx = 0, m_vy = 0;
-  uint32_t m_vw = 1280, m_vh = 720;
+  glm::ivec4 m_drawnViewport{0};
   bool m_initialized = false;
 };

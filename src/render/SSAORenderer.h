@@ -53,15 +53,12 @@ public:
   bool SetFullResolution(bool fullRes);
   bool FullResolution() const { return m_fullRes; }
 
-  // Section clip plane (world): matches MeshRenderer::SetClipPlane —
-  // sectioned-away material must not occlude.
-  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
-
-  // Records prepass + AO + blur. Camera matrices are read from `scene`
-  // (guaranteed identical to what the main pass will use); the AO radius is
-  // fit from the scene bbox. Call before the main render pass begins.
+  // Records prepass + AO + blur for the main pass that will draw `view`:
+  // its camera, and its section planes (sectioned-away material must not
+  // occlude). The casters and the AO radius, fit from their bbox, come from
+  // `scene`. Call before the main render pass begins.
   void RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
-                        MeshRenderer& scene);
+                        MeshRenderer& scene, const SceneView& view);
 
   // What mesh.frag samples (MeshRenderer::SetAOMap / RebindAOMap): the
   // full-res upsampled AO in half mode, the native full-res blur in full.
@@ -152,8 +149,6 @@ private:
   std::vector<VkBuffer> m_aoUBOs;
   std::vector<VkDeviceMemory> m_aoUBOMemory;
   std::vector<void*> m_aoUBOMapped;
-
-  ClipPlaneArray m_clipPlanes = NoClipPlanes(); // section view
 
   // Scratch reused across frames (avoids per-frame allocations).
   std::vector<ShadowCaster> m_casters;

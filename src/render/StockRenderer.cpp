@@ -229,20 +229,21 @@ bool StockRenderer::EnsureCapacity(DynamicBuffer& buf, VkDeviceSize bytes,
   return buf.mapped != nullptr;
 }
 
-void StockRenderer::Render(VkCommandBuffer commandBuffer,
-                           uint32_t currentFrame) {
+void StockRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+                           const SceneView& view) {
+  m_drawnViewport = view.viewport;
   if (!m_initialized || m_indices.empty())
     return;
   const uint32_t frame = render::FrameSlot(currentFrame, "StockRenderer");
 
   Ubo ubo{};
-  ubo.view = m_view;
-  ubo.proj = m_proj;
+  ubo.view = view.view;
+  ubo.proj = view.proj;
   for (int i = 0; i < kMaxClipPlanes; i++)
-    ubo.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
+    ubo.clipPlanes[i] = view.clips[static_cast<size_t>(i)];
   // The scene's own rig, not a copy — the part beside the block is lit by
   // the same derivation from the same camera (core/LightRig.h).
-  const conv::LightRig rig = conv::StudioRig(m_view, m_lightsLocked);
+  const conv::LightRig rig = conv::StudioRig(view.view, m_lightsLocked);
   ubo.key = {glm::vec4(rig.key, conv::kKeyLight.a),
              glm::vec4(glm::vec3(conv::kKeyLight), 1.0f)};
   ubo.fill = {glm::vec4(rig.fill, conv::kFillLight.a),
@@ -263,14 +264,9 @@ void StockRenderer::Render(VkCommandBuffer commandBuffer,
   std::memcpy(m_vertexBuffers[frame].mapped, m_vertices.data(), vbytes);
   std::memcpy(m_indexBuffers[frame].mapped, m_indices.data(), ibytes);
 
-  VkViewport vp{};
-  vp.x = static_cast<float>(m_vx);
-  vp.y = static_cast<float>(m_vy);
-  vp.width = static_cast<float>(m_vw);
-  vp.height = static_cast<float>(m_vh);
-  vp.maxDepth = 1.0f;
+  const VkViewport vp = ViewportOf(view);
   vkCmdSetViewport(commandBuffer, 0, 1, &vp);
-  VkRect2D scissor{{m_vx, m_vy}, {m_vw, m_vh}};
+  const VkRect2D scissor = ScissorOf(view);
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);

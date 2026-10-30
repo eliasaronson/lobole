@@ -46,22 +46,10 @@ public:
   }
   bool HasMesh() const { return !m_indices.empty(); }
 
-  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
-    m_view = view;
-    m_proj = proj;
-  }
-  void SetClipPlanes(const ClipPlaneArray& planes) override {
-    m_clipPlanes = planes;
-  }
   void SetDeformScale(float scale) { m_deformScale = scale; }
-  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) override {
-    m_vx = x;
-    m_vy = y;
-    m_vw = w;
-    m_vh = h;
-  }
 
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+              const SceneView& view) override;
   bool IsInitialized() const { return m_initialized; }
 
 private:
@@ -109,11 +97,6 @@ private:
   std::vector<uint32_t> m_indices;
   bool m_dirty = false;
 
-  glm::mat4 m_view = glm::mat4(1.0f);
-  glm::mat4 m_proj = glm::mat4(1.0f);
-  ClipPlaneArray m_clipPlanes = NoClipPlanes();
   float m_deformScale = 0.0f;
-  int32_t m_vx = 0, m_vy = 0;
-  uint32_t m_vw = 1280, m_vh = 720;
   bool m_initialized = false;
 };

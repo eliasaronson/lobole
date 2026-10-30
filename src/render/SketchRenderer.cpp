@@ -334,14 +334,14 @@ void SketchRenderer::DrawBuffer(VkCommandBuffer cb, VkPipeline pipeline,
 }
 
 void SketchRenderer::Render(VkCommandBuffer commandBuffer,
-                            uint32_t currentFrame) {
+                            uint32_t currentFrame, const SceneView& view) {
   if (!m_initialized)
     return;
   const uint32_t frame = render::FrameSlot(currentFrame, "SketchRenderer");
 
-  Ubo ubo{m_view, m_proj,
-          glm::vec4(static_cast<float>(m_viewportWidth),
-                    static_cast<float>(m_viewportHeight), 0.0f, 0.0f)};
+  Ubo ubo{view.view, view.proj,
+          glm::vec4(static_cast<float>(view.viewport.z),
+                    static_cast<float>(view.viewport.w), 0.0f, 0.0f)};
   std::memcpy(m_uniformBuffers[frame].mapped, &ubo, sizeof(ubo));
 
   const uint32_t quadCount = Upload(m_quadBuffers[frame], m_quads);
@@ -375,15 +375,9 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
       gizmoCount == 0 && onTopCount == 0 && cachedCount == 0)
     return;
 
-  VkViewport vp{};
-  vp.x = static_cast<float>(m_viewportX);
-  vp.y = static_cast<float>(m_viewportY);
-  vp.width = static_cast<float>(m_viewportWidth);
-  vp.height = static_cast<float>(m_viewportHeight);
-  vp.maxDepth = 1.0f;
+  const VkViewport vp = ViewportOf(view);
   vkCmdSetViewport(commandBuffer, 0, 1, &vp);
-  VkRect2D scissor{{m_viewportX, m_viewportY},
-                   {m_viewportWidth, m_viewportHeight}};
+  const VkRect2D scissor = ScissorOf(view);
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,

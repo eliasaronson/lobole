@@ -2736,13 +2736,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->stockRenderer->HasMesh());
     IM_CHECK(s_App->gpu.camToolInstance != 0);
 
-    // And it is aimed at the SAME rectangle as the rest of the scene. The 3D
-    // view is a sub-region between the docked panels; a renderer left out of
-    // the list in UI.cpp draws full-window while the camera aspect is the
-    // sub-region, so its geometry lands at a different scale and offset than
-    // everything drawn around it. That shipped: the stock came out not
-    // parallel to the part with its cuts shifted sideways, while the cutter —
-    // a mesh-renderer instance, correctly aimed — sat right where it belonged.
+    // And it drew into the SAME rectangle as the rest of the scene. The 3D
+    // view is a sub-region between the docked panels; a renderer that draws
+    // full-window while the camera aspect is the sub-region lands its
+    // geometry at a different scale and offset than everything drawn around
+    // it. That shipped, when each renderer was aimed by a list it could be
+    // left out of: the stock came out not parallel to the part with its cuts
+    // shifted sideways, while the cutter — a mesh-renderer instance,
+    // correctly aimed — sat right where it belonged. Every draw is now handed
+    // its rectangle (render/SceneRenderer.h); this checks the stock's last.
     //
     // Only a WINDOWED run can catch it. Under --offscreen there are no panels,
     // so the sub-region is the whole framebuffer and the bug is invisible,

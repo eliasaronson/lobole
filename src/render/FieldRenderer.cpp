@@ -221,15 +221,15 @@ bool FieldRenderer::EnsureCapacity(DynamicBuffer& buf, VkDeviceSize bytes,
   return buf.mapped != nullptr;
 }
 
-void FieldRenderer::Render(VkCommandBuffer commandBuffer,
-                           uint32_t currentFrame) {
+void FieldRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+                           const SceneView& view) {
   if (!m_initialized || m_indices.empty())
     return;
   const uint32_t frame = render::FrameSlot(currentFrame, "FieldRenderer");
 
-  Ubo ubo{m_view, m_proj, {}};
+  Ubo ubo{view.view, view.proj, {}};
   for (int i = 0; i < kMaxClipPlanes; i++)
-    ubo.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
+    ubo.clipPlanes[i] = view.clips[static_cast<size_t>(i)];
   std::memcpy(m_uniformBuffers[frame].mapped, &ubo, sizeof(ubo));
 
   const VkDeviceSize vbytes = m_vertices.size() * sizeof(FieldVertex);
@@ -243,14 +243,9 @@ void FieldRenderer::Render(VkCommandBuffer commandBuffer,
   std::memcpy(m_vertexBuffers[frame].mapped, m_vertices.data(), vbytes);
   std::memcpy(m_indexBuffers[frame].mapped, m_indices.data(), ibytes);
 
-  VkViewport vp{};
-  vp.x = static_cast<float>(m_vx);
-  vp.y = static_cast<float>(m_vy);
-  vp.width = static_cast<float>(m_vw);
-  vp.height = static_cast<float>(m_vh);
-  vp.maxDepth = 1.0f;
+  const VkViewport vp = ViewportOf(view);
   vkCmdSetViewport(commandBuffer, 0, 1, &vp);
-  VkRect2D scissor{{m_vx, m_vy}, {m_vw, m_vh}};
+  const VkRect2D scissor = ScissorOf(view);
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);

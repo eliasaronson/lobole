@@ -16,7 +16,6 @@
 #include "render/FieldRenderer.h"
 #include "render/MeshRenderer.h"
 #include "render/OutlineRenderer.h"
-#include "render/SceneRenderer.h"
 #include "render/SketchRenderer.h"
 #include "render/StockRenderer.h"
 #include "render/UnderlayRenderer.h"
@@ -1197,26 +1196,16 @@ void DrawUI(AppState& state) {
   // — the edited sketch's, and every shown sketch's show-always ones (v166).
   SyncUnderlays(state, /*withEditedSketch=*/true);
 
-  // Point the renderers, camera, and picking at the central-node region so
-  // the 3D scene is centered in the visible area between the panels.
+  // The camera's aspect is the central-node region between the panels. The
+  // renderers are not aimed here: the frame hands every one of them that
+  // rectangle with each draw (render/SceneRenderer.h, main.cpp's
+  // LiveSceneView), so none can draw at another.
   ImGuiIO& io = ImGui::GetIO();
   const glm::vec2 scale(io.DisplayFramebufferScale.x,
                         io.DisplayFramebufferScale.y);
-  const glm::vec2 fbPos = state.viewportPos * scale;
   const glm::vec2 fbSize = state.viewportSize * scale;
-  if (fbSize.x > 0 && fbSize.y > 0) {
-    // Every renderer that draws into the 3D scene, aimed at the sub-region
-    // between the panels — one loop over the registry, in the order it draws.
-    // This used to be a hand-written list, and being missing from it is how
-    // the FEM field (0346a8e) and the CAM stock (4a3083d) each shipped drawing
-    // full-window while the camera aspect was this rectangle.
-    for (SceneRenderer* r : state.sceneRenderers)
-      r->SetViewport(
-          static_cast<int32_t>(fbPos.x), static_cast<int32_t>(fbPos.y),
-          static_cast<uint32_t>(fbSize.x), static_cast<uint32_t>(fbSize.y));
-    if (state.camera)
-      state.camera->SetAspectRatio(fbSize.x / fbSize.y);
-  }
+  if (fbSize.x > 0 && fbSize.y > 0 && state.camera)
+    state.camera->SetAspectRatio(fbSize.x / fbSize.y);
 }
 
 } // namespace ui

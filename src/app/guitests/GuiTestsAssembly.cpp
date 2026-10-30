@@ -17,7 +17,7 @@
 
 #include "core/Literals.h"
 #include "render/MeshRenderer.h" // InstanceHighlightRanges (the step's)
-#include "render/StockRenderer.h" // Viewport(): what the capture restores
+#include "render/StockRenderer.h" // Viewport(): what the last frame drew into
 #include "thirdparty/stb_image.h"
 #include "ui/ImportJob.h"
 #include "ui/VariableActions.h"
@@ -1097,8 +1097,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     int w2 = 0, h2 = 0;
     IM_CHECK(load(3, w2, h2) != first);
 
-    // Everything the capture resized is back: the scene renderers aim at the
-    // dock between the panels again, in framebuffer pixels.
+    // The capture's size stayed with the capture: the frames since have drawn
+    // at the dock between the panels again, in framebuffer pixels.
     const glm::vec2 scale(io.DisplayFramebufferScale.x,
                           io.DisplayFramebufferScale.y);
     const glm::ivec4 vp = s_App->stockRenderer->Viewport();

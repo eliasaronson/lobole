@@ -454,26 +454,20 @@ uint32_t UnderlayRenderer::UploadVerts(DynamicBuffer& buf,
 }
 
 void UnderlayRenderer::Render(VkCommandBuffer commandBuffer,
-                              uint32_t currentFrame) {
+                              uint32_t currentFrame, const SceneView& view) {
   if (!m_initialized || m_draws.empty())
     return;
   const uint32_t frame = render::FrameSlot(currentFrame, "UnderlayRenderer");
 
-  Ubo ubo{m_view, m_proj};
+  Ubo ubo{view.view, view.proj};
   std::memcpy(m_uniformBuffers[frame].mapped, &ubo, sizeof(ubo));
   const uint32_t vertCount = UploadVerts(m_vertexBuffers[frame], m_verts);
   if (vertCount == 0)
     return;
 
-  VkViewport vp{};
-  vp.x = static_cast<float>(m_viewportX);
-  vp.y = static_cast<float>(m_viewportY);
-  vp.width = static_cast<float>(m_viewportWidth);
-  vp.height = static_cast<float>(m_viewportHeight);
-  vp.maxDepth = 1.0f;
+  const VkViewport vp = ViewportOf(view);
   vkCmdSetViewport(commandBuffer, 0, 1, &vp);
-  VkRect2D scissor{{m_viewportX, m_viewportY},
-                   {m_viewportWidth, m_viewportHeight}};
+  const VkRect2D scissor = ScissorOf(view);
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);

@@ -1196,28 +1196,17 @@ ImGui_ImplVulkan_InitInfo ImGuiInitInfo() {
 }
 
 // What the scene renderers are built against: the window's render pass, or
-// --offscreen's; and the size they start at.
+// --offscreen's.
 VkRenderPass ScenePass() {
   return s_start.window != nullptr ? g_MainWindowData.RenderPass
                                    : g_OffscreenPass;
 }
-uint32_t SceneWidth() {
-  return s_start.window != nullptr ? 1280u : kOffscreenWidth;
-}
-uint32_t SceneHeight() {
-  return s_start.window != nullptr ? 720u : kOffscreenHeight;
-}
 
-// The four that start alike: a pipeline on the scene pass, a viewport size.
+// The four that start alike: a pipeline on the scene pass. Nothing about a
+// frame is set here -- each draw hands its SceneView (render/SceneRenderer.h).
 template <class R> bool InitOnScenePass(R& r) {
-  if (!r.Initialize(g_Device, g_PhysicalDevice, ScenePass(), g_Queue,
-                    g_QueueFamily, g_CommandPool, g_MSAASamples))
-    return false;
-  if constexpr (requires { r.SetViewportSize(0u, 0u); })
-    r.SetViewportSize(SceneWidth(), SceneHeight());
-  else
-    r.SetViewport(0, 0, SceneWidth(), SceneHeight());
-  return true;
+  return r.Initialize(g_Device, g_PhysicalDevice, ScenePass(), g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples);
 }
 
 void CreateWindowRow() {
@@ -1433,7 +1422,6 @@ ui::RendererSet CurrentSet() {
   set.underlay = g_UnderlayRenderer.get();
   set.field = g_FieldRenderer.get();
   set.stock = g_StockRenderer.get();
-  set.scene = g_Scene;
   set.rayTracer = g_RayTracingRenderer.get();
   set.faceSelector = g_FaceSelector.get();
   set.ibl = g_IBLTextures.get();

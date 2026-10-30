@@ -50,7 +50,6 @@ struct RendererSet {
   UnderlayRenderer* underlay = nullptr;
   FieldRenderer* field = nullptr;
   StockRenderer* stock = nullptr;
-  std::vector<SceneRenderer*> scene; // in draw order
   RayTracingRenderer* rayTracer = nullptr;
   FaceSelector* faceSelector = nullptr;
   IBLTextures* ibl = nullptr;

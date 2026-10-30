@@ -792,11 +792,9 @@ OutlineRenderer::AssetOf(const OutlineMesh& mesh) const {
   return m_assets[AssetSlot(mesh.assetId)].get();
 }
 
-void OutlineRenderer::UpdateCamera(const glm::mat4& view,
-                                   const glm::mat4& projection) {
-  glm::mat4 prevView = m_viewMatrix;
-  m_viewMatrix = view;
-  m_projectionMatrix = projection;
+void OutlineRenderer::NoteCamera(const glm::mat4& view) {
+  const glm::mat4 prevView = m_lastView;
+  m_lastView = view;
 
   // Extract camera position from view matrix
   glm::mat4 invView = glm::inverse(view);
@@ -824,7 +822,15 @@ void OutlineRenderer::WaitDeviceIdleOnce() {
 }
 
 void OutlineRenderer::Render(VkCommandBuffer commandBuffer,
-                             uint32_t currentFrame) {
+                             uint32_t currentFrame, const SceneView& view) {
+  // Before anything can return: the camera is tracked whether or not there
+  // is anything to outline, so the first draw after a mesh arrives does not
+  // read a stale camera as a move.
+  NoteCamera(view.view);
+  if (m_settleNextRender) {
+    m_lastCameraMove = {};
+    m_settleNextRender = false;
+  }
   // Never draw from an asset whose staging copy has not executed (see
   // MeshRenderer::Render).
   EndAssetBatch();
@@ -844,17 +850,17 @@ void OutlineRenderer::Render(VkCommandBuffer commandBuffer,
   const uint32_t frame = render::FrameSlot(currentFrame, "OutlineRenderer");
 
   // Update uniform buffers for current frame
-  UpdateUniformBuffers(frame);
+  UpdateUniformBuffers(frame, view);
 
   // Render based on mode
   switch (m_settings.mode) {
   case OutlineMode::EDGES:
   case OutlineMode::SILHOUETTE:
-    RenderOutlines(commandBuffer, frame);
+    RenderOutlines(commandBuffer, frame, view);
     break;
 
   case OutlineMode::WIREFRAME:
-    RenderWireframes(commandBuffer, frame);
+    RenderWireframes(commandBuffer, frame, view);
     break;
 
   default:
@@ -955,14 +961,6 @@ void OutlineRenderer::SetMeshVisible(uint32_t meshId, bool visible) {
     m_meshes[MeshSlot(meshId)]->visible = visible;
 }
 
-void OutlineRenderer::SetViewport(int32_t x, int32_t y, uint32_t width,
-                                  uint32_t height) {
-  m_viewportX = x;
-  m_viewportY = y;
-  m_viewportWidth = width;
-  m_viewportHeight = height;
-}
-
 void OutlineRenderer::EnsureEdgeBuffer(OutlineMesh& mesh, uint32_t slot) {
   if (mesh.edgeIndexBuffers[slot] != VK_NULL_HANDLE)
     return;
@@ -1029,7 +1027,8 @@ void OutlineRenderer::RefreshSilhouettes() {
             meshCount, silhouetteIndices, elapsed.count());
 }
 
-void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
+void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame,
+                                           const SceneView& view) {
   // Wireframe edge policy: while the camera moves, only the static
   // feature/boundary prefix draws; silhouettes are reclassified in one flat
   // pass once it has settled (or every change with liveSilhouettes).
@@ -1069,8 +1068,8 @@ void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
   // Update outline uniform buffer
   OutlineUniformBufferObject outlineUBO{};
   outlineUBO.model = model;
-  outlineUBO.view = m_viewMatrix;
-  outlineUBO.proj = m_projectionMatrix;
+  outlineUBO.view = view.view;
+  outlineUBO.proj = view.proj;
   outlineUBO.viewPos = glm::vec4(m_cameraPosition, 1.0f);
   outlineUBO.outlineColor = m_settings.outlineColor;
   outlineUBO.outlineWidth = m_settings.outlineWidth;
@@ -1085,9 +1084,9 @@ void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
   WireframeUniformBufferObject wireframeUBO{};
   wireframeUBO.model = model;
   for (int i = 0; i < kMaxClipPlanes; i++)
-    wireframeUBO.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
-  wireframeUBO.view = m_viewMatrix;
-  wireframeUBO.proj = m_projectionMatrix;
+    wireframeUBO.clipPlanes[i] = view.clips[static_cast<size_t>(i)];
+  wireframeUBO.view = view.view;
+  wireframeUBO.proj = view.proj;
   wireframeUBO.viewPos = glm::vec4(m_cameraPosition, 1.0f);
   wireframeUBO.wireframeColor = m_settings.wireframeColor;
   // A line thinner than the narrowest the device draws is drawn that wide at
@@ -1104,23 +1103,15 @@ void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
 }
 
 void OutlineRenderer::RenderOutlines(VkCommandBuffer commandBuffer,
-                                     uint32_t currentFrame) {
+                                     uint32_t currentFrame,
+                                     const SceneView& view) {
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     m_outlinePipeline);
 
   // Set dynamic viewport and scissor
-  VkViewport viewport{};
-  viewport.x = static_cast<float>(m_viewportX);
-  viewport.y = static_cast<float>(m_viewportY);
-  viewport.width = static_cast<float>(m_viewportWidth);
-  viewport.height = static_cast<float>(m_viewportHeight);
-  viewport.minDepth = 0.0f;
-  viewport.maxDepth = 1.0f;
+  const VkViewport viewport = ViewportOf(view);
   vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-  VkRect2D scissor{};
-  scissor.offset = {m_viewportX, m_viewportY};
-  scissor.extent = {m_viewportWidth, m_viewportHeight};
+  const VkRect2D scissor = ScissorOf(view);
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1146,23 +1137,15 @@ void OutlineRenderer::RenderOutlines(VkCommandBuffer commandBuffer,
 }
 
 void OutlineRenderer::RenderWireframes(VkCommandBuffer commandBuffer,
-                                       uint32_t currentFrame) {
+                                       uint32_t currentFrame,
+                                       const SceneView& view) {
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     m_wireframePipeline);
 
   // Set dynamic viewport and scissor
-  VkViewport viewport{};
-  viewport.x = static_cast<float>(m_viewportX);
-  viewport.y = static_cast<float>(m_viewportY);
-  viewport.width = static_cast<float>(m_viewportWidth);
-  viewport.height = static_cast<float>(m_viewportHeight);
-  viewport.minDepth = 0.0f;
-  viewport.maxDepth = 1.0f;
+  const VkViewport viewport = ViewportOf(view);
   vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-  VkRect2D scissor{};
-  scissor.offset = {m_viewportX, m_viewportY};
-  scissor.extent = {m_viewportWidth, m_viewportHeight};
+  const VkRect2D scissor = ScissorOf(view);
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
   vkCmdSetLineWidth(commandBuffer, std::clamp(m_settings.rasterLineWidth,

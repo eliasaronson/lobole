@@ -180,12 +180,49 @@ static void glfw_error_callback(int error, const char* description) {
                     std::to_string(error) + ")";
 }
 
+// What a draw of the scene is for (render/SceneRenderer.h): a rectangle of
+// the framebuffer, the camera at `proj`, and the section planes. Every render
+// block builds one and hands the same one to the prepasses and to every
+// scene renderer, so nothing draws with a viewport, a camera or a cut left
+// behind by another draw.
+static SceneView SceneViewAt(glm::ivec4 rect, const glm::mat4& proj) {
+  SceneView v;
+  v.viewport = rect;
+  if (g_Camera)
+    v.view = g_Camera->GetViewMatrix();
+  v.proj = proj;
+  v.clips = ui::SectionPlanes(g_App);
+  return v;
+}
+
+// The windowed frame's 3D viewport, in framebuffer pixels: the dock between
+// the panels (DockLayout.cpp lays it out at the start of each frame), or the
+// whole framebuffer before there is one.
+static glm::ivec4 LiveViewportRect(uint32_t fbW, uint32_t fbH) {
+  const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
+  if (g_App.viewportSize.x > 0 && g_App.viewportSize.y > 0)
+    return {static_cast<int32_t>(g_App.viewportPos.x * scale.x),
+            static_cast<int32_t>(g_App.viewportPos.y * scale.y),
+            static_cast<int32_t>(g_App.viewportSize.x * scale.x),
+            static_cast<int32_t>(g_App.viewportSize.y * scale.y)};
+  return {0, 0, static_cast<int32_t>(fbW), static_cast<int32_t>(fbH)};
+}
+
+// The live view: the frame's, and every capture of the frame as it is.
+static SceneView LiveSceneView(uint32_t fbW, uint32_t fbH) {
+  return SceneViewAt(LiveViewportRect(fbW, fbH),
+                     g_Camera ? g_Camera->GetProjectionMatrix()
+                              : glm::mat4(1.0f));
+}
+
 // Scene prepasses recorded before the main render pass begins: the S1
-// key-light shadow map and the S2 SSAO prepass+AO+blur chain. Shared by
-// FrameRender and CaptureScreenshot so remote screenshots show identical
-// shadows/AO. Each pass's own subpass dependencies order its writes vs.
-// fragment sampling, so no explicit barriers are needed here.
+// key-light shadow map and the S2 SSAO prepass+AO+blur chain, for the main
+// pass that will draw `view`. Shared by FrameRender and CaptureScreenshot so
+// remote screenshots show identical shadows/AO. Each pass's own subpass
+// dependencies order its writes vs. fragment sampling, so no explicit
+// barriers are needed here.
 static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame,
+                                 const SceneView& view,
                                  render::GpuTimer* timer = nullptr) {
   // `timer` only from the live frame loop: the screenshot path re-records
   // these passes into its own one-shot buffer, and timestamps there would
@@ -201,8 +238,7 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame,
   if (g_ShadowRenderer) {
     g_MeshRenderer->SetShadowsEnabled(g_App.showShadows);
     if (g_App.showShadows) {
-      g_ShadowRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
-      g_ShadowRenderer->RecordShadowPass(cb, *g_MeshRenderer);
+      g_ShadowRenderer->RecordShadowPass(cb, *g_MeshRenderer, view);
       g_MeshRenderer->SetShadowState(g_ShadowRenderer->LightViewProj(),
                                      g_ShadowRenderer->TexelWorldSize(),
                                      g_ShadowRenderer->TexelUVSize());
@@ -213,8 +249,7 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame,
   if (g_SSAORenderer) {
     g_MeshRenderer->SetAOEnabled(g_App.showAmbientOcclusion);
     if (g_App.showAmbientOcclusion) {
-      g_SSAORenderer->SetClipPlanes(ui::SectionPlanes(g_App));
-      g_SSAORenderer->RecordSSAOPasses(cb, currentFrame, *g_MeshRenderer);
+      g_SSAORenderer->RecordSSAOPasses(cb, currentFrame, *g_MeshRenderer, view);
       g_MeshRenderer->SetAOState(g_SSAORenderer->InvFullResolution());
     }
   }
@@ -226,7 +261,8 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame,
 
 // Where a quick render (CaptureRasterStill) draws and what it must put back:
 // the render pass and format of the loop it runs in, an idle frame slot, the
-// SSAO targets' size and the viewport rect the next frame expects.
+// SSAO targets' size; and the live viewport rect, which captureViewport crops
+// to.
 struct RasterTarget {
   VkRenderPass pass = VK_NULL_HANDLE;
   VkFormat format = VK_FORMAT_B8G8R8A8_UNORM;
@@ -234,7 +270,7 @@ struct RasterTarget {
   uint32_t frame = 0;
   VkClearValue clear{};
   uint32_t aoW = 0, aoH = 0; // the SSAO targets, restored
-  int32_t vpX = 0, vpY = 0;  // the scene viewport, restored
+  int32_t vpX = 0, vpY = 0;  // the live scene viewport
   uint32_t vpW = 0, vpH = 0;
 };
 
@@ -243,14 +279,15 @@ struct RasterTarget {
 // motion video draw. The underlay renderer is here for the show-always
 // reference images (v166) — AimRenderersAt hands it only those — drawn after
 // the model so the depth test hides what is behind it, and under the edges.
-static void RecordModel(VkCommandBuffer cb, uint32_t frame) {
-  g_MeshRenderer->Render(cb, frame);
+static void RecordModel(VkCommandBuffer cb, uint32_t frame,
+                        const SceneView& view) {
+  g_MeshRenderer->Render(cb, frame, view);
   if (g_FieldRenderer)
-    g_FieldRenderer->Render(cb, frame);
+    g_FieldRenderer->Render(cb, frame, view);
   if (g_UnderlayRenderer)
-    g_UnderlayRenderer->Render(cb, frame);
+    g_UnderlayRenderer->Render(cb, frame, view);
   if (g_OutlineRenderer)
-    g_OutlineRenderer->Render(cb, frame);
+    g_OutlineRenderer->Render(cb, frame, view);
 }
 
 // How a capture draws its edges: whether at all, and the wireframe's width
@@ -260,12 +297,19 @@ struct CaptureLines {
   float rasterWidth = 0.0f; // <= 0: the viewport's, unscaled
 };
 
-// Point every renderer at a W x H capture of the current camera, drawn `k`
+// A capture aimed by AimRenderersAt: the view it draws, and the outline
+// settings AimRenderersBack restores.
+struct AimedCapture {
+  SceneView view;
+  OutlineSettings outline{};
+};
+
+// Ready the renderers for a W x H capture of the current camera, drawn `k`
 // times larger than it will be shown (lines widened to match), after waiting
-// for the GPU: the SSAO targets are reallocated. Returns the outline settings
-// AimRenderersBack restores.
-static OutlineSettings AimRenderersAt(uint32_t W, uint32_t H, uint32_t k,
-                                      const CaptureLines& lines = {}) {
+// for the GPU: the SSAO targets are reallocated. Returns the view the capture
+// draws -- the whole W x H, at the capture's aspect.
+static AimedCapture AimRenderersAt(uint32_t W, uint32_t H, uint32_t k,
+                                   const CaptureLines& lines = {}) {
   vkDeviceWaitIdle(g_Device);
   // Only the model: no selection or hover tint on it (the GUI re-applies
   // both next frame), and none of the overlay renderers.
@@ -276,14 +320,13 @@ static OutlineSettings AimRenderersAt(uint32_t W, uint32_t H, uint32_t k,
   // other thing that fills the renderer, and offscreen there is no frame
   // loop, so this is where a quick still gets them at all.
   ui::SyncUnderlays(g_App, /*withEditedSketch=*/false);
-  // Everything that is sized in pixels, pointed at the capture.
-  for (SceneRenderer* r : g_Scene)
-    r->SetViewport(0, 0, W, H);
+  // The targets sized in pixels, sized to the capture.
   if (g_SSAORenderer) {
     g_SSAORenderer->Resize(W, H);
     g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
   }
-  OutlineSettings outline{};
+  AimedCapture aimed;
+  OutlineSettings& outline = aimed.outline;
   if (g_OutlineRenderer) {
     outline = g_OutlineRenderer->GetOutlineSettings();
     OutlineSettings wide = outline;
@@ -296,14 +339,13 @@ static OutlineSettings AimRenderersAt(uint32_t W, uint32_t H, uint32_t k,
       wide.mode = OutlineMode::NONE;
     g_OutlineRenderer->SetOutlineSettings(wide);
   }
-  const glm::mat4 view = g_Camera->GetViewMatrix();
-  const glm::mat4 proj = g_Camera->GetProjectionMatrixForAspect(
-      static_cast<float>(W) / static_cast<float>(H));
-  for (SceneRenderer* r : g_Scene)
-    r->UpdateCamera(view, proj);
+  aimed.view =
+      SceneViewAt({0, 0, static_cast<int32_t>(W), static_cast<int32_t>(H)},
+                  g_Camera->GetProjectionMatrixForAspect(
+                      static_cast<float>(W) / static_cast<float>(H)));
   if (g_OutlineRenderer)
     g_OutlineRenderer->SettleSilhouettes();
-  return outline;
+  return aimed;
 }
 
 // Put back everything the next frame reads.
@@ -316,12 +358,6 @@ static void AimRenderersBack(const RasterTarget& t,
     g_SSAORenderer->Resize(t.aoW, t.aoH);
     g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
   }
-  for (SceneRenderer* r : g_Scene)
-    r->SetViewport(t.vpX, t.vpY, t.vpW, t.vpH);
-  const glm::mat4 view = g_Camera->GetViewMatrix();
-  const glm::mat4 liveProj = g_Camera->GetProjectionMatrix();
-  for (SceneRenderer* r : g_Scene)
-    r->UpdateCamera(view, liveProj);
 }
 
 // QUICK render (docs/rendering/still-render.md#quick-mode): the model as the
@@ -386,19 +422,22 @@ static bool CaptureRasterStill(const RasterTarget& t,
       }
     }
   }
-  const OutlineSettings outline = AimRenderersAt(W, H, k, lines);
+  const AimedCapture aimed = AimRenderersAt(W, H, k, lines);
 
   out->rgb.clear();
   std::string captureError;
   FrameStats stats; // whole frame: there is no chrome in it
   const bool captured = CaptureScreenshot(
       g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, t.pass, t.format, W,
-      H, t.clear, [&](VkCommandBuffer cb) { RecordModel(cb, t.frame); },
+      H, t.clear,
+      [&](VkCommandBuffer cb) { RecordModel(cb, t.frame, aimed.view); },
       /*outputPath=*/"", &captureError, g_MSAASamples,
-      [&](VkCommandBuffer cb) { RecordScenePrepasses(cb, t.frame); }, &stats,
-      t.finalLayout, 1, {}, &out->rgb);
+      [&](VkCommandBuffer cb) {
+        RecordScenePrepasses(cb, t.frame, aimed.view);
+      },
+      &stats, t.finalLayout, 1, {}, &out->rgb);
 
-  AimRenderersBack(t, outline);
+  AimRenderersBack(t, aimed.outline);
 
   if (!captured)
     return fail(captureError.empty() ? "the capture failed" : captureError);
@@ -426,10 +465,10 @@ class ViewportFrameCapture final : public ui::FrameCapture {
 public:
   explicit ViewportFrameCapture(const RasterTarget& t) : m_t(t) {}
   ~ViewportFrameCapture() override {
-    if (!m_aimed)
+    if (!m_isAimed)
       return;
     m_stream.reset(); // waits for the frames in flight
-    AimRenderersBack(m_t, m_outline);
+    AimRenderersBack(m_t, m_aimed.outline);
   }
   bool Begin(uint32_t w, uint32_t h, std::string* error) {
     if (!g_MeshRenderer || !g_Camera) {
@@ -447,8 +486,8 @@ public:
                  " px on a side (the device's largest image)";
       return false;
     }
-    m_outline = AimRenderersAt(w, h, 1);
-    m_aimed = true;
+    m_aimed = AimRenderersAt(w, h, 1);
+    m_isAimed = true;
     render::FrameStream::Config c;
     c.device = g_Device;
     c.physicalDevice = g_PhysicalDevice;
@@ -465,11 +504,16 @@ public:
     return m_stream->Init(c, error);
   }
   bool Submit(std::string* error) override {
+    // The camera and the cut as the capture began: a slice of frames is one
+    // shot, whatever the poses do between them.
+    const SceneView& view = m_aimed.view;
     return m_stream->Submit(
-        [](VkCommandBuffer cb, uint32_t frame) {
-          RecordScenePrepasses(cb, frame);
+        [&](VkCommandBuffer cb, uint32_t frame) {
+          RecordScenePrepasses(cb, frame, view);
         },
-        [](VkCommandBuffer cb, uint32_t frame) { RecordModel(cb, frame); },
+        [&](VkCommandBuffer cb, uint32_t frame) {
+          RecordModel(cb, frame, view);
+        },
         error);
   }
   bool Collect(std::vector<uint8_t>* pixels, std::string* error) override {
@@ -481,8 +525,8 @@ public:
 
 private:
   RasterTarget m_t;
-  OutlineSettings m_outline{};
-  bool m_aimed = false;
+  AimedCapture m_aimed;
+  bool m_isAimed = false;
   std::unique_ptr<render::FrameStream> m_stream;
 };
 
@@ -520,12 +564,9 @@ static bool FrameOk(VkResult err, const char* where) {
 
 // The renderers sized to a framebuffer of w x h: after a swapchain recreate,
 // and after every build of the owner table (the start's and each rebuild's).
-// SetViewportSize is a DIFFERENT question from the scene viewport rect (which
-// UI.cpp sets from the sub-region between the panels every frame) and only
-// some renderers have it.
+// Only the window-sized targets and the camera's aspect: the scene viewport
+// rect is handed to each draw (LiveSceneView).
 static void ApplyFramebufferSize(int fb_width, int fb_height) {
-  if (g_MeshRenderer)
-    g_MeshRenderer->SetViewportSize(fb_width, fb_height);
   // SSAO targets are window-sized: recreate (waits for idle) and rebind the
   // new AO view into the mesh renderer's descriptor sets.
   if (g_SSAORenderer) {
@@ -533,14 +574,6 @@ static void ApplyFramebufferSize(int fb_width, int fb_height) {
     if (g_MeshRenderer)
       g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
   }
-  if (g_OutlineRenderer)
-    g_OutlineRenderer->SetViewportSize(fb_width, fb_height);
-  if (g_SketchRenderer)
-    g_SketchRenderer->SetViewportSize(fb_width, fb_height);
-  if (g_UnderlayRenderer)
-    g_UnderlayRenderer->SetViewportSize(fb_width, fb_height);
-  for (SceneRenderer* r : g_Scene)
-    r->SetViewport(0, 0, fb_width, fb_height);
   if (g_Camera)
     g_Camera->SetAspectRatio(static_cast<float>(fb_width) /
                              static_cast<float>(fb_height));
@@ -610,7 +643,8 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   }
   g_GpuTimer.BeginFrame(fd->CommandBuffer, wd->FrameIndex);
 
-  RecordScenePrepasses(fd->CommandBuffer, wd->FrameIndex, &g_GpuTimer);
+  const SceneView view = LiveSceneView(wd->Width, wd->Height);
+  RecordScenePrepasses(fd->CommandBuffer, wd->FrameIndex, view, &g_GpuTimer);
 
   {
     VkRenderPassBeginInfo info = {};
@@ -629,7 +663,7 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
 
   // 3D scene first, UI on top
   for (SceneRenderer* r : g_Scene)
-    r->Render(fd->CommandBuffer, wd->FrameIndex);
+    r->Render(fd->CommandBuffer, wd->FrameIndex, view);
 
   ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
@@ -730,17 +764,18 @@ static bool CaptureForTestEngine(ImGuiID /*viewport*/, int x, int y, int w,
     s_CaptureRgb.clear();
     std::string error;
     ImDrawData* drawData = s_CaptureDrawData;
+    const SceneView view = LiveSceneView(s_CaptureW, s_CaptureH);
     if (!CaptureScreenshot(
             g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, wd->RenderPass,
             wd->SurfaceFormat.format, s_CaptureW, s_CaptureH, wd->ClearValue,
             [&](VkCommandBuffer cb) {
               for (SceneRenderer* r : g_Scene)
-                r->Render(cb, wd->FrameIndex);
+                r->Render(cb, wd->FrameIndex, view);
               ImGui_ImplVulkan_RenderDrawData(drawData, cb);
             },
             /*outputPath=*/"", &error, g_MSAASamples,
             [&](VkCommandBuffer cb) {
-              RecordScenePrepasses(cb, wd->FrameIndex);
+              RecordScenePrepasses(cb, wd->FrameIndex, view);
             },
             nullptr, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1, {}, &s_CaptureRgb)) {
       LOG_ERROR("test engine capture: {}", error);
@@ -1196,8 +1231,9 @@ static std::string DeviceLostRefusal() {
 }
 
 // Everything that has to be true of the renderers before --offscreen draws:
-// the document->renderer projection, plus the render-quality targets, the
-// section planes and the deform scale, which only matter to a frame.
+// the document->renderer projection, plus the render-quality targets and the
+// deform scale, which only matter to a frame. (The section planes ride in
+// each draw's SceneView.)
 //
 // Called from the capture path rather than the tick, which is the whole point
 // of the mode: it draws only when asked, so an edit nobody looks at costs no
@@ -1217,8 +1253,6 @@ static void SyncOffscreenScene() {
       g_SSAORenderer->SetFullResolution(g_App.ssaoFullRes)) {
     g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
   }
-  for (SceneRenderer* r : g_Scene)
-    r->SetClipPlanes(ui::SectionPlanes(g_App));
   if (g_FieldRenderer)
     g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
 }
@@ -1254,6 +1288,12 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_App.camera = g_Camera.get();
   constexpr uint32_t kOffW = kOffscreenWidth, kOffH = kOffscreenHeight;
   constexpr VkFormat kOffFormat = kOffscreenFormat;
+  // There are no panels here: the 3D viewport is the whole framebuffer.
+  const auto OffscreenSceneView = [&] {
+    return SceneViewAt(
+        {0, 0, static_cast<int32_t>(kOffW), static_cast<int32_t>(kOffH)},
+        g_Camera->GetProjectionMatrix());
+  };
   // Shadow/SSAO/shadow-map-size preferences flow into the same fields
   // set_render_options writes, so the toggles below read coherent state.
   ui::ApplySettings(g_App);
@@ -1305,10 +1345,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
     if (count == 0)
       return 0;
     SyncOffscreenScene();
-    const glm::mat4 view = g_Camera->GetViewMatrix();
-    const glm::mat4 proj = g_Camera->GetProjectionMatrix();
-    for (SceneRenderer* r : g_Scene)
-      r->UpdateCamera(view, proj);
+    const SceneView view = OffscreenSceneView();
     vkQueueWaitIdle(g_Queue);
     const ui::ClearColor vp = ui::ViewportClearColor();
     VkClearValue clear{};
@@ -1331,14 +1368,14 @@ static int RunOffscreen(const CommandLineArgs& args) {
           kOffFormat, kOffW, kOffH, clear,
           [&](VkCommandBuffer cb) {
             for (SceneRenderer* r : g_Scene)
-              r->Render(cb, 0);
+              r->Render(cb, 0, view);
             g_GpuTimer.Write(cb, kTimerSlot,
                              render::GpuTimer::Point::AfterMain);
           },
           /*outputPath=*/"", /*error=*/nullptr, g_MSAASamples,
           [&](VkCommandBuffer cb) {
             g_GpuTimer.BeginFrame(cb, kTimerSlot);
-            RecordScenePrepasses(cb, kTimerSlot, &g_GpuTimer);
+            RecordScenePrepasses(cb, kTimerSlot, view, &g_GpuTimer);
           },
           /*stats=*/nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, times,
           after);
@@ -1467,10 +1504,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
     } else if ((animatingSince < 0 || now - animatingSince > 5.0) &&
                server.WantsScreenshot(shotPath)) {
       SyncOffscreenScene();
-      const glm::mat4 view = g_Camera->GetViewMatrix();
-      const glm::mat4 proj = g_Camera->GetProjectionMatrix();
-      for (SceneRenderer* r : g_Scene)
-        r->UpdateCamera(view, proj);
+      const SceneView view = OffscreenSceneView();
       vkQueueWaitIdle(g_Queue);
       const ui::ClearColor vp = ui::ViewportClearColor();
       VkClearValue clear{};
@@ -1495,14 +1529,14 @@ static int RunOffscreen(const CommandLineArgs& args) {
             // mode, so a capture is the viewport, full frame. Which also
             // makes `main` here the SCENE's cost, with no interface over it.
             for (SceneRenderer* r : g_Scene)
-              r->Render(cb, 0);
+              r->Render(cb, 0, view);
             g_GpuTimer.Write(cb, kTimerSlot,
                              render::GpuTimer::Point::AfterMain);
           },
           shotPath, &shotError, g_MSAASamples,
           [&](VkCommandBuffer cb) {
             g_GpuTimer.BeginFrame(cb, kTimerSlot);
-            RecordScenePrepasses(cb, kTimerSlot, &g_GpuTimer);
+            RecordScenePrepasses(cb, kTimerSlot, view, &g_GpuTimer);
           },
           &shotStats, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
       // CaptureScreenshot waits on the queue, so this slot's results are
@@ -2107,16 +2141,11 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     t.clear.color = {{vp.r, vp.g, vp.b, 1.0f}};
     t.aoW = static_cast<uint32_t>(wd->Width);
     t.aoH = static_cast<uint32_t>(wd->Height);
-    const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
-    if (g_App.viewportSize.x > 0 && g_App.viewportSize.y > 0) {
-      t.vpX = static_cast<int32_t>(g_App.viewportPos.x * scale.x);
-      t.vpY = static_cast<int32_t>(g_App.viewportPos.y * scale.y);
-      t.vpW = static_cast<uint32_t>(g_App.viewportSize.x * scale.x);
-      t.vpH = static_cast<uint32_t>(g_App.viewportSize.y * scale.y);
-    } else {
-      t.vpW = t.aoW;
-      t.vpH = t.aoH;
-    }
+    const glm::ivec4 rect = LiveViewportRect(t.aoW, t.aoH);
+    t.vpX = rect.x;
+    t.vpY = rect.y;
+    t.vpW = static_cast<uint32_t>(rect.z);
+    t.vpH = static_cast<uint32_t>(rect.w);
     return t;
   };
   g_App.captureRaster = [](const ui::AppState::RasterStill& req,
@@ -2140,16 +2169,17 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     std::vector<uint8_t> full;
     const uint32_t W = static_cast<uint32_t>(wd->Width),
                    H = static_cast<uint32_t>(wd->Height);
+    const SceneView view = LiveSceneView(W, H);
     if (!CaptureScreenshot(
             g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, wd->RenderPass,
             wd->SurfaceFormat.format, W, H, wd->ClearValue,
             [&](VkCommandBuffer cb) {
               for (SceneRenderer* r : g_Scene)
-                r->Render(cb, wd->FrameIndex);
+                r->Render(cb, wd->FrameIndex, view);
             },
             /*outputPath=*/"", nullptr, g_MSAASamples,
             [&](VkCommandBuffer cb) {
-              RecordScenePrepasses(cb, wd->FrameIndex);
+              RecordScenePrepasses(cb, wd->FrameIndex, view);
             },
             nullptr, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1, {}, &full))
       return false;
@@ -2700,9 +2730,6 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
       g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
     }
 
-    // Section view (I3): push the clip plane to the renderers each frame.
-    for (SceneRenderer* r : g_Scene)
-      r->SetClipPlanes(ui::SectionPlanes(g_App));
     if (g_FieldRenderer)
       g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
 
@@ -2740,12 +2767,6 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     ImGui::NewFrame();
 
     ui::DrawUI(g_App);
-
-    // Update camera matrices for 3D rendering
-    if (g_Camera)
-      for (SceneRenderer* r : g_Scene)
-        r->UpdateCamera(g_Camera->GetViewMatrix(),
-                        g_Camera->GetProjectionMatrix());
 
     // Rendering
     ImGui::Render();
@@ -2811,18 +2832,19 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
         shotStats.h = static_cast<int>(g_App.viewportSize.y);
         if (g_OutlineRenderer)
           g_OutlineRenderer->SettleSilhouettes();
+        const SceneView view = LiveSceneView(wd->Width, wd->Height);
         const bool ok = CaptureScreenshot(
             g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, wd->RenderPass,
             wd->SurfaceFormat.format, static_cast<uint32_t>(wd->Width),
             static_cast<uint32_t>(wd->Height), wd->ClearValue,
             [&](VkCommandBuffer cb) {
               for (SceneRenderer* r : g_Scene)
-                r->Render(cb, wd->FrameIndex);
+                r->Render(cb, wd->FrameIndex, view);
               ImGui_ImplVulkan_RenderDrawData(draw_data, cb);
             },
             shotPath, &shotError, g_MSAASamples,
             [&](VkCommandBuffer cb) {
-              RecordScenePrepasses(cb, wd->FrameIndex);
+              RecordScenePrepasses(cb, wd->FrameIndex, view);
             },
             &shotStats);
         remoteServer.ScreenshotDone(ok, shotError, shotStats.dominantFraction,

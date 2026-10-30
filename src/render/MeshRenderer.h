@@ -323,23 +323,10 @@ public:
   // the whole of it. Read by the GUI tests.
   glm::uvec2 InstanceHoverRange(uint32_t instanceId);
 
-  // Rendering
-  void UpdateCamera(const glm::mat4& view,
-                    const glm::mat4& projection) override;
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
-
-  // Viewport
-  void SetViewportSize(uint32_t width, uint32_t height) {
-    SetViewport(0, 0, width, height);
-  }
-
-  // Section clip plane (world space): xyz = normal, w = distance; fragments
-  // past it are discarded. Zero vector = no clipping (the default).
-  void SetClipPlanes(const ClipPlaneArray& planes) override {
-    m_clipPlanes = planes;
-  }
-  void SetViewport(int32_t x, int32_t y, uint32_t width,
-                   uint32_t height) override;
+  // Rendering. The section planes in `view.clips` discard the fragments
+  // past them (world space: xyz = normal, w = distance; zero = none).
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+              const SceneView& view) override;
 
   // IBL textures for the fragment shader. Must be set BEFORE Initialize()
   // (descriptor sets bind them at creation).
@@ -398,17 +385,12 @@ public:
 
   // Preferences > Lock lights to model (Settings::lockLightsToModel).
   void SetLightsLockedToModel(bool locked) { m_lightsLocked = locked; }
-  // The rig for the camera as last set by UpdateCamera (core/LightRig.h).
-  // The shadow pass reads its key from here, so the map is rendered from
-  // exactly the light the main pass shades with.
-  conv::LightRig Rig() const {
-    return conv::StudioRig(m_viewMatrix, m_lightsLocked);
+  // The rig for a camera at `view` (core/LightRig.h). The shadow pass reads
+  // its key from here, with the SceneView the main pass then draws, so the
+  // map is rendered from exactly the light the main pass shades with.
+  conv::LightRig Rig(const glm::mat4& view) const {
+    return conv::StudioRig(view, m_lightsLocked);
   }
-
-  // Camera matrices as last set by UpdateCamera — the prepasses read them
-  // here so they are guaranteed identical to what the main pass uses.
-  const glm::mat4& ViewMatrix() const { return m_viewMatrix; }
-  const glm::mat4& ProjectionMatrix() const { return m_projectionMatrix; }
 
   // Shadow-pass draw list: every visible, non-ghost instance (ghosts don't
   // write depth in the main pass and must not cast), plus the combined
@@ -418,7 +400,6 @@ public:
                         glm::vec3& bbMax);
 
 private:
-  ClipPlaneArray m_clipPlanes = NoClipPlanes(); // section view
   VkDevice m_device = VK_NULL_HANDLE;
   VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
   VkQueue m_graphicsQueue = VK_NULL_HANDLE;
@@ -481,16 +462,6 @@ private:
   glm::vec2 m_aoInvSize = glm::vec2(0.0f);
 
   bool m_lightsLocked = false;
-
-  // Camera
-  glm::mat4 m_viewMatrix = glm::mat4(1.0f);
-  glm::mat4 m_projectionMatrix = glm::mat4(1.0f);
-
-  // Viewport
-  int32_t m_viewportX = 0;
-  int32_t m_viewportY = 0;
-  uint32_t m_viewportWidth = 800;
-  uint32_t m_viewportHeight = 600;
 
   // Constants
   // One slot per swapchain image, not per "frame in flight" — the caller

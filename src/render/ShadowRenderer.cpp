@@ -121,7 +121,8 @@ void ShadowRenderer::Shutdown() {
   m_device = VK_NULL_HANDLE;
 }
 
-void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene) {
+void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene,
+                                      const SceneView& sceneView) {
   glm::vec3 bbMin, bbMax;
   const bool haveCasters = scene.GetShadowCasters(m_casters, bbMin, bbMax);
 
@@ -134,7 +135,7 @@ void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene) {
     // `up`, 45 degrees off the key by construction: a fixed axis is parallel
     // to some key a camera can now produce, and lookAt degenerates there.
     // Shadowing any other light would need its own map.
-    const conv::LightRig rig = scene.Rig();
+    const conv::LightRig rig = scene.Rig(sceneView.view);
     const glm::vec3 lightDir = rig.key;
     const glm::vec3 center = 0.5f * (bbMin + bbMax);
     const float diag = std::max(glm::length(bbMax - bbMin), 1e-3f);
@@ -187,7 +188,7 @@ void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene) {
     // slots stay all-zero and the shader skips them.
     ClipPlaneArray worldPlanes = NoClipPlanes();
     for (int i = 0; i < kMaxClipPlanes; i++) {
-      const glm::vec4& p = m_clipPlanes[static_cast<size_t>(i)];
+      const glm::vec4& p = sceneView.clips[static_cast<size_t>(i)];
       if (glm::dot(glm::vec3(p), glm::vec3(p)) > 0.0f)
         worldPlanes[static_cast<size_t>(i)] = glm::vec4(glm::vec3(p), -p.w);
     }
