@@ -1,0 +1,35 @@
+{
+  "order": 150,
+  "why": "The whole run but the stills, on the P1S's K5 profile seeded into the instance's own config, for a 0.3 x 5 mm KANTHAL 94S strip, a 3 mm 1.4301 rod and an 80 x 95 mug with a 3 mm wall, set for 55 C in a 22 C room: the strip check (a steel/brass strip bonded in an assembly under a uniform thermal load, its tip against Timoshenko's in-house and on CalculiX, and its steel/steel control), the bimetal row refused a structural study, the ramp's statics from the app's printed masses and the ball they allow, the strip's budget (offset, Kanthal's minimum-volume share, K per mN, stress), the trigger swept down from the pour at the knob's mark and at both ends of its range, the contact relation refused for a sliding pusher, the frame rod as a fin at both ends of Incropera's free-convection range and on CalculiX, the printed block's margin picking its material, the clip's grip against its beam theory and on the vessel by contact, the chime's first mode against Euler-Bernoulli, every printed part and the plate through check_print, the bill, the drawings (the clip's flat pattern and bend table, the rod's bend table, the knob's dial), and the side cases: the PETG latch's snap-through against Timoshenko and Gere with its eps 1.5 control, and the steel bracket past yield with its control.",
+  "steps": [
+    ["{python}", "-u", "{generators}/print_coupon.py", "--port", "{port}", "--seed"],
+    ["{python}", "-u", "{generators}/tea_alarm/build.py", "--port", "{port}", "--profile", "K5 PLA on P1S", "--strip-mm", "5", "0.3", "--rod-mm", "3", "--vessel-mm", "80", "95", "3", "--ready-c", "55", "--room-c", "22", "--no-render", "--out", "{out}/tea_alarm"]
+  ],
+  "markers": [
+    "strip check: within 2 % of Timoshenko's turn in-house and on CalculiX, and the control does not curl",
+    "negative control, a structural study of the bimetal strip: refused, naming its Poisson's ratio",
+    "trigger: rings at 55\\.0\\d C at the knob's mark",
+    "gap, a contact relation driven by a sliding pusher: refused",
+    "fin at 2 W/\\(m2 K\\)",
+    "fin at 25 W/\\(m2 K\\)",
+    "fin on CalculiX",
+    "block: its mount at .* printed in",
+    "clip: its .* N grip opens the leaf",
+    "chime: f1 ",
+    "every printed part checked as it prints \\(4 parts\\): every item passes",
+    "plate: 4 pieces, every check_print item passes",
+    "bill of materials: 4 printed",
+    "drawings: the clip's flat pattern with its bend lines and bend table, the rod's bend table, the knob's dial; check_drawing clean",
+    "snap-through: the PETG latch",
+    "negative control, the latch at eps 1.5: deflection_limit",
+    "plasticity: the bracket at 1.25 x its M_p load reaches it",
+    "negative control, the bracket under its yield",
+    "tea_alarm: every check passed"
+  ],
+  "instance": "headless",
+  "budget_s": 1200,
+  "readme": {
+    "runs": "`tea_alarm/build.py --no-render` on the seeded P1S profile: the strip check (steel/brass bonded under a uniform thermal load against Timoshenko, in-house and on CalculiX, and its control), the bimetal refused a structural study, the ramp's statics and the ball, the strip's budget, the trigger at the knob's mark and across its range, the contact relation refused for a sliding pusher, the frame rod as a fin at both films and on CalculiX, the block's margin picking its material, the clip's grip and the clip on the vessel by contact, the chime against Euler-Bernoulli, check_print, the plate, the bill and the drawings, and the side cases (a PETG latch's snap-through and a steel bracket past yield, each with its control)",
+    "measured": "569 s"
+  }
+}
