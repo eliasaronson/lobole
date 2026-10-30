@@ -3,7 +3,8 @@
 
 // The organic fixtures carry the answers they claim, and manifold -- the
 // mesh boolean the cradle subtracts with -- is linked and right on them
-// (docs/plans/organic-meshes-and-scans.md, stage 0). The 2M-triangle sizes
+// (docs/interchange/README.md#mesh-bodies, docs/packaging/README.md#windows).
+// The 2M-triangle sizes
 // are [slow]: they are the bench's, not the inner loop's.
 
 #include "mesh_organic.h"

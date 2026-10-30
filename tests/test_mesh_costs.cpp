@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // What recognition and the cradle's pieces cost, measured on the fixtures
-// (docs/plans/organic-meshes-and-scans.md, stage 0). HIDDEN: these are the
-// measurements the plan's cost laws were read from, not checks, and they
+// (docs/interchange/README.md#what-a-mesh-costs,
+// docs/rendering/README.md#mesh-bodies,
+// docs/modeling/README.md#what-a-cradle-costs). HIDDEN: these are the
+// measurements the cost laws there were read from, not checks, and they
 // take minutes. Run one by name:
 //
 //   ./tests/designer_tests "[mesh-cost-recognition]"

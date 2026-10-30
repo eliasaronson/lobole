@@ -3,9 +3,9 @@
 
 // What OpenCASCADE's writers do with a face that carries ONLY a
 // Poly_Triangulation -- no surface, no edges: the shape a mesh body would
-// hand them (docs/plans/organic-meshes-and-scans.md, stage 0, "the OCC
-// writers"). Each check is the outcome read back from the file, not a
-// writer's return value.
+// hand them (docs/interchange/README.md#mesh-bodies,
+// docs/packaging/README.md#opencascade-76). Each check is the outcome read back
+// from the file, not a writer's return value.
 
 #include "mesh_organic.h"
 

@@ -1157,6 +1157,12 @@ every item too, on K5 with its measured air.
   its inscribed diameter, not its length; no support or island detection
   within a piece (a piece that starts off the bed is stacking's); no wall
   thickness; no overhang shading in the viewport.
+- `check_print`'s bridges, stacking and slender on a mesh body
+  ([measuring one](../inspect/README.md#mesh-bodies)): each reads the
+  B-Rep's surfaces (bridges a UV grid classified against the face, stacking
+  rays refined on the exact surface, slender a footprint of the downward
+  planar faces), so each needs a version that reads triangles, and is
+  skipped saying so until then.
 - In a print job: a second filament in one project (the CLI cannot slice
   it), supports' own parameters (only on and off) and a brim's other than
   its width (which is the slender item's 5 mm), the

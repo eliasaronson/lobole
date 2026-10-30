@@ -86,7 +86,7 @@ public:
                std::shared_ptr<const mesh::Bvh> bvh = nullptr);
 
   // Where a brute-force pick stops fitting the frame: it costs 15.7 ns a
-  // triangle (measured, docs/plans/organic-meshes-and-scans.md stage 0) and
+  // triangle (measured, docs/rendering/README.md#picking) and
   // the hover pick runs every frame, so a quarter of a 60 Hz frame is
   // reached at this many triangles. Derived, not chosen.
   static constexpr double kBruteForcePickNsPerTriangle = 15.7;

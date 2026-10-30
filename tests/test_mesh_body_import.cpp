@@ -403,7 +403,7 @@ TEST_CASE("Mesh body: what auto reads off the fixtures",
 // Cost checks (docs/ui/testing.md#tests-that-time-things): CPU time, a bound
 // per piece set against the slowest core (an E-core, `taskset`), each shown
 // to fail against a spin planted in what it times. The 2M figure is the
-// largest a scan comes in at (docs/plans/organic-meshes-and-scans.md).
+// largest a scan comes in at (docs/interchange/README.md#mesh-bodies).
 TEST_CASE("A 2M-triangle scan imports, weighs and sections in seconds",
           "[mesh_body][slow]") {
   const auto fig = fixtures::Figurine(2000000);

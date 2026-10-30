@@ -78,6 +78,29 @@ them:
   and FEM constants but no cost, stock form or finish, and a BOM row has a
   standard and a designation but no price, supplier, part number or lead
   time.
+- **A holder for a scanned object, made and tried.** Each step exists
+  ([mesh bodies](interchange/README.md#mesh-bodies),
+  [Cradle](modeling/README.md#cradle)); nothing has run them as one job.
+  - A generator, `generators/scan_cradle/` (output in
+    `scratch/scan_cradle/`), on the RPC surface alone: import a scan; align
+    it (floor, then scale by a measured distance); sketch the stand's
+    outline from a section; extrude the blank and add B-Rep fillets and
+    screw bosses; cradle it at the print process's clearance; subtract the
+    screw holes as a mesh Boolean; `check_print`, then `export_print_job`.
+  - The object is a hand tool (a cordless drill or pliers) scanned with a
+    phone, for a printed wall holder: its grip and trigger undercut test the
+    cradle's pull direction, since the tool must lift out along `direction`
+    with the undercut present. Where that scan is not available, a CC0 scan
+    from the Smithsonian Open Access 3D collection stands in, fetched by the
+    generator with its URL and licence on the generator's page (each file's
+    licence checked).
+  - The printed holder tried on the real tool, the only test of the
+    clearance that means anything; the generator's page records the fit.
+  - The [action matrix](modeling/README.md#action-matrix) run with a mesh
+    body in the part, and with a Cradle's result in it: that is how a B-Rep
+    consumer `MeshBodyRefusal` misses is found. `tools/fuzz.py run
+    --mesh-body` does it for random designs only
+    ([random designs](modeling/README.md#random-designs)).
 
 ## 3. Assemblies and cross-part design
 
@@ -87,6 +110,11 @@ them:
   to several, and needs its own design.
 - **Cross-part linked sketch copies.** A linked copy follows a sketch in the
   same part; across parts it falls back to a plain paste.
+- **Mesh bodies in an assembly's checks.** A
+  [mesh body](interchange/README.md#mesh-bodies) in an assembly is drawn,
+  picked and measured, and mates reach it through the datums fitted to it;
+  clashes, the contact sweep and motion studies there still read B-Rep
+  shapes only.
 - **Other designed overlaps.** The contact checks relieve an engaged
   thread, a retaining ring's grip and a press fit whose size bands allow it
   ([designed overlaps](inspect/README.md#designed-overlaps)); any other
@@ -134,7 +162,9 @@ them:
   eigenvalues and an adjoint per mode. Sized only if the check-and-rerun loop
   proves too blunt.
 - **A topology result as a part.**
-  - First, the smoothed result as a mesh body (organic meshes, Stage 1).
+  - First, the smoothed result as a
+    [mesh body](interchange/README.md#mesh-bodies): `topo_to_body` imports
+    it as `facets` today.
   - Then a hybrid: the organic bulk unioned with the original part's exact
     keep faces (bores, bolt faces, mating surfaces), so it prints, bolts on
     and can be studied again. Netgen meshing a closed triangle surface for
@@ -215,6 +245,10 @@ Split what the next feature extends, not as a standalone sweep:
   it on its own, against the pixel gate.
 - `tests/rpc_gate_smoke.py` still regex-parses handler bodies; it could read
   the `MethodDoc` flags alone.
+- `collide::Mesh` (`core/MeshCollide`, [mesh mode](inspect/README.md#mesh-mode))
+  keeps an AABB tree of its own beside `mesh::Bvh` and decides containment
+  by ray parity, which is wrong for an open mesh; as a user of `mesh::Bvh`
+  it would share the tree and take the winding number's answer.
 
 ## Not planned
 

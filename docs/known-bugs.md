@@ -214,6 +214,20 @@ the heading if it is not here yet.
   saved extrusion of a closed spline (one edge becomes two), so it needs
   a look at what refers to them.
 
+## Performance
+
+### The bench's big mesh rows are priced as faceted imports
+
+- **Symptom:** `tools/bench.py run --set mesh` plans the 300k and 2M rows
+  at an hour each (`estimate_s`, `setup_s` 3600), so `--dry-run` overstates
+  the set's cost many times over.
+- **Cause:** the rows were priced when a mesh imported as a face a
+  triangle; under `auto` they are mesh bodies now, which import a 2M
+  figure in seconds ([mesh bodies](interchange/README.md#mesh-bodies)).
+- **Where:** `_mesh_rows` in `tools/bench_workloads.py`.
+- **Likely fix:** price them from a measured run of each row as a mesh
+  body instead of the faceted estimate.
+
 ## Rendering
 
 ### The remote is silent while a Wayland window is not on screen

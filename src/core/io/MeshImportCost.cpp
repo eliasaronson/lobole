@@ -165,7 +165,7 @@ std::string DescribeTriangles(uint64_t triangles) {
 
 namespace {
 // The figure's segmentation, the slowest organic fixture: fitted to its 10k
-// and 30k points (docs/plans/organic-meshes-and-scans.md, stage 0).
+// and 30k points (docs/interchange/README.md#what-a-mesh-costs).
 constexpr double kRecognitionAt10k = 2.0;
 constexpr double kRecognitionExponent = 2.2;
 // What a mesh body puts in the tessellation budget a triangle: a closed

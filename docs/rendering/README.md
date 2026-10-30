@@ -695,8 +695,26 @@ so a body that did not change keeps its asset across syncs and tabs. Every
 triangle is face 0, so the whole body highlights as one range and picks as
 its one element; past `kPickBvhTriangles` the entry carries the tree the
 pick walks. The outline draws silhouettes and the few creases past 60°, not
-a wireframe (stage 0 measured 21,004 static line indices and a 13.9 ms
-settled silhouette pass on the 2M figure).
+a wireframe.
+
+What a 2M-triangle body costs the renderer, measured on the figure fixture
+(1.0M shared vertices; the hidden `[mesh-cost-render]` in
+`tests/test_mesh_costs.cpp`):
+- its vertex and index buffers are 46 MB, counted twice against the 256 MB
+  tessellation budget because the outline uploads them again: 92 MB, which
+  is what sets the most a mesh body holds
+  ([mesh bodies](../interchange/README.md#mesh-bodies));
+- `BuildEdgeAdjacency` takes 0.77 s and 270 MB at its peak, once per asset;
+- 21,004 static line indices (boundary and creases), and 3.0M smooth edges
+  that are silhouette candidates: a settled silhouette pass is 13.9 ms,
+  most of a 60 Hz frame, once per camera settle.
+
+The tree is one per mesh (`mesh::Bvh::For`), shared by the pick, `measure`
+and `check_print`'s mesh items: a median split, four triangles a leaf,
+built in about 0.9 µs a triangle on one thread (1.8 s at 2M). A closest
+point grows as log n (0.6 µs at 10k, 4.1 µs at 2M); the winding number,
+which tells inside from outside on an open mesh, costs 3.9 µs near the
+surface at 10k and 11.8 µs at 2M, and 0.8 µs far from it at either.
 
 Measured by the GUI test `import/a_hover_pick_on_a_2m_mesh_fits_a_frame`
 on a 2M-triangle body (the RTX 4060 laptop, under Xvfb): the tree pick takes
@@ -866,7 +884,11 @@ renderer, and by looking at the pictures.
   own appearance exists
   ([a face of its own](materials.md#a-face-of-its-own)). A per-occurrence *material* exists
   ([assemblies](../assemblies/README.md#configurations-per-placement)).
-- A **BVH for picking** (see [Picking](#picking)).
+- A **BVH for picking a B-Rep tessellation**: only a mesh at or past
+  `kPickBvhTriangles` walks one (see [Picking](#picking)).
+- **The frame of a 2M-triangle mesh body**, about 26 ms of main-thread time
+  with the cursor on it or off it ([mesh bodies](#mesh-bodies)), is not
+  profiled.
 - The path tracer builds one BLAS per body occurrence from pre-transformed
   geometry rather than sharing one per asset.
 - **A software device on Windows.** Nothing is bundled; the software rung is

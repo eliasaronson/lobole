@@ -142,17 +142,17 @@ Three rows are shaped by what the app does:
 ### Mesh workloads
 
 The `mesh/*` rows (`--set mesh`, in no other set but `all`) run at 10k,
-300k and 2M triangles: a sculpt download and a phone scan, the sizes the
-organic-meshes plan sets its budgets from
-([plan](../plans/organic-meshes-and-scans.md)). Their inputs are the
+300k and 2M triangles: a sculpt download and a phone scan, the sizes a
+[mesh body](../interchange/README.md#mesh-bodies) is for. Their inputs are the
 organic fixtures of `tests/mesh_organic.h`, written once as binary STL by
 `build/mesh_fixture_writer` (built by name on first use) into
 `~/.cache/lobole/bench/meshes/`, keyed by the generator's source, with the
 fixture's known answers beside each as `<file>.json`. An import passes
 `keep_origin` (the answers are in the file's coordinates) and
-`allow_large_mesh` (what a big mesh costs is the row). Until a mesh stays a
-mesh, the 300k and 2M rows run for hours; they are here for the stage that
-makes them run at all. A hover pick has no row: no RPC picks at a screen
+`allow_large_mesh` (what a big mesh costs is the row), and names no
+`representation`: the instance's private config leaves the preference at
+`auto`, which keeps the organic fixtures mesh bodies at every size
+([what auto chooses](../interchange/README.md#mesh-bodies)). A hover pick has no row: no RPC picks at a screen
 point, so it is measured in-process (`[mesh-cost-render]` in
 `tests/test_mesh_costs.cpp`).
 

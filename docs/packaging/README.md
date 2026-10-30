@@ -290,6 +290,10 @@ Ubuntu 24.04 ships 7.6; development is against 7.9. CI builds a stock
 
 - **No PLY export**: `RWPly_CafWriter` arrived in 7.7, so PLY refuses and
   names the version.
+- **No STEP of a mesh body**: 7.6's STEP writer crashed on a face that
+  carries only a triangulation, so `export_step` refuses one by name there
+  ([mesh bodies](../interchange/README.md#mesh-bodies));
+  `tests/test_mesh_writers.cpp` runs its STEP and PLY checks from 7.7 only.
 - **Two tests fail** where the kernel changed by 7.9 (`Assembly import
   plan…`, `Shell that removes no material…`); the features work.
 - **Some booleans are wrong**, such as a sphere touching a cylinder's floor
@@ -539,6 +543,14 @@ leaves one whose frames are msvcrt's, then `lobole.exe`'s
 under Wine; the
 crash path has not run on real Windows, though the app has been tested
 there by hand.
+
+The vendored mesh boolean (manifold, [libraries](../architecture.md#libraries-and-targets))
+has a check of its own, since the app's cross build has no test suite:
+`nix-build packaging/windows/manifold-probe.nix --cores 8` builds only
+`mesh_boolean_probe.exe` (`tests/mesh_boolean_probe.cpp`, static), one
+boolean of two organic fixtures that checks its own answer; under Wine it
+exits 0 and prints the volumes Linux does. On Linux the same boolean is
+`tests/test_mesh_organic.cpp`'s, run in nix and in both Ubuntu containers.
 
 Rules for code, since nothing builds this target on a push (a release
 cross-builds it and runs `packaging/windows/smoke.sh` on it under Wine):

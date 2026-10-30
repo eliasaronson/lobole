@@ -667,10 +667,10 @@ def _fem_body(ctx):
 
 # mesh -----------------------------------------------------------------------
 
-# The organic fixtures (tests/mesh_organic.h) as STL, at the sizes the
-# organic-meshes plan sets its budgets from: a sculpt download (10k, 300k)
-# and a phone scan (2M). Written once by build/mesh_fixture_writer into
-# ~/.cache/lobole/bench/meshes/, keyed by the generator's own source, with
+# The organic fixtures (tests/mesh_organic.h) as STL, at the sizes the mesh
+# budgets are set from (docs/performance/README.md#mesh-workloads): a sculpt
+# download (10k, 300k) and a phone scan (2M). Written once by
+# build/mesh_fixture_writer into ~/.cache/lobole/bench/meshes/, keyed by the generator's own source, with
 # the fixture's known answers beside each as <file>.json.
 MESH_SIZES = (10000, 300000, 2000000)
 MESH_SRC = [os.path.join(ROOT, "tests", f) for f in
@@ -719,9 +719,8 @@ def _mesh_rows():
     for n in MESH_SIZES:
         label = _mesh_size_label(n)
         heavy = n >= 300000
-        # Today a big mesh is a face a triangle (or a recognised solid):
-        # the rows past 10k measure what the plan's mesh body will replace,
-        # and take long; one repeat after the warm-up.
+        # The rows past 10k are mesh bodies (`auto`) and still the slow
+        # ones: one repeat after the warm-up.
         reps = 1 if heavy else 3
 
         def import_body(ctx, n=n):

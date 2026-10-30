@@ -11,9 +11,9 @@
 // OpenCASCADE; a built tree is read-only, so any number of threads may query
 // it.
 //
-// A median split, four triangles a leaf: stage 0 measured it at 0.9 µs a
-// triangle to build (1.8 s for 2M on one thread) and a closest point that
-// grows as log n (docs/plans/organic-meshes-and-scans.md).
+// A median split, four triangles a leaf: measured at 0.9 µs a triangle to
+// build (1.8 s for 2M on one thread) and a closest point that grows as
+// log n (docs/rendering/README.md#mesh-bodies).
 
 #include "core/mesh/TriMesh.h"
 
