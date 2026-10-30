@@ -1596,14 +1596,24 @@ SolveBuckling(const FemMesh&, const std::vector<Material>&, const Supports&,
 std::optional<FaceMotion>
 FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
               int faceIndex) {
+  return FitFaceMotion(mesh, displacement, std::vector<int>{faceIndex});
+}
+
+std::optional<FaceMotion>
+FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
+              const std::vector<int>& faceIndices) {
   if (displacement.size() != mesh.nodes.size())
     return std::nullopt;
+  const auto on = [&](int f) {
+    return std::find(faceIndices.begin(), faceIndices.end(), f) !=
+           faceIndices.end();
+  };
   // Each node stands for a sixth of every triangle it is a node of, so a
   // finely meshed corner of the face does not outvote the rest of it.
   std::vector<double> weight(mesh.nodes.size(), 0.0);
   double area = 0.0;
   for (const FemMesh::BoundaryTri& t : mesh.boundary) {
-    if (t.faceIndex != faceIndex)
+    if (!on(t.faceIndex))
       continue;
     const glm::dvec3& a = mesh.nodes[t.nodes[0]];
     const double triArea =
@@ -1723,14 +1733,24 @@ FieldPeak PeakOf(const FemMesh& mesh, const std::vector<double>& field) {
 std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
                                        const std::vector<double>& vonMises,
                                        int faceIndex) {
+  return FaceStressOf(mesh, vonMises, std::vector<int>{faceIndex});
+}
+
+std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
+                                       const std::vector<double>& vonMises,
+                                       const std::vector<int>& faceIndices) {
   if (vonMises.size() != mesh.nodes.size())
     return std::nullopt;
+  const auto on = [&](int f) {
+    return std::find(faceIndices.begin(), faceIndices.end(), f) !=
+           faceIndices.end();
+  };
   FaceStress out;
   double weighted = 0.0;
   std::vector<char> seen(mesh.nodes.size(), 0);
   bool any = false;
   for (const FemMesh::BoundaryTri& t : mesh.boundary) {
-    if (t.faceIndex != faceIndex)
+    if (!on(t.faceIndex))
       continue;
     any = true;
     const glm::dvec3& a = mesh.nodes[t.nodes[0]];

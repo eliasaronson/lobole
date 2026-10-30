@@ -26,12 +26,21 @@
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <Bnd_Box.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS_Shape.hxx>
+#include <gp_Pnt.hxx>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -333,10 +342,57 @@ fem::Nonlinear NonlinearOf(const json& v) {
   return nl;
 }
 
+// The faces of a solved mesh that lie on `face` (world coordinates, as an
+// assembly study's placed bodies are): every boundary facet whose six nodes
+// are on it, within a millionth of the mesh's size (the placement's float
+// rounding) and never under 1e-4 mm. How an assembly study's probe finds a
+// part's face in the imprinted fuse it meshed, whose faces are not the
+// part's.
+std::vector<int> MeshFacesOn(const fem::FemMesh& mesh,
+                             const TopoDS_Shape& face) {
+  std::vector<int> out;
+  if (mesh.nodes.empty())
+    return out;
+  glm::dvec3 lo = mesh.nodes[0], hi = mesh.nodes[0];
+  for (const glm::dvec3& n : mesh.nodes) {
+    lo = glm::min(lo, n);
+    hi = glm::max(hi, n);
+  }
+  const double tol = std::max(1e-4, 1e-6 * glm::length(hi - lo));
+  Bnd_Box box;
+  BRepBndLib::Add(face, box);
+  box.Enlarge(tol);
+  std::map<int, bool> onIt; // node -> on the face
+  const auto nodeOn = [&](int n) {
+    if (const auto it = onIt.find(n); it != onIt.end())
+      return it->second;
+    const glm::dvec3& q = mesh.nodes[n];
+    bool on = false;
+    if (!box.IsOut(gp_Pnt(q.x, q.y, q.z))) {
+      BRepExtrema_DistShapeShape d(
+          BRepBuilderAPI_MakeVertex(gp_Pnt(q.x, q.y, q.z)).Vertex(), face);
+      on = d.IsDone() && d.Value() <= tol;
+    }
+    onIt[n] = on;
+    return on;
+  };
+  for (const fem::FemMesh::BoundaryTri& t : mesh.boundary) {
+    if (std::find(out.begin(), out.end(), t.faceIndex) != out.end())
+      continue;
+    bool all = true;
+    for (int n : t.nodes)
+      all = all && nodeOn(n);
+    if (all)
+      out.push_back(t.faceIndex);
+  }
+  return out;
+}
+
 // set_study's thermal_load: {from_study, stress_free_c?}, {uniform_c,
 // stress_free_c}, or null. A from_study that names no thermal study of the
-// part is refused here, naming those it has.
-fem::ThermalLoad ThermalLoadOf(const json& v, const Document& doc,
+// part is refused here, naming those it has; on an assembly (no `doc`) a
+// from_study is refused outright, since an assembly solves no heat.
+fem::ThermalLoad ThermalLoadOf(const json& v, const Document* doc,
                                uint64_t self) {
   fem::ThermalLoad tl;
   if (v.is_null())
@@ -362,12 +418,17 @@ fem::ThermalLoad ThermalLoadOf(const json& v, const Document& doc,
   };
   if (v.contains("from_study")) {
     tl.kind = fem::ThermalLoad::Kind::FromStudy;
+    if (doc == nullptr) {
+      fem::Study probe;
+      probe.thermalLoad = tl;
+      throw std::runtime_error(fem::AssemblyThermalRefusal(probe));
+    }
     tl.fromStudy = v.at("from_study").get<uint64_t>();
-    const fem::Study* src = doc.FindStudy(tl.fromStudy);
+    const fem::Study* src = doc->FindStudy(tl.fromStudy);
     if (src == nullptr || src->type != fem::AnalysisType::Thermal ||
         tl.fromStudy == self) {
       std::string names;
-      for (const fem::Study& st : doc.GetStudies())
+      for (const fem::Study& st : doc->GetStudies())
         if (st.type == fem::AnalysisType::Thermal)
           names += (names.empty() ? "" : ", ") + std::to_string(st.id) + " ('" +
                    st.name + "')";
@@ -384,7 +445,7 @@ fem::ThermalLoad ThermalLoadOf(const json& v, const Document& doc,
     tl.hasStressFree = true;
     tl.stressFreeC = number("stress_free_c");
   } else if (tl.kind == fem::ThermalLoad::Kind::FromStudy &&
-             !fem::DerivedStressFree(*doc.FindStudy(tl.fromStudy))) {
+             !fem::DerivedStressFree(*doc->FindStudy(tl.fromStudy))) {
     throw std::runtime_error(
         "thermal_load needs stress_free_c: thermal study " +
         std::to_string(tl.fromStudy) +
@@ -725,7 +786,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(solved at small deformation) or with it; it is refused in_house, on "
      "another analysis, with load cases, with snap_through, and with "
      "converge always (docs/simulation/README.md#contact).\n"
-     "`thermal_load` expands a STATIC part study under a "
+     "`thermal_load` expands a STATIC study under a "
      "temperature: {from_study: <a thermal study's id>, stress_free_c?} "
      "re-solves that study's heat on this study's own mesh (both must load "
      "the same bodies; stress_free_c, degrees C, defaults to its one "
@@ -737,7 +798,11 @@ static constexpr MethodDoc SimulationMethods[] = {
      "Refused on any other study (thermal buckling is not solved yet), with "
      "snap_through, "
      "beside a contact participant, and with an unknown key "
-     "(docs/simulation/README.md#the-thermal-load-on-a-static-study). A "
+     "(docs/simulation/README.md#the-thermal-load-on-a-static-study). On an "
+     "ASSEMBLY study only the uniform form is taken: each meshed or bonded "
+     "member expands by its own material's coefficient (a bimetal), and "
+     "from_study is refused, since an assembly solves no heat "
+     "(docs/simulation/README.md#a-thermal-load-on-an-assembly). A "
      "THERMAL study takes converge (on its peak temperature rise) and "
      "solver (calculix solves it with *HEAT TRANSFER as a cross-check), and "
      "refuses load_cases, gravity, nonlinear, shape_from and thermal_load.",
@@ -1125,7 +1190,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "case, deform_scale, field, mode, study, threshold"},
     {"probe_study",
      "How one FACE moved and how hard it is stressed under a solved static "
-     "PART study {id (or study), face, at?}. Stress: von_mises_max_mpa (the "
+     "study {id (or study), face, occurrence?, at?}; on an ASSEMBLY study "
+     "`occurrence` names the placed part the face is on, and the facets of "
+     "the meshed fuse that lie on it are read (at and the answer in world "
+     "coordinates). Stress: von_mises_max_mpa (the "
      "largest nodal von Mises on the face, MPa) at von_mises_max_at_mm, and "
      "von_mises_mean_mpa (area-weighted over the face) -- a tooth root or a "
      "fillet, where the global peak may sit in a sharp corner whose value "
@@ -1143,7 +1211,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "holds rigidly goes, a bearing seat's shaft, the lens on that shaft. "
      "The maxima study_results reports are somewhere on the part; this is "
      "what one seat did. Refused on a stale study (re-run it: the face "
-     "named now may not be the face that was meshed), an assembly study, "
+     "named now may not be the face that was meshed), an assembly study "
+     "without `occurrence` (or a part study with one), "
      "or a modal or topology one (docs/simulation/README.md#probing-a-face). "
      "A study with load cases takes `case` (its name or 0-based index; "
      "default the first). Also principal_max_mpa, principal_max_at_mm and "
@@ -1152,8 +1221,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "study_results takes it) across_layers_max_mpa, "
      "across_layers_max_at_mm and across_layers_mean_mpa: the tension "
      "pulling the face's printed layers apart "
-     "(docs/simulation/README.md#printed-layers).",
-     "at, case, face, id, layer_normal, study"},
+     "(docs/simulation/README.md#printed-layers). A plastic result adds "
+     "plastic_strain_max (and _at_mm) and plastic_strain_mean (the "
+     "equivalent plastic strain on the face, unitless), and "
+     "residual_translation_mm / residual_rotation_rad: the face's rigid "
+     "motion once the load is off (docs/simulation/README.md#plasticity).",
+     "at, case, face, id, layer_normal, occurrence, study"},
     {"export_study_inp",
      "Write the CalculiX deck a STATIC, BUCKLING or THERMAL study would run "
      "{id (or study), "
@@ -1924,11 +1997,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // Thermal expansion under a temperature field
       // (docs/simulation/README.md#the-thermal-load-on-a-static-study).
       if (p.contains("thermal_load"))
-        s.thermalLoad = ThermalLoadOf(p.at("thermal_load"), *doc, s.id);
-      if (s.type == fem::AnalysisType::Thermal && host.IsAssembly())
-        throw std::runtime_error(
-            "a thermal study is a part study's: an assembly study does not "
-            "solve heat yet (docs/simulation/README.md#not-done)");
+        s.thermalLoad = ThermalLoadOf(p.at("thermal_load"), doc, s.id);
+      if (host.IsAssembly())
+        if (const std::string why = fem::AssemblyThermalRefusal(s);
+            !why.empty())
+          throw std::runtime_error(why);
       if (const std::string why = fem::ThermalRefusal(s); !why.empty())
         throw std::runtime_error(why);
     });
@@ -3824,11 +3897,15 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
                      p.contains("study"), p.value("study", uint64_t{0}));
     const fem::Study& s = host.Require(id);
-    if (host.IsAssembly())
+    if (host.IsAssembly() && !p.contains("occurrence"))
       throw std::runtime_error(
-          "probe_study reads a PART study: an assembly study meshes the "
-          "imprinted fuse of its participants, whose faces are not the "
-          "parts' faces -- study the part, loaded as the assembly loads it");
+          "probe_study on an assembly study needs `occurrence`: the face is "
+          "a part's, and the study meshed the imprinted fuse of its "
+          "participants, so which placed part it is on says where it is");
+    if (!host.IsAssembly() && p.contains("occurrence"))
+      throw std::runtime_error(
+          "probe_study takes `occurrence` on an assembly study only; a part "
+          "study's face is the part's own");
     if (s.type != fem::AnalysisType::Static)
       throw std::runtime_error(
           std::string("probe_study reads a static study's displacements; "
@@ -3846,23 +3923,61 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       throw std::runtime_error("probe_study needs `face` (the element, as "
                                "add_load takes it)");
     const ElementRef face = studyFaceOf(p.at("face"));
-    fem::ResolvedFace rf;
-    std::string why;
-    if (!fem::ResolveFace(*doc, face, "probe", rf, &why))
-      throw std::runtime_error(why);
     const fem::StudyBodyResult* body = nullptr;
-    for (const fem::StudyBodyResult& b : rt->bodies)
-      if (b.bodyIndex == rf.bodyIndex)
-        body = &b;
-    if (!body)
-      throw std::runtime_error(
-          "face '" + face.name +
-          "' is on a body this study did not solve: a part study meshes only "
-          "the bodies its loads are on");
+    std::vector<int> faces; // the solved mesh's faces the face is
+    if (!host.IsAssembly()) {
+      fem::ResolvedFace rf;
+      std::string why;
+      if (!fem::ResolveFace(*doc, face, "probe", rf, &why))
+        throw std::runtime_error(why);
+      for (const fem::StudyBodyResult& b : rt->bodies)
+        if (b.bodyIndex == rf.bodyIndex)
+          body = &b;
+      if (!body)
+        throw std::runtime_error(
+            "face '" + face.name +
+            "' is on a body this study did not solve: a part study meshes "
+            "only the bodies its loads are on");
+      faces = {rf.faceIndex};
+    } else {
+      // An assembly study (docs/simulation/README.md#probing-a-face): the
+      // part's face, placed, and the solved mesh's facets that lie on it.
+      const Occurrence& occ = host.OccurrenceOf(p.at("occurrence"), "probe");
+      const std::vector<Body> placed =
+          ui::AssemblyStudyContextFor(state).placedBodies(occ.id);
+      TopoDS_Shape onFace;
+      for (const Body& b : placed) {
+        if (face.featureId != 0 && b.createdBy != face.featureId)
+          continue;
+        if (const auto idx = b.elementMap.Resolve(face.name)) {
+          int i = 0;
+          for (TopExp_Explorer ex(b.shape.GetShape(), TopAbs_FACE); ex.More();
+               ex.Next(), ++i)
+            if (i == *idx)
+              onFace = ex.Current();
+          break;
+        }
+      }
+      if (onFace.IsNull())
+        throw std::runtime_error("face '" + face.name + "' is not on '" +
+                                 occ.name + "' (list_elements names them)");
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        faces = MeshFacesOn(b.mesh, onFace);
+        if (!faces.empty()) {
+          body = &b;
+          break;
+        }
+      }
+      if (!body)
+        throw std::runtime_error(
+            "face '" + face.name + "' of '" + occ.name +
+            "' is on no surface this study meshed: is the occurrence a "
+            "meshed or bonded participant, and is the face on its outside?");
+    }
     const int caseIdx =
         p.contains("case") ? CaseIndex(rt->caseNames, p.at("case")) : 0;
-    const auto fm = fem::FitFaceMotion(
-        body->mesh, body->Case(caseIdx).displacement, rf.faceIndex);
+    const auto fm =
+        fem::FitFaceMotion(body->mesh, body->Case(caseIdx).displacement, faces);
     if (!fm)
       throw std::runtime_error("face '" + face.name +
                                "' has no triangles in the study's mesh");
@@ -3876,7 +3991,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           "v172), so the stress across layers cannot be read from it -- "
           "run_study with recompute: true");
     const auto stress =
-        fem::FaceStressOf(body->mesh, caseResult.vonMises, rf.faceIndex);
+        fem::FaceStressOf(body->mesh, caseResult.vonMises, faces);
     const auto vec = [](const glm::dvec3& v) {
       return json::array({v.x, v.y, v.z});
     };
@@ -3898,7 +4013,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     }
     if (!caseResult.stress.empty()) {
       if (const auto pr = fem::FaceStressOf(
-              body->mesh, fem::MaxPrincipalField(caseResult), rf.faceIndex)) {
+              body->mesh, fem::MaxPrincipalField(caseResult), faces)) {
         out["principal_max_mpa"] = pr->maxMPa;
         out["principal_max_at_mm"] = vec(pr->maxAt);
         out["principal_mean_mpa"] = pr->meanMPa;
@@ -3908,7 +4023,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       out["layer_normal"] = vec(*layerNormal);
       if (const auto al = fem::FaceStressOf(
               body->mesh, fem::AcrossLayersField(caseResult, *layerNormal),
-              rf.faceIndex)) {
+              faces)) {
         out["across_layers_max_mpa"] = al->maxMPa;
         out["across_layers_max_at_mm"] = vec(al->maxAt);
         out["across_layers_mean_mpa"] = al->meanMPa;
@@ -3918,6 +4033,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       out["rotation_rad"] = vec(fm->rotation);
       out["rotation_magnitude_deg"] = glm::degrees(glm::length(fm->rotation));
     }
+    // A plastic result (docs/simulation/README.md#plasticity): the plastic
+    // strain on the face, and how the face is left once the load is off.
+    if (!caseResult.plasticStrain.empty()) {
+      if (const auto pe =
+              fem::FaceStressOf(body->mesh, caseResult.plasticStrain, faces)) {
+        out["plastic_strain_max"] = pe->maxMPa;
+        out["plastic_strain_max_at_mm"] = vec(pe->maxAt);
+        out["plastic_strain_mean"] = pe->meanMPa;
+      }
+    }
+    if (!caseResult.residualDisplacement.empty())
+      if (const auto rm = fem::FitFaceMotion(
+              body->mesh, caseResult.residualDisplacement, faces)) {
+        out["residual_translation_mm"] = vec(rm->translation);
+        if (rm->rotationDetermined)
+          out["residual_rotation_rad"] = vec(rm->rotation);
+      }
     if (p.contains("at")) {
       const json& a = p.at("at");
       if (!a.is_array() || a.size() != 3)

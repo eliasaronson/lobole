@@ -433,6 +433,12 @@ std::string ContactRefusal(const Study& study);
 // temperature where none can be derived. Checked without the document: a
 // from_study that names no thermal study is the planner's.
 std::string ThermalRefusal(const Study& study);
+// What an ASSEMBLY study refuses of heat beyond ThermalRefusal
+// (docs/simulation/README.md#a-thermal-load-on-an-assembly): a thermal
+// study, a thermal load or a thermal study's load (an assembly does not
+// solve heat yet), and a from_study thermal load (it would re-solve a heat
+// the assembly cannot). A uniform thermal load on a static study is taken.
+std::string AssemblyThermalRefusal(const Study& study);
 // One thermal load's own refusal (its quantities), for add_load before it
 // is added; empty when it can be applied. `type` must be thermal.
 std::string ThermalLoadRefusal(const Load& load);

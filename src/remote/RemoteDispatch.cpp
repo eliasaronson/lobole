@@ -1684,6 +1684,20 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
              put("poisson", mp.poisson);
              put("yield_mpa", mp.yieldMPa);
              put("interlayer_mpa", mp.interlayerMPa);
+             put("conductivity_w_mk", mp.conductivityWmK);
+             put("expansion_per_k", mp.expansionPerK);
+             if (!std::isnan(mp.serviceMaxC))
+               j["service_max_c"] = mp.serviceMaxC;
+             // A thermostatic bimetal's maker's constants
+             // (docs/simulation/README.md#material-data).
+             if (mp.specificCurvaturePerK > 0.0)
+               j["bimetal"] = {
+                   {"specific_curvature_per_k", mp.specificCurvaturePerK},
+                   {"specific_curvature_tolerance",
+                    mp.specificCurvatureTolerance},
+                   {"specific_deflection_per_k", mp.specificDeflectionPerK},
+                   {"linear_from_c", mp.linearFromC},
+                   {"linear_to_c", mp.linearToC}};
              out[slug] = std::move(j);
            }
            return out;

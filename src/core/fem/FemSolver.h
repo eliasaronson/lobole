@@ -272,6 +272,11 @@ struct FaceMotion {
 std::optional<FaceMotion>
 FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
               int faceIndex);
+// The same over several mesh faces as one: a part's face an assembly
+// study's imprint split into pieces.
+std::optional<FaceMotion>
+FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
+              const std::vector<int>& faceIndices);
 
 // The von Mises stress on one face of a solved mesh
 // (docs/simulation/README.md#probing-a-face): the largest nodal value over
@@ -292,6 +297,9 @@ struct FaceStress {
 std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
                                        const std::vector<double>& vonMises,
                                        int faceIndex);
+std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
+                                       const std::vector<double>& vonMises,
+                                       const std::vector<int>& faceIndices);
 
 // The largest principal stress of `s` (MPa, tension positive): the
 // eigenvalue of the stress tensor that a brittle material breaks on.

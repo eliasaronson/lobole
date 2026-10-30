@@ -246,11 +246,11 @@ bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
   const auto matType =
       CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
   const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
-  if (mp.youngGPa <= 0.0) {
+  if (const std::string why = CADMaterials::ElasticDataRefusal(mp);
+      !why.empty()) {
     if (error)
       *error = Quote(label) + ": material '" +
-               (body.material.empty() ? "default" : body.material) +
-               "' has no stiffness data";
+               (body.material.empty() ? "default" : body.material) + "' " + why;
     return false;
   }
   const bool needsDensity =
@@ -322,11 +322,15 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
                   "its part with fixed faces or a rigid neighbour's contact");
   if (const std::string why = ContactRefusal(study); !why.empty())
     return fail(why);
-  // Heat is a part study's (docs/simulation/README.md#not-done).
-  if (study.type == AnalysisType::Thermal || study.thermalLoad.On())
-    return fail("a thermal study, or a thermal load, is a part study's: an "
-                "assembly study does not solve heat yet");
+  // Heat is a part study's (docs/simulation/README.md#not-done); a uniform
+  // thermal load on a static study is taken, each member expanding by its
+  // own material (docs/simulation/README.md#a-thermal-load-on-an-assembly).
+  if (const std::string why = AssemblyThermalRefusal(study); !why.empty())
+    return fail(why);
+  if (const std::string why = ThermalRefusal(study); !why.empty())
+    return fail(why);
   out.type = study.type;
+  out.thermalLoad = study.thermalLoad;
   out.solver = EffectiveSolver(study);
   out.nonlinear = study.nonlinear;
   out.numModes = study.numModes;
@@ -627,10 +631,11 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
     const std::string bodyLabel =
         meshedOcc->name + (meshedBodies.size() > 1 ? "/" + body.name : "");
-    if (mp.youngGPa <= 0.0)
+    if (const std::string why = CADMaterials::ElasticDataRefusal(mp);
+        !why.empty())
       return fail(Quote(bodyLabel) + ": material '" +
-                  (body.material.empty() ? "default" : body.material) +
-                  "' has no stiffness data");
+                  (body.material.empty() ? "default" : body.material) + "' " +
+                  why);
     const bool needsDensity =
         study.type == AnalysisType::Modal ||
         (study.gravity.x != 0 || study.gravity.y != 0 || study.gravity.z != 0);
@@ -691,6 +696,12 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
       if (const std::string why = HardeningRefusal(
               bp.mat, Quote(bodyLabel) + "'s material " + mp.name,
               CADMaterials::MaterialLibrary::HardeningSlugList());
+          !why.empty())
+        return fail(why);
+    if (study.thermalLoad.On())
+      if (const std::string why = ThermalMaterialRefusal(
+              bp.mat, Quote(bodyLabel) + "'s material " + mp.name, false, true,
+              CADMaterials::MaterialLibrary::ExpansionSlugList());
           !why.empty())
         return fail(why);
     bp.shape = imprinted;
@@ -986,6 +997,21 @@ static bool PlanBondedGroup(const AssemblyDocument& asmDoc, Study& study,
                       study.type, study.gravity, study.nonlinear.plasticity,
                       m.mat, &why))
         return fail(why);
+      // Under a thermal load each member expands by its own coefficient,
+      // which reaches the solver as its domain's material.
+      if (study.thermalLoad.On())
+        if (const std::string refusal = ThermalMaterialRefusal(
+                m.mat,
+                Quote(occ->name +
+                      (bodies.size() > 1 ? "/" + bodies[bi].name : "")) +
+                    "'s material " +
+                    CADMaterials::MaterialLibrary::GetMaterialOrDefault(
+                        bodies[bi].material)
+                        .name,
+                false, true,
+                CADMaterials::MaterialLibrary::ExpansionSlugList());
+            !refusal.empty())
+          return fail(refusal);
       m.original = BRepBuilderAPI_Copy(bodies[bi].shape.GetShape()).Shape();
       m.originalFaces = FacesOf(m.original);
       members.push_back(std::move(m));

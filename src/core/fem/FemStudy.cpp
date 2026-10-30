@@ -540,6 +540,23 @@ std::string ThermalRefusal(const Study& study) {
   return {};
 }
 
+std::string AssemblyThermalRefusal(const Study& study) {
+  if (study.type == AnalysisType::Thermal)
+    return "a thermal study is a part study's: an assembly study does not "
+           "solve heat yet (docs/simulation/README.md#not-done); a static "
+           "assembly study takes a uniform thermal_load";
+  for (const Load& l : study.loads)
+    if (IsThermalLoad(l.type))
+      return "load " + std::to_string(l.id) + " (" + LoadTypeToString(l.type) +
+             ") is a thermal study's, and an assembly study does not solve "
+             "heat yet (docs/simulation/README.md#not-done)";
+  if (study.thermalLoad.kind == ThermalLoad::Kind::FromStudy)
+    return "thermal_load from_study re-solves a thermal study's heat, and an "
+           "assembly study does not solve heat yet: on an assembly the "
+           "thermal load is uniform, {uniform_c, stress_free_c}";
+  return {};
+}
+
 const char* CpuSolverName(AnalysisType type) {
   switch (type) {
   case AnalysisType::Modal:
@@ -1541,10 +1558,12 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     const auto matType =
         CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
     const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
-    if (mp.youngGPa <= 0.0f && !thermalStudy)
-      return fail("body '" + body.name + "': material '" +
-                  (body.material.empty() ? "default" : body.material) +
-                  "' has no stiffness data");
+    if (!thermalStudy)
+      if (const std::string why = CADMaterials::ElasticDataRefusal(mp);
+          !why.empty())
+        return fail("body '" + body.name + "': material '" +
+                    (body.material.empty() ? "default" : body.material) + "' " +
+                    why);
 
     // Each loaded body needs at least one support; a thermal body somewhere
     // for its heat to go (a held temperature or a convection), without
@@ -3624,10 +3643,11 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
   const auto matType =
       CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
   const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
-  if (mp.youngGPa <= 0.0f)
+  if (const std::string why = CADMaterials::ElasticDataRefusal(mp);
+      !why.empty())
     return fail("body '" + body.name + "': material '" +
-                (body.material.empty() ? "default" : body.material) +
-                "' has no stiffness data");
+                (body.material.empty() ? "default" : body.material) + "' " +
+                why);
 
   // Keep faces (frozen solid beyond the auto-frozen support/load skin), by
   // keep-face index so an island can say which it took.

@@ -1777,11 +1777,11 @@ const std::optional<fem::CalculixInstall>& CalculixHere(const AppState& state,
 // #the-thermal-load-on-a-static-study): none, one temperature everywhere,
 // or a thermal study's, with the stress-free temperature seeded where it is
 // derived (the thermal study's one ambient). A choice the study cannot take
-// is refused where it is made, saying why.
+// is refused where it is made, saying why. On an assembly only None and
+// Uniform: it has no thermal studies to take a temperature from
+// (docs/simulation/README.md#a-thermal-load-on-an-assembly).
 void DrawThermalLoad(AppState& state, const fem::Study& s) {
   const StudyHost host = StudyHostOf(state);
-  if (host.IsAssembly())
-    return;
   std::vector<const fem::Study*> thermals;
   for (const fem::Study& o : host.Studies())
     if (o.type == fem::AnalysisType::Thermal)
@@ -1797,7 +1797,10 @@ void DrawThermalLoad(AppState& state, const fem::Study& s) {
   const auto apply = [&](fem::ThermalLoad next) {
     fem::Study with = s;
     with.thermalLoad = next;
-    refusal = fem::ThermalRefusal(with);
+    refusal =
+        host.IsAssembly() ? fem::AssemblyThermalRefusal(with) : std::string();
+    if (refusal.empty())
+      refusal = fem::ThermalRefusal(with);
     if (refusal.empty())
       ModifyStudy(state, s.id, "Set thermal load",
                   [&](fem::Study& cs) { cs.thermalLoad = next; });

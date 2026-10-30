@@ -22,6 +22,12 @@ enum class MaterialType {
   GOLD,
   SILVER,
   TITANIUM,
+  // KANTHAL 94S thermostatic bimetal, roll-bonded strip (two NiCr steels):
+  // bought by its curvature constant, not modelled by its layers, whose
+  // data the maker does not publish. A row for its mass, conductivity and
+  // stiffness; a structural study of a body of it is refused, since it has
+  // no Poisson's ratio (docs/simulation/README.md#material-data).
+  BIMETAL_KANTHAL_94S,
   // Aluminium alloys by grade (EN 573 / AA designation and temper), and
   // only by grade: a grade is what a drawing orders, what a study's yield is
   // and what its conductivity is, and across alloys those run 95 to 500 MPa
@@ -172,6 +178,18 @@ struct MaterialProperties {
   double serviceMaxC = std::numeric_limits<double>::quiet_NaN();
   std::string serviceBasis;
 
+  // A thermostatic bimetal's maker's constants (0 = not a bimetal), each
+  // cited beside it: the specific curvature k (1/K: a strip of thickness s
+  // curves by k dT / s), its tolerance as a fraction (0.04 = +/- 4 %), the
+  // specific deflection a (1/K: a strip of length L clamped at one end
+  // moves its tip by a dT L^2 / s), and the range (degrees C) over which
+  // both hold.
+  double specificCurvaturePerK = 0.0;
+  double specificCurvatureTolerance = 0.0;
+  double specificDeflectionPerK = 0.0;
+  double linearFromC = 0.0;
+  double linearToC = 0.0;
+
   // Procedural surface figure. Both fields are pattern-relative, and are 0
   // exactly when pattern is Flat:
   //   Wood     scale = rings per local unit, contrast = late-wood darkening
@@ -201,6 +219,12 @@ struct MaterialProperties {
 // colour, and its reflection and highlights (mesh.frag's glass branch) give it
 // the rest of its presence.
 float ViewportAlpha(const MaterialProperties& m);
+
+// Why a structural study (static, modal, buckling, topology) cannot solve a
+// body of this material: no modulus ("has no stiffness data"), or no
+// Poisson's ratio. Empty when it can. The caller puts the body and the
+// material in front of it.
+std::string ElasticDataRefusal(const MaterialProperties& m);
 
 class MaterialLibrary {
 public:

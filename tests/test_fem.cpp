@@ -1971,6 +1971,93 @@ TEST_CASE("S2: a bonded neighbour joins the mesh with its own material, and "
 }
 #endif // HAVE_NETGEN
 
+TEST_CASE("a uniform thermal load on a bonded assembly study is taken, and "
+          "the rest of heat on an assembly refused by name",
+          "[fem][assembly][thermal]") {
+  std::string err;
+  fem::StudyPlan plan;
+  const auto uniform = [](fem::Study& s) {
+    s.thermalLoad.kind = fem::ThermalLoad::Kind::Uniform;
+    s.thermalLoad.uniformC = 100.0;
+    s.thermalLoad.hasStressFree = true;
+    s.thermalLoad.stressFreeC = 20.0;
+  };
+  SECTION("taken on a bonded pair, each member with its own expansion") {
+    TwoBlocks world(16.0f);
+    world.lower->GetFeature(0)->SetMaterial("brass");
+    world.lower->Regenerate();
+    fem::Study study = world.StudyBonded();
+    uniform(study);
+    REQUIRE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(), plan,
+                                   &err));
+    INFO(err);
+    CHECK(plan.thermalLoad.On());
+    REQUIRE(plan.bodies.size() == 1);
+    REQUIRE(plan.bodies[0].members.size() == 2);
+    CHECK(plan.bodies[0].members[0].mat.expansionPerK == 12e-6);
+    CHECK(plan.bodies[0].members[1].mat.expansionPerK == 19.2e-6);
+  }
+  SECTION("taken on one meshed occurrence on a rigid support") {
+    TwoBlocks world(16.0f);
+    fem::Study study = world.StudyWithContactSupport();
+    uniform(study);
+    REQUIRE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(), plan,
+                                   &err));
+    CHECK(plan.thermalLoad.On());
+  }
+  SECTION("a member without an expansion coefficient") {
+    TwoBlocks world(16.0f);
+    world.lower->GetFeature(0)->SetMaterial("copper");
+    world.lower->Regenerate();
+    fem::Study study = world.StudyBonded();
+    uniform(study);
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring(
+                        "no thermal expansion coefficient"));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("Lower"));
+  }
+  SECTION("a thermal study, and from_study") {
+    TwoBlocks world(16.0f);
+    fem::Study study = world.StudyBonded();
+    study.type = fem::AnalysisType::Thermal;
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("does not solve heat"));
+    study = world.StudyBonded();
+    study.thermalLoad.kind = fem::ThermalLoad::Kind::FromStudy;
+    study.thermalLoad.fromStudy = 7;
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("uniform"));
+  }
+  SECTION("beside a contact participant, and on a modal study") {
+    TwoBlocks world(16.0f);
+    fem::Study study = world.StudyWithContactSupport();
+    uniform(study);
+    study.participants[1].role = fem::ParticipantRole::Contact;
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("contact participant"));
+    study = world.StudyBonded();
+    uniform(study);
+    study.type = fem::AnalysisType::Modal;
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("modal"));
+  }
+  SECTION("a bimetal member, which has no Poisson's ratio") {
+    TwoBlocks world(16.0f);
+    world.lower->GetFeature(0)->SetMaterial("bimetal_kanthal_94s");
+    world.lower->Regenerate();
+    fem::Study study = world.StudyBonded();
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("Poisson's ratio"));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("bimetal_kanthal_94s"));
+  }
+}
+
 TEST_CASE("S2: a bonded participant that touches nothing is refused by name",
           "[fem][assembly]") {
   TwoBlocks world(40.0f); // 24 mm of air

@@ -28,6 +28,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <functional>
 #include <limits>
@@ -349,6 +350,127 @@ TEST_CASE("a free bar under a gradient through its depth bends without "
   CHECK_THAT(bend, WithinRel(12e-6 * dT / kW * kL * kW, 1e-9));
 }
 
+// ---- A bimetal strip
+// (docs/simulation/README.md#a-thermal-load-on-an-assembly)
+
+namespace {
+
+// Timoshenko's curvature of a heated bimetal strip (S. Timoshenko, "Analysis
+// of bi-metal thermostats", J. Opt. Soc. Am. 11, 233-255, 1925; the Kanthal
+// handbook's eq. [1]): layers t1 and t2 thick, moduli E1 and E2, expansion
+// coefficients a1 and a2, heated dT from flat. 1/mm, positive curling toward
+// the layer that expands less.
+double TimoshenkoCurvature(double t1, double t2, double e1, double e2,
+                           double a1, double a2, double dT) {
+  const double m = t1 / t2, n = e1 / e2, h = t1 + t2;
+  return 6.0 * (a2 - a1) * dT * (1 + m) * (1 + m) /
+         (h *
+          (3.0 * (1 + m) * (1 + m) + (1 + m * n) * (m * m + 1.0 / (m * n))));
+}
+
+fem::Material Layer(double eMPa, double nu, double alpha) {
+  fem::Material m;
+  m.youngMPa = eMPa;
+  m.poisson = nu;
+  m.expansionPerK = alpha;
+  return m;
+}
+
+// A 40 x 5 strip of two 0.5 mm layers, `lower` under `upper`, clamped
+// across its end at x = 0 and heated from 20 to 100 C: how its free end
+// (face 1, x = 40) moved as a rigid body.
+fem::FaceMotion HeatedStrip(const fem::Material& lower,
+                            const fem::Material& upper, size_t* nodes,
+                            double* spanCurvature = nullptr) {
+  fem::FemMesh mesh = GenerateBoxMesh(80, 5, 2, 40.0, 5.0, 1.0);
+  mesh.tetDomain.resize(mesh.tets.size());
+  for (size_t t = 0; t < mesh.tets.size(); ++t) {
+    double z = 0.0;
+    for (int k = 0; k < 4; ++k)
+      z += 0.25 * mesh.nodes[mesh.tets[t][k]].z;
+    mesh.tetDomain[t] = z < 0.5 ? 0 : 1;
+  }
+  fem::Supports sup;
+  for (int n : NodesAtPlane(mesh, 0, 0.0, 1e-9))
+    sup.fixedNodes.push_back(n);
+  fem::SolveOptions o;
+  o.thermal = Uniform(mesh, 100.0, 20.0);
+  std::string err;
+  const auto r = fem::SolveCases(mesh, {lower, upper}, sup, {{}}, &err,
+                                 glm::dvec3(0.0), o);
+  INFO(err);
+  REQUIRE(r);
+  // The section's rotation at x, from the axial motions of its top and
+  // bottom fibres on the strip's mid-width.
+  const auto turn = [&](double x) {
+    double top = 0.0, bottom = 0.0;
+    for (size_t n = 0; n < mesh.nodes.size(); ++n) {
+      const glm::dvec3& p = mesh.nodes[n];
+      if (std::abs(p.x - x) > 1e-9 || std::abs(p.y - 2.5) > 1e-9)
+        continue;
+      if (std::abs(p.z) < 1e-9)
+        bottom = r->front().displacement[n].x;
+      if (std::abs(p.z - 1.0) < 1e-9)
+        top = r->front().displacement[n].x;
+    }
+    return bottom - top;
+  };
+  if (spanCurvature)
+    *spanCurvature = (turn(10.0) - turn(30.0)) / 20.0;
+  const auto fm = fem::FitFaceMotion(mesh, r->front().displacement, 1);
+  REQUIRE(fm);
+  REQUIRE(fm->rotationDetermined);
+  if (nodes)
+    *nodes = mesh.nodes.size();
+  return *fm;
+}
+
+} // namespace
+
+TEST_CASE("a steel and brass strip heated from flat curls as Timoshenko's "
+          "bimetal, and a steel pair does not",
+          "[fem][thermal]") {
+  // The library's steel (E 200 GPa, 12e-6/K: EN 1993-1-1) under C26000
+  // brass (E 110.3 GPa, nu 0.333, 19.2e-6/K: Wieland Concast's datasheet).
+  const fem::Material steel = Layer(200000.0, 0.3, 12e-6);
+  const fem::Material brass = Layer(110300.0, 16000.0 / 12000.0 - 1.0, 19.2e-6);
+  const double L = 40.0;
+  const double kappa =
+      TimoshenkoCurvature(0.5, 0.5, 200000.0, 110300.0, 12e-6, 19.2e-6, 80.0);
+  CHECK_THAT(kappa, WithinRel(8.448e-4, 1e-3)); // the plan's number
+  size_t nodes = 0;
+  double span = 0.0;
+  const fem::FaceMotion fm = HeatedStrip(steel, brass, &nodes, &span);
+  // Brass on top expands more, so the strip curls down: the free end turns
+  // about +y (x toward -z) and drops.
+  const double rotation = fm.rotation.y;
+  const double drop = -fm.translation.z;
+  std::printf("bimetal: steel/brass 40 x 5 x 2 x 0.5, 20 -> 100 C, %zu "
+              "nodes: curvature between x = 10 and 30 %.5e /mm (Timoshenko "
+              "%.5e, %+.3f %%); tip rotation %.6f rad (%.6f, %+.3f %%), "
+              "drop %.6f mm (%.6f, %+.3f %%)\n",
+              nodes, span, kappa, 100.0 * (span / kappa - 1), rotation,
+              kappa * L, 100.0 * (rotation / (kappa * L) - 1), drop,
+              kappa * L * L / 2, 100.0 * (drop / (kappa * L * L / 2) - 1));
+  // Away from the clamp the strip curves as the closed form says. The clamp
+  // holds both layers' ends across the width and thickness, and the end
+  // turns a little more there (docs/simulation/README.md
+  // #a-thermal-load-on-an-assembly): measured +1.9 % on the tip's rotation
+  // and +3.6 % on its drop at L/b = 8.
+  CHECK_THAT(span, WithinRel(kappa, 0.01));
+  CHECK_THAT(rotation, WithinRel(kappa * L, 0.02));
+  CHECK(drop > kappa * L * L / 2);
+  CHECK_THAT(drop, WithinRel(kappa * L * L / 2, 0.04));
+  // The control: both layers steel. It grows, and does not curl (what
+  // turns is the structured mesh's asymmetry, a thousandth of the pair's).
+  const fem::FaceMotion same = HeatedStrip(steel, steel, nullptr);
+  std::printf("bimetal: steel/steel control, tip rotation %.3g rad, end "
+              "moved %.6f mm along (alpha dT L %.6f)\n",
+              glm::length(same.rotation), same.translation.x, 12e-6 * 80.0 * L);
+  CHECK(glm::length(same.rotation) < 1e-3 * kappa * L);
+  CHECK_THAT(same.translation.x, WithinRel(12e-6 * 80.0 * L, 0.01));
+}
+
 // ---- Studies ------------------------------------------------------------
 
 TEST_CASE("a thermal study refuses what it cannot take, naming what it can",
@@ -446,6 +568,51 @@ TEST_CASE("the material library carries cited thermal numbers, and generic "
   CHECK_THAT(MaterialLibrary::ConductivitySlugList(),
              ContainsSubstring("aluminum_6061_t6"));
   CHECK_THAT(MaterialLibrary::ExpansionSlugList(), !ContainsSubstring("pla"));
+}
+
+TEST_CASE("stainless, brass and the bimetal carry their cited numbers, and a "
+          "row without a Poisson's ratio is refused a structural study",
+          "[fem][thermal][materials]") {
+  using CADMaterials::MaterialLibrary;
+  using CADMaterials::MaterialType;
+  // 1.4301: SCI P413 (2017), §2.3.1, Table 2.2 (cold-rolled strip), 2.7.
+  const auto& ss = MaterialLibrary::GetMaterial(MaterialType::STAINLESS_STEEL);
+  CHECK(ss.youngGPa == 200.0);
+  CHECK(ss.poisson == 0.3);
+  CHECK(ss.yieldMPa == 230.0);
+  CHECK(ss.density == 7900.0);
+  CHECK(ss.conductivityWmK == 15.0);
+  CHECK(ss.expansionPerK == 16e-6);
+  // C26000: Wieland Concast's datasheet. No yield: it gives rod's only.
+  const auto& brass = MaterialLibrary::GetMaterial(MaterialType::BRASS);
+  CHECK(brass.youngGPa == 110.3);
+  CHECK_THAT(brass.poisson, WithinRel(1.0 / 3.0, 1e-12));
+  CHECK(brass.yieldMPa == 0.0);
+  CHECK(brass.density == 8530.0);
+  CHECK(brass.conductivityWmK == 121.2);
+  CHECK(brass.expansionPerK == 19.2e-6);
+  CHECK_THAT(MaterialLibrary::ExpansionSlugList(), ContainsSubstring("brass"));
+  // KANTHAL 94S: the handbook's p. 40 and type table.
+  const auto& bi =
+      MaterialLibrary::GetMaterial(MaterialType::BIMETAL_KANTHAL_94S);
+  CHECK(MaterialLibrary::Slug(MaterialType::BIMETAL_KANTHAL_94S) ==
+        "bimetal_kanthal_94s");
+  CHECK(bi.youngGPa == 190.0);
+  CHECK(bi.poisson == 0.0);
+  CHECK(bi.conductivityWmK == 12.0);
+  CHECK(bi.expansionPerK == 0.0);
+  CHECK(bi.density == 8100.0);
+  CHECK(bi.specificCurvaturePerK == 17.8e-6);
+  CHECK(bi.specificCurvatureTolerance == 0.04);
+  CHECK(bi.specificDeflectionPerK == 9.5e-6);
+  CHECK(bi.linearFromC == 0.0);
+  CHECK(bi.linearToC == 200.0);
+  CHECK(MaterialLibrary::GradeOf("bimetal_kanthal_94s") == "KANTHAL 94S");
+  CHECK_THAT(CADMaterials::ElasticDataRefusal(bi),
+             ContainsSubstring("Poisson's ratio"));
+  CHECK(CADMaterials::ElasticDataRefusal(ss).empty());
+  CHECK(CADMaterials::ElasticDataRefusal(MaterialLibrary::GetMaterial(
+            MaterialType::DEFAULT)) == "has no stiffness data");
 }
 
 #ifdef HAVE_NETGEN

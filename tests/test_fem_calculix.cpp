@@ -2988,4 +2988,130 @@ TEST_CASE("a steel bar clamped along its axis, heated past yield and cooled, "
   CHECK_THAT(shorter, Catch::Matchers::WithinRel(L * epsP, 5e-3));
 }
 
+// A bimetal strip (docs/simulation/README.md#a-thermal-load-on-an-assembly):
+// a library steel layer under a C26000 brass one, two parts bonded in an
+// assembly, clamped across one end and heated from 20 to 100 C. The tip
+// turns by L / rho with Timoshenko's curvature, in-house and on ccx, on the
+// one mesh the study made.
+TEST_CASE("a steel and brass strip bonded in an assembly curls as "
+          "Timoshenko's bimetal, in-house and on CalculiX",
+          "[fem][calculix][thermal]") {
+  REQUIRE_CCX(ccx);
+  const double L = 40.0, b = 5.0, t = 0.5;
+  auto lower = std::make_unique<Document>();
+  auto upper = std::make_unique<Document>();
+  for (auto [d, mat] :
+       {std::pair{lower.get(), "steel"}, std::pair{upper.get(), "brass"}}) {
+    auto box = std::make_unique<BoxFeature>("Layer", glm::vec3(0.0f), L, b, t);
+    box->SetMaterial(mat);
+    d->AddFeature(std::move(box));
+  }
+  AssemblyDocument asmDoc;
+  Occurrence lo;
+  lo.name = "Steel";
+  lo.partId = 1;
+  lo.fixed = true;
+  const uint64_t lowerOcc = asmDoc.AddOccurrence(lo);
+  Occurrence up;
+  up.name = "Brass";
+  up.partId = 2;
+  up.position = glm::vec3(0.0f, 0.0f, static_cast<float>(t));
+  const uint64_t upperOcc = asmDoc.AddOccurrence(up);
+  fem::AssemblyStudyContext ctx;
+  ctx.placedBodies = [&](uint64_t occId) {
+    std::vector<Body> out;
+    const Document* part = occId == lowerOcc ? lower.get() : upper.get();
+    const glm::mat4 world = glm::translate(
+        glm::mat4(1.0f), occId == lowerOcc
+                             ? glm::vec3(0.0f)
+                             : glm::vec3(0.0f, 0.0f, static_cast<float>(t)));
+    for (const Body& body : part->GetBodies()) {
+      Body nb = body;
+      nb.shape = body.shape.Transformed(world);
+      out.push_back(std::move(nb));
+    }
+    return out;
+  };
+  const auto endAt = [](const Document& d, double x) {
+    return FaceWhere(d.GetBodies()[0], "plane", [x](const glm::dvec3& c) {
+      return std::abs(c.x - x) < 1e-6;
+    });
+  };
+  fem::Study s;
+  s.id = 2;
+  s.name = "bimetal";
+  s.meshSize = t;
+  s.participants.push_back({lowerOcc, fem::ParticipantRole::Meshed, 0.0, ""});
+  s.participants.push_back({upperOcc, fem::ParticipantRole::Bonded, 0.0, ""});
+  for (auto [occ, d] :
+       {std::pair{lowerOcc, lower.get()}, std::pair{upperOcc, upper.get()}}) {
+    fem::Load fix;
+    fix.id = 20 + occ;
+    fix.type = fem::LoadType::Fixed;
+    fix.occurrenceId = occ;
+    fix.face = ElementRef{0, endAt(*d, 0.0).name};
+    s.loads.push_back(fix);
+  }
+  s.thermalLoad.kind = fem::ThermalLoad::Kind::Uniform;
+  s.thermalLoad.uniformC = 100.0;
+  s.thermalLoad.hasStressFree = true;
+  s.thermalLoad.stressFreeC = 20.0;
+  fem::StudyPlan plan;
+  std::string err;
+  REQUIRE(fem::PlanAssemblyStudy(asmDoc, s, ctx, plan, &err));
+  INFO(err);
+  fem::StudyJobInput input;
+  REQUIRE(fem::MeshPlannedStudy(plan, input, &err));
+  REQUIRE(input.bodies.size() == 1);
+  REQUIRE(input.bodies[0].materials.size() == 2);
+  const Agreement a = SolveBoth(input, *ccx, "steel/brass bimetal");
+  CHECK(a.residual < 10.0 * std::max(a.floor, 1e-6));
+
+  // The tip, read the way probe_study reads a face: the free end's facets
+  // (both layers'), fitted as a rigid body.
+  Scratch scratch;
+  fem::StudyJobInput onCcx = input;
+  onCcx.solver = fem::Solver::Calculix;
+  fem::StudyRuntime own, theirs;
+  REQUIRE(fem::SolvePreparedStudy(input, own, &err));
+  fem::SolveOptions options;
+  options.calculix = RunWith(*ccx, scratch.dir / "runs");
+  REQUIRE(fem::SolvePreparedStudy(onCcx, theirs, &err, options));
+  const fem::FemMesh& mesh = own.bodies[0].mesh;
+  std::vector<int> tipFaces;
+  for (const auto& tri : mesh.boundary) {
+    bool all = true;
+    for (int n : tri.nodes)
+      all = all && std::abs(mesh.nodes[n].x - L) < 1e-6;
+    if (all && std::find(tipFaces.begin(), tipFaces.end(), tri.faceIndex) ==
+                   tipFaces.end())
+      tipFaces.push_back(tri.faceIndex);
+  }
+  REQUIRE(tipFaces.size() == 2);
+  const double kappaRaw = [&] {
+    const double m = 1.0, n = 200.0 / 110.3, h = 2 * t;
+    return 6.0 * (19.2e-6 - 12e-6) * 80.0 * (1 + m) * (1 + m) /
+           (h *
+            (3.0 * (1 + m) * (1 + m) + (1 + m * n) * (m * m + 1.0 / (m * n))));
+  }();
+  for (const fem::StudyRuntime* rt : {&own, &theirs}) {
+    const auto fm = fem::FitFaceMotion(
+        rt->bodies[0].mesh, rt->bodies[0].results.displacement, tipFaces);
+    REQUIRE(fm);
+    REQUIRE(fm->rotationDetermined);
+    std::printf("bimetal (%s, %zu nodes): tip rotation %.6f rad against "
+                "Timoshenko's %.6f (%+.3f %%), drop %.6f mm against %.6f "
+                "(%+.3f %%)\n",
+                rt == &own ? "in-house" : "calculix", mesh.nodes.size(),
+                fm->rotation.y, kappaRaw * L,
+                100.0 * (fm->rotation.y / (kappaRaw * L) - 1),
+                -fm->translation.z, kappaRaw * L * L / 2,
+                100.0 * (-fm->translation.z / (kappaRaw * L * L / 2) - 1));
+    CHECK_THAT(fm->rotation.y, Catch::Matchers::WithinRel(kappaRaw * L, 0.02));
+    // The clamp turns the root a little (test_fem_thermal.cpp's strip:
+    // the free span curves as the closed form, the end 1.9 % more).
+    CHECK_THAT(-fm->translation.z,
+               Catch::Matchers::WithinRel(kappaRaw * L * L / 2, 0.04));
+  }
+}
 #endif // HAVE_NETGEN

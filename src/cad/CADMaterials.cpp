@@ -50,6 +50,16 @@ void MaterialLibrary::InitializeMaterials() {
       0.04f,                          // Standard metal reflectance
       "Brass"};
 
+  // A thermostatic bimetal's two NiCr steels, roll-bonded: the bright face
+  // of a steel strip.
+  materials[MaterialType::BIMETAL_KANTHAL_94S] = {
+      glm::vec3(0.70f, 0.71f, 0.72f), // Steel strip, as rolled
+      1.0f,                           // Fully metallic
+      0.25f,                          // Rolled, not polished
+      0.8f,                           // High specular
+      0.04f,                          // Standard metal reflectance
+      "Kanthal 94S bimetal"};
+
   materials[MaterialType::BRONZE] = {
       glm::vec3(0.80f, 0.50f, 0.20f), // Reddish-brown
       1.0f,                           // Fully metallic
@@ -322,8 +332,15 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::ALUMINUM_6061_T6].density = 2700.0f;
   materials[MaterialType::ALUMINUM_6082_T6].density = 2700.0f;
   materials[MaterialType::STEEL].density = 7850.0f;
-  materials[MaterialType::STAINLESS_STEEL].density = 8000.0f;
+  // Stainless 1.4301: SCI P413, Design Manual for Structural Stainless
+  // Steel, 4th ed. (2017), Table 2.7: 7 900 kg/m^3.
+  materials[MaterialType::STAINLESS_STEEL].density = 7900.0f;
+  // Brass is C26000 cartridge brass: Wieland Concast, "C26000" datasheet,
+  // physical properties provided by CDA: 8.53 g/cm^3.
   materials[MaterialType::BRASS].density = 8530.0f;
+  // KANTHAL 94S: Kanthal, Thermostatic Bimetal Handbook (catalogue
+  // 3-A-1-3), the KANTHAL 94S page (p. 40): 8.1 g/cm^3.
+  materials[MaterialType::BIMETAL_KANTHAL_94S].density = 8100.0f;
   materials[MaterialType::BRONZE].density = 8800.0f;
   materials[MaterialType::COPPER].density = 8960.0f;
   materials[MaterialType::CHROME].density = 7190.0f;
@@ -380,7 +397,7 @@ void MaterialLibrary::InitializeMaterials() {
   // are left 0 on DEFAULT so a study on an unassigned body fails loudly.
   // Yield is 0 where it isn't a meaningful single number (brittle/soft
   // materials) — the study then reports stress without a factor of safety.
-  auto elastic = [&](MaterialType t, float e, float nu, float yield) {
+  auto elastic = [&](MaterialType t, double e, double nu, double yield) {
     materials[t].youngGPa = e;
     materials[t].poisson = nu;
     materials[t].yieldMPa = yield;
@@ -393,8 +410,27 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::ALUMINUM_6061_T6, 68.9f, 0.33f, 240.0f);
   elastic(MaterialType::ALUMINUM_6082_T6, 70.0f, 0.33f, 240.0f);
   elastic(MaterialType::STEEL, 200.0f, 0.30f, 250.0f);
-  elastic(MaterialType::STAINLESS_STEEL, 193.0f, 0.30f, 215.0f);
-  elastic(MaterialType::BRASS, 100.0f, 0.34f, 200.0f);
+  // Stainless 1.4301: SCI P413, Design Manual for Structural Stainless
+  // Steel, 4th ed. (2017), §2.3.1: E = 200 GPa, nu = 0.3 (G = 76.9 GPa);
+  // Table 2.2: f_y = 230 MPa for 1.4301 cold-rolled strip, t <= 8 mm (f_u
+  // 540 MPa). The thinnest product form's, which is what a clip or a spring
+  // is cut from.
+  elastic(MaterialType::STAINLESS_STEEL, 200.0, 0.30, 230.0);
+  // Brass is C26000 cartridge brass: Wieland Concast, "C26000" datasheet,
+  // physical properties provided by CDA: E = 16 000 ksi (110.3 GPa), G =
+  // 6 000 ksi (41.37 GPa), so nu = E / 2G - 1 = 0.333. No yield: Concast
+  // gives one for ASTM B927 ROD only (H01 205 to H04 345 MPa under 1/2"),
+  // which is a temper and a product form, not the material -- so a factor
+  // of safety on brass is refused rather than read off one of them.
+  elastic(MaterialType::BRASS, 110.3, 16000.0 / (2.0 * 6000.0) - 1.0, 0.0f);
+  // KANTHAL 94S: Kanthal, Thermostatic Bimetal Handbook (catalogue
+  // 3-A-1-3), p. 40: E = 190 GPa at 20 C. Kanthal publishes no Poisson's
+  // ratio (nor either layer's data), so none: a structural study of a body
+  // of it is refused (ElasticDataRefusal), and its motion is read from its
+  // measured constants below, not from a layer model. No yield: the
+  // handbook's permissible stress is a graph per grade with no values in
+  // its text.
+  elastic(MaterialType::BIMETAL_KANTHAL_94S, 190.0, 0.0, 0.0);
   elastic(MaterialType::BRONZE, 110.0f, 0.34f, 125.0f);
   elastic(MaterialType::COPPER, 117.0f, 0.34f, 70.0f);
   elastic(MaterialType::CHROME, 279.0f, 0.21f, 0.0f);
@@ -499,6 +535,28 @@ void MaterialLibrary::InitializeMaterials() {
   // Structural Stainless Steel, 4th ed. (2017), §2.4 Table 2.7, room
   // temperature, annealed: 15 W/(m C), and 16e-6 per C over 20-100 C.
   thermal(MaterialType::STAINLESS_STEEL, 15.0, 16e-6);
+  // Brass, C26000: Wieland Concast, "C26000" datasheet (CDA's physical
+  // properties): conductivity 121.2 W/(m K) at 20 C, expansion 19.2e-6 per
+  // C over 20-300 C.
+  thermal(MaterialType::BRASS, 121.2, 19.2e-6);
+  // KANTHAL 94S: Kanthal, Thermostatic Bimetal Handbook (catalogue
+  // 3-A-1-3), p. 40: conductivity 12 W/(m K). No expansion coefficient:
+  // a bimetal is two, and its motion is its specific curvature's (below),
+  // so a thermal load on it is refused.
+  thermal(MaterialType::BIMETAL_KANTHAL_94S, 12.0, 0.0);
+  // Its maker's constants, the same page and the type table (pp. 17-18):
+  // specific curvature k = 17.8e-6 per K +/- 4 %, specific deflection a =
+  // 9.5e-6 per K, linear from 0 to +200 C; components 38/7 NiCr steel and
+  // 19/7 NiCr steel. "Both components consist of NiCr steels. KANTHAL 94S
+  // is suitable for use in water and steam" (handbook §4).
+  {
+    MaterialProperties& b = materials[MaterialType::BIMETAL_KANTHAL_94S];
+    b.specificCurvaturePerK = 17.8e-6;
+    b.specificCurvatureTolerance = 0.04;
+    b.specificDeflectionPerK = 9.5e-6;
+    b.linearFromC = 0.0;
+    b.linearToC = 200.0;
+  }
   // The 6xxx alloys: EN 1999-1-2:2007 §3.3.1.3(1), lambda = 0.07 theta + 190
   // W/(m C) for 3xxx and 6xxx alloys, at 20 C 191.4 (read in the English
   // column of DSTU-N B EN 1999-1-2:2010, its Ukrainian adoption; the 2023
@@ -575,6 +633,7 @@ void MaterialLibrary::InitializeMaterials() {
   }
   materials[MaterialType::ALUMINUM_6061_T6].grade = "6061-T6";
   materials[MaterialType::ALUMINUM_6082_T6].grade = "6082-T6";
+  materials[MaterialType::BIMETAL_KANTHAL_94S].grade = "KANTHAL 94S";
   materials[MaterialType::DEFAULT].grade.clear();
 }
 
@@ -585,6 +644,16 @@ const MaterialProperties& MaterialLibrary::GetMaterial(MaterialType type) {
     return it->second;
   }
   return materials[MaterialType::DEFAULT];
+}
+
+std::string ElasticDataRefusal(const MaterialProperties& m) {
+  if (!(m.youngGPa > 0.0))
+    return "has no stiffness data";
+  if (!(m.poisson > 0.0))
+    return "has no Poisson's ratio in the library (its maker publishes "
+           "none, and none is entered without a source), so a structural "
+           "study cannot solve it";
+  return {};
 }
 
 float ViewportAlpha(const MaterialProperties& m) {
@@ -611,6 +680,7 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::GOLD, "gold"},
       {MaterialType::SILVER, "silver"},
       {MaterialType::TITANIUM, "titanium"},
+      {MaterialType::BIMETAL_KANTHAL_94S, "bimetal_kanthal_94s"},
       {MaterialType::ALUMINUM_6061_T6, "aluminum_6061_t6"},
       {MaterialType::ALUMINUM_6082_T6, "aluminum_6082_t6"},
       {MaterialType::PLASTIC_WHITE, "plastic_white"},
