@@ -750,7 +750,8 @@ loads every file or names it as unreadable; collecting crash reports never
 throws and copies nothing from outside the state dir; the registry never
 reports an instance with pid or port 0; a recovery refuses naming the
 sidecar; an image decodes to the size its header states, or not at all;
-a mesh (`meshes`, an STL binary and ASCII and an OBJ) is refused naming
+a mesh (`meshes`, an STL binary and ASCII, an OBJ, a PLY in each
+encoding and a GLB) is refused naming
 the file, or reads into a mesh whose every corner is a vertex, which
 segments with every triangle in a region, and which a mesh body slices,
 caps and weighs without walking off it.

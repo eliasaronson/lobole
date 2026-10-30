@@ -149,7 +149,7 @@ them:
 ## 5. Interchange
 
 - **PMI in STEP** (AP242 GD&T and tolerances); tolerances stay in the app.
-- **IGES export**, **PLY and glTF import**, and **3MF** import and a
+- **IGES export**, and **3MF** import and a
   general 3MF export (a print job is written as
   one, [print jobs](tolerances/README.md#print-jobs)).
 - **Healing a STEP only when it needs it.** OpenCASCADE's read-time

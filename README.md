@@ -27,7 +27,7 @@ Version 0.1: so expect some rough edges. Issues are welcome.
 - **Scripting and agents:** JSON-RPC, a Python SDK and an MCP server reach
   every command the GUI has; a terminal panel runs an agent inside the
   window.
-- **Interchange:** STEP, IGES, STL, OBJ and BREP in, and DXF and SVG into a
+- **Interchange:** STEP, IGES, STL, OBJ, PLY, glTF and BREP in, and DXF and SVG into a
   sketch; STEP, STL, BREP, glTF, OBJ, PLY, DXF, SVG and PDF out.
 
 > [!WARNING]

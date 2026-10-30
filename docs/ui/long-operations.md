@@ -308,7 +308,7 @@ tractions, and a shape that is not the document's).
 
 Every import that is not a sketch's is one `import` job
 (`ui::StartImport(state, ImportRequest)`, `src/ui/ImportJob.{h,cpp}`):
-File › Import of any STEP, IGES, STL, OBJ or BREP, the `import_step` RPC,
+File › Import of any STEP, IGES, STL, OBJ, PLY, glTF or BREP, the `import_step` RPC,
 and `--file` at startup in all three modes. An `ImportRequest` carries the
 path, the unit, `keep_origin`, the up axis and turn, the mode (`Auto`: a STEP
 with several instances is an assembly; `Feature`; `Assembly`, which is

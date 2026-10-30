@@ -4,8 +4,8 @@ Getting geometry into and out of Loböle. Document storage and the
 project format are in [../versioning/README.md](../versioning/README.md).
 
 **One RPC imports every 3D format: `import_step`**, despite its name. It
-reads STEP, IGES, STL, OBJ and BREP into the active part (or a STEP or IGES
-as an assembly), the same as an `Import` feature through `add_feature`; an
+reads STEP, IGES, STL, OBJ, PLY, glTF and BREP into the active part (or a
+STEP or IGES as an assembly), the same as an `Import` feature through `add_feature`; an
 STL is [recognised](#recognising-a-faceted-mesh) into true planes,
 cylinders, cones and spheres unless `representation` is `facets`. A DXF or
 SVG goes into a sketch through `import_sketch`. An unknown method that looks
@@ -19,7 +19,8 @@ like an import (`import_stl`, `import_mesh`) is refused naming both
 | BREP (`.brep`) | exact | exact; one shape (a part's bodies fused, or one body) |
 | STL (`.stl`) | [recognised](#recognising-a-faceted-mesh): its planes, cylinders, cones and spheres rebuilt as true faces; or, with `representation: facets`, sewn triangles (a solid when closed, a shell when open) | binary, re-meshed at a chord tolerance; one shape |
 | OBJ (`.obj`) | [each object a named, coloured body](#obj), sewn as an STL | visual meshes (below) |
-| glTF (`.glb`, `.gltf`), OBJ, PLY | — | visual meshes with PBR materials, part or assembly, instanced |
+| PLY (`.ply`) | [ASCII or binary](#ply-and-gltf), polygons fanned, a uniform vertex colour kept; any `representation` | visual meshes (below) |
+| glTF (`.glb`, `.gltf`) | [the default scene's meshes, placed](#ply-and-gltf), metres read as mm, Y up stood on Z; any `representation` | visual meshes with PBR materials, part or assembly, instanced |
 | DXF | into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) | a sheet-metal flat pattern (see [../sheetmetal/README.md](../sheetmetal/README.md)) |
 | SVG | into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) | drawing sheets (see [../drawings/README.md](../drawings/README.md)) |
 | PDF | — | drawing sheets |
@@ -46,7 +47,8 @@ the recipe, and each regeneration reads it.
   only; it is not a simulation material. The label walk is one
   `ModelFromXcaf` that IGES and OBJ share, and the reader also returns the
   file's header (`ImportedModel::origin`) for the [up axis](#up-axis).
-- **IGES** and **OBJ**: see [IGES](#iges) and [OBJ](#obj).
+- **IGES**, **OBJ**, **PLY** and **glTF**: see [IGES](#iges), [OBJ](#obj)
+  and [PLY and glTF](#ply-and-gltf).
 - **STL** is recognised by default: the planes, cylinders, cones and
   spheres its triangles were tessellated from are rebuilt as true faces
   ([recognising a faceted mesh](#recognising-a-faceted-mesh)). With
@@ -65,7 +67,9 @@ the recipe, and each regeneration reads it.
   1 of 3: \"Lid\" (a surface, not a solid)"), and when nothing is left the
   error does. It used to vanish without a word.
 - **The extension decides the reader**, case-blind; any other is refused,
-  naming `.step/.stp, .igs/.iges, .brep, .stl, .obj`.
+  naming `.step/.stp, .igs/.iges, .brep, .stl, .obj, .ply, .glb/.gltf`
+  (`interchange::kImportExtensions`, `src/core/io/ImportFormats.h`, the one
+  list the refusals, the file dialog and the in-app browser read).
 - **Centring.** By default the combined bounding box is centred on the
   origin, keeping the shapes' relative placement. `keep_origin` keeps the
   file's own coordinates, which is what an import whose coordinates mean
@@ -74,9 +78,10 @@ the recipe, and each regeneration reads it.
   After it, the import's own `placement` and `scale` put it where it
   belongs ([placing an import](#placing-an-import)).
 - **Units.** STEP and IGES declare their own unit (OpenCASCADE converts to
-  mm). STL, OBJ and BREP carry none, so the feature's `units` (`mm` default,
-  `cm`, `m`, `in`) scales the shape once as it is read; it is refused on a
-  STEP or IGES and an unknown string is refused. An STL, OBJ or BREP that
+  mm), and glTF is metres by its specification (read as mm). STL, OBJ, PLY
+  and BREP carry none, so the feature's `units` (`mm` default, `cm`, `m`,
+  `in`) scales the shape once as it is read; it is refused on a STEP, IGES
+  or glTF and an unknown string is refused. An STL, OBJ, PLY or BREP that
   comes out under 1 mm across gets a warning naming the fix.
 - **At most 500 shapes** are imported from one file, with a log line when
   capped; the cap guards against pathological files only.
@@ -178,8 +183,11 @@ native system ID and preprocessor version. SolidWorks named in any of them
 (case-blind) is `+y`; Loböle is `none`; any other writer is `none`, *because
 it is not one known to write Y up*. A row of that table is added only with a
 real file's header in its test (`tests/fixtures/import/make_fixtures.py`
-copies them). STL, BREP and OBJ have no header: `auto` is `none`, and says
-so (for an OBJ, that one is usually Y up). Our own STEP export writes
+copies them). STL, BREP, OBJ and PLY have no header naming their writer:
+`auto` is `none`, and says so (for an OBJ, that one is usually Y up). glTF
+is Y up by its specification, so `auto` is `+y` for every glTF, whoever
+wrote it (our own export turns Z up to it); its `asset.generator` is still
+named as the `system`. Our own STEP export writes
 `Loböle <version>` as its originating system, so a round trip says why it
 stayed `none`.
 
@@ -321,8 +329,75 @@ warning says so. `units` applies, as for STL. No axis or unit conversion is
 asked of the reader: the import's `units` and `up_axis` do both, and `auto`
 is `none`.
 
-glTF and 3MF are not read: OpenCASCADE's glTF reader needs RapidJSON, which
-the Windows cross build turns off, and it reads no 3MF.
+3MF is not read: OpenCASCADE reads no 3MF. PLY and glTF are read by
+vendored parsers ([PLY and glTF](#ply-and-gltf)).
+
+## PLY and glTF
+
+The formats phone scanning apps export besides OBJ and STL. Both are read
+straight into a `TriMesh`, no B-Rep built (`mesh::ReadPly` and
+`mesh::ReadGltf`, `src/core/mesh/ScanReaders.cpp`), on the same path as an
+STL or OBJ read into a [mesh body](#mesh-bodies): counted first, read off the
+frame as the `import` job with its cancel, and every `representation` taken
+from there -- `mesh`, `auto`, `recognize`, and `facets`, which builds the
+planar faces from the mesh read (`CADKernel::FacetsFromMesh`) and sews them
+as an OBJ's are. A recognition that fails a check keeps it as facets, priced
+by the sewing law as an STL's fallback is.
+
+**PLY** is read by miniply (`src/thirdparty/miniply.{h,cpp}`, MIT;
+OpenCASCADE writes PLY but reads none): ASCII and binary of either
+endianness, the vertex element's `x y z`, and the face element's
+`vertex_indices` (or `vertex_index`) list, each polygon fanned from its
+first corner. Welded at half the float32 spacing, as an OBJ is at half its
+digit; the fits read the float32 spacing. A vertex colour (`red green
+blue`, uchar, ushort or real) is the body's display colour when every vertex
+has the same one; colours that vary are dropped, and the warning says so,
+as it does for face colours and for any other element ("not read: 12
+edges"). Refused, naming the file: a header that promises more rows than
+the file's bytes can hold (checked before miniply allocates for them), no
+face element (a point cloud: mesh it in MeshLab first), a face naming a
+vertex not there or of fewer than three corners, data that ends early. Two
+patches to miniply are marked in its source: a damaged row stops the
+element (it went on, leaving fewer list counts than rows), and an ASCII
+list grows a value at a time (a damaged count allocated gigabytes first).
+
+**glTF** (`.glb`, or `.gltf` with its buffers beside it or embedded) is read
+by cgltf (`src/thirdparty/cgltf.h`, MIT, one header). OpenCASCADE's
+`RWGltf_CafReader` needs RapidJSON, which the Windows cross build turns
+off, so it would read nowhere there.
+- **The node tree is flattened**: the default scene (or the first, or every
+  root node when there is none), each mesh placed by its node's world
+  transform, all in one mesh body as an OBJ's objects are. A mirroring
+  transform turns its triangles back outward.
+- **Metres are read as millimetres**, the unit the format defines; `units`
+  is refused on it. **Y up is stood on our Z** by `auto` (above).
+- **Triangles, strips and fans** are read; points and lines are skipped and
+  the warning counts them. Materials and textures are not read.
+- **Refused, naming the file**: anything `cgltf_validate` finds (an
+  accessor past its buffer, an index past its vertices, a cycle in the
+  node tree), a buffer that cannot be read (named), glTF 1.0, positions or
+  indices without a buffer view, and a required extension that is not
+  read -- materials, textures, lights and `KHR_mesh_quantization` are read
+  or harmless, and Draco and meshopt compression are refused saying to
+  re-export uncompressed. A skinned mesh (posed by its joints) and one
+  shown blended with a morph target are refused too: what a viewer draws
+  of them is not the positions stored.
+- The import's file hash is the `.gltf`'s own bytes, not its buffers'
+  (`ImportFeature::ContentHash`).
+
+**Counting**, before the read: a PLY's face element count from its header
+(a polygon counted once), a glTF's triangles from its accessors over the
+placed meshes (`mesh::CountPlyFaces`, `CountGltfTriangles`). The read
+checks the true count against what a mesh body holds again.
+
+Checked by `tests/test_mesh_scan_import.cpp` (each PLY encoding to the same
+body, quads fanned, a uniform colour kept and a varied one warned of, every
+representation of a PLY and a GLB, nodes placed and mirrored, a `.gltf`
+with its `.bin` and without it, each refusal, a cancel), by the round trip
+of our own `export_visual` in `tests/test_cadkernel.cpp`, by the reader
+fuzz's `meshes` family, and by `headless_smoke.py` (both formats in each
+representation through `import_step`). The files the tests read are
+written byte for byte by `tests/scan_files.{h,cpp}`.
 
 ## What a mesh costs
 
@@ -335,7 +410,8 @@ whole). So before anything is built,
 `interchange::MeshImportCost` (`src/core/io/MeshImportCost.{h,cpp}`) counts
 the triangles -- a binary STL's header (believed only when the file's size
 agrees with it), an ASCII STL's `facet`s, an OBJ's `f` records with an
-n-gon as n − 2 -- and a cost law says what the import may take.
+n-gon as n − 2, a PLY's or glTF's as [above](#ply-and-gltf) -- and a cost
+law says what the import may take.
 
 Measured on this machine (22 cores, load ≈ 2), whole `import_step` calls:
 
@@ -547,7 +623,7 @@ code involved.
 
 ### The Import's representation
 
-An Import of an STL or OBJ takes `representation`: `facets`, `recognize`,
+An Import of an STL, OBJ, PLY or glTF takes `representation`: `facets`, `recognize`,
 `mesh` ([a mesh body](#mesh-bodies)) or `auto`; any other value is refused,
 naming the four.
 
@@ -561,7 +637,7 @@ naming the four.
   density surface, with nothing in it to recognise.
 - **`min_sides`** (5 to 1024, default 12) applies with `recognize` and
   `auto`. It is refused with `facets` and `mesh`, and `representation` is
-  refused on any file that is not an STL or an OBJ.
+  refused on any file that is not a mesh (STL, OBJ, PLY, glTF).
 - **The reply says what was recognised.** `add_feature` and `import_step`
   answer with `recognition`: per body, every cylinder, cone and sphere
   (radius, axis, centre, side count, sagitta), the polygons left flat,
@@ -654,7 +730,8 @@ refused or absent, each saying so.
 **Readers.** STL and OBJ are read by `mesh::ReadStl` and `mesh::ReadObj`
 (`src/core/mesh/MeshReaders.cpp`) straight into a `TriMesh`, no B-Rep. An
 OBJ is every object in one mesh, its polygons fanned, welded at half its
-printed digit so integer corners stay apart.
+printed digit so integer corners stay apart. PLY and glTF have their own
+readers ([PLY and glTF](#ply-and-gltf)).
 
 **Baked geometry.** A mesh body bakes as `geometry/N.mesh` (a header, the
 counts, double positions and `uint32` triangles), named in the index by
@@ -701,13 +778,14 @@ How it is checked:
   0.32 s and caps in 0.075 s of a low-power E-core's CPU (2.7, 0.065 and
   0.017 s on a P-core), against bounds of 30, 2 and 1 s; `auto` reads and
   rebuilds a 43,116-triangle plate in 0.44 s (bound 5 s).
-- `headless_smoke.py` (STL and OBJ in each representation, the STL and glTF
+- `headless_smoke.py` (STL, OBJ, PLY and glTF in each representation, the STL and glTF
   of a mesh body, an open scan's refused volume and a snapped point, the
   open scan laid on its rim and scaled by `align_import`, and
   `import_step`'s placement echoed),
   `print_job_smoke.py` (a mesh body's own triangles in the 3MF; an open one
-  refused by `check_print`), the reader fuzz's `meshes` family (an OBJ, and
-  a mesh body's slice and mass of whatever it read).
+  refused by `check_print`), the reader fuzz's `meshes` family (an OBJ, a
+  PLY in each encoding and a GLB, and a mesh body's slice and mass of
+  whatever it read).
 - GUI `import/a_hover_pick_on_a_2m_mesh_fits_a_frame`: the pick on a
   2M-triangle mesh body, in main-thread CPU, under a 60 Hz frame.
 
@@ -739,7 +817,7 @@ A STEP or IGES with several placed instances becomes an assembly
 - It is not undoable; like Open, it creates documents.
 
 **In the GUI**, File > Import (Ctrl+I, `file.import`) accepts STEP, IGES,
-STL, OBJ, BREP, DXF and SVG. DXF and SVG go into a sketch
+STL, OBJ, PLY, glTF, BREP, DXF and SVG. DXF and SVG go into a sketch
 ([sketching](../sketching/README.md#importing-dxf-and-svg)); everything else
 runs as the `import` background job (`src/ui/ImportJob.{h,cpp}`,
 [long operations](../ui/long-operations.md#import)) under one progress
@@ -761,11 +839,10 @@ thousands of times on a large file.
 
 **Over RPC**, `import_step {path, as_assembly?, keep_origin?, units?,
 up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?}` — the
-one importer for every 3D format, STL and OBJ included: without
+one importer for every 3D format, meshes included: without
 `as_assembly` it adds an `Import` feature to the active part and returns
 `{bodies, regen, digest, up_axis, recentred_by?, warning?, mesh?,
-recognition?}`, `mesh` being `{triangles, expected_s, limit}` for an STL or
-OBJ and `recognition` what an STL was [found to be](#the-imports-representation);
+recognition?}`, `mesh` being `{triangles, expected_s, limit}` for a mesh and `recognition` what an STL was [found to be](#the-imports-representation);
 with it, it returns
 `{assembly_index, occurrences, parts, ok, up_axis}` plus `failed` naming
 every part whose feature did not build. Every parameter is checked before
@@ -882,7 +959,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 
 | RPC | module | does |
 |---|---|---|
-| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?, placement?, scale?}` | RemoteProject | every 3D format, whatever the name says: STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; a mesh as facets, recognised, a [mesh body](#mesh-bodies) or `auto` (`representation`); replies `up_axis`, `mesh` for a mesh, `representation` {chosen, why} and `recognition` for a recognised one |
+| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?, placement?, scale?}` | RemoteProject | every 3D format, whatever the name says: STEP / IGES / STL / OBJ / PLY / glTF / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; a mesh as facets, recognised, a [mesh body](#mesh-bodies) or `auto` (`representation`); replies `up_axis`, `mesh` for a mesh, `representation` {chosen, why} and `recognition` for a recognised one |
 | `import_sketch {path, sketch_id? \| plane?, units?, layers?, construction_layers?, keep_origin?}` | RemoteModeling | a DXF or SVG into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) |
 | `export_step {path, part?, body?}` | RemoteProject | structured STEP of a part or the assembly |
 | `export_stl {path, body?, stl_deflection_mm?}`, `export_brep {path, body?}` | RemoteProject | one shape of the active part |
@@ -898,7 +975,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 | where | covers |
 |---|---|
 | `tests/test_step_export.cpp` | an assembly exports as its tree (each part once per configuration and material, placed by reference, sub-assemblies nested, hidden occurrences left out); a part is one named product of its bodies; a one-solid compound keeps its name and colour; a face painted apart is a colour on that face in the STEP and its own primitive and material in glTF; visual export colours every occurrence as the screen does; an assembly tab writes STEP and refuses STL by name |
-| `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open; each `auto` decision and its reason; each axis puts the 30 mm along Z and SolidWorks' front on −Y; a sketch on an imported face follows an axis change; R·P·R⁻¹; an older Import reloads unmoved; IGES names and colours as STEP's, surfaces sewn, a skipped one named; OBJ objects, colours and units; our STEP names Loböle |
+| `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); our own glTF and PLY read back where they were written; STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open; each `auto` decision and its reason; each axis puts the 30 mm along Z and SolidWorks' front on −Y; a sketch on an imported face follows an axis change; R·P·R⁻¹; an older Import reloads unmoved; IGES names and colours as STEP's, surfaces sewn, a skipped one named; OBJ objects, colours and units; our STEP names Loböle |
 | `tests/fixtures/import/` | the fixtures and `make_fixtures.py` / `make_iges.cpp`, which wrote them: our box under real SolidWorks 2024 and Autodesk headers, IGES as a solid, as surfaces and with a SolidWorks system ID, ezdxf DXFs, SVGs, an OBJ |
 | `tests/golden/v190-import-up-axis.json` | `up_axis` and `turn_deg` round-trip; v97 and v103 reload as `none` |
 | `tests/test_import_align.cpp` `[align]` | a placement's angles read back; composing an alignment is the matrix product; a mesh body and a B-Rep placed (moved vertices, volume, face names kept); the keys written, read and refused; floor on a tilted box as a mesh and as facets, then scaled by a known edge with the floor kept; three points; principal axes; the rim of an open scan on z = 0 with the figure standing; each refusal |
@@ -908,6 +985,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly`; every import fixture through `import_step` / `import_sketch` with its reply read |
 | `tests/refused_calls_smoke.py` | an unknown `up_axis`, `units` on IGES, a drawing given to `import_step`, a scale of -1 and an unknown placement key; `align_import`'s unknown mode, a parameter of another mode, a point off the import, three points in a line, a missing distance; each changing nothing |
 | GUI `import/solidworks_part_stands_up_and_lies_down` | the pill, the editor's axis combo, undo |
+| `tests/test_mesh_scan_import.cpp` `[mesh_body][import]` | [PLY and glTF](#ply-and-gltf): each encoding, colours, every representation, nodes placed in mm and stood up, each refusal, a cancel |
 | `tests/test_mesh_import.cpp` `[interchange][import]` | counting a binary, an ASCII and a lying STL and an OBJ's polygons; the limit is where the law reaches the patient wait, and the refusal names the count, the time and the override; a mesh read reports its phases and stops on a cancel (STL and OBJ); a seeded import is the import of its file (bodies, names, volume, units) |
 | `tests/import_job_smoke.py` | `import_step` of a mesh as a job: listed with its triangles, its fraction moving, other calls answered; a cancel from another connection answers the call and leaves the part; a second import refused; past the limit refused naming the count, the time and `allow_large_mesh` (and `add_feature` naming `import_step`), with it started; `--file` cancellable, landing, and past the limit refused naming `--allow-large-mesh` |
 | GUI `import/a_mesh_import_runs_in_background`, `import/a_large_mesh_asks_first` | the modal says the triangles, lands, and its Cancel goes at once adding nothing; past the limit the ask's Cancel imports nothing and Import anyway starts the job |
@@ -921,22 +999,20 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
 ## Not done
 
 - IGES export.
-- glTF and 3MF import (see [OBJ](#obj)).
+- 3MF import (see [OBJ](#obj)).
+- A glTF's or PLY's materials, textures and varied colours; a glTF's skins
+  and morph targets (refused by name).
 - A SolidWorks IGES header from a real file: the IGES row of the `auto`
   table rests on the STEP files' and a modelled global section.
 - 3MF as an export of a part or an assembly (OpenCASCADE has no writer).
   A print job is a 3MF of Loböle's own writing
   ([print jobs](../tolerances/README.md#print-jobs)).
 - DXF of a drawing.
-- Mesh bodies: an STL arrives as sewn B-Rep faces, not as a lightweight
-  reference mesh.
 - A faster sewing of a mesh. The faces `BRepBuilderAPI_MakeShapeOnMesh`
   makes already share their edges, so a shell could be built from them
   directly, in linear time, instead of through the quilt. Unless it kept
   the faces in the sewing's order, it would rename every face of every
   mesh import already saved.
-- Recognition of an OBJ's meshes: only STL is recognised, and an OBJ is
-  sewn as facets.
 - Recognising a part with fillets everywhere as fast as sewing it: the
   rebuild's rounds make a 17,000-triangle Autodesk export about four times
   slower to read than its facets (6.8 s against 1.6 s), for a seventh of

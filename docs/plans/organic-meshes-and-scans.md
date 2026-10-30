@@ -30,8 +30,7 @@ cannot be done, because every triangle becomes a B-Rep face:
 - An open scan, the normal case for a phone scan of an object standing on a
   table, is dropped outright: `ImportFeature` skips any shape whose volume
   is 0 as "a surface, not a solid".
-- There is no PLY or glTF import, no way to place, rotate or scale an
-  import, and no section into a sketch. Mesh simplification and repair are
+- There is no section into a sketch. Mesh simplification and repair are
   not built here: they are done in external tools (MeshLab, Blender, the
   scanning app).
 
@@ -82,7 +81,7 @@ docs/interchange/README.md#recognising-a-faceted-mesh)
   and to put datums on it.
 
 **Readers**
-- STL (binary and ASCII), OBJ (both built), PLY and GLB all produce a
+- STL (binary and ASCII), OBJ, PLY and glTF (all built) produce a
   `TriMesh` without building any B-Rep.
 - Every reader joins `tests/test_reader_fuzz.cpp`
   (docs/versioning/README.md#reader-fuzzing).
@@ -303,23 +302,11 @@ later stages still need of it: the floor's fit is least squares over the
 grown region, not yet RANSAC (stage 6's robust fit), so a floor whose
 grown region takes in a stray lump fits through it.
 
-### Stage 4 — PLY and GLB (S)
+### Stage 4 — PLY and GLB
 
-These are the formats phone scanning apps export besides OBJ and STL.
-
-- **PLY** uses a vendored miniply (MIT), placed in `src/thirdparty` as stb is.
-  OpenCASCADE has a PLY writer but no reader. Supported content is ASCII and
-  binary of either endianness, vertex positions, face lists and vertex
-  colour (kept as the body's display colour when it is uniform; otherwise
-  dropped, with a warning).
-- **GLB and glTF** use a vendored cgltf (MIT, one header).
-  `RWGltf_CafReader` exists in OCC, but the Windows OCC build is configured
-  with `USE_RAPIDJSON=OFF`, so it would read nowhere there.
-- The node tree is flattened to placed meshes, and metres are converted to
-  mm per the format.
-- The extension list in the import refusal grows to include both.
-- Both readers join the reader fuzz. `tests/test_cadkernel.cpp` gains a
-  fixture written by our own `export_visual` and read back.
+Built: PLY and glTF read into a mesh body or any other representation
+([PLY and glTF](../interchange/README.md#ply-and-gltf)), by vendored miniply
+and cgltf.
 
 ### Stage 5 — a section into a sketch (M)
 
@@ -356,7 +343,7 @@ often the better part than a cradle, because it stays fully parametric.
 ## Files
 
 **Core**
-- `src/core/mesh/`: `MeshReaders` gains PLY and GLB; `Segment` gains `GrowFrom`; `Fit` gains RANSAC.
+- `src/core/mesh/`: `Segment` gains `GrowFrom`; `Fit` gains RANSAC.
 - `src/core/MeshCollide.*` becomes a user of `MeshBvh`.
 - Changed features: `DatumPlaneFeature.*`, `DatumAxisFeature.*`.
 - `src/core/sketch/` (the projected section).
@@ -375,12 +362,6 @@ often the better part than a cradle, because it stays fully parametric.
   `MethodDoc` rows. Every physical parameter carries its unit (`_mm`,
   `_deg`) for `tests/rpc_units_gate.py`.
 
-**Dependencies**
-- `deps/manifold` (submodule), plus
-  `src/thirdparty/{miniply,cgltf}`.
-- `CMakeLists.txt`, `.gitmodules`, `flake.nix`,
-  `packaging/windows/cross-app.nix`, `THIRD_PARTY.md` and `LICENSES/`.
-
 **Docs**
 - `docs/interchange/README.md`, `docs/ui/long-operations.md`,
   `docs/inspect/README.md`, `docs/modeling/README.md`,
@@ -396,12 +377,10 @@ often the better part than a cradle, because it stays fully parametric.
 - Each new enum or mode refused with its list.
 - A refused call changes nothing (`refused_calls_smoke`).
 
-**Goldens and readers**
+**Goldens**
 - Every `v205` golden.
-- The reader fuzz over PLY and GLB.
 
 **Smokes and suites**
-- `headless_smoke.py` imports PLY and GLB in each representation.
 - The action matrix run with a mesh body in the part, and with a Cradle's
   result in it.
 - A GUI test per tool, plus the `defaults/*` suite.
