@@ -166,6 +166,18 @@ def validate(schema, value, operation, path='/params'):
                     operation, 'missing_argument', at, props[key], None,
                     f'{operation}: missing required parameter {_where(at)} '
                     f'({describe(props[key])})')
+        # A choice (`oneOf` of single required keys): exactly one is given.
+        if 'oneOf' in schema:
+            keys = [k for alt in schema['oneOf'] for k in alt['required']]
+            given = [k for k in keys if k in value]
+            if len(given) != 1:
+                code = 'missing_argument' if not given else 'invalid_argument'
+                raise contract_refusal(
+                    operation, code, path, schema['oneOf'],
+                    {k: value[k] for k in given} or None,
+                    f'{operation}: {_where(path)} takes exactly one of '
+                    + ', '.join(keys) + ('; got none' if not given else
+                                         '; got ' + ', '.join(given)), keys)
         for key in sorted(value):
             if key in props:
                 validate(props[key], value[key], operation, path + '/' + key)

@@ -440,7 +440,7 @@ FEATURE_SCHEMAS: dict[str, dict[str, Any]] = {
     'Sphere': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Sphere']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'on': {'anyOf': [{'type': 'string'}, {'type': 'object'}]}, 'diameter': {'type': 'number'}, 'diameter_expr': {'type': 'string'}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}, 'offset': {'type': 'array', 'items': {'type': 'number'}}, 'offset_expr': {'type': 'array', 'items': {'type': 'string'}}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'ids': {'type': 'array', 'items': {'type': 'integer'}}}, 'required': ['type', 'on'], 'additionalProperties': False},
     'Cylinder': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Cylinder']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'on': {'anyOf': [{'type': 'string'}, {'type': 'object'}]}, 'diameter': {'type': 'number'}, 'diameter_expr': {'type': 'string'}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}, 'height': {'type': 'number'}, 'height_expr': {'type': 'string'}, 'offset': {'type': 'array', 'items': {'type': 'number'}}, 'offset_expr': {'type': 'array', 'items': {'type': 'string'}}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'reversed': {'type': 'boolean'}, 'ids': {'type': 'array', 'items': {'type': 'integer'}}}, 'required': ['type', 'on'], 'additionalProperties': False},
     'Fastener': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Fastener']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'standard': {'type': 'string'}, 'size': {'type': 'string'}, 'length': {'type': 'number'}, 'length_expr': {'type': 'string'}, 'drive': {'type': 'string'}}, 'required': ['type', 'standard', 'size'], 'additionalProperties': False},
-    'CamProfile': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['CamProfile']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'face': {'type': 'object'}, 'frame': {'type': 'integer'}, 'base_radius_mm': {'type': 'number'}, 'base_radius_mm_expr': {'type': 'string'}, 'width_mm': {'type': 'number'}, 'width_mm_expr': {'type': 'string'}, 'lift': {}, 'segments': {'type': 'array', 'items': {'type': 'object'}}, 'follower': {'type': 'object'}, 'turn': {'type': 'string', 'enum': ['ccw', 'cw']}, 'body': {'type': 'string', 'enum': ['new', 'add']}}, 'required': ['type'], 'additionalProperties': False},
+    'CamProfile': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['CamProfile']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'face': {'type': 'object'}, 'frame': {'type': 'integer'}, 'base_radius_mm': {'type': 'number'}, 'base_radius_mm_expr': {'type': 'string'}, 'width_mm': {'type': 'number'}, 'width_mm_expr': {'type': 'string'}, 'lift': {}, 'segments': {'type': 'array', 'items': {'type': 'object'}}, 'follower': {'type': 'object'}, 'turn': {'type': 'string', 'enum': ['ccw', 'cw']}, 'body': {'type': 'string', 'enum': ['new', 'add']}}, 'required': ['type'], 'oneOf': [{'required': ['face']}, {'required': ['frame']}], 'additionalProperties': False},
     'Worm': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Worm']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'face': {'type': 'object'}, 'module': {'type': 'number'}, 'module_expr': {'type': 'string'}, 'starts': {'type': 'integer'}, 'pressure_angle_deg': {'type': 'number'}, 'hand': {'type': 'string', 'enum': ['right', 'left']}, 'backlash': {'type': 'number'}, 'length': {'type': 'number'}}, 'required': ['type', 'face'], 'additionalProperties': False},
     'WormWheel': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['WormWheel']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'face': {'type': 'object'}, 'teeth': {'type': 'integer'}, 'module': {'type': 'number'}, 'module_expr': {'type': 'string'}, 'starts': {'type': 'integer'}, 'worm_diameter': {'type': 'number'}, 'pressure_angle_deg': {'type': 'number'}, 'hand': {'type': 'string', 'enum': ['right', 'left']}}, 'required': ['type', 'face'], 'additionalProperties': False},
     'Bearing': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Bearing']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'designation': {'type': 'string'}}, 'required': ['type', 'designation'], 'additionalProperties': False},
@@ -612,7 +612,7 @@ FastenerSpec = TypedDict('FastenerSpec', {
     'drive': NotRequired[str],
 })
 
-CamProfileSpec = TypedDict('CamProfileSpec', {
+CamProfileFaceSpec = TypedDict('CamProfileFaceSpec', {
     'type': Literal['CamProfile'],
     'name': NotRequired[str],
     'id': NotRequired[int],
@@ -620,8 +620,7 @@ CamProfileSpec = TypedDict('CamProfileSpec', {
     'appearance': NotRequired[Mapping[str, Any]],
     'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
     'suppressed': NotRequired[bool],
-    'face': NotRequired[Mapping[str, Any]],
-    'frame': NotRequired[int],
+    'face': Mapping[str, Any],
     'base_radius_mm': NotRequired[float],
     'base_radius_mm_expr': NotRequired[str],
     'width_mm': NotRequired[float],
@@ -632,6 +631,27 @@ CamProfileSpec = TypedDict('CamProfileSpec', {
     'turn': NotRequired[Literal['ccw', 'cw']],
     'body': NotRequired[Literal['new', 'add']],
 })
+
+CamProfileFrameSpec = TypedDict('CamProfileFrameSpec', {
+    'type': Literal['CamProfile'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'frame': int,
+    'base_radius_mm': NotRequired[float],
+    'base_radius_mm_expr': NotRequired[str],
+    'width_mm': NotRequired[float],
+    'width_mm_expr': NotRequired[str],
+    'lift': NotRequired[Any],
+    'segments': NotRequired[Sequence[Mapping[str, Any]]],
+    'follower': NotRequired[Mapping[str, Any]],
+    'turn': NotRequired[Literal['ccw', 'cw']],
+    'body': NotRequired[Literal['new', 'add']],
+})
+CamProfileSpec = CamProfileFaceSpec | CamProfileFrameSpec
 
 WormSpec = TypedDict('WormSpec', {
     'type': Literal['Worm'],

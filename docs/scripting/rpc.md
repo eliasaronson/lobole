@@ -580,6 +580,12 @@ read — so there is no second table to drift from it:
   parser refuses against; a vocabulary can carry the remedy for its usual
   mistake (a coupling is a relation, not a mate), which ends the refusal.
 - A range follows a numeric type: `int>=0`, `number>0`, `number>=0<=1`.
+- `key^group` puts the key in a choice: exactly one key of the group is
+  given, each optional alone. CamProfile is placed by
+  `face^place:object, frame^place:int`. The schema says it as `oneOf`
+  [{required: [face]}, {required: [frame]}] beside `required`, and a spec
+  with neither is refused `missing_argument`, with both `invalid_argument`,
+  naming the keys. A contract has one group, of two keys or more.
 
 A row with no parameters (`""`) is a complete contract already. Typed today:
 `add_assembly`, `add_configuration`, `add_feature`, `add_mate`,
@@ -682,7 +688,12 @@ for a spec that arrives another way, reading its keys from the same column.
 Generated from the rows: a `TypedDict` per type (`ExtrudeSpec`, …) and their
 union `FeatureSpec` in `lobole.rpc`, which `feature` accepts beside any
 mapping, so a spec annotated as one is checked field by field and a plain
-dict still passes; and `FEATURE_SCHEMAS`, which the SDK holds a spec to
+dict still passes. A type with a choice is one `TypedDict` per key it can
+be (`CamProfileFaceSpec`, `CamProfileFrameSpec`, that key required and the
+others absent) and their union (`CamProfileSpec`): when CamProfile's only
+required key was `type`, mypy before 2.1, which picks a `TypedDict` from a
+union by keys alone, held `{"type": "Box"}` to it and refused the plain
+dict; and `FEATURE_SCHEMAS`, which the SDK holds a spec to
 before it is sent, with the server's diagnostic. `rpc_contracts_smoke`
 refuses an unknown field, a wrong type, an enum miss and a missing field of
 every type, alike from the server and the SDK, and holds `describe`'s

@@ -11,6 +11,10 @@ every row equal to the server's `request_schema`.
 
     "feature_id?:int>=0, feature:object, type?:@mate_types, mode?:'a'|'b'"
 
+`key^group:type` puts a key in a choice: exactly one key of the group is
+given (`face^place:object, frame^place:int`), and the schema says so as
+`oneOf` [{required: [face]}, {required: [frame]}].
+
 A `returns` column is the same grammar plus object literals, which a
 response nests and a request does not: `bodies:{name:string,
 volume_mm3:number}[]`, and `{..., *}` for an object that carries more keys
@@ -152,7 +156,16 @@ def _entries(column, objects=False):
     for e in entries:
         name, sep, typ = e.partition(":")
         name = name.strip()
-        required = not name.endswith("?")
+        # `key^group`: exactly one of the group's keys is given (a cam is
+        # placed by `face` OR `frame`), each optional on its own.
+        group = None
+        if "^" in name:
+            name, _, group = name.partition("^")
+            name, group = name.strip(), group.strip()
+            if not re.fullmatch(r"[a-z_]+", group or ""):
+                raise ContractSyntaxError(
+                    f"contract key '{name}': '^' names no group")
+        required = not name.endswith("?") and group is None
         name = name.rstrip("?").strip()
         if not name:
             raise ContractSyntaxError(f"contract entry '{e}' names no key")
@@ -164,9 +177,25 @@ def _entries(column, objects=False):
         seen.add(name)
         typ = typ.strip()
         params.append({"name": name, "required": required, "type": typ,
+                       **({"one_of": group} if group else {}),
                        "alts": [_alt(name, a.strip(), objects)
                                 for a in split_top(typ, "|")]})
     return {"entries": params, "open": bool(is_open)}
+
+
+def one_of_groups(params):
+    """{group: [key, ...]} of a contract's `key^group` entries, in order:
+    exactly one key of each group is given."""
+    groups = {}
+    for p in params:
+        if p.get("one_of"):
+            groups.setdefault(p["one_of"], []).append(p["name"])
+    for g, keys in groups.items():
+        if len(keys) < 2:
+            raise ContractSyntaxError(
+                f"contract group '^{g}' has one key ({keys[0]}): a choice "
+                "needs two")
+    return groups
 
 
 def revision_schema():
@@ -254,6 +283,12 @@ def _object_schema(params, is_open, vocab):
         if p["required"]:
             required.append(p["name"])
     out = {"type": "object", "properties": props, "required": required}
+    groups = one_of_groups(params)
+    if len(groups) > 1:
+        raise ContractSyntaxError(
+            "a contract has one '^' group: " + ", ".join(groups))
+    for keys in groups.values():
+        out["oneOf"] = [{"required": [k]} for k in keys]
     if not is_open:
         out["additionalProperties"] = False
     return out

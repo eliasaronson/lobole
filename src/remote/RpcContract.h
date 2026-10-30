@@ -50,6 +50,9 @@ struct Alt {
 struct Param {
   std::string name;
   bool required = true;
+  // `key^group`: the key belongs to a choice, of which exactly one key is
+  // given (a cam placed by `face` OR `frame`); empty for an ordinary key.
+  std::string oneOf;
   std::vector<Alt> alts;
   std::string type; // as written, after the ':'
 };

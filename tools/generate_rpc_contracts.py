@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from method_doc_scan import method_docs  # noqa: E402
 from method_doc_scan import literal  # noqa: E402
-from rpc_contract import (parse_column, parse_result_column,  # noqa: E402
+from rpc_contract import (one_of_groups, parse_column, parse_result_column,  # noqa: E402
                           request_schema, result_schema)
 
 OUT = ROOT / "python/lobole/rpc.py"
@@ -227,12 +227,29 @@ def generate():
               + keys("kPrimitiveRetiredKeys"),
               ""]
     for name, column in features.items():
-        fields = []
-        for prm in parse_column(column):
-            t = py_type(prm)
-            fields.append(f"    {prm['name']!r}: "
-                          + (t if prm["required"] else f"NotRequired[{t}]") + ",")
-        lines += ["", f"{name}Spec = TypedDict({name + 'Spec'!r}, {{"] + fields + ["})"]
+        params = parse_column(column)
+        groups = one_of_groups(params)
+        # A choice (`key^group`) is one TypedDict per key it can be, that key
+        # required and the others absent: a dict holding none of them fits
+        # no spec, so a type checker that picks a TypedDict by keys alone
+        # (mypy before 2.1) leaves a partial plain dict alone.
+        choices = [None] if not groups else next(iter(groups.values()))
+        variants = []
+        for chosen in choices:
+            fields = []
+            for prm in params:
+                if prm.get("one_of") and prm["name"] != chosen:
+                    continue
+                t = py_type(prm)
+                req = prm["required"] or prm["name"] == chosen
+                fields.append(f"    {prm['name']!r}: "
+                              + (t if req else f"NotRequired[{t}]") + ",")
+            cls = name + ("".join(w.title() for w in chosen.split("_"))
+                          if chosen else "") + "Spec"
+            variants.append(cls)
+            lines += ["", f"{cls} = TypedDict({cls!r}, {{"] + fields + ["})"]
+        if len(variants) > 1:
+            lines += [f"{name}Spec = " + " | ".join(variants)]
     lines += ["", "FeatureSpec = " + " | ".join(f"{n}Spec" for n in features), ""]
     typed_results = results()
     lines += ["", "", "# Each typed `returns` column, as the JSON Schema an answer is held to",

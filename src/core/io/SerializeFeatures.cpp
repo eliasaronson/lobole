@@ -2190,7 +2190,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "undercut is refused with its angles and the base radius that clears "
      "it. get_state reports the pressure angle, radii and fit deviation "
      "(docs/modeling/cam-profiles.md)",
-     "face?:object, frame?:int, base_radius_mm?:number, "
+     "face^place:object, frame^place:int, base_radius_mm?:number, "
      "base_radius_mm_expr?:string, width_mm?:number, width_mm_expr?:string, "
      "lift?:any, segments?:object[], follower?:object, "
      "turn?:'ccw'|'cw', body?:'new'|'add'"},

@@ -212,7 +212,19 @@ std::optional<Contract> ParseColumn(std::string_view column) {
   for (const std::string& e : entries) {
     const size_t colon = e.find(':');
     std::string name = Trim(e.substr(0, colon));
-    bool required = true;
+    // `key^group`: one key of a choice (Param::oneOf).
+    std::string group;
+    if (const size_t caret = name.find('^'); caret != std::string::npos) {
+      group = Trim(name.substr(caret + 1));
+      name = Trim(name.substr(0, caret));
+      bool word = !group.empty();
+      for (char ch : group)
+        word =
+            word && (std::islower(static_cast<unsigned char>(ch)) || ch == '_');
+      if (!word)
+        Fail(name, "'^' names no group");
+    }
+    bool required = group.empty();
     if (!name.empty() && name.back() == '?') {
       required = false;
       name = Trim(name.substr(0, name.size() - 1));
@@ -226,11 +238,27 @@ std::optional<Contract> ParseColumn(std::string_view column) {
     Param p;
     p.name = name;
     p.required = required;
+    p.oneOf = group;
     p.type = Trim(e.substr(colon + 1));
     for (const std::string& a : SplitTop(p.type, '|'))
       p.alts.push_back(ParseAlt(name, Trim(a)));
     c.params.push_back(std::move(p));
   }
+  // A choice is one group of two keys or more.
+  std::string group;
+  int keys = 0;
+  for (const Param& p : c.params) {
+    if (p.oneOf.empty())
+      continue;
+    if (!group.empty() && p.oneOf != group)
+      throw std::invalid_argument("a contract has one '^' group: " + group +
+                                  ", " + p.oneOf);
+    group = p.oneOf;
+    keys++;
+  }
+  if (keys == 1)
+    throw std::invalid_argument("contract group '^" + group +
+                                "' has one key: a choice needs two");
   return c;
 }
 
@@ -241,6 +269,7 @@ std::vector<std::string> ParamNames(std::string_view column) {
     return out;
   for (const std::string& e : SplitTop(all, ',')) {
     std::string name = Trim(e.substr(0, e.find(':')));
+    name = Trim(name.substr(0, name.find('^')));
     if (!name.empty() && name.back() == '?')
       name = Trim(name.substr(0, name.size() - 1));
     if (!name.empty())
@@ -290,10 +319,17 @@ nlohmann::json RequestSchema(const Contract& contract,
     if (p.required)
       required.push_back(p.name);
   }
-  return {{"type", "object"},
-          {"properties", props},
-          {"required", required},
-          {"additionalProperties", false}};
+  nlohmann::json out = {
+      {"type", "object"}, {"properties", props}, {"required", required}};
+  // A choice: exactly one of its keys (`key^group`).
+  nlohmann::json oneOf = nlohmann::json::array();
+  for (const Param& p : contract.params)
+    if (!p.oneOf.empty())
+      oneOf.push_back({{"required", {p.name}}});
+  if (!oneOf.empty())
+    out["oneOf"] = std::move(oneOf);
+  out["additionalProperties"] = false;
+  return out;
 }
 
 } // namespace remote::contract

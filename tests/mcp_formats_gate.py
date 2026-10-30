@@ -108,7 +108,7 @@ def main():
               "face_appearance", "suppressed"}
     for ft in desc["feature_types"]:
         for entry in ft["contract"].split(", "):
-            key = entry.split(":", 1)[0].rstrip("?")
+            key = entry.split(":", 1)[0].split("^", 1)[0].rstrip("?")
             base = key[:-len("_expr")] if key.endswith("_expr") else key
             if key in common or key in carried_back:
                 continue

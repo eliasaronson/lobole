@@ -323,16 +323,30 @@ def check_feature_contracts(raw):
         schema = rpc.FEATURE_SCHEMAS[name]
         props, required = schema["properties"], schema["required"]
         base = {k: _sample(props[k]) for k in required}
+        # A choice (`oneOf`): the base gives its first key; a spec with
+        # neither key, or with both, is refused too.
+        choice = [a["required"][0] for a in schema.get("oneOf", [])]
+        if choice:
+            base[choice[0]] = _sample(props[choice[0]])
         cases = [("unknown_argument", dict(base, zz_not_a_field=1))]
+        if choice:
+            cases.append(("missing_argument",
+                          {x: v for x, v in base.items() if x not in choice}))
+            cases.append(("invalid_argument",
+                          dict(base, **{k: _sample(props[k])
+                                        for k in choice})))
         for k, sub in props.items():
             if k == "type":
                 continue
+            # A choice's other key replaces the base's, rather than joining it.
+            at = ({x: v for x, v in base.items() if x not in choice}
+                  if k in choice else base)
             if "enum" in sub:
-                cases.append(("invalid_argument", dict(base, **{k: "zz"})))
+                cases.append(("invalid_argument", dict(at, **{k: "zz"})))
             elif sub.get("type") in ("integer", "number", "boolean",
                                      "string", "array"):
                 cases.append(("invalid_argument",
-                              dict(base, **{k: _wrong(sub)})))
+                              dict(at, **{k: _wrong(sub)})))
         for k in required:
             if k != "type":
                 cases.append(("missing_argument",

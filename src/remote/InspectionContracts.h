@@ -253,6 +253,35 @@ inline void ValidateInspectionValue(const nlohmann::json& schema,
                 DescribeSchema(props[k]) + ")");
       }
     }
+    // A choice (`oneOf` of single required keys): exactly one is given.
+    if (schema.contains("oneOf")) {
+      std::vector<std::string> keys, given;
+      for (const auto& alt : schema["oneOf"])
+        for (const auto& k : alt.at("required")) {
+          keys.push_back(k.get<std::string>());
+          if (value.contains(keys.back()))
+            given.push_back(keys.back());
+        }
+      if (given.size() != 1) {
+        const auto join = [](const std::vector<std::string>& v) {
+          std::string out;
+          for (const std::string& k : v)
+            out += (out.empty() ? "" : ", ") + k;
+          return out;
+        };
+        nlohmann::json observed = nullptr;
+        for (const std::string& k : given)
+          observed[k] = value[k];
+        ContractError e(
+            operation, given.empty() ? "missing_argument" : "invalid_argument",
+            path, schema["oneOf"], observed,
+            operation + ": " + where(path) + " takes exactly one of " +
+                join(keys) +
+                (given.empty() ? "; got none" : "; got " + join(given)));
+        e.diagnostic["accepted"] = keys;
+        throw e;
+      }
+    }
     for (auto it = value.begin(); it != value.end(); ++it)
       ValidateInspectionValue(props[it.key()], it.value(), operation,
                               path + "/" + it.key());
