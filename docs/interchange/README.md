@@ -600,11 +600,17 @@ holding only a `Poly_Triangulation`, which BRepMesh leaves alone.
   `topo::FindOwningBody` and `topo::UnresolvedReason` (fillet, chamfer,
   shell, draft, thread, split, a sketch or an extrude end on its face,
   `project_geometry`);
-- a Boolean with a mesh operand;
 - an extrude or revolve Cut that reaches it, and an Add that reaches only
   mesh bodies (an Add elsewhere skips it; a new body beside it is fine);
 - a mate's connector, a drawing view (unless `hidden` leaves it off), a FEM
   study's load or refinement, and `add_job_part`.
+
+A body a [Cradle](../modeling/README.md#cradle) or a
+[mesh Boolean](../modeling/README.md#mesh-booleans) made a mesh says so in
+the same sentence ("… since Cradle 'Holder': move this before it"), since
+the way on is to do the B-Rep work first. A Boolean with a mesh operand is
+not refused: it runs on triangles, through manifold, when both operands
+are closed.
 
 How it is checked:
 - `tests/test_mesh_body.cpp`: the tree, the slice and its cap, and the mass

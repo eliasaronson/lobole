@@ -762,6 +762,140 @@ way, or not move at all (a tilt about the face's middle). The target slot
 (`###slot` `ReplaceFaceTarget`) takes a face in the viewport, or a datum
 plane's or a sketch's row in the tree; there is no numeric default.
 
+## Cradle
+
+A **Cradle** cuts a holder shaped to a scan out of a block: the block less
+the scan grown by a clearance and swept along the direction the object is
+lowered in, so it lifts in and out (`src/core/features/CradleFeature.{h,cpp}`,
+the pocket in `src/core/mesh/Field.{h,cpp}`).
+
+`Cradle {target_id, tool_id, clearance_mm?, direction?, sweep?,
+resolution_mm?}`:
+
+- `target_id` is the block (a B-Rep or a closed mesh body), `tool_id` the
+  scan: a mesh body, open or closed, or a B-Rep, tessellated at a thousandth
+  of its own diagonal or half a cell, whichever is finer.
+- `clearance_mm` is the gap a side between the scan and the pocket wall.
+  Unset, it is the part's print process's **gap** a side
+  ([printed parts](../tolerances/README.md#printed-parts)): what keeps two
+  surfaces from closing on each other once printed (PETG 0.3, PLA 0.25).
+  With neither it is refused, naming `set_print_process` and
+  `clearance_mm`: a literal would be wrong for any real printer.
+- `direction` is the way the object moves INTO the cradle, `[0, 0, -1]`
+  (world down) unless set; any non-zero vector.
+- `sweep: false` keeps the undercuts, for a snap-in grip.
+- `resolution_mm` is the grid's cell, half the clearance unless set.
+
+The block becomes a **mesh body** (the same body: its producer, name and
+material; its one element `<cradle id>/mesh`); the scan stays. The reply's
+`report` gives `clearance_mm` and `clearance_from`, `resolution_mm`, the
+`deviation_mm` that implies (half the cell's diagonal, plus a B-Rep scan's
+tessellation), the cells and the result's triangles.
+
+**How the pocket is built.** In a distance field, and only the last step
+is a mesh boolean (manifold):
+
+1. a grid whose z points against `direction` covers the block the scan can
+   reach: the scan's box grown by the clearance and two cells, and with the
+   sweep on up through the block's top, cut to the block's box and two
+   cells past it, so the caps the level set closes the pocket with lie
+   outside the block;
+2. at each node, the distance to the scan by `MeshBvh` within a band (the
+   clearance and two cells), its sign from the generalised winding number,
+   which an open scan (no bottom) still answers. On a closed scan the sign
+   carries down a column between two nodes both past the band, which cannot
+   have crossed the surface; an open one asks at every node;
+3. the sweep is a running minimum up each column, f_swept(p) = min over
+   t >= 0 of f(p + t·dir), exact at the nodes because the grid is aligned
+   with `direction`;
+4. manifold's `LevelSet` contours `clearance - f`, trilinearly sampled, on
+   one thread (slabs of it in parallel measured slower, below);
+5. manifold subtracts the pocket from the block, which must be closed.
+
+Why a field: the clearance is an iso-level and the sweep a running
+minimum, both trivial there, where on a mesh an offset is a Minkowski sum
+that on non-convex input "scales with the product of face counts"
+(manifold's own source). A field also takes an open or dirty scan, which a
+mesh boolean refuses (manifold: `NotManifold`); the subtraction, which must
+be exact and watertight, is the one step left to manifold.
+
+The field runs under `parallel::For`; manifold itself is built serial. A
+Cradle is a heavy feature
+([long operations](../ui/long-operations.md#heavy-features)): it builds as
+a `feature` job, reports its progress, and is cancelled from the field's
+rows, the level set's samples and between the steps.
+
+### What a cradle costs
+
+Measured on the figure fixture (`tests/test_mesh_cradle.cpp`, hidden
+cases `[mesh-cost-cradle-field]` and `[mesh-cost-cradle-feature]`), on the
+development machine:
+
+| piece | measured | law (`CradleFeature.cpp`) |
+|---|---|---|
+| the field (distance, sign, sweep) | 0.68 s wall for 7.5M nodes on 22 threads | 2 µs of CPU a node, shared by the workers |
+| `LevelSet`, one thread | 4.6 s at 7.5M nodes, 26 s at 30M | 0.9 µs a node |
+| the scan's tree, the subtraction | 1.5 s for a 0.3 mm pocket's 785k triangles | 2.4 µs a triangle of scan, block and pocket (two a cell of the scan's surface) |
+
+The field is cheap because the sign carries down a column on a closed
+scan; the level set is nearly all of it. Running the level set in slabs on
+every core was measured and dropped: six slabs took 6.1 s against one's
+4.5 s at 7.5M nodes, 3.3 s of it the union of the seams.
+
+**The budget** a Cradle is refused past is the patient wait an import is
+held to, `interchange::kPatientImportSeconds` (60 s), and 2 GB for the
+level set's voxels, which manifold pads to a power of two on each axis
+(`mesh::PocketBytes` counts them exactly). On a 100 mm scan the memory
+binds first: the figure's stand at PLA's 0.25 mm clearance asks for a
+0.125 mm cell, is coarsened to 0.185 mm (30M cells, a deviation of
+0.16 mm), and builds in 31 s at 300k triangles and 33 s at 2M, the process
+peaking at 2.1 GB. Past the budget:
+
+- a stated `resolution_mm` is refused, naming the coarsest cell that fits;
+- the default cell is coarsened in 5% steps until it fits, and refused once
+  that would be coarser than the clearance;
+- a scan whose triangles alone are past it is refused naming the count to
+  decimate to (MeshLab's Quadric Edge Collapse Decimation, Blender's
+  Decimate modifier); a smaller block also shrinks the grid.
+
+The cost check (`[slow]`) holds a 300k-triangle stand at its default
+resolution to the law's own estimate in CPU time, and fails against a 5 µs
+spin planted in the level set's samples.
+
+### After a cradle
+
+Once a body is a mesh, a B-Rep feature on it is refused, naming the feature
+that made it one (`Body::meshSince`, read by `MeshBodyRefusal`): "Fillet
+needs a B-Rep, and body 'Blank' is a mesh (… triangles) since Cradle
+'Holder': move this before it". So a holder is finished in that order: the
+B-Rep work first (fillets, chamfers, bosses), then the cradle, then any
+[mesh boolean](#mesh-booleans) for screw holes and slots.
+
+### Mesh booleans
+
+A `Boolean` with a mesh operand runs on triangles through manifold
+(`BooleanFeature::ExecuteMesh`): both operands must be closed. An open one
+is refused naming its boundary loops and the longest, and pointing at
+MeshLab, Blender or the scanning app to close it, or at a Cradle, which
+takes an open scan. A B-Rep operand is tessellated at a thousandth of its
+diagonal, which the reply's `report` states (`target_deflection_mm`,
+`tool_deflection_mm`). The result is a new mesh body, as a B-Rep boolean
+makes a new body.
+
+How the cradle is checked: `tests/test_mesh_cradle.cpp` on a sphere of
+radius 20 in a block, by what it is for -- the pocket wall at r + c within
+the reported deviation, the swept opening 2(r + c) wide above the equator
+and the unswept one closing over it, the result `Closed()`, and the sphere
+lowered in along -Z clashing with nothing only when swept -- and on the
+cut figure, an open scan that cradles where a mesh Boolean refuses it by
+name; the clearance from the print process and its refusal without one,
+each bad input refused naming what is accepted, the budget's refusal
+naming the resolution that fits, a mesh Boolean putting a B-Rep screw hole
+into a cradle; the goldens `vNEXT-cradle` and `vNEXT-mesh-boolean`;
+`refused_calls_smoke.py` (a refused Cradle changes nothing); the GUI tests
+`cradle/a_block_cut_to_a_ball_off_the_frame` (the toolbar's defaults, one
+undo step, built as a job, undone) and `defaults/cradle`.
+
 ## Sizes past the model space are refused
 
 `kModelSpaceMm` (`src/core/ModelSpace.h`) is a kilometre: OpenCASCADE's
@@ -1119,6 +1253,7 @@ pieces interfere fails outright.
 | `src/core/ElementMap.h`, `src/core/ElementHistory.{h,cpp}` | toponaming |
 | `src/core/sketch/SketchProfile.{h,cpp}` | loops, profile faces, named prism/revolve builders |
 | `src/core/AxisRef.h` | the shared axis reference |
+| `src/core/features/CradleFeature.{h,cpp}`, `src/core/mesh/Field.{h,cpp}`, `src/core/MeshOperand.{h,cpp}` | the Cradle, its pocket, a body as triangles for a mesh operation |
 | `src/core/io/SerializeFeatures.cpp` | feature JSON, `kFeatureTypes` |
 | `src/cad/CADKernel.{h,cpp}`, `src/cad/FaceSelector.cpp` | OCC wrapper, face/edge picking |
 | `src/remote/RemoteModeling.cpp` | modeling RPCs |

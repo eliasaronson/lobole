@@ -30,7 +30,7 @@ Includes are relative to `src/` (`#include "core/Document.h"`).
 | `src/core/features/` | one file pair per feature type (`ExtrudeFeature`, `HoleFeature`, `DerivedFeature`, the sheet-metal and tube features, …); `ImportFeature` and the stored primitives an older document carries (`Box`, `Sphere`, `Cylinder`) are inline in `core/Feature.h`; the Box/Cylinder/Sphere tool, which adds a sketch and an extrude, is `core/Primitives.{h,cpp}` |
 | `src/core/sketch/` | the 2D sketch solver (PlaneGCS), profiles, inference, selection |
 | `src/core/io/` | serialization, split by domain (`Serialize{Features,Assembly,Studies,Configurations,Cam}.cpp`, shared `SerializationInternal.h`), the git vault, merge, autosave, checkpoints, settings, keymap |
-| `src/core/mesh/` | triangle meshes with no OpenCASCADE in them: `TriMesh`, the STL reader, the surface fits and the segmentation that finds a faceted part's planes, cylinders, cones and spheres ([recognising a faceted mesh](interchange/README.md#recognising-a-faceted-mesh)); the B-Rep rebuilt from them is `src/cad/MeshRebuild` |
+| `src/core/mesh/` | triangle meshes with no OpenCASCADE in them: `TriMesh`, the STL reader, the surface fits and the segmentation that finds a faceted part's planes, cylinders, cones and spheres ([recognising a faceted mesh](interchange/README.md#recognising-a-faceted-mesh)), and the distance field a Cradle's pocket is built in ([cradle](modeling/README.md#cradle)); the B-Rep rebuilt from them is `src/cad/MeshRebuild` |
 | `src/core/{cam,drawing,fem,parts,catalog,sheet,tube}/` | one directory per domain |
 | `src/cad/` | the OpenCASCADE wrapper (`CADKernel.h`: `CADShape`), materials, mesh conversion and export, sketch planes |
 | `src/common/` | logging (`Logger.h`), runtime paths, build info, the terminal emulator and PTY (they live here so `designer_tests` can link them) |
@@ -57,7 +57,7 @@ stays GPU-free.
 
 | target | contents | notes |
 |---|---|---|
-| `designer_core` | `core/`, `cad/`, `common/`, `remote/InstanceRegistry.cpp` | the unit-testable target; carries OpenCASCADE, PlaneGCS, Eigen/Spectra, Netgen (via `fem_mesher`), and the vendored static Clipper2 and manifold (mesh booleans; `core/mesh/MeshBoolean.cpp` is its one caller) |
+| `designer_core` | `core/`, `cad/`, `common/`, `remote/InstanceRegistry.cpp` | the unit-testable target; carries OpenCASCADE, PlaneGCS, Eigen/Spectra, Netgen (via `fem_mesher`), and the vendored static Clipper2 and manifold (mesh booleans and the level set; `core/mesh/MeshBoolean.cpp` and `core/mesh/Field.cpp` are its callers) |
 | `designer_app` | `ui/`, `render/`, `remote/`, the GUI suite, ImGui | everything the app is except its entry points, so `designer_tests` can link the actions layer |
 | `designer` | `main.cpp`, `GpuOwners.cpp`, `HeadlessMain.cpp`, `CrashHandler.cpp` | links `designer_app`, `designer_core` and (when built) `fem_gpu` |
 | `fem_gpu` | `src/femgpu/` | Vulkan compute; `LOBOLE_ENABLE_FEM_GPU` |

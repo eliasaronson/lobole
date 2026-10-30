@@ -264,9 +264,9 @@ that is about **4 × 10⁷ cells**, a grid of 350³, and LevelSet's own memory
 there is about 1.7 GB. A 100 mm scan at a 0.15 mm cell (half a 0.3 mm
 clearance) is 3 × 10⁸ cells: past the budget seven times over, so either the
 cell is coarsened to about 0.3 mm or the level set runs in parallel slabs
-under `parallel::For` (manifold is serial here), which stage 2 measures
-before it sets the budget it refuses past. Its `BuildCostS` is this law
-on the cells and triangles it would make.
+under `parallel::For` (manifold is serial here). Stage 2 measured the
+slabs slower than one level set, and coarsens instead
+([what a cradle costs](../modeling/README.md#what-a-cradle-costs)).
 
 ### Stage 1 — a mesh body
 
@@ -285,106 +285,14 @@ below are its. What the later stages still need of it:
 - a frame with a 2M-triangle mesh body costs about 26 ms of main-thread
   time with or without the cursor on it, not yet profiled.
 
-### Stage 2 — the cradle (L)
+### Stage 2 — the cradle
 
-This is the operation the round exists for. It makes a block (B-Rep or mesh)
-into a holder shaped to a scan, with a clearance, which can be lifted in and
-out.
-
-**The decision**
-
-The pocket is built in a **distance field**, and only the final subtraction
-is a **mesh boolean (manifold)**. The evidence:
-
-- **Clearance and insertion are both trivial operations on a field, and
-  hard on a mesh.**
-  - Clearance is an iso-level shift.
-  - Making the pocket insertable along a direction (removing the undercuts
-    that would trap the object) is a running minimum down each grid column:
-    `f_swept(p) = min_{t≥0} f(p + t·dir)`.
-  - On a mesh, an offset is a Minkowski sum. manifold's own source says that
-    on non-convex input it "scales with the product of face counts", which
-    rules it out against a 1M-triangle scan.
-- **A field takes an open or dirty scan.**
-  - The sign comes from the generalised winding number, which tolerates
-    holes, even the missing bottom of a table-top scan.
-  - A mesh boolean refuses non-manifold input: manifold returns
-    `NotManifold`, and its `Merge()` promises no repair.
-- **manifold's boolean is the step that must be exact and fast.**
-  - It keeps the block's sharp edges and holes, and its result is watertight
-    by construction.
-  - A third-party benchmark (MeshLib) measured a 2M-triangle union at about
-    0.27 s.
-  - It also supplies the iso-surface extraction (`Manifold::LevelSet`),
-    which outputs a manifold mesh.
-- **The dependency is permissive and fits every build.**
-  - Apache-2.0, built static. Only LGPL code has to be a shared library.
-  - Its one dependency, Clipper2, is already vendored.
-  - Stage 0 has proven it in all three builds.
-  - The field code is ours, on `MeshBvh`, so there is no TBB, Blosc or Boost
-    and no GPL dependency.
-
-**The feature**
-
-`Cradle {target, tool, clearance_mm?, direction?, sweep?, resolution_mm?}`
-
-- `target` is the blank, a body.
-- `tool` is the scan: a mesh body, or a B-Rep tessellated at a deflection
-  derived from its own size, as `collide::Mesh` does.
-- `clearance_mm` defaults from the part's print process (the print
-  allowance, docs/tolerances/README.md). With no process set it is refused,
-  naming `set_print_process` and `clearance_mm`, because a literal default
-  would be wrong for any real printer.
-- `direction` is the direction the object moves into the cradle. It defaults
-  to world −Z, the world's own down, so it carries no unit.
-- `sweep: false` keeps the undercuts, for a snap-in grip.
-- `resolution_mm` defaults to half the clearance. The grid covers only
-  target ∩ (tool + clearance), and is capped by a cell budget set in stage 0.
-  If the cap would force a cell coarser than the clearance, the feature is
-  refused, naming the budget. The reply reports the resolution used and the
-  surface deviation it implies.
-
-**The pipeline**, all in `src/core/mesh/`:
-
-1. Closest-point distance on the grid by `MeshBvh`, computed within a band.
-2. The sign from the winding number.
-3. Shift by the clearance, then sweep along `direction`.
-4. `LevelSet` with trilinear sampling.
-5. Subtract the pocket from the target by manifold.
-6. The result is a mesh body.
-
-**Mesh booleans in general**
-
-`Boolean` with a mesh operand runs through manifold. This is what puts a
-screw hole or a slot (a B-Rep tool body) into a cradle after it is cut:
-- A mesh operand must be `Closed()`. An open one is refused, naming its
-  loops, and saying to close them in an external tool or to use Cradle.
-- A B-Rep operand is tessellated at a derived deflection, which the reply
-  states.
-
-**After the cradle**
-- Once a body is a mesh, a later B-Rep feature on it is refused, naming the
-  feature that made it one.
-- The way to finish such a part is to do the B-Rep work first (fillets,
-  chamfers, bosses) and the cradle and mesh-tool booleans last.
-  docs/modeling says so.
-
-**Threading and the job**
-- The field and the boolean are pure data, and run under `parallel::For`.
-- Cradle is a heavy feature (docs/ui/long-operations.md#heavy-features):
-  it declares `MayBuildOffFrame` and estimates `BuildCostS` from its cells
-  and triangles (the stage-0 cost law), and builds as a `feature` job with
-  that mechanism's progress, cancel rule and result store, keyed by its
-  chain hash (target, tool, clearance, direction, sweep, resolution are in
-  it), so reopening reuses it. Its Execute reads only its bodies, its
-  referenced features and the symbols, as that mechanism requires. Added
-  here: a refusal past a cost budget derived from the stage-0 measurement,
-  and progress reported through `heavy::ReportFraction`.
-- A refusal past the budget names what to do: a coarser `resolution_mm` (the
-  value that fits the budget), a smaller target, or decimating the scan
-  externally to under the triangle count that fits.
-
-`vNEXT` adds a golden for Cradle and one for a mesh Boolean.
+Built: [Cradle](../modeling/README.md#cradle) and
+[mesh booleans](../modeling/README.md#mesh-booleans), with the budget it
+measured ([what a cradle costs](../modeling/README.md#what-a-cradle-costs)).
+What the later stages still need of it: a `generators/scan_cradle/`
+dogfood (below), and the printed holder tried on a real object, the only
+test of the clearance that means anything.
 
 ### Stage 3 — placing a scan (M)
 
@@ -461,14 +369,10 @@ often the better part than a cradle, because it stays fully parametric.
 ## Files
 
 **Core**
-- `src/core/mesh/`: `Field` (grid, winding number, sweep) new; `MeshReaders`
-  gains PLY and GLB; `Segment` gains `GrowFrom`; `Fit` gains RANSAC.
+- `src/core/mesh/`: `MeshReaders` gains PLY and GLB; `Segment` gains `GrowFrom`; `Fit` gains RANSAC.
 - `src/core/MeshCollide.*` becomes a user of `MeshBvh`.
 - `src/core/Feature.{h,cpp}`: Import's `placement` and `scale`.
-- New feature: `src/core/features/CradleFeature.*`, and its heavy-feature
-  job beside `src/ui/ImportJob.*`.
-- Changed features: `BooleanFeature.cpp`, `DatumPlaneFeature.*`,
-  `DatumAxisFeature.*`.
+- Changed features: `DatumPlaneFeature.*`, `DatumAxisFeature.*`.
 - `src/core/sketch/` (the projected section).
 
 **Serialization**
@@ -478,8 +382,8 @@ often the better part than a cradle, because it stays fully parametric.
 
 **Rendering, picking and export**
 - `src/ui/ImportActions.cpp` (placement).
-- New tools: Align, Cradle and Fit, and "To sketch" in the
-  Section tool, each in its own `ui/` file.
+- New tools: Align and Fit, and "To sketch" in the Section tool, each in
+  its own `ui/` file.
 
 **RPC**
 - `src/remote/Remote{Project,Modeling,Inspection}.cpp` and their
@@ -501,44 +405,21 @@ often the better part than a cradle, because it stays fully parametric.
 ## Verified by
 
 **Unit tests against the fixtures, checking the outcome**
-- **Cradle of a sphere of radius r, clearance c:**
-  - the pocket wall is at r + c, to within the reported deviation;
-  - with `sweep`, the pocket's width above the equator stays 2(r + c) all
-    the way to the top;
-  - without `sweep`, the pocket closes over the top;
-  - the result is `Closed()`;
-  - lowering the sphere along `direction` clashes with nothing
-    (`collide::Mesh` against the cradle at each pose: the purpose, not the
-    formula).
-- The cradle of the open blob succeeds where a mesh Boolean refuses it by
-  name.
 - A fitted cylinder's radius and axis match the generated ones.
 - `align_import floor` lands the cut face on z = 0.
 
 **Refusals**
 - Each new enum or mode refused with its list.
-- A Cradle with no clearance and no print process refused.
 - A refused call changes nothing (`refused_calls_smoke`).
 
 **Goldens and readers**
 - Every `v205` golden.
 - The reader fuzz over PLY and GLB.
 
-**The job**
-- A Cradle job reports progress. Cancelling an edit leaves the document
-  byte-identical with no undo step. Cancelling the build during open leaves
-  the feature "cancelled" with its downstream unbuilt, visible in the tree
-  and the reply, and a rebuild request builds it. A reopen after a build
-  reuses the cached result with no recompute. A Cradle past the budget is
-  refused naming the resolution or triangle count that fits.
-
-**Cost checks** (CPU time, a bound per budget from stage 0, each shown to
-fail against a planted spin)
-- A Cradle at the default resolution.
-
 **Smokes and suites**
 - `headless_smoke.py` imports PLY and GLB in each representation.
-- The action matrix run with a mesh body in the part.
+- The action matrix run with a mesh body in the part, and with a Cradle's
+  result in it.
 - A GUI test per tool, plus the `defaults/*` suite.
 - `tools/ci-local.sh` for the Ubuntu containers, and the mingw build for
   the vendored libraries.

@@ -498,13 +498,17 @@ synchronous call parks on it.
 Regeneration runs on the main thread on every path, and stays there (below).
 Only a feature that may cost seconds builds as a `feature` job: Delete Face
 of many faces today (`BRepAlgoAPI_Defeaturing` on one thread: the Voron fan
-grill's 916 faces, 14 s), and the organic meshes plan's Cradle next.
+grill's 916 faces, 14 s), and a [Cradle](../modeling/README.md#cradle) (a
+distance field and a level set over millions of cells, seconds to a minute).
 
 **Which.** A feature declares that it may (`Feature::MayBuildOffFrame`) and
 estimates its own cost on the bodies it would act on (`BuildCostS`); it
 goes to a job when the estimate reaches `heavy::kOffFrameS`, 0.25 s.
 Delete Face estimates 15 ms a face, the grill's measured rate, so a hole's
-bore and floor build inline and the grill's four holes do not. No list of
+bore and floor build inline and the grill's four holes do not; a Cradle
+estimates from its grid's cells and the triangles it handles
+([what a cradle costs](../modeling/README.md#what-a-cradle-costs)), and
+reports its progress through `heavy::ReportFraction`. No list of
 feature types exists.
 
 **How.** Only a part the app holds builds off the frame
