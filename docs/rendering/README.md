@@ -297,10 +297,11 @@ Per frame, in one command buffer:
 
 Steps 1-2 are `RecordScenePrepasses` (`main.cpp`), which the frame and every
 screenshot path both call, so a capture has the same shadows and AO as the
-viewport. The prepasses read the camera matrices and the shadow-caster list
-out of the `MeshRenderer` (`SSAORenderer::RecordSSAOPasses(cb, frame,
-MeshRenderer&)`) so they are guaranteed identical to what the main pass
-uses.
+viewport. They are handed the same [`SceneView`](#scene-renderers) the main
+pass then draws (`RecordShadowPass(cb, mesh, view)`,
+`RecordSSAOPasses(cb, frame, mesh, view)`), so their camera and section
+planes are the main pass's by construction; the shadow-caster list comes
+out of the `MeshRenderer`.
 
 Every framebuffer shares one depth image and one MSAA colour image. That is
 correct because frames execute in order on one queue, **provided the render
@@ -314,29 +315,50 @@ Frames in flight, the swapchain image count and present mode are on
 ## Scene renderers
 
 `SceneRenderer` (`render/SceneRenderer.h`) is the per-frame contract:
-`SetViewport(x, y, w, h)`, `UpdateCamera(view, proj)`, `SetClipPlanes(...)`
-(a no-op by default), `Render(cb, frameIndex)`, `Shutdown()`. Six classes
+`Render(cb, frameIndex, const SceneView&)` and `Shutdown()`. Six classes
 implement it: `MeshRenderer`, `FieldRenderer`, `StockRenderer`,
 `OutlineRenderer`, `UnderlayRenderer`, `SketchRenderer`. The prepasses
 (`ShadowRenderer`, `SSAORenderer`) and the path tracer are not scene
 renderers.
 
+A `SceneView` is what one draw is for: the viewport rectangle (`x, y, w, h`
+in framebuffer pixels — the dock between the panels, not the framebuffer),
+the view and projection matrices, and the section planes. It is **passed,
+never set**: no renderer holds a viewport, a camera or a cut between draws,
+so none can draw with one left behind by another draw, and a render path
+that does not build a view does not compile. `main.cpp` builds them —
+`LiveSceneView` for the windowed frame and every capture of it (the remote
+screenshot, the test engine's capture, `captureViewport`), the whole
+1280x720 for `--offscreen`, and the capture's own size and aspect from
+`AimRenderersAt` for a quick still or a motion video's frames — and each
+block hands the same view to the prepasses and to every scene renderer:
+
+```cpp
+const SceneView view = LiveSceneView(wd->Width, wd->Height);
+RecordScenePrepasses(cb, frame, view, &g_GpuTimer);
+...
+for (SceneRenderer* r : g_Scene)
+  r->Render(cb, frame, view);
+```
+
+The outline renderer is the one with memory of the camera, on purpose: each
+`Render` notes where its view puts the camera, and a move restarts the
+silhouette settle clock. `SettleSilhouettes()` counts the next draw as
+settled after it has noted its camera, which is what a capture asks for.
+
 `app/GpuOwners.cpp` holds the two lists and nothing else enumerates
 renderers:
 
-- **`RegisterSceneRenderers()`** fills `g_Scene` (mirrored as
-  `AppState::sceneRenderers`) **in draw order**: mesh, field, stock, outline,
-  underlay, sketch. The order is content: the field and the stock stand in
-  front of the mesh they replace, the outline goes over the solids it traces,
-  reference images go under the sketch lines drawn on them. Every per-frame
-  duty — viewport, camera, clip planes, and the three render blocks (the
-  windowed frame, the windowed screenshot, the offscreen capture) — loops
-  over this list.
+- **`RegisterSceneRenderers()`** fills `g_Scene` **in draw order**: mesh,
+  field, stock, outline, underlay, sketch. The order is content: the field
+  and the stock stand in front of the mesh they replace, the outline goes
+  over the solids it traces, reference images go under the sketch lines
+  drawn on them. Every render block (the windowed frame, the windowed
+  screenshot, the offscreen capture) loops over this list.
 - **`kRows`**, [the owner table](#rebuilding-the-device): one row per
-  renderer, its construction and its teardown, for both modes (a renderer
-  that starts at the window's size or the offscreen 1280x720 is told so by
-  the row). The table is walked back before the device is destroyed, so no
-  renderer outlives it; one that did crashed at exit.
+  renderer, its construction and its teardown, for both modes. The table is
+  walked back before the device is destroyed, so no renderer outlives it;
+  one that did crashed at exit.
 
 A renderer whose row failed to initialise is null, named in
 `renderer.missing`, and skipped.
@@ -345,20 +367,19 @@ A renderer whose row failed to initialise is null, named in
 `kRows`, add it to `RegisterSceneRenderers` in draw order.
 `tests/test_conventions.cpp` fails if a class deriving `: public
 SceneRenderer` is missing from either. The gate exists because a renderer
-missing from the viewport loop draws full-window at the wrong scale and
-offset — invisible under `--offscreen`, where the 3D viewport *is* the
-whole framebuffer — and one missing from teardown crashes at exit, or
-outlives a rebuild holding the old device's handles.
+missing from the render loop never draws, and one missing from teardown
+crashes at exit, or outlives a rebuild holding the old device's handles.
+(A renderer drawn full-window at the wrong scale and offset — invisible
+under `--offscreen`, where the 3D viewport *is* the whole framebuffer — is
+what the `SceneView` argument closed: it used to be a viewport set on each
+renderer from a list, and the FEM field and the CAM stock each shipped
+missing from it.)
 
 The typed pointers in `AppState` (`meshRenderer`, `outlineRenderer`,
 `fieldRenderer`, …) stay: the `ui/` layer uses them for content (`AddMesh`,
 `SetInstanceGhost`, `SetStaticLines`, …). The registry owns the per-frame
 contract only. `MeshRenderer` also has duties nothing else has (shadow
 casters, AO/shadow-map rebinds, asset management).
-
-The viewport, camera and clip planes are still *set* on each renderer before
-`Render` rather than passed to it; [../plans/renderer-scene-view.md](../plans/renderer-scene-view.md)
-is the plan to pass them at `Render` instead.
 
 ## Meshes: assets and instances
 
@@ -486,13 +507,14 @@ hidden `[.outline-perf]` case is the benchmark.
 
 `core/LightRig.h` is the one derivation of where the lights stand.
 `conv::StudioRig(view, locked)` takes the world-to-view matrix every renderer
-is handed (`UpdateCamera`) and returns the key, fill and rim directions
+is handed (`SceneView::view`) and returns the key, fill and rim directions
 (toward each light), a roll for the shadow map, and the environment's
-rotation. The mesh renderer (`MeshRenderer::Rig()`), the stock block in the
-CAM simulation, the shadow map (which reads the key from the mesh renderer)
-and the ray-traced still (`MakeStillDesc`) all call it, and every screenshot
-and capture path re-records those renderers, so a still or a screenshot is
-lit exactly as the viewport is.
+rotation. The mesh renderer (`MeshRenderer::Rig(view)`), the stock block in
+the CAM simulation, the shadow map (which reads the key from the mesh
+renderer, for the view the main pass draws) and the ray-traced still
+(`MakeStillDesc`) all call it, and every screenshot and capture path
+re-records those renderers, so a still or a screenshot is lit exactly as the
+viewport is.
 
 - **Camera-relative by default**, as a CAD viewport's headlight rig is: the
   key 40° to the camera's left and 45° up (screen up), the fill 60° to its
