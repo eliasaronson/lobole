@@ -304,6 +304,13 @@ def main():
                     ("import_step a drawing", "import_step",
                      {"path": os.path.join(fx, "unitless.dxf")},
                      "import_sketch"),
+                    ("import_step a mirror for a scale", "import_step",
+                     {"path": os.path.join(fx, "box-solidworks.step"),
+                      "scale": -1}, "greater than 0"),
+                    ("import_step an unknown placement key", "import_step",
+                     {"path": os.path.join(fx, "box-solidworks.step"),
+                      "placement": {"move_mm": [0, 0, 1]}},
+                     "translate_mm and rotate_deg"),
                     ("import_sketch unit contradicting $INSUNITS",
                      "import_sketch",
                      {"path": os.path.join(fx, "plate-ezdxf.dxf"),
@@ -323,6 +330,41 @@ def main():
                       "sketch_id": 1, "plane": "Top"}, "one or the other")]:
                 check(label, method, params, needle=needle,
                       tab=part["name"])
+
+            # Aligning an import, refused on its inputs and on the geometry
+            # before the placement is written
+            # (docs/interchange/README.md#placing-an-import). The import is
+            # removed again after.
+            d.call("set_active_part", part=part["name"])
+            got = d.call("import_step",
+                         path=os.path.join(fx, "box-solidworks.step"))
+            note(not got.get("regen", {}).get("errors"),
+                 f"align fixture import failed: {got}")
+            imp = d.call("get_state")["features"][-1]["id"]
+            for label, params, needle in [
+                    ("align_import unknown mode",
+                     {"mode": "flor", "point_mm": [0, 0, 0]},
+                     "floor, three_points, principal, scale"),
+                    ("align_import distance on a floor",
+                     {"mode": "floor", "point_mm": [0, 0, 0],
+                      "distance_mm": 10}, "distance_mm is scale's"),
+                    ("align_import a point off the import",
+                     {"mode": "floor", "point_mm": [5000, 0, 0]},
+                     "nearest surface"),
+                    ("align_import three points in a line",
+                     {"mode": "three_points",
+                      "points_mm": [[0, 0, 0], [1, 0, 0], [2, 0, 0]]},
+                     "in a line"),
+                    ("align_import two points for three",
+                     {"mode": "three_points",
+                      "points_mm": [[0, 0, 0], [1, 0, 0]]},
+                     "three_points takes three"),
+                    ("align_import scale without a distance",
+                     {"mode": "scale", "points_mm": [[0, 0, 0], [1, 0, 0]]},
+                     "distance_mm")]:
+                check(label, "align_import", dict(params, feature_id=imp),
+                      needle=needle, tab=part["name"])
+            d.call("delete_feature", feature_id=imp)
 
             # An expression requirement and a design sweep
             # (docs/requirements/README.md#expression, #design-sweep): every

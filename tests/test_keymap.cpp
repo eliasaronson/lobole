@@ -146,6 +146,9 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "part.replace_face",
       // A cradle is cut once a part, near its end, from a toolbar button.
       "part.cradle",
+      // An import is aligned once, after it arrives, from the toolbar or its
+      // editor.
+      "part.align",
       "view.reset_layout",
       "view.controls_help",
       // The sketch "more constraints" flyout: a constraint used once a month

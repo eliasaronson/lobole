@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/FeatureEditor.h"
+#include "ui/AlignTool.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BearingTool.h"
 #include "ui/CamPanel.h"
@@ -1726,6 +1727,12 @@ const ToolSession kToolSessions[] = {
        return s.assembly != nullptr && s.bearingTool.open;
      },
      [](AppState& s, const SelectionItem& i) { BearingSeatPicked(s, i); }},
+    {kAlignToolSlot,
+     [](const AppState& s) {
+       return s.document != nullptr && s.alignTool.open &&
+              s.alignTool.document == s.document.get();
+     },
+     [](AppState& s, const SelectionItem& i) { AlignPointPicked(s, i); }},
 };
 } // namespace
 
@@ -2324,6 +2331,30 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       if (!up.because.empty())
         ImGui::TextWrapped("Applied %s: %s", interchange::ToString(up.applied),
                            up.because.c_str());
+    }
+    // Where it is put (docs/interchange/README.md#placing-an-import): the
+    // placement as numbers, each an undoable modify, and the Align tool,
+    // which writes them from a floor, three points, the principal axes or
+    // a known distance.
+    {
+      importplace::Placement& pl = import->placement;
+      HandleEdit(state, feature,
+                 DragFloat3Row(state, "Move (mm)", &pl.translateMm.x), index,
+                 commit);
+      HandleEdit(state, feature,
+                 DragFloat3Row(state, "Turn (deg)", &pl.rotateDeg.x), index,
+                 commit);
+      LeftLabel("Scale");
+      ImGui::SetNextItemWidth(-1);
+      double sc = pl.scale;
+      const bool scaled =
+          ExprInputDouble(state, "##import_scale", &sc, "%.6g") && sc > 0.0 &&
+          std::isfinite(sc);
+      if (scaled)
+        pl.scale = sc;
+      HandleEdit(state, feature, scaled, index, commit);
+      if (commit && ImGui::Button("Align...###import_align"))
+        OpenAlignTool(state, import->GetId());
     }
     // What a mesh becomes: auto's choice, a mesh body, recognised surfaces
     // or a face per triangle (docs/interchange/README.md#mesh-bodies), and

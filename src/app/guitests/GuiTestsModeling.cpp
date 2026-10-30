@@ -3,6 +3,7 @@
 
 #include "app/guitests/GuiTestsCommon.h"
 #include "cad/NonDestructiveBoolean.h"
+#include "common/ChildProcess.h" // CurrentPid
 #include "core/Angles.h"
 #include "core/ElementHistory.h"
 #include "core/HeavyBuild.h"
@@ -28,6 +29,7 @@
 #include "core/io/ReadContext.h" // kMaxPartFeatures
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchProfile.h"
+#include "ui/AlignTool.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/FeatureBuildJob.h"
@@ -2449,6 +2451,122 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     for (const Body& b : Doc()->GetBodies())
       if (b.createdBy == blockId)
         IM_CHECK(!b.IsMesh());
+  };
+
+  // The Align tool (docs/interchange/README.md#placing-an-import): a 40 x
+  // 20 x 10 box read as a mesh body, standing on its 40 x 20. The toolbar
+  // opens it on the import waiting for a pick, Accept disabled; a click on
+  // the +X end previews that end on the floor, the 40 mm standing up;
+  // Accept is one undo step and Undo puts it back; a second preview is put
+  // back by Cancel without touching the undo stack.
+  t = IM_REGISTER_TEST(engine, "align",
+                       "a_floor_picked_on_a_scan_is_one_undo_step");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto stl =
+        std::filesystem::temp_directory_path() /
+        ("lobole_gui_align_" + std::to_string(proc::CurrentPid()) + ".stl");
+    {
+      std::vector<glm::vec3> corners;
+      for (int i = 0; i < 8; i++)
+        corners.emplace_back((i & 1) ? 20.0f : -20.0f, (i & 2) ? 10.0f : -10.0f,
+                             (i & 4) ? 5.0f : -5.0f);
+      const int quads[6][4] = {{0, 2, 6, 4}, {1, 3, 7, 5}, {0, 1, 5, 4},
+                               {2, 3, 7, 6}, {0, 1, 3, 2}, {4, 5, 7, 6}};
+      std::ofstream out(stl, std::ios::binary);
+      const char header[80] = {};
+      out.write(header, 80);
+      const uint32_t count = 12;
+      out.write(reinterpret_cast<const char*>(&count), 4);
+      for (const auto& q : quads)
+        for (const std::array<int, 3> tri :
+             {std::array<int, 3>{q[0], q[1], q[2]},
+              std::array<int, 3>{q[0], q[2], q[3]}}) {
+          glm::vec3 a = corners[tri[0]], b = corners[tri[1]],
+                    c = corners[tri[2]];
+          if (glm::dot(glm::cross(b - a, c - a), a + b + c) < 0.0f)
+            std::swap(b, c); // wound outward
+          const float n[3] = {0, 0, 0};
+          out.write(reinterpret_cast<const char*>(n), 12);
+          for (const glm::vec3& p : {a, b, c})
+            out.write(reinterpret_cast<const char*>(&p), 12);
+          const char attr[2] = {};
+          out.write(attr, 2);
+        }
+    }
+    auto imp = std::make_unique<ImportFeature>("scan", stl.string());
+    imp->upAxis = interchange::UpAxis::None;
+    imp->representation = mesh::Representation::Mesh;
+    Doc()->AddFeature(std::move(imp));
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), size_t{1});
+    IM_CHECK(Doc()->GetBodies()[0].IsMesh());
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+    const auto zSpan = [] {
+      glm::dvec3 lo, hi;
+      BodyBounds(Doc()->GetBodies()[0], lo, hi);
+      return std::pair<double, double>{lo.z, hi.z};
+    };
+    const auto import = [&] {
+      return dynamic_cast<const ImportFeature*>(Doc()->FindFeatureById(id));
+    };
+    const size_t depth = s_App->commands->UndoDepth();
+
+    ToolbarClick(ctx, "###tb_align");
+    ctx->Yield();
+    IM_CHECK(s_App->alignTool.open);
+    IM_CHECK_EQ(s_App->alignTool.featureId, id);
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kAlignToolSlot);
+    IM_CHECK((ctx->ItemInfo("//###ToolWindow/###tw_accept").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+
+    // The +X end, from straight out along +X.
+    const auto lookAtEnd = [&] {
+      const glm::vec3 end(20.0f, 0.0f, 0.0f);
+      s_App->camera->StopAnimation();
+      s_App->camera->SetTarget(end);
+      s_App->camera->SetUp(conv::kWorldUpF);
+      s_App->camera->SetPosition(end + glm::vec3(80.0f, 0.0f, 0.0f));
+      ctx->Yield(2);
+      ctx->MouseMoveToPos(WorldToWindow(end + glm::vec3(0.0f, 3.0f, 1.0f)));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+    };
+    lookAtEnd();
+    IM_CHECK(s_App->alignTool.preview.has_value());
+    IM_CHECK(s_App->alignTool.error.empty());
+    IM_CHECK(std::abs(zSpan().first) < 1e-4);         // on the floor
+    IM_CHECK(std::abs(zSpan().second - 40.0) < 1e-4); // standing on its end
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth); // a preview, unrecorded
+    ctx->ItemClick("//###ToolWindow/###tw_accept");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->alignTool.open);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth + 1);
+    IM_CHECK(!import()->placement.IsIdentity());
+    IM_CHECK(std::abs(zSpan().second - 40.0) < 1e-4);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    IM_CHECK(import()->placement.IsIdentity());
+    IM_CHECK(std::abs(zSpan().second - zSpan().first - 10.0) < 1e-4);
+
+    // Previewed again, then cancelled: back where it was, nothing recorded.
+    const size_t undone = s_App->commands->UndoDepth();
+    ToolbarClick(ctx, "###tb_align");
+    ctx->Yield();
+    lookAtEnd();
+    IM_CHECK(s_App->alignTool.preview.has_value());
+    ctx->ItemClick("//###ToolWindow/###tw_cancel");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->alignTool.open);
+    IM_CHECK(import()->placement.IsIdentity());
+    IM_CHECK(std::abs(zSpan().second - zSpan().first - 10.0) < 1e-4);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undone);
+    std::filesystem::remove(stl);
   };
 
   // Heavy features build off the frame

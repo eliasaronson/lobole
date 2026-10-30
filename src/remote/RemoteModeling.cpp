@@ -12,6 +12,7 @@
 #include "core/ElementOrigin.h"
 #include "core/Expression.h"
 #include "core/HeavyBuild.h"
+#include "core/ImportAlign.h"
 #include "core/Literals.h"
 #include "core/Primitives.h"
 #include "core/PrintSplit.h"
@@ -597,6 +598,30 @@ static constexpr MethodDoc ModelingMethods[] = {
      "feature:object, feature_id?:int>=0, index?:int>=0, "
      "expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
+    {"align_import",
+     "Place an Import from what it is, writing its `placement` and `scale` "
+     "(docs/interchange/README.md#placing-an-import) as one undo step. "
+     "`mode`: floor (fit a plane to the flat grown from `point_mm`, a point "
+     "on it, within `tolerance_mm` -- default a five-hundredth of the "
+     "import's diagonal; on an open scan a point on a triangle at the rim of "
+     "the hole where the table was fits the rim -- and lay it on z = 0 "
+     "facing down), three_points (the plane through `points_mm` [3 points], "
+     "laid on z = 0), principal (the surface's principal axes onto the "
+     "world's: the widest spread along X, the least along Z) or scale "
+     "(`points_mm` [2 points] and the true `distance_mm` between them give "
+     "the factor; scaled about the origin, so a floor on z = 0 stays there). "
+     "The plane modes put the bodies above the floor and centre them over "
+     "the origin in x and y; principal centres them. Points are where the "
+     "bodies stand now (get_state, measure, a pick), in mm. Any other mode is "
+     "refused, naming the four. Returns the inputs, the new {placement: "
+     "{translate_mm, rotate_deg}, scale}, `fit` (floor: {fitted: region | "
+     "boundary_loop, body, triangles | loop_vertices, area_mm2, rms_mm, "
+     "max_mm, tolerance_mm, normal}; three_points: {normal}; principal: "
+     "{spread_mm, note?}; scale: {measured_mm, factor}), regen and digest.",
+     "feature_id:int>=0, mode:string, "
+     "point_mm?:number[3], points_mm?:any[], distance_mm?:number, "
+     "tolerance_mm?:number",
+     remote::NeedsPart},
     {"set_material",
      "Assign a material slug (describe's material_slugs) to a body's creating "
      "feature, by feature_id (its created_by), by body index, or by "
@@ -1541,6 +1566,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
             json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
       // Which axis was up, and how the import knows (auto reads the header).
       resp["up_axis"] = interchange::ToJson(imp->UpApplied());
+      if (!imp->placement.IsIdentity()) {
+        resp["placement"] = importalign::PlacementJson(imp->placement);
+        resp["scale"] = imp->placement.scale;
+      }
       // What a mesh became, in the call that made it.
       if (json rec = interchange::RecognitionJson(*imp, true); !rec.is_null())
         resp["recognition"] = std::move(rec);
@@ -1831,6 +1860,116 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (auto* th = dynamic_cast<const ThreadFeature*>(doc->GetFeature(index)))
       if (const auto r = ui::PrintedThreadFor(*doc, *th))
         resp["print"] = PrintedThreadJson(*r);
+    return resp;
+  }
+  if (m == "align_import") {
+    // Every input is read and checked before anything changes: a refused
+    // call changes nothing.
+    const uint64_t fid = p.at("feature_id").get<uint64_t>();
+    size_t index = 0;
+    Feature* feature = doc->FindFeatureById(fid, &index);
+    if (feature == nullptr)
+      throw std::runtime_error(
+          "no feature with id " + std::to_string(fid) +
+          " — get_state lists every feature with its id and index");
+    auto* imp = dynamic_cast<ImportFeature*>(feature);
+    if (imp == nullptr)
+      throw std::runtime_error(
+          "feature " + std::to_string(fid) + " ('" + feature->GetName() +
+          "') is a " + feature->TypeName() +
+          ", not an Import: align_import places an imported file");
+    const json& modeJson = p.at("mode");
+    const std::optional<importalign::Mode> mode =
+        modeJson.is_string()
+            ? importalign::ModeFromString(modeJson.get<std::string>())
+            : std::nullopt;
+    if (!mode)
+      throw std::runtime_error("mode: unknown " + modeJson.dump() +
+                               ". Accepted: " + importalign::AcceptedModes());
+    importalign::Request request;
+    request.mode = *mode;
+    const auto point = [](const json& v, const std::string& what) {
+      if (!v.is_array() || v.size() != 3 || !v[0].is_number() ||
+          !v[1].is_number() || !v[2].is_number())
+        throw std::runtime_error(what + " is [x, y, z] in mm, not " + v.dump());
+      return glm::dvec3(v[0].get<double>(), v[1].get<double>(),
+                        v[2].get<double>());
+    };
+    const char* modeName = importalign::ToString(*mode);
+    if (p.contains("point_mm")) {
+      if (*mode != importalign::Mode::Floor)
+        throw std::runtime_error(
+            std::string("point_mm is floor's; ") + modeName + " takes " +
+            (*mode == importalign::Mode::Principal ? "no points"
+                                                   : "points_mm"));
+      request.pointsMm.push_back(point(p.at("point_mm"), "point_mm"));
+    }
+    if (p.contains("points_mm")) {
+      if (*mode == importalign::Mode::Floor ||
+          *mode == importalign::Mode::Principal)
+        throw std::runtime_error(
+            std::string("points_mm is for three_points "
+                        "and scale; ") +
+            modeName + " takes " +
+            (*mode == importalign::Mode::Floor ? "one point_mm" : "no points"));
+      const json& pts = p.at("points_mm");
+      if (!pts.is_array())
+        throw std::runtime_error("points_mm is a list of [x, y, z] points, "
+                                 "not " +
+                                 pts.dump());
+      for (size_t i = 0; i < pts.size(); i++)
+        request.pointsMm.push_back(
+            point(pts[i], "points_mm[" + std::to_string(i) + "]"));
+    }
+    if (p.contains("distance_mm")) {
+      if (*mode != importalign::Mode::Scale)
+        throw std::runtime_error(std::string("distance_mm is scale's; ") +
+                                 modeName + " takes none");
+      if (!p.at("distance_mm").is_number())
+        throw std::runtime_error("distance_mm is a number of mm");
+      request.distanceMm = p.at("distance_mm").get<double>();
+    }
+    if (p.contains("tolerance_mm")) {
+      if (*mode != importalign::Mode::Floor)
+        throw std::runtime_error(std::string("tolerance_mm is floor's; ") +
+                                 modeName + " takes none");
+      if (!p.at("tolerance_mm").is_number())
+        throw std::runtime_error("tolerance_mm is a number of mm");
+      request.toleranceMm = p.at("tolerance_mm").get<double>();
+    }
+    importalign::CheckRequest(request);
+    importalign::Result aligned;
+    std::string why;
+    if (!importalign::Align(importalign::ImportBodies(*doc, *imp),
+                            imp->placement, request, aligned, why))
+      throw std::runtime_error("align_import: " + why +
+                               "; the document is unchanged");
+    const json before = DocumentIO::FeatureToJson(*imp);
+    json after;
+    {
+      ImportFeature placed(*imp);
+      placed.placement = aligned.placement;
+      after = DocumentIO::FeatureToJson(placed);
+    }
+    const json preDigest = BodyDigestJson(*doc);
+    if (!state.commands->Execute(
+            std::make_unique<ModifyFeatureCommand>(index, before, after), *doc))
+      throw std::runtime_error("align_import: the placed import did not "
+                               "regenerate; the document is unchanged");
+    json resp{{"feature_id", fid}, {"mode", modeName}};
+    if (p.contains("point_mm"))
+      resp["point_mm"] = p.at("point_mm");
+    if (p.contains("points_mm"))
+      resp["points_mm"] = p.at("points_mm");
+    if (p.contains("distance_mm"))
+      resp["distance_mm"] = request.distanceMm;
+    if (p.contains("tolerance_mm"))
+      resp["tolerance_mm"] = *request.toleranceMm;
+    resp["placement"] = importalign::PlacementJson(aligned.placement);
+    resp["scale"] = aligned.placement.scale;
+    resp["fit"] = aligned.report;
+    resp["regen"] = RegenSummaryJson(*doc);
+    resp["digest"] = DigestJson(preDigest, *doc);
     return resp;
   }
   if (m == "set_material") {

@@ -14,6 +14,7 @@
 #include "core/features/SketchFeature.h"
 #include "render/Camera.h"
 #include "render/RayTracingRenderer.h"
+#include "ui/AlignTool.h"
 #include "ui/BearingTool.h"
 #include "ui/CreateActions.h"
 #include "ui/DerivedActions.h"
@@ -510,6 +511,10 @@ const std::vector<Command>& Table() {
         "part.cradle", [](AppState& s) { return Idle(s) && Producers(s) >= 2; },
         [](AppState& s) { CreateCradle(s); });
     add(
+        "part.align",
+        [](AppState& s) { return Idle(s) && HasImportToAlign(s); },
+        [](AppState& s) { OpenAlignTool(s); });
+    add(
         "part.mirror", [](AppState& s) { return Idle(s) && Producers(s) >= 1; },
         [](AppState& s) { CreateMirror(s); });
     add(
@@ -965,6 +970,13 @@ void DispatchShortcuts(AppState& state) {
   if (HasPendingFeature(state)) {
     if (Pressed(keys.Get("edit.undo")) || Pressed(keys.Alt("edit.undo")))
       CancelPendingFeature(state);
+    return;
+  }
+  // The Align tool's preview is off the stack in the same way: undo's chord
+  // puts the import back and closes it, and history is not touched.
+  if (state.alignTool.open &&
+      (Pressed(keys.Get("edit.undo")) || Pressed(keys.Alt("edit.undo")))) {
+    CancelAlignTool(state);
     return;
   }
 

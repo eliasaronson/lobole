@@ -458,6 +458,10 @@ struct SlotPickState {
   // in complete silence; the tool window shows this under the slot rows and
   // the next good pick clears it (U10).
   std::string miss;
+  // Where the click that filled it met the face, in the part's
+  // coordinates: what a session that takes a POINT reads (the Align
+  // tool's floor and its points). Set before the pick is handed on.
+  glm::dvec3 hitPoint{0.0};
   bool Active() const { return featureId != 0; }
 };
 
@@ -1806,6 +1810,29 @@ struct AppState {
   // The Section tool window is open. The sections outlive it: closing the
   // tool does not undo the cut you set up.
   bool sectionToolOpen = false;
+  // The Align tool (docs/interchange/README.md#placing-an-import): an
+  // Import's placement from a floor, three points, its principal axes or a
+  // known distance. The preview writes the placement onto the feature with
+  // no undo entry; Accept is one ModifyFeatureCommand from `original`, and
+  // closing without it puts `original` back (ui/AlignTool.h).
+  struct AlignTool {
+    bool open = false;
+    // The document it was opened on: ids are per document, so another
+    // tab's feature of the same id is never the one it put back.
+    const Document* document = nullptr;
+    uint64_t featureId = 0; // the Import
+    int mode = 0;           // importalign::Mode
+    // Picked points, where the bodies stand at `original`.
+    std::vector<glm::dvec3> points;
+    double distanceMm = 0.0; // scale: the true distance
+    bool ownTolerance = false;
+    double toleranceMm = 0.0;
+    importplace::Placement original;
+    // What the preview wrote onto the feature; set while it shows.
+    std::optional<importplace::Placement> preview;
+    std::string error;   // why the last alignment failed
+    std::string summary; // what it fitted, one line
+  } alignTool;
   // Which row owns the viewport drag arrow (0 = the first section).
   uint64_t sectionActiveId = 0;
   // Section cap fills (I3 v2, C4): the planes at the last cap rebuild. A cap

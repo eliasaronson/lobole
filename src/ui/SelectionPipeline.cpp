@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/SelectionPipeline.h"
+#include "ui/AlignTool.h"
 #include "ui/AssemblyActions.h"
 #include "ui/StudyPanel.h"
 
@@ -352,6 +353,7 @@ struct ArmedContext {
 };
 
 void ConsumeSlotPick(AppState& state, const Candidate& c) {
+  state.slotPick.hitPoint = glm::dvec3(c.hitPoint); // a point session reads it
   SlotPickClicked(state, c.item, c.meshId, c.index);
 }
 void ConsumeMeasure(AppState& state, const Candidate& c) {
@@ -1037,6 +1039,7 @@ void SelectFeature(AppState& state, uint64_t featureId) {
 void OpenFeatureEditor(AppState& state, uint64_t featureId) {
   if (!state.document || state.document->FindFeatureById(featureId) == nullptr)
     return;
+  CancelAlignTool(state); // one session at a time
   SelectFeature(state, featureId);
   state.editFeatureId = featureId; // the Tool window shows the editor session
 }

@@ -171,6 +171,7 @@ add_executable(designer_tests
     test_mesh_body.cpp
     test_mesh_body_import.cpp
     test_mesh_cradle.cpp
+    test_import_align.cpp
     test_mesh_costs.cpp
     test_mesh_writers.cpp
     test_mesh_fit.cpp

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/ViewportInput.h"
+#include "ui/AlignTool.h"
 #include "ui/AssemblyActions.h"
 #include "ui/DrawingPanel.h"
 #include "ui/ListSelection.h"
@@ -319,6 +320,9 @@ void HandleViewportInput(AppState& state) {
       state.slotPick = {};
       escUsed = true;
     }
+  } else if (state.alignTool.open && esc) {
+    CancelAlignTool(state); // puts the import back where it stood
+    escUsed = true;
   } else if (state.editFeatureId != 0 && esc) {
     state.editFeatureId = 0; // Escape closes the editor session
     escUsed = true;

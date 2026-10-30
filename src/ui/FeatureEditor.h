@@ -110,6 +110,11 @@ inline constexpr uint64_t kFastenerToolSlot = ~3ull;
 // SlotPickClicked routes these to BearingSeatPicked.
 inline constexpr uint64_t kBearingToolSlot = ~4ull;
 
+// And the Align tool (ui/AlignTool.h): its picks are POINTS on an Import's
+// faces, which place the import rather than fill a feature's slot.
+// SlotPickClicked routes these to AlignPointPicked.
+inline constexpr uint64_t kAlignToolSlot = ~5ull;
+
 // --- the tool-session registry ----------------------------------------------
 //
 // A sentinel is not a value, it is a SESSION, and every session has to answer

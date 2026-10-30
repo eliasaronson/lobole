@@ -33,6 +33,7 @@ struct Ray;          // defined in FaceSelector.h
 // of them rebuilt 73 targets (146 s) instead of the handful that care.
 // docs/architecture.md#the-ui-actions-layer.
 
+#include "core/ImportPlacement.h"
 #include "core/Units.h"
 #include "core/io/ImportUpAxis.h"
 #include "core/mesh/Representation.h"
@@ -62,13 +63,16 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 // import that `auto` turned says so in a viewport pill (state.importNote).
 // `representation` and `minSides` are ImportFeature's, for a mesh: absent,
 // the user's `mesh_representation` preference (MeshRepresentationSetting).
+// `placement` is ImportFeature::placement: scaled, turned and moved after
+// the up axis and the centring.
 bool ImportAsFeature(
     AppState& state, const std::string& filename,
     CADKernel::ImportedModel* parsed, std::string* error,
     units::Length unit = units::Length::Millimetre, bool keepOrigin = false,
     interchange::UpAxis up = interchange::UpAxis::Auto, double turnDeg = 0.0,
     std::optional<mesh::Representation> representation = std::nullopt,
-    int minSides = mesh::kDefaultMinSides);
+    int minSides = mesh::kDefaultMinSides,
+    const importplace::Placement& placement = {});
 
 // What a new mesh import becomes when it names nothing: the preference
 // (docs/ui/settings.md), which the settings store keeps to the names

@@ -8,6 +8,7 @@
 #include "core/io/MeshImportCost.h"
 #include "core/mesh/MeshReaders.h"
 #include <glm/gtc/matrix_transform.hpp>
+#include <mutex>
 
 #include <algorithm>
 
@@ -559,6 +560,34 @@ bool ImportFeature::ReadModel(const std::string& path,
   return true;
 }
 
+namespace {
+
+// The last mesh-only model an import read, keyed by the file's bytes and the
+// read options. A placement edit re-executes the import -- every preview of
+// align_import's -- and a 2M-triangle scan takes seconds to read again. Meshes
+// only, which Execute copies and never writes: a B-Rep product shares
+// OpenCASCADE topology that a later boolean writes onto, so it is never
+// handed out twice. One entry: it holds a scan's triangles once more.
+struct MeshReadCache {
+  std::mutex mutex;
+  std::string key;
+  CADKernel::ImportedModel model;
+};
+MeshReadCache& ReadCache() {
+  static MeshReadCache cache;
+  return cache;
+}
+bool MeshOnly(const CADKernel::ImportedModel& model) {
+  if (model.products.empty())
+    return false;
+  for (const auto& p : model.products)
+    if (p.mesh == nullptr || p.shape.IsValid())
+      return false;
+  return true;
+}
+
+} // namespace
+
 bool ImportFeature::Execute(RegenContext& ctx) {
   auto& bodies = ctx.bodies;
   m_recognized.clear();
@@ -573,12 +602,33 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   // Consumed, not kept: one Execute uses what the importer already parsed,
   // every later one re-reads `path` as it always did (see SeedGeometry).
   std::unique_ptr<CADKernel::ImportedModel> seed = std::move(m_seed);
-  if (seed != nullptr) {
+  const size_t content = ContentHash();
+  const std::string cacheKey = content == 0
+                                   ? std::string()
+                                   : path + "|" + std::to_string(content) +
+                                         "|" + units::ToString(lengthUnit) +
+                                         "|" + mesh::ToString(representation) +
+                                         "|" + std::to_string(minSides);
+  bool cached = false;
+  if (seed == nullptr && !cacheKey.empty()) {
+    std::lock_guard<std::mutex> lock(ReadCache().mutex);
+    if (ReadCache().key == cacheKey) {
+      model = ReadCache().model;
+      cached = true;
+    }
+  }
+  if (cached) {
+  } else if (seed != nullptr) {
     model = std::move(*seed);
   } else if (std::string why; !ReadModel(path, Options(), model, why)) {
     SetError(why);
     LOG_ERROR("ImportFeature '{}': {}", m_name, why);
     return false;
+  }
+  if (!cached && !cacheKey.empty() && MeshOnly(model)) {
+    std::lock_guard<std::mutex> lock(ReadCache().mutex);
+    ReadCache().key = cacheKey;
+    ReadCache().model = model;
   }
   m_chosen = model.representation;
   m_chosenWhy = model.representationWhy;
@@ -703,6 +753,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       largest = extent.y;
     if (extent.z > largest)
       largest = extent.z;
+    // Measured as placed: a scan scaled up by its placement is not small.
+    largest *= placement.scale;
     if (largest < 1.0) {
       char across[32];
       std::snprintf(across, sizeof across, "%.3g", largest);
@@ -742,12 +794,24 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     ElementMap map;
     if (p.mesh) {
       // A mesh body has one element, the mesh; the whole body picks and
-      // highlights as it (docs/interchange/README.md#mesh-bodies).
+      // highlights as it (docs/interchange/README.md#mesh-bodies). The
+      // placement is a turn, a move and a positive scale: the triangles keep
+      // their adjacency and their winding, so it is applied in place.
+      const glm::dmat4 m =
+          placement.Matrix() * glm::translate(glm::dmat4(1.0), -center);
       for (glm::dvec3& v : p.mesh->positions)
-        v -= center;
+        v = glm::dvec3(m * glm::dvec4(v, 1.0));
+      p.mesh->quantum *= placement.scale;
       map.names[0] = prefix + "/mesh";
     } else {
       p.shape.Translate(-center);
+      // Placed after the centring; a placement changes no topology, so the
+      // face names below are the file's.
+      if (placement.scale != 1.0)
+        p.shape.Scale(placement.scale);
+      if (placement.translateMm != glm::dvec3(0.0) ||
+          placement.rotateDeg != glm::dvec3(0.0))
+        p.shape = p.shape.Transformed(placement.Rigid());
       topo::NamePrimitiveElements(p.shape, prefix, map);
     }
     // The PRODUCT name labels the body ("Widget", not the writer's
@@ -766,6 +830,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       Recognized r{bodyName, *product.recognition};
       r.recognition.Transform(
           glm::translate(glm::dmat4(1.0), -center) * p.placement, 1.0);
+      if (!placement.IsIdentity())
+        r.recognition.Transform(placement.Rigid(), placement.scale);
       m_recognized.push_back(std::move(r));
     }
     if (m_material.empty()) {

@@ -1,0 +1,19 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [
+    1000.0
+  ],
+  "import_representation": "mesh",
+  "import_translate_mm": [
+    0.0,
+    0.0,
+    41.5
+  ],
+  "import_rotate_deg": [
+    -12.5,
+    3.25,
+    90.0
+  ],
+  "import_scale": 1.042
+}

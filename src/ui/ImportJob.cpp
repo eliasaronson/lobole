@@ -313,9 +313,9 @@ bool Finish(AppState& state, const std::shared_ptr<ImportJob>& jobPtr) {
       const ImportRequest& rq = job->request;
       CADKernel::ImportedModel parsed = std::move(job->model);
       std::string featureError;
-      const bool ok = ImportAsFeature(state, rq.path, &parsed, &featureError,
-                                      rq.unit, rq.keepOrigin, rq.up, rq.turnDeg,
-                                      rq.representation, rq.minSides);
+      const bool ok = ImportAsFeature(
+          state, rq.path, &parsed, &featureError, rq.unit, rq.keepOrigin, rq.up,
+          rq.turnDeg, rq.representation, rq.minSides, rq.placement);
       Ended(state, job,
             ok ? ImportJob::Outcome::Landed : ImportJob::Outcome::Failed,
             featureError);

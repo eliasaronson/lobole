@@ -4,6 +4,7 @@
 #pragma once
 
 #include "cad/CADKernel.h"
+#include "core/ImportPlacement.h"
 #include "core/Units.h"
 #include "core/io/ImportAssembly.h"
 #include "core/io/MeshImportCost.h"
@@ -40,6 +41,8 @@ struct ImportRequest {
   // the preference, which StartImport resolves before the worker reads.
   std::optional<mesh::Representation> representation;
   int minSides = mesh::kDefaultMinSides;
+  // Where the import is put (ImportFeature::placement).
+  importplace::Placement placement;
   // Past interchange::MeshTriangleLimit a mesh is refused unless this says
   // the caller knows what it costs.
   bool allowLargeMesh = false;

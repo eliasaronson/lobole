@@ -252,7 +252,7 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
                      units::Length unit, bool keepOrigin,
                      interchange::UpAxis up, double turnDeg,
                      std::optional<mesh::Representation> representation,
-                     int minSides) {
+                     int minSides, const importplace::Placement& placement) {
   if (!state.document || !state.commands) {
     if (error)
       *error = "no active part document";
@@ -275,6 +275,7 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
   feature->representation =
       ResolveRepresentation(state, filename, representation);
   feature->minSides = minSides;
+  feature->placement = placement;
   // The import worker already read this file to decide it was a single
   // product; hand that over rather than parse it again (ImportFeature::
   // SeedGeometry). Only the first Execute uses it.

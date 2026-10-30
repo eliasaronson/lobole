@@ -15,6 +15,7 @@
 #include "cad/MeshShape.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/ImportAlign.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/Units.h"
@@ -164,9 +165,14 @@ static constexpr MethodDoc ProjectMethods[] = {
      "lists every cylinder, cone and sphere (radius, axis, centre, sides, "
      "sagitta), the polygons left flat, and -- when the rebuilt solid failed "
      "a check and the mesh was kept as facets -- `fell_back`, naming the "
-     "check (docs/interchange/README.md#recognising-a-faceted-mesh).",
+     "check (docs/interchange/README.md#recognising-a-faceted-mesh). "
+     "`placement` {translate_mm?: [x, y, z], rotate_deg?: [x, y, z] about "
+     "the world axes, X then Y then Z} and `scale` (a factor > 0) place the "
+     "import after the up axis and the centring: scaled about the origin, "
+     "turned, moved; align_import writes them from the geometry "
+     "(docs/interchange/README.md#placing-an-import). Not with as_assembly.",
      "allow_large_mesh, as_assembly, keep_origin, min_sides, path, "
-     "representation, turn_deg, units, up_axis",
+     "placement, representation, scale, turn_deg, units, up_axis",
      remote::NeedsPart | remote::NotInBatch},
     {"export_step",
      "Export to STEP {path}: the active part (or {part}, from any tab), or — "
@@ -528,6 +534,10 @@ json ImportFeatureReply(Document& doc, size_t before, const json& preDigest,
         out["recentred_by"] =
             json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
       out["up_axis"] = interchange::ToJson(imp->UpApplied());
+      if (!imp->placement.IsIdentity()) {
+        out["placement"] = importalign::PlacementJson(imp->placement);
+        out["scale"] = imp->placement.scale;
+      }
       // What the reader left out or sewed, in the call that did it.
       if (!imp->GetWarning().empty())
         out["warning"] = imp->GetWarning();
@@ -1938,6 +1948,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                         "auto, and this import is ") +
             mesh::ToString(resolved));
     }
+    importplace::Placement placement;
+    if (p.contains("placement"))
+      importplace::ReadPlacement(p.at("placement"), placement, "import_step");
+    if (p.contains("scale"))
+      importplace::ReadScale(p.at("scale"), placement, "import_step");
+    if (p.value("as_assembly", false) && !placement.IsIdentity())
+      throw std::runtime_error(
+          "placement and scale: an Import feature's; an assembly import "
+          "places each part as an occurrence (move those instead)");
     const bool asAssembly = p.value("as_assembly", false);
     const bool allowLarge = p.value("allow_large_mesh", false);
     const bool keepOrigin = p.value("keep_origin", false);
@@ -1971,6 +1990,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       request.turnDeg = turnDeg;
       request.representation = representation;
       request.minSides = minSides;
+      request.placement = placement;
       request.allowLargeMesh = allowLarge;
       request.overrideName = "`allow_large_mesh: true`";
       request.owner = state.rpcConnection;
@@ -1996,7 +2016,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const json preDigest = BodyDigestJson(*doc);
     std::string error;
     if (!ui::ImportAsFeature(state, path, nullptr, &error, unit, keepOrigin, up,
-                             turnDeg, representation, minSides))
+                             turnDeg, representation, minSides, placement))
       throw std::runtime_error(error);
     return ImportFeatureReply(*doc, before, preDigest, mesh);
   }

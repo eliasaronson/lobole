@@ -1,0 +1,39 @@
+{
+  "format": "designer-document",
+  "version": 212,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Datum block",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 10,
+      "height": 10,
+      "depth": 10
+    },
+    {
+      "type": "Import",
+      "name": "Phone scan",
+      "id": 2,
+      "path": "scan_from_a_phone.stl",
+      "representation": "mesh",
+      "placement": {
+        "translate_mm": [
+          0.0,
+          0.0,
+          41.5
+        ],
+        "rotate_deg": [
+          -12.5,
+          3.25,
+          90.0
+        ]
+      },
+      "scale": 1.042
+    }
+  ]
+}

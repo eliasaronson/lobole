@@ -6,6 +6,7 @@
 #include "cad/CADKernel.h"
 #include "core/ElementMap.h"
 #include "core/Expression.h"
+#include "core/ImportPlacement.h"
 #include "core/SheetMetal.h"
 #include "core/Units.h"
 #include "core/io/ImportUpAxis.h"
@@ -861,7 +862,7 @@ public:
         lengthUnit(other.lengthUnit), upAxis(other.upAxis),
         turnDeg(other.turnDeg), hasColor(other.hasColor), color(other.color),
         representation(other.representation), minSides(other.minSides),
-        m_shift(other.m_shift), m_up(other.m_up),
+        placement(other.placement), m_shift(other.m_shift), m_up(other.m_up),
         m_recognized(other.m_recognized) {}
 
   std::string TypeName() const override { return "Import"; }
@@ -939,6 +940,14 @@ public:
   int minSides = mesh::kDefaultMinSides;
   // Whether `path` is a mesh the representation applies to (.stl).
   static bool IsMesh(const std::string& path);
+  // Where the import is put (vNEXT, `placement` {translate_mm, rotate_deg}
+  // and `scale`): scaled about the part origin, turned about the world
+  // axes, moved -- after the up axis and the centring, so a scan that
+  // arrived tilted, off-centre or at a photogrammetry scale is placed
+  // without changing its topology
+  // (docs/interchange/README.md#placing-an-import). `align_import` writes it
+  // from a floor, three points, the principal axes or a known distance.
+  importplace::Placement placement;
   // What the last Execute made of a mesh -- "facets", "recognize" or
   // "mesh" -- and why (`auto`'s reason, or "asked for"); empty for a file
   // that is not a mesh.

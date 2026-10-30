@@ -3,6 +3,7 @@
 
 #include "ui/PreviewFeature.h"
 #include "common/Logger.h"
+#include "ui/AlignTool.h"
 #include "ui/FloatingWindow.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/StudyPanel.h" // DrawSimulationToolWindow
@@ -49,6 +50,7 @@ uint64_t BeginPreviewFeature(AppState& state,
   // user decides; committed to the undo stack only on accept. Logged, like
   // every edit: the session's activity journal.
   LOG_INFO("tool: {} started", feature->TypeName());
+  CancelAlignTool(state); // one session at a time
   state.document->AddFeature(std::move(feature));
   const size_t idx = state.document->FeatureCount() - 1;
   Feature* added = state.document->GetFeature(idx);
@@ -204,6 +206,9 @@ void AcceptPendingFeature(AppState& state) {
 }
 
 void CancelPendingFeature(AppState& state) {
+  // An alignment's preview is off the undo stack too: put back before a tab
+  // is stashed, as a pending feature is removed.
+  CancelAlignTool(state);
   size_t idx = 0;
   if (Feature* f = ResolvePendingFeature(state, &idx)) {
     LOG_INFO("tool: {} cancelled", f->TypeName());
@@ -633,6 +638,11 @@ void DrawToolWindow(AppState& state) {
       state.document->RemoveFeature(cidx);
     state.pendingCompanionId = 0;
     state.pendingFeatureId = 0;
+    // The Align tool previews on a committed Import (ui/AlignTool.h).
+    if (state.alignTool.open) {
+      DrawAlignToolWindow(state);
+      return;
+    }
     // Committed-feature editor session (U7e): same window, live commits.
     if (state.editFeatureId != 0 && state.document &&
         !state.sketchEdit.IsEditing()) {

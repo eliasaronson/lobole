@@ -513,6 +513,9 @@ set(core_sources
     src/core/MeshCollide.cpp
     src/core/MeshMeasure.cpp
     src/core/MeshOperand.cpp
+    src/core/ImportAlign.cpp
+    src/core/ImportPlacement.cpp
+    src/core/mesh/Align.cpp
     src/core/mesh/TriMesh.cpp
     src/core/mesh/MeshReaders.cpp
     src/core/mesh/Fit.cpp
@@ -1022,6 +1025,7 @@ set(app_sources
     src/ui/ProjectActions.cpp
     src/ui/RendererSync.cpp
     src/ui/MeasureActions.cpp
+    src/ui/AlignTool.cpp
     src/ui/CreateActions.cpp
     src/ui/DocumentSlots.cpp
     src/ui/ViewActions.cpp

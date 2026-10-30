@@ -1671,6 +1671,33 @@ def main():
         # A point on it, snapped.
         p = d.call("measure", a={"feature_id": fid, "point_mm": [0, 0, 50]})
         expect(abs(p["snapped_a"]["moved_mm"] - 30.0) < 0.2, f"snap: {p}")
+        # Placed by what it is (docs/interchange/README.md#placing-an-import):
+        # a point on the rim of its hole lays the rim on z = 0, the ball
+        # above; then two points 35 mm apart said to be 70 doubles it about
+        # the origin, the rim staying on the floor.
+        rim = (400.0 - 225.0) ** 0.5
+        a = d.call("align_import", feature_id=fid, mode="floor",
+                   point_mm=[rim, 0, -15])
+        box = a["digest"]["bodies"][0]
+        expect(a["fit"]["fitted"] == "boundary_loop" and
+               a["point_mm"] == [rim, 0, -15] and
+               abs(box["bbox_min"][2]) < 1e-3 and
+               a["regen"].get("ok"),
+               f"align_import floor fits the rim and lays it on z = 0: {a}")
+        top = box["bbox_max"][2]
+        a = d.call("align_import", feature_id=fid, mode="scale",
+                   points_mm=[[0, 0, 0], [0, 0, 35]], distance_mm=70)
+        box = a["digest"]["bodies"][0]
+        expect(abs(a["scale"] - 2.0) < 1e-9 and
+               abs(box["bbox_min"][2]) < 1e-3 and
+               abs(box["bbox_max"][2] - 2 * top) < 1e-3,
+               f"align_import scale doubles it about the origin: {a}")
+        d.call("new_project")
+        r = d.call("import_step", path=open_ball, representation="mesh",
+                   placement={"translate_mm": [0, 0, 5]}, scale=1.5)
+        expect(r.get("scale") == 1.5 and
+               r.get("placement", {}).get("translate_mm") == [0, 0, 5],
+               f"import_step echoes its placement: {r}")
 
         expect_error(d, "import_step", "Accepted", path=stl, units="furlong")
         expect_error(d, "import_step", "declares its own", path=step,

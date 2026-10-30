@@ -1333,6 +1333,13 @@ json FeatureToJson(const Feature& feature) {
       j["representation"] = mesh::ToString(import->representation);
     if (import->minSides != mesh::kDefaultMinSides) // v200; absent = 12
       j["min_sides"] = import->minSides;
+    // vNEXT; absent = where the up axis and the centring put it
+    const importplace::Placement& pl = import->placement;
+    if (pl.translateMm != glm::dvec3(0.0) || pl.rotateDeg != glm::dvec3(0.0))
+      j["placement"] = {{"translate_mm", Vec3ToJson(pl.translateMm)},
+                        {"rotate_deg", Vec3ToJson(pl.rotateDeg)}};
+    if (pl.scale != 1.0) // vNEXT; absent = 1
+      j["scale"] = pl.scale;
   } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
     // v161 (docs/modeling/templates.md). The definition rides in full, so
     // the chain hash covers what the instance expands and a part rebuilds
@@ -2268,12 +2275,17 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "holes). The reply's `representation` says what was chosen and why, "
      "and `recognition` lists what was found, the polygons left flat and, "
      "if the rebuild failed a check, why it was kept as facets "
-     "(docs/interchange/README.md#mesh-bodies)",
+     "(docs/interchange/README.md#mesh-bodies). placement?: {translate_mm?: "
+     "[x, y, z], rotate_deg?: [x, y, z] (about the world axes, X then Y then "
+     "Z)} and scale?: a factor > 0 (default 1), applied after the up axis "
+     "and the centring: scaled about the origin, turned, moved; align_import "
+     "writes both from a floor, three points, the principal axes or a known "
+     "distance (docs/interchange/README.md#placing-an-import)",
      "path:string, units?:'mm'|'cm'|'m'|'in', keep_origin?:bool, "
      "color?:any, up_axis?:'auto'|'none'|'+x'|'-x'|'+y'|'-y'|'-z', "
      "turn_deg?:number, "
      "representation?:'facets'|'recognize'|'mesh'|'auto', "
-     "min_sides?:int"},
+     "min_sides?:int, placement?:any, scale?:number"},
     {"Derived", 84,
      "source_part (a part slot id), configuration?: the source's "
      "configuration to copy, an id (or its name, which add_feature resolves) "
@@ -2666,7 +2678,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
              {"face", "from", "offset", "offset_expr", "standard"}},
             {"Import",
              {"path", "keep_origin", "units", "color", "up_axis", "turn_deg",
-              "representation", "min_sides"}},
+              "placement", "scale", "representation", "min_sides"}},
             {"DeleteFace", {"body_id", "faces"}},
             {"OffsetFace",
              {"body_id", "faces", "distance_mm", "distance_mm_expr"}},
@@ -3280,6 +3292,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "Import: min_sides is for representation: recognize or auto");
       imp->minSides = m.get<int>();
     }
+    if (j.contains("placement")) // vNEXT
+      importplace::ReadPlacement(j.at("placement"), imp->placement, "Import");
+    if (j.contains("scale")) // vNEXT
+      importplace::ReadScale(j.at("scale"), imp->placement, "Import");
     out = std::move(imp);
   } else if (type == "Template") {
     // A request names the template and gives values; the add_feature

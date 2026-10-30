@@ -437,7 +437,13 @@ typed `contract`: every field, its type and its enum values.
   "recognize"|"facets" (what an STL becomes: its holes, flats, cones and
   spheres rebuilt as true faces, or a face per triangle; default the
   user's preference), "min_sides"?: int (with recognize, 5-1024, default
-  12: the fewest sides a ring of facets needs to be round)}} — the reply's
+  12: the fewest sides a ring of facets needs to be round), "placement"?:
+  {{"translate_mm"?: [x, y, z], "rotate_deg"?: [x, y, z]}} and "scale"?:
+  number > 0 (after the axis and the centring: scaled about the origin,
+  turned about world X, Y, Z, moved; rpc('align_import', {{feature_id,
+  mode: floor|three_points|principal|scale, ...}}) writes them from a
+  picked floor, three points, the principal axes or a known distance)}} —
+  the reply's
   `up_axis` says what was applied and why, and `recognition` what an STL
   was found to be. A DXF or SVG goes into a sketch with
   rpc('import_sketch', ...).
@@ -1842,7 +1848,10 @@ _reference("import_step", "The importer for EVERY 3D file, meshes "
           "naming the time unless allow_large_mesh=True. The read runs as "
           "the `import` background job: cancel_background_job "
           "{kind: \"import\"} stops it. A recognised mesh sews nothing, "
-          "so it is not held to `limit`.")
+          "so it is not held to `limit`. placement {translate_mm, "
+          "rotate_deg} and scale place it after the centring; align_import "
+          "writes them from a floor, three points, the principal axes or a "
+          "known distance.")
 
 
 _reference("checkpoint_create", "Save the WHOLE project and name this state a "

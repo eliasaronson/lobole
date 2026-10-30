@@ -34,6 +34,7 @@ COLUMNS: dict[str, str] = {
     'add_mate': "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose'",
     'add_occurrence': 'part:string|int, name?:string, transform?:object, visible?:bool, fixed?:bool, configuration?:string|int|null, material?:string|null, flexible?:bool',
     'add_part': 'name?:string',
+    'align_import': 'feature_id:int>=0, mode:string, point_mm?:number[3], points_mm?:any[], distance_mm?:number, tolerance_mm?:number',
     'autosave_now': '',
     'autosave_status': '',
     'background_jobs': '',
@@ -162,6 +163,14 @@ class AddOccurrenceParams(TypedDict):
 
 class AddPartParams(TypedDict):
     name: NotRequired[str]
+
+class AlignImportParams(TypedDict):
+    feature_id: int
+    mode: str
+    point_mm: NotRequired[Sequence[float]]
+    points_mm: NotRequired[Sequence[Any]]
+    distance_mm: NotRequired[float]
+    tolerance_mm: NotRequired[float]
 
 class BatchParams(TypedDict):
     calls: Sequence[Mapping[str, Any]]
@@ -431,7 +440,7 @@ FEATURE_SCHEMAS: dict[str, dict[str, Any]] = {
     'Jog': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Jog']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'height': {'type': 'number'}, 'height_expr': {'type': 'string'}, 'angle_deg': {'type': 'number'}, 'angle_deg_expr': {'type': 'string'}, 'flip': {'type': 'boolean'}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
     'CornerRelief': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['CornerRelief']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'style': {'type': 'string', 'enum': ['circular', 'rectangular']}, 'size': {'type': 'number'}, 'size_expr': {'type': 'string'}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
     'NormalCut': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['NormalCut']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'regions': {'type': 'array', 'items': {}}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
-    'Import': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Import']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'path': {'type': 'string'}, 'units': {'type': 'string', 'enum': ['mm', 'cm', 'm', 'in']}, 'keep_origin': {'type': 'boolean'}, 'color': {}, 'up_axis': {'type': 'string', 'enum': ['auto', 'none', '+x', '-x', '+y', '-y', '-z']}, 'turn_deg': {'type': 'number'}, 'representation': {'type': 'string', 'enum': ['facets', 'recognize', 'mesh', 'auto']}, 'min_sides': {'type': 'integer'}}, 'required': ['type', 'path'], 'additionalProperties': False},
+    'Import': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Import']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'path': {'type': 'string'}, 'units': {'type': 'string', 'enum': ['mm', 'cm', 'm', 'in']}, 'keep_origin': {'type': 'boolean'}, 'color': {}, 'up_axis': {'type': 'string', 'enum': ['auto', 'none', '+x', '-x', '+y', '-y', '-z']}, 'turn_deg': {'type': 'number'}, 'representation': {'type': 'string', 'enum': ['facets', 'recognize', 'mesh', 'auto']}, 'min_sides': {'type': 'integer'}, 'placement': {}, 'scale': {'type': 'number'}}, 'required': ['type', 'path'], 'additionalProperties': False},
     'Derived': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Derived']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'source_part': {'type': 'integer', 'minimum': 0.0}, 'configuration': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}, 'bodies': {'type': 'array', 'items': {'type': 'integer'}}, 'body_names': {'type': 'array', 'items': {'type': 'string'}}, 'sketches': {'type': 'array', 'items': {'type': 'integer'}}, 'sketch_names': {'type': 'array', 'items': {'type': 'string'}}, 'follow': {'type': 'boolean'}, 'placement': {'type': 'object'}, 'reference': {'type': 'boolean'}, 'snapshot': {}, 'source_name': {'type': 'string'}}, 'required': ['type', 'source_part'], 'additionalProperties': False},
     'Template': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Template']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'template': {'type': 'string'}, 'parameters': {'type': 'object'}, 'on': {'anyOf': [{'type': 'string'}, {'type': 'object'}]}, 'definition': {'type': 'object'}, 'ids': {'type': 'array', 'items': {}}, 'revision': {'type': 'integer'}}, 'required': ['type', 'template'], 'additionalProperties': False},
     'DatumPlane': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['DatumPlane']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string', 'enum': ['offset', 'angled', 'through_points']}, 'base_plane': {'type': 'string', 'enum': ['xy', 'xz', 'yz']}, 'parent_id': {'type': 'integer', 'minimum': 0.0}, 'offset': {'type': 'number'}, 'offset_expr': {'type': 'string'}, 'flip': {'type': 'boolean'}, 'axis': {'type': 'object'}, 'angle_deg': {'type': 'number'}, 'angle_expr': {'type': 'string'}, 'points': {'type': 'array', 'items': {}}}, 'required': ['type', 'kind'], 'additionalProperties': False},
@@ -837,6 +846,8 @@ ImportSpec = TypedDict('ImportSpec', {
     'turn_deg': NotRequired[float],
     'representation': NotRequired[Literal['facets', 'recognize', 'mesh', 'auto']],
     'min_sides': NotRequired[int],
+    'placement': NotRequired[Any],
+    'scale': NotRequired[float],
 })
 
 DerivedSpec = TypedDict('DerivedSpec', {
@@ -3607,6 +3618,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def add_requirement(self, _timeout: float | None = None, **params: Any) -> AddRequirementResult:
+        raise NotImplementedError
+
+    def align_import(self, _timeout: float | None = None, **params: Unpack[AlignImportParams]) -> dict[str, Any]:
         raise NotImplementedError
 
     def autosave_now(self, _timeout: float | None = None) -> dict[str, Any]:

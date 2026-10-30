@@ -1478,6 +1478,23 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     CHECK(imp->minSides ==
           expect.value("import_min_sides", mesh::kDefaultMinSides));
   }
+  // vNEXT: where an Import is put. Lost on a round trip, an aligned scan
+  // reloads tilted, off its floor and at the photogrammetry's scale.
+  if (expect.contains("import_translate_mm") ||
+      expect.contains("import_rotate_deg") || expect.contains("import_scale")) {
+    const ImportFeature* imp = nullptr;
+    for (const auto& f : doc.GetFeatures())
+      if (const auto* i = dynamic_cast<const ImportFeature*>(f.get()))
+        imp = i;
+    REQUIRE(imp != nullptr);
+    const auto vec = [&](const char* key) {
+      const auto v = expect.value(key, std::vector<double>{0.0, 0.0, 0.0});
+      return glm::dvec3(v.at(0), v.at(1), v.at(2));
+    };
+    CHECK(imp->placement.translateMm == vec("import_translate_mm"));
+    CHECK(imp->placement.rotateDeg == vec("import_rotate_deg"));
+    CHECK(imp->placement.scale == expect.value("import_scale", 1.0));
+  }
   // v195: a projection's fingerprint. Lost on a round trip, a reopened part
   // takes the print from whatever the file then holds under the name.
   if (expect.contains("projection_fingerprint_area_mm2")) {

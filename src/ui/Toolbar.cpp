@@ -627,6 +627,8 @@ void DrawModelToolbar(AppState& state) {
       "Boolean (union / subtract / intersect)");
   btn("###tb_cradle", "part.cradle",
       "Cradle (a holder shaped to a scan, which lifts in and out)");
+  btn("###tb_align", "part.align",
+      "Align an import (floor, three points, principal axes, scale)");
   btn("###tb_mirror", "part.mirror", "Mirror a body");
   btn("###tb_pattern", "part.pattern", "Pattern (linear / circular)");
 
