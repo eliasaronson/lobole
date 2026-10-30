@@ -527,7 +527,11 @@ so it can run on a worker thread.
     it is the float32 spacing at the largest coordinate (2⁻¹⁸ mm at 60 mm).
     For an ASCII STL it is the place value of the last printed digit at that
     magnitude (OpenSCAD prints six significant digits, so 10⁻⁴ mm at 30 mm).
-    Every tolerance below is a small multiple of it, so none is a length
+    A file (STL or OBJ) none of whose numbers shows a fraction or an exponent
+    printed with its trailing zeros stripped (`%g` of 4.0 is `4`), so its
+    last digit is no precision at all; it takes float32's, the format's own.
+    A 2 x 3 x 4 box of integer corners read at the 1 mm digit was
+    recognised with 4 mm tolerances, its box 10 x 11 x 12. Every tolerance below is a small multiple of it, so none is a length
     written in the code.
 - **`ReadStl`** (`MeshReaders.{h,cpp}`) reads binary and ASCII STL straight
   into a `TriMesh`, with no B-Rep. It is the reader fuzz's `meshes` family,

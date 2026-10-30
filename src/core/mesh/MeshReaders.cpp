@@ -41,6 +41,15 @@ int SignificantDigits(std::string_view s) {
   return digits;
 }
 
+// Whether a printed number shows a place below the units: a fraction or an
+// exponent. A file none of whose numbers does printed its values with the
+// trailing zeros stripped (`%g` of 4.0 is "4"), so its last printed digit
+// says nothing of its precision -- a 2 x 3 x 4 box printed so is exact, not
+// good to a millimetre.
+bool ShowsFraction(std::string_view s) {
+  return s.find_first_of(".eE") != std::string_view::npos;
+}
+
 struct AsciiReader {
   std::string_view text;
   size_t pos = 0;
@@ -87,6 +96,7 @@ bool ReadAscii(std::string_view text, const std::string& name,
   while (r.pos < text.size() && text[r.pos] != '\n')
     r.pos++;
   size_t facets = 0;
+  bool fraction = false;
   for (;;) {
     const std::string_view w = r.Word();
     if (w.empty()) {
@@ -131,6 +141,7 @@ bool ReadAscii(std::string_view text, const std::string& name,
           return false;
         }
         digits = std::max(digits, SignificantDigits(num));
+        fraction = fraction || ShowsFraction(num);
       }
       soup.push_back(p);
     }
@@ -146,6 +157,10 @@ bool ReadAscii(std::string_view text, const std::string& name,
       return false;
     }
   }
+  // Whole numbers throughout: no printed digit to read a precision from,
+  // and the caller falls back on float32's, the format's own.
+  if (!fraction)
+    digits = 0;
   return true;
 }
 
@@ -251,6 +266,7 @@ bool ReadObjBytes(const std::string& bytes, const std::string& name,
   out = {};
   std::vector<glm::dvec3> verts, soup;
   int digits = 0;
+  bool fraction = false;
   size_t line = 0, faces = 0;
   std::string_view text(bytes);
   size_t pos = 0;
@@ -275,6 +291,7 @@ bool ReadObjBytes(const std::string& bytes, const std::string& name,
           return false;
         }
         digits = std::max(digits, SignificantDigits(num));
+        fraction = fraction || ShowsFraction(num);
       }
       verts.push_back(p);
     } else if (key == "f") {
@@ -324,7 +341,8 @@ bool ReadObjBytes(const std::string& bytes, const std::string& name,
   // the second weld is only half a printed digit, which never joins two
   // values printed differently (a cube of integer corners stays a cube).
   // The precision the fits read is still the printed digit's.
-  const double printed = PrintedQuantum(soup, digits);
+  // Whole numbers throughout carry no printed digit (ShowsFraction).
+  const double printed = PrintedQuantum(soup, fraction ? digits : 0);
   out = FromSoup(soup, 0.5 * printed);
   out.quantum = printed;
   if (out.triangles.empty()) {

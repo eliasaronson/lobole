@@ -492,3 +492,51 @@ TEST_CASE("An ASCII STL of whole-millimetre corners keeps every corner",
   CHECK(m.Closed());
   CHECK_THAT(m.Volume(), WithinRel(1.0, 1e-12));
 }
+
+// A whole-number file printed its values with the trailing zeros stripped,
+// so its last digit is not its precision: a 2 x 3 x 4 box printed so is
+// recognised to the box it is, not with tolerances of four 1 mm quanta that
+// made its box 10 x 11 x 12.
+TEST_CASE("An ASCII STL of whole-number corners is recognised at its own "
+          "size",
+          "[mesh_body]") {
+  const int c[8][3] = {{0, 0, 0}, {2, 0, 0}, {2, 3, 0}, {0, 3, 0},
+                       {0, 0, 4}, {2, 0, 4}, {2, 3, 4}, {0, 3, 4}};
+  const int f[12][3] = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7},
+                        {0, 1, 5}, {0, 5, 4}, {1, 2, 6}, {1, 6, 5},
+                        {2, 3, 7}, {2, 7, 6}, {3, 0, 4}, {3, 4, 7}};
+  std::string text = "solid box\n";
+  for (const auto& t : f) {
+    text += "facet normal 0 0 0\nouter loop\n";
+    for (int k : t)
+      text += "vertex " + std::to_string(c[k][0]) + " " +
+              std::to_string(c[k][1]) + " " + std::to_string(c[k][2]) + "\n";
+    text += "endloop\nendfacet\n";
+  }
+  text += "endsolid box\n";
+  mesh::TriMesh m;
+  std::string err;
+  REQUIRE(mesh::ReadStlBytes(text, "box.stl", m, err));
+  CHECK(m.quantum < 1e-5);
+
+  const fs::path stl = fs::temp_directory_path() / "whole-number-box.stl";
+  {
+    std::ofstream out(stl, std::ios::binary);
+    out << text;
+  }
+  Document doc;
+  doc.AddFeature(Import(stl, mesh::Representation::Recognize));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& b = doc.GetBodies()[0];
+  REQUIRE_FALSE(b.IsMesh());
+  CHECK(LastImport(doc).RepresentationChosen() == "recognize");
+  glm::dvec3 lo, hi;
+  b.shape.GetBoundingBox(lo, hi); // the conservative box, tolerances and all
+  CHECK_THAT(lo.x, WithinAbs(0.0, 1e-3));
+  CHECK_THAT(lo.y, WithinAbs(0.0, 1e-3));
+  CHECK_THAT(lo.z, WithinAbs(0.0, 1e-3));
+  CHECK_THAT(hi.x, WithinAbs(2.0, 1e-3));
+  CHECK_THAT(hi.y, WithinAbs(3.0, 1e-3));
+  CHECK_THAT(hi.z, WithinAbs(4.0, 1e-3));
+  fs::remove(stl);
+}

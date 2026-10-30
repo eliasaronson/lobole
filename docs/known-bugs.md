@@ -9,23 +9,6 @@ yet".
 Entries are grouped by area. Add a new one under its area's heading, creating
 the heading if it is not here yet.
 
-## Interchange
-
-### An ASCII STL of whole-number coordinates is recognised at 4 mm
-
-- **Symptom:** an ASCII STL that prints its corners as integers (`vertex 2 3
-  4`) is read at a precision of 1 mm, so `recognize` fits its surfaces to
-  four quanta, 4 mm: a 2 x 3 x 4 box rebuilds with the right volume
-  (24 mm³) but tolerances that make `get_state`'s box 10 x 11 x 12.
-- **Cause:** `mesh::ReadStlBytes` takes the place value of the last printed
-  digit as the precision (`10^(floor(log10(largest)) + 1 - digits)`), which
-  for one significant digit is 1.
-- **Where:** `ReadStlBytes` in `src/core/mesh/MeshReaders.cpp`.
-- **Likely fix:** floor the precision a whole-number file implies at what
-  its exporter could mean, or take the coarser of the printed digit and the
-  part's own scale; a regression test of an integer-cornered box
-  recognised with its box within a micron.
-
 ## Inspection
 
 ### `interference` reports a phantom clash at an exactly symmetric pose
