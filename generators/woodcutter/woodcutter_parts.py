@@ -459,9 +459,10 @@ def build_rod(b, s, which):
     x, r = s[f"x_{which}"], s["d_rod"] / 2.0
     foot = s[f"foot_{which}"]
     top = s["rod_pin_z"] + r
-    # The foot reaches a nozzle's width past the rod's side: ending flush
-    # with it, its end face is tangent to the rod's round, and that seam
-    # meshes open (check_print's shells: not watertight).
+    # The foot reaches a nozzle's width past the rod's side. (Ending flush,
+    # its end face tangent to the rod's round, check_print's shells once
+    # called it open: the fuse's line of tangency inside the end face was
+    # counted as a free edge. It is not, now.)
     b.rod_x("foot", 0.0, foot, s["tip"], x - r - NOZZLE, x + r + NOZZLE,
             "new_body")
     b.rod_z("rod", x, 0.0, r, foot, top)

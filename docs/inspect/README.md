@@ -722,7 +722,7 @@ spoked wheel) costs hundreds of times the validity check.
 ## Geometry checks
 
 `check_geometry {body?}` → `{ok, valid, body_count, feature_errors, bodies[]
-{valid, bad_faces, bad_wires, bad_edges, reasons}, receipt}`, plus
+{valid, bad_faces, bad_wires, bad_edges, free_edges, reasons}, receipt}`, plus
 `connected` / `body_components` on a multi-body part and `stale_derived` for
 derived parts whose source moved. Validity is `BRepCheck_Analyzer`; the
 reasons are scanned at the face, wire, edge, shell and solid levels, so a
@@ -732,6 +732,13 @@ midpoint of each inner shell classified against its outer skin ("a cavity
 reaches outside the body"): `BRepCheck_Analyzer` tests one sample point per
 shell, chosen by face order, so its verdict on a void that pokes through the
 wall followed an order the offset builder takes from shape addresses. A
+solid with an edge only one face uses (`free_edges`) is open, which
+`BRepCheck_Analyzer` passes, and is not valid; the count is the one
+`check_print`'s shells and the mesh export's watertightness read
+(`Measure::AnalyzeWatertight`). Only an edge's forward and reversed uses
+count: a fuse draws the line where a plane is tangent to a cylinder (a rod
+flush with a foot's end face) as an INTERNAL edge inside the plane's face,
+which bounds nothing, and counting it called that closed solid open. A
 boolean, sweep or direct-edit feature runs the same check on its own
 result and fails, naming the reasons, rather than handing an invalid solid to
 every later measurement — `CADShape::IsValid` is only a null check.

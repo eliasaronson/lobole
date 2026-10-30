@@ -1828,6 +1828,33 @@ CompareBodySets(const std::vector<Body>& bodiesA, const glm::dmat4& xfA,
   }
 }
 
+namespace {
+// Boundary edges of `s` used by fewer than two faces. Only an edge's
+// FORWARD and REVERSED uses bound a face: an INTERNAL one is a line drawn
+// inside a face (a fuse leaves one where a plane is tangent to a cylinder
+// along it -- a rod flush with a foot's end), which both sides of the face
+// share, and counting it free called a closed solid open. A seam is used
+// twice by its one face, so it is not free.
+int CountFreeEdges(const TopoDS_Shape& s) {
+  TopTools_IndexedMapOfShape edges;
+  std::vector<int> uses;
+  for (TopExp_Explorer f(s, TopAbs_FACE); f.More(); f.Next())
+    for (TopExp_Explorer e(f.Current(), TopAbs_EDGE); e.More(); e.Next()) {
+      const TopAbs_Orientation o = e.Current().Orientation();
+      if (o != TopAbs_FORWARD && o != TopAbs_REVERSED)
+        continue;
+      if (BRep_Tool::Degenerated(TopoDS::Edge(e.Current())))
+        continue;
+      const int i = edges.Add(e.Current());
+      if (i > static_cast<int>(uses.size()))
+        uses.resize(i, 0);
+      uses[i - 1]++;
+    }
+  return static_cast<int>(
+      std::count_if(uses.begin(), uses.end(), [](int n) { return n < 2; }));
+}
+} // namespace
+
 ShellReport AnalyzeWatertight(const CADShape& shape) {
   ShellReport out;
   const TopoDS_Shape& s = shape.GetShape();
@@ -1836,17 +1863,8 @@ ShellReport AnalyzeWatertight(const CADShape& shape) {
   for (TopExp_Explorer ex(s, TopAbs_SHELL); ex.More(); ex.Next())
     out.shells++;
   // Free-edge scan: a closed (watertight) B-Rep uses every non-degenerate
-  // edge in exactly two faces. Seam edges list their face twice, so they do
-  // not count as free.
-  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
-  TopExp::MapShapesAndAncestors(s, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
-  for (int i = 1; i <= edgeFaces.Extent(); i++) {
-    const TopoDS_Edge& e = TopoDS::Edge(edgeFaces.FindKey(i));
-    if (BRep_Tool::Degenerated(e))
-      continue;
-    if (edgeFaces(i).Extent() < 2)
-      out.freeEdges++;
-  }
+  // boundary edge in exactly two faces (CountFreeEdges).
+  out.freeEdges = CountFreeEdges(s);
   out.watertight = out.shells > 0 && out.freeEdges == 0;
   return out;
 }
@@ -1981,13 +1999,19 @@ GeometryReport CheckGeometry(const CADShape& shape) {
   BRepCheck_Analyzer ana(s);
   out.valid = ana.IsValid();
   const bool escapes = CavityReachesOutside(s);
-  if (out.valid && !escapes)
+  // A solid with an edge only one face uses is open, though BRepCheck
+  // passes it: check_print's shells failed a solid check_geometry verified.
+  for (TopExp_Explorer so(s, TopAbs_SOLID); so.More(); so.Next())
+    out.freeEdges += CountFreeEdges(so.Current());
+  if (out.valid && !escapes && out.freeEdges == 0)
     return out;
   out.valid = false;
 
   std::set<std::string> reasons;
   if (escapes)
     reasons.insert("a cavity reaches outside the body");
+  if (out.freeEdges > 0)
+    reasons.insert("free edge (used by one face)");
   const auto collect = [&](const TopoDS_Shape& sub) {
     Handle(BRepCheck_Result) res = ana.Result(sub);
     if (res.IsNull())

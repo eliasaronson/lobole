@@ -315,6 +315,7 @@ struct GeometryReport {
   int badFaces = 0;
   int badEdges = 0;
   int badWires = 0;
+  int freeEdges = 0; // a solid's edges used by one face only: it is open
   std::vector<std::string> reasons; // distinct human-readable failure statuses
 };
 GeometryReport CheckGeometry(const CADShape& shape);

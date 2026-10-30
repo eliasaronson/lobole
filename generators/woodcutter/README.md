@@ -465,11 +465,11 @@ And with the box (phase 3):
   The error said *another relation drives it too*, which none did; it now
   names another driver only when there is one
   ([relations.md](../../docs/assemblies/relations.md#when-relations-disagree)).
-- Logged, not fixed: the rod's foot, ending flush with the rod's round,
-  left a free edge that `check_print` reads as not watertight while
-  `check_geometry` verifies the body
-  ([known bugs](../../docs/known-bugs.md#a-cylinder-added-flush-with-the-tangent-of-another-leaves-a-free-edge));
-  the foot reaches a nozzle's width past the rod instead.
+- Fixed since: the rod's foot, ending flush with the rod's round, read as
+  not watertight in `check_print` while `check_geometry` verified it. The
+  fuse's line of tangency inside the end face was counted as a free edge
+  ([geometry checks](../../docs/inspect/README.md#geometry-checks)); the
+  foot still reaches a nozzle's width past the rod.
 
 And with the drawings (phase 5):
 

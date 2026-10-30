@@ -14,8 +14,10 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -1319,6 +1321,49 @@ TEST_CASE("AnalyzeWatertight reports closed solids and open faces",
   const auto rn = Measure::AnalyzeWatertight(CADShape{});
   CHECK_FALSE(rn.watertight);
   CHECK(rn.shells == 0);
+}
+
+TEST_CASE("A tangent fuse's line inside a face is not a free edge, and an "
+          "open solid fails check_geometry",
+          "[measure]") {
+  // A rod (d6 along Z) fused flush with a foot (d4 along X) whose end faces
+  // sit at the rod's +-3, tangent to its round: the fuse draws the line of
+  // tangency INSIDE each end face (an INTERNAL edge), which the free-edge
+  // scan counted as used by one face, so check_print's shells called the
+  // solid open while check_geometry verified it.
+  const TopoDS_Shape foot =
+      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(-3, 0, 0), gp_Dir(1, 0, 0)), 2.0,
+                               6.0)
+          .Shape();
+  const TopoDS_Shape rod =
+      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 3.0,
+                               20.0)
+          .Shape();
+  const CADShape fused(BRepAlgoAPI_Fuse(foot, rod).Shape());
+  const auto w = Measure::AnalyzeWatertight(fused);
+  CHECK(w.freeEdges == 0);
+  CHECK(w.watertight);
+  const auto g = Measure::CheckGeometry(fused);
+  CHECK(g.valid);
+  CHECK(g.freeEdges == 0);
+
+  // A solid missing a face is open: BRepCheck passes it, check_geometry
+  // does not, and both checks count the same edges.
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(1, 1, 1).Shape();
+  BRep_Builder bb;
+  TopoDS_Shell shell;
+  bb.MakeShell(shell);
+  int n = 0;
+  for (TopExp_Explorer f(box, TopAbs_FACE); f.More(); f.Next())
+    if (n++ > 0)
+      bb.Add(shell, f.Current());
+  TopoDS_Solid open;
+  bb.MakeSolid(open);
+  bb.Add(open, shell);
+  const auto og = Measure::CheckGeometry(CADShape(open));
+  CHECK_FALSE(og.valid);
+  CHECK(og.freeEdges == 4);
+  CHECK(Measure::AnalyzeWatertight(CADShape(open)).freeEdges == 4);
 }
 
 TEST_CASE("Section caps fill the cut face (C4)", "[measure][section]") {

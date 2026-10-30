@@ -859,7 +859,9 @@ BodyComponentNames(const Document& doc, double touchTol, double window) {
 static constexpr MethodDoc InspectionMethods[] = {
     {"check_geometry",
      "Did the model build? {ok, valid, body_count, "
-     "feature_errors, bodies:[...B-Rep checks]}. On a multi-body part it "
+     "feature_errors, bodies:[...B-Rep checks]}. A solid with an edge only "
+     "one face uses (`free_edges`) is not valid: it is open, as "
+     "check_print's shells item says. On a multi-body part it "
      "also warns about FLOATING bodies: `connected` and `body_components` "
      "are decided off the tessellations (the answer `interference "
      "mode=mesh` gives, within the sum of the two deflections), because it "
@@ -868,7 +870,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "connectivity pass entirely.",
      "body?:int", remote::NeedsPart,
      "bodies:{bad_edges:int, bad_faces:int, bad_wires:int, body:int, "
-     "name:string, reasons:string[], valid:bool, mesh?:object}[], "
+     "free_edges:int, name:string, reasons:string[], valid:bool, "
+     "mesh?:object}[], "
      "body_components?:string[][], body_count:int, connected?:bool, "
      "feature_errors:{error:string, index:int, name:string, "
      "after_earlier_failure?:bool}[], ok:bool, "
@@ -5512,6 +5515,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                         {"bad_faces", 0},
                         {"bad_edges", 0},
                         {"bad_wires", 0},
+                        {"free_edges", 0},
                         {"reasons", reasons}});
         continue;
       }
@@ -5523,6 +5527,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                       {"bad_faces", r.badFaces},
                       {"bad_edges", r.badEdges},
                       {"bad_wires", r.badWires},
+                      {"free_edges", r.freeEdges},
                       {"reasons", r.reasons}});
     }
     json featureErrors = RegenSummaryJson(part)["failed"];
