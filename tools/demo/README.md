@@ -1,7 +1,8 @@
 # Demo scenes
 
-The release video's app footage (docs/plans/demo-video.md), recorded from
-the real application. Each scene is a GUI test in the `demo` category
+The release video's app footage, recorded from the real application. A
+segment of an agent building a part over MCP is not scripted here: it is
+recorded live, by hand, so it shows what an agent really does. Each scene is a GUI test in the `demo` category
 (`src/app/guitests/GuiTestsDemo.cpp`); the suite runs them Fast and records
 nothing, so a UI change that breaks one fails the suite the day it lands.
 

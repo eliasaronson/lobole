@@ -128,7 +128,7 @@ static bool EndRecording(ImGuiTestContext* ctx) {
   return ok;
 }
 
-// --- the demo scenes (docs/plans/demo-video.md) ---------------------------
+// --- the demo scenes (tools/demo/README.md) -------------------------------
 //
 // Each scene sets itself up off camera, records only what the video shows,
 // and checks its outcome like any other test. Run in the suite (Fast, no
