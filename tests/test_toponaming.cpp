@@ -5,6 +5,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "TestIO.h"
+#include "TestPaths.h"
 #include "core/AxisRef.h"
 #include "core/Document.h"
 #include "core/ElementHistory.h"
@@ -19,6 +20,7 @@
 #include "core/io/Serialization.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -30,7 +32,9 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Shell.hxx>
 #include <TopoDS_Wire.hxx>
+#include <cstdio>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 
@@ -1052,4 +1056,84 @@ TEST_CASE("Coincident boundary edges take no U name", "[toponaming]") {
   CHECK(map.EdgeNameOf(topo::EdgeIndexOf(plate, twin1)) == nullptr);
   CHECK(map.EdgeNameOf(topo::EdgeIndexOf(plate, twin2)) == nullptr);
   CHECK(map.edgeNames.size() == 3);
+}
+
+// An edge two named faces share takes its U name by a fixed rule, never by
+// the result's face order: a builder can hand its faces back in
+// shape-address order, so another process named the edge from the other
+// face and a saved reference to it found nothing. The same box, its faces
+// in two orders, names every edge alike -- and the other face's U name
+// still resolves to it, as a document saved under the face order holds.
+TEST_CASE("A shared edge's U name does not follow the result's face order",
+          "[toponaming]") {
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(10, 20, 30).Shape();
+  std::vector<TopoDS_Shape> faces;
+  for (TopExp_Explorer f(box, TopAbs_FACE); f.More(); f.Next())
+    faces.push_back(f.Current());
+  // A face's name by its outward normal: the same in either order.
+  const auto nameOf = [](const TopoDS_Shape& f) {
+    const gp_Pln pl = BRepAdaptor_Surface(TopoDS::Face(f)).Plane();
+    gp_Dir n = pl.Axis().Direction();
+    if (f.Orientation() == TopAbs_REVERSED)
+      n.Reverse();
+    const char* axis = std::abs(n.X()) > 0.5   ? "x"
+                       : std::abs(n.Y()) > 0.5 ? "y"
+                                               : "z";
+    const double s = n.X() + n.Y() + n.Z();
+    return std::string("9/") + (s > 0 ? "+" : "-") + axis;
+  };
+  const auto named = [&](const std::vector<TopoDS_Shape>& order) {
+    BRep_Builder bb;
+    TopoDS_Shell shell;
+    bb.MakeShell(shell);
+    for (const TopoDS_Shape& f : order)
+      bb.Add(shell, f);
+    ElementMap map;
+    for (size_t i = 0; i < order.size(); i++)
+      map.names[static_cast<int>(i)] = nameOf(order[i]);
+    const CADShape s(shell);
+    topo::ApplyFallbackPasses(s, map);
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shell, TopAbs_EDGE, edges);
+    std::map<std::string, std::string> byEdgeMid; // midpoint -> name
+    for (int i = 1; i <= edges.Extent(); i++) {
+      BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+      const gp_Pnt m = c.Value(0.5 * (c.FirstParameter() + c.LastParameter()));
+      char key[64];
+      std::snprintf(key, sizeof key, "%.3f,%.3f,%.3f", m.X(), m.Y(), m.Z());
+      const std::string* n = map.EdgeNameOf(i - 1);
+      REQUIRE(n != nullptr);
+      byEdgeMid[key] = *n;
+    }
+    return std::make_pair(byEdgeMid, map);
+  };
+  std::vector<TopoDS_Shape> reversed(faces.rbegin(), faces.rend());
+  const auto [a, mapA] = named(faces);
+  const auto [b, mapB] = named(reversed);
+  CHECK(a.size() == 12);
+  CHECK(a == b);
+  // Every face's U name for each of its edges resolves, whichever face
+  // named it.
+  for (const auto& [idx, faceName] : mapB.names) {
+    (void)idx;
+    for (int k = 0; k < 4; k++)
+      CHECK(mapB.ResolveEdge(faceName + ";U" + std::to_string(k)));
+  }
+}
+TEST_CASE("The vNEXT golden's hole rim is a U name of its bore",
+          "[toponaming][golden]") {
+  // tests/golden/vNEXT-u-name-by-fewer-edges.json: a plate with a hole, a
+  // Fillet on the top rim by the name the bore gives it (its three edges
+  // against the cap's five); the cap's U name for the rim is an alias.
+  auto doc = testio::Load(std::string(TestSourceDir()) +
+                          "/tests/golden/vNEXT-u-name-by-fewer-edges.json");
+  REQUIRE(doc != nullptr);
+  INFO(doc->GetFeature(2)->GetError());
+  CHECK(doc->GetFeature(2)->GetError().empty());
+  const std::vector<Body>* before = doc->CachedBodiesAfter(1); // the plate
+  REQUIRE(before != nullptr);
+  const Body& b = before->at(0);
+  const auto rim = b.elementMap.ResolveEdge("2/g3031518093;U1");
+  REQUIRE(rim);
+  CHECK(b.elementMap.ResolveEdge("2/cap1;U1") == rim);
 }

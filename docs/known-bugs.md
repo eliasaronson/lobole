@@ -69,31 +69,6 @@ the heading if it is not here yet.
   cost a second build of every honest refusal. The fix belongs upstream, in
   the offset's intersections, not in the order.
 
-### A boundary edge's U name follows the result's face order
-
-- **Symptom:** an edge both of whose faces are named takes its U name
-  (`<face>;U<k>`) from whichever face comes first in the result's face
-  order, and a builder can hand its faces back in shape-address order, so
-  in another process the same edge can carry the other face's name. A
-  reference saved with one name then finds no edge: the feature fails with
-  "no longer exists" (the lookup is an exact match for a U name, and an
-  edge's place in its face's order is held for it whether or not that face
-  names it, so the missing name is never given to another edge). Separately,
-  an edit that moves one edge's midpoint past a sibling's swaps the two
-  edges' numbers, and that reference does resolve, to the other edge.
-- **Cause:** the U pass numbers a face's edges by their geometry
-  ([toponaming](modeling/toponaming.md#how-each-operation-names-its-output))
-  but walks the faces in index order, which is the kernel's.
-- **Where:** `FallbackPasses` in `src/core/ElementHistory.cpp`.
-- **Likely fix:** pick the naming face by a fixed rule. Not by face name: a
-  first attempt sorted the faces by name, and "A dangling edge ref errors
-  the fillet with reattach info" failed: a hole's rim edge, named from the
-  hole's bore before, became a U name of the cap face, and once the hole was
-  deleted that cap-face name resolved to one of the cap's outer edges
-  instead of failing. A rule that prefers the face with fewer boundary
-  edges (the bore over the cap) keeps that case honest; it renames U edges
-  in saved documents, so it is a format change.
-
 ### An extrusion of a lone closed spline weighs wrong
 
 - **Symptom:** a profile that is one B-spline closed on itself (first pole

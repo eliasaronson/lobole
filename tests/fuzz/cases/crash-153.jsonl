@@ -13,13 +13,13 @@
 {"method":"mass_properties","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g2;U2","feature_id":100}],"id":120,"name":"C2","radius":3.92,"type":"Chamfer"}}}
+{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/cap1;U3","feature_id":100}],"id":120,"name":"C2","radius":3.92,"type":"Chamfer"}}}
 {"method":"check_geometry","params":{}}
 {"method":"get_state","params":{}}
 {"method":"mass_properties","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"body_id":100,"id":130,"name":"Sh3","open_faces":[{"element":"100/g2;U2;G120","feature_id":100}],"thickness":0.92,"type":"Shell"}}}
+{"method":"add_feature","params":{"feature":{"body_id":100,"id":130,"name":"Sh3","open_faces":[{"element":"100/cap1;U3;G120","feature_id":100}],"thickness":0.92,"type":"Shell"}}}
 {"method":"undo","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
@@ -29,7 +29,7 @@
 {"method":"list_parts","params":{}}
 {"method":"add_part","params":{"name":"Rebuild"}}
 {"method":"set_active_part","params":{"part":"Rebuild"}}
-{"method":"batch","params":{"calls":[{"method":"add_feature","params":{"feature":{"entities":[{"a":[-7.5,-11.25],"b":[7.5,-11.25],"type":"line"},{"a":[7.5,-11.25],"b":[7.5,0],"type":"line"},{"center":[0,0],"end_angle_deg":180,"radius":7.5,"start_angle_deg":0,"type":"arc"},{"a":[-7.5,0],"b":[-7.5,-11.25],"type":"line"}],"id":101,"name":"Base sketch","plane":{"normal":[0,0,1],"origin":[0,0,0],"uAxis":[1,0,0]},"type":"Sketch"}}},{"method":"add_feature","params":{"feature":{"distance":35.0,"id":100,"mode":"new_body","name":"Base","sketch_id":101,"type":"Extrude"}}},{"method":"add_feature","params":{"feature":{"diameter":7.5,"ids":[110,111],"mode":"cut","name":"P1","offset":[5.0,2.5],"on":{"element":"100/g4","feature_id":100},"type":"Sphere"}}},{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g2;U2","feature_id":100}],"id":120,"name":"C2","radius":3.92,"type":"Chamfer"}}}]}}
+{"method":"batch","params":{"calls":[{"method":"add_feature","params":{"feature":{"entities":[{"a":[-7.5,-11.25],"b":[7.5,-11.25],"type":"line"},{"a":[7.5,-11.25],"b":[7.5,0],"type":"line"},{"center":[0,0],"end_angle_deg":180,"radius":7.5,"start_angle_deg":0,"type":"arc"},{"a":[-7.5,0],"b":[-7.5,-11.25],"type":"line"}],"id":101,"name":"Base sketch","plane":{"normal":[0,0,1],"origin":[0,0,0],"uAxis":[1,0,0]},"type":"Sketch"}}},{"method":"add_feature","params":{"feature":{"distance":35.0,"id":100,"mode":"new_body","name":"Base","sketch_id":101,"type":"Extrude"}}},{"method":"add_feature","params":{"feature":{"diameter":7.5,"ids":[110,111],"mode":"cut","name":"P1","offset":[5.0,2.5],"on":{"element":"100/g4","feature_id":100},"type":"Sphere"}}},{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/cap1;U3","feature_id":100}],"id":120,"name":"C2","radius":3.92,"type":"Chamfer"}}}]}}
 {"method":"get_state","params":{}}
 {"method":"set_active_part","params":{"part":"Part 1"}}
 {"method":"undo","params":{}}
@@ -42,7 +42,7 @@
 {"method":"redo","params":{}}
 {"method":"redo","params":{}}
 {"method":"get_state","params":{}}
-{"method":"save_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_sijqu0jv/fuzz.lob"}}
-{"method":"open_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_sijqu0jv/fuzz.lob"}}
+{"method":"save_project","params":{"path":"/tmp/designer_smoke_d7u21vff/fuzz.lob"}}
+{"method":"open_project","params":{"path":"/tmp/designer_smoke_d7u21vff/fuzz.lob"}}
 {"method":"set_active_part","params":{"part":"Part 1"}}
 {"method":"get_state","params":{}}

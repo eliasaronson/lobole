@@ -351,6 +351,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An edge two named faces share takes its U name (`<face>;U<k>`) from the face with fewer boundary edges, then the lesser name, not the first in the result's face order, which a builder can hand back in shape-address order ([toponaming](../modeling/toponaming.md#how-each-operation-names-its-output)). A reference saved under the other face's U name still resolves, as an alias of the edge, wherever the edge's name carries; no migration. A FACE named from such an edge (a blend's `<edge>;G<tag>`) takes the new name, and a reference to it saved before is not followed. Golden `vNEXT-u-name-by-fewer-edges` (a Fillet on a plate's hole rim, a U name of the bore) |
 
 ## Paths in a project
 

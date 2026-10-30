@@ -32,6 +32,14 @@ struct ElementMap {
   // first-appearance order of TopExp::MapShapes(shape, TopAbs_EDGE) — unlike
   // faces, a raw explorer walk visits shared edges once per adjacent face.
   std::map<int, std::string> edgeNames;
+  // Other names an edge ANSWERS to, never hands out: an edge two named
+  // faces share takes its U name from one of them by a fixed rule
+  // (docs/modeling/toponaming.md#how-each-operation-names-its-output), and
+  // the other face's U name for it -- the one a document saved before vNEXT
+  // may hold, when the naming face followed the result's face order -- is
+  // kept here so that reference still resolves. Only on the body the U pass
+  // ran on; an edge renamed by a later operation leaves its aliases behind.
+  std::map<std::string, int> edgeAliases;
 
   [[nodiscard]] bool Empty() const {
     return names.empty() && edgeNames.empty();

@@ -190,8 +190,19 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   passes over 140 000 named faces, spends 0.74 s in both passes against
   0.56 s for the wire order, in a 70 s rebuild. A geometric order is stable
   across processes, not across every edit: an edit that moves one edge's
-  midpoint past a sibling's renumbers the two. Which of an edge's two faces
-  names it is still the first in the result's face order.
+  midpoint past a sibling's renumbers the two (that reference resolves, to
+  the other edge). Which of an edge's two named faces names it is a fixed
+  rule, not the result's face order (a builder can hand faces back in
+  shape-address order, so another process named the edge from the other
+  face and a saved reference found nothing): the face with FEWER boundary
+  edges, then the lesser name. Fewer first keeps a hole's rim a U name of
+  its bore, not of the cap round it, so once the hole is deleted a reference
+  to the rim fails instead of resolving to one of the cap's outer edges. The
+  other face's U name for the edge is kept as an alias
+  (`ElementMap::edgeAliases`): never handed out, but resolved, so a
+  reference saved before vNEXT, when the face order chose, still finds its
+  edge. An alias follows the edge through later operations as its name does
+  (`<alias>;M<tag>`, a qualified piece), by the name it became.
 - **Primitives and rebuilt shapes** (`topo::NamePrimitiveElements`): every face
   `<prefix>/face<i>` in index order, then the fallback passes. Used by
   Import, the stored Box/Sphere/Cylinder an older document carries

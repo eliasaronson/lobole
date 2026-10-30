@@ -634,7 +634,12 @@ std::optional<int> ElementMap::Resolve(const std::string& name) const {
 }
 
 std::optional<int> ElementMap::ResolveEdge(const std::string& name) const {
-  return topo::LookUp(edgeNames, name);
+  if (std::optional<int> found = topo::LookUp(edgeNames, name))
+    return found;
+  // The other face's U name for an edge (edgeAliases).
+  if (const auto it = edgeAliases.find(name); it != edgeAliases.end())
+    return it->second;
+  return std::nullopt;
 }
 
 PositionalLookups::PositionalLookups() : m_outer(topo::t_positional) {

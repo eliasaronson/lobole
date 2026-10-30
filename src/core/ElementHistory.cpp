@@ -306,6 +306,39 @@ ElementMap PropagateNames(const std::vector<NamedInput>& inputs,
   }
 
   QualifyPieces(groups, result, resFaces, resEdges, out);
+
+  // An input edge's aliases (ElementMap::edgeAliases) follow whatever its
+  // name became: a result edge named `<name>...` (the same edge, ;M, ;G, a
+  // qualified piece) answers to `<alias>...` too, so a reference saved
+  // under the other face's U name follows the edge as far as its name does.
+  std::map<std::string, std::vector<std::string>> aliasesOf;
+  for (const NamedInput& input : inputs) {
+    for (const auto& [alias, edgeIdx] : input.map.edgeAliases) {
+      if (const std::string* n = input.map.EdgeNameOf(edgeIdx)) {
+        aliasesOf[*n].push_back(alias);
+      }
+    }
+  }
+  if (!aliasesOf.empty()) {
+    for (const auto& [idx, name] : out.edgeNames) {
+      size_t cut = name.size();
+      while (true) {
+        const auto it = aliasesOf.find(name.substr(0, cut));
+        if (it != aliasesOf.end()) {
+          for (const std::string& alias : it->second) {
+            out.edgeAliases.try_emplace(alias + name.substr(cut), idx);
+          }
+          break;
+        }
+        const size_t at =
+            cut == 0 ? std::string::npos : name.rfind(';', cut - 1);
+        if (at == std::string::npos) {
+          break;
+        }
+        cut = at;
+      }
+    }
+  }
   return out;
 }
 
@@ -396,12 +429,40 @@ void FallbackPasses(const TopoDS_Shape& shape, ElementMap& map) {
     }
     return ka.Tail() < kb.Tail();
   };
+  // The naming face of an edge two named faces share is chosen by a fixed
+  // rule, not by the result's face order (which a builder can hand back in
+  // shape-address order, so another process named the edge from the other
+  // face and a saved reference found nothing): the face with FEWER boundary
+  // edges names it, then the lesser name. Fewer edges first keeps a hole's
+  // rim a U name of its bore, not of the cap round it, so a reference to the
+  // rim fails with the bore instead of resolving to one of the cap's edges.
+  struct Namer {
+    int faceIdx;
+    const std::string* name;
+    TopTools_IndexedMapOfShape boundary;
+  };
+  std::set<int> uNamed; // the edges this pass named
+  std::vector<Namer> namers;
+  namers.reserve(map.names.size());
   for (const auto& [faceIdx, faceName] : map.names) {
     if (faceIdx + 1 > resFaces.Extent()) {
       continue;
     }
-    TopTools_IndexedMapOfShape boundary;
-    TopExp::MapShapes(resFaces(faceIdx + 1), TopAbs_EDGE, boundary);
+    Namer& n = namers.emplace_back(Namer{faceIdx, &faceName, {}});
+    TopExp::MapShapes(resFaces(faceIdx + 1), TopAbs_EDGE, n.boundary);
+  }
+  std::sort(namers.begin(), namers.end(), [](const Namer& a, const Namer& b) {
+    if (a.boundary.Extent() != b.boundary.Extent()) {
+      return a.boundary.Extent() < b.boundary.Extent();
+    }
+    if (*a.name != *b.name) {
+      return *a.name < *b.name;
+    }
+    return a.faceIdx < b.faceIdx;
+  });
+  for (const Namer& namer : namers) {
+    const std::string& faceName = *namer.name;
+    const TopTools_IndexedMapOfShape& boundary = namer.boundary;
     order.clear();
     for (int k = 1; k <= boundary.Extent(); k++) {
       const int idx = resEdges.FindIndex(boundary(k)) - 1;
@@ -428,8 +489,15 @@ void FallbackPasses(const TopoDS_Shape& shape, ElementMap& map) {
       const bool tied = (i > 0 && !less(order[i - 1], order[i])) ||
                         (i + 1 < order.size() && !less(order[i], order[i + 1]));
       if (!tied) {
-        map.edgeNames.try_emplace(order[i],
-                                  faceName + ";U" + std::to_string(i));
+        std::string name = faceName + ";U" + std::to_string(i);
+        if (map.edgeNames.try_emplace(order[i], name).second) {
+          uNamed.insert(order[i]);
+        } else if (uNamed.count(order[i])) {
+          // The other face's U name for the same edge: what a document
+          // saved before the fixed rule may hold (the naming face then
+          // followed the result's face order), so it still resolves here.
+          map.edgeAliases.try_emplace(std::move(name), order[i]);
+        }
       }
     }
   }
