@@ -1260,6 +1260,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(st->loads.size(), (size_t)2);
     IM_CHECK(st->loads[1].type == fem::LoadType::HeatGeneration);
     IM_CHECK(st->loads[1].body == body.name);
+#ifdef HAVE_NETGEN // the run needs a mesh; the refusals above do not
     ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, sid));
     const fem::StudyRuntime* rt = Doc()->StudyResults(sid);
@@ -1271,6 +1272,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     IM_CHECK(s_App->simulation.field ==
              ui::SimulationState::Field::Temperature);
+#endif
     s_App->simulation.pendingFilmWm2K =
         std::numeric_limits<double>::quiet_NaN();
     s_App->simulation.pendingAmbientC =
