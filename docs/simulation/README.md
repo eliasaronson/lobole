@@ -1620,22 +1620,31 @@ ground in each direction:
   contact facets under the whole load of that step (`kSettleMotion`), so
   its contact closes and takes the load as it does. They are removed
   (`*MODEL CHANGE, TYPE=ELEMENT, REMOVE`) for the rest of the load.
-- **weak springs** all through: `1e-6 E L` summed over the part's nodes, `L`
-  its bounding-box diagonal (`kStabilization`), holding what a frictionless
-  contact leaves free with nothing pushing it there: a block on a
-  frictionless floor under a load straight down is free to slide, and
-  nothing makes it.
+- **weak springs** all through, holding what a frictionless contact leaves
+  free with nothing pushing it there: a block on a frictionless floor under
+  a load straight down is free to slide, and nothing makes it. Summed over
+  the part's nodes they are `kStabilization` (1e-5) of the part's OWN
+  stiffness under its load (`fem::WeakSprings`): the mesh clamped where its
+  contacts can close (each pair's facets in it) and loaded as the case
+  loads it, solved in-house, `k = F² / (f · u)` with F the nodal loads'
+  summed magnitude. A case whose only load is thermal is measured under a
+  uniform body force instead (a load's scale cancels in k).
 
 What the weak springs carry at the factor reported, over the load, is the
 result's `stabilization`, and it is part of the equilibrium check. Past
 `kNonlinearBalance` (1e-3) the answer is refused: the springs are holding
 a part nothing else holds -- a frictionless contact under a sideways load
 -- and the refusal names friction or another support as the way out.
-Measured: 3e-6 to 6e-6 of the load on every case below. The weak springs
-are scaled by the modulus and the part's size, not by its own stiffness, so
-a thin spring part held by its contact alone is softer than they are and is
-refused (a 0.5 mm stainless clip: they carried 62 % of its grip;
-[known bugs](../known-bugs.md#a-contacts-weak-springs-hold-a-soft-part-instead-of-its-contact)).
+The springs were once `1e-6 E L` (`L` the bounding-box diagonal), set by
+the modulus and the part's size, and a thin spring part is far softer than
+that: a 0.5 mm stainless clip held by its contact alone moves 3 mm under
+0.76 N, the springs gave 11 N/mm, and they carried 62 % of its grip; a
+1 mm steel strip on two feet (`[contact]`, about 57 N/mm against 12.7)
+was refused the same way, the springs carrying 7.8 %, and carries 4.5e-5
+now. Scaled from the part's own stiffness they carry
+a share of the order of kStabilization whatever the part, and a part
+pushed along a frictionless floor is still refused, the springs carrying
+the push (`[contact]`).
 
 ### What a contact reports
 
@@ -1685,7 +1694,9 @@ base state a buckling study holds.
 | a steel ball, R 10, on a rigid flat (a rigid occurrence), 30.8 kN for a = R/10, its cap refined to a/6, 11 371 nodes, 10 increments, 153 s (`[slow]`) | contact radius 1.0094 mm, peak pressure 14 941 MPa | Hertz: a = 1 mm (+0.94 %), p0 = 14 691 MPa (+1.7 %) |
 | a 20 x 20 x 30 steel block, a contact participant (friction 0.2), standing on a clamped aluminium slab, 3 kN down 3 mm off its axis, 5 mm, 2 197 nodes, 3.4 s | 2 999.97 N at 2.99969 mm; 399.4 mm² of the block's 400 closed | statics: P at e (-0.010 %) |
 
-The weak springs carried 3e-6 to 6e-6 of the load in each. Two meshed parts
+The weak springs carried 6e-6 to 1.9e-5 of the load in each (3e-6 to 6e-6
+when they were `1e-6 E L`), and 4.5e-5 on the 1 mm bridge, which `1e-6 E
+L` refused at 7.8 %. Two meshed parts
 converge with the mesh as any contact does, and refining a face refines
 all of it: a steel ball on a steel block, the ball's cap and the block's
 whole top refined to a/2.5, read the radius 15 % short (18 278 nodes, 453
@@ -1838,9 +1849,9 @@ the peak plastic strain, what is left once unloaded, and a collapse.
 
 The bar is exact but for the weak springs that hold a part on a contact
 alone ([a part held by a contact alone](#a-part-held-by-a-contact-alone)):
-plastic flow shortens it by a millimetre, and the springs carried 1.5e-4 of
-the load there, which near the base is 0.05 MPa of stress and so 2.6e-5 of
-plastic strain on a hardening modulus of 2020 MPa.
+plastic flow shortens it by nearly a millimetre, and the springs carried
+8.8e-5 of the load there, a few hundredths of an MPa near the base and so
+about 1e-5 of plastic strain on a hardening modulus of 2121 MPa.
 
 The collapse case's closed form is for perfect plasticity, so the test
 states the curve flat on its plan; the library's steel hardens, and at

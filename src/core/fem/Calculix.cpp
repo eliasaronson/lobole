@@ -1592,7 +1592,10 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
     deck.nlgeom = in.nonlinear.largeDeformation;
     deck.contacts = &jb.contacts;
     deck.partners = &jb.rigidPartners;
-    deck.stabilized = &jb.stabilized;
+    std::vector<StudyJobBody::Stabilized> weak;
+    if (!WeakSprings(jb, mats, rhs[caseIndex], g, opts, weak, &err))
+      return fail(err);
+    deck.stabilized = &weak;
     deck.plasticity = in.nonlinear.plasticity;
     deck.unload = in.nonlinear.plasticity;
     for (const FaceLoad& l : rhs[caseIndex])
@@ -1795,6 +1798,81 @@ uint64_t CalculixNonlinearMemoryEstimate(size_t dofs) {
 
 double ContactPenalty(double youngMPa, double edgeMm) {
   return edgeMm > 0.0 ? kContactPenalty * youngMPa / edgeMm : 0.0;
+}
+
+bool WeakSprings(const StudyJobBody& jb, const std::vector<Material>& mats,
+                 const std::vector<FaceLoad>& loads,
+                 const glm::dvec3& gravityAccel, const SolveOptions& options,
+                 std::vector<StudyJobBody::Stabilized>& out,
+                 std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = "the weak springs that hold a part while its contact closes "
+               "are scaled from its own stiffness, and " +
+               m;
+    return false;
+  };
+  out = jb.stabilized;
+  if (out.empty())
+    return true;
+  // The case's own load; with none but a thermal one, a uniform body force
+  // (every material a unit density, its scale cancelling in k) along
+  // (1, 1, 1), so the softest direction answers.
+  std::vector<Material> used = mats;
+  std::vector<FaceLoad> probe = loads;
+  glm::dvec3 g = gravityAccel;
+  std::vector<glm::dvec3> f;
+  std::string err;
+  if (!NodalForces(jb.mesh, used, probe, g, f, &err))
+    return fail(err);
+  double total = 0.0;
+  for (const glm::dvec3& v : f)
+    total += glm::length(v);
+  if (!(total > 0.0)) {
+    for (Material& m : used)
+      m.densityTPerMM3 = 1.0;
+    probe.clear();
+    g = glm::normalize(glm::dvec3(1.0));
+    if (!NodalForces(jb.mesh, used, probe, g, f, &err))
+      return fail(err);
+    total = 0.0;
+    for (const glm::dvec3& v : f)
+      total += glm::length(v);
+  }
+  // Clamped where it can touch, as the contact holds it once closed: both
+  // sides of a pair whose partner is meshed here.
+  std::set<int> held(jb.fixedNodes.begin(), jb.fixedNodes.end());
+  for (const auto& c : jb.contacts) {
+    for (int t : c.slaveTris)
+      for (int v : jb.mesh.boundary[t].nodes)
+        held.insert(v);
+    if (c.partner < 0) // the partner meshed here, not rigid
+      for (int t : c.masterTris)
+        if (t >= 0 && static_cast<size_t>(t) < jb.mesh.boundary.size())
+          for (int v : jb.mesh.boundary[t].nodes)
+            held.insert(v);
+  }
+  Supports sup;
+  sup.fixedNodes.assign(held.begin(), held.end());
+  SolveOptions own;
+  own.cancelled = options.cancelled;
+  own.makeExternal = options.makeExternal;
+  auto r = SolveCases(jb.mesh, used, sup, {probe}, &err, g, own);
+  if (!r)
+    return fail("the part clamped where its contact closes did not solve: " +
+                err);
+  double work = 0.0;
+  const std::vector<glm::dvec3>& u = r->front().displacement;
+  for (size_t n = 0; n < f.size() && n < u.size(); ++n)
+    work += glm::dot(f[n], u[n]);
+  if (!(total > 0.0) || !(work > 0.0))
+    return fail("its load does no work on it, clamped where its contact "
+                "closes");
+  const double k = total * total / work; // N/mm
+  for (StudyJobBody::Stabilized& st : out)
+    st.kPerNode = kStabilization * k /
+                  static_cast<double>(std::max<size_t>(1, st.nodes.size()));
+  return true;
 }
 
 std::vector<double> SettleSprings(const StudyJobBody& jb,
@@ -2422,6 +2500,9 @@ bool NonlinearOnCalculix(
       req.snapThrough
           ? std::vector<double>{}
           : SettleSprings(jb, mats, loads, gravityAccel, settleFactor);
+  std::vector<StudyJobBody::Stabilized> weak;
+  if (!WeakSprings(jb, mats, loads, gravityAccel, options, weak, &err))
+    return fail(err);
   const auto pass = [&](const std::vector<NonlinearStep>& steps, double above,
                         PassOutcome& po) -> bool {
     DeckNonlinear deck;
@@ -2432,7 +2513,7 @@ bool NonlinearOnCalculix(
     deck.nlgeom = req.nlgeom;
     deck.contacts = &jb.contacts;
     deck.partners = &jb.rigidPartners;
-    deck.stabilized = &jb.stabilized;
+    deck.stabilized = &weak;
     deck.plasticity = req.plasticity;
     deck.unload = req.plasticity && !req.snapThrough;
     if (steps.size() >= 2 && !settle.empty())
@@ -2759,7 +2840,7 @@ bool NonlinearOnCalculix(
   }
   glm::dvec3 springs(0.0);
   double springCarried = 0.0;
-  for (const StudyJobBody::Stabilized& st : jb.stabilized)
+  for (const StudyJobBody::Stabilized& st : weak)
     for (int n : st.nodes)
       if (n >= 0 && static_cast<size_t>(n) < nNodes) {
         springs -= st.kPerNode * at.u[n];

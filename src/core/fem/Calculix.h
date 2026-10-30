@@ -152,6 +152,21 @@ struct DeckNonlinear {
   bool plasticity = false;
   bool unload = false;
 };
+// The weak springs of `jb.stabilized`, their stiffness derived from the
+// part's own: the mesh clamped where its contacts can close (every pair's
+// facets in it, and its own supports) under the case's `loads` and
+// gravity, its stiffness k = F^2 / (f . u) (N/mm, F the sum of the nodal
+// loads' magnitudes), and each group's springs together kStabilization k.
+// A case whose only load is thermal is measured under a uniform body force
+// along (1, 1, 1) instead (a load's scale cancels in k). Springs scaled
+// from the modulus and the part's size instead were stiffer than a thin
+// spring part and held it in place of its contact (a 0.5 mm clip: 62 % of
+// its grip). Fails, saying why, when that solve fails.
+bool WeakSprings(const StudyJobBody& jb, const std::vector<Material>& mats,
+                 const std::vector<FaceLoad>& loads,
+                 const glm::dvec3& gravityAccel, const SolveOptions& options,
+                 std::vector<StudyJobBody::Stabilized>& out,
+                 std::string* error);
 // The settling step's springs (DeckNonlinear::settlePerNode): a part held
 // only by a contact that touches at a point closes nothing in the first
 // iteration, and under the weak springs alone its first increment of load
@@ -181,11 +196,12 @@ std::vector<double> SettleSprings(const StudyJobBody& jb,
 // stick slope is the penalty over
 // kStickSlopeRatio, as ccx's manual advises ("about 100 times smaller than
 // the spring constant"). A part held only by a contact takes weak springs
-// whose stiffness, summed over its nodes, is kStabilization times its
-// modulus times its bounding-box diagonal in each direction.
+// whose stiffness, summed over its nodes, is kStabilization times its OWN
+// stiffness under its load (WeakSprings): a hundredth of the
+// kNonlinearBalance share they may carry before the answer is refused.
 inline constexpr double kContactPenalty = 5.0;
 inline constexpr double kStickSlopeRatio = 100.0;
-inline constexpr double kStabilization = 1e-6;
+inline constexpr double kStabilization = 1e-5;
 // The pressure per overclosure of a pair (MPa/mm): `youngMPa` the softer
 // side's modulus, `edgeMm` the mean edge of the body's contact facets.
 double ContactPenalty(double youngMPa, double edgeMm);

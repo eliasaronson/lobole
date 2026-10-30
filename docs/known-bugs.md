@@ -238,26 +238,6 @@ the heading if it is not here yet.
 
 ## Simulation
 
-### A contact's weak springs hold a soft part instead of its contact
-
-- **Symptom:** a 0.5 mm 1.4301 spring clip held only by its contact with a
-  rigid vessel (the tea alarm's clip, pulled onto the mug's wall by its
-  inner leaf) is refused: "the weak springs that hold a part while its
-  contact closes carry 62.1 % of the load". It was 11 minutes of ccx
-  before the refusal.
-- **Cause:** the weak springs are `1e-6 E L` summed over the part's nodes
-  (`kStabilization`), a stiffness set by the modulus and the part's size,
-  not by the part's own stiffness. A thin spring is far softer than that
-  (the clip moves 3 mm under 0.76 N; the springs give 11 N/mm), so the
-  springs, not the contact, carry the load.
-- **Where:** `fem::SettleSprings` and the stabilization in
-  `src/core/fem/Calculix.cpp`.
-- **Likely fix:** scale the weak springs from the part's own stiffness (a
-  fraction of the stiffest support-free mode's, or of the assembled
-  diagonal's mean) rather than `E L`, and keep the equilibrium refusal.
-  Until then the generator holds the clip's inner leaf as the rod does and
-  presses the jaw onto the wall (generators/tea_alarm/README.md).
-
 ### CalculiX does not balance the in-house stiffness on a thin bent sheet
 
 - **Symptom:** a linear static study of the tea alarm's clip (0.5 mm

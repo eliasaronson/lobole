@@ -2095,32 +2095,26 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
       contacts.push_back(std::move(pair));
     }
     // A part no fixed support or pin holds -- held by a contact alone --
-    // takes weak springs while its contact closes.
+    // takes weak springs while its contact closes; their stiffness is the
+    // part's own under its load, found when a case is solved (WeakSprings).
     std::vector<StudyJobBody::Stabilized> stabilized;
     if (!contacts.empty()) {
-      const auto spring = [&](size_t from, size_t to, double youngMPa) {
+      const auto spring = [&](size_t from, size_t to) {
         if (to <= from)
           return;
-        glm::dvec3 lo(1e300), hi(-1e300);
-        for (size_t n = from; n < to; ++n) {
+        for (size_t n = from; n < to; ++n)
           if (fixedSet.count(static_cast<int>(n)))
             return;
-          lo = glm::min(lo, mesh->nodes[n]);
-          hi = glm::max(hi, mesh->nodes[n]);
-        }
         StudyJobBody::Stabilized st;
         for (size_t n = from; n < to; ++n)
           st.nodes.push_back(static_cast<int>(n));
-        st.kPerNode = kStabilization * youngMPa * glm::length(hi - lo) /
-                      static_cast<double>(to - from);
         stabilized.push_back(std::move(st));
       };
       if (pins.empty())
-        spring(0, mainNodes, bp.mat.youngMPa);
+        spring(0, mainNodes);
       for (size_t k = 0; k < bp.partners.size(); ++k)
         if (!bp.partners[k].rigid)
-          spring(memberNodes[k].first, memberNodes[k].second,
-                 bp.partners[k].mat.youngMPa);
+          spring(memberNodes[k].first, memberNodes[k].second);
     }
 
     StudyJobBody jb;

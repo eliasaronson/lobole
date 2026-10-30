@@ -1966,6 +1966,113 @@ TEST_CASE("a block on the ground lifts off under a moment only past its "
   }
 }
 
+TEST_CASE("a thin bridge held by its contact alone is held by its contact, "
+          "not by the weak springs",
+          "[fem][calculix][contact]") {
+  REQUIRE_CCX(ccx);
+  // A 1 mm steel strip 60 x 6 on two 4 mm feet, standing on a
+  // frictionless rigid floor, pressed down by 1 N over its top. Its span
+  // bends at about 57 N/mm (384 E I / (5 L^3) over the 52 mm between the
+  // feet), not far above the 1e-6 E L = 12.7 N/mm the weak springs once
+  // were: they carried 7.8 % of the load and the study was refused. Scaled
+  // from the part's own stiffness under its load they carry 4.5e-5, and
+  // the floor carries the load.
+  constexpr double L = 60.0, B = 6.0, t = 1.0, F = 4.0, P = 1.0;
+  Scratch scratch;
+  Document doc;
+  auto strip =
+      std::make_unique<BoxFeature>("Strip", glm::dvec3(0, 0, F), L, B, t);
+  strip->SetMaterial("steel");
+  doc.AddFeature(std::move(strip));
+  const uint64_t s0 = doc.GetFeature(0)->GetId();
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Foot A", glm::dvec3(0, 0, 0), F, B, F));
+  const uint64_t a = doc.GetFeature(1)->GetId();
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Foot B", glm::dvec3(L - F, 0, 0), F, B, F));
+  const uint64_t b = doc.GetFeature(2)->GetId();
+  doc.AddFeature(
+      std::make_unique<BooleanFeature>("A", s0, a, BooleanOp::Union));
+  const uint64_t sa = doc.GetFeature(3)->GetId();
+  doc.AddFeature(
+      std::make_unique<BooleanFeature>("Bridge", sa, b, BooleanOp::Union));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Bridge");
+  s.meshSize = t;
+  s.nonlinear.increments = 2;
+  const auto at = [](double x, double z) {
+    return [x, z](const glm::dvec3& c) {
+      return std::abs(c.z - z) < 1e-6 && std::abs(c.x - x) < 1e-6;
+    };
+  };
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Contact,
+                             FaceWhere(body, "plane", at(F / 2, 0.0))));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Contact,
+                             FaceWhere(body, "plane", at(L - F / 2, 0.0))));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Force,
+                             FaceWhere(body, "plane", at(L / 2, F + t)), P,
+                             glm::dvec3(0, 0, -1)));
+  for (const fem::Load& l : s.loads)
+    REQUIRE_FALSE(l.face.name.empty());
+  fem::StudyPlan plan;
+  std::string err;
+  REQUIRE(fem::PlanStudy(doc, s, plan, &err));
+  double seconds = 0.0;
+  const fem::StudyRuntime rt = RunContact(plan, *ccx, scratch, &seconds);
+  const fem::StudyBodyResult& r = rt.bodies[0];
+  REQUIRE(r.contacts.size() == 2);
+  double normal = 0.0;
+  for (const auto& c : r.contacts)
+    normal += c.normalN;
+  std::printf("contact: thin bridge on the ground, %zu nodes, %.1f s: floor "
+              "%.6g N (P %g), springs %.2e, imbalance %.2e\n",
+              r.mesh.stats.nodeCount, seconds, normal, P,
+              r.nonlinear.stabilization, r.nonlinear.imbalance);
+  CHECK_THAT(normal, Catch::Matchers::WithinRel(P, 1e-3));
+  CHECK(r.nonlinear.stabilization < 1e-4);
+  CHECK(r.nonlinear.imbalance < fem::kNonlinearBalance);
+}
+
+TEST_CASE("a part on a frictionless contact pushed sideways is refused: the "
+          "weak springs would hold it",
+          "[fem][calculix][contact]") {
+  REQUIRE_CCX(ccx);
+  // What the equilibrium check on the weak springs exists for: nothing
+  // but they resist the push along a frictionless floor, so they carry it
+  // all, and the answer is refused rather than reported.
+  Scratch scratch;
+  Document doc;
+  auto box = std::make_unique<BoxFeature>("Block", glm::dvec3(-10, -10, 0),
+                                          20.0, 20.0, 20.0);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const Body& body = doc.GetBodies()[0];
+  fem::Study& s = doc.AddStudy("Sliding");
+  s.meshSize = 5.0;
+  s.nonlinear.increments = 2;
+  const auto isZ = [](double z) {
+    return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
+  };
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Contact,
+                             FaceWhere(body, "plane", isZ(0.0))));
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Force,
+                             FaceWhere(body, "plane", isZ(20.0)), 1000.0,
+                             glm::normalize(glm::dvec3(0.2, 0, -1))));
+  fem::StudyPlan plan;
+  std::string err;
+  REQUIRE(fem::PlanStudy(doc, s, plan, &err));
+  fem::SolveOptions options;
+  options.calculix = RunWith(*ccx, scratch.dir / "runs");
+  fem::ConvergeOptions converge;
+  converge.mode = fem::ConvergeMode::Never;
+  fem::StudyJobInput input;
+  fem::StudyRuntime rt;
+  CHECK_FALSE(fem::SolveConverged(plan, input, rt, converge, &err, options));
+  CHECK_THAT(err, Catch::Matchers::ContainsSubstring("weak springs"));
+  CHECK_THAT(err, Catch::Matchers::ContainsSubstring("friction"));
+}
+
 namespace {
 
 // Two parts placed as they are, for an assembly study.

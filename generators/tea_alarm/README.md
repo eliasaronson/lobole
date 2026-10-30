@@ -228,10 +228,14 @@ R 7.2 former 218.7 mm from the foot, then the run, cut 239.0 mm.
   rod's hold takes the rest), 4.4 % of it across, its line 0.24 mm up the
   2 mm jaw, closed over 0.042 mm²; the study balances to 3.3e-9. The
   plan's check -- the clip resting on the vessel alone, its resultant the
-  grip on the grip's line to 1e-3 -- is not reachable: held by its contact
-  alone the study is refused, because the weak springs that hold a part
-  until its contact closes are stiffer than a 0.5 mm spring clip and
-  carried 62 % of the grip ([known bugs](../../docs/known-bugs.md#a-contacts-weak-springs-hold-a-soft-part-instead-of-its-contact)).
+  grip on the grip's line to 1e-3 -- is not reachable, and for a reason of
+  statics now: the clip touches the vessel at its jaw only, so a pull at
+  its inner leaf turns it about the jaw, nothing but the weak springs
+  resist that (91 % of the load), and the study is refused, as it should
+  be. It was refused before for the springs' stiffness: scaled as `1e-6 E
+  L` they were stiffer than a 0.5 mm spring clip and carried 62 % of its
+  grip; they are scaled from the part's own stiffness now
+  ([a part held by a contact alone](../../docs/simulation/README.md#a-part-held-by-a-contact-alone)).
 
 ## The chime
 
@@ -301,9 +305,11 @@ bought); the drawings, each `check_drawing` clean. It ends with
   only.
 - **No interference preload and no prescribed displacement**: the clip's
   grip is computed by hand.
-- **A contact's weak springs** outweigh a thin spring part, so the clip
-  cannot rest on the vessel by its contact alone
-  ([known bugs](../../docs/known-bugs.md#a-contacts-weak-springs-hold-a-soft-part-instead-of-its-contact)).
+- **A contact's weak springs** outweighed a thin spring part (`1e-6 E
+  L`); they are scaled from the part's own stiffness now
+  ([a part held by a contact alone](../../docs/simulation/README.md#a-part-held-by-a-contact-alone)).
+  The clip still cannot rest on the vessel by its contact alone: touching
+  at its jaw only, it turns about it.
 - **A contact relation driven by a sliding pusher** is refused (a contact
   relation's driver is a cam's turn), and **a mate's value cannot be an
   expression** of a variable, and **a motion study drives a mate, not a

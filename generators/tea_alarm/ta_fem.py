@@ -364,9 +364,9 @@ def clip_contact(d, s, o_clip, o_vessel, mesh_mm=None):
     line, and close along the jaw.
 
     Held by the contact alone (the inner leaf pulled in toward the axis),
-    the study is refused: the weak springs that hold a part until its
-    contact closes are 1e-6 E L, and a 0.5 mm spring clip is softer than
-    that -- they carried 62 % of the grip (docs/known-bugs.md). And the
+    the study is refused: the clip touches the vessel at its jaw only, and
+    the pull turns it about the jaw, which only the weak springs resist
+    (they carried 91 % of it; README.md#the-clip). And the
     grip itself cannot be the wall's interference: the app has no
     interference preload or prescribed displacement, so it is the beam
     theory's force (README.md#what-the-round-exposed)."""
