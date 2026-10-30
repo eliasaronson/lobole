@@ -294,27 +294,14 @@ What the later stages still need of it: a `generators/scan_cradle/`
 dogfood (below), and the printed holder tried on a real object, the only
 test of the clearance that means anything.
 
-### Stage 3 — placing a scan (M)
+### Stage 3 — placing a scan
 
-A scan arrives tilted, off-centre and, from photogrammetry, at an arbitrary
-scale.
-
-- **Import gains `placement`** (`translate_mm`, `rotate_deg` about world
-  axes) and **`scale`**. This also closes the roadmap's "translating an
-  imported body" item for B-Rep imports.
-- **`align_import {feature_id, mode, …}`** writes that placement and echoes
-  its inputs. The modes:
-  - `floor`: fit a plane to the region grown from a picked point, and lay it
-    on z = 0 facing down.
-  - `three_points`: the plane through three `point_mm` values.
-  - `principal`: principal axes to the world axes.
-  - `scale`: two `point_mm` values and the true `distance_mm` between them
-    give the factor.
-
-  An unknown mode is refused, naming the four.
-- The GUI Align tool offers the same four modes. Each one previews in the
-  viewport and lands as one undo step.
-- `vNEXT` adds a golden.
+Built: an Import's `placement` and `scale`, `align_import` (floor, three
+points, principal axes, scale) and the GUI Align tool
+([placing an import](../interchange/README.md#placing-an-import)). What the
+later stages still need of it: the floor's fit is least squares over the
+grown region, not yet RANSAC (stage 6's robust fit), so a floor whose
+grown region takes in a stray lump fits through it.
 
 ### Stage 4 — PLY and GLB (S)
 
@@ -371,7 +358,6 @@ often the better part than a cradle, because it stays fully parametric.
 **Core**
 - `src/core/mesh/`: `MeshReaders` gains PLY and GLB; `Segment` gains `GrowFrom`; `Fit` gains RANSAC.
 - `src/core/MeshCollide.*` becomes a user of `MeshBvh`.
-- `src/core/Feature.{h,cpp}`: Import's `placement` and `scale`.
 - Changed features: `DatumPlaneFeature.*`, `DatumAxisFeature.*`.
 - `src/core/sketch/` (the projected section).
 
@@ -381,8 +367,7 @@ often the better part than a cradle, because it stays fully parametric.
 - `tests/golden/vNEXT-*.json`.
 
 **Rendering, picking and export**
-- `src/ui/ImportActions.cpp` (placement).
-- New tools: Align and Fit, and "To sketch" in the Section tool, each in
+- New tools: Fit, and "To sketch" in the Section tool, each in
   its own `ui/` file.
 
 **RPC**
@@ -406,7 +391,6 @@ often the better part than a cradle, because it stays fully parametric.
 
 **Unit tests against the fixtures, checking the outcome**
 - A fitted cylinder's radius and axis match the generated ones.
-- `align_import floor` lands the cut face on z = 0.
 
 **Refusals**
 - Each new enum or mode refused with its list.

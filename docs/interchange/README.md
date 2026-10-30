@@ -66,11 +66,13 @@ the recipe, and each regeneration reads it.
   error does. It used to vanish without a word.
 - **The extension decides the reader**, case-blind; any other is refused,
   naming `.step/.stp, .igs/.iges, .brep, .stl, .obj`.
-- **Placement.** By default the combined bounding box is centred on the
+- **Centring.** By default the combined bounding box is centred on the
   origin, keeping the shapes' relative placement. `keep_origin` keeps the
   file's own coordinates, which is what an import whose coordinates mean
   something needs (a neighbour part, a fixture, a re-import of our own
   export). `add_feature` reports the shift it applied as `recentred_by`.
+  After it, the import's own `placement` and `scale` put it where it
+  belongs ([placing an import](#placing-an-import)).
 - **Units.** STEP and IGES declare their own unit (OpenCASCADE converts to
   mm). STL, OBJ and BREP carry none, so the feature's `units` (`mm` default,
   `cm`, `m`, `in`) scales the shape once as it is read; it is refused on a
@@ -139,10 +141,11 @@ same RPCs an MCP client has:
   through the region is what removes it: the bracket's 4.2 mm past the servo
   horn went with one Extrude cut on a datum plane.
 - **Placing it.** An import is centred on its box or kept where the file put
-  it (`keep_origin`), turned by `up_axis` and `turn_deg`; there is no
-  translate. A print plate is a second part holding a `Derived` of it with a
-  `placement` (and `reference: false`, or it is a ghost `check_print` will
-  not print).
+  it (`keep_origin`), turned by `up_axis` and `turn_deg`, then moved,
+  turned and scaled by its own `placement` and `scale`
+  ([placing an import](#placing-an-import)). A print plate is a second
+  part holding a `Derived` of it with a `placement` (and `reference:
+  false`, or it is a ghost `check_print` will not print).
 - **Measuring it.** `measure` with `distance_kind: centres` gives a
   cylinder face's centre, which is how a hole pattern or a horn axis is
   located: the face's own row gives its axis direction and radius, not
@@ -199,6 +202,82 @@ import that `auto` turned says so in a viewport pill (`AppState::importNote`).
 defaults (v190, [format](../versioning/format.md#pending-changes)). An
 Import saved before them loads as `none` (`MigratedFeatureJson`), so no
 saved part moves.
+
+## Placing an import
+
+A scan arrives tilted, off-centre and, from photogrammetry, at an arbitrary
+scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`):
+
+- **`placement` {`translate_mm`, `rotate_deg`} and `scale`.** Applied after
+  the up axis and the centring: the import is scaled about the part origin
+  by `scale` (a factor greater than 0; a mirror is not a placement), turned
+  about the world X, then Y, then Z axes by `rotate_deg`, then moved by
+  `translate_mm`. All zero and 1 is the import as it stood before. It is a
+  placement, so it changes no topology: a B-Rep keeps its face names, a
+  mesh body its triangles and their winding (moved in place), and a
+  recognised mesh's report moves with it. Written only when not the
+  defaults (vNEXT, [format](../versioning/format.md#pending-changes)); a
+  key the placement does not take, a vector that is not three finite
+  numbers or a scale of 0 or less is refused. `import_step` takes both
+  (not with `as_assembly`, whose parts are placed as occurrences), and the
+  reply of `import_step` and `add_feature` echoes them.
+- **`align_import {feature_id, mode, …}`** (`src/core/ImportAlign.{h,cpp}`,
+  the RPC in `RemoteModeling.cpp`) writes the placement from what the import
+  is, as one undo step, and echoes its inputs. The points are where the
+  bodies stand now, and the alignment composes onto the placement the
+  import already has. The modes:
+  - `floor` {`point_mm`, `tolerance_mm`?}: the plane of the flat grown from
+    the triangle under the point (`mesh::GrowPlane`, `src/core/mesh/Align.h`:
+    across edges while every corner stays within the tolerance of the plane
+    fitted so far, then once more from the seed against the final fit),
+    laid on z = 0 facing down. The tolerance defaults to a five-hundredth of
+    the import's bounding diagonal, never under four quanta of the file's
+    precision. On an open scan, a point on a triangle at the rim of the hole
+    where the table was fits that rim instead (`fitted: boundary_loop`): the
+    rim is the floor. A point farther than a fiftieth of the diagonal from
+    every surface is refused.
+  - `three_points` {`points_mm` [3]}: the plane through them, laid on z = 0;
+    three in a line are refused.
+  - `principal`: the surface's principal axes (the area-weighted
+    covariance of the triangles, which an open scan has as a closed one
+    does) onto the world's: the widest spread along X, the least along Z,
+    each keeping the sense nearest the world axis it lands on. Two spreads
+    within 1% of each other leave those axes to the noise, and the reply's
+    `note` says so.
+  - `scale` {`points_mm` [2], `distance_mm`}: the factor that makes the two
+    points stand `distance_mm` apart, applied about the origin, so a floor
+    already on z = 0 stays there (floor first, then scale).
+
+  The plane modes put the bodies on the side of the plane that holds their
+  surface centroid (above the floor) and centre them over the origin in x
+  and y; `principal` centres them. Any other mode is refused, naming the
+  four, and a parameter that belongs to another mode (`distance_mm` on a
+  floor) is refused naming whose it is. The reply: the inputs,
+  `placement`, `scale`, and `fit` -- floor {`fitted`: region |
+  boundary_loop, `body`, `triangles` and `area_mm2` or `loop_vertices`,
+  `rms_mm`, `max_mm`, `tolerance_mm`, `normal`}, three_points {`normal`},
+  principal {`spread_mm`, `note`?}, scale {`measured_mm`, `factor`} -- with
+  `regen` and `digest`. The points work on a B-Rep import too: its bodies
+  are tessellated at a deflection derived from their size, as a mesh
+  Boolean's operand is.
+- **A placement edit does not read the file again.** The last mesh-only
+  model an import read is kept, keyed by the file's bytes and the read
+  options (`ImportFeature::Execute`), so moving a 2M-triangle scan
+  regenerates in the time its triangles take to move. A B-Rep product is
+  never handed out twice (a later boolean writes onto its edges), and only
+  one model is kept.
+- **In the GUI** the Import's editor shows Move, Turn and Scale, each an
+  undoable modify, and *Align...*, which opens the **Align tool**
+  (`src/ui/AlignTool.{h,cpp}`; the toolbar's *Align an import* opens it on
+  the selected import, else the newest): the four modes, each point picked
+  on the import in the viewport (`kAlignToolSlot`, a point session: the
+  pick's hit point, `SlotPickState::hitPoint`). It previews as soon as the
+  mode has its points (principal at once; scale once the true distance
+  differs from the measured one, which seeds it) by writing the placement
+  with no undo entry, and always from where the import stood, so a second
+  pick never compounds. Accept is one undo step; Cancel, Escape, the undo
+  chord, a new preview and a tab switch put it back. What it fitted shows
+  under the points, and a failure in red with Accept disabled.
 
 ## IGES
 
@@ -623,7 +702,9 @@ How it is checked:
   0.017 s on a P-core), against bounds of 30, 2 and 1 s; `auto` reads and
   rebuilds a 43,116-triangle plate in 0.44 s (bound 5 s).
 - `headless_smoke.py` (STL and OBJ in each representation, the STL and glTF
-  of a mesh body, an open scan's refused volume and a snapped point),
+  of a mesh body, an open scan's refused volume and a snapped point, the
+  open scan laid on its rim and scaled by `align_import`, and
+  `import_step`'s placement echoed),
   `print_job_smoke.py` (a mesh body's own triangles in the 3MF; an open one
   refused by `check_print`), the reader fuzz's `meshes` family (an OBJ, and
   a mesh body's slice and mass of whatever it read).
@@ -801,7 +882,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 
 | RPC | module | does |
 |---|---|---|
-| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?}` | RemoteProject | every 3D format, whatever the name says: STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; a mesh as facets, recognised, a [mesh body](#mesh-bodies) or `auto` (`representation`); replies `up_axis`, `mesh` for a mesh, `representation` {chosen, why} and `recognition` for a recognised one |
+| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?, allow_large_mesh?, representation?, min_sides?, placement?, scale?}` | RemoteProject | every 3D format, whatever the name says: STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly, as the `import` job; a mesh as facets, recognised, a [mesh body](#mesh-bodies) or `auto` (`representation`); replies `up_axis`, `mesh` for a mesh, `representation` {chosen, why} and `recognition` for a recognised one |
 | `import_sketch {path, sketch_id? \| plane?, units?, layers?, construction_layers?, keep_origin?}` | RemoteModeling | a DXF or SVG into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) |
 | `export_step {path, part?, body?}` | RemoteProject | structured STEP of a part or the assembly |
 | `export_stl {path, body?, stl_deflection_mm?}`, `export_brep {path, body?}` | RemoteProject | one shape of the active part |
@@ -809,7 +890,8 @@ on an assembly tab, and unknown extensions, are refused by name.
 | `export_members {dir}` | RemoteTube | one STEP per tube member |
 | `export_dxf` | RemoteSheetMetal | a flat pattern as R12 DXF |
 | `export_print_job {path, plates, slicer_config?, name?}` | RemotePrint | a print job, one 3MF of plates for Bambu Studio ([print jobs](../tolerances/README.md#print-jobs)) |
-| `add_feature` with `type: "Import"` | RemoteModeling | the feature directly; reports `recentred_by` and `up_axis` |
+| `add_feature` with `type: "Import"` | RemoteModeling | the feature directly; reports `recentred_by`, `up_axis` and a `placement` it was given |
+| `align_import {feature_id, mode, point_mm?, points_mm?, distance_mm?, tolerance_mm?}` | RemoteModeling | an Import's placement from a floor, three points, its principal axes or a known distance ([placing an import](#placing-an-import)) |
 
 ## Tests
 
@@ -819,9 +901,12 @@ on an assembly tab, and unknown extensions, are refused by name.
 | `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open; each `auto` decision and its reason; each axis puts the 30 mm along Z and SolidWorks' front on −Y; a sketch on an imported face follows an axis change; R·P·R⁻¹; an older Import reloads unmoved; IGES names and colours as STEP's, surfaces sewn, a skipped one named; OBJ objects, colours and units; our STEP names Loböle |
 | `tests/fixtures/import/` | the fixtures and `make_fixtures.py` / `make_iges.cpp`, which wrote them: our box under real SolidWorks 2024 and Autodesk headers, IGES as a solid, as surfaces and with a SolidWorks system ID, ezdxf DXFs, SVGs, an OBJ |
 | `tests/golden/v190-import-up-axis.json` | `up_axis` and `turn_deg` round-trip; v97 and v103 reload as `none` |
+| `tests/test_import_align.cpp` `[align]` | a placement's angles read back; composing an alignment is the matrix product; a mesh body and a B-Rep placed (moved vertices, volume, face names kept); the keys written, read and refused; floor on a tilted box as a mesh and as facets, then scaled by a known edge with the floor kept; three points; principal axes; the rim of an open scan on z = 0 with the figure standing; each refusal |
+| `tests/golden/vNEXT-import-placement.json` | `placement` and `scale` round-trip |
+| GUI `align/a_floor_picked_on_a_scan_is_one_undo_step` | the tool waits for a pick with Accept disabled, a click on the face previews it on the floor, Accept is one undo step and Undo puts it back; principal previews with no pick and Cancel puts it back |
 | `tests/test_assembly_flatten.cpp` | `Flatten`'s levels compose to exactly its world placement |
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly`; every import fixture through `import_step` / `import_sketch` with its reply read |
-| `tests/refused_calls_smoke.py` | an unknown `up_axis`, `units` on IGES, a drawing given to `import_step`, each changing nothing |
+| `tests/refused_calls_smoke.py` | an unknown `up_axis`, `units` on IGES, a drawing given to `import_step`, a scale of -1 and an unknown placement key; `align_import`'s unknown mode, a parameter of another mode, a point off the import, three points in a line, a missing distance; each changing nothing |
 | GUI `import/solidworks_part_stands_up_and_lies_down` | the pill, the editor's axis combo, undo |
 | `tests/test_mesh_import.cpp` `[interchange][import]` | counting a binary, an ASCII and a lying STL and an OBJ's polygons; the limit is where the law reaches the patient wait, and the refusal names the count, the time and the override; a mesh read reports its phases and stops on a cancel (STL and OBJ); a seeded import is the import of its file (bodies, names, volume, units) |
 | `tests/import_job_smoke.py` | `import_step` of a mesh as a job: listed with its triangles, its fraction moving, other calls answered; a cancel from another connection answers the call and leaves the part; a second import refused; past the limit refused naming the count, the time and `allow_large_mesh` (and `add_feature` naming `import_step`), with it started; `--file` cancellable, landing, and past the limit refused naming `--allow-large-mesh` |
@@ -868,6 +953,5 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
   and a mesh noisier than the precision it was written at (a scan, or a
   part re-saved through a mesh editor). Loosening the fits to noise belongs
   to the scan work.
-- Translating an imported body (a placement on the Import itself).
 - STEP PMI / AP242 GD&T.
 - Fusion 360 (no server-side feature API) and native SolidWorks.

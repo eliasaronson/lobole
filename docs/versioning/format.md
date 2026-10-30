@@ -348,6 +348,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An `Import` takes `placement` {`translate_mm`, `rotate_deg`} and `scale` (a factor > 0): scaled about the part origin, turned about the world X, Y and Z axes, moved, after the up axis and the centring ([placing an import](../interchange/README.md#placing-an-import)). Written only when not the defaults, so an older Import reads unmoved; an unknown key, a vector that is not three finite numbers and a scale of 0 or less are refused. Golden `vNEXT-import-placement` |
 
 ## Paths in a project
 

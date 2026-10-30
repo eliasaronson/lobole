@@ -62,11 +62,15 @@ Conditional slots appear only in the mode that uses them (the extrude end
 face for Up-to-face, the split knife face for Face-knife mode).
 
 A slot armed by something that is not a feature — a mate, section, a CAM
-verb, the fastener tool — carries a sentinel in `slotPick.featureId`, and
+verb, the fastener tool, the Align tool's points — carries a sentinel in
+`slotPick.featureId`, and
 `kToolSessions` (`FeatureEditor.cpp`) says, for each sentinel, whether the
 session is still alive (checked every frame, so a dead session disarms) and
 who consumes a pick. Adding such a session is one row there;
-`test_conventions.cpp` checks every `k*Slot` sentinel appears.
+`test_conventions.cpp` checks every `k*Slot` sentinel appears. A session
+that takes a POINT rather than an element reads where the click met the
+face, `slotPick.hitPoint`, which the pipeline sets before handing the pick
+on (the Align tool's floor and points).
 
 ## The tool window
 
@@ -175,6 +179,11 @@ origin that misses the body. Examples in the code:
   (`defaults/cradle`; [modeling](../modeling/README.md#cradle)). Ticking
   *Own clearance* seeds it from the last build, else a five-hundredth of
   the scan's diagonal.
+- The Align tool's floor tolerance is a five-hundredth of the import's
+  bounding diagonal, as `align_import`'s; ticking *Own tolerance* seeds the
+  field with it. Its scale's true distance starts as the distance measured
+  between the two picks, so nothing scales until it is typed
+  ([placing an import](../interchange/README.md#placing-an-import)).
 - The placement rule (`src/ui/Placement.h`, `ClearOffset`) keeps a new item's
   span clear of the ones already taken, with a gap scaled to the item; the
   occurrence insert and drawing-view placement use it.
