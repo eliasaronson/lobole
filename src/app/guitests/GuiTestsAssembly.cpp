@@ -3274,6 +3274,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     Feature* extrude = Doc()->GetFeature(Doc()->FeatureCount() - 1);
     IM_CHECK_SILENT(extrude != nullptr);
+    // By id: the undo below rebuilds the document, and `extrude` with it.
+    const uint64_t extrudeId = extrude->GetId();
     double distance = 0.0;
     extrude->VisitExprs([&](std::string&, double& v) {
       if (distance == 0.0)
@@ -3312,11 +3314,11 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//###Variables/###literals_check");
     ctx->Yield(2);
     const std::string use = "//###Variables/###literal_use_" +
-                            std::to_string(extrude->GetId()) + "_distance";
+                            std::to_string(extrudeId) + "_distance";
     ctx->ItemClick(use.c_str());
     ctx->Yield(2);
-    const auto* bound = dynamic_cast<const ExtrudeFeature*>(
-        Doc()->FindFeatureById(extrude->GetId()));
+    const auto* bound =
+        dynamic_cast<const ExtrudeFeature*>(Doc()->FindFeatureById(extrudeId));
     IM_CHECK(bound != nullptr);
     IM_CHECK_STR_EQ(bound->distanceExpr.c_str(), "plate_t");
     IM_CHECK_EQ(s_App->projectParameters.size(), vars); // no new variable
