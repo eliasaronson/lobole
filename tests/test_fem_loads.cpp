@@ -531,6 +531,10 @@ TEST_CASE("a pull on half a cantilever's end bends it by its eccentricity",
 
 #endif // HAVE_NETGEN && HAVE_FEM_SOLVER
 
+// The solver alone, on a hand-assembled beam: no mesher needed.
+#ifdef HAVE_FEM_SOLVER
+#include "core/fem/FemSolverInternal.h"
+
 namespace {
 // A cantilever of n Euler-Bernoulli (Hermite) beam elements, unit EI and
 // length, clamped at x = 0: K over (w, theta) of the free nodes, and a unit
@@ -595,3 +599,5 @@ TEST_CASE("CG is judged by its energy: a slender part's climbing residual is "
         fem::internal::PcgOutcome::Converged);
   CHECK(its < 10);
 }
+
+#endif // HAVE_FEM_SOLVER
