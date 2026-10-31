@@ -100,9 +100,9 @@ private:
     std::vector<Parameter> params;
     for (const auto& p : snapshot.recipe.at("parameters")) {
       Parameter param;
-      param.name = p.at("name");
-      param.expression = p.at("expression");
-      param.comment = p.at("comment");
+      param.name = p.at("name").get<std::string>();
+      param.expression = p.at("expression").get<std::string>();
+      param.comment = p.at("comment").get<std::string>();
       params.push_back(std::move(param));
     }
     doc.SetParametersRaw(std::move(params));
