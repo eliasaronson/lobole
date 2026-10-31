@@ -53,7 +53,7 @@ the API; [generators/README.md](generators/README.md) lists them all.
 From the [releases page](https://github.com/eliasaronson/lobole/releases):
 
 - **Linux:** `lobole-<version>-x86_64.AppImage`, the full GUI on glibc
-  2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later). `chmod +x`
+  2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later). `chmod +x`
   it and run it; linked onto your PATH as `lobole`, the MCP server can
   start it by itself.
 - **Ubuntu 26.04:** `sudo apt install ./lobole_<version>-1_amd64.deb`.

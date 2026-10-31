@@ -38,8 +38,17 @@ else
   exit 1
 fi
 
+# The smoke drives the app with the SDK, which needs Python 3.11; 22.04's
+# python3 is 3.10. The app itself needs no Python.
+python=python3
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python3.11
+  python=python3.11
+fi
+
 export APPIMAGE_EXTRACT_AND_RUN=1
-python3 "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
+"$python" "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
   --calculix -- "$appimage"
 
 Xvfb :99 -screen 0 1600x1000x24 &

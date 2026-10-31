@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The AppImage's entry point; packaging/appimage/build.sh fills in the
+# newest version the bundled libstdc++ defines. The bundled C++ runtime
+# is used only where the host's is older: a host driver loaded into the
+# process may need the host's newer one.
+here="$(dirname "$(readlink -f "$0")")"
+host=
+for d in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu /usr/lib64 /lib64 \
+         /usr/lib; do
+  [ -e "$d/libstdc++.so.6" ] && { host="$d/libstdc++.so.6"; break; }
+done
+if [ -z "$host" ] || ! grep -qaF '@GLIBCXX@' "$host"; then
+  LD_LIBRARY_PATH="$here/usr/lib/runtime${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export LD_LIBRARY_PATH
+fi
+exec "$here/usr/bin/lobole" "$@"

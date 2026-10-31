@@ -6,15 +6,19 @@
 #
 #   packaging/appimage/build.sh VERSION OUTDIR
 #
-# Runs as root in a fresh ubuntu:24.04 image, whose glibc is the oldest the
-# AppImage runs on. Installs the build dependencies, builds OpenCASCADE and
-# Netgen into $LOBOLE_DEPS (default /opt/lobole-deps) unless they are
-# already there, builds the app, and bundles every library except glibc and
-# the graphics stack, which come from the host. Bundles Ubuntu's CalculiX
-# (ccx) where the app looks for one beside it, usr/lib/lobole/ccx. Writes
+# Runs as root in a fresh ubuntu:22.04 image, the oldest Ubuntu LTS in
+# standard support, whose glibc (2.35) is the oldest the AppImage runs on.
+# Installs the build dependencies and gcc 13 from the toolchain PPA (the
+# C++23 here needs it), builds OpenCASCADE, Netgen, Spectra and glslc into
+# $LOBOLE_DEPS (default /opt/lobole-deps) unless they are already there,
+# builds the app, and bundles every library except glibc and the graphics
+# stack, which come from the host; libstdc++ is bundled for a host whose own
+# is older (AppRun). Builds Ubuntu 24.04's CalculiX (ccx) source package
+# here, 22.04's being older than the app accepts, and bundles it where the
+# app looks for one beside it, usr/lib/lobole/ccx. Writes
 # OUTDIR/lobole-VERSION-x86_64.AppImage and, because ccx is GPL and we
 # distribute it, OUTDIR/calculix-ccx-<debian version>-source.tar: the exact
-# Ubuntu source package of the ccx inside
+# source package of the ccx inside
 # (docs/packaging/README.md#the-bundled-calculix).
 set -euo pipefail
 
@@ -27,47 +31,60 @@ deps="${LOBOLE_DEPS:-/opt/lobole-deps}"
 jobs="${JOBS:-$(nproc)}"
 work="${LOBOLE_APPIMAGE_WORK:-$(mktemp -d)}"
 
-# The stock-ubuntu CI job's list without OpenCASCADE (24.04 has 7.6) and
-# GTK (the file dialogs use the portal), plus what deps.sh and OCC's glTF
-# reader need, Spectra, and the bundlers' own needs (file, the
-# desktop-file check), ccache, which CMake uses when it is there, and the
-# ccx the AppImage carries. deb-src too, for that ccx's source package.
+# The stock-ubuntu CI job's list without OpenCASCADE and GTK (the file
+# dialogs use the portal), plus what deps.sh and OCC's glTF reader need, the
+# bundlers' own needs (file, the desktop-file check), ccache, which CMake
+# uses when it is there, and what building ccx's package takes. 22.04 has no
+# glslc and no Spectra, its libvterm (0.1) predates the selection API the
+# terminal uses (deps.sh builds those), and its gcc 11 is too old.
 export DEBIAN_FRONTEND=noninteractive
-sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+apt-get update
+apt-get install -y --no-install-recommends software-properties-common gpg-agent
+add-apt-repository -y ppa:ubuntu-toolchain-r/test
+# ccx's source from 24.04 (noble), sources only: nothing binary comes from it.
+echo 'deb-src http://archive.ubuntu.com/ubuntu noble main universe' \
+  > /etc/apt/sources.list.d/noble-src.list
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates git curl file python3 desktop-file-utils \
-  cmake ninja-build build-essential \
-  libvulkan-dev glslc libglfw3-dev libglm-dev \
+  cmake ninja-build build-essential g++-13 \
+  libvulkan-dev libglfw3-dev libglm-dev \
   libspdlog-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
-  libtbb-dev libvterm-dev libdbus-1-dev libx11-dev \
-  libfreetype-dev libfontconfig-dev rapidjson-dev libspectra-dev \
-  libgl-dev libxi-dev libxmu-dev zlib1g-dev ccache calculix-ccx
+  libtbb-dev libtool-bin libdbus-1-dev libx11-dev \
+  libfreetype-dev libfontconfig-dev rapidjson-dev \
+  libgl-dev libxi-dev libxmu-dev zlib1g-dev ccache dpkg-dev devscripts \
+  equivs
+export CC=gcc-13 CXX=g++-13
 # CMake reads the commit with git, which refuses a checkout another user
 # owns ("dubious ownership"): CI's container runs as root over the runner's.
 git config --global --add safe.directory "$repo"
 
 [ -e "$deps/lib/libTKernel.so" ] || JOBS="$jobs" "$here/deps.sh" "$deps"
 
-cmake -S "$repo" -B "$work/build" -G Ninja \
+PATH="$deps/bin:$PATH" cmake -S "$repo" -B "$work/build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
   -DCMAKE_PREFIX_PATH="$deps" -DLOBOLE_BUILD_TESTS=OFF
 cmake --build "$work/build" -j"$jobs" --target designer
 rm -rf "$work/AppDir"
 DESTDIR="$work/AppDir" cmake --install "$work/build"
 
-# CalculiX; linuxdeploy below brings its libraries (SPOOLES, ARPACK and the
-# OpenMPI it links, BLAS, LAPACK, libgfortran). It goes in usr/bin, where
-# linuxdeploy points an executable's rpath at usr/lib ($ORIGIN/../lib): given
-# usr/lib/lobole/ccx it wrote $ORIGIN and the copy found none of them. Its
-# source package, at exactly the version inside, goes beside the AppImage
-# for the release to attach (GPL-2 section 3).
-ccx_version="$(dpkg-query -W -f='${source:Version}' calculix-ccx)"
+# CalculiX, 24.04's source package built here with 22.04's own compiler;
+# linuxdeploy below brings its libraries (SPOOLES, ARPACK and the OpenMPI it
+# links, BLAS, LAPACK, libgfortran). It goes in usr/bin, where linuxdeploy
+# points an executable's rpath at usr/lib ($ORIGIN/../lib): given
+# usr/lib/lobole/ccx it wrote $ORIGIN and the copy found none of them. The
+# source package, exactly what was built, goes beside the AppImage for the
+# release to attach (GPL-2 section 3).
+ccx_version=2.21-1
+rm -rf "$work/ccx-src" "$work/ccx-build" && mkdir -p "$work/ccx-src" "$work/ccx-build"
+(cd "$work/ccx-src" && apt-get source --download-only "calculix-ccx=$ccx_version")
+(cd "$work/ccx-build" && dpkg-source -x "$work"/ccx-src/calculix-ccx_*.dsc src \
+  && mk-build-deps -i -r -t 'apt-get -y --no-install-recommends' src/debian/control \
+  && cd src && dpkg-buildpackage -b -uc -us -j"$jobs")
+apt-get install -y --no-install-recommends "$work"/ccx-build/calculix-ccx_*.deb
 install -D -m755 "$(readlink -f /usr/bin/ccx)" "$work/AppDir/usr/bin/ccx"
 install -D -m644 /usr/share/doc/calculix-ccx/copyright \
   "$work/AppDir/usr/share/doc/calculix-ccx/copyright"
-rm -rf "$work/ccx-src" && mkdir -p "$work/ccx-src"
-(cd "$work/ccx-src" && apt-get source --download-only "calculix-ccx=$ccx_version")
 tar -C "$work/ccx-src" --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -cf "$out/calculix-ccx-$ccx_version-source.tar" .
 
@@ -104,6 +121,23 @@ LD_LIBRARY_PATH="$deps/lib" "$linuxdeploy" --appdir "$work/AppDir" \
 # $ORIGIN from the file it resolves to, usr/bin.
 mkdir -p "$work/AppDir/usr/lib/lobole"
 ln -sfn ../../bin/ccx "$work/AppDir/usr/lib/lobole/ccx"
+
+# The C++ runtime is gcc 13's, newer than 22.04's. It cannot simply be
+# bundled: the host's graphics driver loads into the process and may need a
+# libstdc++ newer than ours (Mesa links LLVM). So it goes outside every
+# rpath, in usr/lib/runtime, and AppRun puts it on the library path only
+# where the host's lacks the newest version ours defines.
+rt="$work/AppDir/usr/lib/runtime"
+mkdir -p "$rt"
+for lib in libstdc++.so.6 libgcc_s.so.1; do
+  rm -f "$work/AppDir/usr/lib/$lib"
+  cp -L "$("$CXX" -print-file-name="$lib")" "$rt/$lib"
+done
+newest="$(strings "$rt/libstdc++.so.6" | grep -E '^GLIBCXX_3\.4\.[0-9]+$' \
+  | sort -t. -k3 -n | tail -1)"
+rm -f "$work/AppDir/AppRun"
+sed "s/@GLIBCXX@/$newest/" "$here/AppRun" > "$work/AppDir/AppRun"
+chmod +x "$work/AppDir/AppRun"
 
 ARCH=x86_64 VERSION="$version" "$appimagetool" --no-appstream "$work/AppDir" \
   "$out/lobole-$version-x86_64.AppImage"

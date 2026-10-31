@@ -242,13 +242,14 @@ jobs:
             --version "${{ needs.check.outputs.version }}" -- /usr/bin/lobole
 
   # The GUI AppImage (docs/packaging/README.md#the-gui-appimage): built on
-  # Ubuntu 24.04's glibc, the oldest it runs on, with every library but glibc
-  # and the graphics stack inside. OpenCASCADE and Netgen are built from
-  # source and cached on the script that builds them.
+  # Ubuntu 22.04's glibc, the oldest LTS in standard support and the oldest
+  # glibc it runs on, with every library but glibc and the graphics stack
+  # inside. What 22.04 lacks is built from source and cached on the script
+  # that builds it.
   appimage:
     needs: check
     runs-on: ubuntu-24.04
-    container: ubuntu:24.04
+    container: ubuntu:22.04
     timeout-minutes: 180
     steps:
       - name: Container prerequisites
@@ -298,7 +299,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: ["ubuntu:24.04", "debian:13", "fedora:latest"]
+        image: ["ubuntu:22.04", "ubuntu:24.04", "debian:13", "fedora:latest"]
     container: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v7

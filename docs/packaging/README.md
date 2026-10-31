@@ -8,7 +8,7 @@ ninja …"`) are in the repository's `CLAUDE.md` and `CONTRIBUTING.md`.
 |---|---|---|---|
 | Nix flake | Nix and NixOS users | `flake.nix` | yes |
 | Container image | CI, servers, agents | `flake.nix` `dockerHeadless` | no |
-| GUI AppImage | desktop users on glibc 2.39 or newer | `packaging/appimage/` | yes |
+| GUI AppImage | desktop users on glibc 2.35 or newer | `packaging/appimage/` | yes |
 | `nix bundle` AppImage | headless use on any distro | `nix bundle --bundler github:ralismark/nix-appimage .#default` | no |
 | Flatpak | desktop users on any distro | `packaging/flatpak/`, `tools/flatpak-build.sh` | yes |
 | Windows | Windows users | `packaging/windows/` (cross-compiled on Linux) | yes |
@@ -50,9 +50,9 @@ metainfo release is missing or has no notes. It then builds, in parallel:
 
 - the headless AppImage from the flake (`nix bundle`, the bundler pinned by
   revision);
-- the GUI AppImage in `ubuntu:24.04` ([The GUI AppImage](#the-gui-appimage)),
-  then run in fresh Ubuntu 24.04, Debian 13 and Fedora images, windowed
-  as well as headless;
+- the GUI AppImage in `ubuntu:22.04` ([The GUI AppImage](#the-gui-appimage)),
+  then run in fresh Ubuntu 22.04, Ubuntu 24.04, Debian 13 and Fedora images,
+  windowed as well as headless;
 - the container image (`.#dockerHeadless`);
 - the Windows portable zip and installer, cross-built against the flake's
   nixpkgs (`NIX_PATH` is pinned to it, rather than a channel);
@@ -312,13 +312,28 @@ window. It has no sandbox, so the terminal panel, git and ffmpeg are the
 user's own, unlike in the [Flatpak](#the-flatpak).
 
 - `packaging/appimage/build.sh VERSION OUTDIR` runs as root in a fresh
-  `ubuntu:24.04` (glibc 2.39, gcc 13). It runs on that glibc and newer:
-  Ubuntu 24.04+, Mint 22, Debian 13, Fedora 40+, Arch.
-- Everything comes from apt except OpenCASCADE (24.04 has 7.6) and Netgen,
-  which `packaging/appimage/deps.sh` builds into `/opt/lobole-deps`: OCC
-  `V7_9_3` with the patches in `nix/occt-overlay.nix`, Netgen `v6.2.2605`,
-  each checked against its commit, with the Flatpak manifest's flags. The
-  release caches that prefix on `deps.sh` and the patches.
+  `ubuntu:22.04` (glibc 2.35), the oldest Ubuntu LTS in standard support,
+  which is what the [AppImage catalog](https://appimage.github.io) tests
+  on. It runs on that glibc and newer: Ubuntu 22.04+, Mint 21, Debian 12,
+  Fedora 36+, Arch. The compiler is gcc 13 from the
+  `ubuntu-toolchain-r/test` PPA; 22.04's gcc 11 cannot build the C++23
+  here.
+- Everything comes from apt except what 22.04 lacks or has too old, which
+  `packaging/appimage/deps.sh` builds into `/opt/lobole-deps`: OCC
+  `V7_9_3` (22.04 has 7.5) with the patches in `nix/occt-overlay.nix`,
+  Netgen `v6.2.2605`, Spectra `v1.0.1`, libvterm `v0.3.3` (22.04's 0.1
+  predates the selection API the terminal uses) and glslc from shaderc
+  `v2026.4`, each checked against its commit, OCC and Netgen with the
+  Flatpak manifest's flags. The release caches that prefix on `deps.sh`
+  and the patches.
+- The C++ runtime is gcc 13's, newer than 22.04's, and cannot simply be
+  bundled: the host's graphics driver loads into the process and may need
+  a `libstdc++` newer than ours (Mesa links LLVM). So `libstdc++` and
+  `libgcc_s` sit outside every rpath, in `usr/lib/runtime`, and the
+  AppImage's entry point (`packaging/appimage/AppRun`) puts them on the
+  library path only where the host's `libstdc++` lacks the newest
+  `GLIBCXX_` version the bundled one defines. Fedora's is newer and is
+  used; 22.04's and 24.04's are older and the bundled one is.
 - linuxdeploy (a pinned release, checksum checked) copies the libraries and
   sets rpaths; its excludelist leaves glibc, libGL, X11 and xcb to the host.
   We also leave out the Vulkan loader, so the host's finds the host's
@@ -328,16 +343,17 @@ user's own, unlike in the [Flatpak](#the-flatpak).
   the host needs FUSE but not `libfuse2`, and no user namespaces.
 - `packaging/appimage/smoke.sh APPIMAGE VERSION` installs only what a
   desktop already has (the Vulkan loader with Mesa, X11, fontconfig,
-  D-Bus) plus Xvfb and python3, runs `tools/release-smoke.py`, then opens
+  D-Bus) plus Xvfb and python3 (3.11 where `python3` is older, as on
+  22.04: the SDK needs it, the app does not), runs `tools/release-smoke.py`, then opens
   the window on Xvfb for `app/boots_and_renders`. Containers have no FUSE,
   so it runs with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - NixOS runs no generic AppImage without `appimage-run`; Nix users have the
   flake.
 
 To build one here: `docker run --rm -v "$PWD:/src:ro" -v "$PWD/dist:/out"
-ubuntu:24.04 /src/packaging/appimage/build.sh <version> /out` (about 20
-minutes, most of it OpenCASCADE; mount a directory at `/opt/lobole-deps`
-to keep that between runs).
+ubuntu:22.04 /src/packaging/appimage/build.sh <version> /out` (about 30
+minutes, most of it OpenCASCADE and shaderc; mount a directory at
+`/opt/lobole-deps` to keep that between runs).
 
 ## The headless AppImage
 
@@ -352,7 +368,7 @@ symbols. On NixOS the bundle's `/nix/store` mount also shadows
 `/run/opengl-driver`, so every ICD dangles. The [GUI
 AppImage](#the-gui-appimage) leaves glibc to the host instead. This one
 stays for where that one cannot run: a server with no Vulkan loader, or a
-glibc older than 2.39. A release builds it and smokes it headless
+glibc older than 2.35. A release builds it and smokes it headless
 ([Releasing](#releasing)).
 
 What it needs from the host, measured in a stock `ubuntu:24.04` container:
@@ -600,7 +616,7 @@ after the setting and `LOBOLE_CCX`: beside itself.
 
 | package | ccx | where | its source, attached to the release |
 |---|---|---|---|
-| GUI AppImage | Ubuntu 24.04's `calculix-ccx` (2.21), with SPOOLES, ARPACK and the OpenMPI it links, BLAS, LAPACK and libgfortran | `usr/lib/lobole/ccx`, a link to `usr/bin/ccx`: linuxdeploy (`--executable`) points an executable's rpath at `usr/lib` only from `usr/bin`, and given the `lib/lobole` path it wrote `$ORIGIN`, so that copy found none of its libraries | `calculix-ccx-<version>-source.tar`: Ubuntu's source package of exactly that version (`.dsc`, upstream tarball, Debian changes), fetched by `build.sh` with `apt-get source` |
+| GUI AppImage | Ubuntu 24.04's `calculix-ccx` source package (2.21), built in the 22.04 image (whose 2.17 is older than the app accepts), with SPOOLES, ARPACK and the OpenMPI it links, BLAS, LAPACK and libgfortran | `usr/lib/lobole/ccx`, a link to `usr/bin/ccx`: linuxdeploy (`--executable`) points an executable's rpath at `usr/lib` only from `usr/bin`, and given the `lib/lobole` path it wrote `$ORIGIN`, so that copy found none of its libraries | `calculix-ccx-<version>-source.tar`: Ubuntu's source package of exactly that version (`.dsc`, upstream tarball, Debian changes), fetched by `build.sh` with `apt-get source` from 24.04's `deb-src`, and the bundled ccx is built from it |
 | Flatpak | 2.23, built in the manifest against reference BLAS/LAPACK, ARPACK and a static SPOOLES (with nixpkgs' three patches, `packaging/flatpak/patches/`) | `/app/lib/lobole/ccx` | built from source; the manifest pins it |
 | `.deb`, AUR, Nix | not bundled: the distribution's own (`Suggests: calculix-ccx`; Nix's `calculix-ccx`) | | |
 | Windows zip and installer | not bundled: the user installs dhondt.de's build and points `calculix_path` at it | | |
