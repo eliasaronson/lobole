@@ -491,22 +491,44 @@ static void CreateDevice(bool wsi) {
     queue_info[0].queueCount = 1;
     queue_info[0].pQueuePriorities = queue_priority;
 
-    // Enable ray tracing features if available
+    // Enable the ray tracing features the device has. Asking for one it
+    // lacks fails device creation (VK_ERROR_FEATURE_NOT_PRESENT), and the
+    // app with it: Ubuntu 22.04's lavapipe has no ray tracing at all.
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{};
     bufferDeviceAddressFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
     rtPipelineFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipelineFeatures.rayTracingPipeline = VK_TRUE;
     rtPipelineFeatures.pNext = &bufferDeviceAddressFeatures;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{};
     asFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    asFeatures.accelerationStructure = VK_TRUE;
+    asFeatures.pNext = &rtPipelineFeatures;
+
+    VkPhysicalDeviceFeatures2 supported2{};
+    supported2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    supported2.pNext = &asFeatures;
+    vkGetPhysicalDeviceFeatures2(g_PhysicalDevice, &supported2);
+    const VkBool32 hasBufferDeviceAddress =
+        bufferDeviceAddressFeatures.bufferDeviceAddress;
+    const VkBool32 hasRtPipeline = rtPipelineFeatures.rayTracingPipeline;
+    const VkBool32 hasAs = asFeatures.accelerationStructure;
+    bufferDeviceAddressFeatures = {};
+    bufferDeviceAddressFeatures.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+    bufferDeviceAddressFeatures.bufferDeviceAddress = hasBufferDeviceAddress;
+    rtPipelineFeatures = {};
+    rtPipelineFeatures.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rtPipelineFeatures.rayTracingPipeline = hasRtPipeline;
+    rtPipelineFeatures.pNext = &bufferDeviceAddressFeatures;
+    asFeatures = {};
+    asFeatures.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    asFeatures.accelerationStructure = hasAs;
     asFeatures.pNext = &rtPipelineFeatures;
 
     // The OutlineRenderer wireframe pipeline draws with VK_POLYGON_MODE_LINE,
