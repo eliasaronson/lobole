@@ -24,6 +24,15 @@
   <url type="homepage">https://github.com/eliasaronson/lobole</url>
   <url type="bugtracker">https://github.com/eliasaronson/lobole/issues</url>
   <releases>
+    <release version="0.2.1" date="2026-11-18">
+      <description>
+        <p>The AppImage runs on more Linux distributions, and the app starts on graphics hardware without ray tracing.</p>
+        <ul>
+          <li>The GUI AppImage runs on glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36 and later</li>
+          <li>The app no longer fails to start with "could not create the graphics device" on a GPU or driver without ray tracing</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-30">
       <description>
         <p>Simulation past linear static: buckling, thermal, large deformation, contact and plasticity. Scans and meshes you can work with as they are.</p>
