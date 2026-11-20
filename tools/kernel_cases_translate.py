@@ -336,10 +336,8 @@ SKIPPED = {
 
 
 class Translator:
-    def __init__(self, d, case_dir="", out_dir=""):
+    def __init__(self, d):
         self.d = d
-        self.case_dir = case_dir
-        self.out_dir = out_dir
         self.log = []          # every step sent, as written
         self.results = []      # their answers, for $ref
         self.digest = None     # the last mutating call's

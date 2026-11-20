@@ -13,7 +13,8 @@ written here. A case is a command script (recipe.json) and its right answer
 it, and holds the whole corpus to tests/kernel_cases/status.json.
 
     tools/kernel_cases.py vendor --from SOLIDCRAFT [--solidcore SOLIDCORE]
-    tools/kernel_cases.py run BINARY [--ladder [--quick] | --area A ...] [-k TEXT ...]
+    tools/kernel_cases.py run BINARY [--ladder [--quick] | --area A ...]
+                              [-k TEXT ...] [--only FILE]
                               [--shard K/N] [--jobs N] [--write-page]
     tools/kernel_cases.py bless BINARY [--jobs N]
     tools/kernel_cases.py replay BINARY CASE
@@ -594,11 +595,7 @@ def run_case(d, case, scratch):
         return Outcome(f"untranslated: graded by `{k}`, a SolidCraft "
                        "command's own answer")
     d.call("new_project")
-    out_dir = os.path.join(scratch, "out")
-    shutil.rmtree(out_dir, ignore_errors=True)
-    os.makedirs(out_dir)
-    tr = kt.Translator(d, case_dir=os.path.join(CORPUS, case),
-                       out_dir=out_dir)
+    tr = kt.Translator(d)
     run = {"refusal": None}
     try:
         for i, command in enumerate(commands, 1):
@@ -799,8 +796,8 @@ def write_status(status):
 
 
 def known_row(row):
-    """("volume", "docs/known-bugs.md#anchor") from "known: volume
-    (docs/known-bugs.md#anchor)", else None."""
+    """(class, entry) from a row `known: <class> (<entry>)`, the entry a
+    doc path with its heading's anchor; None for any other row."""
     if not row.startswith("known: "):
         return None
     rest = row[len("known: "):]
@@ -1055,8 +1052,8 @@ def cmd_bless(args):
         if row.startswith("known: "):
             new[case] = row  # by hand; the run says whether it still holds
         elif got.startswith(("fail: ", "broken")):
-            unrowed.append(f"{case}: {got} "
-                           f"({results[case]['detail'].splitlines()[0][:200]})")
+            first = results[case]["detail"].splitlines()[:1]
+            unrowed.append(f"{case}: {got} ({''.join(first)[:200]})")
         else:
             new[case] = got
     if unrowed:

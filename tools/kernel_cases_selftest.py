@@ -13,7 +13,6 @@ naming it; and planted answers (a pass, a volume off in the eighth digit, a
 refusal that changed the part, a known case that passes, an edited vendored
 file) must each be judged.
 """
-import copy
 import decimal
 import json
 import os
@@ -178,7 +177,7 @@ def main():
     check("a volume past its range's end", status == "fail: volume", status)
 
     # 4. The ratchet.
-    entry = "docs/known-bugs.md#planted"
+    entry = "a planted entry"
     rows = {"a": "pass", "b": f"known: volume ({entry})",
             "c": "untranslated: `solid.emboss`"}
 
