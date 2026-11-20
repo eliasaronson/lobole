@@ -10,12 +10,14 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Occurrence.h"
 #include "core/PrintAllowance.h"
 #include "core/Requirements.h"
 #include "core/Units.h"
 #include "core/cam/CamJob.h"
 #include "core/cam/CamNames.h"
 #include "core/cam/CamToolpath.h"
+#include "core/drawing/DrawingDocument.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/HoleFeature.h"
@@ -32,6 +34,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -1871,4 +1874,97 @@ TEST_CASE("Opening the index.json inside a .lob opens the project",
   REQUIRE(loaded != nullptr);
   CHECK(loaded->FeatureCount() == 1);
   fs::remove_all(proj);
+}
+
+namespace {
+
+std::string ReadBytes(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// Every golden of one kind under tests/golden/<sub>, the .expect files left
+// out.
+std::vector<fs::path> GoldensIn(const fs::path& dir) {
+  std::vector<fs::path> out;
+  for (const auto& entry : fs::directory_iterator(dir)) {
+    const fs::path& p = entry.path();
+    if (entry.is_regular_file() && p.extension() == ".json" &&
+        !p.stem().string().ends_with(".expect"))
+      out.push_back(p);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+// Saves `load(golden)` with `save`, loads that and saves it again: the two
+// files are byte-identical. A field the reader drops, or one the writer
+// spells differently from what the reader reads, moves a byte here even
+// when no .expect file names it — which is the check that moving a field
+// onto another type (ExprValue) lost nothing. LOBOLE_GOLDEN_DUMP_DIR, when
+// set, keeps the first save of each golden there, so two builds' writers
+// can be compared file by file.
+template <class Load, class Save>
+void CheckWriterFixpoint(const fs::path& dir, const std::string& kind,
+                         Load load, Save save) {
+  const char* dumpDir = std::getenv("LOBOLE_GOLDEN_DUMP_DIR");
+  for (const fs::path& golden : GoldensIn(dir)) {
+    DYNAMIC_SECTION(kind << "/" << golden.filename().string()) {
+      auto doc = load(golden);
+      REQUIRE(doc != nullptr);
+      const fs::path a =
+          fs::temp_directory_path() /
+          ("golden_fix_a_" + kind + "_" + golden.filename().string());
+      const fs::path b =
+          fs::temp_directory_path() /
+          ("golden_fix_b_" + kind + "_" + golden.filename().string());
+      REQUIRE(save(*doc, a));
+      auto again = load(a);
+      REQUIRE(again != nullptr);
+      REQUIRE(save(*again, b));
+      const std::string first = ReadBytes(a), second = ReadBytes(b);
+      CHECK(!first.empty());
+      CHECK(first == second);
+      if (dumpDir != nullptr) {
+        fs::create_directories(fs::path(dumpDir) / kind);
+        fs::copy_file(a, fs::path(dumpDir) / kind / golden.filename(),
+                      fs::copy_options::overwrite_existing);
+      }
+      fs::remove(a);
+      fs::remove(b);
+    }
+  }
+}
+
+} // namespace
+
+TEST_CASE("Every golden's written form reads and writes back identical",
+          "[golden]") {
+  const fs::path root = fs::path(TestSourceDir()) / "tests" / "golden";
+  CheckWriterFixpoint(
+      root, "part", [](const fs::path& p) { return testio::Load(p.string()); },
+      [](const Document& d, const fs::path& p) {
+        return testio::Save(d, p.string());
+      });
+  CheckWriterFixpoint(
+      root / "assembly", "assembly",
+      [](const fs::path& p) { return testio::LoadAssembly(p.string()); },
+      [](const AssemblyDocument& d, const fs::path& p) {
+        return testio::SaveAssembly(d, p.string());
+      });
+  CheckWriterFixpoint(
+      root / "drawing", "drawing",
+      [](const fs::path& p) { return testio::LoadDrawing(p.string()); },
+      [](const DrawingDocument& d, const fs::path& p) {
+        return testio::SaveDrawing(d, p.string());
+      });
+  CheckWriterFixpoint(
+      root / "job", "job",
+      [](const fs::path& p) -> std::unique_ptr<cam::JobDocument> {
+        auto r = DocumentIO::LoadJob(p.string());
+        return r ? std::move(*r) : nullptr;
+      },
+      [](const cam::JobDocument& d, const fs::path& p) {
+        return DocumentIO::SaveJob(d, p.string()).has_value();
+      });
 }
