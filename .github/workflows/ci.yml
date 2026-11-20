@@ -175,6 +175,20 @@ jobs:
           path: tests/golden/render/*.actual.png
           if-no-files-found: ignore
 
+      # A smoke that fails keeps the app's log and its traceback under the
+      # state dir (tests/smoke_app.py), and ctest its output; a runner's disk
+      # goes with the job, so hand them over.
+      - name: What the failing tests left
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-failures-gui
+          path: |
+            ~/.local/state/lobole/smoke-failures/
+            build/gui.log
+            build/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+
   build-and-test:
     runs-on: ubuntu-24.04
     # Measured over 19 green runs (Oct 2026): median 28 min, slowest 50.
@@ -299,6 +313,20 @@ jobs:
           ctest --test-dir build-nocam -LE gui -j "$(nproc)" --output-on-failure \
             -E "Assembly import plan|Shell that removes no material"
 
+      # A smoke that fails keeps the app's log and its traceback under the
+      # state dir (tests/smoke_app.py), and ctest its output; a runner's disk
+      # goes with the job, so hand them over.
+      - name: What the failing tests left
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-failures-headless
+          path: |
+            ~/.local/state/lobole/smoke-failures/
+            build/Testing/Temporary/LastTest*.log
+            build-nocam/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+
   # The job above runs on GitHub's runner image, which carries hundreds of
   # preinstalled packages — so it cannot tell whether the README's apt list is
   # COMPLETE. A stock container can, and when this was first tried
@@ -395,6 +423,19 @@ jobs:
             ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure
           fi
 
+      # A smoke that fails keeps the app's log and its traceback under the
+      # state dir (tests/smoke_app.py), and ctest its output; a runner's disk
+      # goes with the job, so hand them over.
+      - name: What the failing tests left
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-failures-stock-${{ strategy.job-index }}
+          path: |
+            ~/.local/state/lobole/smoke-failures/
+            build/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+
   # ASan + UBSan, by hand only — no push trigger and no schedule.
   #
   # The sanitizer flags miss the normal build's ccache entries, so this is a
@@ -472,3 +513,16 @@ jobs:
           source tools/sanitizer-env.sh
           ctest --test-dir build-asan -LE "$SANITIZER_LABEL_EXCLUDE" -j "$(nproc)" --output-on-failure \
             -E "$SANITIZER_TEST_EXCLUDE|Assembly import plan|Shell that removes no material"
+
+      # A smoke that fails keeps the app's log and its traceback under the
+      # state dir (tests/smoke_app.py), and ctest its output; a runner's disk
+      # goes with the job, so hand them over.
+      - name: What the failing tests left
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-failures-sanitizers
+          path: |
+            ~/.local/state/lobole/smoke-failures/
+            build-asan/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore

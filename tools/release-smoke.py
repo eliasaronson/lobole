@@ -232,9 +232,19 @@ def check_calculix(port, launcher):
 
 
 def start(cmd, port, env=None):
+    # LOBOLE_SMOKE_LOG_DIR keeps the app's output, one file a start, for a CI
+    # job to upload when the smoke fails (release.yml); without it the
+    # output goes nowhere, as a smoke on a desk wants.
+    out = err = subprocess.DEVNULL
+    log_dir = os.environ.get("LOBOLE_SMOKE_LOG_DIR")
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        start.count = getattr(start, "count", 0) + 1
+        name = f"release-smoke-{os.getpid()}-{start.count}.log"
+        out = open(os.path.join(log_dir, name), "w")
+        err = subprocess.STDOUT
     return subprocess.Popen(cmd + ["--headless", "--remote", str(port)],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, env=env)
+                            stdout=out, stderr=err, env=env)
 
 
 def stop(proc):

@@ -28,6 +28,9 @@ permissions:
 # failure, a lost device; src/app/StartupReport.h) would wait for a click.
 env:
   LOBOLE_NO_DIALOG: "1"
+  # tools/release-smoke.py writes each app it starts' output here, relative
+  # to the job's working directory; a failed smoke uploads it.
+  LOBOLE_SMOKE_LOG_DIR: smoke-logs
 
 jobs:
   # A tag that disagrees with what it builds is refused, not shipped.
@@ -103,6 +106,20 @@ jobs:
           python3 tools/release-smoke.py --attach --port 8437
           docker rm -f lobole
 
+      - name: The container's output
+        if: failure()
+        run: |
+          mkdir -p smoke-logs
+          docker logs lobole > smoke-logs/container.log 2>&1 || true
+
+      - name: The smoked app's output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-logs-linux
+          path: smoke-logs/
+          if-no-files-found: ignore
+
       - uses: actions/upload-artifact@v7
         with:
           name: linux
@@ -152,6 +169,14 @@ jobs:
             nixpkgs#python3 nixpkgs#unzip -c \
             packaging/windows/smoke.sh win/lobole-*-portable.zip \
               "${{ needs.check.outputs.version }}"
+
+      - name: The smoked app's output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-logs-windows
+          path: smoke-logs/
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v7
         with:
@@ -240,6 +265,13 @@ jobs:
         run: |
           python3 tools/release-smoke.py --port 8437 \
             --version "${{ needs.check.outputs.version }}" -- /usr/bin/lobole
+      - name: The smoked app's output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-logs-deb
+          path: smoke-logs/
+          if-no-files-found: ignore
 
   # The GUI AppImage (docs/packaging/README.md#the-gui-appimage): built on
   # Ubuntu 22.04's glibc, the oldest LTS in standard support and the oldest
@@ -311,6 +343,13 @@ jobs:
           chmod +x lobole-*.AppImage
           packaging/appimage/smoke.sh lobole-*-x86_64.AppImage \
             "${{ needs.check.outputs.version }}"
+      - name: The smoked app's output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-logs-appimage-${{ strategy.job-index }}
+          path: smoke-logs/
+          if-no-files-found: ignore
 
   # The complete source, submodules included, for packagers
   # (docs/packaging/README.md#the-source-tarball).
@@ -365,6 +404,13 @@ jobs:
              && sudo -u builder sh -c 'makepkg --printsrcinfo > .SRCINFO')
           pacman -U --noconfirm aur/lobole-*.pkg.tar.zst
           python3 tools/release-smoke.py --port 8437 --version "$version" -- /usr/bin/lobole
+      - name: The smoked app's output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-logs-aur
+          path: smoke-logs/
+          if-no-files-found: ignore
       - name: ccache (save)
         if: always()
         uses: actions/cache/save@v6

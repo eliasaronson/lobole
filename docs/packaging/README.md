@@ -71,7 +71,10 @@ solver is linked; a build that loses Boost configures PlaneGCS off without
 a word). With `--version` it also checks that the binary's `--version` is
 the release's, and with `--calculix`, on the two packages that carry ccx,
 that `ping` finds that copy and it solves ([The bundled
-CalculiX](#the-bundled-calculix)). The two GUI builds also open a window and render one frame
+CalculiX](#the-bundled-calculix)). The app's own output goes nowhere
+unless `LOBOLE_SMOKE_LOG_DIR` names a directory, one log a start; the
+release workflow sets it, and a job whose smoke fails uploads it, with the
+container's log for the image. The two GUI builds also open a window and render one frame
 (`app/boots_and_renders`, on Xvfb with Mesa's lavapipe): the AppImage in
 fresh images (`packaging/appimage/smoke.sh`), the Windows zip under Wine
 from a folder named `Loböle`, as the installer names it
