@@ -761,10 +761,18 @@ parallel. `[reader_fuzz]` is the fixed sample: every operator at least once
 per family, about 1/50 of the rest, over a sixth of the corpus (each input
 costs a load and a save before its first case) plus the inputs with side
 files; it is in `tools/test-fast.sh` and is what `tools/ci-local.sh --asan`
-runs. `[reader_fuzz][slow][asan_slow]` is every case of the whole corpus,
-in the headless suite (under ASan one family alone ran past ctest's 20
-minutes); the part files and the part directories run as four shards each
-(`… 1/4` to `4/4`, split by a hash of the input's name). Two exceptions keep
+runs. Every case of the whole corpus is `[.reader_fuzz_all][asan_slow]`,
+hidden from discovery and registered by `tests/CMakeLists.txt` under a ctest
+configuration of its own, as the big generators are:
+`tools/ctest -C reader_fuzz -L reader_fuzz_all` runs it, and
+`tools/merge-branch.sh` does when a merge touches the readers, the goldens or
+the mutators, and on `--release`. In the headless suite it re-proved a fixed
+seed over a fixed corpus on every run, a third of the suite's time; the
+sample stays in it. The ctest names are `reader_fuzz_all_<family>`, read
+from the `READER_FUZZ_*` lines of `tests/test_reader_fuzz.cpp` at configure
+time (under ASan one family alone ran past ctest's 20 minutes); the part
+files and the part directories run as four shards each (`… 1/4` to `4/4`,
+split by a hash of the input's name). Two exceptions keep
 it to minutes: an input whose own read takes a quarter second or more (a
 modeled thread, a worm, a text sketch — most of its damaged cases rebuild
 it) runs every operator once and an eighth of the rest, and the git vault

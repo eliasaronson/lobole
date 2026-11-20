@@ -342,6 +342,55 @@ catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      TEST_SPEC "[reader_fuzz]"
                      PROPERTIES TIMEOUT 1200 SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}" ${LOBOLE_TEST_ENV})
+# Every case of every reader-fuzz family: a third of the headless suite's
+# time, re-proving a fixed seed over a fixed corpus whatever changed. So it
+# runs only when asked for, as the big generators do: CONFIGURATIONS keeps a
+# plain ctest from seeing it, and
+#   tools/ctest -C reader_fuzz -L reader_fuzz_all
+# runs it (tools/merge-branch.sh when a merge touches the readers, and
+# --release). Hidden in Catch ([.reader_fuzz_all]), so discovery does not
+# register it; registered here from the families test_reader_fuzz.cpp
+# declares, read from its source, so a family added there is a test here at
+# the next configure.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_CURRENT_SOURCE_DIR}/test_reader_fuzz.cpp)
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/test_reader_fuzz.cpp rf_lines
+     REGEX "^READER_FUZZ_(FAMILY|SHARDED)\\(\"")
+set(rf_cases "")
+foreach(rf_line ${rf_lines})
+  string(REGEX MATCH
+         "^READER_FUZZ_(FAMILY|SHARDED)\\(\"([^\"]+)\"[^,]*,[^,)]*(, *([0-9]+))?"
+         rf_match "${rf_line}")
+  set(rf_name "Reader fuzz (every case): ${CMAKE_MATCH_2}")
+  if(CMAKE_MATCH_1 STREQUAL "SHARDED")
+    foreach(rf_k RANGE 1 ${CMAKE_MATCH_4})
+      list(APPEND rf_cases "${rf_name} ${rf_k}/${CMAKE_MATCH_4}")
+    endforeach()
+  else()
+    list(APPEND rf_cases "${rf_name}")
+  endif()
+endforeach()
+list(LENGTH rf_cases rf_count)
+if(rf_count LESS 10)
+  message(FATAL_ERROR "tests/test_reader_fuzz.cpp: read ${rf_count} reader-"
+                      "fuzz families from its READER_FUZZ_* lines; the "
+                      "pattern above no longer matches them")
+endif()
+foreach(rf_case ${rf_cases})
+  # A ctest name may not hold the case's parentheses; the case is the
+  # argument, so the binary runs exactly it.
+  string(REGEX REPLACE "^Reader fuzz \\(every case\\): " "" rf_test "${rf_case}")
+  string(REGEX REPLACE "[^A-Za-z0-9]+" "_" rf_test "reader_fuzz_all_${rf_test}")
+  add_test(NAME ${rf_test} CONFIGURATIONS reader_fuzz
+           COMMAND $<TARGET_FILE:designer_tests> "${rf_case}"
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(${rf_test} PROPERTIES
+                       LABELS "reader_fuzz;reader_fuzz_all;slow;asan_slow"
+                       TIMEOUT 1200
+                       SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}"
+                       ${LOBOLE_TEST_ENV})
+endforeach()
+
 # The reader-fuzz budget is CPU time: this case's read is pinned to one CPU
 # with four contending burners, so it takes five times its CPU in wall time,
 # and must still pass. The CPU is the first the test may run on (a container

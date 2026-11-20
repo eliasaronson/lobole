@@ -8,9 +8,13 @@
 //
 // In-process, one TEST_CASE per reader family so ctest runs them side by
 // side. `[reader_fuzz]` is a fixed sample (every operator at least once per
-// family, about 1/50 of the rest) for the inner loop; `[reader_fuzz][slow]`
-// is every case. Before each case its id goes to stderr and to
-// build/reader-fuzz-last-case.<family>, so a crash or a hang names it;
+// family, about 1/50 of the rest), in every suite; `[.reader_fuzz_all]`,
+// hidden, is every case, registered by tests/CMakeLists.txt under its own
+// ctest configuration (`tools/ctest -C reader_fuzz -L reader_fuzz_all`) --
+// a third of the headless suite's time, re-proving a fixed seed over a fixed
+// corpus on changes that touched no reader. Before each case its id goes to
+// stderr and to build/reader-fuzz-last-case.<family>, so a crash or a hang
+// names it;
 // `tools/reader-fuzz.py case <id>` writes that case out as a regression
 // (tests/reader_cases/, test_reader_cases.cpp).
 
@@ -66,7 +70,7 @@ void Run(Family family, bool everyCase, int shard = 0, int shards = 1) {
 #define READER_FUZZ_FAMILY(name, family)                                       \
   TEST_CASE("Reader fuzz: " name, "[reader_fuzz]") { Run(family, false); }     \
   TEST_CASE("Reader fuzz (every case): " name,                                 \
-            "[reader_fuzz][slow][asan_slow]") {                                \
+            "[.reader_fuzz_all][asan_slow]") {                                 \
     Run(family, true);                                                         \
   }
 
@@ -76,19 +80,19 @@ void Run(Family family, bool everyCase, int shard = 0, int shards = 1) {
 #define READER_FUZZ_SHARDED(name, family, n)                                   \
   TEST_CASE("Reader fuzz: " name, "[reader_fuzz]") { Run(family, false); }     \
   TEST_CASE("Reader fuzz (every case): " name " 1/" #n,                        \
-            "[reader_fuzz][slow][asan_slow]") {                                \
+            "[.reader_fuzz_all][asan_slow]") {                                 \
     Run(family, true, 0, n);                                                   \
   }                                                                            \
   TEST_CASE("Reader fuzz (every case): " name " 2/" #n,                        \
-            "[reader_fuzz][slow][asan_slow]") {                                \
+            "[.reader_fuzz_all][asan_slow]") {                                 \
     Run(family, true, 1, n);                                                   \
   }                                                                            \
   TEST_CASE("Reader fuzz (every case): " name " 3/" #n,                        \
-            "[reader_fuzz][slow][asan_slow]") {                                \
+            "[.reader_fuzz_all][asan_slow]") {                                 \
     Run(family, true, 2, n);                                                   \
   }                                                                            \
   TEST_CASE("Reader fuzz (every case): " name " 4/" #n,                        \
-            "[reader_fuzz][slow][asan_slow]") {                                \
+            "[.reader_fuzz_all][asan_slow]") {                                 \
     Run(family, true, 3, n);                                                   \
   }
 
