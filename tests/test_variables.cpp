@@ -8,9 +8,13 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Measure.h"
+#include "core/Occurrence.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "ui/AppState.h"
+#include "ui/DocumentSlots.h"
+#include "ui/VariableActions.h"
 
 #include <filesystem>
 
@@ -103,7 +107,7 @@ TEST_CASE("Expression-driven extrude follows a parameter edit", "[variables]") {
   Document doc;
   doc.SetParameter("depth", "3");
   ExtrudeFeature* ext = MakeExtrudedRect(doc, 1.0);
-  ext->distanceExpr = "depth * 2";
+  ext->distance.expr = "depth * 2";
   doc.Regenerate();
 
   REQUIRE(doc.GetBodies().size() == 1);
@@ -307,7 +311,7 @@ TEST_CASE("A project symbol table drives features in two documents",
   Document axle;
   axle.SetProjectSymbols(&project);
   ExtrudeFeature* axleExt = MakeExtrudedRect(axle, 1.0);
-  axleExt->distanceExpr = "bore"; // resolves from the project scope
+  axleExt->distance.expr = "bore"; // resolves from the project scope
   axle.Regenerate();
   CHECK_THAT(axleExt->distance, WithinRel(6.0));
   CHECK(axleExt->GetError().empty());
@@ -315,7 +319,7 @@ TEST_CASE("A project symbol table drives features in two documents",
   Document wheel;
   wheel.SetProjectSymbols(&project);
   ExtrudeFeature* wheelExt = MakeExtrudedRect(wheel, 1.0);
-  wheelExt->distanceExpr = "bore * 2";
+  wheelExt->distance.expr = "bore * 2";
   wheel.Regenerate();
   CHECK_THAT(wheelExt->distance, WithinRel(12.0));
 
@@ -341,7 +345,7 @@ TEST_CASE("An unknown variable is a loud feature error, not a silent literal",
   // must error, not silently keep drilling the literal twin (the 1 mm hole).
   Document doc;
   ExtrudeFeature* ext = MakeExtrudedRect(doc, 5.0);
-  ext->distanceExpr = "bore"; // never defined anywhere
+  ext->distance.expr = "bore"; // never defined anywhere
   doc.Regenerate();
 
   // The literal is kept as the RENDERED fallback (5.0), but the error is set.
@@ -366,7 +370,7 @@ TEST_CASE("A project-value change invalidates the regen cache across a part",
   Document doc;
   doc.SetProjectSymbols(&project);
   ExtrudeFeature* ext = MakeExtrudedRect(doc, 1.0);
-  ext->distanceExpr = "h";
+  ext->distance.expr = "h";
   doc.Regenerate();
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0 * 2.0, 1e-6));
 
@@ -447,12 +451,12 @@ TEST_CASE("Rename rewrites feature expressions", "[variables]") {
   Document doc;
   doc.SetParameter("depth", "3");
   ExtrudeFeature* ext = MakeExtrudedRect(doc, 1.0);
-  ext->distanceExpr = "depth + 1";
+  ext->distance.expr = "depth + 1";
   doc.Regenerate();
   CHECK_THAT(ext->distance, WithinRel(4.0));
 
   REQUIRE(doc.RenameParameter("depth", "h"));
-  CHECK(ext->distanceExpr == "h + 1");
+  CHECK(ext->distance.expr == "h + 1");
   CHECK_THAT(ext->distance, WithinRel(4.0));
 
   // And deletion is refused while the feature references it.
@@ -460,6 +464,110 @@ TEST_CASE("Rename rewrites feature expressions", "[variables]") {
   CHECK_FALSE(doc.RemoveParameter("h", &refs));
   REQUIRE(refs.size() == 1);
   CHECK(refs[0] == "feature 'Extrude1'");
+}
+
+namespace {
+// A study whose load and mesh size read variables: the two kinds of field
+// Study::VisitExprs walks.
+fem::Study StudyReading(Document& doc, const std::string& load,
+                        const std::string& mesh) {
+  fem::Study study = doc.AddStudy("Bracket");
+  fem::Load l;
+  l.id = doc.AllocateId();
+  l.type = fem::LoadType::Force;
+  l.magnitude.expr = load;
+  study.loads.push_back(l);
+  study.meshSize.expr = mesh;
+  REQUIRE(doc.ReplaceStudy(study));
+  return study;
+}
+} // namespace
+
+TEST_CASE("Rename reaches a study and a configuration's overrides; delete "
+          "names the study",
+          "[variables]") {
+  Document doc;
+  doc.SetParameter("pull", "100");
+  doc.SetParameter("depth", "3");
+  const uint64_t id = StudyReading(doc, "pull * 2", "depth").id;
+  Configuration& added = doc.AddConfiguration("Heavy");
+  Configuration cfg = added;
+  cfg.parameterOverrides = {{"depth", "pull / 10"}};
+  REQUIRE(doc.ReplaceConfiguration(cfg));
+
+  CommandStack stack;
+  REQUIRE(stack.Execute(
+      std::make_unique<RenameVariableCommand>("pull", "force"), doc));
+  REQUIRE(doc.RenameParameter("depth", "h"));
+  const fem::Study* study = doc.FindStudy(id);
+  REQUIRE(study != nullptr);
+  CHECK(study->loads.at(0).magnitude.expr == "force * 2");
+  CHECK(study->meshSize.expr == "h");
+  // The override follows the variable it overrides, and the text it reads.
+  const Configuration* heavy = doc.FindConfiguration(cfg.id);
+  REQUIRE(heavy != nullptr);
+  REQUIRE(heavy->parameterOverrides.size() == 1);
+  CHECK(heavy->parameterOverrides[0].first == "h");
+  CHECK(heavy->parameterOverrides[0].second == "force / 10");
+  // ...and still applies: h is 100 / 10 under it.
+  REQUIRE(doc.SetActiveConfiguration(cfg.id));
+  CHECK_THAT(doc.Symbols().at("h"), WithinRel(10.0));
+  REQUIRE(doc.SetActiveConfiguration(0));
+
+  fem::Study evaluated = *study;
+  std::string err;
+  REQUIRE(fem::EvaluateStudyExprs(evaluated, doc.Symbols(), &err));
+  CHECK_THAT(evaluated.loads.at(0).magnitude, WithinRel(200.0));
+
+  // A variable only the study reads cannot be deleted, and says who reads it.
+  std::vector<std::string> refs;
+  CHECK_FALSE(doc.RemoveParameter("force", &refs));
+  CHECK(std::find(refs.begin(), refs.end(), "study 'Bracket'") != refs.end());
+
+  // Undoing the rename puts the study's text back too.
+  stack.Undo(doc);
+  CHECK(doc.FindStudy(id)->loads.at(0).magnitude.expr == "pull * 2");
+}
+
+TEST_CASE("A project variable's rename and delete reach a part's study and an "
+          "assembly's",
+          "[variables]") {
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+  REQUIRE(ui::SetProjectVariable(state, "pull", "100", ""));
+  StudyReading(*state.document, "pull", "");
+  ui::AddAssembly(state, "Rig");
+  fem::Study rig;
+  rig.id = 1;
+  rig.name = "Rig study";
+  fem::Load l;
+  l.id = 2;
+  l.magnitude.expr = "pull / 2";
+  rig.loads.push_back(l);
+  state.assembly->GetStudies().push_back(rig);
+
+  std::vector<std::string> refs;
+  CHECK_FALSE(ui::RemoveProjectVariable(state, "pull", &refs));
+  CHECK(std::find(refs.begin(), refs.end(), "Part 1: study 'Bracket'") !=
+        refs.end());
+  CHECK(std::find(refs.begin(), refs.end(), "Rig: study 'Rig study'") !=
+        refs.end());
+
+  const uint64_t asmStamp = state.assembly->SaveStamp();
+  REQUIRE(ui::RenameProjectVariable(state, "pull", "force"));
+  CHECK(state.assembly->GetStudies().at(0).loads.at(0).magnitude.expr ==
+        "force / 2");
+  CHECK(state.assembly->SaveStamp() != asmStamp); // saved, so dirty
+  CHECK(state.parts.at(0).doc->GetStudies().at(0).loads.at(0).magnitude.expr ==
+        "force");
+  // Undo reverses it in both.
+  REQUIRE(ui::UndoProjectVars(state));
+  CHECK(state.assembly->GetStudies().at(0).loads.at(0).magnitude.expr ==
+        "pull / 2");
+  CHECK(state.parts.at(0).doc->GetStudies().at(0).loads.at(0).magnitude.expr ==
+        "pull");
 }
 
 // --- Serialization
@@ -474,7 +582,7 @@ TEST_CASE("Parameters and expressions round-trip through save/load",
     doc.SetParameter("width", "20", "overall width");
     doc.SetParameter("depth", "width / 4");
     ExtrudeFeature* ext = MakeExtrudedRect(doc, 1.0);
-    ext->distanceExpr = "depth";
+    ext->distance.expr = "depth";
     doc.Regenerate();
     CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0 * 5.0, 1e-6));
     REQUIRE(testio::Save(doc, path.string()));
@@ -489,7 +597,7 @@ TEST_CASE("Parameters and expressions round-trip through save/load",
 
   const auto* ext = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
   REQUIRE(ext != nullptr);
-  CHECK(ext->distanceExpr == "depth");
+  CHECK(ext->distance.expr == "depth");
   CHECK_THAT(ext->distance, WithinRel(5.0));
   REQUIRE(loaded->GetBodies().size() == 1);
   CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(8.0 * 5.0, 1e-6));
