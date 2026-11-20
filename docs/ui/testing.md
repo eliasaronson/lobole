@@ -285,6 +285,18 @@ only when the branch reaches what they cover, and always on `--release`:
 They ran on every `--full` merge before: an hour of six to twelve busy cores,
 the main source of the load every other agent's suites ran under.
 
+**A suite is not run twice on the same tree.** `tools/ctest` and the GUI
+runner stamp a run that passes on a committed tree (`build/suite-stamps/`,
+`tools/suite_stamp.py`): the tree hash, read before and after the run with
+no tracked file modified and nothing untracked under the source
+directories, the toolchain (every store path the build was configured
+against and the suites' environment holds, the build type and options), and
+which tests ran. The merge reuses a worktree's stamp only when main's tree
+after the pick IS the stamped tree and main's `build/` has the same
+toolchain, and says which it reused. Main's tree is the worktree's only when
+the branch was rebased onto main before landing; a format bump numbered by
+the landing changes it, so that merge runs its suites.
+
 ## Recording a scene
 
 The test engine records video: `ctx->CaptureBeginVideo()` and

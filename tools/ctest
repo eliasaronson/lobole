@@ -129,11 +129,30 @@ fi
 [ "$jobs_at" -ge 0 ] && cpu_claim "${jobs:-1}"
 quoted=" --test-dir $(printf '%q' "$dir")"
 for a in ${rest[@]+"${rest[@]}"}; do quoted+=" $(printf '%q' "$a")"; done
+# A run that passes on a committed tree is stamped with that tree and the
+# toolchain (tools/suite_stamp.py), so tools/merge-branch.sh need not run it
+# again on main when main's tree after the pick is this one. The tree is
+# read before and after: a commit or an edit during the run stamps nothing.
+tree0=""
+if git -C "$root" rev-parse --git-dir >/dev/null 2>&1 &&
+   python3 "$root/tools/suite_stamp.py" clean "$root" 2>/dev/null; then
+  tree0="$(git -C "$root" rev-parse 'HEAD^{tree}')"
+fi
 # The fd is closed for the run: a process a test leaves behind must not keep
 # holding the lock. This shell holds it until ctest returns. Inside shell.nix
 # already, or on a machine without nix (CI), ctest is the one on PATH.
+status=0
 if [ -n "${IN_NIX_SHELL:-}" ] || ! command -v nix-instantiate >/dev/null; then
-  cd "$dir" && eval "ctest$quoted" 9>&- 7>&-
+  (cd "$dir" && eval "ctest$quoted") 9>&- 7>&- || status=$?
 else
-  "$root/tools/nix-run" "cd $(printf '%q' "$dir") && ctest$quoted" 9>&- 7>&-
+  "$root/tools/nix-run" "cd $(printf '%q' "$dir") && ctest$quoted" 9>&- 7>&- || status=$?
 fi
+if [ -n "$tree0" ]; then
+  if [ "$status" -ne 0 ]; then
+    python3 "$root/tools/suite_stamp.py" forget "$dir" "$tree0" ${rest[@]+"${rest[@]}"} || true
+  elif python3 "$root/tools/suite_stamp.py" clean "$root" 2>/dev/null &&
+       [ "$(git -C "$root" rev-parse 'HEAD^{tree}')" = "$tree0" ]; then
+    python3 "$root/tools/suite_stamp.py" write "$dir" "$tree0" ${rest[@]+"${rest[@]}"} || true
+  fi
+fi
+exit "$status"

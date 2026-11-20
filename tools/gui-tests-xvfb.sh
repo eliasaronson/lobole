@@ -208,6 +208,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# The tree this run tests, for its stamp below; nothing if it is dirty.
+TREE0=""
+if python3 "$ROOT/tools/suite_stamp.py" clean "$ROOT" 2>/dev/null; then
+  TREE0="$(git -C "$ROOT" rev-parse 'HEAD^{tree}')"
+fi
 WORK="$(mktemp -d -t designer-gui-XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -370,6 +375,18 @@ else
 fi
 if [ "$ran" != "$EXPECTED" ]; then
   echo "MISMATCH: the shards did not run every test — the partition is wrong."
-  exit 1
+  failed=1
+fi
+# The whole suite, passed on a committed tree it read before and after:
+# stamped, as tools/ctest stamps a run (tools/suite_stamp.py), so a merge of
+# this exact tree need not run it again. --fast and the slowed runs are not
+# the suite.
+if [ -n "$TREE0" ] && [ -z "$SLOWER_THAN" ] && [ -z "$APP_EXTRA" ]; then
+  if [ "$failed" != 0 ]; then
+    python3 "$ROOT/tools/suite_stamp.py" forget "$ROOT/build" "$TREE0" gui-suite || true
+  elif python3 "$ROOT/tools/suite_stamp.py" clean "$ROOT" 2>/dev/null &&
+       [ "$(git -C "$ROOT" rev-parse 'HEAD^{tree}')" = "$TREE0" ]; then
+    python3 "$ROOT/tools/suite_stamp.py" write "$ROOT/build" "$TREE0" gui-suite || true
+  fi
 fi
 exit "$failed"

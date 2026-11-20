@@ -84,6 +84,22 @@ if [ "$dry" = 1 ]; then
   for k in build headless gui generators action_matrix reader_fuzz_all; do
     printf '  %-16s %s\n' "$k" "$(plan_get "$k")"
   done
+  # Main's tree after the pick is the branch's own only when the branch is
+  # main plus its commits, and no vNEXT is numbered on the way.
+  if [ -n "$wt" ] && git merge-base --is-ancestor main "$branch" &&
+     [ "$(git rev-list --count main.."$branch")" = "$(echo "${pending:-}" | sed '/^$/d' | wc -l)" ]; then
+    t="$(git rev-parse "$branch^{tree}")"
+    echo "  stamps against $branch's tree $(echo "$t" | cut -c1-12) (if nothing is numbered):"
+    for key in "-LE gui|slow" "-LE gui" gui-suite "-C generators -L generators" \
+               "-C action_matrix -L action_matrix" "-C reader_fuzz -L reader_fuzz_all"; do
+      # shellcheck disable=SC2086
+      if [ "$key" = "-LE gui|slow" ]; then set -- -LE 'gui|slow'; else set -- $key; fi
+      printf '    %-34s %s\n' "$key" \
+        "$(python3 "$root/tools/suite_stamp.py" find "$wt/build" "$root/build" "$t" "$@" || true)"
+    done
+  else
+    echo "  no stamp can be reused: $branch is not rebased onto main"
+  fi
   exit 0
 fi
 
@@ -185,7 +201,22 @@ git -C "$root" submodule status | awk '/^-/ { print $2 }' | while read -r sub; d
   echo "merge-branch: checking out the new submodule $sub"
   git -C "$root" submodule update --init -- "$sub"
 done
-ran=() skipped=()
+ran=() skipped=() reused=()
+# A suite that already passed in the worktree on EXACTLY the tree main now
+# has, on the toolchain main's build/ has, is not run again
+# (tools/suite_stamp.py). Only a branch rebased onto main before it is
+# landed gives main that tree; a format bump numbered here changes it.
+main_tree="$(git rev-parse 'HEAD^{tree}')"
+stamped() { # what... (the key the worktree's run was stamped with)
+  local why
+  [ -n "$wt" ] && [ -d "$wt/build/suite-stamps" ] || return 1
+  if why="$(python3 "$root/tools/suite_stamp.py" find "$wt/build" "$root/build" \
+              "$main_tree" "$@")"; then
+    reused+=("$* ($why)")
+    return 0
+  fi
+  return 1
+}
 if [ "$(plan_get build)" = if-stale ] &&
    "$root/tools/nix-run" "$(printf '%q %q' "$root/tools/stale-binaries.sh" "$root/build")" >/dev/null; then
   skipped+=("build (docs only, and the binaries are current)")
@@ -200,7 +231,9 @@ suite_log="$root/build/merge-branch-suite.log"
 echo "merge-branch: the suite's whole output goes to $suite_log"
 : > "$suite_log"
 headless="$(plan_get headless)"
-if [ "$headless" = subset ]; then
+if [ "$headless" = subset ] && stamped -LE gui; then
+  headless=reused
+elif [ "$headless" = subset ]; then
   names="$state/$branch.tests"
   if "$root/tools/nix-run" "$(printf 'python3 %q select --build %q %q %q' \
        "$root/tools/merge_plan.py" "$root/build" "$changed_file" "$names")"; then
@@ -214,7 +247,11 @@ if [ "$headless" = subset ]; then
   fi
   rm -f "$names"
 fi
-if [ "$headless" = all ]; then
+if [ "$headless" = all ] && [ "$mode" = fast ] && stamped -LE 'gui|slow'; then
+  :
+elif [ "$headless" = all ] && [ "$mode" != fast ] && stamped -LE gui; then
+  :
+elif [ "$headless" = all ]; then
   if [ "$mode" = fast ]; then
     "$root/tools/test-fast.sh" 2>&1 | tee -a "$suite_log" |
       grep -E 'tests passed|\(Failed\)'
@@ -225,7 +262,9 @@ if [ "$headless" = all ]; then
     ran+=("headless suite")
   fi
 fi
-if [ "$(plan_get generators)" = yes ]; then
+if [ "$(plan_get generators)" = yes ] && stamped -C generators -L generators; then
+  :
+elif [ "$(plan_get generators)" = yes ]; then
   # The big generators, each from nothing on its own instance
   # (generators/README.md#the-big-generators-as-tests): after the headless
   # suite, not beside it -- two at a time is what memory and one GPU take.
@@ -240,7 +279,9 @@ if [ "$(plan_get generators)" = yes ]; then
 else
   skipped+=("big generators: $(echo "$plan" | sed -n 's/^merge-plan: generators *no *//p')")
 fi
-if [ "$(plan_get gui)" = yes ]; then
+if [ "$(plan_get gui)" = yes ] && stamped gui-suite; then
+  :
+elif [ "$(plan_get gui)" = yes ]; then
   # The verdict, and on a failure what failed and where it is archived with
   # its seed: the last line alone ("SOME FAILED") invites a re-run, which
   # passes and hides an order-dependent failure the archive can replay.
@@ -251,7 +292,9 @@ if [ "$(plan_get gui)" = yes ]; then
 elif [ "$mode" != fast ]; then
   skipped+=("GUI suite: nothing the GUI tests run changed")
 fi
-if [ "$(plan_get action_matrix)" = yes ]; then
+if [ "$(plan_get action_matrix)" = yes ] && stamped -C action_matrix -L action_matrix; then
+  :
+elif [ "$(plan_get action_matrix)" = yes ]; then
   # The full action matrix (docs/modeling/README.md#action-matrix) against
   # the committed baseline: every ordinary action on every face, edge and
   # body of the corpus, which the headless suite only samples. Last, and
@@ -263,7 +306,9 @@ if [ "$(plan_get action_matrix)" = yes ]; then
 else
   skipped+=("full action matrix: $(echo "$plan" | sed -n 's/^merge-plan: action_matrix *no *//p')")
 fi
-if [ "$(plan_get reader_fuzz_all)" = yes ]; then
+if [ "$(plan_get reader_fuzz_all)" = yes ] && stamped -C reader_fuzz -L reader_fuzz_all; then
+  :
+elif [ "$(plan_get reader_fuzz_all)" = yes ]; then
   # Every reader-fuzz case (docs/versioning/README.md#reader-fuzzing), by
   # memory: a family peaks at 1.4 GB.
   "$root/tools/ctest" -C reader_fuzz -L reader_fuzz_all \
@@ -275,6 +320,12 @@ else
 fi
 echo "merge-branch: ran: $(IFS=,; echo "${ran[*]:-nothing}" | sed 's/,/, /g')"
 for k in "${skipped[@]}"; do echo "merge-branch: skipped $k"; done
+for k in "${reused[@]}"; do
+  echo "merge-branch: reused the worktree's pass of $k"
+done
+[ "${#reused[@]}" -gt 0 ] || [ -z "$wt" ] ||
+  echo "merge-branch: no stamp reused (main's tree $(echo "$main_tree" | cut -c1-12)" \
+       "is not one the worktree passed a suite on, or it ran none)"
 
 # Every commit of the branch now on main (by patch), and nothing uncommitted.
 if [ -n "$wt" ] && [ -d "$wt" ]; then
