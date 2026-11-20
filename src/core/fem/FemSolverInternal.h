@@ -71,6 +71,11 @@ inline void TetShape(double r, double s, double t, double N[10]) {
     N[4 + e] = 4 * L[edge[e][0]] * L[edge[e][1]];
 }
 
+// Every integrator weighs a Gauss point by |detJ|. That is the volume only
+// because no element's Jacobian changes sign: the mesher straightens or
+// refuses a curved tet that folds, and a study refuses one a seed folded
+// (FoldedTetRefusal, docs/simulation/README.md#curved-elements-that-fold).
+//
 // The 6x30 strain-displacement matrix B and detJ at natural point (r,s,t) for
 // an element whose 10 node coordinates are `X`. Voigt order
 // [xx,yy,zz,xy,yz,zx].

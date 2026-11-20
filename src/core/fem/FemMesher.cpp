@@ -3,6 +3,8 @@
 
 #include "core/fem/FemMesher.h"
 
+#include "common/Logger.h"
+
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
@@ -15,9 +17,12 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #ifdef HAVE_NETGEN
@@ -349,6 +354,16 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
       out.boundary.push_back(tri);
     }
 
+    // Midside nodes projected onto a tight curve can fold an element
+    // (docs/simulation/README.md#curved-elements-that-fold): those are
+    // straightened, and one still folded after is refused.
+    if (const std::size_t moved = StraightenFoldedTets(out))
+      LOG_INFO("fem mesh: straightened {} midside nodes of elements their "
+               "curved edges folded",
+               moved);
+    if (std::string why = FoldedTetRefusal(out); !why.empty())
+      return fail(why);
+
     out.stats.nodeCount = std::size_t(np);
     out.stats.tetCount = std::size_t(ne);
     out.stats.worstQuality = worst;
@@ -374,5 +389,262 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape&, const MeshSettings&,
 }
 
 #endif // HAVE_NETGEN
+
+// --- Curved tet10 that fold ------------------------------------------------
+
+namespace {
+
+// det J of tet `X` at natural point (r, s, t): J_jk = sum_i dN_i/dk X_i[j],
+// with the solver's shape functions (FemSolverInternal.h, TetShapeGrad).
+double DetJ(const glm::dvec3 X[10], double r, double s, double t) {
+  const double L[4] = {1 - r - s - t, r, s, t};
+  static const double dL[4][3] = {
+      {-1, -1, -1}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  static const int edge[6][2] = {{0, 1}, {1, 2}, {0, 2},
+                                 {0, 3}, {1, 3}, {2, 3}};
+  double J[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
+  const auto add = [&](const glm::dvec3& x, const double g[3]) {
+    for (int j = 0; j < 3; ++j)
+      for (int k = 0; k < 3; ++k)
+        J[j][k] += g[k] * x[j];
+  };
+  for (int i = 0; i < 4; ++i) {
+    const double f = 4 * L[i] - 1;
+    const double g[3] = {f * dL[i][0], f * dL[i][1], f * dL[i][2]};
+    add(X[i], g);
+  }
+  for (int e = 0; e < 6; ++e) {
+    const int a = edge[e][0], b = edge[e][1];
+    double g[3];
+    for (int k = 0; k < 3; ++k)
+      g[k] = 4 * (dL[a][k] * L[b] + L[a] * dL[b][k]);
+    add(X[4 + e], g);
+  }
+  return J[0][0] * (J[1][1] * J[2][2] - J[1][2] * J[2][1]) -
+         J[0][1] * (J[1][0] * J[2][2] - J[1][2] * J[2][0]) +
+         J[0][2] * (J[1][0] * J[2][1] - J[1][1] * J[2][0]);
+}
+
+// The 20 multi-indices of degree 3 over four barycentric coordinates: the
+// lattice det J is sampled on, and the Bernstein basis it is written in.
+struct Cubic {
+  int idx[20][4];
+  double toBernstein[20][20]; // Bernstein coefficients from lattice values
+  Cubic() {
+    int n = 0;
+    for (int i = 0; i <= 3; ++i)
+      for (int j = 0; j <= 3 - i; ++j)
+        for (int k = 0; k <= 3 - i - j; ++k) {
+          idx[n][0] = i;
+          idx[n][1] = j;
+          idx[n][2] = k;
+          idx[n][3] = 3 - i - j - k;
+          ++n;
+        }
+    // M[p][q] = B_q(lattice point p) = 3!/(q!) prod L_p^q; invert it.
+    static const double fact[4] = {1, 1, 2, 6};
+    double M[20][40];
+    for (int p = 0; p < 20; ++p)
+      for (int q = 0; q < 20; ++q) {
+        double v = 6.0;
+        for (int c = 0; c < 4; ++c)
+          v *= std::pow(idx[p][c] / 3.0, idx[q][c]) / fact[idx[q][c]];
+        M[p][q] = v;
+        M[p][20 + q] = p == q ? 1.0 : 0.0;
+      }
+    for (int c = 0; c < 20; ++c) {
+      int piv = c;
+      for (int r = c + 1; r < 20; ++r)
+        if (std::abs(M[r][c]) > std::abs(M[piv][c]))
+          piv = r;
+      for (int k = 0; k < 40; ++k)
+        std::swap(M[c][k], M[piv][k]);
+      const double d = M[c][c];
+      for (int k = 0; k < 40; ++k)
+        M[c][k] /= d;
+      for (int r = 0; r < 20; ++r)
+        if (r != c && M[r][c] != 0.0) {
+          const double f = M[r][c];
+          for (int k = 0; k < 40; ++k)
+            M[r][k] -= f * M[c][k];
+        }
+    }
+    for (int p = 0; p < 20; ++p)
+      for (int q = 0; q < 20; ++q)
+        toBernstein[p][q] = M[p][20 + q];
+  }
+};
+const Cubic& TheCubic() {
+  static const Cubic c;
+  return c;
+}
+
+using Bary = std::array<double, 4>;
+
+// Whether det J keeps `sign` over the sub-tet with barycentric corners `c`:
+// +1 proven, -1 not (with `at`, the natural point found), 0 undecided at the
+// depth cap (every sample right, the bound not yet tight).
+int Certify(const glm::dvec3 X[10], const std::array<Bary, 4>& c, int sign,
+            int depth, Bary& at) {
+  const Cubic& cu = TheCubic();
+  double v[20];
+  for (int p = 0; p < 20; ++p) {
+    Bary b{0, 0, 0, 0};
+    for (int k = 0; k < 4; ++k)
+      for (int m = 0; m < 4; ++m)
+        b[m] += (cu.idx[p][k] / 3.0) * c[k][m];
+    v[p] = sign * DetJ(X, b[1], b[2], b[3]);
+    if (!(v[p] > 0.0)) {
+      at = b;
+      return -1;
+    }
+  }
+  bool proven = true;
+  for (int q = 0; q < 20 && proven; ++q) {
+    double bq = 0.0;
+    for (int p = 0; p < 20; ++p)
+      bq += cu.toBernstein[q][p] * v[p];
+    proven = bq > 0.0;
+  }
+  if (proven)
+    return 1;
+  constexpr int kMaxDepth = 5;
+  if (depth >= kMaxDepth)
+    return 0;
+  const auto mid = [&](int a, int b) {
+    Bary m;
+    for (int k = 0; k < 4; ++k)
+      m[k] = 0.5 * (c[a][k] + c[b][k]);
+    return m;
+  };
+  const Bary m01 = mid(0, 1), m02 = mid(0, 2), m03 = mid(0, 3), m12 = mid(1, 2),
+             m13 = mid(1, 3), m23 = mid(2, 3);
+  const std::array<Bary, 4> sub[8] = {
+      {c[0], m01, m02, m03}, {m01, c[1], m12, m13}, {m02, m12, c[2], m23},
+      {m03, m13, m23, c[3]}, {m01, m02, m03, m13},  {m01, m02, m12, m13},
+      {m02, m03, m13, m23},  {m02, m12, m13, m23}};
+  int worst = 1;
+  for (const auto& s : sub) {
+    const int r = Certify(X, s, sign, depth + 1, at);
+    if (r < 0)
+      return -1;
+    worst = std::min(worst, r);
+  }
+  return worst;
+}
+
+// Whether tet `t` folds against `sign`; `at` the point where it does.
+bool Folds(const FemMesh& mesh, std::size_t t, int sign, glm::dvec3& at) {
+  glm::dvec3 X[10];
+  for (int i = 0; i < 10; ++i)
+    X[i] = mesh.nodes[mesh.tets[t][i]];
+  const std::array<Bary, 4> whole = {Bary{1, 0, 0, 0}, Bary{0, 1, 0, 0},
+                                     Bary{0, 0, 1, 0}, Bary{0, 0, 0, 1}};
+  Bary b;
+  if (Certify(X, whole, sign, 0, b) >= 0)
+    return false;
+  // The natural point's place: the shape functions at it.
+  const double L[4] = {b[0], b[1], b[2], b[3]};
+  static const int edge[6][2] = {{0, 1}, {1, 2}, {0, 2},
+                                 {0, 3}, {1, 3}, {2, 3}};
+  at = glm::dvec3(0.0);
+  for (int i = 0; i < 4; ++i)
+    at += L[i] * (2 * L[i] - 1) * X[i];
+  for (int e = 0; e < 6; ++e)
+    at += 4 * L[edge[e][0]] * L[edge[e][1]] * X[4 + e];
+  return true;
+}
+
+} // namespace
+
+int MeshOrientation(const FemMesh& mesh) {
+  std::size_t pos = 0, neg = 0;
+  for (const auto& t : mesh.tets) {
+    const glm::dvec3 a = mesh.nodes[t[0]];
+    const double v =
+        glm::dot(mesh.nodes[t[1]] - a,
+                 glm::cross(mesh.nodes[t[2]] - a, mesh.nodes[t[3]] - a));
+    (v >= 0 ? pos : neg) += 1;
+  }
+  if (pos == 0 && neg == 0)
+    return 0;
+  return pos >= neg ? 1 : -1;
+}
+
+std::vector<TetFold> FoldedTets(const FemMesh& mesh, std::size_t limit) {
+  std::vector<TetFold> out;
+  const int sign = MeshOrientation(mesh);
+  if (sign == 0)
+    return out;
+  for (std::size_t t = 0; t < mesh.tets.size() && out.size() < limit; ++t) {
+    glm::dvec3 at;
+    if (Folds(mesh, t, sign, at))
+      out.push_back({static_cast<int>(t), at});
+  }
+  return out;
+}
+
+std::string FoldedTetRefusal(const FemMesh& mesh) {
+  const std::vector<TetFold> f = FoldedTets(mesh, 1);
+  if (f.empty())
+    return "";
+  char buf[160];
+  std::snprintf(buf, sizeof buf, "(%.4g, %.4g, %.4g) mm", f[0].at.x, f[0].at.y,
+                f[0].at.z);
+  return "the mesh has an element that folds: its curved edges turn it inside "
+         "out at " +
+         std::string(buf) + " (element " + std::to_string(f[0].tet + 1) +
+         " of " + std::to_string(mesh.tets.size()) +
+         "), so it cannot be integrated; a finer mesh size there, or a "
+         "larger fillet radius, gives the curve more elements";
+}
+
+std::size_t StraightenFoldedTets(FemMesh& mesh) {
+  const int sign = MeshOrientation(mesh);
+  if (sign == 0)
+    return 0;
+  static const int edge[6][2] = {{0, 1}, {1, 2}, {0, 2},
+                                 {0, 3}, {1, 3}, {2, 3}};
+  std::vector<std::size_t> check(mesh.tets.size());
+  for (std::size_t t = 0; t < check.size(); ++t)
+    check[t] = t;
+  std::vector<std::vector<int>> tetsOf; // built at the first fold
+  std::vector<char> moved(mesh.nodes.size(), 0);
+  std::size_t count = 0;
+  // Each pass straightens what it finds and checks the tets that share a
+  // moved node; a node straightened once stays put, so it ends.
+  while (!check.empty()) {
+    std::vector<std::size_t> next;
+    std::vector<char> queued(mesh.tets.size(), 0);
+    for (std::size_t t : check) {
+      glm::dvec3 at;
+      if (!Folds(mesh, t, sign, at))
+        continue;
+      if (tetsOf.empty()) {
+        tetsOf.resize(mesh.nodes.size());
+        for (std::size_t u = 0; u < mesh.tets.size(); ++u)
+          for (int v : mesh.tets[u])
+            tetsOf[v].push_back(static_cast<int>(u));
+      }
+      const auto& tet = mesh.tets[t];
+      for (int e = 0; e < 6; ++e) {
+        const int m = tet[4 + e];
+        if (moved[m])
+          continue;
+        moved[m] = 1;
+        mesh.nodes[m] =
+            0.5 * (mesh.nodes[tet[edge[e][0]]] + mesh.nodes[tet[edge[e][1]]]);
+        ++count;
+        for (int u : tetsOf[m])
+          if (!queued[u]) {
+            queued[u] = 1;
+            next.push_back(static_cast<std::size_t>(u));
+          }
+      }
+    }
+    check = std::move(next);
+  }
+  return count;
+}
 
 } // namespace fem

@@ -550,6 +550,34 @@ midside nodes lie on the true surface. Node order is canonical tet10 (corners
 Mesh statistics carry node and element counts and the worst normalized tet
 quality.
 
+### Curved elements that fold
+
+A midside node projected onto a tight curve -- a small fillet at a mesh
+size near its radius -- can fold its element: the Jacobian changes sign
+inside it, near the crowded corner, while its corners, its quality metric
+and often all four Gauss points look sound. Every integrator weighs a Gauss
+point by |det J|, so a folded element would be integrated as if it were
+whole. So every mesh is certified (`fem::FoldedTets`,
+`src/core/fem/FemMesher.cpp`): the mesh's orientation is the sign most
+tets' corner volumes have (Netgen's is negative), and an element is sound
+when det J keeps that sign over all of it. det J of a tet10 is a cubic, so
+its 20 Bernstein coefficients bound it (they are its values on the
+degree-3 lattice, transformed): all of the mesh's sign proves the element;
+a lattice value of the other sign (or zero) disproves it, naming where;
+otherwise the element is split in eight and each part tried again, to five
+levels (Johnen, Remacle and Geuzaine's certification; one still undecided
+there has every sample right and det J within about a thousandth of zero
+at worst, and is kept).
+
+`fem::Mesh` straightens a folded element -- its midside nodes back to the
+middles of its straight edges, its neighbours checked again
+(`StraightenFoldedTets`) -- and refuses a mesh with one still folded,
+naming the point in millimetres and suggesting a finer size there. A
+snap-through run's imperfection seed moves the nodes again, and a seed that
+folds an element is refused, asking for a smaller `imperfection_mm`.
+`[fem][element]` folds one element by pulling a midside node to a fifth of
+its edge, in both orientations.
+
 Netgen is optional. The wrapper is its own static library, `fem_mesher`,
 because Netgen's build requirements (the `PARALLEL`/MPI defines and
 `-fabi-version=17` the nixpkgs package was built with — a mismatch corrupts

@@ -2899,6 +2899,12 @@ bool SolveNonlinearBody(StudyJobBody& jb, const std::vector<Material>& mats,
     limit = nl.hasDeflectionLimit ? nl.deflectionLimitMm : 0.1 * diagonal;
     for (size_t n = 0; n < nNodes; ++n)
       jb.mesh.nodes[n] += imperfection * first->displacement[n];
+    // A seed larger than an element can fold one
+    // (docs/simulation/README.md#curved-elements-that-fold).
+    if (std::string why = FoldedTetRefusal(jb.mesh); !why.empty())
+      return fail("the imperfection seed (" + std::to_string(imperfection) +
+                  " mm of the first mode) leaves " + why +
+                  "; give a smaller imperfection_mm");
     req.maxFactor = 2.0 * linear;
     req.deflectionLimitMm = limit;
   }

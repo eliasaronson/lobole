@@ -89,4 +89,30 @@ double AutoMeshSize(const TopoDS_Shape& shape);
 // Netgen). docs/simulation/README.md#meshing.
 int NetgenPropertyEntries(const TopoDS_Shape& shape);
 
+// Curved tet10 that fold (docs/simulation/README.md#curved-elements-that-fold).
+// A tet10 whose midside nodes sit on a curved surface can turn its Jacobian's
+// sign somewhere inside while its corners look sound; every integrator takes
+// |detJ|, so such an element would be integrated as if it were whole. The
+// mesh's orientation is the sign most tets' corner volumes have (Netgen's is
+// negative); an element is sound when det J keeps that sign over all of it,
+// proven from the Bernstein coefficients of det J (a cubic), subdividing
+// where they are inconclusive (Johnen, Remacle and Geuzaine). `at` is a point
+// where det J has the wrong sign, or is zero.
+struct TetFold {
+  int tet = -1;
+  glm::dvec3 at{0.0};
+};
+// +1 or -1; 0 for a mesh with no tets.
+int MeshOrientation(const FemMesh& mesh);
+// Every folded tet, at most `limit` of them (in tet order).
+std::vector<TetFold> FoldedTets(const FemMesh& mesh, std::size_t limit = 64);
+// The refusal for the first folded tet, naming where it is; empty when none.
+[[nodiscard]] std::string FoldedTetRefusal(const FemMesh& mesh);
+// Straightens every folded tet: its midside nodes back to the middles of its
+// straight edges (a node shared with a sound neighbour moves too, and its
+// neighbours are checked again). Returns how many midside nodes moved; a
+// tet still folded after (one whose corners are inverted) is left to
+// FoldedTetRefusal.
+std::size_t StraightenFoldedTets(FemMesh& mesh);
+
 } // namespace fem

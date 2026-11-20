@@ -2175,3 +2175,47 @@ TEST_CASE("S2: a bonded participant that touches nothing is refused by name",
   CHECK(role == fem::ParticipantRole::Bonded);
   CHECK(std::string(fem::ParticipantRoleToString(role)) == "bonded");
 }
+
+// A curved tet10 that folds (docs/simulation/README.md
+// #curved-elements-that-fold): a midside node pulled to a fifth of its edge
+// turns the Jacobian's sign near the corner it crowds, while the four Gauss
+// points, the corners' volume and the quality metric all still look sound. It
+// is found (where it folds, not just that it does), refused by name, and
+// straightened.
+TEST_CASE("a curved tet10 that folds is found, refused and straightened",
+          "[fem][element]") {
+  fem::FemMesh sound = SingleTetMesh(false);
+  CHECK(fem::FoldedTets(sound).empty());
+  CHECK(fem::FoldedTetRefusal(sound).empty());
+  // Curved, not folded: the midside of edge (0,1) bowed off the edge by a
+  // tenth of its length.
+  fem::FemMesh bowed = sound;
+  bowed.nodes[4] += glm::dvec3(0, -0.2, 0);
+  CHECK(fem::FoldedTets(bowed).empty());
+
+  for (const bool flipped : {false, true}) {
+    fem::FemMesh folded = sound;
+    folded.nodes[4] =
+        folded.nodes[0] + 0.2 * (folded.nodes[1] - folded.nodes[0]);
+    if (flipped) {
+      // The same element oriented as Netgen orients: corners 1 and 2
+      // swapped, with their midsides (4 <-> 6, 8 <-> 9).
+      auto& t = folded.tets[0];
+      std::swap(t[1], t[2]);
+      std::swap(t[4], t[6]);
+      std::swap(t[8], t[9]);
+      REQUIRE(fem::MeshOrientation(folded) == -1);
+    }
+    INFO((flipped ? "negative" : "positive") << " orientation");
+    const auto f = fem::FoldedTets(folded);
+    REQUIRE(f.size() == 1);
+    CHECK(f[0].tet == 0);
+    // Where: between corner 0 and the crowded midside node.
+    CHECK(glm::length(f[0].at - folded.nodes[0]) < 0.5);
+    const std::string why = fem::FoldedTetRefusal(folded);
+    CHECK_THAT(why, Catch::Matchers::ContainsSubstring("folds"));
+    CHECK_THAT(why, Catch::Matchers::ContainsSubstring("element 1 of 1"));
+    CHECK(fem::StraightenFoldedTets(folded) == 6);
+    CHECK(fem::FoldedTets(folded).empty());
+  }
+}
