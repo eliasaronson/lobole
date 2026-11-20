@@ -502,7 +502,7 @@ void LimitRow(AppState& state, Mate* sel, RangedValue v, const char* label,
 void ConeRow(AppState& state, Mate* sel, std::string& note) {
   ImGui::PushID("cone");
   bool on = sel->coneRad.has_value();
-  if (ImGui::Checkbox("###limit_on", &on)) {
+  if (ImGui::Checkbox("###cone_on", &on)) {
     SnapshotAssembly(state);
     if (on)
       sel->coneRad = assembly::RangedValueOf(*sel, RangedValue::Cone);
