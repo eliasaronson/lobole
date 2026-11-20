@@ -153,6 +153,13 @@ def mesh_report(d):
     expect(again["stale"] is False
            and d.call("check_study", id=study)["ok"] is True,
            "made again, it is current")
+    # Editing the part marks the mesh, as the mesh size did.
+    plate = [f for f in d.call("get_state")["features"] if f["id"] == fid][0]
+    plate = {k: v for k, v in plate.items() if k != "id"}
+    plate["width"] = 62.0
+    d.call("modify_feature", feature_id=fid, feature=plate)
+    expect(d.call("set_mesh_display", study=study, view="edges")["stale"]
+           is True, "editing the part marks the mesh stale")
     d.call("set_mesh_display", study=study, view="off")
 
 
@@ -178,6 +185,7 @@ def check_three(d):
                   face={"feature_id": boss, "element": boss_face})["id"]
     d.call("delete_feature", id=boss)
     before = d.call("list_studies")["studies"][0]
+    revision = d.call("validation_revision")
     check = d.call("check_study", id=study)
     codes = sorted(p["code"] for p in check["problems"])
     problems = {p["code"]: p for p in check["problems"]}
@@ -199,8 +207,9 @@ def check_three(d):
            and problems["material"]["body"] == "Bar",
            "a material to set, on the body by name")
     after = d.call("list_studies")["studies"][0]
-    expect(len(after["loads"]) == len(before["loads"]),
-           "read-only: the study is as it was")
+    expect(after == before, "read-only: the study is as it was")
+    expect(d.call("validation_revision") == revision,
+           "and the document's version did not move")
     # A run refuses the first of them; the check was the list.
     refused(d, "run_study", "", id=study)
 
@@ -278,6 +287,14 @@ def fields_and_export(d, study, scratch):
                    range_max=250.0)
     shown = d.call("set_result_display", study=study, field="displacement")
     expect(shown["range_max"] is None, "a range is one field's")
+    # The above-yield preset: steel's yield, by name rather than by number.
+    shown = d.call("set_result_display", study=study, field="von_mises",
+                   range_max="yield")
+    expect(shown["range_max"] == 250.0, f"range_max at the yield: {shown}")
+    refused(d, "set_result_display", 'a number, null or "yield"',
+            study=study, field="von_mises", range_max="high")
+    refused(d, "set_result_display", "a stress",
+            study=study, field="displacement", range_max="yield")
     d.call("set_result_display", study=study, field="none")
 
     # --- The export.

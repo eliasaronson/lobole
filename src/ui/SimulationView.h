@@ -93,6 +93,9 @@ struct ShownField {
   // What the colour bar spans: lo/hi unless a clamp set an end.
   double barLo = 0.0, barHi = 0.0;
   bool under = false, over = false; // values lie past that end
+  // A factor's own bar stops at a few times its least value, and what is
+  // safer than that takes the top colour: the top tick reads "and above".
+  bool topOpen = false;
   bool reversed = false;            // the low end is the hot one
   bool normalized = false;          // a mode shape, a density: no unit
 };

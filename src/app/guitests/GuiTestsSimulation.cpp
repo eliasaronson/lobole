@@ -428,7 +428,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::ModifyStudy(*s_App, studyId, "Set load", [](fem::Study& cs) {
       for (fem::Load& l : cs.loads)
         if (l.type == fem::LoadType::Force)
-          l.magnitude *= 2.0;
+          l.magnitude = 2.0 * l.magnitude;
     });
     ctx->Yield(2);
     IM_CHECK(!ui::StudyMeshStale(*s_App, studyId));

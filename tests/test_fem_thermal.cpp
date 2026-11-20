@@ -20,6 +20,7 @@
 #include "core/Feature.h"
 #include "core/Measure.h"
 #include "core/features/BooleanFeature.h"
+#include "core/fem/FemFields.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemThermal.h"
@@ -962,5 +963,35 @@ TEST_CASE("stress where two materials meet is each material's own",
   // the stiff one's 250 / sStiff, or either yield over the peak, is larger.
   CHECK_THAT(r->factorOfSafety, WithinRel(soft.yieldMPa / sSoft, 1e-6));
   CHECK(r->factorOfSafety < stiff.yieldMPa / r->maxVonMises);
+
+  // The factor drawn as a field is the solve's own: its least value is the
+  // one above, and no one yield is read over every node, even when the
+  // caller has one to offer (docs/simulation/README.md#results-display).
+  fem::FieldInputs in;
+  in.yieldMPa = stiff.yieldMPa;
+  in.severalMaterials = true;
+  std::string why;
+  const std::vector<double> fos =
+      fem::NodalField(*r, fem::ResultField::FactorOfSafety, in, &why);
+  INFO(why);
+  REQUIRE(fos.size() == mesh.nodes.size());
+  CHECK_THAT(fem::RangeOf(fos).lo, WithinRel(r->factorOfSafety, 1e-12));
+  // Away from the bond and the ends each layer reads its own yield.
+  for (int n = 0; n < (int)mesh.nodes.size(); ++n) {
+    const glm::dvec3 p = mesh.nodes[n];
+    if (std::abs(p.x - L / 2) > 1e-9 || std::abs(p.y - W / 2) < 1e-9)
+      continue;
+    const bool inSoft = p.y > W / 2;
+    CHECK_THAT(fos[n], WithinRel(inSoft ? soft.yieldMPa / sSoft
+                                        : stiff.yieldMPa / sStiff,
+                                 1e-6));
+  }
+  // Read back from disk the result has no such field, and a bonded
+  // group's factor is then refused rather than read against one yield.
+  fem::FemResults stored = *r;
+  stored.nodeFactorOfSafety.clear();
+  CHECK(fem::NodalField(stored, fem::ResultField::FactorOfSafety, in, &why)
+            .empty());
+  CHECK_THAT(why, Catch::Matchers::ContainsSubstring("recompute"));
 }
 #endif // HAVE_FEM_SOLVER

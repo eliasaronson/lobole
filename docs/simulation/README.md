@@ -2517,7 +2517,7 @@ function.
 |---|---|---|
 | `von_mises`, `displacement` | MPa, mm | the result's own |
 | `principal_max`, `principal_mid`, `principal_min` | MPa, tension positive | the stress tensor's eigenvalues in closed form (`fem::Principals`): the largest is what a brittle material breaks on, the smallest the hardest compression |
-| `factor_of_safety` | -- | the body's yield strength over von Mises |
+| `factor_of_safety` | -- | yield over von Mises, the solve's own (`FemResults::nodeFactorOfSafety`): where materials meet each is read against its own yield ([stress where materials meet](#stress-where-materials-meet)), so the field's least value is the result's `factor_of_safety`; a result read from disk, or a CalculiX one, reads the body's yield |
 | `across_layers` | MPa | the normal stress along the build direction ([printed layers](#printed-layers)) |
 | `interlayer_factor` | -- | the material's interlayer strength over the tension across the layers |
 | `plastic_strain` | -- | a [plastic](#plasticity) result's equivalent plastic strain |
@@ -2530,8 +2530,8 @@ offered; one its result does not hold is listed greyed with the reason, and
 `set_result_display` refuses it with the same words (`ui::FieldRefusal`): a
 result with no stress tensor, a material with no yield or interlayer
 strength, a stress across layers on an assembly (its parts are each printed
-their own way), a factor on a bonded group (each member has its own
-material; `study_results` reports the factor against each). The build
+their own way), a bonded group's factor on a result read from disk (it
+keeps the least factor, not the field: run it again to draw it). The build
 direction is a question asked of the result, not a study input, so it is a
 display setting (`layer_normal`, the window's **Layers along**), and the
 RPC refuses the layer fields without it. The contact pressure field is a
@@ -2549,20 +2549,29 @@ and nothing else.
   temperature) from its least value, and a factor from its least value to
   four times it, its low end the hot one: a factor has no upper bound where
   the stress is zero, and every node past four times the governing one
-  reads as safe.
+  takes the top colour, the top tick reading "and above" (`23.5+`). Only a
+  range the user set has an off-scale colour at a factor's safe end.
 - **The range clamp.** `range_min` and `range_max` (the window's **Range**
   fields, in the field's unit; empty is the field's own) replace an end of
   the bar. Values past the hot end take pink and values past the other end
   grey (a factor's hot end is its low one, so what is safer than its bar
   reads grey), and the bar shows each as a cap at that end, so a clamped
-  picture cannot be read as the whole field. **Above yield** tops
-  the range of a stress at the least yield strength of the solved bodies:
-  what is over it has yielded. A range belongs to its field and is cleared
-  when the field changes.
+  picture cannot be read as the whole field. **Above yield**
+  (`range_max: "yield"`) tops the range of a stress at the least yield
+  strength of the solved bodies: what is over it has yielded. A range
+  belongs to its field and is cleared when the field changes.
 - **Markers.** A magenta cross at the field's maximum and a pale blue one at
   its minimum, each tagged with its value, both warped with the deformation;
-  under the bar, where each is in millimetres and on which body. `markers:
-  false` (the **Mark max, min** box) leaves the caption of the maximum.
+  under the bar, where each is in millimetres and on which body. Where the
+  two ends are close on screen the minimum's tag is pushed below the
+  maximum's. A factor is marked at its least value only (its greatest is
+  wherever the stress is nearly zero). `markers: false` (the **Mark max,
+  min** box) leaves the caption of the hot end.
+- **Out of the way.** The legend sits on a backdrop of its own, the unit
+  once in its title and not on the ticks. While a mesh or a result is on
+  show the loads' labels are hidden, except the load whose row is selected
+  in the window (click it; again to let it go): the picture is the subject
+  then, and the setup's labels covered it.
 
 `set_result_display` colours the raster viewport, which is what `screenshot`
 captures. `render_still` renders the model, not the field.
@@ -2600,7 +2609,9 @@ field of arrows over the face, each along its own triangle's inward normal,
 on a grid spaced from the view-scaled glyph length; a fixed face gets anchor
 hatches; gravity is one arrow from the centre of mass of the meshed set,
 drawn in the see-through channel because that point is inside the solid.
-Labels with value and unit sit at the glyphs and can be switched off. On an
+Labels with value and unit sit at the glyphs and can be switched off; over
+a mesh or a result only the selected load's is drawn
+([results display](#results-display)). On an
 assembly study a rigid support is drawn as a ghost with its contact faces
 tinted as a fixture, and bonded seams in the bond colour.
 
@@ -2861,6 +2872,6 @@ verb that names a study for context (`add_load`, `add_refinement`,
 - A stored mesh: the kept mesh is the session's, each study makes its own,
   and a reopened result has no interior to export or cut
   ([the simulation document](../plans/simulation-document.md)). On an
-  assembly, an asynchronous Mesh, a check that itemises, and a factor field
-  on a bonded group.
+  assembly, an asynchronous Mesh, a check that itemises, and a bonded
+  group's factor field once it is read back from disk.
 - A binary or compressed VTU: the export is ASCII.

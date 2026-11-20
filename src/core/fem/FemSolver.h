@@ -159,6 +159,10 @@ struct HeatFlow {
 using Stress = std::array<double, 6>;
 
 // Solved fields, one entry per mesh node.
+// A value no factor reaches: where the stress is zero or pushes the layers
+// together, a factor of safety is unbounded and reads as this.
+inline constexpr double kUnboundedFactor = 1e30;
+
 struct FemResults {
   std::vector<glm::dvec3> displacement; // mm
   std::vector<double> vonMises;         // MPa
@@ -187,6 +191,14 @@ struct FemResults {
   // body's yield over maxVonMises there).
   double factorOfSafety = 0.0;
   glm::dvec3 fosAt{0, 0, 0};
+  // The same at each node: the least yield / von Mises over the materials
+  // that meet there, each against its own yield, kUnboundedFactor where the
+  // stress is zero or no material there has a yield. Its least value is
+  // `factorOfSafety`. The in-house solve's, and a run's only: empty on a
+  // CalculiX result and on one read from disk, where the factor field reads
+  // the body's yield over von Mises
+  // (docs/simulation/README.md#results-display).
+  std::vector<double> nodeFactorOfSafety;
 
   // A plastic result (docs/simulation/README.md#plasticity): the equivalent
   // plastic strain at each node, extrapolated from the integration points

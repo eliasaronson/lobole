@@ -138,6 +138,17 @@ std::vector<double> NodalField(const FemResults& r, ResultField f,
   case ResultField::FactorOfSafety:
     if (r.vonMises.empty())
       return none("the result has no stress (a modal or thermal result)");
+    // The solve's own: each material against its own yield where several
+    // meet (docs/simulation/README.md#stress-where-materials-meet), so the
+    // field's least value is FemResults::factorOfSafety.
+    if (!r.nodeFactorOfSafety.empty() &&
+        r.nodeFactorOfSafety.size() == r.vonMises.size())
+      return r.nodeFactorOfSafety;
+    if (in.severalMaterials)
+      return none("a bonded group's factor field is its run's, and this "
+                  "result was read from disk (it keeps the least factor, "
+                  "which study_results reports): run the study again "
+                  "(run_study {recompute: true}) to draw it");
     if (!(in.yieldMPa > 0.0))
       return none("the material has no yield strength");
     out.reserve(r.vonMises.size());

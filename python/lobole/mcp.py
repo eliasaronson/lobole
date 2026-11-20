@@ -2231,8 +2231,9 @@ _reference("set_result_display", "Show a study's result overlay in the viewport 
           "(0..1, 0 = auto) sets the iso-surface level. range_min / "
           "range_max clamp the legend in the field's unit (null = the "
           "field's own): what is past them takes the over or under colour, "
-          "so range_max at the yield strength shows what yielded. markers "
-          "marks the maximum and minimum. Enters simulation mode; "
+          "and range_max 'yield' tops a stress at the material's yield, "
+          "so what is over it has yielded. markers marks the maximum and "
+          "minimum (a factor's least only). Enters simulation mode; "
           "display-only, like set_explode.")
 
 

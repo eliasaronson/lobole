@@ -910,11 +910,18 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
 
     out.vonMises.resize(nNodes, 0.0);
     out.stress.assign(nNodes, Stress{});
-    // yield / von Mises at a node for one material group, the least kept.
+    // yield / von Mises at a node for one material group, the least kept,
+    // at the node and over the whole result.
+    const bool anyYield = std::any_of(groupYield.begin(), groupYield.end(),
+                                      [](double y) { return y > 0; });
+    if (anyYield)
+      out.nodeFactorOfSafety.assign(nNodes, kUnboundedFactor);
     const auto readFoS = [&](int n, int group, double vm) {
       const double y = groupYield[group];
-      if (y > 0 && vm > 0 &&
-          (out.factorOfSafety == 0.0 || y / vm < out.factorOfSafety)) {
+      if (!(y > 0 && vm > 0))
+        return;
+      out.nodeFactorOfSafety[n] = std::min(out.nodeFactorOfSafety[n], y / vm);
+      if (out.factorOfSafety == 0.0 || y / vm < out.factorOfSafety) {
         out.factorOfSafety = y / vm;
         out.fosAt = mesh.nodes[n];
       }

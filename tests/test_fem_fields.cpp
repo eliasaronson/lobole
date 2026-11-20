@@ -256,6 +256,16 @@ TEST_CASE("A pulled bar's principal stresses are F/A and nothing",
   CHECK_THAT(at(fem::ResultField::FactorOfSafety), WithinRel(2.5, 0.05));
   CHECK_THAT(at(fem::ResultField::Displacement),
              WithinRel(F * (L / 2) / (200000.0 * W * W), 0.05));
+  // Layers at 45 degrees to the pull carry n.sigma.n = sigma cos^2 45 =
+  // sigma / 2, and layers along it (stacked across the bar) none.
+  in.layerNormal = {1, 0, 1};
+  CHECK_THAT(at(fem::ResultField::AcrossLayers), WithinRel(sigma / 2, 0.03));
+  in.layerNormal = {0, 0, 1};
+  CHECK_THAT(at(fem::ResultField::AcrossLayers), WithinAbs(0.0, 0.03 * sigma));
+  // A solve given no yield keeps no factor of its own; the field then
+  // reads the body's yield over von Mises, as above.
+  CHECK(res->factorOfSafety == 0.0);
+  CHECK(res->nodeFactorOfSafety.empty());
 }
 
 TEST_CASE("A pressurised cylinder's principal stresses are Lame's, and its "

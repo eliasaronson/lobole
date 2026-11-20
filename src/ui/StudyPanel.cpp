@@ -841,6 +841,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       row.tooltip = dir;
     }
     row.menuId = "###load_ctx_" + std::to_string(l.id);
+    row.selected = state.simulation.selectedLoadId == l.id;
     const uint64_t loadId = l.id;
     const bool remote = l.type == fem::LoadType::Remote;
     const glm::dvec3 point = l.point;
@@ -861,7 +862,11 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###load_del"))
         removeLoad = loadId;
     };
-    ListRow(row);
+    // A click selects the load (again: lets it go), which keeps its label
+    // on over a mesh or a result.
+    if (ListRow(row).clicked)
+      state.simulation.selectedLoadId =
+          state.simulation.selectedLoadId == loadId ? 0 : loadId;
   }
   if (removeLoad != 0)
     ModifyStudy(state, s.id, "Remove load", [&](fem::Study& cs) {
@@ -2606,20 +2611,13 @@ void DrawFieldLegend(AppState& state) {
   // reader had to trust.
   ImDrawList* dl = ViewportDrawList();
   const float lineH = ImGui::GetTextLineHeight();
-  const float x = state.viewportPos.x + 16.0f;
-  const float barW = 18.0f, barH = 180.0f;
+  const float barW = 14.0f, barH = 160.0f, capH = 8.0f;
+  const float pad = 10.0f, margin = 12.0f, tickGap = 8.0f;
   const bool extremes =
       !shown->mesh && !shown->normalized && shown->hasExtremes;
-  // Room under the bar for its captions (one line each).
-  const int captions = shown->mesh ? (shown->reversed ? 1 : 0)
-                       : extremes  ? (sim.showExtremes ? 2 : 1)
-                                   : 0;
-  const float y1 = state.viewportPos.y + state.viewportSize.y - 20.0f -
-                   lineH * std::max(captions, 1) - (shown->under ? 8.0f : 0.0f);
-  const float y0 = y1 - barH;
   std::vector<std::string> head;
   if (study) {
-    head.push_back(study->name + "  " +
+    head.push_back(study->name + ", " +
                    (shown->mesh                                 ? "mesh"
                     : buckling                                  ? "buckling"
                     : modal                                     ? "modal"
@@ -2641,11 +2639,11 @@ void DrawFieldLegend(AppState& state) {
     if (mode) {
       char buf[96];
       if (buckling)
-        std::snprintf(buf, sizeof(buf), "mode %d of %zu  factor x %.4g",
+        std::snprintf(buf, sizeof(buf), "mode %d of %zu, factor x %.4g",
                       std::clamp(sim.activeMode, 0, (int)modes - 1) + 1, modes,
                       mode->factor);
       else
-        std::snprintf(buf, sizeof(buf), "mode %d of %zu  %.4g Hz",
+        std::snprintf(buf, sizeof(buf), "mode %d of %zu, %.4g Hz",
                       std::clamp(sim.activeMode, 0, (int)modes - 1) + 1, modes,
                       mode->frequencyHz);
       head.push_back(buf);
@@ -2661,19 +2659,83 @@ void DrawFieldLegend(AppState& state) {
         "case " +
         rt->caseNames[std::clamp(sim.activeCase, 0,
                                  static_cast<int>(rt->caseNames.size()) - 1)]);
-  head.push_back(shown->unit.empty() ? shown->title
-                                     : shown->title + " (" + shown->unit + ")");
-  const float capH = 8.0f;
-  float ty =
-      y0 - 10.0f - (shown->over ? capH : 0.0f) - lineH * (float)head.size();
-  for (const std::string& line : head) {
-    dl->AddText(ImVec2(x, ty), IM_COL32_WHITE, line.c_str());
-    ty += lineH;
+  // The quantity last, nearest the bar, its unit once here and not on the
+  // ticks.
+  const std::string title = shown->unit.empty()
+                                ? shown->title
+                                : shown->title + " (" + shown->unit + ")";
+
+  // The ticks: the ends and the quarters, so a colour halfway up the bar is
+  // a number too.
+  char buf[160];
+  std::string ticks[5];
+  for (int k = 0; k <= 4; ++k) {
+    std::snprintf(buf, sizeof(buf), "%.3g",
+                  shown->barLo + (shown->barHi - shown->barLo) * (k / 4.0));
+    ticks[k] = buf;
+  }
+  if (shown->topOpen)
+    ticks[4] += "+";
+
+  // Under the bar: where the hot end is, in world millimetres and on which
+  // body (the magenta cross marks it), and with the markers on, the other
+  // end (the pale cross); a mesh's worst element. A factor's hot end is its
+  // least value and is the only one marked.
+  std::vector<std::string> captions;
+  const auto where = [&](const char* what, const glm::dvec3& at,
+                         const std::string& body) {
+    std::snprintf(buf, sizeof(buf), "%s at (%.1f, %.1f, %.1f)%s%s", what, at.x,
+                  at.y, at.z, body.empty() ? "" : " on ", body.c_str());
+    captions.push_back(buf);
+  };
+  if (shown->mesh) {
+    if (shown->reversed) {
+      std::snprintf(buf, sizeof(buf), "worst %.2f", shown->lo);
+      captions.push_back(buf);
+    }
+  } else if (extremes) {
+    if (shown->reversed) {
+      where("min", shown->loAt, shown->loBody);
+    } else {
+      where("max", shown->hiAt, shown->hiBody);
+      if (sim.showExtremes)
+        where("min", shown->loAt, shown->loBody);
+    }
   }
 
-  // A vertical Turbo colorbar anchored to the viewport's lower-left corner,
-  // the high value at the top; a factor's runs the other way, its low end
-  // the hot one.
+  // --- Layout, from the viewport's lower-left corner up.
+  const float x = state.viewportPos.x + margin + pad;
+  const float bottom =
+      state.viewportPos.y + state.viewportSize.y - margin - pad;
+  const float capsTop = bottom - lineH * (float)captions.size();
+  const float y1 = capsTop - lineH * 0.5f - (captions.empty() ? 0.0f : 6.0f) -
+                   (shown->under ? capH : 0.0f);
+  const float y0 = y1 - barH;
+  const float titleY =
+      y0 - (shown->over ? capH : 0.0f) - lineH * 0.5f - 6.0f - lineH;
+  const float headY = titleY - lineH * (float)head.size();
+  float width = ImGui::CalcTextSize(title.c_str()).x;
+  for (const std::string& h : head)
+    width = std::max(width, ImGui::CalcTextSize(h.c_str()).x);
+  for (const std::string& t : ticks)
+    width = std::max(width, barW + tickGap + ImGui::CalcTextSize(t.c_str()).x);
+  for (const std::string& c : captions)
+    width = std::max(width, ImGui::CalcTextSize(c.c_str()).x);
+  // A backdrop, so the legend reads over any colour and nothing drawn in
+  // the scene (a glyph, an edge) runs through its text.
+  const ImVec2 boxLo(x - pad, headY - pad),
+      boxHi(x + width + pad, bottom + pad);
+  dl->AddRectFilled(boxLo, boxHi, IM_COL32(18, 20, 26, 232), 6.0f);
+  const ImU32 dim = IM_COL32(255, 255, 255, 190);
+  float ty = headY;
+  for (const std::string& line : head) {
+    dl->AddText(ImVec2(x, ty), dim, line.c_str());
+    ty += lineH;
+  }
+  dl->AddText(ImVec2(x, titleY), IM_COL32_WHITE, title.c_str());
+
+  // A vertical Turbo colorbar, the high value at the top; a factor's runs
+  // the other way, its low end the hot one.
   const auto colour = [&](float t) {
     return Turbo(shown->reversed ? 1.0f - t : t);
   };
@@ -2684,7 +2746,7 @@ void DrawFieldLegend(AppState& state) {
                                 ImVec2(x + barW, y1 - t0 * barH), colour(t1),
                                 colour(t1), colour(t0), colour(t0));
   }
-  const ImU32 frame = IM_COL32(255, 255, 255, 160);
+  const ImU32 frame = IM_COL32(255, 255, 255, 140);
   dl->AddRect(ImVec2(x, y0), ImVec2(x + barW, y1), frame);
   // Past the ends: what lies over the range and under it, in the colours
   // the picture draws them in (FieldStyle::kOver / kUnder).
@@ -2700,77 +2762,96 @@ void DrawFieldLegend(AppState& state) {
     cap(y0 - capH, shown->reversed ? FieldStyle::kUnder : FieldStyle::kOver);
   if (shown->under)
     cap(y1, shown->reversed ? FieldStyle::kOver : FieldStyle::kUnder);
-  const char* unit = shown->unit.c_str();
-  char buf[160];
-  std::snprintf(buf, sizeof(buf), "%.3g %s", shown->barHi, unit);
-  dl->AddText(ImVec2(x + barW + 6, y0 - 6), IM_COL32_WHITE, buf);
-  // Intermediate ticks, so a colour halfway up the bar is a number too.
-  for (int k = 1; k < 4; ++k) {
+  for (int k = 0; k <= 4; ++k) {
     const float yk = y1 - barH * (k / 4.0f);
-    dl->AddLine(ImVec2(x + barW, yk), ImVec2(x + barW + 4, yk), frame);
-    std::snprintf(buf, sizeof(buf), "%.3g",
-                  shown->barLo + (shown->barHi - shown->barLo) * (k / 4.0));
-    dl->AddText(ImVec2(x + barW + 8, yk - lineH * 0.5f),
-                IM_COL32(255, 255, 255, 200), buf);
+    if (k > 0 && k < 4)
+      dl->AddLine(ImVec2(x + barW, yk), ImVec2(x + barW + 4, yk), frame);
+    dl->AddText(ImVec2(x + barW + tickGap, yk - lineH * 0.5f),
+                k == 0 || k == 4 ? IM_COL32_WHITE : dim, ticks[k].c_str());
   }
-  std::snprintf(buf, sizeof(buf), "%.3g", shown->barLo);
-  dl->AddText(ImVec2(x + barW + 6, y1 - 6), IM_COL32_WHITE, buf);
-
-  // Under the bar: where the maximum is, in world millimetres and on which
-  // body (the magenta cross marks it), and with the markers on, the
-  // minimum (the pale cross); a mesh's worst element.
-  float cy = y1 + 12.0f + (shown->under ? capH : 0.0f);
-  const ImU32 dim = IM_COL32(255, 255, 255, 200);
-  if (shown->mesh) {
-    if (shown->reversed) {
-      std::snprintf(buf, sizeof(buf), "worst %.2f", shown->lo);
-      dl->AddText(ImVec2(x, cy), dim, buf);
-    }
-    return;
-  }
-  if (!extremes)
-    return;
-  const auto caption = [&](const char* what, const glm::dvec3& at,
-                           const std::string& body) {
-    std::snprintf(buf, sizeof(buf), "%s at (%.1f, %.1f, %.1f)%s%s", what, at.x,
-                  at.y, at.z, body.empty() ? "" : " on ", body.c_str());
-    dl->AddText(ImVec2(x, cy), dim, buf);
+  float cy = capsTop;
+  for (const std::string& c : captions) {
+    dl->AddText(ImVec2(x, cy), dim, c.c_str());
     cy += lineH;
-  };
-  caption("max", shown->hiAt, shown->hiBody);
-  if (!sim.showExtremes)
+  }
+  if (!extremes || !sim.showExtremes || state.camera == nullptr)
     return;
-  caption("min", shown->loAt, shown->loBody);
-  // The values at the crosses, so a marker reads without the legend.
-  if (state.camera == nullptr)
-    return;
+
+  // The values at the crosses, so a marker reads without the legend: the
+  // hot end's tag above its cross and the other's below, pushed clear of it
+  // where the two ends are close on screen.
   const glm::mat4 viewProj =
       state.camera->GetProjectionMatrix() * state.camera->GetViewMatrix();
-  // The maximum's tag above its cross and the minimum's below, so the two
-  // stay apart where the ends of the field are close.
-  const auto tag = [&](const glm::dvec3& at, const glm::dvec3& disp,
-                       const char* what, double value, bool above) {
+  const std::string unit = shown->unit.empty() ? "" : " " + shown->unit;
+  struct Tag {
+    ImVec2 lo, hi;
+    std::string text;
+    float px = 0.0f; // the cross it labels, on screen
+  };
+  const auto place = [&](const glm::dvec3& at, const glm::dvec3& disp,
+                         const char* what, double value,
+                         bool above) -> std::optional<Tag> {
     const glm::vec3 w = glm::vec3(at) + sim.deformScale * glm::vec3(disp);
     if ((viewProj * glm::vec4(w, 1.0f)).w <= 1e-6f)
-      return;
+      return std::nullopt;
     const glm::vec2 p = WorldToScreen(state, w);
     if (p.x < state.viewportPos.x || p.y < state.viewportPos.y ||
         p.x > state.viewportPos.x + state.viewportSize.x ||
         p.y > state.viewportPos.y + state.viewportSize.y)
-      return;
-    char text[96];
-    std::snprintf(text, sizeof(text), "%s %.3g%s%s", what, value,
-                  shown->unit.empty() ? "" : " ", unit);
-    const ImVec2 size = ImGui::CalcTextSize(text);
-    const ImVec2 pos(p.x + 10.0f, above ? p.y - size.y - 8.0f : p.y + 8.0f);
-    dl->AddRectFilled(ImVec2(pos.x - 5.0f, pos.y - 3.0f),
-                      ImVec2(pos.x + size.x + 5.0f, pos.y + size.y + 3.0f),
-                      IM_COL32(20, 22, 28, 200), 4.0f);
-    dl->AddText(pos, IM_COL32(255, 255, 255, 235), text);
+      return std::nullopt;
+    Tag t;
+    std::snprintf(buf, sizeof(buf), "%s %.3g%s", what, value, unit.c_str());
+    t.text = buf;
+    const ImVec2 size = ImGui::CalcTextSize(buf);
+    const float top = above ? p.y - size.y - 14.0f : p.y + 8.0f;
+    t.px = p.x;
+    t.lo = ImVec2(p.x + 10.0f, top);
+    t.hi = ImVec2(p.x + 20.0f + size.x, top + size.y + 6.0f);
+    return t;
   };
-  tag(shown->hiAt, shown->hiDisp, "max", shown->hi, true);
-  if (shown->hi > shown->lo)
-    tag(shown->loAt, shown->loDisp, "min", shown->lo, false);
+  const auto overlaps = [](ImVec2 alo, ImVec2 ahi, ImVec2 blo, ImVec2 bhi) {
+    return alo.x < bhi.x && blo.x < ahi.x && alo.y < bhi.y && blo.y < ahi.y;
+  };
+  const auto shift = [](Tag& t, float dx, float dy) {
+    t.lo = ImVec2(t.lo.x + dx, t.lo.y + dy);
+    t.hi = ImVec2(t.hi.x + dx, t.hi.y + dy);
+  };
+  std::vector<Tag> tags;
+  const auto add = [&](std::optional<Tag> t) {
+    if (!t)
+      return;
+    // Inside what is seen: a tag that would run under the tool window or
+    // off the viewport's right edge goes to the left of its cross.
+    const glm::vec4& tw = state.toolWindowRect;
+    const bool windowOpen =
+        state.toolWindowLastFrame >= ImGui::GetFrameCount() - 1 &&
+        tw.z > tw.x && tw.w > tw.y;
+    if ((windowOpen && overlaps(t->lo, t->hi, ImVec2(tw.x - 4.0f, tw.y),
+                                ImVec2(tw.z, tw.w))) ||
+        t->hi.x > state.viewportPos.x + state.viewportSize.x)
+      shift(*t, t->px - 10.0f - (t->hi.x - t->lo.x) - t->lo.x, 0.0f);
+    // Clear of the legend: a tag over it is moved out past its right edge.
+    if (overlaps(t->lo, t->hi, boxLo, boxHi))
+      shift(*t, boxHi.x + 6.0f - t->lo.x, 0.0f);
+    // And clear of the tag before it, below it.
+    if (!tags.empty() &&
+        overlaps(t->lo, ImVec2(t->hi.x, t->hi.y + 4.0f), tags[0].lo,
+                 ImVec2(tags[0].hi.x, tags[0].hi.y + 4.0f)))
+      shift(*t, 0.0f, tags[0].hi.y + 4.0f - t->lo.y);
+    tags.push_back(*t);
+  };
+  if (shown->reversed) {
+    add(place(shown->loAt, shown->loDisp, "min", shown->lo, true));
+  } else {
+    add(place(shown->hiAt, shown->hiDisp, "max", shown->hi, true));
+    if (shown->hi > shown->lo)
+      add(place(shown->loAt, shown->loDisp, "min", shown->lo, false));
+  }
+  for (const Tag& t : tags) {
+    dl->AddRectFilled(t.lo, t.hi, IM_COL32(18, 20, 26, 210), 4.0f);
+    dl->AddText(ImVec2(t.lo.x + 5.0f, t.lo.y + 3.0f),
+                IM_COL32(255, 255, 255, 235), t.text.c_str());
+  }
 }
 
 namespace {
@@ -3431,8 +3512,16 @@ void DrawSimulationLabels(AppState& state) {
   const auto col = [](const glm::vec4& c) {
     return IM_COL32(int(c.r * 255), int(c.g * 255), int(c.b * 255), 255);
   };
+  // While a mesh or a result is on show only the selected load keeps its
+  // label (docs/simulation/README.md#results-display): the picture is the
+  // subject then, and the setup's labels sat over it.
+  const bool pictured = sim.meshView != SimulationState::MeshView::Off ||
+                        (sim.field != SimulationState::Field::None &&
+                         sim.shown != nullptr && !sim.shown->mesh);
   const fem::Study shown = host.Shown(*s);
   for (const fem::Load& load : shown.loads) {
+    if (pictured && load.id != sim.selectedLoadId)
+      continue;
     if (load.contactWith != 0) {
       // At the first contact face the imprint found on the support.
       for (const fem::ContactPatch& patch : SimulationContacts(state)) {
@@ -3495,6 +3584,8 @@ void DrawSimulationLabels(AppState& state) {
       break;
     }
   }
+  if (pictured)
+    return; // the keep faces' and gravity's labels too
   for (const ElementRef& keep : s->keepFaces) {
     uint32_t mesh = 0, index = 0;
     if (ResolveFaceItem(state, {SelectionItem::Kind::Face, 0, keep}, mesh,

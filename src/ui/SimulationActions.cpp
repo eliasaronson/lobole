@@ -67,11 +67,20 @@ void AppendStudyMarker(const AppState& state,
   if (shown == nullptr || shown->mesh || shown->normalized ||
       !shown->hasExtremes || !sim.showExtremes)
     return;
-  cross(glm::vec3(shown->hiAt) + sim.deformScale * glm::vec3(shown->hiDisp),
-        glm::vec3(1.0f, 0.1f, 0.8f), L); // magenta, distinct from CoG amber
+  // A factor's hot end is its least value, and its greatest is only where
+  // the stress is nearly zero: it is marked at its least alone.
+  const glm::vec3 hot(1.0f, 0.1f, 0.8f); // magenta, distinct from CoG amber
+  const glm::vec3 lo =
+      glm::vec3(shown->loAt) + sim.deformScale * glm::vec3(shown->loDisp);
+  const glm::vec3 hi =
+      glm::vec3(shown->hiAt) + sim.deformScale * glm::vec3(shown->hiDisp);
+  if (shown->reversed) {
+    cross(lo, hot, L);
+    return;
+  }
+  cross(hi, hot, L);
   if (shown->hi > shown->lo)
-    cross(glm::vec3(shown->loAt) + sim.deformScale * glm::vec3(shown->loDisp),
-          glm::vec3(0.55f, 0.8f, 1.0f), 0.6f * L);
+    cross(lo, glm::vec3(0.55f, 0.8f, 1.0f), 0.6f * L);
 }
 bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error,
                       const fem::ConvergeOptions& converge) {

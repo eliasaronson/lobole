@@ -797,6 +797,10 @@ struct SimulationState {
   // "0.5 MPa", "fixed", "g 9.81 m/s^2"). On by default: a setup whose
   // numbers are only in the panel cannot be checked against the picture.
   bool showLabels = true;
+  // The load whose row was clicked in the window: its label stays on while
+  // a mesh or a result is shown, when every other load's is hidden so the
+  // picture is not covered in text. 0 = none.
+  uint64_t selectedLoadId = 0;
   // The gravity glyph stands at the centre of mass, which is an OCC volume
   // integral over every body; cached against the document version so the
   // glyph pass does not recompute it per frame.

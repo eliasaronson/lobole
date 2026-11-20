@@ -525,6 +525,7 @@ fem::FieldInputs InputsFor(AppState& state, const StudyHost& host,
                            fem::ResultField f) {
   fem::FieldInputs in;
   in.layerNormal = state.simulation.layerNormal;
+  in.severalMaterials = SolvedOnSeveral(host, s);
   if (f == fem::ResultField::FactorOfSafety ||
       f == fem::ResultField::InterlayerFactor) {
     const auto& mp = MaterialOfBody(state, host, s, b.bodyIndex);
@@ -555,10 +556,6 @@ std::string KindRefusal(const StudyHost& host, const fem::Study& s,
       host.IsAssembly())
     return "the stress across layers is a part study's: an assembly's parts "
            "are each printed their own way";
-  if ((field == F::FactorOfSafety || field == F::InterlayerFactor) &&
-      SolvedOnSeveral(host, s))
-    return "on a bonded group each member has its own material; "
-           "study_results reports the factor of safety against each";
   return "";
 }
 
@@ -753,6 +750,14 @@ bool BuildResultOverlay(AppState& state, const StudyHost& host,
   const double eps = 1e-9 * std::max(std::abs(shown.barHi), 1.0);
   shown.under = shown.lo < shown.barLo - eps;
   shown.over = shown.hi > shown.barHi + eps || anyUnbounded;
+  // A factor's own top is not a limit anyone set: what is safer than it is
+  // drawn in the top colour, and the tick says "and above". Only a range the
+  // user set has an off-scale colour there.
+  if (!shown.normalized && spec->factor && !sim.clampHi && shown.over) {
+    shown.over = false;
+    shown.topOpen = true;
+  }
+  const double tMax = shown.topOpen ? 1.0 : 2.0;
 
   // --- The triangles.
   for (const BodyField& bf : fields) {
@@ -765,7 +770,7 @@ bool BuildResultOverlay(AppState& state, const StudyHost& host,
         v[i].displacement =
             bf.disp ? glm::vec3((*bf.disp)[n]) : glm::vec3(0.0f);
         const double t = span > 0.0 ? (bf.value[n] - shown.barLo) / span : 0.0;
-        v[i].scalar = static_cast<float>(std::clamp(t, -1.0, 2.0));
+        v[i].scalar = static_cast<float>(std::clamp(t, -1.0, tMax));
         v[i].edge = glm::vec3(1.0f);
       }
       EmitTri6(verts, indices, v);

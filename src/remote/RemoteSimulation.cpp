@@ -1227,9 +1227,11 @@ static constexpr MethodDoc SimulationMethods[] = {
      "shape | density | none. A field the study's result does not hold is "
      "refused, saying what is missing. `range_min` / `range_max` clamp the "
      "legend in the field's own unit (null gives that end back to the "
-     "field): past them the picture takes the over and under colours, so "
-     "range_max at the yield strength shows what has yielded. `markers` "
-     "(default on) marks the field's maximum and minimum. "
+     "field): past them the picture takes the over and under colours. "
+     "range_max \"yield\" (a stress field's) sets it at the least yield "
+     "strength of the solved bodies, which shows what has yielded. "
+     "`markers` (default on) marks the field's maximum and minimum (a "
+     "factor's least only). "
      "(temperature: a "
      "thermal study's, or a static one's under a thermal_load, its legend in "
      "degrees C; heat_flux: a thermal study's, W/m^2). It colours the raster "
@@ -2724,6 +2726,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       study = p.at("study").get<uint64_t>();
       host.Require(*study);
     }
+    if (!p.contains("view") || !p.at("view").is_string())
+      throw std::runtime_error("view is required: off, edges, quality or "
+                               "size");
     const std::string v = p.at("view").get<std::string>();
     ui::SimulationState::MeshView view = ui::SimulationState::MeshView::Off;
     if (v == "off")
@@ -4543,10 +4548,34 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       const json& v = p.at(key);
       if (v.is_null())
         return b;
+      // "yield", the Above yield preset: a stress's range topped at the
+      // least yield of the solved bodies, so what is over it has yielded.
+      if (v.is_string() && v.get<std::string>() == "yield" &&
+          std::string(key) == "range_max") {
+        using F = ui::SimulationState::Field;
+        if (field != F::VonMises && field != F::PrincipalMax &&
+            field != F::PrincipalMin)
+          throw std::runtime_error("range_max \"yield\" tops a stress "
+                                   "read against yield (von_mises, "
+                                   "principal_max, principal_min); field " +
+                                   f + " is not one");
+        const std::optional<double> y = ui::YieldClampMPa(
+            state, study.value_or(state.simulation.activeStudyId));
+        if (!y)
+          throw std::runtime_error("range_max \"yield\": no solved body's "
+                                   "material has a yield strength");
+        b.on = true;
+        b.value = *y;
+        return b;
+      }
       if (!v.is_number() || !std::isfinite(v.get<double>()))
         throw std::runtime_error(std::string(key) +
-                                 " is a number in the field's unit, or null "
-                                 "for the field's own; got " +
+                                 std::string(std::string(key) == "range_max"
+                                                 ? " is a number, null or "
+                                                   "\"yield\""
+                                                 : " is a number or null") +
+                                 " (a number in the field's unit, null for "
+                                 "the field's own); got " +
                                  v.dump());
       b.on = true;
       b.value = v.get<double>();

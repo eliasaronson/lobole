@@ -68,10 +68,12 @@ struct FieldInputs {
   glm::dvec3 layerNormal{0.0};
   double yieldMPa = 0.0;
   double interlayerMPa = 0.0;
+  // The result is of a bonded group, several materials in one mesh: its
+  // factor of safety is only the solve's own (FemResults::
+  // nodeFactorOfSafety), never one yield over every node.
+  bool severalMaterials = false;
 };
-// A value no factor reaches: where the stress is zero or pushes the layers
-// together, the factor is unbounded and reads as this.
-inline constexpr double kUnboundedFactor = 1e30;
+// fem::kUnboundedFactor (FemSolver.h) is what an unbounded factor reads as.
 
 // One value per node of `r`. Empty, with *why saying what is missing, when
 // the result does not hold the field (a modal result has no stress, a
