@@ -237,6 +237,12 @@ std::optional<glm::dmat4> ConnectorWorldFrame(AppState& state,
 // Appends the mate tool's connector triads (picked connectors) to `lines`.
 void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
 
+// The selected (or edited) mate's limits, drawn where they act
+// (docs/assemblies/README.md#mate-limits): an arc about the axis for a
+// rotation range, a span along it for an offset, a box in the plane for a
+// planar slide, a cone for a ball; a tick where the mate stands now.
+void AppendMateLimitOverlay(AppState& state, std::vector<LineVertex3D>& lines);
+
 // The 3D drag gizmo (A2.5). PublishGizmoHandles publishes the translate/rotate
 // handles for the selected non-fixed occurrence (or the selected job part's
 // placement) into state.viewportHandles, where the shared hit test AND the

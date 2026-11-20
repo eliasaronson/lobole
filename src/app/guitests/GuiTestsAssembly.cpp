@@ -2115,6 +2115,95 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
              glm::radians(12.0f));
   };
 
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "dragging_a_limited_revolute_stops_at_its_limit");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // Mate limits (docs/assemblies/README.md#mate-limits): a revolute that
+    // may turn 90 degrees either way, dragged round its ring through 300,
+    // stops AT 90 -- not past it, and not snapping back to where the drag
+    // began -- and says what holds it while it does.
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx); // 2x2x2 at the origin
+    const uint64_t partSlotId = s_App->parts[0].id;
+    ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    Occurrence base;
+    base.partId = partSlotId;
+    base.fixed = true;
+    const uint64_t baseId = s_App->assembly->AddOccurrence(base);
+    Occurrence spinner;
+    spinner.partId = partSlotId;
+    const uint64_t spinId = s_App->assembly->AddOccurrence(spinner);
+    Mate axle;
+    axle.type = MateType::Revolute;
+    axle.name = "hinge";
+    axle.a.occurrenceId = baseId;
+    axle.a.anchor.origin = true;
+    axle.b.occurrenceId = spinId;
+    axle.b.anchor.origin = true;
+    axle.flipped = false;
+    axle.offset = 6.0;
+    axle.rotationRange = MateRange{glm::radians(-90.0), glm::radians(90.0)};
+    const uint64_t axleId = s_App->assembly->AddMate(axle);
+    ui::SolveActiveAssembly(*s_App);
+    ui::SelectOccurrence(*s_App, spinId);
+    ctx->Yield(3);
+    const auto ring = [&]() -> ui::ViewportHandle {
+      for (const ui::ViewportHandle& h : s_App->viewportHandles)
+        if (h.kind == ui::HandleKind::Rotate)
+          return h;
+      return {};
+    };
+    IM_CHECK(ring().length > 0.0f);
+    const glm::vec3 centre = ring().origin;
+    const glm::vec3 axis = ring().dir;
+    const glm::vec3 b1 = ui::PerpTo(axis);
+    const glm::vec3 b2 = glm::cross(axis, b1);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(centre);
+    s_App->camera->SetUp(b2);
+    s_App->camera->SetPosition(centre + axis * 40.0f + b1 * 3.0f);
+    ctx->Yield(3);
+    const float radius = ring().length;
+    IM_CHECK(radius > 0.1f);
+    const auto at = [&](float deg) {
+      const float a = glm::radians(deg);
+      return centre + (std::cos(a) * b1 + std::sin(a) * b2) * radius;
+    };
+    const auto rotation = [&]() {
+      return s_App->assembly->FindMateById(axleId)->rotation;
+    };
+    ctx->MouseMoveToPos(WorldToWindow(at(0.0f)));
+    ctx->Yield();
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->Yield();
+    // Inside the range the drag follows the cursor freely.
+    for (int step = 1; step <= 2; step++) {
+      ctx->MouseMoveToPos(WorldToWindow(at(30.0f * step)));
+      ctx->Yield();
+    }
+    const double inside = rotation();
+    IM_CHECK(std::abs(std::abs(inside) - glm::radians(60.0)) <
+             glm::radians(12.0));
+    IM_CHECK(s_App->gizmoDrag.heldBy.empty());
+    // On past the stop: held there, and saying so.
+    for (int step = 3; step <= 10; step++) {
+      ctx->MouseMoveToPos(WorldToWindow(at(30.0f * step)));
+      ctx->Yield();
+    }
+    IM_CHECK(s_App->gizmoDrag.active && s_App->gizmoDrag.rotate);
+    IM_CHECK(s_App->gizmoDrag.heldBy.find("hinge") != std::string::npos);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    const double held = rotation();
+    ctx->LogInfo("a drag through 300 degrees held the hinge at %.3f degrees",
+                 glm::degrees(held));
+    // Exactly at the limit, on the side the drag went.
+    IM_CHECK(std::abs(std::abs(held) - glm::radians(90.0)) < 1e-9);
+    IM_CHECK((held > 0.0) == (inside > 0.0));
+    IM_CHECK(s_App->assembly->FindMateById(axleId)->error.empty());
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly", "mate_hover_marker");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

@@ -1372,6 +1372,10 @@ struct AppState {
     uint64_t mateId = 0;
     double startDof = 0.0;
     glm::dquat startBall{1, 0, 0, 0};
+    // Mate limits (docs/assemblies/README.md#mate-limits): what holds the
+    // drag at a stop, shown beside the cursor while it does -- "held at
+    // rotation max 95°" -- and empty while the drag moves freely.
+    std::string heldBy;
     // A MOVING PART of a flexible placement (v129): non-zero -> the grabbed
     // thing is this occurrence of the placement's sub-assembly, and `mateId`
     // (when set) is the sub-assembly's mate that places it -- the drag writes

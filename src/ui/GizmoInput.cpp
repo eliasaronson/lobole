@@ -809,6 +809,63 @@ bool HandleFixtureGizmo(AppState& state, const Ray& screenRay, bool clicked,
   return true;
 }
 
+// ---- Limits (docs/assemblies/README.md#mate-limits) ------------------------
+//
+// A drag stops AT a limit: the value is held to the mate's own range before
+// it is written, and when the solve says another mate's limit held a loop
+// (or a relation drove a follower past one), every mate goes back to where
+// the last frame left it -- not past the stop, and not snapping back to
+// where the drag began.
+
+// Every mate's values, to put back when a frame's move reached a limit.
+struct MatePoses {
+  std::vector<Mate> mates;
+};
+
+MatePoses SavePoses(const AssemblyDocument& doc) { return {doc.GetMates()}; }
+
+void RestorePoses(AssemblyDocument& doc, const MatePoses& was) {
+  for (const Mate& w : was.mates)
+    if (Mate* m = doc.FindMateById(w.id)) {
+      m->rotation = w.rotation;
+      m->offset = w.offset;
+      m->dx = w.dx;
+      m->dy = w.dy;
+      m->ballRotation = w.ballRotation;
+    }
+}
+
+// What held the drag, as the cursor says it: the first limit the solve
+// reported, or the dragged mate's own when the value was held to it.
+std::string HeldText(const assembly::SolveReport::Limit& l) {
+  return "'" + l.name + "' held at its " + assembly::RangedValueName(l.value) +
+         " limit " + assembly::FormatRangedValue(l.value, l.bound);
+}
+
+// Whether the solve found a limit this frame's move reached, rather than
+// a value some other mate already stood past (a file that says so): a drag
+// is not frozen by a fault it did not make.
+bool NewLimit(const assembly::SolveReport& rep, const MatePoses& was) {
+  for (const assembly::SolveReport::Limit& l : rep.limits) {
+    if (l.loop || !l.path.empty())
+      return true;
+    for (const Mate& w : was.mates)
+      if (w.id == l.mate && assembly::MateOutsideRange(w).empty())
+        return true;
+  }
+  return false;
+}
+
+std::string OwnStop(const Mate& m, RangedValue v, double wanted, double got) {
+  if (wanted == got)
+    return {};
+  const std::optional<MateRange> r = assembly::RangeOf(m, v);
+  return "'" + m.name + "' held at its " + assembly::RangedValueName(v) +
+         " limit " +
+         assembly::FormatRangedValue(v, r ? (got >= r->max ? r->max : r->min)
+                                          : got);
+}
+
 // A drag of a MOVING PART of a flexible placement (v129), in progress: the
 // same two modes as a top-level part -- an exploded view's step, or the
 // placement's own pose of the sub-assembly mate that places it, written
@@ -879,9 +936,33 @@ bool DragInnerPart(AppState& state, const Ray& screenRay, bool down,
     // frame is the zero.
     value = SnapAngleRad(g.startDof + UnwrappedTurn(g, ang), snap);
   }
+  // The sub-assembly's own limit holds this placement's pose of it.
+  const double wanted = value;
+  value = assembly::ClampToRange(
+      assembly::RangeOf(*mate, dof == MateDof::Rotation ? RangedValue::Rotation
+                                                        : RangedValue::Offset),
+      value);
+  g.heldBy = OwnStop(*mate,
+                     dof == MateDof::Rotation ? RangedValue::Rotation
+                                              : RangedValue::Offset,
+                     wanted, value);
+  const std::vector<InnerMateDof> was = F->innerMateDofs;
+  const std::vector<InnerPose> wasPoses = F->innerPoses;
   assembly::SetMateDofAt(*state.assembly, path, mate->id, dof, value,
                          AssemblyResolverFor(state));
-  (void)SolveActiveAssemblyReport(state, {mate->id, dof, path});
+  const assembly::SolveReport rep =
+      SolveActiveAssemblyReport(state, {mate->id, dof, path});
+  if (std::any_of(
+          rep.limits.begin(), rep.limits.end(),
+          [](const assembly::SolveReport::Limit& l) { return l.loop; })) {
+    // Another limit held the unit's loop: back to the last frame's pose.
+    g.heldBy = HeldText(rep.limits.front());
+    if (Occurrence* back = state.assembly->FindById(g.placement)) {
+      back->innerMateDofs = was;
+      back->innerPoses = wasPoses;
+    }
+    (void)SolveActiveAssemblyReport(state, {mate->id, dof, path});
+  }
   return true; // solve already repositioned + resynced
 }
 
@@ -921,6 +1002,9 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
            HandlePlacementGizmo(state, screenRay, clicked, down, released);
   auto& g = state.gizmoDrag;
 
+  // What holds the drag at a stop, beside the cursor while it does.
+  if (g.active && !g.heldBy.empty())
+    ImGui::SetTooltip("%s", g.heldBy.c_str());
   if (g.active && g.innerOcc != 0)
     return DragInnerPart(state, screenRay, down, released);
   if (g.active) {
@@ -992,16 +1076,26 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
           hold != nullptr && (g.rotate ? hold->rotation.has_value()
                                        : (g.axis == 2 && hold->offset)))
         return true;
+      const MatePoses was = SavePoses(*state.assembly);
+      g.heldBy.clear();
+      // Each value held to its own range before it is written: the drag
+      // stops at the stop (docs/assemblies/README.md#mate-limits).
+      const auto held = [&](RangedValue rv, double v) {
+        const double got =
+            assembly::ClampToRange(assembly::RangeOf(*mate, rv), v);
+        g.heldBy = OwnStop(*mate, rv, v, got);
+        return got;
+      };
       if (!g.rotate) {
         const double t =
             RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
         const double v = g.startDof + (t - g.startParam);
         if (g.axis == 0)
-          mate->dx = v;
+          mate->dx = held(RangedValue::Dx, v);
         else if (g.axis == 1)
-          mate->dy = v;
+          mate->dy = held(RangedValue::Dy, v);
         else
-          mate->offset = v;
+          mate->offset = held(RangedValue::Offset, v);
       } else {
         double ang;
         if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
@@ -1010,17 +1104,32 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
           // so a joint lands on 90 degrees from its seat rather than 90 from
           // wherever this particular drag was grabbed. Ball has no single
           // angle, so it snaps the turn like a free occurrence.
-          if (mate->type == MateType::Ball)
-            mate->ballRotation =
+          if (mate->type == MateType::Ball) {
+            const glm::dquat want =
                 glm::angleAxis(SnapAngleRad(d, snap), A) * g.startBall;
-          else
-            mate->rotation = SnapAngleRad(g.startDof + d, snap);
+            mate->ballRotation = assembly::ClampToCone(mate->coneRad, want);
+            if (mate->ballRotation != want)
+              g.heldBy = "'" + mate->name + "' held at its cone " +
+                         assembly::FormatRangedValue(RangedValue::Cone,
+                                                     *mate->coneRad);
+          } else {
+            mate->rotation =
+                held(RangedValue::Rotation, SnapAngleRad(g.startDof + d, snap));
+          }
         }
       }
       // The dragged mate drives its relations (a gear turns its partner).
       (void)assembly::PropagateRelations(*state.assembly, mate->id,
                                          ui::PartResolverFor(state));
-      SolveActiveAssembly(state);
+      const assembly::SolveReport rep = SolveActiveAssemblyReport(state);
+      if (NewLimit(rep, was)) {
+        // A follower reached its limit -- a loop held against it, or a
+        // relation drove it past -- so this frame's move does not happen:
+        // every mate back where the last frame left them.
+        g.heldBy = HeldText(rep.limits.front());
+        RestorePoses(*state.assembly, was);
+        SolveActiveAssembly(state);
+      }
       return true; // solve already repositioned + resynced
     }
     // A FREE drag moves the occurrence directly and never solves — which is
@@ -1058,6 +1167,7 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
 
   SnapshotAssembly(state); // one snapshot per drag
   g.active = true;
+  g.heldBy.clear();
   g.axis = axis;
   g.rotate = rotate;
   g.frameOrigin = spec.origin;

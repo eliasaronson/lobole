@@ -432,29 +432,196 @@ void DrawMatesSection(AppState& state) {
     DeleteSelection(state);
 }
 
+namespace {
+// One range row of the Edit Mate window: a checkbox that limits the value
+// and its [min, max]. A new range starts CLOSED at where the mate stands --
+// the one bound derived from the mate rather than a literal -- and is
+// widened from there. An edit that would leave the value outside is not
+// applied; `note` says why.
+void LimitRow(AppState& state, Mate* sel, RangedValue v, const char* label,
+              std::string& note) {
+  const bool deg = v == RangedValue::Rotation;
+  std::optional<MateRange>* slot =
+      v == RangedValue::Rotation ? &sel->rotationRange
+      : v == RangedValue::Offset ? &sel->offsetRange
+      : v == RangedValue::Dx     ? &sel->dxRange
+                                 : &sel->dyRange;
+  ImGui::PushID(label);
+  bool on = slot->has_value();
+  if (ImGui::Checkbox("###limit_on", &on)) {
+    SnapshotAssembly(state);
+    const double at = assembly::RangedValueOf(*sel, v);
+    if (on)
+      *slot = MateRange{at, at};
+    else
+      slot->reset();
+    note.clear();
+    SolveActiveAssembly(state);
+  }
+  ImGui::SameLine();
+  if (!slot->has_value()) {
+    ImGui::TextDisabled("%s: free", label);
+    ImGui::PopID();
+    return;
+  }
+  double mm[2] = {(*slot)->min, (*slot)->max};
+  if (deg) {
+    mm[0] = glm::degrees(mm[0]);
+    mm[1] = glm::degrees(mm[1]);
+  }
+  const std::string text =
+      std::string(label) + (deg ? " (deg)" : " (mm)") + "###limit_range";
+  const bool changed =
+      ExprDragFloat2(state, text.c_str(), mm, deg ? 1.0f : 0.1f);
+  if (ImGui::IsItemActivated())
+    SnapshotAssembly(state);
+  if (changed) {
+    Mate trial = *sel;
+    std::optional<MateRange>* tslot =
+        v == RangedValue::Rotation ? &trial.rotationRange
+        : v == RangedValue::Offset ? &trial.offsetRange
+        : v == RangedValue::Dx     ? &trial.dxRange
+                                   : &trial.dyRange;
+    *tslot = deg ? MateRange{glm::radians(mm[0]), glm::radians(mm[1])}
+                 : MateRange{mm[0], mm[1]};
+    std::string why = assembly::MateRangeProblem(trial);
+    if (why.empty())
+      why = assembly::RangeRefusal(trial, v, assembly::RangedValueOf(trial, v));
+    if (why.empty()) {
+      *slot = *tslot;
+      note.clear();
+      SolveActiveAssembly(state);
+    } else {
+      note = why;
+    }
+  }
+  ImGui::PopID();
+}
+
+// The cone row of a ball mate: its half-angle, starting at the tilt it has.
+void ConeRow(AppState& state, Mate* sel, std::string& note) {
+  ImGui::PushID("cone");
+  bool on = sel->coneRad.has_value();
+  if (ImGui::Checkbox("###limit_on", &on)) {
+    SnapshotAssembly(state);
+    if (on)
+      sel->coneRad = assembly::RangedValueOf(*sel, RangedValue::Cone);
+    else
+      sel->coneRad.reset();
+    note.clear();
+    SolveActiveAssembly(state);
+  }
+  ImGui::SameLine();
+  if (!sel->coneRad) {
+    ImGui::TextDisabled("Cone: free");
+    ImGui::PopID();
+    return;
+  }
+  double d = glm::degrees(*sel->coneRad);
+  const bool changed = ExprDragDouble(state, "Cone (deg)###limit_cone", &d,
+                                      1.0f, 0.0, 180.0, "%.3f");
+  if (ImGui::IsItemActivated())
+    SnapshotAssembly(state);
+  if (changed) {
+    Mate trial = *sel;
+    trial.coneRad = glm::radians(d);
+    std::string why = assembly::MateRangeProblem(trial);
+    if (why.empty())
+      why = assembly::MateOutsideRange(trial);
+    if (why.empty()) {
+      sel->coneRad = trial.coneRad;
+      note.clear();
+      SolveActiveAssembly(state);
+    } else {
+      note = why;
+    }
+  }
+  ImGui::PopID();
+}
+} // namespace
+
+// The limits section of the Edit Mate window: one row per value the type
+// frees (docs/assemblies/README.md#mate-limits), and what the last edit
+// was held at or refused for.
+void DrawMateLimitFields(AppState& state, Mate* sel, std::string& note) {
+  const std::vector<RangedValue> freed = assembly::RangedValuesFor(sel->type);
+  if (freed.empty())
+    return;
+  ImGui::SeparatorText("Limits");
+  for (RangedValue v : freed) {
+    switch (v) {
+    case RangedValue::Rotation:
+      LimitRow(state, sel, v, sel->type == MateType::Planar ? "Spin" : "Angle",
+               note);
+      break;
+    case RangedValue::Offset:
+      LimitRow(state, sel, v, sel->type == MateType::Planar ? "Gap" : "Offset",
+               note);
+      break;
+    case RangedValue::Dx:
+      LimitRow(state, sel, v, "Slide x", note);
+      break;
+    case RangedValue::Dy:
+      LimitRow(state, sel, v, "Slide y", note);
+      break;
+    case RangedValue::Cone:
+      ConeRow(state, sel, note);
+      break;
+    }
+  }
+  if (!note.empty())
+    TextDisabledWrapped(note);
+}
+
 // A mate's degrees of freedom, by type -- what the panel's "Selected mate"
 // section held, drawn by the mate tool's Edit Mate window now
 // (docs/ui/panels.md#assembly-tab-the-model-panel). Each field is one undo step
 // per drag.
 void DrawMateDofFields(AppState& state, Mate* sel) {
+  // Mate limits (docs/assemblies/README.md#mate-limits): a field stops at
+  // its range, as a drag does, and says so; a range edit that would leave
+  // the mate outside it is not applied, and says why.
+  static std::string s_limitNote;
+  const auto stopped = [&](RangedValue v, double wanted, double got) {
+    if (wanted != got)
+      s_limitNote = "held at its " + std::string(assembly::RangedValueName(v)) +
+                    " limit " + assembly::FormatRangedValue(v, got);
+    else
+      s_limitNote.clear();
+  };
   auto angleDof = [&](const char* label) {
     double deg = glm::degrees(sel->rotation);
+    const std::optional<MateRange> r =
+        assembly::RangedValuesFor(sel->type).empty() ||
+                sel->type == MateType::Fastened
+            ? std::nullopt
+            : sel->rotationRange;
+    const double lo = r ? glm::degrees(r->min) : -DBL_MAX;
+    const double hi = r ? glm::degrees(r->max) : DBL_MAX;
     const bool changed =
-        ExprDragDouble(state, label, &deg, 1.0f, -DBL_MAX, DBL_MAX, "%.3f");
+        ExprDragDouble(state, label, &deg, 1.0f, lo, hi, "%.3f");
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
-      sel->rotation = glm::radians(deg);
+      const double want = glm::radians(deg);
+      sel->rotation = assembly::ClampToRange(r, want);
+      stopped(RangedValue::Rotation, want, sel->rotation);
       SolveActiveAssembly(state);
     }
   };
   auto offsetDof = [&](const char* label) {
-    const bool changed = ExprDragDouble(state, label, &sel->offset, 0.1f,
-                                        -DBL_MAX, DBL_MAX, "%.3f");
+    const std::optional<MateRange> r = sel->offsetRange;
+    const bool changed =
+        ExprDragDouble(state, label, &sel->offset, 0.1f, r ? r->min : -DBL_MAX,
+                       r ? r->max : DBL_MAX, "%.3f");
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
-    if (changed)
+    if (changed) {
+      const double want = sel->offset;
+      sel->offset = assembly::ClampToRange(r, want);
+      stopped(RangedValue::Offset, want, sel->offset);
       SolveActiveAssembly(state);
+    }
   };
   switch (sel->type) {
   case MateType::Revolute:
@@ -473,11 +640,15 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
-      sel->dx = dxy[0];
-      sel->dy = dxy[1];
+      sel->dx = assembly::ClampToRange(sel->dxRange, dxy[0]);
+      sel->dy = assembly::ClampToRange(sel->dyRange, dxy[1]);
+      stopped(sel->dx != dxy[0] ? RangedValue::Dx : RangedValue::Dy,
+              sel->dx != dxy[0] ? dxy[0] : dxy[1],
+              sel->dx != dxy[0] ? sel->dx : sel->dy);
       SolveActiveAssembly(state);
     }
     angleDof("Spin (deg)");
+    offsetDof("Gap");
     break;
   }
   case MateType::Ball: {
@@ -487,7 +658,14 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
-      sel->ballRotation = glm::dquat(glm::radians(euler));
+      const glm::dquat want = glm::dquat(glm::radians(euler));
+      sel->ballRotation = assembly::ClampToCone(sel->coneRad, want);
+      if (sel->ballRotation != want)
+        s_limitNote =
+            "held at its cone " +
+            assembly::FormatRangedValue(RangedValue::Cone, *sel->coneRad);
+      else
+        s_limitNote.clear();
       SolveActiveAssembly(state);
     }
     break;
@@ -499,6 +677,7 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
     angleDof("Angle (deg)");
     break;
   }
+  DrawMateLimitFields(state, sel, s_limitNote);
 }
 
 // What the motion row shows while a run is in flight: how far in, how long

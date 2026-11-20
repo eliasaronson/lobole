@@ -55,6 +55,7 @@
 #include "render/SketchRenderer.h"
 #include "render/VulkanCommon.h"
 #include "ui/DragMath.h"
+#include <glm/gtc/constants.hpp>
 
 #include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
@@ -431,6 +432,99 @@ void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
               : nullptr) {
     if (const auto fb = ConnectorWorldFrame(state, m->b))
       AppendFrameTriad(lines, *fb, scale);
+  }
+}
+
+void AppendMateLimitOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
+  if (!state.assembly)
+    return;
+  const uint64_t id = state.mateTool.active && state.mateTool.editMateId != 0
+                          ? state.mateTool.editMateId
+                          : SelectedMateId(state);
+  const Mate* m = id ? state.assembly->FindMateById(id) : nullptr;
+  if (m == nullptr || !(m->rotationRange || m->offsetRange || m->dxRange ||
+                        m->dyRange || m->coneRad))
+    return;
+  const std::optional<glm::dmat4> wa = ConnectorWorldFrame(state, m->a);
+  if (!wa)
+    return;
+  const glm::dvec3 x = glm::normalize(glm::dvec3((*wa)[0]));
+  const glm::dvec3 y = glm::normalize(glm::dvec3((*wa)[1]));
+  const glm::dvec3 z = glm::normalize(glm::dvec3((*wa)[2]));
+  const glm::dvec3 o = glm::dvec3((*wa)[3]);
+  // On-screen sized, as the gizmo is: what is drawn is a range of motion,
+  // and its arc needs to read at any zoom.
+  const double r = GizmoScale(state) * 0.8;
+  const glm::vec3 range(0.95f, 0.75f, 0.25f), now(1.0f, 1.0f, 1.0f);
+  const auto seg = [&](const glm::dvec3& a, const glm::dvec3& b,
+                       const glm::vec3& c) {
+    lines.push_back(LineVertex(glm::vec3(a), c));
+    lines.push_back(LineVertex(glm::vec3(b), c));
+  };
+  const bool slides =
+      m->type == MateType::Slider || m->type == MateType::Cylindrical;
+  // The seat the arc turns at: a revolute's axial offset, a planar's gap,
+  // the plane's own slide.
+  const glm::dvec3 seat =
+      o + z * (slides ? 0.0 : m->offset) +
+      (m->type == MateType::Planar ? x * m->dx + y * m->dy : glm::dvec3(0.0));
+  if (m->rotationRange) {
+    const glm::dvec3 c = slides ? o + z * m->offset : seat;
+    const double a0 = m->rotationRange->min, a1 = m->rotationRange->max;
+    const auto at = [&](double t) {
+      return c + r * (std::cos(t) * x + std::sin(t) * y);
+    };
+    const int n = std::clamp(
+        static_cast<int>(std::ceil(std::abs(a1 - a0) / glm::radians(5.0))), 1,
+        720);
+    for (int k = 0; k < n; k++)
+      seg(at(a0 + (a1 - a0) * k / n), at(a0 + (a1 - a0) * (k + 1) / n), range);
+    seg(c, at(a0), range); // the two stops
+    seg(c, at(a1), range);
+    seg(c, at(m->rotation) + (at(m->rotation) - c) * 0.15, now);
+  }
+  if (m->offsetRange && slides) {
+    const glm::dvec3 a = o + z * m->offsetRange->min;
+    const glm::dvec3 b = o + z * m->offsetRange->max;
+    seg(a, b, range);
+    seg(a - x * (r * 0.15), a + x * (r * 0.15), range);
+    seg(b - x * (r * 0.15), b + x * (r * 0.15), range);
+    const glm::dvec3 p = o + z * m->offset;
+    seg(p - y * (r * 0.2), p + y * (r * 0.2), now);
+  } else if (m->offsetRange) { // a planar's gap: where its plane may sit
+    for (double g : {m->offsetRange->min, m->offsetRange->max})
+      seg(o + z * g - x * (r * 0.3), o + z * g + x * (r * 0.3), range);
+  }
+  if (m->dxRange || m->dyRange) {
+    const double x0 = m->dxRange ? m->dxRange->min : m->dx;
+    const double x1 = m->dxRange ? m->dxRange->max : m->dx;
+    const double y0 = m->dyRange ? m->dyRange->min : m->dy;
+    const double y1 = m->dyRange ? m->dyRange->max : m->dy;
+    const glm::dvec3 g = o + z * m->offset;
+    const auto p = [&](double u, double v) { return g + x * u + y * v; };
+    seg(p(x0, y0), p(x1, y0), range);
+    seg(p(x1, y0), p(x1, y1), range);
+    seg(p(x1, y1), p(x0, y1), range);
+    seg(p(x0, y1), p(x0, y0), range);
+    seg(p(m->dx, m->dy) - x * (r * 0.1), p(m->dx, m->dy) + x * (r * 0.1), now);
+    seg(p(m->dx, m->dy) - y * (r * 0.1), p(m->dx, m->dy) + y * (r * 0.1), now);
+  }
+  if (m->coneRad) {
+    const double c = *m->coneRad;
+    const glm::dvec3 rim = o + z * (r * std::cos(c));
+    const double rr = r * std::sin(c);
+    constexpr int kN = 48;
+    for (int k = 0; k < kN; k++) {
+      const double t0 = glm::two_pi<double>() * k / kN;
+      const double t1 = glm::two_pi<double>() * (k + 1) / kN;
+      seg(rim + rr * (std::cos(t0) * x + std::sin(t0) * y),
+          rim + rr * (std::cos(t1) * x + std::sin(t1) * y), range);
+      if (k % 12 == 0)
+        seg(o, rim + rr * (std::cos(t0) * x + std::sin(t0) * y), range);
+    }
+    const glm::dvec3 bz = glm::dmat3(*wa) * (glm::normalize(m->ballRotation) *
+                                             glm::dvec3(0, 0, 1));
+    seg(o, o + glm::normalize(bz) * r, now);
   }
 }
 

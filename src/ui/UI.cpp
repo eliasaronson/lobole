@@ -1079,6 +1079,7 @@ void DrawUI(AppState& state) {
     AppendOriginGizmo(state, overlay);    // world origin: parts and assemblies
     AppendThreadOverlays(state, overlay); // cosmetic threads (part tabs)
     BuildMateToolOverlay(state, overlay); // A3 mate connector triads (assembly)
+    AppendMateLimitOverlay(state, overlay); // the selected mate's limits
 
     // Viewport handles (docs/ui/viewport-handles.md): every owner PUBLISHES
     // its arrows and arcs into one list, rebuilt every frame, which is what

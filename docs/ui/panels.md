@@ -123,8 +123,12 @@ The feature tree (`src/ui/FeatureTreePanel.cpp`):
 
 Editors float. A double-click (or Edit) opens an occurrence's or a relation's
 properties in `DrawAssemblyEditWindow`, and a mate's (name, flip, rotate, its
-DOF fields — `DrawMateDofFields`) in the mate tool's edit mode
-(`DrawMateToolWindow`). Each field edit is one undo step per drag.
+DOF fields — `DrawMateDofFields` — and its **Limits**, `DrawMateLimitFields`:
+a checkbox and a [min, max] per value the type frees, a ball's cone) in the
+mate tool's edit mode (`DrawMateToolWindow`). Each field edit is one undo
+step per drag. A DOF field stops at its range and says what held it; a
+limit edit that would leave the mate outside is not applied, and says why
+([mate limits](../assemblies/README.md#mate-limits)).
 
 - A part placement's editor adds its **Configuration** picker
   (`###occ_part_config`, shown when the part has configurations) and its
