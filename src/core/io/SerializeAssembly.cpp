@@ -439,7 +439,7 @@ json MateToJson(const Mate& m) {
     j["dy"] = m.dy;
   if (m.ballRotation != glm::dquat(1.0, 0.0, 0.0, 0.0))
     j["ball_rotation"] = QuatToJson(m.ballRotation);
-  // Limits (vNEXT, docs/assemblies/README.md#mate-limits), in the units of
+  // Limits (v218, docs/assemblies/README.md#mate-limits), in the units of
   // the values they bound: radians and mm. Omitted when there are none, so
   // a file without them is byte-identical to before.
   json limits = json::object();
@@ -1487,7 +1487,7 @@ json MotionResultToJson(const motion::Result& r) {
     out["branch_jumps"] = r.branchJumps; // v179
   if (!r.error.empty())
     out["error"] = r.error;
-  if (r.stoppedBy) { // vNEXT: a follower reached its limit
+  if (r.stoppedBy) { // v218: a follower reached its limit
     const motion::Result::LimitStop& l = *r.stoppedBy;
     json sj{{"mate", l.mate},
             {"name", l.name},

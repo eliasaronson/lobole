@@ -282,7 +282,7 @@ struct Mate {
   double dy = 0.0;       // in-plane Y translation (planar DOF)
   glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0}; // free rotation (ball DOF)
 
-  // Limits (vNEXT, docs/assemblies/README.md#mate-limits). Unset = free, as
+  // Limits (v218, docs/assemblies/README.md#mate-limits). Unset = free, as
   // every mate was before. Which a type takes is RangedValuesFor (in
   // AssemblySolve.h): rotation on a revolute, a cylindrical and a planar's
   // spin; offset on a slider, a cylindrical and a planar's gap; dx/dy on a

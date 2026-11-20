@@ -189,11 +189,11 @@ TEST_CASE("A ball's cone holds the tilt and keeps the twist",
   CHECK(assembly::ClampToCone(b.coneRad, b.ballRotation) == b.ballRotation);
 }
 
-TEST_CASE("Save and reopen keeps every range, and the vNEXT golden loads",
+TEST_CASE("Save and reopen keeps every range, and the v218 golden loads",
           "[assembly][limits][serialization]") {
   const auto root = std::filesystem::path(TestSourceDir()) / "tests/golden";
   auto loaded = DocumentIO::LoadAssembly(
-      (root / "assembly/vNEXT-mate-limits.json").string());
+      (root / "assembly/v218-mate-limits.json").string());
   REQUIRE(loaded.has_value());
   const AssemblyDocument& doc = **loaded;
   const Mate* hinge = doc.FindMateById(11);

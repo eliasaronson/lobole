@@ -301,7 +301,7 @@ be refused against, stopped at and proved
 
 On the wire `add_mate` and `set_mate` take `rotation_range_deg`,
 `offset_range_mm`, `dx_range_mm`, `dy_range_mm` as `[min, max]` and
-`cone_deg`; `null` clears one. Inside, and in the file (`limits`, vNEXT),
+`cone_deg`; `null` clears one. Inside, and in the file (`limits`, v218),
 radians and mm, as the mate's own values are. `list_mates` answers each
 mate's `limits` in degrees and mm. Bounds are inclusive; `min == max` is a
 lock. Refused, naming what the type frees: a range on a value the type does
@@ -1249,7 +1249,7 @@ one.
   what limits cost — `-L limits`), `test_mate_limits.cpp` (what each type
   takes, the refusals, a relation driving past a limit, a study refused
   across its driver's limit and stopped by a follower's, save and reopen;
-  golden `vNEXT-mate-limits.json`), `test_assembly_relations.cpp` (every
+  golden `v218-mate-limits.json`), `test_assembly_relations.cpp` (every
   relation kind, propagation order, freewheel/reverser/click, loop rows),
   `test_contact_relation.cpp`, `test_follower_check.cpp`,
   `test_assembly_flatten.cpp`, `test_motion.cpp`,
