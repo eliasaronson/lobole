@@ -34,6 +34,27 @@ an unstocked gauge, a radius under the material's minimum and a K outside
 (0, 1), at the RPC and at load. Every bend records where its K came from
 ("table:steel R/t<2", "rules", "override").
 
+### Rules that are expressions
+
+The four numbers a part may set -- `bend_radius`, `k_factor`,
+`relief_width` and `relief_depth` -- are `ExprValue`s
+([variables](../variables/README.md#numbers-that-are-expressions)): each
+may be an expression of the part's variables, then the project's.
+`set_sheet_metal_rules` takes `bend_radius_mm_expr`, `k_factor_expr`,
+`relief_width_mm_expr` and `relief_depth_mm_expr`, evaluated when the call
+arrives and refused naming the key when the text does not parse or names a
+variable the scope does not have; a number alone unbinds.
+`get_sheet_metal_rules` answers each text beside its number. The file
+writes `<key>_expr` beside the value (format vNEXT).
+
+A variable change re-evaluates them in `Document::Regenerate`, before the
+chain hash the rules seed, so every bend rebuilds. A value
+`sheet::Validate` refuses (a radius under the material's minimum, a K
+outside (0, 1)) keeps the rules' last good values, and the reason is
+reported as `{owner: "sheet-metal rules", error}` in the `owners` list of
+the regen every mutating call answers (`set_variable` included). The
+thickness takes none: the gauge is the stock, and it fixes the thickness.
+
 ## Bends are recorded, never recognised
 
 Every sheet feature knows the bend it made and stamps a `BendRegion` on the
@@ -194,7 +215,10 @@ so a flange and a hem cannot disagree about a bend; `Unfold`; `Check`),
 GUI: the nine tools are one toolbar group (`###tb_base_flange` …
 `###tb_refold`, commands `part.sheet_*`). The Variables panel's Sheet Metal
 section (`src/ui/SheetMetalPanel.cpp`) shows the stock with each derived number
-labelled by its source, a "Show the blank" toggle that activates a `Flat`
+labelled by its source, the four settable ones as fields
+(`###sm_bend_radius`, `###sm_k_factor`, `###sm_relief_width`,
+`###sm_relief_depth`) that keep an expression typed into them and refuse a
+value the material cannot take, a "Show the blank" toggle that activates a `Flat`
 configuration unsuppressing the flat pattern (creating it if absent), and one
 row per bend. Accepting the Flat pattern tool does the authoring above in one
 undo step: the feature goes in suppressed, and a `Flat` configuration that
@@ -209,6 +233,9 @@ validation, round trip, undo), `test_flange.cpp`, `test_hem_jog.cpp`
 (hem, mitred corners, jog), `test_corners.cpp` (closed corners, relief,
 non-square refusals), `test_unfold.cpp` (the blank's outline and thickness
 over one bend, a tree and a chain; naming; configuration switch; up/down),
+`test_part_exprs.cpp` (a bend radius bound to a variable rebuilding the bend,
+one the material refuses keeping the last good one), `tests/part_exprs_smoke.py`
+(the same over the RPC), GUI `sheetmetal/a_bend_radius_takes_an_expression`,
 `test_refold.cpp` (the involution, holes across creases, refusals),
 `test_normal_cut.cpp`, `test_sheetmetal_check.cpp` (every violation kind, and
 a clean part firing none), `test_flat_drawing.cpp`, `tests/sheetmetal_smoke.py`

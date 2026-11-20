@@ -31,11 +31,12 @@ for agents.
   kinds of expression field:
   - a dimension constraint's `valueExpr`, stored as the `"expr"` key;
   - driven entity coordinates in `SketchFeature::entityExprs`: Line
-    `ax ay bx by`, Circle and Arc `cx cy r`, Point `x y`, and a spline's
+    `ax ay bx by`, Circle `cx cy r`, Arc `cx cy r` and its angles
+    `start_angle_deg end_angle_deg` (degrees), Point `x y`, and a spline's
     poles `p<k>x p<k>y` (k from 0), so a spline outline scales with the
     variable that sizes the rest of the part; a text label's anchor
     `x y`, `height`, `angle_deg` (degrees) and `spacing`. They are stored as
-    `<field>_expr` keys on the entity. Ellipses and arc angles cannot be
+    `<field>_expr` keys on the entity. Ellipses cannot be
     driven (an ellipse's radius is a distance from its centre to an axis
     end, which can: [../sketching/README.md](../sketching/README.md#ellipses-and-splines)). An `_expr` key the entity does not have (`radius_expr` on a
     circle, whose field is `r`) is refused naming the ones it takes, not
@@ -78,12 +79,43 @@ One type and one hook carry every expression-capable number, in
   (`mates/2/limits/rotation/1`): mates and their limits, occurrence
   positions, relations, exploded steps, motion studies, the sequence,
   configurations' mate overrides and the assembly's studies
-  ([what takes one](../assemblies/README.md#numbers-that-are-expressions)). A number the geometry reads as part of a vector (a
+  ([what takes one](../assemblies/README.md#numbers-that-are-expressions)).
+  A part's walk (`Document::VisitDocumentExprs`) is its features and
+  studies, then its own numbers outside them, each with its owner: the
+  [sheet-metal rules](../sheetmetal/README.md#rules-that-are-expressions)
+  ("sheet-metal rules"), the
+  [tube rules](../tube/README.md#rules-that-are-expressions) ("tube
+  rules") and an explicit tolerance's
+  [limits](../tolerances/README.md#limits-that-are-expressions)
+  ("tolerance 12"). Those are evaluated at the start of every regeneration
+  (`Document::EvaluateDocumentExprs`); an owner whose new values do not
+  evaluate, or that its own validation refuses, keeps its last good values
+  and is listed in `Document::ExprProblems()`, which every mutating call's
+  `regen` answers as `owners: [{owner, error}]` (and `ok: false`). A number the geometry reads as part of a vector (a
   Frame's origin, a MoveFace's translation) and a sketch dimension stay a
   value and a text of their own, and are visited as slots on that pair. A
   pattern's count is an `ExprInt`: `n / 2` of an odd `n` is the pattern's
   error naming the value, and a count below 1 is refused, not made 1. An
   integer field in the GUI refuses a typed fraction the same way.
+- **What a part's features take**, beyond each feature's dimensions: a
+  Hole's counterbore and countersink sizes, fit pitch and drill point; a
+  Thread's pitch, minimum engagement and flank angle; a Worm's starts,
+  pressure angle, backlash and length and a WormWheel's teeth, starts,
+  worm diameter and pressure angle (`starts` and `teeth` are `ExprInt`s); a
+  RetainingRing's size; a Curve3D's points, a control polygon's degree, a
+  bent path's radius and a helix's origin; a Cradle's direction; a
+  DatumPlane's and a DatumAxis's points; a Derived copy's position; a Box's
+  position and a Sphere's and a Cylinder's centre; a custom axis's origin
+  (Revolve, Pattern, MoveFace, an angled DatumPlane); and a sketch's linked
+  pattern ops ([sketching](../sketching/README.md#patterns-that-are-expressions)).
+  A vector is a slot per coordinate (`Vec3Exprs`, written as
+  `<key>_expr: [x, y, z]` texts, or one such triple per point of a list).
+  They come over the RPC as keys of the feature JSON, like every other
+  feature number. What a part writes that takes no expression -- ids,
+  directions, quaternions, an Import's placement, a cam profile's law and
+  follower, derived outputs -- is listed with its reason in
+  `tests/test_part_exprs.cpp`'s probe, which fails on a number that is
+  neither a slot nor listed.
 
 Everything that walks expressions walks that hook:
 
@@ -97,8 +129,8 @@ Everything that walks expressions walks that hook:
 - the literals lint ([below](#literals-that-should-be-expressions)), which
   takes each field's quantity from its slot.
 
-**Scope.** A part's features and studies resolve against the part's
-variables, then the project's. An assembly resolves against the
+**Scope.** A part's features, studies, rules and tolerances resolve
+against the part's variables, then the project's. An assembly resolves against the
 project's, and has none of its own; a lone assembly outside a project
 resolves against an empty table, so an expression there fails naming
 the variable it could not find. `ui::SyncProjectScope` re-evaluates every
@@ -452,6 +484,10 @@ spellings stay accepted as aliases: a string where a study's number goes
   entry on Ctrl+click, double-click, or Enter on a focused field. Completion
   offers variables, functions and unit suffixes (`src/ui/ExprComplete.h`).
   - A plain numeric field evaluates what you type and stores the *result*.
+  A field over an `ExprValue` outside a feature (`ExprBoundDrag`: a mate's
+  values and limits, the sheet-metal rules, a distance tolerance's limits,
+  a sketch pattern's numbers) keeps the text instead, shows it bound, and a
+  **123** button or a plain number unbinds it.
   - A feature dimension (`ExprDim` in `src/ui/FeatureEditor.cpp`) has an
     **fx** button that stores the expression text and shows its value or
     error. A **123** button turns it back into a literal.
@@ -505,8 +541,22 @@ spellings stay accepted as aliases: a string where a study's number goes
   changes nothing, an apply that moves no geometry and puts an expression on
   every field it proposed, each new variable moving exactly the fields it
   drives, one undo and a redo in either scope, `reuse`, and the refusals.
-- `tests/golden/v11-expressions.json`, `v38-entity-exprs.json` and
-  `v150-lookup-table.json` pin the file format.
+- `tests/test_part_exprs.cpp` covers a part's numbers outside the
+  features that already took expressions: a bend radius bound to a
+  variable rebuilding the bend and one the material refuses keeping the
+  last good value, a tolerance's limits and the tube rules following their
+  variables (a reversed band and a refused rule reported as owners), a
+  box's position, a fractional tooth count refused, a sketch pattern's
+  count and an arc's angle, rename and the delete refusal reaching every
+  owner, a file whose rule holds a text that does not parse opening with
+  the rules marked, and the probe: every number every part golden's
+  features write, and every number the part writes outside them, is a
+  slot or listed with its reason. `tests/part_exprs_smoke.py` is the RPC
+  half: the `_expr` keys, `set_variable`'s `regen.owners`, the refusals,
+  the getters, rename and delete, and a save and reopen.
+- `tests/golden/v11-expressions.json`, `v38-entity-exprs.json`,
+  `v150-lookup-table.json` and `vNEXT-part-expressions.json` pin the file
+  format.
 
 ## Not built
 

@@ -77,6 +77,19 @@ I/O, mirroring `ThreadStandards`:
 - A tolerance whose element no longer resolves is kept and listed as
   unresolved: the intent outlives the topology.
 
+### Limits that are expressions
+
+An explicit band's `lower` and `upper` are `ExprValue`s
+([variables](../variables/README.md#numbers-that-are-expressions)):
+`set_tolerance` takes `lower_expr` / `upper_expr`, evaluated over the
+part's variables as the call arrives (refused naming the key when it does
+not), and `set_tolerance` / `list_tolerances` answer each text beside its
+number. A variable change re-evaluates them with the part; a band that
+comes out reversed keeps its last good limits and is reported as
+`{owner: "tolerance <id>", error}` in the regen's `owners`. The panel's
+distance fields (`###tol_lower`, `###tol_upper`) keep a typed expression.
+A class and a printed press store no numbers, so they take none.
+
 ## Checks
 
 - **`check_fit`** — `{hole: {class, feature_id?, element?, part?}, shaft: {…},

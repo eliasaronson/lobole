@@ -463,6 +463,26 @@ expression-driven sketch.
 Baked (unlinked) mirrors and patterns leave no op — just plain entities.
 Fillet and offset always bake.
 
+#### Patterns that are expressions
+
+A linked op's numbers may be expressions of the part's variables
+([variables](../variables/README.md#numbers-that-are-expressions)): a
+pattern's `count` and `count2` (`ExprInt`: a fractional result is the
+sketch's error, never rounded, and so is a count below 1), each coordinate
+of `vec` and `vec2`, and a circular pattern's step angle, whose text is in
+DEGREES while `scalar` stays radians. They are written as `count_expr`,
+`count2_expr`, `vec_expr` / `vec2_expr` (`[u, v]` texts) and
+`scalar_expr` on the op (format vNEXT), visited by
+`SketchFeature::VisitExprs` at `derived_ops/<i>/...`, and a variable change
+re-runs `RegenerateDerived` after the solve. The `pattern` RPC takes
+`count_expr`, `step_expr`, `center_expr` and `angle_deg_expr` (with
+`link: true`, the default); the pattern's tool window edits each field
+keeping its text (`EditPatternOp`).
+
+An arc's `start_angle_deg` and `end_angle_deg` are entity expression
+fields too ([Entities](#entities)), in degrees over angles stored in
+radians, held fixed by the solver like a driven radius.
+
 ### Linked copies
 
 `Ctrl+C` in a sketch copies the selection; `Ctrl+V` pastes plain copies with

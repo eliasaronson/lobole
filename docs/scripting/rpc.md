@@ -227,6 +227,21 @@ radians (`phase`, `constant`, a held `rotation`). The getters answer
 limit's `rotation_range_deg_expr`, `list_relations`, the motion studies,
 `get_assembly_sequence`, `list_occurrences`, `list_exploded_views`).
 
+A **part's** methods outside its features take theirs the same way, as
+their own parameters, evaluated over the part's variables (then the
+project's) when the call arrives: `set_sheet_metal_rules`
+`bend_radius_mm_expr`, `k_factor_expr`, `relief_width_mm_expr`,
+`relief_depth_mm_expr`; `set_tube_rules` `min_straight_mm_expr`,
+`tail_length_mm_expr`, `max_thinning_expr`, `former_radii_mm_expr` (a text
+per radius); `set_tolerance` `lower_expr`, `upper_expr`; the sketch
+`pattern` `count_expr`, `step_expr`, `center_expr`, `angle_deg_expr`. Their
+getters answer the texts (`get_sheet_metal_rules`, `get_tube_rules`,
+`list_tolerances`, a sketch's `derived_ops` in `get_state`). When a variable
+change leaves one of them unable to stand, the `regen` of that call lists
+it under `owners: [{owner, error}]` (and `ok` is false); the owner keeps its
+last good values
+([variables](../variables/README.md#numbers-that-are-expressions)).
+
 Two older spellings are kept as aliases, since scripts and the SDK use
 them: a STRING where a study's number goes (`mesh_size: "wall / 2"`), and a
 sketch dimension's `expr` (`add_constraint`, and the stored key). Giving a

@@ -56,6 +56,21 @@ nothing and changes only what `check_tube` may say. `tube::Validate` refuses
 an unknown material, a negative straight or tail, a thinning limit outside
 (0, 1) and a former under what the stock takes, at the RPC and at load.
 
+### Rules that are expressions
+
+Every number of the rules -- each former radius, `min_straight`,
+`tail_length`, `max_thinning` -- may be an expression of the part's
+variables
+([variables](../variables/README.md#numbers-that-are-expressions)).
+`set_tube_rules` takes `min_straight_mm_expr`, `tail_length_mm_expr`,
+`max_thinning_expr` and `former_radii_mm_expr` (one text per radius, `""`
+where `former_radii_mm`'s own number stands), evaluated as the call arrives
+and refused naming the key when they do not; a number alone unbinds.
+`get_tube_rules` answers `former_radii_mm_expr`, `min_straight_expr`,
+`tail_length_expr` and `max_thinning_expr`. A variable change re-evaluates
+them; a value `tube::Validate` refuses keeps the last good ones and is
+reported as `{owner: "tube rules", error}` in the regen's `owners`.
+
 The stock table (`tube::SizeTable`) carries `steel`, `stainless_steel`,
 `aluminum_6061_t6` and `titanium`, each size designated `ODxwall` ("25.4x2.4") the way
 round tube is ordered. `LookupSize` refuses an unstocked size naming the
