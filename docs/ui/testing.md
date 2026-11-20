@@ -299,6 +299,7 @@ only when the branch reaches what they cover, and always on `--release`:
 | the big generators (`-C generators`) | code, `python/lobole/**`, `generators/**`: a generator drives CAM, drawings and studies too |
 | the full action matrix (`-C action_matrix`) | code outside CAM, FEM, drawings, the renderers and the GUI tests; `python/lobole/**`; its corpus (`tests/action_matrix/`, `tests/golden/`, `generators/`) |
 | every reader-fuzz case (`-C reader_fuzz`) | `src/core/io/**`, the goldens and reader cases, `tests/mutate/`, the fuzz's own files, the kernel (`shell.nix`, `nix/**`) |
+| the FEM reference cases (`-C fem_reference`, [reference cases](../simulation/README.md#reference-cases)) | `src/core/fem/**`, `src/femgpu/**`, the material library, the simulation RPC, the cases and their tool, the page they write, the kernel |
 
 They ran on every `--full` merge before: an hour of six to twelve busy cores,
 the main source of the load every other agent's suites ran under.

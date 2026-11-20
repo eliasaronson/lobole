@@ -94,7 +94,7 @@ study lists are then gone from the model, not kept as a second home.
   naming the feature. The subject itself is never changed.
 - **Symmetry cut.** A plane (a datum or a flat face) cuts the analysis
   shape and puts a roller on the cut
-  ([reference cases](fem-reference-cases.md), which builds the roller);
+  ([the roller](../simulation/README.md#rollers-held-directions-and-cylindrical-supports));
   results draw mirrored on request.
 - **The geometry check** (`check_sim_geometry`, and a list in the panel):
   edges, faces and gaps smaller than the element size they will be meshed
@@ -138,8 +138,8 @@ study lists are then gone from the model, not kept as a second home.
   `AssembleFaceLoads` beside Torque and Remote), and a free-free modal
   study (a negative shift in `SpdShiftInvert`; rigid modes labelled; each
   mode's effective mass per direction).
-- The supports of [reference cases](fem-reference-cases.md) appear here as
-  tools; they are built there.
+- The [roller, held and cylindrical supports](../simulation/README.md#rollers-held-directions-and-cylindrical-supports)
+  are tools in today's Simulation window, and appear here as tools.
 - A reply's `applied_total` and `reaction_total`, so a balance is one read.
 
 ### 5. Results
@@ -258,10 +258,10 @@ Each merges on its own with the suites green.
    symmetry cut.
 5. **Bearing load, free-free modal, `keep: full`, study sweeps.**
 
-Stages 1 and 2 stand on today's model and start at once, beside
-[reference cases](fem-reference-cases.md). Stage 3 follows the reference
-cases, so the merge of the two planners is checked against published
-targets, not only our own tests.
+Stages 1 and 2 stand on today's model and start at once. Stage 3 runs
+[the reference cases](../simulation/README.md#reference-cases), so the
+merge of the two planners is checked against published targets, not only
+our own tests.
 
 ## Files
 

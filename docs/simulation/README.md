@@ -32,6 +32,9 @@ A study holds:
   a `Contact` support (the face rests on the ground or on a rigid
   occurrence, pushed and never pulled, with friction, solved on CalculiX:
   [contact](#contact)),
+  a `Roller`, `Held` or `Cylindrical` support (some directions held both
+  ways, the rest free:
+  [rollers, held directions and cylindrical supports](#rollers-held-directions-and-cylindrical-supports)),
   a `Force` (a total vector in newtons,
   spread as uniform traction over the face), a `Pressure` (MPa along the
   inward normal, positive pushes into the part), a `Torque` (N·mm about an
@@ -210,6 +213,67 @@ side in tension and puts a clamp's edge on the bore's rims. A `pin` support
   is in x, y, z; a pinned study above the iterative threshold solves on the
   CPU's PCG, and the result's `solver` says "GPU declined: a pin support
   holds nodes in rotated frames, which the GPU solve does not take".
+
+### Rollers, held directions and cylindrical supports
+
+Three supports hold some directions of a face's nodes and leave the rest
+free, both ways and with no contact iteration: what a symmetry plane, a
+flat a part slides on, a prescribed motion and a bearing seat need.
+
+| type | holds | takes |
+|---|---|---|
+| `roller` | the face's normal: a flat face's plane normal (a symmetry plane, inclined or not), a cylinder's radius, any other face each node's normal from its facets (a frictionless seat) | nothing |
+| `held` | `hold`, any of `x`, `y`, `z` of the world or of the Frame, DatumPlane or DatumAxis `frame` (by id; the RPC also takes its name), each at zero or at `dx_mm`, `dy_mm`, `dz_mm` | the displacements as expressions (`Study::VisitExprs` visits them, so they bind to variables) |
+| `cylindrical` | `hold`, any of `radial`, `tangential`, `axial` about its cylindrical face's axis; unlike a pin it holds both ways | nothing |
+
+Each solves on the frames `MakeReduction` (`FemSolver.cpp`) already holds a
+pin's nodes in (`HeldNode`): a node's DOF are taken in its frame, the held
+ones eliminated, and `FreeRigidMotion` reads them before anything is
+factored, so rollers that leave a part free to slide are refused naming the
+slide. A prescribed displacement is a held DOF's value: `f - K u_p` over the
+elements that touch it is the right-hand side, the expanded answer carries
+it, and the reactions read the internal force less the applied load (not
+the moved DOF's share), so a held face reports the force it takes to move
+it. A modal study takes all three at zero (`SolveModal` on the same
+reduction, its mass taken into each node's frame as its stiffness is), and
+so does a buckling study's base state.
+
+Where two supports share a node (the edge two symmetry planes meet on) it
+is held in the span of both: one frame per node, built by `MergeHolds`
+(`FemStudy.cpp`) from every direction any of them holds; a direction one
+support holds that the others already fix is checked against them, and a
+node held at displacements that disagree is refused, naming both. A node a
+fixed support holds stays fixed unless a held support would move it, which
+is refused; one on a pin's face is refused (the pin's contact iteration
+holds its own nodes).
+
+Refused, naming what is accepted: a held or cylindrical support that holds
+nothing, a cylindrical support off a cylinder, a roller with `hold` or a
+`frame`, a `frame` that is no datum of the part, a displacement on a
+direction not held, a prescribed displacement on a modal, buckling,
+nonlinear or contact study (`FrameSupportRefusal`), any of them on a
+topology study (which freezes the faces its fixed supports hold) or an
+assembly study; `check_study` names each of these with its load and its fix,
+as it does a pin's. Each reports its reaction as the other supports do; at
+a node two of them share, each takes the part of its reaction along its own
+directions (a direction both hold is split between them), so a held face
+on the edge of a symmetry plane reports the whole force it takes.
+
+On CalculiX each held node is written in its own frame: a roller on a
+plane or a datum-framed held support as one rectangular `*TRANSFORM`, a
+cylindrical support or a roller on a cylinder as a cylindrical one, a
+curved roller's and a merged node's frame each a transform of its own; the
+held directions as `*BOUNDARY`, and a prescribed displacement as a
+`*BOUNDARY` with its value inside the step. The Simulation window's Roller,
+Held and Cylindrical tools place them (Held with its directions ticked,
+each displacement typed and its frame chosen first); a roller draws as a
+hatch on wheels on each sample of its face, a held direction as an arrow
+along it with a bar across its foot. `tests/test_fem_supports.cpp` checks
+each by its outcome (a half bar on a roller is the whole bar, a quarter of
+Lame's cylinder on rollers is the closed form, an inclined symmetry plane
+is its axis-aligned image, a prescribed displacement carries E A delta / L,
+a mode survives halving) and the refusals; `test_fem_calculix.cpp` holds
+CalculiX to the in-house answer on the same mesh.
 
 ### A peak on a support's edge
 
@@ -1009,12 +1073,13 @@ they run where ccx is absent):
 
 | case | answer | closed form |
 |---|---|---|
-| Euler, fixed–free, 10×10×200 steel, 2.5 mm, 10 204 nodes | 10.802 | π²EI/4L² = 10.7949 (+0.07 %) |
-| the same 10×20: strong over weak axis | 3.968 | 4 (I ratio; shear takes the rest) |
+| the fixed–free 10×10×200 column made 10×20: strong over weak axis | 3.968 | 4 (I ratio; shear takes the rest) |
 | wide cantilever plate, 60×20×1, 2 mm, 4 479 nodes | 70.679 | Et³/12(1−ν²) per width: 71.175 (−0.70 %) |
 | thin cylinder, R/t 25, capped, 2 mm, 33 283 nodes | 767.53; knockdown 0.758 (`cylinder`, the bore's R 24.5 over a 0.98 mm wall) | classical Et/(R√(3(1−ν²))): 798.58 (−3.9 %); SP-8007 at that R/t, exactly |
 | stocky strut, 10×10×131.4 at 10 kN (its Euler load its squash load) | buckling 2.499, yield 1.891, governing 1.077 | Rankine–Gordon, to 1e-12 |
 | pure tension | `null`, "nothing in this load buckles" | |
+
+Euler's fixed-free column is a [reference case](reference-cases.md) (`euler_column`), its numbers there.
 
 **Through the thickness**, measured before anything was built on it: the
 60×20×1 mm plate's first factor at one element through the wall and at two
@@ -1189,8 +1254,9 @@ pulled along their bond -- the bond's von Mises is the stiff layer's to
 Per-part bodies are independent: a part study meshes and solves each body it
 references separately, with no contact between them, and `study_results`
 reports one entry per body. Only bodies that carry a load or refinement are
-meshed; each needs a support, fixed or pin ("has loads but no fixed
-support" is checked before any factorization).
+meshed; each needs a support ("has loads but no fixed support" is checked
+before any meshing, and a rigid motion its supports leave free before any
+factorization).
 
 `study_results` for a static study reports `max_von_mises_mpa` and
 `max_displacement_mm` (`{value, at, body}`), the per-body breakdown with
@@ -1320,6 +1386,56 @@ stresses for a receipt, and a factor under 2, across the layers or
 against the yield, stops the run. The Strandbeest's crank pins, handle,
 joint pins and frame pivots (under its legs' statics), the clock's barrel
 arbor and the engine's wrist pin state theirs in their receipts.
+
+## Reference cases
+
+The solvers are run against published benchmarks and closed forms, each a
+directory of `tests/fem_reference/`: `case.py` builds the part and the
+study through the RPC (so a case tests the pipeline a user drives, mesher
+and supports included) and `expected.json` holds, per quantity, its `kind`
+(`theory` or `benchmark`), its `source` (document, test, section), the
+`value` and `unit`, a relative `tolerance` (or, for a rate, a `minimum`)
+and the written `reason` for it: the mesh it was judged at and what the
+element can and cannot resolve. A target in another unit system than the
+library's material is a `scale` with its `scale_reason` (FV32's density).
+
+- A reference is a published value, never a number from running another
+  solver. CalculiX runs the same study where a case asks
+  (`"calculix": true`, or `"only"` for a contact and a plastic study,
+  which solve nowhere else) and is held to the same tolerance: a
+  cross-check reported beside the reference.
+- A tolerance is never widened to pass. A miss with a known cause is a
+  `known_failure`, which stays on the page; a known failure that starts
+  passing fails the run until its entry is removed.
+- `lame_rate` is the convergence-rate case: Lame's cylinder at 4, 2 and
+  1 mm, its error falling every halving at a rate of at least 1.5. Lame
+  rather than a cantilever, because a beam theory is not the solid's exact
+  answer (the clamp's Poisson hold is in one and not the other), so a
+  cantilever's error against it stops falling at the modelling error and
+  its rate means nothing. `lame_tpu` asks the near-incompressible question
+  at nu 0.48. With `LOBOLE_TEST_PLANT_GAUSS_WEIGHT` set the static solve
+  weighs one of a tet10's four Gauss points 1.25 times, and
+  `fem_reference.py run --planted` passes only when both cases fail under
+  it (`"planted": "fails"`).
+
+`tools/fem_reference.py run` runs every case on one headless instance and
+`--write-page` writes [the page](reference-cases.md): per case the source,
+the target, what each solver got, the error, the tolerance and its reason,
+the known failures and what was left out. It is committed, and the suite's
+`--check-page` fails when the committed page differs from its run (the
+CalculiX column is compared only where ccx is found). The suite has a
+ctest configuration of its own, outside the headless suite:
+`tools/ctest -C fem_reference -L fem_reference` (`fem_reference` and
+`fem_reference_planted`); `tools/merge-branch.sh --full` runs it when a
+merge touches the FEM code, the material library, the simulation RPC or
+the cases, and `--release` always. `fem_reference.py check`
+(`fem_reference_table`, in the headless suite, seconds) checks every
+`expected.json`, and that the procedure table in
+`src/core/fem/FemReferenceCases.h` names exactly the cases that say they
+verify it: a study's receipt carries `verified_by` {`procedure`, `cases`,
+`page`} from it (`static tet10: le1, kirsch, lame_rate, lame_tpu, bar,
+cantilever`), so an answer says what it rests on. `sample_study` reads the
+fields at a point, which is where a benchmark's target is read.
 
 ## CalculiX
 
@@ -1898,10 +2014,11 @@ base state a buckling study holds.
 
 | case | answer | closed form |
 |---|---|---|
-| a 20 x 20 x 40 steel block on a frictionless ground, 4 kN down e = b/12 off its axis (a remote load), 4 mm, 2 468 nodes, 2 increments, 2.2 s | the whole base closed (399.99 of 400 mm²), peak pressure 14.994 MPa, the ground's resultant 1.66592 mm off the axis | inside the kern: closed, P/A (1 + 6e/b) = 15.000 MPa (-0.04 %), e = 1.66667 (-0.05 %) |
-| the same, e = b/4, 3.4 s | 277.7 mm² closed, peak 26.4 MPa, resultant at 4.99761 mm | past the kern (b/6) it lifts off; e = 5 (-0.05 %). A rigid block on a Winkler bed would close 3 (b/2 - e) b = 300 mm² |
+| a 20 x 20 x 40 steel block on a frictionless ground, 4 kN down e = b/4 off its axis (a remote load), 4 mm, 3.4 s | 277.7 mm² closed, peak 26.4 MPa, resultant at 4.99761 mm | past the kern (b/6) it lifts off; e = 5 (-0.05 %). A rigid block on a Winkler bed would close 3 (b/2 - e) b = 300 mm² |
 | a steel ball, R 10, on a rigid flat (a rigid occurrence), 30.8 kN for a = R/10, its cap refined to a/6, 11 371 nodes, 10 increments, 153 s (`[slow]`) | contact radius 1.0094 mm, peak pressure 14 941 MPa | Hertz: a = 1 mm (+0.94 %), p0 = 14 691 MPa (+1.7 %) |
 | a 20 x 20 x 30 steel block, a contact participant (friction 0.2), standing on a clamped aluminium slab, 3 kN down 3 mm off its axis, 5 mm, 2 197 nodes, 3.4 s | 2 999.97 N at 2.99969 mm; 399.4 mm² of the block's 400 closed | statics: P at e (-0.010 %) |
+
+The block inside its kern (e = b/12) is a [reference case](reference-cases.md) (`contact_block`), its numbers there.
 
 The weak springs carried 6e-6 to 1.9e-5 of the load in each (3e-6 to 6e-6
 when they were `1e-6 E L`), and 4.5e-5 on the 1 mm bridge, which `1e-6 E
@@ -2385,11 +2502,12 @@ unless named (a 100 × 10 × 10 bar at 5 mm, k = 50 W/(m·K), 1 025 nodes):
 | heated through its volume, 0.01 mW/mm³, ends at 20 °C | T = 20 + q x (L − x) / 2k to 1e-9 at every node | q L² / 8k |
 | 0.5 mW/mm² into one end, the other at 20 °C | T to 1e-9 | T₀ + q L / k |
 | a fin: base 100 °C, other faces 25 W/(m²·K) to 20 °C | 65.8516 °C mid-length, 55.6129 at the tip, 5.0637 W through the base | 1-D fin with a convecting tip: 65.8552 (−0.005 %), 55.6094 (+0.006 %), 5.0663 W (−0.05 %) |
-| a steel pipe (Netgen, 2.5 mm, 17 621 nodes), bore 10 at 100 °C, outside 20 at 25 W/(m²·K) to 20 °C, 40 long | 9.988193 W out of the outside, the same into the bore | 2π L ΔT / (ln(rₒ/rᵢ)/k + 1/(h rₒ)) = 9.988191 W |
 | a PLA rod (Netgen, R 10, 40 long) making 0.5 W, cooled at 25 W/(m²·K) to 20 °C, converge always | 35.6085 °C at its axis, settled in two steps | 20 + q R²/4k + q R/2h = 35.6094 (−0.003 %) |
 | the bar clamped along its axis (symmetry planes across), 100 K | σxx −240 MPa to 1e-9, σyy and σzz under 1e-9 of it; the end carries σ A | −E α ΔT |
 | a 30 mm cube held on every face, 50 K | every normal stress to 1e-9 | −E α ΔT / (1 − 2ν) |
 | the bar free, held statically determinately, 50 K across its depth | no stress (under 1e-6 MPa); the ends' axial motions differ across the depth by κ L h to 1e-9 | κ = α ΔT / h |
+
+The pipe wall (bore at 100 °C, outside cooled to 20 °C) is a [reference case](reference-cases.md) (`thermal_pipe`), its numbers there.
 
 The Netgen bar of `from_study` (ends held at 100 and 20 °C, both clamped in
 all three directions) carries 10 442 N at its ends, against E α (T̄ − T₀) A =
