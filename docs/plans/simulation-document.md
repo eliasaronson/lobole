@@ -251,9 +251,20 @@ Each merges on its own with the suites green.
    sees first and it does not wait for the document.
 2. **Result fields, the legend, VTU export.** No format change beyond the
    display settings.
-3. **The document**: `SimDocument`, the one planner, the migration, the
-   tab, [the window](#6-the-window) (tree, toolbar, tool window, legend), the
-   mesh stored and shared, RPCs on the document with the study ids kept.
+3. **The document**, in steps that each land green. The core is built
+   ([the simulation document (core)](../simulation/README.md#the-simulation-document-core):
+   `SimDocument`, the one planner, the mesh stored and shared); what is left:
+   1. **Serialization and migration** (`vNEXT`): the document saved and
+      opened, its stored meshes beside its results, and the studies of every
+      part and assembly moved into one simulation document each, as
+      [the document](#1-the-document) says.
+   2. **The tab and [the window](#6-the-window)** (tree, toolbar, tool
+      window, legend) on the document, and the app's runs going through
+      `RunSimStudy`.
+   3. **The RPC move**: the study RPCs on the document, with the study ids
+      kept.
+   4. **Docs and generators**, and the part- and assembly-level study lists
+      deleted.
 4. **The geometry step**: suppress for analysis, the geometry check, the
    symmetry cut.
 5. **Bearing load, free-free modal, `keep: full`, study sweeps.**

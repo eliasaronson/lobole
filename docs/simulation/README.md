@@ -2614,6 +2614,64 @@ its undo snapshots so a snapshot does not copy meshes. Topology
 optimization is refused on an assembly; `mesh_study {async}` is refused there
 (`run_study {async}` works).
 
+## The simulation document (core)
+
+`fem::SimDocument` (`src/core/fem/SimDocument.{h,cpp}`) is the study list's
+future home ([the plan](../plans/simulation-document.md)). **It exists in
+core only: the app, the file format and the RPCs do not use it yet**, and
+the studies still live on the part and the assembly as described above.
+
+It holds a **subject** (a part or an assembly by stable project-document id,
+and one configuration, 0 = the active one: a reference, never a copy), the
+**roles** table on an assembly subject (`fem::Participant`, now on the
+document rather than on each study), the document's **mesh** (a size and
+refinements) and the **studies**, with the ids studies have today. What a
+study is planned as is `SimDocument::Effective`: the document's mesh size
+where the study sets none, the document's refinements before its own, the
+document's roles.
+
+- **Staleness is per study.** Each study has its own revision, so editing
+  one leaves the others' results current; the subject, the roles and the
+  mesh are every study's input. A result is also stale when a subject
+  document it was solved against (`StudyRuntime::solvedPartVersions`) has
+  moved.
+- **Results and meshes are shared with undo snapshots**: a copy of the
+  document is a snapshot and points at the same store. `ClearStorage()`
+  drops every stored mesh and result, and the studies stay.
+- **Expressions** go through the one hook (`SimDocument::VisitExprs`, each
+  study's `Study::VisitExprs`, the mesh size and refinements, the roles'
+  sizes): `RenameReferences` renames a variable in all of them, and
+  `FindParameterReferences` names who reads one, so a delete can be refused.
+
+**One planner** (`src/core/fem/SimStudy.{h,cpp}`): `fem::PlanSimStudy` and
+`fem::SimStudyInputKey` take a `fem::SimContext` (the subject resolved by
+the caller: the part, or the assembly with its placed bodies and each
+occurrence's part; the symbols; the subject stamps). A part subject is
+planned as today's part study (`PlanStudy`). An assembly whose one meshed
+participant has no rigid, bonded or contact neighbour is the same problem,
+and is planned as that part's study, so pins, the frame supports, thermal
+studies and loads on part of a face work there, and the part and the part as
+a one-participant assembly hash the same. It takes that path only when the
+occurrence shows a part, at the part's own frame and in the part's own
+material; otherwise, and beside a neighbour, the assembly planner builds it
+and what that planner does not build is refused, saying why it took that
+path. A study cut from a topology result, a `thermal_load {from_study}` and
+a topology run are refused on a simulation for now: each reads another
+study's result, which the planner is not yet handed. `fem::RunSimStudy`
+plans, solves and stores the answer stamped with its input hash.
+
+### One mesh, shared
+
+Every planned body carries a **mesh key** (`fem::MeshKey`: the shape's
+digest, `inputhash::ShapeDigestOf`, and every mesher setting) and the
+document's stored mesh under it, which the run solves on instead of meshing
+again (`StudyBodyPlan::stored`); a mesh the run does make comes back in
+`StudyJobInput::madeMeshes` and is stored, and the result lists the keys it
+solved on (`StudyRuntime::meshKeys`). So two studies with the same effective
+settings mesh once, a study with a mesh size of its own meshes separately,
+an edit to a load never re-meshes, and an edit to the subject moves the key.
+A convergence step's refinement is a mesh of its own and is not stored.
+
 ## Results display
 
 `FieldRenderer` (`src/render/FieldRenderer.{h,cpp}`) has its own pipeline and
