@@ -237,3 +237,23 @@ what lets a plain 6.6 mm hole be read back as "an M6 normal clearance"
 the attribution and modification notice Apache-2.0 §4 asks for is
 `LICENSES/NOTICE-data-tables.txt`, installed with every binary.
 
+
+## Test data
+
+Files the tests read, in the source tree and the source tarball and in no
+binary package. Each folder's `LICENSES.txt` says what was copied, from
+where, and carries the licence text with its copyright line.
+
+- `tests/kernel_cases/solidcraft/`: SolidCraft's kernel rig cases
+  (https://github.com/tangency-labs/solidcraft, `tests/kernel-cases/`),
+  copied unchanged; SolidCraft is MIT OR Apache-2.0 and these are taken under
+  **MIT**. `tests/kernel_cases/solidcore/`: the `expected` block of
+  solidcore's later cases (https://github.com/tangency-labs/solidcore,
+  **Apache-2.0**, text in `LICENSES/Apache-2.0.txt`), each beside a recipe
+  written here. `tests/kernel_cases/SOURCE` names the commits and lists every
+  copied file's hash; `tests/kernel_cases/LICENSES.txt` has the MIT text and
+  solidcore's NOTICE (docs/modeling/README.md#kernel-cases).
+- `tests/fixtures/step/`: six STEP files from BenchCAD
+  (https://github.com/BenchCAD/BenchCAD-main, **MIT**; its hosted datasets
+  CC-BY-4.0) and one from SolidCraft's `tests/step-conformance/` (**MIT**),
+  copied unchanged; `tests/fixtures/step/LICENSES.txt`.

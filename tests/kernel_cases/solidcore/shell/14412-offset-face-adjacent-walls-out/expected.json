@@ -1,0 +1,12 @@
+{
+ "area_mm2": 682.0,
+ "body_count": 1,
+ "faces": 6,
+ "method": "the walls x=10 and y=10 move to x=11 and y=11: an 11 x 11 x 10 box, V=1210, area 2*(121+110+110)=682, 6 faces",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#14412"
+ ],
+ "volume_mm3": 1210.0,
+ "what": "Offset Face moves two adjacent side walls of a 10 mm box out 1 mm, so each wall grows to meet the other"
+}

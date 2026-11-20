@@ -1,0 +1,6 @@
+{
+ "commands": [
+  {"command": "solid.cylinder", "params": {"radius": 125, "height": 12, "body_name": "Drum"}},
+  {"command": "solid.chamfer", "params": {"edges": [[-102.23352414474739, -71.92570153252139, 12]], "distance": 1}}
+ ]
+}

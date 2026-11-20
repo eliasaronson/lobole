@@ -1,0 +1,6 @@
+{
+ "commands": [
+  {"command": "solid.cone", "params": {"radius": 15, "height": 40, "base": [0, 0, 0], "axis": "X", "body_name": "Cone"}},
+  {"command": "solid.shell", "params": {"faces": [[0, 3.1411078843307365, 4.997542771220968]], "thickness": 2}}
+ ]
+}

@@ -1,0 +1,6 @@
+{
+ "commands": [
+  {"command": "solid.cylinder", "params": {"radius": 50, "height": 12, "body_name": "Drum"}},
+  {"command": "solid.fillet", "params": {"edges": [[-40.89340965789883, -28.77028061300873, 12]], "radius": 1}}
+ ]
+}

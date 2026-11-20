@@ -1546,6 +1546,149 @@ belongs to one `GENERATOR_VERSION`, and changes only with the generator.
 union that breaks the identity and a reopen with another volume, and a
 failure planted at step 5 of 8 that needs step 2 must minimise to those two.
 
+## Kernel cases
+
+`tests/kernel_cases/` holds small cases whose answers were worked out by
+hand, most of them at a coincidence, a tangency or a geometric limit: a cut
+tangent to a face along a line, a tool 1e-6 mm into or out of the stock,
+holes touching at one point, a round as wide as its face.
+`tools/kernel_cases.py` builds each over the RPC and holds it to its answer;
+[kernel-cases.md](kernel-cases.md), generated from the same rows, says how
+many pass, which fail and under which entry, and what is not translated.
+
+**The cases are copied, never edited.** `solidcraft/<area>/<id>/` is
+SolidCraft's kernel rig (`recipe.json`, a command script, and
+`expected.json`, its answer: `source: analytic` with the derivation in
+`method`, or `source: invariants`), byte for byte, with a graded ladder on
+one 60 x 40 x 20 stock. `tools/kernel_cases.py vendor --from CHECKOUT`
+copies them and writes `SOURCE` (the repository, the commit, every file's
+SHA-256); the runner refuses a tree that differs. `solidcore/<area>/<id>/`
+holds the `expected` block of a case solidcore added later, beside a recipe
+written here from the entry's description (solidcore's entries are kernel
+calls on recorded bodies, not scripts); the ones whose bodies are not a
+few plain dimensions are still to write. `LICENSES.txt` says what was taken and under which licence.
+The answer never comes from a kernel, theirs or ours.
+
+**A recipe is translated at run time** (`tools/kernel_cases_translate.py`)
+into the steps [the reference parts](reference-parts.md) run, with its
+`base` chain's commands first; nothing translated is committed.
+
+| recipe command | becomes |
+|---|---|
+| `solid.box`, `solid.cylinder` | a Sketch on a plane `{origin, normal, uAxis}` at the corner or base, and an Extrude |
+| `solid.sphere`, `solid.cone`, `solid.torus` | a section Sketch and a Revolve about a `custom` axis |
+| `sketch.create` with lines, rectangles, circles, arcs, slots, rounded rectangles, polygons, an ellipse, a control-point spline | one Sketch, sent when a feature first uses it; SolidCraft's named planes are written out as frames (its XZ faces +Y), never left to `Top`/`Front`/`Right`, and a sketch on a face takes SolidCraft's frame for that face |
+| `solid.extrude` | Extrude: `distance`, `direction`, `taper` as `taper_deg` with its sign turned, `through_all`, a `profiles` pick by a point as `regions` |
+| `operation` `new` / `join` / `cut` | `mode` `new_body` / `add` / `cut`; a target named in a part of several bodies is a new body and a Boolean against it |
+| `solid.combine` | a Boolean per tool, chained on the result |
+| `solid.fillet`, `solid.chamfer` | Fillet, Chamfer, each edge a `$pick` at its point |
+| `solid.shell`, `solid.offset_face`, `face.delete`, `solid.draft` | Shell, OffsetFace, DeleteFace, Draft, faces by `$pick` |
+| `solid.hole` | a point Sketch on the face at `position` and a Hole; a `thread` is a tapped fit |
+| `solid.revolve`, `solid.loft`, `solid.sweep`, `solid.thread` | Revolve (its axis pointed so a part turn goes toward the sketch's normal, as SolidCraft's does), Loft, Sweep, Thread |
+| `solid.pattern.*`, `solid.mirror`, `solid.split_body` | Pattern (a total `angle` divided into the step between copies), Split |
+| `parameters.add`, `construct.plane.offset` | nothing sent: an expression is evaluated, a plane kept as a frame |
+
+A command or a parameter with no counterpart is not approximated: the case
+is `untranslated`, naming it (a second radius or a setback on a fillet, a
+two-distance chamfer, an outward shell, a pattern in two directions, a cut
+with several targets, regions that come from crossing curves, every command
+outside the table). A `$pick` that finds no element, or more than one, makes
+the case `untranslated: ambiguous pick`, never the nearest one; the one
+exception is SolidCraft's own rule, that a seam or a tangent join passing
+through the point gives way to the real edge there. A body a later command
+names that has no `created_by` of its own (a split's piece, a pattern's
+copy, a lump) is untranslated too. `inspect.measure` and `document.inspect`
+build nothing and are skipped. The import and export commands
+(`file.insert_step`, `file.export`, `file.new`) are not translated yet, so
+the `import` area is vendored and waits.
+
+**What a case is held to.**
+
+- `body_count` (solids: two lumps one feature left in one body are two,
+  unless the case states its `shells`, which is how it says one body has
+  several),
+  `volume_mm3`, and `area_mm2`, `center_of_mass` and `bbox` where given, from
+  `mass_properties`; every body valid and closed by `check_geometry`. A
+  volume or an area is held to half a unit in the last digit the case
+  states, never tighter than 1e-9 relative, or to the case's own
+  `tolerance`; a `[min, max]` is inclusive. A coordinate is held the same
+  way, and a box's side stated as a whole number to 1e-4 mm. SolidCraft's blanket
+  1e-3 is not used: the near-tangent ladder's answers differ from the
+  stock's by 2e-7 of it.
+- `faces` where given, as their own class (`topology`), so a right volume
+  on the wrong faces is told apart from a wrong volume. The cases count a
+  whole analytic surface once, so faces that share a smooth edge and lie on
+  one plane, cylinder or sphere are counted as one (`list_elements`): the
+  coplanar faces an `add` leaves unmerged until a Refine do not fail a
+  case. `edges` and `vertices` are not graded: SolidCraft counts a chain of
+  edges once, and no RPC lists the vertices a chain joins at. `shells` and `watertight` are read off an STL exported at the
+  case's `mesh_mm` (0.01 mm), its vertices welded at `weld_mm` (1e-4 mm):
+  every edge used by exactly two triangles, and the connected pieces
+  counted.
+- `outcome: refused`: a call is refused, or adds a feature that fails to
+  build, with a message that states a condition (`fuzz_design.measured`),
+  and the bodies are as they were. The wording is ours, so `refusal` is not
+  matched as text. `solid_or_refused` takes either.
+- Never a crash, a hang (120 s a case, or its `timeout_s`; the instance is
+  killed by pid), an `internal` error or a non-finite number.
+
+**A failure stays visible, and fails when it stops.**
+`tests/kernel_cases/status.json` holds one sorted line per case: `pass`,
+`untranslated: <what>`, or `known: <class> (<entry>)`. The classes are
+`volume` (a measure or the body count), `topology`, `invalid`, `accepted`
+(a case that must be refused and built), `crash`, `hang`, `internal`, each
+naming its [known-bugs](../known-bugs.md) entry, one per defect; and
+`refused`, a clean refusal of a case that has an answer, which is not a bug
+but something [not built](#not-built), and names its line there. A run fails
+on a `pass` that no longer passes, a `known` case that passes ("remove the
+row and its entry") or fails with another class, an `untranslated` case that
+now translates, a failing case with no row and a vendored case missing from
+the file. `bless` writes every row but the `known` ones, which are edited by
+hand, and refuses while a failing case has none; it also writes `slow.json`,
+the cases that took over 3 s.
+
+### Known rows that are not kernel defects
+
+Some rows are `known: volume` and name this section instead of a
+known-bugs entry, because the difference is not a defect that can be shown:
+
+- **Right to 1e-6, not to the digits stated.** The answer agrees to
+  between 1e-9 and 1e-6 relative (a box by a micron), past the floor above.
+  Three things are that size and are not told apart here: OpenCASCADE's
+  1e-7 mm confusion on a 30 mm part, a swept, lofted or blended surface
+  approximated to its own tolerance (a square swept along a Bezier is 2e-6
+  off), and the case's own quadrature, whose value is printed to sixteen
+  digits whatever it is good to.
+- **The case's formula is approximate.** A rectangle extruded with a taper
+  is a prismatoid, V = h (A0 + 4 Am + A1) / 6; two cases state the
+  pyramid's h (A0 + A1 + sqrt(A0 A1)) / 3, which is 7e-5 and 7e-4 off, and
+  one of them says so.
+- **The answer follows SolidCraft's own construction or table.** A loft
+  from a square to a circle depends on how the sections are paired, and a
+  loft through five or ten circles of an elbow is not the torus (2e-6 to
+  1e-3); a 1/4-28 UNF tapped hole takes the tap drill of SolidCraft's
+  table.
+
+Every other failing row names a [known-bugs](../known-bugs.md) entry or a
+line under [Not built](#not-built).
+
+    tools/kernel_cases.py run build/lobole [--ladder [--quick] | --area A] [-k TEXT] [--jobs N] [--write-page]
+    tools/kernel_cases.py replay build/lobole CASE [--keep]
+    tools/kernel_cases.py bless build/lobole
+    tools/kernel_cases.py vendor --from SOLIDCRAFT [--solidcore SOLIDCORE]
+    tools/kernel_cases.py self-test
+
+`replay` prints one case's calls and its expected values against what was
+measured; `--keep` leaves the instance running with the part open.
+`kernel_cases_ladder` (headless suite) runs the ladder's tiers less the
+slow list on one instance, checks the vendored files against `SOURCE`,
+every case for a row, and the generated page against the rows;
+`kernel_cases_selftest` feeds the translator a planted recipe per table row
+(`tests/kernel_cases/selftest.json`: the calls are written beside it) and
+the grader and the ratchet planted answers. The whole corpus is
+`tools/ctest -C kernel_cases -L kernel_cases -j4`: run it before a release
+and after a change to the kernel layer; `tools/merge-branch.sh` does not.
+
 ## Action matrix
 
 Every test above builds the part it was written for, on the edges its
@@ -1772,6 +1915,11 @@ invariants from outside, over designs nobody chose, and the action matrix
 (above) every ordinary action on every face, edge and body of a fixed
 corpus.
 
+Small cases at a coincidence, a tangency or a limit, with answers worked
+out by hand, are the [kernel cases](#kernel-cases)
+(`tools/kernel_cases.py`, `kernel_cases_ladder` in the headless suite and
+`tools/ctest -C kernel_cases -L kernel_cases` for all of them).
+
 Whole parts are checked by the [reference parts](reference-parts.md)
 (`tests/reference_parts.py`, `tools/ctest -L reference`): each built over
 the RPC, picked by points, compared tightly against closed-form volume,
@@ -1795,6 +1943,26 @@ reference case.
 - A thin extrude of an OPEN profile: `thin` walls every closed loop, and an
   open polyline is refused as "sketch has no closed profile", naming its
   [open ends](../sketching/README.md#open-ends).
+
+- What the [kernel cases](#kernel-cases) hold as built and Loböle refuses
+  cleanly (their rows are `known: refused`):
+  - a round or a chamfer at its limit: as wide as the face beside it, as
+    tall as its wall or as deep as its pocket, past either, or ending
+    against a boss, an opening or another blend ("the blend could not be
+    built", "the fillet failed on N contour(s)", or a result the validity
+    check refuses);
+  - a Shell whose wall is thicker than a round inside it, that opens the
+    side of a thin rib, or whose floor falls away to a drain, and a Shell
+    with no open face (a sealed void);
+  - an Offset Face of two adjacent faces at once, and of a face with a
+    tangent neighbour without it ([Offset Face](#offset-face));
+  - a Sweep along a closed path, a Pattern of a Loft or a Sweep that adds
+    to a body, and a Loft to a section the first cannot see whole (a comb);
+  - a thread outside the tables: a metric size with a pitch of its own
+    (M44x1), trapezoidal (Tr20x4) and pipe threads (Rp, Rc, NPT), on a
+    Thread and on a tapped Hole; a modelled thread in a hole as wide as
+    the thread, which SolidCraft narrows to the minor diameter first; and
+    a modelled thread whose groove cut the boolean check refuses.
 
 - A thread runout (DIN 76) or a faded end on a modelled thread, and a
   blind tapped hole's thread trimmed by its drill point: the ends are square.

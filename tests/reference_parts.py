@@ -68,6 +68,16 @@ class CaseError(Exception):
     known_failure mark says."""
 
 
+class PickError(CaseError):
+    """A `$pick` whose point is on no element, or on several: `count` of
+    `kind` pass through it. tools/kernel_cases.py tells the two apart."""
+
+    def __init__(self, message, kind, count):
+        super().__init__(message)
+        self.kind = kind
+        self.count = count
+
+
 # ------------------------------------------------------------ loading cases
 
 def check_imports(path):
@@ -152,7 +162,9 @@ def all_cases():
 # -------------------------------------------------------------- the recipe
 
 def resolve(d, value, results):
-    """Replace {"$ref": n[, "key"]} and {"$pick": kind, "at": p}."""
+    """Replace {"$ref": n[, "key"]} and {"$pick": kind, "at": p}; a pick
+    with "key": "feature_id" gives the created_by of the body the element
+    is on, for a feature that names its body beside its faces."""
     if isinstance(value, list):
         return [resolve(d, v, results) for v in value]
     if not isinstance(value, dict):
@@ -169,15 +181,20 @@ def resolve(d, value, results):
         return results[n - 1][key]
     if "$pick" in value:
         kind = value["$pick"]
-        if kind not in ("edge", "face") or set(value) != {"$pick", "at"}:
+        if kind not in ("edge", "face") or \
+                set(value) - {"key"} != {"$pick", "at"} or \
+                value.get("key", "feature_id") != "feature_id":
             raise CaseError(f"bad pick {value}: {{\"$pick\": edge|face, "
                             "\"at\": [x, y, z]}")
         r = d.call("query_geometry", element_type=kind, on_point=value["at"],
                    expected_count=1)
         if not r["ok"]:
-            raise CaseError(f"pick {kind} at {value['at']}: {r['count']} "
-                            "elements pass through it, want exactly 1")
+            raise PickError(f"pick {kind} at {value['at']}: {r['count']} "
+                            "elements pass through it, want exactly 1",
+                            kind, r["count"])
         m = r["matches"][0]
+        if "key" in value:
+            return m["created_by"]
         if "element" not in m:
             raise CaseError(f"pick {kind} at {value['at']}: the {m['kind']} "
                             "found there has no stable name, so it cannot "

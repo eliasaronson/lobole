@@ -111,6 +111,7 @@ cost, measured on a loaded machine (2026-11):
 | every reader-fuzz case | `tools/ctest -C reader_fuzz -L reader_fuzz_all` (docs/versioning/README.md#reader-fuzzing) | ~50 CPU-min |
 | random designs | `tools/fuzz.py run --count 200` (docs/modeling/README.md#random-designs; background past 600 s) | ~1 min |
 | the action matrix | `tools/ctest -C action_matrix -L action_matrix -j4` (docs/modeling/README.md#action-matrix; `tools/action_matrix.py run --profile` says where the time goes) | ~16 min |
+| the kernel case corpus | `tools/ctest -C kernel_cases -L kernel_cases -j4` (docs/modeling/README.md#kernel-cases; before a release and after a change to the kernel layer, its ladder is in the headless suite) | ~10 min |
 | damaged files at every reader, another seed | `tools/reader-fuzz.py run --seed S` (docs/versioning/README.md#reader-fuzzing) | slow; the sample is in the headless suite |
 
 `gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and

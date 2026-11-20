@@ -1781,6 +1781,32 @@ add_test(NAME fuzz_corpus_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(fuzz_corpus_smoke PROPERTIES TIMEOUT 180)
 
+# The kernel case corpus (docs/modeling/README.md#kernel-cases): small cases
+# with answers worked out by hand, built over the RPC from their command
+# scripts and held to tests/kernel_cases/status.json. The ladder's tiers run
+# everywhere, with the vendored files checked against SOURCE and the
+# generated page against the rows. The whole corpus, sharded by a stable
+# hash of each case's name, exists only under a configuration, like the big
+# generators and the action matrix:
+#   tools/ctest -C kernel_cases -L kernel_cases -j4
+add_test(NAME kernel_cases_selftest
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernel_cases_smoke.py
+                 --self-test)
+set_tests_properties(kernel_cases_selftest PROPERTIES TIMEOUT 60)
+add_test(NAME kernel_cases_ladder
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernel_cases_smoke.py
+                 $<TARGET_FILE:designer> --ladder)
+set_tests_properties(kernel_cases_ladder PROPERTIES TIMEOUT 600)
+set(KERNEL_CASES_SHARDS 4)
+math(EXPR KERNEL_CASES_LAST "${KERNEL_CASES_SHARDS} - 1")
+foreach(k RANGE ${KERNEL_CASES_LAST})
+  add_test(NAME kernel_cases_full_${k} CONFIGURATIONS kernel_cases
+           COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernel_cases_smoke.py
+                   $<TARGET_FILE:designer> --shard ${k}/${KERNEL_CASES_SHARDS})
+  set_tests_properties(kernel_cases_full_${k} PROPERTIES
+                       LABELS "slow;kernel_cases" TIMEOUT 3000)
+endforeach()
+
 # Every test finds the lobole Python package (python/lobole/) without
 # editing sys.path, on the stock-Ubuntu CI image as in the nix shell (which
 # exports the same). Last in the file, so it reaches every test above; the

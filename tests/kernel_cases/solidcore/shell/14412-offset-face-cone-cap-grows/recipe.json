@@ -1,0 +1,9 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 10}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 30, "taper": 10, "body_name": "Plug"}},
+  {"command": "solid.offset_face", "params": {"faces": [[-5.019410128486253, 2.793778807334932, 30]], "distance": 2}}
+ ]
+}

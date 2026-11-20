@@ -69,6 +69,141 @@ the heading if it is not here yet.
   cost a second build of every honest refusal. The fix belongs upstream, in
   the offset's intersections, not in the order.
 
+### A cut 0.001 mm deep is dropped as removing nothing
+
+- **Symptom:** a cylinder of radius 10 along X whose side dips 0.001 mm
+  into the top of a 60 x 40 x 20 block, in `cut` mode, leaves the block
+  whole with the warning "cut removed no material"; the groove it should
+  leave is 0.0113 mm³ and two faces. The same cylinder 1e-6 mm in is held to
+  the same answer by the case and passes for the same reason.
+- **Cause:** not established. The boolean returns the body unchanged, or
+  `ApplyBodyMode` reads a volume change this small as none.
+- **Where:** `ApplyBodyMode` in `src/core/BodyMode.cpp`.
+- **Likely fix:** decide "removed nothing" from the result's faces, not
+  from a volume threshold.
+- **Case:** `solidcraft/ladder/02-booleans/009-near-tangent-overlap-1e-3`
+  ([kernel cases](modeling/kernel-cases.md)).
+
+### Three chamfers meeting at a corner cut it off flat
+
+- **Symptom:** a Chamfer of three edges that meet at a box corner removes
+  more than the three bevels do: at distance 3 on the 60 x 40 x 20 stock the
+  volume is 47478 where the mitred bevels leave 47480.25, with one face
+  more (the corner's triangle). At distance 2 the difference is 0.667 mm³;
+  all twelve edges of a 25 mm cube at 2.5 are 10.4 mm³ and eight faces
+  out.
+- **Cause:** `BRepFilletAPI_MakeChamfer` closes a corner of three chamfers
+  with a plane through their three ends; the bevels' own planes meet in a
+  point further out.
+- **Where:** the Chamfer in `src/core/features/FilletFeature.cpp`, which
+  leaves the corner to OpenCASCADE.
+- **Likely fix:** build the corner from the three bevel planes (a cut by
+  each plane in turn gives it), or say in the Chamfer's doc that the corner
+  is cut flat.
+- **Cases:** `solidcraft/ladder/08-chamfers/004-corner-three-equal-3`,
+  `solidcraft/fillets/every-box-corner-three-edges-chamfer-2`,
+  `solidcraft/fillets/3655-chamfer-edge-order-box`.
+
+### A sweep rounds a sharp corner of its path
+
+- **Symptom:** an 8 x 5 rectangle swept up 30 and across 40 along two lines
+  at a right angle measures 2782.83 mm³; the mitred bar is 2800. The outer
+  corner is rounded about the path's corner.
+- **Cause:** `SweepFeature` sets `BRepBuilderAPI_RoundCorner` on its
+  `MakePipeShell`, so every path corner is a revolved fillet of the section
+  about the corner, not a mitre.
+- **Where:** the `SetTransitionMode` call in
+  `src/core/features/SweepFeature.cpp`.
+- **Likely fix:** a `corners: round | mitre` field (`RightCorner` is the
+  mitre), mitre for a path of lines.
+- **Case:** `solidcraft/sweeps/96-sweep-rectangle-round-a-mitred-corner`.
+
+### A modelled thread is cut in a hole too narrow for it
+
+- **Symptom:** a modelled M8 thread on the wall of a 6.3 mm hole builds.
+  The hole is narrower than the M8 tap drill (6.8 mm), so the thread's teeth
+  would fill it; the case holds that it is refused naming the drill.
+- **Cause:** `ThreadFeature` checks that the thread's root is outside the
+  hole (a 5 mm hole refuses M5) and not that the hole is at least the minor
+  diameter.
+- **Where:** `ThreadFeature::Execute`, `src/core/features/ThreadFeature.cpp`.
+- **Likely fix:** refuse an internal modelled thread in a hole under the
+  thread's minor diameter, naming the tap drill.
+- **Case:** `solidcraft/threads/2369-m8-thread-in-6.3mm-hole-refused`.
+
+### A union of a tube and nine bars through its wall gains volume
+
+- **Symptom:** a tube (r 21.5 to 23, 20 high) joined with nine round bars
+  (r 1) standing radially out of its wall, one Boolean a bar, measures
+  4596.234 mm³; the closed form is 4595.675. Each union adds 44.68 to
+  44.77 where every bar adds 44.628, and the centre of mass ends 0.7 µm
+  off the axis.
+- **Cause:** not established. The bars' ends lie inside the wall, 0.7 mm
+  from its inner face; the excess is the same order as the bar's end disc
+  times a few hundredths of a millimetre.
+- **Where:** `BooleanFeature`, `CADKernel::Fuse`.
+- **Likely fix:** reduce it first: one bar, then whether the excess follows
+  the fuzzy value or the measure (`mass_properties` on the result).
+- **Case:** `solidcraft/booleans/1107-join-hollow-hub-with-nine-blades`.
+
+### A blend along a curved edge is off its rolling-ball volume
+
+- **Symptom:** a Fillet or Chamfer whose edge is an intersection curve or
+  ends on a curved face measures up to 6e-4 off the closed form the case
+  derives, where one along a straight or circular edge agrees to 1e-9: the
+  rim of a tube bent through an arc (5e-5), a plane cutting a cylinder or
+  a cone obliquely (2e-5, 4e-6), a round laid over a hole (3e-4), a tray's
+  floor and three of its corners (1e-4), a chamfer where a pipe meets a
+  plate (6e-4), a tapered extrude of arcs meeting at corners (one face
+  more).
+- **Cause:** not established case by case. OpenCASCADE's blend surface on
+  such an edge is an approximation to its own tolerance, and where rounds
+  meet at a corner it builds a patch of its own; neither is the rolling
+  ball's envelope.
+- **Where:** `src/core/features/FilletFeature.cpp`;
+  `ExtrudeFeature::TaperPrism` for the tapered extrude.
+- **Likely fix:** per case: tighten the blend's approximation tolerance
+  where that closes the gap, and write down where the corner patch differs
+  by construction.
+- **Cases:** `solidcraft/fillets/1213-round-end-circle-of-bent-tube`,
+  `cov-fillet-exact-oblique-plane-cylinder-rim-r2`,
+  `cov-fillet-exact-oblique-plane-cone-rim-r1-5`,
+  `324-fillet-over-hole-overlap`,
+  `324-fillet-over-hole-cut-by-overlong-cylinder`,
+  `1008-fillet-tray-floor-and-three-of-four-corners`,
+  `cov-fillet-section-chamfer-pipe-on-plate-2`,
+  `solidcraft/booleans/2810-taper-extrude-arcs-meeting-at-corners`,
+  `solidcraft/threads/3368-faceted-prism-with-bore-and-cross-hole` (8e-5,
+  a faceted prism with a bore: no blend, kept here until it is looked at).
+
+### A round after a bend round leaves a face more
+
+- **Symptom:** an L bracket whose inside bend is rounded, then its front
+  inner outline rounded R1 along the tangent chain, has the right volume
+  on 13 faces; the case counts 12.
+- **Cause:** not established: one of the chain's rounds comes out in two
+  faces that are not one cylinder or plane.
+- **Where:** `FilletFeature`.
+- **Case:**
+  `solidcraft/fillets/every-l-bracket-front-inner-outline-after-bend-round-r1`.
+
+### A cavity touching the outer skin along a line is one shell with it
+
+- **Symptom:** a box less a cylinder that lies inside it and touches a wall
+  along a line (a cavity) has the right volume and passes
+  `check_geometry`, and its mesh is one connected piece where the case
+  counts two shells: the cavity's wall and the box's share the line's
+  edge.
+- **Cause:** the boolean keeps the tangent line as an edge both shells
+  use; nothing splits the result into an outer shell and a void that only
+  touch.
+- **Where:** `ApplyBodyMode`, `src/core/BodyMode.cpp`.
+- **Likely fix:** none needed for volume; a consumer that needs manifold
+  shells (a mesh export, a print check) has to split at such an edge.
+- **Cases:** `solidcore/booleans/17439-cylinder-cavity-touching-a-wall-along-a-line`,
+  `17439-cylinder-cavity-along-x-touching-the-floor`,
+  `17439-cylinder-cavity-touching-two-walls-along-lines`.
+
 ## Sketching
 
 ### A huge length edit refuses a shape that rides the line's end

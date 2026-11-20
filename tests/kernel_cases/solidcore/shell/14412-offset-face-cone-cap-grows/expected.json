@@ -1,0 +1,12 @@
+{
+ "area_mm2": 3700.494337823725,
+ "body_count": 1,
+ "faces": 3,
+ "method": "r10 circle extruded 30 with a 10 deg outward taper, top moved from z=30 to z=32: a frustum of height h=32 from r0=10 to r1=10+32*tan(10deg). V=pi*h/3*(r0^2+r0*r1+r1^2), area pi*(r0+r1)*h/cos(10deg)+pi*(r0^2+r1^2), 3 faces",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#14412"
+ ],
+ "volume_mm3": 16792.4006554399,
+ "what": "Offset Face moves the top of a tapered cylinder out 2 mm, so the top grows along the cone"
+}
