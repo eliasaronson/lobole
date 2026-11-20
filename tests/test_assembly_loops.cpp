@@ -1492,17 +1492,37 @@ TEST_CASE("Limits that do not bind cost a loop nothing; resting on them it "
     assembly::LoopSolution free, wide, resting;
     // Warm once: the first solve pays for allocations the rest reuse.
     (void)assembly::SolveLoops(c.p);
-    const double tFree = CpuSecondsOf(c.p, c.reps, &free);
+    (void)CpuSecondsOf(c.p, 1, &free);
     REQUIRE(free.converged);
     assembly::LoopProblem w = c.p;
     WideLimits(w);
-    const double tWide = CpuSecondsOf(w, c.reps, &wide);
+    assembly::LoopProblem r = c.p;
+    const int held = RestingLimits(r, free);
+    // The arms side by side, five times, each judged by the round that came
+    // out best. CPU time depends on the core (an E-core spends ~3 times a
+    // P-core's seconds) and on a loaded machine the scheduler moves the
+    // thread between them: timed one arm after the other, a move between
+    // the arms failed the ratio. Adjacent runs share a core far more often,
+    // and a real cost in the limit path still raises every round.
+    double tFree = 0, tWide = 0, tRest = 0;
+    double wideExcess = 1e9, restExcess = 1e9; // over the allowance, s
+    for (int round = 0; round < 5; round++) {
+      const double f = CpuSecondsOf(c.p, c.reps, &free);
+      const double wd = CpuSecondsOf(w, c.reps, &wide);
+      const double rs = CpuSecondsOf(r, c.reps, &resting);
+      if (wd - 1.5 * f < wideExcess) {
+        wideExcess = wd - 1.5 * f;
+        tFree = f;
+        tWide = wd;
+      }
+      if (rs - 4.0 * f < restExcess) {
+        restExcess = rs - 4.0 * f;
+        tRest = rs;
+      }
+    }
     CHECK(wide.converged);
     CHECK(wide.limits.empty());
     CHECK(wide.iterations == free.iterations);
-    assembly::LoopProblem r = c.p;
-    const int held = RestingLimits(r, free);
-    const double tRest = CpuSecondsOf(r, c.reps, &resting);
     if (print)
       std::printf("limits cost: %-18s %3d dof  free %8.2f ms (%d it)  "
                   "wide %8.2f ms (%d it)  resting on %d limits %8.2f ms "
@@ -1512,7 +1532,7 @@ TEST_CASE("Limits that do not bind cost a loop nothing; resting on them it "
                   resting.iterations, resting.converged ? "closed" : "OPEN");
     // A cost check, as a ratio within one run: wide limits are a box the
     // step never meets, so the solve is the free one.
-    CHECK(tWide <= 1.5 * tFree + 2e-3);
+    CHECK(wideExcess <= 2e-3);
     if (held > 0) {
       // Resting on its limits the loop still closes -- the other joints
       // take the motion -- and every held joint is AT its limit, not crept
@@ -1525,7 +1545,7 @@ TEST_CASE("Limits that do not bind cost a loop nothing; resting on them it "
           CHECK(resting.solved[i].rotation >= g.min);
           CHECK(resting.solved[i].rotation <= g.max);
         }
-      CHECK(tRest <= 4.0 * tFree + 5e-3);
+      CHECK(restExcess <= 5e-3);
     }
   }
 }
