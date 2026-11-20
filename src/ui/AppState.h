@@ -637,6 +637,8 @@ struct MeasureState {
 // simulation tools, the Model dock shows the Studies panel, and a viewport
 // click assigns the armed boundary condition to the picked face. Results are
 // derived data on the Document; this holds only transient UI/display state.
+struct ShownField; // ui/SimulationView.h
+struct StudyCheck; // ui/SimulationView.h
 struct SimulationState {
   bool active = false;        // in simulation mode (the mode gate)
   uint64_t activeStudyId = 0; // study being edited/viewed (0 = none)
@@ -747,9 +749,49 @@ struct SimulationState {
     Shape,
     Density,
     Temperature,
-    HeatFlux
+    HeatFlux,
+    // What a static result's stress tensor is read by
+    // (docs/simulation/README.md#results-display), each a fem::ResultField.
+    PrincipalMax,
+    PrincipalMid,
+    PrincipalMin,
+    AcrossLayers,
+    InterlayerFactor,
+    FactorOfSafety,
+    PlasticStrain,
+    ContactPressure
   };
   Field field = Field::None;
+  // The mesh the Mesh action made, drawn in place of the body
+  // (docs/simulation/README.md#the-mesh-you-look-at): its element edges,
+  // alone or over a colour by element quality or size. A result field and
+  // the mesh view are one picture each: showing one switches the other off.
+  enum class MeshView { Off, Edges, Quality, Size };
+  MeshView meshView = MeshView::Off;
+  // The build direction the across-layers fields read the stress along, in
+  // the part's frame. A question asked of the result, not a study input
+  // (docs/simulation/README.md#printed-layers); it starts as the world's up.
+  glm::dvec3 layerNormal{0.0, 0.0, 1.0};
+  // The legend's range clamp, in the field's own unit: a bound that is set
+  // replaces that end of the field's range, and values past it take the
+  // over or under colour. Cleared when the field changes.
+  bool clampLo = false, clampHi = false;
+  double rangeLo = 0.0, rangeHi = 0.0;
+  // Markers at the field's maximum and minimum, with their values.
+  bool showExtremes = true;
+  // What the field overlay last built, for the legend and the markers: the
+  // field's range, where its extremes are, what it is called. Rebuilt with
+  // the overlay (ui::SyncFieldRenderer), never per frame.
+  std::shared_ptr<const ShownField> shown;
+  // The study check beside Run (docs/simulation/README.md
+  // #checking-a-study), cached against the study and the document.
+  std::shared_ptr<const StudyCheck> check;
+  // The place a report row last framed (a worst element, a wall), marked in
+  // the viewport while the mesh is on show.
+  bool placeMarked = false;
+  glm::dvec3 placeAt{0.0};
+  // What the last Export VTU did, under its button.
+  std::string exportNote;
   float deformScale = 0.0f; // shader-side warp multiplier (0 = undeformed)
   // Value-and-unit labels beside every boundary-condition glyph ("1.2 kN",
   // "0.5 MPa", "fixed", "g 9.81 m/s^2"). On by default: a setup whose
@@ -2205,6 +2247,7 @@ struct AppState {
   // found, by (part slot id, study id) — study_status answers from here.
   std::shared_ptr<MeshJob> meshJob;
   std::map<std::pair<uint64_t, uint64_t>, MeshReport> meshReports;
+  uint64_t meshReportEpoch = 0;
   // Mass-properties center-of-gravity marker (C3): drawn as a small world-space
   // cross when the Properties panel's Mass properties section is open. The
   // panel computes the CoM and stamps it here; the overlay build reads it.

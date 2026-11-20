@@ -5,6 +5,13 @@
 
 layout(location = 0) in float fragScalar;
 layout(location = 1) in vec4 fragClipDist;
+layout(location = 2) in vec3 fragEdge;
+layout(location = 3) in vec3 fragViewPos;
+
+layout(push_constant) uniform Push {
+    float deformScale;
+    int flags; // FieldStyle: 1 edges, 2 plain, 4 lit, 8 unclipped, 16 reversed
+} pc;
 
 layout(location = 0) out vec4 outColor;
 
@@ -25,7 +32,37 @@ vec3 turbo(float x) {
                 dot(v4, kBlueVec4)  + dot(v2, kBlueVec2));
 }
 
+// The colours past the legend's ends (FieldStyle::kOver / kUnder).
+const vec3 kOver = vec3(1.0, 0.35, 0.9);
+const vec3 kUnder = vec3(0.42, 0.44, 0.48);
+
 void main() {
     if (any(greaterThan(fragClipDist, vec4(0.0)))) discard; // section planes
-    outColor = vec4(turbo(fragScalar), 1.0);
+    vec3 color;
+    if ((pc.flags & 2) != 0) {
+        color = vec3(0.74, 0.76, 0.80); // the mesh view's plain body
+    } else if (fragScalar > 1.0005) {
+        // Past the hot end pink, past the other grey: a reversed map's hot
+        // end is its low one.
+        color = (pc.flags & 16) != 0 ? kUnder : kOver;
+    } else if (fragScalar < -0.0005) {
+        color = (pc.flags & 16) != 0 ? kOver : kUnder;
+    } else {
+        color = turbo((pc.flags & 16) != 0 ? 1.0 - fragScalar : fragScalar);
+    }
+    if ((pc.flags & 4) != 0) {
+        // A headlight on the facet: its normal from the surface itself, so
+        // every element face reads as a facet.
+        vec3 n = normalize(cross(dFdx(fragViewPos), dFdy(fragViewPos)));
+        color *= 0.5 + 0.5 * abs(dot(n, normalize(vec3(0.35, 0.5, 0.8))));
+    }
+    if ((pc.flags & 1) != 0) {
+        // Element edges: where a barycentric coordinate nears zero, at a
+        // width constant on screen.
+        vec3 w = fwidth(fragEdge);
+        vec3 a = smoothstep(vec3(0.0), w * 1.25, fragEdge);
+        float inside = min(a.x, min(a.y, a.z));
+        color = mix(vec3(0.07, 0.08, 0.10), color, 0.2 + 0.8 * inside);
+    }
+    outColor = vec4(color, 1.0);
 }

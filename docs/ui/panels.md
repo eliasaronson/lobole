@@ -334,6 +334,16 @@ flagged in the panel before Run, with the material combo in place
 and direction. The `--offscreen` instance builds no overlays, so a study's
 picture needs a windowed instance.
 
+The window's reports are lists whose rows frame their place: the **Mesh
+report** under the Mesh button (folded until opened) and the study check
+under Run are `FindingRow`s (`src/ui/StudyPanel.cpp`), a glyph and the
+finding as a whole sentence wrapped at the window's fixed width -- an elided
+sentence is not a finding -- with a hover highlight across it, and a click
+that frames the element, the wall, the face or the body it is about
+([../simulation/README.md](../simulation/README.md#the-mesh-report)). The
+result's display is one **Field** combo, the deformation slider and one
+**Range** row; the legend in the viewport carries the rest.
+
 A thermal study's tools (**Temperature**, **Heat flux**, **Convection**,
 **Heat source**) have no derivable default: a held temperature, a film
 coefficient and an ambient are the caller's. Their fields start empty and

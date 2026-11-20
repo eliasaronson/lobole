@@ -23,6 +23,7 @@
 #include "ui/DocumentSlots.h" // AddPart, SetActivePart
 #include "ui/ImportActions.h"
 #include "ui/SimulationActions.h"
+#include "ui/SimulationView.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -961,7 +962,16 @@ static constexpr MethodDoc SimulationMethods[] = {
      "threshold_lowered_from?:number, topology?:int"},
     {"remove_keep_face", "Unmark a kept face.", "face, study"},
     {"mesh_study",
-     "Mesh the study (Netgen tets); returns element counts/quality. "
+     "Mesh the study (Netgen tets) and KEEP the mesh for set_mesh_display; "
+     "returns per body its counts, worst quality and `report` "
+     "(worst_elements with where each is, size_mm {min, mean, max}, "
+     "thin_walls -- a wall crossed by ONE element, straightened_nodes -- "
+     "what the fold check flattened, refinement_misses, volume {mesh_mm3, "
+     "body_mm3, apart_mm3, allowed_mm3}, and on a bonded group its "
+     "interfaces, unshared_nodes and loose_members), and `findings`, the "
+     "same as rows {level, code, text, at?, radius_mm?}. A mesh whose "
+     "volume is not its body's, past what its curved faces' deflection "
+     "allows, is refused. "
      "Synchronous by default — a fine mesh takes minutes, so either give the "
      "client a long timeout (the server finishes even if the client gives "
      "up) or pass `async: true`: the mesh then runs on a background job and "
@@ -1195,13 +1205,32 @@ static constexpr MethodDoc SimulationMethods[] = {
      "service temperature\" (oracle in_house/heat or calculix/heat). A "
      "static result under a thermal_load adds `temperature` {min_c, max_c, "
      "stress_free_c, from_study?} and warns of a body past its service "
-     "temperature (docs/simulation/README.md#thermal).",
+     "temperature (docs/simulation/README.md#thermal). A static result's "
+     "`reaction_total` {force_n [x,y,z]} is the resultant of every "
+     "support's reaction, and a result run in this session adds "
+     "`applied_total` {force_n}, the resultant of everything applied "
+     "(forces, pressures, gravity): the two cancel when the study is in "
+     "balance, so that check is one read (per case in `cases`).",
      "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
-     "the deformation {study, field: von_mises|displacement|shape|density|"
-     "temperature|heat_flux|none, deform_scale?, mode? (0-based, which mode "
-     "shape for a modal or buckling study), threshold?} (temperature: a "
+     "the deformation {study, field, deform_scale?, mode? (0-based, which "
+     "mode shape for a modal or buckling study), threshold?, range_min?, "
+     "range_max?, layer_normal?, markers?}. `field`: von_mises | "
+     "displacement | principal_max | principal_mid | principal_min (the "
+     "principal stresses, MPa, tension positive) | factor_of_safety (yield / "
+     "von Mises, its low end the hot one) | across_layers (the normal stress "
+     "along `layer_normal` [x, y, z], the build direction in the part's "
+     "frame, MPa) | interlayer_factor (the material's interlayer strength "
+     "over it) | plastic_strain (a plastic study's) | contact_pressure (MPa, "
+     "a contact study's, run in this session) | temperature | heat_flux | "
+     "shape | density | none. A field the study's result does not hold is "
+     "refused, saying what is missing. `range_min` / `range_max` clamp the "
+     "legend in the field's own unit (null gives that end back to the "
+     "field): past them the picture takes the over and under colours, so "
+     "range_max at the yield strength shows what has yielded. `markers` "
+     "(default on) marks the field's maximum and minimum. "
+     "(temperature: a "
      "thermal study's, or a static one's under a thermal_load, its legend in "
      "degrees C; heat_flux: a thermal study's, W/m^2). It colours the raster "
      "viewport, which is "
@@ -1211,7 +1240,51 @@ static constexpr MethodDoc SimulationMethods[] = {
      "undeformed part in its own material and looks like the call silently "
      "did nothing. A static study with load cases shows `case` (its name or "
      "0-based index).",
-     "case, deform_scale, field, mode, study, threshold"},
+     "case, deform_scale, field, layer_normal, markers, mode, range_max, "
+     "range_min, study, threshold"},
+    {"set_mesh_display",
+     "Draw the mesh mesh_study kept in place of the body {study?, view: off "
+     "| edges | quality | size}: its element edges, alone or over a colour "
+     "by each element's quality (the worse of its shape and its scaled "
+     "Jacobian, 1 good) or its size in mm. A section then cuts it along "
+     "whole elements, so the interior tets show. Display only; it colours "
+     "the raster viewport, which is what `screenshot` captures, and switches "
+     "a result field off (one picture at a time). Refused when the study has "
+     "no kept mesh. Answers `stale` when the geometry or the mesh settings "
+     "moved since it was made.",
+     "study, view"},
+    {"check_study",
+     "Everything a run of the study would refuse, AT ONCE, each with the "
+     "call that fixes it {id (or study)} -> {ok, problems: [{code, message, "
+     "load_id?, body?, face?, fix?: {method, params, note?}}]}. Read-only: "
+     "nothing is meshed, solved or changed. `code`: no_loads | no_support | "
+     "material | anchor | refinement_anchor (a face that is gone) | "
+     "load_geometry (a torque on a face that is not a cylinder, a remote "
+     "load with no point, a pin on a flat face) | region (a load region "
+     "holding no facet of its face: found once mesh_study has kept a mesh) | "
+     "load_cases | setup | expression | stale_mesh | solver (CalculiX is not "
+     "installed) | plan (what the planner refuses that is not itemised; on "
+     "an assembly study every refusal is this one row). `fix.params` is the "
+     "call to make, with null where the caller chooses (a face, a "
+     "material). run_study refuses the first of these; this is the list.",
+     "id, study", remote::NoFlags,
+     "ok:bool, problems:{body?:string, code:string, face?:string, "
+     "fix?:object, load_id?:int, message:string}[], receipt:{claims:object[], "
+     "schema:string, standing:string, summary:string}"},
+    {"export_study_result",
+     "Write a solved study's result as a VTK unstructured grid {id (or "
+     "study), path, case?} for ParaView or another post-processor: the "
+     "tet10 mesh as VTK_QUADRATIC_TETRA (VTK's node order, right-handed) "
+     "with point data displacement (mm), von_mises and stress (MPa; the "
+     "tensor as XX YY ZZ XY YZ XZ), and where the result holds them "
+     "plastic_strain, temperature (degrees C), heat_flux (W/m^2) and "
+     "mode_<k>; cell data body, domain and a topology result's density. "
+     "ASCII, written to `path` (a .vtu), never returned inline. It writes "
+     "the WHOLE result, which the session keeps from a run; a result "
+     "reopened from disk keeps its boundary surface only and is refused, "
+     "saying to run again (run_study {recompute: true}). A study with load "
+     "cases names `case` (its name or 0-based index).",
+     "case, id, path, study", remote::NotInBatch},
     {"probe_study",
      "How one FACE moved and how hard it is stressed under a solved static "
      "study {id (or study), face, occurrence?, at?}; on an ASSEMBLY study "
@@ -1300,6 +1373,112 @@ namespace {
 // study would hand CalculiX, for body `body` and load case `case`, meshed
 // here. Needs no ccx. Every parameter is read, and the deck written into
 // memory, before the file is touched.
+json Vec3Json(const glm::dvec3& v) { return json::array({v.x, v.y, v.z}); }
+
+// A kept mesh as mesh_study and study_status answer it
+// (docs/simulation/README.md#the-mesh-report): per body its counts and
+// report, and `findings`, the rows the panel lists.
+json MeshReportJson(ui::AppState& state, const ui::MeshReport& mr,
+                    uint64_t studyId) {
+  json bodies = json::array();
+  for (const ui::MeshReport::Body& b : mr.bodies) {
+    const fem::MeshBodyReport& r = b.report;
+    json walls = json::array(), misses = json::array(), worst = json::array(),
+         interfaces = json::array();
+    for (const auto& w : r.thinWalls)
+      walls.push_back({{"face_a", ui::MeshFaceName(state, b, w.faceA)},
+                       {"face_b", ui::MeshFaceName(state, b, w.faceB)},
+                       {"thickness_mm", w.thicknessMm},
+                       {"elements", w.tets},
+                       {"at", Vec3Json(w.at)}});
+    for (const auto& m : r.refinementMisses)
+      misses.push_back({{"face", ui::MeshFaceName(state, b, m.faceIndex)},
+                        {"asked_mm", m.askedMm},
+                        {"got_mm", m.gotMm},
+                        {"why", m.why}});
+    for (const auto& e : r.worst)
+      worst.push_back({{"element", e.tet},
+                       {"quality", e.quality},
+                       {"shape", e.shape},
+                       {"scaled_jacobian", e.jacobian},
+                       {"size_mm", e.size},
+                       {"at", Vec3Json(e.at)}});
+    for (const auto& i : r.interfaces)
+      interfaces.push_back({{"member_a", i.domainA},
+                            {"member_b", i.domainB},
+                            {"shared_faces", i.sharedFaces},
+                            {"at", Vec3Json(i.at)}});
+    json report{
+        {"worst_quality", r.worstQuality},
+        {"worst_elements", worst},
+        {"size_mm",
+         {{"min", r.sizeMin}, {"mean", r.sizeMean}, {"max", r.sizeMax}}},
+        {"boundary_triangles", r.boundaryTris},
+        {"straightened_nodes", r.straightenedNodes},
+        {"thin_walls", walls},
+        {"refinement_misses", misses}};
+    if (r.shapeVolumeMm3 > 0.0)
+      report["volume"] = {
+          {"mesh_mm3", r.volumeMm3},
+          {"body_mm3", r.shapeVolumeMm3},
+          {"apart_mm3", std::abs(r.volumeMm3 - r.shapeVolumeMm3)},
+          {"allowed_mm3", r.volumeSlackMm3}};
+    if (r.domains > 1) {
+      report["members"] = r.domains;
+      report["interfaces"] = interfaces;
+      report["unshared_nodes"] = r.unsharedNodes;
+      report["loose_members"] = r.looseDomains;
+    }
+    bodies.push_back({{"body", b.name},
+                      {"nodes", b.nodes},
+                      {"elements", b.elements},
+                      {"worst_quality", b.worstQuality},
+                      {"report", report}});
+  }
+  json findings = json::array();
+  for (const ui::MeshFinding& f : ui::MeshFindings(state, mr)) {
+    json fj{{"level",
+             f.level == ui::MeshFinding::Level::Warning ? "warning" : "info"},
+            {"code", f.code},
+            {"text", f.text},
+            {"body", f.body}};
+    if (f.hasPlace) {
+      fj["at"] = Vec3Json(f.at);
+      fj["radius_mm"] = f.radiusMm;
+    }
+    findings.push_back(std::move(fj));
+  }
+  return json{{"bodies", bodies},
+              {"findings", findings},
+              {"seconds", mr.seconds},
+              {"stale", ui::StudyMeshStale(state, studyId)}};
+}
+
+json ProblemsJson(const std::vector<fem::StudyProblem>& problems) {
+  json out = json::array();
+  for (const fem::StudyProblem& p : problems) {
+    json pj{{"code", p.code}, {"message", p.message}};
+    if (p.loadId != 0)
+      pj["load_id"] = p.loadId;
+    if (!p.body.empty())
+      pj["body"] = p.body;
+    if (p.hasFace)
+      pj["face"] = p.face.name;
+    if (!p.fixMethod.empty() || !p.fixNote.empty()) {
+      json fix = json::object();
+      if (!p.fixMethod.empty()) {
+        fix["method"] = p.fixMethod;
+        fix["params"] = p.fixParams;
+      }
+      if (!p.fixNote.empty())
+        fix["note"] = p.fixNote;
+      pj["fix"] = std::move(fix);
+    }
+    out.push_back(std::move(pj));
+  }
+  return out;
+}
+
 json ExportStudyInp(ui::AppState& state, Host& host, const RpcParams& p) {
   const uint64_t id =
       StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
@@ -2490,22 +2669,124 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                   {"kind", "mesh"},
                   {"outlives_client", start.owner == 0}};
     }
-    std::vector<fem::StudyBodyMesh> meshes;
+    // Meshed here and kept (ui::MeshStudyNow): what set_mesh_display
+    // draws, and what check_study reads a load's region against.
     std::string err;
-    const bool meshed =
-        host.IsAssembly()
-            ? ui::MeshAssemblyStudy(state, *host.asmDoc, id, meshes, &err)
-            : fem::MeshStudy(*doc, *s, meshes, &err);
-    if (!meshed)
+    if (!ui::MeshStudyNow(state, id, &err))
       throw std::runtime_error(err);
-    json bodies = json::array();
-    for (const fem::StudyBodyMesh& bm : meshes) {
-      bodies.push_back({{"body", bm.bodyName},
-                        {"nodes", bm.mesh.stats.nodeCount},
-                        {"elements", bm.mesh.stats.tetCount},
-                        {"worst_quality", bm.mesh.stats.worstQuality}});
+    (void)s;
+    const ui::MeshReport* mr = ui::StudyMesh(state, id);
+    if (mr == nullptr)
+      throw std::runtime_error("the mesh was made and not kept");
+    return MeshReportJson(state, *mr, id);
+  }
+  if (m == "check_study") {
+    // Everything a run would refuse, at once; read-only
+    // (docs/simulation/README.md#checking-a-study). params: {id | study}
+    const uint64_t id =
+        StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                     p.contains("study"), p.value("study", uint64_t{0}));
+    host.Require(id);
+    // rpc-returns-from: src/remote/RemoteSimulation.cpp
+    const std::vector<fem::StudyProblem> problems =
+        ui::CheckStudyNow(state, id, true);
+    json out{{"ok", problems.empty()}, {"problems", ProblemsJson(problems)}};
+    // What `ok` covers and what it does not: the setup rules and the
+    // planner were read, and what a run refuses only after it has meshed
+    // and assembled (a part its supports leave free to move, a pin that
+    // lifts off, a nonlinear run that stops converging) was not.
+    receipt::Receipt r;
+    const receipt::Oracle oracle{"designer/study-check",
+                                 host.IsAssembly() ? "assembly-planner"
+                                                   : "part-planner"};
+    receipt::Claim c("the study's setup is one a run accepts", oracle,
+                     problems.empty() ? receipt::Verdict::Pass
+                                      : receipt::Verdict::Fail);
+    c.basis = receipt::Basis::Verified;
+    c.value = static_cast<double>(problems.size());
+    c.unit = "problems";
+    c.note = "the rules run_study's planner reads, collected instead of "
+             "stopping at the first";
+    r.Add(std::move(c));
+    r.Unverifiable("a run of the study solves", oracle,
+                   "what a run refuses after meshing is not checked here: "
+                   "supports that leave the part free to move, a pin that "
+                   "lifts off, a solve that does not converge. run_study "
+                   "answers those");
+    AttachReceipt(out, r);
+    return out;
+  }
+  if (m == "set_mesh_display") {
+    // Draw the kept mesh in place of the body (display only).
+    // params: {study?, view: off | edges | quality | size}
+    std::optional<uint64_t> study;
+    if (p.contains("study")) {
+      study = p.at("study").get<uint64_t>();
+      host.Require(*study);
     }
-    return json{{"bodies", bodies}};
+    const std::string v = p.at("view").get<std::string>();
+    ui::SimulationState::MeshView view = ui::SimulationState::MeshView::Off;
+    if (v == "off")
+      view = ui::SimulationState::MeshView::Off;
+    else if (v == "edges")
+      view = ui::SimulationState::MeshView::Edges;
+    else if (v == "quality")
+      view = ui::SimulationState::MeshView::Quality;
+    else if (v == "size")
+      view = ui::SimulationState::MeshView::Size;
+    else
+      throw std::runtime_error("unknown view: " + v +
+                               "; views: off, edges, quality, size");
+    const uint64_t shown = study.value_or(state.simulation.activeStudyId);
+    if (view != ui::SimulationState::MeshView::Off &&
+        ui::StudyMesh(state, shown) == nullptr)
+      throw std::runtime_error(
+          "study " + std::to_string(shown) +
+          " has no mesh to draw: mesh_study {id} makes one and keeps it");
+    ui::EnterSimulation(state);
+    if (study)
+      state.simulation.activeStudyId = *study;
+    state.simulation.meshView = view;
+    if (view != ui::SimulationState::MeshView::Off)
+      state.simulation.field = ui::SimulationState::Field::None;
+    return json{
+        {"view", v},
+        {"stale", ui::StudyMeshStale(state, state.simulation.activeStudyId)}};
+  }
+  if (m == "export_study_result") {
+    // A solved study's whole result as a .vtu, written to a file
+    // (docs/simulation/README.md#vtu-export). params: {id | study, path,
+    // case?}
+    const uint64_t id =
+        StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                     p.contains("study"), p.value("study", uint64_t{0}));
+    host.Require(id);
+    if (!p.contains("path") || !p.at("path").is_string() ||
+        p.at("path").get<std::string>().empty())
+      throw std::runtime_error("path is required: the .vtu file to write");
+    const std::string path = p.at("path").get<std::string>();
+    const fem::StudyRuntime* rt = host.Results(id);
+    if (!rt)
+      throw std::runtime_error("study has not been run");
+    int caseIndex = -1;
+    if (p.contains("case"))
+      caseIndex = CaseIndex(rt->caseNames, p.at("case"));
+    else if (rt->caseNames.size() > 1)
+      throw std::runtime_error(
+          "this study has " + std::to_string(rt->caseNames.size()) +
+          " load cases, each its own file: name one with `case` (its name "
+          "or 0-based index)");
+    ui::VtuExport done;
+    std::string err;
+    if (!ui::ExportStudyResultVtu(state, id, path, caseIndex, &done, &err))
+      throw std::runtime_error(err);
+    return json{{"path", path},
+                {"points", done.points},
+                {"cells", done.cells},
+                {"cell_type", "VTK_QUADRATIC_TETRA"},
+                {"point_data", done.pointData},
+                {"cell_data", done.cellData},
+                {"bytes", done.bytes}};
   }
   if (m == "run_study" || m == "study_results" || m == "study_status" ||
       m == "cancel_study") {
@@ -2596,13 +2877,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         out["error"] = s->error;
       if (const ui::MeshReport* mr =
               doc ? ui::MeshReportFor(state, *doc, id) : nullptr) {
-        json bodies = json::array();
-        for (const ui::MeshReport::Body& b : mr->bodies)
-          bodies.push_back({{"body", b.name},
-                            {"nodes", b.nodes},
-                            {"elements", b.elements},
-                            {"worst_quality", b.worstQuality}});
-        json mesh{{"bodies", bodies}, {"seconds", mr->seconds}};
+        json mesh = MeshReportJson(state, *mr, id);
         if (!mr->error.empty())
           mesh["error"] = mr->error;
         out["mesh"] = mesh;
@@ -3170,6 +3445,29 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       }
       return out;
     };
+    // The balance in one read (docs/simulation/README.md#the-balance): the
+    // resultant of what was applied and of what the supports carry, over
+    // every body, for case `k` (-1: the result's own). The applied total is
+    // a run's (a reopened result has the reactions only).
+    const auto balanceInto = [&](json& target, int k) {
+      glm::dvec3 applied(0.0), carried(0.0);
+      bool haveApplied = !rt->bodies.empty(), haveReactions = false;
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        const fem::FemResults& r = b.Case(k);
+        haveApplied = haveApplied && r.hasApplied;
+        applied += r.appliedN;
+        for (const fem::FemResults::SupportReaction& sr : r.reactions) {
+          carried += sr.forceN;
+          haveReactions = true;
+        }
+      }
+      if (haveReactions)
+        target["reaction_total"] = {
+            {"force_n", {carried.x, carried.y, carried.z}}};
+      if (haveApplied)
+        target["applied_total"] = {
+            {"force_n", {applied.x, applied.y, applied.z}}};
+    };
     const auto edgeJson = [](const fem::FemResults& r, double yield) {
       const fem::FemResults::SupportEdgePeak& e = r.supportEdgePeak;
       json j = {{"support", e.support},
@@ -3405,6 +3703,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         {"stale", host.Stale(id)}};
     if (haveFoS)
       result["factor_of_safety"] = minFoS;
+    if (rt->caseNames.empty())
+      balanceInto(result, -1);
     if (plasticPeak)
       result["max_plastic_strain"] = {
           {"value", plasticMax},
@@ -3722,6 +4022,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           cj["peak_at_support_edge"] = std::move(caseEdge);
         if (!caseReactions.empty())
           cj["reactions"] = std::move(caseReactions);
+        balanceInto(cj, static_cast<int>(k));
         cases.push_back(std::move(cj));
       }
       result["cases"] = std::move(cases);
@@ -4216,24 +4517,108 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // "displacment" would otherwise show a plausible stress plot.
     const std::string f = p.value("field", std::string("von_mises"));
     ui::SimulationState::Field field = ui::SimulationState::Field::VonMises;
-    if (f == "von_mises")
-      field = ui::SimulationState::Field::VonMises;
-    else if (f == "displacement")
-      field = ui::SimulationState::Field::Displacement;
-    else if (f == "shape")
+    if (f == "shape")
       field = ui::SimulationState::Field::Shape;
     else if (f == "density")
       field = ui::SimulationState::Field::Density;
-    else if (f == "temperature")
-      field = ui::SimulationState::Field::Temperature;
-    else if (f == "heat_flux")
-      field = ui::SimulationState::Field::HeatFlux;
     else if (f == "none")
       field = ui::SimulationState::Field::None;
+    else if (const auto rf = fem::ResultFieldFromKey(f))
+      field = ui::FieldOfResult(*rf);
     else
       throw std::runtime_error("unknown field: " + f +
-                               "; fields: von_mises, displacement, shape, "
-                               "density, temperature, heat_flux, none");
+                               "; fields: " + fem::ResultFieldKeys() +
+                               " | shape | density | none");
+    // The legend's range, in the field's own unit: a number sets that end,
+    // null gives it back to the field.
+    struct Bound {
+      bool given = false, on = false;
+      double value = 0.0;
+    };
+    const auto boundOf = [&](const char* key) {
+      Bound b;
+      if (!p.contains(key))
+        return b;
+      b.given = true;
+      const json& v = p.at(key);
+      if (v.is_null())
+        return b;
+      if (!v.is_number() || !std::isfinite(v.get<double>()))
+        throw std::runtime_error(std::string(key) +
+                                 " is a number in the field's unit, or null "
+                                 "for the field's own; got " +
+                                 v.dump());
+      b.on = true;
+      b.value = v.get<double>();
+      return b;
+    };
+    // rpc-params: range_max, range_min
+    const Bound rangeMin = boundOf("range_min"),
+                rangeMax = boundOf("range_max");
+    {
+      // The range as it would stand: a bound given here, else the one the
+      // same field already has (another field's is dropped with it).
+      const bool same = state.simulation.field == field;
+      const bool loOn =
+          rangeMin.given ? rangeMin.on : same && state.simulation.clampLo;
+      const bool hiOn =
+          rangeMax.given ? rangeMax.on : same && state.simulation.clampHi;
+      const double lo =
+          rangeMin.given ? rangeMin.value : state.simulation.rangeLo;
+      const double hi =
+          rangeMax.given ? rangeMax.value : state.simulation.rangeHi;
+      if (loOn && hiOn && !(hi > lo))
+        throw std::runtime_error("range_max must be above range_min; got " +
+                                 std::to_string(hi) + " over " +
+                                 std::to_string(lo));
+    }
+    std::optional<glm::dvec3> layerNormal;
+    if (p.contains("layer_normal")) {
+      const json& v = p.at("layer_normal");
+      if (!v.is_array() || v.size() != 3 || !v[0].is_number() ||
+          !v[1].is_number() || !v[2].is_number())
+        throw std::runtime_error("layer_normal is [x, y, z], the build "
+                                 "direction in the part's frame; got " +
+                                 v.dump());
+      layerNormal = glm::dvec3(v[0].get<double>(), v[1].get<double>(),
+                               v[2].get<double>());
+      if (!(glm::dot(*layerNormal, *layerNormal) > 0.0) ||
+          !std::isfinite(glm::dot(*layerNormal, *layerNormal)))
+        throw std::runtime_error("layer_normal must have a length; got " +
+                                 v.dump());
+    }
+    const bool layered = field == ui::SimulationState::Field::AcrossLayers ||
+                         field == ui::SimulationState::Field::InterlayerFactor;
+    if (layered && !layerNormal)
+      throw std::runtime_error(
+          "field " + f +
+          " needs layer_normal [x, y, z]: the build direction the layers "
+          "are stacked along, in the part's frame");
+    std::optional<bool> markers;
+    if (p.contains("markers")) {
+      if (!p.at("markers").is_boolean())
+        throw std::runtime_error("markers is true or false; got " +
+                                 p.at("markers").dump());
+      markers = p.at("markers").get<bool>();
+    }
+    // A field the study's result does not hold is refused with what is
+    // missing, not drawn as nothing (a study not yet run takes the choice:
+    // it is shown when the run lands).
+    {
+      const uint64_t shownStudy =
+          study.value_or(state.simulation.activeStudyId);
+      if (field != ui::SimulationState::Field::None &&
+          host.Find(shownStudy) != nullptr &&
+          host.Results(shownStudy) != nullptr) {
+        const glm::dvec3 keep = state.simulation.layerNormal;
+        if (layerNormal)
+          state.simulation.layerNormal = *layerNormal;
+        const std::string why = ui::FieldRefusal(state, shownStudy, field);
+        state.simulation.layerNormal = keep;
+        if (!why.empty())
+          throw std::runtime_error("field " + f + ": " + why);
+      }
+    }
     std::optional<float> deformScale, threshold;
     std::optional<int> mode, caseIndex;
     // Float on the display side: a scale past its range would be infinity,
@@ -4272,7 +4657,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     ui::EnterSimulation(state);
     if (study)
       state.simulation.activeStudyId = *study;
+    if (state.simulation.field != field) // a range is one field's
+      state.simulation.clampLo = state.simulation.clampHi = false;
     state.simulation.field = field;
+    if (field != ui::SimulationState::Field::None)
+      state.simulation.meshView = ui::SimulationState::MeshView::Off;
+    if (rangeMin.given) {
+      state.simulation.clampLo = rangeMin.on;
+      state.simulation.rangeLo = rangeMin.value;
+    }
+    if (rangeMax.given) {
+      state.simulation.clampHi = rangeMax.on;
+      state.simulation.rangeHi = rangeMax.value;
+    }
+    if (layerNormal)
+      state.simulation.layerNormal = *layerNormal;
+    if (markers)
+      state.simulation.showExtremes = *markers;
     if (deformScale)
       state.simulation.deformScale = *deformScale;
     if (mode)
@@ -4281,11 +4682,20 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       state.simulation.activeCase = *caseIndex;
     if (threshold)
       state.simulation.topoThreshold = *threshold;
-    return json{{"field", f},
-                {"deform_scale", state.simulation.deformScale},
-                {"mode", state.simulation.activeMode},
-                {"case", state.simulation.activeCase},
-                {"threshold", state.simulation.topoThreshold}};
+    json out{
+        {"field", f},
+        {"deform_scale", state.simulation.deformScale},
+        {"mode", state.simulation.activeMode},
+        {"case", state.simulation.activeCase},
+        {"threshold", state.simulation.topoThreshold},
+        {"markers", state.simulation.showExtremes},
+        {"range_min", state.simulation.clampLo ? json(state.simulation.rangeLo)
+                                               : json(nullptr)},
+        {"range_max", state.simulation.clampHi ? json(state.simulation.rangeHi)
+                                               : json(nullptr)}};
+    if (const auto rf = ui::ResultFieldOf(field))
+      out["unit"] = fem::SpecOf(*rf).unit;
+    return out;
   }
   return std::nullopt;
 }

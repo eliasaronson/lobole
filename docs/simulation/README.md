@@ -642,6 +642,135 @@ were single precision). There is no defeaturing step: suppress cosmetic features
 or, on an imported part, remove them with Delete Face
 ([modeling](../modeling/README.md#delete-face)).
 
+### The mesh you look at
+
+Mesh is an action whose result is drawn. `mesh_study`, and **Mesh** in the
+Simulation window, mesh the study's bodies and keep the mesh for the session
+(`ui::MeshReport`, `src/ui/TopoJob.h`, by tab and study: its elements and
+its [report](#the-mesh-report)). A part meshes off the frame as a `mesh`
+job; an assembly study's plan is made of its placed parts on the main
+thread, and its mesh with it. A run does not need it: it meshes for itself
+as it always did, and the kept mesh is for looking first.
+
+`set_mesh_display {view}` (the window's **Show mesh** combo) draws it in
+place of the body, through the [field renderer](#results-display):
+
+- `edges`: every element edge over a plain, lit body. The edges are drawn in
+  the fragment shader from each triangle's barycentric coordinate
+  (`FieldVertex::edge`), at a width constant on screen, so they are
+  anti-aliased and never fight the faces for depth.
+- `quality`: coloured by each element's quality, the worse of two numbers
+  (`fem::MeasureTet`, `src/core/fem/FemMesher.h`): its **shape**, the corner
+  tetrahedron's normalized quality (1 regular, toward 0 a sliver), and its
+  **scaled Jacobian**, the least det J over the largest on the degree-3
+  lattice the [fold certification](#curved-elements-that-fold) samples (1
+  for a straight-sided element, falling as a curved edge crowds a corner, 0
+  or less folded). The legend runs 0 to 1 with the low end hot.
+- `size`: coloured by the mean length of its six straight edges, in mm,
+  which is where a refinement went.
+
+A [section](../inspect/README.md) through a mesh shows whole elements: those
+whose middle is on the kept side, uncut (`ui::BuildMeshOverlay`,
+`src/ui/SimulationView.cpp`), so the cut face is made of the interior tets
+and their colours. The body's flat section cap is hidden under it.
+
+The kept mesh is **stale** once the geometry or the study's mesh settings
+(its size, its refinements, an assembly's participants) move; editing a load
+leaves it current. A stale mesh is still drawn, says so beside the Mesh
+button and in `set_mesh_display`'s reply, and is a row of the
+[check](#checking-a-study). On an assembly any study edit marks it, because
+the assembly's version is what its plan is keyed on.
+
+A mesh view and a result field are one picture each: showing one switches
+the other off.
+
+### The mesh report
+
+`fem::ReportMesh` (`src/core/fem/FemMeshReport.{h,cpp}`) reads a mesh once
+and says everything about it at once. `mesh_study` answers it per body as
+`report`, and as `findings`, the rows the window lists under **Mesh report**;
+a row with a place frames it in the viewport when clicked
+(`ui::MeshFindings`, `ui::FrameSimulationPlace`).
+
+| row | what it says |
+|---|---|
+| volume | the mesh's volume beside the body's, how far apart, and what its curved faces allow |
+| worst elements | the twelve worst by quality, worst first, each with its shape, scaled Jacobian, size and where it is |
+| one element through | each pair of faces that share no node and are joined by elements whose four corners all lie on the boundary: the wall's thickness and how many elements cross it |
+| straightened | how many midside nodes the fold check moved back to their straight edges |
+| refinement did not take | a refined face whose element edges average half again what it asked for, or which asked for no less than the study's own size |
+| members | on a bonded group: the element faces each pair of members shares, a member that shares none, and nodes that coincide without being shared |
+
+A wall one element through is information, not an error: a tet10 bends
+right one through (above), and a contact or a stress gradient through the
+wall wants more. An unshared seam is an error in all but name: it looks
+bonded and carries nothing.
+
+**A mesh fills its shape, or it is refused.** `fem::Mesh` integrates the
+mesh's volume exactly (det J of a tet10 is a cubic; `fem::MeshVolume` uses
+the degree-3 rule on a tetrahedron) and compares it with the B-Rep's. The
+tolerance is derived from the mesh's own deflection
+(`fem::MeshVolumeSlack`): each boundary triangle's area times the sag of its
+midside nodes off their chords, which is the volume a faceted mesh of the
+same nodes would miss; plus the error OpenCASCADE's adaptive integration
+reports for the B-Rep's own volume, and a hundred-thousandth of the volume
+for rounding. A flat-faced body therefore has to match to a part in a
+hundred thousand, and a tube at the automatic size sits well inside its
+slack. Past it the mesh is refused, with both volumes and which way it is
+off: the mesher left a region empty or dropped a solid, and an answer on it
+would be an answer about another part. It is measured before any folded
+element is straightened, which moves the boundary off the surface.
+
+## Checking a study
+
+A run stops at its first refusal, so a setup with three things wrong took
+three runs to hear of them. `check_study` (read-only) returns every problem
+a run would refuse, at once, each with the call that fixes it; the window
+shows the same list under **Run** (`ui::CachedStudyCheck`, cached against the
+study's text and the document's version), each row framing the face or the
+body it is about and carrying its fix in its tooltip. A `material` problem
+is not repeated there: the window flags it above, with the combo that sets
+it.
+
+`fem::CheckStudy` (`src/core/fem/FemCheck.{h,cpp}`) reads the rules
+`PlanStudy` reads and collects instead of stopping:
+
+| code | the problem | the fix it offers |
+|---|---|---|
+| `no_loads` | the study has nothing on it | `add_load {type: fixed}` |
+| `no_support` | a loaded body has no support (a thermal one, nowhere for its heat to go) | `add_load {type: fixed}` on that body |
+| `material` | a body's material has no modulus, or no density where a modal study or gravity needs one | `set_material` |
+| `anchor`, `refinement_anchor` | a load's or a refinement's face is gone | `remove_load`, `remove_refinement` |
+| `load_geometry` | a torque with no axis on a face that is not a cylinder, a remote load with no point, a pin on a flat face or on a modal study | `remove_load`, then `add_load` with what it lacked |
+| `region` | a load's [region](#loads-on-part-of-a-face) holds no facet of its face | `remove_load`, then a region that reaches it |
+| `load_cases`, `setup`, `expression` | what `ValidateLoadCases`, `ContactRefusal`, `ThermalRefusal` and the expression pass refuse | `set_study` |
+| `stale_mesh` | the [kept mesh](#the-mesh-you-look-at) is no longer the study's | `mesh_study` |
+| `solver` | the study solves on CalculiX and no ccx is found | `set_study {solver: in_house}` where one exists |
+| `plan` | what the planner refuses that is not itemised above | -- |
+
+`fix.params` is the call to make, with `null` where the caller chooses (a
+face, a material) and `fix.note` saying what goes there. A `region` is found
+only once a mesh is kept and current, because only a mesh shows it. When
+nothing itemised is wrong the RPC runs `PlanStudy` on a copy as a backstop,
+so `ok: true` means the planner accepts the study; the window's list leaves
+that to Run, since the planner copies every body's shape. On an **assembly**
+study everything the assembly planner refuses is one `plan` row (its first
+refusal), beside `no_loads`, `stale_mesh` and `solver`: the part and
+assembly planners are two until the
+[simulation document](../plans/simulation-document.md) makes them one. What
+a run refuses only after meshing and assembling (a free rigid motion, a pin
+that lifts off) is not here.
+
+### The balance
+
+A static reply carries `reaction_total` {`force_n`}, the resultant of every
+support's reaction, and after a run in this session `applied_total`
+{`force_n`}, the resultant of everything applied (the assembled load
+vector's sum: forces, pressures, gravity), per load case in `cases`. They
+cancel when the study is in balance, so that check is one read. The applied
+total is not stored with a result (`FemResults::appliedN`), so a reopened
+one has its reactions only.
+
 ## A peak that has settled
 
 A peak at a hole or a fillet read at the auto size is about 5 % low (the
@@ -2370,20 +2499,99 @@ optimization is refused on an assembly; `mesh_study {async}` is refused there
 ## Results display
 
 `FieldRenderer` (`src/render/FieldRenderer.{h,cpp}`) has its own pipeline and
-vertex format `FieldVertex {position, displacement, scalar}`: the boundary
-triangles of the solved mesh, warped in the vertex shader by a push-constant
-deformation scale (so the slider needs no re-upload) and coloured through an
-analytic Turbo colormap. It shares the scene's clip planes, so a section
-cuts a stress plot like everything else. While a field is shown it stands in
-for the solved body (or every solved occurrence of an assembly study).
-Fields: von Mises, displacement magnitude, a modal or buckling mode shape,
-and the topology views. The legend names the study and analysis, the
-quantity with quarter ticks, the deformation factor, the mode and frequency
-of a modal result (its load factor for a buckling one), and where the
-maximum is, marked in the viewport by a cross.
+vertex format `FieldVertex {position, displacement, scalar, edge}`: the
+boundary triangles of the solved mesh, warped in the vertex shader by a
+push-constant deformation scale (so the slider needs no re-upload) and
+coloured through an analytic Turbo colormap. It shares the scene's clip
+planes, so a section cuts a stress plot like everything else. While a field
+is shown it stands in for the solved body (or every solved occurrence of an
+assembly study). It also draws [the mesh](#the-mesh-you-look-at)
+(`FieldStyle`: element edges, a plain lit body, the colour map reversed).
+
+**Fields.** A field is one value per node, derived from what the result
+keeps and never stored (`fem::NodalField`, `src/core/fem/FemFields.{h,cpp}`):
+the viewport, its legend and the [VTU export](#vtu-export) read the same
+function.
+
+| field | unit | from |
+|---|---|---|
+| `von_mises`, `displacement` | MPa, mm | the result's own |
+| `principal_max`, `principal_mid`, `principal_min` | MPa, tension positive | the stress tensor's eigenvalues in closed form (`fem::Principals`): the largest is what a brittle material breaks on, the smallest the hardest compression |
+| `factor_of_safety` | -- | the body's yield strength over von Mises |
+| `across_layers` | MPa | the normal stress along the build direction ([printed layers](#printed-layers)) |
+| `interlayer_factor` | -- | the material's interlayer strength over the tension across the layers |
+| `plastic_strain` | -- | a [plastic](#plasticity) result's equivalent plastic strain |
+| `contact_pressure` | MPa | a [contact](#contact) run's pressure at each node, the largest of the slave faces it touches (CalculiX prints it per face) |
+| `temperature`, `heat_flux` | degrees C, W/m² | a [thermal](#thermal) result's |
+
+A modal or buckling study shows its mode shapes and a topology study its
+shape or density, as before. A field the study's kind does not have is not
+offered; one its result does not hold is listed greyed with the reason, and
+`set_result_display` refuses it with the same words (`ui::FieldRefusal`): a
+result with no stress tensor, a material with no yield or interlayer
+strength, a stress across layers on an assembly (its parts are each printed
+their own way), a factor on a bonded group (each member has its own
+material; `study_results` reports the factor against each). The build
+direction is a question asked of the result, not a study input, so it is a
+display setting (`layer_normal`, the window's **Layers along**), and the
+RPC refuses the layer fields without it. The contact pressure field is a
+run's: a stored result keeps each contact's peak, not the field.
+
+**The legend** names the study and analysis, the quantity with its unit and
+quarter ticks, the deformation factor, the load case, the mode and
+frequency of a modal result (its load factor for a buckling one). It is
+drawn from the record the overlay last built (`ui::ShownField`,
+`src/ui/SimulationView.h`), so it describes the picture that is on screen
+and nothing else.
+
+- **What the bar spans.** A magnitude runs from zero to its maximum, a
+  signed field (a principal stress, the stress across layers, a
+  temperature) from its least value, and a factor from its least value to
+  four times it, its low end the hot one: a factor has no upper bound where
+  the stress is zero, and every node past four times the governing one
+  reads as safe.
+- **The range clamp.** `range_min` and `range_max` (the window's **Range**
+  fields, in the field's unit; empty is the field's own) replace an end of
+  the bar. Values past the hot end take pink and values past the other end
+  grey (a factor's hot end is its low one, so what is safer than its bar
+  reads grey), and the bar shows each as a cap at that end, so a clamped
+  picture cannot be read as the whole field. **Above yield** tops
+  the range of a stress at the least yield strength of the solved bodies:
+  what is over it has yielded. A range belongs to its field and is cleared
+  when the field changes.
+- **Markers.** A magenta cross at the field's maximum and a pale blue one at
+  its minimum, each tagged with its value, both warped with the deformation;
+  under the bar, where each is in millimetres and on which body. `markers:
+  false` (the **Mark max, min** box) leaves the caption of the maximum.
 
 `set_result_display` colours the raster viewport, which is what `screenshot`
 captures. `render_still` renders the model, not the field.
+
+### VTU export
+
+`export_study_result {id, path, case?}` (the window's **Export VTU...**)
+writes a solved study for an outside post-processor (`fem::VtuText`,
+`src/core/fem/FemVtu.{h,cpp}`): one VTK unstructured grid of
+`VTK_QUADRATIC_TETRA` cells, every body a block of the same piece, with
+point data `displacement`, `von_mises`, `stress` (the symmetric tensor as XX
+YY ZZ XY YZ XZ, which is the result's own order), and where the result
+holds them `plastic_strain`, `temperature`, `heat_flux` and each mode as
+`mode_<k>`; cell data `body`, `domain`, and a topology result's `density`.
+The arrays are ASCII (floats as the shortest text that reads back), and the
+file is written atomically to `path`, never returned inline.
+
+VTK wants a tetrahedron right-handed, and Netgen's are left-handed
+([curved elements that fold](#curved-elements-that-fold)), so a tet whose
+corner volume is negative is written with corners 1 and 2 exchanged and its
+midside nodes following their edges (`kVtkTet10Negative`); VTK's midside
+order is otherwise ours.
+
+It writes the **whole** result, which a [stored result](#what-a-saved-result-keeps)
+is not: the session remembers the last eight results by input hash as they
+were solved (`AppState::studyResultsByInput`), and the export reads the one
+behind the study's stored result (`ui::FullStudyResult`). A result reopened
+from disk has its boundary surface only and is refused, saying to run again
+(`run_study {recompute: true}`); nothing is written.
 
 Boundary conditions are drawn in the viewport (`src/ui/StudyPanel.cpp`):
 each BC face is tinted through the mesh renderer's face highlight in its
@@ -2441,13 +2649,21 @@ tinted as a fixture, and bonded seams in the bond colour.
   (`StudyHost::Shown`). A placed force can be dragged in the
   viewport to change its magnitude, from the value it shows (one undo step
   on release). Run shows the
-  shared progress bar. Results: mesh size, max von Mises, max displacement,
-  field selector and deformation slider; for modal, the natural frequencies
+  shared progress bar, and under it the [check](#checking-a-study): every
+  problem a run would refuse, as rows. Results: mesh size, max von Mises,
+  max displacement, and **Display**: the **Field** combo
+  ([results display](#results-display)), the deformation slider, the
+  **Range** fields with **Above yield**, **Mark max, min**, and **Export
+  VTU...** ([VTU export](#vtu-export)); for modal, the natural frequencies
   (selecting one shows its mode shape) and a mode-shape toggle; for
   buckling, the **Buckling factors** list (selecting one shows its mode),
   the governing factor with the knockdown and its class, the yield and
-  interlayer factors, and the flags as text. The factor of safety is
-  reported over RPC only.
+  interlayer factors, and the flags as text.
+- Under the mesh size: **Mesh**, which meshes and draws the elements
+  ([the mesh you look at](#the-mesh-you-look-at)), what came out ("41 820
+  elements, worst 0.31", and "stale" once it is), **Show mesh** (Hidden,
+  Edges, Quality, Size), and **Mesh report**, folded, whose rows frame
+  their place when clicked ([the mesh report](#the-mesh-report)).
 - **Probes** (a solved static part study): arm **Probe**, hover a face to
   read its max and mean von Mises at the cursor, click to pin it. Each pin
   is a row, "<face>  max 2.1  mean 1.4 MPa" in the case shown, with a small
@@ -2474,14 +2690,17 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)); a thermal study's `temperature` {face, temperature_c}, `heat_flux` {face, power_w \| flux_w_m2}, `convection` {face, film_w_m2k, ambient_c} and `heat_generation` {body, power_w} ([thermal](#thermal)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
-| `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
+| `mesh_study {id, async?}` | meshes and keeps the mesh: per body nodes, elements, worst quality and `report`, and `findings` ([the mesh report](#the-mesh-report)); refused when the mesh does not fill its body |
+| `set_mesh_display {study?, view}` | `view`: off \| edges \| quality \| size ([the mesh you look at](#the-mesh-you-look-at)) |
+| `check_study {id}` | read-only: `ok` and `problems`, each {code, message, load_id?, body?, face?, fix?} ([checking a study](#checking-a-study)) |
 | `run_study {id, async?, recompute?, outlive_client?, timeout_s?, converge?, layer_normal?}` | mesh + solve, and on a static study settle its peak ([a peak that has settled](#a-peak-that-has-settled)): `converge` overrides the study's for this run, `layer_normal` is the build direction whose across-layers peak a printed part's check settles; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)); a nonlinear run that stops converging is refused with the load it reached ([nonlinear static](#nonlinear-static)) |
 | `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static, buckling or thermal study would run (a thermal study's heat deck, a thermally loaded static study's with its temperatures: [thermal](#on-calculix)), meshed now, no ccx needed ([the deck](#the-deck)); a large-deformation study's NLGEOM deck, a snap-through one's refused ([nonlinear static](#nonlinear-static)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended -- a nonlinear run's `load_fraction` ([the run](#the-run)); cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)); thermal: the peaks, `flows`, `balance`, `temperature_margin_k`, and a static study's `temperature` under a thermal load ([thermal](#what-a-thermal-result-says)) |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, `reaction_total` and a run's `applied_total` ([the balance](#the-balance)), factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)); thermal: the peaks, `flows`, `balance`, `temperature_margin_k`, and a static study's `temperature` under a thermal load ([thermal](#what-a-thermal-result-says)) |
 | `probe_study {id, face, occurrence?, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at`; on a plastic result its plastic strain and residual motion; on an assembly study the face of `occurrence` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
-| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| temperature \| heat_flux \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows |
+| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?, range_min?, range_max?, layer_normal?, markers?}` | `field`: one of [the fields](#results-display), or shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows; the legend's range clamp and markers |
+| `export_study_result {id, path, case?}` | the whole result as a `.vtu` of quadratic tetrahedra ([VTU export](#vtu-export)) |
 | `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
 
 ## Tests
@@ -2567,6 +2786,28 @@ verb that names a study for context (`add_load`, `add_refinement`,
   both), a small load against the linear answer, the refusals and the
   result's round trip; `tests/nonlinear_smoke.py` over the RPCs
   ([nonlinear static](#nonlinear-static)).
+- `tests/test_fem_mesh_report.cpp` (`[meshreport]`, `[check]`): an
+  element's measures on a regular, a curved and a folded tet; a two-solid
+  mesh that shares its interface and one that only touches; a box's mesh
+  matching its volume, a tube's within its slack and each refused with a
+  hole planted; a plate's wall one element through and a refinement that
+  asked for nothing; `check_study` returning every planted problem at once,
+  each with its fix, read-only, empty for a study that runs, and a region
+  off its face found once there is a mesh.
+- `tests/test_fem_fields.cpp` (`[fields]`, `[vtu]`): the principal stresses
+  of known tensors, of a pulled bar (F/A and nothing) and of a pressurised
+  cylinder at its bore against Lame (`[slow]`); the factors against their
+  allowables, unbounded where there is no tension; every refusal; and the
+  cylinder's export read back with a parser of its own -- counts, arrays,
+  the values at a node, every cell right-handed with each midside node at
+  its edge, and on the bore's chords the node on the surface.
+- `tests/sim_mesh_smoke.py` over the RPCs: the kept mesh and its report, a
+  load edit leaving it current and a mesh size marking it, three planted
+  problems in one `check_study` reply and none once each fix is made, the
+  totals cancelling, every field and its refusals, the range clamp, the
+  export and its refusal on a reopened result; `tests/sim_view_smoke.py`
+  (`pygui`) on the pictures: element edges, the quality colours, a section
+  made of whole elements, the over colour under a clamp and the markers.
 - `tests/fem_smoke.py`, `tests/fem_async_smoke.py`: the RPC surface
   headless, including an assembly tab; the async one also a reused run, a
   job's status by id and a cancel by id. Both skip (exit 77) on a build without
@@ -2577,7 +2818,10 @@ verb that names a study for context (`add_load`, `add_refinement`,
   window and its clamp, the list-row editor; a torque on a cylinder, a
   torque refused on a flat face and placed with an axis, a remote load's
   default point, a pin refused on a flat face and placed on a cylinder, a
-  probe pinned and made a requirement.
+  probe pinned and made a requirement; the mesh made, drawn, coloured and
+  its worst element framed from its row; the check listing a missing
+  support beside Run; a field chosen, clamped, topped at yield, marked and
+  exported.
 - `tests/rpc_gate_smoke.py` checks the study verbs are accepted on an
   assembly tab.
 
@@ -2597,8 +2841,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
   other plastics), and an expansion coefficient for PLA.
 - Hardening curves for any material but steel ([plasticity](#plasticity)):
   a plastic study on one is refused until a cited curve is in the library.
-  Kinematic hardening (a part loaded back and forth), and a plastic strain
-  field in the viewport (the panel and the RPCs report its peak).
+  Kinematic hardening (a part loaded back and forth).
 - Contact between two contact participants, between a contact participant
   and a rigid occurrence, beside bonded participants, a curved face on the
   ground (it rests on a rigid occurrence instead), and an interference fit
@@ -2615,4 +2858,9 @@ verb that names a study for context (`add_load`, `add_refinement`,
   suppressed for the analysis shape.
 - Per-participant mesh size on a bonded member applies to its faces only; the
   study's global size still governs the interior.
-- Result export (VTU).
+- A stored mesh: the kept mesh is the session's, each study makes its own,
+  and a reopened result has no interior to export or cut
+  ([the simulation document](../plans/simulation-document.md)). On an
+  assembly, an asynchronous Mesh, a check that itemises, and a factor field
+  on a bonded group.
+- A binary or compressed VTU: the export is ASCII.

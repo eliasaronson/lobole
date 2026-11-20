@@ -892,6 +892,14 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
           fint.segment<3>(3 * tet[i]) += fe.segment<3>(3 * i);
       }
     }
+    // Everything applied in this case, as one force: the load vector's sum.
+    {
+      Vector3d total = Vector3d::Zero();
+      for (int n = 0; n < nNodes; ++n)
+        total += Fcase.segment<3>(3 * n);
+      out.appliedN = glm::dvec3(total(0), total(1), total(2));
+      out.hasApplied = true;
+    }
     if (supports.reactions) {
       out.nodeReaction.resize(nNodes);
       for (int n = 0; n < nNodes; ++n) {

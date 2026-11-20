@@ -256,6 +256,16 @@ struct FemResults {
   // thermal load keeps its temperature too. Empty on any other.
   std::vector<double> temperature;
   std::vector<glm::dvec3> heatFlux;
+
+  // Transient, as `solver` is on the runtime (never saved: a reopened result
+  // reads empty/false). The contact pressure at each node (MPa; 0 off the
+  // contact faces), from a CalculiX contact run's per-face rows; and the
+  // resultant of everything applied to the body in this case (N: forces,
+  // pressures, gravity, a thermal load's none), beside `reactions`, so a
+  // balance is one read (docs/simulation/README.md#the-balance).
+  std::vector<double> contactPressure;
+  glm::dvec3 appliedN{0.0};
+  bool hasApplied = false;
 };
 
 // How a face moved, as a rigid body: the small-displacement fit of its

@@ -581,6 +581,10 @@ set(core_sources
     src/core/sketch/SketchSolver.cpp
     src/core/sketch/ConstraintEndCurvature.cpp
     src/core/fem/FemStudy.cpp
+    src/core/fem/FemMeshReport.cpp
+    src/core/fem/FemFields.cpp
+    src/core/fem/FemVtu.cpp
+    src/core/fem/FemCheck.cpp
     src/core/fem/FemInputKey.cpp
     src/core/fem/AssemblyStudy.cpp
     src/core/fem/FemSolver.cpp
@@ -1085,6 +1089,7 @@ set(app_sources
     src/ui/MachineActions.cpp
     src/ui/PrintProfileActions.cpp
     src/ui/SimulationActions.cpp
+    src/ui/SimulationView.cpp
     src/ui/FeatureEditor.cpp
     src/ui/ExprInput.cpp
     src/ui/ExprComplete.cpp

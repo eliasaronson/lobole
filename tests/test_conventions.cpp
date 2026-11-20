@@ -1633,6 +1633,11 @@ TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
       // A requirement that is stale, unresolved or unchecked is an
       // unverifiable claim, never a pass (docs/requirements/README.md).
       {"check_requirements", "src/remote/RemoteRequirements.cpp", true},
+      // A study's setup against the planner's rules. Its pass never rolls
+      // up verified: what a run refuses only after meshing is unverifiable
+      // from here, and the receipt says so
+      // (docs/simulation/README.md#checking-a-study).
+      {"check_study", "src/remote/RemoteSimulation.cpp", true},
       {"verify_assertions", "src/remote/RemoteRequirements.cpp", true},
   };
 

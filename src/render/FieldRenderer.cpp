@@ -13,6 +13,14 @@
 #include <fstream>
 #include <stdexcept>
 
+namespace {
+// field.vert / field.frag's push constants.
+struct Push {
+  float deformScale;
+  int32_t flags;
+};
+} // namespace
+
 bool FieldRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
                                VkRenderPass renderPass, VkQueue graphicsQueue,
                                uint32_t queueFamily, VkCommandPool commandPool,
@@ -115,12 +123,13 @@ bool FieldRenderer::CreatePipeline() {
   binding.binding = 0;
   binding.stride = sizeof(FieldVertex);
   binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-  std::array<VkVertexInputAttributeDescription, 3> attrs{};
+  std::array<VkVertexInputAttributeDescription, 4> attrs{};
   attrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT,
               offsetof(FieldVertex, position)};
   attrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT,
               offsetof(FieldVertex, displacement)};
   attrs[2] = {2, 0, VK_FORMAT_R32_SFLOAT, offsetof(FieldVertex, scalar)};
+  attrs[3] = {3, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FieldVertex, edge)};
   VkPipelineVertexInputStateCreateInfo vin{
       VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
   vin.vertexBindingDescriptionCount = 1;
@@ -169,7 +178,9 @@ bool FieldRenderer::CreatePipeline() {
   dynamic.dynamicStateCount = 2;
   dynamic.pDynamicStates = dyn;
 
-  VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float)};
+  VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT |
+                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(Push)};
   VkPipelineLayoutCreateInfo layoutInfo{
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
   layoutInfo.setLayoutCount = 1;
@@ -252,9 +263,13 @@ void FieldRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           m_pipelineLayout, 0, 1, &m_descriptorSets[frame], 0,
                           nullptr);
+  const Push push{m_deformScale,
+                  (m_style.edges ? 1 : 0) | (m_style.plain ? 2 : 0) |
+                      (m_style.lit ? 4 : 0) | (m_style.unclipped ? 8 : 0) |
+                      (m_style.reversed ? 16 : 0)};
   vkCmdPushConstants(commandBuffer, m_pipelineLayout,
-                     VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float),
-                     &m_deformScale);
+                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                     0, sizeof(Push), &push);
   VkDeviceSize offset = 0;
   vkCmdBindVertexBuffers(commandBuffer, 0, 1, &m_vertexBuffers[frame].buffer,
                          &offset);

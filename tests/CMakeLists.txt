@@ -221,6 +221,8 @@ add_executable(designer_tests
     test_fem_thermal.cpp
     test_fem_calculix.cpp
     test_fem_converge.cpp
+    test_fem_mesh_report.cpp
+    test_fem_fields.cpp
     test_topopt.cpp
     test_topo_build.cpp
     test_study_inputs.cpp
@@ -1448,6 +1450,27 @@ add_test(NAME fem_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fem_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(fem_smoke PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
+# The mesh step, the study check, the result fields and the VTU export over
+# the RPCs (docs/simulation/README.md#the-mesh-you-look-at, #checking-a-study,
+# #results-display, #vtu-export): the kept mesh and its report, three planted
+# problems in one check_study reply, the totals cancelling, each field and
+# its refusals, the export and its refusal on a reopened result. Headless;
+# self-skips (77) without Netgen.
+add_test(NAME sim_mesh_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sim_mesh_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(sim_mesh_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
+# ...and the pictures: element edges, the quality colours, a section made of
+# whole elements, the over colour under a range clamp and the markers, each
+# read off a screenshot's pixels. --offscreen: a real renderer, no window.
+# Self-skips (77) without a Vulkan device, Netgen or pillow.
+add_test(NAME sim_view_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sim_view_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(sim_view_smoke PROPERTIES LABELS "gui;pygui" TIMEOUT 300
+                     SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
 
 # The worker-thread half of the same surface, split out 2026-08-25: it is the
 # slow one (it solves, then polls), so a failure here names the async contract

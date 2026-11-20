@@ -56,6 +56,22 @@ double AutoSize(const TopoDS_Shape& shape) {
   return diag > 0 ? diag / 15.0 : 1.0;
 }
 
+// The volume of every solid of `shape` (mm^3; 0 for one with none), and in
+// `error` how well it is known: the adaptive integration's own estimate
+// over curved faces, asked for to a part in a hundred thousand.
+[[maybe_unused]] double ShapeVolume(const TopoDS_Shape& shape, double& error) {
+  double v = 0.0;
+  error = 0.0;
+  for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next()) {
+    GProp_GProps props;
+    const double rel = BRepGProp::VolumeProperties(ex.Current(), props, 1e-5);
+    const double solid = std::abs(props.Mass());
+    v += solid;
+    error += std::max(rel, 0.0) * solid;
+  }
+  return v;
+}
+
 // Normalized tetrahedron shape quality from its four corners, in [0,1]:
 // 72*sqrt(3) * V / (sum of squared edge lengths)^(3/2). 1 for a regular tet,
 // -> 0 for a sliver. Midside nodes don't enter the linear shape metric.
@@ -357,13 +373,24 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
     // Midside nodes projected onto a tight curve can fold an element
     // (docs/simulation/README.md#curved-elements-that-fold): those are
     // straightened, and one still folded after is refused.
-    if (const std::size_t moved = StraightenFoldedTets(out))
+    // The mesh fills its shape, or it is not that shape's mesh: measured
+    // before anything is straightened, which moves the boundary off it.
+    out.stats.volumeMm3 = MeshVolume(out);
+    out.stats.shapeVolumeMm3 =
+        ShapeVolume(shape, out.stats.shapeVolumeErrorMm3);
+    if (std::string why = MeshVolumeRefusal(out, out.stats.shapeVolumeMm3,
+                                            out.stats.shapeVolumeErrorMm3);
+        !why.empty())
+      return fail(why);
+    const std::size_t moved = StraightenFoldedTets(out);
+    if (moved)
       LOG_INFO("fem mesh: straightened {} midside nodes of elements their "
                "curved edges folded",
                moved);
     if (std::string why = FoldedTetRefusal(out); !why.empty())
       return fail(why);
 
+    out.stats.straightenedNodes = moved;
     out.stats.nodeCount = std::size_t(np);
     out.stats.tetCount = std::size_t(ne);
     out.stats.worstQuality = worst;
@@ -597,6 +624,91 @@ std::string FoldedTetRefusal(const FemMesh& mesh) {
          " of " + std::to_string(mesh.tets.size()) +
          "), so it cannot be integrated; a finer mesh size there, or a "
          "larger fillet radius, gives the curve more elements";
+}
+
+TetMeasure MeasureTet(const FemMesh& mesh, std::size_t tet, int sign) {
+  TetMeasure m;
+  const auto& t = mesh.tets[tet];
+  glm::dvec3 X[10];
+  for (int i = 0; i < 10; ++i)
+    X[i] = mesh.nodes[t[i]];
+  m.shape = TetQuality(X[0], X[1], X[2], X[3]);
+  double len = 0.0;
+  for (int i = 0; i < 4; ++i)
+    for (int j = i + 1; j < 4; ++j)
+      len += glm::length(X[i] - X[j]);
+  m.size = len / 6.0;
+  const Cubic& cu = TheCubic();
+  double lo = 0.0, hi = 0.0;
+  for (int p = 0; p < 20; ++p) {
+    const double d =
+        (sign < 0 ? -1.0 : 1.0) *
+        DetJ(X, cu.idx[p][1] / 3.0, cu.idx[p][2] / 3.0, cu.idx[p][3] / 3.0);
+    lo = p == 0 ? d : std::min(lo, d);
+    hi = p == 0 ? d : std::max(hi, d);
+  }
+  m.jacobian = hi > 0.0 ? std::clamp(lo / hi, -1.0, 1.0) : -1.0;
+  return m;
+}
+
+double MeshVolume(const FemMesh& mesh) {
+  // Closed Newton-Cotes of degree 3 on a tetrahedron: the corners at 1/40
+  // and the face centres at 9/40 of the reference volume, 1/6.
+  static const double pts[8][3] = {{0, 0, 0},
+                                   {1, 0, 0},
+                                   {0, 1, 0},
+                                   {0, 0, 1},
+                                   {1.0 / 3, 1.0 / 3, 1.0 / 3},
+                                   {0, 1.0 / 3, 1.0 / 3},
+                                   {1.0 / 3, 0, 1.0 / 3},
+                                   {1.0 / 3, 1.0 / 3, 0}};
+  double v = 0.0;
+  for (const auto& t : mesh.tets) {
+    glm::dvec3 X[10];
+    for (int i = 0; i < 10; ++i)
+      X[i] = mesh.nodes[t[i]];
+    double e = 0.0;
+    for (int p = 0; p < 8; ++p)
+      e += (p < 4 ? 1.0 : 9.0) * DetJ(X, pts[p][0], pts[p][1], pts[p][2]);
+    v += std::abs(e) / 240.0;
+  }
+  return v;
+}
+
+double MeshVolumeSlack(const FemMesh& mesh, double volume, double shapeError) {
+  double slack = 0.0;
+  for (const FemMesh::BoundaryTri& tri : mesh.boundary) {
+    const glm::dvec3 a = mesh.nodes[tri.nodes[0]], b = mesh.nodes[tri.nodes[1]],
+                     c = mesh.nodes[tri.nodes[2]];
+    const double area = 0.5 * glm::length(glm::cross(b - a, c - a));
+    const double sag =
+        std::max({glm::length(mesh.nodes[tri.nodes[3]] - 0.5 * (a + b)),
+                  glm::length(mesh.nodes[tri.nodes[4]] - 0.5 * (b + c)),
+                  glm::length(mesh.nodes[tri.nodes[5]] - 0.5 * (c + a))});
+    slack += area * sag;
+  }
+  return slack + std::max(shapeError, 0.0) + 1e-5 * std::abs(volume);
+}
+
+std::string MeshVolumeRefusal(const FemMesh& mesh, double shapeVolume,
+                              double shapeError) {
+  if (!(shapeVolume > 0.0) || mesh.tets.empty())
+    return "";
+  const double v = MeshVolume(mesh);
+  const double slack = MeshVolumeSlack(mesh, shapeVolume, shapeError);
+  if (std::abs(v - shapeVolume) <= slack)
+    return "";
+  char buf[400];
+  std::snprintf(buf, sizeof buf,
+                "the mesh does not fill its shape: its elements hold %.6g "
+                "mm3 and the body %.6g mm3, %.3g mm3 apart where the "
+                "curved faces' deflection accounts for %.3g; the mesher "
+                "%s, so nothing is solved on it (a finer mesh size, or "
+                "repairing the body, is the way on)",
+                v, shapeVolume, std::abs(v - shapeVolume), slack,
+                v < shapeVolume ? "left part of the body empty"
+                                : "meshed more than the body");
+  return buf;
 }
 
 std::size_t StraightenFoldedTets(FemMesh& mesh) {

@@ -4073,6 +4073,7 @@ void RoundFields(FemResults& r) {
   RoundAll(r.residualDisplacement);
   RoundAll(r.temperature);
   RoundAll(r.heatFlux);
+  RoundAll(r.contactPressure);
   for (FemResults::ModeShape& m : r.modes)
     RoundAll(m.displacement);
 }
@@ -4092,6 +4093,8 @@ bool PerNode(const FemResults& r, size_t n) {
   if (!r.temperature.empty() && r.temperature.size() != n)
     return false;
   if (!r.heatFlux.empty() && r.heatFlux.size() != n)
+    return false;
+  if (!r.contactPressure.empty() && r.contactPressure.size() != n)
     return false;
   for (const FemResults::ModeShape& m : r.modes)
     if (m.displacement.size() != n)
@@ -4119,6 +4122,7 @@ void Renumber(FemResults& r, const std::vector<int>& kept,
   Gather(r.residualDisplacement, kept);
   Gather(r.temperature, kept);
   Gather(r.heatFlux, kept);
+  Gather(r.contactPressure, kept);
   for (FemResults::ModeShape& m : r.modes)
     Gather(m.displacement, kept);
   if (r.maxVmNode >= 0)

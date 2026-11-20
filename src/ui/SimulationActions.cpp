@@ -23,6 +23,8 @@
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/MotionActions.h"
+#include "ui/SimulationView.h"
+#include "ui/SimulationViewInternal.h"
 #ifdef HAVE_FEM_GPU
 #include "femgpu/TopoGpuSolver.h"
 #endif
@@ -43,47 +45,33 @@ namespace ui {
 void AppendStudyMarker(const AppState& state,
                        std::vector<LineVertex3D>& lines) {
   const SimulationState& sim = state.simulation;
-  // The peak marker only applies to the FEM scalar fields (max von Mises / max
-  // displacement). Topology views (Shape/Density) have no such peak — and a
-  // topology runtime's maxVm/DispAt are (0,0,0), which would draw a stray cross
-  // at the origin.
-  const StudyHost host = StudyHostOf(const_cast<AppState&>(state));
-  if (!sim.IsActive() ||
-      (sim.field != SimulationState::Field::VonMises &&
-       sim.field != SimulationState::Field::Displacement) ||
-      !host)
-    return;
-  const fem::StudyRuntime* rt = host.Results(sim.activeStudyId);
-  if (!rt)
-    return;
-  // A magenta cross at the peak of the displayed field (max von Mises or max
-  // displacement), warped by the same deform scale so it tracks the overlay.
-  const bool vm = sim.field == SimulationState::Field::VonMises;
-  // The peak of the case on show (the only one without cases).
-  const int k = rt->caseNames.empty() ? -1 : sim.activeCase;
-  glm::vec3 at(0.0f);
-  double best = -1.0;
-  for (const fem::StudyBodyResult& b : rt->bodies) {
-    const fem::FemResults& r = b.Case(k);
-    const double v = vm ? r.maxVonMises : r.maxDisplacement;
-    const int node = vm ? r.maxVmNode : r.maxDispNode;
-    if (v <= best || node < 0 || node >= (int)r.displacement.size())
-      continue;
-    best = v;
-    // Warped by the same deform scale so it tracks the overlay.
-    at = glm::vec3(b.mesh.nodes[node]) +
-         sim.deformScale * glm::vec3(r.displacement[node]);
-  }
-  if (best < 0.0)
+  if (!sim.IsActive())
     return;
   const float L =
       state.camera ? std::max(0.06f * state.camera->GetDistance(), 0.1f) : 1.0f;
-  const glm::vec3 col(1.0f, 0.1f, 0.8f); // magenta, distinct from CoG amber
-  const glm::vec3 ax[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-  for (const glm::vec3& a : ax) {
-    lines.push_back(LineVertex(at - a * L, col));
-    lines.push_back(LineVertex(at + a * L, col));
-  }
+  const auto cross = [&](const glm::vec3& at, const glm::vec3& col, float len) {
+    const glm::vec3 ax[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    for (const glm::vec3& a : ax) {
+      lines.push_back(LineVertex(at - a * len, col));
+      lines.push_back(LineVertex(at + a * len, col));
+    }
+  };
+  // The place a report row framed (a worst element, a thin wall).
+  if (sim.placeMarked && sim.meshView != SimulationState::MeshView::Off)
+    cross(glm::vec3(sim.placeAt), glm::vec3(1.0f, 0.85f, 0.2f), 0.35f * L);
+  // The ends of the field on show (ui::ShownField, built with the overlay,
+  // so a topology view or a mesh has none and a stale one cannot be drawn):
+  // a magenta cross at the maximum and a pale blue one at the minimum, each
+  // warped by the deform scale so it tracks the overlay.
+  const ShownField* shown = sim.shown.get();
+  if (shown == nullptr || shown->mesh || shown->normalized ||
+      !shown->hasExtremes || !sim.showExtremes)
+    return;
+  cross(glm::vec3(shown->hiAt) + sim.deformScale * glm::vec3(shown->hiDisp),
+        glm::vec3(1.0f, 0.1f, 0.8f), L); // magenta, distinct from CoG amber
+  if (shown->hi > shown->lo)
+    cross(glm::vec3(shown->loAt) + sim.deformScale * glm::vec3(shown->loDisp),
+          glm::vec3(0.55f, 0.8f, 1.0f), 0.6f * L);
 }
 bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error,
                       const fem::ConvergeOptions& converge) {
@@ -209,6 +197,7 @@ bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
   rt.solveSeconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
           .count();
+  RememberStudyResult(state, rt); // whole, before the store cuts it
   doc.StoreStudyResults(studyId, std::move(rt));
   return true;
 }
@@ -286,9 +275,22 @@ bool ReuseStudyResult(AppState& state, Document* doc, AssemblyDocument* asmDoc,
 }
 
 void RememberStudyResult(AppState& state, const fem::StudyRuntime& rt) {
-  if (rt.inputHash != 0 && !rt.cancelled)
-    state.studyResultsByInput.Put(
-        rt.inputHash, std::make_shared<const fem::StudyRuntime>(rt));
+  if (rt.inputHash == 0 || rt.cancelled)
+    return;
+  // A whole result is not replaced by its own surface: the one remembered
+  // before it was stored is what a VTU export writes
+  // (docs/simulation/README.md#vtu-export).
+  const auto whole = [](const fem::StudyRuntime& r) {
+    for (const fem::StudyBodyResult& b : r.bodies)
+      if (b.mesh.tets.empty())
+        return false;
+    return !r.bodies.empty();
+  };
+  if (const auto have = state.studyResultsByInput.Find(rt.inputHash);
+      have && whole(*have) && !whole(rt))
+    return;
+  state.studyResultsByInput.Put(rt.inputHash,
+                                std::make_shared<const fem::StudyRuntime>(rt));
 }
 
 namespace {
@@ -832,6 +834,8 @@ bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
   job->studyId = studyId;
   job->partSlotId = SlotIdOfDoc(state, doc);
   job->started = std::chrono::steady_clock::now();
+  job->docVersion = doc.Version();
+  job->settingsKey = MeshSettingsKey(*s);
   state.meshReports.erase({job->partSlotId, studyId});
 
   auto bg = std::make_unique<BackgroundJob>();
@@ -848,6 +852,14 @@ bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
     std::string err;
     if (!fem::MeshPlanned(job->plan, job->meshes, &err))
       job->error = err.empty() ? "meshing failed" : err;
+    // What each mesh says about itself, here beside it: the report reads
+    // every element.
+    else
+      for (size_t i = 0; i < job->meshes.size() && i < job->plan.bodies.size();
+           ++i)
+        job->reports.push_back(
+            fem::ReportMesh(job->meshes[i].mesh, job->plan.bodies[i].settings,
+                            fem::AutoMeshSize(job->plan.bodies[i].shape)));
     raw->error = job->error;
     raw->done.store(true); // last
   });
@@ -858,14 +870,13 @@ bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
         s.meshJob.reset();
       return true;
     }
-    MeshReport report;
+    MeshReport report =
+        MakeMeshReport(std::move(j.meshes), std::move(j.reports));
     report.error = j.error;
     report.seconds = Elapsed(j.started);
-    for (const fem::StudyBodyMesh& bm : j.meshes)
-      report.bodies.push_back({bm.bodyName, bm.mesh.stats.nodeCount,
-                               bm.mesh.stats.tetCount,
-                               bm.mesh.stats.worstQuality});
-    s.meshReports[{j.partSlotId, j.studyId}] = std::move(report);
+    report.docVersion = j.docVersion;
+    report.settingsKey = j.settingsKey;
+    KeepStudyMesh(s, j.partSlotId, j.studyId, std::move(report));
     if (!j.error.empty())
       if (Document* target = PartDocById(s, j.partSlotId))
         if (fem::Study* st = target->StudyForRun(j.studyId))
@@ -1348,6 +1359,46 @@ bool MeshAssemblyStudy(AppState& state, AssemblyDocument& asmDoc,
   return true;
 }
 
+bool MeshAssemblyStudyWithReports(AppState& state, AssemblyDocument& asmDoc,
+                                  uint64_t studyId,
+                                  std::vector<fem::StudyBodyMesh>& meshes,
+                                  std::vector<fem::MeshBodyReport>& reports,
+                                  std::string* error) {
+  fem::StudyPlan plan;
+  fem::Study* s = nullptr;
+  if (!PlanForRun(state, asmDoc, studyId, plan, &s, error))
+    return false;
+  fem::StudyJobInput input;
+  std::string err;
+  if (!fem::MeshPlannedStudy(plan, input, &err)) {
+    s->error = err;
+    if (error)
+      *error = err;
+    return false;
+  }
+  meshes.clear();
+  reports.clear();
+  for (size_t i = 0; i < input.bodies.size(); ++i) {
+    fem::StudyJobBody& jb = input.bodies[i];
+    // The plan's body is what was meshed: its settings are what the
+    // report's refinements are read against.
+    fem::MeshSettings asked;
+    double autoSize = 0.0;
+    if (i < plan.bodies.size()) {
+      asked = plan.bodies[i].settings;
+      if (!plan.bodies[i].shape.IsNull())
+        autoSize = fem::AutoMeshSize(plan.bodies[i].shape);
+    }
+    reports.push_back(fem::ReportMesh(jb.mesh, asked, autoSize));
+    fem::StudyBodyMesh bm;
+    bm.bodyIndex = jb.bodyIndex;
+    bm.bodyName = jb.bodyName;
+    bm.mesh = std::move(jb.mesh);
+    meshes.push_back(std::move(bm));
+  }
+  return true;
+}
+
 void EnterSimulation(AppState& state) {
   Document* doc = state.document.get();
   if (!doc) {
@@ -1444,9 +1495,16 @@ void SyncFieldRenderer(AppState& state) {
   // hidden" early-out can hold only stale ids while the regenerated body
   // renders fully visible over the overlay — the raw-block-instead-of-result
   // bug. Stale ids drop out with the rebuild (their instances are gone).
-  auto hideBodies = [&](const fem::StudyRuntime* rt) {
+  auto hideBodies = [&](const std::vector<int>& bodyIndices,
+                        bool capsToo = false) {
     std::vector<uint32_t> want;
-    for (const fem::StudyBodyResult& b : rt->bodies)
+    // The mesh view cuts along whole elements, which stand proud of the
+    // section plane: the body's flat cap would slice through them.
+    if (capsToo)
+      for (const AppState::GpuProjection::SectionCapMesh& cap :
+           state.gpu.sectionCapMeshes)
+        want.push_back(cap.meshId);
+    for (int bodyIndex : bodyIndices)
       for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
         if (bondedGroup) {
           // The group's field mesh covers every solved occurrence.
@@ -1455,7 +1513,7 @@ void SyncFieldRenderer(AppState& state) {
               want.push_back(m.meshId);
           continue;
         }
-        if (static_cast<int>(m.bodyIndex) == b.bodyIndex &&
+        if (static_cast<int>(m.bodyIndex) == bodyIndex &&
             m.occurrenceId == meshedOcc)
           want.push_back(m.meshId);
       }
@@ -1466,58 +1524,65 @@ void SyncFieldRenderer(AppState& state) {
         state.meshRenderer->SetInstanceVisible(id, false);
     state.gpu.hiddenMeshes = std::move(want);
   };
-
-  const fem::StudyRuntime* rt =
-      host ? host.Results(sim.activeStudyId) : nullptr;
-  const fem::Study* study = host ? host.Find(sim.activeStudyId) : nullptr;
-  const bool show = sim.IsActive() &&
-                    sim.field != SimulationState::Field::None && rt != nullptr;
-  if (!show) {
+  const auto bodiesOf = [](const fem::StudyRuntime* rt) {
+    std::vector<int> out;
+    for (const fem::StudyBodyResult& b : rt->bodies)
+      out.push_back(b.bodyIndex);
+    return out;
+  };
+  const auto clear = [&]() {
     if (state.gpu.fieldBuiltKey != 0 || state.gpu.topoIsoInstance != 0 ||
         !state.gpu.hiddenMeshes.empty()) {
       restoreBodies();
       removeIso();
       state.fieldRenderer->SetMesh({}, {});
+      state.fieldRenderer->SetStyle(FieldStyle{});
       state.gpu.fieldBuiltKey = 0;
     }
-    return;
-  }
+    sim.shown.reset();
+  };
 
-  const bool topo = study && study->type == fem::AnalysisType::Topology;
-
-  // Guard against a field that doesn't match the study's result data: a
-  // topology runtime has no von Mises / displacement arrays, and a static/modal
-  // runtime has no density field. This happens when the field is left armed
-  // across an analysis-type switch (e.g. view modal displacement, then change
-  // the study to topology) — reading the empty arrays would be out of bounds.
-  // Treat a mismatched field as "off".
-  // A thermal field (docs/simulation/README.md#thermal): a thermal study's
-  // temperature and heat flux, or a thermally loaded static study's
-  // temperature.
-  bool anyTemperature = false, anyFlux = false;
-  for (const fem::StudyBodyResult& b : rt->bodies) {
-    anyTemperature = anyTemperature || !b.results.temperature.empty();
-    anyFlux = anyFlux || !b.results.heatFlux.empty();
-  }
-  const bool temperature = sim.field == SimulationState::Field::Temperature;
-  const bool heatFlux = sim.field == SimulationState::Field::HeatFlux;
-  const bool thermalStudy = study && study->type == fem::AnalysisType::Thermal;
-  const bool applicable =
-      temperature ? anyTemperature
-      : heatFlux  ? anyFlux
-      : topo      ? (sim.field == SimulationState::Field::Shape ||
-                sim.field == SimulationState::Field::Density)
-                  : !thermalStudy &&
-                   (sim.field == SimulationState::Field::VonMises ||
-                    sim.field == SimulationState::Field::Displacement);
-  if (!applicable) {
-    restoreBodies();
+  // --- The mesh the Mesh action kept, in place of the body
+  // (docs/simulation/README.md#the-mesh-you-look-at).
+  if (sim.IsActive() && sim.meshView != SimulationState::MeshView::Off) {
+    const MeshReport* mr = StudyMesh(state, sim.activeStudyId);
+    if (mr == nullptr) {
+      clear();
+      return;
+    }
     removeIso();
-    state.fieldRenderer->SetMesh({}, {});
-    state.gpu.fieldBuiltKey = 0;
+    std::vector<int> bodies;
+    for (const MeshReport::Body& b : mr->bodies)
+      bodies.push_back(b.bodyIndex);
+    const uint64_t key = MeshOverlayKey(state, *mr);
+    if (key != state.gpu.fieldBuiltKey) {
+      std::vector<FieldVertex> verts;
+      std::vector<uint32_t> indices;
+      FieldStyle style;
+      auto shown = std::make_shared<ShownField>();
+      BuildMeshOverlay(state, *mr, verts, indices, style, *shown);
+      shown->key = key;
+      state.fieldRenderer->SetMesh(std::move(verts), std::move(indices));
+      state.fieldRenderer->SetStyle(style);
+      sim.shown = std::move(shown);
+      state.gpu.fieldBuiltKey = key;
+    }
+    hideBodies(bodies, true);
     return;
   }
 
+  const fem::StudyRuntime* rt =
+      host ? host.Results(sim.activeStudyId) : nullptr;
+  const fem::Study* study = host ? host.Find(sim.activeStudyId) : nullptr;
+  const bool show = sim.IsActive() &&
+                    sim.field != SimulationState::Field::None &&
+                    rt != nullptr && study != nullptr;
+  if (!show) {
+    clear();
+    return;
+  }
+
+  const bool topo = study->type == fem::AnalysisType::Topology;
   // --- Topology "Shape": the optimized iso-surface as a grey MeshRenderer
   // body.
   if (topo && sim.field == SimulationState::Field::Shape) {
@@ -1525,6 +1590,7 @@ void SyncFieldRenderer(AppState& state) {
       state.fieldRenderer->SetMesh({}, {});
       state.gpu.fieldBuiltKey = 0;
     }
+    sim.shown.reset();
     // Re-extract only when the study, results, or threshold changes.
     const uint64_t tq = static_cast<uint64_t>(
         std::lround(std::clamp(sim.topoThreshold, 0.0f, 1.0f) * 1000.0f));
@@ -1556,126 +1622,38 @@ void SyncFieldRenderer(AppState& state) {
       }
       state.gpu.topoIsoKey = key;
     }
-    hideBodies(rt);
+    hideBodies(bodiesOf(rt));
     return;
   }
 
-  // --- Scalar field via the FieldRenderer (von Mises / displacement /
-  // density).
+  // --- A scalar field through the FieldRenderer: what the result holds at
+  // its nodes, over the legend's range (ui/SimulationView.h). A field that
+  // does not match the study's result -- one left armed across a change of
+  // analysis type, or a stress asked of a result that kept none -- builds
+  // nothing, and is treated as off.
   removeIso();
   // A buckling study shows its modes as a modal one does.
-  const bool modal = study && (study->type == fem::AnalysisType::Modal ||
-                               study->type == fem::AnalysisType::Buckling);
-  const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
-  const bool density = topo && sim.field == SimulationState::Field::Density;
-
-  const int caseIdx = rt->caseNames.empty() ? -1 : sim.activeCase;
-  const uint64_t key =
-      (((static_cast<uint64_t>(sim.field) * 1000003ull + sim.activeStudyId) *
-            1000003ull +
-        host.ResultsEpoch()) *
-           1000003ull +
-       (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0)) *
-          1000003ull +
-      static_cast<uint64_t>(caseIdx + 1);
+  const bool modal = study->type == fem::AnalysisType::Modal ||
+                     study->type == fem::AnalysisType::Buckling;
+  const uint64_t key = ResultOverlayKey(state, host, *rt, modal);
   if (key == state.gpu.fieldBuiltKey) {
-    hideBodies(rt);
+    hideBodies(bodiesOf(rt));
     return;
   }
-
-  // A thermal field spans its own range: lowest to highest temperature, 0
-  // to the peak flux.
-  double tLo = 0.0, tHi = 0.0, fluxHi = 0.0;
-  if (temperature || heatFlux) {
-    bool first = true;
-    for (const fem::StudyBodyResult& b : rt->bodies) {
-      for (double t : b.results.temperature) {
-        tLo = first ? t : std::min(tLo, t);
-        tHi = first ? t : std::max(tHi, t);
-        first = false;
-      }
-      for (const glm::dvec3& q : b.results.heatFlux)
-        fluxHi = std::max(fluxHi, glm::length(q));
-    }
-  }
-  // The scale is the case on show's own maximum (the study's, without
-  // cases).
-  double fmax = vm ? rt->maxVonMises : rt->maxDisplacement;
-  if (caseIdx >= 0) {
-    fmax = 0.0;
-    for (const fem::StudyBodyResult& b : rt->bodies)
-      fmax = std::max(fmax, vm ? b.Case(caseIdx).maxVonMises
-                               : b.Case(caseIdx).maxDisplacement);
-  }
-  const double inv = (modal || density) ? 1.0 : (fmax > 0 ? 1.0 / fmax : 0.0);
-
   std::vector<FieldVertex> verts;
   std::vector<uint32_t> indices;
-  // tri6 -> 4 linear sub-triangles via the midside nodes (corners 0,1,2,
-  // midsides 3,4,5): (0,3,5)(3,1,4)(5,4,2)(3,4,5).
-  static const int kSub[4][3] = {{0, 3, 5}, {3, 1, 4}, {5, 4, 2}, {3, 4, 5}};
-  for (const fem::StudyBodyResult& b : rt->bodies) {
-    // Density: the per-tet density averaged onto every mesh node. Otherwise the
-    // displacement source (active mode shape for modal, else the static solve).
-    std::vector<double> nodeDensity;
-    if (density) {
-      nodeDensity.assign(b.mesh.nodes.size(), 0.0);
-      std::vector<int> cnt(b.mesh.nodes.size(), 0);
-      for (size_t e = 0; e < b.mesh.tets.size() && e < b.density.size(); ++e)
-        for (int i = 0; i < 10; ++i) {
-          const int n = b.mesh.tets[e][i];
-          nodeDensity[n] += b.density[e];
-          ++cnt[n];
-        }
-      for (size_t n = 0; n < nodeDensity.size(); ++n)
-        if (cnt[n])
-          nodeDensity[n] /= cnt[n];
-    }
-    const fem::FemResults& shown = b.Case(caseIdx);
-    const std::vector<glm::dvec3>* disp = &shown.displacement;
-    if (modal) {
-      if (b.results.modes.empty())
-        continue;
-      const int mi = std::clamp(sim.activeMode, 0,
-                                static_cast<int>(b.results.modes.size()) - 1);
-      disp = &b.results.modes[mi].displacement;
-    }
-    for (const auto& tri : b.mesh.boundary) {
-      const uint32_t base = static_cast<uint32_t>(verts.size());
-      for (int i = 0; i < 6; ++i) {
-        const int n = tri.nodes[i];
-        const glm::dvec3& p = b.mesh.nodes[n];
-        FieldVertex fv;
-        fv.position = glm::vec3(p);
-        if (density) {
-          fv.displacement = glm::vec3(0.0f);
-          fv.scalar = static_cast<float>(std::clamp(nodeDensity[n], 0.0, 1.0));
-        } else if (temperature || heatFlux) {
-          // No deformation: the scalar alone.
-          fv.displacement = glm::vec3(0.0f);
-          double val = 0.0;
-          if (temperature && n < static_cast<int>(shown.temperature.size()))
-            val = tHi > tLo ? (shown.temperature[n] - tLo) / (tHi - tLo) : 0.0;
-          if (heatFlux && n < static_cast<int>(shown.heatFlux.size()))
-            val = fluxHi > 0 ? glm::length(shown.heatFlux[n]) / fluxHi : 0.0;
-          fv.scalar = static_cast<float>(std::clamp(val, 0.0, 1.0));
-        } else {
-          const glm::dvec3& d = (*disp)[n];
-          const double val = vm ? shown.vonMises[n] : glm::length(d);
-          fv.displacement = glm::vec3(d);
-          fv.scalar = static_cast<float>(std::clamp(val * inv, 0.0, 1.0));
-        }
-        verts.push_back(fv);
-      }
-      for (const auto& s : kSub) {
-        indices.push_back(base + s[0]);
-        indices.push_back(base + s[1]);
-        indices.push_back(base + s[2]);
-      }
-    }
+  FieldStyle style;
+  auto shown = std::make_shared<ShownField>();
+  if (!BuildResultOverlay(state, host, *rt, *study, verts, indices, style,
+                          *shown)) {
+    clear();
+    return;
   }
+  shown->key = key;
   state.fieldRenderer->SetMesh(std::move(verts), std::move(indices));
-  hideBodies(rt);
+  state.fieldRenderer->SetStyle(style);
+  sim.shown = std::move(shown);
+  hideBodies(bodiesOf(rt));
   state.gpu.fieldBuiltKey = key;
 }
 

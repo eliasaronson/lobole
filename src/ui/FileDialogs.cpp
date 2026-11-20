@@ -7,6 +7,7 @@
 #include "ui/ImportJob.h"
 #include "ui/MotionActions.h"
 #include "ui/OpenJob.h"
+#include "ui/SimulationView.h"
 #include "ui/StepExport.h"
 #include "ui/StlExport.h"
 
@@ -994,6 +995,57 @@ void ExportMotionVideoDialog(AppState& state, uint64_t studyId) {
     state.motionAddRefusal.clear();
   else
     state.motionAddRefusal = "Export failed: " + error;
+}
+
+void ExportStudyResultDialog(AppState& state, uint64_t studyId) {
+  const StudyHost host = StudyHostOf(state);
+  const fem::Study* s = host ? host.Find(studyId) : nullptr;
+  if (!s)
+    return;
+  std::string path;
+  if (state.saveDialogAnswer) {
+    path = *state.saveDialogAnswer;
+    state.saveDialogAnswer.reset();
+  } else {
+#ifdef HAVE_NATIVEFILEDIALOG
+    if (!NativeDialogsSafe())
+      return;
+    std::string name = s->name.empty() ? "study" : s->name;
+    for (char& c : name)
+      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-')
+        c = '_';
+    nfdu8char_t* outPath = nullptr;
+    const nfdu8filteritem_t filters[] = {{"VTK unstructured grid", "vtu"}};
+    if (InDialog([&] {
+          return NFD_SaveDialogU8(&outPath, filters, 1, nullptr,
+                                  (name + ".vtu").c_str());
+        }) != NFD_OKAY)
+      return;
+    path = outPath;
+    NFD_FreePathU8(outPath);
+#else
+    return;
+#endif
+  }
+  if (!path.ends_with(".vtu"))
+    path += ".vtu";
+  VtuExport done;
+  std::string error;
+  // The case on show is the one written.
+  const int caseIndex = state.simulation.activeCase;
+  if (ExportStudyResultVtu(state, studyId, path, caseIndex, &done, &error)) {
+    char size[32];
+    std::snprintf(size, sizeof(size), "%.1f MB", done.bytes / 1e6);
+    state.simulation.exportNote =
+        "Exported " + std::to_string(done.cells) + " elements (" + size +
+        ") to " + std::filesystem::path(path).filename().string();
+    LOG_INFO("Study result exported to {} ({} points, {} cells)", path,
+             done.points, done.cells);
+  } else {
+    // Shown under the button, not only logged: a click that silently did
+    // nothing is the thing a refusal is for.
+    state.simulation.exportNote = "Export failed: " + error;
+  }
 }
 
 bool ExportActiveDocument(AppState& state, const std::string& path,

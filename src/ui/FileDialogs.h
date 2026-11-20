@@ -46,6 +46,10 @@ void ExportMotionDialog(AppState& state, uint64_t studyId);
 // named after the file. A refusal lands in `state.motionAddRefusal`.
 // `state.saveDialogAnswer`, when set, answers instead of a dialog (tests).
 void ExportMotionVideoDialog(AppState& state, uint64_t studyId);
+// A solved study's whole result as a .vtu (docs/simulation/README.md
+// #vtu-export): asks where, writes it, and leaves what happened in
+// SimulationState::exportNote.
+void ExportStudyResultDialog(AppState& state, uint64_t studyId);
 
 // Whether a native file dialog can actually open here (NFD compiled in AND a
 // usable backend — on Linux the XDG desktop portal). False in a bare session

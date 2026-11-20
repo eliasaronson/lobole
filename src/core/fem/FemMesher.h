@@ -67,6 +67,17 @@ struct FemMesh {
     // 1 = regular tetrahedron, -> 0 = degenerate sliver. Surfaced so a study
     // can warn on a bad mesh before trusting its stresses.
     double worstQuality = 0.0;
+    // Midside nodes the fold check moved back to their straight edges
+    // (StraightenFoldedTets); 0 on a mesh that needed none.
+    std::size_t straightenedNodes = 0;
+    // The mesh's volume and the B-Rep's it was made from (mm^3), as Mesh()
+    // measured them before anything was straightened; 0 on a mesh not made
+    // by Mesh() (a hand-built one, a result read back).
+    double volumeMm3 = 0.0;
+    double shapeVolumeMm3 = 0.0;
+    // How well the B-Rep's own volume is known (mm^3): the error its
+    // integration over curved faces reports.
+    double shapeVolumeErrorMm3 = 0.0;
   } stats;
 };
 
@@ -114,5 +125,41 @@ std::vector<TetFold> FoldedTets(const FemMesh& mesh, std::size_t limit = 64);
 // tet still folded after (one whose corners are inverted) is left to
 // FoldedTetRefusal.
 std::size_t StraightenFoldedTets(FemMesh& mesh);
+
+// What one element measures (docs/simulation/README.md#the-mesh-you-look-at).
+// `shape` is the corner tetrahedron's normalized quality (1 = regular, -> 0 a
+// sliver: Stats::worstQuality is its minimum). `jacobian` is the scaled
+// Jacobian of the curved element, the least det J over the largest on the
+// degree-3 lattice the fold certification samples: 1 for a straight-sided
+// element, falling as its curved edges crowd a corner, <= 0 folded. `size`
+// is the mean length of its six straight edges (mm). `sign` is
+// MeshOrientation's.
+struct TetMeasure {
+  double shape = 0.0;
+  double jacobian = 0.0;
+  double size = 0.0;
+  // The worse of shape and jacobian: the one number an element is coloured
+  // and listed by.
+  double Quality() const { return shape < jacobian ? shape : jacobian; }
+};
+TetMeasure MeasureTet(const FemMesh& mesh, std::size_t tet, int sign);
+
+// The mesh's volume (mm^3): each tet10's |det J| integrated exactly (det J
+// is a cubic, and the rule used is exact for one).
+double MeshVolume(const FemMesh& mesh);
+// How far a sound mesh's volume may sit from its B-Rep's (mm^3): the volume
+// between the curved boundary triangles and their flat chords -- each
+// triangle's area times the sag of its midside nodes, which is what the
+// mesh's own deflection leaves room for -- then `shapeError`, how well the
+// B-Rep's volume is itself known, and a hundred-thousandth of the volume
+// for rounding.
+double MeshVolumeSlack(const FemMesh& mesh, double volume,
+                       double shapeError = 0.0);
+// The refusal for a mesh whose volume is not its shape's (a region the
+// mesher left empty, a solid it dropped); empty when it is, and when
+// `shapeVolume` is not positive (not a solid).
+[[nodiscard]] std::string MeshVolumeRefusal(const FemMesh& mesh,
+                                            double shapeVolume,
+                                            double shapeError = 0.0);
 
 } // namespace fem

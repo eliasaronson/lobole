@@ -2137,8 +2137,28 @@ _reference("add_load", "Add a boundary condition to a study. type is 'fixed' "
 _reference("remove_load", "Remove a load (by id) from a study.")
 
 
-_reference("mesh_study", "Mesh a study's bodies without solving (a quick check). "
-          "Returns per-body node/element counts and worst element quality.")
+_reference("mesh_study", "Mesh a study's bodies without solving, and keep the "
+          "mesh to look at. Returns per body its node/element counts, worst "
+          "quality and `report` (the worst elements and where they are, "
+          "walls one element through, refinements that did not take, the "
+          "mesh's volume against the body's), and `findings`, the same as "
+          "rows. set_mesh_display then draws it; a mesh that does not fill "
+          "its body is refused.")
+
+
+_reference("set_mesh_display", "Draw the mesh mesh_study kept in place of the "
+          "body (for a screenshot): view is 'edges', 'quality' (colour by "
+          "element quality, 1 good), 'size' (mm) or 'off'. A section then "
+          "shows the interior elements. Display-only; refused when the study "
+          "has no kept mesh.")
+
+
+_reference("check_study", "Everything run_study would refuse, at once, each "
+          "with the call that fixes it: {ok, problems: [{code, message, "
+          "load_id?, body?, face?, fix?: {method, params, note?}}]}. "
+          "Read-only. "
+          "Call it before run_study; fix.params has null where you choose "
+          "(a face, a material).")
 
 
 _reference("run_study", "Mesh + solve a study now (explicit; never automatic). "
@@ -2195,14 +2215,32 @@ _reference("set_topo_ghost", "Toggle the topology SHAPE GUIDE: a translucent ove
 
 
 _reference("set_result_display", "Show a study's result overlay in the viewport (for a "
-          "screenshot). field is 'von_mises', 'displacement', or 'none' for a "
-          "static/modal study, or 'shape' (grey optimized iso-surface) / "
-          "'density' (colormap) for a topology study. deform_scale exaggerates "
+          "screenshot). field is 'von_mises', 'displacement', 'principal_max' "
+          "/ 'principal_mid' / 'principal_min' (MPa, tension positive), "
+          "'factor_of_safety' (yield / von Mises; low is hot), "
+          "'across_layers' and 'interlayer_factor' (a printed part's; both "
+          "need layer_normal [x, y, z], the build direction), "
+          "'plastic_strain', 'contact_pressure', 'temperature', 'heat_flux' "
+          "or 'none' for a static, modal or thermal study, or 'shape' (grey "
+          "optimized iso-surface) / 'density' (colormap) for a topology "
+          "study; a field the result does not hold is refused, saying what "
+          "is missing. deform_scale exaggerates "
           "the deformed shape (0 = undeformed). For a modal or buckling study, "
           "mode selects "
           "which mode shape (0-based). For a topology 'shape' view, threshold "
-          "(0..1, 0 = auto) sets the iso-surface level. Enters simulation mode; "
+          "(0..1, 0 = auto) sets the iso-surface level. range_min / "
+          "range_max clamp the legend in the field's unit (null = the "
+          "field's own): what is past them takes the over or under colour, "
+          "so range_max at the yield strength shows what yielded. markers "
+          "marks the maximum and minimum. Enters simulation mode; "
           "display-only, like set_explode.")
+
+
+_reference("export_study_result", "Write a solved study's whole result to a "
+          ".vtu file (path) for ParaView: quadratic tetrahedra with "
+          "displacement, von_mises and the stress tensor. Needs a result "
+          "run in this session: one reopened from disk keeps its surface "
+          "only and is refused (run_study recompute:true first).")
 
 
 # ---------------------------------------------------------------------------

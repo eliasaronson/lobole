@@ -300,7 +300,11 @@ tractions, and a shape that is not the document's).
   solved whole ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)).
 - `mesh_study {async: true}` is a `mesh` job (a cancel drops its report); `study_status` answers
   `{running, meshing: true}` until it lands and then carries
-  `mesh: {bodies, seconds, error?}`. The synchronous form remains.
+  `mesh: {bodies, findings, seconds, stale, error?}`. Its worker makes each
+  mesh's report beside it, and the finish keeps mesh and report for the
+  viewport ([the mesh you look at](../simulation/README.md#the-mesh-you-look-at));
+  the Simulation window's **Mesh** button starts the same job. The
+  synchronous form remains, and is the one an assembly study takes.
 
 `PrepareTopology` still meshes on the main thread.
 

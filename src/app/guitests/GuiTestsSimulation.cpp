@@ -3,16 +3,20 @@
 
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Measure.h"
+#include "render/Camera.h"
+#include "render/FieldRenderer.h" // the mesh view's style
 #include "render/MeshRenderer.h" // InstanceHighlightRanges (tint test)
 #include "ui/AssemblyActions.h"  // UndoAssembly, PartDocById (S1)
 #include "ui/DocumentSlots.h"    // AddAssembly, SetActivePart
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (arrow-placement test)
 #include "ui/SimulationActions.h"
+#include "ui/SimulationView.h" // the kept mesh, the check, the field on show
 #include "ui/StudyHost.h" // ModifyStudy, SimulationContacts, StudyStale
 #include "ui/StudyPanel.h"
 #include "ui/VariableActions.h"    // SetProjectVariable
 #include "ui/ViewportHandleDraw.h" // DrawViewportHandles
 
+#include <filesystem>
 #include <limits>
 
 // Simulation GUI tests, carved out of the single 8,036-line RegisterGuiTests.
@@ -340,6 +344,247 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // than the band.
     IM_CHECK(rt->maxVonMises > 23.0);
     IM_CHECK(rt->maxVonMises < 31.5);
+  };
+
+  // The mesh step, clicked (docs/simulation/README.md#the-mesh-you-look-at):
+  // Mesh makes the mesh and draws it -- element edges over a plain body in
+  // place of the part -- the Show combo colours it by quality, the report
+  // lists what the mesh says about itself, and a click on its worst element
+  // frames it. A load edit leaves the mesh current; the mesh size moving
+  // marks it stale.
+  t = IM_REGISTER_TEST(engine, "sim",
+                       "the_mesh_is_drawn_and_its_worst_element_framed");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    using MeshView = ui::SimulationState::MeshView;
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    IM_CHECK(ui::StudyMesh(*s_App, studyId) == nullptr);
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###mesh_view"));
+    ctx->ItemClick("//###ToolWindow/###study_mesh");
+    IM_CHECK(WaitFor(
+        ctx, "the mesh",
+        [studyId] { return ui::StudyMesh(*s_App, studyId) != nullptr; },
+        120.0));
+    ctx->Yield(3);
+    const ui::MeshReport* mr = ui::StudyMesh(*s_App, studyId);
+    IM_CHECK(mr != nullptr && !mr->bodies.empty());
+    IM_CHECK(mr->bodies[0].elements > 0);
+    IM_CHECK(mr->bodies[0].report.quality.size() == mr->bodies[0].elements);
+
+    // Drawn: the overlay holds the element faces with their edges on, the
+    // body under it is hidden, and nothing is coloured yet.
+    IM_CHECK(s_App->simulation.meshView == MeshView::Edges);
+    IM_CHECK(s_App->fieldRenderer != nullptr &&
+             s_App->fieldRenderer->HasMesh());
+    IM_CHECK(s_App->fieldRenderer->Style().edges);
+    IM_CHECK(s_App->fieldRenderer->Style().plain);
+    IM_CHECK(!s_App->gpu.hiddenMeshes.empty());
+    IM_CHECK(s_App->simulation.shown != nullptr &&
+             s_App->simulation.shown->mesh);
+
+    // Coloured by quality, from the combo.
+    ctx->ItemClick("//###ToolWindow/###mesh_view");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Quality").c_str());
+    ctx->Yield(3);
+    IM_CHECK(s_App->simulation.meshView == MeshView::Quality);
+    IM_CHECK(!s_App->fieldRenderer->Style().plain);
+    IM_CHECK(s_App->fieldRenderer->Style().reversed);
+    IM_CHECK(s_App->simulation.shown->title == "element quality");
+    IM_CHECK(s_App->simulation.shown->lo > 0.0);
+    IM_CHECK(s_App->simulation.shown->lo <= 1.0);
+
+    // The report: its worst element's row frames it.
+    const std::vector<ui::MeshFinding> rows = ui::MeshFindings(*s_App, *mr);
+    int worstRow = -1;
+    for (size_t i = 0; i < rows.size() && worstRow < 0; ++i)
+      if (rows[i].code == "worst_element")
+        worstRow = static_cast<int>(i);
+    IM_CHECK(worstRow >= 0);
+    IM_CHECK(rows[worstRow].hasPlace);
+    ctx->ItemOpen("//###ToolWindow/###mesh_report");
+    ctx->Yield(2);
+    const std::string rowRef =
+        "//###ToolWindow/###mesh_row_" + std::to_string(worstRow);
+    IM_CHECK(ctx->ItemExists(rowRef.c_str()));
+    ctx->ItemClick(rowRef.c_str());
+    WaitFor(
+        ctx, "the camera to settle",
+        [] { return !s_App->camera->IsAnimating(); }, 10.0);
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.placeMarked);
+    const glm::dvec3 at = rows[worstRow].at;
+    IM_CHECK(glm::length(glm::dvec3(s_App->camera->GetTarget()) - at) <
+             rows[worstRow].radiusMm);
+    // Framed, not merely aimed at: the element fills the view, so the
+    // camera is within a few of its radii.
+    IM_CHECK(s_App->camera->GetDistance() < 12.0f * rows[worstRow].radiusMm);
+
+    // A load is not a mesh setting; the mesh size is.
+    IM_CHECK(!ui::StudyMeshStale(*s_App, studyId));
+    ui::ModifyStudy(*s_App, studyId, "Set load", [](fem::Study& cs) {
+      for (fem::Load& l : cs.loads)
+        if (l.type == fem::LoadType::Force)
+          l.magnitude *= 2.0;
+    });
+    ctx->Yield(2);
+    IM_CHECK(!ui::StudyMeshStale(*s_App, studyId));
+    ui::ModifyStudy(*s_App, studyId, "Set mesh size",
+                    [](fem::Study& cs) { cs.meshSize = 3.0; });
+    ctx->Yield(2);
+    IM_CHECK(ui::StudyMeshStale(*s_App, studyId));
+  };
+
+  // The check beside Run (docs/simulation/README.md#checking-a-study): a
+  // study with its support removed lists that before anything is run, and
+  // the row goes when the support is back.
+  t = IM_REGISTER_TEST(engine, "sim", "the_check_lists_problems_beside_run");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    ctx->Yield(2);
+    IM_CHECK(ui::CachedStudyCheck(*s_App, studyId).problems.empty());
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###check_row_0"));
+    const fem::Study before = *Doc()->FindStudy(studyId);
+    ui::ModifyStudy(*s_App, studyId, "Remove support", [](fem::Study& cs) {
+      std::erase_if(cs.loads, [](const fem::Load& l) {
+        return l.type == fem::LoadType::Fixed;
+      });
+    });
+    ctx->Yield(3);
+    const ui::StudyCheck& check = ui::CachedStudyCheck(*s_App, studyId);
+    IM_CHECK_EQ(check.problems.size(), (size_t)1);
+    IM_CHECK(check.problems[0].code == "no_support");
+    IM_CHECK(check.problems[0].fixMethod == "add_load");
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###check_row_0"));
+    // The row frames the body it is about.
+    ctx->ItemClick("//###ToolWindow/###check_row_0");
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.placeMarked);
+    ui::ModifyStudy(*s_App, studyId, "Restore support",
+                    [&](fem::Study& cs) { cs.loads = before.loads; });
+    ctx->Yield(3);
+    IM_CHECK(ui::CachedStudyCheck(*s_App, studyId).problems.empty());
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###check_row_0"));
+  };
+
+  // The result fields and the legend's range, clicked
+  // (docs/simulation/README.md#results-display): the Field combo shows the
+  // largest principal stress with its unit, a typed maximum puts the part
+  // of the beam over it in the over colour, "Above yield" tops the range at
+  // the steel's yield, the markers stand at the field's ends, and the VTU
+  // export writes the whole result to the file it is given.
+  t = IM_REGISTER_TEST(engine, "sim", "a_result_field_is_clamped_and_marked");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    using Field = ui::SimulationState::Field;
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, studyId));
+    ctx->Yield(2);
+    const auto choose = [&](const char* item) {
+      ctx->ItemClick("//###ToolWindow/###result_field");
+      ctx->Yield();
+      IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+      ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+      IM_CHECK_SILENT(popup != nullptr);
+      ctx->ItemClick((std::string("//") + popup->Name + "/**/" + item).c_str());
+      ctx->Yield(3);
+    };
+    // A field this study's kind does not have is not offered at all.
+    ctx->ItemClick("//###ToolWindow/###result_field");
+    ctx->Yield();
+    {
+      IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+      const std::string popup =
+          std::string("//") +
+          ctx->UiContext->OpenPopupStack.back().Window->Name;
+      IM_CHECK(ctx->ItemExists((popup + "/**/###field_principal_max").c_str()));
+      IM_CHECK(
+          !ctx->ItemExists((popup + "/**/###field_plastic_strain").c_str()));
+      IM_CHECK(
+          !ctx->ItemExists((popup + "/**/###field_contact_pressure").c_str()));
+      ctx->ItemClick((popup + "/**/###field_principal_max").c_str());
+      ctx->Yield(3);
+    }
+    IM_CHECK(s_App->simulation.field == Field::PrincipalMax);
+    const ui::ShownField* shown = s_App->simulation.shown.get();
+    IM_CHECK(shown != nullptr);
+    IM_CHECK(shown->title == "max principal");
+    IM_CHECK(shown->unit == "MPa");
+    // The beam's top fibre is in tension at the clamp (about 27 MPa) and its
+    // bottom in compression, so the largest principal stress spans from
+    // about nothing to that.
+    IM_CHECK(shown->hi > 20.0);
+    IM_CHECK(shown->hi < 40.0);
+    IM_CHECK(shown->hasExtremes);
+    IM_CHECK(!shown->over);
+    const double peak = shown->hi;
+    // The maximum is at the clamp end (x = 0), the minimum is not.
+    IM_CHECK(shown->hiAt.x < 30.0);
+
+    // A typed maximum of half the peak: the bar stops there and what is
+    // past it is over.
+    ctx->ItemInputValue("//###ToolWindow/###result_range_hi",
+                        static_cast<float>(peak * 0.5));
+    ctx->Yield(3);
+    shown = s_App->simulation.shown.get();
+    IM_CHECK(s_App->simulation.clampHi);
+    IM_CHECK(std::abs(shown->barHi - peak * 0.5) < 1e-3 * peak);
+    IM_CHECK(shown->over);
+    IM_CHECK(std::abs(shown->hi - peak) < 1e-9); // the field's own maximum
+    // "Above yield": steel's 250 MPa is far over this beam, so nothing is.
+    ctx->ItemClick("//###ToolWindow/###result_range_yield");
+    ctx->Yield(3);
+    shown = s_App->simulation.shown.get();
+    IM_CHECK(shown->barHi > 200.0);
+    IM_CHECK(!shown->over);
+    // Another field starts from its own range.
+    choose("###field_von_mises");
+    IM_CHECK(s_App->simulation.field == Field::VonMises);
+    IM_CHECK(!s_App->simulation.clampHi);
+    // The factor of safety reads the other way round: its low end the hot
+    // one, at the peak stress.
+    choose("###field_factor_of_safety");
+    shown = s_App->simulation.shown.get();
+    IM_CHECK(shown != nullptr && shown->reversed);
+    IM_CHECK(shown->unit.empty());
+    IM_CHECK(shown->lo > 5.0); // 250 / ~27
+    IM_CHECK(shown->lo < 12.0);
+    IM_CHECK(shown->over); // most of the beam is far safer than four times it
+    // The markers: a cross at the maximum and one at the minimum, three
+    // lines each, and none with the box unticked.
+    IM_CHECK(s_App->simulation.showExtremes);
+    {
+      std::vector<LineVertex3D> lines;
+      ui::AppendStudyMarker(*s_App, lines);
+      IM_CHECK_EQ(lines.size(), (size_t)12);
+    }
+    ctx->ItemClick("//###ToolWindow/###result_extremes");
+    ctx->Yield();
+    IM_CHECK(!s_App->simulation.showExtremes);
+    {
+      std::vector<LineVertex3D> lines;
+      ui::AppendStudyMarker(*s_App, lines);
+      IM_CHECK(lines.empty());
+    }
+    ctx->ItemClick("//###ToolWindow/###result_extremes");
+
+    // Export: the whole result, to the file the dialog would have named.
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "lobole_gui_export.vtu")
+            .string();
+    std::filesystem::remove(path);
+    s_App->saveDialogAnswer = path;
+    ctx->ItemClick("//###ToolWindow/###result_export");
+    ctx->Yield(2);
+    IM_CHECK(std::filesystem::exists(path));
+    IM_CHECK(std::filesystem::file_size(path) > 10000);
+    IM_CHECK(s_App->simulation.exportNote.rfind("Exported ", 0) == 0);
+    std::filesystem::remove(path);
   };
 
   // A buckling study, clicked (docs/simulation/README.md#buckling): the
@@ -1271,7 +1516,13 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(rt->bodies[0].thermal.solved);
     IM_CHECK(rt->bodies[0].thermal.maxC > 25.0);
     ctx->Yield(2);
-    ctx->ItemClick("//###ToolWindow/###thermal_field_temperature");
+    ctx->ItemClick("//###ToolWindow/###result_field");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ctx->ItemClick((std::string("//") +
+                    ctx->UiContext->OpenPopupStack.back().Window->Name +
+                    "/**/###field_temperature")
+                       .c_str());
     ctx->Yield(3);
     IM_CHECK(s_App->simulation.field ==
              ui::SimulationState::Field::Temperature);

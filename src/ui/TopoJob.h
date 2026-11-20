@@ -10,6 +10,7 @@
 // atomics + a single join on the main thread (see SimulationActions:
 // Start/Poll/Cancel TopologyRun). Owned by AppState (one run at a time).
 
+#include "core/fem/FemMeshReport.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemTopo.h"
 
@@ -88,20 +89,37 @@ struct MeshJob {
   uint64_t partSlotId = 0;
   fem::MeshPlan plan;
   std::vector<fem::StudyBodyMesh> meshes;
+  // What each mesh says about itself, made on the worker beside it.
+  std::vector<fem::MeshBodyReport> reports;
+  uint64_t docVersion = 0;
+  std::string settingsKey;
   std::string error;
   std::chrono::steady_clock::time_point started;
 };
 
+// The mesh the Mesh action made, kept so it can be looked at
+// (docs/simulation/README.md#the-mesh-you-look-at): each body's elements,
+// and its report. Session state: nothing of it is saved.
 struct MeshReport {
   struct Body {
     std::string name;
     size_t nodes = 0;
     size_t elements = 0;
     double worstQuality = 0.0;
+    int bodyIndex = -1;
+    // Shared, so the view and a check read the mesh a later Mesh replaces.
+    std::shared_ptr<const fem::FemMesh> mesh;
+    fem::MeshBodyReport report;
   };
   std::vector<Body> bodies;
   std::string error; // non-empty = the meshing failed, and why
   double seconds = 0.0;
+  // What it was made from: the document's version and the study's mesh
+  // settings as text. Either moving makes it stale; a load does neither.
+  uint64_t docVersion = 0;
+  std::string settingsKey;
+  // Unique per mesh made in the session: the renderer's key.
+  uint64_t epoch = 0;
 };
 
 } // namespace ui

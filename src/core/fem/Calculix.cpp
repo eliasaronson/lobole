@@ -2157,6 +2157,8 @@ struct Increment {
   std::vector<glm::dvec3> partnerRf;
   std::vector<std::vector<double>> stats;
   std::vector<double> maxPressure;
+  // ...and every slave face's pressure, by its code (element * 10 + face).
+  std::vector<std::pair<long, double>> facePressure;
   // A plastic run's: each tet's stress and equivalent plastic strain at its
   // four Gauss points, in its own corner order (IntegrationPointFields).
   std::vector<std::array<Stress, 4>> ipStress;
@@ -2279,9 +2281,11 @@ struct PathWatch {
       }
     } else if (b.kind == "contact") {
       for (const auto& [code, v] : b.rows)
-        if (const auto it = pairOf.find(code); it != pairOf.end())
+        if (const auto it = pairOf.find(code); it != pairOf.end()) {
           inc.maxPressure[it->second] =
               std::max(inc.maxPressure[it->second], v.x);
+          inc.facePressure.push_back({code, v.x});
+        }
     }
   }
   void TakePending() {
@@ -2805,6 +2809,10 @@ bool NonlinearOnCalculix(
         applied[n] += at.factor * p[n];
     }
   }
+  result.appliedN = refTotal;
+  for (size_t n = 0; n < nNodes; ++n)
+    result.appliedN += applied[n];
+  result.hasApplied = true;
   glm::dvec3 balance = refTotal;
   double scale = glm::length(refTotal);
   double carried = 0.0;
@@ -2882,6 +2890,22 @@ bool NonlinearOnCalculix(
                 "leaves a part free to slide along it and turn on it. Give "
                 "the contact friction, or the part another support. Nothing "
                 "was stored");
+  // The contact pressure at each node: the largest of the slave faces it
+  // touches (ccx prints it per face), zero elsewhere.
+  if (!jb.contacts.empty() && !at.facePressure.empty()) {
+    const std::vector<std::pair<int, int>> faces = FacetFaces(mesh, 0);
+    std::map<long, int> triOf;
+    for (const StudyJobBody::ContactPair& c : jb.contacts)
+      for (int t : c.slaveTris)
+        if (t >= 0 && t < static_cast<int>(faces.size()))
+          triOf[faces[t].first * 10L + faces[t].second] = t;
+    result.contactPressure.assign(nNodes, 0.0);
+    for (const auto& [code, pressure] : at.facePressure)
+      if (const auto it = triOf.find(code); it != triOf.end())
+        for (int n : mesh.boundary[it->second].nodes)
+          result.contactPressure[n] =
+              std::max(result.contactPressure[n], pressure);
+  }
   if (contactsOut) {
     contactsOut->clear();
     for (size_t k = 0; k < jb.contacts.size(); ++k) {

@@ -697,7 +697,13 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     Hold(ctx, 0.5);
     ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
-    ctx->ItemClick("//###ToolWindow/**/###field_von_mises");
+    ctx->ItemClick("//###ToolWindow/**/###result_field");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ctx->ItemClick((std::string("//") +
+                    ctx->UiContext->OpenPopupStack.back().Window->Name +
+                    "/**/###field_von_mises")
+                       .c_str());
     ctx->Yield(2);
     Hold(ctx, 0.5);
     // The deflection, magnified until it shows: 0.3 mm on a 200 mm beam is
@@ -706,7 +712,13 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     Hold(ctx, 0.5);
     OrbitFor(ctx, 30.0, 2.0);
-    ctx->ItemClick("//###ToolWindow/**/###field_displacement");
+    ctx->ItemClick("//###ToolWindow/**/###result_field");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ctx->ItemClick((std::string("//") +
+                    ctx->UiContext->OpenPopupStack.back().Window->Name +
+                    "/**/###field_displacement")
+                       .c_str());
     ctx->Yield(2);
     Hold(ctx, 0.5);
     OrbitFor(ctx, -30.0, 2.0);
