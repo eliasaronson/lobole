@@ -1960,6 +1960,23 @@ TEST_CASE("a block on the ground lifts off under a moment only past its "
     REQUIRE(r.results.reactions.size() == 1);
     CHECK(r.results.reactions[0].type == fem::LoadType::Contact);
     CHECK(r.results.reactions[0].contactAreaMm2 == c.closedMm2);
+    // The pressure as a field (docs/simulation/README.md#results-display):
+    // one value a node, its largest the pair's peak, on the floor's face
+    // only, and what was applied beside what the floor carries.
+    {
+      const std::vector<double>& cp = r.results.contactPressure;
+      REQUIRE(cp.size() == r.mesh.nodes.size());
+      double top = 0.0, off = 0.0;
+      for (size_t n = 0; n < cp.size(); ++n) {
+        top = std::max(top, cp[n]);
+        if (r.mesh.nodes[n].z > 1e-6)
+          off = std::max(off, cp[n]);
+      }
+      CHECK_THAT(top, Catch::Matchers::WithinRel(c.maxPressureMPa, 1e-9));
+      CHECK(off == 0.0);
+      REQUIRE(r.results.hasApplied);
+      CHECK_THAT(r.results.appliedN.z, Catch::Matchers::WithinRel(-P, 1e-6));
+    }
     if (e <= b / 6.0) {
       CHECK_THAT(c.closedMm2, Catch::Matchers::WithinRel(A, 1e-3));
       CHECK_THAT(c.maxPressureMPa, Catch::Matchers::WithinRel(peak, 0.03));
