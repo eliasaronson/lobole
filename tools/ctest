@@ -58,7 +58,7 @@ dir="$(cd "$dir" && pwd)"
 selected() {
   local q=""
   for a in ${rest[@]+"${rest[@]}"}; do q+=" $(printf '%q' "$a")"; done
-  if [ -n "${IN_NIX_SHELL:-}" ] || ! command -v nix-instantiate >/dev/null; then
+  if ! command -v nix-instantiate >/dev/null; then
     (cd "$dir" && eval "ctest -N --show-only=json-v1$q")
   else
     "$root/tools/nix-run" "cd $(printf '%q' "$dir") && ctest -N --show-only=json-v1$q"
@@ -79,7 +79,7 @@ build_lock_shared "$dir" 9
 # A binary behind its source would test the code it was linked from, not this
 # tree's (tools/stale-binaries.sh). Asked under the lock, so a build that is
 # running finishes first.
-if [ -n "${IN_NIX_SHELL:-}" ] || ! command -v nix-instantiate >/dev/null; then
+if ! command -v nix-instantiate >/dev/null; then
   behind="$("$root/tools/stale-binaries.sh" "$dir")" || true
 else
   behind="$("$root/tools/nix-run" "$(printf '%q %q' "$root/tools/stale-binaries.sh" "$dir")")" || true
@@ -139,10 +139,12 @@ if git -C "$root" rev-parse --git-dir >/dev/null 2>&1 &&
   tree0="$(git -C "$root" rev-parse 'HEAD^{tree}')"
 fi
 # The fd is closed for the run: a process a test leaves behind must not keep
-# holding the lock. This shell holds it until ctest returns. Inside shell.nix
-# already, or on a machine without nix (CI), ctest is the one on PATH.
+# holding the lock. This shell holds it until ctest returns. On a machine
+# without nix (CI), ctest is the one on PATH. IN_NIX_SHELL is not trusted: an
+# agent's session sits in a nix-shell that is not shell.nix's (no ccx), and
+# every CalculiX test skipped there without a word.
 status=0
-if [ -n "${IN_NIX_SHELL:-}" ] || ! command -v nix-instantiate >/dev/null; then
+if ! command -v nix-instantiate >/dev/null; then
   (cd "$dir" && eval "ctest$quoted") 9>&- 7>&- || status=$?
 else
   "$root/tools/nix-run" "cd $(printf '%q' "$dir") && ctest$quoted" 9>&- 7>&- || status=$?
