@@ -78,7 +78,7 @@
           "type": "roller",
           "face": {
             "feature_id": 2,
-            "element": "2/g2"
+            "element": "2/cap0"
           },
           "magnitude": 0.0
         },
@@ -87,7 +87,7 @@
           "type": "held",
           "face": {
             "feature_id": 2,
-            "element": "2/g3"
+            "element": "2/cap1"
           },
           "magnitude": 0.0,
           "hold": [

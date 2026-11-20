@@ -72,10 +72,10 @@ double FactorOfSafety(const fem::FemResults& r, double bodyYield) {
 bool SettlesStress(fem::AnalysisType t) {
   return t == fem::AnalysisType::Static || t == fem::AnalysisType::Buckling;
 }
-// A roller's, held or cylindrical support's own keys (docs/simulation/
-// README.md#rollers-held-directions-and-cylindrical-supports): `hold`, the
-// list of directions held (a held support's x, y, z; a cylindrical one's
-// radial, tangential, axial), a held support's `dx_mm`, `dy_mm`, `dz_mm`
+// A roller's, held or cylindrical support's own keys
+// (docs/simulation/README.md#rollers-held-directions-and-cylindrical-supports):
+// `hold`, the list of directions held (a held support's x, y, z; a cylindrical
+// one's radial, tangential, axial), a held support's `dx_mm`, `dy_mm`, `dz_mm`
 // (each an expression too) and its `frame` (a Frame or datum, by id or
 // name). Every key is refused on a type that does not take it.
 void ReadFrameSupportParams(const RpcParams& p, fem::Load& l,
@@ -111,7 +111,6 @@ void ReadFrameSupportParams(const RpcParams& p, fem::Load& l,
         std::string("a ") + type + " support names the directions it holds: " +
         "`hold`, any of " + (held ? "x, y, z" : "radial, tangential, axial"));
   }
-  // rpc-params: dx_mm, dx_mm_expr, dy_mm, dy_mm_expr, dz_mm, dz_mm_expr
   for (int k = 0; k < 3; ++k) {
     const std::string key = std::string("d") + fem::kHeldAxisNames[k] + "_mm";
     if (!p.contains(key) && !p.contains(key + "_expr"))
@@ -982,8 +981,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "study_results reports each contact's closed and open area, its "
      "pressure and its force (docs/simulation/README.md#contact). Three "
      "supports hold some directions and leave the rest free, both ways and "
-     "with no contact iteration (docs/simulation/README.md"
-     "#rollers-held-directions-and-cylindrical-supports): a `roller` holds "
+     "with no contact iteration (see docs/simulation/README.md, its section "
+     "on rollers, held directions and cylindrical supports): a `roller` holds "
      "its face's normal -- on a flat face a symmetry plane (an inclined one "
      "as well as an axis-aligned one), on a curved face a frictionless seat; "
      "`held` holds `hold`, any of [\"x\", \"y\", \"z\"] of the world or of "
@@ -2665,6 +2664,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             std::string("a ") + fem::LoadTypeToString(l.type) +
             " support is a part study's; an assembly study holds its part "
             "with a fixed face or a rigid neighbour's contact");
+      // rpc-params: dx_mm, dx_mm_expr, dy_mm, dy_mm_expr, dz_mm, dz_mm_expr
       ReadFrameSupportParams(p, l, *doc);
     } else {
       for (const char* key : {"hold", "dx_mm", "dy_mm", "dz_mm", "dx_mm_expr",

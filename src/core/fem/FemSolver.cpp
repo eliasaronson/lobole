@@ -620,8 +620,9 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   if (iterative && options.makeExternal && anyFrame) {
     // The GPU's SpMV applies each element matrix relative to its first
     // node's translation, which holds only when every node is in x, y, z.
-    declined = "a pin, roller, held or cylindrical support holds nodes in "
-               "frames of their own, which the GPU solve does not take";
+    declined = "a pin support (or a roller, held or cylindrical one) holds "
+               "nodes in frames of their own, which the GPU solve does not "
+               "take";
   } else if (iterative && options.makeExternal) {
     external = options.makeExternal(&declined);
     if (external &&

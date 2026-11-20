@@ -1090,7 +1090,8 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   if (expect.contains("study_supports")) {
     REQUIRE_FALSE(doc.GetStudies().empty());
     std::vector<const fem::Load*> supports;
-    for (const fem::Load& l : doc.GetStudies().front().loads)
+    const fem::Study& first = doc.GetStudies().front();
+    for (const fem::Load& l : first.loads)
       if (fem::IsFrameSupport(l.type))
         supports.push_back(&l);
     const auto& want = expect.at("study_supports");
