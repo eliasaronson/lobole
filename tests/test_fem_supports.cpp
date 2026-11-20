@@ -20,6 +20,7 @@
 #include "core/Measure.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/fem/FemCheck.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
@@ -454,6 +455,33 @@ TEST_CASE("roller, held and cylindrical supports refuse what they cannot "
                         Force(doc, x1, 10.0, glm::dvec3(1, 0, 0))}),
                ContainsSubstring("free to"));
   }
+}
+
+// check_study names them the way a run refuses them, each with its fix.
+TEST_CASE("check_study finds a held support that holds nothing and a "
+          "cylindrical support off a cylinder",
+          "[fem][supports][check]") {
+  Document doc;
+  AddBox(doc, 40.0, 10.0, 10.0);
+  fem::Study& s = doc.AddStudy("Checked");
+  s.loads.push_back(Support(doc, fem::LoadType::Fixed, FlatAt(doc, 0, 0.0)));
+  s.loads.push_back(Held(doc, FlatAt(doc, 0, 40.0), {false, false, false}));
+  fem::Load c = Support(doc, fem::LoadType::Cylindrical, FlatAt(doc, 1, 0.0));
+  c.hold = {true, false, false};
+  s.loads.push_back(c);
+  const auto problems = fem::CheckStudy(doc, s);
+  bool nothing = false, offCylinder = false;
+  for (const fem::StudyProblem& p : problems) {
+    INFO(p.code << ": " << p.message);
+    if (p.loadId == s.loads[1].id && p.code == "setup")
+      nothing = p.message.find("holds no direction") != std::string::npos &&
+                p.fixMethod == "remove_load";
+    if (p.loadId == c.id && p.code == "load_geometry")
+      offCylinder =
+          p.message.find("goes on a cylindrical face") != std::string::npos;
+  }
+  CHECK(nothing);
+  CHECK(offCylinder);
 }
 
 // Held in a datum's frame: a Frame turned about z holds its own x, and the

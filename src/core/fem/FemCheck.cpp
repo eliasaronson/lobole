@@ -69,6 +69,25 @@ std::vector<StudyProblem> CheckStudy(const Document& doc, const Study& original,
     p.fixParams = {{"id", sid}};
     p.fixNote = "the message names the setting to change";
   }
+  // A roller, held or cylindrical support that cannot mean what it says
+  // (docs/simulation/README.md
+  // #rollers-held-directions-and-cylindrical-supports).
+  for (const Load& l : study.loads) {
+    if (!IsFrameSupport(l.type))
+      continue;
+    Study one = study;
+    one.loads = {l};
+    if (const std::string why = FrameSupportRefusal(one); !why.empty()) {
+      StudyProblem& p = add("setup", why);
+      p.loadId = l.id;
+      p.hasFace = true;
+      p.face = l.face;
+      p.fixMethod = "remove_load";
+      p.fixParams = {{"study", sid}, {"id", l.id}};
+      p.fixNote = "then add_load it again with what the message says it "
+                  "takes";
+    }
+  }
 
   if (study.loads.empty()) {
     StudyProblem& p = add("no_loads", "the study has no loads or supports");

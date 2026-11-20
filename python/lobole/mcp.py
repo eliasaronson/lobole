@@ -2124,14 +2124,20 @@ _reference("add_load", "Add a boundary condition to a study. type is 'fixed' "
           "(zero displacement), 'pin' (a rigid pin in a CYLINDRICAL face -- a "
           "bore or a shaft -- holding it only where the part presses on it, "
           "free to turn unless fix_rotation: true; a static part study's), "
+          "'roller' (zero motion along the face's normal: a symmetry plane "
+          "or a frictionless seat), 'held' (hold: any of x, y, z of the "
+          "world or of a datum frame, each at zero or at dx_mm/dy_mm/dz_mm), "
+          "'cylindrical' (hold: any of radial, tangential, axial about a "
+          "cylindrical face's axis), "
           "'force' (a total vector in N over the face), 'pressure' (MPa "
           "along the inward normal), 'torque' (torque_nmm) or 'remote' "
           "(force_n at point_mm); help('add_load') has them all. face is "
           "{feature_id, element}. magnitude is N/MPa (number or expression); "
           "direction is [x,y,z] for a force. region? puts it on PART of its "
           "face: {normal, from_mm, to_mm} (a band) or {center_mm, radius_mm}. "
-          "Returns {id} of the new load. Every loaded body needs a support "
-          "(fixed or pin); a part free to turn on one pin is refused.")
+          "Returns {id} of the new load. Every loaded body needs a support; "
+          "supports that leave a part free to move are refused, naming the "
+          "motion.")
 
 
 _reference("remove_load", "Remove a load (by id) from a study.")
