@@ -12,10 +12,15 @@
 // showing.
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 class Document;
 class CommandStack;
+
+namespace heavy {
+struct Request;
+}
 
 namespace ui {
 
@@ -58,5 +63,16 @@ bool SettleFeatureBuilds(AppState& state, double seconds);
 // One line for a status bar or a tooltip: "Building 'Delete face' (3 s, 40%)",
 // or empty when the active part builds nothing.
 std::string FeatureBuildStatus(AppState& state);
+
+// A heavy direct edit an RPC asked for, built off the frame on a copy of the
+// part BEFORE anything is committed (remote RefuseFailingDirectEdit,
+// docs/scripting/rpc.md#a-refused-call-changes-nothing): the job files its
+// result in the heavy store, where the call's second dispatch finds it and
+// either refuses with the edit's own error or commits the edit, its build
+// already paid for. `owner` is the RPC connection the job dies with. Returns
+// the job's id.
+uint64_t StartTrialBuild(AppState& state,
+                         std::shared_ptr<heavy::Request> request,
+                         uint64_t owner);
 
 } // namespace ui

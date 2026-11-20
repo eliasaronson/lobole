@@ -2250,7 +2250,7 @@
   "golden/v137-text": {
    "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
    "edge:2/*;U*": "edge.chamfer*156 edge.fillet*156",
-   "face:2/cap0@g1": "-face.delete !face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.move -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
+   "face:2/cap0@g1": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.move -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:2/cap0@g5.0.1": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:2/cap0@g5.1.1": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:2/cap0@g5.2.1": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",

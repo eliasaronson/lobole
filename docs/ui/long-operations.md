@@ -114,7 +114,7 @@ row here, a row with no outcome, or a test named below that does not exist.
 | `interference` | not cancellable (one boolean): the waiting call answers | `contact_smoke.py::cancel_interference` |
 | `insertion` | nothing: the waiting `check_insertion` is refused | `insertion_smoke.py::cancel_insertion` |
 | `assembly_sequence` | nothing: the waiting `check_assembly_sequence` is refused | `assembly_sequence_smoke.py::cancel_assembly_sequence` |
-| `feature` | an edit's build: the edit, rolled back with no undo step; an existing feature's: the feature, marked not built (cancelled), until it is asked for ([heavy features](#heavy-features)) | `direct/cancelling_a_heavy_delete_undoes_it`, `direct/cancelling_a_rebuild_leaves_it_not_built`, `heavy_feature_smoke.py::main`, `A build stops on its cancel and keeps nothing` |
+| `feature` | an edit's build: the edit, rolled back with no undo step; an RPC's trial of a direct edit: the call, refused, the document as it was; an existing feature's: the feature, marked not built (cancelled), until it is asked for ([heavy features](#heavy-features)) | `direct/cancelling_a_heavy_delete_undoes_it`, `direct/cancelling_a_rebuild_leaves_it_not_built`, `heavy_feature_smoke.py::main`, `A build stops on its cancel and keeps nothing` |
 
 ## Cancel, quit and close
 
@@ -555,9 +555,16 @@ order is the order of edits, whatever is building.
 (`BuildWait`, `RemoteUiActions.cpp`) and answers when the build lands, its
 `regen` and `digest` recomputed against the part as built: the regen-honesty
 rule, off the frame, as `import_step` waits on its job. A heavy direct edit
-is not tried on a copy first (the trial would be the build, on the frame);
-an `add_feature` or `modify_feature` whose own build fails is refused then,
-the call rolled back. While the active part builds, every request that
+is tried on a copy before it is committed, as a light one is, but off the
+frame: `add_feature` or `modify_feature` of one whose build no store holds
+parks on a `feature` job ("Trying ...", `ui::StartTrialBuild`, owned by the
+caller's connection) that builds it on the copy and files the result in the
+store, and the call is dispatched again when it lands. Its own error then
+refuses it with nothing moved, the revision included; otherwise it commits
+and the commit's regeneration takes the build from the store. Until then
+the part does not have it. A batch commits and builds it as any heavy
+feature, and a call whose own build fails is refused then, the batch
+rolled back. While the active part builds, every request that
 reads its geometry -- a `NeedsPart` method that is not `Deferrable` --
 waits (`BuildGate`), so no answer describes the bodies before the feature;
 `get_state` answers at once, with each feature's `build` (`building`,

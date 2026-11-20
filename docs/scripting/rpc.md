@@ -381,7 +381,9 @@ its G-code and then answered "unknown parameter '_timeout'". So:
   and `modify_feature` of a direct edit regenerate a copy of the part
   (`RefuseFailingDirectEdit`, `Document::CopyWithGeometry`) and refuse with
   the edit's own error: nothing has moved, the revision included
-  ([modeling](../modeling/README.md#direct-edit)).
+  ([modeling](../modeling/README.md#direct-edit)). A heavy one is tried
+  off the frame, the call parked on the trial's job
+  ([heavy features](../ui/long-operations.md#heavy-features)).
 - **`NotInBatch` methods are not rolled back** — they reach outside the
   document (a file, a tab, the settings, the machine store, the print
   profile store, git), which no undo stack holds. They are the ones that must

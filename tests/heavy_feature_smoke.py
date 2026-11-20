@@ -8,11 +8,14 @@ docs/ui/long-operations.md#heavy-features. A Delete Face of many faces (the
 fan grill's 916: 14 s of Defeaturing) held the main thread for all of it,
 twice for an add_feature. Now, over the RPC:
 
-- add_feature of one answers when its `feature` job lands, with the regen
-  and digest of the part as built, while the instance answers other calls
-  and get_state says it is `building`;
-- cancelled from another connection, the call is refused and rolled back:
-  the features and the saved bytes are as before, no undo step;
+- add_feature of one is tried off the frame on a copy before it is
+  committed (a `feature` job, "Trying ..."), and answers when that lands,
+  with the regen and digest of the part as built, while the instance
+  answers other calls and the part does not have it yet;
+- one whose build fails is refused with nothing moved, the revision
+  included (docs/scripting/rpc.md#a-refused-call-changes-nothing);
+- its trial cancelled from another connection, the call is refused and the
+  document is as before: the features, the revision, no undo step;
 - a reopen in the same session reuses the build (no job);
 - an open that rebuilds it, cancelled, answers with the feature not built
   (`regen.unbuilt`, state `cancelled`), and build_feature builds it.
@@ -122,13 +125,13 @@ def main():
             seen = wait_for(lambda: feature_jobs(other), "the feature job")
             expect(seen[0]["cancellable"], f"not cancellable: {seen[0]}")
             expect("Fill" in seen[0]["label"], f"label: {seen[0]}")
+            expect("Trying" in seen[0]["label"], f"label: {seen[0]}")
+            # Tried on a copy: the part does not have it until it builds.
             st = other.call("get_state")
-            fill = [f for f in st["features"] if f.get("name") == "Fill"]
-            expect(fill and fill[0].get("build") == "building",
-                   f"get_state while it builds: {fill}")
-            expect(any(u["state"] == "building"
-                       for u in st["regen"].get("unbuilt", [])),
-                   f"regen while it builds: {st['regen']}")
+            expect(not [f for f in st["features"] if f.get("name") == "Fill"],
+                   f"committed while it is tried: {st['features']}")
+            expect("unbuilt" not in st["regen"],
+                   f"regen while it is tried: {st['regen']}")
             other.call("ping")
             call.join()
             expect(call.error is None, f"add_feature failed: {call.error}")
@@ -153,7 +156,39 @@ def main():
             expect(st["regen"]["ok"], f"reopened: {st['regen']} {o}")
             other.close()
 
-        # A cancel of the edit's build: refused, rolled back, no undo step.
+        # A heavy edit whose own build fails: refused, and nothing moved --
+        # the features, the revision, the undo stack, the dirty flag. It was
+        # committed, built and rolled back, which moved the revision and
+        # left the part unsaved (golden v137-text in the action matrix).
+        with launch(binary, env=env(0)) as app:
+            d = app.client
+            blk, _ = drilled(d)
+            top = d.call("query_geometry", element_type="face",
+                         on_point=[5, 5, 20], max_distance=0.05,
+                         max_results=5)["matches"]
+            expect(top, "no top face found")
+            before = d.call("get_state")
+            dirty = d.call("ping")["dirty"]
+            try:
+                d.call("add_feature", feature=delete_face(
+                    blk, {"feature_id": blk, "element": top[0]["element"]}))
+                raise AssertionError("deleting the top face built")
+            except AssertionError:
+                raise
+            except Exception as e:  # noqa: BLE001 -- the message is the point
+                expect("DeleteFace refused" in str(e) and
+                       "unchanged" in str(e), f"refusal: {e}")
+            after = d.call("get_state")
+            expect(after["revision"] == before["revision"],
+                   f"the revision moved: {before['revision']} -> "
+                   f"{after['revision']}")
+            expect(after["features"] == before["features"],
+                   "the features are not as before the edit")
+            expect(after["can_undo"] == before["can_undo"] and
+                   not after["can_redo"], "an undo or redo step was left")
+            expect(d.call("ping")["dirty"] == dirty, "the dirty flag moved")
+
+        # A cancel of the edit's trial: refused, the document as it was.
         with launch(binary, env=env(60000)) as app:
             d = app.client
             other = Client.wait_for(app.port)
@@ -164,9 +199,11 @@ def main():
             other.call("cancel_background_job", kind="feature")
             call.join()
             expect(call.error is not None and "cancelled" in call.error and
-                   "rolled back" in call.error,
+                   "unchanged" in call.error,
                    f"the cancelled edit answered {call.result} {call.error}")
             after = d.call("get_state")
+            expect(after["revision"] == before["revision"],
+                   "the revision moved")
             expect(after["features"] == before["features"],
                    "the features are not as before the edit")
             expect(after["can_undo"] == before["can_undo"] and

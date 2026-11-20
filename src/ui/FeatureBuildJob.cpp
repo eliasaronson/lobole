@@ -202,6 +202,50 @@ void Start(AppState& state, const Part& part) {
 
 } // namespace
 
+uint64_t StartTrialBuild(AppState& state,
+                         std::shared_ptr<heavy::Request> request,
+                         uint64_t owner) {
+  heavy::Detach(*request);
+  struct Trial {
+    std::shared_ptr<heavy::Request> request;
+    std::optional<heavy::Result> result;
+    std::string error;
+  };
+  auto trial = std::make_shared<Trial>();
+  trial->request = std::move(request);
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = kFeatureBuildKind;
+  bg->label = "Trying '" + trial->request->featureName + "'";
+  bg->cancellable = true;
+  bg->owner = owner;
+  BackgroundJob* raw = bg.get();
+  bg->thread = std::thread([trial, raw] {
+    ArmOccSignalHandlers();
+    try {
+      trial->result = heavy::Run(*trial->request, &raw->cancel, &raw->fraction);
+    } catch (const std::exception& e) {
+      trial->error = e.what();
+    } catch (...) {
+      trial->error = "the build threw";
+    }
+    raw->done.store(true);
+  });
+  bg->finish = [trial](AppState&) {
+    // A cancelled trial leaves nothing (Run answered nullopt); a failed
+    // build is a result whose feature carries the error, and is stored too.
+    if (trial->result)
+      heavy::Put(*trial->result);
+    if (!trial->error.empty())
+      LOG_ERROR("Trial build of '{}' failed off the frame: {}",
+                trial->request->featureName, trial->error);
+    return true;
+  };
+  LOG_INFO("Trying '{}' off the frame before committing it (estimated "
+           "{:.1f} s)",
+           trial->request->featureName, trial->request->estimateS);
+  return StartBackgroundJob(state, std::move(bg)).id;
+}
+
 void OptPartsIntoOffFrameBuilds(AppState& state) {
   for (const Part& p : PartsOf(state))
     p.doc->SetBuildsOffFrame(true);

@@ -852,6 +852,42 @@ private:
   std::string m_building;
 };
 
+// A heavy direct edit tried off the frame before the call commits it
+// (remote::HeavyTrialNeeded): the call waits for the trial's job, then is
+// dispatched again, and the trial answers from the heavy store. A trial
+// cancelled from the GUI refuses the call, which has changed nothing.
+class TrialWait : public remote::Parking {
+public:
+  TrialWait(std::string method, uint64_t jobId, std::string feature)
+      : m_method(std::move(method)), m_job(jobId),
+        m_feature(std::move(feature)) {}
+
+  Next Poll(ui::AppState& state, const remote::RpcParams&, json&) override {
+    if (ui::BackgroundJob* bg = ui::FindBackgroundJobById(state, m_job);
+        bg != nullptr) {
+      if (bg->cancel.load())
+        m_cancelled = true;
+      if (!bg->reaped)
+        return Next::Wait;
+    }
+    // Reaped between two polls: its record says how it ended.
+    if (const ui::FinishedJob* done = ui::FinishedJobById(state, m_job);
+        done != nullptr && done->outcome == "cancelled")
+      m_cancelled = true;
+    if (m_cancelled)
+      throw std::runtime_error(m_method + ": the trial build of '" + m_feature +
+                               "' was cancelled before it was committed; the "
+                               "document is unchanged");
+    return Next::Dispatch;
+  }
+
+private:
+  std::string m_method;
+  uint64_t m_job = 0;
+  std::string m_feature;
+  bool m_cancelled = false;
+};
+
 // Whether a call on this part may leave a heavy feature building, so its
 // `digest` must be recomputed against the bodies from before it.
 bool MayBuildHeavy(const Document* doc, const std::string& method) {
@@ -1313,7 +1349,29 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       const json preDigestHeavy = MayBuildHeavy(docBefore, request.method)
                                       ? remote::BodyDigestJson(*docBefore)
                                       : json();
-      json result = HandleSemantic(request, state, handled, params);
+      json result;
+      try {
+        const remote::HeavyTrialScope trial(
+            !request.resumed && (request.method == "add_feature" ||
+                                 request.method == "modify_feature"));
+        result = HandleSemantic(request, state, handled, params);
+      } catch (const remote::HeavyTrialNeeded& need) {
+        // Thrown before the handler's first edit; nothing to take back, but
+        // the marks are dropped the way a refusal drops them.
+        (void)rolledBack();
+        const std::string name = need.request->featureName;
+        const uint64_t job =
+            ui::StartTrialBuild(state, need.request, request.connection);
+        auto parked = std::make_shared<Parked>();
+        parked->request = std::move(request);
+        parked->params =
+            std::make_unique<remote::RpcParams>(parked->request.params);
+        (void)parked->params->raw(); // read again when it is dispatched
+        parked->wait =
+            std::make_unique<TrialWait>(parked->request.method, job, name);
+        m_parked.push_back(std::move(parked));
+        continue;
+      }
       ui::OptPartsIntoOffFrameBuilds(state);
       if (!handled)
         marks.reset(); // nothing ran: what follows is a capture or the GUI

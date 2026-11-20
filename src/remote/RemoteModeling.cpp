@@ -70,6 +70,16 @@ using nlohmann::json;
 namespace remote {
 
 namespace {
+thread_local bool t_heavyTrialAllowed = false;
+} // namespace
+
+HeavyTrialScope::HeavyTrialScope(bool allowed) : m_was(t_heavyTrialAllowed) {
+  t_heavyTrialAllowed = allowed;
+}
+HeavyTrialScope::~HeavyTrialScope() { t_heavyTrialAllowed = m_was; }
+bool HeavyTrialScope::Allowed() { return t_heavyTrialAllowed; }
+
+namespace {
 
 // Radians from whichever spelling the caller used, refusing both at once.
 //
@@ -211,23 +221,19 @@ void RefuseFailingDirectEdit(Document& doc, const Feature& f,
                              std::optional<size_t> at) {
   if (!IsDirectEdit(f))
     return;
-  // A heavy edit is not tried here: the trial would be the build itself, on
-  // the frame. It builds off the frame once committed, and the call, which
-  // waits for it, is refused and rolled back then if its own build fails
-  // (BuildWait, RemoteUiActions.cpp;
-  // docs/ui/long-operations.md#heavy-features). Nor is anything tried while the
-  // part is building: the copy would rebuild the whole list inline.
-  if (doc.BuildsOffFrame()) {
-    if (doc.HasUnbuilt())
-      return;
-    const std::vector<Body>* input = &doc.GetBodies();
-    if (at)
-      input = *at == 0 ? nullptr : doc.CachedBodiesAfter(*at - 1);
-    static const std::vector<Body> kNone;
-    if (heavy::BuildsOffFrame(f, input != nullptr ? *input : kNone))
-      return;
-  }
+  // Nothing is tried while the part is building: the copy would rebuild the
+  // whole list inline.
+  if (doc.BuildsOffFrame() && doc.HasUnbuilt())
+    return;
   const auto copy = Document::CopyWithGeometry(doc);
+  // A heavy edit is not built here, on the frame: the copy stops at it, as
+  // the part would, unless the heavy store already holds its build. With
+  // none, a call that can park asks for the trial off the frame
+  // (HeavyTrialNeeded) and comes back when it is stored; one that cannot
+  // commits the edit, which builds off the frame and is refused and rolled
+  // back then if its own build fails (BuildWait, RemoteUiActions.cpp;
+  // docs/ui/long-operations.md#heavy-features).
+  copy->SetBuildsOffFrame(doc.BuildsOffFrame());
   std::unique_ptr<Feature> probe = f.Clone();
   size_t index = 0;
   if (at) {
@@ -241,6 +247,14 @@ void RefuseFailingDirectEdit(Document& doc, const Feature& f,
   // Adding or replacing it regenerated the copy; regenerating again ran a
   // failed edit -- which no cache holds -- a second time.
   const Feature* built = copy->GetFeatures()[index].get();
+  // A later heavy feature the copy stopped at is the commit's to build; the
+  // edit itself has been tried.
+  if (const heavy::Request* pending = copy->PendingBuild();
+      pending != nullptr && pending->featureId == built->GetId()) {
+    if (HeavyTrialScope::Allowed())
+      throw HeavyTrialNeeded{copy->PendingBuildShared()};
+    return;
+  }
   if (!built->GetError().empty() && !built->ErrorAfterEarlierFailure())
     throw std::runtime_error(f.TypeName() + " refused: " + built->GetError() +
                              ". The document is unchanged");

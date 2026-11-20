@@ -592,8 +592,11 @@ the deadline now refuses it at 30.
 quarter of a second (15 ms a face deleted, 17 faces) it builds as a
 `feature` job while the frame keeps drawing, its RPC answering when it
 lands, and a cancel rolls the edit back or leaves the feature not built
-([heavy features](../ui/long-operations.md#heavy-features)). Such an edit is
-not tried on a copy first; one whose build fails is refused when it lands.
+([heavy features](../ui/long-operations.md#heavy-features)). Over the RPC
+such an edit is tried on a copy as a light one is, but in that job, before
+anything is committed, so its refusal moves nothing either; inside a
+`batch` it is committed and built, and one whose build fails is refused
+when it lands, the batch rolled back.
 
 The bbox may grow by no more than the deleted faces' own extent. Defeaturing
 trims the host face's own surface, so a pocket in an imported face whose

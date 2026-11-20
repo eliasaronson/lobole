@@ -7,6 +7,7 @@
 #include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -14,6 +15,9 @@
 class Document;
 namespace ui {
 struct AppState;
+}
+namespace heavy {
+struct Request;
 }
 
 // Modeling / feature-tree RPC handlers (select_feature..list_variables) carved
@@ -39,5 +43,30 @@ std::vector<std::string> ConstraintKindNames();
 // radians through add_feature. Kinds that take no value are omitted, so the
 // map doubles as "which kinds are dimensions".
 std::vector<std::pair<std::string, std::string>> ConstraintValueUnits();
+
+// A heavy direct edit is tried off the frame before it is committed, so a
+// refusal changes nothing, not even the revision
+// (docs/scripting/rpc.md#a-refused-call-changes-nothing). When a top-level
+// add_feature or modify_feature reaches one whose build no store holds, the
+// handler throws this with the build to run, before any edit; the server
+// parks the call on that build (ui::StartTrialBuild) and dispatches it
+// again once it is done, when the trial answers from the store. Only while
+// a HeavyTrialScope says the caller can park: inside a batch, or on the
+// second dispatch, the edit is committed and built as before.
+struct HeavyTrialNeeded {
+  std::shared_ptr<heavy::Request> request;
+};
+
+class HeavyTrialScope {
+public:
+  explicit HeavyTrialScope(bool allowed);
+  ~HeavyTrialScope();
+  HeavyTrialScope(const HeavyTrialScope&) = delete;
+  HeavyTrialScope& operator=(const HeavyTrialScope&) = delete;
+  static bool Allowed();
+
+private:
+  bool m_was;
+};
 
 } // namespace remote
