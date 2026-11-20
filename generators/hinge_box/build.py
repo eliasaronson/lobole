@@ -365,10 +365,13 @@ def build_assembly(d):
     d.call("add_assembly", name="hinge box")
     box = d.call("add_occurrence", part="box", name="box", fixed=True)["id"]
     lid = d.call("add_occurrence", part="lid", name="lid")["id"]
+    # The lid swings from flat on the bed, as printed (0), over onto the
+    # rim (180): its limits (docs/assemblies/README.md#mate-limits), stated
+    # so the swing study below proves the box allows exactly that.
     mate = d.call("add_mate", type="revolute", name="hinge",
                   a={"occurrence": box, "frame": "hinge"},
                   b={"occurrence": lid, "frame": "hinge"},
-                  flipped=False)["id"]
+                  flipped=False, rotation_range_deg=[0.0, 180.0])["id"]
     d.call("solve_assembly")
     return box, lid, mate
 

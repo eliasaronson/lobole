@@ -189,9 +189,9 @@ class Asm:
                        "orientation": q or [0.0, 0.0, 0.0, 1.0]})["id"]
         return self.occ[name]
 
-    def mate(self, kind, name, a, b):
+    def mate(self, kind, name, a, b, **limits):
         r = self.d.call("add_mate", type=kind, name=name, a=a, b=b,
-                        flipped=False)
+                        flipped=False, **limits)
         if r.get("errored_mates"):
             fail(f"mate {name} errored: {r}")
         self.mates[name] = r["id"]
@@ -230,9 +230,12 @@ def bottom_end(a, s, rod_part="rod"):
     their wrist pins: four slider-crank loops."""
     a.place("block", "block", fixed=True)
     a.place("crankshaft", "crankshaft")
+    # The crank turns freely, whole turns either way: stated as no limit
+    # (docs/assemblies/README.md#mate-limits).
     a.mate("revolute", "crank", {"occurrence": a.occ["block"],
                                  "frame": "crank"},
-           {"occurrence": a.occ["crankshaft"], "frame": "main"})
+           {"occurrence": a.occ["crankshaft"], "frame": "main"},
+           rotation_range_deg=None)
     L = s.L if rod_part == "rod" else s.L_long
     for k in range(4):
         c = k + 1

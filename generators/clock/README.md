@@ -154,7 +154,10 @@ A hidden "beat" revolute turns once a period. Through an `intermittent`
 relation it steps the escape wheel half a tooth a beat, inside a window that
 opens where the locking corner passes the resting tooth; through a `cam`
 whose table is `A cos(beat)` it swings the anchor, and the pendulum
-fastened to it. The step's law is a **table**
+fastened to it. The anchor's mate is limited to ±kappa, the amplitude and
+the play its arms are cut back by
+([mate limits](../../docs/assemblies/README.md#mate-limits)), so nothing
+can swing it further than its arms allow. The step's law is a **table**
 ([`motion: table`](../../docs/assemblies/relations.md#intermittent)):
 `clock_spec.window()` walks the beat in 60 samples and at each puts the
 wheel as far on as it can go without coming nearer either pallet than the

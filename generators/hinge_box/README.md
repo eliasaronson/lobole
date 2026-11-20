@@ -99,7 +99,9 @@ the cones (0.424 normal).
   receipt. On the built-in table there is no printer, and bed_fit is
   skipped, saying so.
 - **The swing**, in the assembly `hinge box`: the box fixed, the lid on a
-  revolute to the box's `hinge` frame. A motion study turns it from 0° to
+  revolute to the box's `hinge` frame, limited to 0°..180°
+  ([mate limits](../../docs/assemblies/README.md#mate-limits)): flat on
+  the bed as printed, and closed on the rim. A motion study turns it from 0° to
   180° in 5° samples with the mesh clash check at a fifth of the gap. Every
   sample before 180° must be clean; half way the lid must be over the axis
   (a lid swung the other way would pass through the bed, which no clash

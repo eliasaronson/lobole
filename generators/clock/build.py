@@ -353,6 +353,12 @@ class Asm:
             return 1.0 if r.get("clash") else 0.0
         return r.get("volume_mm3", 0.0) if r.get("clash") else 0.0
 
+    def limit(self, mate, lo_deg, hi_deg):
+        """The mate's rotation range (docs/assemblies/README.md#mate-limits):
+        past it the solve refuses, a study stops and a drag holds."""
+        self.d.call("set_mate", id=self.mates[mate],
+                    rotation_range_deg=[lo_deg, hi_deg])
+
     def set(self, mate, deg):
         self.d.call("set_mate", id=self.mates[mate], rotation_deg=deg)
         self.d.call("solve_assembly")
@@ -471,10 +477,21 @@ def build_stage1(d, s):
     a.on("escape wheel", "escape arbor (stage 1)", "escape arbor")
     a.on("escape wheel", "drum (stage 1)", "drum")
     a.turn("back plate", "anchor", "anchor", "anchor")
+    anchor_swing(a, s)
     a.on("anchor", "anchor arbor", "anchor arbor")
     rating_nut_on(a, s)
     escapement_relations(a, s)
     return a, nut_win
+
+
+def anchor_swing(a, s):
+    """The anchor -- and the pendulum fastened to it -- swings the design
+    amplitude and its play, kappa: the arms are cut back that far so no
+    tooth reaches them (clock_spec.py). Stated as the anchor's limit, so a
+    study or a sequence that would swing it further is refused or stopped
+    rather than drawn."""
+    k = s["escape"]["kappa_deg"]
+    a.limit("anchor axis", -k, k)
 
 
 def rating_nut_on(a, s):
@@ -515,6 +532,7 @@ def build_stage2(d, s, control=False):
     a.turn("back plate", "escape", "escape wheel", "escape wheel")
     a.on("escape wheel", "escape arbor", "escape arbor")
     a.turn("back plate", "anchor", "anchor", "anchor")
+    anchor_swing(a, s)
     a.on("anchor", "anchor arbor", "anchor arbor")
     rating_nut_on(a, s)
     a.turn("back plate", "third", "third wheel", "third wheel")

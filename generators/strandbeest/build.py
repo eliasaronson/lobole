@@ -1107,11 +1107,17 @@ def build_assembly(d, s, lay, throws, step_deg, name, parts, L=None,
     t0 = time.perf_counter()
     calls = []
     for kind, a, fa, b, fb, rot, what in mates:
-        calls.append({"method": "add_mate", "params": {
+        params = {
             "type": kind, "name": what, "flipped": False,
             "rotation_deg": rot,
             "a": {"occurrence": a, "frame": fa},
-            "b": {"occurrence": b, "frame": fb}}})
+            "b": {"occurrence": b, "frame": fb}}
+        if what == "crank":
+            # The crank turns freely, whole turns either way: stated, so the
+            # mechanism's one input says it has no stop
+            # (docs/assemblies/README.md#mate-limits).
+            params["rotation_range_deg"] = None
+        calls.append({"method": "add_mate", "params": params})
     r = d.request("batch", {"calls": calls}, timeout=3600)
     if r.get("failed"):
         raise SystemExit(f"strandbeest: {name}: a mate was refused: "
