@@ -152,8 +152,10 @@ missing budget, is refused, naming what is accepted.
 
 They are registered for the ctest configuration `generators` only, so a
 plain `ctest` -- the headless suite, CI, the nix sandbox -- never runs them,
-and labelled `generators` and `slow`. `tools/merge-branch.sh --full` runs
-them after the headless suite, two at a time.
+and labelled `generators` and `slow`. `tools/merge-branch.sh --release` runs
+them after the headless suite, two at a time, and `--full` does when the
+branch reaches what they cover
+([what a merge runs](../docs/ui/testing.md#what-a-merge-runs)).
 
 Not covered: the pan/tilt yoke's statics and topology (`yoke_topo`, 9
 minutes, its two projects 160 and 240 MB with every study's result saved

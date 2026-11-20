@@ -5,51 +5,87 @@
 # Land a worktree branch on main: cherry-pick, build, test, remove the worktree.
 #
 #   tools/merge-branch.sh BRANCH            # test-fast after the build
-#   tools/merge-branch.sh BRANCH --full     # the headless suite, the big
-#                                           # generators, the GUI suite and
-#                                           # the full action matrix
+#   tools/merge-branch.sh BRANCH --full     # the headless suite and the GUI
+#                                           # suite, and the heavy suites
+#                                           # whose ground the branch touches
+#   tools/merge-branch.sh BRANCH --release  # every suite, whatever changed:
+#                                           # the big generators, the full
+#                                           # action matrix, every reader-
+#                                           # fuzz case
+#   tools/merge-branch.sh BRANCH --no-skip  # the mode's every suite, not
+#                                           # narrowed by what changed
+#   tools/merge-branch.sh BRANCH --dry-run  # print the plan; change nothing
 #   tools/merge-branch.sh BRANCH --pick-only  # pick and number, then stop:
 #                                           # no build, no suite, no removal
 #
-# The cherry-pick happens under build/'s lock, held exclusively
-# (tools/build-lock.sh), so it never lands while a build of this tree is
-# compiling or a suite (tools/ctest, the GUI runner) runs from it. A conflict
-# stops here with the cherry-pick in progress, for a person to resolve; `git cherry-pick
-# --continue` and then this script again with --no-pick finishes the rest.
-# A conflict ONLY in the files made from the MethodDoc rows
-# (python/lobole/rpc.py, api/rpc-surface.json) is not one: two branches that
-# each add an RPC both regenerate them, the rows themselves merge, and the
-# files are made again from the merged rows and the pick goes on.
-# The worktree is removed only when every commit is on main and it holds
-# nothing uncommitted -- `git worktree remove` refuses trees with submodules,
-# so it is rm -rf, which is why both are checked (CLAUDE.md).
+# What runs follows from the paths the branch changes (tools/merge_plan.py,
+# docs/ui/testing.md#what-a-merge-runs), and the script prints the decision:
+# a docs-only branch runs the conventions and the format gates and builds
+# only if the binaries are behind; a branch of tests, python or tools runs
+# the tests those paths can reach; anything else runs all the mode runs.
+# The big generators (~45 min), the full action matrix (~16 min) and every
+# reader-fuzz case (a third of the old headless suite) ran on every --full
+# merge, an hour of six to twelve busy cores that slowed every other agent;
+# they now run on --full only when the branch touches what they cover, and
+# always on --release.
 #
-# A branch's format bump is written vNEXT and numbered here, after the pick
-# and under the same lock, in a commit of its own: tools/format-version.py
-# land gives it main's next number (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-branch="" full=0 pick=1 pick_only=0
+branch="" mode=fast no_skip=0 dry=0 pick=1 pick_only=0
 for a in "$@"; do
   case "$a" in
-    --full) full=1 ;;
+    --full) mode=full ;;
+    --release) mode=release ;;
+    --no-skip) no_skip=1 ;;
+    --dry-run) dry=1 ;;
     --no-pick) pick=0 ;;
     --pick-only) pick_only=1 ;;
-    -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,50p' "$0"; exit 0 ;;
+    -*) echo "merge-branch: unknown option $a" >&2; exit 2 ;;
     *) branch="$a" ;;
   esac
 done
 [ -n "$branch" ] || { echo "merge-branch: name the branch" >&2; exit 2; }
 git rev-parse --verify -q "$branch" >/dev/null || { echo "merge-branch: no branch $branch" >&2; exit 2; }
-[ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "merge-branch: not on main" >&2; exit 2; }
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+# A dry run reads the branch against main from anywhere, and changes nothing.
+[ "$dry" = 1 ] || [ "$(git rev-parse --abbrev-ref HEAD)" = main ] ||
+  { echo "merge-branch: not on main" >&2; exit 2; }
+if [ "$dry" = 0 ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "merge-branch: main has uncommitted changes; commit or set them aside first" >&2
   exit 2
 fi
 wt="$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '/^worktree /{w=$2} $0=="branch "b{print w}')"
-state="$(git rev-parse --git-dir)/merge-branch"
+# Absolute: ctest reads the test list from inside the build directory.
+state="$(git rev-parse --absolute-git-dir)/merge-branch"
 base_file="$state/$branch.base"
+
+# The paths the branch changes, for the plan: the files of the commits to be
+# picked (kept, so a --no-pick after a conflict plans the same).
+changed_file="$state/$branch.changed"
+mkdir -p "$state"
+if [ "$pick" = 1 ]; then
+  pending="$(git rev-list --reverse --cherry-pick --right-only --no-merges main..."$branch")"
+  # shellcheck disable=SC2086
+  { [ -z "$pending" ] || git show --name-only --format= $pending; } |
+    sed '/^$/d' | sort -u > "$changed_file.new"
+  mv "$changed_file.new" "$changed_file"
+elif [ ! -f "$changed_file" ]; then
+  : > "$changed_file" # nothing known: the plan runs everything
+fi
+plan_args=(--mode "$mode")
+[ "$no_skip" = 1 ] && plan_args+=(--no-skip)
+plan="$(python3 "$root/tools/merge_plan.py" classify "${plan_args[@]}" "$changed_file")"
+echo "$plan" | grep '^merge-plan:' || true
+plan_get() { echo "$plan" | sed -n "s/^$1=//p"; }
+if [ "$dry" = 1 ]; then
+  echo "merge-branch: --dry-run: $(wc -l < "$changed_file") path(s) in" \
+       "$(echo "${pending:-}" | sed '/^$/d' | wc -l) commit(s); would run:"
+  for k in build headless gui generators action_matrix reader_fuzz_all; do
+    printf '  %-16s %s\n' "$k" "$(plan_get "$k")"
+  done
+  exit 0
+fi
 
 # The files made from the MethodDoc rows. A pick that conflicts in these
 # alone has them made again from the merged rows (which conflicted nowhere)
@@ -149,15 +185,47 @@ git -C "$root" submodule status | awk '/^-/ { print $2 }' | while read -r sub; d
   echo "merge-branch: checking out the new submodule $sub"
   git -C "$root" submodule update --init -- "$sub"
 done
-"$root/tools/build.sh"
+ran=() skipped=()
+if [ "$(plan_get build)" = if-stale ] &&
+   "$root/tools/nix-run" "$(printf '%q %q' "$root/tools/stale-binaries.sh" "$root/build")" >/dev/null; then
+  skipped+=("build (docs only, and the binaries are current)")
+else
+  "$root/tools/build.sh"
+  ran+=(build)
+fi
 # The suite's whole output, a failing test's own included, is kept: the
 # summary below is all that is printed, and a failure that passes on the
 # rerun is otherwise gone (LastTest.log is the next run's).
 suite_log="$root/build/merge-branch-suite.log"
 echo "merge-branch: the suite's whole output goes to $suite_log"
-if [ "$full" = 1 ]; then
-  "$root/tools/ctest" -LE gui -j"$("$root/tools/build-jobs" 700)" --output-on-failure 2>&1 |
-    tee "$suite_log" | grep -E 'tests passed|\(Failed\)'
+: > "$suite_log"
+headless="$(plan_get headless)"
+if [ "$headless" = subset ]; then
+  names="$state/$branch.tests"
+  if "$root/tools/nix-run" "$(printf 'python3 %q select --build %q %q %q' \
+       "$root/tools/merge_plan.py" "$root/build" "$changed_file" "$names")"; then
+    "$root/tools/ctest" --tests-from-file "$names" \
+      -j"$("$root/tools/build-jobs" 700)" --output-on-failure 2>&1 |
+      tee -a "$suite_log" | grep -E 'tests passed|\(Failed\)'
+    ran+=("headless subset ($(wc -l < "$names") tests)")
+    skipped+=("the rest of the headless suite (the changed paths cannot reach it)")
+  else
+    headless=all
+  fi
+  rm -f "$names"
+fi
+if [ "$headless" = all ]; then
+  if [ "$mode" = fast ]; then
+    "$root/tools/test-fast.sh" 2>&1 | tee -a "$suite_log" |
+      grep -E 'tests passed|\(Failed\)'
+    ran+=("headless fast lane")
+  else
+    "$root/tools/ctest" -LE gui -j"$("$root/tools/build-jobs" 700)" --output-on-failure 2>&1 |
+      tee -a "$suite_log" | grep -E 'tests passed|\(Failed\)'
+    ran+=("headless suite")
+  fi
+fi
+if [ "$(plan_get generators)" = yes ]; then
   # The big generators, each from nothing on its own instance
   # (generators/README.md#the-big-generators-as-tests): after the headless
   # suite, not beside it -- two at a time is what memory and one GPU take.
@@ -168,12 +236,22 @@ if [ "$full" = 1 ]; then
     awk '/tests passed|\(Failed\)|\(Timeout\)/ { print; next }
          /^[a-z0-9_]+: (exit|over its budget)/ { n = 40 }
          n > 0 { print; n-- }'
+  ran+=("big generators")
+else
+  skipped+=("big generators: $(echo "$plan" | sed -n 's/^merge-plan: generators *no *//p')")
+fi
+if [ "$(plan_get gui)" = yes ]; then
   # The verdict, and on a failure what failed and where it is archived with
   # its seed: the last line alone ("SOME FAILED") invites a re-run, which
   # passes and hides an order-dependent failure the archive can replay.
   "$root/tools/gui-tests-xvfb.sh" |
-    grep -E '^--- shard|test failed|Error |archived:|^GUI tests: [0-9]+/|^MISMATCH' |
+    grep -E '^--- shard|test failed|Error |archived:|^GUI tests: [0-9]+/|^MISMATCH|^shards:' |
     sed 's/\x1b\[[0-9;]*m//g'
+  ran+=("GUI suite")
+elif [ "$mode" != fast ]; then
+  skipped+=("GUI suite: nothing the GUI tests run changed")
+fi
+if [ "$(plan_get action_matrix)" = yes ]; then
   # The full action matrix (docs/modeling/README.md#action-matrix) against
   # the committed baseline: every ordinary action on every face, edge and
   # body of the corpus, which the headless suite only samples. Last, and
@@ -181,10 +259,22 @@ if [ "$full" = 1 ]; then
   "$root/tools/ctest" -C action_matrix -L action_matrix -j4 \
     --output-on-failure 2>&1 | tee -a "$suite_log" |
     grep -E 'tests passed|\(Failed\)|\(Timeout\)|^  - '
+  ran+=("full action matrix")
 else
-  "$root/tools/test-fast.sh" 2>&1 | tee "$suite_log" |
-    grep -E 'tests passed|\(Failed\)'
+  skipped+=("full action matrix: $(echo "$plan" | sed -n 's/^merge-plan: action_matrix *no *//p')")
 fi
+if [ "$(plan_get reader_fuzz_all)" = yes ]; then
+  # Every reader-fuzz case (docs/versioning/README.md#reader-fuzzing), by
+  # memory: a family peaks at 1.4 GB.
+  "$root/tools/ctest" -C reader_fuzz -L reader_fuzz_all \
+    -j"$("$root/tools/build-jobs" 1500)" --output-on-failure 2>&1 |
+    tee -a "$suite_log" | grep -E 'tests passed|\(Failed\)|\(Timeout\)'
+  ran+=("every reader-fuzz case")
+else
+  skipped+=("every reader-fuzz case: $(echo "$plan" | sed -n 's/^merge-plan: reader_fuzz_all *no *//p')")
+fi
+echo "merge-branch: ran: $(IFS=,; echo "${ran[*]:-nothing}" | sed 's/,/, /g')"
+for k in "${skipped[@]}"; do echo "merge-branch: skipped $k"; done
 
 # Every commit of the branch now on main (by patch), and nothing uncommitted.
 if [ -n "$wt" ] && [ -d "$wt" ]; then

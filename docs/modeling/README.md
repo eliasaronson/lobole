@@ -1730,8 +1730,10 @@ headless suite and `test-fast.sh`), `action_matrix_full_0`..`7` and
 `action_matrix_determinism` (labelled `slow;action_matrix`, and registered
 only for the ctest configuration `action_matrix`, as the big generators are
 for theirs, so that no plain ctest runs some two CPU-hours: `tools/ctest
--C action_matrix -L action_matrix -j4`; `tools/merge-branch.sh --full`
-ends with it, and so does the release checklist,
+-C action_matrix -L action_matrix -j4`; `tools/merge-branch.sh --release`
+ends with it, `--full` when the branch reaches what it covers
+([what a merge runs](../ui/testing.md#what-a-merge-runs)), and so does the
+release checklist,
 [packaging](../packaging/README.md#releasing)), and `action_matrix_selftest`, which
 feeds the classifier and the ratchet planted answers — a pass, a refusal, a
 refusal that moved the revision, a broken feature, a caught `OSD_SIGSEGV`, a

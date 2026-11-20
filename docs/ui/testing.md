@@ -257,6 +257,34 @@ used to wait for it inside ctest's clock: `remote_smoke` waited 9.5 of its
 the selection holds such a test, `tools/ctest` takes the GPU lock once for
 the whole run, before ctest starts, and says it is waiting.
 
+## What a merge runs
+
+`tools/merge-branch.sh` decides what to run from the paths the branch
+changes (`tools/merge_plan.py`), prints the decision before it runs anything
+and lists at the end what it skipped and why; `--dry-run` prints the plan
+and changes nothing. The map is conservative: a path it does not know is
+code, and code runs everything the mode runs.
+
+| the branch changes | runs |
+|---|---|
+| only `docs/**` and `*.md` | the convention cases (`[docs]` among them), the format gates, the tests that read a page as input; the build only if the binaries are behind |
+| tests, `tools/**`, `python/lobole/**`, and docs | the cases a changed test file declares (from Catch2's own listing), a smoke script's entries, every python test for a helper or `python/lobole`, the tests that name a changed tool, the GUI suite for the GUI runner's files, and the conventions |
+| anything else | everything the mode runs |
+
+The modes: plain (`tools/test-fast.sh`), `--full` (the headless suite and
+the GUI suite), `--release` (every suite, whatever changed), and `--no-skip`
+to run a mode's every suite unnarrowed. The heavy suites run on `--full`
+only when the branch reaches what they cover, and always on `--release`:
+
+| suite | its ground |
+|---|---|
+| the big generators (`-C generators`) | code, `python/lobole/**`, `generators/**`: a generator drives CAM, drawings and studies too |
+| the full action matrix (`-C action_matrix`) | code outside CAM, FEM, drawings, the renderers and the GUI tests; `python/lobole/**`; its corpus (`tests/action_matrix/`, `tests/golden/`, `generators/`) |
+| every reader-fuzz case (`-C reader_fuzz`) | `src/core/io/**`, the goldens and reader cases, `tests/mutate/`, the fuzz's own files, the kernel (`shell.nix`, `nix/**`) |
+
+They ran on every `--full` merge before: an hour of six to twelve busy cores,
+the main source of the load every other agent's suites ran under.
+
 ## Recording a scene
 
 The test engine records video: `ctx->CaptureBeginVideo()` and
