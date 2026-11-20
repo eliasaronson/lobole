@@ -687,8 +687,8 @@ The loop that works — follow it every time:
    (docs/simulation/README.md#buckling); read its warnings (a mode local
    where a load enters, one element through a wall). A curved wall loaded
    across its curve (an arch, a dome, a clip) can SNAP THROUGH, which
-   linear buckling does not see: run a static study with nonlinear
-   {large_deformation: true, snap_through: true} (solved on CalculiX,
+   linear buckling does not see: run the nonlinear static study's
+   snap-through run on it (solved on CalculiX,
    docs/simulation/README.md#snap-through) and read its governing factor,
    rather than calling the part done on the linear factor. A requirement on a study never run is `unchecked`:
    report it as NOT met. A part beside heat (a motor, a hot end, a lamp)
