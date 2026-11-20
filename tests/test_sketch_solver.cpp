@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchOrientation.h"
@@ -1584,3 +1585,122 @@ TEST_CASE("An over-constrained sketch still takes an unrelated constraint",
 }
 
 #endif // HAVE_PLANEGCS
+
+// A distance driven to 0 and back (docs/sketching/README.md
+// #a-distance-of-zero). At 0 two points coincide and a point sits on its line:
+// there is no direction, and no side, to come back along. Back up from it, a
+// pair held vertical could not move at all ("cannot be met"), and a point held
+// off a line came back on its far side. A distance of 0 is refused, naming what
+// says it instead; the edit before it is untouched.
+TEST_CASE("A distance of zero is refused, not solved", "[solver][flip]") {
+  using K = sketch::ConstraintKind;
+  SECTION("between two points") {
+    SketchFeature s = MakeSketch();
+    const uint32_t a = s.AddEntity(sketch::Point{{0, 0}});
+    const uint32_t b = s.AddEntity(sketch::Point{{0, 20}});
+    s.constraints.push_back({K::Fixed, {a, 0}, {}});
+    s.constraints.push_back({K::Vertical, {a, 0}, {b, 0}});
+    s.constraints.push_back({K::Distance, {a, 0}, {b, 0}, 20.0});
+    const EditRun run = RunEdit(s, {{2, 0.0}});
+    REQUIRE_FALSE(run.edit.Accepted());
+    CHECK_THAT(run.edit.refusal,
+               Catch::Matchers::ContainsSubstring("say coincident"));
+    // And one added at 0 is refused by the load.
+    sketch::Solver solver;
+    s.constraints[2].value = 0.0;
+    solver.Load(s);
+    REQUIRE(solver.UnsupportedConstraints().size() == 1);
+    CHECK(solver.UnsupportedConstraints()[0].index == 2);
+  }
+  SECTION("from a point to a line") {
+    SketchFeature s = MakeSketch();
+    const uint32_t l = s.AddEntity(sketch::Line{{0, 0}, {10, 0}});
+    const uint32_t p = s.AddEntity(sketch::Point{{5, 4}});
+    s.constraints.push_back({K::Fixed, {l, 0}, {}});
+    s.constraints.push_back({K::Fixed, {l, 1}, {}});
+    s.constraints.push_back({K::DistanceX, {l, 0}, {p, 0}, 5.0});
+    s.constraints.push_back({K::DistancePL, {p, 0}, {l, 0}, 4.0});
+    const EditRun zero = RunEdit(s, {{3, 0.0}});
+    REQUIRE_FALSE(zero.edit.Accepted());
+    CHECK_THAT(zero.edit.refusal,
+               Catch::Matchers::ContainsSubstring("point_on_line"));
+    // Down to near the line and back keeps the side.
+    const EditRun near = RunEdit(s, {{3, 1e-3}});
+    REQUIRE(near.edit.Accepted());
+    SketchFeature at = s;
+    at.entities = near.editOut;
+    at.constraints[3].value = 1e-3;
+    const EditRun back = RunEdit(at, {{3, 4.0}});
+    REQUIRE(back.edit.Accepted());
+    const auto& pt = std::get<sketch::Point>(back.editOut[s.IndexOfEntity(p)]);
+    CHECK_THAT(pt.p.y, WithinAbs(4.0, 1e-9));
+  }
+}
+
+// A big length change carries what is tied to the line's end with it
+// (docs/sketching/README.md#solving). A regular hexagon inscribed in a
+// construction circle centred on the end of a line 100 long: the line
+// driven to 400 came back with all six corners on one point -- every
+// constraint met, the sides all equal at zero -- and was accepted. A
+// collapse now sends the edit into continuation as a flip does.
+TEST_CASE("A length edit does not collapse a hexagon tied to the line's end",
+          "[solver][flip]") {
+  using K = sketch::ConstraintKind;
+  SketchFeature s = MakeSketch();
+  const double R = 30.0, cx = 100.0;
+  const uint32_t line = s.AddEntity(sketch::Line{{0, 0}, {cx, 0}});
+  sketch::Circle circle{{cx, 0}, R};
+  circle.construction = true;
+  const uint32_t c = s.AddEntity(circle);
+  std::vector<uint32_t> hex;
+  for (int k = 0; k < 6; ++k) {
+    const double a0 = M_PI / 3 * k, a1 = M_PI / 3 * (k + 1);
+    hex.push_back(
+        s.AddEntity(sketch::Line{{cx + R * std::cos(a0), R * std::sin(a0)},
+                                 {cx + R * std::cos(a1), R * std::sin(a1)}}));
+  }
+  s.constraints.push_back({K::Fixed, {line, 0}, {}});
+  s.constraints.push_back({K::Horizontal, {line, 0}, {}});
+  s.constraints.push_back({K::Coincident, {c, 0}, {line, 1}});
+  s.constraints.push_back({K::Radius, {c, 0}, {}, R});
+  for (int k = 0; k < 6; ++k) {
+    s.constraints.push_back(
+        {K::Coincident, {hex[k], 1}, {hex[(k + 1) % 6], 0}});
+    s.constraints.push_back({K::PointOnLine, {hex[k], 0}, {c, 0}});
+  }
+  for (int k = 1; k < 6; ++k)
+    s.constraints.push_back({K::Equal, {hex[0], 0}, {hex[k], 0}});
+  s.constraints.push_back({K::Distance, {line, 0}, {line, 1}, cx});
+  const size_t length = s.constraints.size() - 1;
+  // 400 is carried; 10000 (a hundred times the line, three hundred the
+  // hexagon) collapses at every step continuation can afford, and is
+  // refused naming the collapse -- never kept collapsed.
+  {
+    const EditRun far = RunEdit(s, {{length, 10000.0}});
+    if (!far.edit.Accepted())
+      CHECK_THAT(far.edit.refusal,
+                 Catch::Matchers::ContainsSubstring("to a point"));
+    else
+      for (uint32_t h : hex) {
+        const auto& l = std::get<sketch::Line>(far.editOut[s.IndexOfEntity(h)]);
+        CHECK_THAT(glm::length(l.b - l.a), WithinRel(R, 1e-6));
+      }
+  }
+  for (const double to : {400.0}) {
+    INFO("length " << to);
+    const EditRun run = RunEdit(s, {{length, to}});
+    REQUIRE(run.plain.ok);
+    { // one jump collapses it
+      const auto& l0 =
+          std::get<sketch::Line>(run.plainOut[s.IndexOfEntity(hex[0])]);
+      REQUIRE(glm::length(l0.b - l0.a) < 1e-3);
+    }
+    REQUIRE(run.edit.Accepted());
+    for (uint32_t h : hex) {
+      const auto& l = std::get<sketch::Line>(run.editOut[s.IndexOfEntity(h)]);
+      CHECK_THAT(glm::length(l.b - l.a), WithinRel(R, 1e-6));
+    }
+    const auto& cc = std::get<sketch::Circle>(run.editOut[s.IndexOfEntity(c)]);
+    CHECK_THAT(cc.center.x, WithinRel(to, 1e-9));
+  }
+}

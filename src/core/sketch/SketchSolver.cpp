@@ -24,6 +24,8 @@
 namespace sketch {
 
 namespace {
+// A distance under this is zero (mm): refused, see Distance and DistancePL.
+constexpr double kZeroDistance = 1e-9;
 // The kind as the file and add_constraint spell it, for refusal messages.
 const char* KindWord(ConstraintKind k) {
   using K = ConstraintKind;
@@ -336,6 +338,39 @@ struct Solver::Impl {
     std::vector<size_t> out;
     for (size_t i = 0; i < before.size() && i < after.size(); i++)
       if (before[i] != 0 && after[i] != 0 && after[i] != before[i])
+        out.push_back(i);
+    return out;
+  }
+  // What can collapse to a point: each line's length and each circle's and
+  // arc's radius, in the solver's current values (entity order, which a
+  // solve does not change).
+  std::vector<double> Extents() const {
+    std::vector<Entity> now;
+    WriteBackTo(now);
+    std::vector<double> out;
+    for (const Entity& e : now) {
+      if (const auto* l = std::get_if<Line>(&e))
+        out.push_back(glm::length(l->b - l->a));
+      else if (const auto* c = std::get_if<Circle>(&e))
+        out.push_back(c->radius);
+      else if (const auto* a = std::get_if<Arc>(&e))
+        out.push_back(a->radius);
+      else
+        out.push_back(0.0);
+    }
+    return out;
+  }
+  // The extents clear in `before` (a thousandth of the largest) that are
+  // gone in `after`: a hexagon dragged three times its size by an edit came
+  // back as six corners on one point, every constraint met.
+  static std::vector<size_t> Collapsed(const std::vector<double>& before,
+                                       const std::vector<double>& after) {
+    double largest = 0.0;
+    for (double v : before)
+      largest = std::max(largest, v);
+    std::vector<size_t> out;
+    for (size_t i = 0; i < before.size() && i < after.size(); i++)
+      if (before[i] > 1e-3 * largest && after[i] < 1e-6 * before[i])
         out.push_back(i);
     return out;
   }
@@ -946,7 +981,16 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
     case ConstraintKind::Distance:
     case ConstraintKind::DistanceX:
     case ConstraintKind::DistanceY:
-      if (a && b) {
+      if (a && b && con.kind == ConstraintKind::Distance && !con.driven &&
+          std::abs(con.value) < kZeroDistance) {
+        // At zero the two points coincide and the distance has no gradient
+        // and no direction: an edit back up from it either cannot move them
+        // or picks a direction of its own (docs/sketching/README.md
+        // #a-distance-of-zero).
+        why = "a distance of 0 makes the points coincide, which leaves no "
+              "direction to come back along: say coincident, or keep a "
+              "distance above 0";
+      } else if (a && b) {
         if (con.kind == ConstraintKind::Distance) {
           // Unsigned kinds take |value|: a negative-evaluating driving
           // expression means "flipped direction", which distances/radii
@@ -1229,7 +1273,15 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
       // Perpendicular point-to-line distance. P2LDistance is SIGNED, so pick
       // the side the point is already on and keep it there (the Tangent
       // recipe) rather than let the solve flip it across the line.
-      if (a && isLine(con.b.entity)) {
+      if (a && isLine(con.b.entity) && !con.driven &&
+          std::abs(con.value) < kZeroDistance) {
+        // The side is read from where the point is, and on the line there
+        // is none: back up from 0 it came out on whichever side the solve
+        // chose, the far one as often as not.
+        why = "a distance of 0 puts the point on the line, which leaves no "
+              "side to come back to: say point_on_line, or keep a distance "
+              "above 0";
+      } else if (a && isLine(con.b.entity)) {
         GCS::Line& l = im.lines[im.lineOf[con.b.entity]];
         const double dx = *l.p2.x - *l.p1.x, dy = *l.p2.y - *l.p1.y;
         const double rx = *a->x - *l.p1.x, ry = *a->y - *l.p1.y;
@@ -1413,6 +1465,17 @@ EditOutcome Solver::SolveValueEdit(const std::vector<ValueChange>& asked) {
   EditOutcome out;
   // Only the dimensions the solver holds a value for can step; an angle
   // steps from the turn nearest its new value.
+  // A new value the solver refuses to hold (a distance of 0) refuses the
+  // edit, rather than solving without it.
+  for (const ValueChange& c : asked)
+    for (const Unsupported& u : im.unsupported)
+      if (u.index == c.constraint) {
+        out.refusal = std::string(KindWord(im.constraints[c.constraint].kind)) +
+                      " (constraint " + std::to_string(c.constraint) + ") = " +
+                      FormatValue(im.constraints[c.constraint].kind, c.to) +
+                      " is refused: " + u.reason;
+        return out;
+      }
   std::vector<ValueChange> changes;
   for (ValueChange c : asked) {
     if (c.constraint >= im.valueSlots.size() ||
@@ -1426,13 +1489,16 @@ EditOutcome Solver::SolveValueEdit(const std::vector<ValueChange>& asked) {
   im.DeclareUnknowns();
   const Impl::Snapshot pre = im.Take();
   const std::vector<int> s0 = im.Signs();
+  const std::vector<double> e0 = im.Extents();
+  std::vector<size_t> collapsed;
 
   // One jump: an ordinary edit costs one solve and the check.
   out.solve = im.RunSolve();
   std::vector<size_t> turned;
   if (out.solve.ok) {
     turned = Impl::Turned(s0, im.Signs());
-    if (turned.empty()) {
+    collapsed = Impl::Collapsed(e0, im.Extents());
+    if (turned.empty() && collapsed.empty()) {
       out.reached = true;
       return out;
     }
@@ -1454,28 +1520,36 @@ EditOutcome Solver::SolveValueEdit(const std::vector<ValueChange>& asked) {
     };
     Impl::Snapshot at = pre;
     std::vector<int> signsAt = s0;
+    std::vector<double> extentsAt = e0;
     int t = 0, step = kEditSteps / 2, budget = kEditSolveBudget;
     turned.clear();
+    collapsed.clear();
     while (t < kEditSteps && step >= 1 && budget-- > 0) {
       const int tn = std::min(kEditSteps, t + step);
       for (const ValueChange& c : changes)
         im.SetSlot(c, valueAt(c, tn));
       const SolveResult r = im.RunSolve();
       std::vector<int> signs;
-      std::vector<size_t> tr;
+      std::vector<double> extents;
+      std::vector<size_t> tr, gone;
       if (r.ok) {
         signs = im.Signs();
         tr = Impl::Turned(signsAt, signs);
+        extents = im.Extents();
+        gone = Impl::Collapsed(extentsAt, extents);
       }
-      if (r.ok && tr.empty()) {
+      if (r.ok && tr.empty() && gone.empty()) {
         t = tn;
         signsAt = std::move(signs);
+        extentsAt = std::move(extents);
+        collapsed.clear();
         at = im.Take();
         im.sys.initSolution();
         step *= 2;
         out.solve = r;
       } else {
         turned = std::move(tr);
+        collapsed = std::move(gone);
         if (!r.ok)
           out.solve = r;
         Impl::Put(at);
@@ -1496,6 +1570,18 @@ EditOutcome Solver::SolveValueEdit(const std::vector<ValueChange>& asked) {
   Impl::Put(pre);
   if (out.solve.ok && turned.empty())
     out.solve.ok = false; // ran out of steps short of the new values
+  if (turned.empty() && !collapsed.empty()) {
+    std::vector<Entity> was;
+    im.WriteBackTo(was);
+    const size_t i = collapsed.front();
+    const bool line = i < was.size() && std::holds_alternative<Line>(was[i]);
+    out.refusal = RefusalText(im.constraints, changes, nullptr);
+    out.refusal = out.refusal.substr(0, out.refusal.rfind(" cannot be met")) +
+                  " would collapse " + (line ? "line " : "circle ") +
+                  std::to_string(i < was.size() ? EntityId(was[i]) : 0) +
+                  " to a point";
+    return out;
+  }
   const std::vector<Orientation>& orients = im.Orientations();
   std::set<size_t> flipped;
   for (size_t i : turned)

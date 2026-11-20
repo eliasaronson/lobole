@@ -885,6 +885,29 @@ re-solves without reloading: PlaneGCS starts every solve from the reference
 `initSolution` stored, so a taken step re-stores it and an undone one goes
 back to it. The cost is small beside the load's own diagnosis.
 
+A **collapse** is checked as a flip is: a line whose length, or a circle's
+or arc's radius, was clear (over a thousandth of the largest) and is gone
+after a solve sends the one jump into continuation, and a step that
+collapses one is undone. A regular hexagon inscribed in a construction
+circle centred on the end of a line 100 long, the line driven to 400: the
+one jump put all six corners on one point -- every constraint met, the
+sides all equal at zero -- and was accepted; continuation carries it whole.
+Driven to 10000, every step continuation can afford collapses it, and the
+edit is refused, "would collapse line N to a point" (`[flip]`).
+
+#### A distance of zero
+
+A `distance` of 0 between two points, or a `distance_pl` of 0 from a point
+to a line, is refused (an unsupported constraint, so `add_constraint`
+refuses it and a value edit or a regenerated expression is refused naming
+the dimension). At 0 the points coincide and the point sits on the line:
+the distance has no gradient and no direction there, and the side a
+`distance_pl` keeps is read from where the point is. Back up from 0, a pair
+held vertical could not move at all ("cannot be met") and a point held off
+a line came back on its far side, silently. `coincident` and
+`point_on_line` say 0; a small distance keeps its side. `distance_x` and
+`distance_y` are signed and take 0.
+
 Every value edit goes through it: the GUI inline editor
 (`ApplyDimensionEdit`, `SketchDimensionDraw.cpp`), `modify_feature`'s
 re-solve of a sketch whose dimension values changed (`RemoteModeling.cpp`),
