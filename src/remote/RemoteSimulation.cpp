@@ -3755,10 +3755,21 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         // until its peak settles or its time runs out, so the two solvers
         // can end on different meshes; their difference is then the mesh's,
         // and is not reported as agreement.
+        // Counted on the boundary: the session remembers the in-house run
+        // whole (for the VTU export) and this one is the stored result, cut
+        // to its surface, so their node lists differ on the same mesh while
+        // their boundaries are the same.
         const auto nodes = [](const fem::StudyRuntime& r) {
           size_t n = 0;
-          for (const auto& b : r.bodies)
-            n += b.mesh.nodes.size();
+          for (const auto& b : r.bodies) {
+            std::vector<char> on(b.mesh.nodes.size(), 0);
+            for (const fem::FemMesh::BoundaryTri& t : b.mesh.boundary)
+              for (int v : t.nodes)
+                if (v >= 0 && static_cast<size_t>(v) < on.size() && !on[v]) {
+                  on[v] = 1;
+                  ++n;
+                }
+          }
           return n;
         };
         const size_t ours = nodes(*own), theirs = nodes(*rt);
@@ -3773,7 +3784,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
               {"input_hash", inputhash::Hex(twinHash)},
               {"not_compared",
                "the two runs ended on different meshes (" +
-                   std::to_string(ours) + " nodes in-house, " +
+                   std::to_string(ours) + " surface nodes in-house, " +
                    std::to_string(theirs) +
                    " on CalculiX): each refined until its peak settled or "
                    "its time ran out"}};
