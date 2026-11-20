@@ -36,6 +36,20 @@ trap 'rm -f "$log"' EXIT
 # shellcheck source=build-lock.sh
 . "$root/tools/build-lock.sh"
 build_lock_exclusive "$dir" 9
+# A tree configured against store paths shell.nix no longer resolves (a
+# patched OpenCASCADE, another Catch2) builds against the old ones: it skips
+# what the new kernel fixed and shares no ccache entry with a tree configured
+# today. Put back on the current environment first; under the lock, so no
+# suite reads the tree while it is reconfigured (tools/fix-stale-nix-cache.sh).
+if ! stale="$("$root/tools/fix-stale-nix-cache.sh" --check "$dir" 2>&1)"; then
+  echo "$stale" | sed 's/^/build: /'
+  echo "build: reconfiguring $dir against the current environment"
+  "$root/tools/fix-stale-nix-cache.sh" "$dir" | sed 's/^/build: /'
+  # Once: an entry the reconfigure finds again is the environment's own, and
+  # a loop would reconfigure on every build.
+  "$root/tools/fix-stale-nix-cache.sh" --check "$dir" >/dev/null 2>&1 ||
+    echo "build: $dir still names other store paths after a reconfigure; building anyway" >&2
+fi
 status=0
 "$root/tools/nix-run" "ninja -C '$dir' -j$jobs ${targets[*]:-}" > "$log" 2>&1 || status=$?
 grep -E 'FAILED|error:|Terminated signal' "$log" | head -40 || true

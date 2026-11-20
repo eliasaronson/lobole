@@ -19,10 +19,20 @@
 # a dry run always reports as work to do. Runs in shell.nix's environment, for
 # ninja; the caller provides it.
 set -uo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dir="${1:?usage: stale-binaries.sh BUILD_DIR}"
 [ -f "$dir/build.ninja" ] || exit 0
-cd "$dir" || exit 2
 stale=0
+# A tree configured against store paths shell.nix no longer resolves is
+# behind too, though every binary is newer than its inputs: they are the old
+# kernel's (main's suite skipped a fillet patch's test this way). The build
+# reconfigures it (tools/build.sh, tools/fix-stale-nix-cache.sh).
+if ! why="$("$here/fix-stale-nix-cache.sh" --check "$dir" 2>&1)"; then
+  echo "$dir is configured against store paths the environment no longer resolves:"
+  echo "$why" | sed -n 's/^   /  /p' | head -4
+  stale=1
+fi
+cd "$dir" || exit 2
 for target in designer designer_tests femgpu_tests; do
   bin="$(sed -n "s/^build $target: phony //p" build.ninja)"
   [ -n "$bin" ] && [ -e "$bin" ] || continue

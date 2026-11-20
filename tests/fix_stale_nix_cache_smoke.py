@@ -11,9 +11,9 @@ refuses a cache made from another source. It now reads each tree's
 CMAKE_HOME_DIRECTORY before it touches the cache and passes that as -S.
 
 A scratch project and a scratch build dir, nothing else: never main's build/
-or a worktree's. `nix-shell` is stubbed to run its --run command in the
-environment this test already has, so the test neither enters nor nests a
-nix shell. Both of the script's branches are driven:
+or a worktree's. The script runs its cmake through tools/nix-run, which
+sources the cached environment rather than entering a nix shell. Its
+branches are driven:
 
   1. the toolchain moved (the cache names another compiler): the cache is
      thrown away and the tree configured fresh -- from the scratch source;
@@ -21,14 +21,18 @@ nix shell. Both of the script's branches are driven:
      reconfigured -- from the scratch source, which cmake requires;
   3. a package's config directory is cached as not found (a configure ran
      after a GC took the package): no store path is named, and it was
-     called clean. It is unset and the tree reconfigured.
+     called clean. It is unset and the tree reconfigured;
+  4. a cache entry names ANOTHER VERSION of a package the environment
+     resolves, still in the store (Catch2_DIR at 3.16.0 under 3.16.1
+     headers: an undefined Catch::AutoReg at link). Nothing was collected,
+     so asking the store called it clean. --check says so and changes
+     nothing; the plain run unsets it.
 
 Usage: fix_stale_nix_cache_smoke.py
 """
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -72,20 +76,22 @@ def main():
     try:
         src = os.path.join(work, "src")
         build = os.path.join(work, "build")
-        stub = os.path.join(work, "bin")
         os.makedirs(src)
-        os.makedirs(stub)
         with open(os.path.join(src, "CMakeLists.txt"), "w") as f:
             f.write("cmake_minimum_required(VERSION 3.20)\n"
                     "project(scratch CXX)\n")
-        # `nix-shell shell.nix --run CMD` -> CMD, here.
-        nix_shell = os.path.join(stub, "nix-shell")
-        with open(nix_shell, "w") as f:
-            f.write('#!/usr/bin/env bash\n'
-                    'while [ $# -gt 0 ] && [ "$1" != --run ]; do shift; done\n'
-                    'exec bash -c "$2"\n')
-        os.chmod(nix_shell, os.stat(nix_shell).st_mode | stat.S_IXUSR)
-        env = dict(os.environ, PATH=stub + os.pathsep + os.environ["PATH"])
+        env = dict(os.environ)
+        # The compiler the script calls current: shell.nix's, through
+        # tools/nix-run, where there is nix. Not this process's PATH, which
+        # may be another nix shell's (an agent's session is one) and would
+        # make every case read as a moved toolchain.
+        cxx = shutil.which("g++")
+        if shutil.which("nix-instantiate"):
+            r = subprocess.run([os.path.join(HERE, "..", "tools", "nix-run"),
+                                "command -v g++"], capture_output=True,
+                               text=True)
+            if r.returncode == 0 and r.stdout.strip():
+                cxx = r.stdout.strip().splitlines()[-1]
 
         def configure():
             shutil.rmtree(build, ignore_errors=True)
@@ -93,13 +99,14 @@ def main():
             # changes in the cache is stale.
             subprocess.run(["cmake", "-S", src, "-B", build, "-G", "Ninja",
                             "-DCMAKE_BUILD_TYPE=Release",
-                            "-DCMAKE_CXX_COMPILER=" + shutil.which("g++")],
+                            "-DCMAKE_CXX_COMPILER=" + cxx],
                            check=True, capture_output=True, env=env)
             expect(entry(build, "CMAKE_HOME_DIRECTORY") == src,
                    f"the scratch tree is configured from {src}")
 
-        def run():
-            r = subprocess.run(["bash", SCRIPT, build], env=env,
+        def run(*flags, extra=None):
+            r = subprocess.run(["bash", SCRIPT, *flags, build],
+                               env=dict(env, **(extra or {})),
                                capture_output=True, text=True, timeout=300)
             return r.returncode, r.stdout + r.stderr
 
@@ -135,6 +142,39 @@ def main():
                f"the not-found package was called clean ({code}): {said}")
         expect(entry(build, "Gone_DIR") is None,
                "the not-found package is still in the cache")
+
+        # 4. Another version of a package the environment resolves. Any
+        # store path that exists will do as the "old" one: this python's,
+        # which the scratch cache does not otherwise name. The environment
+        # is told it resolves version 99 of the same package now.
+        real = os.path.realpath(sys.executable)
+        parts = real.split("/")
+        m = (re.match(r"[a-z0-9]{32}-(.+?)-\d", parts[3])
+             if real.startswith("/nix/store/") else None)
+        if m is None:
+            print("fix_stale_nix_cache_smoke: no python in /nix/store; "
+                  "case 4 skipped")
+        else:
+            old = "/nix/store/" + parts[3]
+            current = os.path.join(work, "current")
+            with open(current, "w") as f:
+                f.write("/nix/store/%s-%s\n" % (
+                    "z" * 32, re.sub(r"-\d[\w.]*", "-99.0", parts[3][33:], count=1)))
+            pin = {"LOBOLE_FSNC_CURRENT": current}
+            configure()
+            rewrite(build, "Old_DIR", old + "/lib", "PATH")
+            code, said = run("--check", extra=pin)
+            expect(code == 1 and "another version" in said,
+                   f"--check called another version clean ({code}): {said}")
+            expect(entry(build, "Old_DIR") == old + "/lib",
+                   "--check changed the cache")
+            code, said = run(extra=pin)
+            expect(code == 0 and "reconfigured" in said,
+                   f"another version was not cleared ({code}): {said}")
+            expect(entry(build, "Old_DIR") is None,
+                   "the other version is still in the cache")
+            code, said = run("--check", extra=pin)
+            expect(code == 0, f"--check after the fix ({code}): {said}")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("fix_stale_nix_cache_smoke: ok")

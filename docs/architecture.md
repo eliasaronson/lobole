@@ -125,10 +125,18 @@ What makes a worktree share main's cache:
 - **Relative paths.** The compiler launcher sets `CCACHE_BASEDIR` to the
   source tree, so `-I…/src` hashes as `../src` in every tree.
 - **One toolchain.** A tree configured before `shell.nix` moved keeps the old
-  compiler and headers. `tools/fix-stale-nix-cache.sh` reconfigures it,
-  from the source its cache names (`CMAKE_HOME_DIRECTORY`), so a
-  worktree's tree reconfigured from main stays the worktree's
-  (`tests/fix_stale_nix_cache_smoke.py`). A package's directory cached as
+  compiler and headers, and every OpenCASCADE-including compile hashes the
+  old `-isystem` path: three trees on three kernels shared almost nothing
+  in ccache, and main's suite skipped a kernel patch's test.
+  `tools/fix-stale-nix-cache.sh` reconfigures such a tree, from the source
+  its cache names (`CMAKE_HOME_DIRECTORY`), so a worktree's tree
+  reconfigured from main stays the worktree's
+  (`tests/fix_stale_nix_cache_smoke.py`). Stale is a collected store path,
+  the same package under another hash (a patched kernel), or another
+  version of a package the environment resolves (Catch2 3.16.0 under 3.16.1
+  headers). `tools/build.sh` and `tools/worktree-build.sh` ask its
+  `--check` first and reconfigure; `tools/stale-binaries.sh`, so every
+  suite, refuses such a tree until it is built. A package's directory cached as
   not found (a configure that ran after a GC took the package) counts as
   stale too: no store path names it, and the script called such a tree
   clean. A missing OpenCASCADE now stops the configure, where it used to

@@ -86,6 +86,19 @@ BUILD_TYPE="${BUILD_TYPE:-Release}"
 # agent host itself.
 JOBS="$("$ROOT/tools/build-jobs")"
 
+# A tree on another environment's store paths shares nothing with this one
+# in ccache (the -isystem path is in every hash). This tree's own is put back
+# first; main's is only reported, since a merge may be using it -- its next
+# tools/build.sh reconfigures it.
+if [ -f "$ROOT/build/CMakeCache.txt" ] &&
+   ! "$ROOT/tools/fix-stale-nix-cache.sh" --check "$ROOT/build" >/dev/null 2>&1; then
+  "$ROOT/tools/fix-stale-nix-cache.sh" "$ROOT/build"
+fi
+if [ "$MAIN" != "$ROOT" ] && [ -f "$MAIN/build/CMakeCache.txt" ] &&
+   ! "$ROOT/tools/fix-stale-nix-cache.sh" --check "$MAIN/build" >/dev/null 2>&1; then
+  echo "worktree-build: main's build/ is configured against older store paths;" \
+       "this tree shares little of its cache until main's next tools/build.sh"
+fi
 echo "worktree-build: configuring + building [$TARGETS] in $ROOT/build ($BUILD_TYPE like main, -j$JOBS by free memory; ccache shared)"
 "$ROOT/tools/nix-run" \
   "cmake -S '$ROOT' -B '$ROOT/build' -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE >/dev/null && ninja -C '$ROOT/build' -j$JOBS $TARGETS"
