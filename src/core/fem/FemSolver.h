@@ -183,7 +183,7 @@ struct FemResults {
   // factor of safety reads every one against its own material's yield
   // (docs/simulation/README.md#stress-where-materials-meet). The least
   // yield / von Mises over every node and material, `fosAt` where; 0 when
-  // no material has a yield, and on a result saved before vNEXT (read the
+  // no material has a yield, and on a result saved before v219 (read the
   // body's yield over maxVonMises there).
   double factorOfSafety = 0.0;
   glm::dvec3 fosAt{0, 0, 0};

@@ -1042,7 +1042,7 @@ yield: the least yield / von Mises over every node and material, with
 `fosAt`. That is the static `factor_of_safety` (a body's, a case's, the
 top level's) and a buckling result's `yield_factor`; a lower stress in a
 weaker material can govern. One material: the same number as yield over
-the peak. A result saved before vNEXT has no stored factor and reads yield
+the peak. A result saved before v219 has no stored factor and reads yield
 over the peak as it did. `[fem][materials]`: two layers, E 200 and 70 GPa,
 pulled along their bond -- the bond's von Mises is the stiff layer's to
 1e-6, and the factor the soft layer's own.
