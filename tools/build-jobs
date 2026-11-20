@@ -9,11 +9,35 @@
 # Memory, not cores, is what runs out here: four worktree builds at one job
 # per core (22) got the OOM killer to take 58 compilers and then the agent
 # host itself (docs/architecture.md#the-development-loop).
+#
+# Nor more than the CPUs other builds and suites have not CLAIMED
+# (tools/cpu-claims.sh: a claim is a file read, no sampling), down to a
+# quarter of the memory's count: three worktree builds at -j8 beside two
+# generators and a GUI suite took 70 s a compile against 10-17 s.
+#
+# And not out of ALL the free memory: dividing every MemAvailable byte among
+# compilers left the person at the machine nothing for their own work. A
+# reserve stays free -- 4 GB, or the MB in $LOBOLE_MEM_RESERVE_MB, or in
+# ~/.config/lobole-dev/memory-reserve-mb for a lasting choice (raise it
+# before a video call; 0 gives everything back to the builds).
 set -euo pipefail
 per_mb="${1:-1536}"
+reserve_file="${XDG_CONFIG_HOME:-$HOME/.config}/lobole-dev/memory-reserve-mb"
+reserve_mb="${LOBOLE_MEM_RESERVE_MB:-}"
+if [ -z "$reserve_mb" ] && [ -r "$reserve_file" ]; then
+  reserve_mb="$(tr -dc '0-9' < "$reserve_file")"
+fi
+case "$reserve_mb" in '' | *[!0-9]*) reserve_mb=4096 ;; esac
 avail_kb="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
+avail_kb=$(( avail_kb - reserve_mb * 1024 ))
 jobs=$(( avail_kb / (per_mb * 1024) ))
 cores="$(nproc)"
 [ "$jobs" -lt 1 ] && jobs=1
 [ "$jobs" -gt "$cores" ] && jobs="$cores"
+# shellcheck source=cpu-claims.sh
+. "$(dirname "${BASH_SOURCE[0]}")/cpu-claims.sh"
+left=$(( cores - $(cpu_claimed_by_others) ))
+floor=$(( (jobs + 3) / 4 ))
+[ "$left" -lt "$floor" ] && left=$floor
+[ "$jobs" -gt "$left" ] && jobs=$left
 echo "$jobs"

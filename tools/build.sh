@@ -50,6 +50,11 @@ if ! stale="$("$root/tools/fix-stale-nix-cache.sh" --check "$dir" 2>&1)"; then
   "$root/tools/fix-stale-nix-cache.sh" --check "$dir" >/dev/null 2>&1 ||
     echo "build: $dir still names other store paths after a reconfigure; building anyway" >&2
 fi
+# What this build holds, for the job counts other suites and builds pick
+# while it runs (tools/cpu-claims.sh).
+# shellcheck source=cpu-claims.sh
+. "$root/tools/cpu-claims.sh"
+cpu_claim "$jobs"
 status=0
 "$root/tools/nix-run" "ninja -C '$dir' -j$jobs ${targets[*]:-}" > "$log" 2>&1 || status=$?
 grep -E 'FAILED|error:|Terminated signal' "$log" | head -40 || true
