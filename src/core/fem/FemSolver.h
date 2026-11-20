@@ -863,6 +863,11 @@ struct StudyRuntime {
   // behind a fresh-looking result is the stale drawing's lie. Empty on a
   // part study.
   std::vector<std::pair<uint64_t, uint64_t>> solvedPartVersions;
+  // The stored meshes the run solved on (SimDocument::FindMesh), by key:
+  // what a save keeps beside the result
+  // (docs/simulation/README.md#one-mesh-shared). Empty for a run whose mesh
+  // was not stored (a topology shape, a convergence step's refinement).
+  std::vector<uint64_t> meshKeys;
   std::vector<StudyBodyResult> bodies;
   double maxVonMises = 0.0;
   glm::dvec3 maxVmAt{0, 0, 0};
@@ -1040,6 +1045,11 @@ struct StudyJobBody {
   double baseC = 0.0; // the lowest held or ambient temperature of `heat`
 };
 struct StudyJobInput {
+  // Meshes MeshPlannedStudy made for a keyed body (StudyBodyPlan::meshKey),
+  // as the mesher returned them: the caller stores them on the simulation.
+  std::vector<std::pair<uint64_t, std::shared_ptr<const FemMesh>>> madeMeshes;
+  // Every keyed body's key, stored or made.
+  std::vector<uint64_t> meshKeys;
   AnalysisType type = AnalysisType::Static;
   Solver solver = Solver::Auto;
   Nonlinear nonlinear;
@@ -1087,6 +1097,12 @@ struct StudyBodyPlan {
   // A static study of a topology result (ShapeSource): the mesh to solve,
   // already cut from the result — nothing is meshed. `shape` is then null.
   std::shared_ptr<const FemMesh> premeshed;
+  // The simulation's stored mesh of `shape` under `settings`
+  // (docs/simulation/README.md#one-mesh-shared): its key (fem::MeshKey, 0 =
+  // not keyed) and, when one is stored, the mesh, which MeshPlannedStudy
+  // solves on instead of meshing again.
+  uint64_t meshKey = 0;
+  std::shared_ptr<const FemMesh> stored;
   // The material's strength across printed layers (MPa; 0 = not a printed
   // material): a convergence check then also settles the stress across the
   // layers.

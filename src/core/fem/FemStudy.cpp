@@ -2017,11 +2017,28 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
       *error = m;
     return false;
   };
+  out.madeMeshes.clear();
+  out.meshKeys.clear();
   for (const StudyBodyPlan& bp : plan.bodies) {
-    auto mesh = bp.premeshed ? std::optional<FemMesh>(*bp.premeshed)
-                             : Mesh(bp.shape, bp.settings, &err);
+    // A simulation's stored mesh of this shape under these settings
+    // (docs/simulation/README.md#one-mesh-shared) is solved on as it is;
+    // one made here for a keyed body is handed back for the simulation to
+    // keep.
+    std::optional<FemMesh> mesh;
+    if (bp.premeshed)
+      mesh = *bp.premeshed;
+    else if (bp.stored)
+      mesh = *bp.stored;
+    else {
+      mesh = Mesh(bp.shape, bp.settings, &err);
+      if (mesh && bp.meshKey != 0)
+        out.madeMeshes.emplace_back(bp.meshKey,
+                                    std::make_shared<const FemMesh>(*mesh));
+    }
     if (!mesh)
       return fail("body '" + bp.bodyName + "': " + err);
+    if (bp.meshKey != 0)
+      out.meshKeys.push_back(bp.meshKey);
 
     // A bonded group (S2): the mesh spans several solids, each its own
     // domain, each its own material. Which domain is which member is
@@ -4036,6 +4053,11 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
     return false;
   if (!SolvePreparedStudy(in, rt, error, options))
     return false;
+  // What the run meshed for a simulation to keep, and the stored meshes it
+  // started from: a refinement below replaces `in` with meshes of its own.
+  const auto madeMeshes = in.madeMeshes;
+  const auto meshKeys = in.meshKeys;
+  rt.meshKeys = meshKeys;
   Convergence conv;
   conv.hasLayerNormal = converge.hasLayerNormal;
   conv.layerNormal = converge.layerNormal;
@@ -4089,6 +4111,12 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
     }
     // Halve the element size on each face a governing peak lies on.
     StudyPlan next = plan;
+    // A refinement is a mesh of its own, never the stored one it began
+    // from: the settings it meshes under are not the ones keyed.
+    for (StudyBodyPlan& bp : next.bodies) {
+      bp.stored.reset();
+      bp.meshKey = 0;
+    }
     ConvergenceStep rec;
     std::vector<std::pair<int, int>> where; // (body, face), each once
     for (const GoverningPeak& p : peaks) {
@@ -4170,6 +4198,9 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
       !(options.cancelled && options.cancelled()))
     conv.stopped = "steps";
   rt.convergence = std::move(conv);
+  rt.meshKeys = meshKeys;
+  in.madeMeshes = madeMeshes;
+  in.meshKeys = meshKeys;
   return true;
 }
 

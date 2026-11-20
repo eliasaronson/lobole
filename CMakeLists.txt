@@ -586,6 +586,8 @@ set(core_sources
     src/core/fem/FemVtu.cpp
     src/core/fem/FemCheck.cpp
     src/core/fem/FemInputKey.cpp
+    src/core/fem/SimDocument.cpp
+    src/core/fem/SimStudy.cpp
     src/core/fem/AssemblyStudy.cpp
     src/core/fem/FemSolver.cpp
     src/core/fem/FemTopo.cpp
