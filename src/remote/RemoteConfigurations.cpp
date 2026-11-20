@@ -311,6 +311,18 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
               "mate_overrides: mate " + std::to_string(o.mate) +
               " has no rotation to hold — a revolute, cylindrical or planar "
               "mate turns");
+        // A hold past the mate's limit is a pose it cannot reach
+        // (docs/assemblies/README.md#mate-limits).
+        if (o.rotation)
+          if (std::string why =
+                  assembly::RangeRefusal(*mate, MateDof::Rotation, *o.rotation);
+              !why.empty())
+            throw std::runtime_error("mate_overrides: " + why);
+        if (o.offset)
+          if (std::string why =
+                  assembly::RangeRefusal(*mate, MateDof::Offset, *o.offset);
+              !why.empty())
+            throw std::runtime_error("mate_overrides: " + why);
         next.mateOverrides.push_back(o);
       }
     }

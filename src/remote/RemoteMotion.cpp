@@ -70,7 +70,9 @@ constexpr MethodDoc MotionMethods[] = {
      "it), max_refine? (how many times a step may be halved where a free "
      "joint jumps between samples, 0..12, default 6: down to a 64th of the "
      "step; docs/assemblies/README.md#branch-jumps), name?}. Returns the "
-     "study and, if it cannot run, `why_not`. Nothing "
+     "study and, if it cannot run, `why_not` -- among them a from..to that "
+     "crosses the driver's own limit (docs/assemblies/README.md"
+     "#mate-limits), which run_motion_study then refuses. Nothing "
      "runs until run_motion_study. ONE driver moves the whole mechanism "
      "when the rest follows through mates and RELATIONS (add_relation): a "
      "geared pair turns because the relation propagates, not because two "
@@ -155,6 +157,11 @@ constexpr MethodDoc MotionMethods[] = {
      "expected_deg|expected_mm (what its rate gave), at_deg|at_mm, "
      "step_deg|step_mm}: the linkage passes a singular pose there, "
      "`branch_jumps` counts them, and the study is not clean. "
+     "A follower that reaches its LIMIT (docs/assemblies/README.md"
+     "#mate-limits) stops the run at that sample: `stopped_by` {reason: "
+     "'limit', mate, name, path?, value, limit_deg|limit_mm, at_deg|at_mm "
+     "(the driver value), sample, text}; that sample is the last, unsolved, "
+     "and the study is not clean. "
      "include_poses adds, per sample, every occurrence's placement "
      "(`poses`: position mm, orientation quaternion [x,y,z,w]) and every "
      "moving mate's value (`mates`: {mate, name, rotation_deg, offset} — "
@@ -686,6 +693,27 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
       {"table", motion::Table(r, s)}};
   if (s.clashMode == "mesh" && s.checkClash)
     out["deflection_mm"] = r.deflectionMm;
+  // Why the run ended before its last sample, when it did
+  // (docs/assemblies/README.md#mate-limits): a follower at its limit.
+  if (r.stoppedBy) {
+    const motion::Result::LimitStop& l = *r.stoppedBy;
+    const bool deg =
+        l.value == RangedValue::Rotation || l.value == RangedValue::Cone;
+    json st{{"reason", "limit"},  {"mate", l.mate},
+            {"name", l.name},     {"value", assembly::RangedValueName(l.value)},
+            {"sample", l.sample}, {"text", motion::LimitStopText(l, rot)}};
+    if (!l.path.empty())
+      st["path"] = l.path;
+    if (deg)
+      st["limit_deg"] = angles::ToDegrees(l.bound);
+    else
+      st["limit_mm"] = l.bound;
+    if (rot)
+      st["at_deg"] = angles::ToDegrees(l.atValue);
+    else
+      st["at_mm"] = l.atValue;
+    out["stopped_by"] = std::move(st);
+  }
   // The press fits an exact check relieved, once per pair: not clashes, and
   // listed so a clean run still says what it took to be deliberate
   // (docs/tolerances/README.md#press-fits). A mesh check relieves none.

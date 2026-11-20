@@ -55,7 +55,7 @@ and the call a person would make agree by construction.
 | `section_area` | part | `section` (`area_mm2`, or `enclosed_area_mm2`) | mm², the material a plane cuts or the area it encloses | `of`: material \| enclosed, `base_plane` (xy \| xz \| yz) with `offset` (mm) or `origin` and `normal`, `bodies?` (body names or feature ids) |
 | `check_fasteners` | assembly | `check_fasteners` | verdict | `allow?` [{`part?`, `why?`, `max?`}], `allow_skipped?` |
 | `check_literals` | part, parts, or none | `check_literals` | verdict | `documents?` (several parts); neither: every part |
-| `motion_clean` | assembly | `run_motion_study` | verdict | `study` |
+| `motion_clean` | assembly | `run_motion_study` | verdict | `study`, `whole_range?` ([a mate's whole range](#a-mates-whole-range)) |
 | `follower` | assembly | `run_motion_study`, `check_followers` | rpm, deg, mm (the quantity's) | `relation` (a contact relation), `study`, `quantity`: liftoff_rpm \| drop_rpm \| pressure_angle_deg \| deviation_mm \| deviation_deg \| gap_mm \| gap_deg, `speed_rpm?`, `max_pressure_angle_deg?` ([follower](#follower)) |
 | `cam_verify` | job | `cam_verify` | verdict | `setup`, `resolution?`, `allow_uncut?` [what prefixes] |
 | `expression` | none, or a part | the evaluator (`req::EvaluateIn`) | as `unit` says (default mm) | `expression`, `unit?`, `document?` (a part), `configuration?` (that part's; 0 = base) ([expression](#expression)) |
@@ -86,12 +86,27 @@ What a verdict needs to pass:
   parts, or every part (a standard part's length can equal a variable by
   coincidence, which is why `documents` exists).
 - `motion_clean`: the result is clean: every sample solved, no clash, no
-  standing clash, no branch jump. A failure's `detail.findings` names each
-  clashing pair (how many samples, the first driver value), the unsolved
-  samples and the branch jumps.
+  standing clash, no branch jump, no follower stopped at its limit. A
+  failure's `detail.findings` names each clashing pair (how many samples,
+  the first driver value), the unsolved samples, the branch jumps and the
+  limit that stopped the run. With `whole_range` the study must also drive
+  over its driver's whole limit (below).
 - `cam_verify`: ok and complete, it cuts something, no operation failed,
   every thread judged in its band, every toleranced wall in its band, and
   every hole or thread the job leaves uncut matches an `allow_uncut` prefix.
+
+### A mate's whole range
+
+A mate's limit states intent: "the anchor swings ±4°", "the lid opens to
+180°" ([mate limits](../assemblies/README.md#mate-limits)). `motion_clean`
+with `whole_range: true` proves the case allows it: it passes when its
+study's run is clean AND the study drives its driver over the driver
+mate's whole range on the driven value (`from`..`to` reaching both ends,
+either way round). A driver with no range there, or a study that stops
+short of one end, fails and its findings say which; so does a range
+widened after the study was written, which is the point. A study cannot
+drive past its driver's limit at all (it is refused before it runs), so
+"whole" is exactly the two ends.
 
 ### Follower
 

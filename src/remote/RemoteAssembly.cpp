@@ -183,10 +183,19 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "they are, reproducing any error in that placement. Refused when the "
      "two anchors are not square to one axis, because then no turn seats "
      "them and a nearest quarter turn would be a guess wearing a joint's "
-     "clothes.",
+     "clothes. LIMITS (docs/assemblies/README.md#mate-limits): "
+     "rotation_range_deg [min, max] (revolute, cylindrical, a planar's "
+     "spin), offset_range_mm (slider, cylindrical, a planar's gap), "
+     "dx_range_mm / dy_range_mm (planar), cone_deg (a ball's half-angle "
+     "from its seat); unset = free. A range on a value the type does not "
+     "free, a min above its max, or a starting value outside its range is "
+     "refused.",
      "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, "
      "rotation_deg?:number, offset?:number, dx?:number, "
-     "dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose'"},
+     "dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose', "
+     "rotation_range_deg?:number[2]|null, offset_range_mm?:number[2]|null, "
+     "dx_range_mm?:number[2]|null, dy_range_mm?:number[2]|null, "
+     "cone_deg?:number|null"},
     {"set_mate",
      "Edit a mate's parameters, and the way to POSE a mechanism: turn a "
      "revolute or cylindrical mate with `rotation_deg` (degrees), slide it "
@@ -200,10 +209,22 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "With {path: [occurrence]} `id` is a mate INSIDE that flexible "
      "sub-assembly placement (its own id there): only "
      "rotation_deg or offset — THIS placement's pose of it, kept on the "
-     "occurrence; refused where the placement's configuration holds it.",
+     "occurrence; refused where the placement's configuration holds it. "
+     "LIMITS (docs/assemblies/README.md#mate-limits) as add_mate takes them "
+     "(rotation_range_deg, offset_range_mm, dx_range_mm, dy_range_mm as "
+     "[min, max], cone_deg; null clears one). A value outside its range is "
+     "REFUSED naming the range, never clamped; so is a range that excludes "
+     "where the mate stands unless the same call moves it inside, and an "
+     "edit whose relations would drive another mate past its limit. In a "
+     "closed loop a follower that reaches its limit is held there and the "
+     "answer's `limits_held` [{mate, name, value, held, limit_deg|limit_mm, "
+     "at_deg|at_mm}] names it, its mate carrying the error.",
      "id:int>=0, path?:int[]|null, name?:string, flipped?:bool, "
      "rotation_deg?:number, offset?:number, dx?:number, "
-     "dy?:number, ball_rotation?:number[4]"},
+     "dy?:number, ball_rotation?:number[4], "
+     "rotation_range_deg?:number[2]|null, offset_range_mm?:number[2]|null, "
+     "dx_range_mm?:number[2]|null, dy_range_mm?:number[2]|null, "
+     "cone_deg?:number|null"},
     {"remove_mate", "Remove a mate by id.", "id:int>=0"},
     {"list_mates",
      "List mates with `status` (satisfied | redundant | error) and the "
@@ -212,13 +233,15 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "takes. Each carries `rotation` in radians and "
      "`rotation_deg` beside it. A mate that closes a loop which did not "
      "close carries `residual_mm`, its own closure error from the last "
-     "solve.",
+     "solve. A limited mate carries `limits` {rotation_range_deg?, "
+     "offset_range_mm?, dx_range_mm?, dy_range_mm?, cone_deg?} "
+     "(docs/assemblies/README.md#mate-limits).",
      "", remote::NoFlags,
      "mates:{a:object, b:object, flipped:bool, id:int, name:string, "
      "offset:number, rotation:number, rotation_deg:number, "
      "status:string, type:string, held?:object, error?:string, "
      "residual_mm?:number, dx?:number, dy?:number, "
-     "ball_rotation?:number[], suppressed?:bool}[]"},
+     "ball_rotation?:number[], suppressed?:bool, limits?:object}[]"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
      "gear|chain|rack|screw|linear|cam|freewheel|click|worm|intermittent|"
@@ -773,7 +796,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "removes it. An unknown step key, an occurrence named twice or not in "
      "the assembly, a mate that does not join its step's occurrence, a "
      "direction with no length, a negative distance, a pose of a mate "
-     "without that freedom or a pose step with a path is refused before "
+     "without that freedom, a pose outside the mate's limit "
+     "(docs/assemblies/README.md#mate-limits) or a pose step with a path "
+     "is refused before "
      "anything changes. One undo step. check_assembly_sequence checks it; "
      "the requirement kind `assembly_sequence` states it checked.",
      "steps:object[], allowance_mm?:number", remote::NoFlags,
@@ -942,6 +967,13 @@ AssemblySequence ReadSequence(const AssemblyDocument& a, const RpcParams& p) {
               (rot ? "rotation" : "offset") +
               " to pose (a revolute's or a cylindrical's rotation_deg, a "
               "slider's or a cylindrical's offset_mm)");
+        // A pose past a limit is one the mechanism cannot reach
+        // (docs/assemblies/README.md#mate-limits): refused here, so the
+        // check and the film never pose it.
+        if (std::string why = assembly::RangeRefusal(
+                *mate, sp.dof, rot ? angles::ToRadians(sp.value) : sp.value);
+            !why.empty())
+          throw std::runtime_error(at + ": " + why);
         if (!posed.insert({mate->id, int(sp.dof)}).second)
           throw std::runtime_error(at + ": mate '" + mate->name +
                                    "' is posed twice");
@@ -1138,8 +1170,147 @@ double MateRotationRadians(bool hasDeg, double deg, double current) {
   return hasDeg ? angles::ToRadians(deg) : current;
 }
 
+// Mate limits on the wire (docs/assemblies/README.md#mate-limits): in the
+// units a caller writes, each key naming its own -- the file keeps radians
+// and mm, as it keeps the mate's values.
+json MateLimitsJson(const Mate& m) {
+  json l = json::object();
+  const auto range = [&](const char* key, const std::optional<MateRange>& r,
+                         bool deg) {
+    if (r)
+      l[key] = deg ? json::array(
+                         {angles::ToDegrees(r->min), angles::ToDegrees(r->max)})
+                   : json::array({r->min, r->max});
+  };
+  range("rotation_range_deg", m.rotationRange, true);
+  range("offset_range_mm", m.offsetRange, false);
+  range("dx_range_mm", m.dxRange, false);
+  range("dy_range_mm", m.dyRange, false);
+  if (m.coneRad)
+    l["cone_deg"] = angles::ToDegrees(*m.coneRad);
+  return l;
+}
+
+// The range parameters set_mate and add_mate take, written into `m`:
+// [min, max] sets a range, null clears it. Returns which values the call
+// named, so the caller checks those (and only those) against where the mate
+// stands. Refuses a malformed value; what the type frees, and min <= max,
+// are MateRangeProblem's, after the units are converted.
+std::vector<RangedValue> ApplyRangeParams(const RpcParams& p, Mate& m) {
+  std::vector<RangedValue> named;
+  const auto range = [&](const char* key, std::optional<MateRange>& out,
+                         RangedValue v, bool deg) {
+    if (!p.contains(key))
+      return;
+    named.push_back(v);
+    const json& r = p.at(key);
+    if (r.is_null()) {
+      out.reset();
+      return;
+    }
+    if (!r.is_array() || r.size() != 2 || !r[0].is_number() ||
+        !r[1].is_number() || !std::isfinite(r[0].get<double>()) ||
+        !std::isfinite(r[1].get<double>()))
+      throw std::runtime_error(std::string(key) + " is [min, max] (" +
+                               (deg ? "degrees" : "mm") +
+                               ") or null to clear it, not " + r.dump());
+    const double lo = r[0].get<double>(), hi = r[1].get<double>();
+    out = deg ? MateRange{angles::ToRadians(lo), angles::ToRadians(hi)}
+              : MateRange{lo, hi};
+  };
+  range("rotation_range_deg", m.rotationRange, RangedValue::Rotation, true);
+  range("offset_range_mm", m.offsetRange, RangedValue::Offset, false);
+  range("dx_range_mm", m.dxRange, RangedValue::Dx, false);
+  range("dy_range_mm", m.dyRange, RangedValue::Dy, false);
+  if (p.contains("cone_deg")) {
+    named.push_back(RangedValue::Cone);
+    const json& c = p.at("cone_deg");
+    if (c.is_null())
+      m.coneRad.reset();
+    else if (!c.is_number() || !std::isfinite(c.get<double>()))
+      throw std::runtime_error(
+          "cone_deg is the cone's half-angle in degrees, or null to clear "
+          "it, not " +
+          c.dump());
+    else
+      m.coneRad = angles::ToRadians(c.get<double>());
+  }
+  return named;
+}
+
+// Refuses `m` as edited when a range cannot stand, or a value the call named
+// (a range or the value itself) stands outside its range. A range that
+// excludes where the mate stands is refused naming where it stands, unless
+// the same call also moves it inside.
+void CheckMateRanges(const Mate& m, const std::vector<RangedValue>& named) {
+  if (std::string why = assembly::MateRangeProblem(m); !why.empty())
+    throw std::runtime_error(why);
+  for (RangedValue v : named)
+    if (std::string why =
+            assembly::RangeRefusal(m, v, assembly::RangedValueOf(m, v));
+        !why.empty())
+      throw std::runtime_error(
+          why + " — set a value inside the range in the same call, or a "
+                "range that holds the value");
+}
+
+// Whether any mate of `doc` carries a limit: what a relation could drive
+// past, so only then is the edit tried on a copy first.
+bool AnyMateLimits(const AssemblyDocument& doc) {
+  for (const Mate& m : doc.GetMates())
+    if (m.rotationRange || m.offsetRange || m.dxRange || m.dyRange || m.coneRad)
+      return true;
+  return false;
+}
+
+// What a relation does with `edited` in place of its mate, tried on a copy:
+// refused when it drives any mate past a limit (a mate tree has no solve to
+// stop it there, so the edit is what gets refused).
+void CheckRelationsInRange(const AssemblyDocument& doc, const Mate& edited,
+                           const assembly::PartResolver& parts) {
+  if (!AnyMateLimits(doc) || doc.GetRelations().empty())
+    return;
+  AssemblyDocument trial = doc;
+  Mate* m = trial.FindMateById(edited.id);
+  if (m == nullptr)
+    return;
+  *m = edited;
+  (void)assembly::PropagateRelations(trial, edited.id, parts);
+  if (std::string why = assembly::AssemblyOutsideRange(trial); !why.empty())
+    throw std::runtime_error(why + " — a relation drives it there from mate " +
+                             std::to_string(edited.id));
+}
+
+// The limits a solve held a loop against, or found a value past: what a
+// call that moved the mechanism says in its own answer.
+json LimitsJson(const assembly::SolveReport& rep) {
+  json out = json::array();
+  for (const assembly::SolveReport::Limit& l : rep.limits) {
+    const bool deg =
+        l.value == RangedValue::Rotation || l.value == RangedValue::Cone;
+    json row{{"mate", l.mate},
+             {"name", l.name},
+             {"value", assembly::RangedValueName(l.value)},
+             {"held", l.loop}};
+    if (!l.path.empty())
+      row["path"] = l.path;
+    if (deg) {
+      row["limit_deg"] = angles::ToDegrees(l.bound);
+      row["at_deg"] = angles::ToDegrees(l.at);
+    } else {
+      row["limit_mm"] = l.bound;
+      row["at_mm"] = l.at;
+    }
+    out.push_back(std::move(row));
+  }
+  return out;
+}
+
 json MateJson(const Mate& m) {
   json j = DocumentIO::MateToJson(m);
+  j.erase("limits");
+  if (json l = MateLimitsJson(m); !l.empty())
+    j["limits"] = std::move(l);
   // On the wire `type` is the mate KIND — the word add_mate(type=…) takes.
   // The file keeps `mate_type` beside a constant "Mate", and a list whose
   // every row said type "Mate" read as if the kind had been lost.
@@ -2080,6 +2251,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (p.contains("ball_rotation"))
       mateJson["ball_rotation"] = p.at("ball_rotation");
     Mate mate = DocumentIO::MateFromJson(mateJson);
+    // Limits (docs/assemblies/README.md#mate-limits), checked against the
+    // starting values given here before anything is added.
+    // rpc-params: rotation_range_deg, offset_range_mm, dx_range_mm
+    // rpc-params: dy_range_mm, cone_deg
+    CheckMateRanges(mate, ApplyRangeParams(p, mate));
     // Both occurrences must exist before we solve against them.
     if (!state.assembly->FindById(mate.a.occurrenceId) ||
         !state.assembly->FindById(mate.b.occurrenceId))
@@ -2149,7 +2325,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     std::vector<uint64_t> path;
     const Mate* mate =
         MateFromRequest(state, p, "path", p.at("id").get<uint64_t>(), path);
-    for (const char* k : {"flipped", "name", "dx", "dy", "ball_rotation"})
+    for (const char* k :
+         {"flipped", "name", "dx", "dy", "ball_rotation", "rotation_range_deg",
+          "offset_range_mm", "dx_range_mm", "dy_range_mm", "cone_deg"})
       if (p.contains(k))
         throw std::runtime_error(
             std::string(k) +
@@ -2183,6 +2361,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         turn ? MateRotationRadians(p.contains("rotation_deg"),
                                    p.value("rotation_deg", 0.0), current)
              : p.at("offset").get<double>();
+    // The sub-assembly's own limit holds this placement's pose of it too.
+    if (std::string why = assembly::RangeRefusal(*mate, dof, value);
+        !why.empty())
+      throw std::runtime_error(why);
     ui::SnapshotAssembly(state);
     assembly::SetMateDofAt(*state.assembly, path, mate->id, dof, value,
                            ui::AssemblyResolverFor(state));
@@ -2196,6 +2378,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       out["offset"] = d->offset;
     }
     out["errored_mates"] = rep.erroredMates;
+    if (!rep.limits.empty())
+      out["limits_held"] = LimitsJson(rep);
     for (const assembly::SolveReport::InnerMate& im : rep.innerMates)
       if (im.occurrence == path.front() && im.mate == mate->id &&
           !im.error.empty())
@@ -2228,36 +2412,67 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
             "set_active_configuration(0) to edit the mate itself");
       }
     }
-    ui::SnapshotAssembly(state);
-    if (p.contains("rotation_deg"))
-      mate->rotation = MateRotationRadians(true, p.value("rotation_deg", 0.0),
-                                           mate->rotation);
-    if (p.contains("offset"))
-      mate->offset = p.at("offset").get<double>();
-    if (p.contains("flipped"))
-      mate->flipped = p.at("flipped").get<bool>();
-    if (p.contains("name"))
-      mate->name = p.at("name").get<std::string>();
-    if (p.contains("dx"))
-      mate->dx = p.at("dx").get<double>(); // planar
-    if (p.contains("dy"))
-      mate->dy = p.at("dy").get<double>(); // planar
-    if (p.contains("ball_rotation")) {     // ball [x,y,z,w]
-      mate->ballRotation =
-          remote::QuatParam(p.at("ball_rotation"), "ball_rotation");
+    // Edited on a copy, checked, and only then written: a refused call
+    // changes nothing (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+    Mate edited = *mate;
+    std::vector<RangedValue> named;
+    if (p.contains("rotation_deg")) {
+      edited.rotation = MateRotationRadians(true, p.value("rotation_deg", 0.0),
+                                            edited.rotation);
+      named.push_back(RangedValue::Rotation);
     }
+    if (p.contains("offset")) {
+      edited.offset = p.at("offset").get<double>();
+      named.push_back(RangedValue::Offset);
+    }
+    if (p.contains("flipped"))
+      edited.flipped = p.at("flipped").get<bool>();
+    if (p.contains("name"))
+      edited.name = p.at("name").get<std::string>();
+    if (p.contains("dx")) {
+      edited.dx = p.at("dx").get<double>(); // planar
+      named.push_back(RangedValue::Dx);
+    }
+    if (p.contains("dy")) {
+      edited.dy = p.at("dy").get<double>(); // planar
+      named.push_back(RangedValue::Dy);
+    }
+    if (p.contains("ball_rotation")) { // ball [x,y,z,w]
+      edited.ballRotation =
+          remote::QuatParam(p.at("ball_rotation"), "ball_rotation");
+      named.push_back(RangedValue::Cone);
+    }
+    // Limits (docs/assemblies/README.md#mate-limits): a value outside its
+    // range is refused naming the range, never clamped.
+    // rpc-params: rotation_range_deg, offset_range_mm, dx_range_mm
+    // rpc-params: dy_range_mm, cone_deg
+    for (RangedValue v : ApplyRangeParams(p, edited))
+      named.push_back(v);
+    std::erase_if(named, [&](RangedValue v) {
+      const auto freed = assembly::RangedValuesFor(edited.type);
+      return std::find(freed.begin(), freed.end(), v) == freed.end();
+    });
+    CheckMateRanges(edited, named);
+    CheckRelationsInRange(*state.assembly, edited, ui::PartResolverFor(state));
+    ui::SnapshotAssembly(state);
+    *mate = edited;
     // The mate just edited drives whatever it is related to: turning the
     // wheel turns the pinion as readily as the other way round.
     (void)assembly::PropagateRelations(*state.assembly, mate->id,
                                        ui::PartResolverFor(state));
     // Hold what was just set: in a closed loop the solver would otherwise
     // treat this DOF as one more unknown and move it.
-    ui::SolveActiveAssemblyDriven(state, mate->id,
-                                  p.contains("offset") ? MateDof::Offset
-                                                       : MateDof::Rotation);
+    const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(
+        state,
+        {mate->id, p.contains("offset") ? MateDof::Offset : MateDof::Rotation});
+    mate = state.assembly->FindMateById(edited.id);
     json out = MateJson(*mate);
     if (!mate->error.empty())
       out["error"] = mate->error;
+    // A loop held against a limit says so here, in the call that moved it:
+    // which mate, which limit, and where it stands.
+    if (!rep.limits.empty())
+      out["limits_held"] = LimitsJson(rep);
     return out;
   }
   if (m == "remove_mate") {

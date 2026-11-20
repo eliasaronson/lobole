@@ -133,7 +133,11 @@ const MethodDoc RequirementMethods[] = {
      "requirement whose state it changed; an unknown name or a formula that "
      "does not compile is refused naming the scope's variables), "
      "motion_clean "
-     "{document, study}, follower {document, relation: a contact relation "
+     "{document, study, whole_range?: true also requires the study to drive "
+     "its driver over the driver mate's whole limit, so the range a design "
+     "states is proved reachable without a clash "
+     "(docs/requirements/README.md#a-mates-whole-range)}, follower {document, "
+     "relation: a contact relation "
      "id, study: a motion study id, quantity: liftoff_rpm | drop_rpm | "
      "pressure_angle_deg | deviation_mm | deviation_deg | gap_mm | gap_deg, "
      "speed_rpm?, max_pressure_angle_deg?} (check_followers' number: the "
@@ -2132,7 +2136,43 @@ Taken MeasureMotionClean(ui::AppState& state, const json& m, const Ctx& ctx) {
                        driver(unsolvedAt.front()));
   if (res->cancelled)
     findings.push_back("the run was cancelled");
-  t.pass = res->clean && !res->cancelled;
+  if (res->stoppedBy)
+    findings.push_back(motion::LimitStopText(*res->stoppedBy, turns));
+  // `whole_range` (docs/requirements/README.md#a-mates-whole-range): the
+  // study must drive its driver over the driver's whole limit, so a clean
+  // run proves the range the generator stated is reachable without a
+  // clash. A range edited since, or a study that stops short, says so.
+  bool covers = true;
+  if (m.value("whole_range", false) && study) {
+    std::string why;
+    const Mate* d = assembly::MateAtPath(*state.assembly, study->driverPath,
+                                         study->driverMate,
+                                         ui::AssemblyResolverFor(state), &why);
+    const RangedValue rv = turns ? RangedValue::Rotation : RangedValue::Offset;
+    const std::optional<MateRange> r =
+        d ? assembly::RangeOf(*d, rv) : std::nullopt;
+    const double lo = std::min(study->from, study->to);
+    const double hi = std::max(study->from, study->to);
+    const double tol = turns ? 1e-9 : 1e-6;
+    if (d == nullptr) {
+      covers = false;
+      findings.push_back("whole_range: " + why);
+    } else if (!r) {
+      covers = false;
+      findings.push_back("whole_range: '" + d->name + "' has no " +
+                         assembly::RangedValueName(rv) +
+                         " range to cover (set one with set_mate)");
+    } else if (lo > r->min + tol || hi < r->max - tol) {
+      covers = false;
+      findings.push_back("whole_range: the study drives '" + d->name +
+                         "' over " + assembly::FormatRangedValue(rv, lo) +
+                         " .. " + assembly::FormatRangedValue(rv, hi) +
+                         ", not its whole range " +
+                         assembly::FormatRangedValue(rv, r->min) + " .. " +
+                         assembly::FormatRangedValue(rv, r->max));
+    }
+  }
+  t.pass = res->clean && !res->cancelled && covers;
   t.detail = {{"samples", res->samples.size()},
               {"clashes", clashes},
               {"unsolved", unsolved},

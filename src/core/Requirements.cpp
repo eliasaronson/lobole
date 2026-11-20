@@ -96,10 +96,12 @@ const std::vector<KindSpec>& Specs() {
        {"document", "allow", "allow_skipped"},
        {"document"}},
       {"check_literals", false, "part", {"document", "documents"}, {}},
+      // whole_range (docs/requirements/README.md#a-mates-whole-range): the
+      // study must also drive its driver over the driver's whole limit.
       {"motion_clean",
        false,
        "assembly",
-       {"document", "study"},
+       {"document", "study", "whole_range"},
        {"document", "study"}},
       // A contact relation's follower over a motion study's run
       // (docs/requirements/README.md#follower).
@@ -208,7 +210,7 @@ void ValidateTypes(const std::string& kind, const char* document,
                                  ": `measure.documents` lists part ids "
                                  "(list_parts), not " +
                                  e.dump());
-  for (const char* k : {"allow_unverified", "allow_skipped"})
+  for (const char* k : {"allow_unverified", "allow_skipped", "whole_range"})
     if (m.contains(k) && !m.at(k).is_boolean())
       refuse(k, "true or false");
   for (const char* k : {"offset", "resolution", "allowance_mm", "lead_in_mm",
