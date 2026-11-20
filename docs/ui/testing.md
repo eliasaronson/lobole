@@ -27,14 +27,14 @@ there is no compositor, occlusion or screen lock to throttle presentation.
 
 | flag | effect |
 |---|---|
-| (none) | whole suite, 4 shards, **shuffled**, with the seed printed |
-| `-j N` | N shards |
+| (none) | whole suite, **shuffled**, with the seed printed; one shard per free CPU, 4 to 8, as memory allows |
+| `-j N` | exactly N shards |
 | `--fast` | skip tests recorded above a time threshold (a test with no recorded time always runs) |
 | `-f <pattern>` | matching cases only, one process |
 | `--serial` | one process: the worst case for leaked state, and the way to find it |
 | `--shuffle <seed>` | replay a recorded order exactly |
 | `--in-order` | declared order, no shuffle |
-| `--record-times` | refresh `tools/gui-test-times.txt`, which balances the shards |
+| `--record-times` | rewrite `tools/gui-test-times.txt`, the committed seed of the balance, from one serial run |
 | `-L <label>` | all ctest tests with that label |
 | `--slow-frames MS`, `--slow-jobs MS` | a loaded machine, simulated ([below](#wait-on-the-condition-not-a-frame-count)) |
 
@@ -48,6 +48,16 @@ there is no compositor, occlusion or screen lock to throttle presentation.
 - It compares the number of tests that ran with `--gui-test-list`, so a bad
   partition fails loudly instead of skipping tests.
 - It reaps Xvfb servers orphaned by an earlier run.
+- Every sharded run times each test as its shard prints it and folds the
+  times into `~/.cache/lobole-dev/gui-test-times.txt` (the mean of the old
+  and the new), which balances the next run over the committed seed. Only
+  `--record-times` wrote them once, and nobody ran it: the balancer knew 190
+  of 517 tests, guessed 1.7 s for the 328 that carried 76% of the time, and
+  four shards finished 517 to 779 s into one run. A test with no time weighs
+  the median of the ones that have one. Slowed runs (`--slow-frames`,
+  `--slow-jobs`) record nothing.
+- A full run that passes on a committed tree is stamped
+  ([what a merge runs](#what-a-merge-runs)).
 
 ctest's `gui_smoke` is the same suite, serial and unsharded; it and the other
 Xvfb-needing ctest entries run under `tools/xvfb-exec.sh`. CI runs the suite
@@ -231,11 +241,19 @@ a third of a CPU, and five that pass alone in seconds ran past their
 `TIMEOUT` in one week (`refused_calls_smoke`, `fuzz_seeds_smoke`, the reader
 fuzz's `part directories 4/4`, `packaging_smoke`, the adaptive pocket). So
 `tools/ctest` takes the job count down to the CPUs other work leaves free,
-measured over one second of `/proc/stat` before the first test starts, never
-below a quarter of what was asked, and prints `-j22 -> -j6: 16 of 22 CPUs
-are busy with other work` when it does. `LOBOLE_CTEST_JOBS=asked` keeps the
-count as given. It is one reading at the start, so a build that begins
-halfway through the suite is not seen; and on a machine whose other work
+measured over one second of `/proc/stat` before the first test starts and
+against what other builds and suites have CLAIMED, never below a quarter of
+what was asked, and prints `-j22 -> -j6: 16 of 22 CPUs are busy or claimed
+by other builds and suites` when it does. `LOBOLE_CTEST_JOBS=asked` keeps
+the count as given. A claim (`tools/cpu-claims.sh`) is a file named for the
+pid of a running `tools/ctest`, `tools/build.sh` or GUI runner, holding its
+job count; it is written before the jobs start, so agents starting suites in
+the same minute no longer each see an idle machine and each run `-j22`, and
+it stops counting when its pid is gone. `tools/build-jobs` reads the claims
+too (no sample: it is a file read), and keeps a memory reserve free, 4 GB
+or `$LOBOLE_MEM_RESERVE_MB` or `~/.config/lobole-dev/memory-reserve-mb`. It
+is still one decision at the start, not a jobserver: a build that begins
+halfway through the suite is not seen, and on a machine whose other work
 alone fills it, fewer jobs of ours help only as far as the quarter.
 
 Not `ctest --test-load`: it starts nothing while the load average is past

@@ -4,7 +4,7 @@
 
 # The headless suite minus the long numeric gates — the inner loop.
 #
-#   tools/test-fast.sh            # ~65 s, against ~110 s for the full suite
+#   tools/test-fast.sh            # minutes; it prints its own time
 #   tools/test-fast.sh -R sketch  # ...further filtered, ctest args pass through
 #
 # What it skips is the `slow` LABEL, not a list of names kept here. A Catch2

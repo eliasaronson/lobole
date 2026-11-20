@@ -97,25 +97,27 @@ ITS OWN response (`regen`), not in a `get_state` the caller has to know to poll
 ## Tests
 
 **Three suites, and they do NOT overlap — running all of ctest's `gui` label
-after the sharder re-runs the whole GUI suite serially for 6 minutes.** Costs
-are upper bounds on a loaded machine; the suites print their own counts.
+after the sharder re-runs the whole GUI suite serially.** Every suite prints
+its own count and time; read that, not a number written here. The order of
+cost, measured on a loaded machine (2026-11):
 
 | what | command | cost |
 |---|---|---|
-| headless | `tools/ctest -LE gui -j$(nproc)` | ~110 s |
-| **inner loop** | `tools/test-fast.sh` | **~90 s** |
-| GUI | `./tools/gui-tests-xvfb.sh` | ~130 s |
-| the python `gui` ones | `tools/ctest -L pygui -j1` | ~110 s |
+| headless | `tools/ctest -LE gui -j$(nproc)` | ~10 min, CPU-bound |
+| **inner loop** | `tools/test-fast.sh` | **~3 min** |
+| GUI | `./tools/gui-tests-xvfb.sh` (4-8 shards by free CPUs) | ~4 min idle, ~13 loaded |
+| the python `gui` ones | `tools/ctest -L pygui -j1` | ~4 min |
 | the big generators | `tools/ctest -C generators -L generators -j2` (generators/README.md#the-big-generators-as-tests) | ~45 min |
+| every reader-fuzz case | `tools/ctest -C reader_fuzz -L reader_fuzz_all` (docs/versioning/README.md#reader-fuzzing) | ~50 CPU-min |
 | random designs | `tools/fuzz.py run --count 200` (docs/modeling/README.md#random-designs; background past 600 s) | ~1 min |
 | the action matrix | `tools/ctest -C action_matrix -L action_matrix -j4` (docs/modeling/README.md#action-matrix; `tools/action_matrix.py run --profile` says where the time goes) | ~16 min |
-| damaged files at every reader | `tools/reader-fuzz.py run --seed S` (docs/versioning/README.md#reader-fuzzing) | slow; the sample is in the headless suite |
+| damaged files at every reader, another seed | `tools/reader-fuzz.py run --seed S` (docs/versioning/README.md#reader-fuzzing) | slow; the sample is in the headless suite |
 
 `gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and
-unsharded — ~365 s against ~130 s. It keeps the `gui` label so the headless
+unsharded. It keeps the `gui` label so the headless
 run excludes it; the python ones also carry **`pygui`**, which is why the row
-above asks for a label instead of excluding `gui_smoke` by name. Full
-verification is ~5 min. `remote_smoke` is most of the `pygui` time because it
+above asks for a label instead of excluding `gui_smoke` by name.
+`remote_smoke` is most of the `pygui` time because it
 drives the WINDOWED path (`--hidden`); passing `--headless` would override
 that and stop testing what it exists for.
 
@@ -307,10 +309,14 @@ worktree, kept until the worktree is deleted (`tools/scratch_port.py` — free p
 the kernel, unclaimed by any running instance or worktree, never the human's;
 `tools/stray-instances.sh` lists every running lobole, an orphan's deleted cwd
 marked). Integrate SERIALLY, in the order branches finish:
-`tools/merge-branch.sh BRANCH [--full]` cherry-picks under `build/`'s lock
+`tools/merge-branch.sh BRANCH [--full|--release] [--dry-run]` cherry-picks under `build/`'s lock
 (remaking `rpc.py` and `rpc-surface.json` when only they conflict), builds,
-runs the suites (whole output in `build/merge-branch-suite.log`) and removes
-the worktree once every commit is on main and it holds nothing uncommitted. By hand, REMOVE the worktree as soon as its
+runs the suites the changed paths can reach and says what it skipped
+(docs/ui/testing.md#what-a-merge-runs; whole output in
+`build/merge-branch-suite.log`), and removes
+the worktree once every commit is on main and it holds nothing uncommitted.
+**Rebase the branch onto main and run its suites there before landing**: a
+suite that passed on exactly main's tree after the pick is not run again. By hand, REMOVE the worktree as soon as its
 branch is in. `git worktree remove` REFUSES here ("working trees containing
 submodules cannot be moved or removed"), so it is:
 ```
