@@ -2647,6 +2647,10 @@ StudyBodyResult::Buckling ReadBuckling(const StudyJobBody& jb,
   }
   if (worstYield > 0)
     out.yieldFactor = 1.0 / worstYield;
+  // The solve read each material against its own yield where materials
+  // meet (docs/simulation/README.md#stress-where-materials-meet).
+  if (base.factorOfSafety > 0)
+    out.yieldFactor = base.factorOfSafety;
   if (worstInter > 0)
     out.interlayerFactor = 1.0 / worstInter;
 

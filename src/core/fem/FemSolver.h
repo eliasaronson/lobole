@@ -177,6 +177,17 @@ struct FemResults {
   int maxDispNode = -1;
   glm::dvec3 maxDispAt{0, 0, 0};
 
+  // Where elements of different materials meet at a node (a bonded
+  // interface), each material's stress is averaged over its own elements:
+  // `vonMises` and `stress` keep the one with the higher von Mises, and the
+  // factor of safety reads every one against its own material's yield
+  // (docs/simulation/README.md#stress-where-materials-meet). The least
+  // yield / von Mises over every node and material, `fosAt` where; 0 when
+  // no material has a yield, and on a result saved before vNEXT (read the
+  // body's yield over maxVonMises there).
+  double factorOfSafety = 0.0;
+  glm::dvec3 fosAt{0, 0, 0};
+
   // A plastic result (docs/simulation/README.md#plasticity): the equivalent
   // plastic strain at each node, extrapolated from the integration points
   // as the stress is, and its peak; and the deformation left once the load

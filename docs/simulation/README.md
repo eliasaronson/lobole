@@ -1012,8 +1012,10 @@ buckling).
     so far (the GPU's inner iterations over its refinement steps, then the
     CPU's); the stored result names the one that ran, with `GPU declined:
     <why>` when a GPU was offered and not used. Stresses are evaluated at each
-  element's nodes and averaged to the mesh nodes weighted by element volume;
-  von Mises per node, and the maxima with their locations.
+  element's nodes and averaged to the mesh nodes weighted by element volume,
+  over the elements of one material ([stress where materials
+  meet](#stress-where-materials-meet)); von Mises per node, and the maxima
+  with their locations.
 - **Modal** (`fem::SolveModal`): `K φ = ω² M φ` with a consistent mass
   matrix, lowest `numModes` by Spectra shift-invert. It needs a fixed support,
   so K is positive definite: only the lower triangle is assembled (the only
@@ -1024,6 +1026,26 @@ buckling).
 - **Several materials in one mesh**: both solvers take one `Material` per
   mesh domain (`FemMesh::tetDomain`), which is what a bonded assembly group
   needs.
+
+### Stress where materials meet
+
+At a bonded interface the displacement is continuous and the stress is not:
+two layers pulled together share a strain, and each carries its own E
+times it. A node on the interface belongs to elements of both, so it has
+one average per material (domains of equal materials are one); averaging
+across them gave a von Mises that was neither material's, which a factor
+of safety then read against one yield. Each material keeps its own average
+there; the node's `vonMises` and `stress` show the higher of them (the
+peak, the plot and the principal and across-layer fields read that), and
+`FemResults::factorOfSafety` reads every one against its own material's
+yield: the least yield / von Mises over every node and material, with
+`fosAt`. That is the static `factor_of_safety` (a body's, a case's, the
+top level's) and a buckling result's `yield_factor`; a lower stress in a
+weaker material can govern. One material: the same number as yield over
+the peak. A result saved before vNEXT has no stored factor and reads yield
+over the peak as it did. `[fem][materials]`: two layers, E 200 and 70 GPa,
+pulled along their bond -- the bond's von Mises is the stiff layer's to
+1e-6, and the factor the soft layer's own.
 
 Per-part bodies are independent: a part study meshes and solves each body it
 references separately, with no contact between them, and `study_results`

@@ -53,6 +53,16 @@ namespace remote {
 
 namespace {
 
+// A static result's factor of safety against yield: the solve's own, which
+// reads each material against its own yield where materials meet
+// (docs/simulation/README.md#stress-where-materials-meet); on a result
+// saved before it, the body's yield over the peak. 0 = none.
+double FactorOfSafety(const fem::FemResults& r, double bodyYield) {
+  if (r.factorOfSafety > 0)
+    return r.factorOfSafety;
+  return bodyYield > 0 && r.maxVonMises > 0 ? bodyYield / r.maxVonMises : 0.0;
+}
+
 // A study whose loads make a stress to settle and whose supports may be
 // pins: a static one, and a buckling one, whose base state is a static
 // solve (docs/simulation/README.md#buckling).
@@ -1448,8 +1458,8 @@ json CheckTopology(ui::AppState& state, Host& host, Document* doc,
         {"max_von_mises_mpa", r.maxVonMises},
         {"max_von_mises_at", {r.maxVmAt.x, r.maxVmAt.y, r.maxVmAt.z}},
         {"volume_mm3", rt.shapeVolume}};
-    if (yield > 0 && r.maxVonMises > 0)
-      j["factor_of_safety"] = yield / r.maxVonMises;
+    if (const double fos = FactorOfSafety(r, yield); fos > 0)
+      j["factor_of_safety"] = fos;
     if (mp.density > 0)
       j["mass_g"] = rt.shapeVolume * 1e-9 * mp.density * 1000.0;
     return j;
@@ -3324,9 +3334,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       AcrossAway bodyAcross;
       // Factor of safety against yield, when the body's material defines one.
       if (b.results.maxVonMises > 0) {
-        const double yield = mp.yieldMPa;
-        if (yield > 0) {
-          const double fos = yield / b.results.maxVonMises;
+        if (const double fos = FactorOfSafety(b.results, mp.yieldMPa);
+            fos > 0) {
           bj["factor_of_safety"] = fos;
           if (!haveFoS || fos < minFoS)
             minFoS = fos;
@@ -3727,8 +3736,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
               host.BodyMaterial(*s, b.bodyIndex));
           const double yield =
               CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
-          if (yield > 0 && r.maxVonMises > 0) {
-            const double f = yield / r.maxVonMises;
+          if (const double f = FactorOfSafety(r, yield); f > 0) {
             if (!caseFoS || f < fos)
               fos = f;
             caseFoS = true;

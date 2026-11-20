@@ -374,6 +374,41 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     return Ds[std::min(d, Ds.size() - 1)];
   };
 
+  // Material groups for stress recovery: domains whose materials are the
+  // same are one group (their stress is continuous between them), and a
+  // node in elements of two groups is an interface node.
+  std::vector<int> groupOfDomain(byDomain.size());
+  std::vector<double> groupYield;
+  for (size_t d = 0; d < byDomain.size(); ++d) {
+    const Material& m = byDomain[d];
+    int g = -1;
+    for (size_t e = 0; e < d && g < 0; ++e) {
+      const Material& o = byDomain[e];
+      if (o.youngMPa == m.youngMPa && o.poisson == m.poisson &&
+          o.expansionPerK == m.expansionPerK && o.yieldMPa == m.yieldMPa)
+        g = groupOfDomain[e];
+    }
+    if (g < 0) {
+      g = static_cast<int>(groupYield.size());
+      groupYield.push_back(m.yieldMPa);
+    }
+    groupOfDomain[d] = g;
+  }
+  const auto groupOfTet = [&](size_t t) {
+    const size_t d = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t];
+    return groupOfDomain[std::min(d, byDomain.size() - 1)];
+  };
+  std::vector<int> groupOfNode(nNodes, -1);
+  std::vector<char> interfaceNode(nNodes, 0);
+  for (size_t t = 0; t < mesh.tets.size(); ++t)
+    for (int v : mesh.tets[t]) {
+      const int g = groupOfTet(t);
+      if (groupOfNode[v] < 0)
+        groupOfNode[v] = g;
+      else if (groupOfNode[v] != g)
+        interfaceNode[v] = 1;
+    }
+
   const Reduction red = MakeReduction(mesh, supports);
   const std::vector<int>& dofMap = red.dofs.map;
   const int nFree = red.dofs.nFree;
@@ -779,10 +814,19 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
       fint = Eigen::VectorXd::Zero(3 * nNodes);
 
     // Nodal stress recovery: evaluate element stress at each of its 10 nodes,
-    // accumulate to global nodes weighted by element volume, then average.
+    // accumulate to global nodes weighted by element volume, then average --
+    // over the elements of one material: where materials meet (a bonded
+    // interface) each keeps its own average, since the stress is not
+    // continuous there (docs/simulation/README.md
+    // #stress-where-materials-meet).
     std::vector<Eigen::Matrix<double, 6, 1>> stressAccum(
         nNodes, Eigen::Matrix<double, 6, 1>::Zero());
     std::vector<double> weight(nNodes, 0.0);
+    struct Shared {
+      Eigen::Matrix<double, 6, 1> sum = Eigen::Matrix<double, 6, 1>::Zero();
+      double weight = 0.0;
+    };
+    std::map<std::pair<int, int>, Shared> shared; // (node, material group)
     for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
       const auto& tet = mesh.tets[ti];
       const Eigen::Matrix<double, 6, 6>& D = DOf(ti);
@@ -813,8 +857,14 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
           strain -= thermalStrain(ti, Ni);
         }
         const Eigen::Matrix<double, 6, 1> s = D * strain;
-        stressAccum[tet[i]] += vol * s;
-        weight[tet[i]] += vol;
+        if (interfaceNode[tet[i]]) {
+          Shared& sh = shared[{tet[i], groupOfTet(ti)}];
+          sh.sum += vol * s;
+          sh.weight += vol;
+        } else {
+          stressAccum[tet[i]] += vol * s;
+          weight[tet[i]] += vol;
+        }
       }
       if (supports.reactions) {
         Eigen::Matrix<double, 30, 1> fe = Eigen::Matrix<double, 30, 1>::Zero();
@@ -837,13 +887,40 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
 
     out.vonMises.resize(nNodes, 0.0);
     out.stress.assign(nNodes, Stress{});
+    // yield / von Mises at a node for one material group, the least kept.
+    const auto readFoS = [&](int n, int group, double vm) {
+      const double y = groupYield[group];
+      if (y > 0 && vm > 0 &&
+          (out.factorOfSafety == 0.0 || y / vm < out.factorOfSafety)) {
+        out.factorOfSafety = y / vm;
+        out.fosAt = mesh.nodes[n];
+      }
+    };
     for (int n = 0; n < nNodes; ++n) {
       if (weight[n] > 0) {
         const Eigen::Matrix<double, 6, 1> s = stressAccum[n] / weight[n];
         out.vonMises[n] = VonMises(s);
         for (int k = 0; k < 6; ++k)
           out.stress[n][k] = s(k);
+        readFoS(n, groupOfNode[n], out.vonMises[n]);
       }
+    }
+    // An interface node shows the material whose von Mises is higher there,
+    // and every material is read against its own yield.
+    for (const auto& [key, sh] : shared) {
+      if (!(sh.weight > 0))
+        continue;
+      const int n = key.first;
+      const Eigen::Matrix<double, 6, 1> s = sh.sum / sh.weight;
+      const double vm = VonMises(s);
+      readFoS(n, key.second, vm);
+      if (vm >= out.vonMises[n]) {
+        out.vonMises[n] = vm;
+        for (int k = 0; k < 6; ++k)
+          out.stress[n][k] = s(k);
+      }
+    }
+    for (int n = 0; n < nNodes; ++n) {
       if (out.vonMises[n] > out.maxVonMises) {
         out.maxVonMises = out.vonMises[n];
         out.maxVmNode = n;

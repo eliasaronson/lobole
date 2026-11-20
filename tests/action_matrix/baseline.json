@@ -3090,6 +3090,13 @@
    "face:2/cap0": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch",
    "face:2/cap1": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch"
   },
+  "golden/vNEXT-factor-of-safety": {
+   "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
+   "edge:2/*;U*": "edge.chamfer*2 edge.fillet*2 edge.frame*2",
+   "face:2/cap0": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/cap1": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
+   "face:2/g1": "curved.frame curved.thread -face.delete -face.delete_feature face.offset_in face.offset_out"
+  },
   "golden/v28-units": {
    "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
    "edge:2/*;U*": "edge.chamfer*12 edge.fillet*12",

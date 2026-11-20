@@ -326,6 +326,11 @@ TEST_CASE("A study result of each kind reopens current, its part hashing as "
     }
     if (type == fem::AnalysisType::Static)
       CHECK_FALSE(a.results.reactions.empty());
+    // The factor of safety the solve read per material (vNEXT).
+    CHECK(b.results.factorOfSafety == a.results.factorOfSafety);
+    CHECK(b.results.fosAt == a.results.fosAt);
+    if (type == fem::AnalysisType::Static) // steel, which has a yield
+      CHECK(a.results.factorOfSafety > 0);
     // Which support's edge each node lies near, and the convergence check
     // (v206).
     CHECK(b.supportEdgeZone == a.supportEdgeZone);

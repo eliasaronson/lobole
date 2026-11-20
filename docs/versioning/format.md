@@ -354,6 +354,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A saved static result's fields take `factor_of_safety` and `factor_of_safety_at`: the least yield over von Mises over every node and every material meeting there, each material's stress averaged over its own elements ([stress where materials meet](../simulation/README.md#stress-where-materials-meet)); a result saved before has neither, and its factor is read as the body's yield over the peak, as before. Golden `vNEXT-factor-of-safety` (results are not in the single-file corpus, so their round trip is `tests/test_study_inputs.cpp`'s) |
 
 ## Paths in a project
 

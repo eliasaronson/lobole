@@ -893,3 +893,74 @@ TEST_CASE("a thermal study of 228k nodes costs what it was measured to",
 #endif // HAVE_NETGEN
 
 #endif // HAVE_FEM_SOLVER
+
+#ifdef HAVE_FEM_SOLVER
+// Two layers of different materials bonded along y = W/2 and pulled along x
+// (docs/simulation/README.md#stress-where-materials-meet). The strain is
+// the same in both, so each carries its own E times it, and a node on the
+// bond is in both. Averaging the two there gave a von Mises that is neither
+// material's; the solve now keeps each material's own, shows the higher, and
+// reads each against its own yield -- here the soft layer, at the lower
+// stress, governs.
+TEST_CASE("stress where two materials meet is each material's own",
+          "[fem][materials]") {
+  const double L = 60.0, W = 4.0, H = 4.0, F = 1000.0;
+  fem::FemMesh mesh = GenerateBoxMesh(30, 4, 2, L, W, H);
+  mesh.tetDomain.clear();
+  for (const auto& t : mesh.tets) {
+    double y = 0.0;
+    for (int k = 0; k < 4; ++k)
+      y += 0.25 * mesh.nodes[t[k]].y;
+    mesh.tetDomain.push_back(y < W / 2 ? 0 : 1);
+  }
+  // Poisson's ratio 0: a clamped end then restrains nothing sideways, and
+  // the field away from the ends is uniaxial.
+  fem::Material stiff{200000.0, 0.0}, soft{70000.0, 0.0};
+  stiff.yieldMPa = 250.0;
+  soft.yieldMPa = 30.0;
+  std::vector<int> fixed;
+  for (int n = 0; n < (int)mesh.nodes.size(); ++n)
+    if (std::abs(mesh.nodes[n].x) < 1e-9)
+      fixed.push_back(n);
+  // Each layer's end pulled by its share (E times its area), so the strain
+  // is uniform all along and each layer's stress is exactly E times it.
+  fem::FaceLoad pulls[2];
+  const double E[2] = {stiff.youngMPa, soft.youngMPa};
+  for (int k = 0; k < 2; ++k) {
+    pulls[k].type = fem::LoadType::Force;
+    pulls[k].magnitude = F * E[k] / (E[0] + E[1]);
+    pulls[k].direction = glm::dvec3(1, 0, 0);
+  }
+  for (int t = 0; t < (int)mesh.boundary.size(); ++t) {
+    const auto& tri = mesh.boundary[t];
+    if (tri.faceIndex != 1)
+      continue;
+    const double y = (mesh.nodes[tri.nodes[0]].y + mesh.nodes[tri.nodes[1]].y +
+                      mesh.nodes[tri.nodes[2]].y) /
+                     3.0;
+    pulls[y < W / 2 ? 0 : 1].tris.push_back(t);
+  }
+  std::string err;
+  const auto r =
+      fem::Solve(mesh, {stiff, soft}, fixed, {pulls[0], pulls[1]}, &err);
+  INFO(err);
+  REQUIRE(r.has_value());
+  const double strain = F / (0.5 * W * H * (stiff.youngMPa + soft.youngMPa));
+  const double sStiff = stiff.youngMPa * strain, sSoft = soft.youngMPa * strain;
+  int seen = 0;
+  for (int n = 0; n < (int)mesh.nodes.size(); ++n) {
+    const glm::dvec3 p = mesh.nodes[n];
+    if (std::abs(p.y - W / 2) > 1e-9 || std::abs(p.x - L / 2) > 1e-9)
+      continue;
+    ++seen;
+    INFO("bond node at z = " << p.z << ": " << r->vonMises[n] << " MPa; "
+                             << sStiff << " stiff, " << sSoft << " soft");
+    CHECK_THAT(r->vonMises[n], WithinRel(sStiff, 1e-6));
+  }
+  CHECK(seen > 0);
+  // Read against its own yield, the soft layer governs: 30 / sSoft, where
+  // the stiff one's 250 / sStiff, or either yield over the peak, is larger.
+  CHECK_THAT(r->factorOfSafety, WithinRel(soft.yieldMPa / sSoft, 1e-6));
+  CHECK(r->factorOfSafety < stiff.yieldMPa / r->maxVonMises);
+}
+#endif // HAVE_FEM_SOLVER

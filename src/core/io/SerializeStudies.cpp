@@ -866,6 +866,11 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
               {"max_displacement", r.maxDisplacement},
               {"max_disp_node", r.maxDispNode},
               {"max_disp_at", Vec3ToJson(r.maxDispAt)}};
+  // vNEXT: the factor of safety, each material read against its own yield.
+  if (r.factorOfSafety > 0) {
+    out["factor_of_safety"] = r.factorOfSafety;
+    out["factor_of_safety_at"] = Vec3ToJson(r.fosAt);
+  }
   if (!r.displacement.empty())
     out["displacement"] = w.F32(r.displacement);
   if (!r.vonMises.empty())
@@ -970,6 +975,9 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
   r.maxVmNode = j.value("max_vm_node", -1);
   if (j.contains("max_vm_at"))
     r.maxVmAt = Vec3FromJson(j.at("max_vm_at"));
+  r.factorOfSafety = j.value("factor_of_safety", 0.0); // vNEXT
+  if (j.contains("factor_of_safety_at"))
+    r.fosAt = Vec3FromJson(j.at("factor_of_safety_at"));
   r.maxDisplacement = j.value("max_displacement", 0.0);
   r.maxDispNode = j.value("max_disp_node", -1);
   if (j.contains("max_disp_at"))
