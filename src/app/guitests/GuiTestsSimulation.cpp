@@ -554,10 +554,20 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(shown->unit.empty());
     IM_CHECK(shown->lo > 5.0); // 250 / ~27
     IM_CHECK(shown->lo < 12.0);
-    IM_CHECK(shown->over); // most of the beam is far safer than four times it
-    // The markers: a cross at the maximum and one at the minimum, three
-    // lines each, and none with the box unticked.
+    // Most of the beam is far safer than four times it: that is the top
+    // colour, "and above", not the off-scale one a typed range gives.
+    IM_CHECK(!shown->over);
+    IM_CHECK(shown->topOpen);
+    // The markers: a factor is marked at its least value alone, three
+    // lines, and nothing with the box unticked.
     IM_CHECK(s_App->simulation.showExtremes);
+    {
+      std::vector<LineVertex3D> lines;
+      ui::AppendStudyMarker(*s_App, lines);
+      IM_CHECK_EQ(lines.size(), (size_t)6);
+    }
+    // A stress is marked at both ends.
+    choose("###field_von_mises");
     {
       std::vector<LineVertex3D> lines;
       ui::AppendStudyMarker(*s_App, lines);

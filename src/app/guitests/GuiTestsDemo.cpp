@@ -697,7 +697,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     Hold(ctx, 0.5);
     ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
-    ctx->ItemClick("//###ToolWindow/**/###result_field");
+    ctx->ItemClick("//###ToolWindow/###result_field");
     ctx->Yield();
     IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
     ctx->ItemClick((std::string("//") +
@@ -712,7 +712,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     Hold(ctx, 0.5);
     OrbitFor(ctx, 30.0, 2.0);
-    ctx->ItemClick("//###ToolWindow/**/###result_field");
+    ctx->ItemClick("//###ToolWindow/###result_field");
     ctx->Yield();
     IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
     ctx->ItemClick((std::string("//") +
