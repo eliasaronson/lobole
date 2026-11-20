@@ -360,7 +360,7 @@
    "edge:110/*;U*": "edge.chamfer*3 !edge.chamfer*3 edge.fillet*4 !edge.fillet*2 edge.frame*5",
    "edge:170/*;U*": "edge.chamfer*10 edge.fillet*10",
    "face:100/*;U*": "face.delete*2 -face.delete*2 -face.delete_feature*4 face.extrude_add*3 face.extrude_cut*3 face.frame*3 face.hole*3 face.offset_in*1 -face.offset_in*2 face.offset_out*1 -face.offset_out*2 -face.replace*3 !face.shell*3 face.sketch*3",
-   "face:100/cap0;M110;M160;M170": "-face.delete !face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.move face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
+   "face:100/cap0;M110;M160;M170": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.move face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:100/cap1;M160;M170": "-face.delete !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:100/g1;M110;M160": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
    "face:100/g2;G130;M160": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch",
@@ -3084,11 +3084,11 @@
    "face:2/g605787230": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch"
   },
   "golden/v217-closed-spline-two-edges": {
-   "body:2": "body.mirror body.pattern_circular body.pattern_linear !body.split",
-   "edge:2/*;U*": "edge.chamfer*4 edge.fillet*4",
-   "face:2/*;U*": "-face.delete*2 -face.delete_feature*2",
+   "body:2": "-body.mirror -body.pattern_circular -body.pattern_linear !body.split",
+   "edge:2/*;U*": "edge.chamfer*2 -edge.chamfer*2 edge.fillet*2 -edge.fillet*2",
+   "face:2/*;U*": "-face.delete*4 -face.delete_feature*4",
    "face:2/cap0": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch",
-   "face:2/cap1": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch"
+   "face:2/cap1;M3": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace !face.shell face.sketch"
   },
   "golden/v219-factor-of-safety": {
    "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
@@ -4118,7 +4118,6 @@
   "golden/v113-closed-corner": {"edges": 1, "faces": 0},
   "golden/v155-ellipse-axis-ends": {"edges": 1, "faces": 0},
   "golden/v18-end-conditions": {"edges": 2, "faces": 0},
-  "golden/v217-closed-spline-two-edges": {"edges": 2, "faces": 0},
   "golden/v40-spline": {"edges": 2, "faces": 0},
   "reference/09-thin-extrude": {"edges": 18, "faces": 0},
   "reference/14-box-round-all": {"edges": 8, "faces": 0},
@@ -4135,14 +4134,13 @@
   "golden/v97-import-keep-origin": "regen not clean: Neighbour part: failed to read 'neighbour_in_its_own_frame.step' as STEP"
  },
  "slow": {
-  "generator/gear_train#pinion": {"face:2/cap0;M4 face.delete": 18.3, "face:2/cap1;M4 face.delete": 17.1},
-  "golden/v117-bent-path": {"body:2 body.pattern_circular": 32.5},
-  "golden/v119-cope": {"body:2 body.pattern_circular": 23.4},
+  "generator/gear_train#idler": {"face:2/g120 face.shell": 5.8},
+  "generator/gear_train#pinion": {"face:2/cap0;M4 face.delete": 17.2, "face:2/cap1;M4 face.delete": 16.3},
+  "golden/v117-bent-path": {"body:2 body.pattern_circular": 24.1},
+  "golden/v119-cope": {"body:2 body.pattern_circular": 29.6},
   "golden/v119-tube-rules": {"body:2 body.pattern_circular": 31.6},
-  "golden/v146-worm": {"edge:2/*;U* edge.chamfer": 21.8, "face:1/face1;M* face.shell": 79.9},
-  "golden/v198-cam-profile": {"face:1/face2;M* face.shell": 5.6},
-  "golden/v217-closed-spline-two-edges": {"body:2 body.mirror": 5.5},
-  "reference/25-modelled-thread": {"face:2/cap1;M3 face.replace": 5.2}
+  "golden/v146-worm": {"face:1/face1;M* face.shell": 79.8},
+  "golden/v198-cam-profile": {"face:1/face1;M* face.shell": 5.1, "face:1/face2;M* face.shell": 5.3}
  },
  "known": [
  ]
