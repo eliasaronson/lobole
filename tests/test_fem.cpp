@@ -719,6 +719,46 @@ TEST_CASE("Solver: a GPU solve that falls short is finished on the CPU from "
   CHECK(seen.back() <= report.iterations);
 }
 
+TEST_CASE("Solver: a GPU answer finished at the energy floor is an answer",
+          "[fem][solver]") {
+  // A GPU that falls short stops where three steps gain less energy than
+  // fp64 can tell (TopoGpuSolver's Refine), a little above its 1e-7. Its
+  // iterate, finished on the CPU, then gains nothing the stall window can
+  // see either, and was refused "stopped gaining" at a residual the
+  // acceptance takes: the tea alarm's clip, one run in three, by the GPU's
+  // unreproducible arithmetic. Here the GPU's answer is the exact one 1e-7
+  // long, whose energy lies 1e-14 of it above the floor, and the window is
+  // one iteration, so the stall comes at once rather than after 2000.
+  TwoMaterialBeam beam;
+  beam.cases.resize(1); // the GPU's case only: one falling short ends it
+  fem::SolveOptions cold;
+  cold.iterativeAboveDofs = 0;
+  std::string err;
+  const auto exact = beam.Solve(cold, nullptr, &err);
+  INFO(err);
+  REQUIRE(exact);
+  std::vector<glm::dvec3> partial = exact->front().displacement;
+  for (glm::dvec3& d : partial)
+    d *= 1.0 + 1e-7;
+  fem::SolveOptions warm = cold;
+  warm.stallIterations = 1;
+  warm.makeExternal =
+      [&](std::string*) -> std::unique_ptr<fem::TopoLinearSolver> {
+    return std::make_unique<ShortSolver>(partial);
+  };
+  fem::SolveReport report;
+  const auto finished = beam.Solve(warm, &report, &err);
+  INFO(err);
+  REQUIRE(finished);
+  CHECK(report.externalDeclined == "fell short of its tolerance (a test's)");
+  CHECK(report.worstResidual <= 1e-6);
+  double worst = 0.0;
+  for (size_t n = 0; n < exact->front().displacement.size(); ++n)
+    worst = std::max(worst, glm::length(exact->front().displacement[n] -
+                                        finished->front().displacement[n]));
+  CHECK(worst <= 1e-5 * exact->front().maxDisplacement);
+}
+
 TEST_CASE("Solver: an iterative solve stops when cancelled", "[fem][solver]") {
   TwoMaterialBeam beam;
   fem::SolveOptions iterative;

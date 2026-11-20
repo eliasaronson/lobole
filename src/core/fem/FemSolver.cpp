@@ -102,6 +102,10 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
 
 namespace {
 
+// The relative residual |K u - f| / |f| an iterative answer (and a direct
+// one) is held to before it is used.
+constexpr double kAcceptResidual = 1e-6;
+
 // What holds a mesh, as the reduced system SolveCases and SolveBuckling both
 // solve in: each held node's DOF in its own frame (R's columns; a node also
 // fixed is fixed, all three held, its frame immaterial), a tie's master
@@ -767,14 +771,25 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
       std::function<void(int)> iterated;
       if (options.iterated)
         iterated = [&](int n) { options.iterated(iterationsSoFar + n); };
-      const PcgOutcome o = Pcg(K, ic, F, u, 1e-8, maxIterations,
-                               options.cancelled, &its, &rel, iterated);
+      const PcgOutcome o =
+          Pcg(K, ic, F, u, 1e-8, maxIterations, options.cancelled, &its, &rel,
+              iterated,
+              options.stallIterations > 0 ? options.stallIterations
+                                          : kPcgStallIterations);
       iterationsSoFar += its;
       if (report)
         report->iterations += its;
       if (o == PcgOutcome::Cancelled)
         return fail("cancelled");
-      if (o != PcgOutcome::Converged)
+      // A stall is the floor of what fp64 can gain, and an iterate there
+      // that already meets the acceptance below is an answer: that check
+      // holds it to K u = f as it holds a converged one. A GPU that falls
+      // short stops on the same energy floor (TopoGpuSolver's Refine), a
+      // little above its 1e-7, so its iterate, finished here, gained
+      // nothing the window could see and was refused "stopped gaining" at
+      // a residual of a few 1e-7 (the tea alarm's clip, one run in three).
+      if (o != PcgOutcome::Converged &&
+          !(o == PcgOutcome::Stalled && rel <= kAcceptResidual))
         return fail(PcgFailure(o, its, rel) + gpuWhy);
     } else if (!iterative && !given) {
       u = direct.solve(F);
@@ -793,7 +808,7 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
       // The supports were checked above: a direct factor that misses is a
       // singular K they do not explain (a piece of the mesh nothing holds);
       // an iterative answer is held to its own tolerance before this.
-      if (!u.allFinite() || residual > 1e-6)
+      if (!u.allFinite() || residual > kAcceptResidual)
         return fail(iterative ? "the iterative solve's answer does not "
                                 "satisfy K u = f: relative residual " +
                                     std::to_string(residual)

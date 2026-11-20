@@ -989,13 +989,19 @@ buckling).
       plate as "insufficiently constrained".) It fails, as a solver
       failure naming the residual and the iterations, when 2000 iterations
       lower the energy by less than fp64 can tell from rounding ("stopped
-      gaining"), when a step is not finite ("broke down"), or at
-      `max(10000, DOF/4)` iterations ("did not converge").
+      gaining") at a residual above the 1e-6 every answer is held to, when
+      a step is not finite ("broke down"), or at `max(10000, DOF/4)`
+      iterations ("did not converge"). A stall at or under 1e-6 is the
+      floor of what fp64 can gain on an answer the acceptance already
+      takes, and is used.
     - A case the GPU falls short on is finished on the CPU from where the
       GPU got to (a start worse than zero is dropped), and the rest of the
       cases on the CPU. The result's `solver` names the CPU with `GPU
       declined: <why>`, and if the CPU fails too its error ends "the GPU
-      solve before it: <why>".
+      solve before it: <why>". The GPU stops short on the same energy
+      floor the CPU's stall reads, a little above its 1e-7, so its iterate
+      gains nothing the CPU's window can see: refused as stalled, it failed
+      the tea alarm's clip one run in three, at a residual of a few 1e-7.
     - The GPU's own arithmetic is not reproducible run to run (its SpMV
       scatters each element's product with an fp32 `atomicAdd`, in
       whatever order the device schedules it):

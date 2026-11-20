@@ -20,6 +20,7 @@
 
 #include <Eigen/Sparse>
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <string>
@@ -208,6 +209,9 @@ inline constexpr double kTriW = (1.0 / 3) * (1.0 / 2);
 // residual.
 enum class PcgOutcome { Converged, Cancelled, Stalled, BrokeDown, Capped };
 
+// The window Stalled is judged over.
+inline constexpr int kPcgStallIterations = 2000;
+
 // What an outcome that is not Converged or Cancelled reads as, for an error.
 inline std::string PcgFailure(PcgOutcome o, int iterations, double rel) {
   const std::string at = "a relative residual of " + std::to_string(rel) +
@@ -231,9 +235,10 @@ inline PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
                       const Eigen::VectorXd& f, Eigen::VectorXd& u, double tol,
                       int maxIterations, const std::function<bool()>& cancelled,
                       int* iterations, double* relResidual,
-                      const std::function<void(int)>& iterated = {}) {
+                      const std::function<void(int)>& iterated = {},
+                      int stallIterations = kPcgStallIterations) {
   constexpr int kCancelEvery = 32;
-  constexpr int kStallIterations = 2000;
+  const int kStallIterations = std::max(1, stallIterations);
   const double fNorm = f.norm();
   *iterations = 0;
   *relResidual = 0.0;

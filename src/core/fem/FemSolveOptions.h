@@ -84,6 +84,9 @@ struct SolveOptions {
   // A static solve under a thermal load: the temperature at every node of
   // the mesh it solves. Null: none.
   std::shared_ptr<const NodalTemperature> thermal;
+  // The CPU's iterative solve judges a stall over this many iterations
+  // (fem::internal::kPcgStallIterations when 0). A test sets it.
+  int stallIterations = 0;
 };
 
 // What a solve did, for the study's result and its status.
