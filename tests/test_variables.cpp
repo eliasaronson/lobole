@@ -531,6 +531,38 @@ TEST_CASE("Rename reaches a study and a configuration's overrides; delete "
   CHECK(doc.FindStudy(id)->loads.at(0).magnitude.expr == "pull * 2");
 }
 
+TEST_CASE("A variable a configuration's override reads cannot be deleted",
+          "[variables]") {
+  Document doc;
+  doc.SetParameter("pull", "100");
+  doc.SetParameter("depth", "3");
+  Configuration cfg = doc.AddConfiguration("Heavy");
+  cfg.parameterOverrides = {{"depth", "pull / 10"}};
+  REQUIRE(doc.ReplaceConfiguration(cfg));
+  // Nothing but the override reads `pull`.
+  std::vector<std::string> refs;
+  CHECK_FALSE(doc.RemoveParameter("pull", &refs));
+  REQUIRE(refs.size() == 1);
+  CHECK(refs[0] == "configuration 'Heavy' (its override of 'depth')");
+  CHECK(doc.FindParameter("pull") != nullptr);
+
+  // A project variable the same: refused, naming the part's configuration.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+  REQUIRE(ui::SetProjectVariable(state, "pull", "100", ""));
+  state.document->SetParameter("depth", "3");
+  Configuration pc = state.document->AddConfiguration("Heavy");
+  pc.parameterOverrides = {{"depth", "pull / 10"}};
+  REQUIRE(state.document->ReplaceConfiguration(pc));
+  refs.clear();
+  CHECK_FALSE(ui::RemoveProjectVariable(state, "pull", &refs));
+  CHECK(std::find(refs.begin(), refs.end(),
+                  "Part 1: configuration 'Heavy' (its override of 'depth')") !=
+        refs.end());
+}
+
 TEST_CASE("A project variable's rename and delete reach a part's study and an "
           "assembly's",
           "[variables]") {

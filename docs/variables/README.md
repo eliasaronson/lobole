@@ -352,8 +352,9 @@ every variable the features read becomes one.
     project rename puts the requirement back too; a part's undo does not.
 - **Delete** is **refused while the variable is referenced**. The refusal
   lists the references, for example `parameter 'x'`, `feature 'Extrude 1'`,
-  `study 'Bracket'`, `<Part>: feature '…'` or `<Assembly>: study '…'` for
-  the project scope, or `requirement 'wall'`
+  `study 'Bracket'`, `configuration 'Heavy' (its override of 'depth')` (an
+  override whose text reads it), `<Part>: feature '…'` or
+  `<Assembly>: study '…'` for the project scope, or `requirement 'wall'`
   (`ui::RequirementReferences`; `ui::RemovePartVariable` for a part-local
   one). Nothing is left dangling silently. A table is refused the same way
   while a variable, a feature or a requirement looks it up.

@@ -1454,6 +1454,15 @@ Document::FindParameterReferences(const std::string& name) {
     if (SlotReads(slot, name) && (refs.empty() || refs.back() != owner))
       refs.push_back(owner);
   });
+  // A configuration whose override text reads it: deleted, the override
+  // would stop evaluating and the configuration build something else.
+  for (const Configuration& cfg : m_configurations)
+    for (const auto& [overridden, expr] : cfg.parameterOverrides)
+      if (references(expr)) {
+        refs.push_back("configuration '" + cfg.name + "' (its override of '" +
+                       overridden + "')");
+        break;
+      }
   return refs;
 }
 
