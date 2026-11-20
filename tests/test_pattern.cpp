@@ -115,7 +115,7 @@ TEST_CASE("Expression-driven count and spacing follow parameter edits",
   uint64_t box = AddBox(doc, "A", {0, 0, 0}, 2.0);
   auto pat = std::make_unique<PatternFeature>("Arr", PatternKind::Linear, box);
   pat->axis.kind = AxisRef::Kind::X;
-  pat->countExpr = "n";
+  pat->count.expr = "n";
   pat->spacing.expr = "gap";
   doc.AddFeature(std::move(pat));
   REQUIRE(doc.GetBodies().size() == 3);
@@ -123,6 +123,28 @@ TEST_CASE("Expression-driven count and spacing follow parameter edits",
   doc.SetParameter("n", "5");
   CHECK(doc.GetBodies().size() == 5); // count follows the variable
   CHECK_THAT(TotalVolume(doc), WithinRel(40.0, 1e-4));
+}
+
+TEST_CASE("A count that comes out fractional is refused, not rounded",
+          "[pattern]") {
+  Document doc;
+  doc.SetParameter("n", "5");
+  uint64_t box = AddBox(doc, "A", {0, 0, 0}, 2.0);
+  auto pat = std::make_unique<PatternFeature>("Arr", PatternKind::Linear, box);
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count.expr = "n";
+  pat->spacing = 5.0;
+  PatternFeature* f = pat.get();
+  doc.AddFeature(std::move(pat));
+  REQUIRE(doc.GetBodies().size() == 5);
+
+  doc.SetParameter("n", "5 / 2"); // 2.5 copies is not a pattern
+  CHECK(f->GetError().find("2.5") != std::string::npos);
+  // The last good count stands; nothing was rounded to 2 or 3.
+  CHECK(f->count == 5);
+
+  doc.SetParameter("n", "0"); // below the seed: refused, not made 1
+  CHECK(f->GetError().find("got 0") != std::string::npos);
 }
 
 // --- Failure + serialization -------------------------------------------------
@@ -146,7 +168,7 @@ TEST_CASE("Pattern round-trips through JSON", "[pattern]") {
     auto pat =
         std::make_unique<PatternFeature>("Arr", PatternKind::Linear, box);
     pat->axis.kind = AxisRef::Kind::X;
-    pat->countExpr = "n";
+    pat->count.expr = "n";
     pat->spacing = 5.0;
     doc.AddFeature(std::move(pat));
     REQUIRE(testio::Save(doc, path.string()));
@@ -156,7 +178,7 @@ TEST_CASE("Pattern round-trips through JSON", "[pattern]") {
   auto* pat = dynamic_cast<PatternFeature*>(loaded->GetFeature(1));
   REQUIRE(pat != nullptr);
   CHECK(pat->kind == PatternKind::Linear);
-  CHECK(pat->countExpr == "n");
+  CHECK(pat->count.expr == "n");
   CHECK(pat->axis.kind == AxisRef::Kind::X);
   CHECK(loaded->GetBodies().size() == 4);
   fs::remove(path);

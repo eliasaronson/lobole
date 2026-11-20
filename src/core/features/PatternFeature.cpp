@@ -161,6 +161,13 @@ void CarryMarks(std::vector<Body>& bodies, const SeedMarks& marks,
 // rotation that hung the same way (hostile_params_smoke).
 bool PatternFeature::PatternInRange(int n) {
   constexpr int kMaxCopies = 10000; // each is a boolean against the body
+  // At least the seed: a count of 0 (or below) is refused, not made 1.
+  if (n < 1) {
+    SetError("count is the number of instances, the seed included, so 1 or "
+             "more; got " +
+             std::to_string(n));
+    return false;
+  }
   if (n > kMaxCopies) {
     SetError("a pattern makes at most " + std::to_string(kMaxCopies) +
              " copies; count is " + std::to_string(n));
@@ -250,11 +257,7 @@ bool PatternFeature::Execute(RegenContext& ctx) {
   // copies removed nothing). `angle_deg` is the STEP between instances, so
   // six round a circle is 60 and 360 stacks all six on the first.
   if (kind != PatternKind::Mirror) {
-    int n = count;
-    if (!countExpr.empty() && ctx.symbols != nullptr)
-      if (const auto v =
-              ExpressionEngine::Default().EvaluateText(countExpr, *ctx.symbols))
-        n = static_cast<int>(std::lround(*v));
+    const int n = count;
     if (n > 1 && kind == PatternKind::Linear && std::abs(spacing) < 1e-9) {
       SetError("spacing 0 puts every copy on the seed");
       return false;
@@ -301,16 +304,8 @@ bool PatternFeature::Execute(RegenContext& ctx) {
       SetError("pattern axis not found");
       return false;
     }
-    // Resolve the count (expression over the parameter table, else literal).
-    int n = count;
-    if (!countExpr.empty() && ctx.symbols != nullptr) {
-      const auto v =
-          ExpressionEngine::Default().EvaluateText(countExpr, *ctx.symbols);
-      if (v.has_value()) {
-        n = static_cast<int>(std::lround(*v));
-      }
-    }
-    n = std::max(1, n);
+    // The count as evaluated (Document::Regenerate, before execution).
+    const int n = count;
     if (!PatternInRange(n)) // a count, spacing or angle past what it can take
       return false;
 
@@ -387,14 +382,7 @@ bool PatternFeature::ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,
       SetError("pattern axis not found");
       return false;
     }
-    int n = count;
-    if (!countExpr.empty() && ctx.symbols != nullptr) {
-      const auto v =
-          ExpressionEngine::Default().EvaluateText(countExpr, *ctx.symbols);
-      if (v.has_value())
-        n = static_cast<int>(std::lround(*v));
-    }
-    n = std::max(1, n);
+    const int n = count;
     if (!PatternInRange(n)) // a count, spacing or angle past what it can take
       return false;
     for (int k = 1; k < n; k++) { // k = 0 is the source cut itself

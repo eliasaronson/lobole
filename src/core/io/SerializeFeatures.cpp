@@ -649,6 +649,11 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
     op.sourceIds.push_back(EntityIdFromJson(s, "sketch derived op source_ids"));
   op.vec = Vec2FromJson(j.at("vec"));
   op.scalar = j.at("scalar").get<double>();
+  // Whole counts: get<int>() truncates, so a count of 2.5 read as 2.
+  for (const char* key : {"count", "count2"})
+    if (j.contains(key) && !readctx::IsWhole(j.at(key)))
+      throw std::runtime_error("sketch derived op " + std::string(key) + " " +
+                               j.at(key).dump() + " is not a whole number");
   op.count = j.at("count").get<int>();
   if (j.contains("vec2")) // v50: 2D linear grid
     op.vec2 = Vec2FromJson(j.at("vec2"));
@@ -1968,8 +1973,7 @@ json FeatureToJson(const Feature& feature) {
         j["base_plane"] = PlaneTypeToString(pat->basePlane);
     } else {
       j["axis"] = AxisRefToJson(pat->axis);
-      j["count"] = pat->count;
-      WriteExprText(j, "count", pat->countExpr);
+      WriteExpr(j, "count", pat->count);
       if (pat->kind == PatternKind::Linear) {
         WriteExpr(j, "spacing", pat->spacing);
       } else { // Circular
@@ -4318,8 +4322,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             PlaneTypeFromString(j.at("base_plane").get<std::string>());
     } else {
       pat->axis = AxisRefFromJson(j.at("axis"));
-      pat->count = j.value("count", 3);
-      pat->countExpr = ReadExprText(j, "count");
+      ReadExpr(j, "count", pat->count);
       if (pat->kind == PatternKind::Linear) {
         pat->spacing = j.value("spacing", 5.0);
         pat->spacing.expr = ReadExprText(j, "spacing");

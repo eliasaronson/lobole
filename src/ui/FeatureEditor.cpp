@@ -391,10 +391,13 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
 }
 
 // The integer sibling of ExprDim: a literal InputInt with an "fx" button to
-// switch to an expression (evaluated against the parameter table, rounded).
+// switch to an expression (evaluated against the parameter table; one that
+// comes out fractional is the feature's error, never rounded).
 void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
-               const char* label, std::string& exprText, int& value) {
+               const char* label, ExprInt& count) {
   Document& doc = *state.document;
+  std::string& exprText = count.expr;
+  int& value = count.value;
   ImGui::PushID(label);
 
   if (exprText.empty()) {
@@ -445,13 +448,12 @@ void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
     CommitDiscrete(state, feature, before, index, commit);
   }
 
-  const auto v =
-      ExpressionEngine::Default().EvaluateText(exprText, doc.Symbols());
-  if (v.has_value())
-    ImGui::TextDisabled("= %d", std::max(1, static_cast<int>(std::lround(*v))));
+  ExprInt probe = count; // evaluated as the regeneration will, on a copy
+  std::string why;
+  if (EvaluateSlot(ExprSlot(probe, "count"), doc.Symbols(), &why))
+    ImGui::TextDisabled("= %d", probe.value);
   else
-    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
-                       v.error().message.c_str());
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s", why.c_str());
   ImGui::SameLine();
   if (ImGui::SmallButton("123")) {
     nlohmann::json before = DocumentIO::FeatureToJson(feature);
@@ -1039,12 +1041,12 @@ void DrawPatternParams(AppState& state, PatternFeature& pat, size_t index,
     break;
   case PatternKind::Linear:
     DrawAxisRefCombo(state, pat, pat.axis, index, commit, /*sketch=*/0);
-    ExprCount(state, pat, index, commit, "Count", pat.countExpr, pat.count);
+    ExprCount(state, pat, index, commit, "Count", pat.count);
     ExprDim(state, pat, index, commit, "Spacing", pat.spacing);
     break;
   case PatternKind::Circular:
     DrawAxisRefCombo(state, pat, pat.axis, index, commit, /*sketch=*/0);
-    ExprCount(state, pat, index, commit, "Count", pat.countExpr, pat.count);
+    ExprCount(state, pat, index, commit, "Count", pat.count);
     ExprDim(state, pat, index, commit, "Angle (deg)", pat.angleDeg);
     break;
   }

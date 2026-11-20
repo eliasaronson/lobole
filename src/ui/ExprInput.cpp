@@ -256,6 +256,20 @@ bool ExprCommitOnItem(AppState& state, ImGuiID id, double* out,
   return true;
 }
 
+// An integer field's typed expression: a whole number, or refused with the
+// value it came out as (prompt-bar feedback) -- never rounded to a count
+// nobody wrote.
+bool WholeOrRefused(AppState& state, double v) {
+  if (std::isfinite(v) && std::abs(v - std::round(v)) <= 1e-9 &&
+      std::abs(v) <= 2147483647.0)
+    return true;
+  char msg[96];
+  std::snprintf(msg, sizeof msg,
+                "a whole number is needed here, and that is %g", v);
+  state.sketchEdit.actionMsg = msg;
+  return false;
+}
+
 // The id of the text field inside an InputScalar. With step buttons ImGui
 // wraps it in PushID(label) + InputText(""), so the group's id is not the
 // one to watch; without them the field IS the item. InputScalarN nests one
@@ -322,9 +336,10 @@ bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
                  int vmin, int vmax, const char* fmt) {
   if (InExprMode(label)) {
     double expr = 0.0;
-    if (!DrawExprField(state, label, &expr, nullptr))
+    if (!DrawExprField(state, label, &expr, nullptr) ||
+        !WholeOrRefused(state, expr))
       return false;
-    const int n = static_cast<int>(std::lround(expr));
+    const int n = static_cast<int>(std::lround(expr)); // whole, checked
     *v = vmin < vmax ? std::clamp(n, vmin, vmax) : n; // equal: unbounded
     return true;
   }
@@ -407,8 +422,12 @@ bool ExprInputInt(AppState& state, const char* label, int* v,
   const ImGuiID field = InnerFieldId(label);
   bool changed = ImGui::InputInt(label, v);
   double expr = 0.0;
-  if (ExprCommitOnItem(state, field, &expr, exprOut)) {
-    *v = static_cast<int>(std::lround(expr));
+  std::string text;
+  if (ExprCommitOnItem(state, field, &expr, &text) &&
+      WholeOrRefused(state, expr)) {
+    *v = static_cast<int>(std::lround(expr)); // whole, checked
+    if (exprOut != nullptr)
+      *exprOut = std::move(text);
     changed = true;
   }
   return changed;
