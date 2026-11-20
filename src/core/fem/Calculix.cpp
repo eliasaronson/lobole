@@ -2809,10 +2809,9 @@ bool NonlinearOnCalculix(
         applied[n] += at.factor * p[n];
     }
   }
-  result.appliedN = refTotal;
+  glm::dvec3 appliedTotal = refTotal;
   for (size_t n = 0; n < nNodes; ++n)
-    result.appliedN += applied[n];
-  result.hasApplied = true;
+    appliedTotal += applied[n];
   glm::dvec3 balance = refTotal;
   double scale = glm::length(refTotal);
   double carried = 0.0;
@@ -2827,6 +2826,9 @@ bool NonlinearOnCalculix(
       : req.nlgeom
           ? LargeDeformationFields(mesh, mats, at.u, options.thermal.get())
           : SmallDeformationFields(mesh, mats, at.u, options.thermal.get());
+  // Set after the fields, which replace the whole result.
+  result.appliedN = appliedTotal;
+  result.hasApplied = true;
   if (req.plasticity && !req.snapThrough && !collapsed) {
     if (r.end != PassOutcome::End::Completed || !r.haveUnloaded ||
         r.unloaded.factor < 2.0 * cap * (1.0 - 1e-9))
