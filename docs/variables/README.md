@@ -23,12 +23,12 @@ for agents.
   project's. A local variable shadows a project variable of the same name.
   Project variables are evaluated without the part scope, so they cannot
   refer to part-local names.
-- **Expression field.** A numeric feature parameter keeps its literal value
-  and, optionally, an expression text beside it. The feature declares the
-  pairs through `Feature::VisitExprs(text, value)` in `src/core/Feature.h`.
-  An empty text means a plain literal. In JSON the text is
-  `"<field>_expr"` next to the number (for example `distance_expr`), and it
-  is omitted when empty. Sketches have two kinds of expression field:
+- **Expression field.** A numeric parameter keeps its value and,
+  optionally, an expression text beside it: an `ExprValue`
+  ([below](#numbers-that-are-expressions)). An empty text means a plain
+  literal. In JSON the text is `"<field>_expr"` next to the number (for
+  example `distance_expr`), and it is omitted when empty. Sketches have two
+  kinds of expression field:
   - a dimension constraint's `valueExpr`, stored as the `"expr"` key;
   - driven entity coordinates in `SketchFeature::entityExprs`: Line
     `ax ay bx by`, Circle and Arc `cx cy r`, Point `x y`, and a spline's
@@ -40,6 +40,53 @@ for agents.
     end, which can: [../sketching/README.md](../sketching/README.md#ellipses-and-splines)). An `_expr` key the entity does not have (`radius_expr` on a
     circle, whose field is `r`) is refused naming the ones it takes, not
     dropped: dropped, the dimension would silently freeze at its literal.
+
+## Numbers that are expressions
+
+One type and one hook carry every expression-capable number, in
+`src/core/ExprValue.h`:
+
+- **`ExprValue`** is `{value, expr}`: the evaluated number geometry reads
+  (it converts to `double`), and the text that drives it, empty for a
+  literal. Assigning a `double` sets the value and leaves the text, which is
+  what evaluation and a computed default do; unbinding is clearing `expr`.
+  **`ExprInt`** is a count: a result that is not a whole number is
+  refused, never rounded. **`ExprAngle`** is stored in radians and written,
+  read and evaluated in degrees. Feature angles (`angle_deg`, `twist_deg`)
+  are stored in degrees, so they are `ExprValue`s whose quantity is an
+  angle.
+- **`WriteExpr` / `ReadExpr`** write and read `<key>` and `<key>_expr`
+  together (`WriteExprText` / `ReadExprText` the text alone, for a value
+  written under a condition of its own, and for the few keys whose text is
+  not `<key>_expr`: an extrude's `twist_deg` beside `twist_expr`). An
+  `_expr` that is not text or does not parse is **refused** where it is
+  read, naming the key; one naming a variable that does not exist loads,
+  and fails where it is evaluated, since that is the scope's question.
+- **`VisitExprs(ExprVisitor)`** hands each number to the visitor as an
+  `ExprSlot`: its text, its value in the expression's units (degrees for a
+  radian-stored angle), what it measures (`ExprQuantity`: length, angle,
+  count, other) and where it lives (`distance`, `origin/2`,
+  `loads/0/magnitude`). `Feature`, `fem::Study` and a requirement's
+  `Bound` implement it. A number the geometry reads as part of a vector (a
+  Frame's origin, a MoveFace's translation), a sketch dimension and a
+  pattern's count (which rounds) stay a value and a text of their own, and
+  are visited as slots on that pair.
+
+Everything that walks expressions walks that hook:
+
+- evaluation: `EvaluateSlot` in the regeneration loop, and
+  `fem::EvaluateStudyExprs` when a study meshes;
+- rename: `Document::RenameParameter` and `RewriteProjectVarRefs` rewrite
+  the features' and the studies' slots and the configurations' overrides;
+  a project rename does an assembly's studies too;
+- the refusal to delete a variable something reads
+  (`Document::FindParameterReferences`, `ui::ProjectVarReferences`);
+- the literals lint ([below](#literals-that-should-be-expressions)), which
+  takes each field's quantity from its slot.
+
+**Scope.** A part's features and studies resolve against the part's
+variables, then the project's. An assembly's studies resolve against the
+project's.
 
 ## The expression language
 
@@ -172,8 +219,8 @@ its last value and the message becomes that **feature's error**. It is not
 dropped silently.
 
 Sketch angle dimensions are stored in **radians**, but their expressions
-are written in **degrees**. `SketchFeature::VisitExprs` converts between
-the two around the evaluation. Driven sketch coordinates are held fixed in
+are written in **degrees**. `SketchFeature::VisitExprs` visits them as a
+radian slot (`ExprSlot::Radians`), which converts both ways. Driven sketch coordinates are held fixed in
 the solver, because the variable table owns their value, not the solver
 (see [../sketching/README.md](../sketching/README.md#linked-copies)).
 
@@ -280,13 +327,15 @@ every variable the features read becomes one.
 
 ## Rename and delete
 
-- **Rename.** `Document::RenameParameter` rewrites every parameter and
-  feature expression with `RenameIdentifier`. The rewrite works on tokens
-  and preserves every other byte of the text. Text that cannot be tokenized
-  is left as it is.
+- **Rename.** `Document::RenameParameter` rewrites every parameter,
+  feature and study expression with `RenameIdentifier`, and every
+  configuration override: the name it overrides and its text, so the
+  override keeps applying. The rewrite works on tokens and preserves every
+  other byte of the text. Text that cannot be tokenized is left as it is.
   - A project-scope rename (`ui::RenameProjectVariable` in
     `src/ui/VariableActions.cpp`) rewrites every part, except parts where a
-    local variable of the same name shadows it.
+    local variable of the same name shadows it, and every assembly's
+    studies.
   - A requirement's expressions -- an `expression` requirement's formula
     and any requirement's expression bounds -- are rewritten with them, in
     the scope the requirement reads (`ui::RenameProjectVariable`, and
@@ -295,7 +344,8 @@ every variable the features read becomes one.
     project rename puts the requirement back too; a part's undo does not.
 - **Delete** is **refused while the variable is referenced**. The refusal
   lists the references, for example `parameter 'x'`, `feature 'Extrude 1'`,
-  `<Part>: feature '…'` for the project scope, or `requirement 'wall'`
+  `study 'Bracket'`, `<Part>: feature '…'` or `<Assembly>: study '…'` for
+  the project scope, or `requirement 'wall'`
   (`ui::RequirementReferences`; `ui::RemovePartVariable` for a part-local
   one). Nothing is left dangling silently. A table is refused the same way
   while a variable, a feature or a requirement looks it up.
@@ -331,7 +381,12 @@ The RPCs are handled in `src/remote/RemoteProject.cpp`.
 
 Every numeric feature parameter also accepts an expression, as a
 `<field>_expr` key in the feature JSON passed to `add_feature` or
-`modify_feature`. `add_constraint` takes
+`modify_feature`, and so does every study number that takes one
+(`set_study`'s `mesh_size_expr`, `add_load`'s `magnitude_expr`, ...): one
+convention, read by `ReadExprParam`
+([rpc.md](../scripting/rpc.md#numbers-that-take-an-expression)). Two older
+spellings stay accepted as aliases: a string where a study's number goes
+(`mesh_size: "wall / 2"`), and `add_constraint`'s
 `expr`, which is written in base units where **angles are degrees**
 (`"45"`, `"45deg"` and `"0.785rad"` are the same angle). Its literal
 `value` is in radians for an angle, or you can pass `value_deg` instead

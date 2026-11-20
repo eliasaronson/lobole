@@ -171,6 +171,9 @@ worse than a missing row, because an agent trusts it instead of guessing.
   `src/remote/`.
 - **Units.** A parameter carrying a physical quantity names its unit
   (`angle_deg`, `tolerance_mm`, `deflection_mm`) or has it stated in its row.
+- **Expressions.** A number that can be an expression of the variables
+  takes it as `<field>_expr` beside `<field>` (see
+  [Numbers that take an expression](#numbers-that-take-an-expression)).
 - **Names.** `id` is the id of the thing the method is named after
   (`remove_mate(id)`, `set_occurrence_visible(id)`). `<noun>_id` refers to
   something the method is not about (`set_material(feature_id)`).
@@ -180,6 +183,28 @@ worse than a missing row, because an agent trusts it instead of guessing.
   must be a Sketch, so passing an extrude fails at the call. A method that
   resolves a feature takes `feature_id` (`delete_feature` and `set_rollback`
   also keep their older `id` / `index`). `rpc_names_gate` holds this.
+
+### Numbers that take an expression
+
+One convention on every method that sets such a number: `<field>` is the
+number and `<field>_expr` the expression text beside it
+([variables](../variables/README.md#numbers-that-are-expressions)). On a
+feature they are keys of the feature JSON (`distance`, `distance_expr`); on
+a study they are the method's own parameters (`set_study` `mesh_size_expr`,
+`filter_radius_expr`, `volume_fraction_expr`, a participant's or a load
+case's `mesh_size_expr` / `weight_expr`, `add_load` `magnitude_expr` /
+`force_n_expr` / `torque_nmm_expr`, `add_refinement` `size_expr`).
+`ReadExprParam` (`src/core/ExprValue.h`; `remote::ExprParam` marks both
+keys read) reads them, so no handler parses its own: a number alone is a
+literal and clears an expression the field had; a text that does not parse
+is refused, naming the key; whether its names resolve is decided where it
+is evaluated. `tools/rpc_params_scan.py` reads an `ExprParam(p, "<field>")`
+as both keys, and the method's row lists both.
+
+Two older spellings are kept as aliases, since scripts and the SDK use
+them: a STRING where a study's number goes (`mesh_size: "wall / 2"`), and a
+sketch dimension's `expr` (`add_constraint`, and the stored key). Giving a
+study number both ways at once is refused.
 
 ### Reads name their part
 

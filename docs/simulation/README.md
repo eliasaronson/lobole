@@ -48,9 +48,13 @@ A study holds:
   ([a static study of the optimised shape](../topopt/README.md#a-static-study-of-the-optimised-shape)).
 - `participants` (assembly studies only, below).
 
-Sizes and magnitudes follow the value + expression convention, so a load can
-read `bolt_preload * 1.5`. Expressions are evaluated lazily at mesh/solve
-time (`EvaluateStudyExprs`), not during regeneration.
+Sizes, magnitudes, load-case weights and the topology numbers are
+`ExprValue`s ([variables](../variables/README.md#numbers-that-are-expressions)),
+so a load can read `bolt_preload * 1.5`; the RPC takes them as
+`<field>_expr` (or a string in the number's place). `Study::VisitExprs`
+walks them: they are evaluated lazily at mesh/solve time
+(`EvaluateStudyExprs`), not during regeneration, a variable's rename
+rewrites them and its delete is refused while one reads it.
 
 Every face is an `ElementRef` resolved at mesh time (`fem::ResolveFace`,
 the same lookup `ShellFeature` and `Measure` use). A reference whose face no
