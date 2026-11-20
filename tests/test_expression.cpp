@@ -1,11 +1,14 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "core/ExprValue.h"
 #include "core/Expression.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
+#include <nlohmann/json.hpp>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -203,4 +206,97 @@ TEST_CASE("expression units are invisible to dependencies and rename",
   // Rename leaves unit-bearing literals byte-for-byte untouched.
   CHECK(engine.RenameIdentifier("gap + 10mm", "gap", "g") == "g + 10mm");
   CHECK(engine.RenameIdentifier("2in * width", "width", "w") == "2in * w");
+}
+
+// ---- ExprValue (docs/variables/README.md#numbers-that-are-expressions) ----
+
+TEST_CASE("ExprValue writes <key> and <key>_expr and reads them back",
+          "[variables]") {
+  ExprValue literal{12.5};
+  nlohmann::json j = nlohmann::json::object();
+  WriteExpr(j, "depth", literal);
+  CHECK(j == nlohmann::json{{"depth", 12.5}}); // a literal writes what it did
+  ExprValue bound{4.0};
+  bound.expr = "bore / 2";
+  WriteExpr(j, "depth", bound);
+  CHECK(j == nlohmann::json{{"depth", 4.0}, {"depth_expr", "bore / 2"}});
+
+  ExprValue back{1.0};
+  CHECK(ReadExpr(j, "depth", back));
+  CHECK(back == bound);
+  // Absent keys leave the value and clear the text.
+  CHECK_FALSE(ReadExpr(nlohmann::json::object(), "depth", back));
+  CHECK(back.value == 4.0);
+  CHECK(back.expr.empty());
+
+  // An angle is degrees in the file and radians in memory.
+  ExprAngle a = ExprAngle::FromDegrees(90.0);
+  nlohmann::json ja = nlohmann::json::object();
+  WriteExpr(ja, "angle_deg", a);
+  CHECK_THAT(ja.at("angle_deg").get<double>(), WithinRel(90.0));
+  ExprAngle aBack;
+  CHECK(ReadExpr(ja, "angle_deg", aBack));
+  CHECK_THAT(aBack.value, WithinRel(a.value));
+}
+
+TEST_CASE("An _expr that does not parse is refused where it is read",
+          "[variables]") {
+  ExprValue v;
+  const nlohmann::json j = {{"depth", 3.0}, {"depth_expr", "bore *"}};
+  CHECK_THROWS_WITH(
+      ReadExpr(j, "depth", v),
+      Catch::Matchers::ContainsSubstring("depth_expr 'bore *' does not read"));
+  // An unknown name parses: whether it resolves is the scope's question.
+  const nlohmann::json unknown = {{"depth_expr", "nowhere + 1"}};
+  CHECK(ReadExpr(unknown, "depth", v));
+  CHECK(v.expr == "nowhere + 1");
+  CHECK_THROWS(ReadExpr(nlohmann::json{{"depth_expr", 3}}, "depth", v));
+}
+
+TEST_CASE("The RPC reader takes <key>_expr, and a string in <key> as an "
+          "alias",
+          "[variables]") {
+  ExprValue v{9.0};
+  v.expr = "old";
+  CHECK(ReadExprParam(nlohmann::json{{"size", 2.0}}, "size", v));
+  CHECK(v.value == 2.0);
+  CHECK(v.expr.empty()); // a number alone is a literal
+  CHECK(ReadExprParam(nlohmann::json{{"size_expr", "t * 2"}}, "size", v));
+  CHECK(v.expr == "t * 2");
+  CHECK(ReadExprParam(nlohmann::json{{"size", "t * 3"}}, "size", v));
+  CHECK(v.expr == "t * 3");
+  CHECK_FALSE(ReadExprParam(nlohmann::json::object(), "size", v));
+  CHECK_THROWS(ReadExprParam(nlohmann::json{{"size", "t"}, {"size_expr", "u"}},
+                             "size", v));
+  CHECK_THROWS(ReadExprParam(nlohmann::json{{"size", true}}, "size", v));
+  CHECK_THROWS(ReadExprParam(nlohmann::json{{"size", "2 +"}}, "size", v));
+}
+
+TEST_CASE("A slot evaluates, renames and refuses a fractional count",
+          "[variables]") {
+  const SymbolTable symbols = {{"n", 5.0}, {"theta", 90.0}};
+  ExprInt count{3};
+  count.expr = "n - 1";
+  const ExprSlot c(count, "count");
+  CHECK(c.Quantity() == ExprQuantity::Count);
+  CHECK(EvaluateSlot(c, symbols));
+  CHECK(count.value == 4);
+  count.expr = "n / 2";
+  std::string why;
+  CHECK_FALSE(EvaluateSlot(c, symbols, &why));
+  CHECK(count.value == 4); // the last good value stays
+  CHECK_THAT(why, Catch::Matchers::ContainsSubstring("whole number"));
+
+  ExprAngle angle;
+  angle.expr = "theta";
+  const ExprSlot a(angle, "angle_deg");
+  CHECK(EvaluateSlot(a, symbols));
+  CHECK_THAT(angle.Degrees(), WithinRel(90.0));
+  CHECK_THAT(a.Value(), WithinRel(90.0));
+
+  CHECK(SlotReads(a, "theta"));
+  CHECK_FALSE(SlotReads(a, "n"));
+  CHECK(RenameInSlot(a, "theta", "phi"));
+  CHECK(angle.expr == "phi");
+  CHECK_FALSE(RenameInSlot(a, "theta", "phi"));
 }

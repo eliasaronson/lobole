@@ -244,6 +244,24 @@ inline glm::dquat QuatParam(const nlohmann::json& v, const std::string& what) {
   return glm::dquat(x[3], x[0], x[1], x[2]);
 }
 
+// A number a method sets: `<key>` (a number, or -- the older spelling --
+// an expression text) and `<key>_expr`, both marked read, through
+// ReadExprParam (docs/scripting/rpc.md#numbers-that-take-an-expression).
+// False when neither came.
+inline bool ExprParam(const RpcParams& p, const std::string& key,
+                      ExprValue& v) {
+  const bool hasKey = p.contains(key);
+  const bool hasExpr = p.contains(key + "_expr");
+  if (!hasKey && !hasExpr)
+    return false;
+  nlohmann::json both = nlohmann::json::object();
+  if (hasKey)
+    both[key] = p.at(key);
+  if (hasExpr)
+    both[key + "_expr"] = p.at(key + "_expr");
+  return ReadExprParam(both, key, v);
+}
+
 // A {feature_id, element} reference out of a parameter, refused with what it
 // was when it is not one (`r.at("feature_id")` on {} fell over as internal).
 inline std::pair<uint64_t, std::string> ElementParam(const nlohmann::json& r,

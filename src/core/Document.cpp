@@ -582,19 +582,13 @@ bool Document::Regenerate() {
   // unchanged literal never re-executes.
   std::vector<std::string> exprErr(upTo);
   for (size_t i = 0; i < upTo; i++) {
-    m_features[i]->VisitExprs([&, i](std::string& text, double& value) {
-      if (text.empty()) {
-        return;
-      }
-      const auto v = ExpressionEngine::Default().EvaluateText(text, m_symbols);
-      if (v.has_value()) {
-        value = *v;
-      } else if (exprErr[i].empty()) {
-        // The ExprError message distinguishes the case ("unknown variable
-        // 'bore'" vs. a parse / division error); first failure per feature
-        // wins.
-        exprErr[i] = v.error().message;
-      }
+    m_features[i]->VisitExprs([&, i](const ExprSlot& slot) {
+      std::string why;
+      // The ExprError message distinguishes the case ("unknown variable
+      // 'bore'" vs. a parse / division error); first failure per feature
+      // wins.
+      if (!EvaluateSlot(slot, m_symbols, &why) && exprErr[i].empty())
+        exprErr[i] = why;
     });
   }
 
@@ -1376,14 +1370,66 @@ bool Document::RenameParameter(const std::string& oldName,
     }
     p.expression = engine.RenameIdentifier(p.expression, oldName, newName);
   }
-  for (const auto& feature : m_features) {
-    feature->VisitExprs([&](std::string& text, double& value) {
-      (void)value;
-      text = engine.RenameIdentifier(text, oldName, newName);
-    });
-  }
+  RenameReferences(oldName, newName);
   Regenerate();
   return true;
+}
+
+void Document::VisitDocumentExprs(
+    const std::function<void(const std::string& owner, const ExprSlot&)>&
+        visit) {
+  for (const auto& feature : m_features) {
+    const std::string owner = "feature '" + feature->GetName() + "'";
+    feature->VisitExprs([&](const ExprSlot& slot) { visit(owner, slot); });
+  }
+  for (fem::Study& study : m_studies) {
+    const std::string owner = "study '" + study.name + "'";
+    study.VisitExprs([&](const ExprSlot& slot) { visit(owner, slot); });
+  }
+}
+
+void Document::ForEachExprText(
+    const std::function<void(const std::string& owner,
+                             const std::string& text)>& visit) {
+  VisitDocumentExprs([&](const std::string& owner, const ExprSlot& slot) {
+    if (slot.Bound())
+      visit(owner, slot.Expr());
+  });
+}
+
+void Document::RenameReferences(const std::string& oldName,
+                                const std::string& newName) {
+  // A study and a configuration are saved without moving Version(), so a
+  // change to either is stamped here; the features' is the regeneration's.
+  bool savedOutsideFeatures = false;
+  for (const auto& feature : m_features)
+    feature->VisitExprs(
+        [&](const ExprSlot& slot) { RenameInSlot(slot, oldName, newName); });
+  for (fem::Study& study : m_studies)
+    study.VisitExprs([&](const ExprSlot& slot) {
+      savedOutsideFeatures |= RenameInSlot(slot, oldName, newName);
+    });
+  // A configuration overrides a variable BY NAME, and its override texts
+  // read others: both follow the rename, or the override silently stops
+  // applying to anything.
+  const auto& engine = ExpressionEngine::Default();
+  bool configs = false;
+  for (Configuration& cfg : m_configurations)
+    for (auto& [name, expr] : cfg.parameterOverrides) {
+      if (name == oldName) {
+        name = newName;
+        configs = true;
+      }
+      std::string next = engine.RenameIdentifier(expr, oldName, newName);
+      if (next != expr) {
+        expr = std::move(next);
+        configs = true;
+      }
+    }
+  if (configs)
+    m_configurationsRevision++;
+  if (savedOutsideFeatures || configs)
+    MarkEdited();
 }
 
 std::vector<std::string>
@@ -1403,16 +1449,11 @@ Document::FindParameterReferences(const std::string& name) {
       refs.push_back("parameter '" + p.name + "'");
     }
   }
-  for (const auto& feature : m_features) {
-    bool hit = false;
-    feature->VisitExprs([&](std::string& text, double& value) {
-      (void)value;
-      hit = hit || references(text);
-    });
-    if (hit) {
-      refs.push_back("feature '" + feature->GetName() + "'");
-    }
-  }
+  // Each feature and study that reads it, once.
+  VisitDocumentExprs([&](const std::string& owner, const ExprSlot& slot) {
+    if (SlotReads(slot, name) && (refs.empty() || refs.back() != owner))
+      refs.push_back(owner);
+  });
   return refs;
 }
 
@@ -1555,12 +1596,7 @@ bool Document::RewriteProjectVarRefs(const std::string& oldName,
   for (Parameter& p : m_parameters) {
     p.expression = engine.RenameIdentifier(p.expression, oldName, newName);
   }
-  for (const auto& feature : m_features) {
-    feature->VisitExprs([&](std::string& text, double& value) {
-      (void)value;
-      text = engine.RenameIdentifier(text, oldName, newName);
-    });
-  }
+  RenameReferences(oldName, newName);
   return true; // caller regenerates
 }
 

@@ -41,13 +41,12 @@ public:
     VisitRefs(from, visit); // the edge at the end it is measured from
   }
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(offsetExpr, offset);
+    visit({offset, ExprQuantity::Length, "offset"});
   }
 
   ElementRef face;     // a cylindrical face, by stable toponame
   ElementRef from;     // a circular edge at one end of that face
-  double offset = 0.0; // mm, from `from` to the groove's near flank
-  std::string offsetExpr;
+  ExprValue offset{0.0}; // mm, from `from` to the groove's near flank
   // "din471" | "din472", or empty for the one the face takes (a shaft takes
   // 471, a bore 472); the other one is refused.
   std::string standard;

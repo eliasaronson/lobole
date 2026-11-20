@@ -83,7 +83,7 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
   ElementMap map;
   std::string buildErr;
   CADShape solid = sketch::BuildRevolveNamed(
-      sketch->plane, loops, axisOrigin, axisDir, glm::radians(angleDeg),
+      sketch->plane, loops, axisOrigin, axisDir, glm::radians(angleDeg.value),
       reversed, symmetric, GetId(), map, &buildErr);
   if (!solid.IsValid()) {
     SetError(buildErr.empty() ? "revolve construction failed" : buildErr);

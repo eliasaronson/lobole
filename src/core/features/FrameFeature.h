@@ -54,15 +54,14 @@ public:
   [[nodiscard]] bool IsDatum() const override { return true; }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(originExpr[0], origin[0]);
-    visit(originExpr[1], origin[1]);
-    visit(originExpr[2], origin[2]);
-    visit(offsetExpr[0], offset[0]);
-    visit(offsetExpr[1], offset[1]);
-    visit(offsetExpr[2], offset[2]);
-    visit(rotationExpr[0], rotationDeg[0]);
-    visit(rotationExpr[1], rotationDeg[1]);
-    visit(rotationExpr[2], rotationDeg[2]);
+    // Vectors the geometry reads whole, so each coordinate is a pair.
+    for (int i = 0; i < 3; i++) {
+      const std::string k = std::to_string(i);
+      visit({originExpr[i], origin[i], ExprQuantity::Length, "origin/" + k});
+      visit({offsetExpr[i], offset[i], ExprQuantity::Length, "offset/" + k});
+      visit({rotationExpr[i], rotationDeg[i], ExprQuantity::Angle,
+             "rotation_deg/" + k});
+    }
   }
 
   // The resolved frame, part space: columns X, Y, Z, origin (frame::Build).
@@ -75,7 +74,8 @@ public:
   FrameKind kind = FrameKind::Explicit;
 
   // Explicit: the origin (expression-driven, mirrors ExtrudeFeature's
-  // distance/distanceExpr twin) and the axes as plain directions.
+  // ExtrudeFeature::distance: a value and its text) and the axes as plain
+  // directions.
   double origin[3] = {0.0, 0.0, 0.0};
   std::string originExpr[3];
   glm::dvec3 zAxis{0.0, 0.0, 1.0};

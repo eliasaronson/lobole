@@ -803,8 +803,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 
     // Roles through the study edit path (the combos draw per occurrence).
     ui::ModifyStudy(*s_App, studyId, "roles", [&](fem::Study& cs) {
-      cs.participants.push_back({upper, fem::ParticipantRole::Meshed, 0, ""});
-      cs.participants.push_back({lower, fem::ParticipantRole::Rigid, 0, ""});
+      cs.participants.push_back(
+          {upper, fem::ParticipantRole::Meshed, ExprValue{0.0}});
+      cs.participants.push_back(
+          {lower, fem::ParticipantRole::Rigid, ExprValue{0.0}});
       cs.meshSize = 12.0;
     });
     ctx->Yield(2);
@@ -944,7 +946,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
         force.id = forceId = Doc()->AllocateId();
         force.type = fem::LoadType::Force;
         force.face = faces[1];
-        force.magnitudeExpr = "load_n";
+        force.magnitude.expr = "load_n";
         st.loads.push_back(force);
       });
       ctx->Yield(3);
@@ -955,7 +957,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
         if (l.id == forceId)
           force = &l;
       IM_CHECK_SILENT(force != nullptr);
-      ctx->LogInfo("round %d: stored magnitude %g", round, force->magnitude);
+      ctx->LogInfo("round %d: stored magnitude %g", round,
+                   force->magnitude.value);
       // What the row, the label and a drag start from.
       const fem::Load shown = ui::StudyHostOf(*s_App).Shown(*force);
       IM_CHECK_EQ(shown.magnitude, 10000.0);

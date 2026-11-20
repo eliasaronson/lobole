@@ -116,7 +116,7 @@ TEST_CASE("Expression-driven count and spacing follow parameter edits",
   auto pat = std::make_unique<PatternFeature>("Arr", PatternKind::Linear, box);
   pat->axis.kind = AxisRef::Kind::X;
   pat->countExpr = "n";
-  pat->spacingExpr = "gap";
+  pat->spacing.expr = "gap";
   doc.AddFeature(std::move(pat));
   REQUIRE(doc.GetBodies().size() == 3);
 

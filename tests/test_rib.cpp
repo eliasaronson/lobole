@@ -97,7 +97,7 @@ TEST_CASE("Rib round-trips through serialization", "[rib][serialization]") {
     Document doc;
     skId = BoxAndProfile(doc, glm::vec3(0, 0, -1));
     auto rib = std::make_unique<RibFeature>("Rib", skId, 1.0);
-    rib->thicknessExpr = "1.0";
+    rib->thickness.expr = "1.0";
     doc.AddFeature(std::move(rib));
     v0 = doc.GetBodies()[0].shape.Volume();
     REQUIRE(testio::Save(doc, path.string()));
@@ -108,7 +108,7 @@ TEST_CASE("Rib round-trips through serialization", "[rib][serialization]") {
   REQUIRE(rb != nullptr);
   CHECK(rb->sketchId == skId);
   CHECK(rb->thickness == 1.0);
-  CHECK(rb->thicknessExpr == "1.0");
+  CHECK(rb->thickness.expr == "1.0");
   CHECK_FALSE(rb->flipDirection);
   REQUIRE(loaded->GetBodies().size() == 1);
   CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(v0, 1e-9));

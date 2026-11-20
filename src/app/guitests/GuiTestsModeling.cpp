@@ -673,7 +673,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
-    IM_CHECK_STR_EQ(box->widthExpr.c_str(), "plate_width*2");
+    IM_CHECK_STR_EQ(box->width.expr.c_str(), "plate_width*2");
     IM_CHECK_EQ(box->width, 85.0);
 
     // ...so the variable still drives it.
@@ -689,7 +689,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
-    IM_CHECK(box->widthExpr.empty());
+    IM_CHECK(box->width.expr.empty());
     IM_CHECK_EQ(box->width, 7.0);
   };
 
@@ -749,7 +749,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
-    IM_CHECK_STR_EQ(box->widthExpr.c_str(), "plate_width");
+    IM_CHECK_STR_EQ(box->width.expr.c_str(), "plate_width");
     IM_CHECK_EQ(box->width, 42.5);
   };
 
@@ -1193,7 +1193,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     auto* ext = dynamic_cast<ExtrudeFeature*>(Doc()->GetFeature(1));
     IM_CHECK(ext != nullptr);
-    IM_CHECK_STR_EQ(ext->distanceExpr.c_str(), "2*3");
+    IM_CHECK_STR_EQ(ext->distance.expr.c_str(), "2*3");
     IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 7.0 * d * 6.0) <
              1e-6 * 7.0 * d * 6.0);
   };

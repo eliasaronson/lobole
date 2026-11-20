@@ -47,10 +47,11 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(translateExpr[0], translate.x);
-    visit(translateExpr[1], translate.y);
-    visit(translateExpr[2], translate.z);
-    visit(rotateExpr, rotateDeg);
+    // A vector the geometry reads whole, so each coordinate is a pair.
+    for (int i = 0; i < 3; i++)
+      visit({translateExpr[i], translate[i], ExprQuantity::Length,
+             "translate_mm/" + std::to_string(i)});
+    visit({rotateDeg, ExprQuantity::Angle, "rotate_deg"});
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
@@ -61,8 +62,8 @@ public:
   std::vector<ElementRef> faces;
   glm::dvec3 translate{0.0}; // mm, model space
   std::array<std::string, 3> translateExpr;
-  double rotateDeg = 0.0; // about `axis`, after nothing: rotate then translate
-  std::string rotateExpr;
+  ExprValue rotateDeg{
+      0.0};     // about `axis`, after nothing: rotate then translate
   AxisRef axis; // used only when rotateDeg != 0
   directedit::Fingerprints fingerprints;
 };

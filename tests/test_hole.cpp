@@ -325,7 +325,7 @@ TEST_CASE("Hole with an unresolved diameter_expr errors", "[hole]") {
   const uint64_t sk = PointSketch(doc, 10.0, {{5, 5}});
   // No `bore` variable is defined anywhere -> the expr can't resolve.
   auto ho = std::make_unique<HoleFeature>("H", sk, HoleKind::Simple, 1.0, 5.0);
-  ho->diameterExpr = "bore";
+  ho->diameter.expr = "bore";
   doc.AddFeature(std::move(ho));
 
   CHECK_FALSE(doc.Regenerate());

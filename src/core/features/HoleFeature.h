@@ -67,9 +67,9 @@ public:
   const ElementMap* ToolMap() const override { return &m_toolMap; }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(diameterExpr, diameter);
-    visit(depthExpr, depth);
-    visit(threadDepthExpr, threadDepth);
+    visit({diameter, ExprQuantity::Length, "diameter"});
+    visit({depth, ExprQuantity::Length, "depth"});
+    visit({threadDepth, ExprQuantity::Length, "thread_depth"});
   }
 
   // The drill point at a blind floor and how deep a tapped fit is threaded,
@@ -80,8 +80,7 @@ public:
 
   uint64_t sketchId = 0;
   HoleKind kind = HoleKind::Simple;
-  double diameter = 1.0;
-  std::string diameterExpr;
+  ExprValue diameter{1.0};
 
   // What the hole is FOR (docs/modeling/holes-and-threads.md#hole).
   //
@@ -97,8 +96,7 @@ public:
   std::string fitThread; // "M6"; empty = a plain diameter, as before
   std::string fitKind;   // close | normal | loose | tapped
   double fitPitch = 0.0; // mm; 0 = coarse, and only read when tapped
-  double depth = 1.0; // bore depth; `through` overrides it
-  std::string depthExpr;
+  ExprValue depth{1.0};  // bore depth; `through` overrides it
   bool through = false; // drill far enough to pierce any body below
 
   // The included angle of the drill's point, degrees, that a BLIND hole's
@@ -112,8 +110,7 @@ public:
   // depth less the three pitches a blind-hole tap's lead (ISO 8830 form C,
   // 2-3 threads) cuts no full thread in; the whole bore when through. Refused
   // without a tapped fit, and deeper than the hole.
-  double threadDepth = 0.0;
-  std::string threadDepthExpr;
+  ExprValue threadDepth{0.0};
 
   // A hole printed across its layers
   // (docs/modeling/holes-and-threads.md#printed-holes): its roof raised to a

@@ -172,7 +172,7 @@ void ExtrudeHandleSpecs(AppState& state, const Document& doc,
   const glm::vec3 fwd = ext.reversed && end != ExtrudeEnd::Symmetric ? -N : N;
   const double capAt =
       end == ExtrudeEnd::Symmetric ? ext.distance * 0.5 : ext.distance;
-  if (ext.distanceExpr.empty()) {
+  if (ext.distance.expr.empty()) {
     HandleSpec s;
     s.param = HandleParam::Distance;
     s.anchor = base + fwd * static_cast<float>(capAt); // tracks the end cap
@@ -180,7 +180,7 @@ void ExtrudeHandleSpecs(AppState& state, const Document& doc,
     s.value = ext.distance;
     out.push_back(s);
   }
-  if (end == ExtrudeEnd::TwoSided && ext.distance2Expr.empty()) {
+  if (end == ExtrudeEnd::TwoSided && ext.distance2.expr.empty()) {
     HandleSpec s; // the backward side, from its own cap
     s.param = HandleParam::Distance2;
     s.anchor = base - fwd * static_cast<float>(ext.distance2);
@@ -191,7 +191,7 @@ void ExtrudeHandleSpecs(AppState& state, const Document& doc,
   // The twist: an arc about the twist axis (the sketch normal through the
   // sketch origin) at the end cap, once there is a twist to turn.
   if ((end == ExtrudeEnd::Blind || end == ExtrudeEnd::Symmetric) &&
-      ext.twistExpr.empty() && ext.twistDeg != 0.0 && !ext.thin) {
+      ext.twistDeg.expr.empty() && ext.twistDeg != 0.0 && !ext.thin) {
     glm::vec2 lo, hi;
     float reach = 0.0f;
     if (ProfileBoundsUV(*sk, ext.regions, lo, hi))
@@ -228,7 +228,7 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
   }
 
   if (auto* fil = dynamic_cast<FilletFeature*>(f)) {
-    if (!fil->radiusExpr.empty() || fil->edges.empty())
+    if (!fil->radius.expr.empty() || fil->edges.empty())
       return false;
     const ElementRef& ref = fil->edges.front();
     // The displayed body is already blended — its toponames carry the blend's
@@ -277,7 +277,7 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
   // The direct edits: the faces resolve on the edit's INPUT body, which is
   // where they were picked (the preview shows them already moved).
   if (auto* off = dynamic_cast<OffsetFaceFeature*>(f)) {
-    if (!off->distanceExpr.empty() || off->faces.empty() || index == 0)
+    if (!off->distance.expr.empty() || off->faces.empty() || index == 0)
       return false;
     const std::vector<Body>* input = doc.CachedBodiesAfter(index - 1);
     if (input == nullptr)
@@ -296,7 +296,7 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
       const glm::dvec3 on = in ? in->point : info->centroid;
       HandleSpec spec;
       spec.param = HandleParam::Offset;
-      spec.anchor = on + n * off->distance; // rides on the moved face
+      spec.anchor = on + n * off->distance.value; // rides on the moved face
       spec.dir = n;
       spec.value = off->distance;
       out.push_back(spec);
@@ -343,7 +343,7 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
   }
 
   if (auto* rev = dynamic_cast<RevolveFeature*>(f)) {
-    if (!rev->angleExpr.empty())
+    if (!rev->angleDeg.expr.empty())
       return false;
     const SketchFeature* sk = SketchOf(doc, rev->sketchId);
     if (!sk)

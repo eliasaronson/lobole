@@ -462,13 +462,13 @@ void DrawLoadCases(AppState& state, const fem::Study& s) {
       const bool wChanged =
           ExprInputDouble(state, "###case_weight", &w, "%.3g", &wExpr);
       if ((wChanged || ImGui::IsItemDeactivatedAfterEdit()) && w > 0.0 &&
-          (w != c.weight || wExpr != c.weightExpr)) {
+          (w != c.weight || wExpr != c.weight.expr)) {
         const std::string name = c.name;
         ModifyStudy(state, s.id, "Set load case weight", [&](fem::Study& cs) {
           for (fem::LoadCase& lc : cs.loadCases)
             if (lc.name == name) {
               lc.weight = w;
-              lc.weightExpr = wExpr;
+              lc.weight.expr = wExpr;
             }
         });
       }
@@ -505,7 +505,7 @@ void DrawLoadCases(AppState& state, const fem::Study& s) {
     }
     ModifyStudy(state, s.id, "Add load case", [&](fem::Study& cs) {
       const bool first = cs.loadCases.empty();
-      cs.loadCases.push_back({name, 1.0, ""});
+      cs.loadCases.push_back({name, ExprValue{1.0}});
       if (first)
         for (fem::Load& l : cs.loads)
           if (!fem::IsSupport(l.type))
@@ -803,7 +803,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     }
     if (!fem::IsSupport(l.type) && !fem::IsThermalLoad(l.type)) {
       char buf[64];
-      std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude,
+      std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude.value,
                     l.type == fem::LoadType::Pressure ? " MPa" : " N");
       row.tail = l.type == fem::LoadType::Torque ? TorqueText(l.magnitude)
                                                  : std::string(buf);
@@ -1667,14 +1667,14 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
       const bool changed =
           ExprInputDouble(state, sizeId.c_str(), &size, "%.3g", &expr);
       if ((changed || ImGui::IsItemDeactivatedAfterEdit()) &&
-          (size != pt->meshSize || expr != pt->meshSizeExpr)) {
+          (size != pt->meshSize || expr != pt->meshSize.expr)) {
         const uint64_t id = occ.id;
         ModifyStudy(state, s.id, "Set participant mesh size",
                     [&](fem::Study& cs) {
                       for (fem::Participant& x : cs.participants)
                         if (x.occurrenceId == id) {
                           x.meshSize = size;
-                          x.meshSizeExpr = expr;
+                          x.meshSize.expr = expr;
                         }
                     });
       }
@@ -1963,10 +1963,10 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
   const bool meshChanged = ExprInputDouble(state, "###study_mesh_size",
                                            &meshSize, "%.3g", &meshExpr);
   if ((meshChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
-      (meshSize != s->meshSize || meshExpr != s->meshSizeExpr))
+      (meshSize != s->meshSize || meshExpr != s->meshSize.expr))
     ModifyStudy(state, s->id, "Set mesh size", [&](fem::Study& cs) {
       cs.meshSize = meshSize;
-      cs.meshSizeExpr = meshExpr;
+      cs.meshSize.expr = meshExpr;
     });
 
   if (s->type == fem::AnalysisType::Modal ||
@@ -1985,7 +1985,7 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
     if (ImGui::SliderFloat("###topo_volume_fraction", &vf, 0.05f, 0.9f, "%.2f"))
       ModifyStudy(state, s->id, "Set volume fraction", [&](fem::Study& cs) {
         cs.volumeFraction = vf;
-        cs.volumeFractionExpr.clear();
+        cs.volumeFraction.expr.clear();
       });
     double fr = s->filterRadius;
     LeftLabel("Filter radius (mm, 0=auto)");
@@ -1993,10 +1993,10 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
     const bool frChanged =
         ExprInputDouble(state, "###topo_filter_radius", &fr, "%.3g", &frExpr);
     if ((frChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
-        (fr != s->filterRadius || frExpr != s->filterRadiusExpr))
+        (fr != s->filterRadius || frExpr != s->filterRadius.expr))
       ModifyStudy(state, s->id, "Set filter radius", [&](fem::Study& cs) {
         cs.filterRadius = fr;
-        cs.filterRadiusExpr = frExpr;
+        cs.filterRadius.expr = frExpr;
       });
     int mi = s->maxIterations;
     LeftLabel("Max iterations");
@@ -2462,7 +2462,7 @@ bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
     const double scale =
         1.0 + static_cast<double>(t - sim.loadDrag.startParam) / len;
     load->magnitude = std::max(0.0, sim.loadDrag.startMagnitude * scale);
-    load->magnitudeExpr.clear(); // a dragged value is a number, not a formula
+    load->magnitude.expr.clear(); // a dragged value is a number, not a formula
     // No staleness bump mid-drag: the ModifyStudyCommand on release is what
     // moves the document version, so results go stale exactly once — the
     // gizmo's solve-on-release contract.
@@ -2939,15 +2939,16 @@ std::string SimulationLoadLabel(const fem::Load& load) {
     return "contact";
   case fem::LoadType::Force:
     if (std::abs(load.magnitude) >= 1000.0)
-      std::snprintf(buf, sizeof(buf), "%.3g kN", load.magnitude / 1000.0);
+      std::snprintf(buf, sizeof(buf), "%.3g kN", load.magnitude.value / 1000.0);
     else
-      std::snprintf(buf, sizeof(buf), "%.3g N", load.magnitude);
+      std::snprintf(buf, sizeof(buf), "%.3g N", load.magnitude.value);
     return buf;
   case fem::LoadType::Pressure:
     if (std::abs(load.magnitude) < 0.1 && load.magnitude != 0.0)
-      std::snprintf(buf, sizeof(buf), "%.3g kPa", load.magnitude * 1000.0);
+      std::snprintf(buf, sizeof(buf), "%.3g kPa",
+                    load.magnitude.value * 1000.0);
     else
-      std::snprintf(buf, sizeof(buf), "%.3g MPa", load.magnitude);
+      std::snprintf(buf, sizeof(buf), "%.3g MPa", load.magnitude.value);
     return buf;
   case fem::LoadType::Torque:
     return TorqueText(load.magnitude);
@@ -2956,7 +2957,8 @@ std::string SimulationLoadLabel(const fem::Load& load) {
       std::snprintf(buf, sizeof(buf), "%.3g kN at a point",
                     load.magnitude / 1000.0);
     else
-      std::snprintf(buf, sizeof(buf), "%.3g N at a point", load.magnitude);
+      std::snprintf(buf, sizeof(buf), "%.3g N at a point",
+                    load.magnitude.value);
     return buf;
   case fem::LoadType::Temperature:
     std::snprintf(buf, sizeof(buf),
@@ -3313,7 +3315,7 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
       sim.pendingTorque = SimulationWeightN(state) * r;
     }
     load.magnitude = sim.pendingTorque;
-    load.magnitudeExpr = sim.pendingTorqueExpr;
+    load.magnitude.expr = sim.pendingTorqueExpr;
   }
   if (load.type == fem::LoadType::Pin) {
     // Refused where it can be read, and nothing placed: a pin holds a
@@ -3371,7 +3373,7 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   if (!fem::IsSupport(load.type)) {
     if (load.type != fem::LoadType::Torque) {
       load.magnitude = sim.pendingMagnitude;
-      load.magnitudeExpr = sim.pendingMagnitudeExpr;
+      load.magnitude.expr = sim.pendingMagnitudeExpr;
     }
     // On a study with load cases it goes in the one chosen (the first when
     // none is, or the chosen one is gone).

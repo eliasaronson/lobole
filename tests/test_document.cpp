@@ -281,7 +281,7 @@ TEST_CASE("Expression edits invalidate the cache through parameters",
   const uint64_t skId = doc.GetFeature(0)->GetId();
   auto ext =
       std::make_unique<ExtrudeFeature>("Pad", skId, 1.0, ExtrudeMode::NewBody);
-  ext->distanceExpr = "w";
+  ext->distance.expr = "w";
   doc.AddFeature(std::move(ext));
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(16.0, 1e-6));
 

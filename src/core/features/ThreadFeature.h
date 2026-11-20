@@ -56,7 +56,7 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(lengthExpr, length);
+    visit({length, ExprQuantity::Length, "length"});
   }
 
   ElementRef face;         // a cylindrical face, by stable toponame
@@ -65,8 +65,7 @@ public:
   // "6g"/"6H", "2A"/"2B": checked against the series and the side, drives
   // no geometry (a modelled thread is the basic profile).
   std::string threadClass;
-  double length = 0.0; // threaded length from the face's start; 0 = full
-  std::string lengthExpr;
+  ExprValue length{0.0}; // threaded length from the face's start; 0 = full
   bool allowEngagement = false;
   double minimumEngagement = 0.0;
   bool modeled = false;    // cut the real helical groove

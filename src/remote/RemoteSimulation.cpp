@@ -721,7 +721,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "nonlinear?:object, participants?:object[]}[]"},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
-     "and filter_radius are MILLIMETRES; `gravity` is metres per second "
+     "and filter_radius are MILLIMETRES; each of them, volume_fraction and "
+     "a participant's mesh_size or a load case's weight takes an expression "
+     "of the variables as `<key>_expr` beside it (the older spelling, a "
+     "string in the number's place, is still read: "
+     "docs/scripting/rpc.md#numbers-that-take-an-expression); `gravity` is "
+     "metres per second "
      "squared (m/s^2) as a [x, y, z] vector, so Earth down is [0, 0, -9.81] "
      "with Z up. volume_fraction is a fraction of 1 and the iteration counts "
      "are counts. Takes `id` (or `study`, the same thing here) — see "
@@ -818,10 +823,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "THERMAL study takes converge (on its peak temperature rise) and "
      "solver (calculix solves it with *HEAT TRANSFER as a cross-check), and "
      "refuses load_cases, gravity, nonlinear, shape_from and thermal_load.",
-     "converge, filter_radius, gravity, id, load_cases, max_iterations, "
-     "mesh_size, name, nonlinear, num_modes, participants, shape_from, "
-     "solver, study, thermal_load, type, "
-     "volume_fraction"},
+     "converge, filter_radius, filter_radius_expr, gravity, id, load_cases, "
+     "max_iterations, mesh_size, mesh_size_expr, name, nonlinear, num_modes, "
+     "participants, shape_from, solver, study, thermal_load, type, "
+     "volume_fraction, volume_fraction_expr"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
      "torque|remote|pin|contact, face, ...}. force/pressure take `magnitude`: "
@@ -841,6 +846,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "way an RBE3 spreads it. A key another type takes is refused, naming "
      "the right one. On an assembly study the axis and point are WORLD "
      "coordinates (docs/simulation/README.md#torque-and-remote-loads). "
+     "magnitude, force_n and torque_nmm each take an expression of the "
+     "variables as `<key>_expr` "
+     "(docs/scripting/rpc.md#numbers-that-take-an-expression). "
      "Every result scales linearly with these numbers and a wrong unit is "
      "invisible in the answer, so it is stated here rather than left to be "
      "inferred from the solver. An omitted force `direction` pushes into "
@@ -891,8 +899,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`region` (docs/simulation/README.md#thermal).",
      "ambient_c, axis_dir, axis_origin_mm, body, case, contact_with, "
      "direction, face, film_w_m2k, fix_rotation, flux_w_m2, force_n, "
-     "friction, magnitude, occurrence, point_mm, power_w, region, study, "
-     "temperature_c, torque_nmm, type"},
+     "force_n_expr, friction, magnitude, magnitude_expr, occurrence, "
+     "point_mm, power_w, region, study, temperature_c, torque_nmm, "
+     "torque_nmm_expr, type"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
@@ -901,8 +910,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "id, load, study"},
     {"add_refinement",
      "Add a local mesh refinement on an element: `size` is the target element "
-     "edge length there, in MILLIMETRES.",
-     "face, occurrence, size, study"},
+     "edge length there, in MILLIMETRES, or an expression of the variables "
+     "(size_expr; docs/scripting/rpc.md#numbers-that-take-an-expression).",
+     "face, occurrence, size, size_expr, study"},
     {"remove_refinement", "Remove a refinement.", "face, study"},
     {"add_keep_face", "Topology optimization: mark a face to keep.",
      "face, study"},
@@ -1761,15 +1771,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     modifyStudy(id, "Edit study", [&](fem::Study& s) {
       if (p.contains("name"))
         s.name = p.at("name").get<std::string>();
-      if (p.contains("mesh_size")) {
-        const json& v = p.at("mesh_size");
-        if (v.is_string()) {
-          s.meshSizeExpr = v.get<std::string>(); // evaluated at mesh time
-        } else {
-          s.meshSize = v.get<double>();
-          s.meshSizeExpr.clear();
-        }
-      }
+      (void)ExprParam(p, "mesh_size", s.meshSize); // evaluated at mesh time
       const fem::AnalysisType typeWas = s.type;
       if (p.contains("type") &&
           !fem::AnalysisTypeFromString(p.at("type").get<std::string>(), s.type))
@@ -1839,13 +1841,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                   "friction is a number: the coefficient, unitless");
             pt.friction = pj.at("friction").get<double>();
           }
-          if (pj.contains("mesh_size")) {
-            const json& v = pj.at("mesh_size");
-            if (v.is_string())
-              pt.meshSizeExpr = v.get<std::string>();
-            else
-              pt.meshSize = v.get<double>();
-          }
+          (void)ReadExprParam(pj, "mesh_size", pt.meshSize);
           for (const fem::Participant& have : s.participants)
             if (have.occurrenceId == pt.occurrenceId)
               throw std::runtime_error("participant " +
@@ -1879,7 +1875,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // the save drops them and the reader refuses them in a file, so they
       // are refused here, after `type`.
       for (const char* k :
-           {"volume_fraction", "filter_radius", "max_iterations"})
+           {"volume_fraction", "volume_fraction_expr", "filter_radius",
+            "filter_radius_expr", "max_iterations"})
         if (p.contains(k) && s.type != fem::AnalysisType::Topology)
           throw std::runtime_error(
               std::string(k) +
@@ -1887,24 +1884,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
               "is " +
               fem::AnalysisTypeToString(s.type) +
               "; set type: topology (in this call or before it)");
-      if (p.contains("volume_fraction")) {
-        const json& v = p.at("volume_fraction");
-        if (v.is_string())
-          s.volumeFractionExpr = v.get<std::string>();
-        else {
-          s.volumeFraction = v.get<double>();
-          s.volumeFractionExpr.clear();
-        }
-      }
-      if (p.contains("filter_radius")) {
-        const json& v = p.at("filter_radius");
-        if (v.is_string())
-          s.filterRadiusExpr = v.get<std::string>();
-        else {
-          s.filterRadius = v.get<double>();
-          s.filterRadiusExpr.clear();
-        }
-      }
+      (void)ExprParam(p, "volume_fraction", s.volumeFraction);
+      (void)ExprParam(p, "filter_radius", s.filterRadius);
       if (p.contains("max_iterations"))
         s.maxIterations = IntParam(p.at("max_iterations"), "max_iterations");
       if (p.contains("load_cases")) {
@@ -1925,14 +1906,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             if (have.name == c.name)
               throw std::runtime_error("load case '" + c.name +
                                        "' is listed twice");
-          if (cj.contains("weight")) {
-            const json& w = cj.at("weight");
-            if (w.is_string())
-              c.weightExpr = w.get<std::string>();
-            else
-              c.weight = w.get<double>();
-          }
-          if (c.weightExpr.empty() && !(c.weight > 0.0))
+          (void)ReadExprParam(cj, "weight", c.weight);
+          if (c.weight.expr.empty() && !(c.weight > 0.0))
             throw std::runtime_error("load case '" + c.name +
                                      "': weight must be positive");
           cases.push_back(std::move(c));
@@ -2125,11 +2100,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       throw std::runtime_error(
           "a refinement on an assembly study says whose face: pass "
           "occurrence (id or name)");
-    const json& v = p.at("size");
-    if (v.is_string())
-      r.sizeExpr = v.get<std::string>();
-    else
-      r.size = v.get<double>();
+    if (!ExprParam(p, "size", r.size))
+      throw std::runtime_error(
+          "add_refinement needs size: mm, or an expression (size_expr)");
     modifyStudy(id, "Add refinement",
                 [&](fem::Study& s) { s.refinements.push_back(r); });
     return json::object();
@@ -2384,17 +2357,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             "(id or name), or contact_with for a fixed support at a contact");
       }
     }
-    // rpc-params: magnitude
+    // rpc-params: magnitude, magnitude_expr, force_n_expr, torque_nmm_expr
     const char* magKey = torque   ? "torque_nmm"
                          : remote ? "force_n"
                                   : "magnitude";
-    if (p.contains(magKey)) {
-      const json& v = p.at(magKey);
-      if (v.is_string())
-        l.magnitudeExpr = v.get<std::string>();
-      else
-        l.magnitude = v.get<double>();
-    }
+    (void)ExprParam(p, magKey, l.magnitude);
     // A torque on a face that lends no axis is refused here, before the
     // study changes, as well as at the run (a file can carry one too).
     if (torque && !l.HasAxis() && l.contactWith == 0 &&

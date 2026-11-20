@@ -1256,7 +1256,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
           ext = e;
       REQUIRE(ext != nullptr);
       CHECK_THAT(ext->twistDeg, WithinRel(want.at(1).get<double>(), 1e-9));
-      CHECK(ext->twistExpr == want.at(2).get<std::string>());
+      CHECK(ext->twistDeg.expr == want.at(2).get<std::string>());
       CHECK(ext->herringbone == want.at(3).get<bool>());
     }
   }

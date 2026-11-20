@@ -266,7 +266,7 @@ uint32_t Fill(SketchFeature& sk, const Spec& s) {
 void SetSolid(Feature& solid, const Spec& s, uint32_t axisLine) {
   if (auto* e = dynamic_cast<ExtrudeFeature*>(&solid)) {
     e->distance = s.height.value;
-    e->distanceExpr = s.height.expr;
+    e->distance.expr = s.height.expr;
     e->mode = s.mode;
     e->reversed = s.reversed;
   } else if (auto* r = dynamic_cast<RevolveFeature*>(&solid)) {

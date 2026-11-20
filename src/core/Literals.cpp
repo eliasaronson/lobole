@@ -24,20 +24,6 @@ using nlohmann::json;
 
 namespace literals {
 
-const char* QuantityName(Quantity q) {
-  switch (q) {
-  case Quantity::Length:
-    return "length";
-  case Quantity::Angle:
-    return "angle";
-  case Quantity::Count:
-    return "count";
-  case Quantity::Other:
-    return "other";
-  }
-  return "length";
-}
-
 std::string ExactNumber(double v) {
   char buf[64];
   const auto r = std::to_chars(buf, buf + sizeof(buf), v);
@@ -129,8 +115,8 @@ void FindSentinels(const json& j, const std::string& path,
 std::vector<std::pair<size_t, std::string>> ProbeSlots(const Feature& f) {
   std::unique_ptr<Feature> probe = f.Clone();
   size_t k = 0;
-  probe->VisitExprs([&](std::string& text, double&) {
-    text = kSentinel + std::to_string(k++);
+  probe->VisitExprs([&](const ExprSlot& slot) {
+    slot.Expr() = kSentinel + std::to_string(k++);
   });
   std::vector<std::pair<size_t, std::string>> found;
   const json probed = DocumentIO::FeatureToJson(*probe);
@@ -139,16 +125,6 @@ std::vector<std::pair<size_t, std::string>> ProbeSlots(const Feature& f) {
     path = FieldPath(probed, path);
   std::sort(found.begin(), found.end());
   return found;
-}
-
-Quantity QuantityOfName(const std::string& name) {
-  if (name.find("angle") != std::string::npos ||
-      name.find("rotation") != std::string::npos || EndsWith(name, "_deg") ||
-      name == "deg")
-    return Quantity::Angle;
-  if (name == "count" || name == "turns")
-    return Quantity::Count;
-  return Quantity::Length;
 }
 
 const char* Axis(size_t i) {
@@ -169,7 +145,7 @@ void Describe(const json& fj, const std::string& path, Field& out) {
   if (segs.size() == 3 && segs[0] == "entities" && IsIndex(segs[1])) {
     const json& e = fj.at("entities").at(std::stoul(segs[1]));
     out.label = e.value("type", std::string("entity")) + " " + segs[2];
-    out.quantity = QuantityOfName(segs[2]);
+    out.quantity = QuantityOfFieldName(segs[2]);
     return;
   }
   std::string name;
@@ -183,7 +159,7 @@ void Describe(const json& fj, const std::string& path, Field& out) {
     }
   }
   out.label = label;
-  out.quantity = QuantityOfName(name);
+  out.quantity = QuantityOfFieldName(name);
 }
 
 // Why a field must not carry an expression, read off the feature's JSON.
@@ -208,13 +184,19 @@ std::vector<Field> Fields(const Feature& f) {
   std::vector<Field> out;
   const json fj = DocumentIO::FeatureToJson(f);
 
-  // The slots' current texts and values, read from a clone (VisitExprs is
-  // non-const, and a sketch's angle round-trips through degrees).
-  std::vector<std::pair<std::string, double>> slots;
+  // The slots' current texts, values (in the expression's units: a
+  // sketch's angle in degrees) and kinds, read from a clone (VisitExprs is
+  // non-const).
+  struct Slot {
+    std::string expr;
+    double value = 0.0;
+    Quantity quantity = Quantity::Length;
+  };
+  std::vector<Slot> slots;
   {
     std::unique_ptr<Feature> reader = f.Clone();
-    reader->VisitExprs([&](std::string& text, double& value) {
-      slots.emplace_back(text, value);
+    reader->VisitExprs([&](const ExprSlot& s) {
+      slots.push_back({s.Expr(), s.Value(), s.Quantity()});
     });
   }
   for (const auto& [slot, path] : ProbeSlots(f)) {
@@ -222,9 +204,10 @@ std::vector<Field> Fields(const Feature& f) {
       continue;
     Field field;
     field.path = path;
-    field.expr = slots[slot].first;
-    field.value = slots[slot].second;
+    field.expr = slots[slot].expr;
+    field.value = slots[slot].value;
     Describe(fj, path, field);
+    field.quantity = slots[slot].quantity;
     field.notDrivable = NotDrivable(fj, path);
     out.push_back(std::move(field));
   }
@@ -283,9 +266,9 @@ bool SetFieldExpr(Feature& f, const std::string& path,
       slot = k;
   if (slot) {
     size_t k = 0;
-    f.VisitExprs([&](std::string& t, double&) {
+    f.VisitExprs([&](const ExprSlot& s) {
       if (k++ == *slot)
-        t = text;
+        s.Expr() = text;
     });
     return true;
   }
@@ -482,7 +465,7 @@ World FramePlacement(const Document& doc, const FrameFeature& fr, int depth);
 World DatumPlacement(const Document& doc, const DatumPlaneFeature& dp,
                      int depth) {
   World w{true, false, Quoted("datum plane", dp)};
-  if (!dp.offsetExpr.empty() || !dp.angleExpr.empty())
+  if (!dp.offset.expr.empty() || !dp.angleDeg.expr.empty())
     w.exprDriven = true;
   if (dp.kind != DatumPlaneKind::ThroughPoints && dp.parentId != 0 &&
       depth < 32)

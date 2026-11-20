@@ -140,13 +140,13 @@ TEST_CASE("An FEM run's input hash moves with every input",
   // An expression is an input by its VALUE: the same text, another value of
   // the variable it reads, is another run.
   bar->doc.SetParameter("load", "500");
-  StudyOf(*bar).loads[1].magnitudeExpr = "load";
+  StudyOf(*bar).loads[1].magnitude.expr = "load";
   const uint64_t withExpr = Key(*bar);
   bar->doc.SetParameter("load", "700");
   CHECK(Key(*bar) != withExpr);
   bar->doc.SetParameter("load", "500");
   CHECK(Key(*bar) == withExpr);
-  StudyOf(*bar).loads[1].magnitudeExpr.clear();
+  StudyOf(*bar).loads[1].magnitude.expr.clear();
   REQUIRE(Key(*bar) == base);
 
   // The material.

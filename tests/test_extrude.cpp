@@ -589,7 +589,7 @@ TEST_CASE("End conditions round-trip through serialization (v18)",
       std::make_unique<ExtrudeFeature>("Pad", skId, 5.0, ExtrudeMode::NewBody);
   ext->endMode = ExtrudeEnd::TwoSided;
   ext->distance2 = 1.0;
-  ext->distance2Expr = "back";
+  ext->distance2.expr = "back";
   doc.AddFeature(std::move(ext));
 
   const auto path = std::filesystem::temp_directory_path() / "end_rt.json";
@@ -600,7 +600,7 @@ TEST_CASE("End conditions round-trip through serialization (v18)",
   auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
   REQUIRE(rt != nullptr);
   CHECK(rt->endMode == ExtrudeEnd::TwoSided);
-  CHECK(rt->distance2Expr == "back");
+  CHECK(rt->distance2.expr == "back");
   CHECK_THAT(loaded->GetBodies()[0].shape.Volume(),
              WithinRel(8.0 * 7.0, 1e-6)); // 5 forward + expr-driven 2 back
   std::filesystem::remove(path);

@@ -13,6 +13,7 @@
 
 #include "core/Conventions.h"
 #include "core/ElementMap.h"
+#include "core/ExprValue.h"
 #include "core/Expression.h"
 #include "core/fem/FemMesher.h"
 
@@ -69,11 +70,10 @@ inline bool IsSupport(LoadType t) {
 }
 
 // A per-face mesh size override (mm). size follows the value+expr convention:
-// `sizeExpr` empty means `size` is a literal, else it is the evaluated result.
+// `size.expr` empty means `size` is a literal, else it is the evaluated result.
 struct Refinement {
   ElementRef face;
-  double size = 0.0;
-  std::string sizeExpr;
+  ExprValue size{0.0};
   uint64_t occurrenceId = 0; // assembly studies: whose face (0 on a part)
 };
 
@@ -100,8 +100,7 @@ struct Participant {
   ParticipantRole role = ParticipantRole::Rigid;
   // Per-participant element size (mm; 0 = the study's global size): a 16 mm
   // panel and a 60 mm brace do not want one number. value+expr convention.
-  double meshSize = 0.0;
-  std::string meshSizeExpr;
+  ExprValue meshSize{0.0};
   // Contact only: the friction coefficient against the meshed occurrence
   // (unitless; 0 = frictionless).
   double friction = 0.0;
@@ -151,8 +150,7 @@ struct Load {
   uint64_t occurrenceId = 0; // 0 on a part study
   // Fixed: clamped where this occurrence touches; Contact: resting on it.
   uint64_t contactWith = 0;
-  double magnitude = 0.0;
-  std::string magnitudeExpr;
+  ExprValue magnitude{0.0};
   // Down, for a load whose face could not be resolved. Every path that HAS a
   // face derives this from it (DefaultForceDirection): a force pushes into
   // the face you picked. "Down" comes from the world frame — a hand-written
@@ -202,8 +200,7 @@ struct Load {
 // solves each case on one factorisation. value+expr convention.
 struct LoadCase {
   std::string name;
-  double weight = 1.0;
-  std::string weightExpr;
+  ExprValue weight{1.0};
 };
 
 // A region a topology study must leave empty
@@ -323,9 +320,15 @@ struct Study {
   // and re-saves as it did.
   Solver solver = Solver::Auto;
 
+  // Every number of the study that can be an expression of the variables
+  // (docs/variables/README.md#numbers-that-are-expressions), as the
+  // document's walk reads them: evaluation (EvaluateStudyExprs), rename and
+  // the refusal to delete a variable. The topology numbers only on a
+  // topology study, the one whose file carries them.
+  void VisitExprs(const ExprVisitor& visit);
+
   // Global maximum element size (mm); 0 = auto from the body bounding box.
-  double meshSize = 0.0;
-  std::string meshSizeExpr;
+  ExprValue meshSize{0.0};
 
   std::vector<Refinement> refinements;
   std::vector<Load> loads;
@@ -357,10 +360,8 @@ struct Study {
   // member size. `keepFaces` are frozen solid in addition to the auto-frozen
   // support/load skin (bolt bosses, bearing seats). volumeFraction/filterRadius
   // follow the value+expr convention.
-  double volumeFraction = 0.3;
-  std::string volumeFractionExpr;
-  double filterRadius = 0.0;
-  std::string filterRadiusExpr;
+  ExprValue volumeFraction{0.3};
+  ExprValue filterRadius{0.0};
   int maxIterations = 60;
   std::vector<ElementRef> keepFaces;
   std::vector<KeepOut> keepOuts;
@@ -468,12 +469,11 @@ const char* CpuSolverName(AnalysisType type);
 [[nodiscard]] bool AnalysisTypeFromString(const std::string& s,
                                           AnalysisType& out);
 
-// Evaluates every expression-driven field (mesh size, refinement sizes, load
-// magnitudes) against `symbols`, writing results into the value fields. On a
-// parse/unknown-name error, sets *error (naming the offending text) and returns
-// false; the value fields keep their last good values. Lazy: called at mesh/
-// solve time, not during regeneration (a Study is not visited by the feature
-// loop, and results are never auto-solved).
+// Evaluates every slot Study::VisitExprs visits against `symbols`, writing
+// results into the value fields. On a parse/unknown-name error, sets *error
+// (naming the field and the offending text) and returns false; the value
+// fields keep their last good values. Lazy: called at mesh/solve time, not
+// during regeneration (results are never auto-solved).
 bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
                         std::string* error);
 

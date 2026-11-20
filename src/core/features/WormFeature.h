@@ -39,7 +39,7 @@ public:
     VisitRefs(face, visit);
   }
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(moduleExpr, module);
+    visit({module, ExprQuantity::Length, "module"});
   }
   [[nodiscard]] std::string WhyIncomplete() const override {
     return face.name.empty() ? "pick the worm blank's cylindrical face"
@@ -49,8 +49,7 @@ public:
   ElementRef face; // the blank's outside: the worm's tip cylinder
   // Axial module, mm. 0 = derived from the blank at the usual diameter
   // quotient: tip diameter / (10 + 2).
-  double module = 0.0;
-  std::string moduleExpr;
+  ExprValue module{0.0};
   int starts = 1;
   double pressureDeg = 20.0;
   bool rightHanded = true; // JSON "hand": "right" | "left"
@@ -91,7 +90,7 @@ public:
     VisitRefs(face, visit);
   }
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(moduleExpr, module);
+    visit({module, ExprQuantity::Length, "module"});
   }
   [[nodiscard]] std::string WhyIncomplete() const override {
     return face.name.empty() ? "pick the wheel blank's cylindrical face"
@@ -100,8 +99,7 @@ public:
 
   ElementRef face; // the blank's rim; its length is the face width
   // mm. 0 = derived from the blank: rim diameter / (teeth + 3).
-  double module = 0.0;
-  std::string moduleExpr;
+  ExprValue module{0.0};
   int teeth = 40;
   // The mating worm's.
   int starts = 1;

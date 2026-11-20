@@ -48,6 +48,11 @@ OPT_RE = re.compile(
     r'\b(?:p|params|request\.params)\s*\.\s*(?:value|contains)\s*\(\s*'
     r'"([A-Za-z0-9_]+)"')
 LITERAL_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
+# A number a method sets reads `<key>` and `<key>_expr` together, through one
+# helper (remote/RemoteHelpers.h ExprParam), both optional:
+# docs/scripting/rpc.md#numbers-that-take-an-expression
+EXPR_PARAM_RE = re.compile(
+    r'\bExprParam\s*\(\s*(?:p|params)\s*,\s*"([A-Za-z0-9_]+)"')
 RAW_RE = re.compile(r'\b(?:p|params)\s*\.\s*raw\s*\(\s*\)')
 # Method names in a condition: `m == "x"`, and the `||` chains that group
 # them. `request.method` is the second spelling: `screenshot` and
@@ -83,7 +88,8 @@ EXTRA_RE = re.compile(r'rpc-params:\s*([a-z0-9_]+(?:\s*,\s*[a-z0-9_]+)*)\s*$',
 HANDOFF_RE = re.compile(r'\b([A-Za-z_][A-Za-z0-9_:]*)\s*\(([^;{}]*?)\)', re.S)
 HANDOFF_ARG_RE = re.compile(r'(?:^|,)\s*(?:const\s+)?(?:p|params)\s*(?:,|$)')
 # Not a hand-off: the readers themselves, and the scanner's own idioms.
-HANDOFF_SKIP = {"if", "while", "for", "switch", "return", "need", "sizeof"}
+HANDOFF_SKIP = {"if", "while", "for", "switch", "return", "need", "sizeof",
+                "ExprParam"}
 
 
 def _strip(src):
@@ -197,6 +203,12 @@ def scan_source(src):
         owner = _innermost(scopes, mm.start())
         if owner:
             note(owner, optional=mm.group(1))
+    for mm in EXPR_PARAM_RE.finditer(bare):
+        owner = _innermost(scopes, mm.start())
+        if owner:
+            for k in (mm.group(1), mm.group(1) + "_expr"):
+                note(owner, key=k)
+                note(owner, optional=k)
     for mm in RAW_RE.finditer(bare):
         owner = _innermost(scopes, mm.start())
         if owner:
@@ -357,6 +369,10 @@ def _helpers(sources):
                                         "calls": set(), "optional": set()})
             for km in KEY_RE.finditer(body):
                 e["keys"].add(km.group(1) or km.group(2))
+            for km in EXPR_PARAM_RE.finditer(body):
+                for k in (km.group(1), km.group(1) + "_expr"):
+                    e["keys"].add(k)
+                    e["optional"].add(k)
             for km in OPT_RE.finditer(body):
                 e["optional"].add(km.group(1))
             e["opaque"] = e["opaque"] or bool(RAW_RE.search(body))

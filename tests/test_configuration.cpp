@@ -41,7 +41,7 @@ ExtrudeFeature* MakeBar(Document& doc, const std::string& distanceExpr,
   const uint64_t sketchId = doc.GetFeature(0)->GetId();
   auto ext = std::make_unique<ExtrudeFeature>("Extrude1", sketchId, literal,
                                               ExtrudeMode::NewBody);
-  ext->distanceExpr = distanceExpr;
+  ext->distance.expr = distanceExpr;
   auto* raw = ext.get();
   doc.AddFeature(std::move(ext));
   return raw;
@@ -93,12 +93,12 @@ TEST_CASE("A configuration drives a primitive through a variable",
   doc.SetParameter("wall", "6");
   auto box =
       std::make_unique<BoxFeature>("Plate", glm::vec3(0.0f), 40.0, 6.0, 30.0);
-  box->widthExpr = "len";
-  box->heightExpr = "wall";
+  box->width.expr = "len";
+  box->height.expr = "wall";
   doc.AddFeature(std::move(box));
   auto cyl = std::make_unique<CylinderFeature>(
       "Boss", glm::vec3(0.0f, 6.0f, 0.0f), glm::vec3(0, 1, 0), 6.0, 12.0);
-  cyl->radiusExpr = "wall";
+  cyl->radius.expr = "wall";
   doc.AddFeature(std::move(cyl));
   REQUIRE(doc.Regenerate());
   // Two separate bodies — Vol() reads the first, so check each by hand.

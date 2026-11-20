@@ -44,7 +44,7 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(distanceExpr, distance);
+    visit({distance, ExprQuantity::Length, "distance_mm"});
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
@@ -53,8 +53,7 @@ public:
 
   uint64_t bodyId = 0; // producing-feature id of the body edited
   std::vector<ElementRef> faces;
-  double distance = 1.0; // mm, + outward
-  std::string distanceExpr;
+  ExprValue distance{1.0}; // mm, + outward
   directedit::Fingerprints fingerprints;
 };
 

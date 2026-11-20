@@ -74,7 +74,7 @@ TEST_CASE("the same field driven by the variable is not reported",
   REQUIRE(doc.SetParameter("wall_r", "52"));
   Plate(doc, 52.0);
   auto* ext = dynamic_cast<ExtrudeFeature*>(doc.GetFeature(1));
-  ext->distanceExpr = "wall_r";
+  ext->distance.expr = "wall_r";
   doc.Regenerate();
   CHECK(Finding(literals::Lint(doc, Vars(doc)), "Plate", "distance") ==
         nullptr);
@@ -147,7 +147,7 @@ TEST_CASE("a placement whose offset follows a variable is not reported",
   REQUIRE(doc.SetParameter("deck", "10"));
   Plate(doc, 10.0);
   auto datum = std::make_unique<DatumPlaneFeature>("Deck");
-  datum->offsetExpr = "deck";
+  datum->offset.expr = "deck";
   doc.AddFeature(std::move(datum));
   const uint64_t datumId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
   auto boss = std::make_unique<SketchFeature>("Boss sketch", kXY);
@@ -281,7 +281,7 @@ TEST_CASE("a field spelled in degrees is named by its own key", "[literals]") {
   const std::vector<std::string> bare = literals::FieldsWithoutTwin(rev);
   CHECK(std::find(bare.begin(), bare.end(), "angle_deg") == bare.end());
   REQUIRE(literals::SetFieldExpr(rev, "angle_deg", "turn"));
-  CHECK(rev.angleExpr == "turn");
+  CHECK(rev.angleDeg.expr == "turn");
 }
 
 TEST_CASE("a variable's comment says what it measures", "[literals]") {

@@ -170,7 +170,7 @@ TEST_CASE("A datum offset driven by a variable follows a parameter edit",
   doc.SetParameter("gap", "4");
   auto dp =
       std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
-  dp->offsetExpr = "gap";
+  dp->offset.expr = "gap";
   doc.AddFeature(std::move(dp));
   auto* d = dynamic_cast<DatumPlaneFeature*>(doc.GetFeature(0));
   REQUIRE(d != nullptr);
@@ -239,7 +239,7 @@ TEST_CASE("Datum + tracked sketch + extrude round-trip through JSON",
     doc.SetParameter("gap", "5");
     auto dp =
         std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
-    dp->offsetExpr = "gap";
+    dp->offset.expr = "gap";
     doc.AddFeature(std::move(dp));
     const uint64_t datum = doc.GetFeature(0)->GetId();
     uint64_t sketch = AddSketchOnDatum(doc, datum, {0, 0}, {4, 2});
@@ -254,7 +254,7 @@ TEST_CASE("Datum + tracked sketch + extrude round-trip through JSON",
 
   auto* dp = dynamic_cast<DatumPlaneFeature*>(loaded->GetFeature(0));
   REQUIRE(dp != nullptr);
-  CHECK(dp->offsetExpr == "gap");
+  CHECK(dp->offset.expr == "gap");
   CHECK_THAT(dp->OutputPlane().GetOrigin().z, WithinRel(5.0, 1e-5));
 
   auto* sk = dynamic_cast<SketchFeature*>(loaded->GetFeature(1));

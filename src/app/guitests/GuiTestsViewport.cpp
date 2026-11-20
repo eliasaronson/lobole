@@ -1550,7 +1550,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     auto* ext =
         dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
     IM_CHECK(ext != nullptr);
-    IM_CHECK(ext->distanceExpr.empty());
+    IM_CHECK(ext->distance.expr.empty());
 
     // Frame deterministically from an iso direction so the extrude axis is
     // draggable on screen (facing the plane it would be view-parallel). The
@@ -1646,7 +1646,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     auto* rev =
         dynamic_cast<RevolveFeature*>(ui::ResolvePendingFeature(*s_App));
     IM_CHECK(rev != nullptr);
-    IM_CHECK(rev->angleExpr.empty()); // no handle when expression-driven
+    IM_CHECK(rev->angleDeg.expr.empty()); // no handle when expression-driven
     const double a0 = rev->angleDeg;
     IM_CHECK(std::abs(a0 - 360.0) < 1e-9); // the default, and the clamp ceiling
 

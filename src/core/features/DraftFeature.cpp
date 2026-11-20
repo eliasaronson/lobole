@@ -230,7 +230,7 @@ bool DraftFeature::Execute(RegenContext& ctx) {
                     "%.3g deg tapers the face by %.3g over its height and "
                     "changes the body by %.0f%% — check the angle and the "
                     "neutral plane",
-                    angleDeg, maxTaper, changed * 100.0);
+                    angleDeg.value, maxTaper, changed * 100.0);
       SetWarning(msg);
     }
     // Names through the builder's own history: a face a draft leaves alone

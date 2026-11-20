@@ -43,10 +43,10 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(lengthExpr, length);
-    visit(gapExpr, gap);
-    visit(offsetStartExpr, offsetStart);
-    visit(offsetEndExpr, offsetEnd);
+    visit({length, ExprQuantity::Length, "length"});
+    visit({gap, ExprQuantity::Length, "gap"});
+    visit({offsetStart, ExprQuantity::Length, "offset_start"});
+    visit({offsetEnd, ExprQuantity::Length, "offset_end"});
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
@@ -57,15 +57,13 @@ public:
 
   std::vector<ElementRef> edges;
   // How far the return runs back over the panel, past the fold, mm.
-  double length = 5.0;
-  std::string lengthExpr;
+  ExprValue length{5.0};
   // Closed: the return lies against the panel, with the smallest gap a solid
   // model can keep between two walls — a tenth of the sheet — since walls
   // that touch fuse into one and the fold stops being a fold. Open: the
   // return stands off by `gap`.
   HemKind kind = HemKind::Closed;
-  double gap = 0.0; // open hems; 0 = one thickness
-  std::string gapExpr;
+  ExprValue gap{0.0}; // open hems; 0 = one thickness
   // Inside (default): the fold's outside lands on the picked edge, so the
   // part does not grow past its drawn outline. Outside: the fold starts at
   // the edge and adds to it.
@@ -76,8 +74,6 @@ public:
   // so a hemmed tray needs its hem stopped short, exactly as an edge flange
   // does. Unlike a flange's, these cut no relief: a hem is crushed flat
   // against the panel, so there is no bend line stopping inside it.
-  double offsetStart = 0.0;
-  std::string offsetStartExpr;
-  double offsetEnd = 0.0;
-  std::string offsetEndExpr;
+  ExprValue offsetStart{0.0};
+  ExprValue offsetEnd{0.0};
 };

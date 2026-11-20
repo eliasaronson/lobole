@@ -659,38 +659,65 @@ bool ParticipantRoleFromString(const std::string& s, ParticipantRole& out) {
   return false;
 }
 
+void Study::VisitExprs(const ExprVisitor& visit) {
+  visit({meshSize, ExprQuantity::Length, "mesh_size"});
+  for (size_t i = 0; i < refinements.size(); i++)
+    visit({refinements[i].size, ExprQuantity::Length,
+           "refinements/" + std::to_string(i) + "/size"});
+  for (size_t i = 0; i < loads.size(); i++)
+    visit({loads[i].magnitude, ExprQuantity::Other,
+           "loads/" + std::to_string(i) + "/magnitude"});
+  for (size_t i = 0; i < participants.size(); i++)
+    visit({participants[i].meshSize, ExprQuantity::Length,
+           "participants/" + std::to_string(i) + "/mesh_size"});
+  for (size_t i = 0; i < loadCases.size(); i++)
+    visit({loadCases[i].weight, ExprQuantity::Other,
+           "load_cases/" + std::to_string(i) + "/weight"});
+  if (type == AnalysisType::Topology) {
+    visit({volumeFraction, ExprQuantity::Other, "volume_fraction"});
+    visit({filterRadius, ExprQuantity::Length, "filter_radius"});
+  }
+}
+
+namespace {
+
+// What a refusal calls the field at a Study::VisitExprs path.
+std::string StudyFieldWords(const Study& study, const std::string& path) {
+  const size_t slash = path.find('/');
+  const std::string head = path.substr(0, slash);
+  if (head == "refinements")
+    return "refinement size";
+  if (head == "loads")
+    return "load magnitude";
+  if (head == "participants")
+    return "participant mesh size";
+  if (head == "load_cases") {
+    const size_t i = std::stoul(path.substr(slash + 1));
+    return "load case '" +
+           (i < study.loadCases.size() ? study.loadCases[i].name : "") +
+           "' weight";
+  }
+  std::string words = head;
+  std::replace(words.begin(), words.end(), '_', ' ');
+  return words; // "mesh size", "volume fraction", "filter radius"
+}
+
+} // namespace
+
 bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
                         std::string* error) {
   bool ok = true;
-  // Evaluate one value+expr pair; on failure records the first error but keeps
-  // going so every bad field is left with its last good value.
-  auto eval = [&](const std::string& text, double& value,
-                  const std::string& what) {
-    if (text.empty())
+  // On failure records the first error but keeps going so every bad field
+  // is left with its last good value.
+  study.VisitExprs([&](const ExprSlot& slot) {
+    std::string why;
+    if (EvaluateSlot(slot, symbols, &why) || !ok)
       return;
-    const auto v = ExpressionEngine::Default().EvaluateText(text, symbols);
-    if (v.has_value()) {
-      value = *v;
-    } else if (ok) {
-      ok = false;
-      if (error)
-        *error = what + " expression '" + text + "': " + v.error().message;
-    }
-  };
-
-  eval(study.meshSizeExpr, study.meshSize, "mesh size");
-  for (auto& r : study.refinements)
-    eval(r.sizeExpr, r.size, "refinement size");
-  for (auto& l : study.loads)
-    eval(l.magnitudeExpr, l.magnitude, "load magnitude");
-  for (auto& pt : study.participants)
-    eval(pt.meshSizeExpr, pt.meshSize, "participant mesh size");
-  for (auto& c : study.loadCases)
-    eval(c.weightExpr, c.weight, "load case '" + c.name + "' weight");
-  if (study.type == AnalysisType::Topology) {
-    eval(study.volumeFractionExpr, study.volumeFraction, "volume fraction");
-    eval(study.filterRadiusExpr, study.filterRadius, "filter radius");
-  }
+    ok = false;
+    if (error)
+      *error = StudyFieldWords(study, slot.Path()) + " expression '" +
+               slot.Expr() + "': " + why;
+  });
   return ok;
 }
 

@@ -70,7 +70,7 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(offsetExpr, offset);
+    visit({offset, ExprQuantity::Length, "offset"});
   }
 
   uint64_t bodyId = 0; // producing-feature id of the body to split
@@ -82,8 +82,7 @@ public:
   // normal (so a base plane can cut a body that does not sit at the origin).
   uint64_t datumId = 0;
   PlaneType basePlane = PlaneType::XY;
-  double offset = 0.0;
-  std::string offsetExpr;
+  ExprValue offset{0.0};
 
   // Face knife: a planar face of the target body, extended to an unbounded
   // plane. ref.featureId must be bodyId.

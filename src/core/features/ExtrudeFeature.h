@@ -61,11 +61,11 @@ public:
   bool ToolAdds() const override { return mode == ExtrudeMode::Add; }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(distanceExpr, distance);
-    visit(distance2Expr, distance2);
-    visit(thinThicknessExpr, thinThickness);
-    visit(twistExpr, twistDeg);
-    visit(taperExpr, taperDeg);
+    visit({distance, ExprQuantity::Length, "distance"});
+    visit({distance2, ExprQuantity::Length, "distance2"});
+    visit({thinThickness, ExprQuantity::Length, "thin/thickness"});
+    visit({twistDeg, ExprQuantity::Angle, "twist_deg"});
+    visit({taperDeg, ExprQuantity::Angle, "taper_deg"});
   }
 
   // A twist is a Blind or Symmetric solid extrude's: the other end modes
@@ -75,13 +75,11 @@ public:
   [[nodiscard]] std::string WhyIncomplete() const override;
 
   uint64_t sketchId = 0;
-  double distance = 1.0;
+  ExprValue distance{1.0};
   // Optional expression driving `distance` (empty = plain literal),
   // evaluated against the document's parameters on every regeneration.
-  std::string distanceExpr;
   // The backward side of a TwoSided extrude (with its expression twin).
-  double distance2 = 1.0;
-  std::string distance2Expr;
+  ExprValue distance2{1.0};
   ExtrudeEnd endMode = ExtrudeEnd::Blind;
   // UpToFace target: a planar face by stable element name (toponaming).
   // Planar only in v1 — a curved target needs a trimmed boolean, not a
@@ -90,8 +88,7 @@ public:
   // Thin/wall extrude (M3.4): every loop becomes a hollow wall instead of a
   // filled profile. Composes with any end condition.
   bool thin = false;
-  double thinThickness = 1.0;
-  std::string thinThicknessExpr;
+  ExprValue thinThickness{1.0};
   sketch::ThinSide thinSide = sketch::ThinSide::Out;
   bool reversed = false;
   // Twisted extrude (v168, docs/modeling/README.md#twisted-extrudes): the
@@ -99,16 +96,14 @@ public:
   // origin over the length, right-handed about the direction of travel when
   // positive. 0 = a plain prism. `herringbone` climbs the first half at that
   // rate and comes back over the second (a V; ignored at zero twist).
-  double twistDeg = 0.0;
-  std::string twistExpr;
+  ExprValue twistDeg{0.0};
   bool herringbone = false;
   // Tapered extrude (docs/modeling/README.md#tapered-extrudes): every wall
   // leans IN by `taperDeg` from the extrude direction over the length
   // (negative leans out), about the sketch plane, so the profile is the
   // section there. 0 = a straight prism. Blind only, not thin, not twisted;
   // refused past the angle at which the profile closes up.
-  double taperDeg = 0.0;
-  std::string taperExpr;
+  ExprValue taperDeg{0.0};
   ExtrudeMode mode = ExtrudeMode::NewBody;
   // Region selection (U2): each entry is one selected region — the sorted
   // entity ids of its outer loop (sketch::LoopEntityIds). Empty = the whole

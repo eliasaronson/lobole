@@ -58,7 +58,9 @@ public:
       visit(id);
   }
 
-  void VisitExprs(const ExprVisitor& visit) override { visit(gapExpr, gap); }
+  void VisitExprs(const ExprVisitor& visit) override {
+    visit({gap, ExprQuantity::Length, "gap"});
+  }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
     if (memberId == 0)
@@ -71,6 +73,5 @@ public:
   uint64_t memberId = 0;         // producing-feature id of the member cut
   std::vector<uint64_t> against; // lands on their SIDE: a fishmouth
   std::vector<uint64_t> mitre;   // meets them END TO END: a mitre
-  double gap = 0.0;              // mm on the radius, for the weld root
-  std::string gapExpr;
+  ExprValue gap{0.0};            // mm on the radius, for the weld root
 };

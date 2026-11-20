@@ -477,6 +477,7 @@ set(core_sources
     src/core/io/Format.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
+    src/core/ExprValue.cpp
     src/core/LookupTable.cpp
     src/core/Literals.cpp
     src/core/Requirements.cpp

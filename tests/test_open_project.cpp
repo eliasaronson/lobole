@@ -254,7 +254,7 @@ TEST_CASE("A part using a project variable opens from its baked geometry",
     // when the name is unknown, a part variable has none to keep.
     doc.SetParameter("half_w", "plate_w / 2");
     auto box = std::make_unique<BoxFeature>("Plate", glm::vec3(0), 1, 10, 30);
-    box->widthExpr = "half_w * 2";
+    box->width.expr = "half_w * 2";
     doc.AddFeature(std::move(box));
     REQUIRE(doc.Regenerate());
     REQUIRE(doc.GetBodies().size() == 1);

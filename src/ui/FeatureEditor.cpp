@@ -384,6 +384,12 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   ImGui::PopID();
 }
 
+// The same on an ExprValue: its text and its value.
+void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
+             const char* label, ExprValue& v, double minValue = 0.01) {
+  ExprDim(state, feature, index, commit, label, v.expr, v.value, minValue);
+}
+
 // The integer sibling of ExprDim: a literal InputInt with an "fx" button to
 // switch to an expression (evaluated against the parameter table, rounded).
 void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
@@ -686,12 +692,12 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
 
   switch (dp.kind) {
   case DatumPlaneKind::Offset:
-    ExprDim(state, dp, index, commit, "Offset", dp.offsetExpr, dp.offset);
+    ExprDim(state, dp, index, commit, "Offset", dp.offset);
     HandleEdit(state, dp, ImGui::Checkbox("Flip", &dp.flip), index, commit);
     break;
   case DatumPlaneKind::Angled: {
     DrawAxisRefCombo(state, dp, dp.axis, index, commit, /*sketch=*/0);
-    ExprDim(state, dp, index, commit, "Angle (deg)", dp.angleExpr, dp.angleDeg);
+    ExprDim(state, dp, index, commit, "Angle (deg)", dp.angleDeg);
     break;
   }
   case DatumPlaneKind::ThroughPoints:
@@ -903,10 +909,9 @@ void DrawCradleParams(AppState& state, CradleFeature& cr, size_t index,
     usedC = scanDiag / 500.0;
   if (usedH <= 0.0)
     usedH = usedC / 2.0;
-  toggle("Own clearance", cr.hasClearance, cr.clearanceMm, usedC);
+  toggle("Own clearance", cr.hasClearance, cr.clearanceMm.value, usedC);
   if (cr.hasClearance)
-    ExprDim(state, cr, index, commit, "Clearance (mm)", cr.clearanceExpr,
-            cr.clearanceMm, 0.001);
+    ExprDim(state, cr, index, commit, "Clearance (mm)", cr.clearanceMm, 0.001);
   else
     ImGui::TextDisabled("Clearance: the print process's gap a side");
   // The direction the object moves in: one of the six axes; another vector
@@ -934,10 +939,10 @@ void DrawCradleParams(AppState& state, CradleFeature& cr, size_t index,
       CommitDiscrete(state, cr, before, index, commit);
     }
   }
-  toggle("Own resolution", cr.hasResolution, cr.resolutionMm, usedH);
+  toggle("Own resolution", cr.hasResolution, cr.resolutionMm.value, usedH);
   if (cr.hasResolution)
-    ExprDim(state, cr, index, commit, "Resolution (mm)", cr.resolutionExpr,
-            cr.resolutionMm, 0.001);
+    ExprDim(state, cr, index, commit, "Resolution (mm)", cr.resolutionMm,
+            0.001);
   if (report.is_object())
     ImGui::TextDisabled("Cut at %.3g mm clearance, %.3g mm cells: within "
                         "%.3g mm of the scan",
@@ -1035,13 +1040,12 @@ void DrawPatternParams(AppState& state, PatternFeature& pat, size_t index,
   case PatternKind::Linear:
     DrawAxisRefCombo(state, pat, pat.axis, index, commit, /*sketch=*/0);
     ExprCount(state, pat, index, commit, "Count", pat.countExpr, pat.count);
-    ExprDim(state, pat, index, commit, "Spacing", pat.spacingExpr, pat.spacing);
+    ExprDim(state, pat, index, commit, "Spacing", pat.spacing);
     break;
   case PatternKind::Circular:
     DrawAxisRefCombo(state, pat, pat.axis, index, commit, /*sketch=*/0);
     ExprCount(state, pat, index, commit, "Count", pat.countExpr, pat.count);
-    ExprDim(state, pat, index, commit, "Angle (deg)", pat.angleExpr,
-            pat.angleDeg);
+    ExprDim(state, pat, index, commit, "Angle (deg)", pat.angleDeg);
     break;
   }
 }
@@ -1154,7 +1158,7 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
       if (!ToggleDirectFace(off->bodyId, off->faces, off->fingerprints, item))
         return false;
       // The first face of a fresh tool derives the distance from itself.
-      if (first && !off->faces.empty() && off->distanceExpr.empty() &&
+      if (first && !off->faces.empty() && off->distance.expr.empty() &&
           state.pendingFeatureId == f.GetId())
         off->distance = SizeFromFace(state, off->faces.front(), off->distance);
       return true;
@@ -2112,8 +2116,8 @@ static void DrawWormRows(AppState& state, Feature& feature, size_t index,
                          bool commit) {
   auto* wo = dynamic_cast<WormFeature*>(&feature);
   auto* ww = dynamic_cast<WormWheelFeature*>(&feature);
-  double& module = wo ? wo->module : ww->module;
-  std::string& moduleExpr = wo ? wo->moduleExpr : ww->moduleExpr;
+  double& module = wo ? wo->module.value : ww->module.value;
+  std::string& moduleExpr = wo ? wo->module.expr : ww->module.expr;
   int& starts = wo ? wo->starts : ww->starts;
   double& pressure = wo ? wo->pressureDeg : ww->pressureDeg;
   bool& right = wo ? wo->rightHanded : ww->rightHanded;
@@ -2189,12 +2193,11 @@ static void DrawCamProfileRows(AppState& state, Feature& feature, size_t index,
                                bool commit) {
   auto* cp = dynamic_cast<CamProfileFeature*>(&feature);
   const nlohmann::json rep = cp->ReportJson();
-  ExprDim(state, feature, index, commit, "Base radius", cp->baseRadiusExpr,
-          cp->baseRadius);
+  ExprDim(state, feature, index, commit, "Base radius", cp->baseRadius);
   if (cp->baseRadius <= 0.0 && rep.is_object())
     ImGui::TextDisabled("from the hub: %.3f",
                         rep.at("base_radius_mm").get<double>());
-  ExprDim(state, feature, index, commit, "Width", cp->widthExpr, cp->width);
+  ExprDim(state, feature, index, commit, "Width", cp->width);
   if (cp->width <= 0.0 && rep.is_object())
     ImGui::TextDisabled("from the hub: %.3f", rep.at("width_mm").get<double>());
   {
@@ -2311,26 +2314,22 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     // ExprDim, not DragDim: the "fx" button is what lets a variable drive
     // the dimension, and without it a primitive could not be parametric —
     // which meant a part built from primitives could not be configured.
-    ExprDim(state, feature, index, commit, "Width", box->widthExpr, box->width);
-    ExprDim(state, feature, index, commit, "Height", box->heightExpr,
-            box->height);
-    ExprDim(state, feature, index, commit, "Depth", box->depthExpr, box->depth);
+    ExprDim(state, feature, index, commit, "Width", box->width);
+    ExprDim(state, feature, index, commit, "Height", box->height);
+    ExprDim(state, feature, index, commit, "Depth", box->depth);
   } else if (auto* sphere = dynamic_cast<SphereFeature*>(&feature)) {
     HandleEdit(state, feature,
                DragFloat3Row(state, "Center", &sphere->center.x), index,
                commit);
-    ExprDim(state, feature, index, commit, "Radius", sphere->radiusExpr,
-            sphere->radius);
+    ExprDim(state, feature, index, commit, "Radius", sphere->radius);
   } else if (auto* cyl = dynamic_cast<CylinderFeature*>(&feature)) {
     HandleEdit(state, feature, DragFloat3Row(state, "Center", &cyl->center.x),
                index, commit);
     HandleEdit(state, feature,
                DragFloat3Row(state, "Direction", &cyl->direction.x), index,
                commit);
-    ExprDim(state, feature, index, commit, "Radius", cyl->radiusExpr,
-            cyl->radius);
-    ExprDim(state, feature, index, commit, "Height", cyl->heightExpr,
-            cyl->height);
+    ExprDim(state, feature, index, commit, "Radius", cyl->radius);
+    ExprDim(state, feature, index, commit, "Height", cyl->height);
   } else if (auto* import = dynamic_cast<ImportFeature*>(&feature)) {
     ImGui::TextDisabled("File: %s", import->path.c_str());
     // STL and BREP carry no unit (STEP declares its own), so which one the
@@ -2488,20 +2487,18 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       PickSlotRow(state, feature, PickSlot::ExtrudeEndFace,
                   ext->endTarget.IsSet() ? ext->endTarget.name : "");
     } else if (ext->endMode != ExtrudeEnd::ThroughAll) { // no distance there
-      ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
-              ext->distance);
+      ExprDim(state, feature, index, commit, "Distance", ext->distance);
     }
     if (ext->endMode == ExtrudeEnd::TwoSided) {
-      ExprDim(state, feature, index, commit, "Distance 2", ext->distance2Expr,
-              ext->distance2);
+      ExprDim(state, feature, index, commit, "Distance 2", ext->distance2);
     }
     // A twist is a blind or symmetric extrude's (ExtrudeFeature::
     // WhyIncomplete refuses the rest, and says so in the window).
     if (ext->endMode == ExtrudeEnd::Blind ||
         ext->endMode == ExtrudeEnd::Symmetric) {
-      ExprDim(state, feature, index, commit, "Twist (deg)", ext->twistExpr,
-              ext->twistDeg, /*minValue=*/-1e6); // either hand
-      if (ext->twistDeg != 0.0 || !ext->twistExpr.empty())
+      ExprDim(state, feature, index, commit, "Twist (deg)", ext->twistDeg,
+              /*minValue=*/-1e6); // either hand
+      if (ext->twistDeg != 0.0 || !ext->twistDeg.expr.empty())
         HandleEdit(state, feature,
                    ImGui::Checkbox("Herringbone", &ext->herringbone), index,
                    commit);
@@ -2510,8 +2507,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     // (docs/modeling/README.md#tapered-extrudes); WhyIncomplete says so for
     // the rest.
     if (ext->endMode == ExtrudeEnd::Blind && !ext->thin) {
-      ExprDim(state, feature, index, commit, "Taper (deg)", ext->taperExpr,
-              ext->taperDeg, /*minValue=*/-89.9);
+      ExprDim(state, feature, index, commit, "Taper (deg)", ext->taperDeg,
+              /*minValue=*/-89.9);
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Every wall leans in by this many degrees from the "
                           "extrude direction (negative leans out); 45 prints "
@@ -2526,8 +2523,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     HandleEdit(state, feature, ImGui::Checkbox("Thin", &ext->thin), index,
                commit);
     if (ext->thin) {
-      ExprDim(state, feature, index, commit, "Thickness",
-              ext->thinThicknessExpr, ext->thinThickness);
+      ExprDim(state, feature, index, commit, "Thickness", ext->thinThickness);
       const char* sides[] = {"Outward", "Inward", "Both"};
       int side = std::to_underlying(ext->thinSide);
       if (LabeledCombo("Wall side", &side, sides, 3)) {
@@ -2547,7 +2543,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       // this extrude's preview.
       const std::vector<Body>* prior =
           index > 0 ? state.document->CachedBodiesAfter(index - 1) : nullptr;
-      if (state.pendingFeatureId == ext->GetId() && ext->distanceExpr.empty())
+      if (state.pendingFeatureId == ext->GetId() && ext->distance.expr.empty())
         if (auto* sk = dynamic_cast<SketchFeature*>(
                 state.document->FindFeatureById(ext->sketchId))) {
           const std::vector<Body> none;
@@ -2572,8 +2568,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                     ? "All regions"
                     : std::to_string(ext->regions.size()) + " selected");
   } else if (auto* rev = dynamic_cast<RevolveFeature*>(&feature)) {
-    ExprDim(state, feature, index, commit, "Angle (deg)", rev->angleExpr,
-            rev->angleDeg);
+    ExprDim(state, feature, index, commit, "Angle (deg)", rev->angleDeg);
     DrawAxisRefCombo(state, feature, rev->axis, index, commit, rev->sketchId);
     HandleEdit(state, feature, ImGui::Checkbox("Symmetric", &rev->symmetric),
                index, commit);
@@ -2605,8 +2600,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {
     DrawPatternParams(state, *pat, index, commit);
   } else if (auto* dr = dynamic_cast<DraftFeature*>(&feature)) {
-    ExprDim(state, feature, index, commit, "Angle (deg)", dr->angleExpr,
-            dr->angleDeg);
+    ExprDim(state, feature, index, commit, "Angle (deg)", dr->angleDeg);
     const char* planes[] = {"XY (pull +Z)", "XZ (pull +Y)", "YZ (pull +X)"};
     int pl = std::to_underlying(dr->neutralPlane);
     if (LabeledCombo("Neutral", &pl, planes, 3)) {
@@ -2626,9 +2620,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     AddTheFeatureRow(state, feature, index, commit, del->faces);
     RefListRows(state, feature, index, commit, del->faces);
   } else if (auto* off = dynamic_cast<OffsetFaceFeature*>(&feature)) {
-    ExprDim(state, feature, index, commit, "Distance", off->distanceExpr,
-            off->distance, /*minValue=*/-1e6);
-    if (off->distanceExpr.empty()) {
+    ExprDim(state, feature, index, commit, "Distance", off->distance,
+            /*minValue=*/-1e6);
+    if (off->distance.expr.empty()) {
       // Out adds material, in removes it: the one choice a number's sign
       // hides.
       if (ImGui::Button("Flip###offset_flip")) {
@@ -2653,9 +2647,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
             mv->translate.y, /*minValue=*/-1e6);
     ExprDim(state, feature, index, commit, "Move Z", mv->translateExpr[2],
             mv->translate.z, /*minValue=*/-1e6);
-    ExprDim(state, feature, index, commit, "Rotate (deg)", mv->rotateExpr,
-            mv->rotateDeg, /*minValue=*/-360.0);
-    if (mv->rotateDeg != 0.0 || !mv->rotateExpr.empty())
+    ExprDim(state, feature, index, commit, "Rotate (deg)", mv->rotateDeg,
+            /*minValue=*/-360.0);
+    if (mv->rotateDeg != 0.0 || !mv->rotateDeg.expr.empty())
       DrawAxisRefCombo(state, feature, mv->axis, index, commit,
                        /*sketchIdForLines=*/0);
     PickSlotRow(
@@ -2746,8 +2740,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       }
     }
     ImGui::BeginDisabled(!ho->fitThread.empty());
-    ExprDim(state, feature, index, commit, "Diameter", ho->diameterExpr,
-            ho->diameter);
+    ExprDim(state, feature, index, commit, "Diameter", ho->diameter);
     ImGui::EndDisabled();
     if (!ho->fitThread.empty() &&
         ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -2773,7 +2766,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                           "without sagging. Needs the part's print process");
     }
     if (!ho->through)
-      ExprDim(state, feature, index, commit, "Depth", ho->depthExpr, ho->depth);
+      ExprDim(state, feature, index, commit, "Depth", ho->depth);
     // The floor's drill point and a tapped hole's thread depth, each 0 to
     // derive it (docs/modeling/holes-and-threads.md#hole).
     if (!ho->through) {
@@ -2790,8 +2783,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                               : "a jobber drill's, as a fit's drill is");
     }
     if (ho->fitKind == "tapped" && !ho->fitThread.empty()) {
-      ExprDim(state, feature, index, commit, "Thread depth",
-              ho->threadDepthExpr, ho->threadDepth);
+      ExprDim(state, feature, index, commit, "Thread depth", ho->threadDepth);
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("How deep it is threaded from the mouth; 0 derives "
                           "it (now %.2f: %s)",
@@ -2837,10 +2829,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                  commit);
       HandleEdit(state, feature, DragFloat3Row(state, "Axis", &cv->axisDir.x),
                  index, commit);
-      ExprDim(state, feature, index, commit, "Radius", cv->radiusExpr,
-              cv->radius);
-      ExprDim(state, feature, index, commit, "Pitch", cv->pitchExpr, cv->pitch);
-      ExprDim(state, feature, index, commit, "Turns", cv->turnsExpr, cv->turns);
+      ExprDim(state, feature, index, commit, "Radius", cv->radius);
+      ExprDim(state, feature, index, commit, "Pitch", cv->pitch);
+      ExprDim(state, feature, index, commit, "Turns", cv->turns);
       HandleEdit(state, feature,
                  ImGui::Checkbox("Right-handed", &cv->rightHanded), index,
                  commit);
@@ -2882,15 +2873,14 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* pi = dynamic_cast<PipeFeature*>(&feature)) {
     DrawFeatureRefCombo(state, feature, "Path", &pi->pathId, index, commit,
                         /*allowNone=*/false, AcceptPathLike);
-    ExprDim(state, feature, index, commit, "Outer dia", pi->outerDiameterExpr,
-            pi->outerDiameter);
+    ExprDim(state, feature, index, commit, "Outer dia", pi->outerDiameter);
     // Wall allows 0 (a solid rod), so a plain drag (ExprDim's DragDim clamps to
     // >= 0.01).
     LeftLabel("Wall");
     static const double wmin = 0.0, wmax = 1e6;
     HandleEdit(state, feature,
-               ExprDragDouble(state, "##Wall", &pi->wallThickness, 0.02f, wmin,
-                              wmax,
+               ExprDragDouble(state, "##Wall", &pi->wallThickness.value, 0.02f,
+                              wmin, wmax,
                               pi->wallThickness <= 0.0 ? "solid" : "%.3f"),
                index, commit);
   } else if (auto* sw = dynamic_cast<SweepFeature*>(&feature)) {
@@ -3018,8 +3008,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       LeftLabel("Length");
       static const double lmin = 0.0, lmax = 1e6;
       HandleEdit(state, feature,
-                 ExprDragDouble(state, "##Length", &th->length, 0.05f, lmin,
-                                lmax, th->length <= 0.0 ? "full face" : "%.3f"),
+                 ExprDragDouble(state, "##Length", &th->length.value, 0.05f,
+                                lmin, lmax,
+                                th->length <= 0.0 ? "full face" : "%.3f"),
                  index, commit);
     }
     // The class: the series' own classes for the side the face is on (the
@@ -3071,8 +3062,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
           ImGui::TextDisabled("%s", n.c_str());
       }
   } else if (auto* rb = dynamic_cast<RibFeature*>(&feature)) {
-    ExprDim(state, feature, index, commit, "Thickness", rb->thicknessExpr,
-            rb->thickness);
+    ExprDim(state, feature, index, commit, "Thickness", rb->thickness);
     HandleEdit(state, feature, ImGui::Checkbox("Flip", &rb->flipDirection),
                index, commit);
     PickSlotRow(state, feature, PickSlot::RibBody,
@@ -3085,8 +3075,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     HandleEdit(state, feature, ImGui::Checkbox("Other side", &bf->reversed),
                index, commit);
   } else if (auto* ef = dynamic_cast<EdgeFlangeFeature*>(&feature)) {
-    ExprDim(state, feature, index, commit, "Length", ef->lengthExpr,
-            ef->length);
+    ExprDim(state, feature, index, commit, "Length", ef->length);
     const char* modes[] = {"Flat wall", "To outside mold line",
                            "To inside mold line"};
     int mode = std::to_underlying(ef->lengthMode);
@@ -3095,12 +3084,10 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ef->lengthMode = static_cast<FlangeLengthMode>(mode);
       CommitDiscrete(state, feature, before, index, commit);
     }
-    ExprDim(state, feature, index, commit, "Angle", ef->angleDegExpr,
-            ef->angleDeg);
+    ExprDim(state, feature, index, commit, "Angle", ef->angleDeg);
     // 0 means "the document's", which is itself the material's minimum — so
     // the field shows what it will USE rather than a bare zero.
-    ExprDim(state, feature, index, commit, "Radius", ef->radiusExpr,
-            ef->radius);
+    ExprDim(state, feature, index, commit, "Radius", ef->radius);
     const char* positions[] = {"Material inside", "Material outside",
                                "Bend outside"};
     int pos = std::to_underlying(ef->position);
@@ -3112,10 +3099,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     HandleEdit(state, feature,
                ImGui::Checkbox("Close corners", &ef->closedCorners), index,
                commit);
-    ExprDim(state, feature, index, commit, "Inset start", ef->offsetStartExpr,
-            ef->offsetStart);
-    ExprDim(state, feature, index, commit, "Inset end", ef->offsetEndExpr,
-            ef->offsetEnd);
+    ExprDim(state, feature, index, commit, "Inset start", ef->offsetStart);
+    ExprDim(state, feature, index, commit, "Inset end", ef->offsetEnd);
     PickSlotRow(
         state, feature, PickSlot::EdgeFlangeEdges,
         ef->edges.empty() ? "" : std::to_string(ef->edges.size()) + " picked");
@@ -3136,10 +3121,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       CommitDiscrete(state, feature, before, index, commit);
     }
     // 0 is "from the bend": radius plus thickness, what clears both bends.
-    ExprDim(state, feature, index, commit, "Size", cr->sizeExpr, cr->size);
+    ExprDim(state, feature, index, commit, "Size", cr->size);
   } else if (auto* hm = dynamic_cast<HemFeature*>(&feature)) {
-    ExprDim(state, feature, index, commit, "Return", hm->lengthExpr,
-            hm->length);
+    ExprDim(state, feature, index, commit, "Return", hm->length);
     const char* kinds[] = {"Closed", "Open"};
     int kind = std::to_underlying(hm->kind);
     if (LabeledCombo("Kind", &kind, kinds, 2)) {
@@ -3148,16 +3132,14 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       CommitDiscrete(state, feature, before, index, commit);
     }
     if (hm->kind == HemKind::Open)
-      ExprDim(state, feature, index, commit, "Gap", hm->gapExpr, hm->gap);
+      ExprDim(state, feature, index, commit, "Gap", hm->gap);
     HandleEdit(state, feature,
                ImGui::Checkbox("Outside the edge", &hm->outside), index,
                commit);
     // Where the hem stops short of each end of the edge: a hem running the
     // whole length of a pan's wall fuses to the wall beside it.
-    ExprDim(state, feature, index, commit, "Inset start", hm->offsetStartExpr,
-            hm->offsetStart);
-    ExprDim(state, feature, index, commit, "Inset end", hm->offsetEndExpr,
-            hm->offsetEnd);
+    ExprDim(state, feature, index, commit, "Inset start", hm->offsetStart);
+    ExprDim(state, feature, index, commit, "Inset end", hm->offsetEnd);
     PickSlotRow(
         state, feature, PickSlot::HemEdges,
         hm->edges.empty() ? "" : std::to_string(hm->edges.size()) + " picked");
@@ -3167,10 +3149,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     // panel, and the combo offers only sketches that hold exactly one.
     DrawFeatureRefCombo(state, feature, "Line", &jg->sketchId, index, commit,
                         /*allowNone=*/false, AcceptJogLine);
-    ExprDim(state, feature, index, commit, "Height", jg->heightExpr,
-            jg->height);
-    ExprDim(state, feature, index, commit, "Angle", jg->angleDegExpr,
-            jg->angleDeg);
+    ExprDim(state, feature, index, commit, "Height", jg->height);
+    ExprDim(state, feature, index, commit, "Angle", jg->angleDeg);
     HandleEdit(state, feature, ImGui::Checkbox("Other side", &jg->flip), index,
                commit);
   } else if (auto* uf = dynamic_cast<UnfoldFeature*>(&feature)) {
@@ -3190,8 +3170,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     PickSlotRow(state, feature, PickSlot::FlatPatternBody,
                 BodyRefLabel(state, fp->bodyId));
   } else if (auto* sh = dynamic_cast<ShellFeature*>(&feature)) {
-    ExprDim(state, feature, index, commit, "Thickness", sh->thicknessExpr,
-            sh->thickness);
+    ExprDim(state, feature, index, commit, "Thickness", sh->thickness);
     PickSlotRow(state, feature, PickSlot::ShellBody,
                 BodyRefLabel(state, sh->bodyId));
     PickSlotRow(state, feature, PickSlot::ShellOpenFaces,
@@ -3212,8 +3191,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     if (sp->knife == SplitKnifeKind::Plane) {
       PlaneRefCombo(state, feature, sp->datumId, sp->basePlane, index, commit,
                     [&] { RecenterSplitOffset(state, *sp); });
-      ExprDim(state, feature, index, commit, "Offset", sp->offsetExpr,
-              sp->offset);
+      ExprDim(state, feature, index, commit, "Offset", sp->offset);
     } else {
       PickSlotRow(state, feature, PickSlot::SplitKnifeFace,
                   sp->face.name.empty() ? "" : sp->face.name);
@@ -3231,7 +3209,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
     ExprDim(state, feature, index, commit,
             fil->op == EdgeBlendOp::Chamfer ? "Distance" : "Radius",
-            fil->radiusExpr, fil->radius);
+            fil->radius);
 
     // The edge collection as a regular multi slot (U7 — was EdgePickState).
     PickSlotRow(state, feature, PickSlot::BlendEdges,

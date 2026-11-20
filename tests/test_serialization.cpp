@@ -277,8 +277,8 @@ Document DocWithStudy() {
                                               4.0, 4.0));
   fem::Study& s = doc.AddStudy("Static 1");
   s.meshSize = 5.0;
-  s.meshSizeExpr = "";
-  s.refinements.push_back({ElementRef{2, "2/g1"}, 1.0, std::string{}});
+  s.meshSize.expr = "";
+  s.refinements.push_back({ElementRef{2, "2/g1"}, ExprValue{1.0}});
   fem::Load fixed;
   fixed.id = doc.AllocateId();
   fixed.type = fem::LoadType::Fixed;
@@ -289,7 +289,7 @@ Document DocWithStudy() {
   force.type = fem::LoadType::Force;
   force.face = ElementRef{2, "2/cap1"};
   force.magnitude = 1000.0;
-  force.magnitudeExpr = "load_n";
+  force.magnitude.expr = "load_n";
   force.direction = glm::dvec3(0, 0, -1);
   s.loads.push_back(force);
   return doc;
@@ -308,7 +308,7 @@ void CheckStudyMatches(const Document& loaded) {
   CHECK(s.loads[0].face.name == "2/cap0");
   CHECK(s.loads[1].type == fem::LoadType::Force);
   CHECK(s.loads[1].magnitude == 1000.0);
-  CHECK(s.loads[1].magnitudeExpr == "load_n");
+  CHECK(s.loads[1].magnitude.expr == "load_n");
   CHECK(s.loads[1].direction.z == -1.0);
 }
 } // namespace

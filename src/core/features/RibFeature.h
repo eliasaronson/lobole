@@ -37,12 +37,11 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(thicknessExpr, thickness);
+    visit({thickness, ExprQuantity::Length, "thickness"});
   }
 
   uint64_t sketchId = 0;  // the open profile
-  double thickness = 1.0; // symmetric about the profile curve
-  std::string thicknessExpr;
+  ExprValue thickness{1.0};   // symmetric about the profile curve
   bool flipDirection = false; // grow along -normal instead of +normal
   // Target body's creating-feature id (the boolean/pattern operand
   // convention); 0 = the nearest overlapping body (the Add rule).

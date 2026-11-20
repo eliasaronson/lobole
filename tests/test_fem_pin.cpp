@@ -234,7 +234,7 @@ TEST_CASE("a lever on two pins: reactions balance the load and the clamp's "
     // the machine's load, not the mesh.
     s.converge = fem::ConvergeMode::Never;
     for (const ElementRef& bore : p->bores)
-      s.refinements.push_back({bore, boreSize, "", 0});
+      s.refinements.push_back({bore, ExprValue{boreSize}, 0});
     s.loads.push_back(Support(doc, type, p->bores[0]));
     s.loads.push_back(Support(doc, type, p->bores[1]));
     s.loads.push_back(Force(doc, p->endX1, F, glm::dvec3(0, -1, 0)));

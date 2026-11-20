@@ -46,9 +46,9 @@ public:
 
   void VisitExprs(const ExprVisitor& visit) override {
     if (hasClearance)
-      visit(clearanceExpr, clearanceMm);
+      visit({clearanceMm, ExprQuantity::Length, "clearance_mm"});
     if (hasResolution)
-      visit(resolutionExpr, resolutionMm);
+      visit({resolutionMm, ExprQuantity::Length, "resolution_mm"});
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
@@ -77,8 +77,7 @@ public:
   // Unset: the part's print process's gap a side
   // (docs/tolerances/README.md#printed-parts); refused without one.
   bool hasClearance = false;
-  double clearanceMm = 0.0;
-  std::string clearanceExpr;
+  ExprValue clearanceMm{0.0};
   // The way the object moves INTO the cradle: world -Z, down, unless set.
   glm::dvec3 direction{0.0, 0.0, -1.0};
   // false keeps the undercuts: a snap-in grip.
@@ -86,8 +85,7 @@ public:
   // Unset: half the clearance, coarsened to fit the budget, never past the
   // clearance.
   bool hasResolution = false;
-  double resolutionMm = 0.0;
-  std::string resolutionExpr;
+  ExprValue resolutionMm{0.0};
 
   // What a plan of this cradle on some bodies comes to: what Execute,
   // BuildCostS and WhyRefusedOn all read, so they cannot disagree.

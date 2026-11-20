@@ -41,7 +41,7 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(angleExpr, angleDeg);
+    visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
   }
 
   // As Extrude's: a Pattern of a revolve that cuts or adds (a Sphere placed
@@ -58,8 +58,7 @@ public:
 
   uint64_t sketchId = 0;
   AxisRef axis;
-  double angleDeg = 360.0;
-  std::string angleExpr;
+  ExprValue angleDeg{360.0};
   bool reversed = false;
   bool symmetric = false;
   ExtrudeMode mode = ExtrudeMode::NewBody;

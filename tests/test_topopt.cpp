@@ -643,7 +643,7 @@ TEST_CASE("Topology study definition round-trips through JSON",
   s.type = fem::AnalysisType::Topology;
   s.meshSize = 3.0;
   s.volumeFraction = 0.25;
-  s.volumeFractionExpr = "vf";
+  s.volumeFraction.expr = "vf";
   s.filterRadius = 4.0;
   s.maxIterations = 45;
   s.keepFaces = {ElementRef{2, "2/cap0"}, ElementRef{2, "2/cap1"}};
@@ -658,7 +658,7 @@ TEST_CASE("Topology study definition round-trips through JSON",
   const fem::Study r = DocumentIO::StudyFromJson(DocumentIO::StudyToJson(s));
   CHECK(r.type == fem::AnalysisType::Topology);
   CHECK_THAT(r.volumeFraction, WithinAbs(0.25, 1e-12));
-  CHECK(r.volumeFractionExpr == "vf");
+  CHECK(r.volumeFraction.expr == "vf");
   CHECK_THAT(r.filterRadius, WithinAbs(4.0, 1e-12));
   CHECK(r.maxIterations == 45);
   REQUIRE(r.keepFaces.size() == 2);

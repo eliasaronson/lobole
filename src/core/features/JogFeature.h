@@ -36,8 +36,8 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(heightExpr, height);
-    visit(angleDegExpr, angleDeg);
+    visit({height, ExprQuantity::Length, "height"});
+    visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
@@ -51,11 +51,9 @@ public:
   // Face to face: how far the far side's picked face ends up above where it
   // was, mm. There is a floor — the two bends alone take (2R + t)(1 - cos a)
   // — and a height under it is refused rather than squeezed.
-  double height = 5.0;
-  std::string heightExpr;
+  ExprValue height{5.0};
   // How steeply the step climbs, (0, 90]. 90 is a square step.
-  double angleDeg = 90.0;
-  std::string angleDegExpr;
+  ExprValue angleDeg{90.0};
   // Which side of the line moves. The sketch face's normal is "up": the far
   // side is carried that way.
   bool flip = false;

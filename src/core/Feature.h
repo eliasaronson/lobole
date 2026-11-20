@@ -5,6 +5,7 @@
 
 #include "cad/CADKernel.h"
 #include "core/ElementMap.h"
+#include "core/ExprValue.h"
 #include "core/Expression.h"
 #include "core/ImportPlacement.h"
 #include "core/SheetMetal.h"
@@ -548,13 +549,14 @@ public:
   // aborts regeneration of subsequent features.
   virtual bool Execute(RegenContext& ctx) = 0;
 
-  // Expression-driven numeric fields follow the pattern of a plain double
-  // (what geometry code reads) paired with an expression-text string (empty
-  // = plain literal; see ExtrudeFeature::distanceExpr). Features expose each
-  // such pair here so the Document can evaluate them during regeneration and
-  // parameter rename/delete can rewrite/inspect the texts — one hook instead
-  // of three per-feature code paths.
-  using ExprVisitor = std::function<void(std::string& text, double& value)>;
+  // Every number of this feature that can be an expression of the
+  // variables, each handed to `visit` as an ExprSlot (core/ExprValue.h):
+  // the Document evaluates them during regeneration, and variable rename,
+  // delete and the literals lint read and rewrite their texts -- one hook
+  // instead of a code path per feature. A slot whose JSON the serializer
+  // does not write (an extrude's second distance when it is one-sided) is
+  // still visited; the literals lint leaves it out.
+  using ExprVisitor = ::ExprVisitor;
   virtual void VisitExprs(const ExprVisitor& visit) { (void)visit; }
 
   // Every OTHER feature of THIS history that this one names by stable id —
@@ -772,14 +774,13 @@ public:
   // from primitives could not be configured at all. That was true until
   // v61, which is a strange thing for a parametric modeller to have shipped.
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(widthExpr, width);
-    visit(heightExpr, height);
-    visit(depthExpr, depth);
+    visit({width, ExprQuantity::Length, "width"});
+    visit({height, ExprQuantity::Length, "height"});
+    visit({depth, ExprQuantity::Length, "depth"});
   }
 
   glm::dvec3 position;
-  double width, height, depth;
-  std::string widthExpr, heightExpr, depthExpr;
+  ExprValue width, height, depth;
 };
 
 class SphereFeature : public Feature {
@@ -803,12 +804,11 @@ public:
   void VisitFeatureRefs(const RefVisitor&) const override {}
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(radiusExpr, radius);
+    visit({radius, ExprQuantity::Length, "radius"});
   }
 
   glm::dvec3 center;
-  double radius;
-  std::string radiusExpr;
+  ExprValue radius;
 };
 
 class CylinderFeature : public Feature {
@@ -832,14 +832,13 @@ public:
   void VisitFeatureRefs(const RefVisitor&) const override {}
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(radiusExpr, radius);
-    visit(heightExpr, height);
+    visit({radius, ExprQuantity::Length, "radius"});
+    visit({height, ExprQuantity::Length, "height"});
   }
 
   glm::dvec3 center;
   glm::dvec3 direction;
-  double radius, height;
-  std::string radiusExpr, heightExpr;
+  ExprValue radius, height;
 };
 
 // References an external STEP/STL/BREP file. By DEFAULT the shapes are

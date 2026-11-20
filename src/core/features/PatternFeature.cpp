@@ -266,7 +266,7 @@ bool PatternFeature::Execute(RegenContext& ctx) {
         std::snprintf(msg, sizeof msg,
                       "angle_deg %g puts every copy on the seed: it is the "
                       "step between instances (%d round a circle is %g)",
-                      angleDeg, n, 360.0 / n);
+                      angleDeg.value, n, 360.0 / n);
         SetError(msg);
         return false;
       }

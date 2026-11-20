@@ -50,13 +50,12 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(angleExpr, angleDeg);
+    visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
   }
 
   uint64_t bodyId = 0;
   std::vector<ElementRef> faces;
-  double angleDeg = 5.0;
-  std::string angleExpr;
+  ExprValue angleDeg{5.0};
   PlaneType neutralPlane =
       PlaneType::XY; // pull direction = this plane's normal
 };

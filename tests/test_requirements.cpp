@@ -243,7 +243,7 @@ TEST_CASE("bounds hold as stated", "[requirements]") {
   CHECK_FALSE(req::Holds(most, 2.0001, 2.0, 0, 0));
   const req::Bound least =
       req::BoundFromJson({{"kind", "at_least"}, {"value", "run_gap / 2"}});
-  CHECK(least.valueExpr == "run_gap / 2");
+  CHECK(least.value.expr == "run_gap / 2");
   CHECK(req::Holds(least, 0.6, 0.6, 0, 0));
   CHECK_FALSE(req::Holds(least, 0.5, 0.6, 0, 0));
   CHECK_FALSE(req::Holds(most, std::nan(""), 2.0, 0, 0));
@@ -268,7 +268,7 @@ TEST_CASE("the saved form round-trips, evidence and expressions included",
   CHECK(j.at("evidence").at("input_hash") == "0xfedcba9876543210");
   const req::Requirement back = req::FromJson(j);
   CHECK(req::ToJson(back) == j);
-  CHECK(back.bound.minExpr == "head_min_g");
+  CHECK(back.bound.min.expr == "head_min_g");
   CHECK(back.evidence.inputHash == r.evidence.inputHash);
 
   // A file naming a measure this build does not know does not load as
@@ -625,7 +625,7 @@ TEST_CASE("the expression golden round-trips with its evidence",
   CHECK(list[0].Kind() == "expression");
   CHECK(list[0].evidence.detail.at("inputs").at("od") == 18.0);
   CHECK(list[1].measure.at("configuration") == 7);
-  CHECK(list[1].bound.maxExpr == "od + 12");
+  CHECK(list[1].bound.max.expr == "od + 12");
   CHECK(list[1].evidence.limitMax == 30.0);
   for (const req::Requirement& r : list)
     CHECK(req::ToJson(req::FromJson(req::ToJson(r))) == req::ToJson(r));

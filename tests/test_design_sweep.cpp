@@ -58,7 +58,7 @@ void FilletedBlock(App& app) {
   Document& doc = *app.state.document;
   auto box =
       std::make_unique<BoxFeature>("Block", glm::dvec3(0.0), 20.0, 10.0, 20.0);
-  box->heightExpr = "t";
+  box->height.expr = "t";
   doc.AddFeature(std::move(box));
   REQUIRE(doc.GetBodies().size() == 1);
   const Body& body = doc.GetBodies()[0];
@@ -70,7 +70,7 @@ void FilletedBlock(App& app) {
       edges.push_back({body.createdBy, *name});
   REQUIRE(edges.size() == 12);
   auto fillet = std::make_unique<FilletFeature>("Edges round", edges, 2.0);
-  fillet->radiusExpr = "r";
+  fillet->radius.expr = "r";
   doc.AddFeature(std::move(fillet));
   REQUIRE(doc.GetBodies().size() == 1);
   REQUIRE(doc.GetFeature(1)->GetError().empty());
@@ -218,7 +218,7 @@ TEST_CASE("from_requirements takes a within range and refuses a one-sided "
   REQUIRE(ui::SetProjectVariable(app.state, "od", "18", ""));
   auto box =
       std::make_unique<BoxFeature>("Block", glm::dvec3(0.0), 20.0, 10.0, 20.0);
-  box->heightExpr = "t";
+  box->height.expr = "t";
   app.state.document->AddFeature(std::move(box));
   app.Call("add_requirement",
            {{"name", "wall"},
@@ -235,7 +235,7 @@ TEST_CASE("from_requirements takes a within range and refuses a one-sided "
   REQUIRE(ui::SetProjectVariable(one.state, "t", "10", ""));
   auto box2 =
       std::make_unique<BoxFeature>("Block", glm::dvec3(0.0), 20.0, 10.0, 20.0);
-  box2->heightExpr = "t";
+  box2->height.expr = "t";
   one.state.document->AddFeature(std::move(box2));
   one.Call("add_requirement",
            {{"name", "thick enough"},

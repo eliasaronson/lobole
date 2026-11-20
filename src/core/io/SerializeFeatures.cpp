@@ -525,7 +525,9 @@ sketch::Constraint ConstraintFromJson(const json& j) {
   c.value = c.kind == sketch::ConstraintKind::Angle
                 ? AngleRadians(j, "value", "value_deg", 0.0)
                 : j.value("value", 0.0);
-  c.valueExpr = j.value("expr", std::string{}); // absent (pre-v11) = literal
+  // absent (pre-v11) = literal
+  c.valueExpr = j.contains("expr") ? ExprTextFromJson(j.at("expr"), "expr")
+                                   : std::string{};
   if (j.contains("c"))
     c.c = PointRefFromJson(j.at("c"), "c");
   if (j.contains("label"))
@@ -1291,9 +1293,8 @@ json FeatureToJson(const Feature& feature) {
     }
   } else if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     j["sketch_id"] = ext->sketchId;
-    j["distance"] = ext->distance;
-    if (!ext->distanceExpr.empty()) // literals stay plain numbers (v11)
-      j["distance_expr"] = ext->distanceExpr;
+    WriteExpr(j, "distance",
+              ext->distance); // literals stay plain numbers (v11)
     j["reversed"] = ext->reversed;
     j["mode"] = ExtrudeModeToString(ext->mode);
     if (ext->endMode != ExtrudeEnd::Blind) { // v18; omit the default
@@ -1303,9 +1304,7 @@ json FeatureToJson(const Feature& feature) {
                           ? "through_all" // v52
                           : "up_to_face";
       if (ext->endMode == ExtrudeEnd::TwoSided) {
-        j["distance2"] = ext->distance2;
-        if (!ext->distance2Expr.empty())
-          j["distance2_expr"] = ext->distance2Expr;
+        WriteExpr(j, "distance2", ext->distance2);
       }
       if (ext->endMode == ExtrudeEnd::UpToFace) {
         j["end_target"] = {{"feature_id", ext->endTarget.featureId},
@@ -1316,61 +1315,50 @@ json FeatureToJson(const Feature& feature) {
       j["regions"] = ext->regions;
     // v168: a twist, omitted when there is none, so an untwisted extrude
     // writes what it always did.
-    if (ext->twistDeg != 0.0 || !ext->twistExpr.empty())
-      j["twist_deg"] = ext->twistDeg;
-    if (!ext->twistExpr.empty())
-      j["twist_expr"] = ext->twistExpr;
+    if (ext->twistDeg != 0.0 || !ext->twistDeg.expr.empty())
+      j["twist_deg"] = ext->twistDeg.value;
+    WriteExprText(j, "twist", ext->twistDeg.expr);
     if (ext->herringbone)
       j["herringbone"] = true;
     // v183: a taper, omitted when there is none.
-    if (ext->taperDeg != 0.0 || !ext->taperExpr.empty())
-      j["taper_deg"] = ext->taperDeg;
-    if (!ext->taperExpr.empty())
-      j["taper_expr"] = ext->taperExpr;
+    if (ext->taperDeg != 0.0 || !ext->taperDeg.expr.empty())
+      j["taper_deg"] = ext->taperDeg.value;
+    WriteExprText(j, "taper", ext->taperDeg.expr);
     if (ext->thin) { // v18; omit when off
-      json thin = {{"thickness", ext->thinThickness},
+      json thin = {{"thickness", ext->thinThickness.value},
                    {"side", ext->thinSide == sketch::ThinSide::Out  ? "out"
                             : ext->thinSide == sketch::ThinSide::In ? "in"
                                                                     : "both"}};
-      if (!ext->thinThicknessExpr.empty())
-        thin["thickness_expr"] = ext->thinThicknessExpr;
+      WriteExprText(thin, "thickness", ext->thinThickness.expr);
       j["thin"] = thin;
     }
   } else if (auto* box = dynamic_cast<const BoxFeature*>(&feature)) {
     j["position"] = Vec3ToJson(box->position);
-    j["width"] = box->width;
-    j["height"] = box->height;
-    j["depth"] = box->depth;
+    j["width"] = box->width.value;
+    j["height"] = box->height.value;
+    j["depth"] = box->depth.value;
     // v61: the primitives became expression-driven. "<field>_expr" is the
     // format's standing convention and is omitted when the field is a plain
     // literal, so a file that uses none of them is byte-identical to v60.
-    if (!box->widthExpr.empty())
-      j["width_expr"] = box->widthExpr;
-    if (!box->heightExpr.empty())
-      j["height_expr"] = box->heightExpr;
-    if (!box->depthExpr.empty())
-      j["depth_expr"] = box->depthExpr;
+    WriteExprText(j, "width", box->width.expr);
+    WriteExprText(j, "height", box->height.expr);
+    WriteExprText(j, "depth", box->depth.expr);
   } else if (auto* sphere = dynamic_cast<const SphereFeature*>(&feature)) {
     j["center"] = Vec3ToJson(sphere->center);
-    j["radius"] = sphere->radius;
-    if (!sphere->radiusExpr.empty())
-      j["radius_expr"] = sphere->radiusExpr;
+    WriteExpr(j, "radius", sphere->radius);
   } else if (auto* cyl = dynamic_cast<const CylinderFeature*>(&feature)) {
     j["center"] = Vec3ToJson(cyl->center);
     j["direction"] = Vec3ToJson(cyl->direction);
-    j["radius"] = cyl->radius;
-    j["height"] = cyl->height;
-    if (!cyl->radiusExpr.empty())
-      j["radius_expr"] = cyl->radiusExpr;
-    if (!cyl->heightExpr.empty())
-      j["height_expr"] = cyl->heightExpr;
+    j["radius"] = cyl->radius.value;
+    j["height"] = cyl->height.value;
+    WriteExprText(j, "radius", cyl->radius.expr);
+    WriteExprText(j, "height", cyl->height.expr);
   } else if (auto* fastener = dynamic_cast<const FastenerFeature*>(&feature)) {
     j["standard"] = fastener->standard;
     j["size"] = fastener->size;
     if (fastener->length > 0.0)
-      j["length"] = fastener->length; // a nut and a washer have none
-    if (!fastener->lengthExpr.empty())
-      j["length_expr"] = fastener->lengthExpr;
+      j["length"] = fastener->length.value; // a nut and a washer have none
+    WriteExprText(j, "length", fastener->length.expr);
     // Omitted when empty, which means "the drive this standard is made with"
     // — the default, and the only value that stays right if the standard's
     // recess is ever corrected.
@@ -1387,9 +1375,7 @@ json FeatureToJson(const Feature& feature) {
                  {"element", groove->face.name}};
     j["from"] = {{"feature_id", groove->from.featureId},
                  {"element", groove->from.name}};
-    j["offset"] = groove->offset;
-    if (!groove->offsetExpr.empty())
-      j["offset_expr"] = groove->offsetExpr;
+    WriteExpr(j, "offset", groove->offset);
     if (!groove->standard.empty())
       j["standard"] = groove->standard;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
@@ -1521,17 +1507,14 @@ json FeatureToJson(const Feature& feature) {
     // Emit only the active variant's fields.
     switch (dp->kind) {
     case DatumPlaneKind::Offset:
-      j["offset"] = dp->offset;
-      if (!dp->offsetExpr.empty())
-        j["offset_expr"] = dp->offsetExpr;
+      WriteExpr(j, "offset", dp->offset);
       if (dp->flip)
         j["flip"] = true;
       break;
     case DatumPlaneKind::Angled:
       j["axis"] = AxisRefToJson(dp->axis);
-      j["angle_deg"] = dp->angleDeg;
-      if (!dp->angleExpr.empty())
-        j["angle_expr"] = dp->angleExpr;
+      j["angle_deg"] = dp->angleDeg.value;
+      WriteExprText(j, "angle", dp->angleDeg.expr);
       break;
     case DatumPlaneKind::ThroughPoints:
       j["points"] = {Vec3ToJson(dp->p0), Vec3ToJson(dp->p1),
@@ -1544,9 +1527,9 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* rev = dynamic_cast<const RevolveFeature*>(&feature)) {
     j["sketch_id"] = rev->sketchId;
     j["axis"] = AxisRefToJson(rev->axis);
-    j["angle_deg"] = rev->angleDeg;
-    if (!rev->angleExpr.empty()) // literals stay plain numbers (v11)
-      j["angle_expr"] = rev->angleExpr;
+    j["angle_deg"] = rev->angleDeg.value;
+    WriteExprText(j, "angle",
+                  rev->angleDeg.expr); // literals stay plain numbers (v11)
     if (rev->symmetric)
       j["symmetric"] = true;
     j["reversed"] = rev->reversed;
@@ -1622,9 +1605,7 @@ json FeatureToJson(const Feature& feature) {
       if (cv->kind == Curve3DKind::ControlPoly)
         j["degree"] = cv->degree;
       if (cv->kind == Curve3DKind::BentPath) {
-        j["radius"] = cv->radius; // the former's, to the centreline
-        if (!cv->radiusExpr.empty())
-          j["radius_expr"] = cv->radiusExpr;
+        WriteExpr(j, "radius", cv->radius); // the former's, to the centreline
       }
       if (cv->closed)
         j["closed"] = true;
@@ -1633,21 +1614,13 @@ json FeatureToJson(const Feature& feature) {
     case Curve3DKind::Helix:
       j["origin"] = Vec3ToJson(cv->axisOrigin);
       j["axis"] = Vec3ToJson(cv->axisDir);
-      j["radius"] = cv->radius;
-      if (!cv->radiusExpr.empty())
-        j["radius_expr"] = cv->radiusExpr;
-      j["pitch"] = cv->pitch;
-      if (!cv->pitchExpr.empty())
-        j["pitch_expr"] = cv->pitchExpr;
-      j["turns"] = cv->turns;
-      if (!cv->turnsExpr.empty())
-        j["turns_expr"] = cv->turnsExpr;
+      WriteExpr(j, "radius", cv->radius);
+      WriteExpr(j, "pitch", cv->pitch);
+      WriteExpr(j, "turns", cv->turns);
       if (!cv->rightHanded)
         j["left_handed"] = true;
-      if (cv->startDeg != 0.0 || !cv->startDegExpr.empty())
-        j["start_deg"] = cv->startDeg; // v128
-      if (!cv->startDegExpr.empty())
-        j["start_deg_expr"] = cv->startDegExpr;
+      if (cv->startDeg != 0.0 || !cv->startDeg.expr.empty())
+        WriteExpr(j, "start_deg", cv->startDeg); // v128
       break;
     }
   } else if (auto* boo = dynamic_cast<const BooleanFeature*>(&feature)) {
@@ -1658,17 +1631,13 @@ json FeatureToJson(const Feature& feature) {
     j["target_id"] = cr->targetId; // v211
     j["tool_id"] = cr->toolId;
     if (cr->hasClearance) {
-      j["clearance_mm"] = cr->clearanceMm;
-      if (!cr->clearanceExpr.empty())
-        j["clearance_mm_expr"] = cr->clearanceExpr;
+      WriteExpr(j, "clearance_mm", cr->clearanceMm);
     }
     j["direction"] = {cr->direction.x, cr->direction.y, cr->direction.z};
     if (!cr->sweep)
       j["sweep"] = false;
     if (cr->hasResolution) {
-      j["resolution_mm"] = cr->resolutionMm;
-      if (!cr->resolutionExpr.empty())
-        j["resolution_mm_expr"] = cr->resolutionExpr;
+      WriteExpr(j, "resolution_mm", cr->resolutionMm);
     }
   } else if (auto* sp = dynamic_cast<const SplitFeature*>(&feature)) {
     j["body_id"] = sp->bodyId;
@@ -1683,17 +1652,14 @@ json FeatureToJson(const Feature& feature) {
       else
         j["base_plane"] = PlaneTypeToString(sp->basePlane);
       if (sp->offset != 0.0)
-        j["offset"] = sp->offset;
-      if (!sp->offsetExpr.empty())
-        j["offset_expr"] = sp->offsetExpr;
+        j["offset"] = sp->offset.value;
+      WriteExprText(j, "offset", sp->offset.expr);
     }
   } else if (auto* rf = dynamic_cast<const RefineFeature*>(&feature)) {
     j["body_id"] = rf->bodyId;
   } else if (auto* fil = dynamic_cast<const FilletFeature*>(&feature)) {
     // type is "Fillet"/"Chamfer" (TypeName encodes the op); v17.
-    j["radius"] = fil->radius;
-    if (!fil->radiusExpr.empty()) // literals stay plain numbers
-      j["radius_expr"] = fil->radiusExpr;
+    WriteExpr(j, "radius", fil->radius); // literals stay plain numbers
     json arr = json::array();
     for (const auto& ref : fil->edges) {
       arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
@@ -1710,28 +1676,21 @@ json FeatureToJson(const Feature& feature) {
     for (const auto& ref : ef->edges)
       arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
     j["edges"] = std::move(arr);
-    j["length"] = ef->length;
-    if (!ef->lengthExpr.empty())
-      j["length_expr"] = ef->lengthExpr;
-    j["angle_deg"] = ef->angleDeg;
-    if (!ef->angleDegExpr.empty())
-      j["angle_deg_expr"] = ef->angleDegExpr;
+    WriteExpr(j, "length", ef->length);
+    WriteExpr(j, "angle_deg", ef->angleDeg);
     if (ef->radius > 0.0)
-      j["radius"] = ef->radius;
-    if (!ef->radiusExpr.empty())
-      j["radius_expr"] = ef->radiusExpr;
+      j["radius"] = ef->radius.value;
+    WriteExprText(j, "radius", ef->radius.expr);
     if (ef->position != FlangePosition::MaterialInside)
       j["position"] = FlangePositionName(ef->position);
     if (ef->lengthMode != FlangeLengthMode::Flat)
       j["length_mode"] = FlangeLengthModeName(ef->lengthMode);
     if (ef->offsetStart != 0.0)
-      j["offset_start"] = ef->offsetStart;
-    if (!ef->offsetStartExpr.empty())
-      j["offset_start_expr"] = ef->offsetStartExpr;
+      j["offset_start"] = ef->offsetStart.value;
+    WriteExprText(j, "offset_start", ef->offsetStart.expr);
     if (ef->offsetEnd != 0.0)
-      j["offset_end"] = ef->offsetEnd;
-    if (!ef->offsetEndExpr.empty())
-      j["offset_end_expr"] = ef->offsetEndExpr;
+      j["offset_end"] = ef->offsetEnd.value;
+    WriteExprText(j, "offset_end", ef->offsetEnd.expr);
     if (ef->reliefStyle)
       j["relief"] = sheet::ReliefStyleName(*ef->reliefStyle);
     if (ef->closedCorners)
@@ -1755,34 +1714,26 @@ json FeatureToJson(const Feature& feature) {
     for (const auto& ref : hm->edges)
       arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
     j["edges"] = std::move(arr);
-    j["length"] = hm->length;
-    if (!hm->lengthExpr.empty())
-      j["length_expr"] = hm->lengthExpr;
+    WriteExpr(j, "length", hm->length);
     if (hm->kind != HemKind::Closed)
       j["kind"] = HemKindName(hm->kind);
     if (hm->gap > 0.0)
-      j["gap"] = hm->gap;
-    if (!hm->gapExpr.empty())
-      j["gap_expr"] = hm->gapExpr;
+      j["gap"] = hm->gap.value;
+    WriteExprText(j, "gap", hm->gap.expr);
     if (hm->outside)
       j["outside"] = true;
     if (hm->offsetStart != 0.0) // v116
-      j["offset_start"] = hm->offsetStart;
-    if (!hm->offsetStartExpr.empty())
-      j["offset_start_expr"] = hm->offsetStartExpr;
+      j["offset_start"] = hm->offsetStart.value;
+    WriteExprText(j, "offset_start", hm->offsetStart.expr);
     if (hm->offsetEnd != 0.0)
-      j["offset_end"] = hm->offsetEnd;
-    if (!hm->offsetEndExpr.empty())
-      j["offset_end_expr"] = hm->offsetEndExpr;
+      j["offset_end"] = hm->offsetEnd.value;
+    WriteExprText(j, "offset_end", hm->offsetEnd.expr);
   } else if (auto* jg = dynamic_cast<const JogFeature*>(&feature)) {
     j["sketch_id"] = jg->sketchId;
-    j["height"] = jg->height;
-    if (!jg->heightExpr.empty())
-      j["height_expr"] = jg->heightExpr;
+    WriteExpr(j, "height", jg->height);
     if (jg->angleDeg != 90.0)
-      j["angle_deg"] = jg->angleDeg;
-    if (!jg->angleDegExpr.empty())
-      j["angle_deg_expr"] = jg->angleDegExpr;
+      j["angle_deg"] = jg->angleDeg.value;
+    WriteExprText(j, "angle_deg", jg->angleDeg.expr);
     if (jg->flip)
       j["flip"] = true;
   } else if (auto* cr = dynamic_cast<const CornerReliefFeature*>(&feature)) {
@@ -1790,9 +1741,8 @@ json FeatureToJson(const Feature& feature) {
     if (cr->style != CornerReliefStyle::Circular)
       j["style"] = CornerReliefStyleName(cr->style);
     if (cr->size > 0.0)
-      j["size"] = cr->size;
-    if (!cr->sizeExpr.empty())
-      j["size_expr"] = cr->sizeExpr;
+      j["size"] = cr->size.value;
+    WriteExprText(j, "size", cr->size.expr);
   } else if (auto* nc = dynamic_cast<const NormalCutFeature*>(&feature)) {
     j["sketch_id"] = nc->sketchId;
     if (nc->bodyId != 0)
@@ -1801,9 +1751,7 @@ json FeatureToJson(const Feature& feature) {
       j["regions"] = nc->regions;
   } else if (auto* sh = dynamic_cast<const ShellFeature*>(&feature)) {
     j["body_id"] = sh->bodyId;
-    j["thickness"] = sh->thickness;
-    if (!sh->thicknessExpr.empty())
-      j["thickness_expr"] = sh->thicknessExpr;
+    WriteExpr(j, "thickness", sh->thickness);
     json arr = json::array();
     for (const auto& ref : sh->openFaces)
       arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
@@ -1827,19 +1775,14 @@ json FeatureToJson(const Feature& feature) {
                                                     : "corrected_frenet";
   } else if (auto* pi = dynamic_cast<const PipeFeature*>(&feature)) { // v43
     j["path_id"] = pi->pathId;
-    j["outer_diameter"] = pi->outerDiameter;
-    if (!pi->outerDiameterExpr.empty())
-      j["outer_diameter_expr"] = pi->outerDiameterExpr;
+    WriteExpr(j, "outer_diameter", pi->outerDiameter);
     if (pi->wallThickness != 0.0)
-      j["wall_thickness"] = pi->wallThickness;
-    if (!pi->wallThicknessExpr.empty())
-      j["wall_thickness_expr"] = pi->wallThicknessExpr;
+      j["wall_thickness"] = pi->wallThickness.value;
+    WriteExprText(j, "wall_thickness", pi->wallThickness.expr);
     j["mode"] = ExtrudeModeToString(pi->mode);
   } else if (auto* rb = dynamic_cast<const RibFeature*>(&feature)) {
     j["sketch_id"] = rb->sketchId;
-    j["thickness"] = rb->thickness;
-    if (!rb->thicknessExpr.empty())
-      j["thickness_expr"] = rb->thicknessExpr;
+    WriteExpr(j, "thickness", rb->thickness);
     if (rb->flipDirection)
       j["flip"] = true;
     if (rb->bodyId != 0)
@@ -1854,9 +1797,8 @@ json FeatureToJson(const Feature& feature) {
     if (!th->threadClass.empty())
       j["thread_class"] = th->threadClass;
     if (th->length > 0.0)
-      j["length"] = th->length;
-    if (!th->lengthExpr.empty())
-      j["length_expr"] = th->lengthExpr;
+      j["length"] = th->length.value;
+    WriteExprText(j, "length", th->length.expr);
     if (th->modeled)
       j["modeled"] = true;
     if (!th->rightHanded)
@@ -1871,13 +1813,11 @@ json FeatureToJson(const Feature& feature) {
     if (cp->frameId != 0)
       j["frame"] = cp->frameId;
     if (cp->baseRadius > 0.0)
-      j["base_radius_mm"] = cp->baseRadius;
-    if (!cp->baseRadiusExpr.empty())
-      j["base_radius_mm_expr"] = cp->baseRadiusExpr;
+      j["base_radius_mm"] = cp->baseRadius.value;
+    WriteExprText(j, "base_radius_mm", cp->baseRadius.expr);
     if (cp->width > 0.0)
-      j["width_mm"] = cp->width;
-    if (!cp->widthExpr.empty())
-      j["width_mm_expr"] = cp->widthExpr;
+      j["width_mm"] = cp->width.value;
+    WriteExprText(j, "width_mm", cp->width.expr);
     j["turn"] = cp->ccw ? "ccw" : "cw";
     j["body"] = cp->newBody ? "new" : "add";
     const bool turns =
@@ -1916,9 +1856,8 @@ json FeatureToJson(const Feature& feature) {
     j["face"] = {{"feature_id", wo->face.featureId},
                  {"element", wo->face.name}};
     if (wo->module > 0.0)
-      j["module"] = wo->module;
-    if (!wo->moduleExpr.empty())
-      j["module_expr"] = wo->moduleExpr;
+      j["module"] = wo->module.value;
+    WriteExprText(j, "module", wo->module.expr);
     j["starts"] = wo->starts;
     j["pressure_angle_deg"] = wo->pressureDeg;
     j["hand"] = wo->rightHanded ? "right" : "left";
@@ -1930,9 +1869,8 @@ json FeatureToJson(const Feature& feature) {
     j["face"] = {{"feature_id", ww->face.featureId},
                  {"element", ww->face.name}};
     if (ww->module > 0.0)
-      j["module"] = ww->module;
-    if (!ww->moduleExpr.empty())
-      j["module_expr"] = ww->moduleExpr;
+      j["module"] = ww->module.value;
+    WriteExprText(j, "module", ww->module.expr);
     j["teeth"] = ww->teeth;
     j["starts"] = ww->starts;
     if (ww->wormDiameter > 0.0)
@@ -1946,18 +1884,14 @@ json FeatureToJson(const Feature& feature) {
     // reader that knows nothing about fits still gets a correct hole. When a
     // fit is recorded it is ALSO the thing that derives it on the next
     // regeneration, so the two cannot drift.
-    j["diameter"] = ho->diameter;
-    if (!ho->diameterExpr.empty())
-      j["diameter_expr"] = ho->diameterExpr;
+    WriteExpr(j, "diameter", ho->diameter);
     if (!ho->fitThread.empty()) {
       nlohmann::json fit = {{"thread", ho->fitThread}, {"kind", ho->fitKind}};
       if (ho->fitPitch > 0.0)
         fit["pitch"] = ho->fitPitch; // omitted = the coarse pitch
       j["fit"] = fit;
     }
-    j["depth"] = ho->depth;
-    if (!ho->depthExpr.empty())
-      j["depth_expr"] = ho->depthExpr;
+    WriteExpr(j, "depth", ho->depth);
     if (ho->through)
       j["through"] = true;
     // v148: each written only when stated; absent is derived
@@ -1965,9 +1899,8 @@ json FeatureToJson(const Feature& feature) {
     if (ho->pointAngleDeg > 0.0)
       j["drill_point_deg"] = ho->pointAngleDeg;
     if (ho->threadDepth > 0.0)
-      j["thread_depth"] = ho->threadDepth;
-    if (!ho->threadDepthExpr.empty())
-      j["thread_depth_expr"] = ho->threadDepthExpr;
+      j["thread_depth"] = ho->threadDepth.value;
+    WriteExprText(j, "thread_depth", ho->threadDepth.expr);
     if (ho->printed != HolePrinted::Round) // v183; absent = round
       j["printed"] = HolePrintedName(ho->printed);
     if (ho->kind == HoleKind::Counterbore) {
@@ -1983,9 +1916,7 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* off = dynamic_cast<const OffsetFaceFeature*>(&feature)) {
     j["body_id"] = off->bodyId;
     j["faces"] = DirectFacesToJson(off->faces, off->fingerprints);
-    j["distance_mm"] = off->distance;
-    if (!off->distanceExpr.empty())
-      j["distance_mm_expr"] = off->distanceExpr;
+    WriteExpr(j, "distance_mm", off->distance);
   } else if (auto* mv = dynamic_cast<const MoveFaceFeature*>(&feature)) {
     j["body_id"] = mv->bodyId;
     j["faces"] = DirectFacesToJson(mv->faces, mv->fingerprints);
@@ -1993,10 +1924,8 @@ json FeatureToJson(const Feature& feature) {
     if (std::any_of(mv->translateExpr.begin(), mv->translateExpr.end(),
                     [](const std::string& e) { return !e.empty(); }))
       j["translate_mm_expr"] = mv->translateExpr;
-    if (mv->rotateDeg != 0.0 || !mv->rotateExpr.empty()) {
-      j["rotate_deg"] = mv->rotateDeg;
-      if (!mv->rotateExpr.empty())
-        j["rotate_deg_expr"] = mv->rotateExpr;
+    if (mv->rotateDeg != 0.0 || !mv->rotateDeg.expr.empty()) {
+      WriteExpr(j, "rotate_deg", mv->rotateDeg);
       j["axis"] = AxisRefToJson(mv->axis);
     }
   } else if (auto* rp = dynamic_cast<const ReplaceFaceFeature*>(&feature)) {
@@ -2022,9 +1951,8 @@ json FeatureToJson(const Feature& feature) {
     j["target"] = std::move(t);
   } else if (auto* dr = dynamic_cast<const DraftFeature*>(&feature)) {
     j["body_id"] = dr->bodyId;
-    j["angle_deg"] = dr->angleDeg;
-    if (!dr->angleExpr.empty())
-      j["angle_expr"] = dr->angleExpr;
+    j["angle_deg"] = dr->angleDeg.value;
+    WriteExprText(j, "angle", dr->angleDeg.expr);
     j["neutral_plane"] = PlaneTypeToString(dr->neutralPlane);
     json arr = json::array();
     for (const auto& ref : dr->faces)
@@ -2041,16 +1969,12 @@ json FeatureToJson(const Feature& feature) {
     } else {
       j["axis"] = AxisRefToJson(pat->axis);
       j["count"] = pat->count;
-      if (!pat->countExpr.empty())
-        j["count_expr"] = pat->countExpr;
+      WriteExprText(j, "count", pat->countExpr);
       if (pat->kind == PatternKind::Linear) {
-        j["spacing"] = pat->spacing;
-        if (!pat->spacingExpr.empty())
-          j["spacing_expr"] = pat->spacingExpr;
+        WriteExpr(j, "spacing", pat->spacing);
       } else { // Circular
-        j["angle_deg"] = pat->angleDeg;
-        if (!pat->angleExpr.empty())
-          j["angle_expr"] = pat->angleExpr;
+        j["angle_deg"] = pat->angleDeg.value;
+        WriteExprText(j, "angle", pat->angleDeg.expr);
       }
     }
   } else if (auto* cope = dynamic_cast<const CopeFeature*>(&feature)) {
@@ -2059,9 +1983,8 @@ json FeatureToJson(const Feature& feature) {
     if (!cope->mitre.empty())
       j["mitre"] = cope->mitre;
     if (cope->gap > 0.0)
-      j["gap"] = cope->gap;
-    if (!cope->gapExpr.empty())
-      j["gap_expr"] = cope->gapExpr;
+      j["gap"] = cope->gap.value;
+    WriteExprText(j, "gap", cope->gap.expr);
   } else {
     throw std::runtime_error("Unserializable feature type: " +
                              feature.TypeName());
@@ -2938,7 +2861,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         std::map<std::string, std::string> exprs;
         const std::vector<std::string> fields = sketch::EntityExprFields(ent);
         for (const std::string& field : fields) {
-          const std::string expr = ej.value(field + "_expr", std::string{});
+          const std::string expr = ReadExprText(ej, field);
           if (!expr.empty())
             exprs[field] = expr;
         }
@@ -3261,7 +3184,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, IdField(j, "sketch_id", true), j.value("distance", 1.0),
         ExtrudeModeFromString(j.value("mode", "new_body")),
         j.value("reversed", false));
-    ext->distanceExpr =
+    ext->distance.expr =
         j.value("distance_expr", std::string{}); // absent (pre-v11) = literal
     // End condition (v18); absent = blind.
     const std::string end = j.value("end_mode", "blind");
@@ -3277,12 +3200,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                    : end == "through_all" ? ExtrudeEnd::ThroughAll // v52
                                           : ExtrudeEnd::Blind;
     ext->distance2 = j.value("distance2", 1.0);
-    ext->distance2Expr = j.value("distance2_expr", std::string{});
+    ext->distance2.expr = ReadExprText(j, "distance2");
     ext->twistDeg = j.value("twist_deg", 0.0); // v168
-    ext->twistExpr = j.value("twist_expr", std::string{});
+    ext->twistDeg.expr = ReadExprText(j, "twist");
     ext->herringbone = j.value("herringbone", false);
     ext->taperDeg = j.value("taper_deg", 0.0); // v183
-    ext->taperExpr = j.value("taper_expr", std::string{});
+    ext->taperDeg.expr = ReadExprText(j, "taper");
     if (j.contains("regions")) // v34
       ext->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
     if (j.contains("end_target")) {
@@ -3297,7 +3220,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                  "thin");
       ext->thin = true;
       ext->thinThickness = t.value("thickness", 1.0);
-      ext->thinThicknessExpr = t.value("thickness_expr", std::string{});
+      ext->thinThickness.expr = ReadExprText(t, "thickness");
       const std::string side = t.value("side", "out");
       if (side == "out")
         ext->thinSide = sketch::ThinSide::Out;
@@ -3316,21 +3239,21 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.at("height").get<double>(), j.at("depth").get<double>());
     // v61 expression fields; absent in an older file, which just means the
     // dimension is a literal.
-    box->widthExpr = j.value("width_expr", std::string{});
-    box->heightExpr = j.value("height_expr", std::string{});
-    box->depthExpr = j.value("depth_expr", std::string{});
+    box->width.expr = ReadExprText(j, "width");
+    box->height.expr = ReadExprText(j, "height");
+    box->depth.expr = ReadExprText(j, "depth");
     out = std::move(box);
   } else if (type == "Sphere") {
     auto sph = std::make_unique<SphereFeature>(
         name, Vec3FromJson(j.at("center")), j.at("radius").get<double>());
-    sph->radiusExpr = j.value("radius_expr", std::string{});
+    sph->radius.expr = ReadExprText(j, "radius");
     out = std::move(sph);
   } else if (type == "Cylinder") {
     auto cyl = std::make_unique<CylinderFeature>(
         name, Vec3FromJson(j.at("center")), Vec3FromJson(j.at("direction")),
         j.at("radius").get<double>(), j.at("height").get<double>());
-    cyl->radiusExpr = j.value("radius_expr", std::string{});
-    cyl->heightExpr = j.value("height_expr", std::string{});
+    cyl->radius.expr = ReadExprText(j, "radius");
+    cyl->height.expr = ReadExprText(j, "height");
     out = std::move(cyl);
   } else if (type == "Fastener") {
     // `length` is OPTIONAL, because whether it means anything is the
@@ -3348,7 +3271,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto fastener = std::make_unique<FastenerFeature>(
         name, j.at("standard").get<std::string>(),
         j.at("size").get<std::string>(), j.value("length", 0.0));
-    fastener->lengthExpr = j.value("length_expr", std::string{});
+    fastener->length.expr = ReadExprText(j, "length");
     fastener->drive = j.value("drive", std::string{});
     out = std::move(fastener);
   } else if (type == "Bearing") {
@@ -3368,7 +3291,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     };
     auto groove = std::make_unique<RetainingRingGrooveFeature>(
         name, ref("face"), ref("from"), j.at("offset").get<double>());
-    groove->offsetExpr = j.value("offset_expr", std::string{});
+    groove->offset.expr = ReadExprText(j, "offset");
     groove->standard = j.value("standard", std::string{});
     out = std::move(groove);
   } else if (type == "Import") {
@@ -3608,13 +3531,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     switch (dp->kind) {
     case DatumPlaneKind::Offset:
       dp->offset = j.value("offset", 0.0);
-      dp->offsetExpr = j.value("offset_expr", std::string{});
+      dp->offset.expr = ReadExprText(j, "offset");
       dp->flip = j.value("flip", false);
       break;
     case DatumPlaneKind::Angled:
       dp->axis = AxisRefFromJson(j.at("axis"));
       dp->angleDeg = j.value("angle_deg", 0.0);
-      dp->angleExpr = j.value("angle_expr", std::string{});
+      dp->angleDeg.expr = ReadExprText(j, "angle");
       break;
     case DatumPlaneKind::ThroughPoints: {
       const json& pts = j.at("points");
@@ -3635,7 +3558,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         ExtrudeModeFromString(j.value("mode", "new_body")),
         j.value("reversed", false));
     rev->axis = AxisRefFromJson(j.at("axis"));
-    rev->angleExpr = j.value("angle_expr", std::string{});
+    rev->angleDeg.expr = ReadExprText(j, "angle");
     rev->symmetric = j.value("symmetric", false);
     if (j.contains("regions")) // v34
       rev->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
@@ -3690,7 +3613,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                  " is [expr_x, expr_y, expr_z] (\"\" = "
                                  "literal)");
       for (size_t i = 0; i < 3; i++)
-        out[i] = a.at(i).get<std::string>();
+        out[i] = ExprTextFromJson(a.at(i), key);
     };
     switch (fr->kind) {
     case FrameKind::Explicit:
@@ -3758,21 +3681,21 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       cv->closed = j.value("closed", false);
       if (cv->kind == Curve3DKind::BentPath) {
         cv->radius = j.value("radius", 0.0);
-        cv->radiusExpr = j.value("radius_expr", std::string{});
+        cv->radius.expr = ReadExprText(j, "radius");
       }
       break;
     case Curve3DKind::Helix:
       cv->axisOrigin = Vec3FromJson(j.at("origin"));
       cv->axisDir = Vec3FromJson(j.at("axis"));
       cv->radius = j.value("radius", 1.0);
-      cv->radiusExpr = j.value("radius_expr", std::string{});
+      cv->radius.expr = ReadExprText(j, "radius");
       cv->pitch = j.value("pitch", 1.0);
-      cv->pitchExpr = j.value("pitch_expr", std::string{});
+      cv->pitch.expr = ReadExprText(j, "pitch");
       cv->turns = j.value("turns", 1.0);
-      cv->turnsExpr = j.value("turns_expr", std::string{});
+      cv->turns.expr = ReadExprText(j, "turns");
       cv->rightHanded = !j.value("left_handed", false);
       cv->startDeg = j.value("start_deg", 0.0);
-      cv->startDegExpr = j.value("start_deg_expr", std::string{});
+      cv->startDeg.expr = ReadExprText(j, "start_deg");
       break;
     }
     out = std::move(cv);
@@ -3786,7 +3709,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (j.contains("clearance_mm") || j.contains("clearance_mm_expr")) {
       cr->hasClearance = true;
       cr->clearanceMm = j.value("clearance_mm", 0.0);
-      cr->clearanceExpr = j.value("clearance_mm_expr", std::string{});
+      cr->clearanceMm.expr = ReadExprText(j, "clearance_mm");
     }
     if (j.contains("direction")) {
       const json& d = j.at("direction");
@@ -3807,7 +3730,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (j.contains("resolution_mm") || j.contains("resolution_mm_expr")) {
       cr->hasResolution = true;
       cr->resolutionMm = j.value("resolution_mm", 0.0);
-      cr->resolutionExpr = j.value("resolution_mm_expr", std::string{});
+      cr->resolutionMm.expr = ReadExprText(j, "resolution_mm");
     }
     out = std::move(cr);
   } else if (type == "Split") { // v39
@@ -3831,7 +3754,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         sp->basePlane =
             PlaneTypeFromString(j.at("base_plane").get<std::string>());
       sp->offset = j.value("offset", 0.0);
-      sp->offsetExpr = j.value("offset_expr", std::string{});
+      sp->offset.expr = ReadExprText(j, "offset");
     }
     out = std::move(sp);
   } else if (type == "Refine") { // v47
@@ -3846,7 +3769,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto fil = std::make_unique<FilletFeature>(
         name, std::move(refs), j.value("radius", 0.5),
         type == "Chamfer" ? EdgeBlendOp::Chamfer : EdgeBlendOp::Fillet);
-    fil->radiusExpr = j.value("radius_expr", std::string{});
+    fil->radius.expr = ReadExprText(j, "radius");
     out = std::move(fil);
   } else if (type == "BaseFlange") { // v109
     auto bf = std::make_unique<BaseFlangeFeature>(
@@ -3864,10 +3787,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto ef = std::make_unique<EdgeFlangeFeature>(name, std::move(picked),
                                                   j.value("length", 10.0),
                                                   j.value("angle_deg", 90.0));
-    ef->lengthExpr = j.value("length_expr", std::string{});
-    ef->angleDegExpr = j.value("angle_deg_expr", std::string{});
+    ef->length.expr = ReadExprText(j, "length");
+    ef->angleDeg.expr = ReadExprText(j, "angle_deg");
     ef->radius = j.value("radius", 0.0);
-    ef->radiusExpr = j.value("radius_expr", std::string{});
+    ef->radius.expr = ReadExprText(j, "radius");
     if (j.contains("position")) {
       const std::string v = j.at("position").get<std::string>();
       if (!FlangePositionFromString(v, ef->position))
@@ -3883,9 +3806,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "' (expected one of: " + FlangeLengthModeList() + ")");
     }
     ef->offsetStart = j.value("offset_start", 0.0);
-    ef->offsetStartExpr = j.value("offset_start_expr", std::string{});
+    ef->offsetStart.expr = ReadExprText(j, "offset_start");
     ef->offsetEnd = j.value("offset_end", 0.0);
-    ef->offsetEndExpr = j.value("offset_end_expr", std::string{});
+    ef->offsetEnd.expr = ReadExprText(j, "offset_end");
     if (j.contains("relief")) {
       const std::string v = j.at("relief").get<std::string>();
       sheet::ReliefStyle style{};
@@ -3936,7 +3859,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     auto hm = std::make_unique<HemFeature>(name, std::move(picked),
                                            j.value("length", 5.0));
-    hm->lengthExpr = j.value("length_expr", std::string{});
+    hm->length.expr = ReadExprText(j, "length");
     if (j.contains("kind")) {
       const std::string v = j.at("kind").get<std::string>();
       if (!HemKindFromString(v, hm->kind))
@@ -3944,19 +3867,19 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                  "' (expected one of: " + HemKindList() + ")");
     }
     hm->gap = j.value("gap", 0.0);
-    hm->gapExpr = j.value("gap_expr", std::string{});
+    hm->gap.expr = ReadExprText(j, "gap");
     hm->outside = j.value("outside", false);
     hm->offsetStart = j.value("offset_start", 0.0); // v116
-    hm->offsetStartExpr = j.value("offset_start_expr", std::string{});
+    hm->offsetStart.expr = ReadExprText(j, "offset_start");
     hm->offsetEnd = j.value("offset_end", 0.0);
-    hm->offsetEndExpr = j.value("offset_end_expr", std::string{});
+    hm->offsetEnd.expr = ReadExprText(j, "offset_end");
     out = std::move(hm);
   } else if (type == "Jog") { // v112
     auto jg = std::make_unique<JogFeature>(name, IdField(j, "sketch_id", true),
                                            j.value("height", 5.0));
-    jg->heightExpr = j.value("height_expr", std::string{});
+    jg->height.expr = ReadExprText(j, "height");
     jg->angleDeg = j.value("angle_deg", 90.0);
-    jg->angleDegExpr = j.value("angle_deg_expr", std::string{});
+    jg->angleDeg.expr = ReadExprText(j, "angle_deg");
     jg->flip = j.value("flip", false);
     out = std::move(jg);
   } else if (type == "CornerRelief") { // v113
@@ -3970,7 +3893,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "' (expected one of: " + CornerReliefStyleList() + ")");
     }
     cr->size = j.value("size", 0.0);
-    cr->sizeExpr = j.value("size_expr", std::string{});
+    cr->size.expr = ReadExprText(j, "size");
     out = std::move(cr);
   } else if (type == "NormalCut") { // v114
     auto nc =
@@ -3989,7 +3912,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto sh = std::make_unique<ShellFeature>(name, IdField(j, "body_id", true),
                                              std::move(faces),
                                              j.value("thickness", 1.0));
-    sh->thicknessExpr = j.value("thickness_expr", std::string{});
+    sh->thickness.expr = ReadExprText(j, "thickness");
     out = std::move(sh);
   } else if (type == "Loft") { // v20
     std::vector<uint64_t> ids;
@@ -4020,14 +3943,14 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, IdField(j, "path_id", true), j.value("outer_diameter", 2.0),
         j.value("wall_thickness", 0.0),
         ExtrudeModeFromString(j.value("mode", "new_body")));
-    pi->outerDiameterExpr = j.value("outer_diameter_expr", std::string{});
-    pi->wallThicknessExpr = j.value("wall_thickness_expr", std::string{});
+    pi->outerDiameter.expr = ReadExprText(j, "outer_diameter");
+    pi->wallThickness.expr = ReadExprText(j, "wall_thickness");
     out = std::move(pi);
   } else if (type == "Rib") { // v36
     auto rb = std::make_unique<RibFeature>(
         name, IdField(j, "sketch_id", true), j.value("thickness", 1.0),
         j.value("flip", false), IdField(j, "body_id", false));
-    rb->thicknessExpr = j.value("thickness_expr", std::string{});
+    rb->thickness.expr = ReadExprText(j, "thickness");
     out = std::move(rb);
   } else if (type == "Thread") { // v36
     const json& fj = j.at("face");
@@ -4052,7 +3975,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         designation, pitch);
     th->threadClass = j.value("thread_class", std::string{});
     th->length = j.value("length", 0.0);
-    th->lengthExpr = j.value("length_expr", std::string{});
+    th->length.expr = ReadExprText(j, "length");
     th->modeled = j.value("modeled", false);
     // v140. A hand we do not know is refused: read as right-handed, a left
     // thread would load, look right and never go on its bolt.
@@ -4082,9 +4005,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto cp = std::make_unique<CamProfileFeature>(name, face);
     cp->frameId = j.value("frame", uint64_t{0});
     cp->baseRadius = j.value("base_radius_mm", 0.0);
-    cp->baseRadiusExpr = j.value("base_radius_mm_expr", std::string{});
+    cp->baseRadius.expr = ReadExprText(j, "base_radius_mm");
     cp->width = j.value("width_mm", 0.0);
-    cp->widthExpr = j.value("width_mm_expr", std::string{});
+    cp->width.expr = ReadExprText(j, "width_mm");
     const auto oneOf = [&](const char* key, const std::string& v,
                            std::initializer_list<const char*> ok) {
       std::string list;
@@ -4196,7 +4119,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (type == "Worm") {
       auto wo = std::make_unique<WormFeature>(name, face);
       wo->module = j.value("module", 0.0);
-      wo->moduleExpr = j.value("module_expr", std::string{});
+      wo->module.expr = ReadExprText(j, "module");
       wo->starts = j.value("starts", 1);
       wo->pressureDeg = j.value("pressure_angle_deg", 20.0);
       wo->rightHanded = hand == "right";
@@ -4206,7 +4129,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     } else {
       auto ww = std::make_unique<WormWheelFeature>(name, face);
       ww->module = j.value("module", 0.0);
-      ww->moduleExpr = j.value("module_expr", std::string{});
+      ww->module.expr = ReadExprText(j, "module");
       ww->teeth = j.value("teeth", 40);
       ww->starts = j.value("starts", 1);
       ww->wormDiameter = j.value("worm_diameter", 0.0);
@@ -4235,8 +4158,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto ho = std::make_unique<HoleFeature>(name, IdField(j, "sketch_id", true),
                                             kind, j.value("diameter", 1.0),
                                             j.value("depth", 1.0));
-    ho->diameterExpr = j.value("diameter_expr", std::string{});
-    ho->depthExpr = j.value("depth_expr", std::string{});
+    ho->diameter.expr = ReadExprText(j, "diameter");
+    ho->depth.expr = ReadExprText(j, "depth");
     ho->through = j.value("through", false);
     ho->cbDiameter = j.value("cb_diameter", 2.0);
     ho->cbDepth = j.value("cb_depth", 0.5);
@@ -4265,7 +4188,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                  "derived");
     ho->pointAngleDeg = j.value("drill_point_deg", 0.0);
     ho->threadDepth = j.value("thread_depth", 0.0);
-    ho->threadDepthExpr = j.value("thread_depth_expr", std::string{});
+    ho->threadDepth.expr = ReadExprText(j, "thread_depth");
     if (j.contains("printed")) { // v183: a teardrop's roof
       const std::string name = j.at("printed").get<std::string>();
       const auto printed = HolePrintedFromName(name);
@@ -4288,7 +4211,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.value("distance_mm", 1.0));
     off->faces =
         DirectFacesFromJson(j.value("faces", json::array()), off->fingerprints);
-    off->distanceExpr = j.value("distance_mm_expr", std::string{});
+    off->distance.expr = ReadExprText(j, "distance_mm");
     out = std::move(off);
   } else if (type == "MoveFace") { // v192
     glm::dvec3 t(0.0);
@@ -4308,10 +4231,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         throw std::runtime_error(
             "MoveFace translate_mm_expr is three expressions, \"\" for none");
       for (int a = 0; a < 3; a++)
-        mv->translateExpr[a] = e[a].get<std::string>();
+        mv->translateExpr[a] = ExprTextFromJson(e[a], "translate_mm_expr");
     }
     mv->rotateDeg = j.value("rotate_deg", 0.0);
-    mv->rotateExpr = j.value("rotate_deg_expr", std::string{});
+    mv->rotateDeg.expr = ReadExprText(j, "rotate_deg");
     if (j.contains("axis"))
       mv->axis = AxisRefFromJson(j.at("axis"));
     out = std::move(mv);
@@ -4369,7 +4292,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, IdField(j, "body_id", true), std::move(refs),
         j.value("angle_deg", 5.0),
         PlaneTypeFromString(j.value("neutral_plane", "xy")));
-    dr->angleExpr = j.value("angle_expr", std::string{});
+    dr->angleDeg.expr = ReadExprText(j, "angle");
     out = std::move(dr);
   } else if (type == "Cope") {
     std::vector<uint64_t> against = UniqueIds(j.at("against"), "against");
@@ -4380,7 +4303,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         std::make_unique<CopeFeature>(name, IdField(j, "member_id", true),
                                       std::move(against), std::move(mitre));
     cope->gap = j.value("gap", 0.0);
-    cope->gapExpr = j.value("gap_expr", std::string{});
+    cope->gap.expr = ReadExprText(j, "gap");
     // Through the common tail below like every other type: an early return
     // here loaded a Cope without its id, material or appearance.
     out = std::move(cope);
@@ -4396,13 +4319,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     } else {
       pat->axis = AxisRefFromJson(j.at("axis"));
       pat->count = j.value("count", 3);
-      pat->countExpr = j.value("count_expr", std::string{});
+      pat->countExpr = ReadExprText(j, "count");
       if (pat->kind == PatternKind::Linear) {
         pat->spacing = j.value("spacing", 5.0);
-        pat->spacingExpr = j.value("spacing_expr", std::string{});
+        pat->spacing.expr = ReadExprText(j, "spacing");
       } else {
         pat->angleDeg = j.value("angle_deg", 90.0);
-        pat->angleExpr = j.value("angle_expr", std::string{});
+        pat->angleDeg.expr = ReadExprText(j, "angle");
       }
     }
     out = std::move(pat);

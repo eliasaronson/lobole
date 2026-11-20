@@ -813,8 +813,10 @@ TEST_CASE("CalculiX and the in-house solver agree on a steel block bonded to "
   s.id = 2;
   s.name = "bonded";
   s.meshSize = 8.0;
-  s.participants.push_back({upperOcc, fem::ParticipantRole::Meshed, 0.0, ""});
-  s.participants.push_back({lowerOcc, fem::ParticipantRole::Bonded, 0.0, ""});
+  s.participants.push_back(
+      {upperOcc, fem::ParticipantRole::Meshed, ExprValue{0.0}});
+  s.participants.push_back(
+      {lowerOcc, fem::ParticipantRole::Bonded, ExprValue{0.0}});
   fem::Load fix;
   fix.id = 20;
   fix.type = fem::LoadType::Fixed;
@@ -1075,8 +1077,10 @@ TEST_CASE("CalculiX and the in-house solver buckle a steel column bonded to "
   s.name = "bonded";
   s.type = fem::AnalysisType::Buckling;
   s.meshSize = 4.0;
-  s.participants.push_back({upperOcc, fem::ParticipantRole::Meshed, 0.0, ""});
-  s.participants.push_back({lowerOcc, fem::ParticipantRole::Bonded, 0.0, ""});
+  s.participants.push_back(
+      {upperOcc, fem::ParticipantRole::Meshed, ExprValue{0.0}});
+  s.participants.push_back(
+      {lowerOcc, fem::ParticipantRole::Bonded, ExprValue{0.0}});
   fem::Load fix;
   fix.id = 20;
   fix.type = fem::LoadType::Fixed;
@@ -1327,7 +1331,7 @@ TEST_CASE("a contact is refused where a nonlinear study is: in-house, on "
   }
   {
     fem::Study t = s;
-    t.loadCases.push_back({"up", 1.0, ""});
+    t.loadCases.push_back({"up", ExprValue{1.0}});
     CHECK_THAT(fem::ContactRefusal(t),
                ContainsSubstring("takes no load cases"));
   }
@@ -2175,7 +2179,7 @@ TEST_CASE("a steel ball pressed on a rigid flat touches over Hertz's "
   s.loads.push_back(press);
   s.refinements.push_back(
       {FaceWhere(ball, "sphere", [](const glm::dvec3&) { return true; }),
-       aWant / 6.0, "", parts.occB});
+       ExprValue{aWant / 6.0}, parts.occB});
   fem::StudyPlan plan;
   std::string err;
   const bool planned =
@@ -3148,8 +3152,10 @@ TEST_CASE("a steel and brass strip bonded in an assembly curls as "
   s.id = 2;
   s.name = "bimetal";
   s.meshSize = t;
-  s.participants.push_back({lowerOcc, fem::ParticipantRole::Meshed, 0.0, ""});
-  s.participants.push_back({upperOcc, fem::ParticipantRole::Bonded, 0.0, ""});
+  s.participants.push_back(
+      {lowerOcc, fem::ParticipantRole::Meshed, ExprValue{0.0}});
+  s.participants.push_back(
+      {upperOcc, fem::ParticipantRole::Bonded, ExprValue{0.0}});
   for (auto [occ, d] :
        {std::pair{lowerOcc, lower.get()}, std::pair{upperOcc, upper.get()}}) {
     fem::Load fix;
@@ -3279,7 +3285,8 @@ TEST_CASE("an exact answer printed to ccx's seven digits balances a thin bent "
   for (const auto& [index, name] : body.elementMap.names) {
     const auto info = Measure::DescribeFaceAt(body, index);
     if (info && info->kind == "cylinder")
-      s.refinements.push_back({ElementRef{body.createdBy, name}, t / 2, ""});
+      s.refinements.push_back(
+          {ElementRef{body.createdBy, name}, ExprValue{t / 2}});
   }
   REQUIRE(s.refinements.size() == 2);
   const fem::StudyJobInput in = Meshed(doc, s);

@@ -240,7 +240,8 @@ json MeasureOn(const Inputs& in, const Worker& w, const req::Requirement& r) {
     out = *v.value;
     return true;
   };
-  if (!side(b.valueExpr, lim) || !side(b.minExpr, lo) || !side(b.maxExpr, hi)) {
+  if (!side(b.value.expr, lim) || !side(b.min.expr, lo) ||
+      !side(b.max.expr, hi)) {
     row["state"] = "unresolved";
     row["note"] = why;
     return row;

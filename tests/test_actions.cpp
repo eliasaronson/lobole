@@ -215,7 +215,7 @@ TEST_CASE("re-centring never overwrites a user's expression",
   SplitFeature split("Split", boxId);
   split.basePlane = PlaneType::XZ;
   split.offset = 3.0;
-  split.offsetExpr = "plate_t / 2"; // the user drove it
+  split.offset.expr = "plate_t / 2"; // the user drove it
 
   ui::RecenterSplitOffset(state, split);
 
@@ -223,7 +223,7 @@ TEST_CASE("re-centring never overwrites a user's expression",
   // silently break the parametric link — the value AND the expression must
   // both survive.
   CHECK_THAT(split.offset, WithinAbs(3.0, 1e-9));
-  CHECK(split.offsetExpr == "plate_t / 2");
+  CHECK(split.offset.expr == "plate_t / 2");
 }
 
 TEST_CASE("re-centring finds the body before AND after the split runs",

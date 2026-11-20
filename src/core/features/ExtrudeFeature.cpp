@@ -142,7 +142,7 @@ double ExtrudeFeature::TaperCloseDistance(
 }
 
 std::string ExtrudeFeature::WhyIncomplete() const {
-  if (taperDeg != 0.0 || !taperExpr.empty()) {
+  if (taperDeg != 0.0 || !taperDeg.expr.empty()) {
     if (endMode != ExtrudeEnd::Blind)
       return "a taper needs end_mode blind: it leans the walls from the "
              "sketch plane, which is the section there (set taper_deg to 0 "
@@ -150,14 +150,14 @@ std::string ExtrudeFeature::WhyIncomplete() const {
     if (thin)
       return "a tapered extrude cannot be thin (set taper_deg to 0, or "
              "turn thin off)";
-    if (twistDeg != 0.0 || !twistExpr.empty())
+    if (twistDeg != 0.0 || !twistDeg.expr.empty())
       return "an extrude is twisted or tapered, not both (set one of "
              "twist_deg and taper_deg to 0)";
     if (!std::isfinite(taperDeg) || std::abs(taperDeg) >= 90.0)
       return "taper_deg is how far the walls lean from the extrude "
              "direction, between -90 and 90 degrees";
   }
-  if (twistDeg == 0.0 && twistExpr.empty())
+  if (twistDeg == 0.0 && twistDeg.expr.empty())
     return {};
   if (endMode != ExtrudeEnd::Blind && endMode != ExtrudeEnd::Symmetric) {
     const char* end = endMode == ExtrudeEnd::TwoSided   ? "two_sided"
@@ -326,7 +326,7 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
                       "a taper of %.4g degrees closes the profile up before "
                       "the end: over %.4g mm its %s %.4g mm apart at most, "
                       "so the taper must be under %.4g degrees",
-                      taperDeg, length,
+                      taperDeg.value, length,
                       taperDeg > 0.0 ? "walls come together from"
                                      : "holes' walls come together from",
                       2.0 * close, limitDeg);
@@ -393,7 +393,7 @@ bool ExtrudeFeature::TaperPrism(const SketchFeature& sketch, bool reversed,
         if (name != nullptr && (name->find("/cap0") != std::string::npos ||
                                 name->find("/cap1") != std::string::npos))
           continue;
-        draft->Add(f, pull, glm::radians(taperDeg), neutral);
+        draft->Add(f, pull, glm::radians(taperDeg.value), neutral);
         if (!draft->AddDone()) {
           if (why)
             *why = "the taper could not lean the wall '" +

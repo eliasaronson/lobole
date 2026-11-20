@@ -283,14 +283,22 @@ public:
                        std::vector<std::string>* outReferences = nullptr);
 
   // Renames a parameter and rewrites every expression referencing it (other
-  // parameters and feature fields), so references never dangle silently.
+  // parameters, feature and study fields, configuration overrides -- the
+  // name each overrides too), so references never dangle silently.
   // Returns false if oldName is absent or newName is invalid/taken.
   bool RenameParameter(const std::string& oldName, const std::string& newName);
 
   // Everything that references `name`, as human-readable labels ("parameter
-  // 'depth'", "feature 'Extrude 1'"). Backs delete refusal and UI hints.
-  // Non-const because it walks features via VisitExprs (read-only here).
+  // 'depth'", "feature 'Extrude 1'", "study 'Bracket'"). Backs delete
+  // refusal and UI hints. Non-const because it walks VisitExprs (read-only
+  // here).
   std::vector<std::string> FindParameterReferences(const std::string& name);
+  // Every bound expression text of the features and the studies, with who
+  // holds it ("feature 'Boss'", "study 'Bracket'"), read-only: what a
+  // reference search outside the document (a table's) walks.
+  void
+  ForEachExprText(const std::function<void(const std::string& owner,
+                                           const std::string& text)>& visit);
 
   // Parameter values from the last regeneration; what feature expressions
   // (and UI previews) evaluate against. This is the EFFECTIVE scope: the
@@ -343,7 +351,9 @@ public:
   }
 
   // Rewrites references to `oldName` into `newName` in this document's feature
-  // expressions and local-parameter expressions, WITHOUT renaming any local
+  // and study expressions, its local-parameter expressions and its
+  // configurations' overrides (the name each overrides, and the texts),
+  // WITHOUT renaming any local
   // parameter DECLARATION (the declaration lives in the project scope). Backs a
   // project-variable rename, which must rewrite refs across every part. Returns
   // false and touches nothing if a local parameter named `oldName` shadows the
@@ -849,6 +859,16 @@ public:
   int OwnerIndex(uint64_t id) const;
 
 private:
+  // Every expression slot of the features and the studies, with who holds
+  // it: "feature 'Boss'", "study 'Bracket'". The one walk rename and the
+  // delete refusal read
+  // (docs/variables/README.md#numbers-that-are-expressions).
+  void VisitDocumentExprs(const std::function<void(const std::string& owner,
+                                                   const ExprSlot&)>& visit);
+  // Renames `oldName` in every slot and configuration override, the name an
+  // override targets included. Not the parameter table, nor a regeneration.
+  void RenameReferences(const std::string& oldName, const std::string& newName);
+
   // The one copy implementation; both public forms delegate to it.
   Document(const Document& other, bool reuseGeometry);
 

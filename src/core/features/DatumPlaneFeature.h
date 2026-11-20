@@ -52,8 +52,8 @@ public:
   [[nodiscard]] bool IsDatum() const override { return true; }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(offsetExpr, offset);
-    visit(angleExpr, angleDeg);
+    visit({offset, ExprQuantity::Length, "offset"});
+    visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
   }
 
   // The plane this datum evaluated to on the last successful Execute.
@@ -67,14 +67,12 @@ public:
   PlaneType basePlane = PlaneType::XY;
 
   // Offset: signed distance along the parent normal; flip negates.
-  double offset = 2.0;
-  std::string offsetExpr;
+  ExprValue offset{2.0};
   bool flip = false;
 
   // Angled: parent plane rotated about the axis, degrees (UI convention).
   AxisRef axis;
-  double angleDeg = 45.0;
-  std::string angleExpr;
+  ExprValue angleDeg{45.0};
 
   // ThroughPoints: three non-collinear world-space points.
   glm::dvec3 p0{0.0}, p1{1.0, 0.0, 0.0}, p2{0.0, 1.0, 0.0};

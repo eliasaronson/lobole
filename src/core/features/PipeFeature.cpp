@@ -80,8 +80,8 @@ PipeFeature::PipeFeature(const std::string& name, uint64_t pathId,
 }
 
 void PipeFeature::VisitExprs(const ExprVisitor& visit) {
-  visit(outerDiameterExpr, outerDiameter);
-  visit(wallThicknessExpr, wallThickness);
+  visit({outerDiameter, ExprQuantity::Length, "outer_diameter"});
+  visit({wallThickness, ExprQuantity::Length, "wall_thickness"});
 }
 
 bool PipeFeature::Execute(RegenContext& ctx) {

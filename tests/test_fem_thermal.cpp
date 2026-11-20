@@ -525,7 +525,7 @@ TEST_CASE("a thermal study refuses what it cannot take, naming what it can",
   CHECK_THAT(fem::ThermalRefusal(st),
              ContainsSubstring("study of type thermal"));
   s.loads = {t};
-  s.loadCases.push_back({"a", 1.0, ""});
+  s.loadCases.push_back({"a", ExprValue{1.0}});
   CHECK_THAT(fem::ThermalRefusal(s), ContainsSubstring("load cases"));
   s.loadCases.clear();
   s.gravity = glm::dvec3(0, 0, -9.81);

@@ -318,7 +318,7 @@ TEST_CASE("a stocky strut fails below both its buckling and its yield "
 TEST_CASE("a buckling study refuses load cases", "[fem][buckling]") {
   Document doc;
   fem::Study& s = Column(doc, 10.0, 10.0, 100.0, 1000.0, 4.0);
-  s.loadCases.push_back({"a", 1.0, ""});
+  s.loadCases.push_back({"a", ExprValue{1.0}});
   s.loads[1].loadCase = "a";
   fem::StudyRuntime rt;
   std::string err;

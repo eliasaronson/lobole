@@ -2524,7 +2524,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::SetProjectVariable(*s_App, "r", "3", "mm, its edges"));
     auto box = std::make_unique<BoxFeature>("Block", glm::dvec3(0.0), 20.0,
                                             10.0, 20.0);
-    box->heightExpr = "t";
+    box->height.expr = "t";
     s_App->commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(box)), *Doc());
     IM_CHECK(Doc()->GetBodies().size() == 1);
@@ -2536,7 +2536,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
               body.elementMap.EdgeNameOf(static_cast<int>(e)))
         edges.push_back({body.createdBy, *name});
     auto fillet = std::make_unique<FilletFeature>("Edges round", edges, 3.0);
-    fillet->radiusExpr = "r";
+    fillet->radius.expr = "r";
     s_App->commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(fillet)), *Doc());
     IM_CHECK(Doc()->GetFeature(1)->GetError().empty());

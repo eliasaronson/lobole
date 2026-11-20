@@ -136,7 +136,7 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
       SetError("axis is parallel to the parent normal");
       return false;
     }
-    const double rad = glm::radians(angleDeg);
+    const double rad = glm::radians(angleDeg.value);
     const glm::dmat3 rot(glm::rotate(glm::dmat4(1.0), rad, axisDir));
     // The rotated plane hinges on the axis: the axis lies in the plane
     // (uAxis follows it) and the parent normal tips around it.

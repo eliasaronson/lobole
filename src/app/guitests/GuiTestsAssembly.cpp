@@ -3366,9 +3366,9 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // By id: the undo below rebuilds the document, and `extrude` with it.
     const uint64_t extrudeId = extrude->GetId();
     double distance = 0.0;
-    extrude->VisitExprs([&](std::string&, double& v) {
+    extrude->VisitExprs([&](const ExprSlot& slot) {
       if (distance == 0.0)
-        distance = v; // an extrude's first field is its distance
+        distance = slot.Value(); // an extrude's first field is its distance
     });
     IM_CHECK(distance > 0.0);
     const double volume = Doc()->GetBodies().at(0).shape.Volume();
@@ -3409,7 +3409,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     const auto* bound =
         dynamic_cast<const ExtrudeFeature*>(Doc()->FindFeatureById(extrudeId));
     IM_CHECK(bound != nullptr);
-    IM_CHECK_STR_EQ(bound->distanceExpr.c_str(), "plate_t");
+    IM_CHECK_STR_EQ(bound->distance.expr.c_str(), "plate_t");
     IM_CHECK_EQ(s_App->projectParameters.size(), vars); // no new variable
     IM_CHECK(std::abs(Doc()->GetBodies().at(0).shape.Volume() - volume) < 1e-6);
 

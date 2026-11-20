@@ -300,7 +300,7 @@ TEST_CASE("a hole's refinement meshes clean and reads the converged peak",
   auto p = HolePlate();
   for (const double h : {0.3, 0.2, 0.15}) {
     INFO("refinement " << h << " mm");
-    StudyOf(*p).refinements = {{p->hot, h, "", 0}};
+    StudyOf(*p).refinements = {{p->hot, ExprValue{h}, 0}};
     std::vector<fem::StudyBodyMesh> meshes;
     std::string err;
     REQUIRE(fem::MeshStudy(p->doc, StudyOf(*p), meshes, &err));

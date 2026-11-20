@@ -162,7 +162,7 @@ TEST_CASE("An expression-driven revolve angle follows a parameter edit",
   auto rev =
       std::make_unique<RevolveFeature>("Rev", sid, 1.0, ExtrudeMode::NewBody);
   rev->axis.kind = AxisRef::Kind::Y;
-  rev->angleExpr = "sweep";
+  rev->angleDeg.expr = "sweep";
   doc.AddFeature(std::move(rev));
 
   // 180deg: half the full 24pi.
@@ -204,7 +204,7 @@ TEST_CASE("Revolve round-trips through JSON", "[revolve]") {
     auto rev =
         std::make_unique<RevolveFeature>("Rev", sid, 1.0, ExtrudeMode::NewBody);
     rev->axis.kind = AxisRef::Kind::Y;
-    rev->angleExpr = "sweep";
+    rev->angleDeg.expr = "sweep";
     rev->symmetric = true;
     doc.AddFeature(std::move(rev));
     REQUIRE(testio::Save(doc, path.string()));
@@ -214,7 +214,7 @@ TEST_CASE("Revolve round-trips through JSON", "[revolve]") {
   REQUIRE(loaded != nullptr);
   auto* rev = dynamic_cast<RevolveFeature*>(loaded->GetFeature(1));
   REQUIRE(rev != nullptr);
-  CHECK(rev->angleExpr == "sweep");
+  CHECK(rev->angleDeg.expr == "sweep");
   CHECK(rev->symmetric);
   CHECK(rev->axis.kind == AxisRef::Kind::Y);
   CHECK_THAT(rev->angleDeg, WithinRel(270.0, 1e-9));

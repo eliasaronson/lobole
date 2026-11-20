@@ -262,7 +262,7 @@ bool CopeFeature::Execute(RegenContext& ctx) {
       glm::dvec3 lo{0.0}, hi{0.0};
       shape.GetBoundingBox(lo, hi);
       const double size = glm::length(glm::dvec3(hi - lo)) * 2.0 + 200.0;
-      cutter = MitreCutter(j.at + keep * gap, keep, size);
+      cutter = MitreCutter(j.at + keep * gap.value, keep, size);
       if (!cutter.IsValid()) {
         SetError("mitre to '" + f->GetName() + "': could not build the cut");
         return false;

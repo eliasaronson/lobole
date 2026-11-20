@@ -33,8 +33,8 @@ public:
     visit(frameId);
   }
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(baseRadiusExpr, baseRadius);
-    visit(widthExpr, width);
+    visit({baseRadius, ExprQuantity::Length, "base_radius_mm"});
+    visit({width, ExprQuantity::Length, "width_mm"});
   }
   [[nodiscard]] std::string WhyIncomplete() const override {
     return face.name.empty() && frameId == 0
@@ -48,10 +48,8 @@ public:
   uint64_t frameId = 0;
   // mm; 0 = derived: the picked cylinder's radius, and its length along the
   // axis. A Frame gives neither, so both are then required.
-  double baseRadius = 0.0;
-  std::string baseRadiusExpr;
-  double width = 0.0;
-  std::string widthExpr;
+  ExprValue baseRadius{0.0};
+  ExprValue width{0.0};
   // The motion; empty = derived: rise half the base radius, a cycloidal
   // rise-dwell-fall-dwell over 120/60/120/60 degrees (a sliding follower).
   cammech::MotionSpec motion;

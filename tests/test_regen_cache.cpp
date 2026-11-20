@@ -211,8 +211,8 @@ size_t NumericFeatureFrom(const Document& doc, size_t from) {
   for (size_t i = from; i < doc.FeatureCount(); i++) {
     bool any = false;
     std::unique_ptr<Feature> probe = doc.GetFeature(i)->Clone();
-    probe->VisitExprs([&](std::string& text, double&) {
-      if (text.empty())
+    probe->VisitExprs([&](const ExprSlot& slot) {
+      if (!slot.Bound())
         any = true;
     });
     if (any)
@@ -225,10 +225,11 @@ size_t NumericFeatureFrom(const Document& doc, size_t from) {
 nlohmann::json Nudged(const Document& doc, size_t index) {
   std::unique_ptr<Feature> f = doc.GetFeature(index)->Clone();
   bool done = false;
-  f->VisitExprs([&](std::string& text, double& value) {
-    if (done || !text.empty())
+  f->VisitExprs([&](const ExprSlot& slot) {
+    if (done || slot.Bound())
       return;
-    value = value == 0.0 ? 0.5 : value * 1.1;
+    const double value = slot.Value();
+    (void)slot.Set(value == 0.0 ? 0.5 : value * 1.1);
     done = true;
   });
   return DocumentIO::FeatureToJson(*f);

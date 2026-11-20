@@ -893,7 +893,7 @@ TEST_CASE("parts: a fastener round-trips through the document format",
   Document doc;
   auto screw =
       std::make_unique<FastenerFeature>("Screw", "iso4762def", "M8", 30.0);
-  screw->lengthExpr = "plate * 2";
+  screw->length.expr = "plate * 2";
   doc.AddFeature(std::move(screw));
   REQUIRE(doc.GetBodies().size() == 1);
   const double volume = doc.GetBodies()[0].shape.Volume();

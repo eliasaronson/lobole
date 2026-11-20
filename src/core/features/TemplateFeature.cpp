@@ -45,7 +45,11 @@ void TemplateFeature::VisitExprs(const ExprVisitor& visit) {
       continue;
     const auto it = values.find(p.name);
     if (it != values.end())
-      visit(it->second.expr, it->second.number);
+      visit({it->second.expr, it->second.number,
+             p.kind == tmpl::ParamKind::Angle   ? ExprQuantity::Angle
+             : p.kind == tmpl::ParamKind::Count ? ExprQuantity::Count
+                                                : ExprQuantity::Length,
+             "parameters/" + p.name});
   }
 }
 
@@ -220,8 +224,8 @@ TemplateFeature::Unlinked(std::string* why) const {
     std::unique_ptr<Feature> copy = f->Clone();
     copy->ClearError();
     copy->ClearWarning();
-    copy->VisitExprs([&](std::string& text, double&) {
-      text = tmpl::SubstituteParams(definition, values, text);
+    copy->VisitExprs([&](const ExprSlot& slot) {
+      slot.Expr() = tmpl::SubstituteParams(definition, values, slot.Expr());
     });
     out.push_back(std::move(copy));
   }

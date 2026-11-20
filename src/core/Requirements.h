@@ -28,6 +28,7 @@
 // (src/remote/RemoteRequirements.cpp), through the RPCs that already compute
 // each quantity.
 
+#include "core/ExprValue.h"
 #include "core/Expression.h" // SymbolTable
 
 #include <nlohmann/json.hpp>
@@ -89,8 +90,15 @@ struct Bound {
   // at_most / at_least: `value`; within: `min`..`max`. Each may be an
   // expression over the project's variables (`*Expr`), evaluated when the
   // requirement is checked.
-  double value = 0.0, min = 0.0, max = 0.0;
-  std::string valueExpr, minExpr, maxExpr;
+  ExprValue value{0.0}, min{0.0}, max{0.0};
+
+  // The three sides, as every walk over expressions reads them. The unit is
+  // the measure's, so each is ExprQuantity::Other.
+  void VisitExprs(const ExprVisitor& visit) {
+    visit({value, ExprQuantity::Other, "bound/value"});
+    visit({min, ExprQuantity::Other, "bound/min"});
+    visit({max, ExprQuantity::Other, "bound/max"});
+  }
 };
 
 struct Evidence {

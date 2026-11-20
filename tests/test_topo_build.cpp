@@ -275,7 +275,7 @@ TEST_CASE("Load cases refuse what they cannot mean", "[topopt][topobuild]") {
   std::string err;
   CHECK(fem::ValidateLoadCases(s, &err)); // no cases, none named
 
-  s.loadCases = {{"down", 1.0, ""}, {"side", 2.0, ""}};
+  s.loadCases = {{"down", ExprValue{1.0}}, {"side", ExprValue{2.0}}};
   CHECK_FALSE(fem::ValidateLoadCases(s, &err));
   CHECK(err.find("in no load case") != std::string::npos);
   CHECK(err.find("'down', 'side'") != std::string::npos);
@@ -306,7 +306,7 @@ TEST_CASE("Load cases refuse what they cannot mean", "[topopt][topobuild]") {
 
   fem::Study modal;
   modal.type = fem::AnalysisType::Modal;
-  modal.loadCases = {{"a", 1.0, ""}};
+  modal.loadCases = {{"a", ExprValue{1.0}}};
   CHECK_FALSE(fem::ValidateLoadCases(modal, &err));
 }
 
@@ -318,7 +318,8 @@ TEST_CASE("Load cases, keep-outs and shape_from round-trip through JSON",
   s.id = 7;
   s.name = "Gen";
   s.type = fem::AnalysisType::Topology;
-  s.loadCases = {{"down", 1.0, ""}, {"side", 2.0, "w_side"}};
+  s.loadCases = {{"down", ExprValue{1.0}}, {"side", ExprValue{2.0}}};
+  s.loadCases[1].weight.expr = "w_side";
   s.keepOuts.push_back({"worm block", {}, {}});
   s.keepOuts.push_back({"", {1, 2, 3}, {4, 5, 6}});
   fem::Load l;
@@ -330,7 +331,7 @@ TEST_CASE("Load cases, keep-outs and shape_from round-trip through JSON",
   const fem::Study r = DocumentIO::StudyFromJson(DocumentIO::StudyToJson(s));
   REQUIRE(r.loadCases.size() == 2);
   CHECK(r.loadCases[1].name == "side");
-  CHECK(r.loadCases[1].weightExpr == "w_side");
+  CHECK(r.loadCases[1].weight.expr == "w_side");
   REQUIRE(r.keepOuts.size() == 2);
   CHECK(r.keepOuts[0].body == "worm block");
   CHECK(r.keepOuts[1].boxMax == glm::dvec3(4, 5, 6));
@@ -477,7 +478,7 @@ Document MakeBar() {
   s.volumeFraction = 0.35;
   s.filterRadius = 12.0;
   s.maxIterations = 20;
-  s.loadCases = {{"down", 1.0, ""}, {"side", 1.0, ""}};
+  s.loadCases = {{"down", ExprValue{1.0}}, {"side", ExprValue{1.0}}};
   fem::Load fixed;
   fixed.id = doc.AllocateId();
   fixed.type = fem::LoadType::Fixed;

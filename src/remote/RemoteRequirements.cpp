@@ -374,9 +374,9 @@ std::set<std::string> ExpressionNames(const req::Requirement& r) {
       for (const std::string& d : (*c)->Dependencies())
         names.insert(d);
   };
-  add(r.bound.valueExpr);
-  add(r.bound.minExpr);
-  add(r.bound.maxExpr);
+  add(r.bound.value.expr);
+  add(r.bound.min.expr);
+  add(r.bound.max.expr);
   const json& m = r.measure;
   if (m.contains("expression") && m.at("expression").is_string())
     add(m.at("expression").get<std::string>());
@@ -969,9 +969,9 @@ void RefuseUnresolvable(ui::AppState& state, const req::Requirement& r) {
         throw std::runtime_error(no);
     };
     check(r.measure.at("expression").get<std::string>(), "measure.expression");
-    check(r.bound.valueExpr, "bound.value");
-    check(r.bound.minExpr, "bound.min");
-    check(r.bound.maxExpr, "bound.max");
+    check(r.bound.value.expr, "bound.value");
+    check(r.bound.min.expr, "bound.min");
+    check(r.bound.max.expr, "bound.max");
     return;
   }
   if (kind == "check_literals" && !r.measure.contains("document")) {
@@ -2355,12 +2355,12 @@ void Judge(ui::AppState& state, const req::Requirement& r, const Taken& t,
                                "': " + v.error);
     return *v.value;
   };
-  if (!b.valueExpr.empty())
-    lim = side(b.valueExpr, "bound");
-  if (!b.minExpr.empty())
-    lo = side(b.minExpr, "bound min");
-  if (!b.maxExpr.empty())
-    hi = side(b.maxExpr, "bound max");
+  if (!b.value.expr.empty())
+    lim = side(b.value.expr, "bound");
+  if (!b.min.expr.empty())
+    lo = side(b.min.expr, "bound min");
+  if (!b.max.expr.empty())
+    hi = side(b.max.expr, "bound max");
   if (b.kind == "within") {
     e.limitMin = lo;
     e.limitMax = hi;
@@ -2835,7 +2835,7 @@ uint64_t ActiveSlotId(const ui::AppState& state) {
 bool IsAssertionOf(const req::Requirement& r, uint64_t asmId) {
   return r.Kind() == "clearance" && r.Document() == asmId &&
          !r.measure.contains("motion_study") && r.bound.kind == "at_least" &&
-         r.bound.valueExpr.empty();
+         r.bound.value.expr.empty();
 }
 
 json AssertionRow(ui::AppState& state, const req::Requirement& r) {
@@ -3207,15 +3207,15 @@ SweepPlan PlanSweep(ui::AppState& state, const RpcParams& p) {
       // A range the call states itself wins: it is the one asked for.
       if (r.bound.kind == "within" || r.bound.kind == "at_least")
         if (!e->min) {
-          e->min = end(r.bound.kind == "within" ? r.bound.minExpr
-                                                : r.bound.valueExpr,
+          e->min = end(r.bound.kind == "within" ? r.bound.min.expr
+                                                : r.bound.value.expr,
                        r.bound.kind == "within" ? r.bound.min : r.bound.value);
           e->minFrom = r.name;
         }
       if (r.bound.kind == "within" || r.bound.kind == "at_most")
         if (!e->max) {
-          e->max = end(r.bound.kind == "within" ? r.bound.maxExpr
-                                                : r.bound.valueExpr,
+          e->max = end(r.bound.kind == "within" ? r.bound.max.expr
+                                                : r.bound.value.expr,
                        r.bound.kind == "within" ? r.bound.max : r.bound.value);
           e->maxFrom = r.name;
         }

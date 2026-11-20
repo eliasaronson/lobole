@@ -126,7 +126,7 @@ TEST_CASE("Curve3D round-trips through JSON", "[curve3d]") {
   helix->pitch = 1.5;
   helix->turns = 4.0;
   helix->rightHanded = false;
-  helix->pitchExpr = "gap * 2";
+  helix->pitch.expr = "gap * 2";
 
   const nlohmann::json j = DocumentIO::FeatureToJson(*helix);
   auto back = DocumentIO::FeatureFromJson(j);
@@ -139,7 +139,7 @@ TEST_CASE("Curve3D round-trips through JSON", "[curve3d]") {
   CHECK_THAT(cv->pitch, WithinAbs(1.5, 1e-9));
   CHECK_THAT(cv->turns, WithinAbs(4.0, 1e-9));
   CHECK_FALSE(cv->rightHanded);
-  CHECK(cv->pitchExpr == "gap * 2");
+  CHECK(cv->pitch.expr == "gap * 2");
 
   auto fit = std::make_unique<CurveFeature>("Fit", Curve3DKind::FitSpline);
   fit->points = {{0, 0, 0}, {1, 1, 1}, {2, 0, 2}};
@@ -259,7 +259,7 @@ TEST_CASE("A bent path round-trips through JSON", "[curve3d][bent]") {
   auto cv = std::make_unique<CurveFeature>("Bent", Curve3DKind::BentPath);
   cv->points = {{0, 0, 0}, {0, 0, 50}, {80, 0, 50}};
   cv->radius = 12.0;
-  cv->radiusExpr = "former";
+  cv->radius.expr = "former";
 
   const nlohmann::json j = DocumentIO::FeatureToJson(*cv);
   auto back = DocumentIO::FeatureFromJson(j);
@@ -268,7 +268,7 @@ TEST_CASE("A bent path round-trips through JSON", "[curve3d][bent]") {
   CHECK(read->kind == Curve3DKind::BentPath);
   CHECK(read->points.size() == 3);
   CHECK_THAT(read->radius, WithinAbs(12.0, 1e-12));
-  CHECK(read->radiusExpr == "former");
+  CHECK(read->radius.expr == "former");
 }
 
 TEST_CASE("Helix start_deg turns its start round the axis", "[curve3d]") {
@@ -310,14 +310,14 @@ TEST_CASE("Helix start_deg turns its start round the axis", "[curve3d]") {
 TEST_CASE("Helix start_deg is an expression and round-trips", "[curve3d]") {
   auto helix = std::make_unique<CurveFeature>("Coil", Curve3DKind::Helix);
   helix->startDeg = 45.0;
-  helix->startDegExpr = "phase + 15";
+  helix->startDeg.expr = "phase + 15";
   const nlohmann::json j = DocumentIO::FeatureToJson(*helix);
   CHECK_THAT(j.at("start_deg").get<double>(), WithinAbs(45.0, 1e-12));
   auto back = DocumentIO::FeatureFromJson(j);
   auto* cv = dynamic_cast<CurveFeature*>(back.get());
   REQUIRE(cv);
   CHECK_THAT(cv->startDeg, WithinAbs(45.0, 1e-12));
-  CHECK(cv->startDegExpr == "phase + 15");
+  CHECK(cv->startDeg.expr == "phase + 15");
   // A helix that never set it writes nothing: files from before v128 stay
   // byte-identical when re-saved.
   CurveFeature plain("P", Curve3DKind::Helix);
@@ -328,7 +328,7 @@ TEST_CASE("Helix start_deg is an expression and round-trips", "[curve3d]") {
   auto cv2 = std::make_unique<CurveFeature>("H", Curve3DKind::Helix);
   cv2->radius = 2.0;
   cv2->turns = 0.25;
-  cv2->startDegExpr = "phase + 15"; // 90
+  cv2->startDeg.expr = "phase + 15"; // 90
   CurveFeature* c = AddCurve(doc, std::move(cv2));
   REQUIRE(doc.Regenerate());
   CHECK(glm::length(c->Polyline().front() - glm::dvec3(0, 2, 0)) < 1e-3);

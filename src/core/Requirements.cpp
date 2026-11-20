@@ -492,8 +492,8 @@ void Validate(const json& measure, const Bound& bound) {
     throw std::runtime_error("measure " + kind +
                              " is a verdict: its bound is pass, not " +
                              bound.kind);
-  if (bound.kind == "within" && bound.minExpr.empty() &&
-      bound.maxExpr.empty() && bound.min > bound.max)
+  if (bound.kind == "within" && bound.min.expr.empty() &&
+      bound.max.expr.empty() && bound.min > bound.max)
     throw std::runtime_error("bound within: min is above max");
 }
 
@@ -524,13 +524,13 @@ Bound BoundFromJson(const json& j) {
     only({"value"});
     if (!j.contains("value"))
       throw std::runtime_error("bound " + b.kind + " needs `value`");
-    ReadSide(j, "value", b.value, b.valueExpr);
+    ReadSide(j, "value", b.value.value, b.value.expr);
   } else if (b.kind == "within") {
     only({"min", "max"});
     if (!j.contains("min") || !j.contains("max"))
       throw std::runtime_error("bound within needs `min` and `max`");
-    ReadSide(j, "min", b.min, b.minExpr);
-    ReadSide(j, "max", b.max, b.maxExpr);
+    ReadSide(j, "min", b.min.value, b.min.expr);
+    ReadSide(j, "max", b.max.value, b.max.expr);
   } else if (b.kind == "pass") {
     only({});
   } else {
@@ -543,10 +543,10 @@ Bound BoundFromJson(const json& j) {
 json BoundToJson(const Bound& b) {
   json j{{"kind", b.kind}};
   if (b.kind == "at_most" || b.kind == "at_least")
-    WriteSide(j, "value", b.value, b.valueExpr);
+    WriteSide(j, "value", b.value, b.value.expr);
   else if (b.kind == "within") {
-    WriteSide(j, "min", b.min, b.minExpr);
-    WriteSide(j, "max", b.max, b.maxExpr);
+    WriteSide(j, "min", b.min, b.min.expr);
+    WriteSide(j, "max", b.max, b.max.expr);
   }
   return j;
 }
@@ -847,10 +847,11 @@ std::vector<std::string> FindingLines(const json& row) {
 
 std::vector<std::string> ExpressionTexts(const Requirement& r) {
   std::vector<std::string> out;
-  for (const std::string* t :
-       {&r.bound.valueExpr, &r.bound.minExpr, &r.bound.maxExpr})
-    if (!t->empty())
-      out.push_back(*t);
+  Bound bound = r.bound; // VisitExprs is non-const: a copy to read
+  bound.VisitExprs([&](const ExprSlot& slot) {
+    if (slot.Bound())
+      out.push_back(slot.Expr());
+  });
   if (r.measure.contains("expression") &&
       r.measure.at("expression").is_string())
     out.push_back(r.measure.at("expression").get<std::string>());
@@ -910,9 +911,7 @@ bool RenameIn(Requirement& r, const std::string& from, const std::string& to) {
       changed = true;
     }
   };
-  rename(r.bound.valueExpr);
-  rename(r.bound.minExpr);
-  rename(r.bound.maxExpr);
+  r.bound.VisitExprs([&](const ExprSlot& slot) { rename(slot.Expr()); });
   if (r.measure.contains("expression") &&
       r.measure.at("expression").is_string()) {
     std::string text = r.measure.at("expression").get<std::string>();

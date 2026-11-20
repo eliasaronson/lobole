@@ -1847,7 +1847,9 @@ bool SketchFeature::Execute(RegenContext& ctx) {
 }
 
 void SketchFeature::VisitExprs(const ExprVisitor& visit) {
-  for (sketch::Constraint& c : constraints) {
+  for (size_t k = 0; k < constraints.size(); k++) {
+    sketch::Constraint& c = constraints[k];
+    const std::string path = "constraints/" + std::to_string(k);
     // A driven dimension has no input -- no expression, no value of its own
     // (docs/sketching/README.md#constraints) -- so it is no slot: the
     // variables lint would otherwise call its measure a literal, and
@@ -1857,12 +1859,10 @@ void SketchFeature::VisitExprs(const ExprVisitor& visit) {
     }
     if (c.kind == sketch::ConstraintKind::Angle) {
       // Angle values are stored in radians, but expressions (like the
-      // dimension UI) speak degrees — convert around the visit.
-      double degrees = glm::degrees(c.value);
-      visit(c.valueExpr, degrees);
-      c.value = glm::radians(degrees);
+      // dimension UI) speak degrees.
+      visit(ExprSlot::Radians(c.valueExpr, c.value, path));
     } else {
-      visit(c.valueExpr, c.value);
+      visit({c.valueExpr, c.value, ExprQuantity::Length, path});
     }
   }
   // Expression-driven entity coordinates (Decision 2A): surface each
@@ -1881,7 +1881,8 @@ void SketchFeature::VisitExprs(const ExprVisitor& visit) {
         continue; // field doesn't apply to this entity kind
       }
       double value = *current;
-      visit(expr, value);
+      visit({expr, value, QuantityOfFieldName(field),
+             "entities/" + std::to_string(idx) + "/" + field});
       sketch::SetEntityField(entities[idx], field, value);
     }
   }

@@ -321,7 +321,7 @@ TEST_CASE("Twist and herringbone round-trip, the twist live as an expression",
   Twisted t;
   t.doc.SetParameter("turn", "40", "");
   Make(t, Rect, 12.0, 1.0, true);
-  t.ext->twistExpr = "turn * 2";
+  t.ext->twistDeg.expr = "turn * 2";
   t.doc.Regenerate();
   REQUIRE(t.ext->GetError().empty());
   CHECK_THAT(t.ext->twistDeg, WithinAbs(80.0, 1e-9));
@@ -344,7 +344,7 @@ TEST_CASE("Twist and herringbone round-trip, the twist live as an expression",
   REQUIRE(loaded != nullptr);
   auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
   REQUIRE(rt != nullptr);
-  CHECK(rt->twistExpr == "turn * 2");
+  CHECK(rt->twistDeg.expr == "turn * 2");
   CHECK(rt->herringbone);
   REQUIRE(loaded->GetBodies().size() == 1);
   // A steep twist: the pipe's surfaces are within its 1e-4 mm tolerance.

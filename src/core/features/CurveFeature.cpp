@@ -228,10 +228,10 @@ CurveFeature::CurveFeature(const std::string& name, Curve3DKind kind)
 
 void CurveFeature::VisitExprs(const ExprVisitor& visit) {
   if (kind == Curve3DKind::Helix) {
-    visit(radiusExpr, radius);
-    visit(pitchExpr, pitch);
-    visit(turnsExpr, turns);
-    visit(startDegExpr, startDeg);
+    visit({radius, ExprQuantity::Length, "radius"});
+    visit({pitch, ExprQuantity::Length, "pitch"});
+    visit({turns, ExprQuantity::Count, "turns"});
+    visit({startDeg, ExprQuantity::Angle, "start_deg"});
   }
 }
 

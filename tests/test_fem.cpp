@@ -1793,8 +1793,10 @@ struct TwoBlocks {
     s.id = 2;
     s.name = "upper bonded to lower";
     s.meshSize = 12.0;
-    s.participants.push_back({upperOcc, fem::ParticipantRole::Meshed, 0.0, ""});
-    s.participants.push_back({lowerOcc, fem::ParticipantRole::Bonded, 0.0, ""});
+    s.participants.push_back(
+        {upperOcc, fem::ParticipantRole::Meshed, ExprValue{0.0}});
+    s.participants.push_back(
+        {lowerOcc, fem::ParticipantRole::Bonded, ExprValue{0.0}});
     fem::Load fix;
     fix.id = 20;
     fix.type = fem::LoadType::Fixed;
@@ -1825,8 +1827,10 @@ struct TwoBlocks {
     s.id = 1;
     s.name = "upper on lower";
     s.meshSize = 12.0;
-    s.participants.push_back({upperOcc, fem::ParticipantRole::Meshed, 0.0, ""});
-    s.participants.push_back({lowerOcc, fem::ParticipantRole::Rigid, 0.0, ""});
+    s.participants.push_back(
+        {upperOcc, fem::ParticipantRole::Meshed, ExprValue{0.0}});
+    s.participants.push_back(
+        {lowerOcc, fem::ParticipantRole::Rigid, ExprValue{0.0}});
     fem::Load clamp;
     clamp.id = 10;
     clamp.type = fem::LoadType::Fixed;

@@ -66,7 +66,7 @@ bool SplitFeature::Execute(RegenContext& ctx) {
       return false;
     }
     normal = plane->GetNormal();
-    origin = plane->GetOrigin() + normal * offset;
+    origin = plane->GetOrigin() + normal * offset.value;
   } else { // Face
     if (face.featureId != bodyId) {
       SetError("the knife face must belong to the split body");

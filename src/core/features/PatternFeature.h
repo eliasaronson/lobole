@@ -65,14 +65,16 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(spacingExpr, spacing);
-    visit(angleExpr, angleDeg);
+    visit({spacing, ExprQuantity::Length, "spacing"});
+    visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
     // count is an int: round-trip through a double so expression-driven
     // counts land in the serialized feature BEFORE execution — the regen
     // cache (R3) hashes that JSON, and an in-Execute-only evaluation would
     // leave the hash (and therefore the cache) stale on parameter edits.
+    // Not an ExprInt: a pattern ROUNDS a fractional count (n / 2 of an odd
+    // n), where an ExprInt refuses one.
     double countValue = static_cast<double>(count);
-    visit(countExpr, countValue);
+    visit({countExpr, countValue, ExprQuantity::Count, "count"});
     count = std::max(1, static_cast<int>(std::lround(countValue)));
   }
 
@@ -89,9 +91,7 @@ public:
   int count = 3; // total instances including the seed
   std::string countExpr;
 
-  double spacing = 5.0; // Linear: per-step distance along the axis
-  std::string spacingExpr;
+  ExprValue spacing{5.0}; // Linear: per-step distance along the axis
 
-  double angleDeg = 90.0; // Circular: per-step angle about the axis
-  std::string angleExpr;
+  ExprValue angleDeg{90.0}; // Circular: per-step angle about the axis
 };

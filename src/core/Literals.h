@@ -9,7 +9,7 @@
 // the advisory lint that reads it (`check_literals`), and the planner the
 // `extract_variables` action applies.
 //
-// The walk is GENERIC on purpose. A feature declares its expression pairs
+// The walk is GENERIC on purpose. A feature declares its expression slots
 // through Feature::VisitExprs and writes each as "<field>_expr" in its JSON;
 // Fields() puts a sentinel text into every pair of a CLONE, serializes it and
 // reads back where each sentinel landed. So a new feature type participates
@@ -29,18 +29,12 @@
 
 namespace literals {
 
-// What a number measures. A literal is only ever compared with a variable
-// of the same kind: 52 teeth are not the 52 mm wall.
-enum class Quantity {
-  Length, // mm
-  Angle,  // degrees
-  Count,  // unitless: a pattern count, a helix's turns
-  // A variable's only: a force, a stress, a mass -- what a variable's
-  // comment says it is ("N, a fingertip pull"). No field is one, so a
-  // variable of this kind is never matched.
-  Other,
-};
-const char* QuantityName(Quantity q); // "length", "angle", "count", "other"
+// What a number measures: the one ExprSlot carries (core/ExprValue.h). A
+// literal is only ever compared with a variable of the same kind: 52 teeth
+// are not the 52 mm wall. Other is a force, a stress, a ratio -- what a
+// variable's comment says it is ("N, a fingertip pull"); never matched.
+using Quantity = ExprQuantity;
+inline const char* QuantityName(Quantity q) { return ExprQuantityName(q); }
 
 // One expression-capable number on a feature.
 struct Field {
@@ -54,7 +48,7 @@ struct Field {
   std::string label;
   double value = 0.0; // in the expression's units: mm, degrees
   std::string expr;   // empty: the number is a literal
-  Quantity quantity = Quantity::Length;
+  Quantity quantity = Quantity::Length; // the slot's own (ExprSlot::Quantity)
   // Why it must not be given an expression, or empty. A sketch entity
   // coordinate a constraint names would fight the solver (drive the
   // dimension instead); a hole's diameter comes from its fit; an extrude's

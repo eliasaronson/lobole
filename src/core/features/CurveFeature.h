@@ -120,16 +120,14 @@ public:
   // Helix parameters (axis frame + geometry).
   glm::dvec3 axisOrigin{0.0};
   glm::dvec3 axisDir{0.0, 0.0, 1.0};
-  double radius = 1.0;
-  double pitch = 1.0; // rise along the axis per full turn
-  double turns = 1.0;
+  ExprValue radius{1.0};
+  ExprValue pitch{1.0}; // rise along the axis per full turn
+  ExprValue turns{1.0};
   bool rightHanded = true;
   // Where the helix starts round its axis (v128), degrees, right-handed about
   // the axis from HelixReference(axisDir). 0 is where every helix started
   // before the field existed.
-  double startDeg = 0.0;
-  std::string radiusExpr, pitchExpr, turnsExpr; // expression-driven (v42)
-  std::string startDegExpr;                     // v128
+  ExprValue startDeg{0.0};
 
 private:
   std::vector<glm::dvec3> m_polyline;

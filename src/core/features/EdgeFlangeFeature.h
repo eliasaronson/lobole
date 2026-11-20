@@ -67,11 +67,11 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(lengthExpr, length);
-    visit(angleDegExpr, angleDeg);
-    visit(radiusExpr, radius);
-    visit(offsetStartExpr, offsetStart);
-    visit(offsetEndExpr, offsetEnd);
+    visit({length, ExprQuantity::Length, "length"});
+    visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
+    visit({radius, ExprQuantity::Length, "radius"});
+    visit({offsetStart, ExprQuantity::Length, "offset_start"});
+    visit({offsetEnd, ExprQuantity::Length, "offset_end"});
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
@@ -84,15 +84,12 @@ public:
   // sheet body.
   std::vector<ElementRef> edges;
 
-  double length = 10.0; // mm, read as `lengthMode` says
-  std::string lengthExpr;
-  double angleDeg = 90.0; // the bend's included sweep, not the wall's pitch
-  std::string angleDegExpr;
+  ExprValue length{10.0};   // mm, read as `lengthMode` says
+  ExprValue angleDeg{90.0}; // the bend's included sweep, not the wall's pitch
   // 0 = the document's bend radius (itself the material's minimum unless the
   // rules pin it). Never a literal default: the tightest radius a sheet takes
   // is a property of the sheet.
-  double radius = 0.0;
-  std::string radiusExpr;
+  ExprValue radius{0.0};
 
   FlangePosition position = FlangePosition::MaterialInside;
   FlangeLengthMode lengthMode = FlangeLengthMode::Flat;
@@ -101,10 +98,8 @@ public:
   // Non-zero is what makes a bend line STOP inside a panel — and so what
   // makes relief necessary, since the metal either gets a cut to move into or
   // tears the panel beside it.
-  double offsetStart = 0.0;
-  std::string offsetStartExpr;
-  double offsetEnd = 0.0;
-  std::string offsetEndExpr;
+  ExprValue offsetStart{0.0};
+  ExprValue offsetEnd{0.0};
 
   // Unset (nullopt) inherits the document's relief style, the Appearance
   // pattern. `Tear` and `None` both cut nothing; they differ in what the

@@ -49,13 +49,12 @@ public:
   }
 
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(thicknessExpr, thickness);
+    visit({thickness, ExprQuantity::Length, "thickness"});
   }
 
   uint64_t bodyId = 0; // producing-feature id of the body to hollow
   std::vector<ElementRef> openFaces;
-  double thickness = 1.0;
-  std::string thicknessExpr;
+  ExprValue thickness{1.0};
 };
 
 // The thinnest wall of `body`: from a point well inside each face, along its

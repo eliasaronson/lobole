@@ -377,7 +377,7 @@ TEST_CASE("Fillet radius can be driven by a document parameter", "[fillet]") {
   REQUIRE(doc.SetParameter("r", "0.5"));
   const ElementRef edge = PickEdge(doc, AtZ(3.0f));
   auto fil = std::make_unique<FilletFeature>("Fillet", std::vector{edge}, 0.1);
-  fil->radiusExpr = "r";
+  fil->radius.expr = "r";
   doc.AddFeature(std::move(fil));
   REQUIRE(doc.Regenerate());
 
@@ -402,7 +402,7 @@ TEST_CASE("Fillet and chamfer round-trip through JSON (v17)", "[fillet]") {
     edgeName = edge.name;
     auto fil =
         std::make_unique<FilletFeature>("Fillet", std::vector{edge}, 0.5);
-    fil->radiusExpr = "0.25 + 0.25";
+    fil->radius.expr = "0.25 + 0.25";
     doc.AddFeature(std::move(fil));
     doc.AddFeature(std::make_unique<FilletFeature>(
         "Chamfer", std::vector{PickEdge(doc, AtZ(0.0f))}, 0.3,
@@ -416,7 +416,7 @@ TEST_CASE("Fillet and chamfer round-trip through JSON (v17)", "[fillet]") {
   auto* fil = dynamic_cast<FilletFeature*>(loaded->GetFeature(2));
   REQUIRE(fil != nullptr);
   CHECK(fil->op == EdgeBlendOp::Fillet);
-  CHECK(fil->radiusExpr == "0.25 + 0.25");
+  CHECK(fil->radius.expr == "0.25 + 0.25");
   REQUIRE(fil->edges.size() == 1);
   CHECK(fil->edges[0].name == edgeName);
   auto* cha = dynamic_cast<FilletFeature*>(loaded->GetFeature(3));

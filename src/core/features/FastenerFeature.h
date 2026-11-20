@@ -60,7 +60,7 @@ public:
   // it is a key into a table, not a quantity, and an expression that evaluated
   // to "M6.5" would have nothing to look up.
   void VisitExprs(const ExprVisitor& visit) override {
-    visit(lengthExpr, length);
+    visit({length, ExprQuantity::Length, "length"});
   }
 
   // The designation a supplier would recognise, and the name the generated
@@ -69,8 +69,7 @@ public:
 
   std::string standard; // vendored file stem, e.g. "iso4762def"
   std::string size;     // table key, e.g. "M6"
-  double length = 0.0;  // mm, under the head
-  std::string lengthExpr;
+  ExprValue length{0.0}; // mm, under the head
   // Which recess is cut in the head, and EMPTY means "the one this standard
   // is made with" — which is almost always what you want, because the
   // standard fixes it. You do not order an ISO 4762 with a torx drive, you

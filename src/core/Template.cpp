@@ -752,14 +752,11 @@ BuildFeature(const Template& t, size_t k, const Values& v, const LocalToId& ids,
   }
   const SymbolTable symbols = ParamSymbols(t, v);
   std::string err;
-  f->VisitExprs([&](std::string& text, double& value) {
-    if (text.empty() || !err.empty())
+  f->VisitExprs([&](const ExprSlot& slot) {
+    std::string why;
+    if (!err.empty() || EvaluateSlot(slot, symbols, &why))
       return;
-    const auto r = ExpressionEngine::Default().EvaluateText(text, symbols);
-    if (r)
-      value = *r;
-    else
-      err = "'" + text + "': " + r.error().message;
+    err = "'" + slot.Expr() + "': " + why;
   });
   if (!err.empty())
     return std::unexpected(FeatureLabel(*j) + ": " + err);
@@ -1126,7 +1123,8 @@ Template FromFeatures(const Document& doc, const SaveSpec& spec) {
       if (!fd.expr.empty())
         kindOf[fd.expr] = fd.quantity;
     std::string failure;
-    clones[k]->VisitExprs([&](std::string& text, double&) {
+    clones[k]->VisitExprs([&](const ExprSlot& slot) {
+      std::string& text = slot.Expr();
       if (text.empty() || !failure.empty())
         return;
       if (text.find("lookup") != std::string::npos) {

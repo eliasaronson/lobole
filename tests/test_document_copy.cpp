@@ -52,7 +52,7 @@ std::unique_ptr<Document> BuildLoadedDocument() {
 
   auto pad = std::make_unique<ExtrudeFeature>("Pad", sketchId, 12.0,
                                               ExtrudeMode::NewBody);
-  pad->distanceExpr = "height"; // an expression-driven field, not a literal
+  pad->distance.expr = "height"; // an expression-driven field, not a literal
   pad->SetMaterial("steel");
   doc->AddFeature(std::move(pad));
 

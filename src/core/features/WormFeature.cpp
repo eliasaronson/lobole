@@ -500,7 +500,7 @@ bool WormWheelFeature::Execute(RegenContext& ctx) {
   snprintf(keyBuf, sizeof(keyBuf), "%llu|%llu|%s|%d|%.17g|%d|%.17g|%.17g|%d",
            static_cast<unsigned long long>(GetId()),
            static_cast<unsigned long long>(face.featureId), face.name.c_str(),
-           teeth, module, starts, wormDiameter, pressureDeg,
+           teeth, module.value, starts, wormDiameter, pressureDeg,
            rightHanded ? 1 : 0);
   const std::string key = keyBuf;
   const TopoDS_Shape input = blank.body->shape.GetShape();

@@ -923,7 +923,7 @@ ResolvePlaneForTool(AppState& state, uint64_t datumId, PlaneType basePlane) {
 }
 
 void RecenterSplitOffset(AppState& state, SplitFeature& split) {
-  if (!state.document || !split.offsetExpr.empty())
+  if (!state.document || !split.offset.expr.empty())
     return; // an expression is the user's, not ours to overwrite
   const auto plane = ResolvePlaneForTool(state, split.datumId, split.basePlane);
   if (!plane)

@@ -43,7 +43,9 @@ public:
     visit(bodyId);
   }
 
-  void VisitExprs(const ExprVisitor& visit) override { visit(sizeExpr, size); }
+  void VisitExprs(const ExprVisitor& visit) override {
+    visit({size, ExprQuantity::Length, "size"});
+  }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
     return bodyId == 0 ? "pick the sheet body whose corners to relieve"
@@ -54,6 +56,5 @@ public:
   CornerReliefStyle style = CornerReliefStyle::Circular;
   // The relief's radius, or half its side, mm. 0 = one bend radius plus one
   // thickness: exactly what clears both bends where they cross.
-  double size = 0.0;
-  std::string sizeExpr;
+  ExprValue size{0.0};
 };

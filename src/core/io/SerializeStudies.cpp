@@ -53,12 +53,8 @@ json StudyToJson(const fem::Study& s) {
   // Topology parameters (v33) — written only for a topology study so lower
   // versions stay byte-identical.
   if (s.type == fem::AnalysisType::Topology) {
-    j["volume_fraction"] = s.volumeFraction;
-    if (!s.volumeFractionExpr.empty())
-      j["volume_fraction_expr"] = s.volumeFractionExpr;
-    j["filter_radius"] = s.filterRadius;
-    if (!s.filterRadiusExpr.empty())
-      j["filter_radius_expr"] = s.filterRadiusExpr;
+    WriteExpr(j, "volume_fraction", s.volumeFraction);
+    WriteExpr(j, "filter_radius", s.filterRadius);
     j["max_iterations"] = s.maxIterations;
     if (!s.keepFaces.empty()) {
       j["keep_faces"] = json::array();
@@ -81,9 +77,8 @@ json StudyToJson(const fem::Study& s) {
   if (!s.loadCases.empty()) {
     j["load_cases"] = json::array();
     for (const fem::LoadCase& c : s.loadCases) {
-      json cj = {{"name", c.name}, {"weight", c.weight}};
-      if (!c.weightExpr.empty())
-        cj["weight_expr"] = c.weightExpr;
+      json cj = {{"name", c.name}, {"weight", c.weight.value}};
+      WriteExprText(cj, "weight", c.weight.expr);
       j["load_cases"].push_back(std::move(cj));
     }
   }
@@ -96,9 +91,7 @@ json StudyToJson(const fem::Study& s) {
       sj["threshold"] = s.shapeFrom.threshold;
     j["shape_from"] = std::move(sj);
   }
-  j["mesh_size"] = s.meshSize;
-  if (!s.meshSizeExpr.empty())
-    j["mesh_size_expr"] = s.meshSizeExpr;
+  WriteExpr(j, "mesh_size", s.meshSize);
   // Whether a run checks its peak has settled (v206): absent at the
   // default, auto, so earlier files re-save byte-identically.
   if (s.converge != fem::ConvergeMode::Auto)
@@ -143,10 +136,8 @@ json StudyToJson(const fem::Study& s) {
     for (const fem::Participant& pt : s.participants) {
       json pj = {{"occurrence", pt.occurrenceId},
                  {"role", fem::ParticipantRoleToString(pt.role)}};
-      if (pt.meshSize != 0.0 || !pt.meshSizeExpr.empty())
-        pj["mesh_size"] = pt.meshSize;
-      if (!pt.meshSizeExpr.empty())
-        pj["mesh_size_expr"] = pt.meshSizeExpr;
+      if (pt.meshSize != 0.0 || !pt.meshSize.expr.empty())
+        WriteExpr(pj, "mesh_size", pt.meshSize);
       if (pt.role == fem::ParticipantRole::Contact && pt.friction != 0.0)
         pj["friction"] = pt.friction; // v209
       j["participants"].push_back(std::move(pj));
@@ -156,11 +147,10 @@ json StudyToJson(const fem::Study& s) {
   if (!s.refinements.empty()) {
     j["refinements"] = json::array();
     for (const fem::Refinement& r : s.refinements) {
-      json rj = {{"face", ElementRefJson(r.face)}, {"size", r.size}};
+      json rj = {{"face", ElementRefJson(r.face)}, {"size", r.size.value}};
       if (r.occurrenceId != 0)
         rj["occurrence"] = r.occurrenceId;
-      if (!r.sizeExpr.empty())
-        rj["size_expr"] = r.sizeExpr;
+      WriteExprText(rj, "size", r.size.expr);
       j["refinements"].push_back(std::move(rj));
     }
   }
@@ -170,7 +160,7 @@ json StudyToJson(const fem::Study& s) {
     for (const fem::Load& l : s.loads) {
       json lj = {{"id", l.id},
                  {"type", fem::LoadTypeToString(l.type)},
-                 {"magnitude", l.magnitude}};
+                 {"magnitude", l.magnitude.value}};
       // A contact anchor has no face to name (v106); a face anchor on an
       // assembly study says whose face it is.
       if (l.contactWith != 0)
@@ -179,8 +169,7 @@ json StudyToJson(const fem::Study& s) {
         lj["face"] = ElementRefJson(l.face);
       if (l.occurrenceId != 0)
         lj["occurrence"] = l.occurrenceId;
-      if (!l.magnitudeExpr.empty())
-        lj["magnitude_expr"] = l.magnitudeExpr;
+      WriteExprText(lj, "magnitude", l.magnitude.expr);
       if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote)
         lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
       // v170: a torque's axis (omitted: the cylindrical face's own), and a
@@ -358,9 +347,9 @@ fem::Study StudyFromJson(const json& j) {
                            g.at(2).get<double>());
   }
   s.volumeFraction = j.value("volume_fraction", 0.3);
-  s.volumeFractionExpr = j.value("volume_fraction_expr", std::string{});
+  s.volumeFraction.expr = ReadExprText(j, "volume_fraction");
   s.filterRadius = j.value("filter_radius", 0.0);
-  s.filterRadiusExpr = j.value("filter_radius_expr", std::string{});
+  s.filterRadius.expr = ReadExprText(j, "filter_radius");
   s.maxIterations = j.value("max_iterations", 60);
   for (const json& fj : j.value("keep_faces", json::array())) {
     readctx::RefuseUnknownKeys(fj, {"feature_id", "element"},
@@ -398,7 +387,7 @@ fem::Study StudyFromJson(const json& j) {
     fem::LoadCase c;
     c.name = cj.at("name").get<std::string>();
     c.weight = cj.value("weight", 1.0);
-    c.weightExpr = cj.value("weight_expr", std::string{});
+    c.weight.expr = ReadExprText(cj, "weight");
     s.loadCases.push_back(std::move(c));
   }
   if (j.contains("shape_from")) {
@@ -413,7 +402,7 @@ fem::Study StudyFromJson(const json& j) {
                                ": only a static study takes shape_from");
   }
   s.meshSize = j.value("mesh_size", 0.0);
-  s.meshSizeExpr = j.value("mesh_size_expr", std::string{});
+  s.meshSize.expr = ReadExprText(j, "mesh_size");
   if (j.contains("converge")) { // v206
     const std::string c = j.at("converge").get<std::string>();
     if (!fem::ConvergeModeFromString(c, s.converge))
@@ -488,7 +477,7 @@ fem::Study StudyFromJson(const json& j) {
                                "' (expected one of: meshed, rigid, bonded, "
                                "contact, ignored)");
     pt.meshSize = pj.value("mesh_size", 0.0);
-    pt.meshSizeExpr = pj.value("mesh_size_expr", std::string{});
+    pt.meshSize.expr = ReadExprText(pj, "mesh_size");
     if (pj.contains("friction")) { // v209
       if (pt.role != fem::ParticipantRole::Contact)
         throw std::runtime_error("participant " +
@@ -512,7 +501,7 @@ fem::Study StudyFromJson(const json& j) {
     r.face = ElementRefFromJson(rj.at("face"));
     r.occurrenceId = rj.value("occurrence", uint64_t{0});
     r.size = rj.value("size", 0.0);
-    r.sizeExpr = rj.value("size_expr", std::string{});
+    r.size.expr = ReadExprText(rj, "size");
     s.refinements.push_back(std::move(r));
   }
 
@@ -549,7 +538,7 @@ fem::Study StudyFromJson(const json& j) {
                                ": only a fixed support or a contact "
                                "support anchors on a contact");
     l.magnitude = lj.value("magnitude", 0.0);
-    l.magnitudeExpr = lj.value("magnitude_expr", std::string{});
+    l.magnitude.expr = ReadExprText(lj, "magnitude");
     l.loadCase = lj.value("case", std::string{});
     const auto point = [&](const char* key) {
       const json& v = lj.at(key);

@@ -169,7 +169,7 @@ TEST_CASE("A document's lookups drive its geometry and survive a save",
   CHECK(doc.FindParameter("od")->error.empty());
   CHECK(doc.FindParameter("od")->value == 32.0);
   auto box = std::make_unique<BoxFeature>("Box", glm::dvec3(0), 1.0, 1.0, 1.0);
-  box->widthExpr = "lookup(\"bearings\", 6200, \"D\")";
+  box->width.expr = "lookup(\"bearings\", 6200, \"D\")";
   doc.AddFeature(std::move(box));
   REQUIRE(doc.Regenerate());
   CHECK_THAT(doc.GetBodies().front().shape.Volume(), WithinAbs(30.0, 1e-6));
