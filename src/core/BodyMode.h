@@ -98,11 +98,11 @@ CheckedBoolean CheckedBooleanNamed(
     const std::function<std::string(const CADShape&)>& extra = {},
     const topo::RefineResult& refine = {});
 
-// The fuzzy retry's tolerance: 1e-5 of the SMALLER operand's bounding-box
-// diagonal, so it scales with the feature and never swallows a dimension of
-// it (a 2 mm spoke 290 mm long gets 0.0029 mm). The fraction is measured:
-// too small or too large a value each gave a result that passed the check
-// and was wrong (BodyMode.cpp, kFuzzyRel).
+// The fuzzy retry's tolerance: 1e-5 of the SMALLER operand's (tight)
+// bounding-box diagonal, so it scales with the feature and never swallows a
+// dimension of it (a 2 mm spoke 290 mm long gets 0.0029 mm). The fraction is
+// measured: too small or too large a value each gave a result that passed the
+// check and was wrong (BodyMode.cpp, kFuzzyRel).
 [[nodiscard]] double FuzzyTolerance(const CADShape& target,
                                     const CADShape& tool);
 

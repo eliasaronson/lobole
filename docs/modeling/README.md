@@ -1294,7 +1294,11 @@ BRepCheck, and a result that fails BRepCheck is retried too.
 
 **The tolerance** is 1e-5 of the smaller operand's bounding-box diagonal
 (`FuzzyTolerance`), so it scales with the feature and stays far below any
-dimension of it (0.0029 mm for a 290 mm spoke). The fraction was measured,
+dimension of it (0.0029 mm for a 290 mm spoke). The box is the tight one:
+the conservative box bounds a B-spline face by every pole of its surface,
+and a 10 mm face cut from a 2000 mm surface read 2828 mm across, putting the
+retry at 0.028 mm, past where the window below starts merging geometry
+(`[fuzzy]`). The fraction was measured,
 because both ways of getting it wrong produce a result that PASSES the check:
 
 - too small, and the kernel still misreads the near-coincidence. The jig slot

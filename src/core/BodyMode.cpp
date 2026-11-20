@@ -343,9 +343,15 @@ std::string Mm(double v) {
 } // namespace
 
 double FuzzyTolerance(const CADShape& target, const CADShape& tool) {
+  // The TIGHT box: the conservative one bounds a B-spline face by every pole
+  // of its surface, so a 10 mm face cut from a 2000 mm surface (as some
+  // exporters write one) read 2828 mm across where it is 17, and its fuzzy
+  // value 0.028 mm -- past where the window above starts merging geometry.
+  // Only a refused boolean's retry asks, so the tight box's cost is paid
+  // rarely.
   const auto diag = [](const CADShape& s) {
     glm::dvec3 lo, hi;
-    s.GetBoundingBox(lo, hi);
+    s.GetBoundingBox(lo, hi, /*tight=*/true);
     return static_cast<double>(glm::length(hi - lo));
   };
   const double small = std::min(diag(target), diag(tool));

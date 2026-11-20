@@ -15,10 +15,16 @@
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_TEdge.hxx>
+#include <GeomConvert.hxx>
+#include <Geom_BSplineSurface.hxx>
+#include <Geom_Plane.hxx>
+#include <Geom_RectangularTrimmedSurface.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS_Compound.hxx>
@@ -26,6 +32,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <string>
 
 using Catch::Matchers::WithinRel;
@@ -492,4 +499,26 @@ TEST_CASE("A cut that leaves a sliver of a corner keeps it as a solid",
       BooleanRefusal("P1", BooleanOp::Subtract, "Base", block, tool, cut);
   INFO(why);
   CHECK(why.empty());
+}
+
+// The fuzzy retry's tolerance is the operand's SIZE
+// (docs/modeling/README.md#a-refused-boolean-gets-one-fuzzy-retry), read off
+// the tight box. The conservative box bounds a B-spline face by every pole
+// of its surface: a 10 mm square cut from a 2000 mm B-spline surface, as
+// some exporters write a face, and pushed 10 mm, read 2828 mm across where
+// it is 17, and the retry ran at 0.028 mm -- past where the measured window
+// starts merging geometry.
+TEST_CASE("The fuzzy tolerance reads an operand's tight size",
+          "[boolean][fuzzy]") {
+  Handle(Geom_Plane) plane = new Geom_Plane(gp::XOY());
+  Handle(Geom_RectangularTrimmedSurface) big =
+      new Geom_RectangularTrimmedSurface(plane, -1000.0, 1000.0, -1000.0,
+                                         1000.0);
+  Handle(Geom_BSplineSurface) spline =
+      GeomConvert::SurfaceToBSplineSurface(big);
+  const TopoDS_Face face =
+      BRepBuilderAPI_MakeFace(spline, 0.0, 10.0, 0.0, 10.0, 1e-7);
+  const CADShape block(BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, 10)).Shape());
+  const double diag = std::sqrt(300.0); // 10 x 10 x 10
+  CHECK_THAT(FuzzyTolerance(block, block), WithinRel(1e-5 * diag, 1e-6));
 }
