@@ -1601,7 +1601,7 @@ Verdict Summarize(const Result& r, const MotionStudy& study, bool stale) {
     std::snprintf(line, sizeof line,
                   "Cancelled: %zu of %d samples done, the rest not looked "
                   "at.",
-                  r.samples.size(), study.samples);
+                  r.samples.size(), study.samples.value);
     v.text = line;
     return v;
   }

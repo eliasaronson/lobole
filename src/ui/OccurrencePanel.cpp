@@ -131,7 +131,7 @@ std::string RelationTail(const Relation& r) {
     else
       std::snprintf(buf, sizeof(buf), "%s %.4g",
                     r.intermittent.table.empty() ? "step" : "table step",
-                    r.intermittent.step);
+                    r.intermittent.step.value);
     return buf;
   }
   return DocumentIO::RelationKindToString(r.kind);
@@ -184,7 +184,7 @@ void DrawRelationsSection(AppState& state) {
       char term[160];
       std::snprintf(term, sizeof(term), "%s%s %s (%.5g)", k ? ", " : "",
                     assembly::RelationTermRole(r, k).c_str(), m.c_str(),
-                    t.coefficient);
+                    t.coefficient.value);
       memberTip += term;
     }
     // Unnamed, a row reads as what it moves: a planet relation as its
@@ -206,7 +206,7 @@ void DrawRelationsSection(AppState& state) {
     std::string tip;
     if (r.HasTerms()) {
       char k[64];
-      std::snprintf(k, sizeof(k), ", constant %.5g", r.phase);
+      std::snprintf(k, sizeof(k), ", constant %.5g", r.phase.value);
       tip = memberTip + k;
     } else if (r.kind == RelationKind::Intermittent) {
       const Relation::Intermittent& im = r.intermittent;
@@ -214,9 +214,10 @@ void DrawRelationsSection(AppState& state) {
       std::snprintf(buf, sizeof(buf),
                     "%s steps %s by %.4g%s once every %.4g deg, over %.4g "
                     "deg from %.4g deg",
-                    mateName(a).c_str(), mateName(b).c_str(), im.step,
-                    r.dofB == MateDof::Rotation ? " deg" : " mm", im.periodDeg,
-                    im.durationDeg, im.startDeg);
+                    mateName(a).c_str(), mateName(b).c_str(), im.step.value,
+                    r.dofB == MateDof::Rotation ? " deg" : " mm",
+                    im.periodDeg.value, im.durationDeg.value,
+                    im.startDeg.value);
       tip = buf;
       if (!im.table.empty())
         tip += ", following a table of " + std::to_string(im.table.size()) +
@@ -224,7 +225,8 @@ void DrawRelationsSection(AppState& state) {
     } else {
       char buf[256];
       std::snprintf(buf, sizeof(buf), "%s drives %s, ratio %.5g, phase %.5g",
-                    mateName(a).c_str(), mateName(b).c_str(), r.ratio, r.phase);
+                    mateName(a).c_str(), mateName(b).c_str(), r.ratio.value,
+                    r.phase.value);
       tip = buf;
     }
     if (!r.held.empty())
@@ -875,7 +877,7 @@ void DrawMotionBody(AppState& state) {
   // 0.0104 degrees of its barrel, and "0.0 to 0.0 deg" reads as a study
   // that does nothing.
   ImGui::Text("%.4g to %.4g %s in %d samples", sel->from * k, sel->to * k,
-              rot ? "deg" : "mm", sel->samples);
+              rot ? "deg" : "mm", sel->samples.value);
   const std::string why =
       motion::WhyNot(asmDoc, *sel, AssemblyResolverFor(state));
   if (!why.empty())
@@ -2539,7 +2541,7 @@ void DrawRelationTerms(AppState& state, Relation& r) {
     for (size_t i = 0; i < r.terms.size(); i++)
       ImGui::TextDisabled("%s: coefficient %.5g on its %s",
                           assembly::RelationTermRole(r, i).c_str(),
-                          r.terms[i].coefficient,
+                          r.terms[i].coefficient.value,
                           DocumentIO::MateDofToString(r.terms[i].dof));
   double k = r.phase;
   if (NumberField(state, "Constant", "rel_constant", &k, "%.5g") &&
@@ -2746,7 +2748,8 @@ void DrawAssemblyEditWindow(AppState& state) {
         const Relation::Intermittent& im = r->intermittent;
         LeftLabel("Step");
         ImGui::TextDisabled("%.5g over %.5g deg, once every %.5g deg%s",
-                            im.step, im.durationDeg, im.periodDeg,
+                            im.step.value, im.durationDeg.value,
+                            im.periodDeg.value,
                             im.slots > 0 ? " (Geneva)" : "");
         double start = im.startDeg;
         if (NumberField(state, "Window opens (deg)", "rel_start", &start,
@@ -2807,7 +2810,7 @@ void DrawAssemblyEditWindow(AppState& state) {
           SolveActiveAssembly(state);
         }
         LeftLabel("Ratio");
-        ImGui::TextDisabled("%.5g", r->ratio);
+        ImGui::TextDisabled("%.5g", r->ratio.value);
         if (state.asmEditRefusalFor == r->id && !state.asmEditRefusal.empty()) {
           ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.5f, 0.4f, 1.0f));
           ImGui::TextWrapped("%s", state.asmEditRefusal.c_str());
