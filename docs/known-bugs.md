@@ -91,6 +91,26 @@ the heading if it is not here yet.
   cost a second build of every honest refusal. The fix belongs upstream, in
   the offset's intersections, not in the order.
 
+## Sketching
+
+### A huge length edit refuses a shape that rides the line's end
+
+- **Symptom:** a regular hexagon inscribed in a construction circle centred
+  on the end of a line 100 long follows the line to 400, but driven to
+  10000 the edit is refused, "would collapse line N to a point", where the
+  hexagon could simply translate with the line's end.
+- **Cause:** every solve starts from the pre-edit geometry, and the cheapest
+  least-squares answer for points left 9900 mm behind is to slide them all
+  to the circle's nearest point. Continuation steps a sixty-fourth at a
+  time within 160 solves, and each step is still too far for the hexagon;
+  the collapse guard then refuses it rather than keep it collapsed
+  (docs/sketching/README.md#solving).
+- **Where:** `Solver::SolveValueEdit`, `src/core/sketch/SketchSolver.cpp`.
+- **Likely fix:** seed each step better: move a point held on a circle (or
+  coincident with a moving point) with the circle's centre before the
+  solve, as SolidCraft's 20cf1644f does; or finer steps when the budget
+  allows.
+
 ## Performance
 
 ### The bench's big mesh rows are priced as faceted imports
