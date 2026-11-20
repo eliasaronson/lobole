@@ -1079,7 +1079,6 @@ void DrawUI(AppState& state) {
     AppendOriginGizmo(state, overlay);    // world origin: parts and assemblies
     AppendThreadOverlays(state, overlay); // cosmetic threads (part tabs)
     BuildMateToolOverlay(state, overlay); // A3 mate connector triads (assembly)
-    AppendMateLimitOverlay(state, overlay); // the selected mate's limits
 
     // Viewport handles (docs/ui/viewport-handles.md): every owner PUBLISHES
     // its arrows and arcs into one list, rebuilt every frame, which is what
@@ -1093,6 +1092,9 @@ void DrawUI(AppState& state) {
     // Markers that are not handles keep the no-depth 1 px line channel.
     std::vector<LineVertex3D> gizmo;
     AppendCogMarker(state, gizmo);   // mass-props CoG cross (no-depth channel)
+    // The selected mate's limits: at its axis, usually inside the parts it
+    // joins (a hinge pin in its knuckle), so drawn through them.
+    AppendMateLimitOverlay(state, gizmo);
     AppendStudyMarker(state, gizmo); // FEM peak-field cross (no-depth channel)
 
     // CAM's decision-time drawings (docs/cam/gui.md#what-the-viewport-draws):
