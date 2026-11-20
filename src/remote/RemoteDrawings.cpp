@@ -614,11 +614,16 @@ uint64_t ParseViewConfiguration(ui::AppState& state, const DrawingView& view,
     throw std::runtime_error(
         "`configuration` applies to a view of a part; this view's source is "
         "an assembly");
+  if (j.is_string())
+    if (const Configuration* c = UniqueNamed(
+            doc->GetConfigurations(), j.get<std::string>(), "configuration",
+            [](const Configuration& x) -> const std::string& { return x.name; },
+            [](const Configuration& x) { return x.id; }))
+      return c->id;
   std::vector<std::string> known;
   for (const Configuration& c : doc->GetConfigurations()) {
     known.push_back(c.name);
-    if ((j.is_string() && c.name == j.get<std::string>()) ||
-        (j.is_number_unsigned() && c.id == j.get<uint64_t>()))
+    if (j.is_number_unsigned() && c.id == j.get<uint64_t>())
       return c.id;
   }
   throw std::runtime_error("no configuration " + j.dump() +
@@ -638,11 +643,16 @@ uint64_t ParseExplodedView(ui::AppState& state, const DrawingView& view,
   if (asmDoc == nullptr)
     throw std::runtime_error("`exploded_view` applies to a view of an "
                              "assembly; this view's source is a part");
+  if (j.is_string())
+    if (const ExplodedView* e = UniqueNamed(
+            asmDoc->GetExplodedViews(), j.get<std::string>(), "exploded_view",
+            [](const ExplodedView& x) -> const std::string& { return x.name; },
+            [](const ExplodedView& x) { return x.id; }))
+      return e->id;
   std::vector<std::string> known;
   for (const ExplodedView& e : asmDoc->GetExplodedViews()) {
     known.push_back(e.name);
-    if ((j.is_string() && e.name == j.get<std::string>()) ||
-        (j.is_number_unsigned() && e.id == j.get<uint64_t>()))
+    if (j.is_number_unsigned() && e.id == j.get<uint64_t>())
       return e.id;
   }
   throw std::runtime_error("no exploded view " + j.dump() +

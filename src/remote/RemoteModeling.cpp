@@ -1086,9 +1086,11 @@ json SplitForPrinting(ui::AppState& state, Document& active,
     names += (names.empty() ? "'" : ", '") + b->name + "'";
   if (p.contains("body")) {
     const std::string want = p.at("body").get<std::string>();
-    for (const Body* b : solids)
-      if (b->name == want)
-        body = b;
+    if (const Body* const* b = UniqueNamed(
+            solids, want, "split_for_printing: body",
+            [](const Body* x) -> const std::string& { return x->name; },
+            [](const Body* x) { return x->createdBy; }))
+      body = *b;
     if (body == nullptr)
       throw std::runtime_error(
           "split_for_printing: part '" + srcName + "' has no body '" + want +
@@ -1530,11 +1532,15 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                  "which is not a part of this project");
       uint64_t id = 0;
       std::string known;
-      for (const Configuration& c : src->GetConfigurations()) {
-        if (c.name == want)
-          id = c.id;
+      if (const Configuration* c = UniqueNamed(
+              src->GetConfigurations(), want, "Derived: configuration",
+              [](const Configuration& x) -> const std::string& {
+                return x.name;
+              },
+              [](const Configuration& x) { return x.id; }))
+        id = c->id;
+      for (const Configuration& c : src->GetConfigurations())
         known += (known.empty() ? "" : ", ") + c.name;
-      }
       if (id == 0)
         throw std::runtime_error(
             "Derived: the source part has no configuration '" + want +

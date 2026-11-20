@@ -36,7 +36,8 @@ const char* KindLabel(const Feature& f);
 
 // The anchor of `part` by id (a number) or name (a string), or null with
 // `listing` naming every anchor there: "12 (Frame1, frame), 14 (Seat,
-// datum plane)", empty when there is none.
+// datum plane)", empty when there is none. A name two anchors share is
+// refused (std::runtime_error naming their ids), not resolved to one.
 const Feature* Find(const Document& part, const nlohmann::json& idOrName,
                     std::string& listing);
 

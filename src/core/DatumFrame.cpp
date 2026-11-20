@@ -9,6 +9,8 @@
 #include "core/features/FrameFeature.h"
 
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 namespace datumframe {
 
@@ -62,18 +64,29 @@ const char* KindLabel(const Feature& f) {
 const Feature* Find(const Document& part, const nlohmann::json& v,
                     std::string& listing) {
   const Feature* hit = nullptr;
+  std::string named; // the ids of every anchor called `v`
+  int nNamed = 0;
   listing.clear();
   for (const auto& f : part.GetFeatures()) {
     if (!IsAnchor(*f))
       continue;
-    if ((v.is_number_integer() && f->GetId() == v.get<uint64_t>()) ||
-        (v.is_string() && f->GetName() == v.get<std::string>()))
+    if (v.is_number_integer() && f->GetId() == v.get<uint64_t>())
       hit = f.get();
+    if (v.is_string() && f->GetName() == v.get<std::string>()) {
+      if (!hit)
+        hit = f.get();
+      named += (nNamed++ ? ", " : "") + std::to_string(f->GetId());
+    }
     if (!listing.empty())
       listing += ", ";
     listing += std::to_string(f->GetId()) + " (" + f->GetName() + ", " +
                KindLabel(*f) + ")";
   }
+  // A name names one anchor (docs/scripting/rpc.md#a-name-names-one-thing).
+  if (nNamed > 1)
+    throw std::runtime_error(std::to_string(nNamed) + " frames are named '" +
+                             v.get<std::string>() + "' (ids " + named +
+                             "), so the name does not say which: pass the id");
   return hit;
 }
 

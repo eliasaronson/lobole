@@ -657,9 +657,11 @@ struct Host {
       return *occ;
     }
     if (v.is_string()) {
-      for (const Occurrence& occ : asmDoc->GetOccurrences())
-        if (occ.name == v.get<std::string>())
-          return occ;
+      if (const Occurrence* occ = UniqueNamed(
+              asmDoc->GetOccurrences(), v.get<std::string>(), what,
+              [](const Occurrence& x) -> const std::string& { return x.name; },
+              [](const Occurrence& x) { return x.id; }))
+        return *occ;
       throw std::runtime_error(std::string(what) + ": no occurrence named '" +
                                v.get<std::string>() +
                                "' (list_occurrences names them)");

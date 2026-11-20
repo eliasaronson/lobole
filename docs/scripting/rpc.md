@@ -206,6 +206,24 @@ mutating a part that is not on screen raises what Ctrl+Z would then mean;
 parts, reads every path on the first while the second is active, and asserts
 the active tab never changed.
 
+### A name names one thing
+
+A parameter that names an occurrence, a mate, a configuration, an exploded
+view, a frame or datum, or a body by NAME resolves to the one object called
+that, compared exactly. A JSON number is an id and a string is a name, so a
+feature named "3" is reached as `"3"` and feature 3 as `3`; a tab is the
+exception, tried as a name, then an id, then an index (above).
+
+Names are not unique: placing a part twice gives two occurrences with its
+name, every mate starts as "Mate", and nothing stops two configurations
+sharing one. So a name two objects share is REFUSED, naming each one's id
+(`UniqueNamed` in `RemoteHelpers.h`, `datumframe::Find` for frames), rather
+than resolved to whichever a loop stopped at: the first and the last were
+both in use, and either is plausible and wrong. `name_ambiguity_smoke`
+places a part twice and asks each by-name reader for it. A body list
+(`bodies`) is the exception: it names a set, and a name there takes every
+body called it.
+
 ## What a response carries
 
 - **`regen`** on every mutating response: `{ok, failed[], warnings[]}`

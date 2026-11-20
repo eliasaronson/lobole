@@ -1504,9 +1504,18 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
           const nlohmann::json& f = request.params.at("focus");
           const Occurrence* found = nullptr;
           if (f.is_string()) {
-            for (const Occurrence& o : state.assembly->GetOccurrences())
-              if (o.name == f.get<std::string>())
-                found = &o;
+            try {
+              found = remote::UniqueNamed(
+                  state.assembly->GetOccurrences(), f.get<std::string>(),
+                  "focus",
+                  [](const Occurrence& x) -> const std::string& {
+                    return x.name;
+                  },
+                  [](const Occurrence& x) { return x.id; });
+            } catch (const std::exception& e) {
+              RespondError(request.client, request.id, e.what());
+              continue;
+            }
           } else {
             found = state.assembly->FindById(f.get<uint64_t>());
           }

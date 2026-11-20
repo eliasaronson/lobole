@@ -824,6 +824,13 @@ add_test(NAME assembly_propagation_smoke
 set_tests_properties(assembly_propagation_smoke PROPERTIES TIMEOUT 120)
 
 # Inspection C3 measure: face area / edge length+radius / distance + mass CoM.
+# A name two objects share is refused, naming both ids, not resolved to one
+# (docs/scripting/rpc.md#a-name-names-one-thing).
+add_test(NAME name_ambiguity_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/name_ambiguity_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(name_ambiguity_smoke PROPERTIES TIMEOUT 120)
+
 add_test(NAME measure_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/measure_smoke.py
                  $<TARGET_FILE:designer>)

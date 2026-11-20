@@ -868,9 +868,10 @@ const Mate* MateByRef(const AssemblyDocument& a, const json& mv) {
   if (mv.is_number_unsigned())
     return a.FindMateById(mv.get<uint64_t>());
   if (mv.is_string())
-    for (const Mate& x : a.GetMates())
-      if (x.name == mv.get<std::string>())
-        return &x;
+    return UniqueNamed(
+        a.GetMates(), mv.get<std::string>(), "mate",
+        [](const Mate& x) -> const std::string& { return x.name; },
+        [](const Mate& x) { return x.id; });
   return nullptr;
 }
 
@@ -988,9 +989,10 @@ AssemblySequence ReadSequence(const AssemblyDocument& a, const RpcParams& p) {
       if (ov.is_number_unsigned())
         o = a.FindById(ov.get<uint64_t>());
       else if (ov.is_string())
-        for (const Occurrence& x : a.GetOccurrences())
-          if (x.name == ov.get<std::string>())
-            o = &x;
+        o = UniqueNamed(
+            a.GetOccurrences(), ov.get<std::string>(), at + " occurrence",
+            [](const Occurrence& x) -> const std::string& { return x.name; },
+            [](const Occurrence& x) { return x.id; });
       if (o == nullptr)
         throw std::runtime_error(at + ": no top-level occurrence " + ov.dump() +
                                  " (an id or name, see list_occurrences)");
@@ -1108,10 +1110,15 @@ uint64_t PlacedConfiguration(ui::AppState& state, OccurrenceRef kind,
     cfgs = part->GetConfigurations();
   }
   std::string known;
+  if (c.is_string())
+    if (const Configuration* cfg = UniqueNamed(
+            cfgs, c.get<std::string>(), "configuration of '" + label + "'",
+            [](const Configuration& x) -> const std::string& { return x.name; },
+            [](const Configuration& x) { return x.id; }))
+      return cfg->id;
   for (const Configuration& cfg : cfgs) {
     known += (known.empty() ? "" : ", ") + cfg.name;
-    if ((c.is_number() && cfg.id == c.get<uint64_t>()) ||
-        (c.is_string() && cfg.name == c.get<std::string>()))
+    if (c.is_number() && cfg.id == c.get<uint64_t>())
       return cfg.id;
   }
   if ((c.is_number() && c.get<uint64_t>() == 0) ||
@@ -2115,9 +2122,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         if (c.at("occurrence").is_number())
           o = state.assembly->FindById(c.at("occurrence").get<uint64_t>());
         else
-          for (const Occurrence& cand : state.assembly->GetOccurrences())
-            if (cand.name == c.at("occurrence").get<std::string>())
-              o = &cand;
+          o = UniqueNamed(
+              state.assembly->GetOccurrences(),
+              c.at("occurrence").get<std::string>(), "occurrence",
+              [](const Occurrence& x) -> const std::string& { return x.name; },
+              [](const Occurrence& x) { return x.id; });
       }
       // A5: a face anchor names a face of a PART. A placed sub-assembly has
       // none of its own, so refuse it HERE rather than storing a mate that

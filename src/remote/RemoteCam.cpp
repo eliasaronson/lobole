@@ -23,6 +23,7 @@
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "core/io/Serialization.h"
+#include "remote/RemoteHelpers.h" // UniqueNamed
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
 #include "ui/BackgroundJob.h"
@@ -61,11 +62,17 @@ uint64_t SourceConfiguration(ui::AppState& state, uint64_t sourceId,
   const Document* part = ui::PartDocById(state, sourceId);
   uint64_t id = 0;
   std::string known;
+  if (part != nullptr && c.is_string())
+    if (const Configuration* cfg = UniqueNamed(
+            part->GetConfigurations(), c.get<std::string>(),
+            "configuration of '" + label + "'",
+            [](const Configuration& x) -> const std::string& { return x.name; },
+            [](const Configuration& x) { return x.id; }))
+      id = cfg->id;
   if (part != nullptr)
     for (const Configuration& cfg : part->GetConfigurations()) {
       known += (known.empty() ? "" : ", ") + cfg.name;
-      if ((c.is_number() && cfg.id == c.get<uint64_t>()) ||
-          (c.is_string() && cfg.name == c.get<std::string>()))
+      if (c.is_number() && cfg.id == c.get<uint64_t>())
         id = cfg.id;
     }
   if (id == 0) {

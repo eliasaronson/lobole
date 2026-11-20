@@ -305,6 +305,31 @@ inline std::string KnownList(const std::vector<std::string>& known,
   return out;
 }
 
+// A name names ONE thing (docs/scripting/rpc.md#a-name-names-one-thing):
+// the element of `items` called `name`, nullptr when none. When several are
+// called it the call is refused, naming each one's id, rather than taking
+// the first or the last -- an occurrence placed twice, a mate left "Mate",
+// two configurations given one name are all ordinary, and the one a loop
+// happened to stop at is plausible and wrong. `what` names the parameter.
+template <class Range, class NameOf, class IdOf>
+auto UniqueNamed(Range& items, const std::string& name, const std::string& what,
+                 NameOf nameOf, IdOf idOf) -> decltype(&*std::begin(items)) {
+  decltype(&*std::begin(items)) found = nullptr;
+  std::vector<std::string> ids;
+  for (auto& item : items)
+    if (nameOf(item) == name) {
+      if (!found)
+        found = &item;
+      ids.push_back(std::to_string(idOf(item)));
+    }
+  if (ids.size() > 1)
+    throw std::runtime_error(what + ": " + std::to_string(ids.size()) +
+                             " are named '" + name + "' (ids " +
+                             KnownList(ids, ids.size()) +
+                             "), so the name does not say which: pass the id");
+  return found;
+}
+
 // A part's bodies named by the caller, as body names or creating-feature ids
 // (partmeasure::ResolveBodies, in core so a design sweep's worker reads a
 // section_area requirement the way the RPC does).

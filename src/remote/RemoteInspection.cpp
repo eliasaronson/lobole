@@ -2829,9 +2829,10 @@ InsertionCall ReadInsertionCall(ui::AppState& state, const json& p, uint64_t a,
     if (v.is_number_integer())
       mate = asmDoc.FindMateById(v.get<uint64_t>());
     else if (v.is_string())
-      for (const Mate& m : asmDoc.GetMates())
-        if (m.name == v.get<std::string>())
-          mate = &m;
+      mate = UniqueNamed(
+          asmDoc.GetMates(), v.get<std::string>(), "check_insertion: mate",
+          [](const Mate& x) -> const std::string& { return x.name; },
+          [](const Mate& x) { return x.id; });
     if (mate == nullptr)
       throw std::runtime_error("check_insertion: no mate " + v.dump() +
                                " (a mate id or name, see list_mates)");
@@ -4087,9 +4088,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (!v.is_string())
         throw std::runtime_error(std::string(key) +
                                  " is a top-level occurrence id or name");
-      for (const Occurrence& o : state.assembly->GetOccurrences())
-        if (o.name == v.get<std::string>())
-          return o.id;
+      if (const Occurrence* o = UniqueNamed(
+              state.assembly->GetOccurrences(), v.get<std::string>(), key,
+              [](const Occurrence& x) -> const std::string& { return x.name; },
+              [](const Occurrence& x) { return x.id; }))
+        return o->id;
       throw std::runtime_error(std::string(key) +
                                ": no top-level "
                                "occurrence is called " +
@@ -4197,9 +4200,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (!v.is_string())
         throw std::runtime_error(std::string(key) +
                                  " is a top-level occurrence id or name");
-      for (const Occurrence& o : state.assembly->GetOccurrences())
-        if (o.name == v.get<std::string>())
-          return o.id;
+      if (const Occurrence* o = UniqueNamed(
+              state.assembly->GetOccurrences(), v.get<std::string>(), key,
+              [](const Occurrence& x) -> const std::string& { return x.name; },
+              [](const Occurrence& x) { return x.id; }))
+        return o->id;
       throw std::runtime_error(std::string(key) +
                                ": no top-level "
                                "occurrence is called " +
@@ -4261,13 +4266,17 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           return t;
         }
         const std::string name = v.get<std::string>();
-        for (const Occurrence& o : state.assembly->GetOccurrences())
-          if (o.name == name) {
-            t.occ = &o;
-            t.label = o.name;
-            t.bodies = subtreeOf(o.id); // a unit is its whole subtree
-            return t;
-          }
+        if (const Occurrence* o = UniqueNamed(
+                state.assembly->GetOccurrences(), name, "interference",
+                [](const Occurrence& x) -> const std::string& {
+                  return x.name;
+                },
+                [](const Occurrence& x) { return x.id; })) {
+          t.occ = o;
+          t.label = o->name;
+          t.bodies = subtreeOf(o->id); // a unit is its whole subtree
+          return t;
+        }
         // A5: a PATH into a sub-assembly ("Gangway/Board 19", or the id
         // chain "2/17"). Read-only, and the only way to ask a question that
         // spans the boundary — the board lives in the sub-assembly's
@@ -4804,9 +4813,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const auto occBodies = [&](const json& v) {
         const Occurrence* found = nullptr;
         if (v.is_string()) {
-          for (const Occurrence& o : state.assembly->GetOccurrences())
-            if (o.name == v.get<std::string>())
-              found = &o;
+          found = UniqueNamed(
+              state.assembly->GetOccurrences(), v.get<std::string>(),
+              "compare_geometry",
+              [](const Occurrence& x) -> const std::string& { return x.name; },
+              [](const Occurrence& x) { return x.id; });
         } else {
           found = state.assembly->FindById(v.get<uint64_t>());
         }
@@ -6937,12 +6948,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           label = occ->name;
         } else {
           const std::string name = v.get<std::string>();
-          for (const Occurrence& o : state.assembly->GetOccurrences())
-            if (o.name == name) {
-              occ = &o;
-              label = o.name;
-              break;
-            }
+          occ = UniqueNamed(
+              state.assembly->GetOccurrences(), name, "measure: occurrence",
+              [](const Occurrence& x) -> const std::string& { return x.name; },
+              [](const Occurrence& x) { return x.id; });
+          if (occ)
+            label = occ->name;
           if (!occ && name.find('/') != std::string::npos) {
             // A5: a part INSIDE a sub-assembly, by path.
             auto hit = assembly::ResolvePath(*state.assembly, name,
@@ -7360,12 +7371,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         label = occ->name;
       } else {
         const std::string name = v.get<std::string>();
-        for (const Occurrence& o : state.assembly->GetOccurrences())
-          if (o.name == name) {
-            occ = &o;
-            label = o.name;
-            break;
-          }
+        occ = UniqueNamed(
+            state.assembly->GetOccurrences(), name, "frame: occurrence",
+            [](const Occurrence& x) -> const std::string& { return x.name; },
+            [](const Occurrence& x) { return x.id; });
+        if (occ)
+          label = occ->name;
         if (!occ && name.find('/') != std::string::npos) {
           auto hit = assembly::ResolvePath(*state.assembly, name,
                                            ui::PartResolverFor(state),
@@ -7683,10 +7694,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const json& c = p.at("configuration");
       uint64_t cfg = 0;
       std::string known;
+      if (c.is_string())
+        if (const Configuration* k = UniqueNamed(
+                listed->GetConfigurations(), c.get<std::string>(),
+                "configuration",
+                [](const Configuration& x) -> const std::string& {
+                  return x.name;
+                },
+                [](const Configuration& x) { return x.id; }))
+          cfg = k->id;
       for (const Configuration& k : listed->GetConfigurations()) {
         known += (known.empty() ? "" : ", ") + k.name;
-        if ((c.is_number() && k.id == c.get<uint64_t>()) ||
-            (c.is_string() && k.name == c.get<std::string>()))
+        if (c.is_number() && k.id == c.get<uint64_t>())
           cfg = k.id;
       }
       if (cfg == 0)
