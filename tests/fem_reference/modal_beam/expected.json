@@ -1,0 +1,16 @@
+{
+  "title": "A cantilever's first frequency",
+  "procedure": "modal tet10",
+  "calculix": false,
+  "model": "a 100 x 10 x 10 mm steel cantilever (E 210 GPa, 7850 kg/m^3) clamped at x = 0; 2.5 mm elements",
+  "quantities": {
+    "f1": {
+      "kind": "theory",
+      "source": "Euler-Bernoulli: f = (1.8751^2 / 2 pi) sqrt(E I / (rho A L^4)) (Blevins, Formulas for Natural Frequency and Mode Shape, 1979, ch. 8, the clamped-free beam)",
+      "value": 835.5165944334211,
+      "unit": "Hz",
+      "tolerance": 0.02,
+      "reason": "Euler-Bernoulli leaves out shear and rotary inertia, which at L/h = 10 lower the first frequency by about half a percent, and the clamp's hold of the root, which raises it a little; the mesh error at 2.5 mm is under 0.1 %"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "title": "A bar pressed past yield",
+  "procedure": "plasticity (CalculiX)",
+  "calculix": "only",
+  "model": "a 10 x 10 x 40 mm steel bar on rollers at x = 0, y = 0 and z = 0, 300 MPa on its top; the library's steel curve, linear hardening at E/100 (H = E/99 in plastic strain) from f_y 250 MPa; 5 mm elements, 6 increments",
+  "quantities": {
+    "plastic_strain": {
+      "kind": "theory",
+      "source": "linear isotropic hardening under uniaxial stress: eps_p = (sigma - f_y) / H, H = E/99 (EN 1993-1-5:2006 Annex C.6(2), the library's curve)",
+      "value": 0.023571428571428573,
+      "unit": "",
+      "tolerance": 0.002,
+      "reason": "the stress is uniform, so the element holds it exactly; what is left is CalculiX's increments, each converged to its residual, and the plastic strain carried from its integration points to the nodes"
+    }
+  }
+}

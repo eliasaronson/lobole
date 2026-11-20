@@ -1,0 +1,16 @@
+{
+  "title": "Kirsch: a plate with a hole in tension",
+  "procedure": "static tet10",
+  "calculix": true,
+  "model": "a quarter of a 400 x 400 mm plate, a 10 mm hole at its middle, 100 MPa along x; rollers on the two symmetry planes and on both faces (plane strain); steel; 20 mm elements, 0.4 mm on the bore",
+  "quantities": {
+    "kt": {
+      "kind": "theory",
+      "source": "Kirsch (1898); Timoshenko & Goodier, Theory of Elasticity, 3rd ed. (1970), ch. 4, the effect of circular holes on stress distributions in plates: sigma_theta = 3 sigma at the hole's side",
+      "value": 3.0,
+      "unit": "",
+      "tolerance": 0.015,
+      "reason": "Kirsch's plate is infinite; this one is 40 hole diameters wide, which Heywood's d/W formula puts 0.1 % above 3, and 20 radii long. 0.4 mm quadratic elements on a 5 mm bore (about 80 round the quarter) resolve the peak to a few tenths of a percent, read at its node"
+    }
+  }
+}

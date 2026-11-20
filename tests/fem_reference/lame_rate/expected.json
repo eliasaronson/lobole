@@ -1,0 +1,25 @@
+{
+  "title": "Lame's thick cylinder: the rate of convergence",
+  "procedure": "static tet10",
+  "calculix": false,
+  "model": "a quarter of a cylinder, bore 10 mm, outside 20 mm, 2 mm long, on rollers on its symmetry planes and ends (plane strain), 10 MPa in the bore; steel; 4, 2, 1 and 0.5 mm elements; the bore's mean radial displacement, from probe_study's rigid fit of the face",
+  "quantities": {
+    "u_r_bore": {
+      "kind": "theory",
+      "source": "Lame; Timoshenko & Goodier, Theory of Elasticity, 3rd ed. (1970), ch. 4, the thick-walled cylinder under uniform pressure, in plane strain",
+      "value": 0.000907936507936508,
+      "unit": "mm",
+      "tolerance": 0.0002,
+      "reason": "at 0.5 mm, twenty quadratic elements through the 10 mm wall, whose 1/r field a quadratic follows closely; the bore's mean is an area-weighted sum over its facets, whose own error falls as h^2 and is under 1e-4 here"
+    },
+    "rate": {
+      "kind": "theory",
+      "source": "Strang & Fix, An Analysis of the Finite Element Method (1973): a quadratic element's displacement error falls as h^3 and its energy as h^2; a mean over the facets of a curved face, weighted by their flat areas, as h^2",
+      "value": 2.0,
+      "unit": "",
+      "minimum": 1.5,
+      "reason": "the error of the bore's mean radial displacement against Lame must fall at every halving from 4 to 0.5 mm, and at the last two (2 to 1, 1 to 0.5 mm; from 4 mm the wall has two and a half elements, before the asymptotic range) by 2^1.5 or more: the h^2 the facet-weighted mean converges at, with room for what is left of the pre-asymptotic. An element whose stiffness is consistently wrong converges to the wrong answer, and its rate falls towards zero"
+    }
+  },
+  "planted": "fails"
+}

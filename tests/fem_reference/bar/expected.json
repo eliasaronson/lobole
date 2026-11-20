@@ -1,0 +1,24 @@
+{
+  "title": "A bar in tension",
+  "procedure": "static tet10",
+  "calculix": true,
+  "model": "a 100 x 10 x 10 mm steel bar on rollers at x = 0, y = 0 and z = 0, 10 kN along x on its far end; 4 mm elements",
+  "quantities": {
+    "u_end": {
+      "kind": "theory",
+      "source": "Hooke's law: u = F L / (E A)",
+      "value": 0.047619047619047616,
+      "unit": "mm",
+      "tolerance": 1e-05,
+      "reason": "the field is linear, which a tet10 holds exactly: what is left is rounding: a saved result keeps its fields as float (seven digits), and CalculiX prints seven"
+    },
+    "sigma": {
+      "kind": "theory",
+      "source": "sigma = F / A",
+      "value": 100.0,
+      "unit": "MPa",
+      "tolerance": 1e-05,
+      "reason": "uniform stress, exact in the element; what is left is rounding: a saved result keeps its fields as float (seven digits), and CalculiX prints seven"
+    }
+  }
+}

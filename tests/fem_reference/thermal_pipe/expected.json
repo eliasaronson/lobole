@@ -1,0 +1,16 @@
+{
+  "title": "Conduction through a pipe wall",
+  "procedure": "thermal tet10",
+  "calculix": true,
+  "model": "a steel pipe (k 53.33 W/(m K)), bore 10 mm at 100 C, outside 20 mm cooled at 25 W/(m^2 K) to 20 C, 40 mm long, ends insulated; 2.5 mm elements",
+  "quantities": {
+    "heat_w": {
+      "kind": "theory",
+      "source": "steady radial conduction in series with a film: Q = 2 pi L (T_i - T_inf) / (ln(r_o/r_i)/k + 1/(h r_o)) (Incropera & DeWitt, Fundamentals of Heat and Mass Transfer, ch. 3, the cylindrical wall)",
+      "value": 9.988186652586656,
+      "unit": "W",
+      "tolerance": 0.001,
+      "reason": "the temperature, ln r through the wall, is smooth and a quadratic follows it to 1e-5 at 2.5 mm; the film is a boundary integral the quadratic facets of a curved face carry to their area's error, about 1e-4"
+    }
+  }
+}

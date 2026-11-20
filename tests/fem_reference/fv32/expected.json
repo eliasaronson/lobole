@@ -1,0 +1,68 @@
+{
+  "title": "NAFEMS FV32: cantilevered tapered membrane",
+  "procedure": "modal tet10",
+  "calculix": false,
+  "model": "the membrane as half a 250 mm plate (its in-plane frequencies do not depend on the thickness) on a mid-plane roller, clamped along x = 0; stainless_steel, E 200 GPa, nu 0.3, 7900 kg/m^3; 250 mm elements",
+  "quantities": {
+    "f1": {
+      "kind": "benchmark",
+      "source": "NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 1",
+      "value": 44.623,
+      "unit": "Hz",
+      "scale": 1.0063092108532552,
+      "scale_reason": "the benchmark's steel is 8000 kg/m^3 at E 200 GPa, nu 0.3; the library's stainless_steel is 7900 kg/m^3 at the same E and nu, and a frequency goes as sqrt(E/rho): the target is the published value times sqrt(8000/7900)",
+      "tolerance": 0.01,
+      "reason": "250 mm quadratic tets put about eight elements across mode 1's half-wave at the root, which a tet10 resolves to a few tenths of a percent; a 250 mm thick solid is plane stress to (t/L)^2 nu^2, under 0.01 %; the targets are quoted to five figures"
+    },
+    "f2": {
+      "kind": "benchmark",
+      "source": "NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 2",
+      "value": 130.03,
+      "unit": "Hz",
+      "scale": 1.0063092108532552,
+      "scale_reason": "the benchmark's steel is 8000 kg/m^3 at E 200 GPa, nu 0.3; the library's stainless_steel is 7900 kg/m^3 at the same E and nu, and a frequency goes as sqrt(E/rho): the target is the published value times sqrt(8000/7900)",
+      "tolerance": 0.01,
+      "reason": "250 mm quadratic tets put about eight elements across mode 2's half-wave at the root, which a tet10 resolves to a few tenths of a percent; a 250 mm thick solid is plane stress to (t/L)^2 nu^2, under 0.01 %; the targets are quoted to five figures"
+    },
+    "f3": {
+      "kind": "benchmark",
+      "source": "NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 3",
+      "value": 162.7,
+      "unit": "Hz",
+      "scale": 1.0063092108532552,
+      "scale_reason": "the benchmark's steel is 8000 kg/m^3 at E 200 GPa, nu 0.3; the library's stainless_steel is 7900 kg/m^3 at the same E and nu, and a frequency goes as sqrt(E/rho): the target is the published value times sqrt(8000/7900)",
+      "tolerance": 0.01,
+      "reason": "250 mm quadratic tets put about eight elements across mode 3's half-wave at the root, which a tet10 resolves to a few tenths of a percent; a 250 mm thick solid is plane stress to (t/L)^2 nu^2, under 0.01 %; the targets are quoted to five figures"
+    },
+    "f4": {
+      "kind": "benchmark",
+      "source": "NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 4",
+      "value": 246.05,
+      "unit": "Hz",
+      "scale": 1.0063092108532552,
+      "scale_reason": "the benchmark's steel is 8000 kg/m^3 at E 200 GPa, nu 0.3; the library's stainless_steel is 7900 kg/m^3 at the same E and nu, and a frequency goes as sqrt(E/rho): the target is the published value times sqrt(8000/7900)",
+      "tolerance": 0.01,
+      "reason": "250 mm quadratic tets put about eight elements across mode 4's half-wave at the root, which a tet10 resolves to a few tenths of a percent; a 250 mm thick solid is plane stress to (t/L)^2 nu^2, under 0.01 %; the targets are quoted to five figures"
+    },
+    "f5": {
+      "kind": "benchmark",
+      "source": "NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 5",
+      "value": 379.9,
+      "unit": "Hz",
+      "scale": 1.0063092108532552,
+      "scale_reason": "the benchmark's steel is 8000 kg/m^3 at E 200 GPa, nu 0.3; the library's stainless_steel is 7900 kg/m^3 at the same E and nu, and a frequency goes as sqrt(E/rho): the target is the published value times sqrt(8000/7900)",
+      "tolerance": 0.01,
+      "reason": "250 mm quadratic tets put about eight elements across mode 5's half-wave at the root, which a tet10 resolves to a few tenths of a percent; a 250 mm thick solid is plane stress to (t/L)^2 nu^2, under 0.01 %; the targets are quoted to five figures"
+    },
+    "f6": {
+      "kind": "benchmark",
+      "source": "NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 6",
+      "value": 391.44,
+      "unit": "Hz",
+      "scale": 1.0063092108532552,
+      "scale_reason": "the benchmark's steel is 8000 kg/m^3 at E 200 GPa, nu 0.3; the library's stainless_steel is 7900 kg/m^3 at the same E and nu, and a frequency goes as sqrt(E/rho): the target is the published value times sqrt(8000/7900)",
+      "tolerance": 0.01,
+      "reason": "250 mm quadratic tets put about eight elements across mode 6's half-wave at the root, which a tet10 resolves to a few tenths of a percent; a 250 mm thick solid is plane stress to (t/L)^2 nu^2, under 0.01 %; the targets are quoted to five figures"
+    }
+  }
+}

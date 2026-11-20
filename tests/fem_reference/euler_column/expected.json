@@ -1,0 +1,16 @@
+{
+  "title": "Euler's column, fixed-free",
+  "procedure": "buckling tet10",
+  "calculix": true,
+  "model": "a 10 x 10 x 200 mm steel column clamped at its base, 1 kN down on its top; 2.5 mm elements",
+  "quantities": {
+    "factor": {
+      "kind": "theory",
+      "source": "Euler: P_cr = pi^2 E I / (4 L^2) (Timoshenko & Gere, Theory of Elastic Stability, 2nd ed. (1961), ch. 2, the column fixed at one end and free at the other)",
+      "value": 10.794879813691484,
+      "unit": "x",
+      "tolerance": 0.01,
+      "reason": "at L/h = 20 shear lowers the load by about 0.1 % and the clamp's hold of the root raises it as much; the eigensolve converges to 1e-10 and the mesh error at 2.5 mm is under 0.1 %"
+    }
+  }
+}

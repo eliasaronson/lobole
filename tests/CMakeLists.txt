@@ -217,6 +217,7 @@ add_executable(designer_tests
     test_fem.cpp
     test_fem_loads.cpp
     test_fem_pin.cpp
+    test_fem_supports.cpp
     test_fem_buckling.cpp
     test_fem_thermal.cpp
     test_fem_calculix.cpp
@@ -1623,6 +1624,30 @@ foreach(gen_test ${gen_tests})
   set_tests_properties(generator_${gen} PROPERTIES
                        LABELS "generators;slow" TIMEOUT ${gen_timeout})
 endforeach()
+
+# The FEM reference cases (docs/simulation/README.md#reference-cases):
+# published benchmarks and closed forms, each through the RPC, in-house and
+# on CalculiX. Minutes, so like the big generators they run only when asked
+# for, under a configuration of their own:
+#   tools/ctest -C fem_reference -L fem_reference
+# (tools/merge-branch.sh --full when FEM code changed, and --release). The
+# run fails a miss, a known failure that passes, and a committed page
+# (docs/simulation/reference-cases.md) that is not this run's; the planted
+# run fails unless a wrong Gauss weight is caught by the cases that say
+# they catch one. The table's own consistency is cheap and in the headless
+# suite.
+add_test(NAME fem_reference CONFIGURATIONS fem_reference
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fem_reference.py run
+                 --binary $<TARGET_FILE:designer> --check-page)
+set_tests_properties(fem_reference PROPERTIES
+                     LABELS "fem_reference;slow" TIMEOUT 2400)
+add_test(NAME fem_reference_planted CONFIGURATIONS fem_reference
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fem_reference.py run
+                 --planted --no-ccx --binary $<TARGET_FILE:designer>)
+set_tests_properties(fem_reference_planted PROPERTIES
+                     LABELS "fem_reference;slow" TIMEOUT 900)
+add_test(NAME fem_reference_table
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fem_reference.py check)
 
 # The README's table of those tests is made from the same files
 # (tools/generator_tests.py); this fails when it was not remade.

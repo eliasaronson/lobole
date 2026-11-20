@@ -1,0 +1,16 @@
+{
+  "title": "A cantilever's tip deflection",
+  "procedure": "static tet10",
+  "calculix": true,
+  "model": "a 100 x 10 x 10 mm steel cantilever clamped at x = 0, 1 kN down on its free end, read at the end's centre; 2.5 mm elements",
+  "quantities": {
+    "tip": {
+      "kind": "theory",
+      "source": "Timoshenko beam: P L^3 / 3EI + P L / (k G A), k = 10(1 + nu)/(12 + 11 nu) (Cowper, J. Appl. Mech. 33 (1966) 335)",
+      "value": 1.9193333333333333,
+      "unit": "mm",
+      "tolerance": 0.02,
+      "reason": "a beam theory is not the solid: the clamp holds the root's Poisson contraction and its warping, which the beam leaves free, and at L/h = 10 that stiffens the root by about a percent; the mesh error at 2.5 mm is a tenth of that"
+    }
+  }
+}

@@ -81,7 +81,7 @@ plan_get() { echo "$plan" | sed -n "s/^$1=//p"; }
 if [ "$dry" = 1 ]; then
   echo "merge-branch: --dry-run: $(wc -l < "$changed_file") path(s) in" \
        "$(echo "${pending:-}" | sed '/^$/d' | wc -l) commit(s); would run:"
-  for k in build headless gui generators action_matrix reader_fuzz_all; do
+  for k in build headless gui generators action_matrix reader_fuzz_all fem_reference; do
     printf '  %-16s %s\n' "$k" "$(plan_get "$k")"
   done
   # Main's tree after the pick is the branch's own only when the branch is
@@ -91,7 +91,8 @@ if [ "$dry" = 1 ]; then
     t="$(git rev-parse "$branch^{tree}")"
     echo "  stamps against $branch's tree $(echo "$t" | cut -c1-12) (if nothing is numbered):"
     for key in "-LE gui|slow" "-LE gui" gui-suite "-C generators -L generators" \
-               "-C action_matrix -L action_matrix" "-C reader_fuzz -L reader_fuzz_all"; do
+               "-C action_matrix -L action_matrix" "-C reader_fuzz -L reader_fuzz_all" \
+               "-C fem_reference -L fem_reference"; do
       # shellcheck disable=SC2086
       if [ "$key" = "-LE gui|slow" ]; then set -- -LE 'gui|slow'; else set -- $key; fi
       printf '    %-34s %s\n' "$key" \
@@ -317,6 +318,19 @@ elif [ "$(plan_get reader_fuzz_all)" = yes ]; then
   ran+=("every reader-fuzz case")
 else
   skipped+=("every reader-fuzz case: $(echo "$plan" | sed -n 's/^merge-plan: reader_fuzz_all *no *//p')")
+fi
+if [ "$(plan_get fem_reference)" = yes ] && stamped -C fem_reference -L fem_reference; then
+  :
+elif [ "$(plan_get fem_reference)" = yes ]; then
+  # The FEM reference cases (docs/simulation/README.md#reference-cases):
+  # every published benchmark and closed form, in-house and on CalculiX,
+  # one instance; the planted Gauss weight must be caught.
+  "$root/tools/ctest" -C fem_reference -L fem_reference -j1 \
+    --output-on-failure 2>&1 | tee -a "$suite_log" |
+    grep -E 'tests passed|\(Failed\)|\(Timeout\)|^fem-reference: (FAIL|PASSING|planted)'
+  ran+=("FEM reference cases")
+else
+  skipped+=("FEM reference cases: $(echo "$plan" | sed -n 's/^merge-plan: fem_reference *no *//p')")
 fi
 echo "merge-branch: ran: $(IFS=,; echo "${ran[*]:-nothing}" | sed 's/,/, /g')"
 for k in "${skipped[@]}"; do echo "merge-branch: skipped $k"; done

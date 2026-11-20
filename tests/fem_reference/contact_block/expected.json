@@ -1,0 +1,16 @@
+{
+  "title": "A block on the ground, off its axis",
+  "procedure": "contact (CalculiX)",
+  "calculix": "only",
+  "model": "a 20 x 20 x 40 mm steel block on a frictionless contact support, 4 kN down at b/12 off its axis (a remote load on its top); 4 mm elements, 2 increments",
+  "quantities": {
+    "peak_pressure": {
+      "kind": "theory",
+      "source": "the short column's kern: sigma_max = P/A (1 + 6e/b) for e within b/6 (Timoshenko & Gere, Mechanics of Materials, the core (kern) of a section under an eccentric axial load)",
+      "value": 15.0,
+      "unit": "MPa",
+      "tolerance": 0.01,
+      "reason": "a block four times as tall as its base's eccentricity spreads its load to the linear pressure the formula assumes; the contact's penalty lets the base sink a hundredth of the element, and the peak is a corner node's, which the 4 mm mesh reads to a few tenths of a percent"
+    }
+  }
+}

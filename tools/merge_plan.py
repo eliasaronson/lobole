@@ -48,6 +48,12 @@ ground (and always by `release`):
                    goldens and reader cases, the mutators (tests/mutate),
                    tests/test_reader_fuzz.cpp, tools/reader-fuzz.py, and
                    the kernel (shell.nix, nix/**)
+  fem_reference    the FEM code (src/core/fem/**, src/femgpu/**), the
+                   material library (src/cad/CADMaterials*), the mesher's
+                   kernel (shell.nix, nix/**), the cases
+                   (tests/fem_reference/**), tools/fem_reference.py, the
+                   simulation RPC (src/remote/RemoteSimulation*) and the
+                   page it writes; only its own ground, as reader_fuzz_all
 """
 
 import fnmatch
@@ -82,6 +88,11 @@ READER_GROUND = ["src/core/io/*", "tests/golden/*", "tests/reader_cases/*",
                  "tests/mutate/*", "tests/test_reader_fuzz.cpp",
                  "tests/test_reader_cases.cpp", "tools/reader-fuzz.py",
                  "shell.nix", "nix/*"]
+FEM_REFERENCE_GROUND = ["src/core/fem/*", "src/femgpu/*", "src/cad/CADMaterials*",
+                        "shell.nix", "nix/*", "tests/fem_reference/*",
+                        "tools/fem_reference.py",
+                        "src/remote/RemoteSimulation*",
+                        "docs/simulation/reference-cases.md"]
 GENERATORS_NOT = ["src/app/guitests/*"]
 GENERATORS_ALSO = ["python/lobole/*", "generators/*", "tests/generator_runs.py",
                    "tools/generator_tests.py"]
@@ -173,8 +184,9 @@ def classify(mode, no_skip, changed):
     for name, ground, exclude in (
             ("generators", GENERATORS_ALSO, GENERATORS_NOT),
             ("action_matrix", MATRIX_ALSO, MATRIX_NOT),
-            ("reader_fuzz_all", READER_GROUND, None)):
-        if name == "reader_fuzz_all":
+            ("reader_fuzz_all", READER_GROUND, None),
+            ("fem_reference", FEM_REFERENCE_GROUND, None)):
+        if name in ("reader_fuzz_all", "fem_reference"):
             # Only its own ground: a code change elsewhere is what the
             # sample in the headless suite is for.
             v, r = heavy(name, ground, exclude=["*"])

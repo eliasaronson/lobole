@@ -1,0 +1,16 @@
+{
+  "title": "NAFEMS LE1: elliptic membrane",
+  "procedure": "static tet10",
+  "calculix": true,
+  "model": "a quarter of the membrane, 50 mm thick (half the 100 mm plate) on a roller at its mid-plane and on the x = 0 and y = 0 symmetry rollers; steel, E 210 GPa, nu 0.3 (the benchmark's); 10 MPa outward on the outer ellipse; 100 mm elements, 25 mm on the inner ellipse",
+  "quantities": {
+    "sigma_yy_D": {
+      "kind": "benchmark",
+      "source": "NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test LE1",
+      "value": 92.7,
+      "unit": "MPa",
+      "tolerance": 0.02,
+      "reason": "D is the peak of the hoop stress, on the inner ellipse's sharpest curve. At 25 mm elements there (1/40 of the ellipse's minor semi-axis) quadratic tets carry the gradient into D to within about a percent; the target is quoted to three figures. A solid of 1/20 of the minor semi-axis's thickness on a mid-plane roller is plane stress to well under that"
+    }
+  }
+}
