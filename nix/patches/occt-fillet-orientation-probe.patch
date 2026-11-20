@@ -1,0 +1,23 @@
+--- a/src/ChFi3d/ChFi3d_Builder_6.cxx
++++ b/src/ChFi3d/ChFi3d_Builder_6.cxx
+@@ -945,6 +945,11 @@
+ 
+   Standard_Real    aDelta = VLast - VFirst;
+   Standard_Integer aDenom = 2;
++  // Each probe moves closer to VFirst, by aDelta / aDenom; stopping only
++  // when that step reached tolget2d took aDelta / tolget2d probes where
++  // the normals stay degenerate, minutes on a blend along a spiked spline.
++  // A thousand probes that all find a degenerate normal is a failed blend.
++  const Standard_Integer aMaxDenom = 1000;
+ 
+   for (;;)
+   {
+@@ -967,7 +972,7 @@
+     {
+       aDenom++;
+ 
+-      if (Abs(aDeltav) <= tolget2d)
++      if (Abs(aDeltav) <= tolget2d || aDenom > aMaxDenom)
+         return Standard_False;
+ 
+       continue;

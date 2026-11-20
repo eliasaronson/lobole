@@ -211,10 +211,8 @@ TEST_CASE("An unconstrained B-spline solves without moving",
 TEST_CASE("The v217 golden's closed spline is two edges and weighs its area",
           "[spline][golden]") {
   // tests/golden/v217-closed-spline-two-edges.json: one spline fitted
-  // round a 30 x 12 ellipse, padded 4 mm. Its top outline is filleted here,
-  // by the two U names the cap gives its two halves, and not in the golden:
-  // every golden is the reader fuzz's input, and a fillet after a damaged
-  // spline walks for minutes (docs/known-bugs.md).
+  // round a 30 x 12 ellipse, padded 4 mm, its top outline filleted by the
+  // two U names the cap gives its two halves.
   auto doc = testio::Load(std::string(TestSourceDir()) +
                           "/tests/golden/v217-closed-spline-two-edges.json");
   REQUIRE(doc != nullptr);
@@ -224,13 +222,7 @@ TEST_CASE("The v217 golden's closed spline is two edges and weighs its area",
   REQUIRE(pad != nullptr);
   CHECK_THAT(pad->at(0).shape.Volume(),
              WithinAbs(4.0 * M_PI * 30.0 * 12.0, 4.0 * 134.0 * 0.002));
-  const uint64_t padId = doc->GetFeature(1)->GetId();
-  const std::string cap = std::to_string(padId) + "/cap1";
-  doc->AddFeature(std::make_unique<FilletFeature>(
-      "Round",
-      std::vector<ElementRef>{{padId, cap + ";U0"}, {padId, cap + ";U1"}},
-      0.5));
-  doc->Regenerate();
+  REQUIRE(doc->FeatureCount() == 3);
   INFO(doc->GetFeature(2)->GetError());
   CHECK(doc->GetFeature(2)->GetError().empty());
   // The fillet takes about 7.4 mm^3; OpenCASCADE 7.6 and 7.9 agree on it to

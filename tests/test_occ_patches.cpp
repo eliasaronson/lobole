@@ -29,9 +29,12 @@
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <Geom_Curve.hxx>
 #include <Message_ProgressIndicator.hxx>
 #include <Standard_ErrorHandler.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
@@ -282,6 +285,45 @@ TEST_CASE("A thin shell of the worm stops when its deadline passes",
   // Ten times the longest silence measured, and a tenth of what an unheard
   // deadline overran by.
   CHECK(took < deadline + 10.0);
+}
+
+// The v217 golden's pad after the reader fuzz's damage to its sketch
+// (part-dir/v217-closed-spline-two-edges/features/1-sketch.json:drop_run:2,
+// a pole thrown far out): a 0.5 mm fillet of its top outline spent minutes
+// in one ChFi3d_Builder::StoreData, probing ever closer to the blend's start
+// for a non-degenerate normal (nix/patches/upstream/fillet-orientation-
+// probe.md). Now a failed fillet, at once.
+TEST_CASE("A fillet whose blend normal stays degenerate fails at once",
+          "[occ][fillet]") {
+  REQUIRE_PATCH("occt-fillet-orientation-probe");
+  const Body pad = Fixture("fillet-orientation-probe.brep");
+  // The top cap's outline: the two halves of the spline at z = 4.
+  std::vector<int> top;
+  int k = 0;
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(pad.shape.GetShape(), TopAbs_EDGE, edges);
+  for (k = 1; k <= edges.Extent(); k++) {
+    double a = 0.0, b = 0.0;
+    const TopoDS_Edge& e = TopoDS::Edge(edges(k));
+    const Handle(Geom_Curve) c = BRep_Tool::Curve(e, a, b);
+    if (c.IsNull())
+      continue;
+    if (std::abs(c->Value(a).Z() - 4.0) < 1e-6 &&
+        std::abs(c->Value(0.5 * (a + b)).Z() - 4.0) < 1e-6)
+      top.push_back(k - 1);
+  }
+  REQUIRE(top.size() == 2);
+  ElementMap map;
+  std::string error;
+  // A cost, on this thread's CPU: unpatched it ran past ctest's minute.
+  const double t0 = ThreadCpuSeconds();
+  const CADShape out = topo::EdgeBlendNamed(
+      pad.shape, pad.elementMap, top, EdgeBlendOp::Fillet, 0.5, 9, map, &error);
+  const double took = ThreadCpuSeconds() - t0;
+  CHECK_FALSE(out.IsValid());
+  CHECK_FALSE(error.empty());
+  INFO(error);
+  CHECK(took < 10.0);
 }
 
 // Random design 17's body, a 0.002 mm shell opening its blend face (face 9):

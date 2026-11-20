@@ -1140,6 +1140,15 @@ read the sections of an intersection that had failed, which have no edge
 feature (`tests/test_occ_patches.cpp`, skipped on a kernel without the patch
 -- CI's apt OpenCASCADE).
 
+One more never faulted but never returned: a fillet along a closed spline
+whose pole a damaged file had thrown 83 m out searched for a point where the
+blend's normal is not degenerate by a step that shrank towards the
+approximation's 2D tolerance, minutes of probes inside
+`ChFi3d_Builder::StoreData`. It now gives up after a thousand, and the
+fillet fails on that contour, naming where; the reader
+fuzz's damaged copies of the `v217` golden, which fillets that spline, read
+inside its CPU allowance again.
+
 ## A reshaping feature keeps only a valid solid
 
 A Fillet, Chamfer, Shell, Draft or direct edit

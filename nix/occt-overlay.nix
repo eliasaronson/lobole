@@ -48,6 +48,13 @@
 #   constructor throws (a face it cannot classify) the pave filler catches
 #   the exception and the block is lost, 208 B a face. It now frees the
 #   block and rethrows (nix/patches/upstream/inttools-fclass2d-leak.md).
+# - occt-fillet-orientation-probe.patch: ChFi3d_Builder::StoreData looked for
+#   a point where the blend's normal is not degenerate by stepping towards
+#   the start of the blend by a smaller fraction each time, until the step
+#   reached the approximation's 2D tolerance: where the normals stay
+#   degenerate (a fillet along a spline with a spiked pole) that was minutes
+#   of probes. It now gives up after a thousand, a failed blend
+#   (nix/patches/upstream/fillet-orientation-probe.md).
 #
 # And no IPA-CP clones: GCC 16 at -O3 miscompiles BRepClass3d_SClassifier.cxx,
 # so every point-in-solid test could call through a garbage vtable and every
@@ -69,6 +76,7 @@ let
     ./patches/occt-offset-inter3d-progress.patch
     ./patches/occt-error-handler-thread-local.patch
     ./patches/occt-inttools-fclass2d-leak.patch
+    ./patches/occt-fillet-orientation-probe.patch
   ];
 in
 {
