@@ -70,15 +70,18 @@ const char* __lsan_default_suppressions() {
       // connection is a library global we never see.
       "leak:dbus_bus_register\n"
       "leak:internal_bus_get\n"
+#ifndef LOBOLE_OCC_FREES_FAILED_FCLASS2D
       // The IntTools_FClass2d block IntTools_Context::FClass2d allocates and
       // then constructs in place: when the constructor throws (a face that
       // cannot be classified, Standard_ConstructionError), the block is never
       // bound to the context's map nor freed, and the pave filler catches
       // the exception: no pointer to it is left, ours or OCC's. 208 B per
-      // face. Reached from a pave filler on faces
-      // that fail to intersect: the failed thin shell in
-      // test_occ_patches.cpp.
-      "leak:IntTools_Context::FClass2d\n";
+      // face. Only on a kernel without
+      // nix/patches/occt-inttools-fclass2d-leak.patch, which frees it
+      // (CMakeLists.txt defines the macro): apt's, in the sanitizer CI job.
+      "leak:IntTools_Context::FClass2d\n"
+#endif
+      ;
 }
 
 const char* __ubsan_default_options() {

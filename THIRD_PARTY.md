@@ -76,7 +76,7 @@ functional but cannot generate FEM meshes.
   `occt-offset-arc-bind-order.patch`, a backport of upstream's OCCT#1600,
   `occt-offset-inter3d-progress.patch`,
   `occt-error-handler-thread-local.patch`, the source half of upstream's
-  OCCT#980)
+  OCCT#980, `occt-inttools-fclass2d-leak.patch`)
 - **Source:** <https://github.com/Open-Cascade-SAS/OCCT>
 
 OpenCASCADE supplies B-Rep modeling, topology, tessellation, mass properties,

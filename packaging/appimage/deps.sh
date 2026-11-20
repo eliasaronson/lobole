@@ -34,7 +34,8 @@ patches="occt-shell-cap-order occt-fillet-reorder-faces-loop
          occt-draft-null-curve-and-parallel
          occt-topopebrep-unclosed-wire-iterator
          occt-offset-arc-bind-order occt-offset-inter3d-progress
-         occt-error-handler-thread-local"
+         occt-error-handler-thread-local
+         occt-inttools-fclass2d-leak"
 for patch in $patches; do
   git -C "$work/occt" apply "$repo/nix/patches/$patch.patch"
 done

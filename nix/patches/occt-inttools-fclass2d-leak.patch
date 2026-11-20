@@ -1,0 +1,21 @@
+--- a/src/IntTools/IntTools_Context.cxx
++++ b/src/IntTools/IntTools_Context.cxx
+@@ -235,7 +235,17 @@
+     aTolF = BRep_Tool::Tolerance(aFF);
+     //
+     pFClass2d = (IntTools_FClass2d*)myAllocator->Allocate(sizeof(IntTools_FClass2d));
+-    new (pFClass2d) IntTools_FClass2d(aFF, aTolF);
++    try
++    {
++      new (pFClass2d) IntTools_FClass2d(aFF, aTolF);
++    }
++    catch (...)
++    {
++      // The constructor threw (a face it cannot classify): the block was
++      // never bound to the map, so nothing else would free it.
++      myAllocator->Free(pFClass2d);
++      throw;
++    }
+     //
+     myFClass2dMap.Bind(aFF, pFClass2d);
+   }

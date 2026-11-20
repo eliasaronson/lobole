@@ -43,6 +43,11 @@
 #   the thread's own handlers anyway. Upstream since OCCT 8.0 (OCCT#980,
 #   which also reworks the class); this is the .cxx half alone, the ABI
 #   unchanged (docs/performance/README.md#the-kernels-error-handler-lock).
+# - occt-inttools-fclass2d-leak.patch: IntTools_Context::FClass2d constructs
+#   an IntTools_FClass2d in a block from its allocator, and when the
+#   constructor throws (a face it cannot classify) the pave filler catches
+#   the exception and the block is lost, 208 B a face. It now frees the
+#   block and rethrows (nix/patches/upstream/inttools-fclass2d-leak.md).
 #
 # And no IPA-CP clones: GCC 16 at -O3 miscompiles BRepClass3d_SClassifier.cxx,
 # so every point-in-solid test could call through a garbage vtable and every
@@ -63,6 +68,7 @@ let
     ./patches/occt-offset-arc-bind-order.patch
     ./patches/occt-offset-inter3d-progress.patch
     ./patches/occt-error-handler-thread-local.patch
+    ./patches/occt-inttools-fclass2d-leak.patch
   ];
 in
 {

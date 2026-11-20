@@ -244,6 +244,15 @@ string(REPLACE ";" "," LOBOLE_OCC_PATCHES "${LOBOLE_OCC_PATCHES}")
 message(STATUS "OpenCASCADE patches: ${LOBOLE_OCC_PATCHES}")
 set_source_files_properties(src/cad/OccPatches.cpp PROPERTIES
     COMPILE_DEFINITIONS "LOBOLE_OCC_PATCHES=\"${LOBOLE_OCC_PATCHES}\"")
+# A kernel carrying occt-inttools-fclass2d-leak.patch frees the classifier
+# block a failed face leaves; apt's (the dispatched sanitizer CI job) still
+# loses it, so SanitizerDefaults.cpp suppresses that leak only there. Global
+# for the same reason as LOBOLE_SANITIZER_SOURCE_DIR, and only in a
+# sanitizer build, so the normal tree's command lines do not move.
+if((ENABLE_SANITIZERS OR ENABLE_TSAN) AND
+   LOBOLE_OCC_PATCHES MATCHES "occt-inttools-fclass2d-leak")
+  add_compile_definitions(LOBOLE_OCC_FREES_FAILED_FCLASS2D)
+endif()
 
 if(OPENCASCADE_FOUND)
     # Core OpenCASCADE libraries we need. With the config package these are

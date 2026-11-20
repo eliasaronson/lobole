@@ -247,6 +247,9 @@ for upstream in `nix/patches/upstream/`. The seventh is upstream's
 OCCT#980 without its header changes: a per-thread error-handler stack, so
 that booleans on many threads stop queueing on one mutex
 ([performance](../performance/README.md#the-kernels-error-handler-lock)).
+The eighth frees the face classifier a pave filler's context allocates when
+its constructor throws, a leak LeakSanitizer reported on every failed
+intersection (`nix/patches/upstream/inttools-fclass2d-leak.md`).
 The Debian package builds against Ubuntu's own OpenCASCADE and carries
 none.
 Patching OpenCASCADE means nixpkgs' binary cache no longer has it: the first
