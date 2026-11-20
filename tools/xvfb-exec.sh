@@ -34,17 +34,10 @@ if [ -n "${LOBOLE_NO_XVFB:-}" ]; then
   exec "$@" # opt out: run against whatever DISPLAY is set
 fi
 
-if command -v xvfb-run >/dev/null; then
-  XVFB_RUN=xvfb-run
-else
-  # The nix shell does not carry xvfb-run; fetch it the same way
-  # gui-tests-xvfb.sh does. Falling back to the real display is better than
-  # not running at all.
-  XVFB_RUN="$(nix-shell -p xvfb-run --run 'which xvfb-run' 2>/dev/null | tail -1 || true)"
-  if [ -z "$XVFB_RUN" ] || [ ! -x "$XVFB_RUN" ]; then
-    exec "$@"
-  fi
-fi
+# The nix shell does not carry xvfb-run; resolved once and kept
+# (tools/xvfb-run-path), not looked up per test. Falling back to the real
+# display is better than not running at all.
+XVFB_RUN="$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/xvfb-run-path")" || exec "$@"
 
 # On a Wayland session GLFW picks Wayland over the X display xvfb-run sets,
 # so the app would land on the developer's compositor after all — and a

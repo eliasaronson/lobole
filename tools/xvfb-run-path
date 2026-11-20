@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Print the xvfb-run to use, resolving it once rather than once per test.
+#
+#   XVFB_RUN="$(tools/xvfb-run-path)" || ...   # exits 1, printing nothing,
+#                                              # when there is none
+#
+# xvfb-run is on PATH on a CI runner and not in shell.nix (it would put an X
+# server's closure on every build's search paths), so here it comes from
+# `nix-shell -p xvfb-run`: 3.8 s of wall and 2.5 CPU-s each time. Seven pygui
+# tests went through tools/xvfb-exec.sh and each looked it up, about 27 s of
+# every pygui run spent finding a path. The answer is a store path, so it is
+# kept beside tools/nix-run's cache (.nix-env/, untracked) and asked again
+# only when it stops existing (a garbage collection took it).
+set -uo pipefail
+if command -v xvfb-run >/dev/null; then
+  command -v xvfb-run
+  exit 0
+fi
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cache="$root/.nix-env/xvfb-run.path"
+if [ -s "$cache" ] && p="$(cat "$cache")" && [ -x "$p" ]; then
+  echo "$p"
+  exit 0
+fi
+command -v nix-shell >/dev/null || exit 1
+p="$(nix-shell -p xvfb-run --run 'command -v xvfb-run' 2>/dev/null | tail -1)"
+[ -n "$p" ] && [ -x "$p" ] || exit 1
+mkdir -p "$root/.nix-env"
+tmp="$(mktemp "$root/.nix-env/.xvfb.XXXXXX")" && echo "$p" > "$tmp" &&
+  mv "$tmp" "$cache"
+echo "$p"

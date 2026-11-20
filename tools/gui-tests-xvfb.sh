@@ -82,11 +82,9 @@ if [ -n "$behind" ]; then
   exit 2
 fi
 
-if command -v xvfb-run >/dev/null; then
-  XVFB_RUN=xvfb-run
-else
-  XVFB_RUN="$(nix-shell -p xvfb-run --run 'which xvfb-run' | tail -1)"
-fi
+# Resolved once and kept (tools/xvfb-run-path): it is not in shell.nix.
+XVFB_RUN="$("$ROOT/tools/xvfb-run-path")" ||
+  { echo "gui-tests: no xvfb-run (not on PATH, and nix-shell -p xvfb-run failed)" >&2; exit 2; }
 SCREEN='-screen 0 1600x1000x24'
 # GLFW prefers Wayland whenever WAYLAND_DISPLAY is set: run from a Wayland
 # session, every shard would open its window on the user's compositor rather

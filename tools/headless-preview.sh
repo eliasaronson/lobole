@@ -41,18 +41,13 @@ export LOBOLE_NO_DIALOG="${LOBOLE_NO_DIALOG:-1}"
 # Only the --gui path needs a display server; resolve Xvfb lazily so the
 # default path works on a machine that has neither X nor xvfb-run.
 resolve_xvfb() {
-  if command -v xvfb-run >/dev/null; then
-    XVFB_RUN=xvfb-run
-  else
-    # Fall back to nixpkgs. gui-tests-xvfb.sh does the same; the nested
-    # nix-shell can fail (e.g. a GC'd/HOME-less env) and yield an empty
-    # string, so guard it instead of exec'ing nothing ("exec: : not found").
-    XVFB_RUN="$(nix-shell -p xvfb-run --run 'command -v xvfb-run' 2>/dev/null | tail -1)"
-    if [ -z "$XVFB_RUN" ] || ! command -v "$XVFB_RUN" >/dev/null 2>&1; then
-      echo "headless-preview: xvfb-run not found (not on PATH, and the nixpkgs" >&2
-      echo "  fallback failed). Install it or run inside 'nix-shell -p xvfb-run'." >&2
-      exit 1
-    fi
+  # PATH, or nixpkgs resolved once and kept (tools/xvfb-run-path). The
+  # nix-shell lookup can fail (a GC'd/HOME-less env) and yield nothing, so it
+  # is guarded instead of exec'ing nothing ("exec: : not found").
+  if ! XVFB_RUN="$("$ROOT/tools/xvfb-run-path")"; then
+    echo "headless-preview: xvfb-run not found (not on PATH, and the nixpkgs" >&2
+    echo "  fallback failed). Install it or run inside 'nix-shell -p xvfb-run'." >&2
+    exit 1
   fi
 }
 
