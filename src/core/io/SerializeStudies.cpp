@@ -185,7 +185,7 @@ json StudyToJson(const fem::Study& s) {
         lj["fix_rotation"] = true;
       if (l.type == fem::LoadType::Contact && l.friction != 0.0) // v209
         lj["friction"] = l.friction;
-      // vNEXT: a held or cylindrical support's directions, a held one's
+      // v221: a held or cylindrical support's directions, a held one's
       // displacements (only where not zero) and frame.
       if (l.type == fem::LoadType::Held ||
           l.type == fem::LoadType::Cylindrical) {
@@ -596,7 +596,7 @@ fem::Study StudyFromJson(const json& j) {
                                  ": fix_rotation is not true or false");
       l.fixRotation = lj.at("fix_rotation").get<bool>();
     }
-    // vNEXT: a held or cylindrical support's directions, displacements and
+    // v221: a held or cylindrical support's directions, displacements and
     // frame, each refused on any other type.
     if (lj.contains("hold")) {
       if (l.type != fem::LoadType::Held && l.type != fem::LoadType::Cylindrical)

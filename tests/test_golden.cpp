@@ -1083,7 +1083,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
         CHECK(l.fixRotation == want[i].at(4).get<bool>());
     }
   }
-  // vNEXT: a roller, held or cylindrical support's directions, a held
+  // v221: a roller, held or cylindrical support's directions, a held
   // one's displacements and frame. None changes a volume, and a direction
   // dropped on load solves a different support; each [type, hold,
   // [dx, dy, dz] mm, frame] of the first study's frame supports must hold.
