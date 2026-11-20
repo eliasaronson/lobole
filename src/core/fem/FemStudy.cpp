@@ -2245,6 +2245,40 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
       ps.nodeWeight[i] *= glm::length((x - o) - glm::dot(x - o, a) * a);
     }
   }
+  // A node is held in one frame. Two pins that share nodes (a bore imported
+  // as two faces, each pinned) hold them in the same one when they share an
+  // axis; on two axes the second pin's holds would be read in the first's
+  // frame, so that is refused, naming both.
+  {
+    glm::dvec3 lo0(1e300), hi0(-1e300);
+    for (const glm::dvec3& x : mesh.nodes) {
+      lo0 = glm::min(lo0, x);
+      hi0 = glm::max(hi0, x);
+    }
+    const double size = glm::length(hi0 - lo0);
+    for (size_t p = 0; p < pins.size(); ++p)
+      for (size_t q = p + 1; q < pins.size(); ++q) {
+        bool share = false;
+        for (int v : pins[q].nodes)
+          if (pins[p].slot.count(v)) {
+            share = true;
+            break;
+          }
+        if (!share)
+          continue;
+        const glm::dvec3 a = glm::normalize(pins[p].pin->axisDirection);
+        const glm::dvec3 b = glm::normalize(pins[q].pin->axisDirection);
+        const glm::dvec3 d = pins[q].pin->axisOrigin - pins[p].pin->axisOrigin;
+        if (std::abs(glm::dot(a, b)) > 1.0 - 1e-9 &&
+            glm::length(d - glm::dot(d, a) * a) <= 1e-6 * size)
+          continue;
+        return fail("pins " + std::to_string(pins[p].pin->id) + " and " +
+                    std::to_string(pins[q].pin->id) +
+                    " share nodes where their faces meet, but not an axis; "
+                    "a node is held round one axis: pin faces that meet "
+                    "must be on one axis");
+      }
+  }
   const auto pinFreeToTurn = [&](const glm::dvec3& dir, const glm::dvec3& pt,
                                  double scale) -> const PinState* {
     for (const PinState& ps : pins) {

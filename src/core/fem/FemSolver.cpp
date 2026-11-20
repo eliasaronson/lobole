@@ -239,24 +239,70 @@ Reduction MakeReduction(const FemMesh& mesh, const Supports& supports) {
       if (h.held[k])
         heldDof[3 * h.node + k] = 1;
   }
-  // Ties: each one's largest free entry is the MASTER, eliminated as
-  // u_m = sum_s f_s u_s over the others (f_s = -c_s / c_m). A tie left with
-  // one free entry holds it; with none, nothing.
+  // Ties, eliminated in order. Each tie's terms are first written over the
+  // DOF still free: a held DOF is zero, and an earlier tie's master is its
+  // expansion. Its largest term is then the MASTER, eliminated as
+  // u_m = sum_s f_s u_s over the others (f_s = -c_s / c_m), and substituted
+  // into every earlier tie that names it as a slave -- so a DOF two pins
+  // share (a bore split into two faces, both held from turning) keeps both
+  // ties, and every tie's slaves are free DOF at the end. A tie left with one
+  // term holds it; with none (it repeats earlier ones), nothing.
   red.tieOfDof.assign(3 * nNodes, -1);
+  // Sorted by DOF, duplicates summed, terms that cancel to nothing dropped.
+  const auto tidy = [](std::vector<std::pair<int, double>>& v, double scale) {
+    std::sort(v.begin(), v.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    size_t w = 0;
+    for (size_t i = 0; i < v.size();) {
+      std::pair<int, double> t = v[i++];
+      while (i < v.size() && v[i].first == t.first)
+        t.second += v[i++].second;
+      if (std::abs(t.second) > 1e-12 * scale)
+        v[w++] = t;
+    }
+    v.resize(w);
+  };
+  // `d` is no longer free: every earlier tie naming it as a slave takes
+  // `expr` (its value over free DOF; empty when it is held) instead.
+  const auto substitute = [&](int d,
+                              const std::vector<std::pair<int, double>>& expr) {
+    for (TieElim& e : red.elims) {
+      const auto it =
+          std::find_if(e.slaves.begin(), e.slaves.end(),
+                       [d](const auto& sf) { return sf.first == d; });
+      if (it == e.slaves.end())
+        continue;
+      const double f = it->second;
+      double scale = 0.0;
+      for (const auto& [sd, sf] : e.slaves)
+        scale = std::max(scale, std::abs(sf));
+      e.slaves.erase(it);
+      for (const auto& [xd, xf] : expr)
+        e.slaves.push_back({xd, f * xf});
+      tidy(e.slaves, scale);
+    }
+  };
   for (const Tie& tie : supports.ties) {
     std::vector<std::pair<int, double>> live;
+    double scale = 0.0;
     for (const Tie::Entry& e : tie.entries) {
       if (e.node < 0 || e.node >= nNodes || e.k < 0 || e.k > 2 ||
           red.frameOf[e.node] < 0 || e.coef == 0.0)
         continue;
       const int d = 3 * e.node + e.k;
-      if (!heldDof[d] && red.tieOfDof[d] < 0)
+      scale = std::max(scale, std::abs(e.coef));
+      if (red.tieOfDof[d] >= 0)
+        for (const auto& [sd, f] : red.elims[red.tieOfDof[d]].slaves)
+          live.push_back({sd, e.coef * f});
+      else if (!heldDof[d])
         live.push_back({d, e.coef});
     }
+    tidy(live, scale);
     if (live.empty())
       continue;
     if (live.size() == 1) {
       heldDof[live[0].first] = 1;
+      substitute(live[0].first, {});
       continue;
     }
     size_t m = 0;
@@ -268,8 +314,9 @@ Reduction MakeReduction(const FemMesh& mesh, const Supports& supports) {
     for (size_t i = 0; i < live.size(); ++i)
       if (i != m)
         te.slaves.push_back({live[i].first, -live[i].second / live[m].second});
-    red.tieOfDof[te.master] = static_cast<int>(red.elims.size());
     heldDof[te.master] = 1;
+    substitute(te.master, te.slaves);
+    red.tieOfDof[te.master] = static_cast<int>(red.elims.size());
     red.elims.push_back(std::move(te));
   }
   // DOF reduction map: -1 for held DOFs, else a compacted free-DOF index.

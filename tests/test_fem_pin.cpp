@@ -21,6 +21,7 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
+#include "topo_testmesh.h"
 
 #include <algorithm>
 #include <cmath>
@@ -580,3 +581,155 @@ TEST_CASE("a short sleeve on a pin, leaned on off its end, settles on its "
   }
 }
 #endif
+
+#ifdef HAVE_NETGEN
+// The same through a study: a lug on one pin held from turning, and the same
+// lug with that pin given twice -- two pins on one face, every node in both
+// ties. Each tie's master is a slave of the other's; the answer is the one
+// pin's.
+TEST_CASE("two pins held from turning on one bore answer as one",
+          "[fem][pin][run]") {
+  auto p = MakePlate(40.0, 12.0, 4.0, 5.0, {8.0}, "pla");
+  Document& doc = p->doc;
+  const auto solve = [&](int pins, fem::StudyRuntime& rt) {
+    fem::Study& s = doc.AddStudy(pins == 1 ? "One" : "Two");
+    s.meshSize = 2.0;
+    s.converge = fem::ConvergeMode::Never;
+    for (int k = 0; k < pins; ++k)
+      s.loads.push_back(Support(doc, fem::LoadType::Pin, p->bores[0], true));
+    s.loads.push_back(Force(doc, p->endX1, 10.0, glm::dvec3(0, -1, 0)));
+    std::string err;
+    const bool ok = fem::RunStudy(doc, s, rt, &err);
+    INFO(err);
+    REQUIRE(ok);
+  };
+  fem::StudyRuntime one, two;
+  solve(1, one);
+  solve(2, two);
+  const fem::FemResults& a = one.bodies[0].results;
+  const fem::FemResults& b = two.bodies[0].results;
+  REQUIRE(a.maxDisplacement > 0.0);
+  CHECK_THAT(b.maxDisplacement, WithinRel(a.maxDisplacement, 1e-6));
+  CHECK_THAT(b.maxVonMises, WithinRel(a.maxVonMises, 1e-6));
+}
+
+// A node is held in one frame. Two pins whose faces meet but whose axes do
+// not -- a bore crossed by a smaller cross-bore -- would read the second
+// pin's holds in the first's frame at the nodes they share; that is refused,
+// naming both, rather than solved wrong.
+TEST_CASE("pins whose faces meet off one axis are refused", "[fem][pin]") {
+  Document doc;
+  auto box =
+      std::make_unique<BoxFeature>("Block", glm::dvec3(0), 40.0, 40.0, 20.0);
+  box->SetMaterial("pla");
+  doc.AddFeature(std::move(box));
+  uint64_t solid = doc.GetFeature(0)->GetId();
+  const auto drill = [&](const glm::dvec3& at, const glm::dvec3& dir, double r,
+                         double len) {
+    doc.AddFeature(std::make_unique<CylinderFeature>("Hole", at, dir, r, len));
+    const uint64_t tool = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+    doc.AddFeature(std::make_unique<BooleanFeature>("Bore", solid, tool,
+                                                    BooleanOp::Subtract));
+    solid = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  };
+  drill(glm::dvec3(20, 20, -1), glm::dvec3(0, 0, 1), 5.0, 22.0);
+  drill(glm::dvec3(20, -1, 10), glm::dvec3(0, 1, 0), 3.0, 42.0);
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  ElementRef vertical, cross, end;
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, index);
+    REQUIRE(info.has_value());
+    const ElementRef ref{body.createdBy, name};
+    if (info->kind == "cylinder")
+      (std::abs(info->axis.z) > 0.9 ? vertical : cross) = ref;
+    else if (std::abs(info->centroid.x - 40.0) < 1e-6)
+      end = ref;
+  }
+  REQUIRE_FALSE(vertical.name.empty());
+  REQUIRE_FALSE(cross.name.empty());
+  REQUIRE_FALSE(end.name.empty());
+  fem::Study& s = doc.AddStudy("Crossed");
+  s.meshSize = 3.0;
+  s.converge = fem::ConvergeMode::Never;
+  s.loads.push_back(Support(doc, fem::LoadType::Pin, vertical, true));
+  s.loads.push_back(Support(doc, fem::LoadType::Pin, cross, true));
+  s.loads.push_back(Force(doc, end, 10.0, glm::dvec3(0, -1, 0)));
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::RunStudy(doc, s, rt, &err));
+  CHECK_THAT(err, ContainsSubstring("share nodes"));
+  CHECK_THAT(err, ContainsSubstring(std::to_string(s.loads[0].id)));
+  CHECK_THAT(err, ContainsSubstring(std::to_string(s.loads[1].id)));
+}
+#endif
+
+#ifdef HAVE_FEM_SOLVER
+// Two ties that share a DOF -- the seam nodes of a bore split into two faces,
+// each face pinned and held from turning. The shared DOF is a slave of the
+// first tie and the largest term of the second, and the first tie's master
+// is a term of the second too: each tie must still hold in the answer, not
+// lose a term or read a DOF the reduction removed (an index of -1).
+TEST_CASE("two ties that share their DOF both hold", "[fem][pin]") {
+  const double L = 40.0, W = 4.0;
+  const fem::FemMesh mesh = GenerateBoxMesh(10, 2, 2, L, W, W);
+  fem::Supports sup;
+  std::vector<int> atA, atB; // the nodes of two sections, x = 20 and x = 30
+  for (int n = 0; n < (int)mesh.nodes.size(); ++n) {
+    const double x = mesh.nodes[n].x;
+    if (std::abs(x) < 1e-9)
+      sup.fixedNodes.push_back(n);
+    else if (std::abs(x - 20.0) < 1e-9)
+      atA.push_back(n);
+    else if (std::abs(x - 30.0) < 1e-9)
+      atB.push_back(n);
+  }
+  REQUIRE(atA.size() > 3);
+  REQUIRE(atB.size() > 3);
+  // Tie A: sum u_y over section A, its first node weighted twice (its
+  // master). Tie B: sum u_y over section B, plus A's master, plus A's second
+  // node weighted ten times (B's master, and a slave of A).
+  fem::Tie a, b;
+  for (size_t i = 0; i < atA.size(); ++i)
+    a.entries.push_back({atA[i], 1, i == 0 ? 2.0 : 1.0});
+  for (int n : atB)
+    b.entries.push_back({n, 1, 1.0});
+  b.entries.push_back({atA[0], 1, 1.0});
+  b.entries.push_back({atA[1], 1, 10.0});
+  for (const auto* nodes : {&atA, &atB})
+    for (int n : *nodes) {
+      fem::HeldNode h;
+      h.node = n;
+      sup.held.push_back(h);
+    }
+  sup.ties = {a, b};
+  // Pulled sideways (y) at the free end.
+  fem::FaceLoad pull;
+  pull.type = fem::LoadType::Force;
+  pull.magnitude = 100.0;
+  pull.direction = glm::dvec3(0, 1, 0);
+  for (int t = 0; t < (int)mesh.boundary.size(); ++t)
+    if (mesh.boundary[t].faceIndex == 1)
+      pull.tris.push_back(t);
+  std::string err;
+  const auto r = fem::SolveCases(mesh, {fem::Material{200000.0, 0.3}}, sup,
+                                 {{pull}}, &err);
+  INFO(err);
+  REQUIRE(r.has_value());
+  const fem::FemResults& res = r->front();
+  for (const fem::Tie* tie : {&a, &b}) {
+    double sum = 0.0, size = 0.0;
+    for (const fem::Tie::Entry& e : tie->entries) {
+      sum += e.coef * res.displacement[e.node].y;
+      size += std::abs(e.coef * res.displacement[e.node].y);
+    }
+    INFO("tie " << (tie == &a ? "A" : "B") << ": sum " << sum << " of "
+                << size);
+    REQUIRE(size > 0.0);
+    CHECK(std::abs(sum) < 1e-9 * size);
+  }
+  // The end still moves the way it is pulled: the ties hold two sections
+  // from sliding as a whole, not the beam.
+  CHECK(res.maxDisplacement > 0.0);
+}
+#endif // HAVE_FEM_SOLVER

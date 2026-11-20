@@ -157,7 +157,17 @@ side in tension and puts a clamp's edge on the bore's rims. A `pin` support
   along it; `K' = Tᵀ K T` per element, loads rotated the same way, the
   answer rotated back), so a held direction is eliminated exactly as a
   fixed DOF is, and K stays symmetric positive definite. A tie (`fem::Tie`)
-  eliminates its largest entry's DOF in terms of the others.
+  eliminates its largest entry's DOF in terms of the others. Ties are
+  eliminated in order, each written first over the DOF still free (an
+  earlier tie's master replaced by its expansion), and its master then
+  substituted into every earlier tie that names it: two pins held from
+  turning that share nodes -- a bore imported as two half-cylinder faces,
+  each pinned -- keep both ties. A shared DOF once lost a term from the
+  second tie, or was read as an index of -1 where the first tie still named
+  it (`[pin]`, "two ties that share their DOF both hold"). A node is held
+  in ONE frame, so two pins whose faces meet must share an axis: a bore
+  crossed by a cross-bore, both pinned, read the second pin's holds in the
+  first's frame where they meet, and is refused naming both pins.
 - **A mechanism is refused, never solved.** Before each solve the held
   directions are tested against the six rigid motions (`FreeRigidMotion`:
   the 6x6 Gram matrix of the rows `[d, (x − c) × d]`, a tie the sum of its
