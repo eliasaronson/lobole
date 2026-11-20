@@ -429,7 +429,7 @@ fem::FaceMotion HeatedStrip(const fem::Material& lower,
 
 TEST_CASE("a steel and brass strip heated from flat curls as Timoshenko's "
           "bimetal, and a steel pair does not",
-          "[fem][thermal]") {
+          "[fem][thermal][slow]") {
   // The library's steel (E 210 GPa, nu 0.3, 12e-6/K: EN 1993-1-1 §3.2.6)
   // under C26000 brass (E 110.3 GPa, nu 0.333, 19.2e-6/K: Wieland
   // Concast's datasheet).

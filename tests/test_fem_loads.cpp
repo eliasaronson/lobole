@@ -447,7 +447,7 @@ TEST_CASE("a torque on a shaft's cylindrical face turns it about its own axis",
 // its tip drops M L^2 / 2EI -- which a pull on the whole face does not do at
 // all.
 TEST_CASE("a pull on half a cantilever's end bends it by its eccentricity",
-          "[fem][loads][region][run]") {
+          "[fem][loads][region][run][slow]") {
   const double L = 100.0, b = 10.0, h = 10.0, F = 2000.0;
   Document doc;
   auto box = std::make_unique<BoxFeature>("Beam", glm::dvec3(0), L, b, h);

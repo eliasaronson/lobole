@@ -651,7 +651,7 @@ set_tests_properties(contact_relation_smoke PROPERTIES TIMEOUT 120)
 add_test(NAME follower_check_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/follower_check_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(follower_check_smoke PROPERTIES TIMEOUT 180)
+set_tests_properties(follower_check_smoke PROPERTIES LABELS slow TIMEOUT 180)
 
 # Cam followers driving mate loops: the woodcutter automaton's mechanism,
 # built by its generator's own code, clean over a turn in mesh mode and
@@ -660,7 +660,7 @@ set_tests_properties(follower_check_smoke PROPERTIES TIMEOUT 180)
 add_test(NAME contact_loop_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/contact_loop_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(contact_loop_smoke PROPERTIES TIMEOUT 240)
+set_tests_properties(contact_loop_smoke PROPERTIES LABELS slow TIMEOUT 240)
 
 # Fan-out (agent-scale plan G5): three instances, three parts, one project —
 # and the refusal that makes two instances on ONE directory loud.
@@ -702,7 +702,7 @@ set_tests_properties(study_jobs_smoke PROPERTIES TIMEOUT 300)
 add_test(NAME study_reopen_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/study_reopen_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(study_reopen_smoke PROPERTIES TIMEOUT 300
+set_tests_properties(study_reopen_smoke PROPERTIES LABELS slow TIMEOUT 300
                      SKIP_RETURN_CODE 77)
 
 # fit_fastener and check_fasteners agree about where a joint ENDS (W1).
@@ -1457,7 +1457,7 @@ set_tests_properties(topo_smoke PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
 add_test(NAME topo_build_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/topo_build_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(topo_build_smoke PROPERTIES TIMEOUT 240
+set_tests_properties(topo_build_smoke PROPERTIES LABELS slow TIMEOUT 240
                      SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
 
 # Records a session and replays it into a fresh headless instance (S4).
@@ -1510,7 +1510,7 @@ set_tests_properties(watch_smoke PROPERTIES LABELS "slow;asan_slow" TIMEOUT 300)
 add_test(NAME generators_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generators_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(generators_smoke PROPERTIES TIMEOUT 300)
+set_tests_properties(generators_smoke PROPERTIES LABELS slow TIMEOUT 300)
 
 # The big generators as tests (generators/README.md#the-big-generators-as-tests):
 # each one's cheapest checking stage from nothing, against its own instance.
@@ -1701,7 +1701,7 @@ set_tests_properties(hostile_params_selftest PROPERTIES TIMEOUT 120)
 add_test(NAME action_matrix_sample
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/action_matrix_smoke.py
                  $<TARGET_FILE:designer> --sample)
-set_tests_properties(action_matrix_sample PROPERTIES TIMEOUT 240)
+set_tests_properties(action_matrix_sample PROPERTIES LABELS slow TIMEOUT 240)
 set(ACTION_MATRIX_SHARDS 8)
 math(EXPR ACTION_MATRIX_LAST "${ACTION_MATRIX_SHARDS} - 1")
 foreach(k RANGE ${ACTION_MATRIX_LAST})
@@ -1726,7 +1726,7 @@ set_tests_properties(action_matrix_selftest PROPERTIES TIMEOUT 60)
 add_test(NAME fuzz_seeds_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fuzz_seeds_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(fuzz_seeds_smoke PROPERTIES TIMEOUT 180)
+set_tests_properties(fuzz_seeds_smoke PROPERTIES LABELS slow TIMEOUT 180)
 add_test(NAME fuzz_corpus_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fuzz_corpus_smoke.py
                  $<TARGET_FILE:designer>)

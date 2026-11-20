@@ -95,7 +95,7 @@ double Sum(const std::vector<double>& v) {
 
 TEST_CASE("cam rough: a dome roughed in layers leaves its skin and finishes "
           "clean",
-          "[cam][surface][slow]") {
+          "[cam][surface]") {
   const std::vector<Body> bodies = DomeOnPlate();
   cam::Setup setup = TwoBallSetup();
 
@@ -150,7 +150,7 @@ TEST_CASE("cam rough: a dome roughed in layers leaves its skin and finishes "
 }
 
 TEST_CASE("cam rest: a smaller ball re-cuts only the corner the larger left",
-          "[cam][surface][slow]") {
+          "[cam][surface]") {
   const std::vector<Body> bodies = DomeOnPlate(12.0);
   cam::Setup setup = TwoBallSetup();
   // The stock ends at the plate's edges: a 1 mm margin beside the plate's
@@ -391,7 +391,7 @@ TEST_CASE("cam entries: a rotary rest pass comes down just above what its "
 
 TEST_CASE("cam entries: a layered rough enters each layer from just over "
           "the last",
-          "[cam][slow]") {
+          "[cam]") {
   SECTION("on the rotary") {
     // A flat end too: its entry beside a shoulder is where the floor alone
     // was not enough -- the cell at the wall's foot is never under a tool
@@ -455,7 +455,7 @@ TEST_CASE("cam entries: a layered rough enters each layer from just over "
 }
 
 TEST_CASE("cam rotary: passes run past a domed end and finish its foot",
-          "[cam][slow]") {
+          "[cam]") {
   // docs/cam/rotary.md#limits used to say passes stop at the part's ends:
   // the grid was the part's own extent, so no ball centred past the end and
   // the steep foot of a dome was never cut. The chuck and the tailstock clip

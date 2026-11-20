@@ -98,7 +98,7 @@ TEST_CASE("Cradle pocket: the wall stands at the radius plus the clearance",
 
 TEST_CASE("Cradle pocket: a block cut by it stays closed, and the object "
           "lowers into it without a clash only when swept",
-          "[mesh][cradle]") {
+          "[mesh][cradle][slow]") {
   const auto s = fixtures::NoisySphere(20000, 20.0, 0.0);
   const double c = 0.4, h = 0.25;
   const glm::dvec3 lo(-30, -30, -30), hi(30, 30, 8);

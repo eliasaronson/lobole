@@ -114,7 +114,7 @@ fs::path GoldenProject(const char* name, size_t* parts) {
 } // namespace
 
 TEST_CASE("A project's parts load the same on one thread and on many",
-          "[open][parallel]") {
+          "[open][parallel][slow]") {
   size_t n = 0;
   const fs::path proj = GoldenProject("open-parallel.lob", &n);
   REQUIRE(n >= 40); // the corpus, not a token handful

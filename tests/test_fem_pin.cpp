@@ -314,7 +314,7 @@ TEST_CASE("a lever on two pins: reactions balance the load and the clamp's "
 // clamp's edge; a bar with a hole, clamped at one end and pulled at the
 // other, peaks at the hole, far from the clamp.
 TEST_CASE("a peak on a support's edge is flagged, and one elsewhere is not",
-          "[fem][pin][run]") {
+          "[fem][pin][run][slow]") {
   {
     auto p = MakePlate(80.0, 10.0, 10.0, 0.0, {}, "steel");
     Document& doc = p->doc;
@@ -354,7 +354,8 @@ TEST_CASE("a peak on a support's edge is flagged, and one elsewhere is not",
 #endif // HAVE_NETGEN
 
 // A pin that leaves a mechanism is refused, naming it -- never factored.
-TEST_CASE("a pin is refused where it cannot hold the part", "[fem][pin]") {
+TEST_CASE("a pin is refused where it cannot hold the part",
+          "[fem][pin][slow]") {
   auto p = MakePlate(60.0, 12.0, 5.0, 5.0, {8.0, 30.0}, "pla");
   Document& doc = p->doc;
   fem::StudyRuntime rt;
@@ -536,7 +537,7 @@ std::unique_ptr<Bushing> MakeBushing(double od, double len, double fd,
 
 TEST_CASE("a short sleeve on a pin, leaned on off its end, settles on its "
           "two ends",
-          "[fem][pin]") {
+          "[fem][pin][slow]") {
   // The woodcutter's left bushing: a 14.8 x 6.2 mm sleeve under a 2 mm
   // flange, on a pin over its sleeve held from turning, loaded through its
   // bore by 35 N 22 mm off the sleeve's middle. The load tilts it, pressing

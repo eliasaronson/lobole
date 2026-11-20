@@ -868,7 +868,7 @@ TEST_CASE("Solver: pressure on a face compresses along the inward normal",
 }
 
 TEST_CASE("Solver: Lame thick-wall cylinder von Mises on a curved surface",
-          "[fem][solver][slow]") {
+          "[fem][solver]") {
   // A pressurized thick tube — the one benchmark with CURVED geometry, so it
   // validates the second-order (tet10) midside projection onto curved faces.
   // a=10, b=20 mm, internal p=10 MPa, along z, length H. Both ends fully
@@ -1051,7 +1051,7 @@ TEST_CASE("RunStudy errors when a loaded body has no fixed support",
 }
 
 TEST_CASE("RunStudy solves multiple loaded bodies and aggregates the maxima",
-          "[fem][run]") {
+          "[fem][run][slow]") {
   // Two disjoint steel bars in one study, loaded to different stress levels.
   // Exercises the per-body solve loop and the cross-body max aggregation.
   Document doc;

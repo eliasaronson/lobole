@@ -87,7 +87,7 @@ const json* PointAt(const json& out, const std::string& name, double v) {
 
 TEST_CASE("a sweep breaks where the fillet cannot round the wall, and names "
           "it",
-          "[requirements][design_sweep][slow]") {
+          "[requirements][design_sweep]") {
   App app;
   FilletedBlock(app);
   const json out =
@@ -124,7 +124,7 @@ TEST_CASE("a sweep breaks where the fillet cannot round the wall, and names "
 }
 
 TEST_CASE("the user's document is as it was after a sweep",
-          "[requirements][design_sweep][slow]") {
+          "[requirements][design_sweep]") {
   App app;
   FilletedBlock(app);
   Document& doc = *app.state.document;

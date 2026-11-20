@@ -799,7 +799,7 @@ TEST_CASE("the basic depth follows the flank angle", "[thread]") {
 }
 
 TEST_CASE("a modelled 45-degree custom thread cuts its own groove",
-          "[thread][slow]") {
+          "[thread]") {
   // A printable thread: 45-degree flanks overhang no more than 45 degrees
   // from vertical, which a printer bridges without support. The groove keeps
   // ISO's flats (P/4 at the root, 7P/8 at the major), only shallower: 5P/16.

@@ -822,7 +822,7 @@ TEST_CASE("cam rotary: the stock mesh is a closed tube facing outward",
 // the axis are not a whole number of the pruning's blocks, where a kernel
 // wrapping past the last cell once read the wrong block.
 TEST_CASE("cam rotary: the pruned CL equals the full kernel's",
-          "[cam][rotary]") {
+          "[cam][rotary][slow]") {
   cam::RadiusMap model = cam::MakeRotaryStock(0.0, 30.0, 12.0, 0.1);
   for (int j = 0; j < model.nTheta; j++)
     for (int i = 0; i < model.nx; i++) {

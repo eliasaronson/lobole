@@ -1723,7 +1723,8 @@ TEST_CASE("The version history covers every kVersion", "[golden]") {
   CHECK(highest + pending == DocumentIO::DocumentFormatVersion());
 }
 
-TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
+TEST_CASE("Golden corpus loads, regenerates, and round-trips",
+          "[golden][slow]") {
   const fs::path dir = fs::path(TestSourceDir()) / "tests" / "golden";
   REQUIRE(fs::exists(dir));
 

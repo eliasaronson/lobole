@@ -553,7 +553,7 @@ TEST_CASE("waterline: what it refuses", "[cam][surface]") {
 }
 
 TEST_CASE("surfacing closes the loop: generate, post, verify a dome",
-          "[cam][surface][slow]") {
+          "[cam][surface]") {
   // The check that matters, and the one the whole workstream is for: the
   // toolpath goes out through the REAL post and comes back through the REAL
   // verifier, which carves a height map with the tool's own profile. A bug in
@@ -637,7 +637,7 @@ TEST_CASE("surfacing closes the loop: generate, post, verify a dome",
 }
 
 TEST_CASE("surfacing: a finer stepover leaves a smaller scallop",
-          "[cam][surface][slow]") {
+          "[cam][surface]") {
   // The one property of a finishing pass no other test pins. A ball of
   // radius r stepping over by s leaves a ridge of about s^2/(8r) BETWEEN the
   // passes, so a finer step must leave less of it -- and a pass that merely

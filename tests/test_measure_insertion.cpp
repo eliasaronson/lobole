@@ -485,7 +485,7 @@ TEST_CASE("An uncached check cuts the fixed side only where the part reaches",
 // fresh cut gives, also for parts since moved along or turned about the
 // path (a pose).
 TEST_CASE("Bands kept between checks are reused and answer as cut afresh",
-          "[measure][insertion]") {
+          "[measure][insertion][slow]") {
   const Body peg0 = Make(Herringbone(6.0, 10.0), "peg");
   const Body block0 =
       Make(BRepAlgoAPI_Cut(
@@ -547,7 +547,7 @@ TEST_CASE("Bands kept between checks are reused and answer as cut afresh",
 // check whose part comes near elsewhere along it cuts again -- each answering
 // as a whole cut does.
 TEST_CASE("A short check into a long solid cuts only the stretch it reaches",
-          "[measure][insertion]") {
+          "[measure][insertion][slow]") {
   // A 100 long block with a herringbone hole near each end, a peg in each.
   const TopoDS_Shape hole = Herringbone(6.8, 10.0);
   gp_Trsf up;

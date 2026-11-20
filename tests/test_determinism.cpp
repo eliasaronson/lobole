@@ -129,7 +129,7 @@ TEST_CASE("Determinism: regenerating a document twice changes nothing",
 }
 
 TEST_CASE("Determinism: two independent loads agree, body for body",
-          "[determinism][serialization]") {
+          "[determinism][serialization][slow]") {
   // The property the first test structurally cannot check: both regenerations
   // there share whatever global state exists, so a static that survives
   // between documents is invisible to it. Here the two documents are built
@@ -154,7 +154,7 @@ TEST_CASE("Determinism: two independent loads agree, body for body",
 }
 
 TEST_CASE("Determinism: a save/load round trip rebuilds the same bodies",
-          "[determinism][serialization]") {
+          "[determinism][serialization][slow]") {
   // The third way the promise is used: a document written out and read back is
   // the same model. This is what a checkpoint, a git commit and an autosave
   // all rely on, and it composes with the two above — a round trip that agrees

@@ -114,7 +114,7 @@ fem::Study& Column(Document& doc, double w, double d, double length,
 
 TEST_CASE("a fixed-free column buckles at Euler's load, a 10 x 20 one in its "
           "weak and strong axes four apart",
-          "[fem][buckling]") {
+          "[fem][buckling][slow]") {
   constexpr double E = 210000.0, L = 200.0, P = 1000.0; // library steel
   {
     Document doc;
