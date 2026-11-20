@@ -33,12 +33,14 @@
 // FromSlug escaped. A new string-to-enum parser goes in as `*FromString`.
 
 #include "TestPaths.h"
+#include "common/RuntimePaths.h"
 #include "core/cam/CamNames.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -2697,4 +2699,32 @@ TEST_CASE("no range-for iterates into a temporary through a call",
     return s;
   }());
   CHECK(offenders.empty());
+}
+
+// ctest hands every discovered case XDG_STATE_HOME and XDG_CONFIG_HOME inside
+// the build tree (LOBOLE_TEST_ENV in tests/CMakeLists.txt), so no test reads
+// or writes the developer's preferences, recent list or autosaves. The config
+// half was dropped for every case for weeks -- an escaped `;` that
+// catch_discover_tests split anyway -- and nothing noticed, because a test
+// that reads the real settings passes on the machine whose settings they are.
+// Run under ctest, this case has what every other case has. (Run by hand,
+// the binary gets whatever the shell has; name a case to skip this one.)
+TEST_CASE("a test process sees neither the developer's config nor state",
+          "[convention]") {
+  const char* home = std::getenv("HOME");
+  for (const char* var : {"XDG_CONFIG_HOME", "XDG_STATE_HOME"}) {
+    INFO(var << " is not set: tests/CMakeLists.txt LOBOLE_TEST_ENV did not "
+                "reach this process");
+    const char* v = std::getenv(var);
+    REQUIRE(v != nullptr);
+    REQUIRE(*v != '\0');
+  }
+  if (home == nullptr || *home == '\0')
+    return;
+  const fs::path h = fs::weakly_canonical(home);
+  const fs::path config = fs::weakly_canonical(RuntimePaths::UserConfigDir());
+  const fs::path state = fs::weakly_canonical(RuntimePaths::UserStateDir());
+  INFO("config " << config << ", state " << state);
+  CHECK(config != h / ".config" / "lobole");
+  CHECK(state != h / ".local" / "state" / "lobole");
 }

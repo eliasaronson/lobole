@@ -314,10 +314,18 @@ include(Catch)
 # for unsaved documents and the instance registry land here too.
 set(LOBOLE_TEST_HOME "${CMAKE_CURRENT_BINARY_DIR}/test-home")
 file(MAKE_DIRECTORY "${LOBOLE_TEST_HOME}/state" "${LOBOLE_TEST_HOME}/config")
-# The semicolon is ESCAPED: unescaped, CMake splits the string into two list
-# elements, so ENVIRONMENT takes the first and the second is read as another
-# property name — and the whole thing is silently dropped. It generated tests
-# with no ENVIRONMENT at all, which looked exactly like it had worked.
+# Two PROPERTIES, one variable each, and no semicolon. A list in one
+# ENVIRONMENT value does not survive catch_discover_tests: it expands its
+# PROPERTIES unquoted on the way to the generated script, so every escape
+# of the `;` was eaten and the second variable became a property NAME --
+# 2546 cases ran with XDG_STATE_HOME alone, against the developer's own
+# config directory, and `XDG_CONFIG_HOME=...` stood in the property list
+# looking like it worked. ENVIRONMENT_MODIFICATION `set:` is the second
+# variable. The case "a test process sees neither the developer's config nor
+# state" fails if either goes missing (tests/test_conventions.cpp).
+set(LOBOLE_TEST_ENV
+    ENVIRONMENT "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state"
+    ENVIRONMENT_MODIFICATION "XDG_CONFIG_HOME=set:${LOBOLE_TEST_HOME}/config")
 # A case that SKIP()s is a skip, not a failure: the [occ] cases on a kernel
 # without nix/patches (stock Ubuntu's) were reported FAILED. It is read from
 # Catch2's summary, never from its exit code: 4 means "every case skipped"
@@ -327,15 +335,13 @@ file(MAKE_DIRECTORY "${LOBOLE_TEST_HOME}/state" "${LOBOLE_TEST_HOME}/config")
 set(CATCH_SKIPPED "test cases: +1 [|] +1 skipped")
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      TEST_SPEC "~[reader_fuzz]~[occ]"
-                     PROPERTIES SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}" ENVIRONMENT
-                     "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
+                     PROPERTIES SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}" ${LOBOLE_TEST_ENV})
 # The reader-fuzz families (docs/versioning/README.md#reader-fuzzing) with a
 # TIMEOUT of their own: a reader that never returns is stopped here, and
 # build/reader-fuzz-last-case.<family> names the case it was reading.
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      TEST_SPEC "[reader_fuzz]"
-                     PROPERTIES TIMEOUT 1200 SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}" ENVIRONMENT
-                     "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
+                     PROPERTIES TIMEOUT 1200 SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}" ${LOBOLE_TEST_ENV})
 # The reader-fuzz budget is CPU time: this case's read is pinned to one CPU
 # with four contending burners, so it takes five times its CPU in wall time,
 # and must still pass. The CPU is the first the test may run on (a container
@@ -354,8 +360,7 @@ set_tests_properties(reader_fuzz_budget_under_load PROPERTIES
 # 25, where a kernel without the patch still has it.
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      TEST_SPEC "[occ]"
-                     PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}" ENVIRONMENT
-                     "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
+                     PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}" ${LOBOLE_TEST_ENV})
 
 # Release metadata smoke: --version must exit before GLFW/Vulkan initialization,
 # so the packaged binary can be identified on a display-less machine.
@@ -383,8 +388,7 @@ if(TARGET fem_gpu)
     # container, a CI runner) sees.
     catch_discover_tests(femgpu_tests ADD_TAGS_AS_LABELS
                          PROPERTIES RESOURCE_LOCK gpu SKIP_REGULAR_EXPRESSION "${CATCH_SKIPPED}"
-                         ENVIRONMENT
-                         "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
+                         ${LOBOLE_TEST_ENV})
 endif()
 
 # GUI smoke tests drive the real app through ImGui Test Engine. They go
