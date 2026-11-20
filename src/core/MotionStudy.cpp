@@ -217,6 +217,26 @@ bool TracePoints(const Result& result, const std::vector<TracePoint>& points,
   return true;
 }
 
+namespace {
+// A driver range that crosses the driver's own limit
+// (docs/assemblies/README.md#mate-limits): refused before the run, naming
+// the limit. A range that ends AT a limit is the mate's whole travel.
+std::string DriverPastLimit(const Mate& m, const MotionStudy& study) {
+  for (double v : {study.from, study.to})
+    if (std::string why = assembly::RangeRefusal(m, study.driverDof, v);
+        !why.empty()) {
+      const RangedValue rv = study.driverDof == MateDof::Rotation
+                                 ? RangedValue::Rotation
+                                 : RangedValue::Offset;
+      return "the study drives from " +
+             assembly::FormatRangedValue(rv, study.from) + " to " +
+             assembly::FormatRangedValue(rv, study.to) +
+             ", past the driver's limit: " + why;
+    }
+  return {};
+}
+} // namespace
+
 std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study,
                    const assembly::AssemblyResolver& assemblies) {
   // A study that names its configuration is judged UNDER it: its holds and
@@ -267,6 +287,8 @@ std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study,
           return "driver mate " + std::to_string(m->id) + " (" + m->name +
                  ") is held by configuration '" + c->name + "' of '" + F->name +
                  "', so driving it would move nothing";
+    if (std::string why = DriverPastLimit(*m, study); !why.empty())
+      return why;
     if (study.samples < 2)
       return "a motion study needs at least 2 samples";
     return {};
@@ -302,6 +324,8 @@ std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study,
              (study.driverDof == MateDof::Rotation ? "rotation" : "offset") +
              " is held by the active configuration, so driving it would move "
              "nothing";
+  if (std::string why = DriverPastLimit(*m, study); !why.empty())
+    return why;
   if (study.samples < 2)
     return "a motion study needs at least 2 samples";
   return {};
@@ -1332,6 +1356,22 @@ Result Run(const AssemblyDocument& asmDocIn,
     s.erroredMates = rep.erroredMates;
     s.residualMm = rep.residualMm;
     s.solved = rep.erroredMates == 0 && rep.loopsClosed;
+    // A follower that reached its limit stops the run HERE
+    // (docs/assemblies/README.md#mate-limits): past it the mechanism the
+    // study drives cannot go, and a run that carried on would draw poses the
+    // real thing never reaches. The sample is kept, unsolved, as the last.
+    const bool stop = !rep.limits.empty();
+    if (stop) {
+      const assembly::SolveReport::Limit& l = rep.limits.front();
+      out.stoppedBy = Result::LimitStop{l.mate,
+                                        l.path,
+                                        l.name,
+                                        l.value,
+                                        l.bound,
+                                        s.value,
+                                        out.samples.size()};
+      s.solved = false;
+    }
     {
       std::vector<const Mate*> own;
       for (const Mate& m : solved.GetMates())
@@ -1357,6 +1397,8 @@ Result Run(const AssemblyDocument& asmDocIn,
       out.samples.push_back(std::move(s));
       placed.emplace_back();
       flattened.push_back(0);
+      if (stop)
+        break;
       continue;
     }
     // Placements: one per top-level occurrence, from the solved document,
@@ -1378,6 +1420,8 @@ Result Run(const AssemblyDocument& asmDocIn,
     if (progress)
       progress(solveShare * static_cast<double>(i + 1) /
                static_cast<double>(study.samples));
+    if (stop)
+      break;
   }
 
   // Pass B: the checks, all samples at once. A run cancelled during the
@@ -1440,6 +1484,17 @@ Result Run(const AssemblyDocument& asmDocIn,
   return out;
 }
 
+std::string LimitStopText(const Result::LimitStop& l, bool deg) {
+  char at[64];
+  std::snprintf(at, sizeof at, "%.6g %s",
+                deg ? angles::ToDegrees(l.atValue) : l.atValue,
+                deg ? "deg" : "mm");
+  return "Stopped at sample " + std::to_string(l.sample) + " (driver " + at +
+         "): '" + l.name + "' (mate " + std::to_string(l.mate) +
+         ") reached its " + assembly::RangedValueName(l.value) + " limit " +
+         assembly::FormatRangedValue(l.value, l.bound) + ".";
+}
+
 static std::string BranchJumpText(const Sample::BranchJump& j, bool deg) {
   const auto value = [&](double v, bool rot) {
     char b[48];
@@ -1490,6 +1545,7 @@ std::string Table(const Result& result, const MotionStudy& study) {
   std::snprintf(line, sizeof line, "%s: %zu samples, %zu pair checks, %.2f s\n",
                 !result.error.empty()    ? "ERROR"
                 : result.cancelled       ? "INCOMPLETE"
+                : result.stoppedBy       ? "STOPPED AT A LIMIT"
                 : result.branchJumps     ? "BRANCH JUMP"
                 : !result.checkedClashes ? "KINEMATICS ONLY"
                 : result.pairsUnknown    ? "UNVERIFIED"
@@ -1499,6 +1555,8 @@ std::string Table(const Result& result, const MotionStudy& study) {
   out += line;
   if (!result.error.empty())
     out += "Error: " + result.error + "\n";
+  if (result.stoppedBy)
+    out += LimitStopText(*result.stoppedBy, deg) + "\n";
   if (result.cancelled)
     out += "Cancelled before all samples completed.\n";
   if (result.pairsUnknown)
@@ -1545,6 +1603,12 @@ Verdict Summarize(const Result& r, const MotionStudy& study, bool stale) {
                   "at.",
                   r.samples.size(), study.samples);
     v.text = line;
+    return v;
+  }
+  // A follower stopped at its limit: the run ends there, and says why.
+  if (r.stoppedBy) {
+    v.level = Verdict::Level::Bad;
+    v.text = LimitStopText(*r.stoppedBy, deg);
     return v;
   }
   // Did it MOVE? Asked first, for a preview and a validation alike: a sample

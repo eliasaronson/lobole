@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -78,6 +79,10 @@ struct LoopMate {
   double dx = 0.0;
   double dy = 0.0;
   glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0};
+  // The mate's limits (docs/assemblies/README.md#mate-limits): each unknown
+  // is projected into its range after every step. Unset = free.
+  std::optional<MateRange> rotationRange, offsetRange, dxRange, dyRange;
+  std::optional<double> coneRad;
 };
 
 // One placement step: `to` is positioned from `from` across `mate`.
@@ -180,6 +185,15 @@ struct LoopDiagnosis {
   std::vector<LoopTiltTrial> suspects;
 };
 
+// A limit a loop that did not close is held against: the unknown sits at
+// its bound and the closure would have taken it further.
+struct LoopLimit {
+  uint64_t mate = 0;
+  RangedValue value = RangedValue::Rotation;
+  double bound = 0.0; // the limit it stands at: rad (rotation, cone) or mm
+  bool upper = true;  // the range's max (or the cone), else its min
+};
+
 struct LoopSolution {
   bool ran = false;       // false when there was nothing to close
   bool converged = false; // residual fell under tolerance
@@ -191,6 +205,9 @@ struct LoopSolution {
   // Each conflicting mate's OWN closure error (the largest entry of its six
   // residual rows, mm), parallel to `conflicting`.
   std::vector<double> conflictingMm;
+  // The limits holding a loop that did not close (empty when it closed, or
+  // when no limit was what held it).
+  std::vector<LoopLimit> limits;
   // One per failing component, when the problem asked to `diagnose`.
   std::vector<LoopDiagnosis> diagnoses;
   std::vector<LoopMate> solved;      // `mates` with their DOF updated

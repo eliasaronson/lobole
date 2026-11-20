@@ -439,6 +439,22 @@ json MateToJson(const Mate& m) {
     j["dy"] = m.dy;
   if (m.ballRotation != glm::dquat(1.0, 0.0, 0.0, 0.0))
     j["ball_rotation"] = QuatToJson(m.ballRotation);
+  // Limits (vNEXT, docs/assemblies/README.md#mate-limits), in the units of
+  // the values they bound: radians and mm. Omitted when there are none, so
+  // a file without them is byte-identical to before.
+  json limits = json::object();
+  const auto range = [&](const char* key, const std::optional<MateRange>& r) {
+    if (r)
+      limits[key] = json::array({r->min, r->max});
+  };
+  range("rotation", m.rotationRange);
+  range("offset", m.offsetRange);
+  range("dx", m.dxRange);
+  range("dy", m.dyRange);
+  if (m.coneRad)
+    limits["cone"] = *m.coneRad;
+  if (!limits.empty())
+    j["limits"] = std::move(limits);
   return j;
 }
 
@@ -447,7 +463,7 @@ Mate MateFromJson(const json& j) {
   readctx::RefuseUnknownKeys(j,
                              {"type", "id", "name", "mate_type", "a", "b",
                               "flipped", "rotation", "offset", "dx", "dy",
-                              "ball_rotation"},
+                              "ball_rotation", "limits"},
                              "mate");
   Mate m;
   m.id = j.at("id").get<uint64_t>();
@@ -462,6 +478,38 @@ Mate MateFromJson(const json& j) {
   m.dy = j.value("dy", 0.0);
   if (j.contains("ball_rotation"))
     m.ballRotation = QuatFromJson(j.at("ball_rotation"));
+  if (j.contains("limits")) {
+    const json& l = j.at("limits");
+    if (!l.is_object())
+      throw std::runtime_error("mate limits is an object, not " + l.dump());
+    readctx::RefuseUnknownKeys(l, {"rotation", "offset", "dx", "dy", "cone"},
+                               "mate limits");
+    const auto range = [&](const char* key) -> std::optional<MateRange> {
+      if (!l.contains(key))
+        return std::nullopt;
+      const json& r = l.at(key);
+      if (!r.is_array() || r.size() != 2 || !r[0].is_number() ||
+          !r[1].is_number())
+        throw std::runtime_error(std::string("mate limits ") + key +
+                                 " is [min, max], not " + r.dump());
+      return MateRange{r[0].get<double>(), r[1].get<double>()};
+    };
+    m.rotationRange = range("rotation");
+    m.offsetRange = range("offset");
+    m.dxRange = range("dx");
+    m.dyRange = range("dy");
+    if (l.contains("cone")) {
+      if (!l.at("cone").is_number())
+        throw std::runtime_error("mate limits cone is a number (radians), "
+                                 "not " +
+                                 l.at("cone").dump());
+      m.coneRad = l.at("cone").get<double>();
+    }
+    // A range the type does not free, or one upside down, is refused as
+    // set_mate refuses it: loaded quietly it would hold the wrong value.
+    if (std::string why = assembly::MateRangeProblem(m); !why.empty())
+      throw std::runtime_error(why);
+  }
   return m;
 }
 
@@ -1439,6 +1487,18 @@ json MotionResultToJson(const motion::Result& r) {
     out["branch_jumps"] = r.branchJumps; // v179
   if (!r.error.empty())
     out["error"] = r.error;
+  if (r.stoppedBy) { // vNEXT: a follower reached its limit
+    const motion::Result::LimitStop& l = *r.stoppedBy;
+    json sj{{"mate", l.mate},
+            {"name", l.name},
+            {"value", assembly::RangedValueName(l.value)},
+            {"limit", l.bound},
+            {"at", l.atValue},
+            {"sample", l.sample}};
+    if (!l.path.empty())
+      sj["path"] = l.path;
+    out["stopped_by"] = std::move(sj);
+  }
   if (!r.pressFits.empty()) {
     json fits = json::array();
     for (const motion::PressFit& f : r.pressFits)
@@ -1577,6 +1637,28 @@ motion::Result MotionResultFromJson(const json& j) {
   r.refinedSamples = j.value("refined_samples", size_t{0});
   r.branchJumps = j.value("branch_jumps", size_t{0});
   r.error = j.value("error", std::string{});
+  if (j.contains("stopped_by")) {
+    const json& sj = j.at("stopped_by");
+    motion::Result::LimitStop l;
+    l.mate = sj.at("mate").get<uint64_t>();
+    l.name = sj.value("name", std::string{});
+    const std::string v = sj.at("value").get<std::string>();
+    bool known = false;
+    for (RangedValue rv : {RangedValue::Rotation, RangedValue::Offset,
+                           RangedValue::Dx, RangedValue::Dy, RangedValue::Cone})
+      if (v == assembly::RangedValueName(rv)) {
+        l.value = rv;
+        known = true;
+      }
+    if (!known)
+      throw std::runtime_error("motion result: stopped_by value '" + v +
+                               "' (accepted: rotation, offset, dx, dy, cone)");
+    l.bound = sj.at("limit").get<double>();
+    l.atValue = sj.at("at").get<double>();
+    l.sample = sj.at("sample").get<size_t>();
+    l.path = sj.value("path", std::vector<uint64_t>{});
+    r.stoppedBy = std::move(l);
+  }
   for (const json& fj : j.value("press_fits", json::array()))
     r.pressFits.push_back(PressFitFromJson(fj));
   if (j.contains("input_hash") &&

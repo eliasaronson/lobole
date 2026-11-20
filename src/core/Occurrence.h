@@ -241,6 +241,18 @@ enum class MateType {
   Ball,        // origins coincident; free 3-axis rotation (`ballRotation`)
 };
 
+// Mate limits (docs/assemblies/README.md#mate-limits): an optional range on
+// one of a mate's free values, inclusive at both ends. Radians for a
+// rotation, mm for an offset, dx or dy -- the units of the value it bounds.
+struct MateRange {
+  double min = 0.0;
+  double max = 0.0;
+  bool operator==(const MateRange&) const = default;
+};
+
+// Which of a mate's values a range (or a cone) bounds.
+enum class RangedValue { Rotation, Offset, Dx, Dy, Cone };
+
 // A mate: one connection between two connector frames, with one type. The
 // solve places `b`'s occurrence so that b's world frame equals a's world
 // frame composed with Flip?·Rz(rotation)·Tz(offset). Every mate carries the
@@ -269,6 +281,18 @@ struct Mate {
   double dx = 0.0;       // in-plane X translation (planar DOF)
   double dy = 0.0;       // in-plane Y translation (planar DOF)
   glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0}; // free rotation (ball DOF)
+
+  // Limits (vNEXT, docs/assemblies/README.md#mate-limits). Unset = free, as
+  // every mate was before. Which a type takes is RangedValuesFor (in
+  // AssemblySolve.h): rotation on a revolute, a cylindrical and a planar's
+  // spin; offset on a slider, a cylindrical and a planar's gap; dx/dy on a
+  // planar. A ball takes a cone instead: the half-angle, radians, b's Z may
+  // tilt from where ballRotation's identity puts it.
+  std::optional<MateRange> rotationRange;
+  std::optional<MateRange> offsetRange;
+  std::optional<MateRange> dxRange;
+  std::optional<MateRange> dyRange;
+  std::optional<double> coneRad;
 
   // Transient solve status (mirrors Feature::m_error): stamped by the
   // placement pass, cleared on every solve, never serialized. Empty = ok.

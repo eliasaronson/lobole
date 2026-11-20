@@ -439,6 +439,12 @@ void CollapseFlexible(const FlexibleExpansion& ex, AssemblyDocument& parent,
     }
   }
   if (report != nullptr) {
+    // A limit on an inner mate names it by path and its own id.
+    for (SolveReport::Limit& l : report->limits)
+      if (const auto it = ex.mateOf.find(l.mate); it != ex.mateOf.end()) {
+        l.path = {it->second.first};
+        l.mate = it->second.second;
+      }
     // Synthetic ids mean nothing to the caller: the inner rows above say it.
     std::erase_if(report->redundantMates,
                   [&](uint64_t id) { return ex.mateOf.count(id) != 0; });

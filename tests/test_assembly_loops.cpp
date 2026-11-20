@@ -15,9 +15,14 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "core/MotionStudy.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <memory>
 
 using Catch::Matchers::WithinAbs;
@@ -1161,4 +1166,366 @@ TEST_CASE("A Jansen leg has one degree of freedom and walks its own curve",
   CHECK_THAT(lowest, WithinAbs(-91.83, 0.02));
   CHECK_THAT(highest - lowest, WithinAbs(22.46, 0.02));
   CHECK_THAT(maxX - minX, WithinAbs(67.90, 0.02));
+}
+
+// ---------------------------------------------------------------------------
+// Mate limits in a loop (docs/assemblies/README.md#mate-limits): the bounded
+// step, the limit that holds a loop named on its mate, and its cost.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// The parallelogram four-bar of the first tests, J1 pinned at `drive`.
+assembly::LoopProblem FourBar(double seed, double drive) {
+  assembly::LoopProblem p;
+  p.mates.push_back(
+      Revolute(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0), seed));
+  p.mates.push_back(Revolute(2, 20, AtX(40.0), 30, glm::dmat4(1.0), -seed));
+  p.mates.push_back(Revolute(3, 30, AtX(100.0), 40, AtX(40.0), seed));
+  p.mates.push_back(Revolute(4, 10, AtX(100.0), 40, glm::dmat4(1.0), seed));
+  p.tree.push_back({0, 10, 20, false});
+  p.tree.push_back({1, 20, 30, false});
+  p.tree.push_back({2, 30, 40, false});
+  p.cut.push_back(3);
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
+  p.pinned.push_back({0, MateDof::Rotation, drive});
+  return p;
+}
+
+const assembly::LoopLimit* LimitOn(const assembly::LoopSolution& s,
+                                   uint64_t mate) {
+  for (const assembly::LoopLimit& l : s.limits)
+    if (l.mate == mate)
+      return &l;
+  return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("A four-bar driven until a follower's limit binds stops there and "
+          "names it",
+          "[assembly][solve][loops][limits]") {
+  // The rocker (J4) may turn to 0.5 rad. The crank is driven to 0.3 (the
+  // parallelogram puts the rocker at 0.3: inside) and then to 0.8 (it would
+  // be 0.8: past).
+  assembly::LoopProblem p = FourBar(0.3, 0.3);
+  p.mates[3].rotationRange = MateRange{-0.5, 0.5};
+  const assembly::LoopSolution inside = assembly::SolveLoops(p);
+  REQUIRE(inside.unavailable.empty());
+  CHECK(inside.converged);
+  CHECK(inside.limits.empty());
+
+  p.pinned[0].value = 0.8;
+  p.mates[0].rotation = 0.8;
+  const assembly::LoopSolution held = assembly::SolveLoops(p);
+  CHECK_FALSE(held.converged);
+  const assembly::LoopLimit* l = LimitOn(held, 4);
+  REQUIRE(l != nullptr);
+  CHECK(l->value == RangedValue::Rotation);
+  CHECK(l->upper);
+  CHECK(l->bound == 0.5);
+  // AT the limit, not past it and not short of it.
+  CHECK(held.solved[3].rotation == 0.5);
+  // The crank was driven, so it is where it was driven to; the loop is
+  // what cannot close.
+  CHECK(held.conflicting.size() == 1);
+}
+
+TEST_CASE("A loop whose branch a limit makes unreachable stays on it and "
+          "says so",
+          "[assembly][solve][loops][limits]") {
+  // The rocker may turn from -1.4 to 0.5 rad. Driven to 0.6 the
+  // parallelogram branch needs the rocker at 0.6 -- past its limit -- while
+  // the crossed branch puts it at -1.25, inside. The solve does not jump
+  // there: it stays on the branch it was seeded on, held at the limit.
+  assembly::LoopProblem p = FourBar(0.3, 0.6);
+  p.mates[0].rotation = 0.6;
+  p.mates[3].rotationRange = MateRange{-1.4, 0.5};
+  const assembly::LoopSolution s = assembly::SolveLoops(p);
+  CHECK_FALSE(s.converged);
+  const assembly::LoopLimit* l = LimitOn(s, 4);
+  REQUIRE(l != nullptr);
+  CHECK(l->upper);
+  CHECK(s.solved[3].rotation == 0.5);
+  // Still the parallelogram's side: the coupler turned back by about as
+  // much as the crank turned forward, not the crossed branch's -1.25.
+  CHECK(s.solved[1].rotation < 0.0);
+  CHECK(s.solved[1].rotation > -0.8);
+}
+
+TEST_CASE("A ball's cone holds a loop at its tilt",
+          "[assembly][solve][loops][limits]") {
+  // A part on a ball at the origin, and a fastened cut that wants it tilted
+  // 30 degrees about X. A 40-degree cone lets it; a 20-degree one holds it
+  // at 20 and says so.
+  const auto build = [](double coneDeg) {
+    assembly::LoopProblem p;
+    assembly::LoopMate ball;
+    ball.id = 1;
+    ball.type = MateType::Ball;
+    ball.aOcc = 10;
+    ball.bOcc = 20;
+    ball.flipped = false;
+    ball.coneRad = glm::radians(coneDeg);
+    p.mates.push_back(ball);
+    p.mates.push_back(Fastened(
+        2, 10,
+        glm::rotate(glm::dmat4(1.0), glm::radians(30.0), glm::dvec3(1, 0, 0)) *
+            AtX(50.0),
+        20, AtX(50.0)));
+    p.tree.push_back({0, 10, 20, false});
+    p.cut.push_back(1);
+    p.anchor.emplace_back(10, glm::dmat4(1.0));
+    return p;
+  };
+  const auto tilt = [](const assembly::LoopMate& m) {
+    const glm::dvec3 z = glm::normalize(m.ballRotation) * glm::dvec3(0, 0, 1);
+    return glm::degrees(std::acos(std::clamp(z.z, -1.0, 1.0)));
+  };
+  const assembly::LoopSolution wide = assembly::SolveLoops(build(40.0));
+  CHECK(wide.converged);
+  CHECK(wide.limits.empty());
+  CHECK_THAT(tilt(wide.solved[0]), WithinAbs(30.0, 1e-3));
+
+  const assembly::LoopSolution narrow = assembly::SolveLoops(build(20.0));
+  CHECK_FALSE(narrow.converged);
+  const assembly::LoopLimit* l = LimitOn(narrow, 1);
+  REQUIRE(l != nullptr);
+  CHECK(l->value == RangedValue::Cone);
+  CHECK_THAT(tilt(narrow.solved[0]), WithinAbs(20.0, 1e-6));
+}
+
+TEST_CASE("Solve names the limit that holds a loop on its mate, and a motion "
+          "study stops at it",
+          "[assembly][solve][loops][limits][motion]") {
+  // The crank-rocker of the diagnosis test, as a document: crank 30,
+  // coupler 90, rocker 60, ground pivots 100 apart.
+  auto ground = Link({{0, 0, 0}, {100, 0, 0}});
+  auto crank = Link({{0, 0, 0}, {30, 0, 0}});
+  auto coupler = Link({{0, 0, 0}, {90, 0, 0}});
+  auto rocker = Link({{0, 0, 0}, {60, 0, 0}});
+  const std::vector<Document*> parts{ground.get(), crank.get(), coupler.get(),
+                                     rocker.get()};
+  const assembly::PartResolver resolve = [&](uint64_t id,
+                                             uint64_t) -> const Document* {
+    return id >= 1 && id <= parts.size() ? parts[id - 1] : nullptr;
+  };
+  const auto frameId = [&](size_t part, size_t i) {
+    return parts[part]->GetFeature(i)->GetId();
+  };
+  AssemblyDocument asmDoc;
+  const uint64_t g = asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
+  const uint64_t c = asmDoc.AddOccurrence(MakeOcc(2, {0, 40, 0}));
+  const uint64_t k = asmDoc.AddOccurrence(MakeOcc(3, {0, 80, 0}));
+  const uint64_t r = asmDoc.AddOccurrence(MakeOcc(4, {0, 120, 0}));
+  const uint64_t drive = asmDoc.AddMate(
+      FrameMate("main bearing", g, frameId(0, 0), c, frameId(1, 0)));
+  asmDoc.AddMate(FrameMate("crank pin", c, frameId(1, 1), k, frameId(2, 0)));
+  asmDoc.AddMate(FrameMate("rocker pin", k, frameId(2, 1), r, frameId(3, 1)));
+  const uint64_t pivot = asmDoc.AddMate(
+      FrameMate("rocker pivot", g, frameId(0, 1), r, frameId(3, 0)));
+  asmDoc.GetMates()[0].rotation = 1.2;
+  asmDoc.GetMates()[1].rotation = -0.8;
+  asmDoc.GetMates()[2].rotation = 1.0;
+  asmDoc.GetMates()[3].rotation = 1.0;
+  const assembly::SolveReport free = assembly::Solve(asmDoc, resolve);
+  REQUIRE(free.loopsClosed);
+  // Read where the rocker swings over a turn of the crank, then limit it to
+  // the middle of that swing so a full turn must reach the limit.
+  MotionStudy turn;
+  turn.name = "turn";
+  turn.driverMate = drive;
+  turn.from = 1.2;
+  turn.to = 1.2 + 2.0 * 3.14159265358979;
+  turn.samples = 73;
+  turn.checkClash = false;
+  const motion::Result swing = motion::Run(asmDoc, resolve, nullptr, turn);
+  REQUIRE(swing.error.empty());
+  REQUIRE(swing.clean);
+  double lo = 1e9, hi = -1e9;
+  for (const motion::Sample& s : swing.samples)
+    for (const motion::Sample::MateValue& v : s.mates)
+      if (v.mate == pivot) {
+        lo = std::min(lo, v.rotation);
+        hi = std::max(hi, v.rotation);
+      }
+  REQUIRE(hi - lo > 0.2);
+  const double stop = 0.5 * (lo + hi);
+  Mate* pm = asmDoc.FindMateById(pivot);
+  const double at = pm->rotation;
+  pm->rotationRange =
+      at <= stop ? MateRange{lo - 1.0, stop} : MateRange{stop, hi + 1.0};
+
+  const motion::Result held = motion::Run(asmDoc, resolve, nullptr, turn);
+  REQUIRE(held.error.empty());
+  REQUIRE(held.stoppedBy);
+  CHECK(held.stoppedBy->mate == pivot);
+  CHECK(held.stoppedBy->name == "rocker pivot");
+  CHECK_THAT(held.stoppedBy->bound, WithinAbs(stop, 1e-12));
+  CHECK(held.samples.size() < swing.samples.size());
+  CHECK_FALSE(held.samples.back().solved);
+  CHECK_THAT(held.stoppedBy->atValue,
+             WithinAbs(held.samples.back().value, 1e-12));
+
+  // The document solved at the sample the run stopped at carries it on the
+  // mate whose limit it is.
+  asmDoc.FindMateById(drive)->rotation = held.stoppedBy->atValue;
+  const assembly::SolveReport rep =
+      assembly::Solve(asmDoc, resolve, nullptr, {drive, MateDof::Rotation});
+  CHECK_FALSE(rep.loopsClosed);
+  bool named = false;
+  for (const assembly::SolveReport::Limit& l : rep.limits)
+    named = named || (l.mate == pivot && l.loop);
+  CHECK(named);
+  INFO(asmDoc.FindMateById(pivot)->error);
+  CHECK(asmDoc.FindMateById(pivot)->error.find("held at its rotation") !=
+        std::string::npos);
+  (void)k;
+}
+
+// ---- What limits cost -------------------------------------------------------
+//
+// Limits must not slow a solve they do not touch, and a loop RESTING on
+// its limits must still close without creeping. Three loops that load the
+// solver -- a 192-bolt flange with a lid on a hinge, a closed chain of 64
+// links and one of 199 -- solved free, with wide limits that never bind, and
+// with every fourth joint held at a limit the solve presses against. CPU
+// time, a ratio within one run (docs/ui/testing.md#tests-that-time-things);
+// LOBOLE_LIMIT_TIMINGS=1 prints the numbers docs/assemblies/solver.md
+// quotes.
+
+namespace {
+
+// A regular closed polygon of `n` revolute links, `len` mm each: link i is
+// occurrence 100+i, the ground (link 0) fixed; joint i joins link i's far
+// end to link i+1 (the last joins back to the ground, the cut). Seeded off
+// closure by a smooth wobble, so the solve has work to do.
+assembly::LoopProblem Chain(int n, double len = 10.0) {
+  assembly::LoopProblem p;
+  const double turn = 2.0 * 3.14159265358979 / n;
+  for (int i = 0; i < n; i++) {
+    const uint64_t a = 100 + static_cast<uint64_t>(i);
+    const uint64_t b = i + 1 < n ? a + 1 : 100;
+    p.mates.push_back(Revolute(static_cast<uint64_t>(i + 1), a, AtX(len), b,
+                               glm::dmat4(1.0),
+                               turn + 0.02 * std::sin(0.7 * i)));
+    if (i + 1 < n)
+      p.tree.push_back({static_cast<size_t>(i), a, b, false});
+  }
+  p.cut.push_back(static_cast<size_t>(n - 1));
+  p.anchor.emplace_back(100, glm::dmat4(1.0));
+  return p;
+}
+
+// 192 bolts on a 200 mm circle between a fixed flange and a cover, and a
+// lid on a hinge off the cover.
+assembly::LoopProblem BoltPattern() {
+  assembly::LoopProblem p;
+  for (int i = 0; i < 192; i++) {
+    const double t = 2.0 * 3.14159265358979 * i / 192;
+    const glm::dmat4 at = glm::translate(
+        glm::dmat4(1.0), glm::dvec3(100 * std::cos(t), 100 * std::sin(t), 0));
+    p.mates.push_back(Fastened(static_cast<uint64_t>(i + 1), 10, at, 20, at));
+    if (i == 0)
+      p.tree.push_back({0, 10, 20, false});
+    else
+      p.cut.push_back(static_cast<size_t>(i));
+  }
+  p.mates.push_back(Revolute(500, 20, AtX(120.0), 30, glm::dmat4(1.0), 0.4));
+  p.tree.push_back({192, 20, 30, false});
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
+  return p;
+}
+
+double CpuSecondsOf(const assembly::LoopProblem& p, int reps,
+                    assembly::LoopSolution* out) {
+  const std::clock_t t0 = std::clock();
+  for (int i = 0; i < reps; i++)
+    *out = assembly::SolveLoops(p);
+  return double(std::clock() - t0) / CLOCKS_PER_SEC / reps;
+}
+
+// Wide limits that never bind: every revolute free to turn a whole turn
+// either side of where it is.
+void WideLimits(assembly::LoopProblem& p) {
+  for (assembly::LoopMate& m : p.mates)
+    if (m.type == MateType::Revolute)
+      m.rotationRange = MateRange{m.rotation - 6.3, m.rotation + 6.3};
+}
+
+// Every fourth revolute held where it is seeded, against the way the free
+// solve moved it: the loop rests on those limits and closes by the rest.
+// Returns how many are held.
+int RestingLimits(assembly::LoopProblem& p,
+                  const assembly::LoopSolution& free) {
+  int held = 0;
+  for (size_t i = 0; i < p.mates.size(); i += 4) {
+    assembly::LoopMate& m = p.mates[i];
+    if (m.type != MateType::Revolute)
+      continue;
+    const double moved = free.solved[i].rotation - m.rotation;
+    if (std::abs(moved) < 1e-9)
+      continue;
+    m.rotationRange = moved > 0 ? MateRange{m.rotation - 1.0, m.rotation}
+                                : MateRange{m.rotation, m.rotation + 1.0};
+    held++;
+  }
+  return held;
+}
+
+} // namespace
+
+TEST_CASE("Limits that do not bind cost a loop nothing; resting on them it "
+          "still closes",
+          "[assembly][solve][loops][limits]") {
+  const bool print = std::getenv("LOBOLE_LIMIT_TIMINGS") != nullptr;
+  struct Case {
+    const char* name;
+    assembly::LoopProblem p;
+    int reps;
+  };
+  Case cases[] = {{"192-bolt pattern", BoltPattern(), 20},
+                  {"64-link chain", Chain(64), 10},
+                  {"199-link chain", Chain(199), 2}};
+  for (Case& c : cases) {
+    INFO(c.name);
+    assembly::LoopSolution free, wide, resting;
+    // Warm once: the first solve pays for allocations the rest reuse.
+    (void)assembly::SolveLoops(c.p);
+    const double tFree = CpuSecondsOf(c.p, c.reps, &free);
+    REQUIRE(free.converged);
+    assembly::LoopProblem w = c.p;
+    WideLimits(w);
+    const double tWide = CpuSecondsOf(w, c.reps, &wide);
+    CHECK(wide.converged);
+    CHECK(wide.limits.empty());
+    CHECK(wide.iterations == free.iterations);
+    assembly::LoopProblem r = c.p;
+    const int held = RestingLimits(r, free);
+    const double tRest = CpuSecondsOf(r, c.reps, &resting);
+    if (print)
+      std::printf("limits cost: %-18s %3d dof  free %8.2f ms (%d it)  "
+                  "wide %8.2f ms (%d it)  resting on %d limits %8.2f ms "
+                  "(%d it, %s)\n",
+                  c.name, free.dof + 0, tFree * 1e3, free.iterations,
+                  tWide * 1e3, wide.iterations, held, tRest * 1e3,
+                  resting.iterations, resting.converged ? "closed" : "OPEN");
+    // A cost check, as a ratio within one run: wide limits are a box the
+    // step never meets, so the solve is the free one.
+    CHECK(tWide <= 1.5 * tFree + 2e-3);
+    if (held > 0) {
+      // Resting on its limits the loop still closes -- the other joints
+      // take the motion -- and every held joint is AT its limit, not crept
+      // off it.
+      CHECK(resting.converged);
+      CHECK(resting.iterations <= 3 * std::max(free.iterations, 5));
+      for (size_t i = 0; i < r.mates.size(); i++)
+        if (r.mates[i].rotationRange) {
+          const MateRange& g = *r.mates[i].rotationRange;
+          CHECK(resting.solved[i].rotation >= g.min);
+          CHECK(resting.solved[i].rotation <= g.max);
+        }
+      CHECK(tRest <= 4.0 * tFree + 5e-3);
+    }
+  }
 }

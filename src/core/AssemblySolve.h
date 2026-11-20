@@ -84,6 +84,23 @@ struct SolveReport {
     bool redundant = false;
   };
   std::vector<InnerMate> innerMates;
+
+  // Mate limits (docs/assemblies/README.md#mate-limits): every mate whose
+  // value this solve left OUTSIDE its range (a relation drove it there in a
+  // mate tree, or a file says so), and every limit that held a loop which
+  // then did not close. Each is an error on its mate as well.
+  struct Limit {
+    uint64_t mate = 0;
+    // v129: the flexible placement an inner mate is in (`mate` is then the
+    // sub-assembly's id); empty = a mate of this document.
+    std::vector<uint64_t> path;
+    std::string name;
+    RangedValue value = RangedValue::Rotation;
+    double bound = 0.0; // the limit: rad (rotation, cone) or mm
+    double at = 0.0;    // where the value stands
+    bool loop = false;  // a loop held against it, rather than a value past it
+  };
+  std::vector<Limit> limits;
 };
 
 // The connector's local frame in its part's coordinates (columns X, Y, Z,
@@ -233,6 +250,44 @@ CamProfileMotion(const Relation& r, const PartResolver& partById,
                  std::string* why);
 [[nodiscard]] double MateDofValue(const Mate& m, MateDof dof);
 void SetMateDof(Mate& m, MateDof dof, double value);
+
+// ---- Mate limits (docs/assemblies/README.md#mate-limits) -------------------
+//
+// The values of a mate type a range may bound: rotation on a revolute, a
+// cylindrical and a planar's spin; offset on a slider, a cylindrical and a
+// planar's gap; dx and dy on a planar; the cone on a ball. Fastened: none.
+[[nodiscard]] std::vector<RangedValue> RangedValuesFor(MateType type);
+// "rotation", "offset", "dx", "dy", "cone".
+[[nodiscard]] const char* RangedValueName(RangedValue v);
+// A value in its own unit for a message: "12.5°" or "3.2 mm".
+[[nodiscard]] std::string FormatRangedValue(RangedValue v, double value);
+// The range set on `v`, or nullopt. A cone reads as [0, cone].
+[[nodiscard]] std::optional<MateRange> RangeOf(const Mate& m, RangedValue v);
+// The value `v` stands at now. A cone's is the tilt of b's Z.
+[[nodiscard]] double RangedValueOf(const Mate& m, RangedValue v);
+// Why the mate's ranges cannot stand as they are -- one on a value its
+// type does not free (naming what it does free), a min above its max, a
+// bound that is not a finite number, a cone outside 0..180 degrees -- or
+// empty when they can. Says nothing of where the values stand.
+[[nodiscard]] std::string MateRangeProblem(const Mate& m);
+// Why `v` may not be `value` on this mate: outside its range, the range
+// named. Empty when it fits, or nothing limits it.
+[[nodiscard]] std::string RangeRefusal(const Mate& m, RangedValue v,
+                                       double value);
+// The same for a DOF the way set_mate, a study and a sequence name one.
+[[nodiscard]] std::string RangeRefusal(const Mate& m, MateDof dof,
+                                       double value);
+// The first of the mate's values standing outside its range, as above;
+// empty when every one is inside.
+[[nodiscard]] std::string MateOutsideRange(const Mate& m);
+// The first mate of `doc` standing outside a range, by name, or empty.
+[[nodiscard]] std::string AssemblyOutsideRange(const AssemblyDocument& doc);
+// `value` held to the range (unchanged with none): what a drag does at a
+// stop. A cone holds the tilt and keeps the twist about Z.
+[[nodiscard]] double ClampToRange(const std::optional<MateRange>& r,
+                                  double value);
+[[nodiscard]] glm::dquat ClampToCone(const std::optional<double>& coneRad,
+                                     const glm::dquat& ballRotation);
 
 // What the caller just drove, held while a loop closes around it. Zero =
 // nothing driven, which is every call that is not a drag, a set_mate or a

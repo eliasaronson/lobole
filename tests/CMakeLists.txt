@@ -77,6 +77,7 @@ add_executable(designer_tests
     test_sequence_timeline.cpp
     test_assembly_solve.cpp
     test_assembly_loops.cpp
+    test_mate_limits.cpp
     test_assembly_relations.cpp
     test_derived.cpp
     test_links.cpp
@@ -930,6 +931,13 @@ add_test(NAME assembly_sequence_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_sequence_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_sequence_smoke PROPERTIES TIMEOUT 240)
+
+# Mate limits: refused past, stopping a study, proved by a requirement
+# (docs/assemblies/README.md#mate-limits). Headless.
+add_test(NAME mate_limits_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mate_limits_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(mate_limits_smoke PROPERTIES TIMEOUT 240)
 
 # The clash sweep runs its booleans on every core. A race in OpenCASCADE's
 # lazily-filled per-shape caches, or a `record` that stops running in plan

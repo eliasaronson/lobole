@@ -2009,6 +2009,11 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
     lm.dx = m.dx;
     lm.dy = m.dy;
     lm.ballRotation = m.ballRotation;
+    lm.rotationRange = m.rotationRange;
+    lm.offsetRange = m.offsetRange;
+    lm.dxRange = m.dxRange;
+    lm.dyRange = m.dyRange;
+    lm.coneRad = m.coneRad;
   }
   {
     std::unordered_map<uint64_t, size_t> indexOfMate;
@@ -2259,6 +2264,64 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
             m->error += LoopHint(d, asmDoc);
         report.erroredMates++;
       }
+      // A limit that held a loop which then did not close
+      // (docs/assemblies/README.md#mate-limits): said on the mate whose
+      // limit it is, as a closure error is said on the mate that closes.
+      for (const LoopLimit& l : closed.limits) {
+        Mate* m = asmDoc.FindMateById(l.mate);
+        if (m == nullptr)
+          continue;
+        const std::string text = std::string("held at its ") +
+                                 RangedValueName(l.value) +
+                                 (l.value == RangedValue::Cone ? " "
+                                  : l.upper                    ? " max "
+                                                               : " min ") +
+                                 FormatRangedValue(l.value, l.bound) +
+                                 ": the loop cannot close inside its range";
+        if (m->error.empty()) {
+          m->error = text;
+          report.erroredMates++;
+        } else {
+          m->error += "; " + text;
+        }
+        report.limits.push_back({m->id,
+                                 {},
+                                 m->name,
+                                 l.value,
+                                 l.bound,
+                                 RangedValueOf(*m, l.value),
+                                 true});
+      }
+    }
+  }
+  // A value standing outside its range (docs/assemblies/README.md
+  // #mate-limits): a relation drove it there in a mate tree, or the file
+  // says so. Placed where it says, and said -- never clamped silently.
+  for (Mate& m : asmDoc.GetMates()) {
+    if (asmDoc.MateSuppressed(m.id))
+      continue;
+    for (RangedValue v : RangedValuesFor(m.type)) {
+      const double at = RangedValueOf(m, v);
+      const std::string why = RangeRefusal(m, v, at);
+      if (why.empty())
+        continue;
+      const std::optional<MateRange> r = RangeOf(m, v);
+      const std::string text =
+          std::string(RangedValueName(v)) + " " + FormatRangedValue(v, at) +
+          " is outside its range" +
+          (v == RangedValue::Cone ? std::string(" (a cone of ") +
+                                        FormatRangedValue(v, r->max) + ")"
+                                  : " " + FormatRangedValue(v, r->min) +
+                                        " .. " + FormatRangedValue(v, r->max));
+      if (m.error.empty()) {
+        m.error = text;
+        report.erroredMates++;
+      } else {
+        m.error += "; " + text;
+      }
+      report.limits.push_back(
+          {m.id, {}, m.name, v, at > r->max ? r->max : r->min, at, false});
+      break;
     }
   }
   // Write solved transforms back to the non-`fixed` occurrences. Anchors keep

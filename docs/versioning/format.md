@@ -353,6 +353,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A mate takes `limits` {`rotation`?, `offset`?, `dx`?, `dy`? as [min, max], `cone`?} in radians and mm ([mate limits](../assemblies/README.md#mate-limits)), written only when one is set, so a file without them is unchanged. A range on a value the mate type does not free (a revolute's offset, any range on a fastened mate, a rotation on a ball), a min above its max, a cone outside 0..180°, an unknown key or a malformed range is refused, naming what the type frees. A saved motion result gains `stopped_by` {`mate`, `name`, `value`, `limit`, `at`, `sample`, `path`?}: the follower whose limit stopped the run. Golden `vNEXT-mate-limits` (a revolute, a slider, a planar with all four ranges and its gap locked, a ball's cone, a cylindrical) |
 
 ## Paths in a project
 

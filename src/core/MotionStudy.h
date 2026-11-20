@@ -182,6 +182,19 @@ struct Result {
   size_t pairsChecked = 0; // over all samples
   double seconds = 0.0;
   bool cancelled = false;
+  // A follower that reached its limit (docs/assemblies/README.md#mate-limits)
+  // STOPS the run at that sample: the sample is the last one, unsolved, and
+  // this says which mate and at what driver value. Unset = nothing stopped.
+  struct LimitStop {
+    uint64_t mate = 0;
+    std::vector<uint64_t> path; // as Sample::MateValue's
+    std::string name;
+    RangedValue value = RangedValue::Rotation;
+    double bound = 0.0;   // the limit, rad or mm
+    double atValue = 0.0; // the driver value the run stopped at
+    size_t sample = 0;    // the index of the sample it stopped at
+  };
+  std::optional<LimitStop> stoppedBy;
   std::string error; // a refusal (driver gone, DOF missing); empty = ran
   // The input hash it was run for (InputKey); 0 = unknown.
   uint64_t inputHash = 0;
@@ -274,6 +287,10 @@ std::string WhyNotTrace(const AssemblyDocument& asmDoc,
 // the placement itself).
 bool TracePoints(const Result& result, const std::vector<TracePoint>& points,
                  std::vector<TracePath>* out, std::string* why);
+
+// Why a run stopped at a limit, as one sentence: the sample, the driver
+// value, the mate and its limit.
+std::string LimitStopText(const Result::LimitStop& stop, bool degrees);
 
 // The collision table as text, one line per sample: what the plan asked to
 // be PRINTED, and what an agent pastes into its report.

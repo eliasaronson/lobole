@@ -3,6 +3,7 @@
 
 #include "core/AssemblyLoopSolve.h"
 #include "core/Angles.h"
+#include "core/AssemblySolve.h" // ClampToCone
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 #ifdef HAVE_EIGEN
 #include <Eigen/Dense>
@@ -381,6 +383,198 @@ glm::dmat4 TiltAt(const std::vector<double>& q, int column) {
   return glm::mat4_cast(ExpSo3(glm::dvec3(q[c], q[c + 1], 0.0)));
 }
 
+// ---- Limits (docs/assemblies/README.md#mate-limits) ------------------------
+
+// Each column's box, and every ball's cone over its three columns.
+struct Bounds {
+  bool any = false;
+  bool boxed = false; // any column has a box (else only cones)
+  std::vector<double> lo, hi;
+  // Which limit each column is, for the report: its mate and value.
+  std::vector<int> mateOf;
+  std::vector<RangedValue> valueOf;
+  struct Cone {
+    size_t mate = 0;
+    int column = 0;
+    double rad = 0.0;
+  };
+  std::vector<Cone> cones;
+};
+
+constexpr double kInf = std::numeric_limits<double>::infinity();
+
+Bounds BoundsFor(const std::vector<LoopMate>& mates, const Packing& pack,
+                 int cols) {
+  Bounds b;
+  b.lo.assign(static_cast<size_t>(cols), -kInf);
+  b.hi.assign(static_cast<size_t>(cols), kInf);
+  b.mateOf.assign(static_cast<size_t>(cols), -1);
+  b.valueOf.assign(static_cast<size_t>(cols), RangedValue::Rotation);
+  const auto box = [&](int col, size_t mate, RangedValue v,
+                       const std::optional<MateRange>& r) {
+    if (col < 0 || !r)
+      return;
+    const size_t c = static_cast<size_t>(col);
+    b.lo[c] = r->min;
+    b.hi[c] = std::max(r->min, r->max);
+    b.mateOf[c] = static_cast<int>(mate);
+    b.valueOf[c] = v;
+    b.any = b.boxed = true;
+  };
+  for (size_t i = 0; i < mates.size(); i++) {
+    const LoopMate& m = mates[i];
+    const int c = pack.columnOf[i];
+    if (c < 0)
+      continue;
+    switch (m.type) {
+    case MateType::Revolute:
+      box(c, i, RangedValue::Rotation, m.rotationRange);
+      break;
+    case MateType::Slider:
+      box(c, i, RangedValue::Offset, m.offsetRange);
+      break;
+    case MateType::Cylindrical:
+      box(c, i, RangedValue::Rotation, m.rotationRange);
+      box(c + 1, i, RangedValue::Offset, m.offsetRange);
+      break;
+    case MateType::Planar:
+      box(c, i, RangedValue::Dx, m.dxRange);
+      box(c + 1, i, RangedValue::Dy, m.dyRange);
+      box(c + 2, i, RangedValue::Rotation, m.rotationRange);
+      break;
+    case MateType::Ball:
+      if (m.coneRad) {
+        b.cones.push_back({i, c, *m.coneRad});
+        b.any = true;
+      }
+      break;
+    case MateType::Fastened:
+      break;
+    }
+  }
+  return b;
+}
+
+// The tilt of Z a ball's columns give it, on its seed.
+double ConeTilt(const LoopMate& seed, const std::vector<double>& q, int c) {
+  const size_t k = static_cast<size_t>(c);
+  const glm::dquat rot = glm::normalize(
+      seed.ballRotation * ExpSo3(glm::dvec3(q[k], q[k + 1], q[k + 2])));
+  const glm::dvec3 z = rot * glm::dvec3(0.0, 0.0, 1.0);
+  return std::acos(std::clamp(z.z, -1.0, 1.0));
+}
+
+// Every ball's tilt brought back inside its cone.
+void ProjectCones(const Bounds& b, const std::vector<LoopMate>& mates,
+                  std::vector<double>& q) {
+  for (const Bounds::Cone& cone : b.cones) {
+    const LoopMate& seed = mates[cone.mate];
+    const size_t k = static_cast<size_t>(cone.column);
+    const glm::dquat rot = glm::normalize(
+        seed.ballRotation * ExpSo3(glm::dvec3(q[k], q[k + 1], q[k + 2])));
+    const glm::dquat held = ClampToCone(cone.rad, rot);
+    if (held == rot)
+      continue;
+    // Back to a delta on the seed, which is what the columns hold.
+    const glm::dquat delta =
+        glm::normalize(glm::conjugate(seed.ballRotation) * held);
+    const glm::dvec3 w = LogSo3(glm::mat3_cast(delta));
+    q[k] = w.x;
+    q[k + 1] = w.y;
+    q[k + 2] = w.z;
+  }
+}
+
+// One damped step `d` from `x` that stays inside the boxes: the least
+// squares step with a value the step would take past a bound HELD at that
+// bound and the step solved again for the others; a held value is let go
+// where the model does better with it moving back inside (the sign of the
+// quadratic model's slope along it). `A` is the damped normal matrix and
+// `g` = -J^T r. Projecting an unbounded step back into the box instead
+// spreads the motion over every value, the ones at a limit cannot take
+// their share, and a loop resting on a limit creeps and stalls -- which is
+// what another CAD's solver found and replaced with this.
+Eigen::VectorXd BoundedStep(const Eigen::MatrixXd& A, const Eigen::VectorXd& g,
+                            const std::vector<double>& x, const Bounds& b) {
+  const int n = static_cast<int>(x.size());
+  std::vector<int> held(static_cast<size_t>(n), 0); // -1 at lo, +1 at hi
+  Eigen::VectorXd move = Eigen::VectorXd::Zero(n);
+  Eigen::VectorXd last;
+  for (int pass = 0; pass < 3 * n + 3; pass++) {
+    Eigen::MatrixXd M = A;
+    Eigen::VectorXd rhs = g;
+    for (int p = 0; p < n; p++) {
+      if (held[static_cast<size_t>(p)] == 0)
+        continue;
+      const double d = move[p];
+      for (int q = 0; q < n; q++)
+        if (q != p)
+          rhs[q] -= M(q, p) * d;
+      M.row(p).setZero();
+      M.col(p).setZero();
+      M(p, p) = 1.0;
+      rhs[p] = d;
+    }
+    const Eigen::VectorXd d = M.ldlt().solve(rhs);
+    if (!d.allFinite())
+      return d;
+    bool changed = false;
+    for (int p = 0; p < n; p++) {
+      const size_t k = static_cast<size_t>(p);
+      if (held[k] != 0)
+        continue;
+      if (x[k] + d[p] < b.lo[k]) {
+        held[k] = -1;
+        move[p] = b.lo[k] - x[k];
+        changed = true;
+      } else if (x[k] + d[p] > b.hi[k]) {
+        held[k] = 1;
+        move[p] = b.hi[k] - x[k];
+        changed = true;
+      }
+    }
+    if (!changed)
+      for (int p = 0; p < n; p++) {
+        const size_t k = static_cast<size_t>(p);
+        if (held[k] == 0)
+          continue;
+        const double slope = A.row(p).dot(d) - g[p];
+        if ((held[k] < 0 && slope < 0.0) || (held[k] > 0 && slope > 0.0)) {
+          held[k] = 0;
+          changed = true;
+        }
+      }
+    if (!changed)
+      return d;
+    last = d;
+  }
+  return last;
+}
+
+// The limits a loop that did not close stands against: at the bound, with
+// the residual's descent (-g) pointing out of the range.
+std::vector<LoopLimit> BindingLimits(const Bounds& b,
+                                     const std::vector<LoopMate>& mates,
+                                     const std::vector<double>& q,
+                                     const Eigen::VectorXd& g) {
+  std::vector<LoopLimit> out;
+  for (size_t c = 0; c < b.lo.size(); c++) {
+    if (b.mateOf[c] < 0)
+      continue;
+    const double tol = 1e-9 * (1 + std::abs(q[c]));
+    const double descent = -g[static_cast<int>(c)];
+    const bool lo = std::abs(q[c] - b.lo[c]) <= tol && descent < 0.0;
+    const bool hi = std::abs(q[c] - b.hi[c]) <= tol && descent > 0.0;
+    if (lo || hi)
+      out.push_back({mates[static_cast<size_t>(b.mateOf[c])].id, b.valueOf[c],
+                     hi ? b.hi[c] : b.lo[c], hi});
+  }
+  for (const Bounds::Cone& cone : b.cones)
+    if (ConeTilt(mates[cone.mate], q, cone.column) >= cone.rad - 1e-9)
+      out.push_back({mates[cone.mate].id, RangedValue::Cone, cone.rad, true});
+  return out;
+}
+
 // Solves ONE connected component. SolveLoops below partitions first, so this
 // never sees unknowns that cannot influence its residuals. With `tilt` set it
 // is the diagnosis's re-solve: two more columns, everything else identical.
@@ -467,6 +661,13 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
                    static_cast<int>(pinRows.size());
   std::vector<double> q = SeedQ(problem.mates, pack);
   q.resize(static_cast<size_t>(cols), 0.0); // a tilt starts at zero
+
+  // Mate limits (docs/assemblies/README.md#mate-limits): a box on the
+  // scalar columns and a cone on a ball's three. Every step stays inside
+  // them (BoundedStep); with none set nothing below costs a thing. A seed
+  // already outside (a file that says so) is not moved here: if the loop
+  // closes as it stands, the solve reports the value outside its range.
+  const Bounds bounds = BoundsFor(problem.mates, pack, cols);
 
   const double charLen =
       CharacteristicLength(WalkTree(problem, AdjustsFrom(problem.mates)));
@@ -590,6 +791,9 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
     if (live == 0)
       break; // nothing here can move the residual; the poses stand
     bool stepped = false, tiny = false;
+    // A bounded LM (BoundedStep): a value the step would take past its
+    // limit is held at it and the others solved again. The Jacobian is the
+    // one above either way.
     for (int backoff = 0; backoff < 16; backoff++) {
       Eigen::MatrixXd damped = jtj;
       Eigen::VectorXd rhs = -jtr;
@@ -603,7 +807,9 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
         }
         damped(i, i) += lambda * std::max(1e-12, jtj(i, i));
       }
-      const Eigen::VectorXd step = damped.ldlt().solve(rhs);
+      const Eigen::VectorXd step =
+          bounds.boxed ? BoundedStep(damped, rhs, q, bounds)
+                       : Eigen::VectorXd(damped.ldlt().solve(rhs));
       if (!step.allFinite()) {
         lambda *= 10.0;
         continue;
@@ -611,6 +817,10 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
       std::vector<double> qn = q;
       for (int i = 0; i < cols; i++)
         qn[i] += step[i];
+      // A box step lands ON a bound, never past it (above); a ball's cone
+      // is not a box, and its tilt is brought back to the cone here.
+      if (!bounds.cones.empty())
+        ProjectCones(bounds, problem.mates, qn);
       Eigen::VectorXd rn;
       residualAt(qn, rn, false);
       if (rn.squaredNorm() < r.squaredNorm()) {
@@ -664,6 +874,12 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
       dependentRows[k] = 6;
   } else {
     buildJacobian(q, r);
+    // Which limits hold a loop that did not close: an unknown standing at
+    // its bound whose descent direction points out of the range.
+    if (bounds.any && !sol.converged && !tilting) {
+      const Eigen::VectorXd g = jac.transpose() * r;
+      sol.limits = BindingLimits(bounds, problem.mates, q, g);
+    }
     const Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(jac.transpose());
     const int rank = static_cast<int>(qr.rank());
     sol.dof = cols - rank;
@@ -903,6 +1119,8 @@ LoopSolution SolveLoops(const LoopProblem& problem) {
       sol.conflicting.push_back(id);
     for (double mm : part.conflictingMm)
       sol.conflictingMm.push_back(mm);
+    for (const LoopLimit& l : part.limits)
+      sol.limits.push_back(l);
     if (problem.diagnose && !part.conflicting.empty())
       sol.diagnoses.push_back(Diagnose(c.sub, part.conflicting));
     for (size_t i = 0; i < part.solved.size(); i++)
