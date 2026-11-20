@@ -29,6 +29,7 @@
 #include <vector>
 
 class CADShape;
+class TopoDS_Shape;
 struct Body;
 
 namespace inputhash {
@@ -57,6 +58,12 @@ public:
 private:
   uint64_t h_ = 1469598103934665603ULL;
 };
+
+// The digest Hasher::Shape writes, of a bare OpenCASCADE shape and NOT
+// memoized: for a shape with no CADShape identity to key a memo on (a body
+// imprinted for an assembly study, whose mesh a simulation stores by it).
+// Costs the BinTools round trips every time; 0 for a null shape.
+uint64_t ShapeDigestOf(const TopoDS_Shape& shape);
 
 // "0x" + 16 hex digits: how a hash goes on the wire and to disk (a JSON
 // number past 2^53 is not safe in every reader).

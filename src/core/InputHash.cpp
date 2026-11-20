@@ -111,32 +111,7 @@ uint64_t ShapeDigest(const CADShape& shape) {
   // (tests/test_printed_features.cpp, tests/fixtures/engine-camshaft.json).
   // Most shapes settle in two or three reads; the bound only costs the
   // ones that drift.
-  constexpr int kMaxReads = 32;
-  const auto write = [](const TopoDS_Shape& s) {
-    std::stringstream bin;
-    BinTools::Write(s, bin, /*theWithTriangles=*/false,
-                    /*theWithNormals=*/false, BinTools_FormatVersion_VERSION_1);
-    return bin;
-  };
-  std::vector<uint64_t> seen;
-  std::stringstream bin = write(shape.GetShape());
-  uint64_t digest = 0;
-  for (int pass = 0; pass < kMaxReads; ++pass) {
-    TopoDS_Shape copy;
-    BinTools::Read(copy, bin);
-    NeutralFlags(copy);
-    bin = write(copy);
-    Hasher h;
-    h.Str(bin.view());
-    const uint64_t d = h.Digest();
-    const auto again = std::find(seen.begin(), seen.end(), d);
-    if (again != seen.end()) {
-      digest = *std::min_element(again, seen.end());
-      break;
-    }
-    seen.push_back(d);
-    digest = d; // past kMaxReads: the last read
-  }
+  const uint64_t digest = inputhash::ShapeDigestOf(shape.GetShape());
   std::lock_guard lock(memo.mutex);
   if (!memo.entries.contains(key)) {
     while (memo.entries.size() >= ShapeMemo::kCapacity) {
@@ -173,6 +148,38 @@ void Hasher::Str(std::string_view s) {
 void Hasher::Json(const nlohmann::json& j) { Str(j.dump()); }
 
 void Hasher::Shape(const CADShape& shape) { U64(ShapeDigest(shape)); }
+
+uint64_t ShapeDigestOf(const TopoDS_Shape& shape) {
+  if (shape.IsNull())
+    return 0;
+  constexpr int kMaxReads = 32;
+  const auto write = [](const TopoDS_Shape& s) {
+    std::stringstream bin;
+    BinTools::Write(s, bin, /*theWithTriangles=*/false,
+                    /*theWithNormals=*/false, BinTools_FormatVersion_VERSION_1);
+    return bin;
+  };
+  std::vector<uint64_t> seen;
+  std::stringstream bin = write(shape);
+  uint64_t digest = 0;
+  for (int pass = 0; pass < kMaxReads; ++pass) {
+    TopoDS_Shape copy;
+    BinTools::Read(copy, bin);
+    NeutralFlags(copy);
+    bin = write(copy);
+    Hasher h;
+    h.Str(bin.view());
+    const uint64_t d = h.Digest();
+    const auto again = std::find(seen.begin(), seen.end(), d);
+    if (again != seen.end()) {
+      digest = *std::min_element(again, seen.end());
+      break;
+    }
+    seen.push_back(d);
+    digest = d; // past kMaxReads: the last read
+  }
+  return digest;
+}
 
 void Hasher::Bodies(const std::vector<Body>& bodies) {
   U64(bodies.size());
