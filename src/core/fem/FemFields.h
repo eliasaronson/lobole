@@ -55,7 +55,7 @@ const ResultFieldSpec& SpecOf(ResultField f);
 // ResultFieldKeys().
 [[nodiscard]] std::optional<ResultField>
 ResultFieldFromKey(const std::string& key);
-std::string ResultFieldKeys(); // "von_mises | displacement | ..."
+std::string ResultFieldKeys(); // "von_mises, displacement, ..."
 
 // The three principal stresses of `s`, largest first (MPa, tension
 // positive), in closed form.

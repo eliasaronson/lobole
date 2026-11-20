@@ -4533,7 +4533,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     else
       throw std::runtime_error("unknown field: " + f +
                                "; fields: " + fem::ResultFieldKeys() +
-                               " | shape | density | none");
+                               ", shape, density, none");
     // The legend's range, in the field's own unit: a number sets that end,
     // null gives it back to the field.
     struct Bound {

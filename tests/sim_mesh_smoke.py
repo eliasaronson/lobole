@@ -155,8 +155,9 @@ def mesh_report(d):
            "made again, it is current")
     # Editing the part marks the mesh, as the mesh size did.
     plate = [f for f in d.call("get_state")["features"] if f["id"] == fid][0]
-    plate = {k: v for k, v in plate.items() if k != "id"}
-    plate["width"] = 62.0
+    plate = {k: v for k, v in plate.items()
+             if k not in ("id", "distance_expr")}
+    plate["distance"] = 1.5  # the plate's thickness
     d.call("modify_feature", feature_id=fid, feature=plate)
     expect(d.call("set_mesh_display", study=study, view="edges")["stale"]
            is True, "editing the part marks the mesh stale")
@@ -265,7 +266,7 @@ def fields_and_export(d, study, scratch):
             field="temperature")
     refused(d, "set_result_display", "topology study's views", study=study,
             field="density")
-    refused(d, "set_result_display", "principal_max | principal_mid",
+    refused(d, "set_result_display", "principal_max, principal_mid",
             study=study, field="principal")
 
     # The range clamp: set, read back, given back; and checked before

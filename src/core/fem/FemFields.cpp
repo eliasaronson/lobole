@@ -57,7 +57,7 @@ std::optional<ResultField> ResultFieldFromKey(const std::string& key) {
 std::string ResultFieldKeys() {
   std::string out;
   for (const ResultFieldSpec& s : ResultFieldSpecs())
-    out += (out.empty() ? "" : " | ") + std::string(s.key);
+    out += (out.empty() ? "" : ", ") + std::string(s.key);
   return out;
 }
 
