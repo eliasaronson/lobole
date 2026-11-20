@@ -899,6 +899,19 @@ namespace {
 // The same surface already names UNKNOWN fields well ("unknown parameter 'x'
 // for 'add_drawing_view'. Accepted: ..."), and `describe` documents every
 // type's params. This makes the two match.
+namespace {
+// A document keeps an expression that does not parse (a file with one still
+// opens, the feature marked broken), but a call is refused one: it could
+// only ever fail (docs/scripting/rpc.md#numbers-that-take-an-expression).
+std::unique_ptr<Feature> RefusingUnreadable(std::unique_ptr<Feature> f) {
+  if (f)
+    f->VisitExprs([](const ExprSlot& slot) {
+      RefuseUnreadableExpr(slot.Expr(), slot.Path() + "_expr");
+    });
+  return f;
+}
+} // namespace
+
 std::unique_ptr<Feature> FeatureFromJsonNamed(const nlohmann::json& j) {
   try {
     // A get_state entry sent back carries what get_state stamps AROUND the
@@ -915,9 +928,9 @@ std::unique_ptr<Feature> FeatureFromJsonNamed(const nlohmann::json& j) {
       if (!spec.contains("name") && spec.contains("type") &&
           spec["type"].is_string())
         spec["name"] = spec["type"];
-      return DocumentIO::FeatureFromJson(spec);
+      return RefusingUnreadable(DocumentIO::FeatureFromJson(spec));
     }
-    return DocumentIO::FeatureFromJson(j);
+    return RefusingUnreadable(DocumentIO::FeatureFromJson(j));
   } catch (const nlohmann::json::out_of_range& e) {
     const std::string type = j.value("type", "");
     std::string missing = e.what();

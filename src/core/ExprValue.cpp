@@ -158,14 +158,18 @@ std::string ExprTextFromJson(const nlohmann::json& t, const std::string& what) {
   if (!t.is_string())
     throw std::runtime_error(what + " is an expression (text), not " +
                              t.dump());
-  std::string text = t.get<std::string>();
+  // Kept even when it does not parse: the evaluation says so, on whatever
+  // holds it, and the rest of the file opens (ReadExpr).
+  return t.get<std::string>();
+}
+
+void RefuseUnreadableExpr(const std::string& text, const std::string& what) {
   if (text.empty())
-    return text;
+    return;
   const auto compiled = ExpressionEngine::Default().Compile(text);
   if (!compiled)
     throw std::runtime_error(what + " '" + text +
                              "' does not read: " + compiled.error().message);
-  return text;
 }
 
 std::string ReadExprText(const nlohmann::json& j, const std::string& key) {
@@ -225,8 +229,7 @@ bool ReadExprParam(const nlohmann::json& p, const std::string& key,
     const nlohmann::json& n = p.at(key);
     if (n.is_string()) {
       // The alias: an expression where the number goes.
-      nlohmann::json alias = {{key + "_expr", n}};
-      text = ReadExprText(alias, key);
+      text = ExprTextFromJson(n, key);
       if (hasExpr)
         throw std::runtime_error(key + " is given twice: as the expression '" +
                                  n.get<std::string>() + "' and as " + key +
@@ -240,6 +243,7 @@ bool ReadExprParam(const nlohmann::json& p, const std::string& key,
   }
   if (hasExpr)
     text = ReadExprText(p, key);
+  RefuseUnreadableExpr(text, hasExpr ? key + "_expr" : key);
   v.expr = std::move(text);
   return true;
 }

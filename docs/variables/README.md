@@ -59,18 +59,26 @@ One type and one hook carry every expression-capable number, in
   together (`WriteExprText` / `ReadExprText` the text alone, for a value
   written under a condition of its own, and for the few keys whose text is
   not `<key>_expr`: an extrude's `twist_deg` beside `twist_expr`). An
-  `_expr` that is not text or does not parse is **refused** where it is
-  read, naming the key; one naming a variable that does not exist loads,
-  and fails where it is evaluated, since that is the scope's question.
+  `_expr` that is not text is refused where it is read, naming the key. One
+  that is text but does not parse is **kept**: a file with one bad
+  expression still opens, and the feature (or study) that holds it is
+  marked broken with the parse error, as one naming a variable that does
+  not exist is. Every reader of a document's own JSON -- a load, an undo, a
+  copy -- has to take what the document can hold. The **RPC** refuses such
+  a text where it arrives (`ReadExprParam`, and `RefuseUnreadableExpr` over
+  a feature spec's slots in `add_feature` / `modify_feature`), so a call
+  never stores one that can only fail.
 - **`VisitExprs(ExprVisitor)`** hands each number to the visitor as an
   `ExprSlot`: its text, its value in the expression's units (degrees for a
   radian-stored angle), what it measures (`ExprQuantity`: length, angle,
   count, other) and where it lives (`distance`, `origin/2`,
   `loads/0/magnitude`). `Feature`, `fem::Study` and a requirement's
   `Bound` implement it. A number the geometry reads as part of a vector (a
-  Frame's origin, a MoveFace's translation), a sketch dimension and a
-  pattern's count (which rounds) stay a value and a text of their own, and
-  are visited as slots on that pair.
+  Frame's origin, a MoveFace's translation) and a sketch dimension stay a
+  value and a text of their own, and are visited as slots on that pair. A
+  pattern's count is an `ExprInt`: `n / 2` of an odd `n` is the pattern's
+  error naming the value, and a count below 1 is refused, not made 1. An
+  integer field in the GUI refuses a typed fraction the same way.
 
 Everything that walks expressions walks that hook:
 

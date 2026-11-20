@@ -17,6 +17,8 @@
 #include "ui/VariableActions.h"
 
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 
 using Catch::Matchers::WithinRel;
 namespace fs = std::filesystem;
@@ -617,5 +619,55 @@ TEST_CASE("Documents without parameters load unchanged", "[variables]") {
   CHECK(loaded->GetParameters().empty());
   REQUIRE(loaded->GetBodies().size() == 1);
   CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(16.0, 1e-6));
+  fs::remove(path);
+}
+
+// A document may hold an expression that does not parse; the RPC refuses
+// one (FeatureFromJsonNamed), but a FILE with one must still open, the
+// feature that holds it marked broken with the parse error and the rest of
+// the part built (docs/variables/README.md#numbers-that-are-expressions).
+TEST_CASE("A file with an expression that does not parse opens, that feature "
+          "broken",
+          "[variables]") {
+  const fs::path path =
+      fs::temp_directory_path() / "lobole_unreadable_expr.json";
+  {
+    Document doc;
+    doc.SetParameter("len", "40");
+    auto bad =
+        std::make_unique<BoxFeature>("Bad", glm::vec3(0.0f), 10.0, 10.0, 10.0);
+    bad->width.expr = "len";
+    doc.AddFeature(std::move(bad));
+    doc.AddFeature(std::make_unique<BoxFeature>(
+        "Good", glm::vec3(50.0f, 0.0f, 0.0f), 5.0, 5.0, 5.0));
+    REQUIRE(testio::Save(doc, path.string()));
+  }
+  std::string text;
+  {
+    std::ifstream in(path);
+    text.assign(std::istreambuf_iterator<char>(in), {});
+  }
+  const std::string from = "\"width_expr\": \"len\"";
+  const size_t at = text.find(from);
+  REQUIRE(at != std::string::npos);
+  text.replace(at, from.size(), "\"width_expr\": \"len *\"");
+  {
+    std::ofstream out(path);
+    out << text;
+  }
+  const auto loaded = testio::Load(path.string());
+  REQUIRE(loaded != nullptr);
+  REQUIRE(loaded->FeatureCount() == 2);
+  const Feature* bad = loaded->GetFeature(0);
+  CHECK(!bad->GetError().empty());
+  CHECK(static_cast<const BoxFeature*>(bad)->width.expr == "len *");
+  CHECK(loaded->GetFeature(1)->GetError().empty());
+  CHECK(!loaded->GetBodies().empty()); // the good box built
+  // And it writes back what it read: the text is kept, not dropped.
+  REQUIRE(testio::Save(*loaded, path.string()));
+  const auto again = testio::Load(path.string());
+  REQUIRE(again != nullptr);
+  CHECK(static_cast<const BoxFeature*>(again->GetFeature(0))->width.expr ==
+        "len *");
   fs::remove(path);
 }

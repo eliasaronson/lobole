@@ -171,21 +171,26 @@ void WriteExprText(nlohmann::json& j, const std::string& key,
 
 // Reads `<key>` when present (else the value is left as it is) and
 // `<key>_expr` when present (else the text is cleared). An `_expr` that is
-// not text, or does not parse, is REFUSED (std::runtime_error naming the
-// key): a text the loader keeps would only fail later, at every
-// regeneration, as something else. Whether it resolves is the scope's
-// business, decided where it is evaluated. Returns whether either key was
-// there.
+// not text is REFUSED (std::runtime_error naming the key). One that is text
+// but does not parse is KEPT: a file with one bad expression still opens,
+// and the evaluation marks what holds it broken with the parse error, as an
+// unknown variable does. The RPC refuses such a text where it arrives
+// (ReadExprParam, RefuseUnreadableExpr); a document can hold one, so every
+// reader of a document's own JSON (a load, an undo, a copy) must take it.
+// Returns whether either key was there.
 bool ReadExpr(const nlohmann::json& j, const std::string& key, ExprValue& v);
 bool ReadExpr(const nlohmann::json& j, const std::string& key, ExprInt& v);
 bool ReadExpr(const nlohmann::json& j, const std::string& key, ExprAngle& v);
-// Only `<key>_expr`, refused as above; empty when absent.
+// Only `<key>_expr`, read as above; empty when absent.
 std::string ReadExprText(const nlohmann::json& j, const std::string& key);
-// `t` as an expression text, refused as above naming `what` (the key it
-// came from): for a text stored under a key of its own (a sketch
-// dimension's `expr`, one of a Frame's `origin_expr` triple). Empty is a
-// literal.
+// `t` as an expression text, read as above naming `what` (the key it came
+// from): for a text stored under a key of its own (a sketch dimension's
+// `expr`, one of a Frame's `origin_expr` triple). Empty is a literal.
 std::string ExprTextFromJson(const nlohmann::json& t, const std::string& what);
+// Refuses (std::runtime_error naming `what`) a text that does not parse:
+// what the RPC applies to every expression it is handed, so a call never
+// stores one that can only fail.
+void RefuseUnreadableExpr(const std::string& text, const std::string& what);
 
 // The RPC's reader for a number a method sets: `<key>` as a number, or as a
 // string (the older spelling the FEM methods took, kept as an alias), and

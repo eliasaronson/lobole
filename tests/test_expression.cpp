@@ -239,17 +239,32 @@ TEST_CASE("ExprValue writes <key> and <key>_expr and reads them back",
   CHECK_THAT(aBack.value, WithinRel(a.value));
 }
 
-TEST_CASE("An _expr that does not parse is refused where it is read",
+TEST_CASE("An _expr that does not parse is kept by a reader and refused by "
+          "the RPC",
           "[variables]") {
   ExprValue v;
+  // A document's own JSON (a file, an undo, a copy) keeps it: the
+  // evaluation marks whatever holds it broken.
   const nlohmann::json j = {{"depth", 3.0}, {"depth_expr", "bore *"}};
+  CHECK(ReadExpr(j, "depth", v));
+  CHECK(v.expr == "bore *");
+  CHECK(v.value == 3.0);
+  std::string why;
+  CHECK_FALSE(
+      EvaluateSlot(ExprSlot(v, ExprQuantity::Length, "depth"), {}, &why));
+  CHECK(!why.empty());
+  // A call is refused it, naming the key.
+  ExprValue p;
   CHECK_THROWS_WITH(
-      ReadExpr(j, "depth", v),
+      ReadExprParam(j, "depth", p),
       Catch::Matchers::ContainsSubstring("depth_expr 'bore *' does not read"));
+  CHECK_THROWS_WITH(RefuseUnreadableExpr("bore *", "depth_expr"),
+                    Catch::Matchers::ContainsSubstring("does not read"));
   // An unknown name parses: whether it resolves is the scope's question.
   const nlohmann::json unknown = {{"depth_expr", "nowhere + 1"}};
   CHECK(ReadExpr(unknown, "depth", v));
   CHECK(v.expr == "nowhere + 1");
+  // Not text at all is a damaged file.
   CHECK_THROWS(ReadExpr(nlohmann::json{{"depth_expr", 3}}, "depth", v));
 }
 
