@@ -16,15 +16,17 @@
 # there is no per-test overhead to trim; the fix is to run several at once.
 #
 # Usage:
-#   ./tools/gui-tests-xvfb.sh              # whole suite, 4 shards, SHUFFLED
-#   ./tools/gui-tests-xvfb.sh --fast       # ...minus the slowest   (~70 s)
-#   ./tools/gui-tests-xvfb.sh -j 8         # more shards
+#   ./tools/gui-tests-xvfb.sh              # whole suite, SHUFFLED, 4-8 shards
+#                                          # by the CPUs free (below)
+#   ./tools/gui-tests-xvfb.sh --fast       # ...minus the slowest
+#   ./tools/gui-tests-xvfb.sh -j 8         # exactly this many shards
 #   ./tools/gui-tests-xvfb.sh --serial     # one process (~335 s), for debugging
 #   ./tools/gui-tests-xvfb.sh -f fillet    # only matching cases, one process
 #   ./tools/gui-tests-xvfb.sh -L gui       # all GUI-labeled ctest tests
 #   ./tools/gui-tests-xvfb.sh --shuffle 12345  # replay a recorded seed
 #   ./tools/gui-tests-xvfb.sh --in-order   # the declared order, no shuffle
 #   ./tools/gui-tests-xvfb.sh --record-times   # refresh gui-test-times.txt
+#       (serial; every sharded run also records its times, below)
 #   ./tools/gui-tests-xvfb.sh --slow-frames 150 [...]  # every frame >= 150 ms:
 #       a loaded machine without loading it (before -f, which runs at once)
 #   ./tools/gui-tests-xvfb.sh --slow-jobs 2000 [...]  # every background job
@@ -46,7 +48,13 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/build"
 
+# The balance: the committed seed, then what every sharded run on this
+# machine has measured since (tools/gui_shard_record.py), which wins. The
+# second is not in the tree: a run would dirty the checkout it ran from, and
+# a merge refuses a main with uncommitted changes. Written only under the GPU
+# lock below, so two runs never write it at once.
 TIMES="$ROOT/tools/gui-test-times.txt"
+RECORDED="${XDG_CACHE_HOME:-$HOME/.cache}/lobole-dev/gui-test-times.txt"
 # --fast skips tests recorded at or above this. Chosen from the measured
 # distribution: it drops 5 of 148 (82 s, over half of it the pattern stress
 # test) and keeps everything under a few seconds. A test with no recorded
@@ -121,7 +129,7 @@ run_shard() {
      $APP_EXTRA" 8>&-
 }
 
-SHARDS=4
+SHARDS=auto
 SLOWER_THAN=""
 APP_EXTRA=""
 RECORD=0
@@ -232,8 +240,26 @@ fi
 # silently skipped. Listing needs no display and no GPU.
 "$ROOT/tools/nix-run" \
   "cd '$ROOT/build' && ./lobole --gui-test-list" > "$WORK/list" 2>/dev/null
+# Shards: one per free CPU, 4 to 8, and no more than memory takes (a shard
+# is 400-600 MB). Each shard holds about one core (54-66% measured under
+# load) and 130 MB of the GPU, so past the free CPUs more shards only move
+# the load; under 4 the longest tests serialise. "Free" is what neither the
+# last second's load nor another build or suite's claim holds
+# (tools/cpu-claims.sh), and this run claims its shards in turn.
+# shellcheck source=cpu-claims.sh
+. "$ROOT/tools/cpu-claims.sh"
+if [ "$SHARDS" = auto ]; then
+  free="$(free_cpus)"
+  mem="$("$ROOT/tools/build-jobs" 700)"
+  SHARDS=$free
+  [ "$SHARDS" -lt 4 ] && SHARDS=4
+  [ "$SHARDS" -gt 8 ] && SHARDS=8
+  [ "$SHARDS" -gt "$mem" ] && SHARDS=$mem
+  echo "shards: $SHARDS ($free CPUs free, memory for $mem; -j N to choose)"
+fi
+cpu_claim "$SHARDS"
 python3 "$ROOT/tools/gui_shard.py" --list "$WORK/list" --times "$TIMES" \
-  --shards "$SHARDS" ${SLOWER_THAN:+--slower-than "$SLOWER_THAN"} \
+  --times "$RECORDED" --shards "$SHARDS" ${SLOWER_THAN:+--slower-than "$SLOWER_THAN"} \
   > "$WORK/filters" 2> "$WORK/info"
 EXPECTED="$(sed -n 's/^# tests: //p' "$WORK/info")"
 sed -n 's/^# estimated/estimated/p' "$WORK/info"
@@ -261,9 +287,12 @@ while read -r filter; do
     # from a single number: --shuffle <SEED> reproduces every shard exactly.
     SHUFFLE_ARG="--gui-test-shuffle $((SEED + i))"
   fi
-  ( run_shard "$((BASE + i))" "$filter" "$WORK/state$i" "$SHUFFLE_ARG" \
-      > "$WORK/shard$i.log" 2>&1
-    echo "$?" > "$WORK/shard$i.code" ) &
+  # Each shard's output is timed per test on its way to the log
+  # (gui_shard_record.py --tee), for the balance of the next run.
+  ( run_shard "$((BASE + i))" "$filter" "$WORK/state$i" "$SHUFFLE_ARG" 2>&1 |
+      python3 -u "$ROOT/tools/gui_shard_record.py" --tee "$WORK/times$i" \
+      > "$WORK/shard$i.log"
+    echo "${PIPESTATUS[0]}" > "$WORK/shard$i.code" ) &
 done < "$WORK/filters"
 START=$(date +%s)
 wait
@@ -305,6 +334,13 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 # Keep the last 20 archived failures; past that the oldest are noise.
 if [ -d "$FAILDIR" ]; then
   ls -1dt "$FAILDIR"/* 2>/dev/null | tail -n +21 | xargs -r rm -rf
+fi
+
+# This run's times into the balance, unless the frames or jobs were slowed
+# on purpose (--slow-frames, --slow-jobs), which is not what a test costs.
+if [ -z "$APP_EXTRA" ]; then
+  python3 "$ROOT/tools/gui_shard_record.py" --merge "$RECORDED" \
+    "$WORK"/times* || true
 fi
 
 ran=0

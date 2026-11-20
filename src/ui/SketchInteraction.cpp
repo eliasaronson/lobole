@@ -139,7 +139,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
             // Inside the drawn quad (DatumQuadCentre: over the part), or
             // where the base planes are hit.
             const glm::dvec2 c =
-                dp->OutputPlane().WorldToPlane(DatumQuadCentre(state, *dp));
+                dp->OutputPlane().WorldToPlane(DatumQuadCentre(state, *dp, i));
             const double datumHalf = DatumHalfExtent(state);
             const bool inQuad = std::abs(uv->x - c.x) <= datumHalf &&
                                 std::abs(uv->y - c.y) <= datumHalf;

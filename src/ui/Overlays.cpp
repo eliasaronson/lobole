@@ -42,7 +42,7 @@ void DrawDatumLabels(AppState& state) {
       const SketchPlane plane = dp->OutputPlane();
       const double corner = 0.87 * DatumHalfExtent(state);
       glm::vec2 s = WorldToScreen(
-          state, glm::vec3(DatumQuadCentre(state, *dp) +
+          state, glm::vec3(DatumQuadCentre(state, *dp, i) +
                            (plane.GetUAxis() + plane.GetVAxis()) * corner));
       dl->AddText(ImVec2(s.x, s.y), col, dp->GetName().c_str());
     } else if (auto* da = dynamic_cast<DatumAxisFeature*>(f)) {

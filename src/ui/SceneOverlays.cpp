@@ -331,7 +331,7 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads) {
     // Over the part, not round the world origin: a plane offset clear of a
     // part built away from the origin was drawn where the part is not.
     const SketchPlane plane = dp->OutputPlane();
-    const SketchPlane over(DatumQuadCentre(state, *dp), plane.GetNormal(),
+    const SketchPlane over(DatumQuadCentre(state, *dp, i), plane.GetNormal(),
                            plane.GetUAxis());
     AppendPlaneQuad(over, kDatumTint * (emphasized ? 1.8f : 1.0f), half, quads);
   }
@@ -362,7 +362,8 @@ float DatumHalfExtent(AppState& state) {
   return (3.0f / kDefaultPlaneHalfExtent) * ScenePlaneHalfExtent(state);
 }
 
-glm::dvec3 DatumQuadCentre(AppState& state, const DatumPlaneFeature& datum) {
+glm::dvec3 DatumQuadCentre(AppState& state, const DatumPlaneFeature& datum,
+                           size_t index) {
   const SketchPlane plane = datum.OutputPlane();
   const glm::dvec3 o = plane.GetOrigin();
   if (!state.document)
@@ -370,9 +371,7 @@ glm::dvec3 DatumQuadCentre(AppState& state, const DatumPlaneFeature& datum) {
   // The bodies BEFORE the datum: what it was placed against. Not the
   // document's whole, which would move the quad whenever anything later is
   // suppressed or edited.
-  size_t index = 0;
-  if (state.document->FindFeatureById(datum.GetId(), &index) == nullptr ||
-      index == 0)
+  if (index == 0)
     return o;
   const std::vector<Body>* before =
       state.document->CachedBodiesAfter(index - 1);

@@ -20,16 +20,20 @@ Two things about the ImGui test engine's filter drive the design:
   stress test in two of them.
 
 Times only balance the shards; they never decide who runs. A test missing
-from the times file gets the median weight and still runs — a stale file
-costs balance, not coverage, which is the failure mode we can live with.
+from the times files gets the median of the recorded ones and still runs —
+a stale file costs balance, not coverage, which is the failure mode we can
+live with. `--times` may be given more than once: the committed seed
+(tools/gui-test-times.txt), then the times every run records
+(tools/gui_shard_record.py), which win.
 """
 
 import argparse
 import collections
 import sys
 
-# Weight for a test with no recorded time (a new one). Deliberately the
-# median rather than 0: an unknown test should not look free.
+# Weight for a test with no recorded time (a new one) when nothing is
+# recorded at all; otherwise the median of what is. Never 0: an unknown test
+# should not look free.
 DEFAULT_WEIGHT = 1.7
 
 
@@ -81,7 +85,8 @@ def build_units(tests):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", default="-", help="test inventory ('-' = stdin)")
-    ap.add_argument("--times", default=None, help="recorded per-test times")
+    ap.add_argument("--times", action="append", default=[],
+                    help="recorded per-test times (repeatable; later wins)")
     ap.add_argument("--shards", type=int, default=4)
     ap.add_argument("--slower-than", type=float, default=None,
                     help="skip tests recorded at or above this many seconds")
@@ -91,7 +96,13 @@ def main():
     tests = [ln.strip() for ln in src if ln.strip()]
     if not tests:
         sys.exit("gui_shard: empty test list")
-    times = load_times(args.times)
+    times = {}
+    for path in args.times:
+        times.update(load_times(path))
+    known = sorted(times[t] for t in tests if t in times)
+    global DEFAULT_WEIGHT
+    if known:
+        DEFAULT_WEIGHT = max(0.1, known[len(known) // 2])
 
     skipped = []
     if args.slower_than is not None:
@@ -144,7 +155,8 @@ def main():
     # have.
     print("# tests: %d" % len(tests), file=sys.stderr)
     est = ", ".join("%.0fs" % l for l in load)
-    print("# estimated per shard: %s" % est, file=sys.stderr)
+    print("# estimated per shard: %s (%d of %d tests timed)"
+          % (est, len(known), len(tests)), file=sys.stderr)
 
 
 if __name__ == "__main__":

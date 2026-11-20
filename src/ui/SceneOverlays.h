@@ -61,7 +61,12 @@ float FrameTriadLength(AppState& state);
 // corner. All scale with ScenePlaneHalfExtent, as the base planes do: a
 // fixed 3 units was a speck on a 300 mm part and a span on a 2 mm one.
 float DatumHalfExtent(AppState& state);
-glm::dvec3 DatumQuadCentre(AppState& state, const DatumPlaneFeature& datum);
+// `index` is the datum's place in the history, which every caller is
+// looping over already. Looked up by id instead, it was a linear search per
+// datum per frame -- quadratic, and 93% of a frame's CPU in a part filled
+// with 50 000 datum planes (the feature-limit GUI test spent 200 s on it).
+glm::dvec3 DatumQuadCentre(AppState& state, const DatumPlaneFeature& datum,
+                           size_t index);
 
 // Draws every Curve3D feature's tessellated polyline (curves-3d Phase 0).
 void AppendCurve3DLines(AppState& state, std::vector<LineVertex3D>& lines);
