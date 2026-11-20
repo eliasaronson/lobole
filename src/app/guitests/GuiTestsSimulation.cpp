@@ -1397,6 +1397,67 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // A roller and a held direction (docs/simulation/README.md
+  // #rollers-held-directions-and-cylindrical-supports), placed by clicking:
+  // the roller on a flat face holds it along its normal; the held tool with
+  // nothing ticked is refused in the red line and places nothing, and with
+  // x ticked places a held support that holds x. Both draw their glyphs.
+  t = IM_REGISTER_TEST(engine, "sim", "a_roller_and_a_held_direction_place");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    const Body& body = Doc()->GetBodies()[0];
+    std::vector<ElementRef> flats;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const auto info = Measure::DescribeFaceAt(body, index);
+      if (info && info->kind == "plane")
+        flats.push_back(ElementRef{body.createdBy, name});
+    }
+    IM_CHECK_SILENT(flats.size() >= 2);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###ToolWindow/###sim_bc_roller");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Roller);
+    ui::SimulationApplyToFace(*s_App, flats[0]);
+    ctx->Yield(2);
+    {
+      const fem::Study* st = Doc()->FindStudy(sid);
+      IM_CHECK_EQ(st->loads.size(), (size_t)1);
+      IM_CHECK(st->loads[0].type == fem::LoadType::Roller);
+      IM_CHECK(ui::SimulationLoadLabel(st->loads[0]) == "roller");
+    }
+    ctx->ItemClick("//###ToolWindow/###sim_bc_held");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Held);
+    s_App->simulation.pendingHold = {false, false, false};
+    ui::SimulationApplyToFace(*s_App, flats[1]);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FindStudy(sid)->loads.size(), (size_t)1);
+    IM_CHECK(s_App->simulation.placeRefusal.find("Tick the directions") !=
+             std::string::npos);
+    ctx->ItemClick("//###ToolWindow/###sim_held_x");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.pendingHold[0]);
+    ui::SimulationApplyToFace(*s_App, flats[1]);
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(sid);
+    IM_CHECK_EQ(st->loads.size(), (size_t)2);
+    IM_CHECK(st->loads[1].type == fem::LoadType::Held);
+    IM_CHECK(st->loads[1].hold[0] && !st->loads[1].hold[1] &&
+             !st->loads[1].hold[2]);
+    IM_CHECK(st->loads[1].frame == 0);
+    IM_CHECK(ui::SimulationLoadLabel(st->loads[1]) == "held x");
+    IM_CHECK(s_App->simulation.placeRefusal.empty());
+    std::vector<PrimVertex> prims;
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    s_App->simulation.pendingHold = {false, false, false};
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
   // A contact support (docs/simulation/README.md#contact): armed in the
   // panel, a click on the curved face is refused in the red line and places
   // nothing (the ground is the plane a flat face lies on); on a flat end it

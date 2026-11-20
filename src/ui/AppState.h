@@ -47,6 +47,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -664,7 +665,12 @@ struct SimulationState {
     Temperature,
     HeatFlux,
     Convection,
-    HeatSource
+    HeatSource,
+    // The roller, held and cylindrical supports (docs/simulation/README.md
+    // #rollers-held-directions-and-cylindrical-supports).
+    Roller,
+    Held,
+    Cylindrical
   };
   Tool tool = Tool::None;
 
@@ -701,6 +707,18 @@ struct SimulationState {
   // other face is refused (placeRefusal).
   // The Pin tool: whether the next pin also holds the part from turning.
   bool pendingPinFixRotation = false;
+  // The Held tool: which of x, y, z of the frame (0: the world's, else a
+  // Frame or datum's id) the next held support holds, and each one's
+  // displacement (mm, 0 = where it is; a static study's only) with the
+  // expression typed. Nothing ticked until the user ticks it: the tool
+  // refuses a click with none.
+  std::array<bool, 3> pendingHold{false, false, false};
+  std::array<double, 3> pendingHeldMm{0.0, 0.0, 0.0};
+  std::array<std::string, 3> pendingHeldMmExpr;
+  uint64_t pendingHeldFrame = 0;
+  // The Cylindrical tool: radial, tangential, axial held. A seat holds its
+  // shaft radially and along it; the turn is left to the user to hold.
+  std::array<bool, 3> pendingCylHold{true, false, true};
   // The Contact tool: the next contact support's friction coefficient
   // (unitless; 0 = frictionless).
   double pendingContactFriction = 0.0;

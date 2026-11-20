@@ -450,6 +450,13 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
             ? "Pick the bore (or shaft) the pin holds - Esc cancels"
         : tool == SimulationState::Tool::Contact
             ? "Pick the flat face that rests on the ground - Esc cancels"
+        : tool == SimulationState::Tool::Roller
+            ? "Pick the face the roller holds along its normal - Esc cancels"
+        : tool == SimulationState::Tool::Held
+            ? "Pick the face whose ticked directions are held - Esc cancels"
+        : tool == SimulationState::Tool::Cylindrical
+            ? "Pick the bore (or shaft) the cylindrical support holds - Esc "
+              "cancels"
             : "Pick a face for the boundary condition - Esc cancels";
     return ArmedContext{KindBit(SelectionItem::Kind::Face), prompt,
                         ConsumeSimFace};

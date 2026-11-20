@@ -1276,6 +1276,15 @@ void DrawSimulationToolbar(AppState& state) {
     case SimulationState::Tool::Contact:
       what = "contact support (a flat face on the ground)";
       break;
+    case SimulationState::Tool::Roller:
+      what = "roller (held along the face's normal)";
+      break;
+    case SimulationState::Tool::Held:
+      what = "held directions";
+      break;
+    case SimulationState::Tool::Cylindrical:
+      what = "cylindrical support (a bore or a shaft)";
+      break;
     case SimulationState::Tool::Keep:
       what = "keep face";
       break;

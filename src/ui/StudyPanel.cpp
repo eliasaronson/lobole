@@ -7,6 +7,7 @@
 #include "common/Logger.h"
 #include "core/Command.h"
 #include "core/Conventions.h"
+#include "core/DatumFrame.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/Requirements.h"
@@ -93,6 +94,12 @@ const char* LoadLabel(fem::LoadType t) {
     return "Pin";
   case fem::LoadType::Contact:
     return "Contact";
+  case fem::LoadType::Roller:
+    return "Roller";
+  case fem::LoadType::Held:
+    return "Held";
+  case fem::LoadType::Cylindrical:
+    return "Cylindrical";
   case fem::LoadType::Temperature:
     return "Temperature";
   case fem::LoadType::HeatFlux:
@@ -121,6 +128,12 @@ const char* LoadGlyph(fem::LoadType t) {
     return ICON_FA_THUMBTACK;
   case fem::LoadType::Contact:
     return ICON_FA_ARROWS_DOWN_TO_LINE;
+  case fem::LoadType::Roller:
+    return ICON_FA_CIRCLE_DOT;
+  case fem::LoadType::Held:
+    return ICON_FA_ARROWS_TO_DOT;
+  case fem::LoadType::Cylindrical:
+    return ICON_FA_LIFE_RING;
   case fem::LoadType::Temperature:
     return ICON_FA_TEMPERATURE_HALF;
   case fem::LoadType::HeatFlux:
@@ -131,6 +144,81 @@ const char* LoadGlyph(fem::LoadType t) {
     return ICON_FA_FIRE;
   }
   return ICON_FA_BOLT;
+}
+
+// The roller, held and cylindrical tools (docs/simulation/README.md
+// #rollers-held-directions-and-cylindrical-supports): offered on a part's
+// static, modal or buckling study, each with what it holds chosen before the
+// click. Nothing here has a default with a unit: a held support's
+// displacements are zero until typed, and one with no direction ticked is
+// refused where it is placed.
+template <class Arm>
+void DrawFrameSupportTools(AppState& state, const fem::Study& s, Arm&& arm) {
+  SimulationState& sim = state.simulation;
+  const StudyHost host = StudyHostOf(state);
+  if (host.IsAssembly() || s.type == fem::AnalysisType::Topology ||
+      s.type == fem::AnalysisType::Thermal)
+    return;
+  arm(ICON_FA_CIRCLE_DOT " Roller###sim_bc_roller",
+      SimulationState::Tool::Roller);
+  arm(ICON_FA_ARROWS_TO_DOT " Held###sim_bc_held", SimulationState::Tool::Held);
+  arm(ICON_FA_LIFE_RING " Cylindrical###sim_bc_cylindrical",
+      SimulationState::Tool::Cylindrical);
+  if (sim.tool == SimulationState::Tool::Roller)
+    ImGui::TextDisabled("Click a face: held along its normal, free across "
+                        "it -- a symmetry plane on a flat face, a "
+                        "frictionless seat on a curved one");
+  if (sim.tool == SimulationState::Tool::Held) {
+    // The frame: the world's, or a Frame or datum of the part.
+    std::string current = "World";
+    std::vector<std::pair<uint64_t, std::string>> frames;
+    if (host.part)
+      for (const auto& f : host.part->GetFeatures())
+        if (datumframe::IsAnchor(*f))
+          frames.push_back({f->GetId(), f->GetName()});
+    for (const auto& [id, name] : frames)
+      if (id == sim.pendingHeldFrame)
+        current = name;
+    LeftLabel("Frame");
+    if (ImGui::BeginCombo("###sim_held_frame", current.c_str())) {
+      if (ImGui::Selectable("World###held_frame_world",
+                            sim.pendingHeldFrame == 0))
+        sim.pendingHeldFrame = 0;
+      for (const auto& [id, name] : frames)
+        if (ImGui::Selectable(
+                (name + "###held_frame_" + std::to_string(id)).c_str(),
+                sim.pendingHeldFrame == id))
+          sim.pendingHeldFrame = id;
+      ImGui::EndCombo();
+    }
+    for (int k = 0; k < 3; ++k) {
+      const std::string id = std::string("Hold ") + fem::kHeldAxisNames[k] +
+                             "###sim_held_" + fem::kHeldAxisNames[k];
+      ImGui::Checkbox(id.c_str(), &sim.pendingHold[k]);
+      if (sim.pendingHold[k] && s.type == fem::AnalysisType::Static) {
+        ImGui::SameLine();
+        std::string expr;
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+        if (ExprInputDouble(
+                state,
+                (std::string("###sim_held_d") + fem::kHeldAxisNames[k]).c_str(),
+                &sim.pendingHeldMm[k], "%.4g mm", &expr))
+          sim.pendingHeldMmExpr[k] = expr;
+      }
+    }
+    ImGui::TextDisabled("Click a face: each ticked direction held, at the "
+                        "displacement typed (0: where it is)");
+  }
+  if (sim.tool == SimulationState::Tool::Cylindrical) {
+    for (int k = 0; k < 3; ++k) {
+      const std::string id = std::string("Hold ") +
+                             fem::kCylindricalAxisNames[k] + "###sim_cyl_" +
+                             fem::kCylindricalAxisNames[k];
+      ImGui::Checkbox(id.c_str(), &sim.pendingCylHold[k]);
+    }
+    ImGui::TextDisabled("Click a bore or a shaft: held both ways in the "
+                        "directions ticked, about its axis");
+  }
 }
 
 // A torque's axis, chosen before the click (DrawAxisRefCombo's choices on a
@@ -643,6 +731,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   if (s.type == fem::AnalysisType::Static)
     arm(ICON_FA_ARROWS_DOWN_TO_LINE " Contact###sim_bc_contact",
         SimulationState::Tool::Contact);
+  DrawFrameSupportTools(state, s, arm);
   ImGui::Checkbox("Labels in viewport###sim_show_labels", &sim.showLabels);
   DrawThermalTools(state);
   if (sim.tool == SimulationState::Tool::Contact) {
@@ -797,6 +886,8 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       row.tail = SimulationLoadLabel(l);
     if (l.type == fem::LoadType::Pin)
       row.tail = l.fixRotation ? "held from turning" : "free to turn";
+    if (fem::IsFrameSupport(l.type))
+      row.tail = SimulationLoadLabel(l);
     if (l.type == fem::LoadType::Contact) {
       char buf[64];
       std::snprintf(buf, sizeof(buf), "%s, friction %.3g",
@@ -3044,6 +3135,49 @@ void TorqueGlyph(const glm::vec3& centre, const glm::vec3& axis, float radius,
                      centre + axis * radius * 1.2f, 1.6f, kTorque, out);
 }
 
+// A roller: a ground line off the face along `n`, on two wheels that touch
+// the face, in both in-plane axes as the anchor's hatch is.
+void RollerGlyph(const glm::vec3& c, const glm::vec3& n, float len,
+                 std::vector<PrimVertex>& out) {
+  glm::vec3 side =
+      glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+  side = glm::normalize(glm::cross(n, side));
+  const glm::vec3 other = glm::normalize(glm::cross(n, side));
+  const float r = len * 0.1f;
+  for (const glm::vec3& axis : {side, other}) {
+    const glm::vec3 ground = c + n * (2.0f * r);
+    ui::AppendPrimLine(ground - axis * len * 0.4f, ground + axis * len * 0.4f,
+                       2.4f, kFixed, out);
+    for (float at : {-0.22f, 0.22f}) {
+      const glm::vec3 wc = c + axis * (len * at) + n * r;
+      constexpr int kSegments = 12;
+      for (int i = 0; i < kSegments; ++i) {
+        const float a0 = 6.2831853f * i / kSegments;
+        const float a1 = 6.2831853f * (i + 1) / kSegments;
+        ui::AppendPrimLine(wc + (axis * std::cos(a0) + n * std::sin(a0)) * r,
+                           wc + (axis * std::cos(a1) + n * std::sin(a1)) * r,
+                           1.6f, kFixed, out);
+      }
+    }
+  }
+}
+
+// A held direction `d`: an arrow along it from the face's centre with a
+// bar across its foot; `moved` (a prescribed displacement) gives the arrow a
+// second head, the way it is pushed.
+void HeldGlyph(const glm::vec3& c, const glm::vec3& d, float len, bool moved,
+               std::vector<PrimVertex>& out) {
+  const glm::vec3 dir = glm::normalize(d);
+  ArrowGlyph(c, c + dir * len, kFixed, out);
+  if (moved)
+    ArrowGlyph(c, c + dir * len * 0.7f, kFixed, out);
+  glm::vec3 side =
+      glm::abs(dir.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+  side = glm::normalize(glm::cross(dir, side));
+  ui::AppendPrimLine(c - side * len * 0.2f, c + side * len * 0.2f, 2.4f, kFixed,
+                     out);
+}
+
 // An anchor hatch: a ground line with strokes fanning off it, in BOTH
 // in-plane axes. It used to draw along one axis only, so from most angles
 // a fixed support was a single stick lying on the face. The strokes lean
@@ -3158,8 +3292,37 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
     if (!faceFrame(load.occurrenceId, load.face, c, n))
       continue;
     switch (load.type) {
+    case fem::LoadType::Roller: {
+      // A roller: the hatch on wheels, standing on each sample's normal --
+      // free across the face, held along it.
+      const auto samples = SampleFace(state, load.occurrenceId, load.face,
+                                      spacing * 1.5f, kMaxGlyphsPerFace / 2);
+      const float size = samples.size() > 1 ? len * 0.55f : len;
+      for (const FaceSample& fs : samples)
+        RollerGlyph(fs.point, fs.normal, size, out);
+      break;
+    }
+    case fem::LoadType::Held: {
+      // An arrow along each held direction of its frame, with a bar across
+      // it: held there, free in the others.
+      std::array<glm::dvec3, 3> axes{glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
+                                     glm::dvec3(0, 0, 1)};
+      if (load.frame != 0 && host.part)
+        if (const Feature* f = host.part->FindFeatureById(load.frame);
+            f && datumframe::IsAnchor(*f)) {
+          const glm::dmat4 m = datumframe::Matrix(*f);
+          for (int k = 0; k < 3; ++k)
+            axes[k] = glm::normalize(glm::dvec3(m[k]));
+        }
+      for (int k = 0; k < 3; ++k)
+        if (load.hold[k])
+          HeldGlyph(c, glm::vec3(axes[k]), len, load.prescribedMm[k] != 0.0,
+                    out);
+      break;
+    }
     case fem::LoadType::Fixed:
     case fem::LoadType::Pin:
+    case fem::LoadType::Cylindrical:
     case fem::LoadType::Contact: {
       // The hatch repeated over the face, so "what is fixed" reads as an
       // AREA -- and each hatch stands on its own triangle's normal, which on
@@ -3405,6 +3568,26 @@ std::string SimulationLoadLabel(const fem::Load& load) {
     return load.fixRotation ? "pin, held" : "pin";
   case fem::LoadType::Contact:
     return "contact";
+  case fem::LoadType::Roller:
+    return "roller";
+  case fem::LoadType::Held:
+  case fem::LoadType::Cylindrical: {
+    const bool held = load.type == fem::LoadType::Held;
+    std::string text = held ? "held" : "cylindrical";
+    const char* sep = " ";
+    for (int k = 0; k < 3; ++k)
+      if (load.hold[k]) {
+        text += sep;
+        text += held ? fem::kHeldAxisNames[k] : fem::kCylindricalAxisNames[k];
+        if (held && load.prescribedMm[k] != 0.0) {
+          std::snprintf(buf, sizeof(buf), " %+.3g mm",
+                        load.prescribedMm[k].value);
+          text += buf;
+        }
+        sep = ", ";
+      }
+    return text;
+  }
   case fem::LoadType::Force:
     if (std::abs(load.magnitude) >= 1000.0)
       std::snprintf(buf, sizeof(buf), "%.3g kN", load.magnitude.value / 1000.0);
@@ -3552,6 +3735,9 @@ void DrawSimulationLabels(AppState& state) {
     case fem::LoadType::Fixed:
     case fem::LoadType::Pin:
     case fem::LoadType::Contact:
+    case fem::LoadType::Roller:
+    case fem::LoadType::Held:
+    case fem::LoadType::Cylindrical:
       label(c, SimulationLoadLabel(load), col(kFixed));
       break;
     case fem::LoadType::Force: {
@@ -3742,6 +3928,15 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   case SimulationState::Tool::Contact:
     load.type = fem::LoadType::Contact;
     break;
+  case SimulationState::Tool::Roller:
+    load.type = fem::LoadType::Roller;
+    break;
+  case SimulationState::Tool::Held:
+    load.type = fem::LoadType::Held;
+    break;
+  case SimulationState::Tool::Cylindrical:
+    load.type = fem::LoadType::Cylindrical;
+    break;
   default:
     load.type = fem::LoadType::Pressure;
     break;
@@ -3810,6 +4005,52 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
       return;
     }
     load.fixRotation = sim.pendingPinFixRotation;
+  }
+  if (fem::IsFrameSupport(load.type)) {
+    // Refused where it can be read, and nothing placed
+    // (docs/simulation/README.md
+    // #rollers-held-directions-and-cylindrical-supports).
+    if (host.IsAssembly()) {
+      sim.placeRefusal = std::string("A ") + fem::LoadTypeToString(load.type) +
+                         " support is a part study's; an assembly study "
+                         "holds its part with fixed faces";
+      return;
+    }
+    if (load.type == fem::LoadType::Held) {
+      load.hold = sim.pendingHold;
+      load.frame = sim.pendingHeldFrame;
+      if (s->type == fem::AnalysisType::Static)
+        for (int k = 0; k < 3; ++k)
+          if (load.hold[k]) {
+            load.prescribedMm[k] = sim.pendingHeldMm[k];
+            load.prescribedMm[k].expr = sim.pendingHeldMmExpr[k];
+          }
+      if (!load.hold[0] && !load.hold[1] && !load.hold[2]) {
+        sim.placeRefusal = "Tick the directions it holds (x, y, z), then "
+                           "click the face again";
+        return;
+      }
+    }
+    if (load.type == fem::LoadType::Cylindrical) {
+      if (!faceDoc || !fem::CylindricalFaceAxis(*faceDoc, face)) {
+        sim.placeRefusal = "'" + face.name +
+                           "' is not cylindrical: a cylindrical support "
+                           "holds a bore or a shaft about its axis";
+        return;
+      }
+      load.hold = sim.pendingCylHold;
+      if (!load.hold[0] && !load.hold[1] && !load.hold[2]) {
+        sim.placeRefusal = "Tick the directions it holds (radial, "
+                           "tangential, axial), then click the face again";
+        return;
+      }
+    }
+    fem::Study with = *s;
+    with.loads.push_back(load);
+    if (const std::string why = fem::FrameSupportRefusal(with); !why.empty()) {
+      sim.placeRefusal = why;
+      return;
+    }
   }
   if (load.type == fem::LoadType::Contact) {
     // Refused where it can be read, and nothing placed: on the ground a
