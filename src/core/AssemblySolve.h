@@ -286,8 +286,34 @@ void SetMateDof(Mate& m, MateDof dof, double value);
 // stop. A cone holds the tilt and keeps the twist about Z.
 [[nodiscard]] double ClampToRange(const std::optional<MateRange>& r,
                                   double value);
-[[nodiscard]] glm::dquat ClampToCone(const std::optional<double>& coneRad,
+[[nodiscard]] glm::dquat ClampToCone(const std::optional<ExprAngle>& coneRad,
                                      const glm::dquat& ballRotation);
+
+// ---- Expressions (docs/assemblies/README.md#numbers-that-are-expressions)
+//
+// Evaluates every bound number of `doc` (AssemblyDocument::VisitExprs) over
+// `symbols`, the project's variables. A text that does not evaluate keeps
+// its last good value and is its owner's problem; so is a mate whose values
+// then cannot stand -- a range upside down, a value outside its range, a
+// range excluding where the mate stands -- and that mate keeps ALL its last
+// good values, carrying the reason as `exprError`. A motion study whose
+// samples or deflection cannot stand the same. The problems are stored on
+// the document (ExprProblems). True when any value or problem changed: the
+// caller re-solves.
+bool EvaluateExprs(AssemblyDocument& doc, const SymbolTable& symbols);
+// The problem of `owner`'s slot at `path` evaluating over `symbols`, or
+// empty: what an RPC that sets one refuses with before it changes anything.
+// Evaluates into the slot.
+[[nodiscard]] std::string EvaluateOne(const ExprSlot& slot,
+                                      const SymbolTable& symbols);
+// One relation's slots, paths relative to it ("phase", "lift/2/1"): what
+// AssemblyDocument::VisitExprs walks for each relation.
+void VisitRelationExprs(Relation& r, const ExprVisitor& visit);
+// Evaluates them over `symbols`; the first problem, naming the key, or
+// empty. What an RPC that builds or edits a relation runs once its kind and
+// b's DOF are known.
+[[nodiscard]] std::string EvaluateRelationExprs(Relation& r,
+                                                const SymbolTable& symbols);
 
 // What the caller just drove, held while a loop closes around it. Zero =
 // nothing driven, which is every call that is not a drag, a set_mate or a

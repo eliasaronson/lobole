@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+class AssemblyDocument;
 class Document;
 
 namespace ui {
@@ -43,5 +44,32 @@ literals::ExtractPlan PlanExtractVariables(AppState& state,
 [[nodiscard]] std::string
 ApplyExtractVariables(AppState& state, const literals::ExtractPlan& plan,
                       bool projectScope);
+
+// ---- An assembly's literals ------------------------------------------------
+// The same lint and extraction over an assembly's numbers
+// (AssemblyDocument::VisitExprs), against the project's variables, which
+// are all an assembly reads. A finding's and a use's `feature` is the
+// owner ("mate 'Hinge'"), its featureId 0, and its field's path the slot's
+// ("mates/0/limits/rotation/1"), what extract_variables' `fields` names.
+
+// Every unbound number of `a` equal to a project variable it could mean.
+// `checked` counts the literals compared.
+std::vector<literals::LiteralFinding>
+LintAssembly(AppState& state, AssemblyDocument& a, size_t* checked = nullptr);
+
+// Plans an extraction on `a`: one project variable per literal (equal ones
+// of one owner sharing it; of several, with mergeEqual), or with reuse the
+// one existing variable it equals. options.featureIds is not used here;
+// options.paths limits it to those slots, an unknown one refused naming
+// what exists.
+literals::ExtractPlan PlanExtractAssembly(AppState& state, AssemblyDocument& a,
+                                          literals::ExtractOptions options);
+
+// Applies it: the new variables are project variables (one step on the
+// project history), and binding the slots is one step on the assembly's.
+// Returns "" or why nothing was changed.
+[[nodiscard]] std::string
+ApplyExtractAssembly(AppState& state, AssemblyDocument& a,
+                     const literals::ExtractPlan& plan);
 
 } // namespace ui

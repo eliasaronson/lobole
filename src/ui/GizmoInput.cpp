@@ -264,7 +264,7 @@ bool BuildGizmoSpec(AppState& state, Occurrence* occ, uint64_t inner,
   // offset seats B up or down the axis (a gear on a plate sits 6.5 mm above
   // the hole's mid-depth), and a ring drawn at the hole read as the gear
   // floating above it — reported as "the pinion moves away from the gears".
-  spec.origin = glm::dvec3((*Wa)[3]) + spec.axis[2] * mate->offset;
+  spec.origin = glm::dvec3((*Wa)[3]) + spec.axis[2] * mate->offset.value;
   switch (mate->type) {
   case MateType::Revolute:
     spec.rot[2] = true;
@@ -913,6 +913,7 @@ bool DragInnerPart(AppState& state, const Ray& screenRay, bool down,
     const double t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
     const double f = std::max(double(state.explodeFactor), 0.05);
     step->offset = g.startOffset + A * ((t - g.startParam) / f);
+    step->offsetExpr = {}; // dragged by hand: numbers again
     PushOccurrenceLive(state, F->id);
     return true;
   }
@@ -950,6 +951,9 @@ bool DragInnerPart(AppState& state, const Ray& screenRay, bool down,
   const std::vector<InnerPose> wasPoses = F->innerPoses;
   assembly::SetMateDofAt(*state.assembly, path, mate->id, dof, value,
                          AssemblyResolverFor(state));
+  for (InnerMateDof& d : F->innerMateDofs) // dragged by hand: a number again
+    if (d.mate == mate->id)
+      (dof == MateDof::Rotation ? d.rotation.expr : d.offset.expr).clear();
   const assembly::SolveReport rep =
       SolveActiveAssemblyReport(state, {mate->id, dof, path});
   if (std::any_of(
@@ -1043,6 +1047,7 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
       const double f =
           std::max(double(state.explodeFactor), 0.05); // never divide by ~0
       step->offset = g.startOffset + A * ((t - g.startParam) / f);
+      step->offsetExpr = {}; // dragged by hand: numbers again
       PushOccurrenceLive(state, occ->id);
       return true;
     }
@@ -1057,6 +1062,7 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
         const double t =
             RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
         occ->position = g.startPos + A * (t - g.startParam);
+        occ->positionExpr = {}; // dragged by hand: numbers again
       } else {
         double ang;
         // The TURN is what snaps here: a free occurrence's starting
@@ -1090,12 +1096,16 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
         const double t =
             RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
         const double v = g.startDof + (t - g.startParam);
-        if (g.axis == 0)
-          mate->dx = held(RangedValue::Dx, v);
-        else if (g.axis == 1)
-          mate->dy = held(RangedValue::Dy, v);
-        else
-          mate->offset = held(RangedValue::Offset, v);
+        // Dragged by hand, a value is a number again: the text that drove
+        // it would put it back at the next variable change.
+        ExprValue& moved = g.axis == 0   ? mate->dx
+                           : g.axis == 1 ? mate->dy
+                                         : mate->offset;
+        moved = held(g.axis == 0   ? RangedValue::Dx
+                     : g.axis == 1 ? RangedValue::Dy
+                                   : RangedValue::Offset,
+                     v);
+        moved.expr.clear();
       } else {
         double ang;
         if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
@@ -1111,10 +1121,11 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
             if (mate->ballRotation != want)
               g.heldBy = "'" + mate->name + "' held at its cone " +
                          assembly::FormatRangedValue(RangedValue::Cone,
-                                                     *mate->coneRad);
+                                                     mate->coneRad->value);
           } else {
             mate->rotation =
                 held(RangedValue::Rotation, SnapAngleRad(g.startDof + d, snap));
+            mate->rotation.expr.clear(); // dragged by hand: a number again
           }
         }
       }
@@ -1192,7 +1203,10 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
         break;
       }
     if (!step) {
-      view->steps.push_back({stepOcc, glm::dvec3(0.0), path});
+      ExplodeStep made;
+      made.occurrenceId = stepOcc;
+      made.path = path;
+      view->steps.push_back(std::move(made));
       step = &view->steps.back();
     }
     g.startOffset = step->offset;

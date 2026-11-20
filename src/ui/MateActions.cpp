@@ -223,8 +223,14 @@ bool DeriveMateFromPlacement(AppState& state, Mate& mate,
     return false;
   // What the solver will compose: world(b's frame) = world(a's frame) *
   // adjust. So the adjust we want is what stands between them right now.
+  // A derived value is a number: whatever text drove it no longer does.
+  mate.rotation.expr.clear();
+  mate.dx.expr.clear();
+  mate.dy.expr.clear();
+  mate.offset.expr.clear();
   return assembly::DeriveMateDofs(glm::inverse(*wa) * *wb, how, mate.flipped,
-                                  mate.rotation, mate.dx, mate.dy, mate.offset);
+                                  mate.rotation.value, mate.dx.value,
+                                  mate.dy.value, mate.offset.value);
 }
 
 // Arms one of the mate session's connector slots on the shared armed-slot
@@ -466,11 +472,13 @@ void AppendMateLimitOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
   // The seat the arc turns at: a revolute's axial offset, a planar's gap,
   // the plane's own slide.
   const glm::dvec3 seat =
-      o + z * (slides ? 0.0 : m->offset) +
-      (m->type == MateType::Planar ? x * m->dx + y * m->dy : glm::dvec3(0.0));
+      o + z * (slides ? 0.0 : m->offset.value) +
+      (m->type == MateType::Planar ? x * m->dx.value + y * m->dy.value
+                                   : glm::dvec3(0.0));
   if (m->rotationRange) {
-    const glm::dvec3 c = slides ? o + z * m->offset : seat;
-    const double a0 = m->rotationRange->min, a1 = m->rotationRange->max;
+    const glm::dvec3 c = slides ? o + z * m->offset.value : seat;
+    const double a0 = m->rotationRange->min.value,
+                 a1 = m->rotationRange->max.value;
     const auto at = [&](double t) {
       return c + r * (std::cos(t) * x + std::sin(t) * y);
     };
@@ -484,23 +492,23 @@ void AppendMateLimitOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
     seg(c, at(m->rotation) + (at(m->rotation) - c) * 0.15, now);
   }
   if (m->offsetRange && slides) {
-    const glm::dvec3 a = o + z * m->offsetRange->min;
-    const glm::dvec3 b = o + z * m->offsetRange->max;
+    const glm::dvec3 a = o + z * m->offsetRange->min.value;
+    const glm::dvec3 b = o + z * m->offsetRange->max.value;
     seg(a, b, range);
     seg(a - x * (r * 0.15), a + x * (r * 0.15), range);
     seg(b - x * (r * 0.15), b + x * (r * 0.15), range);
-    const glm::dvec3 p = o + z * m->offset;
+    const glm::dvec3 p = o + z * m->offset.value;
     seg(p - y * (r * 0.2), p + y * (r * 0.2), now);
   } else if (m->offsetRange) { // a planar's gap: where its plane may sit
-    for (double g : {m->offsetRange->min, m->offsetRange->max})
+    for (double g : {m->offsetRange->min.value, m->offsetRange->max.value})
       seg(o + z * g - x * (r * 0.3), o + z * g + x * (r * 0.3), range);
   }
   if (m->dxRange || m->dyRange) {
-    const double x0 = m->dxRange ? m->dxRange->min : m->dx;
-    const double x1 = m->dxRange ? m->dxRange->max : m->dx;
-    const double y0 = m->dyRange ? m->dyRange->min : m->dy;
-    const double y1 = m->dyRange ? m->dyRange->max : m->dy;
-    const glm::dvec3 g = o + z * m->offset;
+    const double x0 = m->dxRange ? m->dxRange->min.value : m->dx.value;
+    const double x1 = m->dxRange ? m->dxRange->max.value : m->dx.value;
+    const double y0 = m->dyRange ? m->dyRange->min.value : m->dy.value;
+    const double y1 = m->dyRange ? m->dyRange->max.value : m->dy.value;
+    const glm::dvec3 g = o + z * m->offset.value;
     const auto p = [&](double u, double v) { return g + x * u + y * v; };
     seg(p(x0, y0), p(x1, y0), range);
     seg(p(x1, y0), p(x1, y1), range);

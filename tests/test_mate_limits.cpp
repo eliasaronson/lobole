@@ -118,9 +118,9 @@ TEST_CASE("A range on a value the type does not free is refused, naming "
   b.rotationRange = MateRange{0.0, 1.0};
   CHECK_THAT(assembly::MateRangeProblem(b), ContainsSubstring("cone"));
   b.rotationRange.reset();
-  b.coneRad = Rad(190);
+  b.coneRad = ExprAngle::FromRadians(Rad(190));
   CHECK_THAT(assembly::MateRangeProblem(b), ContainsSubstring("0..180"));
-  b.coneRad = Rad(25);
+  b.coneRad = ExprAngle::FromRadians(Rad(25));
   CHECK(assembly::MateRangeProblem(b).empty());
 
   // A planar frees its slide, its spin and (as a range) its gap.
@@ -164,7 +164,7 @@ TEST_CASE("A value outside its range is refused, inside and at a bound "
 TEST_CASE("A ball's cone holds the tilt and keeps the twist",
           "[assembly][limits]") {
   Mate b = MateOf(MateType::Ball);
-  b.coneRad = Rad(20);
+  b.coneRad = ExprAngle::FromRadians(Rad(20));
   // Tilted 35 degrees about X, twisted 50 about Z first.
   const glm::dquat twist = glm::angleAxis(Rad(50), glm::dvec3(0, 0, 1));
   const glm::dquat tilt = glm::angleAxis(Rad(35), glm::dvec3(1, 0, 0));

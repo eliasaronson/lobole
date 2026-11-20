@@ -5,6 +5,7 @@
 
 #include "core/Configuration.h"
 #include "core/ElementMap.h"
+#include "core/ExprValue.h"
 #include "core/Units.h"
 #include "core/fem/FemStudy.h"
 #include "core/sketch/ExternalPrint.h"
@@ -12,6 +13,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -46,8 +48,10 @@ struct InnerPose {
 // posed (v129): every value a mate can move, by the mate's id there.
 struct InnerMateDof {
   uint64_t mate = 0;
-  double rotation = 0.0;
-  double offset = 0.0;
+  // The two set_mate {path} poses, and so the two that take an expression
+  // (docs/assemblies/README.md#numbers-that-are-expressions).
+  ExprAngle rotation; // radians
+  ExprValue offset;
   double dx = 0.0;
   double dy = 0.0;
   glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0};
@@ -78,6 +82,11 @@ struct Occurrence {
   // and how mate frames will think — not a raw mat4.
   glm::dvec3 position{0.0};
   glm::dquat orientation{1.0, 0.0, 0.0, 0.0}; // (w,x,y,z) identity
+  // An expression per coordinate of `position`, "" for a literal one
+  // (docs/assemblies/README.md#numbers-that-are-expressions). Only an
+  // occurrence nothing else places takes one -- a fixed one, or one no mate
+  // reaches; a mated one is where its mates put it.
+  std::array<std::string, 3> positionExpr;
 
   bool visible = true;
   bool fixed = false; // grounded flag; an anchor for the placement pass
@@ -245,8 +254,12 @@ enum class MateType {
 // one of a mate's free values, inclusive at both ends. Radians for a
 // rotation, mm for an offset, dx or dy -- the units of the value it bounds.
 struct MateRange {
-  double min = 0.0;
-  double max = 0.0;
+  // Each end may be an expression: in degrees for a rotation range, as every
+  // angle expression is, while the value stays in radians.
+  ExprValue min;
+  ExprValue max;
+  MateRange() = default;
+  MateRange(double lo, double hi) : min(lo), max(hi) {}
   bool operator==(const MateRange&) const = default;
 };
 
@@ -269,18 +282,23 @@ struct Mate {
 
   bool flipped = true;   // reverse b's Z against a's Z (two touching planar
                          // faces have opposing normals, hence default true)
-  double rotation = 0.0; // twist about Z, radians: the revolute/cylindrical
-                         // DOF, and on every other type — FASTENED included
-                         // — the authored twist about the connector axis.
-                         // flipped says which side, this says which way up.
-  double offset = 0.0;   // translation along +Z of a's connector frame (a's
-                         // outward face normal): slider/cylindrical DOF, the
-                         // revolute axial seat, the planar plane gap. A
-                         // POSITIVE offset moves b along a's +Z — see the
-                         // MateAdjust composition (T is applied in a's frame).
-  double dx = 0.0;       // in-plane X translation (planar DOF)
-  double dy = 0.0;       // in-plane Y translation (planar DOF)
-  glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0}; // free rotation (ball DOF)
+  // rotation, offset, dx and dy take expressions (rotation's in degrees);
+  // a solve that moves one writes the value and leaves the text, which the
+  // next evaluation applies again.
+  ExprAngle rotation; // twist about Z, radians: the revolute/cylindrical
+                      // DOF, and on every other type — FASTENED included
+                      // — the authored twist about the connector axis.
+                      // flipped says which side, this says which way up.
+  ExprValue offset;   // translation along +Z of a's connector frame (a's
+                      // outward face normal): slider/cylindrical DOF, the
+                      // revolute axial seat, the planar plane gap. A
+                      // POSITIVE offset moves b along a's +Z — see the
+                      // MateAdjust composition (T is applied in a's frame).
+  ExprValue dx;       // in-plane X translation (planar DOF)
+  ExprValue dy;       // in-plane Y translation (planar DOF)
+  // Free rotation (ball DOF). A quaternion has no one number to bind; the
+  // cone that limits it does.
+  glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0};
 
   // Limits (v218, docs/assemblies/README.md#mate-limits). Unset = free, as
   // every mate was before. Which a type takes is RangedValuesFor (in
@@ -292,11 +310,16 @@ struct Mate {
   std::optional<MateRange> offsetRange;
   std::optional<MateRange> dxRange;
   std::optional<MateRange> dyRange;
-  std::optional<double> coneRad;
+  std::optional<ExprAngle> coneRad;
 
   // Transient solve status (mirrors Feature::m_error): stamped by the
   // placement pass, cleared on every solve, never serialized. Empty = ok.
   std::string error;
+  // Transient too: why its expressions do not stand (one did not evaluate,
+  // or the values they gave cannot: min above max, a value outside its
+  // range), set by assembly::EvaluateExprs, which kept the mate's last good
+  // values. Every solve puts it into `error`.
+  std::string exprError;
   // Transient too: when this mate closes a loop that did not close, ITS OWN
   // closure error in mm (0 otherwise) — the number its `error` quotes.
   double residualMm = 0.0;
@@ -307,6 +330,7 @@ struct Mate {
 struct ExplodeStep {
   uint64_t occurrenceId = 0;
   glm::dvec3 offset{0.0}; // world space, at factor 1.0
+  std::array<std::string, 3> offsetExpr; // per coordinate; "" = a literal
   // v130: a moving part INSIDE a flexible placement, named as a mate is
   // ({path, mate}, Relation::mateAPath): `path` is [the placement] and
   // `occurrenceId` the sub-assembly's id for the part. Empty = an occurrence
@@ -393,7 +417,7 @@ struct RelationTerm {
   uint64_t mate = 0;
   std::vector<uint64_t> path; // as Relation::mateAPath reads
   MateDof dof = MateDof::Rotation;
-  double coefficient = 1.0;
+  ExprValue coefficient{1.0};
   int teeth = 0;
 };
 
@@ -411,8 +435,10 @@ struct Relation {
   std::vector<uint64_t> mateBPath;
   MateDof dofA = MateDof::Rotation;
   MateDof dofB = MateDof::Rotation;
-  double ratio = -1.0;
-  double phase = 0.0; // in dofB's unit (radians or mm)
+  ExprValue ratio{-1.0};
+  // In dofB's unit (radians or mm); its expression in degrees for a turn, as
+  // every angle expression is. A relation over several mates' constant.
+  ExprValue phase;
   // Cam only (v88): the lift profile, as (angle in DEGREES, lift in the
   // FOLLOWER's unit — mm for a slide, DEGREES for a turn, v102) rising by
   // angle and spanning one full turn. Stored as authored; the solve converts
@@ -427,6 +453,9 @@ struct Relation {
   // same lift, so propagation runs forward only and the reverse direction is
   // refused rather than picking a branch.
   std::vector<std::pair<double, double>> lift;
+  // An expression per lift entry {angle, lift}, "" for a literal: empty, or
+  // as long as `lift`. Whatever replaces the table replaces this with it.
+  std::vector<std::array<std::string, 2>> liftExpr;
   // Freewheel only (v104): the direction b is DRIVEN in (+1 or -1), and
   // `lead`, how far b has run ahead of the input's drive line in b's unit.
   // A freewheel's pose depends on history, and `lead` is all of it: it only
@@ -470,10 +499,10 @@ struct Relation {
   // (1, 1), both monotone, linear between them: a follower that keeps to
   // a driver's face, as an escape wheel to its pallet's impulse face.
   struct Intermittent {
-    double step = 0.0;
-    double periodDeg = 360.0;
-    double startDeg = 0.0;
-    double durationDeg = 0.0;
+    ExprValue step;
+    ExprValue periodDeg{360.0};
+    ExprValue startDeg;
+    ExprValue durationDeg;
     int slots = 0;
     std::vector<std::pair<double, double>> table;
   } intermittent;
@@ -551,9 +580,11 @@ struct MotionStudy {
   // Range in the DOF's own unit: RADIANS for a rotation, mm for an offset —
   // the same unit `set_mate` takes, so nothing here converts. The RPC takes
   // degrees for a rotation and converts once, at the boundary.
-  double from = 0.0;
-  double to = 0.0;
-  int samples = 48; // poses, `to` inclusive; 720 degrees at 15 = 49
+  // Their expressions are in degrees for a rotation, as every angle
+  // expression is.
+  ExprValue from;
+  ExprValue to;
+  ExprInt samples{48}; // poses, `to` inclusive; 720 degrees at 15 = 49
   bool checkClash = true;
   // "mesh" (the default: triangles, the speed a sweep needs) or "exact"
   // (the boolean, at a boolean's price, for a final gate).
@@ -563,7 +594,7 @@ struct MotionStudy {
   // that (print-in-place gears at 0.1 mm a side, where a 100 mm ring meshes
   // at 0.2 mm) says so here, or its triangles are coarser than the gap they
   // decide. Mesh mode only.
-  double clashDeflectionMm = 0.0;
+  ExprValue clashDeflectionMm;
   // The configuration the study runs under (v128): an id, or 0 for the BASE
   // (no configuration); unset = whichever is active when it runs. A study
   // that measures "full load" has to SAY full load, or it measures whatever
@@ -667,7 +698,7 @@ struct MotionResultCache;
 struct SequencePose {
   uint64_t mateId = 0;
   MateDof dof = MateDof::Rotation;
-  double value = 0.0; // degrees for a rotation, mm for an offset
+  ExprValue value; // degrees for a rotation, mm for an offset
 };
 
 // One step of an assembly sequence
@@ -689,8 +720,8 @@ struct SequenceStep {
   // The mate whose seat gives the default path; 0: the one mate joining it
   // to an occurrence placed before it.
   uint64_t mateId = 0;
-  double distanceMm = -1.0; // from its seat to where it starts; < 0: clear
-  double turnDeg = 0.0;     // turned about the path over it (a bayonet)
+  ExprValue distanceMm{-1.0}; // from its seat to where it starts; < 0: clear
+  ExprValue turnDeg;          // turned about the path over it (a bayonet)
   bool thread = false;      // it goes on by its thread
   std::string note;         // what the step is, for a person
   bool IsPose() const { return occurrences.empty(); }
@@ -699,12 +730,36 @@ struct SequenceStep {
 struct AssemblySequence {
   std::vector<SequenceStep> steps;
   // How much nearer faces come as made (check_insertion's allowance_mm).
-  double allowanceMm = 0.0;
+  ExprValue allowanceMm;
   bool Empty() const { return steps.empty(); }
+};
+
+// One expression of an assembly that does not stand: it did not evaluate,
+// or the value it gave cannot. Its owner keeps its last good value
+// (docs/assemblies/README.md#numbers-that-are-expressions).
+struct AssemblyExprProblem {
+  std::string owner; // "mate 'Hinge'", "motion study 'Sweep'"
+  uint64_t id = 0;   // the owner's id, 0 for the sequence
+  std::string error;
 };
 
 class AssemblyDocument {
 public:
+  // Every number that takes an expression, with who holds it ("mate
+  // 'Hinge'", "study 'Rig'") and its path in the assembly's JSON
+  // ("mates[2].limits.rotation[1]"): the one walk evaluation, rename, the
+  // delete refusal and the literals lint read. The FEM studies' slots
+  // included, under "studies[i].".
+  void VisitExprs(const std::function<void(const std::string& owner,
+                                           const ExprSlot&)>& visit);
+  // What the last assembly::EvaluateExprs found (transient).
+  const std::vector<AssemblyExprProblem>& ExprProblems() const {
+    return m_exprProblems;
+  }
+  void SetExprProblems(std::vector<AssemblyExprProblem> p) {
+    m_exprProblems = std::move(p);
+  }
+
   // The order its parts go together in, and how (v187; groups and poses
   // v188).
   const AssemblySequence& GetSequence() const { return m_sequence; }
@@ -917,6 +972,7 @@ public:
 
 private:
   uint64_t m_edits = 0;
+  std::vector<AssemblyExprProblem> m_exprProblems;
   AssemblySequence m_sequence;
   std::vector<Occurrence> m_occurrences;
   units::System m_units;

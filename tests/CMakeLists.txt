@@ -78,6 +78,7 @@ add_executable(designer_tests
     test_assembly_solve.cpp
     test_assembly_loops.cpp
     test_mate_limits.cpp
+    test_assembly_exprs.cpp
     test_assembly_relations.cpp
     test_derived.cpp
     test_links.cpp
@@ -673,6 +674,13 @@ set_tests_properties(nested_assembly_smoke PROPERTIES TIMEOUT 180)
 
 # Assemblies A3 mates: add/set/remove/list/solve over RPC, error reporting,
 # undo, and a save -> reopen round-trip. Headless (no display).
+# An assembly's numbers as expressions of the project's variables
+# (docs/assemblies/README.md#numbers-that-are-expressions). Headless.
+add_test(NAME assembly_exprs_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_exprs_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(assembly_exprs_smoke PROPERTIES TIMEOUT 120)
+
 add_test(NAME assembly_mates_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_mates_smoke.py
                  $<TARGET_FILE:designer>)

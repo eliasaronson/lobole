@@ -1,0 +1,631 @@
+{
+  "configurations": [
+    {
+      "id": 17,
+      "mate_overrides": [
+        {
+          "mate": 5,
+          "offset": 1.0,
+          "offset_expr": "gap",
+          "rotation": 0.08726646259971647,
+          "rotation_expr": "lid_open"
+        }
+      ],
+      "name": "Held",
+      "suppressed_mates": [
+        6
+      ],
+      "type": "Configuration"
+    }
+  ],
+  "exploded": [
+    {
+      "id": 10,
+      "name": "Apart",
+      "steps": [
+        {
+          "occurrence": 1,
+          "offset": [
+            0.0,
+            0.0,
+            10.0
+          ],
+          "offset_expr": [
+            "swing",
+            "teeth * pitch",
+            "stroke / 2"
+          ]
+        }
+      ],
+      "type": "ExplodedView"
+    }
+  ],
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "ball_rotation": [
+        0.1,
+        0.1,
+        0.1,
+        0.9
+      ],
+      "dx": 1.0,
+      "dx_expr": "lid_open",
+      "dy": 1.0,
+      "dy_expr": "gap",
+      "flipped": true,
+      "id": 4,
+      "mate_type": "fastened",
+      "name": "m",
+      "offset": 0.0,
+      "offset_expr": "stroke / 2",
+      "rotation": 0.0,
+      "rotation_expr": "teeth * pitch",
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "ball_rotation": [
+        0.1,
+        0.1,
+        0.1,
+        0.9
+      ],
+      "dx": 1.0,
+      "dx_expr": "teeth * pitch",
+      "dy": 1.0,
+      "dy_expr": "stroke / 2",
+      "flipped": true,
+      "id": 5,
+      "limits": {
+        "rotation": [
+          -1000.0,
+          1000.0
+        ],
+        "rotation_expr": [
+          "lid_open",
+          "gap"
+        ]
+      },
+      "mate_type": "revolute",
+      "name": "m",
+      "offset": 0.0,
+      "offset_expr": "swing",
+      "rotation": 0.0,
+      "rotation_expr": "-swing",
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "ball_rotation": [
+        0.1,
+        0.1,
+        0.1,
+        0.9
+      ],
+      "dx": 1.0,
+      "dx_expr": "teeth * pitch",
+      "dy": 1.0,
+      "dy_expr": "stroke / 2",
+      "flipped": true,
+      "id": 6,
+      "limits": {
+        "offset": [
+          -1000.0,
+          1000.0
+        ],
+        "offset_expr": [
+          "lid_open",
+          "gap"
+        ]
+      },
+      "mate_type": "slider",
+      "name": "m",
+      "offset": 0.0,
+      "offset_expr": "swing",
+      "rotation": 0.0,
+      "rotation_expr": "-swing",
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "ball_rotation": [
+        0.1,
+        0.1,
+        0.1,
+        0.9
+      ],
+      "dx": 1.0,
+      "dx_expr": "teeth * pitch",
+      "dy": 1.0,
+      "dy_expr": "stroke / 2",
+      "flipped": true,
+      "id": 7,
+      "limits": {
+        "offset": [
+          -1000.0,
+          1000.0
+        ],
+        "offset_expr": [
+          "-swing",
+          "swing"
+        ],
+        "rotation": [
+          -1000.0,
+          1000.0
+        ],
+        "rotation_expr": [
+          "lid_open",
+          "gap"
+        ]
+      },
+      "mate_type": "cylindrical",
+      "name": "m",
+      "offset": 0.0,
+      "offset_expr": "swing",
+      "rotation": 0.0,
+      "rotation_expr": "-swing",
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "ball_rotation": [
+        0.1,
+        0.1,
+        0.1,
+        0.9
+      ],
+      "dx": 1.0,
+      "dx_expr": "lid_open",
+      "dy": 1.0,
+      "dy_expr": "gap",
+      "flipped": true,
+      "id": 8,
+      "limits": {
+        "dx": [
+          -1000.0,
+          1000.0
+        ],
+        "dx_expr": [
+          "lid_open",
+          "gap"
+        ],
+        "dy": [
+          -1000.0,
+          1000.0
+        ],
+        "dy_expr": [
+          "-swing",
+          "swing"
+        ],
+        "offset": [
+          -1000.0,
+          1000.0
+        ],
+        "offset_expr": [
+          "teeth * pitch",
+          "stroke / 2"
+        ],
+        "rotation": [
+          -1000.0,
+          1000.0
+        ],
+        "rotation_expr": [
+          "-swing",
+          "swing"
+        ]
+      },
+      "mate_type": "planar",
+      "name": "m",
+      "offset": 0.0,
+      "offset_expr": "stroke / 2",
+      "rotation": 0.0,
+      "rotation_expr": "teeth * pitch",
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "ball_rotation": [
+        0.1,
+        0.1,
+        0.1,
+        0.9
+      ],
+      "dx": 1.0,
+      "dx_expr": "lid_open",
+      "dy": 1.0,
+      "dy_expr": "gap",
+      "flipped": true,
+      "id": 9,
+      "limits": {
+        "cone": 0.5235987755982988,
+        "cone_expr": "-swing"
+      },
+      "mate_type": "ball",
+      "name": "m",
+      "offset": 0.0,
+      "offset_expr": "stroke / 2",
+      "rotation": 0.0,
+      "rotation_expr": "teeth * pitch",
+      "type": "Mate"
+    }
+  ],
+  "motion": [
+    {
+      "check_clash": true,
+      "clash_deflection_mm": 0.1,
+      "clash_deflection_mm_expr": "gap",
+      "clash_mode": "mesh",
+      "driver_dof": "rotation",
+      "driver_mate": 5,
+      "from": 0.0,
+      "from_expr": "teeth * pitch",
+      "id": 16,
+      "max_refine": 3,
+      "name": "Sweep",
+      "samples": 48,
+      "samples_expr": "lid_open",
+      "to": 1.5707963267948966,
+      "to_expr": "stroke / 2",
+      "type": "MotionStudy"
+    }
+  ],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Base",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "position_expr": [
+          "stroke / 2",
+          "lid_open",
+          "gap"
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "flexible": true,
+      "id": 2,
+      "inner_mate_dofs": [
+        {
+          "dx": 1.0,
+          "dy": 1.0,
+          "mate": 6,
+          "offset": 2.0,
+          "offset_expr": "lid_open",
+          "rotation": 0.17453292519943295,
+          "rotation_expr": "stroke / 2"
+        }
+      ],
+      "inner_poses": [
+        {
+          "occurrence": 5,
+          "orientation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "position": [
+            1.0,
+            2.0,
+            3.0
+          ]
+        }
+      ],
+      "name": "Unit",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "assembly",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "position_expr": [
+          "-swing",
+          "swing",
+          "teeth * pitch"
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "attach_offset": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "attach_rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "attached_to": 1,
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 3,
+      "name": "Screw",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "position_expr": [
+          "gap",
+          "-swing",
+          "swing"
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "relations": [
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "id": 11,
+      "kind": "gear",
+      "mate_a": 5,
+      "mate_b": 5,
+      "name": "Pair",
+      "phase": 0.0,
+      "phase_expr": "gap",
+      "ratio": -1.0,
+      "ratio_expr": "lid_open",
+      "type": "Relation"
+    },
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "id": 12,
+      "kind": "gear",
+      "mate_a": 5,
+      "mate_b": 5,
+      "name": "Toothed",
+      "phase": 0.0,
+      "phase_expr": "-swing",
+      "ratio": -1.0,
+      "teeth_a": 12,
+      "teeth_b": 24,
+      "type": "Relation"
+    },
+    {
+      "dof_a": "rotation",
+      "dof_b": "offset",
+      "id": 13,
+      "kind": "cam",
+      "lift": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          180.0,
+          5.0
+        ]
+      ],
+      "lift_expr": [
+        [
+          "teeth * pitch",
+          "stroke / 2"
+        ],
+        [
+          "lid_open",
+          "gap"
+        ]
+      ],
+      "mate_a": 5,
+      "mate_b": 6,
+      "name": "Cam",
+      "phase": 0.0,
+      "phase_expr": "swing",
+      "ratio": -1.0,
+      "type": "Relation"
+    },
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "duration_deg": 90.0,
+      "duration_deg_expr": "stroke / 2",
+      "id": 14,
+      "kind": "intermittent",
+      "mate_a": 5,
+      "mate_b": 5,
+      "motion": "uniform",
+      "name": "Carry",
+      "period_deg": 360.0,
+      "period_deg_expr": "teeth * pitch",
+      "phase": 0.0,
+      "phase_expr": "-swing",
+      "ratio": -1.0,
+      "start_deg": 0.0,
+      "start_deg_expr": "lid_open",
+      "step": 36.0,
+      "step_expr": "swing",
+      "type": "Relation"
+    },
+    {
+      "constant": 0.0,
+      "constant_expr": "gap",
+      "id": 15,
+      "kind": "linear_n",
+      "name": "Sum",
+      "terms": [
+        {
+          "coefficient": 1.0,
+          "coefficient_expr": "-swing",
+          "dof": "rotation",
+          "mate": 5
+        },
+        {
+          "coefficient": 2.0,
+          "coefficient_expr": "swing",
+          "dof": "offset",
+          "mate": 6
+        }
+      ],
+      "type": "Relation"
+    }
+  ],
+  "sequence": {
+    "allowance_mm": 0.1,
+    "allowance_mm_expr": "-swing",
+    "steps": [
+      {
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance_mm": 5.0,
+        "distance_mm_expr": "swing",
+        "mate": 5,
+        "occurrence": 2,
+        "origin_mm": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "turn_deg": 90.0,
+        "turn_deg_expr": "teeth * pitch"
+      },
+      {
+        "pose": [
+          {
+            "mate": 5,
+            "rotation_deg": 10.0,
+            "rotation_deg_expr": "stroke / 2"
+          }
+        ]
+      }
+    ]
+  },
+  "studies": [
+    {
+      "id": 18,
+      "loads": [
+        {
+          "face": {
+            "element": "",
+            "feature_id": 0
+          },
+          "id": 19,
+          "magnitude": 10.0,
+          "type": "fixed"
+        }
+      ],
+      "mesh_size": 0.0,
+      "name": "Rig",
+      "type": "Study"
+    }
+  ],
+  "version": 220
+}

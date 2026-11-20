@@ -2459,6 +2459,25 @@ std::atomic<uint64_t> g_solveCount{0};
 
 uint64_t SolveCount() { return g_solveCount.load(); }
 
+namespace {
+// A mate whose expressions do not stand (assembly::EvaluateExprs) says so in
+// every solve's answer: it stood at its last good values, which is not what
+// it was asked for.
+SolveReport WithExprErrors(AssemblyDocument& asmDoc, SolveReport report) {
+  for (Mate& m : asmDoc.GetMates()) {
+    if (m.exprError.empty())
+      continue;
+    if (m.error.empty()) {
+      m.error = m.exprError;
+      report.erroredMates++;
+    } else if (m.error.find(m.exprError) == std::string::npos) {
+      m.error = m.exprError + "; " + m.error;
+    }
+  }
+  return report;
+}
+} // namespace
+
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById, const Driven& driven,
                   bool diagnose) {
@@ -2473,7 +2492,8 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     Driven own = driven;
     if (!driven.path.empty())
       own.mate = 0; // a path with nothing to expand names no mate here
-    return SolveCore(asmDoc, partById, asmById, own, diagnose);
+    return WithExprErrors(asmDoc,
+                          SolveCore(asmDoc, partById, asmById, own, diagnose));
   }
   FlexibleExpansion ex = ExpandFlexible(asmDoc, partById, asmById);
   Driven inner = driven;
@@ -2481,7 +2501,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   inner.path.clear();
   SolveReport report = SolveCore(ex.doc, partById, asmById, inner, diagnose);
   CollapseFlexible(ex, asmDoc, &report);
-  return report;
+  return WithExprErrors(asmDoc, std::move(report));
 }
 
 glm::dmat3 InertiaAbout(const std::vector<PointInertia>& parts,

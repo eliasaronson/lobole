@@ -2204,6 +2204,95 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->assembly->FindMateById(axleId)->error.empty());
   };
 
+  // A mate limit is an expression of the variables
+  // (docs/assemblies/README.md#numbers-that-are-expressions): typed into the
+  // Edit Mate window's Limits row it KEEPS its text, and a change to the
+  // variable in the Variables panel moves the limit and the arc drawn for
+  // it -- where Ctrl+click `swing / 2` used to store 30 and forget `swing`.
+  t = IM_REGISTER_TEST(engine, "assembly", "a_mate_limit_takes_an_expression");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    const uint64_t partSlotId = s_App->parts[0].id;
+    IM_CHECK(ui::SetProjectVariable(*s_App, "swing", "60", ""));
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    Occurrence base;
+    base.partId = partSlotId;
+    base.fixed = true;
+    const uint64_t baseId = s_App->assembly->AddOccurrence(base);
+    Occurrence lid;
+    lid.partId = partSlotId;
+    const uint64_t lidId = s_App->assembly->AddOccurrence(lid);
+    Mate axle;
+    axle.type = MateType::Revolute;
+    axle.name = "hinge";
+    axle.a.occurrenceId = baseId;
+    axle.a.anchor.origin = true;
+    axle.b.occurrenceId = lidId;
+    axle.b.anchor.origin = true;
+    axle.flipped = false;
+    axle.rotationRange = MateRange{glm::radians(-90.0), glm::radians(90.0)};
+    const uint64_t axleId = s_App->assembly->AddMate(axle);
+    ui::SolveActiveAssembly(*s_App);
+    ui::StartMateEdit(*s_App, axleId);
+    ctx->Yield(3);
+
+    // Where the drawn range ends: the widest angle of its arc about the
+    // hinge (A's frame is the world's here).
+    const auto drawnMaxDeg = [&]() {
+      std::vector<LineVertex3D> lines;
+      ui::AppendMateLimitOverlay(*s_App, lines);
+      double best = -1e9;
+      for (const LineVertex3D& v : lines)
+        if (v.color.x > 0.9f && v.color.z < 0.3f && // the range's colour
+            glm::length(glm::vec2(v.position.x, v.position.y)) > 1e-3f)
+          best = std::max(best, glm::degrees(std::atan2(double(v.position.y),
+                                                        double(v.position.x))));
+      return best;
+    };
+    IM_CHECK(std::abs(drawnMaxDeg() - 90.0) < 0.5);
+
+    ctx->ItemInputValue("//Edit Mate###ToolWindow/Angle/###limit_max",
+                        "swing / 2");
+    ctx->Yield(3);
+    const Mate* m = s_App->assembly->FindMateById(axleId);
+    IM_CHECK(m != nullptr && m->rotationRange.has_value());
+    IM_CHECK_STR_EQ(m->rotationRange->max.expr.c_str(), "swing / 2");
+    IM_CHECK(std::abs(m->rotationRange->max.value - glm::radians(30.0)) < 1e-9);
+    IM_CHECK(std::abs(drawnMaxDeg() - 30.0) < 0.5);
+
+    // The variable changed where a person changes it: the limit follows,
+    // and so does what is drawn.
+    ImGuiWindow* vars = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(vars != nullptr && vars->DockNode != nullptr);
+    ctx->ItemClick(vars->TabId);
+    ctx->Yield(2);
+    ctx->ItemInputValue(
+        "//###Variables/###vars_table/###var_expr_project_swing", "100");
+    ctx->Yield(3);
+    m = s_App->assembly->FindMateById(axleId);
+    IM_CHECK(std::abs(m->rotationRange->max.value - glm::radians(50.0)) < 1e-9);
+    IM_CHECK_STR_EQ(m->rotationRange->max.expr.c_str(), "swing / 2");
+    IM_CHECK(std::abs(drawnMaxDeg() - 50.0) < 0.5);
+    IM_CHECK(m->exprError.empty());
+
+    // A plain number typed over it unbinds it.
+    ctx->ItemInputValue(
+        "//Edit Mate###ToolWindow/Angle/Max###limit_max/##bound", "45");
+    ctx->Yield(3);
+    m = s_App->assembly->FindMateById(axleId);
+    IM_CHECK(m->rotationRange->max.expr.empty());
+    IM_CHECK(std::abs(m->rotationRange->max.value - glm::radians(45.0)) < 1e-9);
+
+    ImGuiWindow* model = ImGui::FindWindowByName(ui::kPanelModel);
+    if (model != nullptr && model->DockNode != nullptr)
+      ctx->ItemClick(model->TabId); // the next test starts on its own tab
+    ctx->ItemClick("//Edit Mate###ToolWindow/###mate_close");
+    ctx->Yield();
+    (void)asmIdx;
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly", "mate_hover_marker");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -2455,7 +2544,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     const Mate* m = s_App->assembly->FindMateById(mateId);
     IM_CHECK(m != nullptr);
-    IM_CHECK(std::abs(glm::degrees(m->rotation) - 90.0f) < 1e-3f);
+    IM_CHECK(std::abs(glm::degrees(m->rotation.value) - 90.0f) < 1e-3f);
     // ...and the driven part turned a quarter turn with it. The angle
     // between two quats, without pulling in gtx: 2*acos|dot|.
     const glm::quat after = s_App->assembly->FindById(secondId)->orientation;
@@ -2534,7 +2623,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
       return r;
     };
     const auto rotationDeg = [&]() {
-      return glm::degrees(s_App->assembly->FindMateById(axleId)->rotation);
+      return glm::degrees(
+          s_App->assembly->FindMateById(axleId)->rotation.value);
     };
 
     // 88 degrees of drag lands on exactly 90.

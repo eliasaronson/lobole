@@ -3113,7 +3113,7 @@ std::shared_ptr<const SequenceCheck> ReadSequenceCheck(ui::AppState& state) {
               (p.dof == MateDof::Rotation ? "rotation" : "offset") +
               " to pose");
         const bool rot = p.dof == MateDof::Rotation;
-        const double to = rot ? glm::radians(p.value) : p.value;
+        const double to = rot ? glm::radians(p.value.value) : p.value.value;
         // A limit set (or a file edited) after the sequence was stated:
         // the check refuses the pose as set_assembly_sequence would
         // (docs/assemblies/README.md#mate-limits), and the film with it.

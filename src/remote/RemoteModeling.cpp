@@ -850,7 +850,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "changes. `part` (name or id) lints another part than the active one. "
      "Run it after building a part from literals; extract_variables "
      "{reuse: true} binds the literal findings.",
-     "part", remote::NeedsPart,
+     "part", remote::NoFlags,
      "checked:{fields:int, placements:int}, literals:{feature:string, "
      "feature_id:int, field:string, label:string, quantity:string, "
      "value:number, variables:string[]}[], part:string, "
@@ -878,7 +878,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "'project' (the default) or 'part'. `value` is mm for a length, "
      "degrees for an angle.",
      "apply, feature_ids, fields, merge_equal, prefix, reuse, scope",
-     remote::NeedsPart,
+     remote::NoFlags,
      "applied:bool, left_alone:{feature:string, feature_id:int, "
      "field:string, label:string, reason:string, value:number}[], "
      "scope:string, variables:{existing:bool, expression:string, "

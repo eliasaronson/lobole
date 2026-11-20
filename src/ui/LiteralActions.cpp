@@ -3,16 +3,22 @@
 
 #include "ui/LiteralActions.h"
 
+#include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Occurrence.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActionsInternal.h" // SlotDoc
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h" // SnapshotAssembly
 #include "ui/VariableActions.h"
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <memory>
+#include <set>
+#include <stdexcept>
 
 namespace ui {
 
@@ -181,6 +187,242 @@ std::string ApplyExtractVariables(AppState& state,
     return "the extraction would break " + why + "; nothing was changed";
   }
   commands.CoalesceSince(depth, "Extract variables");
+  return {};
+}
+
+// ---- An assembly's literals ------------------------------------------------
+
+namespace {
+
+// One unbound number of an assembly, as the lint and the planner read it.
+struct AssemblyField {
+  std::string owner;
+  literals::Field field;
+};
+
+std::vector<AssemblyField> AssemblyFields(AssemblyDocument& a) {
+  std::vector<AssemblyField> out;
+  a.VisitExprs([&](const std::string& owner, const ExprSlot& slot) {
+    literals::Field f;
+    f.path = slot.Path();
+    f.label = slot.Path();
+    f.value = slot.Value();
+    f.expr = slot.Expr();
+    f.quantity = slot.Quantity();
+    out.push_back({owner, std::move(f)});
+  });
+  return out;
+}
+
+// The project's variables, each knowing the kinds the parts use it as: a
+// part-less Document sees exactly the project scope.
+std::vector<literals::Variable> ProjectVariables(AppState& state) {
+  static const Document none;
+  return literals::VariablesInScope(none, &state.projectParameters,
+                                    PartDocuments(state, none));
+}
+
+// "mate 'Hinge'" + "mates/0/limits/rotation/1" -> "hinge_rotation_1": a
+// name for the variable a literal becomes.
+std::string NameFor(const std::string& owner, const std::string& path) {
+  std::string base;
+  const size_t q = owner.find('\'');
+  std::string word = q == std::string::npos
+                         ? owner
+                         : owner.substr(q + 1, owner.rfind('\'') - q - 1);
+  std::string tail;
+  {
+    // The path's last two meaningful segments: "rotation/1", "offset".
+    std::vector<std::string> segs;
+    size_t from = 0;
+    while (true) {
+      const size_t slash = path.find('/', from);
+      segs.push_back(path.substr(from, slash - from));
+      if (slash == std::string::npos)
+        break;
+      from = slash + 1;
+    }
+    size_t keep =
+        segs.size() >= 2 && !segs.back().empty() &&
+                std::isdigit(static_cast<unsigned char>(segs.back()[0]))
+            ? 2
+            : 1;
+    for (size_t i = segs.size() - keep; i < segs.size(); i++)
+      tail += (tail.empty() ? "" : "_") + segs[i];
+  }
+  for (char c : word + "_" + tail) {
+    const unsigned char u = static_cast<unsigned char>(c);
+    base += std::isalnum(u) ? static_cast<char>(std::tolower(u)) : '_';
+  }
+  if (base.empty() || std::isdigit(static_cast<unsigned char>(base[0])))
+    base = "v_" + base;
+  return base;
+}
+
+} // namespace
+
+std::vector<literals::LiteralFinding>
+LintAssembly(AppState& state, AssemblyDocument& a, size_t* checked) {
+  const std::vector<literals::Variable> vars = ProjectVariables(state);
+  std::vector<literals::LiteralFinding> out;
+  size_t n = 0;
+  for (AssemblyField& f : AssemblyFields(a)) {
+    if (!f.field.expr.empty() || f.field.value == 0.0)
+      continue;
+    n++;
+    literals::LiteralFinding finding;
+    finding.feature = f.owner;
+    finding.field = f.field;
+    for (const literals::Variable& v : vars) {
+      if (literals::Matches(v, f.field.quantity, f.field.value))
+        finding.variables.push_back(v.name);
+      else if (literals::Matches(v, f.field.quantity, -f.field.value))
+        finding.variables.push_back("-" + v.name);
+    }
+    if (!finding.variables.empty())
+      out.push_back(std::move(finding));
+  }
+  if (checked != nullptr)
+    *checked = n;
+  return out;
+}
+
+literals::ExtractPlan PlanExtractAssembly(AppState& state, AssemblyDocument& a,
+                                          literals::ExtractOptions options) {
+  options.taken = TakenVariableNames(state);
+  const std::vector<AssemblyField> fields = AssemblyFields(a);
+  for (const std::string& want : options.paths)
+    if (std::none_of(fields.begin(), fields.end(), [&](const AssemblyField& f) {
+          return f.field.path == want;
+        })) {
+      std::string known;
+      for (const AssemblyField& f : fields)
+        known += (known.empty() ? "" : ", ") + f.field.path;
+      throw std::runtime_error("extract_variables: this assembly has no field "
+                               "'" +
+                               want + "'; its fields are " + known);
+    }
+  const std::vector<literals::Variable> vars = ProjectVariables(state);
+  literals::ExtractPlan plan;
+  std::set<std::string> taken = options.taken;
+  for (const AssemblyField& f : fields) {
+    if (!options.paths.empty() &&
+        std::find(options.paths.begin(), options.paths.end(), f.field.path) ==
+            options.paths.end())
+      continue;
+    if (!f.field.expr.empty())
+      continue;
+    const auto leave = [&](const std::string& why) {
+      literals::LeftAlone l;
+      l.feature = f.owner;
+      l.path = f.field.path;
+      l.label = f.field.label;
+      l.value = f.field.value;
+      l.reason = why;
+      plan.leftAlone.push_back(std::move(l));
+    };
+    if (f.field.value == 0.0) {
+      leave("zero: nothing to name");
+      continue;
+    }
+    if (f.field.quantity == literals::Quantity::Count) {
+      leave("a unitless count");
+      continue;
+    }
+    literals::Use use;
+    use.feature = f.owner;
+    use.field = f.field;
+    if (options.reuse) {
+      std::vector<std::string> equal;
+      for (const literals::Variable& v : vars)
+        if (literals::Matches(v, f.field.quantity, f.field.value))
+          equal.push_back(v.name);
+      if (equal.size() == 1) {
+        use.expression = equal[0];
+        auto it = std::find_if(plan.proposals.begin(), plan.proposals.end(),
+                               [&](const literals::Proposal& p) {
+                                 return p.existing && p.name == equal[0];
+                               });
+        if (it == plan.proposals.end()) {
+          literals::Proposal p;
+          p.name = equal[0];
+          p.value = f.field.value;
+          p.quantity = f.field.quantity;
+          p.existing = true;
+          plan.proposals.push_back(std::move(p));
+          it = plan.proposals.end() - 1;
+        }
+        it->uses.push_back(std::move(use));
+        continue;
+      }
+    }
+    // Equal literals of one owner share one variable; of several, only
+    // with mergeEqual (equal is not the same as related).
+    auto shared = std::find_if(
+        plan.proposals.begin(), plan.proposals.end(),
+        [&](const literals::Proposal& p) {
+          return !p.existing && p.value == f.field.value &&
+                 p.quantity == f.field.quantity &&
+                 (options.mergeEqual || p.uses.front().feature == f.owner);
+        });
+    if (shared != plan.proposals.end()) {
+      use.expression = shared->name;
+      shared->uses.push_back(std::move(use));
+      continue;
+    }
+    std::string name = options.prefix + NameFor(f.owner, f.field.path);
+    for (int k = 2; taken.contains(name); k++)
+      name = options.prefix + NameFor(f.owner, f.field.path) + "_" +
+             std::to_string(k);
+    taken.insert(name);
+    literals::Proposal p;
+    p.name = name;
+    p.expression = literals::ExactNumber(f.field.value);
+    p.value = f.field.value;
+    p.quantity = f.field.quantity;
+    use.expression = name;
+    p.uses.push_back(std::move(use));
+    plan.proposals.push_back(std::move(p));
+  }
+  return plan;
+}
+
+std::string ApplyExtractAssembly(AppState& state, AssemblyDocument& a,
+                                 const literals::ExtractPlan& plan) {
+  const std::set<std::string> taken = TakenVariableNames(state);
+  for (const literals::Proposal& p : plan.proposals)
+    if (!p.existing && taken.contains(p.name))
+      return "a variable named '" + p.name +
+             "' exists now; run the dry run again for fresh names";
+  if (plan.proposals.empty())
+    return {};
+  // Every use must still be a literal slot of the assembly.
+  std::map<std::string, std::string> bind; // path -> expression
+  for (const literals::Proposal& p : plan.proposals)
+    for (const literals::Use& u : p.uses)
+      bind[u.field.path] = u.expression;
+  size_t found = 0;
+  a.VisitExprs([&](const std::string&, const ExprSlot& slot) {
+    if (bind.contains(slot.Path()) && !slot.Bound())
+      found++;
+  });
+  if (found != bind.size())
+    return "the assembly changed since the plan; run the dry run again";
+  PushProjectVarUndoWithFeatures(state, {});
+  for (const literals::Proposal& p : plan.proposals)
+    if (!p.existing)
+      state.projectParameters.push_back(
+          {p.name, p.expression, Provenance(p), p.value, {}});
+  if (&a == state.assembly.get())
+    SnapshotAssembly(state);
+  a.VisitExprs([&](const std::string&, const ExprSlot& slot) {
+    if (const auto it = bind.find(slot.Path()); it != bind.end())
+      slot.Expr() = it->second;
+  });
+  a.MarkEdited();
+  // Evaluated over the new table: the values are the literals they were,
+  // so nothing moves.
+  SyncProjectScope(state);
   return {};
 }
 

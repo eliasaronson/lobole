@@ -33,6 +33,10 @@ json OccurrenceToJson(const Occurrence& o) {
   j["part_version"] = o.partVersion ? json(*o.partVersion) : json(nullptr);
   j["transform"] = {{"position", Vec3ToJson(o.position)},
                     {"orientation", QuatToJson(o.orientation)}};
+  // vNEXT: a coordinate bound to an expression (an occurrence nothing else
+  // places), written only when one is.
+  WriteExprTexts(j["transform"], "position",
+                 {o.positionExpr.begin(), o.positionExpr.end()});
   j["visible"] = o.visible;
   j["fixed"] = o.fixed;
   // What it rides on (v72). Omitted when free, so every existing assembly
@@ -76,7 +80,9 @@ json OccurrenceToJson(const Occurrence& o) {
     j["inner_poses"] = std::move(poses);
     json dofs = json::array();
     for (const InnerMateDof& d : o.innerMateDofs) {
-      json dj{{"mate", d.mate}, {"rotation", d.rotation}, {"offset", d.offset}};
+      json dj{{"mate", d.mate}};
+      WriteExprRadians(dj, "rotation", d.rotation);
+      WriteExpr(dj, "offset", d.offset);
       if (d.dx != 0.0 || d.dy != 0.0) {
         dj["dx"] = d.dx;
         dj["dy"] = d.dy;
@@ -122,10 +128,14 @@ Occurrence OccurrenceFromJson(const json& j) {
   // key 'orientation' not found" (found by the scale round, writing exactly
   // that call).
   const json& t = j.at("transform");
-  readctx::RefuseUnknownKeys(t, {"position", "orientation"},
+  readctx::RefuseUnknownKeys(t, {"position", "position_expr", "orientation"},
                              "occurrence transform");
   if (t.contains("position"))
     o.position = Vec3FromJson(t.at("position"));
+  {
+    const std::vector<std::string> texts = ReadExprTexts(t, "position", 3);
+    std::copy(texts.begin(), texts.end(), o.positionExpr.begin());
+  }
   if (t.contains("orientation"))
     o.orientation = QuatFromJson(t.at("orientation"));
   o.visible = j.value("visible", true);
@@ -189,13 +199,14 @@ Occurrence OccurrenceFromJson(const json& j) {
     o.innerPoses.push_back(p);
   }
   for (const json& dj : j.value("inner_mate_dofs", json::array())) {
-    readctx::RefuseUnknownKeys(
-        dj, {"mate", "rotation", "offset", "dx", "dy", "ball_rotation"},
-        "occurrence inner mate dof");
+    readctx::RefuseUnknownKeys(dj,
+                               {"mate", "rotation", "rotation_expr", "offset",
+                                "offset_expr", "dx", "dy", "ball_rotation"},
+                               "occurrence inner mate dof");
     InnerMateDof d;
     d.mate = dj.at("mate").get<uint64_t>();
-    d.rotation = dj.value("rotation", 0.0);
-    d.offset = dj.value("offset", 0.0);
+    ReadExprRadians(dj, "rotation", d.rotation);
+    ReadExpr(dj, "offset", d.offset);
     d.dx = dj.value("dx", 0.0);
     d.dy = dj.value("dy", 0.0);
     if (dj.contains("ball_rotation"))
@@ -429,14 +440,16 @@ json MateToJson(const Mate& m) {
   j["a"] = ConnectorToJson(m.a);
   j["b"] = ConnectorToJson(m.b);
   j["flipped"] = m.flipped;
-  j["rotation"] = m.rotation;
-  j["offset"] = m.offset;
+  // Radians, as the file has always held them; an expression beside each
+  // (vNEXT), the rotation's in degrees.
+  WriteExprRadians(j, "rotation", m.rotation);
+  WriteExpr(j, "offset", m.offset);
   // Additive DOF for the wider mate set (v25); omit when zero/identity so
   // fastened/revolute/slider files stay byte-identical to v24.
-  if (m.dx != 0.0)
-    j["dx"] = m.dx;
-  if (m.dy != 0.0)
-    j["dy"] = m.dy;
+  if (m.dx != 0.0 || m.dx.Bound())
+    WriteExpr(j, "dx", m.dx);
+  if (m.dy != 0.0 || m.dy.Bound())
+    WriteExpr(j, "dy", m.dy);
   if (m.ballRotation != glm::dquat(1.0, 0.0, 0.0, 0.0))
     j["ball_rotation"] = QuatToJson(m.ballRotation);
   // Limits (v218, docs/assemblies/README.md#mate-limits), in the units of
@@ -444,15 +457,17 @@ json MateToJson(const Mate& m) {
   // a file without them is byte-identical to before.
   json limits = json::object();
   const auto range = [&](const char* key, const std::optional<MateRange>& r) {
-    if (r)
-      limits[key] = json::array({r->min, r->max});
+    if (!r)
+      return;
+    limits[key] = json::array({r->min.value, r->max.value});
+    WriteExprTexts(limits, key, {r->min.expr, r->max.expr});
   };
   range("rotation", m.rotationRange);
   range("offset", m.offsetRange);
   range("dx", m.dxRange);
   range("dy", m.dyRange);
   if (m.coneRad)
-    limits["cone"] = *m.coneRad;
+    WriteExprRadians(limits, "cone", *m.coneRad);
   if (!limits.empty())
     j["limits"] = std::move(limits);
   return j;
@@ -462,7 +477,8 @@ Mate MateFromJson(const json& j) {
   readctx::RequireTag(j, "Mate", "mate");
   readctx::RefuseUnknownKeys(j,
                              {"type", "id", "name", "mate_type", "a", "b",
-                              "flipped", "rotation", "offset", "dx", "dy",
+                              "flipped", "rotation", "rotation_expr", "offset",
+                              "offset_expr", "dx", "dx_expr", "dy", "dy_expr",
                               "ball_rotation", "limits"},
                              "mate");
   Mate m;
@@ -472,17 +488,20 @@ Mate MateFromJson(const json& j) {
   m.a = ConnectorFromJson(j.at("a"));
   m.b = ConnectorFromJson(j.at("b"));
   m.flipped = j.value("flipped", true);
-  m.rotation = j.value("rotation", 0.0);
-  m.offset = j.value("offset", 0.0);
-  m.dx = j.value("dx", 0.0);
-  m.dy = j.value("dy", 0.0);
+  ReadExprRadians(j, "rotation", m.rotation);
+  ReadExpr(j, "offset", m.offset);
+  ReadExpr(j, "dx", m.dx);
+  ReadExpr(j, "dy", m.dy);
   if (j.contains("ball_rotation"))
     m.ballRotation = QuatFromJson(j.at("ball_rotation"));
   if (j.contains("limits")) {
     const json& l = j.at("limits");
     if (!l.is_object())
       throw std::runtime_error("mate limits is an object, not " + l.dump());
-    readctx::RefuseUnknownKeys(l, {"rotation", "offset", "dx", "dy", "cone"},
+    readctx::RefuseUnknownKeys(l,
+                               {"rotation", "rotation_expr", "offset",
+                                "offset_expr", "dx", "dx_expr", "dy", "dy_expr",
+                                "cone", "cone_expr"},
                                "mate limits");
     const auto range = [&](const char* key) -> std::optional<MateRange> {
       if (!l.contains(key))
@@ -492,8 +511,16 @@ Mate MateFromJson(const json& j) {
           !r[1].is_number())
         throw std::runtime_error(std::string("mate limits ") + key +
                                  " is [min, max], not " + r.dump());
-      return MateRange{r[0].get<double>(), r[1].get<double>()};
+      MateRange out{r[0].get<double>(), r[1].get<double>()};
+      const std::vector<std::string> texts = ReadExprTexts(l, key, 2);
+      out.min.expr = texts[0];
+      out.max.expr = texts[1];
+      return out;
     };
+    for (const char* key : {"rotation", "offset", "dx", "dy"})
+      if (l.contains(std::string(key) + "_expr") && !l.contains(key))
+        throw std::runtime_error(std::string("mate limits ") + key +
+                                 "_expr without the range it binds");
     m.rotationRange = range("rotation");
     m.offsetRange = range("offset");
     m.dxRange = range("dx");
@@ -503,7 +530,12 @@ Mate MateFromJson(const json& j) {
         throw std::runtime_error("mate limits cone is a number (radians), "
                                  "not " +
                                  l.at("cone").dump());
-      m.coneRad = l.at("cone").get<double>();
+      ExprAngle cone;
+      ReadExprRadians(l, "cone", cone);
+      m.coneRad = cone;
+    } else if (l.contains("cone_expr")) {
+      throw std::runtime_error("mate limits cone_expr without the cone it "
+                               "binds");
     }
     // A range the type does not free, or one upside down, is refused as
     // set_mate refuses it: loaded quietly it would hold the wrong value.
@@ -517,18 +549,19 @@ Mate MateFromJson(const json& j) {
 
 json AssemblySequenceToJson(const AssemblySequence& seq) {
   json j;
-  if (seq.allowanceMm != 0.0)
-    j["allowance_mm"] = seq.allowanceMm;
+  if (seq.allowanceMm != 0.0 || seq.allowanceMm.Bound())
+    WriteExpr(j, "allowance_mm", seq.allowanceMm);
   j["steps"] = json::array();
   for (const SequenceStep& s : seq.steps) {
     json sj = json::object();
     if (s.IsPose()) {
       json pose = json::array();
-      for (const SequencePose& p : s.pose)
-        pose.push_back(
-            {{"mate", p.mateId},
-             {p.dof == MateDof::Rotation ? "rotation_deg" : "offset_mm",
-              p.value}});
+      for (const SequencePose& p : s.pose) {
+        json pj{{"mate", p.mateId}};
+        WriteExpr(pj, p.dof == MateDof::Rotation ? "rotation_deg" : "offset_mm",
+                  p.value);
+        pose.push_back(std::move(pj));
+      }
       sj["pose"] = std::move(pose);
     } else if (s.occurrences.size() == 1) {
       sj["occurrence"] = s.occurrences[0];
@@ -541,10 +574,10 @@ json AssemblySequenceToJson(const AssemblySequence& seq) {
       sj["origin_mm"] = {s.origin->x, s.origin->y, s.origin->z};
     if (s.mateId != 0)
       sj["mate"] = s.mateId;
-    if (s.distanceMm >= 0.0)
-      sj["distance_mm"] = s.distanceMm;
-    if (s.turnDeg != 0.0)
-      sj["turn_deg"] = s.turnDeg;
+    if (s.distanceMm >= 0.0 || s.distanceMm.Bound())
+      WriteExpr(sj, "distance_mm", s.distanceMm);
+    if (s.turnDeg != 0.0 || s.turnDeg.Bound())
+      WriteExpr(sj, "turn_deg", s.turnDeg);
     if (s.thread)
       sj["thread"] = true;
     if (!s.note.empty())
@@ -560,16 +593,18 @@ AssemblySequence AssemblySequenceFromJson(const json& j) {
     throw std::runtime_error("an assembly sequence is an object {steps, "
                              "allowance_mm?}");
   for (auto it = j.begin(); it != j.end(); ++it)
-    if (it.key() != "steps" && it.key() != "allowance_mm")
+    if (it.key() != "steps" && it.key() != "allowance_mm" &&
+        it.key() != "allowance_mm_expr")
       throw std::runtime_error("unknown assembly sequence key '" + it.key() +
-                               "' (accepted: steps, allowance_mm)");
+                               "' (accepted: steps, allowance_mm, "
+                               "allowance_mm_expr)");
   // A sequence is written only with steps: one without would be dropped by
   // the next save, its allowance with it.
   if (!j.contains("steps") || !j.at("steps").is_array() ||
       j.at("steps").empty())
     throw std::runtime_error("an assembly sequence lists its steps; this one "
                              "has none");
-  seq.allowanceMm = j.value("allowance_mm", 0.0);
+  ReadExpr(j, "allowance_mm", seq.allowanceMm);
   const auto vec = [](const json& v, const char* key) {
     if (!v.is_array() || v.size() != 3 ||
         !std::all_of(v.begin(), v.end(),
@@ -582,14 +617,16 @@ AssemblySequence AssemblySequenceFromJson(const json& j) {
   for (const json& sj : j.value("steps", json::array())) {
     for (auto it = sj.begin(); it != sj.end(); ++it) {
       static const char* kKeys[] = {
-          "occurrence", "occurrences", "pose",     "direction", "origin_mm",
-          "mate",       "distance_mm", "turn_deg", "thread",    "note"};
+          "occurrence", "occurrences",   "pose",        "direction",
+          "origin_mm",  "mate",          "distance_mm", "distance_mm_expr",
+          "turn_deg",   "turn_deg_expr", "thread",      "note"};
       if (std::none_of(std::begin(kKeys), std::end(kKeys),
                        [&](const char* k) { return it.key() == k; }))
         throw std::runtime_error(
             "unknown sequence step key '" + it.key() +
             "' (accepted: occurrence, occurrences, pose, direction, "
-            "origin_mm, mate, distance_mm, turn_deg, thread, note)");
+            "origin_mm, mate, distance_mm, distance_mm_expr, turn_deg, "
+            "turn_deg_expr, thread, note)");
     }
     SequenceStep s;
     const int what = int(sj.contains("occurrence")) +
@@ -603,17 +640,21 @@ AssemblySequence AssemblySequenceFromJson(const json& j) {
       s.occurrences = sj.at("occurrences").get<std::vector<uint64_t>>();
     if (sj.contains("pose")) {
       for (const json& pj : sj.at("pose")) {
-        readctx::RefuseUnknownKeys(pj, {"mate", "rotation_deg", "offset_mm"},
+        readctx::RefuseUnknownKeys(pj,
+                                   {"mate", "rotation_deg", "rotation_deg_expr",
+                                    "offset_mm", "offset_mm_expr"},
                                    "sequence pose value");
         SequencePose p;
         p.mateId = pj.at("mate").get<uint64_t>();
         const bool rot = pj.contains("rotation_deg"),
                    off = pj.contains("offset_mm");
-        if (rot == off || pj.size() != 2)
+        if (rot == off ||
+            pj.size() != 2 + size_t(pj.contains(rot ? "rotation_deg_expr"
+                                                    : "offset_mm_expr")))
           throw std::runtime_error("a pose value is {mate, rotation_deg} or "
                                    "{mate, offset_mm}");
         p.dof = rot ? MateDof::Rotation : MateDof::Offset;
-        p.value = pj.at(rot ? "rotation_deg" : "offset_mm").get<double>();
+        ReadExpr(pj, rot ? "rotation_deg" : "offset_mm", p.value);
         s.pose.push_back(p);
       }
       if (s.pose.empty())
@@ -626,8 +667,8 @@ AssemblySequence AssemblySequenceFromJson(const json& j) {
     if (sj.contains("origin_mm"))
       s.origin = vec(sj.at("origin_mm"), "origin_mm");
     s.mateId = sj.value("mate", uint64_t{0});
-    s.distanceMm = sj.value("distance_mm", -1.0);
-    s.turnDeg = sj.value("turn_deg", 0.0);
+    ReadExpr(sj, "distance_mm", s.distanceMm);
+    ReadExpr(sj, "turn_deg", s.turnDeg);
     s.thread = sj.value("thread", false);
     s.note = sj.value("note", std::string{});
     seq.steps.push_back(std::move(s));
@@ -646,6 +687,7 @@ json ExplodedViewToJson(const ExplodedView& v) {
   for (const ExplodeStep& s : v.steps) {
     json step{{"occurrence", s.occurrenceId},
               {"offset", {s.offset.x, s.offset.y, s.offset.z}}};
+    WriteExprTexts(step, "offset", {s.offsetExpr.begin(), s.offsetExpr.end()});
     if (!s.path.empty()) // v130: a moving part inside a flexible placement
       step["path"] = s.path;
     j["steps"].push_back(std::move(step));
@@ -661,8 +703,8 @@ ExplodedView ExplodedViewFromJson(const json& j) {
   v.id = j.at("id").get<uint64_t>();
   v.name = j.value("name", std::string{});
   for (const json& sj : j.value("steps", json::array())) {
-    readctx::RefuseUnknownKeys(sj, {"occurrence", "offset", "path"},
-                               "explode step");
+    readctx::RefuseUnknownKeys(
+        sj, {"occurrence", "offset", "offset_expr", "path"}, "explode step");
     ExplodeStep s;
     s.occurrenceId = sj.at("occurrence").get<uint64_t>();
     const auto& o = sj.at("offset");
@@ -672,6 +714,10 @@ ExplodedView ExplodedViewFromJson(const json& j) {
                                o.dump().substr(0, 80));
     s.offset = glm::dvec3(o.at(0).get<double>(), o.at(1).get<double>(),
                           o.at(2).get<double>());
+    {
+      const std::vector<std::string> texts = ReadExprTexts(sj, "offset", 3);
+      std::copy(texts.begin(), texts.end(), s.offsetExpr.begin());
+    }
     if (sj.contains("path")) {
       s.path = sj.at("path").get<std::vector<uint64_t>>();
       if (s.path.size() > 1) // only one level moves; never half-applied
@@ -860,9 +906,8 @@ json RelationToJson(const Relation& r) {
     // members carry the tooth counts their coefficients came from.
     json terms = json::array();
     for (const RelationTerm& t : r.terms) {
-      json tj{{"mate", t.mate},
-              {"dof", MateDofToString(t.dof)},
-              {"coefficient", t.coefficient}};
+      json tj{{"mate", t.mate}, {"dof", MateDofToString(t.dof)}};
+      WriteExpr(tj, "coefficient", t.coefficient);
       if (!t.path.empty())
         tj["path"] = t.path;
       if (t.teeth > 0)
@@ -870,7 +915,7 @@ json RelationToJson(const Relation& r) {
       terms.push_back(std::move(tj));
     }
     j["terms"] = std::move(terms);
-    j["constant"] = r.phase;
+    WriteExpr(j, "constant", r.phase);
     return j;
   }
   j["mate_a"] = r.mateA;
@@ -883,7 +928,7 @@ json RelationToJson(const Relation& r) {
     j["mate_b_path"] = r.mateBPath;
   j["dof_a"] = MateDofToString(r.dofA);
   j["dof_b"] = MateDofToString(r.dofB);
-  j["ratio"] = r.ratio;
+  WriteExpr(j, "ratio", r.ratio);
   if (r.teethA > 0 && r.teethB > 0) { // v171: what the ratio came from
     j["teeth_a"] = r.teethA;
     j["teeth_b"] = r.teethB;
@@ -894,21 +939,31 @@ json RelationToJson(const Relation& r) {
     j["thread_part"] = r.threadPart;
     j["thread_feature"] = r.threadFeature;
   }
-  j["phase"] = r.phase;
+  WriteExpr(j, "phase", r.phase);
   if (!r.lift.empty()) { // v88, cam only; absent for every other kind
     json lift = json::array();
     for (const auto& [angle, mm] : r.lift)
       lift.push_back({angle, mm});
     j["lift"] = std::move(lift);
+    // vNEXT: an entry's expressions, [angle, lift] texts per entry.
+    bool bound = false;
+    for (const auto& e : r.liftExpr)
+      bound = bound || !e[0].empty() || !e[1].empty();
+    if (bound && r.liftExpr.size() == r.lift.size()) {
+      json texts = json::array();
+      for (const auto& e : r.liftExpr)
+        texts.push_back({e[0], e[1]});
+      j["lift_expr"] = std::move(texts);
+    }
   }
   if (r.kind == RelationKind::Intermittent) {
     // v174: the step in the follower's unit (degrees for a turn, as a cam's
     // lift), a's angles in degrees, and the law over the window.
     const Relation::Intermittent& im = r.intermittent;
-    j["step"] = im.step;
-    j["period_deg"] = im.periodDeg;
-    j["start_deg"] = im.startDeg;
-    j["duration_deg"] = im.durationDeg;
+    WriteExpr(j, "step", im.step);
+    WriteExpr(j, "period_deg", im.periodDeg);
+    WriteExpr(j, "start_deg", im.startDeg);
+    WriteExpr(j, "duration_deg", im.durationDeg);
     j["motion"] = im.slots > 0        ? "geneva"
                   : !im.table.empty() ? "table"
                                       : "uniform";
@@ -1022,13 +1077,13 @@ json MotionStudyToJson(const MotionStudy& s) {
   j["driver_dof"] = MateDofToString(s.driverDof);
   if (!s.driverPath.empty())
     j["driver_path"] = s.driverPath; // v129
-  j["from"] = s.from;
-  j["to"] = s.to;
-  j["samples"] = s.samples;
+  WriteExpr(j, "from", s.from);
+  WriteExpr(j, "to", s.to);
+  WriteExpr(j, "samples", s.samples);
   j["check_clash"] = s.checkClash;
   j["clash_mode"] = s.clashMode;
-  if (s.clashDeflectionMm > 0.0)
-    j["clash_deflection_mm"] = s.clashDeflectionMm; // v167; absent = derived
+  if (s.clashDeflectionMm > 0.0 || s.clashDeflectionMm.Bound())
+    WriteExpr(j, "clash_deflection_mm", s.clashDeflectionMm); // v167
   if (s.configuration)
     j["configuration"] = *s.configuration; // v128; 0 = the base
   if (s.maxRefine != MotionStudy::kDefaultMaxRefine)
@@ -1041,7 +1096,8 @@ MotionStudy MotionStudyFromJson(const json& j) {
   readctx::RefuseUnknownKeys(
       j,
       {"type", "id", "name", "driver_mate", "driver_dof", "driver_path", "from",
-       "to", "samples", "check_clash", "clash_mode", "clash_deflection_mm",
+       "from_expr", "to", "to_expr", "samples", "samples_expr", "check_clash",
+       "clash_mode", "clash_deflection_mm", "clash_deflection_mm_expr",
        "configuration", "max_refine"},
       "motion study");
   MotionStudy s;
@@ -1051,9 +1107,11 @@ MotionStudy MotionStudyFromJson(const json& j) {
   s.driverDof = MateDofFromString(j.at("driver_dof").get<std::string>());
   if (j.contains("driver_path")) // v129
     s.driverPath = j.at("driver_path").get<std::vector<uint64_t>>();
-  s.from = j.at("from").get<double>();
-  s.to = j.at("to").get<double>();
-  s.samples = j.value("samples", 48);
+  (void)j.at("from"); // required, as ever
+  (void)j.at("to");
+  ReadExpr(j, "from", s.from);
+  ReadExpr(j, "to", s.to);
+  ReadExpr(j, "samples", s.samples);
   if (s.samples < 2)
     throw std::runtime_error("a motion study needs at least 2 samples");
   s.checkClash = j.value("check_clash", true);
@@ -1073,8 +1131,9 @@ MotionStudy MotionStudyFromJson(const json& j) {
                                std::to_string(MotionStudy::kMaxMaxRefine));
     s.maxRefine = v.get<int>();
   }
-  if (j.contains("clash_deflection_mm")) { // v167
-    s.clashDeflectionMm = j.at("clash_deflection_mm").get<double>();
+  if (j.contains("clash_deflection_mm") ||
+      j.contains("clash_deflection_mm_expr")) { // v167
+    ReadExpr(j, "clash_deflection_mm", s.clashDeflectionMm);
     if (const std::string why = MotionStudyDeflectionProblem(s); !why.empty())
       throw std::runtime_error("motion study '" + s.name + "': " + why);
   }
@@ -1099,19 +1158,52 @@ int TeethOf(const json& j, const char* key) {
 
 Relation RelationFromJson(const json& j) {
   readctx::RequireTag(j, "Relation", "relation");
-  readctx::RefuseUnknownKeys(j, {"type",        "id",          "name",
-                                 "kind",        "terms",       "constant",
-                                 "mate_a",      "mate_b",      "mate_a_path",
-                                 "mate_b_path", "dof_a",       "dof_b",
-                                 "ratio",       "teeth_a",     "teeth_b",
-                                 "internal",    "thread_part", "thread_feature",
-                                 "phase",       "lift",        "step",
-                                 "period_deg",  "start_deg",   "duration_deg",
-                                 "motion",      "slots",       "table",
-                                 "drives",      "lead",        "teeth",
-                                 "ride",        "profile",     "cam",
-                                 "follower",    "cam_body",    "follower_body",
-                                 "toward"},
+  readctx::RefuseUnknownKeys(j,
+                             {"type",
+                              "id",
+                              "name",
+                              "kind",
+                              "terms",
+                              "constant",
+                              "mate_a",
+                              "mate_b",
+                              "mate_a_path",
+                              "mate_b_path",
+                              "dof_a",
+                              "dof_b",
+                              "ratio",
+                              "teeth_a",
+                              "teeth_b",
+                              "internal",
+                              "thread_part",
+                              "thread_feature",
+                              "phase",
+                              "lift",
+                              "step",
+                              "period_deg",
+                              "start_deg",
+                              "duration_deg",
+                              "motion",
+                              "slots",
+                              "table",
+                              "drives",
+                              "lead",
+                              "teeth",
+                              "ride",
+                              "profile",
+                              "cam",
+                              "follower",
+                              "cam_body",
+                              "follower_body",
+                              "toward",
+                              "ratio_expr",
+                              "phase_expr",
+                              "constant_expr",
+                              "lift_expr",
+                              "step_expr",
+                              "period_deg_expr",
+                              "start_deg_expr",
+                              "duration_deg_expr"},
                              "relation");
   Relation r;
   r.id = j.at("id").get<uint64_t>();
@@ -1124,17 +1216,20 @@ Relation RelationFromJson(const json& j) {
                                " relation needs its `terms`");
     for (const json& tj : j.at("terms")) {
       readctx::RefuseUnknownKeys(
-          tj, {"mate", "path", "dof", "coefficient", "teeth"}, "relation term");
+          tj,
+          {"mate", "path", "dof", "coefficient", "coefficient_expr", "teeth"},
+          "relation term");
       RelationTerm t;
       t.mate = tj.at("mate").get<uint64_t>();
       if (tj.contains("path"))
         t.path = tj.at("path").get<std::vector<uint64_t>>();
       t.dof = MateDofFromString(tj.at("dof").get<std::string>());
-      t.coefficient = tj.at("coefficient").get<double>();
+      (void)tj.at("coefficient");
+      ReadExpr(tj, "coefficient", t.coefficient);
       t.teeth = TeethOf(tj, "teeth");
       r.terms.push_back(std::move(t));
     }
-    r.phase = j.value("constant", 0.0);
+    ReadExpr(j, "constant", r.phase);
     r.ratio = 1.0;
     return r;
   }
@@ -1146,7 +1241,8 @@ Relation RelationFromJson(const json& j) {
     r.mateBPath = j.at("mate_b_path").get<std::vector<uint64_t>>();
   r.dofA = MateDofFromString(j.at("dof_a").get<std::string>());
   r.dofB = MateDofFromString(j.at("dof_b").get<std::string>());
-  r.ratio = j.at("ratio").get<double>();
+  (void)j.at("ratio");
+  ReadExpr(j, "ratio", r.ratio);
   r.teethA = TeethOf(j, "teeth_a"); // v171
   r.teethB = TeethOf(j, "teeth_b");
   // Written as a pair (what the ratio came from); one alone would be dropped.
@@ -1160,12 +1256,28 @@ Relation RelationFromJson(const json& j) {
                              std::string(RelationKindToString(r.kind)));
   r.threadPart = j.value("thread_part", uint64_t{0});
   r.threadFeature = j.value("thread_feature", uint64_t{0});
-  r.phase = j.value("phase", 0.0);
+  ReadExpr(j, "phase", r.phase);
   for (const json& pt : j.value("lift", json::array())) { // v88
     if (!pt.is_array() || pt.size() != 2)
       throw std::runtime_error(
           "a cam's lift table is [[angle_deg, lift_mm], ...]");
     r.lift.emplace_back(pt.at(0).get<double>(), pt.at(1).get<double>());
+  }
+  if (j.contains("lift_expr")) { // vNEXT
+    const json& le = j.at("lift_expr");
+    if (!le.is_array() || le.size() != r.lift.size())
+      throw std::runtime_error("a cam's lift_expr is one [angle, lift] pair "
+                               "of texts per lift entry; it has " +
+                               std::to_string(le.is_array() ? le.size() : 0) +
+                               " for " + std::to_string(r.lift.size()));
+    for (const json& e : le) {
+      if (!e.is_array() || e.size() != 2)
+        throw std::runtime_error("a lift_expr entry is [angle, lift] texts, "
+                                 "not " +
+                                 e.dump());
+      r.liftExpr.push_back({ExprTextFromJson(e[0], "lift_expr"),
+                            ExprTextFromJson(e[1], "lift_expr")});
+    }
   }
   // A ride is part of a toothed freewheel's statement: written only with
   // its teeth, and refused without them -- read alone it was skipped, and
@@ -1201,10 +1313,10 @@ Relation RelationFromJson(const json& j) {
         throw std::runtime_error(
             std::string("an intermittent relation needs `") + k + "`");
     Relation::Intermittent& im = r.intermittent;
-    im.step = j.at("step").get<double>();
-    im.periodDeg = j.value("period_deg", 360.0);
-    im.startDeg = j.at("start_deg").get<double>();
-    im.durationDeg = j.at("duration_deg").get<double>();
+    ReadExpr(j, "step", im.step);
+    ReadExpr(j, "period_deg", im.periodDeg);
+    ReadExpr(j, "start_deg", im.startDeg);
+    ReadExpr(j, "duration_deg", im.durationDeg);
     im.slots = IntermittentMotionFromJson(j);
     im.table = IntermittentTableOf(j);
   }

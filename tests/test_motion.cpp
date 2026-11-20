@@ -511,7 +511,7 @@ TEST_CASE("A study runs under the configuration it names", "[motion]") {
   Configuration& held = r.asmDoc.AddConfiguration("axle held");
   MateOverride o;
   o.mate = r.axle;
-  o.rotation = 0.5f;
+  o.rotation = ExprAngle::FromRadians(0.5);
   held.mateOverrides.push_back(o);
   study.configuration = held.id;
   CHECK_THAT(motion::WhyNot(r.asmDoc, study),

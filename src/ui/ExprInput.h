@@ -56,4 +56,19 @@ bool ExprInputInt(AppState& state, const char* label, int* v,
 bool ExprInputDouble3(AppState& state, const char* label, double v[3],
                       const char* fmt);
 
+// A number the model keeps as a value AND a text (an ExprValue, an
+// ExprAngle shown in degrees): the field for anything that may be bound to
+// the variables outside a part feature (FeatureEditor's ExprDim is the
+// feature's). Unbound it is ExprDragDouble, and an expression typed with
+// Ctrl+click BINDS it -- the text is kept, not evaluated once and dropped.
+// Bound it shows the text in an expression field (with completion) and
+// what it gives, tinted as bound, with a "123" button back to a literal
+// holding that value. A plain number typed into either UNBINDS it. `*shown`
+// is in the text's units (degrees for an angle); `vmin == vmax` is
+// unbounded, as for the drags. True when the value or the text changed:
+// the caller applies `*shown`, and keeps `*expr`.
+bool ExprBoundDrag(AppState& state, const char* label, double* shown,
+                   std::string* expr, float speed, double vmin, double vmax,
+                   const char* fmt);
+
 } // namespace ui

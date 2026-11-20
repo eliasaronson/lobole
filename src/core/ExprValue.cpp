@@ -247,3 +247,71 @@ bool ReadExprParam(const nlohmann::json& p, const std::string& key,
   v.expr = std::move(text);
   return true;
 }
+
+bool ReadExprParam(const nlohmann::json& p, const std::string& key,
+                   ExprInt& v) {
+  if (p.is_object() && p.contains(key) && p.at(key).is_number() &&
+      !p.at(key).is_number_integer()) {
+    const double d = p.at(key).get<double>();
+    if (d != std::round(d))
+      throw std::runtime_error(key + " is a whole number, not " +
+                               p.at(key).dump());
+  }
+  ExprValue x(static_cast<double>(v.value));
+  if (!ReadExprParam(p, key, x))
+    return false;
+  if (!x.Bound() || (p.is_object() && p.contains(key)))
+    v.value = static_cast<int>(std::lround(x.value)); // whole, checked above
+  v.expr = std::move(x.expr);
+  return true;
+}
+
+bool ReadExprParam(const nlohmann::json& p, const std::string& key,
+                   ExprAngle& v) {
+  ExprValue x(v.Degrees());
+  if (!ReadExprParam(p, key, x))
+    return false;
+  v.value = glm::radians(x.value);
+  v.expr = std::move(x.expr);
+  return true;
+}
+
+void WriteExprRadians(nlohmann::json& j, const std::string& key,
+                      const ExprAngle& v) {
+  j[key] = v.value;
+  WriteExprText(j, key, v.expr);
+}
+
+bool ReadExprRadians(const nlohmann::json& j, const std::string& key,
+                     ExprAngle& v) {
+  const bool has = j.is_object() && j.contains(key);
+  if (has)
+    v.value = NumberAt(j, key);
+  v.expr = ReadExprText(j, key);
+  return has || !v.expr.empty();
+}
+
+void WriteExprTexts(nlohmann::json& j, const std::string& key,
+                    const std::vector<std::string>& texts) {
+  for (const std::string& t : texts)
+    if (!t.empty()) {
+      j[key + "_expr"] = texts;
+      return;
+    }
+}
+
+std::vector<std::string> ReadExprTexts(const nlohmann::json& j,
+                                       const std::string& key, size_t n) {
+  std::vector<std::string> out(n);
+  const std::string k = key + "_expr";
+  if (!j.is_object() || !j.contains(k))
+    return out;
+  const nlohmann::json& a = j.at(k);
+  if (!a.is_array() || a.size() != n)
+    throw std::runtime_error(k + " is " + std::to_string(n) +
+                             " expression texts (\"\" for a number), not " +
+                             a.dump());
+  for (size_t i = 0; i < n; i++)
+    out[i] = ExprTextFromJson(a[i], k);
+  return out;
+}

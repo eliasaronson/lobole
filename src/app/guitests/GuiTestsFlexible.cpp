@@ -71,7 +71,8 @@ Rig BuildRig(ImGuiTestContext* ctx) {
     r.crankMate = s_App->assembly->AddMate(m);
     Configuration& held = s_App->assembly->AddConfiguration("Held");
     held.mateOverrides.push_back(
-        {r.crankMate, glm::half_pi<float>(), std::nullopt});
+        {r.crankMate, ExprAngle::FromRadians(glm::half_pi<double>()),
+         std::nullopt});
     r.heldCfg = held.id;
     ui::SolveActiveAssembly(*s_App);
   }

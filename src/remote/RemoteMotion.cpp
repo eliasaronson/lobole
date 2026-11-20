@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "remote/RemoteMotion.h"
+#include "remote/ExprArgs.h"
 
 #include "core/Angles.h"
 #include "remote/RemoteHelpers.h"
@@ -85,17 +86,25 @@ constexpr MethodDoc MotionMethods[] = {
      "too much is re-solved at half the step, down to max_refine halvings, "
      "so a step too coarse for its seed no longer lands on a mirror branch; "
      "a jump that stays at the finest step is a singular pose, reported as "
-     "the sample's `branch_jump`, and the study does not pass.",
+     "the sample's `branch_jump`, and the study does not pass. from_expr, "
+     "to_expr (degrees for a rotation), samples_expr and "
+     "clash_deflection_mm_expr bind those to the project's variables "
+     "(docs/assemblies/README.md#numbers-that-are-expressions); the study "
+     "answers each beside its number.",
      "check_clash, clash_deflection_mm, clash_mode, configuration, dof, "
-     "driver, driver_path, from, max_refine, name, samples, to"},
+     "driver, driver_path, from, max_refine, name, samples, to, from_expr, "
+     "to_expr, samples_expr, clash_deflection_mm_expr"},
     {"set_motion_study",
      "Edit a study {study, name?, from?, to?, samples?, check_clash?, "
      "clash_mode?, clash_deflection_mm? (mm, null = derived per body "
      "again), configuration? (an id, 0 = the base, null = whichever "
      "is active), max_refine? (0..12)}; a stored "
-     "result is dropped, since it described the old definition.",
+     "result is dropped, since it described the old definition. from_expr, "
+     "to_expr, samples_expr, clash_deflection_mm_expr as add_motion_study "
+     "takes them; a number alone unbinds.",
      "check_clash, clash_deflection_mm, clash_mode, configuration, from, "
-     "max_refine, name, samples, study, to"},
+     "max_refine, name, samples, study, to, from_expr, to_expr, "
+     "samples_expr, clash_deflection_mm_expr"},
     {"remove_motion_study", "Remove a study by id.", "study"},
     {"list_motion_studies",
      "Every study, with whether it has a result and whether one is running.",
@@ -106,7 +115,8 @@ constexpr MethodDoc MotionMethods[] = {
      "type:string, "
      "unit:string, clean?:bool, collision_checked?:bool, stale?:bool, "
      "clash_deflection_mm?:number, configuration?:int, "
-     "why_not?:string}[]"},
+     "why_not?:string, from_expr?:string, to_expr?:string, "
+     "samples_expr?:string, clash_deflection_mm_expr?:string}[]"},
     {"run_motion_study",
      "Run it: {study, async?, include_poses?, leave_at?, leave_at_deg?, "
      "leave_at_mm?, recompute?, outlive_client?}. A run whose INPUTS hash "
@@ -385,6 +395,36 @@ void ReadMaxRefine(const RpcParams& p, MotionStudy& s) {
   s.maxRefine = static_cast<int>(v.get<int64_t>());
 }
 
+// The numbers a motion study takes that may be expressions: `from` and `to`
+// in degrees for a rotation, as their numbers are.
+const std::vector<std::string> kMotionExprKeys = {"from", "to", "samples",
+                                                  "clash_deflection_mm"};
+
+// The call's texts onto the study, evaluated in the units it holds them in
+// (radians for a rotation's range). Refused, naming the key, when one does
+// not stand.
+void BindMotion(const ExprArgs& ex, MotionStudy& s, const SymbolTable& sym) {
+  ex.Bind("from", s.from.expr);
+  ex.Bind("to", s.to.expr);
+  ex.Bind("samples", s.samples.expr);
+  ex.Bind("clash_deflection_mm", s.clashDeflectionMm.expr);
+  const bool rot = s.driverDof == MateDof::Rotation;
+  const auto range = [&](ExprValue& v, const char* key) {
+    return rot ? ExprSlot::Radians(v.expr, v.value, key)
+               : ExprSlot(v, ExprQuantity::Length, key);
+  };
+  for (const ExprSlot& slot :
+       {range(s.from, "from"), range(s.to, "to"),
+        ExprSlot(s.samples, "samples"),
+        ExprSlot(s.clashDeflectionMm, ExprQuantity::Length,
+                 "clash_deflection_mm")})
+    if (std::string why = assembly::EvaluateOne(slot, sym); !why.empty())
+      throw std::runtime_error(slot.Path() + "_expr '" + slot.Expr() +
+                               "': " + why);
+  if (s.samples < 2)
+    throw std::runtime_error("samples must be at least 2");
+}
+
 json StudyJson(ui::AppState& state, const AssemblyDocument& asmDoc,
                const MotionStudy& s) {
   json j = DocumentIO::MotionStudyToJson(s);
@@ -392,8 +432,8 @@ json StudyJson(ui::AppState& state, const AssemblyDocument& asmDoc,
   // The document stores the DOF's own unit; the surface speaks degrees for
   // a rotation. Both are shown so nobody has to remember which this is.
   j["unit"] = rot ? "deg" : "mm";
-  j["from"] = rot ? angles::ToDegrees(s.from) : s.from;
-  j["to"] = rot ? angles::ToDegrees(s.to) : s.to;
+  j["from"] = rot ? angles::ToDegrees(s.from) : s.from.value;
+  j["to"] = rot ? angles::ToDegrees(s.to) : s.to.value;
   j["max_refine"] = s.maxRefine;
   const std::string why =
       motion::WhyNot(asmDoc, s, ui::AssemblyResolverFor(state));
@@ -1423,6 +1463,9 @@ json CheckFollowers(ui::AppState& state, uint64_t studyId,
 std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
                                     const RpcParams& p) {
   if (m == "add_motion_study") {
+    // rpc-params: from_expr, to_expr, samples_expr, clash_deflection_mm_expr
+    const ExprArgs ex(p, kMotionExprKeys, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     AssemblyDocument& asmDoc = NeedAssembly(state);
     MotionStudy s;
     const uint64_t driver = p.at("driver").get<uint64_t>();
@@ -1479,7 +1522,8 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     s.to = RotAwareAngle(p.at("to").get<double>(), rot);
     if (std::abs(s.to - s.from) < 1e-12)
       throw std::runtime_error("from and to are equal — nothing would move");
-    s.samples = p.value("samples", 48);
+    if (p.contains("samples"))
+      s.samples = IntParam(p.at("samples"), "samples");
     if (s.samples < 2)
       throw std::runtime_error("samples must be at least 2");
     s.checkClash = p.value("check_clash", true);
@@ -1510,11 +1554,15 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     s.name = p.value("name", std::string{});
     if (s.name.empty())
       s.name = "Motion " + std::to_string(asmDoc.GetMotionStudies().size() + 1);
+    BindMotion(ex, s, state.projectSymbols);
     ui::SnapshotAssembly(state);
     const uint64_t id = asmDoc.AddMotionStudy(std::move(s));
     return StudyJson(state, asmDoc, *asmDoc.FindMotionStudyById(id));
   }
   if (m == "set_motion_study") {
+    // rpc-params: from_expr, to_expr, samples_expr, clash_deflection_mm_expr
+    const ExprArgs ex(p, kMotionExprKeys, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     AssemblyDocument& asmDoc = NeedAssembly(state);
     MotionStudy& live = NeedStudy(asmDoc, p);
     // Edited on a copy and written back only once every field has passed: a
@@ -1561,6 +1609,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
         s.configuration = c;
       }
     }
+    BindMotion(ex, s, state.projectSymbols);
     ui::SnapshotAssembly(state);
     live = s;
     asmDoc.BumpVersion();

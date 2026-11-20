@@ -24,6 +24,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 // What a number measures. A literal is only ever compared with a variable
 // of the same kind (the literals lint): 52 teeth are not the 52 mm wall.
@@ -91,6 +92,17 @@ struct ExprAngle {
 
   ExprAngle() = default;
   static ExprAngle FromDegrees(double deg);
+  static ExprAngle FromRadians(double rad) {
+    ExprAngle a;
+    a.value = rad;
+    return a;
+  }
+  // Sets the value in RADIANS, which is what `value` and the conversion
+  // hold; the text is untouched (ExprValue's rule): what a solve writes.
+  ExprAngle& operator=(double radians) {
+    value = radians;
+    return *this;
+  }
   [[nodiscard]] double Degrees() const;
   operator double() const { return value; } // NOLINT
   [[nodiscard]] bool Bound() const { return !expr.empty(); }
@@ -123,6 +135,13 @@ public:
   // Where it lives in its owner's JSON, `_expr` left off: "distance",
   // "loads[2].magnitude".
   [[nodiscard]] const std::string& Path() const { return m_path; }
+  // The same number under another path: a study's slot as its assembly
+  // sees it ("studies/0/loads/1/magnitude").
+  [[nodiscard]] ExprSlot WithPath(std::string path) const {
+    ExprSlot s = *this;
+    s.m_path = std::move(path);
+    return s;
+  }
 
 private:
   ExprSlot() = default;
@@ -192,6 +211,22 @@ std::string ExprTextFromJson(const nlohmann::json& t, const std::string& what);
 // stores one that can only fail.
 void RefuseUnreadableExpr(const std::string& text, const std::string& what);
 
+// An angle written in RADIANS under `<key>`, its text (in degrees, as every
+// angle expression is) under `<key>_expr`: the assembly's mate values and
+// limits, which the file has always held in radians.
+void WriteExprRadians(nlohmann::json& j, const std::string& key,
+                      const ExprAngle& v);
+bool ReadExprRadians(const nlohmann::json& j, const std::string& key,
+                     ExprAngle& v);
+// An array of numbers whose entries may each be bound: `<key>_expr` is an
+// array of as many texts, "" for a literal entry, written only when one is
+// bound. ReadExprTexts gives `n` texts, all empty when the key is absent,
+// and refuses one of another length or an entry that is not text.
+void WriteExprTexts(nlohmann::json& j, const std::string& key,
+                    const std::vector<std::string>& texts);
+std::vector<std::string> ReadExprTexts(const nlohmann::json& j,
+                                       const std::string& key, size_t n);
+
 // The RPC's reader for a number a method sets: `<key>` as a number, or as a
 // string (the older spelling the FEM methods took, kept as an alias), and
 // `<key>_expr`. A number alone is a literal (the text is cleared); a text
@@ -200,3 +235,8 @@ void RefuseUnreadableExpr(const std::string& text, const std::string& what);
 // the key. Returns whether either key was there.
 bool ReadExprParam(const nlohmann::json& p, const std::string& key,
                    ExprValue& v);
+// The same for a count (a `<key>` that is not whole is refused) and for an
+// angle, whose `<key>` is in degrees.
+bool ReadExprParam(const nlohmann::json& p, const std::string& key, ExprInt& v);
+bool ReadExprParam(const nlohmann::json& p, const std::string& key,
+                   ExprAngle& v);

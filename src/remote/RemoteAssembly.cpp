@@ -36,7 +36,11 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "remote/ExprArgs.h"
+#include "ui/AppActionsInternal.h" // SlotAssembly
+#include "ui/LiteralActions.h"
 #include <algorithm>
+
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -68,7 +72,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "{configuration: name|id} places it in that configuration of what it "
      "places (a part's or a sub-assembly's; see "
      "set_occurrence_configuration); {material: slug} makes this placement "
-     "of that material (see set_occurrence_material).",
+     "of that material (see set_occurrence_material). "
+     "transform.position_expr ([x, y, z] texts, \"\" for a number of "
+     "position) binds the coordinates to the project's variables "
+     "(docs/assemblies/README.md#numbers-that-are-expressions).",
      "part:string|int, name?:string, transform?:object, visible?:bool, "
      "fixed?:bool, configuration?:string|int|null, material?:string|null, "
      "flexible?:bool"},
@@ -100,7 +107,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Set an occurrence's world transform {id, transform: {position, "
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}. Either half may "
      "be omitted and keeps its current value, so sliding a part along one "
-     "axis needs no quaternion.",
+     "axis needs no quaternion. transform.position_expr binds the "
+     "coordinates to the project's variables, on an occurrence nothing else "
+     "places (refused for one its mates place); a position alone unbinds.",
      "id?:int>=0, occurrence?:int>=0, transform:object"},
     {"set_occurrence_visible",
      "Show/hide an occurrence. Takes `occurrence` as well as `id` — its "
@@ -189,13 +198,22 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "dx_range_mm / dy_range_mm (planar), cone_deg (a ball's half-angle "
      "from its seat); unset = free. A range on a value the type does not "
      "free, a min above its max, or a starting value outside its range is "
-     "refused.",
+     "refused. "
+     "EXPRESSIONS (docs/assemblies/README.md#numbers-that-are-expressions): "
+     "`<key>_expr` beside each number binds it to the project's variables "
+     "-- rotation_deg_expr (degrees), offset_expr, dx_expr, dy_expr, "
+     "rotation_range_deg_expr etc. as [min, max] texts (\"\" for an end "
+     "the range's number gives), cone_deg_expr -- evaluated now, refused "
+     "naming a variable the project lacks; a number alone unbinds.",
      "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, "
      "rotation_deg?:number, offset?:number, dx?:number, "
      "dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose', "
      "rotation_range_deg?:number[2]|null, offset_range_mm?:number[2]|null, "
      "dx_range_mm?:number[2]|null, dy_range_mm?:number[2]|null, "
-     "cone_deg?:number|null"},
+     "cone_deg?:number|null, rotation_deg_expr?:string, offset_expr?:string, "
+     "dx_expr?:string, dy_expr?:string, rotation_range_deg_expr?:string[2], "
+     "offset_range_mm_expr?:string[2], dx_range_mm_expr?:string[2], "
+     "dy_range_mm_expr?:string[2], cone_deg_expr?:string"},
     {"set_mate",
      "Edit a mate's parameters, and the way to POSE a mechanism: turn a "
      "revolute or cylindrical mate with `rotation_deg` (degrees), slide it "
@@ -218,13 +236,24 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "edit whose relations would drive another mate past its limit. In a "
      "closed loop a follower that reaches its limit is held there and the "
      "answer's `limits_held` [{mate, name, value, held, limit_deg|limit_mm, "
-     "at_deg|at_mm}] names it, its mate carrying the error.",
+     "at_deg|at_mm}] names it, its mate carrying the error. "
+     "EXPRESSIONS (docs/assemblies/README.md#numbers-that-are-expressions): "
+     "`<key>_expr` beside each number binds it to the project's variables "
+     "-- rotation_deg_expr (degrees), offset_expr, dx_expr, dy_expr, "
+     "rotation_range_deg_expr etc. as [min, max] texts (\"\" for an end "
+     "the range's number gives), cone_deg_expr -- evaluated now, refused "
+     "naming a variable the project lacks; a number alone unbinds. "
+     "With a path, rotation_deg_expr and offset_expr bind this "
+     "placement's pose of the inner mate.",
      "id:int>=0, path?:int[]|null, name?:string, flipped?:bool, "
      "rotation_deg?:number, offset?:number, dx?:number, "
      "dy?:number, ball_rotation?:number[4], "
      "rotation_range_deg?:number[2]|null, offset_range_mm?:number[2]|null, "
      "dx_range_mm?:number[2]|null, dy_range_mm?:number[2]|null, "
-     "cone_deg?:number|null"},
+     "cone_deg?:number|null, rotation_deg_expr?:string, offset_expr?:string, "
+     "dx_expr?:string, dy_expr?:string, rotation_range_deg_expr?:string[2], "
+     "offset_range_mm_expr?:string[2], dx_range_mm_expr?:string[2], "
+     "dy_range_mm_expr?:string[2], cone_deg_expr?:string"},
     {"remove_mate", "Remove a mate by id.", "id:int>=0"},
     {"list_mates",
      "List mates with `status` (satisfied | redundant | error) and the "
@@ -235,13 +264,17 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "close carries `residual_mm`, its own closure error from the last "
      "solve. A limited mate carries `limits` {rotation_range_deg?, "
      "offset_range_mm?, dx_range_mm?, dy_range_mm?, cone_deg?} "
-     "(docs/assemblies/README.md#mate-limits).",
+     "(docs/assemblies/README.md#mate-limits). A number bound to the "
+     "variables carries its text beside it: rotation_deg_expr, offset_expr, "
+     "dx_expr, dy_expr, and in `limits` rotation_range_deg_expr etc.",
      "", remote::NoFlags,
      "mates:{a:object, b:object, flipped:bool, id:int, name:string, "
      "offset:number, rotation:number, rotation_deg:number, "
      "status:string, type:string, held?:object, error?:string, "
      "residual_mm?:number, dx?:number, dy?:number, "
-     "ball_rotation?:number[], suppressed?:bool, limits?:object}[]"},
+     "ball_rotation?:number[], suppressed?:bool, limits?:object, "
+     "rotation_deg_expr?:string, offset_expr?:string, dx_expr?:string, "
+     "dy_expr?:string}[]"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
      "gear|chain|rack|screw|linear|cam|freewheel|click|worm|intermittent|"
@@ -380,7 +413,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "ring, slots, step_deg, step_mm, sun, table, teeth, teeth_planet, "
      "teeth_ring, teeth_sun, terms, "
      "phase, pitch, pitch_radius, ratio, "
-     "rise, rise_deg, start_deg, starts, teeth_a, teeth_b, type"},
+     "rise, rise_deg, start_deg, starts, teeth_a, teeth_b, type, "
+     "ratio_expr, phase_expr, constant_expr, start_deg_expr, step_deg_expr, "
+     "step_mm_expr, duration_deg_expr, period_deg_expr, lift_expr"},
     {"set_relation",
      "Edit a relation's {ratio?, phase?, name?} by {id}; a freewheel's "
      "{lead?} too (b's unit, radians), which moves b onto a's drive line "
@@ -391,10 +426,15 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "{constant?} (radians) instead of a phase. An intermittent relation "
      "takes {start_deg?} (its window's timing) and {phase?}, and refuses a "
      "ratio. A contact relation takes {toward?, cam_body?, follower_body?} "
-     "and refuses a ratio or a phase.",
+     "and refuses a ratio or a phase. ratio_expr, phase_expr (degrees for "
+     "a turning b), constant_expr (degrees) and start_deg_expr bind those "
+     "to the project's variables "
+     "(docs/assemblies/README.md#numbers-that-are-expressions); a number "
+     "alone unbinds.",
      "cam_body, constant, follower_body, id, internal, lead, name, phase, "
      "ratio, start_deg, teeth_a, teeth_b, teeth_planet, teeth_ring, "
-     "teeth_sun, toward"},
+     "teeth_sun, toward, ratio_expr, phase_expr, constant_expr, "
+     "start_deg_expr"},
     {"remove_relation", "Remove a relation by id.", "id"},
     {"list_relations",
      "List relations with status/errors. A relation over several mates "
@@ -423,7 +463,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "mate_b_path?:int[], mate_a_path?:int[], internal?:bool, "
      "lift?:any, profile?:object, ride?:any, teeth?:int, toward?:string, "
      "cam?:int, "
-     "follower?:int, cam_body?:int, follower_body?:int, contact?:object}[]"},
+     "follower?:int, cam_body?:int, follower_body?:int, contact?:object, "
+     "ratio_expr?:string, phase_expr?:string, constant_expr?:string, "
+     "start_deg_expr?:string, step_expr?:string, period_deg_expr?:string, "
+     "duration_deg_expr?:string, lift_expr?:any}[]"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
      "Run the mate solver. Returns every mate with a `status` (satisfied | "
@@ -759,8 +802,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "sub-assembly's id, as list_occurrences on its tab or solve_assembly's "
      "flexible rows give it), which then moves on its own on top of the "
      "unit's step; refused for a rigid placement, whose parts explode as one "
-     "block.",
-     "occurrence, offset, path, view"},
+     "block. offset_expr ([x, y, z] texts, \"\" for a number of offset) "
+     "binds the step to the project's variables.",
+     "occurrence, offset, offset_expr, path, view"},
     {"auto_explode",
      "Generate explode steps automatically (creates and "
      "activates a view when none is given).",
@@ -800,14 +844,21 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "(docs/assemblies/README.md#mate-limits) or a pose step with a path "
      "is refused before "
      "anything changes. One undo step. check_assembly_sequence checks it; "
-     "the requirement kind `assembly_sequence` states it checked.",
-     "steps:object[], allowance_mm?:number", remote::NoFlags,
-     "steps:object[], allowance_mm:number"},
+     "the requirement kind `assembly_sequence` states it checked. "
+     "allowance_mm_expr, and in a step distance_mm_expr, turn_deg_expr and "
+     "a pose value's rotation_deg_expr / offset_mm_expr, bind those to the "
+     "project's variables "
+     "(docs/assemblies/README.md#numbers-that-are-expressions).",
+     "steps:object[], allowance_mm?:number, allowance_mm_expr?:string",
+     remote::NoFlags,
+     "steps:object[], allowance_mm:number, allowance_mm_expr?:string"},
     {"get_assembly_sequence",
      "The active assembly's sequence, as set_assembly_sequence states it, "
      "each step with its occurrence's name (a group's `names`, a pose's "
-     "`mate_name`s, and its mate's).",
-     "", remote::NoFlags, "steps:object[], allowance_mm:number"},
+     "`mate_name`s, and its mate's); a number bound to the variables "
+     "carries its `<key>_expr` beside it.",
+     "", remote::NoFlags,
+     "steps:object[], allowance_mm:number, allowance_mm_expr?:string"},
 };
 std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
 
@@ -828,7 +879,8 @@ json SequenceJson(const AssemblyDocument& a) {
         json pj{{"mate", p.mateId}};
         if (const Mate* m = a.FindMateById(p.mateId))
           pj["mate_name"] = m->name;
-        pj[p.dof == MateDof::Rotation ? "rotation_deg" : "offset_mm"] = p.value;
+        WriteExpr(pj, p.dof == MateDof::Rotation ? "rotation_deg" : "offset_mm",
+                  p.value);
         pose.push_back(std::move(pj));
       }
       j["pose"] = std::move(pose);
@@ -851,17 +903,20 @@ json SequenceJson(const AssemblyDocument& a) {
       if (const Mate* m = a.FindMateById(st.mateId))
         j["mate_name"] = m->name;
     }
-    if (st.distanceMm >= 0.0)
-      j["distance_mm"] = st.distanceMm;
-    if (st.turnDeg != 0.0)
-      j["turn_deg"] = st.turnDeg;
+    if (st.distanceMm >= 0.0 || st.distanceMm.Bound())
+      WriteExpr(j, "distance_mm", st.distanceMm);
+    if (st.turnDeg != 0.0 || st.turnDeg.Bound())
+      WriteExpr(j, "turn_deg", st.turnDeg);
     if (st.thread)
       j["thread"] = true;
     if (!st.note.empty())
       j["note"] = st.note;
     steps.push_back(std::move(j));
   }
-  return {{"steps", steps}, {"allowance_mm", seq.allowanceMm}};
+  json out{{"steps", steps}, {"allowance_mm", seq.allowanceMm.value}};
+  if (seq.allowanceMm.Bound())
+    out["allowance_mm_expr"] = seq.allowanceMm.expr;
+  return out;
 }
 
 const Mate* MateByRef(const AssemblyDocument& a, const json& mv) {
@@ -1184,18 +1239,56 @@ json MateLimitsJson(const Mate& m) {
   json l = json::object();
   const auto range = [&](const char* key, const std::optional<MateRange>& r,
                          bool deg) {
-    if (r)
-      l[key] = deg ? json::array(
-                         {angles::ToDegrees(r->min), angles::ToDegrees(r->max)})
-                   : json::array({r->min, r->max});
+    if (!r)
+      return;
+    l[key] = deg ? json::array({angles::ToDegrees(r->min.value),
+                                angles::ToDegrees(r->max.value)})
+                 : json::array({r->min.value, r->max.value});
+    WriteExprTexts(l, key, {r->min.expr, r->max.expr});
   };
   range("rotation_range_deg", m.rotationRange, true);
   range("offset_range_mm", m.offsetRange, false);
   range("dx_range_mm", m.dxRange, false);
   range("dy_range_mm", m.dyRange, false);
-  if (m.coneRad)
-    l["cone_deg"] = angles::ToDegrees(*m.coneRad);
+  if (m.coneRad) {
+    l["cone_deg"] = m.coneRad->Degrees();
+    WriteExprText(l, "cone_deg", m.coneRad->expr);
+  }
   return l;
+}
+
+// The numbers add_mate and set_mate take that may be expressions
+// (docs/scripting/rpc.md#numbers-that-take-an-expression), in the units
+// their keys name: a rotation's text is in degrees, as `rotation_deg` is.
+const std::vector<std::string> kMateExprKeys = {"rotation_deg",
+                                                "offset",
+                                                "dx",
+                                                "dy",
+                                                "rotation_range_deg",
+                                                "offset_range_mm",
+                                                "dx_range_mm",
+                                                "dy_range_mm",
+                                                "cone_deg"};
+
+// The call's texts onto the mate it built: a key given as a number alone
+// unbinds what it sets.
+void BindMate(const ExprArgs& ex, Mate& m) {
+  ex.Bind("rotation_deg", m.rotation.expr);
+  ex.Bind("offset", m.offset.expr);
+  ex.Bind("dx", m.dx.expr);
+  ex.Bind("dy", m.dy.expr);
+  const auto range = [&](const char* key, std::optional<MateRange>& r) {
+    if (r) {
+      ex.Bind(key, r->min.expr, 0);
+      ex.Bind(key, r->max.expr, 1);
+    }
+  };
+  range("rotation_range_deg", m.rotationRange);
+  range("offset_range_mm", m.offsetRange);
+  range("dx_range_mm", m.dxRange);
+  range("dy_range_mm", m.dyRange);
+  if (m.coneRad)
+    ex.Bind("cone_deg", m.coneRad->expr);
 }
 
 // The range parameters set_mate and add_mate take, written into `m`:
@@ -1240,7 +1333,7 @@ std::vector<RangedValue> ApplyRangeParams(const RpcParams& p, Mate& m) {
           "it, not " +
           c.dump());
     else
-      m.coneRad = angles::ToRadians(c.get<double>());
+      m.coneRad = ExprAngle::FromDegrees(c.get<double>());
   }
   return named;
 }
@@ -1323,8 +1416,56 @@ json MateJson(const Mate& m) {
   // every row said type "Mate" read as if the kind had been lost.
   j["type"] = j.at("mate_type");
   j.erase("mate_type");
-  j["rotation_deg"] = angles::ToDegrees(m.rotation);
+  j["rotation_deg"] = m.rotation.Degrees();
+  // The text is in degrees: it stands beside rotation_deg, not the radians.
+  j.erase("rotation_expr");
+  WriteExprText(j, "rotation_deg", m.rotation.expr);
   return j;
+}
+
+// The numbers add_relation and set_relation take that may be expressions.
+// `phase` and `constant` are in b's unit as numbers -- radians for a turn
+// -- and, as every angle expression is, in DEGREES as texts: the relation
+// is evaluated again once its kind and b's DOF are known
+// (EvaluateRelationExprs), which puts each in the unit it is held in.
+const std::vector<std::string> kRelationExprKeys = {
+    "ratio",        "phase",
+    "constant",     "start_deg",
+    "step_deg",     "step_mm",
+    "duration_deg", "period_deg",
+    "lift",         "terms/*/coefficient"};
+
+// The call's texts onto the relation it built or edited, then evaluated in
+// the units the relation holds them in. Refused naming the key when one
+// does not evaluate.
+void BindRelation(const ExprArgs& ex, Relation& r, const SymbolTable& symbols) {
+  if (r.HasTerms()) {
+    ex.Bind("constant", r.phase.expr);
+    for (size_t i = 0; i < r.terms.size(); i++)
+      ex.Bind("terms/" + std::to_string(i) + "/coefficient",
+              r.terms[i].coefficient.expr);
+  } else {
+    ex.Bind("ratio", r.ratio.expr);
+    ex.Bind("phase", r.phase.expr);
+  }
+  // A ratio made from teeth, a thread or a worm's hand is theirs.
+  if (r.teethA > 0 || r.threadPart != 0 || r.kind == RelationKind::Worm)
+    r.ratio.expr.clear();
+  Relation::Intermittent& im = r.intermittent;
+  ex.Bind("start_deg", im.startDeg.expr);
+  ex.Bind(r.dofB == MateDof::Rotation ? "step_deg" : "step_mm", im.step.expr);
+  ex.Bind("duration_deg", im.durationDeg.expr);
+  ex.Bind("period_deg", im.periodDeg.expr);
+  if (ex.Given("lift")) {
+    r.liftExpr.assign(r.lift.size(), {});
+    for (size_t k = 0; k < r.lift.size(); k++) {
+      ex.Bind("lift", r.liftExpr[k][0], static_cast<int>(k), 0);
+      ex.Bind("lift", r.liftExpr[k][1], static_cast<int>(k), 1);
+    }
+  }
+  if (std::string why = assembly::EvaluateRelationExprs(r, symbols);
+      !why.empty())
+    throw std::runtime_error(why);
 }
 
 // Error-audit round: "no such occurrence" names what DOES exist (id + name)
@@ -1510,15 +1651,152 @@ json ContactTableJson(const contact::Model& m) {
 }
 } // namespace
 
+namespace {
+// A literal of an assembly as check_literals and extract_variables answer
+// it: its owner where a part's says the feature.
+json AssemblyLiteralJson(const std::string& owner,
+                         const literals::Field& field) {
+  return {{"feature", owner},
+          {"feature_id", 0},
+          {"field", field.path},
+          {"label", field.label},
+          {"quantity", literals::QuantityName(field.quantity)},
+          {"value", field.value}};
+}
+
+// The assembly check_literals / extract_variables means: `part` naming one,
+// or the active tab when `part` is not given. Null for a part.
+AssemblyDocument* LiteralsAssembly(ui::AppState& state, const RpcParams& p,
+                                   std::string* name) {
+  size_t slot = static_cast<size_t>(state.activePart);
+  if (p.contains("part"))
+    slot = ResolveSlotIndex(state, p.at("part"));
+  if (slot >= state.parts.size() ||
+      state.parts[slot].kind != ui::DocKind::Assembly)
+    return nullptr;
+  *name = state.parts[slot].name;
+  return ui::SlotAssembly(state, slot);
+}
+} // namespace
+
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
+  // An assembly's literals, a part's being RemoteModeling's
+  // (docs/variables/README.md#literals-that-should-be-expressions).
+  std::string literalsName;
+  if (m == "check_literals")
+    if (AssemblyDocument* a = LiteralsAssembly(state, p, &literalsName)) {
+      size_t checked = 0;
+      json lits = json::array();
+      for (const literals::LiteralFinding& f :
+           ui::LintAssembly(state, *a, &checked)) {
+        json j = AssemblyLiteralJson(f.feature, f.field);
+        j["variables"] = f.variables;
+        lits.push_back(std::move(j));
+      }
+      return json{{"part", literalsName},
+                  {"literals", std::move(lits)},
+                  {"placements", json::array()},
+                  {"checked", {{"fields", checked}, {"placements", 0}}}};
+    }
+  if (m == "extract_variables" && state.assembly && state.activePart >= 0 &&
+      state.parts[static_cast<size_t>(state.activePart)].kind ==
+          ui::DocKind::Assembly) {
+    // rpc-params: apply, feature_ids, fields, merge_equal, prefix, reuse
+    // rpc-params: scope
+    if (p.contains("feature_ids"))
+      throw std::runtime_error("extract_variables: an assembly has no "
+                               "features; name its numbers by `fields` "
+                               "(as check_literals gives them)");
+    if (p.value("scope", std::string("project")) != "project")
+      throw std::runtime_error("extract_variables: an assembly reads the "
+                               "project's variables and has none of its "
+                               "own, so scope is 'project'");
+    literals::ExtractOptions options;
+    if (p.contains("fields")) {
+      const json& fields = p.at("fields");
+      if (!fields.is_array())
+        throw std::runtime_error("fields is an array of field paths "
+                                 "(\"mates/0/offset\")");
+      for (const json& f : fields)
+        options.paths.push_back(f.get<std::string>());
+    }
+    options.prefix = p.value("prefix", std::string{});
+    options.mergeEqual = p.value("merge_equal", false);
+    options.reuse = p.value("reuse", false);
+    const literals::ExtractPlan plan =
+        ui::PlanExtractAssembly(state, *state.assembly, std::move(options));
+    json vars = json::array();
+    for (const literals::Proposal& pr : plan.proposals) {
+      json uses = json::array();
+      for (const literals::Use& u : pr.uses) {
+        json j = AssemblyLiteralJson(u.feature, u.field);
+        j.erase("value");
+        j.erase("quantity");
+        j["expression"] = u.expression;
+        uses.push_back(std::move(j));
+      }
+      vars.push_back({{"name", pr.name},
+                      {"expression", pr.expression},
+                      {"value", pr.value},
+                      {"quantity", literals::QuantityName(pr.quantity)},
+                      {"existing", pr.existing},
+                      {"uses", std::move(uses)}});
+    }
+    json left = json::array();
+    for (const literals::LeftAlone& l : plan.leftAlone)
+      left.push_back({{"feature_id", 0},
+                      {"feature", l.feature},
+                      {"field", l.path},
+                      {"label", l.label},
+                      {"reason", l.reason},
+                      {"value", l.value}});
+    json out = {{"applied", false},
+                {"scope", "project"},
+                {"variables", std::move(vars)},
+                {"left_alone", std::move(left)}};
+    if (!p.value("apply", false))
+      return out;
+    if (const std::string why =
+            ui::ApplyExtractAssembly(state, *state.assembly, plan);
+        !why.empty())
+      throw std::runtime_error("extract_variables: " + why);
+    out["applied"] = !plan.proposals.empty();
+    return out;
+  }
+  if ((m == "check_literals" || m == "extract_variables") &&
+      state.document == nullptr)
+    throw std::runtime_error(m + " works on a part or an assembly: switch to "
+                                 "one (set_active_part), or name one with "
+                                 "`part`");
   if (m == "set_assembly_sequence") {
+    // rpc-params: allowance_mm_expr
+    // (and inside steps: distance_mm_expr, turn_deg_expr, and a pose
+    // value's rotation_deg_expr or offset_mm_expr)
+    const ExprArgs ex(p,
+                      {"allowance_mm", "steps/*/distance_mm",
+                       "steps/*/turn_deg", "steps/*/pose/*/rotation_deg",
+                       "steps/*/pose/*/offset_mm"},
+                      state.projectSymbols);
+    const RpcParams& p = ex.Params();
     // rpc-params: steps, allowance_mm
     if (!state.assembly)
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
     AssemblySequence seq = ReadSequence(*state.assembly, p);
+    ex.Bind("allowance_mm", seq.allowanceMm.expr);
+    for (size_t i = 0; i < seq.steps.size(); i++) {
+      SequenceStep& st = seq.steps[i];
+      const std::string at = "steps/" + std::to_string(i) + "/";
+      ex.Bind(at + "distance_mm", st.distanceMm.expr);
+      ex.Bind(at + "turn_deg", st.turnDeg.expr);
+      for (size_t k = 0; k < st.pose.size(); k++)
+        ex.Bind(at + "pose/" + std::to_string(k) +
+                    (st.pose[k].dof == MateDof::Rotation ? "/rotation_deg"
+                                                         : "/offset_mm"),
+                st.pose[k].value.expr);
+    }
     ui::SnapshotAssembly(state);
     state.assembly->SetSequence(std::move(seq));
     state.assembly->BumpVersion();
@@ -1773,6 +2051,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // Places a part OR another assembly (A5) in the active assembly. `part`
     // is its NAME, resolved to a stable slot id; optional `transform` =
     // {position:[x,y,z], orientation:[x,y,z,w] OR rotate:{axis, angle_deg}}.
+    // `transform.position_expr` binds the coordinates (ExprArgs).
+    const ExprArgs ex(p, {"transform/position"}, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     if (!state.assembly)
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
@@ -1879,6 +2160,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error("cannot place '" + refName +
                                  "' flexible: " + why);
     }
+    for (int k = 0; k < 3; k++)
+      ex.Bind("transform/position", occ.positionExpr[k], k);
     ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddOccurrence(occ);
     json out{
@@ -1999,6 +2282,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
+    const ExprArgs ex(p, {"transform/position"}, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     // `occurrence` as well as `id`: every neighbouring RPC names this
     // argument `occurrence`, and these five named it `id` alone.
     if (!p.contains("id") && !p.contains("occurrence"))
@@ -2069,8 +2354,28 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       // the caller did not mention.
       const json t = NormalizeTransform(p.at("transform"));
       if (t.contains("position")) {
-        occ->position =
+        const glm::dvec3 at =
             remote::Vec3Param(t.at("position"), "transform.position");
+        std::array<std::string, 3> texts;
+        for (int k = 0; k < 3; k++)
+          ex.Bind("transform/position", texts[k], k);
+        // A position its mates decide is not an input: an expression there
+        // would be undone by every solve
+        // (docs/assemblies/README.md#numbers-that-are-expressions).
+        const bool bound =
+            !texts[0].empty() || !texts[1].empty() || !texts[2].empty();
+        if (bound && !occ->fixed)
+          for (const Mate& mm : state.assembly->GetMates())
+            if (mm.a.occurrenceId == occ->id || mm.b.occurrenceId == occ->id) {
+              ui::DropAssemblySnapshot(state); // nothing changed
+              throw std::runtime_error(
+                  "occurrence '" + occ->name + "' is placed by its mates ('" +
+                  mm.name +
+                  "' among them), so its position is not an input; fix it "
+                  "(set_occurrence_fixed) or give the mate the expression");
+            }
+        occ->position = at;
+        occ->positionExpr = texts;
       }
       if (t.contains("orientation")) {
         occ->orientation =
@@ -2115,6 +2420,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
+    // rpc-params: rotation_deg_expr, offset_expr, dx_expr, dy_expr
+    // rpc-params: rotation_range_deg_expr, offset_range_mm_expr
+    // rpc-params: dx_range_mm_expr, dy_range_mm_expr, cone_deg_expr
+    const ExprArgs ex(p, kMateExprKeys, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     auto connToJson = [&state](const json& c) -> json {
       json anchor;
       const Occurrence* o = nullptr;
@@ -2265,6 +2575,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // rpc-params: rotation_range_deg, offset_range_mm, dx_range_mm
     // rpc-params: dy_range_mm, cone_deg
     CheckMateRanges(mate, ApplyRangeParams(p, mate));
+    BindMate(ex, mate);
     // Both occurrences must exist before we solve against them.
     if (!state.assembly->FindById(mate.a.occurrenceId) ||
         !state.assembly->FindById(mate.b.occurrenceId))
@@ -2299,6 +2610,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     }
     ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddMate(mate);
+    (void)assembly::EvaluateExprs(*state.assembly, state.projectSymbols);
     const int errored = ui::SolveActiveAssembly(state);
     // MateJson, not MateToJson: the same shape `list_mates` reports, which
     // matters now that `derive` decides some of these numbers — the reply is
@@ -2331,6 +2643,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
+    // rpc-params: rotation_deg_expr, offset_expr
+    const ExprArgs ex(p, {"rotation_deg", "offset"}, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     std::vector<uint64_t> path;
     const Mate* mate =
         MateFromRequest(state, p, "path", p.at("id").get<uint64_t>(), path);
@@ -2377,14 +2692,23 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     ui::SnapshotAssembly(state);
     assembly::SetMateDofAt(*state.assembly, path, mate->id, dof, value,
                            ui::AssemblyResolverFor(state));
+    // This placement's pose of it takes the call's text, or loses it to a
+    // number given alone.
+    for (InnerMateDof& d :
+         state.assembly->FindById(path.front())->innerMateDofs)
+      if (d.mate == mate->id) {
+        ex.Bind("rotation_deg", d.rotation.expr);
+        ex.Bind("offset", d.offset.expr);
+      }
     const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(
         state, assembly::Driven{mate->id, dof, path});
     json out{{"id", mate->id}, {"path", path}, {"name", mate->name}};
     const Occurrence* after = state.assembly->FindById(path.front());
     if (const InnerMateDof* d = after->FindInnerMateDof(mate->id)) {
-      out["rotation"] = d->rotation;
-      out["rotation_deg"] = angles::ToDegrees(d->rotation);
-      out["offset"] = d->offset;
+      out["rotation"] = d->rotation.value;
+      out["rotation_deg"] = d->rotation.Degrees();
+      WriteExprText(out, "rotation_deg", d->rotation.expr);
+      WriteExpr(out, "offset", d->offset);
     }
     out["errored_mates"] = rep.erroredMates;
     if (!rep.limits.empty())
@@ -2402,6 +2726,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
+    // rpc-params: rotation_deg_expr, offset_expr, dx_expr, dy_expr
+    // rpc-params: rotation_range_deg_expr, offset_range_mm_expr
+    // rpc-params: dx_range_mm_expr, dy_range_mm_expr, cone_deg_expr
+    const ExprArgs ex(p, kMateExprKeys, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     Mate* mate = state.assembly->FindMateById(p.at("id").get<uint64_t>());
     if (!mate)
       throw std::runtime_error("no such mate");
@@ -2462,9 +2791,12 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       return std::find(freed.begin(), freed.end(), v) == freed.end();
     });
     CheckMateRanges(edited, named);
+    BindMate(ex, edited);
     CheckRelationsInRange(*state.assembly, edited, ui::PartResolverFor(state));
     ui::SnapshotAssembly(state);
     *mate = edited;
+    // Its problems as they now stand (a text it was given, a range moved).
+    (void)assembly::EvaluateExprs(*state.assembly, state.projectSymbols);
     // The mate just edited drives whatever it is related to: turning the
     // wheel turns the pinion as readily as the other way round.
     (void)assembly::PropagateRelations(*state.assembly, mate->id,
@@ -2523,8 +2855,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       if (const MateOverride* hold = state.assembly->MateOverrideFor(mate.id)) {
         json h = json::object();
         if (hold->rotation) {
-          h["rotation"] = *hold->rotation;
-          h["rotation_deg"] = angles::ToDegrees(*hold->rotation);
+          h["rotation"] = hold->rotation->value;
+          h["rotation_deg"] = hold->rotation->Degrees();
         }
         if (hold->offset)
           h["offset"] = *hold->offset;
@@ -2539,6 +2871,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
+    // rpc-params: ratio_expr, phase_expr, constant_expr, start_deg_expr
+    // rpc-params: step_deg_expr, step_mm_expr, duration_deg_expr
+    // rpc-params: period_deg_expr, lift_expr
+    const ExprArgs ex(p, kRelationExprKeys, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     Relation r;
     r.kind =
         DocumentIO::RelationKindFromString(p.at("type").get<std::string>());
@@ -2631,6 +2968,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       made[0].phase = p.contains("constant")
                           ? p.at("constant").get<double>()
                           : ConstantAsItStands(state, made[0]);
+      BindRelation(ex, made[0], state.projectSymbols);
       for (const Relation& each : made)
         if (std::string why = assembly::RelationProblem(
                 *state.assembly, each, ui::AssemblyResolverFor(state));
@@ -3222,6 +3560,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           "rotation");
     if (r.ratio == 0.0)
       throw std::runtime_error("a relation's ratio cannot be zero");
+    BindRelation(ex, r, state.projectSymbols);
+    if (r.ratio == 0.0)
+      throw std::runtime_error("a relation's ratio cannot be zero");
     const auto lacks = [](const Mate& mm, MateDof dof) {
       return !assembly::MateHasDof(mm.type, dof);
     };
@@ -3342,6 +3683,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
+    // rpc-params: ratio_expr, phase_expr, constant_expr, start_deg_expr
+    const ExprArgs ex(p, {"ratio", "phase", "constant", "start_deg"},
+                      state.projectSymbols);
+    const RpcParams& p = ex.Params();
     Relation* r = state.assembly->FindRelationById(p.at("id").get<uint64_t>());
     if (!r)
       throw std::runtime_error("no such relation; list_relations shows them");
@@ -3481,6 +3826,12 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       r->intermittent.startDeg = p.at("start_deg").get<double>();
     if (p.contains("name"))
       r->name = p.at("name").get<std::string>();
+    {
+      // Evaluated on a copy first: a refused text changes nothing.
+      Relation trial = *r;
+      BindRelation(ex, trial, state.projectSymbols);
+      *r = trial;
+    }
     state.assembly->BumpVersion();
     ui::SolveActiveAssembly(state);
     json out = DocumentIO::RelationToJson(*r);
@@ -3694,6 +4045,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
+    // rpc-params: offset_expr
+    const ExprArgs ex(p, {"offset"}, state.projectSymbols);
+    const RpcParams& p = ex.Params();
     ExplodedView* v =
         state.assembly->FindExplodedViewById(p.at("view").get<uint64_t>());
     if (!v)
@@ -3743,10 +4097,15 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         break;
       }
     if (!step) {
-      v->steps.push_back({occId, offset, path});
-    } else {
-      step->offset = offset;
+      ExplodeStep made;
+      made.occurrenceId = occId;
+      made.path = path;
+      v->steps.push_back(std::move(made));
+      step = &v->steps.back();
     }
+    step->offset = offset;
+    for (int k = 0; k < 3; k++)
+      ex.Bind("offset", step->offsetExpr[k], k);
     state.assembly->BumpVersion(); // resyncs when this view is active
     return DocumentIO::ExplodedViewToJson(*v);
   }

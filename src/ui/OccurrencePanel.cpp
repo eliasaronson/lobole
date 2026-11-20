@@ -464,17 +464,26 @@ void LimitRow(AppState& state, Mate* sel, RangedValue v, const char* label,
     ImGui::PopID();
     return;
   }
-  double mm[2] = {(*slot)->min, (*slot)->max};
+  // Each end its own field, and each may be an expression of the variables
+  // (docs/assemblies/README.md#numbers-that-are-expressions): Ctrl+click
+  // `swing / 2` keeps the link, and the end follows the variable.
+  double mm[2] = {(*slot)->min.value, (*slot)->max.value};
+  std::string texts[2] = {(*slot)->min.expr, (*slot)->max.expr};
   if (deg) {
     mm[0] = glm::degrees(mm[0]);
     mm[1] = glm::degrees(mm[1]);
   }
-  const std::string text =
-      std::string(label) + (deg ? " (deg)" : " (mm)") + "###limit_range";
-  const bool changed =
-      ExprDragFloat2(state, text.c_str(), mm, deg ? 1.0f : 0.1f);
-  if (ImGui::IsItemActivated())
-    SnapshotAssembly(state);
+  ImGui::TextUnformatted(deg ? "(deg)" : "(mm)");
+  bool changed = false;
+  for (int end = 0; end < 2; end++) {
+    const std::string text = std::string(end == 0 ? "Min" : "Max") +
+                             (end == 0 ? "###limit_min" : "###limit_max");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
+    changed |= ExprBoundDrag(state, text.c_str(), &mm[end], &texts[end],
+                             deg ? 1.0f : 0.1f, 0.0, 0.0, "%.3f");
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state);
+  }
   if (changed) {
     Mate trial = *sel;
     std::optional<MateRange>* tslot =
@@ -484,11 +493,16 @@ void LimitRow(AppState& state, Mate* sel, RangedValue v, const char* label,
                                    : &trial.dyRange;
     *tslot = deg ? MateRange{glm::radians(mm[0]), glm::radians(mm[1])}
                  : MateRange{mm[0], mm[1]};
+    (*tslot)->min.expr = texts[0];
+    (*tslot)->max.expr = texts[1];
     std::string why = assembly::MateRangeProblem(trial);
     if (why.empty())
       why = assembly::RangeRefusal(trial, v, assembly::RangedValueOf(trial, v));
     if (why.empty()) {
+      if ((*slot)->min.expr != texts[0] || (*slot)->max.expr != texts[1])
+        SnapshotAssembly(state); // a text committed is one edit
       *slot = *tslot;
+      sel->exprError.clear();
       note.clear();
       SolveActiveAssembly(state);
     } else {
@@ -505,7 +519,8 @@ void ConeRow(AppState& state, Mate* sel, std::string& note) {
   if (ImGui::Checkbox("###cone_on", &on)) {
     SnapshotAssembly(state);
     if (on)
-      sel->coneRad = assembly::RangedValueOf(*sel, RangedValue::Cone);
+      sel->coneRad = ExprAngle::FromRadians(
+          assembly::RangedValueOf(*sel, RangedValue::Cone));
     else
       sel->coneRad.reset();
     note.clear();
@@ -517,18 +532,22 @@ void ConeRow(AppState& state, Mate* sel, std::string& note) {
     ImGui::PopID();
     return;
   }
-  double d = glm::degrees(*sel->coneRad);
-  const bool changed = ExprDragDouble(state, "Cone (deg)###limit_cone", &d,
-                                      1.0f, 0.0, 180.0, "%.3f");
+  double d = sel->coneRad->Degrees();
+  std::string text = sel->coneRad->expr;
+  const bool changed = ExprBoundDrag(state, "Cone (deg)###limit_cone", &d,
+                                     &text, 1.0f, 0.0, 180.0, "%.3f");
   if (ImGui::IsItemActivated())
     SnapshotAssembly(state);
   if (changed) {
     Mate trial = *sel;
-    trial.coneRad = glm::radians(d);
+    trial.coneRad = ExprAngle::FromDegrees(d);
+    trial.coneRad->expr = text;
     std::string why = assembly::MateRangeProblem(trial);
     if (why.empty())
       why = assembly::MateOutsideRange(trial);
     if (why.empty()) {
+      if (sel->coneRad->expr != text)
+        SnapshotAssembly(state); // a text committed is one edit
       sel->coneRad = trial.coneRad;
       note.clear();
       SolveActiveAssembly(state);
@@ -590,35 +609,44 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
       s_limitNote.clear();
   };
   auto angleDof = [&](const char* label) {
-    double deg = glm::degrees(sel->rotation);
+    double deg = sel->rotation.Degrees();
+    std::string text = sel->rotation.expr;
     const std::optional<MateRange> r =
         assembly::RangedValuesFor(sel->type).empty() ||
                 sel->type == MateType::Fastened
             ? std::nullopt
             : sel->rotationRange;
-    const double lo = r ? glm::degrees(r->min) : -DBL_MAX;
-    const double hi = r ? glm::degrees(r->max) : DBL_MAX;
+    const double lo = r ? glm::degrees(r->min.value) : -DBL_MAX;
+    const double hi = r ? glm::degrees(r->max.value) : DBL_MAX;
     const bool changed =
-        ExprDragDouble(state, label, &deg, 1.0f, lo, hi, "%.3f");
+        ExprBoundDrag(state, label, &deg, &text, 1.0f, lo, hi, "%.3f");
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
+      if (text != sel->rotation.expr)
+        SnapshotAssembly(state); // a text committed is one edit
       const double want = glm::radians(deg);
       sel->rotation = assembly::ClampToRange(r, want);
+      sel->rotation.expr = text;
       stopped(RangedValue::Rotation, want, sel->rotation);
       SolveActiveAssembly(state);
     }
   };
   auto offsetDof = [&](const char* label) {
     const std::optional<MateRange> r = sel->offsetRange;
-    const bool changed =
-        ExprDragDouble(state, label, &sel->offset, 0.1f, r ? r->min : -DBL_MAX,
-                       r ? r->max : DBL_MAX, "%.3f");
+    double at = sel->offset.value;
+    std::string text = sel->offset.expr;
+    const bool changed = ExprBoundDrag(state, label, &at, &text, 0.1f,
+                                       r ? r->min.value : -DBL_MAX,
+                                       r ? r->max.value : DBL_MAX, "%.3f");
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
-      const double want = sel->offset;
+      if (text != sel->offset.expr)
+        SnapshotAssembly(state); // a text committed is one edit
+      const double want = at;
       sel->offset = assembly::ClampToRange(r, want);
+      sel->offset.expr = text;
       stopped(RangedValue::Offset, want, sel->offset);
       SolveActiveAssembly(state);
     }
@@ -635,11 +663,15 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
     offsetDof("Offset");
     break;
   case MateType::Planar: {
-    double dxy[2] = {sel->dx, sel->dy};
+    double dxy[2] = {sel->dx.value, sel->dy.value};
     const bool changed = ExprDragFloat2(state, "Slide (x,y)", dxy, 0.1f);
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
+      // A slide dragged by hand is a number again (bind one from the RPC
+      // or the limits).
+      sel->dx.expr.clear();
+      sel->dy.expr.clear();
       sel->dx = assembly::ClampToRange(sel->dxRange, dxy[0]);
       sel->dy = assembly::ClampToRange(sel->dyRange, dxy[1]);
       stopped(sel->dx != dxy[0] ? RangedValue::Dx : RangedValue::Dy,
@@ -663,7 +695,7 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
       if (sel->ballRotation != want)
         s_limitNote =
             "held at its cone " +
-            assembly::FormatRangedValue(RangedValue::Cone, *sel->coneRad);
+            assembly::FormatRangedValue(RangedValue::Cone, sel->coneRad->value);
       else
         s_limitNote.clear();
       SolveActiveAssembly(state);
@@ -1726,16 +1758,18 @@ void DrawMateToolWindow(AppState& state) {
       if (ImGui::Button("Rotate 90°###mate_rotate90")) {
         // Wrapped into [0, 360), so four clicks come back to where they
         // started rather than winding the number up.
-        const double turned = glm::degrees(live->rotation) + 90.0;
+        const double turned = glm::degrees(live->rotation.value) + 90.0;
         live->rotation =
             glm::radians(turned - 360.0 * std::floor(turned / 360.0));
+        live->rotation.expr.clear(); // turned by hand: a number again
         edited();
       }
       if (editM == nullptr) {
-        double deg = glm::degrees(live->rotation);
+        double deg = glm::degrees(live->rotation.value);
         if (ExprDragDouble(state, "Angle (deg)###mateToolAngle", &deg, 1.0f,
                            -DBL_MAX, DBL_MAX, "%.3f")) {
           live->rotation = glm::radians(deg);
+          live->rotation.expr.clear();
           edited();
         }
       }
@@ -2610,14 +2644,35 @@ void DrawAssemblyEditWindow(AppState& state) {
       sel->name = name;
       asmDoc.BumpVersion();
     }
-    glm::dvec3 pos = sel->position;
-    const bool posChanged =
-        ExprDragFloat3(state, "Position###occ_pos", &pos.x, 0.1f);
-    if (ImGui::IsItemActivated())
-      SnapshotAssembly(state); // one snapshot per drag session
-    if (posChanged) {
-      sel->position = pos;
-      asmDoc.BumpVersion();
+    // Each coordinate may be an expression of the variables -- on an
+    // occurrence nothing else places (a mated one is where its mates put it).
+    bool placedByMates = false;
+    if (!sel->fixed)
+      for (const Mate& mm : asmDoc.GetMates())
+        placedByMates = placedByMates || mm.a.occurrenceId == sel->id ||
+                        mm.b.occurrenceId == sel->id;
+    static const char* const kAxes[3] = {"X###occ_px", "Y###occ_py",
+                                         "Z###occ_pz"};
+    ImGui::TextUnformatted("Position (mm)");
+    for (int k = 0; k < 3; k++) {
+      double at = sel->position[k];
+      std::string text = sel->positionExpr[k];
+      bool changed = false;
+      if (placedByMates) {
+        changed = ExprDragDouble(state, kAxes[k], &at, 0.1f, 0.0, 0.0, "%.3f");
+      } else {
+        changed =
+            ExprBoundDrag(state, kAxes[k], &at, &text, 0.1f, 0.0, 0.0, "%.3f");
+      }
+      if (ImGui::IsItemActivated())
+        SnapshotAssembly(state); // one snapshot per drag session
+      if (changed) {
+        if (text != sel->positionExpr[k])
+          SnapshotAssembly(state);
+        sel->position[k] = at;
+        sel->positionExpr[k] = text;
+        asmDoc.BumpVersion();
+      }
     }
     glm::dvec3 euler = glm::degrees(glm::eulerAngles(sel->orientation));
     const bool rotChanged =
@@ -2759,21 +2814,36 @@ void DrawAssemblyEditWindow(AppState& state) {
           ImGui::PopStyleColor();
         }
       } else if (r->kind != RelationKind::Intermittent &&
-                 r->kind != RelationKind::Contact &&
-                 ExprInputDouble(state, "Ratio###rel_ratio", &ratio, "%.5g") &&
-                 ratio != 0.0 && ratio != r->ratio) {
-        SnapshotAssembly(state);
-        r->ratio = ratio;
-        asmDoc.BumpVersion();
-        SolveActiveAssembly(state);
+                 r->kind != RelationKind::Contact) {
+        std::string text = r->ratio.expr;
+        if (ExprBoundDrag(state, "Ratio###rel_ratio", &ratio, &text, 0.01f, 0.0,
+                          0.0, "%.5g") &&
+            ratio != 0.0 && (ratio != r->ratio || text != r->ratio.expr)) {
+          SnapshotAssembly(state);
+          r->ratio = ratio;
+          r->ratio.expr = text;
+          asmDoc.BumpVersion();
+          SolveActiveAssembly(state);
+        }
       }
-      if (r->kind != RelationKind::Contact &&
-          ExprInputDouble(state, "Phase###rel_phase", &phase, "%.5g") &&
-          phase != r->phase) {
-        SnapshotAssembly(state);
-        r->phase = phase;
-        asmDoc.BumpVersion();
-        SolveActiveAssembly(state);
+      if (r->kind != RelationKind::Contact) {
+        // In b's unit, its text in degrees for a turn as every angle's is:
+        // the field shows degrees for a turn.
+        const bool turn = r->HasTerms() || r->dofB == MateDof::Rotation;
+        double shown = turn ? glm::degrees(phase) : phase;
+        std::string text = r->phase.expr;
+        if (ExprBoundDrag(
+                state, turn ? "Phase (deg)###rel_phase" : "Phase###rel_phase",
+                &shown, &text, turn ? 1.0f : 0.1f, 0.0, 0.0, "%.5g")) {
+          const double v = turn ? glm::radians(shown) : shown;
+          if (v != r->phase || text != r->phase.expr) {
+            SnapshotAssembly(state);
+            r->phase = v;
+            r->phase.expr = text;
+            asmDoc.BumpVersion();
+            SolveActiveAssembly(state);
+          }
+        }
       }
     }
     if (!r->held.empty())

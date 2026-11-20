@@ -127,6 +127,22 @@ void SyncProjectScope(AppState& state) {
       fem::RestampByInputs(*d);
     }
   }
+  // Every assembly reads the project's variables
+  // (docs/assemblies/README.md#numbers-that-are-expressions): one whose
+  // values moved, or whose problems changed, is solved again where they
+  // now put it. The parts above regenerated first, so the solve sees them.
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    AssemblyDocument* a = SlotAssembly(state, i);
+    if (a == nullptr || !assembly::EvaluateExprs(*a, state.projectSymbols))
+      continue;
+    if (a == state.assembly.get()) {
+      (void)SolveActiveAssemblyReport(state);
+    } else {
+      (void)assembly::Solve(*a, PartResolverFor(state),
+                            AssemblyResolverFor(state));
+      a->BumpVersion();
+    }
+  }
   state.gpu.syncedDocumentVersion =
       UINT64_MAX; // a cross-tab edit; force resync
 }
@@ -197,19 +213,19 @@ std::vector<std::string> RequirementReferences(const AppState& state,
 }
 
 namespace {
-// A project-variable rename in every assembly's studies: what
+// A project-variable rename in every assembly: its mates, placements,
+// relations, studies and the rest (AssemblyDocument::VisitExprs), what
 // Document::RewriteProjectVarRefs does for a part's.
-void RewriteAssemblyStudyRefs(AppState& state, const std::string& from,
-                              const std::string& to) {
+void RewriteAssemblyRefs(AppState& state, const std::string& from,
+                         const std::string& to) {
   for (size_t i = 0; i < state.parts.size(); i++)
     if (AssemblyDocument* a = SlotAssembly(state, i)) {
       bool changed = false;
-      for (fem::Study& s : a->GetStudies())
-        s.VisitExprs([&](const ExprSlot& slot) {
-          changed |= RenameInSlot(slot, from, to);
-        });
+      a->VisitExprs([&](const std::string&, const ExprSlot& slot) {
+        changed |= RenameInSlot(slot, from, to);
+      });
       if (changed)
-        a->MarkEdited(); // saved, and no change to the model
+        a->MarkEdited(); // saved; the values are the same
     }
 }
 } // namespace
@@ -262,17 +278,19 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
     for (const std::string& r : d->FindParameterReferences(name))
       refs.push_back(state.parts[i].name + ": " + r);
   }
-  // An assembly's studies read the project's variables (an assembly has
-  // none of its own).
+  // An assembly reads the project's variables (it has none of its own):
+  // each mate, placement, relation, study... that reads it, once.
   for (size_t i = 0; i < state.parts.size(); i++)
-    if (AssemblyDocument* a = SlotAssembly(state, i))
-      for (fem::Study& s : a->GetStudies()) {
-        bool hit = false;
-        s.VisitExprs(
-            [&](const ExprSlot& slot) { hit = hit || SlotReads(slot, name); });
-        if (hit)
-          refs.push_back(state.parts[i].name + ": study '" + s.name + "'");
-      }
+    if (AssemblyDocument* a = SlotAssembly(state, i)) {
+      std::vector<std::string> owners;
+      a->VisitExprs([&](const std::string& owner, const ExprSlot& slot) {
+        if (SlotReads(slot, name) &&
+            std::find(owners.begin(), owners.end(), owner) == owners.end())
+          owners.push_back(owner);
+      });
+      for (const std::string& owner : owners)
+        refs.push_back(state.parts[i].name + ": " + owner);
+    }
   // A requirement that reads it: deleting the variable would leave the
   // requirement unresolved, so it is refused like a feature's reference.
   for (std::string& r : RequirementReferences(state, name, 0))
@@ -319,7 +337,7 @@ void ApplyProjectVarSnapshot(AppState& state, const ProjectVarSnapshot& s) {
     for (size_t i = 0; i < state.parts.size(); i++)
       if (Document* d = SlotDoc(state, i))
         d->RewriteProjectVarRefs(s.docRefFrom, s.docRefTo);
-    RewriteAssemblyStudyRefs(state, s.docRefFrom, s.docRefTo);
+    RewriteAssemblyRefs(state, s.docRefFrom, s.docRefTo);
     RewriteRequirements(state, s.docRefFrom, s.docRefTo, 0);
   }
   state.projectParameters = s.params;
@@ -409,7 +427,7 @@ bool RenameProjectVariable(AppState& state, const std::string& oldName,
   for (size_t i = 0; i < state.parts.size(); i++)
     if (Document* d = SlotDoc(state, i))
       d->RewriteProjectVarRefs(oldName, newName);
-  RewriteAssemblyStudyRefs(state, oldName, newName);
+  RewriteAssemblyRefs(state, oldName, newName);
   RewriteRequirements(state, oldName, newName, 0);
   SyncProjectScope(state);
   return true;
@@ -475,6 +493,16 @@ std::vector<std::string> ProjectTableReferences(AppState& state,
       }
     });
   }
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (AssemblyDocument* a = SlotAssembly(state, i)) {
+      std::string last; // each owner once
+      a->VisitExprs([&](const std::string& owner, const ExprSlot& slot) {
+        if (owner != last && slot.Bound() && references(slot.Expr())) {
+          refs.push_back(state.parts[i].name + ": " + owner);
+          last = owner;
+        }
+      });
+    }
   for (const req::Requirement& r : state.requirements)
     if (req::ReadsTable(r, name))
       refs.push_back("requirement '" + r.name + "'");

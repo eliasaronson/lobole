@@ -406,8 +406,9 @@ uint64_t JoinAcrossInterface(AppState& state, const assembly::FlatInstance& a,
   mate.dy = rel[3][1];
   mate.offset = rel[3][2];
   glm::dmat4 adjust(1.0);
-  adjust = glm::translate(adjust, glm::dvec3(mate.dx, mate.dy, mate.offset));
-  adjust = glm::rotate(adjust, mate.rotation, glm::dvec3(0.0, 0.0, 1.0));
+  adjust = glm::translate(
+      adjust, glm::dvec3(mate.dx.value, mate.dy.value, mate.offset.value));
+  adjust = glm::rotate(adjust, mate.rotation.value, glm::dvec3(0.0, 0.0, 1.0));
   if (mate.flipped)
     adjust = glm::rotate(adjust, glm::pi<double>(), glm::dvec3(1.0, 0.0, 0.0));
   for (int c = 0; c < 4; c++)

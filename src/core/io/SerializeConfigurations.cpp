@@ -45,10 +45,10 @@ json ConfigurationToJson(const Configuration& c) {
     j["mate_overrides"] = json::array();
     for (const MateOverride& o : c.mateOverrides) {
       json oj = {{"mate", o.mate}};
-      if (o.rotation)
-        oj["rotation"] = *o.rotation; // radians
-      if (o.offset)
-        oj["offset"] = *o.offset; // mm
+      if (o.rotation) // radians; an expression (vNEXT) in degrees
+        WriteExprRadians(oj, "rotation", *o.rotation);
+      if (o.offset) // mm
+        WriteExpr(oj, "offset", *o.offset);
       j["mate_overrides"].push_back(std::move(oj));
     }
   }
@@ -80,14 +80,26 @@ Configuration ConfigurationFromJson(const json& j) {
   c.suppressedRelations =
       j.value("suppressed_relations", std::vector<uint64_t>{});
   for (const json& oj : j.value("mate_overrides", json::array())) {
-    readctx::RefuseUnknownKeys(oj, {"mate", "rotation", "offset"},
-                               "configuration mate override");
+    readctx::RefuseUnknownKeys(
+        oj, {"mate", "rotation", "rotation_expr", "offset", "offset_expr"},
+        "configuration mate override");
     MateOverride o;
     o.mate = oj.at("mate").get<uint64_t>();
-    if (oj.contains("rotation"))
-      o.rotation = oj.at("rotation").get<double>();
-    if (oj.contains("offset"))
-      o.offset = oj.at("offset").get<double>();
+    if (oj.contains("rotation")) {
+      ExprAngle r;
+      ReadExprRadians(oj, "rotation", r);
+      o.rotation = r;
+    }
+    if (oj.contains("offset")) {
+      ExprValue v;
+      ReadExpr(oj, "offset", v);
+      o.offset = v;
+    }
+    for (const char* key : {"rotation", "offset"})
+      if (oj.contains(std::string(key) + "_expr") && !oj.contains(key))
+        throw std::runtime_error(std::string("configuration mate override: ") +
+                                 key + "_expr without the " + key +
+                                 " it binds");
     c.mateOverrides.push_back(o);
   }
   return c;

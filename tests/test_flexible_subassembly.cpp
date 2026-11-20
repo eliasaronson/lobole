@@ -253,7 +253,8 @@ TEST_CASE("A flexible unit runs under its own configuration",
           "[assembly][solver][motion]") {
   Rig r = MakeRig(false, /*withChain=*/false);
   Configuration& held = r.sub.AddConfiguration("Held");
-  held.mateOverrides.push_back({r.crankMate, kPi / 4.0, std::nullopt});
+  held.mateOverrides.push_back(
+      {r.crankMate, ExprAngle::FromRadians(kPi / 4.0), std::nullopt});
   const uint64_t heldId = held.id;
   r.top.FindById(r.unitOcc)->configurationId = heldId;
   assembly::Solve(r.top, r.Parts(), r.Subs());

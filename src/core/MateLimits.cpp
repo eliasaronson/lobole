@@ -209,10 +209,10 @@ std::string AssemblyOutsideRange(const AssemblyDocument& doc) {
 double ClampToRange(const std::optional<MateRange>& r, double value) {
   if (!r)
     return value;
-  return std::clamp(value, r->min, std::max(r->min, r->max));
+  return std::clamp(value, r->min.value, std::max(r->min.value, r->max.value));
 }
 
-glm::dquat ClampToCone(const std::optional<double>& coneRad,
+glm::dquat ClampToCone(const std::optional<ExprAngle>& coneRad,
                        const glm::dquat& ballRotation) {
   if (!coneRad)
     return ballRotation;
@@ -229,7 +229,7 @@ glm::dquat ClampToCone(const std::optional<double>& coneRad,
   if (tilt <= *coneRad || s < 1e-15)
     return q;
   const glm::dvec3 dir = (swing.w < 0.0 ? -axis : axis) / s;
-  return glm::normalize(glm::angleAxis(*coneRad, dir) * twist);
+  return glm::normalize(glm::angleAxis(coneRad->value, dir) * twist);
 }
 
 } // namespace assembly

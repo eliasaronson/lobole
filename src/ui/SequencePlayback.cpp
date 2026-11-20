@@ -89,7 +89,7 @@ SolvePose(AppState& state, AssemblyDocument& doc,
     if (m == nullptr) // the check refused it before this runs
       continue;
     const bool rot = p.dof == MateDof::Rotation;
-    const double to = rot ? glm::radians(p.value) : p.value;
+    const double to = rot ? glm::radians(p.value.value) : p.value.value;
     const double from = assembly::MateDofValue(*m, p.dof);
     strides = std::max(
         strides, static_cast<int>(std::ceil(std::abs(to - from) /

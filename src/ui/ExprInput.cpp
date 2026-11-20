@@ -433,6 +433,79 @@ bool ExprInputInt(AppState& state, const char* label, int* v,
   return changed;
 }
 
+bool ExprBoundDrag(AppState& state, const char* label, double* shown,
+                   std::string* expr, float speed, double vmin, double vmax,
+                   const char* fmt) {
+  const char* hidden = std::strstr(label, "##");
+  const std::string visible =
+      hidden != nullptr ? std::string(label, hidden) : std::string(label);
+  bool changed = false;
+  if (expr->empty()) {
+    std::string typed;
+    changed =
+        ExprDragDouble(state, label, shown, speed, vmin, vmax, fmt, &typed);
+    if (changed)
+      *expr = typed; // empty for a plain number: it stays a literal
+    return changed;
+  }
+  ImGui::PushID(label); // the bound field's items live under the label
+  // Bound: the text is what is edited, one shared buffer claimed on
+  // activation (only one item is ever active), as ExprDim does.
+  static ImGuiID s_active = 0;
+  static char s_buf[256];
+  const ImGuiID me = ImGui::GetID("##bound");
+  char tmp[sizeof(s_buf)];
+  std::snprintf(tmp, sizeof(tmp), "%s", expr->c_str());
+  const float button = ImGui::CalcTextSize("123").x +
+                       ImGui::GetStyle().FramePadding.x * 2.0f +
+                       ImGui::GetStyle().ItemInnerSpacing.x;
+  ImGui::SetNextItemWidth(std::max(40.0f, ImGui::CalcItemWidth() - button));
+  ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.18f, 0.30f, 0.45f, 0.9f));
+  const ExprFieldEvents ev = ExprCompletingInput(
+      state, "##bound", s_active == me ? s_buf : tmp, sizeof(s_buf));
+  ImGui::PopStyleColor();
+  if (ev.activated) {
+    s_active = me;
+    std::snprintf(s_buf, sizeof(s_buf), "%s", expr->c_str());
+  }
+  if (s_active == me && ev.left) {
+    s_active = 0;
+    char* end = nullptr;
+    const double number = std::strtod(s_buf, &end);
+    while (end != nullptr && *end == ' ')
+      end++;
+    if (end != s_buf && end != nullptr && *end == '\0') {
+      expr->clear(); // a plain number: a literal again
+      *shown = vmin < vmax ? std::clamp(number, vmin, vmax) : number;
+      changed = true;
+    } else if (s_buf[0] != '\0' && *expr != s_buf) {
+      const auto v =
+          ExpressionEngine::Default().EvaluateText(s_buf, SymbolsFor(state));
+      if (!v.has_value()) {
+        state.sketchEdit.actionMsg = v.error().message;
+      } else {
+        *expr = s_buf;
+        *shown = *v;
+        changed = true;
+      }
+    }
+  }
+  ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+  if (ImGui::SmallButton("123")) {
+    expr->clear(); // back to a literal holding the value it gave
+    changed = true;
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Unbind: keep %.6g as a number", *shown);
+  if (!visible.empty()) {
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::TextUnformatted(visible.c_str());
+  }
+  ImGui::TextDisabled("  = %.6g  (%s)", *shown, expr->c_str());
+  ImGui::PopID();
+  return changed;
+}
+
 bool ExprInputDouble3(AppState& state, const char* label, double v[3],
                       const char* fmt) {
   ImGuiID fields[3];

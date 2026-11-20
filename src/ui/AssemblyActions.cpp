@@ -123,6 +123,11 @@ void RestoreAssembly(AppState& state, AssemblyDocument restored) {
   while (restored.Version() <= current || restored.SaveStamp() <= currentStamp)
     restored.BumpVersion();
   *state.assembly = std::move(restored);
+  // A snapshot's bound values are those of its day: one a variable has
+  // moved since is applied again, and only then does the restored pose
+  // re-solve (docs/assemblies/README.md#numbers-that-are-expressions).
+  if (assembly::EvaluateExprs(*state.assembly, state.projectSymbols))
+    (void)SolveActiveAssemblyReport(state);
 }
 } // namespace
 

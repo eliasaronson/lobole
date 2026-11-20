@@ -442,6 +442,7 @@ set(core_sources
     src/core/FollowerCheck.cpp
     src/core/AssemblyFlexible.cpp
     src/core/MateLimits.cpp
+    src/core/AssemblyExprs.cpp
     src/core/AssemblyRelations.cpp
     src/core/AssemblySolve.cpp
     src/core/AssemblyLoopSolve.cpp

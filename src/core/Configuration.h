@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/ExprValue.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -21,8 +23,8 @@
 // authored — so leaving the configuration restores it.
 struct MateOverride {
   uint64_t mate = 0;
-  std::optional<double> rotation; // radians
-  std::optional<double> offset;   // mm: a slide, or a revolute's axial seat
+  std::optional<ExprAngle> rotation; // radians; an expression in degrees
+  std::optional<ExprValue> offset;   // mm: a slide, or a revolute's axial seat
 };
 
 struct Configuration {

@@ -1266,7 +1266,7 @@ TEST_CASE("A ball's cone holds a loop at its tilt",
     ball.aOcc = 10;
     ball.bOcc = 20;
     ball.flipped = false;
-    ball.coneRad = glm::radians(coneDeg);
+    ball.coneRad = ExprAngle::FromDegrees(coneDeg);
     p.mates.push_back(ball);
     p.mates.push_back(Fastened(
         2, 10,

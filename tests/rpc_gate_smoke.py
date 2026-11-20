@@ -44,11 +44,9 @@ GATED_ON_PURPOSE = {
     # Its source is the active part's body unless `part` names another; the
     # handler reads the part document through its helper.
     "split_for_printing": "it cuts the active part's body by default",
-    # The literals lint reads the active part unless `part` names another,
-    # and extract_variables edits the active part's features; both reach the
-    # document through their helpers (RemoteModeling.cpp).
-    "check_literals": "it lints the active part by default",
-    "extract_variables": "it edits the active part's features",
+    # check_literals and extract_variables are not gated: on an assembly tab
+    # they read the assembly's numbers, and refuse on a drawing or a job tab
+    # themselves (docs/variables/README.md#extracting-variables).
     # A template is saved from the active part's features
     # (docs/modeling/templates.md#saving-one); the handler reaches the part
     # through state.document in its helper (ui::SaveTemplate).

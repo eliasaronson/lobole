@@ -143,11 +143,9 @@ void DrawAssemblyConfigs(AppState& state) {
       auto it =
           std::find_if(cc.mateOverrides.begin(), cc.mateOverrides.end(),
                        [&](const MateOverride& o) { return o.mate == mt.id; });
-      std::optional<double>* slot =
-          it == cc.mateOverrides.end()
-              ? nullptr
-              : (rotation ? &it->rotation : &it->offset);
-      bool held = slot != nullptr && slot->has_value();
+      const bool present = it != cc.mateOverrides.end();
+      bool held = present && (rotation ? it->rotation.has_value()
+                                       : it->offset.has_value());
       ImGui::SameLine();
       const std::string hid = std::string(rotation ? "turn" : "slide") +
                               "###cfg_hold_" + (rotation ? "r_" : "o_") + sid;
@@ -158,10 +156,15 @@ void DrawAssemblyConfigs(AppState& state) {
             cc.mateOverrides.push_back({mt.id, std::nullopt, std::nullopt});
             it = cc.mateOverrides.end() - 1;
           }
-          (rotation ? it->rotation : it->offset) =
-              rotation ? mt.rotation : mt.offset;
+          if (rotation)
+            it->rotation = ExprAngle::FromRadians(mt.rotation.value);
+          else
+            it->offset = ExprValue(mt.offset.value);
         } else if (it != cc.mateOverrides.end()) {
-          (rotation ? it->rotation : it->offset).reset();
+          if (rotation)
+            it->rotation.reset();
+          else
+            it->offset.reset();
           if (!it->rotation && !it->offset)
             cc.mateOverrides.erase(it);
         }
@@ -173,13 +176,20 @@ void DrawAssemblyConfigs(AppState& state) {
         ImGui::SetNextItemWidth(80.0f);
         // An ExprInput field, not a raw DragFloat: a typed "90/4" must
         // evaluate, not sscanf to 90 (test_conventions.cpp).
-        double v = rotation ? angles::ToDegrees(**slot) : **slot;
+        // The held value may be an expression of the variables, its text
+        // in degrees for a turn as every angle's is.
+        double& value = rotation ? it->rotation->value : it->offset->value;
+        std::string& expr = rotation ? it->rotation->expr : it->offset->expr;
+        double v = rotation ? angles::ToDegrees(value) : value;
+        std::string text = expr;
         const std::string vid =
             std::string("###cfg_hold_v") + (rotation ? "r_" : "o_") + sid;
-        if (ExprDragDouble(state, vid.c_str(), &v, rotation ? 1.0f : 0.05f, 0.0,
-                           0.0, rotation ? "%.2f deg" : "%.3f mm")) {
+        if (ExprBoundDrag(state, vid.c_str(), &v, &text,
+                          rotation ? 1.0f : 0.05f, 0.0, 0.0,
+                          rotation ? "%.2f deg" : "%.3f mm")) {
           SnapshotAssembly(state);
-          *slot = rotation ? angles::ToRadians(v) : v;
+          value = rotation ? angles::ToRadians(v) : v;
+          expr = text;
           changed = true;
         }
       }

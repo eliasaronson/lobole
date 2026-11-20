@@ -4,6 +4,7 @@
 #include "remote/RemoteConfigurations.h"
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
+#include "remote/ExprArgs.h"
 
 #include "core/Command.h"
 #include "core/Configuration.h"
@@ -44,7 +45,9 @@ static constexpr MethodDoc ConfigurationMethods[] = {
      "suppression lists (a flat pattern is exactly this). "
      "ASSEMBLY: suppressed_occurrences, suppressed_mates, "
      "suppressed_relations [ids], mate_overrides [{mate, rotation (radians) "
-     "| rotation_deg, offset (mm)}] — DOFs the configuration holds; an "
+     "| rotation_deg, offset (mm), and rotation_deg_expr, rotation_expr "
+     "(degrees), offset_expr binding them to the project's variables}] — "
+     "DOFs the configuration holds; an "
      "overlay, so leaving it restores the mates. Each list replaces; the "
      "other kind's keys are refused. Editing the active one re-solves; an "
      "expression requirement it moves answers in `requirements`.",
@@ -209,11 +212,12 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
       for (const MateOverride& o : c.mateOverrides) {
         json oj = {{"mate", o.mate}};
         if (o.rotation) {
-          oj["rotation"] = *o.rotation;
-          oj["rotation_deg"] = angles::ToDegrees(*o.rotation);
+          oj["rotation"] = o.rotation->value;
+          oj["rotation_deg"] = o.rotation->Degrees();
+          WriteExprText(oj, "rotation_deg", o.rotation->expr);
         }
         if (o.offset)
-          oj["offset"] = *o.offset;
+          WriteExpr(oj, "offset", *o.offset);
         holds.push_back(std::move(oj));
       }
       arr.push_back({{"id", c.id},
@@ -227,6 +231,15 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
     return true;
   }
   if (m == "set_configuration") {
+    // A held turn or slide may be an expression of the project's variables;
+    // `rotation` (radians) takes its text in degrees, as rotation_deg does.
+    // rpc-params: mate_overrides
+    const ExprArgs ex(p,
+                      {"mate_overrides/*/rotation_deg",
+                       "rad:mate_overrides/*/rotation",
+                       "mate_overrides/*/offset"},
+                      state.projectSymbols);
+    const RpcParams& p = ex.Params();
     const uint64_t id = p.at("id").get<uint64_t>();
     Configuration* c = asm_.FindConfiguration(id);
     if (!c)
@@ -295,12 +308,21 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
           throw std::runtime_error(
               "mate_overrides: give rotation (radians) OR rotation_deg, not "
               "both");
-        if (oj.contains("rotation"))
-          o.rotation = oj.at("rotation").get<double>();
-        if (oj.contains("rotation_deg"))
-          o.rotation = (angles::ToRadians(oj.at("rotation_deg").get<double>()));
-        if (oj.contains("offset"))
-          o.offset = oj.at("offset").get<double>();
+        const std::string at =
+            "mate_overrides/" + std::to_string(next.mateOverrides.size()) + "/";
+        if (oj.contains("rotation")) {
+          o.rotation = ExprAngle::FromRadians(oj.at("rotation").get<double>());
+          ex.Bind(at + "rotation", o.rotation->expr);
+        }
+        if (oj.contains("rotation_deg")) {
+          o.rotation =
+              ExprAngle::FromDegrees(oj.at("rotation_deg").get<double>());
+          ex.Bind(at + "rotation_deg", o.rotation->expr);
+        }
+        if (oj.contains("offset")) {
+          o.offset = ExprValue(oj.at("offset").get<double>());
+          ex.Bind(at + "offset", o.offset->expr);
+        }
         if (!o.rotation && !o.offset)
           throw std::runtime_error("mate_overrides: mate " +
                                    std::to_string(o.mate) +

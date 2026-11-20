@@ -5,6 +5,7 @@
 #include "core/GeneratedComponent.h"
 #include "core/Measure.h"
 #include "remote/InspectionContracts.h"
+#include "ui/AppActionsInternal.h" // SlotAssembly
 #include "ui/AssemblyActions.h"
 #include "ui/StepExport.h"
 #include "ui/StlExport.h"
@@ -673,6 +674,32 @@ std::unique_ptr<Parking> ParkImportRequest(ui::AppState& state,
   return std::make_unique<ImportWait>(std::move(slot), refusal);
 }
 
+namespace {
+// What a variable edit did to the assemblies, in its own answer
+// (docs/assemblies/README.md#numbers-that-are-expressions): each assembly
+// whose expressions do not stand, and why. Silent when every one does.
+void AttachAssemblyRegen(ui::AppState& state, json& out) {
+  json rows = json::array();
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (const AssemblyDocument* a = ui::SlotAssembly(state, i)) {
+      json failed = json::array();
+      for (const AssemblyExprProblem& pr : a->ExprProblems())
+        failed.push_back(
+            {{"owner", pr.owner}, {"id", pr.id}, {"error", pr.error}});
+      if (!failed.empty())
+        rows.push_back(
+            {{"assembly", state.parts[i].name}, {"failed", std::move(failed)}});
+    }
+  if (rows.empty())
+    return;
+  if (!out.contains("regen"))
+    out["regen"] = {
+        {"ok", true}, {"failed", json::array()}, {"warnings", json::array()}};
+  out["regen"]["assemblies"] = std::move(rows);
+  out["regen"]["ok"] = false;
+}
+} // namespace
+
 std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   Document* doc = state.document.get();
@@ -1239,6 +1266,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       result["error"] = param->error;
     // No active part on an assembly or drawing tab: nothing to report.
     AttachRegen(result, doc, preDigest);
+    AttachAssemblyRegen(state, result);
     return result;
   }
   if (m == "delete_variable") {
@@ -1268,6 +1296,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       }
       json out = json::object();
       AttachRegen(out, state.document.get(), preDigest);
+      AttachAssemblyRegen(state, out);
       return out;
     }
     if (!haveProject)
@@ -1281,6 +1310,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     }
     json out = json::object();
     AttachRegen(out, state.document.get(), preDigest);
+    AttachAssemblyRegen(state, out);
     return out;
   }
   if (m == "rename_variable") {
@@ -1307,6 +1337,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
             "shows what exists in each scope");
       json out = json::object();
       AttachRegen(out, state.document.get(), preDigest);
+      AttachAssemblyRegen(state, out);
       return out;
     }
     if (!ui::RenameProjectVariable(state, name, newName))
@@ -1317,6 +1348,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
           "shows what exists in each scope");
     json out = json::object();
     AttachRegen(out, state.document.get(), preDigest);
+    AttachAssemblyRegen(state, out);
     return out;
   }
   if (m == "set_table") {
@@ -1388,6 +1420,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("set_table: " + why);
     json out = {{"table", lookuptable::ToJson(t)}};
     AttachRegen(out, doc, preDigest);
+    AttachAssemblyRegen(state, out);
     return out;
   }
   if (m == "list_tables") {
@@ -1416,6 +1449,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("delete_table: " + why);
     json out = json::object();
     AttachRegen(out, state.document.get(), preDigest);
+    AttachAssemblyRegen(state, out);
     return out;
   }
   if (m == "list_variables") {

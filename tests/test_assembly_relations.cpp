@@ -267,7 +267,8 @@ TEST_CASE("A configuration suppresses mates, relations and occurrences and "
   Configuration& cfg = r.d.AddConfiguration("Held");
   const uint64_t cfgId = cfg.id;
   cfg.suppressedRelations = {ab};
-  cfg.mateOverrides = {{a, 0.5f, std::nullopt}, {c, std::nullopt, 3.0f}};
+  cfg.mateOverrides = {{a, ExprAngle::FromRadians(0.5), std::nullopt},
+                       {c, std::nullopt, ExprValue(3.0)}};
   REQUIRE(r.d.SetActiveConfiguration(cfgId));
   assembly::Solve(r.d, NoParts());
   // The hold drives: A stands at 0.5 for the placement and for its relation
@@ -1521,7 +1522,8 @@ TEST_CASE("Willis holds with each member of an epicyclic held in turn",
   SECTION("carrier held: the ring turns -zs/zr of the sun") {
     Epi e = MakeEpi(false);
     Configuration& cfg = e.r.d.AddConfiguration("Carrier held");
-    cfg.mateOverrides = {{e.carrier, 0.0, std::nullopt}};
+    cfg.mateOverrides = {
+        {e.carrier, ExprAngle::FromRadians(0.0), std::nullopt}};
     REQUIRE(e.r.d.SetActiveConfiguration(cfg.id));
     e.Drive(e.sun, 0.7);
     CHECK_THAT(e.Rot(e.ring), WithinAbs(-0.7 * zs / zr, 1e-9));
@@ -1531,7 +1533,7 @@ TEST_CASE("Willis holds with each member of an epicyclic held in turn",
   SECTION("sun held: the carrier turns zr/(zs+zr) of the ring") {
     Epi e = MakeEpi(false);
     Configuration& cfg = e.r.d.AddConfiguration("Sun held");
-    cfg.mateOverrides = {{e.sun, 0.0, std::nullopt}};
+    cfg.mateOverrides = {{e.sun, ExprAngle::FromRadians(0.0), std::nullopt}};
     REQUIRE(e.r.d.SetActiveConfiguration(cfg.id));
     e.Drive(e.ring, 0.5);
     CHECK_THAT(e.Rot(e.carrier), WithinAbs(0.5 * zr / (zs + zr), 1e-9));
@@ -1569,7 +1571,7 @@ TEST_CASE("A differential: two members driven set the third, one driven "
   // The ring held at 0.3 by a configuration, the sun driven to 0.7: Willis
   // sets the carrier between them.
   Configuration& cfg = e.r.d.AddConfiguration("Ring at 0.3");
-  cfg.mateOverrides = {{e.ring, 0.3, std::nullopt}};
+  cfg.mateOverrides = {{e.ring, ExprAngle::FromRadians(0.3), std::nullopt}};
   REQUIRE(e.r.d.SetActiveConfiguration(cfg.id));
   e.Drive(e.sun, 0.7);
   CHECK_THAT(e.Rot(e.carrier),
@@ -1996,7 +1998,10 @@ TEST_CASE("An intermittent relation round-trips, refuses what it does not "
   u.dofB = MateDof::Offset;
   u.ratio = 1.0;
   u.phase = 0.5;
-  u.intermittent = {2.5, 180.0, 10.0, 30.0, 0};
+  u.intermittent.step = 2.5;
+  u.intermittent.periodDeg = 180.0;
+  u.intermittent.startDeg = 10.0;
+  u.intermittent.durationDeg = 30.0;
   r.d.AddRelation(u);
   r.d.AddRelation(Geneva(a, a, 4, -12.0)); // shape only: never solved
   const fs::path tmp = fs::temp_directory_path() / "intermittent_rt.json";

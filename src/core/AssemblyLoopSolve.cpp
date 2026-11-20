@@ -472,7 +472,7 @@ void ProjectCones(const Bounds& b, const std::vector<LoopMate>& mates,
     const size_t k = static_cast<size_t>(cone.column);
     const glm::dquat rot = glm::normalize(
         seed.ballRotation * ExpSo3(glm::dvec3(q[k], q[k + 1], q[k + 2])));
-    const glm::dquat held = ClampToCone(cone.rad, rot);
+    const glm::dquat held = ClampToCone(ExprAngle::FromRadians(cone.rad), rot);
     if (held == rot)
       continue;
     // Back to a delta on the seed, which is what the columns hold.

@@ -74,6 +74,10 @@ public:
     return params_;
   }
 
+  // The params as they came, WITHOUT opting out of the check: for a reader
+  // that marks what it reads itself (remote/ExprArgs.h).
+  const nlohmann::json& raw_view() const { return params_; }
+
   // Top-level keys present in the request that no handler read. Empty when a
   // passthrough consumer ran, or when params isn't an object.
   std::vector<std::string> UnknownKeys() const {
