@@ -19,6 +19,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -50,6 +51,14 @@ enum class LoadType {
             // ground (a part study: the plane a flat face lies on) or on a
             // rigid occurrence (`contactWith`), which push it and never
             // pull, with `friction`
+  // Supports that hold some directions and leave the rest free
+  // (docs/simulation/README.md#rollers-held-directions-and-cylindrical-supports),
+  // each held both ways, with no contact iteration:
+  Roller,      // zero motion along the face's normal: a symmetry plane on a
+               // flat face, a frictionless seat on a curved one
+  Held,        // `hold`'s x, y, z of the world or of datum `frame`, each at
+               // zero or at its `prescribedMm`
+  Cylindrical, // on a cylindrical face: `hold`'s radial, tangential, axial
   // A thermal study's loads (docs/simulation/README.md#thermal), each
   // refused on any other analysis:
   Temperature,    // a face held at `temperatureC`
@@ -66,8 +75,21 @@ inline bool IsThermalLoad(LoadType t) {
 inline constexpr double kAbsoluteZeroC = -273.15;
 // A support holds the part rather than loading it.
 inline bool IsSupport(LoadType t) {
-  return t == LoadType::Fixed || t == LoadType::Pin || t == LoadType::Contact;
+  return t == LoadType::Fixed || t == LoadType::Pin || t == LoadType::Contact ||
+         t == LoadType::Roller || t == LoadType::Held ||
+         t == LoadType::Cylindrical;
 }
+// A support held in each node's own frame, both ways: a roller, held
+// directions or a cylindrical support.
+inline bool IsFrameSupport(LoadType t) {
+  return t == LoadType::Roller || t == LoadType::Held ||
+         t == LoadType::Cylindrical;
+}
+// The names of `hold`'s three directions: a held support's, in its frame,
+// and a cylindrical one's.
+inline constexpr const char* kHeldAxisNames[3] = {"x", "y", "z"};
+inline constexpr const char* kCylindricalAxisNames[3] = {"radial", "tangential",
+                                                         "axial"};
 
 // A per-face mesh size override (mm). size follows the value+expr convention:
 // `size.expr` empty means `size` is a literal, else it is the evaluated result.
@@ -192,6 +214,29 @@ struct Load {
   double filmWm2K = std::numeric_limits<double>::quiet_NaN();
   double ambientC = std::numeric_limits<double>::quiet_NaN();
   std::string body;
+  // Held and Cylindrical (docs/simulation/README.md
+  // #rollers-held-directions-and-cylindrical-supports): which directions
+  // are held -- a held support's x, y, z of `frame`, a cylindrical one's
+  // radial, tangential, axial (kHeldAxisNames, kCylindricalAxisNames). A
+  // roller holds its face's normal and uses none of these.
+  std::array<bool, 3> hold{false, false, false};
+  // Held only: each held direction's displacement (mm; 0 = held where it
+  // is), value+expr. A static study's only.
+  std::array<ExprValue, 3> prescribedMm{};
+  bool Prescribes() const {
+    for (int k = 0; k < 3; ++k)
+      if (hold[k] && prescribedMm[k].value != 0.0)
+        return true;
+    return false;
+  }
+  // Held only: the Frame or datum feature whose axes x, y, z are (0 = the
+  // world's).
+  uint64_t frame = 0;
+  // Derived where the load is planned, never saved: the held frame's axes
+  // (part coordinates), and a roller's plane normal (zero: not planar).
+  std::array<glm::dvec3, 3> frameAxes{glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
+                                      glm::dvec3(0, 0, 1)};
+  glm::dvec3 planeNormal{0.0};
 };
 
 // One load case of a study (docs/topopt/README.md#load-cases): the force and
@@ -423,6 +468,18 @@ std::string NonlinearRefusal(Solver solver, AnalysisType type,
 // that is negative or not a number, a contact support with a pin or on a
 // study of a topology shape, on a modal or buckling study.
 std::string ContactRefusal(const Study& study);
+// Empty when the study's roller, held and cylindrical supports can be
+// solved; otherwise why not, naming what is accepted
+// (docs/simulation/README.md
+// #rollers-held-directions-and-cylindrical-supports): one that holds no
+// direction, a prescribed displacement that is not finite or on any study
+// but a static one, a prescribed displacement on a direction not held, a
+// frame on a support that is not `held`, and any of them on a topology
+// study (which freezes the faces its fixed supports hold). A node one of
+// them shares with a pin, or holds in a way another support contradicts,
+// is refused where the mesh is (MeshPlannedStudy). Expressions must have
+// been evaluated.
+std::string FrameSupportRefusal(const Study& study);
 // Empty when the study's thermal side can be run; otherwise why not, naming
 // what is accepted (docs/simulation/README.md#thermal): a thermal load on a
 // study that is not thermal, a structural load on one that is, a load's
@@ -451,8 +508,8 @@ std::optional<double> DerivedStressFree(const Study& thermal);
 const char* LoadTypeToString(LoadType type);
 // Every load type's name, for a refusal that names what is accepted.
 inline constexpr const char* kLoadTypeNames =
-    "fixed, force, pressure, torque, remote, pin, contact, temperature, "
-    "heat_flux, convection, heat_generation";
+    "fixed, force, pressure, torque, remote, pin, contact, roller, held, "
+    "cylindrical, temperature, heat_flux, convection, heat_generation";
 inline constexpr const char* kThermalLoadTypeNames =
     "temperature, heat_flux, convection, heat_generation";
 [[nodiscard]] bool LoadTypeFromString(const std::string& s, LoadType& out);

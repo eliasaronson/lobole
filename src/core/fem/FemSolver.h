@@ -374,11 +374,29 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
 // A node held in its own frame: local direction k is `frame[k]` (the three
 // orthonormal), held at zero when `held[k]`. A pin holds its face's nodes
 // radially and axially and leaves them free to slide round the axis.
+// A roller, held directions or a cylindrical support
+// (docs/simulation/README.md
+// #rollers-held-directions-and-cylindrical-supports) holds its nodes the
+// same way, a held direction at `value[k]` (mm along frame[k]; zero but on
+// a prescribed displacement). `transform` names the CalculiX frame the node
+// is written in (Supports::transforms); -1 is a pin's cylinder, or the
+// world's x, y, z when the frame is the world's.
 struct HeldNode {
   int node = -1;
   std::array<glm::dvec3, 3> frame{glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
                                   glm::dvec3(0, 0, 1)};
   std::array<bool, 3> held{false, false, false};
+  std::array<double, 3> value{0.0, 0.0, 0.0};
+  int transform = -1;
+};
+// A CalculiX *TRANSFORM a held node is written in: rectangular (its x axis
+// along `a`, its y axis in the plane of `a` and `b`, both from the origin)
+// or cylindrical (the axis through the points `a` and `b`; radial,
+// tangential, axial).
+struct DeckTransform {
+  bool cylindrical = false;
+  glm::dvec3 a{1.0, 0.0, 0.0};
+  glm::dvec3 b{0.0, 1.0, 0.0};
 };
 // What holds a mesh: whole nodes fixed in all three directions, and nodes
 // held in some directions of their own frames (a node in both is fixed).
@@ -399,6 +417,7 @@ struct Supports {
   std::vector<int> fixedNodes;
   std::vector<HeldNode> held;
   std::vector<Tie> ties;
+  std::vector<DeckTransform> transforms; // HeldNode::transform's
   bool reactions = false;
 };
 
@@ -446,6 +465,16 @@ struct SupportFacets {
   // How far from its edge a node still counts as ON it, mm (SupportAwayMm);
   // 0 = one element.
   double awayMm = 0.0;
+  // A roller's, held or cylindrical support's nodes and the directions it
+  // holds at each (the first `count` of `dirs`): a node two of them share
+  // gives each the part of its reaction along its own directions
+  // (FinishSupports), not the whole to whichever came first.
+  struct NodeDirs {
+    int node = -1;
+    std::array<glm::dvec3, 3> dirs{};
+    int count = 0;
+  };
+  std::vector<NodeDirs> holds;
 };
 FemResults::SupportEdgePeak
 FindSupportEdgePeak(const FemMesh& mesh, const FemResults& results,
@@ -486,6 +515,13 @@ std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
            const std::vector<int>& fixedNodes, int numModes,
            std::string* error);
+
+// The same under any supports that leave no rigid motion free (a roller,
+// held or cylindrical support's nodes held in their frames). A prescribed
+// displacement is refused: a mode has no load.
+std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
+           const Supports& supports, int numModes, std::string* error);
 
 // Linear buckling (docs/simulation/README.md#buckling) about the base state
 // `baseDisplacement` (the static answer under `supports`, one per node):
@@ -949,6 +985,12 @@ struct StudyJobBody {
     bool fixRotation = false;
   };
   std::vector<PinSupport> pins;
+  // The roller, held and cylindrical supports' nodes, one entry a node, each
+  // in the frame every support that holds it agrees on, and the CalculiX
+  // frames they are written in (docs/simulation/README.md
+  // #rollers-held-directions-and-cylindrical-supports).
+  std::vector<HeldNode> held;
+  std::vector<DeckTransform> transforms;
   // Contact (docs/simulation/README.md#contact). Each pair is the body's
   // facets on one side (`slaveTris`) against a partner's: a rigid one's
   // (`partner`, an index into `rigidPartners`, whose every node is fixed;

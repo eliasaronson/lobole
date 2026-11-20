@@ -270,11 +270,16 @@ std::string FirstCalculixError(const std::string& text);
 // and swept once that owner has gone.
 void SweepDeadRunDirs(const std::string& root);
 
+// What holds `jb` before any contact is found: its fixed nodes and its
+// roller, held and cylindrical supports' nodes. Defined in FemStudy.cpp.
+Supports BaseSupports(const StudyJobBody& jb);
+
 // The supports a static solve of `jb` holds, one per case of `rhs`: its
-// fixed nodes, and with pins the contact set the in-house iteration
-// (SolveWithPins) settles on, held as it is in that iteration's last solve.
-// `pinRows` gets each case's pin reaction rows (contact area), which a
-// result solved under those supports reports. Defined in FemStudy.cpp.
+// fixed nodes and held nodes (BaseSupports), and with pins the contact set the
+// in-house iteration (SolveWithPins) settles on, held as it is in that
+// iteration's last solve. `pinRows` gets each case's pin reaction rows (contact
+// area), which a result solved under those supports reports. Defined in
+// FemStudy.cpp.
 bool StaticSupportsOf(
     const StudyJobBody& jb, const std::vector<Material>& mats,
     const std::vector<std::vector<FaceLoad>>& rhs,

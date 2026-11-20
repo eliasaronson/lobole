@@ -7,6 +7,8 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <iterator>
 #include <map>
 
 #ifdef HAVE_FEM_SOLVER
@@ -106,6 +108,17 @@ namespace {
 // one) is held to before it is used.
 constexpr double kAcceptResidual = 1e-6;
 
+// A planted element bug, for the reference suite's check that it can see
+// one (docs/simulation/README.md#reference-cases): with
+// LOBOLE_TEST_PLANT_GAUSS_WEIGHT set, the static solve's stiffness weighs
+// the first of a tet10's four Gauss points 1.25 times. Read once; 1 always
+// but under that switch.
+double PlantedGaussWeight() {
+  static const double w =
+      std::getenv("LOBOLE_TEST_PLANT_GAUSS_WEIGHT") ? 1.25 : 1.0;
+  return w;
+}
+
 // What holds a mesh, as the reduced system SolveCases and SolveBuckling both
 // solve in: each held node's DOF in its own frame (R's columns; a node also
 // fixed is fixed, all three held, its frame immaterial), a tie's master
@@ -116,6 +129,10 @@ struct TieElim {
 };
 struct Reduction {
   int nNodes = 0;
+  // Each held DOF's displacement in its node's frame (zero but on a
+  // prescribed displacement), and whether any is not zero.
+  std::vector<double> prescribed;
+  bool anyPrescribed = false;
   std::vector<int> frameOf;
   std::vector<Eigen::Matrix3d> frames;
   std::vector<TieElim> elims;
@@ -200,7 +217,7 @@ struct Reduction {
     return r;
   }
   // Node `n`'s displacement in x, y, z from a reduced one (a held DOF is
-  // zero).
+  // its prescribed value, zero but on a prescribed displacement).
   glm::dvec3 NodeDisplacement(const Eigen::VectorXd& u, int n) const {
     Vector3d d(0, 0, 0);
     for (int k = 0; k < 3; ++k) {
@@ -210,6 +227,8 @@ struct Reduction {
       else if (tieOfDof[3 * n + k] >= 0)
         for (const auto& [sd, f] : elims[tieOfDof[3 * n + k]].slaves)
           d(k) += f * u(dofs.map[sd]);
+      else
+        d(k) = prescribed[3 * n + k];
     }
     d = ToGlobal(n, d);
     return glm::dvec3(d(0), d(1), d(2));
@@ -225,6 +244,7 @@ Reduction MakeReduction(const FemMesh& mesh, const Supports& supports) {
     if (n >= 0 && n < nNodes)
       isFixed[n] = 1;
   red.frameOf.assign(nNodes, -1);
+  red.prescribed.assign(3 * nNodes, 0.0);
   std::vector<char> heldDof(3 * nNodes, 0);
   for (int n = 0; n < nNodes; ++n)
     if (isFixed[n])
@@ -240,8 +260,11 @@ Reduction MakeReduction(const FemMesh& mesh, const Supports& supports) {
       red.frames.push_back(R);
     }
     for (int k = 0; k < 3; ++k)
-      if (h.held[k])
+      if (h.held[k] && !heldDof[3 * h.node + k]) {
         heldDof[3 * h.node + k] = 1;
+        red.prescribed[3 * h.node + k] = h.value[k];
+        red.anyPrescribed = red.anyPrescribed || h.value[k] != 0.0;
+      }
   }
   // Ties, eliminated in order. Each tie's terms are first written over the
   // DOF still free: a held DOF is zero, and an earlier tie's master is its
@@ -441,7 +464,8 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
         X[i] = Vector3d(p.x, p.y, p.z);
       }
       Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
-      for (const auto& g : kTetGauss) {
+      for (size_t gi = 0; gi < std::size(kTetGauss); ++gi) {
+        const auto& g = kTetGauss[gi];
         Eigen::Matrix<double, 6, 30> B;
         // B (physical gradients) is orientation-independent; the volume measure
         // is |detJ|. Netgen orders tet corners with negative orientation, so
@@ -449,7 +473,8 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
         const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
         if (std::abs(detJ) < 1e-12)
           return fail("mesh has a degenerate element");
-        Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D * B);
+        const double w = gi == 0 ? kTetW * PlantedGaussWeight() : kTetW;
+        Ke += (w * std::abs(detJ)) * (B.transpose() * D * B);
       }
       red.Scatter(tet, Ke, triplets, false);
     }
@@ -538,6 +563,50 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     }
   }
 
+  // A prescribed displacement (docs/simulation/README.md
+  // #rollers-held-directions-and-cylindrical-supports): the held DOF's
+  // values moved to the right-hand side, f - K u_p, over the elements that
+  // touch them. Not a load the part carries, so the reactions do not read
+  // it.
+  Eigen::VectorXd Fprescribed;
+  if (red.anyPrescribed) {
+    Eigen::VectorXd full = Eigen::VectorXd::Zero(3 * nNodes);
+    std::vector<char> moved(nNodes, 0);
+    for (int n = 0; n < nNodes; ++n) {
+      Vector3d l(red.prescribed[3 * n], red.prescribed[3 * n + 1],
+                 red.prescribed[3 * n + 2]);
+      if (l.squaredNorm() == 0.0)
+        continue;
+      moved[n] = 1;
+      full.segment<3>(3 * n) = red.ToGlobal(n, l);
+    }
+    Fprescribed = Eigen::VectorXd::Zero(3 * nNodes);
+    for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+      const auto& tet = mesh.tets[ti];
+      bool any = false;
+      for (int v : tet)
+        any = any || moved[v];
+      if (!any)
+        continue;
+      Vector3d X[10];
+      Eigen::Matrix<double, 30, 1> ue;
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh.nodes[tet[i]];
+        X[i] = Vector3d(p.x, p.y, p.z);
+        ue.segment<3>(3 * i) = full.segment<3>(3 * tet[i]);
+      }
+      Eigen::Matrix<double, 30, 1> fe = Eigen::Matrix<double, 30, 1>::Zero();
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B;
+        const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+        fe += (kTetW * std::abs(detJ)) * (B.transpose() * (DOf(ti) * (B * ue)));
+      }
+      for (int i = 0; i < 10; ++i)
+        Fprescribed.segment<3>(3 * tet[i]) -= fe.segment<3>(3 * i);
+    }
+    Fprescribed = reduce(Fprescribed);
+  }
+
   // Direct below the threshold: factorise once, every case one right-hand
   // side. Above it, PCG per case on K with one incomplete-Cholesky
   // preconditioner. Both are held to the same residual below.
@@ -551,8 +620,8 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
   if (iterative && options.makeExternal && anyFrame) {
     // The GPU's SpMV applies each element matrix relative to its first
     // node's translation, which holds only when every node is in x, y, z.
-    declined = "a pin support holds nodes in rotated frames, which the GPU "
-               "solve does not take";
+    declined = "a pin, roller, held or cylindrical support holds nodes in "
+               "frames of their own, which the GPU solve does not take";
   } else if (iterative && options.makeExternal) {
     external = options.makeExternal(&declined);
     if (external &&
@@ -623,7 +692,9 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
       if (!AssembleFaceLoads(mesh, loads, allDofs, Fcase, &loadErr))
         return fail(loadErr);
     }
-    const Eigen::VectorXd F = reduce(Fcase);
+    Eigen::VectorXd F = reduce(Fcase);
+    if (red.anyPrescribed)
+      F += Fprescribed;
     Eigen::VectorXd u;
     bool gpuSolved = false;
     const size_t caseIndex = all.size();
@@ -649,8 +720,9 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
           const int dof = 3 * n + k;
           if (dofMap[dof] >= 0)
             u(dofMap[dof]) = l(k);
-          else if (red.tieOfDof[dof] < 0 && std::abs(l(k)) > heldMove) {
-            heldMove = std::abs(l(k));
+          else if (red.tieOfDof[dof] < 0 &&
+                   std::abs(l(k) - red.prescribed[dof]) > heldMove) {
+            heldMove = std::abs(l(k) - red.prescribed[dof]);
             heldNode = n;
           }
         }
@@ -1315,6 +1387,19 @@ std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
            const std::vector<int>& fixedNodes, int numModes,
            std::string* error) {
+  if (fixedNodes.empty()) {
+    if (error)
+      *error = "modal analysis needs at least one fixed support";
+    return std::nullopt;
+  }
+  Supports supports;
+  supports.fixedNodes = fixedNodes;
+  return SolveModal(mesh, byDomain, supports, numModes, error);
+}
+
+std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
+           const Supports& supports, int numModes, std::string* error) {
   auto fail = [&](const std::string& m)
       -> std::optional<std::vector<FemResults::ModeShape>> {
     if (error)
@@ -1342,24 +1427,25 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
   if (numModes < 1)
     numModes = 1;
 
-  // Reduced-DOF map; v1 requires a support so K is positive-definite (sigma=0
-  // shift-invert). Free-free (unconstrained) modes are deferred.
-  std::vector<char> fixed(3 * nNodes, 0);
-  int nFixed = 0;
-  for (int n : fixedNodes)
-    if (n >= 0 && n < nNodes)
-      for (int k = 0; k < 3; ++k)
-        if (!fixed[3 * n + k]) {
-          fixed[3 * n + k] = 1;
-          ++nFixed;
-        }
-  if (nFixed == 0)
-    return fail("modal analysis needs at least one fixed support");
-  std::vector<int> dofMap(3 * nNodes, -1);
-  int nFree = 0;
-  for (int d = 0; d < 3 * nNodes; ++d)
-    if (!fixed[d])
-      dofMap[d] = nFree++;
+  // Reduced-DOF map; the supports must hold every rigid motion so K is
+  // positive-definite (sigma=0 shift-invert). Free-free (unconstrained)
+  // modes are deferred. A held node's DOF are taken in its frame, as the
+  // static solve takes them.
+  if (supports.fixedNodes.empty() && supports.held.empty())
+    return fail("modal analysis needs at least one support");
+  for (const HeldNode& h : supports.held)
+    for (int k = 0; k < 3; ++k)
+      if (h.held[k] && h.value[k] != 0.0)
+        return fail("a modal study holds its supports at zero: a mode has "
+                    "no prescribed displacement");
+  if (const std::string free = FreeRigidMotion(mesh, supports); !free.empty())
+    return fail("model is insufficiently constrained (singular stiffness "
+                "matrix): its supports leave it free to " +
+                free);
+  const Reduction red = MakeReduction(mesh, supports);
+  const std::vector<int>& dofMap = red.dofs.map;
+  const int nFree = red.dofs.nFree;
+  const bool framed = red.AnyFrame() || !red.elims.empty();
   if (nFree < numModes + 1)
     return fail("mesh too small for the requested modes");
 
@@ -1392,6 +1478,10 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
         if (std::abs(detJ) < 1e-12)
           return fail("mesh has a degenerate element");
         Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D * B);
+      }
+      if (framed) {
+        red.Scatter(tet, Ke, kt, true);
+        continue;
       }
       for (int a = 0; a < 30; ++a) {
         const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
@@ -1429,7 +1519,18 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
           for (int j = 0; j < 10; ++j)
             Me(i, j) += rho * dV * N[i] * N[j];
       }
-      // Consistent mass couples same-direction DOFs (block-diagonal in x/y/z).
+      // Consistent mass couples same-direction DOFs (block-diagonal in x/y/z);
+      // a node held in its own frame takes it there, as K does.
+      if (framed) {
+        Eigen::Matrix<double, 30, 30> Me30 =
+            Eigen::Matrix<double, 30, 30>::Zero();
+        for (int i = 0; i < 10; ++i)
+          for (int j = 0; j < 10; ++j)
+            for (int d = 0; d < 3; ++d)
+              Me30(3 * i + d, 3 * j + d) = Me(i, j);
+        red.Scatter(tet, Me30, mt, true);
+        continue;
+      }
       for (int i = 0; i < 10; ++i)
         for (int j = 0; j < 10; ++j)
           for (int d = 0; d < 3; ++d) {
@@ -1477,13 +1578,9 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
     mode.frequencyHz = std::sqrt(lambda) / kTwoPi;
     mode.displacement.assign(nNodes, glm::dvec3(0, 0, 0));
     double maxMag = 0.0;
+    const Eigen::VectorXd phi = evecs.col(m);
     for (int n = 0; n < nNodes; ++n) {
-      glm::dvec3 u(0, 0, 0);
-      for (int k = 0; k < 3; ++k) {
-        const int g = dofMap[3 * n + k];
-        if (g >= 0)
-          u[k] = evecs(g, m);
-      }
+      const glm::dvec3 u = red.NodeDisplacement(phi, n);
       mode.displacement[n] = u;
       maxMag = std::max(maxMag, glm::length(u));
     }
@@ -1681,6 +1778,13 @@ SolveModal(const FemMesh&, const std::vector<Material>&,
   return std::nullopt;
 }
 std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh&, const std::vector<Material>&, const Supports&, int,
+           std::string* error) {
+  if (error)
+    *error = "built without modal support (Spectra not found)";
+  return std::nullopt;
+}
+std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh& mesh, const Material& material,
            const std::vector<int>& fixedNodes, int numModes,
            std::string* error) {
@@ -1769,6 +1873,13 @@ SolveCases(const FemMesh&, const std::vector<Material>&,
 std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh&, const std::vector<Material>&,
            const std::vector<int>&, int, std::string* error) {
+  if (error)
+    *error = "built without FEM solver support (Eigen not found)";
+  return std::nullopt;
+}
+std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh&, const std::vector<Material>&, const Supports&, int,
+           std::string* error) {
   if (error)
     *error = "built without FEM solver support (Eigen not found)";
   return std::nullopt;

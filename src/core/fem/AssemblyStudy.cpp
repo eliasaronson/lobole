@@ -315,11 +315,17 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   if (study.type == AnalysisType::Topology)
     return fail("topology optimisation is a part study; an assembly study is "
                 "static or modal");
-  for (const Load& l : study.loads)
+  for (const Load& l : study.loads) {
     if (l.type == LoadType::Pin)
       return fail("load " + std::to_string(l.id) +
                   ": a pin support is a part study's; an assembly study holds "
                   "its part with fixed faces or a rigid neighbour's contact");
+    if (IsFrameSupport(l.type))
+      return fail("load " + std::to_string(l.id) + ": a " +
+                  LoadTypeToString(l.type) +
+                  " support is a part study's; an assembly study holds its "
+                  "part with fixed faces or a rigid neighbour's contact");
+  }
   if (const std::string why = ContactRefusal(study); !why.empty())
     return fail(why);
   // Heat is a part study's (docs/simulation/README.md#not-done); a uniform

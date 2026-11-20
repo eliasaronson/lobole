@@ -1083,6 +1083,30 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
         CHECK(l.fixRotation == want[i].at(4).get<bool>());
     }
   }
+  // vNEXT: a roller, held or cylindrical support's directions, a held
+  // one's displacements and frame. None changes a volume, and a direction
+  // dropped on load solves a different support; each [type, hold,
+  // [dx, dy, dz] mm, frame] of the first study's frame supports must hold.
+  if (expect.contains("study_supports")) {
+    REQUIRE_FALSE(doc.GetStudies().empty());
+    std::vector<const fem::Load*> supports;
+    for (const fem::Load& l : doc.GetStudies().front().loads)
+      if (fem::IsFrameSupport(l.type))
+        supports.push_back(&l);
+    const auto& want = expect.at("study_supports");
+    REQUIRE(supports.size() == want.size());
+    for (size_t i = 0; i < supports.size(); ++i) {
+      INFO("support " << i);
+      const fem::Load& l = *supports[i];
+      CHECK(std::string(fem::LoadTypeToString(l.type)) ==
+            want[i].at(0).get<std::string>());
+      for (int k = 0; k < 3; ++k) {
+        CHECK(l.hold[k] == want[i].at(1).at(k).get<bool>());
+        CHECK(l.prescribedMm[k].value == want[i].at(2).at(k).get<double>());
+      }
+      CHECK(l.frame == want[i].at(3).get<uint64_t>());
+    }
+  }
   // v204: which program solves each study
   // (docs/simulation/README.md#calculix). A solver dropped on load would
   // solve a CalculiX study in-house and say nothing; each [study name,

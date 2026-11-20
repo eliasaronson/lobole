@@ -306,6 +306,17 @@ std::array<glm::dvec3, 3> CylFrame(const glm::dvec3& x, const glm::dvec3& o,
   return {r, glm::cross(a, r), a};
 }
 
+// ccx's frame of a *TRANSFORM at `x`: rectangular (x' along a, y' in the
+// plane of a and b) or cylindrical about the axis through a and b.
+std::array<glm::dvec3, 3> TransformFrame(const DeckTransform& t,
+                                         const glm::dvec3& x) {
+  if (t.cylindrical)
+    return CylFrame(x, t.a, glm::normalize(t.b - t.a));
+  const glm::dvec3 ex = glm::normalize(t.a);
+  const glm::dvec3 ey = glm::normalize(t.b - glm::dot(t.b, ex) * ex);
+  return {ex, ey, glm::cross(ex, ey)};
+}
+
 } // namespace
 
 namespace {
@@ -403,8 +414,7 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
                          const std::vector<Material>& byDomain,
                          const std::vector<char>& fixed,
                          const std::vector<int>& frameOf,
-                         const std::vector<int>& pinOf,
-                         const std::vector<StudyJobBody::PinSupport>& pins,
+                         const std::vector<std::array<glm::dvec3, 3>>& ccxFrame,
                          const std::vector<glm::dvec3>& nodalForces,
                          const DeckNonlinear& nl, std::string* error,
                          const NodalTemperature* thermal) {
@@ -619,9 +629,7 @@ bool WriteNonlinearSteps(std::ostream& out, const FemMesh& mesh,
         continue;
       glm::dvec3 f = lambda * nodalForces[n];
       if (frameOf[n] >= 0) {
-        const auto& pin = pins[pinOf[n]];
-        const auto cyl = CylFrame(mesh.nodes[n], pin.axisOrigin,
-                                  glm::normalize(pin.axisDirection));
+        const auto& cyl = ccxFrame[n];
         f = glm::dvec3(glm::dot(f, cyl[0]), glm::dot(f, cyl[1]),
                        glm::dot(f, cyl[2]));
       }
@@ -720,9 +728,10 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
   for (int n : supports.fixedNodes)
     if (n >= 0 && n < nNodes)
       fixed[n] = 1;
-  std::vector<int> frameOf(nNodes, -1);
+  std::vector<int> frameOf(nNodes, -1), transformOf(nNodes, -1);
   std::vector<std::array<glm::dvec3, 3>> frames;
   std::vector<std::array<bool, 3>> held;
+  std::vector<std::array<double, 3>> heldValue;
   for (const HeldNode& h : supports.held) {
     if (h.node < 0 || h.node >= nNodes || fixed[h.node])
       continue;
@@ -730,9 +739,16 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
       frameOf[h.node] = static_cast<int>(frames.size());
       frames.push_back(h.frame);
       held.push_back({false, false, false});
+      heldValue.push_back({0.0, 0.0, 0.0});
+      if (h.transform >= 0 &&
+          h.transform < static_cast<int>(supports.transforms.size()))
+        transformOf[h.node] = h.transform;
     }
     for (int k = 0; k < 3; ++k)
-      held[frameOf[h.node]][k] = held[frameOf[h.node]][k] || h.held[k];
+      if (h.held[k] && !held[frameOf[h.node]][k]) {
+        held[frameOf[h.node]][k] = true;
+        heldValue[frameOf[h.node]][k] = h.value[k];
+      }
   }
   // Which pin's frame each held node is in: the pin whose facets have it.
   std::vector<int> pinOf(nNodes, -1);
@@ -749,21 +765,31 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
                       "two bores touch, which the deck cannot express");
         pinOf[v] = static_cast<int>(p);
       }
-  // Each held node's frame directions as ccx's cylindrical ones: direction
-  // k is ccx's dof slot[k] times sign[k].
+  // Each held node's frame as ccx writes it: a pin's cylinder, the
+  // transform its support names, or the world's x, y, z.
+  std::vector<std::array<glm::dvec3, 3>> ccxFrame(nNodes);
+  for (int n = 0; n < nNodes; ++n) {
+    if (frameOf[n] < 0)
+      continue;
+    if (pinOf[n] >= 0)
+      ccxFrame[n] = CylFrame(mesh.nodes[n], pins[pinOf[n]].axisOrigin,
+                             glm::normalize(pins[pinOf[n]].axisDirection));
+    else if (transformOf[n] >= 0)
+      ccxFrame[n] =
+          TransformFrame(supports.transforms[transformOf[n]], mesh.nodes[n]);
+    else
+      ccxFrame[n] = {glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
+                     glm::dvec3(0, 0, 1)};
+  }
+  // Each held node's frame directions as ccx's: direction k is ccx's dof
+  // slot[k] times sign[k].
   std::vector<std::array<int, 3>> slot(frames.size());
   std::vector<std::array<double, 3>> sign(frames.size());
   for (int n = 0; n < nNodes; ++n) {
     const int f = frameOf[n];
     if (f < 0)
       continue;
-    if (pinOf[n] < 0)
-      return fail("node " + std::to_string(n + 1) +
-                  " is held in a frame of its own but is on no pin's face, "
-                  "which the deck has no transform for");
-    const auto& pin = pins[pinOf[n]];
-    const auto cyl = CylFrame(mesh.nodes[n], pin.axisOrigin,
-                              glm::normalize(pin.axisDirection));
+    const auto& cyl = ccxFrame[n];
     for (int k = 0; k < 3; ++k) {
       slot[f][k] = -1;
       for (int j = 0; j < 3; ++j) {
@@ -775,7 +801,9 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
       }
       if (slot[f][k] < 0)
         return fail("node " + std::to_string(n + 1) +
-                    " is held in a frame that is not its pin's cylinder");
+                    " is held in a frame that is not the one the deck "
+                    "writes it in (its pin's cylinder, its support's "
+                    "transform, or the world's)");
     }
   }
 
@@ -865,6 +893,23 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
         << Num(a.x) << ", " << Num(a.y) << ", " << Num(a.z) << ", " << Num(b.x)
         << ", " << Num(b.y) << ", " << Num(b.z) << "\n";
   }
+  // A roller's, held or cylindrical support's nodes in their transforms.
+  for (size_t t = 0; t < supports.transforms.size(); ++t) {
+    std::vector<int> ids;
+    for (int n = 0; n < nNodes; ++n)
+      if (frameOf[n] >= 0 && pinOf[n] < 0 &&
+          transformOf[n] == static_cast<int>(t))
+        ids.push_back(n);
+    if (ids.empty())
+      continue;
+    out << "*NSET, NSET=TR" << t + 1 << "\n";
+    WriteIdLines(out, ids);
+    const DeckTransform& tr = supports.transforms[t];
+    out << "*TRANSFORM, NSET=TR" << t + 1
+        << ", TYPE=" << (tr.cylindrical ? "C" : "R") << "\n"
+        << Num(tr.a.x) << ", " << Num(tr.a.y) << ", " << Num(tr.a.z) << ", "
+        << Num(tr.b.x) << ", " << Num(tr.b.y) << ", " << Num(tr.b.z) << "\n";
+  }
   // The held directions.
   bool boundaryOpen = false;
   const auto boundary = [&]() {
@@ -933,7 +978,7 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
     out << "*INITIAL CONDITIONS, TYPE=TEMPERATURE\nNALL, "
         << Num(thermal->stressFreeC) << "\n";
   if (nonlinear)
-    return WriteNonlinearSteps(out, mesh, byDomain, fixed, frameOf, pinOf, pins,
+    return WriteNonlinearSteps(out, mesh, byDomain, fixed, frameOf, ccxFrame,
                                nodalForces, *nonlinear, error, thermal);
   // A buckling run's step: its factors to the accuracy the in-house
   // eigensolve holds (ccx's default is 1 %).
@@ -948,9 +993,7 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
     glm::dvec3 f = nodalForces[n];
     if (frameOf[n] >= 0) {
       // A transformed node's load is given in its frame.
-      const auto& pin = pins[pinOf[n]];
-      const auto cyl = CylFrame(mesh.nodes[n], pin.axisOrigin,
-                                glm::normalize(pin.axisDirection));
+      const auto& cyl = ccxFrame[n];
       f = glm::dvec3(glm::dot(f, cyl[0]), glm::dot(f, cyl[1]),
                      glm::dot(f, cyl[2]));
     }
@@ -960,6 +1003,24 @@ bool WriteDeck(std::ostream& out, const FemMesh& mesh,
           out << "*CLOAD\n";
         anyLoad = true;
         out << n + 1 << ", " << k + 1 << ", " << Num(f[k]) << "\n";
+      }
+  }
+  // A prescribed displacement, in the step it is applied in: its direction
+  // as ccx's dof, the value signed to match.
+  bool prescribedOpen = false;
+  for (int n = 0; n < nNodes; ++n) {
+    const int f = frameOf[n];
+    if (f < 0)
+      continue;
+    for (int k = 0; k < 3; ++k)
+      if (held[f][k] && heldValue[f][k] != 0.0) {
+        if (buckleFactors > 0)
+          return fail("a buckling deck holds its supports at zero");
+        if (!prescribedOpen)
+          out << "*BOUNDARY\n";
+        prescribedOpen = true;
+        out << n + 1 << ", " << slot[f][k] + 1 << ", " << slot[f][k] + 1 << ", "
+            << Num(heldValue[f][k] * sign[f][k]) << "\n";
       }
   }
   if (thermal)
@@ -1859,6 +1920,10 @@ bool WeakSprings(const StudyJobBody& jb, const std::vector<Material>& mats,
   }
   Supports sup;
   sup.fixedNodes.assign(held.begin(), held.end());
+  sup.held = jb.held;
+  sup.transforms = jb.transforms;
+  for (HeldNode& h : sup.held)
+    h.value = {0.0, 0.0, 0.0};
   SolveOptions own;
   own.cancelled = options.cancelled;
   own.makeExternal = options.makeExternal;

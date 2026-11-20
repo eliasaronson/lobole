@@ -24,6 +24,7 @@
 #include <gp_Sphere.hxx>
 
 #include "cad/CADMaterials.h"
+#include "core/DatumFrame.h"
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/fem/Calculix.h"
@@ -59,6 +60,12 @@ const char* LoadTypeToString(LoadType type) {
     return "pin";
   case LoadType::Contact:
     return "contact";
+  case LoadType::Roller:
+    return "roller";
+  case LoadType::Held:
+    return "held";
+  case LoadType::Cylindrical:
+    return "cylindrical";
   case LoadType::Temperature:
     return "temperature";
   case LoadType::HeatFlux:
@@ -98,6 +105,18 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
   }
   if (s == "contact") {
     out = LoadType::Contact;
+    return true;
+  }
+  if (s == "roller") {
+    out = LoadType::Roller;
+    return true;
+  }
+  if (s == "held") {
+    out = LoadType::Held;
+    return true;
+  }
+  if (s == "cylindrical") {
+    out = LoadType::Cylindrical;
     return true;
   }
   if (s == "temperature") {
@@ -664,9 +683,17 @@ void Study::VisitExprs(const ExprVisitor& visit) {
   for (size_t i = 0; i < refinements.size(); i++)
     visit({refinements[i].size, ExprQuantity::Length,
            "refinements/" + std::to_string(i) + "/size"});
-  for (size_t i = 0; i < loads.size(); i++)
+  for (size_t i = 0; i < loads.size(); i++) {
     visit({loads[i].magnitude, ExprQuantity::Other,
            "loads/" + std::to_string(i) + "/magnitude"});
+    // A held support's displacements, on the directions it holds.
+    if (loads[i].type == LoadType::Held)
+      for (int k = 0; k < 3; ++k)
+        if (loads[i].hold[k])
+          visit({loads[i].prescribedMm[k], ExprQuantity::Length,
+                 "loads/" + std::to_string(i) + "/d" + kHeldAxisNames[k] +
+                     "_mm"});
+  }
   for (size_t i = 0; i < participants.size(); i++)
     visit({participants[i].meshSize, ExprQuantity::Length,
            "participants/" + std::to_string(i) + "/mesh_size"});
@@ -688,7 +715,7 @@ std::string StudyFieldWords(const Study& study, const std::string& path) {
   if (head == "refinements")
     return "refinement size";
   if (head == "loads")
-    return "load magnitude";
+    return path.ends_with("_mm") ? "held displacement" : "load magnitude";
   if (head == "participants")
     return "participant mesh size";
   if (head == "load_cases") {
@@ -1119,7 +1146,87 @@ bool CompleteLoadGeometry(const TopoDS_Shape& face, Load& load,
                ": a remote load needs the point it acts at (point_mm)";
     return false;
   }
+  // A cylindrical support holds round its face's axis; a roller on a
+  // cylinder holds radially about it, on a plane along the plane's normal,
+  // and on any other face along each node's normal, read off the mesh.
+  if (load.type == LoadType::Cylindrical) {
+    const auto axis = CylindricalFaceAxis(face);
+    if (!axis) {
+      if (error)
+        *error = "load " + std::to_string(load.id) +
+                 ": a cylindrical support goes on a cylindrical face (a bore "
+                 "or a shaft), whose axis its radial, tangential and axial "
+                 "directions are about; this face is not one -- hold it with "
+                 "a roller (its normal) or held directions (x, y, z)";
+      return false;
+    }
+    load.axisOrigin = axis->origin;
+    load.axisDirection = axis->direction;
+  }
+  if (load.type == LoadType::Roller) {
+    load.planeNormal = glm::dvec3(0.0);
+    load.axisDirection = glm::dvec3(0.0);
+    if (const auto axis = CylindricalFaceAxis(face)) {
+      load.axisOrigin = axis->origin;
+      load.axisDirection = axis->direction;
+    } else if (face.ShapeType() == TopAbs_FACE) {
+      BRepAdaptor_Surface surf(TopoDS::Face(face));
+      if (surf.GetType() == GeomAbs_Plane) {
+        const gp_Dir n = surf.Plane().Axis().Direction();
+        load.planeNormal = glm::dvec3(n.X(), n.Y(), n.Z());
+      }
+    }
+  }
   return true;
+}
+
+std::string FrameSupportRefusal(const Study& study) {
+  for (const Load& l : study.loads) {
+    if (!IsFrameSupport(l.type))
+      continue;
+    const std::string who = std::string(LoadTypeToString(l.type)) +
+                            " support " + std::to_string(l.id);
+    if (study.type == AnalysisType::Topology)
+      return who + ": a topology study's supports are fixed (it freezes the "
+                   "faces they hold); a roller, held or cylindrical support "
+                   "is a static, modal or buckling study's";
+    if (l.type == LoadType::Roller) {
+      if (l.hold[0] || l.hold[1] || l.hold[2] || l.frame != 0)
+        return who + ": a roller holds its face's normal and takes no hold "
+                     "or frame; held directions are a `held` support's";
+      continue;
+    }
+    if (!l.hold[0] && !l.hold[1] && !l.hold[2])
+      return who + ": it holds no direction; name at least one of " +
+             (l.type == LoadType::Held ? "x, y, z"
+                                       : "radial, tangential, axial");
+    if (l.type == LoadType::Cylindrical && l.frame != 0)
+      return who + ": a cylindrical support's directions are about its "
+                   "face's axis, so it takes no frame";
+    for (int k = 0; k < 3; ++k) {
+      const double v = l.prescribedMm[k].value;
+      if (v == 0.0 && l.prescribedMm[k].expr.empty())
+        continue;
+      if (l.type != LoadType::Held)
+        return who + ": a cylindrical support holds at zero; a prescribed "
+                     "displacement is a held support's (dx_mm, dy_mm, dz_mm)";
+      if (!l.hold[k])
+        return who + ": d" + kHeldAxisNames[k] + "_mm is given but " +
+               kHeldAxisNames[k] + " is not held; hold it, or drop d" +
+               kHeldAxisNames[k] + "_mm";
+      if (!std::isfinite(v))
+        return who + ": d" + kHeldAxisNames[k] + "_mm is not a finite number";
+    }
+    if (l.Prescribes() && study.type != AnalysisType::Static)
+      return who + ": a prescribed displacement is a static study's; a " +
+             AnalysisTypeToString(study.type) +
+             " study holds its supports at zero";
+    if (l.Prescribes() && IsNonlinear(study))
+      return who + ": a prescribed displacement is a linear static study's; "
+                   "a nonlinear or contact study steps its loads up, which "
+                   "a displacement held from the start does not follow";
+  }
+  return {};
 }
 
 FaceLoad MakeFaceLoad(const Load& load) {
@@ -1443,6 +1550,8 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     return fail(why);
   if (const std::string why = ThermalRefusal(study); !why.empty())
     return fail(why);
+  if (const std::string why = FrameSupportRefusal(study); !why.empty())
+    return fail(why);
   out.type = study.type;
   out.solver = EffectiveSolver(study);
   out.nonlinear = study.nonlinear;
@@ -1710,6 +1819,18 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
       if (!CompleteLoadGeometry(FaceByIndex(body.shape.GetShape(), faceIndex),
                                 l, &err))
         return fail(err);
+      // A held support's frame: a datum's axes, read now (the worker has
+      // no document).
+      if (l.type == LoadType::Held && l.frame != 0) {
+        const Feature* f = doc.FindFeatureById(l.frame);
+        if (!f || !datumframe::IsAnchor(*f))
+          return fail("held support " + std::to_string(l.id) + ": frame " +
+                      std::to_string(l.frame) +
+                      " is no Frame, datum plane or datum axis of this part");
+        const glm::dmat4 m = datumframe::Matrix(*f);
+        for (int k = 0; k < 3; ++k)
+          l.frameAxes[k] = glm::normalize(glm::dvec3(m[k]));
+      }
       bp.loads.push_back({faceIndex, std::move(l)});
     }
     if (study.shapeFrom.study != 0) {
@@ -1725,6 +1846,155 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   }
   return true;
 }
+
+namespace {
+
+// One support's hold on one node (docs/simulation/README.md
+// #rollers-held-directions-and-cylindrical-supports): its frame, the
+// directions held and their displacements, and the CalculiX frame it is
+// written in.
+struct NodeHold {
+  uint64_t id = 0;
+  LoadType type = LoadType::Roller;
+  std::array<glm::dvec3, 3> frame{glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
+                                  glm::dvec3(0, 0, 1)};
+  std::array<bool, 3> held{false, false, false};
+  std::array<double, 3> value{0.0, 0.0, 0.0};
+  int transform = -1;
+};
+
+// A right-handed orthonormal frame whose first direction is `n` (unit).
+std::array<glm::dvec3, 3> FrameAlong(const glm::dvec3& n) {
+  const glm::dvec3 seed =
+      std::abs(n.x) < 0.9 ? glm::dvec3(1, 0, 0) : glm::dvec3(0, 1, 0);
+  const glm::dvec3 t1 = glm::normalize(seed - glm::dot(seed, n) * n);
+  return {n, t1, glm::cross(n, t1)};
+}
+
+std::string SupportName(LoadType type, uint64_t id) {
+  return std::string(LoadTypeToString(type)) + " support " + std::to_string(id);
+}
+
+// One node's holds as one HeldNode. A single support's is its own; several
+// (the edge two symmetry planes share, a seat beside a held face) hold the
+// span of every direction any of them holds, each at the displacement it
+// names. A direction one support holds that the others' already fix is
+// checked against them: a node held at two displacements that disagree is
+// refused, naming both supports. The frame is the span's orthonormal
+// basis, written to CalculiX as a rectangular transform of its own.
+bool MergeHolds(int node, const std::vector<NodeHold>& holds,
+                const glm::dvec3& at, std::vector<DeckTransform>& transforms,
+                HeldNode& out, std::string* error) {
+  out = HeldNode{};
+  out.node = node;
+  if (holds.size() == 1) {
+    out.frame = holds[0].frame;
+    out.held = holds[0].held;
+    out.value = holds[0].value;
+    out.transform = holds[0].transform;
+    return true;
+  }
+  struct Row {
+    glm::dvec3 d;
+    double v;
+    const NodeHold* by;
+  };
+  std::vector<Row> rows, independent, dependent;
+  for (const NodeHold& h : holds)
+    for (int k = 0; k < 3; ++k)
+      if (h.held[k])
+        rows.push_back({h.frame[k], h.value[k], &h});
+  std::vector<glm::dvec3> basis;
+  for (const Row& r : rows) {
+    glm::dvec3 e = r.d;
+    for (const glm::dvec3& b : basis)
+      e -= glm::dot(e, b) * b;
+    if (glm::length(e) > 1e-6) {
+      basis.push_back(glm::normalize(e));
+      independent.push_back(r);
+    } else {
+      dependent.push_back(r);
+    }
+  }
+  // u in the span with d_i . u = v_i over the independent rows.
+  const size_t m = independent.size();
+  glm::dvec3 u(0.0);
+  {
+    // Gram matrix solve, at most 3 x 3.
+    double G[3][3] = {}, rhs[3] = {}, c[3] = {};
+    for (size_t i = 0; i < m; ++i) {
+      rhs[i] = independent[i].v;
+      for (size_t j = 0; j < m; ++j)
+        G[i][j] = glm::dot(independent[i].d, independent[j].d);
+    }
+    // Gaussian elimination with partial pivoting.
+    int idx[3] = {0, 1, 2};
+    for (size_t col = 0; col < m; ++col) {
+      size_t piv = col;
+      for (size_t r = col + 1; r < m; ++r)
+        if (std::abs(G[r][col]) > std::abs(G[piv][col]))
+          piv = r;
+      std::swap(G[col], G[piv]);
+      std::swap(rhs[col], rhs[piv]);
+      std::swap(idx[col], idx[piv]);
+      for (size_t r = col + 1; r < m; ++r) {
+        const double f = G[r][col] / G[col][col];
+        for (size_t k = col; k < m; ++k)
+          G[r][k] -= f * G[col][k];
+        rhs[r] -= f * rhs[col];
+      }
+    }
+    for (size_t i = m; i-- > 0;) {
+      double v = rhs[i];
+      for (size_t k = i + 1; k < m; ++k)
+        v -= G[i][k] * c[k];
+      c[i] = v / G[i][i];
+    }
+    for (size_t i = 0; i < m; ++i)
+      u += c[i] * independent[i].d;
+  }
+  double scale = 0.0;
+  for (const Row& r : rows)
+    scale = std::max(scale, std::abs(r.v));
+  for (const Row& r : dependent)
+    if (std::abs(glm::dot(r.d, u) - r.v) > 1e-9 * std::max(scale, 1.0)) {
+      const NodeHold* other = independent.front().by;
+      for (const Row& i : independent)
+        if (i.by != r.by) {
+          other = i.by;
+          break;
+        }
+      if (error) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "(%.4g, %.4g, %.4g) mm", at.x, at.y,
+                      at.z);
+        *error = SupportName(r.by->type, r.by->id) + " and " +
+                 SupportName(other->type, other->id) + " hold the node at " +
+                 buf +
+                 " at displacements that disagree: where two supports meet "
+                 "they must agree on every direction both hold";
+      }
+      return false;
+    }
+  std::array<glm::dvec3, 3> f;
+  if (m == 1) {
+    f = FrameAlong(basis[0]);
+  } else {
+    f[0] = basis[0];
+    f[1] = basis[1];
+    f[2] = glm::cross(basis[0], basis[1]);
+  }
+  out.frame = f;
+  for (size_t k = 0; k < 3; ++k) {
+    out.held[k] = k < m;
+    out.value[k] = k < m ? glm::dot(u, f[k]) : 0.0;
+  }
+  out.transform = static_cast<int>(transforms.size());
+  transforms.push_back({false, f[0], f[1]});
+  return true;
+}
+
+} // namespace
 
 bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
                       std::string* error) {
@@ -1848,6 +2118,10 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     std::set<int> fixedSet;
     std::vector<SupportFacets> supportFacets;
     std::vector<StudyJobBody::PinSupport> pins;
+    // Roller, held and cylindrical supports: every node's holds, merged
+    // into one HeldNode a node once all are in.
+    std::map<int, std::vector<NodeHold>> holdsOf;
+    std::vector<DeckTransform> transforms;
     std::vector<FaceLoad> faceLoads;
     std::vector<std::vector<FaceLoad>> caseLoads(plan.caseNames.size());
     // A torque or remote load on a face the imprint split arrives once per
@@ -2003,6 +2277,100 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
              SupportAwayMm(*mesh, pin.tris, LoadType::Pin, pin.axisOrigin,
                            pin.axisDirection)});
         pins.push_back(std::move(pin));
+      } else if (IsFrameSupport(load.type)) {
+        const std::string who = SupportName(load.type, load.id);
+        std::vector<int> tris;
+        for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
+          if (mesh->boundary[t].faceIndex == faceIndex &&
+              inRegion(mesh->boundary[t], load.region))
+            tris.push_back(t);
+        if (tris.empty())
+          return fail("body '" + bp.bodyName + "': " + who +
+                      (load.region.IsWhole()
+                           ? "'s face meshed to no facets"
+                           : "'s region holds none of its face's mesh facets"));
+        const bool onAxis = load.HasAxis();
+        const glm::dvec3 a = onAxis ? glm::normalize(load.axisDirection)
+                                    : glm::dvec3(0.0, 0.0, 1.0);
+        const glm::dvec3 o = load.axisOrigin;
+        // Each node's normal on a curved roller: its facets' area-weighted.
+        std::map<int, glm::dvec3> normalOf;
+        std::set<int> nodes;
+        for (int t : tris) {
+          const auto& tri = mesh->boundary[t];
+          const glm::dvec3& p0 = mesh->nodes[tri.nodes[0]];
+          const glm::dvec3 cr = glm::cross(mesh->nodes[tri.nodes[1]] - p0,
+                                           mesh->nodes[tri.nodes[2]] - p0);
+          for (int v : tri.nodes) {
+            nodes.insert(v);
+            normalOf[v] += cr;
+          }
+        }
+        // One CalculiX frame for the whole support where it has one.
+        int shared = -1;
+        if (onAxis) {
+          shared = static_cast<int>(transforms.size());
+          transforms.push_back({true, o, o + a});
+        } else if (load.type == LoadType::Roller &&
+                   glm::length(load.planeNormal) > 0.0) {
+          const auto f = FrameAlong(glm::normalize(load.planeNormal));
+          shared = static_cast<int>(transforms.size());
+          transforms.push_back({false, f[0], f[1]});
+        } else if (load.type == LoadType::Held && load.frame != 0) {
+          shared = static_cast<int>(transforms.size());
+          transforms.push_back({false, load.frameAxes[0], load.frameAxes[1]});
+        }
+        std::vector<SupportFacets::NodeDirs> held;
+        for (int v : nodes) {
+          NodeHold h;
+          h.id = load.id;
+          h.type = load.type;
+          h.transform = shared;
+          const glm::dvec3 x = mesh->nodes[v];
+          if (onAxis) {
+            glm::dvec3 r = (x - o) - glm::dot(x - o, a) * a;
+            if (!(glm::length(r) > 0.0))
+              return fail("body '" + bp.bodyName + "': " + who +
+                          ": a node of its face lies on its axis");
+            r = glm::normalize(r);
+            h.frame = {r, glm::cross(a, r), a};
+          }
+          if (load.type == LoadType::Roller) {
+            if (!onAxis) {
+              glm::dvec3 n = glm::length(load.planeNormal) > 0.0
+                                 ? load.planeNormal
+                                 : normalOf[v];
+              if (!(glm::length(n) > 0.0))
+                return fail("body '" + bp.bodyName + "': " + who +
+                            ": its face has no normal at a node of its mesh");
+              h.frame = FrameAlong(glm::normalize(n));
+              if (shared < 0) {
+                h.transform = static_cast<int>(transforms.size());
+                transforms.push_back({false, h.frame[0], h.frame[1]});
+              }
+            }
+            h.held = {true, false, false};
+          } else {
+            if (load.type == LoadType::Held)
+              h.frame = load.frameAxes;
+            h.held = load.hold;
+            for (int k = 0; k < 3; ++k)
+              h.value[k] = load.hold[k] ? load.prescribedMm[k].value : 0.0;
+          }
+          holdsOf[v].push_back(h);
+          SupportFacets::NodeDirs nd;
+          nd.node = v;
+          for (int k = 0; k < 3; ++k)
+            if (h.held[k])
+              nd.dirs[nd.count++] = h.frame[k];
+          held.push_back(nd);
+        }
+        SupportFacets sf{load.id, load.type, tris,
+                         SupportAwayMm(*mesh, tris,
+                                       onAxis ? LoadType::Pin : LoadType::Fixed,
+                                       o, a)};
+        sf.holds = std::move(held);
+        supportFacets.push_back(std::move(sf));
       } else {
         std::vector<int> tris;
         for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
@@ -2044,8 +2412,50 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
         into.push_back(std::move(fl));
       }
     }
+    // The held nodes, each in one frame. A node a fixed support holds is
+    // fixed, unless a held support moves it; a pin's nodes are its contact
+    // iteration's, so a held support on one of them is refused.
+    std::vector<HeldNode> heldNodes;
+    if (!holdsOf.empty()) {
+      std::map<int, uint64_t> fixedBy, pinBy;
+      for (const SupportFacets& sf : supportFacets)
+        if (sf.type == LoadType::Fixed)
+          for (int t : sf.tris)
+            for (int v : mesh->boundary[t].nodes)
+              fixedBy.emplace(v, sf.id);
+      for (const StudyJobBody::PinSupport& pin : pins)
+        for (int t : pin.tris)
+          for (int v : mesh->boundary[t].nodes)
+            pinBy.emplace(v, pin.id);
+      for (const auto& [v, holds] : holdsOf) {
+        if (auto it = pinBy.find(v); it != pinBy.end())
+          return fail("body '" + bp.bodyName + "': " +
+                      SupportName(holds.front().type, holds.front().id) +
+                      " and pin " + std::to_string(it->second) +
+                      " share nodes where their faces meet; a pin holds its "
+                      "face where the part presses on it, which a support "
+                      "beside it cannot also hold -- leave a gap between them");
+        if (fixedSet.count(v)) {
+          for (const NodeHold& h : holds)
+            for (int k = 0; k < 3; ++k)
+              if (h.held[k] && h.value[k] != 0.0)
+                return fail("body '" + bp.bodyName +
+                            "': " + SupportName(h.type, h.id) +
+                            " moves nodes that "
+                            "fixed support " +
+                            std::to_string(fixedBy.count(v) ? fixedBy[v] : 0) +
+                            " holds where it is; the two faces meet, so "
+                            "they disagree there");
+          continue;
+        }
+        HeldNode hn;
+        if (!MergeHolds(v, holds, mesh->nodes[v], transforms, hn, &err))
+          return fail("body '" + bp.bodyName + "': " + err);
+        heldNodes.push_back(hn);
+      }
+    }
     if (fixedSet.empty() && pins.empty() && bp.contacts.empty() &&
-        plan.type != AnalysisType::Thermal)
+        heldNodes.empty() && plan.type != AnalysisType::Thermal)
       return fail("body '" + bp.bodyName + "': fixed face meshed to no nodes");
 
     // Each contact: the body's facets against its partner's, a rigid
@@ -2150,6 +2560,8 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     jb.stabilized = std::move(stabilized);
     jb.supports = std::move(supportFacets);
     jb.pins = std::move(pins);
+    jb.held = std::move(heldNodes);
+    jb.transforms = std::move(transforms);
     jb.bodyIndex = bp.bodyIndex;
     jb.bodyName = bp.bodyName;
     jb.mat = bp.mat;
@@ -2352,8 +2764,7 @@ SolveWithPins(const StudyJobBody& jb, const std::vector<Material>& mats,
       seen.push_back(std::move(state));
     }
     for (int it = 0; it < kMaxContactIterations && !settled; ++it) {
-      Supports sup;
-      sup.fixedNodes = jb.fixedNodes;
+      Supports sup = BaseSupports(jb);
       sup.reactions = true;
       for (const PinState& ps : pins) {
         std::vector<char> held(ps.nodes.size(), 0);
@@ -2532,16 +2943,100 @@ void FinishSupports(const StudyJobBody& jb, const std::vector<int>& zones,
                     FemResults& res) {
   std::vector<FemResults::SupportReaction> pinRows = std::move(res.reactions);
   res.reactions.clear();
-  std::vector<char> counted(jb.mesh.nodes.size(), 0);
-  for (const SupportFacets& sf : jb.supports) {
+  const size_t nNodes = jb.mesh.nodes.size();
+  std::vector<char> counted(nNodes, 0);
+  const bool have = res.nodeReaction.size() == nNodes;
+  // A node a roller, held or cylindrical support holds (and no fixed one):
+  // its reaction split between them along their directions, each direction
+  // the supports share split evenly.
+  std::vector<char> fixedNode(nNodes, 0);
+  for (int v : jb.fixedNodes)
+    if (v >= 0 && static_cast<size_t>(v) < nNodes)
+      fixedNode[v] = 1;
+  std::map<int, std::vector<std::pair<size_t, glm::dvec3>>> dirsAt;
+  for (size_t i = 0; i < jb.supports.size(); ++i)
+    for (const SupportFacets::NodeDirs& nd : jb.supports[i].holds)
+      if (!fixedNode[nd.node])
+        for (int k = 0; k < nd.count; ++k)
+          dirsAt[nd.node].push_back({i, nd.dirs[k]});
+  std::vector<glm::dvec3> shareF(jb.supports.size(), glm::dvec3(0.0)),
+      shareM(jb.supports.size(), glm::dvec3(0.0));
+  if (have)
+    for (const auto& [v, dirs] : dirsAt) {
+      counted[v] = 1;
+      // The distinct directions, how many supports hold each, and the
+      // reaction as their combination (the Gram system, at most 3 x 3).
+      std::vector<glm::dvec3> uniq;
+      std::vector<int> many;
+      std::vector<int> slot(dirs.size(), -1);
+      for (size_t i = 0; i < dirs.size(); ++i) {
+        for (size_t j = 0; j < uniq.size() && slot[i] < 0; ++j)
+          if (std::abs(glm::dot(uniq[j], dirs[i].second)) > 1.0 - 1e-9)
+            slot[i] = static_cast<int>(j);
+        if (slot[i] < 0 && uniq.size() < 3) {
+          slot[i] = static_cast<int>(uniq.size());
+          uniq.push_back(dirs[i].second);
+          many.push_back(0);
+        }
+        if (slot[i] >= 0)
+          ++many[slot[i]];
+      }
+      const glm::dvec3 r = res.nodeReaction[v];
+      const size_t m = uniq.size();
+      double G[3][3] = {}, b[3] = {}, c[3] = {};
+      for (size_t i = 0; i < m; ++i) {
+        b[i] = glm::dot(uniq[i], r);
+        for (size_t j = 0; j < m; ++j)
+          G[i][j] = glm::dot(uniq[i], uniq[j]);
+      }
+      for (size_t col = 0; col < m; ++col) {
+        size_t piv = col;
+        for (size_t q = col + 1; q < m; ++q)
+          if (std::abs(G[q][col]) > std::abs(G[piv][col]))
+            piv = q;
+        std::swap(G[col], G[piv]);
+        std::swap(b[col], b[piv]);
+        if (std::abs(G[col][col]) < 1e-12)
+          continue;
+        for (size_t q = col + 1; q < m; ++q) {
+          const double f = G[q][col] / G[col][col];
+          for (size_t k = col; k < m; ++k)
+            G[q][k] -= f * G[col][k];
+          b[q] -= f * b[col];
+        }
+      }
+      for (size_t i = m; i-- > 0;) {
+        double x = b[i];
+        for (size_t k = i + 1; k < m; ++k)
+          x -= G[i][k] * c[k];
+        c[i] = std::abs(G[i][i]) < 1e-12 ? 0.0 : x / G[i][i];
+      }
+      for (size_t i = 0; i < dirs.size(); ++i) {
+        if (slot[i] < 0)
+          continue;
+        const glm::dvec3 f = c[slot[i]] / many[slot[i]] * uniq[slot[i]];
+        shareF[dirs[i].first] += f;
+        shareM[dirs[i].first] += glm::cross(jb.mesh.nodes[v], f);
+      }
+    }
+  for (size_t i = 0; i < jb.supports.size(); ++i) {
+    const SupportFacets& sf = jb.supports[i];
     FemResults::SupportReaction sr;
     for (const auto& pr : pinRows)
       if (pr.support == sf.id && sf.type == LoadType::Pin)
         sr = pr;
     sr.support = sf.id;
     sr.type = sf.type;
-    if (res.nodeReaction.size() == jb.mesh.nodes.size()) {
+    if (have) {
       sr.hasMoment = true;
+      sr.forceN = shareF[i];
+      sr.momentNmm = shareM[i];
+      // A frame support's share is its directions' (above); a node of its
+      // face a fixed support holds is the fixed support's.
+      if (!sf.holds.empty()) {
+        res.reactions.push_back(sr);
+        continue;
+      }
       for (int t : sf.tris)
         for (int v : jb.mesh.boundary[t].nodes)
           if (!counted[v]) {
@@ -2814,6 +3309,14 @@ StudyBodyResult::Buckling ReadBuckling(const StudyJobBody& jb,
 
 } // namespace
 
+Supports BaseSupports(const StudyJobBody& jb) {
+  Supports sup;
+  sup.fixedNodes = jb.fixedNodes;
+  sup.held = jb.held;
+  sup.transforms = jb.transforms;
+  return sup;
+}
+
 bool StaticSupportsOf(
     const StudyJobBody& jb, const std::vector<Material>& mats,
     const std::vector<std::vector<FaceLoad>>& rhs,
@@ -2824,8 +3327,7 @@ bool StaticSupportsOf(
   supports.clear();
   pinRows.clear();
   if (jb.pins.empty()) {
-    Supports sup;
-    sup.fixedNodes = jb.fixedNodes;
+    Supports sup = BaseSupports(jb);
     sup.reactions = true;
     supports.assign(rhs.size(), sup);
     pinRows.assign(rhs.size(), {});
@@ -3112,11 +3614,10 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       rt.residualFloor = std::max(rt.residualFloor, hs.residualFloor);
       rt.energyResidual = std::max(rt.energyResidual, hs.energyResidual);
     } else if (in.type == AnalysisType::Modal) {
-      auto modes =
-          jb.materials.empty()
-              ? SolveModal(jb.mesh, jb.mat, jb.fixedNodes, in.numModes, &err)
-              : SolveModal(jb.mesh, jb.materials, jb.fixedNodes, in.numModes,
-                           &err);
+      auto modes = SolveModal(
+          jb.mesh,
+          jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials,
+          BaseSupports(jb), in.numModes, &err);
       if (!modes)
         return fail("body '" + jb.bodyName + "': " + err);
       sbr.results.modes = std::move(*modes);
@@ -3198,8 +3699,7 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
         rt.energyResidual =
             std::max(rt.energyResidual, report.worstEnergyResidual);
       } else if (jb.pins.empty()) {
-        Supports sup;
-        sup.fixedNodes = jb.fixedNodes;
+        Supports sup = BaseSupports(jb);
         sup.reactions = true;
         all = SolveCases(jb.mesh, mats, sup, rhs, &err, g, opts, &report);
         settled.assign(rhs.size(), sup);
@@ -3708,6 +4208,8 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
       return fail("load " + std::to_string(l.id) +
                   ": a topology study's supports are fixed (it freezes the "
                   "faces they hold); a pin is a static study's");
+  if (const std::string why = FrameSupportRefusal(study); !why.empty())
+    return fail(why);
   // A contact (or a nonlinear option) is a static study's, never read as
   // a fixed support here.
   if (const std::string why = ContactRefusal(study); !why.empty())

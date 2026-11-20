@@ -5,12 +5,14 @@
 
 #include "cad/CADMaterials.h"
 #include "core/Command.h"
+#include "core/DatumFrame.h"
 #include "core/Document.h"
 #include "core/InputHash.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/Units.h"
 #include "core/fem/Calculix.h"
+#include "core/fem/FemReferenceCases.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
@@ -70,6 +72,99 @@ double FactorOfSafety(const fem::FemResults& r, double bodyYield) {
 bool SettlesStress(fem::AnalysisType t) {
   return t == fem::AnalysisType::Static || t == fem::AnalysisType::Buckling;
 }
+// A roller's, held or cylindrical support's own keys (docs/simulation/
+// README.md#rollers-held-directions-and-cylindrical-supports): `hold`, the
+// list of directions held (a held support's x, y, z; a cylindrical one's
+// radial, tangential, axial), a held support's `dx_mm`, `dy_mm`, `dz_mm`
+// (each an expression too) and its `frame` (a Frame or datum, by id or
+// name). Every key is refused on a type that does not take it.
+void ReadFrameSupportParams(const RpcParams& p, fem::Load& l,
+                            const Document& doc) {
+  const bool held = l.type == fem::LoadType::Held;
+  const bool roller = l.type == fem::LoadType::Roller;
+  const char* type = fem::LoadTypeToString(l.type);
+  if (p.contains("hold")) {
+    if (roller)
+      throw std::runtime_error("a roller holds its face's normal and takes "
+                               "no `hold`; held directions are a `held` "
+                               "support's");
+    const char* const* names =
+        held ? fem::kHeldAxisNames : fem::kCylindricalAxisNames;
+    const json& h = p.at("hold");
+    if (!h.is_array() || h.empty())
+      throw std::runtime_error(std::string("`hold` is a list of the "
+                                           "directions held: any of ") +
+                               names[0] + ", " + names[1] + ", " + names[2]);
+    for (const json& d : h) {
+      int k = -1;
+      for (int i = 0; i < 3; ++i)
+        if (d.is_string() && d.get<std::string>() == names[i])
+          k = i;
+      if (k < 0)
+        throw std::runtime_error(std::string("`hold` names ") + d.dump() +
+                                 "; a " + type + " support holds " + names[0] +
+                                 ", " + names[1] + " or " + names[2]);
+      l.hold[k] = true;
+    }
+  } else if (!roller) {
+    throw std::runtime_error(
+        std::string("a ") + type + " support names the directions it holds: " +
+        "`hold`, any of " + (held ? "x, y, z" : "radial, tangential, axial"));
+  }
+  // rpc-params: dx_mm, dx_mm_expr, dy_mm, dy_mm_expr, dz_mm, dz_mm_expr
+  for (int k = 0; k < 3; ++k) {
+    const std::string key = std::string("d") + fem::kHeldAxisNames[k] + "_mm";
+    if (!p.contains(key) && !p.contains(key + "_expr"))
+      continue;
+    if (!held)
+      throw std::runtime_error("`" + key + "` is a held support's: a " + type +
+                               " support holds at zero");
+    if (!l.hold[k])
+      throw std::runtime_error(
+          "`" + key + "` is given but " + fem::kHeldAxisNames[k] +
+          " is not in `hold`; hold it, or drop `" + key + "`");
+    (void)ExprParam(p, key, l.prescribedMm[k]);
+  }
+  if (p.contains("frame")) {
+    if (!held)
+      throw std::runtime_error(std::string("`frame` is a held support's: a ") +
+                               type + " support's directions are its face's");
+    std::string listing;
+    const Feature* f = datumframe::Find(doc, p.at("frame"), listing);
+    if (f == nullptr)
+      throw std::runtime_error(
+          "no Frame, DatumPlane or DatumAxis " + p.at("frame").dump() +
+          " on this part; there: " +
+          (listing.empty() ? std::string("none (add_feature type Frame)")
+                           : listing));
+    l.frame = f->GetId();
+  }
+}
+
+// What list_studies says of a held or cylindrical support: its `hold`, a
+// held one's displacements (the evaluated values, with `_expr` where bound)
+// and frame.
+void AddFrameSupportFields(const fem::Load& l, json& lj) {
+  const bool held = l.type == fem::LoadType::Held;
+  const char* const* names =
+      held ? fem::kHeldAxisNames : fem::kCylindricalAxisNames;
+  json hold = json::array();
+  for (int k = 0; k < 3; ++k)
+    if (l.hold[k])
+      hold.push_back(names[k]);
+  lj["hold"] = std::move(hold);
+  if (!held)
+    return;
+  for (int k = 0; k < 3; ++k)
+    if (l.hold[k]) {
+      const std::string key = std::string("d") + fem::kHeldAxisNames[k] + "_mm";
+      lj[key] = l.prescribedMm[k].value;
+      if (l.prescribedMm[k].Bound())
+        lj[key + "_expr"] = l.prescribedMm[k].expr;
+    }
+  lj["frame"] = l.frame;
+}
+
 // A study whose run refines round a peak until it settles: a stress's, or
 // a thermal study's temperature rise.
 bool Converges(fem::AnalysisType t) {
@@ -830,7 +925,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "volume_fraction, volume_fraction_expr"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
-     "torque|remote|pin|contact, face, ...}. force/pressure take `magnitude`: "
+     "torque|remote|pin|contact|roller|held|cylindrical, face, ...}. "
+     "force/pressure take `magnitude`: "
      "NEWTONS "
      "for a force -- the total on that face, spread over its area -- and MPa "
      "for a pressure, which pushes along the inward normal; `direction?`. "
@@ -884,7 +980,26 @@ static constexpr MethodDoc SimulationMethods[] = {
      "no magnitude, direction or region, and is refused where a nonlinear "
      "study is (in_house, another analysis, load cases) and beside a pin; "
      "study_results reports each contact's closed and open area, its "
-     "pressure and its force (docs/simulation/README.md#contact). A THERMAL "
+     "pressure and its force (docs/simulation/README.md#contact). Three "
+     "supports hold some directions and leave the rest free, both ways and "
+     "with no contact iteration (docs/simulation/README.md"
+     "#rollers-held-directions-and-cylindrical-supports): a `roller` holds "
+     "its face's normal -- on a flat face a symmetry plane (an inclined one "
+     "as well as an axis-aligned one), on a curved face a frictionless seat; "
+     "`held` holds `hold`, any of [\"x\", \"y\", \"z\"] of the world or of "
+     "the Frame, DatumPlane or DatumAxis `frame` (id or name), each at zero "
+     "or at `dx_mm`/`dy_mm`/`dz_mm` (a prescribed displacement, mm along "
+     "that axis, each taking `_expr`; a static linear study's only, and "
+     "refused on a direction not held); `cylindrical` (a cylindrical face "
+     "only) holds `hold`, any of [\"radial\", \"tangential\", \"axial\"] "
+     "about the face's axis -- unlike a pin it holds both ways. None takes "
+     "a magnitude or direction, every one takes `region`, and each is a "
+     "part study's (static, modal or buckling; not topology). Where two "
+     "supports meet they hold the span of both, and a node they hold at "
+     "displacements that disagree is refused, naming both; one beside a "
+     "pin's face is refused. Verified by the reference cases "
+     "(docs/simulation/reference-cases.md): LE1, LE10, FV32, Lame, Kirsch "
+     "and MacNeal-Harder's thick cylinder stand on rollers. A THERMAL "
      "study's loads (each refused on any other study, and every structural "
      "load refused on a thermal one): `temperature` {face, temperature_c} "
      "holds the face at that many degrees C; `heat_flux` {face, power_w | "
@@ -899,8 +1014,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "that is not positive are refused. All but heat_generation take "
      "`region` (docs/simulation/README.md#thermal).",
      "ambient_c, axis_dir, axis_origin_mm, body, case, contact_with, "
-     "direction, face, film_w_m2k, fix_rotation, flux_w_m2, force_n, "
-     "force_n_expr, friction, magnitude, magnitude_expr, occurrence, "
+     "direction, dx_mm, dx_mm_expr, dy_mm, dy_mm_expr, dz_mm, dz_mm_expr, "
+     "face, film_w_m2k, fix_rotation, flux_w_m2, force_n, force_n_expr, "
+     "frame, friction, hold, magnitude, magnitude_expr, occurrence, "
      "point_mm, power_w, region, study, temperature_c, torque_nmm, "
      "torque_nmm_expr, type"},
     {"remove_load",
@@ -1349,6 +1465,23 @@ static constexpr MethodDoc SimulationMethods[] = {
      "on a modal or topology study (docs/simulation/README.md#calculix).",
      "body, case, id, path, study", remote::NotInBatch,
      "body:string, bytes:int, elements:int, nodes:int, path:string"},
+    {"sample_study",
+     "The solved fields at one POINT of a static, buckling (its base state) "
+     "or thermal study {id (or study), at_mm: [x, y, z], case?}: the solved "
+     "surface's node nearest `at_mm` (part coordinates, mm; a result keeps "
+     "its boundary surface, so a point inside the part reads the nearest "
+     "surface node), `node_at_mm` and `distance_mm` saying which, its "
+     "displacement_mm, stress_mpa [xx, yy, zz, xy, yz, zx] (MPa, tension "
+     "positive), von_mises_mpa, and where the result has them "
+     "temperature_c and plastic_strain. What a benchmark's target is read "
+     "at -- a stress component at a named point "
+     "(docs/simulation/reference-cases.md). Refused on a stale or unrun "
+     "study, a modal or topology one, and an at_mm that is not three "
+     "finite numbers.",
+     "at_mm, case, id, study", remote::NoFlags,
+     "body:string, displacement_mm:number[], distance_mm:number, "
+     "node_at_mm:number[], plastic_strain?:number, stress_mpa:number[], "
+     "temperature_c?:number, von_mises_mpa:number"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
      "on, study"},
     {"export_topo_stl", "Export the optimized topology as STL.",
@@ -1370,6 +1503,71 @@ static constexpr MethodDoc SimulationMethods[] = {
 std::span<const MethodDoc> SimulationMethodDocs() { return SimulationMethods; }
 
 namespace {
+
+// sample_study: the fields at the solved surface's node nearest a point.
+json SampleStudy(ui::AppState& state, Host& host, const RpcParams& p) {
+  ui::ReapBackgroundJobs(state);
+  const uint64_t id =
+      StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                   p.contains("study"), p.value("study", uint64_t{0}));
+  const fem::Study& s = host.Require(id);
+  if (s.type == fem::AnalysisType::Modal ||
+      s.type == fem::AnalysisType::Topology)
+    throw std::runtime_error(
+        std::string("sample_study reads a static, buckling or thermal "
+                    "study's fields; this study is ") +
+        fem::AnalysisTypeToString(s.type));
+  if (!p.contains("at_mm"))
+    throw std::runtime_error("sample_study needs `at_mm`, the point [x, y, z] "
+                             "(mm, part coordinates)");
+  const glm::dvec3 at = remote::Vec3Param(p.at("at_mm"), "at_mm");
+  if (!std::isfinite(at.x) || !std::isfinite(at.y) || !std::isfinite(at.z))
+    throw std::runtime_error("at_mm is three finite numbers");
+  const fem::StudyRuntime* rt = host.Results(id);
+  if (!rt)
+    throw std::runtime_error("study has not been run");
+  if (host.Stale(id))
+    throw std::runtime_error("the study is stale: the part changed after it "
+                             "was solved -- run_study again first");
+  const int caseIdx =
+      p.contains("case") ? CaseIndex(rt->caseNames, p.at("case")) : 0;
+  const fem::StudyBodyResult* best = nullptr;
+  int node = -1;
+  double dist = std::numeric_limits<double>::infinity();
+  for (const fem::StudyBodyResult& b : rt->bodies)
+    for (size_t n = 0; n < b.mesh.nodes.size(); ++n) {
+      const double d = glm::length(b.mesh.nodes[n] - at);
+      if (d < dist) {
+        dist = d;
+        best = &b;
+        node = static_cast<int>(n);
+      }
+    }
+  if (!best)
+    throw std::runtime_error("the result has no nodes");
+  const fem::FemResults& r = best->Case(caseIdx);
+  const glm::dvec3 x = best->mesh.nodes[node];
+  json out{{"body", best->bodyName},
+           {"node_at_mm", {x.x, x.y, x.z}},
+           {"distance_mm", dist}};
+  if (static_cast<size_t>(node) < r.displacement.size()) {
+    const glm::dvec3 u = r.displacement[node];
+    out["displacement_mm"] = {u.x, u.y, u.z};
+  }
+  if (static_cast<size_t>(node) < r.stress.size()) {
+    json st = json::array();
+    for (double v : r.stress[node])
+      st.push_back(v);
+    out["stress_mpa"] = std::move(st);
+  }
+  if (static_cast<size_t>(node) < r.vonMises.size())
+    out["von_mises_mpa"] = r.vonMises[node];
+  if (static_cast<size_t>(node) < r.temperature.size())
+    out["temperature_c"] = r.temperature[node];
+  if (static_cast<size_t>(node) < r.plasticStrain.size())
+    out["plastic_strain"] = r.plasticStrain[node];
+  return out;
+}
 
 // export_study_inp (docs/simulation/README.md#calculix): the deck a static
 // study would hand CalculiX, for body `body` and load case `case`, meshed
@@ -1805,6 +2003,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           lj["fix_rotation"] = l.fixRotation;
         if (l.type == fem::LoadType::Contact)
           lj["friction"] = l.friction;
+        if (l.type == fem::LoadType::Held ||
+            l.type == fem::LoadType::Cylindrical)
+          AddFrameSupportFields(l, lj);
         if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote)
           lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
         if (l.type == fem::LoadType::Torque) {
@@ -2271,6 +2472,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // rpc-returns-from: src/remote/RemoteSimulation.cpp
     return ExportStudyInp(state, host, p);
   }
+  if (m == "sample_study") {
+    // rpc-returns-from: src/remote/RemoteSimulation.cpp
+    return SampleStudy(state, host, p);
+  }
   if (m == "add_refinement") {
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Refinement r;
@@ -2451,6 +2656,21 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     } else {
       refuseKey("fix_rotation", "");
     }
+    // A roller, held directions, a cylindrical support.
+    if (fem::IsFrameSupport(l.type)) {
+      refuseKey("magnitude", "");
+      refuseKey("direction", "");
+      if (host.IsAssembly())
+        throw std::runtime_error(
+            std::string("a ") + fem::LoadTypeToString(l.type) +
+            " support is a part study's; an assembly study holds its part "
+            "with a fixed face or a rigid neighbour's contact");
+      ReadFrameSupportParams(p, l, *doc);
+    } else {
+      for (const char* key : {"hold", "dx_mm", "dy_mm", "dz_mm", "dx_mm_expr",
+                              "dy_mm_expr", "dz_mm_expr", "frame"})
+        refuseKey(key, "");
+    }
     // A compression-only support (docs/simulation/README.md#contact).
     const bool contact = l.type == fem::LoadType::Contact;
     if (contact) {
@@ -2566,6 +2786,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             "the ground, the plane a flat face lies on; a curved face rests "
             "on a rigid occurrence in an assembly study (contact_with)");
     }
+    if (l.type == fem::LoadType::Cylindrical &&
+        !(faceDoc && fem::CylindricalFaceAxis(*faceDoc, l.face)))
+      throw std::runtime_error(
+          "face '" + l.face.name +
+          "' is not cylindrical: a cylindrical support holds radial, "
+          "tangential and axial directions about a cylindrical face's axis; "
+          "hold another face with a roller or held directions");
     if (pin && !(faceDoc && fem::CylindricalFaceAxis(*faceDoc, l.face)))
       throw std::runtime_error(
           "face '" + l.face.name +
@@ -2624,6 +2851,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (const std::string why = fem::ContactRefusal(with); !why.empty())
         throw std::runtime_error(why);
       if (const std::string why = fem::ThermalRefusal(with); !why.empty())
+        throw std::runtime_error(why);
+      if (const std::string why = fem::FrameSupportRefusal(with); !why.empty())
         throw std::runtime_error(why);
     }
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
@@ -3010,6 +3239,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     const auto stamp = [&](json j) {
       if (rt->inputHash != 0)
         j["input_hash"] = inputhash::Hex(rt->inputHash);
+      // What the procedure rests on (docs/simulation/reference-cases.md).
+      if (j.contains("receipt"))
+        if (const fem::ReferenceProcedure* rp = fem::ReferenceProcedureOf(*s))
+          j["receipt"]["verified_by"] = {
+              {"procedure", std::string(rp->procedure)},
+              {"cases", std::string(rp->cases)},
+              {"page", "docs/simulation/reference-cases.md"}};
       if (m == "run_study") {
         j["reused"] = reused;
         if (reused)

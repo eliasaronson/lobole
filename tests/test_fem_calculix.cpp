@@ -23,6 +23,7 @@
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/fem/Calculix.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
@@ -604,11 +605,18 @@ Agreement SolveBoth(fem::StudyJobInput input, const fem::CalculixInstall& ccx,
   for (const auto& b : own.bodies)
     a.nodes += b.mesh.nodes.size();
   // The reactions, which the in-house code computes from either answer.
+  // A support that carries next to nothing (a cylindrical support's
+  // tangential hold under an axial pull) is held to the body's largest
+  // reaction's precision (1e-6 of it), not to its own zero.
   for (size_t b = 0; b < own.bodies.size(); ++b)
     for (size_t r = 0; r < own.bodies[b].results.reactions.size(); ++r) {
       const auto& x = own.bodies[b].results.reactions[r];
       const auto& y = theirs.bodies[b].results.reactions[r];
-      const double scale = std::max(glm::length(x.forceN), 1e-9);
+      double largest = 0.0;
+      for (const auto& o : own.bodies[b].results.reactions)
+        largest = std::max(largest, glm::length(o.forceN));
+      const double scale =
+          std::max({glm::length(x.forceN), 1e-2 * largest, 1e-9});
       CHECK(glm::length(x.forceN - y.forceN) < 1e-4 * scale);
       CHECK(x.contactAreaMm2 == y.contactAreaMm2);
     }
@@ -707,6 +715,52 @@ TEST_CASE("CalculiX and the in-house solver agree on a lug on a pin held from "
         MakeLoad(doc, fem::LoadType::Force, end, 50.0, glm::dvec3(0, -1, 0)));
     SolveBoth(Meshed(doc, s), *ccx, "lever on two pins");
   }
+}
+
+// The roller, held and cylindrical supports on CalculiX
+// (docs/simulation/README.md#rollers-held-directions-and-cylindrical-supports):
+// an inclined bar on a roller at its root (one rectangular *TRANSFORM), a
+// cylindrical support holding its side tangentially (a cylindrical one),
+// its end moved along its axis by a held support in a datum's frame (a
+// *BOUNDARY with its value in the step). The edges where the side meets
+// its caps hold nodes two supports share: merged frames, each its own
+// transform.
+TEST_CASE("CalculiX and the in-house solver agree on rollers, a cylindrical "
+          "support and a prescribed displacement",
+          "[fem][calculix][run][supports]") {
+  REQUIRE_CCX(ccx);
+  Document doc;
+  const glm::dvec3 dir = glm::normalize(glm::dvec3(1.0, 0.4, 0.2));
+  auto cyl =
+      std::make_unique<CylinderFeature>("Bar", glm::dvec3(0), dir, 5.0, 50.0);
+  cyl->SetMaterial("steel");
+  doc.AddFeature(std::move(cyl));
+  const Body& body = doc.GetBodies()[0];
+  const ElementRef side =
+      FaceWhere(body, "cylinder", [](const glm::dvec3&) { return true; });
+  const ElementRef root = FaceWhere(body, "plane", [&](const glm::dvec3& c) {
+    return std::abs(glm::dot(c, dir)) < 1e-6;
+  });
+  const ElementRef end = FaceWhere(body, "plane", [&](const glm::dvec3& c) {
+    return std::abs(glm::dot(c, dir) - 50.0) < 1e-6;
+  });
+  fem::Study& s = doc.AddStudy("Moved");
+  s.meshSize = 2.5;
+  s.loads.push_back(MakeLoad(doc, fem::LoadType::Roller, root));
+  fem::Load around = MakeLoad(doc, fem::LoadType::Cylindrical, side);
+  around.hold = {false, true, false};
+  s.loads.push_back(around);
+  fem::Load moved = MakeLoad(doc, fem::LoadType::Held, end);
+  moved.hold = {false, false, true};
+  moved.prescribedMm[2] = 0.01;
+  // Along the bar: a Frame whose z is the bar's axis.
+  auto frame = std::make_unique<FrameFeature>("Along");
+  frame->zAxis = dir;
+  frame->xAxis = glm::normalize(glm::cross(glm::dvec3(0, 0, 1), dir));
+  doc.AddFeature(std::move(frame));
+  moved.frame = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  s.loads.push_back(moved);
+  SolveBoth(Meshed(doc, s), *ccx, "rollers, cylindrical, prescribed");
 }
 
 TEST_CASE("CalculiX and the in-house solver agree on a shaft under a torque "

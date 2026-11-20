@@ -1,0 +1,11 @@
+{
+  "features": 3,
+  "bodies": 1,
+  "volumes": [7853.98],
+  "study_supports": [
+    ["roller", [false, false, false], [0.0, 0.0, 0.0], 0],
+    ["held", [true, false, true], [0.0, 0.0, 0.25], 3],
+    ["cylindrical", [true, false, true], [0.0, 0.0, 0.0], 0],
+    ["held", [false, true, false], [0.0, 0.0, 0.0], 0]
+  ]
+}

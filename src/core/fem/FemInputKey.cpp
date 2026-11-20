@@ -4,6 +4,7 @@
 // The input hash of an FEM run (docs/simulation/README.md#studies-as-jobs).
 
 #include "cad/CADMaterials.h"
+#include "core/DatumFrame.h"
 #include "core/Document.h"
 #include "core/InputHash.h"
 #include "core/Occurrence.h"
@@ -79,6 +80,18 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
   h.Str(kFemAlgorithm);
   h.Json(Definition(study));
   h.Bodies(doc.GetBodies());
+  // A held support in a datum's frame reads that datum where it is now.
+  for (const Load& l : study.loads)
+    if (l.type == LoadType::Held && l.frame != 0) {
+      const Feature* f = doc.FindFeatureById(l.frame);
+      h.U64(f && datumframe::IsAnchor(*f) ? 1 : 0);
+      if (f && datumframe::IsAnchor(*f)) {
+        const glm::dmat4 m = datumframe::Matrix(*f);
+        for (int c = 0; c < 4; ++c)
+          for (int r = 0; r < 3; ++r)
+            h.F64(m[c][r]);
+      }
+    }
   HashHardening(h, study, doc.GetBodies());
   HashThermal(h, study, doc.GetBodies());
   // A static study under a thermal study's temperature reads that study's

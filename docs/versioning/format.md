@@ -356,6 +356,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A study's load `type` may be `roller` (zero motion along its face's normal), `held` (`hold`: any of `x`, `y`, `z` of the world or of the Frame or datum `frame` names by id, each held at zero or at `dx_mm`/`dy_mm`/`dz_mm`, with `_expr`, written only where not zero) or `cylindrical` (`hold`: any of `radial`, `tangential`, `axial` about its cylindrical face's axis) ([rollers, held directions and cylindrical supports](../simulation/README.md#rollers-held-directions-and-cylindrical-supports)). `hold`, the displacements and `frame` are refused on any other type, and a direction that is none of its type's three is refused, naming them. Golden `vNEXT-frame-supports` |
 
 ## Paths in a project
 

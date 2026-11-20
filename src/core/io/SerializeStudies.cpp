@@ -185,6 +185,28 @@ json StudyToJson(const fem::Study& s) {
         lj["fix_rotation"] = true;
       if (l.type == fem::LoadType::Contact && l.friction != 0.0) // v209
         lj["friction"] = l.friction;
+      // vNEXT: a held or cylindrical support's directions, a held one's
+      // displacements (only where not zero) and frame.
+      if (l.type == fem::LoadType::Held ||
+          l.type == fem::LoadType::Cylindrical) {
+        const char* const* names = l.type == fem::LoadType::Held
+                                       ? fem::kHeldAxisNames
+                                       : fem::kCylindricalAxisNames;
+        json hold = json::array();
+        for (int k = 0; k < 3; ++k)
+          if (l.hold[k])
+            hold.push_back(names[k]);
+        lj["hold"] = std::move(hold);
+      }
+      if (l.type == fem::LoadType::Held) {
+        for (int k = 0; k < 3; ++k)
+          if (l.hold[k] &&
+              (l.prescribedMm[k].value != 0.0 || l.prescribedMm[k].Bound()))
+            WriteExpr(lj, std::string("d") + fem::kHeldAxisNames[k] + "_mm",
+                      l.prescribedMm[k]);
+        if (l.frame != 0)
+          lj["frame"] = l.frame;
+      }
       // A thermal load's quantities (v212), each only where given.
       const auto given = [&](const char* key, double v) {
         if (!std::isnan(v))
@@ -512,7 +534,9 @@ fem::Study StudyFromJson(const json& j) {
              "axis_origin",  "axis_dir",     "point",      "case",
              "region",       "fix_rotation", "friction",   "temperature_c",
              "power_w",      "flux_w_m2",    "film_w_m2k", "ambient_c",
-             "body"},
+             "body",         "hold",         "dx_mm",      "dx_mm_expr",
+             "dy_mm",        "dy_mm_expr",   "dz_mm",      "dz_mm_expr",
+             "frame"},
         "study load");
     fem::Load l;
     l.id = lj.at("id").get<uint64_t>();
@@ -571,6 +595,50 @@ fem::Study StudyFromJson(const json& j) {
         throw std::runtime_error("load " + std::to_string(l.id) +
                                  ": fix_rotation is not true or false");
       l.fixRotation = lj.at("fix_rotation").get<bool>();
+    }
+    // vNEXT: a held or cylindrical support's directions, displacements and
+    // frame, each refused on any other type.
+    if (lj.contains("hold")) {
+      if (l.type != fem::LoadType::Held && l.type != fem::LoadType::Cylindrical)
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": hold is a held or cylindrical support's");
+      const json& h = lj.at("hold");
+      const bool held = l.type == fem::LoadType::Held;
+      const char* const* names =
+          held ? fem::kHeldAxisNames : fem::kCylindricalAxisNames;
+      if (!h.is_array())
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": hold is a list of directions");
+      for (const json& d : h) {
+        int k = -1;
+        for (int i = 0; i < 3; ++i)
+          if (d.is_string() && d.get<std::string>() == names[i])
+            k = i;
+        if (k < 0)
+          throw std::runtime_error(
+              "load " + std::to_string(l.id) + ": hold names " + d.dump() +
+              "; a " + fem::LoadTypeToString(l.type) + " support holds " +
+              names[0] + ", " + names[1] + " or " + names[2]);
+        l.hold[k] = true;
+      }
+    }
+    for (int k = 0; k < 3; ++k) {
+      const std::string key = std::string("d") + fem::kHeldAxisNames[k] + "_mm";
+      if (!lj.contains(key) && !lj.contains(key + "_expr"))
+        continue;
+      if (l.type != fem::LoadType::Held)
+        throw std::runtime_error("load " + std::to_string(l.id) + ": " + key +
+                                 " is a held support's");
+      ReadExpr(lj, key, l.prescribedMm[k]);
+    }
+    if (lj.contains("frame")) {
+      if (l.type != fem::LoadType::Held)
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": frame is a held support's");
+      if (!lj.at("frame").is_number_unsigned())
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": frame is a feature id");
+      l.frame = lj.at("frame").get<uint64_t>();
     }
     if (lj.contains("friction")) { // v209
       if (l.type != fem::LoadType::Contact)

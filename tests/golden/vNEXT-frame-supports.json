@@ -1,0 +1,33 @@
+{
+  "format": "designer-document",
+  "version": 220,
+  "features": [
+    {"type": "Sketch", "name": "Section", "id": 1, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "circle", "id": 1, "center": [0, 0], "radius": 5}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Shaft", "id": 2, "sketch_id": 1,
+     "distance": 100.0, "mode": "new_body"},
+    {"type": "Frame", "id": 3, "name": "tilted", "kind": "explicit",
+     "origin": [0.0, 0.0, 0.0], "x_axis": [0.6, 0.8, 0.0],
+     "z_axis": [0.0, 0.0, 1.0]}
+  ],
+  "studies": [
+    {"type": "Study", "id": 4, "name": "Held three ways",
+     "loads": [
+       {"id": 5, "type": "roller",
+        "face": {"feature_id": 2, "element": "2/g2"}, "magnitude": 0.0},
+       {"id": 6, "type": "held",
+        "face": {"feature_id": 2, "element": "2/g3"}, "magnitude": 0.0,
+        "hold": ["x", "z"], "dz_mm": 0.25, "frame": 3},
+       {"id": 7, "type": "cylindrical",
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 0.0,
+        "hold": ["radial", "axial"]},
+       {"id": 8, "type": "held",
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 0.0,
+        "hold": ["y"]}
+     ]}
+  ]
+}
