@@ -262,6 +262,22 @@ inline bool ExprParam(const RpcParams& p, const std::string& key,
   return ReadExprParam(both, key, v);
 }
 
+// The same, and a text that came is evaluated NOW over `symbols` -- the
+// scope the document it lands in reads -- into the value, so a call that
+// names a variable the scope does not have is refused naming the key before
+// anything changes (docs/scripting/rpc.md#numbers-that-take-an-expression).
+inline bool ExprParam(const RpcParams& p, const std::string& key, ExprValue& v,
+                      const SymbolTable& symbols) {
+  if (!ExprParam(p, key, v))
+    return false;
+  if (v.Bound()) {
+    std::string why;
+    if (!EvaluateSlot(ExprSlot(v, ExprQuantity::Other, key), symbols, &why))
+      throw std::runtime_error(key + "_expr '" + v.expr + "': " + why);
+  }
+  return true;
+}
+
 // A {feature_id, element} reference out of a parameter, refused with what it
 // was when it is not one (`r.at("feature_id")` on {} fell over as internal).
 inline std::pair<uint64_t, std::string> ElementParam(const nlohmann::json& r,
@@ -408,7 +424,8 @@ inline std::string IndexError(const char* what, long long given, size_t count,
 // failures from the call that caused them instead of having to poll:
 //   {"ok": bool, "failed": [{"index", "name", "error",
 //                            "after_earlier_failure"?}, ...],
-//    "warnings": [{"index", "name", "warning"}, ...]}
+//    "warnings": [{"index", "name", "warning"}, ...],
+//    "owners"?: [{"owner", "error"}, ...]}
 // `ok` reflects errors only — a warning means the feature built a valid
 // result that is likely not what was intended (the silent no-op cut), and
 // scripts should surface it without treating the edit as failed.
@@ -578,9 +595,19 @@ inline nlohmann::json RegenSummaryJson(const Document& doc) {
       unbuilt.push_back(
           {{"index", i}, {"name", features[i]->GetName()}, {"state", state}});
     }
-  nlohmann::json out = {{"ok", failed.empty() && unbuilt.empty()},
-                        {"failed", std::move(failed)},
-                        {"warnings", std::move(warnings)}};
+  // The part's numbers outside its features -- the sheet-metal and tube
+  // rules, a tolerance's limits -- whose expressions do not stand: each keeps
+  // its last good value, and the call that caused it says so
+  // (docs/variables/README.md#numbers-that-are-expressions).
+  nlohmann::json owners = nlohmann::json::array();
+  for (const DocumentExprProblem& pr : doc.ExprProblems())
+    owners.push_back({{"owner", pr.owner}, {"error", pr.error}});
+  nlohmann::json out = {
+      {"ok", failed.empty() && unbuilt.empty() && owners.empty()},
+      {"failed", std::move(failed)},
+      {"warnings", std::move(warnings)}};
+  if (!owners.empty())
+    out["owners"] = std::move(owners);
   if (!unbuilt.empty())
     out["unbuilt"] = std::move(unbuilt);
   return out;

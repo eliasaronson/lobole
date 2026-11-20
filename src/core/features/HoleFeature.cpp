@@ -634,7 +634,7 @@ void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
   std::string designation = table ? table->designation : fitThread;
   if (table && fitPitch > 0.0 && std::abs(fitPitch - table->pitch) > 1e-9) {
     char buf[64];
-    std::snprintf(buf, sizeof buf, "%sx%g", fitThread.c_str(), fitPitch);
+    std::snprintf(buf, sizeof buf, "%sx%g", fitThread.c_str(), fitPitch.value);
     designation = buf;
   }
   // As deep as it is threaded, from the mouth: a blind hole's tap leaves its

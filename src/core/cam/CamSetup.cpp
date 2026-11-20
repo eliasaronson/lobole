@@ -837,7 +837,8 @@ void StampBands(const Document& doc, Body& body) {
       band.lower = t.lower;
       band.upper = t.upper;
       char buf[64];
-      std::snprintf(buf, sizeof buf, "%+.3f/%+.3f", t.upper, t.lower);
+      std::snprintf(buf, sizeof buf, "%+.3f/%+.3f", t.upper.value,
+                    t.lower.value);
       band.label = buf;
       body.bands.push_back(std::move(band));
       continue;
@@ -854,7 +855,8 @@ void StampBands(const Document& doc, Body& body) {
       band.lower = t.lower;
       band.upper = t.upper;
       char buf[64];
-      std::snprintf(buf, sizeof buf, "%+.3f/%+.3f", t.upper, t.lower);
+      std::snprintf(buf, sizeof buf, "%+.3f/%+.3f", t.upper.value,
+                    t.lower.value);
       band.label = buf;
     } else {
       const std::optional<fits::Band> b =

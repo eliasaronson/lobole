@@ -315,3 +315,56 @@ std::vector<std::string> ReadExprTexts(const nlohmann::json& j,
     out[i] = ExprTextFromJson(a[i], k);
   return out;
 }
+
+void VisitVec3Exprs(const ExprVisitor& visit, glm::dvec3& v, Vec3Exprs& texts,
+                    ExprQuantity q, const std::string& path) {
+  for (int k = 0; k < 3; k++)
+    visit(ExprSlot(texts[static_cast<size_t>(k)], v[k], q,
+                   path + "/" + std::to_string(k)));
+}
+
+void WriteVec3Exprs(nlohmann::json& j, const std::string& key,
+                    const Vec3Exprs& texts) {
+  if (AnyBound(texts))
+    j[key + "_expr"] = {texts[0], texts[1], texts[2]};
+}
+
+Vec3Exprs ReadVec3Exprs(const nlohmann::json& j, const std::string& key) {
+  const std::vector<std::string> t = ReadExprTexts(j, key, 3);
+  return {t[0], t[1], t[2]};
+}
+
+void WritePointExprs(nlohmann::json& j, const std::string& key,
+                     const std::vector<Vec3Exprs>& texts) {
+  bool any = false;
+  for (const Vec3Exprs& t : texts)
+    any = any || AnyBound(t);
+  if (!any)
+    return;
+  nlohmann::json a = nlohmann::json::array();
+  for (const Vec3Exprs& t : texts)
+    a.push_back({t[0], t[1], t[2]});
+  j[key + "_expr"] = std::move(a);
+}
+
+std::vector<Vec3Exprs> ReadPointExprs(const nlohmann::json& j,
+                                      const std::string& key, size_t n) {
+  std::vector<Vec3Exprs> out(n);
+  const std::string k = key + "_expr";
+  if (!j.is_object() || !j.contains(k))
+    return out;
+  const nlohmann::json& a = j.at(k);
+  if (!a.is_array() || a.size() != n)
+    throw std::runtime_error(k + " is " + std::to_string(n) +
+                             " [x, y, z] of expression texts (\"\" for a "
+                             "number), not " +
+                             a.dump());
+  for (size_t i = 0; i < n; i++) {
+    if (!a[i].is_array() || a[i].size() != 3)
+      throw std::runtime_error(k + " entry " + std::to_string(i) +
+                               " is [x, y, z] of texts, not " + a[i].dump());
+    for (size_t c = 0; c < 3; c++)
+      out[i][c] = ExprTextFromJson(a[i][c], k);
+  }
+  return out;
+}

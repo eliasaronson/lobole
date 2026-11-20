@@ -136,7 +136,7 @@ std::vector<std::string> EntityExprFields(const Entity& e) {
         else if constexpr (std::is_same_v<T, Circle>)
           return {"cx", "cy", "r"};
         else if constexpr (std::is_same_v<T, Arc>)
-          return {"cx", "cy", "r"};
+          return {"cx", "cy", "r", "start_angle_deg", "end_angle_deg"};
         else if constexpr (std::is_same_v<T, BSpline>) {
           // Every pole, so an outline drawn as a spline (a knight's head, a
           // cam lobe) can follow a variable the way a polyline does.
@@ -181,6 +181,13 @@ std::optional<double> GetEntityField(const Entity& e,
             return g.center.y;
           if (field == "r")
             return g.radius;
+          if constexpr (std::is_same_v<T, Arc>) {
+            // Stored in radians; the expression speaks degrees.
+            if (field == "start_angle_deg")
+              return angles::ToDegrees(g.startAngle);
+            if (field == "end_angle_deg")
+              return angles::ToDegrees(g.endAngle);
+          }
         } else if constexpr (std::is_same_v<T, BSpline>) {
           if (const auto pf = PoleField(field);
               pf && pf->first < g.poles.size())
@@ -246,6 +253,16 @@ bool SetEntityField(Entity& e, const std::string& field, double value) {
           if (field == "r") {
             g.radius = value;
             return true;
+          }
+          if constexpr (std::is_same_v<T, Arc>) {
+            if (field == "start_angle_deg") {
+              g.startAngle = angles::ToRadians(value);
+              return true;
+            }
+            if (field == "end_angle_deg") {
+              g.endAngle = angles::ToRadians(value);
+              return true;
+            }
           }
         } else if constexpr (std::is_same_v<T, BSpline>) {
           if (const auto pf = PoleField(field);
@@ -1800,10 +1817,29 @@ bool SketchFeature::Execute(RegenContext& ctx) {
                   [](const sketch::Constraint& c) {
                     return sketch::IsDimension(c.kind) && !c.valueExpr.empty();
                   }) ||
-      std::any_of(entityExprs.begin(), entityExprs.end(), [](const auto& kv) {
-        return std::any_of(kv.second.begin(), kv.second.end(),
-                           [](const auto& fe) { return !fe.second.empty(); });
+      std::any_of(entityExprs.begin(), entityExprs.end(),
+                  [](const auto& kv) {
+                    return std::any_of(
+                        kv.second.begin(), kv.second.end(),
+                        [](const auto& fe) { return !fe.second.empty(); });
+                  }) ||
+      std::any_of(derived.begin(), derived.end(), [](const auto& op) {
+        return op.count.Bound() || op.count2.Bound() ||
+               !op.scalarExpr.empty() || !op.vecExpr[0].empty() ||
+               !op.vecExpr[1].empty() || !op.vec2Expr[0].empty() ||
+               !op.vec2Expr[1].empty();
       });
+  // A count a variable gave must still be a count: below one there is not
+  // even the seed (the loader refuses it in a file for the same reason).
+  for (const sketch::DerivedOp& op : derived)
+    if (op.count < 1 || op.count2 < 1) {
+      SetError("a sketch pattern's count comes out " +
+               std::to_string(op.count < 1 ? op.count.value : op.count2.value) +
+               (op.count < 1 ? (" ('" + op.count.expr + "')")
+                             : (" ('" + op.count2.expr + "')")) +
+               "; a pattern needs at least 1");
+      return false;
+    }
   // With external geometry we always re-solve, so geometry constrained to the
   // (re-projected) references follows when the source moves.
   if (!exprDriven && external.empty()) {
@@ -1886,6 +1922,40 @@ void SketchFeature::VisitExprs(const ExprVisitor& visit) {
       sketch::SetEntityField(entities[idx], field, value);
     }
   }
+  // A pattern's, a mirror's and a linked copy's numbers
+  // (docs/sketching/README.md#patterns-that-are-expressions), replayed by
+  // RegenerateDerived once the solve has run.
+  for (size_t i = 0; i < derived.size(); i++) {
+    sketch::DerivedOp& op = derived[i];
+    const std::string at = "derived_ops/" + std::to_string(i) + "/";
+    const auto vec2d = [&](glm::dvec2& v, std::array<std::string, 2>& t,
+                           const std::string& key) {
+      for (int c = 0; c < 2; c++)
+        visit({t[static_cast<size_t>(c)], v[c], ExprQuantity::Length,
+               at + key + "/" + std::to_string(c)});
+    };
+    switch (op.kind) {
+    case sketch::DerivedKind::LinearPattern:
+      vec2d(op.vec, op.vecExpr, "vec");
+      visit({op.count, at + "count"});
+      if (op.count2 > 1 || op.count2.Bound()) {
+        vec2d(op.vec2, op.vec2Expr, "vec2");
+        visit({op.count2, at + "count2"});
+      }
+      break;
+    case sketch::DerivedKind::CircularPattern:
+      if (op.centerEntity == 0)
+        vec2d(op.vec, op.vecExpr, "vec");
+      visit(ExprSlot::Radians(op.scalarExpr, op.scalar, at + "scalar"));
+      visit({op.count, at + "count"});
+      break;
+    case sketch::DerivedKind::LinkedCopy:
+      vec2d(op.vec, op.vecExpr, "vec");
+      break;
+    case sketch::DerivedKind::Mirror:
+      break; // its axis is an entity
+    }
+  }
 }
 
 void SketchFeature::RegenerateDerived() {
@@ -1950,9 +2020,9 @@ void SketchFeature::RegenerateDerived() {
                                   static_cast<double>(k) * op.scalar);
     };
     const int total = op.kind == sketch::DerivedKind::LinearPattern
-                          ? op.count * std::max(1, op.count2)
+                          ? op.count.value * std::max(1, op.count2.value)
                       : op.kind == sketch::DerivedKind::Mirror ? 2
-                                                               : op.count;
+                                                               : op.count.value;
     std::vector<sketch::DerivedOp::Inst> keep;
     for (uint32_t sid : op.sourceIds) {
       const size_t si = IndexOfEntity(sid);

@@ -94,6 +94,12 @@ public:
   // on is its content key (`sourceKey`) instead.
   void VisitFeatureRefs(const RefVisitor&) const override {}
 
+  // Where the copy sits: placement/position, each coordinate a slot.
+  void VisitExprs(const ExprVisitor& visit) override {
+    VisitVec3Exprs(visit, position, positionExpr, ExprQuantity::Length,
+                   "placement/position");
+  }
+
   std::string WhyIncomplete() const override;
 
   // The part slot the snapshot was taken from, and its name at that time —
@@ -121,6 +127,7 @@ public:
   // Where the copy sits in THIS part. Identity unless made from an
   // in-context edit, where it is OccMatrix(edited)^-1 * OccMatrix(source).
   glm::dvec3 position{0.0};
+  Vec3Exprs positionExpr; // its texts; the orientation has no one number
   glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
   // true: a ghost to draw on — absent from mass, BOM, export, CAM and
   // booleans. false: an ordinary body of this part (a mould from its

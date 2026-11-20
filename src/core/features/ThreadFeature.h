@@ -57,17 +57,20 @@ public:
 
   void VisitExprs(const ExprVisitor& visit) override {
     visit({length, ExprQuantity::Length, "length"});
+    visit({pitch, ExprQuantity::Length, "pitch"});
+    visit({minimumEngagement, ExprQuantity::Length, "minimum_engagement"});
+    visit({flankDeg, ExprQuantity::Angle, "flank_angle_deg"});
   }
 
   ElementRef face;         // a cylindrical face, by stable toponame
   std::string designation; // "M8", "M8x1", or free text (custom)
-  double pitch = 1.25;
+  ExprValue pitch{1.25};
   // "6g"/"6H", "2A"/"2B": checked against the series and the side, drives
   // no geometry (a modelled thread is the basic profile).
   std::string threadClass;
   ExprValue length{0.0}; // threaded length from the face's start; 0 = full
   bool allowEngagement = false;
-  double minimumEngagement = 0.0;
+  ExprValue minimumEngagement{0.0};
   bool modeled = false;    // cut the real helical groove
   bool rightHanded = true; // JSON "hand": "right" | "left"
   // The flank angle, degrees: half the thread angle, from the plane normal
@@ -75,7 +78,7 @@ public:
   // designation has; a custom thread may take 15-60
   // (docs/modeling/holes-and-threads.md#flank-angle) -- 45 is a thread whose
   // every flank prints without support.
-  double flankDeg = 30.0;
+  ExprValue flankDeg{30.0};
 
   // Session-only, rebuilt by Execute (never serialized): what the UI draws.
   struct Overlay {

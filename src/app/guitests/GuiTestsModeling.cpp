@@ -596,7 +596,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(box != nullptr);
     const float y0 = box->position.y;
 
-    ctx->ItemInputValue("//Box###ToolWindow/##Position/##y", "3*4");
+    // One row per coordinate, each an expression field that keeps its
+    // text (docs/variables/README.md#numbers-that-are-expressions).
+    ctx->ItemInputValue("//Box###ToolWindow/Position Y/##Position Y", "3*4");
     ctx->Yield(2);
     box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
@@ -3247,12 +3249,12 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(wo->rightHanded);
     ctx->SetRef("//Worm###ToolWindow");
     ctx->ComboClick("###Hand/Left");
-    ctx->ItemInputValue("##Starts", 2);
+    ctx->ItemInputValue("Starts/##count", 2);
     ctx->Yield(3);
     wo = dynamic_cast<WormFeature*>(ui::ResolvePendingFeature(*s_App));
     IM_CHECK(wo != nullptr);
     IM_CHECK(!wo->rightHanded);
-    IM_CHECK_EQ(wo->starts, 2);
+    IM_CHECK_EQ(wo->starts.value, 2);
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
@@ -3345,7 +3347,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_STR_EQ(ww->GetError().c_str(), "");
     IM_CHECK(ww->report.valid);
     ctx->SetRef("//Worm wheel###ToolWindow");
-    IM_CHECK(ctx->ItemExists("##Teeth"));
+    IM_CHECK(ctx->ItemExists("Teeth/##count"));
     IM_CHECK(ctx->ItemExists("###Hand"));
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
@@ -3834,6 +3836,56 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     s_App->commands->Undo(*Doc());
     ctx->Yield();
     IM_CHECK(!Doc()->SheetMetal().has_value());
+
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
+  };
+
+  // A sheet-metal rule is an expression of the variables
+  // (docs/sheetmetal/README.md#rules-that-are-expressions): typed into the
+  // Sheet Metal panel's Bend radius field it KEEPS its text, a change to the
+  // variable in the Variables panel moves the radius every flange reads, and
+  // a plain number typed over it unbinds it.
+  t = IM_REGISTER_TEST(engine, "sheetmetal",
+                       "a_bend_radius_takes_an_expression");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    SetupFor(ctx, Needs::SheetBlank);
+    ctx->Yield();
+    IM_CHECK(Doc()->SheetMetal().has_value());
+    IM_CHECK(ui::SetProjectVariable(*s_App, "r_bend", "3", ""));
+
+    ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+    ctx->ItemClick(w->TabId);
+    ctx->Yield(2);
+    if (ctx->ItemInfo("//###Variables/###sm_bend_radius",
+                      ImGuiTestOpFlags_NoError)
+            .ID == 0) {
+      ctx->ItemClick("//###Variables/Sheet metal");
+      ctx->Yield(2);
+    }
+    ctx->ItemInputValue("//###Variables/###sm_bend_radius", "r_bend");
+    ctx->Yield(3);
+    IM_CHECK_STR_EQ(Doc()->SheetMetal()->bendRadius.expr.c_str(), "r_bend");
+    IM_CHECK(std::abs(Doc()->SheetMetal()->bendRadius.value - 3.0) < 1e-9);
+    IM_CHECK(std::abs(Doc()->SheetMetal()->EffectiveBendRadius() - 3.0) < 1e-9);
+
+    // The variable changed where a person changes it: the rule follows.
+    ctx->ItemInputValue(
+        "//###Variables/###vars_table/###var_expr_project_r_bend", "4");
+    ctx->Yield(3);
+    IM_CHECK_STR_EQ(Doc()->SheetMetal()->bendRadius.expr.c_str(), "r_bend");
+    IM_CHECK(std::abs(Doc()->SheetMetal()->bendRadius.value - 4.0) < 1e-9);
+    IM_CHECK(Doc()->ExprProblems().empty());
+
+    // A plain number typed over it unbinds it.
+    ctx->ItemInputValue("//###Variables/###sm_bend_radius/##bound", "5");
+    ctx->Yield(3);
+    IM_CHECK(Doc()->SheetMetal()->bendRadius.expr.empty());
+    IM_CHECK(std::abs(Doc()->SheetMetal()->bendRadius.value - 5.0) < 1e-9);
 
     ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
     ctx->Yield(2);

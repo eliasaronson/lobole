@@ -43,6 +43,15 @@
 //
 // One per element: the same face cannot be two sizes at once, so setting a
 // tolerance on a face that has one REPLACES it.
+// A number of the part outside its features -- the sheet-metal rules, the
+// tube rules, a tolerance's limits -- whose expression did not evaluate, or
+// gave a value its owner cannot take: the owner keeps its last good value,
+// and every mutating call's `regen` says so (remote::RegenSummaryJson).
+struct DocumentExprProblem {
+  std::string owner; // "sheet-metal rules", "tolerance 12"
+  std::string error;
+};
+
 struct Tolerance {
   uint64_t id = 0; // document-unique, from the shared id counter
   ElementRef ref;  // the face this is a tolerance ON
@@ -53,8 +62,10 @@ struct Tolerance {
   // a drawing anybody can make from.
   ElementRef ref2;
   std::string isoClass; // "H7"; empty means the pair below is authoritative
-  double lower = 0.0;   // mm, signed deviation from nominal
-  double upper = 0.0;   // mm, signed deviation from nominal
+  // mm, signed deviations from nominal; either may be an expression of the
+  // variables (docs/tolerances/README.md#limits-that-are-expressions).
+  ExprValue lower{0.0};
+  ExprValue upper{0.0};
   // v179: a PRINTED PRESS (docs/tolerances/README.md#printed-press-fits),
   // set on both faces of a printed cap pressed on a printed pin. Its band is
   // not stored: it is the part's print profile's `press` allowance, give or
@@ -293,6 +304,11 @@ public:
   // refusal and UI hints. Non-const because it walks VisitExprs (read-only
   // here).
   std::vector<std::string> FindParameterReferences(const std::string& name);
+  // The part's own numbers (sheet-metal and tube rules, tolerances) whose
+  // expressions do not stand, as the last regeneration found them.
+  const std::vector<DocumentExprProblem>& ExprProblems() const {
+    return m_exprProblems;
+  }
   // Every bound expression text of the features and the studies, with who
   // holds it ("feature 'Boss'", "study 'Bracket'"), read-only: what a
   // reference search outside the document (a table's) walks.
@@ -859,12 +875,17 @@ public:
   int OwnerIndex(uint64_t id) const;
 
 private:
-  // Every expression slot of the features and the studies, with who holds
-  // it: "feature 'Boss'", "study 'Bracket'". The one walk rename and the
-  // delete refusal read
+  // Every expression slot of the features, the studies, the sheet-metal and
+  // tube rules and the tolerances, with who holds it: "feature 'Boss'",
+  // "study 'Bracket'", "sheet-metal rules", "tolerance 12". The one walk
+  // rename and the delete refusal read
   // (docs/variables/README.md#numbers-that-are-expressions).
   void VisitDocumentExprs(const std::function<void(const std::string& owner,
                                                    const ExprSlot&)>& visit);
+  // Evaluates the rules' and the tolerances' slots over the symbols, keeping
+  // the last good values of an owner whose new ones cannot stand, and
+  // records why in m_exprProblems. True when a value changed.
+  bool EvaluateDocumentExprs();
   // Renames `oldName` in every slot and configuration override, the name an
   // override targets included. Not the parameter table, nor a regeneration.
   void RenameReferences(const std::string& oldName, const std::string& newName);
@@ -909,6 +930,7 @@ private:
   units::System m_units;
   std::optional<sheet::SheetMetalRules> m_sheetMetal;
   std::optional<tube::TubeRules> m_tube;
+  std::vector<DocumentExprProblem> m_exprProblems;
   std::optional<printfit::Process> m_print;
   printset::PartSettings m_printSettings;
   uint64_t m_activeConfiguration = 0; // 0 = base; persisted like m_rollback

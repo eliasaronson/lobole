@@ -491,8 +491,8 @@ std::vector<FitCheck> CheckFits(AppState& state) {
         otherBand.lower = other.tol->lower;
         otherBand.upper = other.tol->upper;
         char buf[64];
-        std::snprintf(buf, sizeof(buf), "%+.3f/%+.3f", other.tol->lower,
-                      other.tol->upper);
+        std::snprintf(buf, sizeof(buf), "%+.3f/%+.3f", other.tol->lower.value,
+                      other.tol->upper.value);
         otherClass = buf;
       } else {
         std::string why;

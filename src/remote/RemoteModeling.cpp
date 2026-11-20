@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "remote/RemoteModeling.h"
+
+#include "remote/ExprArgs.h"
 #include "ui/SelectionPipeline.h"
 
 #include "cad/CADMaterials.h"
@@ -830,9 +832,15 @@ static constexpr MethodDoc ModelingMethods[] = {
      "both}. The circular angle is the PER-STEP angle about the centre, not "
      "the total sweep — 3 instances 45 degrees apart is angle_deg: 45. More "
      "than a full turn in `angle` is refused: it was meant as degrees. "
+     "With link (the default) `count_expr`, `step_expr` ([du, dv] texts, "
+     "\"\" where step's own number stands), `center_expr` and "
+     "`angle_deg_expr` bind the op to the part's variables, evaluated now "
+     "and refused naming the key when they do not; a variable change "
+     "re-runs the pattern. "
      "line1/line2/radius are `fillet`'s, which shares this branch.",
-     "angle, angle_deg, center, circular, count, line1, line2, link, radius, "
-     "sketch_id, sources, step",
+     "angle, angle_deg, angle_deg_expr, center, center_expr, circular, count, "
+     "count_expr, line1, line2, link, radius, sketch_id, sources, step, "
+     "step_expr",
      remote::NeedsPart},
     {"check_literals",
      "ADVISORY lint for numbers that should be expressions "
@@ -2619,13 +2627,50 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       result["generated"] = sk->MirrorEntities(
           sources, p.at("axis").get<uint32_t>(), p.value("link", true));
     } else if (m == "pattern") {
+      // Read through the ExprArgs copy, which the scanner cannot see:
+      // rpc-params: angle, angle_deg, angle_deg_expr, center, center_expr
+      // rpc-params: circular, count, count_expr, link, sources, step
+      // rpc-params: step_expr
+      // count, step, center and angle_deg may each be an expression of the
+      // part's variables, evaluated now, refused naming the key before
+      // anything changes, and bound onto the linked op the call makes
+      // (docs/sketching/README.md#patterns-that-are-expressions).
+      const ExprArgs exprs(p, {"count", "step", "center", "angle_deg"},
+                           doc->Symbols(),
+                           "a sketch reads its part's variables");
+      const RpcParams& q = exprs.Params();
       std::vector<uint32_t> sources;
-      for (const auto& s : p.at("sources"))
+      for (const auto& s : q.at("sources"))
         sources.push_back(s.get<uint32_t>());
-      const int count = IntParam(p.at("count"), "count");
-      const bool link = p.value("link", true);
-      if (p.value("circular", false)) {
-        const auto& c = p.at("center");
+      const int count = IntParam(q.at("count"), "count");
+      const bool link = q.value("link", true);
+      const bool bound =
+          !exprs.Text("count").empty() || !exprs.Text("step", 0).empty() ||
+          !exprs.Text("step", 1).empty() || !exprs.Text("center", 0).empty() ||
+          !exprs.Text("center", 1).empty() || !exprs.Text("angle_deg").empty();
+      if (bound && !link)
+        throw std::runtime_error(
+            "pattern: an expression needs link: true -- a baked pattern "
+            "keeps no op to hold it");
+      if (bound && q.value("circular", false) && q.contains("angle"))
+        throw std::runtime_error(
+            "pattern: give the step angle as angle_deg with angle_deg_expr "
+            "-- every angle expression is in degrees");
+      const size_t opsBefore = sk->derived.size();
+      const auto bindOp = [&] {
+        if (!bound || sk->derived.size() <= opsBefore)
+          return;
+        sketch::DerivedOp& op = sk->derived.back();
+        exprs.Bind("count", op.count.expr);
+        const bool circular = op.kind == sketch::DerivedKind::CircularPattern;
+        const char* vec = circular ? "center" : "step";
+        exprs.Bind(vec, op.vecExpr[0], 0);
+        exprs.Bind(vec, op.vecExpr[1], 1);
+        if (circular)
+          exprs.Bind("angle_deg", op.scalarExpr);
+      };
+      if (q.value("circular", false)) {
+        const auto& c = q.at("center");
         // PER-STEP, and radians. Both halves were wrong in the MCP layer,
         // which called it "the total sweep in degrees" and passed it through
         // unconverted: a 3-instance pattern asked for 90 came out as 90
@@ -2634,15 +2679,16 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         // the sketch it builds looks deliberate.
         result["generated"] = sk->AddCircularPattern(
             sources, {c[0].get<double>(), c[1].get<double>()},
-            AngleParam(p.contains("angle"), p.value("angle", 0.0),
-                       p.contains("angle_deg"), p.value("angle_deg", 0.0),
+            AngleParam(q.contains("angle"), q.value("angle", 0.0),
+                       q.contains("angle_deg"), q.value("angle_deg", 0.0),
                        "angle", "angle_deg", 0.0),
             count, link);
       } else {
-        const auto& s = p.at("step");
+        const auto& s = q.at("step");
         result["generated"] = sk->AddLinearPattern(
             sources, {s[0].get<double>(), s[1].get<double>()}, count, link);
       }
+      bindOp();
     } else if (m == "offset") {
       std::vector<uint32_t> chain;
       for (const auto& s : p.at("chain"))

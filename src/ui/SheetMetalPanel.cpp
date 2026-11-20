@@ -10,6 +10,7 @@
 #include "core/SheetMetal.h"
 #include "core/features/FlatPatternFeature.h"
 #include "ui/AppState.h"
+#include "ui/ExprInput.h"
 
 #include "imgui.h"
 
@@ -94,7 +95,7 @@ void Apply(AppState& state, sheet::SheetMetalRules rules) {
   // Dropping it back to "derived" is the honest repair: the number the user
   // chose is no longer available, and the material's own minimum is.
   if (!sheet::Validate(rules).empty())
-    rules.bendRadius = 0.0;
+    rules.bendRadius = ExprValue{0.0}; // its text too: it is gone
   if (!sheet::Validate(rules).empty())
     return;
   state.commands->Execute(
@@ -167,20 +168,58 @@ void DrawSheetMetalSection(AppState& state) {
   }
 
   Row("Thickness", Mm(rules.thickness), rules.gauge.c_str());
-  Row("Bend radius", Mm(radius),
-      rules.bendRadius > 0.0 ? "set" : "table: the material's minimum");
-  Row(
-      "K-factor",
-      [&] {
-        char buf[16];
-        std::snprintf(buf, sizeof(buf), "%.3f", rules.EffectiveKFactor(radius));
-        return std::string(buf);
-      }(),
-      rules.KSource(radius).c_str());
-  Row("Relief", sheet::ReliefStyleName(rules.reliefStyle),
-      (Mm(rules.EffectiveReliefWidth()) + " x " +
-       Mm(rules.EffectiveReliefDepth(radius)))
-          .c_str());
+  // The four a part may set, each a number or an expression of the
+  // variables (docs/sheetmetal/README.md#rules-that-are-expressions): the
+  // field shows what a flange uses, derived or set, and an edit sets it.
+  // A rule a variable gave and the material cannot take keeps its last good
+  // value; the reason is under it.
+  using Member = ExprValue sheet::SheetMetalRules::*;
+  const auto field = [&](const char* label, Member member, double shown,
+                         float speed, const char* fmt, const char* source) {
+    const ExprValue& v = rules.*member;
+    double edit = shown;
+    std::string expr = v.expr;
+    if (ExprBoundDrag(state, label, &edit, &expr, speed, 0.0, 0.0, fmt)) {
+      sheet::SheetMetalRules next = rules;
+      ExprValue& slot = next.*member;
+      slot.value = edit;
+      slot.expr = expr;
+      // A value the material cannot take is refused here, as the RPC
+      // refuses it, rather than repaired by Apply.
+      if (const std::string why = sheet::Validate(next); !why.empty()) {
+        state.sketchEdit.actionMsg = why;
+        return false;
+      }
+      Apply(state, std::move(next));
+      return true;
+    }
+    if (!v.Bound() && source != nullptr)
+      ImGui::TextDisabled("  %s", source);
+    return false;
+  };
+  if (field("Bend radius###sm_bend_radius", &sheet::SheetMetalRules::bendRadius,
+            radius, 0.05f, "%.2f mm",
+            rules.bendRadius > 0.0 ? "set" : "table: the material's minimum"))
+    return;
+  const std::string kSource = rules.KSource(radius);
+  if (field("K-factor###sm_k_factor", &sheet::SheetMetalRules::kFactor,
+            rules.EffectiveKFactor(radius), 0.005f, "%.3f", kSource.c_str()))
+    return;
+  Row("Relief", sheet::ReliefStyleName(rules.reliefStyle));
+  if (field("Relief width###sm_relief_width",
+            &sheet::SheetMetalRules::reliefWidth, rules.EffectiveReliefWidth(),
+            0.05f, "%.2f mm",
+            rules.reliefWidth > 0.0 ? "set" : "derived: 1.5 x thickness"))
+    return;
+  if (field("Relief depth###sm_relief_depth",
+            &sheet::SheetMetalRules::reliefDepth,
+            rules.EffectiveReliefDepth(radius), 0.05f, "%.2f mm",
+            rules.reliefDepth > 0.0 ? "set" : "derived: radius + thickness"))
+    return;
+  for (const DocumentExprProblem& pr : doc.ExprProblems())
+    if (pr.owner == "sheet-metal rules")
+      ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
+                         pr.error.c_str());
 
   // The blank. A flat pattern is authored off and a configuration turns it
   // on, so the toggle here is that configuration — not a hidden mode.

@@ -102,7 +102,9 @@ public:
 
   // FitSpline: fit points to interpolate. ControlPoly: control poles.
   std::vector<glm::dvec3> points;
-  int degree = 3;      // ControlPoly effective degree (clamped to points-1)
+  // Each point's coordinates' texts, "" for a number; as many as the points.
+  std::vector<Vec3Exprs> pointsExpr;
+  ExprInt degree{3};   // ControlPoly effective degree (clamped to points-1)
   bool closed = false; // FitSpline periodic (ControlPoly ignores in v1)
 
   // BentPath: one bend record per corner, filled by Execute — the schedule a
@@ -119,6 +121,7 @@ public:
 
   // Helix parameters (axis frame + geometry).
   glm::dvec3 axisOrigin{0.0};
+  Vec3Exprs axisOriginExpr;
   glm::dvec3 axisDir{0.0, 0.0, 1.0};
   ExprValue radius{1.0};
   ExprValue pitch{1.0}; // rise along the axis per full turn

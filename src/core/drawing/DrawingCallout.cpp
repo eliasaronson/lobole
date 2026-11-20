@@ -166,7 +166,7 @@ std::string FormatHoleCallout(const HoleFeature& hole,
   } else if (hole.kind == HoleKind::Countersink) {
     const double angle =
         2.0 * std::atan2((hole.csDiameter - hole.diameter) / 2.0,
-                         std::max(hole.csDepth, 1e-9));
+                         std::max(hole.csDepth.value, 1e-9));
     out += " CSK \xC3\x98" + len(hole.csDiameter) + " \xC3\x97 " +
            core::FormatAngle(angle, units); // "× 90°"
   }

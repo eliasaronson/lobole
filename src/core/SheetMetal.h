@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/ExprValue.h"
+
 #include <optional>
 #include <string>
 #include <vector>
@@ -102,11 +104,22 @@ struct SheetMetalRules {
   std::string material;    // a CADMaterials slug; required
   std::string gauge;       // a designation from GaugesFor(material); required
   double thickness = 0.0;  // mm, resolved from the gauge at set time
-  double bendRadius = 0.0; // 0 = MinBendRadius(material, thickness)
-  double kFactor = 0.0;    // 0 = KFactor(material, radius, thickness)
+  // The four below may each be an expression of the variables
+  // (docs/sheetmetal/README.md#rules-that-are-expressions); the thickness
+  // may not, because the gauge is what fixes it.
+  ExprValue bendRadius{0.0}; // 0 = MinBendRadius(material, thickness)
+  ExprValue kFactor{0.0};    // 0 = KFactor(material, radius, thickness)
   ReliefStyle reliefStyle = ReliefStyle::Rectangular;
-  double reliefWidth = 0.0; // 0 = max(1.5*t, 1mm)
-  double reliefDepth = 0.0; // 0 = radius + t
+  ExprValue reliefWidth{0.0}; // 0 = max(1.5*t, 1mm)
+  ExprValue reliefDepth{0.0}; // 0 = radius + t
+
+  // Every number above that takes an expression, by its key in the file.
+  void VisitExprs(const ExprVisitor& visit) {
+    visit({bendRadius, ExprQuantity::Length, "bend_radius"});
+    visit({kFactor, ExprQuantity::Other, "k_factor"});
+    visit({reliefWidth, ExprQuantity::Length, "relief_width"});
+    visit({reliefDepth, ExprQuantity::Length, "relief_depth"});
+  }
 
   // The resolved values, each applying the rule in its field comment above.
   [[nodiscard]] double EffectiveBendRadius() const;

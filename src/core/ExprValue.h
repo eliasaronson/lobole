@@ -20,8 +20,10 @@
 
 #include "core/Expression.h"
 
+#include <glm/vec3.hpp>
 #include <nlohmann/json_fwd.hpp>
 
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -156,6 +158,16 @@ private:
 // A slot is a handle: const, it still reaches the number it names.
 using ExprVisitor = std::function<void(const ExprSlot&)>;
 
+// A vector the geometry reads whole (a box's position, a datum's point): one
+// text per coordinate, "" for a literal one, each visited as a slot of its
+// own at `<path>/0..2`.
+using Vec3Exprs = std::array<std::string, 3>;
+void VisitVec3Exprs(const ExprVisitor& visit, glm::dvec3& v, Vec3Exprs& texts,
+                    ExprQuantity q, const std::string& path);
+[[nodiscard]] inline bool AnyBound(const Vec3Exprs& t) {
+  return !t[0].empty() || !t[1].empty() || !t[2].empty();
+}
+
 // Evaluates a bound slot over `symbols` into its value; a literal is left
 // alone. On failure the last good value stays and `why` gets the engine's
 // message ("unknown variable 'bore'") or the slot's refusal.
@@ -178,6 +190,7 @@ void WriteExpr(nlohmann::json& j, const std::string& key, const ExprInt& v);
 void WriteExpr(nlohmann::json& j, const std::string& key, const ExprAngle& v);
 // A log line ({fmt}, found by name) prints an ExprValue as its value.
 inline double format_as(const ExprValue& v) { return v.value; }
+inline int format_as(const ExprInt& v) { return v.value; }
 
 // An ExprValue put straight into JSON is its value: what a report or an RPC
 // answer that shows the number writes. A document's file writes both keys,
@@ -226,6 +239,20 @@ void WriteExprTexts(nlohmann::json& j, const std::string& key,
                     const std::vector<std::string>& texts);
 std::vector<std::string> ReadExprTexts(const nlohmann::json& j,
                                        const std::string& key, size_t n);
+
+// A vector's texts: `<key>_expr` as [x, y, z] texts ("" for a literal
+// coordinate), written only when one is bound; read as ReadExprTexts reads.
+void WriteVec3Exprs(nlohmann::json& j, const std::string& key,
+                    const Vec3Exprs& texts);
+Vec3Exprs ReadVec3Exprs(const nlohmann::json& j, const std::string& key);
+// A list of points' texts: `<key>_expr` as one [x, y, z] of texts per point,
+// written only when one is bound. Read gives `n` entries, all empty when the
+// key is absent, and refuses another length or an entry that is not three
+// texts.
+void WritePointExprs(nlohmann::json& j, const std::string& key,
+                     const std::vector<Vec3Exprs>& texts);
+std::vector<Vec3Exprs> ReadPointExprs(const nlohmann::json& j,
+                                      const std::string& key, size_t n);
 
 // The RPC's reader for a number a method sets: `<key>` as a number, or as a
 // string (the older spelling the FEM methods took, kept as an alias), and

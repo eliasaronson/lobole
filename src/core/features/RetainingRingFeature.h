@@ -47,8 +47,14 @@ public:
   // Names no other feature: the whole part is derived from the standard.
   void VisitFeatureRefs(const RefVisitor&) const override {}
 
+  // The nominal size picks the standard's row, so it may be the shaft's own
+  // variable; one the standard does not list is the feature's error.
+  void VisitExprs(const ExprVisitor& visit) override {
+    visit({size, ExprQuantity::Length, "size"});
+  }
+
   std::string standard; // "din471" | "din472"
-  double size = 0.0;    // the nominal shaft or bore diameter, mm
+  ExprValue size{0.0};  // the nominal shaft or bore diameter, mm
 
   // The faces a placement names, as the suffix of the element name
   // ("<id>/ring_side_a"): side A bears on what the ring holds.

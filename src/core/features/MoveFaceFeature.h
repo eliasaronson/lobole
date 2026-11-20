@@ -52,6 +52,7 @@ public:
       visit({translateExpr[i], translate[i], ExprQuantity::Length,
              "translate_mm/" + std::to_string(i)});
     visit({rotateDeg, ExprQuantity::Angle, "rotate_deg"});
+    VisitAxisExprs(axis, visit, "axis");
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {

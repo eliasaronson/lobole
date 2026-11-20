@@ -79,6 +79,7 @@ add_executable(designer_tests
     test_assembly_loops.cpp
     test_mate_limits.cpp
     test_assembly_exprs.cpp
+    test_part_exprs.cpp
     test_assembly_relations.cpp
     test_derived.cpp
     test_links.cpp
@@ -684,6 +685,13 @@ add_test(NAME assembly_exprs_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_exprs_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_exprs_smoke PROPERTIES TIMEOUT 120)
+
+# A part's rules, tolerances and feature gaps as expressions of its
+# variables (docs/variables/README.md#numbers-that-are-expressions). Headless.
+add_test(NAME part_exprs_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/part_exprs_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(part_exprs_smoke PROPERTIES TIMEOUT 120)
 
 add_test(NAME assembly_mates_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_mates_smoke.py

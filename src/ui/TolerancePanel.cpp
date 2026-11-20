@@ -278,19 +278,23 @@ void DrawTolerancePick(AppState& state) {
     // refuses, and there is no general-tolerance table vendored to derive one
     // from.
     ImGui::SetNextItemWidth(90.0f);
-    // ExprInputDouble, not ImGui::InputDouble: the raw widget's Ctrl+click
-    // entry runs a bare sscanf, so "0.2/2" commits as 0.2 — and a deviation
-    // written as a fraction of something is exactly how a person types one
-    // (tests/test_conventions.cpp gates this for every numeric field in ui/).
-    ExprInputDouble(state, "###tol_lower", &state.toleranceLower, "%.4f");
+    // ExprBoundDrag, not ImGui's raw widget, whose Ctrl+click entry runs a
+    // bare sscanf ("0.2/2" committed as 0.2; tests/test_conventions.cpp
+    // gates every numeric field in ui/): and an expression typed is KEPT, so
+    // the limit follows the variable it names
+    // (docs/tolerances/README.md#limits-that-are-expressions).
+    ExprBoundDrag(state, "###tol_lower", &state.toleranceLower,
+                  &state.toleranceLowerExpr, 0.001f, 0.0, 0.0, "%.4f");
     ImGui::SetItemTooltip("Lower deviation from the measured length, in mm "
                           "(negative is smaller). Takes an expression.");
-    ImGui::SameLine();
     ImGui::SetNextItemWidth(90.0f);
-    ExprInputDouble(state, "###tol_upper", &state.toleranceUpper, "%.4f");
+    ExprBoundDrag(state, "###tol_upper", &state.toleranceUpper,
+                  &state.toleranceUpperExpr, 0.001f, 0.0, 0.0, "%.4f");
     ImGui::SetItemTooltip("Upper deviation from the measured length, in mm");
     edit.lower = state.toleranceLower;
+    edit.lower.expr = state.toleranceLowerExpr;
     edit.upper = state.toleranceUpper;
+    edit.upper.expr = state.toleranceUpperExpr;
     ready = true;
   } else {
     DrawClassPicker(state);

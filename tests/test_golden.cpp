@@ -905,6 +905,16 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   }
   AssertTolerances(doc, expect);
   AssertSheetMetal(doc, expect);
+  // vNEXT: every expression text the part holds, with its owner, in walk
+  // order -- the rules', the tolerances' and the feature gaps' among them.
+  if (expect.contains("expr_texts")) {
+    nlohmann::json got = nlohmann::json::array();
+    const_cast<Document&>(doc).ForEachExprText(
+        [&](const std::string& owner, const std::string& text) {
+          got.push_back({owner, text});
+        });
+    CHECK(got == expect.at("expr_texts"));
+  }
   // v160: the project's requirements a lone part carries, read back as
   // the requirements they are (docs/requirements/README.md#saved-form).
   {

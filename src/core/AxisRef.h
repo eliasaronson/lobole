@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/ExprValue.h"
+
 #include <cstdint>
 
 #include <glm/glm.hpp>
@@ -26,8 +28,18 @@ struct AxisRef {
   uint32_t entityId = 0;    // SketchLine: stable sketch-entity id
   uint64_t datumAxisId = 0; // DatumAxis: referenced DatumAxisFeature id
   glm::dvec3 origin{0.0};   // Custom: a point on the axis, mm
+  Vec3Exprs originExpr;     // Custom: its texts ("" for a number)
   glm::dvec3 direction{0.0, 0.0, 1.0}; // Custom: need not be unit
 };
+
+// A custom axis's point, each coordinate a slot at `<path>/origin/0..2`;
+// nothing for any other kind, whose axis is a reference.
+inline void VisitAxisExprs(AxisRef& ref, const ExprVisitor& visit,
+                           const std::string& path) {
+  if (ref.kind == AxisRef::Kind::Custom)
+    VisitVec3Exprs(visit, ref.origin, ref.originExpr, ExprQuantity::Length,
+                   path + "/origin");
+}
 
 // Resolves the axis to a world-space origin + unit direction against the
 // features visible in ctx (strictly earlier in the history). Returns false

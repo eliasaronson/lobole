@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/ExprValue.h"
+
 #include <optional>
 #include <string>
 #include <vector>
@@ -106,8 +108,11 @@ struct TubeRules {
   // radius is available, which is the honest reading of "no bender declared"
   // — not a guess at a common set.
   std::vector<double> formerRadii;
-  double minStraight = 0.0; // between bends; 0 = 2 x the member's OD
-  double tailLength = 0.0;  // past the last bend; 0 = 1.5 x it, to grip
+  // Each radius's expression text, "" for a number; as many as the radii
+  // (docs/tube/README.md#rules-that-are-expressions).
+  std::vector<std::string> formerRadiiExpr;
+  ExprValue minStraight{0.0}; // between bends; 0 = 2 x the member's OD
+  ExprValue tailLength{0.0};  // past the last bend; 0 = 1.5 x it, to grip
   // How much of the wall the outside of a bend may give up, as a fraction.
   // 0 = 0.25, roughly what draw bending is accepted at — which is deliberately
   // slack, because at the tightest former this stock legally takes it thins
@@ -115,7 +120,18 @@ struct TubeRules {
   // exists for the case that is not slack: a rulebook that demands the wall
   // stay above a stated figure, which is what a Formula Student team has to
   // show for a roll hoop.
-  double maxThinning = 0.0;
+  ExprValue maxThinning{0.0};
+
+  // Every number above that takes an expression, by its key in the file.
+  void VisitExprs(const ExprVisitor& visit) {
+    formerRadiiExpr.resize(formerRadii.size());
+    for (size_t i = 0; i < formerRadii.size(); i++)
+      visit({formerRadiiExpr[i], formerRadii[i], ExprQuantity::Length,
+             "former_radii/" + std::to_string(i)});
+    visit({minStraight, ExprQuantity::Length, "min_straight"});
+    visit({tailLength, ExprQuantity::Length, "tail_length"});
+    visit({maxThinning, ExprQuantity::Other, "max_thinning"});
+  }
 
   // The resolved values, each applying the rule in its field comment above.
   // The straight a clamp needs and the tail a bender grips are multiples of

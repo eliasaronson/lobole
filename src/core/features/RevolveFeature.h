@@ -42,6 +42,7 @@ public:
 
   void VisitExprs(const ExprVisitor& visit) override {
     visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
+    VisitAxisExprs(axis, visit, "axis");
   }
 
   // As Extrude's: a Pattern of a revolve that cuts or adds (a Sphere placed

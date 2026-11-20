@@ -127,15 +127,17 @@ std::optional<sheet::SheetMetalRules> SheetMetalFromEnvelope(const json& j) {
   const json m = j.at("sheet_metal");
   readctx::RefuseUnknownKeys(m,
                              {"material", "gauge", "thickness", "bend_radius",
-                              "k_factor", "relief", "relief_width",
-                              "relief_depth"},
+                              "bend_radius_expr", "k_factor", "k_factor_expr",
+                              "relief", "relief_width", "relief_width_expr",
+                              "relief_depth", "relief_depth_expr"},
                              "sheet_metal");
   sheet::SheetMetalRules r;
   r.material = m.value("material", std::string{});
   r.gauge = m.value("gauge", std::string{});
   r.thickness = m.value("thickness", 0.0);
-  r.bendRadius = m.value("bend_radius", 0.0);
-  r.kFactor = m.value("k_factor", 0.0);
+  // vNEXT: each may carry its text; the number is its last good value.
+  ReadExpr(m, "bend_radius", r.bendRadius);
+  ReadExpr(m, "k_factor", r.kFactor);
   if (m.contains("relief")) {
     const std::string v = m.at("relief").get<std::string>();
     if (!sheet::ReliefStyleFromString(v, r.reliefStyle))
@@ -143,8 +145,8 @@ std::optional<sheet::SheetMetalRules> SheetMetalFromEnvelope(const json& j) {
           "unknown sheet-metal relief style '" + v +
           "' (expected one of: " + sheet::ReliefStyleList() + ")");
   }
-  r.reliefWidth = m.value("relief_width", 0.0);
-  r.reliefDepth = m.value("relief_depth", 0.0);
+  ReadExpr(m, "relief_width", r.reliefWidth);
+  ReadExpr(m, "relief_depth", r.reliefDepth);
   if (const std::string why = sheet::Validate(r); !why.empty())
     throw std::runtime_error("sheet-metal rules: " + why);
   return r;
@@ -162,16 +164,17 @@ void SheetMetalToEnvelope(const std::optional<sheet::SheetMetalRules>& rules,
   json m = {{"material", rules->material},
             {"gauge", rules->gauge},
             {"thickness", rules->thickness}};
-  if (rules->bendRadius > 0.0)
-    m["bend_radius"] = rules->bendRadius;
-  if (rules->kFactor > 0.0)
-    m["k_factor"] = rules->kFactor;
+  // A bound one is written whatever it is, beside its text (vNEXT).
+  const auto put = [&](const char* key, const ExprValue& v) {
+    if (v > 0.0 || v.Bound())
+      WriteExpr(m, key, v);
+  };
+  put("bend_radius", rules->bendRadius);
+  put("k_factor", rules->kFactor);
   if (rules->reliefStyle != sheet::ReliefStyle::Rectangular)
     m["relief"] = sheet::ReliefStyleName(rules->reliefStyle);
-  if (rules->reliefWidth > 0.0)
-    m["relief_width"] = rules->reliefWidth;
-  if (rules->reliefDepth > 0.0)
-    m["relief_depth"] = rules->reliefDepth;
+  put("relief_width", rules->reliefWidth);
+  put("relief_depth", rules->reliefDepth);
   j["sheet_metal"] = std::move(m);
 }
 
@@ -187,8 +190,10 @@ std::optional<tube::TubeRules> TubeFromEnvelope(const json& j) {
     return std::nullopt;
   const json m = j.at("tube");
   readctx::RefuseUnknownKeys(m,
-                             {"material", "former_radii", "min_straight",
-                              "tail_length", "max_thinning"},
+                             {"material", "former_radii", "former_radii_expr",
+                              "min_straight", "min_straight_expr",
+                              "tail_length", "tail_length_expr", "max_thinning",
+                              "max_thinning_expr"},
                              "tube");
   tube::TubeRules r;
   r.material = m.value("material", std::string{});
@@ -196,9 +201,11 @@ std::optional<tube::TubeRules> TubeFromEnvelope(const json& j) {
     for (const auto& v : m.at("former_radii"))
       r.formerRadii.push_back(v.get<double>());
   }
-  r.minStraight = m.value("min_straight", 0.0);
-  r.tailLength = m.value("tail_length", 0.0);
-  r.maxThinning = m.value("max_thinning", 0.0);
+  r.formerRadiiExpr =
+      ReadExprTexts(m, "former_radii", r.formerRadii.size()); // vNEXT
+  ReadExpr(m, "min_straight", r.minStraight);
+  ReadExpr(m, "tail_length", r.tailLength);
+  ReadExpr(m, "max_thinning", r.maxThinning);
   if (const std::string why = tube::Validate(r); !why.empty())
     throw std::runtime_error("tube rules: " + why);
   return r;
@@ -212,14 +219,17 @@ void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
   if (!rules)
     return;
   json m = {{"material", rules->material}};
-  if (!rules->formerRadii.empty())
+  if (!rules->formerRadii.empty()) {
     m["former_radii"] = rules->formerRadii;
-  if (rules->minStraight > 0.0)
-    m["min_straight"] = rules->minStraight;
-  if (rules->tailLength > 0.0)
-    m["tail_length"] = rules->tailLength;
-  if (rules->maxThinning > 0.0)
-    m["max_thinning"] = rules->maxThinning;
+    WriteExprTexts(m, "former_radii", rules->formerRadiiExpr);
+  }
+  const auto put = [&](const char* key, const ExprValue& v) {
+    if (v > 0.0 || v.Bound())
+      WriteExpr(m, key, v);
+  };
+  put("min_straight", rules->minStraight);
+  put("tail_length", rules->tailLength);
+  put("max_thinning", rules->maxThinning);
   j["tube"] = std::move(m);
 }
 
@@ -247,7 +257,8 @@ bool TolerancePrintedFromJson(const json& tj) {
     throw std::runtime_error(
         "tolerance " + tj.value("ref", json::object()).dump() + ": printed " +
         v.dump() + " is not a printed tolerance; accepted: press");
-  if (tj.contains("class") || tj.contains("lower") || tj.contains("upper"))
+  if (tj.contains("class") || tj.contains("lower") || tj.contains("upper") ||
+      tj.contains("lower_expr") || tj.contains("upper_expr"))
     throw std::runtime_error("a printed press tolerance carries no class and "
                              "no lower/upper: its band is the print "
                              "profile's");
@@ -380,8 +391,8 @@ json DocumentEnvelope(const Document& doc) {
       } else if (!t.isoClass.empty()) {
         tj["class"] = t.isoClass;
       } else {
-        tj["lower"] = t.lower;
-        tj["upper"] = t.upper;
+        WriteExpr(tj, "lower", t.lower);
+        WriteExpr(tj, "upper", t.upper);
       }
       if (!t.comment.empty()) {
         tj["comment"] = t.comment;
@@ -1201,10 +1212,11 @@ void ReadPartEnvelope(const json& j, Document& doc) {
   // face, so a ref that no longer resolves stays recorded and is reported
   // as unresolved when something LOOKS, rather than being dropped here.
   for (const auto& tj : j.value("tolerances", json::array())) {
-    readctx::RefuseUnknownKeys(
-        tj,
-        {"id", "ref", "ref2", "class", "lower", "upper", "printed", "comment"},
-        "tolerance");
+    readctx::RefuseUnknownKeys(tj,
+                               {"id", "ref", "ref2", "class", "lower",
+                                "lower_expr", "upper", "upper_expr", "printed",
+                                "comment"},
+                               "tolerance");
     Tolerance t;
     t.id = tj.value("id", uint64_t{0});
     t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
@@ -1216,8 +1228,8 @@ void ReadPartEnvelope(const json& j, Document& doc) {
       throw std::runtime_error("tolerance " + std::to_string(t.id) + ": ref2 " +
                                tj.at("ref2").dump() + " names no feature");
     t.isoClass = tj.value("class", std::string{});
-    t.lower = tj.value("lower", 0.0);
-    t.upper = tj.value("upper", 0.0);
+    ReadExpr(tj, "lower", t.lower);
+    ReadExpr(tj, "upper", t.upper);
     t.printedPress = TolerancePrintedFromJson(tj);
     t.comment = tj.value("comment", std::string{});
     doc.RestoreTolerance(std::move(t));

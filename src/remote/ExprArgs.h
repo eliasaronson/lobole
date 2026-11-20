@@ -38,9 +38,11 @@ namespace remote {
 class ExprArgs {
 public:
   // `keys` are the method's numbers that take an expression, as paths.
+  // `scope` says, in a refusal, what the texts were evaluated over.
   ExprArgs(const RpcParams& p, const std::vector<std::string>& keys,
-           const SymbolTable& symbols)
-      : m_outer(p), m_copy(p.raw_view()) {
+           const SymbolTable& symbols,
+           const char* scope = "an assembly reads the project's variables")
+      : m_outer(p), m_copy(p.raw_view()), m_scope(scope) {
     for (const std::string& spec : keys) {
       // "rad:<key>": a number the method takes in radians, whose text is in
       // degrees as every angle expression is (a configuration's held turn).
@@ -73,7 +75,7 @@ public:
             radians && number.is_number()
                 ? nlohmann::json(angles::ToDegrees(number.get<double>()))
                 : number,
-            key, symbols);
+            key, symbols, m_scope);
         if (radians && place[leaf].is_number())
           place[leaf] = angles::ToRadians(place[leaf].get<double>());
         place.erase(exprKey);
@@ -179,7 +181,8 @@ private:
   static nlohmann::json Evaluate(const nlohmann::json& texts,
                                  const nlohmann::json& number,
                                  const std::string& key,
-                                 const SymbolTable& symbols) {
+                                 const SymbolTable& symbols,
+                                 const char* scope) {
     const std::string what = key + "_expr";
     if (texts.is_array()) {
       if (!number.is_null() &&
@@ -192,7 +195,7 @@ private:
       for (size_t i = 0; i < texts.size(); i++)
         out.push_back(Evaluate(
             texts[i], number.is_null() ? nlohmann::json(nullptr) : number[i],
-            key, symbols));
+            key, symbols, scope));
       return out;
     }
     if (texts.is_null() ||
@@ -211,12 +214,13 @@ private:
     const auto v = ExpressionEngine::Default().EvaluateText(text, symbols);
     if (!v.has_value())
       throw std::runtime_error(what + " '" + text + "': " + v.error().message +
-                               " (an assembly reads the project's variables)");
+                               " (" + scope + ")");
     return *v;
   }
 
   const RpcParams& m_outer;
   nlohmann::json m_copy;
+  const char* m_scope;
   std::unique_ptr<RpcParams> m_params;
   std::map<std::string, nlohmann::json> m_given;
 };

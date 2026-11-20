@@ -71,6 +71,7 @@ public:
     // odd n) is the pattern's error, naming the value, never rounded to a
     // number of copies nobody wrote.
     visit({count, "count"});
+    VisitAxisExprs(axis, visit, "axis");
   }
 
   PatternKind kind = PatternKind::Linear;

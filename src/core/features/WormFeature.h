@@ -40,6 +40,10 @@ public:
   }
   void VisitExprs(const ExprVisitor& visit) override {
     visit({module, ExprQuantity::Length, "module"});
+    visit({starts, "starts"});
+    visit({pressureDeg, ExprQuantity::Angle, "pressure_angle_deg"});
+    visit({backlash, ExprQuantity::Length, "backlash"});
+    visit({length, ExprQuantity::Length, "length"});
   }
   [[nodiscard]] std::string WhyIncomplete() const override {
     return face.name.empty() ? "pick the worm blank's cylindrical face"
@@ -50,13 +54,13 @@ public:
   // Axial module, mm. 0 = derived from the blank at the usual diameter
   // quotient: tip diameter / (10 + 2).
   ExprValue module{0.0};
-  int starts = 1;
-  double pressureDeg = 20.0;
+  ExprInt starts{1};
+  ExprValue pressureDeg{20.0};
   bool rightHanded = true; // JSON "hand": "right" | "left"
   // Axial backlash, mm: the tooth is thinned by half of it per flank, the
   // clearance a printed pair runs at (0.2-0.3 mm).
-  double backlash = 0.0;
-  double length = 0.0; // the threaded length from the face's start; 0 = full
+  ExprValue backlash{0.0};
+  ExprValue length{0.0}; // the threaded length from the face's start; 0 = full
 
   // Session-only, rebuilt by Execute (never serialized): what it built.
   struct Report {
@@ -91,6 +95,10 @@ public:
   }
   void VisitExprs(const ExprVisitor& visit) override {
     visit({module, ExprQuantity::Length, "module"});
+    visit({teeth, "teeth"});
+    visit({starts, "starts"});
+    visit({wormDiameter, ExprQuantity::Length, "worm_diameter"});
+    visit({pressureDeg, ExprQuantity::Angle, "pressure_angle_deg"});
   }
   [[nodiscard]] std::string WhyIncomplete() const override {
     return face.name.empty() ? "pick the wheel blank's cylindrical face"
@@ -100,11 +108,11 @@ public:
   ElementRef face; // the blank's rim; its length is the face width
   // mm. 0 = derived from the blank: rim diameter / (teeth + 3).
   ExprValue module{0.0};
-  int teeth = 40;
+  ExprInt teeth{40};
   // The mating worm's.
-  int starts = 1;
-  double wormDiameter = 0.0; // pitch diameter d1, mm; 0 = 10 modules
-  double pressureDeg = 20.0;
+  ExprInt starts{1};
+  ExprValue wormDiameter{0.0}; // pitch diameter d1, mm; 0 = 10 modules
+  ExprValue pressureDeg{20.0};
   bool rightHanded = true; // JSON "hand": "right" | "left"
 
   struct Report {

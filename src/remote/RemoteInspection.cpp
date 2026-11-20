@@ -1172,7 +1172,10 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"set_tolerance",
      "Record what a face's SIZE is allowed to vary by: {feature_id, element, "
      "class: \"H7\"} — or {lower, upper} in mm for limits no class "
-     "expresses, never both. Only a round face has a size of its own, and "
+     "expresses, never both; either limit may be `lower_expr`/`upper_expr`, "
+     "an expression of the part's variables, evaluated now (refused naming "
+     "the key when it does not) and again when a variable changes. Only a "
+     "round face has a size of its own, and "
      "anything else is refused saying so. Adding {b: {feature_id, element}} "
      "tolerances "
      "the DISTANCE between the two faces instead (a shoulder-to-seat length, "
@@ -1196,7 +1199,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "size, naming why. The reply carries the band (`press_mm`, "
      "`tolerance_mm`, `min`/`max` the face may print at in the model's "
      "terms).",
-     "b, class, comment, element, feature_id, lower, part, printed, upper",
+     "b, class, comment, element, feature_id, lower, lower_expr, part, "
+     "printed, upper, upper_expr",
      remote::NoFlags},
     {"list_tolerances",
      "Every tolerance on this part, each tagged `kind: size|distance`, with "
@@ -1208,7 +1212,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "tolerances:{class?:string, element:string, feature_id:int, "
      "id:int, kind:string, max:number, min:number, nominal:number, "
      "resolved:bool, b?:object, comment?:string, lower?:number, "
-     "upper?:number, printed?:string, press_mm?:number, "
+     "upper?:number, lower_expr?:string, upper_expr?:string, printed?:string, "
+     "press_mm?:number, "
      "tolerance_mm?:number, side?:string, press_from?:string, "
      "error?:string}[]"},
     {"clear_tolerance",
@@ -6496,7 +6501,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         throw std::runtime_error("set_tolerance: printed " + v.dump() +
                                  " is not a printed tolerance; accepted: "
                                  "press");
-      if (hasClass || p.contains("lower") || p.contains("upper"))
+      if (hasClass || p.contains("lower") || p.contains("upper") ||
+          p.contains("lower_expr") || p.contains("upper_expr"))
         throw std::runtime_error(
             "set_tolerance: a printed press takes no `class` and no "
             "`lower`/`upper` -- its band is the print profile's");
@@ -6548,7 +6554,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       nominal = el->radius * 2.0;
     }
 
-    const bool hasLower = p.contains("lower"), hasUpper = p.contains("upper");
+    // Each limit a number or an expression of the part's variables
+    // (docs/tolerances/README.md#limits-that-are-expressions).
+    const bool hasLower = p.contains("lower") || p.contains("lower_expr"),
+               hasUpper = p.contains("upper") || p.contains("upper_expr");
     // Checked against the face and the part's profile before anything is
     // stored: a press nothing can band is refused now, not when a contact
     // check later finds no band to relieve.
@@ -6587,8 +6596,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (!fits::Limits(nominal, t.isoClass, &why))
         throw std::runtime_error("set_tolerance: " + why);
     } else {
-      t.lower = p.at("lower").get<double>();
-      t.upper = p.at("upper").get<double>();
+      ExprParam(p, "lower", t.lower, part.Symbols());
+      ExprParam(p, "upper", t.upper, part.Symbols());
       if (t.lower > t.upper)
         throw std::runtime_error(
             "set_tolerance: lower must not exceed upper — a reversed band "
@@ -6618,6 +6627,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     } else {
       out["lower"] = stored->lower;
       out["upper"] = stored->upper;
+      WriteExprText(out, "lower", stored->lower.expr);
+      WriteExprText(out, "upper", stored->upper.expr);
       out["min"] = nominal + stored->lower;
       out["max"] = nominal + stored->upper;
     }
@@ -6658,6 +6669,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       } else if (t.isoClass.empty()) {
         e["lower"] = t.lower;
         e["upper"] = t.upper;
+        WriteExprText(e, "lower", t.lower.expr);
+        WriteExprText(e, "upper", t.upper.expr);
       } else {
         e["class"] = t.isoClass;
       }

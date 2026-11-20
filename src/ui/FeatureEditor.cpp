@@ -390,6 +390,19 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   ExprDim(state, feature, index, commit, label, v.expr, v.value, minValue);
 }
 
+// A vector the geometry reads whole, one ExprDim row per coordinate, as a
+// Frame's origin is: each may be its own expression, kept and unbindable.
+void ExprVec3(AppState& state, Feature& feature, size_t index, bool commit,
+              const char* label, glm::dvec3& v, Vec3Exprs& texts,
+              double minValue = -1e9) {
+  static const char* kAxes[] = {" X", " Y", " Z"};
+  for (int k = 0; k < 3; k++) {
+    const std::string row = std::string(label) + kAxes[k];
+    ExprDim(state, feature, index, commit, row.c_str(),
+            texts[static_cast<size_t>(k)], v[k], minValue);
+  }
+}
+
 // The integer sibling of ExprDim: a literal InputInt with an "fx" button to
 // switch to an expression (evaluated against the parameter table; one that
 // comes out fractional is the feature's error, never rounded).
@@ -703,12 +716,9 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
     break;
   }
   case DatumPlaneKind::ThroughPoints:
-    HandleEdit(state, dp, DragFloat3Row(state, "Point 1", &dp.p0.x), index,
-               commit);
-    HandleEdit(state, dp, DragFloat3Row(state, "Point 2", &dp.p1.x), index,
-               commit);
-    HandleEdit(state, dp, DragFloat3Row(state, "Point 3", &dp.p2.x), index,
-               commit);
+    ExprVec3(state, dp, index, commit, "Point 1", dp.p0, dp.pExpr[0]);
+    ExprVec3(state, dp, index, commit, "Point 2", dp.p1, dp.pExpr[1]);
+    ExprVec3(state, dp, index, commit, "Point 3", dp.p2, dp.pExpr[2]);
     break;
   }
 }
@@ -732,10 +742,8 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
 
   switch (da.kind) {
   case DatumAxisKind::TwoPoints:
-    HandleEdit(state, da, DragFloat3Row(state, "Point 1", &da.p0.x), index,
-               commit);
-    HandleEdit(state, da, DragFloat3Row(state, "Point 2", &da.p1.x), index,
-               commit);
+    ExprVec3(state, da, index, commit, "Point 1", da.p0, da.pExpr[0]);
+    ExprVec3(state, da, index, commit, "Point 2", da.p1, da.pExpr[1]);
     break;
   case DatumAxisKind::SketchLine:
     if (Feature* sk = state.document->FindFeatureById(da.sketchId)) {
@@ -925,12 +933,17 @@ void DrawCradleParams(AppState& state, CradleFeature& cr, size_t index,
   for (int i = 0; i < 6; i++)
     if (glm::length(glm::normalize(cr.direction) - axes[i]) < 1e-9)
       sel = i;
-  if (sel < 0)
+  if (AnyBound(cr.directionExpr))
+    // A direction a variable drives: its texts, each kept and unbindable.
+    ExprVec3(state, cr, index, commit, "Direction", cr.direction,
+             cr.directionExpr);
+  else if (sel < 0)
     ImGui::TextDisabled("Direction: custom [%g, %g, %g]", cr.direction.x,
                         cr.direction.y, cr.direction.z);
   if (LabeledCombo("Moves in", &sel, dirs, 6) && sel >= 0) {
     nlohmann::json before = DocumentIO::FeatureToJson(cr);
     cr.direction = axes[sel];
+    cr.directionExpr = {}; // an axis picked is a literal again
     CommitDiscrete(state, cr, before, index, commit);
   }
   {
@@ -2120,34 +2133,25 @@ static void DrawWormRows(AppState& state, Feature& feature, size_t index,
   auto* ww = dynamic_cast<WormWheelFeature*>(&feature);
   double& module = wo ? wo->module.value : ww->module.value;
   std::string& moduleExpr = wo ? wo->module.expr : ww->module.expr;
-  int& starts = wo ? wo->starts : ww->starts;
-  double& pressure = wo ? wo->pressureDeg : ww->pressureDeg;
+  ExprInt& starts = wo ? wo->starts : ww->starts;
+  ExprValue& pressure = wo ? wo->pressureDeg : ww->pressureDeg;
   bool& right = wo ? wo->rightHanded : ww->rightHanded;
   const nlohmann::json rep = wo ? wo->ReportJson() : ww->ReportJson();
 
   ExprDim(state, feature, index, commit, "Module", moduleExpr, module);
   if (module <= 0.0 && rep.is_object())
     ImGui::TextDisabled("from the blank: %.3f", rep.at("module").get<double>());
-  const auto count = [&](const char* label, int& v, int lo, int hi) {
-    LeftLabel(label);
-    const std::string id = std::string("##") + label;
-    const bool changed = ExprInputInt(state, id.c_str(), &v);
-    v = std::clamp(v, lo, hi);
-    HandleEdit(state, feature, changed, index, commit);
-  };
-  const auto length = [&](const char* label, double& v, const char* zero) {
-    LeftLabel(label);
-    const std::string id = std::string("##") + label;
-    HandleEdit(state, feature,
-               ExprDragDouble(state, id.c_str(), &v, 0.01f, 0.0, 1e4,
-                              v <= 0.0 ? zero : "%.3f"),
-               index, commit);
+  // Each may be an expression of the variables; a count out of its range is
+  // the feature's error at regeneration, which names the range.
+  const auto length = [&](const char* label, ExprValue& v, const char* zero) {
+    ExprDim(state, feature, index, commit, label, v, 0.0);
+    if (v <= 0.0 && !v.Bound())
+      ImGui::TextDisabled("%s", zero);
   };
   if (ww)
-    count("Teeth", ww->teeth, 8, 400);
-  count("Starts", starts, 1, 8);
-  HandleEdit(state, feature, DragDim(state, "Pressure angle", &pressure), index,
-             commit);
+    ExprCount(state, feature, index, commit, "Teeth", ww->teeth);
+  ExprCount(state, feature, index, commit, "Starts", starts);
+  ExprDim(state, feature, index, commit, "Pressure angle", pressure);
   {
     nlohmann::json before = DocumentIO::FeatureToJson(feature);
     const char* hands[] = {"Right", "Left"};
@@ -2310,9 +2314,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   }
 
   if (auto* box = dynamic_cast<BoxFeature*>(&feature)) {
-    HandleEdit(state, feature,
-               DragFloat3Row(state, "Position", &box->position.x), index,
-               commit);
+    ExprVec3(state, feature, index, commit, "Position", box->position,
+             box->positionExpr);
     // ExprDim, not DragDim: the "fx" button is what lets a variable drive
     // the dimension, and without it a primitive could not be parametric —
     // which meant a part built from primitives could not be configured.
@@ -2320,13 +2323,12 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     ExprDim(state, feature, index, commit, "Height", box->height);
     ExprDim(state, feature, index, commit, "Depth", box->depth);
   } else if (auto* sphere = dynamic_cast<SphereFeature*>(&feature)) {
-    HandleEdit(state, feature,
-               DragFloat3Row(state, "Center", &sphere->center.x), index,
-               commit);
+    ExprVec3(state, feature, index, commit, "Center", sphere->center,
+             sphere->centerExpr);
     ExprDim(state, feature, index, commit, "Radius", sphere->radius);
   } else if (auto* cyl = dynamic_cast<CylinderFeature*>(&feature)) {
-    HandleEdit(state, feature, DragFloat3Row(state, "Center", &cyl->center.x),
-               index, commit);
+    ExprVec3(state, feature, index, commit, "Center", cyl->center,
+             cyl->centerExpr);
     HandleEdit(state, feature,
                DragFloat3Row(state, "Direction", &cyl->direction.x), index,
                commit);
@@ -2772,10 +2774,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     // The floor's drill point and a tapped hole's thread depth, each 0 to
     // derive it (docs/modeling/holes-and-threads.md#hole).
     if (!ho->through) {
-      HandleEdit(state, feature,
-                 ExprInputDouble(state, "Drill point (deg)", &ho->pointAngleDeg,
-                                 "%.1f"),
-                 index, commit);
+      ExprDim(state, feature, index, commit, "Drill point (deg)",
+              ho->pointAngleDeg, 0.0);
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("The point's included angle at the floor; 0 "
                           "derives it (now %.0f: %s), 180 is flat",
@@ -2795,15 +2795,11 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                                         "pitches");
     }
     if (ho->kind == HoleKind::Counterbore) {
-      HandleEdit(state, feature, DragDim(state, "C'bore dia", &ho->cbDiameter),
-                 index, commit);
-      HandleEdit(state, feature, DragDim(state, "C'bore depth", &ho->cbDepth),
-                 index, commit);
+      ExprDim(state, feature, index, commit, "C'bore dia", ho->cbDiameter);
+      ExprDim(state, feature, index, commit, "C'bore depth", ho->cbDepth);
     } else if (ho->kind == HoleKind::Countersink) {
-      HandleEdit(state, feature, DragDim(state, "C'sink dia", &ho->csDiameter),
-                 index, commit);
-      HandleEdit(state, feature, DragDim(state, "C'sink depth", &ho->csDepth),
-                 index, commit);
+      ExprDim(state, feature, index, commit, "C'sink dia", ho->csDiameter);
+      ExprDim(state, feature, index, commit, "C'sink depth", ho->csDepth);
     }
     if (Feature* src = state.document->FindFeatureById(ho->sketchId)) {
       // The centre count is the confirmation the user wants right here: it
@@ -2826,9 +2822,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       CommitDiscrete(state, feature, before, index, commit);
     }
     if (cv->kind == Curve3DKind::Helix) {
-      HandleEdit(state, feature,
-                 DragFloat3Row(state, "Origin", &cv->axisOrigin.x), index,
-                 commit);
+      ExprVec3(state, feature, index, commit, "Origin", cv->axisOrigin,
+               cv->axisOriginExpr);
       HandleEdit(state, feature, DragFloat3Row(state, "Axis", &cv->axisDir.x),
                  index, commit);
       ExprDim(state, feature, index, commit, "Radius", cv->radius);
@@ -2839,10 +2834,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                  commit);
     } else {
       if (cv->kind == Curve3DKind::ControlPoly) {
-        LeftLabel("Degree");
-        HandleEdit(state, feature, ExprInputInt(state, "##Degree", &cv->degree),
-                   index, commit);
-        if (cv->degree < 1)
+        ExprCount(state, feature, index, commit, "Degree", cv->degree);
+        if (cv->degree < 1 && !cv->degree.Bound())
           cv->degree = 1;
       }
       HandleEdit(state, feature, ImGui::Checkbox("Closed", &cv->closed), index,
@@ -2854,14 +2847,24 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         if (ImGui::SmallButton("x")) {
           nlohmann::json before = DocumentIO::FeatureToJson(*cv);
           cv->points.erase(cv->points.begin() + static_cast<long>(p));
+          if (p < cv->pointsExpr.size()) // its texts go with it
+            cv->pointsExpr.erase(cv->pointsExpr.begin() + static_cast<long>(p));
           CommitDiscrete(state, feature, before, index, commit);
           ImGui::PopID();
           break;
         }
         ImGui::SameLine();
-        HandleEdit(state, feature,
-                   ExprDragFloat3(state, "##pt", &cv->points[p].x, 0.05f),
-                   index, commit);
+        cv->pointsExpr.resize(cv->points.size());
+        if (AnyBound(cv->pointsExpr[p])) {
+          // A point a variable drives: its texts, each kept and unbindable.
+          ImGui::NewLine();
+          ExprVec3(state, feature, index, commit, "Point", cv->points[p],
+                   cv->pointsExpr[p]);
+        } else {
+          HandleEdit(state, feature,
+                     ExprDragFloat3(state, "##pt", &cv->points[p].x, 0.05f),
+                     index, commit);
+        }
         ImGui::PopID();
       }
       if (ImGui::Button("Add point")) {
@@ -2980,10 +2983,10 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       // and shown as what it is -- never the table's number over another.
       LeftLabel("Pitch");
       if (threads::PitchError(*row, th->designation, th->pitch).empty()) {
-        ImGui::Text("%.4g (from table)", th->pitch);
+        ImGui::Text("%.4g (from table)", th->pitch.value);
       } else {
         ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.2f, 1.0f),
-                           "%.4g -- %s is %.4g", th->pitch,
+                           "%.4g -- %s is %.4g", th->pitch.value,
                            row->designation.c_str(), row->pitch);
         ImGui::SameLine();
         if (ImGui::SmallButton("Use the table's")) {
@@ -2993,27 +2996,19 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         }
       }
     } else {
-      HandleEdit(state, feature, DragDim(state, "Pitch", &th->pitch), index,
-                 commit);
+      ExprDim(state, feature, index, commit, "Pitch", th->pitch);
       // A custom thread's flank angle: half the thread angle, 30 the ISO
       // profile, 45 one whose every flank prints without support
       // (docs/modeling/holes-and-threads.md#flank-angle). A table thread is
       // the standard's 30 and shows none.
-      LeftLabel("Flank angle");
-      HandleEdit(state, feature,
-                 ExprDragDouble(state, "##Flank angle", &th->flankDeg, 0.25f,
-                                threads::kMinFlankDeg, threads::kMaxFlankDeg,
-                                "%.1f deg"),
-                 index, commit);
+      // Out of range is the feature's error, which names the range.
+      ExprDim(state, feature, index, commit, "Flank angle", th->flankDeg,
+              threads::kMinFlankDeg);
     }
     {
-      LeftLabel("Length");
-      static const double lmin = 0.0, lmax = 1e6;
-      HandleEdit(state, feature,
-                 ExprDragDouble(state, "##Length", &th->length.value, 0.05f,
-                                lmin, lmax,
-                                th->length <= 0.0 ? "full face" : "%.3f"),
-                 index, commit);
+      ExprDim(state, feature, index, commit, "Length", th->length, 0.0);
+      if (th->length <= 0.0 && !th->length.Bound())
+        ImGui::TextDisabled("full face");
     }
     // The class: the series' own classes for the side the face is on (the
     // overlay knows which once the face resolves), or none.

@@ -164,7 +164,7 @@ std::string ThreadFeature::WhyRefused() const {
                "%s is the standard's 60-degree profile; a %g-degree flank "
                "is a custom thread (a designation that names no series, with "
                "its own pitch)",
-               designation.c_str(), flankDeg);
+               designation.c_str(), flankDeg.value);
       return buf;
     }
     if (!resolved->threadClass.empty() && !threadClass.empty() &&
@@ -182,7 +182,7 @@ std::string ThreadFeature::WhyRefused() const {
     snprintf(buf, sizeof(buf),
              "flank angle %g degrees is outside %g-%g (30 is the ISO "
              "profile, 45 prints without support)",
-             flankDeg, threads::kMinFlankDeg, threads::kMaxFlankDeg);
+             flankDeg.value, threads::kMinFlankDeg, threads::kMaxFlankDeg);
     return buf;
   }
   return {};

@@ -232,7 +232,19 @@ void CurveFeature::VisitExprs(const ExprVisitor& visit) {
     visit({pitch, ExprQuantity::Length, "pitch"});
     visit({turns, ExprQuantity::Count, "turns"});
     visit({startDeg, ExprQuantity::Angle, "start_deg"});
+    VisitVec3Exprs(visit, axisOrigin, axisOriginExpr, ExprQuantity::Length,
+                   "origin");
+    return;
   }
+  // FitSpline, ControlPoly, BentPath: their points.
+  pointsExpr.resize(points.size());
+  for (size_t i = 0; i < points.size(); i++)
+    VisitVec3Exprs(visit, points[i], pointsExpr[i], ExprQuantity::Length,
+                   "points/" + std::to_string(i));
+  if (kind == Curve3DKind::ControlPoly)
+    visit({degree, "degree"});
+  if (kind == Curve3DKind::BentPath)
+    visit({radius, ExprQuantity::Length, "radius"});
 }
 
 glm::dvec3 HelixReference(const glm::dvec3& axis) {

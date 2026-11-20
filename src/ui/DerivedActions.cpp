@@ -328,6 +328,7 @@ std::string PointDerivedAt(AppState& state, DerivedFeature& feature,
   trial.sourceName = SlotName(state, source.slotId);
   if (source.occurrenceId != 0) {
     trial.position = glm::dvec3(source.placement[3]);
+    trial.positionExpr = {}; // where the occurrence stands, not a variable
     trial.orientation =
         glm::normalize(glm::quat_cast(glm::dmat3(source.placement)));
   }

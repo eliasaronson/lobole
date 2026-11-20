@@ -567,11 +567,19 @@ json DerivedOpToJson(const sketch::DerivedOp& op) {
             {"source_ids", op.sourceIds},
             {"vec", Vec2ToJson(op.vec)},
             {"scalar", op.scalar},
-            {"count", op.count},
+            {"count", op.count.value},
             {"instances", insts}};
-  if (op.count2 > 1) { // v50: 2D linear grid; omitted = 1D (back-compat)
+  // vNEXT: the texts beside them, the step angle's in degrees
+  // (docs/sketching/README.md#patterns-that-are-expressions).
+  WriteExprTexts(j, "vec", {op.vecExpr[0], op.vecExpr[1]});
+  WriteExprText(j, "scalar", op.scalarExpr);
+  WriteExprText(j, "count", op.count.expr);
+  // v50: 2D linear grid; omitted = 1D (back-compat). A bound count2 is
+  // written whatever it comes out as, so its text is kept.
+  if (op.count2 > 1 || op.count2.Bound()) {
     j["vec2"] = Vec2ToJson(op.vec2);
-    j["count2"] = op.count2;
+    WriteExprTexts(j, "vec2", {op.vec2Expr[0], op.vec2Expr[1]});
+    WriteExpr(j, "count2", op.count2);
   }
   if (op.axisEntity != 0) // v51: mirror axis
     j["axis_entity"] = op.axisEntity;
@@ -638,9 +646,10 @@ sketch::ExternalKind ExternalKindFromString(const std::string& kind) {
 sketch::DerivedOp DerivedOpFromJson(const json& j) {
   readctx::RefuseUnknownKeys(j,
                              {"kind", "source_sketch_id", "source_ids", "vec",
-                              "scalar", "count", "vec2", "count2",
-                              "axis_entity", "center_entity", "center_which",
-                              "instances"},
+                              "vec_expr", "scalar", "scalar_expr", "count",
+                              "count_expr", "vec2", "vec2_expr", "count2",
+                              "count2_expr", "axis_entity", "center_entity",
+                              "center_which", "instances"},
                              "sketch derived op");
   sketch::DerivedOp op;
   op.kind = DerivedKindFromString(j.at("kind").get<std::string>());
@@ -655,9 +664,19 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
       throw std::runtime_error("sketch derived op " + std::string(key) + " " +
                                j.at(key).dump() + " is not a whole number");
   op.count = j.at("count").get<int>();
-  if (j.contains("vec2")) // v50: 2D linear grid
+  op.count.expr = ReadExprText(j, "count");
+  op.scalarExpr = ReadExprText(j, "scalar");
+  {
+    const std::vector<std::string> t = ReadExprTexts(j, "vec", 2);
+    op.vecExpr = {t[0], t[1]};
+  }
+  if (j.contains("vec2")) { // v50: 2D linear grid
     op.vec2 = Vec2FromJson(j.at("vec2"));
+    const std::vector<std::string> t = ReadExprTexts(j, "vec2", 2);
+    op.vec2Expr = {t[0], t[1]};
+  }
   op.count2 = j.value("count2", 1);
+  op.count2.expr = ReadExprText(j, "count2");
   // v51
   if (j.contains("axis_entity"))
     op.axisEntity =
@@ -706,17 +725,21 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
     throw std::runtime_error("sketch derived op: center_which without "
                              "center_entity");
   if (j.contains("vec2") != j.contains("count2") ||
-      (j.contains("count2") && op.count2 < 2))
+      (j.contains("count2") && op.count2 < 2 && !op.count2.Bound()))
     throw std::runtime_error("sketch derived op: a grid's vec2 and count2 "
                              "(above 1) come together");
-  if (op.count < 1 || op.count2 < 1)
+  // A bound count that came out below 1 is the sketch's error when it
+  // regenerates, as a file with a text that does not parse is
+  // (ExprValue.h, ReadExpr): the file still opens.
+  if ((op.count < 1 && !op.count.Bound()) ||
+      (op.count2 < 1 && !op.count2.Bound()))
     throw std::runtime_error("sketch derived op: count " +
                              std::to_string(op.count) + " is not a count");
   if (!(op.kind == sketch::DerivedKind::LinkedCopy && op.sourceSketchId != 0)) {
     const int total = op.kind == sketch::DerivedKind::LinearPattern
-                          ? op.count * op.count2
+                          ? op.count.value * op.count2.value
                       : op.kind == sketch::DerivedKind::Mirror ? 2
-                                                               : op.count;
+                                                               : op.count.value;
     for (const auto& in : op.instances)
       if (in.k < 1 || in.k >= total ||
           std::find(op.sourceIds.begin(), op.sourceIds.end(), in.sourceId) ==
@@ -1050,11 +1073,14 @@ json AxisRefToJson(const AxisRef& axis) {
             {"entity_id", axis.entityId}};
   case AxisRef::Kind::DatumAxis:
     return {{"kind", "datum_axis"}, {"datum_axis_id", axis.datumAxisId}};
-  case AxisRef::Kind::Custom:
-    return {
+  case AxisRef::Kind::Custom: {
+    json j = {
         {"kind", "custom"},
         {"origin", {axis.origin.x, axis.origin.y, axis.origin.z}},
         {"direction", {axis.direction.x, axis.direction.y, axis.direction.z}}};
+    WriteVec3Exprs(j, "origin", axis.originExpr);
+    return j;
+  }
   }
   return {{"kind", "x"}};
 }
@@ -1067,7 +1093,8 @@ AxisRef AxisRefFromJson(const json& j) {
   else if (kind == "datum_axis")
     readctx::RefuseUnknownKeys(j, {"kind", "datum_axis_id"}, "axis");
   else if (kind == "custom")
-    readctx::RefuseUnknownKeys(j, {"kind", "origin", "direction"}, "axis");
+    readctx::RefuseUnknownKeys(
+        j, {"kind", "origin", "origin_expr", "direction"}, "axis");
   else
     readctx::RefuseUnknownKeys(j, {"kind"}, "axis");
   if (kind == "x")
@@ -1095,6 +1122,7 @@ AxisRef AxisRefFromJson(const json& j) {
                         v[2].get<double>());
     };
     axis.origin = triple("origin");
+    axis.originExpr = ReadVec3Exprs(j, "origin");
     axis.direction = triple("direction");
     if (glm::dot(axis.direction, axis.direction) < 1e-18)
       throw std::runtime_error("a custom axis's direction is zero; give the "
@@ -1339,6 +1367,7 @@ json FeatureToJson(const Feature& feature) {
     }
   } else if (auto* box = dynamic_cast<const BoxFeature*>(&feature)) {
     j["position"] = Vec3ToJson(box->position);
+    WriteVec3Exprs(j, "position", box->positionExpr); // vNEXT
     j["width"] = box->width.value;
     j["height"] = box->height.value;
     j["depth"] = box->depth.value;
@@ -1350,9 +1379,11 @@ json FeatureToJson(const Feature& feature) {
     WriteExprText(j, "depth", box->depth.expr);
   } else if (auto* sphere = dynamic_cast<const SphereFeature*>(&feature)) {
     j["center"] = Vec3ToJson(sphere->center);
+    WriteVec3Exprs(j, "center", sphere->centerExpr); // vNEXT
     WriteExpr(j, "radius", sphere->radius);
   } else if (auto* cyl = dynamic_cast<const CylinderFeature*>(&feature)) {
     j["center"] = Vec3ToJson(cyl->center);
+    WriteVec3Exprs(j, "center", cyl->centerExpr); // vNEXT
     j["direction"] = Vec3ToJson(cyl->direction);
     j["radius"] = cyl->radius.value;
     j["height"] = cyl->height.value;
@@ -1373,7 +1404,7 @@ json FeatureToJson(const Feature& feature) {
     j["designation"] = bearing->designation; // v141
   } else if (auto* ring = dynamic_cast<const RetainingRingFeature*>(&feature)) {
     j["standard"] = ring->standard; // v156
-    j["size"] = ring->size;
+    WriteExpr(j, "size", ring->size);
   } else if (auto* groove =
                  dynamic_cast<const RetainingRingGrooveFeature*>(&feature)) {
     j["face"] = {{"feature_id", groove->face.featureId}, // v156
@@ -1439,6 +1470,7 @@ json FeatureToJson(const Feature& feature) {
       j["body_names"] = d->bodyNames; // v85
     j["placement"] = {{"position", Vec3ToJson(d->position)},
                       {"orientation", QuatToJson(d->orientation)}};
+    WriteVec3Exprs(j["placement"], "position", d->positionExpr); // vNEXT
     j["reference"] = d->reference;
     json bodies = json::array();
     for (const DerivedBody& b : d->snapshot) {
@@ -1524,6 +1556,7 @@ json FeatureToJson(const Feature& feature) {
     case DatumPlaneKind::ThroughPoints:
       j["points"] = {Vec3ToJson(dp->p0), Vec3ToJson(dp->p1),
                      Vec3ToJson(dp->p2)};
+      WritePointExprs(j, "points", {dp->pExpr[0], dp->pExpr[1], dp->pExpr[2]});
       break;
     case DatumPlaneKind::FromFit:
       j["fit"] = FitRefToJson(dp->fit);
@@ -1546,6 +1579,7 @@ json FeatureToJson(const Feature& feature) {
     switch (da->kind) {
     case DatumAxisKind::TwoPoints:
       j["points"] = {Vec3ToJson(da->p0), Vec3ToJson(da->p1)};
+      WritePointExprs(j, "points", {da->pExpr[0], da->pExpr[1]});
       break;
     case DatumAxisKind::SketchLine:
       j["sketch_id"] = da->sketchId;
@@ -1607,8 +1641,9 @@ json FeatureToJson(const Feature& feature) {
       for (const glm::dvec3& p : cv->points)
         pts.push_back(Vec3ToJson(p));
       j["points"] = std::move(pts);
+      WritePointExprs(j, "points", cv->pointsExpr); // vNEXT
       if (cv->kind == Curve3DKind::ControlPoly)
-        j["degree"] = cv->degree;
+        WriteExpr(j, "degree", cv->degree);
       if (cv->kind == Curve3DKind::BentPath) {
         WriteExpr(j, "radius", cv->radius); // the former's, to the centreline
       }
@@ -1618,6 +1653,7 @@ json FeatureToJson(const Feature& feature) {
     }
     case Curve3DKind::Helix:
       j["origin"] = Vec3ToJson(cv->axisOrigin);
+      WriteVec3Exprs(j, "origin", cv->axisOriginExpr); // vNEXT
       j["axis"] = Vec3ToJson(cv->axisDir);
       WriteExpr(j, "radius", cv->radius);
       WriteExpr(j, "pitch", cv->pitch);
@@ -1639,6 +1675,7 @@ json FeatureToJson(const Feature& feature) {
       WriteExpr(j, "clearance_mm", cr->clearanceMm);
     }
     j["direction"] = {cr->direction.x, cr->direction.y, cr->direction.z};
+    WriteVec3Exprs(j, "direction", cr->directionExpr); // vNEXT
     if (!cr->sweep)
       j["sweep"] = false;
     if (cr->hasResolution) {
@@ -1796,9 +1833,9 @@ json FeatureToJson(const Feature& feature) {
     j["face"] = {{"feature_id", th->face.featureId},
                  {"element", th->face.name}};
     j["designation"] = th->designation;
-    j["pitch"] = th->pitch;
+    WriteExpr(j, "pitch", th->pitch);
     j["allow_engagement"] = th->allowEngagement;
-    j["minimum_engagement"] = th->minimumEngagement;
+    WriteExpr(j, "minimum_engagement", th->minimumEngagement);
     if (!th->threadClass.empty())
       j["thread_class"] = th->threadClass;
     if (th->length > 0.0)
@@ -1808,8 +1845,9 @@ json FeatureToJson(const Feature& feature) {
       j["modeled"] = true;
     if (!th->rightHanded)
       j["hand"] = "left"; // v140; absent = right, as every thread before it
-    if (th->flankDeg != 30.0)
-      j["flank_angle_deg"] = th->flankDeg; // v173; absent = the ISO 30
+    if (th->flankDeg != 30.0 || th->flankDeg.Bound())
+      j["flank_angle_deg"] = th->flankDeg.value; // v173; absent = the ISO 30
+    WriteExprText(j, "flank_angle_deg", th->flankDeg.expr);
   } else if (auto* cp = dynamic_cast<const CamProfileFeature*>(&feature)) {
     // v198 (docs/modeling/cam-profiles.md)
     if (!cp->face.name.empty())
@@ -1863,24 +1901,27 @@ json FeatureToJson(const Feature& feature) {
     if (wo->module > 0.0)
       j["module"] = wo->module.value;
     WriteExprText(j, "module", wo->module.expr);
-    j["starts"] = wo->starts;
-    j["pressure_angle_deg"] = wo->pressureDeg;
+    WriteExpr(j, "starts", wo->starts);
+    WriteExpr(j, "pressure_angle_deg", wo->pressureDeg);
     j["hand"] = wo->rightHanded ? "right" : "left";
     if (wo->backlash > 0.0)
-      j["backlash"] = wo->backlash;
+      j["backlash"] = wo->backlash.value;
+    WriteExprText(j, "backlash", wo->backlash.expr);
     if (wo->length > 0.0)
-      j["length"] = wo->length;
+      j["length"] = wo->length.value;
+    WriteExprText(j, "length", wo->length.expr);
   } else if (auto* ww = dynamic_cast<const WormWheelFeature*>(&feature)) {
     j["face"] = {{"feature_id", ww->face.featureId},
                  {"element", ww->face.name}};
     if (ww->module > 0.0)
       j["module"] = ww->module.value;
     WriteExprText(j, "module", ww->module.expr);
-    j["teeth"] = ww->teeth;
-    j["starts"] = ww->starts;
+    WriteExpr(j, "teeth", ww->teeth);
+    WriteExpr(j, "starts", ww->starts);
     if (ww->wormDiameter > 0.0)
-      j["worm_diameter"] = ww->wormDiameter;
-    j["pressure_angle_deg"] = ww->pressureDeg;
+      j["worm_diameter"] = ww->wormDiameter.value;
+    WriteExprText(j, "worm_diameter", ww->wormDiameter.expr);
+    WriteExpr(j, "pressure_angle_deg", ww->pressureDeg);
     j["hand"] = ww->rightHanded ? "right" : "left";
   } else if (auto* ho = dynamic_cast<const HoleFeature*>(&feature)) {
     j["sketch_id"] = ho->sketchId;
@@ -1893,7 +1934,8 @@ json FeatureToJson(const Feature& feature) {
     if (!ho->fitThread.empty()) {
       nlohmann::json fit = {{"thread", ho->fitThread}, {"kind", ho->fitKind}};
       if (ho->fitPitch > 0.0)
-        fit["pitch"] = ho->fitPitch; // omitted = the coarse pitch
+        fit["pitch"] = ho->fitPitch.value; // omitted = the coarse pitch
+      WriteExprText(fit, "pitch", ho->fitPitch.expr);
       j["fit"] = fit;
     }
     WriteExpr(j, "depth", ho->depth);
@@ -1902,18 +1944,19 @@ json FeatureToJson(const Feature& feature) {
     // v148: each written only when stated; absent is derived
     // (docs/modeling/holes-and-threads.md#hole).
     if (ho->pointAngleDeg > 0.0)
-      j["drill_point_deg"] = ho->pointAngleDeg;
+      j["drill_point_deg"] = ho->pointAngleDeg.value;
+    WriteExprText(j, "drill_point_deg", ho->pointAngleDeg.expr);
     if (ho->threadDepth > 0.0)
       j["thread_depth"] = ho->threadDepth.value;
     WriteExprText(j, "thread_depth", ho->threadDepth.expr);
     if (ho->printed != HolePrinted::Round) // v183; absent = round
       j["printed"] = HolePrintedName(ho->printed);
     if (ho->kind == HoleKind::Counterbore) {
-      j["cb_diameter"] = ho->cbDiameter;
-      j["cb_depth"] = ho->cbDepth;
+      WriteExpr(j, "cb_diameter", ho->cbDiameter);
+      WriteExpr(j, "cb_depth", ho->cbDepth);
     } else if (ho->kind == HoleKind::Countersink) {
-      j["cs_diameter"] = ho->csDiameter;
-      j["cs_depth"] = ho->csDepth;
+      WriteExpr(j, "cs_diameter", ho->csDiameter);
+      WriteExpr(j, "cs_depth", ho->csDepth);
     }
   } else if (auto* del = dynamic_cast<const DeleteFaceFeature*>(&feature)) {
     j["body_id"] = del->bodyId;
@@ -2130,8 +2173,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "modules. get_state reports the lead angle and whether it self-locks "
      "(docs/modeling/worm-gears.md)",
      "face:object, module?:number, module_expr?:string, starts?:int, "
-     "pressure_angle_deg?:number, hand?:'right'|'left', "
-     "backlash?:number, length?:number"},
+     "starts_expr?:string, pressure_angle_deg?:number, "
+     "pressure_angle_deg_expr?:string, hand?:'right'|'left', "
+     "backlash?:number, backlash_expr?:string, length?:number, "
+     "length_expr?:string"},
     {"WormWheel", 146,
      "face (the blank's cylindrical OUTSIDE: the rim; its length is the face "
      "width), teeth? (40), module? (+_expr) mm (omitted = rim dia / (teeth + "
@@ -2140,8 +2185,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "right|left. Hobs the wheel: throat, tip and enveloping teeth. "
      "get_state reports the centre distance, the ratio and self-locking "
      "(docs/modeling/worm-gears.md)",
-     "face:object, teeth?:int, module?:number, module_expr?:string, "
-     "starts?:int, worm_diameter?:number, pressure_angle_deg?:number, "
+     "face:object, teeth?:int, teeth_expr?:string, module?:number, "
+     "module_expr?:string, starts?:int, starts_expr?:string, "
+     "worm_diameter?:number, worm_diameter_expr?:string, "
+     "pressure_angle_deg?:number, pressure_angle_deg_expr?:string, "
      "hand?:'right'|'left'"},
     {"Bearing", 141,
      "designation: an ISO 15 deep-groove ball bearing, 618/619/60/62/63 "
@@ -2160,7 +2207,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "lugs). Faces <id>/bore, /outside, /ring_side_a|b; axis +Z, side A on "
      "z = 0. In an assembly, add_retaining_ring places one "
      "(docs/parts/README.md#retaining-rings)",
-     "standard:'din471'|'din472', size:number"},
+     "standard:'din471'|'din472', size?:number, size_expr?:string"},
     {"RetainingRingGroove", 156,
      "face {feature_id, element} (a CYLINDRICAL face: a shaft takes din471, "
      "a bore din472), from {feature_id, element} (a circular edge at ONE END "
@@ -2360,7 +2407,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "kind:'offset'|'angled'|'through_points'|'from_fit', "
      "base_plane?:'xy'|'xz'|'yz', parent_id?:int>=0, offset?:number, "
      "offset_expr?:string, flip?:bool, axis?:object, angle_deg?:number, "
-     "angle_expr?:string, points?:any[], fit?:object"},
+     "angle_expr?:string, points?:any[], points_expr?:any[], "
+     "fit?:object"},
     {"Revolve", 1,
      "sketch_id, axis {kind: x|y|z (world axes THROUGH THE WORLD ORIGIN)|"
      "sketch_line {sketch_id, entity_id}|datum_axis {datum_axis_id}|custom "
@@ -2383,7 +2431,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "from the apex, which is its origin; "
      "docs/modeling/README.md#datums-on-a-scan)",
      "kind:'two_points'|'sketch_line'|'global_x'|'global_y'|'global_z'|"
-     "'from_fit', points?:any[], sketch_id?:int>=0, entity_id?:int>=0, "
+     "'from_fit', points?:any[], points_expr?:any[], sketch_id?:int>=0, "
+     "entity_id?:int>=0, "
      "fit?:object"},
     {"Frame", 86,
      "kind: explicit|from_element|offset — a NAMED datum frame (origin + "
@@ -2411,8 +2460,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "for +X or +Y, -Z for -X or -Y (in general OpenCASCADE's gp_Ax3 "
      "choice). The helix then winds right-handed (or left) from there",
      "kind:'fit_spline'|'control_poly'|'bent_path'|'helix', "
-     "points?:any[], degree?:int, closed?:bool, radius?:number, "
-     "radius_expr?:string, origin?:number[], axis?:number[], "
+     "points?:any[], points_expr?:any[], degree?:int, "
+     "degree_expr?:string, closed?:bool, radius?:number, "
+     "radius_expr?:string, origin?:number[], origin_expr?:string[], "
+     "axis?:number[], "
      "pitch?:number, pitch_expr?:string, turns?:number, "
      "turns_expr?:string, left_handed?:bool, start_deg?:number, "
      "start_deg_expr?:string"},
@@ -2433,7 +2484,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "refused past the cost budget, naming the resolution or triangle count "
      "that fits",
      "target_id:int>=0, tool_id:int>=0, clearance_mm?:number, "
-     "clearance_mm_expr?:string, direction?:number[3], sweep?:bool, "
+     "clearance_mm_expr?:string, direction?:number[3], "
+     "direction_expr?:string[], sweep?:bool, "
      "resolution_mm?:number, resolution_mm_expr?:string"},
     {"Split", 39,
      "body_id, knife: \"plane\" (default) with datum_id or base_plane, "
@@ -2492,6 +2544,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "custom thread 15-60, and 45 prints with no flank past 45 degrees of "
      "overhang); allow_engagement?, minimum_engagement? (mm)",
      "face:object, designation?:string, pitch?:number, "
+     "pitch_expr?:string, flank_angle_deg_expr?:string, "
+     "minimum_engagement_expr?:string, "
      "thread_class?:string, length?:number, length_expr?:string, "
      "modeled?:bool, hand?:'right'|'left', flank_angle_deg?:number, "
      "allow_engagement?:bool, minimum_engagement?:number"},
@@ -2520,8 +2574,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "hole_kind?:'simple'|'counterbore'|'countersink', "
      "diameter?:number, diameter_expr?:string, depth?:number, "
      "depth_expr?:string, through?:bool, cb_diameter?:number, "
-     "cb_depth?:number, cs_diameter?:number, cs_depth?:number, "
-     "drill_point_deg?:number, thread_depth?:number, "
+     "cb_diameter_expr?:string, cb_depth?:number, cb_depth_expr?:string, "
+     "cs_diameter?:number, cs_diameter_expr?:string, cs_depth?:number, "
+     "cs_depth_expr?:string, drill_point_deg?:number, "
+     "drill_point_deg_expr?:string, thread_depth?:number, "
      "thread_depth_expr?:string, fit?:object, "
      "printed?:'round'|'teardrop'|'teardrop_flat'"},
     {"DeleteFace", 192,
@@ -2698,16 +2754,16 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
               "regions", "twist_deg", "twist_expr", "herringbone", "taper_deg",
               "taper_expr", "thin"}},
             {"Box",
-             {"position", "width", "height", "depth", "width_expr",
-              "height_expr", "depth_expr"}},
-            {"Sphere", {"center", "radius", "radius_expr"}},
+             {"position", "position_expr", "width", "height", "depth",
+              "width_expr", "height_expr", "depth_expr"}},
+            {"Sphere", {"center", "center_expr", "radius", "radius_expr"}},
             {"Cylinder",
-             {"center", "direction", "radius", "height", "radius_expr",
-              "height_expr"}},
+             {"center", "center_expr", "direction", "radius", "height",
+              "radius_expr", "height_expr"}},
             {"Fastener",
              {"standard", "size", "length", "length_expr", "drive"}},
             {"Bearing", {"designation"}},
-            {"RetainingRing", {"standard", "size"}},
+            {"RetainingRing", {"standard", "size", "size_expr"}},
             {"RetainingRingGroove",
              {"face", "from", "offset", "offset_expr", "standard"}},
             {"Import",
@@ -2728,23 +2784,28 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
               "reference", "snapshot"}},
             {"DatumPlane",
              {"kind", "parent_id", "base_plane", "offset", "offset_expr",
-              "flip", "axis", "angle_deg", "angle_expr", "points", "fit"}},
+              "flip", "axis", "angle_deg", "angle_expr", "points",
+              "points_expr", "fit"}},
             {"Revolve",
              {"sketch_id", "axis", "angle_deg", "angle_expr", "symmetric",
               "reversed", "mode", "regions"}},
-            {"DatumAxis", {"kind", "points", "sketch_id", "entity_id", "fit"}},
+            {"DatumAxis",
+             {"kind", "points", "points_expr", "sketch_id", "entity_id",
+              "fit"}},
             {"Frame",
              {"kind", "origin", "origin_expr", "z_axis", "x_axis", "elements",
               "flip", "parent_id", "offset", "offset_expr", "rotation_deg",
               "rotation_expr"}},
             {"Curve3D",
-             {"kind", "points", "degree", "closed", "radius", "radius_expr",
-              "origin", "axis", "pitch", "pitch_expr", "turns", "turns_expr",
+             {"kind", "points", "points_expr", "degree", "degree_expr",
+              "closed", "radius", "radius_expr", "origin", "origin_expr",
+              "axis", "pitch", "pitch_expr", "turns", "turns_expr",
               "left_handed", "start_deg", "start_deg_expr"}},
             {"Boolean", {"target_id", "tool_id", "op"}},
             {"Cradle",
              {"target_id", "tool_id", "clearance_mm", "clearance_mm_expr",
-              "direction", "sweep", "resolution_mm", "resolution_mm_expr"}},
+              "direction", "direction_expr", "sweep", "resolution_mm",
+              "resolution_mm_expr"}},
             {"Split",
              {"body_id", "knife", "face", "datum_id", "base_plane", "offset",
               "offset_expr"}},
@@ -2778,24 +2839,44 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             {"Rib",
              {"sketch_id", "thickness", "thickness_expr", "flip", "body_id"}},
             {"Thread",
-             {"face", "designation", "pitch", "allow_engagement",
-              "minimum_engagement", "thread_class", "length", "length_expr",
-              "modeled", "hand", "flank_angle_deg"}},
+             {"face", "designation", "pitch", "pitch_expr", "allow_engagement",
+              "minimum_engagement", "minimum_engagement_expr", "thread_class",
+              "length", "length_expr", "modeled", "hand", "flank_angle_deg",
+              "flank_angle_deg_expr"}},
             {"CamProfile",
              {"face", "frame", "base_radius_mm", "base_radius_mm_expr",
               "width_mm", "width_mm_expr", "lift", "segments", "follower",
               "turn", "body"}},
             {"Worm",
-             {"face", "module", "module_expr", "starts", "pressure_angle_deg",
-              "hand", "backlash", "length"}},
+             {"face", "module", "module_expr", "starts", "starts_expr",
+              "pressure_angle_deg", "pressure_angle_deg_expr", "hand",
+              "backlash", "backlash_expr", "length", "length_expr"}},
             {"WormWheel",
-             {"face", "module", "module_expr", "teeth", "starts",
-              "worm_diameter", "pressure_angle_deg", "hand"}},
+             {"face", "module", "module_expr", "teeth", "teeth_expr", "starts",
+              "starts_expr", "worm_diameter", "worm_diameter_expr",
+              "pressure_angle_deg", "pressure_angle_deg_expr", "hand"}},
             {"Hole",
-             {"sketch_id", "hole_kind", "diameter", "diameter_expr", "fit",
-              "depth", "depth_expr", "through", "drill_point_deg",
-              "thread_depth", "thread_depth_expr", "printed", "cb_diameter",
-              "cb_depth", "cs_diameter", "cs_depth"}},
+             {"sketch_id",
+              "hole_kind",
+              "diameter",
+              "diameter_expr",
+              "fit",
+              "depth",
+              "depth_expr",
+              "through",
+              "drill_point_deg",
+              "drill_point_deg_expr",
+              "thread_depth",
+              "thread_depth_expr",
+              "printed",
+              "cb_diameter",
+              "cb_diameter_expr",
+              "cb_depth",
+              "cb_depth_expr",
+              "cs_diameter",
+              "cs_diameter_expr",
+              "cs_depth",
+              "cs_depth_expr"}},
             {"Draft",
              {"body_id", "angle_deg", "angle_expr", "neutral_plane", "faces"}},
             {"Pattern",
@@ -3246,11 +3327,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     box->width.expr = ReadExprText(j, "width");
     box->height.expr = ReadExprText(j, "height");
     box->depth.expr = ReadExprText(j, "depth");
+    box->positionExpr = ReadVec3Exprs(j, "position"); // vNEXT
     out = std::move(box);
   } else if (type == "Sphere") {
     auto sph = std::make_unique<SphereFeature>(
         name, Vec3FromJson(j.at("center")), j.at("radius").get<double>());
     sph->radius.expr = ReadExprText(j, "radius");
+    sph->centerExpr = ReadVec3Exprs(j, "center"); // vNEXT
     out = std::move(sph);
   } else if (type == "Cylinder") {
     auto cyl = std::make_unique<CylinderFeature>(
@@ -3258,6 +3341,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.at("radius").get<double>(), j.at("height").get<double>());
     cyl->radius.expr = ReadExprText(j, "radius");
     cyl->height.expr = ReadExprText(j, "height");
+    cyl->centerExpr = ReadVec3Exprs(j, "center"); // vNEXT
     out = std::move(cyl);
   } else if (type == "Fastener") {
     // `length` is OPTIONAL, because whether it means anything is the
@@ -3284,8 +3368,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "RetainingRing") { // v156
     // An unknown standard or size is refused by Execute, naming what is
     // carried — the same door add_feature and a file come in by.
-    out = std::make_unique<RetainingRingFeature>(
-        name, j.at("standard").get<std::string>(), j.at("size").get<double>());
+    auto ring = std::make_unique<RetainingRingFeature>(
+        name, j.at("standard").get<std::string>(), j.value("size", 0.0));
+    if (!ReadExpr(j, "size", ring->size))
+      throw std::runtime_error("RetainingRing '" + name +
+                               "' needs a size (or size_expr)");
+    out = std::move(ring);
   } else if (type == "RetainingRingGroove") { // v156
     const auto ref = [&](const char* key) {
       const json& rj = j.at(key);
@@ -3413,9 +3501,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     d->follow = j.value("follow", true); // v193
     if (j.contains("placement")) {
       const json& pl = j.at("placement");
-      readctx::RefuseUnknownKeys(pl, {"position", "orientation"}, "placement");
+      readctx::RefuseUnknownKeys(
+          pl, {"position", "position_expr", "orientation"}, "placement");
       if (pl.contains("position"))
         d->position = Vec3FromJson(pl.at("position"));
+      d->positionExpr = ReadVec3Exprs(pl, "position");
       if (pl.contains("orientation"))
         d->orientation = QuatFromJson(pl.at("orientation"));
     }
@@ -3548,6 +3638,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       dp->p0 = Vec3FromJson(pts.at(0));
       dp->p1 = Vec3FromJson(pts.at(1));
       dp->p2 = Vec3FromJson(pts.at(2));
+      const auto t = ReadPointExprs(j, "points", 3); // vNEXT
+      dp->pExpr = {t[0], t[1], t[2]};
       break;
     }
     case DatumPlaneKind::FromFit:
@@ -3575,6 +3667,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       const json& pts = j.at("points");
       da->p0 = Vec3FromJson(pts.at(0));
       da->p1 = Vec3FromJson(pts.at(1));
+      const auto t = ReadPointExprs(j, "points", 2); // vNEXT
+      da->pExpr = {t[0], t[1]};
       break;
     }
     case DatumAxisKind::SketchLine:
@@ -3657,13 +3751,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     {
       std::vector<const char*> foreign;
       if (cv->kind == Curve3DKind::Helix)
-        foreign = {"points", "degree", "closed"};
+        foreign = {"points", "points_expr", "degree", "degree_expr", "closed"};
       else
-        foreign = {"origin",      "axis",      "pitch",
-                   "pitch_expr",  "turns",     "turns_expr",
-                   "left_handed", "start_deg", "start_deg_expr"};
-      if (cv->kind != Curve3DKind::ControlPoly)
+        foreign = {"origin",     "origin_expr",   "axis",       "pitch",
+                   "pitch_expr", "turns",         "turns_expr", "left_handed",
+                   "start_deg",  "start_deg_expr"};
+      if (cv->kind != Curve3DKind::ControlPoly) {
         foreign.push_back("degree");
+        foreign.push_back("degree_expr");
+      }
       if (cv->kind == Curve3DKind::FitSpline ||
           cv->kind == Curve3DKind::ControlPoly) {
         foreign.push_back("radius");
@@ -3681,7 +3777,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     case Curve3DKind::BentPath:
       for (const auto& pj : j.value("points", json::array()))
         cv->points.push_back(Vec3FromJson(pj));
-      cv->degree = j.value("degree", 3);
+      cv->pointsExpr = ReadPointExprs(j, "points", cv->points.size());
+      cv->degree = 3;
+      ReadExpr(j, "degree", cv->degree);
       cv->closed = j.value("closed", false);
       if (cv->kind == Curve3DKind::BentPath) {
         cv->radius = j.value("radius", 0.0);
@@ -3690,6 +3788,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       break;
     case Curve3DKind::Helix:
       cv->axisOrigin = Vec3FromJson(j.at("origin"));
+      cv->axisOriginExpr = ReadVec3Exprs(j, "origin");
       cv->axisDir = Vec3FromJson(j.at("axis"));
       cv->radius = j.value("radius", 1.0);
       cv->radius.expr = ReadExprText(j, "radius");
@@ -3725,6 +3824,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       cr->direction = {d[0].get<double>(), d[1].get<double>(),
                        d[2].get<double>()};
     }
+    cr->directionExpr = ReadVec3Exprs(j, "direction");
     if (j.contains("sweep")) {
       if (!j.at("sweep").is_boolean())
         throw std::runtime_error("Cradle sweep is true or false, not " +
@@ -3995,8 +4095,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                "': flank_angle_deg must be a number of "
                                "degrees");
     th->flankDeg = j.value("flank_angle_deg", 30.0);
+    th->flankDeg.expr = ReadExprText(j, "flank_angle_deg"); // vNEXT
+    th->pitch.expr = ReadExprText(j, "pitch");
     th->allowEngagement = j.value("allow_engagement", false);
     th->minimumEngagement = j.value("minimum_engagement", 0.0);
+    th->minimumEngagement.expr = ReadExprText(j, "minimum_engagement");
     out = std::move(th);
   } else if (type == "CamProfile") { // v198
     ElementRef face;
@@ -4124,20 +4227,20 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       auto wo = std::make_unique<WormFeature>(name, face);
       wo->module = j.value("module", 0.0);
       wo->module.expr = ReadExprText(j, "module");
-      wo->starts = j.value("starts", 1);
-      wo->pressureDeg = j.value("pressure_angle_deg", 20.0);
+      ReadExpr(j, "starts", wo->starts);
+      ReadExpr(j, "pressure_angle_deg", wo->pressureDeg);
       wo->rightHanded = hand == "right";
-      wo->backlash = j.value("backlash", 0.0);
-      wo->length = j.value("length", 0.0);
+      ReadExpr(j, "backlash", wo->backlash);
+      ReadExpr(j, "length", wo->length);
       out = std::move(wo);
     } else {
       auto ww = std::make_unique<WormWheelFeature>(name, face);
       ww->module = j.value("module", 0.0);
       ww->module.expr = ReadExprText(j, "module");
-      ww->teeth = j.value("teeth", 40);
-      ww->starts = j.value("starts", 1);
-      ww->wormDiameter = j.value("worm_diameter", 0.0);
-      ww->pressureDeg = j.value("pressure_angle_deg", 20.0);
+      ReadExpr(j, "teeth", ww->teeth);
+      ReadExpr(j, "starts", ww->starts);
+      ReadExpr(j, "worm_diameter", ww->wormDiameter);
+      ReadExpr(j, "pressure_angle_deg", ww->pressureDeg);
       ww->rightHanded = hand == "right";
       out = std::move(ww);
     }
@@ -4151,7 +4254,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                  const char* ownerName) {
       if (kind == owner)
         return;
-      for (const char* suffix : {"diameter", "depth"})
+      for (const char* suffix :
+           {"diameter", "depth", "diameter_expr", "depth_expr"})
         if (j.contains(std::string(prefix) + suffix))
           throw std::runtime_error(
               std::string(prefix) + suffix + " belongs to a " + ownerName +
@@ -4165,19 +4269,21 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ho->diameter.expr = ReadExprText(j, "diameter");
     ho->depth.expr = ReadExprText(j, "depth");
     ho->through = j.value("through", false);
-    ho->cbDiameter = j.value("cb_diameter", 2.0);
-    ho->cbDepth = j.value("cb_depth", 0.5);
-    ho->csDiameter = j.value("cs_diameter", 2.0);
-    ho->csDepth = j.value("cs_depth", 0.5);
+    ReadExpr(j, "cb_diameter", ho->cbDiameter);
+    ReadExpr(j, "cb_depth", ho->cbDepth);
+    ReadExpr(j, "cs_diameter", ho->csDiameter);
+    ReadExpr(j, "cs_depth", ho->csDepth);
     if (j.contains("fit")) { // v71
       const auto& fit = j.at("fit");
-      readctx::RefuseUnknownKeys(fit, {"thread", "kind", "pitch"}, "fit");
+      readctx::RefuseUnknownKeys(fit, {"thread", "kind", "pitch", "pitch_expr"},
+                                 "fit");
       // A fit is written with its thread; one without is not written back.
       if (fit.value("thread", std::string{}).empty())
         throw std::runtime_error("a hole's fit names its thread");
       ho->fitThread = fit.value("thread", std::string{});
       ho->fitKind = fit.value("kind", std::string("normal"));
       ho->fitPitch = fit.value("pitch", 0.0);
+      ho->fitPitch.expr = ReadExprText(fit, "pitch");
     }
     // v148: the drill's point and a tapped fit's thread depth. Absent is
     // derived; a value Execute cannot use is its error, not a substitute.
@@ -4191,6 +4297,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                  " is below 0; leave it out to have it "
                                  "derived");
     ho->pointAngleDeg = j.value("drill_point_deg", 0.0);
+    ho->pointAngleDeg.expr = ReadExprText(j, "drill_point_deg");
     ho->threadDepth = j.value("thread_depth", 0.0);
     ho->threadDepth.expr = ReadExprText(j, "thread_depth");
     if (j.contains("printed")) { // v183: a teardrop's roof

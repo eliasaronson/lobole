@@ -270,6 +270,13 @@ bool EditPatternParams(AppState& state, size_t opIndex, glm::dvec2 vec,
                        double scalar, int count, glm::dvec2 vec2 = {0.0, 0.0},
                        int count2 = 1);
 
+// The same from an edited copy of the op: its numbers AND the texts that
+// drive them (docs/sketching/README.md#patterns-that-are-expressions), so a
+// count typed as `n` stays bound to `n`. Refused (false, with the reason in
+// actionMsg) for a count below 1. One undo record.
+bool EditPatternOp(AppState& state, size_t opIndex,
+                   const sketch::DerivedOp& edited);
+
 // Removes a linked pattern (its op + generated entities) and regenerates. One
 // undo record. No-op if opIndex is out of range.
 bool RemovePattern(AppState& state, size_t opIndex);

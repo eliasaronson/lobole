@@ -52,11 +52,19 @@ public:
 
   [[nodiscard]] bool IsDatum() const override { return true; }
 
+  void VisitExprs(const ExprVisitor& visit) override {
+    if (kind == DatumAxisKind::TwoPoints) {
+      VisitVec3Exprs(visit, p0, pExpr[0], ExprQuantity::Length, "points/0");
+      VisitVec3Exprs(visit, p1, pExpr[1], ExprQuantity::Length, "points/1");
+    }
+  }
+
   [[nodiscard]] const glm::dvec3& Origin() const { return m_origin; }
   [[nodiscard]] const glm::dvec3& Direction() const { return m_dir; } // unit
 
   DatumAxisKind kind = DatumAxisKind::TwoPoints;
   glm::dvec3 p0{0.0}, p1{1.0, 0.0, 0.0};    // TwoPoints (world space)
+  std::array<Vec3Exprs, 2> pExpr;           // their texts
   uint64_t sketchId = 0;                    // SketchLine: sketch feature id
   uint32_t entityId = 0;                    // SketchLine: stable entity id
   // FromFit: the body, the seed point and the kind (cylinder or cone).

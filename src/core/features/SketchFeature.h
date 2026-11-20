@@ -656,7 +656,8 @@ inline glm::dvec2 EntityPointUV(const Entity& e, uint8_t which) {
 // The scalar fields of an entity that may carry a driving expression:
 //   Line   "ax" "ay" "bx" "by"   (endpoint coordinates)
 //   Circle "cx" "cy" "r"         (center + radius)
-//   Arc    "cx" "cy" "r"         (center + radius; angles deliberately not)
+//   Arc    "cx" "cy" "r" "start_angle_deg" "end_angle_deg" (the angles
+//          stored in radians, their expressions speaking DEGREES)
 //   Point  "x" "y"
 //   BSpline "p<k>x" "p<k>y"       (pole k, from 0)
 //   Text   "x" "y" (anchor) "height" "angle_deg" "spacing" — the angle's
@@ -811,12 +812,18 @@ struct DerivedOp {
   glm::dvec2 vec{0.0}; // Linear: per-step translation. Circular: centre (UV).
                        // LinkedCopy: the paste offset.
   double scalar = 0.0; // Circular: step angle (radians). Linear: unused.
-  int count = 2;       // total instances including the seed (count-1 generated)
+  ExprInt count{2};    // total instances including the seed (count-1 generated)
   // Linear only (v50): second grid direction. count2 = 1 keeps the pattern
   // 1D; instances flatten row-major (k = row*count + col), so the Inst
   // records need no new fields.
   glm::dvec2 vec2{0.0};
-  int count2 = 1;
+  ExprInt count2{1};
+  // The texts that drive the numbers above, "" for a literal
+  // (docs/sketching/README.md#patterns-that-are-expressions): each
+  // coordinate of `vec` and `vec2`, and the step angle in DEGREES, as every
+  // angle expression is.
+  std::array<std::string, 2> vecExpr, vec2Expr;
+  std::string scalarExpr;
   // Mirror only (v51): the axis line entity (or X/Y datum axis id) the
   // copies reflect across — resolved fresh each regeneration.
   uint32_t axisEntity = 0;

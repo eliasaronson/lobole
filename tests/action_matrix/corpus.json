@@ -227,6 +227,7 @@
   {"design": "golden/v217-closed-spline-two-edges", "kind": "golden", "source": "tests/golden/v217-closed-spline-two-edges.json"},
   {"design": "golden/v219-factor-of-safety", "kind": "golden", "source": "tests/golden/v219-factor-of-safety.json"},
   {"design": "golden/v221-frame-supports", "kind": "golden", "source": "tests/golden/v221-frame-supports.json"},
+  {"design": "golden/vNEXT-part-expressions", "kind": "golden", "source": "tests/golden/vNEXT-part-expressions.json"},
   {"design": "golden/v194-edge-names-by-geometry", "kind": "golden", "source": "tests/golden/v194-edge-names-by-geometry.json"},
   {"design": "generator/gear", "kind": "generator", "source": "generators/gear.py"},
   {"design": "generator/gear_train", "kind": "generator", "source": "generators/gear_train.py", "parts": ["carrier", "pinion", "idler", "wheel", "rack"]},

@@ -1,0 +1,65 @@
+{
+  "bodies": 2,
+  "expr_texts": [
+    [
+      "feature 'Block'",
+      "x0"
+    ],
+    [
+      "feature 'Dots'",
+      "sweep"
+    ],
+    [
+      "feature 'Dots'",
+      "n"
+    ],
+    [
+      "sheet-metal rules",
+      "r_bend"
+    ],
+    [
+      "sheet-metal rules",
+      "r_bend - 0.5"
+    ],
+    [
+      "tube rules",
+      "die"
+    ],
+    [
+      "tube rules",
+      "die / 2"
+    ],
+    [
+      "tolerance 4",
+      "-tol"
+    ],
+    [
+      "tolerance 4",
+      "tol"
+    ]
+  ],
+  "features": 5,
+  "volumes": [
+    1000.0,
+    12208.572933822
+  ],
+  "sheet_metal": {
+    "material": "aluminum_6061_t6",
+    "gauge": "1.5mm",
+    "thickness": 1.5,
+    "bend_radius": 3.0,
+    "k_factor": 0.46,
+    "relief": "rectangular",
+    "relief_width": 2.5
+  },
+  "tolerances": [
+    {
+      "feature_id": 2,
+      "element": "x",
+      "b_feature_id": 2,
+      "b_element": "y",
+      "lower": -0.1,
+      "upper": 0.1
+    }
+  ]
+}

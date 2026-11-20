@@ -246,6 +246,7 @@ Document::Document(const Document& other, bool reuseGeometry)
   m_generator = other.m_generator;
   m_sheetMetal = other.m_sheetMetal; // every flange's thickness comes from it
   m_tube = other.m_tube;             // what check_frame and the cut list read
+  m_exprProblems = other.m_exprProblems;
   m_print = other.m_print;           // what the fit checks model a print at
   m_printSettings = other.m_printSettings; // what the slicer is handed
   m_tables = other.m_tables;         // a lone part's project tables
@@ -580,6 +581,8 @@ bool Document::Regenerate() {
   // after the execute loop below (a rebuilt feature ClearError()s first), so
   // the message survives; it is also why it must cover cached features whose
   // unchanged literal never re-executes.
+  // The rules and the tolerances first: the sheet's seed the chain below.
+  EvaluateDocumentExprs();
   std::vector<std::string> exprErr(upTo);
   for (size_t i = 0; i < upTo; i++) {
     m_features[i]->VisitExprs([&, i](const ExprSlot& slot) {
@@ -609,10 +612,11 @@ bool Document::Regenerate() {
     const sheet::SheetMetalRules& r = *m_sheetMetal;
     chain = std::hash<std::string>{}(
         std::to_string(chain) + "|sheet|" + r.material + "|" + r.gauge + "|" +
-        std::to_string(r.thickness) + "|" + std::to_string(r.bendRadius) + "|" +
-        std::to_string(r.kFactor) + "|" +
+        std::to_string(r.thickness) + "|" + std::to_string(r.bendRadius.value) +
+        "|" + std::to_string(r.kFactor.value) + "|" +
         sheet::ReliefStyleName(r.reliefStyle) + "|" +
-        std::to_string(r.reliefWidth) + "|" + std::to_string(r.reliefDepth));
+        std::to_string(r.reliefWidth.value) + "|" +
+        std::to_string(r.reliefDepth.value));
   }
   const size_t seed = chain;
   // Feature i's link of the chain, from the link before it.
@@ -1386,6 +1390,92 @@ void Document::VisitDocumentExprs(
     const std::string owner = "study '" + study.name + "'";
     study.VisitExprs([&](const ExprSlot& slot) { visit(owner, slot); });
   }
+  // The part's own numbers outside its features
+  // (docs/variables/README.md#numbers-that-are-expressions).
+  if (m_sheetMetal)
+    m_sheetMetal->VisitExprs(
+        [&](const ExprSlot& slot) { visit("sheet-metal rules", slot); });
+  if (m_tube)
+    m_tube->VisitExprs(
+        [&](const ExprSlot& slot) { visit("tube rules", slot); });
+  for (Tolerance& t : m_tolerances) {
+    if (!t.IsExplicit())
+      continue; // a class's or a printed press's band is not stored
+    const std::string owner = "tolerance " + std::to_string(t.id);
+    visit(owner, ExprSlot(t.lower, ExprQuantity::Length, "lower"));
+    visit(owner, ExprSlot(t.upper, ExprQuantity::Length, "upper"));
+  }
+}
+
+bool Document::EvaluateDocumentExprs() {
+  std::vector<DocumentExprProblem> problems;
+  bool changed = false;
+  // Evaluates `owner`'s slots on a copy; the copy is taken when every slot
+  // evaluated and `check` finds nothing wrong with what it came to.
+  // Otherwise the texts are kept (the next evaluation tries them again) and
+  // the values stay the last good ones.
+  const auto evaluate = [&](auto& rules, const std::string& owner,
+                            const auto& check) {
+    auto next = rules;
+    std::string why;
+    next.VisitExprs([&](const ExprSlot& slot) {
+      std::string e;
+      if (!EvaluateSlot(slot, m_symbols, &e) && why.empty())
+        why = slot.Path() + "_expr '" + slot.Expr() + "': " + e;
+    });
+    if (why.empty())
+      why = check(next);
+    if (!why.empty()) {
+      problems.push_back({owner, why});
+      return;
+    }
+    std::vector<double> before, after;
+    rules.VisitExprs([&](const ExprSlot& s) { before.push_back(s.Value()); });
+    next.VisitExprs([&](const ExprSlot& s) { after.push_back(s.Value()); });
+    if (before != after) {
+      rules = std::move(next);
+      changed = true;
+    }
+  };
+  if (m_sheetMetal)
+    evaluate(
+        *m_sheetMetal, "sheet-metal rules",
+        [](const sheet::SheetMetalRules& r) { return sheet::Validate(r); });
+  if (m_tube)
+    evaluate(*m_tube, "tube rules",
+             [](const tube::TubeRules& r) { return tube::Validate(r); });
+  for (Tolerance& t : m_tolerances) {
+    if (!t.IsExplicit() || (!t.lower.Bound() && !t.upper.Bound()))
+      continue;
+    // A tolerance's two limits, as a pair of slots.
+    struct Limits {
+      ExprValue lower, upper;
+      void VisitExprs(const ExprVisitor& visit) {
+        visit({lower, ExprQuantity::Length, "lower"});
+        visit({upper, ExprQuantity::Length, "upper"});
+      }
+    } limits{t.lower, t.upper};
+    evaluate(limits, "tolerance " + std::to_string(t.id),
+             [](const Limits& l) -> std::string {
+               if (l.lower > l.upper)
+                 return "lower (" + std::to_string(l.lower.value) +
+                        ") comes out above upper (" +
+                        std::to_string(l.upper.value) +
+                        "): a reversed band admits nothing";
+               return {};
+             });
+    t.lower.value = limits.lower.value;
+    t.upper.value = limits.upper.value;
+  }
+  if (problems.size() != m_exprProblems.size())
+    changed = true;
+  else
+    for (size_t i = 0; i < problems.size(); i++)
+      if (problems[i].owner != m_exprProblems[i].owner ||
+          problems[i].error != m_exprProblems[i].error)
+        changed = true;
+  m_exprProblems = std::move(problems);
+  return changed;
 }
 
 void Document::ForEachExprText(
@@ -1409,6 +1499,19 @@ void Document::RenameReferences(const std::string& oldName,
     study.VisitExprs([&](const ExprSlot& slot) {
       savedOutsideFeatures |= RenameInSlot(slot, oldName, newName);
     });
+  // The rules and the tolerances: saved without a feature moving, too.
+  if (m_sheetMetal)
+    m_sheetMetal->VisitExprs([&](const ExprSlot& slot) {
+      savedOutsideFeatures |= RenameInSlot(slot, oldName, newName);
+    });
+  if (m_tube)
+    m_tube->VisitExprs([&](const ExprSlot& slot) {
+      savedOutsideFeatures |= RenameInSlot(slot, oldName, newName);
+    });
+  for (Tolerance& t : m_tolerances)
+    for (ExprValue* v : {&t.lower, &t.upper})
+      savedOutsideFeatures |= RenameInSlot(
+          ExprSlot(*v, ExprQuantity::Length, ""), oldName, newName);
   // A configuration overrides a variable BY NAME, and its override texts
   // read others: both follow the rename, or the override silently stops
   // applying to anything.

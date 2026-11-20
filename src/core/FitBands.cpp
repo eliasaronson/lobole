@@ -200,7 +200,8 @@ void Stamp(const Document& doc, std::vector<Body>& bodies) {
         b.lower = t.lower;
         b.upper = t.upper;
         char buf[64];
-        std::snprintf(buf, sizeof buf, "%+.3f/%+.3f", t.upper, t.lower);
+        std::snprintf(buf, sizeof buf, "%+.3f/%+.3f", t.upper.value,
+                      t.lower.value);
         b.label = buf;
       } else {
         const auto band = fits::Limits(made, t.isoClass, nullptr);

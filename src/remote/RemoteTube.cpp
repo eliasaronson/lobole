@@ -42,10 +42,15 @@ static constexpr MethodDoc TubeMethods[] = {
      "last one) default to 2x and 1.5x THAT MEMBER's outer diameter. "
      "`max_thinning` is a FRACTION of the wall, for a rulebook that demands "
      "better than the 25% draw bending is accepted at. `clear: true` makes "
-     "it not a tube part. It drives no geometry, so setting it rebuilds "
+     "it not a tube part. Every number takes `<key>_expr`, an expression of "
+     "the part's variables (`former_radii_mm_expr` one text per radius, \"\" "
+     "where the number stands), evaluated now and refused naming the key "
+     "when it does not; a number alone unbinds, and a variable change "
+     "re-evaluates them. It drives no geometry, so setting it rebuilds "
      "nothing.",
-     "clear, former_radii_mm, material, max_thinning, min_straight_mm, "
-     "tail_length_mm",
+     "clear, former_radii_mm, former_radii_mm_expr, material, max_thinning, "
+     "max_thinning_expr, min_straight_mm, min_straight_mm_expr, "
+     "tail_length_mm, tail_length_mm_expr",
      remote::NeedsPart | remote::NotInBatch},
     {"get_tube_rules",
      "This part's tube rules (`min_straight` and `tail_length` in mm), with "
@@ -58,7 +63,9 @@ static constexpr MethodDoc TubeMethods[] = {
      "part", remote::Deferrable,
      "rules:{material:string, max_thinning:number, "
      "former_radii_mm:number[], min_straight:number|string, "
-     "tail_length:number|string}|null, stocked?:object"},
+     "tail_length:number|string, former_radii_mm_expr?:string[], "
+     "min_straight_expr?:string, tail_length_expr?:string, "
+     "max_thinning_expr?:string}|null, stocked?:object"},
     {"check_frame",
      "Is this frame a TRUSS? Three questions on the member graph: a member "
      "welded to nothing at one end (a lever, and a space frame has none), a "
@@ -179,14 +186,20 @@ json RulesJson(const tube::TubeRules& r) {
   json j = {{"material", r.material},
             {"max_thinning", r.EffectiveMaxThinning()}};
   j["former_radii_mm"] = r.formerRadii; // empty = any radius
+  // Each text beside the number it drives
+  // (docs/tube/README.md#rules-that-are-expressions).
+  WriteExprTexts(j, "former_radii_mm", r.formerRadiiExpr);
+  WriteExprText(j, "min_straight", r.minStraight.expr);
+  WriteExprText(j, "tail_length", r.tailLength.expr);
+  WriteExprText(j, "max_thinning", r.maxThinning.expr);
   // The straight a clamp needs and the tail a bender grips are multiples of
   // the MEMBER's diameter, so they are reported as the rule rather than as a
   // number that would be wrong for every member but one.
   j["min_straight"] = r.minStraight > 0.0
-                          ? json(r.minStraight)
+                          ? json(r.minStraight.value)
                           : json("2 x the member's outer diameter");
   j["tail_length"] = r.tailLength > 0.0
-                         ? json(r.tailLength)
+                         ? json(r.tailLength.value)
                          : json("1.5 x the member's outer diameter");
   return j;
 }
@@ -216,17 +229,53 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
           "a tube frame is several sizes at once and each member's Pipe "
           "carries its own.");
     }
-    if (p.contains("former_radii_mm")) {
-      r.formerRadii.clear();
-      for (const auto& v : p.at("former_radii_mm"))
-        r.formerRadii.push_back(v.get<double>());
+    // Each number may be an expression of the part's variables, evaluated
+    // now and refused naming the key when it does not; a number alone
+    // unbinds.
+    const SymbolTable& symbols = active.Symbols();
+    if (p.contains("former_radii_mm") || p.contains("former_radii_mm_expr")) {
+      // [r, ...] and/or [text, ...]: a text, or "" where the number stands.
+      const json radii = p.value("former_radii_mm", json(nullptr));
+      const json texts = p.value("former_radii_mm_expr", json(nullptr));
+      if (!radii.is_null() && !radii.is_array())
+        throw std::runtime_error("former_radii_mm is [r, ...] in mm");
+      if (!texts.is_null() &&
+          (!texts.is_array() ||
+           (!radii.is_null() && texts.size() != radii.size())))
+        throw std::runtime_error(
+            "former_radii_mm_expr is one text per radius (\"\" where "
+            "former_radii_mm's own number stands)");
+      const size_t n = radii.is_null() ? texts.size() : radii.size();
+      r.formerRadii.assign(n, 0.0);
+      r.formerRadiiExpr.assign(n, std::string{});
+      for (size_t i = 0; i < n; i++) {
+        json one = json::object();
+        if (!radii.is_null())
+          one["r"] = radii[i];
+        if (!texts.is_null() &&
+            !(texts[i].is_string() && texts[i].get<std::string>().empty()))
+          one["r_expr"] = texts[i];
+        if (!one.contains("r") && !one.contains("r_expr"))
+          throw std::runtime_error("former_radii_mm_expr entry " +
+                                   std::to_string(i) +
+                                   " is \"\" and no former_radii_mm stands "
+                                   "there");
+        ExprValue v{0.0};
+        ReadExprParam(one, "r", v);
+        if (v.Bound()) {
+          std::string why;
+          if (!EvaluateSlot(ExprSlot(v, ExprQuantity::Length, ""), symbols,
+                            &why))
+            throw std::runtime_error("former_radii_mm_expr '" + v.expr +
+                                     "': " + why);
+        }
+        r.formerRadii[i] = v.value;
+        r.formerRadiiExpr[i] = v.expr;
+      }
     }
-    if (p.contains("min_straight_mm"))
-      r.minStraight = p.at("min_straight_mm").get<double>();
-    if (p.contains("tail_length_mm"))
-      r.tailLength = p.at("tail_length_mm").get<double>();
-    if (p.contains("max_thinning"))
-      r.maxThinning = p.at("max_thinning").get<double>();
+    ExprParam(p, "min_straight_mm", r.minStraight, symbols);
+    ExprParam(p, "tail_length_mm", r.tailLength, symbols);
+    ExprParam(p, "max_thinning", r.maxThinning, symbols);
     if (const std::string bad = tube::Validate(r); !bad.empty())
       throw std::runtime_error(bad);
     active.SetTube(r);

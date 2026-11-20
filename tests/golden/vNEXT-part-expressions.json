@@ -1,0 +1,272 @@
+{
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            0.0,
+            0.0
+          ],
+          "b": [
+            100.0,
+            0.0
+          ],
+          "id": 4229304666,
+          "type": "line"
+        },
+        {
+          "a": [
+            100.0,
+            0.0
+          ],
+          "b": [
+            100.0,
+            60.0
+          ],
+          "id": 337062134,
+          "type": "line"
+        },
+        {
+          "a": [
+            100.0,
+            60.0
+          ],
+          "b": [
+            0.0,
+            60.0
+          ],
+          "id": 176634820,
+          "type": "line"
+        },
+        {
+          "a": [
+            0.0,
+            60.0
+          ],
+          "b": [
+            0.0,
+            0.0
+          ],
+          "id": 235920667,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Blank",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "id": 2,
+      "name": "Base",
+      "sketch_id": 1,
+      "type": "BaseFlange"
+    },
+    {
+      "angle_deg": 90.0,
+      "edges": [
+        {
+          "element": "2/cap0;U1",
+          "feature_id": 2
+        }
+      ],
+      "id": 3,
+      "length": 20.0,
+      "name": "Wall",
+      "type": "EdgeFlange"
+    },
+    {
+      "depth": 10.0,
+      "height": 10.0,
+      "id": 5,
+      "name": "Block",
+      "position": [
+        120.0,
+        0.0,
+        0.0
+      ],
+      "position_expr": [
+        "x0",
+        "",
+        ""
+      ],
+      "type": "Box",
+      "width": 10.0
+    },
+    {
+      "constraints": [],
+      "derived_ops": [
+        {
+          "count": 3,
+          "count_expr": "n",
+          "instances": [
+            {
+              "gen": 4272268567,
+              "k": 1,
+              "source": 2556061764
+            },
+            {
+              "gen": 3089291195,
+              "k": 2,
+              "source": 2556061764
+            }
+          ],
+          "kind": "linear_pattern",
+          "scalar": 0.0,
+          "source_ids": [
+            2556061764
+          ],
+          "vec": [
+            5.0,
+            0.0
+          ]
+        }
+      ],
+      "entities": [
+        {
+          "center": [
+            0.0,
+            0.0
+          ],
+          "id": 2556061764,
+          "radius": 1.0,
+          "type": "circle"
+        },
+        {
+          "center": [
+            20.0,
+            0.0
+          ],
+          "end_angle": 1.5707963267948966,
+          "end_angle_deg_expr": "sweep",
+          "id": 4073933378,
+          "radius": 3.0,
+          "start_angle": 0.0,
+          "type": "arc"
+        },
+        {
+          "center": [
+            5.0,
+            0.0
+          ],
+          "id": 4272268567,
+          "radius": 1.0,
+          "type": "circle"
+        },
+        {
+          "center": [
+            10.0,
+            0.0
+          ],
+          "id": 3089291195,
+          "radius": 1.0,
+          "type": "circle"
+        }
+      ],
+      "id": 6,
+      "name": "Dots",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          40.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    }
+  ],
+  "format": "designer-document",
+  "parameters": [
+    {
+      "expression": "3",
+      "name": "r_bend"
+    },
+    {
+      "expression": "60",
+      "name": "die"
+    },
+    {
+      "expression": "0.1",
+      "name": "tol"
+    },
+    {
+      "expression": "120",
+      "name": "x0"
+    },
+    {
+      "expression": "3",
+      "name": "n"
+    },
+    {
+      "expression": "90",
+      "name": "sweep"
+    }
+  ],
+  "sheet_metal": {
+    "bend_radius": 3.0,
+    "bend_radius_expr": "r_bend",
+    "gauge": "1.5mm",
+    "material": "aluminum_6061_t6",
+    "relief_width": 2.5,
+    "relief_width_expr": "r_bend - 0.5",
+    "thickness": 1.5
+  },
+  "tolerances": [
+    {
+      "id": 4,
+      "lower": -0.1,
+      "lower_expr": "-tol",
+      "ref": {
+        "element": "x",
+        "feature_id": 2
+      },
+      "ref2": {
+        "element": "y",
+        "feature_id": 2
+      },
+      "upper": 0.1,
+      "upper_expr": "tol"
+    }
+  ],
+  "tube": {
+    "former_radii": [
+      60.0,
+      80.0
+    ],
+    "former_radii_expr": [
+      "die",
+      ""
+    ],
+    "material": "steel",
+    "min_straight": 30.0,
+    "min_straight_expr": "die / 2"
+  },
+  "version": 222
+}

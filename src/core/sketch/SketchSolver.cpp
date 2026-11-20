@@ -1380,6 +1380,11 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
               im.circles[static_cast<size_t>(im.circleOf[id])].rad);
         else if (im.arcOf.count(id) != 0)
           im.fixedParams.insert(im.arcs[static_cast<size_t>(im.arcOf[id])].rad);
+      } else if ((field == "start_angle_deg" || field == "end_angle_deg") &&
+                 im.arcOf.count(id) != 0) {
+        const GCS::Arc& a = im.arcs[static_cast<size_t>(im.arcOf[id])];
+        im.fixedParams.insert(field == "start_angle_deg" ? a.startAngle
+                                                         : a.endAngle);
       }
     }
   }

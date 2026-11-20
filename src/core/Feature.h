@@ -777,9 +777,12 @@ public:
     visit({width, ExprQuantity::Length, "width"});
     visit({height, ExprQuantity::Length, "height"});
     visit({depth, ExprQuantity::Length, "depth"});
+    VisitVec3Exprs(visit, position, positionExpr, ExprQuantity::Length,
+                   "position");
   }
 
   glm::dvec3 position;
+  Vec3Exprs positionExpr;
   ExprValue width, height, depth;
 };
 
@@ -805,9 +808,11 @@ public:
 
   void VisitExprs(const ExprVisitor& visit) override {
     visit({radius, ExprQuantity::Length, "radius"});
+    VisitVec3Exprs(visit, center, centerExpr, ExprQuantity::Length, "center");
   }
 
   glm::dvec3 center;
+  Vec3Exprs centerExpr;
   ExprValue radius;
 };
 
@@ -834,9 +839,11 @@ public:
   void VisitExprs(const ExprVisitor& visit) override {
     visit({radius, ExprQuantity::Length, "radius"});
     visit({height, ExprQuantity::Length, "height"});
+    VisitVec3Exprs(visit, center, centerExpr, ExprQuantity::Length, "center");
   }
 
   glm::dvec3 center;
+  Vec3Exprs centerExpr;
   glm::dvec3 direction;
   ExprValue radius, height;
 };

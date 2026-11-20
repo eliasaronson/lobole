@@ -175,7 +175,7 @@ TEST_CASE("Thread round-trips through serialization",
   CHECK(th->pitch == 1.25);
   CHECK(th->threadClass == "6g");
   CHECK(th->allowEngagement);
-  CHECK(th->minimumEngagement == 3);
+  CHECK(th->minimumEngagement == 3.0);
   CHECK(th->length == 8.0);
   CHECK_FALSE(th->modeled);
   CHECK(th->GetError().empty());

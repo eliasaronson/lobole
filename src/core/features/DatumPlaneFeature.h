@@ -53,7 +53,15 @@ public:
 
   void VisitExprs(const ExprVisitor& visit) override {
     visit({offset, ExprQuantity::Length, "offset"});
-    visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
+    if (kind == DatumPlaneKind::Angled) {
+      visit({angleDeg, ExprQuantity::Angle, "angle_deg"});
+      VisitAxisExprs(axis, visit, "axis");
+    }
+    if (kind == DatumPlaneKind::ThroughPoints) {
+      VisitVec3Exprs(visit, p0, pExpr[0], ExprQuantity::Length, "points/0");
+      VisitVec3Exprs(visit, p1, pExpr[1], ExprQuantity::Length, "points/1");
+      VisitVec3Exprs(visit, p2, pExpr[2], ExprQuantity::Length, "points/2");
+    }
   }
 
   // The plane this datum evaluated to on the last successful Execute.
@@ -76,6 +84,7 @@ public:
 
   // ThroughPoints: three non-collinear world-space points.
   glm::dvec3 p0{0.0}, p1{1.0, 0.0, 0.0}, p2{0.0, 1.0, 0.0};
+  std::array<Vec3Exprs, 3> pExpr; // their texts
 
   // FromFit: the body, the seed point and the kind (plane only).
   meshfit::FitRef fit;

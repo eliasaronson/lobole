@@ -30,11 +30,16 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "derived from those two unless given: bend radius = the material's "
      "minimum, K = the R/t band of the bend chart, relief = 1.5t wide by "
      "R+t deep. Omit them and a correction to the tables reaches this part; "
-     "set them and they stay put. `clear: true` makes it not a sheet part "
+     "set them and they stay put. Each of those four takes `<key>_expr`, an "
+     "expression of the part's variables (evaluated now, refused naming the "
+     "key when it does not; a number alone unbinds), and a variable change "
+     "rebuilds every bend. The thickness is the gauge's and takes none. "
+     "`clear: true` makes it not a sheet part "
      "again. Rebuilds every sheet feature. get_sheet_metal_rules with no "
      "rules set lists the materials and gauges carried.",
-     "material, gauge, bend_radius_mm, k_factor, relief, relief_width_mm, "
-     "relief_depth_mm, clear",
+     "material, gauge, bend_radius_mm, bend_radius_mm_expr, k_factor, "
+     "k_factor_expr, relief, relief_width_mm, relief_width_mm_expr, "
+     "relief_depth_mm, relief_depth_mm_expr, clear",
      NeedsPart},
     {"get_sheet_metal_rules",
      "The part's sheet-metal rules, each derived field RESOLVED to the number "
@@ -43,6 +48,8 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "is not sheet metal.",
      "part", Deferrable,
      "relief_styles:string[], rules:{bend_radius_mm:number, "
+     "bend_radius_mm_expr?:string, k_factor_expr?:string, "
+     "relief_width_mm_expr?:string, relief_depth_mm_expr?:string, "
      "bend_radius_source:string, gauge:string, k_factor:number, "
      "k_factor_source:string, material:string, "
      "min_bend_radius_mm:number, relief:string, relief_depth_mm:number, "
@@ -119,6 +126,17 @@ json RulesJson(const sheet::SheetMetalRules& r) {
           {"relief_depth_mm", r.EffectiveReliefDepth(radius)}};
 }
 
+// The same, with each text beside the number it drives
+// (docs/sheetmetal/README.md#rules-that-are-expressions).
+json RulesJsonWithExprs(const sheet::SheetMetalRules& r) {
+  json j = RulesJson(r);
+  WriteExprText(j, "bend_radius_mm", r.bendRadius.expr);
+  WriteExprText(j, "k_factor", r.kFactor.expr);
+  WriteExprText(j, "relief_width_mm", r.reliefWidth.expr);
+  WriteExprText(j, "relief_depth_mm", r.reliefDepth.expr);
+  return j;
+}
+
 // Every material and its stocked designations — the list IS the scope, so a
 // picker built from it cannot offer a row set_sheet_metal_rules would refuse.
 json StockJson() {
@@ -182,10 +200,11 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
     if (!t)
       throw std::runtime_error(why);
     r.thickness = *t;
-    if (p.contains("bend_radius_mm"))
-      r.bendRadius = p.at("bend_radius_mm").get<double>();
-    if (p.contains("k_factor"))
-      r.kFactor = p.at("k_factor").get<double>();
+    // Each may be an expression of the part's variables, evaluated now and
+    // refused naming the key when it does not; a number alone unbinds.
+    const SymbolTable& symbols = active.Symbols();
+    ExprParam(p, "bend_radius_mm", r.bendRadius, symbols);
+    ExprParam(p, "k_factor", r.kFactor, symbols);
     if (p.contains("relief")) {
       const std::string v = p.at("relief").get<std::string>();
       if (!sheet::ReliefStyleFromString(v, r.reliefStyle)) {
@@ -194,17 +213,15 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
             "' (expected one of: " + sheet::ReliefStyleList() + ")");
       }
     }
-    if (p.contains("relief_width_mm"))
-      r.reliefWidth = p.at("relief_width_mm").get<double>();
-    if (p.contains("relief_depth_mm"))
-      r.reliefDepth = p.at("relief_depth_mm").get<double>();
+    ExprParam(p, "relief_width_mm", r.reliefWidth, symbols);
+    ExprParam(p, "relief_depth_mm", r.reliefDepth, symbols);
     if (const std::string bad = sheet::Validate(r); !bad.empty())
       throw std::runtime_error(bad);
 
     const json preDigest = BodyDigestJson(active);
     state.commands->Execute(std::make_unique<SetSheetMetalRulesCommand>(r),
                             active);
-    out = {{"rules", RulesJson(r)}};
+    out = {{"rules", RulesJsonWithExprs(*active.SheetMetal())}};
     AttachRegen(out, &active, preDigest);
     return true;
   }
@@ -337,8 +354,8 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
     // Read-only, so it answers about any part rather than only the active tab
     // (docs/scripting/rpc.md#reads-name-their-part).
     const Document& src = SubjectPart(state, doc, p);
-    out = {{"rules",
-            src.SheetMetal() ? RulesJson(*src.SheetMetal()) : json(nullptr)},
+    out = {{"rules", src.SheetMetal() ? RulesJsonWithExprs(*src.SheetMetal())
+                                      : json(nullptr)},
            {"stock", StockJson()},
            {"relief_styles", ReliefStylesJson()}};
     return true;

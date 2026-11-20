@@ -49,6 +49,9 @@ public:
       visit({clearanceMm, ExprQuantity::Length, "clearance_mm"});
     if (hasResolution)
       visit({resolutionMm, ExprQuantity::Length, "resolution_mm"});
+    // A direction, not a length: its coordinates are read as a way to go.
+    VisitVec3Exprs(visit, direction, directionExpr, ExprQuantity::Other,
+                   "direction");
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
@@ -80,6 +83,7 @@ public:
   ExprValue clearanceMm{0.0};
   // The way the object moves INTO the cradle: world -Z, down, unless set.
   glm::dvec3 direction{0.0, 0.0, -1.0};
+  Vec3Exprs directionExpr;
   // false keeps the undercuts: a snap-in grip.
   bool sweep = true;
   // Unset: half the clearance, coarsened to fit the budget, never past the

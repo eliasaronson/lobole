@@ -1632,6 +1632,9 @@ struct AppState {
   int toleranceGrade = 7;
   double toleranceLower = 0.0;
   double toleranceUpper = 0.0;
+  // Their expression texts, "" for a number: what a limit typed as an
+  // expression stays bound to once set.
+  std::string toleranceLowerExpr, toleranceUpperExpr;
   std::string toleranceMsg; // the refusal or confirmation, shown in-window
 
   Selection selection; // U1: the one selection set (see SelectionItem)

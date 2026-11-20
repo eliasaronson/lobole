@@ -70,6 +70,16 @@ public:
     visit({diameter, ExprQuantity::Length, "diameter"});
     visit({depth, ExprQuantity::Length, "depth"});
     visit({threadDepth, ExprQuantity::Length, "thread_depth"});
+    visit({pointAngleDeg, ExprQuantity::Angle, "drill_point_deg"});
+    if (!fitThread.empty())
+      visit({fitPitch, ExprQuantity::Length, "fit/pitch"});
+    if (kind == HoleKind::Counterbore) {
+      visit({cbDiameter, ExprQuantity::Length, "cb_diameter"});
+      visit({cbDepth, ExprQuantity::Length, "cb_depth"});
+    } else if (kind == HoleKind::Countersink) {
+      visit({csDiameter, ExprQuantity::Length, "cs_diameter"});
+      visit({csDepth, ExprQuantity::Length, "cs_depth"});
+    }
   }
 
   // The drill point at a blind floor and how deep a tapped fit is threaded,
@@ -95,7 +105,7 @@ public:
   // coarse pitch, read out of the vendored standard rather than assumed.
   std::string fitThread; // "M6"; empty = a plain diameter, as before
   std::string fitKind;   // close | normal | loose | tapped
-  double fitPitch = 0.0; // mm; 0 = coarse, and only read when tapped
+  ExprValue fitPitch{0.0}; // mm; 0 = coarse, and only read when tapped
   ExprValue depth{1.0};  // bore depth; `through` overrides it
   bool through = false; // drill far enough to pierce any body below
 
@@ -105,7 +115,7 @@ public:
   // those tables are ISO 235 jobber drills, whose point is 118 degrees; a
   // plain diameter says nothing about how it is made and keeps its flat
   // floor. 180 states a flat floor. Read by nothing on a through hole.
-  double pointAngleDeg = 0.0;
+  ExprValue pointAngleDeg{0.0};
   // A tapped fit's thread depth from the mouth, mm. 0 = derived: the drilled
   // depth less the three pitches a blind-hole tap's lead (ISO 8830 form C,
   // 2-3 threads) cuts no full thread in; the whole bore when through. Refused
@@ -120,12 +130,12 @@ public:
   HolePrinted printed = HolePrinted::Round;
 
   // Counterbore: a `cbDiameter` recess `cbDepth` deep at the surface.
-  double cbDiameter = 2.0;
-  double cbDepth = 0.5;
+  ExprValue cbDiameter{2.0};
+  ExprValue cbDepth{0.5};
   // Countersink: a cone widening to `csDiameter` at the surface over
   // `csDepth` (typical 82/90 deg bolt heads — the caller picks the depth).
-  double csDiameter = 2.0;
-  double csDepth = 0.5;
+  ExprValue csDiameter{2.0};
+  ExprValue csDepth{0.5};
 
 private:
   void NameByRole(const CADShape& tool, const std::vector<glm::dvec3>& centers,

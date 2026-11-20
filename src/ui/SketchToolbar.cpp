@@ -195,35 +195,59 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   const bool circular = op.kind == sketch::DerivedKind::CircularPattern;
   BeginToolWindowFrame(state, circular ? "Circular Pattern" : "Linear Pattern");
   sourcesRow();
-  int count = op.count;
-  glm::dvec2 vec = op.vec;
-  glm::dvec2 vec2 = op.vec2;
-  int count2 = op.count2;
-  double angleDeg = glm::degrees(op.scalar);
+  // Every number a field that keeps its text: a count, a step or the angle
+  // typed as an expression stays bound to it, and a plain number unbinds
+  // (docs/sketching/README.md#patterns-that-are-expressions).
+  sketch::DerivedOp next = op;
   bool changed = false;
-  ImGui::SetNextItemWidth(90);
-  changed |= ExprDragInt(state, "Count", &count, 0.1f, 2, 1000);
-  if (circular) {
-    ImGui::SetNextItemWidth(140);
-    changed |= ExprDragFloat2(state, "Centre", &vec.x, 0.05f);
+  const auto countField = [&](const char* label, ExprInt& c, double lo) {
+    double v = c.value;
+    std::string expr = c.expr;
     ImGui::SetNextItemWidth(90);
-    changed |= ExprDragDouble(state, "Angle", &angleDeg, 0.5f, -360.0, 360.0,
-                              "%.1f deg");
-  } else {
-    ImGui::SetNextItemWidth(140);
-    changed |= ExprDragFloat2(state, "Step", &vec.x, 0.05f);
-    ImGui::SetNextItemWidth(90);
-    changed |= ExprDragInt(state, "Rows", &count2, 0.1f, 1, 1000);
-    if (count2 > 1) {
-      ImGui::SetNextItemWidth(140);
-      changed |= ExprDragFloat2(state, "Row step", &vec2.x, 0.05f);
+    if (!ExprBoundDrag(state, label, &v, &expr, 0.1f, lo, 1000.0, "%.0f"))
+      return;
+    if (v != std::round(v)) { // a count is whole, never rounded
+      state.sketchEdit.actionMsg = std::string(label) +
+                                   ": a count is a whole number, and this "
+                                   "comes out " +
+                                   std::to_string(v);
+      return;
     }
+    c.value = static_cast<int>(std::lround(v));
+    c.expr = expr;
+    changed = true;
+  };
+  const auto pairField = [&](const char* label, glm::dvec2& v,
+                             std::array<std::string, 2>& texts) {
+    static const char* kAxes[] = {" u", " v"};
+    for (int k = 0; k < 2; k++) {
+      const std::string row = std::string(label) + kAxes[k];
+      ImGui::SetNextItemWidth(90);
+      changed |= ExprBoundDrag(state, row.c_str(), &v[k],
+                               &texts[static_cast<size_t>(k)], 0.05f, 0.0, 0.0,
+                               "%.3f");
+    }
+  };
+  countField("Count", next.count, 2.0);
+  if (circular) {
+    pairField("Centre", next.vec, next.vecExpr);
+    double angleDeg = glm::degrees(next.scalar);
+    ImGui::SetNextItemWidth(90);
+    if (ExprBoundDrag(state, "Angle", &angleDeg, &next.scalarExpr, 0.5f, -360.0,
+                      360.0, "%.1f deg")) {
+      next.scalar = glm::radians(angleDeg);
+      changed = true;
+    }
+  } else {
+    pairField("Step", next.vec, next.vecExpr);
+    countField("Rows", next.count2, 1.0);
+    if (next.count2 > 1)
+      pairField("Row step", next.vec2, next.vec2Expr);
   }
   if (changed) {
     // Commits + REPLACES the sketch feature — `sketch`/`op` dangle after;
     // nothing below reads them.
-    EditPatternParams(state, oi, vec, circular ? glm::radians(angleDeg) : 0.0,
-                      count, vec2, count2);
+    EditPatternOp(state, oi, next);
   }
   ImGui::Separator();
   if (ImGui::Button(ICON_FA_TRASH_CAN " Delete")) {
@@ -734,7 +758,7 @@ void DrawSketchModelSections(AppState& state) {
                       op.kind == sketch::DerivedKind::CircularPattern
                           ? "Circular"
                           : "Linear",
-                      op.count);
+                      op.count.value);
       }
       // Highlight the op whose instance/source is currently selected.
       bool opSelected = false;

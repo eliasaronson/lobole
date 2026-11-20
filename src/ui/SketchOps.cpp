@@ -790,6 +790,45 @@ bool EditPatternParams(AppState& state, size_t opIndex, glm::dvec2 vec,
   return true;
 }
 
+bool EditPatternOp(AppState& state, size_t opIndex,
+                   const sketch::DerivedOp& edited) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || opIndex >= sketch->derived.size())
+    return false;
+  if (edited.count < 1 || edited.count2 < 1) {
+    state.sketchEdit.actionMsg = "a pattern's count is at least 1";
+    return false;
+  }
+  sketch::DerivedOp& op = sketch->derived[opIndex];
+  if (op.vec == edited.vec && op.scalar == edited.scalar &&
+      op.count == edited.count && op.vec2 == edited.vec2 &&
+      op.count2 == edited.count2 && op.vecExpr == edited.vecExpr &&
+      op.vec2Expr == edited.vec2Expr && op.scalarExpr == edited.scalarExpr)
+    return false; // no change
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  op.vec = edited.vec;
+  op.vecExpr = edited.vecExpr;
+  op.scalar = edited.scalar;
+  op.scalarExpr = edited.scalarExpr;
+  op.count = edited.count;
+  op.vec2 = edited.vec2;
+  op.vec2Expr = edited.vec2Expr;
+  op.count2 = edited.count2;
+  sketch->RegenerateDerived();
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch->entities);
+  sketch->RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  return true;
+}
+
 bool SetPatternCount(AppState& state, size_t opIndex, int count) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
