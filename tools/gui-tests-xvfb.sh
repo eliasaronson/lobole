@@ -297,7 +297,7 @@ fi
 # directory that no later run touches, alongside the one thing that makes it
 # reproducible — the exact filter, in order, and the seed.
 rm -f /tmp/designer-gui-shard*.log
-FAILDIR="${XDG_STATE_HOME:-$HOME/.local/state}/designer/gui-failures"
+FAILDIR="${XDG_STATE_HOME:-$HOME/.local/state}/lobole/gui-failures"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 # Keep the last 20 archived failures; past that the oldest are noise.
 if [ -d "$FAILDIR" ]; then
