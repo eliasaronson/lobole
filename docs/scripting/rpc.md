@@ -197,9 +197,35 @@ case's `mesh_size_expr` / `weight_expr`, `add_load` `magnitude_expr` /
 `ReadExprParam` (`src/core/ExprValue.h`; `remote::ExprParam` marks both
 keys read) reads them, so no handler parses its own: a number alone is a
 literal and clears an expression the field had; a text that does not parse
-is refused, naming the key; whether its names resolve is decided where it
-is evaluated. `tools/rpc_params_scan.py` reads an `ExprParam(p, "<field>")`
+is refused, naming the key (a feature spec's too: `add_feature`,
+`modify_feature`); whether its names resolve is decided where it is
+evaluated. A FILE may hold one that does not parse: it opens, and what
+holds it is broken with the parse error. `tools/rpc_params_scan.py` reads an `ExprParam(p, "<field>")`
 as both keys, and the method's row lists both.
+
+An **assembly's** methods take theirs the same way, as their own
+parameters in the units their keys name (`src/remote/ExprArgs.h`):
+`add_mate` / `set_mate` `rotation_deg_expr`, `offset_expr`, `dx_expr`,
+`dy_expr`, `rotation_range_deg_expr` (and the other ranges: `[min, max]`
+texts, `""` where the range's own number stands) and `cone_deg_expr`;
+`add_occurrence` / `set_occurrence_transform` `transform.position_expr`;
+`add_relation` / `set_relation` `ratio_expr`, `phase_expr`,
+`constant_expr`, `start_deg_expr` (and on add `step_deg_expr` /
+`step_mm_expr`, `duration_deg_expr`, `period_deg_expr`, `lift_expr`, a
+term's `coefficient_expr`); `add_motion_study` / `set_motion_study`
+`from_expr`, `to_expr`, `samples_expr`, `clash_deflection_mm_expr`;
+`set_explode_step` `offset_expr`; `set_assembly_sequence`
+`allowance_mm_expr` and inside its steps `distance_mm_expr`,
+`turn_deg_expr` and a pose value's `rotation_deg_expr` / `offset_mm_expr`;
+`set_configuration`'s `mate_overrides` entries `rotation_deg_expr`,
+`rotation_expr` (degrees too) and `offset_expr`. Each text is evaluated
+over the project's variables when the call arrives, and refused naming
+the key when it does not parse or names a variable the project does not
+have. An angle's text is in degrees even where the number beside it is
+radians (`phase`, `constant`, a held `rotation`). The getters answer
+`<field>_expr` beside `<field>` (`list_mates` `rotation_deg_expr`, a
+limit's `rotation_range_deg_expr`, `list_relations`, the motion studies,
+`get_assembly_sequence`, `list_occurrences`, `list_exploded_views`).
 
 Two older spellings are kept as aliases, since scripts and the SDK use
 them: a STRING where a study's number goes (`mesh_size: "wall / 2"`), and a

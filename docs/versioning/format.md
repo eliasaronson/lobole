@@ -355,6 +355,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An assembly's numbers take expressions of the project's variables ([numbers that are expressions](../assemblies/README.md#numbers-that-are-expressions)), each text beside its number as `<key>_expr`, written only when bound: a mate's `rotation_expr` (degrees; `rotation` stays radians), `offset_expr`, `dx_expr`, `dy_expr`; its `limits` `rotation_expr`, `offset_expr`, `dx_expr`, `dy_expr` as [min, max] texts ("" for a literal end) and `cone_expr` (degrees); an occurrence's `transform.position_expr` (three texts) and an inner mate dof's `rotation_expr` / `offset_expr`; an explode step's `offset_expr`; a relation's `ratio_expr`, `phase_expr` (degrees for a turning b), `constant_expr`, a term's `coefficient_expr`, `lift_expr` ([angle, lift] texts per entry) and an intermittent relation's `step_expr`, `period_deg_expr`, `start_deg_expr`, `duration_deg_expr`; a motion study's `from_expr`, `to_expr`, `samples_expr`, `clash_deflection_mm_expr`; a sequence's `allowance_mm_expr`, a step's `distance_mm_expr`, `turn_deg_expr` and a pose value's `rotation_deg_expr` / `offset_mm_expr`; an assembly configuration's mate override `rotation_expr` (degrees) / `offset_expr`. An `_expr` without the number it binds, one that is not text, or a texts array of the wrong length is refused; a text that does not parse loads, its owner reporting the error. Golden `vNEXT-assembly-expressions` |
 
 ## Paths in a project
 

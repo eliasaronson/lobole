@@ -72,8 +72,13 @@ One type and one hook carry every expression-capable number, in
   `ExprSlot`: its text, its value in the expression's units (degrees for a
   radian-stored angle), what it measures (`ExprQuantity`: length, angle,
   count, other) and where it lives (`distance`, `origin/2`,
-  `loads/0/magnitude`). `Feature`, `fem::Study` and a requirement's
-  `Bound` implement it. A number the geometry reads as part of a vector (a
+  `loads/0/magnitude`). `Feature`, `fem::Study`, a requirement's `Bound`
+  and `AssemblyDocument` implement it; the assembly's hands each slot out
+  with its owner ("mate 'Hinge'") and its path in the assembly's JSON
+  (`mates/2/limits/rotation/1`): mates and their limits, occurrence
+  positions, relations, exploded steps, motion studies, the sequence,
+  configurations' mate overrides and the assembly's studies
+  ([what takes one](../assemblies/README.md#numbers-that-are-expressions)). A number the geometry reads as part of a vector (a
   Frame's origin, a MoveFace's translation) and a sketch dimension stay a
   value and a text of their own, and are visited as slots on that pair. A
   pattern's count is an `ExprInt`: `n / 2` of an odd `n` is the pattern's
@@ -86,15 +91,19 @@ Everything that walks expressions walks that hook:
   `fem::EvaluateStudyExprs` when a study meshes;
 - rename: `Document::RenameParameter` and `RewriteProjectVarRefs` rewrite
   the features' and the studies' slots and the configurations' overrides;
-  a project rename does an assembly's studies too;
+  a project rename does every assembly's slots too;
 - the refusal to delete a variable something reads
   (`Document::FindParameterReferences`, `ui::ProjectVarReferences`);
 - the literals lint ([below](#literals-that-should-be-expressions)), which
   takes each field's quantity from its slot.
 
 **Scope.** A part's features and studies resolve against the part's
-variables, then the project's. An assembly's studies resolve against the
-project's.
+variables, then the project's. An assembly resolves against the
+project's, and has none of its own; a lone assembly outside a project
+resolves against an empty table, so an expression there fails naming
+the variable it could not find. `ui::SyncProjectScope` re-evaluates every
+open assembly after the parts and re-solves one whose values changed
+([recompute](../assemblies/README.md#numbers-that-are-expressions)).
 
 ## The expression language
 
@@ -328,6 +337,18 @@ applies a plan.
   refused ("run the dry run again"); an apply that would leave a touched
   feature broken is rolled back and says which.
 
+**On an assembly** (`ui::LintAssembly`, `ui::PlanExtractAssembly`,
+`ui::ApplyExtractAssembly` in `src/ui/LiteralActions.cpp`) the walk is
+`AssemblyDocument::VisitExprs`: `check_literals` with `part` naming an
+assembly, or on an assembly tab, compares its unbound numbers with the
+project's variables, and `extract_variables` on an assembly tab proposes
+project variables for them. A finding's and a use's `feature` is the
+owner (`mate 'Hinge'`), `feature_id` 0, and `field` the slot's path
+(`mates/0/limits/rotation/1`), what `fields` names; `feature_ids` and
+`scope: "part"` are refused, since an assembly has neither. Names are
+`<owner>_<field>`. Applying is two undo steps: the variables on the
+project history, the bindings on the assembly's.
+
 Save as template ([templates](../modeling/templates.md#saving-one)) reads
 the same walk: the literals of the features it saves are offered as the
 template's parameters, named as `extract_variables` would name them, and
@@ -343,7 +364,7 @@ every variable the features read becomes one.
   - A project-scope rename (`ui::RenameProjectVariable` in
     `src/ui/VariableActions.cpp`) rewrites every part, except parts where a
     local variable of the same name shadows it, and every assembly's
-    studies.
+    expressions.
   - A requirement's expressions -- an `expression` requirement's formula
     and any requirement's expression bounds -- are rewritten with them, in
     the scope the requirement reads (`ui::RenameProjectVariable`, and
@@ -354,7 +375,9 @@ every variable the features read becomes one.
   lists the references, for example `parameter 'x'`, `feature 'Extrude 1'`,
   `study 'Bracket'`, `configuration 'Heavy' (its override of 'depth')` (an
   override whose text reads it), `<Part>: feature '…'` or
-  `<Assembly>: study '…'` for the project scope, or `requirement 'wall'`
+  `<Assembly>: mate '…'` (any owner of an assembly's expression: a mate,
+  an occurrence, a relation, a motion study, the sequence, a study) for
+  the project scope, or `requirement 'wall'`
   (`ui::RequirementReferences`; `ui::RemovePartVariable` for a part-local
   one). Nothing is left dangling silently. A table is refused the same way
   while a variable, a feature or a requirement looks it up.

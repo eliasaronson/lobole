@@ -420,6 +420,65 @@ area or length, and centroid (`ConnectorAnchor::facePrint`, `snapPrint`,
   and printing it would bless that. It resolves by name as it always did
   until it is re-picked.
 
+## Numbers that are expressions
+
+An assembly's numbers may be expressions of the **project's** variables,
+as a part feature's are ([variables](../variables/README.md#numbers-that-are-expressions)):
+"the hinge opens to `lid_open`", a slide's travel `stroke / 2`, a limit of
+`-swing .. swing`. `AssemblyDocument::VisitExprs` (in
+`src/core/AssemblyExprs.cpp`) hands every one out as an `ExprSlot` with
+its owner (`mate 'Hinge'`) and its path in the assembly's JSON
+(`mates/2/limits/rotation/1`); evaluation, rename, the delete refusal and
+the literals lint walk that one hook.
+
+**What takes one.**
+
+| owner | numbers |
+|---|---|
+| mate | `rotation` (its text in degrees, the value radians), `offset`, `dx`, `dy`; each limit's `min` and `max` (degrees for a rotation range) and the ball's `cone` |
+| occurrence | each coordinate of `position`, on an occurrence nothing else places (a fixed one, or one no mate reaches; a mated one is where its mates put it, and binding it is refused); a flexible placement's pose of an inner mate, `rotation` and `offset` |
+| relation | `ratio` (where it is the relation's own: not one made from teeth, a thread or a worm's hand, nor a cam's, a contact's or an intermittent relation's), `phase` (in b's unit, its text in degrees for a turn), each lift table entry's angle and lift, an intermittent relation's `step`, `period_deg`, `duration_deg` (not a Geneva's, which its slots set) and `start_deg`, a linear_n's `constant` and term `coefficient`s |
+| exploded view | each step's offset coordinates |
+| motion study | `from`, `to` (degrees for a rotation), `samples` (a count: a fractional one is refused), `clash_deflection_mm` |
+| sequence | `allowance_mm`, a step's `distance_mm` and `turn_deg`, a pose value |
+| configuration | a mate override's held `rotation` (degrees as a text) and `offset` |
+| FEM study | what [its own visitor](../simulation/README.md) visits |
+
+Not bindable, each for its reason: ids; quaternions (an orientation, a
+ball's rotation -- a ball's cone is); a rider's attach offset, derived
+from its seat on every solve; a flexible placement's inner poses, which
+its solve writes; tooth counts and the ratios they derive (the next
+stage's); a freewheel's `lead`, which is history; a Geneva's slots; an
+intermittent law's table; a sequence step's direction and path origin;
+a motion study's `max_refine`; the clearance assertions an old file
+holds, which open as requirements. `tests/test_assembly_exprs.cpp` writes
+a sentinel through every slot and fails on a number in the file that is
+neither visited nor on that list, so a new field has to choose.
+
+**Scope.** Every assembly resolves against the project's variables; it
+has none of its own. A lone assembly outside a project resolves against
+an empty table, so an expression there is its owner's problem, naming
+the variable it could not find, and an RPC that sets one is refused.
+
+**Recompute.** `ui::SyncProjectScope` regenerates the parts, then runs
+`assembly::EvaluateExprs` on every open assembly and re-solves one whose
+values or problems changed. A text that does not evaluate keeps its last
+good value. A mate whose values then cannot stand -- a range upside down,
+a value outside its range, a range that excludes where the mate stands --
+keeps **all** its last good values and carries the reason as
+`exprError`, which every solve puts into its `error`; a motion study
+whose samples come out fewer than 2, or fractional, or whose deflection
+cannot stand, the same. `set_variable`, `delete_variable`,
+`rename_variable` and `set_table` answer them in their own `regen`:
+`assemblies: [{assembly, failed: [{owner, id, error}]}]`, with `ok`
+false while any stands. The texts are kept, so widening the variable
+again applies them.
+
+**Edits.** A solve that moves a mate writes the value and leaves the
+text; the next evaluation applies it again. A value set by hand -- a
+viewport drag, a field typed with a plain number, Rotate 90°, `derive`,
+`set_mate` with a number alone -- is a number again: its text goes.
+
 ## Relations
 
 A relation couples mates' degrees of freedom — `dof_b = ratio · dof_a +
@@ -1255,7 +1314,14 @@ one.
   `test_assembly_flatten.cpp`, `test_motion.cpp`,
   `test_flexible_subassembly.cpp` (a parent relation into an inner mate,
   two placements posed apart, a configuration per placement, clashes per
-  leaf, the refusals). Goldens in
+  leaf, the refusals), `test_assembly_exprs.cpp` (a mate bound to a
+  variable turning with it, a limit narrowed past the mate and kept, every
+  owner's units, a lone assembly's unknown variable, rename and delete
+  across a part, an assembly and a study, and the probe that every number
+  the file writes is a slot or says why not; golden
+  `vNEXT-assembly-expressions.json`; the wire half is
+  `assembly_exprs_smoke.py`, the Edit Mate window's
+  `assembly/a_mate_limit_takes_an_expression`). Goldens in
   `tests/golden/assembly/` (`v135-part-configurations.json`: part
   placements in a configuration and a material).
 - Headless smokes: `assembly_smoke.py`, `assembly_mates_smoke.py`,
@@ -1294,9 +1360,7 @@ one.
   it would need per-occurrence geometry, which instancing and the
   feature-less assembly document do not have.
 - References from a part to assembly geometry while editing in context.
-- Mate limits as expressions of the variables (a range is two numbers, as
-  every mate value is), and a helper that finds a range from where the
-  parts first collide.
+- A helper that finds a mate's range from where the parts first collide.
 - Editing into a sub-assembly from its parent.
 - A per-occurrence appearance override (a placement's `material` exists).
 - A gear relation's phase derived from the gears' geometry; creating the
