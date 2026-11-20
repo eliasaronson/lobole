@@ -280,6 +280,110 @@ the last solve, so this works headless too), and every part regeneration
 while editing in context. A mated, non-fixed occurrence's own transform is
 overwritten by the next solve.
 
+### Mate limits
+
+A mate's free values may carry a **range**: how far a hinge opens before
+its stop, how far a vise jaw travels, how far the anchor swings. Unset is
+free, as every mate was before; a limit is intent written down, so it can
+be refused against, stopped at and proved
+([a requirement](../requirements/README.md#a-mates-whole-range)).
+
+**What a type takes** (`RangedValuesFor`, in `src/core/MateLimits.cpp`):
+
+| type | ranges |
+|---|---|
+| revolute | rotation |
+| slider | offset |
+| cylindrical | rotation, offset |
+| planar | rotation (its spin), dx, dy, offset (its gap) |
+| ball | a cone: the half-angle b's Z may tilt from its seat (0..180°) |
+| fastened | none |
+
+On the wire `add_mate` and `set_mate` take `rotation_range_deg`,
+`offset_range_mm`, `dx_range_mm`, `dy_range_mm` as `[min, max]` and
+`cone_deg`; `null` clears one. Inside, and in the file (`limits`, vNEXT),
+radians and mm, as the mate's own values are. `list_mates` answers each
+mate's `limits` in degrees and mm. Bounds are inclusive; `min == max` is a
+lock. Refused, naming what the type frees: a range on a value the type does
+not free (a revolute's offset is its seat, not a freedom), a min above its
+max after the units are converted, a cone outside 0..180°.
+
+**Refused, never clamped.** Every place a value is SET checks it, and a
+value past its range is refused naming the range (`RangeRefusal`, one
+wording everywhere):
+
+- `set_mate` and `add_mate` (a starting value outside the range given). A
+  range that excludes where the mate stands is refused naming where it
+  stands, unless the same call also moves it inside. The edit is made on a
+  copy and checked before anything changes.
+- An edit whose **relations** would drive another mate past its limit (a
+  gear turning its partner past a stop): tried on a copy, refused naming
+  the follower. In a mate tree nothing else could stop it there.
+- `set_mate` with a path (an inner mate of a flexible placement) against
+  the sub-assembly's own range; a configuration's held value
+  (`set_configuration` `mate_overrides`).
+- A sequence's pose step (`set_assembly_sequence`), and the check
+  (`check_assembly_sequence`) for a sequence stated before the limit was;
+  playing and filming read the check, so they refuse with it.
+- A motion study whose `from`..`to` crosses its driver's limit: `why_not`
+  at `add_motion_study`, refused by `run_motion_study` before it runs.
+  Driving exactly to a limit is the mate's whole travel and runs.
+
+A value already outside (a file edited by hand, a relation in an
+unprompted solve) is placed where it says and **said**: the solve puts
+"rotation 120° is outside its range -5° .. 95°" on the mate, counts it in
+`errored_mates` and lists it in `SolveReport::limits`.
+
+**Loops.** Inside a loop the followers are unknowns, and the solve keeps
+them inside their ranges with a bounded step: an unknown the step would
+take past a bound is held at it and the step solved again for the others;
+one held is let go where the model does better moving it back inside. It
+is not a projection after the step -- that spreads the motion over every
+unknown, the ones at a limit cannot take their share, and a loop resting
+on a limit creeps and stalls
+([solver.md](solver.md#limits-in-a-loop)). A loop that cannot close inside
+its ranges says which limit holds it, on that mate ("held at its rotation
+max 95°: the loop cannot close inside its range"), beside the closure
+error the cut mate carries. The branch is kept: a limit that makes the
+current branch unreachable says so rather than jumping to the other one.
+`set_mate` answers `limits_held` [{mate, name, value, held, limit_deg |
+limit_mm, at_deg | at_mm}] when a loop it moved is held.
+
+**Dragging** stops at the limit. The gizmo and a drag within a mate hold
+the value to its range before it is written (`ClampToRange`,
+`ClampToCone`), and a frame whose move made a follower reach its limit --
+a loop held, or a relation driving past -- puts every mate back where the
+last frame left it: the drag stops where the first limit binds, not past
+it and not snapping back to the grab. The cursor says what holds it
+("'hinge' held at its rotation limit 95°", `gizmoDrag.heldBy`). The Edit
+Mate window's DOF fields stop the same way.
+
+**Motion studies.** A follower that reaches its limit -- held in a loop,
+or driven past in a tree -- **stops the run** at that sample: it is the
+last sample, unsolved, and the result's `stopped_by` {reason: `limit`,
+mate, name, path?, value, limit, at (the driver value), sample} says which
+mate stopped it and where; the table ends "STOPPED AT A LIMIT" and the
+verdict names it. A run that carried on would draw poses the mechanism
+never reaches.
+
+**In the GUI** the Edit Mate window has a **Limits** row per value the type
+frees ([panels](../ui/panels.md#assembly-tab-the-model-panel)): a new
+range starts closed at where the mate stands -- the one bound derived from
+the mate itself -- and is widened from there. While a mate is selected or
+edited, the viewport draws its limits where they act
+(`AppendMateLimitOverlay`): an arc about the axis between the two stops for
+a rotation, a span along it for an offset, a box in the plane for a planar
+slide, a cone for a ball, and a tick where the mate stands.
+
+**First users**: the clock's anchor (and the pendulum fastened to it)
+swings ±kappa, the amplitude and its play; the hinge box's lid 0..180°;
+the Strandbeest's and the engine's crank state that they turn freely
+(`rotation_range_deg: null`).
+
+Not this: **contact** -- parts stopped by their geometry touching rather
+than by a stated range -- needs collision inside the solve, and comes after
+a mesh collision engine exists.
+
 ### A mate on an imported face
 
 An imported part names its faces and edges by their place in the file
@@ -1119,7 +1223,8 @@ one.
 | `src/core/Occurrence.{h,cpp}` | the model: occurrences, connectors, mates, relations, views, studies, the clearance assertions an old file carries; `CamLift` |
 | `src/core/AssemblySolve.{h,cpp}` | connector frames, relation propagation, the placement pass, attachments, `Flatten`, `ResolvePath`, `WouldCycle`, `SubtreeVersions`, `MassProperties` |
 | `src/core/AssemblyFlexible.cpp` | flexible sub-assemblies: `ExpandFlexible`, `CollapseFlexible`, `FlexibleRefusal`, mates named `{path, mate}` |
-| `src/core/AssemblyLoopSolve.{h,cpp}` | the loop solve; `MateAdjustFor`, `DeriveMateDofs` |
+| `src/core/AssemblyLoopSolve.{h,cpp}` | the loop solve (its bounded step); `MateAdjustFor`, `DeriveMateDofs` |
+| `src/core/MateLimits.cpp` | mate limits: what a type takes, `MateRangeProblem`, `RangeRefusal`, `ClampToRange`, `ClampToCone` |
 | `src/core/MotionStudy.{h,cpp}` | running a motion study |
 | `src/core/ContactFollower.{h,cpp}` | the contact relation: sections, the first touch, the table and its cache |
 | `src/core/FollowerCheck.{h,cpp}` | the follower check: the cuts across the width, pressure angle, deviation, gravity and drops |
@@ -1139,7 +1244,12 @@ one.
   part-edit-moves-the-mate payoff, dangling refs), `test_assembly_loops.cpp`
   (four-bar DOF, branch keeping, redundant bolts, conflicting loops,
   partitioning, driven DOF held, which tilted connector keeps a loop open —
-  `-L diagnose`), `test_assembly_relations.cpp` (every
+  `-L diagnose`; a limit holding a four-bar, a branch a limit makes
+  unreachable, a ball's cone, a study stopped by a follower's limit, and
+  what limits cost — `-L limits`), `test_mate_limits.cpp` (what each type
+  takes, the refusals, a relation driving past a limit, a study refused
+  across its driver's limit and stopped by a follower's, save and reopen;
+  golden `vNEXT-mate-limits.json`), `test_assembly_relations.cpp` (every
   relation kind, propagation order, freewheel/reverser/click, loop rows),
   `test_contact_relation.cpp`, `test_follower_check.cpp`,
   `test_assembly_flatten.cpp`, `test_motion.cpp`,
@@ -1160,6 +1270,9 @@ one.
   `flexible_subassembly_smoke.py`, `part_configuration_smoke.py` (one part
   placed in two configurations and two materials: BOM lines, mass, STEP
   products, a job part in a configuration, the refusals).
+  `mate_limits_smoke.py` (refusals past a hinge's swing, a study refused
+  across it and one stopped by a geared follower's limit, a sequence pose
+  refused, `motion_clean whole_range` passing and failing).
   `motion_video_smoke.py` (renderer, label
   `pygui`): every video format read back by ffprobe, the refusals including
   a PATH without ffmpeg, the pose put back, an async cancel;
@@ -1167,7 +1280,8 @@ one.
 - GUI (`src/app/guitests/GuiTestsAssembly.cpp`, category `assembly`): mate
   hover marker and snaps, re-pick connector, mate tool rotate, sub-assembly
   insert/open/drag, relation and mate rows, BOM through a sub-assembly, motion
-  scrub, a sequence played and stopped, `add_relation_cam_contact`, and `motion_video_frames_are_the_view` (a filmed frame is the
+  scrub, a sequence played and stopped, `add_relation_cam_contact`,
+  `dragging_a_limited_revolute_stops_at_its_limit`, and `motion_video_frames_are_the_view` (a filmed frame is the
   viewport, not the window). `GuiTestsFlexible.cpp` (category `flexible`):
   tick Flexible (and the refusal for a unit with nothing fixed), pick a
   configuration, a relation side and a study driver inside the unit and run
@@ -1180,7 +1294,9 @@ one.
   it would need per-occurrence geometry, which instancing and the
   feature-less assembly document do not have.
 - References from a part to assembly geometry while editing in context.
-- Mate limits (min/max on a DOF).
+- Mate limits as expressions of the variables (a range is two numbers, as
+  every mate value is), and a helper that finds a range from where the
+  parts first collide.
 - Editing into a sub-assembly from its parent.
 - A per-occurrence appearance override (a placement's `material` exists).
 - A gear relation's phase derived from the gears' geometry; creating the

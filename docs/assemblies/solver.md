@@ -279,6 +279,53 @@ watches the joints' rates and re-solves such a step finer
 ([branch jumps](README.md#branch-jumps)); the solver itself has no branch
 guard.
 
+### Limits in a loop
+
+A mate's limits ([mate limits](README.md#mate-limits)) bound its unknowns:
+a box on each scalar column (a rotation, an offset, dx, dy) and a cone on
+a ball's three. The LM step is **bounded** (`BoundedStep`): an unknown the
+damped step would take past a bound is held AT the bound and the step is
+solved again for the others; a held unknown is let go again where the
+quadratic model's slope along it points back inside. The Jacobian -- the
+costly part -- is the one the step was always solved from. A ball's cone,
+not being a box, is brought back by turning the tilt onto the cone and
+keeping the twist (`ClampToCone`).
+
+Cutting an unbounded step back into the box instead would spread the motion
+over every unknown, leave the ones at a limit unable to take their share,
+and a loop resting on a limit would creep along it and stall. Another CAD's
+loop solver and its drag both did that and replaced it with the bounded
+step this follows.
+
+A loop that cannot close inside its ranges reports the limits holding it
+(`LoopSolution::limits`): an unknown standing at its bound with the
+residual's descent pointing out of the range. The solve names it on its
+mate, beside the cut mate's closure error, and lists it in
+`SolveReport::limits`; a motion study stops there. A seed already outside
+a range (a file that says so) is not moved into it: if the loop closes as
+it stands, the value is reported outside its range like any other.
+
+What limits cost (`test_assembly_loops.cpp`, "Limits that do not bind cost
+a loop nothing; resting on them it still closes"; CPU ms a solve on the
+development machine, `LOBOLE_LIMIT_TIMINGS=1` prints them). *Before* is the
+solver as it was, without limits; the rest are this one:
+
+| loop | DOF | before | free | wide limits | resting on limits |
+|---|---|---|---|---|---|
+| 192-bolt pattern, a lid on a hinge | 1 | 0.2 | 0.2 | 0.2 | none to rest on |
+| 64-link chain | 61 | 2.4 | 2.5–2.9 | 2.5–3.1 | 2.7–3.1, on 16 |
+| 199-link chain | 196 | 24–26 | 25–27 | 27–30 | 25–27, on 50 |
+
+Each in 3 LM iterations (the bolt pattern in 1), with and without limits,
+pinned to one core on a machine busy with other builds, so the spread is
+the machine's: the cost check holds wide limits to 1.5 times the free
+solve within one run, and resting ones to 4 times.
+
+Limits that never bind take the free solve's iterations exactly: the step
+never meets the box. Resting on its limits -- every fourth joint held where
+it was seeded, against the way the free solve moved it -- a chain still
+closes by the others, each held joint exactly at its limit.
+
 ### Coupled loops
 
 A Theo Jansen leg is the coupled-loop case: eight bodies, ten revolutes,
