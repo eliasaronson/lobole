@@ -33,7 +33,7 @@ json OccurrenceToJson(const Occurrence& o) {
   j["part_version"] = o.partVersion ? json(*o.partVersion) : json(nullptr);
   j["transform"] = {{"position", Vec3ToJson(o.position)},
                     {"orientation", QuatToJson(o.orientation)}};
-  // vNEXT: a coordinate bound to an expression (an occurrence nothing else
+  // v220: a coordinate bound to an expression (an occurrence nothing else
   // places), written only when one is.
   WriteExprTexts(j["transform"], "position",
                  {o.positionExpr.begin(), o.positionExpr.end()});
@@ -441,7 +441,7 @@ json MateToJson(const Mate& m) {
   j["b"] = ConnectorToJson(m.b);
   j["flipped"] = m.flipped;
   // Radians, as the file has always held them; an expression beside each
-  // (vNEXT), the rotation's in degrees.
+  // (v220), the rotation's in degrees.
   WriteExprRadians(j, "rotation", m.rotation);
   WriteExpr(j, "offset", m.offset);
   // Additive DOF for the wider mate set (v25); omit when zero/identity so
@@ -945,7 +945,7 @@ json RelationToJson(const Relation& r) {
     for (const auto& [angle, mm] : r.lift)
       lift.push_back({angle, mm});
     j["lift"] = std::move(lift);
-    // vNEXT: an entry's expressions, [angle, lift] texts per entry.
+    // v220: an entry's expressions, [angle, lift] texts per entry.
     bool bound = false;
     for (const auto& e : r.liftExpr)
       bound = bound || !e[0].empty() || !e[1].empty();
@@ -1263,7 +1263,7 @@ Relation RelationFromJson(const json& j) {
           "a cam's lift table is [[angle_deg, lift_mm], ...]");
     r.lift.emplace_back(pt.at(0).get<double>(), pt.at(1).get<double>());
   }
-  if (j.contains("lift_expr")) { // vNEXT
+  if (j.contains("lift_expr")) { // v220
     const json& le = j.at("lift_expr");
     if (!le.is_array() || le.size() != r.lift.size())
       throw std::runtime_error("a cam's lift_expr is one [angle, lift] pair "

@@ -1319,7 +1319,7 @@ one.
   owner's units, a lone assembly's unknown variable, rename and delete
   across a part, an assembly and a study, and the probe that every number
   the file writes is a slot or says why not; golden
-  `vNEXT-assembly-expressions.json`; the wire half is
+  `v220-assembly-expressions.json`; the wire half is
   `assembly_exprs_smoke.py`, the Edit Mate window's
   `assembly/a_mate_limit_takes_an_expression`). Goldens in
   `tests/golden/assembly/` (`v135-part-configurations.json`: part

@@ -45,7 +45,7 @@ json ConfigurationToJson(const Configuration& c) {
     j["mate_overrides"] = json::array();
     for (const MateOverride& o : c.mateOverrides) {
       json oj = {{"mate", o.mate}};
-      if (o.rotation) // radians; an expression (vNEXT) in degrees
+      if (o.rotation) // radians; an expression (v220) in degrees
         WriteExprRadians(oj, "rotation", *o.rotation);
       if (o.offset) // mm
         WriteExpr(oj, "offset", *o.offset);
