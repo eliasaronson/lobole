@@ -259,8 +259,19 @@ struct FemResults {
     double frequencyHz = 0.0;
     std::vector<glm::dvec3> displacement; // normalized (max |u| = 1)
     double factor = 0.0;
+    // A modal mode (vNEXT; zero on a buckling mode and on one saved
+    // before): its effective mass along x, y and z (kg), (phi^T M r)^2 /
+    // (phi^T M phi) with r a unit translation, so the modes' sum along a
+    // direction approaches the mass that moves; and on a free-free study
+    // whether it is a rigid-body mode (docs/simulation/README.md
+    // #free-free-modes).
+    glm::dvec3 effectiveMassKg{0.0};
+    bool rigid = false;
   };
   std::vector<ModeShape> modes;
+  // A modal result (vNEXT): the mass of the body as solved (kg), which its
+  // modes' effective masses are read against. 0 on another.
+  double modalMassKg = 0.0;
 
   // A thermal result (docs/simulation/README.md#thermal): the temperature
   // at each node (degrees C), and the heat flux -k grad T (W/m^2), averaged
@@ -522,9 +533,19 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
 // The same under any supports that leave no rigid motion free (a roller,
 // held or cylindrical support's nodes held in their frames). A prescribed
 // displacement is refused: a mode has no load.
+//
+// `freeFree` (docs/simulation/README.md#free-free-modes): no support at all,
+// refused with one. K is then singular on its six rigid motions, which are
+// set apart: returned first, labelled rigid, each at its Rayleigh quotient's
+// frequency, and projected out of the shift-invert operator, which is
+// factorized at a negative shift (a millionth of the mean diagonal ratio
+// below zero, where K - s M is positive definite) for `numModes` elastic
+// modes after them. Every mode carries its effective mass per direction,
+// and `massKg` (when given) the body's mass.
 std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
-           const Supports& supports, int numModes, std::string* error);
+           const Supports& supports, int numModes, std::string* error,
+           bool freeFree = false, double* massKg = nullptr);
 
 // Linear buckling (docs/simulation/README.md#buckling) about the base state
 // `baseDisplacement` (the static answer under `supports`, one per node):
@@ -668,6 +689,14 @@ struct StudyBodyResult {
   // before v206.
   std::vector<int> supportEdgeZone;
   std::vector<FemResults::SupportReaction> edgeOwners;
+  // The simulation's stored mesh this body was solved on (its MeshKey; 0
+  // when it was not a stored one), and, when a convergence run refined it,
+  // the stored mesh the refinement started from (`parentMeshKey`, with
+  // `meshKey` 0: the solved mesh is a child of it, kept with the result).
+  // What a full result (KeepMode::Full) is saved against
+  // (docs/simulation/README.md#a-full-result).
+  uint64_t meshKey = 0;
+  uint64_t parentMeshKey = 0;
   // A buckling body (docs/simulation/README.md#buckling): `results` is the
   // base state and its modes the buckling modes; this is what was read off
   // them.
@@ -871,6 +900,9 @@ struct StudyRuntime {
   // (docs/simulation/README.md#one-mesh-shared). Empty for a run whose mesh
   // was not stored (a topology shape, a convergence step's refinement).
   std::vector<uint64_t> meshKeys;
+  // The study's KeepMode::Full (vNEXT): KeepWhatIsRead keeps every body's
+  // whole mesh and field, and a save writes them against `meshKey`.
+  bool keepFull = false;
   std::vector<StudyBodyResult> bodies;
   double maxVonMises = 0.0;
   glm::dvec3 maxVmAt{0, 0, 0};
@@ -1074,6 +1106,8 @@ struct StudyJobInput {
   ThermalLoad thermalLoad;
   std::vector<std::string> caseNames;
   int numModes = 8;
+  bool freeFree = false;
+  bool keepFull = false;
   glm::dvec3 gravity{0.0};
   std::vector<StudyJobBody> bodies;
   // Carried from the plan of a shape study into its runtime.
@@ -1183,6 +1217,8 @@ struct StudyPlan {
   double shapeVolume = 0.0;
   double shapeThresholdLoweredFrom = 0.0;
   int numModes = 8;
+  bool freeFree = false;
+  bool keepFull = false;
   glm::dvec3 gravity{0.0};
   std::vector<StudyBodyPlan> bodies;
   std::vector<ContactPatch> contacts;

@@ -1665,7 +1665,9 @@ bool WriteStudyDeck(const StudyJobInput& in, size_t body, size_t caseIndex,
     deck.plasticity = in.nonlinear.plasticity;
     deck.unload = in.nonlinear.plasticity;
     for (const FaceLoad& l : rhs[caseIndex])
-      (l.type == LoadType::Force || !deck.nlgeom ? dead : deck.loads)
+      (l.type == LoadType::Force || l.type == LoadType::Bearing || !deck.nlgeom
+           ? dead
+           : deck.loads)
           .push_back(l);
     std::vector<glm::dvec3> forces;
     if (!NodalForces(jb.mesh, mats, dead, g, forces, &err))
@@ -2521,13 +2523,18 @@ bool NonlinearOnCalculix(
   const FemMesh& mesh = jb.mesh;
   const size_t nNodes = mesh.nodes.size();
   std::string err;
-  // Dead loads as nodal forces; under large deformation a pressure, a
+  // Dead loads as nodal forces (a force, and a bearing load, whose nodal
+  // forces the undeformed bore puts where they are); under large
+  // deformation a pressure, a
   // torque and a remote load through the deck's own keywords, and at small
   // deformation (a contact run) as the nodal forces the in-house solve
   // applies.
   std::vector<FaceLoad> dead, other;
   for (const FaceLoad& l : loads)
-    (l.type == LoadType::Force || !req.nlgeom ? dead : other).push_back(l);
+    (l.type == LoadType::Force || l.type == LoadType::Bearing || !req.nlgeom
+         ? dead
+         : other)
+        .push_back(l);
   std::vector<glm::dvec3> forces;
   if (!NodalForces(mesh, mats, dead, gravityAccel, forces, &err))
     return fail(err);

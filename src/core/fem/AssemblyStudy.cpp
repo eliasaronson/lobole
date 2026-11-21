@@ -340,7 +340,11 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   out.solver = EffectiveSolver(study);
   out.nonlinear = study.nonlinear;
   out.numModes = study.numModes;
+  out.keepFull = study.keep == KeepMode::Full;
   out.gravity = study.gravity;
+  if (study.freeFree)
+    return fail("a free-free study is one part's: the assembly's "
+                "participants are held by their neighbours");
 
   // Roles. Exactly one occurrence is meshed in S1; the rest are supports or
   // absent, and a study that names none says so rather than solving nothing.

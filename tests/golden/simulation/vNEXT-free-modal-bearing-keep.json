@@ -1,0 +1,53 @@
+{
+  "format": "designer-document",
+  "version": 229,
+  "kind": "simulation",
+  "subject": {
+    "kind": "part",
+    "document": 2,
+    "name": "Lug"
+  },
+  "mesh": {
+    "size": 1.6
+  },
+  "studies": [
+    {
+      "analysis": "modal",
+      "free": true,
+      "id": 10,
+      "keep": "full",
+      "mesh_size": 0.0,
+      "name": "Hanging free",
+      "num_modes": 4,
+      "type": "Study"
+    },
+    {
+      "id": 11,
+      "keep": "full",
+      "loads": [
+        {
+          "face": {
+            "element": "1/face1",
+            "feature_id": 1
+          },
+          "id": 12,
+          "magnitude": 0.0,
+          "type": "fixed"
+        },
+        {
+          "direction": [-1.0, 0.0, 0.0],
+          "face": {
+            "element": "3/face0",
+            "feature_id": 3
+          },
+          "id": 13,
+          "magnitude": 400.0,
+          "type": "bearing"
+        }
+      ],
+      "mesh_size": 0.0,
+      "name": "Pulled on its pin",
+      "type": "Study"
+    }
+  ]
+}

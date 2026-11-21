@@ -364,6 +364,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A bearing load (`type: "bearing"`, a force on a bore with its `direction`); a modal study's `free` (free-free, no support) and every study's `keep` (`surface` \| `full`); a modal result's modes carry `effective_mass_kg` and `rigid`, its fields `mass_kg`; a full result (the study's `keep: "full"`; its result json says `keep: "full"`) keeps every node and tet, a body solved on a kept mesh written against it (`mesh`, its key, with no `nodes`, `tets` or `boundary` of its own) and a convergence run's refinement whole with `parent_mesh`, so a simulation's stored meshes are read before its results ([a full result](../simulation/README.md#a-full-result)). Refused on load: `free` on a study that is not modal, `keep` other than `surface` \| `full` or on a topology study, a bearing load without a `direction` or with a zero one (one along its axis is refused at the run), a result's `mesh` or `parent_mesh` without `keep: "full"`, and a `mesh` beside nodes of its own; a full body whose mesh is not kept drops that result. Golden `vNEXT-free-modal-bearing-keep`. |
 
 ## Paths in a project
 

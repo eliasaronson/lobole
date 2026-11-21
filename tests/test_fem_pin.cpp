@@ -735,3 +735,72 @@ TEST_CASE("two ties that share their DOF both hold", "[fem][pin]") {
   CHECK(res.maxDisplacement > 0.0);
 }
 #endif // HAVE_FEM_SOLVER
+
+#ifdef HAVE_NETGEN
+// The lug the pin test hangs, loaded the other way: clamped at its far end
+// and pulled by a bearing load on its bore (docs/simulation/README.md
+// #bearing-loads), the load a pin in the hole puts there. The clamp answers
+// the force, and the bore's radial stress where it is pushed straight is
+// the cosine distribution's peak pressure (4/pi) F/(dt) -- the number the
+// pin test reads its bearing stress against -- with nothing on the far
+// half.
+TEST_CASE("a lug under a bearing load bears (4/pi) F/(dt) on its bore",
+          "[fem][pin][bearing][run]") {
+  const double L = 60.0, w = 20.0, t = 4.0, d = 8.0, x0 = 12.0, F = 400.0;
+  auto p = MakePlate(L, w, t, d, {x0}, "steel");
+  Document& doc = p->doc;
+  fem::Study s = NewStudy(doc, "Lug on a bearing load");
+  s.meshSize = 1.6;
+  s.converge = fem::ConvergeMode::Never;
+  s.loads.push_back(Support(doc, fem::LoadType::Fixed, p->endX1));
+  fem::Load b;
+  b.id = doc.AllocateId();
+  b.type = fem::LoadType::Bearing;
+  b.face = p->bores[0];
+  b.magnitude = F;
+  b.direction = glm::dvec3(-1, 0, 0); // towards the lug's end
+  s.loads.push_back(b);
+  const uint64_t clampId = s.loads[0].id;
+  fem::StudyRuntime rt;
+  std::string err;
+  const bool ok = fem::RunStudy(doc, s, rt, &err);
+  INFO(err);
+  REQUIRE(ok);
+  const fem::StudyBodyResult& body = rt.bodies[0];
+  const fem::FemResults& r = body.results;
+  const auto* sr = ReactionOf(r, clampId);
+  REQUIRE(sr);
+  CHECK_THAT(sr->forceN.x, WithinRel(F, 1e-6));
+  CHECK_THAT(sr->forceN.y, WithinAbs(0.0, 1e-6 * F));
+  CHECK_THAT(sr->forceN.z, WithinAbs(0.0, 1e-6 * F));
+  // No moment about the bore's axis (z through the hole): the clamp's
+  // moment about it is the force's lever arm only, which is zero, the
+  // force passing through the axis.
+  const glm::dvec3 axisO(x0, w / 2, t / 2);
+  const glm::dvec3 aboutAxis =
+      sr->momentNmm - glm::cross(axisO, sr->forceN); // moved to the axis
+  INFO("clamp moment about the axis " << aboutAxis.z << " N mm");
+  CHECK(std::abs(aboutAxis.z) < 1e-3 * F * d);
+
+  double peak = 0.0, far = 0.0;
+  for (size_t n = 0; n < body.mesh.nodes.size(); ++n) {
+    const glm::dvec3 x = body.mesh.nodes[n];
+    glm::dvec3 rv = x - glm::dvec3(x0, w / 2, 0.0);
+    rv.z = 0.0;
+    const double rr = glm::length(rv);
+    if (std::abs(rr - d / 2) > 1e-3 || x.z < 0.5 || x.z > t - 0.5)
+      continue;
+    const glm::dvec3 m = rv / rr;
+    const double sigRR = fem::NormalStress(r.stress[n], m);
+    if (m.x < -0.97)
+      peak = std::max(peak, -sigRR);
+    if (m.x > 0.7)
+      far = std::max(far, std::abs(sigRR));
+  }
+  const double p0 = 4.0 / std::numbers::pi * F / (d * t);
+  INFO("bore peak " << peak << " MPa against (4/pi) F/(dt) " << p0
+                    << "; far side " << far);
+  CHECK_THAT(peak, WithinRel(p0, 0.10));
+  CHECK(far < 0.15 * peak);
+}
+#endif // HAVE_NETGEN

@@ -1331,7 +1331,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "loads:object[], max_iterations?:int, mesh_size:number, "
      "name:string, num_modes?:int, refinements:int, stale:bool, type:string, "
      "volume_fraction?:number, shape_from?:object, solver?:string, "
-     "nonlinear?:object, participants?:object[], material?:object}[]"},
+     "nonlinear?:object, participants?:object[], material?:object, "
+     "free?:bool, keep?:string}[]"},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
      "and filter_radius are MILLIMETRES; each of them, volume_fraction and "
@@ -1450,15 +1451,37 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(docs/simulation/README.md#a-study-states-its-own-material). An "
      "unknown key, a missing young_gpa or poisson, and a value outside its "
      "range are refused. Part of the study's input: a change makes its "
-     "result stale.",
-     "converge, filter_radius, filter_radius_expr, gravity, id, load_cases, "
-     "material, max_iterations, mesh_size, mesh_size_expr, name, nonlinear, "
-     "num_modes, "
+     "result stale.\n"
+     "`free: true` makes a MODAL study free-free: the part with no support "
+     "at all (docs/simulation/README.md#free-free-modes). Its six rigid "
+     "modes are found first, each labelled `rigid`, then `num_modes` "
+     "elastic ones; every mode carries its effective mass per direction. "
+     "Refused on any other type, and on a study with any support or load "
+     "(remove them first, or free: false) -- a support is never dropped to "
+     "make a study free; a free study whose type moves away from modal is "
+     "refused until the same call says free: false. On an assembly "
+     "simulation it is refused (its participants are held by their "
+     "neighbours), and under a symmetry cut as every modal study is.\n"
+     "`keep` is what the stored result keeps: surface (the default: the "
+     "boundary surface the panels and RPCs read) | full (every node and "
+     "element as well, saved against the mesh it was solved on, so a "
+     "reopened result can be sectioned, sampled inside -- sample_study "
+     "interpolates in the element holding the point -- and exported as "
+     "VTU; a convergence run's refined mesh is kept with the result as a "
+     "child of the one it started from: "
+     "docs/simulation/README.md#a-full-result). Anything else is refused "
+     "naming the two; refused on a topology study, whose result keeps its "
+     "whole mesh already. Part of the study's input, so changing it makes "
+     "the result stale.",
+     "converge, filter_radius, filter_radius_expr, free, gravity, id, keep, "
+     "load_cases, material, max_iterations, mesh_size, mesh_size_expr, name, "
+     "nonlinear, num_modes, "
      "participants, shape_from, solver, study, thermal_load, type, "
      "volume_fraction, volume_fraction_expr, simulation"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
-     "torque|remote|pin|contact|roller|held|cylindrical, face, ...}. "
+     "torque|remote|bearing|pin|contact|roller|held|cylindrical, face, "
+     "...}. "
      "force/pressure take `magnitude`: "
      "NEWTONS "
      "for a force -- the total on that face, spread over its area -- and MPa "
@@ -1473,7 +1496,18 @@ static constexpr MethodDoc SimulationMethods[] = {
      "and `point_mm` (required, [x, y, z] mm): that force acting at that "
      "point, carried by the face as its share F/A plus the linear traction "
      "that carries the moment (p - c) x F about the face's centroid, the "
-     "way an RBE3 spreads it. A key another type takes is refused, naming "
+     "way an RBE3 spreads it. A `bearing` load takes `force_n` (N, the "
+     "total) and `direction` (required, [x, y, z] across the axis: a share "
+     "of more than 1e-3 of its length along the axis is refused) on a "
+     "CYLINDRICAL face (a bore or a shaft; any other face is refused): the "
+     "way a pin or a shaft in it presses, a normal pressure p0 cos(theta) "
+     "over the half the direction pushes on and none on the other, p0 "
+     "scaled so the resultant is exactly force_n along direction with no "
+     "moment about the axis (docs/simulation/README.md#bearing-loads); a "
+     "static, buckling or topology study's, on a whole face (no region). "
+     "A face that does not hold the whole loaded half is refused at the "
+     "run; under a symmetry cut it is refused, as a torque is. A key "
+     "another type takes is refused, naming "
      "the right one. On an assembly study the axis and point are WORLD "
      "coordinates (docs/simulation/README.md#torque-and-remote-loads). "
      "magnitude, force_n and torque_nmm each take an expression of the "
@@ -1720,7 +1754,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(docs/simulation/README.md#assembly-studies). A body carries "
      "max_displacement_mm: {value, at}, max_von_mises_mpa: {value, at} and "
      "factor_of_safety for a static study, `frequencies_hz` for a modal one, "
-     "and the optimization summary for a topology one; the static maxima are "
+     "and the optimization summary for a topology one (a modal body also "
+     "`modes`: each {frequency_hz, rigid, effective_mass_kg [x, y, z]}, "
+     "with `mass_kg`, `effective_mass_fraction` and, free-free, "
+     "`rigid_modes`, and at the top `free`: "
+     "docs/simulation/README.md#free-free-modes); the static "
+     "maxima are "
      "also aggregated at the top level. Read a modal result as "
      "`bodies[i].frequencies_hz` — this row used to name the per-body keys "
      "as though they were top-level, which is a KeyError rather than a wrong "
@@ -1940,9 +1979,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "plastic_strain, temperature (degrees C), heat_flux (W/m^2) and "
      "mode_<k>; cell data body, domain and a topology result's density. "
      "ASCII, written to `path` (a .vtu), never returned inline. It writes "
-     "the WHOLE result, which the session keeps from a run; a result "
+     "the WHOLE result, which the session keeps from a run, and which a "
+     "study with keep: full stores, after a reopen too "
+     "(docs/simulation/README.md#a-full-result); a surface result "
      "reopened from disk keeps its boundary surface only and is refused, "
-     "saying to run again (run_study {recompute: true}). A study with load "
+     "saying to run again (run_study {recompute: true}) or to keep the "
+     "whole field. A study with load "
      "cases names `case` (its name or 0-based index).",
      "case, id, path, study, simulation", remote::NotInBatch},
     {"probe_study",
@@ -2009,10 +2051,16 @@ static constexpr MethodDoc SimulationMethods[] = {
      "body:string, bytes:int, elements:int, nodes:int, path:string"},
     {"sample_study",
      "The solved fields at one POINT of a static, buckling (its base state) "
-     "or thermal study {id (or study), at_mm: [x, y, z], case?}: the solved "
-     "surface's node nearest `at_mm` (part coordinates, mm; a result keeps "
-     "its boundary surface, so a point inside the part reads the nearest "
-     "surface node), `node_at_mm` and `distance_mm` saying which, its "
+     "or thermal study {id (or study), at_mm: [x, y, z], case?}. A result "
+     "that keeps its whole field (keep: full, after a reopen too: "
+     "docs/simulation/README.md#a-full-result) answers from the element "
+     "holding the point, through its quadratic shape functions (`inside` "
+     "true, `element` which, `node_at_mm` the point itself, `distance_mm` "
+     "0); otherwise, and for a point in no element, the solved node "
+     "nearest `at_mm` (part coordinates, mm; a surface result keeps its "
+     "boundary only, so a point inside the part reads the nearest "
+     "surface node), `inside` false, `node_at_mm` and `distance_mm` saying "
+     "which, its "
      "displacement_mm, stress_mpa [xx, yy, zz, xy, yz, zx] (MPa, tension "
      "positive), von_mises_mpa, and where the result has them "
      "temperature_c and plastic_strain. What a benchmark's target is read "
@@ -2022,6 +2070,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "finite numbers.",
      "at_mm, case, id, study, simulation", remote::NoFlags,
      "body:string, displacement_mm:number[], distance_mm:number, "
+     "element?:int, inside:bool, "
      "node_at_mm:number[], plastic_strain?:number, stress_mpa:number[], "
      "temperature_c?:number, von_mises_mpa:number"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
@@ -2073,6 +2122,69 @@ json SampleStudy(ui::AppState& state, Host& host, const RpcParams& p) {
                              "was solved -- run_study again first");
   const int caseIdx =
       p.contains("case") ? CaseIndex(rt->caseNames, p.at("case")) : 0;
+  // A result that kept its interior (keep: full, docs/simulation/README.md
+  // #a-full-result): the element that holds the point, and the fields
+  // there through its own quadratic shape functions.
+  for (const fem::StudyBodyResult& b : rt->bodies) {
+    const fem::FemMesh& mesh = b.mesh;
+    for (size_t t = 0; t < mesh.tets.size(); ++t) {
+      const auto& e = mesh.tets[t];
+      const glm::dvec3 x0 = mesh.nodes[e[0]];
+      const glm::dmat3 J(mesh.nodes[e[1]] - x0, mesh.nodes[e[2]] - x0,
+                         mesh.nodes[e[3]] - x0);
+      const double det = glm::determinant(J);
+      if (std::abs(det) < 1e-18)
+        continue;
+      const glm::dvec3 l = glm::inverse(J) * (at - x0);
+      const double l0 = 1.0 - l.x - l.y - l.z;
+      constexpr double kOn = -1e-9;
+      if (l.x < kOn || l.y < kOn || l.z < kOn || l0 < kOn)
+        continue;
+      const double L[4] = {l0, l.x, l.y, l.z};
+      double N[10];
+      for (int i = 0; i < 4; ++i)
+        N[i] = L[i] * (2.0 * L[i] - 1.0);
+      static constexpr int kEdge[6][2] = {{0, 1}, {1, 2}, {0, 2},
+                                          {0, 3}, {1, 3}, {2, 3}};
+      for (int k = 0; k < 6; ++k)
+        N[4 + k] = 4.0 * L[kEdge[k][0]] * L[kEdge[k][1]];
+      const fem::FemResults& r = b.Case(caseIdx);
+      const size_t n = mesh.nodes.size();
+      json out{{"body", b.bodyName},
+               {"inside", true},
+               {"element", t},
+               {"node_at_mm", {at.x, at.y, at.z}},
+               {"distance_mm", 0.0}};
+      if (r.displacement.size() == n) {
+        glm::dvec3 u(0.0);
+        for (int i = 0; i < 10; ++i)
+          u += N[i] * r.displacement[e[i]];
+        out["displacement_mm"] = {u.x, u.y, u.z};
+      }
+      if (r.stress.size() == n) {
+        fem::Stress st{};
+        for (int i = 0; i < 10; ++i)
+          for (int k = 0; k < 6; ++k)
+            st[k] += N[i] * r.stress[e[i]][k];
+        json sj = json::array();
+        for (double v : st)
+          sj.push_back(v);
+        out["stress_mpa"] = std::move(sj);
+      }
+      const auto scalar = [&](const std::vector<double>& f, const char* key) {
+        if (f.size() != n)
+          return;
+        double v = 0.0;
+        for (int i = 0; i < 10; ++i)
+          v += N[i] * f[e[i]];
+        out[key] = v;
+      };
+      scalar(r.vonMises, "von_mises_mpa");
+      scalar(r.temperature, "temperature_c");
+      scalar(r.plasticStrain, "plastic_strain");
+      return out;
+    }
+  }
   const fem::StudyBodyResult* best = nullptr;
   int node = -1;
   double dist = std::numeric_limits<double>::infinity();
@@ -2090,6 +2202,7 @@ json SampleStudy(ui::AppState& state, Host& host, const RpcParams& p) {
   const fem::FemResults& r = best->Case(caseIdx);
   const glm::dvec3 x = best->mesh.nodes[node];
   json out{{"body", best->bodyName},
+           {"inside", false},
            {"node_at_mm", {x.x, x.y, x.z}},
            {"distance_mm", dist}};
   if (static_cast<size_t>(node) < r.displacement.size()) {
@@ -2868,6 +2981,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                  {"stale", host.Stale(s.id)}};
       if (Converges(s.type))
         sj["converge"] = fem::ConvergeModeToString(s.converge);
+      if (s.type == fem::AnalysisType::Modal)
+        sj["free"] = s.freeFree;
+      if (s.type != fem::AnalysisType::Topology)
+        sj["keep"] = fem::KeepModeToString(s.keep);
       if (s.material)
         sj["material"] = DocumentIO::StudyMaterialToJson(*s.material);
       if (s.thermalLoad.On()) {
@@ -3040,6 +3157,38 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           throw std::runtime_error("num_modes is at least 1");
         s.numModes = n;
       }
+      // Free-free (docs/simulation/README.md#free-free-modes): a modal
+      // study's, after `type`. A study with supports is refused, not
+      // stripped of them, and a free study made another type is refused
+      // until the same call says free: false.
+      if (p.contains("free")) {
+        if (!p.at("free").is_boolean())
+          throw std::runtime_error("free is true or false");
+        s.freeFree = p.at("free").get<bool>();
+      }
+      if (const std::string why = fem::FreeFreeRefusal(s); !why.empty())
+        throw std::runtime_error(
+            why + (p.contains("free") || s.type == fem::AnalysisType::Modal
+                       ? std::string()
+                       : "; this study is free-free, so set free: false in "
+                         "the same call"));
+      // What the stored result keeps (docs/simulation/README.md
+      // #a-full-result).
+      if (p.contains("keep")) {
+        const std::string k =
+            p.at("keep").is_string() ? p.at("keep").get<std::string>() : "";
+        if (!fem::KeepModeFromString(k, s.keep))
+          throw std::runtime_error("keep " + p.at("keep").dump() +
+                                   " is not one of: " + fem::kKeepModeNames);
+      }
+      if (s.keep != fem::KeepMode::Surface &&
+          s.type == fem::AnalysisType::Topology)
+        throw std::runtime_error(
+            "keep applies to a static, modal, buckling or thermal study; a "
+            "topology result keeps its whole mesh already" +
+            std::string(p.contains("keep") ? ""
+                                           : " (set keep: surface in the "
+                                             "same call)"));
       if (p.contains("gravity")) {
         s.gravity = remote::Vec3Param(p.at("gravity"), "gravity");
       }
@@ -3488,6 +3637,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // read as newtons would be a thousand times off on a 1 m lever).
     const bool torque = l.type == fem::LoadType::Torque;
     const bool remote = l.type == fem::LoadType::Remote;
+    const bool bearing = l.type == fem::LoadType::Bearing;
     const auto refuseKey = [&](const char* key, const char* instead) {
       if (p.contains(key))
         throw std::runtime_error(
@@ -3496,16 +3646,33 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             (instead[0] ? std::string("; it takes `") + instead + "`"
                         : std::string()));
     };
-    if (torque || remote)
+    if (torque || remote || bearing)
       refuseKey("magnitude", torque ? "torque_nmm" : "force_n");
     if (!torque) {
       refuseKey("torque_nmm", "");
       refuseKey("axis_origin_mm", "");
       refuseKey("axis_dir", "");
     }
-    if (!remote) {
+    if (!remote && !bearing)
       refuseKey("force_n", "");
+    if (!remote)
       refuseKey("point_mm", "");
+    if (bearing) {
+      if (!p.contains("force_n"))
+        throw std::runtime_error("a bearing load needs force_n (N, the total "
+                                 "it presses its bore with)");
+      if (!p.contains("direction"))
+        throw std::runtime_error(
+            "a bearing load needs `direction`, [x, y, z] across its bore's "
+            "axis: the way the shaft in it pushes");
+      refuseKey("region", "");
+      const fem::Study& st = host.Require(id);
+      if (st.type == fem::AnalysisType::Modal ||
+          st.type == fem::AnalysisType::Thermal)
+        throw std::runtime_error(
+            std::string("a bearing load is a static, buckling or topology "
+                        "study's; this study is ") +
+            fem::AnalysisTypeToString(st.type));
     }
     const bool pin = l.type == fem::LoadType::Pin;
     if (pin) {
@@ -3625,9 +3792,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       }
     }
     // rpc-params: magnitude, magnitude_expr, force_n_expr, torque_nmm_expr
-    const char* magKey = torque   ? "torque_nmm"
-                         : remote ? "force_n"
-                                  : "magnitude";
+    const char* magKey = torque              ? "torque_nmm"
+                         : remote || bearing ? "force_n"
+                                             : "magnitude";
     (void)ExprParam(p, magKey, l.magnitude);
     // A torque on a face that lends no axis is refused here, before the
     // study changes, as well as at the run (a file can carry one too).
@@ -3659,6 +3826,25 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           "' is not cylindrical: a cylindrical support holds radial, "
           "tangential and axial directions about a cylindrical face's axis; "
           "hold another face with a roller or held directions");
+    if (bearing) {
+      const auto axis =
+          faceDoc ? fem::CylindricalFaceAxis(*faceDoc, l.face) : std::nullopt;
+      if (!axis)
+        throw std::runtime_error(
+            "face '" + l.face.name +
+            "' is not cylindrical: a bearing load presses a bore or a "
+            "shaft across its axis (a force on a flat face is type: force)");
+      fem::Load check = l;
+      check.direction = remote::Vec3Param(p.at("direction"), "direction");
+      check.axisDirection = axis->direction;
+      if (l.occurrenceId != 0)
+        if (const Occurrence* occ = host.asmDoc->FindById(l.occurrenceId))
+          check.axisDirection =
+              glm::mat3_cast(occ->orientation) * check.axisDirection;
+      if (const std::string why = fem::BearingDirectionRefusal(check);
+          !why.empty())
+        throw std::runtime_error(why);
+    }
     if (pin && !(faceDoc && fem::CylindricalFaceAxis(*faceDoc, l.face)))
       throw std::runtime_error(
           "face '" + l.face.name +
@@ -3715,6 +3901,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (const std::string why = fem::ThermalRefusal(with); !why.empty())
         throw std::runtime_error(why);
       if (const std::string why = fem::FrameSupportRefusal(with); !why.empty())
+        throw std::runtime_error(why);
+      // A free-free study holds nothing (docs/simulation/README.md
+      // #free-free-modes): a support or load on it is refused, not added
+      // for the run to drop or to make it a supported study.
+      if (const std::string why = fem::FreeFreeRefusal(with); !why.empty())
         throw std::runtime_error(why);
     }
     refuseSuppressedFace(l);
@@ -4177,13 +4368,35 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         json freqs = json::array();
         for (const auto& mode : b.results.modes)
           freqs.push_back(mode.frequencyHz);
-        bodies.push_back({{"body", b.bodyName}, {"frequencies_hz", freqs}});
+        json bj{{"body", b.bodyName}, {"frequencies_hz", freqs}};
+        // Each mode (docs/simulation/README.md#free-free-modes): its
+        // frequency, whether it is a rigid-body mode of a free study, and
+        // its effective mass along x, y, z, with the body's mass they are
+        // shares of.
+        json modes = json::array();
+        glm::dvec3 sum(0.0);
+        int rigid = 0;
+        for (const auto& mode : b.results.modes) {
+          const glm::dvec3& me = mode.effectiveMassKg;
+          sum += me;
+          rigid += mode.rigid ? 1 : 0;
+          modes.push_back({{"frequency_hz", mode.frequencyHz},
+                           {"rigid", mode.rigid},
+                           {"effective_mass_kg", {me.x, me.y, me.z}}});
+        }
+        bj["modes"] = std::move(modes);
+        if (b.results.modalMassKg > 0) {
+          const double m = b.results.modalMassKg;
+          bj["mass_kg"] = m;
+          bj["effective_mass_fraction"] = {sum.x / m, sum.y / m, sum.z / m};
+        }
+        if (s->freeFree)
+          bj["rigid_modes"] = rigid;
+        bodies.push_back(std::move(bj));
       }
-      json out{{"type", "modal"},
-               {"nodes", nodes},
-               {"elements", elements},
-               {"bodies", bodies},
-               {"stale", host.Stale(id)}};
+      json out{{"type", "modal"},      {"nodes", nodes},
+               {"elements", elements}, {"bodies", bodies},
+               {"free", s->freeFree},  {"stale", host.Stale(id)}};
       if (!roles.empty())
         out["participants"] = roles;
       return stamp(out);

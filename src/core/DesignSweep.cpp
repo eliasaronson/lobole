@@ -4,10 +4,12 @@
 #include "core/DesignSweep.h"
 
 #include "cad/CADKernel.h" // ArmOccSignalHandlers
+#include "cad/CADMaterials.h"
 #include "cad/KernelThreads.h"
 #include "core/Parallel.h"
 #include "core/PartMeasures.h"
 #include "core/features/SketchFeature.h"
+#include "core/fem/SimStudy.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchSolver.h"
 
@@ -27,6 +29,20 @@ using json = nlohmann::json;
 namespace sweep {
 
 std::string ValueText(double v) { return std::format("{:.17g}", v); }
+
+std::shared_ptr<const fem::StudyRuntime> StudyCache::Find(uint64_t hash) {
+  std::lock_guard lock(mutex);
+  const auto it = byHash.find(hash);
+  return it == byHash.end() ? nullptr : it->second;
+}
+
+void StudyCache::Put(uint64_t hash,
+                     std::shared_ptr<const fem::StudyRuntime> rt) {
+  std::lock_guard lock(mutex);
+  if (!byHash.contains(hash) && byHash.size() >= kCapacity)
+    byHash.erase(byHash.begin()); // the cache is a convenience, not a record
+  byHash[hash] = std::move(rt);
+}
 
 std::vector<Chunk> PlanChunks(const Spec& spec) {
   std::vector<Chunk> chunks;
@@ -76,6 +92,26 @@ namespace {
 
 std::string Num(double v) { return std::format("{:.6g}", v); }
 
+// What every worker of one run shares: when it started (the study budget
+// runs from there), how many studies were solved and reused, the solving
+// time spent, and whether the budget ran out. One solve at a time: a
+// factorisation takes what memory the machine has, and two at once is
+// how a sweep would take the host down.
+struct RunShared {
+  std::chrono::steady_clock::time_point started =
+      std::chrono::steady_clock::now();
+  std::mutex solveMutex;
+  std::atomic<size_t> solved{0}, reused{0};
+  std::atomic<bool> budgetSpent{false};
+  std::mutex secondsMutex;
+  double solveSeconds = 0.0;
+  double Elapsed() const {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                         started)
+        .count();
+  }
+};
+
 // One worker's copies: the project variables and tables as the app had
 // them, every rebuilt part read back from its saved form against them, and
 // what the base looked like (each sketch's DOF), which a point's sketches
@@ -87,6 +123,11 @@ struct Worker {
   std::vector<std::unique_ptr<Document>> docs; // aligned with Inputs::parts
   std::map<std::pair<size_t, uint64_t>, int> baseDof; // {part, sketch} -> dof
   json base;
+  // Each study measure's simulation, this worker's own clone (a solve
+  // stores its meshes and result on it), aligned with Inputs::studies.
+  std::vector<fem::SimDocument> sims;
+  RunShared* shared = nullptr;
+  Progress* progress = nullptr;
 
   Worker() = default;
   Worker(const Worker&) = delete;
@@ -173,7 +214,227 @@ const SymbolTable* ScopeOn(const Inputs& in, const Worker& w,
 
 // One requirement measured on the copies: {id, name, state, value?, unit?,
 // note?}, its bound read in the scope it reads.
-json MeasureOn(const Inputs& in, const Worker& w, const req::Requirement& r) {
+// A study requirement measured on the copies (docs/requirements/README.md
+// #design-sweep): its study planned on the rebuilt part, keyed by the run's
+// input hash, read from the cache or meshed and solved here, and the
+// reading taken from the runtime as study_results and probe_study take it.
+// `value` unset with `why` when it cannot be read.
+void MeasureStudyOn(const Inputs& in, Worker& w, size_t index,
+                    std::optional<double>& value, std::string& unit,
+                    std::string& why, json& row) {
+  const StudyMeasure& sm = in.studies[index];
+  const req::Requirement& r = sm.requirement;
+  size_t k = 0;
+  const Document* doc = DocById(in, w, sm.part, &k);
+  if (doc == nullptr) {
+    why = "its part is not rebuilt";
+    return;
+  }
+  fem::SimDocument& sim = w.sims[index];
+  const fem::Study* study = sim.FindStudy(sm.study);
+  if (study == nullptr) {
+    why = "study " + std::to_string(sm.study) + " is gone";
+    return;
+  }
+  fem::SimContext ctx;
+  ctx.sim = &sim;
+  ctx.part = doc;
+  ctx.subjectStamps = {{sm.part, 1}};
+  fem::ConvergeOptions conv;
+  conv.mode = study->converge;
+  conv.autoSeconds = in.convergeAutoS;
+  const uint64_t key = fem::SimStudyInputKey(ctx, sm.study);
+  if (key == 0) {
+    std::string err;
+    fem::StudyPlan plan;
+    if (!fem::PlanSimStudy(ctx, sm.study, plan, &err))
+      why = "the study does not plan here: " + err;
+    else
+      why = "the study's inputs do not hash here";
+    return;
+  }
+  const uint64_t hash = fem::RunInputKey(key, conv);
+  row["input_hash"] = std::format("0x{:016x}", hash);
+  std::shared_ptr<const fem::StudyRuntime> rt;
+  if (in.studyCache)
+    rt = in.studyCache->Find(hash);
+  if (rt) {
+    row["reused"] = true;
+    w.shared->reused.fetch_add(1);
+  } else {
+    std::unique_lock lock(w.shared->solveMutex);
+    // Another worker may have solved these inputs while this one waited.
+    if (in.studyCache)
+      rt = in.studyCache->Find(hash);
+    if (rt) {
+      row["reused"] = true;
+      w.shared->reused.fetch_add(1);
+    } else {
+      if (w.shared->Elapsed() >= in.studyBudgetS ||
+          w.shared->budgetSpent.load()) {
+        w.shared->budgetSpent.store(true);
+        why = std::format("the study budget of {} s was spent before this "
+                          "point; nothing was solved for it",
+                          Num(in.studyBudgetS));
+        return;
+      }
+      if (w.progress != nullptr) {
+        std::lock_guard pl(w.progress->mutex);
+        w.progress->label += ": solving '" + study->name + "'";
+      }
+      const auto t0 = std::chrono::steady_clock::now();
+      fem::SolveOptions opts;
+      const double budget = in.studyBudgetS;
+      RunShared* shared = w.shared;
+      Progress* progress = w.progress;
+      opts.cancelled = [shared, progress, budget] {
+        return (progress != nullptr && progress->cancel.load()) ||
+               shared->Elapsed() >= budget;
+      };
+      auto whole = std::make_shared<fem::StudyRuntime>();
+      std::string err;
+      const bool ok =
+          fem::RunSimStudy(sim, ctx, sm.study, *whole, conv, opts, &err);
+      const double took =
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+              .count();
+      {
+        std::lock_guard sl(w.shared->secondsMutex);
+        w.shared->solveSeconds += took;
+      }
+      if (!ok) {
+        if (w.shared->Elapsed() >= budget) {
+          w.shared->budgetSpent.store(true);
+          why = std::format("the study budget of {} s ran out while this "
+                            "point solved",
+                            Num(budget));
+        } else {
+          why = "the study did not solve: " + err;
+        }
+        return;
+      }
+      fem::KeepWhatIsRead(*whole);
+      whole->inputHash = hash;
+      rt = whole;
+      if (in.studyCache)
+        in.studyCache->Put(hash, rt);
+      row["reused"] = false;
+      row["solve_s"] = took;
+      w.shared->solved.fetch_add(1);
+    }
+  }
+  // The reading, as the check takes it.
+  const std::string kind = r.Kind();
+  const json& m = r.measure;
+  int caseIdx = 0;
+  if (m.contains("case")) {
+    const json& want = m.at("case");
+    caseIdx = -1;
+    for (size_t c = 0; c < rt->caseNames.size(); ++c)
+      if ((want.is_string() && rt->caseNames[c] == want.get<std::string>()) ||
+          (want.is_number_unsigned() && want.get<size_t>() == c))
+        caseIdx = static_cast<int>(c);
+    if (caseIdx < 0) {
+      why = "the study has no load case " + want.dump();
+      return;
+    }
+  }
+  if (kind == "study_result") {
+    const std::string q = m.at("quantity").get<std::string>();
+    double disp = 0.0, vm = 0.0, fos = 0.0;
+    bool haveFos = false;
+    for (const fem::StudyBodyResult& b : rt->bodies) {
+      const fem::FemResults& res = b.Case(caseIdx);
+      disp = std::max(disp, res.maxDisplacement);
+      vm = std::max(vm, res.maxVonMises);
+      std::string material;
+      if (b.bodyIndex >= 0 &&
+          static_cast<size_t>(b.bodyIndex) < doc->GetBodies().size())
+        material = doc->GetBodies()[b.bodyIndex].material;
+      const double yield = fem::StudyMaterialRow(*study, material).yieldMPa;
+      const double f = res.factorOfSafety > 0 ? res.factorOfSafety
+                       : yield > 0 && res.maxVonMises > 0
+                           ? yield / res.maxVonMises
+                           : 0.0;
+      if (f > 0 && (!haveFos || f < fos)) {
+        fos = f;
+        haveFos = true;
+      }
+    }
+    if (q == "max_displacement") {
+      value = disp;
+      unit = "mm";
+    } else if (q == "max_von_mises") {
+      value = vm;
+      unit = "MPa";
+    } else if (q == "factor_of_safety") {
+      if (haveFos)
+        value = fos;
+      else
+        why = "no factor of safety: a material without a yield strength, or "
+              "no stress";
+    } else {
+      why = "a sweep reads max_displacement, max_von_mises and "
+            "factor_of_safety of a static study; " +
+            q + " is not swept";
+    }
+    return;
+  }
+  // study_probe on one face.
+  const json& fj = m.at("face");
+  const ElementRef face = fj.is_string()
+                              ? ElementRef{0, fj.get<std::string>()}
+                              : ElementRef{fj.value("feature_id", uint64_t{0}),
+                                           fj.value("element", std::string{})};
+  fem::ResolvedFace rf;
+  std::string err;
+  if (!fem::ResolveFace(*doc, face, "probe", rf, &err)) {
+    why = err;
+    return;
+  }
+  const fem::StudyBodyResult* body = nullptr;
+  for (const fem::StudyBodyResult& b : rt->bodies)
+    if (b.bodyIndex == rf.bodyIndex)
+      body = &b;
+  if (body == nullptr) {
+    why = "face '" + face.name + "' is on a body the study did not solve";
+    return;
+  }
+  const fem::FemResults& res = body->Case(caseIdx);
+  const std::string q = m.value("quantity", std::string("translation"));
+  if (q == "von_mises_max" || q == "von_mises_mean") {
+    const auto st = fem::FaceStressOf(body->mesh, res.vonMises, rf.faceIndex);
+    if (!st) {
+      why = "the face carries no stress in the study's result";
+      return;
+    }
+    value = q == "von_mises_max" ? st->maxMPa : st->meanMPa;
+    unit = "MPa";
+    return;
+  }
+  const auto fm =
+      fem::FitFaceMotion(body->mesh, res.displacement, rf.faceIndex);
+  if (!fm) {
+    why = "face '" + face.name + "' has no triangles in the study's mesh";
+    return;
+  }
+  if (q == "translation") {
+    value = glm::length(fm->translation);
+    unit = "mm";
+  } else if (q == "rotation") {
+    if (!fm->rotationDetermined) {
+      why = "the face's nodes lie on a line: its rotation is not determined";
+      return;
+    }
+    value = glm::degrees(glm::length(fm->rotation));
+    unit = "deg";
+  } else {
+    why = q + " is not swept (a sweep reads translation, rotation, "
+              "von_mises_max and von_mises_mean of one face)";
+  }
+}
+
+json MeasureOn(const Inputs& in, Worker& w, const req::Requirement& r) {
   json row{{"id", r.id}, {"name", r.name}};
   const std::string kind = r.Kind();
   std::optional<double> value;
@@ -211,6 +472,10 @@ json MeasureOn(const Inputs& in, const Worker& w, const req::Requirement& r) {
       } else if (kind == "section_area") {
         value = partmeasure::SectionAreaMeasure(*doc, r.measure).value;
         unit = "mm2";
+      } else if (kind == "study_result" || kind == "study_probe") {
+        for (size_t i = 0; i < in.studies.size(); ++i)
+          if (in.studies[i].requirement.id == r.id)
+            MeasureStudyOn(in, w, i, value, unit, why, row);
       }
     }
   } catch (const Standard_Failure& e) {
@@ -318,7 +583,10 @@ json Record(const Inputs& in, Worker& w, bool isBase) {
     parts.push_back(std::move(p));
   }
   json reqs = json::array();
-  for (const req::Requirement& r : in.requirements) {
+  std::vector<req::Requirement> all = in.requirements;
+  for (const StudyMeasure& sm : in.studies)
+    all.push_back(sm.requirement);
+  for (const req::Requirement& r : all) {
     json row = MeasureOn(in, w, r);
     const std::string st = row.at("state").get<std::string>();
     if (st != "pass")
@@ -360,6 +628,8 @@ void Apply(const Inputs& in, Worker& w, const std::vector<double>& values) {
 }
 
 void Load(const Inputs& in, Worker& w) {
+  for (const StudyMeasure& sm : in.studies)
+    w.sims.push_back(sm.sim->Clone());
   w.params = in.projectParameters;
   lookuptable::AddCellSymbols(in.tables, w.cells);
   w.Evaluate();
@@ -509,6 +779,7 @@ void RunChunk(const Inputs& in, Worker& w, const Chunk& chunk, ChunkResult& out,
 } // namespace
 
 json Run(const Inputs& in, Progress& progress) {
+  RunShared shared;
   const std::vector<Chunk> chunks = PlanChunks(in.spec);
   const size_t planned = PlannedCount(in.spec);
   std::vector<ChunkResult> results(chunks.size());
@@ -529,6 +800,8 @@ json Run(const Inputs& in, Progress& progress) {
       if (progress.cancel.load())
         return;
       Worker w;
+      w.shared = &shared;
+      w.progress = &progress;
       Load(in, w);
       {
         std::lock_guard lock(baseMutex);
@@ -569,10 +842,17 @@ json Run(const Inputs& in, Progress& progress) {
     baseValues[v.name] = v.value;
   if (base.is_object())
     base["values"] = baseValues;
-  return json{{"points", points},
-              {"base", base},
-              {"first_failure", firstFailure},
-              {"cancelled", progress.cancel.load()}};
+  json out{{"points", points},
+           {"base", base},
+           {"first_failure", firstFailure},
+           {"cancelled", progress.cancel.load()}};
+  if (!in.studies.empty())
+    out["studies"] = {{"solved", shared.solved.load()},
+                      {"reused", shared.reused.load()},
+                      {"solve_seconds", shared.solveSeconds},
+                      {"budget_s", in.studyBudgetS},
+                      {"budget_spent", shared.budgetSpent.load()}};
+  return out;
 }
 
 } // namespace sweep

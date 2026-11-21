@@ -49,6 +49,10 @@ struct Window {
   int samples = 5;
   bool corners = false;
   int refine = 0;
+  // Seconds a sweep that solves studies may spend (study_budget_s); 0 is
+  // not stated, and a sweep that solves one is refused until it is
+  // (docs/requirements/README.md#studies-at-every-point).
+  double studyBudgetS = 0.0;
   uint64_t job = 0;
   json result;
   std::string error;
@@ -81,6 +85,8 @@ json Request(const Window& w) {
     p["corners"] = true;
   if (w.refine > 0)
     p["refine"] = w.refine;
+  if (w.studyBudgetS > 0.0)
+    p["study_budget_s"] = w.studyBudgetS;
   if (w.fromRequirements) {
     p["from_requirements"] = true;
     return p;
@@ -349,6 +355,11 @@ void DrawDesignSweepWindow(AppState& state) {
   ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
   ExprInputInt(state, "Refine###sweep_refine", &w.refine);
   w.refine = std::clamp(w.refine, 0, 8);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+  ExprInputDouble(state, "Study budget (s)###sweep_study_budget",
+                  &w.studyBudgetS, "%.0f");
+  w.studyBudgetS = std::max(0.0, w.studyBudgetS);
 
   // The planned count against the cap, before Run: what design_sweep would
   // answer, or why it would refuse.
@@ -375,6 +386,16 @@ void DrawDesignSweepWindow(AppState& state) {
     drawn.planned = std::to_string(w.plan.value("planned", 0)) +
                     " points planned, cap " +
                     std::to_string(w.plan.value("cap", 0));
+    // A sweep that solves studies says what it solves and what it may
+    // cost before Run.
+    if (w.plan.contains("study_requirements"))
+      drawn.planned +=
+          "; solves " + std::to_string(w.plan.at("study_requirements").size()) +
+          " study requirement(s) at each point" +
+          (w.plan.contains("estimate_s")
+               ? ", about " + Num(w.plan.at("estimate_s").get<double>()) + " s"
+               : std::string()) +
+          ", within " + Num(w.plan.value("study_budget_s", 0.0)) + " s";
     ImGui::TextDisabled("%s", drawn.planned.c_str());
   }
 

@@ -50,6 +50,14 @@ LoadSimulation(const std::string& path);
 // fingerprint are the same document (what an undo guard compares).
 [[nodiscard]] std::string SimulationFingerprint(const fem::SimDocument& sim);
 
+// A stored result of `sim` as a save writes it (StudyResultToJson, with the
+// meshes it was solved on): a full result's body solved on a mesh `sim`
+// keeps is written against it (docs/simulation/README.md#a-full-result).
+// What the sizes-on-disk hover and the clear-storage question count. False
+// when it holds nothing solved.
+bool SimResultToJson(const fem::SimDocument& sim, const fem::StudyRuntime& rt,
+                     nlohmann::json& out);
+
 // One stored mesh as a json whose arrays ride under kResultData (positions
 // f64: a mesh is solved on again, not only drawn). FromJson throws on a
 // malformed one: counts that disagree, an index past the nodes.

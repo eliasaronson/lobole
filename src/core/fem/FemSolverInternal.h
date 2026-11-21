@@ -406,6 +406,17 @@ inline FaceIntegrals IntegrateFace(const FemMesh& mesh,
 //   Remote   t = F/A + (I^-1 M) x (x - c), M = (p - c) x F, I the face's area
 //            inertia about its centroid c: the force F at the point p, the
 //            way an RBE3 spreads it.
+//   Bearing  t = p0 w m, m the unit radial direction from the axis pointing
+//            INTO the material (out of a bore's hole, into a shaft), w =
+//            max(0, m . d) the cosine from the force's direction d: a
+//            normal pressure p0 cos(theta) over the half d pushes on and
+//            none on the other, plus on that half q sin(theta) (m . e, e = a
+//            x d), p0 and q solved so the resultant is exactly F along d and
+//            nothing across it on this mesh (q is a trace: what a mesh not
+//            symmetric about d leaves). The moment about the axis is exactly
+//            zero (each traction is radial). A face that does not hold the
+//            whole loaded half (q over a hundredth of p0) is refused: the
+//            load would not be the cosine asked for.
 // Returns false + *error on a face meshed to zero area, a torque with no
 // axis or no polar moment, or a remote load whose face cannot carry a
 // moment (its nodes on a line).
@@ -442,6 +453,68 @@ inline bool AssembleFaceLoads(const FemMesh& mesh,
                     " face meshed to zero area");
     }
     Vector3d omega = Vector3d::Zero(); // Remote: the moment's traction rate
+    // Bearing: the unit radial direction into the material at x, and the
+    // pressure's scale.
+    const auto into = [&](const Vector3d& x, const Vector3d& cross) {
+      Vector3d r = x - origin;
+      r -= r.dot(axis) * axis;
+      const double len = r.norm();
+      if (!(len > 0))
+        return Vector3d(Vector3d::Zero());
+      r /= len;
+      // netgen's boundary normal points out of the part: on a bore towards
+      // the axis, on a shaft away from it. Into the material is against it.
+      return Vector3d(cross.dot(r) > 0 ? -r : r);
+    };
+    double p0 = 0.0, q = 0.0;
+    Vector3d across = Vector3d::Zero(); // Bearing: e = axis x d
+    if (load.type == LoadType::Bearing) {
+      if (axis.squaredNorm() == 0)
+        return fail("a bearing load has no axis (its face is not "
+                    "cylindrical)");
+      const Vector3d d = dir - dir.dot(axis) * axis;
+      if (!(d.squaredNorm() > 0))
+        return fail("a bearing load's direction lies along its axis, so it "
+                    "presses nothing");
+      const Vector3d dn = d.normalized();
+      across = axis.cross(dn);
+      // The cosine pressure w = m.d over the loaded half, and beside it the
+      // sine one s = m.e there, whose share q cancels what a mesh that is
+      // not symmetric about d leaves across it: p0 and q make the resultant
+      // exactly F along d and nothing across.
+      Eigen::Matrix2d A = Eigen::Matrix2d::Zero();
+      ForEachFaceGaussPoint(mesh, load.tris,
+                            [&](const auto&, const double*, const Vector3d& x,
+                                const Vector3d& cross, double dA) {
+                              const Vector3d m = into(x, cross);
+                              const double w = m.dot(dn);
+                              if (!(w > 0))
+                                return;
+                              const double e = m.dot(across);
+                              A(0, 0) += w * w * dA;
+                              A(0, 1) += e * w * dA;
+                              A(1, 0) += w * e * dA;
+                              A(1, 1) += e * e * dA;
+                            });
+      if (!(A(0, 0) > 0) || !(A(1, 1) > 0))
+        return fail("a bearing load's face has nothing on the side its "
+                    "force pushes");
+      const Eigen::Vector2d pq =
+          A.fullPivLu().solve(Eigen::Vector2d(load.magnitude, 0.0));
+      p0 = pq(0);
+      q = pq(1);
+      // A face that holds the whole loaded half needs no more than a trace
+      // of the sine; one that holds part of it would be pushed off its
+      // cosine to add up, which is another load.
+      if (!std::isfinite(p0) || !std::isfinite(q) ||
+          std::abs(q) > 1e-2 * std::abs(p0))
+        return fail("a bearing load's face does not hold the whole half its "
+                    "force presses on (a bore in pieces, or part of one), so "
+                    "the pressure would not add up to the force; put it on "
+                    "the face that does, or use a force");
+      // From here on the direction is the radial one.
+      omega = dn;
+    }
     if (load.type == LoadType::Torque) {
       if (axis.squaredNorm() == 0)
         return fail("a torque has no axis to turn about");
@@ -473,6 +546,13 @@ inline bool AssembleFaceLoads(const FemMesh& mesh,
             traction =
                 (load.magnitude / in.area) * dir + omega.cross(x - in.centroid);
             break;
+          case LoadType::Bearing: {
+            const Vector3d m = into(x, cross);
+            const double w = m.dot(omega);
+            traction = w > 0 ? Vector3d((p0 * w + q * m.dot(across)) * m)
+                             : Vector3d(Vector3d::Zero());
+            break;
+          }
           default: // Pressure: along the inward normal (positive = pushing)
             traction = -load.magnitude * cross.normalized(); // netgen: outward
             break;

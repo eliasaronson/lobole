@@ -222,6 +222,7 @@ add_executable(designer_tests
     test_fem.cpp
     test_fem_loads.cpp
     test_fem_pin.cpp
+    test_fem_free_modal.cpp
     test_fem_supports.cpp
     test_fem_buckling.cpp
     test_fem_thermal.cpp
@@ -236,6 +237,7 @@ add_executable(designer_tests
     test_sim_geometry.cpp
     test_sim_storage.cpp
     test_sim_project.cpp
+    test_sim_full_result.cpp
     test_drawing_hlr.cpp
     test_drawing.cpp
     test_drawing_sheet.cpp
@@ -1564,6 +1566,18 @@ add_test(NAME sim_geometry_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sim_geometry_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(sim_geometry_smoke PROPERTIES TIMEOUT 180
+                     SKIP_RETURN_CODE 77)
+
+# A bearing load, a free-free modal study and a full result over the RPCs
+# alone (docs/simulation/README.md#bearing-loads, #free-free-modes,
+# #a-full-result): the clamp answers the bearing force, six rigid modes hold
+# the whole mass, and a full result sampled inside answers the same after
+# the project is saved, the app closed and a new one opens it. Every
+# refusal changes nothing. Self-skips (77) without Netgen.
+add_test(NAME sim_loads_results_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sim_loads_results_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(sim_loads_results_smoke PROPERTIES TIMEOUT 240
                      SKIP_RETURN_CODE 77)
 
 # A nonlinear static study over the RPCs alone

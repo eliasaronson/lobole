@@ -2430,9 +2430,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
             {"###tb_sim_fixed", "###tb_sim_pin", "###tb_sim_contact",
              "###tb_sim_roller", "###tb_sim_held", "###tb_sim_cylindrical",
              "###tb_sim_temperature", "###tb_sim_convection"});
-    inGroup("sim_loads", {"###tb_sim_force", "###tb_sim_pressure",
-                          "###tb_sim_torque", "###tb_sim_remote",
-                          "###tb_sim_heat_flux", "###tb_sim_heat_source"});
+    inGroup("sim_loads",
+            {"###tb_sim_force", "###tb_sim_pressure", "###tb_sim_torque",
+             "###tb_sim_remote", "###tb_sim_bearing", "###tb_sim_heat_flux",
+             "###tb_sim_heat_source"});
     // A static study: a heat source is off and says why; Keep (a topology
     // study's) is not on the bar at all; nothing to export before a run.
     IM_CHECK(!ui::CommandEnabled(*s_App, "sim.heat_source"));
@@ -2541,6 +2542,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
           Try{"###tb_sim_pressure", A::Static},
           Try{"###tb_sim_torque", A::Static},
           Try{"###tb_sim_remote", A::Static},
+          Try{"###tb_sim_bearing", A::Static},
           Try{"###tb_sim_temperature", A::Thermal},
           Try{"###tb_sim_convection", A::Thermal},
           Try{"###tb_sim_heat_flux", A::Thermal},
@@ -2948,5 +2950,210 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::ExitSimulation(*s_App);
     ctx->Yield();
 #endif
+  };
+
+  // A bearing load (docs/simulation/README.md#bearing-loads) is a kind in
+  // the Load tool's list: armed there, its force typed in the tool window,
+  // a flat face refused in the red line, a vertical bore refused for "down"
+  // until a direction is given, and then placed across the bore's axis,
+  // drawn as arrows over the half it pushes on.
+  t = IM_REGISTER_TEST(engine, "sim", "the_load_tool_places_a_bearing_load");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureCylinder(ctx); // standing up: its axis is the world's up
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    const Body& body = Doc()->GetBodies()[0];
+    ElementRef side, flat;
+    for (const auto& [index, name] : body.elementMap.names)
+      if (const auto info = Measure::DescribeFaceAt(body, index))
+        (info->kind == "cylinder" ? side : flat) =
+            ElementRef{body.createdBy, name};
+    IM_CHECK_SILENT(!side.name.empty() && !flat.name.empty());
+    ToolbarClick(ctx, "###tb_sim_bearing");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Bearing);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###sim_bearing_force"));
+    ctx->ItemInputValue("//###ToolWindow/###sim_bearing_force", "120");
+    ctx->Yield();
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    ui::SimulationApplyToFace(*s_App, flat);
+    ctx->Yield(2);
+    IM_CHECK(Sim()->FindStudy(sid)->loads.empty());
+    IM_CHECK(s_App->simulation.placeRefusal.find("not cylindrical") !=
+             std::string::npos);
+    // Down is along a standing bore: refused until a direction is given.
+    ui::SimulationApplyToFace(*s_App, side);
+    ctx->Yield(2);
+    IM_CHECK(Sim()->FindStudy(sid)->loads.empty());
+    IM_CHECK(s_App->simulation.placeRefusal.find("Custom direction") !=
+             std::string::npos);
+    ctx->ItemCheck("//###ToolWindow/###sim_bearing_custom_dir");
+    ctx->Yield();
+    s_App->simulation.pendingDirection = glm::dvec3(1, 0, 0);
+    ui::SimulationApplyToFace(*s_App, side);
+    ctx->Yield(2);
+    const fem::Study* st = Sim()->FindStudy(sid);
+    IM_CHECK_EQ(st->loads.size(), (size_t)1);
+    const fem::Load& l = st->loads[0];
+    IM_CHECK(l.type == fem::LoadType::Bearing);
+    IM_CHECK(std::abs(l.magnitude - 120.0) < 1e-9);
+    IM_CHECK(std::abs(glm::dot(l.direction, conv::kWorldUp)) < 1e-9);
+    IM_CHECK(!l.HasAxis()); // the face's, found when it is planned
+    IM_CHECK(s_App->simulation.placeRefusal.empty());
+    // Its arrows: the study has no other load, so whatever is drawn is
+    // the bearing load's.
+    std::vector<PrimVertex> prims;
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    IM_CHECK(ctx->ItemExists(
+        ("//###Model/**/###load_row_" + std::to_string(l.id)).c_str()));
+    // The tool window with the bearing kind armed again, for a person.
+    s_App->simulation.directionOverridden = false;
+    ToolbarClick(ctx, "###tb_sim_bearing");
+    ctx->Yield(3);
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->StopAnimation();
+    {
+      // From the side the load pushes on (it pushes +x: the shaft is
+      // pressed on its -x half), a little above.
+      const glm::vec3 at = s_App->camera->GetTarget();
+      const float far = glm::length(s_App->camera->GetPosition() - at);
+      s_App->camera->SetUp(glm::vec3(conv::kWorldUp));
+      s_App->camera->SetPosition(
+          at + far * glm::normalize(glm::vec3(-1.0f, -0.6f, 0.5f)));
+    }
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.3f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.8f * s_App->viewportSize.y));
+    ctx->Yield(10);
+    SimWindowShot(ctx, "bearing-load-tool");
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::None);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // A free-free modal study (docs/simulation/README.md#free-free-modes):
+  // ticked in the study's window (refused while a support holds it), run,
+  // and its result window lists six rigid modes by name, then the elastic
+  // ones with their effective mass.
+  t = IM_REGISTER_TEST(engine, "sim", "a_free_study_names_its_rigid_modes");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+#if defined(HAVE_NETGEN) && defined(HAVE_SPECTRA)
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx);
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_sim_add_modal");
+    ctx->Yield(2);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    IM_CHECK(Sim()->FindStudy(sid)->type == fem::AnalysisType::Modal);
+    SimFocusStudy(ctx, sid);
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_free"));
+    ctx->ItemCheck("//###ToolWindow/###study_free");
+    ctx->Yield(2);
+    IM_CHECK(Sim()->FindStudy(sid)->freeFree);
+    // Nothing may hold it now: the Fixed tool says so.
+    IM_CHECK(!ui::SimCommandRefusal(*s_App, "sim.fixed").empty());
+    ctx->ItemInputValue("//###ToolWindow/###study_modes", "3");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->numModes, 3);
+    ToolbarClick(ctx, "###tb_sim_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid));
+    ctx->Yield(3);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(sid);
+    IM_CHECK_SILENT(rt != nullptr);
+    const auto& modes = rt->bodies.at(0).results.modes;
+    IM_CHECK_EQ(modes.size(), (size_t)9);
+    for (size_t i = 0; i < modes.size(); ++i)
+      IM_CHECK(modes[i].rigid == (i < 6));
+    SimTreeClick(ctx, "###sim_result_" + std::to_string(sid));
+    ctx->Yield(2);
+    LegendChoose(ctx, "###result_field", "###field_mode_shape");
+    LegendChoose(ctx, "###result_mode", "###result_mode_6");
+    IM_CHECK_EQ(s_App->simulation.activeMode, 6);
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->StopAnimation();
+    SimTreeClick(ctx, "###sim_result_" + std::to_string(sid));
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.45f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.12f * s_App->viewportSize.y));
+    ctx->Yield(10);
+    SimWindowShot(ctx, "free-free-rigid-modes");
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+#endif
+  };
+
+  // A study that keeps its whole field (docs/simulation/README.md
+  // #a-full-result), set in its window: the stored result has every
+  // element, a section cuts the field through them (a crinkle cut, drawn
+  // unclipped, not a hollow skin), the VTU export is offered from the
+  // stored result, and the sizes on disk count its fields.
+  t = IM_REGISTER_TEST(engine, "sim",
+                       "a_full_result_is_cut_through_its_elements");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    using Field = ui::SimulationState::Field;
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    SimTreeClick(ctx, "###study_sel_" + std::to_string(sid));
+    ctx->Yield(2);
+    ctx->ItemClick("//###ToolWindow/###study_keep");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    {
+      ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+      IM_CHECK_SILENT(popup != nullptr);
+      ctx->ItemClick(
+          (std::string("//") + popup->Name + "/**/Whole field").c_str());
+    }
+    ctx->Yield(2);
+    IM_CHECK(Sim()->FindStudy(sid)->keep == fem::KeepMode::Full);
+    ToolbarClick(ctx, "###tb_sim_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid));
+    ctx->Yield(3);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(sid);
+    IM_CHECK_SILENT(rt != nullptr && rt->keepFull);
+    IM_CHECK(!rt->bodies.at(0).mesh.tets.empty());
+    IM_CHECK(ui::SimCommandRefusal(*s_App, "sim.export_vtu").empty());
+    LegendChoose(ctx, "###result_field", "###field_von_mises");
+    IM_CHECK(s_App->simulation.field == Field::VonMises);
+    // Along the bar's length, through the middle of its width: the cut
+    // face is its side profile, the bending stress across its height.
+    const uint64_t cut = ui::AddSection(*s_App, 0);
+    ctx->Yield(5);
+    // The body's flat cap is not drawn over the elements it would cut.
+    for (const auto& cap : s_App->gpu.sectionCapMeshes)
+      IM_CHECK(std::find(s_App->gpu.hiddenMeshes.begin(),
+                         s_App->gpu.hiddenMeshes.end(),
+                         cap.meshId) != s_App->gpu.hiddenMeshes.end());
+    const auto shown = s_App->simulation.shown;
+    IM_CHECK(shown != nullptr);
+    IM_CHECK(s_App->fieldRenderer == nullptr ||
+             s_App->fieldRenderer->Style().unclipped);
+    const ui::SimStoredBytes& bytes = ui::SimStoredBytesOf(*s_App);
+    IM_CHECK(bytes.results.count(sid) == 1);
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->StopAnimation();
+    {
+      // Onto the cut face from the side cut away (the cut keeps what is
+      // below it): the stress inside the bar, the bar across the view.
+      const glm::vec3 at = s_App->camera->GetTarget();
+      const float far = glm::length(s_App->camera->GetPosition() - at);
+      s_App->camera->SetUp(-glm::vec3(conv::kWorldFront));
+      s_App->camera->SetPosition(at + 1.3f * far * glm::vec3(conv::kWorldUp));
+      // The bar moved right, clear of the legend in the lower left.
+      s_App->camera->StopAnimation();
+      s_App->camera->Pan(90.0, -60.0);
+    }
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.12f * s_App->viewportSize.y));
+    ctx->Yield(10);
+    SimWindowShot(ctx, "full-result-sectioned");
+    ui::RemoveSection(*s_App, cut);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
   };
 }

@@ -587,6 +587,12 @@ uint64_t ResultOverlayKey(const AppState& state, const StudyHost& host,
   // A half model's mirror image, about the plane as it is now.
   const bool mirror = sim.mirror && host.sim->Geometry().symmetry.On();
   key = Mix(key, mirror ? fem::GeometryHash(host.sim->Geometry()) : 0);
+  // A full result is cut by the section through its elements, so where the
+  // planes are is part of what is drawn.
+  if (rt.keepFull)
+    for (const glm::vec4& p : SectionPlanes(state))
+      for (int k = 0; k < 4; ++k)
+        key = Mix(key, Bits(p[k]));
   return key | 1ull;
 }
 
@@ -739,9 +745,65 @@ bool BuildResultOverlay(AppState& state, const StudyHost& host,
     return p - 2.0 * d * n;
   };
 
+  // A result that kept its interior (docs/simulation/README.md
+  // #a-full-result), under a section: the elements whose middle is on the
+  // kept side, drawn whole (a crinkle cut, as the mesh is), so the cut face
+  // shows the field inside the part rather than a hollow skin.
+  std::vector<glm::dvec4> cuts;
+  if (rt.keepFull && !mirror)
+    for (const glm::vec4& p : SectionPlanes(state))
+      if (glm::dot(glm::vec3(p), glm::vec3(p)) > 0.0f)
+        cuts.push_back(glm::dvec4(p));
+  bool crinkle = false;
+
   // --- The triangles.
   for (const BodyField& bf : fields) {
     const fem::FemMesh& m = bf.body->mesh;
+    if (!cuts.empty() && !m.tets.empty()) {
+      crinkle = true;
+      std::vector<char> kept(m.tets.size(), 1);
+      for (size_t t = 0; t < m.tets.size(); ++t) {
+        const auto& e = m.tets[t];
+        const glm::dvec3 c = 0.25 * (m.nodes[e[0]] + m.nodes[e[1]] +
+                                     m.nodes[e[2]] + m.nodes[e[3]]);
+        for (const glm::dvec4& p : cuts)
+          if (glm::dot(glm::dvec3(p), c) - p.w > 0.0)
+            kept[t] = 0;
+      }
+      std::unordered_map<FaceKey, std::pair<int, int>, FaceKeyHash> skin;
+      skin.reserve(m.boundary.size() * 2 + 64);
+      for (size_t t = 0; t < m.tets.size(); ++t) {
+        if (!kept[t])
+          continue;
+        const auto& e = m.tets[t];
+        for (int f = 0; f < 4; ++f) {
+          FaceKey key{
+              {e[kTetFace[f][0]], e[kTetFace[f][1]], e[kTetFace[f][2]]}};
+          std::sort(key.n.begin(), key.n.end());
+          const auto it = skin.find(key);
+          if (it == skin.end())
+            skin.emplace(key, std::make_pair(static_cast<int>(t), f));
+          else
+            skin.erase(it);
+        }
+      }
+      for (const auto& [key, tf] : skin) {
+        const auto& e = m.tets[tf.first];
+        std::array<FieldVertex, 6> v;
+        for (int k = 0; k < 6; ++k) {
+          const int n = e[kTetFace[tf.second][k]];
+          v[k].position = glm::vec3(m.nodes[n]);
+          v[k].displacement =
+              bf.disp ? glm::vec3((*bf.disp)[n]) : glm::vec3(0.0f);
+          const double t =
+              span > 0.0 ? (bf.value[n] - shown.barLo) / span : 0.0;
+          v[k].scalar = static_cast<float>(std::clamp(t, -1.0, tMax));
+          v[k].edge = glm::vec3(1.0f);
+        }
+        EmitTri6(verts, indices, v);
+      }
+      continue;
+    }
     for (const fem::FemMesh::BoundaryTri& tri : m.boundary) {
       std::array<FieldVertex, 6> v;
       for (int i = 0; i < 6; ++i) {
@@ -770,6 +832,7 @@ bool BuildResultOverlay(AppState& state, const StudyHost& host,
   }
   style = FieldStyle{};
   style.reversed = shown.reversed;
+  style.unclipped = crinkle;
   return true;
 }
 
@@ -782,6 +845,12 @@ FullStudyResult(const AppState& constState, uint64_t studyId) {
   const fem::StudyRuntime* rt = host ? host.Results(studyId) : nullptr;
   if (!rt || rt->inputHash == 0)
     return nullptr;
+  // A full result (keep: full) is whole as it is stored, after a reopen
+  // too (docs/simulation/README.md#a-full-result): not owned here, read
+  // while the store holds it.
+  if (rt->keepFull && fem::VtuRefusal(*rt).empty())
+    return std::shared_ptr<const fem::StudyRuntime>(
+        std::shared_ptr<const fem::StudyRuntime>(), rt);
   std::shared_ptr<const fem::StudyRuntime> full =
       state.studyResultsByInput.Find(rt->inputHash);
   if (!full || !fem::VtuRefusal(*full).empty())
@@ -928,7 +997,7 @@ const SimStoredBytes& SimStoredBytesOf(AppState& state) {
   for (const uint64_t id : sim.ResultIds())
     if (const fem::StudyRuntime* rt = sim.StudyResults(id)) {
       nlohmann::json j;
-      if (DocumentIO::StudyResultToJson(*rt, j)) {
+      if (DocumentIO::SimResultToJson(sim, *rt, j)) {
         const size_t n = SavedBytes(std::move(j));
         cached.results[id] = n;
         cached.total += n;

@@ -22,12 +22,15 @@
 #include "core/Document.h"
 #include "core/LookupTable.h"
 #include "core/Requirements.h"
+#include "core/fem/SimDocument.h"
 
 #include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -76,6 +79,31 @@ struct PartCopy {
   std::filesystem::path file;
 };
 
+// A study requirement a sweep measures (docs/requirements/README.md
+// #design-sweep): at every point its simulation's study is planned on the
+// rebuilt part, meshed and solved, unless a run of the same inputs is in
+// the cache.
+struct StudyMeasure {
+  req::Requirement requirement;
+  uint64_t part = 0; // the rebuilt part's slot id: the simulation's subject
+  uint64_t study = 0;
+  // The simulation as it is now, without its results (its meshes kept,
+  // shared): each worker solves on a clone of its own.
+  std::shared_ptr<const fem::SimDocument> sim;
+};
+
+// What a study solved at a sweep's point answers, by its run's input hash
+// (fem::RunInputKey of fem::SimStudyInputKey): a rerun of the sweep, or a
+// point whose inputs a stored result was solved at, solves nothing. The
+// app keeps one for the session; workers read and write it under `mutex`.
+struct StudyCache {
+  std::mutex mutex;
+  std::map<uint64_t, std::shared_ptr<const fem::StudyRuntime>> byHash;
+  static constexpr size_t kCapacity = 64;
+  std::shared_ptr<const fem::StudyRuntime> Find(uint64_t hash);
+  void Put(uint64_t hash, std::shared_ptr<const fem::StudyRuntime> rt);
+};
+
 struct Inputs {
   Spec spec;
   std::vector<Parameter> projectParameters;
@@ -84,6 +112,13 @@ struct Inputs {
   // Measured at every point: `expression`, and `mass`, `volume` and
   // `section_area` of a rebuilt part. The app lists the rest as not swept.
   std::vector<req::Requirement> requirements;
+  // Measured at every point too, each by a solve (or a cached one), under
+  // `studyBudgetS` of solving in all: once it is spent, a point's study
+  // reads unresolved, saying so, and the answer says `budget_spent`.
+  std::vector<StudyMeasure> studies;
+  double studyBudgetS = 0.0;
+  double convergeAutoS = 0.0; // the converge_auto_s preference
+  std::shared_ptr<StudyCache> studyCache;
   int holdMs = 0; // tests: how long each point waits first, cancellable
 };
 

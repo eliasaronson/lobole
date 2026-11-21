@@ -442,7 +442,8 @@ void DrawPendingCase(AppState& state, const fem::Study& s) {
   if (s.loadCases.empty() || (sim.tool != SimulationState::Tool::Force &&
                               sim.tool != SimulationState::Tool::Pressure &&
                               sim.tool != SimulationState::Tool::Torque &&
-                              sim.tool != SimulationState::Tool::Remote))
+                              sim.tool != SimulationState::Tool::Remote &&
+                              sim.tool != SimulationState::Tool::Bearing))
     return;
   int k = std::max(0, s.FindLoadCase(sim.pendingCase));
   LeftLabel("In case");
@@ -671,6 +672,27 @@ void DrawArmedTool(AppState& state, const fem::Study& s) {
     } else {
       Hint("At: off the face you click, along its normal");
     }
+  }
+
+  // A bearing load (docs/simulation/README.md#bearing-loads): its total
+  // force, and the way the shaft in the bore pushes it.
+  if (sim.tool == SimulationState::Tool::Bearing) {
+    LeftLabel("Force (N)");
+    std::string expr;
+    if (ExprInputDouble(state, "###sim_bearing_force", &sim.pendingMagnitude,
+                        "%.1f", &expr))
+      sim.pendingMagnitudeExpr = expr;
+    ImGui::Checkbox("Custom direction###sim_bearing_custom_dir",
+                    &sim.directionOverridden);
+    if (sim.directionOverridden) {
+      LeftLabel("Direction");
+      ExprInputDouble3(state, "###sim_bearing_direction",
+                       &sim.pendingDirection.x, "%.3f");
+    } else {
+      Hint("Direction: down, across the bore's axis");
+    }
+    Hint("Click a bore or a shaft: the force presses the half it pushes "
+         "on, most where it pushes straight");
   }
 
   // Pending magnitude/direction applied to the next placed force/pressure.
@@ -1284,14 +1306,61 @@ void DrawResults(AppState& state, const fem::Study& s) {
         b = &br;
         break;
       }
-    // The mode shown is the legend's; the one on show is marked here.
-    if (b)
-      for (int i = 0; i < (int)b->results.modes.size(); ++i)
-        ImGui::TextColored(
-            sim.activeMode == i && sim.field != SimulationState::Field::None
-                ? ImVec4(1, 1, 1, 1)
-                : kMuted,
-            "Mode %d:  %.4g Hz", i + 1, b->results.modes[i].frequencyHz);
+    // The mode shown is the legend's; the one on show is marked here. Each
+    // mode's effective mass along x, y, z as a share of the body's
+    // (docs/simulation/README.md#free-free-modes), and a free study's rigid
+    // modes named as such: their frequency is zero, not a resonance.
+    if (b) {
+      const double total = b->results.modalMassKg;
+      const bool masses = total > 0.0;
+      if (ImGui::BeginTable("###modal_modes", masses ? 5 : 2,
+                            ImGuiTableFlags_SizingFixedFit |
+                                ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Mode");
+        ImGui::TableSetupColumn("Frequency");
+        if (masses) {
+          ImGui::TableSetupColumn("x");
+          ImGui::TableSetupColumn("y");
+          ImGui::TableSetupColumn("z");
+        }
+        ImGui::TableHeadersRow();
+        for (int i = 0; i < (int)b->results.modes.size(); ++i) {
+          const fem::FemResults::ModeShape& md = b->results.modes[i];
+          const ImVec4 col =
+              sim.activeMode == i && sim.field != SimulationState::Field::None
+                  ? ImVec4(1, 1, 1, 1)
+                  : kMuted;
+          ImGui::TableNextRow();
+          ImGui::TableNextColumn();
+          ImGui::TextColored(col, "%d", i + 1);
+          ImGui::TableNextColumn();
+          if (md.rigid)
+            ImGui::TextColored(col, "rigid");
+          else
+            ImGui::TextColored(col, "%.4g Hz", md.frequencyHz);
+          if (masses)
+            for (int k = 0; k < 3; ++k) {
+              ImGui::TableNextColumn();
+              const double pct = 100.0 * md.effectiveMassKg[k] / total;
+              if (pct < 0.05)
+                ImGui::TextColored(kMuted, "-");
+              else
+                ImGui::TextColored(col, "%.1f%%", pct);
+            }
+        }
+        ImGui::EndTable();
+      }
+      if (masses) {
+        glm::dvec3 sum(0.0);
+        for (const auto& md : b->results.modes)
+          sum += md.effectiveMassKg;
+        ImGui::TextColored(kMuted,
+                           "Effective mass, share of %.4g kg: these modes "
+                           "hold %.0f / %.0f / %.0f %%",
+                           total, 100.0 * sum.x / total, 100.0 * sum.y / total,
+                           100.0 * sum.z / total);
+      }
+    }
     return;
   }
 
@@ -1932,6 +2001,13 @@ void DrawStudySettings(AppState& state, const fem::Study* s) {
       if (nt == fem::AnalysisType::Buckling && cs.type != nt)
         cs.numModes = fem::kBucklingFactorsDefault;
       cs.type = nt;
+      // Free-free is a modal study's, and a topology result keeps its
+      // whole mesh already: neither setting is carried to a study that
+      // cannot read it.
+      if (nt != fem::AnalysisType::Modal)
+        cs.freeFree = false;
+      if (nt == fem::AnalysisType::Topology)
+        cs.keep = fem::KeepMode::Surface;
       if (!fem::SolverRefusal(cs.solver, cs.type).empty())
         cs.solver = fem::Solver::Auto;
     });
@@ -1946,6 +2022,26 @@ void DrawStudySettings(AppState& state, const fem::Study* s) {
   DrawStudyMaterial(state, *s);
   if (s->shapeFrom.study == 0)
     DrawStudyOwnMeshSize(state, *s, "Own mesh (mm, 0=shared)");
+  // What the stored result keeps (docs/simulation/README.md#a-full-result):
+  // the surface, or the whole field so a reopened result can be cut and
+  // probed inside. A topology result keeps its whole mesh already.
+  if (s->type != fem::AnalysisType::Topology) {
+    int keep = s->keep == fem::KeepMode::Full ? 1 : 0;
+    const char* kKeep[] = {"Surface", "Whole field"};
+    LeftLabel("Keep");
+    if (ImGui::Combo("###study_keep", &keep, kKeep, 2)) {
+      const fem::KeepMode k =
+          keep == 1 ? fem::KeepMode::Full : fem::KeepMode::Surface;
+      if (k != s->keep)
+        ModifyStudy(state, s->id, "Set what the result keeps",
+                    [&](fem::Study& cs) { cs.keep = k; });
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Surface: what the panels read, small on disk.\n"
+                        "Whole field: every node and element, so a reopened "
+                        "result can be sectioned, probed inside and "
+                        "exported.");
+  }
 
   if (s->type == fem::AnalysisType::Modal ||
       s->type == fem::AnalysisType::Buckling) {
@@ -1956,6 +2052,24 @@ void DrawStudySettings(AppState& state, const fem::Study* s) {
         nm != s->numModes)
       ModifyStudy(state, s->id, "Set mode count",
                   [&](fem::Study& cs) { cs.numModes = nm; });
+    // Free-free (docs/simulation/README.md#free-free-modes): the part with
+    // no support. Offered only on a study that holds nothing: a support is
+    // never dropped to make it so.
+    if (s->type == fem::AnalysisType::Modal) {
+      bool free = s->freeFree;
+      const bool held = !s->loads.empty() && !s->freeFree;
+      ImGui::BeginDisabled(held);
+      if (ImGui::Checkbox("Free-free: no support###study_free", &free))
+        ModifyStudy(state, s->id,
+                    free ? "Make study free-free" : "Make study supported",
+                    [&](fem::Study& cs) { cs.freeFree = free; });
+      ImGui::EndDisabled();
+      if (held && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Remove its supports first: a free-free study "
+                          "holds nothing");
+      if (s->freeFree)
+        Hint("Six rigid modes come first, then %d elastic ones", s->numModes);
+    }
   } else if (s->type == fem::AnalysisType::Topology) {
     // Topology: target volume, minimum-member (filter) size, iteration cap.
     float vf = static_cast<float>(s->volumeFraction);
@@ -2148,7 +2262,7 @@ void DrawLoadWindow(AppState& state, const fem::Study& s, uint64_t loadId) {
     LeftLabel(fem::IsSupport(l->type) ? "Holds" : "Value");
     ImGui::TextUnformatted(value.c_str());
   }
-  if (l->type == fem::LoadType::Force) {
+  if (l->type == fem::LoadType::Force || l->type == fem::LoadType::Bearing) {
     LeftLabel("Direction");
     ImGui::Text("[%.3g, %.3g, %.3g]", l->direction.x, l->direction.y,
                 l->direction.z);
@@ -2588,6 +2702,8 @@ void DrawLegendControls(AppState& state, const fem::Study& s,
         if (s.type == fem::AnalysisType::Buckling)
           std::snprintf(buf, sizeof(buf), "%d:  x %.4g", i + 1,
                         b->results.modes[i].factor);
+        else if (b->results.modes[i].rigid)
+          std::snprintf(buf, sizeof(buf), "%d:  rigid", i + 1);
         else
           std::snprintf(buf, sizeof(buf), "%d:  %.4g Hz", i + 1,
                         b->results.modes[i].frequencyHz);
@@ -3430,6 +3546,24 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
                   load.magnitude >= 0.0 ? 1.0f : -1.0f, out);
       break;
     }
+    case fem::LoadType::Bearing: {
+      // The pressure over the half it pushes on: an arrow at each sample
+      // there, into the material, as long as the cosine it carries.
+      const glm::dvec3 dd = load.direction;
+      if (glm::length(dd) < 1e-12)
+        break;
+      const glm::vec3 d = glm::normalize(glm::vec3(dd));
+      const auto samples = SampleFace(state, load.occurrenceId, load.face,
+                                      spacing * 0.8f, kMaxGlyphsPerFace);
+      for (const FaceSample& fs : samples) {
+        const float w = glm::dot(-fs.normal, d);
+        if (w < 0.15f)
+          continue;
+        ArrowGlyph(fs.point + fs.normal * (len * 0.7f * w), fs.point, kForce,
+                   out);
+      }
+      break;
+    }
     case fem::LoadType::Remote: {
       // The force where it acts, and thin lines tying that point to the
       // face that carries it.
@@ -3652,6 +3786,12 @@ std::string SimulationLoadLabel(const fem::Load& load) {
     return buf;
   case fem::LoadType::Torque:
     return TorqueText(load.magnitude);
+  case fem::LoadType::Bearing: // the row and the tooltip say it is one
+    if (std::abs(load.magnitude) >= 1000.0)
+      std::snprintf(buf, sizeof(buf), "%.3g kN", load.magnitude / 1000.0);
+    else
+      std::snprintf(buf, sizeof(buf), "%.3g N", load.magnitude.value);
+    return buf;
   case fem::LoadType::Remote:
     if (std::abs(load.magnitude) >= 1000.0)
       std::snprintf(buf, sizeof(buf), "%.3g kN at a point",
@@ -3803,6 +3943,13 @@ void DrawSimulationLabels(AppState& state) {
     case fem::LoadType::Torque:
       label(c + n * len * 0.6f, SimulationLoadLabel(load), col(kTorque));
       break;
+    case fem::LoadType::Bearing: {
+      // Behind the half it pushes on, against its direction.
+      glm::vec3 d(load.direction);
+      d = glm::length(d) > 1e-9f ? glm::normalize(d) : n;
+      label(c - d * len * 0.9f, SimulationLoadLabel(load), col(kForce));
+      break;
+    }
     case fem::LoadType::Remote: {
       glm::vec3 dir(load.direction);
       dir =
@@ -3992,6 +4139,9 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   case SimulationState::Tool::Remote:
     load.type = fem::LoadType::Remote;
     break;
+  case SimulationState::Tool::Bearing:
+    load.type = fem::LoadType::Bearing;
+    break;
   case SimulationState::Tool::Pin:
     load.type = fem::LoadType::Pin;
     break;
@@ -4133,6 +4283,42 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
       sim.placeRefusal = why;
       return;
     }
+  }
+  if (load.type == fem::LoadType::Bearing) {
+    // Refused where it can be read, and nothing placed: a bearing load
+    // presses a bore or a shaft across its axis.
+    const auto axis =
+        faceDoc ? fem::CylindricalFaceAxis(*faceDoc, face) : std::nullopt;
+    if (!axis) {
+      sim.placeRefusal = "'" + face.name +
+                         "' is not cylindrical: a bearing load presses a "
+                         "bore or a shaft (a force on a flat face is a Force)";
+      return;
+    }
+    glm::dvec3 a = axis->direction;
+    if (placedOcc)
+      a = glm::mat3_cast(placedOcc->orientation) * a;
+    glm::dvec3 d = sim.pendingDirection;
+    if (!sim.directionOverridden) {
+      // Down, across the axis: what a part's weight or a load hung from the
+      // bore does. A vertical bore has no down across it.
+      d = -conv::kWorldUp - glm::dot(-conv::kWorldUp, a) * a;
+      if (glm::length(d) < 1e-6) {
+        sim.placeRefusal = "'" + face.name +
+                           "' stands vertical, so down is along it: tick "
+                           "Custom direction and give the way it is pushed";
+        return;
+      }
+      d = glm::normalize(d);
+    }
+    load.direction = d;
+    load.axisDirection = a; // for the check only; never saved
+    if (const std::string why = fem::BearingDirectionRefusal(load);
+        !why.empty()) {
+      sim.placeRefusal = why;
+      return;
+    }
+    load.axisDirection = glm::dvec3(0.0);
   }
   if (load.type == fem::LoadType::Remote) {
     if (!sim.pointOverridden) {

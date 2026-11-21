@@ -45,6 +45,10 @@ enum class LoadType {
   Remote,   // a force (N) acting at a point off the face, carried by the
             // face as F/A plus the linear traction that carries its moment
             // (docs/simulation/README.md#torque-and-remote-loads)
+  Bearing,  // a total force (N) on a cylindrical face, the way a shaft or a
+            // pin in it presses: a normal pressure over the half the force
+            // pushes on, p0 cos(theta) from the direction, zero on the far
+            // half (docs/simulation/README.md#bearing-loads)
   Pin,      // a support on a cylindrical face: a rigid pin on its axis that
             // holds the face radially and axially where the part presses on
             // it (compression only), free to turn unless fixRotation
@@ -155,7 +159,8 @@ struct LoadRegion {
   bool operator==(const LoadRegion&) const = default;
 };
 
-// One boundary condition. `magnitude` is N (Force, Remote), MPa (Pressure) or
+// One boundary condition. `magnitude` is N (Force, Remote, Bearing), MPa
+// (Pressure) or
 // N*mm (Torque), ignored for Fixed. `direction` is the force direction (Force
 // and Remote; need not be normalized — it is normalized at solve time).
 // Magnitude follows the value+ expr convention so it can read "bolt_preload
@@ -199,6 +204,9 @@ struct Load {
   std::string loadCase;
   // Part of the face only (v183); Whole, the face, as ever. A part study's.
   LoadRegion region;
+  // A bearing load's axis is its cylindrical face's, kept in
+  // axisOrigin/axisDirection once CompleteLoadGeometry has run (never
+  // saved), and its `direction` lies across that axis.
   // Pin only: hold the tangential direction too, so the part cannot turn on
   // the pin (a keyed or pressed pin). The pin's axis is its face's, kept in
   // axisOrigin/axisDirection once CompleteLoadGeometry has run.
@@ -286,6 +294,15 @@ inline constexpr const char* kConvergeModeNames = "auto, always, never";
 const char* ConvergeModeToString(ConvergeMode mode);
 [[nodiscard]] bool ConvergeModeFromString(const std::string& s,
                                           ConvergeMode& out);
+
+// What a stored result keeps (docs/simulation/README.md
+// #what-a-saved-result-keeps): Surface, the boundary surface every panel and
+// RPC reads; Full, the interior too, against the mesh it was solved on, so
+// a reopened result can be sectioned, probed inside and exported.
+enum class KeepMode { Surface, Full };
+inline constexpr const char* kKeepModeNames = "surface, full";
+const char* KeepModeToString(KeepMode mode);
+[[nodiscard]] bool KeepModeFromString(const std::string& s, KeepMode& out);
 
 inline constexpr int kBucklingFactorsDefault = 3;
 
@@ -433,6 +450,14 @@ struct Study {
   // many factors (kBucklingFactorsDefault when not given: a symmetric
   // section has two equal first modes).
   int numModes = 6;
+  // Modal only (vNEXT): free-free, the part with no support at all. Its six
+  // rigid modes are found and labelled, and `numModes` elastic modes after
+  // them (docs/simulation/README.md#free-free-modes). A free study takes no
+  // support: one with any is refused, never solved as supported.
+  bool freeFree = false;
+
+  // What a stored result keeps (vNEXT): the surface, or the whole field.
+  KeepMode keep = KeepMode::Surface;
 
   // Topology only. The optimizer removes material from the loaded body down to
   // `volumeFraction` of its volume while keeping it as stiff as possible under
@@ -556,7 +581,8 @@ std::optional<double> DerivedStressFree(const Study& thermal);
 const char* LoadTypeToString(LoadType type);
 // Every load type's name, for a refusal that names what is accepted.
 inline constexpr const char* kLoadTypeNames =
-    "fixed, force, pressure, torque, remote, pin, contact, roller, held, "
+    "fixed, force, pressure, torque, remote, bearing, pin, contact, roller, "
+    "held, "
     "cylindrical, temperature, heat_flux, convection, heat_generation";
 inline constexpr const char* kThermalLoadTypeNames =
     "temperature, heat_flux, convection, heat_generation";
@@ -640,6 +666,18 @@ std::optional<LoadAxis> TorqueAxis(const Document& doc, const Load& load);
 // pass unchanged.
 bool CompleteLoadGeometry(const TopoDS_Shape& face, Load& load,
                           std::string* error);
+// Empty when the study's `freeFree` can be solved; otherwise why not, naming
+// what is accepted (docs/simulation/README.md#free-free-modes): free on any
+// study but a modal one, and a free study with any load or support (it is
+// the part with none: a support is never quietly dropped).
+std::string FreeFreeRefusal(const Study& study);
+// A bearing load's direction lies across its bore's axis: the share of its
+// length along the axis may be at most this.
+inline constexpr double kBearingAxialTolerance = 1e-3;
+// Empty when a bearing load's `direction` can be its push: not zero, and,
+// once its axis is known (CompleteLoadGeometry), across it to
+// kBearingAxialTolerance. Otherwise why not, naming what is accepted.
+std::string BearingDirectionRefusal(const Load& load);
 
 // One meshed body of a study.
 struct StudyBodyMesh {

@@ -240,13 +240,35 @@ const MethodDoc RequirementMethods[] = {
      "each failure's bracket (default 0, at most 8 times), documents?: [part "
      "ids] (default: every part whose variables or features read a swept "
      "one, directly or through others), max_points?: (default 64, at most "
-     "256), async?, outlive_client?}. A point records, per rebuilt part, "
+     "256), study_budget_s?, async?, outlive_client?}. A point records, per "
+     "rebuilt part, "
      "regen ok|broken with the broken features {feature_id, name, error}, "
      "each sketch that does not solve or whose dof moved {feature_id, ok, "
      "dof, conflicting}, volume_mm3 and mass_g; and every expression, mass, "
      "volume and section_area requirement of a rebuilt part, measured as "
-     "the check measures it (the others are listed once in not_swept, with "
-     "why). first_failure {name: {below?, above?: {last_ok, failed, why}}} "
+     "the check measures it. A study_result (max_displacement, "
+     "max_von_mises, factor_of_safety) or study_probe (one face's "
+     "translation, rotation, von_mises_max, von_mises_mean) requirement on "
+     "a static, in-house study of a rebuilt part's simulation is SOLVED at "
+     "every point: the study planned on the rebuilt part, re-meshed and "
+     "solved as part of the sweep's job, one solve at a time, its row "
+     "carrying input_hash, reused and solve_s; a point whose inputs hash as "
+     "a stored result or an earlier sweep's solve did reuses it. Such a "
+     "sweep needs study_budget_s (seconds on the wall clock from the "
+     "sweep's start within which it may solve, above 0, at most 86400; "
+     "refused without, the refusal saying what the last solves suggest, and "
+     "refused on a sweep that solves none): once spent, a point's study "
+     "reads unresolved saying so, a solve under way is cancelled, and "
+     "studies.budget_spent is true. A study that converges always is "
+     "refused (each point would refine without a bound). The answer's "
+     "`studies` {solved, reused, solve_seconds, budget_s, budget_spent, "
+     "requirements, estimate_s?}; async's first answer lists them as "
+     "`study_requirements` [{id, name, study, study_name, "
+     "last_solve_s?}] with "
+     "study_budget_s and estimate_s? "
+     "(docs/requirements/README.md#studies-at-every-point). "
+     "The others are listed once in not_swept, with why. first_failure {name: "
+     "{below?, above?: {last_ok, failed, why}}} "
      "is the failing value nearest the variable's own on each side. "
      "Refused before anything starts: an unknown key, a variable not in "
      "scope (naming those that are) or that nothing reads, one a rebuilt "
@@ -259,12 +281,13 @@ const MethodDoc RequirementMethods[] = {
      "unless outlive_client. The last sweeps are kept in memory: "
      "design_sweep_result.",
      "async, corners, documents, from_requirements, max_points, "
-     "outlive_client, refine, samples, variables",
+     "outlive_client, refine, samples, study_budget_s, variables",
      NotInBatch,
      "base?:object, cancelled?:bool, cap:int, first_failure?:object, "
      "job:int, kind?:string, not_swept?:object[], planned:int, "
      "points?:object[], seconds?:number, started?:bool, "
-     "variables:object[]"},
+     "estimate_s?:number, studies?:object, study_budget_s?:number, "
+     "study_requirements?:object[], variables:object[]"},
     {"design_sweep_result",
      "A design sweep's answer {job?: the sweep's job, else the last one}: "
      "what design_sweep answers once it has run (cancelled: true with the "
@@ -274,7 +297,7 @@ const MethodDoc RequirementMethods[] = {
      "base?:object, cancelled?:bool, cap?:int, first_failure?:object, "
      "fraction?:number, job:int, label?:string, not_swept?:object[], "
      "planned?:int, points?:object[], running?:bool, seconds?:number, "
-     "variables?:object[]"},
+     "studies?:object, variables?:object[]"},
     // The declared clearances (v97) are clearance requirements now
     // (docs/requirements/README.md#clearance-assertions). These four keep
     // their words for the scripts that use them.
@@ -2949,6 +2972,12 @@ struct SweepPlan {
   sweep::Spec spec;
   std::vector<size_t> slots;
   std::vector<req::Requirement> measured;
+  // The study requirements it solves at every point, their simulations,
+  // and the budget the caller stated for solving them.
+  std::vector<sweep::StudyMeasure> studies;
+  double studyBudgetS = 0.0;
+  json studyRows = json::array();
+  double estimateS = 0.0; // the last solve times the points, where known
   json notSwept = json::array();
   size_t planned = 0, cap = sweep::kDefaultMaxPoints;
   json variables = json::array(); // as resolved, for the answer
@@ -2963,6 +2992,13 @@ SweepStore& Sweeps() {
   static SweepStore store;
   return store;
 }
+// The studies sweeps solved this session, by their run's input hash: a
+// rerun of a sweep answers each point it already solved from here.
+std::shared_ptr<sweep::StudyCache> SweepStudyCache() {
+  static auto cache = std::make_shared<sweep::StudyCache>();
+  return cache;
+}
+
 void KeepSweep(uint64_t job, json answer) {
   SweepStore& s = Sweeps();
   s.answers.emplace_back(job, std::move(answer));
@@ -3078,6 +3114,17 @@ SweepPlan PlanSweep(ui::AppState& state, const RpcParams& p) {
   const bool fromRequirements = flag("from_requirements");
   (void)flag("async");
   (void)flag("outlive_client");
+  std::optional<double> studyBudget;
+  if (p.contains("study_budget_s")) {
+    const json& v = p.at("study_budget_s");
+    if (!v.is_number() || !std::isfinite(v.get<double>()) ||
+        !(v.get<double>() > 0.0) || v.get<double>() > 86400.0)
+      throw std::runtime_error("`study_budget_s` is the seconds of solving a "
+                               "sweep may spend on its studies, above 0 and "
+                               "at most 86400, not " +
+                               v.dump());
+    studyBudget = v.get<double>();
+  }
 
   Document* active = state.document.get();
   const auto activeId = [&]() -> uint64_t {
@@ -3418,9 +3465,66 @@ SweepPlan PlanSweep(ui::AppState& state, const RpcParams& p) {
       else if (!rebuilt.contains(r.Document()))
         why = "its part is not rebuilt, so none of the swept variables "
               "reaches it";
-    } else if (kind == "study_probe" || kind == "study_result" ||
-               kind == "motion_clean" || kind == "follower") {
-      why = "a study per point is minutes";
+    } else if (kind == "study_probe" || kind == "study_result") {
+      // Solved at every point (docs/requirements/README.md#design-sweep):
+      // a static part study, in-house, on one face or one maximum.
+      const uint64_t sid = r.measure.at("study").get<uint64_t>();
+      const fem::SimDocument* sim = SimulationHolding(state, r.Document(), sid);
+      const fem::Study* st = sim ? sim->FindStudy(sid) : nullptr;
+      const std::string q = r.measure.value("quantity", std::string());
+      if (!rebuilt.contains(r.Document()))
+        why = "its part is not rebuilt, so none of the swept variables "
+              "reaches it";
+      else if (st == nullptr)
+        why = "study " + std::to_string(sid) + " is gone";
+      else if (sim->Subject().kind != fem::SubjectKind::Part)
+        why = "an assembly simulation's study: the sweep rebuilds parts";
+      else if (st->type != fem::AnalysisType::Static)
+        why = std::string("a sweep solves a static study at each point; "
+                          "this one is ") +
+              fem::AnalysisTypeToString(st->type);
+      else if (fem::EffectiveSolver(*st) == fem::Solver::Calculix)
+        why = "a CalculiX study per point (an external program, run again "
+              "at each); a sweep solves in-house";
+      else if (kind == "study_probe" &&
+               (r.measure.contains("readings") || r.measure.contains("at")))
+        why = "a formula over several faces, or a motion carried to a "
+              "point, is not swept: a sweep reads one face's translation, "
+              "rotation or stress";
+      else if (kind == "study_result" && q != "max_displacement" &&
+               q != "max_von_mises" && q != "factor_of_safety")
+        why = "a sweep reads max_displacement, max_von_mises and "
+              "factor_of_safety; " +
+              q + " is not swept";
+      else if (st->converge == fem::ConvergeMode::Always)
+        throw std::runtime_error(
+            "requirement '" + r.name + "' reads study '" + st->name +
+            "', which converges always: each point would refine round its "
+            "peak until it settles, however long that takes, so the sweep "
+            "has no bound. Set the study's converge to auto (it stops for "
+            "time) or never, or leave the requirement out");
+      if (why.empty()) {
+        sweep::StudyMeasure sm;
+        sm.requirement = r;
+        sm.part = r.Document();
+        sm.study = sid;
+        auto copy = std::make_shared<fem::SimDocument>(sim->Clone());
+        for (const uint64_t id : copy->ResultIds())
+          copy->DropStudyResults(id);
+        sm.sim = std::move(copy);
+        plan.studies.push_back(std::move(sm));
+        json row{{"id", r.id},
+                 {"name", r.name},
+                 {"study", sid},
+                 {"study_name", st->name}};
+        if (const fem::StudyRuntime* rt = sim->StudyResults(sid);
+            rt && rt->solveSeconds > 0.0)
+          row["last_solve_s"] = rt->solveSeconds;
+        plan.studyRows.push_back(std::move(row));
+        continue;
+      }
+    } else if (kind == "motion_clean" || kind == "follower") {
+      why = "a motion study per point is minutes";
     } else if (kind == "cam_verify") {
       why = "a CAM job's verification per point is minutes";
     } else if (kind == "check_literals") {
@@ -3438,6 +3542,34 @@ SweepPlan PlanSweep(ui::AppState& state, const RpcParams& p) {
   }
 
   plan.planned = sweep::PlannedCount(plan.spec);
+  // A sweep that solves studies says up front how long it may: the caller
+  // states the budget, and the plan what its last solves suggest.
+  if (!plan.studies.empty()) {
+    double perPoint = 0.0;
+    std::string names;
+    for (const json& row : plan.studyRows) {
+      perPoint += row.value("last_solve_s", 0.0);
+      names += (names.empty() ? "'" : ", '") +
+               row.at("study_name").get<std::string>() + "'";
+    }
+    plan.estimateS = perPoint * static_cast<double>(plan.planned + 1);
+    if (!studyBudget)
+      throw std::runtime_error(
+          "this sweep solves " + names + " at each of its " +
+          std::to_string(plan.planned) +
+          " points (and its base): state study_budget_s, the seconds of "
+          "solving it may spend" +
+          (perPoint > 0.0
+               ? std::format(" (the last solves took {:.3g} s, so about "
+                             "{:.3g} s for every point)",
+                             perPoint, plan.estimateS)
+               : std::string(" (none has been timed in this session)")));
+    plan.studyBudgetS = *studyBudget;
+  } else if (studyBudget) {
+    throw std::runtime_error("study_budget_s bounds the studies a sweep "
+                             "solves, and this one solves none (its study "
+                             "requirements, if any, are in not_swept)");
+  }
   if (plan.planned > plan.cap)
     throw std::runtime_error(
         "the sweep would run " + std::to_string(plan.planned) +
@@ -3457,10 +3589,17 @@ SweepPlan PlanSweep(ui::AppState& state, const RpcParams& p) {
 }
 
 json PlanJson(const SweepPlan& plan) {
-  return json{{"planned", plan.planned},
-              {"cap", plan.cap},
-              {"variables", plan.variables},
-              {"not_swept", plan.notSwept}};
+  json out{{"planned", plan.planned},
+           {"cap", plan.cap},
+           {"variables", plan.variables},
+           {"not_swept", plan.notSwept}};
+  if (!plan.studies.empty()) {
+    out["study_requirements"] = plan.studyRows;
+    out["study_budget_s"] = plan.studyBudgetS;
+    if (plan.estimateS > 0.0)
+      out["estimate_s"] = plan.estimateS;
+  }
+  return out;
 }
 
 // The copies a sweep reads: each rebuilt part in its saved form, with the
@@ -3473,6 +3612,21 @@ sweep::Inputs SweepInputs(ui::AppState& state, const SweepPlan& plan,
   in.projectParameters = state.projectParameters;
   in.tables = state.projectTables;
   in.requirements = plan.measured;
+  in.studies = plan.studies;
+  in.studyBudgetS = plan.studyBudgetS;
+  in.convergeAutoS = state.settings.convergeAutoS;
+  in.studyCache = SweepStudyCache();
+  // A stored result still current answers the point it was solved at.
+  for (const sweep::StudyMeasure& sm : plan.studies) {
+    const fem::SimDocument* sim = SimulationHolding(state, sm.part, sm.study);
+    if (sim == nullptr)
+      continue;
+    const fem::StudyRuntime* rt = sim->StudyResults(sm.study);
+    if (rt && rt->inputHash != 0 && !rt->cancelled &&
+        !ui::SimStudyStale(state, *sim, sm.study))
+      in.studyCache->Put(rt->inputHash,
+                         std::make_shared<const fem::StudyRuntime>(*rt));
+  }
   in.holdMs = TestSweepHoldMs();
   std::error_code ec;
   std::filesystem::create_directories(dir, ec);
@@ -3497,6 +3651,11 @@ std::filesystem::path SweepDir() {
 }
 
 json AnswerOf(const SweepPlan& plan, json run, double seconds, uint64_t job) {
+  if (!plan.studies.empty() && run.contains("studies")) {
+    run["studies"]["requirements"] = plan.studyRows;
+    if (plan.estimateS > 0.0)
+      run["studies"]["estimate_s"] = plan.estimateS;
+  }
   run["planned"] = plan.planned;
   run["cap"] = plan.cap;
   run["variables"] = plan.variables;
@@ -3613,9 +3772,9 @@ public:
   Next Poll(ui::AppState& state, const RpcParams& p, json& answer) override {
     if (ui::FindBackgroundJobById(state, m_job))
       return Next::Wait;
-    for (const char* k :
-         {"variables", "from_requirements", "samples", "corners", "refine",
-          "documents", "max_points", "async", "outlive_client"})
+    for (const char* k : {"variables", "from_requirements", "samples",
+                          "corners", "refine", "documents", "max_points",
+                          "async", "outlive_client", "study_budget_s"})
       if (p.contains(k))
         (void)p.at(k);
     answer = SweepAnswer(m_job);
@@ -3904,7 +4063,7 @@ std::optional<json> HandleRequirementsRpc(ui::AppState& state,
   if (m == "design_sweep") {
     // rpc-returns-from: src/remote/RemoteRequirements.cpp
     // rpc-params: async, corners, documents, from_requirements, max_points
-    // rpc-params: outlive_client, refine, samples, variables
+    // rpc-params: outlive_client, refine, samples, study_budget_s, variables
     ui::ReapBackgroundJobs(state);
     SweepPlan plan = PlanSweep(state, p);
     const bool async = p.value("async", false);

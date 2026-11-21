@@ -90,6 +90,35 @@ std::vector<StudyProblem> CheckStudy(const Document& doc, const Study& original,
     }
   }
 
+  // A free-free modal study (docs/simulation/README.md#free-free-modes):
+  // nothing holds it, and nothing may.
+  if (const std::string why = FreeFreeRefusal(study); !why.empty()) {
+    StudyProblem& p = add("setup", why);
+    p.fixMethod = "set_study";
+    p.fixParams = {{"id", sid}, {"free", false}};
+    p.fixNote = "or remove its loads and supports to keep it free";
+  }
+  if (study.freeFree && study.loads.empty()) {
+    for (const Body& body : doc.GetBodies()) {
+      if (body.reference)
+        continue;
+      const auto mp = StudyMaterialRow(study, body.material);
+      std::string why = CADMaterials::ElasticDataRefusal(mp);
+      if (why.empty() && mp.density <= 0.0f)
+        why = "has no density (needed for modal analysis)";
+      if (why.empty())
+        continue;
+      StudyProblem& p = add(
+          "material", "body '" + body.name + "': material '" +
+                          (body.material.empty() ? "default" : body.material) +
+                          "' " + why);
+      p.body = body.name;
+      p.fixMethod = "set_material";
+      p.fixParams = {{"body_name", body.name}, {"material", nullptr}};
+      p.fixNote = "material: a library material that has the property";
+    }
+    return out;
+  }
   if (study.loads.empty()) {
     StudyProblem& p = add("no_loads", "the study has no loads or supports");
     p.fixMethod = "add_load";
@@ -213,7 +242,7 @@ std::vector<StudyProblem> CheckStudy(const Document& doc, const Study& original,
       p.fixNote = "face and temperature_c: the face that is held and what "
                   "at; or a convection load {film_w_m2k, ambient_c}";
     }
-    if (!thermalStudy && !held) {
+    if (!thermalStudy && !held && !study.freeFree) {
       StudyProblem& p = add("no_support", "body '" + body.name +
                                               "' has loads but no fixed "
                                               "support");
@@ -258,6 +287,9 @@ std::vector<StudyProblem> CheckStudy(const Document& doc, const Study& original,
                     "and axis_dir, or on a cylindrical face"
               : l.type == LoadType::Remote
                   ? "then add_load {type: remote} again with point_mm"
+              : l.type == LoadType::Bearing
+                  ? "then add_load {type: bearing} again on a cylindrical "
+                    "face, with a direction across its axis"
                   : "then add_load it again on a cylindrical face";
         }
       }

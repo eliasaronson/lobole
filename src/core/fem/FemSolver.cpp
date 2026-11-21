@@ -1374,6 +1374,37 @@ private:
   Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>, Eigen::Lower> solver;
   bool factored = false;
 };
+
+// SpdShiftInvert with known modes set apart (a free-free study's six rigid
+// motions, docs/simulation/README.md#free-free-modes): after the solve,
+// y <- y - R (M R)^T y, R M-orthonormal, so the operator (K - sigma M)^-1 M
+// keeps every other eigenpair and sends R's to zero. The projector is
+// M-self-adjoint and commutes with the operator, so the product is a
+// symmetric generalized problem Spectra can take. Null R: no projection.
+class ProjectedShiftInvert {
+public:
+  using Scalar = double;
+  ProjectedShiftInvert(const Eigen::SparseMatrix<double>& k,
+                       const Eigen::SparseMatrix<double>& m,
+                       const Eigen::MatrixXd* r, const Eigen::MatrixXd* mr)
+      : inner(k, m), r(r), mr(mr) {}
+  Eigen::Index rows() const { return inner.rows(); }
+  Eigen::Index cols() const { return inner.cols(); }
+  void set_shift(const Scalar& sigma) { inner.set_shift(sigma); }
+  bool ok() const { return inner.ok(); }
+  void perform_op(const Scalar* xIn, Scalar* yOut) const {
+    inner.perform_op(xIn, yOut);
+    if (r == nullptr)
+      return;
+    Eigen::Map<Eigen::VectorXd> y(yOut, inner.rows());
+    y -= *r * (mr->transpose() * y);
+  }
+
+private:
+  SpdShiftInvert inner;
+  const Eigen::MatrixXd* r;
+  const Eigen::MatrixXd* mr;
+};
 } // namespace
 
 std::optional<std::vector<FemResults::ModeShape>>
@@ -1400,7 +1431,8 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
 
 std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
-           const Supports& supports, int numModes, std::string* error) {
+           const Supports& supports, int numModes, std::string* error,
+           bool freeFree, double* massKg) {
   auto fail = [&](const std::string& m)
       -> std::optional<std::vector<FemResults::ModeShape>> {
     if (error)
@@ -1429,26 +1461,40 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
     numModes = 1;
 
   // Reduced-DOF map; the supports must hold every rigid motion so K is
-  // positive-definite (sigma=0 shift-invert). Free-free (unconstrained)
-  // modes are deferred. A held node's DOF are taken in its frame, as the
-  // static solve takes them.
-  if (supports.fixedNodes.empty() && supports.held.empty())
-    return fail("modal analysis needs at least one support");
+  // positive-definite (sigma=0 shift-invert), or there are none at all
+  // (free-free: a negative shift, below). A held node's DOF are taken in its
+  // frame, as the static solve takes them.
+  const bool unsupported = supports.fixedNodes.empty() &&
+                           supports.held.empty() && supports.ties.empty();
+  if (freeFree && !unsupported)
+    return fail("a free-free modal study has no support: it is the part "
+                "hanging free, and a support would make it another problem; "
+                "remove the supports, or set free: false");
+  if (!freeFree && unsupported)
+    return fail("modal analysis needs at least one support (or free: true, "
+                "the part with none: a free-free study)");
   for (const HeldNode& h : supports.held)
     for (int k = 0; k < 3; ++k)
       if (h.held[k] && h.value[k] != 0.0)
         return fail("a modal study holds its supports at zero: a mode has "
                     "no prescribed displacement");
-  if (const std::string free = FreeRigidMotion(mesh, supports); !free.empty())
-    return fail("model is insufficiently constrained (singular stiffness "
-                "matrix): its supports leave it free to " +
-                free);
+  if (!freeFree)
+    if (const std::string free = FreeRigidMotion(mesh, supports); !free.empty())
+      return fail("model is insufficiently constrained (singular stiffness "
+                  "matrix): its supports leave it free to " +
+                  free);
   const Reduction red = MakeReduction(mesh, supports);
   const std::vector<int>& dofMap = red.dofs.map;
   const int nFree = red.dofs.nFree;
   const bool framed = red.AnyFrame() || !red.elims.empty();
-  if (nFree < numModes + 1)
+  // A free-free study finds its six rigid modes and `numModes` elastic ones.
+  constexpr int kRigidModes = 6;
+  if (nFree < numModes + (freeFree ? kRigidModes : 0) + 1)
     return fail("mesh too small for the requested modes");
+  // Each node's row of the consistent scalar mass matrix, summed over its
+  // elements and every node (held or not): M r for a unit translation r,
+  // what a mode's effective mass is read against.
+  std::vector<double> nodeMass(nNodes, 0.0);
 
   // K and M are assembled in two SCOPED passes, each holding only the
   // triplets of the matrix it builds, and only the LOWER triangle of it.
@@ -1520,6 +1566,9 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
           for (int j = 0; j < 10; ++j)
             Me(i, j) += rho * dV * N[i] * N[j];
       }
+      for (int i = 0; i < 10; ++i)
+        for (int j = 0; j < 10; ++j)
+          nodeMass[tet[i]] += Me(i, j);
       // Consistent mass couples same-direction DOFs (block-diagonal in x/y/z);
       // a node held in its own frame takes it there, as K does.
       if (framed) {
@@ -1546,21 +1595,116 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
   M.makeCompressed();
 
   // Generalized eigenproblem K phi = lambda M phi, lowest eigenvalues via
-  // shift-invert at sigma=0 (K is positive-definite here).
-  using OpType = SpdShiftInvert;
+  // shift-invert at sigma=0 (K is positive-definite here). Free-free, K is
+  // singular on its six rigid motions, so the shift is negative: K - sigma M
+  // is then positive definite, and every eigenvalue (all >= 0) is nearer to
+  // it the lower it is. A millionth of the mean diagonal ratio, which is far
+  // above an elastic mode's eigenvalue, sits below the first elastic one
+  // and keeps K - sigma M conditioned (about 1e6 times K's own spread).
+  // The body's mass (t) and centre, and, free-free, its six rigid motions
+  // in the solved DOF (no support, so every node's x, y, z is free, in the
+  // world frame): unit translations and small rotations about the centre,
+  // made M-orthonormal.
+  double totalMass = 0.0;
+  glm::dvec3 centroid(0.0);
+  for (int n = 0; n < nNodes; ++n) {
+    totalMass += nodeMass[n];
+    centroid += nodeMass[n] * mesh.nodes[n];
+  }
+  if (massKg)
+    *massKg = totalMass * 1000.0; // t -> kg
+  if (totalMass > 0)
+    centroid /= totalMass;
+  const auto Mx = [&](const Eigen::VectorXd& v) -> Eigen::VectorXd {
+    return M.selfadjointView<Eigen::Lower>() * v;
+  };
+  const auto Kx = [&](const Eigen::VectorXd& v) -> Eigen::VectorXd {
+    return K.selfadjointView<Eigen::Lower>() * v;
+  };
+  Eigen::MatrixXd rigid, rigidM; // nFree x 6: R, M R (free-free only)
+  if (freeFree) {
+    rigid.setZero(nFree, kRigidModes);
+    for (int n = 0; n < nNodes; ++n) {
+      const glm::dvec3 r = mesh.nodes[n] - centroid;
+      const double rv[3] = {r.x, r.y, r.z};
+      for (int d = 0; d < 3; ++d) {
+        const int g = dofMap[3 * n + d];
+        if (g < 0)
+          continue;
+        rigid(g, d) = 1.0;
+        // Rotation about axis k: (e_k x r)_d.
+        for (int k = 0; k < 3; ++k) {
+          const int a = (k + 1) % 3, b = (k + 2) % 3;
+          if (d == b)
+            rigid(g, 3 + k) = rv[a];
+          else if (d == a)
+            rigid(g, 3 + k) = -rv[b];
+        }
+      }
+    }
+    rigidM.resize(nFree, kRigidModes);
+    for (int k = 0; k < kRigidModes; ++k)
+      rigidM.col(k) = Mx(rigid.col(k));
+    // M-orthonormal: R <- R L^-T with L L^T = R^T M R.
+    const Eigen::LLT<Eigen::MatrixXd> gram(rigid.transpose() * rigidM);
+    if (gram.info() != Eigen::Success)
+      return fail("a free-free study's body has no rigid motions to set "
+                  "apart (its mesh has no mass)");
+    const Eigen::MatrixXd Linv = gram.matrixL().solve(
+        Eigen::MatrixXd::Identity(kRigidModes, kRigidModes));
+    rigid = rigid * Linv.transpose();
+    rigidM = rigidM * Linv.transpose();
+  }
+
+  // Generalized eigenproblem K phi = lambda M phi, lowest eigenvalues via
+  // shift-invert at sigma=0 (K is positive-definite here). Free-free, K is
+  // singular on its six rigid motions, which are known: they are set apart
+  // (the operator projects them out, so it sees only the elastic modes;
+  // asked for a six-fold eigenvalue the Lanczos iteration misses some of
+  // it) and K - sigma M is factorized at a negative shift, where it is
+  // positive definite and every elastic eigenvalue is nearer to it the
+  // lower it is. A millionth of the mean diagonal ratio keeps it
+  // conditioned (about 1e6 times K's own spread).
+  double sigma = 0.0;
+  if (freeFree) {
+    double trK = 0.0, trM = 0.0;
+    for (int d = 0; d < nFree; ++d) {
+      trK += K.coeff(d, d);
+      trM += M.coeff(d, d);
+    }
+    if (!(trK > 0) || !(trM > 0))
+      return fail("a free-free study's mesh has no stiffness or no mass");
+    sigma = -1e-6 * trK / trM;
+  }
+  using OpType = ProjectedShiftInvert;
   using BOpType = Spectra::SparseSymMatProd<double>;
-  OpType op(K, M);
+  OpType op(K, M, freeFree ? &rigid : nullptr, freeFree ? &rigidM : nullptr);
   BOpType Bop(M);
-  const int nev = std::min(numModes, nFree - 1);
+  const int nev = std::min(numModes, nFree - (freeFree ? kRigidModes : 0) - 1);
+  if (nev < 1)
+    return fail("mesh too small for the requested modes");
   const int ncv = std::min(std::max(2 * nev + 1, 20), nFree);
   Spectra::SymGEigsShiftSolver<OpType, BOpType, Spectra::GEigsMode::ShiftInvert>
-      geigs(op, Bop, nev, ncv, 0.0);
+      geigs(op, Bop, nev, ncv, sigma);
   // The constructor sets the shift, which is where the factorization happens.
   if (!op.ok())
     return fail(
-        "model is insufficiently constrained (singular stiffness matrix)");
+        freeFree ? std::string("a free-free study's shifted stiffness did not "
+                               "factor")
+                 : std::string("model is insufficiently constrained (singular "
+                               "stiffness matrix)"));
   try {
-    geigs.init();
+    if (freeFree) {
+      // Start in the elastic space: a start vector with a rigid part keeps
+      // that part through the projection's rounding.
+      Eigen::VectorXd start = Eigen::VectorXd::Ones(nFree);
+      for (int i = 0; i < nFree; ++i)
+        start(i) += std::sin(1.7 * i);
+      start -= rigid * (rigidM.transpose() * start);
+      geigs.init(start.data());
+    } else {
+      geigs.init();
+    }
     geigs.compute(Spectra::SortRule::LargestMagn, 1000, 1e-10,
                   Spectra::SortRule::SmallestAlge);
   } catch (const std::exception& e) {
@@ -1571,25 +1715,42 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
   const Eigen::VectorXd evals = geigs.eigenvalues(); // omega^2, ascending
   const Eigen::MatrixXd evecs = geigs.eigenvectors();
 
+  constexpr double kTwoPi = 6.283185307179586;
   std::vector<FemResults::ModeShape> modes;
-  for (int m = 0; m < evals.size(); ++m) {
-    const double lambda = std::max(evals(m), 0.0); // clamp tiny negatives
-    constexpr double kTwoPi = 6.283185307179586;
+  // One mode from its shape in the solved DOF: its displacement normalized
+  // to max |u| = 1 for display, and its effective mass along x, y, z.
+  const auto addMode = [&](const Eigen::VectorXd& phi, double lambda,
+                           bool rigidMode) {
     FemResults::ModeShape mode;
-    mode.frequencyHz = std::sqrt(lambda) / kTwoPi;
+    mode.rigid = rigidMode;
+    mode.frequencyHz = std::sqrt(std::max(lambda, 0.0)) / kTwoPi;
     mode.displacement.assign(nNodes, glm::dvec3(0, 0, 0));
+    const double modalMass = phi.dot(Mx(phi));
+    glm::dvec3 participation(0.0); // phi^T M r per direction
     double maxMag = 0.0;
-    const Eigen::VectorXd phi = evecs.col(m);
     for (int n = 0; n < nNodes; ++n) {
       const glm::dvec3 u = red.NodeDisplacement(phi, n);
       mode.displacement[n] = u;
+      participation += nodeMass[n] * u;
       maxMag = std::max(maxMag, glm::length(u));
     }
-    if (maxMag > 0) // normalize the shape to max |u| = 1 for display
+    if (modalMass > 0)
+      mode.effectiveMassKg =
+          1000.0 * participation * participation / modalMass; // t -> kg
+    if (maxMag > 0)
       for (auto& u : mode.displacement)
         u /= maxMag;
     modes.push_back(std::move(mode));
-  }
+  };
+  // The rigid modes first: each its Rayleigh quotient r^T K r / r^T M r,
+  // which a stiffness that holds rigid motion free makes zero to rounding.
+  if (freeFree)
+    for (int k = 0; k < kRigidModes; ++k) {
+      const Eigen::VectorXd r = rigid.col(k);
+      addMode(r, r.dot(Kx(r)) / r.dot(Mx(r)), true);
+    }
+  for (int m = 0; m < evals.size(); ++m)
+    addMode(evecs.col(m), evals(m), false);
   return modes;
 }
 

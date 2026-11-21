@@ -456,6 +456,9 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
               "Esc cancels"
         : tool == SimulationState::Tool::Remote
             ? "Pick the face that carries the remote load - Esc cancels"
+        : tool == SimulationState::Tool::Bearing
+            ? "Pick the bore (or shaft) the bearing load presses - Esc "
+              "cancels"
         : tool == SimulationState::Tool::Pin
             ? "Pick the bore (or shaft) the pin holds - Esc cancels"
         : tool == SimulationState::Tool::Contact

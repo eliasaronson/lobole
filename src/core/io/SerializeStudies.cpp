@@ -154,6 +154,12 @@ json StudyToJson(const fem::Study& s) {
   if (s.type == fem::AnalysisType::Modal ||
       s.type == fem::AnalysisType::Buckling)
     j["num_modes"] = s.numModes;
+  // vNEXT: a free-free modal study, and a study that keeps its whole field;
+  // each absent at its default, so every older study re-saves as it was.
+  if (s.freeFree)
+    j["free"] = true;
+  if (s.keep != fem::KeepMode::Surface)
+    j["keep"] = fem::KeepModeToString(s.keep);
   if (s.gravity.x != 0 || s.gravity.y != 0 || s.gravity.z != 0)
     j["gravity"] = {s.gravity.x, s.gravity.y, s.gravity.z};
   // Topology parameters (v33) — written only for a topology study so lower
@@ -268,7 +274,8 @@ json StudyToJson(const fem::Study& s) {
       if (l.occurrenceId != 0)
         lj["occurrence"] = l.occurrenceId;
       WriteExprText(lj, "magnitude", l.magnitude.expr);
-      if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote)
+      if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote ||
+          l.type == fem::LoadType::Bearing) // vNEXT: a bearing load's
         lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
       // v170: a torque's axis (omitted: the cylindrical face's own), and a
       // remote load's point.
@@ -395,6 +402,8 @@ fem::Study StudyFromJson(const json& j) {
                               "analysis",
                               "solver",
                               "num_modes",
+                              "free",
+                              "keep",
                               "gravity",
                               "volume_fraction",
                               "volume_fraction_expr",
@@ -462,6 +471,26 @@ fem::Study StudyFromJson(const json& j) {
   s.numModes = j.value("num_modes", s.type == fem::AnalysisType::Buckling
                                         ? fem::kBucklingFactorsDefault
                                         : 6);
+  if (j.contains("free")) { // vNEXT
+    if (!j.at("free").is_boolean())
+      throw std::runtime_error("study free is true or false");
+    s.freeFree = j.at("free").get<bool>();
+    if (s.freeFree && s.type != fem::AnalysisType::Modal)
+      throw std::runtime_error("study free is a modal study's, and this one "
+                               "is " +
+                               analysisStr);
+  }
+  if (j.contains("keep")) { // vNEXT
+    const std::string k =
+        j.at("keep").is_string() ? j.at("keep").get<std::string>() : "";
+    if (!fem::KeepModeFromString(k, s.keep))
+      throw std::runtime_error("study keep " + j.at("keep").dump() +
+                               " is not one of: " + fem::kKeepModeNames);
+    if (s.type == fem::AnalysisType::Topology)
+      throw std::runtime_error("study keep is a static, modal, buckling or "
+                               "thermal study's; a topology result keeps its "
+                               "whole mesh already");
+  }
   if (j.contains("gravity")) {
     const auto& g = j.at("gravity");
     s.gravity = glm::dvec3(g.at(0).get<double>(), g.at(1).get<double>(),
@@ -647,9 +676,17 @@ fem::Study StudyFromJson(const json& j) {
       throw std::runtime_error("load " + std::to_string(l.id) +
                                ": axis_origin and axis_dir are a torque's");
     if (l.type != fem::LoadType::Force && l.type != fem::LoadType::Remote &&
-        lj.contains("direction"))
+        l.type != fem::LoadType::Bearing && lj.contains("direction"))
       throw std::runtime_error("load " + std::to_string(l.id) +
-                               ": direction is a force's or a remote load's");
+                               ": direction is a force's, a remote load's or "
+                               "a bearing load's");
+    if (l.type == fem::LoadType::Bearing) { // vNEXT
+      if (!lj.contains("direction"))
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": a bearing load needs its direction");
+      if (const std::string why = fem::BearingDirectionRefusal(l); !why.empty())
+        throw std::runtime_error("load " + std::to_string(l.id) + ": " + why);
+    }
     if (l.type != fem::LoadType::Remote && lj.contains("point"))
       throw std::runtime_error("load " + std::to_string(l.id) +
                                ": point is a remote load's");
@@ -1052,9 +1089,16 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
                  {"shape", w.F32(m.displacement)}};
       if (m.factor != 0.0) // v207: a buckling mode's load factor
         mj["factor"] = m.factor;
+      // vNEXT: a modal mode's effective mass, and whether it is rigid.
+      if (m.effectiveMassKg != glm::dvec3(0.0))
+        mj["effective_mass_kg"] = Vec3ToJson(m.effectiveMassKg);
+      if (m.rigid)
+        mj["rigid"] = true;
       modes.push_back(std::move(mj));
     }
     out["modes"] = std::move(modes);
+    if (r.modalMassKg > 0) // vNEXT
+      out["mass_kg"] = r.modalMassKg;
   }
   return out;
 }
@@ -1105,10 +1149,17 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
   r.maxDispNode = j.value("max_disp_node", -1);
   if (j.contains("max_disp_at"))
     r.maxDispAt = Vec3FromJson(j.at("max_disp_at"));
-  for (const json& mj : j.value("modes", json::array()))
-    r.modes.push_back({mj.at("frequency_hz").get<double>(),
-                       f.Vec3s(mj.at("shape"), "a mode shape"),
-                       mj.value("factor", 0.0)});
+  for (const json& mj : j.value("modes", json::array())) {
+    fem::FemResults::ModeShape mode;
+    mode.frequencyHz = mj.at("frequency_hz").get<double>();
+    mode.displacement = f.Vec3s(mj.at("shape"), "a mode shape");
+    mode.factor = mj.value("factor", 0.0);
+    if (mj.contains("effective_mass_kg")) // vNEXT
+      mode.effectiveMassKg = Vec3FromJson(mj.at("effective_mass_kg"));
+    mode.rigid = mj.value("rigid", false);
+    r.modes.push_back(std::move(mode));
+  }
+  r.modalMassKg = j.value("mass_kg", 0.0);
   const auto supportType = [](const json& v) {
     const std::string t = v.get<std::string>();
     fem::LoadType out;
@@ -1575,7 +1626,10 @@ fem::Convergence ConvergenceFromJson(const json& j) {
 
 } // namespace
 
-bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
+bool StudyResultToJson(
+    const fem::StudyRuntime& runtime, json& out,
+    const std::function<bool(uint64_t key, const fem::FemMesh& mesh)>&
+        storedAs) {
   if (runtime.bodies.empty())
     return false; // nothing was solved
   // What is saved is what is kept (a stored runtime already is).
@@ -1603,6 +1657,10 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
     out["solver"] = rt.solver;
   if (rt.convergence.checked || !rt.convergence.why.empty())
     out["convergence"] = ConvergenceToJson(rt.convergence);
+  // vNEXT: the whole field, every node and tet (docs/simulation/README.md
+  // #a-full-result).
+  if (rt.keepFull)
+    out["keep"] = "full";
   if (!rt.topology)
     out["maxima"] = {{"von_mises", rt.maxVonMises},
                      {"von_mises_at", Vec3ToJson(rt.maxVmAt)},
@@ -1656,26 +1714,40 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
     json bj = {{"body_index", b.bodyIndex},
                {"body", b.bodyName},
                {"node_count", b.mesh.stats.nodeCount},
-               {"tet_count", b.mesh.stats.tetCount},
-               {"nodes", w.F32(b.mesh.nodes)}};
-    if (!b.mesh.tets.empty()) {
+               {"tet_count", b.mesh.stats.tetCount}};
+    // A full body solved on a mesh the simulation keeps is written against
+    // it: the mesh once, under its key, and here only the fields on it.
+    const bool onStored = rt.keepFull && b.meshKey != 0 && storedAs &&
+                          storedAs(b.meshKey, b.mesh);
+    if (onStored) {
+      bj["mesh"] = inputhash::Hex(b.meshKey);
+    } else {
+      bj["nodes"] = w.F32(b.mesh.nodes);
+      // A convergence run's refinement: a child of the stored mesh it began
+      // from, kept here with its result.
+      if (rt.keepFull && b.parentMeshKey != 0)
+        bj["parent_mesh"] = inputhash::Hex(b.parentMeshKey);
+    }
+    if (!onStored && !b.mesh.tets.empty()) {
       std::vector<int> tets;
       tets.reserve(b.mesh.tets.size() * 10);
       for (const std::array<int, 10>& t : b.mesh.tets)
         tets.insert(tets.end(), t.begin(), t.end());
       bj["tets"] = w.Index(tets);
     }
-    std::vector<int> tris, faces;
-    tris.reserve(b.mesh.boundary.size() * 6);
-    faces.reserve(b.mesh.boundary.size());
-    for (const fem::FemMesh::BoundaryTri& tr : b.mesh.boundary) {
-      tris.insert(tris.end(), tr.nodes.begin(), tr.nodes.end());
-      faces.push_back(tr.faceIndex);
+    if (!onStored) {
+      std::vector<int> tris, faces;
+      tris.reserve(b.mesh.boundary.size() * 6);
+      faces.reserve(b.mesh.boundary.size());
+      for (const fem::FemMesh::BoundaryTri& tr : b.mesh.boundary) {
+        tris.insert(tris.end(), tr.nodes.begin(), tr.nodes.end());
+        faces.push_back(tr.faceIndex);
+      }
+      bj["boundary"] = w.Index(tris);
+      bj["boundary_face"] = w.Index(faces);
+      if (!b.mesh.tetDomain.empty())
+        bj["tet_domain"] = w.Index(b.mesh.tetDomain);
     }
-    bj["boundary"] = w.Index(tris);
-    bj["boundary_face"] = w.Index(faces);
-    if (!b.mesh.tetDomain.empty())
-      bj["tet_domain"] = w.Index(b.mesh.tetDomain);
     if (b.mesh.stats.worstQuality != 0.0)
       bj["worst_quality"] = b.mesh.stats.worstQuality;
     // v206: which support's edge each node lies near, one past its index
@@ -1721,7 +1793,9 @@ bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
   return true;
 }
 
-fem::StudyRuntime StudyResultFromJson(const json& j) {
+fem::StudyRuntime StudyResultFromJson(
+    const json& j,
+    const std::function<const fem::FemMesh*(uint64_t key)>& meshOf) {
   fem::StudyRuntime rt;
   const std::string kind =
       j.value("kind", std::string(j.contains("topology") ? "topology" : ""));
@@ -1756,6 +1830,23 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
   }
   if (j.contains("convergence")) // v206
     rt.convergence = ConvergenceFromJson(j.at("convergence"));
+  if (j.contains("keep")) { // vNEXT
+    if (j.at("keep") != "full")
+      throw std::runtime_error(what + ": keep " + j.at("keep").dump() +
+                               " (a saved result says keep only when it is "
+                               "\"full\")");
+    if (kind == "topology")
+      throw std::runtime_error(what + ": a topology result keeps its whole "
+                                      "mesh already, and says no keep");
+    rt.keepFull = true;
+  }
+  const auto keyOf = [&](const json& v, const char* name) {
+    uint64_t key = 0;
+    if (!v.is_string() || !inputhash::FromHex(v.get<std::string>(), key))
+      throw std::runtime_error(what + ": " + name + " " + v.dump() +
+                               " is not 0x and 16 hex digits");
+    return key;
+  };
   if (j.contains("maxima")) {
     const json& m = j.at("maxima");
     rt.maxVonMises = m.value("von_mises", 0.0);
@@ -1781,7 +1872,35 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     fem::StudyBodyResult b;
     b.bodyIndex = bj.value("body_index", -1);
     b.bodyName = bj.value("body", std::string{});
-    b.mesh.nodes = f.Vec3s(bj.at("nodes"), "nodes");
+    if (bj.contains("mesh")) {
+      // A full body written against a stored mesh (vNEXT).
+      if (!rt.keepFull)
+        throw std::runtime_error(what + ": body '" + b.bodyName +
+                                 "' names a stored mesh, which only a full "
+                                 "result (keep: full) does");
+      for (const char* own : {"nodes", "tets", "boundary", "boundary_face",
+                              "tet_domain", "parent_mesh"})
+        if (bj.contains(own))
+          throw std::runtime_error(what + ": body '" + b.bodyName +
+                                   "' names a stored mesh and carries " + own +
+                                   " of its own");
+      b.meshKey = keyOf(bj.at("mesh"), "mesh");
+      const fem::FemMesh* stored = meshOf ? meshOf(b.meshKey) : nullptr;
+      if (stored == nullptr)
+        throw std::runtime_error(
+            what + ": body '" + b.bodyName + "' was solved on mesh " +
+            inputhash::Hex(b.meshKey) + ", which is not kept");
+      b.mesh = *stored;
+    } else {
+      b.mesh.nodes = f.Vec3s(bj.at("nodes"), "nodes");
+    }
+    if (bj.contains("parent_mesh")) {
+      if (!rt.keepFull)
+        throw std::runtime_error(what + ": body '" + b.bodyName +
+                                 "' names a parent mesh, which only a full "
+                                 "result does");
+      b.parentMeshKey = keyOf(bj.at("parent_mesh"), "parent_mesh");
+    }
     const auto tets = bj.contains("tets") ? f.Indices(bj.at("tets"), "tets")
                                           : std::vector<int>{};
     if (tets.size() % 10 != 0)

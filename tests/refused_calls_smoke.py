@@ -892,6 +892,37 @@ def main():
             d.call("set_material", feature_id=cube["created_by"],
                    material="steel")
             d.call("remove_study", id=nl)
+            # A bearing load, a free-free study and what a result keeps
+            # (docs/simulation/README.md#bearing-loads, #free-free-modes,
+            # #a-full-result): each refused naming what is accepted.
+            five = d.call("add_study", name="Five")["id"]
+            check("a keep that is none", "set_study",
+                  {"id": five, "keep": "whole"}, needle="surface, full",
+                  tab=part["name"])
+            check("free on a static study", "set_study",
+                  {"id": five, "free": True}, needle="modal study's",
+                  tab=part["name"])
+            bearing = {"study": five, "type": "bearing", "face": face(1.0),
+                       "force_n": 10.0, "direction": [1, 0, 0]}
+            check("a bearing load on a flat face", "add_load", bearing,
+                  needle="not cylindrical", tab=part["name"])
+            check("a bearing load given a magnitude", "add_load",
+                  {**bearing, "magnitude": 10.0}, needle="force_n",
+                  tab=part["name"])
+            check("a bearing load with no direction", "add_load",
+                  {k: v for k, v in bearing.items() if k != "direction"},
+                  needle="needs `direction`", tab=part["name"])
+            hanging = d.call("add_study", name="Hanging",
+                             type="modal")["id"]
+            d.call("set_study", id=hanging, free=True)
+            check("a support on a free-free study", "add_load",
+                  {"study": hanging, "type": "fixed", "face": face(-1.0)},
+                  needle="free-free", tab=part["name"])
+            check("a free-free study made static", "set_study",
+                  {"id": hanging, "type": "static"}, needle="free: false",
+                  tab=part["name"])
+            d.call("remove_study", id=hanging)
+            d.call("remove_study", id=five)
             # Thermal (docs/simulation/README.md#thermal): each refused by
             # the call that says it, naming what is accepted; nothing is
             # defaulted.

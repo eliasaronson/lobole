@@ -13,6 +13,7 @@
 #include <array>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -285,8 +286,23 @@ fem::Study StudyFromJson(const nlohmann::json& j);
 // `solvedAtVersion` is NOT written -- on load the caller stamps it (current
 // when the inputs still hash the same, stale otherwise). Returns false for a
 // runtime that holds nothing solved. Throws on malformed input.
-bool StudyResultToJson(const fem::StudyRuntime& rt, nlohmann::json& out);
-fem::StudyRuntime StudyResultFromJson(const nlohmann::json& j);
+//
+// A full result (fem::KeepMode::Full, vNEXT;
+// docs/simulation/README.md#a-full-result) keeps every node and tet. A body
+// solved on a stored mesh that `storedAs` says is kept (the simulation's,
+// unchanged) is written against it, `mesh` its key, with no nodes, tets or
+// boundary of its own; a body solved on a convergence run's refinement keeps
+// that child mesh whole, `parent_mesh` the key it was refined from. On the
+// way back `meshOf` answers a key with the stored mesh (null: none, and the
+// result is refused, so the open drops it). Both null: no body is written
+// against a stored mesh, and one that is cannot be read.
+bool StudyResultToJson(
+    const fem::StudyRuntime& rt, nlohmann::json& out,
+    const std::function<bool(uint64_t key, const fem::FemMesh& mesh)>&
+        storedAs = nullptr);
+fem::StudyRuntime StudyResultFromJson(
+    const nlohmann::json& j,
+    const std::function<const fem::FemMesh*(uint64_t key)>& meshOf = nullptr);
 // A motion study's result (v153), the same way: every sample's poses (in the
 // binary value since v154), mate values, clashes and unknown contacts, the
 // press fits it relieved (v159), the

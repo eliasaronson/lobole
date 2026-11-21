@@ -633,7 +633,12 @@ class App(_RpcSurface):
         `variables` is {name: (min, max)} -- each end a number or an
         expression -- or design_sweep's own list of {name, min, max,
         scope?}. `options` are design_sweep's: samples, corners, refine,
-        documents, max_points. Runs it as a job (design_sweep {async}),
+        documents, max_points, and study_budget_s (the seconds from its
+        start within which it may solve,
+        required when a study requirement is solved at every point:
+        docs/requirements/README.md#studies-at-every-point; the answer's
+        `studies` says what was solved and reused). Runs it as a job
+        (design_sweep {async}),
         follows it by id, and returns design_sweep_result's answer: the
         table of points, `first_failure` and what was not swept. Nothing in
         the document changes. A sweep that failed or was cancelled raises

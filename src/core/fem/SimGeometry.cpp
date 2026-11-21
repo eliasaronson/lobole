@@ -344,6 +344,14 @@ bool CutPlanOnSymmetry(StudyPlan& plan, AnalysisType type,
                                  "moment, a pin's or a contact's hold "
                                  "turns about the plane); solve the whole "
                                  "part");
+      // A bearing load's pressure is spread over the loaded half of its
+      // bore to add up to its force; on a bore the plane cuts, the half
+      // left is not that half, and the force it should carry is not stated.
+      if (l.type == LoadType::Bearing)
+        return Refuse(error, by + ": " + LoadName(l) +
+                                 " is spread over the loaded half of its "
+                                 "whole bore, which a cut does not leave; "
+                                 "solve the whole part");
       if (!l.region.IsWhole())
         return Refuse(error, by + ": " + LoadName(l) +
                                  " is on part of a face, which is not cut; "

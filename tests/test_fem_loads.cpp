@@ -602,3 +602,94 @@ TEST_CASE("CG is judged by its energy: a slender part's climbing residual is "
 }
 
 #endif // HAVE_FEM_SOLVER
+
+// A bearing load (docs/simulation/README.md#bearing-loads): a cosine
+// pressure over the half of a shaft its direction pushes on, whose nodal
+// loads sum to exactly the force along it, carry no moment about the axis,
+// and leave the other half unloaded. A bore takes it the other way round: the
+// half it pushes on is the one the direction points to from the axis.
+TEST_CASE("a bearing load's nodal loads are its force, with no moment about "
+          "its axis",
+          "[fem][loads][bearing]") {
+  const fem::FemMesh mesh = ShaftMesh();
+  const double F = 800.0;
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Bearing;
+  load.magnitude = F;
+  load.direction = glm::dvec3(0, -2, 0); // need not be unit
+  load.origin = glm::dvec3(0, 0, kL / 2);
+  load.axis = glm::dvec3(0, 0, 1);
+  // The shaft's side: every triangle off its two ends.
+  load.tris = TrisWhere(mesh, [](const glm::dvec3& p) {
+    return std::abs(std::hypot(p.x, p.y) - kR) < 1e-3;
+  });
+  REQUIRE_FALSE(load.tris.empty());
+  const auto f = NodalLoads(mesh, {load});
+  glm::dvec3 net(0.0), moment(0.0);
+  double pushed = 0.0, far = 0.0;
+  for (size_t i = 0; i < f.size(); ++i) {
+    net += f[i];
+    moment += glm::cross(mesh.nodes[i] - load.origin, f[i]);
+    // A shaft is pushed on the side the force comes from: y > 0 here,
+    // the force pointing -y.
+    if (mesh.nodes[i].y > 0.5)
+      pushed += glm::length(f[i]);
+    // Past the loaded half's edge by more than an element (2 mm on a 5 mm
+    // radius): the consistent loads of the elements that straddle the edge
+    // reach a node or two beyond it, and none further.
+    if (mesh.nodes[i].y < -0.5 * kR)
+      far += glm::length(f[i]);
+  }
+  INFO("net " << net.x << " " << net.y << " " << net.z << ", moment "
+              << moment.z);
+  CHECK_THAT(net.y, WithinRel(-F, 1e-9));
+  CHECK(std::abs(net.x) < 1e-9 * F);
+  CHECK(std::abs(net.z) < 1e-9 * F);
+  // Every traction is radial, so about the axis it turns nothing.
+  CHECK(std::abs(moment.z) < 1e-9 * F * kR);
+  CHECK(pushed > 0.0);
+  CHECK(far == 0.0);
+}
+
+// A bearing load needs a cylindrical face, a direction, and one across the
+// axis: each refused naming what it takes, before a mesh (the same check an
+// RPC, a click and a file run: CompleteLoadGeometry).
+TEST_CASE("a bearing load refuses a flat face and a push along its axis",
+          "[fem][loads][bearing]") {
+  const CADShape shaft = CADKernel::Instance().CreateCylinder(
+      glm::dvec3(0, 0, 0), glm::dvec3(0, 0, 1), 5.0, 40.0);
+  int cylinders = 0, planes = 0;
+  for (const TopoDS_Shape& face : Faces(shaft.GetShape())) {
+    fem::Load l;
+    l.id = 3;
+    l.type = fem::LoadType::Bearing;
+    l.magnitude = 100.0;
+    l.direction = glm::dvec3(1, 0, 0);
+    std::string err;
+    if (fem::CylindricalFaceAxis(face)) {
+      ++cylinders;
+      CHECK(fem::CompleteLoadGeometry(face, l, &err));
+      CHECK(l.HasAxis());
+      fem::Load along = l;
+      along.axisDirection = glm::dvec3(0.0);
+      along.direction = glm::dvec3(0.1, 0, 1);
+      CHECK_FALSE(fem::CompleteLoadGeometry(face, along, &err));
+      CHECK_THAT(err, ContainsSubstring("across its bore's axis"));
+      fem::Load none = l;
+      none.axisDirection = glm::dvec3(0.0);
+      none.direction = glm::dvec3(0.0);
+      CHECK_FALSE(fem::CompleteLoadGeometry(face, none, &err));
+      CHECK_THAT(err, ContainsSubstring("direction"));
+    } else {
+      ++planes;
+      CHECK_FALSE(fem::CompleteLoadGeometry(face, l, &err));
+      CHECK_THAT(err, ContainsSubstring("cylindrical face"));
+    }
+  }
+  CHECK(cylinders == 1);
+  CHECK(planes == 2);
+  fem::LoadType t;
+  CHECK(fem::LoadTypeFromString("bearing", t));
+  CHECK(t == fem::LoadType::Bearing);
+  CHECK(std::string(fem::LoadTypeToString(t)) == "bearing");
+}

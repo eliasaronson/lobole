@@ -794,12 +794,13 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       Seen sim;
       CollectToolbarIcons(
           ctx, "//##DockHost", "simulation", sim,
-          {"tb_sim_add_static", "tb_sim_add_modal", "tb_sim_add_buckling",
+          {"tb_sim_add_static",  "tb_sim_add_modal",    "tb_sim_add_buckling",
            "tb_sim_add_thermal", "tb_sim_add_topology", "tb_sim_fixed",
-           "tb_sim_pin", "tb_sim_contact", "tb_sim_roller", "tb_sim_held",
-           "tb_sim_cylindrical", "tb_sim_temperature", "tb_sim_convection",
-           "tb_sim_force", "tb_sim_pressure", "tb_sim_torque", "tb_sim_remote",
-           "tb_sim_heat_flux", "tb_sim_heat_source"});
+           "tb_sim_pin",         "tb_sim_contact",      "tb_sim_roller",
+           "tb_sim_held",        "tb_sim_cylindrical",  "tb_sim_temperature",
+           "tb_sim_convection",  "tb_sim_force",        "tb_sim_pressure",
+           "tb_sim_torque",      "tb_sim_remote",       "tb_sim_bearing",
+           "tb_sim_heat_flux",   "tb_sim_heat_source"});
       for (const char* g : {"sim_study", "sim_supports", "sim_loads"})
         CollectFlyout(ctx, (std::string(g) + "/###more").c_str(), "simulation",
                       sim);

@@ -56,6 +56,8 @@ const char* LoadTypeToString(LoadType type) {
     return "torque";
   case LoadType::Remote:
     return "remote";
+  case LoadType::Bearing:
+    return "bearing";
   case LoadType::Pin:
     return "pin";
   case LoadType::Contact:
@@ -99,6 +101,10 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
     out = LoadType::Remote;
     return true;
   }
+  if (s == "bearing") {
+    out = LoadType::Bearing;
+    return true;
+  }
   if (s == "pin") {
     out = LoadType::Pin;
     return true;
@@ -133,6 +139,22 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
   }
   if (s == "heat_generation") {
     out = LoadType::HeatGeneration;
+    return true;
+  }
+  return false;
+}
+
+const char* KeepModeToString(KeepMode mode) {
+  return mode == KeepMode::Full ? "full" : "surface";
+}
+
+bool KeepModeFromString(const std::string& s, KeepMode& out) {
+  if (s == "surface") {
+    out = KeepMode::Surface;
+    return true;
+  }
+  if (s == "full") {
+    out = KeepMode::Full;
     return true;
   }
   return false;
@@ -1177,6 +1199,26 @@ bool CompleteLoadGeometry(const TopoDS_Shape& face, Load& load,
     load.axisOrigin = axis->origin;
     load.axisDirection = axis->direction;
   }
+  // A bearing load presses its face the way a shaft in it does: across the
+  // face's axis (docs/simulation/README.md#bearing-loads).
+  if (load.type == LoadType::Bearing) {
+    const auto axis = CylindricalFaceAxis(face);
+    if (!axis) {
+      if (error)
+        *error = "load " + std::to_string(load.id) +
+                 ": a bearing load goes on a cylindrical face (a bore or a "
+                 "shaft), which it presses across its axis; this face is not "
+                 "one -- a force on it is a `force`";
+      return false;
+    }
+    load.axisOrigin = axis->origin;
+    load.axisDirection = axis->direction;
+    if (const std::string why = BearingDirectionRefusal(load); !why.empty()) {
+      if (error)
+        *error = "load " + std::to_string(load.id) + ": " + why;
+      return false;
+    }
+  }
   if (load.type == LoadType::Remote && !load.hasPoint) {
     if (error)
       *error = "load " + std::to_string(load.id) +
@@ -1266,12 +1308,54 @@ std::string FrameSupportRefusal(const Study& study) {
   return {};
 }
 
+std::string FreeFreeRefusal(const Study& study) {
+  if (!study.freeFree)
+    return {};
+  if (study.type != AnalysisType::Modal)
+    return std::string("free is a modal study's (the part with no support, "
+                       "its rigid modes and its elastic ones); a ") +
+           AnalysisTypeToString(study.type) + " study needs its supports";
+  if (!study.loads.empty()) {
+    const Load& l = study.loads.front();
+    return "load " + std::to_string(l.id) + " (" + LoadTypeToString(l.type) +
+           "): a free-free modal study has no support and no load -- it is "
+           "the part hanging free; remove it, or set free: false for a "
+           "supported modal study";
+  }
+  if (study.IsAssemblyStudy())
+    return "a free-free study is one part's: the assembly's participants "
+           "are held by their neighbours";
+  return {};
+}
+
+std::string BearingDirectionRefusal(const Load& load) {
+  const double d = glm::length(load.direction);
+  if (!(d > 0.0) || !std::isfinite(d))
+    return "a bearing load needs the direction its force pushes the face "
+           "(`direction`, across the bore's axis)";
+  if (!load.HasAxis())
+    return {};
+  const glm::dvec3 a = glm::normalize(load.axisDirection);
+  const double along = std::abs(glm::dot(load.direction, a)) / d;
+  if (along > kBearingAxialTolerance) {
+    char buf[128];
+    std::snprintf(buf, sizeof(buf),
+                  "(%.4g, %.4g, %.4g)), and this direction "
+                  "has %.3g",
+                  a.x, a.y, a.z, along);
+    return std::string("a bearing load pushes across its bore's axis ") + buf +
+           " of its length along it; give the radial direction, and an "
+           "axial load as a force on the shoulder that takes it";
+  }
+  return {};
+}
+
 FaceLoad MakeFaceLoad(const Load& load) {
   FaceLoad fl;
   fl.type = load.type;
   fl.magnitude = load.magnitude;
   fl.direction = load.direction;
-  if (load.type == LoadType::Torque) {
+  if (load.type == LoadType::Torque || load.type == LoadType::Bearing) {
     fl.origin = load.axisOrigin;
     fl.axis = load.axisDirection;
   } else if (load.type == LoadType::Remote) {
@@ -1598,9 +1682,13 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   out.nonlinear = study.nonlinear;
   out.thermalLoad = study.thermalLoad;
   out.numModes = study.numModes;
+  out.freeFree = study.freeFree;
+  out.keepFull = study.keep == KeepMode::Full;
   out.gravity = study.gravity;
   for (const LoadCase& c : study.loadCases)
     out.caseNames.push_back(c.name);
+  if (const std::string why = FreeFreeRefusal(study); !why.empty())
+    return fail(why);
 
   const auto& bodies = doc.GetBodies();
 
@@ -1647,8 +1735,17 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     bp.settings.maxSize = study.meshSize;
     bp.loads.push_back({rf.faceIndex, i});
   }
+  // A free-free study holds nothing and is loaded by nothing: every solid
+  // body of the part is its subject (docs/simulation/README.md
+  // #free-free-modes).
+  if (study.freeFree)
+    for (size_t b = 0; b < bodies.size(); ++b)
+      if (!bodies[b].reference)
+        perBody[static_cast<int>(b)].settings.maxSize = study.meshSize;
   if (perBody.empty())
-    return fail("study has no loads to solve");
+    return fail(study.freeFree ? "a free-free study has no body to solve: "
+                                 "the part has no solid"
+                               : "study has no loads to solve");
 
   // A static study under a from_study thermal load: the thermal study's
   // loads, on the same bodies, re-solved on this study's mesh.
@@ -1774,8 +1871,12 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
                     ": a modal study's supports are fixed; a pin holds where "
                     "a load presses the part onto it, and a mode has none");
     }
-    if (!hasFixed)
-      return fail("body '" + body.name + "' has loads but no fixed support");
+    if (!hasFixed && !study.freeFree)
+      return fail("body '" + body.name + "' has loads but no fixed support" +
+                  (study.type == AnalysisType::Modal
+                       ? std::string(" (a modal study of the part hanging "
+                                     "free is free: true)")
+                       : std::string()));
 
     // Density-dependent analyses must fail HERE (prepare has the material
     // library and study), not on the worker.
@@ -2050,6 +2151,8 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
   out.nonlinear = plan.nonlinear;
   out.thermalLoad = plan.thermalLoad;
   out.numModes = plan.numModes;
+  out.freeFree = plan.freeFree;
+  out.keepFull = plan.keepFull;
   out.gravity = plan.gravity;
   out.caseNames = plan.caseNames;
   out.sourceDigest = plan.sourceDigest;
@@ -2461,8 +2564,9 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
         }
         std::vector<FaceLoad>& into =
             plan.caseNames.empty() ? faceLoads : caseLoads[k];
-        const bool field =
-            load.type == LoadType::Torque || load.type == LoadType::Remote;
+        const bool field = load.type == LoadType::Torque ||
+                           load.type == LoadType::Remote ||
+                           load.type == LoadType::Bearing;
         if (field && load.id != 0)
           if (auto it = fieldLoad.find(load.id); it != fieldLoad.end()) {
             std::vector<int>& more = into[it->second.second].tris;
@@ -2519,7 +2623,8 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
       }
     }
     if (fixedSet.empty() && pins.empty() && bp.contacts.empty() &&
-        heldNodes.empty() && plan.type != AnalysisType::Thermal)
+        heldNodes.empty() && plan.type != AnalysisType::Thermal &&
+        !plan.freeFree)
       return fail("body '" + bp.bodyName + "': fixed face meshed to no nodes");
 
     // Each contact: the body's facets against its partner's, a rigid
@@ -3619,6 +3724,7 @@ StudyBodyResult::Thermal ReadThermal(const StudyJobBody& jb,
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
                         const SolveOptions& options) {
   rt = StudyRuntime{};
+  rt.keepFull = in.keepFull;
   rt.caseNames = in.caseNames;
   rt.sourceDigest = in.sourceDigest;
   rt.shapeThreshold = in.shapeThreshold;
@@ -3678,13 +3784,15 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
       rt.residualFloor = std::max(rt.residualFloor, hs.residualFloor);
       rt.energyResidual = std::max(rt.energyResidual, hs.energyResidual);
     } else if (in.type == AnalysisType::Modal) {
+      double massKg = 0.0;
       auto modes = SolveModal(
           jb.mesh,
           jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials,
-          BaseSupports(jb), in.numModes, &err);
+          BaseSupports(jb), in.numModes, &err, in.freeFree, &massKg);
       if (!modes)
         return fail("body '" + jb.bodyName + "': " + err);
       sbr.results.modes = std::move(*modes);
+      sbr.results.modalMassKg = massKg;
     } else {
       const glm::dvec3 g = in.gravity * 1000.0; // m/s^2 -> mm/s^2
       // Every case on one factorisation; without cases, the one set of loads.
@@ -4113,6 +4221,8 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
   const auto notChecked = [&](const std::string& why) {
     conv.why = why;
     rt.convergence = conv;
+    for (size_t i = 0; i < rt.bodies.size() && i < planIn.bodies.size(); ++i)
+      rt.bodies[i].meshKey = planIn.bodies[i].meshKey;
     return true;
   };
   if (planIn.type != AnalysisType::Static &&
@@ -4245,6 +4355,14 @@ bool SolveConverged(const StudyPlan& planIn, StudyJobInput& in,
   if (!conv.converged && conv.stopped.empty() &&
       !(options.cancelled && options.cancelled()))
     conv.stopped = "steps";
+  // Which stored mesh each body was solved on: the one it was planned
+  // with, or, after a refinement, none -- its mesh is a child of that one
+  // (docs/simulation/README.md#a-full-result).
+  const bool refined = conv.steps.size() > 1;
+  for (size_t i = 0; i < rt.bodies.size() && i < planIn.bodies.size(); ++i) {
+    rt.bodies[i].meshKey = refined ? 0 : planIn.bodies[i].meshKey;
+    rt.bodies[i].parentMeshKey = refined ? planIn.bodies[i].meshKey : 0;
+  }
   rt.convergence = std::move(conv);
   rt.meshKeys = meshKeys;
   in.madeMeshes = madeMeshes;
@@ -4786,7 +4904,8 @@ void KeepWhatIsRead(StudyRuntime& rt) {
       m.stats.nodeCount = m.nodes.size();
     if (m.stats.tetCount == 0)
       m.stats.tetCount = m.tets.size();
-    if (!rt.topology)
+    // A full result keeps every node and tet (KeepMode::Full).
+    if (!rt.topology && !rt.keepFull)
       KeepSurface(b);
     if (std::all_of(m.tetDomain.begin(), m.tetDomain.end(),
                     [](int d) { return d == 0; }))

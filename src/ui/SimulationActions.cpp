@@ -457,7 +457,8 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
   }
   if (tool != SimulationState::Tool::Force &&
       tool != SimulationState::Tool::Pressure &&
-      tool != SimulationState::Tool::Remote)
+      tool != SimulationState::Tool::Remote &&
+      tool != SimulationState::Tool::Bearing)
     return; // a torque seeds when it is placed, from the face's radius
   if (sim.pendingMagnitude != 0.0)
     return; // the user's own number survives re-arming
@@ -880,9 +881,14 @@ void SyncFieldRenderer(AppState& state) {
   // A buckling study shows its modes as a modal one does.
   const bool modal = study->type == fem::AnalysisType::Modal ||
                      study->type == fem::AnalysisType::Buckling;
+  // A full result is cut through its elements under a section, which
+  // stand proud of the plane: the body's flat cap would slice through them,
+  // as it would through the mesh view's (docs/simulation/README.md
+  // #a-full-result).
+  const bool crinkle = rt->keepFull;
   const uint64_t key = ResultOverlayKey(state, host, *rt, modal);
   if (key == state.gpu.fieldBuiltKey) {
-    hideBodies(bodiesOf(rt));
+    hideBodies(bodiesOf(rt), crinkle);
     return;
   }
   std::vector<FieldVertex> verts;
@@ -898,7 +904,7 @@ void SyncFieldRenderer(AppState& state) {
   state.fieldRenderer->SetMesh(std::move(verts), std::move(indices));
   state.fieldRenderer->SetStyle(style);
   sim.shown = std::move(shown);
-  hideBodies(bodiesOf(rt));
+  hideBodies(bodiesOf(rt), crinkle);
   state.gpu.fieldBuiltKey = key;
 }
 
@@ -919,6 +925,7 @@ SimulationState::Tool SimCommandTool(std::string_view command) {
       {"sim.pressure", T::Pressure},
       {"sim.torque", T::Torque},
       {"sim.remote", T::Remote},
+      {"sim.bearing", T::Bearing},
       {"sim.heat_flux", T::HeatFlux},
       {"sim.heat_source", T::HeatSource},
       {"sim.keep", T::Keep},
@@ -979,9 +986,30 @@ std::string SimCommandRefusal(AppState& state, std::string_view command) {
       return "Run the study first: there is no result to export";
     return FullStudyResult(state, s->id) == nullptr
                ? "A stored result keeps its surface only: run the study again "
-                 "(Shift+Run) and export while the app is open"
+                 "(Shift+Run) and export while the app is open, or keep its "
+                 "whole field (the study's Keep: full)"
                : "";
   }
+  // A free-free modal study is the part hanging free
+  // (docs/simulation/README.md#free-free-modes): nothing holds it.
+  if (s->freeFree)
+    switch (SimCommandTool(command)) {
+    case T::Fixed:
+    case T::Pin:
+    case T::Contact:
+    case T::Roller:
+    case T::Held:
+    case T::Cylindrical:
+    case T::Force:
+    case T::Pressure:
+    case T::Torque:
+    case T::Remote:
+    case T::Bearing:
+      return "A free-free study holds nothing and takes no load: untick "
+             "Free-free in the study for a supported one";
+    default:
+      break;
+    }
   switch (SimCommandTool(command)) {
   case T::Fixed:
     return type == A::Thermal
@@ -1004,6 +1032,10 @@ std::string SimCommandRefusal(AppState& state, std::string_view command) {
   case T::HeatFlux:
   case T::HeatSource:
     return type != A::Thermal ? "A thermal study's load" : "";
+  case T::Bearing:
+    if (type == A::Modal)
+      return "A modal study has no loads: its modes are the part's own";
+    [[fallthrough]];
   case T::Force:
   case T::Pressure:
   case T::Torque:

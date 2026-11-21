@@ -2158,6 +2158,31 @@ TEST_CASE("Simulation golden corpus loads and round-trips",
             CHECK_FALSE(have.symmetry.On());
           }
         }
+        // vNEXT: a free-free modal study and what a study's result keeps
+        // (docs/simulation/README.md#free-free-modes, #a-full-result), as
+        // [study, free, keep]; and a bearing load, [study, load, force N,
+        // direction] (docs/simulation/README.md#bearing-loads).
+        if (expect.contains("study_settings"))
+          for (const nlohmann::json& row : expect.at("study_settings")) {
+            const fem::Study* s = sim.FindStudy(row[0].get<uint64_t>());
+            REQUIRE(s != nullptr);
+            CHECK(s->freeFree == row[1].get<bool>());
+            CHECK(fem::KeepModeToString(s->keep) == row[2].get<std::string>());
+          }
+        if (expect.contains("bearing_loads"))
+          for (const nlohmann::json& row : expect.at("bearing_loads")) {
+            const fem::Study* s = sim.FindStudy(row[0].get<uint64_t>());
+            REQUIRE(s != nullptr);
+            const fem::Load* l = nullptr;
+            for (const fem::Load& x : s->loads)
+              if (x.id == row[1].get<uint64_t>())
+                l = &x;
+            REQUIRE(l != nullptr);
+            CHECK(l->type == fem::LoadType::Bearing);
+            CHECK(l->magnitude.value == row[2].get<double>());
+            for (int k = 0; k < 3; ++k)
+              CHECK(l->direction[k] == row[3][k].get<double>());
+          }
         if (expect.contains("next_id_above"))
           CHECK(sim.NextId() > expect.at("next_id_above").get<uint64_t>());
       };

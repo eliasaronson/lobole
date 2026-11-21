@@ -84,10 +84,14 @@ std::string Headline(const fem::Study& s, const fem::StudyRuntime* rt) {
   case fem::AnalysisType::Buckling:
     for (const fem::StudyBodyResult& b : rt->bodies)
       if (!b.results.modes.empty()) {
-        if (s.type == fem::AnalysisType::Modal)
-          std::snprintf(buf, sizeof(buf), "%.4g Hz",
-                        b.results.modes[0].frequencyHz);
-        else
+        if (s.type == fem::AnalysisType::Modal) {
+          // A free study's first elastic mode: its rigid ones are at zero.
+          for (const fem::FemResults::ModeShape& m : b.results.modes)
+            if (!m.rigid) {
+              std::snprintf(buf, sizeof(buf), "%.4g Hz", m.frequencyHz);
+              break;
+            }
+        } else
           std::snprintf(buf, sizeof(buf), "x %.3g", b.results.modes[0].factor);
         break;
       }
@@ -150,6 +154,10 @@ std::string LoadTooltip(const StudyHost& host, const fem::Load& l) {
                   l.axisOrigin.x, l.axisOrigin.y, l.axisOrigin.z);
   else if (l.type == fem::LoadType::Torque)
     std::snprintf(buf, sizeof(buf), "About the cylindrical face's own axis");
+  else if (l.type == fem::LoadType::Bearing)
+    std::snprintf(buf, sizeof(buf),
+                  "Pressing [%.2g, %.2g, %.2g], over the half it pushes on",
+                  l.direction.x, l.direction.y, l.direction.z);
   else if (l.type == fem::LoadType::Remote)
     std::snprintf(buf, sizeof(buf),
                   "At (%.3g, %.3g, %.3g) mm, along [%.2g, %.2g, %.2g]",
@@ -747,6 +755,8 @@ const char* SimLoadName(fem::LoadType t) {
     return "Torque";
   case fem::LoadType::Remote:
     return "Remote";
+  case fem::LoadType::Bearing:
+    return "Bearing";
   case fem::LoadType::Pin:
     return "Pin";
   case fem::LoadType::Contact:
@@ -781,6 +791,8 @@ const char* SimLoadCommand(fem::LoadType t) {
     return "sim.torque";
   case fem::LoadType::Remote:
     return "sim.remote";
+  case fem::LoadType::Bearing:
+    return "sim.bearing";
   case fem::LoadType::Pin:
     return "sim.pin";
   case fem::LoadType::Contact:

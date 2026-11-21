@@ -466,6 +466,7 @@ const Binding kDefaults[] = {
     {"sim.pressure", Context::Simulation, "Pressure load", "Loads", "3"},
     {"sim.torque", Context::Simulation, "Torque", "Loads", ""},
     {"sim.remote", Context::Simulation, "Remote load", "Loads", ""},
+    {"sim.bearing", Context::Simulation, "Bearing load", "Loads", ""},
     {"sim.heat_flux", Context::Simulation, "Heat flux", "Loads", ""},
     {"sim.heat_source", Context::Simulation, "Heat source", "Loads", ""},
     {"sim.add_case", Context::Simulation, "Add a load case", "Loads", ""},

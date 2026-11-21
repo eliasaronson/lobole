@@ -1,0 +1,8 @@
+{
+  "subject": {"kind": "part", "document": 2, "name": "Lug"},
+  "mesh_size": 1.6,
+  "studies": [[10, "Hanging free", true], [11, "Pulled on its pin", true]],
+  "study_settings": [[10, true, "full"], [11, false, "full"]],
+  "bearing_loads": [[11, 13, 400.0, [-1.0, 0.0, 0.0]]],
+  "next_id_above": 13
+}

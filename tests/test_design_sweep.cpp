@@ -6,14 +6,19 @@
 // variable's range on copies, where it breaks bracketed and named, and the
 // user's document left as it was.
 
+#include "cad/CADMaterials.h"
 #include "core/DesignSweep.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Measure.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/fem/SimDocument.h"
 #include "remote/RemoteRequirements.h"
 #include "ui/AppState.h"
 #include "ui/DocumentSlots.h"
+#include "ui/SimRunActions.h"
+#include "ui/SimulationActions.h"
 #include "ui/VariableActions.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -298,3 +303,169 @@ TEST_CASE("a design sweep is refused before anything starts",
   CHECK_THAT(app.Refusal("design_sweep", {{"variables", {t}}}),
              ContainsSubstring("configuration 'Thick', which overrides 't'"));
 }
+
+#ifdef HAVE_NETGEN
+namespace {
+
+// A steel plate 60 long, 20 wide and `t` thick (a project variable), a
+// cantilever: clamped at x = 0, pushed across its thickness at x = 60 by
+// 40 N, in a simulation whose study states two requirements, its factor of
+// safety and its deflection. Returns the study's id.
+uint64_t WallCantilever(App& app, double t) {
+  REQUIRE(ui::SetProjectVariable(app.state, "t", std::to_string(t),
+                                 "mm, the wall"));
+  Document& doc = *app.state.document;
+  auto box =
+      std::make_unique<BoxFeature>("Wall", glm::dvec3(0.0), 60.0, t, 20.0);
+  box->height.expr = "t";
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const Body& body = doc.GetBodies().at(0);
+  ElementRef x0, x1;
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, index);
+    if (info && std::abs(info->centroid.x) < 1e-6)
+      x0 = ElementRef{body.createdBy, name};
+    if (info && std::abs(info->centroid.x - 60.0) < 1e-6)
+      x1 = ElementRef{body.createdBy, name};
+  }
+  REQUIRE_FALSE(x0.name.empty());
+  REQUIRE_FALSE(x1.name.empty());
+  fem::SimDocument sim;
+  sim.SetSubject({fem::SubjectKind::Part, app.PartId(), 0, "Wall"});
+  sim.SetMesh({ExprValue{1.5}, {}});
+  fem::Study& st = sim.AddStudy("Bend");
+  st.converge = fem::ConvergeMode::Never;
+  fem::Load fixed;
+  fixed.id = sim.AllocateId();
+  fixed.type = fem::LoadType::Fixed;
+  fixed.face = x0;
+  st.loads.push_back(fixed);
+  fem::Load force;
+  force.id = sim.AllocateId();
+  force.type = fem::LoadType::Force;
+  force.face = x1;
+  force.magnitude = 40.0;
+  force.direction = glm::dvec3(0, -1, 0);
+  st.loads.push_back(force);
+  const uint64_t sid = st.id;
+  REQUIRE(ui::AddSimulation(app.state, "Wall simulation", std::move(sim)) == 1);
+  ui::SetActivePart(app.state, 0);
+  app.Call("add_requirement",
+           {{"name", "wall holds"},
+            {"measure",
+             {{"kind", "study_result"},
+              {"document", app.PartId()},
+              {"study", sid},
+              {"quantity", "factor_of_safety"}}},
+            {"bound", {{"kind", "at_least"}, {"value", 2.0}}}});
+  app.Call("add_requirement",
+           {{"name", "tip deflection"},
+            {"measure",
+             {{"kind", "study_result"},
+              {"document", app.PartId()},
+              {"study", sid},
+              {"quantity", "max_displacement"}}},
+            {"bound", {{"kind", "at_most"}, {"value", 5.0}}}});
+  return sid;
+}
+
+double Reading(const json& point, const std::string& name) {
+  for (const json& r : point.at("requirements"))
+    if (r.at("name") == name) {
+      INFO(r.dump());
+      REQUIRE(r.contains("value"));
+      return r.at("value").get<double>();
+    }
+  FAIL("no requirement " << name);
+  return 0.0;
+}
+
+} // namespace
+
+// A sweep of a wall's thickness solves its study at each point
+// (docs/requirements/README.md#design-sweep): each point's deflection is
+// the cantilever's F L^3 / (3 E I), its factor of safety grows with the
+// wall, a stored result answers the point it was solved at, and the same
+// sweep again solves nothing.
+TEST_CASE("a sweep of wall thickness solves its study at every point, "
+          "reused on a rerun",
+          "[requirements][design_sweep][fem][slow]") {
+  App app;
+  const uint64_t sid = WallCantilever(app, 4.0);
+  // The base solved in the app first: its stored result answers that point.
+  std::string err;
+  const uint64_t simSlot = app.state.parts.at(1).id;
+  REQUIRE(ui::RunSimStudyAndCache(app.state, simSlot, sid, &err));
+  INFO(err);
+  ui::SetActivePart(app.state, 0);
+  const json req = {
+      {"variables", {{{"name", "t"}, {"min", 2.0}, {"max", 6.0}}}},
+      {"samples", 3},
+      {"study_budget_s", 600}};
+  const json out = app.Call("design_sweep", req);
+  INFO(out.dump(1));
+  REQUIRE(out.contains("studies"));
+  CHECK(out.at("not_swept").empty());
+  // 2, 4, 6 and the base (4, from the stored result): two solves.
+  CHECK(out.at("studies").at("solved") == 2);
+  CHECK(out.at("studies").at("reused").get<int>() >= 2);
+  CHECK(out.at("studies").at("budget_spent") == false);
+  const double E = 1000.0 * CADMaterials::MaterialLibrary::GetMaterial(
+                                CADMaterials::MaterialType::STEEL)
+                                .youngGPa;
+  const double F = 40.0, L = 60.0, b = 20.0;
+  double lastFos = 0.0;
+  for (double t : {2.0, 4.0, 6.0}) {
+    const json* p = PointAt(out, "t", t);
+    REQUIRE(p != nullptr);
+    const double I = b * t * t * t / 12.0;
+    const double closed = F * L * L * L / (3.0 * E * I);
+    const double got = Reading(*p, "tip deflection");
+    INFO("t " << t << ": deflection " << got << " mm, F L^3/3EI " << closed);
+    // A wall 20 wide is a little stiffer than Euler-Bernoulli's beam (the
+    // clamp's Poisson hold, a plate's anticlastic bending): 1-3 % here.
+    CHECK(std::abs(got - closed) < 0.05 * closed);
+    const double fos = Reading(*p, "wall holds");
+    CHECK(fos > lastFos);
+    lastFos = fos;
+  }
+  // The thin wall fails its factor of safety (yield over a peak that grows
+  // as 1/t^2), the thick one holds.
+  CHECK(PointAt(out, "t", 2.0)->at("ok") == false);
+  CHECK(PointAt(out, "t", 6.0)->at("ok") == true);
+
+  // Again: nothing solved.
+  const json again = app.Call("design_sweep", req);
+  CHECK(again.at("studies").at("solved") == 0);
+  for (double t : {2.0, 4.0, 6.0})
+    CHECK(Reading(*PointAt(again, "t", t), "tip deflection") ==
+          Reading(*PointAt(out, "t", t), "tip deflection"));
+}
+
+// What would make a sweep that solves studies unbounded is refused before
+// anything starts: no budget stated, and a study that refines until it
+// settles however long that takes. A budget on a sweep that solves nothing
+// is refused too.
+TEST_CASE("a sweep that solves studies states its budget and refuses "
+          "converge always",
+          "[requirements][design_sweep][fem]") {
+  App app;
+  const uint64_t sid = WallCantilever(app, 4.0);
+  const json vars = {{{"name", "t"}, {"min", 2.0}, {"max", 6.0}}};
+  CHECK_THAT(app.Refusal("design_sweep", {{"variables", vars}}),
+             ContainsSubstring("study_budget_s"));
+  CHECK_THAT(app.Refusal("design_sweep",
+                         {{"variables", vars}, {"study_budget_s", -1}}),
+             ContainsSubstring("above 0"));
+  fem::SimDocument* sim = ui::SimBySlotId(app.state, app.state.parts[1].id);
+  REQUIRE(sim != nullptr);
+  fem::Study st = *sim->FindStudy(sid);
+  st.converge = fem::ConvergeMode::Always;
+  REQUIRE(sim->ReplaceStudy(st));
+  CHECK_THAT(app.Refusal("design_sweep",
+                         {{"variables", vars}, {"study_budget_s", 60}}),
+             ContainsSubstring("converges always"));
+  CHECK(ui::FindBackgroundJob(app.state, "design_sweep") == nullptr);
+}
+#endif // HAVE_NETGEN

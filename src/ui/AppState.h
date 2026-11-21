@@ -700,6 +700,7 @@ struct SimulationState {
     Keep,
     Torque,
     Remote,
+    Bearing, // a force on a bore, as a shaft in it presses
     Probe,
     Pin,
     Contact, // a compression-only support: the face rests on the ground

@@ -865,11 +865,11 @@ const std::vector<Command>& Table() {
     // A support or a load: the button toggles, so pressing the armed tool's
     // key again disarms it, the same as clicking it again.
     for (const char* id :
-         {"sim.fixed", "sim.pin", "sim.contact", "sim.roller", "sim.held",
-          "sim.cylindrical", "sim.temperature", "sim.convection", "sim.force",
-          "sim.pressure", "sim.torque", "sim.remote", "sim.heat_flux",
-          "sim.heat_source", "sim.keep", "sim.probe", "sim.suppress",
-          "sim.symmetry", "sim.refine"}) {
+         {"sim.fixed",   "sim.pin",         "sim.contact",     "sim.roller",
+          "sim.held",    "sim.cylindrical", "sim.temperature", "sim.convection",
+          "sim.force",   "sim.pressure",    "sim.torque",      "sim.remote",
+          "sim.bearing", "sim.heat_flux",   "sim.heat_source", "sim.keep",
+          "sim.probe",   "sim.suppress",    "sim.symmetry",    "sim.refine"}) {
       const SimulationState::Tool t = SimCommandTool(id);
       simAdd(id, [t](AppState& s) {
         SimulationArmTool(

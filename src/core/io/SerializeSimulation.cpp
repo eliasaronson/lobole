@@ -201,23 +201,19 @@ json BodyJson(const fem::SimDocument& sim) {
   return j;
 }
 
-// A stored result as saved: StudyResultToJson's, with the meshes it was
-// solved on. False when it holds nothing solved.
-bool ResultJson(const fem::StudyRuntime& rt, json& out) {
-  if (!StudyResultToJson(rt, out))
-    return false;
-  if (!rt.meshKeys.empty())
-    out["mesh_keys"] = KeysToJson(rt.meshKeys);
-  return true;
-}
-
-fem::StudyRuntime ResultFromJson(json j) {
+fem::StudyRuntime ResultFromJson(const fem::SimDocument& sim, json j) {
   std::vector<uint64_t> keys;
   if (j.contains("mesh_keys")) {
     keys = KeysFromJson(j.at("mesh_keys"), "mesh_keys");
     j.erase("mesh_keys");
   }
-  fem::StudyRuntime rt = StudyResultFromJson(j);
+  // A full result's body names the stored mesh it was solved on, read
+  // before the results.
+  fem::StudyRuntime rt =
+      StudyResultFromJson(j, [&](uint64_t key) -> const fem::FemMesh* {
+        const fem::StoredMesh* m = sim.FindMesh(key);
+        return m && m->mesh ? m->mesh.get() : nullptr;
+      });
   rt.meshKeys = std::move(keys);
   return rt;
 }
@@ -385,7 +381,7 @@ void AdoptResult(fem::SimDocument& sim, uint64_t studyId, json j) {
     throw std::runtime_error("is the result of study " +
                              std::to_string(studyId) +
                              ", which the simulation does not have");
-  sim.RestoreStudyResults(studyId, ResultFromJson(std::move(j)));
+  sim.RestoreStudyResults(studyId, ResultFromJson(sim, std::move(j)));
 }
 
 uint64_t StudyIdOfStem(const std::string& stem) {
@@ -406,7 +402,8 @@ bool SaveDirForm(const fem::SimDocument& sim, const fs::path& dir,
   for (const uint64_t id : sim.ResultIds()) {
     const fem::StudyRuntime* rt = sim.StudyResults(id);
     json rj;
-    if (rt == nullptr || sim.FindStudy(id) == nullptr || !ResultJson(*rt, rj))
+    if (rt == nullptr || sim.FindStudy(id) == nullptr ||
+        !SimResultToJson(sim, *rt, rj))
       continue;
     fs::create_directories(resultsDir);
     if (!WriteResultFiles(resultsDir, std::to_string(id), std::move(rj),
@@ -445,7 +442,8 @@ json SingleFileJson(const fem::SimDocument& sim) {
   for (const uint64_t id : sim.ResultIds()) {
     const fem::StudyRuntime* rt = sim.StudyResults(id);
     json rj;
-    if (rt == nullptr || sim.FindStudy(id) == nullptr || !ResultJson(*rt, rj))
+    if (rt == nullptr || sim.FindStudy(id) == nullptr ||
+        !SimResultToJson(sim, *rt, rj))
       continue;
     rj["study"] = id;
     results.push_back(InlineBytes(std::move(rj)));
@@ -463,6 +461,19 @@ json SingleFileJson(const fem::SimDocument& sim) {
 
 void ReadInlineDerived(fem::SimDocument& sim, const json& j,
                        const std::string& file) {
+  // The meshes first: a full result is read against the one it was solved
+  // on.
+  const json meshes = j.value("meshes", json::array());
+  if (!meshes.is_array())
+    throw std::runtime_error("`meshes` is a list");
+  std::map<uint64_t, std::pair<std::string, std::string>> where;
+  for (size_t i = 0; i < meshes.size(); ++i)
+    OrDrop(file, "/meshes/" + std::to_string(i), [&] {
+      uint64_t key = 0;
+      fem::StoredMesh m = StoredMeshFromJson(InlineBytesBack(meshes[i]), key);
+      sim.StoreMesh(key, std::move(m));
+      where[key] = {file, "/meshes/" + std::to_string(i)};
+    });
   const json results = j.value("results", json::array());
   if (!results.is_array())
     throw std::runtime_error("`results` is a list");
@@ -474,17 +485,6 @@ void ReadInlineDerived(fem::SimDocument& sim, const json& j,
       const uint64_t id = rj.at("study").get<uint64_t>();
       rj.erase("study");
       AdoptResult(sim, id, std::move(rj));
-    });
-  const json meshes = j.value("meshes", json::array());
-  if (!meshes.is_array())
-    throw std::runtime_error("`meshes` is a list");
-  std::map<uint64_t, std::pair<std::string, std::string>> where;
-  for (size_t i = 0; i < meshes.size(); ++i)
-    OrDrop(file, "/meshes/" + std::to_string(i), [&] {
-      uint64_t key = 0;
-      fem::StoredMesh m = StoredMeshFromJson(InlineBytesBack(meshes[i]), key);
-      sim.StoreMesh(key, std::move(m));
-      where[key] = {file, "/meshes/" + std::to_string(i)};
     });
   ReportUnkept(sim, where);
 }
@@ -503,15 +503,8 @@ void ReadDirDerived(fem::SimDocument& sim, const fs::path& dir) {
     std::sort(rels.begin(), rels.end());
     return rels;
   };
-  for (const std::string& rel : files(kResultsDir, ".result.json")) {
-    std::optional<json> j = ReadResultFiles(dir, rel);
-    if (!j)
-      continue;
-    OrDrop(rel, "", [&] {
-      AdoptResult(sim, StudyIdOfStem(fs::path(rel).filename().string()),
-                  std::move(*j));
-    });
-  }
+  // The meshes first: a full result is read against the one it was solved
+  // on.
   std::map<uint64_t, std::pair<std::string, std::string>> where;
   for (const std::string& rel : files(kMeshesDir, ".mesh.json")) {
     std::optional<json> j = ReadResultFiles(dir, rel);
@@ -528,10 +521,53 @@ void ReadDirDerived(fem::SimDocument& sim, const fs::path& dir) {
       where[key] = {rel, ""};
     });
   }
+  for (const std::string& rel : files(kResultsDir, ".result.json")) {
+    std::optional<json> j = ReadResultFiles(dir, rel);
+    if (!j)
+      continue;
+    OrDrop(rel, "", [&] {
+      AdoptResult(sim, StudyIdOfStem(fs::path(rel).filename().string()),
+                  std::move(*j));
+    });
+  }
   ReportUnkept(sim, where);
 }
 
 } // namespace
+
+bool SimResultToJson(const fem::SimDocument& sim, const fem::StudyRuntime& rt,
+                     json& out) {
+  // A body solved on a mesh the simulation keeps, as it keeps it (the
+  // result's positions are the mesh's, at a float's precision).
+  const std::vector<uint64_t> kept = sim.KeptMeshKeys();
+  const auto storedAs = [&](uint64_t key, const fem::FemMesh& mesh) {
+    if (std::find(kept.begin(), kept.end(), key) == kept.end())
+      return false;
+    const fem::StoredMesh* m = sim.FindMesh(key);
+    if (m == nullptr || !m->mesh)
+      return false;
+    const fem::FemMesh& s = *m->mesh;
+    if (s.nodes.size() != mesh.nodes.size() ||
+        s.tets.size() != mesh.tets.size() ||
+        s.boundary.size() != mesh.boundary.size() || s.tets != mesh.tets)
+      return false;
+    for (size_t i = 0; i < s.nodes.size(); ++i)
+      for (int k = 0; k < 3; ++k)
+        if (static_cast<float>(s.nodes[i][k]) !=
+            static_cast<float>(mesh.nodes[i][k]))
+          return false;
+    for (size_t t = 0; t < s.boundary.size(); ++t)
+      if (s.boundary[t].nodes != mesh.boundary[t].nodes ||
+          s.boundary[t].faceIndex != mesh.boundary[t].faceIndex)
+        return false;
+    return true;
+  };
+  if (!StudyResultToJson(rt, out, storedAs))
+    return false;
+  if (!rt.meshKeys.empty())
+    out["mesh_keys"] = KeysToJson(rt.meshKeys);
+  return true;
+}
 
 json StoredMeshToJson(uint64_t key, const fem::StoredMesh& stored) {
   const fem::FemMesh& m = *stored.mesh;

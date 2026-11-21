@@ -1405,6 +1405,9 @@ void DrawSimulationToolbar(AppState& state) {
        {"###tb_sim_torque", "sim.torque", "Torque (click the face it turns)"},
        {"###tb_sim_remote", "sim.remote",
         "Remote load (a force at a point, carried by the face clicked)"},
+       {"###tb_sim_bearing", "sim.bearing",
+        "Bearing load (click a bore or a shaft: a force pressed on the half "
+        "it pushes, as a pin or a shaft in it does)"},
        {"###tb_sim_heat_flux", "sim.heat_flux",
         "Heat flux (click a face: heat into it)"},
        {"###tb_sim_heat_source", "sim.heat_source",
