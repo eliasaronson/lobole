@@ -183,16 +183,22 @@ BRACE_SUPPORTS = ("brace ladder", "port ring brace")
 
 def assembly_study(app, label, supports, mesh_mm, modes=6):
     """The side wall meshed, the named occurrences rigid and clamped at their
-    contact with it. On the assembly tab; the same verbs as `study`."""
-    sid = app.add_study(kind="modal", name=f"{label} {mesh_mm:g}mm")["id"]
+    contact with it. The same verbs as `study`, in a simulation of the
+    assembly of its own: every study of a simulation shares its participant
+    table, and each label here is a different one
+    (docs/scripting/rpc.md#simulations)."""
     parts = [{"occurrence": SIDE_WALL, "role": "meshed"}]
     parts += [{"occurrence": n, "role": "rigid"} for n in supports]
-    app.set_study(study=sid, mesh_size=mesh_mm, num_modes=modes,
-                  participants=parts)
+    sim = app.call("add_simulation", subject="speaker",
+                   participants=parts)["id"]
+    sid = app.add_study(simulation=sim, kind="modal",
+                        name=f"{label} {mesh_mm:g}mm")["id"]
+    app.set_study(simulation=sim, study=sid, mesh_size=mesh_mm,
+                  num_modes=modes)
     for n in supports:
-        app.add_load(study=sid, type="fixed", contact_with=n)
+        app.add_load(simulation=sim, study=sid, type="fixed", contact_with=n)
     t0 = time.time()
-    r = app.run_study(study=sid, _timeout=2400)
+    r = app.run_study(simulation=sim, study=sid, _timeout=2400)
     hz = r["bodies"][0]["frequencies_hz"]
     print(f"  {label:34} {len(supports):2} supports, {r['elements']:6} el, "
           f"{time.time() - t0:5.1f}s")

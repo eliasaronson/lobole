@@ -371,8 +371,12 @@ class App(_RpcSurface):
             f"app.methods() lists them")
 
     # RPCs that make a DIFFERENT tab active as a side effect, so the cached
-    # `_active` below is a lie afterwards. Creating any tab activates it, and
-    # add_drawing_view switches to the drawing it adds to.
+    # `_active` below is a lie afterwards. Creating any tab activates it,
+    # add_drawing_view switches to the drawing it adds to, and the
+    # simulation's display calls bring its tab forward, exit_simulation going
+    # back to its subject (docs/scripting/rpc.md#simulations): a part's
+    # activate() after set_result_display was a no-op, and the next part edit
+    # landed on the simulation tab.
     #
     # Found by the drawing gate: create_drawing left `_active` pointing at a
     # part, so the next part.box() short-circuited its own activate() and the
@@ -383,6 +387,8 @@ class App(_RpcSurface):
         "add_part", "add_assembly", "create_drawing", "add_drawing_view",
         "add_job", "new_project", "open_project", "delete_part",
         "edit_in_context", "set_active_part", "claim_component", "update_component",
+        "enter_simulation", "exit_simulation", "set_result_display",
+        "set_mesh_display",
     ))
 
     def _inspection_call(self, method, params):

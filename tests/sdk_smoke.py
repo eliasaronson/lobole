@@ -945,6 +945,15 @@ def main():
         expect(abs(d.body().volume - math.pi * 400 / 2 * 5) < 1e-3,
                f"a half-disc prism is pi r^2 / 2 * h: {d.body().volume}")
 
+        # The simulation's display calls bring its tab forward, so the SDK's
+        # remembered tab is dropped: a part's activate() after one must
+        # switch back, or the next part edit lands on the simulation.
+        app.call("enter_simulation")
+        expect(app.active() != d.id, "enter_simulation brought its tab forward")
+        d.activate()
+        expect(app.active() == d.id,
+               "activate() after a display call goes back to the part")
+
         # extent(): how far a profile actually REACHES, before extruding it.
         # A slot reaches half its width past each centre — the thing that put
         # a crank web through a barrel.
