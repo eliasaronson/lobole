@@ -146,7 +146,17 @@ the document, the undo history and the open tabs carry on. A path-traced
 render, a motion video or a test-engine capture holds the device; the switch
 waits for it, and the row says "Switches when the render finishes".
 `set_settings {gpu_device}` answers once the switch has run, with `renderer`
-saying where it landed. The FEM compute context is created per run, so the
+saying where it landed.
+
+A device whose driver crashed a start is left out of the ladder until its
+driver or the build changes
+([a driver that crashed at start](../rendering/README.md#a-driver-that-crashed-at-start)):
+the row says so under the combo, with **Try this device again**
+(`###gpu_retry_<n>`), which takes it off the skip list and rebuilds onto it
+in place when it is now the first rung. That is an action, not a setting:
+nothing is saved to `settings.json`. `set_settings {gpu_retry: "<device>"}`
+is the same, answered as a `gpu_device` change is; a device that is not
+skipped is refused, naming those that are. The FEM compute context is created per run, so the
 same choice applies there on the next run.
 
 ## Safe mode

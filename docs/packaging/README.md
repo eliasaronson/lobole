@@ -168,6 +168,14 @@ Windows; `zenity`, else `kdialog`, else a desktop notification naming the
 file on Linux. The next start that draws a window says it once. The message
 is what to read first; by what it names:
 
+- **Before any of these, on Linux**: a start that cannot get a hardware
+  renderer restarts itself on Mesa's lavapipe where that is installed, and
+  says so for as long as it lasts — a modal at each start, a `Software
+  rendering` notice in the menu bar, what to do about it
+  (docs/rendering/README.md#software-rendering-when-the-gpu-will-not).
+  `LOBOLE_SOFTWARE_DRIVER=none` turns that off for the report below. A
+  driver that crashed a start is left out of the next ones until it changes
+  (Preferences ▸ Performance ▸ Try this device again).
 - **"create the Vulkan instance", "load Vulkan", "find a graphics device"**:
   no Vulkan driver works here. Install or update the GPU driver and the
   Vulkan loader — Debian and Ubuntu `libvulkan1 mesa-vulkan-drivers`, Fedora
@@ -177,8 +185,10 @@ is what to read first; by what it names:
   In a virtual machine, turn on 3D acceleration.
 - **"create the graphics device", "set up the swapchain"**: every device was
   tried and failed (the message lists each). A driver update usually fixes
-  it; `LOBOLE_RENDERER=software lobole` renders on Mesa's lavapipe where it
-  is installed (Linux only: nothing is bundled, and stock Windows has none).
+  it. Where lavapipe is installed the start has already restarted on it, so
+  this report means software rendering failed too, or was turned off
+  (`LOBOLE_RENDERER`, `LOBOLE_SOFTWARE_DRIVER=none`); nothing is bundled,
+  and stock Windows has none.
 - **"start the windowing system", "open the main window"**: no desktop
   session reached the app (`DISPLAY` / `WAYLAND_DISPLAY`).
 - **Anything that crashes before the window draws** — a preference, a
@@ -198,10 +208,13 @@ and a restart offered (docs/rendering/README.md#a-lost-device).
 
 The release smokes check the first case on every package:
 `packaging/appimage/smoke.sh` and `packaging/windows/smoke.sh` start the app
-with `VK_ICD_FILENAMES=/nonexistent` and `LOBOLE_NO_DIALOG=1`, expecting
-exit 3 and the failure file; the AppImage smoke runs it once more without
+with `VK_ICD_FILENAMES=/nonexistent` and `LOBOLE_NO_DIALOG=1` (and, on the
+AppImage's Mesa lane, `LOBOLE_SOFTWARE_DRIVER=none`), expecting exit 3 and
+the failure file; the AppImage smoke runs it once more without
 `LOBOLE_NO_DIALOG`, `zenity`, `kdialog` or a session bus, to show the chain
-ends at the file rather than a hang.
+ends at the file rather than a hang. Before that, its Mesa lane checks the
+restart: the same environment without `none` answers `ping` restarted on
+lavapipe and passes `app/boots_and_renders`.
 
 ## The Nix flake
 
@@ -346,8 +359,15 @@ user's own, unlike in the [Flatpak](#the-flatpak).
   used; 22.04's and 24.04's are older and the bundled one is.
 - linuxdeploy (a pinned release, checksum checked) copies the libraries and
   sets rpaths; its excludelist leaves glibc, libGL, X11 and xcb to the host.
-  We also leave out the Vulkan loader, so the host's finds the host's
-  drivers, and D-Bus: bundled, it brought `libsystemd` and `libgcrypt`
+  We also leave the Vulkan loader to the host where it has one, so the
+  host's finds the host's drivers — but bundle the Khronos loader
+  (Apache-2.0, `libvulkan1`'s, its copyright in `usr/share/doc/libvulkan1`)
+  in `usr/lib/runtime-vulkan`, outside every rpath, which AppRun puts on
+  the library path only when the host has no `libvulkan.so.1`. Without it
+  a host with no Vulkan packages (a VM, the catalog's test machine) ended
+  the app in the dynamic linker before `main`: no report, no exit 3, and no
+  `--headless`. With it the app starts, `--headless` works, and a window
+  ends at exit 3 with the report and its `apt` line. And D-Bus: bundled, it brought `libsystemd` and `libgcrypt`
   without the `libgpg-error` the excludelist keeps out, and Debian 13 failed
   to start it. appimagetool (pinned) packs it with the static runtime, so
   the host needs FUSE but not `libfuse2`, and no user namespaces.
@@ -355,8 +375,14 @@ user's own, unlike in the [Flatpak](#the-flatpak).
   desktop already has (the Vulkan loader with Mesa, X11, fontconfig,
   D-Bus) plus Xvfb and python3 (3.11 where `python3` is older, as on
   22.04: the SDK needs it, the app does not), runs `tools/release-smoke.py`, then opens
-  the window on Xvfb for `app/boots_and_renders`. Containers have no FUSE,
-  so it runs with `APPIMAGE_EXTRACT_AND_RUN=1`.
+  the window on Xvfb for `app/boots_and_renders`, then the software
+  restart and the no-driver report (above). `smoke.sh APPIMAGE VERSION
+  --no-vulkan` is the second lane: X11, fontconfig, D-Bus and python with
+  neither the loader nor a driver (it fails if the image has either, so it
+  cannot pass as the first lane): `tools/release-smoke.py` over
+  `--headless` on the bundled loader, and a window that ends at exit 3 with
+  a report naming the driver packages. Containers have no FUSE, so it runs
+  with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - NixOS runs no generic AppImage without `appimage-run`; Nix users have the
   flake.
 

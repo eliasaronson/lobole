@@ -66,13 +66,24 @@ rung holds, start-up ends with exit code 3 and the report of
 The ladder never drops to `--offscreen` or `--headless` by itself; the
 report offers them.
 
-Landing below the first rung is a **fallback**, and is announced: a modal
-once, at the first frame ("Rendering in software (llvmpipe)", with which
-device failed and how), a lasting notice at the right of the menu bar
-(`Software rendering` or `Fallback renderer`, the reason in its tooltip),
-rows in Help ▸ About, and `ping`'s `renderer` (`{device, type, software,
-fallback, reason, forced, ray_tracing, missing, lost, lost_reason, rebuilds,
-last_rebuild}`). A
+Landing below the first rung is a **fallback**, and so are [the software
+restart](#software-rendering-when-the-gpu-will-not) and a [skipped
+device](#a-driver-that-crashed-at-start). Each is announced: a modal at the
+first frame of every start while it lasts ("Rendering in software
+(llvmpipe)", with what failed and how, and what to do about it), a lasting
+notice at the right of the menu bar (`Software rendering` or `Fallback
+renderer`, the reason and what to do in its tooltip; clicking it opens the
+modal again), rows in Help ▸ About (`Fallback`, `Skipped`, `What to do`),
+and `ping`'s `renderer` (`{device, type, software, driver, fallback,
+reason, forced, restarted, skipped, ray_tracing, missing, lost,
+lost_reason, rebuilds, last_rebuild}`). What to do is
+`startup::FallbackAdvice`, chosen by the failed step from the rows the
+startup report's tips hold: the driver and the Vulkan loader by
+distribution, 3D acceleration in a virtual machine, the loader variable
+(`VK_ICD_FILENAMES`, `VK_DRIVER_FILES`, `VK_INSTANCE_LAYERS`, …) or the
+implicit layer that was in the way when there was one, and
+`LOBOLE_SOFTWARE_DRIVER=none` for a user who would rather have the
+report. A
 machine whose only usable device IS a software one (CI, a VM, a desktop on
 Xvfb) is not a fallback: the menu bar says `Software rendering`, and there
 is no modal. A preference that cannot be honoured is said in the log and in
@@ -83,6 +94,78 @@ Preferences, as before.
 start (exit 2), naming those two. The software rung is the host's own Mesa
 — the same lavapipe the CI GUI suite runs on — and nothing is bundled, so a
 machine without it, and every stock Windows system, ends at the report.
+
+### Software rendering when the GPU will not
+
+The ladder's own software rung only helps when the failure is one a rung
+catches and lavapipe is among the devices the loader lists. A broken
+implicit layer or a stale `VK_ICD_FILENAMES` fails `vkCreateInstance`, or
+leaves the loader listing nothing, above the ladder; a hardware device that
+creates and presents but cannot build the mesh pipeline fails below it. So
+`EndStartup` (`src/app/main.cpp`) **restarts on software** instead of
+reporting (`startup::ShouldRestartInSoftware`) when all of these hold:
+
+- the step is one software rendering can cure (`startup::SoftwareCures`):
+  "create the Vulkan instance", "find a graphics device", "create the
+  graphics device", "open the window surface", "set up the swapchain",
+  "initialise the mesh renderer" — not the windowing system, the window or
+  the loader;
+- this process is not itself the restart (no `--software-fallback`);
+- `LOBOLE_RENDERER` is unset: `hardware` is the user saying no, and
+  `software` was tried;
+- the failure was not on a software device reached through a clean loader
+  (`Failure::softwareTried` and `startup::LoaderIsClean`), which the restart
+  would only repeat;
+- `startup::FindSoftwareDriver()` finds a manifest: one whose
+  `ICD.library_path` names `libvulkan_lvp`, searched where the loader looks
+  (`$XDG_CONFIG_HOME/vulkan/icd.d`, `/etc/vulkan/icd.d`,
+  `$XDG_DATA_HOME/vulkan/icd.d`, each of `$XDG_DATA_DIRS` and NixOS's
+  `/run/opengl-driver/share/vulkan/icd.d`), reading files and loading
+  nothing. Linux only. `LOBOLE_SOFTWARE_DRIVER` overrides it: a manifest's
+  path, or `none` for no restart; anything else is refused at start
+  (exit 2).
+
+It writes `<state>/renderer-fallback.json` (the failure, the manifest, the
+build and the loader variables that were set), ends the session as a clean
+exit does, and re-executes itself (`startup::Relaunch`: `execv`, the same
+pid, so a launcher watching it keeps watching) with its arguments plus
+`--software-fallback`, in an environment where `VK_DRIVER_FILES` and
+`VK_ICD_FILENAMES` are that one manifest, `VK_ADD_DRIVER_FILES` is unset and
+`VK_LOADER_LAYERS_DISABLE=~implicit~`. The window and `--offscreen` both do
+it; `--headless` has no renderer to restart. The restart keeps only the
+software rungs, `renderer.restarted` is true, `reason` is the first start's
+failure and `forced` is empty (nobody asked); `crash_reports` answers the
+record as `renderer_fallback`. A `StartupError` in the restart goes to the
+report, which leads with the first failure and says how software rendering
+failed after it, and the record goes with it: two process starts, never a
+loop. The app's own later restarts (safe mode's buttons, a lost device's)
+drop the flag, so every fresh start tries the hardware first and a repaired
+driver is picked up with nothing to reset; a start that is not the restart
+and gets its renderer deletes an old record.
+
+### A driver that crashed at start
+
+A segfault in the loader or a driver is a crash, not a `StartupError`. So
+before the instance and before each rung the start writes
+`<state>/graphics-attempt.json` (the stage, `instance` or `device` with the
+device's name and driver version, the build and the pid); it is removed at
+the first frame (offscreen: once the build held), on a `StartupError` and
+on a clean exit. A window or `--offscreen` start that finds one left by a
+process that is gone knows where it died:
+
+- at `instance`: it restarts on software as above, the failure reading "The
+  last start died while it created it";
+- on a device: that device goes into `<state>/graphics.json`'s skip list
+  under its name, driver version and this build, and the ladder leaves it
+  out (`startup::Device::skipped`) until the driver or the build changes,
+  or Preferences ▸ Performance ▸ **Try this device again**
+  (`set_settings {gpu_retry: <device>}`, which refuses a device that is not
+  skipped) takes it off and rebuilds onto it in place when it is now the
+  first rung. `renderer.skipped` lists it, `{device, driver, why}`.
+
+Neither file is read under `--headless` or `--gui-tests`. Safe mode counts
+early deaths as before ([safe mode](../ui/settings.md#safe-mode)); the skip
+list changes the device, safe mode the settings.
 
 The path tracer runs only on hardware: lavapipe now offers the ray-tracing
 extensions, but a path-traced still on the CPU is hours of a frozen-looking
@@ -95,8 +178,8 @@ A renderer whose `Initialize` fails is **named**: it is dropped (every user
 of its pointer checks for null, and `RegisterSceneRenderers` skips it), and
 listed in `renderer.missing`, the `Renderers missing` menu-bar notice and
 About. The mesh renderer is the picture, so its failure ends start-up like a
-device that cannot be created. The log line `Selected GPU: …` names the
-device either way.
+device that cannot be created — which the software restart then tries to
+cure. The log line `Selected GPU: …` names the device either way.
 
 ## A lost device
 
@@ -843,8 +926,12 @@ renderer, and by looking at the pictures.
   `LOBOLE_FAULT=device_create|swapchain|renderer_init:<name>` (honoured only
   with `LOBOLE_ALLOW_DEBUG_CRASH=1`): landing on the next device with
   `ping`'s fallback and reason, a missing renderer named, the mesh
-  renderer's failure ending the start, `LOBOLE_RENDERER=software` with its
-  path-traced still refused by name; **`tests/device_loss_smoke.py`** — the
+  renderer's failure restarting on software, `LOBOLE_RENDERER=software`
+  with its path-traced still refused by name; the software restart (no
+  driver with lavapipe named: the same pid, `restarted`, no report; a
+  failed restart: one report naming both, two process starts), a stale
+  attempt at `instance` or on a device, `gpu_retry`, and the attempt file
+  kept by a crash and removed by a start that draws; **`tests/device_loss_smoke.py`** — the
   backstop, above. The fallback modal is the GUI test
   `app/renderer_fallback_and_safe_mode_say_so`.
 - **A rebuild in place**: `tests/device_rebuild_smoke.py` (ctest

@@ -752,10 +752,19 @@ not abort:
   over the reports and `last-good-start`) make the third start
   [safe mode](ui/settings.md#safe-mode), as `--safe-mode` or
   `LOBOLE_SAFE_MODE=1` do.
+- **Before the report, the software restart.** A failure software rendering
+  can cure, on a Linux host with Mesa's lavapipe, restarts the process on it
+  instead (`--software-fallback`, the same pid) and the window says so
+  ([the device ladder](rendering/README.md#software-rendering-when-the-gpu-will-not));
+  only when that is not on offer, or fails too, does the report follow, and
+  then it names both failures.
 - **The environment is refused, not guessed**: `LOBOLE_RENDERER`
-  (`software|hardware`), `LOBOLE_SAFE_MODE` and `LOBOLE_NO_DIALOG` (`0|1`),
+  (`software|hardware`), `LOBOLE_SOFTWARE_DRIVER` (a driver manifest or
+  `none`), `LOBOLE_SAFE_MODE` and `LOBOLE_NO_DIALOG` (`0|1`),
   and `LOBOLE_FAULT` (`device_create`, `swapchain`, `rebuild` (a device
-  rebuild in place fails on every rung: the backstop),
+  rebuild in place fails on every rung: the backstop), `software_restart`
+  (the software restart fails on every rung); the start faults apply to the
+  first start only,
   `renderer_init:<mesh|outline|sketch|underlay|field|stock|raytracing>`,
   honoured only with `LOBOLE_ALLOW_DEBUG_CRASH=1`) are each checked at start
   and anything else is exit 2 naming what is accepted. `LOBOLE_FAULT` is how
