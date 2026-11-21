@@ -812,6 +812,10 @@ void DrawToolWindow(AppState& state) {
     ImGui::TextColored(ImVec4(0.90f, 0.40f, 0.40f, 1.0f),
                        ICON_FA_TRIANGLE_EXCLAMATION " %s", err.c_str());
     ImGui::PopTextWrapPos();
+    // The size that fits, a click away (###tw_fit): the preview builds at
+    // it and Accept comes back.
+    if (!feature->ErrorAfterEarlierFailure())
+      DrawFitButton(state, *feature, idx, /*commit=*/false);
   }
 
   // Accept carries the accent; Cancel is a plain button. They shipped as a

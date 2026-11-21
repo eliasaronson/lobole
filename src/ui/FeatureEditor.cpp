@@ -3207,6 +3207,16 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     ExprDim(state, feature, index, commit,
             fil->op == EdgeBlendOp::Chamfer ? "Distance" : "Radius",
             fil->radius);
+    // The committed feature's editor says why it is broken and offers the
+    // size that fits; the tool window draws both under its own error line.
+    if (commit && fil->GetFitHint() && !fil->ErrorAfterEarlierFailure()) {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(ImVec4(0.90f, 0.40f, 0.40f, 1.0f),
+                         ICON_FA_TRIANGLE_EXCLAMATION " %s",
+                         fil->GetError().c_str());
+      ImGui::PopTextWrapPos();
+      DrawFitButton(state, feature, index, commit);
+    }
 
     // The edge collection as a regular multi slot (U7 — was EdgePickState).
     PickSlotRow(state, feature, PickSlot::BlendEdges,
@@ -3215,6 +3225,25 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                     : std::to_string(fil->edges.size()) + " picked");
     RefListRows(state, feature, index, commit, fil->edges);
   }
+}
+
+bool DrawFitButton(AppState& state, Feature& feature, size_t index,
+                   bool commit) {
+  auto* fil = dynamic_cast<FilletFeature*>(&feature);
+  if (fil == nullptr || !state.document)
+    return false;
+  const auto& hint = fil->GetFitHint();
+  if (!hint || !hint->fitsMm || fil->radius.Bound())
+    return false;
+  char label[64];
+  std::snprintf(label, sizeof(label), "Use %s mm###tw_fit",
+                fit::Mm(*hint->fitsMm).c_str());
+  if (!ImGui::Button(label))
+    return false;
+  const nlohmann::json before = DocumentIO::FeatureToJson(*fil);
+  fil->radius = *hint->fitsMm;
+  CommitDiscrete(state, feature, before, index, commit);
+  return true;
 }
 
 } // namespace ui

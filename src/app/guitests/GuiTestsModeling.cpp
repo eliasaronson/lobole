@@ -3710,6 +3710,92 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->commands->CanUndo()); // accept = one undoable action
   };
 
+  // A round too large for the edges says the size that fits, and the tool
+  // window offers it as a button (###tw_fit) that types it into the field:
+  // the preview builds and Accept commits it, one undo step. With the
+  // radius bound to a variable there is no button, only the sentence
+  // (docs/ui/tool-sessions.md#the-tool-window).
+  t = IM_REGISTER_TEST(engine, "fillet", "too_large_offers_the_size_that_fits");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx); // 2 mm a side
+    ctx->Yield();
+    const size_t features = Doc()->FeatureCount();
+    // The two edges of the face at z = `z` that run along x: the face is
+    // 2 wide between them, so two rounds meet at 1.
+    const auto edgesAlongX = [](bool top) {
+      const Body& b = Doc()->GetBodies()[0];
+      glm::dvec3 lo, hi;
+      b.shape.GetBoundingBox(lo, hi, true);
+      const float z = static_cast<float>(top ? hi.z : lo.z);
+      const auto polys = b.shape.GenerateEdgePolylines();
+      std::vector<ElementRef> out;
+      for (size_t e = 0; e < polys.size(); e++) {
+        const auto& p = polys[e];
+        if (p.size() < 2 || std::abs(p.front().z - z) > 1e-3f ||
+            std::abs(p.back().z - z) > 1e-3f ||
+            std::abs(p.front().y - p.back().y) > 1e-3f)
+          continue;
+        if (const std::string* n = b.elementMap.EdgeNameOf(static_cast<int>(e)))
+          out.push_back({b.createdBy, *n});
+      }
+      return out;
+    };
+    const auto pendingFillet = [&](bool top) -> FilletFeature* {
+      ToolbarClick(ctx, "###tb_fillet");
+      ctx->Yield();
+      size_t idx = 0;
+      auto* fil =
+          dynamic_cast<FilletFeature*>(ui::ResolvePendingFeature(*s_App, &idx));
+      if (fil == nullptr)
+        return nullptr;
+      fil->edges = edgesAlongX(top);
+      fil->radius = 1.5;
+      Doc()->Regenerate();
+      ctx->Yield(2);
+      return fil;
+    };
+
+    FilletFeature* fil = pendingFillet(true);
+    IM_CHECK(fil != nullptr);
+    IM_CHECK_EQ(fil->edges.size(), (size_t)2);
+    IM_CHECK(fil->GetError().find("fillet radius 1.5 mm does not fit") == 0);
+    IM_CHECK(fil->GetFitHint().has_value());
+    const double fits = fil->GetFitHint()->fitsMm.value_or(0.0);
+    IM_CHECK(fits > 0.9 && fits <= 1.0);
+    const ImGuiTestItemInfo refused =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((refused.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###tw_fit"));
+    const size_t undo = s_App->commands->UndoDepth();
+    ctx->ItemClick("//###ToolWindow/###tw_fit");
+    ctx->Yield(2);
+    IM_CHECK_EQ(fil->radius.value, fits);
+    IM_CHECK(fil->GetError().empty());
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###tw_fit"));
+    const ImGuiTestItemInfo accept =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+    ctx->ItemClick("//###ToolWindow/###tw_accept");
+    ctx->Yield(2);
+    IM_CHECK(!ui::HasPendingFeature(*s_App));
+    IM_CHECK_EQ(Doc()->FeatureCount(), features + 1);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undo + 1);
+
+    // Bound to a variable: the sentence, and no button.
+    IM_CHECK(Doc()->SetParameter("r", "1.5"));
+    fil = pendingFillet(false);
+    IM_CHECK(fil != nullptr);
+    fil->radius.expr = "r";
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK(fil->GetError().find("does not fit") != std::string::npos);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###tw_accept"));
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###tw_fit"));
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
   // Sheet metal: the whole Tier 1 flow through the GUI — declare the stock,
   // thicken a profile into a blank, click an edge of it and get a wall, then
   // lay it flat again. Clicking the edge is the point: which of a rim's two

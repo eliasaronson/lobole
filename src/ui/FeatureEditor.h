@@ -19,6 +19,15 @@ namespace ui {
 void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                              bool commit);
 
+// "Use 7.49 mm" (###tw_fit) under a Fillet's or Chamfer's error that names
+// the size that fits (Feature::GetFitHint): types that size into the field
+// as the user would, so the preview builds again and Accept comes back.
+// Nothing when the size is bound to an expression: the sentence is enough,
+// and the variable is the user's to change
+// (docs/ui/tool-sessions.md#the-tool-window). True when it was clicked.
+bool DrawFitButton(AppState& state, Feature& feature, size_t index,
+                   bool commit);
+
 // Dialog pick slots (U3): which reference field of the edited feature an
 // armed SlotPickState fills. One global enum — slots are feature-specific
 // but ids need only be unique. Only append: tests address rows as
