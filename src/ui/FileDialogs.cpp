@@ -81,27 +81,6 @@ bool NothingToSave(const AppState& state) {
          !state.drawing;
 }
 
-// Load `path` (a project or a recovery sidecar) into the app.
-// A recovery sidecar opened as the document. False, with the loader's own
-// reason in `error`, when it does not load: the caller then recovers
-// nothing rather than marking the untouched project recovered.
-bool OpenProjectFile(AppState& state, const std::string& path,
-                     std::string* error) {
-  // Becomes the live part: a heavy feature builds off the frame
-  // (docs/ui/long-operations.md#heavy-features).
-  const Document::BuildOffFrameScope offFrame;
-  if (auto loaded = DocumentIO::Load(path)) {
-    ReplaceDocument(state, std::move(*loaded));
-    FitCameraToDocument(state);
-    return true;
-  } else {
-    LOG_ERROR("Failed to open project: {}", loaded.error());
-    if (error)
-      *error = loaded.error();
-    return false;
-  }
-}
-
 // Container-aware GUI open: ui::OpenProject handles both project forms
 // (directory with project.json, flat single-document file) — unlike
 // OpenProjectFile above, which predates multi-document projects and is now

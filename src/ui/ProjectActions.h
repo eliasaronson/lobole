@@ -78,6 +78,20 @@ bool SaveWouldLoseDrops(const AppState& state, const std::string& path);
 bool RecoverProject(AppState& state, const std::string& path,
                     std::string* error = nullptr);
 
+// A part file read in over the part in front outside an open -- a
+// checkpoint, a recovery sidecar: ReplaceDocument, and then an older file's
+// studies move into simulations as an open's do (MoveStudiesIntoSimulations,
+// which skips a study a simulation of that part already holds). Without the
+// move they would sit in the part's holder and be gone on the next save.
+void AdoptPartFile(AppState& state, std::unique_ptr<Document> doc);
+
+// A recovery sidecar (always one flat part file) opened as the document.
+// False, with the loader's own reason in `error`, when it does not load: the
+// caller then recovers nothing rather than marking the untouched project
+// recovered.
+bool OpenProjectFile(AppState& state, const std::string& path,
+                     std::string* error);
+
 // What the GEOMETRY did between a version and now, for one part document
 // (F11 layer 3). The recipe as it was is extracted from the revision,
 // regenerated, and boolean-diffed against the part in front of you.

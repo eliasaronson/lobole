@@ -1144,7 +1144,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(loaded.error().empty()
                                    ? "no such checkpoint: " + name
                                    : loaded.error());
-    ui::ReplaceDocument(state, std::move(*loaded));
+    // An older checkpoint's studies move into simulations (AdoptPartFile).
+    ui::AdoptPartFile(state, std::move(*loaded));
     ui::FitCameraToDocument(state);
     ui::MarkProjectRecovered(state, state.projectPath);
     json out = json::object();

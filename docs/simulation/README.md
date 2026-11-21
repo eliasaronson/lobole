@@ -2860,7 +2860,11 @@ writer fixpoint, `format_version_gate`), and the reader fuzz has a
 `src/core/fem/SimMigration.{h,cpp}` moves the studies a part or an
 assembly file kept before v226 into simulation documents, and **an open
 does it** (`ui::MoveStudiesIntoSimulations`, from `AdoptProject` and the
-single-part open). The reader keeps such a file's studies, and in the
+single-part open), as does every other path that reads a part file in over
+the one in front: a restored checkpoint, a one-document recovery sidecar
+(`ui::AdoptPartFile`) and a project's part sidecars laid over it
+(`ui::RecoverProject`); without it those studies would be gone at the next
+save. The reader keeps such a file's studies, and in the
 directory form their saved results, as read (`fem::OldStudies`, on the
 document until `Document::TakeOldStudies` / `AssemblyDocument::
 TakeOldStudies` hands them over; nothing else reads them and the document

@@ -15,6 +15,9 @@
 #include "core/fem/FemSolver.h" // StudyRuntime
 #include "core/fem/SimDocument.h"
 #include "core/io/Autosaver.h"
+#include "core/io/Checkpoints.h"
+#include "remote/RemoteProject.h"
+#include "remote/RpcParams.h"
 #include "ui/AppActionsInternal.h" // SlotSim
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
@@ -25,6 +28,8 @@
 #include "ui/SimulationView.h" // MeshReport
 #include "ui/StudyHost.h"
 #include "ui/VariableActions.h" // GlobalUndo
+
+#include "TestPaths.h"
 
 #include <nlohmann/json.hpp>
 
@@ -796,4 +801,100 @@ TEST_CASE("A variable renamed or deleted looks inside every simulation",
   ui::GlobalUndo(state);
   CHECK(LoadExpr(state, rigSim) == "gap * 4");
   CHECK(LoadExpr(state, partSim) == "wall * 10 + gap");
+}
+
+// A part file read in over the part in front outside an open -- a
+// checkpoint, a recovery sidecar -- is migrated as an open is: its studies
+// move into a simulation of that part rather than sit in the part's holder
+// and be gone on the next save (ui::AdoptPartFile). The golden is a part file
+// from before simulations, with studies 3 "Bend" and 7 "Ring".
+namespace {
+
+fs::path OldStudyGolden() {
+  return fs::path(TestSourceDir()) / "tests" / "golden" /
+         "v153-saved-study-results.json";
+}
+
+// The simulation of the slot at `at`, with the golden's two studies.
+void HoldsTheGoldenStudies(ui::AppState& state, size_t at) {
+  REQUIRE(at < state.parts.size());
+  const std::vector<size_t> sims =
+      ui::SimulationSlotsFor(state, state.parts[at].id);
+  REQUIRE(sims.size() == 1);
+  const fem::SimDocument* sim = ui::SlotSim(state, sims[0]);
+  REQUIRE(sim != nullptr);
+  CHECK(sim->FindStudy(3) != nullptr);
+  CHECK(sim->FindStudy(7) != nullptr);
+  const Document* part = ui::SlotDoc(state, at);
+  REQUIRE(part != nullptr);
+  CHECK(part->OldStudiesRead() == nullptr);
+}
+
+} // namespace
+
+TEST_CASE("A restored checkpoint's studies move into a simulation",
+          "[fem][simdoc][project][checkpoint]") {
+  const fs::path root = Scratch("checkpoint");
+  ui::AppState state = StateWithBox();
+  // No git here: checkpoint_restore reads the part-only checkpoint file.
+  state.projectPath = (root / "p.lob").string();
+  const fs::path file = Checkpoints::PathOf(state.projectPath, "before");
+  fs::create_directories(file.parent_path());
+  fs::copy_file(OldStudyGolden(), file);
+  const nlohmann::json params = {{"name", "before"}};
+  remote::RpcParams p{params}; // holds a reference
+  REQUIRE(remote::HandleProjectRpc(state, "checkpoint_restore", p));
+  HoldsTheGoldenStudies(state, 0);
+  // Restored again: a study its simulation already holds is not moved twice.
+  REQUIRE(remote::HandleProjectRpc(state, "checkpoint_restore", p));
+  CHECK(ui::SimulationSlotsFor(state, state.parts[0].id).size() == 1);
+  std::error_code ec;
+  fs::remove_all(root, ec);
+}
+
+TEST_CASE("A one-document recovery sidecar's studies move into a simulation",
+          "[fem][simdoc][project][autosave]") {
+  const fs::path root = Scratch("sidecar");
+  const fs::path sidecar = root / "sidecar.json";
+  fs::copy_file(OldStudyGolden(), sidecar);
+  ui::AppState state = StateWithBox();
+  std::string error;
+  REQUIRE(ui::OpenProjectFile(state, sidecar.string(), &error));
+  INFO(error);
+  HoldsTheGoldenStudies(state, 0);
+  std::error_code ec;
+  fs::remove_all(root, ec);
+}
+
+TEST_CASE("A project's recovered part sidecar moves its studies into a "
+          "simulation",
+          "[fem][simdoc][project][autosave]") {
+  const fs::path root = Scratch("recoverold");
+  const fs::path lob = root / "p.lob";
+  ui::AppState state = StateWithBox();
+  ui::AddPart(state, "Second"); // several documents: one sidecar each
+  REQUIRE(SaveOk(state, lob));
+  // The first part's sidecar, written before studies moved; newer than
+  // its saved form, so it is recovered.
+  const std::string name = state.parts[0].name;
+  const fs::path dir = fs::path(Autosaver::SidecarDir(lob.string())) / "parts";
+  fs::create_directories(dir);
+  fs::copy_file(OldStudyGolden(), dir / (name + ".json"),
+                fs::copy_options::overwrite_existing);
+  fs::last_write_time(dir / (name + ".json"),
+                      fs::file_time_type::clock::now() + std::chrono::hours(1));
+  REQUIRE(Autosaver::RecoverableDocuments(lob.string()).size() == 1);
+
+  ui::AppState recovered;
+  std::string error;
+  REQUIRE(ui::RecoverProject(recovered, lob.string(), &error));
+  INFO(error);
+  size_t at = recovered.parts.size();
+  for (size_t i = 0; i < recovered.parts.size(); i++)
+    if (recovered.parts[i].name == name)
+      at = i;
+  HoldsTheGoldenStudies(recovered, at);
+  Autosaver::Clear(lob.string());
+  std::error_code ec;
+  fs::remove_all(root, ec);
 }

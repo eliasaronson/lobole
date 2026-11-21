@@ -1650,6 +1650,29 @@ bool RevealItem(AppState& state, const std::string& document,
   return true;
 }
 
+void AdoptPartFile(AppState& state, std::unique_ptr<Document> doc) {
+  ReplaceDocument(state, std::move(doc));
+  if (MoveStudiesIntoSimulations(state) > 0)
+    AdoptStoredSimResults(state);
+}
+
+bool OpenProjectFile(AppState& state, const std::string& path,
+                     std::string* error) {
+  // Becomes the live part: a heavy feature builds off the frame
+  // (docs/ui/long-operations.md#heavy-features).
+  const Document::BuildOffFrameScope offFrame;
+  auto loaded = DocumentIO::Load(path);
+  if (!loaded) {
+    LOG_ERROR("Failed to open project: {}", loaded.error());
+    if (error)
+      *error = loaded.error();
+    return false;
+  }
+  AdoptPartFile(state, std::move(*loaded));
+  FitCameraToDocument(state);
+  return true;
+}
+
 bool RecoverProject(AppState& state, const std::string& path,
                     std::string* error) {
   namespace fs = std::filesystem;
@@ -1728,6 +1751,8 @@ bool RecoverProject(AppState& state, const std::string& path,
         ReplaceDocument(state, std::move(sc.part));
       else
         slot.doc = std::move(sc.part);
+      // A sidecar written before studies moved still carries them: they
+      // move below, as the open's did.
     } else if (sc.assembly) {
       (active ? state.assembly : slot.assembly) = std::move(sc.assembly);
     } else if (sc.drawing) {
@@ -1739,6 +1764,8 @@ bool RecoverProject(AppState& state, const std::string& path,
     }
   }
   if (!read.empty()) {
+    if (MoveStudiesIntoSimulations(state) > 0)
+      AdoptStoredSimResults(state);
     LOG_INFO("Recovered {} autosaved document(s) into {}", read.size(), path);
     // Unsaved by definition: the sidecars were never a save.
     state.projectMetaDirty = true;
