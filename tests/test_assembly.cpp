@@ -143,8 +143,8 @@ TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
 // rename (which a save→load round-trip would not catch) fails here.
 // A FROZEN golden for an assembly's own FEM study (v106, S1): participants
 // with roles, a load whose anchor is a CONTACT rather than a face, and a
-// pressure that says whose face it is on. An assembly keeps no studies now:
-// the reader keeps the file's for the open to move into a
+// pressure that says whose face it is on. An assembly keeps no studies now
+// (vNEXT): the reader keeps the file's for the open to move into a
 // simulation (fem::SimulationsFromAssembly), which saves them.
 TEST_CASE("Frozen v106 assembly golden carries a study", "[assembly][golden]") {
   const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
@@ -202,6 +202,21 @@ TEST_CASE("Frozen v106 assembly golden carries a study", "[assembly][golden]") {
   auto again = testio::LoadAssembly(path.string());
   REQUIRE(again);
   CHECK(again->OldStudiesRead() == nullptr);
+  // The golden's studies in a file of this version were not written by it:
+  // refused, naming where studies live (vNEXT).
+  {
+    nlohmann::json j;
+    {
+      std::ifstream in(golden);
+      j = nlohmann::json::parse(in);
+    }
+    std::ifstream saved(path);
+    j["version"] = nlohmann::json::parse(saved).at("version");
+    std::ofstream(path) << j.dump(2);
+  }
+  auto refused = DocumentIO::LoadAssembly(path.string());
+  REQUIRE_FALSE(refused.has_value());
+  CHECK_THAT(refused.error(), Catch::Matchers::ContainsSubstring("simulation"));
   fs::remove(path);
 }
 

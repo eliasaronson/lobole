@@ -701,7 +701,7 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
     // The app creates and commits the project's repo itself (GitVault), so it
     // is the app's job to say how the blob should be treated there.
     WriteRepositoryHints(dirPath, doc.CommitGeometry());
-    // A part keeps no studies: they live in simulation documents.
+    // A part keeps no studies (vNEXT): they live in simulation documents.
     // The studies/ of a part saved before is emptied on the next save, its
     // studies having moved into a simulation on open.
     const fs::path studyDir = dir / "studies";
@@ -1120,6 +1120,21 @@ decltype(auto) ReadItem(const fs::path& dir, uint64_t id,
 
 namespace {
 
+// A part or an assembly keeps no studies from vNEXT on: they live in
+// simulation documents
+// (docs/simulation/README.md#moving-studies-into-a-simulation). One written
+// since that carries `studies` was not written by this format, so it is
+// refused rather than moved.
+void RefuseStudiesAt(const json& j, const char* rel) {
+  const int version = j.value("version", 0);
+  if (j.contains("studies") && version >= kVersionNEXT)
+    readctx::Refuse("`studies`: a part or an assembly written at v" +
+                        std::to_string(version) +
+                        " keeps none; its studies live in a simulation "
+                        "document (simulations/)",
+                    rel != nullptr ? rel : "");
+}
+
 // An old file's studies kept on its document for the open to move
 // (TakeOldStudies), when it had any; their ids stay the document's, so
 // nothing made after takes one a requirement names.
@@ -1318,11 +1333,12 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
                       std::vector<unsigned char>(data.begin(), data.end()));
       });
     }
-    // FEM studies (v29 on, as old files kept them): id-prefix files under
-    // studies/, index order, each result (v33, v153) beside its study. Kept as
-    // read for the open to move into a simulation (Document::TakeOldStudies).
+    // FEM studies (v29 to before vNEXT): id-prefix files under studies/,
+    // index order, each result (v33, v153) beside its study. Kept as read
+    // for the open to move into a simulation (Document::TakeOldStudies).
     auto old = std::make_shared<fem::OldStudies>();
     {
+      RefuseStudiesAt(index, "index.json");
       Collection studies = ScanCollection(dir, "studies", "study", ".result");
       for (const auto& [id, rel] :
            ListedFiles(index, "studies", studies, "study")) {
@@ -1521,7 +1537,7 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     }
     PruneCollection(motionDir, wantedMotion);
 
-    // An assembly keeps no studies; the studies/ of one saved
+    // An assembly keeps no studies (vNEXT); the studies/ of one saved
     // before is emptied, as a part's is.
     const fs::path asmStudyDir = dir / "studies";
     std::set<std::string> wantedStudies;
@@ -1693,9 +1709,10 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       }
     }
     asmDoc->EnsureNextIdAtLeast(maxId + 1);
-    // FEM studies (v106 on, as old files kept them), a result (v153) beside
-    // each: kept as read for the open to move into simulations.
+    // FEM studies (v106 to before vNEXT), a result (v153) beside each: kept
+    // as read for the open to move into simulations.
     {
+      RefuseStudiesAt(index, "index.json");
       auto old = std::make_shared<fem::OldStudies>();
       Collection c = ScanCollection(dir, "studies", "study", ".result");
       for (const auto& [id, rel] : ListedFiles(index, "studies", c, "study")) {
@@ -1918,8 +1935,8 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
                                  "a save does not keep it",
                                  false);
           }
-          // FEM studies (v29 on, as old files kept them), kept for the open to
-          // move.
+          // FEM studies (v29 to before vNEXT), kept for the open to move.
+          RefuseStudiesAt(j, nullptr);
           const json studies = InlineList(j, "studies");
           auto old = std::make_shared<fem::OldStudies>();
           for (size_t i = 0; i < studies.size(); i++)
@@ -2057,8 +2074,8 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
             maxId = std::max(maxId, s.id);
             asmDoc->GetMotionStudies().push_back(std::move(s));
           });
-          // FEM studies (v106 on, as old files kept them), kept for the open to
-          // move.
+          // FEM studies (v106 to before vNEXT), kept for the open to move.
+          RefuseStudiesAt(j, nullptr);
           auto old = std::make_shared<fem::OldStudies>();
           each("studies", [&](const json& x) {
             old->studies.push_back(StudyFromJson(x));

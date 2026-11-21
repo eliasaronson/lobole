@@ -272,8 +272,8 @@ TEST_CASE("Loading rejects unknown feature types", "[serialization]") {
 
 // ---- FEM studies (v29) ----------------------------------------------------
 // A study is saved in its simulation
-// (docs/simulation/README.md#how-a-simulation-is-saved); an older part file
-// kept them itself, and those are read for the open to move.
+// (docs/simulation/README.md#how-a-simulation-is-saved); a part file before
+// vNEXT kept them itself, and those are read for the open to move.
 
 namespace {
 fem::SimDocument SimWithStudy() {
@@ -402,6 +402,16 @@ TEST_CASE("A part keeps no studies; an older file's are read for the move",
     REQUIRE(testio::Save(*loaded, dir.string()));
     CHECK_FALSE(ReadJson(dir / "index.json").contains("studies"));
     CHECK_FALSE(fs::exists(dir / "studies" / "3-static-1.json"));
+  }
+  // A file of this version that carries studies was not written by it:
+  // refused, naming where studies live.
+  j["version"] = j.at("version").get<int>() + 1;
+  std::ofstream(path) << j.dump(2);
+  {
+    auto loaded = DocumentIO::Load(path.string());
+    REQUIRE_FALSE(loaded.has_value());
+    CHECK_THAT(loaded.error(),
+               Catch::Matchers::ContainsSubstring("simulation"));
   }
   fs::remove(path);
   fs::remove_all(dir);

@@ -361,6 +361,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A part and an assembly keep no studies: their studies live in simulation documents ([the simulation document](../simulation/README.md#the-simulation-document-core)), and neither form writes a `studies` list or a `studies/` directory. A file before this version that has them is read as it was and its studies, with the directory form's saved results, move into simulations on open ([moving studies](../simulation/README.md#moving-studies-into-a-simulation)); a save after it empties the old `studies/`. A part or an assembly of this version or later that carries `studies` is refused, naming where studies live. Golden `vNEXT-part-keeps-no-studies` (and the v106 assembly golden at this version, refused, in `tests/test_assembly.cpp`) |
 
 ## Paths in a project
 
@@ -389,8 +390,7 @@ the extension before the rename, is the same form and is still read:
 part.lob/
   index.json                 envelope + the ordered feature-id list
   features/<id>-<type>.json  one file per feature (the type suffix is cosmetic)
-  studies/  configurations/  assets/   per-kind files, absent when empty
-  studies/<id>-<slug>.result.json + .result.bin   a study's saved result
+  configurations/  assets/   per-kind files, absent when empty
   geometry/                  baked bodies (derived; see README.md)
   .gitattributes             geometry/*.brep binary -merge -diff
 ```
@@ -428,16 +428,17 @@ report the same kind as `type`) plus
 `dx` / `dy` / `ball_rotation` where its type uses them; `a` and `b` are
 connectors `{occurrence, anchor}`. An exploded view is `{id, name, steps:
 [{occurrence, offset}]}` and is view state only: the applied view and factor
-are never serialized. Mates, exploded views, relations, motion studies and
-FEM studies share the assembly's one never-reused id counter.
+are never serialized. Mates, exploded views, relations and motion studies
+share the assembly's one never-reused id counter.
 
 Directory form: `index.json` (kind + id lists) plus `occurrences/`, `mates/`,
-`exploded/`, `relations/`, `motion/` and `studies/`, one file per item, each
+`exploded/`, `relations/` and `motion/`, one file per item, each
 directory absent when it would be empty. An `assertions/` directory (v100)
-is read, as the project's clearance requirements, and not written again. A motion or FEM
-study's result sits beside it as `<id>-<slug>.result.json` (v153), with the
-input hash that produced it, and its arrays in `<id>-<slug>.result.bin`
-(v154).
+is read, as the project's clearance requirements, and not written again,
+and a `studies/` directory (v106 to before vNEXT) is read for the open to
+move into simulations. A motion study's result sits beside it as
+`<id>-<slug>.result.json` (v153), with the input hash that produced it, and
+its arrays in `<id>-<slug>.result.bin` (v154).
 
 ## The project envelope
 

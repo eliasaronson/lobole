@@ -908,6 +908,10 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect,
                                            : doc.OldStudiesRead() != nullptr
                                                ? doc.OldStudiesRead()->studies
                                                : none;
+  // How many studies the file carries: from vNEXT none (a part keeps none),
+  // before it those an open moves into a simulation.
+  if (expect.contains("old_studies"))
+    CHECK(studies.size() == expect.at("old_studies").get<size_t>());
   if (expect.contains("generator"))
     CHECK(doc.Generator() == expect.at("generator"));
   if (expect.contains("catalogs"))
