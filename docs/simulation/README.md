@@ -402,7 +402,7 @@ definition, so of its input hash: a change makes the result stale. The
 simulation tab's study settings show it as *Material: From the part /
 Custom*; Custom starts from the first body's library material that has
 stiffness data, and each field is one undoable edit. Saved in the study
-from format vNEXT (docs/versioning/format.md).
+from format v227 (docs/versioning/format.md).
 
 ### Results and staleness
 

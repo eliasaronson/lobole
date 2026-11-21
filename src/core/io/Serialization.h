@@ -215,7 +215,7 @@ MotionStudy MotionStudyFromJson(const nlohmann::json& j);
 // files and to echo/snapshot studies from the RPCs and Commands. Throws on
 // malformed input.
 nlohmann::json StudyToJson(const fem::Study& study);
-// A study's own material (vNEXT, docs/simulation/README.md
+// A study's own material (v227, docs/simulation/README.md
 // #a-study-states-its-own-material), the same object in the file and on the
 // wire: young_gpa and poisson required, the rest written only when stated.
 // An unknown key, a key that is not a number and a value

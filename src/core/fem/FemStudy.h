@@ -465,7 +465,7 @@ struct Study {
   // Static only: thermal expansion under a temperature field (v212).
   ThermalLoad thermalLoad;
 
-  // The study's own material (vNEXT), read in place of every body's library
+  // The study's own material (v227), read in place of every body's library
   // material; absent, each body's own, as every older study reads.
   std::optional<StudyMaterial> material;
 

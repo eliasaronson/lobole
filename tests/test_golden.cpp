@@ -2123,7 +2123,7 @@ TEST_CASE("Simulation golden corpus loads and round-trips",
             CHECK(fem::SimDocument::SharesMesh(s) == want[i][2].get<bool>());
           }
         }
-        // vNEXT: a study's own material, or null for each body's library
+        // v227: a study's own material, or null for each body's library
         // material (docs/simulation/README.md
         // #a-study-states-its-own-material).
         if (expect.contains("study_materials"))

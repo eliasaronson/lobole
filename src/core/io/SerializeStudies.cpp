@@ -234,7 +234,7 @@ json StudyToJson(const fem::Study& s) {
       t["stress_free_c"] = tl.stressFreeC;
     j["thermal_load"] = std::move(t);
   }
-  // The study's own material (vNEXT): absent when each body's library
+  // The study's own material (v227): absent when each body's library
   // material is read, so every older study re-saves as it was.
   if (s.material)
     j["material"] = StudyMaterialToJson(*s.material);
@@ -584,7 +584,7 @@ fem::Study StudyFromJson(const json& j) {
     }
   }
 
-  if (j.contains("material")) // vNEXT
+  if (j.contains("material")) // v227
     s.material = StudyMaterialFromJson(j.at("material"));
 
   for (const json& pj : j.value("participants", json::array()))
