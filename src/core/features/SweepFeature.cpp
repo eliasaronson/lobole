@@ -62,12 +62,15 @@ CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
     return CADShape();
   try {
     // MakePipeShell (not MakePipe) so sharp path corners are handled: a plain
-    // MakePipe truncates the sweep at the first corner. RoundCorner rounds the
-    // spine's corners; the trihedron mode controls how the section is carried.
+    // MakePipe truncates the sweep at the first corner. RightCorner mitres
+    // them, the two pieces meeting on the corner's bisecting plane, as a
+    // sharp path means: RoundCorner turned the section about the corner, and
+    // an 8 x 5 bar swept round a right angle came out 2782.83 mm3 for the
+    // mitred 2800. The trihedron mode controls how the section is carried.
     // Multiple profiles skin a solid through all sections along the spine (the
     // guided-loft path, mirroring FreeCAD's PartDesign Pipe).
     BRepOffsetAPI_MakePipeShell shell(spine);
-    shell.SetTransitionMode(BRepBuilderAPI_RoundCorner);
+    shell.SetTransitionMode(BRepBuilderAPI_RightCorner);
     if (!guide.IsNull()) {
       // A guide curve (auxiliary spine) supersedes the frame: it carries the
       // sections as they travel — the "two directions" sweep/loft.

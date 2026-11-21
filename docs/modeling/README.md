@@ -459,8 +459,11 @@ interference checks: [holes-and-threads.md](holes-and-threads.md#thread).
   `tube_schedule` (cut list and bend schedule per tube member).
 - **`Sweep`** (`SweepFeature`) skins a closed profile sketch along `path_id`,
   a sketch (an open chain of lines, arcs and splines) or a `Curve3D`
-  (`ResolveSweepPathWire`), with `BRepOffsetAPI_MakePipeShell` and rounded
-  corner transitions. `frame`: `corrected_frenet` (default; cannot self-twist
+  (`ResolveSweepPathWire`), with `BRepOffsetAPI_MakePipeShell`; a sharp
+  corner of the path is mitred (`BRepBuilderAPI_RightCorner`: the pieces
+  meet on the corner's bisecting plane), for a Loft along a path and a Pipe
+  too. A rounded corner is a path with an arc in it (or a `bent_path`).
+  `frame`: `corrected_frenet` (default; cannot self-twist
   on a helix), `frenet`, `fixed`. An optional `guide_id` reorients the section
   along a second curve (`BRepFill_NoContact`).
 - **`Loft`** skins `sketch_ids` (two or more sections, in order) with

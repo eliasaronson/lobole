@@ -134,7 +134,7 @@ TEST_CASE("Sweep errors on a missing sketch", "[sweep]") {
   CHECK(!doc.GetFeature(0)->GetError().empty());
 }
 
-TEST_CASE("Sweep follows a bent path (all segments, rounded corner)",
+TEST_CASE("Sweep follows a bent path (all segments, mitred corner)",
           "[sweep]") {
   Document doc;
   const uint64_t prof = AddSketch(
@@ -146,11 +146,38 @@ TEST_CASE("Sweep follows a bent path (all segments, rounded corner)",
       "Path", {sketch::Line{{0, 0}, {0, 6}}, sketch::Line{{0, 6}, {5, 6}}});
   doc.AddFeature(std::make_unique<SweepFeature>("Elbow", prof, path));
   REQUIRE(doc.GetBodies().size() == 1);
-  // Both segments swept (a MakePipe would stop at the corner near pi*0.25*6);
-  // full spine ~11 gives ~pi*0.25*11 minus a little at the rounded corner.
-  const double v = doc.GetBodies()[0].shape.Volume();
-  CHECK(v > 7.5); // well past the single-segment 4.7
-  CHECK(v < 9.0);
+  // Both segments swept (a MakePipe would stop at the corner near
+  // pi*0.25*6), and the corner mitred: what the outer side gains past the
+  // corner the inner side loses, so the volume is the section times the
+  // spine's length.
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(M_PI * 0.25 * 11.0, 1e-6));
+}
+
+// docs/modeling/kernel-cases.md, solidcraft/sweeps/96: an 8 x 5 rectangle
+// swept up 30 and across 40 round a sharp corner. The corner was a revolved
+// round of the section about the path's corner (2782.83 mm3); mitred, the
+// bar is A (l1 + l2) = 40 x 70 and its outer corner reaches 30 + 4.
+TEST_CASE("Sweep mitres a sharp corner of its path", "[sweep]") {
+  Document doc;
+  auto profile = std::make_unique<SketchFeature>(
+      "Sec", SketchPlane(glm::vec3(0), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  profile->AddRectangle({-4, -2.5}, {4, 2.5});
+  doc.AddFeature(std::move(profile));
+  const uint64_t prof = doc.GetFeature(0)->GetId();
+  // On the XZ plane facing -Y, so its V axis is +Z.
+  const uint64_t path = AddSketch(
+      doc, SketchPlane(glm::vec3(0), glm::vec3(0, -1, 0), glm::vec3(1, 0, 0)),
+      "Path", {sketch::Line{{0, 0}, {0, 30}}, sketch::Line{{0, 30}, {40, 30}}});
+  doc.AddFeature(std::make_unique<SweepFeature>("Bar", prof, path));
+  INFO(doc.GetFeature(2)->GetError());
+  REQUIRE(doc.GetBodies().size() == 1);
+  const CADShape& bar = doc.GetBodies()[0].shape;
+  CHECK_THAT(bar.Volume(), WithinRel(2800.0, 1e-9));
+  glm::dvec3 lo, hi;
+  bar.GetBoundingBox(lo, hi);
+  CHECK_THAT(hi.z, WithinRel(34.0, 1e-6));
+  CHECK_THAT(lo.x, WithinRel(-4.0, 1e-6));
 }
 
 TEST_CASE("Sweep on a degenerate path errors instead of aborting", "[sweep]") {

@@ -762,7 +762,7 @@
  "solidcraft/sweeps/96-loft-cut-box-sections-pad-first": "pass",
  "solidcraft/sweeps/96-loft-cut-box-sections-top-first": "pass",
  "solidcraft/sweeps/96-shallow-loft-cut-starting-in-the-top-face": "pass",
- "solidcraft/sweeps/96-sweep-rectangle-round-a-mitred-corner": "known: volume (docs/known-bugs.md#a-sweep-rounds-a-sharp-corner-of-its-path)",
+ "solidcraft/sweeps/96-sweep-rectangle-round-a-mitred-corner": "pass",
  "solidcraft/sweeps/968-loft-hollow-elbow-60deg-5sections": "known: volume (docs/modeling/README.md#known-rows-that-are-not-kernel-defects)",
  "solidcraft/sweeps/968-loft-hollow-elbow-90deg-10sections": "known: volume (docs/modeling/README.md#known-rows-that-are-not-kernel-defects)",
  "solidcraft/sweeps/cov-revolve-circle-touching-its-axis-a-quarter-turn": "pass",

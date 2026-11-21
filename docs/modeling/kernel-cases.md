@@ -20,13 +20,13 @@ command or parameter Loböle has no counterpart for.
 | booleans | 130 | 64 | 9 | 57 |
 | fillets | 275 | 101 | 67 | 107 |
 | shell | 40 | 11 | 11 | 18 |
-| sweeps | 97 | 34 | 15 | 48 |
+| sweeps | 97 | 35 | 14 | 48 |
 | solids | 11 | 3 | 0 | 8 |
 | threads | 31 | 14 | 17 | 0 |
 | import | 35 | 0 | 0 | 35 |
 | tessellation | 14 | 11 | 1 | 2 |
 | crashes | 12 | 3 | 0 | 9 |
-| **all** | 815 | 342 | 134 | 339 |
+| **all** | 815 | 343 | 133 | 339 |
 
 ## Known failures
 
@@ -145,7 +145,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/sweeps/5037-sweep-wall-round-rounded-rectangle-rim | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/sweeps/5324-sweep-square-round-closed-path-from-mid-edge | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/sweeps/881-loft-zigzag-pleat-vertex-pairing | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
-| solidcraft/sweeps/96-sweep-rectangle-round-a-mitred-corner | volume | [docs/known-bugs.md#a-sweep-rounds-a-sharp-corner-of-its-path](../known-bugs.md#a-sweep-rounds-a-sharp-corner-of-its-path) |
 | solidcraft/sweeps/968-loft-hollow-elbow-60deg-5sections | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/sweeps/968-loft-hollow-elbow-90deg-10sections | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/tessellation/1753-bowl-rim-cut-by-cylinder | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |

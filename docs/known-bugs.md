@@ -69,20 +69,6 @@ the heading if it is not here yet.
   cost a second build of every honest refusal. The fix belongs upstream, in
   the offset's intersections, not in the order.
 
-### A sweep rounds a sharp corner of its path
-
-- **Symptom:** an 8 x 5 rectangle swept up 30 and across 40 along two lines
-  at a right angle measures 2782.83 mm³; the mitred bar is 2800. The outer
-  corner is rounded about the path's corner.
-- **Cause:** `SweepFeature` sets `BRepBuilderAPI_RoundCorner` on its
-  `MakePipeShell`, so every path corner is a revolved fillet of the section
-  about the corner, not a mitre.
-- **Where:** the `SetTransitionMode` call in
-  `src/core/features/SweepFeature.cpp`.
-- **Likely fix:** a `corners: round | mitre` field (`RightCorner` is the
-  mitre), mitre for a path of lines.
-- **Case:** `solidcraft/sweeps/96-sweep-rectangle-round-a-mitred-corner`.
-
 ### A union of a tube and nine bars through its wall gains volume
 
 - **Symptom:** a tube (r 21.5 to 23, 20 high) joined with nine round bars
