@@ -366,7 +366,8 @@ const std::vector<std::pair<std::string, std::string>> kNotBindable = {
      "a contact's or an intermittent relation's, which have none; every other "
      "ratio is a slot"},
     {"relations/*/teeth_a",
-     "a tooth count derives the ratio; binding it is the next stage's"},
+     "a tooth count derives the ratio; binding a count that makes geometry "
+     "is not built"},
     {"relations/*/teeth_b", "the same"},
     {"relations/*/teeth", "a freewheel's notches, the same"},
     {"relations/*/terms/*/teeth", "the same"},
@@ -380,7 +381,8 @@ const std::vector<std::pair<std::string, std::string>> kNotBindable = {
     {"relations/*/lead",
      "a freewheel's or a click's history, kept by the solve"},
     {"relations/*/ride/**",
-     "a toothed freewheel's ride: ids, and a lift the next stage binds"},
+     "a toothed freewheel's ride: ids, and a lift that is not bound (not "
+     "built)"},
     {"relations/*/slots", "a Geneva's slot count derives its step and window"},
     {"relations/*/table/**",
      "an intermittent law's shape, fractions of the window"},
@@ -395,7 +397,7 @@ const std::vector<std::pair<std::string, std::string>> kNotBindable = {
     {"motion/*/configuration", "an id"},
     {"motion/*/max_refine", "a solver setting, not a dimension"},
     {"studies/**",
-     "a FEM study's own numbers: the study's visitor, its own stage"},
+     "a FEM study's own numbers, walked by the study's own visitor"},
     {"assertions/**",
      "a clearance as files before v160 held it, moved into the requirements "
      "on open (their bounds take expressions)"},

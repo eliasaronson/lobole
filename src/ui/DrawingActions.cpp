@@ -370,8 +370,8 @@ std::optional<DrawingView> EffectiveView(const DrawingDocument& dwg,
   view.id = asked.id;
   view.name = asked.name;
   view.scale = asked.scale;
-  view.scaleExpr.clear();
   view.position = asked.position;
+  view.positionExpr = asked.positionExpr;
   view.baseViewId = 0;
   view.detail = asked.detail;
   return view;
@@ -1948,7 +1948,7 @@ void PlaceView(AppState& state, DrawingView& v, glm::dvec2 lo, glm::dvec2 hi,
     for (const DrawingView& other : dwg.GetViews()) {
       if (others(other) && other.sourceDocId == v.sourceDocId &&
           other.scale > 0.0) {
-        v.scale = other.scale;
+        v.scale = other.scale.value;
         break;
       }
     }
@@ -1992,11 +1992,11 @@ void PlaceView(AppState& state, DrawingView& v, glm::dvec2 lo, glm::dvec2 hi,
       takenX.push_back({it->second.bboxMin.x, it->second.bboxMax.x});
       lowest = std::min(lowest, it->second.bboxMin.y);
     }
-    const glm::dvec2 placed = size * v.scale;
+    const glm::dvec2 placed = size * v.scale.value;
     const Span incoming{v.scale * lo.x, v.scale * hi.x};
     const double gap = std::max(8.0, std::max(placed.x, placed.y) * 0.15);
     if (!anyPlaced) {
-      pos = ext * 0.5 - v.scale * (lo + hi) * 0.5;
+      pos = ext * 0.5 - v.scale.value * (lo + hi) * 0.5;
     } else if (const double dx = ClearOffset(takenX, incoming, 8.0);
                dx + v.scale * hi.x <= chrome.borderMax.x) {
       pos.x = dx; // same row, to the right of everything placed
@@ -2028,8 +2028,8 @@ void PlaceView(AppState& state, DrawingView& v, glm::dvec2 lo, glm::dvec2 hi,
   if (!measured)
     return;
   const SheetChrome chrome = ChromeOf(dwg.GetSheet());
-  const glm::dvec2 newMin = pos + v.scale * lo;
-  const glm::dvec2 newMax = pos + v.scale * hi;
+  const glm::dvec2 newMin = pos + v.scale.value * lo;
+  const glm::dvec2 newMax = pos + v.scale.value * hi;
   bool collides =
       BoxesOverlap(newMin, newMax, chrome.titleBlockMin,
                    chrome.titleBlockMax) ||
@@ -2055,8 +2055,9 @@ void PlaceView(AppState& state, DrawingView& v, glm::dvec2 lo, glm::dvec2 hi,
         other.scale <= 0.0)
       continue;
     laid.push_back(&other);
-    items.push_back({(it->second.bboxMin - other.position) / other.scale,
-                     (it->second.bboxMax - other.position) / other.scale});
+    items.push_back(
+        {(it->second.bboxMin - other.position) / other.scale.value,
+         (it->second.bboxMax - other.position) / other.scale.value});
   }
   items.push_back({lo, hi});
   static const double kScales[] = {100.0, 50.0, 20.0, 10.0, 5.0,  2.0, 1.0,
@@ -2709,7 +2710,8 @@ glm::dvec2 AutoDetailPosition(AppState& state, const DrawingView& detail) {
     glm::dvec3 vd, up;
     ViewAxes(*parent, vd, up);
     aim = DrawingFoldedPosition(state, *parent).pos +
-          parent->scale * drawing::ProjectPoint(detail.detail.center, vd, up);
+          parent->scale.value *
+              drawing::ProjectPoint(detail.detail.center, vd, up);
   }
   // The detail's box: its circle, and the caption 9 mm under it.
   const auto boxOf = [&](const glm::dvec2& c, glm::dvec2& mn, glm::dvec2& mx) {

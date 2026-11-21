@@ -250,7 +250,7 @@ glm::dmat4 FixtureBedTransform(AppState& state, const cam::Setup& setup,
   cam::Fixture solved = f;
   if (cam::StockBounds(setup, JobBodies(state), lo, hi) &&
       cam::SolveFixtureSeat(lo, hi, FixtureModelBodies(state, f), *f.seat,
-                            solved.pos, solved.rotZdeg, &reason))
+                            solved.pos, solved.rotZdeg.value, &reason))
     return cam::FixtureTransform(solved);
   if (why != nullptr)
     *why = reason;

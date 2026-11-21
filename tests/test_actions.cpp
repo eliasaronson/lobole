@@ -3385,7 +3385,7 @@ TEST_CASE("a job edit bumps the edit counter and a draw does not",
   // An edit bumps it, and the guard around it records one step.
   {
     ui::JobUndoGuard guard(state);
-    state.job->FindSetup(setupId)->safeZ += 5.0;
+    state.job->FindSetup(setupId)->safeZ.value += 5.0;
     ui::MarkJobEdited(state);
   }
   CHECK(state.jobEdits == before + 1);

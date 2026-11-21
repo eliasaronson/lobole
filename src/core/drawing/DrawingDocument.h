@@ -4,10 +4,12 @@
 #pragma once
 
 #include "core/ElementMap.h"
+#include "core/ExprValue.h"
 
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -111,6 +113,7 @@ struct ProjRef {
 struct SectionSpec {
   bool on = false;
   glm::dvec3 point{0.0}; // world mm (the source document's frame)
+  Vec3Exprs pointExpr;   // a text per coordinate
   std::string label;     // "A" -> "SECTION A-A"
 };
 
@@ -125,7 +128,8 @@ struct DetailSpec {
   bool on = false;
   uint64_t parentViewId = 0;
   glm::dvec3 center{0.0}; // world mm
-  double radius = 0.0;    // model mm
+  Vec3Exprs centerExpr;   // a text per coordinate
+  ExprValue radius{0.0};  // model mm
   std::string label;      // "B" -> "DETAIL B"
 };
 
@@ -137,10 +141,9 @@ struct DrawingView {
   uint64_t sourceDocId = 0; // stable project-document id (part OR assembly)
   ViewOrientation orientation = ViewOrientation::Front;
   uint64_t baseViewId = 0; // 0 = base view; else the base this folds from
-  double scale = 1.0;      // drawing:model ratio (1:2 -> 0.5)
-  std::string
-      scaleExpr; // optional expression driving `scale` (empty = literal)
+  ExprValue scale{1.0};    // drawing:model ratio (1:2 -> 0.5)
   glm::dvec2 position{0.0}; // sheet mm; a child moves only along its fold axis
+  Vec2Exprs positionExpr;   // a text per coordinate
   bool showHidden = true;
   // "exact" (the default, and the deliverable) or "fast" — polygonal HLR, a
   // LOOK at a sheet that would otherwise take a minute and a half a view.
@@ -171,7 +174,7 @@ struct DrawingView {
   // own view direction (v134). A part modelled lying along X -- a turned
   // chess piece -- draws upright as its front view turned 90, with no
   // rotated copy of the model.
-  double rotationDeg = 0.0;
+  ExprValue rotationDeg{0.0};
   // A section view: cut by a plane square to its view direction (v147).
   SectionSpec section;
   // A detail view of another view (v151); its own position is where the
@@ -249,7 +252,7 @@ enum class MaterialModifier { None, Mmc, Lmc };
 
 struct FeatureControlFrame {
   GeoSymbol symbol = GeoSymbol::Position;
-  double tolerance = 0.0;    // model mm, the zone's width or diameter
+  ExprValue tolerance{0.0};  // model mm, the zone's width or diameter
   bool diameterZone = false; // Ø: a cylindrical zone
   MaterialModifier modifier = MaterialModifier::None;
   // Datum letters, primary first; each names a `datum` note on the sheet.
@@ -268,6 +271,14 @@ struct DrawingNote {
   // A frame stacked with this dimension's value instead of standing at
   // `pos` with a leader (v151). 0 = not attached.
   uint64_t attachDim = 0;
+};
+
+// An owner whose expressions do not stand after an evaluation: its label
+// ("view 'Front'", "note 4") and why. Derived, never saved.
+struct DrawingExprProblem {
+  std::string owner;
+  uint64_t id = 0;
+  std::string error;
 };
 
 // The document. Views and dims share one never-reused id counter (the
@@ -311,6 +322,20 @@ public:
   }
   uint64_t NextId() const { return m_nextId; }
 
+  // Every number that takes an expression of the project's variables
+  // (docs/drawings/README.md#numbers-that-are-expressions), with its owner
+  // ("view 'Front'") and its path in the drawing's JSON
+  // ("views/0/scale"). Evaluation, rename and the delete refusal walk it.
+  void VisitExprs(const std::function<void(const std::string& owner,
+                                           const ExprSlot&)>& visit);
+  // What the last evaluation could not stand (drawing::EvaluateExprs).
+  const std::vector<DrawingExprProblem>& ExprProblems() const {
+    return m_exprProblems;
+  }
+  void SetExprProblems(std::vector<DrawingExprProblem> p) {
+    m_exprProblems = std::move(p);
+  }
+
   // Monotonic change counter (the Document/AssemblyDocument pattern) so the
   // renderer can skip resyncing an unchanged sheet.
   uint64_t Version() const { return m_version; }
@@ -348,7 +373,23 @@ private:
   uint64_t m_nextId = 1;
   uint64_t m_version = 0;
   ProjectionMap m_projections;
+  std::vector<DrawingExprProblem> m_exprProblems;
 };
+
+namespace drawing {
+// A view's and a note's numbers that take an expression, with paths in
+// their own JSON ("scale", "detail/center/2", "fcf/tolerance_mm"): what
+// DrawingDocument::VisitExprs hands out under "views/<i>/" and
+// "notes/<i>/", and what their writer and reader walk.
+void VisitViewExprs(DrawingView& view, const ExprVisitor& visit);
+void VisitNoteExprs(DrawingNote& note, const ExprVisitor& visit);
+// Evaluates every bound number over `symbols` (the project's variables). An
+// owner whose texts do not evaluate, or whose values cannot stand (a scale
+// or a detail radius not above 0, a frame's tolerance below 0), keeps its
+// last good values and is listed in ExprProblems(). True when a value or
+// the problems changed: the views then project again.
+bool EvaluateExprs(DrawingDocument& doc, const SymbolTable& symbols);
+} // namespace drawing
 
 // Portrait short/long sheet extents in millimetres.
 glm::dvec2 SheetExtentMM(SheetSize size);

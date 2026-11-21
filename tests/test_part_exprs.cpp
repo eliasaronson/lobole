@@ -454,14 +454,10 @@ const std::vector<std::pair<std::string, std::string>> kNotBindable = {
     {"Template/**",
      "an instance's parameters are its template's variables, set by name; "
      "the rest are ids"},
-    {"Import/**",
-     "where a file is put and how it is read (the placement the alignment "
-     "tools compose, the turn, the scale, a mesh's minimum sides): binding "
-     "them is not built"},
-    {"CamProfile/lift/**",
-     "a cam's lift table: binding a law's table is not built"},
-    {"CamProfile/segments/**", "a cam's law segments: the same"},
-    {"CamProfile/follower/**", "a cam's follower: the same"},
+    {"Import/min_sides",
+     "how a mesh is read (the fewest sides a recognised circle has), not "
+     "where it is put"},
+    {"Import/color/*", "an appearance, not a dimension"},
     {"ReplaceFace/**", "ids and fingerprints"},
     {"DeleteFace/**", "ids and fingerprints"},
     {"MoveFace/axis/origin/*", "a slot when custom (axis/origin)"},

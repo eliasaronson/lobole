@@ -124,6 +124,20 @@ public:
       expr = Text(key, i, j);
   }
 
+  // The same by a slot's path: "pos/1" is entry 1 of `pos`, "tabs/width"
+  // the key `width` of `tabs` -- what binds a document's slots by the paths
+  // its VisitExprs gives, where those are the method's keys.
+  void BindAt(const std::string& path, std::string& expr) const {
+    const size_t slash = path.rfind('/');
+    const std::string last =
+        slash == std::string::npos ? "" : path.substr(slash + 1);
+    if (!last.empty() &&
+        last.find_first_not_of("0123456789") == std::string::npos)
+      Bind(path.substr(0, slash), expr, std::stoi(last));
+    else
+      Bind(path, expr);
+  }
+
 private:
   // "terms/*/coefficient" names each entry of the array `terms` holds:
   // "terms/0/coefficient", "terms/1/coefficient", ...

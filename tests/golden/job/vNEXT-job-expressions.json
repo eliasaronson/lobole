@@ -1,0 +1,106 @@
+{
+  "format": "designer-document",
+  "version": 224,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Plate"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "Top",
+      "safe_z": 9.0,
+      "safe_z_expr": "cutter + 3",
+      "rotation_a": 0.0,
+      "grip_mm": 12.0,
+      "grip_mm_expr": "cutter * 2",
+      "stock": {
+        "margin": [
+          6.0,
+          6.0,
+          1.0
+        ],
+        "margin_expr": [
+          "cutter",
+          "cutter",
+          ""
+        ],
+        "bottom_margin": 1.0
+      },
+      "tools": [
+        {
+          "number": 1,
+          "name": "flat",
+          "diameter": 6.0,
+          "diameter_expr": "cutter",
+          "flutes": 2,
+          "flute_length": 20.0,
+          "feed_cut": 900.0,
+          "feed_cut_expr": "cutter * 150",
+          "feed_plunge": 100.0,
+          "spindle_rpm": 18000.0
+        }
+      ],
+      "placements": [
+        {
+          "id": 4,
+          "part": 1,
+          "pos": [
+            10.0,
+            0.0
+          ],
+          "pos_expr": [
+            "cutter + 4",
+            ""
+          ]
+        }
+      ],
+      "fixtures": [
+        {
+          "id": 5,
+          "box": [
+            20.0,
+            10.0,
+            15.0
+          ],
+          "box_expr": [
+            "",
+            "",
+            "cutter * 2.5"
+          ],
+          "name": "Clamp",
+          "pos": [
+            -30.0,
+            0.0,
+            0.0
+          ],
+          "rot_z": 90.0,
+          "rot_z_expr": "quarter"
+        }
+      ],
+      "operations": [
+        {
+          "id": 6,
+          "name": "Outline",
+          "type": "profile",
+          "tool": 1,
+          "top_z": 0.0,
+          "bottom_z": -12.0,
+          "bottom_z_expr": "-thickness",
+          "stepdown": 3.0,
+          "stepdown_expr": "cutter / 2",
+          "tabs": {
+            "count": 4,
+            "count_expr": "tabs",
+            "width": 6.0,
+            "height": 1.5
+          }
+        }
+      ]
+    }
+  ]
+}

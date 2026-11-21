@@ -531,24 +531,47 @@ void DrawSketchToolWindow(AppState& state) {
     ImGui::RadioButton("Circular", edit.patternCircular);
     if (ImGui::IsItemClicked())
       edit.patternCircular = true;
-    ImGui::SetNextItemWidth(80);
-    ExprDragInt(state, "Count##pat", &edit.patternCount, 0.1f, 2, 1000);
-    if (!edit.patternCircular) {
-      ImGui::SetNextItemWidth(140);
-      ExprDragFloat2(state, "Step (dx,dy)##pat", &edit.patternStep.x, 0.05f);
-      // Second grid direction (v50): rows = 1 keeps the pattern a row.
-      ImGui::SetNextItemWidth(80);
-      ExprDragInt(state, "Rows##pat", &edit.patternCount2, 0.1f, 1, 1000);
-      if (edit.patternCount2 > 1) {
-        ImGui::SetNextItemWidth(140);
-        ExprDragFloat2(state, "Row step (dx,dy)##pat", &edit.patternStep2.x,
-                       0.05f);
+    // Each field keeps a typed expression: a linked pattern is bound to it
+    // (docs/sketching/README.md#patterns-that-are-expressions).
+    const auto count = [&](const char* label, int& c, std::string& text,
+                           double lo) {
+      double v = c;
+      ImGui::SetNextItemWidth(90);
+      if (!ExprBoundDrag(state, label, &v, &text, 0.1f, lo, 1000.0, "%.0f"))
+        return;
+      if (v != std::round(v)) { // a count is whole, never rounded
+        edit.actionMsg = std::string(label) +
+                         ": a count is a whole number, and this comes out " +
+                         std::to_string(v);
+        text.clear();
+        return;
       }
+      c = static_cast<int>(std::lround(v));
+    };
+    const auto pair = [&](const char* label, glm::dvec2& v,
+                          std::array<std::string, 2>& texts) {
+      static const char* kAxes[] = {" u##pat", " v##pat"};
+      bool changed = false;
+      for (int k = 0; k < 2; k++) {
+        const std::string row = std::string(label) + kAxes[k];
+        ImGui::SetNextItemWidth(90);
+        changed |= ExprBoundDrag(state, row.c_str(), &v[k],
+                                 &texts[static_cast<size_t>(k)], 0.05f, 0.0,
+                                 0.0, "%.3f");
+      }
+      return changed;
+    };
+    count("Count##pat", edit.patternCount, edit.patternCountExpr, 2.0);
+    if (!edit.patternCircular) {
+      pair("Step", edit.patternStep, edit.patternStepExpr);
+      // Second grid direction (v50): rows = 1 keeps the pattern a row.
+      count("Rows##pat", edit.patternCount2, edit.patternCount2Expr, 1.0);
+      if (edit.patternCount2 > 1)
+        pair("Row step", edit.patternStep2, edit.patternStep2Expr);
     } else {
       // Centre: type coordinates, or Pick a sketch point — picking an
       // entity point stores its REFERENCE so the pattern tracks it (v51).
-      ImGui::SetNextItemWidth(140);
-      if (ExprDragFloat2(state, "Centre##pat", &edit.patternCenter.x, 0.05f))
+      if (pair("Centre", edit.patternCenter, edit.patternCenterExpr))
         edit.patternCenterRef = {0, 0}; // typing detaches the reference
       ImGui::SameLine();
       if (edit.patternPickCenter)
@@ -564,9 +587,9 @@ void DrawSketchToolWindow(AppState& state) {
       if (edit.patternCenterRef.entity != 0)
         ImGui::TextDisabled("Centred on point of entity %u",
                             edit.patternCenterRef.entity);
-      ImGui::SetNextItemWidth(80);
-      ExprDragDouble(state, "Angle##pat", &edit.patternAngleDeg, 0.5f, -360.0,
-                     360.0, "%.1f deg");
+      ImGui::SetNextItemWidth(90);
+      ExprBoundDrag(state, "Angle##pat", &edit.patternAngleDeg,
+                    &edit.patternAngleExpr, 0.5f, -360.0, 360.0, "%.1f deg");
     }
     ImGui::Checkbox("Linked##pat", &edit.linkGenerative);
     ImGui::Separator();

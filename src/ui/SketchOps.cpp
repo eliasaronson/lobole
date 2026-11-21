@@ -702,6 +702,23 @@ bool ApplyPattern(AppState& state) {
     edit.actionMsg = "Pattern: nothing generated (count must be >= 2).";
     return false;
   }
+  // A linked pattern keeps what was typed: its op is bound to the texts
+  // (docs/sketching/README.md#patterns-that-are-expressions). An unlinked
+  // one is copies, with nothing to keep a text on.
+  if (edit.linkGenerative && !sketch->derived.empty()) {
+    sketch::DerivedOp& op = sketch->derived.back();
+    op.count.expr = edit.patternCountExpr;
+    if (edit.patternCircular) {
+      if (edit.patternCenterRef.entity == 0)
+        op.vecExpr = edit.patternCenterExpr;
+      op.scalarExpr = edit.patternAngleExpr;
+    } else {
+      op.vecExpr = edit.patternStepExpr;
+      op.count2.expr = edit.patternCount2Expr;
+      if (edit.patternCount2 > 1)
+        op.vec2Expr = edit.patternStep2Expr;
+    }
+  }
   sketch::Solver solver;
   solver.Load(*sketch);
   if (solver.Solve().ok)

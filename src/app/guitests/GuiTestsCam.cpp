@@ -3712,6 +3712,66 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->camToolOpen);
   };
 
+  // A CAM number is an expression of the project's variables
+  // (docs/cam/README.md#numbers-that-are-expressions): typed into the tool's
+  // diameter it KEEPS its text, a change to the variable in the Variables
+  // panel moves the diameter, and a plain number typed over it unbinds it.
+  t = IM_REGISTER_TEST(engine, "cam", "a_tool_diameter_takes_an_expression");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    IM_CHECK(ui::SetProjectVariable(*s_App, "cutter", "6", ""));
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    const uint64_t id = setup.id;
+    s_App->camActiveSetup = id;
+    ctx->Yield(4);
+    const auto tool = [&]() -> const cam::Tool& {
+      return Job()->FindSetup(id)->tools[0];
+    };
+
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_tools");
+    ctx->Yield(2);
+    ctx->ItemDoubleClick("tools/###cam_tool_1");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditTool, 1);
+    ctx->ItemInputValue("//###ToolWindow/###dia", "cutter + 2");
+    ctx->Yield(3);
+    IM_CHECK_STR_EQ(tool().diameter.expr.c_str(), "cutter + 2");
+    IM_CHECK(std::abs(tool().diameter.value - 8.0) < 1e-9);
+
+    // The variable changed where a person changes it: the tool follows,
+    // and so does the toolpath's input.
+    ImGuiWindow* vars = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(vars != nullptr && vars->DockNode != nullptr);
+    ctx->ItemClick(vars->TabId);
+    ctx->Yield(2);
+    const uint64_t edits = s_App->jobEdits;
+    ctx->ItemInputValue(
+        "//###Variables/###vars_table/###var_expr_project_cutter", "4");
+    ctx->Yield(3);
+    IM_CHECK_STR_EQ(tool().diameter.expr.c_str(), "cutter + 2");
+    IM_CHECK(std::abs(tool().diameter.value - 6.0) < 1e-9);
+    IM_CHECK(s_App->jobEdits != edits); // edited: it undoes, and is unsaved
+    IM_CHECK(Job()->ExprProblems().empty());
+
+    // A plain number typed over it unbinds it.
+    ctx->ItemInputValue("//###ToolWindow/###dia/##bound", "5");
+    ctx->Yield(3);
+    IM_CHECK(tool().diameter.expr.empty());
+    IM_CHECK(std::abs(tool().diameter.value - 5.0) < 1e-9);
+    ctx->ItemClick("//###ToolWindow/###cam_tool_editor_close");
+    ctx->Yield(2);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+  };
+
   // The 3D finishing verbs (docs/cam/gui.md#the-job-toolbar) were written with
   // their picks and derivations and never given a button. Clicked here, on a
   // curved face that every other verb refuses.

@@ -30,7 +30,8 @@
 namespace cam {
 
 using OpMember =
-    std::variant<double Operation::*, bool Operation::*, int Operation::*,
+    std::variant<double Operation::*, ExprValue Operation::*,
+                 ExprInt Operation::*, bool Operation::*, int Operation::*,
                  Side Operation::*, CornerRelief Operation::*,
                  RotaryPattern Operation::*, CutterComp Operation::*,
                  std::vector<double> Operation::*>;
@@ -75,5 +76,11 @@ void ReadOpFields(const nlohmann::json& in, Operation& op);
 // hashes, so a field added to the table is in the key without anyone
 // remembering to add it.
 [[nodiscard]] std::vector<double> OpFieldValues(const Operation& op);
+
+// The op's numbers that take an expression, as slots at their save-file
+// keys ("stepdown", "tabs/width", "index_a_deg/1"): the table's number rows
+// its type has, its depths, its tabs, and its finish stock beside a finish
+// tool (docs/cam/README.md#numbers-that-are-expressions).
+void VisitOpExprs(Operation& op, const ExprVisitor& visit);
 
 } // namespace cam

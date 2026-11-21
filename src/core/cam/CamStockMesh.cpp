@@ -310,7 +310,7 @@ StockMesh BuildToolMesh(const Tool& tool) {
   // Where the collar's underside sits: stated, the SHANK runs between it and
   // the flutes, which is the gap the whole check is about -- a stickout is
   // only worth typing because it can be longer than the cutting part.
-  const double collarZ = stated ? std::max(flutes, tool.overallLength)
+  const double collarZ = stated ? std::max(flutes, tool.overallLength.value)
                                 : flutes + std::max(12.0, 8.0 * shankR);
   const double holderZ = stated ? collarZ + std::max(4.0, r * 1.5) : collarZ;
 

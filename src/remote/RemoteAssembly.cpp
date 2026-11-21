@@ -36,6 +36,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "core/cam/JobDocument.h"
+#include "core/drawing/DrawingDocument.h"
 #include "remote/ExprArgs.h"
 #include "ui/AppActionsInternal.h" // SlotAssembly
 #include "ui/LiteralActions.h"
@@ -1699,6 +1701,37 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                   {"placements", json::array()},
                   {"checked", {{"fields", checked}, {"placements", 0}}}};
     }
+  // A job's and a drawing's the same way, against the project's variables
+  // (docs/cam/README.md#numbers-that-are-expressions).
+  if (m == "check_literals") {
+    size_t slot = static_cast<size_t>(state.activePart);
+    if (p.contains("part"))
+      slot = ResolveSlotIndex(state, p.at("part"));
+    cam::JobDocument* job =
+        slot < state.parts.size() && state.parts[slot].kind == ui::DocKind::Job
+            ? ui::SlotJob(state, slot)
+            : nullptr;
+    DrawingDocument* dwg =
+        slot < state.parts.size() &&
+                state.parts[slot].kind == ui::DocKind::Drawing
+            ? ui::SlotDrawing(state, slot)
+            : nullptr;
+    if (job != nullptr || dwg != nullptr) {
+      size_t checked = 0;
+      json lits = json::array();
+      for (const literals::LiteralFinding& f :
+           job != nullptr ? ui::LintJob(state, *job, &checked)
+                          : ui::LintDrawing(state, *dwg, &checked)) {
+        json j = AssemblyLiteralJson(f.feature, f.field);
+        j["variables"] = f.variables;
+        lits.push_back(std::move(j));
+      }
+      return json{{"part", state.parts[slot].name},
+                  {"literals", std::move(lits)},
+                  {"placements", json::array()},
+                  {"checked", {{"fields", checked}, {"placements", 0}}}};
+    }
+  }
   if (m == "extract_variables" && state.assembly && state.activePart >= 0 &&
       state.parts[static_cast<size_t>(state.activePart)].kind ==
           ui::DocKind::Assembly) {

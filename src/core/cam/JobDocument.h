@@ -6,6 +6,7 @@
 #include "core/cam/CamJob.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,13 @@ struct JobPart {
   // has active. A blank of pawns and one of rooks are one part in two
   // configurations, not two Derived copies of it.
   uint64_t configuration = 0;
+};
+
+// An owner whose expressions do not stand after an evaluation: its label
+// ("tool T3", "operation 'Pocket'") and why. Derived, never saved.
+struct JobExprProblem {
+  std::string owner;
+  std::string error;
 };
 
 class JobDocument {
@@ -85,12 +93,41 @@ public:
   uint64_t SaveStamp() const { return m_version + m_edits; }
   void MarkEdited() { ++m_edits; }
 
+  // Every number that takes an expression of the project's variables
+  // (docs/cam/README.md#numbers-that-are-expressions), with its owner
+  // ("tool T3 in setup 'Top'") and its path in the job's JSON
+  // ("cam/0/tools/2/diameter"). Evaluation, rename and the delete refusal
+  // walk it.
+  void VisitExprs(const std::function<void(const std::string& owner,
+                                           const ExprSlot&)>& visit);
+  const std::vector<JobExprProblem>& ExprProblems() const {
+    return m_exprProblems;
+  }
+  void SetExprProblems(std::vector<JobExprProblem> p) {
+    m_exprProblems = std::move(p);
+  }
+
 private:
   uint64_t m_edits = 0;
   std::vector<JobPart> m_parts;
   std::vector<Setup> m_setups;
   uint64_t m_nextId = 1;
   uint64_t m_version = 0;
+  std::vector<JobExprProblem> m_exprProblems;
 };
+
+// One setup's numbers that take an expression, as JobDocument::VisitExprs
+// hands them out, with paths relative to the setup's JSON ("tools/2/diameter"):
+// what the setup's writer and reader walk to put each text beside its number.
+void VisitSetupExprs(Setup& setup,
+                     const std::function<void(const std::string& owner,
+                                              const ExprSlot&)>& visit);
+
+// Evaluates every bound number over `symbols` (the project's variables). An
+// owner whose texts do not evaluate, or whose values cannot stand (a tool
+// diameter not above 0, a count below what it counts), keeps its last good
+// values and is listed in ExprProblems(). True when a value or the problems
+// changed: the caller marks the job edited, so its toolpaths go stale.
+bool EvaluateJobExprs(JobDocument& doc, const SymbolTable& symbols);
 
 } // namespace cam

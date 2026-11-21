@@ -871,7 +871,9 @@ public:
         lengthUnit(other.lengthUnit), upAxis(other.upAxis),
         turnDeg(other.turnDeg), hasColor(other.hasColor), color(other.color),
         representation(other.representation), minSides(other.minSides),
-        placement(other.placement), m_shift(other.m_shift), m_up(other.m_up),
+        placement(other.placement), turnExpr(other.turnExpr),
+        translateExpr(other.translateExpr), rotateExpr(other.rotateExpr),
+        scaleExpr(other.scaleExpr), m_shift(other.m_shift), m_up(other.m_up),
         m_recognized(other.m_recognized) {}
 
   std::string TypeName() const override { return "Import"; }
@@ -960,6 +962,20 @@ public:
   // (docs/interchange/README.md#placing-an-import). `align_import` writes it
   // from a floor, three points, the principal axes or a known distance.
   importplace::Placement placement;
+  // The texts that drive the turn and the placement (vNEXT), "" for a
+  // literal, a text per coordinate. An alignment writes the placement whole
+  // and unbinds what it rewrote (docs/interchange/README.md#placing-an-import).
+  std::string turnExpr;
+  Vec3Exprs translateExpr, rotateExpr;
+  std::string scaleExpr;
+  void VisitExprs(const ExprVisitor& visit) override {
+    visit(ExprSlot(turnExpr, turnDeg, ExprQuantity::Angle, "turn_deg"));
+    VisitVec3Exprs(visit, placement.translateMm, translateExpr,
+                   ExprQuantity::Length, "placement/translate_mm");
+    VisitVec3Exprs(visit, placement.rotateDeg, rotateExpr, ExprQuantity::Angle,
+                   "placement/rotate_deg");
+    visit(ExprSlot(scaleExpr, placement.scale, ExprQuantity::Other, "scale"));
+  }
   // What the last Execute made of a mesh -- "facets", "recognize" or
   // "mesh" -- and why (`auto`'s reason, or "asked for"); empty for a file
   // that is not a mesh.

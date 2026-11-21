@@ -7,6 +7,8 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Occurrence.h"
+#include "core/cam/JobDocument.h"
+#include "core/drawing/DrawingDocument.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActionsInternal.h" // SlotDoc
 #include "ui/AppState.h"
@@ -261,12 +263,17 @@ std::string NameFor(const std::string& owner, const std::string& path) {
 
 } // namespace
 
+namespace {
+
+// The unbound numbers a document's walk hands out, each against the
+// project's variables of its kind.
 std::vector<literals::LiteralFinding>
-LintAssembly(AppState& state, AssemblyDocument& a, size_t* checked) {
+LintFields(AppState& state, std::vector<AssemblyField> fields,
+           size_t* checked) {
   const std::vector<literals::Variable> vars = ProjectVariables(state);
   std::vector<literals::LiteralFinding> out;
   size_t n = 0;
-  for (AssemblyField& f : AssemblyFields(a)) {
+  for (AssemblyField& f : fields) {
     if (!f.field.expr.empty() || f.field.value == 0.0)
       continue;
     n++;
@@ -285,6 +292,37 @@ LintAssembly(AppState& state, AssemblyDocument& a, size_t* checked) {
   if (checked != nullptr)
     *checked = n;
   return out;
+}
+
+template <class Doc> std::vector<AssemblyField> FieldsOf(Doc& d) {
+  std::vector<AssemblyField> out;
+  d.VisitExprs([&](const std::string& owner, const ExprSlot& slot) {
+    literals::Field f;
+    f.path = slot.Path();
+    f.label = slot.Path();
+    f.value = slot.Value();
+    f.expr = slot.Expr();
+    f.quantity = slot.Quantity();
+    out.push_back({owner, std::move(f)});
+  });
+  return out;
+}
+
+} // namespace
+
+std::vector<literals::LiteralFinding>
+LintAssembly(AppState& state, AssemblyDocument& a, size_t* checked) {
+  return LintFields(state, AssemblyFields(a), checked);
+}
+
+std::vector<literals::LiteralFinding>
+LintJob(AppState& state, cam::JobDocument& job, size_t* checked) {
+  return LintFields(state, FieldsOf(job), checked);
+}
+
+std::vector<literals::LiteralFinding>
+LintDrawing(AppState& state, DrawingDocument& d, size_t* checked) {
+  return LintFields(state, FieldsOf(d), checked);
 }
 
 literals::ExtractPlan PlanExtractAssembly(AppState& state, AssemblyDocument& a,

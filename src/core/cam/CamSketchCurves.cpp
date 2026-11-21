@@ -365,7 +365,7 @@ EngraveGroove EngraveGrooveFor(const Operation& op, const Tool& tool) {
 
 double DefaultEngraveWidth(const Tool& tool, double textHeight) {
   const double w = textHeight > 0.0 ? textHeight / 8.0 : tool.diameter / 4.0;
-  return std::min(w, tool.diameter);
+  return std::min(w, tool.diameter.value);
 }
 
 double DefaultEngraveDepth(const Tool& tool) { return tool.diameter / 4.0; }

@@ -9,6 +9,7 @@
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingValidate.h"
 #include "core/io/Serialization.h"
+#include "remote/ExprArgs.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteProject.h"
 #include "ui/AppState.h"
@@ -91,7 +92,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "off the frame "
      "on a windowed instance, the call waiting for it (see update_drawing).",
      "base_view, configuration, detail, exploded_view, hidden, id, name, "
-     "position, quality, rotation_deg, scale, section, show_hidden"},
+     "position, quality, rotation_deg, scale, section, show_hidden, "
+     "position_expr, rotation_deg_expr, scale_expr"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}. {drawing?} (name or id) checks "
@@ -153,7 +155,7 @@ static constexpr MethodDoc DrawingMethods[] = {
      "instance, the call waiting for it (see update_drawing).",
      "base_view, configuration, detail, drawing, exploded_view, hidden, "
      "name, orientation, position, quality, rotation_deg, scale, section, "
-     "source"},
+     "source, position_expr, rotation_deg_expr, scale_expr"},
     {"remove_drawing_view",
      "Remove a view by id (and its dimensions and saved projection). Nothing "
      "projects; it waits for a projection in flight to land first.",
@@ -172,7 +174,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "position:number[], quality:string, scale:number, "
      "show_hidden:bool, source_id:int, stale:bool, section?:object, "
      "detail?:object, exploded_view?:int, warnings?:string[], "
-     "error?:string}[]"},
+     "error?:string, rotation_deg?:number, scale_expr?:string, "
+     "position_expr?:string[], rotation_deg_expr?:string}[]"},
     {"update_drawing",
      "Re-project all views from current geometry. {drawing?} names the sheet. "
      "`budget_s` bounds the WHOLE "
@@ -785,8 +788,27 @@ DrawingView AddViewFromParams(ui::AppState& state, const RpcParams& p,
 // A set_drawing_view's view: `view` with the parameters applied, every one
 // checked first. What the handler stores, and what a parked one projects
 // ahead of it (ParkDrawingRequest).
+// ---- Numbers that are expressions ----------------------------------------
+// (docs/drawings/README.md#numbers-that-are-expressions): a view's scale,
+// position, turn, section point and detail circle take `<key>_expr` beside
+// them, evaluated over the project's variables when the call arrives
+// (remote/ExprArgs.h); the getters answer each text beside its number.
+constexpr const char* kDrawingScope = "a drawing reads the project's variables";
+const std::vector<std::string> kViewExprKeys = {
+    "scale",         "position",      "rotation_deg",
+    "section/point", "detail/center", "detail/radius_mm"};
+
+// The call's texts onto the view's slots, where it named them.
+void BindView(const ExprArgs& ex, DrawingView& v) {
+  drawing::VisitViewExprs(
+      v, [&](const ExprSlot& slot) { ex.BindAt(slot.Path(), slot.Expr()); });
+}
+
 DrawingView SetViewFromParams(ui::AppState& state, const DrawingView& view,
-                              const RpcParams& p) {
+                              const RpcParams& params) {
+  // rpc-params: scale_expr, position_expr, rotation_deg_expr
+  const ExprArgs ex(params, kViewExprKeys, state.projectSymbols, kDrawingScope);
+  const RpcParams& p = ex.Params();
   if (p.contains("scale") && p.at("scale").get<double>() <= 0.0)
     throw std::runtime_error("scale must be positive");
   if (p.contains("base_view")) {
@@ -851,6 +873,7 @@ DrawingView SetViewFromParams(ui::AppState& state, const DrawingView& view,
     v.baseViewId = p.at("base_view").get<uint64_t>();
   if (p.contains("rotation_deg"))
     v.rotationDeg = p.at("rotation_deg").get<double>();
+  BindView(ex, v);
   return v;
 }
 
@@ -1252,6 +1275,9 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
   if (m == "add_drawing_view") {
     // `drawing` (name or id) switches to that drawing tab first — the doc
     // has always described it, and the handler used to refuse the key.
+    // rpc-params: scale_expr, position_expr, rotation_deg_expr
+    const ExprArgs ex(p, kViewExprKeys, state.projectSymbols, kDrawingScope);
+    const RpcParams& p = ex.Params();
     if (p.contains("drawing"))
       SelectDrawing(state, p);
     if (!state.drawing)
@@ -1277,7 +1303,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
           state.drawing->FindView(v.detail.parentViewId);
       v.sourceDocId = parent->sourceDocId;
       v.orientation = parent->orientation;
-      v.rotationDeg = parent->rotationDeg;
+      v.rotationDeg = parent->rotationDeg.value; // drawn as the parent's
       v.configuration = parent->configuration;
       v.showHidden = parent->showHidden;
       v.scale = p.at("scale").get<double>();
@@ -1286,6 +1312,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       const json& pos = p.at("position");
       v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
       v.name = p.value("name", "detail " + v.detail.label);
+      BindView(ex, v);
       ui::SnapshotDrawing(state);
       const uint64_t id = state.drawing->AddView(v);
       return json{{"id", id},
@@ -1295,6 +1322,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     }
     bool autoPlace = false;
     DrawingView v = AddViewFromParams(state, p, autoPlace);
+    BindView(ex, v);
     const uint64_t sourceId = v.sourceDocId;
     if (autoPlace) {
       // AddDrawingViewPlaced snapshots and re-projects itself, so it goes
@@ -1342,6 +1370,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return json::object();
   }
   if (m == "set_drawing_view") {
+    // rpc-params: scale_expr, position_expr, rotation_deg_expr
     // Edit a view in place — the missing mutation that used to force
     // remove+re-add (losing the view's dims). Everything is validated
     // BEFORE the undo snapshot so a failed call leaves no undo entry.
@@ -1440,6 +1469,11 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                           view.detail.center.z}},
                         {"radius_mm", view.detail.radius},
                         {"label", view.detail.label}};
+      if (view.rotationDeg != 0.0 || view.rotationDeg.Bound())
+        vj["rotation_deg"] = view.rotationDeg;
+      drawing::VisitViewExprs(
+          const_cast<DrawingView&>(view),
+          [&](const ExprSlot& slot) { WriteSlotText(vj, slot); });
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
         vj["curves"] = it->second.curves.size();
@@ -1490,6 +1524,9 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return json{{"views", arr}};
   }
   if (m == "add_drawing_note") {
+    const ExprArgs ex(p, {"fcf/tolerance_mm"}, state.projectSymbols,
+                      kDrawingScope);
+    const RpcParams& p = ex.Params();
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     NoteTable table = NoteTable::None;
@@ -1519,6 +1556,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
             "a feature control frame carries `fcf: {symbol, tolerance_mm, "
             "diameter?, modifier?, datums?}`");
       fcf = ParseFcf(p.at("fcf"));
+      ex.Bind("fcf/tolerance_mm", fcf.tolerance.expr);
       if (p.contains("dim")) {
         attachDim = p.at("dim").get<uint64_t>();
         if (!state.drawing->FindDim(attachDim))
@@ -1630,6 +1668,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                      {"leader_resolved", rn.hasLeader}});
       if (n.style == NoteStyle::Fcf) {
         arr.back()["fcf"] = FcfJson(n.fcf);
+        WriteExprText(arr.back()["fcf"], "tolerance_mm", n.fcf.tolerance.expr);
         if (n.attachDim != 0)
           arr.back()["dim"] = n.attachDim;
         arr.back()["pos"] = {rn.pos.x, rn.pos.y}; // where it stands

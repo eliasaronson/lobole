@@ -98,7 +98,7 @@ const char* CamToolShapeName(cam::ToolType type) {
 // "6 mm ball", the row's tail.
 std::string CamToolTail(const cam::Tool& t) {
   char buf[64];
-  std::snprintf(buf, sizeof(buf), "%.3g mm %s", t.diameter,
+  std::snprintf(buf, sizeof(buf), "%.3g mm %s", t.diameter.value,
                 CamToolShapeName(t.type));
   return buf;
 }
@@ -107,11 +107,11 @@ std::string CamToolTail(const cam::Tool& t) {
 std::string CamToolSummary(const cam::Tool& t) {
   char buf[160];
   std::snprintf(buf, sizeof(buf), "%s, %.1f mm of flute, F%.0f mm/min",
-                CamToolTail(t).c_str(), t.fluteLength, t.feedCut);
+                CamToolTail(t).c_str(), t.fluteLength.value, t.feedCut.value);
   std::string out = buf;
   if (t.overallLength > 0.0 && t.collarDiameter > 0.0) {
     std::snprintf(buf, sizeof(buf), "; %.1f mm out of a %.1f mm collar",
-                  t.overallLength, t.collarDiameter);
+                  t.overallLength.value, t.collarDiameter.value);
     out += buf;
   }
   return out;
@@ -1392,7 +1392,7 @@ void DrawCamPanel(AppState& state) {
         ImGui::PushID(lib.number);
         char label[96];
         std::snprintf(label, sizeof(label), "T%d %.3g mm %s###cam_add_lib_tool",
-                      lib.number, lib.diameter, lib.name.c_str());
+                      lib.number, lib.diameter.value, lib.name.c_str());
         if (ImGui::MenuItem(label)) {
           cam::Tool t = lib;
           // Its own number stays unless the setup already uses it.
@@ -1612,25 +1612,33 @@ bool DrawCamSetupEditor(AppState& state) {
   // the first -- so this is where that refusal sends you.
   ImGui::SeparatorText("Stock and safety");
   ImGui::SetNextItemWidth(90.0f);
-  if (ExprDragDouble(state, "Safe Z###cam_safez", &state.camSafeZEdit, 0.5f,
-                     -DBL_MAX, DBL_MAX, "%.3f"))
+  std::string safeText = setup->safeZ.expr;
+  if (ExprBoundDrag(state, "Safe Z###cam_safez", &state.camSafeZEdit, &safeText,
+                    0.5f, -DBL_MAX, DBL_MAX, "%.3f")) {
+    setup->safeZ.expr = safeText;
     dirty = true;
+  }
   ImGui::SetItemTooltip("Rapid height above the stock top");
   double above = setup->stock.margin.z;
+  std::string aboveText = setup->stock.marginExpr[2];
   ImGui::SetNextItemWidth(90.0f);
-  if (ExprDragDouble(state, "Above the part###cam_stock_above", &above, 0.1f,
-                     0.0, 100.0, "%.2f")) {
+  if (ExprBoundDrag(state, "Above the part###cam_stock_above", &above,
+                    &aboveText, 0.1f, 0.0, 100.0, "%.2f")) {
     setup->stock.margin.z = above;
+    setup->stock.marginExpr[2] = aboveText;
     dirty = true;
   }
   ImGui::SetItemTooltip("Material sitting on top of the part — what a "
                         "facing pass removes. Picking the top face sets "
                         "this to zero.");
   double around = setup->stock.margin.x;
+  std::string aroundText = setup->stock.marginExpr[0];
   ImGui::SetNextItemWidth(90.0f);
-  if (ExprDragDouble(state, "Around it###cam_stock_around", &around, 0.1f, 0.0,
-                     100.0, "%.2f")) {
+  if (ExprBoundDrag(state, "Around it###cam_stock_around", &around, &aroundText,
+                    0.1f, 0.0, 100.0, "%.2f")) {
     setup->stock.margin.x = around;
+    setup->stock.marginExpr[0] = aroundText;
+    setup->stock.marginExpr[1] = aroundText;
     setup->stock.margin.y = around;
     dirty = true;
   }
@@ -1656,12 +1664,15 @@ bool DrawCamSetupEditor(AppState& state) {
   if (setup->stock.mode == cam::StockMode::Fixed) {
     for (int a = 0; a < 3; a++) {
       double v = setup->stock.size[a];
+      std::string vText = setup->stock.sizeExpr[static_cast<size_t>(a)];
       ImGui::SetNextItemWidth(58.0f);
       const char* ids[3] = {"###stock_sx", "###stock_sy", "###stock_sz"};
       if (a > 0)
         ImGui::SameLine();
-      if (ExprDragDouble(state, ids[a], &v, 0.5f, 0.0, 100000.0, "%.1f")) {
+      if (ExprBoundDrag(state, ids[a], &v, &vText, 0.5f, 0.0, 100000.0,
+                        "%.1f")) {
         setup->stock.size[a] = v;
+        setup->stock.sizeExpr[static_cast<size_t>(a)] = vText;
         dirty = true;
       }
     }
@@ -1693,10 +1704,12 @@ bool DrawCamSetupEditor(AppState& state) {
                       setup->origin.z);
 
   double below = setup->stock.bottomMargin;
+  std::string belowText = setup->stock.bottomMargin.expr;
   ImGui::SetNextItemWidth(90.0f);
-  if (ExprDragDouble(state, "Below it###cam_stock_below", &below, 0.1f, 0.0,
-                     100.0, "%.2f")) {
+  if (ExprBoundDrag(state, "Below it###cam_stock_below", &below, &belowText,
+                    0.1f, 0.0, 100.0, "%.2f")) {
     setup->stock.bottomMargin = below;
+    setup->stock.bottomMargin.expr = belowText;
     dirty = true;
   }
   ImGui::SetItemTooltip("How far a through-cut goes into the spoilboard");
@@ -1730,10 +1743,12 @@ bool DrawCamSetupEditor(AppState& state) {
   if (setup->machine.hasRotaryAxis) {
     ImGui::SeparatorText("Rotary");
     double indexA = setup->rotationA;
+    std::string indexAText = setup->rotationA.expr;
     ImGui::SetNextItemWidth(90.0f);
-    if (ExprDragDouble(state, "A index###cam_index_a", &indexA, 0.5f, -360.0,
-                       360.0, "%.2f°")) {
+    if (ExprBoundDrag(state, "A index###cam_index_a", &indexA, &indexAText,
+                      0.5f, -360.0, 360.0, "%.2f°")) {
       setup->rotationA = indexA;
+      setup->rotationA.expr = indexAText;
       dirty = true;
     }
     ImGui::SetItemTooltip("Rotary 4th axis: how far the table is turned for "
@@ -1759,10 +1774,12 @@ bool DrawCamSetupEditor(AppState& state) {
       if (chuck) {
         ImGui::SameLine();
         double grip = setup->gripLength;
+        std::string gripText = setup->gripLength.expr;
         ImGui::SetNextItemWidth(70.0f);
-        if (ExprDragDouble(state, "mm in the jaws (0 = machine's)###cam_grip",
-                           &grip, 0.5f, 0.0, 200.0, "%.1f")) {
+        if (ExprBoundDrag(state, "mm in the jaws (0 = machine's)###cam_grip",
+                          &grip, &gripText, 0.5f, 0.0, 200.0, "%.1f")) {
           setup->gripLength = grip;
+          setup->gripLength.expr = gripText;
           dirty = true;
         }
       }
@@ -1870,30 +1887,36 @@ bool DrawCamPartEditor(AppState& state) {
       // a raw drag reads "10/2" as 10. The axis is named INSIDE the field.
       const float w = ImGui::GetFontSize() * 5.5f;
       double x = place->pos.x;
+      std::string xText = place->posExpr[0];
       double y = place->pos.y;
+      std::string yText = place->posExpr[1];
       ImGui::SetNextItemWidth(w);
-      if (ExprDragDouble(state, "###cam_place_x", &x, 0.5f, 0.0, 0.0,
-                         "X %.2f")) {
+      if (ExprBoundDrag(state, "###cam_place_x", &x, &xText, 0.5f, 0.0, 0.0,
+                        "X %.2f")) {
         place->pos.x = x;
+        place->posExpr[0] = xText;
         state.job->BumpVersion();
         dirty = true;
       }
       ImGui::SetItemTooltip("Where on the stock, along X (setup space)");
       ImGui::SameLine();
       ImGui::SetNextItemWidth(w);
-      if (ExprDragDouble(state, "###cam_place_y", &y, 0.5f, 0.0, 0.0,
-                         "Y %.2f")) {
+      if (ExprBoundDrag(state, "###cam_place_y", &y, &yText, 0.5f, 0.0, 0.0,
+                        "Y %.2f")) {
         place->pos.y = y;
+        place->posExpr[1] = yText;
         state.job->BumpVersion();
         dirty = true;
       }
       ImGui::SetItemTooltip("Where on the stock, along Y (setup space)");
       ImGui::SameLine();
       double rot = place->rotZdeg;
+      std::string rotText = place->rotZdeg.expr;
       ImGui::SetNextItemWidth(w);
-      if (ExprDragDouble(state, "###cam_place_rot", &rot, 1.0f, -360.0, 360.0,
-                         "%.1f°")) {
+      if (ExprBoundDrag(state, "###cam_place_rot", &rot, &rotText, 1.0f, -360.0,
+                        360.0, "%.1f°")) {
         place->rotZdeg = rot;
+        place->rotZdeg.expr = rotText;
         state.job->BumpVersion();
         dirty = true;
       }

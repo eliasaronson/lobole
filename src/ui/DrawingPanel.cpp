@@ -910,7 +910,7 @@ void DrawViewsSection(AppState& state) {
                   ScaleText(view.scale).c_str());
     if (view.rotationDeg != 0.0)
       std::snprintf(tail + std::strlen(tail), sizeof(tail) - std::strlen(tail),
-                    "  %g°", view.rotationDeg);
+                    "  %g°", view.rotationDeg.value);
     row.tail = tail;
     const bool projecting = DrawingViewProjecting(state, view.id);
     row.tooltip = projecting  ? std::string("Projecting...")
@@ -932,6 +932,27 @@ void DrawViewsSection(AppState& state) {
                 canDetail, ofAssembly] {
       if (ImGui::BeginMenu("Scale###dwg_view_scale")) {
         DrawingView* v = state.drawing->FindView(viewId);
+        // Any scale, or an expression of the project's variables it stays
+        // bound to (docs/drawings/README.md#numbers-that-are-expressions).
+        if (v != nullptr) {
+          double shown = v->scale;
+          std::string text = v->scale.expr;
+          ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
+          const bool edited =
+              ExprBoundDrag(state, "###dwg_view_scale_value", &shown, &text,
+                            0.01f, 0.001, 1000.0, "%.4g");
+          if (ImGui::IsItemActivated())
+            SnapshotDrawing(state);
+          if (edited && shown > 0.0) {
+            if (text != v->scale.expr && !ImGui::IsItemActive())
+              SnapshotDrawing(state); // a text committed is one edit
+            v->scale = shown;
+            v->scale.expr = text;
+            state.drawing->BumpVersion();
+            ReassembleDrawingViews(state);
+          }
+          ImGui::Separator();
+        }
         for (const double scale : kScales) {
           const std::string label =
               ScaleText(scale) + "###dwg_scale_" + std::to_string(scale);
@@ -940,6 +961,7 @@ void DrawViewsSection(AppState& state) {
               v) {
             SnapshotDrawing(state);
             v->scale = scale;
+            v->scale.expr.clear(); // a picked scale is a number
             state.drawing->BumpVersion();
             ReassembleDrawingViews(state); // a scale is no new projection
           }
@@ -958,6 +980,7 @@ void DrawViewsSection(AppState& state) {
               v) {
             SnapshotDrawing(state);
             v->rotationDeg = deg;
+            v->rotationDeg.expr.clear();
             state.drawing->BumpVersion();
             ReassembleDrawingViews(state); // nor is a turn on the sheet
           }

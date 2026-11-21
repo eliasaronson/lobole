@@ -20,6 +20,8 @@
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/Units.h"
+#include "core/cam/JobDocument.h"
+#include "core/drawing/DrawingDocument.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
@@ -678,7 +680,7 @@ namespace {
 // What a variable edit did to the assemblies, in its own answer
 // (docs/assemblies/README.md#numbers-that-are-expressions): each assembly
 // whose expressions do not stand, and why. Silent when every one does.
-void AttachAssemblyRegen(ui::AppState& state, json& out) {
+void AttachProjectRegen(ui::AppState& state, json& out) {
   json rows = json::array();
   for (size_t i = 0; i < state.parts.size(); i++)
     if (const AssemblyDocument* a = ui::SlotAssembly(state, i)) {
@@ -690,12 +692,39 @@ void AttachAssemblyRegen(ui::AppState& state, json& out) {
         rows.push_back(
             {{"assembly", state.parts[i].name}, {"failed", std::move(failed)}});
     }
-  if (rows.empty())
+  // A job's and a drawing's the same way (docs/cam/README.md,
+  // docs/drawings/README.md, #numbers-that-are-expressions).
+  json jobs = json::array(), drawings = json::array();
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (const cam::JobDocument* j = ui::SlotJob(state, i)) {
+      json failed = json::array();
+      for (const cam::JobExprProblem& pr : j->ExprProblems())
+        failed.push_back({{"owner", pr.owner}, {"error", pr.error}});
+      if (!failed.empty())
+        jobs.push_back(
+            {{"job", state.parts[i].name}, {"failed", std::move(failed)}});
+    }
+    if (const DrawingDocument* d = ui::SlotDrawing(state, i)) {
+      json failed = json::array();
+      for (const DrawingExprProblem& pr : d->ExprProblems())
+        failed.push_back(
+            {{"owner", pr.owner}, {"id", pr.id}, {"error", pr.error}});
+      if (!failed.empty())
+        drawings.push_back(
+            {{"drawing", state.parts[i].name}, {"failed", std::move(failed)}});
+    }
+  }
+  if (rows.empty() && jobs.empty() && drawings.empty())
     return;
   if (!out.contains("regen"))
     out["regen"] = {
         {"ok", true}, {"failed", json::array()}, {"warnings", json::array()}};
-  out["regen"]["assemblies"] = std::move(rows);
+  if (!rows.empty())
+    out["regen"]["assemblies"] = std::move(rows);
+  if (!jobs.empty())
+    out["regen"]["jobs"] = std::move(jobs);
+  if (!drawings.empty())
+    out["regen"]["drawings"] = std::move(drawings);
   out["regen"]["ok"] = false;
 }
 } // namespace
@@ -1266,7 +1295,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       result["error"] = param->error;
     // No active part on an assembly or drawing tab: nothing to report.
     AttachRegen(result, doc, preDigest);
-    AttachAssemblyRegen(state, result);
+    AttachProjectRegen(state, result);
     return result;
   }
   if (m == "delete_variable") {
@@ -1296,7 +1325,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       }
       json out = json::object();
       AttachRegen(out, state.document.get(), preDigest);
-      AttachAssemblyRegen(state, out);
+      AttachProjectRegen(state, out);
       return out;
     }
     if (!haveProject)
@@ -1310,7 +1339,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     }
     json out = json::object();
     AttachRegen(out, state.document.get(), preDigest);
-    AttachAssemblyRegen(state, out);
+    AttachProjectRegen(state, out);
     return out;
   }
   if (m == "rename_variable") {
@@ -1337,7 +1366,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
             "shows what exists in each scope");
       json out = json::object();
       AttachRegen(out, state.document.get(), preDigest);
-      AttachAssemblyRegen(state, out);
+      AttachProjectRegen(state, out);
       return out;
     }
     if (!ui::RenameProjectVariable(state, name, newName))
@@ -1348,7 +1377,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
           "shows what exists in each scope");
     json out = json::object();
     AttachRegen(out, state.document.get(), preDigest);
-    AttachAssemblyRegen(state, out);
+    AttachProjectRegen(state, out);
     return out;
   }
   if (m == "set_table") {
@@ -1420,7 +1449,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("set_table: " + why);
     json out = {{"table", lookuptable::ToJson(t)}};
     AttachRegen(out, doc, preDigest);
-    AttachAssemblyRegen(state, out);
+    AttachProjectRegen(state, out);
     return out;
   }
   if (m == "list_tables") {
@@ -1449,7 +1478,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("delete_table: " + why);
     json out = json::object();
     AttachRegen(out, state.document.get(), preDigest);
-    AttachAssemblyRegen(state, out);
+    AttachProjectRegen(state, out);
     return out;
   }
   if (m == "list_variables") {
@@ -1987,8 +2016,18 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
             mesh::ToString(resolved));
     }
     importplace::Placement placement;
-    if (p.contains("placement"))
-      importplace::ReadPlacement(p.at("placement"), placement, "import_step");
+    if (p.contains("placement")) {
+      // A placement's texts are the feature's, bound with modify_feature;
+      // import_step places by numbers, and a text here would be dropped.
+      const json& pl = p.at("placement");
+      for (const char* k : {"translate_mm_expr", "rotate_deg_expr"})
+        if (pl.is_object() && pl.contains(k))
+          throw std::runtime_error(
+              std::string("import_step: placement ") + k +
+              " is the Import feature's (modify_feature binds it); "
+              "import_step takes numbers");
+      importplace::ReadPlacement(pl, placement, "import_step");
+    }
     if (p.contains("scale"))
       importplace::ReadScale(p.at("scale"), placement, "import_step");
     if (p.value("as_assembly", false) && !placement.IsIdentity())

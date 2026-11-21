@@ -145,8 +145,8 @@ void GenerateEngrave(const Setup& setup, const Operation& op, const Tool& tool,
     const double hopZ = surface + std::min(1.0, tool.diameter * 0.5);
     // Onto a label from safe Z: a rapid down to the stock top (above it
     // there can be nothing), then the plunge feed.
-    const double entryZ =
-        std::clamp(std::max(hopZ, stockTop), hopZ, std::max(hopZ, setup.safeZ));
+    const double entryZ = std::clamp(std::max(hopZ, stockTop), hopZ,
+                                     std::max(hopZ, setup.safeZ.value));
     // A hop that would pass through the part at the hop height -- a boss
     // between two strokes -- goes over at safe Z instead.
     const auto hopClear = [&](const glm::dvec2& a, const glm::dvec2& b) {

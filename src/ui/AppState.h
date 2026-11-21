@@ -235,6 +235,11 @@ struct SketchEditState {
   glm::dvec2 patternStep2{0.0, 2.0};
   glm::dvec2 patternCenter{0.0}; // circular centre
   double patternAngleDeg = 60.0; // circular step angle
+  // The texts typed into those fields, "" for a number: a linked pattern
+  // keeps them (docs/sketching/README.md#patterns-that-are-expressions).
+  std::string patternCountExpr, patternCount2Expr, patternAngleExpr;
+  std::array<std::string, 2> patternStepExpr, patternStep2Expr,
+      patternCenterExpr;
   // Circular centre picking (v51): armed by the session's Pick button — the
   // next canvas click sets the centre; hitting an entity point stores its
   // REFERENCE so the pattern tracks it.
@@ -1912,6 +1917,10 @@ struct AppState {
     bool ownTolerance = false;
     double toleranceMm = 0.0;
     importplace::Placement original;
+    // The texts that bound it there, put back on a cancel: the preview
+    // writes the placement whole, unbound.
+    Vec3Exprs originalTranslateExpr, originalRotateExpr;
+    std::string originalScaleExpr;
     // What the preview wrote onto the feature; set while it shows.
     std::optional<importplace::Placement> preview;
     std::string error;   // why the last alignment failed

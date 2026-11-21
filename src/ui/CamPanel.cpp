@@ -376,7 +376,7 @@ void AppendToolGlyph(const AppState& state, const cam::Setup& setup,
     prev = p;
   }
   // A stub of shank, so the circle reads as a cutter rather than a hole.
-  const double shank = std::max(2.0, tool->diameter);
+  const double shank = std::max(2.0, tool->diameter.value);
   for (int i = 0; i < 4; i++) {
     const double a = 3.14159265358979 * 0.5 * i;
     const glm::dvec3 base(at.x + r * std::cos(a), at.y + r * std::sin(a), at.z);
@@ -587,7 +587,7 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
       ImGui::PopStyleColor();
     ImGui::SetItemTooltip("%.3g mm %s — the stepdown follows the cutter "
                           "unless you have typed your own",
-                          t.diameter, t.name.c_str());
+                          t.diameter.value, t.name.c_str());
   }
   if (setup->FindTool(op.toolNumber) == nullptr) {
     ImGui::SameLine();
@@ -608,17 +608,22 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   ImGui::SameLine();
   ImGui::SetNextItemWidth(60.0f);
   double top = op.topZ;
-  if (ExprDragDouble(state, "###top", &top, 0.25f, -1000.0, 1000.0, "%.2f")) {
+  std::string topText = op.topZ.expr;
+  if (ExprBoundDrag(state, "###top", &top, &topText, 0.25f, -1000.0, 1000.0,
+                    "%.2f")) {
     op.topZ = top;
+    op.topZ.expr = topText;
     touched(op.id);
   }
   ImGui::SetItemTooltip("Top of the cut (Z)");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(60.0f);
   double bottom = op.bottomZ;
-  if (ExprDragDouble(state, "###bottom", &bottom, 0.25f, -1000.0, 1000.0,
-                     "%.2f")) {
+  std::string bottomText = op.bottomZ.expr;
+  if (ExprBoundDrag(state, "###bottom", &bottom, &bottomText, 0.25f, -1000.0,
+                    1000.0, "%.2f")) {
     op.bottomZ = bottom;
+    op.bottomZ.expr = bottomText;
     touched(op.id);
   }
   ImGui::SetItemTooltip("Bottom of the cut (Z)");
@@ -631,9 +636,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     ImGui::SameLine();
     ImGui::SetNextItemWidth(55.0f);
     double step = op.stepdown;
-    if (ExprDragDouble(state, "###stepdown", &step, 0.25f, 0.0, 100.0,
-                       "%.2f")) {
+    std::string stepText = op.stepdown.expr;
+    if (ExprBoundDrag(state, "###stepdown", &step, &stepText, 0.25f, 0.0, 100.0,
+                      "%.2f")) {
       op.stepdown = step;
+      op.stepdown.expr = stepText;
       touched(op.id);
     }
     ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
@@ -684,7 +691,7 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
           continue;
         char item[64];
         std::snprintf(item, sizeof(item), "finish with T%d %.3g mm", t.number,
-                      t.diameter);
+                      t.diameter.value);
         if (ImGui::Selectable(item, op.finishTool == t.number)) {
           op.finishTool = t.number;
           if (const cam::Tool* rough = setup->FindTool(op.toolNumber);
@@ -702,9 +709,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
       ImGui::SameLine();
       ImGui::SetNextItemWidth(55.0f);
       double leave = op.finishStock;
-      if (ExprDragDouble(state, "left###cam_finish_stock", &leave, 0.05f, 0.0,
-                         10.0, "%.2f")) {
+      std::string leaveText = op.finishStock.expr;
+      if (ExprBoundDrag(state, "left###cam_finish_stock", &leave, &leaveText,
+                        0.05f, 0.0, 10.0, "%.2f")) {
         op.finishStock = leave;
+        op.finishStock.expr = leaveText;
         touched(op.id);
       }
       ImGui::SetItemTooltip("What the rough leaves for the finish (mm)");
@@ -735,9 +744,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     ImGui::SameLine();
     ImGui::SetNextItemWidth(55.0f);
     double peck = op.peck;
-    if (ExprDragDouble(state, "Peck###peck", &peck, 0.25f, 0.0, 100.0,
-                       "%.2f")) {
+    std::string peckText = op.peck.expr;
+    if (ExprBoundDrag(state, "Peck###peck", &peck, &peckText, 0.25f, 0.0, 100.0,
+                      "%.2f")) {
       op.peck = peck;
+      op.peck.expr = peckText;
       touched(op.id);
     }
     ImGui::SetItemTooltip("Retract fully between pecks of this depth so "
@@ -746,11 +757,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::ThreadPasses)) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80.0f);
-    int passes = op.threadPasses;
-    if (ExprDragInt(state, "Passes###threadpasses", &passes, 0.1f, 0, 64)) {
-      op.threadPasses = std::max(0, passes);
+    if (ExprBoundInt(state, "Passes###threadpasses", &op.threadPasses, 0.1f, 0,
+                     64))
       touched(op.id);
-    }
     ImGui::SetItemTooltip("Radial passes, each taking the same area of the "
                           "thread (0 = derived: the first takes at most half "
                           "the cutter's profile depth)");
@@ -758,9 +767,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::EdgeSize)) {
     ImGui::SetNextItemWidth(70.0f);
     double size = op.edgeSize;
-    if (ExprDragDouble(state, "Break###edgesize", &size, 0.1f, 0.0, 100.0,
-                       "%.2f")) {
+    std::string sizeText = op.edgeSize.expr;
+    if (ExprBoundDrag(state, "Break###edgesize", &size, &sizeText, 0.1f, 0.0,
+                      100.0, "%.2f")) {
       op.edgeSize = size;
+      op.edgeSize.expr = sizeText;
       touched(op.id);
     }
     ImGui::SetItemTooltip("Radius of the round (ball) or width of the "
@@ -778,10 +789,13 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     if (tool != nullptr && tool->type == cam::ToolType::VBit) {
       ImGui::SetNextItemWidth(70.0f);
       double width = op.engraveWidth;
-      if (ExprDragDouble(state, "Width###engravewidth", &width, 0.05f, 0.0,
-                         tool->diameter, "%.2f")) {
+      std::string widthText = op.engraveWidth.expr;
+      if (ExprBoundDrag(state, "Width###engravewidth", &width, &widthText,
+                        0.05f, 0.0, tool->diameter, "%.2f")) {
         op.engraveWidth = width;
-        op.engraveDepth = 0.0;
+        op.engraveWidth.expr = widthText;
+        op.engraveDepth = 0.0; // one or the other states the groove
+        op.engraveDepth.expr.clear();
         edited = true;
       }
       ImGui::SetItemTooltip("The groove's width at the surface, mm. A "
@@ -794,10 +808,13 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
                                    ? cam::EngraveGrooveFor(op, *tool)
                                    : cam::EngraveGroove{};
     double depth = shown.ok ? shown.depth : op.engraveDepth;
-    if (ExprDragDouble(state, "Depth###engravedepth", &depth, 0.05f, 0.0, 100.0,
-                       "%.2f")) {
+    std::string depthText = op.engraveDepth.expr;
+    if (ExprBoundDrag(state, "Depth###engravedepth", &depth, &depthText, 0.05f,
+                      0.0, 100.0, "%.2f")) {
       op.engraveDepth = depth;
-      op.engraveWidth = 0.0;
+      op.engraveDepth.expr = depthText;
+      op.engraveWidth = 0.0; // one or the other states the groove
+      op.engraveWidth.expr.clear();
       edited = true;
     }
     ImGui::SetItemTooltip("How deep the tip goes below the surface the "
@@ -839,9 +856,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
       op.rotaryPattern == cam::RotaryPattern::Helical) {
     ImGui::SetNextItemWidth(80.0f);
     double lead = op.leadMm;
-    if (ExprDragDouble(state, "lead mm###lead", &lead, 1.0f, -10000.0, 10000.0,
-                       "%.1f")) {
+    std::string leadText = op.leadMm.expr;
+    if (ExprBoundDrag(state, "lead mm###lead", &lead, &leadText, 1.0f, -10000.0,
+                      10000.0, "%.1f")) {
       op.leadMm = lead;
+      op.leadMm.expr = leadText;
       touched(op.id);
     }
     ImGui::SetItemTooltip(
@@ -867,7 +886,7 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     ImGui::TextDisabled("at");
     if (op.indexA.empty()) {
       ImGui::SameLine();
-      ImGui::TextDisabled("the setup's own A%g", setup->rotationA);
+      ImGui::TextDisabled("the setup's own A%g", setup->rotationA.value);
     }
     size_t removeAt = op.indexA.size();
     for (size_t i = 0; i < op.indexA.size(); i++) {
@@ -934,9 +953,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
     ImGui::SetNextItemWidth(70.0f);
     double angle = op.cutAngleDeg;
-    if (ExprDragDouble(state, "deg###cutangle", &angle, 1.0f, -180.0, 180.0,
-                       "%.0f")) {
+    std::string angleText = op.cutAngleDeg.expr;
+    if (ExprBoundDrag(state, "deg###cutangle", &angle, &angleText, 1.0f, -180.0,
+                      180.0, "%.0f")) {
       op.cutAngleDeg = angle;
+      op.cutAngleDeg.expr = angleText;
       touched(op.id);
     }
     ImGui::SetItemTooltip("Raster direction, degrees anticlockwise from "
@@ -947,9 +968,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::ZStep)) {
     ImGui::SetNextItemWidth(70.0f);
     double zs = op.zStep;
-    if (ExprDragDouble(state, "Z step###zstep", &zs, 0.05f, 0.0, 20.0,
-                       "%.2f")) {
+    std::string zsText = op.zStep.expr;
+    if (ExprBoundDrag(state, "Z step###zstep", &zs, &zsText, 0.05f, 0.0, 20.0,
+                      "%.2f")) {
       op.zStep = zs;
+      op.zStep.expr = zsText;
       touched(op.id);
     }
     ImGui::SetItemTooltip("Millimetres of Z between laps. NOT a stepover: "
@@ -960,9 +983,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::SampleStep)) {
     ImGui::SetNextItemWidth(70.0f);
     double ss = op.sampleStep;
-    if (ExprDragDouble(state, "sample###samplestep", &ss, 0.02f, 0.0, 5.0,
-                       "%.2f")) {
+    std::string ssText = op.sampleStep.expr;
+    if (ExprBoundDrag(state, "sample###samplestep", &ss, &ssText, 0.02f, 0.0,
+                      5.0, "%.2f")) {
       op.sampleStep = ss;
+      op.sampleStep.expr = ssText;
       touched(op.id);
     }
     ImGui::SetItemTooltip("Millimetres ALONG a pass, where the surface is "
@@ -973,9 +998,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::Stepover)) {
     ImGui::SetNextItemWidth(70.0f);
     double over = op.stepover;
-    if (ExprDragDouble(state, "Stepover###stepover", &over, 0.01f, 0.05, 0.9,
-                       "%.2f")) {
+    std::string overText = op.stepover.expr;
+    if (ExprBoundDrag(state, "Stepover###stepover", &over, &overText, 0.01f,
+                      0.05, 0.9, "%.2f")) {
       op.stepover = over;
+      op.stepover.expr = overText;
       touched(op.id);
     }
     ImGui::SetItemTooltip("Fraction of the cutter taken per pass "
@@ -990,10 +1017,12 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   // could reach it.
   if (cam::OpTypeHas(op.type, cam::OpField::StockToLeave)) {
     double leave = op.stockToLeave;
+    std::string leaveText = op.stockToLeave.expr;
     ImGui::SetNextItemWidth(58.0f);
-    if (ExprDragDouble(state, "Leave###leave", &leave, 0.05f, 0.0, 10.0,
-                       "%.2f")) {
+    if (ExprBoundDrag(state, "Leave###leave", &leave, &leaveText, 0.05f, 0.0,
+                      10.0, "%.2f")) {
       op.stockToLeave = leave;
+      op.stockToLeave.expr = leaveText;
       touched(op.id);
     }
     ImGui::SetItemTooltip("Material this pass leaves behind, in mm. Rough "
@@ -1020,11 +1049,8 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::Tabs)) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(55.0f);
-    int tabs = op.tabCount;
-    if (ExprDragInt(state, "Tabs###tabs", &tabs, 0.2f, 0, 32)) {
-      op.tabCount = tabs;
+    if (ExprBoundInt(state, "Tabs###tabs", &op.tabCount, 0.2f, 0, 32))
       touched(op.id);
-    }
     // No longer "(profile only)" in words on an op that is not one: the
     // control is simply not there.
     ImGui::SetItemTooltip("Uncut bridges that hold the part on the last "
@@ -1046,8 +1072,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   }
   ImGui::SetNextItemWidth(70.0f);
   double dia = t.diameter;
-  if (ExprDragDouble(state, "mm###dia", &dia, 0.1f, 0.1, 50.0, "%.3f")) {
+  std::string diaText = t.diameter.expr;
+  if (ExprBoundDrag(state, "mm###dia", &dia, &diaText, 0.1f, 0.1, 50.0,
+                    "%.3f")) {
     t.diameter = dia;
+    t.diameter.expr = diaText;
     changed = true;
   }
   ImGui::SameLine();
@@ -1057,9 +1086,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   // carried the 20 mm default whatever was in the spindle -- and the
   // reach finding compares against it.
   double flute = t.fluteLength;
-  if (ExprDragDouble(state, "flute###flutelen", &flute, 0.5f, 0.5, 300.0,
-                     "%.1f")) {
+  std::string fluteText = t.fluteLength.expr;
+  if (ExprBoundDrag(state, "flute###flutelen", &flute, &fluteText, 0.5f, 0.5,
+                    300.0, "%.1f")) {
     t.fluteLength = flute;
+    t.fluteLength.expr = fluteText;
     changed = true;
   }
   ImGui::SetItemTooltip("Usable depth, mm: the fluted part, not the whole "
@@ -1068,8 +1099,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0f);
   double feed = t.feedCut;
-  if (ExprDragDouble(state, "F###feed", &feed, 10.0f, 1.0, 10000.0, "%.0f")) {
+  std::string feedText = t.feedCut.expr;
+  if (ExprBoundDrag(state, "F###feed", &feed, &feedText, 10.0f, 1.0, 10000.0,
+                    "%.0f")) {
     t.feedCut = feed;
+    t.feedCut.expr = feedText;
     changed = true;
   }
   ImGui::SetItemTooltip("Cutting feed, mm/min — what YOU run. The app "
@@ -1100,9 +1134,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
     double flat = t.tipFlat;
-    if (ExprDragDouble(state, "flat###tipflat", &flat, 0.005f, 0.0, 2.0,
-                       "%.3f")) {
+    std::string flatText = t.tipFlat.expr;
+    if (ExprBoundDrag(state, "flat###tipflat", &flat, &flatText, 0.005f, 0.0,
+                      2.0, "%.3f")) {
       t.tipFlat = flat;
+      t.tipFlat.expr = flatText;
       cam::FillThreadMillShape(t, true);
       changed = true;
     }
@@ -1111,9 +1147,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
                           "thread's root, P/8.");
     ImGui::SetNextItemWidth(70.0f);
     double neck = t.neckDiameter;
-    if (ExprDragDouble(state, "neck###neckdia", &neck, 0.05f, 0.1, t.diameter,
-                       "%.2f")) {
+    std::string neckText = t.neckDiameter.expr;
+    if (ExprBoundDrag(state, "neck###neckdia", &neck, &neckText, 0.05f, 0.1,
+                      t.diameter, "%.2f")) {
       t.neckDiameter = neck;
+      t.neckDiameter.expr = neckText;
       cam::FillThreadMillShape(t, true);
       changed = true;
     }
@@ -1124,9 +1162,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
     double neckLen = t.neckLength;
-    if (ExprDragDouble(state, "reach###necklen", &neckLen, 0.5f, 0.5, 200.0,
-                       "%.1f")) {
+    std::string neckLenText = t.neckLength.expr;
+    if (ExprBoundDrag(state, "reach###necklen", &neckLen, &neckLenText, 0.5f,
+                      0.5, 200.0, "%.1f")) {
       t.neckLength = neckLen;
+      t.neckLength.expr = neckLenText;
       changed = true;
     }
     ImGui::SetItemTooltip("How long the neck is above the head, mm: with "
@@ -1137,9 +1177,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
     double angle = t.tipAngleDeg;
-    if (ExprDragDouble(state, "deg###tipangle", &angle, 1.0f, 5.0, 179.0,
-                       "%.0f")) {
+    std::string angleText = t.tipAngleDeg.expr;
+    if (ExprBoundDrag(state, "deg###tipangle", &angle, &angleText, 1.0f, 5.0,
+                      179.0, "%.0f")) {
       t.tipAngleDeg = angle;
+      t.tipAngleDeg.expr = angleText;
       changed = true;
     }
     ImGui::SetItemTooltip("INCLUDED angle at the point: 90 for the "
@@ -1151,9 +1193,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   // which is exactly the right default for a limit nobody typed.
   ImGui::SetNextItemWidth(70.0f);
   double stickout = t.overallLength;
-  if (ExprDragDouble(state, "out###overall", &stickout, 0.5f, 0.0, 400.0,
-                     "%.1f")) {
+  std::string stickoutText = t.overallLength.expr;
+  if (ExprBoundDrag(state, "out###overall", &stickout, &stickoutText, 0.5f, 0.0,
+                    400.0, "%.1f")) {
     t.overallLength = stickout;
+    t.overallLength.expr = stickoutText;
     changed = true;
   }
   ImGui::SetItemTooltip("Stickout, mm: tip to the underside of the collet "
@@ -1163,9 +1207,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0f);
   double collar = t.collarDiameter;
-  if (ExprDragDouble(state, "collar###collardia", &collar, 0.5f, 0.0, 120.0,
-                     "%.1f")) {
+  std::string collarText = t.collarDiameter.expr;
+  if (ExprBoundDrag(state, "collar###collardia", &collar, &collarText, 0.5f,
+                    0.0, 120.0, "%.1f")) {
     t.collarDiameter = collar;
+    t.collarDiameter.expr = collarText;
     changed = true;
   }
   ImGui::SetItemTooltip("The collet nut at its widest, mm. Needs the "
@@ -1173,9 +1219,11 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0f);
   double shank = t.shankDiameter;
-  if (ExprDragDouble(state, "shank###shankdia", &shank, 0.1f, 0.0, 50.0,
-                     "%.2f")) {
+  std::string shankText = t.shankDiameter.expr;
+  if (ExprBoundDrag(state, "shank###shankdia", &shank, &shankText, 0.1f, 0.0,
+                    50.0, "%.2f")) {
     t.shankDiameter = shank;
+    t.shankDiameter.expr = shankText;
     changed = true;
   }
   ImGui::SetItemTooltip("How wide the tool is ABOVE its flutes, mm. Wider "
@@ -1481,24 +1529,26 @@ std::string CamOpSummary(const cam::Setup& setup, const cam::Operation& op) {
   if (op.type == cam::OpType::SurfaceRotary) {
     // A rotary op has no depth and no climb: it has a pattern, a spacing and
     // -- for the helical pattern -- a lead.
-    const double step = std::clamp(op.stepover, 0.02, 0.95) * dia;
+    const double step = std::clamp(op.stepover.value, 0.02, 0.95) * dia;
     std::snprintf(buf, sizeof(buf), "%s 4-axis, %.3g mm tool, %.2f mm apart",
                   cam::RotaryPatternName(op.rotaryPattern), dia, step);
     std::string out = buf;
     if (op.rotaryPattern == cam::RotaryPattern::Helical) {
       if (op.leadMm != 0.0) {
-        std::snprintf(buf, sizeof(buf), ", lead %.1f mm", op.leadMm);
+        std::snprintf(buf, sizeof(buf), ", lead %.1f mm", op.leadMm.value);
         out += buf;
       } else {
         out += ", lead from the part";
       }
     }
     if (op.stepdown > 0.0) {
-      std::snprintf(buf, sizeof(buf), ", layers every %.3g mm", op.stepdown);
+      std::snprintf(buf, sizeof(buf), ", layers every %.3g mm",
+                    op.stepdown.value);
       out += buf;
     }
     if (op.stockToLeave > 0.0) {
-      std::snprintf(buf, sizeof(buf), ", leaves %.3g mm", op.stockToLeave);
+      std::snprintf(buf, sizeof(buf), ", leaves %.3g mm",
+                    op.stockToLeave.value);
       out += buf;
     }
     return out;
@@ -1600,7 +1650,7 @@ CamOpRowResult CamOperationRow(AppState& state, const cam::Setup& setup,
   char tail[64] = "";
   if (const cam::Tool* tool = setup.FindTool(op.toolNumber))
     std::snprintf(tail, sizeof(tail), "T%d %.3g mm", tool->number,
-                  tool->diameter);
+                  tool->diameter.value);
   const float tailW = tail[0] ? ImGui::CalcTextSize(tail).x : 0.0f;
   const float room = ImGui::GetWindowContentRegionMax().x -
                      ImGui::GetCursorPosX() - tailW -

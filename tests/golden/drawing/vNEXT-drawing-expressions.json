@@ -1,0 +1,110 @@
+{
+  "format": "designer-document",
+  "version": 224,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a3",
+    "landscape": true,
+    "title_block": {
+      "project": "Plate",
+      "document": "Bound views"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "Front",
+      "source": 2,
+      "orientation": "front",
+      "scale": 0.5,
+      "scale_expr": "sheet_scale",
+      "position": [
+        120.0,
+        150.0
+      ],
+      "position_expr": [
+        "margin * 2",
+        ""
+      ],
+      "show_hidden": true,
+      "quality": "exact",
+      "hidden": [],
+      "rotation_deg": 90.0,
+      "rotation_deg_expr": "quarter",
+      "section": {
+        "point": [
+          0.0,
+          0.0,
+          6.0
+        ],
+        "point_expr": [
+          "",
+          "",
+          "thickness / 2"
+        ],
+        "label": "A"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Detail B",
+      "source": 2,
+      "orientation": "front",
+      "scale": 2.0,
+      "scale_expr": "sheet_scale * 4",
+      "position": [
+        300.0,
+        150.0
+      ],
+      "show_hidden": true,
+      "quality": "exact",
+      "hidden": [],
+      "detail": {
+        "view": 1,
+        "center": [
+          10.0,
+          0.0,
+          0.0
+        ],
+        "center_expr": [
+          "margin / 6",
+          "",
+          ""
+        ],
+        "radius_mm": 8.0,
+        "radius_mm_expr": "margin * 2 / 15",
+        "label": "B"
+      }
+    }
+  ],
+  "dims": [],
+  "notes": [
+    {
+      "id": 3,
+      "text": "A",
+      "pos": [
+        60.0,
+        40.0
+      ],
+      "style": "datum"
+    },
+    {
+      "id": 4,
+      "text": "",
+      "pos": [
+        80.0,
+        40.0
+      ],
+      "style": "fcf",
+      "fcf": {
+        "symbol": "position",
+        "tolerance_mm": 0.1,
+        "tolerance_mm_expr": "tol",
+        "datums": [
+          "A"
+        ],
+        "diameter": true
+      }
+    }
+  ]
+}

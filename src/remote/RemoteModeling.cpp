@@ -2016,6 +2016,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     {
       ImportFeature placed(*imp);
       placed.placement = aligned.placement;
+      // Written whole: what it moved no longer follows a text.
+      placed.translateExpr = {};
+      placed.rotateExpr = {};
+      placed.scaleExpr.clear();
       after = DocumentIO::FeatureToJson(placed);
     }
     const json preDigest = BodyDigestJson(*doc);

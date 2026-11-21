@@ -551,7 +551,7 @@ int EngraveTool(const AppState& state, const cam::Setup& setup,
     for (const cam::Tool& t : setup.tools) {
       char one[160];
       std::snprintf(one, sizeof(one), "%sT%d, a %.3g mm %s",
-                    have.empty() ? "" : "; ", t.number, t.diameter,
+                    have.empty() ? "" : "; ", t.number, t.diameter.value,
                     cam::ToolTypeName(t.type));
       have += one;
     }
@@ -1352,7 +1352,7 @@ void VerbToolRow(AppState& state, cam::Setup& setup, const Verb& verb) {
     if (on)
       ImGui::PopStyleColor();
     ImGui::SetItemTooltip("%.3g mm %s — what the verb derives for%s",
-                          tool.diameter, tool.name.c_str(),
+                          tool.diameter.value, tool.name.c_str(),
                           state.camVerbOp != 0 ? "; changes the cut just made"
                                                : "");
   }
@@ -1390,7 +1390,7 @@ void VerbToolRow(AppState& state, cam::Setup& setup, const Verb& verb) {
       ImGui::PopStyleColor();
     ImGui::SetItemTooltip("Rough with T%d leaving a little, then take the "
                           "wall in one pass with this %.3g mm %s",
-                          active, tool.diameter, tool.name.c_str());
+                          active, tool.diameter.value, tool.name.c_str());
   }
 }
 
@@ -1668,9 +1668,11 @@ bool DrawFixtureEditor(AppState& state) {
     const bool alongX = f->seat->edge == cam::StockEdge::MinusY ||
                         f->seat->edge == cam::StockEdge::PlusY;
     double along = f->seat->alongMm;
-    if (ui::ExprDragDouble(state, "Along###cam_seat_along", &along, 0.5f, 0.0,
-                           0.0, "%.2f mm")) {
+    std::string alongText = f->seat->alongMm.expr;
+    if (ui::ExprBoundDrag(state, "Along###cam_seat_along", &along, &alongText,
+                          0.5f, 0.0, 0.0, "%.2f mm")) {
       f->seat->alongMm = along;
+      f->seat->alongMm.expr = alongText;
       changed = true;
     }
     ImGui::SetItemTooltip(alongX ? "From the stock's -X end to the middle of "
@@ -1678,17 +1680,21 @@ bool DrawFixtureEditor(AppState& state) {
                                  : "From the stock's -Y end to the middle of "
                                    "the face it rests on");
     double over = f->seat->overMm;
-    if (ui::ExprDragDouble(state, "Over the stock###cam_seat_over", &over, 0.5f,
-                           0.0, 0.0, "%.2f mm")) {
+    std::string overText = f->seat->overMm.expr;
+    if (ui::ExprBoundDrag(state, "Over the stock###cam_seat_over", &over,
+                          &overText, 0.5f, 0.0, 0.0, "%.2f mm")) {
       f->seat->overMm = over;
+      f->seat->overMm.expr = overText;
       changed = true;
     }
     ImGui::SetItemTooltip("How far it reaches in past the edge -- where its "
                           "nose presses");
     double spin = f->seat->spinDeg;
-    if (ui::ExprDragDouble(state, "Spin###cam_seat_spin", &spin, 1.0f, -180.0,
-                           180.0, "%.1f°")) {
+    std::string spinText = f->seat->spinDeg.expr;
+    if (ui::ExprBoundDrag(state, "Spin###cam_seat_spin", &spin, &spinText, 1.0f,
+                          -180.0, 180.0, "%.1f°")) {
       f->seat->spinDeg = spin;
+      f->seat->spinDeg.expr = spinText;
       changed = true;
     }
     ImGui::SetItemTooltip("Turned from pointing straight in");
@@ -1700,23 +1706,43 @@ bool DrawFixtureEditor(AppState& state) {
     ImGui::SetItemTooltip("Stand it on its own at this bed position; it will "
                           "no longer follow the stock");
   } else {
-    if (ui::ExprDragFloat3(state, "Position###cam_fixture_xyz", &f->pos.x,
-                           0.5f))
+    // A coordinate per field, each keeping a typed expression
+    // (docs/cam/README.md#numbers-that-are-expressions).
+    const auto vec3 = [&](const char* id, glm::dvec3& v, Vec3Exprs& texts,
+                          double lo, double hi) {
+      static const char* kAxes[] = {"X %.2f", "Y %.2f", "Z %.2f"};
+      bool edited = false;
+      const float w = ImGui::GetFontSize() * 5.5f;
+      for (int k = 0; k < 3; k++) {
+        if (k > 0)
+          ImGui::SameLine();
+        double c = v[k];
+        std::string text = texts[static_cast<size_t>(k)];
+        ImGui::SetNextItemWidth(w);
+        const std::string label = std::string("###") + id + std::to_string(k);
+        if (ui::ExprBoundDrag(state, label.c_str(), &c, &text, 0.5f, lo, hi,
+                              kAxes[k])) {
+          v[k] = c;
+          texts[static_cast<size_t>(k)] = text;
+          edited = true;
+        }
+      }
+      return edited;
+    };
+    if (vec3("cam_fixture_xyz", f->pos, f->posExpr, 0.0, 0.0))
       changed = true;
     ImGui::SetItemTooltip("Where its origin sits on the bed (setup space, mm)");
     double rot = f->rotZdeg;
-    if (ui::ExprDragDouble(state, "Spin###cam_fixture_rot", &rot, 1.0f, -360.0,
-                           360.0, "%.1f°")) {
+    std::string rotText = f->rotZdeg.expr;
+    if (ui::ExprBoundDrag(state, "Spin###cam_fixture_rot", &rot, &rotText, 1.0f,
+                          -360.0, 360.0, "%.1f°")) {
       f->rotZdeg = rot;
+      f->rotZdeg.expr = rotText;
       changed = true;
     }
     if (f->IsBox()) {
-      double size[3] = {f->box.x, f->box.y, f->box.z};
-      if (ui::ExprDragFloat3(state, "Size###cam_fixture_size", size, 0.5f) &&
-          size[0] > 0.0 && size[1] > 0.0 && size[2] > 0.0) {
-        f->box = {size[0], size[1], size[2]};
+      if (vec3("cam_fixture_size", f->box, f->boxExpr, 0.001, 100000.0))
         changed = true;
-      }
       ImGui::SetItemTooltip("The keep-out box, X by Y by Z, mm");
     }
     ImGui::SeparatorText("Put it");
@@ -1733,8 +1759,10 @@ bool DrawFixtureEditor(AppState& state) {
         ImGui::SameLine();
       if (ImGui::Button(kPlaces[k].first) &&
           cam::PlaceFixture(*setup, ui::JobBodies(state), model, f->rotZdeg,
-                            kPlaces[k].second, f->pos))
+                            kPlaces[k].second, f->pos)) {
+        f->posExpr = {}; // put against a side: the side's place
         changed = true;
+      }
     }
     ImGui::SetItemTooltip("Against that side of the stock, centred on it (a "
                           "vise), or on its top straddling the -X edge (a toe "
@@ -1837,7 +1865,7 @@ void DrawCamToolWindow(AppState& state) {
       if (armedHere)
         ImGui::TextDisabled("pick a face…");
       else if (setup != nullptr && std::abs(setup->rotationA) > 1e-9)
-        ImGui::TextDisabled("A %.2f°", setup->rotationA);
+        ImGui::TextDisabled("A %.2f°", setup->rotationA.value);
       else
         ImGui::TextDisabled("A 0° (3-axis)");
       break;

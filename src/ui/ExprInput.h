@@ -70,5 +70,10 @@ bool ExprInputDouble3(AppState& state, const char* label, double v[3],
 bool ExprBoundDrag(AppState& state, const char* label, double* shown,
                    std::string* expr, float speed, double vmin, double vmax,
                    const char* fmt);
+// The same for a count: a typed expression that comes out fractional is
+// refused (the prompt bar says so), never rounded. True when the value or
+// the text changed; both are written to `*v`.
+bool ExprBoundInt(AppState& state, const char* label, ExprInt* v, float speed,
+                  int vmin, int vmax);
 
 } // namespace ui

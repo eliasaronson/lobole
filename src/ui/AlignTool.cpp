@@ -50,6 +50,11 @@ void Show(AppState& state, ImportFeature& imp,
   if (imp.placement == p)
     return;
   imp.placement = p;
+  // An alignment writes the placement whole: what it moved is no longer
+  // what a text says (docs/interchange/README.md#placing-an-import).
+  imp.translateExpr = {};
+  imp.rotateExpr = {};
+  imp.scaleExpr.clear();
   state.document->Regenerate();
 }
 
@@ -232,6 +237,9 @@ void OpenAlignTool(AppState& state, uint64_t importId) {
   t.featureId = importId;
   t.mode = static_cast<int>(Mode::Floor);
   t.original = imp->placement;
+  t.originalTranslateExpr = imp->translateExpr;
+  t.originalRotateExpr = imp->rotateExpr;
+  t.originalScaleExpr = imp->scaleExpr;
   LOG_INFO("tool: Align started on '{}'", imp->GetName());
   ArmNext(state);
 }
@@ -245,6 +253,9 @@ void CancelAlignTool(AppState& state) {
       imp != nullptr && state.alignTool.preview &&
       imp->placement == *state.alignTool.preview) {
     imp->placement = state.alignTool.original;
+    imp->translateExpr = state.alignTool.originalTranslateExpr;
+    imp->rotateExpr = state.alignTool.originalRotateExpr;
+    imp->scaleExpr = state.alignTool.originalScaleExpr;
     state.document->Regenerate();
   }
   LOG_INFO("tool: Align cancelled");
@@ -261,6 +272,9 @@ bool AcceptAlignTool(AppState& state) {
   // One undo step from where it stood to where the preview put it.
   ImportFeature was(*imp);
   was.placement = t.original;
+  was.translateExpr = t.originalTranslateExpr;
+  was.rotateExpr = t.originalRotateExpr;
+  was.scaleExpr = t.originalScaleExpr;
   const nlohmann::json before = DocumentIO::FeatureToJson(was);
   const nlohmann::json after = DocumentIO::FeatureToJson(*imp);
   LOG_INFO("tool: Align accepted ({})", importalign::ToString(Mode(t.mode)));

@@ -7,6 +7,7 @@
 #include "core/cam/CamOpFields.h"
 #include "core/cam/CamPost.h"     // PostExists, PostIds
 #include "core/cam/CamToolpath.h" // FrameIsSquare
+#include "core/cam/JobDocument.h"
 #include "core/io/Serialization.h" // WriteTextAtomic
 #include "core/io/SerializationInternal.h"
 
@@ -144,19 +145,21 @@ json ToolToJson(const cam::Tool& t) {
   }
   // Only when somebody stated them, so a job of tools nobody has charted
   // re-saves byte-identically (v92).
-  if (t.chiploadMin > 0.0 || t.chiploadMax > 0.0) {
+  if (t.chiploadMin > 0.0 || t.chiploadMax > 0.0 || t.chiploadMin.Bound() ||
+      t.chiploadMax.Bound()) {
     tj["chipload_min"] = t.chiploadMin;
     tj["chipload_max"] = t.chiploadMax;
   }
   // Same rule again (v121): a job whose tools carry no holder dimensions
   // re-saves byte-identically, and the holder check stays silent on it.
-  if (t.overallLength > 0.0 || t.collarDiameter > 0.0) {
+  if (t.overallLength > 0.0 || t.collarDiameter > 0.0 ||
+      t.overallLength.Bound() || t.collarDiameter.Bound()) {
     tj["overall_length"] = t.overallLength;
     tj["collar_diameter"] = t.collarDiameter;
   }
   // And again (v131): nobody stating a shank is the tool as every check
   // took it before, the cutter's width all the way up.
-  if (t.shankDiameter > 0.0)
+  if (t.shankDiameter > 0.0 || t.shankDiameter.Bound())
     tj["shank_diameter"] = t.shankDiameter;
   // A thread mill's head (v145): its flat and its neck, only on one.
   if (t.type == cam::ToolType::ThreadMill) {
@@ -173,7 +176,14 @@ cam::Tool ToolFromJson(const json& tj) {
       {"number", "name", "diameter", "flutes", "flute_length", "feed_cut",
        "feed_plunge", "spindle_rpm", "tool_type", "tip_angle", "chipload_min",
        "chipload_max", "overall_length", "collar_diameter", "shank_diameter",
-       "tip_flat", "neck_diameter", "neck_length"},
+       "tip_flat", "neck_diameter", "neck_length",
+       // vNEXT: each number's text
+       // (docs/cam/README.md#numbers-that-are-expressions)
+       "diameter_expr", "flutes_expr", "flute_length_expr", "feed_cut_expr",
+       "feed_plunge_expr", "spindle_rpm_expr", "tip_angle_expr",
+       "chipload_min_expr", "chipload_max_expr", "overall_length_expr",
+       "collar_diameter_expr", "shank_diameter_expr", "tip_flat_expr",
+       "neck_diameter_expr", "neck_length_expr"},
       "cam tool");
   cam::Tool t;
   t.number = tj.value("number", 1);
@@ -477,7 +487,7 @@ json CamSetupToJson(const cam::Setup& setup) {
   // The setup's own traverse rate (v139), seeded from the machine's but its
   // own from then on: before it was saved a reload fell back to 0, "not
   // stated", and the time estimates left the rapids out. Absent = 0.
-  if (setup.rapidFeed != 0.0)
+  if (setup.rapidFeed != 0.0 || setup.rapidFeed.Bound())
     j["rapid_feed"] = setup.rapidFeed;
   // DERIVED (v68): recomputed from the stock, the fixture and the picked face
   // on load, so it is written for a reader rather than read back. The RULE is
@@ -492,7 +502,7 @@ json CamSetupToJson(const cam::Setup& setup) {
                                                                  : "model_min";
   // Where the bed sits on the sheet. Zero is the old behaviour, so a job that
   // fits its machine writes nothing and reads back identical.
-  if (setup.reachOffset != glm::dvec2(0.0))
+  if (setup.reachOffset != glm::dvec2(0.0) || AnyBound(setup.reachOffsetExpr))
     j["reach_offset"] = {setup.reachOffset.x, setup.reachOffset.y};
   // Which face Z zero came from. Saved because the panel says so — and said
   // "Z zero is not set yet" about a job that had one, every time it was
@@ -506,14 +516,14 @@ json CamSetupToJson(const cam::Setup& setup) {
   // where 0.70710678f does not.
   if (!cam::FrameIsSquare(setup))
     j["frame"] = {setup.frame.x, setup.frame.y, setup.frame.z, setup.frame.w};
-  if (setup.rotationA != 0.0)
+  if (setup.rotationA != 0.0 || setup.rotationA.Bound())
     j["rotation_a"] = setup.rotationA;
   // v132: where the part is held, how much of it the jaws hold, and whether
   // the tailstock is engaged -- each only when stated.
   if (setup.heldIn != cam::Setup::HeldIn::Derived)
     j["held_in"] =
         setup.heldIn == cam::Setup::HeldIn::Rotary ? "rotary" : "bed";
-  if (setup.gripLength != 0.0)
+  if (setup.gripLength != 0.0 || setup.gripLength.Bound())
     j["grip_mm"] = setup.gripLength;
   if (setup.tailstock != -1)
     j["tailstock"] = setup.tailstock == 1;
@@ -548,9 +558,9 @@ json CamSetupToJson(const cam::Setup& setup) {
     j["placements"] = json::array();
     for (const cam::Placement& p : setup.placements) {
       json pj = {{"id", p.id}, {"part", p.jobPartId}};
-      if (p.pos.x != 0.0 || p.pos.y != 0.0)
+      if (p.pos.x != 0.0 || p.pos.y != 0.0 || AnyBound(p.posExpr))
         pj["pos"] = {p.pos.x, p.pos.y};
-      if (p.rotZdeg != 0.0)
+      if (p.rotZdeg != 0.0 || p.rotZdeg.Bound())
         pj["rot_z"] = p.rotZdeg;
       if (!p.enabled)
         pj["enabled"] = false;
@@ -576,9 +586,9 @@ json CamSetupToJson(const cam::Setup& setup) {
         fj["part"] = f.sourceDocId;
       if (!f.name.empty())
         fj["name"] = f.name;
-      if (f.pos != glm::dvec3(0.0))
+      if (f.pos != glm::dvec3(0.0) || AnyBound(f.posExpr))
         fj["pos"] = {f.pos.x, f.pos.y, f.pos.z};
-      if (f.rotZdeg != 0.0)
+      if (f.rotZdeg != 0.0 || f.rotZdeg.Bound())
         fj["rot_z"] = f.rotZdeg;
       if (!f.enabled)
         fj["enabled"] = false;
@@ -591,7 +601,7 @@ json CamSetupToJson(const cam::Setup& setup) {
                       {"edge", cam::StockEdgeName(f.seat->edge)},
                       {"along_mm", f.seat->alongMm},
                       {"over_mm", f.seat->overMm}};
-        if (f.seat->spinDeg != 0.0)
+        if (f.seat->spinDeg != 0.0 || f.seat->spinDeg.Bound())
           fj["seat"]["spin_deg"] = f.seat->spinDeg;
       }
       j["fixtures"].push_back(std::move(fj));
@@ -618,7 +628,8 @@ json CamSetupToJson(const cam::Setup& setup) {
       oj["finish_tool"] = op.finishTool;
       oj["finish_stock"] = op.finishStock;
     }
-    if (op.tabCount != 0) {
+    if (op.tabCount != 0 || op.tabCount.Bound() || op.tabWidth.Bound() ||
+        op.tabHeight.Bound()) {
       oj["tabs"] = {{"count", op.tabCount},
                     {"width", op.tabWidth},
                     {"height", op.tabHeight}};
@@ -630,6 +641,12 @@ json CamSetupToJson(const cam::Setup& setup) {
     }
     j["operations"].push_back(std::move(oj));
   }
+  // Each number's text beside it (vNEXT): the one walk of the setup's
+  // numbers that take an expression decides where.
+  cam::VisitSetupExprs(const_cast<cam::Setup&>(setup),
+                       [&](const std::string&, const ExprSlot& slot) {
+                         WriteSlotText(j, slot);
+                       });
   return j;
 }
 
@@ -661,7 +678,12 @@ cam::Setup CamSetupFromJson(const json& j) {
                               "order",
                               "placements",
                               "fixtures",
-                              "operations"},
+                              "operations",
+                              "safe_z_expr",
+                              "rapid_feed_expr",
+                              "reach_offset_expr",
+                              "rotation_a_expr",
+                              "grip_mm_expr"},
                              "cam setup");
   cam::Setup setup;
   setup.id = j.value("id", uint64_t{0});
@@ -751,8 +773,11 @@ cam::Setup CamSetupFromJson(const json& j) {
                                  "`machine`");
   if (j.contains("stock")) {
     const json& sj = j["stock"];
-    readctx::RefuseUnknownKeys(
-        sj, {"margin", "bottom_margin", "mode", "size", "place"}, "cam stock");
+    readctx::RefuseUnknownKeys(sj,
+                               {"margin", "bottom_margin", "mode", "size",
+                                "place", "margin_expr", "bottom_margin_expr",
+                                "size_expr", "place_expr"},
+                               "cam stock");
     if (HasArrayOf(sj, "margin", 3))
       setup.stock.margin = {sj["margin"][0].get<double>(),
                             sj["margin"][1].get<double>(),
@@ -792,9 +817,10 @@ cam::Setup CamSetupFromJson(const json& j) {
     setup.order = OrderFromName(j.at("order").get<std::string>());
   RefuseRepeatedIds(j.value("placements", json::array()), "placements", true);
   for (const json& pj : j.value("placements", json::array())) {
-    readctx::RefuseUnknownKeys(
-        pj, {"id", "part", "pos", "rot_z", "enabled", "frame"},
-        "cam placement");
+    readctx::RefuseUnknownKeys(pj,
+                               {"id", "part", "pos", "rot_z", "enabled",
+                                "frame", "pos_expr", "rot_z_expr"},
+                               "cam placement");
     cam::Placement p;
     p.id = pj.value("id", uint64_t{0});
     p.jobPartId = pj.value("part", uint64_t{0});
@@ -810,9 +836,11 @@ cam::Setup CamSetupFromJson(const json& j) {
   }
   RefuseRepeatedIds(j.value("fixtures", json::array()), "fixtures", true);
   for (const json& fj : j.value("fixtures", json::array())) {
-    readctx::RefuseUnknownKeys(
-        fj, {"id", "part", "box", "name", "pos", "rot_z", "enabled", "seat"},
-        "cam fixture");
+    readctx::RefuseUnknownKeys(fj,
+                               {"id", "part", "box", "name", "pos", "rot_z",
+                                "enabled", "seat", "box_expr", "pos_expr",
+                                "rot_z_expr"},
+                               "cam fixture");
     cam::Fixture f;
     f.id = fj.value("id", uint64_t{0});
     f.sourceDocId = fj.value("part", uint64_t{0});
@@ -827,9 +855,11 @@ cam::Setup CamSetupFromJson(const json& j) {
     f.enabled = fj.value("enabled", true);
     if (fj.contains("seat") && fj["seat"].is_object()) {
       const json& sj = fj["seat"];
-      readctx::RefuseUnknownKeys(
-          sj, {"face", "edge", "along_mm", "over_mm", "spin_deg"},
-          "fixture seat");
+      readctx::RefuseUnknownKeys(sj,
+                                 {"face", "edge", "along_mm", "over_mm",
+                                  "spin_deg", "along_mm_expr", "over_mm_expr",
+                                  "spin_deg_expr"},
+                                 "fixture seat");
       cam::FixtureSeat seat;
       const json face = sj.value("face", json::object());
       readctx::RefuseUnknownKeys(face, {"feature", "name"},
@@ -852,14 +882,24 @@ cam::Setup CamSetupFromJson(const json& j) {
   // An operation's keys: its own, and every row of the op-field table
   // (tabs, finish_tool and finish_stock among them). `tool_number` is what
   // the v73 goldens' ops carry beside `tool`; it was never read.
-  static const std::vector<std::string_view> kOpKeys = [] {
-    std::vector<std::string_view> keys = {"id",      "name",       "type",
-                                          "tool",    "top_z",      "bottom_z",
-                                          "targets", "tool_number"};
-    for (const cam::OpFieldRow& row : cam::OpFieldRows())
+  // Each number's text beside it too (vNEXT).
+  static const std::vector<std::string> kOpKeyStore = [] {
+    std::vector<std::string> keys = {
+        "id",       "name",    "type",        "tool",       "top_z",
+        "bottom_z", "targets", "tool_number", "top_z_expr", "bottom_z_expr"};
+    for (const cam::OpFieldRow& row : cam::OpFieldRows()) {
       keys.push_back(row.key);
+      const auto& m = row.member;
+      if ((std::holds_alternative<ExprValue cam::Operation::*>(m) ||
+           std::holds_alternative<ExprInt cam::Operation::*>(m) ||
+           std::holds_alternative<std::vector<double> cam::Operation::*>(m)) &&
+          std::string_view(row.key) != "tabs")
+        keys.push_back(std::string(row.key) + "_expr");
+    }
     return keys;
   }();
+  static const std::vector<std::string_view> kOpKeys(kOpKeyStore.begin(),
+                                                     kOpKeyStore.end());
   RefuseRepeatedIds(j.value("operations", json::array()), "operations", true);
   for (const json& oj : j.value("operations", json::array())) {
     readctx::RefuseUnknownKeys(oj, kOpKeys, "cam operation");
@@ -888,7 +928,9 @@ cam::Setup CamSetupFromJson(const json& j) {
                                ": finish_stock without a finish_tool (the "
                                "finishing pass it is left for)");
     if (oj.contains("tabs")) {
-      readctx::RefuseUnknownKeys(oj["tabs"], {"count", "width", "height"},
+      readctx::RefuseUnknownKeys(oj["tabs"],
+                                 {"count", "width", "height", "count_expr",
+                                  "width_expr", "height_expr"},
                                  "cam tabs");
       // Written with their count, which is never 0: tabs without one are
       // not written back.
@@ -911,6 +953,10 @@ cam::Setup CamSetupFromJson(const json& j) {
     }
     setup.operations.push_back(std::move(op));
   }
+  // Each number's text from beside it (vNEXT).
+  cam::VisitSetupExprs(setup, [&](const std::string&, const ExprSlot& slot) {
+    ReadSlotText(j, slot);
+  });
   return setup;
 }
 

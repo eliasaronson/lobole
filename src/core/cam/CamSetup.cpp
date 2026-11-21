@@ -267,7 +267,7 @@ glm::dmat3 SetupToModel(const Setup& setup, uint64_t jobPartId) {
   // +Y face's operation landed on -Y.
   glm::dmat3 m = glm::mat3_cast(FixtureFrame(setup, jobPartId));
   if (std::abs(setup.rotationA) > 1e-9) {
-    const double a = glm::radians(setup.rotationA);
+    const double a = glm::radians(setup.rotationA.value);
     const double c = std::cos(a), s = std::sin(a);
     // Columns are the images of X, Y, Z: R_x(-A).
     m *= glm::dmat3(glm::dvec3(1.0, 0.0, 0.0), glm::dvec3(0.0, c, -s),
@@ -421,8 +421,8 @@ glm::dmat4 BodyToSetup(const Setup& setup, uint64_t jobPartId) {
   Body probe;
   probe.jobPartId = jobPartId;
   if (const Placement* place = PlacementForBody(setup, probe)) {
-    const double c = std::cos(glm::radians(place->rotZdeg));
-    const double sn = std::sin(glm::radians(place->rotZdeg));
+    const double c = std::cos(glm::radians(place->rotZdeg.value));
+    const double sn = std::sin(glm::radians(place->rotZdeg.value));
     glm::dmat4 t(1.0);
     t[0][0] = c;
     t[0][1] = sn;
@@ -678,7 +678,7 @@ bool SolveFixtureSeat(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
   const glm::dvec2 nose = NoseOf(fixtureModel, sf);
   const glm::dvec2 in = InwardOf(seat.edge);
   const double turn = std::atan2(in.y, in.x) - std::atan2(nose.y, nose.x) +
-                      glm::radians(seat.spinDeg);
+                      glm::radians(seat.spinDeg.value);
   double reach = 0.0;
   glm::dvec2 turned(0.0);
   if (!TurnedFace(sf, turn, in, reach, turned))

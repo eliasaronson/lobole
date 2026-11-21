@@ -101,7 +101,8 @@ void ReadPlacement(const nlohmann::json& pl, Placement& out,
                              "rotate_deg: [x, y, z]}, not " +
                              pl.dump());
   for (const auto& [key, value] : pl.items())
-    if (key != "translate_mm" && key != "rotate_deg")
+    if (key != "translate_mm" && key != "rotate_deg" &&
+        key != "translate_mm_expr" && key != "rotate_deg_expr")
       throw std::runtime_error(who + ": placement has no '" + key +
                                "'; it takes translate_mm and rotate_deg");
   const auto triple = [&](const char* key, glm::dvec3& into) {

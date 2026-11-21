@@ -873,7 +873,7 @@ void DrawCamTransportWindow(AppState& state) {
                           : (state.camCursor == tl.End() ? "done" : "moving"));
     ImGui::SameLine();
     if (tool != nullptr)
-      ImGui::TextDisabled("T%d %.3g mm", tool->number, tool->diameter);
+      ImGui::TextDisabled("T%d %.3g mm", tool->number, tool->diameter.value);
     else
       ImGui::TextDisabled("T%d", move->tool);
     if (move->rapid)

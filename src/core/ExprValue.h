@@ -167,6 +167,11 @@ void VisitVec3Exprs(const ExprVisitor& visit, glm::dvec3& v, Vec3Exprs& texts,
 [[nodiscard]] inline bool AnyBound(const Vec3Exprs& t) {
   return !t[0].empty() || !t[1].empty() || !t[2].empty();
 }
+// The same for a point on a sheet or in a setup's plane: [x, y].
+using Vec2Exprs = std::array<std::string, 2>;
+[[nodiscard]] inline bool AnyBound(const Vec2Exprs& t) {
+  return !t[0].empty() || !t[1].empty();
+}
 
 // Evaluates a bound slot over `symbols` into its value; a literal is left
 // alone. On failure the last good value stays and `why` gets the engine's
@@ -196,6 +201,7 @@ inline int format_as(const ExprInt& v) { return v.value; }
 // answer that shows the number writes. A document's file writes both keys,
 // through WriteExpr.
 void to_json(nlohmann::json& j, const ExprValue& v);
+void to_json(nlohmann::json& j, const ExprInt& v);
 
 // Only `<key>_expr`, when bound: for a value written under its own condition.
 void WriteExprText(nlohmann::json& j, const std::string& key,
@@ -245,6 +251,9 @@ std::vector<std::string> ReadExprTexts(const nlohmann::json& j,
 void WriteVec3Exprs(nlohmann::json& j, const std::string& key,
                     const Vec3Exprs& texts);
 Vec3Exprs ReadVec3Exprs(const nlohmann::json& j, const std::string& key);
+void WriteVec2Exprs(nlohmann::json& j, const std::string& key,
+                    const Vec2Exprs& texts);
+Vec2Exprs ReadVec2Exprs(const nlohmann::json& j, const std::string& key);
 // A list of points' texts: `<key>_expr` as one [x, y, z] of texts per point,
 // written only when one is bound. Read gives `n` entries, all empty when the
 // key is absent, and refuses another length or an entry that is not three
@@ -253,6 +262,16 @@ void WritePointExprs(nlohmann::json& j, const std::string& key,
                      const std::vector<Vec3Exprs>& texts);
 std::vector<Vec3Exprs> ReadPointExprs(const nlohmann::json& j,
                                       const std::string& key, size_t n);
+
+// A slot's text, put beside its number in `root` by the slot's path
+// ("stock/margin/1" is entry 1 of `stock.margin_expr`, "tools/0/diameter"
+// `tools[0].diameter_expr`), the format's convention for each shape. Only
+// where the number itself is there (a writer writes a bound number whatever
+// its value) and only when bound; an array's texts are "" where not bound.
+void WriteSlotText(nlohmann::json& root, const ExprSlot& slot);
+// The reverse: the text from beside the slot's number in `root`, empty when
+// there is none; one that is not text is refused naming its key.
+void ReadSlotText(const nlohmann::json& root, const ExprSlot& slot);
 
 // The RPC's reader for a number a method sets: `<key>` as a number, or as a
 // string (the older spelling the FEM methods took, kept as an alias), and

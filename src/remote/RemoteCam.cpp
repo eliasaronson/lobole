@@ -22,7 +22,9 @@
 #include "core/cam/CamSim.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
+#include "core/cam/JobDocument.h"
 #include "core/io/Serialization.h"
+#include "remote/ExprArgs.h"
 #include "remote/RemoteHelpers.h" // UniqueNamed
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
@@ -193,7 +195,8 @@ constexpr MethodDoc kCamMethods[] = {
      "clamps THIS part with that face at the spindle -- so one sheet can hold "
      "a baffle on its face beside a rail on its edge. It says nothing about "
      "the machine: no A word is posted.",
-     "enabled, job, lay_face_up, part, pos, rot_z, setup"},
+     "enabled, job, lay_face_up, part, pos, rot_z, setup, pos_expr, "
+     "rot_z_expr"},
     {"add_job_fixture",
      "Put a FIXTURE in a setup {setup, part: id or name | box: [x,y,z] mm, "
      "side?: -x|+x|-y|+y|centre|top, pos?: [x,y,z] mm in setup space, "
@@ -208,9 +211,12 @@ constexpr MethodDoc kCamMethods[] = {
      "the -X edge (a toe clamp's arm). With neither, it is centred when it "
      "is wider than the stock and otherwise takes the next free side. Safe "
      "Z is re-derived to clear it. A part the job CUTS is refused.",
-     "box, job, name, part, pos, rot_z, setup, side", remote::NoFlags,
+     "box, job, name, part, pos, rot_z, setup, side, box_expr, pos_expr, "
+     "rot_z_expr",
+     remote::NoFlags,
      "box?:number[], enabled:bool, id:int, name:string, pos:number[], "
-     "rot_z:number, safe_z:number, setup:int, part?:int"},
+     "rot_z:number, safe_z:number, setup:int, part?:int, box_expr?:string[], "
+     "pos_expr?:string[], rot_z_expr?:string"},
     {"set_job_fixture",
      "Move or change a fixture {setup, fixture: id, pos?: [x,y,z] mm in "
      "setup space, side?: -x|+x|-y|+y|centre|top (re-derive against the "
@@ -225,12 +231,15 @@ constexpr MethodDoc kCamMethods[] = {
      "whenever the stock changes. null stands it back on its own at the pose "
      "it has. A seat with pos, side or rot_z is refused. Safe Z is "
      "re-derived.",
-     "box, enabled, fixture, job, name, pos, rot_z, seat, setup, side",
+     "box, enabled, fixture, job, name, pos, rot_z, seat, setup, side, "
+     "box_expr, pos_expr, rot_z_expr",
      remote::NoFlags,
      "enabled:bool, id:int, name:string, part?:int, pos:number[], "
      "rot_z:number, safe_z:number, setup:int, seat?:{along_mm:number, "
      "edge:string, element:string, feature_id:int, over_mm:number, "
-     "spin_deg:number}, box?:number[]"},
+     "spin_deg:number, along_mm_expr?:string, over_mm_expr?:string, "
+     "spin_deg_expr?:string}, box?:number[], box_expr?:string[], "
+     "pos_expr?:string[], rot_z_expr?:string"},
     {"remove_job_fixture",
      "Take a fixture off a setup {setup, fixture: id}. Safe Z is re-derived.",
      "fixture, job, setup"},
@@ -243,7 +252,7 @@ constexpr MethodDoc kCamMethods[] = {
      "most of them. `machine` puts one of your machines (list_machines) on "
      "it -- post, arcs, rotary axis, work area, rapid -- and the setup "
      "EMBEDS a copy, so the job file opens anywhere.",
-     "job, machine, name, post, safe_z"},
+     "job, machine, name, post, safe_z, safe_z_expr"},
     {"list_cam_setups",
      "Every setup: id, name, post, safe_z, origin (Z zero), reach_offset "
      "([x,y] mm, where the bed is on the sheet), top_face (the "
@@ -264,7 +273,9 @@ constexpr MethodDoc kCamMethods[] = {
      "name:string, operations:object[], order:string, origin:number[], "
      "origin_at:string, post:string, reach_offset:number[], "
      "rotation_a:number, safe_z:number, split_output:bool, "
-     "stock?:object, tailstock:int, tools:object[], top_face?:object}[]"},
+     "stock?:object, tailstock:int, tools:object[], top_face?:object, "
+     "grip_mm_expr?:string, reach_offset_expr?:string[], "
+     "rotation_a_expr?:string, safe_z_expr?:string}[]"},
     {"set_cam_setup",
      "Change a setup {id, name?, machine?: name, post?, safe_z?, "
      "lay_face_up?: {feature_id, "
@@ -390,7 +401,7 @@ constexpr MethodDoc kCamMethods[] = {
      "chuck, fit_arcs, flip, grip_mm, has_rotary_axis, held_in, holding, id, "
      "lay_face_up, machine, name, order, origin_at, post, reach_offset, "
      "rotary, rotation_a, safe_z, split_output, job, stock, tailstock, "
-     "tool"},
+     "tool, grip_mm_expr, reach_offset_expr, rotation_a_expr, safe_z_expr"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id, job"},
     {"add_cam_op",
      "Add an operation. Every length here is MILLIMETRES — top_z, bottom_z, "
@@ -501,7 +512,13 @@ constexpr MethodDoc kCamMethods[] = {
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "passes, width_mm, z_step_mm"},
+     "passes, width_mm, z_step_mm, "
+     "bottom_z_expr, cut_angle_deg_expr, depth_mm_expr, "
+     "drilled_bores_expr, edge_size_expr, finish_stock_expr, "
+     "index_a_deg_expr, lead_mm_expr, passes_expr, peck_expr, "
+     "sample_step_mm_expr, stepdown_expr, stepover_expr, "
+     "stock_to_leave_expr, top_z_expr, width_mm_expr, "
+     "z_step_mm_expr"},
     {"set_cam_op",
      "Change an operation {id, …the add_cam_op fields, whose lengths — "
      "stepdown, edge_size and the rest — are MILLIMETRES, while stepover is a "
@@ -521,7 +538,13 @@ constexpr MethodDoc kCamMethods[] = {
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "passes, width_mm, z_step_mm"},
+     "passes, width_mm, z_step_mm, "
+     "bottom_z_expr, cut_angle_deg_expr, depth_mm_expr, "
+     "drilled_bores_expr, edge_size_expr, finish_stock_expr, "
+     "index_a_deg_expr, lead_mm_expr, passes_expr, peck_expr, "
+     "sample_step_mm_expr, stepdown_expr, stepover_expr, "
+     "stock_to_leave_expr, top_z_expr, width_mm_expr, "
+     "z_step_mm_expr"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
      "setup's new order. Operation order IS the cutting sequence — the "
@@ -546,7 +569,13 @@ constexpr MethodDoc kCamMethods[] = {
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "passes, width_mm, z_step_mm"},
+     "passes, width_mm, z_step_mm, "
+     "bottom_z_expr, cut_angle_deg_expr, depth_mm_expr, "
+     "drilled_bores_expr, edge_size_expr, finish_stock_expr, "
+     "index_a_deg_expr, lead_mm_expr, passes_expr, peck_expr, "
+     "sample_step_mm_expr, stepdown_expr, stepover_expr, "
+     "stock_to_leave_expr, top_z_expr, width_mm_expr, "
+     "z_step_mm_expr"},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup, async?} without writing a file: "
      "per operation, the move count, cut length (mm, the tool TIP's path: "
@@ -970,6 +999,63 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
   (void)state;
 }
 
+// ---- Numbers that are expressions ----------------------------------------
+// (docs/cam/README.md#numbers-that-are-expressions): every number a job
+// method sets takes `<key>_expr` beside it, evaluated over the project's
+// variables when the call arrives (remote/ExprArgs.h), and the getters answer
+// each text beside its number.
+
+constexpr const char* kJobScope = "a job reads the project's variables";
+
+// Binds the setup's slots under `prefix` ("tools/2/", "fixtures/0/") to the
+// call's `<param><rest>` texts; with an empty prefix, the setup's own
+// numbers (not its tools', placements', fixtures' or operations').
+void BindSetupSlots(const ExprArgs& ex, cam::Setup& setup,
+                    const std::string& prefix, const std::string& param) {
+  cam::VisitSetupExprs(setup, [&](const std::string&, const ExprSlot& slot) {
+    const std::string& path = slot.Path();
+    if (prefix.empty()) {
+      for (const char* list :
+           {"tools/", "placements/", "fixtures/", "operations/"})
+        if (path.starts_with(list))
+          return;
+    } else if (!path.starts_with(prefix)) {
+      return;
+    }
+    ex.BindAt(param + path.substr(prefix.size()), slot.Expr());
+  });
+}
+
+// An operation's: "tabs/width" from `tabs: {width_expr}`, an index stop's
+// from `index_a_deg_expr`'s entry.
+void BindOpSlots(const ExprArgs& ex, cam::Operation& op) {
+  cam::VisitOpExprs(
+      op, [&](const ExprSlot& slot) { ex.BindAt(slot.Path(), slot.Expr()); });
+}
+
+// The keys an operation's numbers are set under.
+const std::vector<std::string>& OpExprKeys() {
+  static const std::vector<std::string> keys = [] {
+    std::vector<std::string> k = {"top_z",      "bottom_z",    "tabs/count",
+                                  "tabs/width", "tabs/height", "index_a_deg"};
+    for (const cam::OpFieldRow& row : cam::OpFieldRows())
+      if ((std::holds_alternative<ExprValue cam::Operation::*>(row.member) ||
+           std::holds_alternative<ExprInt cam::Operation::*>(row.member)) &&
+          std::string_view(row.key) != "tabs")
+        k.emplace_back(row.key);
+    return k;
+  }();
+  return keys;
+}
+
+// The setup's texts in a getter's JSON of it, where its keys are the file's.
+void AnswerSetupTexts(json& sj, const cam::Setup& setup) {
+  cam::VisitSetupExprs(const_cast<cam::Setup&>(setup),
+                       [&](const std::string&, const ExprSlot& slot) {
+                         WriteSlotText(sj, slot);
+                       });
+}
+
 json ToolJson(const cam::Tool& t) {
   // Everything set_setup accepts comes back out. `flute_length` and the
   // chipload pair used to go in and vanish, so a caller could not read back
@@ -996,7 +1082,11 @@ json ToolJson(const cam::Tool& t) {
     j["neck_diameter"] = t.neckDiameter;
     j["neck_length"] = t.neckLength;
   }
-  return j;
+  cam::Setup one; // the tool's texts, at its keys
+  one.tools = {t};
+  json wrap = {{"tools", json::array({j})}};
+  AnswerSetupTexts(wrap, one);
+  return wrap["tools"][0];
 }
 
 // Whether an op's tools reach its depth (cam::ReachCheck,
@@ -1048,6 +1138,8 @@ json OpJson(const cam::Operation& op) {
       j["targets"].push_back(std::move(tj));
     }
   }
+  cam::VisitOpExprs(const_cast<cam::Operation&>(op),
+                    [&](const ExprSlot& slot) { WriteSlotText(j, slot); });
   return j;
 }
 
@@ -1090,7 +1182,11 @@ json FixtureJson(const cam::Fixture& f) {
                  {"along_mm", f.seat->alongMm},
                  {"over_mm", f.seat->overMm},
                  {"spin_deg", f.seat->spinDeg}};
-  return j;
+  cam::Setup one; // the fixture's texts, at its keys
+  one.fixtures = {f};
+  json wrap = {{"fixtures", json::array({j})}};
+  AnswerSetupTexts(wrap, one);
+  return wrap["fixtures"][0];
 }
 
 glm::dvec3 RequireBoxSize(const json& v) {
@@ -1789,6 +1885,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                                   {"enabled", pl.enabled},
                                   {"frame", {f.x, f.y, f.z, f.w}},
                                   {"clamped_per_part", pl.frame.has_value()}});
+            WriteVec2Exprs(places.back(), "pos", pl.posExpr);
+            WriteExprText(places.back(), "rot_z", pl.rotZdeg.expr);
           }
       pj["placements"] = std::move(places);
       out.push_back(std::move(pj));
@@ -1875,6 +1973,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // `job` is read in the preamble, before the active job is looked up --
     // one place for every branch, and invisible to the scanner from here.
     // rpc-params: job
+    // rpc-params: pos_expr, rot_z_expr
+    const ExprArgs ex(p, {"pos", "rot_z"}, state.projectSymbols, kJobScope);
+    const RpcParams& p = ex.Params();
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     const uint64_t partId = p.at("part").get<uint64_t>();
     if (job->FindPart(partId) == nullptr)
@@ -1901,6 +2002,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       place->rotZdeg = p.at("rot_z").get<double>();
     if (p.contains("enabled"))
       place->enabled = p.at("enabled").get<bool>();
+    ex.Bind("pos", place->posExpr[0], 0);
+    ex.Bind("pos", place->posExpr[1], 1);
+    ex.Bind("rot_z", place->rotZdeg.expr);
     if (p.contains("lay_face_up")) {
       ElementRef ref;
       ref.featureId = p.at("lay_face_up").value("feature_id", uint64_t{0});
@@ -1926,11 +2030,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const glm::dquat f = cam::FixtureFrame(setup, partId);
     out["frame"] = {f.x, f.y, f.z, f.w};
     out["clamped_per_part"] = place->frame.has_value();
+    WriteVec2Exprs(out, "pos", place->posExpr);
+    WriteExprText(out, "rot_z", place->rotZdeg.expr);
     return out;
   }
 
   if (m == "add_job_fixture") {
     // rpc-params: job
+    // rpc-params: box_expr, pos_expr, rot_z_expr
+    const ExprArgs ex(p, {"box", "pos", "rot_z"}, state.projectSymbols,
+                      kJobScope);
+    const RpcParams& p = ex.Params();
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     if (p.contains("part") == p.contains("box"))
       throw std::runtime_error(
@@ -1985,6 +2095,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
             "there is no stock to place a fixture against yet; add a part "
             "to the job first");
     }
+    for (int k = 0; k < 3; k++) {
+      ex.Bind("box", f.boxExpr[static_cast<size_t>(k)], k);
+      ex.Bind("pos", f.posExpr[static_cast<size_t>(k)], k);
+    }
+    ex.Bind("rot_z", f.rotZdeg.expr);
     setup.fixtures.push_back(f);
     ui::CamFixturesChanged(state, setup);
     json out = FixtureJson(f);
@@ -1995,6 +2110,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
   if (m == "set_job_fixture") {
     // rpc-params: job
+    // rpc-params: box_expr, pos_expr, rot_z_expr
+    const ExprArgs ex(p,
+                      {"box", "pos", "rot_z", "seat/along_mm", "seat/over_mm",
+                       "seat/spin_deg"},
+                      state.projectSymbols, kJobScope);
+    const RpcParams& p = ex.Params();
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     cam::Fixture& f = RequireFixture(setup, p.at("fixture").get<uint64_t>());
     // Validate everything before changing anything: a refused call leaves
@@ -2077,6 +2198,18 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       f.pos = *pos;
     if (seat)
       f.seat = *seat; // CamFixturesChanged below solves it into pos/rot_z
+    for (int k = 0; k < 3; k++) {
+      ex.Bind("box", f.boxExpr[static_cast<size_t>(k)], k);
+      ex.Bind("pos", f.posExpr[static_cast<size_t>(k)], k);
+    }
+    ex.Bind("rot_z", f.rotZdeg.expr);
+    if (side) // placed against a side: its pose is that side's
+      f.posExpr = {};
+    if (f.seat) {
+      ex.Bind("seat/along_mm", f.seat->alongMm.expr);
+      ex.Bind("seat/over_mm", f.seat->overMm.expr);
+      ex.Bind("seat/spin_deg", f.seat->spinDeg.expr);
+    }
     if (side && !cam::PlaceFixture(setup, ui::JobBodies(state),
                                    ui::FixtureModelBodies(state, f), f.rotZdeg,
                                    *side, f.pos))
@@ -2106,6 +2239,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // The machine is resolved BEFORE the setup exists: a refused name used to
     // leave a half-made setup behind the error, which the panel then showed
     // as "no machine chosen" while the caller believed nothing had happened.
+    // rpc-params: safe_z_expr
+    const ExprArgs ex(p, {"safe_z"}, state.projectSymbols, kJobScope);
+    const RpcParams& p = ex.Params();
     const cam::Machine* named = nullptr;
     if (p.contains("machine")) {
       const std::string want = p.at("machine").get<std::string>();
@@ -2140,13 +2276,18 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       setup.machine.post = *post;
     if (safeZ)
       setup.safeZ = *safeZ;
-    return json{{"id", setup.id},
-                {"name", setup.name},
-                {"post", setup.machine.post},
-                {"machine", DocumentIO::MachineToJson(setup.machine)},
-                {"machine_match",
-                 MatchName(cam::MatchMachine(state.machines, setup.machine))},
-                {"safe_z", setup.safeZ}};
+    ex.Bind("safe_z", setup.safeZ.expr);
+    json texts = json::object();
+    WriteExprText(texts, "safe_z", setup.safeZ.expr);
+    json out{{"id", setup.id},
+             {"name", setup.name},
+             {"post", setup.machine.post},
+             {"machine", DocumentIO::MachineToJson(setup.machine)},
+             {"machine_match",
+              MatchName(cam::MatchMachine(state.machines, setup.machine))},
+             {"safe_z", setup.safeZ}};
+    out.update(texts);
+    return out;
   }
 
   if (m == "list_cam_setups") {
@@ -2235,6 +2376,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       sj["fixtures"] = json::array();
       for (const cam::Fixture& f : setup.fixtures)
         sj["fixtures"].push_back(FixtureJson(f));
+      AnswerSetupTexts(sj, setup);
       out.push_back(std::move(sj));
     }
     return json{{"setups", out}};
@@ -2244,6 +2386,23 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // `job` is read in the preamble, before the active job is looked up --
     // one place for every branch, and invisible to the scanner from here.
     // rpc-params: job
+    // Each number's text beside it, evaluated now over the project's
+    // variables (docs/cam/README.md#numbers-that-are-expressions).
+    // rpc-params: safe_z_expr, rotation_a_expr, grip_mm_expr, reach_offset_expr
+    static const std::vector<std::string> kKeys = [] {
+      std::vector<std::string> k = {
+          "safe_z",       "rotation_a", "grip_mm",     "reach_offset",
+          "stock/margin", "stock/size", "stock/place", "stock/bottom_margin"};
+      for (const char* t :
+           {"diameter", "tip_angle", "flutes", "flute_length", "feed_cut",
+            "feed_plunge", "spindle_rpm", "chipload_min", "chipload_max",
+            "overall_length", "collar_diameter", "shank_diameter", "tip_flat",
+            "neck_diameter", "neck_length"})
+        k.push_back(std::string("tool/") + t);
+      return k;
+    }();
+    const ExprArgs ex(p, kKeys, state.projectSymbols, kJobScope);
+    const RpcParams& p = ex.Params();
     cam::Setup& setup = RequireSetup(*job, p.at("id").get<uint64_t>());
     if (p.contains("name"))
       setup.name = p.at("name").get<std::string>();
@@ -2442,7 +2601,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         (p.contains("stock") || p.contains("held_in") ||
          p.contains("rotation_a") || p.contains("has_rotary_axis") ||
          p.contains("machine")))
-      setup.safeZ = std::max(setup.safeZ, ui::DeriveJobSafeZ(state, setup));
+      setup.safeZ =
+          std::max(setup.safeZ.value, ui::DeriveJobSafeZ(state, setup));
     if (p.contains("fit_arcs"))
       setup.machine.fitArcs = p.at("fit_arcs").get<bool>();
     if (p.contains("split_output"))
@@ -2489,24 +2649,27 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         next = *existing;
       cam::Tool* tool = &next;
       tool->name = tj.value("name", tool->name);
-      tool->diameter = tj.value("diameter", tool->diameter);
+      tool->diameter = tj.value("diameter", tool->diameter.value);
       const bool wasThreadMill = tool->type == cam::ToolType::ThreadMill;
       if (tj.contains("tool_type"))
         tool->type = ToolTypeFrom(tj.at("tool_type").get<std::string>());
-      tool->tipAngleDeg = tj.value("tip_angle", tool->tipAngleDeg);
-      tool->flutes = tj.value("flutes", tool->flutes);
-      tool->fluteLength = tj.value("flute_length", tool->fluteLength);
-      tool->feedCut = tj.value("feed_cut", tool->feedCut);
-      tool->feedPlunge = tj.value("feed_plunge", tool->feedPlunge);
-      tool->spindleRpm = tj.value("spindle_rpm", tool->spindleRpm);
-      tool->chiploadMin = tj.value("chipload_min", tool->chiploadMin);
-      tool->chiploadMax = tj.value("chipload_max", tool->chiploadMax);
-      tool->overallLength = tj.value("overall_length", tool->overallLength);
-      tool->collarDiameter = tj.value("collar_diameter", tool->collarDiameter);
-      tool->shankDiameter = tj.value("shank_diameter", tool->shankDiameter);
-      tool->tipFlat = tj.value("tip_flat", tool->tipFlat);
-      tool->neckDiameter = tj.value("neck_diameter", tool->neckDiameter);
-      tool->neckLength = tj.value("neck_length", tool->neckLength);
+      tool->tipAngleDeg = tj.value("tip_angle", tool->tipAngleDeg.value);
+      tool->flutes = tj.value("flutes", tool->flutes.value);
+      tool->fluteLength = tj.value("flute_length", tool->fluteLength.value);
+      tool->feedCut = tj.value("feed_cut", tool->feedCut.value);
+      tool->feedPlunge = tj.value("feed_plunge", tool->feedPlunge.value);
+      tool->spindleRpm = tj.value("spindle_rpm", tool->spindleRpm.value);
+      tool->chiploadMin = tj.value("chipload_min", tool->chiploadMin.value);
+      tool->chiploadMax = tj.value("chipload_max", tool->chiploadMax.value);
+      tool->overallLength =
+          tj.value("overall_length", tool->overallLength.value);
+      tool->collarDiameter =
+          tj.value("collar_diameter", tool->collarDiameter.value);
+      tool->shankDiameter =
+          tj.value("shank_diameter", tool->shankDiameter.value);
+      tool->tipFlat = tj.value("tip_flat", tool->tipFlat.value);
+      tool->neckDiameter = tj.value("neck_diameter", tool->neckDiameter.value);
+      tool->neckLength = tj.value("neck_length", tool->neckLength.value);
       if (tool->diameter <= 0.0)
         throw std::runtime_error("tool diameter must be positive");
       if (tool->type == cam::ToolType::ThreadMill) {
@@ -2588,11 +2751,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         *existing = next;
       else
         setup.tools.push_back(next);
+      for (size_t k = 0; k < setup.tools.size(); k++)
+        if (setup.tools[k].number == number)
+          BindSetupSlots(ex, setup, "tools/" + std::to_string(k) + "/",
+                         "tool/");
+      BindSetupSlots(ex, setup, "", "");
       json out{{"id", setup.id}};
       if (!warnings.empty())
         out["warnings"] = warnings;
       return out;
     }
+    BindSetupSlots(ex, setup, "", "");
     return json{{"id", setup.id}};
   }
 
@@ -2612,7 +2781,14 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // rpc-params: job
     // Every field of an operation that is not depth or pick is read inside
     // ApplyOpFields, which tools/rpc_params_scan.py FOLLOWS: its own reads
-    // plus every key of the op-field table. No annotation to go stale.
+    // plus every key of the op-field table, and each number's `_expr`.
+    // rpc-params: top_z_expr, bottom_z_expr, stepdown_expr, stepover_expr
+    // rpc-params: stock_to_leave_expr, drilled_bores_expr, peck_expr
+    // rpc-params: edge_size_expr, finish_stock_expr, cut_angle_deg_expr
+    // rpc-params: sample_step_mm_expr, z_step_mm_expr, lead_mm_expr
+    // rpc-params: index_a_deg_expr, width_mm_expr, depth_mm_expr, passes_expr
+    const ExprArgs ex(p, OpExprKeys(), state.projectSymbols, kJobScope);
+    const RpcParams& p = ex.Params();
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     cam::Operation op;
     op.toolNumber = setup.tools.empty() ? 1 : setup.tools.front().number;
@@ -2681,6 +2857,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // point, not a cage. (To force a strategy on a derived operation, set it
     // afterwards with set_cam_op.)
     ApplyOpFields(state, setup, op, p, /*keepType=*/derive);
+    BindOpSlots(ex, op);
     // The derivation read the first target in the setup's own frame; a
     // derived top is the top of what the earlier setups left over ALL of
     // them, and for an op cut at several indices, in each angle's frame.
@@ -2728,12 +2905,20 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // rpc-params: job
     // The add_cam_op fields, all of them through ApplyOpFields (above), which
     // the params scanner follows.
+    // rpc-params: top_z_expr, bottom_z_expr, stepdown_expr, stepover_expr
+    // rpc-params: stock_to_leave_expr, drilled_bores_expr, peck_expr
+    // rpc-params: edge_size_expr, finish_stock_expr, cut_angle_deg_expr
+    // rpc-params: sample_step_mm_expr, z_step_mm_expr, lead_mm_expr
+    // rpc-params: index_a_deg_expr, width_mm_expr, depth_mm_expr, passes_expr
+    const ExprArgs ex(p, OpExprKeys(), state.projectSymbols, kJobScope);
+    const RpcParams& p = ex.Params();
     auto [setup, op] = FindOp(*job, p.at("id").get<uint64_t>());
     if (op == nullptr)
       throw std::runtime_error("no CAM operation with that id");
     // On a copy, so a refusal leaves the op as it was.
     cam::Operation next = *op;
     ApplyOpFields(state, *setup, next, p);
+    BindOpSlots(ex, next);
     const json warnings = ReachWarnings(*setup, next);
     *op = next;
     json out{{"id", op->id}};
@@ -3044,7 +3229,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
               ") — entry rapids will pass through stock; raise top_z or "
               "leave it out to derive");
         if (op.type == cam::OpType::Face)
-          top = std::min(top, op.bottomZ);
+          top = std::min(top, op.bottomZ.value);
       }
     }
 

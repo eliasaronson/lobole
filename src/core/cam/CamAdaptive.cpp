@@ -82,7 +82,7 @@ AdaptiveResult ClearImpl(double safeZ, double rapidFeed, const Operation& op,
 
   AdaptivePath::Adaptive2d engine;
   engine.toolDiameter = tool.diameter;
-  engine.stepOverFactor = std::clamp(op.stepover, 0.05, 0.9);
+  engine.stepOverFactor = std::clamp(op.stepover.value, 0.05, 0.9);
   engine.stockToLeave = op.stockToLeave;
   // The same chord tolerance the loops were flattened at: asking for more
   // precision than the input has only costs time.
@@ -210,12 +210,13 @@ AdaptiveResult ClearImpl(double safeZ, double rapidFeed, const Operation& op,
         // machine's traverse rate when it states one: at the cutting feed,
         // links through air were 3.9 of the sampler part's 33 minutes.
         const bool cutting = motion == AdaptivePath::MotionType::mtCutting;
-        result.moves.push_back(
-            {Move::Kind::Cut,
-             {pt.first, pt.second, z},
-             false,
-             0.0,
-             cutting ? tool.feedCut : std::max(tool.feedCut, rapidFeed)});
+        result.moves.push_back({Move::Kind::Cut,
+                                {pt.first, pt.second, z},
+                                false,
+                                0.0,
+                                cutting
+                                    ? tool.feedCut.value
+                                    : std::max(tool.feedCut.value, rapidFeed)});
       }
     }
     if (!result.moves.empty())

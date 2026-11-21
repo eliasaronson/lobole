@@ -289,7 +289,7 @@ glm::dvec2 WorldOnView(AppState& state, const DrawingView& view,
   glm::dvec3 vd, up;
   ViewAxes(view, vd, up);
   return DrawingFoldedPosition(state, view).pos +
-         view.scale * drawing::ProjectPoint(p, vd, up);
+         view.scale.value * drawing::ProjectPoint(p, vd, up);
 }
 
 DrawingView CandidateDetail(AppState& state) {
@@ -304,7 +304,7 @@ DrawingView CandidateDetail(AppState& state) {
   if (const DrawingView* parent = state.drawing->FindView(t.parentViewId)) {
     v.sourceDocId = parent->sourceDocId;
     v.orientation = parent->orientation;
-    v.rotationDeg = parent->rotationDeg;
+    v.rotationDeg = parent->rotationDeg.value; // drawn as the parent is
     v.configuration = parent->configuration;
     v.showHidden = parent->showHidden;
   }

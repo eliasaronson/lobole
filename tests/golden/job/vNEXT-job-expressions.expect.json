@@ -1,0 +1,70 @@
+{
+  "job_parts": [
+    "Plate"
+  ],
+  "cam_op_types": [
+    "profile"
+  ],
+  "expr_texts": [
+    [
+      "setup 'Top'",
+      "cam/0/safe_z",
+      "cutter + 3"
+    ],
+    [
+      "setup 'Top'",
+      "cam/0/grip_mm",
+      "cutter * 2"
+    ],
+    [
+      "setup 'Top'",
+      "cam/0/stock/margin/0",
+      "cutter"
+    ],
+    [
+      "setup 'Top'",
+      "cam/0/stock/margin/1",
+      "cutter"
+    ],
+    [
+      "tool T1 in setup 'Top'",
+      "cam/0/tools/0/diameter",
+      "cutter"
+    ],
+    [
+      "tool T1 in setup 'Top'",
+      "cam/0/tools/0/feed_cut",
+      "cutter * 150"
+    ],
+    [
+      "placement 4 in setup 'Top'",
+      "cam/0/placements/0/pos/0",
+      "cutter + 4"
+    ],
+    [
+      "fixture 'Clamp' in setup 'Top'",
+      "cam/0/fixtures/0/box/2",
+      "cutter * 2.5"
+    ],
+    [
+      "fixture 'Clamp' in setup 'Top'",
+      "cam/0/fixtures/0/rot_z",
+      "quarter"
+    ],
+    [
+      "operation 'Outline' in setup 'Top'",
+      "cam/0/operations/0/bottom_z",
+      "-thickness"
+    ],
+    [
+      "operation 'Outline' in setup 'Top'",
+      "cam/0/operations/0/stepdown",
+      "cutter / 2"
+    ],
+    [
+      "operation 'Outline' in setup 'Top'",
+      "cam/0/operations/0/tabs/count",
+      "tabs"
+    ]
+  ]
+}

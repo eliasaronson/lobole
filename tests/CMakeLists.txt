@@ -79,6 +79,8 @@ add_executable(designer_tests
     test_assembly_loops.cpp
     test_mate_limits.cpp
     test_assembly_exprs.cpp
+    test_job_exprs.cpp
+    test_drawing_exprs.cpp
     test_part_exprs.cpp
     test_assembly_relations.cpp
     test_derived.cpp
@@ -694,6 +696,15 @@ add_test(NAME part_exprs_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/part_exprs_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(part_exprs_smoke PROPERTIES TIMEOUT 120)
+
+# A CAM job's and a drawing's numbers as expressions of the project's
+# variables (docs/cam/README.md#numbers-that-are-expressions,
+# docs/drawings/README.md#numbers-that-are-expressions). Headless; the CAM
+# half is skipped on a build without CAM (ping's features).
+add_test(NAME job_drawing_exprs_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/job_drawing_exprs_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(job_drawing_exprs_smoke PROPERTIES TIMEOUT 180)
 
 add_test(NAME assembly_mates_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_mates_smoke.py

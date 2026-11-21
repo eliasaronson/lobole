@@ -644,8 +644,8 @@ DerivedOp DeriveOperation(const Setup& setup,
     if (const Tool* drill = setup.FindTool(op.toolNumber);
         drill != nullptr && (reachesBottom || !solidBelow())) {
       if (reachesBottom)
-        op.bottomZ = std::min(op.bottomZ, lo.z);
-      op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
+        op.bottomZ = std::min(op.bottomZ.value, lo.z);
+      op.bottomZ.value -= TipHeight(*drill, drill->diameter.value * 0.5);
     } else if (drill != nullptr && holePointDeg < 180.0 - 1e-6) {
       // A BLIND hole whose floor is a drill's point in the model
       // (docs/cam/operations.md#drill): a drill of the hole's size goes on
@@ -656,7 +656,7 @@ DerivedOp DeriveOperation(const Setup& setup,
           drill->type == ToolType::Drill || drill->type == ToolType::VBit;
       const bool plunge = std::abs(drill->diameter - 2.0 * holeRadius) < 1e-3;
       if (pointed && plunge)
-        op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
+        op.bottomZ.value -= TipHeight(*drill, drill->diameter.value * 0.5);
       const std::string floor = "the hole's floor is a " +
                                 Round2(holePointDeg) +
                                 " degree drill point in the model, and tool " +
@@ -1121,7 +1121,7 @@ static double TopOverOneFrame(const Setup& setup,
     const double model = MaxRadiusOver(theirFramed, ta, tb, deflection);
     if (model <= 0.0)
       continue;
-    const double r = model + std::max(0.0, best->stockToLeave) +
+    const double r = model + std::max(0.0, best->stockToLeave.value) +
                      TurnedScallop(*bestTool, best->stepover, model) +
                      deflection;
     // Over the op's box the turned solid is highest where the box comes

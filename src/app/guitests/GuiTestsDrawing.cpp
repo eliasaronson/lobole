@@ -8,6 +8,7 @@
 #include "ui/DrawingActions.h"
 #include "ui/DrawingAnnotate.h"
 #include "ui/DrawingSheet.h"
+#include "ui/VariableActions.h"
 
 #include <chrono>
 
@@ -284,6 +285,74 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->drawing->FindView(firstId) == nullptr);
   };
 
+  // A view's scale is an expression of the project's variables
+  // (docs/drawings/README.md#numbers-that-are-expressions): typed into the
+  // view's Scale menu it KEEPS its text, a change to the variable in the
+  // Variables panel rescales the view, and a picked scale unbinds it.
+  t = IM_REGISTER_TEST(engine, "drawing", "a_view_scale_takes_an_expression");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx);
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts.at(0).id;
+    IM_CHECK(ui::SetProjectVariable(*s_App, "sheet_scale", "0.5", ""));
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New Drawing##adddwg");
+    ctx->Yield(3);
+    IM_CHECK(s_App->drawing != nullptr);
+    DrawingView v;
+    v.name = "Front";
+    v.sourceDocId = partId;
+    v.position = {150.0, 100.0};
+    const uint64_t id = s_App->drawing->AddView(v);
+    ui::ReassembleDrawingViews(*s_App);
+    ctx->Yield(3);
+    const auto view = [&]() -> const DrawingView& {
+      return *s_App->drawing->FindView(id);
+    };
+
+    const std::string row = "//###Model/**/###dwg_view_" + std::to_string(id);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->SetRef("//$FOCUSED");
+    ctx->ItemClick("###dwg_view_scale");
+    ctx->Yield(2);
+    // The submenu is a window of its own, named by its depth.
+    ctx->ItemInputValue("//###Menu_00/###dwg_view_scale_value",
+                        "sheet_scale * 2");
+    ctx->Yield(3);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(view().scale.expr.c_str(), "sheet_scale * 2");
+    IM_CHECK(std::abs(view().scale.value - 1.0) < 1e-9);
+
+    ImGuiWindow* vars = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(vars != nullptr && vars->DockNode != nullptr);
+    ctx->ItemClick(vars->TabId);
+    ctx->Yield(2);
+    ctx->ItemInputValue(
+        "//###Variables/###vars_table/###var_expr_project_sheet_scale", "0.25");
+    ctx->Yield(3);
+    IM_CHECK_STR_EQ(view().scale.expr.c_str(), "sheet_scale * 2");
+    IM_CHECK(std::abs(view().scale.value - 0.5) < 1e-9);
+    IM_CHECK(s_App->drawing->ExprProblems().empty());
+
+    // A scale picked from the menu is a number: the text goes.
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->SetRef("//$FOCUSED");
+    ctx->MenuClick(
+        ("###dwg_view_scale/###dwg_scale_" + std::to_string(2.0)).c_str());
+    ctx->Yield(3);
+    IM_CHECK(view().scale.expr.empty());
+    IM_CHECK_EQ(view().scale.value, 2.0);
+  };
+
   // A datum feature and the frames that name it, by clicking
   // (docs/drawings/guide.md#in-the-gui): the pick is the feature, the symbol
   // stands clear of the view where a drag moves it, the defaults come from
@@ -467,14 +536,14 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(tool.parentViewId, front);
     const double px = 1.5 / s_App->sheetView.scale; // a pixel and a half
     ctx->LogInfo("radius %.3f mm at %g:1, detail at %g", tool.radius,
-                 parent.scale, tool.scale);
+                 parent.scale.value, tool.scale);
     IM_CHECK(std::abs(tool.radius * parent.scale - 6.0) < px);
     // The circle is where the press was.
     glm::dvec3 vd, up;
     ViewAxes(parent, vd, up);
     const glm::dvec2 centre =
         ui::DrawingFoldedPosition(*s_App, parent).pos +
-        parent.scale * drawing::ProjectPoint(tool.center, vd, up);
+        parent.scale.value * drawing::ProjectPoint(tool.center, vd, up);
     IM_CHECK(glm::length(centre - at) < px);
     // An enlarging standard scale, the next letter, a place off the views.
     IM_CHECK(tool.scale >= 2.0 * parent.scale - 1e-9);

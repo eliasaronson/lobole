@@ -693,8 +693,10 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
   // enforces safe Z before an index too, but a toolpath that arrives
   // already retracted is one the post never has to correct -- and here
   // the retract is RADIAL, so "safe" is a radius outside the blank.
-  const double safeR = std::max(blankR, rad) + std::max(2.0, tool.diameter);
-  const double pitch = std::clamp(op.stepover, 0.02, 0.95) * tool.diameter;
+  const double safeR =
+      std::max(blankR, rad) + std::max(2.0, tool.diameter.value);
+  const double pitch =
+      std::clamp(op.stepover.value, 0.02, 0.95) * tool.diameter.value;
 
   // Entries (docs/cam/operations.md#surface-entries): rapid radially down to
   // just above what is known to be left, then the plunge feed -- not the
@@ -1034,7 +1036,7 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
   {
     glm::dvec3 slo(0.0), shi(0.0);
     if (StockBoundsFramed(setup, bodies, slo, shi))
-      stockTop = std::min(setup.safeZ, shi.z + clear);
+      stockTop = std::min(setup.safeZ.value, shi.z + clear);
   }
   std::function<double(const glm::dvec3&)> floorAt = [&](const glm::dvec3&) {
     return stockTop;
@@ -1153,7 +1155,8 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
       floors.push_back(f);
     floors.push_back(-1e18); // the last layer: the target itself
     ParallelRequest req;
-    req.stepover_mm = std::clamp(op.stepover, 0.02, 0.95) * tool.diameter;
+    req.stepover_mm =
+        std::clamp(op.stepover.value, 0.02, 0.95) * tool.diameter.value;
     req.sampleStep_mm = op.sampleStep;
     req.cutAngleDeg = op.cutAngleDeg;
     req.floorZ = masked;
@@ -1212,7 +1215,8 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
   std::string why;
   if (op.type == OpType::SurfaceParallel) {
     ParallelRequest req;
-    req.stepover_mm = std::clamp(op.stepover, 0.02, 0.95) * tool.diameter;
+    req.stepover_mm =
+        std::clamp(op.stepover.value, 0.02, 0.95) * tool.diameter.value;
     req.sampleStep_mm = op.sampleStep;
     req.cutAngleDeg = op.cutAngleDeg;
     req.floorZ = drop.floorZ;
@@ -1250,15 +1254,16 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
       p.z += lift;
       // A finishing pass never goes deeper than it was told to, whatever the
       // surface says -- the same rule DepthPasses follows for a level.
-      p.z = std::max(p.z, op.bottomZ);
+      p.z = std::max(p.z, op.bottomZ.value);
     }
   }
   // Two stepovers: a neighbouring pass is one away, and a zigzag's turn puts
   // its start at the same end of it. Anything beyond that is a gap the tool
   // has to lift over.
-  const double step = op.type == OpType::SurfaceParallel
-                          ? std::clamp(op.stepover, 0.02, 0.95) * tool.diameter
-                          : (op.zStep > 0.0 ? op.zStep : tool.diameter * 0.1);
+  const double step =
+      op.type == OpType::SurfaceParallel
+          ? std::clamp(op.stepover.value, 0.02, 0.95) * tool.diameter.value
+          : (op.zStep > 0.0 ? op.zStep : tool.diameter * 0.1);
   EmitSurfacePasses(tp, setup, tool, passes, step * 2.0, floorAt);
 }
 

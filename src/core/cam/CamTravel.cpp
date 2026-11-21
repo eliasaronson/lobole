@@ -717,7 +717,7 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
   // `finishStock` on the wall; the finish takes it with the finishing tool
   // in one full-depth pass along the final boundary.
   Operation rough = op;
-  rough.stockToLeave += op.finishStock;
+  rough.stockToLeave.value += op.finishStock.value;
   // On the WALL only: the profile reads stock-to-leave in Z as well, and a
   // rough that stopped short of the floor left a 0.6 mm step in the stock
   // beyond the finishing tool's reach -- reported as leftover on a correct
@@ -728,7 +728,7 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
   // cut the finish stock UNDER the floor -- the pan/tilt base plate's
   // bearing seat was roughed 0.2 mm under its shoulder.
   if (op.type != OpType::Drill && op.type != OpType::EdgeRound)
-    rough.bottomZ -= op.finishStock;
+    rough.bottomZ.value -= op.finishStock.value;
   rough.cornerRelief = CornerRelief::None; // the finish clears the corners
   rough.leadArcs = false;
   // Compensation is for the wall the finish leaves: the rough's wall is

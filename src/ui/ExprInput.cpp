@@ -523,4 +523,23 @@ bool ExprInputDouble3(AppState& state, const char* label, double v[3],
   return changed;
 }
 
+bool ExprBoundInt(AppState& state, const char* label, ExprInt* v, float speed,
+                  int vmin, int vmax) {
+  double shown = v->value;
+  std::string text = v->expr;
+  if (!ExprBoundDrag(state, label, &shown, &text, speed, vmin, vmax, "%.0f"))
+    return false;
+  if (shown != std::round(shown)) { // a count is whole, never rounded
+    state.sketchEdit.actionMsg =
+        std::string(label).substr(0, std::string(label).find("##")) +
+        ": a count is a whole number, and this "
+        "comes out " +
+        std::to_string(shown);
+    return false;
+  }
+  v->value = static_cast<int>(std::lround(shown));
+  v->expr = text;
+  return true;
+}
+
 } // namespace ui

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/ElementMap.h"
+#include "core/ExprValue.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -50,19 +51,19 @@ enum class ToolType {
 struct Tool {
   int number = 1; // T-word; also how a post addresses it
   std::string name;
-  double diameter = 6.0; // mm
+  ExprValue diameter{6.0}; // mm
   ToolType type = ToolType::Flat;
   // Included angle at the point, for the two conical types. 90° is the
   // common chamfer bit; a drill is usually 118°.
-  double tipAngleDeg = 90.0;
-  int flutes = 2;
-  double fluteLength = 20.0; // mm, the usable depth
+  ExprValue tipAngleDeg{90.0};
+  ExprInt flutes{2};
+  ExprValue fluteLength{20.0}; // mm, the usable depth
   // Feeds and speeds are NOT computed from a chip-load formula: this app
   // does not know the machine's rigidity, and a wrong number here breaks a
   // tool. They are what the user actually runs.
-  double feedCut = 300.0;    // mm/min in XY
-  double feedPlunge = 100.0; // mm/min in Z
-  double spindleRpm = 10000.0;
+  ExprValue feedCut{300.0};    // mm/min in XY
+  ExprValue feedPlunge{100.0}; // mm/min in Z
+  ExprValue spindleRpm{10000.0};
   // What THIS cutter wants per tooth, in mm, when somebody knows -- a tool
   // vendor's chart for this cutter in the material this setup cuts. Zero (the
   // default) means nobody said, and the check falls back to a scaling rule off
@@ -76,8 +77,8 @@ struct Tool {
   // published as vendor copyright. So we ship a conservative rule and let the
   // real numbers be typed in beside the feed they belong to -- and a machine's
   // tool library carries them into every new setup for free.
-  double chiploadMin = 0.0;
-  double chiploadMax = 0.0;
+  ExprValue chiploadMin{0.0};
+  ExprValue chiploadMax{0.0};
   // The rest of the assembly, above the flutes: how far the cutter sticks out
   // of the collet in total, and how wide the thing it sticks out of is. Both
   // zero (the default) means nobody said, and nothing is checked -- the same
@@ -89,8 +90,8 @@ struct Tool {
   // stepped cone and an ISO30 holder is a taper, and modelling either would
   // ask the operator for a drawing they do not have in order to answer a
   // question a cylinder already answers conservatively.
-  double overallLength = 0.0;  // mm, tip to the collar's underside
-  double collarDiameter = 0.0; // mm, the collet nut / holder, at its widest
+  ExprValue overallLength{0.0};  // mm, tip to the collar's underside
+  ExprValue collarDiameter{0.0}; // mm, the collet nut / holder, at its widest
   // How wide the tool is ABOVE its flutes, from the top of the flutes up to
   // the collar. Zero (the default) means nobody said, and the tool is taken
   // to be the cutter's width all the way up -- the assumption every check
@@ -99,14 +100,14 @@ struct Tool {
   // length along a wall that part does not rub, it HITS: the cut is narrower
   // than the thing being driven into it. Narrower is a necked tool, made to
   // reach past its flutes (docs/cam/setup.md#reach).
-  double shankDiameter = 0.0;
+  ExprValue shankDiameter{0.0};
   // A thread mill's head (ToolType::ThreadMill, v145): the flat its V is
   // truncated to at the cutting diameter, and the neck the head sits on --
   // narrower than the head, so it passes inside the thread's crests, and
   // long enough to reach the thread's bottom. Read by nothing else.
-  double tipFlat = 0.0;      // mm, axial width of the flat at the rim
-  double neckDiameter = 0.0; // mm
-  double neckLength = 0.0;   // mm, from the top of the head up
+  ExprValue tipFlat{0.0};      // mm, axial width of the flat at the rim
+  ExprValue neckDiameter{0.0}; // mm
+  ExprValue neckLength{0.0};   // mm, from the top of the head up
   bool operator==(const Tool&) const = default;
 };
 
@@ -273,7 +274,7 @@ struct Machine {
   if (drop <= 1e-9)
     return t.feedCut;
   const double along = glm::length(to - from);
-  return std::min(t.feedCut, t.feedPlunge * along / drop);
+  return std::min(t.feedCut.value, t.feedPlunge * along / drop);
 }
 
 // Does this tool state a holder at all? Both numbers, and a collar wider than
@@ -414,16 +415,16 @@ struct Operation {
 
   // Depth, in setup space. topZ is where the cut starts (usually the stock
   // top), bottomZ where it ends. stepdown 0 = one pass.
-  double topZ = 0.0;
-  double bottomZ = -1.0;
-  double stepdown = 0.0;
-  double stockToLeave = 0.0;
+  ExprValue topZ{0.0};
+  ExprValue bottomZ{-1.0};
+  ExprValue stepdown{0.0};
+  ExprValue stockToLeave{0.0};
   // Rough then finish (R6): a second tool that takes the wall in ONE
   // full-depth pass after this operation has roughed it, leaving
   // `finishStock` behind for it. One operation with two tools rather than
   // two operations that must agree about a boundary. 0 = no finishing pass.
   int finishTool = 0;
-  double finishStock = 0.0; // derived: the roughing tool's diameter / 10
+  ExprValue finishStock{0.0}; // derived: the roughing tool's diameter / 10
   // Rest machining (v125,
   // docs/cam/operations.md#rough-a-surface-and-rest-machining): the number of
   // the LARGER cutter that finished before this one. A surface op with it set
@@ -454,7 +455,7 @@ struct Operation {
   // What separates them is that one is a hole. It is the caller's statement
   // of intent rather than a guess the app can make -- a hole drilled
   // undersize and finished to size is the same pick and the opposite answer.
-  double drilledBores = 0.0;
+  ExprValue drilledBores{0.0};
   // Profile and pocket only (R4): what to do at the inside corners of the
   // material. Applied to the wall pass -- the loop one tool radius off the
   // wall -- at every sharp corner where the cutter cannot reach.
@@ -463,16 +464,16 @@ struct Operation {
   // of this depth so the chips clear -- the G83 reading, as plain moves,
   // since neither GRBL nor our post speaks canned cycles. 0 = one plunge.
   // Derived: the tool's diameter once the hole is deeper than three of them.
-  double peck = 0.0;
+  ExprValue peck{0.0};
 
   Side side = Side::Outside;
   bool climb = true;
 
   // Profile only: leave uncut tabs so the part does not break free on the
   // last pass and get thrown by the cutter.
-  int tabCount = 0;
-  double tabWidth = 6.0;
-  double tabHeight = 1.5;
+  ExprInt tabCount{0};
+  ExprValue tabWidth{6.0};
+  ExprValue tabHeight{1.5};
 
   // Clear the face's OUTLINE, ignoring the openings inside it. A pocket takes
   // its boundary from the picked face's wires: the outer one is where to
@@ -498,12 +499,12 @@ struct Operation {
 
   // Pocket/Face only: fraction of the tool diameter to step over per pass.
   // EdgeRound reads it too: it is what sets the cusp between arc passes.
-  double stepover = 0.45;
+  ExprValue stepover{0.45};
 
   // EdgeRound only: the size of the break, in mm — the radius of the round
   // for a ball, the horizontal width of the bevel for a V-bit. 0 = derive it
   // from the tool and the wall (defaults rule).
-  double edgeSize = 0.0;
+  ExprValue edgeSize{0.0};
 
   // --- surfacing (v118) ---------------------------------------------------
   //
@@ -517,16 +518,16 @@ struct Operation {
 
   // SurfaceParallel only: the raster direction, degrees anticlockwise from
   // +X. Zero runs the passes along X.
-  double cutAngleDeg = 0.0;
+  ExprValue cutAngleDeg{0.0};
   // Both surfacing types: spacing ALONG a pass, where the cutter-location
   // surface is read, in mm. 0 = derive it from the CL grid, which is the
   // finest answer that surface can give.
-  double sampleStep = 0.0;
+  ExprValue sampleStep{0.0};
   // SurfaceWaterline only: the Z between laps, in mm. NOT a stepover: an XY
   // fraction of tool diameter cannot express how far apart constant-Z laps
   // sit, which is the conflation this field exists to avoid. 0 = derive it
   // from the tool and the cusp.
-  double zStep = 0.0;
+  ExprValue zStep{0.0};
 
   // SurfaceRotary only (v123): parallel passes or one spiral. The same
   // `stepover` serves both, and means the spacing between neighbouring cuts
@@ -537,7 +538,7 @@ struct Operation {
   // SurfaceRotary, helical only (v124): the axial advance per turn of a
   // pass, in mm, signed for the hand (positive: theta grows with x). 0 =
   // derive it from the part's own twist (DeriveRotaryTwist).
-  double leadMm = 0.0;
+  ExprValue leadMm{0.0};
 
   // Cut at each of these rotary indices, degrees about X (v136): the
   // crenels of a rook are ONE operation at 0/90/180/270, not four setups
@@ -546,20 +547,23 @@ struct Operation {
   // the setup's own `rotationA`. Needs a machine with a rotary axis; not on
   // a surface_rotary, which turns the part as it cuts.
   std::vector<double> indexA;
+  // One text per stop, "" for a literal one; as many as `indexA` holds
+  // when any is bound, else empty.
+  std::vector<std::string> indexAExpr;
 
   // Engrave only (v138, docs/cam/operations.md#engrave): the groove's width
   // AT THE SURFACE, mm, or its depth below it, mm -- one statement, not two.
   // A V-bit's depth IS its width (TipHeight(tool, width / 2)); a flat or a
   // ball takes a depth only. 0 = not stated.
-  double engraveWidth = 0.0;
-  double engraveDepth = 0.0;
+  ExprValue engraveWidth{0.0};
+  ExprValue engraveDepth{0.0};
 
   // ThreadMill only (v145): how many radial passes take the thread's depth,
   // each removing the same area of it. 0 = derive it from the cutter: the
   // first pass takes at most half its profile depth
   // (docs/cam/operations.md#thread-mill). `climb` and `leadArcs` are the
   // direction and the semicircle entry and exit.
-  int threadPasses = 0;
+  ExprInt threadPasses{0};
 
   bool enabled = true;
 
@@ -604,13 +608,14 @@ enum class StockMode { Relative, Fixed };
 struct Stock {
   StockMode mode = StockMode::Relative;
   glm::dvec3 margin{2.0, 2.0, 1.0}; // Relative: added around the model bbox
-  double bottomMargin = 1.0;        // below the model, for the sacrificial pass
+  ExprValue bottomMargin{1.0};      // below the model, for the sacrificial pass
   // Fixed: the workpiece as it is, in mm, and where the part sits inside it —
   // 0 = the part's low face against the stock's low face, 1 = high against
   // high, 0.5 = centred. Z defaults to 1: sheet goods are referenced from
   // their top, which is the face you surface and touch off on.
   glm::dvec3 size{0.0, 0.0, 0.0};
   glm::dvec3 place{0.5, 0.5, 1.0};
+  Vec3Exprs marginExpr, sizeExpr, placeExpr; // a text per coordinate
 };
 
 // Where X0 Y0 Z0 is: the corner the operator touches off on. Derived from the
@@ -638,7 +643,8 @@ struct Placement {
   uint64_t id = 0;
   uint64_t jobPartId = 0;
   glm::dvec2 pos{0.0, 0.0}; // setup space, mm
-  double rotZdeg = 0.0;
+  Vec2Exprs posExpr;        // a text per coordinate
+  ExprValue rotZdeg{0.0};
   // On the sheet, not cut this run (PrusaSlicer's ModelInstance::printable).
   bool enabled = true;
 
@@ -686,18 +692,20 @@ enum class StockEdge : uint8_t { MinusX, PlusX, MinusY, PlusY };
 struct FixtureSeat {
   ElementRef face; // the fixture's face that rests on the stock top
   StockEdge edge = StockEdge::MinusX;
-  double alongMm = 0.0; // from the edge's low end to the face's centre
-  double overMm = 0.0;  // how far the face reaches in past the edge
-  double spinDeg = 0.0; // turned from pointing straight in
+  ExprValue alongMm{0.0}; // from the edge's low end to the face's centre
+  ExprValue overMm{0.0};  // how far the face reaches in past the edge
+  ExprValue spinDeg{0.0}; // turned from pointing straight in
 };
 
 struct Fixture {
   uint64_t id = 0;          // from the job's one id counter
   uint64_t sourceDocId = 0; // the part slot it is a copy of; 0 = a box
   glm::dvec3 box{0.0};      // a keep-out box's size, mm, corner at its origin
+  Vec3Exprs boxExpr;
   std::string name;         // display; a part owns its own name
   glm::dvec3 pos{0.0};      // setup space, mm
-  double rotZdeg = 0.0;     // spin about +Z, degrees
+  Vec3Exprs posExpr;
+  ExprValue rotZdeg{0.0};   // spin about +Z, degrees
   bool enabled = true;      // off = drawn, not checked
   // When set, `pos` and `rotZdeg` are the pose it last solved to, kept so a
   // reader that cannot solve still has somewhere sane to draw it; the seat
@@ -709,7 +717,7 @@ struct Fixture {
 
 // bed = T(pos) * Rz(rotZ) * model.
 [[nodiscard]] inline glm::dmat4 FixtureTransform(const Fixture& f) {
-  const double a = glm::radians(f.rotZdeg);
+  const double a = glm::radians(f.rotZdeg.value);
   glm::dmat4 m(1.0);
   m[0][0] = std::cos(a);
   m[0][1] = std::sin(a);
@@ -748,6 +756,7 @@ struct Setup {
   // the offset that brings the cutting inside it, which is what an
   // overhanging sheet actually needs; on an axis that fits it is zero.
   glm::dvec2 reachOffset{0.0, 0.0};
+  Vec2Exprs reachOffsetExpr;
 
   // How the part is FIXTURED: the rotation taking setup space to model space.
   // A part is modelled where it belongs in the assembly — a speaker baffle
@@ -772,7 +781,7 @@ struct Setup {
   // word. 0 for every 3-axis job — INCLUDING one whose frame is rotated.
   // Needs `machine.hasRotaryAxis`: no file can carry an A word for an axis
   // the shop does not own.
-  double rotationA = 0.0;
+  ExprValue rotationA{0.0};
   // Whether this setup's part is held IN THE ROTARY (v132). Derived when not
   // stated: a rotary op, an op with its own index list or a non-zero index
   // says so. An indexed setup at
@@ -781,7 +790,7 @@ struct Setup {
   enum class HeldIn { Derived, Bed, Rotary };
   HeldIn heldIn = HeldIn::Derived;
   // How much of the stock the jaws hold, mm; 0 = the machine's.
-  double gripLength = 0.0;
+  ExprValue gripLength{0.0};
   // The tailstock: -1 = engaged when the machine has one, 0 off, 1 on.
   int tailstock = -1;
   // The chuck: -1 / 1 = the part's stock is gripped at its low end (the
@@ -795,8 +804,8 @@ struct Setup {
   // `fitArcs` and `hasRotaryAxis` used to be fields here, which is how every
   // new job re-answered "which machine". Unnamed = the job's own.
   Machine machine;
-  double safeZ = 5.0;     // rapid height above the stock top (mm)
-  double rapidFeed = 0.0; // traverse rate, mm/min, 0 = not stated (Machine)
+  ExprValue safeZ{5.0};     // rapid height above the stock top (mm)
+  ExprValue rapidFeed{0.0}; // traverse rate, mm/min, 0 = not stated (Machine)
 
   // Where each part sits in the stock. Empty is a job that has parts but has
   // not been laid out -- everything at the origin, which is the honest

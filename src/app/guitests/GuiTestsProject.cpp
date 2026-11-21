@@ -1252,8 +1252,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       for (const DrawingView& v : s_App->drawing->GetViews()) {
         char buf[160];
         snprintf(buf, sizeof buf, "%s scale=%.4f at (%.3f, %.3f)",
-                 ViewOrientationToString(v.orientation), v.scale, v.position.x,
-                 v.position.y);
+                 ViewOrientationToString(v.orientation), v.scale.value,
+                 v.position.x, v.position.y);
         rows.push_back(buf);
       }
       return rows;

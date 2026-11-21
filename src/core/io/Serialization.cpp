@@ -2273,11 +2273,9 @@ json DrawingViewToJson(const DrawingView& v) {
             {"hidden", v.hidden}};
   if (v.baseViewId)
     j["base_view"] = v.baseViewId;
-  if (!v.scaleExpr.empty())
-    j["scale_expr"] = v.scaleExpr;
   if (v.configuration != 0) // v115
     j["configuration"] = v.configuration;
-  if (v.rotationDeg != 0.0) // v134
+  if (v.rotationDeg != 0.0 || v.rotationDeg.Bound()) // v134
     j["rotation_deg"] = v.rotationDeg;
   if (v.section.on) { // v147
     const glm::dvec3& p = v.section.point;
@@ -2292,6 +2290,11 @@ json DrawingViewToJson(const DrawingView& v) {
   }
   if (v.explodedView != 0) // v203
     j["exploded_view"] = v.explodedView;
+  // Each number's text beside it (`scale_expr`, `position_expr` [x, y]):
+  // vNEXT, docs/drawings/README.md#numbers-that-are-expressions.
+  drawing::VisitViewExprs(
+      const_cast<DrawingView&>(v),
+      [&](const ExprSlot& slot) { WriteSlotText(j, slot); });
   return j;
 }
 
@@ -2300,7 +2303,8 @@ DrawingView DrawingViewFromJson(const json& j) {
       j,
       {"id", "name", "source", "orientation", "scale", "position",
        "show_hidden", "quality", "hidden", "base_view", "scale_expr",
-       "configuration", "rotation_deg", "section", "detail", "exploded_view"},
+       "configuration", "rotation_deg", "section", "detail", "exploded_view",
+       "position_expr", "rotation_deg_expr"},
       "drawing view");
   DrawingView v;
   v.id = j.value("id", uint64_t{0});
@@ -2317,7 +2321,6 @@ DrawingView DrawingViewFromJson(const json& j) {
                              " is not a view's id");
   v.baseViewId = j.value("base_view", uint64_t{0});
   v.scale = j.value("scale", 1.0);
-  v.scaleExpr = j.value("scale_expr", std::string{});
   if (HasArrayOf(j, "position", 2))
     v.position = Vec2FromJson(j.at("position"));
   v.showHidden = j.value("show_hidden", true);
@@ -2334,7 +2337,7 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.explodedView = j.value("exploded_view", uint64_t{0});
   if (j.contains("section")) {
     const json& sj = j.at("section");
-    readctx::RefuseUnknownKeys(sj, {"point", "label"}, "section");
+    readctx::RefuseUnknownKeys(sj, {"point", "label", "point_expr"}, "section");
     const json p = sj.value("point", json::array());
     if (!p.is_array() || p.size() != 3)
       throw std::runtime_error("a section view's point is [x, y, z]");
@@ -2345,7 +2348,9 @@ DrawingView DrawingViewFromJson(const json& j) {
   }
   if (j.contains("detail")) { // v151
     const json& dj = j.at("detail");
-    readctx::RefuseUnknownKeys(dj, {"view", "center", "radius_mm", "label"},
+    readctx::RefuseUnknownKeys(dj,
+                               {"view", "center", "radius_mm", "label",
+                                "center_expr", "radius_mm_expr"},
                                "detail");
     const json c = dj.value("center", json::array());
     if (!c.is_array() || c.size() != 3)
@@ -2360,6 +2365,8 @@ DrawingView DrawingViewFromJson(const json& j) {
       throw std::runtime_error(
           "a detail view names its parent `view` and a `radius_mm` above 0");
   }
+  drawing::VisitViewExprs(v,
+                          [&](const ExprSlot& slot) { ReadSlotText(j, slot); });
   return v;
 }
 
@@ -2387,6 +2394,9 @@ json DrawingNoteToJson(const DrawingNote& n) {
   }
   if (n.attachDim != 0) // v151
     j["dim"] = n.attachDim;
+  drawing::VisitNoteExprs(
+      const_cast<DrawingNote&>(n),
+      [&](const ExprSlot& slot) { WriteSlotText(j, slot); });
   return j;
 }
 
@@ -2423,8 +2433,10 @@ DrawingNote DrawingNoteFromJson(const json& j) {
     if (!j.contains("fcf") || !j.at("fcf").is_object())
       throw std::runtime_error("an fcf note carries its frame in `fcf`");
     const json& f = j.at("fcf");
-    readctx::RefuseUnknownKeys(
-        f, {"symbol", "tolerance_mm", "datums", "diameter", "modifier"}, "fcf");
+    readctx::RefuseUnknownKeys(f,
+                               {"symbol", "tolerance_mm", "datums", "diameter",
+                                "modifier", "tolerance_mm_expr"},
+                               "fcf");
     const std::string symbol = f.value("symbol", std::string{});
     if (!GeoSymbolFromString(symbol, n.fcf.symbol))
       throw std::runtime_error(UnknownGeoSymbol(symbol));
@@ -2438,6 +2450,8 @@ DrawingNote DrawingNoteFromJson(const json& j) {
       throw std::runtime_error(why);
   }
   n.attachDim = j.value("dim", uint64_t{0});
+  drawing::VisitNoteExprs(n,
+                          [&](const ExprSlot& slot) { ReadSlotText(j, slot); });
   return n;
 }
 

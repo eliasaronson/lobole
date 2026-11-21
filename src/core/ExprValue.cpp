@@ -3,6 +3,8 @@
 
 #include "core/ExprValue.h"
 
+#include <algorithm>
+
 #include <glm/trigonometric.hpp>
 #include <nlohmann/json.hpp>
 
@@ -132,6 +134,7 @@ bool RenameInSlot(const ExprSlot& slot, const std::string& from,
 // ---- JSON -------------------------------------------------------------------
 
 void to_json(nlohmann::json& j, const ExprValue& v) { j = v.value; }
+void to_json(nlohmann::json& j, const ExprInt& v) { j = v.value; }
 
 void WriteExprText(nlohmann::json& j, const std::string& key,
                    const std::string& expr) {
@@ -332,6 +335,111 @@ void WriteVec3Exprs(nlohmann::json& j, const std::string& key,
 Vec3Exprs ReadVec3Exprs(const nlohmann::json& j, const std::string& key) {
   const std::vector<std::string> t = ReadExprTexts(j, key, 3);
   return {t[0], t[1], t[2]};
+}
+
+namespace {
+
+std::vector<std::string> SplitPath(const std::string& path) {
+  std::vector<std::string> out;
+  size_t from = 0;
+  while (from <= path.size()) {
+    const size_t slash = path.find('/', from);
+    out.push_back(path.substr(from, slash - from));
+    if (slash == std::string::npos)
+      break;
+    from = slash + 1;
+  }
+  return out;
+}
+
+bool IsIndex(const std::string& s) {
+  return !s.empty() && std::all_of(s.begin(), s.end(),
+                                   [](char c) { return c >= '0' && c <= '9'; });
+}
+
+// The object holding the slot's number, its key there, and the index into
+// that key's array when the number is an entry of one (-1 when not).
+template <class J>
+J* Place(J& root, const std::vector<std::string>& parts, std::string& key,
+         int& index) {
+  size_t n = parts.size();
+  index = -1;
+  if (n >= 2 && IsIndex(parts[n - 1])) {
+    index = std::stoi(parts[n - 1]);
+    n--;
+  }
+  key = parts[n - 1];
+  J* at = &root;
+  for (size_t i = 0; i + 1 < n; i++) {
+    if (IsIndex(parts[i])) {
+      const size_t k = std::stoul(parts[i]);
+      if (!at->is_array() || k >= at->size())
+        return nullptr;
+      at = &(*at)[k];
+    } else {
+      if (!at->is_object() || !at->contains(parts[i]))
+        return nullptr;
+      at = &(*at)[parts[i]];
+    }
+  }
+  return at->is_object() ? at : nullptr;
+}
+
+} // namespace
+
+void WriteSlotText(nlohmann::json& root, const ExprSlot& slot) {
+  if (!slot.Bound())
+    return;
+  std::string key;
+  int index = 0;
+  nlohmann::json* obj = Place(root, SplitPath(slot.Path()), key, index);
+  if (obj == nullptr || !obj->contains(key))
+    return;
+  if (index < 0) {
+    (*obj)[key + "_expr"] = slot.Expr();
+    return;
+  }
+  const nlohmann::json& numbers = obj->at(key);
+  if (!numbers.is_array() || static_cast<size_t>(index) >= numbers.size())
+    return;
+  nlohmann::json& texts = (*obj)[key + "_expr"];
+  if (!texts.is_array())
+    texts = nlohmann::json::array();
+  while (texts.size() < numbers.size())
+    texts.push_back("");
+  texts[static_cast<size_t>(index)] = slot.Expr();
+}
+
+void ReadSlotText(const nlohmann::json& root, const ExprSlot& slot) {
+  std::string key;
+  int index = 0;
+  const nlohmann::json* obj = Place(root, SplitPath(slot.Path()), key, index);
+  slot.Expr().clear();
+  if (obj == nullptr || !obj->contains(key + "_expr"))
+    return;
+  const nlohmann::json& t = obj->at(key + "_expr");
+  const std::string what = slot.Path() + "_expr";
+  if (index < 0) {
+    slot.Expr() = ExprTextFromJson(t, what);
+    return;
+  }
+  const size_t n =
+      obj->contains(key) && obj->at(key).is_array() ? obj->at(key).size() : 0;
+  if (!t.is_array() || t.size() != n)
+    throw std::runtime_error(key + "_expr is one text per entry of " + key +
+                             " (" + std::to_string(n) + "), \"\" for a number");
+  slot.Expr() = ExprTextFromJson(t[static_cast<size_t>(index)], what);
+}
+
+void WriteVec2Exprs(nlohmann::json& j, const std::string& key,
+                    const Vec2Exprs& texts) {
+  if (AnyBound(texts))
+    j[key + "_expr"] = {texts[0], texts[1]};
+}
+
+Vec2Exprs ReadVec2Exprs(const nlohmann::json& j, const std::string& key) {
+  const std::vector<std::string> t = ReadExprTexts(j, key, 2);
+  return {t[0], t[1]};
 }
 
 void WritePointExprs(nlohmann::json& j, const std::string& key,

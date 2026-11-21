@@ -287,7 +287,7 @@ public:
         f.zLo = f.zHi = cut.z;
         f.label = p.label;
         Operation aimed = op;
-        aimed.bottomZ += f.ZAt(f.aim) - cut.z;
+        aimed.bottomZ.value += f.ZAt(f.aim) - cut.z;
         m_floors.push_back(f);
         return aimed;
       }
@@ -1065,7 +1065,7 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
                               ? stockHi.z
                               : setup.safeZ;
   const double radius = tool.diameter * 0.5;
-  const double step = std::max(0.05, op.stepover) * tool.diameter;
+  const double step = std::max(0.05, op.stepover.value) * tool.diameter.value;
   // A clicked floor face IS the region to clear, at every depth: its outer
   // wire is the pocket wall and its inner wires are islands
   // (docs/cam/operations.md#pocket-and-adaptive).
@@ -1506,7 +1506,7 @@ void GenerateFace(const Setup& setup, const Operation& op, const Tool& tool,
     return;
   }
   const double radius = tool.diameter * 0.5;
-  const double step = std::max(0.05, op.stepover) * tool.diameter;
+  const double step = std::max(0.05, op.stepover.value) * tool.diameter.value;
   std::vector<glm::dvec2> rect = {
       {lo.x, lo.y}, {hi.x, lo.y}, {hi.x, hi.y}, {lo.x, hi.y}};
   const Clipper2Lib::Paths64 region{ToClipper(rect)};
@@ -1682,7 +1682,8 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
               StockBoundsFramed(setup, bodies, stockLo, stockHi) ? stockHi.z
                                                                  : setup.safeZ;
           const double step = std::max(
-              tool.diameter * std::clamp(op.stepover, 0.05, 0.95), 0.1);
+              tool.diameter.value * std::clamp(op.stepover.value, 0.05, 0.95),
+              0.1);
           std::vector<double> rings;
           // A centre pass only when the cutter cannot reach the middle from
           // the wall ring: a 7 mm hole with a 6 mm tool is one ring.
@@ -1730,7 +1731,7 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
         // back to just above the floor of the last peck, and on.
         double z = op.topZ;
         while (z > op.bottomZ + 1e-9) {
-          const double next = std::max(op.bottomZ, z - op.peck);
+          const double next = std::max(op.bottomZ.value, z - op.peck.value);
           Emit(tp, Move::Kind::Plunge, {centre.x, centre.y, next},
                tool.feedPlunge);
           z = next;

@@ -1425,8 +1425,9 @@ json FeatureToJson(const Feature& feature) {
     // v190; absent = auto (a file older than v190 is migrated to none)
     if (import->upAxis != interchange::UpAxis::Auto)
       j["up_axis"] = interchange::ToString(import->upAxis);
-    if (import->turnDeg != 0.0) // v190; absent = no turn
+    if (import->turnDeg != 0.0 || !import->turnExpr.empty()) // v190
       j["turn_deg"] = import->turnDeg;
+    WriteExprText(j, "turn_deg", import->turnExpr); // vNEXT
     // v200; absent = facets, how every older mesh import was read
     if (import->representation != mesh::Representation::Facets)
       j["representation"] = mesh::ToString(import->representation);
@@ -1434,11 +1435,16 @@ json FeatureToJson(const Feature& feature) {
       j["min_sides"] = import->minSides;
     // v213; absent = where the up axis and the centring put it
     const importplace::Placement& pl = import->placement;
-    if (pl.translateMm != glm::dvec3(0.0) || pl.rotateDeg != glm::dvec3(0.0))
+    if (pl.translateMm != glm::dvec3(0.0) || pl.rotateDeg != glm::dvec3(0.0) ||
+        AnyBound(import->translateExpr) || AnyBound(import->rotateExpr)) {
       j["placement"] = {{"translate_mm", Vec3ToJson(pl.translateMm)},
                         {"rotate_deg", Vec3ToJson(pl.rotateDeg)}};
-    if (pl.scale != 1.0) // v213; absent = 1
+      WriteVec3Exprs(j["placement"], "translate_mm", import->translateExpr);
+      WriteVec3Exprs(j["placement"], "rotate_deg", import->rotateExpr);
+    }
+    if (pl.scale != 1.0 || !import->scaleExpr.empty()) // v213; absent = 1
       j["scale"] = pl.scale;
+    WriteExprText(j, "scale", import->scaleExpr); // vNEXT
   } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
     // v161 (docs/modeling/templates.md). The definition rides in full, so
     // the chain hash covers what the instance expands and a part rebuilds
@@ -1870,13 +1876,31 @@ json FeatureToJson(const Feature& feature) {
       for (const auto& [a, l] : cp->motion.lift)
         lift.push_back({a, l});
       j["lift"] = std::move(lift);
+      // vNEXT: [angle, lift] texts per entry, when one is bound.
+      bool bound = false;
+      for (const auto& e : cp->liftExpr)
+        bound = bound || !e[0].empty() || !e[1].empty();
+      if (bound && cp->liftExpr.size() == cp->motion.lift.size()) {
+        json texts = json::array();
+        for (const auto& e : cp->liftExpr)
+          texts.push_back({e[0], e[1]});
+        j["lift_expr"] = std::move(texts);
+      }
     }
     if (!cp->motion.segments.empty()) {
       json segs = json::array();
-      for (const cammech::Segment& sg : cp->motion.segments) {
+      for (size_t k = 0; k < cp->motion.segments.size(); k++) {
+        const cammech::Segment& sg = cp->motion.segments[k];
+        const bool texts = k < cp->segmentExpr.size();
         json sj{{"to_deg", sg.toDeg}, {"law", cammech::LawName(sg.law)}};
-        if (sg.law != cammech::Law::Dwell)
-          sj[turns ? "rise_deg" : "rise_mm"] = sg.rise;
+        if (texts)
+          WriteExprText(sj, "to_deg", cp->segmentExpr[k][0]); // vNEXT
+        if (sg.law != cammech::Law::Dwell) {
+          const char* key = turns ? "rise_deg" : "rise_mm";
+          sj[key] = sg.rise;
+          if (texts)
+            WriteExprText(sj, key, cp->segmentExpr[k][1]);
+        }
         segs.push_back(std::move(sj));
       }
       j["segments"] = std::move(segs);
@@ -1886,12 +1910,17 @@ json FeatureToJson(const Feature& feature) {
       json fj{{"kind", cammech::FollowerKindName(f.kind)},
               {"motion", cammech::FollowerMotionName(f.motion)},
               {"radius_mm", f.radiusMm}};
+      const CamProfileFeature::FollowerExprs& fx = cp->followerExpr;
+      WriteExprText(fj, "radius_mm", fx.radius); // vNEXT
       if (f.motion == cammech::FollowerMotion::Slide) {
-        if (f.offsetMm != 0.0)
+        if (f.offsetMm != 0.0 || !fx.offset.empty())
           fj["offset_mm"] = f.offsetMm;
+        WriteExprText(fj, "offset_mm", fx.offset);
       } else {
         fj["pivot_mm"] = {f.pivotXMm, f.pivotYMm};
+        WriteVec2Exprs(fj, "pivot_mm", fx.pivot);
         fj["arm_mm"] = f.armMm;
+        WriteExprText(fj, "arm_mm", fx.arm);
       }
       j["follower"] = std::move(fj);
     }
@@ -2768,7 +2797,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
              {"face", "from", "offset", "offset_expr", "standard"}},
             {"Import",
              {"path", "keep_origin", "units", "color", "up_axis", "turn_deg",
-              "placement", "scale", "representation", "min_sides"}},
+              "turn_deg_expr", "placement", "scale", "scale_expr",
+              "representation", "min_sides"}},
             {"DeleteFace", {"body_id", "faces"}},
             {"OffsetFace",
              {"body_id", "faces", "distance_mm", "distance_mm_expr"}},
@@ -2845,8 +2875,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
               "flank_angle_deg_expr"}},
             {"CamProfile",
              {"face", "frame", "base_radius_mm", "base_radius_mm_expr",
-              "width_mm", "width_mm_expr", "lift", "segments", "follower",
-              "turn", "body"}},
+              "width_mm", "width_mm_expr", "lift", "lift_expr", "segments",
+              "follower", "turn", "body"}},
             {"Worm",
              {"face", "module", "module_expr", "starts", "starts_expr",
               "pressure_angle_deg", "pressure_angle_deg_expr", "hand",
@@ -3443,10 +3473,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "Import: min_sides is for representation: recognize or auto");
       imp->minSides = m.get<int>();
     }
-    if (j.contains("placement")) // v213
+    if (j.contains("placement")) { // v213
       importplace::ReadPlacement(j.at("placement"), imp->placement, "Import");
+      imp->translateExpr = ReadVec3Exprs(j.at("placement"), "translate_mm");
+      imp->rotateExpr = ReadVec3Exprs(j.at("placement"), "rotate_deg");
+    }
     if (j.contains("scale")) // v213
       importplace::ReadScale(j.at("scale"), imp->placement, "Import");
+    imp->scaleExpr = ReadExprText(j, "scale");   // vNEXT
+    imp->turnExpr = ReadExprText(j, "turn_deg"); // vNEXT
     out = std::move(imp);
   } else if (type == "Template") {
     // A request names the template and gives values; the add_feature
@@ -4136,7 +4171,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       const json& fj = j.at("follower");
       readctx::RefuseUnknownKeys(
           fj,
-          {"kind", "motion", "radius_mm", "offset_mm", "pivot_mm", "arm_mm"},
+          {"kind", "motion", "radius_mm", "offset_mm", "pivot_mm", "arm_mm",
+           "radius_mm_expr", "offset_mm_expr", "pivot_mm_expr", "arm_mm_expr"},
           "CamProfile follower");
       cammech::FollowerSpec f;
       const std::string kind = fj.at("kind").get<std::string>();
@@ -4174,6 +4210,14 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       }
       cp->follower = f;
       cp->followerSet = true;
+      CamProfileFeature::FollowerExprs& fx = cp->followerExpr; // vNEXT
+      fx.radius = ReadExprText(fj, "radius_mm");
+      if (f.motion == cammech::FollowerMotion::Slide) {
+        fx.offset = ReadExprText(fj, "offset_mm");
+      } else {
+        fx.pivot = ReadVec2Exprs(fj, "pivot_mm");
+        fx.arm = ReadExprText(fj, "arm_mm");
+      }
     }
     const bool turns =
         cp->followerSet && cp->follower.motion == cammech::FollowerMotion::Turn;
@@ -4184,8 +4228,27 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       cp->motion.lift.emplace_back(pt.at(0).get<double>(),
                                    pt.at(1).get<double>());
     }
+    if (j.contains("lift_expr")) { // vNEXT
+      const json& le = j.at("lift_expr");
+      if (!le.is_array() || le.size() != cp->motion.lift.size())
+        throw std::runtime_error("CamProfile '" + name +
+                                 "': lift_expr is one [angle, lift] pair of "
+                                 "texts per lift entry");
+      for (const json& e : le) {
+        if (!e.is_array() || e.size() != 2)
+          throw std::runtime_error("CamProfile '" + name +
+                                   "': a lift_expr entry is [angle, lift] "
+                                   "texts, not " +
+                                   e.dump());
+        cp->liftExpr.push_back({ExprTextFromJson(e[0], "lift_expr"),
+                                ExprTextFromJson(e[1], "lift_expr")});
+      }
+    }
     for (const json& sj : j.value("segments", json::array())) {
-      readctx::RefuseUnknownKeys(sj, {"to_deg", "rise_mm", "rise_deg", "law"},
+      readctx::RefuseUnknownKeys(sj,
+                                 {"to_deg", "rise_mm", "rise_deg", "law",
+                                  "to_deg_expr", "rise_mm_expr",
+                                  "rise_deg_expr"},
                                  "CamProfile segment");
       cammech::Segment sg;
       const std::string law = sj.at("law").get<std::string>();
@@ -4202,8 +4265,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                         : "SLIDES: its rise is "
                                           "rise_mm") +
                                  ", not " + other);
+      if (sj.contains(std::string(other) + "_expr"))
+        throw std::runtime_error("CamProfile '" + name +
+                                 "': this follower's "
+                                 "rise is " +
+                                 want + ", not " + other);
       sg.rise = sj.value(want, 0.0);
       cp->motion.segments.push_back(sg);
+      cp->segmentExpr.push_back(
+          {ReadExprText(sj, "to_deg"), ReadExprText(sj, want)}); // vNEXT
     }
     if (!cp->motion.lift.empty() || !cp->motion.segments.empty())
       if (std::string why = cammech::MotionError(

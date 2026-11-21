@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 
 uint64_t DrawingDocument::AddView(DrawingView view) {
   view.id = m_nextId++;
@@ -496,3 +497,141 @@ std::vector<const char*> DrawingDimKindNames() {
           "radius",       "diameter",        "angle",
           "hole_callout", "pattern_callout", "fastener_callout"};
 }
+
+// ---- Numbers that are expressions -----------------------------------------
+// (docs/drawings/README.md#numbers-that-are-expressions)
+
+namespace drawing {
+
+void VisitViewExprs(DrawingView& v, const ExprVisitor& visit) {
+  visit(ExprSlot(v.scale, ExprQuantity::Other, "scale"));
+  for (int k = 0; k < 2; k++)
+    visit(ExprSlot(v.positionExpr[static_cast<size_t>(k)], v.position[k],
+                   ExprQuantity::Length, "position/" + std::to_string(k)));
+  visit(ExprSlot(v.rotationDeg, ExprQuantity::Angle, "rotation_deg"));
+  if (v.section.on)
+    VisitVec3Exprs(visit, v.section.point, v.section.pointExpr,
+                   ExprQuantity::Length, "section/point");
+  if (v.detail.on) {
+    VisitVec3Exprs(visit, v.detail.center, v.detail.centerExpr,
+                   ExprQuantity::Length, "detail/center");
+    visit(ExprSlot(v.detail.radius, ExprQuantity::Length, "detail/radius_mm"));
+  }
+}
+
+void VisitNoteExprs(DrawingNote& n, const ExprVisitor& visit) {
+  if (n.style == NoteStyle::Fcf)
+    visit(ExprSlot(n.fcf.tolerance, ExprQuantity::Length, "fcf/tolerance_mm"));
+}
+
+} // namespace drawing
+
+void DrawingDocument::VisitExprs(
+    const std::function<void(const std::string& owner, const ExprSlot&)>&
+        visit) {
+  for (size_t i = 0; i < m_views.size(); i++) {
+    DrawingView& v = m_views[i];
+    const std::string owner =
+        "view " + (v.name.empty() ? std::to_string(v.id) : "'" + v.name + "'");
+    const std::string at = "views/" + std::to_string(i) + "/";
+    drawing::VisitViewExprs(v, [&](const ExprSlot& slot) {
+      visit(owner, slot.WithPath(at + slot.Path()));
+    });
+  }
+  for (size_t i = 0; i < m_notes.size(); i++) {
+    DrawingNote& n = m_notes[i];
+    const std::string owner = "note " + std::to_string(n.id);
+    const std::string at = "notes/" + std::to_string(i) + "/";
+    drawing::VisitNoteExprs(n, [&](const ExprSlot& slot) {
+      visit(owner, slot.WithPath(at + slot.Path()));
+    });
+  }
+}
+
+namespace drawing {
+
+namespace {
+
+std::string Num(double v) {
+  char b[32];
+  std::snprintf(b, sizeof b, "%g", v);
+  return b;
+}
+
+// What a number must be once evaluated; empty when it stands. The RPC
+// refuses the same where it takes them.
+std::string Refusal(const ExprSlot& slot) {
+  const std::string& path = slot.Path();
+  const double v = slot.Value();
+  if (path.ends_with("/scale") && !(v > 0.0))
+    return "a view's scale must be above 0";
+  if (path.ends_with("detail/radius_mm") && !(v > 0.0))
+    return "a detail's radius must be above 0";
+  if (path.ends_with("fcf/tolerance_mm") && v < 0.0)
+    return "a tolerance zone is not below 0";
+  return {};
+}
+
+uint64_t IdOf(DrawingDocument& doc, const std::string& owner) {
+  for (const DrawingView& v : doc.GetViews())
+    if (owner ==
+        "view " + (v.name.empty() ? std::to_string(v.id) : "'" + v.name + "'"))
+      return v.id;
+  for (const DrawingNote& n : doc.GetNotes())
+    if (owner == "note " + std::to_string(n.id))
+      return n.id;
+  return 0;
+}
+
+} // namespace
+
+bool EvaluateExprs(DrawingDocument& doc, const SymbolTable& symbols) {
+  std::vector<double> before;
+  doc.VisitExprs([&](const std::string&, const ExprSlot& s) {
+    before.push_back(s.Value());
+  });
+  std::vector<DrawingExprProblem> problems;
+  const auto note = [&](const std::string& owner, std::string why) {
+    for (const DrawingExprProblem& p : problems)
+      if (p.owner == owner)
+        return;
+    problems.push_back({owner, IdOf(doc, owner), std::move(why)});
+  };
+  doc.VisitExprs([&](const std::string& owner, const ExprSlot& slot) {
+    if (!slot.Bound())
+      return;
+    std::string why;
+    if (!EvaluateSlot(slot, symbols, &why))
+      note(owner, slot.Path() + "_expr '" + slot.Expr() + "': " + why);
+    else if (std::string r = Refusal(slot); !r.empty())
+      note(owner, slot.Path() + "_expr '" + slot.Expr() + "' comes out " +
+                      Num(slot.Value()) + ": " + r);
+  });
+  size_t i = 0;
+  bool moved = false;
+  doc.VisitExprs([&](const std::string& owner, const ExprSlot& slot) {
+    const double was = before[i++];
+    for (const DrawingExprProblem& p : problems)
+      if (p.owner == owner) {
+        (void)slot.Set(was);
+        return;
+      }
+    moved = moved || slot.Value() != was;
+  });
+  const bool problemsChanged = [&] {
+    const auto& old = doc.ExprProblems();
+    if (old.size() != problems.size())
+      return true;
+    for (size_t k = 0; k < old.size(); k++)
+      if (old[k].owner != problems[k].owner ||
+          old[k].error != problems[k].error)
+        return true;
+    return false;
+  }();
+  doc.SetExprProblems(std::move(problems));
+  if (moved)
+    doc.BumpVersion();
+  return moved || problemsChanged;
+}
+
+} // namespace drawing

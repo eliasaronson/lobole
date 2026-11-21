@@ -537,6 +537,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& screenRay, bool clicked,
         d += shift;
       }
       place->pos = g.startPlace + glm::dvec2(A.x * d, A.y * d);
+      place->posExpr = {}; // dragged: no longer what a text says
     } else {
       double ang;
       if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
@@ -544,6 +545,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& screenRay, bool clicked,
             g.startRotZ +
             glm::degrees(static_cast<double>(UnwrappedTurn(g, ang)));
         place->rotZdeg = SnapAngleDeg(deg, snap);
+        place->rotZdeg.expr.clear();
       }
     }
     // The placed bodies are rebuilt from the placement on the next frame:
@@ -739,6 +741,7 @@ bool HandleFixtureGizmo(AppState& state, const Ray& screenRay, bool clicked,
         g.snapLabel = label;
       }
       f->pos = g.startFixturePos + glm::dvec3(A) * d;
+      f->posExpr = {}; // dragged: no longer what a text says
     } else {
       double ang;
       if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
@@ -756,6 +759,8 @@ bool HandleFixtureGizmo(AppState& state, const Ray& screenRay, bool clicked,
         f->pos = glm::dvec3(c.x + cs * r.x - sn * r.y,
                             c.y + sn * r.x + cs * r.y, g.startFixturePos.z);
         f->rotZdeg = deg;
+        f->posExpr = {};
+        f->rotZdeg.expr.clear();
       }
     }
     // Drawn from its pose on the next sync: JobRenderVersion keys on it.

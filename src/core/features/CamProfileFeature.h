@@ -35,6 +35,48 @@ public:
   void VisitExprs(const ExprVisitor& visit) override {
     visit({baseRadius, ExprQuantity::Length, "base_radius_mm"});
     visit({width, ExprQuantity::Length, "width_mm"});
+    VisitMotionExprs(visit);
+  }
+  // The lift table's, the segments' and the follower's numbers (vNEXT):
+  // a rise and a lift are in the follower's unit, mm for a slide and
+  // degrees for a turn.
+  void VisitMotionExprs(const ExprVisitor& visit) {
+    const bool turns =
+        followerSet && follower.motion == cammech::FollowerMotion::Turn;
+    const ExprQuantity rise =
+        turns ? ExprQuantity::Angle : ExprQuantity::Length;
+    liftExpr.resize(motion.lift.size());
+    for (size_t k = 0; k < motion.lift.size(); k++) {
+      const std::string at = "lift/" + std::to_string(k);
+      visit(ExprSlot(liftExpr[k][0], motion.lift[k].first, ExprQuantity::Angle,
+                     at + "/0"));
+      visit(ExprSlot(liftExpr[k][1], motion.lift[k].second, rise, at + "/1"));
+    }
+    segmentExpr.resize(motion.segments.size());
+    for (size_t k = 0; k < motion.segments.size(); k++) {
+      cammech::Segment& sg = motion.segments[k];
+      const std::string at = "segments/" + std::to_string(k) + "/";
+      visit(ExprSlot(segmentExpr[k][0], sg.toDeg, ExprQuantity::Angle,
+                     at + "to_deg"));
+      if (sg.law != cammech::Law::Dwell)
+        visit(ExprSlot(segmentExpr[k][1], sg.rise, rise,
+                       at + (turns ? "rise_deg" : "rise_mm")));
+    }
+    if (!followerSet)
+      return;
+    visit(ExprSlot(followerExpr.radius, follower.radiusMm, ExprQuantity::Length,
+                   "follower/radius_mm"));
+    if (turns) {
+      visit(ExprSlot(followerExpr.pivot[0], follower.pivotXMm,
+                     ExprQuantity::Length, "follower/pivot_mm/0"));
+      visit(ExprSlot(followerExpr.pivot[1], follower.pivotYMm,
+                     ExprQuantity::Length, "follower/pivot_mm/1"));
+      visit(ExprSlot(followerExpr.arm, follower.armMm, ExprQuantity::Length,
+                     "follower/arm_mm"));
+    } else {
+      visit(ExprSlot(followerExpr.offset, follower.offsetMm,
+                     ExprQuantity::Length, "follower/offset_mm"));
+    }
   }
   [[nodiscard]] std::string WhyIncomplete() const override {
     return face.name.empty() && frameId == 0
@@ -57,6 +99,14 @@ public:
   // radius.
   bool followerSet = false;
   cammech::FollowerSpec follower;
+  // The texts beside `motion` and `follower` (vNEXT), "" for a literal:
+  // [angle, lift] per lift entry, [to_deg, rise] per segment.
+  std::vector<std::array<std::string, 2>> liftExpr;
+  std::vector<std::array<std::string, 2>> segmentExpr;
+  struct FollowerExprs {
+    std::string radius, offset, arm;
+    Vec2Exprs pivot;
+  } followerExpr;
   bool ccw = true;     // the sense the cam turns in about its axis
   bool newBody = true; // false: fused into the picked hub's body
 

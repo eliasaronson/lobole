@@ -4,6 +4,7 @@
 #include "ui/VariableActions.h"
 #include "ui/CatalogActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h" // RequestDrawingUpdate
 #include "ui/RendererSync.h"
 
 #include "core/Units.h"
@@ -27,7 +28,9 @@
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/cam/JobDocument.h"
 #include "core/drawing/DrawingDimension.h"
+#include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
@@ -143,6 +146,28 @@ void SyncProjectScope(AppState& state) {
       a->BumpVersion();
     }
   }
+  // Every job and drawing reads them too (docs/cam/README.md and
+  // docs/drawings/README.md, #numbers-that-are-expressions). A job whose
+  // values moved is edited -- unsaved, its verdict no longer current -- and
+  // the open one's toolpaths are made again from the new numbers; a drawing
+  // whose values moved projects again.
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (cam::JobDocument* j = SlotJob(state, i);
+        j != nullptr && cam::EvaluateJobExprs(*j, state.projectSymbols)) {
+      if (j == state.job.get()) {
+        MarkJobEdited(state);
+#ifdef HAVE_CAM
+        RefreshCamToolpaths(state);
+#endif
+      } else {
+        j->MarkEdited();
+      }
+    }
+    if (DrawingDocument* d = SlotDrawing(state, i);
+        d != nullptr && drawing::EvaluateExprs(*d, state.projectSymbols) &&
+        d == state.drawing.get())
+      RequestDrawingUpdate(state);
+  }
   state.gpu.syncedDocumentVersion =
       UINT64_MAX; // a cross-tab edit; force resync
 }
@@ -227,6 +252,24 @@ void RewriteAssemblyRefs(AppState& state, const std::string& from,
       if (changed)
         a->MarkEdited(); // saved; the values are the same
     }
+  // And every job's and drawing's.
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    bool changed = false;
+    const auto rename = [&](const std::string&, const ExprSlot& slot) {
+      changed |= RenameInSlot(slot, from, to);
+    };
+    if (cam::JobDocument* j = SlotJob(state, i)) {
+      j->VisitExprs(rename);
+      if (changed)
+        j->MarkEdited();
+    }
+    if (DrawingDocument* d = SlotDrawing(state, i)) {
+      changed = false;
+      d->VisitExprs(rename);
+      if (changed)
+        d->BumpVersion();
+    }
+  }
 }
 } // namespace
 
@@ -291,6 +334,21 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
       for (const std::string& owner : owners)
         refs.push_back(state.parts[i].name + ": " + owner);
     }
+  // A job and a drawing read them the same way.
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    std::vector<std::string> owners;
+    const auto reads = [&](const std::string& owner, const ExprSlot& slot) {
+      if (SlotReads(slot, name) &&
+          std::find(owners.begin(), owners.end(), owner) == owners.end())
+        owners.push_back(owner);
+    };
+    if (cam::JobDocument* j = SlotJob(state, i))
+      j->VisitExprs(reads);
+    if (DrawingDocument* d = SlotDrawing(state, i))
+      d->VisitExprs(reads);
+    for (const std::string& owner : owners)
+      refs.push_back(state.parts[i].name + ": " + owner);
+  }
   // A requirement that reads it: deleting the variable would leave the
   // requirement unresolved, so it is refused like a feature's reference.
   for (std::string& r : RequirementReferences(state, name, 0))
@@ -503,6 +561,19 @@ std::vector<std::string> ProjectTableReferences(AppState& state,
         }
       });
     }
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    std::string last; // each owner once
+    const auto reads = [&](const std::string& owner, const ExprSlot& slot) {
+      if (owner != last && slot.Bound() && references(slot.Expr())) {
+        refs.push_back(state.parts[i].name + ": " + owner);
+        last = owner;
+      }
+    };
+    if (cam::JobDocument* j = SlotJob(state, i))
+      j->VisitExprs(reads);
+    if (DrawingDocument* d = SlotDrawing(state, i))
+      d->VisitExprs(reads);
+  }
   for (const req::Requirement& r : state.requirements)
     if (req::ReadsTable(r, name))
       refs.push_back("requirement '" + r.name + "'");

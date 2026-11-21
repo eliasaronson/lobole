@@ -595,8 +595,8 @@ void GenerateThreadMill(const Setup& setup, const Operation& op,
   // centre is held at the cutting feed rather than sped up.
   const auto feedAt = [&](double radius) {
     if (!t.internal || radius <= 1e-9)
-      return tool.feedCut;
-    return tool.feedCut * radius / (radius + tool.diameter * 0.5);
+      return tool.feedCut.value;
+    return tool.feedCut.value * radius / (radius + tool.diameter.value * 0.5);
   };
   const double zStart = plan.direction.upward ? plan.tipLo : plan.tipHi;
   const double zFinal = plan.direction.upward ? plan.tipHi : plan.tipLo;
@@ -619,7 +619,7 @@ void GenerateThreadMill(const Setup& setup, const Operation& op,
       // A rapid never goes below the stock top
       // (docs/cam/README.md#rapids-profile-outlines-and-through-cuts).
       const double floor =
-          std::clamp(std::max(zStart, stockTop), zStart, setup.safeZ);
+          std::clamp(std::max(zStart, stockTop), zStart, setup.safeZ.value);
       Emit(tp, Move::Kind::Rapid, {entry.x, entry.y, floor}, 0.0);
     }
     // Inside a bore the next pass starts from where the last one left the

@@ -16,6 +16,10 @@
 
 class AssemblyDocument;
 class Document;
+class DrawingDocument;
+namespace cam {
+class JobDocument;
+}
 
 namespace ui {
 
@@ -56,6 +60,14 @@ ApplyExtractVariables(AppState& state, const literals::ExtractPlan& plan,
 // `checked` counts the literals compared.
 std::vector<literals::LiteralFinding>
 LintAssembly(AppState& state, AssemblyDocument& a, size_t* checked = nullptr);
+// A CAM job's and a drawing's the same way: their numbers read the
+// project's variables too (cam::JobDocument::VisitExprs,
+// DrawingDocument::VisitExprs). Finding only; extraction is the part's and
+// the assembly's.
+std::vector<literals::LiteralFinding>
+LintJob(AppState& state, cam::JobDocument& job, size_t* checked = nullptr);
+std::vector<literals::LiteralFinding>
+LintDrawing(AppState& state, DrawingDocument& d, size_t* checked = nullptr);
 
 // Plans an extraction on `a`: one project variable per literal (equal ones
 // of one owner sharing it; of several, with mergeEqual), or with reuse the
