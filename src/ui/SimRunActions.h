@@ -95,7 +95,8 @@ CheckSimStudyNow(AppState& state, uint64_t simSlotId, uint64_t studyId);
 
 // The panel's and the toolbar's Run on the simulation tab in front: a
 // topology study through StartSimTopologyRun, any other StartSimStudyRun.
-bool StartFrontSimRun(AppState& state, uint64_t studyId, std::string* error);
+bool StartFrontSimRun(AppState& state, uint64_t studyId, std::string* error,
+                      JobStart* jobStart = nullptr);
 
 // check_topology on a simulation: the
 // topology study's shape and solid static studies, made or brought up to

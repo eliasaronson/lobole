@@ -303,7 +303,7 @@ tractions, and a shape that is not the document's).
   `mesh: {bodies, findings, seconds, stale, error?}`. Its worker makes each
   mesh's report beside it, and the finish keeps mesh and report for the
   viewport ([the mesh you look at](../simulation/README.md#the-mesh-you-look-at));
-  the Simulation window's **Mesh** button starts the same job. The
+  the simulation toolbar's **Mesh** (`###tb_sim_mesh`) starts the same job. The
   synchronous form remains, and is the one an assembly study takes.
 
 `PrepareTopology` still meshes on the main thread.

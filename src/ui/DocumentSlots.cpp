@@ -392,8 +392,12 @@ void ResetActiveTabUiState(AppState& state) {
   // is the Model panel's, for the same reason as the job's.
   if (state.sim) {
     state.simulation.active = true;
-    if (!state.sim->GetStudies().empty())
+    if (!state.sim->GetStudies().empty()) {
       state.simulation.activeStudyId = state.sim->GetStudies().front().id;
+      // Its settings in the tool window, as the tree's row would show them.
+      state.simulation.focus = {SimulationState::Focus::Kind::Study,
+                                state.simulation.activeStudyId, 0, -1};
+    }
     state.gpu.syncedDocumentVersion = UINT64_MAX;
     state.focusPanel = "Model";
     state.focusPanelFrames = 60;

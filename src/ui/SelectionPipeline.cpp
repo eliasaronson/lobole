@@ -26,6 +26,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/fem/SimDocument.h"
 #include "core/sketch/SketchProfile.h"
 
 #include "imgui.h"
@@ -1190,6 +1191,17 @@ void PruneSelection(AppState& state) {
               for (const cam::Setup& s : state.job->GetSetups())
                 for (const cam::Fixture& f : s.fixtures)
                   if (f.id == it.id)
+                    return false;
+              return true;
+            }
+            case SelectionItem::Kind::SimStudy:
+              return !state.sim || state.sim->FindStudy(it.id) == nullptr;
+            case SelectionItem::Kind::SimLoad: {
+              if (!state.sim)
+                return true;
+              for (const fem::Study& s : state.sim->GetStudies())
+                for (const fem::Load& l : s.loads)
+                  if (l.id == it.id)
                     return false;
               return true;
             }

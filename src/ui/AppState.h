@@ -650,6 +650,35 @@ struct SimulationState {
   bool active = false;        // in simulation mode (the mode gate)
   uint64_t activeStudyId = 0; // study being edited/viewed (0 = none)
 
+  // The tree row whose settings the tool window shows while no tool is
+  // armed (docs/ui/panels.md#simulation-tab-the-model-panel): a click on a
+  // row, or the toolbar verb that made it (Mesh shows the mesh, Run the
+  // result, Check the findings). None: no window.
+  struct Focus {
+    enum class Kind {
+      None,
+      Subject,
+      Participant, // id = the occurrence
+      Study,
+      Mesh,
+      Load,    // id = the load
+      Case,    // index = the load case
+      Keep,    // index = the kept face
+      KeepOut, // index = the keep-out
+      Result,
+      Check
+    };
+    Kind kind = Kind::None;
+    uint64_t studyId = 0;
+    uint64_t id = 0;
+    int index = -1;
+  };
+  Focus focus;
+  // The study whose last Run was answered from a stored result
+  // (docs/simulation/README.md#studies-as-jobs), so its result can say why
+  // nothing ran.
+  uint64_t reusedStudy = 0;
+
   // Armed boundary-condition tool: a viewport face click assigns this load.
   // Keep (topology) freezes the picked face solid during optimization.
   // Torque and Remote place those loads; Probe reads a solved static
@@ -1220,9 +1249,15 @@ struct SelectionItem {
     CamSetup,
     JobPart,
     Fixture,
-    CamTool
+    CamTool,
+    // A simulation tab's tree rows that a list selection and Delete reach
+    // (docs/ui/panels.md#simulation-tab-the-model-panel): a study (id = its
+    // id) and a support or a load (id = the load's id, which the
+    // simulation's one counter keeps unique across its studies).
+    SimStudy,
+    SimLoad
   };
-  static constexpr int kKindCount = static_cast<int>(Kind::CamTool) + 1;
+  static constexpr int kKindCount = static_cast<int>(Kind::SimLoad) + 1;
   Kind kind = Kind::Feature;
   uint64_t id = 0;    // Feature/Occurrence/Mate id; Body: its createdBy
   ElementRef element; // Face/Edge/SketchRegion: {featureId, stable name}

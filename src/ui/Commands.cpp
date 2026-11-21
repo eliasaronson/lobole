@@ -342,8 +342,18 @@ void RunActiveStudy(AppState& s) {
   if (!HasStudy(s))
     return;
   std::string error;
-  if (!StartFrontSimRun(s, s.simulation.activeStudyId, &error))
+  // Shift+click computes again what a stored result would answer
+  // (docs/simulation/README.md#studies-as-jobs).
+  JobStart start;
+  start.recompute = ImGui::GetIO().KeyShift;
+  const uint64_t id = s.simulation.activeStudyId;
+  if (!StartFrontSimRun(s, id, &error, &start)) {
     LOG_WARN("run study failed: {}", error);
+    return;
+  }
+  s.simulation.reusedStudy = start.reused ? id : 0;
+  // The run's progress, then its answer, in the tool window.
+  FocusSim(s, SimulationState::Focus::Kind::Result, id);
 }
 
 const std::vector<Command>& Table() {
@@ -836,18 +846,55 @@ const std::vector<Command>& Table() {
         [](AppState& s) { LayOutBalloons(s, BalloonViews(s)); });
 
     // -------------------------------------------------------- Simulation
-    const auto bc = [&add](const char* id, SimulationState::Tool t) {
-      add(id, HasStudy, [t](AppState& s) {
-        // The toolbar button toggles: pressing the armed tool's key again
-        // disarms it, the same as clicking it again.
+    // Every gate is SimCommandRefusal's, so the button says why it is off.
+    const auto simAdd = [&add](const char* id,
+                               std::function<void(AppState&)> run) {
+      add(
+          id, [id](AppState& s) { return SimCommandRefusal(s, id).empty(); },
+          std::move(run));
+    };
+    const auto study = [&simAdd](const char* id, fem::AnalysisType type) {
+      simAdd(id, [type](AppState& s) { AddSimStudy(s, type); });
+    };
+    study("sim.add_static", fem::AnalysisType::Static);
+    study("sim.add_modal", fem::AnalysisType::Modal);
+    study("sim.add_buckling", fem::AnalysisType::Buckling);
+    study("sim.add_thermal", fem::AnalysisType::Thermal);
+    study("sim.add_topology", fem::AnalysisType::Topology);
+    simAdd("sim.mesh", MeshActiveStudy);
+    // A support or a load: the button toggles, so pressing the armed tool's
+    // key again disarms it, the same as clicking it again.
+    for (const char* id :
+         {"sim.fixed", "sim.pin", "sim.contact", "sim.roller", "sim.held",
+          "sim.cylindrical", "sim.temperature", "sim.convection", "sim.force",
+          "sim.pressure", "sim.torque", "sim.remote", "sim.heat_flux",
+          "sim.heat_source", "sim.keep", "sim.probe"}) {
+      const SimulationState::Tool t = SimCommandTool(id);
+      simAdd(id, [t](AppState& s) {
         SimulationArmTool(
             s, s.simulation.tool == t ? SimulationState::Tool::None : t);
       });
-    };
-    bc("sim.fixed", SimulationState::Tool::Fixed);
-    bc("sim.force", SimulationState::Tool::Force);
-    bc("sim.pressure", SimulationState::Tool::Pressure);
-    add("sim.run", HasStudy, RunActiveStudy);
+    }
+    simAdd("sim.add_case", AddActiveLoadCase);
+    simAdd("sim.check", [](AppState& s) {
+      FocusSim(s, SimulationState::Focus::Kind::Check,
+               s.simulation.activeStudyId);
+    });
+    simAdd("sim.run", RunActiveStudy);
+    simAdd("sim.result", [](AppState& s) {
+      FocusSim(s, SimulationState::Focus::Kind::Result,
+               s.simulation.activeStudyId);
+    });
+    simAdd("sim.export_vtu", [](AppState& s) {
+      ExportStudyResultDialog(s, s.simulation.activeStudyId);
+    });
+    simAdd("sim.toggle_labels", [](AppState& s) {
+      s.simulation.showLabels = !s.simulation.showLabels;
+    });
+    // Asked first: what it drops is not undone (Toolbar.cpp's modal).
+    simAdd("sim.clear_storage", [](AppState& s) {
+      s.popupRequest = "Clear stored meshes and results";
+    });
 
     return c;
   }();

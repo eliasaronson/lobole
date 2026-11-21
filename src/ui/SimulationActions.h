@@ -5,9 +5,13 @@
 
 #include "ui/BackgroundJobs.h"
 
+#include "core/fem/FemStudy.h"
 #include "render/MeshRenderer.h"
 #include "render/SketchRenderer.h"
 #include "ui/AppState.h"
+
+#include <string>
+#include <string_view>
 
 // FEM/topology study runs — arming, starting, polling and
 // cancelling them, plus the simulation display mode.
@@ -55,6 +59,40 @@ struct StudyRunStatus {
 // own weight, so the tool never places a load of 0 that silently does
 // nothing.
 void SimulationArmTool(AppState& state, SimulationState::Tool tool);
+
+// The simulation toolbar's commands (docs/ui/panels.md#the-simulation-toolbar):
+// why `command` cannot act on the simulation in front now, as a sentence
+// for its button's tooltip; "" when it can. Every `sim.*` command's gate is
+// this being empty, so a disabled button always says why.
+std::string SimCommandRefusal(AppState& state, std::string_view command);
+// The tool a support or load command arms ("sim.force" -> Force); None for
+// any other command.
+SimulationState::Tool SimCommandTool(std::string_view command);
+// The tree row the tool window shows (SimulationState::Focus); the study it
+// names becomes the active one, the one the tools and the viewport show.
+void FocusSim(AppState& state, SimulationState::Focus::Kind kind,
+              uint64_t studyId, uint64_t id = 0, int index = -1);
+// What the simulation in front keeps stored: its results and meshes.
+struct SimStorage {
+  size_t results = 0, meshes = 0;
+};
+SimStorage SimStorageOf(AppState& state);
+// Clear stored meshes and results
+// (docs/simulation/README.md#clearing-stored-meshes-and-results): the
+// simulation in front's results and meshes, and the session's mesh reports and
+// pictures of them. Everything is rebuilt on the next run; the studies stay.
+// Not undone: what it drops is derived. Returns what went.
+SimStorage ClearSimStorage(AppState& state);
+// The toolbar's Add study: a study of `type` on the simulation in front,
+// one undo step, made active and shown in the tool window. Its id.
+uint64_t AddSimStudy(AppState& state, fem::AnalysisType type);
+// The toolbar's Mesh: the active study meshed off the frame, drawn, and its
+// report in the tool window.
+void MeshActiveStudy(AppState& state);
+// The toolbar's Add case: a load case on the active study, the next force
+// going in it. The first case takes every load there is, so the study stays
+// one that runs (docs/topopt/README.md#load-cases).
+void AddActiveLoadCase(AppState& state);
 // The weight (N) of what the active study solves -- the part, or the meshed
 // occurrence -- that the load tools seed from; 0 when no material says.
 double SimulationWeightN(AppState& state);

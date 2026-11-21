@@ -5,6 +5,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/JobActions.h" // ActiveCamSetup
 #include "ui/SimulationActions.h"
+#include "ui/StudyHost.h"
 
 #include "common/Logger.h"
 #include "core/features/SketchFeature.h"
@@ -1222,87 +1223,220 @@ void DrawAssemblyToolbar(AppState& state) {
 
 // The simulation-mode toolbar: boundary-condition tools, run, exit — replaces
 // the model tools while a FEM study is being set up.
+// A simulation command's button: CommandButton, with the reason it is off
+// in its tooltip (SimCommandRefusal) -- "a tool that cannot apply yet is
+// disabled with its reason on hover"
+// (docs/ui/panels.md#the-simulation-toolbar).
+std::string SimTip(AppState& state, const char* id, const char* tip) {
+  const std::string why = SimCommandRefusal(state, id);
+  return WithChord(state, id, tip) + (why.empty() ? "" : "\n" + why);
+}
+
+bool SimButton(AppState& state, const char* tbId, const char* id,
+               const char* tip, bool active = false) {
+  if (active)
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  const bool clicked =
+      ToolButton((std::string(CommandIcon(id)) + tbId).c_str(),
+                 SimTip(state, id, tip).c_str(), CommandEnabled(state, id));
+  if (active)
+    ImGui::PopStyleColor();
+  if (clicked)
+    RunCommand(state, id);
+  return clicked;
+}
+
+// A drop-down of simulation commands showing the last one used -- the
+// supports, the loads, the kinds of study. The face shows the last used
+// that can act now (a thermal study's group shows Temperature, not a greyed
+// Fixed); the caret lists every one, each disabled with its reason. Each
+// keeps its "###tb_*" id, on the face or on its row.
+void SimGroup(AppState& state, const char* groupId, int& current,
+              std::initializer_list<CommandVariant> variants,
+              SimulationState::Tool armed = SimulationState::Tool::None) {
+  const CommandVariant* v = variants.begin();
+  const int n = static_cast<int>(variants.size());
+  if (current < 0 || current >= n)
+    current = 0;
+  if (!CommandEnabled(state, v[current].id))
+    for (int i = 0; i < n; i++)
+      if (CommandEnabled(state, v[i].id)) {
+        current = i;
+        break;
+      }
+  // The armed tool shows on the face, lit, whichever group armed it.
+  for (int i = 0; i < n; i++)
+    if (armed != SimulationState::Tool::None &&
+        SimCommandTool(v[i].id) == armed)
+      current = i;
+  ImGui::PushID(groupId);
+  const bool lit = armed != SimulationState::Tool::None &&
+                   SimCommandTool(v[current].id) == armed;
+  SimButton(state, v[current].tbId, v[current].id, v[current].label, lit);
+  if (FlyoutCaret())
+    ImGui::OpenPopup("variants");
+  if (ImGui::BeginPopup("variants")) {
+    for (int i = 0; i < n; i++) {
+      const std::string item = std::string(CommandIcon(v[i].id)) + "   " +
+                               WithChord(state, v[i].id, v[i].label) +
+                               v[i].tbId;
+      const std::string why = SimCommandRefusal(state, v[i].id);
+      ImGui::BeginDisabled(!why.empty());
+      if (ImGui::Selectable(item.c_str(), i == current)) {
+        current = i;
+        RunCommand(state, v[i].id);
+      }
+      ImGui::EndDisabled();
+      if (!why.empty() &&
+          ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", why.c_str());
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::PopID();
+  ImGui::SameLine();
+}
+
+// Clear stored meshes and results, asked first: what it drops is not undone
+// (it is derived, and rebuilt by the next run).
+void DrawClearStorageModal(AppState& state) {
+  constexpr const char* kTitle = "Clear stored meshes and results";
+  ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 26.0f, 0),
+                           ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal(kTitle, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+  const SimStorage stored = SimStorageOf(state);
+  ImGui::PushTextWrapPos(ImGui::GetFontSize() * 25.0f);
+  ImGui::Text("%zu stored result%s and %zu mesh%s of this simulation.",
+              stored.results, stored.results == 1 ? "" : "s", stored.meshes,
+              stored.meshes == 1 ? "" : "es");
+  ImGui::TextDisabled("The studies stay; each is meshed and solved again on "
+                      "its next run. This is not undone.");
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  if (ImGui::Button("Clear###sim_clear_storage_ok", ImVec2(120, 0))) {
+    ClearSimStorage(state);
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel###sim_clear_storage_cancel", ImVec2(120, 0)) ||
+      ImGui::IsKeyPressed(ImGuiKey_Escape))
+    ImGui::CloseCurrentPopup();
+  ImGui::EndPopup();
+}
+
+// The simulation tab's toolbar (docs/ui/panels.md#the-simulation-toolbar):
+// every tool, left to right in the order the work goes -- the study, its
+// mesh, its supports and loads, check and run, what the result shows -- and
+// the tree holds none of them.
 void DrawSimulationToolbar(AppState& state) {
   SimulationState& sim = state.simulation;
 
-  // A boundary-condition tool button: armed state highlighted like Measure.
-  auto bcBtn = [&](const char* tbId, const char* id, const char* tip,
-                   SimulationState::Tool t) {
-    CommandButton(state, tbId, id, tip, sim.tool == t); // toggles
-  };
-  bcBtn("###tb_sim_fixed", "sim.fixed", "Fixed support (click a face)",
-        SimulationState::Tool::Fixed);
-  bcBtn("###tb_sim_force", "sim.force", "Force load (click a face)",
-        SimulationState::Tool::Force);
-  bcBtn("###tb_sim_pressure", "sim.pressure", "Pressure load (click a face)",
-        SimulationState::Tool::Pressure);
+  static int studyKind = 0;
+  SimGroup(state, "sim_study", studyKind,
+           {{"###tb_sim_add_static", "sim.add_static",
+             "Add a static study (stress and deflection under load)"},
+            {"###tb_sim_add_modal", "sim.add_modal",
+             "Add a modal study (natural frequencies)"},
+            {"###tb_sim_add_buckling", "sim.add_buckling",
+             "Add a buckling study (the load factor it buckles at)"},
+            {"###tb_sim_add_thermal", "sim.add_thermal",
+             "Add a thermal study (steady temperatures)"},
+            {"###tb_sim_add_topology", "sim.add_topology",
+             "Add a topology study (the shape that carries the load)"}});
 
   Divider();
 
-  // The command uses the same worker-thread paths the panel's Run uses. This
-  // called the blocking RunStudyAndCache once, so the toolbar could freeze the
-  // app for the length of a solve — and on a topology study, for the length of
-  // an optimization.
-  CommandButton(state, "###tb_sim_run", "sim.run", "Run study (mesh + solve)");
+  SimButton(state, "###tb_sim_mesh", "sim.mesh",
+            "Mesh the study and draw its elements (Run meshes by itself; "
+            "this is for looking first)");
 
   Divider();
-  // Framing and measuring what the simulation analyses: the tab's own bar
-  // until it has a window of its own.
+
+  static int support = 0, load = 0;
+  SimGroup(state, "sim_supports", support,
+           {{"###tb_sim_fixed", "sim.fixed", "Fixed support (click a face)"},
+            {"###tb_sim_pin", "sim.pin",
+             "Pin (click a bore or a shaft; free to turn)"},
+            {"###tb_sim_contact", "sim.contact",
+             "Contact (click a flat face: it rests on the ground)"},
+            {"###tb_sim_roller", "sim.roller",
+             "Roller (click a face: held along its normal)"},
+            {"###tb_sim_held", "sim.held",
+             "Held directions (click a face: the ticked axes held)"},
+            {"###tb_sim_cylindrical", "sim.cylindrical",
+             "Cylindrical support (click a bore or a shaft)"},
+            {"###tb_sim_temperature", "sim.temperature",
+             "Temperature (click a face: held at it)"},
+            {"###tb_sim_convection", "sim.convection",
+             "Convection (click a face: cooled by a fluid)"}},
+           sim.tool);
+  SimGroup(
+      state, "sim_loads", load,
+      {{"###tb_sim_force", "sim.force", "Force (click a face)"},
+       {"###tb_sim_pressure", "sim.pressure", "Pressure (click a face)"},
+       {"###tb_sim_torque", "sim.torque", "Torque (click the face it turns)"},
+       {"###tb_sim_remote", "sim.remote",
+        "Remote load (a force at a point, carried by the face clicked)"},
+       {"###tb_sim_heat_flux", "sim.heat_flux",
+        "Heat flux (click a face: heat into it)"},
+       {"###tb_sim_heat_source", "sim.heat_source",
+        "Heat source (click a face of the body that makes it)"}},
+      sim.tool);
+  SimButton(state, "###tb_sim_add_case", "sim.add_case",
+            "Add a load case (each case is solved on its own)");
+  // Only on a topology study, as the rotary verbs are only on a machine
+  // with the axis: a button for a kind of study you do not have is a
+  // question with no answer.
+  if (const StudyHost host = StudyHostOf(state))
+    if (const fem::Study* s = host.Find(sim.activeStudyId);
+        s != nullptr && s->type == fem::AnalysisType::Topology)
+      SimButton(state, "###tb_sim_keep", "sim.keep",
+                "Keep a face solid (click it; the optimizer leaves it)",
+                sim.tool == SimulationState::Tool::Keep);
+
+  Divider();
+
+  SimButton(state, "###tb_sim_check", "sim.check",
+            "Check the study: everything a run would refuse",
+            sim.focus.kind == SimulationState::Focus::Kind::Check);
+  SimButton(state, "###tb_sim_run", "sim.run",
+            "Run the study (mesh + solve); Shift+click computes again what a "
+            "stored result would answer");
+
+  Divider();
+
+  SimButton(state, "###tb_sim_result", "sim.result",
+            "Result: the field shown, its range and the numbers",
+            sim.focus.kind == SimulationState::Focus::Kind::Result);
+  SimButton(state, "###tb_sim_probe", "sim.probe",
+            "Probe: hover a face for its stress, click to pin it",
+            sim.tool == SimulationState::Tool::Probe);
+  SimButton(state, "###tb_sim_export_vtu", "sim.export_vtu",
+            "Export the result as VTU (ParaView or another post-processor)");
+  SimButton(state, "###tb_sim_labels", "sim.toggle_labels",
+            "Labels: each support's and load's value in the viewport",
+            sim.showLabels);
+  SimButton(state, "###tb_sim_clear_storage", "sim.clear_storage",
+            "Clear stored meshes and results (rebuilt on the next run)");
+  if (TakePopupRequest(state, "Clear stored meshes and results"))
+    ImGui::OpenPopup("Clear stored meshes and results");
+  DrawClearStorageModal(state);
+
+  Divider();
   CommandButton(state, "###tb_sim_fit", "view.fit", "Fit view");
   CommandButton(state, "###tb_sim_measure", "view.measure", "Measure",
                 state.measure.active);
 
   Divider();
 
-  // Escape is a fixed modal verb, not a binding — the same rule the sketch
+  // Escape is a fixed modal verb, not a binding -- the same rule the sketch
   // session's check mark follows (docs/ui/keybindings.md).
   if (ToolButton(ICON_FA_ARROW_RIGHT_FROM_BRACKET "###tb_sim_exit",
                  "Exit Simulation (Esc)"))
     ExitSimulation(state);
-
-  // Hint while a BC tool is armed.
-  if (sim.tool != SimulationState::Tool::None) {
-    ImGui::SameLine();
-    const char* what = "pressure";
-    switch (sim.tool) {
-    case SimulationState::Tool::Fixed:
-      what = "fixed support";
-      break;
-    case SimulationState::Tool::Force:
-      what = "force";
-      break;
-    case SimulationState::Tool::Torque:
-      what = "torque";
-      break;
-    case SimulationState::Tool::Remote:
-      what = "remote load";
-      break;
-    case SimulationState::Tool::Pin:
-      what = "pin support (a bore or a shaft)";
-      break;
-    case SimulationState::Tool::Contact:
-      what = "contact support (a flat face on the ground)";
-      break;
-    case SimulationState::Tool::Roller:
-      what = "roller (held along the face's normal)";
-      break;
-    case SimulationState::Tool::Held:
-      what = "held directions";
-      break;
-    case SimulationState::Tool::Cylindrical:
-      what = "cylindrical support (a bore or a shaft)";
-      break;
-    case SimulationState::Tool::Keep:
-      what = "keep face";
-      break;
-    default:
-      break;
-    }
-    if (sim.tool == SimulationState::Tool::Probe)
-      ImGui::TextDisabled("hover a face for its stress, click to pin it");
-    else
-      ImGui::TextDisabled("click a face to place the %s", what);
-  }
   ImGui::NewLine();
 }
 

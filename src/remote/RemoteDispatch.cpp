@@ -2275,6 +2275,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           : it.kind == ui::SelectionItem::Kind::JobPart     ? "job_part"
           : it.kind == ui::SelectionItem::Kind::Fixture     ? "fixture"
           : it.kind == ui::SelectionItem::Kind::CamTool     ? "cam_tool"
+          : it.kind == ui::SelectionItem::Kind::SimStudy    ? "sim_study"
+          : it.kind == ui::SelectionItem::Kind::SimLoad     ? "sim_load"
                                                             : "sketch_region";
       json entry = {{"kind", kind}};
       if (it.id != 0)

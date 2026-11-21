@@ -158,6 +158,12 @@ void PrimitiveOnBasePlane(ImGuiTestContext* ctx, const char* tbId,
                           int planeIdx);
 
 void BuildCantileverStudy(ImGuiTestContext* ctx, double height);
+// A row of the simulation tab's tree ("###sim_mesh_7"): clicked, so the
+// tool window shows its settings.
+void SimTreeClick(ImGuiTestContext* ctx, const std::string& rowId);
+// The study's row (0: the active study), so the tool window shows its
+// settings -- after a Run it shows the result.
+void SimFocusStudy(ImGuiTestContext* ctx, uint64_t studyId = 0);
 bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId);
 
 // --- Waiting for something asynchronous --------------------------------------

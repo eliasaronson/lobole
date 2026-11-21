@@ -19,15 +19,22 @@
 // docs/architecture.md#the-ui-actions-layer.
 namespace ui {
 
-// The Studies panel drawn in the Model dock while in simulation mode on a
-// PART tab. Defined in StudyPanel.cpp.
+// The Model dock on a simulation tab: the tree of what the simulation holds
+// (ui/SimTree.h). Defined in StudyPanel.cpp.
 void DrawStudyPanel(AppState& state);
 
-// The same studies on an ASSEMBLY tab (S1), as the floating tool window
-// beside explode and motion — the Model dock there is the occurrence panel.
-// Adds the participants table (each occurrence's role) and a clamp at each
-// rigid support's contact.
+// The shared tool window on a simulation tab (docs/ui/panels.md
+// #simulation-the-tool-window): the armed tool's settings, else those of the
+// tree row in focus (SimulationState::Focus) -- a study, its mesh and its
+// report, a support or a load, a load case, a participant, the result, the
+// check. Nothing in focus and nothing armed: no window.
 void DrawSimulationToolWindow(AppState& state);
+
+// An assembly subject's participant takes `role`, for every study of the
+// simulation (the roles are the document's), as one undo step: one meshed
+// at a time, and an ignored one's contact supports go with it.
+void SetSimParticipantRole(AppState& state, uint64_t occurrenceId,
+                           fem::ParticipantRole role);
 
 // The result-field colorbar legend overlaid on the viewport while a field is
 // displayed. Defined in StudyPanel.cpp.

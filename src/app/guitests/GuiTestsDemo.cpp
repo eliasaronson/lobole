@@ -695,7 +695,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     CentreLeftOf(ctx, Doc(), "//###ToolWindow");
     BeginScene(ctx, "fem");
     Hold(ctx, 0.5);
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     ctx->ItemClick("//###ToolWindow/###result_field");
     ctx->Yield();

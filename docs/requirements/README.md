@@ -168,9 +168,9 @@ there.
 its largest nodal value or its area-weighted mean
 ([probing a face](../simulation/README.md#probing-a-face)). A study's global
 peak often sits in a sharp corner whose value grows with the mesh; a tooth
-root or a fillet is the stress a design is held to. The Simulation window's
-pinned probes make one ("Add requirement"), bounded at most the material's
-yield.
+root or a fillet is the stress a design is held to. A pinned probe's menu,
+in the result's settings, makes one ("Add requirement"), bounded at most the
+material's yield.
 
 **A formula over several faces** (`study_probe` with `readings`): each
 reading is a `probe_study` of one face, `{face, at?}`, and the expression

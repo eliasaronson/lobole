@@ -216,11 +216,12 @@ both open means nothing):
     ([playing and filming a sequence](../assemblies/README.md#playing-and-filming-a-sequence)).
 - **Simulation** (`###tb_asm_simulation`) — opens the assembly's
   simulation tab ([the simulation tab](../simulation/README.md#the-simulation-tab)),
-  whose `DrawSimulationToolWindow` (in `StudyPanel.cpp`) carries a
-  participants table (each top-level occurrence's role: Ignored, Rigid,
-  Meshed, Bonded or Contact; "Clamp here" and "Rest on it" on a rigid row, a
-  friction field on a contact row:
-  [contact](../simulation/README.md#contact)). Close goes back to the
+  whose tree lists each top-level occurrence under the subject with its
+  role (Ignored, Rigid, Meshed, Bonded or Contact) as its menu, and whose
+  tool window, for a participant's row, holds "Clamp here" and "Rest on
+  it" on a rigid one and a friction field on a contact one
+  ([contact](../simulation/README.md#contact);
+  [the tree](#simulation-tab-the-model-panel)). Exit goes back to the
   assembly.
 - **Bill of materials** (`###tb_asm_bom`, `assembly.bom`, B) —
   `DrawBomWindow`, floating below the tool window: name, quantity, material,
@@ -301,16 +302,93 @@ always regenerate and open it; the status glyph opens it as it stands. The
 CAM verbs themselves (docs/cam) run in the tool window. Starting a verb
 closes an open editor; an editor takes the window from a verb.
 
-## Simulation: the Study panel and window
+## Simulation tab: the Model panel
 
 On a simulation tab (the Simulation button of a part or an assembly opens
 it: [the simulation tab](../simulation/README.md#the-simulation-tab)) the
-studies are listed in the dock under the subject's row as `ListRow`s (a glyph for
-static, modal, topology, buckling or thermal, the name, and the state — solved, stale, failed —
-as the tail). A double-click, or the toolbar's Run (`###tb_sim_run`), opens
-the study in the floating Simulation window, where it is edited, run and read
-with the solve in the shared progress bar. Loads and kept faces are rows with
-Remove in their menu.
+Model dock is the tree of what the simulation holds (`ui::DrawSimTree`,
+`src/ui/SimTree.cpp`). It shows and selects; it holds no tool, no button and
+no field. One `ListRow` per thing, each with its glyph and one short value
+as its tail:
+
+```
+Bracket                        part
+Studies 2
+v Static 1                     27.1 MPa   (a dot: solved / stale / failed / solving)
+    Mesh                       1820 tets
+    Fixed  face3
+    Force  face5               100 N, Case 1
+    Case 1                     1 load
+    Result                     Von Mises
+> Modal 1
+```
+
+- **The subject** (`###sim_subject`): what the simulation analyses, its name
+  as its tab has it, "missing" when that tab is gone. On an assembly each
+  top-level occurrence is a row under it (`###sim_part_<occurrence>`) with
+  its role as its tail and **Role** as its menu
+  (`###role_set_<occurrence>_<role>`; `ui::SetSimParticipantRole`, one undo
+  step, shared by every study): the one control a row keeps, as a CAM part
+  row keeps its Configuration menu.
+- **Studies**, each with a disclosure (`###sim_study_open_<id>`), the glyph
+  of the command that adds its kind, its name (`###study_sel_<id>`) and its
+  headline number (the peak stress, the first frequency or buckling factor,
+  the peak temperature, the volume kept). Its state is a small dot on the
+  glyph (`ListRowSpec::dotColor`) in the colours the list always used, the
+  word on hover. Under an open study, in the order the work goes: its
+  **Mesh** (`###sim_mesh_<id>`: the element count, the report's warning
+  count, a dot for current or stale), its supports, then its loads
+  (`###load_row_<id>`, each with the glyph of the command that places it and
+  its value), gravity and a thermal load when the study has them, its load
+  cases (`###case_row_<study>_<i>`), a topology study's kept faces and
+  keep-outs, and its **Result** (`###sim_result_<id>`) once there is one.
+  A group with nothing in it is not drawn.
+- **Selection** is the lists' ([selection.md](selection.md#lists-one-gesture-one-delete)):
+  studies and loads are `SelectionItem::Kind::SimStudy` and `SimLoad`, so a
+  click selects, Ctrl and Shift extend, and Delete (or the row's menu)
+  removes what is lit as one undo step. Every row's click also puts its
+  settings in the tool window (`SimulationState::Focus`, `ui::FocusSim`),
+  and the study it is under becomes the active one. A load's row lights the
+  face it stands on in the selection's colour (`AppendSimulationFaceTints`),
+  and a face picked in the viewport lights its load's row.
+
+### The simulation toolbar
+
+`DrawSimulationToolbar` (`src/ui/Toolbar.cpp`), left to right in the order
+the work goes, every button a `sim.*` command with its glyph from the icon
+table and a tooltip: **Add study** (a drop-down of static, modal, buckling,
+thermal and topology, `###tb_sim_add_<kind>`, each one undo step named
+"Static 2") | **Mesh** (`###tb_sim_mesh`) | **Supports** (fixed, pin,
+contact, roller, held, cylindrical, temperature, convection) and **Loads**
+(force, pressure, torque, remote, heat flux, heat source), two drop-downs
+showing the last used, lit while it is armed; **Add case**
+(`###tb_sim_add_case`) and, on a topology study only, **Keep**
+(`###tb_sim_keep`) | **Check** (`###tb_sim_check`) and **Run**
+(`###tb_sim_run`; Shift computes again what a stored result would answer) |
+**Result**, **Probe**, **Export VTU**, **Labels** (each load's value in the
+viewport) and **Clear stored meshes and results**
+(`###tb_sim_clear_storage`, asked first: [clearing](../simulation/README.md#clearing-stored-meshes-and-results))
+| Fit, Measure | Exit. A tool that cannot act on the study in front is
+disabled with its reason on hover (`ui::SimCommandRefusal`, every `sim.*`
+command's gate): a pin on a modal study, a heat flux on a static one, an
+export before a run. A drop-down's face shows the last used that can act,
+so a thermal study's supports show Temperature, not a greyed Fixed.
+
+### Simulation: the tool window
+
+The shared `###ToolWindow` ([tool-sessions.md](tool-sessions.md)) shows one
+thing at a time (`DrawSimulationToolWindow`, `src/ui/StudyPanel.cpp`): the
+armed tool's settings (what the next face clicked takes, and the case it
+goes in), else those of the tree row in focus -- a study's settings (name,
+analysis, solver, its kind's numbers, gravity, the material check), the
+mesh's size, view and report, a load's place and value (a remote load's
+point and a force's case are edited there), a case's loads and weight, a
+participant's role, clamp and friction, the result (its progress while it
+runs, then its numbers, its display and its probes), or the check's
+findings. Mesh, Run and Check on the toolbar focus the mesh, the result and
+the check. Its foot is **Close** (`###simulation_close`: the window goes, the
+simulation stays) or, while a tool is armed, **Done**. Nothing in focus and
+nothing armed: no window.
 
 What the setup draws in the viewport (`src/ui/StudyPanel.cpp`):
 
@@ -325,22 +403,23 @@ What the setup draws in the viewport (`src/ui/StudyPanel.cpp`):
   which is its drag handle ([viewport-handles.md](viewport-handles.md)).
 - Gravity is an arrow from the centre of mass.
 - Each boundary condition carries a label with its value and unit
-  (`SimulationLoadLabel`: "1.2 kN", "20 kPa"), switchable with "Labels in
-  viewport".
+  (`SimulationLoadLabel`: "1.2 kN", "20 kPa"), switchable with the
+  toolbar's Labels (`###tb_sim_labels`). While a mesh or a result is on
+  show only the selected load's label is drawn, so the picture is not
+  covered in text.
 
 Defaults come from the part: a force's direction is the negated outward
 normal of the face it is placed on (`fem::DefaultForceDirection`, shared with
 `add_load` when no direction is given; "Custom direction" restores an
 explicit vector), and its magnitude starts at the part's own weight. A body
 still on the default material (which has no stiffness data, deliberately) is
-flagged in the panel before Run, with the material combo in place
-(`###material_<body creator id>`). The load list shows each load's magnitude
-and direction. The `--offscreen` instance builds no overlays, so a study's
+flagged in the study's and the subject's settings before Run, with the
+material combo in place (`###material_<body creator id>`). A load's row
+shows its value, a force's direction on hover. The `--offscreen` instance builds no overlays, so a study's
 picture needs a windowed instance.
 
 The window's reports are lists whose rows frame their place: the **Mesh
-report** under the Mesh button (folded until opened) and the study check
-under Run are `FindingRow`s (`src/ui/StudyPanel.cpp`), a glyph and the
+report** in the mesh's settings and the study check are `FindingRow`s (`src/ui/StudyPanel.cpp`), a glyph and the
 finding as a whole sentence wrapped at the window's fixed width -- an elided
 sentence is not a finding -- with a hover highlight across it, and a click
 that frames the element, the wall, the face or the body it is about
@@ -396,4 +475,8 @@ buttons do not yet follow the row pattern; a shared radio row for 2–4 choices
 assembly relations, nor the CAM panel's setups, parts, fixtures and tools
 (only its operations are in the shared list selection; the others delete
 from their menus); a placed simulation load cannot be edited in place, only
-removed and replaced.
+removed and replaced (but a remote load's point and the case a load is in);
+the simulation tree's load cases, kept faces and keep-outs are not in the
+list selection (each removes from its menu or its settings); the legend
+carries no controls yet (the field, the case, the deformation and the
+range are the result's settings in the tool window).

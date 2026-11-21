@@ -26,13 +26,15 @@
 #include "ui/DocumentSlots.h"
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/FileDialogs.h"
-#include "ui/Overlays.h"    // ViewportDrawList
-#include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
+#include "ui/Icons.h"
+#include "ui/ListSelection.h" // IsSelected (a picked load lights its face)
+#include "ui/Overlays.h"      // ViewportDrawList
+#include "ui/PanelLayout.h"   // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h"    // BeginToolWindowFrame
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 #include "ui/SimRunActions.h"
-#include "ui/SimTree.h" // DrawSimSubjectRow
+#include "ui/SimTree.h"
 #include "ui/SimulationActions.h"
 #include "ui/SimulationView.h"
 #include "ui/SketchInteraction.h" // WorldToScreen (labels)
@@ -49,6 +51,7 @@
 #include <cfloat>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -114,72 +117,18 @@ void MessageText(const ImVec4& color, const std::string& text) {
   ImGui::PopTextWrapPos();
 }
 
-const char* LoadLabel(fem::LoadType t) {
-  switch (t) {
-  case fem::LoadType::Fixed:
-    return "Fixed";
-  case fem::LoadType::Force:
-    return "Force";
-  case fem::LoadType::Pressure:
-    return "Pressure";
-  case fem::LoadType::Torque:
-    return "Torque";
-  case fem::LoadType::Remote:
-    return "Remote";
-  case fem::LoadType::Pin:
-    return "Pin";
-  case fem::LoadType::Contact:
-    return "Contact";
-  case fem::LoadType::Roller:
-    return "Roller";
-  case fem::LoadType::Held:
-    return "Held";
-  case fem::LoadType::Cylindrical:
-    return "Cylindrical";
-  case fem::LoadType::Temperature:
-    return "Temperature";
-  case fem::LoadType::HeatFlux:
-    return "Heat flux";
-  case fem::LoadType::Convection:
-    return "Convection";
-  case fem::LoadType::HeatGeneration:
-    return "Heat source";
-  }
-  return "?";
-}
+const char* LoadLabel(fem::LoadType t) { return SimLoadName(t); }
 
-const char* LoadGlyph(fem::LoadType t) {
-  switch (t) {
-  case fem::LoadType::Fixed:
-    return ICON_FA_LOCK;
-  case fem::LoadType::Force:
-    return ICON_FA_BOLT;
-  case fem::LoadType::Pressure:
-    return ICON_FA_DOWN_LONG;
-  case fem::LoadType::Torque:
-    return ICON_FA_ROTATE;
-  case fem::LoadType::Remote:
-    return ICON_FA_LOCATION_CROSSHAIRS;
-  case fem::LoadType::Pin:
-    return ICON_FA_THUMBTACK;
-  case fem::LoadType::Contact:
-    return ICON_FA_ARROWS_DOWN_TO_LINE;
-  case fem::LoadType::Roller:
-    return ICON_FA_CIRCLE_DOT;
-  case fem::LoadType::Held:
-    return ICON_FA_ARROWS_TO_DOT;
-  case fem::LoadType::Cylindrical:
-    return ICON_FA_LIFE_RING;
-  case fem::LoadType::Temperature:
-    return ICON_FA_TEMPERATURE_HALF;
-  case fem::LoadType::HeatFlux:
-    return ICON_FA_ARROW_RIGHT_TO_BRACKET;
-  case fem::LoadType::Convection:
-    return ICON_FA_WIND;
-  case fem::LoadType::HeatGeneration:
-    return ICON_FA_FIRE;
-  }
-  return ICON_FA_BOLT;
+// What the armed tool does with the face clicked: a line wrapped at the
+// window's width, as MessageText is, so a long one cannot widen it.
+void Hint(const char* fmt, ...) IM_FMTARGS(1);
+void Hint(const char* fmt, ...) {
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 22.0f);
+  va_list args;
+  va_start(args, fmt);
+  ImGui::TextDisabledV(fmt, args);
+  va_end(args);
+  ImGui::PopTextWrapPos();
 }
 
 // The roller, held and cylindrical tools (docs/simulation/README.md
@@ -188,23 +137,13 @@ const char* LoadGlyph(fem::LoadType t) {
 // click. Nothing here has a default with a unit: a held support's
 // displacements are zero until typed, and one with no direction ticked is
 // refused where it is placed.
-template <class Arm>
-void DrawFrameSupportTools(AppState& state, const fem::Study& s, Arm&& arm) {
+void DrawFrameSupportTools(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
   const StudyHost host = StudyHostOf(state);
-  (void)host;
-  if (s.type == fem::AnalysisType::Topology ||
-      s.type == fem::AnalysisType::Thermal)
-    return;
-  arm(ICON_FA_CIRCLE_DOT " Roller###sim_bc_roller",
-      SimulationState::Tool::Roller);
-  arm(ICON_FA_ARROWS_TO_DOT " Held###sim_bc_held", SimulationState::Tool::Held);
-  arm(ICON_FA_LIFE_RING " Cylindrical###sim_bc_cylindrical",
-      SimulationState::Tool::Cylindrical);
   if (sim.tool == SimulationState::Tool::Roller)
-    ImGui::TextDisabled("Click a face: held along its normal, free across "
-                        "it -- a symmetry plane on a flat face, a "
-                        "frictionless seat on a curved one");
+    Hint("Click a face: held along its normal, free across "
+         "it -- a symmetry plane on a flat face, a "
+         "frictionless seat on a curved one");
   if (sim.tool == SimulationState::Tool::Held) {
     // The frame: the world's, or a Frame or datum of the part.
     std::string current = "World";
@@ -243,8 +182,8 @@ void DrawFrameSupportTools(AppState& state, const fem::Study& s, Arm&& arm) {
           sim.pendingHeldMmExpr[k] = expr;
       }
     }
-    ImGui::TextDisabled("Click a face: each ticked direction held, at the "
-                        "displacement typed (0: where it is)");
+    Hint("Click a face: each ticked direction held, at the "
+         "displacement typed (0: where it is)");
   }
   if (sim.tool == SimulationState::Tool::Cylindrical) {
     for (int k = 0; k < 3; ++k) {
@@ -253,8 +192,8 @@ void DrawFrameSupportTools(AppState& state, const fem::Study& s, Arm&& arm) {
                              fem::kCylindricalAxisNames[k];
       ImGui::Checkbox(id.c_str(), &sim.pendingCylHold[k]);
     }
-    ImGui::TextDisabled("Click a bore or a shaft: held both ways in the "
-                        "directions ticked, about its axis");
+    Hint("Click a bore or a shaft: held both ways in the "
+         "directions ticked, about its axis");
   }
 }
 
@@ -436,88 +375,6 @@ void AddProbeRequirement(AppState& state, const fem::Study& s,
   state.projectMetaDirty = true;
 }
 
-// Deletes a study from its host, as one undo step, and moves the selection
-// to the first that is left.
-void DeleteStudy(AppState& state, uint64_t id) {
-  const StudyHost host = StudyHostOf(state);
-  if (!host)
-    return;
-  {
-    SimUndoGuard guard(state);
-    host.sim->RemoveStudy(id);
-  }
-  state.simulation.activeStudyId =
-      host.Studies().empty() ? 0 : host.Studies().front().id;
-}
-
-const char* StudyGlyph(fem::AnalysisType type) {
-  switch (type) {
-  case fem::AnalysisType::Static:
-    return ICON_FA_WEIGHT_HANGING;
-  case fem::AnalysisType::Modal:
-    return ICON_FA_WAVE_SQUARE;
-  case fem::AnalysisType::Topology:
-    return ICON_FA_CIRCLE_NODES;
-  case fem::AnalysisType::Buckling:
-    return ICON_FA_COMPRESS;
-  case fem::AnalysisType::Thermal:
-    return ICON_FA_TEMPERATURE_HALF;
-  }
-  return ICON_FA_WEIGHT_HANGING;
-}
-
-// Where a study stands, in a word, for its row's tail.
-std::string StudyStateWord(AppState& state, const fem::Study& s) {
-  if (GetStudyRunStatus(state, s.id, ActiveSimSlotId(state)).running)
-    return "solving";
-  if (!s.error.empty())
-    return "failed";
-  if (StudyHostOf(state).Results(s.id) == nullptr)
-    return "not run";
-  return StudyStale(state, s.id) ? "stale" : "solved";
-}
-
-// The studies as rows in the feature list's style (ui::ListRow,
-// docs/ui/panels.md#simulation-the-study-panel-and-window): a glyph for the
-// analysis, the name, and where it stands as the tail. Click selects -- its
-// editor is the Simulation window -- and Delete is in the row's menu, where a
-// big button at the bottom of the editor used to be.
-void DrawStudyList(AppState& state) {
-  const StudyHost host = StudyHostOf(state);
-  SimulationState& sim = state.simulation;
-
-  ImGui::SeparatorText("Studies");
-  if (ImGui::Button(ICON_FA_PLUS " Add study###study_add"))
-    sim.activeStudyId = AddStudyOn(state, "");
-
-  uint64_t toDelete = 0;
-  for (const fem::Study& s : host.Studies()) {
-    // The id goes in the label, not a PushID(int): a PushID scope is not
-    // addressable from a test path
-    // (docs/ui/testing.md#making-a-widget-addressable).
-    ListRowSpec row;
-    row.glyph = StudyGlyph(s.type);
-    row.label = s.name + "###study_sel_" + std::to_string(s.id);
-    row.selected = sim.activeStudyId == s.id;
-    row.tail = StudyStateWord(state, s);
-    if (!s.error.empty()) {
-      row.glyphColor = kError;
-      row.tooltip = s.error;
-    }
-    row.menuId = "###study_ctx_" + std::to_string(s.id);
-    const uint64_t id = s.id;
-    row.menu = [&toDelete, id] {
-      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###study_delete"))
-        toDelete = id;
-    };
-    const ListRowResult res = ListRow(row);
-    if (res.clicked || res.doubleClicked)
-      sim.activeStudyId = s.id;
-  }
-  if (toDelete != 0)
-    DeleteStudy(state, toDelete);
-}
-
 // Every new body starts with the DEFAULT material, which deliberately carries
 // no stiffness data (CADMaterials.h: fail rather than guess). So the FIRST Run
 // on any new part fails — and it used to fail only after the click, as a
@@ -557,7 +414,7 @@ void DrawMaterialCheck(AppState& state) {
     const std::string comboId = "###material_" + std::to_string(body.createdBy);
     MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " + body.name +
                             " has no material");
-    ImGui::TextDisabled("A study needs stiffness data to solve.");
+    Hint("A study needs stiffness data to solve.");
     LeftLabel("Material");
     std::vector<const char*> labels;
     labels.reserve(types.size() + 1);
@@ -577,102 +434,77 @@ void DrawMaterialCheck(AppState& state) {
   }
 }
 
-// Load cases (docs/topopt/README.md#load-cases): the list with each case's
-// weight, Add, and the case the next force or pressure goes in. A part's
-// static or topology study only.
-void DrawLoadCases(AppState& state, const fem::Study& s) {
+// The case the next force, pressure, torque or remote load goes in, on a
+// study with load cases (docs/topopt/README.md#load-cases).
+void DrawPendingCase(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
-  const StudyHost host = StudyHostOf(state);
-  // A buckling factor scales one load set: no cases.
-  (void)host;
-  if (s.type == fem::AnalysisType::Modal ||
-      s.type == fem::AnalysisType::Buckling)
+  if (s.loadCases.empty() || (sim.tool != SimulationState::Tool::Force &&
+                              sim.tool != SimulationState::Tool::Pressure &&
+                              sim.tool != SimulationState::Tool::Torque &&
+                              sim.tool != SimulationState::Tool::Remote))
     return;
-  ImGui::SeparatorText("Load cases");
-  if (s.loadCases.empty())
-    ImGui::TextColored(kMuted, "One case: every load acts together.");
-  std::string removeCase;
-  for (size_t i = 0; i < s.loadCases.size(); ++i) {
-    const fem::LoadCase& c = s.loadCases[i];
-    const bool used =
-        std::any_of(s.loads.begin(), s.loads.end(),
-                    [&](const fem::Load& l) { return l.loadCase == c.name; });
-    ImGui::PushID(static_cast<int>(i));
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(c.name.c_str());
-    if (s.type == fem::AnalysisType::Topology) {
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
-      double w = c.weight;
-      std::string wExpr;
-      const bool wChanged =
-          ExprInputDouble(state, "###case_weight", &w, "%.3g", &wExpr);
-      if ((wChanged || ImGui::IsItemDeactivatedAfterEdit()) && w > 0.0 &&
-          (w != c.weight || wExpr != c.weight.expr)) {
-        const std::string name = c.name;
-        ModifyStudy(state, s.id, "Set load case weight", [&](fem::Study& cs) {
-          for (fem::LoadCase& lc : cs.loadCases)
-            if (lc.name == name) {
-              lc.weight = w;
-              lc.weight.expr = wExpr;
-            }
-        });
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Weight in the objective: the run minimises the "
-                          "weighted sum of the cases' compliances.");
-    }
-    ImGui::SameLine();
-    ImGui::BeginDisabled(used);
-    if (ImGui::SmallButton(ICON_FA_TRASH_CAN "###case_del"))
-      removeCase = c.name;
-    ImGui::EndDisabled();
-    if (used && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-      ImGui::SetTooltip("Loads are in this case; remove them first.");
-    ImGui::PopID();
+  int k = std::max(0, s.FindLoadCase(sim.pendingCase));
+  LeftLabel("In case");
+  if (ImGui::BeginCombo("###sim_pending_case", s.loadCases[k].name.c_str())) {
+    for (size_t i = 0; i < s.loadCases.size(); ++i)
+      if (ImGui::Selectable(s.loadCases[i].name.c_str(),
+                            static_cast<int>(i) == k))
+        sim.pendingCase = s.loadCases[i].name;
+    ImGui::EndCombo();
   }
-  if (!removeCase.empty())
+}
+
+// One load case (the tree's row in focus): its loads, its weight in a
+// topology study's objective, and Remove once nothing is in it.
+void DrawCaseWindow(AppState& state, const fem::Study& s, int index) {
+  if (index < 0 || index >= static_cast<int>(s.loadCases.size())) {
+    ImGui::TextColored(kMuted, "That load case is gone.");
+    return;
+  }
+  const fem::LoadCase& c = s.loadCases[static_cast<size_t>(index)];
+  std::vector<const fem::Load*> in;
+  for (const fem::Load& l : s.loads)
+    if (l.loadCase == c.name)
+      in.push_back(&l);
+  ImGui::TextColored(kMuted, "Solved on its own, with every support.");
+  if (s.type == fem::AnalysisType::Topology) {
+    double w = c.weight;
+    std::string wExpr;
+    LeftLabel("Weight");
+    const bool wChanged =
+        ExprInputDouble(state, "###case_weight", &w, "%.3g", &wExpr);
+    if ((wChanged || ImGui::IsItemDeactivatedAfterEdit()) && w > 0.0 &&
+        (w != c.weight || wExpr != c.weight.expr)) {
+      const std::string name = c.name;
+      ModifyStudy(state, s.id, "Set load case weight", [&](fem::Study& cs) {
+        for (fem::LoadCase& lc : cs.loadCases)
+          if (lc.name == name) {
+            lc.weight = w;
+            lc.weight.expr = wExpr;
+          }
+      });
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Weight in the objective: the run minimises the "
+                        "weighted sum of the cases' compliances.");
+  }
+  ImGui::SeparatorText("Loads in it");
+  if (in.empty())
+    ImGui::TextColored(kMuted, "None: arm a load with this case chosen.");
+  for (const fem::Load* l : in)
+    ImGui::BulletText("%s  %s", LoadLabel(l->type), l->face.name.c_str());
+  ImGui::BeginDisabled(!in.empty());
+  if (ImGui::Button(ICON_FA_TRASH_CAN " Remove case###case_del")) {
+    const std::string name = c.name;
     ModifyStudy(state, s.id, "Remove load case", [&](fem::Study& cs) {
-      cs.loadCases.erase(std::remove_if(cs.loadCases.begin(),
-                                        cs.loadCases.end(),
-                                        [&](const fem::LoadCase& c) {
-                                          return c.name == removeCase;
-                                        }),
-                         cs.loadCases.end());
+      std::erase_if(cs.loadCases,
+                    [&](const fem::LoadCase& x) { return x.name == name; });
     });
-  if (ImGui::Button(ICON_FA_PLUS " Add case###case_add")) {
-    // The first case takes every force and pressure there is, so the study
-    // stays one it can run.
-    std::string name;
-    for (int n = static_cast<int>(s.loadCases.size()) + 1;; ++n) {
-      name = "Case " + std::to_string(n);
-      if (s.FindLoadCase(name) < 0)
-        break;
-    }
-    ModifyStudy(state, s.id, "Add load case", [&](fem::Study& cs) {
-      const bool first = cs.loadCases.empty();
-      cs.loadCases.push_back({name, ExprValue{1.0}});
-      if (first)
-        for (fem::Load& l : cs.loads)
-          if (!fem::IsSupport(l.type))
-            l.loadCase = name;
-    });
-    sim.pendingCase = name;
+    state.simulation.focus = {};
   }
-  if (!s.loadCases.empty() && (sim.tool == SimulationState::Tool::Force ||
-                               sim.tool == SimulationState::Tool::Pressure ||
-                               sim.tool == SimulationState::Tool::Torque ||
-                               sim.tool == SimulationState::Tool::Remote)) {
-    int k = std::max(0, s.FindLoadCase(sim.pendingCase));
-    LeftLabel("In case");
-    if (ImGui::BeginCombo("###sim_pending_case", s.loadCases[k].name.c_str())) {
-      for (size_t i = 0; i < s.loadCases.size(); ++i)
-        if (ImGui::Selectable(s.loadCases[i].name.c_str(),
-                              static_cast<int>(i) == k))
-          sim.pendingCase = s.loadCases[i].name;
-      ImGui::EndCombo();
-    }
-  }
+  ImGui::EndDisabled();
+  if (!in.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    ImGui::SetTooltip("Loads are in this case; remove them first.");
 }
 
 // A value with no default (docs/ui/tool-sessions.md#defaults-and-refusals):
@@ -711,7 +543,7 @@ void DrawThermalTools(AppState& state) {
     OptionalNumber("Temperature (\xC2\xB0"
                    "C)",
                    "###sim_temperature_c", "type it", sim.pendingTemperatureC);
-    ImGui::TextDisabled("Click a face: it is held at this temperature");
+    Hint("Click a face: it is held at this temperature");
   }
   if (sim.tool == T::HeatFlux) {
     ImGui::Checkbox("Per area (W/m\xC2\xB2)###sim_flux_per_area",
@@ -722,7 +554,7 @@ void DrawThermalTools(AppState& state) {
     else
       OptionalNumber("Power (W)", "###sim_flux_power_w", "type it",
                      sim.pendingHeatW);
-    ImGui::TextDisabled("Click a face: heat goes into it (negative: out)");
+    Hint("Click a face: heat goes into it (negative: out)");
   }
   if (sim.tool == T::Convection) {
     OptionalNumber("Film (W/m\xC2\xB2K)", "###sim_film_w_m2k",
@@ -730,64 +562,22 @@ void DrawThermalTools(AppState& state) {
     OptionalNumber("Ambient (\xC2\xB0"
                    "C)",
                    "###sim_ambient_c", "type it", sim.pendingAmbientC);
-    ImGui::TextDisabled("Click a face: it is cooled by a fluid at the "
-                        "ambient");
+    Hint("Click a face: it is cooled by a fluid at the "
+         "ambient");
   }
   if (sim.tool == T::HeatSource) {
     OptionalNumber("Power (W)", "###sim_source_power_w", "type it",
                    sim.pendingHeatW);
-    ImGui::TextDisabled("Click a face of the body that makes the heat");
+    Hint("Click a face of the body that makes the heat");
   }
 }
 
-void DrawLoads(AppState& state, const fem::Study& s) {
+// The armed support's or load's settings: what the next face clicked
+// takes. Every value with a unit is derived from the part or typed; none
+// is a literal (docs/ui/tool-sessions.md#defaults-and-refusals).
+void DrawArmedTool(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
-
-  ImGui::SeparatorText("Boundary conditions");
-  ImGui::TextDisabled("Arm a tool, then click a face in the viewport:");
-  WrapRow bcRow;
-  auto arm = [&](const char* label, SimulationState::Tool t) {
-    const bool armed = sim.tool == t;
-    bcRow.Next(ButtonWidth(label));
-    if (armed)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(label))
-      SimulationArmTool(state, armed ? SimulationState::Tool::None : t);
-    if (armed)
-      ImGui::PopStyleColor();
-  };
-  const bool thermal = s.type == fem::AnalysisType::Thermal;
-  if (thermal) {
-    arm(ICON_FA_TEMPERATURE_HALF " Temperature###sim_bc_temperature",
-        SimulationState::Tool::Temperature);
-    arm(ICON_FA_ARROW_RIGHT_TO_BRACKET " Heat flux###sim_bc_heat_flux",
-        SimulationState::Tool::HeatFlux);
-    arm(ICON_FA_WIND " Convection###sim_bc_convection",
-        SimulationState::Tool::Convection);
-    arm(ICON_FA_FIRE " Heat source###sim_bc_heat_source",
-        SimulationState::Tool::HeatSource);
-  } else {
-    arm(ICON_FA_LOCK " Fixed###sim_bc_fixed", SimulationState::Tool::Fixed);
-    arm(ICON_FA_BOLT " Force###sim_bc_force", SimulationState::Tool::Force);
-    arm(ICON_FA_DOWN_LONG " Pressure###sim_bc_pressure",
-        SimulationState::Tool::Pressure);
-    arm(ICON_FA_ROTATE " Torque###sim_bc_torque",
-        SimulationState::Tool::Torque);
-    arm(ICON_FA_LOCATION_CROSSHAIRS " Remote###sim_bc_remote",
-        SimulationState::Tool::Remote);
-  }
-  // A pin is a static part study's support (docs/simulation/README.md
-  // #pin-supports): offered only where it can be placed.
-  if (s.type == fem::AnalysisType::Static)
-    arm(ICON_FA_THUMBTACK " Pin###sim_bc_pin", SimulationState::Tool::Pin);
-  // A contact (docs/simulation/README.md#contact) is a static study's,
-  // solved on CalculiX: the face rests on the ground.
-  if (s.type == fem::AnalysisType::Static)
-    arm(ICON_FA_ARROWS_DOWN_TO_LINE " Contact###sim_bc_contact",
-        SimulationState::Tool::Contact);
-  DrawFrameSupportTools(state, s, arm);
-  ImGui::Checkbox("Labels in viewport###sim_show_labels", &sim.showLabels);
+  DrawFrameSupportTools(state, s);
   DrawThermalTools(state);
   if (sim.tool == SimulationState::Tool::Contact) {
     LeftLabel("Friction (\xCE\xBC)");
@@ -795,15 +585,15 @@ void DrawLoads(AppState& state, const fem::Study& s) {
                     &sim.pendingContactFriction, "%.3g");
     if (sim.pendingContactFriction < 0.0)
       sim.pendingContactFriction = 0.0;
-    ImGui::TextDisabled("Click a flat face: it rests on the ground, which "
-                        "pushes it and never pulls; solved on CalculiX");
+    Hint("Click a flat face: it rests on the ground, which "
+         "pushes it and never pulls; solved on CalculiX");
   }
   if (sim.tool == SimulationState::Tool::Pin) {
     ImGui::Checkbox("Hold it from turning###sim_pin_fix_rotation",
                     &sim.pendingPinFixRotation);
-    ImGui::TextDisabled("Click a bore or a shaft: the pin holds it where the "
-                        "part presses on it%s",
-                        sim.pendingPinFixRotation ? "" : ", free to turn");
+    Hint("Click a bore or a shaft: the pin holds it where the "
+         "part presses on it%s",
+         sim.pendingPinFixRotation ? "" : ", free to turn");
   }
 
   if (sim.tool == SimulationState::Tool::Torque) {
@@ -813,8 +603,8 @@ void DrawLoads(AppState& state, const fem::Study& s) {
                         &expr))
       sim.pendingTorqueExpr = expr;
     if (sim.pendingTorque == 0.0)
-      ImGui::TextDisabled("Default: the part's weight times the face's "
-                          "radius");
+      Hint("Default: the part's weight times the face's "
+           "radius");
     const std::vector<AxisChoice> choices = TorqueAxisChoices(state);
     std::string current = "From the face (cylinder)";
     for (const AxisChoice& c : choices)
@@ -867,7 +657,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       ExprInputDouble3(state, "###sim_remote_direction",
                        &sim.pendingDirection.x, "%.3f");
     } else {
-      ImGui::TextDisabled("Direction: into the face you click");
+      Hint("Direction: into the face you click");
     }
     LeftLabel("At (mm)");
     if (ExprInputDouble3(state, "###sim_remote_point", &sim.pendingPoint.x,
@@ -878,7 +668,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       if (ImGui::SmallButton("From face###sim_remote_point_reset"))
         sim.pointOverridden = false;
     } else {
-      ImGui::TextDisabled("At: off the face you click, along its normal");
+      Hint("At: off the face you click, along its normal");
     }
   }
 
@@ -902,146 +692,28 @@ void DrawLoads(AppState& state, const fem::Study& s) {
         ExprInputDouble3(state, "###sim_direction", &sim.pendingDirection.x,
                          "%.3f");
       } else {
-        ImGui::TextDisabled("Direction: into the face you click");
+        Hint("Direction: into the face you click");
       }
     }
   }
 
-  DrawLoadCases(state, s);
-
+  using T = SimulationState::Tool;
+  if (sim.tool == T::Fixed)
+    Hint("Click a face: it is held where it is");
+  if (sim.tool == T::Force || sim.tool == T::Pressure)
+    Hint("Click a face to place it");
+  if (sim.tool == T::Torque || sim.tool == T::Remote)
+    Hint("Click the face that carries it");
+  if (sim.tool == T::Keep)
+    Hint("Click a face: the optimizer keeps it solid");
+  DrawPendingCase(state, s);
   if (!sim.placeRefusal.empty())
     MessageText(kError, sim.placeRefusal);
-  if (s.loads.empty()) {
-    ImGui::TextColored(kMuted, "No loads yet.");
-    return;
-  }
-  const StudyHost host = StudyHostOf(state);
-  // Rows, as every list (ui::ListRow): the face as the label, the magnitude
-  // as the tail, and Remove in the row's menu instead of a trash button.
-  uint64_t removeLoad = 0;
-  // Evaluated: a magnitude typed as a variable shows what it is now, not
-  // what the study's last run left in the stored value.
-  const fem::Study shown = host.Shown(s);
-  for (const fem::Load& l : shown.loads) {
-    std::string where;
-    // An assembly study's anchor says whose face, or whose contact (S1).
-    if (l.contactWith != 0)
-      where = "contact with " + host.OccurrenceName(l.contactWith);
-    else if (l.occurrenceId != 0)
-      where = host.OccurrenceName(l.occurrenceId) + " " + l.face.name;
-    else if (l.type == fem::LoadType::HeatGeneration)
-      where = l.body; // a heat source names its body, not a face
-    else
-      where = l.face.name;
-    ListRowSpec row;
-    row.glyph = LoadGlyph(l.type);
-    row.label = std::string(LoadLabel(l.type)) + "  " + where + "###load_row_" +
-                std::to_string(l.id);
-    if (fem::IsThermalLoad(l.type))
-      row.tail = SimulationLoadLabel(l);
-    if (l.type == fem::LoadType::Pin)
-      row.tail = l.fixRotation ? "held from turning" : "free to turn";
-    if (fem::IsFrameSupport(l.type))
-      row.tail = SimulationLoadLabel(l);
-    if (l.type == fem::LoadType::Contact) {
-      char buf[64];
-      std::snprintf(buf, sizeof(buf), "%s, friction %.3g",
-                    l.contactWith != 0 ? "on a rigid part" : "on the ground",
-                    l.friction);
-      row.tail = buf;
-    }
-    if (!fem::IsSupport(l.type) && !fem::IsThermalLoad(l.type)) {
-      char buf[64];
-      std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude.value,
-                    l.type == fem::LoadType::Pressure ? " MPa" : " N");
-      row.tail = l.type == fem::LoadType::Torque ? TorqueText(l.magnitude)
-                                                 : std::string(buf);
-      if (!l.loadCase.empty())
-        row.tail += "  " + l.loadCase;
-    }
-    if (l.type == fem::LoadType::Torque) {
-      char ax[160];
-      if (l.HasAxis())
-        std::snprintf(ax, sizeof(ax),
-                      "About (%.3g, %.3g, %.3g) through (%.3g, %.3g, %.3g)",
-                      l.axisDirection.x, l.axisDirection.y, l.axisDirection.z,
-                      l.axisOrigin.x, l.axisOrigin.y, l.axisOrigin.z);
-      else
-        std::snprintf(ax, sizeof(ax), "About the cylindrical face's own axis");
-      row.tooltip = ax;
-    }
-    if (l.type == fem::LoadType::Remote) {
-      char at[160];
-      std::snprintf(at, sizeof(at),
-                    "At (%.3g, %.3g, %.3g) mm, along [%.2g, %.2g, %.2g]",
-                    l.point.x, l.point.y, l.point.z, l.direction.x,
-                    l.direction.y, l.direction.z);
-      row.tooltip = at;
-    }
-    if (l.type == fem::LoadType::Force) {
-      // A force's direction decides the answer; showing only its magnitude
-      // hid the one number most likely to be wrong.
-      char dir[80];
-      std::snprintf(dir, sizeof(dir), "Direction [%.2g, %.2g, %.2g]",
-                    l.direction.x, l.direction.y, l.direction.z);
-      row.tooltip = dir;
-    }
-    row.menuId = "###load_ctx_" + std::to_string(l.id);
-    row.selected = state.simulation.selectedLoadId == l.id;
-    const uint64_t loadId = l.id;
-    const bool remote = l.type == fem::LoadType::Remote;
-    const glm::dvec3 point = l.point;
-    const uint64_t studyId = s.id;
-    row.menu = [&state, &removeLoad, loadId, remote, point, studyId] {
-      if (remote) {
-        // The point after placing: where the force acts is the load.
-        glm::dvec3 p = point;
-        LeftLabel("At (mm)");
-        if (ExprInputDouble3(state, "###load_point", &p.x, "%.2f") &&
-            p != point)
-          ModifyStudy(state, studyId, "Move remote load", [&](fem::Study& cs) {
-            for (fem::Load& x : cs.loads)
-              if (x.id == loadId)
-                x.point = p;
-          });
-      }
-      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###load_del"))
-        removeLoad = loadId;
-    };
-    // A click selects the load (again: lets it go), which keeps its label
-    // on over a mesh or a result.
-    if (ListRow(row).clicked)
-      state.simulation.selectedLoadId =
-          state.simulation.selectedLoadId == loadId ? 0 : loadId;
-  }
-  if (removeLoad != 0)
-    ModifyStudy(state, s.id, "Remove load", [&](fem::Study& cs) {
-      cs.loads.erase(std::remove_if(cs.loads.begin(), cs.loads.end(),
-                                    [&](const fem::Load& x) {
-                                      return x.id == removeLoad;
-                                    }),
-                     cs.loads.end());
-    });
-}
-
-// Which study's last Run was answered from a stored result
-// (docs/simulation/README.md#studies-as-jobs), so the panel can say why
-// nothing ran. Panel state only: the result itself is the study's.
-uint64_t g_reusedStudy = 0;
-
-void NoteReuse(uint64_t studyId, const JobStart& start) {
-  g_reusedStudy = start.reused ? studyId : 0;
-}
-
-void RunButtonTip() {
-  if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("Unchanged inputs reuse the stored result instead of "
-                      "computing it again. Shift+click to compute anyway.");
 }
 
 // Reused: shown under the result it is about.
-void DrawReuseNote(uint64_t studyId) {
-  if (g_reusedStudy == studyId)
+void DrawReuseNote(AppState& state, uint64_t studyId) {
+  if (state.simulation.reusedStudy == studyId)
     ImGui::TextColored(kMuted, "Reused: these inputs were already solved.");
 }
 
@@ -1086,23 +758,9 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
     return;
   }
 
-  if (ImGui::Button(ICON_FA_PLAY " Run###topo_run")) {
-    std::string err;
-    JobStart start;
-    start.recompute = ImGui::GetIO().KeyShift;
-    if (!StartSimTopologyRun(state, host.simSlotId, s.id, &err, &start))
-      LOG_WARN("topology run failed: {}", err);
-    NoteReuse(s.id, start);
-  }
-  RunButtonTip();
-  if (!s.error.empty()) {
-    ImGui::SameLine();
-    ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION);
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("%s", s.error.c_str());
-  }
-
-  DrawReuseNote(s.id);
+  if (!s.error.empty())
+    MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " + s.error);
+  DrawReuseNote(state, s.id);
   const fem::StudyRuntime* rt = host.Results(s.id);
   if (!rt) {
     ImGui::TextColored(kMuted, "Not run yet.");
@@ -1353,11 +1011,28 @@ bool FindingRow(const std::string& id, const char* glyph,
 // The mesh step (docs/simulation/README.md#the-mesh-you-look-at): Mesh as an
 // action whose result is looked at. One row to make it and say what came
 // out, one to choose how it is drawn, and its report folded under them.
-void DrawMeshStep(AppState& state, const fem::Study& s) {
-  if (s.shapeFrom.study != 0)
-    return; // a study of a topology result meshes nothing
+void DrawMeshWindow(AppState& state, const fem::Study& s) {
+  if (s.shapeFrom.study != 0) {
+    ImGui::TextColored(kMuted, "A study of a topology result meshes its "
+                               "shape when it runs.");
+    return;
+  }
   SimulationState& sim = state.simulation;
-  const StudyHost host = StudyHostOf(state);
+  // The size it is made at: a typed EXPRESSION keeps its text (the study
+  // carries a slot for it); a plain number clears the slot back to a
+  // literal. Commits on deactivation too, so a value typed before Mesh is
+  // the one it meshes at.
+  double meshSize = s.meshSize;
+  LeftLabel("Size (mm, 0=auto)");
+  std::string meshExpr;
+  const bool meshChanged = ExprInputDouble(state, "###study_mesh_size",
+                                           &meshSize, "%.3g", &meshExpr);
+  if ((meshChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
+      (meshSize != s.meshSize || meshExpr != s.meshSize.expr))
+    ModifyStudy(state, s.id, "Set mesh size", [&](fem::Study& cs) {
+      cs.meshSize = meshSize;
+      cs.meshSize.expr = meshExpr;
+    });
   const MeshRunStatus run =
       GetMeshRunStatus(state, s.id, ActiveSimSlotId(state));
   if (run.running) {
@@ -1374,24 +1049,13 @@ void DrawMeshStep(AppState& state, const fem::Study& s) {
       CancelBackgroundJobById(state, bg->id, "the Cancel button");
     return;
   }
-  if (ImGui::Button(ICON_FA_BORDER_ALL " Mesh###study_mesh")) {
-    std::string err;
-    // Off the frame.
-    const bool started = StartSimMeshRun(state, host.simSlotId, s.id, &err);
-    if (!started)
-      LOG_WARN("mesh study failed: {}", err);
-    else if (sim.meshView == SimulationState::MeshView::Off)
-      sim.meshView = SimulationState::MeshView::Edges;
-    if (started)
-      sim.field = SimulationState::Field::None;
-  }
-  if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("Mesh the study's bodies and draw the elements.\nRun "
-                      "meshes by itself; this is for looking first.");
   const MeshReport* mr = StudyMesh(state, s.id);
-  ImGui::SameLine();
   if (mr == nullptr) {
-    ImGui::TextColored(kMuted, "Not meshed");
+    ImGui::TextColored(kMuted, "Not meshed: Mesh on the toolbar, or Run.");
+    return;
+  }
+  if (!mr->error.empty()) {
+    MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " + mr->error);
     return;
   }
   size_t elements = 0;
@@ -1441,7 +1105,7 @@ void DrawMeshStep(AppState& state, const fem::Study& s) {
 
   // Each row frames its place.
   if (SectionHeader("Mesh report###mesh_report", static_cast<int>(rows.size()),
-                    false)) {
+                    true)) {
     // The five worst elements are enough to find a bad region by; the
     // RPC's report has all of them.
     int worstShown = 0;
@@ -1469,8 +1133,10 @@ void DrawMeshStep(AppState& state, const fem::Study& s) {
 // it in its tooltip, and a click framing the face or the body it is about.
 void DrawStudyCheck(AppState& state, const fem::Study& s) {
   const StudyCheck& check = CachedStudyCheck(state, s.id);
-  if (check.problems.empty())
+  if (check.problems.empty()) {
+    ImGui::TextColored(kMuted, ICON_FA_CHECK " Nothing a run would refuse.");
     return;
+  }
   const StudyHost host = StudyHostOf(state);
   for (size_t i = 0; i < check.problems.size(); ++i) {
     const fem::StudyProblem& p = check.problems[i];
@@ -1670,24 +1336,14 @@ void DrawResultDisplay(AppState& state, const fem::Study& s) {
 // A solved result out to a file for another post-processor
 // (docs/simulation/README.md#vtu-export). Disabled, saying why, when the
 // session holds only the result's surface.
-void DrawResultExport(AppState& state, const fem::Study& s) {
+void DrawResultExport(AppState& state, const fem::Study&) {
+  // The export is the toolbar's; what it last did is said here.
   SimulationState& sim = state.simulation;
-  const bool whole = FullStudyResult(state, s.id) != nullptr;
-  ImGui::BeginDisabled(!whole);
-  if (ImGui::Button(ICON_FA_FILE_EXPORT " Export VTU...###result_export"))
-    ExportStudyResultDialog(state, s.id);
-  ImGui::EndDisabled();
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-    ImGui::SetTooltip("%s", whole
-                                ? "The solved mesh (quadratic tetrahedra) with "
-                                  "its displacement and stress,\nfor ParaView "
-                                  "or another post-processor."
-                                : "A stored result keeps its surface only. Run "
-                                  "the study again (Shift+Run)\nand export "
-                                  "while the app is open.");
   if (!sim.exportNote.empty())
     MessageText(kMuted, sim.exportNote);
 }
+
+void DrawProbes(AppState& state, const fem::Study& s);
 
 void DrawResults(AppState& state, const fem::Study& s) {
   const StudyHost host = StudyHostOf(state);
@@ -1698,7 +1354,6 @@ void DrawResults(AppState& state, const fem::Study& s) {
     return;
   }
 
-  ImGui::SeparatorText("Results");
   // The solve runs on a worker thread (StartSimStudyRun), the same as
   // topology and the same as the run_study RPC has always done. Clicking Run
   // used to call a blocking solve straight from the draw, so the whole
@@ -1723,36 +1378,19 @@ void DrawResults(AppState& state, const fem::Study& s) {
                     "answer is dropped.";
     if (DrawJobProgress(bar) && bg != nullptr)
       CancelBackgroundJobById(state, bg->id, "the Cancel button");
-  } else {
-    if (ImGui::Button(ICON_FA_PLAY " Run###study_run")) {
-      std::string err;
-      JobStart start;
-      start.recompute = ImGui::GetIO().KeyShift;
-      const bool started =
-          StartSimStudyRun(state, host.simSlotId, s.id, &err, &start);
-      if (!started)
-        LOG_WARN("run study failed: {}", err);
-      NoteReuse(s.id, start);
-    }
-    RunButtonTip();
   }
   if (!s.error.empty()) {
-    ImGui::SameLine();
-    ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION);
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("%s", s.error.c_str());
-    // A CalculiX study's refusal is read, not hovered for: it says how to
+    // A refusal is read, not hovered for: it says what to fix, or how to
     // install the solver, or what the solver said.
-    if (fem::EffectiveSolver(s) == fem::Solver::Calculix) {
-      ImGui::PushStyleColor(ImGuiCol_Text, kError);
-      ImGui::TextWrapped("%s", s.error.c_str());
-      ImGui::PopStyleColor();
-    }
+    ImGui::PushStyleColor(ImGuiCol_Text, kError);
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() +
+                           ImGui::GetFontSize() * 22.0f);
+    ImGui::TextUnformatted(
+        (ICON_FA_TRIANGLE_EXCLAMATION " " + s.error).c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
   }
-
-  if (!run.running)
-    DrawStudyCheck(state, s);
-  DrawReuseNote(s.id);
+  DrawReuseNote(state, s.id);
   const fem::StudyRuntime* rt = host.Results(s.id);
   if (!rt) {
     ImGui::TextColored(kMuted, "Not run yet.");
@@ -1933,23 +1571,21 @@ void DrawResults(AppState& state, const fem::Study& s) {
   // parts'.
   if (!host.GeometryPart())
     return;
+  DrawProbes(state, s);
+}
+
+// The faces pinned with the Probe tool (docs/simulation/README.md
+// #probing-a-face), under the result and while the tool is armed.
+void DrawProbes(AppState& state, const fem::Study& s) {
+  SimulationState& sim = state.simulation;
+  bool any = false;
+  for (const SimulationState::ProbePin& pin : sim.probes)
+    any = any || pin.studyId == s.id;
+  if (!any && sim.tool != SimulationState::Tool::Probe)
+    return;
   ImGui::SeparatorText("Probes");
-  {
-    const bool armed = sim.tool == SimulationState::Tool::Probe;
-    if (armed)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(ICON_FA_CROSSHAIRS " Probe###sim_probe"))
-      SimulationArmTool(state, armed ? SimulationState::Tool::None
-                                     : SimulationState::Tool::Probe);
-    if (armed)
-      ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Hover a face for its von Mises stress; click to pin "
-                        "it here.");
-    if (armed && !sim.placeRefusal.empty())
-      MessageText(kError, sim.placeRefusal);
-  }
+  if (!any)
+    ImGui::TextColored(kMuted, "None pinned yet.");
   size_t removeAt = SIZE_MAX;
   for (size_t i = 0; i < sim.probes.size(); ++i) {
     const SimulationState::ProbePin& pin = sim.probes[i];
@@ -1988,204 +1624,139 @@ void DrawResults(AppState& state, const fem::Study& s) {
 } // namespace
 
 namespace {
-// The participants table of an ASSEMBLY study (S1): every top-level
-// occurrence with its role, a mesh size on the meshed one, and on each rigid
-// support the clamp at its contact — "fix this panel where that part touches
-// it", which is the cheap half of an assembly study and the reason S1
-// exists.
-void DrawParticipants(AppState& state, const fem::Study& s) {
+
+// One participant of an ASSEMBLY subject (S1), the tree's row in focus: its
+// role, a mesh size on the meshed one, a friction on a contact, and on a
+// rigid support the clamp at its contact -- "fix this panel where that part
+// touches it", the cheap half of an assembly study. The clamp is a load of
+// the study the tools act on.
+void DrawParticipantWindow(AppState& state, uint64_t occurrenceId) {
   const StudyHost host = StudyHostOf(state);
-  if (!host.OnAssembly())
+  const Occurrence* occ =
+      host.Assembly() ? host.Assembly()->FindById(occurrenceId) : nullptr;
+  if (occ == nullptr) {
+    ImGui::TextColored(kMuted, "That occurrence is no longer in the assembly.");
     return;
-  ImGui::SeparatorText("Participants");
-  // Wrapped, or this one line sets the whole auto-sized window's width.
-  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 22.0f);
-  ImGui::TextDisabled("Meshed: solved. Bonded: glued to it, solved with "
-                      "it. Rigid: a support, clamped where it touches. "
-                      "Ignored: absent.");
-  ImGui::PopTextWrapPos();
-  // All four roles. Bonded (S2) was missing: the GUI could not bond a
-  // participant, and one bonded over the RPC read here as "Ignored", because
-  // the index below fell through to 0.
+  }
+  const fem::Study* s = host.Find(state.simulation.activeStudyId);
+  const fem::Participant* pt = host.sim->FindRole(occ->id);
+  // All five roles, as the row's menu has them.
   const char* kRoles[] = {"Ignored", "Rigid", "Meshed", "Bonded", "Contact"};
-  // No PushID(int) around the rows: every widget carries its occurrence id
-  // in its own ###label, which is what a test path can address (a PushID
-  // scope is not — docs/ui/testing.md#making-a-widget-addressable).
-  for (const Occurrence& occ : host.Assembly()->GetOccurrences()) {
-    // A simulation's roles are its document's (ModifyStudy hands them to
-    // the edits below and keeps them there).
-    const fem::Participant* pt =
-        host.sim ? host.sim->FindRole(occ.id) : s.FindParticipant(occ.id);
-    int role = !pt                                         ? 0
-               : pt->role == fem::ParticipantRole::Meshed  ? 2
-               : pt->role == fem::ParticipantRole::Rigid   ? 1
-               : pt->role == fem::ParticipantRole::Bonded  ? 3
-               : pt->role == fem::ParticipantRole::Contact ? 4
-                                                           : 0;
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
-    const std::string comboId = "###role_" + std::to_string(occ.id);
-    if (ImGui::Combo(comboId.c_str(), &role, kRoles, 5)) {
-      const uint64_t id = occ.id;
-      const fem::ParticipantRole want =
-          role == 4   ? fem::ParticipantRole::Contact
-          : role == 3 ? fem::ParticipantRole::Bonded
-          : role == 2 ? fem::ParticipantRole::Meshed
-          : role == 1 ? fem::ParticipantRole::Rigid
-                      : fem::ParticipantRole::Ignored;
-      ModifyStudy(state, s.id, "Set participant role", [&](fem::Study& cs) {
-        auto it = std::find_if(
-            cs.participants.begin(), cs.participants.end(),
-            [&](const fem::Participant& x) { return x.occurrenceId == id; });
-        if (want == fem::ParticipantRole::Ignored) {
-          if (it != cs.participants.end())
-            cs.participants.erase(it);
-          // Its contact clamps go with it: a clamp on a support that is
-          // absent clamps nothing.
-          cs.loads.erase(std::remove_if(cs.loads.begin(), cs.loads.end(),
-                                        [&](const fem::Load& l) {
-                                          return l.contactWith == id;
-                                        }),
-                         cs.loads.end());
-          return;
-        }
-        if (it == cs.participants.end()) {
-          fem::Participant np;
-          np.occurrenceId = id;
-          np.role = want;
-          cs.participants.push_back(np);
-        } else {
-          it->role = want;
-        }
-        if (want == fem::ParticipantRole::Meshed) // one meshed in S1
-          for (fem::Participant& other : cs.participants)
-            if (other.occurrenceId != id &&
-                other.role == fem::ParticipantRole::Meshed)
-              other.role = fem::ParticipantRole::Rigid;
+  int role = !pt                                         ? 0
+             : pt->role == fem::ParticipantRole::Meshed  ? 2
+             : pt->role == fem::ParticipantRole::Rigid   ? 1
+             : pt->role == fem::ParticipantRole::Bonded  ? 3
+             : pt->role == fem::ParticipantRole::Contact ? 4
+                                                         : 0;
+  LeftLabel("Role");
+  const std::string comboId = "###role_" + std::to_string(occ->id);
+  if (ImGui::Combo(comboId.c_str(), &role, kRoles, 5))
+    SetSimParticipantRole(state, occ->id,
+                          role == 4   ? fem::ParticipantRole::Contact
+                          : role == 3 ? fem::ParticipantRole::Bonded
+                          : role == 2 ? fem::ParticipantRole::Meshed
+                          : role == 1 ? fem::ParticipantRole::Rigid
+                                      : fem::ParticipantRole::Ignored);
+  Hint("Meshed: solved. Bonded: glued to it, solved with it. Contact: "
+       "pressed against it. Rigid: a support, clamped where it touches. "
+       "Ignored: absent. Every study of the simulation shares the roles.");
+  pt = host.sim->FindRole(occ->id);
+  if (pt && s && pt->role == fem::ParticipantRole::Rigid) {
+    bool clamped = false, rests = false;
+    for (const fem::Load& l : s->loads) {
+      clamped = clamped || l.contactWith == occ->id;
+      rests = rests ||
+              (l.contactWith == occ->id && l.type == fem::LoadType::Contact);
+    }
+    const uint64_t id = occ->id;
+    const std::string clampId =
+        std::string(clamped ? ICON_FA_LOCK " Clamped###clamp_"
+                            : ICON_FA_LOCK_OPEN " Clamp here###clamp_") +
+        std::to_string(id);
+    if (ImGui::Button(clampId.c_str()))
+      ModifyStudy(state, s->id, clamped ? "Unclamp contact" : "Clamp contact",
+                  [&](fem::Study& cs) {
+                    if (clamped) {
+                      std::erase_if(cs.loads, [&](const fem::Load& l) {
+                        return l.contactWith == id;
+                      });
+                      return;
+                    }
+                    fem::Load clamp;
+                    clamp.id = host.AllocateId();
+                    clamp.type = fem::LoadType::Fixed;
+                    clamp.contactWith = id;
+                    cs.loads.push_back(clamp);
+                  });
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Fix the meshed part where %s touches it, in %s. The "
+                        "patch is found by imprinting when the study meshes; "
+                        "it exists in neither part.",
+                        occ->name.c_str(), s->name.c_str());
+    // Or rest on it: a contact support, pressed and never pulled
+    // (docs/simulation/README.md#contact).
+    ImGui::SameLine();
+    const std::string restId =
+        std::string(rests ? ICON_FA_ARROWS_DOWN_TO_LINE " Rests on it###rest_"
+                          : ICON_FA_ARROWS_DOWN_TO_LINE " Rest on it###rest_") +
+        std::to_string(id);
+    if (ImGui::Button(restId.c_str()))
+      ModifyStudy(state, s->id, rests ? "Lift off contact" : "Rest on contact",
+                  [&](fem::Study& cs) {
+                    if (rests) {
+                      std::erase_if(cs.loads, [&](const fem::Load& l) {
+                        return l.contactWith == id &&
+                               l.type == fem::LoadType::Contact;
+                      });
+                      return;
+                    }
+                    fem::Load rest;
+                    rest.id = host.AllocateId();
+                    rest.type = fem::LoadType::Contact;
+                    rest.contactWith = id;
+                    cs.loads.push_back(rest);
+                  });
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("The meshed part rests on %s where they face each "
+                        "other: pressed, never pulled, solved on CalculiX.",
+                        occ->name.c_str());
+  }
+  if (pt && s && pt->role == fem::ParticipantRole::Contact) {
+    double mu = pt->friction;
+    LeftLabel("Friction (\xCE\xBC)");
+    const std::string muId = "###part_friction_" + std::to_string(occ->id);
+    ExprInputDouble(state, muId.c_str(), &mu, "%.3g");
+    if (ImGui::IsItemDeactivatedAfterEdit() && mu != pt->friction &&
+        mu >= 0.0) {
+      const uint64_t id = occ->id;
+      ModifyStudy(state, s->id, "Set contact friction", [&](fem::Study& cs) {
+        for (fem::Participant& x : cs.participants)
+          if (x.occurrenceId == id)
+            x.friction = mu;
       });
     }
-    ImGui::SameLine();
-    ImGui::TextUnformatted(occ.name.c_str());
-    if (pt && pt->role == fem::ParticipantRole::Rigid) {
-      bool clamped = false;
-      for (const fem::Load& l : s.loads)
-        clamped = clamped || l.contactWith == occ.id;
-      ImGui::SameLine();
-      const std::string clampId =
-          std::string(clamped ? ICON_FA_LOCK " Clamped###clamp_"
-                              : ICON_FA_LOCK_OPEN " Clamp here###clamp_") +
-          std::to_string(occ.id);
-      if (ImGui::SmallButton(clampId.c_str())) {
-        const uint64_t id = occ.id;
-        ModifyStudy(state, s.id, clamped ? "Unclamp contact" : "Clamp contact",
-                    [&](fem::Study& cs) {
-                      if (clamped) {
-                        cs.loads.erase(
-                            std::remove_if(cs.loads.begin(), cs.loads.end(),
-                                           [&](const fem::Load& l) {
-                                             return l.contactWith == id;
-                                           }),
-                            cs.loads.end());
-                        return;
-                      }
-                      fem::Load clamp;
-                      clamp.id = host.AllocateId();
-                      clamp.type = fem::LoadType::Fixed;
-                      clamp.contactWith = id;
-                      cs.loads.push_back(clamp);
-                    });
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Fix the meshed part where %s touches it. The "
-                          "patch is found by imprinting when the study "
-                          "meshes; it exists in neither part.",
-                          occ.name.c_str());
-      // Or rest on it: a contact support, pressed and never pulled
-      // (docs/simulation/README.md#contact).
-      bool rests = false;
-      for (const fem::Load& l : s.loads)
-        rests = rests ||
-                (l.contactWith == occ.id && l.type == fem::LoadType::Contact);
-      ImGui::SameLine();
-      const std::string restId =
-          std::string(rests ? ICON_FA_ARROWS_DOWN_TO_LINE " Rests on it###rest_"
-                            : ICON_FA_ARROWS_DOWN_TO_LINE
-                          " Rest on it###rest_") +
-          std::to_string(occ.id);
-      if (ImGui::SmallButton(restId.c_str())) {
-        const uint64_t id = occ.id;
-        ModifyStudy(state, s.id, rests ? "Lift off contact" : "Rest on contact",
-                    [&](fem::Study& cs) {
-                      if (rests) {
-                        cs.loads.erase(
-                            std::remove_if(cs.loads.begin(), cs.loads.end(),
-                                           [&](const fem::Load& l) {
-                                             return l.contactWith == id &&
-                                                    l.type ==
-                                                        fem::LoadType::Contact;
-                                           }),
-                            cs.loads.end());
-                        return;
-                      }
-                      fem::Load rest;
-                      rest.id = host.AllocateId();
-                      rest.type = fem::LoadType::Contact;
-                      rest.contactWith = id;
-                      cs.loads.push_back(rest);
-                    });
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("The meshed part rests on %s where they face each "
-                          "other: pressed, never pulled, solved on CalculiX.",
-                          occ.name.c_str());
-    }
-    if (pt && pt->role == fem::ParticipantRole::Contact) {
-      double mu = pt->friction;
-      LeftLabel("Friction (\xCE\xBC)");
-      const std::string muId = "###part_friction_" + std::to_string(occ.id);
-      ExprInputDouble(state, muId.c_str(), &mu, "%.3g");
-      if (ImGui::IsItemDeactivatedAfterEdit() && mu != pt->friction &&
-          mu >= 0.0) {
-        const uint64_t id = occ.id;
-        ModifyStudy(state, s.id, "Set contact friction", [&](fem::Study& cs) {
-          for (fem::Participant& x : cs.participants)
-            if (x.occurrenceId == id)
-              x.friction = mu;
-        });
-      }
-    }
-    if (pt && pt->role == fem::ParticipantRole::Meshed) {
-      double size = pt->meshSize;
-      std::string expr;
-      LeftLabel("Its mesh size (mm, 0=study's)");
-      const std::string sizeId = "###part_mesh_" + std::to_string(occ.id);
-      const bool changed =
-          ExprInputDouble(state, sizeId.c_str(), &size, "%.3g", &expr);
-      if ((changed || ImGui::IsItemDeactivatedAfterEdit()) &&
-          (size != pt->meshSize || expr != pt->meshSize.expr)) {
-        const uint64_t id = occ.id;
-        ModifyStudy(state, s.id, "Set participant mesh size",
-                    [&](fem::Study& cs) {
-                      for (fem::Participant& x : cs.participants)
-                        if (x.occurrenceId == id) {
-                          x.meshSize = size;
-                          x.meshSize.expr = expr;
-                        }
-                    });
-      }
-    }
   }
-  // The plan's own word on the setup, before anyone presses Run: the
-  // contact cache asks the planner, and a refusal (a support in mid-air,
-  // an interpenetration) is shown here rather than after a solve.
-  SimulationContacts(state);
-  if (!state.simulation.contactError.empty())
-    MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " +
-                            state.simulation.contactError);
-  // Materials come from the parts: say so when the meshed one has none.
-  for (const fem::Participant& pt : host.Roles(s)) {
-    if (pt.role != fem::ParticipantRole::Meshed)
-      continue;
-    for (const Body& b : SubjectOccurrenceBodies(state, pt.occurrenceId)) {
+  if (pt && s && pt->role == fem::ParticipantRole::Meshed) {
+    double size = pt->meshSize;
+    std::string expr;
+    LeftLabel("Its mesh size (mm, 0=study's)");
+    const std::string sizeId = "###part_mesh_" + std::to_string(occ->id);
+    const bool changed =
+        ExprInputDouble(state, sizeId.c_str(), &size, "%.3g", &expr);
+    if ((changed || ImGui::IsItemDeactivatedAfterEdit()) &&
+        (size != pt->meshSize || expr != pt->meshSize.expr)) {
+      const uint64_t id = occ->id;
+      ModifyStudy(state, s->id, "Set participant mesh size",
+                  [&](fem::Study& cs) {
+                    for (fem::Participant& x : cs.participants)
+                      if (x.occurrenceId == id) {
+                        x.meshSize = size;
+                        x.meshSize.expr = expr;
+                      }
+                  });
+    }
+    // Materials come from the parts: say so when the meshed one has none.
+    for (const Body& b : SubjectOccurrenceBodies(state, occ->id)) {
       const auto& mp =
           CADMaterials::MaterialLibrary::GetMaterialOrDefault(b.material);
       if (mp.youngGPa <= 0.0f)
@@ -2196,6 +1767,18 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
   }
 }
 
+// The plan's own word on an assembly's setup, before anyone presses Run:
+// the contact cache asks the planner, and a refusal (a support in mid-air,
+// an interpenetration) is shown where the study is set up.
+void DrawAssemblySetupCheck(AppState& state) {
+  if (!StudyHostOf(state).OnAssembly())
+    return;
+  SimulationContacts(state);
+  if (!state.simulation.contactError.empty())
+    MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " +
+                            state.simulation.contactError);
+}
+
 // Everything below the study list, for either host.
 // Keep-outs (docs/topopt/README.md#keep-outs): the list, and another body of
 // the part to keep out of (a neighbour arrives as a Derived reference body).
@@ -2204,30 +1787,6 @@ void DrawKeepOuts(AppState& state, const fem::Study& s) {
   const Document* doc = StudyHostOf(state).GeometryPart();
   if (doc == nullptr)
     return;
-  int removeAt = -1;
-  for (size_t i = 0; i < s.keepOuts.size(); ++i) {
-    const fem::KeepOut& k = s.keepOuts[i];
-    char box[160];
-    std::snprintf(box, sizeof(box), "box [%.4g, %.4g, %.4g]-[%.4g, %.4g, %.4g]",
-                  k.boxMin.x, k.boxMin.y, k.boxMin.z, k.boxMax.x, k.boxMax.y,
-                  k.boxMax.z);
-    ListRowSpec row;
-    row.glyph = ICON_FA_BAN;
-    row.label = (k.body.empty() ? std::string(box) : "body " + k.body) +
-                "###keepout_row_" + std::to_string(i);
-    row.menuId = "###keepout_ctx_" + std::to_string(i);
-    const int at = static_cast<int>(i);
-    row.menu = [&removeAt, at] {
-      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###keepout_del"))
-        removeAt = at;
-    };
-    ListRow(row);
-  }
-  if (removeAt >= 0)
-    ModifyStudy(state, s.id, "Remove keep-out", [&](fem::Study& cs) {
-      if (removeAt < static_cast<int>(cs.keepOuts.size()))
-        cs.keepOuts.erase(cs.keepOuts.begin() + removeAt);
-    });
   if (ImGui::BeginCombo("###topo_keepout_body", ICON_FA_BAN " Keep out of...",
                         ImGuiComboFlags_NoArrowButton)) {
     for (const Body& b : doc->GetBodies()) {
@@ -2399,8 +1958,11 @@ void DrawSolverCombo(AppState& state, const fem::Study& s) {
                           : why.c_str());
 }
 
-void DrawStudyBody(AppState& state, const fem::Study* s) {
-  ImGui::Spacing();
+void DrawStudySettings(AppState& state, const fem::Study* s) {
+  // What the last Run refused, where the study is set up: it says what to
+  // fix, or how to install the solver.
+  if (!s->error.empty())
+    MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " + s->error);
   char name[128];
   std::snprintf(name, sizeof(name), "%s", s->name.c_str());
   LeftLabel("Name");
@@ -2443,23 +2005,6 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
     state.simulation.activeMode = 0;
   }
   DrawSolverCombo(state, *s);
-  // Numeric fields commit on deactivation (Enter OR clicking away), not only on
-  // Enter — so typing a value then clicking Run applies it instead of
-  // reverting.
-  double meshSize = s->meshSize;
-  LeftLabel("Mesh size (mm, 0=auto)");
-  // A typed EXPRESSION keeps its text (the study carries a slot for it);
-  // a plain number clears the slot back to a literal.
-  std::string meshExpr;
-  const bool meshChanged = ExprInputDouble(state, "###study_mesh_size",
-                                           &meshSize, "%.3g", &meshExpr);
-  if ((meshChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
-      (meshSize != s->meshSize || meshExpr != s->meshSize.expr))
-    ModifyStudy(state, s->id, "Set mesh size", [&](fem::Study& cs) {
-      cs.meshSize = meshSize;
-      cs.meshSize.expr = meshExpr;
-    });
-  DrawMeshStep(state, *s);
 
   if (s->type == fem::AnalysisType::Modal ||
       s->type == fem::AnalysisType::Buckling) {
@@ -2497,45 +2042,7 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
         mi != s->maxIterations)
       ModifyStudy(state, s->id, "Set max iterations",
                   [&](fem::Study& cs) { cs.maxIterations = mi; });
-    // Keep faces: frozen solid, added by picking a face with the Keep tool.
-    SimulationState& sim = state.simulation;
-    const bool arming = sim.tool == SimulationState::Tool::Keep;
-    if (arming)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(ICON_FA_LOCK " Keep face###topo_keep_face"))
-      sim.tool =
-          arming ? SimulationState::Tool::None : SimulationState::Tool::Keep;
-    if (arming)
-      ImGui::PopStyleColor();
-    ImGui::SameLine();
-    ImGui::TextColored(kMuted, "%zu kept", s->keepFaces.size());
-    std::string removeKeep;
-    uint64_t removeKeepFeature = 0;
-    for (size_t i = 0; i < s->keepFaces.size(); ++i) {
-      const ElementRef& f = s->keepFaces[i];
-      ListRowSpec row;
-      row.glyph = ICON_FA_LOCK;
-      row.label = f.name + "###keep_row_" + std::to_string(i);
-      row.menuId = "###keep_ctx_" + std::to_string(i);
-      row.menu = [&, f] {
-        if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###keep_del")) {
-          removeKeep = f.name;
-          removeKeepFeature = f.featureId;
-        }
-      };
-      ListRow(row);
-    }
-    if (!removeKeep.empty())
-      ModifyStudy(state, s->id, "Remove keep face", [&](fem::Study& cs) {
-        cs.keepFaces.erase(
-            std::remove_if(cs.keepFaces.begin(), cs.keepFaces.end(),
-                           [&](const ElementRef& k) {
-                             return k.featureId == removeKeepFeature &&
-                                    k.name == removeKeep;
-                           }),
-            cs.keepFaces.end());
-      });
+    // Kept faces are the tree's rows, added with the toolbar's Keep.
     DrawKeepOuts(state, *s);
   } else if (s->type == fem::AnalysisType::Thermal) {
     // Whether a run refines round its peak temperature rise until it
@@ -2666,47 +2173,314 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
   }
 
   DrawMaterialCheck(state);
-  DrawParticipants(state, *s);
-  DrawLoads(state, *s);
-  DrawResults(state, *s);
+  DrawAssemblySetupCheck(state);
+}
+
+// What a support or a load is (the tree's row in focus): its kind and face,
+// its value as placed, and the case it is in. A placed load is not edited
+// in place but removed and placed again -- except a remote load's point,
+// which IS the load, and the case a force goes in.
+void DrawLoadWindow(AppState& state, const fem::Study& s, uint64_t loadId) {
+  const StudyHost host = StudyHostOf(state);
+  const fem::Study shown = host.Shown(s);
+  const fem::Load* l = nullptr;
+  for (const fem::Load& x : shown.loads)
+    if (x.id == loadId)
+      l = &x;
+  if (l == nullptr) {
+    ImGui::TextColored(kMuted, "That load is gone.");
+    return;
+  }
+  const std::string where =
+      l->contactWith != 0
+          ? "contact with " + host.OccurrenceName(l->contactWith)
+      : l->occurrenceId != 0
+          ? host.OccurrenceName(l->occurrenceId) + " " + l->face.name
+      : l->type == fem::LoadType::HeatGeneration ? l->body
+                                                 : l->face.name;
+  LeftLabel("On");
+  ImGui::TextUnformatted(where.c_str());
+  const std::string value = SimLoadTail(*l);
+  if (!value.empty()) {
+    LeftLabel(fem::IsSupport(l->type) ? "Holds" : "Value");
+    ImGui::TextUnformatted(value.c_str());
+  }
+  if (l->type == fem::LoadType::Force) {
+    LeftLabel("Direction");
+    ImGui::Text("[%.3g, %.3g, %.3g]", l->direction.x, l->direction.y,
+                l->direction.z);
+  }
+  if (!l->magnitude.expr.empty()) {
+    LeftLabel("From");
+    ImGui::TextUnformatted(l->magnitude.expr.c_str());
+  }
+  if (l->type == fem::LoadType::Remote) {
+    // The point after placing: where the force acts is the load.
+    glm::dvec3 p = l->point;
+    LeftLabel("At (mm)");
+    if (ExprInputDouble3(state, "###load_point", &p.x, "%.2f") && p != l->point)
+      ModifyStudy(state, s.id, "Move remote load", [&](fem::Study& cs) {
+        for (fem::Load& x : cs.loads)
+          if (x.id == loadId)
+            x.point = p;
+      });
+  }
+  if (!s.loadCases.empty() && !fem::IsSupport(l->type)) {
+    const int k = std::max(0, s.FindLoadCase(l->loadCase));
+    LeftLabel("In case");
+    if (ImGui::BeginCombo("###load_case", s.loadCases[k].name.c_str())) {
+      for (size_t i = 0; i < s.loadCases.size(); ++i)
+        if (ImGui::Selectable(s.loadCases[i].name.c_str(),
+                              static_cast<int>(i) == k)) {
+          const std::string to = s.loadCases[i].name;
+          ModifyStudy(state, s.id, "Move load to case", [&](fem::Study& cs) {
+            for (fem::Load& x : cs.loads)
+              if (x.id == loadId)
+                x.loadCase = to;
+          });
+        }
+      ImGui::EndCombo();
+    }
+  }
+  Hint("Delete removes it; place it again from the toolbar to change it.");
+}
+
+// The simulation's subject (the tree's first row): what it analyses, and a
+// body with no material, which every study needs.
+void DrawSubjectWindow(AppState& state) {
+  const StudyHost host = StudyHostOf(state);
+  const fem::SimSubject& subject = host.sim->Subject();
+  LeftLabel("Analyses");
+  ImGui::Text("%s '%s'", fem::SubjectKindToString(subject.kind),
+              subject.name.c_str());
+  if (host.OnAssembly())
+    Hint("Each occurrence's role is its row's menu, under this one.");
+  DrawMaterialCheck(state);
+  DrawAssemblySetupCheck(state);
 }
 } // namespace
 
 void DrawStudyPanel(AppState& state) {
   ImGui::Begin(kPanelModel);
   PanelHeading(kPanelModel);
-  const StudyHost host = StudyHostOf(state);
-  if (!host) {
-    ImGui::End();
-    return;
-  }
-  // What the simulation analyses, above its studies.
-  if (host.sim)
-    DrawSimSubjectRow(state);
-  // The list only. The selected study is edited, run and read in the
-  // Simulation window, as an assembly's studies already were: one home for
-  // the editor, and a panel that does not change length under the cursor
-  // (docs/ui/panels.md#simulation-the-study-panel-and-window).
-  DrawStudyList(state);
-  if (host.Find(state.simulation.activeStudyId) == nullptr)
-    ImGui::TextColored(kMuted, "Select or add a study.");
+  // What the simulation holds, and nothing that acts on it: the tools are
+  // the toolbar's (docs/ui/panels.md#simulation-tab-the-model-panel).
+  DrawSimTree(state);
   ImGui::End();
 }
 
+namespace {
+
+// The armed tool's name, for the window's title.
+const char* ToolTitle(SimulationState::Tool t) {
+  using T = SimulationState::Tool;
+  switch (t) {
+  case T::Fixed:
+    return "Fixed support";
+  case T::Force:
+    return "Force";
+  case T::Pressure:
+    return "Pressure";
+  case T::Keep:
+    return "Keep face";
+  case T::Torque:
+    return "Torque";
+  case T::Remote:
+    return "Remote load";
+  case T::Probe:
+    return "Probe";
+  case T::Pin:
+    return "Pin";
+  case T::Contact:
+    return "Contact";
+  case T::Temperature:
+    return "Temperature";
+  case T::HeatFlux:
+    return "Heat flux";
+  case T::Convection:
+    return "Convection";
+  case T::HeatSource:
+    return "Heat source";
+  case T::Roller:
+    return "Roller";
+  case T::Held:
+    return "Held directions";
+  case T::Cylindrical:
+    return "Cylindrical support";
+  case T::None:
+    break;
+  }
+  return "Simulation";
+}
+
+} // namespace
+
 void DrawSimulationToolWindow(AppState& state) {
-  BeginToolWindowFrame(state, "Simulation");
+  SimulationState& sim = state.simulation;
   const StudyHost host = StudyHostOf(state);
-  // The studies are listed in the simulation tab's dock, and edited here.
-  if (const fem::Study* s = host.Find(state.simulation.activeStudyId))
-    DrawStudyBody(state, s);
+  if (!host)
+    return;
+  using K = SimulationState::Focus::Kind;
+  const fem::Study* active = host.Find(sim.activeStudyId);
+  // A focus whose thing went (a study deleted, an undo) shows nothing.
+  const SimulationState::Focus f = sim.focus;
+  const fem::Study* fs = f.studyId != 0 ? host.Find(f.studyId) : nullptr;
+  const bool needsStudy =
+      f.kind != K::None && f.kind != K::Subject && f.kind != K::Participant;
+  if (needsStudy && fs == nullptr)
+    sim.focus = {};
+  const bool armed = sim.tool != SimulationState::Tool::None && active;
+  if (!armed && sim.focus.kind == K::None)
+    return;
+
+  // The title says what the window is about, so the rows need no heading.
+  std::string title;
+  if (armed)
+    title = ToolTitle(sim.tool);
   else
-    ImGui::TextColored(kMuted, "Select or add a study.");
+    switch (sim.focus.kind) {
+    case K::Subject:
+      title = "Subject";
+      break;
+    case K::Participant:
+      title = host.OccurrenceName(sim.focus.id);
+      break;
+    case K::Study:
+      title = "Study: " + fs->name;
+      break;
+    case K::Mesh:
+      title = "Mesh: " + fs->name;
+      break;
+    case K::Load: {
+      title = "Load";
+      for (const fem::Load& l : fs->loads)
+        if (l.id == sim.focus.id)
+          title = SimLoadName(l.type);
+      break;
+    }
+    case K::Case:
+      title = sim.focus.index >= 0 &&
+                      sim.focus.index < static_cast<int>(fs->loadCases.size())
+                  ? "Load case: " +
+                        fs->loadCases[static_cast<size_t>(sim.focus.index)].name
+                  : "Load case";
+      break;
+    case K::Keep:
+      title = "Kept face";
+      break;
+    case K::KeepOut:
+      title = "Keep-out";
+      break;
+    case K::Result:
+      title = "Result: " + fs->name;
+      break;
+    case K::Check:
+      title = "Check: " + fs->name;
+      break;
+    case K::None:
+      break;
+    }
+  BeginToolWindowFrame(state, title);
+  if (armed) {
+    if (sim.tool == SimulationState::Tool::Probe) {
+      Hint("Hover a face for its von Mises stress; click to pin it.");
+      if (!sim.placeRefusal.empty())
+        MessageText(kError, sim.placeRefusal);
+      DrawProbes(state, *active);
+    } else {
+      DrawArmedTool(state, *active);
+    }
+  } else {
+    switch (sim.focus.kind) {
+    case K::Subject:
+      DrawSubjectWindow(state);
+      break;
+    case K::Participant:
+      DrawParticipantWindow(state, sim.focus.id);
+      break;
+    case K::Study:
+      DrawStudySettings(state, fs);
+      break;
+    case K::Mesh:
+      DrawMeshWindow(state, *fs);
+      break;
+    case K::Load:
+      DrawLoadWindow(state, *fs, sim.focus.id);
+      break;
+    case K::Case:
+      DrawCaseWindow(state, *fs, sim.focus.index);
+      break;
+    case K::Keep:
+      Hint("Kept solid: the optimizer leaves its material. Its row's menu "
+           "removes it.");
+      break;
+    case K::KeepOut:
+      Hint("Kept empty: its tets are removed before the run. Its row's menu "
+           "removes it.");
+      break;
+    case K::Result:
+      DrawResults(state, *fs);
+      break;
+    case K::Check:
+      DrawStudyCheck(state, *fs);
+      break;
+    case K::None:
+      break;
+    }
+  }
   ImGui::Separator();
-  // Close, not Esc: the window is a way in to a display state (the field
-  // overlay) that outlives it, and it applies as you go.
-  if (ImGui::Button("Close###simulation_close"))
-    ExitSimulation(state);
+  // Close, not Esc (which leaves the simulation): the window applies as you
+  // go, and a field it shows outlives it.
+  if (ImGui::Button(armed ? "Done###simulation_close"
+                          : "Close###simulation_close")) {
+    if (armed)
+      sim.tool = SimulationState::Tool::None;
+    else
+      sim.focus = {};
+  }
   ImGui::End();
+}
+
+void SetSimParticipantRole(AppState& state, uint64_t occurrenceId,
+                           fem::ParticipantRole role) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host || !host.OnAssembly())
+    return;
+  SimUndoGuard guard(state);
+  std::vector<fem::Participant> roles = host.sim->Roles();
+  auto it =
+      std::find_if(roles.begin(), roles.end(), [&](const fem::Participant& x) {
+        return x.occurrenceId == occurrenceId;
+      });
+  if (role == fem::ParticipantRole::Ignored) {
+    if (it != roles.end())
+      roles.erase(it);
+    // Its contact supports go with it, in every study: a clamp on a
+    // support that is absent clamps nothing.
+    for (const fem::Study& st : std::vector<fem::Study>(host.Studies().begin(),
+                                                        host.Studies().end())) {
+      fem::Study edited = st;
+      if (std::erase_if(edited.loads, [&](const fem::Load& l) {
+            return l.contactWith == occurrenceId;
+          }) > 0)
+        host.sim->ReplaceStudy(std::move(edited));
+    }
+  } else {
+    if (it == roles.end()) {
+      fem::Participant np;
+      np.occurrenceId = occurrenceId;
+      np.role = role;
+      roles.push_back(np);
+    } else {
+      it->role = role;
+    }
+    if (role == fem::ParticipantRole::Meshed) // one meshed at a time (S1)
+      for (fem::Participant& other : roles)
+        if (other.occurrenceId != occurrenceId &&
+            other.role == fem::ParticipantRole::Meshed)
+          other.role = fem::ParticipantRole::Rigid;
+  }
+  host.sim->SetRoles(std::move(roles));
 }
 
 namespace {
@@ -3545,11 +3319,16 @@ void AppendSimulationFaceTints(AppState& state) {
         state.faceSelector->GetFaceVertexRange(mesh, index, first, count))
       state.meshRenderer->SetFaceHighlight(mesh, first, count, tint);
   };
+  // A load picked in the tree is lit as a selection is, so the row and
+  // the face it stands on read as one thing.
   for (const fem::Load& load : s->loads)
     if (load.contactWith == 0)
       tintFace(load.occurrenceId, load.face,
-               fem::IsSupport(load.type) ? MeshRenderer::kTintFixture
-                                         : MeshRenderer::kTintLoad);
+               sim.selectedLoadId == load.id ||
+                       IsSelected(state, SelectionItem::Kind::SimLoad, load.id)
+                   ? MeshRenderer::kTintSelection
+               : fem::IsSupport(load.type) ? MeshRenderer::kTintFixture
+                                           : MeshRenderer::kTintLoad);
   for (const ElementRef& keep : s->keepFaces)
     tintFace(0, keep, MeshRenderer::kTintKeep);
 

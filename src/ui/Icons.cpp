@@ -122,11 +122,38 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"assembly.simulation", ICON_FA_GAUGE_HIGH},
     {"assembly.bom", ICON_FA_TABLE_LIST},
 
-    // Simulation workspace.
+    // Simulation workspace (docs/ui/panels.md#the-simulation-toolbar): a
+    // study's glyph is the command that adds one, a support's or a load's
+    // the command that places it, on the bar and on the tree's rows alike.
+    {"sim.add_static", ICON_FA_BRIDGE},
+    {"sim.add_modal", ICON_FA_WAVE_SQUARE},
+    {"sim.add_buckling", ICON_FA_COMPRESS},
+    {"sim.add_thermal", ICON_FA_TEMPERATURE_HIGH},
+    {"sim.add_topology", ICON_FA_DRAW_POLYGON},
+    {"sim.mesh", ICON_FA_VECTOR_SQUARE},
     {"sim.fixed", ICON_FA_LOCK},
+    {"sim.pin", ICON_FA_THUMBTACK},
+    {"sim.contact", ICON_FA_ARROWS_DOWN_TO_LINE},
+    {"sim.roller", ICON_FA_CIRCLE_HALF_STROKE},
+    {"sim.held", ICON_FA_ANCHOR},
+    {"sim.cylindrical", ICON_FA_RING},
+    {"sim.temperature", ICON_FA_TEMPERATURE_HALF},
+    {"sim.convection", ICON_FA_WIND},
     {"sim.force", ICON_FA_BOLT},
     {"sim.pressure", ICON_FA_DOWN_LONG},
+    {"sim.torque", ICON_FA_ROTATE},
+    {"sim.remote", ICON_FA_LOCATION_ARROW},
+    {"sim.heat_flux", ICON_FA_ARROW_RIGHT_TO_BRACKET},
+    {"sim.heat_source", ICON_FA_FIRE},
+    {"sim.add_case", ICON_FA_LAYER_GROUP},
+    {"sim.keep", ICON_FA_SHIELD_HALVED},
+    {"sim.check", ICON_FA_STETHOSCOPE},
     {"sim.run", ICON_FA_PLAY},
+    {"sim.result", ICON_FA_PALETTE},
+    {"sim.probe", ICON_FA_EYE_DROPPER},
+    {"sim.export_vtu", ICON_FA_FILE_ARROW_DOWN},
+    {"sim.toggle_labels", ICON_FA_TAGS},
+    {"sim.clear_storage", ICON_FA_BROOM_BALL},
 
     // Drawing.
     {"drawing.add_view", ICON_FA_CIRCLE_PLUS},

@@ -88,7 +88,9 @@ session (or plane pick), a mate session, a drawing dimension, a drawing
 annotation (a datum or a feature control frame), a detail view, the drawing's
 Add view, then a feature preview; with none of those it shows the committed-
 feature editor, or measure, section, the CAM verbs, the fastener tool, an
-assembly editor, exploded views, motion, or simulation.
+assembly editor, exploded views, motion, or a simulation's armed tool or
+the tree row in focus (none: no window;
+[panels.md](panels.md#simulation-the-tool-window)).
 
 For a feature preview the window shows the slot rows and parameters, then:
 

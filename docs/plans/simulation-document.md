@@ -124,67 +124,26 @@ but for the analysis-only geometry it holds (below) and its window
 
 ### 6. The window
 
-The left panel shows what exists; the toolbar acts; nothing is edited in
-the panel (docs/ui/panels.md). Today's floating Simulation window, which
-holds the type, the mesh size, every load tool, Run and the results at
-once, is taken apart along that line.
+Built: the tree, the toolbar and the shared tool window
+([panels.md](../ui/panels.md#simulation-tab-the-model-panel)), and clearing
+stored meshes and results from the UI
+([clearing](../simulation/README.md#clearing-stored-meshes-and-results)).
+What is left of it:
 
-**The tree** (the Model dock on a simulation tab), one row per thing, each
-with its icon from `CommandIcon` and a state shown quietly:
-
-```
-Subject      bracket  (config: long)
-Geometry
-  suppressed  Hole pattern 2
-  symmetry    XZ plane
-Mesh         41 820 tets            (a dot: current / stale / not built;
-                                     a warning count when there are any)
-Studies
-  Static 1   solved  FoS 2.4
-    Fixed    back face
-    Force    120 N  lug
-    Result   von Mises
-  Modal 1    not run
-```
-
-- A row says one thing: its name, and one short value in the dimmed
-  column (a load's magnitude, a mesh's size, a study's headline number).
-  No buttons and no fields in rows; a state is a small dot in the icon
-  column in the colours the study list already uses, not a word, with the
-  word on hover.
-- Groups with nothing in them are not drawn (no empty "Geometry" header on
-  a study with no suppression). Studies fold; a folded study shows its
-  state and headline only.
-- Clicking a row selects it and highlights what it stands on in the
-  viewport; double-click or its menu opens its editor in the tool window.
-  Selection, multi-select and Delete follow the shared list behaviour
-  (docs/ui/selection.md).
-- On an assembly subject each participant is a row under Subject with its
-  role as a per-row menu, as a CAM part row has its Configuration menu:
-  the one inline control, because a role is a single choice and a table of
-  them is read as a whole.
-
-**The toolbar**, left to right in the order the work goes, in groups with
-separators: Suppress, Symmetry | Mesh, Refine | the supports | the loads |
-Check, Run | Result field, Probe, Export. Supports and loads are two
-drop-down buttons showing the last-used kind, not a dozen buttons. A tool
-that cannot apply yet is disabled with its reason on hover.
-
-**The tool window** is the shared `###ToolWindow` every other tool uses
-(docs/ui/tool-sessions.md): one tool's fields at a time, and for Mesh and
-Check the report -- a list of findings, each a row that frames its place
-in the viewport on click.
-
-**Result controls sit on the legend** in the viewport, since they act on
-it: the field, the case or mode, the deformation scale, the clamp. The
-legend is the only persistent result chrome; a study's numbers (maxima,
-factors, reactions) are read in the tool window when its Result row is
-opened.
-
-**Glyphs in the viewport** stay as they are for loads and supports. While
-a simulation tab shows a mesh or a result, load labels are hidden unless
-the load's row is selected, so a picture of a result is not covered in
-text.
+- **Result controls on the legend**, since they act on it: the field, the
+  case or mode, the deformation scale, the clamp. The legend is then the
+  only persistent result chrome, and the Result row's settings keep the
+  study's numbers (maxima, factors, reactions) and its probes.
+- **The geometry step's rows and tools** with stage 4: a Geometry group in
+  the tree (suppressed features, the symmetry plane) and Suppress,
+  Symmetry and Refine on the toolbar, before Mesh.
+- **The mesh as the simulation's**: one Mesh row under the subject once the
+  document's mesh size is set on it (`set_simulation {mesh_size_mm}`), each
+  study's row only where it meshes apart.
+- **Sizes on disk on hover** of the mesh and Result rows, and in the clear
+  storage question.
+- **Load cases, kept faces and keep-outs in the list selection**, so Delete
+  and Shift reach them as they reach studies and loads.
 
 ### 7. The agent surface
 
@@ -210,12 +169,12 @@ Each merges on its own with the suites green.
    ([how a simulation is saved](../simulation/README.md#how-a-simulation-is-saved),
    [moving studies](../simulation/README.md#moving-studies-into-a-simulation)),
    the tab ([the simulation tab](../simulation/README.md#the-simulation-tab))
-   with the app's runs and every study RPC on it, and the part- and
+   with the app's runs and every study RPC on it, its tree, toolbar and
+   tool window ([6](#6-the-window)), and the part- and
    assembly-level study lists gone from the model and the format. What is
    left:
-   1. **[The window](#6-the-window)** on the tab: the tree, the toolbar
-      groups, the shared tool window, the legend's controls, and clearing
-      stored meshes and results from the UI.
+   1. **[The window](#6-the-window)**'s remainder: the legend's controls,
+      the mesh as the simulation's row, sizes on hover.
    2. **The new RPCs** `add_simulation`, `list_simulations`,
       `set_simulation {mesh_size_mm, participants, configuration}` and
       `clear_sim_storage` (per-study participant tables come with

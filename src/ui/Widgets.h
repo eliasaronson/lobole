@@ -91,6 +91,9 @@ struct ListRowSpec {
   std::string tailGlyphId;
   ImVec4 tailGlyphColor{0, 0, 0, 0};
   std::string tailGlyphTip;
+  // A small dot on the glyph's lower right, alpha 0 = none: a state shown
+  // quietly (a study solved, stale or failed), its word in the tooltip.
+  ImVec4 dotColor{0, 0, 0, 0};
 };
 struct ListRowResult {
   bool clicked = false;       // a single click on the row

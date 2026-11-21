@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "app/GuiTests.h" // GuiTestCaptureDir
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Measure.h"
 #include "core/fem/SimDocument.h"
@@ -11,7 +12,9 @@
 #include "render/MeshRenderer.h"  // InstanceHighlightRanges (tint test)
 #include "ui/AppActionsInternal.h"
 #include "ui/AssemblyActions.h" // UndoAssembly, PartDocById (S1)
+#include "ui/Commands.h"        // CommandEnabled
 #include "ui/DocumentSlots.h"   // AddAssembly, SetActivePart
+#include "ui/ListSelection.h"   // SelectedIds, DeleteSelection
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (arrow-placement test)
 #include "ui/SimRunActions.h"
@@ -20,6 +23,7 @@
 #include "ui/StudyHost.h"      // ModifyStudy, SimulationContacts, StudyStale
 #include "ui/StudyPanel.h"
 #include "ui/VariableActions.h"    // SetProjectVariable
+#include "ui/ViewActions.h"        // FitCameraToDocument
 #include "ui/ViewportHandleDraw.h" // DrawViewportHandles
 
 #include <filesystem>
@@ -64,6 +68,36 @@ void SteelBlock(ImGuiTestContext* ctx) {
 
 // The slot id of the simulation tab in front.
 uint64_t FrontSimSlot() { return ui::ActiveSimSlotId(*s_App); }
+
+// The window as it stands, checked: the toolbar's row fits, and the tool
+// window sits inside the viewport at under half its width (it sizes itself
+// to its content, so one unwrapped sentence once made it the app's width).
+// Saved as `<name>.png` when the run was given --capture-dir, for a person
+// to look at (docs/ui/testing.md#recording-a-scene).
+void SimWindowShot(ImGuiTestContext* ctx, const char* name) {
+  ctx->Yield(4);
+  for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows)
+    if (std::string(w->Name).find("##ToolbarRow") != std::string::npos)
+      IM_CHECK(w->ContentSize.x <= w->InnerRect.GetWidth() + 1.0f);
+  if (ImGuiWindow* tw = ImGui::FindWindowByID(ImHashStr("###ToolWindow"));
+      tw != nullptr && tw->Active) {
+    const glm::vec4 r = s_App->toolWindowRect;
+    ctx->LogInfo("%s: tool window %.0f x %.0f", name, r.z - r.x, r.w - r.y);
+    IM_CHECK(r.z - r.x < 0.5f * s_App->viewportSize.x);
+  }
+  if (GuiTestCaptureDir().empty())
+    return;
+  ctx->CaptureReset();
+  ImGuiCaptureArgs* args = ctx->CaptureArgs;
+  std::snprintf(args->InOutputFile, sizeof(args->InOutputFile), "%s/%s.png",
+                GuiTestCaptureDir().c_str(), name);
+  args->InPadding = 0.0f;
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  args->InCaptureRect =
+      ImRect(vp->Pos, ImVec2(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y));
+  IM_CHECK(ctx->CaptureScreenshot(ImGuiCaptureFlags_IncludeOtherWindows |
+                                  ImGuiCaptureFlags_IncludePopups));
+}
 } // namespace
 
 void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
@@ -369,7 +403,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t studyId = s_App->simulation.activeStudyId;
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
 
@@ -400,7 +434,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const uint64_t studyId = s_App->simulation.activeStudyId;
     IM_CHECK(ui::StudyMesh(*s_App, studyId) == nullptr);
     IM_CHECK(!ctx->ItemExists("//###ToolWindow/###mesh_view"));
-    ctx->ItemClick("//###ToolWindow/###study_mesh");
+    ToolbarClick(ctx, "###tb_sim_mesh");
     IM_CHECK(WaitFor(
         ctx, "the mesh",
         [studyId] { return ui::StudyMesh(*s_App, studyId) != nullptr; },
@@ -478,14 +512,17 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::StudyMeshStale(*s_App, studyId));
   };
 
-  // The check beside Run (docs/simulation/README.md#checking-a-study): a
+  // The toolbar's Check (docs/simulation/README.md#checking-a-study): a
   // study with its support removed lists that before anything is run, and
   // the row goes when the support is back.
   t = IM_REGISTER_TEST(engine, "sim", "the_check_lists_problems_beside_run");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t studyId = s_App->simulation.activeStudyId;
+    ToolbarClick(ctx, "###tb_sim_check"); // its findings in the tool window
     ctx->Yield(2);
+    IM_CHECK(s_App->simulation.focus.kind ==
+             ui::SimulationState::Focus::Kind::Check);
     IM_CHECK(ui::CachedStudyCheck(*s_App, studyId).problems.empty());
     IM_CHECK(!ctx->ItemExists("//###ToolWindow/###check_row_0"));
     const fem::Study before = *Sim()->FindStudy(studyId);
@@ -522,7 +559,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     using Field = ui::SimulationState::Field;
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t studyId = s_App->simulation.activeStudyId;
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     ctx->Yield(2);
     const auto choose = [&](const char* item) {
@@ -629,7 +666,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
             .string();
     std::filesystem::remove(path);
     s_App->saveDialogAnswer = path;
-    ctx->ItemClick("//###ToolWindow/###result_export");
+    ToolbarClick(ctx, "###tb_sim_export_vtu");
     ctx->Yield(2);
     IM_CHECK(std::filesystem::exists(path));
     IM_CHECK(std::filesystem::file_size(path) > 10000);
@@ -658,7 +695,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(st->numModes, fem::kBucklingFactorsDefault);
     // CalculiX solves buckling too: the solver combo stays.
     IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_solver"));
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     IM_CHECK(rt != nullptr && !rt->bodies.empty());
@@ -696,7 +733,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     const fem::Study* st = Sim()->FindStudy(studyId);
     IM_CHECK(st != nullptr && st->solver == fem::Solver::Calculix);
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     ctx->Yield(2);
     st = Sim()->FindStudy(studyId);
     IM_CHECK(st->error.find("calculix_path setting") != std::string::npos);
@@ -726,16 +763,16 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t studyId = s_App->simulation.activeStudyId;
-    ctx->ItemClick("//###ToolWindow/###case_add");
+    ToolbarClick(ctx, "###tb_sim_add_case");
     ctx->Yield(2);
-    ctx->ItemClick("//###ToolWindow/###case_add");
+    ToolbarClick(ctx, "###tb_sim_add_case");
     ctx->Yield(2);
     const fem::Study* st = Sim()->FindStudy(studyId);
     IM_CHECK_EQ(st->loadCases.size(), (size_t)2);
     IM_CHECK(st->loads[1].loadCase == st->loadCases[0].name);
 
     // Arm the force tool; the case it goes in is chosen in the panel.
-    ctx->ItemClick("//###ToolWindow/###sim_bc_force");
+    ToolbarClick(ctx, "###tb_sim_force");
     ctx->Yield();
     ctx->ItemClick("//###ToolWindow/###sim_pending_case");
     ctx->Yield();
@@ -755,7 +792,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(st->loads.size(), (size_t)3);
     IM_CHECK(st->loads[2].loadCase == "Case 2");
 
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     IM_CHECK_EQ(rt->caseNames.size(), (size_t)2);
@@ -791,12 +828,16 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // The auto mesh is sized for a stress field; a shape needs one that can
     // hold a shape. Four iterations is enough for this gate: the volume
     // constraint is enforced by the OC bisection on every one of them.
+    // The size is the mesh's (its row's settings), the iterations the
+    // study's.
+    SimTreeClick(ctx, "###sim_mesh_" + std::to_string(studyId));
     ctx->ItemInputValue("//###ToolWindow/###study_mesh_size", "10");
     ctx->Yield(2);
+    SimFocusStudy(ctx);
     ctx->ItemInputValue("//###ToolWindow/###topo_max_iterations", "4");
     ctx->Yield(2);
 
-    ctx->ItemClick("//###ToolWindow/###topo_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     // The OC bisection enforces the volume every iteration, so this holds
@@ -1092,7 +1133,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.active);
     IM_CHECK(s_App->sim != nullptr);
     IM_CHECK(s_App->sim->Subject().kind == fem::SubjectKind::Assembly);
-    IM_CHECK(ctx->ItemExists("//###Model/**/###study_add"));
+    IM_CHECK(ctx->ItemExists("//##DockHost/**/###tb_sim_add_static"));
     IM_CHECK_EQ(Sim()->GetStudies().size(), (size_t)1);
     const uint64_t studyId = s_App->simulation.activeStudyId;
     IM_CHECK(studyId != 0);
@@ -1106,9 +1147,13 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       cs.meshSize = 12.0;
     });
     ctx->Yield(2);
-    // The rigid row offers the clamp; one click adds the contact anchor.
+    // The rigid participant's row offers the clamp in the tool window; one
+    // click adds the contact anchor.
+    SimTreeClick(ctx, "###sim_part_" + std::to_string(lower));
+    IM_CHECK(s_App->simulation.focus.kind ==
+             ui::SimulationState::Focus::Kind::Participant);
     const std::string clamp =
-        "//Simulation###ToolWindow/###clamp_" + std::to_string(lower);
+        "//###ToolWindow/###clamp_" + std::to_string(lower);
     IM_CHECK(ctx->ItemExists(clamp.c_str()));
     ctx->ItemClick(clamp.c_str());
     ctx->Yield(2);
@@ -1167,7 +1212,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 
 #ifdef HAVE_NETGEN
     // Run from the window; the result lands on the simulation, fresh.
-    ctx->ItemClick("//Simulation###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     WaitFor(
         ctx, "the assembly study's result",
         [&] {
@@ -1186,8 +1231,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::StudyStale(*s_App, studyId));
 #endif
 
-    // Close leaves simulation mode and the window goes with it.
-    ctx->ItemClick("//Simulation###ToolWindow/###simulation_close");
+    // Exit leaves simulation mode and the window goes with it.
+    ToolbarClick(ctx, "###tb_sim_exit");
     ctx->Yield(2);
     IM_CHECK(!s_App->simulation.active);
     IM_CHECK(!s_App->simulationToolOpen);
@@ -1261,22 +1306,20 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK_EQ(shown.magnitude, 10000.0);
       IM_CHECK_STR_EQ(ui::SimulationLoadLabel(shown).c_str(), "10 kN");
       IM_CHECK(ctx->ItemExists(
-          ("//###ToolWindow/**/###load_row_" + std::to_string(forceId))
-              .c_str()));
+          ("//###Model/**/###load_row_" + std::to_string(forceId)).c_str()));
       ui::ExitSimulation(*s_App);
       ctx->Yield();
     }
   };
 
-  // A study is a row in the part's dock (ui::ListRow): click selects it, its
-  // editor is the Simulation window, and Delete is in its menu -- where the
-  // whole editor, and a Delete button at its foot, used to be inline under
-  // the list (docs/ui/panels.md#simulation-the-study-panel-and-window).
+  // A study is a row in the simulation's tree (ui::ListRow): click selects
+  // it, its settings are the tool window's, and Delete is in its menu
+  // (docs/ui/panels.md#simulation-tab-the-model-panel).
   t = IM_REGISTER_TEST(engine, "sim", "a_study_is_a_row_edited_in_the_window");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 60.0);
     const uint64_t first = s_App->simulation.activeStudyId;
-    ctx->ItemClick("//###Model/**/###study_add");
+    ToolbarClick(ctx, "###tb_sim_add_static");
     ctx->Yield(2);
     const uint64_t second = s_App->simulation.activeStudyId;
     IM_CHECK(second != first);
@@ -1298,7 +1341,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Sim()->GetStudies().size(), (size_t)1);
     IM_CHECK_EQ(Sim()->GetStudies()[0].id, first);
 
-    ctx->ItemClick("//###ToolWindow/###simulation_close");
+    ToolbarClick(ctx, "###tb_sim_exit");
     ctx->Yield(2);
     IM_CHECK(!s_App->simulation.active);
     ctx->SetRef("//##MainMenuBar");
@@ -1321,7 +1364,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
           info && info->kind == "cylinder")
         side = ElementRef{body.createdBy, name};
     IM_CHECK_SILENT(!side.name.empty());
-    ctx->ItemClick("//###ToolWindow/###sim_bc_torque");
+    ToolbarClick(ctx, "###tb_sim_torque");
     ctx->Yield();
     IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Torque);
     ctx->ItemInputValue("//###ToolWindow/###sim_torque", "500");
@@ -1340,7 +1383,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::AppendSimulationBCGlyphs(*s_App, prims);
     IM_CHECK(prims.size() > 30);
     IM_CHECK(ctx->ItemExists(
-        ("//###ToolWindow/**/###load_row_" + std::to_string(st->loads[0].id))
+        ("//###Model/**/###load_row_" + std::to_string(st->loads[0].id))
             .c_str()));
     ui::ExitSimulation(*s_App);
     ctx->Yield();
@@ -1356,7 +1399,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     const uint64_t cb = Doc()->GetBodies()[0].createdBy;
     const ElementRef flat{cb, std::to_string(cb) + "/face1"};
-    ctx->ItemClick("//###ToolWindow/###sim_bc_torque");
+    ToolbarClick(ctx, "###tb_sim_torque");
     ctx->Yield();
     ctx->ItemInputValue("//###ToolWindow/###sim_torque", "250");
     ctx->Yield();
@@ -1410,7 +1453,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
         flat = ElementRef{body.createdBy, name};
     }
     IM_CHECK_SILENT(!side.name.empty() && !flat.name.empty());
-    ctx->ItemClick("//###ToolWindow/###sim_bc_pin");
+    ToolbarClick(ctx, "###tb_sim_pin");
     ctx->Yield();
     IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Pin);
     const uint64_t sid = s_App->simulation.activeStudyId;
@@ -1459,7 +1502,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     }
     IM_CHECK_SILENT(flats.size() >= 2);
     const uint64_t sid = s_App->simulation.activeStudyId;
-    ctx->ItemClick("//###ToolWindow/###sim_bc_roller");
+    ToolbarClick(ctx, "###tb_sim_roller");
     ctx->Yield();
     IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Roller);
     ui::SimulationApplyToFace(*s_App, flats[0]);
@@ -1470,7 +1513,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK(st->loads[0].type == fem::LoadType::Roller);
       IM_CHECK(ui::SimulationLoadLabel(st->loads[0]) == "roller");
     }
-    ctx->ItemClick("//###ToolWindow/###sim_bc_held");
+    ToolbarClick(ctx, "###tb_sim_held");
     ctx->Yield();
     IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Held);
     s_App->simulation.pendingHold = {false, false, false};
@@ -1521,7 +1564,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
         flat = ElementRef{body.createdBy, name};
     }
     IM_CHECK_SILENT(!side.name.empty() && !flat.name.empty());
-    ctx->ItemClick("//###ToolWindow/###sim_bc_contact");
+    ToolbarClick(ctx, "###tb_sim_contact");
     ctx->Yield();
     IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Contact);
     const uint64_t sid = s_App->simulation.activeStudyId;
@@ -1579,7 +1622,11 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick((std::string("//") + popup->Name + "/**/Thermal").c_str());
     ctx->Yield(2);
     IM_CHECK(Sim()->FindStudy(sid)->type == fem::AnalysisType::Thermal);
-    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###sim_bc_fixed"));
+    // A fixed support is not a thermal study's: its button is off, saying
+    // why, and the supports' face shows a thermal one instead.
+    IM_CHECK(!ui::CommandEnabled(*s_App, "sim.fixed"));
+    IM_CHECK(!ui::SimCommandRefusal(*s_App, "sim.fixed").empty());
+    IM_CHECK(ui::CommandEnabled(*s_App, "sim.convection"));
     const Body& body = Doc()->GetBodies()[0];
     ElementRef side, flat;
     for (const auto& [index, name] : body.elementMap.names) {
@@ -1591,7 +1638,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     }
     IM_CHECK_SILENT(!side.name.empty() && !flat.name.empty());
     // Convection, untyped: refused, naming the ranges to choose from.
-    ctx->ItemClick("//###ToolWindow/###sim_bc_convection");
+    ToolbarClick(ctx, "###tb_sim_convection");
     ctx->Yield();
     ui::SimulationApplyToFace(*s_App, side);
     ctx->Yield(2);
@@ -1606,7 +1653,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)1);
     IM_CHECK(Sim()->FindStudy(sid)->loads[0].filmWm2K == 10.0);
     // A heat source on the body whose face is clicked.
-    ctx->ItemClick("//###ToolWindow/###sim_bc_heat_source");
+    ToolbarClick(ctx, "###tb_sim_heat_source");
     ctx->Yield();
     ui::SimulationApplyToFace(*s_App, flat);
     ctx->Yield(2);
@@ -1622,7 +1669,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(st->loads[1].type == fem::LoadType::HeatGeneration);
     IM_CHECK(st->loads[1].body == body.name);
 #ifdef HAVE_NETGEN // the run needs a mesh; the refusals above do not
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, sid));
     const fem::StudyRuntime* rt = Sim()->StudyResults(sid);
     IM_CHECK(rt != nullptr && !rt->bodies.empty());
@@ -1667,7 +1714,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_SILENT(info.has_value());
     glm::dvec3 lo(0.0), hi(0.0);
     body.shape.GetBoundingBox(lo, hi);
-    ctx->ItemClick("//###ToolWindow/###sim_bc_remote");
+    ToolbarClick(ctx, "###tb_sim_remote");
     ctx->Yield();
     s_App->simulation.pointOverridden = false;
     ctx->ItemInputValue("//###ToolWindow/###sim_remote_force", "60");
@@ -1700,11 +1747,11 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t studyId = s_App->simulation.activeStudyId;
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     ctx->Yield(2);
     const ElementRef root = Sim()->FindStudy(studyId)->loads[0].face;
-    ctx->ItemClick("//###ToolWindow/###sim_probe");
+    ToolbarClick(ctx, "###tb_sim_probe");
     ctx->Yield();
     IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Probe);
     ui::SimulationApplyToFace(*s_App, root);
@@ -1712,7 +1759,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->simulation.probes.size(), (size_t)1);
     // Still armed: a probe pins several faces in a row. Off again.
     IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Probe);
-    ctx->ItemClick("//###ToolWindow/###sim_probe");
+    ToolbarClick(ctx, "###tb_sim_probe");
     ctx->Yield();
     // The clamped root carries the bending stress; its peak is real.
     const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
@@ -1758,7 +1805,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->sim->Subject().docId == partId);
     IM_CHECK_EQ(s_App->sim->GetStudies().size(), (size_t)1);
     IM_CHECK(ctx->ItemExists("//###Model/**/###sim_subject"));
-    IM_CHECK(ctx->ItemExists("//###Model/**/###study_add"));
+    IM_CHECK(ctx->ItemExists("//##DockHost/**/###tb_sim_add_static"));
     const uint64_t sid = s_App->simulation.activeStudyId;
     const Body body = Doc()->GetBodies()[0];
     const ElementRef fixed = FaceFacing(body, {0, 0, -1});
@@ -1772,12 +1819,12 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)2);
 #ifdef HAVE_NETGEN
-    ctx->ItemClick("//###ToolWindow/###study_mesh");
+    ToolbarClick(ctx, "###tb_sim_mesh");
     WaitFor(
         ctx, "the mesh",
         [sid] { return ui::StudyMesh(*s_App, sid) != nullptr; }, 120.0);
     IM_CHECK(ui::SimMeshReportFor(*s_App, FrontSimSlot(), sid) != nullptr);
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, sid));
     ctx->Yield(3);
     IM_CHECK(!ui::StudyStale(*s_App, sid));
@@ -1794,7 +1841,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.field == ui::SimulationState::Field::VonMises);
 #endif
     // Leaving goes back to the part.
-    ctx->ItemClick("//Simulation###ToolWindow/###simulation_close");
+    ToolbarClick(ctx, "###tb_sim_exit");
     ctx->Yield(2);
     IM_CHECK(s_App->sim == nullptr);
     IM_CHECK(s_App->document != nullptr);
@@ -1853,7 +1900,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
              std::string::npos);
     ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::None);
 #ifdef HAVE_NETGEN
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, sid));
     IM_CHECK(!ui::StudyStale(*s_App, sid));
     const double lone = Sim()->StudyResults(sid)->maxDisplacement;
@@ -1862,7 +1909,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 
     // Beside a rigid neighbour: a second simulation of the same assembly,
     // its own roles, clamped where the support touches.
-    ctx->ItemClick("//Simulation###ToolWindow/###simulation_close");
+    ToolbarClick(ctx, "###tb_sim_exit");
     ctx->Yield(2);
     IM_CHECK(s_App->assembly != nullptr);
     Occurrence up;
@@ -1889,8 +1936,9 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       cs.meshSize = 12.0;
     });
     ctx->Yield(2);
+    SimTreeClick(ctx, "###sim_part_" + std::to_string(lower));
     const std::string clamp =
-        "//Simulation###ToolWindow/###clamp_" + std::to_string(lower);
+        "//###ToolWindow/###clamp_" + std::to_string(lower);
     ctx->ItemClick(clamp.c_str());
     ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::Pressure);
     ui::SimulationApplyToFace(*s_App, upper, top);
@@ -1899,7 +1947,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Sim()->FindStudy(sid2)->loads.size(), (size_t)2);
     IM_CHECK_EQ(ui::SimulationContacts(*s_App).size(), (size_t)1);
 #ifdef HAVE_NETGEN
-    ctx->ItemClick("//###ToolWindow/###study_run");
+    ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, sid2));
     IM_CHECK(!ui::StudyStale(*s_App, sid2));
     IM_CHECK(Sim()->StudyResults(sid2)->maxDisplacement > 0.0);
@@ -2132,6 +2180,369 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->sim.get() == sim);
     IM_CHECK(ui::UndoSim(*s_App));
     IM_CHECK_EQ(sim->FindStudy(sid)->loads.size(), (size_t)1);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // The tree (docs/ui/panels.md#simulation-tab-the-model-panel): one row
+  // per thing the simulation holds, no tool in it; a row's click puts its
+  // settings in the tool window and lights the face it stands on; a face
+  // picked in the viewport lights its load's row; Ctrl adds a row, Delete
+  // removes what is lit as one undo step.
+  t = IM_REGISTER_TEST(engine, "sim",
+                       "the_tree_shows_what_the_simulation_holds");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    using Kind = ui::SimulationState::Focus::Kind;
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    const fem::Study* st = Sim()->FindStudy(sid);
+    IM_CHECK_SILENT(st != nullptr && st->loads.size() == 2);
+    const uint64_t fixedId = st->loads[0].id, forceId = st->loads[1].id;
+    ToolbarClick(ctx, "###tb_sim_add_case");
+    ctx->Yield(2);
+    const std::string sidText = std::to_string(sid);
+    for (const std::string& row :
+         {std::string("###sim_subject"), "###study_sel_" + sidText,
+          "###sim_mesh_" + sidText, "###load_row_" + std::to_string(fixedId),
+          "###load_row_" + std::to_string(forceId),
+          "###case_row_" + sidText + "_0"})
+      IM_CHECK(ctx->ItemExists(("//###Model/**/" + row).c_str()));
+    // Not one tool in it: the toolbar holds them.
+    for (const char* gone : {"###study_add", "###sim_bc_fixed", "###case_add",
+                             "###study_run", "###study_mesh", "###sim_probe"})
+      IM_CHECK(
+          !ctx->ItemExists((std::string("//###Model/**/") + gone).c_str()));
+    // The case row shows its settings; the force went into the first case.
+    IM_CHECK(s_App->simulation.focus.kind == Kind::Case);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###case_del"));
+
+    // A load's row: its settings, and its face lit as a selection.
+    SimTreeClick(ctx, "###load_row_" + std::to_string(forceId));
+    IM_CHECK(s_App->simulation.focus.kind == Kind::Load);
+    IM_CHECK_EQ(s_App->simulation.focus.id, forceId);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###simulation_close"));
+    ctx->Yield(2);
+    ui::SyncSelectionHighlights(*s_App);
+    bool lit = false;
+    for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes)
+      for (const glm::uvec2& r :
+           s_App->meshRenderer->InstanceHighlightRanges(m.meshId))
+        lit = lit ||
+              (r.y >> MeshRenderer::kTintShift) == MeshRenderer::kTintSelection;
+    IM_CHECK(lit);
+
+    // The viewport's pick: the fixed face picked lights the fixed row.
+    s_App->selection.Replace({ui::SelectionItem::Kind::Face, 0,
+                              Sim()->FindStudy(sid)->loads[0].face});
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.focus.kind == Kind::Load);
+    IM_CHECK_EQ(s_App->simulation.focus.id, fixedId);
+
+    // Two rows lit, Ctrl adding the second; Delete takes both, one step.
+    SimTreeClick(ctx, "###load_row_" + std::to_string(fixedId));
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    SimTreeClick(ctx, "###load_row_" + std::to_string(forceId));
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    IM_CHECK_EQ(
+        ui::SelectedIds(*s_App, ui::SelectionItem::Kind::SimLoad).size(),
+        (size_t)2);
+    IM_CHECK_EQ(ui::DeleteSelection(*s_App), 2);
+    ctx->Yield(2);
+    IM_CHECK(Sim()->FindStudy(sid)->loads.empty());
+    IM_CHECK(ui::UndoSim(*s_App));
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)2);
+
+    // The study's row: its settings, the mesh row's: the mesh's.
+    SimFocusStudy(ctx, sid);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_analysis"));
+    SimTreeClick(ctx, "###sim_mesh_" + sidText);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_mesh_size"));
+    // Close puts the window away; nothing in focus, nothing drawn.
+    ctx->ItemClick("//###ToolWindow/###simulation_close");
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.focus.kind == Kind::None);
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###study_mesh_size"));
+    IM_CHECK(s_App->simulation.active);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // The toolbar (docs/ui/panels.md#the-simulation-toolbar): every tool is on
+  // it -- the supports and the loads in two drop-downs showing the last
+  // used -- the row fits the window, and a tool that cannot act on the
+  // study says why rather than vanishing.
+  t = IM_REGISTER_TEST(engine, "sim", "the_toolbar_holds_every_tool");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 10.0);
+    ctx->Yield(2);
+    ImGuiWindow* bar = nullptr;
+    for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows)
+      if (std::string(w->Name).find("##ToolbarRow") != std::string::npos)
+        bar = w;
+    IM_CHECK_SILENT(bar != nullptr);
+    ctx->LogInfo("simulation toolbar %.0f px in %.0f px", bar->ContentSize.x,
+                 bar->InnerRect.GetWidth());
+    IM_CHECK(bar->ContentSize.x <= bar->InnerRect.GetWidth() + 1.0f);
+    ctx->SetRef("//##DockHost");
+    for (const char* id :
+         {"###tb_sim_mesh", "###tb_sim_add_case", "###tb_sim_check",
+          "###tb_sim_run", "###tb_sim_result", "###tb_sim_probe",
+          "###tb_sim_export_vtu", "###tb_sim_labels", "###tb_sim_clear_storage",
+          "###tb_sim_fit", "###tb_sim_measure", "###tb_sim_exit"})
+      IM_CHECK(ctx->ItemExists((std::string("**/") + id).c_str()));
+    const auto inGroup = [&](const char* group,
+                             std::initializer_list<const char*> ids) {
+      ctx->SetRef("//##DockHost");
+      ctx->ItemClick((std::string("**/") + group + "/###more").c_str());
+      ctx->Yield(2);
+      for (const char* id : ids)
+        IM_CHECK(ctx->ItemExists((std::string("//$FOCUSED/") + id).c_str()));
+      ctx->PopupCloseAll();
+      ctx->Yield();
+    };
+    inGroup("sim_study", {"###tb_sim_add_static", "###tb_sim_add_modal",
+                          "###tb_sim_add_buckling", "###tb_sim_add_thermal",
+                          "###tb_sim_add_topology"});
+    inGroup("sim_supports",
+            {"###tb_sim_fixed", "###tb_sim_pin", "###tb_sim_contact",
+             "###tb_sim_roller", "###tb_sim_held", "###tb_sim_cylindrical",
+             "###tb_sim_temperature", "###tb_sim_convection"});
+    inGroup("sim_loads", {"###tb_sim_force", "###tb_sim_pressure",
+                          "###tb_sim_torque", "###tb_sim_remote",
+                          "###tb_sim_heat_flux", "###tb_sim_heat_source"});
+    // A static study: a heat source is off and says why; Keep (a topology
+    // study's) is not on the bar at all; nothing to export before a run.
+    IM_CHECK(!ui::CommandEnabled(*s_App, "sim.heat_source"));
+    IM_CHECK(!ui::SimCommandRefusal(*s_App, "sim.heat_source").empty());
+    IM_CHECK(!ctx->ItemExists("**/###tb_sim_keep"));
+    IM_CHECK(!ui::CommandEnabled(*s_App, "sim.export_vtu"));
+    IM_CHECK(!ui::CommandEnabled(*s_App, "sim.clear_storage"));
+    // Arming a support lights the group's face, which shows it.
+    ToolbarClick(ctx, "###tb_sim_roller");
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Roller);
+    ctx->SetRef("//##DockHost");
+    IM_CHECK(ctx->ItemExists("**/sim_supports/###tb_sim_roller"));
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###sim_held_x") == false);
+    ToolbarClick(ctx, "###tb_sim_roller"); // again: put down
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::None);
+    // A study of each kind from the first drop-down, each focused.
+    const size_t before = Sim()->GetStudies().size();
+    ToolbarClick(ctx, "###tb_sim_add_modal");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->GetStudies().size(), before + 1);
+    const fem::Study* modal = Sim()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(modal != nullptr && modal->type == fem::AnalysisType::Modal);
+    IM_CHECK(modal->name == "Modal 1");
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_analysis"));
+    // One undo takes it back.
+    IM_CHECK(ui::UndoSim(*s_App));
+    IM_CHECK_EQ(Sim()->GetStudies().size(), before);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // Clear stored meshes and results (docs/simulation/README.md
+  // #clearing-stored-meshes-and-results): asked first, then the simulation
+  // keeps its studies and none of what was solved; the next save writes no
+  // result, and the button is off once nothing is left.
+  t = IM_REGISTER_TEST(engine, "sim", "clear_storage_drops_meshes_and_results");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx);
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield(2);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    // A result as a run stores one (no mesher needed for what is tested).
+    fem::StudyRuntime rt;
+    rt.maxVonMises = 12.0;
+    Sim()->StoreStudyResults(sid, rt);
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::SimStorageOf(*s_App).results, (size_t)1);
+    IM_CHECK(ui::CommandEnabled(*s_App, "sim.clear_storage"));
+    IM_CHECK(ctx->ItemExists(
+        ("//###Model/**/###sim_result_" + std::to_string(sid)).c_str()));
+    ToolbarClick(ctx, "###tb_sim_clear_storage");
+    ctx->Yield(2);
+    // Asked: Cancel keeps it.
+    ctx->ItemClick(
+        "//Clear stored meshes and results/###sim_clear_storage_cancel");
+    ctx->Yield(2);
+    IM_CHECK(Sim()->StudyResults(sid) != nullptr);
+    ToolbarClick(ctx, "###tb_sim_clear_storage");
+    ctx->Yield(2);
+    ctx->ItemClick("//Clear stored meshes and results/###sim_clear_storage_ok");
+    ctx->Yield(2);
+    IM_CHECK(Sim()->StudyResults(sid) == nullptr);
+    IM_CHECK(Sim()->FindStudy(sid) != nullptr); // the study stays
+    IM_CHECK_EQ(ui::SimStorageOf(*s_App).results, (size_t)0);
+    IM_CHECK(!ui::CommandEnabled(*s_App, "sim.clear_storage"));
+    IM_CHECK(!ctx->ItemExists(
+        ("//###Model/**/###sim_result_" + std::to_string(sid)).c_str()));
+    IM_CHECK(ui::ProjectDirty(*s_App)); // its files go at the next save
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // Every simulation tool, given what it acts on, changes the study or says
+  // why it will not (docs/ui/tool-sessions.md#defaults-and-refusals): a new
+  // study of each kind is one more study, and each support and load placed
+  // on a face either is a load or leaves a refusal in words.
+  t = IM_REGISTER_TEST(engine, "defaults", "simulation_tools_place_or_refuse");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx);
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield(2);
+    for (const char* id : {"###tb_sim_add_static", "###tb_sim_add_modal",
+                           "###tb_sim_add_buckling", "###tb_sim_add_thermal",
+                           "###tb_sim_add_topology"}) {
+      const size_t before = Sim()->GetStudies().size();
+      ToolbarClick(ctx, id);
+      ctx->Yield();
+      IM_CHECK_EQ(Sim()->GetStudies().size(), before + 1);
+    }
+    const Body body = Doc()->GetBodies()[0];
+    const ElementRef top = FaceFacing(body, {0, 0, 1});
+    IM_CHECK_SILENT(!top.name.empty());
+    using A = fem::AnalysisType;
+    struct Try {
+      const char* tbId;
+      A on;
+    };
+    for (const Try& tr :
+         {Try{"###tb_sim_fixed", A::Static}, Try{"###tb_sim_pin", A::Static},
+          Try{"###tb_sim_contact", A::Static},
+          Try{"###tb_sim_roller", A::Static}, Try{"###tb_sim_held", A::Static},
+          Try{"###tb_sim_cylindrical", A::Static},
+          Try{"###tb_sim_force", A::Static},
+          Try{"###tb_sim_pressure", A::Static},
+          Try{"###tb_sim_torque", A::Static},
+          Try{"###tb_sim_remote", A::Static},
+          Try{"###tb_sim_temperature", A::Thermal},
+          Try{"###tb_sim_convection", A::Thermal},
+          Try{"###tb_sim_heat_flux", A::Thermal},
+          Try{"###tb_sim_heat_source", A::Thermal},
+          Try{"###tb_sim_keep", A::Topology}}) {
+      uint64_t sid = 0;
+      for (const fem::Study& s : Sim()->GetStudies())
+        if (s.type == tr.on)
+          sid = s.id;
+      IM_CHECK_SILENT(sid != 0);
+      SimFocusStudy(ctx, sid);
+      const fem::Study* s = Sim()->FindStudy(sid);
+      const size_t loads = s->loads.size() + s->keepFaces.size();
+      ToolbarClick(ctx, tr.tbId);
+      ctx->Yield();
+      IM_CHECK(s_App->simulation.tool != ui::SimulationState::Tool::None);
+      ui::SimulationApplyToFace(*s_App, 0, top);
+      ctx->Yield(2);
+      s = Sim()->FindStudy(sid);
+      const bool placed = s->loads.size() + s->keepFaces.size() > loads;
+      ctx->LogInfo("%s: %s", tr.tbId,
+                   placed ? "placed" : s_App->simulation.placeRefusal.c_str());
+      IM_CHECK(placed || !s_App->simulation.placeRefusal.empty());
+      ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::None);
+    }
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // The window in the states a person meets it in, each checked as it
+  // stands and, with --capture-dir, saved to look at: a new simulation with
+  // its one empty study; a study with several loads and two load cases; a
+  // solved part study with its field; an assembly's participants.
+  t = IM_REGISTER_TEST(engine, "sim", "the_window_in_four_states");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // Empty: one study, nothing on it.
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx);
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield(4);
+    SimWindowShot(ctx, "1-empty");
+
+    // Loads and cases: the cantilever's support and force, a pressure and
+    // a second force in a second case, the force's row in focus.
+    ui::ExitSimulation(*s_App);
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    const uint64_t cb = Doc()->GetBodies()[0].createdBy;
+    ToolbarClick(ctx, "###tb_sim_add_case");
+    ToolbarClick(ctx, "###tb_sim_add_case");
+    ToolbarClick(ctx, "###tb_sim_pressure");
+    s_App->simulation.pendingMagnitude = 0.05;
+    ui::SimulationApplyToFace(*s_App,
+                              ElementRef{cb, std::to_string(cb) + "/face3"});
+    ToolbarClick(ctx, "###tb_sim_force");
+    s_App->simulation.pendingCase = "Case 2";
+    ui::SimulationApplyToFace(*s_App,
+                              ElementRef{cb, std::to_string(cb) + "/face1"});
+    ctx->Yield(2);
+    const fem::Study* st = Sim()->FindStudy(sid);
+    IM_CHECK_SILENT(st != nullptr && st->loads.size() >= 3);
+    {
+      // From above and aside, so the faces each load is on show.
+      glm::dvec3 lo(0.0), hi(0.0);
+      Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+      const glm::vec3 mid = (lo + hi) * 0.5;
+      s_App->camera->StopAnimation();
+      s_App->camera->SetTarget(mid);
+      s_App->camera->SetUp(glm::vec3(0, 1, 0));
+      s_App->camera->SetPosition(mid + glm::vec3(-160.0f, 170.0f, 260.0f));
+    }
+    SimTreeClick(ctx, "###load_row_" + std::to_string(st->loads[1].id));
+    SimWindowShot(ctx, "2-loads-and-cases");
+    // The supports' drop-down open, with what is off saying why.
+    ctx->SetRef("//##DockHost");
+    ctx->ItemClick("**/sim_supports/###more");
+    SimWindowShot(ctx, "3-supports-dropdown");
+    ctx->PopupCloseAll();
+    ctx->Yield();
+
+#ifdef HAVE_NETGEN
+    // Solved: the field on the model and the result in the window.
+    ToolbarClick(ctx, "###tb_sim_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid));
+    s_App->simulation.field = ui::SimulationState::Field::VonMises;
+    s_App->simulation.deformScale = 50.0f;
+    SimWindowShot(ctx, "4-part-solved");
+#endif
+
+    // An assembly's participants: a meshed block on a rigid one, clamped.
+    ui::ExitSimulation(*s_App);
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    SteelBlock(ctx);
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Stack");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence lo;
+    lo.name = "Lower";
+    lo.partId = partId;
+    lo.fixed = true;
+    const uint64_t lower = s_App->assembly->AddOccurrence(lo);
+    Occurrence up;
+    up.name = "Upper";
+    up.partId = partId;
+    up.position = glm::vec3(0.0f, 0.0f, 16.0f);
+    const uint64_t upper = s_App->assembly->AddOccurrence(up);
+    ctx->Yield(3);
+    ToolbarClick(ctx, "###tb_asm_simulation");
+    ctx->Yield(3);
+    ui::FitCameraToDocument(*s_App);
+    ui::SetSimParticipantRole(*s_App, upper, fem::ParticipantRole::Meshed);
+    ui::SetSimParticipantRole(*s_App, lower, fem::ParticipantRole::Rigid);
+    ctx->Yield(2);
+    SimTreeClick(ctx, "###sim_part_" + std::to_string(lower));
+    ctx->ItemClick(
+        ("//###ToolWindow/###clamp_" + std::to_string(lower)).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(s_App->simulation.activeStudyId)->loads.size(),
+                (size_t)1);
+    SimWindowShot(ctx, "5-assembly-participants");
     ui::ExitSimulation(*s_App);
     ctx->Yield();
   };

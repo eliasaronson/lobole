@@ -159,7 +159,7 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t studyId = s_App->simulation.activeStudyId;
     if (kField) {
-      ctx->ItemClick("//###ToolWindow/###study_run");
+      ToolbarClick(ctx, "###tb_sim_run");
       IM_CHECK(WaitForStudyResult(ctx, studyId));
       s_App->simulation.field = ui::SimulationState::Field::VonMises;
       IM_CHECK(WaitFor(ctx, "the field on the model", [] {
@@ -783,8 +783,18 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       ui::EnterSimulation(*s_App);
       ctx->Yield(3);
       Seen sim;
-      CollectToolbarIcons(ctx, "//##DockHost", "simulation", sim);
-      IM_CHECK_GE((int)sim.size(), 4);
+      CollectToolbarIcons(
+          ctx, "//##DockHost", "simulation", sim,
+          {"tb_sim_add_static", "tb_sim_add_modal", "tb_sim_add_buckling",
+           "tb_sim_add_thermal", "tb_sim_add_topology", "tb_sim_fixed",
+           "tb_sim_pin", "tb_sim_contact", "tb_sim_roller", "tb_sim_held",
+           "tb_sim_cylindrical", "tb_sim_temperature", "tb_sim_convection",
+           "tb_sim_force", "tb_sim_pressure", "tb_sim_torque", "tb_sim_remote",
+           "tb_sim_heat_flux", "tb_sim_heat_source"});
+      for (const char* g : {"sim_study", "sim_supports", "sim_loads"})
+        CollectFlyout(ctx, (std::string(g) + "/###more").c_str(), "simulation",
+                      sim);
+      IM_CHECK_GE((int)sim.size(), 28);
       ui::ExitSimulation(*s_App);
       ctx->Yield(2);
     }

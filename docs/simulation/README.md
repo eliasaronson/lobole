@@ -268,8 +268,8 @@ plane or a datum-framed held support as one rectangular `*TRANSFORM`, a
 cylindrical support or a roller on a cylinder as a cylindrical one, a
 curved roller's and a merged node's frame each a transform of its own; the
 held directions as `*BOUNDARY`, and a prescribed displacement as a
-`*BOUNDARY` with its value inside the step. The Simulation window's Roller,
-Held and Cylindrical tools place them (Held with its directions ticked,
+`*BOUNDARY` with its value inside the step. The toolbar's Roller, Held and
+Cylindrical supports place them (Held with its directions ticked,
 each displacement typed and its frame chosen first); a roller draws as a
 hatch on wheels on each sample of its face, a held direction as an arrow
 along it with a bar across its foot. `tests/test_fem_supports.cpp` checks
@@ -719,8 +719,8 @@ or, on an imported part, remove them with Delete Face
 
 ### The mesh you look at
 
-Mesh is an action whose result is drawn. `mesh_study`, and **Mesh** in the
-Simulation window, mesh the study's bodies and keep the mesh for the session
+Mesh is an action whose result is drawn. `mesh_study`, and **Mesh** on the
+simulation toolbar, mesh the study's bodies and keep the mesh for the session
 (`ui::MeshReport`, `src/ui/TopoJob.h`, by tab and study: its elements and
 its [report](#the-mesh-report)). A part meshes off the frame as a `mesh`
 job; an assembly study's plan is made of its placed parts on the main
@@ -2543,10 +2543,11 @@ the textbook `(α ΔT − f_y/E)/(1 + H/E)` reads 7 % high.
 
 ### The GUI
 
-The Simulation window's **Analysis** combo has **Thermal**. On a thermal
-study the tools are **Temperature**, **Heat flux** (a total in W, or per
-area), **Convection** (film and ambient) and **Heat source** (click a face
-of the body that makes it), each with its fields empty until typed and
+**Add study** has **Thermal**, and a study's **Analysis** combo too. On a
+thermal study the toolbar's tools are **Temperature** and **Convection**
+(film and ambient) among the supports, and **Heat flux** (a total in W, or
+per area) and **Heat source** (click a face of the body that makes it)
+among the loads, each with its fields empty until typed and
 refusing the click, visibly and with nothing placed, until then; the
 results list each body's peak and lowest temperature, its peak flux, its
 margin (red when negative, the basis on hover), the heat through each load
@@ -2724,30 +2725,44 @@ simulation mode: the mode is on exactly while one is in front
 (`ResetActiveTabUiState` turns it on with the tab). The **Simulation**
 button of a part or an assembly (`part.simulation`, `assembly.simulation`:
 `ui::EnterSimulation`) opens that subject's first simulation, making one
-named "<subject> simulation" with a study where there is none, and Close
-(or Esc, `ExitSimulation`) goes back to the subject's tab. Its window is a
-later step ([the plan](../plans/simulation-document.md#6-the-window)); until
-then the tab runs the study panel, the Simulation tool window, the load and
-support tools with their glyphs, the mesh view, the legend, the markers and
-the results as a part's simulation mode did, on its own document
-(`ui::StudyHostOf` is the simulation, its subject read through
-`GeometryPart` and `Assembly`). The Model dock lists the studies under the
-subject's row (`###sim_subject`). On an assembly subject the roles are the
-document's, edited in the window's participants table as before
-(`ModifyStudy` hands an edit the document's table and keeps it there), and
-a picked face names the occurrence it is on (`ui::SimBodyOccurrence`). A
+named "<subject> simulation" with a study where there is none, and Exit
+(or Esc, `ExitSimulation`) goes back to the subject's tab. Its window
+([panels.md](../ui/panels.md#simulation-tab-the-model-panel)) is the tree of
+what the simulation holds in the Model dock, focused when the tab comes in
+front (`ui::DrawSimTree`, `src/ui/SimTree.cpp`: the subject, an assembly's
+participants with their roles, each study with its mesh, supports, loads,
+cases and result), the toolbar holding every tool
+([the simulation toolbar](../ui/panels.md#the-simulation-toolbar): add a
+study, mesh, the supports and the loads, check, run, the result's verbs,
+clear storage; the keymap's `simulation` context), and the shared tool
+window showing the armed tool or the row in focus
+([the tool window](../ui/panels.md#simulation-the-tool-window)). It runs
+on its own document (`ui::StudyHostOf` is the simulation, its subject read
+through `GeometryPart` and `Assembly`). On an assembly subject the roles are
+the document's, set from a participant's row (`ui::SetSimParticipantRole`;
+`ModifyStudy` still hands an edit the document's table and keeps it there),
+and a picked face names the occurrence it is on (`ui::SimBodyOccurrence`). A
 material is set on the part's own tab, its command stack, from the
 material check. The viewport draws its subject's bodies, read from the
 subject's tab whether it is in front or not -- a part's own bodies, or an
 assembly's leaf parts placed in it, without derived ghosts
 (`ui::SimSubjectBodies`, cached on `ui::SimRenderVersion`, which moves with
-the subject's stamp and, on an assembly, every part's). The Model panel, focused
-when the tab comes in front, is the study panel headed by the subject's row
-(`ui::DrawSimSubjectRow`, `src/ui/SimTree.cpp`), and the toolbar frames and
-measures (`###tb_sim_fit`, `###tb_sim_measure`; the keymap's
-`simulation` context). `ui::OpenSimulationFor` switches to a part's or an
-assembly's first simulation, or makes one; `ui::SimulationSlotFor` finds or
-makes one behind the tab in front (what `add_study` over RPC does).
+the subject's stamp and, on an assembly, every part's).
+`ui::OpenSimulationFor` switches to a part's or an assembly's first
+simulation, or makes one; `ui::SimulationSlotFor` finds or makes one
+behind the tab in front (what `add_study` over RPC does).
+
+### Clearing stored meshes and results
+
+**Clear stored meshes and results** (`sim.clear_storage`, the toolbar's
+broom, `ui::ClearSimStorage`) drops every stored result and mesh of the
+simulation in front (`SimDocument::ClearStorage`) and the session's
+pictures of them (its mesh reports, the field or mesh on show); the studies
+stay, and each is meshed and solved again on its next run. It asks first,
+counting what goes, and is not undone: what it drops is derived, and the
+results and meshes are shared with the undo snapshots, so an undo could
+not bring them back. The simulation reads unsaved, and the next save takes
+their files away. Disabled, saying so, when nothing is stored.
 
 Its undo is a snapshot stack, the job's pattern (`ui::SimHistory`): a
 snapshot shares the results and meshes, `ui::SimUndoGuard` records one step
@@ -2760,7 +2775,7 @@ current one, so an undo never reads as saved.
 The app runs a simulation's studies as it runs a part's
 (`src/ui/SimRunActions.{h,cpp}`), **keyed by the simulation tab's slot id**:
 a run started with another tab in front lands in that simulation, and is
-dropped, said in the log, when the tab is gone. The study panel and
+dropped, said in the log, when the tab is gone. The toolbar's Run and
 `run_study` run through these. A run's, a mesh's and a topology run's
 status are keyed by the simulation and the study
 (`GetStudyRunStatus(state, study, simSlot)`), since study ids are unique

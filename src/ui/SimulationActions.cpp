@@ -638,6 +638,9 @@ void EnterSimulation(AppState& state) {
   }
   if (!state.sim->FindStudy(state.simulation.activeStudyId))
     state.simulation.activeStudyId = state.sim->GetStudies().front().id;
+  if (state.simulation.focus.kind == SimulationState::Focus::Kind::None)
+    FocusSim(state, SimulationState::Focus::Kind::Study,
+             state.simulation.activeStudyId);
   state.focusPanel = "Model";
   state.focusPanelFrames = 60;
   state.gpu.syncedDocumentVersion = UINT64_MAX;
@@ -881,6 +884,268 @@ void SyncFieldRenderer(AppState& state) {
   sim.shown = std::move(shown);
   hideBodies(bodiesOf(rt));
   state.gpu.fieldBuiltKey = key;
+}
+
+// --- The toolbar's commands -------------------------------------------------
+
+SimulationState::Tool SimCommandTool(std::string_view command) {
+  using T = SimulationState::Tool;
+  static constexpr std::pair<std::string_view, T> kTools[] = {
+      {"sim.fixed", T::Fixed},
+      {"sim.pin", T::Pin},
+      {"sim.contact", T::Contact},
+      {"sim.roller", T::Roller},
+      {"sim.held", T::Held},
+      {"sim.cylindrical", T::Cylindrical},
+      {"sim.temperature", T::Temperature},
+      {"sim.convection", T::Convection},
+      {"sim.force", T::Force},
+      {"sim.pressure", T::Pressure},
+      {"sim.torque", T::Torque},
+      {"sim.remote", T::Remote},
+      {"sim.heat_flux", T::HeatFlux},
+      {"sim.heat_source", T::HeatSource},
+      {"sim.keep", T::Keep},
+      {"sim.probe", T::Probe}};
+  for (const auto& [id, tool] : kTools)
+    if (id == command)
+      return tool;
+  return T::None;
+}
+
+std::string SimCommandRefusal(AppState& state, std::string_view command) {
+  using T = SimulationState::Tool;
+  using A = fem::AnalysisType;
+  const StudyHost host = StudyHostOf(state);
+  if (!host || !state.simulation.IsActive())
+    return "Open a simulation tab first";
+  if (command.starts_with("sim.add_") && command != "sim.add_case")
+    return "";
+  if (command == "sim.toggle_labels")
+    return "";
+  if (command == "sim.clear_storage") {
+    const SimStorage stored = SimStorageOf(state);
+    return stored.results + stored.meshes == 0
+               ? "Nothing is stored: no result or mesh to clear"
+               : "";
+  }
+  const fem::Study* s = host.Find(state.simulation.activeStudyId);
+  if (s == nullptr)
+    return "Add a study first";
+  const A type = s->type;
+  const uint64_t slot = host.simSlotId;
+  const bool solving = GetStudyRunStatus(state, s->id, slot).running ||
+                       GetTopologyStatus(state, s->id, slot).running;
+  const bool meshing = GetMeshRunStatus(state, s->id, slot).running;
+  if (command == "sim.mesh") {
+    if (s->shapeFrom.study != 0)
+      return "A study of a topology result meshes its shape when it runs";
+    return meshing ? "Meshing: it is drawn when it lands" : "";
+  }
+  if (command == "sim.check")
+    return "";
+  if (command == "sim.run")
+    return solving ? "Solving: its progress, and Cancel, are in the result"
+                   : "";
+  if (command == "sim.add_case")
+    return type == A::Modal || type == A::Buckling
+               ? "A modal or buckling study has one load set: no load cases"
+               : "";
+  if (command == "sim.result")
+    return host.Results(s->id) == nullptr && !solving
+               ? "Run the study first: there is no result to show"
+               : "";
+  if (command == "sim.export_vtu") {
+    if (host.Results(s->id) == nullptr)
+      return "Run the study first: there is no result to export";
+    return FullStudyResult(state, s->id) == nullptr
+               ? "A stored result keeps its surface only: run the study again "
+                 "(Shift+Run) and export while the app is open"
+               : "";
+  }
+  switch (SimCommandTool(command)) {
+  case T::Fixed:
+    return type == A::Thermal
+               ? "A thermal study holds a face at a temperature: Temperature"
+               : "";
+  case T::Pin:
+    return type != A::Static ? "A pin is a static study's support" : "";
+  case T::Contact:
+    return type != A::Static
+               ? "A contact is a static study's support, solved on CalculiX"
+               : "";
+  case T::Roller:
+  case T::Held:
+  case T::Cylindrical:
+    return type == A::Topology || type == A::Thermal
+               ? "A static, modal or buckling study's support"
+               : "";
+  case T::Temperature:
+  case T::Convection:
+  case T::HeatFlux:
+  case T::HeatSource:
+    return type != A::Thermal ? "A thermal study's load" : "";
+  case T::Force:
+  case T::Pressure:
+  case T::Torque:
+  case T::Remote:
+    return type == A::Thermal
+               ? "A thermal study takes heat, not forces: Heat flux or Heat "
+                 "source"
+               : "";
+  case T::Keep:
+    return type != A::Topology ? "A topology study's: the face stays solid"
+                               : "";
+  case T::Probe:
+    if (type != A::Static || !host.GeometryPart())
+      return "Probing reads a static part study's stress on a face";
+    if (host.Results(s->id) == nullptr || StudyStale(state, s->id))
+      return "Run the study first: there is no stress to read";
+    return "";
+  case T::None:
+    break;
+  }
+  return "unknown simulation command";
+}
+
+void FocusSim(AppState& state, SimulationState::Focus::Kind kind,
+              uint64_t studyId, uint64_t id, int index) {
+  SimulationState& sim = state.simulation;
+  const StudyHost host = StudyHostOf(state);
+  if (studyId != 0 && host && host.Find(studyId) != nullptr &&
+      sim.activeStudyId != studyId) {
+    sim.activeStudyId = studyId;
+    // The displayed field belongs to the study that produced it.
+    sim.field = SimulationState::Field::None;
+    sim.activeMode = 0;
+    sim.activeCase = 0;
+  }
+  // The window shows the focus, not an armed tool: looking at something
+  // puts the tool down.
+  sim.tool = SimulationState::Tool::None;
+  // What is lit in the tree is what the window shows: a study or a load
+  // in focus keeps its own kind's selection (a Ctrl-click adds to it), and
+  // anything else lets go of both.
+  std::erase_if(state.selection.items, [kind](const SelectionItem& it) {
+    return (it.kind == SelectionItem::Kind::SimStudy &&
+            kind != SimulationState::Focus::Kind::Study) ||
+           (it.kind == SelectionItem::Kind::SimLoad &&
+            kind != SimulationState::Focus::Kind::Load);
+  });
+  sim.focus = {kind, studyId, id, index};
+  sim.selectedLoadId = kind == SimulationState::Focus::Kind::Load ? id : 0;
+}
+
+SimStorage SimStorageOf(AppState& state) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host)
+    return {};
+  return {host.sim->ResultIds().size(), host.sim->Meshes().size()};
+}
+
+SimStorage ClearSimStorage(AppState& state) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host)
+    return {};
+  const auto [meshes, results] = host.sim->ClearStorage();
+  // The session's own pictures of them: the mesh reports this tab drew,
+  // and whatever field or mesh was on show.
+  for (auto it = state.meshReports.begin(); it != state.meshReports.end();)
+    it = it->first.first == host.simSlotId ? state.meshReports.erase(it)
+                                           : std::next(it);
+  state.meshReportEpoch++;
+  SimulationState& sim = state.simulation;
+  sim.field = SimulationState::Field::None;
+  sim.meshView = SimulationState::MeshView::Off;
+  sim.check.reset();
+  sim.reusedStudy = 0;
+  LOG_INFO("simulation: cleared {} stored result(s) and {} mesh(es)", results,
+           meshes);
+  return {results, meshes};
+}
+
+uint64_t AddSimStudy(AppState& state, fem::AnalysisType type) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host)
+    return 0;
+  const char* word = type == fem::AnalysisType::Modal      ? "Modal"
+                     : type == fem::AnalysisType::Buckling ? "Buckling"
+                     : type == fem::AnalysisType::Thermal  ? "Thermal"
+                     : type == fem::AnalysisType::Topology ? "Topology"
+                                                           : "Static";
+  // "Static 2": numbered past the studies of its kind, and never a name
+  // the simulation already has.
+  const auto taken = [&](const std::string& name) {
+    for (const fem::Study& o : host.Studies())
+      if (o.name == name)
+        return true;
+    return false;
+  };
+  std::string name;
+  for (int n = 1;; n++) {
+    name = std::string(word) + " " + std::to_string(n);
+    if (!taken(name))
+      break;
+  }
+  uint64_t id = 0;
+  {
+    SimUndoGuard guard(state);
+    id = host.sim->AddStudy(name).id;
+    fem::Study st = *host.sim->FindStudy(id);
+    st.type = type;
+    if (type == fem::AnalysisType::Buckling)
+      st.numModes = fem::kBucklingFactorsDefault;
+    host.sim->ReplaceStudy(std::move(st));
+  }
+  state.simulation.tool = SimulationState::Tool::None;
+  FocusSim(state, SimulationState::Focus::Kind::Study, id);
+  return id;
+}
+
+void MeshActiveStudy(AppState& state) {
+  const StudyHost host = StudyHostOf(state);
+  SimulationState& sim = state.simulation;
+  const fem::Study* s = host ? host.Find(sim.activeStudyId) : nullptr;
+  if (s == nullptr)
+    return;
+  const uint64_t id = s->id;
+  std::string err;
+  // Off the frame; the report lands in the tool window.
+  if (!StartSimMeshRun(state, host.simSlotId, id, &err)) {
+    LOG_WARN("mesh study failed: {}", err);
+    return;
+  }
+  if (sim.meshView == SimulationState::MeshView::Off)
+    sim.meshView = SimulationState::MeshView::Edges;
+  sim.field = SimulationState::Field::None;
+  FocusSim(state, SimulationState::Focus::Kind::Mesh, id);
+}
+
+void AddActiveLoadCase(AppState& state) {
+  const StudyHost host = StudyHostOf(state);
+  SimulationState& sim = state.simulation;
+  const fem::Study* s = host ? host.Find(sim.activeStudyId) : nullptr;
+  if (s == nullptr)
+    return;
+  std::string name;
+  for (int n = static_cast<int>(s->loadCases.size()) + 1;; ++n) {
+    name = "Case " + std::to_string(n);
+    if (s->FindLoadCase(name) < 0)
+      break;
+  }
+  const uint64_t id = s->id;
+  ModifyStudy(state, id, "Add load case", [&](fem::Study& cs) {
+    const bool first = cs.loadCases.empty();
+    cs.loadCases.push_back({name, ExprValue{1.0}});
+    if (first)
+      for (fem::Load& l : cs.loads)
+        if (!fem::IsSupport(l.type))
+          l.loadCase = name;
+  });
+  sim.pendingCase = name;
+  const fem::Study* now = host.Find(id);
+  FocusSim(state, SimulationState::Focus::Kind::Case, id, 0,
+           now ? static_cast<int>(now->loadCases.size()) - 1 : -1);
 }
 
 } // namespace ui

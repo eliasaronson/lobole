@@ -197,6 +197,16 @@ ListRowResult ListRow(const ListRowSpec& row) {
   ImGui::AlignTextToFramePadding();
   ImGui::TextColored(row.glyphColor.w > 0.0f ? row.glyphColor : dim, "%s",
                      row.glyph != nullptr ? row.glyph : "");
+  if (row.dotColor.w > 0.0f) {
+    // On the glyph's lower right, ringed in the window's colour so it
+    // reads against the glyph it overlaps.
+    const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+    const float r = std::max(2.5f, fs * 0.2f);
+    const ImVec2 c(std::max(lo.x + r, hi.x - r * 0.2f), hi.y - r * 1.1f);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddCircleFilled(c, r + 1.5f, ImGui::GetColorU32(ImGuiCol_WindowBg));
+    dl->AddCircleFilled(c, r, ImGui::GetColorU32(row.dotColor));
+  }
   // SameLine's offset is from the window's edge and ignores ImGui::Indent, so
   // an indented row (a flexible unit's parts under it) drew its label under
   // its own glyph. The indent is added back here.

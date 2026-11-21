@@ -189,6 +189,30 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "part.sheet_jog",
       "part.sheet_corner_relief",
       "part.sheet_normal_cut",
+      // The simulation toolbar's drop-downs (docs/ui/panels.md
+      // #the-simulation-toolbar): a study is added a few times per
+      // simulation, and the less common supports and loads sit behind the
+      // three that have digits. The rest are verbs done once per study.
+      "sim.add_static",
+      "sim.add_modal",
+      "sim.add_buckling",
+      "sim.add_thermal",
+      "sim.add_topology",
+      "sim.pin",
+      "sim.contact",
+      "sim.roller",
+      "sim.held",
+      "sim.cylindrical",
+      "sim.temperature",
+      "sim.convection",
+      "sim.torque",
+      "sim.remote",
+      "sim.heat_flux",
+      "sim.heat_source",
+      "sim.add_case",
+      "sim.keep",
+      "sim.export_vtu",
+      "sim.clear_storage",
   };
   for (const keymap::Binding& b : keymap::Defaults()) {
     INFO(b.id);

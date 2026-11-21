@@ -857,15 +857,16 @@ void AdoptStoredSimResults(AppState& state) {
   }
 }
 
-bool StartFrontSimRun(AppState& state, uint64_t studyId, std::string* error) {
+bool StartFrontSimRun(AppState& state, uint64_t studyId, std::string* error,
+                      JobStart* jobStart) {
   const uint64_t slot = ActiveSimSlotId(state);
   fem::SimDocument* sim = SimBySlotId(state, slot);
   const fem::Study* s = sim ? sim->FindStudy(studyId) : nullptr;
   if (s == nullptr)
     return Fail(error, "no such study on the simulation in front");
   return s->type == fem::AnalysisType::Topology
-             ? StartSimTopologyRun(state, slot, studyId, error)
-             : StartSimStudyRun(state, slot, studyId, error);
+             ? StartSimTopologyRun(state, slot, studyId, error, jobStart)
+             : StartSimStudyRun(state, slot, studyId, error, jobStart);
 }
 
 } // namespace ui

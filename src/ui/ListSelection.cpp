@@ -4,6 +4,7 @@
 #include "ui/ListSelection.h"
 
 #include "core/Command.h"
+#include "core/fem/SimDocument.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamPanel.h"
 #include "ui/DocumentSlots.h" // JobUndoGuard
@@ -189,6 +190,47 @@ int DeleteSelection(AppState& state) {
     // A tool still cut with stays, and says why where Delete was pressed.
     if (!refused.empty())
       state.camRefusal = refused;
+    return removed;
+  }
+  if (state.sim && state.simulation.IsActive()) {
+    // The simulation tree's studies and loads, in ONE undo step: a load of
+    // a study that is going goes with it.
+    const std::vector<uint64_t> loads =
+        SelectedIds(state, SelectionItem::Kind::SimLoad);
+    const std::vector<uint64_t> studies =
+        SelectedIds(state, SelectionItem::Kind::SimStudy);
+    if (loads.empty() && studies.empty())
+      return 0;
+    int removed = 0;
+    {
+      SimUndoGuard guard(state);
+      for (const fem::Study& s :
+           std::vector<fem::Study>(state.sim->GetStudies().begin(),
+                                   state.sim->GetStudies().end())) {
+        fem::Study edited = s;
+        const size_t before = edited.loads.size();
+        std::erase_if(edited.loads, [&](const fem::Load& l) {
+          return std::find(loads.begin(), loads.end(), l.id) != loads.end();
+        });
+        if (edited.loads.size() == before)
+          continue;
+        removed += static_cast<int>(before - edited.loads.size());
+        state.sim->ReplaceStudy(std::move(edited));
+      }
+      for (const uint64_t id : studies)
+        if (state.sim->RemoveStudy(id))
+          removed++;
+    }
+    EraseKind(state.selection, SelectionItem::Kind::SimLoad);
+    EraseKind(state.selection, SelectionItem::Kind::SimStudy);
+    SimulationState& sim = state.simulation;
+    if (state.sim->FindStudy(sim.activeStudyId) == nullptr)
+      sim.activeStudyId = state.sim->GetStudies().empty()
+                              ? 0
+                              : state.sim->GetStudies().front().id;
+    // What the tool window showed may be what went.
+    sim.focus = {};
+    sim.selectedLoadId = 0;
     return removed;
   }
   return 0;

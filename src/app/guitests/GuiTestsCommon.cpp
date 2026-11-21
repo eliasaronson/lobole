@@ -324,10 +324,15 @@ void ToolbarClick(ImGuiTestContext* ctx, const char* tbId) {
                          ImGuiTestOpFlags_NoError)
                .ID != 0;
   };
-  for (const char* group : {"sheet", "direct"}) {
+  for (const char* group :
+       {"sheet", "direct", "sim_study", "sim_supports", "sim_loads"}) {
     if (showing())
       break;
-    ctx->ItemClick((std::string("**/") + group + "/###more").c_str());
+    // Only the groups of the bar in front (a part's, a simulation's).
+    const std::string caret = std::string("**/") + group + "/###more";
+    if (ctx->ItemInfo(caret.c_str(), ImGuiTestOpFlags_NoError).ID == 0)
+      continue;
+    ctx->ItemClick(caret.c_str());
     ctx->Yield();
     if (!showing()) {
       ctx->PopupCloseAll(); // not in this group (Esc would drop the selection)
@@ -339,6 +344,17 @@ void ToolbarClick(ImGuiTestContext* ctx, const char* tbId) {
   // Leave the ref on the menu bar, matching the old Create-menu helper: several
   // callers follow up with MenuClick("Edit/Undo") etc. and rely on that ref.
   ctx->SetRef("//##MainMenuBar");
+}
+
+void SimTreeClick(ImGuiTestContext* ctx, const std::string& rowId) {
+  ctx->ItemClick(("//###Model/**/" + rowId).c_str());
+  ctx->Yield();
+}
+
+void SimFocusStudy(ImGuiTestContext* ctx, uint64_t studyId) {
+  if (studyId == 0)
+    studyId = s_App->simulation.activeStudyId;
+  SimTreeClick(ctx, "###study_sel_" + std::to_string(studyId));
 }
 
 // Most tests want a committed feature: create from the toolbar, then accept the
@@ -449,7 +465,7 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   // Fixed on the x=0 end face, looking straight at it.
   s_App->camera->SetPosition(mid - glm::vec3(400.0f, 0.0f, 0.0f));
   ctx->Yield(3);
-  ctx->ItemClick("//###ToolWindow/###sim_bc_fixed");
+  ToolbarClick(ctx, "###tb_sim_fixed");
   ctx->Yield();
   ctx->MouseMoveToPos(WorldToWindow(glm::vec3(lo.x, mid.y, mid.z)));
   ctx->Yield();
@@ -457,7 +473,7 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   ctx->Yield(2);
 
   // 100 N spread over the top face, from above.
-  ctx->ItemClick("//###ToolWindow/###sim_bc_force");
+  ToolbarClick(ctx, "###tb_sim_force");
   ctx->Yield();
   ctx->ItemInputValue("//###ToolWindow/###sim_magnitude", "100");
   ctx->Yield();
@@ -477,6 +493,8 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   IM_CHECK(force.type == fem::LoadType::Force);
   IM_CHECK(std::abs(force.direction.y + 1.0) < 1e-6);
   IM_CHECK(std::abs(force.magnitude - 100.0) < 1e-9);
+  // Put the force down: the tool window shows the study's settings again.
+  SimFocusStudy(ctx);
 }
 
 bool WaitFor(ImGuiTestContext* ctx, const char* what,
