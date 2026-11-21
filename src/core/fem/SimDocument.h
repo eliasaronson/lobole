@@ -113,8 +113,13 @@ public:
   // A run's write access to a study's transient fields (its error, its
   // evaluated expressions); an edit is ReplaceStudy.
   Study* StudyForRun(uint64_t id);
-  // Appends a study with a fresh id (`name` empty: "Study N").
-  Study& AddStudy(const std::string& name = "");
+  // Appends a study of `type` with a fresh id, named `name` or, with it
+  // empty, by its kind numbered past the names it would repeat ("Static 1",
+  // "Modal 2"): what the toolbar, the Simulation button and add_study all
+  // name a new study. A buckling study takes its own default number of
+  // factors.
+  Study& AddStudy(const std::string& name = "",
+                  AnalysisType type = AnalysisType::Static);
   bool RemoveStudy(uint64_t id);
   // Appends a fully formed study, keeping its ids (load, migration).
   void RestoreStudy(Study study);

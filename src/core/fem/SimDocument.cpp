@@ -7,6 +7,7 @@
 #include "core/fem/FemSolver.h" // StudyRuntime, KeepWhatIsRead
 
 #include <algorithm>
+#include <cctype>
 #include <set>
 
 namespace fem {
@@ -106,11 +107,28 @@ Study* SimDocument::StudyForRun(uint64_t id) {
   return nullptr;
 }
 
-Study& SimDocument::AddStudy(const std::string& name) {
+Study& SimDocument::AddStudy(const std::string& name, AnalysisType type) {
   Study study;
   study.id = AllocateId();
-  study.name =
-      name.empty() ? ("Study " + std::to_string(m_studies.size() + 1)) : name;
+  study.type = type;
+  if (type == AnalysisType::Buckling)
+    study.numModes = kBucklingFactorsDefault;
+  study.name = name;
+  if (study.name.empty()) {
+    // "Static 2": numbered past the names the simulation already has.
+    std::string word = AnalysisTypeToString(type);
+    word[0] =
+        static_cast<char>(std::toupper(static_cast<unsigned char>(word[0])));
+    const auto taken = [this](const std::string& n) {
+      return std::any_of(m_studies.begin(), m_studies.end(),
+                         [&](const Study& o) { return o.name == n; });
+    };
+    for (int n = 1;; n++) {
+      study.name = word + " " + std::to_string(n);
+      if (!taken(study.name))
+        break;
+    }
+  }
   m_studies.push_back(std::move(study));
   Touch(m_studies.back().id);
   return m_studies.back();

@@ -43,7 +43,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -754,16 +753,7 @@ struct Host {
     return part ? part->Symbols() : state.projectSymbols;
   }
   const fem::Study& Add(const std::string& name, fem::AnalysisType type) {
-    const uint64_t id = sim->AddStudy(name).id;
-    if (type != sim->FindStudy(id)->type) {
-      fem::Study typed = *sim->FindStudy(id);
-      typed.type = type;
-      // A buckling study takes its own default number of factors.
-      if (type == fem::AnalysisType::Buckling)
-        typed.numModes = fem::kBucklingFactorsDefault;
-      sim->ReplaceStudy(std::move(typed));
-    }
-    return *sim->FindStudy(id);
+    return sim->AddStudy(name, type);
   }
   void Remove(uint64_t id) {
     Require(id);
@@ -805,23 +795,29 @@ struct Host {
   // by index, an assembly's meshed occurrence's placed body by index.
   std::string BodyMaterial(const fem::Study& s, int bodyIndex) {
     (void)s;
-    if (part) {
-      const auto& bodies = part->GetBodies();
-      return bodyIndex >= 0 && bodyIndex < (int)bodies.size()
-                 ? bodies[bodyIndex].material
-                 : std::string{};
-    }
-    for (const fem::Participant& pt : sim->Roles())
-      if (pt.role == fem::ParticipantRole::Meshed) {
-        const fem::SimContext ctx = ui::SimContextFor(state, *sim);
-        const auto bodies = ctx.placedBodies ? ctx.placedBodies(pt.occurrenceId)
-                                             : std::vector<Body>{};
-        return bodyIndex >= 0 && bodyIndex < (int)bodies.size()
-                   ? bodies[bodyIndex].material
-                   : std::string{};
-      }
-    return {};
+    const std::vector<Body>& bodies =
+        part != nullptr ? part->GetBodies() : MeshedBodies();
+    return bodyIndex >= 0 && bodyIndex < (int)bodies.size()
+               ? bodies[bodyIndex].material
+               : std::string{};
   }
+  // On an assembly, the meshed participant's placed bodies, walked once a
+  // call: the subject's context flattens the whole assembly, and a result
+  // asks a material per body.
+  const std::vector<Body>& MeshedBodies() {
+    if (!meshedBodies) {
+      meshedBodies.emplace();
+      for (const fem::Participant& pt : sim->Roles())
+        if (pt.role == fem::ParticipantRole::Meshed) {
+          const fem::SimContext ctx = ui::SimContextFor(state, *sim);
+          if (ctx.placedBodies)
+            *meshedBodies = ctx.placedBodies(pt.occurrenceId);
+          break;
+        }
+    }
+    return *meshedBodies;
+  }
+  std::optional<std::vector<Body>> meshedBodies;
   // An occurrence of the assembly, by id or by name.
   const Occurrence& OccurrenceOf(const json& v, const char* what) {
     return OccurrenceIn(asmDoc, v, what);

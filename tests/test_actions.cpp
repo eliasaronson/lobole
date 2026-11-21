@@ -43,6 +43,7 @@
 #include "ui/PrimitiveTool.h" // SnapPrimitiveAxis
 #include "ui/ProjectActions.h"
 #include "ui/SimRunActions.h"
+#include "ui/SimTree.h"
 #include "ui/SketchInteraction.h" // WorldToScreen
 #include "ui/StudyPanel.h"        // SimulationLoadLabel
 #include "ui/ViewActions.h"
@@ -3337,6 +3338,12 @@ TEST_CASE("Simulation glyph labels carry a value and a unit", "[sim][ui]") {
   CHECK(ui::SimulationLoadLabel(l) == "0.5 MPa");
   l.magnitude = 0.02;
   CHECK(ui::SimulationLoadLabel(l) == "20 kPa");
+  // The tree's row says it the same way as the viewport's label.
+  CHECK(ui::SimLoadTail(l) == "20 kPa");
+  l.type = fem::LoadType::Force;
+  l.magnitude = 1200.0;
+  CHECK(ui::SimLoadTail(l) == "1.2 kN");
+  l.type = fem::LoadType::Pressure;
   l.magnitude = 0.0;
   CHECK(ui::SimulationLoadLabel(l) == "0 MPa");
   CHECK(ui::SimulationGravityLabel(glm::dvec3(0.0, 0.0, -9.81)) ==

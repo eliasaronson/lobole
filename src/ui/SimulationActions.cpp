@@ -1072,34 +1072,10 @@ uint64_t AddSimStudy(AppState& state, fem::AnalysisType type) {
   const StudyHost host = StudyHostOf(state);
   if (!host)
     return 0;
-  const char* word = type == fem::AnalysisType::Modal      ? "Modal"
-                     : type == fem::AnalysisType::Buckling ? "Buckling"
-                     : type == fem::AnalysisType::Thermal  ? "Thermal"
-                     : type == fem::AnalysisType::Topology ? "Topology"
-                                                           : "Static";
-  // "Static 2": numbered past the studies of its kind, and never a name
-  // the simulation already has.
-  const auto taken = [&](const std::string& name) {
-    for (const fem::Study& o : host.Studies())
-      if (o.name == name)
-        return true;
-    return false;
-  };
-  std::string name;
-  for (int n = 1;; n++) {
-    name = std::string(word) + " " + std::to_string(n);
-    if (!taken(name))
-      break;
-  }
   uint64_t id = 0;
   {
     SimUndoGuard guard(state);
-    id = host.sim->AddStudy(name).id;
-    fem::Study st = *host.sim->FindStudy(id);
-    st.type = type;
-    if (type == fem::AnalysisType::Buckling)
-      st.numModes = fem::kBucklingFactorsDefault;
-    host.sim->ReplaceStudy(std::move(st));
+    id = host.sim->AddStudy("", type).id; // "Static 2": named by its kind
   }
   state.simulation.tool = SimulationState::Tool::None;
   FocusSim(state, SimulationState::Focus::Kind::Study, id);

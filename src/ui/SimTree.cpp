@@ -53,15 +53,6 @@ struct RowState {
   std::string word;
 };
 
-std::string Torque(double nmm) {
-  char buf[64];
-  if (std::abs(nmm) >= 10000.0)
-    std::snprintf(buf, sizeof(buf), "%.3g N\xC2\xB7m", nmm / 1000.0);
-  else
-    std::snprintf(buf, sizeof(buf), "%.3g N\xC2\xB7mm", nmm);
-  return buf;
-}
-
 // Where a study stands: solving, failed, not run, stale or solved.
 RowState StudyState(AppState& state, const StudyHost& host,
                     const fem::Study& s) {
@@ -658,16 +649,10 @@ std::string SimLoadTail(const fem::Load& l) {
                   l.friction);
     return buf;
   }
-  std::string tail;
-  if (l.type == fem::LoadType::Torque) {
-    tail = Torque(l.magnitude.value);
-  } else {
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%.4g%s", l.magnitude.value,
-                  l.type == fem::LoadType::Pressure ? " MPa" : " N");
-    tail = buf;
-  }
-  return tail; // its case is the case row's, and its tooltip's
+  // The value as the viewport's label beside its glyph says it ("50 kPa",
+  // "1.2 kN"): one formatter, so the tree and the picture agree. Its case
+  // is the case row's, and its tooltip's.
+  return SimulationLoadLabel(l);
 }
 
 void DrawSimTree(AppState& state) {

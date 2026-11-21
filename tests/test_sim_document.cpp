@@ -274,6 +274,22 @@ TEST_CASE("A simulation's study with a mesh size of its own does not share "
   CHECK(sim.Effective(*sim.FindStudy(mine)).meshSize.value == 6.0);
 }
 
+TEST_CASE("A new study is named by its kind, numbered past the names taken",
+          "[fem][simdoc]") {
+  fem::SimDocument sim = PartSim();
+  CHECK(sim.AddStudy("").name == "Static 1");
+  CHECK(sim.AddStudy("").name == "Static 2");
+  const fem::Study& modal = sim.AddStudy("", fem::AnalysisType::Modal);
+  CHECK(modal.name == "Modal 1");
+  CHECK(modal.type == fem::AnalysisType::Modal);
+  const fem::Study& buckle = sim.AddStudy("", fem::AnalysisType::Buckling);
+  CHECK(buckle.name == "Buckling 1");
+  CHECK(buckle.numModes == fem::kBucklingFactorsDefault);
+  // A name typed by hand that a kind name would repeat is skipped.
+  sim.AddStudy("Thermal 1", fem::AnalysisType::Thermal);
+  CHECK(sim.AddStudy("", fem::AnalysisType::Thermal).name == "Thermal 2");
+}
+
 TEST_CASE("Clearing a simulation's storage drops its meshes and results",
           "[fem][simdoc]") {
   fem::SimDocument sim = PartSim();

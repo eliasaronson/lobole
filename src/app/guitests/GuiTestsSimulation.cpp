@@ -114,6 +114,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     const fem::Study* study = Sim()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
+    // The button's first study is named as the toolbar names one.
+    IM_CHECK_STR_EQ(study->name.c_str(), "Static 1");
     // Straight down in the world frame — a hand-written axis here once
     // sagged the part sideways and bent it about the wrong axis.
     IM_CHECK(glm::length(study->gravity - conv::kGravity) < 1e-9);
