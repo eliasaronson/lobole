@@ -1195,8 +1195,10 @@ does not.
 open face before the offset builder runs, and says the wall that fits. A
 wall it passes that the builder then refuses -- an inner round smaller than
 the wall, a rib thinner than two walls -- is searched the same way, on
-`thickness`: inside the Shell's one deadline (`directedit::BuilderBudgetS`),
-the first guess half the body's thinnest wall (`ThinnestWall`), then four
+`thickness`, in at most three times the CPU the wall asked cost, and not at
+all when that took more than 4 s (inside the Shell's whole budget,
+`directedit::BuilderBudgetS`, a 200-face gear wheel's refusals took over a
+minute each in the action matrix): the first guess half the body's thinnest wall (`ThinnestWall`), then four
 steps (`fit::kShellSearchSteps`), since an offset costs seconds where a blend
 costs milliseconds. The guess is not a bound: where it builds the search
 goes on above it. A candidate builds when `ShellOnce` gives a solid every

@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <optional>
 #include <string>
 
@@ -162,6 +163,11 @@ std::string WithWallThatFits(std::string why, const fit::Answer& a) {
     return why + "; the largest wall that fits is " + fit::Mm(*a.fits) + " mm";
   return why + "; no wall builds, down to " + fit::Mm(a.fails) + " mm";
 }
+
+// The wall search's share of a Shell's time: three times what the wall asked
+// cost, and none past a few seconds of it.
+constexpr double kShellSearchShare = 3.0;
+constexpr double kShellSearchMaxDrawS = 4.0;
 
 } // namespace
 
@@ -354,6 +360,7 @@ bool ShellFeature::Execute(RegenContext& ctx) {
       directedit::MakeDeadline(budget);
   std::string error;
   bool gaveUp = false;
+  const std::clock_t drawStart = std::clock();
   for (int attempt = 0; attempt < attempts; attempt++) {
     BRepBuilderAPI_Copy copy(shape, /*copyGeom=*/false, /*copyMesh=*/false);
     TopTools_ListOfShape remove;
@@ -382,7 +389,13 @@ bool ShellFeature::Execute(RegenContext& ctx) {
     }
     error = std::move(why);
   }
-  if (gaveUp) {
+  // What the wall asked cost: the search may spend three times it, and none
+  // when it took more than a few seconds. Inside the whole budget a body of
+  // 200 faces searched for minutes, and every refusal of it paid that
+  // (the action matrix's gear wheel, 60 s a shell and over).
+  const double drawS =
+      double(std::clock() - drawStart) / static_cast<double>(CLOCKS_PER_SEC);
+  if (gaveUp || drawS > kShellSearchMaxDrawS) {
     SetError(error);
     LOG_ERROR("ShellFeature '{}': {} ({} attempts)", m_name, error, attempts);
     return false;
@@ -395,6 +408,8 @@ bool ShellFeature::Execute(RegenContext& ctx) {
   std::optional<fit::Answer> answer =
       fitMemo.For(body->shape, removeIdx, fit::kShellOp, asked);
   if (!answer) {
+    const Handle(Message_ProgressIndicator) searchDeadline =
+        directedit::MakeDeadline(std::max(0.5, kShellSearchShare * drawS));
     std::optional<fit::Bound> guess;
     if (const auto thin = ThinnestWall(*body))
       guess = fit::Bound{0.5 * *thin, {}, {}, fit::BoundKind::Width};
@@ -408,14 +423,17 @@ bool ShellFeature::Execute(RegenContext& ctx) {
             remove.Append(copy.ModifiedShape(f));
           std::optional<CADShape> result;
           ElementMap map;
-          const bool built = ShellOnce(*body, copy.Shape(), remove, wall,
-                                       deadline->Start(), GetId(), result, map)
-                                 .empty();
-          if (!built && directedit::Expired(deadline))
+          const bool built =
+              ShellOnce(*body, copy.Shape(), remove, wall,
+                        searchDeadline->Start(), GetId(), result, map)
+                  .empty();
+          if (!built && directedit::Expired(searchDeadline))
             throw fit::Stopped{};
           return built;
         },
-        [&] { return heavy::Cancelled() || directedit::Expired(deadline); },
+        [&] {
+          return heavy::Cancelled() || directedit::Expired(searchDeadline);
+        },
         {.steps = fit::kShellSearchSteps, .seedIsBound = false});
     fitMemo = fit::Memo{body->shape, removeIdx, fit::kShellOp, *answer};
   }
