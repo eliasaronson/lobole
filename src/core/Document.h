@@ -519,8 +519,8 @@ public:
   const std::vector<Configuration>& GetConfigurations() const {
     return m_configurations;
   }
-  // Read-only for the reason GetStudies is: edit one with
-  // ReplaceConfiguration, which stamps.
+  // Read-only: an edit through a mutable reference would never reach
+  // SaveStamp(). Edit one with ReplaceConfiguration, which stamps.
   const Configuration* FindConfiguration(uint64_t id) const;
 
   // Appends a configuration with a doc-unique id (auto-named "Configuration N"

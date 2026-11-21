@@ -64,19 +64,19 @@ pin support is refused: a topology study's supports are fixed
 A topology result **is saved with the project**, as every study result is
 ([studies as jobs](../simulation/README.md#studies-as-jobs)): it costs
 minutes, and it is tied to a mesh that Netgen does not reproduce across
-versions or machines, so re-running would not give it back. It is written as
-`studies/<id>-<slug>.result.json` beside the study (compliance history,
+versions or machines, so re-running would not give it back. It is written in
+its simulation as `results/<study id>.result.json` (compliance history,
 iterations, achieved volume fraction, `input_hash`, the hash of what
 produced it, and, since v152, each case's weight and compliance, what the
 keep-outs took and the islands removed) with its arrays -- the whole mesh,
-its boundary and the per-tet density, as float -- in
-`<id>-<slug>.result.bin` since v154
-([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps)),
-and loaded into
-the same `StudyRuntime` slot FEM results use. On load it is stamped with
-the settled document version, so it reads current until the part changes --
-unless its saved hash no longer matches the reopened part, when it reads
-stale; a stale result is still displayed, badged. A run of the same inputs
+its boundary and the per-tet density, as float -- in `.result.bin`
+([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps),
+[how a simulation is saved](../simulation/README.md#how-a-simulation-is-saved);
+before vNEXT a part kept it as `studies/<id>-<slug>.result.json` and
+`.result.bin`), and loaded into the same `StudyRuntime` slot FEM results
+use. On open it is restamped by its inputs, so it reads current until the
+part changes -- unless its saved hash no longer matches the reopened part,
+when it reads stale; a stale result is still displayed, badged. A run of the same inputs
 after a reopen is answered from it, `reused: true`, nothing computed
 ([studies as jobs](../simulation/README.md#studies-as-jobs)). The solver
 name and wall time are not saved. Goldens use a hand-made mesh, never Netgen
@@ -304,8 +304,8 @@ reads) and builds a `fem::TopoInput` of plain data;
 the worker runs `TopologyOptimize` with no document access, publishing
 iteration, compliance, largest change and volume fraction through atomics,
 and checking a cancel flag each iteration. The result is stored at the one
-join point on the main thread (`ui::StartTopologyRun`,
-`src/ui/SimulationActions.cpp`). Cancelling keeps the best densities so far
+join point on the main thread (`ui::StartSimTopologyRun`,
+`src/ui/SimRunActions.cpp`). Cancelling keeps the best densities so far
 as a valid result marked cancelled; a cancelled result is never reused for
 a later run. The run is a job with an id, cancelled with the RPC connection
 that started it unless `outlive_client`
@@ -475,7 +475,7 @@ Below a few hundred tets the CPU is as fast. The yoke's 244 s is the run that
 fell back (7313 s); its GPU run is 80 s, the same compliance history.
 
 The GPU solver is linked into `designer_app`, the library the run is
-started from (`ui::StartTopologyRun`); for a month it was linked into the
+started from (`ui::StartSimTopologyRun`); for a month it was linked into the
 `designer` executable only, where the define never reached that file, and
 every run went to the CPU. `ui::TopologyGpuBuiltIn` and a test in
 `tests/test_actions.cpp` hold the library to the build option.

@@ -5,15 +5,6 @@ you can see, and results and meshes kept with the project.
 
 ## The problem
 
-- **A study lives inside the thing it analyses, twice over.** A part study
-  is in `Document::GetStudies()`, an assembly study in
-  `AssemblyDocument::GetStudies()`, built by two planners
-  (`fem::PlanStudy`, `fem::PlanAssemblyStudy`) with different abilities: a
-  pin and a thermal study work on a part only, a topology run and an async
-  mesh are refused on an assembly, and contact with a neighbour exists on
-  an assembly only. Editing a load moves the part's save stamp. A study of
-  one part held in two ways, or of the same part in two configurations, is
-  two unrelated studies that mesh twice.
 - **The mesh is not a thing.** The GUI goes from a mesh-size number to Run;
   `mesh_study` answers counts and the worst quality over RPC and nothing is
   drawn. Nobody sees the elements, a sliver, a thin wall meshed one element
@@ -42,51 +33,9 @@ you can see, and results and meshes kept with the project.
 
 ### 1. The document
 
-A fifth document kind, `fem::SimDocument` (`ui::DocKind::Simulation`, a tab
-of its own), shaped like `cam::JobDocument`:
-
-```
-SimDocument
-  subject        a part or an assembly, by stable id, and its configuration
-                 (0 = the active one): a reference, never a copy
-  geometry       analysis-only changes: suppressed features (per part),
-                 symmetry cuts
-  roles[]        on an assembly: the participants table (meshed, bonded,
-                 rigid, contact, ignored), as fem::Participant is now
-  mesh           size, per-face and per-participant refinements, the
-                 stored mesh and its report
-  studies[]      fem::Study: type, loads and supports, cases, solver,
-                 converge, nonlinear, thermal -- without the mesh fields
-  results        per study, as now
-```
-
-- One planner. A part subject is an assembly of one meshed participant, so
-  `PlanStudy` and `PlanAssemblyStudy` become one, and what was refused on
-  one side for want of the other's code (a pin, a thermal study, topology,
-  an async mesh on an assembly) is either built by the merge or refused
-  with its real reason.
-- An anchor is `{participant, ElementRef}`, as a CAM target is
-  `{jobPartId, ElementRef}`; one that does not say which participant when
-  the name is ambiguous is refused.
-- A subject that is deleted, or does not build in the named configuration,
-  is reported on the document (`missing`, `why`), never substituted.
-- Several simulation documents may name the same subject.
-- The simulation command on a part or an assembly (`part.simulation`,
-  `assembly.simulation`) opens the subject's simulation document, making
-  one first where there is none, so a quick check is still one click.
-- Requirements (`study_probe`, `study_result`), probes, the topology-to-
-  part flow and the `Study` RPCs name a study by its stable id, which it
-  keeps through the move; `study` parameters accept the ids they accepted.
-
-Studies in existing files migrate on open: each part with studies gets one
-simulation document holding them, and an assembly one per distinct
-participants table (the migration is built,
-[moving studies](../simulation/README.md#moving-studies-into-a-simulation);
-the tab step calls it). A saved result is
-adopted where its hash still matches the migrated study's; where the one
-planner hashes differently it reads stale, as any result whose inputs
-moved does, and is solved again when asked. The part- and assembly-level
-study lists are then gone from the model, not kept as a second home.
+Built ([the simulation document](../simulation/README.md#the-simulation-document-core)),
+but for the analysis-only geometry it holds (below) and its window
+([6](#6-the-window)).
 
 ### 2. The geometry step
 
@@ -254,24 +203,23 @@ Each merges on its own with the suites green.
    sees first and it does not wait for the document.
 2. **Result fields, the legend, VTU export.** No format change beyond the
    display settings.
-3. **The document**, in steps that each land green. The core is built
+3. **The document**, in steps that each land green. Built: the core
    ([the simulation document (core)](../simulation/README.md#the-simulation-document-core):
-   `SimDocument`, the one planner, the mesh stored and shared), and so is
-   its storage and the migration as core functions
+   `SimDocument`, the one planner, the mesh stored and shared), its storage
+   and the move of old files' studies on open
    ([how a simulation is saved](../simulation/README.md#how-a-simulation-is-saved),
-   [moving studies](../simulation/README.md#moving-studies-into-a-simulation)).
-   What is left:
-   1. **The tab and [the window](#6-the-window)** (tree, toolbar, tool
-      window, legend) on the document, and the app's runs going through
-      `RunSimStudy`. The tab itself is built
-      ([the simulation tab](../simulation/README.md#the-simulation-tab));
-      this step gives it its window, calls the migration on open and
-      `RestampSimByInputs` beside `AdoptStoredResults`, and stops saving the
-      part's and the assembly's study lists, in one change.
-   2. **The RPC move**: the study RPCs on the document, with the study ids
-      kept.
-   3. **Docs and generators**, and the part- and assembly-level study lists
-      deleted.
+   [moving studies](../simulation/README.md#moving-studies-into-a-simulation)),
+   the tab ([the simulation tab](../simulation/README.md#the-simulation-tab))
+   with the app's runs and every study RPC on it, and the part- and
+   assembly-level study lists gone from the model and the format. What is
+   left:
+   1. **[The window](#6-the-window)** on the tab: the tree, the toolbar
+      groups, the shared tool window, the legend's controls, and clearing
+      stored meshes and results from the UI.
+   2. **The new RPCs** `add_simulation`, `list_simulations`,
+      `set_simulation {mesh_size_mm, participants, configuration}` and
+      `clear_sim_storage` (per-study participant tables come with
+      `add_simulation`), then the generators, the docs and the screenshots.
 4. **The geometry step**: suppress for analysis, the geometry check, the
    symmetry cut.
 5. **Bearing load, free-free modal, `keep: full`, study sweeps.**
@@ -286,9 +234,7 @@ our own tests.
 - New `src/core/fem/SimDocument.{h,cpp}`; `src/core/fem/FemStudy.{h,cpp}`,
   `AssemblyStudy.cpp` (merged into the one planner), `FemMesher.{h,cpp}`,
   `FemInputKey.cpp`, `FemSolver.cpp`, `FemResults`.
-- `src/core/Document.{h,cpp}`, `src/core/Occurrence.h` (the study lists
-  leave), `src/core/io/SerializeStudies.cpp`, a new
-  `SerializeSimulation.cpp`, the migration and its goldens.
+- `src/core/io/SerializeSimulation.cpp` (the geometry step's fields).
 - `src/render/FieldRenderer.{h,cpp}` (fields, clamp), a mesh-edge overlay
   registered in `src/app/GpuOwners.cpp` (`kRows`,
   `RegisterSceneRenderers`).
@@ -303,11 +249,6 @@ our own tests.
 
 ## Verified by
 
-- The migration: every golden with a study, and `study_reopen_smoke`'s
-  project, opens as a simulation document with every study, load and
-  requirement in place; each saved result reads current or stale, never
-  current against inputs it was not solved for, and a stale one solves to
-  the answer it had.
 - One planner: every existing FEM test passes through it; a part study and
   the same part as a one-participant assembly give the same hash and the
   same answer; a pin and a thermal study on an assembly solve.

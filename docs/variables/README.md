@@ -410,30 +410,38 @@ every variable the features read becomes one.
 
 ## Rename and delete
 
-- **Rename.** `Document::RenameParameter` rewrites every parameter,
-  feature and study expression with `RenameIdentifier`, and every
-  configuration override: the name it overrides and its text, so the
-  override keeps applying. The rewrite works on tokens and preserves every
-  other byte of the text. Text that cannot be tokenized is left as it is.
+- **Rename.** `Document::RenameParameter` rewrites every parameter and
+  feature expression with `RenameIdentifier`, and every configuration
+  override: the name it overrides and its text, so the override keeps
+  applying. The rewrite works on tokens and preserves every other byte of
+  the text. Text that cannot be tokenized is left as it is.
   - A project-scope rename (`ui::RenameProjectVariable` in
     `src/ui/VariableActions.cpp`) rewrites every part, except parts where a
-    local variable of the same name shadows it, and every assembly's
-    expressions.
+    local variable of the same name shadows it, and every assembly's, job's
+    and drawing's expressions.
+  - A simulation's studies and mesh (`SimDocument::VisitExprs`) read their
+    subject's scope: a simulation of a part is rewritten by a rename of
+    that part's own variable (`ui::RenamePartVariable`), and by a project
+    rename unless the part shadows the name; a simulation of an assembly by
+    a project rename.
   - A requirement's expressions -- an `expression` requirement's formula
     and any requirement's expression bounds -- are rewritten with them, in
     the scope the requirement reads (`ui::RenameProjectVariable`, and
     `ui::RenamePartVariable` for a part-local one;
-    [requirements](../requirements/README.md#expression)). Undoing a
-    project rename puts the requirement back too; a part's undo does not.
+    [requirements](../requirements/README.md#expression)).
+  - An undo puts back everything the rename rewrote: a project rename's is
+    a project-variable step, and a part-local rename is one command on the
+    part's stack that renames its requirements and simulations with it.
 - **Delete** is **refused while the variable is referenced**. The refusal
   lists the references, for example `parameter 'x'`, `feature 'Extrude 1'`,
-  `study 'Bracket'`, `configuration 'Heavy' (its override of 'depth')` (an
+  `configuration 'Heavy' (its override of 'depth')` (an
   override whose text reads it), `<Part>: feature '…'` or
   `<Assembly>: mate '…'` (any owner of an assembly's expression: a mate,
-  an occurrence, a relation, a motion study, the sequence, a study) for
-  the project scope, or `requirement 'wall'`
-  (`ui::RequirementReferences`; `ui::RemovePartVariable` for a part-local
-  one). Nothing is left dangling silently. A table is refused the same way
+  an occurrence, a relation, a motion study, the sequence) for the project
+  scope, `<Simulation>: study 'Bracket'` or `<Simulation>: simulation mesh`
+  for a simulation that reads it in its subject's scope, or
+  `requirement 'wall'` (`ui::RequirementReferences`;
+  `ui::RemovePartVariable` for a part-local one). Nothing is left dangling silently. A table is refused the same way
   while a variable, a feature or a requirement looks it up.
 
 ## Undo

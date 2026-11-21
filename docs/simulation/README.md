@@ -9,13 +9,15 @@ kind of study and has its own page, [../topopt/README.md](../topopt/README.md).
 
 ## The model
 
-A **study** (`fem::Study`, `src/core/fem/FemStudy.h`) is a document-level
-object, not a `Feature`. It consumes the finished bodies and produces no
-geometry, so it lives beside the parameter table (`Document::GetStudies()`,
-`AssemblyDocument::GetStudies()`) and never enters regeneration, rollback or
-suppression. On a part the list is read-only: an edit is a command
-(`ModifyStudyCommand` → `ReplaceStudy`), which moves the part's save stamp
-though not its version, so it reads unsaved
+A **study** (`fem::Study`, `src/core/fem/FemStudy.h`) is not a `Feature`. It
+consumes the finished bodies of its subject and produces no geometry, so it
+lives in a simulation document
+([the simulation document](#the-simulation-document-core),
+`SimDocument::GetStudies()`), never on the part or the assembly it analyses,
+and never enters their regeneration, rollback or suppression. The list is
+read-only: an edit is one undo step on the simulation (`ui::ModifyStudy`,
+`ui::SimUndoGuard` → `ReplaceStudy`), which moves the simulation's save
+stamp, so it reads unsaved
 ([versioning](../versioning/README.md#unsaved-changes)); a solve writes the
 study's transient fields through `StudyForRun`. Its analysis `type` is
 `static`, `modal`, `topology` or `buckling` ([buckling](#buckling)).
@@ -49,7 +51,8 @@ A study holds:
 - `shapeFrom` (static only): solve a topology study's result instead of
   meshing the body
   ([a static study of the optimised shape](../topopt/README.md#a-static-study-of-the-optimised-shape)).
-- `participants` (assembly studies only, below).
+- `participants` (an assembly subject's, below; a simulation keeps one table
+  for its studies, so a study's own is empty there).
 
 Sizes, magnitudes, load-case weights and the topology numbers are
 `ExprValue`s ([variables](../variables/README.md#numbers-that-are-expressions)),
@@ -57,7 +60,8 @@ so a load can read `bolt_preload * 1.5`; the RPC takes them as
 `<field>_expr` (or a string in the number's place). `Study::VisitExprs`
 walks them: they are evaluated lazily at mesh/solve time
 (`EvaluateStudyExprs`), not during regeneration, a variable's rename
-rewrites them and its delete is refused while one reads it.
+rewrites them and its delete is refused while one reads it
+([rename and delete](../variables/README.md#rename-and-delete)).
 
 Every face is an `ElementRef` resolved at mesh time (`fem::ResolveFace`,
 the same lookup `ShellFeature` and `Measure` use). A reference whose face no
@@ -375,9 +379,10 @@ by accident.
 
 ### Results and staleness
 
-Mesh and results are **derived**. They live in a `fem::StudyRuntime` cache
-stamped with the document's `Version()` at solve time, and are saved with
-the project beside their study, with the input hash that produced them
+Mesh and results are **derived**. They live in a `fem::StudyRuntime` held
+by the simulation, stamped with the study's stamp and the subject
+documents' stamps at solve time, and are saved with the project beside the
+simulation, with the input hash that produced them
 ([studies as jobs](#studies-as-jobs)). Any later change makes them
 **stale**: the panel badges them and `study_results` / `list_studies`
 report `stale: true`. Nothing is ever re-solved automatically — meshing and
@@ -482,26 +487,32 @@ every result carries `input_hash`, and `recompute: true` computes anyway
 (Shift+Run in the panel, which also says "Reused" when it did). A reuse
 answers before the one-run-at-a-time check: it starts nothing.
 
-**Saved with the project.** Every result is written beside its study with
-its hash: a part's or an assembly's static, modal or topology result as
-`studies/<id>-<slug>.result.json` and `.result.bin` (topology since v33 and
-its hash since v148, the others v153, the two files v154), a motion result
-as `motion/<id>-<slug>.result.json` and `.result.bin`. What is kept is what
+**Saved with the project.** Every result is written with its hash: a
+static, modal or topology result in its simulation, as
+`simulations/<folder>/results/<study id>.result.json` and `.result.bin`
+([how a simulation is saved](#how-a-simulation-is-saved)), a motion result
+beside its study as `motion/<id>-<slug>.result.json` and `.result.bin`. (A
+file before vNEXT kept a part's or an assembly's FEM results as
+`studies/<id>-<slug>.result.json` and `.result.bin` -- topology since v33
+and its hash since v148, the others v153, the two files v154 -- and an open
+moves them into a simulation:
+[moving studies](#moving-studies-into-a-simulation).) What is kept is what
 the panel and the RPCs read back, and nothing else
 ([what a saved result keeps](#what-a-saved-result-keeps)). A reopened
 project's run of the same inputs is answered from it (`reused: true`), and
 a result whose saved hash no longer matches the reopened inputs reads stale
 rather than current-because-loaded. The checks:
 
-- a part's results are checked as it loads (`LoadDir`), and again after
-  the app regenerates it once more against the project's variables
-  (`fem::RestampByInputs`, from `SyncProjectScope` and every open): that
-  regeneration moves the version a result was stamped at, which made a
-  reopened topology result read stale and `check_topology` refuse it;
-- an assembly's FEM and motion results need the parts their hash reads, so
-  the app checks them when the assembly is opened or its tab comes up
-  (`ui::AdoptStoredResults`, `ui::AdoptSavedMotionResults`); until then an
-  assembly study's saved result reads stale.
+- a simulation's results need the subject their hash reads, so they read
+  stale as they load and the app checks them on open and again after it
+  regenerates the parts against the project's variables
+  (`ui::AdoptStoredSimResults` → `fem::RestampSimByInputs`, from
+  `AdoptProject` and `SyncProjectScope`): that regeneration moves the
+  stamps a result was solved against, which made a reopened topology
+  result read stale and `check_topology` refuse it;
+- an assembly's motion results need the parts their hash reads, so the app
+  checks them when the assembly is opened or its tab comes up
+  (`ui::AdoptSavedMotionResults`).
 
 **The B-Rep is hashed as geometry**, not as OCC's bookkeeping on it
 (`inputhash::ShapeDigest`): the shape as the project reads it back (written
@@ -1518,7 +1529,7 @@ deck per body and per load case; `NotInBatch`).
 
 ### Running it
 
-- **The job** is the study's own (`StartStudyRun`, or the synchronous
+- **The job** is the study's own (`StartSimStudyRun`, or the synchronous
   `run_study`): the worker meshes, then for each body and case writes the deck
   and runs `ccx -i job` through `proc::PipedChild` with its working directory
   set (`proc::ChildOptions`).
@@ -2609,13 +2620,11 @@ How it is built (`src/core/fem/AssemblyStudy.cpp`, `fem::PlanAssemblyStudy`):
 - Anchors on split faces are mapped onto the imprinted faces; a force's total
   is divided among them by area.
 
-Assembly results are stale against the assembly's version **and** every
-participating part's version (`StudyRuntime::solvedPartVersions`). An edit to
-an assembly study is one full-state undo snapshot and one version bump. The
-result cache (`fem::StudyRuntimeCache`) is shared between the document and
-its undo snapshots so a snapshot does not copy meshes. Topology
-optimization is refused on an assembly; `mesh_study {async}` is refused there
-(`run_study {async}` works).
+Assembly results are stale against the assembly's stamp **and** every
+placed part's (`StudyRuntime::solvedPartVersions`, the simulation's subject
+stamps). An edit to a study is one undo snapshot of its simulation, which
+shares the results and meshes with the document, so a snapshot does not
+copy meshes. Topology optimization is refused beside a neighbour.
 
 ## The simulation document (core)
 
@@ -2627,8 +2636,8 @@ in front ([the simulation tab](#the-simulation-tab)), the RPCs act on a
 simulation ([simulations](../scripting/rpc.md#simulations)), and a file
 whose studies were saved on its part or assembly has them moved into
 simulations when it opens ([moving studies](#moving-studies-into-a-simulation)).
-A part's and an assembly's own study lists are empty from then on, and
-nothing writes them.
+A part (`Document`) and an assembly (`AssemblyDocument`) hold no studies:
+from vNEXT their files carry none, and one that does is refused.
 
 It holds a **subject** (a part or an assembly by stable project-document id,
 and one configuration, 0 = the active one: a reference, never a copy), the
@@ -2672,8 +2681,8 @@ its input hash (`fem::StoreSimStudyResult`, which an async caller uses too).
   {from_study}` read the other study through `fem::StudySiblings`
   (`FemSolver.h`): the part planners (`PlanStudy`, `StudyInputKey`,
   `RunInputKey`, `PrepareStudy`, `RunStudy`, `CheckStudy`) read the
-  simulation's studies, results and staleness there when they are handed
-  one, and the Document's when not. Each sibling is routed as the study
+  simulation's studies, results and staleness there, and none when they
+  are handed none (a study that names one is then refused). Each sibling is routed as the study
   itself is, so the same studies plan, refuse and hash alike on the part
   and on its simulation. A shape study is stale when the result it was cut
   from is stale or another (`SimDocument::StudyResultsStale`), takes none
@@ -2732,10 +2741,10 @@ material check. The viewport draws its subject's bodies, read from the
 subject's tab whether it is in front or not -- a part's own bodies, or an
 assembly's leaf parts placed in it, without derived ghosts
 (`ui::SimSubjectBodies`, cached on `ui::SimRenderVersion`, which moves with
-the subject's stamp and, on an assembly, every part's). The Model panel is
-a read-only list of the subject and the studies (`ui::DrawSimTree`,
-`src/ui/SimTree.cpp`), focused when the tab comes in front, and the toolbar
-frames and measures (`###tb_sim_fit`, `###tb_sim_measure`; the keymap's
+the subject's stamp and, on an assembly, every part's). The Model panel, focused
+when the tab comes in front, is the study panel headed by the subject's row
+(`ui::DrawSimSubjectRow`, `src/ui/SimTree.cpp`), and the toolbar frames and
+measures (`###tb_sim_fit`, `###tb_sim_measure`; the keymap's
 `simulation` context). `ui::OpenSimulationFor` switches to a part's or an
 assembly's first simulation, or makes one; `ui::SimulationSlotFor` finds or
 makes one behind the tab in front (what `add_study` over RPC does).
@@ -2803,7 +2812,9 @@ only, which is the same index. The tab is a `ui::PartSlot` of kind
 it is in front), added by `ui::AddSimulation` and renamed, duplicated and
 deleted as any tab is; a duplicate is `SimDocument::Clone`, a store of its
 own, since a copy shares the original's. Autosave writes its sidecar under
-`simulations/`, and a recovery reads it back. The document itself is `DocumentIO::SaveSimulation` /
+`simulations/`, the document alone without its stored results and meshes
+(`DocumentIO::SaveSimulationBody`: both are derived, and a big mesh is tens
+of megabytes), and a recovery reads it back. The document itself is `DocumentIO::SaveSimulation` /
 `LoadSimulation` (`src/core/io/SerializeSimulation.{h,cpp}`), `kind:
 "simulation"`, in two forms:
 
@@ -2836,8 +2847,8 @@ own, since a copy shares the original's. Autosave writes its sidecar under
   result whose study's input hash (`SimStudyInputKey`) is the one it was
   solved at, against the subject's stamps now; a run of it then solves on
   the stored mesh without meshing (`RunSimStudy`'s `meshesMade` is 0). The
-  app calls it from the step that adds the tab, as it calls
-  `AdoptStoredResults` for a part's studies.
+  app calls it on open and after the project's variables regenerate the
+  parts (`ui::AdoptStoredSimResults`).
 
 Its goldens are `tests/golden/simulation/` (`test_golden.cpp`'s corpus and
 writer fixpoint, `format_version_gate`), and the reader fuzz has a
@@ -2846,24 +2857,29 @@ writer fixpoint, `format_version_gate`), and the reader fuzz has a
 
 ### Moving studies into a simulation
 
-`src/core/fem/SimMigration.{h,cpp}` moves the studies of a part or an
-assembly into simulation documents, and **an open does it**
-(`ui::MoveStudiesIntoSimulations`, from `AdoptProject` and the single-part
-open): each simulation is a tab added behind the one in front, the part's
-and the assembly's lists are emptied, and the project still reads as saved.
-Beside `AdoptStoredResults`, `ui::AdoptStoredSimResults` restamps each
-simulation's results by their inputs (`fem::RestampSimByInputs`), so a
-result whose study and subject are unchanged reads current. A save after it
-writes the simulations, and the part and the assembly with no studies. A
+`src/core/fem/SimMigration.{h,cpp}` moves the studies a part or an
+assembly file kept before vNEXT into simulation documents, and **an open
+does it** (`ui::MoveStudiesIntoSimulations`, from `AdoptProject` and the
+single-part open). The reader keeps such a file's studies, and in the
+directory form their saved results, as read (`fem::OldStudies`, on the
+document until `Document::TakeOldStudies` / `AssemblyDocument::
+TakeOldStudies` hands them over; nothing else reads them and the document
+never writes them). Each simulation is a tab added behind the one in front,
+and the project still reads as saved. `ui::AdoptStoredSimResults` then
+restamps each simulation's results by their inputs
+(`fem::RestampSimByInputs`), so a result whose study and subject are
+unchanged reads current. A save after it writes the simulations, and the
+part and the assembly with no studies (an old `studies/` directory is
+emptied). A
 study a simulation of its subject already holds is not moved twice (a
 recovery over a part file saved before its studies moved). A part with a
 simulation is two documents, so it saves as a `.lob`: the single-file
 `.json` form, which holds one document, refuses it.
 
-- `fem::SimulationsFromPart(part, id, name)`: every study of the part in
+- `fem::SimulationsFromPart(old, id, name)`: every study the part kept in
   one simulation of it, in its active configuration ("Bracket
   simulation").
-- `fem::SimulationsFromAssembly(assembly, id, name)`: one simulation per
+- `fem::SimulationsFromAssembly(old, id, name)`: one simulation per
   distinct participants table, since roles live on the document. Two
   tables are the same when they list the same occurrences in the same
   roles, sizes and friction, in any order; the studies that agree share
@@ -3016,8 +3032,9 @@ tinted as a fixture, and bonded seams in the bond colour.
   install it ([CalculiX](#calculix)).
 - In the window: analysis type, mesh size, material check, gravity (a
   checkbox that sets world-down 9.81 m/s²), and **Boundary conditions**: arm
-  Fixed, Force, Pressure, Torque, Remote, (on a static part study) Pin or
-  (on a static study) Contact and click a face; magnitude and an
+  Fixed, Force, Pressure, Torque, Remote, and on a static study Pin or
+  Contact, and click a face (a pin beside an assembly's neighbour is the
+  planner's refusal); magnitude and an
   optional custom direction apply to the next placement. **Torque** takes
   "Torque (N·mm)" and an **Axis**: "From the face (cylinder)", or the choices
   a Revolve's axis offers (X/Y/Z, datum axes, construction lines, custom).
@@ -3107,9 +3124,11 @@ verb that names a study for context (`add_load`, `add_refinement`,
 ## Tests
 
 - `tests/test_study_inputs.cpp` (`[studyjobs]`): the input hash moves on
-  each input class and on nothing else; a saved topology result reopens
-  with its hash, fresh, and stale when saved against other inputs; a shape
-  whose reads flip a plane's frame hashes as itself read back.
+  each input class and on nothing else; a saved topology result, and a
+  result of each kind, reopens in its simulation with its hash, current
+  against the reopened part, and stale when saved against other inputs; a
+  shape whose reads flip a plane's frame hashes as itself read back.
+  `tests/test_sim_project.cpp`: a simulation's autosave writes no result.
 - `tests/study_jobs_smoke.py`: job ids, a job cancelled with its
   connection and one that outlives it, a cancel by id, an unknown id
   refused, a hung-up synchronous run stopping, reuse, `leave_at` in one
@@ -3121,8 +3140,10 @@ verb that names a study for context (`add_load`, `add_refinement`,
   never golden meshes, because Netgen output is not bit-stable across
   versions. Also: a mesh spans two solids only when they share the face; the
   assembly cases (clamped nodes on the interface only, the refusals by name,
-  staleness across documents, the shared cache, a bonded pair with two
-  materials and an answer softer than the rigid one).
+  a bonded pair with two materials and an answer softer than the rigid
+  one). A study's undo, staleness against its subject documents and shared
+  store are the simulation's: `tests/test_sim_document.cpp` and
+  `tests/test_sim_project.cpp` (`[simdoc]`).
 - `tests/test_fem_pin.cpp` (`[pin]`): a pinned lug's reaction answers the
   pull, on about half its bore, its bearing stress against
   (4/π) F/(d t) and the hole's sides against the net section F/((w − d) t);

@@ -340,7 +340,7 @@ and it is answered by each document's **save stamp**, not its version.
 
 `Document::Version()` moves only when the model regenerates, and a part
 carries saved state that regenerates nothing: its tolerances, units, tube
-rules and print process, its studies, a configuration that is not the
+rules and print process, a configuration that is not the
 active one, its image assets. Compared by version, an edit to any of those
 read clean and was dropped on close without a prompt. So
 `Document::SaveStamp()` is the version plus a count of those edits
@@ -406,7 +406,7 @@ recovery. That is why a multi-document project gets a directory of
 per-document files rather than one sidecar written like a project tree.
 Unchanged documents are not rewritten. `ui::AutosaveProject` owns the loop
 over documents, because only the UI layer knows what documents a project has;
-assemblies, drawings and jobs autosave as well as parts.
+assemblies, drawings, jobs and simulations autosave as well as parts.
 
 ### Every instance has its own unsaved slot
 
@@ -451,8 +451,9 @@ instance's unsaved slot — never another instance's. Recovery:
 The sidecars sit beside the project, outside its directory, so they are
 outside its git repository and outside the disk stamp below. A sidecar is
 the single-file form, which carries no study result and no drawing
-projection: an autosave never writes one, and a recovered document's
-studies run again
+projection -- a simulation's is written without the results and meshes its
+single file would carry inline (`DocumentIO::SaveSimulationBody`): an
+autosave never writes one, and a recovered document's studies run again
 ([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps))
 and its drawing views project again.
 

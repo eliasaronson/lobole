@@ -76,7 +76,7 @@ struct GLFWwindow;
 
 namespace ui {
 
-struct OpenJob; // ui/OpenJob.h
+struct OpenJob;   // ui/OpenJob.h
 class DiskPoller; // ui/DiskPoller.h
 
 // Per-part tessellation + GPU asset cache; see AppState::partRenderCache.
@@ -683,7 +683,7 @@ struct SimulationState {
   // Dragging a force arrow in the viewport to change its MAGNITUDE
   // (docs/ui/viewport-handles.md — this owner keeps its own grab payload,
   // like the gizmo and the section arrow). Snapshot at grab, mutate live,
-  // one ModifyStudyCommand on release.
+  // one SimUndoGuard step on release.
   struct LoadDrag {
     bool active = false;
     uint64_t loadId = 0;
@@ -837,12 +837,12 @@ struct SimulationState {
   uint64_t contactKey = 0;
   std::vector<fem::ContactPatch> contacts;
   std::vector<fem::BondPatch> bonds; // S2: the glued seams, same cache
-  std::string contactError; // why the plan refused, shown in the panel
+  std::string contactError;          // why the plan refused, shown in the panel
   // Why the last viewport placement was refused (a face clicked on an
   // occurrence that is not the meshed one), shown in the panel.
   std::string placeRefusal;
-  int activeMode = 0;       // modal: which mode shape the overlay displays
-  int activeCase = 0;       // static with load cases: which case it shows
+  int activeMode = 0; // modal: which mode shape the overlay displays
+  int activeCase = 0; // static with load cases: which case it shows
   // Topology iso-surface threshold in [0,1]; 0 = auto (volume-matched).
   float topoThreshold = 0.0f;
   // What the field overlay put in the renderers (the iso-surface instance,
@@ -890,7 +890,7 @@ struct MotionVideoResult;
 struct SequenceShow;
 
 struct RenderJob {
-  bool active = false;  // a render is in flight
+  bool active = false; // a render is in flight
   // QUICK (the raster capture, then an encode on a worker) or a path trace.
   bool quick = false;
   uint32_t supersample = 2;

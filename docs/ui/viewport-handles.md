@@ -8,7 +8,7 @@ test says which one is under the cursor, and one drawer draws them all.
 | preview handles (`src/ui/PreviewHandles.{h,cpp}`) | the pending feature's scalars: extrude distance (both of a two-sided one) and twist, fillet/chamfer radius, revolve angle, Offset Face's distance, Move Face's X/Y/Z translation | `AppState::handleDrag` | nothing: preview edits are not on the undo stack; Accept commits the feature as one step |
 | section (same module) | the active section's offset — view state, no document | `handleDrag` | nothing |
 | gizmo (`src/ui/GizmoInput.cpp`) | an occurrence's transform, a mate DOF, an exploded-view offset, a CAM job part's placement | `AppState::gizmoDrag` | one snapshot per drag, then solve |
-| simulation force load (`StudyPanel.cpp`, `HandleLoadDragInput`) | the load's magnitude | `SimulationState::loadDrag` | one `ModifyStudyCommand` from a snapshot taken at grab |
+| simulation force load (`StudyPanel.cpp`, `HandleLoadDragInput`) | the load's magnitude | `SimulationState::loadDrag` | one `SimUndoGuard` step on the simulation, from a snapshot taken at grab |
 
 ## The shared layer
 
