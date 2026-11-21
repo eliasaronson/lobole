@@ -61,7 +61,7 @@ bool Patched(const char* name) { return occpatch::Carries(name); }
 // This thread's CPU seconds: the clock directedit::MakeDeadline counts.
 // Elsewhere the process's, which is the same for a single-threaded builder.
 double ThreadCpuSeconds() {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
   timespec ts{};
   if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0)
     return static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1e9;

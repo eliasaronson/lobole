@@ -1314,12 +1314,17 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       if (const Feature* f = doc->GetFeature(i))
         for (const std::string& name : ReferencedAssets(*f))
           namedBy.emplace(name, featureFiles[i].second);
+    std::set<std::string> assetsOnDisk;
+    std::error_code assetScanError;
+    for (const auto& entry :
+         fs::directory_iterator(dir / "assets", assetScanError))
+      assetsOnDisk.insert(entry.path().filename().string());
     for (const std::string& name : ReferencedAssets(*doc)) {
       readctx::InFile("assets/" + name, [&] {
         RequireInside(dir, dir / "assets" / CheckedAssetName(name));
         std::ifstream ain(dir / "assets" / CheckedAssetName(name),
                           std::ios::binary);
-        if (!ain) {
+        if (!ain || !assetsOnDisk.contains(name)) {
           const auto by = namedBy.find(name);
           throw std::runtime_error(
               "missing — " +

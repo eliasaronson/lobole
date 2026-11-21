@@ -92,6 +92,9 @@ def check_record(rec, scoped):
 
 
 def main():
+    if sys.platform == "darwin":
+        print("SKIP: tools/bench.py reads /proc and systemd scopes, Linux only")
+        return 77
     binary = os.path.abspath(sys.argv[1])
     tmp = tempfile.mkdtemp(prefix="designer_bench_smoke_")
     try:
@@ -188,4 +191,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

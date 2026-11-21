@@ -35,6 +35,9 @@
 #if defined(__linux__)
 #include <pthread.h>
 #include <time.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <pthread.h>
 #elif defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -555,6 +558,9 @@ public:
                 std::chrono::duration<double>(4.0 * seconds))) {
 #if defined(__linux__)
     m_haveClock = pthread_getcpuclockid(pthread_self(), &m_clock) == 0;
+#elif defined(__APPLE__)
+    m_thread = pthread_mach_thread_np(pthread_self());
+    m_haveClock = m_thread != MACH_PORT_NULL;
 #elif defined(_WIN32)
     m_thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE,
                           GetCurrentThreadId());
@@ -589,6 +595,16 @@ private:
     timespec ts{};
     if (m_haveClock && clock_gettime(m_clock, &ts) == 0)
       return static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1e9;
+#elif defined(__APPLE__)
+    thread_basic_info_data_t info{};
+    mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+    if (m_haveClock && thread_info(m_thread, THREAD_BASIC_INFO,
+                                   reinterpret_cast<thread_info_t>(&info),
+                                   &count) == KERN_SUCCESS)
+      return static_cast<double>(info.user_time.seconds) +
+             static_cast<double>(info.system_time.seconds) +
+             (info.user_time.microseconds + info.system_time.microseconds) /
+                 1e6;
 #elif defined(_WIN32)
     FILETIME created, exited, kernel, user;
     if (m_haveClock &&
@@ -608,6 +624,8 @@ private:
   bool m_haveClock = false;
 #if defined(__linux__)
   clockid_t m_clock{};
+#elif defined(__APPLE__)
+  mach_port_t m_thread = MACH_PORT_NULL;
 #elif defined(_WIN32)
   HANDLE m_thread = nullptr;
 #endif

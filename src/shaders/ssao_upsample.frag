@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "depth_texel.glsl"
 
 // Joint-bilateral upsample of the blurred half-res AO to full resolution
 // (docs/rendering/README.md#ssao). Each full-res pixel blends the four
@@ -46,7 +49,7 @@ void main() {
     for (int i = 0; i < 4; i++) {
         vec2 uv = base + offsets[i];
         float predicted = centerDepth + dot(grad, (uv - fragUV) / texel);
-        float dw = exp(-abs(texture(uDepth, uv).r - predicted) *
+        float dw = exp(-abs(ReadCenteredDepth(uDepth, uv) - predicted) *
                        pc.params.z);
         float ao = texture(uAO, uv).r;
         sum += ao * bilinear[i] * dw;

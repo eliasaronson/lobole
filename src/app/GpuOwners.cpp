@@ -550,11 +550,8 @@ static void CreateDevice(bool wsi) {
       LOG_INFO("Ray Tracing: added buffer device address extension");
     }
 
-#ifdef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
-    if (IsExtensionAvailable(properties,
-                             VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME))
-      device_extensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
-#endif
+    if (IsExtensionAvailable(properties, "VK_KHR_portability_subset"))
+      device_extensions.push_back("VK_KHR_portability_subset");
 
     const float queue_priority[] = {1.0f};
     VkDeviceQueueCreateInfo queue_info[1] = {};
@@ -573,16 +570,40 @@ static void CreateDevice(bool wsi) {
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
     rtPipelineFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipelineFeatures.pNext = &bufferDeviceAddressFeatures;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{};
     asFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    asFeatures.pNext = &rtPipelineFeatures;
+
+    // Chain only the structs whose extension the device has: MoltenVK has
+    // none of the ray tracing ones, and a struct for an extension the device
+    // lacks is not valid in either the query or the create chain.
+    const bool hasBdaExt = IsExtensionAvailable(
+        properties, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+    const bool hasRtExt = IsExtensionAvailable(
+        properties, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+    const bool hasAsExt = IsExtensionAvailable(
+        properties, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    auto chain = [&]() -> void* {
+      void* featureChain = nullptr;
+      if (hasBdaExt) {
+        bufferDeviceAddressFeatures.pNext = featureChain;
+        featureChain = &bufferDeviceAddressFeatures;
+      }
+      if (hasRtExt) {
+        rtPipelineFeatures.pNext = featureChain;
+        featureChain = &rtPipelineFeatures;
+      }
+      if (hasAsExt) {
+        asFeatures.pNext = featureChain;
+        featureChain = &asFeatures;
+      }
+      return featureChain;
+    };
 
     VkPhysicalDeviceFeatures2 supported2{};
     supported2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    supported2.pNext = &asFeatures;
+    supported2.pNext = chain();
     vkGetPhysicalDeviceFeatures2(g_PhysicalDevice, &supported2);
     const VkBool32 hasBufferDeviceAddress =
         bufferDeviceAddressFeatures.bufferDeviceAddress;
@@ -596,12 +617,11 @@ static void CreateDevice(bool wsi) {
     rtPipelineFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     rtPipelineFeatures.rayTracingPipeline = hasRtPipeline;
-    rtPipelineFeatures.pNext = &bufferDeviceAddressFeatures;
     asFeatures = {};
     asFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     asFeatures.accelerationStructure = hasAs;
-    asFeatures.pNext = &rtPipelineFeatures;
+    void* featureChain = chain();
 
     // The OutlineRenderer wireframe pipeline draws with VK_POLYGON_MODE_LINE,
     // which requires the fillModeNonSolid feature. Enable it when supported.
@@ -615,7 +635,7 @@ static void CreateDevice(bool wsi) {
 
     VkDeviceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    create_info.pNext = &asFeatures;
+    create_info.pNext = featureChain;
     create_info.pEnabledFeatures = &enabledFeatures;
     create_info.queueCreateInfoCount =
         sizeof(queue_info) / sizeof(queue_info[0]);
@@ -1255,7 +1275,8 @@ static void InitRayTracing(bool safeMode) {
   if (!FaultsRenderer("raytracing") &&
       g_RayTracingRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
                                        g_QueueFamily, g_CommandPool)) {
-    App().renderer.rayTracing = true;
+    App().renderer.rayTracing =
+        RayTracingRenderer::IsRayTracingSupported(g_PhysicalDevice);
     LOG_INFO("Ray tracing: initialization successful");
     return;
   }

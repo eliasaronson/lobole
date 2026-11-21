@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "depth_texel.glsl"
 
 // Depth-aware 4x4 blur over the raw AO, sized to the 4x4 noise tile so the
 // rotation pattern averages out; the depth weight keeps occlusion from
@@ -20,7 +23,7 @@ layout(location = 0) in vec2 fragUV;
 layout(location = 0) out float outAO;
 
 void main() {
-    float centerDepth = texture(uDepth, fragUV).r;
+    float centerDepth = ReadCenteredDepth(uDepth, fragUV);
     // Compare each neighbor against the local depth PLANE, not the center
     // value: on a sloped or curved surface the raw comparison down-weights
     // half the window, the 4x4 noise tile stops averaging out, and
@@ -39,7 +42,7 @@ void main() {
             vec2 off = vec2(x, y) + 0.5;
             vec2 uv = fragUV + off * pc.params.xy;
             float predicted = centerDepth + dot(grad, off);
-            float w = exp(-abs(texture(uDepth, uv).r - predicted) *
+            float w = exp(-abs(ReadCenteredDepth(uDepth, uv) - predicted) *
                           pc.params.z);
             sum += texture(uAO, uv).r * w;
             weightSum += w;

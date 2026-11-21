@@ -4,7 +4,8 @@
 
 Open-source parametric CAD: B-Rep modeling on OpenCASCADE, a Vulkan
 viewport, and one command layer that the GUI, Python scripts and AI agents
-all drive. Linux first; Windows builds exist, macOS is untested.
+all drive. Linux first; Windows builds exist, and macOS on Apple Silicon builds
+from source.
 
 Version 0.1: so expect some rough edges. Issues are welcome.
 
@@ -99,8 +100,9 @@ driver comes from your system (`hardware.graphics.enable = true`).
 **Other distributions:** the Ubuntu list says what is needed; OpenCASCADE
 must be 7.6 or newer, CMake 3.14+, and the compiler C++23.
 
-**Windows** cross-compiles from Linux (`packaging/windows/`). **macOS** is
-untested.
+**Windows** cross-compiles from Linux (`packaging/windows/`). **macOS** on Apple
+Silicon builds from source with Homebrew and Xcode
+([docs/packaging](docs/packaging/README.md#macos)).
 
 Clone with `--recurse-submodules` (or run `git submodule update --init
 --recursive`) for the vendored dependencies.

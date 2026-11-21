@@ -28,10 +28,17 @@ if [ -z "$reserve_mb" ] && [ -r "$reserve_file" ]; then
   reserve_mb="$(tr -dc '0-9' < "$reserve_file")"
 fi
 case "$reserve_mb" in '' | *[!0-9]*) reserve_mb=4096 ;; esac
-avail_kb="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
+if [ "$(uname -s)" = Darwin ]; then
+  page_bytes="$(sysctl -n hw.pagesize)"
+  free_pages="$(vm_stat | awk '/Pages (free|inactive|speculative|purgeable)/ {gsub(/\./, "", $NF); n += $NF} END {print n}')"
+  avail_kb=$(( free_pages * page_bytes / 1024 ))
+  cores="$(sysctl -n hw.ncpu)"
+else
+  avail_kb="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
+  cores="$(nproc)"
+fi
 avail_kb=$(( avail_kb - reserve_mb * 1024 ))
 jobs=$(( avail_kb / (per_mb * 1024) ))
-cores="$(nproc)"
 [ "$jobs" -lt 1 ] && jobs=1
 [ "$jobs" -gt "$cores" ] && jobs="$cores"
 # shellcheck source=cpu-claims.sh

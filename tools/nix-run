@@ -11,6 +11,9 @@
 # it is remade if a garbage collection took a store path it points at.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ "$(uname -s)" = Darwin ]; then
+  exec bash -c 'source "$1"; shift; eval "$*"' _ "$root/tools/macos-env.sh" "$@"
+fi
 dir="$root/.nix-env"
 mkdir -p "$dir"
 nixpkgs="$(nix-instantiate --find-file nixpkgs 2>/dev/null || echo none)"

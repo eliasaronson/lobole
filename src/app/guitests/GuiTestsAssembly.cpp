@@ -1041,8 +1041,10 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // of the whole framebuffer could not pass this.
     const ImGuiIO& io = ImGui::GetIO();
     IM_CHECK(s_App->viewportSize.x < io.DisplaySize.x - 1.0f);
-    IM_CHECK_EQ(video.plan.width, (uint32_t)s_App->viewportSize.x);
-    IM_CHECK_EQ(video.plan.height, (uint32_t)s_App->viewportSize.y);
+    IM_CHECK_EQ(video.plan.width, (uint32_t)(s_App->viewportSize.x *
+                                             io.DisplayFramebufferScale.x));
+    IM_CHECK_EQ(video.plan.height, (uint32_t)(s_App->viewportSize.y *
+                                              io.DisplayFramebufferScale.y));
     const auto load = [&](int k, int& w, int& h) {
       char name[32];
       std::snprintf(name, sizeof name, "frame_%04d.png", k);

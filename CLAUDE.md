@@ -34,6 +34,9 @@ Always wrap:
 tools/build.sh            # = ninja -j$(tools/build-jobs) designer designer_tests femgpu_tests, in nix
 ```
 
+On macOS there is no nix: `tools/nix-run` applies `tools/macos-env.sh` instead,
+so the same scripts work (docs/packaging/README.md#macos).
+
 That pair is the inner loop. **`-j` comes from free memory, not cores**
 (`tools/build-jobs`, ~1.5 GB a compiler): at one job per core, parallel
 builds got the OOM killer to take the agent host itself. `tools/build.sh`

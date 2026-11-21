@@ -26,7 +26,9 @@
 // The stream here has no buffer of its own, so every character a formatted
 // read takes passes through it, and each time it sets the istream's width
 // to kWordLimit: the next word extracted stops there. Binary reads (read(),
-// sgetn) are a copy and are not touched; numbers ignore width.
+// sgetn) are a copy and are not touched; numbers ignore width. libc++ reads
+// the width before anything passes through the stream, so this does not bound
+// a read there: macOS builds its OCC as C++20 (packaging/macos/deps.sh).
 namespace cad {
 
 class BoundedWordBuf : public std::streambuf {

@@ -666,6 +666,14 @@ independent of the window and survives swapchain rebuilds.
    four lie across a depth edge. The upsample target exists in both tiers so
    the descriptor set stays valid across a tier change.
 
+In the half tier a pixel centre lands exactly on the boundary between two
+prepass depth texels, and depth is sampled NEAREST, so which texel it gets is
+rounding. The Mesa and NVIDIA baselines show no sign of that; on Apple's GPU it
+read as rectangular patches and stripes on steep flat faces. On macOS
+`depth_texel.glsl` reads those centres a quarter texel over
+(`LOBOLE_STABLE_DEPTH_TEXEL`). The define is off elsewhere, so the pixel gates'
+baselines do not move.
+
 `AOView()` is the upsample target in half mode and the blur target in full
 mode; `mesh.frag` samples it by normalized UV and multiplies it into the
 ambient/IBL term only (direct light is occluded by the shadow map). The AO

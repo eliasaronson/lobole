@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "depth_texel.glsl"
 
 // SSAO (docs/rendering/README.md#ssao): normal-oriented hemisphere
 // sampling in view space against the prepass depth, rotated per-pixel by
@@ -53,7 +56,7 @@ vec3 viewPosAt(vec2 uv, float depth) {
 }
 
 void main() {
-    float depth = texture(uDepth, fragUV).r;
+    float depth = ReadCenteredDepth(uDepth, fragUV);
     if (depth >= 1.0) { // background: nothing to occlude
         outAO = 1.0;
         return;

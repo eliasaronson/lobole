@@ -630,8 +630,8 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
   fs::last_write_time(json, old);
   fs::last_write_time(bin, old);
   REQUIRE(DocumentIO::SaveSimulation(sim, proj.string()));
-  CHECK(fs::last_write_time(json) == old);
-  CHECK(fs::last_write_time(bin) == old);
+  CHECK((fs::last_write_time(json) == old));
+  CHECK((fs::last_write_time(bin) == old));
   auto reloaded = DocumentIO::LoadSimulation(proj.string());
   REQUIRE(reloaded.has_value());
   {
@@ -640,14 +640,14 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
     CHECK(back->bodies[0].results.stress == kept.results.stress);
   }
   REQUIRE(DocumentIO::SaveSimulation(**reloaded, proj.string()));
-  CHECK(fs::last_write_time(json) == old);
-  CHECK(fs::last_write_time(bin) == old);
+  CHECK((fs::last_write_time(json) == old));
+  CHECK((fs::last_write_time(bin) == old));
 
   // A new answer is written.
   StudyOf(*bar).loads[1].magnitude = 900.0;
   RunAndStore(*bar, sim);
   REQUIRE(DocumentIO::SaveSimulation(sim, proj.string()));
-  CHECK(fs::last_write_time(bin) != old);
+  CHECK((fs::last_write_time(bin) != old));
   fs::remove_all(proj);
 }
 

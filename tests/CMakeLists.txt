@@ -52,6 +52,7 @@ add_executable(designer_tests
     test_cam_rough_rest.cpp
     test_instance_registry.cpp
     test_crash_reports.cpp
+    test_thread_stack.cpp
     test_rpc_contract.cpp
     test_rpc_errors.cpp
     test_screen_space_mapping.cpp
@@ -410,6 +411,7 @@ endforeach()
 # with four contending burners, so it takes five times its CPU in wall time,
 # and must still pass. The CPU is the first the test may run on (a container
 # need not allow CPU 0).
+if(NOT APPLE)
 add_test(NAME reader_fuzz_budget_under_load
          COMMAND bash -c "cpu=$(taskset -pc $$ | sed -E 's/.*: *([0-9]+).*/\\1/') && exec taskset -c \"$cpu\" \"$0\" -n 4 --contend -t 600 -- \"$1\" \"$2\""
                  ${CMAKE_SOURCE_DIR}/tools/with-cpu-load.sh
@@ -418,6 +420,7 @@ add_test(NAME reader_fuzz_budget_under_load
 set_tests_properties(reader_fuzz_budget_under_load PROPERTIES
     LABELS reader_fuzz TIMEOUT 600 ENVIRONMENT
     "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
+endif()
 
 # The kernel's own failures (tests/test_occ_patches.cpp): a call that used to
 # never return (the fuzz/30 fillet) is stopped in a minute, not the default
@@ -1322,7 +1325,8 @@ set_tests_properties(exit_with_parent_smoke PROPERTIES TIMEOUT 90)
 add_test(NAME bench_harness_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/bench_harness_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(bench_harness_smoke PROPERTIES LABELS bench TIMEOUT 300)
+set_tests_properties(bench_harness_smoke PROPERTIES LABELS bench TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
 
 # The quick still: the raster renderers into an image of exactly W x H, path
 # parameters refused, the viewport left as it was

@@ -34,6 +34,10 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$ROOT/build/lobole"
 [ -x "$BIN" ] || { echo "headless-preview: no binary at $BIN — build it first." >&2; exit 1; }
+if [ "$(uname -s)" = Darwin ]; then
+  # shellcheck source=macos-env.sh
+  . "$ROOT/tools/macos-env.sh"
+fi
 # An agent's instance: no native message box waits for a click
 # (app/StartupReport.h).
 export LOBOLE_NO_DIALOG="${LOBOLE_NO_DIALOG:-1}"
@@ -135,8 +139,13 @@ export XDG_CONFIG_HOME="$LOBOLE_PREVIEW_CONFIG"
 RUN_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/designer-preview"
 is_instance() { # pid port
   local pid="$1" port="$2" cmd
-  [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] || return 1
-  cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
+  [ -n "$pid" ] || return 1
+  if [ "$(uname -s)" = Darwin ]; then
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null) "
+  else
+    [ -r "/proc/$pid/cmdline" ] || return 1
+    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
+  fi
   case "$cmd" in
     *lobole*" --remote $port "*) return 0 ;;
   esac
@@ -168,8 +177,11 @@ if [ "${1:-}" = "--stop" ]; then
   fi
   rm -f "$RUN_DIR/$PORT.pid"
   # Where it announced itself: its own XDG_STATE_HOME, read before it dies.
-  ITS_STATE="$(tr '\0' '\n' <"/proc/$PID/environ" 2>/dev/null |
-    sed -n 's/^XDG_STATE_HOME=//p')"
+  ITS_STATE=""
+  if [ -r "/proc/$PID/environ" ]; then
+    ITS_STATE="$(tr '\0' '\n' <"/proc/$PID/environ" 2>/dev/null |
+      sed -n 's/^XDG_STATE_HOME=//p')"
+  fi
   ITS_REG="${ITS_STATE:-$HOME/.local/state}/lobole/instances/$PORT.json"
   # SIGTERM, then make sure. An instance in the middle of a FEM
   # factorization shuts down only once the factorization ends (it has no
@@ -235,6 +247,10 @@ fi
 
 if [ "${1:-}" = "--gui" ]; then
   PORT="${2:-8798}"
+  if [ "$(uname -s)" = Darwin ]; then
+    echo "headless-preview: starting WINDOWED instance on --remote $PORT (hidden; ui_action works)"
+    exec "$BIN" --hidden --remote "$PORT"
+  fi
   resolve_xvfb
   # GLFW prefers Wayland whenever WAYLAND_DISPLAY is set, so from a shell in
   # a Wayland session the "Xvfb" instance opened a hidden window on the

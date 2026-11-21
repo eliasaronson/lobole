@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "lobole": {
-      "command": "nix-shell",
+      "command": "tools/nix-run",
       "args": [
-        "--run",
         "python3 -m lobole.mcp"
       ]
     }

@@ -10,11 +10,20 @@
 #include <cstring>
 
 #include <fcntl.h>
+#if defined(__APPLE__)
+#include <libproc.h>
+#else
 #include <pty.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+
+#if defined(__APPLE__)
+extern "C" int forkpty(int* amaster, char* name, struct termios* termp,
+                       struct winsize* winp);
+#endif
 
 namespace term {
 
@@ -185,6 +194,12 @@ std::string PtySession::ForegroundName() const {
   const pid_t pg = tcgetpgrp(m_fd);
   if (pg <= 0)
     return {};
+#if defined(__APPLE__)
+  char processName[PROC_PIDPATHINFO_MAXSIZE] = {};
+  return proc_name(pg, processName, sizeof processName) > 0
+             ? std::string(processName)
+             : std::string();
+#else
   // /proc is Linux-specific and so is this whole file; a platform without it
   // simply gets no name, and the caller falls back to the session's label.
   const std::string path = "/proc/" + std::to_string(pg) + "/comm";
@@ -198,6 +213,7 @@ std::string PtySession::ForegroundName() const {
   while (!name.empty() && (name.back() == '\n' || name.back() == '\r'))
     name.pop_back();
   return name;
+#endif
 }
 
 void PtySession::Terminate() {
@@ -217,6 +233,12 @@ void PtySession::Terminate() {
     }
     if (m_pid > 0) {
       kill(static_cast<pid_t>(m_pid), SIGKILL);
+      // On macOS a process exiting with unread terminal output waits for it to
+      // drain, past SIGKILL: until the master closes, waitpid never returns.
+      if (m_fd >= 0) {
+        close(m_fd);
+        m_fd = -1;
+      }
       int status = 0;
       waitpid(static_cast<pid_t>(m_pid), &status, 0);
       m_pid = -1;
