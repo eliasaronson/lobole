@@ -214,12 +214,14 @@ both open means nothing):
     puts the display back. A sequence that does not check is shown as the
     reason it was not played
     ([playing and filming a sequence](../assemblies/README.md#playing-and-filming-a-sequence)).
-- **Simulation** (`###tb_asm_simulation`) — `DrawSimulationToolWindow` (in
-  `StudyPanel.cpp`): the studies over `ui::StudyHost`, plus a participants
-  table (each top-level occurrence's role: Ignored, Rigid, Meshed, Bonded
-  or Contact; "Clamp here" and "Rest on it" on a rigid row, a friction
-  field on a contact row: [contact](../simulation/README.md#contact)).
-  Close leaves simulation mode.
+- **Simulation** (`###tb_asm_simulation`) — opens the assembly's
+  simulation tab ([the simulation tab](../simulation/README.md#the-simulation-tab)),
+  whose `DrawSimulationToolWindow` (in `StudyPanel.cpp`) carries a
+  participants table (each top-level occurrence's role: Ignored, Rigid,
+  Meshed, Bonded or Contact; "Clamp here" and "Rest on it" on a rigid row, a
+  friction field on a contact row:
+  [contact](../simulation/README.md#contact)). Close goes back to the
+  assembly.
 - **Bill of materials** (`###tb_asm_bom`, `assembly.bom`, B) —
   `DrawBomWindow`, floating below the tool window: name, quantity, material,
   mass and total as sortable columns with the total mass in the header, plus
@@ -301,7 +303,9 @@ closes an open editor; an editor takes the window from a verb.
 
 ## Simulation: the Study panel and window
 
-On a part tab the studies are listed in the dock as `ListRow`s (a glyph for
+On a simulation tab (the Simulation button of a part or an assembly opens
+it: [the simulation tab](../simulation/README.md#the-simulation-tab)) the
+studies are listed in the dock under the subject's row as `ListRow`s (a glyph for
 static, modal, topology, buckling or thermal, the name, and the state — solved, stale, failed —
 as the tail). A double-click, or the toolbar's Run (`###tb_sim_run`), opens
 the study in the floating Simulation window, where it is edited, run and read

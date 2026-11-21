@@ -79,7 +79,8 @@ One type and one hook carry every expression-capable number, in
   with its owner ("mate 'Hinge'") and its path in the assembly's JSON
   (`mates/2/limits/rotation/1`): mates and their limits, occurrence
   positions, relations, exploded steps, motion studies, the sequence,
-  configurations' mate overrides and the assembly's studies
+  configurations' mate overrides and the studies an assembly held before
+  they moved into simulations
   ([what takes one](../assemblies/README.md#numbers-that-are-expressions)).
   A job's and a drawing's do the same: a CAM job's setups, tools,
   operations, placements and fixtures

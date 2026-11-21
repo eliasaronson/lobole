@@ -2547,8 +2547,11 @@ the stress-free temperature seeded where it is derived; its display gains
 
 ## Assembly studies
 
-A study on an `AssemblyDocument` names **occurrences**, each in one role
-(`fem::Participant`, top-level occurrences; a sub-assembly takes part whole):
+A study of an assembly (a simulation whose subject is an assembly) names
+**occurrences**, each in one role (`fem::Participant`, top-level
+occurrences; a sub-assembly takes part whole). The roles are the
+simulation's, one table for its studies
+([the simulation document](#the-simulation-document-core)):
 
 | role | cost | meaning |
 |---|---|---|
@@ -2616,14 +2619,16 @@ optimization is refused on an assembly; `mesh_study {async}` is refused there
 
 ## The simulation document (core)
 
-`fem::SimDocument` (`src/core/fem/SimDocument.{h,cpp}`) is the study list's
-future home ([the plan](../plans/simulation-document.md)). **A project saves
-and opens it ([how](#how-a-simulation-is-saved)) as a tab of its own, but
-the RPCs do not use it yet**: the studies still live on the part and the
-assembly as described above, and the app neither makes a simulation nor
-moves studies into one ([moving studies](#moving-studies-into-a-simulation))
-on its own. [The simulation tab](#the-simulation-tab) says what the tab
-does so far.
+`fem::SimDocument` (`src/core/fem/SimDocument.{h,cpp}`) is where studies
+live ([the plan](../plans/simulation-document.md)): a document of its own,
+saved and opened ([how](#how-a-simulation-is-saved)) as a tab of its own,
+whose subject is a part or an assembly. Simulation mode is a simulation tab
+in front ([the simulation tab](#the-simulation-tab)), the RPCs act on a
+simulation ([simulations](../scripting/rpc.md#simulations)), and a file
+whose studies were saved on its part or assembly has them moved into
+simulations when it opens ([moving studies](#moving-studies-into-a-simulation)).
+A part's and an assembly's own study lists are empty from then on, and
+nothing writes them.
 
 It holds a **subject** (a part or an assembly by stable project-document id,
 and one configuration, 0 = the active one: a reference, never a copy), the
@@ -2705,10 +2710,25 @@ Mesh row will show, which a save keeps even when no result reads it.
 
 ### The simulation tab
 
-A simulation tab (`DocKind::Simulation`, glyph `ICON_FA_GAUGE_HIGH`) is the
-first step of the tab: its window is a later one
-([the plan](../plans/simulation-document.md#6-the-window)). So far it shows
-what it holds. The viewport draws its subject's bodies, read from the
+A simulation tab (`DocKind::Simulation`, glyph `ICON_FA_GAUGE_HIGH`) IS
+simulation mode: the mode is on exactly while one is in front
+(`ResetActiveTabUiState` turns it on with the tab). The **Simulation**
+button of a part or an assembly (`part.simulation`, `assembly.simulation`:
+`ui::EnterSimulation`) opens that subject's first simulation, making one
+named "<subject> simulation" with a study where there is none, and Close
+(or Esc, `ExitSimulation`) goes back to the subject's tab. Its window is a
+later step ([the plan](../plans/simulation-document.md#6-the-window)); until
+then the tab runs the study panel, the Simulation tool window, the load and
+support tools with their glyphs, the mesh view, the legend, the markers and
+the results as a part's simulation mode did, on its own document
+(`ui::StudyHostOf` is the simulation, its subject read through
+`GeometryPart` and `Assembly`). The Model dock lists the studies under the
+subject's row (`###sim_subject`). On an assembly subject the roles are the
+document's, edited in the window's participants table as before
+(`ModifyStudy` hands an edit the document's table and keeps it there), and
+a picked face names the occurrence it is on (`ui::SimBodyOccurrence`). A
+material is set on the part's own tab, its command stack, from the
+material check. The viewport draws its subject's bodies, read from the
 subject's tab whether it is in front or not -- a part's own bodies, or an
 assembly's leaf parts placed in it, without derived ghosts
 (`ui::SimSubjectBodies`, cached on `ui::SimRenderVersion`, which moves with
@@ -2717,8 +2737,8 @@ a read-only list of the subject and the studies (`ui::DrawSimTree`,
 `src/ui/SimTree.cpp`), focused when the tab comes in front, and the toolbar
 frames and measures (`###tb_sim_fit`, `###tb_sim_measure`; the keymap's
 `simulation` context). `ui::OpenSimulationFor` switches to a part's or an
-assembly's first simulation, or makes one named "<subject> simulation";
-nothing calls it from the GUI yet.
+assembly's first simulation, or makes one; `ui::SimulationSlotFor` finds or
+makes one behind the tab in front (what `add_study` over RPC does).
 
 Its undo is a snapshot stack, the job's pattern (`ui::SimHistory`): a
 snapshot shares the results and meshes, `ui::SimUndoGuard` records one step
@@ -2731,9 +2751,11 @@ current one, so an undo never reads as saved.
 The app runs a simulation's studies as it runs a part's
 (`src/ui/SimRunActions.{h,cpp}`), **keyed by the simulation tab's slot id**:
 a run started with another tab in front lands in that simulation, and is
-dropped, said in the log, when the tab is gone. **Nothing in the GUI or the
-RPCs calls these yet**; the study panel and `run_study` still run the
-part's and the assembly's own studies.
+dropped, said in the log, when the tab is gone. The study panel and
+`run_study` run through these. A run's, a mesh's and a topology run's
+status are keyed by the simulation and the study
+(`GetStudyRunStatus(state, study, simSlot)`), since study ids are unique
+only within a document.
 
 - `ui::SimContextFor(state, sim)` resolves the subject from the project now:
   a part subject in the simulation's configuration (0 the live part), or an
@@ -2825,9 +2847,18 @@ writer fixpoint, `format_version_gate`), and the reader fuzz has a
 ### Moving studies into a simulation
 
 `src/core/fem/SimMigration.{h,cpp}` moves the studies of a part or an
-assembly into simulation documents. **It is not called on open yet**: the
-step that turns the study panel into the simulation tab calls it, and stops
-saving the part's and the assembly's own study lists, in the same change.
+assembly into simulation documents, and **an open does it**
+(`ui::MoveStudiesIntoSimulations`, from `AdoptProject` and the single-part
+open): each simulation is a tab added behind the one in front, the part's
+and the assembly's lists are emptied, and the project still reads as saved.
+Beside `AdoptStoredResults`, `ui::AdoptStoredSimResults` restamps each
+simulation's results by their inputs (`fem::RestampSimByInputs`), so a
+result whose study and subject are unchanged reads current. A save after it
+writes the simulations, and the part and the assembly with no studies. A
+study a simulation of its subject already holds is not moved twice (a
+recovery over a part file saved before its studies moved). A part with a
+simulation is two documents, so it saves as a `.lob`: the single-file
+`.json` form, which holds one document, refuses it.
 
 - `fem::SimulationsFromPart(part, id, name)`: every study of the part in
   one simulation of it, in its active configuration ("Bracket
@@ -2970,15 +3001,15 @@ tinted as a fixture, and bonded seams in the bond colour.
 
 ## GUI
 
-- A part enters simulation from the toolbar (command `part.simulation`); the
-  Model dock lists the studies, one row per study with its state (solved,
-  stale, failed, not run, solving) and Delete in the row menu. The selected
-  study is edited, run and read in the floating **Simulation** window.
-- On an assembly tab, `assembly.simulation` opens the Simulation tool window,
-  a viewport mode beside explode and motion; it holds the study list and a
-  participants table with a role per row, **Clamp here** and **Rest on
-  it** (a [contact](#contact) support on it) on rigid rows, and a
-  **Friction** field on contact rows.
+- A part's or an assembly's **Simulation** button (`part.simulation`,
+  `assembly.simulation`) opens its simulation tab
+  ([the simulation tab](#the-simulation-tab)); the Model dock lists the
+  studies, one row per study with its state (solved, stale, failed, not
+  run, solving) and Delete in the row menu. The selected study is edited,
+  run and read in the floating **Simulation** window.
+- On an assembly's simulation the window holds a participants table with a
+  role per row, **Clamp here** and **Rest on it** (a [contact](#contact)
+  support on it) on rigid rows, and a **Friction** field on contact rows.
 - A static study's window has a **Solver** combo (Auto, In-house,
   CalculiX with the version found, or "not found"): CalculiX stays choosable
   without ccx, and Run then refuses in the window's red text with how to
@@ -3041,8 +3072,14 @@ tinted as a fixture, and bonded seams in the bond colour.
 ## RPCs
 
 All in `src/remote/RemoteSimulation.cpp` (`SimulationMethods` table). They
-act on the active part or assembly; a drawing or job tab is refused, naming
-where studies live. A verb that acts on a study takes `id` (or `study`); a
+act on a simulation: `simulation` names one, else the simulation tab in
+front, else the active part's or assembly's one simulation, which
+`add_study` makes behind the tab in front when there is none; only the
+display calls switch tabs ([simulations](../scripting/rpc.md#simulations)).
+A drawing or job tab is refused, naming where studies live. Pins, the frame
+supports, a thermal study's loads and a load's `region` are not refused for
+being on an assembly: the planner judges them, so a lone participant takes
+them. A verb that acts on a study takes `id` (or `study`); a
 verb that names a study for context (`add_load`, `add_refinement`,
 `set_result_display`) takes `study`.
 
@@ -3050,7 +3087,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 |---|---|
 | `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling \| thermal (`kind` accepted; thermal a part study's) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study); on an assembly, uniform only: [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (the simulation's, one table for its studies: the reply's `participants_shared_with` names the other studies it changed; a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study); on an assembly, uniform only: [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)); a thermal study's `temperature` {face, temperature_c}, `heat_flux` {face, power_w \| flux_w_m2}, `convection` {face, film_w_m2k, ambient_c} and `heat_generation` {body, power_w} ([thermal](#thermal)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
@@ -3062,7 +3099,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended -- a nonlinear run's `load_fraction` ([the run](#the-run)); cancel stops it |
 | `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, `reaction_total` and a run's `applied_total` ([the balance](#the-balance)), factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)); thermal: the peaks, `flows`, `balance`, `temperature_margin_k`, and a static study's `temperature` under a thermal load ([thermal](#what-a-thermal-result-says)) |
 | `probe_study {id, face, occurrence?, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at`; on a plastic result its plastic strain and residual motion; on an assembly study the face of `occurrence` ([#probing-a-face](#probing-a-face)) |
-| `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
+| `enter_simulation {study?}`, `exit_simulation` | the simulation's tab in front in simulation mode (made, with a study, on a part with none), and back to its subject |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?, range_min?, range_max?, layer_normal?, markers?}` | `field`: one of [the fields](#results-display), or shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows; the legend's range clamp and markers |
 | `export_study_result {id, path, case?}` | the whole result as a `.vtu` of quadratic tetrahedra ([VTU export](#vtu-export)) |
 | `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |

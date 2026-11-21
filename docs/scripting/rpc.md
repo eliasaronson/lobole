@@ -291,6 +291,39 @@ mutating a part that is not on screen raises what Ctrl+Z would then mean;
 parts, reads every path on the first while the second is active, and asserts
 the active tab never changed.
 
+### Simulations
+
+A study lives in a simulation, a document of its own and a tab
+(docs/simulation/README.md#the-simulation-tab), whose subject is a part or an
+assembly. Every study verb (`add_study` through `topo_to_body`, the
+`SimulationMethods` table) takes an optional `simulation`, a simulation tab's
+name or id (`list_parts` lists them with type `simulation`), and without it
+acts on (`ResolveSimulationSlot` in RemoteSimulation.cpp):
+
+1. the simulation tab in front, else
+2. the one simulation of the part or assembly in front. Several are
+   REFUSED, naming each with its id, as [a name](#a-name-names-one-thing)
+   two objects share is.
+
+A part or an assembly with none has nothing to list (`list_studies` answers
+`[]`) and anything else is refused, saying `add_study` makes one:
+`add_study` makes its simulation ("<subject> simulation") BEHIND the tab in
+front, once what it is given is checked, so a refused one leaves no tab.
+
+Nothing switches tabs but the display calls, `enter_simulation`,
+`set_result_display` and `set_mesh_display`, which bring their simulation
+forward in simulation mode (as the Simulation button does: on a part with
+none, `enter_simulation` makes it, with a study), and `exit_simulation`,
+which goes back from a simulation tab to its subject. Every other edit lands
+on its simulation where it is, as one undo step on that tab's own history
+(`ui::SimSlotUndoGuard`), undone when the tab is in front; a mesh, a check,
+an export and a status read it there (`ui::StudyHostOverride`). A run, a
+mesh and their status are keyed by the simulation and the study
+(`study_status`), so the same study id in two simulations never reads as
+the other's. Study ids are kept from before a simulation held them, so a
+requirement's `{document, study}` still names its study, found in the
+document's simulation that holds it (`fem::SimulationHoldingStudy`).
+
 ### A name names one thing
 
 A parameter that names an occurrence, a mate, a configuration, an exploded
@@ -643,7 +676,12 @@ as one transaction:
   requirements is outside the part's command — a project rename is a
   project-history entry and stays batchable); and `run_motion_study` given
   `leave_at`, `leave_at_deg` or `leave_at_mm` (the run is on a copy; the
-  pose it leaves is written like a scrub). A `$ref` in such a parameter is
+  pose it leaves is written like a scrub); a display call on a simulation
+  that is not in front, `exit_simulation` from a simulation tab, and an
+  `add_study` that would make a part's or an assembly's first simulation
+  ([simulations](#simulations)). An edit on a simulation behind the active
+  tab rolls back with the rest: its document as it stood and its history's
+  steps taken off. A `$ref` in such a parameter is
   judged when its call runs, as is a scope an earlier call of the batch
   decides (a part variable it added): refused then, the batch rolls back.
   A script that builds a part calls `add_part` and then batches the edits.
