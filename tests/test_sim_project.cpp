@@ -373,6 +373,59 @@ TEST_CASE("A simulation's edits are unsaved, autosaved and recovered",
   fs::remove_all(root, ec);
 }
 
+// docs/versioning/README.md#autosave-and-recovery: a stored result is
+// derived, and a sidecar keeps the document alone. The result is made by
+// hand, as a run would store it, so this holds without the mesher too.
+TEST_CASE("A simulation's autosave writes no study result",
+          "[fem][simdoc][studyjobs][autosave]") {
+  const fs::path root = Scratch("autosave-result");
+  const fs::path lob = root / "p.lob";
+  ui::AppState state = StateWithBox();
+  REQUIRE(ui::AddSimulation(state, "Sim", SimOf(state.parts[0].id)) == 1);
+  const uint64_t id = state.sim->GetStudies().front().id;
+  fem::StudyRuntime rt;
+  rt.topology = true;
+  rt.inputHash = 0x1234;
+  fem::StudyBodyResult b;
+  b.bodyName = "Box";
+  for (int i = 0; i < 10; ++i)
+    b.mesh.nodes.push_back(glm::dvec3(i, 0.5 * i, 0.25 * i));
+  b.mesh.tets.push_back({0, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+  b.density = {0.7};
+  rt.bodies.push_back(std::move(b));
+  state.sim->StoreStudyResults(id, std::move(rt));
+  const auto anyResult = [](const fs::path& dir) {
+    bool found = false;
+    std::error_code ec;
+    for (const auto& e : fs::recursive_directory_iterator(dir, ec))
+      found |=
+          e.path().filename().string().find(".result.") != std::string::npos;
+    return found;
+  };
+  // The control: a real save writes the result, so the autosave's missing
+  // one is the autosave's doing.
+  REQUIRE(SaveOk(state, lob));
+  REQUIRE(anyResult(lob));
+  {
+    ui::SimUndoGuard guard(state);
+    state.sim->AddStudy("Unsaved");
+  }
+  Autosaver saver(1.0);
+  saver.Prime(0.0);
+  CHECK(ui::AutosaveProject(state, saver, 10.0) >= 1);
+  const fs::path sidecars = Autosaver::SidecarDir(lob.string());
+  REQUIRE(fs::exists(sidecars / "simulations" / "Sim.json"));
+  CHECK_FALSE(anyResult(sidecars));
+  std::ifstream in(sidecars / "simulations" / "Sim.json");
+  const std::string text((std::istreambuf_iterator<char>(in)),
+                         std::istreambuf_iterator<char>());
+  CHECK(text.find("density") == std::string::npos);
+  CHECK(text.find("input_hash") == std::string::npos);
+  Autosaver::Clear(lob.string());
+  std::error_code ec;
+  fs::remove_all(root, ec);
+}
+
 // --- Running a simulation's studies through the app -------------------------
 // (docs/simulation/README.md#running-a-simulations-study)
 

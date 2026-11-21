@@ -551,6 +551,20 @@ std::expected<void, std::string> SaveSimulation(const fem::SimDocument& sim,
   return std::unexpected(error);
 }
 
+std::expected<void, std::string> SaveSimulationBody(const fem::SimDocument& sim,
+                                                    const std::string& path) {
+  std::string error;
+  try {
+    if (WriteTextAtomic(fs::path(NormalizeProjectPath(path)),
+                        BodyJson(sim).dump(2) + "\n", &error))
+      return {};
+  } catch (const std::exception& e) {
+    error = e.what();
+  }
+  LOG_ERROR("Failed to save simulation to {}: {}", path, error);
+  return std::unexpected(error);
+}
+
 std::expected<std::unique_ptr<fem::SimDocument>, std::string>
 LoadSimulation(const std::string& path) {
   const std::string normalized = NormalizeProjectPath(path);

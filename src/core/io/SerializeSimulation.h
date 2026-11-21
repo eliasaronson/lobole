@@ -38,6 +38,12 @@ namespace DocumentIO {
 
 [[nodiscard]] std::expected<void, std::string>
 SaveSimulation(const fem::SimDocument& sim, const std::string& path);
+// The document alone, as one file without its stored results and meshes:
+// what an autosave sidecar keeps (docs/versioning/README.md
+// #autosave-and-recovery). Both are derived, and a big mesh is tens of
+// megabytes written on every autosave.
+[[nodiscard]] std::expected<void, std::string>
+SaveSimulationBody(const fem::SimDocument& sim, const std::string& path);
 [[nodiscard]] std::expected<std::unique_ptr<fem::SimDocument>, std::string>
 LoadSimulation(const std::string& path);
 // The body as text, without results or meshes: two simulations with the same

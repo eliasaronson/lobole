@@ -1475,7 +1475,7 @@ bool WriteSidecarAtomic(AppState& state, size_t slot, const fs::path& target,
   else if (cam::JobDocument* j = SlotJob(state, slot))
     r = DocumentIO::SaveJob(*j, tmp.string());
   else if (fem::SimDocument* sim = SlotSim(state, slot))
-    r = DocumentIO::SaveSimulation(*sim, tmp.string());
+    r = DocumentIO::SaveSimulationBody(*sim, tmp.string()); // no results
   else
     return false;
   if (!r) {
