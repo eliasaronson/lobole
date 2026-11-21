@@ -25,8 +25,10 @@
 
 #include <vulkan/vulkan.h>
 
+#include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -122,6 +124,14 @@ struct Start {
   std::vector<const char*> instanceExtensions;
   bool safeMode = false;
   ui::AppState* app = nullptr;
+  // Where graphics-attempt.json and graphics.json are; empty writes and
+  // reads neither (--gui-tests, whose state is not the user's).
+  std::filesystem::path stateDir;
+  // This process is the software restart (--software-fallback), and what the
+  // start before it could not do, when that start said
+  // (startup::ReadFallbackRecord).
+  bool softwareRestart = false;
+  std::optional<startup::FallbackRecord> restartedFrom;
 };
 
 // Autosave every dirty document NOW, whatever the interval says (and even
@@ -135,6 +145,9 @@ void Build(const Start& start);
 // Every row made, backward, then the instance: the exit. Safe after a failed
 // rebuild, which made nothing.
 void Teardown();
+// The first frame is out (offscreen: the build held): the start did not die
+// in the driver, so its graphics-attempt.json goes.
+void StartedDrawing();
 
 // The ImGui backend's row creates nothing outside a frame boundary, and
 // main.cpp's frame loop is where that is. These are the hooks the boundary

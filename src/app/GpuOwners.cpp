@@ -9,6 +9,7 @@
 #include "app/GpuOwners.h"
 
 #include "cad/FaceSelector.h"
+#include "common/ChildProcess.h"
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "common/Watchdog.h"
@@ -64,6 +65,26 @@ std::string IblCacheDir() {
 }
 // A rebuild is running (LOBOLE_FAULT=rebuild fails its device creation).
 bool s_rebuilding = false;
+// graphics.json's skip list, as last read or written (Build reads it).
+std::vector<startup::SkippedDevice> s_skipped;
+// A "Try this device again" took a device off it: the frame boundary asks
+// whether the ladder now puts another device first, as for a preference.
+bool s_ladderChanged = false;
+// What the start is doing in the graphics path, for a start after one that
+// died there (startup::GraphicsAttempt). Never during a rebuild: a driver
+// that crashes mid-session is a crash report, not a skipped device.
+void NoteAttempt(const std::string& stage, const std::string& device = {},
+                 const std::string& driver = {}) {
+  if (s_start.stateDir.empty() || s_rebuilding)
+    return;
+  startup::GraphicsAttempt a;
+  a.stage = stage;
+  a.device = device;
+  a.driver = driver;
+  a.build = startup::BuildId();
+  a.pid = proc::CurrentPid();
+  startup::WriteGraphicsAttempt(s_start.stateDir, a);
+}
 // ImGui's backends as the last build made them (gpuowners::KeepImGuiBackends).
 void* s_rendererData = nullptr;
 void* s_platformData = nullptr;
@@ -280,6 +301,7 @@ IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties,
 // at all fails HERE, with VK_ERROR_INCOMPATIBLE_DRIVER.
 static void CreateInstance(std::vector<const char*> instance_extensions) {
   VkResult err;
+  NoteAttempt("instance");
   // Create Vulkan Instance
   {
     // Request Vulkan 1.2: it promotes VK_EXT_descriptor_indexing,
@@ -360,6 +382,9 @@ static void CreateInstance(std::vector<const char*> instance_extensions) {
 struct DeviceCandidate {
   VkPhysicalDevice device = VK_NULL_HANDLE;
   std::string name;
+  // The driver's version, as its maker writes it ("Mesa 26.3.1"): what a
+  // skip list entry holds to.
+  std::string driver;
   VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
   int score = 0;
 };
@@ -411,6 +436,17 @@ static std::vector<DeviceCandidate> EnumerateDevices(GLFWwindow* window,
     DeviceCandidate c;
     c.device = pd;
     c.name = props.deviceName;
+    c.driver = std::to_string(props.driverVersion);
+    if (props.apiVersion >= VK_API_VERSION_1_2) {
+      VkPhysicalDeviceDriverProperties driver{};
+      driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+      VkPhysicalDeviceProperties2 props2{};
+      props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      props2.pNext = &driver;
+      vkGetPhysicalDeviceProperties2(pd, &props2);
+      if (driver.driverInfo[0] != '\0')
+        c.driver = driver.driverInfo;
+    }
     c.type = props.deviceType;
     c.score = !canPresent                                                  ? -1
               : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU   ? 2
@@ -427,6 +463,42 @@ static std::vector<DeviceCandidate> EnumerateDevices(GLFWwindow* window,
   for (const DeviceCandidate& c : out)
     App().gpuDevices.push_back(c.name);
   return out;
+}
+
+// The candidates as the ladder takes them, the skip list applied: a device
+// whose driver crashed a start is left off while its driver and the build
+// are the ones recorded. An entry whose driver or build has changed since
+// is dropped, from graphics.json too: that is how a fix is picked up.
+static std::vector<startup::Device>
+LadderDevices(const std::vector<DeviceCandidate>& candidates) {
+  const std::string build = startup::BuildId();
+  const size_t before = s_skipped.size();
+  std::erase_if(s_skipped, [&](const startup::SkippedDevice& d) {
+    if (d.build != build)
+      return true;
+    return std::any_of(candidates.begin(), candidates.end(),
+                       [&d](const DeviceCandidate& c) {
+                         return c.name == d.device && c.driver != d.driver;
+                       });
+  });
+  if (s_skipped.size() != before && !s_start.stateDir.empty()) {
+    LOG_INFO("Rendering: {} skipped device(s) have a new driver or build; "
+             "trying them again",
+             before - s_skipped.size());
+    startup::WriteSkippedDevices(s_start.stateDir, s_skipped);
+  }
+  std::vector<startup::Device> devices;
+  for (const DeviceCandidate& c : candidates) {
+    startup::Device d{c.name, c.type == VK_PHYSICAL_DEVICE_TYPE_CPU, c.score};
+    d.skipped = std::any_of(
+        s_skipped.begin(), s_skipped.end(),
+        [&c](const startup::SkippedDevice& e) { return e.device == c.name; });
+    if (d.skipped)
+      LOG_WARN("Rendering: {} ({}) is left out: its driver crashed a start",
+               c.name, c.driver);
+    devices.push_back(d);
+  }
+  return devices;
 }
 
 // The logical device on g_PhysicalDevice, its queue and pools. Throws
@@ -554,7 +626,13 @@ static void CreateDevice(bool wsi) {
     // backstop is reached (tests/device_loss_smoke.py).
     const bool rebuildFault =
         s_rebuilding && g_Fault.kind == startup::Fault::Kind::Rebuild;
-    err = rebuildFault || Faulted(startup::Fault::Kind::DeviceCreate)
+    // LOBOLE_FAULT=software_restart: the software restart fails here on
+    // every rung, so it ends at the report naming both failures.
+    const bool restartFault =
+        s_start.softwareRestart &&
+        g_Fault.kind == startup::Fault::Kind::SoftwareRestart;
+    err = rebuildFault || restartFault ||
+                  Faulted(startup::Fault::Kind::DeviceCreate)
               ? VK_ERROR_INITIALIZATION_FAILED
               : vkCreateDevice(g_PhysicalDevice, &create_info, g_Allocator,
                                &g_Device);
@@ -1495,14 +1573,11 @@ void BuildRows(const std::string& firstName) {
                 "The Vulkan loader runs, but it offered no device: there is "
                 "no Vulkan driver for this machine's GPU, or no GPU it can "
                 "use.");
-  std::vector<startup::Device> devices;
+  std::vector<startup::Device> devices = LadderDevices(candidates);
   int first = -1;
-  for (size_t i = 0; i < candidates.size(); i++) {
-    const DeviceCandidate& c = candidates[i];
-    devices.push_back({c.name, c.type == VK_PHYSICAL_DEVICE_TYPE_CPU, c.score});
-    if (!firstName.empty() && c.name == firstName && first < 0)
+  for (size_t i = 0; i < candidates.size(); i++)
+    if (!firstName.empty() && candidates[i].name == firstName && first < 0)
       first = static_cast<int>(i);
-  }
   const std::vector<int> ladder = startup::DeviceLadder(
       devices, app.settings.gpuDevice, g_RendererChoice, first);
   if (ladder.empty()) {
@@ -1544,10 +1619,12 @@ void BuildRows(const std::string& firstName) {
 
   std::vector<std::string> attempts;
   std::optional<startup::Failure> last;
+  bool softwareTried = false;
   int landed = -1;
   for (size_t rung = 0; rung < ladder.size() && landed < 0; rung++) {
     const DeviceCandidate& c = candidates[static_cast<size_t>(ladder[rung])];
     g_PhysicalDevice = c.device;
+    NoteAttempt("device", c.name, c.driver);
     try {
       for (size_t i = 0; i < kRowCount; i++) {
         if (!kRows[i].rung || !Applies(kRows[i]))
@@ -1563,6 +1640,7 @@ void BuildRows(const std::string& firstName) {
       const std::string why =
           (f.result.empty() ? f.detail : f.result) + " " + AtStep(f.step);
       attempts.push_back(c.name + ": " + why);
+      softwareTried = softwareTried || c.type == VK_PHYSICAL_DEVICE_TYPE_CPU;
       LOG_WARN("Rendering: {} failed ({}){}", c.name, why,
                rung + 1 < ladder.size() ? "; trying the next device" : "");
       last = f;
@@ -1574,6 +1652,7 @@ void BuildRows(const std::string& firstName) {
     startup::Failure f = *last;
     f.devices = g_SeenDevices;
     f.attempts = attempts;
+    f.softwareTried = softwareTried;
     throw startup::StartupError(std::move(f));
   }
 
@@ -1608,15 +1687,62 @@ void BuildRows(const std::string& firstName) {
   status.device = used.name;
   status.type = DeviceTypeName(used.type);
   status.software = used.type == VK_PHYSICAL_DEVICE_TYPE_CPU;
+  status.driver = used.driver;
   // Below the rung the preference would have picked: a lost device put
   // first and holding again is not a fallback.
   status.fallback =
       !preferred.empty() && ladder[static_cast<size_t>(landed)] != preferred[0];
   status.reason.clear();
+  status.advice.clear();
+  const auto because = [&status](const std::string& why) {
+    status.reason += (status.reason.empty() ? "" : "; ") + why;
+  };
   for (const std::string& a : attempts)
-    status.reason += (status.reason.empty() ? "" : "; ") + a;
+    because(a);
+  if (status.fallback && last)
+    status.advice =
+        startup::FallbackAdvice(*last, startup::LoaderEnvironment());
+  // Left off the ladder because the driver crashed a start
+  // (docs/rendering/README.md#a-driver-that-crashed-at-start).
+  status.skipped.clear();
+  for (size_t i = 0; i < candidates.size(); i++) {
+    if (!devices[i].skipped)
+      continue;
+    const DeviceCandidate& c = candidates[i];
+    const auto e = std::find_if(
+        s_skipped.begin(), s_skipped.end(),
+        [&c](const startup::SkippedDevice& d) { return d.device == c.name; });
+    const std::string why =
+        e != s_skipped.end() ? e->why : "it crashed a start";
+    status.skipped.push_back({c.name, c.driver, why});
+    because(c.name + " was left out: " + why);
+  }
+  if (!status.skipped.empty()) {
+    status.fallback = true;
+    startup::Failure crashed;
+    crashed.step = startup::step::kDevice;
+    status.advice =
+        "  - " + status.skipped.front().device +
+        " is left out of every start until its driver or Loböle changes. "
+        "Preferences > Performance > Try this device again tries it now.\n" +
+        startup::FallbackAdvice(crashed, startup::LoaderEnvironment());
+  }
+  // The software restart: what the start before it could not do.
+  status.restarted = s_start.softwareRestart;
+  if (s_start.softwareRestart) {
+    status.fallback = true;
+    if (s_start.restartedFrom) {
+      const startup::FallbackRecord& r = *s_start.restartedFrom;
+      status.reason = startup::FailureReason(r.failure) +
+                      (status.reason.empty() ? "" : "; " + status.reason);
+      status.advice = startup::FallbackAdvice(r.failure, r.environment);
+    } else {
+      because("it was started with --software-fallback");
+    }
+  }
   status.forced =
-      g_RendererChoice == startup::RendererChoice::Software   ? "software"
+      s_start.softwareRestart                                 ? ""
+      : g_RendererChoice == startup::RendererChoice::Software ? "software"
       : g_RendererChoice == startup::RendererChoice::Hardware ? "hardware"
                                                               : "";
   status.appliedPreference = app.settings.gpuDevice;
@@ -1628,12 +1754,24 @@ void BuildRows(const std::string& firstName) {
              status.forced.empty() ? "" : " (LOBOLE_RENDERER=software)");
 
   // Every other row, forward. A failure here (the mesh renderer) is the
-  // caller's: the start ends, a rebuild reaches the backstop.
-  for (size_t i = 0; i < kRowCount; i++) {
-    if (kRows[i].rung || !Applies(kRows[i]))
-      continue;
-    s_made[i] = true;
-    kRows[i].create();
+  // caller's: the start ends, a rebuild reaches the backstop. It names the
+  // device it was on, as a rung's failure does.
+  try {
+    for (size_t i = 0; i < kRowCount; i++) {
+      if (kRows[i].rung || !Applies(kRows[i]))
+        continue;
+      s_made[i] = true;
+      kRows[i].create();
+    }
+  } catch (const startup::StartupError& e) {
+    startup::Failure f = e.failure();
+    f.devices = g_SeenDevices;
+    attempts.push_back(used.name + ": " +
+                       (f.result.empty() ? f.detail : f.result) + " " +
+                       AtStep(f.step));
+    f.attempts = attempts;
+    f.softwareTried = softwareTried || status.software;
+    throw startup::StartupError(std::move(f));
   }
   RegisterSceneRenderers();
   ui::ForgetGpuProjection(app, CurrentSet());
@@ -1669,9 +1807,7 @@ bool PreferenceMovesFirstRungUncached(ui::AppState& app) {
   VkResult listed = VK_SUCCESS;
   const std::vector<DeviceCandidate> candidates =
       EnumerateDevices(s_start.window, &listed);
-  std::vector<startup::Device> devices;
-  for (const DeviceCandidate& c : candidates)
-    devices.push_back({c.name, c.type == VK_PHYSICAL_DEVICE_TYPE_CPU, c.score});
+  const std::vector<startup::Device> devices = LadderDevices(candidates);
   const std::vector<int> ladder =
       startup::DeviceLadder(devices, app.settings.gpuDevice, g_RendererChoice);
   if (ladder.empty())
@@ -1810,8 +1946,16 @@ int FlushAutosaveNow(ui::AppState& app) {
 void Build(const Start& start) {
   s_start = start;
   s_app = start.app;
+  s_skipped = s_start.stateDir.empty()
+                  ? std::vector<startup::SkippedDevice>{}
+                  : startup::ReadSkippedDevices(s_start.stateDir);
   CreateInstance(s_start.instanceExtensions);
   BuildRows("");
+}
+
+void StartedDrawing() {
+  if (!s_start.stateDir.empty())
+    startup::RemoveGraphicsAttempt(s_start.stateDir);
 }
 
 void Teardown() {
@@ -1824,6 +1968,7 @@ void Teardown() {
   if (s_app)
     ui::ForgetGpuProjection(*s_app, {});
   DestroyInstance();
+  StartedDrawing(); // a clean exit leaves no attempt behind
 }
 
 void KeepImGuiBackends() {
@@ -1857,10 +2002,28 @@ Outcome AtFrameBoundary(ui::AppState& app, const Boundary& b, double now) {
     if (!b.canBuild)
       return Outcome::Nothing; // a minimised window: when it is shown
     RequestDeviceRebuild(startup::RebuildReason::DeviceLost);
-  } else if (app.settings.gpuDevice != r.appliedPreference && b.canBuild) {
+  } else if ((app.settings.gpuDevice != r.appliedPreference ||
+              !app.gpuRetry.empty() || s_ladderChanged) &&
+             b.canBuild) {
+    // "Try this device again": off the skip list, then asked as a
+    // preference is, whether the ladder now puts another device first.
+    if (!app.gpuRetry.empty()) {
+      std::erase_if(s_skipped, [&app](const startup::SkippedDevice& d) {
+        return d.device == app.gpuRetry;
+      });
+      std::erase_if(r.skipped,
+                    [&app](const auto& d) { return d.device == app.gpuRetry; });
+      if (!s_start.stateDir.empty())
+        startup::WriteSkippedDevices(s_start.stateDir, s_skipped);
+      LOG_INFO("Rendering: {} is tried again", app.gpuRetry);
+      app.gpuRetry.clear();
+      s_askedOn.clear(); // the ladder changed: ask the loader again
+      s_ladderChanged = true;
+    }
     if (!PreferenceMovesFirstRung(app)) {
       r.appliedPreference = app.settings.gpuDevice; // the same device
       r.preferenceWaiting = false;
+      s_ladderChanged = false;
       return Outcome::Nothing;
     }
     // A switch waits for what holds the device instead of ending it.
@@ -1870,6 +2033,7 @@ Outcome AtFrameBoundary(ui::AppState& app, const Boundary& b, double now) {
     r.preferenceWaiting = busy;
     if (busy)
       return Outcome::Nothing;
+    s_ladderChanged = false;
     RequestDeviceRebuild(startup::RebuildReason::GpuPreference);
   }
   if (!s_pending)

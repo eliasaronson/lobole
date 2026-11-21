@@ -9,6 +9,11 @@
 
 #include "app/StartupReport.h"
 
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -138,6 +143,8 @@ TEST_CASE("LOBOLE_FAULT needs LOBOLE_ALLOW_DEBUG_CRASH and names its kinds",
   CHECK(Has(error, "device_create"));
   CHECK(Has(error, "renderer_init:<mesh|outline"));
   CHECK_FALSE(startup::FaultFromString("device_lost", true, &f, &error));
+  REQUIRE(startup::FaultFromString("software_restart", true, &f, &error));
+  CHECK(f.kind == startup::Fault::Kind::SoftwareRestart);
 }
 
 TEST_CASE("The device ladder: the choice first, hardware next, software last",
@@ -226,4 +233,269 @@ TEST_CASE("The device-loss box says what happened and that the work is saved",
   CHECK(Has(text, "/state/crashes/x"));
   CHECK(Has(text, "Restart"));
   CHECK(Has(startup::DeviceLossText("r", 0, ""), "Nothing was unsaved"));
+}
+
+namespace {
+namespace fs = std::filesystem;
+
+// A scratch directory, gone with the test.
+struct Scratch {
+  fs::path dir;
+  Scratch() {
+    std::random_device rd;
+    dir = fs::temp_directory_path() /
+          ("lobole_startup_" + std::to_string(rd()) + std::to_string(rd()));
+    fs::create_directories(dir);
+  }
+  ~Scratch() {
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+  }
+  fs::path Write(const std::string& rel, const std::string& text) const {
+    const fs::path p = dir / rel;
+    fs::create_directories(p.parent_path());
+    std::ofstream(p, std::ios::binary) << text;
+    return p;
+  }
+};
+
+std::string Manifest(const std::string& library) {
+  return R"({"file_format_version": "1.0.1", "ICD": {"library_path": ")" +
+         library + R"(", "api_version": "1.4.0"}})";
+}
+
+// Sets an environment variable for the test's length.
+struct EnvVar {
+  std::string name;
+  std::string old;
+  bool had;
+  EnvVar(const char* n, const char* value) : name(n) {
+    const char* o = std::getenv(n);
+    had = o != nullptr;
+    old = o ? o : "";
+    if (value)
+      setenv(n, value, 1);
+    else
+      unsetenv(n);
+  }
+  ~EnvVar() {
+    if (had)
+      setenv(name.c_str(), old.c_str(), 1);
+    else
+      unsetenv(name.c_str());
+  }
+};
+} // namespace
+
+TEST_CASE("The software driver is found where the loader looks, by its "
+          "library",
+          "[startup]") {
+  Scratch s;
+  const fs::path none = s.dir / "none";
+  fs::create_directories(none);
+  CHECK(startup::FindSoftwareDriverIn({none, s.dir / "missing"}).empty());
+
+  // lavapipe among others, and a malformed file before it in name order.
+  const fs::path icd = s.dir / "share" / "vulkan" / "icd.d";
+  s.Write("share/vulkan/icd.d/a_broken.json", "{ not json");
+  s.Write("share/vulkan/icd.d/intel_icd.x86_64.json",
+          Manifest("/usr/lib/libvulkan_intel.so"));
+  const fs::path lvp = s.Write("share/vulkan/icd.d/lvp_icd.x86_64.json",
+                               Manifest("/usr/lib/x86_64/libvulkan_lvp.so"));
+  s.Write("share/vulkan/icd.d/notes.txt", Manifest("libvulkan_lvp.so"));
+  CHECK(startup::FindSoftwareDriverIn({none, icd}) == lvp);
+  // The first directory that has one wins, as the loader's order says.
+  const fs::path early =
+      s.Write("etc/vulkan/icd.d/zz_lvp.json", Manifest("libvulkan_lvp.so"));
+  CHECK(startup::FindSoftwareDriverIn({s.dir / "etc/vulkan/icd.d", icd}) ==
+        early);
+  CHECK(startup::ManifestLibrary(s.dir / "share/vulkan/icd.d/a_broken.json")
+            .empty());
+  CHECK(startup::ManifestLibrary(lvp) == "/usr/lib/x86_64/libvulkan_lvp.so");
+
+  // The search directories come from the environment, XDG_DATA_DIRS split.
+  {
+    EnvVar data("XDG_DATA_DIRS", (s.dir / "share").c_str());
+    EnvVar config("XDG_CONFIG_HOME", (s.dir / "cfg").c_str());
+    EnvVar home("XDG_DATA_HOME", (s.dir / "home").c_str());
+    const std::vector<fs::path> dirs = startup::DriverSearchDirs();
+    REQUIRE(dirs.size() == 5);
+    CHECK(dirs[0] == s.dir / "cfg" / "vulkan" / "icd.d");
+    CHECK(dirs[1] == fs::path("/etc/vulkan/icd.d"));
+    CHECK(dirs[2] == s.dir / "home" / "vulkan" / "icd.d");
+    CHECK(dirs[3] == icd);
+    CHECK(dirs[4] == fs::path("/run/opengl-driver/share/vulkan/icd.d"));
+  }
+
+  // LOBOLE_SOFTWARE_DRIVER: a manifest, none, or refused naming both.
+  startup::SoftwareDriverChoice c;
+  std::string error;
+  REQUIRE(startup::SoftwareDriverFromString("", &c, &error));
+  CHECK(c.kind == startup::SoftwareDriverChoice::Kind::Automatic);
+  REQUIRE(startup::SoftwareDriverFromString("none", &c, &error));
+  CHECK(c.kind == startup::SoftwareDriverChoice::Kind::None);
+  CHECK(startup::FindSoftwareDriver(c).empty());
+  REQUIRE(startup::SoftwareDriverFromString(lvp.string(), &c, &error));
+  CHECK(c.kind == startup::SoftwareDriverChoice::Kind::Manifest);
+  CHECK(startup::FindSoftwareDriver(c) == lvp);
+  for (const std::string bad :
+       {std::string("off"), (s.dir / "nothing.json").string(),
+        (s.dir / "share/vulkan/icd.d/a_broken.json").string()}) {
+    error.clear();
+    CHECK_FALSE(startup::SoftwareDriverFromString(bad, &c, &error));
+    CHECK(Has(error, "LOBOLE_SOFTWARE_DRIVER"));
+    CHECK(Has(error, "none"));
+    CHECK(Has(error, "manifest"));
+  }
+}
+
+TEST_CASE("A start restarts on software only when that can cure it, once",
+          "[startup]") {
+  using startup::RendererChoice;
+  Scratch s;
+  const fs::path lvp =
+      s.Write("lvp_icd.json", Manifest("/usr/lib/libvulkan_lvp.so"));
+  Failure f;
+  f.step = startup::step::kInstance;
+  // The environment of a start that is not the restart: unclean.
+  EnvVar a("VK_LOADER_LAYERS_DISABLE", nullptr);
+  EnvVar b("VK_DRIVER_FILES", nullptr);
+  EnvVar c("VK_ICD_FILENAMES", "/nonexistent");
+  EnvVar d("VK_ADD_DRIVER_FILES", nullptr);
+  CHECK(startup::ShouldRestartInSoftware(f, false, RendererChoice::Automatic,
+                                         lvp));
+  // Not in the restart itself, not when the user chose, not without a
+  // driver, and not for a step software does not cure.
+  CHECK_FALSE(startup::ShouldRestartInSoftware(f, true,
+                                               RendererChoice::Automatic, lvp));
+  CHECK_FALSE(startup::ShouldRestartInSoftware(f, false,
+                                               RendererChoice::Hardware, lvp));
+  CHECK_FALSE(startup::ShouldRestartInSoftware(f, false,
+                                               RendererChoice::Software, lvp));
+  CHECK_FALSE(startup::ShouldRestartInSoftware(f, false,
+                                               RendererChoice::Automatic, {}));
+  for (const char* step : {startup::step::kGlfwInit, startup::step::kWindow,
+                           startup::step::kVulkanLoader}) {
+    Failure g = f;
+    g.step = step;
+    CHECK_FALSE(startup::ShouldRestartInSoftware(
+        g, false, RendererChoice::Automatic, lvp));
+  }
+  for (const char* step : {startup::step::kNoDevice, startup::step::kDevice,
+                           startup::step::kSurface, startup::step::kSwapchain,
+                           startup::step::kMeshRenderer}) {
+    Failure g = f;
+    g.step = step;
+    CHECK(startup::ShouldRestartInSoftware(g, false, RendererChoice::Automatic,
+                                           lvp));
+  }
+  // lavapipe failed through an unclean loader: worth the restart; through
+  // the loader the restart sets up, not.
+  Failure soft = f;
+  soft.step = startup::step::kMeshRenderer;
+  soft.softwareTried = true;
+  CHECK(startup::ShouldRestartInSoftware(soft, false, RendererChoice::Automatic,
+                                         lvp));
+  CHECK_FALSE(startup::LoaderIsClean(lvp));
+  startup::SetSoftwareEnvironment(lvp);
+  CHECK(startup::LoaderIsClean(lvp));
+  CHECK_FALSE(startup::ShouldRestartInSoftware(soft, false,
+                                               RendererChoice::Automatic, lvp));
+  CHECK(startup::ShouldRestartInSoftware(f, false, RendererChoice::Automatic,
+                                         lvp));
+  const std::vector<std::string> env = startup::LoaderEnvironment();
+  CHECK(std::find(env.begin(), env.end(),
+                  "VK_LOADER_LAYERS_DISABLE=~implicit~") != env.end());
+}
+
+TEST_CASE("The fallback record, the attempt and the skip list round-trip",
+          "[startup]") {
+  Scratch s;
+  CHECK_FALSE(startup::ReadFallbackRecord(s.dir));
+  startup::FallbackRecord r;
+  r.failure.step = startup::step::kInstance;
+  r.failure.result = "VK_ERROR_INCOMPATIBLE_DRIVER";
+  r.failure.attempts = {"NVIDIA: VK_ERROR_DEVICE_LOST at device creation"};
+  r.manifest = "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json";
+  r.build = startup::BuildId();
+  r.environment = {"VK_ICD_FILENAMES=/nonexistent"};
+  REQUIRE(startup::WriteFallbackRecord(s.dir, r));
+  const auto back = startup::ReadFallbackRecord(s.dir);
+  REQUIRE(back);
+  CHECK(back->failure.step == r.failure.step);
+  CHECK(back->failure.result == r.failure.result);
+  CHECK(back->failure.attempts == r.failure.attempts);
+  CHECK(back->manifest == r.manifest);
+  CHECK(back->environment == r.environment);
+  CHECK(Has(startup::FailureReason(back->failure),
+            "could not create the Vulkan instance: "
+            "VK_ERROR_INCOMPATIBLE_DRIVER"));
+  // What to do names what was in the way, and the way to the report.
+  const std::string advice =
+      startup::FallbackAdvice(back->failure, back->environment);
+  CHECK(Has(advice, "VK_ICD_FILENAMES=/nonexistent"));
+  CHECK(Has(advice, "libvulkan1"));
+  CHECK(Has(advice, "3D acceleration"));
+  CHECK(Has(advice, "LOBOLE_SOFTWARE_DRIVER=none"));
+  // No variable set at the instance: a layer, which the restart turned off.
+  CHECK(Has(startup::FallbackAdvice(back->failure, {}), "layer"));
+
+  CHECK_FALSE(startup::ReadGraphicsAttempt(s.dir));
+  startup::WriteGraphicsAttempt(
+      s.dir, {"device", "NVIDIA GeForce RTX 4060", "595.112.07", "b", 4242});
+  auto attempt = startup::ReadGraphicsAttempt(s.dir);
+  REQUIRE(attempt);
+  CHECK(attempt->stage == "device");
+  CHECK(attempt->device == "NVIDIA GeForce RTX 4060");
+  CHECK(attempt->driver == "595.112.07");
+  CHECK(attempt->pid == 4242);
+  startup::RemoveGraphicsAttempt(s.dir);
+  CHECK_FALSE(startup::ReadGraphicsAttempt(s.dir));
+  // A stage it does not know is no attempt: nothing is skipped on it.
+  s.Write("graphics-attempt.json", R"({"stage": "dev"})");
+  CHECK_FALSE(startup::ReadGraphicsAttempt(s.dir));
+
+  CHECK(startup::ReadSkippedDevices(s.dir).empty());
+  REQUIRE(startup::WriteSkippedDevices(
+      s.dir, {{"NVIDIA GeForce RTX 4060", "595.112.07", "b", "it crashed"}}));
+  const auto skipped = startup::ReadSkippedDevices(s.dir);
+  REQUIRE(skipped.size() == 1);
+  CHECK(skipped[0].device == "NVIDIA GeForce RTX 4060");
+  CHECK(skipped[0].why == "it crashed");
+}
+
+TEST_CASE("A skipped device is not a rung", "[startup]") {
+  using startup::Device;
+  using startup::RendererChoice;
+  std::vector<Device> devices = {
+      {"llvmpipe (LLVM 21)", true, 0},
+      {"Intel(R) Arc(tm) Graphics", false, 1},
+      {"NVIDIA GeForce RTX 4060", false, 2},
+  };
+  devices[2].skipped = true;
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Automatic) ==
+        std::vector<int>{1, 0});
+  // Not even when it is preferred, or was the device lost.
+  CHECK(startup::DeviceLadder(devices, "NVIDIA", RendererChoice::Automatic) ==
+        std::vector<int>{1, 0});
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Automatic, 2) ==
+        std::vector<int>{1, 0});
+  devices[0].skipped = true;
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Software).empty());
+  devices[1].skipped = true;
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Automatic).empty());
+}
+
+TEST_CASE("The report after a failed software restart says both", "[startup]") {
+  Failure f;
+  f.step = startup::step::kInstance;
+  f.result = "VK_ERROR_INCOMPATIBLE_DRIVER";
+  f.softwareAttempt = "could not create the graphics device: "
+                      "VK_ERROR_INITIALIZATION_FAILED (/lvp.json)";
+  const std::string text = startup::FailureText(f, "", "/f.txt");
+  CHECK(Has(text, "could not create the Vulkan instance"));
+  CHECK(Has(text, "Software rendering was tried next, and it failed too: "
+                  "could not create the graphics device"));
+  // It was tried: the report does not suggest it.
+  CHECK_FALSE(Has(text, "LOBOLE_RENDERER=software"));
 }

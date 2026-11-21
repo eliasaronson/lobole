@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -52,6 +53,13 @@ struct Failure {
   // "NVIDIA GeForce RTX 4060: VK_ERROR_INITIALIZATION_FAILED at device
   // creation".
   std::vector<std::string> attempts;
+  // A CPU device (lavapipe, llvmpipe) was among those tried, or was the one
+  // a later row (the mesh renderer) failed on: the software restart is no
+  // cure for it when it came through a clean loader (LoaderIsClean).
+  bool softwareTried = false;
+  // Set by the software restart when it failed too: how. The report leads
+  // with the first failure and says this after it.
+  std::string softwareAttempt;
 };
 
 class StartupError : public std::runtime_error {
@@ -71,6 +79,11 @@ std::string VkResultName(int result);
 // try for that step, the log of this start and where the text is kept.
 std::string FailureText(const Failure& f, const std::string& logPath,
                         const std::filesystem::path& failureFile);
+
+// The failure in one line, for renderer.reason and the notices: "could not
+// create the Vulkan instance: VK_ERROR_INCOMPATIBLE_DRIVER", then each
+// device tried.
+std::string FailureReason(const Failure& f);
 
 // <state>/last-startup-failure.txt: the last start that found no renderer.
 std::filesystem::path FailureFile(const std::filesystem::path& stateDir);
@@ -140,8 +153,20 @@ enum class RendererChoice { Automatic, Software, Hardware };
 //                          rung (start-up is untouched), so a lost device
 //                          ends at the backstop (docs/rendering/README.md
 //                          #rebuilding-the-device)
+//   software_restart       the software restart fails device creation on
+//                          every rung, so a start whose first try failed
+//                          ends at the report naming both
+// The first three fail the first start only: the software restart
+// (--software-fallback) runs without them.
 struct Fault {
-  enum class Kind { None, DeviceCreate, Swapchain, RendererInit, Rebuild };
+  enum class Kind {
+    None,
+    DeviceCreate,
+    Swapchain,
+    RendererInit,
+    Rebuild,
+    SoftwareRestart
+  };
   Kind kind = Kind::None;
   std::string renderer; // RendererInit only
 };
@@ -156,12 +181,15 @@ struct Device {
   std::string name;
   bool cpu = false; // VK_PHYSICAL_DEVICE_TYPE_CPU: lavapipe, llvmpipe
   int score = 0;    // devicepref's: < 0 ineligible (cannot present here)
+  // On the skip list: its driver crashed a start (graphics.json). Not a rung.
+  bool skipped = false;
 };
 
 // The order to try devices in, as indices: the one devicepref::Choose picks
 // for `preferred` first, then the other hardware by score (first on a tie),
-// then the software ones. Ineligible devices are not rungs. `Software` keeps
-// only the CPU devices and `Hardware` only the rest.
+// then the software ones. Ineligible devices are not rungs, and neither are
+// skipped ones. `Software` keeps only the CPU devices and `Hardware` only the
+// rest.
 //
 // `first` >= 0 puts that device on the first rung whatever the preference
 // says, when it is eligible: a rebuild after a loss tries the device that
@@ -204,5 +232,120 @@ std::string DeviceLossText(const std::string& reason, int autosaved,
 // already let go of what the new process will want: the remote port, the
 // session marker, a terminal panel's child.
 bool Relaunch(const std::vector<std::string>& args, std::string* error);
+
+// --- software rendering when the GPU will not ----------------------------
+//
+// docs/rendering/README.md#software-rendering-when-the-gpu-will-not: a start
+// that cannot get a hardware renderer restarts itself on the host's
+// lavapipe, through a loader that sees that driver alone and no implicit
+// layer.
+
+// The restart's own flag: only the software rungs, and the loop guard.
+inline constexpr const char* kSoftwareFallbackFlag = "--software-fallback";
+
+// LOBOLE_SOFTWARE_DRIVER: unset or empty searches (FindSoftwareDriver);
+// `none` turns the automatic restart off; anything else must be the path of
+// a Vulkan driver manifest, and is refused when it is not one.
+struct SoftwareDriverChoice {
+  enum class Kind { Automatic, None, Manifest } kind = Kind::Automatic;
+  std::filesystem::path manifest;
+};
+[[nodiscard]] bool SoftwareDriverFromString(std::string_view text,
+                                            SoftwareDriverChoice* out,
+                                            std::string* error);
+
+// The `ICD.library_path` a driver manifest names, or empty when the file is
+// not one (unreadable, not JSON, no library_path).
+std::string ManifestLibrary(const std::filesystem::path& manifest);
+// Where the loader looks for driver manifests, in its order: XDG_CONFIG_HOME
+// (default ~/.config), /etc, XDG_DATA_HOME (default ~/.local/share), each of
+// XDG_DATA_DIRS (default /usr/local/share:/usr/share), each + vulkan/icd.d;
+// and NixOS's /run/opengl-driver/share/vulkan/icd.d. Read from the
+// environment at every call.
+std::vector<std::filesystem::path> DriverSearchDirs();
+// The first manifest in `dirs` (each in name order) whose library is
+// lavapipe (`libvulkan_lvp`), or empty. Reads files; loads nothing.
+std::filesystem::path
+FindSoftwareDriverIn(const std::vector<std::filesystem::path>& dirs);
+// The manifest the restart would use: the override's, none for `none`, else
+// the search's. Always empty off Linux: nothing is bundled.
+std::filesystem::path FindSoftwareDriver(const SoftwareDriverChoice& choice);
+
+// Whether the steps' failure is one software rendering can cure: the
+// instance, no device, the device, the surface, the swapchain, the mesh
+// renderer. Not the windowing system, the window or the loader.
+bool SoftwareCures(const std::string& step);
+// The loader here sees `manifest` alone and no implicit layer: what the
+// restart sets up (SetSoftwareEnvironment).
+bool LoaderIsClean(const std::filesystem::path& manifest);
+// VK_DRIVER_FILES and VK_ICD_FILENAMES = manifest, VK_ADD_DRIVER_FILES
+// unset, VK_LOADER_LAYERS_DISABLE=~implicit~.
+void SetSoftwareEnvironment(const std::filesystem::path& manifest);
+// The loader variables this environment sets, as "NAME=value": what may
+// have been in the way, for the notice.
+std::vector<std::string> LoaderEnvironment();
+
+// Whether this start should restart on software instead of reporting `f`.
+// `restart` is true in the restart itself (kSoftwareFallbackFlag); a choice
+// other than Automatic is the user's; `manifest` is FindSoftwareDriver's.
+bool ShouldRestartInSoftware(const Failure& f, bool restart,
+                             RendererChoice choice,
+                             const std::filesystem::path& manifest);
+
+// <state>/renderer-fallback.json: what the first start could not do, for the
+// restart to say. Written by the start that restarts, read by the restart.
+struct FallbackRecord {
+  Failure failure;
+  std::string manifest;
+  std::string build; // BuildId()
+  // LoaderEnvironment() of the start that failed.
+  std::vector<std::string> environment;
+};
+std::filesystem::path FallbackRecordFile(const std::filesystem::path& stateDir);
+bool WriteFallbackRecord(const std::filesystem::path& stateDir,
+                         const FallbackRecord& record);
+std::optional<FallbackRecord>
+ReadFallbackRecord(const std::filesystem::path& stateDir);
+
+// What to do about software rendering that the user did not ask for: the
+// rows of the failure report's tips that fit the step (the driver and the
+// loader by distribution, 3D acceleration in a VM), the loader variable or
+// layer that was in the way when there was one, and LOBOLE_SOFTWARE_DRIVER=
+// none for the report instead.
+std::string FallbackAdvice(const Failure& f,
+                           const std::vector<std::string>& environment);
+
+// "0.2.1 (abc1234, Release)": a skip list entry and the records hold to it.
+std::string BuildId();
+
+// <state>/graphics-attempt.json: what the start is doing in the graphics
+// path, written before the instance and before each rung, removed at the
+// first frame, on a StartupError and on a clean exit. One left behind by a
+// process that is gone says where it died.
+struct GraphicsAttempt {
+  std::string stage;          // "instance" or "device"
+  std::string device, driver; // stage "device"
+  std::string build;
+  long pid = 0;
+};
+std::filesystem::path
+GraphicsAttemptFile(const std::filesystem::path& stateDir);
+void WriteGraphicsAttempt(const std::filesystem::path& stateDir,
+                          const GraphicsAttempt& attempt);
+std::optional<GraphicsAttempt>
+ReadGraphicsAttempt(const std::filesystem::path& stateDir);
+void RemoveGraphicsAttempt(const std::filesystem::path& stateDir);
+
+// <state>/graphics.json's skip list: devices whose driver crashed a start,
+// left off the ladder while the driver version and the build are the ones
+// recorded.
+struct SkippedDevice {
+  std::string device, driver, build, why;
+};
+std::filesystem::path GraphicsStateFile(const std::filesystem::path& stateDir);
+std::vector<SkippedDevice>
+ReadSkippedDevices(const std::filesystem::path& stateDir);
+bool WriteSkippedDevices(const std::filesystem::path& stateDir,
+                         const std::vector<SkippedDevice>& skipped);
 
 } // namespace startup

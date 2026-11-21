@@ -3,6 +3,8 @@
 
 #include "ui/MainMenuBar.h"
 #include "ui/OpenJob.h"
+#include <functional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -436,8 +438,22 @@ void DrawAboutWindow(AppState& state) {
                             (state.renderer.type.empty()
                                  ? ""
                                  : "  (" + state.renderer.type + ")"));
-  if (state.renderer.fallback)
+  if (state.renderer.restarted)
+    row("Fallback",
+        "restarted on software rendering: " + state.renderer.reason);
+  else if (state.renderer.fallback)
     row("Fallback", "a better device failed: " + state.renderer.reason);
+  for (const auto& d : state.renderer.skipped)
+    row("Skipped", d.device + " (" + d.driver + "): " + d.why);
+  if (!state.renderer.advice.empty()) {
+    // The same rows as the notice and the modal, one per line.
+    std::istringstream lines(state.renderer.advice);
+    bool first = true;
+    for (std::string line; std::getline(lines, line);) {
+      row(first ? "What to do" : "", line);
+      first = false;
+    }
+  }
   if (!state.renderer.forced.empty())
     row("Chosen by", "LOBOLE_RENDERER=" + state.renderer.forced);
   if (!state.gpuName.empty() && !state.renderer.rayTracing)
@@ -527,6 +543,9 @@ void DrawHelpMenu(AppState& state) {
 struct MenuBarNotice {
   const char* label; // "Changed on disk###disk_notice"
   const char* tooltip;
+  // Clicking it does this (the renderer notice opens its modal again);
+  // empty is text only.
+  std::function<void()> click = {};
 };
 
 void DrawMenuBarNotices(const std::vector<MenuBarNotice>& notices) {
@@ -543,10 +562,17 @@ void DrawMenuBarNotices(const std::vector<MenuBarNotice>& notices) {
   if (x <= ImGui::GetCursorPosX())
     return; // a narrow window: the menus themselves come first
   ImGui::SetCursorPosX(x);
-  ImGui::PushStyleColor(ImGuiCol_TextDisabled,
-                        ImVec4(0.95f, 0.75f, 0.35f, 1.0f));
+  const ImVec4 amber(0.95f, 0.75f, 0.35f, 1.0f);
+  ImGui::PushStyleColor(ImGuiCol_TextDisabled, amber);
   for (const MenuBarNotice& n : notices) {
-    ImGui::MenuItem(n.label, nullptr, false, false);
+    if (n.click) {
+      ImGui::PushStyleColor(ImGuiCol_Text, amber);
+      if (ImGui::MenuItem(n.label, nullptr, false, true))
+        n.click();
+      ImGui::PopStyleColor();
+    } else {
+      ImGui::MenuItem(n.label, nullptr, false, false);
+    }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
       ImGui::SetTooltip("%s", n.tooltip);
   }
@@ -646,7 +672,11 @@ void DrawNotices(AppState& state) {
         (state.renderer.software ? "Rendering in software on "
                                  : "Rendering on ") +
         state.renderer.device +
-        (state.renderer.fallback
+        (state.renderer.restarted
+             ? ", restarted on it because the start could not get a hardware "
+               "renderer: " +
+                   state.renderer.reason
+         : state.renderer.fallback
              ? ", because a better device failed: " + state.renderer.reason
          : !state.renderer.forced.empty()
              ? " (LOBOLE_RENDERER=" + state.renderer.forced + ")"
@@ -655,11 +685,19 @@ void DrawNotices(AppState& state) {
         (state.renderer.rayTracing
              ? std::string()
              : std::string("\nThe path-traced still is not available here; "
-                           "the quick still is."));
+                           "the quick still is.")) +
+        (state.renderer.advice.empty()
+             ? std::string()
+             : "\n\nWhat to do about it:\n" + state.renderer.advice +
+                   "Click to read it again.");
+    // A fallback's notice opens its modal again: what to do is in it.
+    std::function<void()> again;
+    if (state.renderer.fallback)
+      again = [&state] { state.rendererFallbackNoticeShown = false; };
     notices.push_back({state.renderer.software
                            ? "Software rendering###renderer_software_notice"
                            : "Fallback renderer###renderer_fallback_notice",
-                       rendererTip.c_str()});
+                       rendererTip.c_str(), again});
   }
   std::string missingTip;
   if (!state.renderer.missing.empty()) {

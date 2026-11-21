@@ -13,6 +13,7 @@
 #include "app/StartupReport.h"
 #include "app/StopSignal.h"
 #include "cad/FaceSelector.h"
+#include "common/ChildProcess.h"
 #include "common/DesignerVersion.h"
 #include "common/DevicePreference.h"
 #include "common/Logger.h"
@@ -76,6 +77,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <memory>
@@ -904,9 +906,21 @@ void printUsage(const char* programName) {
                "graphics device: offers\n                       that "
                "session's unsaved work)"
             << std::endl;
+  std::cout << "  --software-fallback  (Given by the restart on software "
+               "rendering after a start\n                       that could "
+               "not get a hardware renderer: software\n                     "
+               "  devices only)"
+            << std::endl;
   std::cout << "Environment:\n"
                "  LOBOLE_RENDERER=software|hardware  Which kind of graphics "
                "device to use\n"
+               "  LOBOLE_SOFTWARE_DRIVER=<manifest>|none  The software driver "
+               "a start that\n"
+               "                       cannot get a hardware renderer "
+               "restarts on (default: Mesa's\n"
+               "                       lavapipe, found where the Vulkan "
+               "loader looks); none reports\n"
+               "                       the failure instead\n"
                "  LOBOLE_NO_DIALOG=1   Never show a native message box (tests, "
                "CI)\n";
 }
@@ -963,6 +977,9 @@ struct CommandLineArgs {
   bool perfHud = false;
   bool safeMode = false;        // --safe-mode
   bool afterDeviceLoss = false; // --after-device-loss
+  // --software-fallback: this process is the restart on software rendering
+  // (docs/rendering/README.md#the-device-ladder).
+  bool softwareFallback = false;
   // --crash-test: crashes once the session marker exists, so the next start
   // collects it like any other crash (and a windowed one counts towards
   // safe mode: it died before its first frame).
@@ -1111,6 +1128,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       args.safeMode = true;
     } else if (arg == "--after-device-loss") {
       args.afterDeviceLoss = true;
+    } else if (arg == startup::kSoftwareFallbackFlag) {
+      args.softwareFallback = true;
     } else if (arg == "--perf-hud") {
       args.perfHud = true;
     } else if (arg == "--hidden") {
@@ -1257,6 +1276,9 @@ static void SyncOffscreenScene() {
     g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
 }
 
+static void PrepareGraphicsStart(gpuowners::Start& start, bool guiTests);
+static void AfterGraphicsStart();
+
 static int RunOffscreen(const CommandLineArgs& args) {
   LOG_INFO("Offscreen mode: real renderer, no window or display server");
 
@@ -1270,8 +1292,12 @@ static int RunOffscreen(const CommandLineArgs& args) {
   {
     gpuowners::Start start;
     start.app = &g_App;
+    PrepareGraphicsStart(start, /*guiTests=*/false);
     gpuowners::Build(start);
   }
+  AfterGraphicsStart();
+  // No frame to wait for here: the build held, so no driver died starting.
+  gpuowners::StartedDrawing();
   RefreshCrashModules(); // the Vulkan driver is loaded now
 
   // Same defaults as the GUI and RunHeadless, so view/fit_view/get_state
@@ -1590,21 +1616,173 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv);
 // — a start that explained itself has not crashed — and exit code 3. _Exit,
 // not a return: what was half built (a window, a device, renderers) is not
 // torn down by destructors that expect it whole.
+// This start's own arguments (argv[1..]) and the choices the environment
+// made, for the restart on software rendering.
+static std::vector<std::string> g_StartArgs;
+static startup::SoftwareDriverChoice g_SoftwareDriver;
+static bool g_SoftwareRestart = false; // --software-fallback
+
+// The restart on software rendering
+// (docs/rendering/README.md#software-rendering-when-the-gpu-will-not): the
+// failure recorded for the restart to say, the session ended as a clean exit
+// ends it, and this executable again (execv: the same pid) with
+// --software-fallback, through a loader that sees the software driver alone
+// and no implicit layer. Returns only when it could not.
+static void RestartInSoftware(const startup::Failure& f,
+                              const std::filesystem::path& manifest) {
+  const std::filesystem::path stateDir = RuntimePaths::UserStateDir();
+  startup::FallbackRecord record;
+  record.failure = f;
+  record.manifest = manifest.string();
+  record.build = startup::BuildId();
+  record.environment = startup::LoaderEnvironment();
+  if (!startup::WriteFallbackRecord(stateDir, record))
+    LOG_WARN("Could not write {}",
+             startup::FallbackRecordFile(stateDir).string());
+  LOG_WARN("Rendering: {}; restarting on software rendering ({})",
+           startup::FailureReason(f), manifest.string());
+  startup::RemoveGraphicsAttempt(stateDir);
+  std::vector<std::string> again;
+  for (const std::string& a : g_StartArgs)
+    if (a != "--crash-test" && a != startup::kSoftwareFallbackFlag)
+      again.push_back(a);
+  again.push_back(startup::kSoftwareFallbackFlag);
+  startup::SetSoftwareEnvironment(manifest);
+  crash::EndSession(); // not a crash: this start explained itself
+  watchdog::Stop();
+  std::fflush(nullptr);
+  std::string error;
+  if (startup::Relaunch(again, &error)) {
+    std::fflush(nullptr);
+    std::_Exit(0); // the new process is started (Windows)
+  }
+  // Could not: the report, as if the restart had never been on offer.
+  std::error_code ec;
+  std::filesystem::remove(startup::FallbackRecordFile(stateDir), ec);
+  LOG_ERROR("Could not restart on software rendering: {}", error);
+}
+
+// A start that found no renderer: restarted on software rendering when that
+// could cure it (startup::ShouldRestartInSoftware), else said everywhere it
+// can be read (startup::ReportStartupFailure), the session ended as a clean
+// exit ends it — a start that explained itself has not crashed — and exit
+// code 3. _Exit, not a return: what was half built (a window, a device,
+// renderers) is not torn down by destructors that expect it whole.
 [[noreturn]] static void EndStartup(const startup::StartupError& e,
                                     bool windowed) {
+  const std::filesystem::path stateDir = RuntimePaths::UserStateDir();
+  startup::RemoveGraphicsAttempt(stateDir);
+  const std::filesystem::path manifest =
+      startup::FindSoftwareDriver(g_SoftwareDriver);
+  if (startup::ShouldRestartInSoftware(e.failure(), g_SoftwareRestart,
+                                       g_RendererChoice, manifest)) {
+    RestartInSoftware(e.failure(), manifest);
+    // ...it could not: on to the report.
+  } else if (!g_SoftwareRestart && !manifest.empty() &&
+             startup::SoftwareCures(e.failure().step)) {
+    LOG_INFO("Rendering: no restart on software rendering ({})",
+             g_RendererChoice != startup::RendererChoice::Automatic
+                 ? "LOBOLE_RENDERER is set"
+                 : "the software device failed through a clean loader");
+  }
+  // The restart failed too: the report leads with the first failure and
+  // says how software rendering failed after it.
+  startup::Failure f = e.failure();
+  if (g_SoftwareRestart) {
+    if (std::optional<startup::FallbackRecord> first =
+            startup::ReadFallbackRecord(stateDir)) {
+      f = first->failure;
+      f.softwareAttempt =
+          startup::FailureReason(e.failure()) + " (" + first->manifest + ")";
+    }
+    std::error_code ec;
+    std::filesystem::remove(startup::FallbackRecordFile(stateDir), ec);
+  }
   const crash::Session* session = crash::CurrentSession();
   const int code = startup::ReportStartupFailure(
-      e.failure(), RuntimePaths::UserStateDir(),
-      session ? session->logFile.string() : std::string(), windowed);
+      f, stateDir, session ? session->logFile.string() : std::string(),
+      windowed);
   crash::EndSession();
   watchdog::Stop();
   std::fflush(nullptr);
   std::_Exit(code);
 }
 
+// What the graphics start is given beyond the window: where its attempt and
+// skip files are, whether it is the software restart and what the start
+// before it could not do. Reads the attempt a dead start left behind first:
+// one that died creating the instance restarts this one on software, one
+// that died on a device puts that device on the skip list
+// (docs/rendering/README.md#a-driver-that-crashed-at-start). Never under
+// --gui-tests, whose state an earlier run must not decide.
+static void PrepareGraphicsStart(gpuowners::Start& start, bool guiTests) {
+  namespace fs = std::filesystem;
+  start.softwareRestart = g_SoftwareRestart;
+  const fs::path stateDir = RuntimePaths::UserStateDir();
+  if (g_SoftwareRestart)
+    start.restartedFrom = startup::ReadFallbackRecord(stateDir);
+  if (guiTests)
+    return;
+  start.stateDir = stateDir;
+  const std::optional<startup::GraphicsAttempt> last =
+      startup::ReadGraphicsAttempt(stateDir);
+  if (!last)
+    return;
+  if (last->pid > 0 && last->pid != proc::CurrentPid() &&
+      proc::ProcessAlive(last->pid))
+    return; // another instance is starting now: it is not dead
+  startup::RemoveGraphicsAttempt(stateDir);
+  if (last->stage == "instance") {
+    LOG_WARN("Rendering: the last start died creating the Vulkan instance");
+    startup::Failure f;
+    f.step = startup::step::kInstance;
+    f.detail = "The last start died while it created it: a crash in the "
+               "Vulkan loader, a layer or a driver.";
+    const fs::path manifest = startup::FindSoftwareDriver(g_SoftwareDriver);
+    if (startup::ShouldRestartInSoftware(f, g_SoftwareRestart, g_RendererChoice,
+                                         manifest))
+      RestartInSoftware(f, manifest);
+    return;
+  }
+  std::vector<startup::SkippedDevice> skipped =
+      startup::ReadSkippedDevices(stateDir);
+  std::erase_if(skipped, [&](const startup::SkippedDevice& d) {
+    return d.device == last->device;
+  });
+  const std::string when = [] {
+    const std::time_t t = std::time(nullptr);
+    char buf[32];
+    std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M", std::localtime(&t));
+    return std::string(buf);
+  }();
+  skipped.push_back({last->device, last->driver, startup::BuildId(),
+                     "its driver (" + last->driver +
+                         ") crashed a start before the window drew (found " +
+                         when + ")"});
+  LOG_WARN("Rendering: the last start died on {} ({}); it is left out until "
+           "its driver or Loböle changes",
+           last->device, last->driver);
+  if (!startup::WriteSkippedDevices(stateDir, skipped))
+    LOG_WARN("Could not write {}",
+             startup::GraphicsStateFile(stateDir).string());
+}
+
+// After a build that held: a start that is not the restart has no use for
+// the record of an earlier one.
+static void AfterGraphicsStart() {
+  if (g_SoftwareRestart)
+    return;
+  std::error_code ec;
+  std::filesystem::remove(
+      startup::FallbackRecordFile(RuntimePaths::UserStateDir()), ec);
+}
+
 int main(int argc, char** argv) {
   InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
+  for (int i = 1; i < argc; i++)
+    g_StartArgs.emplace_back(argv[i]);
+  g_SoftwareRestart = args.softwareFallback;
   // Before any thread: a test's instance dies with the test
   // (app/ParentWatch.h).
   if (const int status = ArmExitWithParent(args.exitWithParent); status >= 0)
@@ -1639,10 +1817,28 @@ int main(int argc, char** argv) {
         !startup::FaultFromString(env("LOBOLE_FAULT"),
                                   allow != nullptr &&
                                       std::string_view(allow) == "1",
-                                  &g_Fault, &error)) {
+                                  &g_Fault, &error) ||
+        !startup::SoftwareDriverFromString(env("LOBOLE_SOFTWARE_DRIVER"),
+                                           &g_SoftwareDriver, &error)) {
       std::cerr << "Error: " << error << std::endl;
       return 2;
     }
+  }
+  // The software restart keeps only the software rungs, and the start
+  // faults were the first start's (app/StartupReport.h).
+  if (args.softwareFallback) {
+    if (g_RendererChoice == startup::RendererChoice::Hardware) {
+      std::cerr << "Error: " << startup::kSoftwareFallbackFlag
+                << " renders in software; it does not run with "
+                   "LOBOLE_RENDERER=hardware"
+                << std::endl;
+      return 2;
+    }
+    g_RendererChoice = startup::RendererChoice::Software;
+    if (g_Fault.kind == startup::Fault::Kind::DeviceCreate ||
+        g_Fault.kind == startup::Fault::Kind::Swapchain ||
+        g_Fault.kind == startup::Fault::Kind::RendererInit)
+      g_Fault = {};
   }
   // The GUI suite is never watched by anyone who could click a box.
   if (args.runGuiTests) {
@@ -2109,8 +2305,10 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     start.instanceExtensions = extensions;
     start.safeMode = g_App.safeMode.active;
     start.app = &g_App;
+    PrepareGraphicsStart(start, args.runGuiTests);
     gpuowners::Build(start);
   }
+  AfterGraphicsStart();
   RefreshCrashModules(); // the Vulkan driver is loaded now
 
   // Initialize application objects
@@ -2415,7 +2613,7 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
       const std::string a = argv[i];
       if (a != "--safe-mode" && a != "--after-device-loss" &&
-          a != "--crash-test")
+          a != "--crash-test" && a != startup::kSoftwareFallbackFlag)
         again.push_back(a);
     }
     again.insert(again.end(), extra.begin(), extra.end());
@@ -2793,6 +2991,7 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
       if (FramePresent(wd) && !firstFrameNoted && !args.runGuiTests) {
         firstFrameNoted = true;
         crash::NoteFirstFrame();
+        gpuowners::StartedDrawing(); // the driver did not die starting
       }
       // Before the uncapped-mode sleep below: the frame is over when the
       // image is presented, not when we have finished idling.

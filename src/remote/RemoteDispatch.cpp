@@ -384,9 +384,15 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "says how start-up got to it "
      "(docs/rendering/README.md#the-device-ladder): {device, type "
      "(discrete|integrated|virtual|software|other), "
-     "software, fallback (a better device here was tried and failed), "
-     "reason (which, and how), forced (LOBOLE_RENDERER: software|hardware, "
-     "or empty), ray_tracing (the path-traced still is available), missing "
+     "software, driver (its driver version), fallback (a better device "
+     "here was tried and failed, was skipped, or this is the software "
+     "restart), reason (which, and how), forced (LOBOLE_RENDERER: "
+     "software|hardware, or empty), restarted (this process is the restart "
+     "on software rendering after a start that could not get a hardware "
+     "renderer; `reason` is that start's failure), skipped ({device, "
+     "driver, why}[]: devices left out because their driver crashed a "
+     "start; set_settings {gpu_retry: device} tries one again), "
+     "ray_tracing (the path-traced still is available), missing "
      "(renderers whose initialization failed), lost (the graphics device "
      "was lost and stays lost -- the rebuild in place failed, or it died "
      "again within 60 s of the last one: every method that draws is refused "
@@ -423,10 +429,14 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "graphics device writes one too, its reason \"graphics device lost: "
      "...\". `last_startup_failure` is {path, text} when the last start "
      "that found no renderer left its message "
-     "(last-startup-failure.txt), else null. Read-only, and "
+     "(last-startup-failure.txt), else null; `renderer_fallback` is {path, "
+     "text} when a start could not get a hardware renderer and restarted "
+     "on software rendering (renderer-fallback.json, the failure it "
+     "recorded), else null. Read-only, and "
      "nothing is ever sent anywhere.",
      "", remote::Deferrable,
      "folder:string, last_startup_failure:{path:string, text:string}|null, "
+     "renderer_fallback:{path:string, text:string}|null, "
      "reports:{autosaves:string[], build:string, "
      "crashed:bool, mode:string, os:string, path:string, "
      "project:string, reason:string, started:string, stem:string, "
@@ -663,7 +673,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "place (docs/rendering/README.md#rebuilding-the-device): the answer "
      "waits until that has run -- after a path-traced render or a motion "
      "video in flight -- and carries `renderer` (ping's) saying where it "
-     "landed.",
+     "landed. `gpu_retry: <device>` is not a preference but \"Try this "
+     "device again\": it takes a device off renderer.skipped (its driver "
+     "crashed a start) and rebuilds onto it when the ladder now puts it "
+     "first, answering the same way; a device that is not skipped is "
+     "refused, naming those that are.",
      "*", remote::NotInBatch},
     {"get_keymap",
      "The keyboard bindings (docs/ui/keybindings.md): every command with "
@@ -1150,6 +1164,10 @@ json FaultInOccScope() {
 // ping's `renderer`, which set_settings {gpu_device} answers with too.
 json RendererJson(const ui::AppState& state) {
   const ui::AppState::RendererStatus& r = state.renderer;
+  json skipped = json::array();
+  for (const auto& d : r.skipped)
+    skipped.push_back(
+        {{"device", d.device}, {"driver", d.driver}, {"why", d.why}});
   json last = nullptr;
   if (r.rebuilds > 0)
     last = {{"reason", r.lastRebuildReason},
@@ -1159,9 +1177,12 @@ json RendererJson(const ui::AppState& state) {
   return {{"device", r.device},
           {"type", r.type},
           {"software", r.software},
+          {"driver", r.driver},
           {"fallback", r.fallback},
           {"reason", r.reason},
           {"forced", r.forced},
+          {"restarted", r.restarted},
+          {"skipped", skipped},
           {"ray_tracing", r.rayTracing},
           {"missing", r.missing},
           // `lost` is the lost STATE: a loss being rebuilt is not one, and no
@@ -1172,10 +1193,35 @@ json RendererJson(const ui::AppState& state) {
           {"last_rebuild", last}};
 }
 
+// set_settings {gpu_retry: device}: "Try this device again", which is not a
+// preference and is not saved. Taken out of `raw` and checked: a device that
+// is not on the skip list is refused, naming those that are.
+static std::string TakeGpuRetry(const ui::AppState& state, json& raw) {
+  if (!raw.is_object() || !raw.contains("gpu_retry"))
+    return {};
+  const json v = raw["gpu_retry"];
+  raw.erase("gpu_retry");
+  std::string skipped;
+  for (const auto& d : state.renderer.skipped)
+    skipped += (skipped.empty() ? "'" : ", '") + d.device + "'";
+  const std::string accepted = skipped.empty()
+                                   ? "no device is skipped on this start"
+                                   : "it takes a skipped device: " + skipped;
+  if (!v.is_string())
+    throw std::runtime_error("gpu_retry must be a device name; " + accepted);
+  const std::string name = v.get<std::string>();
+  for (const auto& d : state.renderer.skipped)
+    if (d.device == name)
+      return name;
+  throw std::runtime_error("gpu_retry is '" + name + "'; " + accepted);
+}
+
 // set_settings, applied: validated first, so a rejected value leaves
 // nothing half-applied, and saved before it is applied.
-json ApplySettingsRequest(ui::AppState& state, const json& raw) {
+json ApplySettingsRequest(ui::AppState& state, const json& rawIn) {
   const settings::Settings before = state.settings;
+  json raw = rawIn;
+  const std::string retry = TakeGpuRetry(state, raw);
   std::string error;
   if (!settings::ApplyJson(state.settings, raw, &error))
     throw std::runtime_error(error);
@@ -1196,6 +1242,8 @@ json ApplySettingsRequest(ui::AppState& state, const json& raw) {
     state.fontRebuildRequested = true;
   state.settingsSaved = state.settings;
   state.settingsDirtyAt = -1.0;
+  if (!retry.empty())
+    state.gpuRetry = retry; // the next frame boundary acts on it
   return settings::ToJson(state.settings);
 }
 
@@ -1212,8 +1260,9 @@ public:
             json& answer) override {
     (void)params.raw(); // every key was read when it was applied
     const ui::AppState::RendererStatus& r = state.renderer;
-    if (!r.backstop && (r.appliedPreference != state.settings.gpuDevice ||
-                        r.preferenceWaiting || r.lost))
+    if (!r.backstop &&
+        (r.appliedPreference != state.settings.gpuDevice ||
+         r.preferenceWaiting || r.lost || !state.gpuRetry.empty()))
       return Next::Wait;
     answer = m_answer;
     answer["renderer"] = RendererJson(state);
@@ -1229,13 +1278,21 @@ std::unique_ptr<Parking> ParkSettingsRequest(ui::AppState& state,
                                              const std::string& method,
                                              RpcParams& params) {
   if (method != "set_settings" || state.renderer.device.empty() ||
-      !params.raw().is_object() || !params.raw().contains("gpu_device"))
+      !params.raw().is_object() ||
+      !(params.raw().contains("gpu_device") ||
+        params.raw().contains("gpu_retry")))
     return nullptr;
   // A value the handler would refuse is left to it: nothing parks, nothing
   // changes, and the refusal is its.
   settings::Settings probe = state.settings;
   std::string error;
-  if (!settings::ApplyJson(probe, params.raw(), &error))
+  json raw = params.raw();
+  try {
+    (void)TakeGpuRetry(state, raw);
+  } catch (const std::exception&) {
+    return nullptr;
+  }
+  if (!settings::ApplyJson(probe, raw, &error))
     return nullptr;
   return std::make_unique<SettingsParking>(
       ApplySettingsRequest(state, params.raw()));
@@ -1920,9 +1977,24 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                  std::istreambuf_iterator<char>())}};
       }
     }
+    // A start that restarted on software rendering recorded why
+    // (docs/rendering/README.md#the-device-ladder).
+    json rendererFallback = nullptr;
+    {
+      const std::filesystem::path f = stateDir / "renderer-fallback.json";
+      std::error_code ec;
+      if (std::filesystem::exists(f, ec)) {
+        std::ifstream in(f, std::ios::binary);
+        rendererFallback = {
+            {"path", f.string()},
+            {"text", std::string((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>())}};
+      }
+    }
     return json{{"folder", crash::ReportsDir(stateDir).string()},
                 {"reports", reports},
-                {"last_startup_failure", startupFailure}};
+                {"last_startup_failure", startupFailure},
+                {"renderer_fallback", rendererFallback}};
   }
   if (m == "debug_crash") {
     const std::string kind = p.at("kind").get<std::string>();

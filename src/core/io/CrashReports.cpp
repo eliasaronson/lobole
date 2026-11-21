@@ -486,6 +486,16 @@ std::optional<Session> BeginSession(const fs::path& stateDir,
       Format(t, "%Y%m%d-%H%M%S") + "-" + std::to_string(platform::CurrentPid());
   s.stateDir = stateDir;
   const fs::path sessions = stateDir / "sessions";
+  // A restart in place (execv: the same pid) within the same second as the
+  // session it follows would otherwise take its stem, and truncate its log.
+  {
+    std::error_code ec;
+    const std::string base = s.stem;
+    for (int n = 2; fs::exists(stateDir / "logs" / (s.stem + ".log"), ec) ||
+                    fs::exists(sessions / (s.stem + ".json"), ec);
+         ++n)
+      s.stem = base + "-" + std::to_string(n);
+  }
   s.marker = sessions / (s.stem + ".json");
   s.crashFile = sessions / (s.stem + ".crash");
   s.dumpFile = sessions / (s.stem + ".dmp");

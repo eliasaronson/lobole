@@ -351,6 +351,15 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     modal = ctx->GetWindowByRef("//###RendererFallback");
     IM_CHECK(modal == nullptr || !modal->Active);
     IM_CHECK(s_App->renderer.fallback); // the menu bar's notice stays
+    // ...and clicking it opens the modal again: what to do is in it.
+    s_App->renderer.advice = "  - Install or update the graphics driver.\n";
+    ctx->ItemClick("//##MainMenuBar/**/###renderer_software_notice");
+    ctx->Yield(3);
+    modal = ctx->GetWindowByRef("//###RendererFallback");
+    IM_CHECK(modal != nullptr && modal->Active);
+    ctx->SetRef("//###RendererFallback");
+    ctx->ItemClick("Dismiss###startup_notice_dismiss");
+    ctx->Yield(2);
 
     int restarts = 0, setAsides = 0;
     s_App->safeMode.active = true;

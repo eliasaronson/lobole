@@ -1356,6 +1356,19 @@ bool DrawRow(AppState& state, const settings::Field& f) {
       ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s",
                          state.gpuPreferenceNote.c_str());
     }
+    // Devices whose driver crashed a start are left out of every start
+    // until the driver or the build changes; this is the way to try one
+    // sooner (docs/rendering/README.md#a-driver-that-crashed-at-start).
+    for (size_t i = 0; i < state.renderer.skipped.size(); i++) {
+      const auto& d = state.renderer.skipped[i];
+      ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f),
+                         "%s is left out: %s.", d.device.c_str(),
+                         d.why.c_str());
+      const std::string id =
+          "Try this device again###gpu_retry_" + std::to_string(i);
+      if (ImGui::SmallButton(id.c_str()))
+        state.gpuRetry = d.device; // the frame boundary acts on it
+    }
     ImGui::PopTextWrapPos();
   } else if (std::string(f.key) == "calculix_path") {
     // Which ccx a CalculiX study would run now, or why there is none

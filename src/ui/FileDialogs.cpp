@@ -329,20 +329,30 @@ void DrawStartupNotices(AppState& state) {
                "Your settings could not be read.", state.settingsNote,
                [&state] { state.settingsNote.clear(); }};
   } else if (state.renderer.fallback && !state.rendererFallbackNoticeShown) {
-    n = Notice{"Rendering on a fallback device###RendererFallback",
-               (state.renderer.software ? "Rendering in software ("
-                                        : "Rendering on ") +
-                   state.renderer.device +
-                   (state.renderer.software ? ")" : "") + ".",
-               "A better graphics device on this machine failed: " +
-                   state.renderer.reason + ".\n\nEverything works, slower" +
-                   (state.renderer.rayTracing
-                        ? std::string(".")
-                        : std::string(", and the path-traced still is not "
-                                      "available here.")) +
-                   " Updating the graphics driver usually brings the "
-                   "device back; Help > About says which device draws.",
-               [&state] { state.rendererFallbackNoticeShown = true; }};
+    n = Notice{
+        "Rendering on a fallback device###RendererFallback",
+        (state.renderer.software ? "Rendering in software ("
+                                 : "Rendering on ") +
+            state.renderer.device + (state.renderer.software ? ")" : "") + ".",
+        (state.renderer.restarted
+             ? "Loböle could not get a hardware renderer, so it "
+               "restarted itself on software rendering. The start "
+               "before said: " +
+                   state.renderer.reason + "."
+             : "A better graphics device on this machine failed: " +
+                   state.renderer.reason + ".") +
+            "\n\nEverything works, slower" +
+            (state.renderer.rayTracing
+                 ? std::string(".")
+                 : std::string(", and the path-traced still is not "
+                               "available here.")) +
+            (state.renderer.advice.empty()
+                 ? std::string(" Updating the graphics driver usually "
+                               "brings the device back.")
+                 : "\n\nWhat to do about it:\n" + state.renderer.advice) +
+            "\nThe notice in the menu bar opens this again, and Help "
+            "> About says which device draws.",
+        [&state] { state.rendererFallbackNoticeShown = true; }};
   } else if (occsig::FaultCount() > 0 && !state.kernelFaultNoticeShown) {
     n = Notice{"OpenCASCADE faulted###KernelFaultNotice",
                "A feature failed with a fault inside OpenCASCADE.",

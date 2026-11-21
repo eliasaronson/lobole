@@ -3,8 +3,11 @@
 
 #include "app/StartupReport.h"
 
+#include "common/BuildInfo.h"
 #include "common/DevicePreference.h"
 #include "common/Logger.h"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -80,8 +83,9 @@ std::string Tips(const Failure& f) {
     tip("In a virtual machine, turn on 3D acceleration in its display "
         "settings.");
 #if !defined(_WIN32)
-    tip("Render in software, on Mesa's lavapipe (slower, and no path-traced "
-        "stills): LOBOLE_RENDERER=software lobole");
+    if (f.softwareAttempt.empty())
+      tip("Render in software, on Mesa's lavapipe (slower, and no "
+          "path-traced stills): LOBOLE_RENDERER=software lobole");
 #endif
   }
   tip("Start with default settings and the default layout, opening no "
@@ -299,12 +303,26 @@ std::string FailureText(const Failure& f, const std::string& logPath,
     }
     o << "\n";
   }
+  if (!f.softwareAttempt.empty())
+    o << "Software rendering was tried next, and it failed too: "
+      << f.softwareAttempt << "\n\n";
   o << "What to try:\n" << Tips(f) << "\n";
   o << "The log of this start: " << (logPath.empty() ? "(none)" : logPath)
     << "\n";
   o << "This message is kept in: " << failureFile.string() << "\n";
   o << "More help: " << kHelpUrl << "\n";
   return o.str();
+}
+
+std::string FailureReason(const Failure& f) {
+  std::string r = "could not " + f.step;
+  if (!f.result.empty())
+    r += ": " + f.result;
+  else if (!f.detail.empty())
+    r += ": " + f.detail;
+  for (const std::string& a : f.attempts)
+    r += "; " + a;
+  return r;
 }
 
 fs::path FailureFile(const fs::path& stateDir) {
@@ -519,7 +537,8 @@ bool FaultFromString(std::string_view text, bool allowed, Fault* out,
   *out = Fault{};
   if (text.empty())
     return true;
-  std::string accepted = "device_create, swapchain, rebuild, renderer_init:<";
+  std::string accepted =
+      "device_create, swapchain, rebuild, software_restart, renderer_init:<";
   for (size_t i = 0; i < std::size(kFaultRenderers); i++)
     accepted += (i ? "|" : "") + std::string(kFaultRenderers[i]);
   accepted += ">";
@@ -540,6 +559,10 @@ bool FaultFromString(std::string_view text, bool allowed, Fault* out,
   }
   if (text == "rebuild") {
     out->kind = Fault::Kind::Rebuild;
+    return true;
+  }
+  if (text == "software_restart") {
+    out->kind = Fault::Kind::SoftwareRestart;
     return true;
   }
   constexpr std::string_view kInit = "renderer_init:";
@@ -564,8 +587,9 @@ std::vector<int> DeviceLadder(const std::vector<Device>& devices,
   std::vector<std::string> names;
   std::vector<int> scores;
   for (const Device& d : devices) {
-    const bool wanted = choice == RendererChoice::Automatic ||
-                        (choice == RendererChoice::Software) == d.cpu;
+    const bool wanted =
+        !d.skipped && (choice == RendererChoice::Automatic ||
+                       (choice == RendererChoice::Software) == d.cpu);
     names.push_back(d.name);
     scores.push_back(wanted ? d.score : -1);
   }
@@ -702,6 +726,378 @@ bool Relaunch(const std::vector<std::string>& args, std::string* error) {
     *error = std::string("execv failed: ") + std::strerror(errno);
   return false;
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// Software rendering when the GPU will not
+
+namespace {
+
+std::string Env(const char* name) {
+  const char* v = std::getenv(name);
+  return v ? std::string(v) : std::string();
+}
+
+void SetEnv(const char* name, const std::string& value) {
+#if defined(_WIN32)
+  _putenv_s(name, value.c_str());
+#else
+  setenv(name, value.c_str(), 1);
+#endif
+}
+
+void UnsetEnv(const char* name) {
+#if defined(_WIN32)
+  _putenv_s(name, "");
+#else
+  unsetenv(name);
+#endif
+}
+
+nlohmann::json ReadJson(const fs::path& file) {
+  std::ifstream in(file, std::ios::binary);
+  if (!in)
+    return nullptr;
+  nlohmann::json j = nlohmann::json::parse(in, nullptr, /*throw=*/false);
+  return j.is_discarded() ? nlohmann::json() : j;
+}
+
+// Written whole or not at all: beside, then renamed over.
+bool WriteJson(const fs::path& file, const nlohmann::json& j) {
+  std::error_code ec;
+  fs::create_directories(file.parent_path(), ec);
+  const fs::path tmp = file.string() + ".new";
+  {
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    out << j.dump(2) << "\n";
+    if (!out)
+      return false;
+  }
+  fs::rename(tmp, file, ec);
+  return !ec;
+}
+
+std::string Str(const nlohmann::json& j, const char* key) {
+  return j.is_object() && j.contains(key) && j[key].is_string()
+             ? j[key].get<std::string>()
+             : std::string();
+}
+
+std::vector<std::string> Strs(const nlohmann::json& j, const char* key) {
+  std::vector<std::string> out;
+  if (j.is_object() && j.contains(key) && j[key].is_array())
+    for (const nlohmann::json& v : j[key])
+      if (v.is_string())
+        out.push_back(v.get<std::string>());
+  return out;
+}
+
+constexpr const char* kLoaderVariables[] = {"VK_DRIVER_FILES",
+                                            "VK_ICD_FILENAMES",
+                                            "VK_ADD_DRIVER_FILES",
+                                            "VK_INSTANCE_LAYERS",
+                                            "VK_LOADER_LAYERS_ENABLE",
+                                            "VK_LOADER_LAYERS_DISABLE",
+                                            "VK_LOADER_DRIVERS_SELECT",
+                                            "VK_LOADER_DRIVERS_DISABLE",
+                                            "VK_LAYER_PATH",
+                                            "VK_ADD_LAYER_PATH"};
+
+} // namespace
+
+bool SoftwareDriverFromString(std::string_view text, SoftwareDriverChoice* out,
+                              std::string* error) {
+  *out = SoftwareDriverChoice{};
+  if (text.empty())
+    return true;
+  if (text == "none") {
+    out->kind = SoftwareDriverChoice::Kind::None;
+    return true;
+  }
+  const fs::path manifest{std::string(text)};
+  if (!ManifestLibrary(manifest).empty()) {
+    out->kind = SoftwareDriverChoice::Kind::Manifest;
+    out->manifest = manifest;
+    return true;
+  }
+  if (error)
+    *error = "LOBOLE_SOFTWARE_DRIVER is '" + std::string(text) +
+             "'; it takes the path of a Vulkan driver manifest (a .json "
+             "naming its library_path, such as Mesa's lvp_icd.x86_64.json) "
+             "or none (no automatic restart on software), and unset searches";
+  return false;
+}
+
+std::string ManifestLibrary(const fs::path& manifest) {
+  std::error_code ec;
+  if (!fs::is_regular_file(manifest, ec))
+    return {};
+  const nlohmann::json j = ReadJson(manifest);
+  if (!j.is_object() || !j.contains("ICD"))
+    return {};
+  return Str(j["ICD"], "library_path");
+}
+
+std::vector<fs::path> DriverSearchDirs() {
+  std::vector<fs::path> dirs;
+  const auto add = [&dirs](const fs::path& base) {
+    if (!base.empty())
+      dirs.push_back(base / "vulkan" / "icd.d");
+  };
+  const std::string home = Env("HOME");
+  const std::string config = Env("XDG_CONFIG_HOME");
+  add(!config.empty() ? fs::path(config)
+      : !home.empty() ? fs::path(home) / ".config"
+                      : fs::path());
+  add("/etc");
+  const std::string data = Env("XDG_DATA_HOME");
+  add(!data.empty()   ? fs::path(data)
+      : !home.empty() ? fs::path(home) / ".local" / "share"
+                      : fs::path());
+  std::string dataDirs = Env("XDG_DATA_DIRS");
+  if (dataDirs.empty())
+    dataDirs = "/usr/local/share:/usr/share";
+  std::istringstream parts(dataDirs);
+  for (std::string d; std::getline(parts, d, ':');)
+    add(d);
+  dirs.push_back("/run/opengl-driver/share/vulkan/icd.d");
+  return dirs;
+}
+
+fs::path FindSoftwareDriverIn(const std::vector<fs::path>& dirs) {
+  for (const fs::path& dir : dirs) {
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec))
+      continue;
+    std::vector<fs::path> files;
+    for (const fs::directory_entry& e : fs::directory_iterator(dir, ec))
+      if (e.path().extension() == ".json")
+        files.push_back(e.path());
+    std::sort(files.begin(), files.end());
+    for (const fs::path& f : files)
+      if (fs::path(ManifestLibrary(f))
+              .filename()
+              .string()
+              .find("libvulkan_lvp") != std::string::npos)
+        return f;
+  }
+  return {};
+}
+
+fs::path FindSoftwareDriver(const SoftwareDriverChoice& choice) {
+#if defined(__linux__)
+  switch (choice.kind) {
+  case SoftwareDriverChoice::Kind::None:
+    return {};
+  case SoftwareDriverChoice::Kind::Manifest:
+    return choice.manifest;
+  case SoftwareDriverChoice::Kind::Automatic:
+    break;
+  }
+  return FindSoftwareDriverIn(DriverSearchDirs());
+#else
+  (void)choice;
+  return {};
+#endif
+}
+
+bool SoftwareCures(const std::string& step) {
+  return step == step::kInstance || step == step::kNoDevice ||
+         step == step::kDevice || step == step::kSurface ||
+         step == step::kSwapchain || step == step::kMeshRenderer;
+}
+
+bool LoaderIsClean(const fs::path& manifest) {
+  const std::string disabled = Env("VK_LOADER_LAYERS_DISABLE");
+  const bool noImplicit = disabled.find("~implicit~") != std::string::npos ||
+                          disabled.find("~all~") != std::string::npos;
+  const std::string files = !Env("VK_DRIVER_FILES").empty()
+                                ? Env("VK_DRIVER_FILES")
+                                : Env("VK_ICD_FILENAMES");
+  return noImplicit && !manifest.empty() && files == manifest.string() &&
+         Env("VK_ADD_DRIVER_FILES").empty();
+}
+
+void SetSoftwareEnvironment(const fs::path& manifest) {
+  SetEnv("VK_DRIVER_FILES", manifest.string());
+  SetEnv("VK_ICD_FILENAMES", manifest.string());
+  UnsetEnv("VK_ADD_DRIVER_FILES");
+  SetEnv("VK_LOADER_LAYERS_DISABLE", "~implicit~");
+}
+
+std::vector<std::string> LoaderEnvironment() {
+  std::vector<std::string> out;
+  for (const char* name : kLoaderVariables)
+    if (const std::string v = Env(name); !v.empty())
+      out.push_back(std::string(name) + "=" + v);
+  return out;
+}
+
+bool ShouldRestartInSoftware(const Failure& f, bool restart,
+                             RendererChoice choice, const fs::path& manifest) {
+  if (restart || choice != RendererChoice::Automatic || manifest.empty() ||
+      !SoftwareCures(f.step))
+    return false;
+  // lavapipe itself failed, through the loader the restart would set up:
+  // the restart would only do it again.
+  return !(f.softwareTried && LoaderIsClean(manifest));
+}
+
+namespace {
+nlohmann::json FailureJson(const Failure& f) {
+  return {{"step", f.step},         {"result", f.result},
+          {"detail", f.detail},     {"devices", f.devices},
+          {"attempts", f.attempts}, {"software_tried", f.softwareTried}};
+}
+Failure FailureFromJson(const nlohmann::json& j) {
+  Failure f;
+  f.step = Str(j, "step");
+  f.result = Str(j, "result");
+  f.detail = Str(j, "detail");
+  f.devices = Strs(j, "devices");
+  f.attempts = Strs(j, "attempts");
+  f.softwareTried = j.is_object() && j.value("software_tried", false);
+  return f;
+}
+} // namespace
+
+fs::path FallbackRecordFile(const fs::path& stateDir) {
+  return stateDir / "renderer-fallback.json";
+}
+
+bool WriteFallbackRecord(const fs::path& stateDir,
+                         const FallbackRecord& record) {
+  return WriteJson(FallbackRecordFile(stateDir),
+                   {{"failure", FailureJson(record.failure)},
+                    {"reason", FailureReason(record.failure)},
+                    {"manifest", record.manifest},
+                    {"build", record.build},
+                    {"environment", record.environment}});
+}
+
+std::optional<FallbackRecord> ReadFallbackRecord(const fs::path& stateDir) {
+  const nlohmann::json j = ReadJson(FallbackRecordFile(stateDir));
+  if (!j.is_object() || !j.contains("failure"))
+    return std::nullopt;
+  FallbackRecord r;
+  r.failure = FailureFromJson(j["failure"]);
+  r.manifest = Str(j, "manifest");
+  r.build = Str(j, "build");
+  r.environment = Strs(j, "environment");
+  if (r.failure.step.empty())
+    return std::nullopt;
+  return r;
+}
+
+std::string FallbackAdvice(const Failure& f,
+                           const std::vector<std::string>& environment) {
+  std::ostringstream o;
+  const auto tip = [&](const std::string& t) { o << "  - " << t << "\n"; };
+  std::string set;
+  for (const std::string& v : environment)
+    if (v.rfind("VK_ICD_FILENAMES=", 0) == 0 ||
+        v.rfind("VK_DRIVER_FILES=", 0) == 0 ||
+        v.rfind("VK_ADD_DRIVER_FILES=", 0) == 0 ||
+        v.rfind("VK_INSTANCE_LAYERS=", 0) == 0 ||
+        v.rfind("VK_LOADER_LAYERS_ENABLE=", 0) == 0)
+      set += (set.empty() ? "" : " and ") + v;
+  const bool inTheWay = !set.empty();
+  if (inTheWay)
+    tip("The environment Loböle was started from sets " + set +
+        ", which decide which Vulkan drivers and layers load: unset or "
+        "correct them, and the graphics card may come back.");
+  if (!inTheWay && f.step == step::kInstance)
+    tip("A Vulkan layer installed on this machine (an overlay, a capture "
+        "tool, a validation layer) can stop the instance from starting: "
+        "the software restart ran with them turned off "
+        "(VK_LOADER_LAYERS_DISABLE=~implicit~). Remove or update the one "
+        "in /usr/share/vulkan/implicit_layer.d or ~/.local/share/vulkan.");
+  if (IsDriverStep(f.step) || f.step == step::kDevice ||
+      f.step == step::kSwapchain || f.step == step::kSurface ||
+      f.step == step::kMeshRenderer) {
+    tip("Install or update the graphics driver and the Vulkan loader:\n"
+        "      Debian, Ubuntu:  sudo apt install libvulkan1 "
+        "mesa-vulkan-drivers\n"
+        "      Fedora:          sudo dnf install vulkan-loader "
+        "mesa-vulkan-drivers\n"
+        "      Arch:            sudo pacman -S vulkan-icd-loader (and "
+        "vulkan-intel, vulkan-radeon or nvidia-utils)");
+    tip("In a virtual machine, turn on 3D acceleration in its display "
+        "settings.");
+  }
+  tip("Each start tries the graphics card first, so a repaired driver is "
+      "used with nothing to reset. To be told why it failed instead of "
+      "being restarted in software: LOBOLE_SOFTWARE_DRIVER=none lobole");
+  return o.str();
+}
+
+std::string BuildId() {
+  return BuildInfo::Version() + " (" + BuildInfo::Commit() + ", " +
+         BuildInfo::Configuration() + ")";
+}
+
+fs::path GraphicsAttemptFile(const fs::path& stateDir) {
+  return stateDir / "graphics-attempt.json";
+}
+
+void WriteGraphicsAttempt(const fs::path& stateDir, const GraphicsAttempt& a) {
+  nlohmann::json j = {{"stage", a.stage}, {"build", a.build}, {"pid", a.pid}};
+  if (a.stage == "device") {
+    j["device"] = a.device;
+    j["driver"] = a.driver;
+  }
+  if (!WriteJson(GraphicsAttemptFile(stateDir), j))
+    LOG_WARN("Could not write {}", GraphicsAttemptFile(stateDir).string());
+}
+
+std::optional<GraphicsAttempt> ReadGraphicsAttempt(const fs::path& stateDir) {
+  const nlohmann::json j = ReadJson(GraphicsAttemptFile(stateDir));
+  if (!j.is_object())
+    return std::nullopt;
+  GraphicsAttempt a;
+  a.stage = Str(j, "stage");
+  a.device = Str(j, "device");
+  a.driver = Str(j, "driver");
+  a.build = Str(j, "build");
+  if (j.contains("pid") && j["pid"].is_number_integer())
+    a.pid = j["pid"].get<long>();
+  if (a.stage != "instance" && !(a.stage == "device" && !a.device.empty()))
+    return std::nullopt;
+  return a;
+}
+
+void RemoveGraphicsAttempt(const fs::path& stateDir) {
+  std::error_code ec;
+  fs::remove(GraphicsAttemptFile(stateDir), ec);
+}
+
+fs::path GraphicsStateFile(const fs::path& stateDir) {
+  return stateDir / "graphics.json";
+}
+
+std::vector<SkippedDevice> ReadSkippedDevices(const fs::path& stateDir) {
+  std::vector<SkippedDevice> out;
+  const nlohmann::json j = ReadJson(GraphicsStateFile(stateDir));
+  if (!j.is_object() || !j.contains("skipped") || !j["skipped"].is_array())
+    return out;
+  for (const nlohmann::json& e : j["skipped"]) {
+    SkippedDevice d{Str(e, "device"), Str(e, "driver"), Str(e, "build"),
+                    Str(e, "why")};
+    if (!d.device.empty())
+      out.push_back(std::move(d));
+  }
+  return out;
+}
+
+bool WriteSkippedDevices(const fs::path& stateDir,
+                         const std::vector<SkippedDevice>& skipped) {
+  nlohmann::json list = nlohmann::json::array();
+  for (const SkippedDevice& d : skipped)
+    list.push_back({{"device", d.device},
+                    {"driver", d.driver},
+                    {"build", d.build},
+                    {"why", d.why}});
+  return WriteJson(GraphicsStateFile(stateDir), {{"skipped", list}});
 }
 
 } // namespace startup

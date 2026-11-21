@@ -3063,8 +3063,24 @@ struct AppState {
     // device creation"); the first frame says so once, in a modal.
     bool fallback = false;
     std::string reason;
-    // LOBOLE_RENDERER as given ("software", "hardware"); empty = automatic.
+    // LOBOLE_RENDERER as given ("software", "hardware"); empty = automatic
+    // (and empty in the software restart, which nobody asked for).
     std::string forced;
+    // The device's driver version ("Mesa 26.3.1", "595.112.07").
+    std::string driver;
+    // This process is the software restart (--software-fallback) of a start
+    // that could not get a hardware renderer; `reason` is that start's
+    // failure (docs/rendering/README.md#the-device-ladder).
+    bool restarted = false;
+    // Devices left off the ladder because their driver crashed a start
+    // (graphics.json): which, on which driver, and why.
+    struct Skipped {
+      std::string device, driver, why;
+    };
+    std::vector<Skipped> skipped;
+    // What to do about a fallback: the modal's, the menu-bar notice's and
+    // About's rows (startup::FallbackAdvice). Empty when there is none.
+    std::string advice;
     bool rayTracing = false; // the path-traced still is available
     // Renderers whose Initialize failed: what the picture is missing.
     std::vector<std::string> missing;
@@ -3112,6 +3128,10 @@ struct AppState {
   // once: shown until this (ImGui) time.
   double rendererRestartedNoticeUntil = -1.0;
   bool rendererFallbackNoticeShown = false;
+  // "Try this device again" (Preferences, set_settings {gpu_retry}): the
+  // skipped device to take off the skip list, which the next frame boundary
+  // does, rebuilding onto it when the ladder now puts it first.
+  std::string gpuRetry;
   // A fault inside OpenCASCADE was caught as a feature's error
   // (occsig::FaultCount): said once, recommending a save and a restart.
   bool kernelFaultNoticeShown = false;
