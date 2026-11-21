@@ -200,7 +200,9 @@ origin that misses the body. Examples in the code:
   disabled and the window asking for it (`defaults/fit_primitive`,
   `RefusesUntilPicked`); a sphere it fits is shown and
   refused as a datum, saying why
-  ([datums on a scan](../modeling/README.md#datums-on-a-scan)).
+  ([datums on a scan](../modeling/README.md#datums-on-a-scan)). Its
+  folded radius range, switched on, starts a tenth either side of the
+  radius it fitted ([hints](../modeling/README.md#hints)).
 - The placement rule (`src/ui/Placement.h`, `ClearOffset`) keeps a new item's
   span clear of the ones already taken, with a gap scaled to the item; the
   occurrence insert and drawing-view placement use it.

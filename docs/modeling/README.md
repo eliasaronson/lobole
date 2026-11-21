@@ -910,7 +910,8 @@ undo step, built as a job, undone) and `defaults/cradle`.
 
 ## Fitting a primitive to a mesh
 
-`fit_primitive {feature_id, point_mm, kind?, tolerance_mm?, part?}`
+`fit_primitive {feature_id, point_mm, kind?, tolerance_mm?, clip_sigma?,
+side?, radius_mm?, axis?, axis_tolerance_deg?, within?, part?}`
 (`src/core/MeshFit.{h,cpp}`, the region in `src/core/mesh/Grow.cpp`, the
 fit in `src/core/mesh/Fit.cpp`) fits a plane, cylinder, cone or sphere to
 the triangles round a point on the bodies feature `feature_id` made: a
@@ -931,15 +932,34 @@ below refit, and what the Fit tool previews.
    bend below the median), never less than those four quanta. On a scan
    with ±0.05 mm of noise that is about 0.18 mm; on a clean CAD export it
    is the facets' own bend.
-3. **The region** (`mesh::GrowFrom`) starts as a disk of rings round the
-   seed, grown until a curved kind's curvature stands above the noise (the
-   disk's best plane misses a vertex by three tolerances); it is fitted
-   robustly, grown across edges while every corner of a triangle lies
-   within the tolerance and it faces the seed's side of the surface,
-   refitted each time it doubles, then grown once more from the seed
-   against the final fit so it does not depend on the order it was
-   reached in, and fitted again. `rms_mm` and `max_mm` are over every
-   vertex of the region.
+3. **The region stops at the edge** (`mesh::GrowFrom`). Where a face
+   rounds into its neighbour, the first degrees of the round lie within
+   the tolerance of the face and face its way, and all of them stand to
+   one side of it: a region grown by distance alone leans the fit toward
+   them. So:
+   - a disk of rings round the seed, grown until a curved kind's
+     curvature stands above the noise (the disk's best plane misses a
+     vertex by three tolerances), is fitted robustly;
+   - **the normal band** is the scan's own: the disk's triangles' median
+     tilt from that fit, times 3 × 1.4826, never less than the tilt the
+     tolerance gives a triangle of the mesh's median edge
+     (atan(tolerance / edge)). A triangle so thin that the file's
+     precision cannot fix its normal that closely is allowed what the
+     precision gives its least height;
+   - the region grows across edges, taking a triangle when every corner
+     lies within the tolerance of the surface, its normal is inside the
+     band, and it faces the seed's side. It is **regrown from the seed**
+     under each new fit, each regrowth capped at three times the
+     triangles of the one before, so a model that is wrong early is
+     refitted before it can take a neighbour, until two regrowths in a
+     row stop short of their cap;
+   - **the rim is peeled**: the region's outer ring of triangles is
+     removed, ring by ring, while that ring's median tilt from the fit is
+     more than twice the region's own (and more than what the file's
+     precision tilts a triangle of the median edge, so a clean export's
+     flats are not peeled for leaning by nothing), never below half the
+     region's area; then it is fitted again. The band is not changed by
+     this: it is after the growth.
 4. **The fit is robust** (`mesh::FitRobust`, RANSAC): hypotheses are drawn
    from the region's triangles, each its centre and unit normal -- a plane
    from three, a sphere from two normal lines' closest approach, a
@@ -952,7 +972,18 @@ below refit, and what the Fit tool previews.
    its inliers until they stop changing. The samples come from splitmix64
    seeded with the points' own bits, so the same triangles give the same
    surface to the bit on every regeneration and every platform.
-5. A curved kind whose region is flat to the tolerance is refused, naming
+5. **The used points are the surface's** (the clip): vertices of the
+   region past `clip_sigma` sigma of the residuals are left out and the
+   fit made by least squares over the rest (`mesh::FitLeastSquares`),
+   until the set stops changing (at most 20 rounds). The sigma is the
+   robust one over every vertex of the region (1.4826 × the median
+   absolute residual), not the RMS of what the last cut kept: that one
+   shrinks with every cut, and a one-sigma clip would eat the region.
+   `clip_sigma` is `3` by default and takes `1`, `2`, `3` or `"all"` (no
+   clip: the robust fit as it is); anything else is refused, naming
+   them. `mesh::FitTriangles` runs the robust fit and this on a set of
+   triangles given rather than grown.
+6. A curved kind whose region is flat to the tolerance is refused, naming
    the plane: the radius it gave would be the noise's.
 
 `kind` is `plane | cylinder | cone | sphere | auto`; any other is refused,
@@ -961,37 +992,101 @@ or a simpler one (plane, sphere, cylinder, cone, in that order) covering at
 least 95% as much (`meshfit::kAutoShare`) -- a cone fits a cylinder's
 triangles as well as the cylinder does, with a half angle of nearly
 nothing -- and the reply's `tried` lists each with its area or why it
-failed. The reply: a plane's `origin_mm` and `normal` (the way the
-triangles face), a cylinder's `origin_mm` on the axis, `axis` (its largest
-component positive: a cylinder's axis has no sense of its own, and a refit
-must not flip it) and `radius_mm`, a cone's `apex_mm`, `axis` (from the
-apex into the cone) and `half_angle_deg`, a sphere's `centre_mm` and
-`radius_mm`; with `rms_mm`, `max_mm`, `tolerance_mm`, `triangles`,
-`area_mm2`, `body` and `seed_distance_mm`.
+failed.
 
-**How well it fits** (`tests/test_mesh_fit_scan.cpp`, on a turned post
-scanned at 60k triangles with ±0.05 mm of noise along the normal and a
-1.5 mm lump on its side, tilted off Z): the cylinder's radius 12.003
-against 12, its axis 0.001° and 0.007 mm off the generated one; the cone's
-half angle 33.690° against 33.690°, its apex 0.002 mm off; the top and the
-bottom exactly their own triangles; a noisy sphere's radius 39.9999
-against 40. Least squares over the side with the lump in it puts the axis
-0.059 mm off; the robust fit 0.008 mm.
+**The reply**: a plane's `origin_mm`, `normal` (the way the triangles
+face) and `extent_mm` (the used points' spans along their two principal
+directions, the longer first); a cylinder's `origin_mm` on the axis,
+`axis` (its largest component positive: a cylinder's axis has no sense of
+its own, and a refit must not flip it), `radius_mm`, `length_mm` and
+`arc_deg` (the used points' span along and about the axis); a cone's
+`apex_mm`, `axis` (from the apex into the cone) and `half_angle_deg`; a
+sphere's `centre_mm`, `radius_mm` and `arc_deg` (the cap the used points
+span, seen from the centre). A cylinder and a sphere also carry
+`diameter_min_mm` and `diameter_max_mm`: the fitted size moved to the
+lowest and the highest radial residual of the used points, the sizes a
+caliper could read. Then two populations: `rms_mm` and `max_mm` over every
+vertex of the region, and `sigma_mm` (RMS), `form_mm` (peak to peak) and
+`used` (count) over the points the clip kept, with `clip_sigma` -- both,
+because a sigma taken over what a cut kept is smaller than the noise.
+`warnings` says when a cylinder or sphere covers under 60° of arc
+(`meshfit::kPartialArcDeg`): a partial arc is where a radius is least
+certain. And `tolerance_mm`, `triangles`, `area_mm2`, `body`,
+`seed_distance_mm`, and with hints `seeds_tried`.
 
-**What it costs** (hidden `[fit-cost]`, one thread): a region is linear in
-its triangles, the fits capped at 65,536 points and the hypotheses scored
-on 4,096. A noisy sphere grown whole takes 12 ms at 10k triangles, 0.24 s
-at 300k and 1.3 s at 2M; the noise tolerance is a stride through at most
-200,000 edges, under 20 ms at any size. A datum refits this on every
-regeneration that reaches it.
+### Hints
+
+Near a rim the nearest surface to a point is often the wrong one: the
+outside of a cup for its inside, a plating thickness away. All optional:
+
+- `side`: `inside` (a bore, a socket: the triangles face the axis or the
+  centre) or `outside` (a boss, a ball), for a curved kind;
+- `radius_mm: [min, max]`, for a cylinder or a sphere;
+- `axis: [x, y, z]` with `axis_tolerance_deg` (both or neither, the
+  tolerance above 0 and at most 90): a plane's normal, a cylinder's or a
+  cone's axis, either sense;
+- `within: {min_mm, max_mm}`: a box the region stays in (every corner of
+  every triangle, the disk's too); the point must be inside it.
+
+A hypothesis outside a hint is not drawn (`FitRobust`'s `admit`); the
+least squares that refines the best is not held to it, so a fit that ends
+outside one comes back as the surface has it and is refused saying which
+("the cylinder fitted here has radius 12 mm, outside radius_mm [20, 30]").
+With any hint, the triangles within the pick's own reach (a fiftieth of
+the diagonal) of the point are tried as seeds, nearest first, one a
+surface -- a triangle turned less than a crease from one already tried, or
+in a region already grown, is the same surface -- at most eight
+(`meshfit::kMostSeeds`); the reply's `seeds_tried` says how many. Under
+`auto`, only the kinds every hint applies to are tried; a hint the given
+kind cannot take (`side` on a plane, `radius_mm` on a plane or a cone,
+`axis` on a sphere) is refused before anything is read. A datum stores its
+hints and `clip_sigma` in its `fit`, so a refit is steered and clipped the
+same way.
+
+**How well it fits** (`tests/test_mesh_fit_scan.cpp`; every fixture
+tilted off the axes and every number checked against its generator's):
+
+- a turned post scanned at 60k triangles with ±0.05 mm of noise along the
+  normal and a 1.5 mm lump on its side: the cylinder's radius 12.002
+  against 12, its axis 0.001° and 0.005 mm off the generated one; the
+  cone's half angle 33.690° against 33.690°, its apex 0.002 mm off; the
+  top all but a few of its own triangles (the smallest round the pole
+  lean past the band) and nothing of the cone; a noisy sphere's radius
+  39.9999 against 40. Least squares over the side with the lump in it puts
+  the axis 0.059 mm off; the robust fit 0.008 mm. Clipped at 3, 2 and 1
+  sigma the cylinder keeps 99%, 98% and 73% of its vertices, the radius
+  within 0.002 mm each time;
+- **the edge**: a block with 0.5 mm rounds on every edge, ±0.05 mm of
+  noise, its face clicked 2 mm from an edge: the plane 0.0006° and
+  0.002 mm off the generated face; the growth by distance alone, on the
+  same mesh and click, 0.006° and 0.007 mm;
+- **structured outliers**: the post's side given 30% of the base beside
+  it: radius 12.002, axis 0.006 mm off; 140° of a cylinder's arc: radius
+  12.001, `arc_deg` 140.1; 12° of an R150 bore: radius 150.04 and the
+  partial-arc warning;
+- **hints** (`tests/test_datum_from_fit.cpp`): a cup clicked on its rim
+  between walls 1.2 mm apart fits the 13.8 mm bore with `side: inside` and
+  the 15 mm outside with `outside` (to 0.0002 mm), a radius or axis it
+  cannot meet refused naming it.
+
+**What it costs** (one thread): a region is linear in its triangles, the
+fits capped at 65,536 points and the hypotheses scored on 4,096. A noisy
+sphere grown whole takes 12 ms at 10k triangles, 0.24 s at 300k and 1.3 s
+at 2M (hidden `[fit-cost]`); against the growth by distance alone that
+came before the band, the peel and the clip, measured in the same run
+(`[slow]`, CPU time, held to twice): 1.1 times at 300k and 1.2 at 2M. The
+noise tolerance is a stride through at most 200,000 edges, under 20 ms at
+any size. A datum refits this on every regeneration that reaches it.
 
 ### Datums on a scan
 
 A scan has no faces to sketch on, mate to or measure from, so it takes part
 through datums fitted to it. A `DatumPlane` or `DatumAxis` of `kind:
-"from_fit"` stores `fit {body_id, point_mm, kind, tolerance_mm?}` -- the
-feature whose body it fits, the seed point, the kind and the tolerance if
-one was given -- and refits on every regeneration, so the datum follows a
+"from_fit"` stores `fit {body_id, point_mm, kind, tolerance_mm?,
+clip_sigma?, side?, radius_mm?, axis?, axis_tolerance_deg?, within?}` --
+the feature whose body it fits, the seed point, the kind, and the
+tolerance, the clip and the [hints](#hints) where they were given (only
+those are written) -- and refits on every regeneration, so the datum follows a
 re-scan: replace the import's file with a new scan standing in the same
 place (aligned the same way) and the datum moves onto it.
 
@@ -1003,7 +1098,8 @@ place (aligned the same way) and the datum moves onto it.
   apex, from the apex into the cone).
 - The kind is stored, never `auto`, so a re-scan cannot turn a datum into
   another kind; a kind the datum does not fit is refused on load, naming
-  the ones it does. A sphere makes no datum (it has no plane or axis);
+  the ones it does, and so is a hint its kind cannot take or a
+  `clip_sigma` other than 1, 2, 3 or `"all"`. A sphere makes no datum (it has no plane or axis);
   `fit_primitive` reports it.
 - The seed is a world point. A scan moved after its datums were fitted
   (a new `align_import`) leaves the seed where it was; one now off the
@@ -1028,8 +1124,13 @@ world's); the **`frame`** query, which reports the same frame; and
 datum](../inspect/README.md#datums)). The Fit tool (`###tb_fit_primitive`,
 `src/ui/FitTool.{h,cpp}`) picks the point, previews the fit in its window
 with its kind (Auto by default) and tolerance (the scan's noise unless
-"Own tolerance"), and Accept adds the datum as one undo step; a sphere is
-shown and Accept stays disabled, saying why.
+"Own tolerance"), shows what the used points read (sigma, form, the
+diameters, a cylinder's length and arc, a plane's spans) and the
+partial-arc warning, and Accept adds the datum as one undo step; a sphere
+is shown and Accept stays disabled, saying why. Its folded "Hints and
+clip" section takes the clip, the side and a radius range (seeded a tenth
+either side of the fitted radius), which the datum keeps; the axis and
+the box are the RPC's.
 
 How it is checked: `tests/test_datum_from_fit.cpp` through a real
 regeneration of an imported scan -- the axis and the top within 0.1° and
@@ -1039,8 +1140,12 @@ regeneration, read back as written with every bad kind refused, failing
 by name off the scan and on a flat, a sketch standing on the fitted top,
 and a part mated to the fitted axis standing on it; the golden
 `v215-datum-from-fit` (a shaft's axis and top fitted to its own B-Rep);
-the GUI tests `fit/a_plane_picked_on_a_body_is_one_undo_step` and
-`defaults/fit_primitive`; `refused_calls_smoke.py`.
+hints and a clip kept in the datum's `fit` and refitted by, every bad one
+refused on load; the golden `vNEXT-datum-fit-hints`; the GUI tests
+`fit/a_plane_picked_on_a_body_is_one_undo_step`,
+`fit/a_side_hint_picks_a_cups_wall` and `defaults/fit_primitive`;
+`headless_smoke.py` (the new reply keys, and a hinted datum surviving save
+and reopen); `refused_calls_smoke.py`.
 
 ## Sizes past the model space are refused
 

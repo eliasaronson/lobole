@@ -1,28 +1,18 @@
-# A scan: a fit that stops at the edge, and how far the model is from it
+# A scan: what a fit found, and how far the model is from it
 
-A primitive fitted to a scan should rest on the surface that was clicked and
-nothing beside it, say how good it is, and say what it found when it will
-not fit. A model built on a scan should be checkable against that scan: laid
-onto it, and coloured by how far it stands off.
+A primitive fitted to a scan rests on the surface that was clicked, says how
+good it is and takes hints
+([fitting a primitive to a mesh](../modeling/README.md#fitting-a-primitive-to-a-mesh)).
+It should also say what it found when it will not fit, and fit a torus. A
+model built on a scan should be checkable against that scan: laid onto it,
+and coloured by how far it stands off.
 
 ## The problem
 
-- **The region climbs the edge.** `mesh::GrowFrom` (src/core/mesh/Grow.cpp)
-  takes a triangle whose corners lie within the tolerance and that faces the
-  seed's side. On a real scan the band where a face rounds into its
-  neighbour passes both tests for a while, and it sits to one side of the
-  surface, never both. The fit leans toward it, and so does every
-  `from_fit` datum (docs/modeling/README.md#datums-on-a-scan).
 - **A refusal does not say what is there.** A click on a stepped bore, a
   lip, or two faces meeting at a few degrees grows one region over both and
   reports a fit with a large `rms_mm`, or refuses with a distance. Nothing
   says "two cylinders, R4.68 and R5.18".
-- **Nothing steers the fit.** Near a rim the nearest surface to a point is
-  often the wrong one (the outside of a cup for its inside, a plating
-  thickness away). `fit_primitive` takes a point and a kind and no more.
-- **The answer is two numbers.** `rms_mm` and `max_mm` are over every vertex
-  of the region. A lump inside the region is in both, and there is no figure
-  for the surface's form or for the size a caliper would read.
 - **No torus.** `fit_primitive` cannot fit a round or a ring, and mesh
   recognition leaves the corner where two fillets meet as facets
   (docs/interchange/README.md#not-done).
@@ -38,29 +28,7 @@ onto it, and coloured by how far it stands off.
 
 ## The shape of the fix
 
-### 1. The region stops at the edge
-
-- **Normals decide membership with distance.** A triangle joins when its
-  corners are within the tolerance *and* its normal is within a band of the
-  model's normal at its centre. The band is the scan's own: the median tilt
-  of the seed disk's triangles from the first robust fit, times the same
-  3 × 1.4826, never less than what the tolerance bends a triangle of the
-  mesh's median edge by. The facing-side test stays.
-- **A round cannot flood the mesh.** Each regrowth from the seed is capped at
-  three times the triangles of the one before; a model that is wrong early
-  is refitted before it can take a neighbour.
-- **The rim is peeled after growing.** The region's outer ring of triangles
-  is removed, ring by ring, while that ring's median tilt from the fit is
-  more than twice the region's own, and never below half the region's area.
-  Then the fit is made once more. This is after the growth, so the band that
-  decides membership is not changed by it.
-- **The used points are the surface's.** After the last fit, vertices past
-  `k` sigma of the residuals are left out and the fit repeated until the set
-  stops changing; `clip_sigma` is `3` by default and takes `1`, `2`, `3` or
-  `"all"`, anything else refused. The reply carries both populations (below),
-  because a sigma taken over what a cut kept is smaller than the noise.
-
-### 2. A fit that says what it found
+### 1. A fit that says what it found
 
 - **Two surfaces.** When the fit's `rms_mm` is over the tolerance, the
   region is split in two by distance to two models of the asked kind (from
@@ -74,29 +42,8 @@ onto it, and coloured by how far it stands off.
 - **A plane on a crown.** A plane whose region's normals spread past 10°, or
   whose region covers under 15% of its own bounding rectangle, is a strip
   along the top of a round. It is refused naming the cylinder that fits.
-- **Hints, all optional:** `side` (`inside | outside`, for a curved kind),
-  `radius_mm: [min, max]`, `axis: [x, y, z]` with `axis_tolerance_deg`, and
-  `within: {min_mm, max_mm}` (a box). A hypothesis outside a hint is not
-  drawn; a fit that ends outside one is refused saying which. They are
-  stored in a datum's `fit` so a refit is steered the same way.
 
-### 3. What the reply says
-
-Beside today's keys:
-
-- `sigma_mm` (RMS over the used points), `form_mm` (their peak to peak),
-  `used` (vertex count) and `clip_sigma`;
-- `rms_mm` and `max_mm` stay as they are, over every vertex of the region;
-- for a cylinder and a sphere, `diameter_min_mm` and `diameter_max_mm`: the
-  fitted size moved to the lowest and the highest radial residual of the
-  used points;
-- for a cylinder, `length_mm` and `arc_deg` covered; for a plane, the
-  region's `extent_mm` along its two principal directions.
-
-A partial arc is where a radius is least certain, so a cylinder or sphere
-covering less than 60° says so in `warnings`.
-
-### 4. A torus
+### 2. A torus
 
 `kind: "torus"` in `mesh::Fit` and `fit_primitive`: every normal of a torus
 passes through its spine circle at the tube's radius. For a candidate tube
@@ -114,7 +61,7 @@ as a region kind, rebuilt on a `Geom_ToroidalSurface`, with the same three
 checks and demotion as the other kinds. The fillet-corner line leaves
 "Not done".
 
-### 5. Laying a scan onto a body
+### 3. Laying a scan onto a body
 
 `align_import {mode: "best_fit", onto, …}` moves an Import's placement so its
 mesh lies on `onto`: a body of the part (B-Rep, by its tessellation, or
@@ -141,7 +88,7 @@ another mesh body).
 A datum's seed is a world point, so a re-scan laid onto the old scan's body
 by this keeps its datums.
 
-### 6. How far a body is from the scan
+### 4. How far a body is from the scan
 
 `compare_scan {scan, body, tolerance_mm?}` (inspection; changes nothing).
 `scan` is a mesh body, `body` any body.
@@ -182,12 +129,11 @@ where they compare a body with its mesh.
 
 Each lands on its own with the suites green.
 
-- **A.** The region (§1), the reply (§3), the hints of §2.
-- **B.** Two surfaces and the crown (§2).
-- **C.** The torus (§4), in `fit_primitive` and the datums, then in
+- **B.** Two surfaces and the crown (§1).
+- **C.** The torus (§2), in `fit_primitive` and the datums, then in
   recognition.
-- **D.** Best fit (§5).
-- **E.** Deviation (§6): the RPC, then the picture and the tool.
+- **D.** Best fit (§3).
+- **E.** Deviation (§4): the RPC, then the picture and the tool.
 
 ## Not in this plan
 
@@ -212,26 +158,16 @@ sketch: [section-sketch-relations.md](section-sketch-relations.md).
 - `tests/mesh_organic.{h,cpp}` (fixtures), `tests/test_mesh_fit_scan.cpp`,
   new `tests/test_mesh_register.cpp`, `tests/test_mesh_deviation.cpp`
 - docs/modeling/README.md, docs/interchange/README.md,
-  docs/inspect/README.md; the datum `fit` keys in docs/versioning/format.md
-  (`vNEXT`: `clip_sigma` and the hints, written only when given)
+  docs/inspect/README.md
 
 ## Verified by
 
 Every fixture is tilted off the axes, so a fit that only works axis-aligned
 cannot pass, and every number is checked against the generator's.
 
-- **The edge.** A noisy block with 0.5 mm edge rounds: a plane fitted from
-  a click 2 mm from the edge is within 0.01° and 0.01 mm of the generated
-  face; today's growth is shown, in the test, to be worse on the same mesh.
-- **Structured outliers.** A cylinder whose region is given 30% of a
-  neighbouring face: axis and radius within the noise. A cylinder from 140°
-  of arc, and from a few degrees of a large bore (which must carry the
-  partial-arc warning).
 - **Two surfaces.** A stepped bore (R4.68 / R5.18) and a 0.3 mm step
   between two planes are refused naming both sizes; a single tapered bore
   and a gently crowned plate are not split.
-- **Hints.** A cup clicked at its rim fits the inside with `side: inside`
-  and the outside with `outside`; a hint the surface cannot meet is refused.
 - **The torus.** A scanned ring and a concave round between two faces:
   both radii within the noise, `concave` right. A faceted CAD part with
   fillets meeting at a corner is recognised with a toroidal face and passes
@@ -247,9 +183,10 @@ cannot pass, and every number is checked against the generator's.
   tolerance. A 1 mm wall reads its own side, not through to the far one. A
   scan of half the part gives `no_scan` near a half. A scan against the
   body it was sampled from reads `within` near 1.
-- **Cost** (CPU time, `[slow]`): the fit's region and clip on the 300k and
-  2M spheres stay within twice today's; best fit of a 500k-triangle scan and
-  its deviation each have a stated budget, set from the first measurement.
+- **Cost** (CPU time, `[slow]`): best fit of a 500k-triangle scan and its
+  deviation each have a stated budget, set from the first measurement; the
+  two-surface split keeps the region's cost check
+  (`tests/test_mesh_fit_scan.cpp`) within twice the old growth.
 - **Through the pipeline:** a smoke that imports a scan, lays it on a body,
   fits its datums, compares, and reads the same numbers after save and
   reopen; `refused_calls_smoke` covers each new refusal changing nothing.
