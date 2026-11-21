@@ -292,7 +292,10 @@ or the GUI. The saved form did not change, so this is not a format version.
   bolt circle is one Hole and a pattern.
 - A cut that removes nothing, or an add that adds nothing, leaves the body as
   it was, with a warning: the boolean would still imprint the tool's outline
-  where the two touch, splitting a face and renaming it.
+  where the two touch, splitting a face and renaming it. A cut is judged by
+  its faces as well as its volume: one that leaves a face inside the
+  material that was there removed something, however little (a groove
+  0.001 mm deep along a 60 mm block is 2e-7 of its volume), and is kept.
 - **A tool starts on its plane, and a face typed at the same height is on it
   too.** The model is double
   ([../conventions.md](../conventions.md#the-model-is-double)), so a face

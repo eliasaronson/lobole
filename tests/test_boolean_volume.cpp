@@ -522,3 +522,50 @@ TEST_CASE("The fuzzy tolerance reads an operand's tight size",
   const double diag = std::sqrt(300.0); // 10 x 10 x 10
   CHECK_THAT(FuzzyTolerance(block, block), WithinRel(1e-5 * diag, 1e-6));
 }
+
+// docs/modeling/kernel-cases.md: a cylinder of radius 10 along X dipping
+// 0.001 mm into the top of a 60 x 40 x 20 block leaves a groove of 0.0113
+// mm3, 2.4e-7 of the block. The cut was judged by volume alone, under a 1e-6
+// floor, and dropped as "removed no material". A cylinder resting ON the top
+// along a line removes nothing, and must still leave the block as it was.
+TEST_CASE("A cut 0.001 mm deep is kept and one that only touches is not",
+          "[boolean][body-mode]") {
+  const auto groove = [](double dip) {
+    std::vector<Body> bodies;
+    bodies.push_back(
+        {"Block",
+         CADShape(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 60, 40, 20).Shape()), "",
+         1});
+    const CADShape tool(
+        BRepPrimAPI_MakeCylinder(
+            gp_Ax2(gp_Pnt(-5, 20, 30 - dip), gp_Dir(1, 0, 0)), 10.0, 70.0)
+            .Shape());
+    std::string warning, error;
+    REQUIRE(ApplyBodyMode(bodies, tool, ElementMap{}, ExtrudeMode::Cut,
+                          "Groove", "", 9, &warning, &error));
+    CHECK(error.empty());
+    REQUIRE(bodies.size() == 1);
+    return std::pair{bodies[0], warning};
+  };
+  {
+    const auto [body, warning] = groove(1e-3);
+    // A circular segment of depth h in r: r^2 acos((r-h)/r) - (r-h)
+    // sqrt(2rh - h^2), times the block's 60.
+    const double r = 10, h = 1e-3;
+    const double segment =
+        r * r * std::acos((r - h) / r) - (r - h) * std::sqrt(2 * r * h - h * h);
+    CHECK_THAT(body.shape.Volume(), WithinRel(48000.0 - 60 * segment, 1e-12));
+    CHECK(warning.find("removed no material") == std::string::npos);
+    TopTools_IndexedMapOfShape faces;
+    TopExp::MapShapes(body.shape.GetShape(), TopAbs_FACE, faces);
+    CHECK(faces.Extent() == 8); // the top split in two, and the groove
+  }
+  {
+    const auto [body, warning] = groove(0.0);
+    CHECK_THAT(body.shape.Volume(), WithinRel(48000.0, 1e-12));
+    CHECK(warning.find("removed no material") != std::string::npos);
+    TopTools_IndexedMapOfShape faces;
+    TopExp::MapShapes(body.shape.GetShape(), TopAbs_FACE, faces);
+    CHECK(faces.Extent() == 6);
+  }
+}

@@ -468,7 +468,7 @@
  "solidcraft/ladder/02-booleans/006-tangent-along-line-no-overlap": "pass",
  "solidcraft/ladder/02-booleans/007-near-tangent-gap-1e-3": "pass",
  "solidcraft/ladder/02-booleans/008-near-tangent-gap-1e-6": "pass",
- "solidcraft/ladder/02-booleans/009-near-tangent-overlap-1e-3": "known: volume (docs/known-bugs.md#a-cut-0001-mm-deep-is-dropped-as-removing-nothing)",
+ "solidcraft/ladder/02-booleans/009-near-tangent-overlap-1e-3": "pass",
  "solidcraft/ladder/02-booleans/010-near-tangent-overlap-1e-6": "pass",
  "solidcraft/ladder/02-booleans/011-tangent-along-circle-through-hole": "pass",
  "solidcraft/ladder/02-booleans/012-tangent-along-circle-bowl": "pass",

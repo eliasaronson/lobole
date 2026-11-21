@@ -42,6 +42,45 @@ bool VolumeUnchanged(double before, double after) {
          std::abs(before - after) < 1e-6 * std::max(before, 1.0);
 }
 
+// Did a cut whose volume reads as unchanged still take material? The volume
+// alone cannot say: a groove 0.001 mm deep along a 60 x 40 x 20 block is
+// 0.0113 mm3, 2e-7 of it, under VolumeUnchanged's floor, and was dropped
+// as "removed no material". A tool that only TOUCHED leaves every face of
+// the result on the body's own boundary (a face split by the imprint lies
+// where it lay); one that removed something leaves a face of its own inside
+// the material that was there. So: a face the result did not keep whole,
+// at a point inside it, classified against the body before the cut. The
+// tolerance is the checker's, 1e-6 of the part's size and never under ten
+// times the kernel's confusion: a groove that shallow is at the kernels'
+// tolerance, where a groove and no change are both right.
+bool CutLeftAFaceInside(const CADShape& before, const CADShape& after) {
+  try {
+    TopTools_IndexedMapOfShape kept;
+    TopExp::MapShapes(before.GetShape(), TopAbs_FACE, kept);
+    Bnd_Box box;
+    BRepBndLib::Add(before.GetShape(), box);
+    const double diag = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
+    const double ptol = std::max(1e-6 * diag, 10.0 * Precision::Confusion());
+    BRepClass3d_SolidClassifier inBefore(before.GetShape());
+    Handle(IntTools_Context) ctx = new IntTools_Context();
+    for (TopExp_Explorer ex(after.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next()) {
+      const TopoDS_Face face = TopoDS::Face(ex.Current());
+      if (kept.Contains(face))
+        continue;
+      gp_Pnt p;
+      gp_Pnt2d uv;
+      if (BOPTools_AlgoTools3D::PointInFace(face, p, uv, ctx) != 0)
+        continue;
+      inBefore.Perform(p, ptol);
+      if (inBefore.State() == TopAbs_IN)
+        return true;
+    }
+  } catch (const Standard_Failure&) {
+  }
+  return false;
+}
+
 // Route a failure reason to the caller when it wants one, else to the log
 // (Document logs the caller-surfaced text again, so never both).
 void Fail(std::string* error, std::string message) {
@@ -613,6 +652,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     // contributing nothing means.
     std::vector<std::pair<CADShape, ElementMap>> cuts(bodies.size());
     std::string retried; // the fuzzy retries this cut needed, if any
+    bool removed = false; // a body kept the cut: it took material
     for (size_t i = 0; i < bodies.size(); i++) {
       Body& body = bodies[i];
       if (body.reference || body.IsMesh())
@@ -631,11 +671,13 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       // and renamed -- and a cut that removes nothing must leave the model
       // exactly as it found it.
       if (VolumeUnchanged(body.shape.Volume(), cut.shape.Volume()) &&
-          cut.shape.SolidCount() == body.shape.SolidCount())
+          cut.shape.SolidCount() == body.shape.SolidCount() &&
+          !CutLeftAFaceInside(body.shape, cut.shape))
         continue;
       if (cut.fuzzy > 0.0)
         retried += (retried.empty() ? "" : "; ") + cut.warning;
       cuts[i] = {std::move(cut.shape), std::move(cut.map)};
+      removed = true;
     }
     for (size_t i = 0; i < bodies.size(); i++) {
       if (!cuts[i].first.IsValid())
@@ -668,7 +710,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       *warning = "this cut consumed EVERY body — nothing is left of the "
                  "part. A tool that swallows the whole model is usually one "
                  "the wrong way round, or a boolean the kernel could not do";
-    } else if (warning && VolumeUnchanged(volBefore, volAfter)) {
+    } else if (warning && !removed) {
       *warning = "cut removed no material — the tool profile does not "
                  "intersect any body (check the sketch plane orientation and "
                  "position)";

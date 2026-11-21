@@ -16,7 +16,7 @@ command or parameter Loböle has no counterpart for.
 
 | area | cases | pass | known | untranslated |
 |---|---|---|---|---|
-| ladder | 170 | 99 | 16 | 55 |
+| ladder | 170 | 100 | 15 | 55 |
 | booleans | 130 | 64 | 9 | 57 |
 | fillets | 275 | 99 | 69 | 107 |
 | shell | 40 | 11 | 11 | 18 |
@@ -26,7 +26,7 @@ command or parameter Loböle has no counterpart for.
 | import | 35 | 0 | 0 | 35 |
 | tessellation | 14 | 11 | 1 | 2 |
 | crashes | 12 | 3 | 0 | 9 |
-| **all** | 815 | 337 | 139 | 339 |
+| **all** | 815 | 338 | 138 | 339 |
 
 ## Known failures
 
@@ -111,7 +111,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/every-l-bracket-inside-bend-r35-uses-both-faces | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/every-l-bracket-outside-bend-r5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/every-pocket-rim-edges-r5-as-deep-as-pocket | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/ladder/02-booleans/009-near-tangent-overlap-1e-3 | volume | [docs/known-bugs.md#a-cut-0001-mm-deep-is-dropped-as-removing-nothing](../known-bugs.md#a-cut-0001-mm-deep-is-dropped-as-removing-nothing) |
 | solidcraft/ladder/04-spline-profiles/004-sweep-square-along-bezier | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/ladder/04-spline-profiles/008-loft-square-to-circle | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/ladder/05-holes-and-taps/012-crossing-tapped-holes-offset | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |

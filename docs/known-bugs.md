@@ -69,21 +69,6 @@ the heading if it is not here yet.
   cost a second build of every honest refusal. The fix belongs upstream, in
   the offset's intersections, not in the order.
 
-### A cut 0.001 mm deep is dropped as removing nothing
-
-- **Symptom:** a cylinder of radius 10 along X whose side dips 0.001 mm
-  into the top of a 60 x 40 x 20 block, in `cut` mode, leaves the block
-  whole with the warning "cut removed no material"; the groove it should
-  leave is 0.0113 mm³ and two faces. The same cylinder 1e-6 mm in is held to
-  the same answer by the case and passes for the same reason.
-- **Cause:** not established. The boolean returns the body unchanged, or
-  `ApplyBodyMode` reads a volume change this small as none.
-- **Where:** `ApplyBodyMode` in `src/core/BodyMode.cpp`.
-- **Likely fix:** decide "removed nothing" from the result's faces, not
-  from a volume threshold.
-- **Case:** `solidcraft/ladder/02-booleans/009-near-tangent-overlap-1e-3`
-  ([kernel cases](modeling/kernel-cases.md)).
-
 ### Three chamfers meeting at a corner cut it off flat
 
 - **Symptom:** a Chamfer of three edges that meet at a box corner removes
