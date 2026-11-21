@@ -394,7 +394,8 @@ flat face clicked, or a datum chosen in its window) and **Refine**
 half the simulation's to start with) -- the geometry the analysis sees,
 before it is meshed -- **Mesh** (`###tb_sim_mesh`) | **Supports** (fixed, pin,
 contact, roller, held, cylindrical, temperature, convection) and **Loads**
-(force, pressure, torque, remote, heat flux, heat source), two drop-downs
+(force, pressure, torque, remote, bearing, heat flux, heat source), two
+drop-downs
 showing the last used, lit while it is armed; **Add case**
 (`###tb_sim_add_case`) and, on a topology study only, **Keep**
 (`###tb_sim_keep`) | **Check** (`###tb_sim_check`) and **Run**
@@ -407,7 +408,8 @@ subject row's Open, and Escape disarms the armed tool, else puts the tool
 window away, else clears the selection, as on a drawing or a job tab. A tool that cannot act on the study in front is
 disabled with its reason on hover (`ui::SimCommandRefusal`, every `sim.*`
 command's gate): a pin on a modal study, a heat flux on a static one, an
-export before a run. A drop-down's face shows the last used that can act,
+export before a run, any support or load on a free-free study. A
+drop-down's face shows the last used that can act,
 so a thermal study's supports show Temperature, not a greyed Fixed.
 
 ### Simulation: the tool window
@@ -416,13 +418,16 @@ The shared `###ToolWindow` ([tool-sessions.md](tool-sessions.md)) shows one
 thing at a time (`DrawSimulationToolWindow`, `src/ui/StudyPanel.cpp`): the
 armed tool's settings (what the next face clicked takes, and the case it
 goes in), else those of the tree row in focus -- a study's settings (name,
-analysis, solver, its own mesh size, its kind's numbers, gravity, the
+analysis, solver, its own mesh size, what its result keeps -- **Keep**,
+surface or whole field --, its kind's numbers -- a modal study's
+**Free-free: no support**, offered while nothing holds it --, gravity, the
 material check), the mesh's size (the simulation's, or a study's own),
 view and report, a load's place and value (a remote load's
 point and a force's case are edited there), a case's loads and weight, a
 participant's role, clamp and friction, the result (its progress while it
 runs, then its numbers -- maxima, factors, frequencies, each case's peaks,
-reactions -- and its probes), the geometry group (what is suppressed, each
+reactions; a modal study's modes in a table with each one's effective
+mass along x, y, z and a free study's rigid ones named -- and its probes), the geometry group (what is suppressed, each
 with **Put back**, the symmetry plane and its side, the refinements' sizes,
 and the geometry check grouped by feature, each with **Suppress**), or the
 check's findings. The Suppress tool's window lists the part's features as

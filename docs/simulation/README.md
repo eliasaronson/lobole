@@ -41,10 +41,17 @@ A study holds:
   spread as uniform traction over the face), a `Pressure` (MPa along the
   inward normal, positive pushes into the part), a `Torque` (N·mm about an
   axis) or a `Remote` force (newtons acting at a point off the face)
-  ([torque and remote loads](#torque-and-remote-loads)).
+  ([torque and remote loads](#torque-and-remote-loads)), or a `Bearing`
+  load (newtons on a bore or a shaft, pressed over the half its direction
+  pushes on: [bearing loads](#bearing-loads)).
 - `gravity` (static and buckling; m/s² in world axes, 0 = off; needs a
   material density) and `numModes` (modal: default 6; buckling: its number
   of factors, default 3).
+- `freeFree` (modal only, `free` in the file and on the wire): the part
+  with no support at all, its rigid modes labelled
+  ([free-free modes](#free-free-modes)).
+- `keep`: what its stored result keeps, `surface` (the default) or `full`,
+  the interior too ([a full result](#a-full-result)).
 - `loadCases` (static and topology): forces and pressures grouped into
   cases, each solved on its own over the same supports
   ([load cases](../topopt/README.md#load-cases)).
@@ -116,6 +123,114 @@ end twists by `TL/GJ` and its surface carries `√3·Tr/J`; a torque on a
 cylinder's side through `RunStudy` twists the end by `TL/2GJ`; a remote
 force's nodal loads are `F` and `(p − c) × F`, and the reactions at the
 clamp answer them; the refusals.
+
+### Bearing loads
+
+A shaft in a bore, or a pin in a lug, does not press its whole face
+evenly: it pushes on the half it is pushed towards, hardest where it
+pushes straight, and not at all on the far side. A force spread over the
+bore pulls the far half too; a `bearing` load (`LoadType::Bearing`)
+presses the way the shaft does.
+
+- **On a cylindrical face only**, a bore or a shaft: its axis is the
+  face's (`fem::CylindricalFaceAxis`, set by `CompleteLoadGeometry` at the
+  run, never saved), and any other face is refused, naming what is
+  accepted, by `add_load`, by the Load tool's click and by the run.
+- **Its force and direction.** `magnitude` is the total in newtons
+  (`force_n` on the wire, with `force_n_expr`) and `direction` the way the
+  shaft pushes the face, across the axis: one with more than a thousandth
+  of its length along the axis is refused (an axial load is a force on
+  the shoulder that takes it), and so is none. The GUI's default is down,
+  across the bore's axis; a bore standing vertical has no down across it
+  and is refused until a direction is typed.
+- **The pressure** (`AssembleFaceLoads`, `FemSolverInternal.h`, beside
+  Torque and Remote): at each Gauss point the unit radial direction from
+  the axis into the material, `m` (out of a bore's hole, into a shaft),
+  carries a normal pressure `p0 cos(theta)` over the half `d` pushes on
+  (`cos(theta) = m . d`) and none on the other, plus a trace `q
+  sin(theta)` there (`sin(theta) = m . e`, `e` the axis cross `d`): `p0`
+  and `q` are solved on the face's Gauss points so the resultant is
+  exactly `F` along `d` and nothing across it, which a mesh not quite
+  symmetric about `d` would otherwise leave (some 1e-4 of `F`). Its
+  moment about the axis is exactly zero (every traction is radial); on a
+  whole bore, `p0` is `(4/pi) F / (d t)`, the pin-joint bearing stress. A
+  face that does not hold the whole loaded half (`q` over a hundredth of
+  `p0`: a bore in pieces, or part of one) is refused at the run, since the
+  pressure would not be the cosine asked for.
+- **Where it goes.** A static, buckling or topology study's, on a whole
+  face (no `region`). A face the assembly's imprint splits is solved as one
+  face, as a torque is. On CalculiX it is written as the in-house nodal
+  forces (`*CLOAD`), and under large deformation it stays dead: its nodal
+  forces are the undeformed bore's.
+- **Under a symmetry cut it is refused**, by name: its pressure is scaled
+  over the loaded half of the whole bore, which a cut does not leave, and
+  the share a half bore should carry is a different load
+  ([the symmetry cut](#the-symmetry-cut)).
+
+The Load tool's list holds it (`sim.bearing`, `###tb_sim_bearing`: its
+force, and **Custom direction**), the tree names it with its direction,
+and the viewport draws an arrow at each sample of the loaded half, as long
+as the cosine there. Tests: `tests/test_fem_loads.cpp` (`[bearing]`): the
+nodal loads on a shaft sum to `F` along its direction and to nothing
+across it to 1e-9, with no moment about the axis and nothing on the far
+half, and the refusals; `tests/test_fem_pin.cpp`: the
+pin test's lug, clamped and pulled by a bearing load on its bore, its clamp
+carrying `F` to 1e-6, no moment about the axis, and the bore's radial
+stress where it is pushed straight within 10 % of `(4/pi) F / (d t)`;
+the reference case `bearing_lug` ([reference cases](#reference-cases)).
+
+### Free-free modes
+
+A part's own modes, hung on nothing: what a rap test measures, and what a
+part on soft mounts does. A modal study with `free: true`
+(`Study::freeFree`) has no support, and its stiffness matrix is singular
+on its six rigid motions.
+
+- **The rigid modes are set apart.** They are known: the three unit
+  translations and the three small rotations about the body's centre of
+  mass, made orthonormal in M's inner product. Each is a mode whose
+  frequency is its Rayleigh quotient `sqrt(r^T K r / r^T M r) / 2 pi`,
+  which a stiffness that leaves rigid motion free makes zero to rounding,
+  and is labelled `rigid`. They are not left to the Lanczos iteration,
+  which, asked for a six-fold eigenvalue at zero, can miss some of it.
+- **The elastic modes, at a negative shift.** `SolveModal` factors `K -
+  sigma M` at `sigma = -1e-6 trace(K) / trace(M)`, a millionth of the mean
+  diagonal ratio below zero, where it is positive definite and every
+  elastic eigenvalue is nearer to it the lower it is (its condition about
+  a million times K's own), and the operator projects the rigid motions
+  out of each product (`ProjectedShiftInvert` around `SpdShiftInvert`, its
+  start vector in the elastic space): what Spectra sees is the elastic
+  spectrum alone, and `numModes` of it come back after the six. A body is
+  meshed whole: a free study's every solid body is its subject.
+- **Effective mass** (every modal study, supported or free): each mode's
+  `(phi^T M r)^2 / (phi^T M phi)` along x, y and z (kg), `r` a unit
+  translation and `M` the whole consistent mass, held nodes included (the
+  base-excitation definition), beside the body's mass (`mass_kg`). Free,
+  the rigid modes hold the whole mass along each direction and the
+  elastic ones none of it; supported, the modes' sum approaches the mass
+  that moves.
+- **Refused, never quietly substituted**: `free` on a study that is not
+  modal; a free study with any support or load (it is the part hanging
+  free; a support is never dropped to make it so); a free study made
+  another type, until the same call sets `free: false`; a free study on an
+  assembly simulation
+  (its participants are held by their neighbours); and, as every modal
+  study, under a symmetry cut. A modal study with no support and `free`
+  false is refused, its message naming `free: true`.
+
+The study's window has **Free-free: no support** (`###study_free`,
+offered while nothing holds it), the Result window lists each mode's
+frequency, `rigid` for a rigid one, and its effective mass along x, y, z
+as a share of the body's, and the legend's mode list names the rigid ones.
+`study_results` carries each body's `modes` {frequency_hz, rigid,
+effective_mass_kg}, `mass_kg`, `effective_mass_fraction` and, free,
+`rigid_modes`, and at the top `free`; `list_studies` says a modal study's
+`free` and every non-topology study's `keep`. Tests: `tests/test_fem_free_modal.cpp` (`[free]`): a 200 x
+10 x 10 steel beam free, six rigid modes under a thousandth of its first
+elastic frequency, which is the free-free beam's closed form within 3 %,
+the rigid modes holding its mass to 1e-6 and the elastic ones none; a
+cantilever's first bending mode moving 61.3 % of its mass within 5 %; the
+refusals. The reference case `free_beam` ([reference cases](#reference-cases)).
 
 ### Pin supports
 
@@ -586,7 +701,7 @@ memory is the one a reopen reads back, value for value.
 
 | kind | kept | left out |
 |---|---|---|
-| static, modal | the boundary surface: its tri6 triangles and their faces, the nodes they use (and the peak nodes), each of those nodes' displacement, von Mises stress and stress tensor per load case, or its mode shapes; the maxima; the solved mesh's node and tet counts | the tets and every interior node: the contour, the deformed shape, a face's motion (`probe_study`) and the peak markers all read the surface |
+| static, modal | the boundary surface: its tri6 triangles and their faces, the nodes they use (and the peak nodes), each of those nodes' displacement, von Mises stress and stress tensor per load case, or its mode shapes; the maxima; the solved mesh's node and tet counts | the tets and every interior node: the contour, the deformed shape, a face's motion (`probe_study`) and the peak markers all read the surface. A study with `keep: full` keeps them too ([a full result](#a-full-result)) |
 | topology | the whole tet10 mesh, its boundary, the per-tet density, the summary | -- the iso-surface, the STL export and a static study of the shape cut tets |
 | motion | every sample's poses, mate values, clashes and unknown contacts; the pair counts | -- |
 
@@ -601,7 +716,8 @@ reference {`type`, `offset`, `count`} for each array
 `src/core/io/SerializationInternal.h`). A motion placement is the model's,
 so it stays `f64`: each distinct matrix once, and each sample's poses as
 indices into them -- an occurrence that holds still through a run is one
-matrix. The build links no zstd, so nothing is compressed. A topology
+matrix. The build links no zstd, so nothing is compressed, a full result
+included. A topology
 result's density digest, which a static study of the shape keys on, is
 taken over the density as float, so a run's digest and a reopened one's
 agree.
@@ -646,6 +762,49 @@ with what the run stored, keeps a static result to its surface as float
 with its peak markers on their nodes, saves an unchanged result twice and
 once more after a reopen without touching either file's time, and has an
 autosave write no result.
+
+### A full result
+
+A surface is all a panel reads, but not all a person asks: a section
+through the part, a stress read inside it, an export to a post-processor.
+A study with `keep: full` (`Study::keep`, `KeepMode::Full`; the study's
+**Keep: Whole field**) keeps its whole field, and its result
+(`StudyRuntime::keepFull`) passes `KeepWhatIsRead` with every node and tet,
+the fields rounded to float as ever.
+
+- **Against the mesh it was solved on.** Each body records the stored mesh
+  it was solved on (`StudyBodyResult::meshKey`). A save writes that body's
+  fields only, `mesh` naming the key (`DocumentIO::SimResultToJson`, when
+  the simulation keeps that mesh unchanged: its nodes as the result's at
+  a float's precision, its tets and boundary the same), and a reopen reads
+  the mesh first and the result against it: nothing is written twice. A
+  result whose mesh did not read is dropped with it, reported, and the
+  study runs again.
+- **A convergence run's refinement** is a mesh of its own, a child of the
+  stored one it started from: the body keeps it whole with its result
+  (`nodes`, `tets`, `boundary` in the result's own file) and names its
+  parent (`parent_mesh`, `StudyBodyResult::parentMeshKey`). It goes with
+  its result.
+- **Raw, not compressed.** The build links no compressor, so the fields
+  are `f32` and the indices `u16`/`u32` as every result's are
+  ([what a saved result keeps](#what-a-saved-result-keeps)). A full result
+  is larger, and the sizes-on-disk hover and the clear-storage question
+  ([clearing stored meshes and results](#clearing-stored-meshes-and-results))
+  count it as a save writes it.
+- **What it gives.** The reopened result is the run's value for value
+  (`tests/test_sim_full_result.cpp`): a section cuts its field through the
+  elements (the crinkle cut the mesh view draws, whole elements on the
+  kept side, unclipped, so the cut face shows the stress inside rather
+  than a hollow skin), `sample_study` answers inside from the element that
+  holds the point through its quadratic shape functions (`inside: true`),
+  and the VTU export takes the stored result. `keep` is part of the
+  study's input, so changing it reads the result stale. A topology result
+  keeps its whole mesh already, and `keep` is refused on one.
+
+`tests/sim_loads_results_smoke.py` saves a full result, closes the app,
+opens the project in another instance, and has `sample_study` at a point
+inside the part answer the same element and the same field, and the export
+succeed.
 
 ## Meshing
 
@@ -1274,8 +1433,9 @@ buckling).
   meet](#stress-where-materials-meet)); von Mises per node, and the maxima
   with their locations.
 - **Modal** (`fem::SolveModal`): `K φ = ω² M φ` with a consistent mass
-  matrix, lowest `numModes` by Spectra shift-invert. It needs a fixed support,
-  so K is positive definite: only the lower triangle is assembled (the only
+  matrix, lowest `numModes` by Spectra shift-invert. Supported, K is
+  positive definite (a free-free study factors at a negative shift with its
+  rigid modes set apart: [free-free modes](#free-free-modes)): only the lower triangle is assembled (the only
   half Spectra reads) and `(K − σM)⁻¹` is factorized with `SimplicialLDLT`
   behind `SpdShiftInvert` rather than Spectra's stock `SparseLU` path, which
   would store an L and a U for a symmetric matrix. Mode shapes are normalized
@@ -1309,7 +1469,8 @@ references separately, with no contact between them, and `study_results`
 reports one entry per body. Only bodies that carry a load or refinement are
 meshed; each needs a support ("has loads but no fixed support" is checked
 before any meshing, and a rigid motion its supports leave free before any
-factorization).
+factorization). A free-free modal study meshes every solid body and holds
+none ([free-free modes](#free-free-modes)).
 
 `study_results` for a static study reports `max_von_mises_mpa` and
 `max_displacement_mm` (`{value, at, body}`), the per-body breakdown with
@@ -1478,6 +1639,15 @@ library's material is a `scale` with its `scale_reason` (FV32's density).
   and the case's lengths are read as mm and its E as MPa: the answers are
   the paper's numbers. The beam's twist is a known failure: the solid
   converges to Saint-Venant's torsion, 6 % over the published value.
+- `free_beam` is a steel beam with no support (`free: true`): its six rigid
+  modes labelled and its first bending frequency against the free-free
+  beam's closed form ([free-free modes](#free-free-modes)); in-house only,
+  CalculiX not being given modal studies. `bearing_lug` is the pin test's
+  lug clamped and pulled by a bearing load on its bore: the radial stress
+  where it is pushed straight against the cosine pressure's peak `(4/pi) F
+  / (d t)` and the clamp's reaction against the force, in-house and on
+  CalculiX, which takes the bearing load as its nodal forces
+  ([bearing loads](#bearing-loads)).
 
 `tools/fem_reference.py run` runs every case on one headless instance and
 `--write-page` writes [the page](reference-cases.md): per case the source,
@@ -1495,7 +1665,7 @@ the cases, and `--release` always. `fem_reference.py check`
 `src/core/fem/FemReferenceCases.h` names exactly the cases that say they
 verify it: a study's receipt carries `verified_by` {`procedure`, `cases`,
 `page`} from it (`static tet10: le1, kirsch, lame_rate, lame_tpu, bar,
-cantilever, mh_beam, mh_cylinder`), so an answer says what it rests on. `sample_study` reads the
+cantilever, mh_beam, mh_cylinder, bearing_lug`), so an answer says what it rests on. `sample_study` reads the
 fields at a point, which is where a benchmark's target is read.
 
 ## CalculiX
@@ -1564,7 +1734,7 @@ and load case:
 |---|---|
 | nodes (mm), tet10 | `*NODE`; `*ELEMENT, TYPE=C3D10`, one ELSET per `tetDomain` (an assembly's bonded members). The node order is ours; a tet Netgen orients negatively has its corners 1 and 2 swapped, with their midsides |
 | material per domain | `*MATERIAL` / `*ELASTIC` (MPa) / `*DENSITY` (t/mm³) / `*SOLID SECTION` |
-| force, pressure, torque, remote load, region, gravity | the nodal forces the in-house solve applies (`fem::NodalForces`: the same Gauss rules), as `*CLOAD`; every load kind and `region` maps identically |
+| force, pressure, torque, remote load, bearing load, region, gravity | the nodal forces the in-house solve applies (`fem::NodalForces`: the same Gauss rules), as `*CLOAD`; every load kind and `region` maps identically |
 | fixed (and a rigid participant's clamp) | `*BOUNDARY n, 1, 3` |
 | pin: a node held radially and axially in its own frame | the pin's nodes in a cylindrical `*TRANSFORM` about its axis, the held directions as `*BOUNDARY` in it, and those nodes' loads given in it |
 | pin `fix_rotation` (`fem::Tie`) | one `*EQUATION` over the tangential directions, the tie's own coefficients, its largest first |
@@ -1723,8 +1893,10 @@ the step's largest increment its load over `increments` (default 10;
 `fem::kNonlinearIncrements`). Each increment is solved on the part as it has
 deformed. The loads (`WriteDeck` with `DeckNonlinear`):
 
-- a **force** and **gravity** keep their direction (dead loads): the nodal
-  forces the in-house solve applies, as `*CLOAD`, scaled by the step;
+- a **force**, a **bearing** load and **gravity** keep their direction
+  (dead loads): the nodal forces the in-house solve applies, as `*CLOAD`,
+  scaled by the step (a bearing load's are the undeformed bore's:
+  [bearing loads](#bearing-loads));
 - a **pressure** follows its face as it turns: `*DLOAD P<n>` on each
   loaded facet's tet face (a boundary tri6 maps to the face S1-S4 of the
   tet that has its corners, in the order the deck writes them);
@@ -2680,7 +2852,7 @@ copy meshes. Topology optimization is refused beside a neighbour.
 ## The simulation document (core)
 
 `fem::SimDocument` (`src/core/fem/SimDocument.{h,cpp}`) is where studies
-live ([the plan](../plans/simulation-document.md)): a document of its own,
+live: a document of its own,
 saved and opened ([how](#how-a-simulation-is-saved)) as a tab of its own,
 whose subject is a part or an assembly. Simulation mode is a simulation tab
 in front ([the simulation tab](#the-simulation-tab)), the RPCs act on a
@@ -2765,7 +2937,9 @@ again (`StudyBodyPlan::stored`); a mesh the run does make comes back in
 solved on (`StudyRuntime::meshKeys`). So two studies with the same effective
 settings mesh once, a study with a mesh size of its own meshes separately,
 an edit to a load never re-meshes, and an edit to the subject moves the key.
-A convergence step's refinement is a mesh of its own and is not stored. A
+A convergence step's refinement is a mesh of its own and is not stored as
+the document's; a full result keeps it with the result, a child of the
+mesh it started from ([a full result](#a-full-result)). A
 study on the document's mesh (`SimDocument::SharesMesh`) sets the document's
 mesh keys (`DocumentMeshKeys`) to the ones it solved on, which a save keeps
 even when no result reads it.
@@ -3062,8 +3236,10 @@ A result is drawn with its mirror image on request (`set_result_display
 reflected with its displacement).
 
 Refused, naming why: a modal or buckling study (a half model finds only the
-modes symmetric about the plane), a topology study, a torque, a remote
-load, a pin or a contact (none is its own mirror image once cut), a load on
+modes symmetric about the plane; a free-free one with them), a topology
+study, a torque, a remote load, a pin or a contact (none is its own mirror
+image once cut), a bearing load (its pressure is scaled over the loaded
+half of the whole bore: [bearing loads](#bearing-loads)), a load on
 part of a face, a static study of a topology shape, a bonded group, a
 thermal load from a thermal study, a plane that leaves nothing, and one
 that does not halve a body's volume to half a percent: the part is not
@@ -3191,11 +3367,14 @@ midside nodes following their edges (`kVtkTet10Negative`); VTK's midside
 order is otherwise ours.
 
 It writes the **whole** result, which a [stored result](#what-a-saved-result-keeps)
-is not: the session remembers the last eight results by input hash as they
+is not unless its study keeps `full`: a full result is whole as it is
+stored, after a reopen too ([a full result](#a-full-result)); otherwise the
+session remembers the last eight results by input hash as they
 were solved (`AppState::studyResultsByInput`), and the export reads the one
-behind the study's stored result (`ui::FullStudyResult`). A result reopened
-from disk has its boundary surface only and is refused, saying to run again
-(`run_study {recompute: true}`); nothing is written.
+behind the study's stored result (`ui::FullStudyResult`). A surface result
+reopened from disk has its boundary surface only and is refused, saying to
+run again (`run_study {recompute: true}`) or to keep the whole field;
+nothing is written.
 
 Boundary conditions are drawn in the viewport (`src/ui/StudyPanel.cpp`):
 each BC face is tinted through the mesh renderer's face highlight in its
@@ -3226,9 +3405,11 @@ tinted as a fixture, and bonded seams in the bond colour.
   without ccx, and Run then refuses in the window's red text with how to
   install it ([CalculiX](#calculix)).
 - In the window: analysis type, the study's own mesh size (0: the
-  simulation's), material check, gravity (a
+  simulation's), **Keep** (Surface or Whole field: [a full
+  result](#a-full-result)), a modal study's **Free-free: no support**
+  ([free-free modes](#free-free-modes)), material check, gravity (a
   checkbox that sets world-down 9.81 m/s²), and **Boundary conditions**: arm
-  Fixed, Force, Pressure, Torque, Remote, and on a static study Pin or
+  Fixed, Force, Pressure, Torque, Remote, Bearing, and on a static study Pin or
   Contact, and click a face (a pin beside an assembly's neighbour is the
   planner's refusal); magnitude and an
   optional custom direction apply to the next placement. **Torque** takes
@@ -3240,7 +3421,10 @@ tinted as a fixture, and bonded seams in the bond colour.
   radius. **Remote** takes "Force (N)", a direction and "At (mm)"; an
   untyped point is the clicked face's centroid pushed out along its normal
   by a tenth of the body's bounding diagonal, and the point stays editable
-  in the load row's menu. A torque is drawn as a circular arrow about its
+  in the load row's menu. **Bearing** takes "Force (N)" and **Custom
+  direction** (unticked: down across the bore's axis); a click on a face
+  that is not a cylinder is refused in the red line and places nothing
+  ([bearing loads](#bearing-loads)). A torque is drawn as a circular arrow about its
   axis, a remote load as an arrow at its point with thin lines to the face.
   **Pin** takes "Hold it from turning" (unticked: free to turn); a click on
   a face that is not a cylinder is refused in the red line and places
@@ -3260,7 +3444,8 @@ tinted as a fixture, and bonded seams in the bond colour.
   shared progress bar, and under it the [check](#checking-a-study): every
   problem a run would refuse, as rows. Results: mesh size, max von Mises,
   max displacement and each load case's peaks, the reactions and the
-  convergence, the probes, for modal the natural frequencies, for
+  convergence, the probes, for modal the natural frequencies (each mode's
+  effective mass, a free study's rigid ones named), for
   buckling the **Buckling factors** with the governing factor, the
   knockdown and its class, the yield and interlayer factors, and the flags
   as text (the mode or case on show is marked). What is shown is the
@@ -3310,8 +3495,8 @@ the simulation's mesh.
 | `check_sim_geometry {study?}` | read-only: [the geometry check](#the-geometry-check), each finding {kind: edge \| face \| gap, size_mm, element_size_mm, element?, feature?, suppressible, through?, at_mm} |
 | `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling \| thermal (`kind` accepted; thermal a part study's) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (the simulation's, one table for its studies: the reply's `participants_shared_with` names the other studies it changed, and `add_simulation` makes a simulation for another table; a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study); on an assembly, uniform only: [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
-| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)); a thermal study's `temperature` {face, temperature_c}, `heat_flux` {face, power_w \| flux_w_m2}, `convection` {face, film_w_m2k, ambient_c} and `heat_generation` {body, power_w} ([thermal](#thermal)) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (the simulation's, one table for its studies: the reply's `participants_shared_with` names the other studies it changed, and `add_simulation` makes a simulation for another table; a `contact` one takes `friction`: [contact](#contact)), `free` (a modal study's: [free-free modes](#free-free-modes)), `keep` (surface \| full: [a full result](#a-full-result)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study); on an assembly, uniform only: [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); bearing takes `force_n` and `direction` across its cylindrical face's axis ([bearing loads](#bearing-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)); a thermal study's `temperature` {face, temperature_c}, `heat_flux` {face, power_w \| flux_w_m2}, `convection` {face, film_w_m2k, ambient_c} and `heat_generation` {body, power_w} ([thermal](#thermal)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study?, face, size, occurrence?}`, `remove_refinement {study?, face}` | local element size, mm: a study's own (it meshes apart), or with no `study` the simulation's mesh's (the toolbar's Refine); a face a suppressed feature made is refused |
 | `mesh_study {id, async?}` | meshes and keeps the mesh: per body nodes, elements, worst quality and `report`, and `findings` ([the mesh report](#the-mesh-report)); refused when the mesh does not fill its body |
@@ -3320,7 +3505,7 @@ the simulation's mesh.
 | `run_study {id, async?, recompute?, outlive_client?, timeout_s?, converge?, layer_normal?}` | mesh + solve, and on a static study settle its peak ([a peak that has settled](#a-peak-that-has-settled)): `converge` overrides the study's for this run, `layer_normal` is the build direction whose across-layers peak a printed part's check settles; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)); `timeout_s` bounds a CalculiX run ([CalculiX](#calculix)); a nonlinear run that stops converging is refused with the load it reached ([nonlinear static](#nonlinear-static)) |
 | `export_study_inp {id, path, body?, case?}` | the CalculiX deck a static, buckling or thermal study would run (a thermal study's heat deck, a thermally loaded static study's with its temperatures: [thermal](#on-calculix)), meshed now, no ccx needed ([the deck](#the-deck)); a large-deformation study's NLGEOM deck, a snap-through one's refused ([nonlinear static](#nonlinear-static)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended -- a nonlinear run's `load_fraction` ([the run](#the-run)); cancel stops it |
-| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, `reaction_total` and a run's `applied_total` ([the balance](#the-balance)), factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)); thermal: the peaks, `flows`, `balance`, `temperature_margin_k`, and a static study's `temperature` under a thermal load ([thermal](#what-a-thermal-result-says)) |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, `reaction_total` and a run's `applied_total` ([the balance](#the-balance)), factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` and `bodies[i].modes` (each `frequency_hz`, `rigid`, `effective_mass_kg`), `mass_kg`, `effective_mass_fraction`, on a free study `rigid_modes`, and at the top `free` ([free-free modes](#free-free-modes)); buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)); thermal: the peaks, `flows`, `balance`, `temperature_margin_k`, and a static study's `temperature` under a thermal load ([thermal](#what-a-thermal-result-says)) |
 | `probe_study {id, face, occurrence?, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at`; on a plastic result its plastic strain and residual motion; on an assembly study the face of `occurrence` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the simulation's tab in front in simulation mode (made, with a study, on a part with none), and back to its subject |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?, range_min?, range_max?, layer_normal?, markers?, mirror?}` | `field`: one of [the fields](#results-display), or shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows; the legend's range clamp and markers; `mirror` a half model's mirror image ([the symmetry cut](#the-symmetry-cut)) |
@@ -3452,6 +3637,17 @@ the simulation's mesh.
   exported.
 - `tests/rpc_gate_smoke.py` checks the study verbs are accepted on an
   assembly tab.
+- Bearing loads, free-free modes and full results: `tests/test_fem_loads.cpp` and
+  `tests/test_fem_pin.cpp` (`[bearing]`, [bearing loads](#bearing-loads)),
+  `tests/test_fem_free_modal.cpp` (`[free]`,
+  [free-free modes](#free-free-modes)), `tests/test_sim_full_result.cpp`
+  (`[keepfull]`, [a full result](#a-full-result)), the golden
+  `vNEXT-free-modal-bearing-keep`, `tests/sim_loads_results_smoke.py`
+  over the RPCs (every refusal changing nothing, the full result through a
+  save, a closed app and a new instance), and the GUI's
+  `sim/the_load_tool_places_a_bearing_load`,
+  `sim/a_free_study_names_its_rigid_modes` and
+  `sim/a_full_result_is_cut_through_its_elements`.
 - The geometry step ([the geometry step](#the-geometry-step)):
   `tests/test_sim_geometry.cpp` (`[simgeom]`) -- a plate's fastener holes
   suppressed meshing under a fifth of the elements while the part keeps them,
@@ -3491,17 +3687,23 @@ the simulation's mesh.
 - The path past a peak: ccx 2.23 has no arc-length method (`*STATIC, RIKS`
   is read as a plain `*STATIC`, with a warning), so a snap-through run
   reports the peak and not the branch after it.
-- Free-free modal analysis (a modal study needs a support).
+- A free-free study on an assembly simulation, and a free-free study's
+  rigid modes found per connected piece of one body's mesh (six are
+  sought for each body; a body meshed in several pieces is not split).
+- A bearing load under a symmetry cut, on part of a face, or following a
+  bore as it deforms under large deformation (it is a dead load there).
 - Shell and beam elements; adaptive refinement over the whole field (the
   convergence check refines only the faces its peaks lie on).
 - Suppressing a feature for the analysis on an assembly study beside a
   neighbour, and a symmetry cut on an assembly
   ([the geometry step](#the-geometry-step)); a cut of a modal, buckling or
-  topology study, or one with a torque, a remote load, a pin or a contact.
+  topology study, or one with a torque, a remote load, a bearing load, a pin
+  or a contact.
 - Per-participant mesh size on a bonded member applies to its faces only; the
   study's global size still governs the interior.
-- A reopened result has no interior to export or cut (`keep: full`,
-  [the plan](../plans/simulation-document.md#2-results)). On an
+- A surface result (the default) has no interior to export or cut after a
+  reopen; `keep: full` keeps it ([a full result](#a-full-result)). A full
+  result is not compressed (no compressor is linked). On an
   assembly, an asynchronous Mesh, a check that itemises, and a bonded
   group's factor field once it is read back from disk. An assembly
   simulation's configuration: it analyses the assembly as it stands.

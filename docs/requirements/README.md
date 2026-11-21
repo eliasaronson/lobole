@@ -484,7 +484,8 @@ nobody saved, not parts as made. ("Sweep" also names the Sweep feature and
 the clash sweep, so this one is `design_sweep` throughout.)
 
 **What it takes.** `design_sweep {variables?, from_requirements?, samples?,
-corners?, refine?, documents?, max_points?, async?, outlive_client?}`:
+corners?, refine?, documents?, max_points?, study_budget_s?, async?,
+outlive_client?}`:
 
 - `variables [{name, min, max, scope?}]`: each end a number or an
   expression in the variable's base units (mm, degrees); `scope` is
@@ -502,6 +503,11 @@ corners?, refine?, documents?, max_points?, async?, outlive_client?}`:
   variables or features read a swept variable, directly or through other
   project variables, and every part an expression requirement reading one
   is on.
+- `study_budget_s`: the seconds, counted from the sweep's start, within
+  which a sweep that measures studies may start and finish its solves
+  (above 0, at most 86400), required when it does
+  ([studies at every point](#studies-at-every-point)) and refused when it
+  does not.
 
 **Refused before anything starts** (a refused call changes nothing): an
 unknown key (a variable's too); a variable not in scope, naming those that
@@ -514,7 +520,11 @@ above `max` or an end that does not evaluate to a finite number; `samples`,
 short (the count is every sample and corner and `refine` bisections on each
 side of each variable at most); `from_requirements` with no requirement
 that bounds one variable, naming those it looked at; a `documents` id that
-is not a part; a second sweep while one runs, naming its job.
+is not a part; a second sweep while one runs, naming its job; a sweep
+that solves studies without `study_budget_s` (the refusal says what the
+last solves suggest it costs), or one of whose studies converges `always`
+(each point would refine until its peak settles, however long that takes:
+no budget bounds it), naming the study.
 
 **On copies.** The main thread writes each part it rebuilds to its saved
 form (`DocumentIO::Save`, a temporary directory) with a copy of the project
@@ -539,16 +549,19 @@ regeneration refused, keeping the previous geometry, is one) or whose DOF
 differs from the base, and `volume_mm3` and `mass_g`. And every requirement
 it can measure on the copies -- `expression`, and `mass`, `volume` and
 `section_area` of a rebuilt part -- through the functions the check calls,
-as `{id, name, state, value?, unit?, note?}`. The others (studies, an
-assembly's, CAM, `check_literals`, and a part's that is not rebuilt) are
-listed once in `not_swept` with why: a study per point is minutes, and an
-assembly reads every part. A point fails (`ok: false`, with `why`, one
-reason a line) when a part is broken, a sketch does not solve, or a
-measured requirement fails or is unresolved.
+as `{id, name, state, value?, unit?, note?}`, and the study requirements
+below, solved. The others (a motion study's, an assembly's, CAM,
+`check_literals`, a study requirement a sweep does not solve, and a part's
+that is not rebuilt) are listed once in `not_swept` with why: a motion
+study per point is minutes, and an assembly reads every part. A point
+fails (`ok: false`, with `why`, one reason a line) when a part is broken, a
+sketch does not solve, or a measured requirement fails or is unresolved.
 
 **The answer.** `{points [{values, parts, requirements, ok, why?}], base,
 first_failure {name: {below?, above?: {last_ok, failed, why}}}, not_swept,
-variables, planned, cap, seconds, cancelled, job}`. `first_failure` is the
+variables, planned, cap, seconds, cancelled, job, studies?}` (`studies`
+when it solves any: [studies at every point](#studies-at-every-point)).
+`first_failure` is the
 failing value nearest the variable's own value on each side, with the last
 good one before it (null when its own value fails), so the break is
 bracketed and named with the broken feature's own error; `refine` narrows
@@ -577,7 +590,7 @@ from, to) and one samples, corners and refine for the sweep; the default
 range is half to twice the variable's value, derived from it, and a
 variable at zero has no default and says so. A line under the rows gives
 the planned count against the cap (or the refusal design_sweep would give)
-before Run. Run (`###sweep_run`) shows progress on `DrawJobProgress` with
+before Run; with **Study budget (s)** (`###sweep_study_budget`, `study_budget_s`; empty is not stated) a sweep that solves studies says how many it solves at each point and what the last solves suggest it costs. Run (`###sweep_run`) shows progress on `DrawJobProgress` with
 Cancel (`###sweep_cancel`); the answer is a table, a row a point, failing
 cells in the fail colour with the reason in their tooltip, and each
 variable's first failure as a line above it. The window plans, starts and
@@ -587,6 +600,51 @@ sweep. It changes nothing in the document.
 
 The SDK's `App.sweep({name: (min, max)} or [...], from_requirements=,
 **options)` runs the job, waits and returns `design_sweep_result`'s answer.
+
+### Studies at every point
+
+A `study_result` (`max_displacement`, `max_von_mises`, `factor_of_safety`,
+`case?`) or `study_probe` (one `face`: `translation`, `rotation`,
+`von_mises_max`, `von_mises_mean`, `case?`) requirement on a static study
+of a rebuilt part's simulation, solved in-house, is measured at every
+point by solving it (`sweep::StudyMeasure`, `src/core/DesignSweep.cpp`).
+Each worker holds its own clone of the simulation (its results dropped,
+its stored meshes shared); at each point the study is planned on the
+rebuilt part (its geometry step with it), keyed by the run's input hash
+(`fem::RunInputKey` of `fem::SimStudyInputKey`, the study's own converge
+mode: what the app's run is keyed by), and either answered from the cache
+or re-meshed and solved (`fem::RunSimStudy`) as part of the sweep's job,
+one solve at a time across the workers, its cancel the sweep's. The
+reading is the one the check takes, read off the runtime: the largest
+displacement and von Mises over the bodies, the least factor of safety
+(each body's yield), or the face's fitted motion and stress
+(`fem::FitFaceMotion`, `fem::FaceStressOf`). Its row carries `input_hash`,
+`reused` and `solve_s`.
+
+- **Reused by input hash.** The cache is the session's
+  (`sweep::StudyCache`, 64 runs), seeded with each measured study's stored
+  result when it is current, so the point at the variable's own value
+  costs nothing when the study has been run, and a sweep run again solves
+  nothing.
+- **A budget stated up front.** `study_budget_s` is how long the sweep may
+  go on solving, on the wall clock from its start (its rebuilds count
+  too). The plan (`async`'s first answer) lists the solved requirements
+  as `study_requirements` [{id, name, study, study_name, last_solve_s?}] with
+  `study_budget_s` and `estimate_s`, the last solves' time times the points
+  and the base where they are known. Once it is spent, a
+  point that needs a solve reads `unresolved`, "the study budget of N s
+  was spent", the solve under way is cancelled when it runs past it, and
+  the answer's `studies` says `budget_spent`. `studies` is {solved,
+  reused, solve_seconds, budget_s, budget_spent, requirements,
+  estimate_s?}.
+- **Unbounded is refused.** A study set to converge `always` refines until
+  its peak settles at every point, however long that takes, so the sweep
+  refuses it, naming the study, before anything starts; `auto` stops for
+  time and `never` does not refine.
+- **Not swept** (listed with why): a study that is not static, one solved
+  on CalculiX, an assembly simulation's, a probe's formula over several
+  faces or a motion carried to a point, and the other `study_result`
+  quantities. The GPU is not offered: each point solves on the CPU.
 
 ## RPCs
 
@@ -601,7 +659,7 @@ reference for every parameter and key.
 | `list_requirements` | every row with its state, the counts, `all_pass` |
 | `check_requirements {ids?, async?, recompute?, outlive_client?}` | measures (above) |
 | `add_assertion`, `list_assertions`, `remove_assertion`, `verify_assertions` | clearance requirements in the old words |
-| `design_sweep {variables?, from_requirements?, samples?, corners?, refine?, documents?, max_points?, async?, outlive_client?}` | the model over ranges of its variables, on copies ([design sweep](#design-sweep)) |
+| `design_sweep {variables?, from_requirements?, samples?, corners?, refine?, documents?, max_points?, study_budget_s?, async?, outlive_client?}` | the model over ranges of its variables, on copies, its study requirements solved at every point ([design sweep](#design-sweep)) |
 | `design_sweep_result {job?}` | a sweep's answer, kept in memory |
 
 The SDK (`python/lobole/sdk.py`): `App.require(name, measure, at_most= |
@@ -631,7 +689,12 @@ delivering.
   every edge filleted at `r`, swept over `t` breaks between the samples
   either side of `2 r` and names the fillet, and `refine` narrows that
   bracket; a triangle dimensioned `a`, `b`, `c` swept over `c` reads its
-  sketch not ok past `a + b`; corners count `2^n + 1`;
+  sketch not ok past `a + b`; corners count `2^n + 1`; a cantilever wall
+  swept over its thickness solving its study at every point, each point's
+  deflection within 5 % of `F L^3 / 3EI`, its factor of safety growing
+  with the wall, the stored result answering its point and a rerun
+  solving nothing (`[slow]`), and a sweep refused without its budget and
+  with a study that converges always;
   `from_requirements` takes a `within` range and refuses a one-sided one
   until `variables` gives its other end; the user's document (its version,
   bodies and variables) is unchanged after a sweep; and the refusals.
@@ -714,4 +777,6 @@ delivering.
   naming the variable. A project variable's rename undoes whole.
 - The Design sweep window takes one `samples` for the sweep, not one per
   variable (design_sweep takes one).
-- A sweep does not measure studies, assemblies or CAM jobs at its points.
+- A sweep does not measure motion studies, assemblies or CAM jobs at its
+  points, and of studies only a static part study's maxima and one face's
+  probe, in-house (not on the GPU or CalculiX).

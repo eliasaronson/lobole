@@ -205,7 +205,10 @@ origin that misses the body. Examples in the code:
   span clear of the ones already taken, with a gap scaled to the item; the
   occurrence insert and drawing-view placement use it.
 - A simulation force defaults to the negated outward normal of the face it is
-  placed on and a magnitude from the part's own weight.
+  placed on and a magnitude from the part's own weight; a bearing load takes
+  the same magnitude, pushing down across its bore's axis (a vertical bore
+  is refused until a direction is typed:
+  [bearing loads](../simulation/README.md#bearing-loads)).
 - Reference geometry is sized from the document's reach and drawn over the
   part ([README.md](README.md#viewport)).
 

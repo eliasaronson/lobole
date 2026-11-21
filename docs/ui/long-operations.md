@@ -491,7 +491,10 @@ as an open reads a project, so it
 shares no shape with the document. Like the requirements check, the job has
 no registry thread: its `finish` is called every frame, carries the run's
 progress (`label` "cam_d = 27.5 (7 of 15)", `fraction`) to the registry,
-hands a cancel on to the workers (read between points), and once the run
+hands a cancel on to the workers (read between points, and by a study
+solve under way: [studies at every
+point](../requirements/README.md#studies-at-every-point), whose label adds
+"solving '<study>'"), and once the run
 has ended joins it and keeps its answer (the last eight, for
 `design_sweep_result`). A cancelled sweep keeps the points it measured. It
 is owned by the RPC connection that started it unless `outlive_client`; a
