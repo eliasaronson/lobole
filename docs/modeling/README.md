@@ -1097,6 +1097,93 @@ accepted:
   (a Fillet, a Shell): refused naming the body it changed and that body's
   `created_by`, the source to give instead.
 
+## The size that fits
+
+A Fillet or Chamfer that cannot be built at the size asked says the size
+that can: "fillet radius 10 mm does not fit: the largest radius that fits
+is 7.49 mm (face '1/face0' is 15 mm wide between the two picked edges, so
+the rounds meet at 7.5 mm)", on an 80×15×20 box with both vertical edges of
+one end picked. The caller, a person dragging the field or an agent
+sending `add_feature` again, would otherwise bisect by hand, one build and
+one round trip a guess.
+
+**Measures at the picked edges** (`src/core/MeasureBlend.cpp`, declared in
+`Measure.h`; `query_geometry` gives them with `blend_measures: true`): for
+each picked edge and each of its two faces, the **dihedral angle** between
+the faces at the edge's middle (`DihedralAngleAt`, the solid's interior
+angle: over 180° at a concave edge); the face's **width across the edge**,
+how far it runs from the edge, in the face and square to it, before its
+boundary, the least over five stations along the edge, and the edge it
+ends at (`WidthAcrossEdgeAt`; on a plane, or along the ruling of a cylinder
+or cone, where that line is straight); and the **least radius of
+curvature** of a face that curves toward the blend (`ConcaveRadiusAt`: into
+the material at a convex edge, into the air at a concave one).
+
+**Bounds** (`fit::BlendBound`, `src/core/BlendFit.h`). A round of radius r
+where the faces meet at θ takes r / tan(θ/2) of each face; a chamfer takes
+its distance. So the setback is at most the face's width, and where the
+face's far edge is picked too the two setbacks together are (two rounds on
+a 15 mm end face meet at 7.5); r is at most a concave face's least radius
+of curvature; and across a disc to its own rim, at most the rim's radius (a
+cylinder's end rounded by its own radius is a hemisphere). Each is an upper
+bound -- nothing above it fits, something below it may still fail -- and
+the least of them, with the face or edge it is about, is the blend's
+bound. A bound does not refuse anything yet; it seeds the search.
+
+**The search** (`fit::LargestThatBuilds`). When the build at the asked size
+fails -- the builder is not done, a faulty contour, a fault in its signal
+scope, or a result `Measure::InvalidReasons` calls invalid; not the edges'
+own objections, which no size cures -- the first candidate sits just under
+the bound (a thousandth below it, so two rounds that would meet exactly
+leave a sliver), and where that builds it is the answer and the bound is
+named as the reason. Otherwise eight steps: down by a factor of 0.4 while
+nothing has built, so the steps reach a thousandth of the size, then
+halving the bracket between the largest that built and the least that
+failed by ratio (its geometric mean), so the answer is as close in
+proportion whatever its size. Nine builds at most, a fixed count, so the answer does not depend
+on how busy the machine is. Every candidate is rounded down to three
+significant digits, so the number reported is a number that was built. A
+candidate builds when `topo::EdgeBlendUnnamed` returns a solid that
+`InvalidReasons` passes: the two things `Execute` requires, without naming
+the result. `BRepFilletAPI_MakeFillet::Build` ignores its progress range in
+OpenCASCADE 7.9, so the search is bounded by its count; it asks
+`heavy::Cancelled()` before each candidate, and a stopped search reports
+the bracket it has.
+
+A feature that stays broken is regenerated again and again. Its answer is
+kept on the feature (`FilletFeature::fitMemo`, restored by
+`CopyDerivedState` with the rest of the executed state), keyed on the input
+body, the edges and the operation, and reused for any asked size at or
+above the least known to fail: a field dragged further past the limit
+searches once. The build at the asked size still runs each time.
+
+**What it says.** "radius" for a Fillet, "distance" for a Chamfer:
+
+- converged: "fillet radius 25 mm does not fit: the largest radius that
+  fits is 3.92 mm — near (40.000, 0.000, 20.000)", the faulty contours'
+  places as before; where the bound's candidate built, the bound's fact in
+  brackets instead: "chamfer distance 10.5 mm does not fit: the largest
+  distance that fits is 9.99 mm (face '2/g2870764257' runs 10 mm from edge
+  '2/g2870764257;U1', so a chamfer of 10 mm takes all of it)";
+- stopped: "… does not fit: a radius of 5 mm builds and 7.5 mm does not
+  (the search was stopped)";
+- nothing built: "… does not fit: no radius builds on these edges, down to
+  <the least size tried> mm (<what the build at the asked size said>);
+  fewer edges in one fillet usually builds".
+
+The answer is also a `FitHint` on the feature (`Feature::GetFitHint`, set
+and cleared with the error): `regen.failed[].fits`, the refusal's
+`diagnostic` ([rpc](../scripting/rpc.md#structured-errors)) and the tool
+window's "Use 7.49 mm" button ([tool
+sessions](../ui/tool-sessions.md#the-tool-window)) read it.
+
+`add_feature` and `modify_feature` build a Fillet or Chamfer on a copy
+first, as they do a direct edit, and refuse one that does not build with
+the document unchanged; a size an upstream edit broke is a broken feature
+in that edit's `regen`. `tests/test_blend_fit.cpp` checks each answer by
+what it is for: the size reported builds a valid solid of the closed-form
+volume, and 2 % above it does not.
+
 ## Kernel calls build on a copy of the cached body
 
 The body a feature acts on is the previous feature's cached result, which
@@ -1159,7 +1246,8 @@ A Fillet, Chamfer, Shell, Draft or direct edit
 a solid that crosses itself is refused with `Measure::InvalidReasons` ("draft
 produced an invalid solid (self-intersecting wire, unorientable shape)"),
 and the body is left as it was; check_geometry would have called it invalid.
-A Shell that reaches past the body's own measured outside — the offset
+A Fillet or Chamfer refused so searches for the size that does build
+([the size that fits](#the-size-that-fits)). A Shell that reaches past the body's own measured outside — the offset
 builder moving a face outward — is refused too: a shell hollows inward.
 
 Stock OpenCASCADE's offset builder answers by where its input lives in

@@ -86,6 +86,7 @@ LoboleError
 │   ├── MissingArgument, UnknownArgument, InvalidArgument
 │   ├── StaleRevision, StaleSnapshot, BudgetExceeded
 │   ├── DeviceLost      the device was lost and a rebuild could not save it
+│   ├── DoesNotFit      a Fillet's or Chamfer's size does not build; .fits_mm does
 │   └── InternalError   the handler fell over; rolled back all the same
 ├── NonFiniteError      the call ran, and its answer held NaN/inf
 └── SdkError            misuse the SDK caught without asking the app

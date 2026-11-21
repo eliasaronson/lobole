@@ -95,6 +95,14 @@ For a feature preview the window shows the slot rows and parameters, then:
 - the pending feature's own **error** in red, with **Accept disabled**
   (button and Enter) — unless the failure only happened because an earlier
   feature failed, which is not this dialog's fault;
+- under a Fillet's or Chamfer's error that names the size that fits
+  ([modeling](../modeling/README.md#the-size-that-fits)), a button
+  "**Use 7.49 mm**" (`###tw_fit`, `ui::DrawFitButton`) that types that size
+  into the field as the user would: the preview builds and Accept comes
+  back, and Accept commits one undo step. A size bound to an expression has
+  no button -- the sentence is enough, and the variable is the user's to
+  change. The committed feature's editor shows the same sentence and button
+  (an edit there is its own undo step);
 - "**Pick <slot> to continue**" and Accept disabled while a required slot is
   empty. `Feature::WhyIncomplete()` names a missing input (distinct from
   `GetError()`, a regeneration failure) and is enforced by

@@ -355,6 +355,14 @@ body called it.
   that removed no material). A mutating RPC that leaves a feature broken says
   so in its own response, never only in a later `get_state` —
   `regen_honesty_smoke`. That includes `undo` and `set_active_configuration`.
+  A failed row is `{index, name, error, after_earlier_failure?,
+  kernel_fault?, fits?}`; `fits` is on a Fillet or Chamfer whose size does
+  not build, `{param: "radius", asked_mm, fits_mm, fails_mm, basis:
+  "built", element?, stopped?}`: the largest size that built (`null` when
+  none did), the least known to fail, and the face or edge whose bound
+  decided it ([modeling](../modeling/README.md#the-size-that-fits)). A
+  `set_variable` that grows a radius past its limit answers the size in its
+  own response.
 - **`requirements`** on any response whose call changed the state of an
   [expression requirement](../requirements/README.md#expression) (a
   `set_variable` that thins a wall below its stated minimum answers the row
@@ -852,7 +860,8 @@ it in fields, a `diagnostic`:
 ```
 
 `code` is `missing_argument`, `unknown_argument`, `invalid_argument` (a
-type, an enum, a range or a shape) or `stale_revision`, plus the inspection
+type, an enum, a range or a shape), `stale_revision` or **`does_not_fit`**,
+plus the inspection
 methods' own (`stale_snapshot`, `budget_exceeded`, …), `device_lost` (a
 method that draws, once the graphics device is lost and a rebuild in place
 could not save it -- while one is being rebuilt requests wait instead:
@@ -882,6 +891,19 @@ add_mate: 'type' must be one of: fastened, revolute, slider, cylindrical,
 planar, ball; got "revolut". To COUPLE two mates' degrees of freedom --
 gears, a rack and pinion, a screw -- the thing to add is a RELATION, not a
 mate: see add_relation
+```
+
+`does_not_fit` is `add_feature`'s or `modify_feature`'s refusal of a Fillet
+or Chamfer that does not build at the size asked (both build one on a copy
+first, as they do a direct edit): `path` `/params/feature/radius`, `param`
+`radius`, `observed` the size asked, `expected` `{max_mm}`, and `fits`, the
+object a `regen.failed[]` row carries. The SDK raises it as
+`lobole.DoesNotFit`, whose `fits_mm` is the size to send instead:
+
+```
+Fillet refused: fillet radius 10 mm does not fit: the largest radius that
+fits is 7.49 mm (face '1/face0' is 15 mm wide between the two picked
+edges, so the rounds meet at 7.5 mm). The document is unchanged
 ```
 
 ### The revision guard
