@@ -391,6 +391,34 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->parts[3].folder, std::string("Rigs"));
   };
 
+  // A simulation tab (DocKind::Simulation): its own bar, the Model panel's
+  // read-only list, its subject drawn, and the tab menu naming its kind.
+  t = IM_REGISTER_TEST(engine, "tabs", "simulation_tab_shows_its_subject");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx); // something to analyse
+    ctx->Yield(2);
+    std::string why;
+    const size_t sim = ui::OpenSimulationFor(*s_App, 0, &why);
+    IM_CHECK_EQ(sim, (size_t)1);
+    ctx->Yield(3);
+    IM_CHECK(s_App->sim != nullptr);
+    IM_CHECK(s_App->document == nullptr);
+    IM_CHECK_EQ(ui::ViewportBodies(*s_App).size(), (size_t)1);
+    IM_CHECK_EQ(s_App->gpu.documentMeshes.size(), (size_t)1); // drawn
+    IM_CHECK(ctx->ItemExists("//##DockHost/**/###tb_sim_fit"));
+    IM_CHECK(ctx->ItemExists("//###Model/**/###sim_subject"));
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->ItemClick("//##PartTabs/**/###part1", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Duplicate simulation");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)3);
+    IM_CHECK(s_App->parts[2].kind == ui::DocKind::Simulation);
+    IM_CHECK_EQ(s_App->parts[2].name, std::string("Part 1 simulation copy"));
+    IM_CHECK(s_App->sim != nullptr);
+  };
+
   // Right-click a tab > Rename... — every document kind, from both menus a
   // tab has (top-level and folder flyout). A taken name is refused in the
   // popup, which stays open with the reason, and nothing is renamed.

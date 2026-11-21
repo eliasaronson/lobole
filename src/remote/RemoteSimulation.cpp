@@ -1911,6 +1911,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
   if (!doc && !state.assembly) {
     const char* kind = state.drawing ? "a drawing"
                        : state.job   ? "a job"
+                       : state.sim   ? "a simulation"
                                      : "not a part";
     throw std::runtime_error("the active document is " + std::string(kind) +
                              "; studies live on a part or an assembly — switch "

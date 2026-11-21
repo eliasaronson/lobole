@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/ViewActions.h"
+#include "ui/DocumentSlots.h" // SimSubjectBodies (a simulation tab)
 #include "ui/RendererSync.h"
 
 #include "core/Units.h"
@@ -401,6 +402,15 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax,
           }
         }
       }
+  } else if (state.sim) {
+    // A simulation tab draws its subject, already placed (SimSubjectBodies).
+    for (const Body& body : SimSubjectBodies(state)) {
+      glm::dvec3 bmin, bmax;
+      BodyBounds(body, bmin, bmax, tight);
+      min = glm::min(min, bmin);
+      max = glm::max(max, bmax);
+      any = true;
+    }
   }
   // The camera and the section tool take float; the box narrows here.
   outMin = glm::vec3(min);

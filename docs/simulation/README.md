@@ -2618,11 +2618,12 @@ optimization is refused on an assembly; `mesh_study {async}` is refused there
 
 `fem::SimDocument` (`src/core/fem/SimDocument.{h,cpp}`) is the study list's
 future home ([the plan](../plans/simulation-document.md)). **A project saves
-and opens it ([how](#how-a-simulation-is-saved)), but no tab shows one and
+and opens it ([how](#how-a-simulation-is-saved)) as a tab of its own, but
 the RPCs do not use it yet**: the studies still live on the part and the
 assembly as described above, and the app neither makes a simulation nor
 moves studies into one ([moving studies](#moving-studies-into-a-simulation))
-on its own.
+on its own. [The simulation tab](#the-simulation-tab) says what the tab
+does so far.
 
 It holds a **subject** (a part or an assembly by stable project-document id,
 and one configuration, 0 = the active one: a reference, never a copy), the
@@ -2678,18 +2679,42 @@ study on the document's mesh (`SimDocument::SharesMesh`) sets the document's
 mesh keys (`DocumentMeshKeys`) to the ones it solved on: the mesh the tree's
 Mesh row will show, which a save keeps even when no result reads it.
 
+### The simulation tab
+
+A simulation tab (`DocKind::Simulation`, glyph `ICON_FA_GAUGE_HIGH`) is the
+first step of the tab: its window is a later one
+([the plan](../plans/simulation-document.md#6-the-window)). So far it shows
+what it holds. The viewport draws its subject's bodies, read from the
+subject's tab whether it is in front or not -- a part's own bodies, or an
+assembly's leaf parts placed in it, without derived ghosts
+(`ui::SimSubjectBodies`, cached on `ui::SimRenderVersion`, which moves with
+the subject's stamp and, on an assembly, every part's). The Model panel is
+a read-only list of the subject and the studies (`ui::DrawSimTree`,
+`src/ui/SimTree.cpp`), focused when the tab comes in front, and the toolbar
+frames and measures (`###tb_sim_fit`, `###tb_sim_measure`; the keymap's
+`simulation` context). `ui::OpenSimulationFor` switches to a part's or an
+assembly's first simulation, or makes one named "<subject> simulation";
+nothing calls it from the GUI yet.
+
+Its undo is a snapshot stack, the job's pattern (`ui::SimHistory`): a
+snapshot shares the results and meshes, `ui::SimUndoGuard` records one step
+for an edit under it (the version or `simEdits` moved, `MarkSimEdited` for
+an edit through `StudyForRun`), and a restore moves the version past the
+current one, so an undo never reads as saved.
+
 ### How a simulation is saved
 
 A project lists a simulation in `project.json` as a document of `type:
 "simulation"` (v223), stored under `simulations/<folder>/` beside `parts/`,
-`assemblies/`, `drawings/` and `jobs/`, and listed after every tab, so
-`active` counts tabs only. Until the simulation tab exists the project keeps
-them aside (`ui::AppState::simulations`, `ui::SimSlot`): an open reads them
-and a save writes them back, so a project that has them never loses them.
-They are added, renamed and deleted as a job is (`ui::AddSimulation`,
-`RenameSimulation`, `DeleteSimulation`): a name no other document answers
-to, an id from the project's document counter, a deleted one's folder left
-unlisted. The document itself is `DocumentIO::SaveSimulation` /
+`assemblies/`, `drawings/` and `jobs/`. It is a tab (vNEXT): listed in tab
+order, `active` may name it, and it may carry a tab `folder`. A project
+written before listed them after every tab with `active` counting tabs
+only, which is the same index. The tab is a `ui::PartSlot` of kind
+`DocKind::Simulation` (its document in `sim`, live in `AppState::sim` while
+it is in front), added by `ui::AddSimulation` and renamed, duplicated and
+deleted as any tab is; a duplicate is `SimDocument::Clone`, a store of its
+own, since a copy shares the original's. Autosave writes its sidecar under
+`simulations/`, and a recovery reads it back. The document itself is `DocumentIO::SaveSimulation` /
 `LoadSimulation` (`src/core/io/SerializeSimulation.{h,cpp}`), `kind:
 "simulation"`, in two forms:
 

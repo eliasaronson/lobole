@@ -34,6 +34,9 @@ struct Body;
 namespace cam {
 struct JobDocument;
 } // namespace cam
+namespace fem {
+class SimDocument;
+} // namespace fem
 
 namespace ui {
 
@@ -255,6 +258,7 @@ Document* SlotDoc(AppState& state, size_t i);
 AssemblyDocument* SlotAssembly(AppState& state, size_t i);
 DrawingDocument* SlotDrawing(AppState& state, size_t i);
 cam::JobDocument* SlotJob(AppState& state, size_t i);
+fem::SimDocument* SlotSim(AppState& state, size_t i);
 void StashActive(AppState& state);
 void ActivateSlot(AppState& state, size_t index);
 void ResetActiveTabUiState(AppState& state);

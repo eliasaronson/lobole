@@ -434,7 +434,7 @@ static bool WriteProject(AppState& state, const std::string& path,
   if (state.parts.size() == 1 && state.parts[0].kind == DocKind::Part &&
       state.document->GetParameters().empty() && state.tabFolders.empty() &&
       state.sections.empty() && state.parts[0].folder.empty() &&
-      state.simulations.empty() && LoneRequirementsFit(state)) {
+      LoneRequirementsFit(state)) {
     // Fold the project scope into the doc for the write (they reload as project
     // scope), then restore the (empty) local table.
     std::vector<Parameter> localBackup = state.document->TakeParameters();
@@ -532,14 +532,16 @@ static bool WriteProject(AppState& state, const std::string& path,
     index["documents"] = nlohmann::json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
       const PartSlot& slot = state.parts[i];
-      const char* sub = slot.kind == DocKind::Assembly  ? "assemblies/"
-                        : slot.kind == DocKind::Drawing ? "drawings/"
-                        : slot.kind == DocKind::Job     ? "jobs/"
-                                                        : "parts/";
-      const char* type = slot.kind == DocKind::Assembly  ? "assembly"
-                         : slot.kind == DocKind::Drawing ? "drawing"
-                         : slot.kind == DocKind::Job     ? "job"
-                                                         : "part";
+      const char* sub = slot.kind == DocKind::Assembly     ? "assemblies/"
+                        : slot.kind == DocKind::Drawing    ? "drawings/"
+                        : slot.kind == DocKind::Job        ? "jobs/"
+                        : slot.kind == DocKind::Simulation ? "simulations/"
+                                                           : "parts/";
+      const char* type = slot.kind == DocKind::Assembly     ? "assembly"
+                         : slot.kind == DocKind::Drawing    ? "drawing"
+                         : slot.kind == DocKind::Job        ? "job"
+                         : slot.kind == DocKind::Simulation ? "simulation"
+                                                            : "part";
       const std::string folder =
           std::string(sub) + projectpaths::DocFolder(slot.name, slot.id);
       const fs::path docDir = dir / folder;
@@ -554,6 +556,10 @@ static bool WriteProject(AppState& state, const std::string& path,
         break;
       case DocKind::Job:
         r = DocumentIO::SaveJob(*SlotJob(state, i), docDir.string());
+        break;
+      case DocKind::Simulation:
+        // Each with its stored results and meshes (SerializeSimulation.h).
+        r = DocumentIO::SaveSimulation(*SlotSim(state, i), docDir.string());
         break;
       case DocKind::Part:
         r = DocumentIO::Save(*SlotDoc(state, i), docDir.string());
@@ -571,25 +577,6 @@ static bool WriteProject(AppState& state, const std::string& path,
       if (!slot.folder.empty()) // display grouping; omit at top level
         entry["folder"] = slot.folder;
       index["documents"].push_back(std::move(entry));
-    }
-    // The simulations (v223), after every tab so `active` still counts tabs
-    // only: simulations/<folder>/, each with its stored results and meshes.
-    for (const SimSlot& ss : state.simulations) {
-      if (!ss.sim)
-        continue;
-      const std::string folder =
-          "simulations/" + projectpaths::DocFolder(ss.name, ss.id);
-      const fs::path docDir = dir / folder;
-      fs::create_directories(docDir);
-      if (auto r = DocumentIO::SaveSimulation(*ss.sim, docDir.string()); !r) {
-        if (error)
-          *error = r.error();
-        return false;
-      }
-      index["documents"].push_back({{"id", ss.id},
-                                    {"name", ss.name},
-                                    {"dir", folder},
-                                    {"type", "simulation"}});
     }
     // Requirements (v160, docs/requirements/README.md#saved-form): one
     // file each under requirements/, so two people stating two of them, or
@@ -701,6 +688,13 @@ ReadSlot(const nlohmann::json& entry, size_t i,
     if (!r)
       return std::unexpected(r.error());
     slot.job = std::move(*r);
+  } else if (type == "simulation") {
+    slot.kind = DocKind::Simulation;
+    auto r = DocumentIO::LoadSimulation(dir);
+    if (!r)
+      return std::unexpected(r.error());
+    slot.sim = std::move(*r);
+    slot.lastSavedVersion = slot.sim->SaveStamp();
   } else if (type == "part") {
     slot.kind = DocKind::Part;
     const auto onDisk = DocumentIO::InspectGeometry(dir);
@@ -720,39 +714,6 @@ ReadSlot(const nlohmann::json& entry, size_t i,
     // CheckProjectIndex refused it already; never read as a part.
     return std::unexpected("document '" + name + "' has type '" + type + "'");
   }
-  return slot;
-}
-
-// One simulation document of a project (SerializeSimulation.h), named
-// relative to the project as a slot's files are.
-std::expected<SimSlot, std::string>
-ReadSimulation(const nlohmann::json& entry, const std::filesystem::path& root) {
-  const std::string name = entry.at("name").get<std::string>();
-  const std::string rel = entry.at("dir").get<std::string>();
-  auto inside = projectpaths::InsideProject(root, rel);
-  if (!inside)
-    return std::unexpected(readctx::Named(
-        "simulation '" + name + "': " + inside.error(), "project.json"));
-  std::error_code ec;
-  if (!std::filesystem::is_directory(*inside, ec) &&
-      !std::filesystem::is_regular_file(*inside, ec))
-    return std::unexpected(readctx::Named(
-        "simulation '" + name + "': its dir '" + rel + "' is not there",
-        "project.json"));
-  const bool isFile = std::filesystem::is_regular_file(*inside, ec);
-  const std::string parent =
-      std::filesystem::path(rel).parent_path().generic_string();
-  readctx::FileContext context(isFile ? (parent.empty() ? "" : parent + "/")
-                               : rel.ends_with("/") ? rel
-                                                    : rel + "/");
-  auto r = DocumentIO::LoadSimulation(inside->string());
-  if (!r)
-    return std::unexpected(r.error());
-  SimSlot slot;
-  slot.id = entry.at("id").get<uint64_t>();
-  slot.name = name;
-  slot.sim = std::move(*r);
-  slot.lastSavedVersion = slot.sim->SaveStamp();
   return slot;
 }
 
@@ -832,10 +793,6 @@ void CheckProjectIndex(const nlohmann::json& index) {
       throw std::runtime_error("document '" + name + "' has type '" + type +
                                "' (expected one of: part, assembly, drawing, "
                                "job, simulation)");
-    // A simulation is no tab, so it takes no tab folder.
-    if (type == "simulation" && d.contains("folder"))
-      throw std::runtime_error("simulation '" + name +
-                               "' has a `folder`, which only a tab has");
   }
   for (const auto& p : list("parts")) // v1
     readctx::RefuseUnknownKeys(p, {"name", "dir"}, "part entry");
@@ -947,32 +904,9 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
         docs.push_back(
             {{"name", p.at("name")}, {"dir", p.at("dir")}, {"type", "part"}});
     }
-    // The simulations are no tabs (SimSlot): read beside the tabs, and
-    // `active`, which counts the whole list, counted over the tabs alone.
-    nlohmann::json simEntries = nlohmann::json::array();
-    {
-      nlohmann::json tabs = nlohmann::json::array();
-      const size_t active = out.index.value("active", size_t{0});
-      size_t activeTab = 0;
-      for (size_t i = 0; i < docs.size(); i++) {
-        if (docs[i].value("type", std::string{}) == "simulation") {
-          simEntries.push_back(docs[i]);
-          continue;
-        }
-        if (i == active)
-          activeTab = tabs.size();
-        tabs.push_back(docs[i]);
-      }
-      if (!simEntries.empty()) {
-        if (tabs.empty())
-          throw std::runtime_error(readctx::Named(
-              "lists only simulations; a project holds at least one part, "
-              "assembly, drawing or job",
-              "project.json"));
-        out.index["active"] = activeTab;
-      }
-      docs = std::move(tabs);
-    }
+    // A simulation is a tab (vNEXT). One written before it was listed after
+    // every tab, with `active` counting tabs alone: the same index into the
+    // whole list, so it reads as it is.
     const size_t n = docs.size();
     if (progress)
       progress->total.store(static_cast<int>(n));
@@ -1070,14 +1004,6 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
     }
     if (distinctReasons.size() == 1)
       out.rebuildReason = *distinctReasons.begin();
-    for (const nlohmann::json& entry : simEntries) {
-      readctx::CollectDrops collect;
-      auto sim = ReadSimulation(entry, fs::path(path));
-      if (!sim)
-        return std::unexpected(sim.error());
-      out.simulations.push_back(std::move(*sim));
-      out.drops.Append(collect.Take());
-    }
     return out;
   } catch (const std::exception& e) {
     return std::unexpected(std::string(e.what()));
@@ -1109,7 +1035,6 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
   if (!loaded.container) {
     ReplaceDocument(state, std::move(loaded.single));
     state.parts.clear();
-    state.simulations.clear();
     state.tabFolders.clear();
     state.nextPartId = 1;
     EnsureParts(state, fs::path(path).stem().string());
@@ -1147,11 +1072,8 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     state.drawing = nullptr;
     state.commands = nullptr;
     state.parts = std::move(loaded.parts);
-    state.simulations = std::move(loaded.simulations);
     uint64_t maxId = 0;
     for (const PartSlot& slot : state.parts)
-      maxId = std::max(maxId, slot.id);
-    for (const SimSlot& slot : state.simulations)
       maxId = std::max(maxId, slot.id);
     state.nextPartId = maxId + 1;
     // Folder registry: the saved list (empty folders and their order), plus
@@ -1252,7 +1174,7 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     // A JOB tab too: opening a project whose active tab was a job left the
     // camera wherever the last project had it -- the chess set opened
     // looking at a corner of the jig from underneath it.
-    if (state.document || state.assembly || state.job) {
+    if (state.document || state.assembly || state.job || state.sim) {
       FitCameraToDocument(state);
       if (state.activePart >= 0 &&
           static_cast<size_t>(state.activePart) < state.parts.size())
@@ -1321,6 +1243,8 @@ uint64_t SlotVersion(AppState& state, size_t i) {
     return dr->Version();
   if (cam::JobDocument* j = SlotJob(state, i))
     return j->SaveStamp();
+  if (fem::SimDocument* sim = SlotSim(state, i))
+    return sim->SaveStamp();
   return 0;
 }
 namespace {
@@ -1337,8 +1261,6 @@ void StampAllSaved(AppState& state) {
   }
   if (state.parts.empty())
     state.lastSavedVersion = state.document ? state.document->SaveStamp() : 0;
-  for (SimSlot& ss : state.simulations)
-    ss.lastSavedVersion = ss.sim ? ss.sim->SaveStamp() : 0;
   state.projectMetaDirty = false;
 }
 
@@ -1446,9 +1368,6 @@ bool ProjectDirty(AppState& state) {
     if (SlotVersion(state, i) != saved)
       return true;
   }
-  for (const SimSlot& ss : state.simulations)
-    if (ss.sim && ss.sim->SaveStamp() != ss.lastSavedVersion)
-      return true;
   return false;
 }
 
@@ -1545,6 +1464,8 @@ bool WriteSidecarAtomic(AppState& state, size_t slot, const fs::path& target,
     r = DocumentIO::SaveDrawing(*dr, tmp.string());
   else if (cam::JobDocument* j = SlotJob(state, slot))
     r = DocumentIO::SaveJob(*j, tmp.string());
+  else if (fem::SimDocument* sim = SlotSim(state, slot))
+    r = DocumentIO::SaveSimulation(*sim, tmp.string());
   else
     return false;
   if (!r) {
@@ -1566,10 +1487,11 @@ bool WriteSidecarAtomic(AppState& state, size_t slot, const fs::path& target,
 // "parts/Stand" — what project.json calls this document.
 std::string SlotDir(const AppState& state, size_t i) {
   const PartSlot& slot = state.parts[i];
-  const char* sub = slot.kind == DocKind::Assembly  ? "assemblies/"
-                    : slot.kind == DocKind::Drawing ? "drawings/"
-                    : slot.kind == DocKind::Job     ? "jobs/"
-                                                    : "parts/";
+  const char* sub = slot.kind == DocKind::Assembly     ? "assemblies/"
+                    : slot.kind == DocKind::Drawing    ? "drawings/"
+                    : slot.kind == DocKind::Job        ? "jobs/"
+                    : slot.kind == DocKind::Simulation ? "simulations/"
+                                                       : "parts/";
   return std::string(sub) + projectpaths::DocFolder(slot.name, slot.id);
 }
 
@@ -1735,6 +1657,7 @@ bool RecoverProject(AppState& state, const std::string& path,
     std::unique_ptr<AssemblyDocument> assembly;
     std::unique_ptr<DrawingDocument> drawing;
     std::unique_ptr<cam::JobDocument> job;
+    std::unique_ptr<fem::SimDocument> sim;
   };
   std::vector<Sidecar> read;
   for (const std::string& rel : Autosaver::RecoverableDocuments(path)) {
@@ -1751,7 +1674,7 @@ bool RecoverProject(AppState& state, const std::string& path,
       const PartSlot& slot = state.parts[i];
       if (slot.name != name)
         continue;
-      Sidecar sc{i, {}, {}, {}, {}};
+      Sidecar sc{i, {}, {}, {}, {}, {}};
       std::string failed;
       if (folder == "parts" && slot.kind == DocKind::Part) {
         auto loaded = DocumentIO::Load(file.string());
@@ -1768,6 +1691,10 @@ bool RecoverProject(AppState& state, const std::string& path,
       } else if (folder == "jobs" && slot.kind == DocKind::Job) {
         auto loaded = DocumentIO::LoadJob(file.string());
         loaded ? void(sc.job = std::move(*loaded))
+               : void(failed = loaded.error());
+      } else if (folder == "simulations" && slot.kind == DocKind::Simulation) {
+        auto loaded = DocumentIO::LoadSimulation(file.string());
+        loaded ? void(sc.sim = std::move(*loaded))
                : void(failed = loaded.error());
       } else {
         continue;
@@ -1796,6 +1723,8 @@ bool RecoverProject(AppState& state, const std::string& path,
       (active ? state.drawing : slot.drawing) = std::move(sc.drawing);
     } else if (sc.job) {
       (active ? state.job : slot.job) = std::move(sc.job);
+    } else if (sc.sim) {
+      (active ? state.sim : slot.sim) = std::move(sc.sim);
     }
   }
   if (!read.empty()) {

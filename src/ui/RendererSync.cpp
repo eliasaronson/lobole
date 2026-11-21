@@ -227,6 +227,10 @@ static std::optional<uint64_t> ActiveRenderVersion(AppState& state) {
     // OTHER documents' bodies, so a model edit in one of them has to reach
     // the viewport (ui::JobBodies keeps the same key).
     return JobRenderVersion(state);
+  if (state.sim)
+    // A simulation draws its subject's bodies, another tab's: the subject's
+    // stamp (and, for an assembly, its parts') is what moves the picture.
+    return SimRenderVersion(state);
   return std::nullopt;
 }
 
@@ -521,6 +525,11 @@ void SyncDocumentRenderers(AppState& state) {
              "instance {:.0f}, picking {:.0f}]",
              state.job->PartCount(), bodies.size(), totalMs, tessMs, uploadMs,
              pickMs);
+  else if (state.sim)
+    LOG_INFO("Simulation synced: {} bodies of '{}' in {:.0f} ms [tessellate "
+             "{:.0f}, instance {:.0f}, picking {:.0f}]",
+             bodies.size(), state.sim->Subject().name, totalMs, tessMs,
+             uploadMs, pickMs);
   else
     LOG_INFO("Document synced: {} features, {} bodies ({} drawn) in {:.0f} ms "
              "[tessellate {:.0f}, instance {:.0f}, picking {:.0f}]",
@@ -659,6 +668,10 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   } else if (state.job) {
     // A job tab ray-traces what it draws: the parts laid out.
     for (const Body& body : JobBodies(state))
+      rtItems.push_back({&body, glm::mat4(1.0f)});
+  } else if (state.sim) {
+    // ...and a simulation tab its subject, placed as it is drawn.
+    for (const Body& body : SimSubjectBodies(state))
       rtItems.push_back({&body, glm::mat4(1.0f)});
   } else if (state.document) {
     for (const auto& body : state.document->GetBodies())
@@ -1092,9 +1105,10 @@ std::string StillTabRefusal(const AppState& state) {
   if (state.activePart >= state.parts.size())
     return "no tab is open: a still renders a part or an assembly tab";
   const PartSlot& slot = state.parts[state.activePart];
-  const char* kind = slot.kind == DocKind::Drawing ? "a drawing"
-                     : slot.kind == DocKind::Job   ? "a CAM job"
-                                                   : "not a model";
+  const char* kind = slot.kind == DocKind::Drawing      ? "a drawing"
+                     : slot.kind == DocKind::Job        ? "a CAM job"
+                     : slot.kind == DocKind::Simulation ? "a simulation"
+                                                        : "not a model";
   return "the active tab '" + slot.name + "' is " + kind +
          ": render_still renders a part or an assembly tab -- switch to "
          "one (set_active_part) first";

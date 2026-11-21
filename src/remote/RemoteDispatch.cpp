@@ -688,10 +688,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      remote::NotInBatch},
     {"list_parts",
      "List project TABS — every one, with `type`: part | assembly | "
-     "drawing | job. Not parts alone, whatever the name says: a sweep that "
-     "filed 'everything list_parts returned and nothing else claimed' into a "
-     "Fasteners folder put the engine and the carburettor there. Filter on "
-     "`type` unless you mean all four.",
+     "drawing | job | simulation. Not parts alone, whatever the name says: a "
+     "sweep that filed 'everything list_parts returned and nothing else "
+     "claimed' into a Fasteners folder put the engine and the carburettor "
+     "there. Filter on `type` unless you mean all five.",
      "", remote::NoFlags,
      "active:int, active_id:int, parts:{id:int, index:int, name:string, "
      "type:string, folder?:string}[], folders?:string[]"},
@@ -1029,6 +1029,7 @@ static void CheckExpectedRevision(ui::AppState& state, const std::string& m,
     const char* kind = state.assembly  ? "an assembly"
                        : state.drawing ? "a drawing"
                        : state.job     ? "a CAM job"
+                       : state.sim     ? "a simulation"
                                        : "empty";
     throw remote::ContractError(
         m, "stale_revision", at, "a part tab", expected,
@@ -1242,6 +1243,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const char* kind = state.assembly  ? "an assembly"
                        : state.drawing ? "a drawing"
                        : state.job     ? "a CAM job"
+                       : state.sim     ? "a simulation"
                                        : "empty";
     throw std::runtime_error("the active document is " + std::string(kind) +
                              ", not a part; switch to a part tab");
@@ -2029,6 +2031,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           (state.assembly  ? "an assembly"
            : state.drawing ? "a drawing"
            : state.job     ? "a CAM job"
+           : state.sim     ? "a simulation"
                            : "not a part") +
           ", which has no feature list — pass `part` to read one (see "
           "list_parts), or switch to a part tab");
@@ -2568,10 +2571,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // document is a CAM job") -- with nothing in the listing to explain
       // why.
       const char* type =
-          state.parts[i].kind == ui::DocKind::Assembly  ? "assembly"
-          : state.parts[i].kind == ui::DocKind::Drawing ? "drawing"
-          : state.parts[i].kind == ui::DocKind::Job     ? "job"
-                                                        : "part";
+          state.parts[i].kind == ui::DocKind::Assembly     ? "assembly"
+          : state.parts[i].kind == ui::DocKind::Drawing    ? "drawing"
+          : state.parts[i].kind == ui::DocKind::Job        ? "job"
+          : state.parts[i].kind == ui::DocKind::Simulation ? "simulation"
+                                                           : "part";
       json entry = {{"name", state.parts[i].name},
                     {"index", i},
                     {"id", state.parts[i].id},
@@ -3298,6 +3302,8 @@ static uint64_t ActiveSaveStamp(const ui::AppState& state) {
     return state.drawing->Version();
   if (state.job)
     return state.job->SaveStamp();
+  if (state.sim)
+    return state.sim->SaveStamp();
   return 0;
 }
 
@@ -3315,6 +3321,8 @@ EditMarks MarkEdits(const ui::AppState& state) {
   marks.drawingUndo = state.drawingHistory.undo.size();
   marks.job = state.job.get();
   marks.jobUndo = state.jobHistory.undo.size();
+  marks.sim = state.sim.get();
+  marks.simUndo = state.simHistory.undo.size();
   marks.projectVarUndo = state.projectVarHistory.undo.size();
   marks.projectVarRedo = state.projectVarHistory.redo;
   auto& mutableState = const_cast<ui::AppState&>(state);
@@ -3444,6 +3452,16 @@ std::string RollBackEdits(ui::AppState& state, const EditMarks& marks) {
     h.redo.resize(h.redo.size() - std::min(n, h.redo.size()));
     h.redoStamps.resize(h.redoStamps.size() - std::min(n, h.redoStamps.size()));
     what.push_back("the job restored");
+  }
+  if (state.sim && state.sim.get() == marks.sim &&
+      state.simHistory.undo.size() > marks.simUndo) {
+    size_t n = 0;
+    while (state.simHistory.undo.size() > marks.simUndo && ui::UndoSim(state))
+      n++;
+    auto& h = state.simHistory;
+    h.redo.resize(h.redo.size() - std::min(n, h.redo.size()));
+    h.redoStamps.resize(h.redoStamps.size() - std::min(n, h.redoStamps.size()));
+    what.push_back("the simulation restored");
   }
   // Saved before the call and restored now: saved still. The restore moved
   // the stamp on, and without this a refused call would leave the project

@@ -555,7 +555,7 @@ void HandleSelectionInput(AppState& state, bool overViewport,
   // click on a job selected nothing and said nothing about it, which is how
   // a CAM pick could only ever be made through the panel.
   if (!state.faceSelector || !state.meshRenderer || !state.camera ||
-      (!state.document && !state.assembly && !state.job)) {
+      (!state.document && !state.assembly && !state.job && !state.sim)) {
     return;
   }
   ImGuiIO& io = ImGui::GetIO();

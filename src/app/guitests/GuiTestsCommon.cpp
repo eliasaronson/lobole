@@ -73,7 +73,8 @@ void ResetAppForTest() {
   // trim two tests later failed with a perfectly good preview of the wrong
   // span.
   for (size_t i = s_App->parts.size(); i-- > 0;)
-    if (s_App->parts[i].kind == ui::DocKind::Job)
+    if (s_App->parts[i].kind == ui::DocKind::Job ||
+        s_App->parts[i].kind == ui::DocKind::Simulation)
       ui::DeletePart(*s_App, i);
   if (s_App->camera) {
     s_App->camera->StopAnimation();

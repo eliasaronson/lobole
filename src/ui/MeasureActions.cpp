@@ -3,6 +3,7 @@
 
 #include "ui/MeasureActions.h"
 #include "core/Angles.h"
+#include "ui/DocumentSlots.h" // SimSubjectBodies (a simulation tab)
 #include "ui/RendererSync.h"
 #include "ui/VariableActions.h"
 
@@ -181,6 +182,9 @@ ResolveMeasureSource(AppState& state, const MeasureState::Element& e) {
     // while the pick pipeline underneath it already knew the job's bodies.
     if (state.job)
       return MeasureSource{&JobPlacedBodies(state), glm::dmat4(1.0), ""};
+    // A simulation tab: its subject's bodies, placed as they are drawn.
+    if (state.sim)
+      return MeasureSource{&SimSubjectBodies(state), glm::dmat4(1.0), ""};
     return std::nullopt;
   }
   if (!state.assembly)
@@ -283,6 +287,10 @@ std::string WholeName(AppState& state, const MeasureState::Element& e) {
     for (const Body& b : JobPlacedBodies(state))
       if (b.createdBy == e.ref.featureId && !b.name.empty() &&
           (e.jobPartId == 0 || b.jobPartId == e.jobPartId))
+        return b.name;
+  if (state.sim)
+    for (const Body& b : SimSubjectBodies(state))
+      if (b.createdBy == e.ref.featureId && !b.name.empty())
         return b.name;
   return "body";
 }
@@ -607,7 +615,8 @@ std::string HoverCacheKey(AppState& state) {
          std::to_string(state.assembly ? state.assembly->Version() : 0) + "@" +
          // A job's geometry moves when any part does AND when a part is
          // re-clamped or re-placed; JobRenderVersion keys on all of it.
-         std::to_string(state.job ? JobRenderVersion(state) : 0);
+         std::to_string(state.job ? JobRenderVersion(state) : 0) + "@" +
+         std::to_string(state.sim ? SimRenderVersion(state) : 0);
   return key;
 }
 } // namespace
@@ -616,7 +625,8 @@ void UpdateMeasureReadout(AppState& state) {
   auto& m = state.measure;
   m.hasDistanceLine = false;
   m.dimension = MeasureState::Dimension{};
-  if ((!state.document && !state.assembly && !state.job) || m.picked.empty()) {
+  if ((!state.document && !state.assembly && !state.job && !state.sim) ||
+      m.picked.empty()) {
     m.readout.clear();
     return;
   }
@@ -678,7 +688,7 @@ void UpdateMeasureReadout(AppState& state) {
 void UpdateMeasureHover(AppState& state) {
   auto& h = state.measure.hover;
   if (!state.measure.active || !h.has || state.measure.picked.size() >= 2 ||
-      (!state.document && !state.assembly && !state.job)) {
+      (!state.document && !state.assembly && !state.job && !state.sim)) {
     h.readout.clear();
     h.dimension = MeasureState::Dimension{};
     h.cacheKey.clear();
@@ -971,7 +981,7 @@ void RefreshPinnedMeasurements(AppState& state) {
 
 void MeasureElementClicked(AppState& state, const MeasureState::Element& e) {
   if (!state.measure.active ||
-      (!state.document && !state.assembly && !state.job))
+      (!state.document && !state.assembly && !state.job && !state.sim))
     return;
   auto& picked = state.measure.picked;
   const auto it = std::find(picked.begin(), picked.end(), e);

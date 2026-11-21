@@ -1504,6 +1504,16 @@ void DrawJobToolbar(AppState& state) {
   ImGui::NewLine();
 }
 
+// A simulation tab's bar (DocKind::Simulation). Minimal until the tab has a
+// window of its own: framing and measuring what it analyses. Ids are
+// "###tb_sim_*", as the job's are "###tb_job_*".
+static void DrawSimTabToolbar(AppState& state) {
+  CommandButton(state, "###tb_sim_fit", "view.fit", "Fit view");
+  CommandButton(state, "###tb_sim_measure", "view.measure", "Measure",
+                state.measure.active);
+  ImGui::NewLine();
+}
+
 void DrawToolbar(AppState& state) {
   if (state.sketchEdit.IsEditing())
     DrawSketchModeToolbar(state);
@@ -1515,6 +1525,8 @@ void DrawToolbar(AppState& state) {
     DrawDrawingToolbar(state);
   else if (state.job)
     DrawJobToolbar(state);
+  else if (state.sim)
+    DrawSimTabToolbar(state);
   else
     DrawModelToolbar(state);
 }

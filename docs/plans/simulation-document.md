@@ -263,8 +263,9 @@ Each merges on its own with the suites green.
    What is left:
    1. **The tab and [the window](#6-the-window)** (tree, toolbar, tool
       window, legend) on the document, and the app's runs going through
-      `RunSimStudy`. This step moves `ui::SimSlot` into a tab
-      (`DocKind::Simulation`), calls the migration on open and
+      `RunSimStudy`. The tab itself is built
+      ([the simulation tab](../simulation/README.md#the-simulation-tab));
+      this step gives it its window, calls the migration on open and
       `RestampSimByInputs` beside `AdoptStoredResults`, and stops saving the
       part's and the assembly's study lists, in one change.
    2. **The RPC move**: the study RPCs on the document, with the study ids

@@ -461,7 +461,7 @@ Loaded LoadProject(const fs::path& path) {
     return l;
   }
   l.outcome.loaded = true;
-  size_t features = 0, occurrences = 0, views = 0, setups = 0;
+  size_t features = 0, occurrences = 0, views = 0, setups = 0, sims = 0;
   for (size_t i = 0; i < state->parts.size(); i++) {
     if (const Document* d = ui::SlotDoc(*state, i))
       features += d->FeatureCount();
@@ -471,13 +471,15 @@ Loaded LoadProject(const fs::path& path) {
       views += d->ViewCount();
     if (const cam::JobDocument* j = ui::SlotJob(*state, i))
       setups += j->SetupCount();
+    if (ui::SlotSim(*state, i) != nullptr)
+      sims++;
   }
   l.outcome.counts = {{"documents", state->parts.size()},
                       {"features", features},
                       {"occurrences", occurrences},
                       {"views", views},
                       {"setups", setups},
-                      {"simulations", state->simulations.size()},
+                      {"simulations", sims},
                       {"requirements", state->requirements.size()},
                       {"sections", state->sections.size()},
                       {"parameters", state->projectParameters.size()}};

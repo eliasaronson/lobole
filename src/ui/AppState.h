@@ -932,8 +932,9 @@ struct RenderJob {
 // a feature list that builds bodies; an assembly is an occurrence list that
 // places other parts; a drawing projects a part or assembly onto a 2D sheet;
 // a job says how parts are cut out of a piece of stock
-// (docs/cam/README.md#the-model).
-enum class DocKind { Part, Assembly, Drawing, Job };
+// (docs/cam/README.md#the-model); a simulation says how a part or an assembly
+// is analysed (docs/simulation/README.md#the-simulation-document-core).
+enum class DocKind { Part, Assembly, Drawing, Job, Simulation };
 
 // One document of a project (assemblies A1/A2). The ACTIVE tab's
 // document/assembly/commands live in AppState (so all existing single-document
@@ -962,6 +963,19 @@ struct JobHistory {
   // A pre-edit copy held back while a drag is still in progress (R7): one
   // undo step per drag, not one per frame of it.
   std::optional<cam::JobDocument> pending;
+};
+
+// Snapshot-based undo for a simulation tab (the job's pattern). A copy of a
+// fem::SimDocument SHARES its results and meshes (SimStore), so a snapshot
+// costs the settings and the studies, never a mesh.
+struct SimHistory {
+  std::vector<fem::SimDocument> undo;
+  std::vector<fem::SimDocument> redo;
+  std::vector<uint64_t> undoStamps; // action-clock stamps, like the job's
+  std::vector<uint64_t> redoStamps;
+  // A pre-edit copy held back while a drag is still in progress: one undo
+  // step per drag, not one per frame of it.
+  std::optional<fem::SimDocument> pending;
 };
 
 struct DrawingHistory {
@@ -1100,20 +1114,6 @@ struct CamSetupResult {
   std::string lastPost;
 };
 
-// A simulation document of the project (docs/simulation/README.md
-// #how-a-simulation-is-saved), saved as `simulations/<folder>/` beside the
-// parts, assemblies, drawings and jobs. No tab shows one yet: the project
-// keeps what it opened and saves it again, so a file that has them does not
-// lose them (docs/plans/simulation-document.md#stages). Its id comes from
-// the same counter as a slot's (nextPartId), and its name is unique among
-// every document's.
-struct SimSlot {
-  uint64_t id = 0;
-  std::string name;
-  std::unique_ptr<fem::SimDocument> sim;
-  uint64_t lastSavedVersion = 0; // SaveStamp at the last save
-};
-
 struct PartSlot {
   uint64_t id = 0; // stable per-document id (A2): what occurrences reference
   std::string name;
@@ -1132,10 +1132,12 @@ struct PartSlot {
   std::unique_ptr<AssemblyDocument> assembly; // assembly: null while active
   std::unique_ptr<DrawingDocument> drawing;   // drawing: null while active
   std::unique_ptr<cam::JobDocument> job;      // job: null while active
+  std::unique_ptr<fem::SimDocument> sim;      // simulation: null while active
   std::unique_ptr<CommandStack> commands;     // null while active (parts only)
   AssemblyHistory history;       // assembly undo/redo (stashed here)
   DrawingHistory drawingHistory; // drawing undo/redo (stashed here)
   JobHistory jobHistory;         // job undo/redo (stashed here)
+  SimHistory simHistory;         // simulation undo/redo (stashed here)
   // Projected view geometry for a stashed drawing tab (D2). Kept across tab
   // switches so re-entering a drawing doesn't silently re-project — staleness
   // is only cleared by an explicit update (the FEM rule).
@@ -1328,6 +1330,17 @@ struct AppState {
   // against.
   std::vector<Body> jobPlacedBodies;
   uint64_t jobPlacedKey = 0;
+  // Active simulation tab: what is analysed and the studies asked of it
+  // (docs/simulation/README.md#the-simulation-document-core). Its subject's
+  // bodies are another tab's, so the tab draws them from there
+  // (ui::SimSubjectBodies, cached here by ui::SimRenderVersion).
+  std::unique_ptr<fem::SimDocument> sim;
+  SimHistory simHistory;
+  // How many edits have been made to a simulation (ui::MarkSimEdited), ever,
+  // on any tab: what ui::SimUndoGuard records on, as jobEdits for a job.
+  uint64_t simEdits = 0;
+  std::vector<Body> simBodies;
+  uint64_t simBodiesKey = 0;
   // Part→assembly change propagation (A4): {partId → ui::PartStamp, the
   // Version and the configurations' revision} stamped at the active
   // assembly's last solve. AssemblyPartsStale compares
@@ -1341,8 +1354,6 @@ struct AppState {
   std::vector<PartSlot> parts;
   int activePart = 0;
   uint64_t nextPartId = 1; // stable document-id allocator (A2)
-  // The project's simulation documents, which no tab shows yet (SimSlot).
-  std::vector<SimSlot> simulations;
   // Tab-bar folder registry, in display order. THE list of folders: lets a
   // folder exist empty ("+ > New folder" before anything is filed in it, or
   // after its last member moves out). Slot folders self-register on

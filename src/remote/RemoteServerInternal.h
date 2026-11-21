@@ -98,6 +98,8 @@ struct EditMarks {
   size_t drawingUndo = 0;
   const void* job = nullptr;
   size_t jobUndo = 0;
+  const void* sim = nullptr;
+  size_t simUndo = 0;
   // The project scope (variables, tables, templates): one cross-tab history,
   // whichever tab is active. Its redo is kept whole, because the first edit
   // a call makes clears it and a rollback has to put it back.

@@ -45,6 +45,7 @@
 #include "core/io/ProjectStamp.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
+#include "core/io/SerializeSimulation.h" // SimulationFingerprint (undo)
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
 #include "render/IBLTextures.h"
@@ -132,9 +133,11 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.assembly = nullptr;
   state.drawing = nullptr;
   state.job = nullptr;
+  state.sim = nullptr;
   state.assemblyHistory = {};
   state.drawingHistory = {};
   state.jobHistory = {};
+  state.simHistory = {};
   state.drawingRenders.clear();
   state.drawingRendersVersion = 0;
   state.drawingProjections = {};
@@ -148,6 +151,8 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.jobBodiesKey = 0;
   state.jobPlacedBodies.clear();
   state.jobPlacedKey = 0;
+  state.simBodies.clear(); // the same, for a simulation's subject
+  state.simBodiesKey = 0;
   state.solvedPartVersions.clear();
   // Phase V: a wholesale replacement (File > New, Open flat, checkpoint/history
   // restore) collapses the project to this single part, so ITS parameters
@@ -271,10 +276,13 @@ void StashActive(AppState& state) {
   slot.assembly = std::move(state.assembly);
   slot.drawing = std::move(state.drawing);
   slot.job = std::move(state.job);
+  slot.sim = std::move(state.sim);
   slot.commands = std::move(state.commands);
   slot.history = std::move(state.assemblyHistory);
   slot.drawingHistory = std::move(state.drawingHistory);
   slot.jobHistory = std::move(state.jobHistory);
+  slot.simHistory = std::move(state.simHistory);
+  state.simHistory = {}; // moved-from: guarantee empty
   slot.drawingRenders = std::move(state.drawingRenders);
   state.drawingRenders.clear(); // moved-from: guarantee empty
   slot.drawingRendersVersion = state.drawingRendersVersion;
@@ -307,10 +315,13 @@ void ActivateSlot(AppState& state, size_t index) {
   state.assembly = std::move(slot.assembly);
   state.drawing = std::move(slot.drawing);
   state.job = std::move(slot.job);
+  state.sim = std::move(slot.sim);
   state.commands = std::move(slot.commands);
   state.assemblyHistory = std::move(slot.history);
   state.drawingHistory = std::move(slot.drawingHistory);
   state.jobHistory = std::move(slot.jobHistory);
+  state.simHistory = std::move(slot.simHistory);
+  slot.simHistory = {};
   state.drawingRenders = std::move(slot.drawingRenders);
   slot.drawingRenders.clear();
   state.drawingRendersVersion = slot.drawingRendersVersion;
@@ -376,6 +387,12 @@ void ResetActiveTabUiState(AppState& state) {
     state.focusPanel = "CAM";
     state.focusPanelFrames = 60;
   }
+  // A simulation tab's list is the Model panel's (DrawSimTree), for the same
+  // reason.
+  if (state.sim) {
+    state.focusPanel = "Model";
+    state.focusPanelFrames = 60;
+  }
   state.gpu.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
 
@@ -405,6 +422,7 @@ size_t AddPart(AppState& state, const std::string& name) {
   state.assembly = nullptr;
   state.drawing = nullptr;
   state.job = nullptr;
+  state.sim = nullptr;
   state.commands = std::make_unique<CommandStack>();
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -432,6 +450,7 @@ size_t AddAssembly(AppState& state, const std::string& name) {
   state.assembly = std::make_unique<AssemblyDocument>();
   state.drawing = nullptr;
   state.job = nullptr;
+  state.sim = nullptr;
   state.commands = nullptr;
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -459,6 +478,7 @@ size_t AddDrawing(AppState& state, const std::string& name) {
   state.assembly = nullptr;
   state.drawing = std::make_unique<DrawingDocument>();
   state.job = nullptr;
+  state.sim = nullptr;
   state.commands = nullptr;
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -480,6 +500,8 @@ const std::vector<Body>& ViewportBodies(AppState& state) {
   static const std::vector<Body> kNone;
   if (state.job)
     return JobPlacedBodies(state);
+  if (state.sim)
+    return SimSubjectBodies(state);
   return state.document ? state.document->GetBodies() : kNone;
 }
 
@@ -494,6 +516,7 @@ size_t AddJob(AppState& state, const std::string& name) {
   state.assembly = nullptr;
   state.drawing = nullptr;
   state.job = std::make_unique<cam::JobDocument>();
+  state.sim = nullptr;
   state.commands = nullptr;
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -530,74 +553,190 @@ bool RenameDocument(AppState& state, size_t index, const std::string& name,
                     "' already exists — names address tabs (add_occurrence, "
                     "set_active_part), so two answering to one would be "
                     "ambiguous");
-  for (const SimSlot& ss : state.simulations)
-    if (ss.name == name)
-      return refuse("a simulation named '" + name + "' already exists");
   state.parts[index].name = name;
   state.projectMetaDirty = true; // tab names live in project.json only
   return true;
 }
 
-namespace {
-// Why `name` cannot name a simulation (the one at `self` keeps its own).
-std::string SimulationNameRefusal(const AppState& state,
-                                  const std::string& name, size_t self) {
-  if (name.empty())
-    return "a simulation's name must be non-empty";
-  for (const PartSlot& ps : state.parts)
-    if (ps.name == name)
-      return "a tab named '" + name + "' already exists";
-  for (size_t i = 0; i < state.simulations.size(); i++)
-    if (i != self && state.simulations[i].name == name)
-      return "a simulation named '" + name + "' already exists";
-  return {};
-}
-} // namespace
-
 size_t AddSimulation(AppState& state, const std::string& name,
                      fem::SimDocument sim, std::string* why) {
-  if (const std::string r = SimulationNameRefusal(state, name, SIZE_MAX);
-      !r.empty()) {
+  EnsureParts(state);
+  const auto refuse = [&](std::string reason) {
     if (why)
-      *why = r;
+      *why = std::move(reason);
     return SIZE_MAX;
-  }
-  SimSlot slot;
+  };
+  if (name.empty())
+    return refuse("a simulation's name must be non-empty");
+  for (const PartSlot& ps : state.parts)
+    if (ps.name == name)
+      return refuse("a tab named '" + name +
+                    "' already exists — names address tabs, so two "
+                    "answering to one would be ambiguous");
+  CancelPendingFeature(state); // before StashActive — see SetActivePart
+  StashActive(state);
+  // Undo is a snapshot stack (the job's pattern): a copy of a simulation
+  // shares its results and meshes, so a snapshot is its settings and studies.
+  state.document = nullptr;
+  state.assembly = nullptr;
+  state.drawing = nullptr;
+  state.job = nullptr;
+  state.sim = std::make_unique<fem::SimDocument>(std::move(sim));
+  state.commands = nullptr;
+  state.lastSavedVersion = 0;
+  state.solvedPartVersions.clear();
+  PartSlot slot;
   slot.id = state.nextPartId++;
   slot.name = name;
-  slot.sim = std::make_unique<fem::SimDocument>(std::move(sim));
-  state.simulations.push_back(std::move(slot));
-  state.projectMetaDirty = true; // the document list lives in project.json
-  return state.simulations.size() - 1;
-}
-
-bool RenameSimulation(AppState& state, size_t index, const std::string& name,
-                      std::string* why) {
-  std::string r = index < state.simulations.size()
-                      ? SimulationNameRefusal(state, name, index)
-                      : "no simulation at index " + std::to_string(index);
-  if (!r.empty()) {
-    if (why)
-      *why = std::move(r);
-    return false;
-  }
-  if (state.simulations[index].name != name) {
-    state.simulations[index].name = name;
-    state.projectMetaDirty = true;
-  }
-  return true;
-}
-
-bool DeleteSimulation(AppState& state, size_t index, std::string* why) {
-  if (index >= state.simulations.size()) {
-    if (why)
-      *why = "no simulation at index " + std::to_string(index);
-    return false;
-  }
-  state.simulations.erase(state.simulations.begin() +
-                          static_cast<std::ptrdiff_t>(index));
+  slot.kind = DocKind::Simulation;
+  state.parts.push_back(std::move(slot));
+  state.activePart = static_cast<int>(state.parts.size()) - 1;
+  // The document list lives in project.json (AddPart says why).
   state.projectMetaDirty = true;
-  return true;
+  ResetActiveTabUiState(state);
+  return state.parts.size() - 1;
+}
+
+size_t FindSimulationFor(const AppState& state, fem::SubjectKind kind,
+                         uint64_t docId) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].kind != DocKind::Simulation)
+      continue;
+    const fem::SimDocument* sim = static_cast<int>(i) == state.activePart
+                                      ? state.sim.get()
+                                      : state.parts[i].sim.get();
+    if (sim != nullptr && sim->Subject().kind == kind &&
+        sim->Subject().docId == docId)
+      return i;
+  }
+  return SIZE_MAX;
+}
+
+size_t OpenSimulationFor(AppState& state, size_t subjectSlot,
+                         std::string* why) {
+  EnsureParts(state);
+  if (subjectSlot >= state.parts.size()) {
+    if (why)
+      *why = "no tab at index " + std::to_string(subjectSlot);
+    return SIZE_MAX;
+  }
+  const PartSlot& subject = state.parts[subjectSlot];
+  if (subject.kind != DocKind::Part && subject.kind != DocKind::Assembly) {
+    if (why)
+      *why = "'" + subject.name +
+             "' is not a part or an assembly: a simulation analyses one";
+    return SIZE_MAX;
+  }
+  const fem::SubjectKind kind = subject.kind == DocKind::Assembly
+                                    ? fem::SubjectKind::Assembly
+                                    : fem::SubjectKind::Part;
+  if (const size_t found = FindSimulationFor(state, kind, subject.id);
+      found != SIZE_MAX) {
+    SetActivePart(state, found);
+    return found;
+  }
+  const std::string stem = subject.name + " simulation";
+  const auto taken = [&state](const std::string& name) {
+    for (const PartSlot& ps : state.parts)
+      if (ps.name == name)
+        return true;
+    return false;
+  };
+  std::string name = stem;
+  for (int n = 2; taken(name); n++)
+    name = stem + " " + std::to_string(n);
+  fem::SimDocument sim;
+  sim.SetSubject({kind, subject.id, 0, subject.name});
+  const size_t added = AddSimulation(state, name, std::move(sim), why);
+  if (added != SIZE_MAX && !state.parts[added].everFramed) {
+    state.parts[added].everFramed = true;
+    FitCameraToDocument(state);
+  }
+  return added;
+}
+
+namespace {
+constexpr uint64_t kFnvPrime = 1099511628211ull;
+}
+
+uint64_t SimRenderVersion(AppState& state) {
+  if (!state.sim)
+    return 0;
+  const fem::SimSubject& subject = state.sim->Subject();
+  uint64_t key = 1469598103934665603ull ^
+                 (subject.kind == fem::SubjectKind::Assembly ? 2u : 1u);
+  key = (key ^ subject.docId) * kFnvPrime;
+  key = (key ^ subject.configuration) * kFnvPrime;
+  const std::optional<size_t> at = SlotIndexById(state, subject.docId);
+  if (!at)
+    return key; // the subject is gone: nothing to draw, still a key
+  if (subject.kind == fem::SubjectKind::Part) {
+    if (const Document* d =
+            PartResolverFor(state)(subject.docId, subject.configuration))
+      key = (key ^ PartStamp(*d)) * kFnvPrime;
+    return key;
+  }
+  // An assembly places other tabs' parts and sub-assemblies, any of which
+  // may have moved: every one is in the key. Cheaper than walking the tree
+  // to find which, and it is read every frame.
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].kind == DocKind::Part) {
+      if (const Document* d = SlotDoc(state, i))
+        key =
+            ((key ^ state.parts[i].id) * kFnvPrime ^ PartStamp(*d)) * kFnvPrime;
+    } else if (state.parts[i].kind == DocKind::Assembly) {
+      if (const AssemblyDocument* a = SlotAssembly(state, i))
+        key =
+            ((key ^ state.parts[i].id) * kFnvPrime ^ a->Version()) * kFnvPrime;
+    }
+  }
+  return key;
+}
+
+const std::vector<Body>& SimSubjectBodies(AppState& state) {
+  static const std::vector<Body> kNone;
+  if (!state.sim) {
+    state.simBodies.clear();
+    state.simBodiesKey = 0;
+    return kNone;
+  }
+  const uint64_t key = SimRenderVersion(state);
+  if (key == state.simBodiesKey)
+    return state.simBodies;
+  state.simBodies.clear();
+  state.simBodiesKey = key;
+  const fem::SimSubject& subject = state.sim->Subject();
+  const std::optional<size_t> at = SlotIndexById(state, subject.docId);
+  if (!at)
+    return state.simBodies;
+  if (subject.kind == fem::SubjectKind::Part) {
+    if (state.parts[*at].kind != DocKind::Part)
+      return state.simBodies;
+    if (const Document* d =
+            PartResolverFor(state)(subject.docId, subject.configuration))
+      state.simBodies = d->GetBodies();
+    return state.simBodies;
+  }
+  const AssemblyDocument* asmDoc = SlotAssembly(state, *at);
+  if (asmDoc == nullptr)
+    return state.simBodies;
+  // Placed as the assembly tab draws them (FlattenActiveAssembly's walk),
+  // without the derived ghosts, which are no occurrence's matter.
+  auto flat = assembly::Flatten(*asmDoc, PartResolverFor(state),
+                                AssemblyResolverFor(state));
+  if (!flat) {
+    LOG_ERROR("Simulation subject '{}' cannot be walked: {}", subject.name,
+              flat.error());
+    return state.simBodies;
+  }
+  for (const assembly::FlatInstance& inst : *flat) {
+    if (!inst.visible || inst.part == nullptr)
+      continue;
+    for (const Body& b : inst.part->GetBodies())
+      if (!b.reference)
+        state.simBodies.push_back(PlacedBody(b, inst.world));
+  }
+  return state.simBodies;
 }
 
 size_t DuplicateDocument(AppState& state, size_t index) {
@@ -661,6 +800,16 @@ size_t DuplicateDocument(AppState& state, size_t index) {
     // The setups name their parts by stable id, so the copy machines the
     // same parts. Its undo history starts empty, as a part's does.
     slot.job = std::make_unique<cam::JobDocument>(*job);
+    break;
+  }
+  case DocKind::Simulation: {
+    const fem::SimDocument* sim = SlotSim(state, index);
+    if (!sim)
+      return SIZE_MAX;
+    // A Clone, not a copy: a copy is an undo snapshot and SHARES the
+    // results and meshes, so the two tabs would solve into one store. The
+    // copy analyses the same subject.
+    slot.sim = std::make_unique<fem::SimDocument>(sim->Clone());
     break;
   }
   }
@@ -888,6 +1037,117 @@ JobUndoGuard::~JobUndoGuard() {
     PushJobUndo(state, *m_before);
 }
 
+void PushSimUndo(AppState& state, const fem::SimDocument& before) {
+  if (!state.sim)
+    return;
+  LOG_INFO("edit: simulation"); // the activity journal, as SnapshotDrawing
+  state.simHistory.undo.push_back(before);
+  state.simHistory.undoStamps.push_back(NextActionStamp());
+  state.simHistory.redo.clear();
+  state.simHistory.redoStamps.clear();
+}
+
+void SnapshotSim(AppState& state) {
+  if (state.sim)
+    PushSimUndo(state, *state.sim);
+}
+
+namespace {
+// RestoreJob's rule: the version (which is the save stamp) moves past the
+// current one, so an undo never lands on the stamp the last save took. The
+// results stay where they are -- the snapshot shares them -- and each reads
+// current or stale by the study revisions the snapshot carries.
+void RestoreSim(AppState& state, fem::SimDocument restored) {
+  const uint64_t current = state.sim->Version();
+  while (restored.Version() <= current)
+    restored.BumpVersion();
+  *state.sim = std::move(restored);
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
+}
+} // namespace
+
+bool UndoSim(AppState& state) {
+  if (!state.sim || state.simHistory.undo.empty())
+    return false;
+  LOG_INFO("undo: simulation");
+  state.simHistory.redo.push_back(*state.sim);
+  state.simHistory.redoStamps.push_back(state.simHistory.undoStamps.back());
+  state.simHistory.undoStamps.pop_back();
+  fem::SimDocument restored = std::move(state.simHistory.undo.back());
+  state.simHistory.undo.pop_back();
+  RestoreSim(state, std::move(restored));
+  return true;
+}
+
+bool RedoSim(AppState& state) {
+  if (!state.sim || state.simHistory.redo.empty())
+    return false;
+  LOG_INFO("redo: simulation");
+  state.simHistory.undo.push_back(*state.sim);
+  state.simHistory.undoStamps.push_back(state.simHistory.redoStamps.back());
+  state.simHistory.redoStamps.pop_back();
+  fem::SimDocument restored = std::move(state.simHistory.redo.back());
+  state.simHistory.redo.pop_back();
+  RestoreSim(state, std::move(restored));
+  return true;
+}
+
+void MarkSimEdited(AppState& state) {
+  state.simEdits++;
+  if (state.sim)
+    state.sim->BumpVersion(); // unsaved now: ProjectDirty, autosave
+}
+
+namespace {
+int g_openSimGuards = 0; // SimUndoGuards alive, outermost first
+} // namespace
+
+SimUndoGuard::SimUndoGuard(AppState& state, bool coalesce, bool compareContent)
+    : m_state(state), m_coalesce(coalesce), m_compareContent(compareContent) {
+  if (g_openSimGuards++ > 0)
+    return; // only the outermost records (JobUndoGuard)
+  if (state.sim) {
+    m_sim = state.sim.get();
+    m_edits = state.simEdits;
+    m_version = state.sim->Version();
+    m_before = *state.sim;
+    if (m_compareContent)
+      m_fingerprint = DocumentIO::SimulationFingerprint(*state.sim);
+  }
+}
+
+SimUndoGuard::~SimUndoGuard() {
+  AppState& state = m_state;
+  g_openSimGuards--;
+  if (!state.sim || !m_before)
+    return;
+  // Another tab's simulation now: its history is not this copy's.
+  if (state.sim.get() != m_sim)
+    return;
+  // Every setter of the document moves its version, so the version is the
+  // edit; the counter covers an edit through StudyForRun (MarkSimEdited).
+  bool moved = state.simEdits != m_edits || state.sim->Version() != m_version;
+  if (m_compareContent && !moved)
+    moved = DocumentIO::SimulationFingerprint(*state.sim) != m_fingerprint;
+  if (moved && state.sim->Version() == m_version)
+    state.sim->BumpVersion(); // an edit to save, as JobUndoGuard's MarkEdited
+  SimHistory& h = state.simHistory;
+  if (m_coalesce && ImGui::IsAnyItemActive()) {
+    if (moved && !h.pending)
+      h.pending = std::move(*m_before);
+    return;
+  }
+  if (h.pending) {
+    if (DocumentIO::SimulationFingerprint(*state.sim) !=
+        DocumentIO::SimulationFingerprint(*h.pending))
+      PushSimUndo(state, *h.pending);
+    h.pending.reset();
+    return;
+  }
+  if (moved)
+    PushSimUndo(state, *m_before);
+}
+
 uint64_t PartIdByName(const AppState& state, const std::string& name) {
   for (const PartSlot& slot : state.parts)
     if (slot.kind == DocKind::Part && slot.name == name)
@@ -1097,6 +1357,12 @@ DrawingDocument* SlotDrawing(AppState& state, size_t i) {
 cam::JobDocument* SlotJob(AppState& state, size_t i) {
   return static_cast<int>(i) == state.activePart ? state.job.get()
                                                  : state.parts[i].job.get();
+}
+
+// A simulation slot's document, active or stashed. Null for every other kind.
+fem::SimDocument* SlotSim(AppState& state, size_t i) {
+  return static_cast<int>(i) == state.activePart ? state.sim.get()
+                                                 : state.parts[i].sim.get();
 }
 
 } // namespace ui

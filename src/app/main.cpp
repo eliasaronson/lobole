@@ -2880,6 +2880,7 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
       pin.documentVersion = g_App.assembly   ? g_App.assembly->Version()
                             : g_App.drawing  ? g_App.drawing->Version()
                             : g_App.document ? g_App.document->Version()
+                            : g_App.sim      ? g_App.sim->Version()
                                              : 0;
       const double nowPace = glfwGetTime();
       paceIdle = s_pacer.IdleNext(pin, nowPace);

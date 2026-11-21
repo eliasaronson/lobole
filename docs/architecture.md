@@ -219,11 +219,13 @@ The numbers were measured on this 22-core, 30 GB machine.
 
 ## The document model and regeneration
 
-A project holds documents of four kinds (`ui::DocKind`): **Part**
-(`Document`, a feature list), **Assembly** (`AssemblyDocument`, occurrences of
-parts or sub-assemblies, mates), **Drawing** (`DrawingDocument`) and **Job**
-(`cam::JobDocument`, CAM setups over placed parts). Documents reference each
-other by stable id.
+A project holds documents of five kinds (`ui::DocKind`), one tab each:
+**Part** (`Document`, a feature list), **Assembly** (`AssemblyDocument`,
+occurrences of parts or sub-assemblies, mates), **Drawing**
+(`DrawingDocument`), **Job** (`cam::JobDocument`, CAM setups over placed
+parts) and **Simulation** (`fem::SimDocument`, studies of a part or an
+assembly: [the simulation tab](simulation/README.md#the-simulation-tab)).
+Documents reference each other by stable id.
 
 `Document::Regenerate()` re-evaluates the parameter table and every
 expression-driven field, then executes the feature list in order. If a

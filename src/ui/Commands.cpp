@@ -367,7 +367,6 @@ const std::vector<Command>& Table() {
     add("file.new", nullptr, [](AppState& s) {
       ReplaceDocument(s, std::make_unique<Document>());
       s.parts.clear();
-      s.simulations.clear();
       s.tabFolders.clear();
       ClearSections(s); // a new project starts uncut
       EnsureParts(s, "Part 1");
@@ -430,7 +429,8 @@ const std::vector<Command>& Table() {
         "view.measure",
         [](AppState& s) {
           return HasBody(s) || HasJob(s) ||
-                 (s.assembly && s.assembly->OccurrenceCount());
+                 (s.assembly && s.assembly->OccurrenceCount()) ||
+                 (s.sim && !ViewportBodies(s).empty());
         },
         ToggleMeasure);
     add("view.section", nullptr, ToggleSection);
@@ -894,6 +894,8 @@ keymap::Context ActiveContext(const AppState& state) {
     return keymap::Context::Drawing;
   if (state.job)
     return keymap::Context::Job;
+  if (state.sim)
+    return keymap::Context::Simulation;
   return keymap::Context::Part;
 }
 

@@ -7,6 +7,7 @@
 #include "ui/DrawingPanel.h"
 #include "ui/OccurrencePanel.h"
 #include "ui/Overlays.h"
+#include "ui/SimTree.h"
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
 
@@ -511,6 +512,8 @@ const char* TabGlyph(DocKind kind) {
     return ICON_FA_FILE_LINES;
   case DocKind::Job:
     return ICON_FA_SCREWDRIVER_WRENCH;
+  case DocKind::Simulation:
+    return ICON_FA_GAUGE_HIGH; // the simulation command's glyph
   }
   return ICON_FA_CUBE;
 }
@@ -525,6 +528,8 @@ const char* TabKindName(DocKind kind) {
     return "Drawing";
   case DocKind::Job:
     return "Job";
+  case DocKind::Simulation:
+    return "Simulation";
   }
   return "Part";
 }
@@ -643,20 +648,22 @@ void DrawPartTabs(AppState& state) {
     // Duplicate/delete menu items shared by top-level tabs and flyout entries.
     const auto duplicateMenuItem = [&](size_t i) {
       const char* label =
-          state.parts[i].kind == DocKind::Assembly  ? "Duplicate assembly"
-          : state.parts[i].kind == DocKind::Job     ? "Duplicate job"
-          : state.parts[i].kind == DocKind::Drawing ? "Duplicate drawing"
-                                                    : "Duplicate part";
+          state.parts[i].kind == DocKind::Assembly     ? "Duplicate assembly"
+          : state.parts[i].kind == DocKind::Job        ? "Duplicate job"
+          : state.parts[i].kind == DocKind::Drawing    ? "Duplicate drawing"
+          : state.parts[i].kind == DocKind::Simulation ? "Duplicate simulation"
+                                                       : "Duplicate part";
       if (ImGui::MenuItem(label))
         DuplicateDocument(state, i);
     };
     // Delete menu item shared by top-level tabs and flyout entries.
     const auto deleteMenuItem = [&](size_t i) {
       const char* label =
-          state.parts[i].kind == DocKind::Assembly  ? "Delete assembly"
-          : state.parts[i].kind == DocKind::Job     ? "Delete job"
-          : state.parts[i].kind == DocKind::Drawing ? "Delete drawing"
-                                                    : "Delete part";
+          state.parts[i].kind == DocKind::Assembly     ? "Delete assembly"
+          : state.parts[i].kind == DocKind::Job        ? "Delete job"
+          : state.parts[i].kind == DocKind::Drawing    ? "Delete drawing"
+          : state.parts[i].kind == DocKind::Simulation ? "Delete simulation"
+                                                       : "Delete part";
       // ASK first. This item used to be enabled whenever more than one tab
       // existed, call DeletePart, and drop both its `false` and its reason on
       // the floor — so on any real project, where every part is placed in an
@@ -967,6 +974,8 @@ void DrawUI(AppState& state) {
     }
   } else if (state.drawing) {
     DrawSheetPanel(state); // sheet settings + title block in the Model panel
+  } else if (state.sim) {
+    DrawSimTree(state); // what it analyses and its studies, read-only
   }
   // Outside the tab-kind branch, like Variables and the history: a
   // configuration is a named variant of the document, and a part and an

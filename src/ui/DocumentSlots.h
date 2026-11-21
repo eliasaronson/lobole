@@ -89,18 +89,35 @@ bool RenameDocument(AppState& state, size_t index, const std::string& name,
 // reference is not something to create on purpose.
 bool DeletePart(AppState& state, size_t index, std::string* why = nullptr);
 
-// The project's simulation documents (AppState::simulations), which no tab
-// shows yet. Added, renamed and deleted as a job is: the name is one no other
-// document answers to (refused naming why), the id is a new document id, and
-// each marks the project's document list changed (projectMetaDirty). Delete
-// leaves its folder on disk unlisted, as a deleted tab's is. AddSimulation
-// returns the simulation's index, or SIZE_MAX when the name is refused.
+// A simulation tab (DocKind::Simulation): appended with `sim` as its
+// document and switched to, as AddJob does. The name is one no other tab
+// answers to (refused naming why, SIZE_MAX returned); the id is a new
+// document id. Renamed and deleted as any tab is (RenameDocument,
+// DeletePart).
 size_t AddSimulation(AppState& state, const std::string& name,
                      fem::SimDocument sim, std::string* why = nullptr);
-bool RenameSimulation(AppState& state, size_t index, const std::string& name,
-                      std::string* why = nullptr);
-bool DeleteSimulation(AppState& state, size_t index,
-                      std::string* why = nullptr);
+
+// The first simulation tab whose subject is that document, or SIZE_MAX.
+size_t FindSimulationFor(const AppState& state, fem::SubjectKind kind,
+                         uint64_t docId);
+
+// The simulation of the part or assembly tab at `subjectSlot`, switched to:
+// its first simulation tab, or else a new one named "<subject> simulation"
+// (made unique) analysing that document in its active configuration.
+// SIZE_MAX, with the reason in `why`, for a slot that is neither.
+size_t OpenSimulationFor(AppState& state, size_t subjectSlot,
+                         std::string* why = nullptr);
+
+// What a simulation tab draws: its subject's bodies -- a part's own, or an
+// assembly's leaf parts placed in it -- read from the subject's tab, active
+// or stashed. Empty when there is no simulation tab or its subject is gone.
+// Cached on AppState and keyed on SimRenderVersion.
+const std::vector<Body>& SimSubjectBodies(AppState& state);
+
+// The key the simulation tab's picture is current at: its subject's stamp
+// and, for an assembly, every part's (any of them may be placed in it). 0
+// when no simulation tab is active.
+uint64_t SimRenderVersion(AppState& state);
 
 // Why that tab cannot be deleted, or empty when it can. The menu asks BEFORE
 // offering, so a refusal is a disabled item with a reason on it rather than a
@@ -196,6 +213,50 @@ void SetJobEditAudit(bool on);
 [[nodiscard]] int JobEditAuditMisses();
 [[nodiscard]] std::string JobEditAuditLastMiss();
 void ResetJobEditAudit();
+
+// Simulation undo: a full snapshot, the job's pattern. A snapshot shares the
+// document's results and meshes (fem::SimDocument's copy), and a restore
+// moves the version and the save stamp past the current ones, so a restored
+// state is never read as saved and a result solved since reads stale against
+// the settings it was not solved at.
+void SnapshotSim(AppState& state);
+
+void PushSimUndo(AppState& state, const fem::SimDocument& before);
+
+bool UndoSim(AppState& state);
+
+bool RedoSim(AppState& state);
+
+// The simulation changed: bumps `state.simEdits` (what SimUndoGuard records
+// on) and the document's version, so the project reads unsaved. For an edit
+// made through write access the document's setters do not see
+// (StudyForRun); every setter already moves the version itself.
+void MarkSimEdited(AppState& state);
+
+// JobUndoGuard for a simulation tab: holds a copy of the active simulation,
+// and at destruction pushes it if the simulation was edited in between
+// (`state.simEdits` moved, the version moved, or -- with `compareContent` --
+// its fingerprint did). Only the outermost guard records; `coalesce` holds a
+// drag back to one step; a guard whose tab changed underneath records
+// nothing.
+class SimUndoGuard {
+public:
+  explicit SimUndoGuard(AppState& state, bool coalesce = false,
+                        bool compareContent = false);
+  ~SimUndoGuard();
+  SimUndoGuard(const SimUndoGuard&) = delete;
+  SimUndoGuard& operator=(const SimUndoGuard&) = delete;
+
+private:
+  AppState& m_state;
+  bool m_coalesce;
+  bool m_compareContent;
+  const fem::SimDocument* m_sim = nullptr;
+  uint64_t m_edits = 0;
+  uint64_t m_version = 0;
+  std::optional<fem::SimDocument> m_before;
+  std::string m_fingerprint; // only when content is compared
+};
 
 // The tab index of the slot with a stable id (nullopt when gone) — the
 // in-context banner's Return button and RPCs resolve slots through this.

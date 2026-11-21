@@ -360,6 +360,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A simulation is a tab: its `type: "simulation"` entry in a project's `documents` takes its place in tab order (`active` may name it) and may carry a `folder`, as any tab's may. A project written before lists its simulations after every tab with `active` counting tabs alone, which is the same index, so it opens as it was. Golden `simulation/vNEXT-simulation-tab` (the v223 document, as a simulation tab saves it at this version) |
 
 ## Paths in a project
 
@@ -449,9 +450,11 @@ A multi-document project is a directory with `project.json`:
 
 `type` is `part`, `assembly`, `drawing`, `job` or `simulation`, stored under
 `parts/`, `assemblies/`, `drawings/`, `jobs/` or `simulations/`; `id` is the
-stable per-document id and `folder` an optional tab-bar folder (none on a
-simulation, which is no tab). Simulations are listed after every other
-document, and `active` counts the others only. Optional keys: project-scope
+stable per-document id and `folder` an optional tab-bar folder. The list is
+the tab order, and `active` indexes it; a simulation is a tab like the
+others (vNEXT). Before it was, simulations were listed after every other
+document and `active` counted the others only, which is the same index.
+Optional keys: project-scope
 `parameters`, `folders`, `sections`, `catalogs`, `tables`,
 `requirements_next_id`, `templates`; the project's requirements are files under
 `requirements/` beside it (v160). The envelope is at version 2: the keys

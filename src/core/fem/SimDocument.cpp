@@ -52,6 +52,12 @@ uint64_t MeshKey(const TopoDS_Shape& shape, const MeshSettings& settings) {
 
 SimDocument::SimDocument() : m_store(std::make_shared<SimStore>()) {}
 
+SimDocument SimDocument::Clone() const {
+  SimDocument copy(*this);
+  copy.m_store = std::make_shared<SimStore>(*m_store);
+  return copy;
+}
+
 uint64_t SimDocument::NewRevision() const { return m_store->nextRevision++; }
 
 void SimDocument::Touch(uint64_t studyId) {

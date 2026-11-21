@@ -315,6 +315,8 @@ const char* KindName(ui::DocKind k) {
     return "drawing";
   case ui::DocKind::Job:
     return "job";
+  case ui::DocKind::Simulation:
+    return "simulation";
   }
   return "part";
 }
@@ -823,7 +825,9 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
     h.U64(JobKey(state, *job));
     return h.Digest();
   }
-  why = "a requirement cannot measure a drawing";
+  why = dk == ui::DocKind::Simulation
+            ? "a requirement cannot measure a simulation"
+            : "a requirement cannot measure a drawing";
   return 0;
 }
 

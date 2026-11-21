@@ -15,9 +15,9 @@
 // unless it sets a size of its own, and the mesh is kept with the document.
 //
 // A project saves and opens these (simulations/<folder>/,
-// core/io/SerializeSimulation.h), and SimMigration.h moves the studies of a
-// part or an assembly into them; the app's tab and the RPCs still use the
-// studies on the part and the assembly
+// core/io/SerializeSimulation.h) as tabs of their own (ui::DocKind::
+// Simulation), and SimMigration.h moves the studies of a part or an assembly
+// into them; the RPCs still use the studies on the part and the assembly
 // (docs/plans/simulation-document.md#stages).
 
 #include "core/ExprValue.h"
@@ -88,6 +88,11 @@ public:
   // A copy is an undo snapshot: it SHARES the results and meshes (SimStore).
   SimDocument(const SimDocument&) = default;
   SimDocument& operator=(const SimDocument&) = default;
+  // A document of its own (a duplicated tab): the same settings, studies,
+  // ids and revisions, with a store of its own holding copies of the
+  // results and the same (immutable, shared) meshes. A copy would write its
+  // results into the original's store.
+  SimDocument Clone() const;
 
   const SimSubject& Subject() const { return m_subject; }
   // A new subject, configuration or name: every result reads stale.

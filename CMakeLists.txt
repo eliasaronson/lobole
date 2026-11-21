@@ -1041,6 +1041,7 @@ set(app_sources
     src/ui/CamPlayback.cpp
     src/ui/CamTool.cpp
     src/ui/CamTree.cpp
+    src/ui/SimTree.cpp
     src/ui/CamGenerate.cpp
     src/ui/CamSetupSheet.cpp
     src/ui/PerfHud.cpp

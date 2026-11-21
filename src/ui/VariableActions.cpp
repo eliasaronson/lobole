@@ -665,6 +665,10 @@ uint64_t ActiveTabTopUndoStamp(const AppState& state) {
     return state.jobHistory.undoStamps.empty()
                ? 0
                : state.jobHistory.undoStamps.back();
+  if (state.sim)
+    return state.simHistory.undoStamps.empty()
+               ? 0
+               : state.simHistory.undoStamps.back();
   return state.commands ? state.commands->TopUndoStamp() : 0;
 }
 uint64_t ActiveTabTopRedoStamp(const AppState& state) {
@@ -680,6 +684,10 @@ uint64_t ActiveTabTopRedoStamp(const AppState& state) {
     return state.jobHistory.redoStamps.empty()
                ? 0
                : state.jobHistory.redoStamps.back();
+  if (state.sim)
+    return state.simHistory.redoStamps.empty()
+               ? 0
+               : state.simHistory.redoStamps.back();
   return state.commands ? state.commands->TopRedoStamp() : 0;
 }
 void ActiveTabUndo(AppState& state) {
@@ -689,6 +697,8 @@ void ActiveTabUndo(AppState& state) {
     UndoDrawing(state);
   else if (state.job)
     UndoJob(state);
+  else if (state.sim)
+    UndoSim(state);
   else if (state.commands && state.commands->CanUndo())
     state.commands->Undo(*state.document);
 }
@@ -699,6 +709,8 @@ void ActiveTabRedo(AppState& state) {
     RedoDrawing(state);
   else if (state.job)
     RedoJob(state);
+  else if (state.sim)
+    RedoSim(state);
   else if (state.commands && state.commands->CanRedo())
     state.commands->Redo(*state.document);
 }
