@@ -3796,6 +3796,86 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // A Shell wall the offset builder refuses says the wall that fits, and the
+  // tool window's button types it into the thickness field: a box whose
+  // bottom edges are rounded 1.5, shelled 2 from the top
+  // (docs/modeling/README.md#a-shells-wall).
+  t = IM_REGISTER_TEST(engine, "shell", "too_thick_offers_the_wall_that_fits");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::make_unique<BoxFeature>(
+            "Tray", glm::vec3(0.0f), 40.0, 30.0, 10.0)),
+        *Doc());
+    ctx->Yield(2);
+    const uint64_t boxId = Doc()->GetFeatures().back()->GetId();
+    const auto onlyAt = [](float z) {
+      const Body& b = Doc()->GetBodies().back();
+      const auto polys = b.shape.GenerateEdgePolylines();
+      std::vector<ElementRef> out;
+      for (size_t e = 0; e < polys.size(); e++) {
+        bool at = polys[e].size() >= 2;
+        for (const auto& q : polys[e])
+          at = at && std::abs(q.z - z) < 1e-3f;
+        if (at)
+          if (const auto* n = b.elementMap.EdgeNameOf(static_cast<int>(e)))
+            out.push_back({b.createdBy, *n});
+      }
+      return out;
+    };
+    const auto bottom = onlyAt(0.0f);
+    IM_CHECK_EQ(bottom.size(), (size_t)4);
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(
+            std::make_unique<FilletFeature>("Round", bottom, 1.5)),
+        *Doc());
+    ctx->Yield(2);
+    IM_CHECK(Doc()->GetFeatures().back()->GetError().empty());
+    std::string top;
+    {
+      const Body& b = Doc()->GetBodies().back();
+      const int faces = b.shape.FaceCount();
+      for (int i = 0; i < faces; i++) {
+        glm::dvec3 c, n, u;
+        if (b.shape.FacePlane(i, c, n, u) && std::abs(c.z - 10.0) < 1e-6 &&
+            n.z > 0.5)
+          top = *b.elementMap.NameOf(i);
+      }
+    }
+    IM_CHECK(!top.empty());
+
+    ToolbarClick(ctx, "###tb_shell");
+    ctx->Yield();
+    size_t idx = 0;
+    auto* sh =
+        dynamic_cast<ShellFeature*>(ui::ResolvePendingFeature(*s_App, &idx));
+    IM_CHECK(sh != nullptr);
+    IM_CHECK_EQ(sh->bodyId, boxId);
+    sh->openFaces = {ElementRef{boxId, top}};
+    sh->thickness = 2.0;
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK(sh->GetError().find("the largest wall that fits is") !=
+             std::string::npos);
+    IM_CHECK(sh->GetFitHint().has_value());
+    const double fits = sh->GetFitHint()->fitsMm.value_or(0.0);
+    IM_CHECK(fits > 0.0 && fits < 2.0);
+    IM_CHECK((ctx->ItemInfo("//###ToolWindow/###tw_accept").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###tw_fit"));
+    const size_t undo = s_App->commands->UndoDepth();
+    ctx->ItemClick("//###ToolWindow/###tw_fit");
+    ctx->Yield(2);
+    IM_CHECK_EQ(sh->thickness.value, fits);
+    IM_CHECK(sh->GetError().empty());
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###tw_fit"));
+    ctx->ItemClick("//###ToolWindow/###tw_accept");
+    ctx->Yield(2);
+    IM_CHECK(!ui::HasPendingFeature(*s_App));
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undo + 1);
+    IM_CHECK(Measure::InvalidReasons(Doc()->GetBodies().back().shape).empty());
+  };
+
   // Sheet metal: the whole Tier 1 flow through the GUI — declare the stock,
   // thicken a profile into a blank, click an edge of it and get a wall, then
   // lay it flat again. Clicking the edge is the point: which of a rim's two
