@@ -849,7 +849,7 @@ DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
 
 // v215: a datum fitted to a body's triangles
 // (docs/modeling/README.md#datums-on-a-scan), as {body_id, point_mm, kind,
-// tolerance_mm?}; vNEXT: clip_sigma? and the hints (side?, radius_mm?,
+// tolerance_mm?}; v230: clip_sigma? and the hints (side?, radius_mm?,
 // axis? + axis_tolerance_deg?, within?), each written only when given.
 // `kinds` is what this datum accepts; anything else -- auto among them,
 // which would let a re-scan change what the datum is -- is refused naming

@@ -460,13 +460,13 @@ TEST_CASE("The v215 golden's datums are fitted on load",
   CHECK(top.FitReport().at("tolerance_mm") == 0.05);
 }
 
-TEST_CASE("The vNEXT golden's datums are fitted by their hints and clip",
+TEST_CASE("The v230 golden's datums are fitted by their hints and clip",
           "[datum][fit][golden]") {
-  // tests/golden/vNEXT-datum-fit-hints.json: v215's shaft, its axis fitted
+  // tests/golden/v230-datum-fit-hints.json: v215's shaft, its axis fitted
   // outside, 9-11 mm, along Z inside a box and clipped at 2 sigma, its top
   // along Z with every point used.
   auto doc = testio::Load(std::string(TestSourceDir()) +
-                          "/tests/golden/vNEXT-datum-fit-hints.json");
+                          "/tests/golden/v230-datum-fit-hints.json");
   REQUIRE(doc != nullptr);
   const auto& axis = *dynamic_cast<const DatumAxisFeature*>(doc->GetFeature(2));
   INFO(axis.GetError());

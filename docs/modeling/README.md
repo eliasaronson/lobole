@@ -1141,7 +1141,7 @@ by name off the scan and on a flat, a sketch standing on the fitted top,
 and a part mated to the fitted axis standing on it; the golden
 `v215-datum-from-fit` (a shaft's axis and top fitted to its own B-Rep);
 hints and a clip kept in the datum's `fit` and refitted by, every bad one
-refused on load; the golden `vNEXT-datum-fit-hints`; the GUI tests
+refused on load; the golden `v230-datum-fit-hints`; the GUI tests
 `fit/a_plane_picked_on_a_body_is_one_undo_step`,
 `fit/a_side_hint_picks_a_cups_wall` and `defaults/fit_primitive`;
 `headless_smoke.py` (the new reply keys, and a hinted datum surviving save
