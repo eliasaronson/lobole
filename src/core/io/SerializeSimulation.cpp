@@ -186,7 +186,7 @@ void CheckSimEnvelope(const json& j) {
                               "mesh", "studies", "mesh_keys", "results",
                               "meshes"},
                              "simulation");
-  RequireLists(j, {{"studies", kVersionNEXT}});
+  RequireLists(j, {{"studies", 223}});
   if (!j.contains("subject"))
     throw std::runtime_error("has no `subject`: a simulation names what it "
                              "analyses");

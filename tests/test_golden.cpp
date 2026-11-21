@@ -2017,7 +2017,7 @@ TEST_CASE("Every golden's written form reads and writes back identical",
       });
 }
 
-// The SIMULATION corpus (vNEXT, docs/simulation/README.md
+// The SIMULATION corpus (v223, docs/simulation/README.md
 // #how-a-simulation-is-saved): what each golden's expect file says it holds,
 // as loaded and after a save through the current writer.
 TEST_CASE("Simulation golden corpus loads and round-trips",

@@ -248,7 +248,7 @@ constexpr const char* kResultsExcluded =
     "# Written by Lobole: saved study results are derived (their input "
     "hash names them)";
 // The study and motion results (v153), and the drawing views' saved
-// projections (v162), and a simulation's stored meshes (vNEXT): derived,
+// projections (v162), and a simulation's stored meshes (v223): derived,
 // each named by its input hash or its key.
 constexpr const char* kDerivedPatterns[] = {
     "*.result.json",    "*.result.bin", "*.projection.json",

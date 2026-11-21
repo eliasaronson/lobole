@@ -5,7 +5,7 @@
 
 // A simulation document saved and opened
 // (docs/simulation/README.md#how-a-simulation-is-saved), discriminated by
-// `kind: "simulation"` (vNEXT). Two forms, dispatched on the path as a job's
+// `kind: "simulation"` (v223). Two forms, dispatched on the path as a job's
 // are:
 //
 // - the directory form (a project's `simulations/<folder>/`): `index.json`

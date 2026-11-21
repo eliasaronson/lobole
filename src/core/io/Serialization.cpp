@@ -915,7 +915,7 @@ void CheckEnvelope(const json& j, const char* kind) {
   const int since = got == "assembly"     ? 23
                     : got == "drawing"    ? 30
                     : got == "job"        ? 73
-                    : got == "simulation" ? kVersionNEXT
+                    : got == "simulation" ? 223
                                           : 1;
   if (version < since)
     throw std::runtime_error(

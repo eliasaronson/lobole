@@ -867,7 +867,7 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
       // A simulation of the part, with a stored mesh and result; no tab
       // folder (a simulation is no tab).
       auto s = DocumentIO::LoadSimulation(
-          (g / "simulation" / "vNEXT-simulation-document.json").string());
+          (g / "simulation" / "v223-simulation-document.json").string());
       Require(s.has_value(), "the simulation golden does not load");
       PlantSimStorage(**s);
       const fs::path at = entry(5, "Stress check", "simulation", "simulations");

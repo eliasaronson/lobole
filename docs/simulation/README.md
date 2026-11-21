@@ -2681,7 +2681,7 @@ Mesh row will show, which a save keeps even when no result reads it.
 ### How a simulation is saved
 
 A project lists a simulation in `project.json` as a document of `type:
-"simulation"` (vNEXT), stored under `simulations/<folder>/` beside `parts/`,
+"simulation"` (v223), stored under `simulations/<folder>/` beside `parts/`,
 `assemblies/`, `drawings/` and `jobs/`, and listed after every tab, so
 `active` counts tabs only. Until the simulation tab exists the project keeps
 them aside (`ui::AppState::simulations`, `ui::SimSlot`): an open reads them

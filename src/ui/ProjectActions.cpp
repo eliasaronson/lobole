@@ -572,7 +572,7 @@ static bool WriteProject(AppState& state, const std::string& path,
         entry["folder"] = slot.folder;
       index["documents"].push_back(std::move(entry));
     }
-    // The simulations (vNEXT), after every tab so `active` still counts tabs
+    // The simulations (v223), after every tab so `active` still counts tabs
     // only: simulations/<folder>/, each with its stored results and meshes.
     for (const SimSlot& ss : state.simulations) {
       if (!ss.sim)
