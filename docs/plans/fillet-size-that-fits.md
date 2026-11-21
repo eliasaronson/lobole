@@ -98,13 +98,3 @@ Verified by:
   r10: the stored radius is the size built, `reduced` names 10 and it, the
   volume is V = 24000 − 2(1 − π/4)r²·20, a save and reopen gives the same
   body, and the same call at r5 answers no `reduced`.
-
-## The kernel-case corpus
-
-Its refused fillet and chamfer cases could compare the size their
-`refusal` states with `fits_mm`, but the runner keeps only the message: the
-translator (`tools/kernel_cases_translate.py`, `Refusal`) drops the failed
-row and the diagnostic, and `expected.json` has no numeric key for the size
-(an unknown key is a `CorpusError`). It needs a `fits_mm` key in
-`expected.json` (graded with the case's tolerance), and `Refusal` to carry
-the `fits` object from the diagnostic or the failed row.

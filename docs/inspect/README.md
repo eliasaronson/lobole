@@ -771,7 +771,11 @@ every later measurement — `CADShape::IsValid` is only a null check.
 - `query_geometry` — declarative filters (`geometry_type`, `normal`/`axis`
   with `angle_tol_deg`, `radius` ± `radius_tol`, area and length bounds,
   `near_point`, `on_point`) and `expected_count`, which turns the query into
-  a one-call assertion. Covers unnamed elements too. `near_point` measures
+  a one-call assertion. Covers unnamed elements too. `blend_measures: true`
+  adds to each matched edge what a blend on it is sized against: its
+  `dihedral_deg` and, per face, `width_mm` (how far the face runs from the
+  edge before its boundary), `width_ends_at` and `concave_radius_mm`
+  ([modeling](../modeling/README.md#the-size-that-fits)). `near_point` measures
   to a face's centroid or an edge's midpoint; `on_point` `[x, y, z]` (mm)
   to the element ITSELF (`Measure::DistanceToElementAt`, a box test then
   `BRepExtrema_DistShapeShape` against a vertex), within `max_distance`,

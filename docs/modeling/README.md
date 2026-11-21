@@ -1716,7 +1716,12 @@ the `import` area is vendored and waits.
 - `outcome: refused`: a call is refused, or adds a feature that fails to
   build, with a message that states a condition (`fuzz_design.measured`),
   and the bodies are as they were. The wording is ours, so `refusal` is not
-  matched as text. `solid_or_refused` takes either.
+  matched as text, with one exception: where it states "the largest radius
+  (or distance) that fits is N" and our refusal names a size too (`fits`
+  on the diagnostic or the failed row: [the size that
+  fits](#the-size-that-fits)), the two agree to 2 % (`fits_mismatch`;
+  ours is a size that built, rounded down to three digits). A refusal that
+  found no size at all is not compared. `solid_or_refused` takes either.
 - Never a crash, a hang (120 s a case, or its `timeout_s`; the instance is
   killed by pid), an `internal` error or a non-finite number.
 
