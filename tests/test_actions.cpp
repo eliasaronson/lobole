@@ -815,6 +815,29 @@ TEST_CASE("a duplicated assembly places the same parts",
   CHECK(state.parts[asmIndex].assembly->OccurrenceCount() == 1);
 }
 
+// The tab menu offers "Duplicate job"; the copy used to be a job tab holding
+// no job, which the next save or switch dereferenced.
+TEST_CASE("a duplicated job is a job of its own with the same setups",
+          "[actions][tabs][duplicate][cam]") {
+  ui::AppState state = MakeHeadlessState();
+  ui::AddJob(state, "Job");
+  state.job->AddSetup("Op 10");
+  const size_t jobIndex = static_cast<size_t>(state.activePart);
+
+  const size_t copy = ui::DuplicateDocument(state, jobIndex);
+  REQUIRE(copy == jobIndex + 1);
+  CHECK(state.parts[copy].kind == ui::DocKind::Job);
+  CHECK(state.parts[copy].name == "Job copy");
+  REQUIRE(state.job != nullptr); // the copy is the active tab, and a job
+  REQUIRE(state.job->SetupCount() == 1);
+  CHECK(state.job->GetSetups()[0].name == "Op 10");
+
+  // Independent: a setup added to the copy does not reach the original.
+  state.job->AddSetup("Op 20");
+  REQUIRE(state.parts[jobIndex].job != nullptr);
+  CHECK(state.parts[jobIndex].job->SetupCount() == 1);
+}
+
 TEST_CASE("a duplicated drawing draws the same source document",
           "[actions][tabs][duplicate][drawing]") {
   ui::AppState state = MakeHeadlessState();

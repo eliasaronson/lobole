@@ -654,6 +654,15 @@ size_t DuplicateDocument(AppState& state, size_t index) {
     slot.drawing = std::make_unique<DrawingDocument>(*dwg);
     break;
   }
+  case DocKind::Job: {
+    const cam::JobDocument* job = SlotJob(state, index);
+    if (!job)
+      return SIZE_MAX;
+    // The setups name their parts by stable id, so the copy machines the
+    // same parts. Its undo history starts empty, as a part's does.
+    slot.job = std::make_unique<cam::JobDocument>(*job);
+    break;
+  }
   }
 
   state.parts.push_back(std::move(slot));
