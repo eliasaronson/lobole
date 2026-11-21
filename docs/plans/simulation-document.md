@@ -78,8 +78,11 @@ SimDocument
   part flow and the `Study` RPCs name a study by its stable id, which it
   keeps through the move; `study` parameters accept the ids they accepted.
 
-Studies in existing files migrate on open (`vNEXT`): each part or assembly
-with studies gets one simulation document holding them. A saved result is
+Studies in existing files migrate on open: each part with studies gets one
+simulation document holding them, and an assembly one per distinct
+participants table (the migration is built,
+[moving studies](../simulation/README.md#moving-studies-into-a-simulation);
+the tab step calls it). A saved result is
 adopted where its hash still matches the migrated study's; where the one
 planner hashes differently it reads stale, as any result whose inputs
 moved does, and is solved again when asked. The part- and assembly-level
@@ -149,7 +152,7 @@ study lists are then gone from the model, not kept as a second home.
   the mesh stored on the document, `keep: full` on a study also stores the
   interior field against it, so a reopened result can be sectioned and
   probed inside. Results and meshes stay sidecars beside the simulation
-  document (`simulations/<id>-<slug>/…`), out of the history as study
+  document (`simulations/<folder>/`), out of the history as study
   results are (docs/versioning/README.md#saved-results-stay-out-of-the-history).
   The mesh row and each Result row show their size on disk on hover, and
   **Clear stored meshes and results** (`clear_sim_storage`) removes them,
@@ -253,17 +256,20 @@ Each merges on its own with the suites green.
    display settings.
 3. **The document**, in steps that each land green. The core is built
    ([the simulation document (core)](../simulation/README.md#the-simulation-document-core):
-   `SimDocument`, the one planner, the mesh stored and shared); what is left:
-   1. **Serialization and migration** (`vNEXT`): the document saved and
-      opened, its stored meshes beside its results, and the studies of every
-      part and assembly moved into one simulation document each, as
-      [the document](#1-the-document) says.
-   2. **The tab and [the window](#6-the-window)** (tree, toolbar, tool
+   `SimDocument`, the one planner, the mesh stored and shared), and so is
+   its storage and the migration as core functions
+   ([how a simulation is saved](../simulation/README.md#how-a-simulation-is-saved),
+   [moving studies](../simulation/README.md#moving-studies-into-a-simulation)).
+   What is left:
+   1. **The tab and [the window](#6-the-window)** (tree, toolbar, tool
       window, legend) on the document, and the app's runs going through
-      `RunSimStudy`.
-   3. **The RPC move**: the study RPCs on the document, with the study ids
+      `RunSimStudy`. This step moves `ui::SimSlot` into a tab
+      (`DocKind::Simulation`), calls the migration on open and
+      `RestampSimByInputs` beside `AdoptStoredResults`, and stops saving the
+      part's and the assembly's study lists, in one change.
+   2. **The RPC move**: the study RPCs on the document, with the study ids
       kept.
-   4. **Docs and generators**, and the part- and assembly-level study lists
+   3. **Docs and generators**, and the part- and assembly-level study lists
       deleted.
 4. **The geometry step**: suppress for analysis, the geometry check, the
    symmetry cut.

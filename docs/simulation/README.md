@@ -2617,9 +2617,12 @@ optimization is refused on an assembly; `mesh_study {async}` is refused there
 ## The simulation document (core)
 
 `fem::SimDocument` (`src/core/fem/SimDocument.{h,cpp}`) is the study list's
-future home ([the plan](../plans/simulation-document.md)). **It exists in
-core only: the app, the file format and the RPCs do not use it yet**, and
-the studies still live on the part and the assembly as described above.
+future home ([the plan](../plans/simulation-document.md)). **A project saves
+and opens it ([how](#how-a-simulation-is-saved)), but no tab shows one and
+the RPCs do not use it yet**: the studies still live on the part and the
+assembly as described above, and the app neither makes a simulation nor
+moves studies into one ([moving studies](#moving-studies-into-a-simulation))
+on its own.
 
 It holds a **subject** (a part or an assembly by stable project-document id,
 and one configuration, 0 = the active one: a reference, never a copy), the
@@ -2670,7 +2673,89 @@ again (`StudyBodyPlan::stored`); a mesh the run does make comes back in
 solved on (`StudyRuntime::meshKeys`). So two studies with the same effective
 settings mesh once, a study with a mesh size of its own meshes separately,
 an edit to a load never re-meshes, and an edit to the subject moves the key.
-A convergence step's refinement is a mesh of its own and is not stored.
+A convergence step's refinement is a mesh of its own and is not stored. A
+study on the document's mesh (`SimDocument::SharesMesh`) sets the document's
+mesh keys (`DocumentMeshKeys`) to the ones it solved on: the mesh the tree's
+Mesh row will show, which a save keeps even when no result reads it.
+
+### How a simulation is saved
+
+A project lists a simulation in `project.json` as a document of `type:
+"simulation"` (vNEXT), stored under `simulations/<folder>/` beside `parts/`,
+`assemblies/`, `drawings/` and `jobs/`, and listed after every tab, so
+`active` counts tabs only. Until the simulation tab exists the project keeps
+them aside (`ui::AppState::simulations`, `ui::SimSlot`): an open reads them
+and a save writes them back, so a project that has them never loses them.
+They are added, renamed and deleted as a job is (`ui::AddSimulation`,
+`RenameSimulation`, `DeleteSimulation`): a name no other document answers
+to, an id from the project's document counter, a deleted one's folder left
+unlisted. The document itself is `DocumentIO::SaveSimulation` /
+`LoadSimulation` (`src/core/io/SerializeSimulation.{h,cpp}`), `kind:
+"simulation"`, in two forms:
+
+| form | layout |
+|---|---|
+| directory (`simulations/<folder>/`, or any `.lob` path) | `index.json`: `subject` {`kind`, `document`, `configuration`?, `name`}, `roles` (an assembly's participants table, as a study's `participants` were written), `mesh` {`size`, `size_expr`?, `refinements`?}, `studies` (as a part's are written, ids kept), `mesh_keys`?; `results/<study id>.result.{json,bin}`; `meshes/<key>.mesh.{json,bin}` |
+| single file | the same `index.json` body with `results` [{`study`, ...}] and `meshes` inline, their bytes base64 under `data` |
+
+- **Every mesh the document keeps is saved** (`SimDocument::KeptMeshKeys`:
+  the document's mesh and each stored result's, `StudyRuntime::meshKeys`,
+  saved with the result as `mesh_keys`). A stored mesh keeps its node
+  positions as `f64`, since it is solved on again, not only drawn; its
+  tets, boundary triangles with their faces, domains and mesh report ride
+  in the `.mesh.bin`. `ClearStorage()` takes the meshes and results out of
+  the next save, and their files go with it. A re-save of an unchanged mesh
+  writes nothing (the atomic writer skips identical bytes), and the mesh
+  files stay out of the project's history as results do
+  (`*.mesh.json`, `*.mesh.bin`;
+  [saved results stay out of the history](../versioning/README.md#saved-results-stay-out-of-the-history)).
+- **Refused, naming what is accepted**: an unknown key, an unknown subject
+  kind or participant role, a `document` that is not an id, roles on a part
+  subject, an occurrence listed twice in the roles, a mesh size below 0, a
+  study that does not read, a version before simulations.
+- **Dropped and reported** (a derived file, never a reason to refuse the
+  document): a result or mesh that does not read, whose halves disagree, a
+  mesh whose name is not its key, a result of a study the document does not
+  have. The study then runs, and meshes, again.
+- **Reopened, a result is stale until the subject is handed to it**:
+  `fem::RestampSimByInputs(sim, ctx)` (`SimStudy.h`) stamps current every
+  result whose study's input hash (`SimStudyInputKey`) is the one it was
+  solved at, against the subject's stamps now; a run of it then solves on
+  the stored mesh without meshing (`RunSimStudy`'s `meshesMade` is 0). The
+  app calls it from the step that adds the tab, as it calls
+  `AdoptStoredResults` for a part's studies.
+
+Its goldens are `tests/golden/simulation/` (`test_golden.cpp`'s corpus and
+writer fixpoint, `format_version_gate`), and the reader fuzz has a
+`simulation` and a `simulation-dir` family
+([reader fuzzing](../versioning/README.md#reader-fuzzing)).
+
+### Moving studies into a simulation
+
+`src/core/fem/SimMigration.{h,cpp}` moves the studies of a part or an
+assembly into simulation documents. **It is not called on open yet**: the
+step that turns the study panel into the simulation tab calls it, and stops
+saving the part's and the assembly's own study lists, in the same change.
+
+- `fem::SimulationsFromPart(part, id, name)`: every study of the part in
+  one simulation of it, in its active configuration ("Bracket
+  simulation").
+- `fem::SimulationsFromAssembly(assembly, id, name)`: one simulation per
+  distinct participants table, since roles live on the document. Two
+  tables are the same when they list the same occurrences in the same
+  roles, sizes and friction, in any order; the studies that agree share
+  one, numbered from 2 past the first ("Frame simulation 2"), and each
+  study's own table is cleared (`Effective` gives it the document's).
+- **Ids are kept**, the study's and its loads', so a requirement's
+  `{document, study}` still names it: `fem::SimulationHoldingStudy` finds
+  the simulation whose subject is that document and that holds the study.
+- **A study's own mesh size and refinements stay on the study**, as its
+  overrides, and the document's mesh is left at auto: each study is planned
+  as it was, so its input hash is the one its saved result was solved at.
+  Each saved result moves with its study and is current again once
+  `RestampSimByInputs` finds it so. One the one planner hashes differently
+  (an assembly of one meshed participant, now planned as the part) reads
+  stale once and is solved again when asked.
 
 ## Results display
 

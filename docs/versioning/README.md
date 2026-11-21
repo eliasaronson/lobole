@@ -14,7 +14,7 @@ A project has one of three shapes, chosen by `ui::SaveProject`
 |---|---|---|
 | single file `.json` | one part saved to a `.json` path (`save_project`, scripts); the GUI's Save As always writes `.lob` | one JSON document, assets base64 inside it |
 | flat `.lob` directory | one part, no part-local variables, no tab folders, no section cuts | `index.json` + `features/` + … (see [format.md](format.md#the-directory-form)) |
-| project container `.lob` | anything else: several documents, or an assembly, drawing or job | `project.json` + `parts/<name>/`, `assemblies/<name>/`, `drawings/<name>/`, `jobs/<name>/`, each a document directory |
+| project container `.lob` | anything else: several documents, or an assembly, drawing, job or simulation | `project.json` + `parts/<name>/`, `assemblies/<name>/`, `drawings/<name>/`, `jobs/<name>/`, `simulations/<name>/`, each a document directory |
 
 The GUI's Save As turns any other name into `<name>.lob`
 (`DocumentIO::ProjectSaveTarget`: `.json` and `.dsgn` are replaced, anything
@@ -72,6 +72,7 @@ the container they live in `project.json` and each part's `index.json`
 | `src/core/io/SerializeFeatures.cpp` | `FeatureToJson` / `FeatureFromJson`, sketch entities and constraints |
 | `src/core/io/SerializeAssembly.cpp` | occurrences, mates, relations, exploded views, motion studies and their saved results, the clearance assertions an old file carries |
 | `src/core/io/SerializeStudies.cpp` | FEM and topology studies and their saved results (the `.result.bin` arrays) |
+| `src/core/io/SerializeSimulation.cpp` | the simulation document, its stored results and meshes (the `.mesh.bin` arrays) ([how a simulation is saved](../simulation/README.md#how-a-simulation-is-saved)) |
 | `src/core/io/SerializeDrawingProjections.cpp` | a drawing view's saved projection (the `.projection.bin` arrays) |
 | `src/core/io/SerializeConfigurations.cpp` | part and assembly configurations |
 | `src/core/io/SerializeCam.cpp` | CAM setups, tools, operations |
@@ -491,8 +492,9 @@ A study or motion result is saved beside its study
 view's projection beside the view
 ([saved projections](../drawings/README.md#saved-projections)), and the
 project's repository keeps neither: `GitVault::CommitAll` (and
-`CommitMerge`) writes `*.result.json`, `*.result.bin`, `*.projection.json`
-and `*.projection.bin` into the repository's own exclude file
+`CommitMerge`) writes `*.result.json`, `*.result.bin`, `*.projection.json`,
+`*.projection.bin`, and a simulation's stored meshes' `*.mesh.json` and
+`*.mesh.bin`, into the repository's own exclude file
 (`.git/info/exclude`, found with `git rev-parse --git-path`), each pattern
 added when its line is missing (so a repository an earlier build set up
 gains the projections' lines), and takes any such file an earlier build
