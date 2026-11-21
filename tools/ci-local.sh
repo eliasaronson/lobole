@@ -41,7 +41,8 @@
 # order-dependent failures in one week were each invisible until the shard
 # partition happened to move.
 #
-# Not covered here: anything needing GitHub itself.
+# Not covered here: anything needing GitHub itself, and the macOS job, which
+# needs a Mac (docs/packaging/README.md#macos).
 #
 # Alternative: `act` runs the real workflow YAML in Docker, which is more
 # faithful but pulls multi-GB runner images and emulates `container:` matrix

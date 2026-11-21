@@ -526,3 +526,184 @@ jobs:
             ~/.local/state/lobole/smoke-failures/
             build-asan/Testing/Temporary/LastTest*.log
           if-no-files-found: ignore
+
+  # macOS on Apple Silicon (docs/packaging/README.md#macos). Nobody who
+  # works on this has a Mac, so this job is where the port is tested at all,
+  # and tools/ci-local.sh cannot mirror it.
+  #
+  # The dependencies are what packaging/macos/deps.sh makes: Homebrew's
+  # formulas (not pinned: Homebrew installs the current bottle) and, from
+  # source at pinned tags, OpenCASCADE 7.9.3 with nix/patches as C++20,
+  # Netgen, Spectra, libvterm and glslc. The source half is cached on the
+  # scripts, the patches, the macOS major version and Xcode, so a cold run
+  # builds them and later runs only reinstall the formulas.
+  #
+  # The suite runs twice over. First with NO Vulkan device, as on the Linux
+  # runner, so it is a gate whatever GPU the virtual machine has: every test
+  # that needs a device skips. Then the tests that skipped are run again on
+  # MoltenVK, followed by the GUI suite, and those two steps say which device
+  # they found or that there was none.
+  macos:
+    runs-on: macos-26
+    # Never measured: no run yet. A cold run builds OpenCASCADE, Netgen and
+    # shaderc before the app, on three cores.
+    timeout-minutes: 300
+    env:
+      # The formulas the runner image already has, rather than a Homebrew
+      # update at the start of every run.
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      # tools/build-jobs keeps 4 GB free for a person at the machine; a
+      # runner has 7 GB and nobody at it.
+      LOBOLE_MEM_RESERVE_MB: "512"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: The runner
+        id: runner
+        run: |
+          sw_vers
+          xcodebuild -version
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+          cmake --version | head -1
+          echo "os=$(sw_vers -productVersion | cut -d. -f1)" >> "$GITHUB_OUTPUT"
+          echo "xcode=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+          # ccache's own default on macOS is ~/Library/Caches.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+
+      - name: Dependencies (cache)
+        id: deps
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/share/lobole/macos-deps
+          key: macos-deps-${{ steps.runner.outputs.os }}-${{ steps.runner.outputs.xcode }}-${{ hashFiles('packaging/macos/deps.sh', 'packaging/appimage/deps.sh', 'nix/patches/occt-*.patch') }}
+
+      - name: Dependencies
+        run: |
+          if [ "${{ steps.deps.outputs.cache-hit }}" = true ]; then
+            packaging/macos/deps.sh --brew-only
+          else
+            packaging/macos/deps.sh
+          fi
+
+      - name: ccache (restore)
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-macos-${{ github.sha }}
+          restore-keys: ccache-macos-
+
+      - name: Configure
+        run: |
+          . tools/macos-env.sh
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          . tools/macos-env.sh
+          cmake --build build -j"$(sysctl -n hw.ncpu)"
+
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-macos-${{ github.sha }}
+
+      # Which device MoltenVK finds in this virtual machine, if any: the
+      # answer the two GPU steps below act on, printed whole.
+      - name: Vulkan device
+        id: vk
+        run: |
+          . tools/macos-env.sh
+          system_profiler SPDisplaysDataType || true
+          out="$(timeout 60 vulkaninfo --summary 2>&1 || true)"
+          device="$(echo "$out" | awk -F= '/deviceName/ {sub(/^ +/, "", $2); print $2; exit}')"
+          if [ -n "$device" ]; then
+            echo "$out" | sed -n '/^Devices:/,$p'
+            echo "Vulkan device: $device"
+          else
+            echo "$out" | tail -20
+            echo "No Vulkan device: MoltenVK finds none on this runner"
+          fi
+          echo "device=$device" >> "$GITHUB_OUTPUT"
+
+      # The gate. VK_DRIVER_FILES names no driver, so no test sees a device
+      # (as on the Linux runner) and every one that needs one skips (77, or
+      # Catch2's SKIP); the next step runs exactly those.
+      - name: Test (headless, no Vulkan device)
+        run: |
+          . tools/macos-env.sh
+          export VK_DRIVER_FILES=/nonexistent/no-driver.json
+          ctest --test-dir build -LE gui -j "$(sysctl -n hw.ncpu)" \
+            --output-on-failure --output-junit headless.xml
+
+      # continue-on-error: MoltenVK over the runner's paravirtual GPU has
+      # never been run, and a runner with no Metal device has nothing to
+      # test. What removes it: a run that shows a device and these steps
+      # green. The render_pixel_smoke among them skips unless a baseline
+      # matches the device's key; the render it made is uploaded below.
+      - name: The skipped tests, on MoltenVK
+        if: steps.vk.outputs.device != ''
+        continue-on-error: true
+        run: |
+          . tools/macos-env.sh
+          python3 - build/headless.xml > build/skipped.txt <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          for case in ET.parse(sys.argv[1]).getroot().iter("testcase"):
+              if case.get("status") == "notrun" or case.find("skipped") is not None:
+                  print(case.get("name"))
+          PY
+          echo "$(wc -l < build/skipped.txt) tests skipped without a device"
+          ctest --test-dir build --tests-from-file build/skipped.txt -j1 \
+            --output-on-failure
+
+      # continue-on-error, for the reason above. The feature-limit case is
+      # left out: it took a quarter of an hour on an M4 Pro, and the test
+      # engine kills a case at 300 s.
+      - name: GUI suite on MoltenVK (serial, shuffled)
+        if: steps.vk.outputs.device != ''
+        continue-on-error: true
+        run: |
+          . tools/macos-env.sh
+          cd build
+          ./lobole --gui-tests --hidden --gui-test-shuffle \
+            --gui-test-filter "-accept_refused_past_the_feature_limit" \
+            | tee gui.log
+          line=$(grep -o 'GUI tests: [0-9]*/[0-9]* passed' gui.log | tail -1)
+          echo "$line"
+          [ -n "$line" ] || {
+            echo "no 'N/N passed' summary: the suite failed or did not run"
+            tail -40 gui.log; exit 1; }
+          ok=${line#GUI tests: }; ok=${ok%%/*}
+          total=${line#*/}; total=${total%% passed}
+          [ "$ok" = "$total" ] || exit 1
+
+      # A render to record as this device's pixel baseline, uploaded below:
+      # committed as tests/golden/render/scene__<key>.png, it makes the
+      # render_pixel_smoke above a gate on this runner. continue-on-error for
+      # the reason above.
+      - name: The render on this device, for a baseline
+        if: steps.vk.outputs.device != ''
+        continue-on-error: true
+        run: |
+          . tools/macos-env.sh
+          python3 tests/render_pixel_smoke.py build/lobole --record
+
+      - name: No Vulkan device, no GPU steps
+        if: steps.vk.outputs.device == ''
+        run: echo "MoltenVK found no device on this runner; the GPU tests and the GUI suite did not run"
+
+      - name: What the tests left
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-test-output
+          path: |
+            ~/.local/state/lobole/smoke-failures/
+            tests/golden/render/scene__*.png
+            build/gui.log
+            build/headless.xml
+            build/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
