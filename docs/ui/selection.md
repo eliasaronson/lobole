@@ -127,9 +127,12 @@ behind the cut, `solid = false`); GUI `section/a_cut_picks_what_you_can_see`.
 
 ## Lists: one gesture, one Delete
 
-Features in a part, occurrences, mates and relations in an assembly, and
-every row of a CAM job -- operations, setups, parts, fixtures and tools --
-share the gesture and the verb
+Features in a part, occurrences, mates and relations in an assembly, every
+row of a CAM job -- operations, setups, parts, fixtures and tools -- and
+every row of a simulation's tree -- studies, loads, load cases, kept faces,
+keep-outs and the Geometry group's rows
+([panels.md](panels.md#simulation-tab-the-model-panel)) -- share the
+gesture and the verb
 (`src/ui/ListSelection.{h,cpp}`), not the row widget:
 
 - `ListRowClicked(state, kind, id, order, ownKindOnly, clickClears)`: a plain
@@ -166,7 +169,10 @@ share the gesture and the verb
   names it; a plain click on a CAM row lets go of the panel's other row kinds
   (`ui::CamRowClicked`), so a setup clicked a moment ago does not go with the
   tool Delete was pressed for. A tool selection is the active setup's, and
-  goes when another setup is made active.
+  goes when another setup is made active. On a simulation tab, every row
+  kind in one undo step (`SimUndoGuard`): a load case only once no load is
+  left in it, a Geometry row by putting its feature back, removing the
+  symmetry plane or the refinement.
 
 A range delete that leaves a dependent broken (an extrude whose sketch went)
 does so, and the row turns red with the reason, as a single delete always has.

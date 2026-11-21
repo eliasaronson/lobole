@@ -163,7 +163,8 @@ ask rather than guess when it is empty, state what the design is for as
 way it is loaded and a [buckling](../simulation/README.md#buckling) study of
 each load that compresses something, with requirements on
 `factor_of_safety` and `buckling_factor`, judge a study before quoting it
-(`check_study`, the mesh report, whether the peak settled or sits on a
+(`check_sim_geometry` before meshing, suppressing with `set_sim_geometry`
+what is smaller than its elements, `check_study`, the mesh report, whether the peak settled or sits on a
 support's edge, `stale`, and what the model leaves out), and run
 [the review checklist](../inspect/review-checklist.md) before delivery.
 Changing it changes what the benchmark measures.

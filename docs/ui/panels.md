@@ -314,6 +314,10 @@ as its tail:
 ```
 Bracket                        part
 Mesh                           1820 tets
+Geometry 3
+    Fastener holes             suppressed
+    Symmetry  Middle           half
+    Refined  face7             1.5 mm
 Studies 2
 v Static 1                     27.1 MPa   (a dot: solved / stale / failed / solving)
     Fixed  face3
@@ -338,7 +342,16 @@ v Static 1                     27.1 MPa   (a dot: solved / stale / failed / solv
   count, the report's warning count, a dot for current or stale. Its
   settings are the simulation's size (`###sim_mesh_size`, as
   `set_simulation {mesh_size_mm}` sets it). Not drawn when every study
-  meshes apart.
+  meshes apart. Its tooltip, like a Result row's, says what it takes on
+  disk with the project (`ui::SimStoredBytesOf`: the bytes a save writes).
+- **Geometry** (`###sim_geometry`, [the geometry step](../simulation/README.md#the-geometry-step)):
+  the features suppressed for the analysis
+  (`###sim_suppressed_<document>_<feature>`, "suppressed"), the symmetry
+  plane (`###sim_symmetry`, "half" or "other half") and the simulation
+  mesh's refinements (`###sim_refinement_<i>`, their size). Not drawn while
+  it holds nothing: Suppress, Symmetry and Refine on the toolbar put things
+  in it. A row's click shows the group in the tool window with the geometry
+  check; its menu (or Delete) removes it.
 - **Studies**, each with a disclosure (`###sim_study_open_<id>`), the glyph
   of the command that adds its kind, its name (`###study_sel_<id>`) and its
   headline number (the peak stress, the first frequency or buckling factor,
@@ -354,9 +367,13 @@ v Static 1                     27.1 MPa   (a dot: solved / stale / failed / solv
   keep-outs, and its **Result** (`###sim_result_<id>`) once there is one.
   A group with nothing in it is not drawn.
 - **Selection** is the lists' ([selection.md](selection.md#lists-one-gesture-one-delete)):
-  studies and loads are `SelectionItem::Kind::SimStudy` and `SimLoad`, so a
-  click selects, Ctrl and Shift extend, and Delete (or the row's menu)
-  removes what is lit as one undo step. Every row's click also puts its
+  studies and loads are `SelectionItem::Kind::SimStudy` and `SimLoad`, load
+  cases, kept faces and keep-outs `SimCase`, `SimKeep` and `SimKeepOut` (by
+  their study and place, `ui::SimRowKey`), the Geometry group's rows
+  `SimGeometry` (`ui::GeometryRowKey`), so a click selects, Ctrl and Shift
+  extend, and Delete (or the row's menu) removes what is lit as one undo
+  step. A load case goes once no load is left in it (its loads selected
+  with it go first): a load is never moved into another case. Every row's click also puts its
   settings in the tool window (`SimulationState::Focus`, `ui::FocusSim`),
   and the study it is under becomes the active one. A load's row lights the
   face it stands on in the selection's colour (`AppendSimulationFaceTints`),
@@ -369,7 +386,13 @@ the work goes, every button a `sim.*` command with its glyph from the icon
 table and a tooltip: **Add study** (a drop-down of static, modal, buckling,
 thermal and topology, `###tb_sim_add_<kind>`, each one undo step named
 "Static 2" by `fem::SimDocument::AddStudy`, as the Simulation button's
-first study and an unnamed `add_study` are) | **Mesh** (`###tb_sim_mesh`) | **Supports** (fixed, pin,
+first study and an unnamed `add_study` are) | **Suppress**
+(`###tb_sim_suppress`: a face clicked suppresses the feature that made it,
+and it stays armed for the next), **Symmetry** (`###tb_sim_symmetry`: a
+flat face clicked, or a datum chosen in its window) and **Refine**
+(`###tb_sim_refine`: a face clicked takes elements of the size typed,
+half the simulation's to start with) -- the geometry the analysis sees,
+before it is meshed -- **Mesh** (`###tb_sim_mesh`) | **Supports** (fixed, pin,
 contact, roller, held, cylindrical, temperature, convection) and **Loads**
 (force, pressure, torque, remote, heat flux, heat source), two drop-downs
 showing the last used, lit while it is armed; **Add case**
@@ -398,8 +421,12 @@ material check), the mesh's size (the simulation's, or a study's own),
 view and report, a load's place and value (a remote load's
 point and a force's case are edited there), a case's loads and weight, a
 participant's role, clamp and friction, the result (its progress while it
-runs, then its numbers, its display and its probes), or the check's
-findings. Mesh, Run and Check on the toolbar focus the mesh, the result and
+runs, then its numbers -- maxima, factors, frequencies, each case's peaks,
+reactions -- and its probes), the geometry group (what is suppressed, each
+with **Put back**, the symmetry plane and its side, the refinements' sizes,
+and the geometry check grouped by feature, each with **Suppress**), or the
+check's findings. The Suppress tool's window lists the part's features as
+boxes (`###sim_suppress_feature_<id>`) beside that check. Mesh, Run and Check on the toolbar focus the mesh, the result and
 the check. Its foot is **Close** (`###simulation_close`: the window goes, the
 simulation stays) or, while a tool is armed, **Done**. Nothing in focus and
 nothing armed: no window.
@@ -437,9 +464,19 @@ report** in the mesh's settings and the study check are `FindingRow`s (`src/ui/S
 finding as a whole sentence wrapped at the window's fixed width -- an elided
 sentence is not a finding -- with a hover highlight across it, and a click
 that frames the element, the wall, the face or the body it is about
-([../simulation/README.md](../simulation/README.md#the-mesh-report)). The
-result's display is one **Field** combo, the deformation slider and one
-**Range** row; the legend in the viewport carries the rest.
+([../simulation/README.md](../simulation/README.md#the-mesh-report)).
+
+The result's controls are on the legend they act on, in the viewport's
+lower-left corner (`##FieldLegend`, `DrawFieldLegend`): the **Field**
+(`###result_field`; a modal or buckling study's mode shape, a topology
+study's shape or density), the **Mode** (`###result_mode`) or the **Case**
+(`###result_case`), the **Deform** slider (`###deform`), the layered
+fields' build direction, the **Range** (`###result_range_lo`,
+`###result_range_hi`) with **Above yield** and **Max, min**, a topology
+shape's threshold, and on a half model **Mirror the half**
+(`###result_mirror`); under them what the picture is and its bar. It is
+the one result chrome that stays, and is there whenever the study in front
+has a result and the mesh is not on show.
 
 A thermal study's tools (**Temperature**, **Heat flux**, **Convection**,
 **Heat source**) have no derivable default: a held temperature, a film
@@ -489,8 +526,4 @@ buttons do not yet follow the row pattern; a shared radio row for 2–4 choices
 assembly relations, nor the CAM panel's setups, parts, fixtures and tools
 (only its operations are in the shared list selection; the others delete
 from their menus); a placed simulation load cannot be edited in place, only
-removed and replaced (but a remote load's point and the case a load is in);
-the simulation tree's load cases, kept faces and keep-outs are not in the
-list selection (each removes from its menu or its settings); the legend
-carries no controls yet (the field, the case, the deformation and the
-range are the result's settings in the tool window).
+removed and replaced (but a remote load's point and the case a load is in).

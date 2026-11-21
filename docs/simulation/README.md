@@ -473,7 +473,9 @@ numbers for them, thread regions and face names, and:
   `src/core/fem/FemInputKey.cpp`): the study as saved with its expressions
   EVALUATED (so a variable feeding a load is an input by its value), its
   name and id aside; on an assembly, each taking-part occurrence as saved
-  and its placed bodies;
+  and its placed bodies; on a simulation, its geometry step
+  (`fem::GeometryHash`, the symmetry plane where it is now:
+  [the geometry step](#the-geometry-step)) mixed in when there is one;
 - a motion study (`motion::InputKey`): the definition (name and id aside,
   the panel's Preview or Validate override included), every occurrence with
   its placement, every mate with its current value -- a run walks from the
@@ -740,9 +742,9 @@ says which, and its shortest edge when that is under a micrometre: the usual
 cause, and one no picture and no BRepCheck shows: two faces meant to
 coincide that miss by a few micrometres leave a zero-area face bounded by
 edges that short (the pan/tilt yoke's arm and base did, while sketch planes
-were single precision). There is no defeaturing step: suppress cosmetic features before meshing,
-or, on an imported part, remove them with Delete Face
-([modeling](../modeling/README.md#delete-face)).
+were single precision). Cosmetic features are suppressed for the analysis
+([the geometry step](#the-geometry-step)), and on an imported part removed
+with Delete Face ([modeling](../modeling/README.md#delete-face)).
 
 ### The mesh you look at
 
@@ -1031,7 +1033,8 @@ has no such estimate.)
 Each body gets `buckling_factors` (every factor found, signed, ascending by
 magnitude), `buckling_factor` (the smallest positive one) and its mode shapes,
 stored as modal ones are (`ModeShape::factor` beside `frequencyHz`) and shown
-with the deform slider and the mode list. The base state's peak von Mises and
+with the legend's deformation and **Mode** (the Result window lists the
+factors). The base state's peak von Mises and
 displacement come beside them (`base_state`).
 
 **The governing number.** Elastic buckling alone over-promises in three ways,
@@ -2691,14 +2694,16 @@ It holds a **subject** (a part or an assembly by stable project-document id,
 and one configuration, 0 = the active one: a reference, never a copy), the
 **roles** table on an assembly subject (`fem::Participant`, now on the
 document rather than on each study), the document's **mesh** (a size and
-refinements) and the **studies**, with the ids studies have today. What a
+refinements), its **geometry step** ([the geometry
+step](#the-geometry-step)) and the **studies**, with the ids studies have
+today. What a
 study is planned as is `SimDocument::Effective`: the document's mesh size
 where the study sets none, the document's refinements before its own, the
 document's roles.
 
 - **Staleness is per study.** Each study has its own revision, so editing
-  one leaves the others' results current; the subject, the roles and the
-  mesh are every study's input. A result is also stale when a subject
+  one leaves the others' results current; the subject, the roles, the
+  mesh and the geometry step are every study's input. A result is also stale when a subject
   document it was solved against (`StudyRuntime::solvedPartVersions`) has
   moved.
 - **Results and meshes are shared with undo snapshots**: a copy of the
@@ -2788,11 +2793,12 @@ disarms a tool or puts the tool window away. Its window
 ([panels.md](../ui/panels.md#simulation-tab-the-model-panel)) is the tree of
 what the simulation holds in the Model dock, focused when the tab comes in
 front (`ui::DrawSimTree`, `src/ui/SimTree.cpp`: the subject, an assembly's
-participants with their roles, the simulation's mesh, each study with its
-own mesh where it meshes apart, its supports, loads, cases and result), the
+participants with their roles, the simulation's mesh, the Geometry group,
+each study with its own mesh where it meshes apart, its supports, loads,
+cases, kept faces, keep-outs and result), the
 toolbar holding every tool
 ([the simulation toolbar](../ui/panels.md#the-simulation-toolbar): add a
-study, mesh, the supports and the loads, check, run, the result's verbs,
+study, suppress, symmetry and refine, mesh, the supports and the loads, check, run, the result's verbs,
 clear storage; the keymap's `simulation` context), and the shared tool
 window showing the armed tool or the row in focus
 ([the tool window](../ui/panels.md#simulation-the-tool-window)). It runs
@@ -2825,7 +2831,7 @@ broom, `ui::ClearSimStorage`) drops every stored result and mesh of the
 simulation in front (`SimDocument::ClearStorage`) and the session's
 pictures of them (its mesh reports, the field or mesh on show); the studies
 stay, and each is meshed and solved again on its next run. It asks first,
-counting what goes, and is not undone: what it drops is derived, and the
+counting what goes and what it takes on disk, and is not undone: what it drops is derived, and the
 results and meshes are shared with the undo snapshots, so an undo could
 not bring them back. The simulation reads unsaved, and the next save takes
 their files away. Disabled, saying so, when nothing is stored.
@@ -2904,7 +2910,7 @@ of megabytes), and a recovery reads it back. The document itself is `DocumentIO:
 
 | form | layout |
 |---|---|
-| directory (`simulations/<folder>/`, or any `.lob` path) | `index.json`: `subject` {`kind`, `document`, `configuration`?, `name`}, `roles` (an assembly's participants table, as a study's `participants` were written), `mesh` {`size`, `size_expr`?, `refinements`?}, `studies` (as a part's are written, ids kept), `mesh_keys`?; `results/<study id>.result.{json,bin}`; `meshes/<key>.mesh.{json,bin}` |
+| directory (`simulations/<folder>/`, or any `.lob` path) | `index.json`: `subject` {`kind`, `document`, `configuration`?, `name`}, `roles` (an assembly's participants table, as a study's `participants` were written), `mesh` {`size`, `size_expr`?, `refinements`?}, `geometry`? {`suppressed`?, `symmetry`?} (vNEXT, [the geometry step](#the-geometry-step)), `studies` (as a part's are written, ids kept), `mesh_keys`?; `results/<study id>.result.{json,bin}`; `meshes/<key>.mesh.{json,bin}` |
 | single file | the same `index.json` body with `results` [{`study`, ...}] and `meshes` inline, their bytes base64 under `data` |
 
 - **Every mesh the document keeps is saved** (`SimDocument::KeptMeshKeys`:
@@ -2984,6 +2990,103 @@ simulation is two documents, so it saves as a `.lob`: the single-file
   (an assembly of one meshed participant, now planned as the part) reads
   stale once and is solved again when asked.
 
+### The geometry step
+
+The geometry the analysis sees is the simulation's (`fem::SimGeometry`,
+`SimDocument::Geometry`, `src/core/fem/SimGeometry.{h,cpp}`): its subject
+with some features **suppressed for the analysis** and cut on a **symmetry
+plane**. The subject itself is never changed. It is every study's input:
+`SetGeometry` reads every result stale, `fem::GeometryHash` (with the plane
+where it is now) joins each study's input hash (`SimStudyInputKey`) and the
+mesh key (`SimMeshKeyNow`), and an empty step hashes as before, so a
+simulation without one keeps its results. It is set by `set_sim_geometry`
+and the toolbar's **Suppress**, **Symmetry** and **Refine**, before Mesh
+([the simulation toolbar](../ui/panels.md#the-simulation-toolbar)), listed in
+the tree's Geometry group, and saved with the simulation (`geometry`,
+vNEXT: [how a simulation is saved](#how-a-simulation-is-saved)). What
+setting one would make a study refuse that it does not refuse now is
+refused when it is set, changing nothing (`fem::SimGeometryRefusal`).
+
+- **Suppress for analysis.** `geometry.suppressed` lists features of the
+  subject, each `{feature}` on a part's simulation and `{document, feature}`
+  on an assembly's (the part it is in). The analysis part is the subject
+  regenerated without them (`fem::AnalysisPart`: a `CopyWithGeometry` of the
+  part that adopts its regeneration cache, so what comes before the first
+  suppressed feature is not built again), kept between plans by the
+  subject's instance, version and the set suppressed
+  (`fem::AnalysisPartCache`, `AppState::simAnalysisParts`). Suppressing what
+  another feature reads, so that it fails where it built before, or what
+  leaves no body, is refused naming them. A plate's fastener holes are the
+  case it is for: with them out a 160 x 60 x 6 plate with six 4 mm holes
+  meshes, at the automatic size, to 538 elements against 6764 with them
+  (`tests/test_sim_geometry.cpp` holds it under a fifth).
+- **Faces through the suppressed features.** A study is read on the
+  analysis part with its faces' names translated (`fem::StudyForAnalysis`):
+  the `;M<tag>` step a suppressed cut added to a face it went through is
+  taken out, so a load on a holed top face is on the whole top face there.
+  A load, a refinement, a kept face or the symmetry plane on a face a
+  suppressed feature MADE (a hole's bore, a fillet's face), or on a piece of
+  a face one split, is refused naming the feature: by the plan, the check
+  and the run, and by `add_load`, `add_refinement` and a click with a load
+  tool, which place nothing.
+- **On an assembly** the suppression is a part study's: it applies where
+  the study is planned as its one meshed participant's part
+  ([the one planner](#the-simulation-document-core)), and beside a rigid,
+  bonded or contact neighbour it is refused by name, since the assembly
+  planner places each part's bodies as they are. A symmetry cut is a part
+  simulation's and refused on an assembly's.
+
+#### The symmetry cut
+
+`geometry.symmetry` is a plane, a datum plane of the part (`datum`) or a
+flat face (`face`), the analysis shape is cut on
+(`fem::CutPlanOnSymmetry`, after the plan): each planned body is cut with a
+box past it on the far side (a non-destructive boolean), the side the
+plane's normal points to is kept (a datum's normal, a face's outward one;
+`flip` keeps the other), and a roller holds every face the cut made
+(`Load::symmetryCut`; its rim is no support's edge, so
+[the support-edge check](#a-peak-on-a-supports-edge) leaves it out). Each
+load's face is mapped onto what is left of it through the boolean's
+history: a force is a total, so a face the plane cuts keeps the share of it
+its kept area carries and one wholly past the plane takes none; a pressure,
+a support and a refinement follow their face's pieces. A thermal study is
+cut too, with no roller (no heat crosses the plane), its heat flux and heat
+source totals halved with their area and volume. The answer is the half
+model's: the same peak stress and deflection as the whole, half the
+reactions (the roller reports as support 0). An 80 x 10 x 10 steel
+cantilever cut on its middle deflects within 0.01 % and peaks within 0.4 %
+of the whole bar, on 1458 elements against 2965, and its clamp carries
+half the force (the test holds 1 % and 3 %).
+A result is drawn with its mirror image on request (`set_result_display
+{mirror}`, the legend's **Mirror the half**: each boundary triangle again,
+reflected with its displacement).
+
+Refused, naming why: a modal or buckling study (a half model finds only the
+modes symmetric about the plane), a topology study, a torque, a remote
+load, a pin or a contact (none is its own mirror image once cut), a load on
+part of a face, a static study of a topology shape, a bonded group, a
+thermal load from a thermal study, a plane that leaves nothing, and one
+that does not halve a body's volume to half a percent: the part is not
+symmetric about it.
+
+#### The geometry check
+
+`check_sim_geometry {study?}` (and the Geometry group's window, and the
+Suppress tool's) lists what in a study's analysis shape, before the cut, is
+smaller than the element size it will be meshed at
+(`fem::CheckSimGeometry`, `fem::CheckBodyGeometry`): an edge shorter than
+the element at it (the smallest of its faces' refinements, else the
+study's size, else the automatic one), a face narrower than it (four times
+its area over its perimeter: a strip's twice its width, a disc's its
+diameter), and two faces that share no vertex closer than it, a wall the
+mesh has one element through (`through: material`) or a slot it bridges
+(`air`); faces past 600 are not compared for gaps, and the answer says so.
+Each names the feature that made it (`topo::DecodeElementName`), and
+`suppressible` is false for the body's own first solid: what to suppress or
+refine before meshing. What lies wholly on the far side of a symmetry plane
+is left out. The window groups the findings by feature, each with
+**Suppress** beside it and a click that frames the smallest.
+
 ## Results display
 
 `FieldRenderer` (`src/render/FieldRenderer.{h,cpp}`) has its own pipeline and
@@ -3021,16 +3124,20 @@ strength, a stress across layers on an assembly (its parts are each printed
 their own way), a bonded group's factor on a result read from disk (it
 keeps the least factor, not the field: run it again to draw it). The build
 direction is a question asked of the result, not a study input, so it is a
-display setting (`layer_normal`, the window's **Layers along**), and the
+display setting (`layer_normal`, the legend's **Layers**), and the
 RPC refuses the layer fields without it. The contact pressure field is a
 run's: a stored result keeps each contact's peak, not the field.
 
-**The legend** names the study and analysis, the quantity with its unit and
-quarter ticks, the deformation factor, the load case, the mode and
-frequency of a modal result (its load factor for a buckling one). It is
-drawn from the record the overlay last built (`ui::ShownField`,
-`src/ui/SimulationView.h`), so it describes the picture that is on screen
-and nothing else.
+**The legend** (`##FieldLegend`, in the viewport's lower-left corner) is
+the result's one piece of chrome that stays: at its top the controls that
+act on it -- the field, the mode (a modal result's frequency, a buckling
+one's load factor) or the load case, the deformation, the build direction
+of a layered field, the range, the markers, and on a half model its mirror
+image ([the symmetry cut](#the-symmetry-cut)) -- shown whenever the study
+in front has a result, and under them the study and analysis and the
+quantity with its unit and quarter ticks. The bar is drawn from the record
+the overlay last built (`ui::ShownField`, `src/ui/SimulationView.h`), so it
+describes the picture that is on screen and nothing else.
 
 - **What the bar spans.** A magnitude runs from zero to its maximum, a
   signed field (a principal stress, the stress across layers, a
@@ -3039,7 +3146,7 @@ and nothing else.
   the stress is zero, and every node past four times the governing one
   takes the top colour, the top tick reading "and above" (`23.5+`). Only a
   range the user set has an off-scale colour at a factor's safe end.
-- **The range clamp.** `range_min` and `range_max` (the window's **Range**
+- **The range clamp.** `range_min` and `range_max` (the legend's **Range**
   fields, in the field's unit; empty is the field's own) replace an end of
   the bar. Values past the hot end take pink and values past the other end
   grey (a factor's hot end is its low one, so what is safer than its bar
@@ -3053,8 +3160,8 @@ and nothing else.
   under the bar, where each is in millimetres and on which body. Where the
   two ends are close on screen the minimum's tag is pushed below the
   maximum's. A factor is marked at its least value only (its greatest is
-  wherever the stress is nearly zero). `markers: false` (the **Mark max,
-  min** box) leaves the caption of the hot end.
+  wherever the stress is nearly zero). `markers: false` (the **Max, min**
+  box) leaves the caption of the hot end.
 - **Out of the way.** The legend sits on a backdrop of its own, the unit
   once in its title and not on the ticks. While a mesh or a result is on
   show the loads' labels are hidden, except the load whose row is selected
@@ -3066,7 +3173,7 @@ captures. `render_still` renders the model, not the field.
 
 ### VTU export
 
-`export_study_result {id, path, case?}` (the window's **Export VTU...**)
+`export_study_result {id, path, case?}` (the toolbar's **Export VTU**)
 writes a solved study for an outside post-processor (`fem::VtuText`,
 `src/core/fem/FemVtu.{h,cpp}`): one VTK unstructured grid of
 `VTK_QUADRATIC_TETRA` cells, every body a block of the same piece, with
@@ -3152,14 +3259,15 @@ tinted as a fixture, and bonded seams in the bond colour.
   on release). Run shows the
   shared progress bar, and under it the [check](#checking-a-study): every
   problem a run would refuse, as rows. Results: mesh size, max von Mises,
-  max displacement, and **Display**: the **Field** combo
-  ([results display](#results-display)), the deformation slider, the
-  **Range** fields with **Above yield**, **Mark max, min**, and **Export
-  VTU...** ([VTU export](#vtu-export)); for modal, the natural frequencies
-  (selecting one shows its mode shape) and a mode-shape toggle; for
-  buckling, the **Buckling factors** list (selecting one shows its mode),
-  the governing factor with the knockdown and its class, the yield and
-  interlayer factors, and the flags as text.
+  max displacement and each load case's peaks, the reactions and the
+  convergence, the probes, for modal the natural frequencies, for
+  buckling the **Buckling factors** with the governing factor, the
+  knockdown and its class, the yield and interlayer factors, and the flags
+  as text (the mode or case on show is marked). What is shown is the
+  legend's: its **Field** combo ([results display](#results-display)), the
+  mode or the case, the deformation slider, the **Range** fields with
+  **Above yield**, **Max, min**, and on a half model **Mirror the half**;
+  **Export VTU...** is the toolbar's ([VTU export](#vtu-export)).
 - The Mesh row's window: its size (the simulation's, or the study's own
   where it meshes apart), and the toolbar's **Mesh**, which meshes and draws the elements
   ([the mesh you look at](#the-mesh-you-look-at)), what came out ("41 820
@@ -3189,20 +3297,23 @@ supports, a thermal study's loads and a load's `region` are not refused for
 being on an assembly: the planner judges them, so a lone participant takes
 them. A verb that acts on a study takes `id` (or `study`); a
 verb that names a study for context (`add_load`, `add_refinement`,
-`set_result_display`) takes `study`.
+`set_result_display`) takes `study`; `add_refinement` without one refines
+the simulation's mesh.
 
 | method | what it does |
 |---|---|
-| `list_simulations {subject?}` | every simulation (or one part's or assembly's): its subject, configuration, `mesh_size_mm`, an assembly's participants, its studies (each `shares_mesh`), what it keeps `stored`, and whether it is in front |
+| `list_simulations {subject?}` | every simulation (or one part's or assembly's): its subject, configuration, `mesh_size_mm`, an assembly's participants, its studies (each `shares_mesh`), what it keeps `stored`, its `geometry` (what is suppressed, the symmetry plane), and whether it is in front |
 | `add_simulation {subject?, name?, configuration?, mesh_size_mm?, participants?}` | another simulation, behind the tab in front, with no study; refused in a batch (it makes a tab) |
 | `set_simulation {configuration?, mesh_size_mm?, mesh_size_mm_expr?, participants?}` | what its studies share: the subject's configuration (a part's; an assembly simulation takes 0), the mesh's size, an assembly's role table; one undo step, and every result it reaches reads stale |
 | `clear_sim_storage` | [clearing stored meshes and results](#clearing-stored-meshes-and-results); not undone, refused in a batch |
+| `set_sim_geometry {suppress?, unsuppress?, part?, symmetry?, flip?}` | [the geometry step](#the-geometry-step): features (ids or names; on an assembly's simulation of `part`) out of the analysis or back, the symmetry plane `{datum}` or `{face}` (null removes it) and its side; one undo step, refused changing nothing where a study would then refuse; answers `geometry` as `list_simulations` does |
+| `check_sim_geometry {study?}` | read-only: [the geometry check](#the-geometry-check), each finding {kind: edge \| face \| gap, size_mm, element_size_mm, element?, feature?, suppressible, through?, at_mm} |
 | `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling \| thermal (`kind` accepted; thermal a part study's) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
 | `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (the simulation's, one table for its studies: the reply's `participants_shared_with` names the other studies it changed, and `add_simulation` makes a simulation for another table; a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study); on an assembly, uniform only: [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)); a thermal study's `temperature` {face, temperature_c}, `heat_flux` {face, power_w \| flux_w_m2}, `convection` {face, film_w_m2k, ambient_c} and `heat_generation` {body, power_w} ([thermal](#thermal)) |
 | `remove_load {study, id}` | by load id |
-| `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
+| `add_refinement {study?, face, size, occurrence?}`, `remove_refinement {study?, face}` | local element size, mm: a study's own (it meshes apart), or with no `study` the simulation's mesh's (the toolbar's Refine); a face a suppressed feature made is refused |
 | `mesh_study {id, async?}` | meshes and keeps the mesh: per body nodes, elements, worst quality and `report`, and `findings` ([the mesh report](#the-mesh-report)); refused when the mesh does not fill its body |
 | `set_mesh_display {study?, view}` | `view`: off \| edges \| quality \| size ([the mesh you look at](#the-mesh-you-look-at)) |
 | `check_study {id}` | read-only: `ok` and `problems`, each {code, message, load_id?, body?, face?, fix?} ([checking a study](#checking-a-study)) |
@@ -3212,7 +3323,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, each support's `reactions`, `reaction_total` and a run's `applied_total` ([the balance](#the-balance)), factor of safety, `peak_at_support_edge` ([a peak on a support's edge](#a-peak-on-a-supports-edge)), `convergence` ([a peak that has settled](#a-peak-that-has-settled)), the `solver` that ran (on CalculiX also its residual and the agreement with an in-house run: [results and receipts](#results-and-receipts)); with `layer_normal`, the stress across those layers, its factor of safety and its away value `max_across_layers_away_mpa` ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz`; buckling: per body `buckling_factors`, `buckling_factor`, `knockdown`, `yield_factor`, `interlayer_factor`, `governing_factor`, the flags, and at the top `governing_factor` = `factor_of_safety` ([buckling](#buckling)); nonlinear: per body `nonlinear` (the path, the equilibrium check, a snap-through run's peak) and at the top `nonlinear` {kind, peak_factor, governing_factor}, a snap-through run's `factor_of_safety` its governing factor ([nonlinear static](#nonlinear-static)); a contact: per body `contacts` (each pair's closed and open area, pressure and force) and `nonlinear.stabilization` ([contact](#contact)); thermal: the peaks, `flows`, `balance`, `temperature_margin_k`, and a static study's `temperature` under a thermal load ([thermal](#what-a-thermal-result-says)) |
 | `probe_study {id, face, occurrence?, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at`; on a plastic result its plastic strain and residual motion; on an assembly study the face of `occurrence` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the simulation's tab in front in simulation mode (made, with a study, on a part with none), and back to its subject |
-| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?, range_min?, range_max?, layer_normal?, markers?}` | `field`: one of [the fields](#results-display), or shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows; the legend's range clamp and markers |
+| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?, range_min?, range_max?, layer_normal?, markers?, mirror?}` | `field`: one of [the fields](#results-display), or shape \| density \| none; `mode`: a modal or buckling study's mode shape; `case`: which load case a static study shows; the legend's range clamp and markers; `mirror` a half model's mirror image ([the symmetry cut](#the-symmetry-cut)) |
 | `export_study_result {id, path, case?}` | the whole result as a `.vtu` of quadratic tetrahedra ([VTU export](#vtu-export)) |
 | `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
 
@@ -3341,6 +3452,20 @@ verb that names a study for context (`add_load`, `add_refinement`,
   exported.
 - `tests/rpc_gate_smoke.py` checks the study verbs are accepted on an
   assembly tab.
+- The geometry step ([the geometry step](#the-geometry-step)):
+  `tests/test_sim_geometry.cpp` (`[simgeom]`) -- a plate's fastener holes
+  suppressed meshing under a fifth of the elements while the part keeps them,
+  a load on a bore refused naming the feature and a load on the
+  holed top face read whole, a suppression that breaks the part refused,
+  the input hash moving and coming back, the half cantilever against the
+  whole through the run, the cut's refusals, the check naming
+  the bores with their feature, the lone-participant assembly taking the
+  suppression and one beside a neighbour refusing it, and the format's
+  round trip and refusals; `tests/sim_geometry_smoke.py` over the RPCs, every
+  refusal changing nothing; the GUI's `sim/the_toolbar_suppresses_a_feature`,
+  `sim/the_geometry_step_cuts_a_half_model` and
+  `sim/the_legend_holds_the_result_controls` (the controls on the legend,
+  the sizes on disk).
 
 ## Not done
 
@@ -3369,14 +3494,14 @@ verb that names a study for context (`add_load`, `add_refinement`,
 - Free-free modal analysis (a modal study needs a support).
 - Shell and beam elements; adaptive refinement over the whole field (the
   convergence check refines only the faces its peaks lie on).
-- Defeaturing for analysis. Mesh size is set by the smallest features, so a
-  whole cabinet of 16 mm panels with fastener holes meshes to millions of
-  DOF; per-panel studies are the practical route until holes can be
-  suppressed for the analysis shape.
+- Suppressing a feature for the analysis on an assembly study beside a
+  neighbour, and a symmetry cut on an assembly
+  ([the geometry step](#the-geometry-step)); a cut of a modal, buckling or
+  topology study, or one with a torque, a remote load, a pin or a contact.
 - Per-participant mesh size on a bonded member applies to its faces only; the
   study's global size still governs the interior.
 - A reopened result has no interior to export or cut (`keep: full`,
-  [the plan](../plans/simulation-document.md#3-results)). On an
+  [the plan](../plans/simulation-document.md#2-results)). On an
   assembly, an asynchronous Mesh, a check that itemises, and a bonded
   group's factor field once it is read back from disk. An assembly
   simulation's configuration: it analyses the assembly as it stands.

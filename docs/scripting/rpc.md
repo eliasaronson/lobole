@@ -310,9 +310,9 @@ A part or an assembly with none has nothing to list (`list_studies` answers
 `add_study` makes its simulation ("<subject> simulation") BEHIND the tab in
 front, once what it is given is checked, so a refused one leaves no tab.
 
-The simulations themselves have four verbs. `list_simulations {subject?}`
+The simulations themselves have five verbs. `list_simulations {subject?}`
 lists them (the names and ids `simulation` takes), with each one's
-subject, configuration, shared mesh size and participants.
+subject, configuration, shared mesh size, participants and geometry step.
 `add_simulation {subject?, name?, configuration?, mesh_size_mm?,
 participants?}` makes another, behind the tab in front and with no study:
 every study of a simulation shares its participant table, so a second
@@ -320,8 +320,12 @@ table on one assembly is a second simulation, and from then on a study
 verb on that assembly's tab names which one. `set_simulation` edits what
 the studies share -- the configuration analysed, `mesh_size_mm` (the mesh
 every study without a size of its own solves on), the participants -- as
-one undo step, and `clear_sim_storage` drops the stored meshes and results,
-not undoably. `add_simulation` and `clear_sim_storage` are refused in a
+one undo step, `set_sim_geometry` edits the geometry they all see -- the
+features suppressed for the analysis, the symmetry plane
+(docs/simulation/README.md#the-geometry-step) -- refused, changing nothing,
+where a study would then refuse (`check_sim_geometry` says what in that
+geometry is smaller than its elements), and `clear_sim_storage` drops the
+stored meshes and results, not undoably. `add_simulation` and `clear_sim_storage` are refused in a
 batch: one makes a tab, the other is no undo step.
 
 Nothing switches tabs but the display calls, `enter_simulation`,

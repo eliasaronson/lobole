@@ -281,7 +281,7 @@ exactly what the measure reads:
 
 | measure | input hash |
 |---|---|
-| `study_probe`, `study_result` | the study's (`fem::StudyInputKey`: the study with its expressions evaluated, the part's B-Rep, names and materials) |
+| `study_probe`, `study_result` | the study's (`fem::StudyInputKey`: the study with its expressions evaluated, the part's B-Rep, names and materials, and its simulation's geometry step: [the geometry step](../simulation/README.md#the-geometry-step)) |
 | `motion_clean`, `follower`, a clearance or a seal over a study | the motion study's (`motion::InputKey`) |
 | `clearance`, `contact`, `seal` | the two occurrences as saved and what each places |
 | the other assembly measures | the assembly's content through every sub-assembly and every placed part's bodies (`motion::AssemblyInputKey`), with each placed part's tolerances and print process |
