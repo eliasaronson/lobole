@@ -317,8 +317,14 @@ TEST_CASE("pty: the header can name what is actually in front",
   }));
   const std::string front = pty.ForegroundName();
   INFO("in front: " << front);
+#if defined(__APPLE__)
+  // macOS's /bin/sh is a stub that execs the shell /private/var/select/sh
+  // names, so the process in front carries that shell's name.
   CHECK((front == "sh" || front == "bash" || front == "dash" ||
-         front == "sleep")); // whichever holds the terminal
+         front == "zsh" || front == "sleep"));
+#else
+  CHECK((front == "sh" || front == "sleep")); // whichever holds the terminal
+#endif
   pty.Terminate();
   CHECK(pty.ForegroundName().empty()); // nothing running, nothing claimed
 }

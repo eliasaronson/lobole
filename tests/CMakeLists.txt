@@ -410,7 +410,8 @@ endforeach()
 # The reader-fuzz budget is CPU time: this case's read is pinned to one CPU
 # with four contending burners, so it takes five times its CPU in wall time,
 # and must still pass. The CPU is the first the test may run on (a container
-# need not allow CPU 0).
+# need not allow CPU 0). Not on macOS: it has no taskset, nor any way to
+# pin a process to one CPU, so the case this measures cannot be set up there.
 if(NOT APPLE)
 add_test(NAME reader_fuzz_budget_under_load
          COMMAND bash -c "cpu=$(taskset -pc $$ | sed -E 's/.*: *([0-9]+).*/\\1/') && exec taskset -c \"$cpu\" \"$0\" -n 4 --contend -t 600 -- \"$1\" \"$2\""

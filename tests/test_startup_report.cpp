@@ -337,7 +337,13 @@ TEST_CASE("The software driver is found where the loader looks, by its "
   CHECK(startup::FindSoftwareDriver(c).empty());
   REQUIRE(startup::SoftwareDriverFromString(lvp.string(), &c, &error));
   CHECK(c.kind == startup::SoftwareDriverChoice::Kind::Manifest);
+#if defined(__linux__)
   CHECK(startup::FindSoftwareDriver(c) == lvp);
+#else
+  // Only Linux restarts on software (lavapipe); elsewhere nothing is found,
+  // whatever the variable names.
+  CHECK(startup::FindSoftwareDriver(c).empty());
+#endif
   for (const std::string bad :
        {std::string("off"), (s.dir / "nothing.json").string(),
         (s.dir / "share/vulkan/icd.d/a_broken.json").string()}) {

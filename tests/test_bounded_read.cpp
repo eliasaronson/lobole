@@ -41,7 +41,13 @@ TEST_CASE("a bounded stream caps every word a formatted read takes",
   // the read: what OCC's char* extraction has when it was built as C++17.
   static char word[2048];
   in >> word;
-#if !defined(_LIBCPP_VERSION)
+#if defined(_LIBCPP_VERSION)
+  // libc++ reads the width before a character passes through the stream, so
+  // the buffer cannot bound a word there. What bounds OCC's reads on macOS is
+  // OpenCASCADE built as C++20 (cad/BoundedRead.h), not this buffer.
+  WARN("libc++: BoundedWordBuf does not bound a formatted read; the word "
+       "length is not checked here");
+#else
   CHECK(std::strlen(word) < size_t(cad::BoundedWordBuf::kWordLimit));
 #endif
   // The rest of the long run is the next word, cut the same way, and the
