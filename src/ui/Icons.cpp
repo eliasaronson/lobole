@@ -146,7 +146,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"sim.pressure", ICON_FA_DOWN_LONG},
     {"sim.torque", ICON_FA_ROTATE},
     {"sim.remote", ICON_FA_LOCATION_ARROW},
-    {"sim.bearing", ICON_FA_CIRCLE_DOT},
+    {"sim.bearing", ICON_FA_CIRCLE_NOTCH},
     {"sim.heat_flux", ICON_FA_ARROW_RIGHT_TO_BRACKET},
     {"sim.heat_source", ICON_FA_FIRE},
     {"sim.add_case", ICON_FA_LAYER_GROUP},

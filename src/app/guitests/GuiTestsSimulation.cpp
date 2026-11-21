@@ -3018,10 +3018,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       // From the side the load pushes on (it pushes +x: the shaft is
       // pressed on its -x half), a little above.
       const glm::vec3 at = s_App->camera->GetTarget();
-      const float far = glm::length(s_App->camera->GetPosition() - at);
+      const float dist = glm::length(s_App->camera->GetPosition() - at);
       s_App->camera->SetUp(glm::vec3(conv::kWorldUp));
       s_App->camera->SetPosition(
-          at + far * glm::normalize(glm::vec3(-1.0f, -0.6f, 0.5f)));
+          at + dist * glm::normalize(glm::vec3(-1.0f, -0.6f, 0.5f)));
     }
     ctx->MouseMoveToPos(
         ImVec2(s_App->viewportPos.x + 0.3f * s_App->viewportSize.x,
@@ -3140,9 +3140,9 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       // Onto the cut face from the side cut away (the cut keeps what is
       // below it): the stress inside the bar, the bar across the view.
       const glm::vec3 at = s_App->camera->GetTarget();
-      const float far = glm::length(s_App->camera->GetPosition() - at);
+      const float dist = glm::length(s_App->camera->GetPosition() - at);
       s_App->camera->SetUp(-glm::vec3(conv::kWorldFront));
-      s_App->camera->SetPosition(at + 1.3f * far * glm::vec3(conv::kWorldUp));
+      s_App->camera->SetPosition(at + 1.3f * dist * glm::vec3(conv::kWorldUp));
       // The bar moved right, clear of the legend in the lower left.
       s_App->camera->StopAnimation();
       s_App->camera->Pan(90.0, -60.0);

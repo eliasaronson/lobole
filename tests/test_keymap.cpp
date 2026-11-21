@@ -207,6 +207,7 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "sim.convection",
       "sim.torque",
       "sim.remote",
+      "sim.bearing",
       "sim.heat_flux",
       "sim.heat_source",
       "sim.add_case",

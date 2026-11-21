@@ -23,9 +23,10 @@ struct ReferenceProcedure {
 };
 
 inline constexpr ReferenceProcedure kReferenceProcedures[] = {
-    {"static tet10",
-     "le1, kirsch, lame_rate, lame_tpu, bar, cantilever, mh_beam, mh_cylinder, "
-     "bearing_lug"},
+    // tools/fem_reference.py reads each list as one string.
+    // clang-format off
+    {"static tet10", "le1, kirsch, lame_rate, lame_tpu, bar, cantilever, mh_beam, mh_cylinder, bearing_lug"},
+    // clang-format on
     {"modal tet10", "fv32, modal_beam, free_beam"},
     {"buckling tet10", "euler_column"},
     {"thermal tet10", "thermal_pipe"},
