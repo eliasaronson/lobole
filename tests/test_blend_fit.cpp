@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "SameCore.h"
 #include "TestPaths.h"
 #include "core/BlendFit.h"
 #include "core/Document.h"
@@ -381,6 +382,10 @@ TEST_CASE("A failed fillet on a plate of 100 holes answers within ten builds",
   REQUIRE(rims.size() >= 100);
   // A round that fits: one build, its validity check included. The rims
   // are 2 mm bores, so a round stops just under 1.
+  // The two times are compared, so both are taken on one core: moved from
+  // a performance core to a low-power one between them, the refusal read
+  // 31 builds with nothing changed (0.26 s against 8.0 s).
+  const SameCore held;
   const auto cpu = [] { return double(std::clock()) / CLOCKS_PER_SEC; };
   double t0 = cpu();
   FilletFeature* f = AddBlend(doc, rims, thick * 0.05); // adding regenerates

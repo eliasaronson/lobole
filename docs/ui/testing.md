@@ -211,6 +211,11 @@ three suites that passed alone):
   bound is set against the slowest core, measured pinned there (`taskset
   -c`). A ratio of two times taken in the same run stays wall-clock, since
   load cancels out of it (`test_meshcollide`'s mesh against exact).
+  A ratio of two CPU times holds only on one core: `SameCore`
+  (`tests/SameCore.h`) keeps the thread where it is for both, since a move
+  from a performance core to a low-power one between them multiplies the
+  ratio by five (the blend refusal on the plate of 100 holes read 31 builds
+  for its 6).
 - **Responsiveness** -- "a ping answers within 1 s while a job runs", "a
   reuse answers within 1 s", "a cancel lands inside the hold", "a budget
   bounds the call". Wall time is the point, so a smoke keeps it, measures
