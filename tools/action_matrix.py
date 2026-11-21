@@ -13,6 +13,7 @@ over the RPC, each outcome held to a committed baseline.
     tools/action_matrix.py bless --from DIR    # merge shard outputs
     tools/action_matrix.py replay CASE.json    # one action, judged
     tools/action_matrix.py self-test
+    tools/action_matrix.py export-breps DIR [--design PAT] [--jobs N]
 
 The corpus is tests/action_matrix/corpus.json; the baseline
 tests/action_matrix/baseline.json, one line per entity: `edge.fillet` a
@@ -2099,6 +2100,57 @@ def self_test():
     return 0
 
 
+def cmd_export_breps(args):
+    """Every body of every design (each part tab) as a BREP in `out`: the
+    bodies the hidden "[.fit_sweep]" test blends past their bounds
+    (docs/modeling/README.md#bounds-that-refuse). One instance per worker,
+    the designs dealt round-robin."""
+    os.makedirs(args.out, exist_ok=True)
+    rows = [r for r in load_corpus()["designs"]
+            if not args.design or fnmatch.fnmatch(r["design"], args.design)]
+    if args.worker:
+        k, n = (int(x) for x in args.worker.split("/"))
+        rows = rows[k::n]
+        work = tempfile.mkdtemp(prefix="matrix_breps_")
+        inst = Instance(args.binary)
+        try:
+            for row in rows:
+                try:
+                    parts = prepare(inst, row, work)
+                except PrepareError as e:
+                    print(f"{row['design']}: skipped: {e}", flush=True)
+                    continue
+                except (ConnectionError, OSError) as e:
+                    print(f"{row['design']}: instance died: {e}", flush=True)
+                    inst.stop()
+                    inst = Instance(args.binary)
+                    continue
+                for part in parts:
+                    if part is not None:
+                        inst.call("set_active_part", part=part)
+                    n_bodies = len(inst.call("get_state")["bodies"])
+                    for b in range(n_bodies):
+                        name = unit_name(row, part).replace("/", "__") \
+                            .replace("#", "@") + f"-b{b}.brep"
+                        try:
+                            inst.call("export_brep", body=b,
+                                      path=os.path.join(args.out, name))
+                        except Exception as e:  # noqa: BLE001
+                            print(f"{name}: not exported: {e}", flush=True)
+                print(f"{row['design']}: {len(parts)} part(s)", flush=True)
+        finally:
+            inst.stop()
+            shutil.rmtree(work, ignore_errors=True)
+        return 0
+    jobs = args.jobs or default_jobs()
+    procs = [subprocess.Popen(
+        [sys.executable, __file__, "export-breps", args.out, "--binary",
+         args.binary, "--worker", f"{k}/{jobs}"]
+        + (["--design", args.design] if args.design else []))
+        for k in range(jobs)]
+    return max(p.wait() for p in procs)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawTextHelpFormatter)
@@ -2121,6 +2173,12 @@ def main():
     rp_.add_argument("case", help="a JSON reproduction, or one JSONL row")
     rp_.add_argument("--binary", default=default_binary())
     rp_.add_argument("--timeout", type=float, default=ACTION_TIMEOUT_S)
+    x = sub.add_parser("export-breps")
+    x.add_argument("out")
+    x.add_argument("--binary", default=default_binary())
+    x.add_argument("--design", default="")
+    x.add_argument("--jobs", type=int, default=0)
+    x.add_argument("--worker", default="")
     w = sub.add_parser("_worker")
     w.add_argument("--binary", required=True)
     w.add_argument("--out", required=True)
@@ -2146,6 +2204,8 @@ def main():
         return self_test()
     if args.cmd == "replay":
         return cmd_replay(args)
+    if args.cmd == "export-breps":
+        return cmd_export_breps(args)
     return worker_main(args)
 
 

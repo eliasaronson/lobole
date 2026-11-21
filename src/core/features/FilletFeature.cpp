@@ -163,14 +163,23 @@ bool FilletFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
+  // A size past a bound that refuses (fit::Refuses) is not built: the
+  // builder's own failure far past the limit was most of what a refusal
+  // cost (docs/modeling/README.md#bounds-that-refuse).
+  const double asked = radius.value;
+  const std::optional<fit::Bound> past =
+      fit::RefusingBound(fit::RimBounds(*body, indices, op), asked);
   ElementMap map;
   std::string error;
   topo::EdgeBlendFailure failure;
-  CADShape result =
-      topo::EdgeBlendNamed(body->shape, body->elementMap, indices, op, radius,
-                           GetId(), map, &error, &failure);
+  CADShape result;
+  if (!past)
+    result = topo::EdgeBlendNamed(body->shape, body->elementMap, indices, op,
+                                  radius, GetId(), map, &error, &failure);
   std::string cause;
-  if (!result.IsValid()) {
+  if (past) {
+    cause = past->why;
+  } else if (!result.IsValid()) {
     cause = error.empty() ? std::string(what) + " failed" : error;
     if (!failure.atBuild) {
       // The edges, not the size: no size would build.
@@ -192,23 +201,31 @@ bool FilletFeature::Execute(RegenContext& ctx) {
 
   // The size does not fit: say the one that does
   // (docs/modeling/README.md#the-size-that-fits).
-  const double asked = radius.value;
   std::optional<fit::Answer> answer =
-      fitMemo.For(body->shape, indices, op, asked);
+      fitMemo.For(body->shape, indices, static_cast<int>(op), asked);
   if (!answer) {
     const CADShape& input = body->shape;
+    const std::optional<fit::Bound> least =
+        fit::Least(fit::BlendBounds(*body, indices, op));
     answer = fit::LargestThatBuilds(
-        asked, fit::BlendBound(*body, indices, op),
+        asked, least,
         [&](double size) {
           const CADShape built =
               topo::EdgeBlendUnnamed(input, indices, op, size);
           return built.IsValid() && Measure::InvalidReasons(built).empty();
         },
-        [] { return heavy::Cancelled(); });
+        [] { return heavy::Cancelled(); },
+        // A bound OpenCASCADE has been seen to build past is a first
+        // guess, and the search goes on above it when it builds.
+        {.seedIsBound = least && fit::Refuses(least->kind)});
     fitMemo = fit::Memo{body->shape, indices, static_cast<int>(op), *answer};
   }
-  SetError(fit::Sentence(op, *answer, failure.places, cause),
-           fit::HintOf(*answer));
+  if (past)
+    SetError(fit::BoundSentence(op, *answer, *past, failure.places),
+             fit::BoundHint(*answer));
+  else
+    SetError(fit::Sentence(op, *answer, failure.places, cause),
+             fit::HintOf(*answer));
   LOG_ERROR("FilletFeature '{}': {}", m_name, GetError());
   return false;
 }

@@ -18,6 +18,7 @@
 #include "core/features/SketchFeature.h"
 
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 #include <functional>
 #include <numbers>
@@ -165,7 +166,65 @@ TEST_CASE("A cylinder's end rounded past its radius names at most it",
   FilletFeature* f = AddBlend(doc, edges, 12.0);
   const FitHint h = Refused(doc, f, 12.0);
   CHECK(*h.fitsMm <= 10.0);
+  // Past a disc's rim nothing builds, so the size asked is not built
+  // (docs/modeling/README.md#bounds-that-refuse).
+  CHECK(h.basis == "bound");
+  CHECK(f->GetError().find("fillet radius 12 mm does not fit: edge '") == 0);
+  CHECK(f->GetError().find("' is a circle of radius 10 mm; the largest "
+                           "radius that fits is " +
+                           fit::Mm(*h.fitsMm) + " mm") != std::string::npos);
   BuildsAtAndNotAbove(doc, f, *h.fitsMm);
+}
+
+TEST_CASE("Far past a rim, the size asked is not built", "[fillet][fit]") {
+  // A round of the end of a 10 mm cylinder at 30: the builder's own failure
+  // there is not tried, only the size just under the rim, which builds.
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "C", glm::dvec3(0), glm::dvec3(0, 0, 1), 10.0, 30.0));
+  REQUIRE(doc.Regenerate());
+  const auto edges = EdgesWhere(doc, [](const auto& p) {
+    return All(p, [](const glm::vec3& q) { return Near(q.z, 30.0f); });
+  });
+  REQUIRE(edges.size() == 1);
+  // The look before every build finds the rim BlendBounds measures.
+  {
+    const Body& body = doc.GetBodies().at(0);
+    const std::vector<int> idx{*body.elementMap.ResolveEdge(edges[0].name)};
+    for (const EdgeBlendOp op : {EdgeBlendOp::Fillet, EdgeBlendOp::Chamfer}) {
+      const auto rims = fit::RimBounds(body, idx, op);
+      REQUIRE(rims.size() == 1);
+      int measured = 0;
+      for (const fit::Bound& b : fit::BlendBounds(body, idx, op))
+        if (b.kind == fit::BoundKind::Rim) {
+          measured++;
+          CHECK_THAT(b.size, WithinRel(rims[0].size, 1e-6));
+          CHECK(b.why == rims[0].why);
+        }
+      CHECK(measured >= 1);
+      CHECK_THAT(rims[0].size, WithinRel(10.0, 1e-6));
+    }
+  }
+  FilletFeature* f = AddBlend(doc, edges, 5.0);
+  REQUIRE(f->GetError().empty());
+  for (const EdgeBlendOp op : {EdgeBlendOp::Fillet, EdgeBlendOp::Chamfer}) {
+    f->op = op;
+    const std::uint64_t before = fit::CandidatesBuilt();
+    const FitHint h = Refused(doc, f, 30.0);
+    CHECK(h.basis == "bound");
+    CHECK(fit::CandidatesBuilt() - before == 1);
+    CHECK(*h.fitsMm == 9.99);
+    // Just past the rim it is refused the same way, and at the rim it is
+    // the builder's to answer.
+    f->radius = 10.02;
+    CHECK_FALSE(doc.Regenerate());
+    CHECK(f->GetFitHint()->basis == "bound");
+    f->radius = 10.0;
+    doc.Regenerate();
+    if (f->GetFitHint())
+      CHECK(f->GetFitHint()->basis == "built");
+    BuildsAtAndNotAbove(doc, f, *h.fitsMm);
+  }
 }
 
 TEST_CASE("A hole's rim chamfered past the plate names at most its thickness",
@@ -290,7 +349,7 @@ TEST_CASE("A fillet that stays broken builds its candidates once",
   CHECK(f->GetError().find("fillet radius 12 mm does not fit") == 0);
   CHECK(fit::CandidatesBuilt() - before == once);
   // Below the size known to fail it searches again.
-  f->radius = 7.6;
+  f->radius = 7.505;
   CHECK_FALSE(doc.Regenerate());
   CHECK(fit::CandidatesBuilt() - before > once);
 }

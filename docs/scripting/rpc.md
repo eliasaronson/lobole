@@ -357,10 +357,12 @@ body called it.
   `regen_honesty_smoke`. That includes `undo` and `set_active_configuration`.
   A failed row is `{index, name, error, after_earlier_failure?,
   kernel_fault?, fits?}`; `fits` is on a Fillet or Chamfer whose size does
-  not build, `{param: "radius", asked_mm, fits_mm, fails_mm, basis:
-  "built", element?, stopped?}`: the largest size that built (`null` when
-  none did), the least known to fail, and the face or edge whose bound
-  decided it ([modeling](../modeling/README.md#the-size-that-fits)). A
+  not build, `{param: "radius", asked_mm, fits_mm, fails_mm, basis,
+  element?, stopped?}`: the largest size that built (`null` when none did),
+  the least known to fail, `basis` `"built"` (the size asked was built and
+  failed) or `"bound"` (it was past a bound that holds, a disc's rim, and
+  was not built), and the face or edge whose bound decided it
+  ([modeling](../modeling/README.md#the-size-that-fits)). A
   `set_variable` that grows a radius past its limit answers the size in its
   own response.
 - **`requirements`** on any response whose call changed the state of an

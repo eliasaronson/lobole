@@ -1119,25 +1119,28 @@ or cone, where that line is straight); and the **least radius of
 curvature** of a face that curves toward the blend (`ConcaveRadiusAt`: into
 the material at a convex edge, into the air at a concave one).
 
-**Bounds** (`fit::BlendBound`, `src/core/BlendFit.h`). A round of radius r
+**Bounds** (`fit::BlendBounds`, `src/core/BlendFit.h`). A round of radius r
 where the faces meet at θ takes r / tan(θ/2) of each face; a chamfer takes
 its distance. So the setback is at most the face's width, and where the
 face's far edge is picked too the two setbacks together are (two rounds on
 a 15 mm end face meet at 7.5); r is at most a concave face's least radius
 of curvature; and across a disc to its own rim, at most the rim's radius (a
-cylinder's end rounded by its own radius is a hemisphere). Each is an upper
-bound -- nothing above it fits, something below it may still fail -- and
-the least of them, with the face or edge it is about, is the blend's
-bound. A bound does not refuse anything yet; it seeds the search.
+cylinder's end rounded by its own radius is a hemisphere). Each reads as an
+upper bound -- nothing above it fits, something below it may still fail --
+and the least of them, with the face or edge it is about, is the blend's
+bound. Only the rim's holds in OpenCASCADE ([bounds that
+refuse](#bounds-that-refuse)): it refuses a size past it, and every other
+kind seeds the search.
 
 **The search** (`fit::LargestThatBuilds`). When the build at the asked size
 fails -- the builder is not done, a faulty contour, a fault in its signal
 scope, or a result `Measure::InvalidReasons` calls invalid; not the edges'
 own objections, which no size cures -- the first candidate sits just under
 the bound (a thousandth below it, so two rounds that would meet exactly
-leave a sliver), and where that builds it is the answer and the bound is
-named as the reason. Otherwise eight steps: down by a factor of 0.4 while
-nothing has built, so the steps reach a thousandth of the size, then
+leave a sliver). Under a rim, where that builds it is the answer; under any
+other bound the search goes on above it, and where nothing above it builds
+the bound is named as the reason. Otherwise eight steps: down by a factor
+of 0.4 while nothing has built, so the steps reach a thousandth of the size, then
 halving the bracket between the largest that built and the least that
 failed by ratio (its geometric mean), so the answer is as close in
 proportion whatever its size. Nine builds at most, a fixed count, so the answer does not depend
@@ -1155,7 +1158,8 @@ kept on the feature (`FilletFeature::fitMemo`, restored by
 `CopyDerivedState` with the rest of the executed state), keyed on the input
 body, the edges and the operation, and reused for any asked size at or
 above the least known to fail: a field dragged further past the limit
-searches once. The build at the asked size still runs each time.
+searches once. The build at the asked size still runs each time, unless it
+is past a rim.
 
 **What it says.** "radius" for a Fillet, "distance" for a Chamfer:
 
@@ -1183,6 +1187,41 @@ the document unchanged; a size an upstream edit broke is a broken feature
 in that edit's `regen`. `tests/test_blend_fit.cpp` checks each answer by
 what it is for: the size reported builds a valid solid of the closed-form
 volume, and 2 % above it does not.
+
+### Bounds that refuse
+
+A size past a bound that holds is not built: the builder's own failure far
+past a limit is most of what a refusal costs, and nothing past the bound
+can build. `fit::Refuses` says which kinds hold, from a sweep
+(`tests/test_blend_fit_sweep.cpp`, hidden, `[.fit_sweep]`) that builds
+every edge of a directory of bodies, alone and with the edge its face's
+width ends at, filleted and chamfered at 1.001, 1.1, 1.5, 2 and 4 times its
+least bound. The bodies are the action matrix's corpus
+(`tools/action_matrix.py export-breps DIR`) and the kernel cases' bodies
+before their first blend (`tools/kernel_cases.py export-breps BINARY DIR`):
+over about 42 000 edge sets, OpenCASCADE built past a face's width and past
+the width between two picked edges in about one in nine, hundreds of them
+at four times it (a wedge whose face narrows to a point at one of the five
+stations, a round that runs off its face over a cliff), and past a face's
+curvature in one in five, up to twice it; past a disc's rim it built
+nothing in 350. So only the rim refuses, a thousandth past it
+(`fit::kRefuseMargin`: a round as large as the rim is still the builder's
+to answer).
+
+`FilletFeature::Execute` looks for a rim before it builds
+(`fit::RimBounds`: a closed circle with a planar face bounded by it alone,
+a look at the picked edges' faces; measuring every bound costs more than a
+fitting blend, 0.35 s against 0.2 s on the plate below, so that waits for a
+build to fail). Past a rim it builds only the search's candidates, and the sentence leads with the
+bound's fact: "fillet radius 12 mm does not fit: edge '1/face1;U0' is a
+circle of radius 10 mm; the largest radius that fits is 9.99 mm", `basis:
+"bound"` in `fits`. The answer is still a size that built; `add_feature`,
+`modify_feature` and the tool window read it as they read any other.
+A size past a bound that does not hold is built and searched as before:
+r30 on the rims of a plate of 100 bores whose limit is the bores' 1 mm
+radius, which no bound measures, still spends most of its refusal in the
+builder's failure at 30 (3.6 s of CPU against 0.17 s for one round that
+fits).
 
 ## Kernel calls build on a copy of the cached body
 

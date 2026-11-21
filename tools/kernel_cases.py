@@ -19,6 +19,7 @@ it, and holds the whole corpus to tests/kernel_cases/status.json.
     tools/kernel_cases.py bless BINARY [--jobs N]
     tools/kernel_cases.py replay BINARY CASE
     tools/kernel_cases.py self-test
+    tools/kernel_cases.py export-breps BINARY DIR
 
 `run` exits non-zero when a case's outcome is not the one status.json holds:
 a pass that fails, a known failure that passes or fails another way, an
@@ -1140,6 +1141,48 @@ def cmd_replay(args):
     return 0
 
 
+def cmd_export_breps(args):
+    """Each case with a fillet or chamfer, built to just before its first
+    one, every body written as a BREP into `out`: the bodies the hidden
+    "[.fit_sweep]" test blends past their bounds
+    (docs/modeling/README.md#bounds-that-refuse)."""
+    check_source()
+    os.makedirs(args.out, exist_ok=True)
+    inst = Instance(args.binary)
+    blends = ("solid.fillet", "solid.chamfer")
+    try:
+        for case in all_cases():
+            try:
+                commands = load_recipe(case)
+            except Exception:  # noqa: BLE001 -- untranslated, not ours
+                continue
+            first = next((i for i, c in enumerate(commands)
+                          if c.get("command") in blends), None)
+            if first is None:
+                continue
+            inst.deadline = time.time() + budget(case)
+            d = inst.d
+            try:
+                d.call("new_project")
+                tr = kt.Translator(d)
+                for command in commands[:first]:
+                    tr.command(command)
+                n = len(d.call("get_state")["bodies"])
+                for b in range(n):
+                    d.call("export_brep", body=b, path=os.path.join(
+                        args.out, case.replace("/", "__") + f"-b{b}.brep"))
+                print(f"{case}: {n} bodies", flush=True)
+            except (ConnectionError, TimeoutError) as e:
+                print(f"{case}: instance died: {e}", flush=True)
+                inst.stop()
+                inst = Instance(args.binary)
+            except Exception as e:  # noqa: BLE001 -- untranslated, refused
+                print(f"{case}: skipped: {e}", flush=True)
+    finally:
+        inst.stop()
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1172,6 +1215,9 @@ def main():
     p.add_argument("--keep", action="store_true",
                    help="leave the instance running, the part open")
     sub.add_parser("self-test")
+    x = sub.add_parser("export-breps")
+    x.add_argument("binary")
+    x.add_argument("out")
     w = sub.add_parser("worker")  # run_cases' own
     w.add_argument("binary")
     w.add_argument("listing")
@@ -1186,6 +1232,9 @@ def main():
             return cmd_bless(args)
         if args.cmd == "replay":
             return cmd_replay(args)
+        if args.cmd == "export-breps":
+            args.binary = os.path.abspath(args.binary)
+            return cmd_export_breps(args)
         if args.cmd == "worker":
             with open(args.listing) as f:
                 return worker(args.binary, json.load(f), args.out)
