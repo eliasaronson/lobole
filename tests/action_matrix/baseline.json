@@ -532,7 +532,7 @@
    "face:150/cap1;M160": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace -face.shell face.sketch",
    "face:150/g2871772336;M150": "curved.frame curved.thread -face.delete -face.delete_feature face.offset_in face.offset_out",
    "face:160/p1/bore;M160": "curved.frame face.delete -face.delete_feature face.offset_in face.offset_out",
-   "face:160/p1/face0;M*": "face.delete*1 -face.delete_feature*1 !face.extrude_add*1 !face.extrude_cut*1 face.frame*1 !face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
+   "face:160/p1/face0;M*": "face.delete*1 -face.delete_feature*1 !face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:170/cap0;M170": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out -face.replace -face.shell face.sketch",
    "face:170/cap1": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace -face.shell face.sketch",
    "face:170/g1890069560": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace -face.shell face.sketch",
@@ -820,7 +820,7 @@
    "face:120/cap1;M140;M160": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out -face.replace -face.shell face.sketch",
    "face:120/g1;M140": "curved.frame curved.thread -face.delete -face.delete_feature face.offset_in face.offset_out",
    "face:140/g2300642214;M140;M160": "-face.delete -face.delete_feature",
-   "face:160/cap0;M160": "face.delete -face.delete_feature !face.draft !face.extrude_add !face.extrude_cut face.frame !face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch",
+   "face:160/cap0;M160": "face.delete -face.delete_feature !face.draft !face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch",
    "face:160/cap1": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace -face.shell face.sketch",
    "face:160/g1478265874;M160": "curved.frame curved.thread -face.delete -face.delete_feature face.offset_in face.offset_out"
   },
@@ -2162,7 +2162,7 @@
    "edge:3/f0/face7;M4[3/f0/face1];G4": "edge.chamfer edge.fillet",
    "edge:3/f0/face7;M4[3/f0/face3;M3];G4": "edge.chamfer edge.fillet",
    "edge:4/*;U*": "edge.chamfer*12 edge.fillet*12 edge.frame*4",
-   "face:2/*;U*": "-face.delete*2 -face.delete_feature*2 !face.draft*2 !face.extrude_add*2 !face.extrude_cut*2 face.frame*2 face.hole*2 face.offset_in*2 face.offset_out*2 -face.replace*2 -face.shell*2 face.sketch*2",
+   "face:2/*;U*": "-face.delete*2 -face.delete_feature*2 !face.draft*2 !face.extrude_add*2 face.extrude_cut*2 face.frame*2 face.hole*2 face.offset_in*2 face.offset_out*2 -face.replace*2 -face.shell*2 face.sketch*2",
    "face:2/cap0;M3;M3;M3;M3": "face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace -face.shell face.sketch",
    "face:2/cap1;M3;M3;M3;M3": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace -face.shell face.sketch",
    "face:2/g2;M3;M3": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace -face.shell face.sketch",
@@ -2609,7 +2609,7 @@
    "face:2/face*": "-face.delete*6 -face.delete_feature*6 face.draft*4 !face.draft*2 face.extrude_add*6 face.extrude_cut*6 face.frame*6 face.hole*6 face.offset_in*6 face.offset_out*6 face.replace*6 face.shell*6 face.sketch*6",
    "face:3/face*": "-face.delete*6 -face.delete_feature*6 face.draft*4 !face.draft*2 face.extrude_add*6 face.extrude_cut*6 face.frame*6 face.hole*6 face.offset_in*6 face.offset_out*6 face.replace*6 face.shell*6 face.sketch*6",
    "face:4/face*": "-face.delete*6 -face.delete_feature*6 face.draft*4 !face.draft*2 face.extrude_add*6 face.extrude_cut*6 face.frame*6 face.hole*6 face.offset_in*6 face.offset_out*6 face.replace*6 face.shell*6 face.sketch*6",
-   "face:5/face*": "-face.delete*6 -face.delete_feature*6 face.draft*2 !face.draft*4 face.extrude_add*6 face.extrude_cut*2 !face.extrude_cut*4 face.frame*6 face.hole*6 face.offset_in*6 face.offset_out*6 face.replace*6 face.shell*6 face.sketch*6",
+   "face:5/face*": "-face.delete*6 -face.delete_feature*6 face.draft*2 !face.draft*4 face.extrude_add*6 face.extrude_cut*6 face.frame*6 face.hole*6 face.offset_in*6 face.offset_out*6 face.replace*6 face.shell*6 face.sketch*6",
    "face:6/face*": "-face.delete*6 -face.delete_feature*6 face.draft*2 !face.draft*4 face.extrude_add*6 face.extrude_cut*6 face.frame*6 face.hole*6 face.offset_in*6 face.offset_out*6 face.replace*6 face.shell*6 face.sketch*6"
   },
   "golden/v166-underlay-show-always": {
@@ -3994,14 +3994,14 @@
    "face:5/bend0/face1;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:5/bend0/face21;M*": "face.delete*1 -face.delete_feature*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:5/bend0/face2;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
-   "face:5/bend0/face4;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 !face.extrude_add*1 !face.extrude_cut*1 face.frame*1 face.hole*1 face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
+   "face:5/bend0/face4;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 !face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:5/bend0/face5;M*": "face.delete*1 -face.delete_feature*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:5/bend1/face*": "face.delete*15 -face.delete_feature*15 face.extrude_add*15 face.extrude_cut*15 face.frame*15 face.hole*15 -face.offset_in*15 face.offset_out*4 -face.offset_out*11 -face.replace*15 -face.shell*15 face.sketch*15",
    "face:5/bend1/face0;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:5/bend1/face20;M*": "face.delete*1 -face.delete_feature*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:5/bend1/face21;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:5/bend1/face2;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
-   "face:5/bend1/face3;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 !face.extrude_add*1 !face.extrude_cut*1 face.frame*1 face.hole*1 face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
+   "face:5/bend1/face3;M*": "-face.delete*1 -face.delete_feature*1 !face.draft*1 !face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1",
    "face:5/bend1/face4;M*": "face.delete*1 -face.delete_feature*1 face.extrude_add*1 face.extrude_cut*1 face.frame*1 face.hole*1 -face.offset_in*1 -face.offset_out*1 -face.replace*1 -face.shell*1 face.sketch*1"
   },
   "reference/37-union": {
@@ -4164,19 +4164,19 @@
   "golden/v97-import-keep-origin": "regen not clean: Neighbour part: failed to read 'neighbour_in_its_own_frame.step' as STEP"
  },
  "slow": {
-  "fuzz/13": {"face:100/g3;M130 face.shell": 5.5},
-  "generator/gear": {"face:2/g120 face.shell": 7.0, "face:2/g42 face.shell": 7.7},
-  "generator/gear_train#idler": {"face:2/g147 face.shell": 8.3},
-  "generator/gear_train#pinion": {"face:2/cap0;M4 face.delete": 14.3, "face:2/cap1;M4 face.delete": 13.9, "face:2/g29 face.shell": 5.3, "face:2/g36 face.shell": 5.6},
-  "generator/gear_train#wheel": {"face:2/g147 face.shell": 13.3, "face:2/g175 face.shell": 15.8, "face:2/g203 face.shell": 15.2},
-  "golden/v117-bent-path": {"body:2 body.pattern_circular": 39.1},
-  "golden/v119-cope": {"body:2 body.pattern_circular": 20.5},
-  "golden/v119-tube-rules": {"body:2 body.pattern_circular": 38.5},
-  "golden/v140-modeled-thread": {"face:1/face1;M* face.shell": 12.8, "face:1/face2;M* face.shell": 8.4},
-  "golden/v146-worm": {"face:1/face1;M* face.shell": 80.0, "face:1/face2;M* face.shell": 7.3},
-  "golden/v173-thread-flank": {"face:1/face1;M* face.shell": 5.4, "face:1/face2;M* face.shell": 6.0},
-  "golden/v198-cam-profile": {"face:1/face1;M* face.shell": 16.2},
-  "reference/25-modelled-thread": {"face:2/cap0;M3 face.replace": 7.0, "face:2/cap0;M3 face.shell": 5.0, "face:2/cap1;M3 face.replace": 5.9, "face:2/cap1;M3 face.shell": 5.8}
+  "fuzz/13": {"face:100/g3;M130 face.shell": 5.1},
+  "generator/gear": {"face:2/g120 face.shell": 5.0, "face:2/g147 face.shell": 9.9, "face:2/g42 face.shell": 5.3, "face:2/g70 face.shell": 5.0},
+  "generator/gear_train#idler": {"face:2/g147 face.shell": 8.7},
+  "generator/gear_train#pinion": {"face:2/cap0;M4 face.delete": 15.0, "face:2/cap1;M4 face.delete": 14.6},
+  "golden/v114-normal-cut": {"face:5/bend0/face0;M* face.shell": 5.1},
+  "golden/v117-bent-path": {"body:2 body.pattern_circular": 24.4},
+  "golden/v119-cope": {"body:2 body.pattern_circular": 26.0},
+  "golden/v119-tube-rules": {"body:2 body.pattern_circular": 30.3},
+  "golden/v140-modeled-thread": {"face:1/face1;M* face.shell": 6.7, "face:1/face2;M* face.shell": 6.2},
+  "golden/v146-worm": {"face:1/face1;M* face.shell": 79.9, "face:1/face2;M* face.shell": 6.4},
+  "golden/v173-thread-flank": {"face:1/face1;M* face.shell": 5.6, "face:1/face2;M* face.shell": 5.5},
+  "golden/v198-cam-profile": {"face:1/face2;M* face.shell": 5.0},
+  "reference/25-modelled-thread": {"face:2/cap0;M3 face.shell": 12.4, "face:2/cap1;M3 face.shell": 12.2}
  },
  "known": [
  ]
