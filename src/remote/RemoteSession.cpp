@@ -228,7 +228,7 @@ bool RemoteServer::Start(uint16_t port, RemoteMode mode, bool bindAll) {
   addr.sin_port = htons(port);
   if (::bind(m_listenFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
           0 ||
-      ::listen(m_listenFd, 1) < 0) {
+      ::listen(m_listenFd, SOMAXCONN) < 0) {
     LOG_ERROR("Remote control: cannot listen on port {}", port);
     SockClose(m_listenFd);
     m_listenFd = -1;

@@ -108,7 +108,7 @@ TEST_CASE("Renaming a feature does not touch its baked shape", "[baked]") {
   doc->GetFeature(0)->SetName("Renamed plate");
   doc->Regenerate();
   REQUIRE(testio::Save(*doc, proj.string()));
-  CHECK(fs::last_write_time(brep) == before); // same shape, same file
+  CHECK((fs::last_write_time(brep) == before)); // same shape, same file
   // The index DOES change: it carries the new chain hash, which is what makes
   // the blob still match the recipe on the next open.
   auto loaded = testio::Load(proj.string());
@@ -148,7 +148,7 @@ TEST_CASE("A regenerated part is baked even when the blob's hash matches",
   const fs::path brep = proj / "geometry" / "0.brep";
   const auto before = fs::last_write_time(brep);
   REQUIRE(testio::Save(*loaded, proj.string()));
-  CHECK(fs::last_write_time(brep) == before);
+  CHECK((fs::last_write_time(brep) == before));
 
   // Opened from one project and saved as another whose blob an older build
   // left under the same hash: the second project gets these bodies.

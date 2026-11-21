@@ -19,6 +19,7 @@ LOBOLE_AUTOSTART=0. Requires the official MCP Python SDK (`mcp` on PyPI,
 """
 import argparse
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -867,20 +868,29 @@ _autostart_enabled = os.environ.get(
 def _descends_from(pid, ancestor):
     """Whether `pid` is `ancestor` or runs under it. An AppImage's runtime
     and `flatpak run` start the app as their CHILD, so the instance announces
-    a pid that is not the one we spawned. Linux reads /proc; elsewhere only
-    the pid itself matches."""
+    a pid that is not the one we spawned. Linux reads /proc, macOS asks ps;
+    elsewhere only the pid itself matches."""
     for _ in range(16):
         if pid == ancestor:
             return True
-        try:
-            with open(f"/proc/{pid}/stat") as f:
-                # The command name is in parentheses and may hold spaces.
-                pid = int(f.read().rsplit(")", 1)[1].split()[1])
-        except (OSError, ValueError, IndexError):
+        parent = _parent_of(pid)
+        if parent is None or parent <= 1:
             return False
-        if pid <= 1:
-            return False
+        pid = parent
     return False
+
+
+def _parent_of(pid: int) -> int | None:
+    if sys.platform == "darwin":
+        answer = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)],
+                                capture_output=True, text=True, check=False)
+        return int(answer.stdout) if answer.stdout.strip() else None
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            # The command name is in parentheses and may hold spaces.
+            return int(f.read().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def _stop_autostarted():

@@ -107,7 +107,8 @@ std::string Tail(const fs::path& path, size_t lines) {
 
 std::time_t ToTimeT(fs::file_time_type t) {
   return std::chrono::system_clock::to_time_t(
-      std::chrono::clock_cast<std::chrono::system_clock>(t));
+      std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+          fs::file_time_type::clock::to_sys(t)));
 }
 
 // The autosave files a session's project writes: the single-document sidecar

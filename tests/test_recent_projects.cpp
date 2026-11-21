@@ -40,6 +40,10 @@ struct ScratchState {
   }
 };
 
+std::string InTmp(const std::string& name) {
+  return fs::weakly_canonical(fs::path("/tmp") / name).string();
+}
+
 } // namespace
 
 TEST_CASE("Recent projects: newest first, no duplicates", "[recent]") {
@@ -50,21 +54,21 @@ TEST_CASE("Recent projects: newest first, no duplicates", "[recent]") {
   RecentProjects::Remember("/tmp/three.lob");
   auto list = RecentProjects::List();
   REQUIRE(list.size() == 3);
-  CHECK(list[0] == "/tmp/three.lob");
-  CHECK(list[2] == "/tmp/one.lob");
+  CHECK(list[0] == InTmp("three.lob"));
+  CHECK(list[2] == InTmp("one.lob"));
 
   // Re-opening an old project moves it to the front instead of adding a
   // second entry — otherwise the list fills with one project.
   RecentProjects::Remember("/tmp/one.lob");
   list = RecentProjects::List();
   REQUIRE(list.size() == 3);
-  CHECK(list[0] == "/tmp/one.lob");
+  CHECK(list[0] == InTmp("one.lob"));
 
   // The same file spelled differently is the same file.
   RecentProjects::Remember("/tmp/./two.lob");
   list = RecentProjects::List();
   CHECK(list.size() == 3);
-  CHECK(list[0] == "/tmp/two.lob");
+  CHECK(list[0] == InTmp("two.lob"));
 
   // The unsaved slot has no path and must not appear.
   RecentProjects::Remember("");
@@ -77,8 +81,8 @@ TEST_CASE("Recent projects: capped, and it survives a restart", "[recent]") {
     RecentProjects::Remember("/tmp/p" + std::to_string(i) + ".lob");
   auto list = RecentProjects::List();
   CHECK(list.size() == RecentProjects::kMax);
-  CHECK(list.front() == "/tmp/p24.lob"); // the newest survives
-  CHECK(std::find(list.begin(), list.end(), "/tmp/p0.lob") == list.end());
+  CHECK(list.front() == InTmp("p24.lob")); // the newest survives
+  CHECK(std::find(list.begin(), list.end(), InTmp("p0.lob")) == list.end());
 
   // Reading it back is what the next launch does.
   CHECK(RecentProjects::List() == list);
@@ -107,5 +111,5 @@ TEST_CASE("A corrupt recent list costs a menu, not a launch", "[recent]") {
   CHECK(RecentProjects::List().empty()); // no throw, no crash
   RecentProjects::Remember("/tmp/y.lob");
   REQUIRE(RecentProjects::List().size() == 1);
-  CHECK(RecentProjects::List()[0] == "/tmp/y.lob");
+  CHECK(RecentProjects::List()[0] == InTmp("y.lob"));
 }

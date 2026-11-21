@@ -1077,7 +1077,7 @@ TEST_CASE("conventions: this binary is not older than the source",
           "does not contain it, and any failure below may be its absence "
           "rather than a regression. Rebuild: nix-shell shell.nix --run "
           "\"cd build && ninja designer designer_tests\"");
-  CHECK(newestAt <= built);
+  CHECK((newestAt <= built));
 }
 
 // Feature-to-feature references (the sketch-edit rollback, U-round): a feature

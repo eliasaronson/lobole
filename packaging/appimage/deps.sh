@@ -45,7 +45,8 @@ cmake -S "$work/occt" -B "$work/occt-build" -G Ninja \
   -DBUILD_MODULE_Draw=OFF -DBUILD_DOC_Overview=OFF \
   -DUSE_VTK=OFF -DUSE_FREEIMAGE=OFF -DUSE_TBB=OFF \
   -DUSE_RAPIDJSON=ON -DUSE_FREETYPE=ON \
-  -DBUILD_RELEASE_DISABLE_EXCEPTIONS=FALSE
+  -DBUILD_RELEASE_DISABLE_EXCEPTIONS=FALSE \
+  ${OCCT_EXTRA_CMAKE_ARGS:-}
 cmake --build "$work/occt-build" -j"$jobs"
 cmake --install "$work/occt-build"
 # The patches it carries, as the nix overlay lists them.

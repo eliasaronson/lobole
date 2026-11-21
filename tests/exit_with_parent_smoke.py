@@ -48,12 +48,28 @@ def expect(cond, what):
 def start_time(pid):
     """/proc/<pid>/stat field 22, or None once the pid is gone (or a zombie,
     which is gone for this purpose: it holds no memory and serves nothing)."""
+    if sys.platform == "darwin":
+        state = ps_field(pid, "stat=")
+        return None if not state or state.startswith("Z") else ps_field(pid, "lstart=")
     try:
         with open(f"/proc/{pid}/stat") as f:
             fields = f.read().rsplit(")", 1)[1].split()
     except OSError:
         return None
     return None if fields[0] == "Z" else fields[19]
+
+
+def parent_of(pid):
+    if sys.platform == "darwin":
+        return int(ps_field(pid, "ppid="))
+    with open(f"/proc/{pid}/stat") as f:
+        return int(f.read().rsplit(")", 1)[1].split()[1])
+
+
+def ps_field(pid, field):
+    answer = subprocess.run(["ps", "-o", field, "-p", str(pid)],
+                            capture_output=True, text=True, check=False)
+    return answer.stdout.strip()
 
 
 def main():
@@ -71,9 +87,8 @@ def main():
         app_pid, tmp = int(line[0]), line[1]
         born = start_time(app_pid)
         expect(born is not None, f"app {app_pid} is running")
-        with open(f"/proc/{app_pid}/stat") as f:
-            ppid = int(f.read().rsplit(")", 1)[1].split()[1])
-        expect(ppid == child.pid, "its parent is the launcher itself")
+        expect(parent_of(app_pid) == child.pid,
+               "its parent is the launcher itself")
 
         child.send_signal(signal.SIGKILL)
         child.wait(timeout=10)

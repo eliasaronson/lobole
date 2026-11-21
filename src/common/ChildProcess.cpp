@@ -432,8 +432,16 @@ bool PipedChild::Start(const std::string& program,
     return false;
   };
   int fds[2];
+#if defined(__APPLE__)
+  if (::pipe(fds) != 0)
+    return fail(std::string("could not make a pipe: ") + std::strerror(errno));
+  ::fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+  ::fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+  ::fcntl(fds[1], F_SETNOSIGPIPE, 1);
+#else
   if (::pipe2(fds, O_CLOEXEC) != 0)
     return fail(std::string("could not make a pipe: ") + std::strerror(errno));
+#endif
   m_stderrPath = StderrPath();
 
   posix_spawn_file_actions_t actions;
@@ -467,8 +475,14 @@ bool PipedChild::Start(const std::string& program,
   sigset_t none;
   sigemptyset(&none);
   posix_spawnattr_setsigmask(&attr, &none);
+#if defined(__APPLE__)
+  posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF |
+                                      POSIX_SPAWN_SETSIGMASK |
+                                      POSIX_SPAWN_CLOEXEC_DEFAULT);
+#else
   posix_spawnattr_setflags(&attr,
                            POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
+#endif
 
   std::vector<char*> argv;
   argv.push_back(const_cast<char*>(program.c_str()));
@@ -512,6 +526,7 @@ bool PipedChild::Start(const std::string& program,
 bool PipedChild::Write(const void* data, size_t n) {
   if (!Running() || m_stdin < 0)
     return false;
+#if !defined(__APPLE__)
   // A child that has exited turns the next write into SIGPIPE, which would
   // end THIS process. Blocked on the writing thread, the write fails with
   // EPIPE instead, and the pending signal is dropped before the mask goes
@@ -520,6 +535,7 @@ bool PipedChild::Write(const void* data, size_t n) {
   sigemptyset(&pipeOnly);
   sigaddset(&pipeOnly, SIGPIPE);
   pthread_sigmask(SIG_BLOCK, &pipeOnly, &previous);
+#endif
   const char* p = static_cast<const char*>(data);
   bool ok = true;
   while (n > 0) {
@@ -533,11 +549,13 @@ bool PipedChild::Write(const void* data, size_t n) {
     p += w;
     n -= static_cast<size_t>(w);
   }
+#if !defined(__APPLE__)
   if (!ok) {
     const struct timespec zero{0, 0};
     sigtimedwait(&pipeOnly, nullptr, &zero); // consume it, if it is pending
   }
   pthread_sigmask(SIG_SETMASK, &previous, nullptr);
+#endif
   return ok;
 }
 
@@ -555,8 +573,13 @@ bool Reap(int pid, bool block, int& exitCode, uint64_t& peakBytes) {
   if (r == 0)
     return false;
   exitCode = r == pid && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-  if (r == pid)
+  if (r == pid) {
+#if defined(__APPLE__)
+    peakBytes = static_cast<uint64_t>(usage.ru_maxrss);
+#else
     peakBytes = static_cast<uint64_t>(usage.ru_maxrss) * 1024; // KiB on Linux
+#endif
+  }
   return true;
 }
 

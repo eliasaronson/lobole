@@ -20,6 +20,7 @@
 #include "vec_divd_spv.h"
 #include "vec_scale_spv.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>

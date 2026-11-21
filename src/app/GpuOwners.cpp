@@ -478,11 +478,8 @@ static void CreateDevice(bool wsi) {
       LOG_INFO("Ray Tracing: added buffer device address extension");
     }
 
-#ifdef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
-    if (IsExtensionAvailable(properties,
-                             VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME))
-      device_extensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
-#endif
+    if (IsExtensionAvailable(properties, "VK_KHR_portability_subset"))
+      device_extensions.push_back("VK_KHR_portability_subset");
 
     const float queue_priority[] = {1.0f};
     VkDeviceQueueCreateInfo queue_info[1] = {};
@@ -501,13 +498,28 @@ static void CreateDevice(bool wsi) {
     rtPipelineFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     rtPipelineFeatures.rayTracingPipeline = VK_TRUE;
-    rtPipelineFeatures.pNext = &bufferDeviceAddressFeatures;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{};
     asFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     asFeatures.accelerationStructure = VK_TRUE;
-    asFeatures.pNext = &rtPipelineFeatures;
+
+    void* featureChain = nullptr;
+    if (IsExtensionAvailable(properties,
+                             VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) {
+      bufferDeviceAddressFeatures.pNext = featureChain;
+      featureChain = &bufferDeviceAddressFeatures;
+    }
+    if (IsExtensionAvailable(properties,
+                             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+      rtPipelineFeatures.pNext = featureChain;
+      featureChain = &rtPipelineFeatures;
+    }
+    if (IsExtensionAvailable(properties,
+                             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
+      asFeatures.pNext = featureChain;
+      featureChain = &asFeatures;
+    }
 
     // The OutlineRenderer wireframe pipeline draws with VK_POLYGON_MODE_LINE,
     // which requires the fillModeNonSolid feature. Enable it when supported.
@@ -521,7 +533,7 @@ static void CreateDevice(bool wsi) {
 
     VkDeviceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    create_info.pNext = &asFeatures;
+    create_info.pNext = featureChain;
     create_info.pEnabledFeatures = &enabledFeatures;
     create_info.queueCreateInfoCount =
         sizeof(queue_info) / sizeof(queue_info[0]);
@@ -1155,7 +1167,8 @@ static void InitRayTracing(bool safeMode) {
   if (!FaultsRenderer("raytracing") &&
       g_RayTracingRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
                                        g_QueueFamily, g_CommandPool)) {
-    App().renderer.rayTracing = true;
+    App().renderer.rayTracing =
+        RayTracingRenderer::IsRayTracingSupported(g_PhysicalDevice);
     LOG_INFO("Ray tracing: initialization successful");
     return;
   }

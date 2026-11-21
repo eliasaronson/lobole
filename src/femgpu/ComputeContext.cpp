@@ -101,6 +101,14 @@ ComputeContext::Create(std::string* error, const std::string& preferredDevice) {
   app.apiVersion = VK_API_VERSION_1_2;
   VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   ici.pApplicationInfo = &app;
+#if defined(__APPLE__)
+  const char* instanceExts[] = {
+      VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+      VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
+  ici.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+  ici.enabledExtensionCount = 2;
+  ici.ppEnabledExtensionNames = instanceExts;
+#endif
   if (vkCreateInstance(&ici, nullptr, &ctx->m_instance) != VK_SUCCESS)
     return fail("vkCreateInstance failed (no Vulkan runtime?)");
 
@@ -139,13 +147,19 @@ ComputeContext::Create(std::string* error, const std::string& preferredDevice) {
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomics{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT};
   atomics.shaderBufferFloat32AtomicAdd = VK_TRUE;
+#if defined(__APPLE__)
+  const char* extNames[] = {VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
+                            "VK_KHR_portability_subset"};
+#else
   const char* extNames[] = {VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME};
+#endif
 
   VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
   dci.pNext = &atomics;
   dci.queueCreateInfoCount = 1;
   dci.pQueueCreateInfos = &qci;
-  dci.enabledExtensionCount = 1;
+  dci.enabledExtensionCount =
+      static_cast<uint32_t>(sizeof(extNames) / sizeof(extNames[0]));
   dci.ppEnabledExtensionNames = extNames;
   if (vkCreateDevice(ctx->m_phys, &dci, nullptr, &ctx->m_device) != VK_SUCCESS)
     return fail("vkCreateDevice failed");

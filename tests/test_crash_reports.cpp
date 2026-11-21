@@ -116,9 +116,11 @@ TEST_CASE("A crashed session's report holds its stack, log tail and "
   Write(dir / "parts" / "Stand.json", "{}");
   Write(dir / "parts" / "Old.json", "{}");
   const auto started = std::chrono::system_clock::now() - std::chrono::hours(1);
-  fs::last_write_time(dir / "parts" / "Old.json",
-                      std::chrono::clock_cast<fs::file_time_type::clock>(
-                          started - std::chrono::hours(1)));
+  fs::last_write_time(
+      dir / "parts" / "Old.json",
+      std::chrono::time_point_cast<fs::file_time_type::duration>(
+          fs::file_time_type::clock::from_sys(started -
+                                              std::chrono::hours(1))));
   PlantMarker(s.dir, stem,
               {{"project", (s.dir / "work" / "Part.lob").string()},
                {"started_epoch", std::chrono::system_clock::to_time_t(started)},

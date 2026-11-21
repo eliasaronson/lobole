@@ -316,7 +316,9 @@ TEST_CASE("pty: the header can name what is actually in front",
     return screen.Line(0).find("ready") != std::string::npos;
   }));
   const std::string front = pty.ForegroundName();
-  CHECK((front == "sh" || front == "sleep")); // whichever holds the terminal
+  INFO("in front: " << front);
+  CHECK((front == "sh" || front == "bash" || front == "dash" ||
+         front == "sleep")); // whichever holds the terminal
   pty.Terminate();
   CHECK(pty.ForegroundName().empty()); // nothing running, nothing claimed
 }

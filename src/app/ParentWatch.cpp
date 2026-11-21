@@ -7,17 +7,54 @@
 #include <iostream>
 #include <string>
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 #include <cerrno>
 #include <csignal>
 #include <cstring>
-#include <sys/prctl.h>
 #include <unistd.h>
+#endif
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+#if defined(__APPLE__)
+#include <sys/event.h>
+#include <thread>
 #endif
 
 namespace {
 constexpr const char* kEnv = "LOBOLE_EXIT_WITH_PARENT";
+
+#if defined(__linux__)
+bool TerminateWhenParentDies() {
+  if (prctl(PR_SET_PDEATHSIG, SIGTERM) == 0)
+    return true;
+  std::cerr << "--exit-with-parent: prctl(PR_SET_PDEATHSIG) failed: "
+            << std::strerror(errno) << std::endl;
+  return false;
 }
+#elif defined(__APPLE__)
+bool TerminateWhenParentDies() {
+  const int queue = kqueue();
+  struct kevent watch;
+  EV_SET(&watch, getppid(), EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0,
+         nullptr);
+  if (queue < 0 ||
+      (kevent(queue, &watch, 1, nullptr, 0, nullptr) != 0 && errno != ESRCH)) {
+    std::cerr << "--exit-with-parent: kqueue watch failed: "
+              << std::strerror(errno) << std::endl;
+    return false;
+  }
+  std::thread([queue] {
+    struct kevent fired;
+    while (kevent(queue, nullptr, 0, &fired, 1, nullptr) < 0 &&
+           errno == EINTR) {
+    }
+    ::kill(getpid(), SIGTERM);
+  }).detach();
+  return true;
+}
+#endif
+} // namespace
 
 int ArmExitWithParent(bool requestedByFlag) {
   const char* raw = std::getenv(kEnv);
@@ -34,9 +71,10 @@ int ArmExitWithParent(bool requestedByFlag) {
   if (!requestedByFlag && value.empty())
     return -1;
 
-#if !defined(__linux__)
+#if !defined(__linux__) && !defined(__APPLE__)
   std::cerr << "--exit-with-parent / " << kEnv
-            << " needs prctl(PR_SET_PDEATHSIG), which only Linux has"
+            << " needs prctl(PR_SET_PDEATHSIG) or kqueue, which this platform "
+               "does not have"
             << std::endl;
   return 2;
 #else
@@ -54,11 +92,8 @@ int ArmExitWithParent(bool requestedByFlag) {
     launcher = static_cast<pid_t>(parsed);
   }
 
-  if (prctl(PR_SET_PDEATHSIG, SIGTERM) != 0) {
-    std::cerr << "--exit-with-parent: prctl(PR_SET_PDEATHSIG) failed: "
-              << std::strerror(errno) << std::endl;
+  if (!TerminateWhenParentDies())
     return 2;
-  }
 
   // Armed. Now the race: if the launcher died before the line above, the
   // kernel has nothing left to signal us about.

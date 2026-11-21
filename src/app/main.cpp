@@ -149,7 +149,7 @@ static void ShowWindowNonBlocking(GLFWwindow* window) {
 // This thread's CPU time, ms: what a frame cost rather than how long it took
 // (FrameTimer::SetWorkCpuMs). Wall time where there is no thread CPU clock.
 static double ThreadCpuMs() {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
   timespec ts{};
   if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0)
     return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
@@ -1882,6 +1882,9 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
 #endif
 
   glfwSetErrorCallback(glfw_error_callback);
+#if defined(__APPLE__)
+  glfwInitVulkanLoader(vkGetInstanceProcAddr);
+#endif
   if (!glfwInit())
     FailStartup(startup::step::kGlfwInit, g_GlfwLastError);
 

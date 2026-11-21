@@ -11,8 +11,9 @@
 // two of them were found 16 hours on, each holding a scratch state dir and
 // its memory. `--exit-with-parent`, or LOBOLE_EXIT_WITH_PARENT=<launcher
 // pid>, asks the kernel for SIGTERM when the parent dies
-// (prctl(PR_SET_PDEATHSIG)); the headless and offscreen loops already stop
-// cleanly on SIGTERM. tests/smoke_app.py sets the variable for every launch.
+// (prctl(PR_SET_PDEATHSIG) on Linux, a kqueue watch on macOS); the headless and
+// offscreen loops already stop cleanly on SIGTERM. tests/smoke_app.py sets the
+// variable for every launch.
 //
 // The environment form names the launcher, which closes the one race the
 // flag cannot: a parent that died between fork and this call. The process is

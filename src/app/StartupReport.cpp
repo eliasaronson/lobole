@@ -5,6 +5,7 @@
 
 #include "common/DevicePreference.h"
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 
 #include <algorithm>
 #include <atomic>
@@ -686,6 +687,8 @@ bool Relaunch(const std::vector<std::string>& args, std::string* error) {
 #if defined(__linux__)
   std::error_code ec;
   self = fs::read_symlink("/proc/self/exe", ec).string();
+#elif defined(__APPLE__)
+  self = (RuntimePaths::ExecutableDir() / "lobole").string();
 #endif
   if (self.empty()) {
     if (error)

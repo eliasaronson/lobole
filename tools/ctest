@@ -31,6 +31,10 @@
 # name build/build.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ "$(uname -s)" = Darwin ]; then
+  # shellcheck source=macos-env.sh
+  . "$root/tools/macos-env.sh"
+fi
 dir="$root/build"
 rest=()
 args=("$@")

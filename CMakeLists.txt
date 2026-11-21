@@ -42,6 +42,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DVK_PROTOTYPES")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES")
+if(APPLE)
+  add_compile_options(-ffp-contract=off -fno-strict-aliasing)
+endif()
 
 # Precompiled headers, OFF by default. GCC's .gch is not byte-reproducible,
 # ccache folds its bytes into the key of every source that uses one, and each
@@ -635,6 +638,9 @@ if(Netgen_FOUND AND OPENCASCADE_FOUND)
     # out of designer_core's usage requirements.
     target_link_libraries(fem_mesher PRIVATE nglib ngcore)
     target_compile_definitions(fem_mesher PRIVATE HAVE_NETGEN)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set_target_properties(fem_mesher PROPERTIES CXX_STANDARD 20)
+    endif()
     message(STATUS "Netgen enabled (FEM meshing)")
 else()
     message(WARNING "Netgen not found: FEM meshing disabled (app runs; run_study errors)")
@@ -1307,6 +1313,8 @@ if(HAVE_STDCXX_STACKTRACE)
 endif()
 if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
     set(LOBOLE_INSTALL_RPATH "${CMAKE_INSTALL_LIBDIR}")
+elseif(APPLE)
+    set(LOBOLE_INSTALL_RPATH "@loader_path/../${CMAKE_INSTALL_LIBDIR}")
 else()
     set(LOBOLE_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 endif()
@@ -1324,6 +1332,13 @@ else()
 endif()
 
 target_link_libraries(designer designer_app designer_core ${LIBRARIES})
+
+if(APPLE)
+    add_library(lobole_thread_stack SHARED src/common/ThreadStackDarwin.c)
+    target_link_libraries(designer_core PUBLIC lobole_thread_stack)
+    install(TARGETS lobole_thread_stack
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()
 
 # X11 for the non-blocking XMapWindow window-show path (see main.cpp); avoids
 # GLFW's waitForVisibilityNotify deadlock under i3. Linux/X11 only.
@@ -1473,10 +1488,14 @@ file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
 
 # Function to compile a shader. Extra args (ARGN) are additional dependency
 # files — e.g. a shared #include'd .glsl — so editing them retriggers the build.
+set(LOBOLE_SHADER_DEFINES "")
+if(APPLE)
+    set(LOBOLE_SHADER_DEFINES -DLOBOLE_STABLE_DEPTH_TEXEL)
+endif()
 function(compile_shader TARGET SHADER_SOURCE SHADER_OUTPUT)
     add_custom_command(
         OUTPUT ${SHADER_OUTPUT}
-        COMMAND ${GLSLC} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+        COMMAND ${GLSLC} ${LOBOLE_SHADER_DEFINES} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
         DEPENDS ${SHADER_SOURCE} ${ARGN}
         COMMENT "Compiling shader ${SHADER_SOURCE}"
     )
@@ -1601,15 +1620,16 @@ compile_shader(fullscreen_vert_shader ${FULLSCREEN_VERT_SHADER_SOURCE} ${FULLSCR
 
 set(SSAO_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/ssao.frag")
 set(SSAO_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/ssao_frag.spv")
-compile_shader(ssao_frag_shader ${SSAO_FRAG_SHADER_SOURCE} ${SSAO_FRAG_SHADER_OUTPUT})
+set(DEPTH_TEXEL_INCLUDE "${CMAKE_SOURCE_DIR}/src/shaders/depth_texel.glsl")
+compile_shader(ssao_frag_shader ${SSAO_FRAG_SHADER_SOURCE} ${SSAO_FRAG_SHADER_OUTPUT} ${DEPTH_TEXEL_INCLUDE})
 
 set(SSAO_BLUR_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/ssao_blur.frag")
 set(SSAO_BLUR_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/ssao_blur_frag.spv")
-compile_shader(ssao_blur_frag_shader ${SSAO_BLUR_FRAG_SHADER_SOURCE} ${SSAO_BLUR_FRAG_SHADER_OUTPUT})
+compile_shader(ssao_blur_frag_shader ${SSAO_BLUR_FRAG_SHADER_SOURCE} ${SSAO_BLUR_FRAG_SHADER_OUTPUT} ${DEPTH_TEXEL_INCLUDE})
 
 set(SSAO_UPSAMPLE_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/ssao_upsample.frag")
 set(SSAO_UPSAMPLE_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/ssao_upsample_frag.spv")
-compile_shader(ssao_upsample_frag_shader ${SSAO_UPSAMPLE_FRAG_SHADER_SOURCE} ${SSAO_UPSAMPLE_FRAG_SHADER_OUTPUT})
+compile_shader(ssao_upsample_frag_shader ${SSAO_UPSAMPLE_FRAG_SHADER_SOURCE} ${SSAO_UPSAMPLE_FRAG_SHADER_OUTPUT} ${DEPTH_TEXEL_INCLUDE})
 
 # FEM result field shaders (deform warp + Turbo colormap)
 set(FIELD_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/field.vert")

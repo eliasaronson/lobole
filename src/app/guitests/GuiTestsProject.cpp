@@ -327,7 +327,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     // machine's after the modal.
     IM_CHECK(WaitForOpen(ctx));
     IM_CHECK(Doc()->FeatureCount() > 0); // the box came back
-    IM_CHECK_EQ(s_App->projectPath, dir.string());
+    IM_CHECK_EQ(s_App->projectPath, std::filesystem::canonical(dir).string());
 
     std::filesystem::remove_all(dir);
     RecentProjects::Clear();

@@ -67,8 +67,8 @@ The variable names the launcher, so an instance whose launcher died before
 it started exits at once too; a value that is not a pid is refused, and so
 is 1 (an orphan's parent reads 1, so it would arm nothing a launcher could
 own -- a launcher that IS PID 1 leaves the variable unset). Linux
-only (`prctl(PR_SET_PDEATHSIG)`); `tests/smoke_app.py` and the MCP server's
-autostart set it.
+(`prctl(PR_SET_PDEATHSIG)`) and macOS (a `kqueue` watch on the parent) only;
+`tests/smoke_app.py` and the MCP server's autostart set it.
 
 An offscreen instance has no panels, so the viewport is the whole
 framebuffer, and it projects the document into the renderers only when

@@ -567,8 +567,8 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
   fs::last_write_time(json, old);
   fs::last_write_time(bin, old);
   REQUIRE(testio::Save(bar->doc, proj.string()));
-  CHECK(fs::last_write_time(json) == old);
-  CHECK(fs::last_write_time(bin) == old);
+  CHECK((fs::last_write_time(json) == old));
+  CHECK((fs::last_write_time(bin) == old));
   auto reloaded = testio::Load(proj.string());
   REQUIRE(reloaded != nullptr);
   {
@@ -577,14 +577,14 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
     CHECK(back->bodies[0].results.stress == kept.results.stress);
   }
   REQUIRE(testio::Save(*reloaded, proj.string()));
-  CHECK(fs::last_write_time(json) == old);
-  CHECK(fs::last_write_time(bin) == old);
+  CHECK((fs::last_write_time(json) == old));
+  CHECK((fs::last_write_time(bin) == old));
 
   // A new answer is written.
   StudyOf(*bar).loads[1].magnitude = 900.0;
   RunAndStore(*bar);
   REQUIRE(testio::Save(bar->doc, proj.string()));
-  CHECK(fs::last_write_time(bin) != old);
+  CHECK((fs::last_write_time(bin) != old));
   fs::remove_all(proj);
 }
 

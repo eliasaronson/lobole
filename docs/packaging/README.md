@@ -12,6 +12,7 @@ ninja …"`) are in the repository's `CLAUDE.md` and `CONTRIBUTING.md`.
 | `nix bundle` AppImage | headless use on any distro | `nix bundle --bundler github:ralismark/nix-appimage .#default` | no |
 | Flatpak | desktop users on any distro | `packaging/flatpak/`, `tools/flatpak-build.sh` | yes |
 | Windows | Windows users | `packaging/windows/` (cross-compiled on Linux) | yes |
+| macOS | building from source on Apple Silicon | [`packaging/macos/`](#macos) | yes |
 
 The Vulkan driver (ICD) is always the host's; no channel bundles one, and
 every channel needs a working Vulkan driver for the GUI.
@@ -150,9 +151,9 @@ Each report holds `report.txt` (what happened, the build, the raw stack),
 in-process symbolizer, so the raw frames are module + offset:
 `tools/symbolize-crash.py report.txt BINARY` names them against the
 unstripped binary of the build the report's `Build:` line names (the mingw
-`x86_64-w64-mingw32-addr2line` for `lobole.exe`). **macOS is untested**:
-the POSIX handler and the dyld module table compile for it by design, but
-nothing here can build or run it.
+`x86_64-w64-mingw32-addr2line` for `lobole.exe`). On macOS the POSIX handler
+prints its backtrace and the next start collects the report (`lobole
+--crash-test`); `symbolize-crash.py` has not been tried on a Mac binary.
 
 ## When it will not start
 
@@ -591,6 +592,77 @@ cross-builds it and runs `packaging/windows/smoke.sh` on it under Wine):
 - A second non-inline definition of a function that also exists inline links
   silently on ELF and fails on PE/COFF.
 
+## macOS
+
+Apple Silicon, built from source, on Vulkan through MoltenVK. There is no
+package and no CI job. It needs Xcode and Homebrew:
+
+```
+git submodule update --init --recursive
+packaging/macos/deps.sh
+tools/nix-run 'cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo'
+tools/build.sh
+tools/nix-run 'build/lobole'
+```
+
+`deps.sh` installs the Homebrew formulas and a python venv, then builds
+OpenCASCADE with our patches and Netgen with `packaging/appimage/deps.sh`, into
+`$LOBOLE_MACOS_DEPS` (by default `~/.local/share/lobole/macos-deps`, outside the
+tree so worktrees share it). There is no nix here: `tools/nix-run` applies `tools/macos-env.sh` instead, so
+`tools/build.sh`, `tools/ctest` and the `lobole` MCP server work as they do on
+Linux. That file pins `SDKROOT` to Xcode's SDK, because a bare `xcrun` can pair
+Xcode's clang with the Command Line Tools' newer one.
+
+Each of these was a failure on this platform before it was a rule:
+
+- **`-fno-strict-aliasing`, for the kernel, Netgen and the app.**
+  `gp_XYZ::SetCoord(i, v)` writes `(&x)[i - 1]`. Clang's alias analysis then
+  assumes `y` and `z` did not change, so `SetCoord(2, r)` is lost when the
+  object is inlined: the tight box of a sphere came back as its half-disc
+  profile.
+- **`-ffp-contract=off`, for the same three.** ARM clang fuses `a*b - c*d` by
+  default, so products that should cancel exactly leave rounding noise, and a
+  degenerate triangle got a random normal. Off, the arithmetic matches an x86-64
+  build, and the adaptive library throws on the same vertex layouts.
+- **OpenCASCADE is built as C++20.** libc++ reads an `istream`'s width before
+  anything passes through the stream, so `cad::BoundedWordBuf` cannot bound a
+  word there (`cad/BoundedRead.h`), and a damaged B-Rep overran OCC's
+  `char[255]`. As C++20 that extraction takes the array's bound, and a stock
+  Homebrew OpenCASCADE would bring the overrun back.
+- **`lobole_thread_stack`** (`src/common/ThreadStackDarwin.c`), a dylib that
+  interposes `pthread_create`. macOS gives a secondary thread 512 KiB against
+  Linux's 8 MiB, and no API changes that default. It sets 8 MiB on any thread
+  created without attributes, which reaches `std::thread`, `std::async` and
+  OpenCASCADE's pool.
+- **`LOBOLE_STABLE_DEPTH_TEXEL`** in the SSAO shaders
+  ([SSAO](../rendering/README.md#ssao)).
+- **`fem_mesher` is C++20 under clang.** Netgen's `basegeom.hpp` holds a
+  `unique_ptr` to an incomplete type, which C++23's constexpr `unique_ptr`
+  instantiates too early.
+- **A deadline reads a Mach thread clock** (`directedit::MakeDeadline`).
+  Without a CPU clock it fell through to its wall-clock backstop, four times
+  the budget.
+- **The filesystem is case-insensitive.** `deps/planegcs/Util.h` shadows the
+  system `<util.h>`, so `PtySession.cpp` declares `forkpty` itself. An asset
+  name differing only in case still opens its file here, so the part reader
+  compares it with the directory listing, or a project that loads on a Mac
+  would be refused on Linux.
+- **The remote socket listens with `SOMAXCONN`.** macOS resets a connection the
+  accept queue has no room for, where Linux lets it retry.
+
+Not available here: ray-traced stills (MoltenVK has no ray tracing extensions;
+`render_still` refuses and `mode: quick` works), lines wider than 1 px (MoltenVK
+reports no `wideLines`), CalculiX (not in Homebrew; its tests skip) and
+`tools/bench.py` (it reads `/proc` and systemd scopes). `ping`'s
+`binary_replaced` is always false, because there is no `/proc/self/exe` to ask.
+
+`tools/gui-tests-xvfb.sh` needs Xvfb, but the suite itself runs natively:
+`cd build && ./lobole --gui-tests --hidden`, through `tools/nix-run`.
+`document/accept_refused_past_the_feature_limit` takes about a quarter of an
+hour here, drawing 50 000 datum planes with a linear `FindFeatureById` for each,
+so leave it out with `--gui-test-filter "-accept_refused_past_the_feature_limit"`
+unless that is what you are testing.
+
 ## The bundled CalculiX
 
 A static or buckling study can be solved on CalculiX
@@ -693,5 +765,6 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
   smokes it under Wine; nothing builds it on a push.
 - Publishing the AUR package (an AUR account, an SSH key, and a release
   job that pushes the `aur` artifact).
-- macOS (MoltenVK; no ray tracing there, and the GPU path cannot be tested
-  off a Mac), and rpm packages (the GUI AppImage covers Fedora meanwhile).
+- A macOS package ([it builds from source](#macos); an `.app`, signing and a
+  CI job are not done), and rpm packages (the GUI AppImage covers Fedora
+  meanwhile).

@@ -8,8 +8,9 @@ layer over `lobole.client`: every tool ends in an RPC ([rpc.md](rpc.md)).
 ## Setup
 
 Claude Code sessions started in this repo pick the server up from the
-checked-in `.mcp.json`, which runs it inside `nix-shell` (the `mcp` package
-comes from `shell.nix`). For other clients:
+checked-in `.mcp.json`, which runs it through `tools/nix-run` (the `mcp` package
+comes from `shell.nix`, or on macOS from the venv `packaging/macos/deps.sh`
+makes). For other clients:
 
 ```
 claude mcp add lobole -- env PYTHONPATH=/path/to/checkout/python python3 -m lobole.mcp
