@@ -319,7 +319,7 @@ bool ReduceRequested(const RpcParams& p, const Document& doc, const Feature& f,
         std::string(method) +
             ": 'fit' applies to a Fillet, Chamfer or "
             "Shell, whose size can be reduced to one "
-            "that builds; a " +
+            "that builds; this " +
             f.TypeName() + " has none. Send it without 'fit'");
   if (v != "reduce")
     return false;
