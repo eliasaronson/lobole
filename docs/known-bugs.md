@@ -90,12 +90,26 @@ the heading if it is not here yet.
   4596.234 mm³; the closed form is 4595.675. Each union adds 44.68 to
   44.77 where every bar adds 44.628, and the centre of mass ends 0.7 µm
   off the axis.
-- **Cause:** not established. The bars' ends lie inside the wall, 0.7 mm
-  from its inner face; the excess is the same order as the bar's end disc
-  times a few hundredths of a millimetre.
-- **Where:** `BooleanFeature`, `CADKernel::Fuse`.
-- **Likely fix:** reduce it first: one bar, then whether the excess follows
-  the fuzzy value or the measure (`mass_properties` on the result).
+- **Cause:** the MEASURE, not the solid. The fused body is right: the
+  same body integrated by `BRepGProp::VolumeProperties` with a precision
+  (the adaptive rule, to 1e-7) is 4595.67543, the closed form to nine
+  digits, and so is V(bar) - V(tube ∩ bar) per bar. `CADShape::Volume` and
+  `ComputeMassProps` use the fixed Gauss rule, which is exact on a face
+  bounded by lines and conics and not on a cylinder trimmed by the bars'
+  intersection B-splines (one bar, built from primitives, reads 44.609
+  added for 44.6277).
+- **Tried:** the adaptive rule everywhere fixes this case and five rows filed
+  as [not kernel defects](modeling/README.md#known-rows-that-are-not-kernel-defects)
+  (1207 twice, 926, 05-holes-and-taps/012, 3528), and breaks others: a revolved Bezier profile
+  reads 0.6 mm³ over, a horn torus 0.02 over, the menger sponge's 400-face
+  union times out. The adaptive rule only on faces of an elementary surface
+  with a non-conic edge still measured the modelled M10 thread
+  (06-threads/004) 7 % heavy, while reporting that it had converged.
+- **Where:** `CADShape::Volume` and `CADShape::ComputeMassProps`,
+  `src/cad/CADKernel.cpp`.
+- **Likely fix:** a face rule that can be trusted case by case, e.g. the
+  adaptive rule cross-checked against a second estimate (the face's area,
+  or the fixed rule at a subdivided domain) and used only where they agree.
 - **Case:** `solidcraft/booleans/1107-join-hollow-hub-with-nine-blades`.
 
 ### A blend along a curved edge is off its rolling-ball volume
@@ -108,7 +122,10 @@ the heading if it is not here yet.
   floor and three of its corners (1e-4), a chamfer where a pipe meets a
   plate (6e-4), a tapered extrude of arcs meeting at corners (one face
   more).
-- **Cause:** not established case by case. OpenCASCADE's blend surface on
+- **Cause:** not established case by case. Part of it may be the measure:
+  see [the tube and nine bars](#a-union-of-a-tube-and-nine-bars-through-its-wall-gains-volume),
+  whose fixed-rule volume is off by the same order on faces trimmed by
+  intersection curves. OpenCASCADE's blend surface on
   such an edge is an approximation to its own tolerance, and where rounds
   meet at a corner it builds a patch of its own; neither is the rolling
   ball's envelope.
