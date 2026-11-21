@@ -472,16 +472,23 @@ that frames the element, the wall, the face or the body it is about
 ([../simulation/README.md](../simulation/README.md#the-mesh-report)).
 
 The result's controls are on the legend they act on, in the viewport's
-lower-left corner (`##FieldLegend`, `DrawFieldLegend`): the **Field**
-(`###result_field`; a modal or buckling study's mode shape, a topology
-study's shape or density), the **Mode** (`###result_mode`) or the **Case**
-(`###result_case`), the **Deform** slider (`###deform`), the layered
-fields' build direction, the **Range** (`###result_range_lo`,
-`###result_range_hi`) with **Above yield** and **Max, min**, a topology
-shape's threshold, and on a half model **Mirror the half**
-(`###result_mirror`); under them what the picture is and its bar. It is
-the one result chrome that stays, and is there whenever the study in front
-has a result and the mesh is not on show.
+lower-left corner (`##FieldLegend`, `DrawFieldLegend`), and the bar leads:
+the face is the title, which is the field picker (`###result_field`; a
+modal or buckling study's mode shape, a topology study's shape or density),
+the **Mode** (`###result_mode`) or the **Case** (`###result_case`) under it
+where there is more than one, the study, the bar and where its ends are.
+The gear on the title row (`###result_more`) opens the rest as a popover
+beside it (`###legend_more`; GUI tests reach it with `LegendMore`): the
+deformation (`###deform`), the layered fields' build direction
+(`###result_layer_axis`), a topology shape's threshold
+(`###result_threshold`), the **Range** (`###result_range_lo`,
+`###result_range_hi`) with **Above yield** (`###result_range_yield`), and
+the toggles, the markers (`###result_extremes`) and on a half model the
+**Mirrored half** (`###result_mirror`). It folds on a click away or Esc;
+what is set in it away from its default is one dim line on the face. It is
+the one result chrome that stays, there whenever the study in front has a
+result; over the mesh view it is the mesh's bar alone, with no picker and
+no gear.
 
 A thermal study's tools (**Temperature**, **Heat flux**, **Convection**,
 **Heat source**) have no derivable default: a held temperature, a film

@@ -1192,7 +1192,7 @@ has no such estimate.)
 Each body gets `buckling_factors` (every factor found, signed, ascending by
 magnitude), `buckling_factor` (the smallest positive one) and its mode shapes,
 stored as modal ones are (`ModeShape::factor` beside `frequencyHz`) and shown
-with the legend's deformation and **Mode** (the Result window lists the
+with the legend's **Mode** and deformation (the Result window lists the
 factors). The base state's peak von Mises and
 displacement come beside them (`base_state`).
 
@@ -3232,7 +3232,7 @@ cantilever cut on its middle deflects within 0.01 % and peaks within 0.4 %
 of the whole bar, on 1458 elements against 2965, and its clamp carries
 half the force (the test holds 1 % and 3 %).
 A result is drawn with its mirror image on request (`set_result_display
-{mirror}`, the legend's **Mirror the half**: each boundary triangle again,
+{mirror}`, the legend's **Mirrored half**: each boundary triangle again,
 reflected with its displacement).
 
 Refused, naming why: a modal or buckling study (a half model finds only the
@@ -3300,20 +3300,35 @@ strength, a stress across layers on an assembly (its parts are each printed
 their own way), a bonded group's factor on a result read from disk (it
 keeps the least factor, not the field: run it again to draw it). The build
 direction is a question asked of the result, not a study input, so it is a
-display setting (`layer_normal`, the legend's **Layers**), and the
+display setting (`layer_normal`, **Layers** behind the legend's gear), and the
 RPC refuses the layer fields without it. The contact pressure field is a
 run's: a stored result keeps each contact's peak, not the field.
 
 **The legend** (`##FieldLegend`, in the viewport's lower-left corner) is
-the result's one piece of chrome that stays: at its top the controls that
-act on it -- the field, the mode (a modal result's frequency, a buckling
-one's load factor) or the load case, the deformation, the build direction
-of a layered field, the range, the markers, and on a half model its mirror
-image ([the symmetry cut](#the-symmetry-cut)) -- shown whenever the study
-in front has a result, and under them the study and analysis and the
-quantity with its unit and quarter ticks. The bar is drawn from the record
-the overlay last built (`ui::ShownField`, `src/ui/SimulationView.h`), so it
-describes the picture that is on screen and nothing else.
+the result's one piece of chrome that stays, shown whenever the study in
+front has a result. The bar leads and the controls fold. Its face is what
+is read: a title that is the field picker (`###result_field`, "von Mises
+(MPa)" with its arrow, a combo drawn as a title until it is hovered), the
+mode (a modal result's frequency, a buckling one's load factor;
+`###result_mode`) or the load case (`###result_case`) under it where the
+result has more than one, the study and its analysis in one dim line (two
+studies of one part draw alike), the bar with its quarter ticks, and where
+its ends are. The gear on the title row (`###result_more`) opens the rest
+in a popover beside the legend: the deformation (`###deform`), the build
+direction of a layered field, a topology shape's threshold, the range with
+**Above yield**, and the toggles together, the markers and on a half model
+its mirror image ([the symmetry cut](#the-symmetry-cut)). It folds on a
+click away or Esc. What is set there away from its default is said on the
+face in one dim line under the captions ("deformed ×200 · range to 23.8 ·
+mirrored", `ui::FieldLegendSummary`), so a clamped or mirrored picture is
+never one that reads as the whole field. A result with none of those (a
+topology density) has no gear. The legend is as wide as what it reads
+(title, bar, captions), and the bar its full height. The bar is drawn from
+the record the overlay last built (`ui::ShownField`,
+`src/ui/SimulationView.h`), so it describes the picture that is on screen
+and nothing else. The same legend draws [the mesh](#the-mesh-you-look-at)
+coloured by quality or size: its title is then plain text and it has no
+picker and no gear (the mesh's own **Show mesh** puts it away).
 
 - **What the bar spans.** A magnitude runs from zero to its maximum, a
   signed field (a principal stress, the stress across layers, a
@@ -3322,8 +3337,8 @@ describes the picture that is on screen and nothing else.
   the stress is zero, and every node past four times the governing one
   takes the top colour, the top tick reading "and above" (`23.5+`). Only a
   range the user set has an off-scale colour at a factor's safe end.
-- **The range clamp.** `range_min` and `range_max` (the legend's **Range**
-  fields, in the field's unit; empty is the field's own) replace an end of
+- **The range clamp.** `range_min` and `range_max` (the **Range**
+  fields behind the legend's gear, in the field's unit; empty is the field's own) replace an end of
   the bar. Values past the hot end take pink and values past the other end
   grey (a factor's hot end is its low one, so what is safer than its bar
   reads grey), and the bar shows each as a cap at that end, so a clamped
@@ -3336,8 +3351,8 @@ describes the picture that is on screen and nothing else.
   under the bar, where each is in millimetres and on which body. Where the
   two ends are close on screen the minimum's tag is pushed below the
   maximum's. A factor is marked at its least value only (its greatest is
-  wherever the stress is nearly zero). `markers: false` (the **Max, min**
-  box) leaves the caption of the hot end.
+  wherever the stress is nearly zero). `markers: false` (the **Max and min
+  markers** box) leaves the caption of the hot end.
 - **Out of the way.** The legend sits on a backdrop of its own, the unit
   once in its title and not on the ticks. While a mesh or a result is on
   show the loads' labels are hidden, except the load whose row is selected
@@ -3449,9 +3464,10 @@ tinted as a fixture, and bonded seams in the bond colour.
   buckling the **Buckling factors** with the governing factor, the
   knockdown and its class, the yield and interlayer factors, and the flags
   as text (the mode or case on show is marked). What is shown is the
-  legend's: its **Field** combo ([results display](#results-display)), the
-  mode or the case, the deformation slider, the **Range** fields with
-  **Above yield**, **Max, min**, and on a half model **Mirror the half**;
+  legend's ([results display](#results-display)): its title is the field
+  combo, the mode or the case is under it, and its gear opens the
+  deformation, the **Range** fields with **Above yield**, the markers and
+  on a half model **Mirrored half**;
   **Export VTU...** is the toolbar's ([VTU export](#vtu-export)).
 - The Mesh row's window: its size (the simulation's, or the study's own
   where it meshes apart), and the toolbar's **Mesh**, which meshes and draws the elements
@@ -3660,8 +3676,9 @@ the simulation's mesh.
   round trip and refusals; `tests/sim_geometry_smoke.py` over the RPCs, every
   refusal changing nothing; the GUI's `sim/the_toolbar_suppresses_a_feature`,
   `sim/the_geometry_step_cuts_a_half_model` and
-  `sim/the_legend_holds_the_result_controls` (the controls on the legend,
-  the sizes on disk).
+  `sim/the_legend_holds_the_result_controls` (the folded legend, its
+  gear's popover driving the result, the face's summary, the sizes on
+  disk).
 
 ## Not done
 

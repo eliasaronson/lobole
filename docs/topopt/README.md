@@ -507,14 +507,14 @@ every run went to the CPU. `ui::TopologyGpuBuiltIn` and a test in
 5. The result shows iterations, a compliance start→end and each case's,
    the achieved volume fraction, what the keep-outs took, any loose pieces
    removed (and a broken load path), and a stale badge. What is drawn is
-   the legend's **Field** in the viewport's corner
+   the legend's title, its field picker, in the viewport's corner
    ([results display](../simulation/README.md#results-display)): *Shape*
-   (the grey optimized body, with a **Threshold** slider; 0 =
-   volume-matched), *Density* or *Off*.
+   (the grey optimized body, with a **Threshold** slider behind the
+   legend's gear; 0 = volume-matched), *Density* or *Off*.
 6. **Check shape** makes the shape's and the solid's static studies and runs
    the shape's; run the solid's to compare. A static study with cases lists
-   each case's maxima, and the legend's **Case** is the one the viewport
-   shows.
+   each case's maxima, and the legend's case picker, under its title, is
+   the one the viewport shows.
 7. Tick **Shape guide (modeling overlay)** and leave simulation to model
    against the result.
 
