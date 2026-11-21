@@ -401,7 +401,7 @@ void AssertCamFrames(const std::vector<cam::Setup>& setups,
 // whatever body answers to the same element name, which is the wrong part,
 // cut for real.
 void AssertJobParts(const cam::JobDocument& job, const nlohmann::json& expect) {
-  // vNEXT: every expression text the job holds -- owner, path, text -- in
+  // v224: every expression text the job holds -- owner, path, text -- in
   // walk order (docs/cam/README.md#numbers-that-are-expressions).
   if (expect.contains("expr_texts")) {
     nlohmann::json got = nlohmann::json::array();

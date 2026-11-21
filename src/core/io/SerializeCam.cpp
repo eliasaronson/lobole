@@ -177,7 +177,7 @@ cam::Tool ToolFromJson(const json& tj) {
        "feed_plunge", "spindle_rpm", "tool_type", "tip_angle", "chipload_min",
        "chipload_max", "overall_length", "collar_diameter", "shank_diameter",
        "tip_flat", "neck_diameter", "neck_length",
-       // vNEXT: each number's text
+       // v224: each number's text
        // (docs/cam/README.md#numbers-that-are-expressions)
        "diameter_expr", "flutes_expr", "flute_length_expr", "feed_cut_expr",
        "feed_plunge_expr", "spindle_rpm_expr", "tip_angle_expr",
@@ -641,7 +641,7 @@ json CamSetupToJson(const cam::Setup& setup) {
     }
     j["operations"].push_back(std::move(oj));
   }
-  // Each number's text beside it (vNEXT): the one walk of the setup's
+  // Each number's text beside it (v224): the one walk of the setup's
   // numbers that take an expression decides where.
   cam::VisitSetupExprs(const_cast<cam::Setup&>(setup),
                        [&](const std::string&, const ExprSlot& slot) {
@@ -882,7 +882,7 @@ cam::Setup CamSetupFromJson(const json& j) {
   // An operation's keys: its own, and every row of the op-field table
   // (tabs, finish_tool and finish_stock among them). `tool_number` is what
   // the v73 goldens' ops carry beside `tool`; it was never read.
-  // Each number's text beside it too (vNEXT).
+  // Each number's text beside it too (v224).
   static const std::vector<std::string> kOpKeyStore = [] {
     std::vector<std::string> keys = {
         "id",       "name",    "type",        "tool",       "top_z",
@@ -953,7 +953,7 @@ cam::Setup CamSetupFromJson(const json& j) {
     }
     setup.operations.push_back(std::move(op));
   }
-  // Each number's text from beside it (vNEXT).
+  // Each number's text from beside it (v224).
   cam::VisitSetupExprs(setup, [&](const std::string&, const ExprSlot& slot) {
     ReadSlotText(j, slot);
   });

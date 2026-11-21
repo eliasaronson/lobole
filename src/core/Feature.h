@@ -962,7 +962,7 @@ public:
   // (docs/interchange/README.md#placing-an-import). `align_import` writes it
   // from a floor, three points, the principal axes or a known distance.
   importplace::Placement placement;
-  // The texts that drive the turn and the placement (vNEXT), "" for a
+  // The texts that drive the turn and the placement (v224), "" for a
   // literal, a text per coordinate. An alignment writes the placement whole
   // and unbinds what it rewrote (docs/interchange/README.md#placing-an-import).
   std::string turnExpr;

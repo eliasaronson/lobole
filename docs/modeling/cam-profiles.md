@@ -54,7 +54,7 @@ turning one; the other unit is refused, never converted. The lowest lift of
 the turn sits on the base circle.
 
 Each number of the motion and of the follower takes an expression of the
-variables (vNEXT,
+variables (v224,
 [numbers that are expressions](../variables/README.md#numbers-that-are-expressions)):
 `lift_expr` beside `lift`, an `[angle, lift]` pair of texts per entry
 (`""` for a number), as the cam relation's; a segment's `to_deg_expr` and

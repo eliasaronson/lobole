@@ -1427,7 +1427,7 @@ json FeatureToJson(const Feature& feature) {
       j["up_axis"] = interchange::ToString(import->upAxis);
     if (import->turnDeg != 0.0 || !import->turnExpr.empty()) // v190
       j["turn_deg"] = import->turnDeg;
-    WriteExprText(j, "turn_deg", import->turnExpr); // vNEXT
+    WriteExprText(j, "turn_deg", import->turnExpr); // v224
     // v200; absent = facets, how every older mesh import was read
     if (import->representation != mesh::Representation::Facets)
       j["representation"] = mesh::ToString(import->representation);
@@ -1444,7 +1444,7 @@ json FeatureToJson(const Feature& feature) {
     }
     if (pl.scale != 1.0 || !import->scaleExpr.empty()) // v213; absent = 1
       j["scale"] = pl.scale;
-    WriteExprText(j, "scale", import->scaleExpr); // vNEXT
+    WriteExprText(j, "scale", import->scaleExpr); // v224
   } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
     // v161 (docs/modeling/templates.md). The definition rides in full, so
     // the chain hash covers what the instance expands and a part rebuilds
@@ -1876,7 +1876,7 @@ json FeatureToJson(const Feature& feature) {
       for (const auto& [a, l] : cp->motion.lift)
         lift.push_back({a, l});
       j["lift"] = std::move(lift);
-      // vNEXT: [angle, lift] texts per entry, when one is bound.
+      // v224: [angle, lift] texts per entry, when one is bound.
       bool bound = false;
       for (const auto& e : cp->liftExpr)
         bound = bound || !e[0].empty() || !e[1].empty();
@@ -1894,7 +1894,7 @@ json FeatureToJson(const Feature& feature) {
         const bool texts = k < cp->segmentExpr.size();
         json sj{{"to_deg", sg.toDeg}, {"law", cammech::LawName(sg.law)}};
         if (texts)
-          WriteExprText(sj, "to_deg", cp->segmentExpr[k][0]); // vNEXT
+          WriteExprText(sj, "to_deg", cp->segmentExpr[k][0]); // v224
         if (sg.law != cammech::Law::Dwell) {
           const char* key = turns ? "rise_deg" : "rise_mm";
           sj[key] = sg.rise;
@@ -1911,7 +1911,7 @@ json FeatureToJson(const Feature& feature) {
               {"motion", cammech::FollowerMotionName(f.motion)},
               {"radius_mm", f.radiusMm}};
       const CamProfileFeature::FollowerExprs& fx = cp->followerExpr;
-      WriteExprText(fj, "radius_mm", fx.radius); // vNEXT
+      WriteExprText(fj, "radius_mm", fx.radius); // v224
       if (f.motion == cammech::FollowerMotion::Slide) {
         if (f.offsetMm != 0.0 || !fx.offset.empty())
           fj["offset_mm"] = f.offsetMm;
@@ -3480,8 +3480,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     if (j.contains("scale")) // v213
       importplace::ReadScale(j.at("scale"), imp->placement, "Import");
-    imp->scaleExpr = ReadExprText(j, "scale");   // vNEXT
-    imp->turnExpr = ReadExprText(j, "turn_deg"); // vNEXT
+    imp->scaleExpr = ReadExprText(j, "scale");   // v224
+    imp->turnExpr = ReadExprText(j, "turn_deg"); // v224
     out = std::move(imp);
   } else if (type == "Template") {
     // A request names the template and gives values; the add_feature
@@ -4210,7 +4210,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       }
       cp->follower = f;
       cp->followerSet = true;
-      CamProfileFeature::FollowerExprs& fx = cp->followerExpr; // vNEXT
+      CamProfileFeature::FollowerExprs& fx = cp->followerExpr; // v224
       fx.radius = ReadExprText(fj, "radius_mm");
       if (f.motion == cammech::FollowerMotion::Slide) {
         fx.offset = ReadExprText(fj, "offset_mm");
@@ -4228,7 +4228,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       cp->motion.lift.emplace_back(pt.at(0).get<double>(),
                                    pt.at(1).get<double>());
     }
-    if (j.contains("lift_expr")) { // vNEXT
+    if (j.contains("lift_expr")) { // v224
       const json& le = j.at("lift_expr");
       if (!le.is_array() || le.size() != cp->motion.lift.size())
         throw std::runtime_error("CamProfile '" + name +
@@ -4273,7 +4273,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sg.rise = sj.value(want, 0.0);
       cp->motion.segments.push_back(sg);
       cp->segmentExpr.push_back(
-          {ReadExprText(sj, "to_deg"), ReadExprText(sj, want)}); // vNEXT
+          {ReadExprText(sj, "to_deg"), ReadExprText(sj, want)}); // v224
     }
     if (!cp->motion.lift.empty() || !cp->motion.segments.empty())
       if (std::string why = cammech::MotionError(

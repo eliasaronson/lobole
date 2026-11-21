@@ -37,7 +37,7 @@ public:
     visit({width, ExprQuantity::Length, "width_mm"});
     VisitMotionExprs(visit);
   }
-  // The lift table's, the segments' and the follower's numbers (vNEXT):
+  // The lift table's, the segments' and the follower's numbers (v224):
   // a rise and a lift are in the follower's unit, mm for a slide and
   // degrees for a turn.
   void VisitMotionExprs(const ExprVisitor& visit) {
@@ -99,7 +99,7 @@ public:
   // radius.
   bool followerSet = false;
   cammech::FollowerSpec follower;
-  // The texts beside `motion` and `follower` (vNEXT), "" for a literal:
+  // The texts beside `motion` and `follower` (v224), "" for a literal:
   // [angle, lift] per lift entry, [to_deg, rise] per segment.
   std::vector<std::array<std::string, 2>> liftExpr;
   std::vector<std::array<std::string, 2>> segmentExpr;

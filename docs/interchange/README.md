@@ -231,7 +231,7 @@ scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`)
   reply of `import_step` and `add_feature` echoes them. Each number, and
   the `turn_deg`, takes an expression of the variables in the feature JSON
   (`translate_mm_expr` and `rotate_deg_expr` as `[x, y, z]` texts inside
-  `placement`, `scale_expr`, `turn_deg_expr`; vNEXT,
+  `placement`, `scale_expr`, `turn_deg_expr`; v224,
   [numbers that are expressions](../variables/README.md#numbers-that-are-expressions)),
   set through `modify_feature`.
 - **`align_import {feature_id, mode, …}`** (`src/core/ImportAlign.{h,cpp}`,

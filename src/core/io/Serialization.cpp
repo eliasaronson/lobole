@@ -2291,7 +2291,7 @@ json DrawingViewToJson(const DrawingView& v) {
   if (v.explodedView != 0) // v203
     j["exploded_view"] = v.explodedView;
   // Each number's text beside it (`scale_expr`, `position_expr` [x, y]):
-  // vNEXT, docs/drawings/README.md#numbers-that-are-expressions.
+  // v224, docs/drawings/README.md#numbers-that-are-expressions.
   drawing::VisitViewExprs(
       const_cast<DrawingView&>(v),
       [&](const ExprSlot& slot) { WriteSlotText(j, slot); });

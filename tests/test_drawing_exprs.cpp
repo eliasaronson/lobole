@@ -234,10 +234,10 @@ TEST_CASE("Every number a drawing writes is a slot or says why it is not",
   CHECK(back == sentinels);
 }
 
-TEST_CASE("The drawing expressions golden loads with its texts (vNEXT)",
+TEST_CASE("The drawing expressions golden loads with its texts (v224)",
           "[variables][drawing][golden]") {
   const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
-                          "drawing" / "vNEXT-drawing-expressions.json";
+                          "drawing" / "v224-drawing-expressions.json";
   REQUIRE(fs::exists(golden));
   auto dwg = testio::LoadDrawing(golden.string());
   REQUIRE(dwg != nullptr);
