@@ -104,7 +104,8 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 
 # linuxdeploy copies every library the binary needs and sets rpaths; its
 # excludelist leaves glibc, libGL, X11 and xcb to the host. The Vulkan
-# loader is the host's too, so it finds the host's drivers. So is D-Bus,
+# loader is the host's too where there is one, so it finds the host's
+# drivers (the bundled one below is for a host with none). So is D-Bus,
 # which every desktop has: bundled, it brought libsystemd and libgcrypt but
 # not the libgpg-error the excludelist keeps out, and Debian 13 failed.
 # linuxdeploy still copies an excluded library's own dependencies, so that
@@ -135,6 +136,19 @@ for lib in libstdc++.so.6 libgcc_s.so.1; do
 done
 newest="$(strings "$rt/libstdc++.so.6" | grep -E '^GLIBCXX_3\.4\.[0-9]+$' \
   | sort -t. -k3 -n | tail -1)"
+# The Vulkan loader (Khronos, Apache-2.0), for a host that has none: without
+# it the dynamic linker ends the app before main, with no report and no
+# --headless. Outside every rpath, in usr/lib/runtime-vulkan, which AppRun
+# puts on the library path only where the host has no libvulkan.so.1; the
+# host's is used wherever there is one, so it finds the host's drivers.
+vk="$work/AppDir/usr/lib/runtime-vulkan"
+mkdir -p "$vk"
+loader="$(dpkg -L libvulkan1 | grep '/libvulkan\.so\.1$' | head -1)"
+[ -n "$loader" ] || { echo "no libvulkan.so.1 in libvulkan1" >&2; exit 1; }
+cp -L "$loader" "$vk/libvulkan.so.1"
+install -D -m644 /usr/share/doc/libvulkan1/copyright \
+  "$work/AppDir/usr/share/doc/libvulkan1/copyright"
+
 rm -f "$work/AppDir/AppRun"
 sed "s/@GLIBCXX@/$newest/" "$here/AppRun" > "$work/AppDir/AppRun"
 chmod +x "$work/AppDir/AppRun"

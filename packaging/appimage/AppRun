@@ -16,4 +16,26 @@ if [ -z "$host" ] || ! grep -qaF '@GLIBCXX@' "$host"; then
   LD_LIBRARY_PATH="$here/usr/lib/runtime${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   export LD_LIBRARY_PATH
 fi
+# The Vulkan loader is the host's wherever there is one, so it finds the
+# host's drivers. A host with none would end the app in the dynamic linker,
+# before main: no report and no --headless. So the Khronos loader is
+# bundled too, outside every rpath, in usr/lib/runtime-vulkan, and used only
+# where the host has no libvulkan.so.1.
+vulkan=
+for d in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu /usr/lib64 /lib64 \
+         /usr/lib /lib; do
+  [ -e "$d/libvulkan.so.1" ] && { vulkan=host; break; }
+done
+if [ -z "$vulkan" ]; then
+  for ldconfig in ldconfig /sbin/ldconfig /usr/sbin/ldconfig; do
+    if "$ldconfig" -p 2> /dev/null | grep -q 'libvulkan\.so\.1 '; then
+      vulkan=host
+      break
+    fi
+  done
+fi
+if [ -z "$vulkan" ]; then
+  LD_LIBRARY_PATH="$here/usr/lib/runtime-vulkan${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export LD_LIBRARY_PATH
+fi
 exec "$here/usr/bin/lobole" "$@"

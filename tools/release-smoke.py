@@ -29,6 +29,11 @@ that it solves (docs/packaging/README.md#the-bundled-calculix):
 - without it (Windows), the ccx `ping` named runs a one-element deck, a unit
   cube in uniform tension, whose answer is exact.
 
+`--software-restart` (the AppImage smoke, in an environment where no
+hardware driver loads) starts a hidden window instead and checks that it
+restarted itself on the host's lavapipe and says so in `ping`
+(docs/rendering/README.md#software-rendering-when-the-gpu-will-not).
+
 `--system-faults` (Windows, run by packaging/windows/smoke.sh) checks the
 crash handler with faults in the system's own code, on a worker thread,
 through `debug_crash` (docs/architecture.md#crashes-and-stalls):
@@ -231,7 +236,7 @@ def check_calculix(port, launcher):
     return f"finds the bundled ccx {ccx['version']} ({ccx['path']}); {how}"
 
 
-def start(cmd, port, env=None):
+def start(cmd, port, env=None, mode=("--headless",)):
     # LOBOLE_SMOKE_LOG_DIR keeps the app's output, one file a start, for a CI
     # job to upload when the smoke fails (release.yml); without it the
     # output goes nowhere, as a smoke on a desk wants.
@@ -243,7 +248,7 @@ def start(cmd, port, env=None):
         name = f"release-smoke-{os.getpid()}-{start.count}.log"
         out = open(os.path.join(log_dir, name), "w")
         err = subprocess.STDOUT
-    return subprocess.Popen(cmd + ["--headless", "--remote", str(port)],
+    return subprocess.Popen(cmd + [*mode, "--remote", str(port)],
                             stdout=out, stderr=err, env=env)
 
 
@@ -320,6 +325,25 @@ def check_system_faults(cmd, port, timeout):
           f"(#0 {frames[0][1]}, #{ours[0][0]} {ours[0][1]})")
 
 
+def check_software_restart(cmd, port, timeout):
+    """A window started where no hardware driver loads (the caller's
+    environment: VK_ICD_FILENAMES=/nonexistent) restarts itself on the
+    host's lavapipe, and says so (docs/rendering/README.md#the-device-ladder)."""
+    proc = start(cmd, port, mode=("--hidden", "--autosave", "0"))
+    try:
+        ping = wait_for_ping(port, proc, timeout)
+        r = ping.get("renderer", {})
+        if not (r.get("software") and r.get("fallback") and
+                r.get("restarted") and r.get("forced") == "" and
+                "create the Vulkan instance" in r.get("reason", "")):
+            sys.exit(f"FAIL: no hardware driver, and the start did not "
+                     f"restart on software rendering: {r}")
+    finally:
+        stop(proc)
+    print(f"release-smoke: no hardware driver: restarted on {r['device']} "
+          f"({r['reason']})")
+
+
 def main():
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--port", type=int, default=8437)
@@ -335,6 +359,10 @@ def main():
     ap.add_argument("--calculix", action="store_true",
                     help="the package bundles ccx: ping must find that copy, "
                          "and it must solve")
+    ap.add_argument("--software-restart", action="store_true",
+                    help="the environment loads no hardware driver: a "
+                         "window must restart on software rendering and "
+                         "say so, instead of modeling")
     ap.add_argument("cmd", nargs="*", help="the app's command line")
     args = ap.parse_args()
     if args.attach == bool(args.cmd):
@@ -347,6 +375,13 @@ def main():
         if args.version not in text.split():
             sys.exit(f"FAIL: `--version` says {text.strip()!r}, not "
                      f"{args.version}")
+
+    if args.software_restart:
+        if not args.cmd:
+            ap.error("--software-restart starts the app: give its command "
+                     "line")
+        check_software_restart(args.cmd, args.port, args.timeout)
+        return
 
     if args.system_faults:
         if not args.cmd:

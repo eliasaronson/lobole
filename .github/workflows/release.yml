@@ -332,6 +332,12 @@ jobs:
       fail-fast: false
       matrix:
         image: ["ubuntu:22.04", "ubuntu:24.04", "debian:13", "fedora:latest"]
+        lane: [""]
+        # The second lane: a host with neither the Vulkan loader nor a
+        # driver (docs/packaging/README.md#the-gui-appimage).
+        include:
+          - image: "ubuntu:22.04"
+            lane: "--no-vulkan"
     container: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v7
@@ -342,7 +348,7 @@ jobs:
         run: |
           chmod +x lobole-*.AppImage
           packaging/appimage/smoke.sh lobole-*-x86_64.AppImage \
-            "${{ needs.check.outputs.version }}"
+            "${{ needs.check.outputs.version }}" ${{ matrix.lane }}
       - name: The smoked app's output
         if: failure()
         uses: actions/upload-artifact@v7
