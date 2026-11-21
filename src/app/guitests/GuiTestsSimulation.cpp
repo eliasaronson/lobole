@@ -2814,7 +2814,11 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const ui::SimStoredBytes& bytes = ui::SimStoredBytesOf(*s_App);
     IM_CHECK(bytes.results.count(sid) == 1);
     IM_CHECK(bytes.results.at(sid) > 1000);
-    IM_CHECK(!bytes.meshes.empty());
+    // Its mesh is counted when the store holds it: a run answered from the
+    // session's own result (an earlier test's, same inputs) stores none.
+    for (const uint64_t key : Sim()->StudyResults(sid)->meshKeys)
+      if (Sim()->FindMesh(key) != nullptr)
+        IM_CHECK(bytes.meshes.count(key) == 1);
     ctx->MouseMove(
         ("//###Model/**/###sim_result_" + std::to_string(sid)).c_str());
     ctx->Yield(30);

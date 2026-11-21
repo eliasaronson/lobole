@@ -2098,7 +2098,9 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
 # none; with several, name one). list_simulations lists them,
 # add_simulation makes another (a second participant table on one
 # assembly), set_simulation edits what its studies share (mesh_size_mm,
-# participants, configuration) and clear_sim_storage drops its stored
+# participants, configuration), set_sim_geometry the geometry they all see
+# (features suppressed for the analysis, a symmetry plane; check_sim_geometry
+# says what to suppress) and clear_sim_storage drops its stored
 # meshes and results. A study fixes faces, loads faces and solves for von Mises stress +
 # displacement. Faces are {feature_id, element}
 # refs from list_elements (feature_id = the body's created_by). Assign a real
@@ -2124,6 +2126,7 @@ _reference("add_study", "Create a FEM study in the active part's (or "
 _reference("list_simulations", "List the project's simulations (or one "
           "subject's): id, name, subject, configuration, the shared "
           "mesh_size_mm, an assembly's participants, studies, stored counts, "
+          "its geometry (what is suppressed, the symmetry plane) "
           "and whether it is the tab in front. Their names and ids are the "
           "`simulation` the study calls take.")
 
@@ -2333,7 +2336,8 @@ _reference("set_result_display", "Show a study's result overlay in the viewport 
           "field's own): what is past them takes the over or under colour, "
           "and range_max 'yield' tops a stress at the material's yield, "
           "so what is over it has yielded. markers marks the maximum and "
-          "minimum (a factor's least only). Enters simulation mode; "
+          "minimum (a factor's least only); mirror draws a half model "
+          "(a symmetry plane's) with its mirror image. Enters simulation mode; "
           "display-only, like set_explode.")
 
 
