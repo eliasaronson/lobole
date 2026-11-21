@@ -10,9 +10,12 @@ Published benchmarks and closed forms the solvers are run against, each through 
 |---|---|---|---|---|---|<!-- ccx -->---|---<!-- /ccx -->|---|
 | A bar in tension (`bar`) | u_end | Hooke's law: u = F L / (E A) | 0.047619 mm | 0.047619 | +0.00 % | <!-- ccx -->0.047619 | +0.00 %<!-- /ccx --> | 0.001 % |
 | A bar in tension (`bar`) | sigma | sigma = F / A | 100 MPa | 100 | +0.00 % | <!-- ccx -->100 | +0.00 %<!-- /ccx --> | 0.001 % |
+| A lug under a bearing load (`bearing_lug`) | bearing_peak | the cosine pressure a pin puts on its hole, peak 4 P / (pi d t) (the pin-joint bearing distribution: Pilkey, Peterson's Stress Concentration Factors, 3rd ed., 2008, ch. 5, pin joints); at the surface the radial stress is the pressure | 15.915 MPa | 16.105 | +1.19 % | <!-- ccx -->16.105 | +1.19 %<!-- /ccx --> | 8 % |
+| A lug under a bearing load (`bearing_lug`) | reaction | statics: the clamp carries the whole force a bearing load applies (its pressure is scaled to add up to it exactly) | 400 N | 400 | -0.00 % | <!-- ccx -->400 | +0.00 %<!-- /ccx --> | 0.0001 % |
 | A cantilever's tip deflection (`cantilever`) | tip | Timoshenko beam: P L^3 / 3EI + P L / (k G A), k = 10(1 + nu)/(12 + 11 nu) (Cowper, J. Appl. Mech. 33 (1966) 335) | 1.9193 mm | 1.9036 | -0.82 % | <!-- ccx -->1.9036 | -0.82 %<!-- /ccx --> | 2 % |
 | A block on the ground, off its axis (`contact_block`) | peak_pressure | the short column's kern: sigma_max = P/A (1 + 6e/b) for e within b/6 (Timoshenko & Gere, Mechanics of Materials, the core (kern) of a section under an eccentric axial load) | 15 MPa | n/a |  | <!-- ccx -->14.994 | -0.04 %<!-- /ccx --> | 1 % |
 | Euler's column, fixed-free (`euler_column`) | factor | Euler: P_cr = pi^2 E I / (4 L^2) (Timoshenko & Gere, Theory of Elastic Stability, 2nd ed. (1961), ch. 2, the column fixed at one end and free at the other) | 10.795 x | 10.802 | +0.07 % | <!-- ccx -->10.802 | +0.07 %<!-- /ccx --> | 1 % |
+| A free-free beam's first frequency (`free_beam`) | f1 | Euler-Bernoulli, free-free: f = (4.7300^2 / 2 pi L^2) sqrt(E I / (rho A)) (Blevins, Formulas for Natural Frequency and Mode Shape, 1979, table 8-1, the free-free beam) | 1329.2 Hz | 1317.4 | -0.88 % | <!-- ccx -->n/a | <!-- /ccx --> | 2 % |
 | NAFEMS FV32: cantilevered tapered membrane (`fv32`) | f1 | NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 1 | 44.905 Hz | 44.932 | +0.06 % | <!-- ccx -->n/a | <!-- /ccx --> | 1 % |
 | NAFEMS FV32: cantilevered tapered membrane (`fv32`) | f2 | NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 2 | 130.85 Hz | 130.89 | +0.03 % | <!-- ccx -->n/a | <!-- /ccx --> | 1 % |
 | NAFEMS FV32: cantilevered tapered membrane (`fv32`) | f3 | NAFEMS, The Standard NAFEMS Benchmarks, TNSB Rev. 3 (1990), test FV32, mode 3 | 163.73 Hz | 163.83 | +0.06 % | <!-- ccx -->n/a | <!-- /ccx --> | 1 % |
@@ -44,6 +47,13 @@ Verifies static tet10. a 100 x 10 x 10 mm steel bar on rollers at x = 0, y = 0 a
 - **u_end**, theory: the field is linear, which a tet10 holds exactly: what is left is rounding: a saved result keeps its fields as float (seven digits), and CalculiX prints seven.
 - **sigma**, theory: uniform stress, exact in the element; what is left is rounding: a saved result keeps its fields as float (seven digits), and CalculiX prints seven.
 
+### A lug under a bearing load (`bearing_lug`)
+
+Verifies static tet10. a 60 x 20 x 4 mm steel plate with an 8 mm bore at x = 12, clamped at x = 60, 400 N towards x = 0 as a bearing load on the bore; read on the bore at (8, 10, 2), where the load pushes straight; 1.2 mm elements.
+
+- **bearing_peak**, theory: the stress is read at the bore's surface node, averaged over the elements that meet there, where it falls from its peak along the bore; at 1.2 mm elements on an 8 mm bore (about 21 round it) the nodal average sits a few percent off the applied pressure.
+- **reaction**, theory: the bearing pressure is integrated at the Gauss points its scale is taken at, so the applied total is the force to rounding, and the reactions balance it to the solve's residual (1e-6 of the load).
+
 ### A cantilever's tip deflection (`cantilever`)
 
 Verifies static tet10. a 100 x 10 x 10 mm steel cantilever clamped at x = 0, 1 kN down on its free end, read at the end's centre; 2.5 mm elements.
@@ -61,6 +71,12 @@ Verifies contact (CalculiX). a 20 x 20 x 40 mm steel block on a frictionless con
 Verifies buckling tet10. a 10 x 10 x 200 mm steel column clamped at its base, 1 kN down on its top; 2.5 mm elements.
 
 - **factor**, theory: at L/h = 20 shear lowers the load by about 0.1 % and the clamp's hold of the root raises it as much; the eigensolve converges to 1e-10 and the mesh error at 2.5 mm is under 0.1 %.
+
+### A free-free beam's first frequency (`free_beam`)
+
+Verifies modal tet10. a 200 x 10 x 10 mm steel beam (E 210 GPa, 7850 kg/m^3) with no support (free: true); 2.5 mm elements.
+
+- **f1**, theory: Euler-Bernoulli leaves out shear and rotary inertia, which at L/h = 20 lower a free-free beam's first frequency by about one percent; the mesh error at 2.5 mm is under 0.1 %. The six rigid modes are set apart and labelled rigid, their Rayleigh quotients zero to rounding (under 0.003 Hz here); CalculiX is not run (a modal study is in-house).
 
 ### NAFEMS FV32: cantilevered tapered membrane (`fv32`)
 

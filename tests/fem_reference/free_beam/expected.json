@@ -1,0 +1,16 @@
+{
+  "title": "A free-free beam's first frequency",
+  "procedure": "modal tet10",
+  "calculix": false,
+  "model": "a 200 x 10 x 10 mm steel beam (E 210 GPa, 7850 kg/m^3) with no support (free: true); 2.5 mm elements",
+  "quantities": {
+    "f1": {
+      "kind": "theory",
+      "source": "Euler-Bernoulli, free-free: f = (4.7300^2 / 2 pi L^2) sqrt(E I / (rho A)) (Blevins, Formulas for Natural Frequency and Mode Shape, 1979, table 8-1, the free-free beam)",
+      "value": 1329.1503191586532,
+      "unit": "Hz",
+      "tolerance": 0.02,
+      "reason": "Euler-Bernoulli leaves out shear and rotary inertia, which at L/h = 20 lower a free-free beam's first frequency by about one percent; the mesh error at 2.5 mm is under 0.1 %. The six rigid modes are set apart and labelled rigid, their Rayleigh quotients zero to rounding (under 0.003 Hz here); CalculiX is not run (a modal study is in-house)"
+    }
+  }
+}

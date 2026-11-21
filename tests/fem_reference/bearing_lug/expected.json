@@ -1,0 +1,24 @@
+{
+  "title": "A lug under a bearing load",
+  "procedure": "static tet10",
+  "calculix": true,
+  "model": "a 60 x 20 x 4 mm steel plate with an 8 mm bore at x = 12, clamped at x = 60, 400 N towards x = 0 as a bearing load on the bore; read on the bore at (8, 10, 2), where the load pushes straight; 1.2 mm elements",
+  "quantities": {
+    "bearing_peak": {
+      "kind": "theory",
+      "source": "the cosine pressure a pin puts on its hole, peak 4 P / (pi d t) (the pin-joint bearing distribution: Pilkey, Peterson's Stress Concentration Factors, 3rd ed., 2008, ch. 5, pin joints); at the surface the radial stress is the pressure",
+      "value": 15.915494309189535,
+      "unit": "MPa",
+      "tolerance": 0.08,
+      "reason": "the stress is read at the bore's surface node, averaged over the elements that meet there, where it falls from its peak along the bore; at 1.2 mm elements on an 8 mm bore (about 21 round it) the nodal average sits a few percent off the applied pressure"
+    },
+    "reaction": {
+      "kind": "theory",
+      "source": "statics: the clamp carries the whole force a bearing load applies (its pressure is scaled to add up to it exactly)",
+      "value": 400.0,
+      "unit": "N",
+      "tolerance": 1e-06,
+      "reason": "the bearing pressure is integrated at the Gauss points its scale is taken at, so the applied total is the force to rounding, and the reactions balance it to the solve's residual (1e-6 of the load)"
+    }
+  }
+}
