@@ -2910,7 +2910,7 @@ of megabytes), and a recovery reads it back. The document itself is `DocumentIO:
 
 | form | layout |
 |---|---|
-| directory (`simulations/<folder>/`, or any `.lob` path) | `index.json`: `subject` {`kind`, `document`, `configuration`?, `name`}, `roles` (an assembly's participants table, as a study's `participants` were written), `mesh` {`size`, `size_expr`?, `refinements`?}, `geometry`? {`suppressed`?, `symmetry`?} (vNEXT, [the geometry step](#the-geometry-step)), `studies` (as a part's are written, ids kept), `mesh_keys`?; `results/<study id>.result.{json,bin}`; `meshes/<key>.mesh.{json,bin}` |
+| directory (`simulations/<folder>/`, or any `.lob` path) | `index.json`: `subject` {`kind`, `document`, `configuration`?, `name`}, `roles` (an assembly's participants table, as a study's `participants` were written), `mesh` {`size`, `size_expr`?, `refinements`?}, `geometry`? {`suppressed`?, `symmetry`?} (v228, [the geometry step](#the-geometry-step)), `studies` (as a part's are written, ids kept), `mesh_keys`?; `results/<study id>.result.{json,bin}`; `meshes/<key>.mesh.{json,bin}` |
 | single file | the same `index.json` body with `results` [{`study`, ...}] and `meshes` inline, their bytes base64 under `data` |
 
 - **Every mesh the document keeps is saved** (`SimDocument::KeptMeshKeys`:
@@ -3003,7 +3003,7 @@ simulation without one keeps its results. It is set by `set_sim_geometry`
 and the toolbar's **Suppress**, **Symmetry** and **Refine**, before Mesh
 ([the simulation toolbar](../ui/panels.md#the-simulation-toolbar)), listed in
 the tree's Geometry group, and saved with the simulation (`geometry`,
-vNEXT: [how a simulation is saved](#how-a-simulation-is-saved)). What
+v228: [how a simulation is saved](#how-a-simulation-is-saved)). What
 setting one would make a study refuse that it does not refuse now is
 refused when it is set, changing nothing (`fem::SimGeometryRefusal`).
 

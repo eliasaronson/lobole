@@ -2137,7 +2137,7 @@ TEST_CASE("Simulation golden corpus loads and round-trips",
               CHECK(DocumentIO::StudyMaterialToJson(*s->material) == row[1]);
             }
           }
-        // vNEXT: the geometry step (docs/simulation/README.md
+        // v228: the geometry step (docs/simulation/README.md
         // #the-geometry-step): what is suppressed, as [document, feature],
         // and the symmetry plane.
         if (expect.contains("geometry")) {

@@ -67,7 +67,7 @@ json Envelope() {
   return j;
 }
 
-// The geometry step (docs/simulation/README.md#the-geometry-step), vNEXT:
+// The geometry step (docs/simulation/README.md#the-geometry-step), v228:
 // absent when there is none.
 json GeometryJson(const fem::SimGeometry& g) {
   json out = json::object();
