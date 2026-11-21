@@ -29,8 +29,6 @@
 {"method":"check_geometry","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g1;M120;G130;U0","feature_id":100},{"element":"100/cap0;M120;U0","feature_id":100},{"element":"100/cap0;M120;U1","feature_id":100}],"id":170,"name":"C7","radius":2.25,"type":"Chamfer"}}}
-{"method":"undo","params":{}}
 {"method":"get_state","params":{}}
 {"method":"list_parts","params":{}}
 {"method":"add_part","params":{"name":"Rebuild"}}

@@ -102,6 +102,36 @@
 
 using nlohmann::json;
 
+namespace {
+
+// query_geometry's blend_measures for one edge (Measure.h: DihedralAngleAt,
+// WidthAcrossEdgeAt, ConcaveRadiusAt): what a blend there is sized against.
+nlohmann::json BlendMeasuresJson(const Body& body, int edge) {
+  nlohmann::json out = nlohmann::json::object();
+  if (const auto theta = Measure::DihedralAngleAt(body, edge))
+    out["dihedral_deg"] = glm::degrees(*theta);
+  const auto faces = Measure::FacesOfEdgeAt(body, edge);
+  if (!faces)
+    return out;
+  nlohmann::json rows = nlohmann::json::array();
+  for (const int f : *faces) {
+    nlohmann::json row = {{"index", f}};
+    if (const std::string* n = body.elementMap.NameOf(f))
+      row["element"] = *n;
+    if (const auto w = Measure::WidthAcrossEdgeAt(body, edge, f)) {
+      row["width_mm"] = w->width;
+      row["width_ends_at"] = w->endsAt;
+    }
+    if (const auto rc = Measure::ConcaveRadiusAt(body, edge, f))
+      row["concave_radius_mm"] = *rc;
+    rows.push_back(std::move(row));
+  }
+  out["faces"] = std::move(rows);
+  return out;
+}
+
+} // namespace
+
 namespace remote {
 
 // Declared in RemoteHelpers.h so every domain module can resolve a `part`
@@ -1737,10 +1767,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "elements too; matches carry stable names where they exist. Every "
      "measure here is MILLIMETRES — radius, radius_tol, max_distance, "
      "min_length, max_length — with areas in mm2 (min_area, max_area) and "
-     "angle_tol_deg in degrees, as its name says.",
-     "angle_tol_deg, axis, body, element_type, expected_count, geometry_type, "
-     "max_area, max_distance, max_length, max_results, min_area, min_length, "
-     "near_point, normal, on_point, part, radius, radius_tol"},
+     "angle_tol_deg in degrees, as its name says. blend_measures true gives "
+     "each matched edge what a blend on it is sized against "
+     "(docs/modeling/README.md#the-size-that-fits): dihedral_deg (the "
+     "solid's interior angle there, over 180 at a concave edge) and faces[] "
+     "{index, element?, width_mm? (how far the face runs from the edge "
+     "before its boundary, on a plane or a ruling), width_ends_at? (the "
+     "edge index it ends at), concave_radius_mm? (its least radius of "
+     "curvature toward a round)}.",
+     "angle_tol_deg, axis, blend_measures, body, element_type, "
+     "expected_count, geometry_type, max_area, max_distance, max_length, "
+     "max_results, min_area, min_length, near_point, normal, on_point, part, "
+     "radius, radius_tol"},
     {"compare_geometry",
      "Boolean-diff similarity: {golden_path} (STEP/BREP reference) vs the "
      "active doc, or {a, b} bodies/occurrences. `metrics`: \"all\" (the "
@@ -4597,6 +4635,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error(IndexError("body", p.value("body", -1),
                                           bodies.size(),
                                           "get_state lists bodies"));
+    const bool blendMeasures = p.value("blend_measures", false);
     const std::string elementType = p.value("element_type", "face");
     if (elementType != "face" && elementType != "edge")
       throw std::runtime_error("element_type must be face or edge");
@@ -4740,6 +4779,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           entry["axis"] = {axis.x, axis.y, axis.z};
         if (const auto it = names.find(idx); it != names.end())
           entry["element"] = it->second;
+        if (blendMeasures && !wantFaces)
+          entry.update(BlendMeasuresJson(bodies[bi], idx));
         matches.push_back(std::move(entry));
       }
     }

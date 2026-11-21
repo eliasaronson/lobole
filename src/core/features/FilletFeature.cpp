@@ -6,6 +6,7 @@
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
+#include "core/HeavyBuild.h" // Cancelled
 
 #include <BRep_Tool.hxx>
 #include <ChFi3d.hxx>
@@ -164,26 +165,50 @@ bool FilletFeature::Execute(RegenContext& ctx) {
 
   ElementMap map;
   std::string error;
-  CADShape result = topo::EdgeBlendNamed(body->shape, body->elementMap, indices,
-                                         op, radius, GetId(), map, &error);
+  topo::EdgeBlendFailure failure;
+  CADShape result =
+      topo::EdgeBlendNamed(body->shape, body->elementMap, indices, op, radius,
+                           GetId(), map, &error, &failure);
+  std::string cause;
   if (!result.IsValid()) {
-    SetError(error.empty() ? std::string(what) +
-                                 " failed (radius too large for the geometry?)"
-                           : error);
-    LOG_ERROR("FilletFeature '{}': {}", m_name, GetError());
-    return false;
+    cause = error.empty() ? std::string(what) + " failed" : error;
+    if (!failure.atBuild) {
+      // The edges, not the size: no size would build.
+      SetError(cause);
+      LOG_ERROR("FilletFeature '{}': {}", m_name, GetError());
+      return false;
+    }
+  } else if (const std::string bad = Measure::InvalidReasons(result);
+             !bad.empty()) {
+    // Kept only when it is a valid solid: the blend builder reported success
+    // on blends that crossed themselves, and the part went on with a body
+    // check_geometry called invalid (tools/fuzz.py).
+    cause = std::string(what) + " produced an invalid solid (" + bad + ")";
+  } else {
+    body->shape = std::move(result);
+    body->elementMap = std::move(map);
+    return true;
   }
 
-  // Kept only when it is a valid solid: the blend builder reported success
-  // on blends that crossed themselves, and the part went on with a body
-  // check_geometry called invalid (tools/fuzz.py).
-  if (const std::string bad = Measure::InvalidReasons(result); !bad.empty()) {
-    SetError(std::string(what) + " produced an invalid solid (" + bad +
-             "); a smaller radius, or fewer edges in one " + what +
-             ", usually builds");
-    return false;
+  // The size does not fit: say the one that does
+  // (docs/modeling/README.md#the-size-that-fits).
+  const double asked = radius.value;
+  std::optional<fit::Answer> answer =
+      fitMemo.For(body->shape, indices, op, asked);
+  if (!answer) {
+    const CADShape& input = body->shape;
+    answer = fit::LargestThatBuilds(
+        asked, fit::BlendBound(*body, indices, op),
+        [&](double size) {
+          const CADShape built =
+              topo::EdgeBlendUnnamed(input, indices, op, size);
+          return built.IsValid() && Measure::InvalidReasons(built).empty();
+        },
+        [] { return heavy::Cancelled(); });
+    fitMemo = fit::Memo{body->shape, indices, static_cast<int>(op), *answer};
   }
-  body->shape = std::move(result);
-  body->elementMap = std::move(map);
-  return true;
+  SetError(fit::Sentence(op, *answer, failure.places, cause),
+           fit::HintOf(*answer));
+  LOG_ERROR("FilletFeature '{}': {}", m_name, GetError());
+  return false;
 }

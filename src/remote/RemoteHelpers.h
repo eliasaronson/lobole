@@ -547,6 +547,25 @@ inline const char* BuildStateName(Document::BuildState s) {
   return nullptr;
 }
 
+// A FitHint as `regen.failed[].fits` and the refusal's diagnostic carry it:
+// {param, asked_mm, fits_mm (null: nothing built), fails_mm?, basis,
+// element?, stopped?}.
+inline nlohmann::json FitHintJson(const FitHint& h) {
+  nlohmann::json j = {{"param", h.param},
+                      {"asked_mm", h.askedMm},
+                      {"fits_mm", nullptr},
+                      {"basis", h.basis}};
+  if (h.fitsMm)
+    j["fits_mm"] = *h.fitsMm;
+  if (h.failsMm)
+    j["fails_mm"] = *h.failsMm;
+  if (!h.element.empty())
+    j["element"] = h.element;
+  if (h.stopped)
+    j["stopped"] = true;
+  return j;
+}
+
 inline nlohmann::json RegenSummaryJson(const Document& doc) {
   nlohmann::json failed = nlohmann::json::array();
   nlohmann::json warnings = nlohmann::json::array();
@@ -580,6 +599,10 @@ inline nlohmann::json RegenSummaryJson(const Document& doc) {
     // (docs/modeling/README.md#a-caught-kernel-fault).
     if (doc.KernelFaulted(f->GetId()))
       entry["kernel_fault"] = true;
+    // A size that does not fit, and the one that does
+    // (docs/scripting/rpc.md#what-a-response-carries).
+    if (const auto& fit = f->GetFitHint())
+      entry["fits"] = FitHintJson(*fit);
     failed.push_back(std::move(entry));
   }
   // A heavy feature building off the frame, or whose build was cancelled,

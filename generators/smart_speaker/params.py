@@ -57,7 +57,7 @@ TABLE = [
     ("mitre_land", "0.15",
      "the flat left at a mitred covering's edge. A 45 deg mitre on 3.6 mm "
      "ply wants a setback of exactly 3.6, which is a knife edge: the kernel "
-     "refuses it (\"radius too large for the geometry\") and no router "
+     "refuses it (the distance does not fit) and no router "
      "cuts one either"),
     ("alpair_chamber_h", "120.0", "the top chamber, under the top wall"),
     ("partition_wall_cutout", "4.0", "how deep a divider lets into a wall"),

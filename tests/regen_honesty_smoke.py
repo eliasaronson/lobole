@@ -106,8 +106,22 @@ def main():
         healthy(d.call("set_active_configuration", id=0), "back to default")
 
         # --- a variable edit that breaks a feature -------------------------
-        broken(d.call("set_variable", name="r", expression="50"),
-               "set_variable driving the radius impossible")
+        grown = d.call("set_variable", name="r", expression="50")
+        broken(grown, "set_variable driving the radius impossible")
+        # ...and says, in its own response, the size that does fit
+        # (docs/modeling/README.md#the-size-that-fits).
+        row = next(f for f in grown["regen"]["failed"] if f["name"] == "F")
+        fits = row.get("fits")
+        expect(fits is not None, f"the failed row carries no 'fits': {row}")
+        expect(fits["param"] == "radius" and fits["asked_mm"] == 50,
+               f"fits names the field and the size asked: {fits}")
+        expect(fits["fits_mm"] is not None and 0 < fits["fits_mm"] < 50,
+               f"fits holds a size under the one asked: {fits}")
+        expect(f"{fits['fits_mm']:g} mm" in row["error"],
+               f"the sentence says the same size: {row}")
+        healthy(d.call("set_variable", name="r",
+                       expression=repr(fits["fits_mm"])),
+                "the variable set to the size that fits")
         healthy(d.call("set_variable", name="r", expression="2"),
                 "and back")
 

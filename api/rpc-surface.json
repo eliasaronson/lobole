@@ -226,7 +226,7 @@
   "pull": ["remote"],
   "push": ["remote"],
   "query_catalog": ["catalog", "designation", "hash", "limit", "offset", "revision"],
-  "query_geometry": ["angle_tol_deg", "axis", "body", "element_type", "expected_count", "geometry_type", "max_area", "max_distance", "max_length", "max_results", "min_area", "min_length", "near_point", "normal", "on_point", "part", "radius", "radius_tol"],
+  "query_geometry": ["angle_tol_deg", "axis", "blend_measures", "body", "element_type", "expected_count", "geometry_type", "max_area", "max_distance", "max_length", "max_results", "min_area", "min_length", "near_point", "normal", "on_point", "part", "radius", "radius_tol"],
   "redo": [],
   "remote_add": ["name", "url"],
   "remote_list": [],

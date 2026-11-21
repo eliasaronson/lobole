@@ -399,6 +399,8 @@ set(core_sources
     src/core/io/ImportSvg.cpp
     src/core/io/SketchImport.cpp
     src/core/Measure.cpp
+    src/core/MeasureBlend.cpp
+    src/core/BlendFit.cpp
     src/core/MeasureSeal.cpp
     src/core/MeasureInsertion.cpp
     src/core/SequenceTimeline.cpp

@@ -2010,8 +2010,11 @@ def self_test():
                       "rounds", {"code": "invalid_argument"})
     expect("a refusal", {"add_feature": refuse}, "refuse")
     expect("a broken feature", {"add_feature": accepted(
-        [{"name": "F", "error": "the fillet failed on 1 contour(s) "
-          "(radius too large for the geometry?)"}])}, "fail", "broken")
+        [{"name": "F", "error": "fillet radius 10 mm does not fit: the "
+          "largest radius that fits is 7.49 mm — near (0.000, 7.500, "
+          "10.000)", "fits": {"param": "radius", "asked_mm": 10,
+                              "fits_mm": 7.49, "fails_mm": 7.5,
+                              "basis": "built"}}])}, "fail", "broken")
     expect("a caught OSD_SIGSEGV", {"add_feature": accepted(
         [{"name": "F", "error": "the fillet failed: OSD_SIGSEGV Access "
           "violation"}])}, "finding", "signal")

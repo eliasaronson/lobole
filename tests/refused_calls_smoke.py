@@ -610,6 +610,40 @@ def main():
                   needle=f"source_id: {plate['created_by']}",
                   tab=part["name"])
 
+            # A round too large for the rim is refused with the size that
+            # fits, in a diagnostic, and changes nothing; that size, sent
+            # back, builds (docs/scripting/rpc.md#structured-errors).
+            # An edge the round above left sharp.
+            plate = next(b for b in d.call("list_elements")["bodies"]
+                         if b["name"] == "Plate")
+            sharp = next(e["name"] for e in plate["edges"]
+                         if not e.get("smooth")
+                         and e.get("made_by") != rounded)
+            too_big = {"type": "Fillet", "name": "TooBig",
+                       "edges": [{"feature_id": plate["created_by"],
+                                  "element": sharp}], "radius": 1000.0}
+            check("a fillet that does not fit", "add_feature",
+                  {"feature": too_big}, needle="does not fit",
+                  tab=part["name"])
+            try:
+                d.request("add_feature", {"feature": too_big}, timeout=120)
+                diag = None
+            except Exception as e:  # noqa: BLE001
+                diag = getattr(e, "diagnostic", None)
+            fits = (diag or {}).get("fits") or {}
+            note((diag or {}).get("code") == "does_not_fit"
+                 and diag.get("param") == "radius"
+                 and diag.get("observed") == 1000.0
+                 and isinstance(fits.get("fits_mm"), (int, float)),
+                 f"the refused fillet's diagnostic: {diag}")
+            if isinstance(fits.get("fits_mm"), (int, float)):
+                ok, said = call(d, "add_feature", {"feature": dict(
+                    too_big, name="Fits", radius=fits["fits_mm"])})
+                note(ok and said["regen"]["ok"],
+                     f"the size that fits, sent back, builds: {said}")
+                if ok:
+                    d.call("undo")
+
             # A section cut on a datum that is not there: add_section added
             # the cut and update_section applied base_plane, each before
             # refusing the plane_id. Both now check first.

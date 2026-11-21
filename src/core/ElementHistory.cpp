@@ -756,8 +756,7 @@ CADShape RunEdgeBlend(Maker& mk, const TopoDS_Shape& shape,
   }
   if (!mk.IsDone()) {
     if (error) {
-      *error = "the blend could not be built (radius too large for the "
-               "geometry?)";
+      *error = "the blend could not be built";
     }
     return CADShape();
   }
@@ -874,11 +873,48 @@ std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
   }
 }
 
+CADShape EdgeBlendUnnamed(const CADShape& body,
+                          const std::vector<int>& edgeIndices, EdgeBlendOp op,
+                          double radiusOrDistance) {
+  if (!body.IsValid() || edgeIndices.empty())
+    return CADShape();
+  try {
+    // On a copy, as EdgeBlendNamed: the builder writes onto its input.
+    const TopoDS_Shape shape =
+        BRepBuilderAPI_Copy(body.GetShape(), false, false).Shape();
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+    for (int idx : edgeIndices)
+      if (idx < 0 || idx + 1 > edges.Extent())
+        return CADShape();
+    const auto build = [&](auto& mk) -> CADShape {
+      const auto why = occsig::RunCatchingOccSignals([&] {
+        for (int idx : edgeIndices)
+          mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
+        mk.Build();
+      });
+      if (why || !mk.IsDone() || mk.Shape().IsNull())
+        return CADShape();
+      return CADShape(mk.Shape());
+    };
+    if (op == EdgeBlendOp::Chamfer) {
+      BRepFilletAPI_MakeChamfer mk(shape);
+      return build(mk);
+    }
+    BRepFilletAPI_MakeFillet mk(shape);
+    return build(mk);
+  } catch (const Standard_Failure&) {
+    return CADShape();
+  }
+}
+
 CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
                         const std::vector<int>& edgeIndices, EdgeBlendOp op,
                         double radiusOrDistance, uint64_t featureTag,
-                        ElementMap& out, std::string* error) {
+                        ElementMap& out, std::string* error,
+                        EdgeBlendFailure* failure) {
   out = {};
+  bool building = false;
   if (!body.IsValid() || edgeIndices.empty()) {
     return CADShape();
   }
@@ -912,19 +948,32 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
       BRepFilletAPI_MakeChamfer mk(shape);
       if (!addAll(mk))
         return CADShape();
-      return RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
+      building = true;
+      CADShape result =
+          RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
+      if (!result.IsValid() && failure)
+        failure->atBuild = true;
+      return result;
     }
     BRepFilletAPI_MakeFillet mk(shape);
     if (!addAll(mk))
       return CADShape();
+    building = true;
     CADShape result = RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
-    if (!result.IsValid() && error && mk.NbFaultyContours() > 0) {
-      *error = "the fillet failed on " + std::to_string(mk.NbFaultyContours()) +
-               " contour(s) (radius too large for the geometry?)" +
-               FaultyContourPlaces(mk);
+    if (!result.IsValid()) {
+      const std::string places = FaultyContourPlaces(mk);
+      if (failure) {
+        failure->atBuild = true;
+        failure->places = places;
+      }
+      if (error && mk.NbFaultyContours() > 0)
+        *error = "the fillet failed on " +
+                 std::to_string(mk.NbFaultyContours()) + " contour(s)" + places;
     }
     return result;
   } catch (const Standard_Failure& e) {
+    if (failure)
+      failure->atBuild = building;
     LOG_ERROR("EdgeBlendNamed: OCCT error: {}", e.GetMessageString());
     if (error) {
       *error = std::string("OCCT error: ") + e.GetMessageString();

@@ -107,6 +107,17 @@ class DeviceLost(Refused):
     CODE = "device_lost"
 
 
+class DoesNotFit(Refused):
+    """A Fillet or Chamfer whose size does not build: `observed` is the size
+    asked, `fits` the answer the app searched for, {param, asked_mm, fits_mm
+    (None: nothing built), fails_mm, basis, element?}, and `fits_mm` the size
+    to send instead (docs/scripting/rpc.md#structured-errors)."""
+    CODE = "does_not_fit"
+
+    fits = property(lambda self: self._field("fits"))
+    fits_mm = property(lambda self: (self._field("fits") or {}).get("fits_mm"))
+
+
 class NonFiniteError(LoboleError):
     """The answer held NaN or infinity, which JSON writes as null: the server
     listed where under `nonfinite`
@@ -129,7 +140,8 @@ class SdkError(LoboleError):
 _BY_CODE: dict[str, type[Refused]] = {
     cls.CODE: cls for cls in (
         MissingArgument, UnknownArgument, InvalidArgument, StaleRevision,
-        StaleSnapshot, BudgetExceeded, InternalError, DeviceLost)
+        StaleSnapshot, BudgetExceeded, InternalError, DeviceLost,
+        DoesNotFit)
     if cls.CODE}
 
 

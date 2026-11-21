@@ -23,6 +23,7 @@
 #include "core/features/CradleFeature.h"
 #include "core/features/DeleteFaceFeature.h"
 #include "core/features/DerivedFeature.h"
+#include "core/features/FilletFeature.h"
 #include "core/features/MoveFaceFeature.h"
 #include "core/features/OffsetFaceFeature.h"
 #include "core/features/ReplaceFaceFeature.h"
@@ -36,6 +37,7 @@
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchSection.h"
 #include "core/sketch/SketchSolver.h"
+#include "remote/InspectionContracts.h" // ContractError
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h" // PrintedThreadJson
 #include "remote/RemoteProject.h"    // RequireFreshTabName
@@ -219,9 +221,17 @@ bool IsDirectEdit(const Feature& f) {
          dynamic_cast<const ReplaceFaceFeature*>(&f) != nullptr;
 }
 
+// A Fillet or Chamfer is tried the same way: a size that does not fit is
+// refused with the size that does, in a `diagnostic` of code does_not_fit
+// (docs/scripting/rpc.md#structured-errors), where it used to be committed
+// as a feature that could only fail.
+bool TriedOnACopy(const Feature& f) {
+  return IsDirectEdit(f) || dynamic_cast<const FilletFeature*>(&f) != nullptr;
+}
+
 void RefuseFailingDirectEdit(Document& doc, const Feature& f,
                              std::optional<size_t> at) {
-  if (!IsDirectEdit(f))
+  if (!TriedOnACopy(f))
     return;
   // Nothing is tried while the part is building: the copy would rebuild the
   // whole list inline.
@@ -257,9 +267,21 @@ void RefuseFailingDirectEdit(Document& doc, const Feature& f,
       throw HeavyTrialNeeded{copy->PendingBuildShared()};
     return;
   }
-  if (!built->GetError().empty() && !built->ErrorAfterEarlierFailure())
-    throw std::runtime_error(f.TypeName() + " refused: " + built->GetError() +
-                             ". The document is unchanged");
+  if (!built->GetError().empty() && !built->ErrorAfterEarlierFailure()) {
+    const std::string message = f.TypeName() +
+                                " refused: " + built->GetError() +
+                                ". The document is unchanged";
+    if (const auto& fit = built->GetFitHint())
+      throw remote::ContractError(
+          message, {{"code", "does_not_fit"},
+                    {"path", "/params/feature/" + fit->param},
+                    {"param", fit->param},
+                    {"observed", fit->askedMm},
+                    {"expected", fit->fitsMm ? json{{"max_mm", *fit->fitsMm}}
+                                             : json(nullptr)},
+                    {"fits", FitHintJson(*fit)}});
+    throw std::runtime_error(message);
+  }
   // Built: the document takes the copy's evaluation instead of building the
   // edit a second time when the call commits it.
   doc.AdoptEvaluations(*copy);
@@ -499,7 +521,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "basic profile it cuts prints tight (docs/tolerances/README.md). A "
      "DeleteFace, OffsetFace, MoveFace or ReplaceFace that would not build "
      "is refused with its error, the document unchanged "
-     "(docs/modeling/README.md#direct-edit); so is a feature the bodies "
+     "(docs/modeling/README.md#direct-edit). So is a Fillet or Chamfer "
+     "whose size does not build, with the size that does: a `diagnostic` "
+     "{code: does_not_fit, param: radius, observed, fits: {param, asked_mm, "
+     "fits_mm, fails_mm, basis, element?}} "
+     "(docs/modeling/README.md#the-size-that-fits); so is a feature the bodies "
      "cannot take, naming what they would: an element on no body or on two, "
      "or named by the feature that made it rather than its body's "
      "created_by; a blend whose edges start no blend; a Draft face square "
@@ -612,7 +638,9 @@ static constexpr MethodDoc ModelingMethods[] = {
      "triangle of distances or turn an arc inside out, is refused naming "
      "the dimension, and the document is unchanged; a direct edit (DeleteFace, "
      "OffsetFace, MoveFace, ReplaceFace) that would not build is refused "
-     "with its error, the document unchanged, and so is a feature the "
+     "with its error, the document unchanged, a Fillet or Chamfer whose size "
+     "does not build is refused with the size that does (diagnostic code "
+     "does_not_fit, as add_feature), and so is a feature the "
      "bodies before it cannot take, as add_feature says "
      "(docs/modeling/README.md#refused-on-the-bodies).",
      "feature:object, feature_id?:int>=0, index?:int>=0, "

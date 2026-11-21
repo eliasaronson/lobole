@@ -411,6 +411,22 @@ struct RegenContext {
 // every feature, and a Template instance after each feature it expands.
 void FollowModifiedFaces(std::vector<Body>& bodies);
 
+// The size that fits, beside a blend's error
+// (docs/modeling/README.md#the-size-that-fits): a Fillet or Chamfer that does
+// not build at the size asked searches for the largest that does
+// (core/BlendFit.h), and says it here as well as in its sentence.
+// `regen.failed[].fits` and the refusal's `diagnostic` carry it. Set and
+// cleared with the error; transient like it.
+struct FitHint {
+  std::string param;             // the feature's field: "radius"
+  double askedMm = 0.0;          // the size asked
+  std::optional<double> fitsMm;  // the largest that built; none: nothing did
+  std::optional<double> failsMm; // the least known to fail
+  std::string basis = "built";   // "built" | "bound" (refused unbuilt)
+  std::string element;           // the face or edge whose bound decided it
+  bool stopped = false;          // the search was cancelled part way
+};
+
 // One step in the parametric history. Features are executed in order by
 // Document::Regenerate() to rebuild the model from scratch, so they must be
 // deterministic and self-contained (all inputs are parameters, never live
@@ -533,6 +549,7 @@ public:
   // (an expression error stamped after the last one is not its).
   void CopyRegenStatus(const Feature& executed) {
     m_error = executed.m_error;
+    m_fitHint = executed.m_fitHint;
     m_warning = executed.m_warning;
     m_errorAfterEarlierFailure = executed.m_errorAfterEarlierFailure;
   }
@@ -674,9 +691,21 @@ public:
   // the UI to surface. Set on the object even though regeneration aborts, so
   // the tree can show which feature broke and why.
   [[nodiscard]] const std::string& GetError() const { return m_error; }
-  void SetError(const std::string& error) { m_error = error; }
+  void SetError(const std::string& error) {
+    m_error = error;
+    m_fitHint.reset();
+  }
+  // An error that is a size which does not fit, and the size that does.
+  void SetError(const std::string& error, FitHint fit) {
+    m_error = error;
+    m_fitHint = std::move(fit);
+  }
+  [[nodiscard]] const std::optional<FitHint>& GetFitHint() const {
+    return m_fitHint;
+  }
   void ClearError() {
     m_error.clear();
+    m_fitHint.reset();
     m_errorAfterEarlierFailure = false;
   }
 
@@ -733,6 +762,7 @@ protected:
   std::vector<std::string> m_unresolvedFaceLooks;
   uint64_t m_id = 0;
   std::string m_error;
+  std::optional<FitHint> m_fitHint; // with m_error: see FitHint
   std::string m_warning;
   bool m_errorAfterEarlierFailure = false;
   bool m_suppressed = false;

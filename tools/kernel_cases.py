@@ -34,6 +34,7 @@ import collections
 import decimal
 import hashlib
 import json
+import re
 import math
 import os
 import shutil
@@ -543,6 +544,32 @@ class Outcome:
                 "rows": self.rows, "seconds": self.seconds}
 
 
+# "the largest radius that fits is 25.2": a size the source's refusal states.
+STATED_FIT = re.compile(r"largest (?:radius|distance) that fits is "
+                        r"([0-9]+(?:\.[0-9]+)?)")
+
+
+def fits_mismatch(exp, refusal):
+    """Where the case's refusal states the largest size that fits and ours
+    names one too (`fits.fits_mm`), the two must agree: within the case's
+    tolerance, or 2 % -- ours is a size that BUILT, rounded down to three
+    digits, and a search's last step. None when they agree or either is
+    silent; else what disagrees."""
+    m = STATED_FIT.search(str(exp.get("refusal") or ""))
+    fits = refusal.get("fits") or {}
+    ours = fits.get("fits_mm")
+    if m is None or not isinstance(ours, (int, float)):
+        return None
+    stated = float(m.group(1))
+    given = exp.get("tolerance")
+    tol = max(given if isinstance(given, (int, float)) else 0.0,
+              0.02 * stated)
+    if abs(ours - stated) <= tol:
+        return None
+    return (f"the size that fits: ours {ours:g} mm, the case's "
+            f"{stated:g} mm: {refusal['message']}")
+
+
 def judge(exp, run):
     """The outcome of a case from what its run left: `run` is
     {refusal: None | {message, internal, changed}, invalid, measured}."""
@@ -558,6 +585,8 @@ def judge(exp, run):
             return ("fail: invalid", "a refused call changed the part: "
                     + refusal["message"], [])
         if outcome in ("refused", "solid_or_refused"):
+            if (bad := fits_mismatch(exp, refusal)) is not None:
+                return "fail: refused", bad, []
             return "pass", "refused: " + refusal["message"], []
         return "fail: refused", refusal["message"], []
     if outcome == "refused":
@@ -606,7 +635,7 @@ def run_case(d, case, scratch):
                 run["refusal"] = {
                     "message": f"command {i} ({command['command']}): "
                                f"{e.message}",
-                    "internal": e.internal}
+                    "internal": e.internal, "fits": e.fits}
                 break
     except Untranslated as e:
         return Outcome(f"untranslated: {e}", seconds=time.time() - t0,

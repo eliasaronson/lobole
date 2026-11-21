@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import lobole.sdk as sdk  # noqa: E402
 from lobole.client import Client  # noqa: E402
-from lobole.errors import UnknownArgument  # noqa: E402
+from lobole.errors import DoesNotFit, UnknownArgument  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -300,14 +300,18 @@ def check_bad_blend_refuses(app):
     edges = [e for e in part.body().edges(kind="line")
              if e.length > 15.0 and not e.smooth]
     expect(len(edges) > 20, f"the test needs a big blend set: {len(edges)}")
-    part.fillet(edges, r=8.0, name="doomed")
+    # Refused, with the size that does fit
+    # (docs/modeling/README.md#the-size-that-fits), the part unchanged.
+    try:
+        part.fillet(edges, r=8.0, name="doomed")
+        expect(False, "a blend the kernel cannot build must be refused")
+    except DoesNotFit as e:
+        expect("fillet" in str(e), f"and say why, in its own words: {e}")
+        expect(e.fits_mm is not None and 0 < e.fits_mm < 8.0,
+               f"and the size that fits: {e.diagnostic}")
     # Still answering, which is the whole point of the test.
     state = part.state()
-    expect(not state["regen"]["ok"],
-           "a blend the kernel cannot build must be reported as failed")
-    why = " ".join(f.get("error", "") for f in state["regen"]["failed"])
-    expect("fillet" in why or "OCCT" in why,
-           f"and say why, in its own words: {why!r}")
+    expect(state["regen"]["ok"], f"the part is as it was: {state['regen']}")
 
 
 def check_faces_by_maker(app):

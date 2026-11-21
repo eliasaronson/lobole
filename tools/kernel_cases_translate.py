@@ -37,10 +37,14 @@ class Untranslated(Exception):
 class Refusal(Exception):
     """The app refused a call, or built the feature broken."""
 
-    def __init__(self, message, internal=False):
+    def __init__(self, message, internal=False, fits=None):
         super().__init__(message)
         self.message = message
         self.internal = internal
+        # The size that fits, where a Fillet or Chamfer said one: the
+        # refusal's diagnostic or the failed row's `fits`
+        # (docs/modeling/README.md#the-size-that-fits).
+        self.fits = fits
 
 
 class Broken(Exception):
@@ -371,7 +375,9 @@ class Translator:
             if code in ("unknown_argument", "missing_argument"):
                 raise Broken(f"{method} {resolved}: {e}")
             raise Refusal(str(e), internal=code == "internal"
-                          or type(e).__name__ == "NonFiniteError")
+                          or type(e).__name__ == "NonFiniteError",
+                          fits=(getattr(e, "diagnostic", None)
+                                or {}).get("fits"))
         r = r if isinstance(r, dict) else {"result": r}
         self.results.append(r)
         if "digest" in r:
@@ -380,7 +386,9 @@ class Translator:
         if isinstance(regen, dict) and not regen.get("ok", True):
             said = "; ".join(str(f.get("error", f))
                              for f in regen.get("failed", [])) or str(regen)
-            raise Refusal(said)
+            fits = next((f["fits"] for f in regen.get("failed", [])
+                         if isinstance(f, dict) and f.get("fits")), None)
+            raise Refusal(said, fits=fits)
         return r
 
     def ref(self):

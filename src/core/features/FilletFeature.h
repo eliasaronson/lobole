@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/BlendFit.h"
 #include "core/ElementMap.h"
 #include "core/Feature.h"
 
@@ -19,8 +20,9 @@ enum class EdgeBlendOp { Fillet, Chamfer };
 // extrude Add/Cut) and its element map is re-propagated through the blend:
 // each blend face is named "<spineEdgeName>;G<id>". Regeneration fails with a
 // per-feature error when a ref no longer resolves (its generating entity was
-// deleted or a boolean consumed the edge) or OCC rejects the blend (radius
-// too large for the geometry); the UI offers re-picking the edges. An
+// deleted or a boolean consumed the edge) or OCC rejects the blend, which
+// then says the largest size that builds (core/BlendFit.h, a FitHint beside
+// the error); the UI offers re-picking the edges. An
 // edge-less blend is a no-op success so a just-created feature can preview
 // while the user picks edges.
 class FilletFeature : public Feature {
@@ -64,4 +66,9 @@ public:
   ExprValue radius{0.5}; // fillet radius / chamfer distance
   // Optional expression driving `radius` (empty = plain literal), evaluated
   // against the document's parameters on every regeneration.
+
+  // The last size search (core/BlendFit.h), kept with the executed state so
+  // a feature that stays broken does not search again. Derived, never
+  // serialized; restored by CopyDerivedState with the rest of the object.
+  fit::Memo fitMemo;
 };

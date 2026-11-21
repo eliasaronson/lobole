@@ -9,6 +9,7 @@
 #include "core/ThreadStandards.h"
 #include "core/Units.h"
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -324,6 +325,33 @@ GeometryReport CheckGeometry(const CADShape& shape);
 // reshapes a body (a blend, a shell, a draft) checks before it keeps the
 // result: their builders report success on solids that cross themselves.
 std::string InvalidReasons(const CADShape& shape);
+
+// What a blend at an edge is sized against (src/core/MeasureBlend.cpp; the
+// bounds are core/BlendFit.h's). Indices are element-map indices (edges in
+// MapShapes order, faces in explorer order); nullopt where the edge is not
+// one between two faces or the measure does not apply.
+//
+// The two faces either side of the edge.
+std::optional<std::array<int, 2>> FacesOfEdgeAt(const Body& body,
+                                                int edgeIndex);
+// The solid's interior angle between those faces at the edge's middle,
+// radians: under pi on a convex edge, over it on a concave one.
+std::optional<double> DihedralAngleAt(const Body& body, int edgeIndex);
+// How far `faceIndex` runs from the edge, in the face and square to it,
+// before its boundary: the least over the edge's length, and the edge it
+// ends at there (the edge itself across a disc). Only where that line is
+// straight in 3-D: a plane, or the ruling of a cylinder or cone.
+struct WidthAcross {
+  double width = 0.0; // mm
+  int endsAt = -1;    // edge index
+};
+std::optional<WidthAcross> WidthAcrossEdgeAt(const Body& body, int edgeIndex,
+                                             int faceIndex);
+// The least radius of curvature of `faceIndex` at the edge's middle, where
+// it curves toward a blend of the edge (into the material at a convex edge,
+// into the air at a concave one: the inside of a bore, a concave round).
+std::optional<double> ConcaveRadiusAt(const Body& body, int edgeIndex,
+                                      int faceIndex);
 
 // The direction an element defines — the only thing an angle can be taken
 // between. A planar face's outward normal, a line edge's tangent, a

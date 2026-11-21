@@ -119,11 +119,24 @@ std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
 // as intended); adjacent support faces keep their names via Modified; fillet
 // corner patches are covered by the U-then-L fallback. On failure returns an
 // invalid CADShape and, when OCC reports faulty contours, a diagnostic in
-// *error (may be null).
+// *error (may be null), and in *failure (may be null) whether it was the
+// build that failed -- a size that may not fit -- rather than the edges, and
+// where the faulty contours are (" — near (x, y, z)", or empty).
+struct EdgeBlendFailure {
+  bool atBuild = false;
+  std::string places;
+};
 CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
                         const std::vector<int>& edgeIndices, EdgeBlendOp op,
                         double radiusOrDistance, uint64_t featureTag,
-                        ElementMap& out, std::string* error);
+                        ElementMap& out, std::string* error,
+                        EdgeBlendFailure* failure = nullptr);
+
+// The same blend built and not named: what the size search (core/BlendFit.h)
+// tries. Invalid when the builder failed.
+CADShape EdgeBlendUnnamed(const CADShape& body,
+                          const std::vector<int>& edgeIndices, EdgeBlendOp op,
+                          double radiusOrDistance);
 
 // Fixed names for a primitive's output (box/sphere/cylinder/import): every
 // face "<prefix>/face<i>" in index order — stable because a primitive's

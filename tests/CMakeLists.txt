@@ -200,6 +200,7 @@ add_executable(designer_tests
     test_pattern.cpp
     test_toponaming.cpp
     test_fillet.cpp
+    test_blend_fit.cpp
     test_faceselector.cpp
     test_sketch_feature.cpp
     test_extrude.cpp
