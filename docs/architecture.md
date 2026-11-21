@@ -33,13 +33,22 @@ Includes are relative to `src/` (`#include "core/Document.h"`).
 | `src/core/mesh/` | triangle meshes with no OpenCASCADE in them: `TriMesh`, the STL reader, the surface fits and the segmentation that finds a faceted part's planes, cylinders, cones and spheres ([recognising a faceted mesh](interchange/README.md#recognising-a-faceted-mesh)), and the distance field a Cradle's pocket is built in ([cradle](modeling/README.md#cradle)); the B-Rep rebuilt from them is `src/cad/MeshRebuild` |
 | `src/core/{cam,drawing,fem,parts,catalog,sheet,tube}/` | one directory per domain |
 | `src/cad/` | the OpenCASCADE wrapper (`CADKernel.h`: `CADShape`), materials, mesh conversion and export, sketch planes |
-| `src/common/` | logging (`Logger.h`), runtime paths, build info, the terminal emulator and PTY (they live here so `designer_tests` can link them) |
+| `src/common/` | logging (`Logger.h`), runtime paths, build info, the terminal emulator and PTY (they live here so `designer_tests` can link them), and most of the platform layer: `Platform.cpp`, `ChildProcess.cpp`, and `ThreadStackDarwin.c`, macOS's `pthread_create` interposer ([macOS](packaging/README.md#macos)) |
 | `src/render/` | the Vulkan renderers, `VulkanCommon` (the shared buffer/memory/shader helpers), camera, screenshot, IBL |
 | `src/ui/` | `AppState` and the actions layer, one file per subject (below), plus the panels |
 | `src/remote/` | the JSON-RPC server: one `Remote<Domain>.cpp` per domain plus the dispatcher (below) |
 | `src/app/` | entry points: `main.cpp` (window, frame loop, captures), `GpuOwners.cpp` (the Vulkan device and every renderer, as one table of owners, and its rebuild in place), `HeadlessMain.cpp`, `CrashHandler.cpp`, and the ImGui Test Engine GUI suite under `app/guitests/`, one file per domain |
 | `src/femgpu/` | the Vulkan-compute topology solver |
 | `src/shaders/` | GLSL, compiled to SPIR-V at build time |
+
+**Platforms.** Linux is the developed platform; Windows cross-builds
+([Windows](packaging/README.md#windows)) and macOS on Apple Silicon is built
+and tested by CI only ([macOS](packaging/README.md#macos)). Code for one sits
+behind `#if defined(_WIN32)` / `__APPLE__` / `__linux__` where the call is
+(the process and pipe calls in `common/`, the parent watch in
+`app/ParentWatch.cpp`, the thread clocks a deadline reads, the Vulkan
+portability extensions in `app/GpuOwners.cpp` and `femgpu/ComputeContext.cpp`),
+not in a separate layer.
 
 **Edit the domain module, not a monolith.** A new RPC goes in its domain's
 `Remote<Domain>.cpp`, a new persisted field in the matching `Serialize*.cpp`,

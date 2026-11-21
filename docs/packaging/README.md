@@ -12,14 +12,15 @@ ninja …"`) are in the repository's `CLAUDE.md` and `CONTRIBUTING.md`.
 | `nix bundle` AppImage | headless use on any distro | `nix bundle --bundler github:ralismark/nix-appimage .#default` | no |
 | Flatpak | desktop users on any distro | `packaging/flatpak/`, `tools/flatpak-build.sh` | yes |
 | Windows | Windows users | `packaging/windows/` (cross-compiled on Linux) | yes |
-| macOS | building from source on Apple Silicon | [`packaging/macos/`](#macos) | yes |
+| macOS app | Apple Silicon Macs on macOS 26 or newer | [`packaging/macos/`](#the-macos-app) | yes |
 
-The Vulkan driver (ICD) is always the host's; no channel bundles one, and
-every channel needs a working Vulkan driver for the GUI.
+The Vulkan driver (ICD) is the host's on every channel but macOS, which has
+no system Vulkan: [the app](#the-macos-app) carries MoltenVK and the loader.
+Every channel needs a working Vulkan driver for the GUI.
 
 A release is built from one tag by `.github/workflows/release.yml`, which
 publishes both AppImages, the Ubuntu `.deb`, the Windows zip and
-installer, the source tarball, the Python package and the container image ([Releasing](#releasing)). The flake and the
+installer, the macOS `.dmg`, the source tarball, the Python package and the container image ([Releasing](#releasing)). The flake and the
 Flatpak are built from the source.
 
 ## One version
@@ -59,6 +60,9 @@ metainfo release is missing or has no notes. It then builds, in parallel:
   nixpkgs (`NIX_PATH` is pinned to it, rather than a channel);
 - the Ubuntu 26.04 `.deb` ([The Debian package](#the-debian-package)),
   smoked after a clean `apt-get install` of it;
+- the macOS `.dmg` on a `macos-26` runner ([The macOS app](#the-macos-app)),
+  copied out of the mounted image and smoked with none of the build's
+  environment;
 - the source tarball ([The source tarball](#the-source-tarball)), and from
   it the AUR package, built, installed and smoked in Arch
   ([Arch Linux (AUR)](#arch-linux-aur));
@@ -646,8 +650,10 @@ cross-builds it and runs `packaging/windows/smoke.sh` on it under Wine):
 
 ## macOS
 
-Apple Silicon, built from source, on Vulkan through MoltenVK. There is no
-package and no CI job. It needs Xcode and Homebrew:
+Apple Silicon, on Vulkan through MoltenVK. CI builds and tests it on every
+push ([CI](#ci-on-a-mac)), and a release ships it as a `.dmg` ([The macOS
+app](#the-macos-app)). Nothing else here can build or run it. To build it on a
+Mac, with Xcode and Homebrew:
 
 ```
 git submodule update --init --recursive
@@ -658,12 +664,18 @@ tools/nix-run 'build/lobole'
 ```
 
 `deps.sh` installs the Homebrew formulas and a python venv, then builds
-OpenCASCADE with our patches and Netgen with `packaging/appimage/deps.sh`, into
+OpenCASCADE 7.9.3 with our patches (as C++20, below), Netgen, Spectra, libvterm
+and glslc with `packaging/appimage/deps.sh`, each at the commit that script
+pins, into
 `$LOBOLE_MACOS_DEPS` (by default `~/.local/share/lobole/macos-deps`, outside the
 tree so worktrees share it). There is no nix here: `tools/nix-run` applies `tools/macos-env.sh` instead, so
 `tools/build.sh`, `tools/ctest` and the `lobole` MCP server work as they do on
 Linux. That file pins `SDKROOT` to Xcode's SDK, because a bare `xcrun` can pair
-Xcode's clang with the Command Line Tools' newer one.
+Xcode's clang with the Command Line Tools' newer one, and sets
+`MACOSX_DEPLOYMENT_TARGET` to 26.0: Homebrew's bottles are built for the macOS
+they install on, so a binary carrying them runs on that release and newer
+whatever its own target says. The Homebrew formulas are not pinned; the
+sources built from are.
 
 Each of these was a failure on this platform before it was a rule:
 
@@ -714,6 +726,87 @@ reports no `wideLines`), CalculiX (not in Homebrew; its tests skip) and
 hour here, drawing 50 000 datum planes with a linear `FindFeatureById` for each,
 so leave it out with `--gui-test-filter "-accept_refused_past_the_feature_limit"`
 unless that is what you are testing.
+
+Mac-only code sits behind `#if defined(__APPLE__)` at the call, a Mac-only
+file is built only `if(APPLE)`, and the SSAO define is set only there, so the
+Linux shaders and their pixel baselines are unchanged. A test whose
+expectation differs on macOS states the Mac's under its own `#if`, with the
+reason, and keeps Linux's as it was.
+
+### CI on a Mac
+
+The `macos` job in `ci.yml` runs on a GitHub-hosted `macos-26` runner (Apple
+Silicon, three cores, a virtual GPU), and `tools/ci-local.sh` cannot mirror
+it. `packaging/macos/deps.sh` provides the dependencies; its source half is
+cached on that script, `packaging/appimage/deps.sh`, the OCC patches, the
+macOS major version and Xcode's, and a hit runs `deps.sh --brew-only`. It
+builds every target, then:
+
+- **the headless suite with no Vulkan device** (`VK_DRIVER_FILES` names
+  none), as the Linux runner has none: the gate, whatever GPU the virtual
+  machine has. A test that needs a device skips.
+- the step `Vulkan device` prints what `vulkaninfo` finds on MoltenVK, or
+  that it finds nothing. With a device, the tests the first run skipped are
+  run again on it (`ctest --tests-from-file`, read from that run's JUnit
+  file), then the GUI suite, serial and shuffled, then a render recorded with
+  `render_pixel_smoke.py --record` and uploaded with the job's output: the
+  file to commit as that device's baseline. These steps are
+  `continue-on-error` until a run shows them green on the runner's device.
+
+### The macOS app
+
+`release.yml`'s `macos` job builds `designer` with the tests off, installs it
+into a stage, and `packaging/macos/bundle.py` makes `Lobole.app` from that:
+
+- `Contents/MacOS/lobole`, and in `Contents/Frameworks` every library it
+  loads that is not the system's, found by walking `otool -L` from the
+  executable: OpenCASCADE, Netgen, Homebrew's formulas, our own dylibs, the
+  Vulkan loader, and MoltenVK, which the loader opens by name. Every
+  reference is rewritten to `@rpath/<name>`, every rpath that points outside
+  the bundle is removed (one left would let a Mac with Homebrew load its
+  copy first), and the executable's one rpath is
+  `@executable_path/../Frameworks`. The script then reads every Mach-O back
+  and fails, naming the file and the reference, on anything outside the
+  bundle or the system.
+- `Contents/Resources/share/lobole`: what the install put under
+  `share/lobole`. `RuntimePaths::DataDir` looks there on macOS, after the
+  development paths and before `../share/lobole`.
+- `Contents/Resources/vulkan/icd.d/MoltenVK_icd.json`, Homebrew's manifest
+  with its `library_path` pointed at `../../../Frameworks/libMoltenVK.dylib`.
+  The Vulkan loader reads a bundle's `Resources/vulkan/icd.d` before the
+  system's, so the app needs no `VK_DRIVER_FILES`.
+- `Info.plist` (`org.lobole.Lobole`, `LSMinimumSystemVersion` from
+  `MACOSX_DEPLOYMENT_TARGET`) and an `.icns` made from the 256 px icon.
+
+The `.dmg` (`lobole-<version>-macos-arm64.dmg`, HFS+, the app beside an
+`Applications` link) is made by `hdiutil`, which needs no identity.
+`packaging/macos/smoke.sh` mounts it, copies the app out as a user would, and
+checks the signature, the references again, that a start loads nothing from
+Homebrew or the build's prefix (`DYLD_PRINT_LIBRARIES`, where the signature
+is not hardened-runtime, which ignores it), then runs
+`tools/release-smoke.py` with none of the build's environment. With
+`--window`, where Homebrew's MoltenVK finds a device on the runner,
+`app/boots_and_renders` opens a window on the bundled one; where it finds
+none, the log says so. That step is `continue-on-error` for the CI job's
+reason.
+
+The app finds `ffmpeg` and `git` on `PATH`, which a Finder launch sets to the
+system's directories only. CalculiX is not bundled.
+
+### Signing and notarisation
+
+Apple Silicon runs no unsigned code, and `install_name_tool` voids every
+signature it touches, so `packaging/macos/sign.sh` signs each library, then
+the bundle. Without secrets it signs ad hoc (`codesign -s -`): the job warns,
+and the release notes tell the user that macOS refuses the first launch and
+where to allow it (System Settings, Privacy & Security, Open Anyway). With
+the secret `MACOS_CERTIFICATE_P12` (a base64 Developer ID Application
+`.p12`) and `MACOS_CERTIFICATE_PASSWORD`, it imports the identity into a
+keychain of the job's own and signs with the hardened runtime and a
+timestamp, and signs the `.dmg`; with `APPLE_ID`, `APPLE_TEAM_ID` and
+`APPLE_APP_PASSWORD` as well, `notarytool` notarises the image and `stapler`
+staples it, and the notes carry no first-launch line. A certificate without
+the notarisation secrets is signed and not notarised, and the job says so.
 
 ## The bundled CalculiX
 
@@ -817,6 +910,6 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
   smokes it under Wine; nothing builds it on a push.
 - Publishing the AUR package (an AUR account, an SSH key, and a release
   job that pushes the `aur` artifact).
-- A macOS package ([it builds from source](#macos); an `.app`, signing and a
-  CI job are not done), and rpm packages (the GUI AppImage covers Fedora
-  meanwhile).
+- macOS: a first green run of the CI and release jobs, a Developer ID, and
+  an Intel build ([macOS](#macos); docs/plans/macos-release.md), and rpm
+  packages (the GUI AppImage covers Fedora meanwhile).

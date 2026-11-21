@@ -224,8 +224,9 @@ them:
 - Shaded fill of sketch regions.
 - Glass in the viewport: a per-body transmission override, and panes sorted
   back to front.
-- **Packaging:** deb, rpm, AUR and macOS builds, Windows signing and
-  Netgen, and a Flathub submission for the existing Flatpak.
+- **Packaging:** rpm, a signed and notarised macOS app (it ships ad-hoc
+  signed: [macOS](packaging/README.md#signing-and-notarisation)), Windows
+  signing and Netgen, and a Flathub submission for the existing Flatpak.
 
 ## 8. Code structure
 
