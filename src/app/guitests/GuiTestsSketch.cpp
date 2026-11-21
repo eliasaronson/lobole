@@ -49,6 +49,46 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->sketchEdit.IsEditing());
   };
 
+  // Escape ends a spline keeping its poles, as it ends a line chain keeping
+  // its segments. It used to clear them: the key a line teaches for "done"
+  // threw away every point of the curve.
+  t = IM_REGISTER_TEST(engine, "sketch", "escape_finishes_a_spline");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto& edit = s_App->sketchEdit;
+    edit.tool = ui::SketchTool::Spline;
+    edit.splinePoles = {{0, 0}, {10, 8}, {20, 0}};
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr);
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);
+    const auto* bs = std::get_if<sketch::BSpline>(&sk->entities[0]);
+    IM_CHECK(bs != nullptr);
+    IM_CHECK_EQ(bs->poles.size(), (size_t)3);
+    // The tool stays armed for the next curve, with nothing pending.
+    IM_CHECK(edit.tool == ui::SketchTool::Spline);
+    IM_CHECK(edit.splinePoles.empty());
+
+    // One pole is no curve: Escape drops it and adds nothing.
+    edit.splinePoles = {{5, 5}};
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);
+    IM_CHECK(edit.splinePoles.empty());
+    IM_CHECK(edit.tool == ui::SketchTool::Spline);
+
+    // With nothing pending the ladder goes on: back to Select.
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(edit.tool == ui::SketchTool::Select);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+  };
+
   // Reference geometry is sized from the part, not from a literal. The base
   // planes were a fixed 8 mm half-extent and the sketch background a fixed
   // 50 mm one, so on a metre-scale part — a speaker panel, a dock — the plane

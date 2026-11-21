@@ -268,7 +268,19 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.trimPath.clear();
       edit.trimPathPreview.clear();
     } else if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty()) {
-      edit.splinePoles.clear(); // cancel the in-progress spline
+      // Ends the spline keeping what was placed, as it ends a line chain
+      // keeping its segments: the poles were clicked one by one, and a key
+      // that threw them all away cost the whole curve. One pole is no curve
+      // and is dropped. May replace the sketch feature: `sketch` is dead
+      // after this, and the block returns below.
+      if (edit.splinePoles.size() >= 2) {
+        sketch::BSpline bs;
+        bs.poles = edit.splinePoles;
+        edit.splinePoles.clear();
+        CommitEntity(state, *sketch, index, bs, false);
+      } else {
+        edit.splinePoles.clear();
+      }
     } else if (edit.hasPendingPoint || edit.hasPendingPoint2 ||
                edit.hasPendingPoint3 || edit.hasPendingPoint4 ||
                edit.boxActive) {

@@ -446,7 +446,7 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     set("Spline", 0, 0,
         edit.splinePoles.empty()
             ? "click to place control poles"
-            : "click for more poles (Enter or double-click to finish)");
+            : "click for more poles (Esc, Enter or double-click to finish)");
     break;
   case T::Trim:
     set("Trim", 0, 0,

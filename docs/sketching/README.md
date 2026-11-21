@@ -1045,8 +1045,8 @@ is upright but +U reads to the left.
 
 **Tools** (`SketchTool`): Select, Point, Line, Circle, Rectangle,
 RectangleCenter, Arc (centre→start→end), ArcThreePoint (start→end→through),
-Ellipse (centre→major end→minor), EllipseArc (5 clicks), Spline (click poles,
-Enter/double-click finishes), Trim, Mirror, Fillet, Pattern, Offset,
+Ellipse (centre→major end→minor), EllipseArc (5 clicks), Spline (click poles;
+Escape, Enter or a double-click finishes), Trim, Mirror, Fillet, Pattern, Offset,
 Dimension, Project (live external geometry), CalibrateImage, Image, Text
 (each click places a label; the Tool window edits its text, cap height,
 font and alignment, and a label selected when the tool is armed is edited
@@ -1064,7 +1064,9 @@ Curvature (G2), point-on-line, symmetric, midpoint, fixed and collinear are
 commands with no default key.
 
 **Escape** backs out one level per press: an open dimension field → dimension
-placement → a drag-trim path → spline poles → pending clicks or a box → mirror axis phase →
+placement → a drag-trim path → a spline in progress (finished with the poles
+placed, as a line chain keeps its segments; a single pole is dropped) →
+pending clicks or a box → mirror axis phase →
 op re-pick → op edit session → dimension targets → the tool (back to Select)
 → the selected constraint → the entity selection → a Hole session → leave the
 sketch.
