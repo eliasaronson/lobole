@@ -136,8 +136,15 @@ the heading if it is not here yet.
 - **Symptom:** an L bracket whose inside bend is rounded, then its front
   inner outline rounded R1 along the tangent chain, has the right volume
   on 13 faces; the case counts 12.
-- **Cause:** not established: one of the chain's rounds comes out in two
-  faces that are not one cylinder or plane.
+- **Cause:** OpenCASCADE's blend builder, not the count. The chain's
+  straight rounds are a cylinder each, and the round along the bend's arc
+  is a torus (4.48 mm²) and, where it meets the round of the foot's edge at
+  the arc's tangent end (x about 6.8, z about 4.9), a B-spline patch of its
+  own (3.8 mm², `kind: other` in `list_elements`): the same ball rolling
+  between the same two surfaces, built as two faces that cannot merge. The
+  volume is right to 2e-10.
+- **Likely fix:** none of ours short of building the round along a
+  tangent chain ourselves; the count stays a known topology row.
 - **Where:** `FilletFeature`.
 - **Case:**
   `solidcraft/fillets/every-l-bracket-front-inner-outline-after-bend-round-r1`.
@@ -154,7 +161,11 @@ the heading if it is not here yet.
   touch.
 - **Where:** `ApplyBodyMode`, `src/core/BodyMode.cpp`.
 - **Likely fix:** none needed for volume; a consumer that needs manifold
-  shells (a mesh export, a print check) has to split at such an edge.
+  shells (a mesh export, a print check) has to split at such an edge. A
+  split has to do two things to count as two shells here: give the cavity
+  a shell of its own, and take the tangent line out of the outer wall's
+  face, where it is an edge the wall's triangles end on, so the wall's mesh
+  and the cavity's no longer share it.
 - **Cases:** `solidcore/booleans/17439-cylinder-cavity-touching-a-wall-along-a-line`,
   `17439-cylinder-cavity-along-x-touching-the-floor`,
   `17439-cylinder-cavity-touching-two-walls-along-lines`.
