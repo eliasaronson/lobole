@@ -162,7 +162,8 @@ def main():
                 ("distance", [[right, 0], [right, 1]], {"expr": "height"})]:
             d.call("add_constraint", sketch_id=sk["id"], kind=kind, refs=refs,
                    **kw)
-        d.call("fillet", sketch_id=sk["id"], line1=top, line2=left, radius=4.0)
+        d.call("fillet", sketch_id=sk["id"], entity1=top, entity2=left,
+               radius=4.0)
         pad = d.call("add_feature", feature={
             "type": "Extrude", "name": "Pad", "sketch_id": sk["id"],
             "distance": 1.0, "distance_expr": "thickness",

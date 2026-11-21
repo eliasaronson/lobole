@@ -703,8 +703,8 @@ def main():
         fid = skf["entity_ids"]
         d.call("add_constraint", sketch_id=skf["id"], kind="coincident",
                refs=[[fid[0], 1], [fid[1], 0]])
-        ff = d.call("fillet", sketch_id=skf["id"], line1=fid[0], line2=fid[1],
-                    radius=1.0)
+        ff = d.call("fillet", sketch_id=skf["id"], entity1=fid[0],
+                    entity2=fid[1], radius=1.0)
         expect(ff["arc_id"] != 0, "fillet created an arc")
         fents = d.call("get_state")["features"][0]["entities"]
         arc = next(e for e in fents if e["id"] == ff["arc_id"])
@@ -720,15 +720,54 @@ def main():
                          {"type": "line", "a": [20, 20], "b": [20, 24]}]})
         cid, lid1, lid2 = skc2["entity_ids"]
         for args, why in [
-                ({"line1": cid, "line2": lid1, "radius": 1.0}, "not a line"),
-                ({"line1": lid1, "line2": lid2, "radius": 1.0},
-                 "share no endpoint"),
-                ({"line1": lid1, "line2": lid2, "radius": 0.0}, "positive")]:
+                ({"entity1": cid, "entity2": lid1, "radius": 1.0},
+                 "is a circle, which has no end"),
+                ({"entity1": lid1, "entity2": lid2, "radius": 1.0},
+                 "share no end"),
+                ({"entity1": lid1, "entity2": lid2, "radius": 0.0},
+                 "positive"),
+                # The old names are gone, not aliased.
+                ({"line1": lid1, "line2": lid2, "radius": 1.0}, "line1")]:
             try:
                 d.call("fillet", sketch_id=skc2["id"], **args)
                 expect(False, f"fillet should error ({why})")
             except RuntimeError as e:
                 expect(why in str(e), f"fillet error explains: {why} ({e})")
+
+        # A line and an arc (docs/sketching/README.md#fillet): a half disc,
+        # whose two curves share both ends, so `near` says which corner.
+        skd = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch D",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [0, 0], "b": [10, 0]},
+                         {"type": "arc", "center": [5, 0], "radius": 5,
+                          "start_angle_deg": 0, "end_angle_deg": 180}]})
+        dl, da = skd["entity_ids"]
+        for args, why in [
+                ({"radius": 1.0}, "share two ends"),
+                ({"radius": 4.0, "near": [0, 0]},
+                 "mm is the largest that does"),
+                ({"radius": 1.0, "near": [0]}, "near is [u, v]")]:
+            try:
+                d.call("fillet", sketch_id=skd["id"], entity1=dl, entity2=da,
+                       **args)
+                expect(False, f"fillet should error ({why})")
+            except RuntimeError as e:
+                expect(why in str(e), f"fillet error explains: {why} ({e})")
+        fd = d.call("fillet", sketch_id=skd["id"], entity1=dl, entity2=da,
+                    radius=1.0, near=[0, 0])
+        dents = {e["id"]: e for e in
+                 d.call("get_state")["features"][-1]["entities"]}
+        darc = dents[fd["arc_id"]]
+        expect(darc["type"] == "arc" and abs(darc["radius"] - 1.0) < 1e-6,
+               f"line-arc fillet arc radius 1: {darc}")
+        # The line now starts at its tangent point, on the fillet circle.
+        tl = dents[dl]["a"]
+        expect(abs(math.hypot(tl[0] - darc["center"][0],
+                              tl[1] - darc["center"][1]) - 1.0) < 1e-6
+               and abs(tl[1]) < 1e-9,
+               f"the line was trimmed to its tangent point: {dents[dl]}")
 
         phase("Linked linear pattern, then edit its count via modify_feature")
         # Linked linear pattern, then edit its count via modify_feature.

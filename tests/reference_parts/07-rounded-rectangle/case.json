@@ -20,19 +20,19 @@
     },
     {
       "method": "fillet",
-      "params": {"sketch_id": {"$ref": 1}, "line1": 1, "line2": 2, "radius": 5}
+      "params": {"sketch_id": {"$ref": 1}, "entity1": 1, "entity2": 2, "radius": 5}
     },
     {
       "method": "fillet",
-      "params": {"sketch_id": {"$ref": 1}, "line1": 2, "line2": 3, "radius": 5}
+      "params": {"sketch_id": {"$ref": 1}, "entity1": 2, "entity2": 3, "radius": 5}
     },
     {
       "method": "fillet",
-      "params": {"sketch_id": {"$ref": 1}, "line1": 3, "line2": 4, "radius": 5}
+      "params": {"sketch_id": {"$ref": 1}, "entity1": 3, "entity2": 4, "radius": 5}
     },
     {
       "method": "fillet",
-      "params": {"sketch_id": {"$ref": 1}, "line1": 4, "line2": 1, "radius": 5}
+      "params": {"sketch_id": {"$ref": 1}, "entity1": 4, "entity2": 1, "radius": 5}
     },
     {
       "method": "add_feature",

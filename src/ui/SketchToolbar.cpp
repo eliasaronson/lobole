@@ -510,10 +510,13 @@ void DrawSketchToolWindow(AppState& state) {
     break;
   }
   case SketchTool::Fillet:
+    // What to do is the prompt pill's alone (docs/ui/tool-sessions.md):
+    // the window holds the radius and what it applies to.
     BeginToolWindowFrame(state, "Sketch Fillet");
-    ImGui::TextUnformatted("Click a corner where two lines meet.");
+    if (edit.filletRadius <= 0.0)
+      FilletToolActivated(state);
     ImGui::SetNextItemWidth(90);
-    ExprDragDouble(state, "Radius##fillet", &edit.filletRadius, 0.02f, 0.01,
+    ExprDragDouble(state, "Radius##fillet", &edit.filletRadius, 0.02f, 1e-6,
                    1e6, "%.3f");
     // The number above is the NEXT fillet's radius — an existing fillet does
     // not follow it, which reads as "the box does nothing" the first time.

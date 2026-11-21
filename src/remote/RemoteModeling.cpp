@@ -943,20 +943,25 @@ static constexpr MethodDoc ModelingMethods[] = {
      "dropping constraints that reference it.",
      "entity_id, sketch_id", remote::NeedsPart},
     {"fillet",
-     "Sketch fillet: round the corner between two lines {sketch_id, "
-     "line1, line2, radius (mm)}; errors explain a failed corner.",
-     "line1, line2, radius, sketch_id", remote::NeedsPart},
+     "Sketch fillet: round the corner two curves make at a shared end "
+     "{sketch_id, entity1, entity2, radius (mm), near?: [u, v] (sketch mm)} "
+     "with a tangent arc, trimming both to it. Lines and arcs; a spline or "
+     "an elliptical arc end is refused by name. `near` picks the corner "
+     "when the two share two ends (refused without it). A radius too large "
+     "is refused naming the largest that fits. Returns arc_id.",
+     "entity1, entity2, near, radius, sketch_id", remote::NeedsPart},
     {"offset",
      "Offset a closed sketch chain {sketch_id, chain: [entity ids], distance "
-     "(mm; the sign picks the side), join_arc?}. line1/line2/radius are "
-     "`fillet`'s, which shares this branch.",
-     "chain, distance, join_arc, line1, line2, radius, sketch_id",
+     "(mm; the sign picks the side), join_arc?}. entity1/entity2/near/"
+     "radius are `fillet`'s, which shares this branch.",
+     "chain, distance, entity1, entity2, join_arc, near, radius, sketch_id",
      remote::NeedsPart},
     {"mirror",
      "Mirror sketch entities across a line {sketch_id, "
-     "sources: [entity ids], axis: <line entity id>, link?}. line1/line2/"
-     "radius are `fillet`'s, which shares this branch.",
-     "axis, line1, line2, link, radius, sketch_id, sources", remote::NeedsPart},
+     "sources: [entity ids], axis: <line entity id>, link?}. entity1/"
+     "entity2/near/radius are `fillet`'s, which shares this branch.",
+     "axis, entity1, entity2, link, near, radius, sketch_id, sources",
+     remote::NeedsPart},
     {"pattern",
      "Sketch pattern of entities: linear {step: [du, dv] mm} or circular "
      "{circular: true, center: [u, v], angle (RADIANS) or angle_deg, never "
@@ -968,10 +973,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "`angle_deg_expr` bind the op to the part's variables, evaluated now "
      "and refused naming the key when they do not; a variable change "
      "re-runs the pattern. "
-     "line1/line2/radius are `fillet`'s, which shares this branch.",
+     "entity1/entity2/near/radius are `fillet`'s, which shares this "
+     "branch.",
      "angle, angle_deg, angle_deg_expr, center, center_expr, circular, count, "
-     "count_expr, line1, line2, link, radius, sketch_id, sources, step, "
-     "step_expr",
+     "count_expr, entity1, entity2, link, near, radius, sketch_id, sources, "
+     "step, step_expr",
      remote::NeedsPart},
     {"check_literals",
      "ADVISORY lint for numbers that should be expressions "
@@ -2773,7 +2779,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   if (m == "mirror" || m == "fillet" || m == "pattern" || m == "offset") {
     // Generative op on a sketch (by id), solve, and commit one edit.
     // mirror params:  {sketch_id, sources:[id,...], axis:lineId, link?}
-    // fillet params:  {sketch_id, line1, line2, radius}
+    // fillet params:  {sketch_id, entity1, entity2, radius, near?}
     // pattern params: {sketch_id, sources:[id,...], count, link?,
     //                  circular?, step:[dx,dy] | center:[x,y], angle}
     // offset params:  {sketch_id, chain:[id,...], distance, join_arc?}
@@ -2874,9 +2880,18 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       result["generated"] = made;
     } else {
       std::string whyNot;
+      std::optional<glm::dvec2> nearUV;
+      if (p.contains("near")) {
+        const json& n = p.at("near");
+        if (!n.is_array() || n.size() != 2 || !n[0].is_number() ||
+            !n[1].is_number())
+          throw std::runtime_error("fillet: near is [u, v] in sketch mm, got " +
+                                   n.dump());
+        nearUV = glm::dvec2(n[0].get<double>(), n[1].get<double>());
+      }
       const uint32_t arcId = sk->FilletCorner(
-          p.at("line1").get<uint32_t>(), p.at("line2").get<uint32_t>(),
-          p.at("radius").get<double>(), &whyNot);
+          p.at("entity1").get<uint32_t>(), p.at("entity2").get<uint32_t>(),
+          p.at("radius").get<double>(), nearUV, &whyNot);
       if (arcId == 0) // loud, not {"arc_id": 0} — a silent no-op to a script
         throw std::runtime_error("fillet failed: " + whyNot);
       result["arc_id"] = arcId;

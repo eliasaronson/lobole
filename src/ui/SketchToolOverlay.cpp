@@ -8,6 +8,7 @@
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
 #include "core/Expression.h"
+#include "core/Units.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
@@ -367,7 +368,8 @@ void DrawSnapGlyphs(AppState& state) {
   }
 }
 
-ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
+ToolPrompt SketchToolPrompt(const SketchEditState& edit,
+                            const units::System& units) {
   using T = SketchTool;
   ToolPrompt p;
   // Op re-pick modes outrank the active tool's prompt.
@@ -465,9 +467,16 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
             ? "click a line to mirror across"
             : "click or box-select geometry (tap empty space to continue)");
     break;
-  case T::Fillet:
-    set("Fillet", 0, 0, "click a corner where two lines meet");
+  case T::Fillet: {
+    // The one place that says what to do; a refusal says only why.
+    std::string what = edit.filletFirst != 0
+                           ? "click the second curve"
+                           : "click inside a corner, or pick two curves";
+    if (edit.filletRadius > 0.0)
+      what += " (radius " + units::FormatLength(edit.filletRadius, units) + ")";
+    set("Fillet", 0, 0, what.c_str());
     break;
+  }
   case T::Pattern:
     set("Pattern", edit.selected.empty() ? 1 : 2, 2,
         edit.selected.empty()
@@ -527,7 +536,7 @@ void DrawToolPrompt(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   if (!edit.IsEditing())
     return;
-  const ToolPrompt tp = SketchToolPrompt(edit);
+  const ToolPrompt tp = SketchToolPrompt(edit, state.ActiveUnits());
   float y = state.viewportPos.y + 34.0f; // clear of the docked panel tab bar
   // Constraint status first — always visible while sketching, the "am I
   // done constraining?" answer at a glance. One shared pill renderer with

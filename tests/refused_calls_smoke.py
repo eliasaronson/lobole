@@ -313,6 +313,42 @@ def main():
                       tab=part["name"])
             d.call("delete_feature", feature_id=probe)
 
+            # A sketch fillet (docs/sketching/README.md#fillet): every
+            # refusal computed before the first entity changes.
+            fil = d.call("add_feature", feature={
+                "type": "Sketch", "name": "Fillet probe",
+                "plane": {"origin": [0, 0, 600], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]},
+                "entities": [
+                    {"type": "line", "a": [0, 0], "b": [10, 0]},
+                    {"type": "arc", "center": [5, 0], "radius": 5,
+                     "start_angle_deg": 0, "end_angle_deg": 180},
+                    {"type": "spline",
+                     "poles": [[10, 0], [12, 3], [14, -2], [16, 0]]},
+                    {"type": "line", "a": [30, 0], "b": [40, 0]}]})
+            fl, fa, fs, far = fil["entity_ids"]
+            for label, params, needle in [
+                    ("fillet too large", {"entity1": fl, "entity2": fa,
+                                          "radius": 4, "near": [0, 0]},
+                     "largest that does"),
+                    ("fillet two shared ends without near",
+                     {"entity1": fl, "entity2": fa, "radius": 1},
+                     "share two ends"),
+                    ("fillet a spline end", {"entity1": fl, "entity2": fs,
+                                             "radius": 1},
+                     "a spline end is not filleted yet"),
+                    ("fillet no shared end", {"entity1": fl, "entity2": far,
+                                              "radius": 1}, "share no end"),
+                    ("fillet zero radius", {"entity1": fl, "entity2": fa,
+                                            "radius": 0, "near": [0, 0]},
+                     "positive"),
+                    ("fillet near not a point",
+                     {"entity1": fl, "entity2": fa, "radius": 1,
+                      "near": [0]}, "near is [u, v]")]:
+                check(label, "fillet", dict(sketch_id=fil["id"], **params),
+                      needle=needle, tab=part["name"])
+            d.call("delete_feature", feature_id=fil["id"])
+
             # Imports (docs/interchange/README.md#up-axis,
             # docs/sketching/README.md#importing-dxf-and-svg): every one read
             # and checked before a feature, a sketch or a tab exists.

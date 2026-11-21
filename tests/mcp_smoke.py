@@ -268,7 +268,7 @@ async def run(port):
 
             # Round one corner; the volume drop pins the arc really extruded
             await call("rpc", method="fillet",
-                       params=dict(sketch_id=sk_id, line1=top, line2=left,
+                       params=dict(sketch_id=sk_id, entity1=top, entity2=left,
                                    radius=4.0))
             state = await call("get_state")
             expected = 40 * 20 * 5 - (16 - math.pi * 4) * 5

@@ -21,6 +21,7 @@ in the file; the UI and expressions show degrees.
 | text labels: fonts, glyph layout, box corners | `src/core/sketch/SketchText.{h,cpp}`, the Hershey data `src/core/sketch/HersheyRomanSimplex.inc` |
 | snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
 | box-select hit test (pure) | `src/core/sketch/SketchSelection.{h,cpp}` |
+| which corner a click means (`CornerAt`), the fillet of two curves and the largest that fits (pure) | `src/core/sketch/SketchFillet.{h,cpp}` |
 | serialization | `src/core/io/SerializeFeatures.cpp` (`EntityFromJson`, `ConstraintToJson`, `DerivedOpToJson`, the sketch arm of `FeatureToJson/FromJson`) |
 | viewport interaction, Escape ladder | `src/ui/SketchInteraction.cpp` (`HandleSketchViewport`) |
 | drawing tools, commits, drag sessions, copy/paste | `src/ui/SketchTools.cpp` |
@@ -843,17 +844,42 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   it ([the first dimension](#the-first-dimension)).
 - **MirrorEntities(sources, axis, link)** — bake: reflected copies. Linked: a
   `Mirror` derived op.
-- **FilletCorner(line1, line2, r, whyNot)** — trims both lines to the tangent
-  points and inserts the arc, with two Coincident and two Tangent constraints.
-  The old corner becomes a **construction point**: constraints that held the
-  corner are re-pointed onto it, and a point-on-line from each line to it
-  keeps both lines aimed as before. Only a slot that names a POINT is
-  re-pointed: a line's corner end and the whole line are both `{line, 0}` or
-  `{line, 1}`, so a tangent, a point-on-line's curve or a one-line
-  horizontal naming the line keeps it. If that web over-determines the corner, one
-  constraint *added by the fillet* that is redundant (same DOF without it) is
-  dropped, so a good fillet does not read as conflicting; user constraints are
-  never removed. Failure reasons go to `whyNot`.
+- **FilletCorner(id1, id2, r, nearUV, whyNot, largestFit)** — rounds the
+  corner two curves make at a shared end: lines and arcs, in any pair, either
+  way round. The geometry is `sketch::FilletOfCurves`
+  (`core/sketch/SketchFillet.{h,cpp}`, pure): the centre is where the two
+  curves' offsets by `r` toward the inside of the corner meet nearest it
+  (an offset line, or the arc's circle at R + r, or at R − r where the arc
+  bends into the corner), each tangent point the foot of the centre on its
+  curve, and the arc the one between them that faces the corner. A tangent
+  point past the far end of its curve, or an arc bending tighter than `r`,
+  is refused as too large, and `sketch::LargestFillet` bisects the same
+  construction for the largest radius that fits, rounded DOWN to three
+  significant figures so the number named is one that fits: "4 mm does not
+  fit this corner; 2.5 mm is the largest that does" (`largestFit` gets the
+  number). `nearUV` (sketch mm; the RPC's `near`) picks the corner when
+  the two share two ends (a half disc's line and arc); without it that is
+  refused, naming both.
+  Each curve is trimmed to its tangent point (a line's end, an arc's angle)
+  and the arc is joined to each with a Coincident and a Tangent (the
+  shared-end angle form, [Constraints](#constraints)). The old corner
+  becomes a **construction point**: constraints that held either corner end
+  are re-pointed onto it, and it is held on each line's line and each arc's
+  circle, so every curve keeps where it ran. Only a slot that names a POINT
+  is re-pointed: a line's corner end and the whole line are both
+  `{line, 0}` or `{line, 1}`, so a tangent, a point-on-line's curve or a
+  one-line horizontal naming the line keeps it. A re-pointed coincident
+  that repeats another is dropped, as the corner's own self-coincident is
+  (three ends joined in a chain leave two coincidents naming the point and
+  the same end). If the web still over-determines the corner, one
+  constraint *added by the fillet* that is redundant (same DOF without it)
+  is dropped, so a good fillet does not read as conflicting; user
+  constraints are never removed. Everything is computed and checked before
+  the first entity changes, so a refusal changes nothing. Refused by name:
+  a spline or an elliptical arc end ("a spline end is not filleted yet (a
+  fillet takes lines and arcs)"), a circle, ellipse, point or label (no
+  end), two curves sharing no end, and an entity a linked op generates or a
+  projection owns (`GeneratedBy`), as Trim leaves them.
 - **AddLinearPattern / AddCircularPattern(..., link)** — bake or a derived op.
   The circular angle is the per-step angle.
 - **OffsetChain(chain, distance, joinArc)** — offsets one closed loop through
@@ -1050,7 +1076,8 @@ is upright but +U reads to the left.
 **Tools** (`SketchTool`): Select, Point, Line, Circle, Rectangle,
 RectangleCenter, Arc (centre→start→end), ArcThreePoint (start→end→through),
 Ellipse (centre→major end→minor), EllipseArc (5 clicks), Spline (click poles;
-Escape, Enter or a double-click finishes), Trim, Mirror, Fillet, Pattern, Offset,
+Escape, Enter or a double-click finishes), Trim, Mirror, Fillet
+([Fillet](#fillet)), Pattern, Offset,
 Dimension, Project (live external geometry), CalibrateImage, Image, Text
 (each click places a label; the Tool window edits its text, cap height,
 font and alignment, and a label selected when the tool is armed is edited
@@ -1144,6 +1171,33 @@ the release trims them all on the sketch, one solve and one undo step.
 Escape drops the path; a press released without a drag still leaves the
 tool; Enter does too.
 
+### Fillet
+
+The Fillet tool rounds the corner under a click. Where several curves end
+at one point, `sketch::CornerAt` lists their ends (a line's, an arc's or
+elliptical arc's, an open spline's) by the direction each leaves in, and
+takes the two either side of the sector the cursor is in, so a click inside
+a corner, not only on its vertex, says which corner: where a spline, a
+vertical line and two collinear horizontal lines meet, a click between the
+two lines fillets those two. On the vertex itself two curves are enough
+(the side under half a turn); where more end there it is refused ("4
+curves end at this point; move into the corner to round"), as are one
+curve ending there and a side wider than half a turn. Two curves can also
+be picked on their bodies, one click each, and are filleted at their shared
+end nearest the second click. Hovering previews the arc a click would make
+and lights the two curves it joins. Each click is one solve and one undo
+step; a tap in empty space or Enter finishes.
+
+The prompt pill alone says what to do — "click inside a corner, or pick two
+curves (radius 1 mm)", the radius through `FormatLength` — and a refusal
+says only why, prefixed "Not filleted:": the radius too large with the
+largest that fits, a spline end, an entity a pattern owns. The Tool window
+keeps the radius field and its note. The radius starts at 0, "not chosen":
+arming the tool sets it to one cell of the sketch's grid (`SketchGridFor`,
+`FilletToolActivated`), as Text takes its cap height from five, and a typed
+radius stays for the session (`fillet/armed_radius_tracks_the_grid`,
+`fillet/line_arc_hover_refusal_and_fit`).
+
 **Driven dimensions in the GUI.** Dimensioning geometry the sketch already
 fixes reads it, as in every CAD tool: the Dimension tool
 (`CommitInferredDimension`, `OverConstrained::AddDriven`) adds a dimension
@@ -1202,7 +1256,7 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr \| driven` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm (an `arc_length` too), or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. A constraint that constrains nothing is refused ([Refusals](#refusals)). `driven: true` on a dimension kind, with none of `value`/`value_deg`/`expr`, adds a [driven dimension](#constraints) and answers `measured` (mm; radians for an angle). Every answer carries the sketch's `dof` after the add. One solve, one undo step. The geometry is taken literally: nothing is [rescaled](#the-first-dimension). A new variable driving a dimension is a `batch` of `set_variable` (`scope: "part"` keeps it one undo step; a project variable is undone on its own) and `add_constraint` with `expr` naming it |
 | `add_constraints` | `sketch_id, constraints[]` | many at once, each spec as `add_constraint`'s: one judgement, solve, regen, undo step; a refused spec adds nothing and is named by index; `measured` lists each spec's measure (null for a driving one) when any is driven |
 | `delete_entity` | `sketch_id, entity_id` | with the constraint cleanup above |
-| `fillet` | `sketch_id, line1, line2, radius` | returns `arc_id`; failures say why |
+| `fillet` | `sketch_id, entity1, entity2, radius, near?` | lines and arcs sharing an end; `radius` in mm, `near` = [u, v] in sketch mm picks the corner where they share two ends; returns `arc_id`; a refusal names why ([Operations](#operations-on-the-entity-list), FilletCorner) and changes nothing |
 | `offset` | `sketch_id, chain, distance, join_arc?` | sign of `distance` picks the side |
 | `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
 | `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |

@@ -9,9 +9,11 @@
 
 #include "common/Logger.h"
 #include "core/Angles.h"
+#include "core/Units.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/sketch/ExternalPrint.h"
+#include "core/sketch/SketchFillet.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h" // SegmentIntersect
 #include "core/sketch/SketchSolver.h"
@@ -1109,104 +1111,142 @@ SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
   return generated;
 }
 
-uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
-                                     double radius, std::string* whyNot) {
+std::string SketchFeature::GeneratedBy(uint32_t id) const {
+  for (const auto& op : derived)
+    for (const auto& in : op.instances)
+      if (in.genId == id)
+        switch (op.kind) {
+        case sketch::DerivedKind::LinearPattern:
+        case sketch::DerivedKind::CircularPattern:
+          return "a linked pattern";
+        case sketch::DerivedKind::Mirror:
+          return "a linked mirror";
+        case sketch::DerivedKind::LinkedCopy:
+          return "a linked copy";
+        }
+  for (const auto& ext : external)
+    for (uint32_t g : ext.genIds)
+      if (g == id)
+        return ext.kind == sketch::ExternalKind::Section ? "a section"
+                                                         : "a projection";
+  return {};
+}
+
+uint32_t SketchFeature::FilletCorner(uint32_t id1, uint32_t id2, double radius,
+                                     std::optional<glm::dvec2> nearUV,
+                                     std::string* whyNot, double* largestFit) {
   using K = sketch::ConstraintKind;
+  if (largestFit)
+    *largestFit = 0.0;
   const auto fail = [&](const std::string& why) -> uint32_t {
     if (whyNot)
       *whyNot = why;
     return 0;
   };
-  if (radius <= 0.0)
-    return fail("fillet radius must be positive");
-  const size_t i1 = IndexOfEntity(lineId1), i2 = IndexOfEntity(lineId2);
+  if (!(radius > 0.0) || !std::isfinite(radius))
+    return fail("the fillet radius must be positive");
+  const size_t i1 = IndexOfEntity(id1), i2 = IndexOfEntity(id2);
   if (i1 == std::numeric_limits<size_t>::max())
-    return fail("no sketch entity with id " + std::to_string(lineId1));
+    return fail("no sketch entity with id " + std::to_string(id1));
   if (i2 == std::numeric_limits<size_t>::max())
-    return fail("no sketch entity with id " + std::to_string(lineId2));
-  auto* l1 = std::get_if<sketch::Line>(&entities[i1]);
-  auto* l2 = std::get_if<sketch::Line>(&entities[i2]);
-  if (!l1 || !l2)
-    return fail("entity " + std::to_string(!l1 ? lineId1 : lineId2) +
-                " is not a line (a fillet rounds the corner of two lines "
-                "sharing an endpoint; rects arrive as four lines)");
-
-  // The shared corner: the endpoint pair (one per line) that coincides. c1/c2
-  // are the which-index (0=a, 1=b) of the corner endpoint on each line.
-  const double tol = 1e-4;
-  const glm::dvec2 e1[2] = {l1->a, l1->b}, e2[2] = {l2->a, l2->b};
-  int c1 = -1, c2 = -1;
-  for (int i = 0; i < 2 && c1 < 0; i++)
-    for (int j = 0; j < 2; j++)
-      if (glm::length(e1[i] - e2[j]) < tol) {
-        c1 = i;
-        c2 = j;
-        break;
-      }
-  if (c1 < 0)
-    return fail("the lines share no endpoint (within 1e-4) - no corner to "
-                "round");
-
-  const glm::dvec2 C = e1[c1];
-  glm::dvec2 d1 = e1[1 - c1] - C, d2 = e2[1 - c2] - C;
-  const double len1 = glm::length(d1), len2 = glm::length(d2);
-  if (len1 < tol || len2 < tol)
-    return fail("a line is zero-length");
-  d1 /= len1;
-  d2 /= len2;
-  const double theta = std::acos(glm::clamp(glm::dot(d1, d2), -1.0, 1.0));
-  if (theta < 1e-3 || theta > M_PI - 1e-3)
-    return fail("the lines are parallel/collinear - no corner to round");
-  const double dTan = radius / std::tan(theta / 2.0);
-  if (dTan > len1 - tol || dTan > len2 - tol)
-    return fail("radius " + std::to_string(radius) +
-                " is too large - the fillet would consume a whole segment");
-  const glm::dvec2 bis = glm::normalize(d1 + d2);
-  const glm::dvec2 center = C + bis * (radius / std::sin(theta / 2.0));
-  const glm::dvec2 T1 = C + d1 * dTan;
-  const glm::dvec2 T2 = C + d2 * dTan;
-
-  // Trim each line's corner endpoint to its tangent point.
-  (c1 == 0 ? l1->a : l1->b) = T1;
-  (c2 == 0 ? l2->a : l2->b) = T2;
-
-  // Minor arc T1→T2 (CCW-always), and which endpoint the arc starts at.
-  auto wrap = [](double x) {
-    while (x < 0)
-      x += 2.0 * M_PI;
-    while (x >= 2.0 * M_PI)
-      x -= 2.0 * M_PI;
-    return x;
+    return fail("no sketch entity with id " + std::to_string(id2));
+  if (id1 == id2)
+    return fail("a fillet rounds the corner of two different curves; both "
+                "ids are " +
+                std::to_string(id1));
+  const auto kindOf = [&](size_t i) -> std::string {
+    const sketch::Entity& e = entities[i];
+    const std::string id = std::to_string(sketch::EntityId(e));
+    if (std::holds_alternative<sketch::Line>(e) ||
+        std::holds_alternative<sketch::Arc>(e))
+      return {};
+    if (std::holds_alternative<sketch::BSpline>(e))
+      return "spline " + id +
+             ": a spline end is not filleted yet (a fillet takes lines and "
+             "arcs)";
+    if (std::holds_alternative<sketch::EllipseArc>(e))
+      return "elliptical arc " + id +
+             ": an elliptical arc end is not filleted yet (a fillet takes "
+             "lines and arcs)";
+    const char* what = std::holds_alternative<sketch::Circle>(e) ? "a circle"
+                       : std::holds_alternative<sketch::Ellipse>(e)
+                           ? "an ellipse"
+                       : std::holds_alternative<sketch::Point>(e) ? "a point"
+                                                                  : "a label";
+    return "entity " + id + " is " + what +
+           ", which has no end to round (a fillet takes lines and arcs that "
+           "share an end)";
   };
-  const double aT1 = std::atan2(T1.y - center.y, T1.x - center.x);
-  const double aT2 = std::atan2(T2.y - center.y, T2.x - center.x);
-  const bool startIsT1 = wrap(aT2 - aT1) <= M_PI;
-  sketch::Arc arc =
-      startIsT1 ? sketch::Arc{center, radius, aT1, aT1 + wrap(aT2 - aT1)}
-                : sketch::Arc{center, radius, aT2, aT2 + wrap(aT1 - aT2)};
-  const uint8_t w1 = static_cast<uint8_t>(c1), w2 = static_cast<uint8_t>(c2);
+  for (size_t i : {i1, i2})
+    if (std::string why = kindOf(i); !why.empty())
+      return fail(why);
+  for (uint32_t id : {id1, id2})
+    if (std::string by = GeneratedBy(id); !by.empty())
+      return fail("entity " + std::to_string(id) + " is generated by " + by +
+                  "; fillet its source, or delete the operation to free the "
+                  "copies");
 
-  // A fillet must NEVER rotate a line — it only trims to the tangent points.
-  // But a line's direction can be locked only *transitively through the
-  // corner* (e.g. the owner's staircase: L3 is vertical merely because its
-  // top point shares X with the shared corner, via a point-pair vertical to
-  // that corner). Trimming moves the corner endpoints off their old position,
-  // so those constraints would drag the line into a rotation.
+  // The shared end: the pair of ends (one per curve) that coincide. Two
+  // pairs (an arc closing a line) need `near` to say which.
+  const std::vector<sketch::SharedEnd> shared =
+      sketch::SharedEnds(entities[i1], entities[i2]);
+  if (shared.empty())
+    return fail("entities " + std::to_string(id1) + " and " +
+                std::to_string(id2) +
+                " share no end (within 1e-4 mm); no corner to round");
+  const auto at = [](glm::dvec2 p) {
+    return "(" + units::FormatNumber(p.x) + ", " + units::FormatNumber(p.y) +
+           ")";
+  };
+  sketch::SharedEnd corner = shared[0];
+  if (shared.size() > 1) {
+    if (!nearUV)
+      return fail("entities " + std::to_string(id1) + " and " +
+                  std::to_string(id2) + " share two ends, at " +
+                  at(shared[0].at) + " and " + at(shared[1].at) +
+                  "; give near to say which corner to round");
+    for (const sketch::SharedEnd& s : shared)
+      if (glm::length(s.at - *nearUV) < glm::length(corner.at - *nearUV))
+        corner = s;
+  }
+  const uint8_t w1 = corner.w1, w2 = corner.w2;
+
+  // Everything is computed and checked before the first entity changes.
+  const auto geo =
+      sketch::FilletOfCurves(entities[i1], w1, entities[i2], w2, radius);
+  if (!geo) {
+    if (!geo.error().tooLarge)
+      return fail(geo.error().why);
+    const double largest =
+        sketch::LargestFillet(entities[i1], w1, entities[i2], w2, radius);
+    if (largestFit)
+      *largestFit = largest;
+    if (largest <= 0.0)
+      return fail(geo.error().why);
+    return fail(units::FormatNumber(radius) + " mm does not fit this corner; " +
+                units::FormatNumber(largest) + " mm is the largest that does");
+  }
+  const glm::dvec2 C = geo->corner;
+
+  // Trim each curve to its tangent point (ids and construction kept).
+  entities[i1] = geo->trimmed1;
+  entities[i2] = geo->trimmed2;
+
+  // A fillet must NEVER rotate a line or move an arc's circle -- it only
+  // trims to the tangent points. But a curve can be held only *through the
+  // corner* (the owner's staircase: L3 is vertical merely because its top
+  // shares X with the corner, via a point-pair vertical). Trimming moves the
+  // corner ends, so those constraints would drag the curve with them.
   //
-  // Fix (construction-point re-anchoring): drop a CONSTRUCTION point at the
-  // old corner C, re-point every existing constraint that referenced either
-  // corner endpoint onto it (so the corner's alignments now hold the fixed
-  // point instead), and add point-on-line for each line through it — keeping
-  // each line aimed exactly as before, for ANY orientation, with no H/V
-  // special-casing. NOTE: AddEntity may reallocate `entities`, invalidating
-  // l1/l2 — both are done being dereferenced (trim above), so don't touch
-  // them past here.
+  // So a CONSTRUCTION point stays at the old corner C, every constraint that
+  // named either corner end is re-pointed onto it, and it is held on each
+  // line's line and each arc's circle: every curve keeps exactly where it
+  // ran, for any orientation. AddEntity may reallocate `entities`: nothing
+  // above is dereferenced past here.
   sketch::Point cornerPt{C};
   cornerPt.construction = true;
   const uint32_t pId = AddEntity(cornerPt);
 
-  // Re-point BEFORE adding the arc-connection constraints (which reuse the
-  // corner endpoints and must NOT be caught).
   // Only a slot that names a POINT is re-pointed. A line's corner end is
   // {line, 0} or {line, 1}, and so is the WHOLE line in a curve slot (a
   // tangent, the curve of a point-on-line, a one-line horizontal): moving
@@ -1242,51 +1282,77 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
       return Slots{};
     }
   };
-  auto repoint = [&](sketch::PointRef& r) {
-    if ((r.entity == lineId1 && r.which == w1) ||
-        (r.entity == lineId2 && r.which == w2))
+  const auto repoint = [&](sketch::PointRef& r) {
+    if ((r.entity == id1 && r.which == w1) ||
+        (r.entity == id2 && r.which == w2)) {
       r = {pId, 0};
+      return true;
+    }
+    return false;
   };
-  for (auto& con : constraints) {
+  std::vector<bool> moved(constraints.size(), false);
+  for (size_t k = 0; k < constraints.size(); k++) {
+    sketch::Constraint& con = constraints[k];
     const auto slots = pointSlots(con);
+    bool m = false;
     if (slots.a)
-      repoint(con.a);
+      m |= repoint(con.a);
     if (slots.b)
-      repoint(con.b);
+      m |= repoint(con.b);
     if (slots.c)
-      repoint(con.c);
+      m |= repoint(con.c);
+    moved[k] = m;
   }
-  // The old corner coincident is now P=P — drop it (plus any other degenerate
-  // self-coincident the re-point produced).
-  constraints.erase(std::remove_if(constraints.begin(), constraints.end(),
-                                   [](const sketch::Constraint& con) {
-                                     return con.kind == K::Coincident &&
-                                            con.a.entity == con.b.entity &&
-                                            con.a.which == con.b.which;
-                                   }),
-                    constraints.end());
+  // The old corner coincident is now P=P, and where three ends were joined
+  // pairwise two coincidents became one and the same: drop the self-
+  // coincidents and every re-pointed coincident that repeats another,
+  // which would read as redundant.
+  {
+    const auto key = [](const sketch::Constraint& con) {
+      auto a = std::make_pair(con.a.entity, con.a.which);
+      auto b = std::make_pair(con.b.entity, con.b.which);
+      return a < b ? std::make_pair(a, b) : std::make_pair(b, a);
+    };
+    std::set<decltype(key(constraints[0]))> seen;
+    for (size_t k = 0; k < constraints.size(); k++)
+      if (constraints[k].kind == K::Coincident && !moved[k])
+        seen.insert(key(constraints[k]));
+    std::vector<sketch::Constraint> kept;
+    kept.reserve(constraints.size());
+    for (size_t k = 0; k < constraints.size(); k++) {
+      const sketch::Constraint& con = constraints[k];
+      if (con.kind == K::Coincident) {
+        if (con.a.entity == con.b.entity && con.a.which == con.b.which)
+          continue;
+        if (moved[k] && !seen.insert(key(con)).second)
+          continue;
+      }
+      kept.push_back(con);
+    }
+    constraints = std::move(kept);
+  }
 
-  const uint32_t arcId = AddEntity(arc);
+  const uint32_t arcId = AddEntity(geo->arc);
 
   // Everything from here is added by THIS fillet call — the only constraints
   // the prune below is allowed to touch (pre-existing user constraints are
   // never removed).
   const size_t addedFrom = constraints.size();
 
-  // Join the trimmed line ends to the arc endpoints; tangency does the rest.
-  const uint32_t startLine = startIsT1 ? lineId1 : lineId2;
-  const uint8_t startWhich = startIsT1 ? w1 : w2;
-  const uint32_t endLine = startIsT1 ? lineId2 : lineId1;
-  const uint8_t endWhich = startIsT1 ? w2 : w1;
+  // Join the trimmed ends to the arc's; tangency at each shared end does the
+  // rest (the solver reads it as the angle there, for any pair of curves).
+  const bool s1 = geo->arcStartsAtT1;
   constraints.push_back(
-      {K::Coincident, {startLine, startWhich}, {arcId, 1}, 0.0});
-  constraints.push_back({K::Coincident, {endLine, endWhich}, {arcId, 2}, 0.0});
-  constraints.push_back({K::Tangent, {lineId1, 0}, {arcId, 0}, 0.0});
-  constraints.push_back({K::Tangent, {lineId2, 0}, {arcId, 0}, 0.0});
+      {K::Coincident, {id1, w1}, {arcId, s1 ? uint8_t(1) : uint8_t(2)}, 0.0});
+  constraints.push_back(
+      {K::Coincident, {id2, w2}, {arcId, s1 ? uint8_t(2) : uint8_t(1)}, 0.0});
+  constraints.push_back({K::Tangent, {id1, 0}, {arcId, 0}, 0.0});
+  constraints.push_back({K::Tangent, {id2, 0}, {arcId, 0}, 0.0});
 
-  // Each line stays collinear with the fixed corner point → direction locked.
-  constraints.push_back({K::PointOnLine, {pId, 0}, {lineId1, 0}, 0.0});
-  constraints.push_back({K::PointOnLine, {pId, 0}, {lineId2, 0}, 0.0});
+  // The corner point stays on each line's line and each arc's circle, which
+  // locks the line's direction and the arc's circle as they were.
+  constraints.push_back({K::PointOnLine, {pId, 0}, {id1, 0}, 0.0});
+  constraints.push_back({K::PointOnLine, {pId, 0}, {id2, 0}, 0.0});
 
   // Add-then-prune: in a richly-constrained corner the fillet's own web (arc
   // tangency + endpoint coincidents + the point-on-line direction locks) can

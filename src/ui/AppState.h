@@ -223,7 +223,18 @@ struct SketchEditState {
   // Generative ops (Mirror/Fillet): "linked" adds constraints tying the result
   // to its source so it tracks edits; unchecked bakes an unlinked copy.
   bool linkGenerative = true;
-  double filletRadius = 0.5;
+  // The Fillet tool (docs/sketching/README.md#fillet). `filletRadius` <= 0
+  // means "not chosen": arming the tool sets it to one cell of the sketch's
+  // grid (FilletToolActivated), and a typed one stays for the session.
+  double filletRadius = 0.0;
+  // The first curve picked on its body (0 = none): a second curve picked
+  // the same way is filleted at their shared end nearest that click.
+  uint32_t filletFirst = 0;
+  // What a click would make, under the cursor: the arc, and the two curves
+  // it joins, lit.
+  bool hasFilletPreview = false;
+  sketch::Arc filletPreviewArc{};
+  uint32_t filletPreviewCurves[2] = {0, 0};
 
   // Mirror tool is two-step: collect geometry (false), then pick the axis
   // (true). Enter advances; Escape backs out. Selection carries the sources.

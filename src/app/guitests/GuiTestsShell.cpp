@@ -708,6 +708,22 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::SketchToolPrompt(sp).text.empty()); // prompts before any pole
     sp.splinePoles = {{0, 0}, {1, 1}};
     IM_CHECK(ui::SketchToolPrompt(sp).text.find("finish") != std::string::npos);
+
+    // The Fillet prompt alone says what to do, with the radius through
+    // FormatLength (docs/sketching/README.md#fillet); a refusal says why.
+    ui::SketchEditState f;
+    f.tool = ui::SketchTool::Fillet;
+    f.filletRadius = 5.0;
+    const std::string fp = ui::SketchToolPrompt(f).text;
+    IM_CHECK(fp.find("click inside a corner") != std::string::npos);
+    IM_CHECK(fp.find("(radius 5 mm)") != std::string::npos);
+    units::System inch;
+    inch.length = units::Length::Inch;
+    IM_CHECK(ui::SketchToolPrompt(f, inch).text.find(" in)") !=
+             std::string::npos);
+    f.filletFirst = 7;
+    IM_CHECK(ui::SketchToolPrompt(f).text.find("the second curve") !=
+             std::string::npos);
   };
 
   // Guided mirror (N2): select geometry in-tool, Enter, then click the axis.

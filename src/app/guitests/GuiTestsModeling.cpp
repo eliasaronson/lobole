@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "app/GuiTests.h" // GuiTestCaptureDir
 #include "app/guitests/GuiTestsCommon.h"
 #include "cad/NonDestructiveBoolean.h"
 #include "common/ChildProcess.h" // CurrentPid
@@ -258,6 +259,26 @@ double ViewReach(const WorldBox& box) {
   return reach;
 }
 
+} // namespace
+
+namespace {
+// A still of the whole window into --capture-dir, when one is given (the
+// fillet tool's look is checked by eye: docs/ui/testing.md).
+void FilletShot(ImGuiTestContext* ctx, const char* name) {
+  ctx->Yield(3);
+  if (GuiTestCaptureDir().empty())
+    return;
+  ctx->CaptureReset();
+  ImGuiCaptureArgs* args = ctx->CaptureArgs;
+  std::snprintf(args->InOutputFile, sizeof(args->InOutputFile), "%s/%s.png",
+                GuiTestCaptureDir().c_str(), name);
+  args->InPadding = 0.0f;
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  args->InCaptureRect =
+      ImRect(vp->Pos, ImVec2(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y));
+  IM_CHECK(ctx->CaptureScreenshot(ImGuiCaptureFlags_IncludeOtherWindows |
+                                  ImGuiCaptureFlags_IncludePopups));
+}
 } // namespace
 
 void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
@@ -3706,6 +3727,139 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
     ctx->KeyPress(ImGuiKey_Escape); // Fillet -> Select
     ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+  };
+
+  // The default radius is the sketch's, never a literal
+  // (docs/ui/tool-sessions.md#defaults-and-refusals): arming the tool takes
+  // one cell of the sketch's grid, on a 2 mm sketch and on a 300 mm one,
+  // and a click on the corner with it fillets it.
+  t = IM_REGISTER_TEST(engine, "fillet", "armed_radius_tracks_the_grid");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    int plane = 0;
+    for (const double side : {2.0, 300.0}) {
+      EnterSketchOnPlane(ctx, plane++);
+      for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+        ctx->Yield();
+      auto* sk = ui::ResolveActiveSketch(*s_App);
+      IM_CHECK(sk != nullptr);
+      const size_t index = Doc()->FeatureCount() - 1;
+      nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+      sk->AddRectangle({0, 0}, {side, side});
+      nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+      s_App->commands->Execute(
+          std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+      ctx->Yield(2);
+      sk = ui::ResolveActiveSketch(*s_App);
+      ToolbarClick(ctx, "###tb_sk_fillet");
+      ctx->Yield(2);
+      IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Fillet);
+      const double cell = ui::SketchGridFor(*s_App, *sk).step;
+      ctx->LogInfo("%.0f mm sketch: armed radius %.3f mm, grid %.3f mm", side,
+                   s_App->sketchEdit.filletRadius, cell);
+      IM_CHECK_EQ(s_App->sketchEdit.filletRadius, cell);
+      IM_CHECK(cell <= side / 2.0); // fits the square it arms on
+      const glm::vec2 corner =
+          ui::SketchUVToScreen(*s_App, sk->plane, glm::dvec2(0, 0));
+      ctx->MouseMoveToPos(ImVec2(corner.x, corner.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+      sk = ui::ResolveActiveSketch(*s_App);
+      IM_CHECK(sk != nullptr);
+      const sketch::Arc* arc = nullptr;
+      for (const auto& e : sk->entities)
+        if (const auto* a = std::get_if<sketch::Arc>(&e))
+          arc = a;
+      IM_CHECK(arc != nullptr);
+      IM_CHECK(std::abs(arc->radius - cell) < 1e-9);
+      IM_CHECK(s_App->sketchEdit.actionMsg.empty());
+      ctx->KeyPress(ImGuiKey_Escape); // Fillet -> Select
+      ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+      ctx->Yield(2);
+    }
+  };
+
+  // A line and an arc (docs/sketching/README.md#fillet): hovering inside the
+  // corner previews the arc and lights the two curves; a radius too large is
+  // refused saying only why -- the largest that fits, through FormatLength
+  // -- never repeating the prompt; that radius then fillets it.
+  t = IM_REGISTER_TEST(engine, "fillet", "line_arc_hover_refusal_and_fit");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(5.0f, 3.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(5.0f, 3.0f, 22.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    // A half disc: the line and the arc share both ends.
+    const uint32_t l = sk->AddEntity(sketch::Line{{0, 0}, {10, 0}});
+    const uint32_t a = sk->AddEntity(sketch::Arc{{5, 0}, 5.0, 0.0, M_PI});
+    sk->constraints.push_back(
+        {sketch::ConstraintKind::Coincident, {l, 1}, {a, 1}, 0.0});
+    sk->constraints.push_back(
+        {sketch::ConstraintKind::Coincident, {a, 2}, {l, 0}, 0.0});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_sk_fillet");
+    ctx->Yield();
+    s_App->sketchEdit.filletRadius = 1.5;
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const glm::vec2 corner =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::dvec2(0, 0));
+    // Inside the corner, clear of both curves' bodies.
+    ctx->MouseMoveToPos(ImVec2(corner.x + 26.0f, corner.y - 26.0f));
+    ctx->Yield(3);
+    const ui::SketchEditState& edit = s_App->sketchEdit;
+    IM_CHECK(edit.hasFilletPreview);
+    IM_CHECK(std::minmax(edit.filletPreviewCurves[0],
+                         edit.filletPreviewCurves[1]) == std::minmax(l, a));
+    IM_CHECK(std::abs(edit.filletPreviewArc.radius - 1.5) < 1e-12);
+    FilletShot(ctx, "fillet_hover_line_arc");
+
+    const std::string prompt = ui::SketchToolPrompt(edit).text;
+    s_App->sketchEdit.filletRadius = 4.0; // the half disc takes 2.5 at most
+    ctx->Yield(2);
+    IM_CHECK(!edit.hasFilletPreview); // nothing would be made
+    const size_t entities = sk->entities.size();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->entities.size(), entities); // nothing changed
+    const std::string& msg = edit.actionMsg;
+    ctx->LogInfo("refusal: %s", msg.c_str());
+    IM_CHECK(msg.rfind("Not filleted: 4 mm does not fit this corner; ", 0) ==
+             0);
+    IM_CHECK(msg.find("is the largest that does") != std::string::npos);
+    // Says only why: nothing of the prompt is repeated.
+    IM_CHECK(msg.find("click") == std::string::npos);
+    IM_CHECK(prompt.find("click inside a corner") != std::string::npos);
+    FilletShot(ctx, "fillet_refusal");
+
+    // The number it names fits.
+    const size_t semi = msg.find("; ") + 2;
+    const double largest = std::stod(msg.substr(semi));
+    IM_CHECK(largest > 2.0 && largest <= 2.5);
+    s_App->sketchEdit.filletRadius = largest;
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    int arcs = 0;
+    for (const auto& e : sk->entities)
+      arcs += std::holds_alternative<sketch::Arc>(e) ? 1 : 0;
+    IM_CHECK_EQ(arcs, 2); // the half disc's own arc and the fillet
+    IM_CHECK(s_App->sketchEdit.actionMsg.empty());
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
   };
 

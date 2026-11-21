@@ -313,8 +313,13 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
   };
   // A line is emphasized on hover only when its *body* is hovered — hovering a
   // vertex highlights just that dot, not the whole line.
+  // The Fillet tool lights the two curves a click would round.
   auto hoveredEntityBody = [&](uint32_t id) {
-    return edit.hasHover && edit.hoveredBody && edit.hoveredRef.entity == id;
+    return (edit.hasHover && edit.hoveredBody &&
+            edit.hoveredRef.entity == id) ||
+           (edit.tool == SketchTool::Fillet && id != 0 &&
+            (edit.filletPreviewCurves[0] == id ||
+             edit.filletPreviewCurves[1] == id));
   };
 
   // Fully-constrained sketches read in a neutral "solved" colour; under-
@@ -419,6 +424,14 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     AppendPrimLine(sk->plane.PlaneToWorld(edit.trimPreviewA),
                    sk->plane.PlaneToWorld(edit.trimPreviewB), 3.4f, trim,
                    prims);
+  }
+  // Fillet preview: the arc a click here would make.
+  if (edit.tool == SketchTool::Fillet && edit.hasFilletPreview) {
+    const std::vector<glm::dvec2> poly =
+        sketch::TessellateEntity(sketch::Entity(edit.filletPreviewArc));
+    for (size_t i = 0; i + 1 < poly.size(); i++)
+      AppendPrimLine(sk->plane.PlaneToWorld(poly[i]),
+                     sk->plane.PlaneToWorld(poly[i + 1]), 3.0f, hov, prims);
   }
   // Trim by dragging: every span the path has crossed, and the path itself.
   if (edit.trimPathActive) {

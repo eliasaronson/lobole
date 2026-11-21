@@ -816,6 +816,10 @@ void SetSketchTool(AppState& state, SketchTool tool) {
   edit.textError.clear();
   if (tool == SketchTool::Text)
     TextToolActivated(state); // default height; a selected label to edit
+  edit.filletFirst = 0;
+  edit.hasFilletPreview = false;
+  if (tool == SketchTool::Fillet)
+    FilletToolActivated(state); // default radius: one grid cell
 }
 
 } // namespace ui

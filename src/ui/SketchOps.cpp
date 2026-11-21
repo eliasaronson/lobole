@@ -1035,6 +1035,15 @@ sketch::Text TextFromToolState(const SketchEditState& edit, glm::dvec2 anchor,
 
 } // namespace
 
+void FilletToolActivated(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  edit.filletFirst = 0;
+  if (edit.filletRadius > 0.0)
+    return;
+  if (SketchFeature* sketch = ResolveActiveSketch(state))
+    edit.filletRadius = SketchGridFor(state, *sketch).step;
+}
+
 void TextToolActivated(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   SketchFeature* sketch = ResolveActiveSketch(state);

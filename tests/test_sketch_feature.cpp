@@ -8,8 +8,11 @@
 #include "TestIO.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Units.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "core/sketch/SketchFillet.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
 
@@ -18,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <set>
 
 using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
@@ -1196,3 +1200,335 @@ TEST_CASE("SiblingRegions expands a pattern member to the whole family",
 #include <iterator>
 
 #include <set>
+
+// --- Fillet of lines and arcs (docs/sketching/README.md#fillet) ------------
+
+namespace {
+
+using FK = sketch::ConstraintKind;
+
+double DistanceToCurve(const sketch::Entity& curve, glm::dvec2 p) {
+  if (const auto* l = std::get_if<sketch::Line>(&curve)) {
+    const glm::dvec2 d = glm::normalize(l->b - l->a);
+    const glm::dvec2 q = p - l->a;
+    return std::abs(q.x * d.y - q.y * d.x);
+  }
+  const auto& a = std::get<sketch::Arc>(curve);
+  return std::abs(glm::length(p - a.center) - a.radius);
+}
+
+// The fillet arc's end (1 or 2) that lies on `curve`, as it was.
+glm::dvec2 EndOn(const sketch::Arc& arc, const sketch::Entity& curve) {
+  const glm::dvec2 e1 = sketch::ArcPointUV(arc, 1),
+                   e2 = sketch::ArcPointUV(arc, 2);
+  return DistanceToCurve(curve, e1) < DistanceToCurve(curve, e2) ? e1 : e2;
+}
+
+// How far the fillet arc is from tangent to `curve` at `at`: the sine of the
+// angle between their tangents there.
+double OffTangent(const sketch::Arc& arc, const sketch::Entity& curve,
+                  glm::dvec2 at) {
+  const glm::dvec2 radial = glm::normalize(at - arc.center);
+  if (const auto* l = std::get_if<sketch::Line>(&curve))
+    return std::abs(glm::dot(radial, glm::normalize(l->b - l->a)));
+  const glm::dvec2 other =
+      glm::normalize(at - std::get<sketch::Arc>(curve).center);
+  return std::abs(radial.x * other.y - radial.y * other.x);
+}
+
+// The whole check of one corner: the tangent points on the curves as they
+// were (1e-9 mm), the arc tangent to both, the sketch solving clean one DOF
+// up (the radius), still in place after the solve, and the profile
+// extruding.
+void CheckFilletedCorner(std::unique_ptr<SketchFeature> sk, uint32_t c1,
+                         uint32_t c2, double r, glm::dvec2 corner) {
+  const sketch::Entity o1 = sk->entities[sk->IndexOfEntity(c1)];
+  const sketch::Entity o2 = sk->entities[sk->IndexOfEntity(c2)];
+  sketch::Solver s0;
+  s0.Load(*sk);
+  const sketch::SolveResult r0 = s0.Solve();
+  REQUIRE(r0.ok);
+  std::string why;
+  const uint32_t arcId = sk->FilletCorner(c1, c2, r, corner, &why);
+  INFO(why);
+  REQUIRE(arcId != 0);
+  const auto check = [&](double tol) {
+    const auto& arc =
+        std::get<sketch::Arc>(sk->entities[sk->IndexOfEntity(arcId)]);
+    CHECK_THAT(arc.radius, WithinAbs(r, tol));
+    for (const sketch::Entity* o : {&o1, &o2}) {
+      const glm::dvec2 t = EndOn(arc, *o);
+      CHECK(DistanceToCurve(*o, t) < tol);
+      CHECK(OffTangent(arc, *o, t) < 1e-9);
+    }
+    // Each curve now ends at its tangent point.
+    const auto endsAt = [&](uint32_t id, const sketch::Entity& o) {
+      const sketch::Entity& e = sk->entities[sk->IndexOfEntity(id)];
+      const glm::dvec2 t = EndOn(arc, o);
+      double best = 1e300;
+      for (uint8_t w : {0, 1, 2})
+        if (!(std::holds_alternative<sketch::Line>(e) && w == 2) &&
+            !(std::holds_alternative<sketch::Arc>(e) && w == 0))
+          best = std::min(best, glm::length(sketch::EntityPointUV(e, w) - t));
+      return best;
+    };
+    CHECK(endsAt(c1, o1) < tol);
+    CHECK(endsAt(c2, o2) < tol);
+  };
+  check(1e-9);
+  sketch::Solver s1;
+  s1.Load(*sk);
+  const sketch::SolveResult r1 = s1.Solve();
+  CHECK(r1.ok);
+  CHECK(r1.conflictingConstraints.empty());
+  CHECK(r1.redundantConstraints.empty());
+  CHECK(r1.dof == r0.dof + 1); // the radius
+  s1.WriteBack(sk->entities);
+  check(1e-9);
+
+  Document doc;
+  doc.AddFeature(std::move(sk));
+  const uint64_t sid = doc.GetFeature(0)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", sid, 2.0, ExtrudeMode::NewBody));
+  CHECK(doc.GetFeature(0)->GetError().empty());
+  CHECK(doc.GetFeature(1)->GetError().empty());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK(doc.GetBodies()[0].shape.Volume() > 0.0);
+}
+
+void Join(SketchFeature& sk, uint32_t a, uint8_t wa, uint32_t b, uint8_t wb) {
+  sk.constraints.push_back({FK::Coincident, {a, wa}, {b, wb}, 0.0});
+}
+
+double Deg(double d) { return d * M_PI / 180.0; }
+
+} // namespace
+
+TEST_CASE("Fillet a line and an arc whose centre is inside the corner",
+          "[sketch][arc][fillet]") {
+  // A half disc: the corner at the origin is the line and the arc's end.
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk->AddEntity(sketch::Line{{0, 0}, {10, 0}});
+  const uint32_t a = sk->AddEntity(sketch::Arc{{5, 0}, 5.0, 0.0, M_PI});
+  Join(*sk, l, 1, a, 1);
+  Join(*sk, a, 2, l, 0);
+  CheckFilletedCorner(std::move(sk), l, a, 1.0, {0, 0});
+}
+
+TEST_CASE("Fillet a line and an arc that bulges into the corner",
+          "[sketch][arc][fillet]") {
+  // A square whose left side is an arc bowed into it.
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const uint32_t b = sk->AddEntity(sketch::Line{{0, 0}, {10, 0}});
+  const uint32_t rgt = sk->AddEntity(sketch::Line{{10, 0}, {10, 10}});
+  const uint32_t t = sk->AddEntity(sketch::Line{{10, 10}, {0, 10}});
+  const uint32_t a = sk->AddEntity(
+      sketch::Arc{{-5, 5}, std::sqrt(50.0), Deg(-45.0), Deg(45.0)});
+  Join(*sk, b, 1, rgt, 0);
+  Join(*sk, rgt, 1, t, 0);
+  Join(*sk, t, 1, a, 2);
+  Join(*sk, a, 1, b, 0);
+  CheckFilletedCorner(std::move(sk), b, a, 1.0, {0, 0});
+}
+
+TEST_CASE("Fillet two arcs meeting convex", "[sketch][arc][fillet]") {
+  // A lens: inside both circles, corners where they cross.
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const double up = std::atan2(3.0, 4.0); // (4, 0) from (0, -3)
+  const uint32_t top = sk->AddEntity(sketch::Arc{{0, -3}, 5.0, up, M_PI - up});
+  const uint32_t bot =
+      sk->AddEntity(sketch::Arc{{0, 3}, 5.0, M_PI + up, 2.0 * M_PI - up});
+  Join(*sk, top, 1, bot, 2);
+  Join(*sk, top, 2, bot, 1);
+  CheckFilletedCorner(std::move(sk), top, bot, 0.5, {4, 0});
+}
+
+TEST_CASE("Fillet two arcs meeting concave", "[sketch][arc][fillet]") {
+  // A crescent: inside the big circle, outside the small one.
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const double y = 25.0 / 8.0, x = std::sqrt(25.0 - y * y);
+  const double aBig = std::atan2(y, x);
+  const double aSmall = std::atan2(y - 4.0, x);
+  const uint32_t big =
+      sk->AddEntity(sketch::Arc{{0, 0}, 5.0, M_PI - aBig, 2.0 * M_PI + aBig});
+  const uint32_t small = sk->AddEntity(
+      sketch::Arc{{0, 4}, 4.0, M_PI - aSmall, 2.0 * M_PI + aSmall});
+  Join(*sk, big, 2, small, 2);
+  Join(*sk, small, 1, big, 1);
+  CheckFilletedCorner(std::move(sk), big, small, 0.3, {x, y});
+}
+
+TEST_CASE("A fillet too large names the largest that fits, and that fits",
+          "[sketch][arc][fillet]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {10, 0}});
+  const uint32_t a = sk.AddEntity(sketch::Arc{{5, 0}, 5.0, 0.0, M_PI});
+  Join(sk, l, 1, a, 1);
+  Join(sk, a, 2, l, 0);
+  const nlohmann::json before = DocumentIO::FeatureToJson(sk);
+  std::string why;
+  double largest = -1.0;
+  CHECK(sk.FilletCorner(l, a, 4.0, glm::dvec2(0, 0), &why, &largest) == 0);
+  CHECK(DocumentIO::FeatureToJson(sk) == before); // a refusal changes nothing
+  INFO(why);
+  CHECK_THAT(why, Catch::Matchers::StartsWith("4 mm does not fit this "
+                                              "corner; "));
+  CHECK_THAT(why, Catch::Matchers::EndsWith(" mm is the largest that does"));
+  REQUIRE(largest > 0.5);
+  REQUIRE(largest < 4.0);
+  CHECK(why.find(units::FormatNumber(largest)) != std::string::npos);
+  CHECK(sk.FilletCorner(l, a, largest, glm::dvec2(0, 0)) != 0);
+}
+
+TEST_CASE("FilletCorner refuses, naming why, and changes nothing",
+          "[sketch][fillet]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {10, 0}});
+  const uint32_t a = sk.AddEntity(sketch::Arc{{5, 0}, 5.0, 0.0, M_PI});
+  const uint32_t sp =
+      sk.AddEntity(sketch::BSpline{{{10, 0}, {12, 3}, {14, -2}, {16, 0}}});
+  const uint32_t ea = sk.AddEntity(
+      sketch::EllipseArc{{-3, 0}, 3.0, 2.0, 0.0, Deg(180.0), Deg(360.0)});
+  const uint32_t c = sk.AddEntity(sketch::Circle{{20, 20}, 2.0});
+  Join(sk, l, 1, a, 1);
+  Join(sk, a, 2, l, 0);
+  const nlohmann::json before = DocumentIO::FeatureToJson(sk);
+  const auto why = [&](uint32_t x, uint32_t y,
+                       std::optional<glm::dvec2> near = std::nullopt) {
+    std::string w;
+    CHECK(sk.FilletCorner(x, y, 1.0, near, &w) == 0);
+    CHECK(DocumentIO::FeatureToJson(sk) == before);
+    return w;
+  };
+  // Two shared ends and no `near`: both named.
+  CHECK(why(l, a).find("share two ends, at (0, 0) and (10, 0)") !=
+        std::string::npos);
+  CHECK(why(l, sp).find("spline " + std::to_string(sp) +
+                        ": a spline end is not filleted yet") == 0);
+  CHECK(why(ea, l).find("elliptical arc " + std::to_string(ea) +
+                        ": an elliptical arc end is not filleted yet") == 0);
+  CHECK(why(c, l).find("is a circle, which has no end") != std::string::npos);
+  CHECK(why(l, l).find("two different curves") != std::string::npos);
+  CHECK(why(c, 999).find("no sketch entity with id 999") == 0);
+}
+
+TEST_CASE("FilletCorner refuses a curve a linked op generates",
+          "[sketch][fillet]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t l1 = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  const uint32_t l2 = sk.AddEntity(sketch::Line{{0, 0}, {0, 4}});
+  const auto copies = sk.AddLinearPattern({l1, l2}, {10, 0}, 2, true);
+  REQUIRE(copies.size() == 2);
+  std::string why;
+  CHECK(sk.FilletCorner(copies[0], copies[1], 1.0, std::nullopt, &why) == 0);
+  CHECK(why.find("is generated by a linked pattern") != std::string::npos);
+  CHECK(sk.GeneratedBy(l1).empty());
+}
+
+TEST_CASE("CornerAt takes the sector the cursor is in", "[sketch][fillet]") {
+  // The owner's corner: a spline, a vertical line and two collinear
+  // horizontal lines, all ending at the origin.
+  struct Ids {
+    uint32_t h1, h2, v, s;
+  };
+  Ids id{};
+  auto make = [&id] {
+    auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+    id.h1 = sk->AddEntity(sketch::Line{{0, 0}, {10, 0}});
+    id.h2 = sk->AddEntity(sketch::Line{{0, 0}, {-10, 0}});
+    id.v = sk->AddEntity(sketch::Line{{0, 0}, {0, 10}});
+    id.s = sk->AddEntity(sketch::BSpline{{{0, 0}, {3, -5}, {6, -6}, {10, -8}}});
+    Join(*sk, id.h1, 0, id.h2, 0);
+    Join(*sk, id.h2, 0, id.v, 0);
+    Join(*sk, id.v, 0, id.s, 0);
+    sk->constraints.push_back({FK::Horizontal, {id.h1, 0}, {}, 0.0});
+    sk->constraints.push_back({FK::Horizontal, {id.h2, 0}, {}, 0.0});
+    sk->constraints.push_back({FK::Vertical, {id.v, 0}, {}, 0.0});
+    return sk;
+  };
+  auto sk = make();
+  const auto& es = sk->entities;
+  using Pair = std::pair<uint32_t, uint32_t>;
+  const auto sorted = [](uint32_t a, uint32_t b) {
+    return a < b ? Pair{a, b} : Pair{b, a};
+  };
+  const auto pair = [&](glm::dvec2 cursor) {
+    const auto c = sketch::CornerAt(es, {0, 0}, cursor, 0.1);
+    REQUIRE(c.has_value());
+    return sorted(c->a.entity, c->b.entity);
+  };
+  CHECK(pair({1, 1}) == sorted(id.h1, id.v));
+  CHECK(pair({-1, 1}) == sorted(id.v, id.h2));
+  CHECK(pair({-1, -1}) == sorted(id.h2, id.s));
+  CHECK(pair({1, -0.2}) == sorted(id.s, id.h1));
+  // On the vertex, four curves end: refused, saying what to do.
+  const auto onVertex = sketch::CornerAt(es, {0, 0}, {0.01, 0.01}, 0.1);
+  REQUIRE(!onVertex.has_value());
+  CHECK(onVertex.error().find("4 curves end at this point; move into the "
+                              "corner") == 0);
+  // A sector bounded by the spline is refused by name in stage A.
+  std::string why;
+  CHECK(sk->FilletCorner(id.h1, id.s, 1.0, glm::dvec2(0, 0), &why) == 0);
+  CHECK(why.find("spline " + std::to_string(id.s)) == 0);
+
+  // Each line sector fillets; the other two curves stay at the corner and
+  // nothing reads redundant.
+  for (int sector = 0; sector < 2; sector++) {
+    auto fresh = make();
+    const uint32_t x = sector == 0 ? id.h1 : id.v;
+    const uint32_t y = sector == 0 ? id.v : id.h2;
+    std::string w;
+    const uint32_t made = fresh->FilletCorner(x, y, 1.0, glm::dvec2(0, 0), &w);
+    INFO(w);
+    REQUIRE(made != 0);
+    sketch::Solver solver;
+    solver.Load(*fresh);
+    const sketch::SolveResult r = solver.Solve();
+    CHECK(r.ok);
+    CHECK(r.redundantConstraints.empty());
+    CHECK(r.conflictingConstraints.empty());
+    solver.WriteBack(fresh->entities);
+    for (uint32_t other : {id.h1, id.h2, id.v})
+      if (other != x && other != y) {
+        const auto& ln = std::get<sketch::Line>(
+            fresh->entities[fresh->IndexOfEntity(other)]);
+        CHECK(glm::length(ln.a) < 1e-9);
+      }
+    const auto& spl =
+        std::get<sketch::BSpline>(fresh->entities[fresh->IndexOfEntity(id.s)]);
+    CHECK(glm::length(spl.poles[0]) < 1e-9);
+    // No coincident is repeated.
+    std::set<std::pair<std::pair<uint32_t, int>, std::pair<uint32_t, int>>>
+        seen;
+    for (const auto& con : fresh->constraints)
+      if (con.kind == FK::Coincident) {
+        const std::pair<uint32_t, int> a{con.a.entity, con.a.which},
+            b{con.b.entity, con.b.which};
+        CHECK(seen.insert(a < b ? std::pair{a, b} : std::pair{b, a}).second);
+      }
+  }
+}
+
+TEST_CASE("CornerAt refuses one curve, a wide side and a straight run",
+          "[sketch][fillet]") {
+  std::vector<sketch::Entity> es = {sketch::Line{{0, 0}, {4, 0}, 1},
+                                    sketch::Line{{0, 0}, {0, 4}, 2}};
+  // Outside the right angle: three quarters of a turn.
+  const auto wide = sketch::CornerAt(es, {0, 0}, {-1, -1}, 0.1);
+  REQUIRE(!wide);
+  CHECK(wide.error().find("wider than half a turn") != std::string::npos);
+  // On the vertex of two curves: the side under half a turn.
+  const auto on = sketch::CornerAt(es, {0, 0}, {0, 0}, 0.1);
+  REQUIRE(on);
+  CHECK(on->a.entity == 1);
+  CHECK(on->b.entity == 2);
+  const auto one = sketch::CornerAt(es, {4, 0}, {3, 1}, 0.1);
+  REQUIRE(!one);
+  CHECK(one.error().find("only line 1 ends here") == 0);
+  std::vector<sketch::Entity> run = {sketch::Line{{0, 0}, {4, 0}, 1},
+                                     sketch::Line{{0, 0}, {-4, 0}, 2}};
+  const auto straight = sketch::CornerAt(run, {0, 0}, {1, 1}, 0.1);
+  REQUIRE(!straight);
+  CHECK(straight.error().find("continue each other") != std::string::npos);
+}

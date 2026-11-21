@@ -1047,14 +1047,27 @@ public:
   std::vector<uint32_t> MirrorEntities(const std::vector<uint32_t>& sourceIds,
                                        uint32_t axisLineId, bool link);
 
-  // Rounds the corner where line `lineId1` and `lineId2` meet with a tangent
-  // arc of the given radius: trims both lines to the tangent points, inserts
-  // the arc, and adds two Tangent + two Coincident constraints (removing the
-  // old corner coincident). Returns the new arc's id, or 0 if the lines don't
-  // share a corner, are parallel, or the radius is too large for either
-  // segment — `whyNot` (when given) receives the specific reason.
-  uint32_t FilletCorner(uint32_t lineId1, uint32_t lineId2, double radius,
-                        std::string* whyNot = nullptr);
+  // Rounds the corner two curves (lines or arcs) make at a shared end with a
+  // tangent arc of `radius` (docs/sketching/README.md#fillet): trims each
+  // curve to its tangent point, inserts the arc joined to both by Coincident
+  // + Tangent, and leaves a construction point at the old corner that every
+  // constraint on the corner ends is re-pointed onto, held on each line's
+  // line and each arc's circle. `nearUV` (sketch mm) picks the corner when the
+  // two share two ends. Returns the arc's id, or 0 with nothing changed and
+  // `whyNot` naming the reason: no shared end, a spline or elliptical arc
+  // (not filleted yet), an entity a linked op or a projection owns, or a
+  // radius too large -- then `largestFit` receives the largest that fits
+  // (0 when none does) and the reason names it.
+  uint32_t FilletCorner(uint32_t id1, uint32_t id2, double radius,
+                        std::optional<glm::dvec2> nearUV = std::nullopt,
+                        std::string* whyNot = nullptr,
+                        double* largestFit = nullptr);
+
+  // What owns entity `id` when something other than the user does -- "a
+  // linked pattern", "a linked mirror", "a linked copy", "a projection", "a
+  // section" -- or "" when nothing does. An edit to such an entity is
+  // re-stamped on the next regeneration, so the editing tools refuse it.
+  std::string GeneratedBy(uint32_t id) const;
 
   // Patterns of `sourceIds`. Linear: `count` instances (incl. the seed) each
   // stepped by `step` in UV. Circular: `count` instances stepped by `stepAngle`

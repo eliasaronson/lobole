@@ -1469,8 +1469,11 @@ _reference("mirror", "Mirror sketch entities across a line entity. sources: "
           "generated entity ids.")
 
 
-_reference("fillet", "Fillet the corner where two sketch lines meet with an "
-          "arc of the given radius. Returns the arc's entity id (arc_id).")
+_reference("fillet", "Round the corner two sketch curves (lines or arcs) "
+          "make at a shared end with a tangent arc: entity1, entity2, "
+          "radius in mm, and near=[u, v] (sketch mm) when the two share two "
+          "ends. A radius too large is refused naming the largest that "
+          "fits. Returns the arc's entity id (arc_id).")
 
 
 _reference("pattern", "Repeat sketch entities in a linear or circular "

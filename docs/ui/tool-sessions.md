@@ -145,6 +145,11 @@ origin that misses the body. Examples in the code:
   chain or curve that is not that profile.
 - Switching a Hole's type sizes the counterbore/countersink from the bore
   unless the user already set those numbers.
+- The sketch Fillet's radius is one cell of the sketch's grid
+  (`SketchGridFor`, sized from the sketch and the part), as Text's cap
+  height is five; a typed radius stays for the session
+  (`fillet/armed_radius_tracks_the_grid`;
+  [sketching](../sketching/README.md#fillet)).
 - Fillet and Chamfer open at a tenth of the target body's thinnest extent,
   rounded to 1/2/5 (`SizeFromBody`); Shell at a tenth of its thinnest wall
   (`SizeFromWall`, `ThinnestWall`: on a body already hollow the extent is

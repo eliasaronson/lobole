@@ -9,9 +9,11 @@
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
 #include "core/Expression.h"
+#include "core/Units.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "core/sketch/SketchFillet.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSelection.h"
@@ -30,6 +32,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <optional>
 #include <vector>
@@ -814,42 +817,152 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   }
 
   if (edit.tool == SketchTool::Fillet) {
-    // Click a corner: fillet the two lines sharing the nearest endpoint.
-    SketchPick vtx = PickSketchPoint(state, *sketch,
-                                     glm::vec2(mousePos.x, mousePos.y), 16.0f);
-    edit.hasHover = vtx.hit;
-    if (vtx.hit)
-      edit.hoveredRef = vtx.ref;
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && vtx.hit) {
-      const size_t vi = sketch->IndexOfEntity(vtx.ref.entity);
-      if (vi != SIZE_MAX) {
-        const glm::dvec2 cornerUV =
-            sketch::EntityPointUV(sketch->entities[vi], vtx.ref.which);
-        std::vector<uint32_t> lines; // lines with an endpoint at the corner
-        for (const auto& e : sketch->entities)
-          if (auto* l = std::get_if<sketch::Line>(&e))
-            if (glm::length(l->a - cornerUV) < 1e-3f ||
-                glm::length(l->b - cornerUV) < 1e-3f)
-              lines.push_back(sketch::EntityId(e));
-        if (lines.size() >= 2) {
-          nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-          if (sketch->FilletCorner(lines[0], lines[1], edit.filletRadius)) {
-            commitMutation(before);
-            edit.actionMsg.clear();
-          } else {
-            edit.actionMsg = "Fillet: radius " +
-                             std::to_string(edit.filletRadius) +
-                             " doesn't fit this corner — try a smaller radius.";
-          }
-        } else {
-          edit.actionMsg = "Fillet: click a corner where two lines meet.";
+    // docs/sketching/README.md#fillet: a click inside a corner rounds the
+    // two curves either side of the cursor (sketch::CornerAt); two curves
+    // picked on their bodies are rounded at their shared end nearest the
+    // second click. Hover previews the arc and lights the two curves.
+    if (edit.filletRadius <= 0.0)
+      FilletToolActivated(state);
+    edit.hasFilletPreview = false;
+    edit.filletPreviewCurves[0] = edit.filletPreviewCurves[1] = 0;
+    if (edit.filletFirst != 0 &&
+        sketch->IndexOfEntity(edit.filletFirst) == SIZE_MAX)
+      edit.filletFirst = 0; // undone or deleted under the tool
+    const glm::vec2 mp(mousePos.x, mousePos.y);
+    const float ppu = std::max(PixelsPerUV(state, sketch->plane, uv), 1e-6f);
+    const auto entityOf = [&](uint32_t id) -> const sketch::Entity* {
+      const size_t i = sketch->IndexOfEntity(id);
+      return i == SIZE_MAX ? nullptr : &sketch->entities[i];
+    };
+    const auto isCurve = [&](uint32_t id) {
+      const sketch::Entity* e = entityOf(id);
+      return e && !std::holds_alternative<sketch::Point>(*e) &&
+             !std::holds_alternative<sketch::Text>(*e);
+    };
+    // The curve end nearest the cursor, in pixels.
+    std::optional<glm::dvec2> vertex;
+    float vertexPx = 0.0f;
+    for (const sketch::Entity& e : sketch->entities)
+      for (uint8_t w : sketch::EndsOf(e)) {
+        const glm::dvec2 p = sketch::EntityPointUV(e, w);
+        const float d = glm::length(SketchUVToScreen(state, sketch->plane, p) -
+                                    glm::vec2(mp));
+        if (!vertex || d < vertexPx) {
+          vertex = p;
+          vertexPx = d;
         }
       }
+    constexpr float kOnVertexPx = 10.0f, kCornerReachPx = 48.0f;
+    const SketchPick body =
+        PickSketchEntity(state, *sketch, mp, kSketchBodyTolPx);
+    const uint32_t bodyId =
+        body.hit && body.body && isCurve(body.ref.entity) ? body.ref.entity : 0;
+
+    // What a click here means: two curves and the corner, a first pick, a
+    // refusal, or nothing (which finishes the tool).
+    struct Target {
+      uint32_t a = 0, b = 0;
+      uint8_t wa = 0, wb = 0;
+      bool ends = false; // wa/wb known (for the preview)
+      glm::dvec2 nearUV{0.0};
+      std::string why;
+    } target;
+    bool firstPick = false;
+    std::optional<std::expected<sketch::Corner, std::string>> corner;
+    if (vertex && vertexPx <= kOnVertexPx) {
+      corner = sketch::CornerAt(sketch->entities, *vertex, uv,
+                                std::numeric_limits<double>::infinity());
+    } else if (edit.filletFirst != 0 && bodyId != 0 &&
+               bodyId != edit.filletFirst) {
+      target.a = edit.filletFirst;
+      target.b = bodyId;
+      target.nearUV = uv;
+      const auto shared =
+          sketch::SharedEnds(*entityOf(target.a), *entityOf(target.b));
+      if (!shared.empty()) {
+        sketch::SharedEnd best = shared[0];
+        for (const sketch::SharedEnd& s : shared)
+          if (glm::length(s.at - uv) < glm::length(best.at - uv))
+            best = s;
+        target.wa = best.w1;
+        target.wb = best.w2;
+        target.ends = true;
+        target.nearUV = best.at;
+      }
+    } else if (vertex && vertexPx <= kCornerReachPx) {
+      corner =
+          sketch::CornerAt(sketch->entities, *vertex, uv, kOnVertexPx / ppu);
+      if (!*corner && bodyId != 0)
+        corner.reset(); // not a corner from here: the body pick below
     }
-    // A tap in empty space or Enter finishes the tool (Escape = abort).
-    if ((ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !vtx.hit) ||
-        ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+    if (corner) {
+      if (*corner) {
+        target.a = (*corner)->a.entity;
+        target.b = (*corner)->b.entity;
+        target.wa = (*corner)->a.which;
+        target.wb = (*corner)->b.which;
+        target.ends = true;
+        target.nearUV = (*corner)->vertex;
+      } else {
+        target.why = corner->error();
+      }
+    } else if (target.a == 0 && bodyId != 0) {
+      firstPick = true;
+    }
+
+    if (target.a != 0) {
+      edit.filletPreviewCurves[0] = target.a;
+      edit.filletPreviewCurves[1] = target.b;
+      if (target.ends)
+        if (const auto geo = sketch::FilletOfCurves(
+                *entityOf(target.a), target.wa, *entityOf(target.b), target.wb,
+                edit.filletRadius)) {
+          edit.hasFilletPreview = true;
+          edit.filletPreviewArc = geo->arc;
+        }
+    } else if (firstPick) {
+      edit.filletPreviewCurves[0] = edit.filletFirst;
+      edit.hasHover = true;
+      edit.hoveredBody = true;
+      edit.hoveredRef = {bodyId, 0};
+    } else if (edit.filletFirst != 0) {
+      edit.filletPreviewCurves[0] = edit.filletFirst;
+    }
+
+    const units::System units = state.ActiveUnits();
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      if (!target.why.empty()) {
+        edit.actionMsg = "Not filleted: " + target.why;
+      } else if (target.a != 0) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+        std::string why;
+        double largest = 0.0;
+        if (sketch->FilletCorner(target.a, target.b, edit.filletRadius,
+                                 target.nearUV, &why, &largest)) {
+          edit.filletFirst = 0;
+          edit.actionMsg.clear();
+          commitMutation(before);
+          return true; // `sketch` may be stale past the commit
+        }
+        edit.actionMsg =
+            "Not filleted: " +
+            (largest > 0.0 ? units::FormatLength(edit.filletRadius, units) +
+                                 " does not fit this corner; " +
+                                 units::FormatLength(largest, units) +
+                                 " is the largest that does"
+                           : why);
+      } else if (firstPick) {
+        edit.filletFirst = bodyId;
+        edit.actionMsg.clear();
+      } else {
+        // A tap in empty space finishes the tool (Escape = abort).
+        edit.tool = SketchTool::Select;
+        edit.filletFirst = 0;
+        edit.actionMsg.clear();
+      }
+    } else if (ImGui::IsKeyPressed(ImGuiKey_Enter)) {
       edit.tool = SketchTool::Select;
+      edit.filletFirst = 0;
       edit.actionMsg.clear();
     }
     return true;

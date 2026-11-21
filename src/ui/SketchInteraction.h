@@ -119,7 +119,8 @@ struct ToolPrompt {
   int step = 0;
   int stepCount = 0;
 };
-ToolPrompt SketchToolPrompt(const SketchEditState& edit);
+ToolPrompt SketchToolPrompt(const SketchEditState& edit,
+                            const units::System& units = {});
 
 // Draws the active tool's staged prompt (+ any transient actionMsg warning) as
 // a pill centred at the top of the viewport. No-op outside sketch edit / for
@@ -300,6 +301,11 @@ bool EditDimensionValue(AppState& state, int dimIndex, double value);
 // commits one undoable edit. Returns false if nothing is selected or the
 // selection isn't a single closed loop.
 bool ApplyOffset(AppState& state);
+
+// Fillet tool (docs/sketching/README.md#fillet). Arming it with no radius
+// chosen yet sets the radius to one cell of the sketch's grid
+// (SketchGridFor) -- never a literal; a typed radius stays for the session.
+void FilletToolActivated(AppState& state);
 
 // Text tool (docs/sketching/README.md#text). Arming it picks the default cap
 // height from the sketch's own size (never a literal) and, when exactly one
