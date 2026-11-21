@@ -5,7 +5,10 @@
 
 #include "core/fem/FemStudy.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
+#include <utility>
 
 namespace ui {
 
@@ -29,5 +32,30 @@ const char* SimLoadCommand(fem::LoadType type);
 const char* SimStudyCommand(fem::AnalysisType type);
 // A load's value as its row's tail: "120 N", "0.5 MPa", "free to turn".
 std::string SimLoadTail(const fem::Load& load);
+
+// The list selection's id of a row that has none of its own
+// (SelectionItem::Kind::SimCase, SimKeep, SimKeepOut): its study and its
+// place in that study's list.
+inline uint64_t SimRowKey(uint64_t studyId, size_t index) {
+  return (studyId << 20) | static_cast<uint64_t>(index & 0xFFFFF);
+}
+inline std::pair<uint64_t, size_t> SimRowOf(uint64_t key) {
+  return {key >> 20, static_cast<size_t>(key & 0xFFFFF)};
+}
+// A row of the Geometry group (SelectionItem::Kind::SimGeometry): the
+// suppressed feature, the symmetry plane or the refinement at `index` of
+// the simulation's lists.
+enum class GeometryRow : uint64_t {
+  Suppressed = 1,
+  Symmetry = 2,
+  Refinement = 3
+};
+inline uint64_t GeometryRowKey(GeometryRow row, size_t index = 0) {
+  return (static_cast<uint64_t>(row) << 40) | static_cast<uint64_t>(index);
+}
+inline std::pair<GeometryRow, size_t> GeometryRowOf(uint64_t key) {
+  return {static_cast<GeometryRow>(key >> 40),
+          static_cast<size_t>(key & ((uint64_t{1} << 40) - 1))};
+}
 
 } // namespace ui

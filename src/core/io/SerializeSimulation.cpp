@@ -67,6 +67,107 @@ json Envelope() {
   return j;
 }
 
+// The geometry step (docs/simulation/README.md#the-geometry-step), vNEXT:
+// absent when there is none.
+json GeometryJson(const fem::SimGeometry& g) {
+  json out = json::object();
+  if (!g.suppressed.empty()) {
+    out["suppressed"] = json::array();
+    for (const fem::SuppressedFeature& f : g.suppressed) {
+      json fj = {{"feature", f.feature}};
+      if (f.document != 0)
+        fj["document"] = f.document;
+      out["suppressed"].push_back(std::move(fj));
+    }
+  }
+  if (g.symmetry.On()) {
+    json sj = json::object();
+    if (g.symmetry.datum != 0)
+      sj["datum"] = g.symmetry.datum;
+    else
+      sj["face"] = ElementRefJson(g.symmetry.face);
+    if (g.symmetry.flip)
+      sj["flip"] = true;
+    out["symmetry"] = std::move(sj);
+  }
+  return out;
+}
+
+fem::SimGeometry GeometryFromJson(const json& j, fem::SubjectKind subject) {
+  readctx::RefuseUnknownKeys(j, {"suppressed", "symmetry"},
+                             "simulation geometry");
+  fem::SimGeometry g;
+  if (j.contains("suppressed")) {
+    const json& list = j.at("suppressed");
+    if (!list.is_array())
+      throw std::runtime_error(std::string("geometry: `suppressed` is a list, "
+                                           "not ") +
+                               list.type_name());
+    for (size_t i = 0; i < list.size(); ++i) {
+      const json& fj = list[i];
+      const std::string at = "geometry.suppressed[" + std::to_string(i) + "]";
+      if (!fj.is_object())
+        throw std::runtime_error(at + " is not an object");
+      readctx::RefuseUnknownKeys(fj, {"feature", "document"}, at);
+      if (!fj.contains("feature") || !readctx::IsWhole(fj.at("feature")) ||
+          fj.at("feature").get<uint64_t>() == 0)
+        throw std::runtime_error(at + ": `feature` is not a feature's id (a "
+                                      "whole number above 0)");
+      fem::SuppressedFeature f;
+      f.feature = fj.at("feature").get<uint64_t>();
+      if (fj.contains("document")) {
+        if (!readctx::IsWhole(fj.at("document")) ||
+            fj.at("document").get<uint64_t>() == 0)
+          throw std::runtime_error(at + ": `document` is not a document's "
+                                        "id (a whole number above 0)");
+        f.document = fj.at("document").get<uint64_t>();
+      }
+      // A part's are its own; an assembly's name the part they are in.
+      if (subject == fem::SubjectKind::Part && f.document != 0)
+        throw std::runtime_error(at + ": a part's simulation suppresses its "
+                                      "own features, with no `document`");
+      if (subject == fem::SubjectKind::Assembly && f.document == 0)
+        throw std::runtime_error(at + ": an assembly's simulation names the "
+                                      "part (`document`) a feature is in");
+      if (g.IsSuppressed(f.document, f.feature))
+        throw std::runtime_error(at + ": feature " + std::to_string(f.feature) +
+                                 " is listed twice");
+      g.suppressed.push_back(f);
+    }
+  }
+  if (j.contains("symmetry")) {
+    const json& sj = j.at("symmetry");
+    if (!sj.is_object())
+      throw std::runtime_error("geometry: `symmetry` is not an object");
+    readctx::RefuseUnknownKeys(sj, {"datum", "face", "flip"},
+                               "geometry.symmetry");
+    if (subject != fem::SubjectKind::Part)
+      throw std::runtime_error("geometry.symmetry: a symmetry cut is a part "
+                               "simulation's");
+    if (sj.contains("datum") == sj.contains("face"))
+      throw std::runtime_error("geometry.symmetry: names its plane by "
+                               "exactly one of `datum` and `face`");
+    if (sj.contains("datum")) {
+      if (!readctx::IsWhole(sj.at("datum")) ||
+          sj.at("datum").get<uint64_t>() == 0)
+        throw std::runtime_error("geometry.symmetry: `datum` is not a "
+                                 "feature's id");
+      g.symmetry.datum = sj.at("datum").get<uint64_t>();
+    } else {
+      g.symmetry.face = ElementRefFromJson(sj.at("face"));
+      if (!g.symmetry.face.IsSet())
+        throw std::runtime_error("geometry.symmetry: `face` names no face");
+    }
+    if (sj.contains("flip")) {
+      if (!sj.at("flip").is_boolean())
+        throw std::runtime_error("geometry.symmetry: `flip` is true or "
+                                 "false");
+      g.symmetry.flip = sj.at("flip").get<bool>();
+    }
+  }
+  return g;
+}
+
 // The document without its derived data: what both forms carry.
 json BodyJson(const fem::SimDocument& sim) {
   json j = Envelope();
@@ -90,6 +191,8 @@ json BodyJson(const fem::SimDocument& sim) {
       mj["refinements"].push_back(RefinementToJson(r));
   }
   j["mesh"] = std::move(mj);
+  if (!sim.Geometry().Empty())
+    j["geometry"] = GeometryJson(sim.Geometry());
   j["studies"] = json::array();
   for (const fem::Study& s : sim.GetStudies())
     j["studies"].push_back(StudyToJson(s));
@@ -183,8 +286,8 @@ void CheckSimEnvelope(const json& j) {
   CheckEnvelope(j, "simulation");
   readctx::RefuseUnknownKeys(j,
                              {"format", "version", "kind", "subject", "roles",
-                              "mesh", "studies", "mesh_keys", "results",
-                              "meshes"},
+                              "mesh", "geometry", "studies", "mesh_keys",
+                              "results", "meshes"},
                              "simulation");
   RequireLists(j, {{"studies", 223}});
   if (!j.contains("subject"))
@@ -261,6 +364,13 @@ std::unique_ptr<fem::SimDocument> FromBodyJson(const json& j) {
       return RefinementFromJson(refinements[i]);
     }));
   sim->SetMesh(std::move(mesh));
+  if (j.contains("geometry")) {
+    const json& gj = j.at("geometry");
+    if (!gj.is_object())
+      throw std::runtime_error(std::string("`geometry` is an object, not ") +
+                               gj.type_name());
+    sim->SetGeometry(GeometryFromJson(gj, sim->Subject().kind));
+  }
   const json studies = InlineList(j, "studies");
   for (size_t i = 0; i < studies.size(); ++i)
     sim->RestoreStudy(

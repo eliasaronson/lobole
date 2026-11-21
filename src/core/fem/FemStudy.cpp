@@ -2433,6 +2433,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
                                        onAxis ? LoadType::Pin : LoadType::Fixed,
                                        o, a)};
         sf.holds = std::move(held);
+        sf.symmetry = load.symmetryCut;
         supportFacets.push_back(std::move(sf));
       } else {
         std::vector<int> tris;

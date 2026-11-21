@@ -868,7 +868,8 @@ const std::vector<Command>& Table() {
          {"sim.fixed", "sim.pin", "sim.contact", "sim.roller", "sim.held",
           "sim.cylindrical", "sim.temperature", "sim.convection", "sim.force",
           "sim.pressure", "sim.torque", "sim.remote", "sim.heat_flux",
-          "sim.heat_source", "sim.keep", "sim.probe"}) {
+          "sim.heat_source", "sim.keep", "sim.probe", "sim.suppress",
+          "sim.symmetry", "sim.refine"}) {
       const SimulationState::Tool t = SimCommandTool(id);
       simAdd(id, [t](AppState& s) {
         SimulationArmTool(

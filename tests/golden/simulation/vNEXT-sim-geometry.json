@@ -1,0 +1,42 @@
+{
+  "format": "designer-document",
+  "version": 228,
+  "kind": "simulation",
+  "subject": {
+    "kind": "part",
+    "document": 2,
+    "name": "Bracket"
+  },
+  "mesh": {
+    "size": 4.0
+  },
+  "geometry": {
+    "suppressed": [
+      {"feature": 5},
+      {"feature": 7}
+    ],
+    "symmetry": {
+      "datum": 9,
+      "flip": true
+    }
+  },
+  "studies": [
+    {
+      "id": 10,
+      "loads": [
+        {
+          "face": {
+            "element": "1/face1",
+            "feature_id": 1
+          },
+          "id": 11,
+          "magnitude": 0.0,
+          "type": "fixed"
+        }
+      ],
+      "mesh_size": 0.0,
+      "name": "Half bracket",
+      "type": "Study"
+    }
+  ]
+}

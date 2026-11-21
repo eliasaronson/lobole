@@ -13,6 +13,7 @@
 #include "core/fem/FemFields.h"
 #include "core/fem/SimDocument.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DocumentSlots.h"
 #include "ui/Icons.h"
 #include "ui/ListSelection.h"
@@ -231,9 +232,11 @@ MeshRow MeshRowOf(AppState& state, const StudyHost& host, const fem::Study& s) {
 // case): it alone is lit, so the studies and loads let go.
 void FocusOnly(AppState& state, FocusKind kind, uint64_t studyId,
                uint64_t id = 0, int index = -1) {
+  using K = SelectionItem::Kind;
   std::erase_if(state.selection.items, [](const SelectionItem& it) {
-    return it.kind == SelectionItem::Kind::SimStudy ||
-           it.kind == SelectionItem::Kind::SimLoad;
+    return it.kind == K::SimStudy || it.kind == K::SimLoad ||
+           it.kind == K::SimCase || it.kind == K::SimKeep ||
+           it.kind == K::SimKeepOut || it.kind == K::SimGeometry;
   });
   state.simulation.tool = SimulationState::Tool::None;
   FocusSim(state, kind, studyId, id, index);
@@ -244,6 +247,42 @@ bool Focused(const AppState& state, FocusKind kind, uint64_t studyId,
   const SimulationState::Focus& f = state.simulation.focus;
   return f.kind == kind && f.studyId == studyId && f.id == id &&
          f.index == index;
+}
+
+// What a row's stored mesh or result takes on disk, said in its tooltip
+// (docs/simulation/README.md#how-a-simulation-is-saved). Measured only for
+// the row the pointer was on last frame: a save's bytes of a big mesh are
+// not worth working out for every row every frame.
+std::string g_hoveredRow;
+std::string DiskLine(AppState& state, const std::string& rowId,
+                     const std::vector<uint64_t>& meshKeys, uint64_t resultOf) {
+  if (g_hoveredRow != rowId)
+    return "";
+  const SimStoredBytes& bytes = SimStoredBytesOf(state);
+  size_t mesh = 0, result = 0;
+  for (const uint64_t k : meshKeys)
+    if (const auto it = bytes.meshes.find(k); it != bytes.meshes.end())
+      mesh += it->second;
+  if (resultOf != 0)
+    if (const auto it = bytes.results.find(resultOf); it != bytes.results.end())
+      result = it->second;
+  std::string out;
+  if (result > 0)
+    out += "Result on disk: " + ByteSize(result);
+  if (mesh > 0)
+    out += std::string(out.empty() ? "" : "\n") +
+           "Mesh on disk: " + ByteSize(mesh);
+  if (out.empty())
+    out =
+        meshKeys.empty() && resultOf == 0 ? "" : "Not stored: nothing on disk";
+  return out;
+}
+// Remembers the row under the pointer for DiskLine.
+void NoteHovered(const ListRowResult& res, const std::string& rowId) {
+  if (res.hovered)
+    g_hoveredRow = rowId;
+  else if (g_hoveredRow == rowId)
+    g_hoveredRow.clear();
 }
 
 // A mesh row: the simulation's (###sim_mesh, shown for `s`, a study that
@@ -263,9 +302,20 @@ void DrawMeshRow(AppState& state, const StudyHost& host, const fem::Study& s,
                   (m.warnings == 1 ? "" : "s") + " in the mesh report; ";
   }
   row.tooltip += m.st.word;
+  // The mesh it stands for, as the project keeps it: the simulation's own,
+  // or the one the study's result was solved on.
+  std::vector<uint64_t> keys;
+  if (fem::SimDocument::SharesMesh(s))
+    keys = host.sim->DocumentMeshKeys();
+  if (keys.empty())
+    if (const fem::StudyRuntime* rt = host.Results(s.id))
+      keys = rt->meshKeys;
+  if (const std::string disk = DiskLine(state, id, keys, 0); !disk.empty())
+    row.tooltip += "\n" + disk;
   row.dotColor = m.st.dot;
   row.selected = selected;
   const ListRowResult res = ListRow(row);
+  NoteHovered(res, id);
   if (res.clicked || res.doubleClicked)
     FocusOnly(state, FocusKind::Mesh, s.id);
 }
@@ -380,6 +430,107 @@ bool DrawSubject(AppState& state, const StudyHost& host) {
   return open;
 }
 
+// The geometry step's group (docs/simulation/README.md#the-geometry-step):
+// the features suppressed for the analysis, the symmetry plane and the
+// simulation mesh's refinements, one row each. Absent while there is
+// nothing in it, as a study's loads are: the tools that put things here are
+// the toolbar's (Suppress, Symmetry, Refine). A click shows the group in the
+// tool window, with the geometry check.
+void DrawGeometryGroup(AppState& state, const StudyHost& host) {
+  const fem::SimGeometry& g = host.sim->Geometry();
+  const std::vector<fem::Refinement>& refs = host.sim->Mesh().refinements;
+  const int count = static_cast<int>(g.suppressed.size()) +
+                    (g.symmetry.On() ? 1 : 0) + static_cast<int>(refs.size());
+  if (count == 0)
+    return;
+  ImGui::Spacing();
+  if (!SectionHeader("Geometry###sim_geometry", count, true))
+    return;
+  using K = SelectionItem::Kind;
+  std::vector<uint64_t> order;
+  for (size_t i = 0; i < g.suppressed.size(); ++i)
+    order.push_back(GeometryRowKey(GeometryRow::Suppressed, i));
+  if (g.symmetry.On())
+    order.push_back(GeometryRowKey(GeometryRow::Symmetry));
+  for (size_t i = 0; i < refs.size(); ++i)
+    order.push_back(GeometryRowKey(GeometryRow::Refinement, i));
+  bool remove = false;
+  const auto draw = [&](ListRowSpec& row, uint64_t key, const char* noun) {
+    row.selected = IsSelected(state, K::SimGeometry, key);
+    const bool selected = row.selected;
+    row.menu = [&state, &remove, key, noun, selected] {
+      if (!selected)
+        ListRowContext(state, K::SimGeometry, key, false);
+      const size_t n = SelectedIds(state, K::SimGeometry).size();
+      if (ImGui::MenuItem((ICON_FA_TRASH_CAN " " +
+                           (n <= 1 ? std::string("Remove ") + noun
+                                   : "Remove " + std::to_string(n) + " rows") +
+                           "###sim_geometry_del")
+                              .c_str()))
+        remove = true;
+    };
+    const ListRowResult res = ListRow(row);
+    if (res.clicked || res.doubleClicked) {
+      FocusSim(state, FocusKind::Geometry, state.simulation.activeStudyId);
+      ListRowClicked(state, K::SimGeometry, key, order, /*ownKindOnly=*/false);
+    }
+  };
+  // A feature's name, read on the part it is in now.
+  const auto featureName = [&](const fem::SuppressedFeature& f) {
+    const Document* part =
+        f.document == 0 ? host.GeometryPart() : PartDocById(state, f.document);
+    const Feature* feat = part ? part->FindFeatureById(f.feature) : nullptr;
+    return feat ? feat->GetName() : "feature " + std::to_string(f.feature);
+  };
+  for (size_t i = 0; i < g.suppressed.size(); ++i) {
+    const fem::SuppressedFeature& f = g.suppressed[i];
+    ListRowSpec row;
+    row.glyph = CommandIcon("sim.suppress");
+    row.label = featureName(f) + "###sim_suppressed_" +
+                std::to_string(f.document) + "_" + std::to_string(f.feature);
+    row.tail = "suppressed";
+    row.tooltip = "Out of the analysis only: the part keeps it.";
+    if (f.document != 0)
+      if (const std::optional<size_t> at = SlotIndexById(state, f.document))
+        row.tooltip += " On '" + state.parts[*at].name + "'.";
+    row.menuId = "###sim_suppressed_ctx_" + std::to_string(i);
+    draw(row, GeometryRowKey(GeometryRow::Suppressed, i), "suppression");
+  }
+  if (g.symmetry.On()) {
+    std::string plane = "face " + ShortFace(g.symmetry.face.name);
+    if (g.symmetry.datum != 0) {
+      const Document* part = host.GeometryPart();
+      const Feature* d =
+          part ? part->FindFeatureById(g.symmetry.datum) : nullptr;
+      plane = d ? d->GetName() : "datum " + std::to_string(g.symmetry.datum);
+    }
+    ListRowSpec row;
+    row.glyph = CommandIcon("sim.symmetry");
+    row.label = "Symmetry  " + plane + "###sim_symmetry";
+    row.tail = g.symmetry.flip ? "other half" : "half";
+    row.tooltip = "The analysis is cut on it and the cut held by a roller: "
+                  "a half model of a part and loads symmetric about it.";
+    row.menuId = "###sim_symmetry_ctx";
+    draw(row, GeometryRowKey(GeometryRow::Symmetry), "symmetry plane");
+  }
+  for (size_t i = 0; i < refs.size(); ++i) {
+    const fem::Refinement& r = refs[i];
+    ListRowSpec row;
+    row.glyph = CommandIcon("sim.refine");
+    row.label = "Refined  " + ShortFace(r.face.name) + "###sim_refinement_" +
+                std::to_string(i);
+    char tail[32];
+    std::snprintf(tail, sizeof(tail), "%.3g mm", r.size.value);
+    row.tail = tail;
+    row.tooltip = "Elements of " + std::string(tail) + " on " + r.face.name +
+                  ", in the simulation's mesh";
+    row.menuId = "###sim_refinement_ctx_" + std::to_string(i);
+    draw(row, GeometryRowKey(GeometryRow::Refinement, i), "refinement");
+  }
+  if (remove)
+    DeleteSelection(state);
+}
+
 // Everything under one study, in the order the work goes.
 void DrawStudyChildren(AppState& state, const StudyHost& host,
                        const fem::Study& s,
@@ -470,7 +621,40 @@ void DrawStudyChildren(AppState& state, const StudyHost& host,
       FocusOnly(state, FocusKind::Study, sid);
   }
 
+  // Load cases, kept faces and keep-outs: rows with no id of their own,
+  // reached by the list selection through their study and place
+  // (SimRowKey), so Delete and Shift reach them as they reach loads.
+  using K = SelectionItem::Kind;
+  bool removeRows = false;
+  const auto keyed = [&](K kind, FocusKind focus, size_t i, ListRowSpec& row,
+                         const char* noun, const std::vector<uint64_t>& order) {
+    const uint64_t key = SimRowKey(sid, i);
+    row.selected = IsSelected(state, kind, key) ||
+                   Focused(state, focus, sid, 0, static_cast<int>(i));
+    row.menu = [&state, &removeRows, kind, key, noun] {
+      if (!IsSelected(state, kind, key))
+        ListRowContext(state, kind, key, false);
+      const size_t n = SelectedIds(state, kind).size();
+      if (ImGui::MenuItem(
+              (ICON_FA_TRASH_CAN " " + DeleteLabel(n, noun) + "###sim_row_del")
+                  .c_str()))
+        removeRows = true;
+    };
+    const ListRowResult res = ListRow(row);
+    if (res.clicked || res.doubleClicked) {
+      FocusSim(state, focus, sid, 0, static_cast<int>(i));
+      ListRowClicked(state, kind, key, order, /*ownKindOnly=*/false);
+    }
+  };
+  const auto orderOf = [&](size_t n) {
+    std::vector<uint64_t> order;
+    for (size_t i = 0; i < n; ++i)
+      order.push_back(SimRowKey(sid, i));
+    return order;
+  };
+
   // Load cases: each its own solve.
+  const std::vector<uint64_t> caseOrder = orderOf(s.loadCases.size());
   for (size_t i = 0; i < s.loadCases.size(); ++i) {
     const fem::LoadCase& c = s.loadCases[i];
     const int n = static_cast<int>(
@@ -487,33 +671,23 @@ void DrawStudyChildren(AppState& state, const StudyHost& host,
       std::snprintf(w, sizeof(w), ", weight %.3g", c.weight.value);
       row.tail += w;
     }
-    row.selected = Focused(state, FocusKind::Case, sid, 0, static_cast<int>(i));
-    const ListRowResult res = ListRow(row);
-    if (res.clicked || res.doubleClicked)
-      FocusOnly(state, FocusKind::Case, sid, 0, static_cast<int>(i));
+    if (n > 0)
+      row.tooltip = "Delete takes it once its loads are gone";
+    row.menuId = "###case_ctx_" + std::to_string(sid) + "_" + std::to_string(i);
+    keyed(K::SimCase, FocusKind::Case, i, row, "load case", caseOrder);
   }
 
   // A topology study's kept faces and keep-outs.
+  const std::vector<uint64_t> keepOrder = orderOf(s.keepFaces.size());
   for (size_t i = 0; i < s.keepFaces.size(); ++i) {
     ListRowSpec row;
     row.glyph = CommandIcon("sim.keep");
     row.label = s.keepFaces[i].name + "###keep_row_" + std::to_string(i);
     row.tail = "kept solid";
-    row.selected = Focused(state, FocusKind::Keep, sid, 0, static_cast<int>(i));
     row.menuId = "###keep_ctx_" + std::to_string(i);
-    const ElementRef f = s.keepFaces[i];
-    row.menu = [&state, sid, f] {
-      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###keep_del"))
-        ModifyStudy(state, sid, "Remove keep face", [&](fem::Study& cs) {
-          std::erase_if(cs.keepFaces, [&](const ElementRef& k) {
-            return k.featureId == f.featureId && k.name == f.name;
-          });
-        });
-    };
-    const ListRowResult res = ListRow(row);
-    if (res.clicked || res.doubleClicked)
-      FocusOnly(state, FocusKind::Keep, sid, 0, static_cast<int>(i));
+    keyed(K::SimKeep, FocusKind::Keep, i, row, "kept face", keepOrder);
   }
+  const std::vector<uint64_t> keepOutOrder = orderOf(s.keepOuts.size());
   for (size_t i = 0; i < s.keepOuts.size(); ++i) {
     const fem::KeepOut& k = s.keepOuts[i];
     char box[160];
@@ -525,28 +699,19 @@ void DrawStudyChildren(AppState& state, const StudyHost& host,
     row.label = (k.body.empty() ? std::string(box) : "body " + k.body) +
                 "###keepout_row_" + std::to_string(i);
     row.tail = "kept empty";
-    row.selected =
-        Focused(state, FocusKind::KeepOut, sid, 0, static_cast<int>(i));
     row.menuId = "###keepout_ctx_" + std::to_string(i);
-    const int at = static_cast<int>(i);
-    row.menu = [&state, sid, at] {
-      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###keepout_del"))
-        ModifyStudy(state, sid, "Remove keep-out", [&](fem::Study& cs) {
-          if (at < static_cast<int>(cs.keepOuts.size()))
-            cs.keepOuts.erase(cs.keepOuts.begin() + at);
-        });
-    };
-    const ListRowResult res = ListRow(row);
-    if (res.clicked || res.doubleClicked)
-      FocusOnly(state, FocusKind::KeepOut, sid, 0, static_cast<int>(i));
+    keyed(K::SimKeepOut, FocusKind::KeepOut, i, row, "keep-out", keepOutOrder);
   }
+  if (removeRows)
+    DeleteSelection(state); // the row's menu put them in the selection
 
   // The result, once there is one (or one is being made).
   const RowState st = StudyState(state, host, s);
   if (host.Results(sid) != nullptr || st.word == "solving") {
     ListRowSpec row;
+    const std::string rowId = "###sim_result_" + std::to_string(sid);
     row.glyph = CommandIcon("sim.result");
-    row.label = "Result###sim_result_" + std::to_string(sid);
+    row.label = "Result" + rowId;
     if (sim.activeStudyId == sid && sim.field != SimulationState::Field::None)
       if (const auto f = ResultFieldOf(sim.field)) {
         row.tail = fem::SpecOf(*f).title;
@@ -556,8 +721,13 @@ void DrawStudyChildren(AppState& state, const StudyHost& host,
       }
     row.dotColor = st.dot;
     row.tooltip = st.word;
+    if (const fem::StudyRuntime* rt = host.Results(sid))
+      if (const std::string disk = DiskLine(state, rowId, rt->meshKeys, sid);
+          !disk.empty())
+        row.tooltip += "\n" + disk;
     row.selected = Focused(state, FocusKind::Result, sid);
     const ListRowResult res = ListRow(row);
+    NoteHovered(res, rowId);
     if (res.clicked || res.doubleClicked)
       FocusOnly(state, FocusKind::Result, sid);
   }
@@ -680,6 +850,7 @@ void DrawSimTree(AppState& state) {
     return;
   }
   DrawSharedMeshRow(state, host);
+  DrawGeometryGroup(state, host);
 
   // A face picked in the viewport on a load selects that load's row, once
   // per pick: the tree and the picture agree on what is selected.

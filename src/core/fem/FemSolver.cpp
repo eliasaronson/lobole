@@ -2243,6 +2243,8 @@ std::vector<int> SupportEdgeZones(const FemMesh& mesh,
     return {};
   bool anyRim = false;
   for (size_t si = 0; si < supports.size(); ++si) {
+    if (supports[si].symmetry)
+      continue; // a cut, not a support's edge
     const auto rim = SupportRim(mesh, supports[si].tris);
     if (rim.empty())
       continue;

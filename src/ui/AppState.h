@@ -62,6 +62,9 @@
 #include <utility>
 #include <vector>
 
+namespace fem {
+class AnalysisPartCache;
+}
 class Camera;
 class MeshRenderer;
 class OutlineRenderer;
@@ -646,6 +649,7 @@ struct MeasureState {
 // derived data on the Document; this holds only transient UI/display state.
 struct ShownField; // ui/SimulationView.h
 struct StudyCheck; // ui/SimulationView.h
+struct SimGeometryCheck; // ui/SimulationView.h
 struct SimulationState {
   bool active = false;        // in simulation mode (the mode gate)
   uint64_t activeStudyId = 0; // study being edited/viewed (0 = none)
@@ -666,7 +670,11 @@ struct SimulationState {
       Keep,    // index = the kept face
       KeepOut, // index = the keep-out
       Result,
-      Check
+      Check,
+      // The geometry step (docs/simulation/README.md#the-geometry-step):
+      // the simulation's Geometry group, its suppressed features, its
+      // symmetry plane, its refinements and the geometry check.
+      Geometry
     };
     Kind kind = Kind::None;
     uint64_t studyId = 0;
@@ -705,7 +713,15 @@ struct SimulationState {
     // #rollers-held-directions-and-cylindrical-supports).
     Roller,
     Held,
-    Cylindrical
+    Cylindrical,
+    // The geometry step's tools (docs/simulation/README.md
+    // #the-geometry-step): Suppress takes the feature that made the face
+    // clicked out of the analysis (it stays armed, for the next hole);
+    // Symmetry cuts the analysis on the plane clicked; Refine sets a local
+    // element size on the face clicked.
+    Suppress,
+    Symmetry,
+    Refine
   };
   Tool tool = Tool::None;
 
@@ -786,6 +802,19 @@ struct SimulationState {
     ElementRef face;
   };
   std::vector<ProbePin> probes;
+  // The Refine tool's size (mm), value+expr: until one is typed, half the
+  // element size the face would be meshed at (SimulationArmTool).
+  double pendingRefineMm = 0.0;
+  std::string pendingRefineExpr;
+  // The Symmetry tool: keep the side the clicked face's normal points
+  // away from.
+  bool pendingSymmetryFlip = false;
+  // A result on a symmetry plane drawn with its mirror image
+  // (set_result_display {mirror}). Display only.
+  bool mirror = false;
+  // The geometry check (fem::CheckSimGeometry) for the tool window, cached
+  // against what it was computed from (ui::CachedGeometryCheck).
+  std::shared_ptr<const SimGeometryCheck> geometryCheck;
   // The load case the next force or pressure goes in, on a study with cases
   // (docs/topopt/README.md#load-cases); empty or gone = the first.
   std::string pendingCase;
@@ -1255,9 +1284,21 @@ struct SelectionItem {
     // id) and a support or a load (id = the load's id, which the
     // simulation's one counter keeps unique across its studies).
     SimStudy,
-    SimLoad
+    SimLoad,
+    // The rest of the simulation tree's rows (docs/ui/selection.md
+    // #lists-one-gesture-one-delete), so Delete and Shift reach them as they
+    // reach studies and loads: a load case (id = its study, element.name =
+    // its name), a topology study's kept face (id = its study, element = the
+    // face) and keep-out (id = its study, element.name = its index), and a
+    // row of the Geometry group (element.name "suppressed" with id = the
+    // feature and element.featureId = its part document (0 on a part),
+    // "symmetry", or "refinement" with id = its index).
+    SimCase,
+    SimKeep,
+    SimKeepOut,
+    SimGeometry
   };
-  static constexpr int kKindCount = static_cast<int>(Kind::SimLoad) + 1;
+  static constexpr int kKindCount = static_cast<int>(Kind::SimGeometry) + 1;
   Kind kind = Kind::Feature;
   uint64_t id = 0;    // Feature/Occurrence/Mate id; Body: its createdBy
   ElementRef element; // Face/Edge/SketchRegion: {featureId, stable name}
@@ -2129,6 +2170,10 @@ struct AppState {
     std::unique_ptr<Document> doc;
   };
   std::map<std::pair<uint64_t, uint64_t>, ConfiguredSource> configuredSources;
+  // A simulation's analysis parts: its subject regenerated without the
+  // features suppressed for the analysis (fem::AnalysisPartCache), kept
+  // across frames so a plan per frame regenerates once per edit.
+  std::shared_ptr<fem::AnalysisPartCache> simAnalysisParts;
 
   // Dimension-placement tool (D4): armed from the panel with a kind, then the
   // user clicks projected edges/circles on the sheet to pick refs; the dim is

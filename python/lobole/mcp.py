@@ -706,7 +706,11 @@ The loop that works — follow it every time:
    margin: a printed plastic softens at its heat deflection temperature
    long before a stress fails it.
 8c. JUDGING A STUDY. A result is an answer only once you have read what
-   says how far to trust it: rpc('check_study') before the run (every
+   says how far to trust it: rpc('check_sim_geometry') before meshing (the
+   holes, fillets and logos smaller than the elements, each with its
+   feature: suppress them for the analysis with rpc('set_sim_geometry'),
+   which leaves the part as it is, unless the stress there is what you
+   are asking about); rpc('check_study') before the run (every
    problem it would refuse, at once); the mesh report (mesh_study's
    findings: walls one element through, refinements that did not take, the
    worst elements); study_results' convergence.status (a peak that has not
@@ -2140,6 +2144,28 @@ _reference("set_simulation", "Edit what a simulation's studies share: "
           "One undo step; the results it reaches read stale.")
 
 
+_reference("set_sim_geometry", "Edit the geometry every study of a "
+          "simulation sees; the part itself is never changed. suppress / "
+          "unsuppress: features (ids or names) out of the analysis or back "
+          "-- fastener holes, logos and small fillets mesh to many elements "
+          "for nothing (on an assembly's simulation, `part` names whose). "
+          "symmetry: {datum} or {face} (a flat face), the plane a static or "
+          "thermal study of a symmetric part and load is cut on, a roller "
+          "on the cut: half the elements, the same peak stress and "
+          "deflection, half the reactions; flip keeps the other side, null "
+          "removes it. Refused, changing nothing, where a study would then "
+          "refuse (a load on a face a suppressed feature made). Run "
+          "check_sim_geometry first: it says what to suppress.")
+
+
+_reference("check_sim_geometry", "Read-only, before meshing: what in a "
+          "study's analysis shape is smaller than the element size it is "
+          "meshed at -- edges, narrow faces, walls and gaps -- each with "
+          "the feature that made it and whether it can be suppressed. "
+          "Suppress those (set_sim_geometry) or refine there "
+          "(add_refinement) rather than meshing them at their size.")
+
+
 _reference("clear_sim_storage", "Drop a simulation's stored meshes and "
           "results (not undoable; the next run rebuilds them). Returns "
           "{results, meshes} removed.")
@@ -2179,10 +2205,13 @@ _reference("remove_keep_face", "Remove a keep face ({feature_id, element}) from 
 
 _reference("add_refinement", "Add a per-face mesh refinement (smaller elements on one "
           "face). face is {feature_id, element}; size is mm (number or "
-          "expression).")
+          "expression). With study, that study's own (it then meshes "
+          "apart); without, the simulation's mesh, which every study that "
+          "sets none shares.")
 
 
-_reference("remove_refinement", "Remove the refinement on a face ({feature_id, element}).")
+_reference("remove_refinement", "Remove the refinement on a face ({feature_id, element}): "
+          "the study's, or with no study the simulation mesh's.")
 
 
 _reference("add_load", "Add a boundary condition to a study. type is 'fixed' "

@@ -475,6 +475,9 @@ struct SupportFacets {
     int count = 0;
   };
   std::vector<NodeDirs> holds;
+  // The symmetry cut's roller (Load::symmetryCut): its rim is where the
+  // half model is cut, not a support's edge, so SupportEdgeZones skips it.
+  bool symmetry = false;
 };
 FemResults::SupportEdgePeak
 FindSupportEdgePeak(const FemMesh& mesh, const FemResults& results,

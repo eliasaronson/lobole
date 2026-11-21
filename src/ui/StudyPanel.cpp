@@ -26,6 +26,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/FileDialogs.h"
+#include "ui/FloatingWindow.h" // RecordViewportObstacle
 #include "ui/Icons.h"
 #include "ui/ListSelection.h" // IsSelected (a picked load lights its face)
 #include "ui/Overlays.h"      // ViewportDrawList
@@ -33,6 +34,7 @@
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h"    // BeginToolWindowFrame
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
+#include "ui/SimGeometryPanel.h"
 #include "ui/SimRunActions.h"
 #include "ui/SimTree.h"
 #include "ui/SimulationActions.h"
@@ -846,28 +848,8 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
                       "solid design domain, with these loads and cases. The "
                       "shape's runs now; run the solid's to compare.");
 
-  // Display: the grey iso-surface (Shape), the density colormap (Density), or
-  // the normal model (Off), plus the iso-surface threshold.
-  ImGui::SeparatorText("Display");
-  int field = sim.field == SimulationState::Field::Shape     ? 1
-              : sim.field == SimulationState::Field::Density ? 2
-                                                             : 0;
-  WrapRow topoRow;
-  topoRow.Next(RadioWidth("Off"));
-  bool changed = ImGui::RadioButton("Off###topo_field_off", &field, 0);
-  topoRow.Next(RadioWidth("Shape"));
-  changed |= ImGui::RadioButton("Shape###topo_field_shape", &field, 1);
-  topoRow.Next(RadioWidth("Density"));
-  changed |= ImGui::RadioButton("Density###topo_field_density", &field, 2);
-  if (changed)
-    sim.field = field == 1   ? SimulationState::Field::Shape
-                : field == 2 ? SimulationState::Field::Density
-                             : SimulationState::Field::None;
-  float thr = sim.topoThreshold;
-  LeftLabel("Threshold (0=auto)");
-  if (ImGui::SliderFloat("###topo_threshold", &thr, 0.0f, 1.0f, "%.2f"))
-    sim.topoThreshold = thr;
-
+  // The shape or the density, and the iso-surface's threshold, are the
+  // legend's (DrawLegendControls).
   // Shape guide: show the optimized shape translucent in the modeling
   // workspace (visible after exiting simulation mode) to re-model against.
   bool ghost = state.topoGhostStudyId == s.id;
@@ -895,15 +877,13 @@ void DrawBucklingResults(AppState& state, const fem::Study& s,
     ImGui::TextColored(kMuted, "No buckling result.");
     return;
   }
-  for (int i = 0; i < (int)b->results.modes.size(); ++i) {
-    char lbl[64];
-    std::snprintf(lbl, sizeof(lbl), "Mode %d:  x %.4g###buckle_mode_%d", i + 1,
-                  b->results.modes[i].factor, i);
-    if (ImGui::Selectable(lbl, sim.activeMode == i)) {
-      sim.activeMode = i;
-      sim.field = SimulationState::Field::Displacement; // show the shape
-    }
-  }
+  // The mode shown is the legend's; the one on show is marked here.
+  for (int i = 0; i < (int)b->results.modes.size(); ++i)
+    ImGui::TextColored(sim.activeMode == i &&
+                               sim.field != SimulationState::Field::None
+                           ? ImVec4(1, 1, 1, 1)
+                           : kMuted,
+                       "Mode %d:  x %.4g", i + 1, b->results.modes[i].factor);
   const fem::StudyBodyResult::Buckling& k = b->buckling;
   const auto fmt = [](const char* f, double v) {
     char buf[96];
@@ -933,14 +913,6 @@ void DrawBucklingResults(AppState& state, const fem::Study& s,
                 fmt("The first mode bends a %.2g mm wall with one element "
                     "through it.",
                     k.wallMm));
-  ImGui::SeparatorText("Display");
-  bool showing = sim.field != SimulationState::Field::None;
-  if (ImGui::Checkbox("Show mode shape###buckle_show", &showing))
-    sim.field = showing ? SimulationState::Field::Displacement
-                        : SimulationState::Field::None;
-  LeftLabel("Deform");
-  ImGui::SliderFloat("###buckle_deform", &sim.deformScale, 0.0f, 100.0f,
-                     "%.0fx");
 }
 
 // A thermal study's answer (docs/simulation/README.md#thermal): each
@@ -1219,153 +1191,6 @@ void DrawStudyCheck(AppState& state, const fem::Study& s) {
   }
 }
 
-// How a solved result is shown (docs/simulation/README.md#results-display):
-// which field, how far it is deformed, and the legend's range. One combo
-// holds every field the study's kind has; one the result lacks is listed
-// greyed with why.
-void DrawResultDisplay(AppState& state, const fem::Study& s) {
-  SimulationState& sim = state.simulation;
-  using F = SimulationState::Field;
-  ImGui::SeparatorText("Display");
-  static constexpr F kStatic[] = {
-      F::VonMises,        F::Displacement,     F::PrincipalMax,
-      F::PrincipalMid,    F::PrincipalMin,     F::FactorOfSafety,
-      F::AcrossLayers,    F::InterlayerFactor, F::PlasticStrain,
-      F::ContactPressure, F::Temperature};
-  static constexpr F kThermal[] = {F::Temperature, F::HeatFlux};
-  const bool thermal = s.type == fem::AnalysisType::Thermal;
-  const auto label = [](F f) -> std::string {
-    if (f == F::None)
-      return "Off";
-    std::string t = fem::SpecOf(*ResultFieldOf(f)).title;
-    if (!t.empty() && f != F::VonMises)
-      t[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(t[0])));
-    return t;
-  };
-  // What this study's kind has at all: a plastic strain only with
-  // plasticity, a contact pressure only with a contact, a temperature only
-  // under a thermal load.
-  const auto offered = [&](F f) {
-    if (f == F::PlasticStrain)
-      return s.nonlinear.plasticity;
-    if (f == F::ContactPressure)
-      return fem::HasContact(s);
-    if (f == F::Temperature && !thermal)
-      return s.thermalLoad.On();
-    return true;
-  };
-  LeftLabel("Field");
-  if (ImGui::BeginCombo("###result_field", label(sim.field).c_str())) {
-    const auto choose = [&](F f) {
-      if (sim.field != f) {
-        sim.field = f;
-        sim.clampLo = sim.clampHi = false; // a range is one field's
-      }
-      if (f != F::None)
-        sim.meshView = SimulationState::MeshView::Off;
-    };
-    if (ImGui::Selectable("Off###field_off", sim.field == F::None))
-      choose(F::None);
-    const auto item = [&](F f) {
-      if (!offered(f))
-        return;
-      const std::string why = FieldRefusal(state, s.id, f);
-      const std::string id =
-          label(f) + "###field_" + fem::SpecOf(*ResultFieldOf(f)).key;
-      ImGui::BeginDisabled(!why.empty());
-      if (ImGui::Selectable(id.c_str(), sim.field == f))
-        choose(f);
-      ImGui::EndDisabled();
-      if (!why.empty() &&
-          ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("%s", why.c_str());
-    };
-    if (thermal)
-      for (F f : kThermal)
-        item(f);
-    else
-      for (F f : kStatic)
-        item(f);
-    ImGui::EndCombo();
-  }
-  const ShownField* shown = sim.shown.get();
-  const bool layered =
-      sim.field == F::AcrossLayers || sim.field == F::InterlayerFactor;
-  if (layered) {
-    // The build direction: a question asked of the result, so it is here
-    // with the field and not in the study.
-    int axis = std::abs(sim.layerNormal.x) > 0.5   ? 0
-               : std::abs(sim.layerNormal.y) > 0.5 ? 1
-                                                   : 2;
-    LeftLabel("Layers along");
-    static const char* kAxes[] = {"X", "Y", "Z"};
-    if (ImGui::Combo("###result_layer_axis", &axis, kAxes, 3)) {
-      sim.layerNormal = glm::dvec3(0.0);
-      sim.layerNormal[axis] = 1.0;
-    }
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("The direction the part was built up in, in its "
-                        "own axes.");
-  }
-  if (!thermal) {
-    LeftLabel("Deform");
-    ImGui::SliderFloat("###deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
-  }
-  if (sim.field == F::None || shown == nullptr || shown->mesh)
-    return;
-  // The legend's range: an end left empty is the field's own. Past an end
-  // the picture takes the over or the under colour.
-  const auto bound = [&](const char* id, const char* hint, bool& on,
-                         double& v) {
-    char buf[32] = "";
-    if (on)
-      std::snprintf(buf, sizeof(buf), "%.4g", v);
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.6f);
-    if (ImGui::InputTextWithHint(id, hint, buf, sizeof(buf))) {
-      char* end = nullptr;
-      const double d = std::strtod(buf, &end);
-      on = end != buf && *end == '\0' && std::isfinite(d);
-      if (on)
-        v = d;
-    }
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Empty: the field's own %s.", hint);
-  };
-  const float column = ImGui::GetFontSize() * 7.0f;
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Range");
-  ImGui::SameLine(column);
-  bound("###result_range_lo", "min", sim.clampLo, sim.rangeLo);
-  ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-  bound("###result_range_hi", "max", sim.clampHi, sim.rangeHi);
-  if (!shown->unit.empty()) {
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-    ImGui::TextColored(kMuted, "%s", shown->unit.c_str());
-  }
-  // The yield as the top of a stress, so what is over it reads as yielded;
-  // and the markers at the field's ends.
-  const bool stress = sim.field == F::VonMises ||
-                      sim.field == F::PrincipalMax ||
-                      sim.field == F::PrincipalMin;
-  ImGui::SetCursorPosX(column);
-  if (stress) {
-    const std::optional<double> yield = YieldClampMPa(state, s.id);
-    ImGui::BeginDisabled(!yield.has_value());
-    if (ImGui::Button("Above yield###result_range_yield")) {
-      sim.clampHi = true;
-      sim.rangeHi = *yield;
-    }
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-      ImGui::SetTooltip("%s", yield ? "Tops the range at the material's "
-                                      "yield strength: what is over it "
-                                      "takes the over colour."
-                                    : "The material has no yield strength.");
-    ImGui::SameLine();
-  }
-  ImGui::Checkbox("Mark max, min###result_extremes", &sim.showExtremes);
-}
-
 // A solved result out to a file for another post-processor
 // (docs/simulation/README.md#vtu-export). Disabled, saying why, when the
 // session holds only the result's surface.
@@ -1446,13 +1271,12 @@ void DrawResults(AppState& state, const fem::Study& s) {
   }
   if (s.type == fem::AnalysisType::Thermal) {
     DrawThermalResults(*rt);
-    DrawResultDisplay(state, s);
     DrawResultExport(state, s);
     return;
   }
   if (s.type == fem::AnalysisType::Modal) {
-    // Natural frequencies: a selectable list; picking one shows that mode
-    // shape in the viewport.
+    // Natural frequencies: the numbers; which mode shape is drawn is the
+    // legend's.
     ImGui::SeparatorText("Natural frequencies");
     const fem::StudyBodyResult* b = nullptr;
     for (const auto& br : rt->bodies)
@@ -1460,25 +1284,14 @@ void DrawResults(AppState& state, const fem::Study& s) {
         b = &br;
         break;
       }
-    if (b) {
-      for (int i = 0; i < (int)b->results.modes.size(); ++i) {
-        char lbl[64];
-        std::snprintf(lbl, sizeof(lbl), "Mode %d:  %.4g Hz", i + 1,
-                      b->results.modes[i].frequencyHz);
-        if (ImGui::Selectable(lbl, sim.activeMode == i)) {
-          sim.activeMode = i;
-          sim.field = SimulationState::Field::Displacement; // show the shape
-        }
-      }
-    }
-    ImGui::SeparatorText("Display");
-    bool showing = sim.field != SimulationState::Field::None;
-    if (ImGui::Checkbox("Show mode shape###modal_show", &showing))
-      sim.field = showing ? SimulationState::Field::Displacement
-                          : SimulationState::Field::None;
-    LeftLabel("Deform");
-    ImGui::SliderFloat("###modal_deform", &sim.deformScale, 0.0f, 100.0f,
-                       "%.0fx");
+    // The mode shown is the legend's; the one on show is marked here.
+    if (b)
+      for (int i = 0; i < (int)b->results.modes.size(); ++i)
+        ImGui::TextColored(
+            sim.activeMode == i && sim.field != SimulationState::Field::None
+                ? ImVec4(1, 1, 1, 1)
+                : kMuted,
+            "Mode %d:  %.4g Hz", i + 1, b->results.modes[i].frequencyHz);
     return;
   }
 
@@ -1586,15 +1399,13 @@ void DrawResults(AppState& state, const fem::Study& s) {
         vm = std::max(vm, b.Case(static_cast<int>(k)).maxVonMises);
         disp = std::max(disp, b.Case(static_cast<int>(k)).maxDisplacement);
       }
-      char lbl[160];
-      std::snprintf(lbl, sizeof(lbl), "%s:  %.4g mm, %.3g MPa###case_sel_%zu",
-                    rt->caseNames[k].c_str(), disp, vm, k);
-      if (ImGui::Selectable(lbl, sim.activeCase == static_cast<int>(k)))
-        sim.activeCase = static_cast<int>(k);
+      // The case shown is the legend's; the one on show is marked here.
+      ImGui::TextColored(
+          sim.activeCase == static_cast<int>(k) ? ImVec4(1, 1, 1, 1) : kMuted,
+          "%s:  %.4g mm, %.3g MPa", rt->caseNames[k].c_str(), disp, vm);
     }
   }
 
-  DrawResultDisplay(state, s);
   DrawResultExport(state, s);
 
   // Probing (docs/simulation/README.md#probing-a-face): the stress ON a face
@@ -2439,6 +2250,12 @@ const char* ToolTitle(SimulationState::Tool t) {
     return "Held directions";
   case T::Cylindrical:
     return "Cylindrical support";
+  case T::Suppress:
+    return "Suppress for the analysis";
+  case T::Symmetry:
+    return "Symmetry plane";
+  case T::Refine:
+    return "Refine";
   case T::None:
     break;
   }
@@ -2457,8 +2274,8 @@ void DrawSimulationToolWindow(AppState& state) {
   // A focus whose thing went (a study deleted, an undo) shows nothing.
   const SimulationState::Focus f = sim.focus;
   const fem::Study* fs = f.studyId != 0 ? host.Find(f.studyId) : nullptr;
-  const bool needsStudy =
-      f.kind != K::None && f.kind != K::Subject && f.kind != K::Participant;
+  const bool needsStudy = f.kind != K::None && f.kind != K::Subject &&
+                          f.kind != K::Participant && f.kind != K::Geometry;
   if (needsStudy && fs == nullptr)
     sim.focus = {};
   const bool armed = sim.tool != SimulationState::Tool::None && active;
@@ -2512,6 +2329,9 @@ void DrawSimulationToolWindow(AppState& state) {
     case K::Check:
       title = "Check: " + fs->name;
       break;
+    case K::Geometry:
+      title = "Geometry";
+      break;
     case K::None:
       break;
     }
@@ -2522,6 +2342,10 @@ void DrawSimulationToolWindow(AppState& state) {
       if (!sim.placeRefusal.empty())
         MessageText(kError, sim.placeRefusal);
       DrawProbes(state, *active);
+    } else if (sim.tool == SimulationState::Tool::Suppress ||
+               sim.tool == SimulationState::Tool::Symmetry ||
+               sim.tool == SimulationState::Tool::Refine) {
+      DrawSimGeometryTool(state);
     } else {
       DrawArmedTool(state, *active);
     }
@@ -2558,6 +2382,9 @@ void DrawSimulationToolWindow(AppState& state) {
       break;
     case K::Check:
       DrawStudyCheck(state, *fs);
+      break;
+    case K::Geometry:
+      DrawSimGeometryWindow(state);
       break;
     case K::None:
       break;
@@ -2638,21 +2465,282 @@ ImU32 Turbo(float x) {
 }
 } // namespace
 
-void DrawFieldLegend(AppState& state) {
-  const SimulationState& sim = state.simulation;
+namespace {
+
+// The result's controls, at the top of the legend they act on
+// (docs/simulation/README.md#results-display): the field, the mode or the
+// load case, the deformation, the range and the markers, and on a half
+// model its mirror image. What the study's kind does not have is not
+// offered; a field its result does not hold is listed greyed with why.
+void DrawLegendControls(AppState& state, const fem::Study& s,
+                        const fem::StudyRuntime& rt) {
+  SimulationState& sim = state.simulation;
+  using F = SimulationState::Field;
   const StudyHost host = StudyHostOf(state);
-  // What the overlay last built (ui::ShownField): the legend describes the
+  const bool thermal = s.type == fem::AnalysisType::Thermal;
+  const bool modal = s.type == fem::AnalysisType::Modal ||
+                     s.type == fem::AnalysisType::Buckling;
+  const bool topo = s.type == fem::AnalysisType::Topology;
+  const float labelW = ImGui::GetFontSize() * 4.2f;
+  const float fieldW = ImGui::GetFontSize() * 9.5f;
+  const auto label = [&](const char* text) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(kMuted, "%s", text);
+    ImGui::SameLine(labelW);
+    ImGui::SetNextItemWidth(fieldW);
+  };
+  const auto title = [](F f) -> std::string {
+    if (f == F::None)
+      return "Off";
+    if (f == F::Shape)
+      return "Shape";
+    if (f == F::Density)
+      return "Density";
+    std::string t = fem::SpecOf(*ResultFieldOf(f)).title;
+    if (!t.empty() && f != F::VonMises)
+      t[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(t[0])));
+    return t;
+  };
+  const auto choose = [&](F f) {
+    if (sim.field != f) {
+      sim.field = f;
+      sim.clampLo = sim.clampHi = false; // a range is one field's
+    }
+    if (f != F::None)
+      sim.meshView = SimulationState::MeshView::Off;
+  };
+
+  // The field.
+  std::string current = title(sim.field);
+  if (modal && sim.field != F::None)
+    current = "Mode shape";
+  label("Field");
+  if (ImGui::BeginCombo("###result_field", current.c_str())) {
+    if (ImGui::Selectable("Off###field_off", sim.field == F::None))
+      choose(F::None);
+    if (modal) {
+      if (ImGui::Selectable("Mode shape###field_mode_shape",
+                            sim.field != F::None))
+        choose(F::Displacement);
+    } else if (topo) {
+      if (ImGui::Selectable("Shape###field_shape", sim.field == F::Shape))
+        choose(F::Shape);
+      if (ImGui::Selectable("Density###field_density", sim.field == F::Density))
+        choose(F::Density);
+    } else {
+      static constexpr F kStatic[] = {
+          F::VonMises,        F::Displacement,     F::PrincipalMax,
+          F::PrincipalMid,    F::PrincipalMin,     F::FactorOfSafety,
+          F::AcrossLayers,    F::InterlayerFactor, F::PlasticStrain,
+          F::ContactPressure, F::Temperature};
+      static constexpr F kThermal[] = {F::Temperature, F::HeatFlux};
+      // What this study's kind has at all: a plastic strain only with
+      // plasticity, a contact pressure only with a contact, a
+      // temperature only under a thermal load.
+      const auto offered = [&](F f) {
+        if (f == F::PlasticStrain)
+          return s.nonlinear.plasticity;
+        if (f == F::ContactPressure)
+          return fem::HasContact(s);
+        if (f == F::Temperature && !thermal)
+          return s.thermalLoad.On();
+        return true;
+      };
+      const auto item = [&](F f) {
+        if (!offered(f))
+          return;
+        const std::string why = FieldRefusal(state, s.id, f);
+        const std::string id =
+            title(f) + "###field_" + fem::SpecOf(*ResultFieldOf(f)).key;
+        ImGui::BeginDisabled(!why.empty());
+        if (ImGui::Selectable(id.c_str(), sim.field == f))
+          choose(f);
+        ImGui::EndDisabled();
+        if (!why.empty() &&
+            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip("%s", why.c_str());
+      };
+      if (thermal)
+        for (F f : kThermal)
+          item(f);
+      else
+        for (F f : kStatic)
+          item(f);
+    }
+    ImGui::EndCombo();
+  }
+  if (sim.field == F::None)
+    return;
+
+  // The mode, or the load case, shown.
+  if (modal) {
+    const fem::StudyBodyResult* b = nullptr;
+    for (const fem::StudyBodyResult& br : rt.bodies)
+      if (!br.results.modes.empty()) {
+        b = &br;
+        break;
+      }
+    if (b != nullptr) {
+      const int n = static_cast<int>(b->results.modes.size());
+      sim.activeMode = std::clamp(sim.activeMode, 0, n - 1);
+      const auto modeText = [&](int i) {
+        char buf[64];
+        if (s.type == fem::AnalysisType::Buckling)
+          std::snprintf(buf, sizeof(buf), "%d:  x %.4g", i + 1,
+                        b->results.modes[i].factor);
+        else
+          std::snprintf(buf, sizeof(buf), "%d:  %.4g Hz", i + 1,
+                        b->results.modes[i].frequencyHz);
+        return std::string(buf);
+      };
+      label("Mode");
+      if (ImGui::BeginCombo("###result_mode",
+                            modeText(sim.activeMode).c_str())) {
+        for (int i = 0; i < n; ++i)
+          if (ImGui::Selectable(
+                  (modeText(i) + "###result_mode_" + std::to_string(i)).c_str(),
+                  sim.activeMode == i))
+            sim.activeMode = i;
+        ImGui::EndCombo();
+      }
+    }
+  } else if (!rt.caseNames.empty() && !topo) {
+    sim.activeCase = std::clamp(sim.activeCase, 0,
+                                static_cast<int>(rt.caseNames.size()) - 1);
+    label("Case");
+    if (ImGui::BeginCombo("###result_case",
+                          rt.caseNames[sim.activeCase].c_str())) {
+      for (size_t k = 0; k < rt.caseNames.size(); ++k)
+        if (ImGui::Selectable(
+                (rt.caseNames[k] + "###result_case_" + std::to_string(k))
+                    .c_str(),
+                sim.activeCase == static_cast<int>(k)))
+          sim.activeCase = static_cast<int>(k);
+      ImGui::EndCombo();
+    }
+  }
+
+  // The build direction of the layered fields: a question asked of the
+  // result, so it is here with the field.
+  if (sim.field == F::AcrossLayers || sim.field == F::InterlayerFactor) {
+    int axis = std::abs(sim.layerNormal.x) > 0.5   ? 0
+               : std::abs(sim.layerNormal.y) > 0.5 ? 1
+                                                   : 2;
+    label("Layers");
+    static const char* kAxes[] = {"along X", "along Y", "along Z"};
+    if (ImGui::Combo("###result_layer_axis", &axis, kAxes, 3)) {
+      sim.layerNormal = glm::dvec3(0.0);
+      sim.layerNormal[axis] = 1.0;
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("The direction the part was built up in, in its "
+                        "own axes.");
+  }
+
+  if (topo) {
+    if (sim.field == F::Shape) {
+      float thr = sim.topoThreshold;
+      label("Threshold");
+      if (ImGui::SliderFloat("###result_threshold", &thr, 0.0f, 1.0f,
+                             thr == 0.0f ? "auto" : "%.2f"))
+        sim.topoThreshold = thr;
+    }
+    return;
+  }
+  if (!thermal) {
+    label("Deform");
+    ImGui::SliderFloat("###deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
+  }
+
+  // The range: an end left empty is the field's own; past an end the
+  // picture takes the over or the under colour.
+  const ShownField* shown = sim.shown.get();
+  if (!modal && shown != nullptr && !shown->mesh && !shown->normalized) {
+    const auto bound = [&](const char* id, const char* hint, bool& on,
+                           double& v) {
+      char buf[32] = "";
+      if (on)
+        std::snprintf(buf, sizeof(buf), "%.4g", v);
+      ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
+      if (ImGui::InputTextWithHint(id, hint, buf, sizeof(buf))) {
+        char* end = nullptr;
+        const double d = std::strtod(buf, &end);
+        on = end != buf && *end == '\0' && std::isfinite(d);
+        if (on)
+          v = d;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Empty: the field's own %s.", hint);
+    };
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(kMuted, "Range");
+    ImGui::SameLine(labelW);
+    bound("###result_range_lo", "min", sim.clampLo, sim.rangeLo);
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    bound("###result_range_hi", "max", sim.clampHi, sim.rangeHi);
+    if (!shown->unit.empty()) {
+      ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+      ImGui::TextColored(kMuted, "%s", shown->unit.c_str());
+    }
+    // The yield as the top of a stress, so what is over it reads as
+    // yielded; and the markers at the field's ends.
+    const bool stress = sim.field == F::VonMises ||
+                        sim.field == F::PrincipalMax ||
+                        sim.field == F::PrincipalMin;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelW -
+                         ImGui::GetStyle().WindowPadding.x);
+    if (stress) {
+      const std::optional<double> yield = YieldClampMPa(state, s.id);
+      ImGui::BeginDisabled(!yield.has_value());
+      if (ImGui::SmallButton("Above yield###result_range_yield")) {
+        sim.clampHi = true;
+        sim.rangeHi = *yield;
+      }
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", yield ? "Tops the range at the material's "
+                                        "yield strength: what is over it "
+                                        "takes the over colour."
+                                      : "The material has no yield strength.");
+      ImGui::SameLine();
+    }
+    ImGui::Checkbox("Max, min###result_extremes", &sim.showExtremes);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Mark the field's maximum and minimum, with their "
+                        "values.");
+  }
+  // A half model, drawn with its mirror image.
+  if (host && host.sim->Geometry().symmetry.On()) {
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelW -
+                         ImGui::GetStyle().WindowPadding.x);
+    ImGui::Checkbox("Mirror the half###result_mirror", &sim.mirror);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("The study solved half the part, cut on its symmetry "
+                        "plane: draw the other half as its mirror image.");
+  }
+}
+
+} // namespace
+
+void DrawFieldLegend(AppState& state) {
+  SimulationState& sim = state.simulation;
+  const StudyHost host = StudyHostOf(state);
+  if (!sim.IsActive() || !host)
+    return;
+  // What the overlay last built (ui::ShownField): the bar describes the
   // picture that is drawn, so a field the result does not hold, the grey
   // Shape iso-surface and the plain mesh have no colour bar.
   const ShownField* shown = sim.shown.get();
-  if (!sim.IsActive() || !host || shown == nullptr || shown->plain)
-    return;
-  if (shown->mesh ? sim.meshView == SimulationState::MeshView::Off
-                  : sim.field == SimulationState::Field::None)
-    return;
   const fem::StudyRuntime* rt = host.Results(sim.activeStudyId);
   const fem::Study* study = host.Find(sim.activeStudyId);
-  if (!shown->mesh && rt == nullptr)
+  // The controls are the result's: while there is one to show. Over the
+  // mesh view they are its Field alone, which puts the mesh away.
+  const bool controls = study != nullptr && rt != nullptr;
+  bool bar = shown != nullptr && !shown->plain &&
+             (shown->mesh
+                  ? sim.meshView != SimulationState::MeshView::Off
+                  : sim.field != SimulationState::Field::None && rt != nullptr);
+  if (!controls && !bar)
     return;
   const bool buckling = study && study->type == fem::AnalysisType::Buckling;
   const bool modal =
@@ -2663,73 +2751,47 @@ void DrawFieldLegend(AppState& state) {
   // analysis, the mode and its frequency, the factor the deformation is
   // drawn at. A colorbar with a number and no subject was a picture a
   // reader had to trust.
-  ImDrawList* dl = ViewportDrawList();
   const float lineH = ImGui::GetTextLineHeight();
-  const float barW = 14.0f, barH = 160.0f, capH = 8.0f;
-  const float pad = 10.0f, margin = 12.0f, tickGap = 8.0f;
+  // Shorter under the controls, so the legend stays a corner of the view.
+  const float barW = 14.0f, barH = controls ? 120.0f : 160.0f, capH = 8.0f;
+  const float margin = 12.0f, tickGap = 8.0f;
   const bool extremes =
-      !shown->mesh && !shown->normalized && shown->hasExtremes;
+      bar && !shown->mesh && !shown->normalized && shown->hasExtremes;
   std::vector<std::string> head;
   if (study) {
     head.push_back(study->name + ", " +
-                   (shown->mesh                                 ? "mesh"
+                   (bar && shown->mesh                          ? "mesh"
                     : buckling                                  ? "buckling"
                     : modal                                     ? "modal"
                     : topo                                      ? "topology"
                     : study->type == fem::AnalysisType::Thermal ? "thermal"
                                                                 : "static"));
   }
-  if (modal && !shown->mesh) {
-    const fem::FemResults::ModeShape* mode = nullptr;
-    size_t modes = 0;
-    for (const fem::StudyBodyResult& b : rt->bodies) {
-      if (b.results.modes.empty())
-        continue;
-      modes = b.results.modes.size();
-      const int mi = std::clamp(sim.activeMode, 0, (int)modes - 1);
-      mode = &b.results.modes[mi];
-      break;
-    }
-    if (mode) {
-      char buf[96];
-      if (buckling)
-        std::snprintf(buf, sizeof(buf), "mode %d of %zu, factor x %.4g",
-                      std::clamp(sim.activeMode, 0, (int)modes - 1) + 1, modes,
-                      mode->factor);
-      else
-        std::snprintf(buf, sizeof(buf), "mode %d of %zu, %.4g Hz",
-                      std::clamp(sim.activeMode, 0, (int)modes - 1) + 1, modes,
-                      mode->frequencyHz);
-      head.push_back(buf);
-    }
-  }
-  if (!shown->mesh && sim.deformScale > 0.0f && !topo) {
+  // The deformation and the case are the controls' when they are drawn;
+  // a mesh view has none.
+  if (bar && !controls && !shown->mesh && sim.deformScale > 0.0f && !topo) {
     char buf[64];
     std::snprintf(buf, sizeof(buf), "deformation x%.3g", sim.deformScale);
     head.push_back(buf);
   }
-  if (!shown->mesh && rt != nullptr && !rt->caseNames.empty() && !modal)
-    head.push_back(
-        "case " +
-        rt->caseNames[std::clamp(sim.activeCase, 0,
-                                 static_cast<int>(rt->caseNames.size()) - 1)]);
-  // The quantity last, nearest the bar, its unit once here and not on the
-  // ticks.
-  const std::string title = shown->unit.empty()
-                                ? shown->title
+  std::string title;
+  if (bar)
+    title = shown->unit.empty() ? shown->title
                                 : shown->title + " (" + shown->unit + ")";
 
   // The ticks: the ends and the quarters, so a colour halfway up the bar is
   // a number too.
   char buf[160];
   std::string ticks[5];
-  for (int k = 0; k <= 4; ++k) {
-    std::snprintf(buf, sizeof(buf), "%.3g",
-                  shown->barLo + (shown->barHi - shown->barLo) * (k / 4.0));
-    ticks[k] = buf;
+  if (bar) {
+    for (int k = 0; k <= 4; ++k) {
+      std::snprintf(buf, sizeof(buf), "%.3g",
+                    shown->barLo + (shown->barHi - shown->barLo) * (k / 4.0));
+      ticks[k] = buf;
+    }
+    if (shown->topOpen)
+      ticks[4] += "+";
   }
-  if (shown->topOpen)
-    ticks[4] += "+";
 
   // Under the bar: where the hot end is, in world millimetres and on which
   // body (the magenta cross marks it), and with the markers on, the other
@@ -2742,7 +2804,7 @@ void DrawFieldLegend(AppState& state) {
                   at.y, at.z, body.empty() ? "" : " on ", body.c_str());
     captions.push_back(buf);
   };
-  if (shown->mesh) {
+  if (bar && shown->mesh) {
     if (shown->reversed) {
       std::snprintf(buf, sizeof(buf), "worst %.2f", shown->lo);
       captions.push_back(buf);
@@ -2757,79 +2819,100 @@ void DrawFieldLegend(AppState& state) {
     }
   }
 
-  // --- Layout, from the viewport's lower-left corner up.
-  const float x = state.viewportPos.x + margin + pad;
-  const float bottom =
-      state.viewportPos.y + state.viewportSize.y - margin - pad;
-  const float capsTop = bottom - lineH * (float)captions.size();
-  const float y1 = capsTop - lineH * 0.5f - (captions.empty() ? 0.0f : 6.0f) -
-                   (shown->under ? capH : 0.0f);
-  const float y0 = y1 - barH;
-  const float titleY =
-      y0 - (shown->over ? capH : 0.0f) - lineH * 0.5f - 6.0f - lineH;
-  const float headY = titleY - lineH * (float)head.size();
-  float width = ImGui::CalcTextSize(title.c_str()).x;
-  for (const std::string& h : head)
-    width = std::max(width, ImGui::CalcTextSize(h.c_str()).x);
-  for (const std::string& t : ticks)
-    width = std::max(width, barW + tickGap + ImGui::CalcTextSize(t.c_str()).x);
-  for (const std::string& c : captions)
-    width = std::max(width, ImGui::CalcTextSize(c.c_str()).x);
-  // A backdrop, so the legend reads over any colour and nothing drawn in
-  // the scene (a glyph, an edge) runs through its text.
-  const ImVec2 boxLo(x - pad, headY - pad),
-      boxHi(x + width + pad, bottom + pad);
-  dl->AddRectFilled(boxLo, boxHi, IM_COL32(18, 20, 26, 232), 6.0f);
+  // One window in the viewport's lower-left corner: the controls, then
+  // what the picture is, then the bar. Its own window so its widgets take
+  // the clicks, and a backdrop so it reads over any colour.
+  ImGui::SetNextWindowPos(
+      ImVec2(state.viewportPos.x + margin,
+             state.viewportPos.y + state.viewportSize.y - margin),
+      ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(18, 20, 26, 232));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
+  const ImGuiWindowFlags flags =
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoFocusOnAppearing;
+  const bool open = ImGui::Begin("##FieldLegend", nullptr, flags);
+  ImGui::PopStyleVar(2);
+  ImGui::PopStyleColor();
+  if (!open) {
+    ImGui::End();
+    return;
+  }
+  RecordViewportObstacle(state); // Fit keeps the model out from under it
   const ImU32 dim = IM_COL32(255, 255, 255, 190);
-  float ty = headY;
-  for (const std::string& line : head) {
-    dl->AddText(ImVec2(x, ty), dim, line.c_str());
-    ty += lineH;
+  for (const std::string& line : head)
+    ImGui::TextColored(ImVec4(1, 1, 1, 0.75f), "%s", line.c_str());
+  if (controls) {
+    DrawLegendControls(state, *study, *rt);
+    // What the controls changed is drawn next frame: read it again.
+    shown = sim.shown.get();
+    bar = bar && shown != nullptr &&
+          (shown->mesh ? sim.meshView != SimulationState::MeshView::Off
+                       : sim.field != SimulationState::Field::None);
   }
-  dl->AddText(ImVec2(x, titleY), IM_COL32_WHITE, title.c_str());
-
-  // A vertical Turbo colorbar, the high value at the top; a factor's runs
-  // the other way, its low end the hot one.
-  const auto colour = [&](float t) {
-    return Turbo(shown->reversed ? 1.0f - t : t);
-  };
-  const int segs = 48;
-  for (int i = 0; i < segs; ++i) {
-    const float t0 = i / (float)segs, t1 = (i + 1) / (float)segs;
-    dl->AddRectFilledMultiColor(ImVec2(x, y1 - t1 * barH),
-                                ImVec2(x + barW, y1 - t0 * barH), colour(t1),
-                                colour(t1), colour(t0), colour(t0));
+  if (bar) {
+    if (controls)
+      ImGui::Spacing();
+    ImGui::TextUnformatted(title.c_str());
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    float tickW = 0.0f;
+    for (const std::string& t : ticks)
+      tickW = std::max(tickW, ImGui::CalcTextSize(t.c_str()).x);
+    const float topCap = shown->over ? capH : 0.0f;
+    const float bottomCap = shown->under ? capH : 0.0f;
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(barW + tickGap + tickW,
+                        topCap + barH + bottomCap + lineH * 0.5f + 4.0f));
+    const float x = at.x;
+    const float y0 = at.y + lineH * 0.5f + topCap;
+    const float y1 = y0 + barH;
+    // A vertical Turbo colorbar, the high value at the top; a factor's runs
+    // the other way, its low end the hot one.
+    const auto colour = [&](float t) {
+      return Turbo(shown->reversed ? 1.0f - t : t);
+    };
+    const int segs = 48;
+    for (int i = 0; i < segs; ++i) {
+      const float t0 = i / (float)segs, t1 = (i + 1) / (float)segs;
+      dl->AddRectFilledMultiColor(ImVec2(x, y1 - t1 * barH),
+                                  ImVec2(x + barW, y1 - t0 * barH), colour(t1),
+                                  colour(t1), colour(t0), colour(t0));
+    }
+    const ImU32 frame = IM_COL32(255, 255, 255, 140);
+    dl->AddRect(ImVec2(x, y0), ImVec2(x + barW, y1), frame);
+    // Past the ends: what lies over the range and under it, in the colours
+    // the picture draws them in (FieldStyle::kOver / kUnder).
+    const auto cap = [&](float top, const glm::vec3& c) {
+      dl->AddRectFilled(
+          ImVec2(x, top), ImVec2(x + barW, top + capH),
+          IM_COL32((int)(c.r * 255), (int)(c.g * 255), (int)(c.b * 255), 255));
+      dl->AddRect(ImVec2(x, top), ImVec2(x + barW, top + capH), frame);
+    };
+    // Pink past the hot end and grey past the other; a factor's hot end is
+    // its low one.
+    if (shown->over)
+      cap(y0 - capH, shown->reversed ? FieldStyle::kUnder : FieldStyle::kOver);
+    if (shown->under)
+      cap(y1, shown->reversed ? FieldStyle::kOver : FieldStyle::kUnder);
+    for (int k = 0; k <= 4; ++k) {
+      const float yk = y1 - barH * (k / 4.0f);
+      if (k > 0 && k < 4)
+        dl->AddLine(ImVec2(x + barW, yk), ImVec2(x + barW + 4, yk), frame);
+      dl->AddText(ImVec2(x + barW + tickGap, yk - lineH * 0.5f),
+                  k == 0 || k == 4 ? IM_COL32_WHITE : dim, ticks[k].c_str());
+    }
+    for (const std::string& c : captions)
+      ImGui::TextColored(ImVec4(1, 1, 1, 0.75f), "%s", c.c_str());
   }
-  const ImU32 frame = IM_COL32(255, 255, 255, 140);
-  dl->AddRect(ImVec2(x, y0), ImVec2(x + barW, y1), frame);
-  // Past the ends: what lies over the range and under it, in the colours
-  // the picture draws them in (FieldStyle::kOver / kUnder).
-  const auto cap = [&](float top, const glm::vec3& c) {
-    dl->AddRectFilled(
-        ImVec2(x, top), ImVec2(x + barW, top + capH),
-        IM_COL32((int)(c.r * 255), (int)(c.g * 255), (int)(c.b * 255), 255));
-    dl->AddRect(ImVec2(x, top), ImVec2(x + barW, top + capH), frame);
-  };
-  // Pink past the hot end and grey past the other; a factor's hot end is
-  // its low one.
-  if (shown->over)
-    cap(y0 - capH, shown->reversed ? FieldStyle::kUnder : FieldStyle::kOver);
-  if (shown->under)
-    cap(y1, shown->reversed ? FieldStyle::kOver : FieldStyle::kUnder);
-  for (int k = 0; k <= 4; ++k) {
-    const float yk = y1 - barH * (k / 4.0f);
-    if (k > 0 && k < 4)
-      dl->AddLine(ImVec2(x + barW, yk), ImVec2(x + barW + 4, yk), frame);
-    dl->AddText(ImVec2(x + barW + tickGap, yk - lineH * 0.5f),
-                k == 0 || k == 4 ? IM_COL32_WHITE : dim, ticks[k].c_str());
-  }
-  float cy = capsTop;
-  for (const std::string& c : captions) {
-    dl->AddText(ImVec2(x, cy), dim, c.c_str());
-    cy += lineH;
-  }
+  const ImVec2 boxLo = ImGui::GetWindowPos();
+  const ImVec2 boxHi(boxLo.x + ImGui::GetWindowSize().x,
+                     boxLo.y + ImGui::GetWindowSize().y);
+  ImGui::End();
   if (!extremes || !sim.showExtremes || state.camera == nullptr)
     return;
+  ImDrawList* dl = ViewportDrawList();
 
   // The values at the crosses, so a marker reads without the legend: the
   // hot end's tag above its cross and the other's below, pushed clear of it
@@ -3783,6 +3866,10 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     faceDoc = occ ? OccurrencePartDoc(state, *occ) : nullptr;
   }
 
+  // The geometry step's tools: suppress, cut on, refine.
+  if (SimulationGeometryPick(state, occurrenceId, face))
+    return;
+
   // Probe: pin the face (the Probes list under the results); the tool stays
   // armed, so several faces can be pinned in a row.
   if (sim.tool == SimulationState::Tool::Probe) {
@@ -3801,6 +3888,26 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     if (!dup)
       sim.probes.push_back({s->id, face});
     return;
+  }
+
+  // A face a feature suppressed for the analysis made is not in the shape
+  // the study solves: refused here, naming the feature, as its run would.
+  if (faceDoc != nullptr && !host.sim->Geometry().suppressed.empty()) {
+    uint64_t document = 0;
+    if (host.OnAssembly())
+      if (const Occurrence* occ = host.Assembly()->FindById(occurrenceId))
+        document = occ->partId;
+    const std::vector<uint64_t> ids =
+        host.sim->Geometry().SuppressedIn(document);
+    fem::Study one;
+    fem::Load at;
+    at.face = face;
+    one.loads.push_back(at);
+    std::string why;
+    if (!ids.empty() && !fem::StudyForAnalysis(*faceDoc, one, ids, &why)) {
+      sim.placeRefusal = why;
+      return;
+    }
   }
 
   // Keep tool (topology): freeze the picked face solid.

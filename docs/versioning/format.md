@@ -363,6 +363,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A simulation takes `geometry` {`suppressed`?, `symmetry`?}: the features suppressed for the analysis only, each {`feature`, `document`?} (`document` the part's id on an assembly's simulation, absent on a part's), and a symmetry plane {`datum` \| `face`, `flip`?} the analysis shape is cut on ([the geometry step](../simulation/README.md#the-geometry-step)). Written only when there is one, so a simulation without it is unchanged. A feature listed twice, one with no id, a `document` on a part's simulation or none on an assembly's, a symmetry plane on an assembly's, a plane named by neither or both of `datum` and `face`, and an unknown key are refused. Golden `vNEXT-sim-geometry` (in `simulation/`: two features suppressed and a datum plane, flipped) |
 
 ## Paths in a project
 

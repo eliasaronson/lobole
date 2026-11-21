@@ -6,6 +6,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/FitTool.h"
 #include "ui/SimRunActions.h"
+#include "ui/SimTree.h" // the simulation rows' selection ids
 #include "ui/StudyPanel.h"
 
 #include "cad/FaceSelector.h"
@@ -466,6 +467,13 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
         : tool == SimulationState::Tool::Cylindrical
             ? "Pick the bore (or shaft) the cylindrical support holds - Esc "
               "cancels"
+        : tool == SimulationState::Tool::Suppress
+            ? "Pick a face: the feature that made it is suppressed for the "
+              "analysis - Esc exits"
+        : tool == SimulationState::Tool::Symmetry
+            ? "Pick the flat face the part is symmetric about - Esc cancels"
+        : tool == SimulationState::Tool::Refine
+            ? "Pick the face to mesh finer - Esc cancels"
             : "Pick a face for the boundary condition - Esc cancels";
     return ArmedContext{KindBit(SelectionItem::Kind::Face), prompt,
                         ConsumeSimFace};
@@ -1196,6 +1204,35 @@ void PruneSelection(AppState& state) {
             }
             case SelectionItem::Kind::SimStudy:
               return !state.sim || state.sim->FindStudy(it.id) == nullptr;
+            case SelectionItem::Kind::SimCase:
+            case SelectionItem::Kind::SimKeep:
+            case SelectionItem::Kind::SimKeepOut: {
+              const auto [studyId, index] = SimRowOf(it.id);
+              const fem::Study* s =
+                  state.sim ? state.sim->FindStudy(studyId) : nullptr;
+              if (s == nullptr)
+                return true;
+              const size_t n = it.kind == SelectionItem::Kind::SimCase
+                                   ? s->loadCases.size()
+                               : it.kind == SelectionItem::Kind::SimKeep
+                                   ? s->keepFaces.size()
+                                   : s->keepOuts.size();
+              return index >= n;
+            }
+            case SelectionItem::Kind::SimGeometry: {
+              if (!state.sim)
+                return true;
+              const auto [row, index] = GeometryRowOf(it.id);
+              switch (row) {
+              case GeometryRow::Suppressed:
+                return index >= state.sim->Geometry().suppressed.size();
+              case GeometryRow::Symmetry:
+                return !state.sim->Geometry().symmetry.On();
+              case GeometryRow::Refinement:
+                return index >= state.sim->Mesh().refinements.size();
+              }
+              return true;
+            }
             case SelectionItem::Kind::SimLoad: {
               if (!state.sim)
                 return true;

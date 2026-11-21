@@ -1,0 +1,8 @@
+{
+  "subject": {"kind": "part", "document": 2, "name": "Bracket"},
+  "mesh_size": 4.0,
+  "studies": [[10, "Half bracket", true]],
+  "geometry": {"suppressed": [[0, 5], [0, 7]],
+               "symmetry": {"datum": 9, "flip": true}},
+  "next_id_above": 10
+}

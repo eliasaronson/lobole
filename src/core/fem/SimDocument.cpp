@@ -93,6 +93,11 @@ void SimDocument::SetMesh(SimMesh mesh) {
   TouchSettings();
 }
 
+void SimDocument::SetGeometry(SimGeometry geometry) {
+  m_geometry = std::move(geometry);
+  TouchSettings();
+}
+
 const Study* SimDocument::FindStudy(uint64_t id) const {
   for (const Study& s : m_studies)
     if (s.id == id)

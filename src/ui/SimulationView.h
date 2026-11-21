@@ -14,11 +14,13 @@
 
 #include "core/fem/FemCheck.h"
 #include "core/fem/FemFields.h"
+#include "core/fem/SimGeometry.h"
 #include "ui/AppState.h"
 #include "ui/StudyHost.h"
 
 #include <glm/glm.hpp>
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -149,5 +151,31 @@ std::vector<fem::StudyProblem> CheckStudyNow(AppState& state, uint64_t studyId,
 // The same, cached against the study's text and the document's version:
 // what the panel draws each frame.
 const StudyCheck& CachedStudyCheck(AppState& state, uint64_t studyId);
+
+// --- The geometry step -------------------------------------------------------
+
+// The geometry check of the active study (fem::CheckSimGeometry against the
+// project now), cached against the simulation's version and its subject's
+// stamps: what the tool window lists. `error` when the study is refused.
+struct SimGeometryCheck {
+  std::string key;
+  uint64_t studyId = 0;
+  fem::GeometryCheck check;
+  std::string error;
+};
+const SimGeometryCheck& CachedGeometryCheck(AppState& state, uint64_t studyId);
+
+// What the simulation in front keeps on disk with the project
+// (docs/simulation/README.md#how-a-simulation-is-saved), in bytes as a save
+// writes them: each stored result's, each stored mesh's, and the sum.
+// Cached against the store's epoch.
+struct SimStoredBytes {
+  std::map<uint64_t, size_t> results; // by study id
+  std::map<uint64_t, size_t> meshes;  // by mesh key
+  size_t total = 0;
+};
+const SimStoredBytes& SimStoredBytesOf(AppState& state);
+// "4.2 MB", "380 kB", "120 B".
+std::string ByteSize(size_t bytes);
 
 } // namespace ui

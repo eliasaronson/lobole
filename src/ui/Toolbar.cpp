@@ -5,6 +5,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/JobActions.h" // ActiveCamSetup
 #include "ui/SimulationActions.h"
+#include "ui/SimulationView.h" // SimStoredBytesOf
 #include "ui/StudyHost.h"
 
 #include "common/Logger.h"
@@ -1308,10 +1309,20 @@ void DrawClearStorageModal(AppState& state) {
                               ImGuiWindowFlags_AlwaysAutoResize))
     return;
   const SimStorage stored = SimStorageOf(state);
+  // What goes, and what it takes on disk with the project: the reason a
+  // person clears it.
+  const SimStoredBytes& bytes = SimStoredBytesOf(state);
+  size_t resultBytes = 0, meshBytes = 0;
+  for (const auto& [id, n] : bytes.results)
+    resultBytes += n;
+  for (const auto& [key, n] : bytes.meshes)
+    meshBytes += n;
   ImGui::PushTextWrapPos(ImGui::GetFontSize() * 25.0f);
-  ImGui::Text("%zu stored result%s and %zu mesh%s of this simulation.",
-              stored.results, stored.results == 1 ? "" : "s", stored.meshes,
-              stored.meshes == 1 ? "" : "es");
+  ImGui::Text("%zu stored result%s (%s) and %zu mesh%s (%s) of this "
+              "simulation.",
+              stored.results, stored.results == 1 ? "" : "s",
+              ByteSize(resultBytes).c_str(), stored.meshes,
+              stored.meshes == 1 ? "" : "es", ByteSize(meshBytes).c_str());
   ImGui::TextDisabled("The studies stay; each is meshed and solved again on "
                       "its next run. This is not undone.");
   ImGui::PopTextWrapPos();
@@ -1349,6 +1360,20 @@ void DrawSimulationToolbar(AppState& state) {
 
   Divider();
 
+  // The geometry the analysis sees (docs/simulation/README.md
+  // #the-geometry-step), before it is meshed.
+  SimButton(state, "###tb_sim_suppress", "sim.suppress",
+            "Suppress for the analysis (click a face: the feature that made "
+            "it, a hole or a logo, leaves the analysis; the part keeps it)",
+            sim.tool == SimulationState::Tool::Suppress);
+  SimButton(state, "###tb_sim_symmetry", "sim.symmetry",
+            "Symmetry plane (click a flat face, or choose a datum: the "
+            "analysis is cut on it, a roller on the cut)",
+            sim.tool == SimulationState::Tool::Symmetry);
+  SimButton(state, "###tb_sim_refine", "sim.refine",
+            "Refine (click a face: smaller elements there, in the "
+            "simulation's mesh)",
+            sim.tool == SimulationState::Tool::Refine);
   SimButton(state, "###tb_sim_mesh", "sim.mesh",
             "Mesh the study and draw its elements (Run meshes by itself; "
             "this is for looking first)");

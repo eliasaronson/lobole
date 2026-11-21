@@ -240,6 +240,10 @@ struct Load {
   std::array<glm::dvec3, 3> frameAxes{glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
                                       glm::dvec3(0, 0, 1)};
   glm::dvec3 planeNormal{0.0};
+  // Derived where planned, never saved: a roller the symmetry cut put on
+  // its plane (docs/simulation/README.md#the-symmetry-cut). Its edge is no
+  // singularity, so the support-edge check leaves it out.
+  bool symmetryCut = false;
 };
 
 // One load case of a study (docs/topopt/README.md#load-cases): the force and

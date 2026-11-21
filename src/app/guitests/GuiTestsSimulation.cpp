@@ -67,6 +67,18 @@ void SteelBlock(ImGuiTestContext* ctx) {
   ctx->Yield(2);
 }
 
+// A choice in one of the legend's combos (docs/simulation/README.md
+// #results-display): the combo opened, the item clicked in its popup.
+void LegendChoose(ImGuiTestContext* ctx, const char* combo, const char* item) {
+  ctx->ItemClick((std::string("//##FieldLegend/") + combo).c_str());
+  ctx->Yield();
+  IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+  ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+  IM_CHECK_SILENT(popup != nullptr);
+  ctx->ItemClick((std::string("//") + popup->Name + "/**/" + item).c_str());
+  ctx->Yield(3);
+}
+
 // The slot id of the simulation tab in front.
 uint64_t FrontSimSlot() { return ui::ActiveSimSlotId(*s_App); }
 
@@ -576,7 +588,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     ctx->Yield(2);
     const auto choose = [&](const char* item) {
-      ctx->ItemClick("//###ToolWindow/###result_field");
+      ctx->ItemClick("//##FieldLegend/###result_field");
       ctx->Yield();
       IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
       ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
@@ -585,7 +597,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       ctx->Yield(3);
     };
     // A field this study's kind does not have is not offered at all.
-    ctx->ItemClick("//###ToolWindow/###result_field");
+    ctx->ItemClick("//##FieldLegend/###result_field");
     ctx->Yield();
     {
       IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
@@ -618,7 +630,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 
     // A typed maximum of half the peak: the bar stops there and what is
     // past it is over.
-    ctx->ItemInputValue("//###ToolWindow/###result_range_hi",
+    ctx->ItemInputValue("//##FieldLegend/###result_range_hi",
                         static_cast<float>(peak * 0.5));
     ctx->Yield(3);
     shown = s_App->simulation.shown.get();
@@ -627,7 +639,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(shown->over);
     IM_CHECK(std::abs(shown->hi - peak) < 1e-9); // the field's own maximum
     // "Above yield": steel's 250 MPa is far over this beam, so nothing is.
-    ctx->ItemClick("//###ToolWindow/###result_range_yield");
+    ctx->ItemClick("//##FieldLegend/###result_range_yield");
     ctx->Yield(3);
     shown = s_App->simulation.shown.get();
     IM_CHECK(shown->barHi > 200.0);
@@ -663,7 +675,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       ui::AppendStudyMarker(*s_App, lines);
       IM_CHECK_EQ(lines.size(), (size_t)12);
     }
-    ctx->ItemClick("//###ToolWindow/###result_extremes");
+    ctx->ItemClick("//##FieldLegend/###result_extremes");
     ctx->Yield();
     IM_CHECK(!s_App->simulation.showExtremes);
     {
@@ -671,7 +683,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       ui::AppendStudyMarker(*s_App, lines);
       IM_CHECK(lines.empty());
     }
-    ctx->ItemClick("//###ToolWindow/###result_extremes");
+    ctx->ItemClick("//##FieldLegend/###result_extremes");
 
     // Export: the whole result, to the file the dialog would have named.
     const std::string path =
@@ -716,12 +728,12 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(rt->bodies[0].results.modes.size() >= 2);
     IM_CHECK(rt->bodies[0].buckling.governingFactor > 0.0);
     ctx->Yield(2);
-    IM_CHECK(ctx->ItemExists("//###ToolWindow/###buckle_mode_0"));
-    ctx->ItemClick("//###ToolWindow/###buckle_mode_1");
-    ctx->Yield(2);
-    IM_CHECK_EQ(s_App->simulation.activeMode, 1);
+    // The mode shown is the legend's: its field, then its mode.
+    LegendChoose(ctx, "###result_field", "###field_mode_shape");
     IM_CHECK(s_App->simulation.field ==
              ui::SimulationState::Field::Displacement);
+    LegendChoose(ctx, "###result_mode", "###result_mode_1");
+    IM_CHECK_EQ(s_App->simulation.activeMode, 1);
   };
 
   // The solver combo (docs/simulation/README.md#calculix): there on a
@@ -861,8 +873,9 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // Case 1 bends the beam down, case 2 pushes its end: different answers.
     IM_CHECK(std::abs(rt->bodies[0].Case(0).maxDisplacement -
                       rt->bodies[0].Case(1).maxDisplacement) > 1e-6);
-    ctx->ItemClick("//###ToolWindow/###case_sel_1");
-    ctx->Yield();
+    // The case shown is the legend's.
+    LegendChoose(ctx, "###result_field", "###field_von_mises");
+    LegendChoose(ctx, "###result_case", "###result_case_1");
     IM_CHECK_EQ(s_App->simulation.activeCase, 1);
     ui::ExitSimulation(*s_App);
     ctx->Yield();
@@ -1736,7 +1749,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(rt->bodies[0].thermal.solved);
     IM_CHECK(rt->bodies[0].thermal.maxC > 25.0);
     ctx->Yield(2);
-    ctx->ItemClick("//###ToolWindow/###result_field");
+    ctx->ItemClick("//##FieldLegend/###result_field");
     ctx->Yield();
     IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
     ctx->ItemClick((std::string("//") +
@@ -1893,7 +1906,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::StudyStale(*s_App, sid));
     IM_CHECK(Sim()->StudyResults(sid)->maxVonMises > 0.0);
     // The result is shown on the tab: a field, and a legend for it.
-    ctx->ItemClick("//###ToolWindow/###result_field");
+    ctx->ItemClick("//##FieldLegend/###result_field");
     ctx->Yield();
     IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
     ctx->ItemClick((std::string("//") +
@@ -2654,5 +2667,282 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     SimWindowShot(ctx, "5-assembly-participants");
     ui::ExitSimulation(*s_App);
     ctx->Yield();
+  };
+
+  // The geometry step from the toolbar (docs/simulation/README.md
+  // #the-geometry-step): Suppress armed, a click on a fillet's face takes the
+  // fillet out of the analysis and leaves the part as it is; the tree grows
+  // a Geometry group with its row; the tool window's list puts it back and
+  // takes it out again; a load on one of its faces is refused naming it;
+  // and one undo takes the suppression back.
+  t = IM_REGISTER_TEST(engine, "sim", "the_toolbar_suppresses_a_feature");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx);
+    {
+      const Body& body = Doc()->GetBodies()[0];
+      std::vector<ElementRef> edges;
+      const size_t n = body.shape.GenerateEdgePolylines().size();
+      for (size_t e = 0; e < n; e++)
+        if (const std::string* name =
+                body.elementMap.EdgeNameOf(static_cast<int>(e)))
+          edges.push_back({body.createdBy, *name});
+      s_App->commands->Execute(
+          std::make_unique<AddFeatureCommand>(
+              std::make_unique<FilletFeature>("Round edges", edges, 3.0)),
+          *Doc());
+    }
+    IM_CHECK_SILENT(Doc()->GetFeature(1)->GetError().empty());
+    const uint64_t filletId = Doc()->GetFeature(1)->GetId();
+    const uint64_t partVersion = Doc()->Version();
+    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield(3);
+    IM_CHECK_SILENT(Sim() != nullptr);
+    // A face the fillet made: its name ends in the fillet's G step.
+    ElementRef rounded;
+    {
+      const Body& body = Doc()->GetBodies()[0];
+      const std::string tag = ";G" + std::to_string(filletId);
+      for (const auto& [index, name] : body.elementMap.names)
+        if (name.size() >= tag.size() &&
+            name.compare(name.size() - tag.size(), tag.size(), tag) == 0)
+          rounded = ElementRef{body.createdBy, name};
+    }
+    IM_CHECK_SILENT(rounded.IsSet());
+    // No Geometry group while there is nothing in it.
+    IM_CHECK(!ctx->ItemExists("//###Model/**/###sim_geometry"));
+
+    ToolbarClick(ctx, "###tb_sim_suppress");
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Suppress);
+    ui::SimulationApplyToFace(*s_App, rounded); // the path a click takes
+    ctx->Yield(3);
+    IM_CHECK(Sim()->Geometry().IsSuppressed(0, filletId));
+    IM_CHECK(s_App->simulation.placeRefusal.empty());
+    // It stays armed, for the next one; the part is not edited.
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Suppress);
+    IM_CHECK_EQ(Doc()->Version(), partVersion);
+    IM_CHECK(!Doc()->GetFeature(1)->IsSuppressed());
+    IM_CHECK(ctx->ItemExists("//###Model/**/###sim_geometry"));
+    IM_CHECK(ctx->ItemExists(
+        ("//###Model/**/###sim_suppressed_0_" + std::to_string(filletId))
+            .c_str()));
+    const std::string box = "//###ToolWindow/**/###sim_suppress_feature_" +
+                            std::to_string(filletId);
+    IM_CHECK(ctx->ItemExists(box.c_str()));
+    SimWindowShot(ctx, "geometry-suppress");
+    // The list puts it back, and takes it out again.
+    ctx->ItemClick(box.c_str());
+    ctx->Yield(2);
+    IM_CHECK(!Sim()->Geometry().IsSuppressed(0, filletId));
+    ctx->ItemClick(box.c_str());
+    ctx->Yield(2);
+    IM_CHECK(Sim()->Geometry().IsSuppressed(0, filletId));
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::None);
+
+    // A support on a face the fillet made is refused, naming it.
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    const size_t loads = Sim()->FindStudy(sid)->loads.size();
+    ToolbarClick(ctx, "###tb_sim_fixed");
+    ui::SimulationApplyToFace(*s_App, rounded);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), loads);
+    IM_CHECK(s_App->simulation.placeRefusal.find("'Round edges'") !=
+             std::string::npos);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+
+    // The group's row shows the group in the tool window, the check with it.
+    SimTreeClick(ctx, "###sim_suppressed_0_" + std::to_string(filletId));
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.focus.kind ==
+             ui::SimulationState::Focus::Kind::Geometry);
+    SimWindowShot(ctx, "geometry-window");
+    // Delete on the row puts it back, one step; undo takes it out again.
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield(2);
+    IM_CHECK(!Sim()->Geometry().IsSuppressed(0, filletId));
+    IM_CHECK(ui::UndoSim(*s_App));
+    ctx->Yield(2);
+    IM_CHECK(Sim()->Geometry().IsSuppressed(0, filletId));
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // The result's controls are on the legend they act on
+  // (docs/simulation/README.md#results-display): the field and the
+  // deformation chosen there, nothing of them in the tool window, which
+  // keeps the numbers; and the Result row says what it takes on disk.
+  t = IM_REGISTER_TEST(engine, "sim", "the_legend_holds_the_result_controls");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    using Field = ui::SimulationState::Field;
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    ToolbarClick(ctx, "###tb_sim_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid));
+    ctx->Yield(3);
+    // A result and no field yet: the legend is its field's combo.
+    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_field"));
+    LegendChoose(ctx, "###result_field", "###field_von_mises");
+    IM_CHECK(s_App->simulation.field == Field::VonMises);
+    ctx->ItemInputValue("//##FieldLegend/###deform", 40.0f);
+    ctx->Yield(3);
+    IM_CHECK(std::abs(s_App->simulation.deformScale - 40.0f) < 1e-3f);
+    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_range_hi"));
+    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_extremes"));
+    // The legend sits inside the viewport, in its lower-left corner, clear
+    // of the tool window.
+    ImGuiWindow* legend = ImGui::FindWindowByName("##FieldLegend");
+    IM_CHECK_SILENT(legend != nullptr && legend->Active);
+    IM_CHECK(legend->Pos.x >= s_App->viewportPos.x);
+    IM_CHECK(legend->Pos.y + legend->Size.y <=
+             s_App->viewportPos.y + s_App->viewportSize.y + 1.0f);
+    IM_CHECK(legend->Size.x < 0.4f * s_App->viewportSize.x);
+    // The Result row's window keeps the numbers, not the controls.
+    SimTreeClick(ctx, "###sim_result_" + std::to_string(sid));
+    ctx->Yield(2);
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###result_field"));
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###deform"));
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.2f * s_App->viewportSize.y));
+    ctx->Yield(3);
+    SimWindowShot(ctx, "legend-controls");
+    // What the result and its mesh take with the project.
+    const ui::SimStoredBytes& bytes = ui::SimStoredBytesOf(*s_App);
+    IM_CHECK(bytes.results.count(sid) == 1);
+    IM_CHECK(bytes.results.at(sid) > 1000);
+    IM_CHECK(!bytes.meshes.empty());
+    ctx->MouseMove(
+        ("//###Model/**/###sim_result_" + std::to_string(sid)).c_str());
+    ctx->Yield(30);
+    SimWindowShot(ctx, "result-row-size");
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // The geometry step whole, in the window (docs/simulation/README.md
+  // #the-geometry-step): a filleted block with a datum through its middle,
+  // its fillet suppressed, the datum chosen as the symmetry plane in the
+  // Symmetry tool's window, its loaded end refined, run: the half model is
+  // solved, the legend mirrors it, and the tree lists all three.
+  t = IM_REGISTER_TEST(engine, "sim", "the_geometry_step_cuts_a_half_model");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+#ifdef HAVE_NETGEN
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx); // 100 x 100 x 16
+    {
+      const Body& body = Doc()->GetBodies()[0];
+      std::vector<ElementRef> edges;
+      const size_t n = body.shape.GenerateEdgePolylines().size();
+      for (size_t e = 0; e < n; e++)
+        if (const std::string* name =
+                body.elementMap.EdgeNameOf(static_cast<int>(e)))
+          edges.push_back({body.createdBy, *name});
+      s_App->commands->Execute(
+          std::make_unique<AddFeatureCommand>(
+              std::make_unique<FilletFeature>("Round edges", edges, 2.0)),
+          *Doc());
+      auto dp =
+          std::make_unique<DatumPlaneFeature>("Middle", DatumPlaneKind::Offset);
+      dp->basePlane = PlaneType::XZ;
+      dp->offset = 50.0;
+      s_App->commands->Execute(
+          std::make_unique<AddFeatureCommand>(std::move(dp)), *Doc());
+    }
+    const uint64_t filletId = Doc()->GetFeature(1)->GetId();
+    const uint64_t datumId = Doc()->GetFeature(2)->GetId();
+    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield(3);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    // Clamped at x = 0, pushed down at x = 100: symmetric about y = 50.
+    const Body& body = Doc()->GetBodies()[0];
+    const ElementRef clamp = FaceFacing(body, {-1, 0, 0});
+    const ElementRef end = FaceFacing(body, {1, 0, 0});
+    IM_CHECK_SILENT(clamp.IsSet() && end.IsSet());
+    ToolbarClick(ctx, "###tb_sim_fixed");
+    ui::SimulationApplyToFace(*s_App, clamp);
+    ToolbarClick(ctx, "###tb_sim_force");
+    s_App->simulation.pendingMagnitude = 2000.0;
+    s_App->simulation.directionOverridden = true;
+    s_App->simulation.pendingDirection = glm::dvec3(0, 0, -1);
+    ui::SimulationApplyToFace(*s_App, end);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)2);
+
+    // Suppress the fillet from its face.
+    ElementRef rounded;
+    const std::string tag = ";G" + std::to_string(filletId);
+    for (const auto& [index, name] : body.elementMap.names)
+      if (name.size() >= tag.size() &&
+          name.compare(name.size() - tag.size(), tag.size(), tag) == 0)
+        rounded = ElementRef{body.createdBy, name};
+    ToolbarClick(ctx, "###tb_sim_suppress");
+    ui::SimulationApplyToFace(*s_App, rounded);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(Sim()->Geometry().IsSuppressed(0, filletId));
+
+    // The datum, chosen in the Symmetry tool's window.
+    ToolbarClick(ctx, "###tb_sim_symmetry");
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Symmetry);
+    ctx->ItemClick("//###ToolWindow/###sim_symmetry_plane");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ctx->ItemClick((std::string("//") +
+                    ctx->UiContext->OpenPopupStack.back().Window->Name +
+                    "/**/###symmetry_datum_" + std::to_string(datumId))
+                       .c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->Geometry().symmetry.datum, datumId);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+
+    // The loaded end refined, at the size the tool starts from: half the
+    // simulation's automatic element.
+    ToolbarClick(ctx, "###tb_sim_refine");
+    IM_CHECK(s_App->simulation.pendingRefineMm > 0.0);
+    ui::SimulationApplyToFace(*s_App, end);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->Mesh().refinements.size(), (size_t)1);
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::None);
+    for (const char* row :
+         {"###sim_geometry", "###sim_symmetry", "###sim_refinement_0"})
+      IM_CHECK(ctx->ItemExists((std::string("//###Model/**/") + row).c_str()));
+
+    // Solved, it is the half on the datum's side: every node at y >= 50.
+    ToolbarClick(ctx, "###tb_sim_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid));
+    ctx->Yield(3);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(sid);
+    IM_CHECK_SILENT(rt != nullptr && !rt->bodies.empty());
+    double lowest = 1e300;
+    for (const glm::dvec3& p : rt->bodies[0].mesh.nodes)
+      lowest = std::min(lowest, p.y);
+    IM_CHECK(lowest > 50.0 - 1e-6);
+    // The legend draws it, and its mirror image on request.
+    LegendChoose(ctx, "###result_field", "###field_von_mises");
+    ctx->ItemInputValue("//##FieldLegend/###deform", 200.0f);
+    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_mirror"));
+    ctx->ItemClick("//##FieldLegend/###result_mirror");
+    ctx->Yield(3);
+    IM_CHECK(s_App->simulation.mirror);
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->StopAnimation();
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.15f * s_App->viewportSize.y));
+    SimTreeClick(ctx, "###sim_symmetry");
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.15f * s_App->viewportSize.y));
+    ctx->Yield(10);
+    SimWindowShot(ctx, "geometry-step-half-model");
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+#endif
   };
 }

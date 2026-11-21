@@ -101,6 +101,10 @@ fem::SimContext SimContextFor(AppState& state, const fem::SimDocument& sim) {
   fem::SimContext ctx;
   ctx.sim = &sim;
   ctx.symbols = &state.projectSymbols;
+  // The analysis parts (the geometry step's), kept across frames.
+  if (!state.simAnalysisParts)
+    state.simAnalysisParts = std::make_shared<fem::AnalysisPartCache>();
+  ctx.analysisParts = state.simAnalysisParts;
   const fem::SimSubject& subject = sim.Subject();
   if (subject.kind == fem::SubjectKind::Part) {
     // Configuration 0 is the part's active one: the live document.
@@ -145,7 +149,7 @@ fem::SimContext SimContextFor(AppState& state, const fem::SimDocument& sim) {
     for (const assembly::FlatInstance& inst : *flat)
       if (inst.rootOccurrenceId == occurrenceId && inst.levels.empty() &&
           inst.occurrenceId == occurrenceId)
-        return fem::SimPart{inst.part, inst.world};
+        return fem::SimPart{inst.part, inst.world, inst.partId};
     return fem::SimPart{};
   };
   // The assembly, every sub-assembly it places and every part: each one's
@@ -404,6 +408,8 @@ bool StartSimTopologyRun(AppState& state, uint64_t simSlotId, uint64_t studyId,
 std::string SimMeshKeyNow(AppState& state, const fem::SimDocument& sim,
                           const fem::Study& study) {
   std::string key = MeshSettingsKey(sim.Effective(study));
+  // The geometry step: what is suppressed and where it is cut.
+  key += "geometry=" + std::to_string(fem::GeometryHash(sim.Geometry())) + ";";
   const fem::SimSubject& subject = sim.Subject();
   key += "subject=" + std::to_string(subject.docId) + "/" +
          std::to_string(subject.configuration) + "@" +

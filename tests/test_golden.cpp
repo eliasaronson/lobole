@@ -2137,6 +2137,27 @@ TEST_CASE("Simulation golden corpus loads and round-trips",
               CHECK(DocumentIO::StudyMaterialToJson(*s->material) == row[1]);
             }
           }
+        // vNEXT: the geometry step (docs/simulation/README.md
+        // #the-geometry-step): what is suppressed, as [document, feature],
+        // and the symmetry plane.
+        if (expect.contains("geometry")) {
+          const nlohmann::json& g = expect.at("geometry");
+          const fem::SimGeometry& have = sim.Geometry();
+          const nlohmann::json& sup =
+              g.value("suppressed", nlohmann::json::array());
+          REQUIRE(have.suppressed.size() == sup.size());
+          for (size_t i = 0; i < sup.size(); ++i) {
+            CHECK(have.suppressed[i].document == sup[i][0].get<uint64_t>());
+            CHECK(have.suppressed[i].feature == sup[i][1].get<uint64_t>());
+          }
+          if (g.contains("symmetry")) {
+            const nlohmann::json& sy = g.at("symmetry");
+            CHECK(have.symmetry.datum == sy.value("datum", uint64_t{0}));
+            CHECK(have.symmetry.flip == sy.value("flip", false));
+          } else {
+            CHECK_FALSE(have.symmetry.On());
+          }
+        }
         if (expect.contains("next_id_above"))
           CHECK(sim.NextId() > expect.at("next_id_above").get<uint64_t>());
       };

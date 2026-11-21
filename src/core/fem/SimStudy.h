@@ -32,6 +32,7 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemTopo.h"
 #include "core/fem/SimDocument.h"
+#include "core/fem/SimGeometry.h"
 
 #include <functional>
 #include <memory>
@@ -51,6 +52,7 @@ namespace fem {
 struct SimPart {
   const Document* doc = nullptr;
   glm::dmat4 placement{1.0};
+  uint64_t partId = 0; // its stable project-document id (SuppressedFeature)
 };
 
 // What a simulation's study is planned against: the subject, resolved by the
@@ -71,6 +73,10 @@ struct SimContext {
   // is solved against, so an edit to any of them reads it stale
   // (SimDocument::StudyResultsStale).
   std::vector<std::pair<uint64_t, uint64_t>> subjectStamps;
+  // Where the analysis parts (the subject without the features suppressed
+  // for the analysis, SimGeometry.h) are kept between plans. Null: each
+  // plan regenerates its own.
+  std::shared_ptr<AnalysisPartCache> analysisParts;
 };
 
 // Plans study `studyId` of `ctx.sim` (its effective form,
@@ -170,6 +176,33 @@ bool MeshSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
                   std::vector<StudyBodyMesh>* out, std::string* error,
                   int* meshesMade = nullptr,
                   std::vector<MeshBodyReport>* reports = nullptr);
+
+// The geometry check of study `studyId` (docs/simulation/README.md
+// #the-geometry-check): what in the shape it is meshed from (the analysis
+// part, not yet cut) is smaller than the elements it is meshed at, each
+// with the feature that made it; on the far side of a symmetry plane
+// nothing. A part study's: refused beside a neighbour, and where the study
+// is refused.
+bool CheckSimGeometry(const SimContext& ctx, uint64_t studyId,
+                      GeometryCheck& out, std::string* error);
+
+// The symmetry plane study `studyId` is cut on, in the part's (and the
+// tab's) coordinates: what a result is mirrored about. False when there is
+// none or it does not resolve.
+bool SimSymmetryPlane(const SimContext& ctx, uint64_t studyId, CutPlane& out,
+                      std::string* error);
+
+// Why `geometry` cannot be the geometry step of `ctx.sim`; empty when it
+// can (docs/simulation/README.md#the-geometry-step). What setting it would
+// make every study's plan refuse that it does not refuse now: a feature
+// that is not its part's (`partById` answers a part document's id with the
+// document; 0 is the subject part), suppressing features that leaves
+// another failing or no body, a study's load, refinement or kept face on a
+// face a suppressed feature made, a symmetry plane that does not resolve,
+// and either on an assembly beside a neighbour. Read-only.
+std::string
+SimGeometryRefusal(const SimContext& ctx, const SimGeometry& geometry,
+                   const std::function<const Document*(uint64_t)>& partById);
 
 // Everything a run of study `studyId` would refuse
 // (docs/simulation/README.md#checking-a-study). On the part route,

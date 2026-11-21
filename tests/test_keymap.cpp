@@ -213,6 +213,11 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "sim.keep",
       "sim.export_vtu",
       "sim.clear_storage",
+      // The geometry step (docs/simulation/README.md#the-geometry-step): set
+      // once per simulation, before it is meshed.
+      "sim.suppress",
+      "sim.symmetry",
+      "sim.refine",
   };
   for (const keymap::Binding& b : keymap::Defaults()) {
     INFO(b.id);

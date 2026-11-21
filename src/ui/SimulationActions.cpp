@@ -439,6 +439,22 @@ double SimulationWeightN(AppState& state) {
 void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
   SimulationState& sim = state.simulation;
   sim.tool = tool;
+  sim.placeRefusal.clear();
+  if (tool == SimulationState::Tool::Refine) {
+    // Half the element size the simulation meshes at: its size, or the
+    // automatic one of the largest body it analyses. Typed, it stays.
+    if (sim.pendingRefineMm > 0.0 || !sim.pendingRefineExpr.empty())
+      return;
+    const StudyHost host = StudyHostOf(state);
+    double h = host ? host.sim->Mesh().size.value : 0.0;
+    if (!(h > 0.0))
+      for (const Body& b : SimSubjectBodies(state))
+        if (!b.reference && !b.shape.GetShape().IsNull())
+          h = std::max(h, fem::AutoMeshSize(b.shape.GetShape()));
+    if (h > 0.0)
+      sim.pendingRefineMm = 0.5 * h;
+    return;
+  }
   if (tool != SimulationState::Tool::Force &&
       tool != SimulationState::Tool::Pressure &&
       tool != SimulationState::Tool::Remote)
@@ -906,7 +922,10 @@ SimulationState::Tool SimCommandTool(std::string_view command) {
       {"sim.heat_flux", T::HeatFlux},
       {"sim.heat_source", T::HeatSource},
       {"sim.keep", T::Keep},
-      {"sim.probe", T::Probe}};
+      {"sim.probe", T::Probe},
+      {"sim.suppress", T::Suppress},
+      {"sim.symmetry", T::Symmetry},
+      {"sim.refine", T::Refine}};
   for (const auto& [id, tool] : kTools)
     if (id == command)
       return tool;
@@ -1002,6 +1021,17 @@ std::string SimCommandRefusal(AppState& state, std::string_view command) {
     if (host.Results(s->id) == nullptr || StudyStale(state, s->id))
       return "Run the study first: there is no stress to read";
     return "";
+  case T::Suppress:
+  case T::Refine:
+    // A part's features, and its faces: the assembly route takes them
+    // where its study is planned as the part's (the plan says when not).
+    return s->shapeFrom.study != 0 ? "A study of a topology result meshes "
+                                     "its shape, not the part"
+                                   : "";
+  case T::Symmetry:
+    return host.OnAssembly() ? "A symmetry cut is a part simulation's: an "
+                               "assembly's is solved whole"
+                             : "";
   case T::None:
     break;
   }
@@ -1021,16 +1051,23 @@ void FocusSim(AppState& state, SimulationState::Focus::Kind kind,
     sim.activeCase = 0;
   }
   // The window shows the focus, not an armed tool: looking at something
-  // puts the tool down.
+  // puts the tool down, and what a tool last refused goes with it.
   sim.tool = SimulationState::Tool::None;
+  sim.placeRefusal.clear();
   // What is lit in the tree is what the window shows: a study or a load
   // in focus keeps its own kind's selection (a Ctrl-click adds to it), and
   // anything else lets go of both.
   std::erase_if(state.selection.items, [kind](const SelectionItem& it) {
-    return (it.kind == SelectionItem::Kind::SimStudy &&
-            kind != SimulationState::Focus::Kind::Study) ||
-           (it.kind == SelectionItem::Kind::SimLoad &&
-            kind != SimulationState::Focus::Kind::Load);
+    using K = SelectionItem::Kind;
+    using F = SimulationState::Focus::Kind;
+    const std::pair<K, F> rows[] = {
+        {K::SimStudy, F::Study},     {K::SimLoad, F::Load},
+        {K::SimCase, F::Case},       {K::SimKeep, F::Keep},
+        {K::SimKeepOut, F::KeepOut}, {K::SimGeometry, F::Geometry}};
+    for (const auto& [k, f] : rows)
+      if (it.kind == k)
+        return kind != f;
+    return false;
   });
   sim.focus = {kind, studyId, id, index};
   sim.selectedLoadId = kind == SimulationState::Focus::Kind::Load ? id : 0;

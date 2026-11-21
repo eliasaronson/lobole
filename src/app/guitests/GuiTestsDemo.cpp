@@ -697,7 +697,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     Hold(ctx, 0.5);
     ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
-    ctx->ItemClick("//###ToolWindow/###result_field");
+    ctx->ItemClick("//##FieldLegend/###result_field");
     ctx->Yield();
     IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
     ctx->ItemClick((std::string("//") +
@@ -708,11 +708,11 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     Hold(ctx, 0.5);
     // The deflection, magnified until it shows: 0.3 mm on a 200 mm beam is
     // invisible at 1x.
-    ctx->ItemInputValue("//###ToolWindow/**/###deform", 100.0f);
+    ctx->ItemInputValue("//##FieldLegend/###deform", 100.0f);
     ctx->Yield(2);
     Hold(ctx, 0.5);
     OrbitFor(ctx, 30.0, 2.0);
-    ctx->ItemClick("//###ToolWindow/###result_field");
+    ctx->ItemClick("//##FieldLegend/###result_field");
     ctx->Yield();
     IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
     ctx->ItemClick((std::string("//") +

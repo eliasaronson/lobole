@@ -1068,6 +1068,45 @@ void ApplySimSettings(fem::SimDocument& sim, SimSettings set) {
 }
 
 // A simulation as list_simulations answers it.
+// The geometry step as list_simulations and set_sim_geometry answer it:
+// each suppressed feature by id and name (and its part on an assembly), the
+// symmetry plane.
+json SimGeometryJson(ui::AppState& state, const fem::SimDocument& sim) {
+  const fem::SimGeometry& g = sim.Geometry();
+  json sup = json::array();
+  for (const fem::SuppressedFeature& f : g.suppressed) {
+    const uint64_t doc = f.document != 0 ? f.document : sim.Subject().docId;
+    const Document* part = ui::PartDocById(state, doc);
+    const Feature* feat = part ? part->FindFeatureById(f.feature) : nullptr;
+    json fj{{"feature", f.feature},
+            {"name", feat ? feat->GetName() : std::string{}}};
+    if (f.document != 0) {
+      const std::optional<size_t> at = ui::SlotIndexById(state, f.document);
+      fj["part"] = {{"id", f.document},
+                    {"name", at ? state.parts[*at].name : std::string{}}};
+    }
+    sup.push_back(std::move(fj));
+  }
+  json out{{"suppressed", std::move(sup)}};
+  if (g.symmetry.On()) {
+    json sj{{"flip", g.symmetry.flip}};
+    if (g.symmetry.datum != 0) {
+      const Document* part = ui::PartDocById(state, sim.Subject().docId);
+      const Feature* feat =
+          part ? part->FindFeatureById(g.symmetry.datum) : nullptr;
+      sj["datum"] = {{"id", g.symmetry.datum},
+                     {"name", feat ? feat->GetName() : std::string{}}};
+    } else {
+      sj["face"] = {{"feature_id", g.symmetry.face.featureId},
+                    {"element", g.symmetry.face.name}};
+    }
+    out["symmetry"] = std::move(sj);
+  } else {
+    out["symmetry"] = nullptr;
+  }
+  return out;
+}
+
 json SimulationJson(ui::AppState& state, const ui::PartSlot& slot) {
   const fem::SimDocument* sim = ui::SimBySlotId(state, slot.id);
   if (sim == nullptr)
@@ -1119,6 +1158,7 @@ json SimulationJson(ui::AppState& state, const ui::PartSlot& slot) {
   out["studies"] = std::move(studies);
   out["stored"] = {{"results", sim->ResultIds().size()},
                    {"meshes", sim->Meshes().size()}};
+  out["geometry"] = SimGeometryJson(state, *sim);
   return out;
 }
 
@@ -1155,8 +1195,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "that sets none of its own solves on (mesh_size_mm, MILLIMETRES, 0 = "
      "auto), on an assembly its participants (one table for all its "
      "studies; a participant's own mesh_size is MILLIMETRES), its studies, "
-     "what it keeps stored (results, meshes) and "
-     "whether it is the tab in front.",
+     "what it keeps stored (results, meshes), its geometry step (the "
+     "features suppressed for the analysis, the symmetry plane: "
+     "set_sim_geometry) and whether it is the tab in front.",
      "subject", remote::NoFlags,
      "simulations:{id:int, name:string, active:bool, subject:{type:string, "
      "id:int, name:string, present:bool}, configuration:int, "
@@ -1164,7 +1205,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "mesh_size_mm_expr?:string, participants?:{occurrence:int, "
      "name:string, role:string, friction?:number, mesh_size?:number}[], "
      "studies:{id:int, name:string, type:string, shares_mesh:bool}[], "
-     "stored:{results:int, meshes:int}}[]"},
+     "stored:{results:int, meshes:int}, geometry:{suppressed:{feature:int, "
+     "name:string, part?:{id:int, name:string}}[], symmetry:{flip:bool, "
+     "datum?:{id:int, name:string}, face?:{feature_id:int, "
+     "element:string}}|null}}[]"},
     {"add_simulation",
      "Make another simulation {subject?: a part's or an assembly's tab name "
      "or id (default: the subject of the simulation tab in front, else the "
@@ -1199,6 +1243,50 @@ static constexpr MethodDoc SimulationMethods[] = {
      "reads stale. Answers the simulation as list_simulations does.",
      "configuration, mesh_size_mm, mesh_size_mm_expr, participants, "
      "simulation"},
+    {"set_sim_geometry",
+     "Edit the geometry the analysis sees, for every study of the "
+     "simulation (docs/simulation/README.md#the-geometry-step) {simulation?, "
+     "suppress?, unsuppress?, part?, symmetry?, flip?}, one undo step; the "
+     "subject itself is never changed. `suppress` / `unsuppress`: features "
+     "(each an id or a name; on an assembly's simulation of `part`, the "
+     "part's tab name or id) taken out of the analysis shape or put back -- "
+     "fastener holes, logos, small fillets, which mesh to many elements for "
+     "nothing. `symmetry`: the plane the analysis shape is cut on, a roller "
+     "holding the cut -- {datum: a datum plane's id or name} or {face: a "
+     "flat face, its element name or {feature_id, element}}, or null to "
+     "remove it; the side its normal points to is kept, the other with "
+     "`flip`: true. A part simulation's, and a static or thermal study's "
+     "(the half model of a part and loads symmetric about the plane: the "
+     "same peak stress and deflection, half the reactions). Refused, "
+     "changing nothing: a feature the part does not have (naming those it "
+     "has), suppressing what leaves another feature failing or no body, a "
+     "study's load, refinement or kept face on a face a suppressed feature "
+     "made (naming both), a datum that is not a plane, a face that is not "
+     "flat, and on an assembly a symmetry plane or a study solved beside a "
+     "neighbour. Every result and mesh it reaches reads stale. Answers the "
+     "simulation's `geometry` as list_simulations does.",
+     "flip, part, simulation, suppress, symmetry, unsuppress"},
+    {"check_sim_geometry",
+     "Read-only: what in a study's analysis shape (with the suppressed "
+     "features out, before the symmetry cut) is smaller than the element "
+     "size it will be meshed at (docs/simulation/README.md"
+     "#the-geometry-check) {study?, simulation?} -- each edge shorter "
+     "than it, each face narrower than it (4 x area / perimeter), and each "
+     "two faces that do not touch closer than it (`through`: material, a "
+     "wall one element thick; air, a slot the mesh bridges), with the "
+     "feature that made it, so you know what to suppress (set_sim_geometry) "
+     "or refine (add_refinement) before meshing. `suppressible` is false "
+     "for the body's own first solid. What is on the far side of a "
+     "symmetry plane is left out. Answers {study, bodies: [{name, "
+     "element_size_mm, faces, edges}], findings: [{kind: edge|face|gap, "
+     "body, size_mm, element_size_mm, element?, other_element?, feature?: "
+     "{id, name}, suppressible, through?, at_mm}], gaps_skipped?, note?}.",
+     "simulation, study", remote::NoFlags,
+     "study:int, bodies:{name:string, element_size_mm:number, faces:int, "
+     "edges:int}[], findings:{kind:string, body:string, size_mm:number, "
+     "element_size_mm:number, element?:string, other_element?:string, "
+     "feature?:{id:int, name:string}, suppressible:bool, through?:string, "
+     "at_mm:number[]}[], gaps_skipped?:bool, note?:string"},
     {"clear_sim_storage",
      "Clear a simulation's stored meshes and results {simulation?}, as its "
      "toolbar's Clear stored meshes and results does "
@@ -1472,10 +1560,18 @@ static constexpr MethodDoc SimulationMethods[] = {
      "id, load, study, simulation"},
     {"add_refinement",
      "Add a local mesh refinement on an element: `size` is the target element "
-     "edge length there, in MILLIMETRES, or an expression of the variables "
-     "(size_expr; docs/scripting/rpc.md#numbers-that-take-an-expression).",
+     "edge length there, in MILLIMETRES (above 0), or an expression of the "
+     "variables (size_expr; "
+     "docs/scripting/rpc.md#numbers-that-take-an-expression). On `study` it "
+     "is that study's own, and the study meshes apart; with no `study` it "
+     "is on the simulation's mesh, which every study that sets none shares "
+     "(the toolbar's Refine). A face a feature suppressed for the analysis "
+     "made is refused, naming it.",
      "face, occurrence, size, size_expr, study, simulation"},
-    {"remove_refinement", "Remove a refinement.", "face, study, simulation"},
+    {"remove_refinement",
+     "Remove a refinement {face, study?}: the study's, or with no `study` "
+     "the simulation's mesh's.",
+     "face, study, simulation"},
     {"add_keep_face", "Topology optimization: mark a face to keep.",
      "face, study, simulation"},
     {"add_keep_out",
@@ -1802,9 +1898,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "tracer renders the MODEL, so a still taken after this shows the "
      "undeformed part in its own material and looks like the call silently "
      "did nothing. A static study with load cases shows `case` (its name or "
-     "0-based index).",
-     "case, deform_scale, field, layer_normal, markers, mode, range_max, "
-     "range_min, study, threshold, simulation"},
+     "0-based index). `mirror` (a simulation with a symmetry plane's) "
+     "draws the half model with its mirror image.",
+     "case, deform_scale, field, layer_normal, markers, mirror, mode, "
+     "range_max, range_min, study, threshold, simulation"},
     {"set_mesh_display",
      "Draw the mesh mesh_study kept in place of the body {study?, view: off "
      "| edges | quality | size}: its element edges, alone or over a colour "
@@ -2460,6 +2557,179 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     return SimulationJson(state,
                           state.parts[*ui::SlotIndexById(state, simSlot)]);
   }
+  if (m == "set_sim_geometry") {
+    // rpc-params: flip, part, suppress, symmetry, unsuppress
+    fem::SimGeometry g = host.sim->Geometry();
+    const bool assembly = host.IsAssembly();
+    // The part the features are in: the subject, or on an assembly's
+    // simulation the part `part` names.
+    uint64_t document = 0;
+    const Document* part = host.part;
+    if (p.contains("part")) {
+      if (!assembly)
+        throw std::runtime_error("`part` names whose features an assembly's "
+                                 "simulation suppresses; this one's subject "
+                                 "is the part");
+      const ui::PartSlot& slot = SubjectSlotOf(state, p.at("part"));
+      if (slot.kind != ui::DocKind::Part)
+        throw std::runtime_error("part: '" + slot.name +
+                                 "' is an assembly; "
+                                 "a feature is a part's");
+      document = slot.id;
+      part = ui::PartDocById(state, slot.id);
+    } else if (assembly &&
+               (p.contains("suppress") || p.contains("unsuppress"))) {
+      throw std::runtime_error("on an assembly's simulation, `part` says "
+                               "whose features to suppress (its tab name or "
+                               "id)");
+    }
+    const auto featureOf = [&](const json& v) -> const Feature& {
+      if (part == nullptr)
+        throw std::runtime_error("the part is gone");
+      const Feature* f = nullptr;
+      if (v.is_number_unsigned() || v.is_number_integer())
+        f = part->FindFeatureById(v.get<uint64_t>());
+      else if (v.is_string())
+        for (const auto& feat : part->GetFeatures())
+          if (feat->GetName() == v.get<std::string>())
+            f = feat.get();
+      if (f == nullptr) {
+        std::string known;
+        for (const auto& feat : part->GetFeatures())
+          known += (known.empty() ? "" : ", ") + feat->GetName() + " (" +
+                   std::to_string(feat->GetId()) + ")";
+        throw std::runtime_error("the part has no feature " + v.dump() +
+                                 "; it has: " + known);
+      }
+      return *f;
+    };
+    const auto idsOf = [&](const char* key) {
+      std::vector<uint64_t> ids;
+      if (!p.contains(key))
+        return ids;
+      const json& v = p.at(key);
+      if (v.is_array()) {
+        for (const json& e : v)
+          ids.push_back(featureOf(e).GetId());
+      } else {
+        ids.push_back(featureOf(v).GetId());
+      }
+      return ids;
+    };
+    for (const uint64_t id : idsOf("suppress"))
+      if (!g.IsSuppressed(document, id))
+        g.suppressed.push_back({document, id});
+    for (const uint64_t id : idsOf("unsuppress")) {
+      if (!g.IsSuppressed(document, id))
+        throw std::runtime_error(
+            "'" + featureOf(json(id)).GetName() +
+            "' is not suppressed for the analysis; nothing to put back");
+      std::erase(g.suppressed, fem::SuppressedFeature{document, id});
+    }
+    if (p.contains("symmetry")) {
+      const json& v = p.at("symmetry");
+      if (v.is_null()) {
+        g.symmetry = {};
+      } else {
+        if (assembly)
+          throw std::runtime_error("a symmetry cut is a part simulation's: "
+                                   "an assembly's simulation is solved whole");
+        if (!v.is_object() || v.contains("datum") == v.contains("face"))
+          throw std::runtime_error("symmetry is {datum: a datum plane's id or "
+                                   "name} or {face: a flat face}, or null; "
+                                   "got " +
+                                   v.dump());
+        for (const auto& [k, x] : v.items())
+          if (k != "datum" && k != "face")
+            throw std::runtime_error("symmetry: unknown key '" + k +
+                                     "' (accepted: datum, face)");
+        fem::SymmetryPlane plane;
+        plane.flip = g.symmetry.flip;
+        if (v.contains("datum")) {
+          plane.datum = featureOf(v.at("datum")).GetId();
+        } else {
+          const json& fv = v.at("face");
+          if (fv.is_string())
+            plane.face = ElementRef{0, fv.get<std::string>()};
+          else if (fv.is_object() && fv.contains("element") &&
+                   fv.at("element").is_string())
+            plane.face = ElementRef{fv.value("feature_id", uint64_t{0}),
+                                    fv.at("element").get<std::string>()};
+          else
+            throw std::runtime_error("symmetry: a face is {feature_id, "
+                                     "element}, or just the element name");
+          fem::ResolvedFace rf;
+          std::string why;
+          if (part == nullptr ||
+              !fem::ResolveFace(*part, plane.face, "symmetry plane", rf, &why))
+            throw std::runtime_error("symmetry: " + why);
+          plane.face.featureId = part->GetBodies()[rf.bodyIndex].createdBy;
+        }
+        g.symmetry = plane;
+      }
+    }
+    if (p.contains("flip")) {
+      if (!p.at("flip").is_boolean())
+        throw std::runtime_error("flip is true or false; got " +
+                                 p.at("flip").dump());
+      if (!g.symmetry.On())
+        throw std::runtime_error("flip keeps the other side of the symmetry "
+                                 "plane, and there is none: set `symmetry`");
+      g.symmetry.flip = p.at("flip").get<bool>();
+    }
+    const fem::SimContext ctx = ui::SimContextFor(state, *host.sim);
+    const std::string why =
+        fem::SimGeometryRefusal(ctx, g, [&](uint64_t id) -> const Document* {
+          return id == 0 ? ctx.part : ui::PartDocById(state, id);
+        });
+    if (!why.empty())
+      throw std::runtime_error(why);
+    if (!(g == host.sim->Geometry()))
+      host.sim->SetGeometry(std::move(g));
+    return json{{"geometry", SimGeometryJson(state, *host.sim)}};
+  }
+  if (m == "check_sim_geometry") {
+    const uint64_t id =
+        p.contains("study") ? p.at("study").get<uint64_t>() : frontStudy();
+    host.Require(id);
+    fem::GeometryCheck check;
+    std::string why;
+    if (!fem::CheckSimGeometry(ui::SimContextFor(state, *host.sim), id, check,
+                               &why))
+      throw std::runtime_error(why);
+    json bodies = json::array();
+    for (const fem::GeometryCheck::Body& b : check.bodies)
+      bodies.push_back({{"name", b.name},
+                        {"element_size_mm", b.elementMm},
+                        {"faces", b.faces},
+                        {"edges", b.edges}});
+    json findings = json::array();
+    for (const fem::GeometryFinding& f : check.findings) {
+      json fj{{"kind", fem::GeometryFindingKindName(f.kind)},
+              {"body", f.body},
+              {"size_mm", f.sizeMm},
+              {"element_size_mm", f.elementMm},
+              {"suppressible", f.suppressible},
+              {"at_mm", {f.at.x, f.at.y, f.at.z}}};
+      if (!f.element.empty())
+        fj["element"] = f.element;
+      if (!f.otherElement.empty())
+        fj["other_element"] = f.otherElement;
+      if (f.feature != 0)
+        fj["feature"] = {{"id", f.feature}, {"name", f.featureName}};
+      if (f.kind == fem::GeometryFinding::Kind::Gap)
+        fj["through"] = f.throughMaterial ? "material" : "air";
+      findings.push_back(std::move(fj));
+    }
+    json out{{"study", id},
+             {"bodies", std::move(bodies)},
+             {"findings", std::move(findings)}};
+    if (check.gapsSkipped)
+      out["gaps_skipped"] = true;
+    if (!check.note.empty())
+      out["note"] = check.note;
+    return out;
+  }
   if (m == "clear_sim_storage") {
     const ui::SimStorage gone = ui::ClearSimStorage(state);
     return json{{"results", gone.results}, {"meshes", gone.meshes}};
@@ -3015,8 +3285,30 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // rpc-returns-from: src/remote/RemoteSimulation.cpp
     return SampleStudy(state, host, p);
   }
+  // A face a feature suppressed for the analysis made is not in the shape
+  // the study solves (docs/simulation/README.md#the-geometry-step): a load
+  // there is refused naming the feature, as the run would refuse it.
+  const auto refuseSuppressedFace = [&](const fem::Load& l) {
+    if (l.face.name.empty() || host.sim->Geometry().suppressed.empty())
+      return;
+    uint64_t document = 0;
+    const Document* part = host.part;
+    if (l.occurrenceId != 0 && host.asmDoc != nullptr)
+      if (const Occurrence* occ = host.asmDoc->FindById(l.occurrenceId)) {
+        document = occ->partId;
+        part = ui::OccurrencePartDoc(state, *occ);
+      }
+    const std::vector<uint64_t> ids =
+        host.sim->Geometry().SuppressedIn(document);
+    if (part == nullptr || ids.empty())
+      return;
+    fem::Study one;
+    one.loads.push_back(l);
+    std::string why;
+    if (!fem::StudyForAnalysis(*part, one, ids, &why))
+      throw std::runtime_error(why);
+  };
   if (m == "add_refinement") {
-    const uint64_t id = p.at("study").get<uint64_t>();
     fem::Refinement r;
     r.face = studyFaceOf(p.at("face"));
     if (p.contains("occurrence"))
@@ -3028,22 +3320,49 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     if (!ExprParam(p, "size", r.size))
       throw std::runtime_error(
           "add_refinement needs size: mm, or an expression (size_expr)");
-    modifyStudy(id, "Add refinement",
-                [&](fem::Study& s) { s.refinements.push_back(r); });
+    if (!(r.size.value > 0.0) || !std::isfinite(r.size.value))
+      throw std::runtime_error("a refinement's size is an element size "
+                               "above 0 mm; got " +
+                               std::to_string(r.size.value));
+    {
+      fem::Load at; // read through the suppressed features as a load is
+      at.type = fem::LoadType::Fixed;
+      at.face = r.face;
+      at.occurrenceId = r.occurrenceId;
+      refuseSuppressedFace(at);
+    }
+    // On a study, its own (it then meshes apart); without one, the
+    // simulation's mesh, which every study that sets none shares.
+    if (p.contains("study")) {
+      const uint64_t id = p.at("study").get<uint64_t>();
+      modifyStudy(id, "Add refinement",
+                  [&](fem::Study& s) { s.refinements.push_back(r); });
+    } else {
+      fem::SimMesh mesh = host.sim->Mesh();
+      mesh.refinements.push_back(r);
+      host.sim->SetMesh(std::move(mesh));
+    }
     return json::object();
   }
   if (m == "remove_refinement") {
-    const uint64_t id = p.at("study").get<uint64_t>();
     const ElementRef face = studyFaceOf(p.at("face"));
-    modifyStudy(id, "Remove refinement", [&](fem::Study& s) {
-      s.refinements.erase(
-          std::remove_if(s.refinements.begin(), s.refinements.end(),
-                         [&](const fem::Refinement& r) {
-                           return r.face.featureId == face.featureId &&
-                                  r.face.name == face.name;
-                         }),
-          s.refinements.end());
-    });
+    const auto matches = [&](const fem::Refinement& r) {
+      return (face.featureId == 0 || r.face.featureId == face.featureId) &&
+             r.face.name == face.name;
+    };
+    if (p.contains("study")) {
+      const uint64_t id = p.at("study").get<uint64_t>();
+      modifyStudy(id, "Remove refinement", [&](fem::Study& s) {
+        std::erase_if(s.refinements, matches);
+      });
+    } else {
+      fem::SimMesh mesh = host.sim->Mesh();
+      if (std::erase_if(mesh.refinements, matches) == 0)
+        throw std::runtime_error("the simulation's mesh has no refinement on "
+                                 "'" +
+                                 face.name + "'");
+      host.sim->SetMesh(std::move(mesh));
+    }
     return json::object();
   }
   if (m == "add_load") {
@@ -3154,6 +3473,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       with.loads.push_back(l);
       if (const std::string why = fem::ThermalRefusal(with); !why.empty())
         throw std::runtime_error(why);
+      refuseSuppressedFace(l);
       modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
       return json{{"id", l.id}};
     }
@@ -3397,6 +3717,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (const std::string why = fem::FrameSupportRefusal(with); !why.empty())
         throw std::runtime_error(why);
     }
+    refuseSuppressedFace(l);
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
     return json{{"id", l.id}};
   }
@@ -5401,6 +5722,19 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                                  p.at("markers").dump());
       markers = p.at("markers").get<bool>();
     }
+    // The half model drawn with its mirror image: a simulation cut on a
+    // symmetry plane's (docs/simulation/README.md#the-symmetry-cut).
+    std::optional<bool> mirror;
+    if (p.contains("mirror")) {
+      if (!p.at("mirror").is_boolean())
+        throw std::runtime_error("mirror is true or false; got " +
+                                 p.at("mirror").dump());
+      mirror = p.at("mirror").get<bool>();
+      if (*mirror && !host.sim->Geometry().symmetry.On())
+        throw std::runtime_error("mirror draws a half model with its mirror "
+                                 "image, and this simulation has no symmetry "
+                                 "plane (set_sim_geometry {symmetry})");
+    }
     // A field the study's result does not hold is refused with what is
     // missing, not drawn as nothing (a study not yet run takes the choice:
     // it is shown when the run lands).
@@ -5472,6 +5806,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       state.simulation.layerNormal = *layerNormal;
     if (markers)
       state.simulation.showExtremes = *markers;
+    if (mirror)
+      state.simulation.mirror = *mirror;
     if (deformScale)
       state.simulation.deformScale = *deformScale;
     if (mode)
@@ -5487,6 +5823,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         {"case", state.simulation.activeCase},
         {"threshold", state.simulation.topoThreshold},
         {"markers", state.simulation.showExtremes},
+        {"mirror",
+         state.simulation.mirror && host.sim->Geometry().symmetry.On()},
         {"range_min", state.simulation.clampLo ? json(state.simulation.rangeLo)
                                                : json(nullptr)},
         {"range_max", state.simulation.clampHi ? json(state.simulation.rangeHi)

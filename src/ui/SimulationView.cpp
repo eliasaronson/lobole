@@ -7,6 +7,7 @@
 #include "core/fem/FemMeshReport.h"
 #include "core/fem/FemVtu.h"
 #include "core/io/Serialization.h"
+#include "core/io/SerializeSimulation.h" // StoredMeshToJson
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
 #include "ui/AppActionsInternal.h"
@@ -23,6 +24,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <unordered_map>
 
 namespace ui {
@@ -582,6 +584,9 @@ uint64_t ResultOverlayKey(const AppState& state, const StudyHost& host,
       sim.field == SimulationState::Field::InterlayerFactor)
     for (int k = 0; k < 3; ++k)
       key = Mix(key, Bits(sim.layerNormal[k]));
+  // A half model's mirror image, about the plane as it is now.
+  const bool mirror = sim.mirror && host.sim->Geometry().symmetry.On();
+  key = Mix(key, mirror ? fem::GeometryHash(host.sim->Geometry()) : 0);
   return key | 1ull;
 }
 
@@ -718,6 +723,22 @@ bool BuildResultOverlay(AppState& state, const StudyHost& host,
   }
   const double tMax = shown.topOpen ? 1.0 : 2.0;
 
+  // A half model drawn whole on request: each triangle again, reflected in
+  // the symmetry plane, its displacement reflected with it and its winding
+  // turned so it faces out.
+  std::optional<fem::CutPlane> mirror;
+  if (sim.mirror && host.sim->Geometry().symmetry.On()) {
+    fem::CutPlane plane;
+    if (fem::SimSymmetryPlane(SimContextFor(state, *host.sim), study.id, plane,
+                              nullptr))
+      mirror = plane;
+  }
+  const auto reflect = [&](const glm::dvec3& p, bool point) {
+    const glm::dvec3 n = mirror->normal;
+    const double d = glm::dot(point ? p - mirror->origin : p, n);
+    return p - 2.0 * d * n;
+  };
+
   // --- The triangles.
   for (const BodyField& bf : fields) {
     const fem::FemMesh& m = bf.body->mesh;
@@ -733,6 +754,18 @@ bool BuildResultOverlay(AppState& state, const StudyHost& host,
         v[i].edge = glm::vec3(1.0f);
       }
       EmitTri6(verts, indices, v);
+      if (mirror) {
+        static constexpr int kTurned[6] = {0, 2, 1, 5, 4, 3};
+        std::array<FieldVertex, 6> w;
+        for (int i = 0; i < 6; ++i) {
+          const int n = tri.nodes[kTurned[i]];
+          w[i] = v[kTurned[i]];
+          w[i].position = glm::vec3(reflect(m.nodes[n], true));
+          w[i].displacement = bf.disp ? glm::vec3(reflect((*bf.disp)[n], false))
+                                      : glm::vec3(0.0f);
+        }
+        EmitTri6(verts, indices, w);
+      }
     }
   }
   style = FieldStyle{};
@@ -833,6 +866,95 @@ const StudyCheck& CachedStudyCheck(AppState& state, uint64_t studyId) {
   fresh->problems = CheckStudyNow(state, studyId, false);
   state.simulation.check = fresh;
   return *state.simulation.check;
+}
+
+const SimGeometryCheck& CachedGeometryCheck(AppState& state, uint64_t studyId) {
+  static const SimGeometryCheck kNone;
+  const StudyHost host = StudyHostOf(state);
+  const fem::Study* s = host ? host.Find(studyId) : nullptr;
+  if (!s)
+    return kNone;
+  // What it reads: the simulation (its studies, mesh and geometry step)
+  // and the subject as it is now.
+  std::string key =
+      std::to_string(host.simSlotId) + ":" + std::to_string(host.Version()) +
+      ":" + std::to_string(studyId) + ":" + SimMeshKeyNow(state, *host.sim, *s);
+  if (state.simulation.geometryCheck &&
+      state.simulation.geometryCheck->key == key)
+    return *state.simulation.geometryCheck;
+  auto fresh = std::make_shared<SimGeometryCheck>();
+  fresh->key = std::move(key);
+  fresh->studyId = studyId;
+  if (!fem::CheckSimGeometry(SimContextFor(state, *host.sim), studyId,
+                             fresh->check, &fresh->error) &&
+      fresh->error.empty())
+    fresh->error = "the geometry check failed";
+  state.simulation.geometryCheck = fresh;
+  return *state.simulation.geometryCheck;
+}
+
+namespace {
+// A value's bytes as a save writes it: the text, and its binary halves
+// (what the directory form puts in the .bin beside it) at their size.
+size_t SavedBytes(nlohmann::json j) {
+  size_t binary = 0;
+  std::function<void(nlohmann::json&)> walk = [&](nlohmann::json& v) {
+    if (v.is_binary()) {
+      binary += v.get_binary().size();
+      v = nullptr;
+    } else if (v.is_object() || v.is_array()) {
+      for (auto& e : v)
+        walk(e);
+    }
+  };
+  walk(j);
+  return binary + j.dump(2).size();
+}
+} // namespace
+
+const SimStoredBytes& SimStoredBytesOf(AppState& state) {
+  static SimStoredBytes none;
+  static SimStoredBytes cached;
+  static uint64_t cachedSlot = 0, cachedEpoch = ~uint64_t{0};
+  static size_t cachedMeshes = 0;
+  const StudyHost host = StudyHostOf(state);
+  if (!host)
+    return none;
+  const fem::SimDocument& sim = *host.sim;
+  if (cachedSlot == host.simSlotId && cachedEpoch == sim.StudyResultsEpoch() &&
+      cachedMeshes == sim.Meshes().size())
+    return cached;
+  cached = {};
+  for (const uint64_t id : sim.ResultIds())
+    if (const fem::StudyRuntime* rt = sim.StudyResults(id)) {
+      nlohmann::json j;
+      if (DocumentIO::StudyResultToJson(*rt, j)) {
+        const size_t n = SavedBytes(std::move(j));
+        cached.results[id] = n;
+        cached.total += n;
+      }
+    }
+  for (const uint64_t key : sim.KeptMeshKeys())
+    if (const fem::StoredMesh* m = sim.FindMesh(key)) {
+      const size_t n = SavedBytes(DocumentIO::StoredMeshToJson(key, *m));
+      cached.meshes[key] = n;
+      cached.total += n;
+    }
+  cachedSlot = host.simSlotId;
+  cachedEpoch = sim.StudyResultsEpoch();
+  cachedMeshes = sim.Meshes().size();
+  return cached;
+}
+
+std::string ByteSize(size_t bytes) {
+  char buf[32];
+  if (bytes >= 1000 * 1000)
+    std::snprintf(buf, sizeof(buf), "%.1f MB", bytes / 1e6);
+  else if (bytes >= 1000)
+    std::snprintf(buf, sizeof(buf), "%.0f kB", bytes / 1e3);
+  else
+    std::snprintf(buf, sizeof(buf), "%zu B", bytes);
+  return buf;
 }
 
 } // namespace ui

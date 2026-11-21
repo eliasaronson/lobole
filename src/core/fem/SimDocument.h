@@ -63,6 +63,54 @@ struct SimMesh {
   std::vector<Refinement> refinements;
 };
 
+// The geometry the analysis sees (docs/simulation/README.md#the-geometry-step):
+// the subject regenerated without some of its features, and cut on a
+// symmetry plane. The subject itself is never changed.
+//
+// A feature suppressed for the analysis only: on a part subject `document`
+// is 0 (the subject), on an assembly the part document it belongs to.
+struct SuppressedFeature {
+  uint64_t document = 0;
+  uint64_t feature = 0;
+  bool operator==(const SuppressedFeature&) const = default;
+};
+// A plane the analysis shape is cut on, a roller put on the cut: a datum
+// plane of the part (`datum`), or a flat face (`face`). The side kept is the
+// one the plane's normal points to (a datum's normal, a face's outward one),
+// the other with `flip`. A part's only.
+struct SymmetryPlane {
+  uint64_t datum = 0;
+  ElementRef face;
+  bool flip = false;
+  bool On() const { return datum != 0 || face.IsSet(); }
+  bool operator==(const SymmetryPlane& o) const {
+    return datum == o.datum && face.featureId == o.face.featureId &&
+           face.name == o.face.name && flip == o.flip;
+  }
+};
+struct SimGeometry {
+  std::vector<SuppressedFeature> suppressed;
+  SymmetryPlane symmetry;
+  bool Empty() const { return suppressed.empty() && !symmetry.On(); }
+  // The features suppressed in part `document` (0 = the subject part).
+  std::vector<uint64_t> SuppressedIn(uint64_t document) const {
+    std::vector<uint64_t> out;
+    for (const SuppressedFeature& f : suppressed)
+      if (f.document == document)
+        out.push_back(f.feature);
+    return out;
+  }
+  bool IsSuppressed(uint64_t document, uint64_t feature) const {
+    for (const SuppressedFeature& f : suppressed)
+      if (f.document == document && f.feature == feature)
+        return true;
+    return false;
+  }
+  bool operator==(const SimGeometry& o) const {
+    return suppressed == o.suppressed && symmetry == o.symmetry;
+  }
+};
+
 // One meshed body as the mesher made it, kept by the key of what it was made
 // from (MeshKey: the shape and its settings). Shared, never copied: a mesh of
 // a cabinet is tens of megabytes.
@@ -106,6 +154,11 @@ public:
 
   const SimMesh& Mesh() const { return m_mesh; }
   void SetMesh(SimMesh mesh);
+
+  // The geometry step: every study's input, so a change reads every result
+  // and the mesh stale.
+  const SimGeometry& Geometry() const { return m_geometry; }
+  void SetGeometry(SimGeometry geometry);
 
   // ---- Studies ------------------------------------------------------------
   const std::vector<Study>& GetStudies() const { return m_studies; }
@@ -217,6 +270,7 @@ private:
   SimSubject m_subject;
   std::vector<Participant> m_roles;
   SimMesh m_mesh;
+  SimGeometry m_geometry;
   std::vector<Study> m_studies;
   std::map<uint64_t, uint64_t> m_studyRevision;
   uint64_t m_settingsRevision = 0;

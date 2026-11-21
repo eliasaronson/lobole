@@ -592,6 +592,7 @@ set(core_sources
     src/core/fem/SimDocument.cpp
     src/core/fem/SimMigration.cpp
     src/core/fem/SimStudy.cpp
+    src/core/fem/SimGeometry.cpp
     src/core/fem/AssemblyStudy.cpp
     src/core/fem/FemSolver.cpp
     src/core/fem/FemTopo.cpp
@@ -1044,6 +1045,7 @@ set(app_sources
     src/ui/CamTool.cpp
     src/ui/CamTree.cpp
     src/ui/SimTree.cpp
+    src/ui/SimGeometryPanel.cpp
     src/ui/CamGenerate.cpp
     src/ui/CamSetupSheet.cpp
     src/ui/PerfHud.cpp

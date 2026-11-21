@@ -233,6 +233,7 @@ add_executable(designer_tests
     test_topo_build.cpp
     test_study_inputs.cpp
     test_sim_document.cpp
+    test_sim_geometry.cpp
     test_sim_storage.cpp
     test_sim_project.cpp
     test_drawing_hlr.cpp
@@ -1552,6 +1553,17 @@ add_test(NAME study_material_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/study_material_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(study_material_smoke PROPERTIES TIMEOUT 120
+                     SKIP_RETURN_CODE 77)
+
+# The geometry step over the RPCs alone (docs/simulation/README.md
+# #the-geometry-step): the check names a plate's fastener holes, suppressing
+# them meshes fewer elements and refuses a load on a bore, the symmetry plane
+# solves half and answers the whole, every refusal changes nothing.
+# Self-skips (77) without Netgen.
+add_test(NAME sim_geometry_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sim_geometry_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(sim_geometry_smoke PROPERTIES TIMEOUT 180
                      SKIP_RETURN_CODE 77)
 
 # A nonlinear static study over the RPCs alone

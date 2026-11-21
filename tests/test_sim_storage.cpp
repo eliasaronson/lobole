@@ -145,8 +145,8 @@ TEST_CASE("A saved simulation's refusals name what is accepted",
   }
   SECTION("an unknown key") {
     nlohmann::json j = good;
-    j["geometry"] = nlohmann::json::object();
-    CHECK_THAT(LoadError(j, "key"), ContainsSubstring("geometry"));
+    j["defeature"] = nlohmann::json::object();
+    CHECK_THAT(LoadError(j, "key"), ContainsSubstring("defeature"));
   }
   SECTION("an unknown role, and roles on a part") {
     nlohmann::json j = good;

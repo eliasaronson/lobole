@@ -9,6 +9,7 @@
 #include "ui/CamPanel.h"
 #include "ui/DocumentSlots.h" // JobUndoGuard
 #include "ui/SelectionPipeline.h"
+#include "ui/SimTree.h" // SimRowKey, GeometryRowKey
 
 #include <imgui.h>
 
@@ -195,12 +196,24 @@ int DeleteSelection(AppState& state) {
   if (state.sim && state.simulation.IsActive()) {
     // The simulation tree's studies and loads, in ONE undo step: a load of
     // a study that is going goes with it.
-    const std::vector<uint64_t> loads =
-        SelectedIds(state, SelectionItem::Kind::SimLoad);
-    const std::vector<uint64_t> studies =
-        SelectedIds(state, SelectionItem::Kind::SimStudy);
-    if (loads.empty() && studies.empty())
+    using K = SelectionItem::Kind;
+    const std::vector<uint64_t> loads = SelectedIds(state, K::SimLoad);
+    const std::vector<uint64_t> studies = SelectedIds(state, K::SimStudy);
+    // The rows with no id of their own: a load case, a kept face and a
+    // keep-out by their study and place, a Geometry row by its kind and
+    // place (SimRowKey, GeometryRowKey).
+    const std::vector<uint64_t> cases = SelectedIds(state, K::SimCase);
+    const std::vector<uint64_t> keeps = SelectedIds(state, K::SimKeep);
+    const std::vector<uint64_t> keepOuts = SelectedIds(state, K::SimKeepOut);
+    const std::vector<uint64_t> geometry = SelectedIds(state, K::SimGeometry);
+    if (loads.empty() && studies.empty() && cases.empty() && keeps.empty() &&
+        keepOuts.empty() && geometry.empty())
       return 0;
+    const auto picked = [](const std::vector<uint64_t>& keys, uint64_t study,
+                           size_t index) {
+      return std::find(keys.begin(), keys.end(), SimRowKey(study, index)) !=
+             keys.end();
+    };
     int removed = 0;
     {
       SimUndoGuard guard(state);
@@ -208,21 +221,84 @@ int DeleteSelection(AppState& state) {
            std::vector<fem::Study>(state.sim->GetStudies().begin(),
                                    state.sim->GetStudies().end())) {
         fem::Study edited = s;
-        const size_t before = edited.loads.size();
-        std::erase_if(edited.loads, [&](const fem::Load& l) {
-          return std::find(loads.begin(), loads.end(), l.id) != loads.end();
-        });
-        if (edited.loads.size() == before)
+        int gone = static_cast<int>(
+            std::erase_if(edited.loads, [&](const fem::Load& l) {
+              return std::find(loads.begin(), loads.end(), l.id) != loads.end();
+            }));
+        // A load case goes when no load is left in it, as the case
+        // window's Remove (its loads selected with it go first): a load is
+        // never moved into another case behind the person's back.
+        std::vector<fem::LoadCase> keptCases;
+        for (size_t i = 0; i < edited.loadCases.size(); ++i) {
+          const std::string& name = edited.loadCases[i].name;
+          const bool holds = std::any_of(
+              edited.loads.begin(), edited.loads.end(),
+              [&](const fem::Load& l) { return l.loadCase == name; });
+          if (picked(cases, s.id, i) && !holds)
+            ++gone;
+          else
+            keptCases.push_back(edited.loadCases[i]);
+        }
+        edited.loadCases = std::move(keptCases);
+        std::vector<ElementRef> keptFaces;
+        for (size_t i = 0; i < edited.keepFaces.size(); ++i)
+          if (picked(keeps, s.id, i))
+            ++gone;
+          else
+            keptFaces.push_back(edited.keepFaces[i]);
+        edited.keepFaces = std::move(keptFaces);
+        std::vector<fem::KeepOut> keptOuts;
+        for (size_t i = 0; i < edited.keepOuts.size(); ++i)
+          if (picked(keepOuts, s.id, i))
+            ++gone;
+          else
+            keptOuts.push_back(edited.keepOuts[i]);
+        edited.keepOuts = std::move(keptOuts);
+        if (gone == 0)
           continue;
-        removed += static_cast<int>(before - edited.loads.size());
+        removed += gone;
         state.sim->ReplaceStudy(std::move(edited));
       }
       for (const uint64_t id : studies)
         if (state.sim->RemoveStudy(id))
           removed++;
+      if (!geometry.empty()) {
+        const auto has = [&](GeometryRow row, size_t i) {
+          return std::find(geometry.begin(), geometry.end(),
+                           GeometryRowKey(row, i)) != geometry.end();
+        };
+        // Putting a feature back or removing the cut never breaks a plan:
+        // no refusal to ask for.
+        fem::SimGeometry g = state.sim->Geometry();
+        std::vector<fem::SuppressedFeature> still;
+        for (size_t i = 0; i < g.suppressed.size(); ++i)
+          if (has(GeometryRow::Suppressed, i))
+            removed++;
+          else
+            still.push_back(g.suppressed[i]);
+        g.suppressed = std::move(still);
+        if (g.symmetry.On() && has(GeometryRow::Symmetry, 0)) {
+          g.symmetry = {};
+          removed++;
+        }
+        if (!(g == state.sim->Geometry()))
+          state.sim->SetGeometry(std::move(g));
+        fem::SimMesh mesh = state.sim->Mesh();
+        std::vector<fem::Refinement> refs;
+        for (size_t i = 0; i < mesh.refinements.size(); ++i)
+          if (has(GeometryRow::Refinement, i))
+            removed++;
+          else
+            refs.push_back(mesh.refinements[i]);
+        if (refs.size() != mesh.refinements.size()) {
+          mesh.refinements = std::move(refs);
+          state.sim->SetMesh(std::move(mesh));
+        }
+      }
     }
-    EraseKind(state.selection, SelectionItem::Kind::SimLoad);
-    EraseKind(state.selection, SelectionItem::Kind::SimStudy);
+    for (const K k : {K::SimLoad, K::SimStudy, K::SimCase, K::SimKeep,
+                      K::SimKeepOut, K::SimGeometry})
+      EraseKind(state.selection, k);
     SimulationState& sim = state.simulation;
     if (state.sim->FindStudy(sim.activeStudyId) == nullptr)
       sim.activeStudyId = state.sim->GetStudies().empty()
