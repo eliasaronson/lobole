@@ -255,6 +255,58 @@ bool Focused(const AppState& state, FocusKind kind, uint64_t studyId,
          f.index == index;
 }
 
+// A mesh row: the simulation's (###sim_mesh, shown for `s`, a study that
+// solves on it) or one study's own (###sim_mesh_<id>). A click shows that
+// mesh in the tool window.
+void DrawMeshRow(AppState& state, const StudyHost& host, const fem::Study& s,
+                 const std::string& id, bool selected) {
+  const MeshRow m = MeshRowOf(state, host, s);
+  ListRowSpec row;
+  row.glyph = CommandIcon("sim.mesh");
+  row.label = "Mesh" + id;
+  row.tail = m.tail;
+  if (m.warnings > 0) {
+    row.tailGlyph = ICON_FA_TRIANGLE_EXCLAMATION;
+    row.tail = std::to_string(m.warnings) + "  " + m.tail;
+    row.tooltip = std::to_string(m.warnings) + " warning" +
+                  (m.warnings == 1 ? "" : "s") + " in the mesh report; ";
+  }
+  row.tooltip += m.st.word;
+  row.dotColor = m.st.dot;
+  row.selected = selected;
+  const ListRowResult res = ListRow(row);
+  if (res.clicked || res.doubleClicked)
+    FocusOnly(state, FocusKind::Mesh, s.id);
+}
+
+// The simulation's mesh row: one for every study that solves on it, read
+// through the active study when it is one of them, else the first that has
+// a mesh to say anything about, else the first. Absent when every study
+// meshes apart (or there are none).
+void DrawSharedMeshRow(AppState& state, const StudyHost& host) {
+  const fem::Study* shown = nullptr;
+  const auto shares = [](const fem::Study& s) {
+    return s.shapeFrom.study == 0 && fem::SimDocument::SharesMesh(s);
+  };
+  if (const fem::Study* a = host.Find(state.simulation.activeStudyId);
+      a != nullptr && shares(*a))
+    shown = a;
+  for (const fem::Study& s : host.Studies())
+    if (shown == nullptr && shares(s) &&
+        (StudyMesh(state, s.id) != nullptr || host.Results(s.id) != nullptr))
+      shown = &s;
+  for (const fem::Study& s : host.Studies())
+    if (shown == nullptr && shares(s))
+      shown = &s;
+  if (shown == nullptr)
+    return;
+  const SimulationState::Focus& f = state.simulation.focus;
+  const fem::Study* focused =
+      f.kind == FocusKind::Mesh ? host.Find(f.studyId) : nullptr;
+  DrawMeshRow(state, host, *shown, "###sim_mesh",
+              focused != nullptr && shares(*focused));
+}
+
 // The subject row (###sim_subject) and, on an assembly, a row per
 // participant with its role as its menu.
 void DrawSubject(AppState& state, const StudyHost& host) {
@@ -331,27 +383,12 @@ void DrawStudyChildren(AppState& state, const StudyHost& host,
   SimulationState& sim = state.simulation;
   const uint64_t sid = s.id;
 
-  // The mesh, unless the study meshes nothing of its own (a study of a
-  // topology result).
-  if (s.shapeFrom.study == 0) {
-    const MeshRow m = MeshRowOf(state, host, s);
-    ListRowSpec row;
-    row.glyph = CommandIcon("sim.mesh");
-    row.label = "Mesh###sim_mesh_" + std::to_string(sid);
-    row.tail = m.tail;
-    if (m.warnings > 0) {
-      row.tailGlyph = ICON_FA_TRIANGLE_EXCLAMATION;
-      row.tail = std::to_string(m.warnings) + "  " + m.tail;
-      row.tooltip = std::to_string(m.warnings) + " warning" +
-                    (m.warnings == 1 ? "" : "s") + " in the mesh report; ";
-    }
-    row.tooltip += m.st.word;
-    row.dotColor = m.st.dot;
-    row.selected = Focused(state, FocusKind::Mesh, sid);
-    const ListRowResult res = ListRow(row);
-    if (res.clicked || res.doubleClicked)
-      FocusOnly(state, FocusKind::Mesh, sid);
-  }
+  // The study's own mesh, where it meshes apart from the simulation's (a
+  // size or a refinement of its own); a study of a topology result meshes
+  // nothing of its own.
+  if (s.shapeFrom.study == 0 && !fem::SimDocument::SharesMesh(s))
+    DrawMeshRow(state, host, s, "###sim_mesh_" + std::to_string(sid),
+                Focused(state, FocusKind::Mesh, sid));
 
   // Supports, then loads; the evaluated values (a load typed as a
   // variable shows what it is now).
@@ -640,6 +677,7 @@ void DrawSimTree(AppState& state) {
   SimulationState& sim = state.simulation;
 
   DrawSubject(state, host);
+  DrawSharedMeshRow(state, host);
 
   // A face picked in the viewport on a load selects that load's row, once
   // per pick: the tree and the picture agree on what is selected.

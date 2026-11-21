@@ -1054,11 +1054,15 @@ SimStorage ClearSimStorage(AppState& state) {
     it = it->first.first == host.simSlotId ? state.meshReports.erase(it)
                                            : std::next(it);
   state.meshReportEpoch++;
-  SimulationState& sim = state.simulation;
-  sim.field = SimulationState::Field::None;
-  sim.meshView = SimulationState::MeshView::Off;
-  sim.check.reset();
-  sim.reusedStudy = 0;
+  // What is on show is the simulation in front's (an RPC may clear one
+  // behind it, StudyHostOverride).
+  if (host.simSlotId == ActiveSimSlotId(state)) {
+    SimulationState& sim = state.simulation;
+    sim.field = SimulationState::Field::None;
+    sim.meshView = SimulationState::MeshView::Off;
+    sim.check.reset();
+    sim.reusedStudy = 0;
+  }
   LOG_INFO("simulation: cleared {} stored result(s) and {} mesh(es)", results,
            meshes);
   return {results, meshes};

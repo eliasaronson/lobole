@@ -828,10 +828,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // The auto mesh is sized for a stress field; a shape needs one that can
     // hold a shape. Four iterations is enough for this gate: the volume
     // constraint is enforced by the OC bisection on every one of them.
-    // The size is the mesh's (its row's settings), the iterations the
-    // study's.
-    SimTreeClick(ctx, "###sim_mesh_" + std::to_string(studyId));
-    ctx->ItemInputValue("//###ToolWindow/###study_mesh_size", "10");
+    // The size is the simulation's mesh's (its row's settings), the
+    // iterations the study's.
+    SimTreeClick(ctx, "###sim_mesh");
+    ctx->ItemInputValue("//###ToolWindow/###sim_mesh_size", "10");
     ctx->Yield(2);
     SimFocusStudy(ctx);
     ctx->ItemInputValue("//###ToolWindow/###topo_max_iterations", "4");
@@ -2203,7 +2203,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const std::string sidText = std::to_string(sid);
     for (const std::string& row :
          {std::string("###sim_subject"), "###study_sel_" + sidText,
-          "###sim_mesh_" + sidText, "###load_row_" + std::to_string(fixedId),
+          std::string("###sim_mesh"), "###load_row_" + std::to_string(fixedId),
           "###load_row_" + std::to_string(forceId),
           "###case_row_" + sidText + "_0"})
       IM_CHECK(ctx->ItemExists(("//###Model/**/" + row).c_str()));
@@ -2256,6 +2256,23 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // The study's row: its settings, the mesh row's: the mesh's.
     SimFocusStudy(ctx, sid);
     IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_analysis"));
+    SimTreeClick(ctx, "###sim_mesh");
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###sim_mesh_size"));
+    // The mesh is the simulation's: its size lands on the document, and a
+    // study that solves on it has no Mesh row of its own.
+    ctx->ItemInputValue("//###ToolWindow/###sim_mesh_size", "12");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->Mesh().size.value, 12.0);
+    IM_CHECK(
+        !ctx->ItemExists(("//###Model/**/###sim_mesh_" + sidText).c_str()));
+    // A size of its own gives the study its own mesh and row; the shared
+    // row goes with the last study on it.
+    SimFocusStudy(ctx, sid);
+    ctx->ItemInputValue("//###ToolWindow/###study_mesh_size", "7");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->meshSize.value, 7.0);
+    IM_CHECK(ctx->ItemExists(("//###Model/**/###sim_mesh_" + sidText).c_str()));
+    IM_CHECK(!ctx->ItemExists("//###Model/**/###sim_mesh"));
     SimTreeClick(ctx, "###sim_mesh_" + sidText);
     IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_mesh_size"));
     // Close puts the window away; nothing in focus, nothing drawn.

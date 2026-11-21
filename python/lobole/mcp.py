@@ -705,6 +705,15 @@ The loop that works — follow it every time:
    that its peak stays under its material's service temperature, with a
    margin: a printed plastic softens at its heat deflection temperature
    long before a stress fails it.
+8c. JUDGING A STUDY. A result is an answer only once you have read what
+   says how far to trust it: rpc('check_study') before the run (every
+   problem it would refuse, at once); the mesh report (mesh_study's
+   findings: walls one element through, refinements that did not take, the
+   worst elements); study_results' convergence.status (a peak that has not
+   settled is not a number to design to), whether it flags the peak at a
+   support's edge (that is the support's idealisation, not the part's),
+   and stale. Then say what the model leaves out -- the bolts, the contact, the
+   print's layers, the load you assumed -- beside the number you report.
 
 IMPORTING a file: rpc('import_step', {path}) is the importer for every 3D
 format, STL, OBJ, PLY and glTF meshes included, despite its name (an STL's
@@ -2080,7 +2089,11 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
 # part or an assembly. Every study call takes an optional `simulation` (its
 # tab's name or id; default the simulation tab in front, else the active
 # part's or assembly's one simulation, which add_study makes when there is
-# none). A study fixes faces, loads faces and solves for von Mises stress +
+# none; with several, name one). list_simulations lists them,
+# add_simulation makes another (a second participant table on one
+# assembly), set_simulation edits what its studies share (mesh_size_mm,
+# participants, configuration) and clear_sim_storage drops its stored
+# meshes and results. A study fixes faces, loads faces and solves for von Mises stress +
 # displacement. Faces are {feature_id, element}
 # refs from list_elements (feature_id = the body's created_by). Assign a real
 # material first (set_material, e.g. "steel") — a study on the default material
@@ -2100,6 +2113,34 @@ _reference("add_study", "Create a FEM study in the active part's (or "
           "loaded and a buckling study of each load that compresses "
           "something, with requirements on factor_of_safety and "
           "buckling_factor (both the governing values).")
+
+
+_reference("list_simulations", "List the project's simulations (or one "
+          "subject's): id, name, subject, configuration, the shared "
+          "mesh_size_mm, an assembly's participants, studies, stored counts, "
+          "and whether it is the tab in front. Their names and ids are the "
+          "`simulation` the study calls take.")
+
+
+_reference("add_simulation", "Make another simulation of a part or an "
+          "assembly (subject, default the one in front), behind the active "
+          "tab, with no study. Every study of a simulation shares its "
+          "participant table, so a second table is a second simulation: "
+          "add_simulation {subject, name, participants}, then add_study "
+          "{simulation: name}. Takes configuration, mesh_size_mm and "
+          "participants as set_simulation does.")
+
+
+_reference("set_simulation", "Edit what a simulation's studies share: "
+          "mesh_size_mm (mm, 0 = auto; the mesh every study without a size "
+          "of its own solves on), participants (an assembly's role table, "
+          "the whole list) and configuration (a part's, by name or id). "
+          "One undo step; the results it reaches read stale.")
+
+
+_reference("clear_sim_storage", "Drop a simulation's stored meshes and "
+          "results (not undoable; the next run rebuilds them). Returns "
+          "{results, meshes} removed.")
 
 
 _reference("remove_study", "Delete a study (by id) and its cached results.")

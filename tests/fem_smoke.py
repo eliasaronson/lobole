@@ -199,18 +199,56 @@ def assembly_study(d):
 
     # S2: the lower block BONDED instead of rigid — one mesh over both, the
     # lower's own bottom fixed, and a softer answer than the rigid support.
+    # Every study of a simulation shares its role table, so a second table
+    # is a second simulation of the same assembly (add_simulation), and the
+    # rigid study keeps its own.
     d.call("set_occurrence_transform", id=upper,
            transform={"position": [0, 0, 16]})
     rigid_disp = d.call("run_study", study=study)["max_displacement_mm"]["value"]
-    bonded = d.call("add_study", name="Bonded")["id"]
-    d.call("set_study", id=bonded, mesh_size=12.0,
-           participants=[{"occurrence": upper, "role": "meshed"},
-                         {"occurrence": lower, "role": "bonded"}])
-    d.call("add_load", study=bonded, type="fixed", occurrence=lower,
-           face=parts["Lower"][2])
-    d.call("add_load", study=bonded, type="pressure", occurrence=upper,
-           face=parts["Upper"][1], magnitude=0.5)
-    res = d.call("run_study", study=bonded)
+    sims = d.call("list_simulations", subject=asm["id"])["simulations"]
+    expect(len(sims) == 1 and sims[0]["subject"]["name"] == "Stack"
+           and [s["id"] for s in sims[0]["studies"]] == [study]
+           and sims[0]["stored"]["results"] == 1, f"one simulation: {sims}")
+    rigid_sim = sims[0]["id"]
+    tabs = len(d.call("list_parts")["parts"])
+    made = d.call("add_simulation", subject="Stack", name="Bonded blocks",
+                  mesh_size_mm=12.0,
+                  participants=[{"occurrence": upper, "role": "meshed"},
+                                {"occurrence": "Lower", "role": "bonded"}])
+    expect(made["name"] == "Bonded blocks" and made["studies"] == []
+           and made["mesh_size_mm"] == 12.0 and not made["active"]
+           and {p["name"]: p["role"] for p in made["participants"]}
+           == {"Upper": "meshed", "Lower": "bonded"}, f"made: {made}")
+    expect(len(d.call("list_parts")["parts"]) == tabs + 1, "a tab of its own")
+    # Two simulations of the tab in front: a study verb that names neither
+    # is refused, naming both.
+    try:
+        d.call("list_studies")
+        raise AssertionError("two simulations, and one was picked")
+    except RuntimeError as e:
+        expect("2 simulations" in str(e) and "Bonded blocks" in str(e)
+               and sims[0]["name"] in str(e), f"names both: {e}")
+    # A name another tab has, a configuration an assembly simulation cannot
+    # take, an unknown role: refused, and no tab is made.
+    for bad, words in (({"name": "Stack"}, "already exists"),
+                       ({"configuration": "Long"}, "as it stands"),
+                       ({"participants": [{"occurrence": upper,
+                                           "role": "glued"}]}, "glued")):
+        try:
+            d.call("add_simulation", subject="Stack", **bad)
+            raise AssertionError(f"add_simulation took {bad}")
+        except RuntimeError as e:
+            expect(words in str(e), f"names {words!r}: {e}")
+    expect(len(d.call("list_parts")["parts"]) == tabs + 1,
+           "a refused add_simulation made no tab")
+    bonded = d.call("add_study", simulation="Bonded blocks",
+                    name="Bonded")["id"]
+    d.call("add_load", simulation="Bonded blocks", study=bonded, type="fixed",
+           occurrence=lower, face=parts["Lower"][2])
+    d.call("add_load", simulation="Bonded blocks", study=bonded,
+           type="pressure", occurrence=upper, face=parts["Upper"][1],
+           magnitude=0.5)
+    res = d.call("run_study", simulation="Bonded blocks", study=bonded)
     expect(res["bodies"][0]["body"] == "Upper + Lower",
            f"one body for the group: {res['bodies']}")
     expect(res["max_displacement_mm"]["value"] > rigid_disp,
@@ -218,10 +256,37 @@ def assembly_study(d):
            f"{rigid_disp}")
     roles = {p["name"]: p["role"] for p in res["participants"]}
     expect(roles == {"Upper": "meshed", "Lower": "bonded"}, f"roles: {roles}")
+    # The rigid study kept its table and its result.
+    kept = d.call("study_results", simulation=rigid_sim, study=study)
+    expect(not kept["stale"] and {p["name"]: p["role"]
+                                  for p in kept["participants"]}
+           == {"Upper": "meshed", "Lower": "rigid"}, f"rigid kept: {kept}")
+
+    # set_simulation: the shared mesh size is the simulation's, and the
+    # result on it reads stale; one undo step on its tab.
+    edited = d.call("set_simulation", simulation="Bonded blocks",
+                    mesh_size_mm=10.0)
+    expect(edited["mesh_size_mm"] == 10.0, f"set: {edited}")
+    expect(d.call("study_results", simulation="Bonded blocks",
+                  study=bonded)["stale"], "a new mesh size staled the result")
+    try:
+        d.call("set_simulation", simulation="Bonded blocks", mesh_size_mm=-1)
+        raise AssertionError("a negative mesh size was taken")
+    except RuntimeError as e:
+        expect("millimetres" in str(e), f"names the unit: {e}")
+    # clear_sim_storage drops what is stored, the studies stay.
+    gone = d.call("clear_sim_storage", simulation="Bonded blocks")
+    expect(gone["results"] == 1 and gone["meshes"] >= 1, f"cleared: {gone}")
+    after = d.call("list_simulations", subject="Stack")["simulations"]
+    held = {s["name"]: s for s in after}
+    expect(held["Bonded blocks"]["stored"] == {"results": 0, "meshes": 0}
+           and len(held["Bonded blocks"]["studies"]) == 1
+           and held[sims[0]["name"]]["stored"]["results"] == 1,
+           f"only that simulation's storage went: {after}")
 
     # The window: enter_simulation on the assembly tab opens its study
     # window rather than refusing.
-    st = d.call("enter_simulation", study=study)
+    st = d.call("enter_simulation", simulation=rigid_sim, study=study)
     expect(st["active"] and st["study"] == study, f"entered: {st}")
     d.call("exit_simulation")
     print("fem_smoke: assembly study OK")

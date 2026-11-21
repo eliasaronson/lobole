@@ -801,6 +801,23 @@ uint64_t SimulationSlotFor(AppState& state, uint64_t docId, bool create) {
   return state.parts[added].id;
 }
 
+uint64_t AppendSimulation(AppState& state, fem::SimDocument sim,
+                          const std::string& name, std::string* why) {
+  if (!name.empty())
+    for (const PartSlot& ps : state.parts)
+      if (ps.name == name) {
+        if (why)
+          *why = "a tab named '" + name +
+                 "' already exists -- names address tabs, so two answering "
+                 "to one would be ambiguous";
+        return 0;
+      }
+  const std::string stem =
+      name.empty() ? sim.Subject().name + " simulation" : name;
+  const size_t added = AppendSimulationSlot(state, stem, std::move(sim));
+  return state.parts[added].id;
+}
+
 size_t MoveStudiesIntoSimulations(AppState& state) {
   size_t made = 0;
   const size_t n = state.parts.size(); // the ones appended are not subjects

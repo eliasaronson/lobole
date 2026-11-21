@@ -1466,6 +1466,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'list_requirements': {'type': 'object', 'properties': {'all_pass': {'type': 'boolean'}, 'requirements': {'type': 'array', 'items': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}, 'checked_at': {'type': 'string'}, 'detail': {'type': 'object'}, 'evidence_revision': {'type': 'integer'}, 'input_hash': {'type': 'string'}, 'limit': {'type': 'number'}, 'unit': {'type': 'string'}, 'value': {'type': 'number'}, 'limit_max': {'type': 'number'}, 'limit_min': {'type': 'number'}}, 'required': ['bound', 'id', 'measure', 'name', 'revision', 'state'], 'additionalProperties': False}}, 'summary': {'type': 'object', 'properties': {'fail': {'type': 'integer'}, 'pass': {'type': 'integer'}, 'stale': {'type': 'integer'}, 'unchecked': {'type': 'integer'}, 'unresolved': {'type': 'integer'}}, 'required': ['fail', 'pass', 'stale', 'unchecked', 'unresolved'], 'additionalProperties': False}, 'not_converged': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'reason': {'type': 'string'}, 'state': {'type': 'string'}}, 'required': ['id', 'name', 'reason', 'state'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['all_pass', 'requirements', 'summary'], 'additionalProperties': False},
     'list_retaining_rings': {'type': 'object', 'properties': {'rings': {'type': 'array', 'items': {'type': 'object', 'properties': {'a_mm': {'type': 'number'}, 'b_mm': {'type': 'number'}, 'd3_mm': {'type': 'number'}, 'd5_mm': {'type': 'number'}, 'designation': {'type': 'string'}, 'groove': {'type': 'object'}, 's_mm': {'type': 'number'}, 'size_mm': {'type': 'number'}}, 'required': ['a_mm', 'b_mm', 'd3_mm', 'd5_mm', 'designation', 'groove', 's_mm', 'size_mm'], 'additionalProperties': False}}, 'source': {'type': 'string'}, 'standard': {'type': 'string'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['rings', 'source', 'standard'], 'additionalProperties': False},
     'list_sections': {'type': 'object', 'properties': {'sections': {'type': 'array', 'items': {'type': 'object', 'properties': {'d': {'type': 'number'}, 'id': {'type': 'integer'}, 'normal': {'type': 'array', 'items': {'type': 'number'}}, 'offset': {'type': 'number'}, 'reverse': {'type': 'boolean'}, 'source': {'type': 'object'}, 'tilt_u': {'type': 'number'}, 'tilt_v': {'type': 'number'}, 'uncapped': {'type': 'array', 'items': {'type': 'string'}}, 'uncapped_why': {'type': 'string'}, 'visible': {'type': 'boolean'}}, 'required': ['d', 'id', 'normal', 'offset', 'reverse', 'source', 'tilt_u', 'tilt_v', 'visible'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['sections'], 'additionalProperties': False},
+    'list_simulations': {'type': 'object', 'properties': {'simulations': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'active': {'type': 'boolean'}, 'subject': {'type': 'object', 'properties': {'type': {'type': 'string'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'present': {'type': 'boolean'}}, 'required': ['type', 'id', 'name', 'present'], 'additionalProperties': False}, 'configuration': {'type': 'integer'}, 'configuration_name': {'type': 'string'}, 'mesh_size_mm': {'type': 'number'}, 'mesh_size_mm_expr': {'type': 'string'}, 'participants': {'type': 'array', 'items': {'type': 'object', 'properties': {'occurrence': {'type': 'integer'}, 'name': {'type': 'string'}, 'role': {'type': 'string'}, 'friction': {'type': 'number'}, 'mesh_size': {'type': 'number'}}, 'required': ['occurrence', 'name', 'role'], 'additionalProperties': False}}, 'studies': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'type': {'type': 'string'}, 'shares_mesh': {'type': 'boolean'}}, 'required': ['id', 'name', 'type', 'shares_mesh'], 'additionalProperties': False}}, 'stored': {'type': 'object', 'properties': {'results': {'type': 'integer'}, 'meshes': {'type': 'integer'}}, 'required': ['results', 'meshes'], 'additionalProperties': False}}, 'required': ['id', 'name', 'active', 'subject', 'configuration', 'mesh_size_mm', 'studies', 'stored'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['simulations'], 'additionalProperties': False},
     'list_studies': {'type': 'object', 'properties': {'studies': {'type': 'array', 'items': {'type': 'object', 'properties': {'converge': {'type': 'string'}, 'filter_radius': {'type': 'number'}, 'has_results': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'keep_faces': {'type': 'integer'}, 'keep_outs': {'type': 'array', 'items': {'type': 'object'}}, 'load_cases': {'type': 'array', 'items': {'type': 'object'}}, 'loads': {'type': 'array', 'items': {'type': 'object'}}, 'max_iterations': {'type': 'integer'}, 'mesh_size': {'type': 'number'}, 'name': {'type': 'string'}, 'num_modes': {'type': 'integer'}, 'refinements': {'type': 'integer'}, 'stale': {'type': 'boolean'}, 'type': {'type': 'string'}, 'volume_fraction': {'type': 'number'}, 'shape_from': {'type': 'object'}, 'solver': {'type': 'string'}, 'nonlinear': {'type': 'object'}, 'participants': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['has_results', 'id', 'loads', 'mesh_size', 'name', 'refinements', 'stale', 'type'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['studies'], 'additionalProperties': False},
     'list_tables': {'type': 'object', 'properties': {'tables': {'type': 'array', 'items': {'type': 'object', 'properties': {'columns': {'type': 'array', 'items': {'type': 'string'}}, 'name': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'comment': {'type': 'string'}}, 'required': ['columns', 'name', 'rows'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['tables'], 'additionalProperties': False},
     'list_templates': {'type': 'object', 'properties': {'templates': {'type': 'array', 'items': {'type': 'object', 'properties': {'features': {'type': 'array', 'items': {'type': 'object'}}, 'instances': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'parameters': {'type': 'array', 'items': {'type': 'object'}}, 'revision': {'type': 'integer'}}, 'required': ['features', 'instances', 'name', 'parameters', 'revision'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['templates'], 'additionalProperties': False},
@@ -3315,6 +3316,51 @@ ListSectionsResult = TypedDict('ListSectionsResult', {
     'sections': list[ListSectionsResultSections],
 })
 
+ListSimulationsResultSimulationsSubject = TypedDict('ListSimulationsResultSimulationsSubject', {
+    'type': str,
+    'id': int,
+    'name': str,
+    'present': bool,
+})
+
+ListSimulationsResultSimulationsParticipants = TypedDict('ListSimulationsResultSimulationsParticipants', {
+    'occurrence': int,
+    'name': str,
+    'role': str,
+    'friction': NotRequired[float],
+    'mesh_size': NotRequired[float],
+})
+
+ListSimulationsResultSimulationsStudies = TypedDict('ListSimulationsResultSimulationsStudies', {
+    'id': int,
+    'name': str,
+    'type': str,
+    'shares_mesh': bool,
+})
+
+ListSimulationsResultSimulationsStored = TypedDict('ListSimulationsResultSimulationsStored', {
+    'results': int,
+    'meshes': int,
+})
+
+ListSimulationsResultSimulations = TypedDict('ListSimulationsResultSimulations', {
+    'id': int,
+    'name': str,
+    'active': bool,
+    'subject': ListSimulationsResultSimulationsSubject,
+    'configuration': int,
+    'configuration_name': NotRequired[str],
+    'mesh_size_mm': float,
+    'mesh_size_mm_expr': NotRequired[str],
+    'participants': NotRequired[list[ListSimulationsResultSimulationsParticipants]],
+    'studies': list[ListSimulationsResultSimulationsStudies],
+    'stored': ListSimulationsResultSimulationsStored,
+})
+
+ListSimulationsResult = TypedDict('ListSimulationsResult', {
+    'simulations': list[ListSimulationsResultSimulations],
+})
+
 ListStudiesResultStudies = TypedDict('ListStudiesResultStudies', {
     'converge': NotRequired[str],
     'filter_radius': NotRequired[float],
@@ -4089,6 +4135,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def list_sections(self, _timeout: float | None = None) -> ListSectionsResult:
+        raise NotImplementedError
+
+    def list_simulations(self, _timeout: float | None = None, **params: Any) -> ListSimulationsResult:
         raise NotImplementedError
 
     def list_studies(self, _timeout: float | None = None, **params: Any) -> ListStudiesResult:

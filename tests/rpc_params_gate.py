@@ -51,9 +51,12 @@ DISPATCHER_KEYS = {"expect_revision": "revision"}
 # the method's branch: a study verb's `simulation`, which names the
 # simulation it acts on (ResolveSimulationSlot in RemoteSimulation.cpp,
 # docs/scripting/rpc.md#simulations). A row of that module lists it; the
-# branch never reads it. `exit_simulation` returns before it is read.
+# branch never reads it. `exit_simulation`, `list_simulations` and
+# `add_simulation` return before it is read.
 MODULE_DISPATCHER_KEYS = {
-    "RemoteSimulation.cpp": ({"simulation"}, {"exit_simulation"}),
+    "RemoteSimulation.cpp": ({"simulation"}, {"exit_simulation",
+                                              "list_simulations",
+                                              "add_simulation"}),
 }
 
 

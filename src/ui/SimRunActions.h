@@ -117,6 +117,12 @@ bool StartSimTopologyCheck(AppState& state, uint64_t simSlotId, uint64_t topoId,
 // 0 when there is none and none was made, or `docId` is not a part's or an
 // assembly's tab. Nothing switches tabs.
 uint64_t SimulationSlotFor(AppState& state, uint64_t docId, bool create);
+// A simulation tab holding `sim`, appended BEHIND the tab in front (nothing
+// switches): named `name`, refused (0, the reason in `why`) when another
+// tab answers to it, or, with `name` empty, "<subject> simulation" made
+// unique. Its slot id.
+uint64_t AppendSimulation(AppState& state, fem::SimDocument sim,
+                          const std::string& name, std::string* why = nullptr);
 // Every simulation tab analysing that document, by slot index.
 std::vector<size_t> SimulationSlotsFor(const AppState& state, uint64_t docId);
 

@@ -248,6 +248,8 @@ def outside_baselines(part, setup, out, cam):
         (part["name"], "create_drawing", {"name": "New dwg"}),
         (part["name"], "machine_part",
          {"part": part["name"], "name": "New job"}),
+        (part["name"], "add_simulation",
+         {"subject": part["name"], "name": "New sim", "mesh_size_mm": 5.0}),
         (part["name"], "delete_part", {"part": "Dwg"}),
         (part["name"], "set_active_part", {"part": "Asm"}),
         (part["name"], "rename_part",

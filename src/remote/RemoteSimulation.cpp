@@ -24,6 +24,7 @@
 #include "ui/AssemblyActions.h" // PartDocById, SnapshotAssembly, OccurrenceMatrix
 #include "ui/BackgroundJobs.h"
 #include "ui/DocumentSlots.h" // AddPart, SetActivePart
+#include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/ImportActions.h"
 #include "ui/SimRunActions.h"
 #include "ui/SimulationActions.h"
@@ -642,6 +643,84 @@ json ConvergenceJson(const fem::Convergence& c) {
   return out;
 }
 
+// An occurrence of an assembly subject, by id or by name.
+const Occurrence& OccurrenceIn(const AssemblyDocument* asmDoc, const json& v,
+                               const char* what) {
+  if (!asmDoc)
+    throw std::runtime_error(std::string(what) +
+                             " names an occurrence, which only an "
+                             "assembly's study has");
+  if (v.is_number_unsigned() || v.is_number_integer()) {
+    const Occurrence* occ = asmDoc->FindById(v.get<uint64_t>());
+    if (!occ)
+      throw std::runtime_error(std::string(what) + ": no occurrence with id " +
+                               std::to_string(v.get<uint64_t>()) +
+                               " (list_occurrences names them)");
+    return *occ;
+  }
+  if (v.is_string()) {
+    if (const Occurrence* occ = UniqueNamed(
+            asmDoc->GetOccurrences(), v.get<std::string>(), what,
+            [](const Occurrence& x) -> const std::string& { return x.name; },
+            [](const Occurrence& x) { return x.id; }))
+      return *occ;
+    throw std::runtime_error(std::string(what) + ": no occurrence named '" +
+                             v.get<std::string>() +
+                             "' (list_occurrences names them)");
+  }
+  throw std::runtime_error(std::string(what) + " is an occurrence id or name");
+}
+
+// A participants table, the whole list at once (a role table is one
+// statement, not a sequence of edits): [{occurrence, role, mesh_size?,
+// friction?}], refused naming what is wrong before anything changes.
+std::vector<fem::Participant> ParticipantsOf(const AssemblyDocument* asmDoc,
+                                             const json& list) {
+  if (!list.is_array())
+    throw std::runtime_error(
+        "participants is a list of {occurrence, role: "
+        "meshed|bonded|contact|rigid|ignored, mesh_size?, friction?}");
+  std::vector<fem::Participant> out;
+  for (const json& pj : list) {
+    if (!pj.is_object() || !pj.contains("occurrence"))
+      throw std::runtime_error(
+          "each participant is {occurrence, role, mesh_size?}");
+    for (const auto& [key, value] : pj.items()) {
+      (void)value;
+      if (key != "occurrence" && key != "role" && key != "mesh_size" &&
+          key != "mesh_size_expr" && key != "friction")
+        throw std::runtime_error("a participant has no '" + key +
+                                 "'; it is {occurrence, role, mesh_size?, "
+                                 "mesh_size_expr?, friction?}");
+    }
+    fem::Participant pt;
+    const Occurrence& occ =
+        OccurrenceIn(asmDoc, pj.at("occurrence"), "participant");
+    pt.occurrenceId = occ.id;
+    const std::string role = pj.value("role", std::string{"rigid"});
+    if (!fem::ParticipantRoleFromString(role, pt.role))
+      throw std::runtime_error(
+          "participant role '" + role +
+          "' is not one of meshed, bonded, contact, rigid, ignored");
+    if (pj.contains("friction")) {
+      if (pt.role != fem::ParticipantRole::Contact)
+        throw std::runtime_error(
+            "friction is a contact participant's (role: contact)");
+      if (!pj.at("friction").is_number())
+        throw std::runtime_error(
+            "friction is a number: the coefficient, unitless");
+      pt.friction = pj.at("friction").get<double>();
+    }
+    (void)ReadExprParam(pj, "mesh_size", pt.meshSize);
+    for (const fem::Participant& have : out)
+      if (have.occurrenceId == pt.occurrenceId)
+        throw std::runtime_error("participant " + occ.name +
+                                 " is listed twice");
+    out.push_back(std::move(pt));
+  }
+  return out;
+}
+
 // Where the studies live: a simulation document (a tab of its own,
 // docs/simulation/README.md#the-simulation-document-core), named by the
 // call's `simulation` or found from the tab in front (ResolveHost). Its
@@ -745,31 +824,7 @@ struct Host {
   }
   // An occurrence of the assembly, by id or by name.
   const Occurrence& OccurrenceOf(const json& v, const char* what) {
-    if (!asmDoc)
-      throw std::runtime_error(std::string(what) +
-                               " names an occurrence, which only an "
-                               "assembly's study has");
-    if (v.is_number_unsigned() || v.is_number_integer()) {
-      const Occurrence* occ = asmDoc->FindById(v.get<uint64_t>());
-      if (!occ)
-        throw std::runtime_error(std::string(what) +
-                                 ": no occurrence with id " +
-                                 std::to_string(v.get<uint64_t>()) +
-                                 " (list_occurrences names them)");
-      return *occ;
-    }
-    if (v.is_string()) {
-      if (const Occurrence* occ = UniqueNamed(
-              asmDoc->GetOccurrences(), v.get<std::string>(), what,
-              [](const Occurrence& x) -> const std::string& { return x.name; },
-              [](const Occurrence& x) { return x.id; }))
-        return *occ;
-      throw std::runtime_error(std::string(what) + ": no occurrence named '" +
-                               v.get<std::string>() +
-                               "' (list_occurrences names them)");
-    }
-    throw std::runtime_error(std::string(what) +
-                             " is an occurrence id or name");
+    return OccurrenceIn(asmDoc, v, what);
   }
   std::string OccurrenceName(uint64_t id) const {
     const Occurrence* occ = asmDoc ? asmDoc->FindById(id) : nullptr;
@@ -890,6 +945,175 @@ Host HostOf(ui::AppState& state, uint64_t simSlot) {
   return host;
 }
 
+// A simulation's subject named by a call (add_simulation's and
+// list_simulations' `subject`): a part's or an assembly's tab, by name or id.
+const ui::PartSlot& SubjectSlotOf(ui::AppState& state, const json& v) {
+  const ui::PartSlot& slot = state.parts[ResolveSlotIndex(state, v)];
+  if (slot.kind != ui::DocKind::Part && slot.kind != ui::DocKind::Assembly)
+    throw std::runtime_error("subject: '" + slot.name +
+                             "' is not a part or an assembly; a simulation "
+                             "analyses one of those");
+  return slot;
+}
+
+// What add_simulation and set_simulation set, each read and checked
+// before anything changes (docs/scripting/rpc.md#a-refused-call-changes-
+// nothing).
+struct SimSettings {
+  std::optional<uint64_t> configuration;
+  std::optional<ExprValue> meshSize;
+  std::optional<std::vector<fem::Participant>> roles;
+};
+
+SimSettings ReadSimSettings(ui::AppState& state, const fem::SimSubject& subject,
+                            const RpcParams& p) {
+  SimSettings out;
+  const bool assembly = subject.kind == fem::SubjectKind::Assembly;
+  const Document* part =
+      assembly ? nullptr : ui::PartDocById(state, subject.docId);
+  const AssemblyDocument* asmDoc =
+      assembly ? ui::AssemblyDocById(state, subject.docId) : nullptr;
+  if (part == nullptr && asmDoc == nullptr)
+    throw std::runtime_error("the subject of this simulation ('" +
+                             subject.name + "') is gone");
+  if (p.contains("configuration")) {
+    const json& c = p.at("configuration");
+    if (!c.is_string() && !c.is_number_unsigned())
+      throw std::runtime_error(
+          "configuration is a configuration's name or id (0 or \"\" = the "
+          "subject's active one)");
+    const bool active = (c.is_number_unsigned() && c.get<uint64_t>() == 0) ||
+                        (c.is_string() && c.get<std::string>().empty());
+    if (active) {
+      out.configuration = 0;
+    } else if (assembly) {
+      throw std::runtime_error(
+          "an assembly simulation analyses the assembly as it stands; "
+          "analysing one of its configurations is not built yet "
+          "(configuration takes 0 here)");
+    } else {
+      std::string known;
+      uint64_t id = 0;
+      if (c.is_string()) {
+        if (const Configuration* cfg = UniqueNamed(
+                part->GetConfigurations(), c.get<std::string>(),
+                "configuration of '" + subject.name + "'",
+                [](const Configuration& x) -> const std::string& {
+                  return x.name;
+                },
+                [](const Configuration& x) { return x.id; }))
+          id = cfg->id;
+      }
+      for (const Configuration& cfg : part->GetConfigurations()) {
+        known += (known.empty() ? "" : ", ") + cfg.name + " (" +
+                 std::to_string(cfg.id) + ")";
+        if (c.is_number_unsigned() && cfg.id == c.get<uint64_t>())
+          id = cfg.id;
+      }
+      if (id == 0)
+        throw std::runtime_error(
+            "no configuration " + c.dump() + " in '" + subject.name +
+            "'; it has: " + (known.empty() ? "none" : known));
+      std::string bad;
+      if (ui::ConfiguredPartDocument(state, subject.docId, id, &bad) == nullptr)
+        throw std::runtime_error("configuration " + c.dump() + ": " + bad);
+      out.configuration = id;
+    }
+  }
+  ExprValue size;
+  if (ExprParam(p, "mesh_size_mm", size,
+                part != nullptr ? part->Symbols() : state.projectSymbols)) {
+    if (!std::isfinite(size.value) || size.value < 0.0)
+      throw std::runtime_error(
+          "mesh_size_mm is a size in millimetres, 0 for auto; got " +
+          std::to_string(size.value));
+    out.meshSize = size;
+  }
+  if (p.contains("participants")) {
+    if (!assembly)
+      throw std::runtime_error(
+          "participants are an assembly simulation's: a part's bodies are "
+          "its one meshed participant");
+    out.roles = ParticipantsOf(asmDoc, p.at("participants"));
+  }
+  return out;
+}
+
+// Applied once every key is read: each setter is the document's, so the
+// results each one reaches read stale.
+void ApplySimSettings(fem::SimDocument& sim, SimSettings set) {
+  if (set.configuration && *set.configuration != sim.Subject().configuration) {
+    fem::SimSubject subject = sim.Subject();
+    subject.configuration = *set.configuration;
+    sim.SetSubject(std::move(subject));
+  }
+  if (set.meshSize) {
+    fem::SimMesh mesh = sim.Mesh();
+    if (mesh.size.value != set.meshSize->value ||
+        mesh.size.expr != set.meshSize->expr) {
+      mesh.size = *set.meshSize;
+      sim.SetMesh(std::move(mesh));
+    }
+  }
+  if (set.roles)
+    sim.SetRoles(std::move(*set.roles));
+}
+
+// A simulation as list_simulations answers it.
+json SimulationJson(ui::AppState& state, const ui::PartSlot& slot) {
+  const fem::SimDocument* sim = ui::SimBySlotId(state, slot.id);
+  if (sim == nullptr)
+    return json::object();
+  const fem::SimSubject& subject = sim->Subject();
+  const std::optional<size_t> at = ui::SlotIndexById(state, subject.docId);
+  json subj{{"type", fem::SubjectKindToString(subject.kind)},
+            {"id", subject.docId},
+            {"name", at ? state.parts[*at].name : subject.name},
+            {"present", at.has_value()}};
+  json out{{"id", slot.id},
+           {"name", slot.name},
+           {"active", ui::ActiveSimSlotId(state) == slot.id},
+           {"subject", std::move(subj)},
+           {"configuration", subject.configuration},
+           {"mesh_size_mm", sim->Mesh().size.value}};
+  if (subject.configuration != 0 && subject.kind == fem::SubjectKind::Part)
+    if (const Document* part = ui::PartDocById(state, subject.docId))
+      for (const Configuration& cfg : part->GetConfigurations())
+        if (cfg.id == subject.configuration)
+          out["configuration_name"] = cfg.name;
+  if (!sim->Mesh().size.expr.empty())
+    out["mesh_size_mm_expr"] = sim->Mesh().size.expr;
+  if (subject.kind == fem::SubjectKind::Assembly) {
+    const AssemblyDocument* asmDoc = ui::AssemblyDocById(state, subject.docId);
+    json roles = json::array();
+    for (const fem::Participant& pt : sim->Roles()) {
+      const Occurrence* occ =
+          asmDoc != nullptr ? asmDoc->FindById(pt.occurrenceId) : nullptr;
+      json pj{{"occurrence", pt.occurrenceId},
+              {"name",
+               occ != nullptr ? occ->name : std::to_string(pt.occurrenceId)},
+              {"role", fem::ParticipantRoleToString(pt.role)}};
+      if (pt.role == fem::ParticipantRole::Contact)
+        pj["friction"] = pt.friction;
+      if (pt.meshSize.value != 0.0 || !pt.meshSize.expr.empty())
+        pj["mesh_size"] = pt.meshSize.value;
+      roles.push_back(std::move(pj));
+    }
+    out["participants"] = std::move(roles);
+  }
+  json studies = json::array();
+  for (const fem::Study& st : sim->GetStudies())
+    studies.push_back({{"id", st.id},
+                       {"name", st.name},
+                       {"type", fem::AnalysisTypeToString(st.type)},
+                       {"shares_mesh", st.shapeFrom.study == 0 &&
+                                           fem::SimDocument::SharesMesh(st)}});
+  out["studies"] = std::move(studies);
+  out["stored"] = {{"results", sim->ResultIds().size()},
+                   {"meshes", sim->Meshes().size()}};
+  return out;
+}
+
 } // namespace
 
 // FEM study RPCs, carved out of RemoteServer::HandleSemantic. All act on the
@@ -913,6 +1137,68 @@ static constexpr MethodDoc SimulationMethods[] = {
      "Leave simulation mode: from a simulation tab, back to the part or "
      "assembly it analyses.",
      ""},
+    {"list_simulations",
+     "The project's simulations, or those of one part or assembly "
+     "(`subject`: its tab's name or id). Each is a tab of its own "
+     "(docs/scripting/rpc.md#simulations), and its name or id is the "
+     "`simulation` every study verb takes. Each answers its subject "
+     "{type: part|assembly, id, name, present}, the configuration it "
+     "analyses (0 = the subject's active one), the mesh size every study "
+     "that sets none of its own solves on (mesh_size_mm, MILLIMETRES, 0 = "
+     "auto), on an assembly its participants (one table for all its "
+     "studies; a participant's own mesh_size is MILLIMETRES), its studies, "
+     "what it keeps stored (results, meshes) and "
+     "whether it is the tab in front.",
+     "subject", remote::NoFlags,
+     "simulations:{id:int, name:string, active:bool, subject:{type:string, "
+     "id:int, name:string, present:bool}, configuration:int, "
+     "configuration_name?:string, mesh_size_mm:number, "
+     "mesh_size_mm_expr?:string, participants?:{occurrence:int, "
+     "name:string, role:string, friction?:number, mesh_size?:number}[], "
+     "studies:{id:int, name:string, type:string, shares_mesh:bool}[], "
+     "stored:{results:int, meshes:int}}[]"},
+    {"add_simulation",
+     "Make another simulation {subject?: a part's or an assembly's tab name "
+     "or id (default: the subject of the simulation tab in front, else the "
+     "part or assembly in front), name? (default \"<subject> simulation\", "
+     "made unique; a name another tab has is refused), configuration?, "
+     "mesh_size_mm?, mesh_size_mm_expr?, participants?} -- each of the last "
+     "four as set_simulation takes it. The tab goes BEHIND the one in "
+     "front, which does not switch, and it holds no study (add_study "
+     "{simulation} adds them). A second simulation of one subject is how a "
+     "script gets studies with different participant tables, since every "
+     "study of a simulation shares its table; with two, a study verb that "
+     "names no `simulation` on their subject's tab is refused, naming "
+     "both. Answers the simulation as list_simulations does.",
+     "configuration, mesh_size_mm, mesh_size_mm_expr, name, participants, "
+     "subject",
+     remote::NotInBatch},
+    {"set_simulation",
+     "Edit what a simulation's studies share {simulation?, configuration?, "
+     "mesh_size_mm?, mesh_size_mm_expr?, participants?}, one undo step on "
+     "its tab, in front or not. `configuration` is the subject's "
+     "configuration analysed, by name or id (0 or \"\" = its active one; a "
+     "part's -- an assembly simulation analyses the assembly as it stands). "
+     "`mesh_size_mm` is the size, MILLIMETRES (0 = auto: each body's "
+     "bounding diagonal / 15), of the mesh every study solves on unless it "
+     "sets a mesh_size or a refinement of its own (set_study), and "
+     "mesh_size_mm_expr the same as an expression of the variables. "
+     "`participants` is an assembly simulation's role table, the whole "
+     "list at once, as set_study takes it: [{occurrence, role: "
+     "meshed|bonded|contact|rigid|ignored, mesh_size?, friction?}] -- every "
+     "study of the simulation shares it (add_simulation makes another for a "
+     "different one); refused on a part. Every result the change reaches "
+     "reads stale. Answers the simulation as list_simulations does.",
+     "configuration, mesh_size_mm, mesh_size_mm_expr, participants, "
+     "simulation"},
+    {"clear_sim_storage",
+     "Clear a simulation's stored meshes and results {simulation?}, as its "
+     "toolbar's Clear stored meshes and results does "
+     "(docs/simulation/README.md#clearing-stored-meshes-and-results): the "
+     "studies stay, and the next run or mesh rebuilds what it needs. Not "
+     "undoable -- what it drops is derived. Answers how many went "
+     "{results, meshes}.",
+     "simulation", remote::NotInBatch},
     {"add_study",
      "Add a study {type: static|modal|topology|buckling|thermal, name?} to a "
      "simulation (`simulation`, or as enter_simulation finds one); on a part "
@@ -2044,6 +2330,60 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     ui::ExitSimulation(state);
     return json::object();
   }
+  // The simulations themselves.
+  if (m == "list_simulations") {
+    std::optional<uint64_t> of;
+    if (p.contains("subject"))
+      of = SubjectSlotOf(state, p.at("subject")).id;
+    json out = json::array();
+    for (const ui::PartSlot& slot : state.parts)
+      if (slot.kind == ui::DocKind::Simulation)
+        if (const fem::SimDocument* sim = ui::SimBySlotId(state, slot.id);
+            sim != nullptr && (!of || sim->Subject().docId == *of))
+          out.push_back(SimulationJson(state, slot));
+    return json{{"simulations", std::move(out)}};
+  }
+  if (m == "add_simulation") {
+    // The subject: named, else the one the simulation in front analyses,
+    // else the part or assembly in front.
+    uint64_t subjectId = 0;
+    if (p.contains("subject")) {
+      subjectId = SubjectSlotOf(state, p.at("subject")).id;
+    } else if (const uint64_t front = ui::ActiveSimSlotId(state)) {
+      subjectId = ui::SimBySlotId(state, front)->Subject().docId;
+    } else if (state.activePart >= 0 &&
+               static_cast<size_t>(state.activePart) < state.parts.size() &&
+               (state.parts[state.activePart].kind == ui::DocKind::Part ||
+                state.parts[state.activePart].kind == ui::DocKind::Assembly)) {
+      subjectId = state.parts[state.activePart].id;
+    } else {
+      throw std::runtime_error(
+          "add_simulation needs a part or an assembly: name it with "
+          "`subject`, or switch to its tab");
+    }
+    const std::optional<size_t> at = ui::SlotIndexById(state, subjectId);
+    if (!at)
+      throw std::runtime_error("the subject of the simulation in front is "
+                               "gone; name one with `subject`");
+    const ui::PartSlot& subjectSlot = state.parts[*at];
+    fem::SimDocument sim;
+    sim.SetSubject({subjectSlot.kind == ui::DocKind::Assembly
+                        ? fem::SubjectKind::Assembly
+                        : fem::SubjectKind::Part,
+                    subjectSlot.id, 0, subjectSlot.name});
+    const std::string name = p.value("name", std::string{});
+    // rpc-params: configuration, mesh_size_mm, mesh_size_mm_expr, participants
+    SimSettings set = ReadSimSettings(state, sim.Subject(), p);
+    if (!name.empty())
+      RequireFreshTabName(state, name);
+    ApplySimSettings(sim, std::move(set));
+    std::string why;
+    const uint64_t made =
+        ui::AppendSimulation(state, std::move(sim), name, &why);
+    if (made == 0)
+      throw std::runtime_error(why);
+    return SimulationJson(state, state.parts[*ui::SlotIndexById(state, made)]);
+  }
   // Which simulation (ResolveSimulationSlot).
   const bool display = m == "enter_simulation" || m == "set_result_display" ||
                        m == "set_mesh_display";
@@ -2060,8 +2400,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
   if (simSlot == 0)
     throw std::runtime_error(
         "'" + state.parts[state.activePart].name +
-        "' has no simulation yet: add_study makes one (the Simulation "
-        "button too)");
+        "' has no simulation yet: add_study or add_simulation makes one (the "
+        "Simulation button too)");
   Host host = HostOf(state, simSlot);
   // What reads the studies through the app's host (a kept mesh, a check, an
   // export) reads this simulation, in front or not.
@@ -2069,8 +2409,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
   // Every edit is one undo step on the simulation's own tab, in front or
   // not (a refused call leaves nothing to record). A display call brings the
   // tab forward instead (ShowSimulation), once it is accepted.
+  // Clearing stored meshes and results is not undone: what it drops is
+  // derived (docs/simulation/README.md#clearing-stored-meshes-and-results).
   std::optional<ui::SimSlotUndoGuard> undo;
-  if (!display)
+  if (!display && m != "clear_sim_storage")
     undo.emplace(state, simSlot);
   // The study a display call shows when it names none: the one in front on
   // its tab, else its first.
@@ -2087,6 +2429,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       throw std::runtime_error("topology optimisation is a part study; an "
                                "assembly study is static or modal");
   };
+  if (m == "set_simulation") {
+    // rpc-params: configuration, mesh_size_mm, mesh_size_mm_expr, participants
+    SimSettings set = ReadSimSettings(state, host.sim->Subject(), p);
+    ApplySimSettings(*host.sim, std::move(set));
+    return SimulationJson(state,
+                          state.parts[*ui::SlotIndexById(state, simSlot)]);
+  }
+  if (m == "clear_sim_storage") {
+    const ui::SimStorage gone = ui::ClearSimStorage(state);
+    return json{{"results", gone.results}, {"meshes", gone.meshes}};
+  }
   if (m == "add_study") {
     // Optional `kind` sets the analysis type at creation (the doc row always
     // promised it; it used to require a second set_study call). Folding it
@@ -2359,43 +2712,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       }
       // Assembly studies (S1): who takes part, and how. The whole list at
       // once — a role table is one statement, not a sequence of edits.
-      if (p.contains("participants")) {
-        const json& list = p.at("participants");
-        if (!list.is_array())
-          throw std::runtime_error(
-              "participants is a list of {occurrence, role: "
-              "meshed|bonded|contact|rigid|ignored, mesh_size?, friction?}");
-        s.participants.clear();
-        for (const json& pj : list) {
-          if (!pj.is_object() || !pj.contains("occurrence"))
-            throw std::runtime_error(
-                "each participant is {occurrence, role, mesh_size?}");
-          fem::Participant pt;
-          pt.occurrenceId =
-              host.OccurrenceOf(pj.at("occurrence"), "participant").id;
-          const std::string role = pj.value("role", std::string{"rigid"});
-          if (!fem::ParticipantRoleFromString(role, pt.role))
-            throw std::runtime_error(
-                "participant role '" + role +
-                "' is not one of meshed, bonded, contact, rigid, ignored");
-          if (pj.contains("friction")) {
-            if (pt.role != fem::ParticipantRole::Contact)
-              throw std::runtime_error(
-                  "friction is a contact participant's (role: contact)");
-            if (!pj.at("friction").is_number())
-              throw std::runtime_error(
-                  "friction is a number: the coefficient, unitless");
-            pt.friction = pj.at("friction").get<double>();
-          }
-          (void)ReadExprParam(pj, "mesh_size", pt.meshSize);
-          for (const fem::Participant& have : s.participants)
-            if (have.occurrenceId == pt.occurrenceId)
-              throw std::runtime_error("participant " +
-                                       host.OccurrenceName(pt.occurrenceId) +
-                                       " is listed twice");
-          s.participants.push_back(std::move(pt));
-        }
-      }
+      if (p.contains("participants"))
+        s.participants = ParticipantsOf(host.asmDoc, p.at("participants"));
       // A modal study's alone: on another the save drops it, and the reader
       // refuses it in a file, so it is refused here, where it is said.
       // After `type`, so one call can make a study modal and size it.

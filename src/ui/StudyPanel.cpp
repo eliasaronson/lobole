@@ -1011,6 +1011,30 @@ bool FindingRow(const std::string& id, const char* glyph,
 // The mesh step (docs/simulation/README.md#the-mesh-you-look-at): Mesh as an
 // action whose result is looked at. One row to make it and say what came
 // out, one to choose how it is drawn, and its report folded under them.
+// A study's own mesh size: 0 solves it on the simulation's mesh, anything
+// else gives it a mesh of its own (docs/simulation/README.md#one-mesh-shared).
+// A typed EXPRESSION keeps its text (the study carries a slot for it); a
+// plain number clears the slot back to a literal. Commits on deactivation
+// too, so a value typed before Mesh is the one it meshes at.
+void DrawStudyOwnMeshSize(AppState& state, const fem::Study& s,
+                          const char* label) {
+  double meshSize = s.meshSize;
+  LeftLabel(label);
+  std::string meshExpr;
+  const bool meshChanged = ExprInputDouble(state, "###study_mesh_size",
+                                           &meshSize, "%.3g", &meshExpr);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("0: this study solves on the simulation's mesh. A "
+                      "size of its own (or a refinement)\ngives it a mesh "
+                      "of its own, with its own row in the tree.");
+  if ((meshChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
+      (meshSize != s.meshSize || meshExpr != s.meshSize.expr))
+    ModifyStudy(state, s.id, "Set mesh size", [&](fem::Study& cs) {
+      cs.meshSize = meshSize;
+      cs.meshSize.expr = meshExpr;
+    });
+}
+
 void DrawMeshWindow(AppState& state, const fem::Study& s) {
   if (s.shapeFrom.study != 0) {
     ImGui::TextColored(kMuted, "A study of a topology result meshes its "
@@ -1018,21 +1042,31 @@ void DrawMeshWindow(AppState& state, const fem::Study& s) {
     return;
   }
   SimulationState& sim = state.simulation;
-  // The size it is made at: a typed EXPRESSION keeps its text (the study
-  // carries a slot for it); a plain number clears the slot back to a
-  // literal. Commits on deactivation too, so a value typed before Mesh is
-  // the one it meshes at.
-  double meshSize = s.meshSize;
-  LeftLabel("Size (mm, 0=auto)");
-  std::string meshExpr;
-  const bool meshChanged = ExprInputDouble(state, "###study_mesh_size",
-                                           &meshSize, "%.3g", &meshExpr);
-  if ((meshChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
-      (meshSize != s.meshSize || meshExpr != s.meshSize.expr))
-    ModifyStudy(state, s.id, "Set mesh size", [&](fem::Study& cs) {
-      cs.meshSize = meshSize;
-      cs.meshSize.expr = meshExpr;
-    });
+  if (fem::SimDocument::SharesMesh(s)) {
+    // The simulation's mesh: every study that sets no size or refinement
+    // of its own solves on it. Same expression rules as a study's size.
+    const StudyHost host = StudyHostOf(state);
+    const ExprValue& have = host.sim->Mesh().size;
+    double meshSize = have;
+    LeftLabel("Size (mm, 0=auto)");
+    std::string meshExpr;
+    const bool meshChanged = ExprInputDouble(state, "###sim_mesh_size",
+                                             &meshSize, "%.3g", &meshExpr);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("The simulation's mesh: every study that sets no "
+                        "size of its own solves on it.\n0 = auto, each "
+                        "body's bounding diagonal / 15.");
+    if ((meshChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
+        (meshSize != have.value || meshExpr != have.expr)) {
+      SimUndoGuard guard(state);
+      fem::SimMesh mesh = host.sim->Mesh();
+      mesh.size = meshSize;
+      mesh.size.expr = meshExpr;
+      host.sim->SetMesh(std::move(mesh));
+    }
+  } else {
+    DrawStudyOwnMeshSize(state, s, "Size (mm, 0=shared)");
+  }
   const MeshRunStatus run =
       GetMeshRunStatus(state, s.id, ActiveSimSlotId(state));
   if (run.running) {
@@ -2005,6 +2039,8 @@ void DrawStudySettings(AppState& state, const fem::Study* s) {
     state.simulation.activeMode = 0;
   }
   DrawSolverCombo(state, *s);
+  if (s->shapeFrom.study == 0)
+    DrawStudyOwnMeshSize(state, *s, "Own mesh (mm, 0=shared)");
 
   if (s->type == fem::AnalysisType::Modal ||
       s->type == fem::AnalysisType::Buckling) {
@@ -2349,7 +2385,10 @@ void DrawSimulationToolWindow(AppState& state) {
       title = "Study: " + fs->name;
       break;
     case K::Mesh:
-      title = "Mesh: " + fs->name;
+      // The simulation's mesh, or one study's own.
+      title = fem::SimDocument::SharesMesh(*fs) && fs->shapeFrom.study == 0
+                  ? std::string("Mesh")
+                  : "Mesh: " + fs->name;
       break;
     case K::Load: {
       title = "Load";
