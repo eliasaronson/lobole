@@ -23,7 +23,8 @@ struct ReferenceProcedure {
 };
 
 inline constexpr ReferenceProcedure kReferenceProcedures[] = {
-    {"static tet10", "le1, kirsch, lame_rate, lame_tpu, bar, cantilever"},
+    {"static tet10",
+     "le1, kirsch, lame_rate, lame_tpu, bar, cantilever, mh_beam, mh_cylinder"},
     {"modal tet10", "fv32, modal_beam"},
     {"buckling tet10", "euler_column"},
     {"thermal tet10", "thermal_pipe"},

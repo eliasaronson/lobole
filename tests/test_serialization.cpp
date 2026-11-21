@@ -368,7 +368,9 @@ TEST_CASE("A part keeps no studies; an older file's are read for the move",
   // A file of the version before, as it kept them: read, and kept for the
   // open to move into a simulation; the ids stay the part's.
   j["studies"] = {DocumentIO::StudyToJson(study)};
-  j["version"] = j.at("version").get<int>() - 1;
+  // v225, the last that kept them: "the current version less one" stops
+  // being that as soon as a later bump is pending.
+  j["version"] = 225;
   std::ofstream(path) << j.dump(2);
   {
     auto loaded = testio::Load(path.string());
@@ -388,7 +390,7 @@ TEST_CASE("A part keeps no studies; an older file's are read for the move",
   {
     nlohmann::json index = ReadJson(dir / "index.json");
     index["studies"] = {study.id};
-    index["version"] = index.at("version").get<int>() - 1;
+    index["version"] = 225;
     std::ofstream(dir / "index.json") << index.dump(2);
     fs::create_directories(dir / "studies");
     std::ofstream(dir / "studies" / "3-static-1.json")
@@ -403,9 +405,9 @@ TEST_CASE("A part keeps no studies; an older file's are read for the move",
     CHECK_FALSE(ReadJson(dir / "index.json").contains("studies"));
     CHECK_FALSE(fs::exists(dir / "studies" / "3-static-1.json"));
   }
-  // A file of this version that carries studies was not written by it:
+  // A file of v226 or later that carries studies was not written by it:
   // refused, naming where studies live.
-  j["version"] = j.at("version").get<int>() + 1;
+  j["version"] = 226;
   std::ofstream(path) << j.dump(2);
   {
     auto loaded = DocumentIO::Load(path.string());

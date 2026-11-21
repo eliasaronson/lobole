@@ -27,6 +27,9 @@
 #include <vector>
 
 class Document;
+namespace CADMaterials {
+struct MaterialProperties;
+}
 
 namespace fem {
 
@@ -356,6 +359,35 @@ struct ThermalLoad {
 };
 inline constexpr int kSnapIncrements = 20;
 
+// A study's own material (docs/simulation/README.md
+// #a-study-states-its-own-material): isotropic constants stated by the study
+// in the library's units, read by every body or meshed member it solves in
+// place of each body's library material. For a benchmark that prescribes
+// its constants (E 1.0e7, nu 0.3 in the case's own units) rather than a
+// material anyone sells. Each number but the two elastic ones may be 0 =
+// not stated, exactly as a library row's: what a study needs and does not
+// have is refused where the library material's would be.
+struct StudyMaterial {
+  double youngGPa = 0.0;        // Young's modulus, GPa (> 0)
+  double poisson = 0.0;         // Poisson's ratio (0 < nu < 0.5)
+  double densityKgM3 = 0.0;     // kg/m^3; 0 = none (modal, gravity refuse)
+  double yieldMPa = 0.0;        // MPa; 0 = none (no factor of safety)
+  double conductivityWmK = 0.0; // W/(m K); 0 = none (a thermal study refuses)
+  double expansionPerK = 0.0;   // 1/K; 0 = none (a thermal load refuses)
+  bool operator==(const StudyMaterial&) const = default;
+};
+// Its keys, in the file and on the wire, for a refusal that names them.
+inline constexpr const char* kStudyMaterialKeys =
+    "young_gpa, poisson, density_kg_m3?, yield_mpa?, conductivity_w_mk?, "
+    "expansion_per_k?";
+// The name a study's own material goes by in a message or a result.
+inline constexpr const char* kStudyMaterialName = "the study's own material";
+// Empty when `m` is a material a study can state; otherwise why not, naming
+// the range: a modulus that is not a positive number, a Poisson's ratio
+// outside (0, 0.5), and a density, yield, conductivity or expansion that is
+// negative or not a number.
+std::string StudyMaterialRefusal(const StudyMaterial& m);
+
 // A single-part analysis definition (linear static or modal).
 struct Study {
   uint64_t id = 0;
@@ -433,10 +465,22 @@ struct Study {
   // Static only: thermal expansion under a temperature field (v212).
   ThermalLoad thermalLoad;
 
+  // The study's own material (vNEXT), read in place of every body's library
+  // material; absent, each body's own, as every older study reads.
+  std::optional<StudyMaterial> material;
+
   // Transient: the most recent mesh/solve error (dangling ref, no fixed
   // support, singular matrix, ...). Never serialized. Empty when healthy.
   std::string error;
 };
+
+// The library row a body of material `slug` is solved with in `study`: the
+// study's own material when it states one, the body's library material
+// otherwise. Every check a library material passes (stiffness, density,
+// hardening, conductivity) reads this row, so a study's own material is
+// refused where the library's would be, and solved where it would be.
+CADMaterials::MaterialProperties StudyMaterialRow(const Study& study,
+                                                  const std::string& slug);
 
 // Empty when `solver` can solve a study of `type`; otherwise why not, naming
 // what can: CalculiX solves static and buckling studies (modal and topology

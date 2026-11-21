@@ -362,6 +362,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A study takes `material` {`young_gpa`, `poisson`, `density_kg_m3`?, `yield_mpa`?, `conductivity_w_mk`?, `expansion_per_k`?}: its own constants, read by every body it solves in place of each body's library material ([a study states its own material](../simulation/README.md#a-study-states-its-own-material)). Written only when set, the optional numbers only when not 0, so a study without one is unchanged. A missing `young_gpa` or `poisson`, a modulus not above 0, a Poisson's ratio outside (0, 0.5), a negative density, yield, conductivity or expansion, a value that is not a number and an unknown key are refused. Golden `vNEXT-study-material` (in `simulation/`: a static study with a benchmark's E and nu alone, a modal study with every constant, and a study without one) |
 
 ## Paths in a project
 

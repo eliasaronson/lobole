@@ -1,0 +1,13 @@
+{
+  "subject": {"kind": "part", "document": 2, "name": "Straight beam"},
+  "studies": [[3, "Benchmark constants", true],
+              [6, "Every constant stated", true],
+              [8, "The part's own material", true]],
+  "study_materials": [
+    [3, {"young_gpa": 10000.0, "poisson": 0.3}],
+    [6, {"young_gpa": 70.0, "poisson": 0.33, "density_kg_m3": 2700.0,
+         "yield_mpa": 240.0, "conductivity_w_mk": 167.0,
+         "expansion_per_k": 2.3e-05}],
+    [8, null]],
+  "next_id_above": 8
+}

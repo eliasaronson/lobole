@@ -240,12 +240,12 @@ struct RigidBodyRef {
   TopoDS_Shape imprinted;
 };
 
-bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
-                const glm::dvec3& gravity, bool plastic, Material& out,
-                std::string* error) {
-  const auto matType =
-      CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
-  const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
+bool MaterialOf(const Body& body, const std::string& label, const Study& study,
+                Material& out, std::string* error) {
+  const AnalysisType type = study.type;
+  const glm::dvec3& gravity = study.gravity;
+  const bool plastic = study.nonlinear.plasticity;
+  const auto mp = StudyMaterialRow(study, body.material);
   if (const std::string why = CADMaterials::ElasticDataRefusal(mp);
       !why.empty()) {
     if (error)
@@ -632,9 +632,7 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   std::set<std::pair<size_t, int>> touchingPlaced; // (set, body)
   for (auto& [bi, planning] : perBody) {
     const Body& body = meshedBodies[bi];
-    const auto matType =
-        CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
-    const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
+    const auto mp = StudyMaterialRow(study, body.material);
     const std::string bodyLabel =
         meshedOcc->name + (meshedBodies.size() > 1 ? "/" + body.name : "");
     if (const std::string why = CADMaterials::ElasticDataRefusal(mp);
@@ -888,8 +886,7 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
         pt.name = label;
         pt.shape = theirShape;
         std::string why;
-        if (!MaterialOf(ts.bodies[tb], label, study.type, study.gravity,
-                        study.nonlinear.plasticity, pt.mat, &why))
+        if (!MaterialOf(ts.bodies[tb], label, study, pt.mat, &why))
           return fail(why);
         pt.settings.maxSize =
             ts.p->meshSize > 0.0 ? ts.p->meshSize : study.meshSize;
@@ -1000,8 +997,7 @@ static bool PlanBondedGroup(const AssemblyDocument& asmDoc, Study& study,
       if (!MaterialOf(bodies[bi],
                       occ->name +
                           (bodies.size() > 1 ? "/" + bodies[bi].name : ""),
-                      study.type, study.gravity, study.nonlinear.plasticity,
-                      m.mat, &why))
+                      study, m.mat, &why))
         return fail(why);
       // Under a thermal load each member expands by its own coefficient,
       // which reaches the solver as its domain's material.
@@ -1011,9 +1007,7 @@ static bool PlanBondedGroup(const AssemblyDocument& asmDoc, Study& study,
                 Quote(occ->name +
                       (bodies.size() > 1 ? "/" + bodies[bi].name : "")) +
                     "'s material " +
-                    CADMaterials::MaterialLibrary::GetMaterialOrDefault(
-                        bodies[bi].material)
-                        .name,
+                    StudyMaterialRow(study, bodies[bi].material).name,
                 false, true,
                 CADMaterials::MaterialLibrary::ExpansionSlugList());
             !refusal.empty())

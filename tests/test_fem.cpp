@@ -1013,6 +1013,104 @@ TEST_CASE("RunStudy errors when the body material has no stiffness data",
   CHECK_FALSE(s.error.empty());
 }
 
+// docs/simulation/README.md#a-study-states-its-own-material: the study's own
+// constants reach the solver in place of the body's (unassigned) library
+// material, and a tip deflection is linear in 1/E.
+TEST_CASE("A study's own material reaches the solver: a tip deflection "
+          "scales as 1/E",
+          "[fem][run]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 100.0,
+                                              10.0, 10.0));
+  const uint64_t createdBy = doc.GetBodies()[0].createdBy;
+  auto faceName = [&](int i) {
+    return std::to_string(createdBy) + "/face" + std::to_string(i);
+  };
+  fem::Study s = NewStudy(doc, "S");
+  s.meshSize = 6.0;
+  s.converge = fem::ConvergeMode::Never; // one solve each: a ratio is read
+  fem::Load fixed;
+  fixed.id = doc.AllocateId();
+  fixed.type = fem::LoadType::Fixed;
+  fixed.face = ElementRef{createdBy, faceName(0)};
+  s.loads.push_back(fixed);
+  fem::Load force;
+  force.id = doc.AllocateId();
+  force.type = fem::LoadType::Force;
+  force.face = ElementRef{createdBy, faceName(1)};
+  force.magnitude = 100.0;
+  force.direction = glm::dvec3(0, 0, -1);
+  s.loads.push_back(force);
+
+  // Without it, the unassigned body is refused (the case above).
+  {
+    fem::Study run = s;
+    fem::StudyRuntime rt;
+    std::string err;
+    REQUIRE_FALSE(fem::RunStudy(doc, run, rt, &err));
+  }
+  const auto tip = [&](double youngGPa) {
+    fem::Study run = s;
+    run.material = fem::StudyMaterial{youngGPa, 0.3};
+    fem::StudyRuntime rt;
+    std::string err;
+    const bool ok = fem::RunStudy(doc, run, rt, &err);
+    INFO(err);
+    REQUIRE(ok);
+    return rt.maxDisplacement;
+  };
+  const double stiff = tip(200.0);
+  const double soft = tip(50.0);
+  CHECK(stiff > 0.0);
+  CHECK_THAT(soft / stiff, WithinRel(4.0, 1e-6));
+  // Near Euler-Bernoulli, as the cantilever case above reads it: F L^3 /
+  // (3 E I), E in MPa.
+  const double I = 10.0 * 1000.0 / 12.0;
+  CHECK_THAT(stiff, WithinRel(100.0 * 1e6 / (3.0 * 200e3 * I), 0.12));
+
+  // A density the study does not state is refused where a library
+  // material's would be.
+  fem::Study modal = s;
+  modal.type = fem::AnalysisType::Modal;
+  modal.loads.pop_back();
+  modal.material = fem::StudyMaterial{200.0, 0.3};
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::RunStudy(doc, modal, rt, &err));
+  CHECK(err.find("density") != std::string::npos);
+
+  // What is not a material is refused, naming the range.
+  CHECK_FALSE(fem::StudyMaterialRefusal({0.0, 0.3}).empty());
+  CHECK_FALSE(fem::StudyMaterialRefusal({200.0, 0.5}).empty());
+  CHECK_FALSE(fem::StudyMaterialRefusal({200.0, 0.0}).empty());
+  CHECK_FALSE(fem::StudyMaterialRefusal({200.0, 0.3, -1.0}).empty());
+  CHECK(fem::StudyMaterialRefusal({200.0, 0.3, 7850.0, 250.0}).empty());
+}
+
+TEST_CASE("A study's own material is read and written as it is given, and "
+          "refused when it is not one",
+          "[fem][serialize]") {
+  fem::Study s;
+  s.id = 7;
+  s.material = fem::StudyMaterial{10000.0, 0.3};
+  const nlohmann::json j = DocumentIO::StudyToJson(s);
+  CHECK(j.at("material") ==
+        nlohmann::json{{"young_gpa", 10000.0}, {"poisson", 0.3}});
+  CHECK(DocumentIO::StudyFromJson(j).material == s.material);
+  s.material.reset();
+  CHECK_FALSE(DocumentIO::StudyToJson(s).contains("material"));
+  for (const nlohmann::json& bad :
+       {nlohmann::json{{"young_gpa", 200.0}},
+        nlohmann::json{{"young_gpa", 200.0}, {"poisson", 0.3}, {"e", 1.0}},
+        nlohmann::json{{"young_gpa", -1.0}, {"poisson", 0.3}},
+        nlohmann::json{{"young_gpa", "200"}, {"poisson", 0.3}}}) {
+    nlohmann::json withBad = j;
+    withBad["material"] = bad;
+    INFO(bad.dump());
+    CHECK_THROWS(DocumentIO::StudyFromJson(withBad));
+  }
+}
+
 TEST_CASE("RunStudy errors when a loaded body has no fixed support",
           "[fem][run]") {
   Document doc;

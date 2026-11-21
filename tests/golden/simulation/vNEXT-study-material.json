@@ -1,0 +1,90 @@
+{
+  "format": "designer-document",
+  "version": 227,
+  "kind": "simulation",
+  "subject": {
+    "kind": "part",
+    "document": 2,
+    "name": "Straight beam"
+  },
+  "mesh": {
+    "size": 0.05
+  },
+  "studies": [
+    {
+      "id": 3,
+      "loads": [
+        {
+          "face": {
+            "element": "1/face1",
+            "feature_id": 1
+          },
+          "id": 4,
+          "magnitude": 0.0,
+          "type": "fixed"
+        },
+        {
+          "direction": [1.0, 0.0, 0.0],
+          "face": {
+            "element": "1/face2",
+            "feature_id": 1
+          },
+          "id": 5,
+          "magnitude": 1.0,
+          "type": "force"
+        }
+      ],
+      "material": {
+        "young_gpa": 10000.0,
+        "poisson": 0.3
+      },
+      "mesh_size": 0.0,
+      "name": "Benchmark constants",
+      "type": "Study"
+    },
+    {
+      "analysis": "modal",
+      "id": 6,
+      "loads": [
+        {
+          "face": {
+            "element": "1/face1",
+            "feature_id": 1
+          },
+          "id": 7,
+          "magnitude": 0.0,
+          "type": "fixed"
+        }
+      ],
+      "material": {
+        "young_gpa": 70.0,
+        "poisson": 0.33,
+        "density_kg_m3": 2700.0,
+        "yield_mpa": 240.0,
+        "conductivity_w_mk": 167.0,
+        "expansion_per_k": 2.3e-05
+      },
+      "mesh_size": 0.0,
+      "name": "Every constant stated",
+      "num_modes": 4,
+      "type": "Study"
+    },
+    {
+      "id": 8,
+      "loads": [
+        {
+          "face": {
+            "element": "1/face1",
+            "feature_id": 1
+          },
+          "id": 9,
+          "magnitude": 0.0,
+          "type": "fixed"
+        }
+      ],
+      "mesh_size": 0.0,
+      "name": "The part's own material",
+      "type": "Study"
+    }
+  ]
+}

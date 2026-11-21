@@ -496,6 +496,15 @@ std::vector<int> MeshFacesOn(const fem::FemMesh& mesh,
   return out;
 }
 
+// add_study's and set_study's `material`: the study's own constants, or null
+// for each body's library material. The file's reader, so the wire and the
+// file refuse the same things in the same words.
+std::optional<fem::StudyMaterial> StudyMaterialOf(const json& v) {
+  if (v.is_null())
+    return std::nullopt;
+  return DocumentIO::StudyMaterialFromJson(v);
+}
+
 // set_study's thermal_load: {from_study, stress_free_c?}, {uniform_c,
 // stress_free_c}, or null. A from_study that names no thermal study of the
 // part is refused here, naming those it has; on an assembly (no `doc`) a
@@ -910,6 +919,8 @@ uint64_t MakeFirstSimulation(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "a thermal study is a part study's: an assembly study does not "
           "solve heat yet (docs/simulation/README.md#not-done)");
+    if (p.contains("material"))
+      (void)StudyMaterialOf(p.at("material"));
   } else if (p.contains("study")) {
     throw std::runtime_error("no such study");
   }
@@ -1210,8 +1221,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "loaded AND a buckling study of each load that compresses something "
      "(struts, ribs, thin walls, tubes, levers in compression), with "
      "requirements on factor_of_safety and buckling_factor: a part that "
-     "buckles passes its static study (docs/simulation/README.md#buckling).",
-     "kind, name, type, simulation"},
+     "buckles passes its static study (docs/simulation/README.md#buckling). "
+     "`material` states the study's own material, as set_study takes it.",
+     "kind, material, name, type, simulation"},
     {"remove_study",
      "Remove a study {id}. `study` names the same thing here and in every "
      "verb that ACTS ON a study (set_study, mesh_study, run_study, "
@@ -1231,7 +1243,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "loads:object[], max_iterations?:int, mesh_size:number, "
      "name:string, num_modes?:int, refinements:int, stale:bool, type:string, "
      "volume_fraction?:number, shape_from?:object, solver?:string, "
-     "nonlinear?:object, participants?:object[]}[]"},
+     "nonlinear?:object, participants?:object[], material?:object}[]"},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
      "and filter_radius are MILLIMETRES; each of them, volume_fraction and "
@@ -1335,9 +1347,25 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(docs/simulation/README.md#a-thermal-load-on-an-assembly). A "
      "THERMAL study takes converge (on its peak temperature rise) and "
      "solver (calculix solves it with *HEAT TRANSFER as a cross-check), and "
-     "refuses load_cases, gravity, nonlinear, shape_from and thermal_load.",
+     "refuses load_cases, gravity, nonlinear, shape_from and thermal_load.\n"
+     "`material` is the study's own material, read by every body (or meshed "
+     "and bonded member) in place of its library material: {young_gpa "
+     "(Young's modulus, GPa, above 0), poisson (above 0, below 0.5), "
+     "density_kg_m3? (kg/m^3), yield_mpa? (MPa), conductivity_w_mk? "
+     "(W/(m K)), expansion_per_k? (1/K)} -- the keys describe's `materials` "
+     "uses -- or null for each body's own. A number left out is not stated, "
+     "and what needs it (modal or gravity a density, a factor of safety a "
+     "yield, a thermal study a conductivity, a thermal load an expansion) "
+     "is refused or left out as for a library material without it; a plastic "
+     "study is refused, the study stating no hardening curve. For a "
+     "benchmark that prescribes its constants "
+     "(docs/simulation/README.md#a-study-states-its-own-material). An "
+     "unknown key, a missing young_gpa or poisson, and a value outside its "
+     "range are refused. Part of the study's input: a change makes its "
+     "result stale.",
      "converge, filter_radius, filter_radius_expr, gravity, id, load_cases, "
-     "max_iterations, mesh_size, mesh_size_expr, name, nonlinear, num_modes, "
+     "material, max_iterations, mesh_size, mesh_size_expr, name, nonlinear, "
+     "num_modes, "
      "participants, shape_from, solver, study, thermal_load, type, "
      "volume_fraction, volume_fraction_expr, simulation"},
     {"add_load",
@@ -2250,8 +2278,7 @@ json CheckTopology(ui::AppState& state, Host& host, const RpcParams& p) {
       trt->bodies.empty()
           ? std::string{}
           : host.BodyMaterial(*shapeStudy, trt->bodies.front().bodyIndex);
-  const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
-      CADMaterials::MaterialLibrary::MaterialTypeFromString(material));
+  const auto mp = fem::StudyMaterialRow(*shapeStudy, material);
   const double yield = mp.yieldMPa;
   const auto side = [&](const fem::StudyRuntime& rt, int k, uint64_t sid) {
     const fem::FemResults& r = rt.bodies.front().Case(k);
@@ -2460,10 +2487,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       throw std::runtime_error(
           "a thermal study is a part study's: an assembly study does not "
           "solve heat yet (docs/simulation/README.md#not-done)");
+    // Read before anything is added: a refused material adds no study.
+    const std::optional<fem::StudyMaterial> material =
+        p.contains("material") ? StudyMaterialOf(p.at("material"))
+                               : std::nullopt;
     const fem::Study* s = &host.Add(p.value("name", std::string{}), type);
-    return json{{"id", s->id},
-                {"name", s->name},
-                {"type", fem::AnalysisTypeToString(s->type)}};
+    if (material) {
+      fem::Study with = *s;
+      with.material = material;
+      host.sim->ReplaceStudy(std::move(with));
+      s = host.Find(s->id);
+    }
+    json out{{"id", s->id},
+             {"name", s->name},
+             {"type", fem::AnalysisTypeToString(s->type)}};
+    if (s->material)
+      out["material"] = DocumentIO::StudyMaterialToJson(*s->material);
+    return out;
   }
   if (m == "remove_study") {
     const uint64_t id =
@@ -2558,6 +2598,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                  {"stale", host.Stale(s.id)}};
       if (Converges(s.type))
         sj["converge"] = fem::ConvergeModeToString(s.converge);
+      if (s.material)
+        sj["material"] = DocumentIO::StudyMaterialToJson(*s.material);
       if (s.thermalLoad.On()) {
         json t = json::object();
         if (s.thermalLoad.kind == fem::ThermalLoad::Kind::FromStudy)
@@ -2849,6 +2891,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (p.contains("thermal_load"))
         s.thermalLoad = ThermalLoadOf(
             p.at("thermal_load"), host.IsAssembly() ? nullptr : host.sim, s.id);
+      // The study's own material
+      // (docs/simulation/README.md#a-study-states-its-own-material).
+      if (p.contains("material"))
+        s.material = StudyMaterialOf(p.at("material"));
       if (host.IsAssembly())
         if (const std::string why = fem::AssemblyThermalRefusal(s);
             !why.empty())
@@ -3979,9 +4025,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         nodes += b.mesh.stats.nodeCount;
         elements += b.mesh.stats.tetCount;
         const fem::StudyBodyResult::Buckling& k = b.buckling;
-        const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
-            CADMaterials::MaterialLibrary::MaterialTypeFromString(
-                host.BodyMaterial(*s, b.bodyIndex)));
+        const auto mp =
+            fem::StudyMaterialRow(*s, host.BodyMaterial(*s, b.bodyIndex));
         json factors = json::array();
         for (const auto& mode : b.results.modes)
           factors.push_back(mode.factor);
@@ -4268,9 +4313,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       json bj = {{"body", b.bodyName},
                  {"max_von_mises_mpa", b.results.maxVonMises},
                  {"max_displacement_mm", b.results.maxDisplacement}};
-      const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
-          CADMaterials::MaterialLibrary::MaterialTypeFromString(
-              host.BodyMaterial(*s, b.bodyIndex)));
+      const auto mp =
+          fem::StudyMaterialRow(*s, host.BodyMaterial(*s, b.bodyIndex));
       if (!b.results.reactions.empty())
         bj["reactions"] = reactionsJson(b.results);
       if (b.nonlinear.solved)
@@ -4729,22 +4773,18 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             vmAt = r.maxVmAt;
             caseEdge =
                 r.supportEdgePeak.flagged
-                    ? edgeJson(r,
-                               CADMaterials::MaterialLibrary::GetMaterial(
-                                   CADMaterials::MaterialLibrary::
-                                       MaterialTypeFromString(
-                                           host.BodyMaterial(*s, b.bodyIndex)))
-                                   .yieldMPa)
+                    ? edgeJson(r, fem::StudyMaterialRow(
+                                      *s, host.BodyMaterial(*s, b.bodyIndex))
+                                      .yieldMPa)
                     : json();
           }
           if (r.maxDisplacement > disp) {
             disp = r.maxDisplacement;
             dispAt = r.maxDispAt;
           }
-          const auto mt = CADMaterials::MaterialLibrary::MaterialTypeFromString(
-              host.BodyMaterial(*s, b.bodyIndex));
           const double yield =
-              CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
+              fem::StudyMaterialRow(*s, host.BodyMaterial(*s, b.bodyIndex))
+                  .yieldMPa;
           if (const double f = FactorOfSafety(r, yield); f > 0) {
             if (!caseFoS || f < fos)
               fos = f;

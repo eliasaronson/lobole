@@ -1,0 +1,32 @@
+{
+  "title": "MacNeal and Harder's thick-walled cylinder, nearly incompressible",
+  "procedure": "static tet10",
+  "calculix": true,
+  "model": "a quarter of a 3.0 bore, 9.0 outside, 1.0 long cylinder on rollers on its symmetry planes and both ends (plane strain), E 1000 and nu 0.49, 0.499 and 0.4999 stated by the study (its units read as mm and MPa), unit pressure in the bore, one study each; 0.5 elements (12 across the wall); the bore's mean radial displacement, from probe_study's rigid fit of the face",
+  "quantities": {
+    "u_r_nu_049": {
+      "kind": "benchmark",
+      "source": "MacNeal & Harder, A proposed standard set of problems to test finite element accuracy, Finite Elements in Analysis and Design 1 (1985) 3-20, Table 5(c) (thick-walled cylinder, nu = 0.49)",
+      "value": 0.0050399,
+      "unit": "mm",
+      "tolerance": 0.005,
+      "reason": "Lame in plane strain, which the paper's value is (0.0050399 by its formula); an element that locks is too stiff as nu nears 1/2 and falls short by far more than its mesh error, and a fully integrated tet10 does not lock: at 12 elements across the wall, as lame_tpu's 10, within half a percent"
+    },
+    "u_r_nu_0499": {
+      "kind": "benchmark",
+      "source": "MacNeal & Harder, A proposed standard set of problems to test finite element accuracy, Finite Elements in Analysis and Design 1 (1985) 3-20, Table 5(c) (thick-walled cylinder, nu = 0.499)",
+      "value": 0.0050602,
+      "unit": "mm",
+      "tolerance": 0.005,
+      "reason": "Lame in plane strain, which the paper's value is (0.0050602 by its formula); an element that locks is too stiff as nu nears 1/2 and falls short by far more than its mesh error, and a fully integrated tet10 does not lock: at 12 elements across the wall, as lame_tpu's 10, within half a percent"
+    },
+    "u_r_nu_04999": {
+      "kind": "benchmark",
+      "source": "MacNeal & Harder, A proposed standard set of problems to test finite element accuracy, Finite Elements in Analysis and Design 1 (1985) 3-20, Table 5(c) (thick-walled cylinder, nu = 0.4999)",
+      "value": 0.0050623,
+      "unit": "mm",
+      "tolerance": 0.005,
+      "reason": "Lame in plane strain, which the paper's value is (0.0050623 by its formula); an element that locks is too stiff as nu nears 1/2 and falls short by far more than its mesh error, and a fully integrated tet10 does not lock: at 12 elements across the wall, as lame_tpu's 10, within half a percent"
+    }
+  }
+}

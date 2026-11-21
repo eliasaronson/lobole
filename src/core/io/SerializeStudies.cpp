@@ -91,6 +91,52 @@ fem::Refinement RefinementFromJson(const json& rj) {
   return r;
 }
 
+json StudyMaterialToJson(const fem::StudyMaterial& m) {
+  json j{{"young_gpa", m.youngGPa}, {"poisson", m.poisson}};
+  const auto put = [&](const char* key, double v) {
+    if (v != 0.0)
+      j[key] = v;
+  };
+  put("density_kg_m3", m.densityKgM3);
+  put("yield_mpa", m.yieldMPa);
+  put("conductivity_w_mk", m.conductivityWmK);
+  put("expansion_per_k", m.expansionPerK);
+  return j;
+}
+
+fem::StudyMaterial StudyMaterialFromJson(const json& j) {
+  if (!j.is_object())
+    throw std::runtime_error(std::string("a study's material is {") +
+                             fem::kStudyMaterialKeys + "}, not " + j.dump());
+  for (const auto& [key, v] : j.items()) {
+    bool known = false;
+    for (const char* k : {"young_gpa", "poisson", "density_kg_m3", "yield_mpa",
+                          "conductivity_w_mk", "expansion_per_k"})
+      known = known || key == k;
+    if (!known)
+      throw std::runtime_error("a study's material does not take `" + key +
+                               "`; it takes " + fem::kStudyMaterialKeys);
+    if (!v.is_number())
+      throw std::runtime_error("a study's material " + key +
+                               " is a number, not " + v.dump());
+  }
+  for (const char* k : {"young_gpa", "poisson"})
+    if (!j.contains(k))
+      throw std::runtime_error(std::string("a study's material needs ") + k +
+                               ": young_gpa and poisson are what a solve "
+                               "reads, and neither has a default");
+  fem::StudyMaterial m;
+  m.youngGPa = j.at("young_gpa").get<double>();
+  m.poisson = j.at("poisson").get<double>();
+  m.densityKgM3 = j.value("density_kg_m3", 0.0);
+  m.yieldMPa = j.value("yield_mpa", 0.0);
+  m.conductivityWmK = j.value("conductivity_w_mk", 0.0);
+  m.expansionPerK = j.value("expansion_per_k", 0.0);
+  if (const std::string why = fem::StudyMaterialRefusal(m); !why.empty())
+    throw std::runtime_error(why);
+  return m;
+}
+
 json StudyToJson(const fem::Study& s) {
   json j;
   j["type"] = "Study";
@@ -188,6 +234,10 @@ json StudyToJson(const fem::Study& s) {
       t["stress_free_c"] = tl.stressFreeC;
     j["thermal_load"] = std::move(t);
   }
+  // The study's own material (vNEXT): absent when each body's library
+  // material is read, so every older study re-saves as it was.
+  if (s.material)
+    j["material"] = StudyMaterialToJson(*s.material);
 
   // Assembly studies (v106): the participants and their roles. Absent on a
   // part study, so every earlier study file re-saves byte-identically.
@@ -360,6 +410,7 @@ fem::Study StudyFromJson(const json& j) {
                               "converge",
                               "nonlinear",
                               "thermal_load",
+                              "material",
                               "participants",
                               "refinements",
                               "loads"},
@@ -532,6 +583,9 @@ fem::Study StudyFromJson(const json& j) {
       tl.stressFreeC = number("stress_free_c");
     }
   }
+
+  if (j.contains("material")) // vNEXT
+    s.material = StudyMaterialFromJson(j.at("material"));
 
   for (const json& pj : j.value("participants", json::array()))
     s.participants.push_back(ParticipantFromJson(pj));

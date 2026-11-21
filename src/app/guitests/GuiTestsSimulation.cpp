@@ -3,6 +3,7 @@
 
 #include "app/GuiTests.h" // GuiTestCaptureDir
 #include "app/guitests/GuiTestsCommon.h"
+#include "cad/CADMaterials.h"
 #include "core/Measure.h"
 #include "core/fem/SimDocument.h"
 #include "remote/RemoteSimulation.h"
@@ -764,6 +765,54 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(st->solver == fem::Solver::Auto);
     IM_CHECK(!ctx->ItemExists("//###ToolWindow/###study_solver"));
     s_App->settings.calculixPath = before;
+  };
+
+  // A study's own material (docs/simulation/README.md
+  // #a-study-states-its-own-material), clicked: Custom starts from the
+  // body's library material, a field is one undoable edit, a value the
+  // study cannot take is refused in the window and changes nothing, and
+  // undo goes back to the part's material.
+  t = IM_REGISTER_TEST(engine, "sim", "a_study_states_its_own_material");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    IM_CHECK(!Sim()->FindStudy(studyId)->material.has_value());
+    const auto& lib = CADMaterials::MaterialLibrary::GetMaterialOrDefault(
+        Doc()->GetBodies().front().material);
+    IM_CHECK_SILENT(lib.youngGPa > 0.0);
+    ctx->ItemClick("//###ToolWindow/###study_material");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Custom").c_str());
+    ctx->Yield(2);
+    const fem::Study* st = Sim()->FindStudy(studyId);
+    IM_CHECK(st->material.has_value());
+    IM_CHECK_EQ(st->material->youngGPa, lib.youngGPa);
+    IM_CHECK_EQ(st->material->poisson, lib.poisson);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_material_young_gpa"));
+
+    ctx->ItemInputValue("//###ToolWindow/###study_material_young_gpa", "70");
+    ctx->Yield(2);
+    st = Sim()->FindStudy(studyId);
+    IM_CHECK_EQ(st->material->youngGPa, 70.0);
+    // Refused, unchanged.
+    ctx->ItemInputValue("//###ToolWindow/###study_material_poisson", "0.6");
+    ctx->Yield(2);
+    st = Sim()->FindStudy(studyId);
+    IM_CHECK_EQ(st->material->poisson, lib.poisson);
+    SimWindowShot(ctx, "sim_study_material");
+
+    IM_CHECK(ui::UndoSim(*s_App));
+    ctx->Yield(2);
+    st = Sim()->FindStudy(studyId);
+    IM_CHECK(st->material.has_value());
+    IM_CHECK_EQ(st->material->youngGPa, lib.youngGPa);
+    IM_CHECK(ui::UndoSim(*s_App));
+    ctx->Yield(2);
+    IM_CHECK(!Sim()->FindStudy(studyId)->material.has_value());
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###study_material_young_gpa"));
   };
 
   // Load cases (docs/topopt/README.md#load-cases), clicked: the first case
@@ -2092,7 +2141,9 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
         std::ifstream in(index);
         j = nlohmann::json::parse(in);
       }
-      j["version"] = j.at("version").get<int>() - 1; // the format before
+      // v225, the last format that kept them (the current one less one
+      // stops being that while a later bump is pending).
+      j["version"] = 225;
       j["studies"] = {study->id};
       fs::create_directories(index.parent_path() / "studies");
       std::ofstream(index.parent_path() / "studies" /

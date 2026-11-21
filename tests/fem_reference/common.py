@@ -90,8 +90,11 @@ class Part:
     """The project's only body, its faces found by where they are."""
 
     def __init__(self, d, solid, material):
+        """`material` a library slug, or None for a part whose study states
+        its own (docs/simulation/README.md#a-study-states-its-own-material)."""
         self.d = d
-        d.call("set_material", feature_id=solid, material=material)
+        if material is not None:
+            d.call("set_material", feature_id=solid, material=material)
         body = d.call("list_elements")["bodies"]
         if len(body) != 1:
             raise AssertionError("expected one body, got %d" % len(body))

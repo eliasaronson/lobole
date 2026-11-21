@@ -1544,6 +1544,16 @@ add_test(NAME thermal_smoke
 set_tests_properties(thermal_smoke PROPERTIES TIMEOUT 300
                      SKIP_RETURN_CODE 77)
 
+# A study's own material over the wire (docs/simulation/README.md
+# #a-study-states-its-own-material): add_study/set_study/list_studies, a
+# solve that reads it, staleness, undo, null and every refusal. Self-skips
+# (77) without Netgen.
+add_test(NAME study_material_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/study_material_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(study_material_smoke PROPERTIES TIMEOUT 120
+                     SKIP_RETURN_CODE 77)
+
 # A nonlinear static study over the RPCs alone
 # (docs/simulation/README.md#nonlinear-static): large deformation with its
 # deck and progress, a column's snap-through peak below its linear factor,

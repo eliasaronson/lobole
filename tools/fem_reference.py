@@ -357,10 +357,16 @@ LEFT_OUT = [
     "field T = (x^2 + y^2)^(1/2) + z): a thermal load is a thermal study's "
     "result or one uniform temperature, and no study states a field as a "
     "function of position",
-    "MacNeal and Harder's thick cylinder at nu = 0.49, 0.499 and 0.4999 "
-    "(Finite Elements in Analysis and Design 1 (1985) 3-20): a study takes "
-    "the library's materials, and none has such a Poisson's ratio; "
-    "`lame_tpu` asks the near-incompressible question at TPU's 0.48",
+    "MacNeal and Harder's curved beam (Finite Elements in Analysis and "
+    "Design 1 (1985) 3-20, Table 3): a tet10 mesh converges to 0.08851 "
+    "in-plane (1.3 % over the published 0.08734, at 0.05 and 0.025 "
+    "elements alike, and on the bending-only closed form pi P R^3 / 4EI) "
+    "and towards 0.4978 out-of-plane (0.9 % under 0.5022); the paper does "
+    "not say how its targets were derived, so no tolerance with a reason "
+    "holds them. Its twisted beam needs a part twisted 90 degrees along "
+    "its length, and its plates and shells are one tet10 layer through a "
+    "thickness of 1/100 to 1/1000 of the part. Its straight beam and "
+    "thick-walled cylinder run (`mh_beam`, `mh_cylinder`)",
 ]
 
 

@@ -1,0 +1,41 @@
+{
+  "title": "MacNeal and Harder's straight cantilever beam",
+  "procedure": "static tet10",
+  "calculix": false,
+  "model": "a 6.0 x 0.2 x 0.1 beam, E 1.0e7 and nu 0.30 stated by the study (its units read as mm and MPa), clamped at x = 0 and loaded on its free end by a unit force along each axis and a unit moment about its length, one study each; 0.05 elements (two through the depth, against the paper's one); the free end's motion from probe_study's rigid fit of the face",
+  "quantities": {
+    "extension": {
+      "kind": "benchmark",
+      "source": "MacNeal & Harder, A proposed standard set of problems to test finite element accuracy, Finite Elements in Analysis and Design 1 (1985) 3-20, Table 3 (straight beam, extension)",
+      "value": 3e-05,
+      "unit": "mm",
+      "tolerance": 0.01,
+      "reason": "F L / (E A) exactly, less only what the clamp holds of the root's Poisson contraction, a few hundredths of a percent over a beam 60 times its depth; a quadratic tet carries a constant strain exactly"
+    },
+    "in_plane_shear": {
+      "kind": "benchmark",
+      "source": "MacNeal & Harder, A proposed standard set of problems to test finite element accuracy, Finite Elements in Analysis and Design 1 (1985) 3-20, Table 3 (straight beam, in-plane shear)",
+      "value": 0.1081,
+      "unit": "mm",
+      "tolerance": 0.01,
+      "reason": "bending plus shear across the 0.2 width; the clamp holds the root's Poisson contraction and warping, which the beam theory leaves free, a few tenths of a percent at L/h = 30 (cantilever's percent at L/h = 10, falling with h/L), and at 0.05 the mesh error is a tenth of that"
+    },
+    "out_of_plane_shear": {
+      "kind": "benchmark",
+      "source": "MacNeal & Harder, A proposed standard set of problems to test finite element accuracy, Finite Elements in Analysis and Design 1 (1985) 3-20, Table 3 (straight beam, out-of-plane shear)",
+      "value": 0.4321,
+      "unit": "mm",
+      "tolerance": 0.01,
+      "reason": "as in-plane, across the 0.1 depth (L/h = 60), with two quadratic elements through it: the root's held contraction and the mesh together a few tenths of a percent"
+    },
+    "twist": {
+      "kind": "benchmark",
+      "source": "MacNeal & Harder, A proposed standard set of problems to test finite element accuracy, Finite Elements in Analysis and Design 1 (1985) 3-20, Table 3 (straight beam, twist: unit moment, the end's rotation)",
+      "value": 0.03208,
+      "unit": "rad",
+      "tolerance": 0.01,
+      "reason": "Saint-Venant torsion of a 2:1 rectangle, T L / (k1 b t^3 G) with k1 = 0.229 (Timoshenko & Goodier, ch. 10), is 0.0341: the published value is 6 % under the solid's answer, which a fine mesh converges to",
+      "known_failure": "the solid converges to Saint-Venant's 0.0341 rad (0.0312, 0.0334 and 0.0341 at 0.1, 0.05 and 0.025 elements), 6 % over the published 0.03208, which the paper gives without its derivation; the miss is the target's distance from the closed form, not the element's"
+    }
+  }
+}

@@ -50,10 +50,11 @@ uint64_t Bits(double v) {
 
 // The material of a solved body: a part's body by index, an assembly's
 // meshed occurrence's placed body by index.
-const CADMaterials::MaterialProperties& MaterialOfBody(AppState& state,
-                                                       const StudyHost& host,
-                                                       const fem::Study& s,
-                                                       int bodyIndex) {
+// The study's own material, when it states one (fem::StudyMaterialRow).
+CADMaterials::MaterialProperties MaterialOfBody(AppState& state,
+                                                const StudyHost& host,
+                                                const fem::Study& s,
+                                                int bodyIndex) {
   std::string slug;
   if (const Document* part = host.GeometryPart()) {
     const auto& bodies = part->GetBodies();
@@ -71,8 +72,7 @@ const CADMaterials::MaterialProperties& MaterialOfBody(AppState& state,
           slug = bodies[bodyIndex].material;
       }
   }
-  return CADMaterials::MaterialLibrary::GetMaterial(
-      CADMaterials::MaterialLibrary::MaterialTypeFromString(slug));
+  return fem::StudyMaterialRow(s, slug);
 }
 
 bool SolvedOnSeveral(const StudyHost& host, const fem::Study& s) {

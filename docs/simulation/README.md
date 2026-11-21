@@ -377,6 +377,33 @@ gravity load on a material with no density is refused too. The library's
 default material has none of these, so an unassigned body cannot be analysed
 by accident.
 
+### A study states its own material
+
+A study may carry its own material instead of reading each body's:
+`add_study`/`set_study` `material` {`young_gpa`, `poisson`,
+`density_kg_m3`?, `yield_mpa`?, `conductivity_w_mk`?, `expansion_per_k`?},
+the keys and units `describe`'s `materials` lists, or `null` for each
+body's own. It is for a problem that prescribes its constants rather than a
+material anyone sells — a benchmark's E = 1.0e7 and nu = 0.3 in its own
+units ([reference cases](#reference-cases)), a nu of 0.4999 no library row
+has — and it is read by every body of a part study and every meshed and
+bonded member of an assembly study, in place of the library row
+(`fem::StudyMaterialRow`; one material for the study, not one per body).
+
+Each check a library material passes reads the same row, so a number the
+study does not state is refused where the library's missing one would be:
+a modal study or gravity needs `density_kg_m3`, a thermal study
+`conductivity_w_mk`, a thermal load `expansion_per_k`; without `yield_mpa`
+a result has no factor of safety. A plastic study is refused: the study
+states no hardening curve. A modulus not above 0, a Poisson's ratio outside
+(0, 0.5), a negative number, an unknown key and a missing `young_gpa` or
+`poisson` are refused, the study unchanged. It is part of the study's
+definition, so of its input hash: a change makes the result stale. The
+simulation tab's study settings show it as *Material: From the part /
+Custom*; Custom starts from the first body's library material that has
+stiffness data, and each field is one undoable edit. Saved in the study
+from format vNEXT (docs/versioning/format.md).
+
 ### Results and staleness
 
 Mesh and results are **derived**. They live in a `fem::StudyRuntime` held
@@ -1440,6 +1467,14 @@ library's material is a `scale` with its `scale_reason` (FV32's density).
   weighs one of a tet10's four Gauss points 1.25 times, and
   `fem_reference.py run --planted` passes only when both cases fail under
   it (`"planted": "fails"`).
+- MacNeal and Harder's straight beam and thick-walled cylinder
+  (`mh_beam`, `mh_cylinder`) prescribe their own constants (E 1.0e7 and
+  nu 0.30; E 1000 and nu up to 0.4999) in units of their own, so the
+  study states its material
+  ([a study states its own material](#a-study-states-its-own-material))
+  and the case's lengths are read as mm and its E as MPa: the answers are
+  the paper's numbers. The beam's twist is a known failure: the solid
+  converges to Saint-Venant's torsion, 6 % over the published value.
 
 `tools/fem_reference.py run` runs every case on one headless instance and
 `--write-page` writes [the page](reference-cases.md): per case the source,
@@ -1457,7 +1492,7 @@ the cases, and `--release` always. `fem_reference.py check`
 `src/core/fem/FemReferenceCases.h` names exactly the cases that say they
 verify it: a study's receipt carries `verified_by` {`procedure`, `cases`,
 `page`} from it (`static tet10: le1, kirsch, lame_rate, lame_tpu, bar,
-cantilever`), so an answer says what it rests on. `sample_study` reads the
+cantilever, mh_beam, mh_cylinder`), so an answer says what it rests on. `sample_study` reads the
 fields at a point, which is where a benchmark's target is read.
 
 ## CalculiX

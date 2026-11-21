@@ -2123,6 +2123,20 @@ TEST_CASE("Simulation golden corpus loads and round-trips",
             CHECK(fem::SimDocument::SharesMesh(s) == want[i][2].get<bool>());
           }
         }
+        // vNEXT: a study's own material, or null for each body's library
+        // material (docs/simulation/README.md
+        // #a-study-states-its-own-material).
+        if (expect.contains("study_materials"))
+          for (const nlohmann::json& row : expect.at("study_materials")) {
+            const fem::Study* s = sim.FindStudy(row[0].get<uint64_t>());
+            REQUIRE(s != nullptr);
+            if (row[1].is_null()) {
+              CHECK_FALSE(s->material.has_value());
+            } else {
+              REQUIRE(s->material.has_value());
+              CHECK(DocumentIO::StudyMaterialToJson(*s->material) == row[1]);
+            }
+          }
         if (expect.contains("next_id_above"))
           CHECK(sim.NextId() > expect.at("next_id_above").get<uint64_t>());
       };

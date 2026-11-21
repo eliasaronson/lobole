@@ -342,8 +342,7 @@ void AddProbeRequirement(AppState& state, const fem::Study& s,
   fem::ResolvedFace rf;
   if (fem::ResolveFace(*part, face, "probe", rf, nullptr)) {
     const Body& body = part->GetBodies()[rf.bodyIndex];
-    const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
-        CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material));
+    const auto mp = fem::StudyMaterialRow(s, body.material);
     if (mp.yieldMPa > 0.0)
       limit = mp.yieldMPa;
   }
@@ -1178,7 +1177,7 @@ void DrawStudyCheck(AppState& state, const fem::Study& s) {
     // sets it (DrawMaterialCheck), and a refusal Run already printed in
     // full is not repeated under it.
     bool flaggedAbove = false;
-    if (p.code == "material" && host.GeometryPart())
+    if (p.code == "material" && host.GeometryPart() && !s.material)
       for (const Body& b : host.GeometryPart()->GetBodies())
         flaggedAbove =
             flaggedAbove ||
@@ -1992,6 +1991,100 @@ void DrawSolverCombo(AppState& state, const fem::Study& s) {
                           : why.c_str());
 }
 
+// The study's material (docs/simulation/README.md
+// #a-study-states-its-own-material): each body's own from the part, or the
+// constants the study states. Custom starts from the first subject body's
+// library material that has stiffness data, so it starts as the part
+// already solves; each field is one undoable edit, and a value the study
+// cannot take is refused under the fields, the study left as it was.
+void DrawStudyMaterial(AppState& state, const fem::Study& s) {
+  using CADMaterials::MaterialLibrary;
+  static std::string refusal;
+  static uint64_t refusalStudy = 0;
+  if (refusalStudy != s.id)
+    refusal.clear();
+  const char* kModes[] = {"From the part", "Custom"};
+  int mode = s.material ? 1 : 0;
+  LeftLabel("Material");
+  if (ImGui::Combo("###study_material", &mode, kModes, 2) &&
+      mode != (s.material ? 1 : 0)) {
+    refusal.clear();
+    if (mode == 0) {
+      ModifyStudy(state, s.id, "Material from the part",
+                  [&](fem::Study& cs) { cs.material.reset(); });
+    } else {
+      // Derived from what the study acts on: the first body that has
+      // stiffness data, else the library's first material that does.
+      const CADMaterials::MaterialProperties* from = nullptr;
+      for (const Body& b : SimSubjectBodies(state)) {
+        const auto& mp = MaterialLibrary::GetMaterialOrDefault(b.material);
+        if (CADMaterials::ElasticDataRefusal(mp).empty()) {
+          from = &mp;
+          break;
+        }
+      }
+      if (from == nullptr)
+        for (auto t : MaterialLibrary::AllTypes())
+          if (CADMaterials::ElasticDataRefusal(MaterialLibrary::GetMaterial(t))
+                  .empty()) {
+            from = &MaterialLibrary::GetMaterial(t);
+            break;
+          }
+      if (from != nullptr) {
+        fem::StudyMaterial m;
+        m.youngGPa = from->youngGPa;
+        m.poisson = from->poisson;
+        m.densityKgM3 = from->density;
+        m.yieldMPa = from->yieldMPa;
+        m.conductivityWmK = from->conductivityWmK;
+        m.expansionPerK = from->expansionPerK;
+        ModifyStudy(state, s.id, "Custom material",
+                    [&](fem::Study& cs) { cs.material = m; });
+      }
+    }
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("From the part: each body is solved with its own "
+                      "library material.\nCustom: every body is solved with "
+                      "the constants below\n(a benchmark that prescribes its "
+                      "own material).");
+  if (!s.material)
+    return;
+  const fem::StudyMaterial& now = *s.material;
+  const auto field = [&](const char* label, const char* id, double now_v,
+                         double fem::StudyMaterial::* key, const char* fmt) {
+    double v = now_v;
+    LeftLabel(label);
+    if ((ExprInputDouble(state, id, &v, fmt) ||
+         ImGui::IsItemDeactivatedAfterEdit()) &&
+        v != now_v) {
+      fem::StudyMaterial next = now;
+      next.*key = v;
+      refusal = fem::StudyMaterialRefusal(next);
+      refusalStudy = s.id;
+      if (refusal.empty())
+        ModifyStudy(state, s.id, "Set study material",
+                    [&](fem::Study& cs) { cs.material = next; });
+    }
+  };
+  field("Young's modulus (GPa)", "###study_material_young_gpa", now.youngGPa,
+        &fem::StudyMaterial::youngGPa, "%.6g");
+  field("Poisson's ratio", "###study_material_poisson", now.poisson,
+        &fem::StudyMaterial::poisson, "%.4g");
+  field("Density (kg/m\xC2\xB3, 0=none)", "###study_material_density",
+        now.densityKgM3, &fem::StudyMaterial::densityKgM3, "%.6g");
+  field("Yield (MPa, 0=none)", "###study_material_yield", now.yieldMPa,
+        &fem::StudyMaterial::yieldMPa, "%.6g");
+  if (s.type == fem::AnalysisType::Thermal)
+    field("Conductivity (W/(m K), 0=none)", "###study_material_conductivity",
+          now.conductivityWmK, &fem::StudyMaterial::conductivityWmK, "%.6g");
+  if (s.thermalLoad.On())
+    field("Expansion (1/K, 0=none)", "###study_material_expansion",
+          now.expansionPerK, &fem::StudyMaterial::expansionPerK, "%.6g");
+  if (!refusal.empty())
+    MessageText(kError, refusal);
+}
+
 void DrawStudySettings(AppState& state, const fem::Study* s) {
   // What the last Run refused, where the study is set up: it says what to
   // fix, or how to install the solver.
@@ -2039,6 +2132,7 @@ void DrawStudySettings(AppState& state, const fem::Study* s) {
     state.simulation.activeMode = 0;
   }
   DrawSolverCombo(state, *s);
+  DrawStudyMaterial(state, *s);
   if (s->shapeFrom.study == 0)
     DrawStudyOwnMeshSize(state, *s, "Own mesh (mm, 0=shared)");
 
@@ -2208,7 +2302,9 @@ void DrawStudySettings(AppState& state, const fem::Study* s) {
     }
   }
 
-  DrawMaterialCheck(state);
+  // A study that states its own material reads no body's.
+  if (!s->material)
+    DrawMaterialCheck(state);
   DrawAssemblySetupCheck(state);
 }
 

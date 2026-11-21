@@ -187,6 +187,19 @@ TEST_CASE("An FEM run's input hash moves with every input",
   StudyOf(*bar).loads[1].magnitude.expr.clear();
   REQUIRE(Key(*bar) == base);
 
+  // The study's own material (docs/simulation/README.md
+  // #a-study-states-its-own-material): each of its numbers, and its absence.
+  StudyOf(*bar).material = fem::StudyMaterial{200.0, 0.3};
+  const uint64_t own = Key(*bar);
+  CHECK(own != base);
+  StudyOf(*bar).material->youngGPa = 100.0;
+  CHECK(Key(*bar) != own);
+  StudyOf(*bar).material->youngGPa = 200.0;
+  StudyOf(*bar).material->densityKgM3 = 7850.0;
+  CHECK(Key(*bar) != own);
+  StudyOf(*bar).material.reset();
+  REQUIRE(Key(*bar) == base);
+
   // The material.
   bar->doc.GetFeature(0)->SetMaterial("aluminum_6061_t6");
   bar->doc.Regenerate();

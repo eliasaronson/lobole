@@ -160,9 +160,7 @@ std::vector<StudyProblem> CheckStudy(const Document& doc, const Study& original,
       study.gravity.x != 0 || study.gravity.y != 0 || study.gravity.z != 0;
   for (const auto& [bodyIndex, placed] : perBody) {
     const Body& body = bodies[bodyIndex];
-    const auto matType =
-        CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
-    const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
+    const auto mp = StudyMaterialRow(study, body.material);
     const auto material = [&](std::string why) {
       StudyProblem& p = add("material", std::move(why));
       p.body = body.name;
@@ -170,6 +168,15 @@ std::vector<StudyProblem> CheckStudy(const Document& doc, const Study& original,
       p.fixParams = {{"body_name", body.name}, {"material", nullptr}};
       p.fixNote = "material: a library material that has the property "
                   "(describe's `materials` lists each one's numbers)";
+      // The study states its own material: the number is the study's to
+      // give, not the body's.
+      if (study.material) {
+        p.fixMethod = "set_study";
+        p.fixParams = {{"id", sid}, {"material", nullptr}};
+        p.fixNote = "material: the study's own constants with the missing "
+                    "one stated (young_gpa, poisson, density_kg_m3, ...), "
+                    "or null for each body's library material";
+      }
     };
     if (!thermalStudy)
       if (const std::string why = CADMaterials::ElasticDataRefusal(mp);

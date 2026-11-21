@@ -345,6 +345,43 @@ std::string ContactRefusal(const Study& study) {
   return {};
 }
 
+std::string StudyMaterialRefusal(const StudyMaterial& m) {
+  const auto bad = [](double v) { return !std::isfinite(v) || v < 0.0; };
+  if (!std::isfinite(m.youngGPa) || !(m.youngGPa > 0.0))
+    return "material young_gpa is Young's modulus in GPa, a number above 0";
+  if (!std::isfinite(m.poisson) || !(m.poisson > 0.0) || !(m.poisson < 0.5))
+    return "material poisson is Poisson's ratio, above 0 and below 0.5 "
+           "(an isotropic solid at 0.5 is incompressible, and the solver "
+           "takes a ratio above 0)";
+  if (bad(m.densityKgM3))
+    return "material density_kg_m3 is kg/m^3, 0 or more (0: none stated)";
+  if (bad(m.yieldMPa))
+    return "material yield_mpa is MPa, 0 or more (0: none stated)";
+  if (bad(m.conductivityWmK))
+    return "material conductivity_w_mk is W/(m K), 0 or more (0: none "
+           "stated)";
+  if (bad(m.expansionPerK))
+    return "material expansion_per_k is 1/K, 0 or more (0: none stated)";
+  return {};
+}
+
+CADMaterials::MaterialProperties StudyMaterialRow(const Study& study,
+                                                  const std::string& slug) {
+  if (!study.material)
+    return CADMaterials::MaterialLibrary::GetMaterial(
+        CADMaterials::MaterialLibrary::MaterialTypeFromString(slug));
+  const StudyMaterial& m = *study.material;
+  CADMaterials::MaterialProperties row{};
+  row.name = kStudyMaterialName;
+  row.youngGPa = m.youngGPa;
+  row.poisson = m.poisson;
+  row.density = m.densityKgM3;
+  row.yieldMPa = m.yieldMPa;
+  row.conductivityWmK = m.conductivityWmK;
+  row.expansionPerK = m.expansionPerK;
+  return row;
+}
+
 Material MaterialFromLibrary(const CADMaterials::MaterialProperties& mp) {
   // GPa -> MPa; density kg/m^3 -> tonne/mm^3 for the consistent mm-N-t-s
   // system; a conductivity in W/(m K) is the same number in mW/(mm K).
@@ -1702,9 +1739,7 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
 
     // Material must have stiffness data (0 = unknown, like density); a
     // thermal study's, a conductivity instead.
-    const auto matType =
-        CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
-    const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
+    const auto mp = StudyMaterialRow(study, body.material);
     if (!thermalStudy)
       if (const std::string why = CADMaterials::ElasticDataRefusal(mp);
           !why.empty())
@@ -4290,9 +4325,7 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
       settings.faceSizes.push_back({rf.faceIndex, study.refinements[i].size});
   }
 
-  const auto matType =
-      CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
-  const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
+  const auto mp = StudyMaterialRow(study, body.material);
   if (const std::string why = CADMaterials::ElasticDataRefusal(mp);
       !why.empty())
     return fail("body '" + body.name + "': material '" +
