@@ -119,8 +119,8 @@ the feature that made it.
 - `outcome: refused`: the call is refused with a message that states a
   condition (`fuzz_design.measured`) and the document is unchanged. The
   wording is ours, so `refusal` is not matched as text; a size it states is
-  compared with the size we report once
-  [fillet-size-that-fits.md](fillet-size-that-fits.md) lands.
+  compared with the size we report
+  ([the size that fits](../modeling/README.md#the-size-that-fits)).
   `solid_or_refused` takes either.
 - Never a crash, a hang (a budget per case, the instance killed by pid),
   an `internal` error or a non-finite number.
@@ -249,7 +249,8 @@ regeneration does not.
 
 `query_geometry` answers, for an edge, `dihedral_deg` and `tolerance_mm`,
 and for a face `min_curvature_radius_mm` (the measures
-[fillet-size-that-fits.md](fillet-size-that-fits.md) adds to core).
+[the size that fits](../modeling/README.md#the-size-that-fits) added to
+core).
 `fuzz.py one --minimise` asks them of the failing step's picks and writes
 them into the case header as `conditions`, beside the step's own sizes, so
 a known-bugs entry starts from "radius 5 on an edge whose face curves at
