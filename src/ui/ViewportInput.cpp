@@ -333,12 +333,17 @@ void HandleViewportInput(AppState& state) {
   } else if (state.measure.active && esc) {
     state.measure = MeasureState{}; // Escape exits (clears pair + readout)
     escUsed = true;
-  } else if (state.simulation.IsActive() && esc) {
-    // Escape disarms the BC tool, or exits the mode when nothing is armed.
+  } else if (state.simulation.IsActive() && esc &&
+             (state.simulation.tool != SimulationState::Tool::None ||
+              state.simulation.focus.kind !=
+                  SimulationState::Focus::Kind::None)) {
+    // Escape disarms the armed tool, else puts the tool window away; with
+    // neither, it clears the selection below, as on a drawing or a job tab.
+    // A simulation is a tab: it is left as any tab is, never by Escape.
     if (state.simulation.tool != SimulationState::Tool::None)
       state.simulation.tool = SimulationState::Tool::None;
     else
-      ExitSimulation(state);
+      state.simulation.focus = {};
     escUsed = true;
   }
 

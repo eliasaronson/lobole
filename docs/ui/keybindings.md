@@ -29,9 +29,10 @@ fixed second chord that cannot be rebound (only redo's `Ctrl+Shift+Z`);
 
 `Context` is `Global, Part, Sketch, Assembly, Drawing, Job, Simulation`.
 `ActiveContext` is the branch `DrawToolbar` takes, so the toolbar you see and
-the keys that work cannot disagree. A CAM job tab is `Job`; the two "leave this
-mode" buttons (the sketch check mark, Exit Simulation) are Escape and have no
-command.
+the keys that work cannot disagree. A CAM job tab is `Job`; the "leave this
+mode" button, the sketch check mark, is Escape and has no command. A
+simulation is a tab and is left as one: Escape on it disarms a tool or puts
+the tool window away, as on a drawing or a job tab.
 
 `DispatchShortcuts` runs once per frame from `DrawUI`, **after every panel has
 drawn**, so `io.WantTextInput` is accurate and a bare `1` typed into a

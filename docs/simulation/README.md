@@ -2725,8 +2725,10 @@ simulation mode: the mode is on exactly while one is in front
 (`ResetActiveTabUiState` turns it on with the tab). The **Simulation**
 button of a part or an assembly (`part.simulation`, `assembly.simulation`:
 `ui::EnterSimulation`) opens that subject's first simulation, making one
-named "<subject> simulation" with a study where there is none, and Exit
-(or Esc, `ExitSimulation`) goes back to the subject's tab. Its window
+named "<subject> simulation" with a study where there is none. It is
+left as any tab is -- another tab, or the subject row's **Open** in its tree
+(`ExitSimulation`, which `exit_simulation` calls too) -- and Escape only
+disarms a tool or puts the tool window away. Its window
 ([panels.md](../ui/panels.md#simulation-tab-the-model-panel)) is the tree of
 what the simulation holds in the Model dock, focused when the tab comes in
 front (`ui::DrawSimTree`, `src/ui/SimTree.cpp`: the subject, an assembly's

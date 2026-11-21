@@ -69,6 +69,16 @@ void SteelBlock(ImGuiTestContext* ctx) {
 // The slot id of the simulation tab in front.
 uint64_t FrontSimSlot() { return ui::ActiveSimSlotId(*s_App); }
 
+// Leaves the simulation tab in front as any tab is left: its subject's tab
+// clicked. There is no Exit button and Escape does not leave.
+void ClickSubjectTab(ImGuiTestContext* ctx) {
+  IM_CHECK_SILENT(Sim() != nullptr);
+  const auto at = ui::SlotIndexById(*s_App, Sim()->Subject().docId);
+  IM_CHECK_SILENT(at.has_value());
+  ctx->ItemClick(("//##PartTabs/**/###part" + std::to_string(*at)).c_str());
+  ctx->Yield(2);
+}
+
 // The window as it stands, checked: the toolbar's row fits, and the tool
 // window sits inside the viewport at under half its width (it sizes itself
 // to its content, so one unwrapped sentence once made it the app's width).
@@ -1233,9 +1243,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::StudyStale(*s_App, studyId));
 #endif
 
-    // Exit leaves simulation mode and the window goes with it.
-    ToolbarClick(ctx, "###tb_sim_exit");
-    ctx->Yield(2);
+    // Another tab leaves simulation mode and the window goes with it.
+    ClickSubjectTab(ctx);
     IM_CHECK(!s_App->simulation.active);
     IM_CHECK(!s_App->simulationToolOpen);
   };
@@ -1343,8 +1352,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Sim()->GetStudies().size(), (size_t)1);
     IM_CHECK_EQ(Sim()->GetStudies()[0].id, first);
 
-    ToolbarClick(ctx, "###tb_sim_exit");
-    ctx->Yield(2);
+    ClickSubjectTab(ctx);
     IM_CHECK(!s_App->simulation.active);
     ctx->SetRef("//##MainMenuBar");
   };
@@ -1842,9 +1850,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     IM_CHECK(s_App->simulation.field == ui::SimulationState::Field::VonMises);
 #endif
-    // Leaving goes back to the part.
-    ToolbarClick(ctx, "###tb_sim_exit");
-    ctx->Yield(2);
+    // Its subject's tab goes back to the part.
+    ClickSubjectTab(ctx);
     IM_CHECK(s_App->sim == nullptr);
     IM_CHECK(s_App->document != nullptr);
     IM_CHECK_EQ(s_App->parts[s_App->activePart].id, partId);
@@ -1911,8 +1918,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 
     // Beside a rigid neighbour: a second simulation of the same assembly,
     // its own roles, clamped where the support touches.
-    ToolbarClick(ctx, "###tb_sim_exit");
-    ctx->Yield(2);
+    ClickSubjectTab(ctx);
     IM_CHECK(s_App->assembly != nullptr);
     Occurrence up;
     up.name = "Upper";
@@ -2308,8 +2314,37 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
          {"###tb_sim_mesh", "###tb_sim_add_case", "###tb_sim_check",
           "###tb_sim_run", "###tb_sim_result", "###tb_sim_probe",
           "###tb_sim_export_vtu", "###tb_sim_labels", "###tb_sim_clear_storage",
-          "###tb_sim_fit", "###tb_sim_measure", "###tb_sim_exit"})
+          "###tb_sim_fit", "###tb_sim_measure"})
       IM_CHECK(ctx->ItemExists((std::string("**/") + id).c_str()));
+    // A simulation is a tab, left as any tab is: no Exit on its toolbar,
+    // and Escape stops at the armed tool and the tool window.
+    IM_CHECK(!ctx->ItemExists("**/###tb_sim_exit"));
+    ToolbarClick(ctx, "###tb_sim_fixed");
+    IM_CHECK(s_App->simulation.tool != ui::SimulationState::Tool::None);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::None);
+    SimFocusStudy(ctx);
+    IM_CHECK(s_App->simulation.focus.kind !=
+             ui::SimulationState::Focus::Kind::None);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.focus.kind ==
+             ui::SimulationState::Focus::Kind::None);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(s_App->sim != nullptr && s_App->simulation.active);
+    // The way back is the subject row's Open, or the subject's tab.
+    const uint64_t subject = Sim()->Subject().docId;
+    ctx->ItemClick("//###Model/**/###sim_subject", ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###sim_subject_open");
+    ctx->Yield(2);
+    IM_CHECK(s_App->sim == nullptr && !s_App->simulation.active);
+    IM_CHECK_EQ(s_App->parts[s_App->activePart].id, subject);
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    ctx->SetRef("//##DockHost");
     const auto inGroup = [&](const char* group,
                              std::initializer_list<const char*> ids) {
       ctx->SetRef("//##DockHost");

@@ -299,8 +299,9 @@ void DrawSharedMeshRow(AppState& state, const StudyHost& host) {
 }
 
 // The subject row (###sim_subject) and, on an assembly, a row per
-// participant with its role as its menu.
-void DrawSubject(AppState& state, const StudyHost& host) {
+// participant with its role as its menu. True when the subject row's
+// Open was chosen: the caller switches tabs once the tree is drawn.
+bool DrawSubject(AppState& state, const StudyHost& host) {
   const fem::SimSubject& subject = host.sim->Subject();
   // The subject's name as its tab has it now; the document's copy is what
   // a deleted subject is still called.
@@ -316,11 +317,23 @@ void DrawSubject(AppState& state, const StudyHost& host) {
   if (gone)
     row.tooltip = "The " + std::string(fem::SubjectKindToString(subject.kind)) +
                   " this simulation analyses is no longer in the project";
+  // The way back to the subject: a simulation is a tab, left as any tab is,
+  // and this row names where it came from.
+  bool open = false;
+  if (!gone) {
+    row.menuId = "###sim_subject_ctx";
+    const std::string label =
+        "Open " + state.parts[*at].name + "###sim_subject_open";
+    row.menu = [&open, label] {
+      if (ImGui::MenuItem(label.c_str()))
+        open = true;
+    };
+  }
   const ListRowResult res = ListRow(row);
   if (res.clicked || res.doubleClicked)
     FocusOnly(state, FocusKind::Subject, 0);
   if (!assembly || host.Assembly() == nullptr)
-    return;
+    return open;
   const float indent = ImGui::GetFontSize() * 1.3f;
   ImGui::Indent(indent);
   for (const Occurrence& occ : host.Assembly()->GetOccurrences()) {
@@ -364,6 +377,7 @@ void DrawSubject(AppState& state, const StudyHost& host) {
       FocusOnly(state, FocusKind::Participant, 0, id);
   }
   ImGui::Unindent(indent);
+  return open;
 }
 
 // Everything under one study, in the order the work goes.
@@ -661,7 +675,10 @@ void DrawSimTree(AppState& state) {
     return;
   SimulationState& sim = state.simulation;
 
-  DrawSubject(state, host);
+  if (DrawSubject(state, host)) {
+    ExitSimulation(state); // back to the subject's tab
+    return;
+  }
   DrawSharedMeshRow(state, host);
 
   // A face picked in the viewport on a load selects that load's row, once

@@ -221,8 +221,8 @@ both open means nothing):
   tool window, for a participant's row, holds "Clamp here" and "Rest on
   it" on a rigid one and a friction field on a contact one
   ([contact](../simulation/README.md#contact);
-  [the tree](#simulation-tab-the-model-panel)). Exit goes back to the
-  assembly.
+  [the tree](#simulation-tab-the-model-panel)). The assembly's tab, or
+  the subject row's **Open**, goes back to it.
 - **Bill of materials** (`###tb_asm_bom`, `assembly.bom`, B) —
   `DrawBomWindow`, floating below the tool window: name, quantity, material,
   mass and total as sortable columns with the total mass in the header, plus
@@ -324,7 +324,9 @@ v Static 1                     27.1 MPa   (a dot: solved / stale / failed / solv
 ```
 
 - **The subject** (`###sim_subject`): what the simulation analyses, its name
-  as its tab has it, "missing" when that tab is gone. On an assembly each
+  as its tab has it, "missing" when that tab is gone. Its menu's **Open
+  <subject>** (`###sim_subject_open`) goes to the subject's tab: a
+  simulation is a tab, left as any tab is, with no Exit button. On an assembly each
   top-level occurrence is a row under it (`###sim_part_<occurrence>`) with
   its role as its tail and **Role** as its menu
   (`###role_set_<occurrence>_<role>`; `ui::SetSimParticipantRole`, one undo
@@ -368,7 +370,9 @@ showing the last used, lit while it is armed; **Add case**
 **Result**, **Probe**, **Export VTU**, **Labels** (each load's value in the
 viewport) and **Clear stored meshes and results**
 (`###tb_sim_clear_storage`, asked first: [clearing](../simulation/README.md#clearing-stored-meshes-and-results))
-| Fit, Measure | Exit. A tool that cannot act on the study in front is
+| Fit, Measure. There is no Exit: the tab is left by another tab or its
+subject row's Open, and Escape disarms the armed tool, else puts the tool
+window away, else clears the selection, as on a drawing or a job tab. A tool that cannot act on the study in front is
 disabled with its reason on hover (`ui::SimCommandRefusal`, every `sim.*`
 command's gate): a pin on a modal study, a heat flux on a static one, an
 export before a run. A drop-down's face shows the last used that can act,

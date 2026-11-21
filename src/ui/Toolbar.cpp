@@ -1429,14 +1429,8 @@ void DrawSimulationToolbar(AppState& state) {
   CommandButton(state, "###tb_sim_fit", "view.fit", "Fit view");
   CommandButton(state, "###tb_sim_measure", "view.measure", "Measure",
                 state.measure.active);
-
-  Divider();
-
-  // Escape is a fixed modal verb, not a binding -- the same rule the sketch
-  // session's check mark follows (docs/ui/keybindings.md).
-  if (ToolButton(ICON_FA_ARROW_RIGHT_FROM_BRACKET "###tb_sim_exit",
-                 "Exit Simulation (Esc)"))
-    ExitSimulation(state);
+  // No Exit: a simulation is a tab, left as any tab is (another tab, or its
+  // subject row's Open in the tree).
   ImGui::NewLine();
 }
 
