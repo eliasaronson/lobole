@@ -273,7 +273,7 @@ TEST_CASE("Loading rejects unknown feature types", "[serialization]") {
 // ---- FEM studies (v29) ----------------------------------------------------
 // A study is saved in its simulation
 // (docs/simulation/README.md#how-a-simulation-is-saved); a part file before
-// vNEXT kept them itself, and those are read for the open to move.
+// v226 kept them itself, and those are read for the open to move.
 
 namespace {
 fem::SimDocument SimWithStudy() {

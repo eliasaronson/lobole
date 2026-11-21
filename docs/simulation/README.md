@@ -492,7 +492,7 @@ static, modal or topology result in its simulation, as
 `simulations/<folder>/results/<study id>.result.json` and `.result.bin`
 ([how a simulation is saved](#how-a-simulation-is-saved)), a motion result
 beside its study as `motion/<id>-<slug>.result.json` and `.result.bin`. (A
-file before vNEXT kept a part's or an assembly's FEM results as
+file before v226 kept a part's or an assembly's FEM results as
 `studies/<id>-<slug>.result.json` and `.result.bin` -- topology since v33
 and its hash since v148, the others v153, the two files v154 -- and an open
 moves them into a simulation:
@@ -2637,7 +2637,7 @@ simulation ([simulations](../scripting/rpc.md#simulations)), and a file
 whose studies were saved on its part or assembly has them moved into
 simulations when it opens ([moving studies](#moving-studies-into-a-simulation)).
 A part (`Document`) and an assembly (`AssemblyDocument`) hold no studies:
-from vNEXT their files carry none, and one that does is refused.
+from v226 their files carry none, and one that does is refused.
 
 It holds a **subject** (a part or an assembly by stable project-document id,
 and one configuration, 0 = the active one: a reference, never a copy), the
@@ -2858,7 +2858,7 @@ writer fixpoint, `format_version_gate`), and the reader fuzz has a
 ### Moving studies into a simulation
 
 `src/core/fem/SimMigration.{h,cpp}` moves the studies a part or an
-assembly file kept before vNEXT into simulation documents, and **an open
+assembly file kept before v226 into simulation documents, and **an open
 does it** (`ui::MoveStudiesIntoSimulations`, from `AdoptProject` and the
 single-part open). The reader keeps such a file's studies, and in the
 directory form their saved results, as read (`fem::OldStudies`, on the

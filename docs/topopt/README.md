@@ -72,7 +72,7 @@ keep-outs took and the islands removed) with its arrays -- the whole mesh,
 its boundary and the per-tet density, as float -- in `.result.bin`
 ([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps),
 [how a simulation is saved](../simulation/README.md#how-a-simulation-is-saved);
-before vNEXT a part kept it as `studies/<id>-<slug>.result.json` and
+before v226 a part kept it as `studies/<id>-<slug>.result.json` and
 `.result.bin`), and loaded into the same `StudyRuntime` slot FEM results
 use. On open it is restamped by its inputs, so it reads current until the
 part changes -- unless its saved hash no longer matches the reopened part,
