@@ -569,7 +569,7 @@ json DerivedOpToJson(const sketch::DerivedOp& op) {
             {"scalar", op.scalar},
             {"count", op.count.value},
             {"instances", insts}};
-  // vNEXT: the texts beside them, the step angle's in degrees
+  // v222: the texts beside them, the step angle's in degrees
   // (docs/sketching/README.md#patterns-that-are-expressions).
   WriteExprTexts(j, "vec", {op.vecExpr[0], op.vecExpr[1]});
   WriteExprText(j, "scalar", op.scalarExpr);
@@ -1367,7 +1367,7 @@ json FeatureToJson(const Feature& feature) {
     }
   } else if (auto* box = dynamic_cast<const BoxFeature*>(&feature)) {
     j["position"] = Vec3ToJson(box->position);
-    WriteVec3Exprs(j, "position", box->positionExpr); // vNEXT
+    WriteVec3Exprs(j, "position", box->positionExpr); // v222
     j["width"] = box->width.value;
     j["height"] = box->height.value;
     j["depth"] = box->depth.value;
@@ -1379,11 +1379,11 @@ json FeatureToJson(const Feature& feature) {
     WriteExprText(j, "depth", box->depth.expr);
   } else if (auto* sphere = dynamic_cast<const SphereFeature*>(&feature)) {
     j["center"] = Vec3ToJson(sphere->center);
-    WriteVec3Exprs(j, "center", sphere->centerExpr); // vNEXT
+    WriteVec3Exprs(j, "center", sphere->centerExpr); // v222
     WriteExpr(j, "radius", sphere->radius);
   } else if (auto* cyl = dynamic_cast<const CylinderFeature*>(&feature)) {
     j["center"] = Vec3ToJson(cyl->center);
-    WriteVec3Exprs(j, "center", cyl->centerExpr); // vNEXT
+    WriteVec3Exprs(j, "center", cyl->centerExpr); // v222
     j["direction"] = Vec3ToJson(cyl->direction);
     j["radius"] = cyl->radius.value;
     j["height"] = cyl->height.value;
@@ -1470,7 +1470,7 @@ json FeatureToJson(const Feature& feature) {
       j["body_names"] = d->bodyNames; // v85
     j["placement"] = {{"position", Vec3ToJson(d->position)},
                       {"orientation", QuatToJson(d->orientation)}};
-    WriteVec3Exprs(j["placement"], "position", d->positionExpr); // vNEXT
+    WriteVec3Exprs(j["placement"], "position", d->positionExpr); // v222
     j["reference"] = d->reference;
     json bodies = json::array();
     for (const DerivedBody& b : d->snapshot) {
@@ -1641,7 +1641,7 @@ json FeatureToJson(const Feature& feature) {
       for (const glm::dvec3& p : cv->points)
         pts.push_back(Vec3ToJson(p));
       j["points"] = std::move(pts);
-      WritePointExprs(j, "points", cv->pointsExpr); // vNEXT
+      WritePointExprs(j, "points", cv->pointsExpr); // v222
       if (cv->kind == Curve3DKind::ControlPoly)
         WriteExpr(j, "degree", cv->degree);
       if (cv->kind == Curve3DKind::BentPath) {
@@ -1653,7 +1653,7 @@ json FeatureToJson(const Feature& feature) {
     }
     case Curve3DKind::Helix:
       j["origin"] = Vec3ToJson(cv->axisOrigin);
-      WriteVec3Exprs(j, "origin", cv->axisOriginExpr); // vNEXT
+      WriteVec3Exprs(j, "origin", cv->axisOriginExpr); // v222
       j["axis"] = Vec3ToJson(cv->axisDir);
       WriteExpr(j, "radius", cv->radius);
       WriteExpr(j, "pitch", cv->pitch);
@@ -1675,7 +1675,7 @@ json FeatureToJson(const Feature& feature) {
       WriteExpr(j, "clearance_mm", cr->clearanceMm);
     }
     j["direction"] = {cr->direction.x, cr->direction.y, cr->direction.z};
-    WriteVec3Exprs(j, "direction", cr->directionExpr); // vNEXT
+    WriteVec3Exprs(j, "direction", cr->directionExpr); // v222
     if (!cr->sweep)
       j["sweep"] = false;
     if (cr->hasResolution) {
@@ -3327,13 +3327,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     box->width.expr = ReadExprText(j, "width");
     box->height.expr = ReadExprText(j, "height");
     box->depth.expr = ReadExprText(j, "depth");
-    box->positionExpr = ReadVec3Exprs(j, "position"); // vNEXT
+    box->positionExpr = ReadVec3Exprs(j, "position"); // v222
     out = std::move(box);
   } else if (type == "Sphere") {
     auto sph = std::make_unique<SphereFeature>(
         name, Vec3FromJson(j.at("center")), j.at("radius").get<double>());
     sph->radius.expr = ReadExprText(j, "radius");
-    sph->centerExpr = ReadVec3Exprs(j, "center"); // vNEXT
+    sph->centerExpr = ReadVec3Exprs(j, "center"); // v222
     out = std::move(sph);
   } else if (type == "Cylinder") {
     auto cyl = std::make_unique<CylinderFeature>(
@@ -3341,7 +3341,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.at("radius").get<double>(), j.at("height").get<double>());
     cyl->radius.expr = ReadExprText(j, "radius");
     cyl->height.expr = ReadExprText(j, "height");
-    cyl->centerExpr = ReadVec3Exprs(j, "center"); // vNEXT
+    cyl->centerExpr = ReadVec3Exprs(j, "center"); // v222
     out = std::move(cyl);
   } else if (type == "Fastener") {
     // `length` is OPTIONAL, because whether it means anything is the
@@ -3638,7 +3638,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       dp->p0 = Vec3FromJson(pts.at(0));
       dp->p1 = Vec3FromJson(pts.at(1));
       dp->p2 = Vec3FromJson(pts.at(2));
-      const auto t = ReadPointExprs(j, "points", 3); // vNEXT
+      const auto t = ReadPointExprs(j, "points", 3); // v222
       dp->pExpr = {t[0], t[1], t[2]};
       break;
     }
@@ -3667,7 +3667,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       const json& pts = j.at("points");
       da->p0 = Vec3FromJson(pts.at(0));
       da->p1 = Vec3FromJson(pts.at(1));
-      const auto t = ReadPointExprs(j, "points", 2); // vNEXT
+      const auto t = ReadPointExprs(j, "points", 2); // v222
       da->pExpr = {t[0], t[1]};
       break;
     }
@@ -4095,7 +4095,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                "': flank_angle_deg must be a number of "
                                "degrees");
     th->flankDeg = j.value("flank_angle_deg", 30.0);
-    th->flankDeg.expr = ReadExprText(j, "flank_angle_deg"); // vNEXT
+    th->flankDeg.expr = ReadExprText(j, "flank_angle_deg"); // v222
     th->pitch.expr = ReadExprText(j, "pitch");
     th->allowEngagement = j.value("allow_engagement", false);
     th->minimumEngagement = j.value("minimum_engagement", 0.0);

@@ -555,7 +555,7 @@ spellings stay accepted as aliases: a string where a study's number goes
   half: the `_expr` keys, `set_variable`'s `regen.owners`, the refusals,
   the getters, rename and delete, and a save and reopen.
 - `tests/golden/v11-expressions.json`, `v38-entity-exprs.json`,
-  `v150-lookup-table.json` and `vNEXT-part-expressions.json` pin the file
+  `v150-lookup-table.json` and `v222-part-expressions.json` pin the file
   format.
 
 ## Not built

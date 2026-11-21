@@ -53,7 +53,7 @@ them, the way assemblies went on (src/core/AssemblyExprs.cpp).
    sentinel through every slot, read back from the file, and every number the
    file holds is a slot or on a short list with its reason.
 
-Format: one `vNEXT` with a golden per kind (`tests/golden/job/`,
+Format: one `v222` with a golden per kind (`tests/golden/job/`,
 `tests/golden/drawing/`).
 
 ## Files

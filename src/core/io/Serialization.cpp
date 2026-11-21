@@ -135,7 +135,7 @@ std::optional<sheet::SheetMetalRules> SheetMetalFromEnvelope(const json& j) {
   r.material = m.value("material", std::string{});
   r.gauge = m.value("gauge", std::string{});
   r.thickness = m.value("thickness", 0.0);
-  // vNEXT: each may carry its text; the number is its last good value.
+  // v222: each may carry its text; the number is its last good value.
   ReadExpr(m, "bend_radius", r.bendRadius);
   ReadExpr(m, "k_factor", r.kFactor);
   if (m.contains("relief")) {
@@ -164,7 +164,7 @@ void SheetMetalToEnvelope(const std::optional<sheet::SheetMetalRules>& rules,
   json m = {{"material", rules->material},
             {"gauge", rules->gauge},
             {"thickness", rules->thickness}};
-  // A bound one is written whatever it is, beside its text (vNEXT).
+  // A bound one is written whatever it is, beside its text (v222).
   const auto put = [&](const char* key, const ExprValue& v) {
     if (v > 0.0 || v.Bound())
       WriteExpr(m, key, v);
@@ -202,7 +202,7 @@ std::optional<tube::TubeRules> TubeFromEnvelope(const json& j) {
       r.formerRadii.push_back(v.get<double>());
   }
   r.formerRadiiExpr =
-      ReadExprTexts(m, "former_radii", r.formerRadii.size()); // vNEXT
+      ReadExprTexts(m, "former_radii", r.formerRadii.size()); // v222
   ReadExpr(m, "min_straight", r.minStraight);
   ReadExpr(m, "tail_length", r.tailLength);
   ReadExpr(m, "max_thinning", r.maxThinning);

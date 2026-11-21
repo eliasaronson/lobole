@@ -45,7 +45,7 @@ may be an expression of the part's variables, then the project's.
 arrives and refused naming the key when the text does not parse or names a
 variable the scope does not have; a number alone unbinds.
 `get_sheet_metal_rules` answers each text beside its number. The file
-writes `<key>_expr` beside the value (format vNEXT).
+writes `<key>_expr` beside the value (format v222).
 
 A variable change re-evaluates them in `Document::Regenerate`, before the
 chain hash the rules seed, so every bend rebuilds. A value

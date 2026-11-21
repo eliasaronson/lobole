@@ -472,7 +472,7 @@ sketch's error, never rounded, and so is a count below 1), each coordinate
 of `vec` and `vec2`, and a circular pattern's step angle, whose text is in
 DEGREES while `scalar` stays radians. They are written as `count_expr`,
 `count2_expr`, `vec_expr` / `vec2_expr` (`[u, v]` texts) and
-`scalar_expr` on the op (format vNEXT), visited by
+`scalar_expr` on the op (format v222), visited by
 `SketchFeature::VisitExprs` at `derived_ops/<i>/...`, and a variable change
 re-runs `RegenerateDerived` after the solve. The `pattern` RPC takes
 `count_expr`, `step_expr`, `center_expr` and `angle_deg_expr` (with
