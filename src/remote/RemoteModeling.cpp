@@ -231,14 +231,15 @@ bool TriedOnACopy(const Feature& f) {
          dynamic_cast<const ShellFeature*>(&f) != nullptr;
 }
 
-void RefuseFailingDirectEdit(Document& doc, const Feature& f,
+// True when the edit was tried and built; false when it was not tried.
+bool RefuseFailingDirectEdit(Document& doc, const Feature& f,
                              std::optional<size_t> at) {
   if (!TriedOnACopy(f))
-    return;
+    return false;
   // Nothing is tried while the part is building: the copy would rebuild the
   // whole list inline.
   if (doc.BuildsOffFrame() && doc.HasUnbuilt())
-    return;
+    return false;
   const auto copy = Document::CopyWithGeometry(doc);
   // A heavy edit is not built here, on the frame: the copy stops at it, as
   // the part would, unless the heavy store already holds its build. With
@@ -267,7 +268,7 @@ void RefuseFailingDirectEdit(Document& doc, const Feature& f,
       pending != nullptr && pending->featureId == built->GetId()) {
     if (HeavyTrialScope::Allowed())
       throw HeavyTrialNeeded{copy->PendingBuildShared()};
-    return;
+    return false;
   }
   if (!built->GetError().empty() && !built->ErrorAfterEarlierFailure()) {
     const std::string message = f.TypeName() +
@@ -287,6 +288,96 @@ void RefuseFailingDirectEdit(Document& doc, const Feature& f,
   // Built: the document takes the copy's evaluation instead of building the
   // edit a second time when the call commits it.
   doc.AdoptEvaluations(*copy);
+  return true;
+}
+
+// `fit` beside `feature` on add_feature and modify_feature
+// (docs/modeling/README.md#reducing-on-the-call): "exact" (the default)
+// builds the size asked, "reduce" builds the size that fits when the asked
+// one does not, stores it, and says so in `reduced`. Read and checked before
+// anything changes.
+bool ReduceRequested(const RpcParams& p, const Document& doc, const Feature& f,
+                     const char* method) {
+  if (!p.contains("fit"))
+    return false;
+  const json& v = p.at("fit");
+  if (!v.is_string() || (v != "exact" && v != "reduce")) {
+    remote::ContractError e(method, "invalid_argument", "/params/fit",
+                            json{{"enum", {"exact", "reduce"}}}, v,
+                            std::string(method) +
+                                ": 'fit' must be one of: exact, reduce; got " +
+                                v.dump());
+    e.diagnostic["accepted"] = {"exact", "reduce"};
+    throw e;
+  }
+  const auto* fil = dynamic_cast<const FilletFeature*>(&f);
+  const auto* sh = dynamic_cast<const ShellFeature*>(&f);
+  if (fil == nullptr && sh == nullptr)
+    throw remote::ContractError(
+        method, "invalid_argument", "/params/fit",
+        json{{"feature_types", {"Fillet", "Chamfer", "Shell"}}}, f.TypeName(),
+        std::string(method) +
+            ": 'fit' applies to a Fillet, Chamfer or "
+            "Shell, whose size can be reduced to one "
+            "that builds; a " +
+            f.TypeName() + " has none. Send it without 'fit'");
+  if (v != "reduce")
+    return false;
+  const ExprValue& size = fil != nullptr ? fil->radius : sh->thickness;
+  const char* field = fil != nullptr ? "radius" : "thickness";
+  if (size.Bound())
+    throw std::runtime_error(
+        std::string(method) +
+        ": fit \"reduce\" stores the size that builds, "
+        "and this " +
+        f.TypeName() + "'s " + field + " is the expression '" + size.expr +
+        "', which a number would overwrite; send a number, or change the "
+        "variable");
+  if (doc.InBulkEdit())
+    throw std::runtime_error(std::string(method) +
+                             ": fit \"reduce\" is refused inside a batch, "
+                             "whose regeneration is deferred: there is no "
+                             "built body to find the size that fits on. "
+                             "Send it outside the batch");
+  return true;
+}
+
+// The edit tried on a copy (RefuseFailingDirectEdit) at the size asked, and,
+// when that is refused as does_not_fit with a size that fits, at that size:
+// `f`'s field then holds it, and the answer is `reduced`, {param, asked_mm,
+// built_mm, basis}; null when the asked size built. Refused as the edit
+// would be when nothing fits, and when the part cannot be tried now.
+json ReduceToFit(Document& doc, Feature& f, std::optional<size_t> at) {
+  auto* fil = dynamic_cast<FilletFeature*>(&f);
+  auto* sh = dynamic_cast<ShellFeature*>(&f);
+  ExprValue& size = fil != nullptr ? fil->radius : sh->thickness;
+  const double asked = size.value;
+  std::string basis;
+  // The size that fits was built by the search that named it, so it builds
+  // again; a second round is for a bound's size the search went under.
+  for (int round = 0;; round++) {
+    try {
+      if (!RefuseFailingDirectEdit(doc, f, at))
+        throw std::runtime_error(
+            f.TypeName() + ": fit \"reduce\" needs the part built, to try "
+                           "the size on; it is building. Send it again when "
+                           "it has built. The document is unchanged");
+      break;
+    } catch (const remote::ContractError& e) {
+      const json& d = e.diagnostic;
+      if (round >= 2 || d.value("code", "") != "does_not_fit" ||
+          !d.contains("fits") || !d["fits"]["fits_mm"].is_number())
+        throw;
+      size = d["fits"]["fits_mm"].get<double>();
+      basis = d["fits"].value("basis", "built");
+    }
+  }
+  if (size.value == asked)
+    return nullptr;
+  return {{"param", fil != nullptr ? "radius" : "thickness"},
+          {"asked_mm", asked},
+          {"built_mm", size.value},
+          {"basis", basis}};
 }
 
 // What a feature says about the bodies it would act on (Feature::WhyRefusedOn):
@@ -523,11 +614,17 @@ static constexpr MethodDoc ModelingMethods[] = {
      "basic profile it cuts prints tight (docs/tolerances/README.md). A "
      "DeleteFace, OffsetFace, MoveFace or ReplaceFace that would not build "
      "is refused with its error, the document unchanged "
-     "(docs/modeling/README.md#direct-edit). So is a Fillet or Chamfer "
-     "whose size does not build, with the size that does: a `diagnostic` "
-     "{code: does_not_fit, param: radius, observed, fits: {param, asked_mm, "
-     "fits_mm, fails_mm, basis, element?}} "
-     "(docs/modeling/README.md#the-size-that-fits); so is a feature the bodies "
+     "(docs/modeling/README.md#direct-edit). So is a Fillet, Chamfer or "
+     "Shell whose size does not build, with the size that does: a "
+     "`diagnostic` {code: does_not_fit, param: radius | thickness, observed, "
+     "fits: {param, asked_mm, fits_mm, fails_mm, basis: built | bound, "
+     "element?}} (docs/modeling/README.md#the-size-that-fits). `fit` "
+     "\"reduce\" (default \"exact\") on one of those three builds the size "
+     "that fits instead and STORES it, answering `reduced` {param, asked_mm, "
+     "built_mm, basis} beside `regen`, and nothing when the size asked built; "
+     "refused for a size given as an expression, inside a batch, and where "
+     "nothing fits (docs/modeling/README.md#reducing-on-the-call). So is a "
+     "feature the bodies "
      "cannot take, naming what they would: an element on no body or on two, "
      "or named by the feature that made it rather than its body's "
      "created_by; a blend whose edges start no blend; a Draft face square "
@@ -542,7 +639,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "the call answers when it lands; cancelled (cancel_background_job "
      "{kind: \"feature\"}) the call is rolled back and refused "
      "(docs/ui/long-operations.md#heavy-features).",
-     "feature:object, expect_revision?:revision",
+     "feature:object, fit?:string, expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
     {"import_sketch",
      "Read a 2D drawing — a DXF (R12 to R2018, ASCII) or an SVG — into a "
@@ -640,12 +737,14 @@ static constexpr MethodDoc ModelingMethods[] = {
      "triangle of distances or turn an arc inside out, is refused naming "
      "the dimension, and the document is unchanged; a direct edit (DeleteFace, "
      "OffsetFace, MoveFace, ReplaceFace) that would not build is refused "
-     "with its error, the document unchanged, a Fillet or Chamfer whose size "
-     "does not build is refused with the size that does (diagnostic code "
-     "does_not_fit, as add_feature), and so is a feature the "
+     "with its error, the document unchanged, a Fillet, Chamfer or Shell "
+     "whose size does not build is refused with the size that does "
+     "(diagnostic code does_not_fit, as add_feature) -- or, with `fit` "
+     "\"reduce\", stored at that size and answered `reduced`, as "
+     "add_feature -- and so is a feature the "
      "bodies before it cannot take, as add_feature says "
      "(docs/modeling/README.md#refused-on-the-bodies).",
-     "feature:object, feature_id?:int>=0, index?:int>=0, "
+     "feature:object, feature_id?:int>=0, index?:int>=0, fit?:string, "
      "expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
     {"align_import",
@@ -1635,8 +1734,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
       throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
     }
+    const bool reduce = ReduceRequested(p, *doc, *feature, "add_feature");
     RefuseOnInput(*doc, *feature, std::nullopt);
-    RefuseFailingDirectEdit(*doc, *feature, std::nullopt);
+    json reduced = nullptr;
+    if (reduce)
+      reduced = ReduceToFit(*doc, *feature, std::nullopt);
+    else
+      RefuseFailingDirectEdit(*doc, *feature, std::nullopt);
     const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(feature)), *doc);
@@ -1698,6 +1802,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         resp["print"] = PrintedThreadJson(*r);
     resp["regen"] = RegenSummaryJson(*doc);
     resp["digest"] = DigestJson(preDigest, *doc);
+    if (!reduced.is_null())
+      resp["reduced"] = std::move(reduced);
     return resp;
   }
   if (m == "update_derived") {
@@ -1851,6 +1957,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     json spec = p.at("feature");
     if (!spec.contains("name"))
       spec["name"] = feature->GetName();
+    json reduced = nullptr;
     // Build a throwaway from the request first: validates the JSON AND lets
     // the round-trip unknown-field check run before anything is committed.
     {
@@ -1865,8 +1972,16 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         RefuseLargeMeshImport(*probe);
       if (now != nullptr && was != nullptr)
         RefuseReferencedRepresentationChange(*doc, *was, *now);
+      const bool reduce = ReduceRequested(p, *doc, *probe, "modify_feature");
       RefuseOnInput(*doc, *probe, index);
-      RefuseFailingDirectEdit(*doc, *probe, index);
+      if (reduce) {
+        reduced = ReduceToFit(*doc, *probe, index);
+        // The size built is the size stored.
+        if (!reduced.is_null())
+          spec[reduced["param"].get<std::string>()] = reduced["built_mm"];
+      } else {
+        RefuseFailingDirectEdit(*doc, *probe, index);
+      }
     }
     json before = DocumentIO::FeatureToJson(*feature);
     json after = spec;
@@ -1957,6 +2072,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (auto* th = dynamic_cast<const ThreadFeature*>(doc->GetFeature(index)))
       if (const auto r = ui::PrintedThreadFor(*doc, *th))
         resp["print"] = PrintedThreadJson(*r);
+    if (!reduced.is_null())
+      resp["reduced"] = std::move(reduced);
     return resp;
   }
   if (m == "align_import") {

@@ -30,7 +30,7 @@ COLUMNS: dict[str, str] = {
     'accept_pending': '',
     'add_assembly': 'name?:string',
     'add_configuration': 'name?:string',
-    'add_feature': 'feature:object, expect_revision?:revision',
+    'add_feature': 'feature:object, fit?:string, expect_revision?:revision',
     'add_mate': "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose', rotation_range_deg?:number[2]|null, offset_range_mm?:number[2]|null, dx_range_mm?:number[2]|null, dy_range_mm?:number[2]|null, cone_deg?:number|null, rotation_deg_expr?:string, offset_expr?:string, dx_expr?:string, dy_expr?:string, rotation_range_deg_expr?:string[2], offset_range_mm_expr?:string[2], dx_range_mm_expr?:string[2], dy_range_mm_expr?:string[2], cone_deg_expr?:string",
     'add_occurrence': 'part:string|int, name?:string, transform?:object, visible?:bool, fixed?:bool, configuration?:string|int|null, material?:string|null, flexible?:bool',
     'add_part': 'name?:string',
@@ -97,7 +97,7 @@ COLUMNS: dict[str, str] = {
     'measure': "a:object, b?:object, kind?:'distance'|'angle'|'both', distance_kind?:string, mode?:'exact'|'mesh', part?:string|int",
     'merge_abort': '',
     'merge_finish': '',
-    'modify_feature': 'feature:object, feature_id?:int>=0, index?:int>=0, expect_revision?:revision',
+    'modify_feature': 'feature:object, feature_id?:int>=0, index?:int>=0, fit?:string, expect_revision?:revision',
     'motion_video_status': '',
     'new_project': '',
     'open_project': 'path:string',
@@ -137,6 +137,7 @@ class AddConfigurationParams(TypedDict):
 
 class AddFeatureParams(TypedDict):
     feature: FeatureSpec | Mapping[str, Any]
+    fit: NotRequired[str]
     expect_revision: NotRequired[Revision]
 
 class AddMateParams(TypedDict):
@@ -338,6 +339,7 @@ class ModifyFeatureParams(TypedDict):
     feature: FeatureSpec | Mapping[str, Any]
     feature_id: NotRequired[int]
     index: NotRequired[int]
+    fit: NotRequired[str]
     expect_revision: NotRequired[Revision]
 
 class OpenProjectParams(TypedDict):

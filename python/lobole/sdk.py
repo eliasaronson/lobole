@@ -1950,14 +1950,14 @@ class _Tab:
 
 
 class Part(_Tab):
-    def _add(self, feature):
+    def _add(self, feature, **call):
         self.activate()
-        return self.app.add_feature(feature=feature)
+        return self.app.add_feature(feature=feature, **call)
 
-    def _feature(self, feature):
+    def _feature(self, feature, **call):
         """Add a feature and hand back its Feature (the response dict,
         with the faces it made to ask for)."""
-        r = self._add(feature)
+        r = self._add(feature, **call)
         return Feature(self, dict(r, name=feature.get("name"),
                                   type=feature.get("type")))
 
@@ -2440,13 +2440,19 @@ class Part(_Tab):
             f["worm_diameter"] = worm_diameter
         return self._feature(f)
 
-    def fillet(self, edges, r, name="Fillet") -> Feature:
-        return self._blend("Fillet", edges, r, name)
+    def fillet(self, edges, r, name="Fillet", fit="exact") -> Feature:
+        """Round `edges` at radius `r`. A radius that does not build raises
+        DoesNotFit, whose `fits_mm` is the one that does; `fit="reduce"`
+        builds that one instead, stores it, and the Feature's
+        `["reduced"]` says both sizes
+        (docs/modeling/README.md#reducing-on-the-call)."""
+        return self._blend("Fillet", edges, r, name, fit)
 
-    def chamfer(self, edges, r, name="Chamfer") -> Feature:
-        return self._blend("Chamfer", edges, r, name)
+    def chamfer(self, edges, r, name="Chamfer", fit="exact") -> Feature:
+        """Bevel `edges` by `r`; `fit` as fillet's."""
+        return self._blend("Chamfer", edges, r, name, fit)
 
-    def _blend(self, type_, edges, r, name):
+    def _blend(self, type_, edges, r, name, fit="exact"):
         edges = list(edges) if isinstance(edges, (list, tuple)) else [edges]
         if not edges:
             raise SdkError(f"{type_.lower()} got no edges — a filter that "
@@ -2454,7 +2460,8 @@ class Part(_Tab):
         f = {"type": type_, "name": name,
              "edges": [e.ref for e in edges]}
         _dim(f, "radius", r)
-        return self._feature(f)
+        # Sent only when asked: the app checks it, and refuses an unknown one.
+        return self._feature(f, **({} if fit == "exact" else {"fit": fit}))
 
     @_renamed(rotate=("rotate_deg", "the same degrees per axis"))
     def frame(self, name, of=None, origin=None, z=(0, 0, 1), x=(1, 0, 0),

@@ -1183,10 +1183,11 @@ sessions](../ui/tool-sessions.md#the-tool-window)) read it.
 
 `add_feature` and `modify_feature` build a Fillet or Chamfer on a copy
 first, as they do a direct edit, and refuse one that does not build with
-the document unchanged; a size an upstream edit broke is a broken feature
-in that edit's `regen`. `tests/test_blend_fit.cpp` checks each answer by
-what it is for: the size reported builds a valid solid of the closed-form
-volume, and 2 % above it does not.
+the document unchanged, unless asked to [reduce](#reducing-on-the-call) it;
+a size an upstream edit broke is a broken feature in that edit's `regen`.
+`tests/test_blend_fit.cpp` checks each answer by what it is for: the size
+reported builds a valid solid of the closed-form volume, and 2 % above it
+does not.
 
 ### A Shell's wall
 
@@ -1210,7 +1211,7 @@ bracket it has: "... ; a wall of 0.5 mm builds and 1 mm does not (the
 search ran out of time)"; where nothing builds, "... ; no wall builds, down
 to 0.00128 mm". The answer is a `FitHint` with `param: "thickness"`, kept
 on the feature (`ShellFeature::fitMemo`) like a blend's, so `regen`, the
-refusal's diagnostic and the tool window's button read it
+refusal's diagnostic, `fit: "reduce"` and the tool window's button read it
 as they read a blend's. `add_feature` and `modify_feature` build a Shell on
 a copy first, as they do a blend, and refuse one that does not build
 (`does_not_fit`) with the document unchanged.
@@ -1249,6 +1250,35 @@ r30 on the rims of a plate of 100 bores whose limit is the bores' 1 mm
 radius, which no bound measures, still spends most of its refusal in the
 builder's failure at 30 (3.6 s of CPU against 0.17 s for one round that
 fits).
+
+### Reducing on the call
+
+`add_feature` and `modify_feature` take `fit` beside `feature`: `"exact"`,
+the default, builds the size asked and refuses one that does not fit;
+`"reduce"` builds the size that fits instead and stores it. Any other value
+is refused naming the two, and `fit` on a feature that is not a Fillet,
+Chamfer or Shell naming the three. The edit is tried on a copy at the size
+asked; refused as `does_not_fit` with a size that fits, the feature's
+`radius` or `thickness` becomes that size and it is tried again, and that
+is what the document holds: the radius is 7.49, and nothing remembers 10.
+The response says so beside `regen`, `reduced: {param, asked_mm, built_mm,
+basis}`; a size that fits is built as asked and answers no `reduced`.
+
+This is not the substitution "refuse, don't substitute" forbids: the caller asked for it on this call, the
+answer names both numbers, and the document holds the number that was
+built, so it never loads looking right and being wrong. So it is refused
+where it could not keep that promise, before anything changes: a size given
+as an expression (`radius_expr`, `thickness_expr`), which a number would
+overwrite; inside a `batch`, whose regeneration is deferred and has no
+built body to try the size on; while the part is still building; and where
+nothing fits, as the same call without `fit` is. It is not stored, so the
+format does not move, and regeneration never reduces anything: a later edit
+that makes 7.49 too large breaks the feature, which then says the new
+size. The GUI's form of it is the "Use" button. `fit_reduce_smoke` checks
+it by what it is for: the stored radius is the size built, the body is the
+closed-form round of it, a save and reopen gives the same body, and r5
+answers no `reduced`; `refused_calls_smoke` that each refusal changes
+nothing.
 
 ## Kernel calls build on a copy of the cached body
 

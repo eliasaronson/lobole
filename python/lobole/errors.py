@@ -108,10 +108,11 @@ class DeviceLost(Refused):
 
 
 class DoesNotFit(Refused):
-    """A Fillet or Chamfer whose size does not build: `observed` is the size
-    asked, `fits` the answer the app searched for, {param, asked_mm, fits_mm
-    (None: nothing built), fails_mm, basis, element?}, and `fits_mm` the size
-    to send instead (docs/scripting/rpc.md#structured-errors)."""
+    """A Fillet, Chamfer or Shell whose size does not build: `observed` is
+    the size asked, `fits` the answer the app searched for, {param (radius or
+    thickness), asked_mm, fits_mm (None: nothing built), fails_mm, basis,
+    element?}, and `fits_mm` the size to send instead -- or ask for it with
+    `fit="reduce"` (docs/scripting/rpc.md#structured-errors)."""
     CODE = "does_not_fit"
 
     fits = property(lambda self: self._field("fits"))

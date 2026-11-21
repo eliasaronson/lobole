@@ -644,6 +644,51 @@ def main():
                 if ok:
                     d.call("undo")
 
+            # `fit` beside `feature`, refused, changing nothing, where it
+            # names no mode, names a feature with no size to reduce, or could
+            # not keep its promise to store the size it built
+            # (docs/modeling/README.md#reducing-on-the-call).
+            check("an unknown fit", "add_feature",
+                  {"feature": too_big, "fit": "smaller"},
+                  needle="'fit' must be one of: exact, reduce",
+                  tab=part["name"])
+            spec = next(f for f in d.call("get_state")["features"]
+                        if f["id"] == plate["created_by"])
+            check("fit on an Extrude", "modify_feature",
+                  {"feature_id": spec["id"], "feature": spec,
+                   "fit": "reduce"},
+                  needle="applies to a Fillet, Chamfer or Shell",
+                  tab=part["name"])
+            check("fit reduce on an expression", "add_feature",
+                  {"feature": dict(too_big, radius_expr="1000"),
+                   "fit": "reduce"},
+                  needle="which a number would overwrite", tab=part["name"])
+            check("fit reduce in a batch", "batch",
+                  {"calls": [{"method": "add_feature",
+                              "params": {"feature": too_big,
+                                         "fit": "reduce"}}]},
+                  needle="refused inside a batch", tab=part["name"])
+            # Where nothing fits: a Shell of a threaded screw's face, which
+            # no wall builds (tests/fixtures/occ/shell-arc-bind-order.brep).
+            screw = d.call("add_feature", feature={
+                "type": "Import", "name": "Screw", "keep_origin": True,
+                "path": os.path.join(HERE, "fixtures", "occ",
+                                     "shell-arc-bind-order.brep")})
+            screw_body = screw["id"]
+            face0 = next(f["name"] for b in d.call("list_elements")["bodies"]
+                         if b["created_by"] == screw_body
+                         for f in b["faces"] if f["name"].endswith("/face0"))
+            check("fit reduce where nothing fits", "add_feature",
+                  {"feature": {"type": "Shell", "name": "Hollow",
+                               "body_id": screw_body,
+                               "open_faces": [{"feature_id": screw_body,
+                                               "element": face0}],
+                               "thickness": 0.05},
+                   "fit": "reduce"},
+                  needle="no wall builds", tab=part["name"])
+            d.call("undo")  # the Screw
+            note(screw["regen"]["ok"], f"the screw imports: {screw}")
+
             # A section cut on a datum that is not there: add_section added
             # the cut and update_section applied base_plane, each before
             # refusing the plane_id. Both now check first.

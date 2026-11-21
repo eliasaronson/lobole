@@ -1378,20 +1378,27 @@ def list_elements(body: int | None = None, part: str | int | None = None,
           "name,warning}]} — ok false means the edit broke the model (fix the "
           "first non-collateral failure); a warning means it built but likely "
           "did nothing intended (e.g. a cut whose profile missed every "
-          "body).\n\n" + FEATURE_FORMATS)
-def add_feature(feature: dict, expect_revision: dict | None = None) -> dict:
+          "body). A Fillet, Chamfer or Shell whose size does not build is "
+          "refused with the size that does (diagnostic does_not_fit, "
+          "fits.fits_mm); fit=\"reduce\" builds that size instead, stores "
+          "it, and answers reduced {param, asked_mm, built_mm, basis}.\n\n"
+          + FEATURE_FORMATS)
+def add_feature(feature: dict, fit: str | None = None,
+                expect_revision: dict | None = None) -> dict:
     return _call("add_feature", feature=feature,
-                 **_given(expect_revision=expect_revision))
+                 **_given(fit=fit, expect_revision=expect_revision))
 
 
 @mcp.tool(description="Replace the feature at a history index with new "
           "feature JSON (same formats as add_feature; keep the same type and "
-          "id). Regenerates. Get indices from get_state.")
+          "id). Regenerates. Get indices from get_state. fit=\"reduce\" as "
+          "add_feature's.")
 def modify_feature(feature: dict, feature_id: int | None = None,
-                   index: int | None = None,
+                   index: int | None = None, fit: str | None = None,
                    expect_revision: dict | None = None) -> dict:
     return _call("modify_feature", feature=feature, **_given(
-        feature_id=feature_id, index=index, expect_revision=expect_revision))
+        feature_id=feature_id, index=index, fit=fit,
+        expect_revision=expect_revision))
 
 
 @mcp.tool(description="Delete the feature at a history index. Later features "

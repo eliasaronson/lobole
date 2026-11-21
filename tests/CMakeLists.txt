@@ -1086,6 +1086,14 @@ add_test(NAME regen_honesty_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(regen_honesty_smoke PROPERTIES TIMEOUT 120)
 
+# `fit: "reduce"` on add_feature and modify_feature stores the size that
+# builds and says both in its own response
+# (docs/modeling/README.md#reducing-on-the-call). Headless.
+add_test(NAME fit_reduce_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fit_reduce_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(fit_reduce_smoke PROPERTIES TIMEOUT 120)
+
 # The modeling-workflow prompt's claims that nothing else pinned: a digest on
 # set_variable and on a batch, set_rollback's intermediate state, get_state's
 # selection (docs/scripting/mcp.md#the-workflow-prompt). Headless.

@@ -909,6 +909,20 @@ fits is 7.49 mm (face '1/face0' is 15 mm wide between the two picked
 edges, so the rounds meet at 7.5 mm). The document is unchanged
 ```
 
+Or ask for it on the call: `fit: "reduce"` beside `feature` builds that
+size instead, stores it, and answers it beside `regen`
+([modeling](../modeling/README.md#reducing-on-the-call)):
+
+```
+{"index": 2, "id": 3, "regen": {"ok": true, ...},
+ "reduced": {"param": "radius", "asked_mm": 10.0, "built_mm": 7.49,
+             "basis": "built"}}
+```
+
+refused for an unknown `fit` (`invalid_argument`, `accepted: [exact,
+reduce]`), on a feature that is not a Fillet, Chamfer or Shell, for a size
+given as an expression, inside a `batch`, and where nothing fits.
+
 ### The revision guard
 
 A write built from a reading of a part can say which reading:

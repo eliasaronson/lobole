@@ -312,6 +312,13 @@ def check_bad_blend_refuses(app):
     # Still answering, which is the whole point of the test.
     state = part.state()
     expect(state["regen"]["ok"], f"the part is as it was: {state['regen']}")
+    # Asked for, the size that fits is built and stored instead
+    # (docs/modeling/README.md#reducing-on-the-call).
+    reduced = part.fillet(edges, r=8.0, name="reduced", fit="reduce")
+    red = reduced["reduced"]
+    expect(red["asked_mm"] == 8.0 and 0 < red["built_mm"] < 8.0,
+           f"fit='reduce' builds the size that fits: {red}")
+    expect(reduced["regen"]["ok"], f"and the part is healthy: {reduced}")
 
 
 def check_faces_by_maker(app):
