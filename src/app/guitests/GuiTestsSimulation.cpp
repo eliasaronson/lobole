@@ -1145,7 +1145,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.active);
     IM_CHECK(s_App->sim != nullptr);
     IM_CHECK(s_App->sim->Subject().kind == fem::SubjectKind::Assembly);
-    IM_CHECK(ctx->ItemExists("//##DockHost/**/###tb_sim_add_static"));
+    // Its Add study group (whose face is the kind last used).
+    IM_CHECK(ctx->ItemExists("//##DockHost/**/sim_study/###more"));
     IM_CHECK_EQ(Sim()->GetStudies().size(), (size_t)1);
     const uint64_t studyId = s_App->simulation.activeStudyId;
     IM_CHECK(studyId != 0);
@@ -1815,7 +1816,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->sim->Subject().docId == partId);
     IM_CHECK_EQ(s_App->sim->GetStudies().size(), (size_t)1);
     IM_CHECK(ctx->ItemExists("//###Model/**/###sim_subject"));
-    IM_CHECK(ctx->ItemExists("//##DockHost/**/###tb_sim_add_static"));
+    // The toolbar is the simulation's: its Add study group. Not one button
+    // of it -- the group's face shows the kind last used, which an earlier
+    // test in a shuffled run may have made Modal.
+    IM_CHECK(ctx->ItemExists("//##DockHost/**/sim_study/###more"));
     const uint64_t sid = s_App->simulation.activeStudyId;
     const Body body = Doc()->GetBodies()[0];
     const ElementRef fixed = FaceFacing(body, {0, 0, -1});
