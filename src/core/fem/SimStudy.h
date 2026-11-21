@@ -20,11 +20,21 @@
 // its shape and its settings) and the simulation's stored mesh under that
 // key, which the run solves on instead of meshing again; a mesh the run
 // does make is handed back for the simulation to keep.
+//
+// What reads another study -- a static study of a topology result
+// (ShapeSource), a thermal_load from_study -- reads it from the simulation
+// (StudySiblings, routed as the study itself is), so it plans and hashes as
+// the same studies on the part do. Beside a neighbour neither is built: a
+// topology result is one part's, and an assembly study does not solve heat.
 
+#include "core/fem/FemCheck.h"
+#include "core/fem/FemMeshReport.h"
 #include "core/fem/FemSolver.h"
+#include "core/fem/FemTopo.h"
 #include "core/fem/SimDocument.h"
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -80,10 +90,12 @@ uint64_t SimStudyInputKey(const SimContext& ctx, uint64_t studyId);
 // `ctx.sim` is ignored.
 int RestampSimByInputs(SimDocument& sim, SimContext ctx);
 
-// Plans and solves study `studyId` of `sim` (a static, modal, buckling or
-// thermal study; a topology study is refused), storing the result on `sim`
-// stamped with its input hash and `ctx.subjectStamps`, and every mesh it
-// made under its key. `rt` is the run's whole answer, before the reduction
+// Plans and solves study `studyId` of `sim`, storing the result on `sim`
+// stamped with its input hash and `ctx.subjectStamps`
+// (StoreSimStudyResult), and every mesh it made under its key. A topology
+// study runs RunTopology on the part it plans as (refused beside a
+// neighbour: it optimises one part); it meshes for itself and keeps no
+// mesh. `rt` is the run's whole answer, before the reduction
 // a stored result gets (KeepWhatIsRead). `meshesMade`, when given, is how
 // many bodies were meshed rather than read from the store. A study on the
 // document's mesh (SimDocument::SharesMesh) sets the document's mesh keys
@@ -92,5 +104,71 @@ int RestampSimByInputs(SimDocument& sim, SimContext ctx);
 bool RunSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
                  StudyRuntime& rt, std::string* error,
                  int* meshesMade = nullptr);
+
+// Stores a finished run's result on `sim`: stamped with `inputHash` (the
+// SimStudyInputKey taken when the run was planned) and the subject stamps
+// it was solved against, the study's error cleared, and, for a study on the
+// document's mesh, the document's mesh keys set to the ones it solved on.
+// What an async caller does on the main thread when its worker is done.
+void StoreSimStudyResult(
+    SimDocument& sim, uint64_t studyId, StudyRuntime rt, uint64_t inputHash,
+    std::vector<std::pair<uint64_t, uint64_t>> subjectStamps);
+
+// A topology study off the frame: PrepareTopology on the part study
+// `studyId` plans as (main thread), refused as RunSimStudy refuses it. The
+// caller then runs TopologyOptimize on a worker, MakeTopoRuntime, and
+// StoreSimStudyResult with the SimStudyInputKey it took here. On a refusal
+// the caller writes `*error` onto the study (StudyForRun).
+bool PrepareSimTopology(const SimContext& ctx, uint64_t studyId, TopoInput& out,
+                        std::string* error);
+
+// Meshing a study on its own, the meshes a run of it solves on
+// (docs/simulation/README.md#one-mesh-shared), split at the thread boundary
+// as the part's mesh is (docs/ui/long-operations.md#fem-meshing-and-solving):
+//   PlanSimMesh   (main thread) PlanSimStudy, each body keyed and handed its
+//                 stored mesh;
+//   MeshSimPlanned (any thread) meshes what is not stored: plain fem data
+//                 and the plan's own shape copies, nothing shared;
+//   StoreSimMesh  (main thread) keeps every mesh made under its key and, for
+//                 a study on the document's mesh, sets the document's mesh
+//                 keys.
+// A run after it meshes nothing it made.
+struct SimMeshRun {
+  uint64_t studyId = 0;
+  bool sharesMesh = false; // SimDocument::SharesMesh, at the plan
+  StudyPlan plan;
+  // Per solved body, in the plan's order: the mesh (as the run solves on it)
+  // and what it says about itself (ReportMesh).
+  std::vector<StudyBodyMesh> meshes;
+  std::vector<MeshBodyReport> reports;
+  // What MeshSimPlanned meshed, by key, and every keyed body's key.
+  std::vector<std::pair<uint64_t, std::shared_ptr<const FemMesh>>> madeMeshes;
+  std::vector<uint64_t> meshKeys;
+};
+bool PlanSimMesh(const SimContext& ctx, uint64_t studyId, SimMeshRun& out,
+                 std::string* error);
+bool MeshSimPlanned(SimMeshRun& run, std::string* error);
+// Returns how many meshes it stored.
+int StoreSimMesh(SimDocument& sim, const SimMeshRun& run);
+// The three in one, synchronous. `out` (and `reports`) the per-body meshes;
+// `meshesMade` how many bodies were meshed rather than read from the store.
+// On a refusal or a failed mesh the study's error is written on `sim`.
+// `ctx.sim` is ignored.
+bool MeshSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
+                  std::vector<StudyBodyMesh>* out, std::string* error,
+                  int* meshesMade = nullptr,
+                  std::vector<MeshBodyReport>* reports = nullptr);
+
+// Everything a run of study `studyId` would refuse
+// (docs/simulation/README.md#checking-a-study). On the part route,
+// CheckStudy on the part study it plans as (its siblings the
+// simulation's); beside a neighbour what the assembly check reads -- a study
+// with no loads, a topology study, and, with `backstop`, the assembly
+// planner's refusal (it imprints, so a panel drawing each frame goes
+// without). A refusal of the route itself is a `plan` problem.
+std::vector<StudyProblem>
+CheckSimStudy(const SimContext& ctx, uint64_t studyId,
+              const std::vector<CheckMesh>* meshes = nullptr,
+              bool backstop = true);
 
 } // namespace fem

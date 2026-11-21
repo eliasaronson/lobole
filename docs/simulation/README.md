@@ -2659,10 +2659,34 @@ a one-participant assembly hash the same. It takes that path only when the
 occurrence shows a part, at the part's own frame and in the part's own
 material; otherwise, and beside a neighbour, the assembly planner builds it
 and what that planner does not build is refused, saying why it took that
-path. A study cut from a topology result, a `thermal_load {from_study}` and
-a topology run are refused on a simulation for now: each reads another
-study's result, which the planner is not yet handed. `fem::RunSimStudy`
-plans, solves and stores the answer stamped with its input hash.
+path. `fem::RunSimStudy` plans, solves and stores the answer stamped with
+its input hash (`fem::StoreSimStudyResult`, which an async caller uses too).
+
+- **A study that reads another reads it from the simulation.** A static
+  study cut from a topology result (`shape_from`) and a `thermal_load
+  {from_study}` read the other study through `fem::StudySiblings`
+  (`FemSolver.h`): the part planners (`PlanStudy`, `StudyInputKey`,
+  `RunInputKey`, `PrepareStudy`, `RunStudy`, `CheckStudy`) read the
+  simulation's studies, results and staleness there when they are handed
+  one, and the Document's when not. Each sibling is routed as the study
+  itself is, so the same studies plan, refuse and hash alike on the part
+  and on its simulation. A shape study is stale when the result it was cut
+  from is stale or another (`SimDocument::StudyResultsStale`), takes none
+  of the document's refinements (it meshes nothing), and is restamped after
+  its source (`RestampSimByInputs`). Beside a neighbour neither is built:
+  a topology result is one part's, and an assembly study does not solve
+  heat.
+- **A topology study runs on the part it plans as** (`RunTopology`;
+  `fem::PrepareSimTopology` for a run off the frame), meshing for itself,
+  and is refused beside a neighbour, naming it: it optimises one part.
+- **Meshing alone** is `fem::MeshSimStudy`, or its thread-boundary split
+  `PlanSimMesh` / `MeshSimPlanned` / `StoreSimMesh`: exactly the meshes a
+  run would solve on, each body's mesh and report handed back and every
+  mesh made stored under its key, so the run that follows meshes nothing.
+- **Checking** is `fem::CheckSimStudy`: `CheckStudy` on the routed part
+  study, or, beside a neighbour, the assembly check (no loads, a topology
+  study, the assembly planner's refusal), and a refusal of the route itself
+  as a `plan` problem.
 
 ### One mesh, shared
 

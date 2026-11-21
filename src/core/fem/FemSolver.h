@@ -950,6 +950,21 @@ struct StudyRuntime {
 // Idempotent: a reduced runtime passes through unchanged.
 void KeepWhatIsRead(StudyRuntime& rt);
 
+// The other studies a part study reads -- the topology result its shape is
+// cut from (ShapeSource), the thermal study whose heat loads it
+// (ThermalLoad::Kind::FromStudy) -- and where they are: the simulation that
+// holds them (SimStudy.cpp builds one from a SimDocument). Every entry point
+// below that takes one reads those studies here when it is given, and from
+// the Document when it is null; for the same studies both hash and refuse
+// alike.
+struct StudySiblings {
+  std::function<const Study*(uint64_t id)> find;
+  std::function<const StudyRuntime*(uint64_t id)> results;
+  std::function<bool(uint64_t id)> stale;
+  // Every study, for naming the alternatives in a refusal.
+  std::function<std::vector<const Study*>()> all;
+};
+
 // (Document is forward-declared at global scope by FemStudy.h.)
 
 // Meshes and solves the study across every body it loads: evaluates the
@@ -958,12 +973,13 @@ void KeepWhatIsRead(StudyRuntime& rt);
 // sets study.error and *error and returns false. Fills `rt` (not stamped —
 // the caller stamps solvedAtVersion and stores it in the Document cache).
 bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
-              std::string* error);
+              std::string* error, const StudySiblings* siblings = nullptr);
 // The same under explicit convergence options (the study's `converge` is
 // what the plain form uses). ConvergeOptions is declared below.
 struct ConvergeOptions;
 bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
-              const ConvergeOptions& converge, std::string* error);
+              const ConvergeOptions& converge, std::string* error,
+              const StudySiblings* siblings = nullptr);
 
 // RunStudy, split at the thread boundary (the TopoInput pattern): everything
 // Document-bound — expression evaluation, face resolution, validation, and
@@ -1066,7 +1082,7 @@ struct StudyJobInput {
   double shapeThresholdLoweredFrom = 0.0;
 };
 bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
-                  std::string* error);
+                  std::string* error, const StudySiblings* siblings = nullptr);
 
 // PrepareStudy split one step further, at the meshing
 // (docs/ui/long-operations.md#fem-meshing-and-solving): PlanStudy keeps
@@ -1171,7 +1187,7 @@ struct StudyPlan {
   std::vector<BondPatch> bonds;
 };
 bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
-               std::string* error);
+               std::string* error, const StudySiblings* siblings = nullptr);
 // The ground a flat `face` rests on (docs/simulation/README.md#contact): a
 // rigid box on the face's outer side whose face against the part lies on
 // the face's plane, past the face on every side. Refused for a face that is
@@ -1212,7 +1228,8 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
 // evaluate (the run would refuse; nothing is reused for it). The solver a
 // topology run picks (GPU or CPU) is not an input: both answer the same
 // problem.
-uint64_t StudyInputKey(const Document& doc, const Study& study);
+uint64_t StudyInputKey(const Document& doc, const Study& study,
+                       const StudySiblings* siblings = nullptr);
 // Every stored result of `doc` whose input hash is what a run would hash now
 // is stamped current (Document::MarkStudyResultsCurrent): a reopened project
 // whose parts were regenerated again after loading (the project scope, a
@@ -1259,7 +1276,8 @@ bool SolveConverged(const StudyPlan& plan, StudyJobInput& in, StudyRuntime& rt,
 // assembly through `assemblyKey`), the layer normal mixed in when the loop
 // reads one. A run's override is an input like any other.
 uint64_t RunInputKey(const Document& doc, const Study& study,
-                     const ConvergeOptions& converge);
+                     const ConvergeOptions& converge,
+                     const StudySiblings* siblings = nullptr);
 uint64_t RunInputKey(uint64_t studyKeyWithMode,
                      const ConvergeOptions& converge);
 

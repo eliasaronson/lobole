@@ -30,7 +30,8 @@ TopoDS_Shape FaceAt(const TopoDS_Shape& shape, int index) {
 
 std::vector<StudyProblem> CheckStudy(const Document& doc, const Study& original,
                                      const std::vector<CheckMesh>* meshes,
-                                     bool backstop) {
+                                     bool backstop,
+                                     const StudySiblings* siblings) {
   std::vector<StudyProblem> out;
   Study study = original; // expressions are evaluated into the copy
   const uint64_t sid = study.id;
@@ -297,7 +298,7 @@ std::vector<StudyProblem> CheckStudy(const Document& doc, const Study& original,
     if (study.type == AnalysisType::Topology) {
       // A topology run plans inside its own job; its setup rules above are
       // the ones shared with it.
-    } else if (!PlanStudy(doc, scratch, plan, &err)) {
+    } else if (!PlanStudy(doc, scratch, plan, &err, siblings)) {
       add("plan", err);
     }
   }

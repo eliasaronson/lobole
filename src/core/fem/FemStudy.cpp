@@ -1357,7 +1357,8 @@ namespace {
 // tets at or above the threshold, or all of them when `whole`, less what is
 // not face-connected to a support. Fills bp.premeshed and the plan's report.
 bool PlanShapeMesh(const Document& doc, const Study& study, int bodyIndex,
-                   StudyBodyPlan& bp, StudyPlan& out, std::string* error) {
+                   StudyBodyPlan& bp, StudyPlan& out, std::string* error,
+                   const StudySiblings* siblings) {
   auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -1366,15 +1367,22 @@ bool PlanShapeMesh(const Document& doc, const Study& study, int bodyIndex,
   const ShapeSource& src = study.shapeFrom;
   if (study.type != AnalysisType::Static)
     return fail("only a static study takes its shape from a topology result");
-  const Study* topo = doc.FindStudy(src.study);
+  // The topology study and its result: the simulation's when it hands
+  // them over (StudySiblings), else the part's.
+  const Study* topo =
+      siblings ? (siblings->find ? siblings->find(src.study) : nullptr)
+               : doc.FindStudy(src.study);
   if (topo == nullptr || topo->type != AnalysisType::Topology)
     return fail("shape_from names study " + std::to_string(src.study) +
                 ", which is not a topology study of this part");
-  const StudyRuntime* rt = doc.StudyResults(src.study);
+  const StudyRuntime* rt =
+      siblings ? (siblings->results ? siblings->results(src.study) : nullptr)
+               : doc.StudyResults(src.study);
   if (rt == nullptr || rt->bodies.empty())
     return fail("topology study '" + topo->name +
                 "' has no result to take a shape from: run it first");
-  if (doc.StudyResultsStale(src.study))
+  if (siblings ? (!siblings->stale || siblings->stale(src.study))
+               : doc.StudyResultsStale(src.study))
     return fail("topology study '" + topo->name +
                 "' is stale: the part changed after it ran, so its shape is "
                 "not this part's -- run it again first");
@@ -1531,7 +1539,7 @@ bool PlanShapeMesh(const Document& doc, const Study& study, int bodyIndex,
 } // namespace
 
 bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
-               std::string* error) {
+               std::string* error, const StudySiblings* siblings) {
   out = StudyPlan{};
   study.error.clear();
   auto fail = [&](const std::string& m) {
@@ -1614,12 +1622,23 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   const bool thermalStudy = study.type == AnalysisType::Thermal;
   std::map<int, std::vector<std::pair<int, Load>>> heatOf;
   if (study.thermalLoad.kind == ThermalLoad::Kind::FromStudy) {
-    const Study* src = doc.FindStudy(study.thermalLoad.fromStudy);
+    const uint64_t from = study.thermalLoad.fromStudy;
+    const Study* src = siblings
+                           ? (siblings->find ? siblings->find(from) : nullptr)
+                           : doc.FindStudy(from);
     if (!src || src->type != AnalysisType::Thermal) {
       std::string names;
-      for (const Study& st : doc.GetStudies())
+      const auto name = [&](const Study& st) {
         if (st.type == AnalysisType::Thermal)
           names += (names.empty() ? "" : ", ") + std::to_string(st.id);
+      };
+      if (siblings == nullptr)
+        for (const Study& st : doc.GetStudies())
+          name(st);
+      else if (siblings->all)
+        for (const Study* st : siblings->all())
+          if (st != nullptr)
+            name(*st);
       return fail(
           "thermal_load from_study " +
           std::to_string(study.thermalLoad.fromStudy) +
@@ -1837,7 +1856,7 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
       // A static study of a topology result: its mesh is cut from the
       // result, nothing is meshed
       // (docs/topopt/README.md#a-static-study-of-the-optimised-shape).
-      if (!PlanShapeMesh(doc, study, bodyIndex, bp, out, &err))
+      if (!PlanShapeMesh(doc, study, bodyIndex, bp, out, &err, siblings))
         return fail(err);
     } else {
       bp.shape = BRepBuilderAPI_Copy(body.shape.GetShape()).Shape();
@@ -2598,10 +2617,10 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
 }
 
 bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
-                  std::string* error) {
+                  std::string* error, const StudySiblings* siblings) {
   out = StudyJobInput{};
   StudyPlan plan;
-  if (!PlanStudy(doc, study, plan, error))
+  if (!PlanStudy(doc, study, plan, error, siblings))
     return false;
   std::string err;
   if (!MeshPlannedStudy(plan, out, &err)) {
@@ -3816,16 +3835,17 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
 }
 
 bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
-              std::string* error) {
+              std::string* error, const StudySiblings* siblings) {
   ConvergeOptions converge;
   converge.mode = study.converge;
-  return RunStudy(doc, study, rt, converge, error);
+  return RunStudy(doc, study, rt, converge, error, siblings);
 }
 
 bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
-              const ConvergeOptions& converge, std::string* error) {
+              const ConvergeOptions& converge, std::string* error,
+              const StudySiblings* siblings) {
   StudyPlan plan;
-  if (!PlanStudy(doc, study, plan, error))
+  if (!PlanStudy(doc, study, plan, error, siblings))
     return false;
   StudyJobInput input;
   std::string err;

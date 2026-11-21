@@ -71,7 +71,8 @@ void HashThermal(inputhash::Hasher& h, const Study& study,
 
 } // namespace
 
-uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
+uint64_t StudyInputKey(const Document& doc, const Study& studyIn,
+                       const StudySiblings* siblings) {
   Study study = studyIn;
   std::string err;
   if (!EvaluateStudyExprs(study, doc.Symbols(), &err))
@@ -97,7 +98,10 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
   // A static study under a thermal study's temperature reads that study's
   // definition -- never its result, which it re-solves on its own mesh.
   if (study.thermalLoad.kind == ThermalLoad::Kind::FromStudy) {
-    const Study* src = doc.FindStudy(study.thermalLoad.fromStudy);
+    const uint64_t from = study.thermalLoad.fromStudy;
+    const Study* src = siblings
+                           ? (siblings->find ? siblings->find(from) : nullptr)
+                           : doc.FindStudy(from);
     if (src == nullptr) {
       h.U64(0);
     } else {
@@ -110,7 +114,10 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
   // A static study of a topology result reads that result: its density is
   // an input (docs/topopt/README.md#a-static-study-of-the-optimised-shape).
   if (study.shapeFrom.study != 0) {
-    const StudyRuntime* src = doc.StudyResults(study.shapeFrom.study);
+    const uint64_t from = study.shapeFrom.study;
+    const StudyRuntime* src =
+        siblings ? (siblings->results ? siblings->results(from) : nullptr)
+                 : doc.StudyResults(from);
     h.U64(src != nullptr ? src->densityDigest : 0);
   }
   return h.Digest();
@@ -130,10 +137,11 @@ uint64_t RunInputKey(uint64_t studyKeyWithMode,
 }
 
 uint64_t RunInputKey(const Document& doc, const Study& study,
-                     const ConvergeOptions& converge) {
+                     const ConvergeOptions& converge,
+                     const StudySiblings* siblings) {
   Study withMode = study;
   withMode.converge = converge.mode;
-  return RunInputKey(StudyInputKey(doc, withMode), converge);
+  return RunInputKey(StudyInputKey(doc, withMode, siblings), converge);
 }
 
 void RestampByInputs(Document& doc) {

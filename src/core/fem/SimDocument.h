@@ -122,8 +122,9 @@ public:
   bool ReplaceStudy(Study study);
 
   // The study as it is planned: with the document's mesh size where it sets
-  // none, the document's refinements before its own, and the document's
-  // roles. What the planner, the input hash and the mesh read.
+  // none, the document's refinements before its own (none on a study of a
+  // topology result, which meshes nothing), and the document's roles. What
+  // the planner, the input hash and the mesh read.
   Study Effective(const Study& study) const;
   // Whether a study meshes on the document's mesh (no size or refinement of
   // its own).

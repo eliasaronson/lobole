@@ -434,7 +434,8 @@ TEST_CASE("A simulation refuses what its planner does not build yet",
     CHECK_FALSE(fem::PlanSimStudy(ctx, id, plan, &err));
     CHECK_THAT(err, ContainsSubstring("part 'Bar' is missing"));
   }
-  SECTION("a study of a topology result") {
+  SECTION("a study of a topology result the simulation does not hold, as "
+          "the part refuses it") {
     Bar bar;
     fem::SimDocument sim = PartSim();
     fem::Study s = bar.Bend();
@@ -443,18 +444,70 @@ TEST_CASE("A simulation refuses what its planner does not build yet",
     fem::SimContext ctx = PartContext(bar);
     ctx.sim = &sim;
     CHECK_FALSE(fem::PlanSimStudy(ctx, id, plan, &err));
-    CHECK_THAT(err, ContainsSubstring("topology result"));
+    std::string onPart;
+    fem::StudyPlan partPlan;
+    fem::Study copy = sim.Effective(*sim.FindStudy(id));
+    CHECK_FALSE(fem::PlanStudy(bar.doc, copy, partPlan, &onPart));
+    CHECK(err == onPart);
+    CHECK_THAT(err, ContainsSubstring("not a topology study"));
   }
-  SECTION("a topology run") {
+  SECTION("a thermal load from a study that is not thermal, naming the "
+          "thermal ones") {
     Bar bar;
     fem::SimDocument sim = PartSim();
+    fem::Study heat = bar.Bend();
+    heat.type = fem::AnalysisType::Thermal;
+    heat.loads.clear();
+    const uint64_t heatId = AddStudy(sim, heat);
+    const uint64_t bendId = AddStudy(sim, bar.Bend());
     fem::Study s = bar.Bend();
-    s.type = fem::AnalysisType::Topology;
+    s.thermalLoad.kind = fem::ThermalLoad::Kind::FromStudy;
+    s.thermalLoad.fromStudy = bendId;
     const uint64_t id = AddStudy(sim, s);
+    fem::SimContext ctx = PartContext(bar);
+    ctx.sim = &sim;
+    CHECK_FALSE(fem::PlanSimStudy(ctx, id, plan, &err));
+    CHECK_THAT(err, ContainsSubstring("is a static study, not a thermal one"));
+    CHECK_THAT(err,
+               ContainsSubstring("thermal studies: " + std::to_string(heatId)));
+  }
+  SECTION("beside a neighbour: a topology run, a study of a topology result, "
+          "and a thermal load from a study") {
+    Blocks world;
+    fem::SimDocument sim = world.Sim();
+    fem::Study topo = world.Pressed();
+    topo.type = fem::AnalysisType::Topology;
+    const uint64_t topoId = AddStudy(sim, topo);
     fem::StudyRuntime rt;
-    CHECK_FALSE(fem::RunSimStudy(sim, PartContext(bar), id, rt, &err));
-    CHECK_THAT(err, ContainsSubstring("RunTopology"));
-    CHECK(sim.FindStudy(id)->error == err);
+    CHECK_FALSE(fem::RunSimStudy(sim, world.Context(), topoId, rt, &err));
+    CHECK_THAT(err, ContainsSubstring("a topology study optimises one part"));
+    CHECK_THAT(err, ContainsSubstring("1 rigid, bonded or contact neighbour"));
+    CHECK(sim.FindStudy(topoId)->error == err);
+    fem::SimContext ctx = world.Context();
+    ctx.sim = &sim;
+    fem::TopoInput input;
+    std::string prepErr;
+    CHECK_FALSE(fem::PrepareSimTopology(ctx, topoId, input, &prepErr));
+    CHECK(prepErr == err);
+    const auto checked = fem::CheckSimStudy(ctx, topoId);
+    REQUIRE(checked.size() == 1);
+    CHECK(checked[0].code == "plan");
+    CHECK(checked[0].message == err);
+
+    fem::Study shape = world.Pressed();
+    shape.shapeFrom.study = topoId;
+    const uint64_t shapeId = AddStudy(sim, shape);
+    CHECK_FALSE(fem::PlanSimStudy(ctx, shapeId, plan, &err));
+    CHECK_THAT(err, ContainsSubstring("a study of a topology result is a "
+                                      "part study's"));
+    CHECK(fem::SimStudyInputKey(ctx, shapeId) == 0);
+
+    fem::Study heated = world.Pressed();
+    heated.thermalLoad.kind = fem::ThermalLoad::Kind::FromStudy;
+    heated.thermalLoad.fromStudy = topoId;
+    const uint64_t heatedId = AddStudy(sim, heated);
+    CHECK_FALSE(fem::PlanSimStudy(ctx, heatedId, plan, &err));
+    CHECK_THAT(err, ContainsSubstring("an assembly study does not solve heat"));
   }
   SECTION("beside a rigid neighbour: a frame support, and a load on part of "
           "a face") {
@@ -480,6 +533,41 @@ TEST_CASE("A simulation refuses what its planner does not build yet",
     CHECK_FALSE(fem::PlanSimStudy(ctx, id2, plan, &err));
     CHECK_THAT(err, ContainsSubstring("part of a face"));
   }
+}
+
+TEST_CASE("A simulation's part study checks as the part's study does",
+          "[fem][simdoc]") {
+  Bar bar;
+  fem::SimDocument sim = PartSim();
+  fem::SimContext ctx = PartContext(bar);
+  ctx.sim = &sim;
+  const auto same = [&](uint64_t id) {
+    const fem::Study today = sim.Effective(*sim.FindStudy(id));
+    const auto expected = fem::CheckStudy(bar.doc, today);
+    const auto got = fem::CheckSimStudy(ctx, id);
+    REQUIRE(got.size() == expected.size());
+    for (size_t i = 0; i < got.size(); ++i) {
+      CHECK(got[i].code == expected[i].code);
+      CHECK(got[i].message == expected[i].message);
+      CHECK(got[i].loadId == expected[i].loadId);
+      CHECK(got[i].fixMethod == expected[i].fixMethod);
+    }
+    return got;
+  };
+  CHECK(same(AddStudy(sim, bar.Bend())).empty());
+  fem::Study unheld = bar.Bend();
+  unheld.loads.erase(unheld.loads.begin());
+  CHECK_FALSE(same(AddStudy(sim, unheld)).empty());
+  fem::Study cut = bar.Bend();
+  cut.shapeFrom.study = 77;
+  CHECK_FALSE(same(AddStudy(sim, cut)).empty());
+
+  // A load naming an occurrence on a part subject: the route's refusal.
+  fem::Study wrong = bar.Bend(5);
+  const auto problems = fem::CheckSimStudy(ctx, AddStudy(sim, wrong));
+  REQUIRE(problems.size() == 1);
+  CHECK(problems[0].code == "plan");
+  CHECK_THAT(problems[0].message, ContainsSubstring("names an occurrence"));
 }
 
 #if defined(HAVE_NETGEN) && defined(HAVE_FEM_SOLVER)
@@ -618,6 +706,199 @@ TEST_CASE("An assembly study through the simulation answers as today's "
   REQUIRE(fem::RunSimStudy(sim, world.Context(), id, again, &err, &made));
   CHECK(made == 0);
   CheckSameAnswer(again, expected);
+}
+
+TEST_CASE("A simulation meshes a study as its run does, and the run then "
+          "meshes nothing",
+          "[fem][simdoc]") {
+  Bar bar;
+  fem::SimDocument sim = PartSim();
+  const uint64_t id = AddStudy(sim, bar.Bend());
+  std::vector<fem::StudyBodyMesh> meshes;
+  std::vector<fem::MeshBodyReport> reports;
+  std::string err;
+  int made = -1;
+  REQUIRE(fem::MeshSimStudy(sim, PartContext(bar), id, &meshes, &err, &made,
+                            &reports));
+  INFO(err);
+  CHECK(made == 1);
+  REQUIRE(meshes.size() == 1);
+  CHECK(reports.size() == 1);
+  CHECK(meshes[0].bodyName == bar.doc.GetBodies()[0].name);
+  CHECK(meshes[0].mesh.tets.size() > 0);
+  CHECK(sim.Meshes().size() == 1);
+  REQUIRE(sim.DocumentMeshKeys().size() == 1);
+  CHECK(sim.FindMesh(sim.DocumentMeshKeys()[0]) != nullptr);
+
+  // Meshing again reads the store.
+  REQUIRE(fem::MeshSimStudy(sim, PartContext(bar), id, nullptr, &err, &made));
+  CHECK(made == 0);
+
+  fem::StudyRuntime rt;
+  REQUIRE(fem::RunSimStudy(sim, PartContext(bar), id, rt, &err, &made));
+  CHECK(made == 0);
+  REQUIRE(rt.bodies.size() == 1);
+  CHECK(rt.bodies[0].mesh.stats.tetCount == meshes[0].mesh.tets.size());
+  CHECK(sim.Meshes().size() == 1);
+}
+
+TEST_CASE("A simulation's thermal load from a thermal study solves and "
+          "hashes as on the part",
+          "[fem][simdoc][thermal]") {
+  Bar bar;
+  fem::Study& heat = bar.doc.AddStudy("Heat");
+  heat.type = fem::AnalysisType::Thermal;
+  heat.meshSize = 4.0;
+  fem::Load hot;
+  hot.id = bar.doc.AllocateId();
+  hot.type = fem::LoadType::Temperature;
+  hot.face = bar.Face(0);
+  hot.temperatureC = 100.0;
+  fem::Load cold = hot;
+  cold.id = bar.doc.AllocateId();
+  cold.face = bar.Face(1);
+  cold.temperatureC = 20.0;
+  heat.loads = {hot, cold};
+  const uint64_t heatId = heat.id;
+  fem::Study& st = bar.doc.AddStudy("Clamped");
+  {
+    fem::Study setup = bar.Bend();
+    setup.id = st.id;
+    setup.name = st.name;
+    setup.loads.pop_back(); // clamped at one end, heated
+    setup.meshSize = 4.0;
+    setup.thermalLoad.kind = fem::ThermalLoad::Kind::FromStudy;
+    setup.thermalLoad.fromStudy = heatId;
+    setup.thermalLoad.hasStressFree = true;
+    setup.thermalLoad.stressFreeC = 20.0;
+    st = setup;
+  }
+  const uint64_t staticId = st.id;
+  fem::StudyRuntime expected;
+  std::string err;
+  REQUIRE(
+      fem::RunStudy(bar.doc, *bar.doc.StudyForRun(staticId), expected, &err));
+  INFO(err);
+  REQUIRE(expected.bodies.size() == 1);
+  CHECK(expected.bodies[0].thermal.load);
+
+  // The same two studies, the same ids, on a simulation of the part.
+  fem::SimDocument sim = PartSim();
+  for (const fem::Study& s : bar.doc.GetStudies())
+    sim.RestoreStudy(s);
+  fem::SimContext ctx = PartContext(bar);
+  ctx.sim = &sim;
+  const uint64_t key = fem::SimStudyInputKey(ctx, staticId);
+  CHECK(key != 0);
+  CHECK(key == fem::StudyInputKey(bar.doc, *bar.doc.FindStudy(staticId)));
+  fem::StudyRuntime rt;
+  REQUIRE(fem::RunSimStudy(sim, PartContext(bar), staticId, rt, &err));
+  CheckSameAnswer(rt, expected);
+  CHECK(rt.bodies[0].thermal.maxC == expected.bodies[0].thermal.maxC);
+  const auto stamps = [](uint64_t) { return uint64_t{7}; };
+  CHECK_FALSE(sim.StudyResultsStale(staticId, stamps));
+
+  // An edit to the thermal study moves the static one's hash and stamp.
+  fem::Study hotter = *sim.FindStudy(heatId);
+  hotter.loads[0].temperatureC = 120.0;
+  REQUIRE(sim.ReplaceStudy(hotter));
+  CHECK(sim.StudyResultsStale(staticId, stamps));
+  CHECK(fem::SimStudyInputKey(ctx, staticId) != key);
+}
+
+TEST_CASE("A simulation optimises its part, and a static study of the shape "
+          "solves and hashes as on the part",
+          "[fem][simdoc][topopt]") {
+  Bar bar;
+  fem::Study& topo = bar.doc.AddStudy("Generative");
+  {
+    fem::Study setup = bar.Bend();
+    setup.id = topo.id;
+    setup.name = topo.name;
+    setup.type = fem::AnalysisType::Topology;
+    setup.meshSize = 4.0;
+    setup.volumeFraction = 0.5;
+    setup.filterRadius = 6.0;
+    setup.maxIterations = 10;
+    topo = setup;
+  }
+  const uint64_t topoId = topo.id;
+  fem::Study& shape = bar.doc.AddStudy("Shape");
+  {
+    fem::Study setup = bar.Bend();
+    setup.id = shape.id;
+    setup.name = shape.name;
+    setup.shapeFrom = {topoId, 0.0, false};
+    setup.meshSize = 4.0; // the simulation's, as its Effective form reads
+    shape = setup;
+  }
+  const uint64_t shapeId = shape.id;
+
+  fem::SimDocument sim = PartSim();
+  for (const fem::Study& s : bar.doc.GetStudies())
+    sim.RestoreStudy(s);
+  fem::SimContext ctx = PartContext(bar);
+  ctx.sim = &sim;
+  const auto stamps = [](uint64_t) { return uint64_t{7}; };
+
+  // Before the topology study has run, the shape study is refused as the
+  // part refuses it.
+  {
+    fem::StudyPlan plan;
+    std::string err;
+    CHECK_FALSE(fem::PlanSimStudy(ctx, shapeId, plan, &err));
+    CHECK_THAT(err, ContainsSubstring("has no result to take a shape from"));
+  }
+
+  std::string err;
+  fem::StudyRuntime topoRt;
+  int made = -1;
+  REQUIRE(fem::RunSimStudy(sim, PartContext(bar), topoId, topoRt, &err, &made));
+  INFO(err);
+  CHECK(made == 0);
+  CHECK(topoRt.topology);
+  REQUIRE(sim.StudyResults(topoId) != nullptr);
+  CHECK(sim.StudyResults(topoId)->inputHash ==
+        fem::StudyInputKey(bar.doc, *bar.doc.FindStudy(topoId)));
+  CHECK(sim.FindStudy(topoId)->error.empty());
+  CHECK_FALSE(sim.StudyResultsStale(topoId, stamps));
+
+  // The async path's preparation is the run's.
+  {
+    fem::TopoInput input;
+    REQUIRE(fem::PrepareSimTopology(ctx, topoId, input, &err));
+    CHECK(input.mesh.tets.size() == topoRt.bodies[0].mesh.tets.size());
+  }
+
+  // The part holds the same topology result: the shape study then plans,
+  // hashes and solves alike on both.
+  {
+    fem::StudyRuntime copy = *sim.StudyResults(topoId);
+    copy.solvedAtVersion = bar.doc.Version();
+    bar.doc.StoreStudyResults(topoId, std::move(copy));
+  }
+  REQUIRE_FALSE(bar.doc.StudyResultsStale(topoId));
+  const uint64_t key = fem::SimStudyInputKey(ctx, shapeId);
+  CHECK(key != 0);
+  CHECK(key == fem::StudyInputKey(bar.doc, *bar.doc.FindStudy(shapeId)));
+  fem::StudyRuntime expected;
+  REQUIRE(
+      fem::RunStudy(bar.doc, *bar.doc.StudyForRun(shapeId), expected, &err));
+  fem::StudyRuntime rt;
+  REQUIRE(fem::RunSimStudy(sim, PartContext(bar), shapeId, rt, &err, &made));
+  CHECK(made == 0); // the shape is cut from the result, not meshed
+  CheckSameAnswer(rt, expected);
+  CHECK(rt.shapeVolume == expected.shapeVolume);
+  CHECK_FALSE(sim.StudyResultsStale(shapeId, stamps));
+
+  // A new topology result leaves the shape study stale, and moves its hash.
+  fem::StudyRuntime other = *sim.StudyResults(topoId);
+  other.bodies[0].density[0] = 0.5 * (other.bodies[0].density[0] + 0.01);
+  other.densityDigest =
+      fem::DensityDigest(other.bodies[0].mesh, other.bodies[0].density);
+  sim.StoreStudyResults(topoId, std::move(other));
+  CHECK(sim.StudyResultsStale(shapeId, stamps));
+  CHECK(fem::SimStudyInputKey(ctx, shapeId) != key);
 }
 
 #endif // HAVE_NETGEN && HAVE_FEM_SOLVER

@@ -20,6 +20,8 @@ class Document;
 
 namespace fem {
 
+struct StudySiblings; // FemSolver.h
+
 struct StudyProblem {
   // expression | load_cases | setup | no_loads | anchor | refinement_anchor |
   // material | no_support | load_geometry | region | stale_mesh | solver |
@@ -50,10 +52,11 @@ struct CheckMesh {
 // With `backstop`, when nothing itemised is wrong the planner itself is run
 // on a copy, so an empty answer means PlanStudy accepts the study; it
 // copies every body's shape, which a panel drawing the list each time the
-// study moves does without.
+// study moves does without. `siblings`: where the studies it reads are
+// (StudySiblings; null = the document).
 std::vector<StudyProblem>
 CheckStudy(const Document& doc, const Study& study,
-           const std::vector<CheckMesh>* meshes = nullptr,
-           bool backstop = true);
+           const std::vector<CheckMesh>* meshes = nullptr, bool backstop = true,
+           const StudySiblings* siblings = nullptr);
 
 } // namespace fem

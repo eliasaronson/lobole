@@ -151,7 +151,9 @@ Study SimDocument::Effective(const Study& study) const {
   Study out = study;
   if (out.meshSize.value == 0.0 && out.meshSize.expr.empty())
     out.meshSize = m_mesh.size;
-  if (!m_mesh.refinements.empty()) {
+  // A study of a topology result meshes nothing (its mesh is cut from the
+  // result), so the document's refinements are not its.
+  if (!m_mesh.refinements.empty() && out.shapeFrom.study == 0) {
     std::vector<Refinement> all = m_mesh.refinements;
     all.insert(all.end(), out.refinements.begin(), out.refinements.end());
     out.refinements = std::move(all);
