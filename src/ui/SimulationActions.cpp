@@ -22,7 +22,9 @@
 #include "ui/AppActionsInternal.h"
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h"
+#include "ui/SimRunActions.h"
 #include "ui/SimulationView.h"
 #include "ui/SimulationViewInternal.h"
 #ifdef HAVE_FEM_GPU
@@ -111,7 +113,7 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error,
 // CPU, =1 admits a software device, and the user's preferred device is
 // asked for. The device is made on the solving thread, and only for a
 // solve that wants one. A synchronous run once went straight to the CPU.
-static void OfferGpuSolver(const AppState& state, fem::SolveOptions& o) {
+void OfferGpuSolver(const AppState& state, fem::SolveOptions& o) {
 #ifdef HAVE_FEM_GPU
   const char* pref = std::getenv("LOBOLE_TOPO_GPU");
   if (!pref || std::string(pref) != "0") {
@@ -302,8 +304,6 @@ void RememberStudyResult(AppState& state, const fem::StudyRuntime& rt) {
                                 std::make_shared<const fem::StudyRuntime>(rt));
 }
 
-namespace {
-
 // What a study job's worker solves with: an iterative solve stops when the
 // job is cancelled (a factorisation still cannot), the job learns which
 // solver it is waiting on and how many iterations it has made, and the GPU
@@ -325,7 +325,7 @@ fem::SolveOptions JobSolveOptions(const AppState& state, BackgroundJob* raw,
 // study_status and the job's bar.
 std::shared_ptr<const fem::CalculixRun>
 WithEstimateTo(const std::shared_ptr<const fem::CalculixRun>& run,
-               StudyJob* job, BackgroundJob* raw = nullptr) {
+               StudyJob* job, BackgroundJob* raw) {
   if (!run)
     return nullptr;
   auto told = std::make_shared<fem::CalculixRun>(*run);
@@ -343,6 +343,8 @@ WithEstimateTo(const std::shared_ptr<const fem::CalculixRun>& run,
 std::string SolverOf(const fem::StudyRuntime& rt, fem::AnalysisType type) {
   return rt.solver.empty() ? std::string(fem::CpuSolverName(type)) : rt.solver;
 }
+
+namespace {
 
 // The part slot `doc` belongs to: the active one (its slot holds no
 // document while it is active) or a stashed one. 0 when `doc` is not a part
@@ -397,6 +399,87 @@ bool TopologyGpuBuiltIn() {
 #endif
 }
 
+void PickTopologySolver(const AppState& state, TopoJob& job) {
+  // Pick the linear solver here on the main thread, so study_status can
+  // report it from the first poll: the GPU matrix-free CG when a usable
+  // hardware device exists, else the built-in Eigen CG-IC. The worker is the
+  // only thread that touches it after launch. LOBOLE_TOPO_GPU=0 forces CPU;
+  // =1 also admits a software (llvmpipe) device — for exercising the GPU path.
+  job.solverName = fem::CpuSolverName(fem::AnalysisType::Topology);
+#ifdef HAVE_FEM_GPU
+  {
+    const char* pref = std::getenv("LOBOLE_TOPO_GPU");
+    if (!pref || std::string(pref) != "0") {
+      std::string gerr;
+      auto gs = gpu::TopoGpuSolver::Create(pref && std::string(pref) == "1",
+                                           &gerr, state.settings.gpuDevice);
+      if (gs) {
+        LOG_INFO("topology: GPU solver on {}", gs->DeviceName());
+        job.solverName = "gpu: " + gs->DeviceName();
+        job.solver = std::move(gs);
+      } else {
+        LOG_INFO("topology: CPU solver ({})", gerr);
+        job.solverName = "cpu (" + gerr + ")";
+      }
+    }
+  }
+#else
+  (void)state;
+#endif
+}
+
+void LaunchTopologyWorker(BackgroundJob& bg,
+                          const std::shared_ptr<TopoJob>& job) {
+  BackgroundJob* raw = &bg;
+  TopoJob* j = job.get(); // the shared_ptr below outlives the thread
+  // Its device waits are cut into slices that ask this: a GPU that never
+  // answers still lets the run be cancelled.
+  if (j->solver)
+    j->solver->SetCancel([raw] { return raw->cancel.load(); });
+  bg.thread = std::thread([j, job, raw]() {
+    std::string err;
+    auto res = fem::TopologyOptimize(
+        j->input.mesh, j->input.material, j->input.fixedNodes, j->input.cases,
+        j->input.params, &err,
+        [j, raw](const fem::TopoProgress& p) {
+          j->iteration.store(p.iteration, std::memory_order_relaxed);
+          j->compliance.store(p.compliance, std::memory_order_relaxed);
+          j->maxChange.store(p.maxChange, std::memory_order_relaxed);
+          j->volumeFraction.store(p.volumeFraction, std::memory_order_relaxed);
+          if (!p.solverFallback.empty() &&
+              !j->fellBack.load(std::memory_order_relaxed)) {
+            j->fallbackReason = p.solverFallback;
+            j->fellBack.store(true, std::memory_order_release);
+          }
+          if (j->maxIterations > 0)
+            raw->fraction.store(static_cast<double>(p.iteration) /
+                                j->maxIterations);
+          return !raw->cancel.load(std::memory_order_relaxed);
+        },
+        j->input.keepNodes, j->solver.get());
+    if (res)
+      j->result = std::move(*res);
+    else
+      j->error = err;
+    raw->error = j->error;
+    raw->done.store(true); // last
+  });
+}
+
+fem::StudyRuntime TopologyRuntimeOf(TopoJob& j) {
+  fem::StudyRuntime rt = fem::MakeTopoRuntime(j.input, *j.result);
+  // Name the solver that actually did the work: TopologyOptimize drops an
+  // external solver that fails mid-run (on a device that was not lost) and
+  // finishes on the CPU, and a result labelled with the GPU it started on
+  // would be a lie.
+  rt.solver = j.result->solverFallback.empty()
+                  ? j.solverName
+                  : "cpu (" + j.solverName +
+                        " failed: " + j.result->solverFallback + ")";
+  rt.solveSeconds = Elapsed(j.started);
+  return rt;
+}
+
 bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
                       std::string* error, JobStart* jobStart) {
   fem::Study* s = doc.StudyForRun(studyId);
@@ -430,31 +513,7 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   job->studyId = studyId;
   job->partSlotId = SlotIdOfDoc(state, doc);
   job->maxIterations = job->input.params.maxIterations;
-
-  // Pick the linear solver here on the main thread, so study_status can
-  // report it from the first poll: the GPU matrix-free CG when a usable
-  // hardware device exists, else the built-in Eigen CG-IC. The worker is the
-  // only thread that touches it after launch. LOBOLE_TOPO_GPU=0 forces CPU;
-  // =1 also admits a software (llvmpipe) device — for exercising the GPU path.
-  job->solverName = fem::CpuSolverName(fem::AnalysisType::Topology);
-#ifdef HAVE_FEM_GPU
-  {
-    const char* pref = std::getenv("LOBOLE_TOPO_GPU");
-    if (!pref || std::string(pref) != "0") {
-      std::string gerr;
-      auto gs = gpu::TopoGpuSolver::Create(pref && std::string(pref) == "1",
-                                           &gerr, state.settings.gpuDevice);
-      if (gs) {
-        LOG_INFO("topology: GPU solver on {}", gs->DeviceName());
-        job->solverName = "gpu: " + gs->DeviceName();
-        job->solver = std::move(gs);
-      } else {
-        LOG_INFO("topology: CPU solver ({})", gerr);
-        job->solverName = "cpu (" + gerr + ")";
-      }
-    }
-  }
-#endif
+  PickTopologySolver(state, *job);
   job->started = std::chrono::steady_clock::now();
 
   auto bg = std::make_unique<BackgroundJob>();
@@ -463,57 +522,15 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   bg->cancellable = true; // between iterations, keeping the best so far
   bg->studyId = studyId;
   bg->owner = jobStart ? jobStart->owner : 0;
-  BackgroundJob* raw = bg.get();
-  TopoJob* j = job.get(); // the shared_ptr below outlives the thread
-  // Its device waits are cut into slices that ask this: a GPU that never
-  // answers still lets the run be cancelled.
-  if (j->solver)
-    j->solver->SetCancel([raw] { return raw->cancel.load(); });
-  bg->thread = std::thread([j, job, raw]() {
-    std::string err;
-    auto res = fem::TopologyOptimize(
-        j->input.mesh, j->input.material, j->input.fixedNodes, j->input.cases,
-        j->input.params, &err,
-        [j, raw](const fem::TopoProgress& p) {
-          j->iteration.store(p.iteration, std::memory_order_relaxed);
-          j->compliance.store(p.compliance, std::memory_order_relaxed);
-          j->maxChange.store(p.maxChange, std::memory_order_relaxed);
-          j->volumeFraction.store(p.volumeFraction, std::memory_order_relaxed);
-          if (!p.solverFallback.empty() &&
-              !j->fellBack.load(std::memory_order_relaxed)) {
-            j->fallbackReason = p.solverFallback;
-            j->fellBack.store(true, std::memory_order_release);
-          }
-          if (j->maxIterations > 0)
-            raw->fraction.store(static_cast<double>(p.iteration) /
-                                j->maxIterations);
-          return !raw->cancel.load(std::memory_order_relaxed);
-        },
-        j->input.keepNodes, j->solver.get());
-    if (res)
-      j->result = std::move(*res);
-    else
-      j->error = err;
-    raw->error = j->error;
-    raw->done.store(true); // last
-  });
+  LaunchTopologyWorker(*bg, job);
   bg->finish = [job, inputHash](AppState& s) {
     TopoJob& j = *job;
     if (Document* target =
             JobDocument(s, j.partSlotId, "topology optimization")) {
       if (j.result) {
-        fem::StudyRuntime rt = fem::MakeTopoRuntime(j.input, *j.result);
+        fem::StudyRuntime rt = TopologyRuntimeOf(j);
         rt.solvedAtVersion = target->Version();
         rt.inputHash = inputHash;
-        // Name the solver that actually did the work: TopologyOptimize drops
-        // an external solver that fails mid-run (on a device that was not
-        // lost) and finishes on the CPU, and
-        // a result labelled with the GPU it started on would be a lie.
-        rt.solver = j.result->solverFallback.empty()
-                        ? j.solverName
-                        : "cpu (" + j.solverName +
-                              " failed: " + j.result->solverFallback + ")";
-        rt.solveSeconds = Elapsed(j.started);
         RememberStudyResult(s, rt);
         target->StoreStudyResults(j.studyId, std::move(rt));
       } else if (fem::Study* st = target->StudyForRun(j.studyId)) {
@@ -1049,16 +1066,35 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
 }
 
 StudyHost StudyHostOf(AppState& state) {
+  if (state.sim) {
+    StudyHost host;
+    host.sim = state.sim.get();
+    // Read on every frame the panel draws: the subject by id, nothing
+    // walked (SimContextFor flattens an assembly).
+    const fem::SimSubject& subject = state.sim->Subject();
+    host.symbols = &state.projectSymbols;
+    if (subject.kind == fem::SubjectKind::Assembly)
+      host.subjectAssembly = AssemblyDocById(state, subject.docId);
+    else if (const Document* part = PartDocById(state, subject.docId))
+      host.symbols = &part->Symbols();
+    return host;
+  }
   const SymbolTable* symbols = state.document   ? &state.document->Symbols()
                                : state.assembly ? &state.projectSymbols
                                                 : nullptr;
-  return StudyHost{state.document.get(), state.assembly.get(), symbols};
+  StudyHost host;
+  host.part = state.document.get();
+  host.asmDoc = state.assembly.get();
+  host.symbols = symbols;
+  return host;
 }
 
 bool StudyStale(AppState& state, uint64_t studyId) {
   const StudyHost host = StudyHostOf(state);
   if (!host)
     return true;
+  if (host.sim)
+    return SimStudyStale(state, *host.sim, studyId);
   return host.part ? host.part->StudyResultsStale(studyId)
                    : AssemblyStudyStale(state, *host.asmDoc, studyId);
 }
@@ -1069,6 +1105,15 @@ void ModifyStudy(AppState& state, uint64_t id, const std::string& desc,
   const fem::Study* cur = host ? host.Find(id) : nullptr;
   if (!cur)
     return;
+  if (host.sim) {
+    // A simulation edits by snapshot (SimUndoGuard): ReplaceStudy moves its
+    // version and the study's revision.
+    fem::Study copy = *cur;
+    mutate(copy);
+    SimUndoGuard guard(state);
+    host.sim->ReplaceStudy(std::move(copy));
+    return;
+  }
   if (host.part) {
     if (!state.commands)
       return;
@@ -1093,6 +1138,10 @@ uint64_t AddStudyOn(AppState& state, const std::string& name) {
   const StudyHost host = StudyHostOf(state);
   if (!host)
     return 0;
+  if (host.sim) {
+    SimUndoGuard guard(state);
+    return host.sim->AddStudy(name).id;
+  }
   if (host.part) {
     if (!state.commands)
       return 0;

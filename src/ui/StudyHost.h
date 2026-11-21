@@ -4,16 +4,19 @@
 #pragma once
 
 // Where the active tab's studies live
-// (docs/simulation/README.md#assembly-studies): on the PART, or on the
-// ASSEMBLY. The record is the same fem::Study; what differs is who owns it, how
-// an edit becomes an undo step (a command on a part, a full-state snapshot on
-// an assembly), and what a result's staleness is measured against. The panel,
-// the glyphs, the legend and the field overlay all read through this so there
-// is one set of drawing code for both tabs.
+// (docs/simulation/README.md#assembly-studies): on the PART, on the
+// ASSEMBLY, or in a SIMULATION document (its tab;
+// docs/simulation/README.md#running-a-simulations-study). The record is the
+// same fem::Study; what differs is who owns it, how an edit becomes an undo
+// step (a command on a part, a full-state snapshot on an assembly), and what a
+// result's staleness is measured against. The panel, the glyphs, the legend and
+// the field overlay all read through this so there is one set of drawing code
+// for both tabs.
 
 #include "core/Document.h"
 #include "core/Occurrence.h"
 #include "core/fem/FemSolver.h"
+#include "core/fem/SimDocument.h"
 
 #include <cstdint>
 #include <functional>
@@ -27,37 +30,56 @@ struct AppState;
 struct StudyHost {
   Document* part = nullptr;
   AssemblyDocument* asmDoc = nullptr;
+  // A simulation tab's document. Its subject is read, never edited, through
+  // the host: `subjectAssembly` names its occurrences.
+  fem::SimDocument* sim = nullptr;
+  const AssemblyDocument* subjectAssembly = nullptr;
   // What a study's expressions read: the part's symbols (which fall back to
-  // the project's), or the project's on an assembly tab.
+  // the project's), or the project's on an assembly tab; on a simulation,
+  // its subject's.
   const SymbolTable* symbols = nullptr;
 
   explicit operator bool() const {
-    return part != nullptr || asmDoc != nullptr;
+    return part != nullptr || asmDoc != nullptr || sim != nullptr;
   }
+  // The studies are an ASSEMBLY's own (not a simulation's of one).
   bool IsAssembly() const { return asmDoc != nullptr; }
+  bool IsSimulation() const { return sim != nullptr; }
   // Read-only: an edit is ModifyStudy, which a part records as a command
   // (and so as a saved change, Document::SaveStamp).
   const std::vector<fem::Study>& Studies() const {
-    return part ? part->GetStudies() : asmDoc->GetStudies();
+    return sim    ? sim->GetStudies()
+           : part ? part->GetStudies()
+                  : asmDoc->GetStudies();
   }
   const fem::Study* Find(uint64_t id) const {
-    return part ? part->FindStudy(id) : asmDoc->FindStudy(id);
+    return sim    ? sim->FindStudy(id)
+           : part ? part->FindStudy(id)
+                  : asmDoc->FindStudy(id);
   }
   // A run's (and a load drag's preview's) write access — Document::StudyForRun.
   fem::Study* FindForRun(uint64_t id) const {
-    return part ? part->StudyForRun(id) : asmDoc->FindStudy(id);
+    return sim    ? sim->StudyForRun(id)
+           : part ? part->StudyForRun(id)
+                  : asmDoc->FindStudy(id);
   }
   const fem::StudyRuntime* Results(uint64_t id) const {
-    return part ? part->StudyResults(id) : asmDoc->StudyResults(id);
+    return sim    ? sim->StudyResults(id)
+           : part ? part->StudyResults(id)
+                  : asmDoc->StudyResults(id);
   }
   uint64_t ResultsEpoch() const {
-    return part ? part->StudyResultsEpoch() : asmDoc->StudyResultsEpoch();
+    return sim    ? sim->StudyResultsEpoch()
+           : part ? part->StudyResultsEpoch()
+                  : asmDoc->StudyResultsEpoch();
   }
   uint64_t AllocateId() const {
-    return part ? part->AllocateId() : asmDoc->AllocateId();
+    return sim    ? sim->AllocateId()
+           : part ? part->AllocateId()
+                  : asmDoc->AllocateId();
   }
   uint64_t Version() const {
-    return part ? part->Version() : asmDoc->Version();
+    return sim ? sim->Version() : part ? part->Version() : asmDoc->Version();
   }
   // `s` with every expression-driven field (a load's magnitude, a mesh
   // size) evaluated against the current variables, for DISPLAY: a study's
@@ -81,12 +103,15 @@ struct StudyHost {
   // The name of an occurrence of the assembly (its id as text when there is
   // no assembly, or no such occurrence).
   std::string OccurrenceName(uint64_t id) const {
-    const Occurrence* occ = asmDoc ? asmDoc->FindById(id) : nullptr;
+    const AssemblyDocument* a = asmDoc ? asmDoc : subjectAssembly;
+    const Occurrence* occ = a ? a->FindById(id) : nullptr;
     return occ ? occ->name : std::to_string(id);
   }
 };
 
 // The active tab's host; false on a drawing or job tab. SimulationActions.cpp.
+// On a simulation tab it is the simulation (`sim`), with neither `part` nor
+// `asmDoc`: what reads a part's or an assembly's own studies checks those.
 StudyHost StudyHostOf(AppState& state);
 // Stale against the part, or against the assembly AND every part it read.
 bool StudyStale(AppState& state, uint64_t studyId);

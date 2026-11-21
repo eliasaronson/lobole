@@ -697,6 +697,7 @@ const std::vector<Body>& SimSubjectBodies(AppState& state) {
   static const std::vector<Body> kNone;
   if (!state.sim) {
     state.simBodies.clear();
+    state.simBodyOccurrences.clear();
     state.simBodiesKey = 0;
     return kNone;
   }
@@ -704,6 +705,7 @@ const std::vector<Body>& SimSubjectBodies(AppState& state) {
   if (key == state.simBodiesKey)
     return state.simBodies;
   state.simBodies.clear();
+  state.simBodyOccurrences.clear();
   state.simBodiesKey = key;
   const fem::SimSubject& subject = state.sim->Subject();
   const std::optional<size_t> at = SlotIndexById(state, subject.docId);
@@ -715,6 +717,7 @@ const std::vector<Body>& SimSubjectBodies(AppState& state) {
     if (const Document* d =
             PartResolverFor(state)(subject.docId, subject.configuration))
       state.simBodies = d->GetBodies();
+    state.simBodyOccurrences.assign(state.simBodies.size(), 0);
     return state.simBodies;
   }
   const AssemblyDocument* asmDoc = SlotAssembly(state, *at);
@@ -733,8 +736,10 @@ const std::vector<Body>& SimSubjectBodies(AppState& state) {
     if (!inst.visible || inst.part == nullptr)
       continue;
     for (const Body& b : inst.part->GetBodies())
-      if (!b.reference)
+      if (!b.reference) {
         state.simBodies.push_back(PlacedBody(b, inst.world));
+        state.simBodyOccurrences.push_back(inst.rootOccurrenceId);
+      }
   }
   return state.simBodies;
 }
@@ -1146,6 +1151,63 @@ SimUndoGuard::~SimUndoGuard() {
   }
   if (moved)
     PushSimUndo(state, *m_before);
+}
+
+namespace {
+int g_openSimSlotGuards = 0;
+
+// The stashed simulation slot `slotId`, or -1 when it is gone, not a
+// simulation, or the tab in front.
+int StashedSimSlot(const AppState& state, uint64_t slotId) {
+  const std::optional<size_t> at = SlotIndexById(state, slotId);
+  if (!at || state.parts[*at].kind != DocKind::Simulation ||
+      static_cast<int>(*at) == state.activePart || !state.parts[*at].sim)
+    return -1;
+  return static_cast<int>(*at);
+}
+} // namespace
+
+SimSlotUndoGuard::SimSlotUndoGuard(AppState& state, uint64_t simSlotId,
+                                   bool compareContent)
+    : m_state(state), m_slotId(simSlotId), m_compareContent(compareContent) {
+  if (g_openSimSlotGuards++ > 0)
+    return; // only the outermost records
+  m_outermost = true;
+  const int i = StashedSimSlot(state, simSlotId);
+  if (i < 0) {
+    const std::optional<size_t> at = SlotIndexById(state, simSlotId);
+    if (at && static_cast<int>(*at) == state.activePart && state.sim)
+      m_active.emplace(state, false, compareContent);
+    return;
+  }
+  const fem::SimDocument& sim = *state.parts[i].sim;
+  m_version = sim.Version();
+  m_before = sim;
+  if (m_compareContent)
+    m_fingerprint = DocumentIO::SimulationFingerprint(sim);
+}
+
+SimSlotUndoGuard::~SimSlotUndoGuard() {
+  g_openSimSlotGuards--;
+  if (!m_outermost || !m_before)
+    return; // m_active, if any, records itself
+  AppState& state = m_state;
+  const int i = StashedSimSlot(state, m_slotId);
+  if (i < 0)
+    return; // gone, or brought forward under the guard: not this copy's
+  PartSlot& slot = state.parts[i];
+  bool moved = slot.sim->Version() != m_version;
+  if (m_compareContent && !moved)
+    moved = DocumentIO::SimulationFingerprint(*slot.sim) != m_fingerprint;
+  if (!moved)
+    return;
+  if (slot.sim->Version() == m_version)
+    slot.sim->BumpVersion(); // an edit to save
+  LOG_INFO("edit: simulation '{}'", slot.name);
+  slot.simHistory.undo.push_back(std::move(*m_before));
+  slot.simHistory.undoStamps.push_back(NextActionStamp());
+  slot.simHistory.redo.clear();
+  slot.simHistory.redoStamps.clear();
 }
 
 uint64_t PartIdByName(const AppState& state, const std::string& name) {

@@ -2726,6 +2726,49 @@ for an edit under it (the version or `simEdits` moved, `MarkSimEdited` for
 an edit through `StudyForRun`), and a restore moves the version past the
 current one, so an undo never reads as saved.
 
+### Running a simulation's study
+
+The app runs a simulation's studies as it runs a part's
+(`src/ui/SimRunActions.{h,cpp}`), **keyed by the simulation tab's slot id**:
+a run started with another tab in front lands in that simulation, and is
+dropped, said in the log, when the tab is gone. **Nothing in the GUI or the
+RPCs calls these yet**; the study panel and `run_study` still run the
+part's and the assembly's own studies.
+
+- `ui::SimContextFor(state, sim)` resolves the subject from the project now:
+  a part subject in the simulation's configuration (0 the live part), or an
+  assembly subject flattened once for the context, each top-level
+  occurrence's bodies placed in it (`placedBodies`) and its part with the
+  occurrence's placement (`partOf`; attachments are already in the poses,
+  explode and motion offsets are display only). Its `subjectStamps` are the
+  subject's and, on an assembly, every sub-assembly's and part's it places
+  (`ui::SimStampOf`: a part's `PartStamp`, an assembly's version), so an
+  edit to any of them reads a result stale (`ui::SimStudyStale`).
+- `RunSimStudyAndCache` solves on the frame with CalculiX where the study
+  asks for it, the GPU offered, a JobStart's convergence and the caller's
+  cancel (`fem::RunSimStudy`'s overload with options); `StartSimStudyRun`
+  and `StartSimTopologyRun` plan on the frame and solve on a worker, storing
+  the meshes the solve made (`fem::StoreSimMadeMeshes`) and the result when
+  it lands. `ReuseSimStudyResult` answers from the study's own result or the
+  session's for the same input hash (`SimStudyInputHash`: a run's
+  convergence override and layer normal are inputs), and every run
+  remembers its answer, as a part's does.
+- `MeshSimStudyNow` and `StartSimMeshRun` mesh alone, storing the meshes on
+  the simulation and keeping the report under `{simulation slot, study}`,
+  checked against `SimMeshKeyNow` (the effective mesh settings and the
+  subject's stamps). `CheckSimStudyNow` is `fem::CheckSimStudy` against
+  that mesh while it is current, plus the solver check.
+- `ui::StudyHostOf` on a simulation tab is the simulation (`host.sim`, its
+  subject assembly for occurrence names); `ModifyStudy` and `AddStudyOn`
+  edit it under `SimUndoGuard`.
+- `ui::SimSlotUndoGuard(state, simSlotId)` records an edit on a simulation
+  that is not in front onto that slot's history (in front it is a
+  `SimUndoGuard`), comparing content by default, so an edit through
+  `StudyForRun` is caught; the step is undone when its tab is in front.
+- `ui::SimBodyOccurrence(state, i)` is the top-level occurrence the i-th of
+  the tab's viewport bodies (`SimSubjectBodies`) belongs to, for picking on
+  an assembly subject.
+
 ### How a simulation is saved
 
 A project lists a simulation in `project.json` as a document of `type:

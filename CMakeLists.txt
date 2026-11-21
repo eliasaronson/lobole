@@ -1094,6 +1094,7 @@ set(app_sources
     src/ui/MachineActions.cpp
     src/ui/PrintProfileActions.cpp
     src/ui/SimulationActions.cpp
+    src/ui/SimRunActions.cpp
     src/ui/SimulationView.cpp
     src/ui/FeatureEditor.cpp
     src/ui/ExprInput.cpp

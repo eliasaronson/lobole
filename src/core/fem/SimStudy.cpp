@@ -308,8 +308,31 @@ bool PrepareSimTopology(const SimContext& ctx, uint64_t studyId, TopoInput& out,
   return PrepareTopology(*route.doc, route.study, out, error);
 }
 
+int StoreSimMadeMeshes(SimDocument& sim, const StudyPlan& plan,
+                       const StudyJobInput& input) {
+  for (const auto& [key, mesh] : input.madeMeshes) {
+    std::string body;
+    for (const StudyBodyPlan& bp : plan.bodies)
+      if (bp.meshKey == key)
+        body = bp.bodyName;
+    sim.StoreMesh(key, {mesh, body});
+  }
+  return static_cast<int>(input.madeMeshes.size());
+}
+
 bool RunSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
                  StudyRuntime& rt, std::string* error, int* meshesMade) {
+  ConvergeOptions converge;
+  if (const Study* study = sim.FindStudy(studyId))
+    converge.mode = sim.Effective(*study).converge;
+  return RunSimStudy(sim, std::move(ctx), studyId, rt, converge, SolveOptions{},
+                     error, meshesMade);
+}
+
+bool RunSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
+                 StudyRuntime& rt, const ConvergeOptions& converge,
+                 const SolveOptions& options, std::string* error,
+                 int* meshesMade) {
   ctx.sim = &sim;
   if (meshesMade)
     *meshesMade = 0;
@@ -340,21 +363,13 @@ bool RunSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
   StudyPlan plan;
   if (!PlanSimStudy(ctx, studyId, plan, &err))
     return fail(err);
-  ConvergeOptions converge;
-  converge.mode = sim.Effective(*study).converge;
   StudyJobInput input;
   rt = StudyRuntime{};
-  if (!SolveConverged(plan, input, rt, converge, &err))
-    return fail(err);
-  for (const auto& [key, mesh] : input.madeMeshes) {
-    std::string body;
-    for (const StudyBodyPlan& bp : plan.bodies)
-      if (bp.meshKey == key)
-        body = bp.bodyName;
-    sim.StoreMesh(key, {mesh, body});
-  }
+  if (!SolveConverged(plan, input, rt, converge, &err, options))
+    return fail(err.empty() ? "solve failed" : err);
+  const int made = StoreSimMadeMeshes(sim, plan, input);
   if (meshesMade)
-    *meshesMade = static_cast<int>(input.madeMeshes.size());
+    *meshesMade = made;
   rt.inputHash = SimStudyInputKey(ctx, studyId);
   rt.solvedPartVersions = ctx.subjectStamps;
   StoreSimStudyResult(sim, studyId, rt, rt.inputHash, ctx.subjectStamps);

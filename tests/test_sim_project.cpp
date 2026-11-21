@@ -11,20 +11,29 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Occurrence.h"
 #include "core/fem/FemSolver.h" // StudyRuntime
 #include "core/fem/SimDocument.h"
 #include "core/io/Autosaver.h"
 #include "ui/AppActionsInternal.h" // SlotSim
 #include "ui/AppState.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/DocumentSlots.h"
 #include "ui/ProjectActions.h"
+#include "ui/SimRunActions.h"
+#include "ui/SimulationActions.h"
+#include "ui/SimulationView.h" // MeshReport
+#include "ui/StudyHost.h"
 #include "ui/VariableActions.h" // GlobalUndo
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
+#include <thread>
 #include <unistd.h>
 
 using Catch::Matchers::ContainsSubstring;
@@ -362,4 +371,287 @@ TEST_CASE("A simulation's edits are unsaved, autosaved and recovered",
   Autosaver::Clear(lob.string());
   std::error_code ec;
   fs::remove_all(root, ec);
+}
+
+// --- Running a simulation's studies through the app -------------------------
+// (docs/simulation/README.md#running-a-simulations-study)
+
+namespace {
+
+// An 80 x 10 x 10 steel bar on the active part tab, as test_sim_document's.
+ui::AppState StateWithBar() {
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+  auto box =
+      std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 80.0, 10.0, 10.0);
+  box->SetMaterial("steel");
+  state.document->AddFeature(std::move(box));
+  return state;
+}
+
+// The bar bent: one end clamped, the other pushed down; its loads on
+// `occurrence` (0 on a part subject).
+fem::Study Bend(const Document& bar, uint64_t occurrence = 0) {
+  const uint64_t cb = bar.GetBodies()[0].createdBy;
+  const auto face = [cb](int i) {
+    return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
+  };
+  fem::Study s;
+  s.name = "Bend";
+  s.converge = fem::ConvergeMode::Never;
+  fem::Load fixed;
+  fixed.id = 101;
+  fixed.type = fem::LoadType::Fixed;
+  fixed.face = face(0);
+  fixed.occurrenceId = occurrence;
+  s.loads.push_back(fixed);
+  fem::Load force;
+  force.id = 102;
+  force.type = fem::LoadType::Force;
+  force.face = face(1);
+  force.magnitude = 500.0;
+  force.direction = glm::dvec3(0, 0, -1);
+  force.occurrenceId = occurrence;
+  s.loads.push_back(force);
+  return s;
+}
+
+uint64_t AddBend(fem::SimDocument& sim, fem::Study setup) {
+  const uint64_t id = sim.AddStudy(setup.name).id;
+  setup.id = id;
+  REQUIRE(sim.ReplaceStudy(std::move(setup)));
+  return id;
+}
+
+void PumpUntil(ui::AppState& state, const std::function<bool()>& done) {
+  const auto t0 = std::chrono::steady_clock::now();
+  while (!done() &&
+         std::chrono::steady_clock::now() - t0 < std::chrono::seconds(120)) {
+    ui::PollBackgroundJobs(state);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+}
+
+} // namespace
+
+#ifdef HAVE_NETGEN
+TEST_CASE("A simulation tab's study runs through the app and lands in it",
+          "[fem][simdoc][jobs]") {
+  ui::AppState state = StateWithBar();
+  const uint64_t partId = state.parts[0].id;
+  fem::SimDocument made;
+  made.SetSubject({fem::SubjectKind::Part, partId, 0, "Part 1"});
+  made.SetMesh({ExprValue{4.0}, {}});
+  const uint64_t studyId = AddBend(made, Bend(*state.document));
+  REQUIRE(ui::AddSimulation(state, "Sim", std::move(made)) == 1);
+  const uint64_t simSlot = state.parts[1].id;
+
+  // The host on the tab is the simulation.
+  const ui::StudyHost host = ui::StudyHostOf(state);
+  REQUIRE(host.IsSimulation());
+  CHECK_FALSE(host.IsAssembly());
+  CHECK(host.Find(studyId) != nullptr);
+  CHECK(ui::StudyStale(state, studyId)); // nothing solved yet
+
+  // Run from the part's tab: it lands in the simulation behind it.
+  ui::SetActivePart(state, 0);
+  fem::SimDocument* sim = ui::SimBySlotId(state, simSlot);
+  REQUIRE(sim != nullptr);
+  CHECK(ui::ActiveSimSlotId(state) == 0);
+  std::string err;
+  REQUIRE(ui::RunSimStudyAndCache(state, simSlot, studyId, &err));
+  INFO(err);
+  const fem::StudyRuntime* rt = sim->StudyResults(studyId);
+  REQUIRE(rt != nullptr);
+  REQUIRE(rt->bodies.size() == 1);
+  CHECK(rt->bodies[0].results.maxVonMises > 0.0);
+  CHECK(rt->inputHash != 0);
+  // Solved against the part, so its edit reads it stale.
+  REQUIRE(rt->solvedPartVersions.size() == 1);
+  CHECK(rt->solvedPartVersions[0].first == partId);
+  CHECK_FALSE(ui::SimStudyStale(state, *sim, studyId));
+  CHECK_FALSE(sim->Meshes().empty()); // the mesh it made is kept
+
+  // The same inputs again are answered without a solve.
+  ui::JobStart again;
+  CHECK(ui::ReuseSimStudyResult(state, simSlot, studyId, &again));
+  CHECK(again.reused);
+  CHECK(ui::SimStudyInputHash(state, *sim, studyId) == rt->inputHash);
+  // A run's own convergence mode is an input.
+  ui::JobStart settle;
+  settle.converge = static_cast<int>(fem::ConvergeMode::Auto);
+  CHECK(ui::SimStudyInputHash(state, *sim, studyId, &settle) != rt->inputHash);
+
+  // Off the frame, started from the part's tab and landing after a switch.
+  ui::JobStart fresh;
+  fresh.recompute = true;
+  REQUIRE(ui::StartSimStudyRun(state, simSlot, studyId, &err, &fresh));
+  CHECK(ui::GetStudyRunStatus(state, studyId).running);
+  CHECK_FALSE(ui::StartSimStudyRun(state, simSlot, studyId, &err, &fresh));
+  CHECK_THAT(err, ContainsSubstring("already in progress"));
+  const uint64_t epoch = sim->StudyResultsEpoch();
+  ui::SetActivePart(state, 1);
+  PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "study"); });
+  sim = ui::SimBySlotId(state, simSlot);
+  CHECK(sim->StudyResultsEpoch() > epoch);
+  CHECK(sim->StudyResults(studyId)->bodies[0].results.maxVonMises > 0.0);
+  CHECK_FALSE(ui::StudyStale(state, studyId));
+
+  // Meshing alone keeps the report under the simulation's slot; the check
+  // reads it until the subject moves.
+  REQUIRE(ui::MeshSimStudyNow(state, simSlot, studyId, &err));
+  const ui::MeshReport* report = ui::SimMeshReportFor(state, simSlot, studyId);
+  REQUIRE(report != nullptr);
+  REQUIRE(report->bodies.size() == 1);
+  CHECK(report->bodies[0].elements > 0);
+  const auto hasStaleMesh = [&] {
+    for (const fem::StudyProblem& p :
+         ui::CheckSimStudyNow(state, simSlot, studyId))
+      if (p.code == "stale_mesh")
+        return true;
+    return false;
+  };
+  CHECK_FALSE(hasStaleMesh());
+
+  ui::SetActivePart(state, 0);
+  state.document->AddFeature(
+      std::make_unique<BoxFeature>("Lug", glm::vec3(0, 0, 10), 5, 5, 5));
+  sim = ui::SimBySlotId(state, simSlot);
+  CHECK(ui::SimStudyStale(state, *sim, studyId));
+  CHECK(hasStaleMesh());
+
+  // A topology study runs the topology path only.
+  fem::Study topo;
+  topo.name = "Topo";
+  topo.type = fem::AnalysisType::Topology;
+  const uint64_t topoId = AddBend(*sim, topo);
+  CHECK_FALSE(ui::StartSimStudyRun(state, simSlot, topoId, &err));
+  CHECK_THAT(err, ContainsSubstring("topology path"));
+  CHECK_FALSE(ui::StartSimTopologyRun(state, simSlot, studyId, &err));
+  CHECK_THAT(err, ContainsSubstring("not a topology study"));
+
+  // A simulation that is gone takes nothing.
+  CHECK_FALSE(ui::RunSimStudyAndCache(state, 999999, studyId, &err));
+  CHECK_THAT(err, ContainsSubstring("no such simulation"));
+}
+
+TEST_CASE("An assembly simulation's study runs on the placed part",
+          "[fem][simdoc][jobs]") {
+  ui::AppState state = StateWithBar();
+  const uint64_t partId = state.parts[0].id;
+  const Document& bar = *state.document;
+  const fem::Study bend = Bend(bar); // ids before the part is stashed
+  ui::AddAssembly(state, "Rig");
+  const size_t rig = static_cast<size_t>(state.activePart);
+  const uint64_t rigId = state.parts[rig].id;
+  Occurrence o;
+  o.name = "Bar";
+  o.partId = partId;
+  o.fixed = true;
+  // Placed away from its part's frame: the assembly planner solves it.
+  o.position = glm::dvec3(0.0, 40.0, 0.0);
+  const uint64_t occ = state.assembly->AddOccurrence(o);
+  state.assembly->BumpVersion();
+
+  std::string why;
+  const size_t at = ui::OpenSimulationFor(state, rig, &why);
+  REQUIRE(at != SIZE_MAX);
+  const uint64_t simSlot = state.parts[at].id;
+  fem::SimDocument* sim = ui::SimBySlotId(state, simSlot);
+  REQUIRE(sim == state.sim.get());
+  sim->SetRoles({{occ, fem::ParticipantRole::Meshed, ExprValue{0.0}}});
+  sim->SetMesh({ExprValue{4.0}, {}});
+  fem::Study study = bend;
+  for (fem::Load& l : study.loads)
+    l.occurrenceId = occ;
+  const uint64_t studyId = AddBend(*sim, study);
+
+  // The viewport's bodies say whose they are, for picking.
+  REQUIRE(ui::SimSubjectBodies(state).size() == 1);
+  CHECK(ui::SimBodyOccurrence(state, 0) == occ);
+  CHECK(ui::SimBodyOccurrence(state, 1) == 0);
+  const ui::StudyHost host = ui::StudyHostOf(state);
+  CHECK(host.OccurrenceName(occ) == "Bar");
+
+  // The context places the part where the occurrence puts it.
+  const fem::SimContext ctx = ui::SimContextFor(state, *sim);
+  REQUIRE(ctx.assembly != nullptr);
+  const fem::SimPart part = ctx.partOf(occ);
+  CHECK(part.doc != nullptr);
+  CHECK(part.placement[3][1] == 40.0);
+  CHECK(ctx.placedBodies(occ).size() == 1);
+
+  std::string err;
+  REQUIRE(ui::RunSimStudyAndCache(state, simSlot, studyId, &err));
+  INFO(err);
+  const fem::StudyRuntime* rt = sim->StudyResults(studyId);
+  REQUIRE(rt != nullptr);
+  CHECK(rt->bodies[0].results.maxVonMises > 0.0);
+  // Solved against the assembly and the part it places.
+  bool sawAssembly = false, sawPart = false;
+  for (const auto& [id, stamp] : rt->solvedPartVersions) {
+    sawAssembly = sawAssembly || id == rigId;
+    sawPart = sawPart || id == partId;
+  }
+  CHECK(sawAssembly);
+  CHECK(sawPart);
+  CHECK_FALSE(ui::StudyStale(state, studyId));
+  // Moving the occurrence moves what was solved.
+  ui::SetActivePart(state, rig);
+  state.assembly->FindById(occ)->position = glm::dvec3(0.0, 50.0, 0.0);
+  state.assembly->BumpVersion();
+  CHECK(ui::SimStudyStale(state, *ui::SimBySlotId(state, simSlot), studyId));
+}
+#endif
+
+TEST_CASE("An edit on a simulation behind another tab is undone on its tab",
+          "[fem][simdoc][undo]") {
+  ui::AppState state = StateWithBox();
+  REQUIRE(ui::AddSimulation(state, "Sim", SimOf(state.parts[0].id)) == 1);
+  const uint64_t simSlot = state.parts[1].id;
+  ui::SetActivePart(state, 0);
+  fem::SimDocument* sim = ui::SimBySlotId(state, simSlot);
+  REQUIRE(sim != nullptr);
+  const uint64_t studyId = sim->GetStudies()[0].id;
+  const uint64_t before = sim->Version();
+  {
+    ui::SimSlotUndoGuard outer(state, simSlot);
+    ui::SimSlotUndoGuard inner(state, simSlot); // only the outermost records
+    sim->AddStudy("Twist");
+  }
+  CHECK(state.parts[1].simHistory.undo.size() == 1);
+  CHECK(sim->Version() > before);
+  // An edit the setters do not see is found by its content.
+  {
+    ui::SimSlotUndoGuard guard(state, simSlot);
+    sim->StudyForRun(studyId)->name = "Renamed";
+  }
+  CHECK(state.parts[1].simHistory.undo.size() == 2);
+  // Nothing changed, nothing recorded; the part's own history is untouched.
+  {
+    ui::SimSlotUndoGuard idle(state, simSlot);
+  }
+  CHECK(state.parts[1].simHistory.undo.size() == 2);
+  CHECK_FALSE(state.commands->CanUndo());
+
+  // On its tab, undo takes both steps back.
+  ui::SetActivePart(state, 1);
+  REQUIRE(ui::UndoSim(state));
+  CHECK(state.sim->FindStudy(studyId)->name == "Bend");
+  REQUIRE(ui::UndoSim(state));
+  CHECK(state.sim->GetStudies().size() == 1);
+
+  // In front, the guard is the tab's own.
+  {
+    ui::SimSlotUndoGuard guard(state, simSlot);
+    state.sim->AddStudy("Again");
+  }
+  CHECK(state.simHistory.undo.size() == 1);
+  // A slot that is not a simulation records nothing, and does not throw.
+  {
+    ui::SimSlotUndoGuard none(state, state.parts[0].id);
+  }
+  CHECK(state.parts[0].simHistory.undo.empty());
 }

@@ -1340,6 +1340,9 @@ struct AppState {
   // on any tab: what ui::SimUndoGuard records on, as jobEdits for a job.
   uint64_t simEdits = 0;
   std::vector<Body> simBodies;
+  // Beside each of simBodies, the top-level occurrence it belongs to on an
+  // assembly subject (0 on a part's): ui::SimBodyOccurrence.
+  std::vector<uint64_t> simBodyOccurrences;
   uint64_t simBodiesKey = 0;
   // Part→assembly change propagation (A4): {partId → ui::PartStamp, the
   // Version and the configurations' revision} stamped at the active

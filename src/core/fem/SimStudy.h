@@ -104,6 +104,18 @@ int RestampSimByInputs(SimDocument& sim, SimContext ctx);
 bool RunSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
                  StudyRuntime& rt, std::string* error,
                  int* meshesMade = nullptr);
+// The same under a run's convergence and solve options (the app's: its
+// CalculiX run, the GPU offered, a cancel); the plain form uses the study's
+// convergence and the defaults. A topology study ignores both.
+bool RunSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
+                 StudyRuntime& rt, const ConvergeOptions& converge,
+                 const SolveOptions& options, std::string* error,
+                 int* meshesMade = nullptr);
+// Keeps every mesh a solve of `plan` made (StudyJobInput::madeMeshes) on
+// `sim` under its key, named for its body: what a run off the frame does
+// on the main thread when it lands. Returns how many.
+int StoreSimMadeMeshes(SimDocument& sim, const StudyPlan& plan,
+                       const StudyJobInput& input);
 
 // Stores a finished run's result on `sim`: stamped with `inputHash` (the
 // SimStudyInputKey taken when the run was planned) and the subject stamps

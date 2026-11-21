@@ -11,6 +11,7 @@
 #include "render/FieldRenderer.h"
 #include "ui/AppActionsInternal.h"
 #include "ui/AssemblyActions.h"
+#include "ui/SimRunActions.h"
 #include "ui/SimulationActions.h"
 #include "ui/SimulationViewInternal.h"
 #include "ui/ViewActions.h"
@@ -117,6 +118,8 @@ const MeshReport* StudyMesh(const AppState& state, uint64_t studyId) {
 
 std::string StudyMeshKeyNow(AppState& state, const StudyHost& host,
                             const fem::Study& s) {
+  if (host.sim)
+    return SimMeshKeyNow(state, *host.sim, s);
   std::string key = MeshSettingsKey(s);
   if (host.IsAssembly())
     key += AssemblyMeshKey(state, *host.asmDoc, s);
@@ -169,6 +172,8 @@ bool MeshStudyNow(AppState& state, uint64_t studyId, std::string* error) {
   };
   if (!s)
     return fail("no such study");
+  if (host.sim)
+    return MeshSimStudyNow(state, ActiveSimSlotId(state), studyId, error);
   const auto started = std::chrono::steady_clock::now();
   std::vector<fem::StudyBodyMesh> meshes;
   std::vector<fem::MeshBodyReport> reports;
@@ -849,6 +854,8 @@ std::vector<fem::StudyProblem> CheckStudyNow(AppState& state, uint64_t studyId,
   const fem::Study* s = host ? host.Find(studyId) : nullptr;
   if (!s)
     return out;
+  if (host.sim)
+    return CheckSimStudyNow(state, ActiveSimSlotId(state), studyId);
   const MeshReport* mr = StudyMesh(state, studyId);
   const bool stale = mr != nullptr && StudyMeshStale(state, studyId);
   if (host.part) {

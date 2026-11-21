@@ -258,6 +258,33 @@ private:
   std::string m_fingerprint; // only when content is compared
 };
 
+// SimUndoGuard for a simulation by its SLOT, in front or not: an RPC edits a
+// simulation without bringing its tab forward, and the step is that tab's,
+// undone when it is in front (its history travels with it). In front, it is
+// a SimUndoGuard; behind, it copies the slot's document and at destruction
+// pushes the copy onto the slot's history if the version moved (every
+// setter moves it) or -- with `compareContent` -- the content did, moving
+// the version for an edit that did not, so it saves. Only the outermost
+// guard records; a slot gone by then records nothing.
+class SimSlotUndoGuard {
+public:
+  SimSlotUndoGuard(AppState& state, uint64_t simSlotId,
+                   bool compareContent = true);
+  ~SimSlotUndoGuard();
+  SimSlotUndoGuard(const SimSlotUndoGuard&) = delete;
+  SimSlotUndoGuard& operator=(const SimSlotUndoGuard&) = delete;
+
+private:
+  AppState& m_state;
+  uint64_t m_slotId;
+  bool m_compareContent;
+  bool m_outermost = false;
+  std::optional<SimUndoGuard> m_active; // the slot was in front
+  uint64_t m_version = 0;
+  std::optional<fem::SimDocument> m_before;
+  std::string m_fingerprint;
+};
+
 // The tab index of the slot with a stable id (nullopt when gone) — the
 // in-context banner's Return button and RPCs resolve slots through this.
 std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId);
