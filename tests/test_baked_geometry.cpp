@@ -14,6 +14,7 @@
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
+#include "core/features/FilletFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/ShellFeature.h"
@@ -27,6 +28,7 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -208,6 +210,55 @@ TEST_CASE("Threads survive a baked open", "[baked][hole]") {
   CHECK(body.threads[0].designation == built.threads[0].designation);
   CHECK(body.threads[0].pitch == built.threads[0].pitch);
   CHECK(body.threads[0].majorDia == built.threads[0].majorDia);
+  fs::remove_all(proj);
+}
+
+// A baked open seeds the regen cache with placeholders for every feature
+// but the last: hashes without bodies. Reading one as a body list said a
+// Fillet's edge was on a body that "no longer exists", so modify_feature on
+// a blend straight after open_project was refused before it could rebuild.
+TEST_CASE("A blend edited straight after a baked open is not refused",
+          "[baked][fillet]") {
+  const fs::path proj = TempProject("baked-fillet-edit.lob");
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0), 40, 10, 30));
+  // The top back edge, along X at y = 10, z = 30.
+  const Body& box = doc->GetBodies().at(0);
+  const auto polylines = box.shape.GenerateEdgePolylines();
+  std::vector<ElementRef> edge;
+  for (size_t e = 0; e < polylines.size(); e++) {
+    bool on = polylines[e].size() >= 2;
+    for (const auto& q : polylines[e])
+      on = on && std::abs(q.y - 10.0f) < 1e-3f && std::abs(q.z - 30.0f) < 1e-3f;
+    if (on)
+      edge.push_back(
+          {box.createdBy, *box.elementMap.EdgeNameOf(static_cast<int>(e))});
+  }
+  REQUIRE(edge.size() == 1);
+  doc->AddFeature(std::make_unique<FilletFeature>("Round", edge, 2.0));
+  REQUIRE(doc->Regenerate());
+  REQUIRE(testio::Save(*doc, proj.string()));
+
+  auto loaded = testio::Load(proj.string());
+  REQUIRE(loaded != nullptr);
+  REQUIRE(loaded->LastRegenStats().executed == 0);
+  // What modify_feature checks before it replaces the feature
+  // (RefuseOnInput): the input of index 1 is the cache after index 0. Not
+  // knowing it is fine (the feature's Execute checks); an empty list is not.
+  auto edited = std::make_unique<FilletFeature>("Round", edge, 3.0);
+  if (const std::vector<Body>* input = loaded->CachedBodiesAfter(0)) {
+    CHECK(input->size() == 1);
+    CHECK(edited->WhyRefusedOn(*input, *loaded).empty());
+  }
+  REQUIRE(loaded->ReplaceFeature(1, std::move(edited)));
+  INFO(loaded->GetFeature(1)->GetError());
+  REQUIRE(loaded->GetFeature(1)->GetError().empty());
+  // A round of radius r along an edge of length L removes L (r^2 - pi r^2/4).
+  const double r = 3.0;
+  const double expected = 40.0 * 10 * 30 - 40.0 * (r * r - M_PI * r * r / 4);
+  CHECK_THAT(loaded->GetBodies().at(0).shape.Volume(),
+             WithinRel(expected, 1e-9));
   fs::remove_all(proj);
 }
 

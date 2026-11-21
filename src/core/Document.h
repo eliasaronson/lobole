@@ -782,13 +782,18 @@ public:
 
   // The body list as it stood after feature `index` executed, from the regen
   // cache — i.e. feature `index + 1`'s input. Valid for the chain the last
-  // Regenerate covered; null when the cache doesn't reach `index`. Used by
-  // edge picking to resolve refs against a blend's input.
+  // Regenerate covered; null when the cache doesn't reach `index`, and null
+  // for the placeholder entries a baked open installs (bodiesValid false):
+  // their empty list is not "no bodies", and a check reading it refused
+  // every blend edge as on a body that no longer exists. Used by edge
+  // picking to resolve refs against a blend's input.
   const std::vector<Body>* CachedBodiesAfter(size_t index) const {
     if (index >= m_chain.size())
       return nullptr;
     const auto it = m_cache.find(m_chain[index]);
-    return it != m_cache.end() ? &it->second.bodiesAfter : nullptr;
+    return it != m_cache.end() && it->second.bodiesValid
+               ? &it->second.bodiesAfter
+               : nullptr;
   }
 
   // Rollback bar (R2): regeneration executes features [0, rollback) only;
