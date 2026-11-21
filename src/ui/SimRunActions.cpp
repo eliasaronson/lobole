@@ -10,6 +10,8 @@
 #include "core/Occurrence.h"
 #include "core/fem/FemCheck.h"
 #include "core/fem/SimDocument.h"
+#include "core/fem/SimMigration.h"
+#include "core/io/Serialization.h"
 #include "ui/AppActionsInternal.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
@@ -288,6 +290,7 @@ bool StartSimStudyRun(AppState& state, uint64_t simSlotId, uint64_t studyId,
     return false;
   }
   job->studyId = studyId;
+  job->simSlotId = simSlotId;
   job->partVersions = ctx.subjectStamps;
   job->started = std::chrono::steady_clock::now();
 
@@ -360,6 +363,7 @@ bool StartSimTopologyRun(AppState& state, uint64_t simSlotId, uint64_t studyId,
     return false;
   }
   job->studyId = studyId;
+  job->simSlotId = simSlotId;
   job->maxIterations = job->input.params.maxIterations;
   PickTopologySolver(state, *job);
   job->started = std::chrono::steady_clock::now();
@@ -471,6 +475,7 @@ bool StartSimMeshRun(AppState& state, uint64_t simSlotId, uint64_t studyId,
   // `run`.
   auto job = std::make_shared<MeshJob>();
   job->studyId = studyId;
+  job->simSlotId = simSlotId;
   job->settingsKey = SimMeshKeyNow(state, *sim, *s);
   job->started = std::chrono::steady_clock::now();
   state.meshReports.erase({simSlotId, studyId});
@@ -566,6 +571,307 @@ uint64_t SimBodyOccurrence(AppState& state, size_t bodyIndex) {
   return bodyIndex < state.simBodyOccurrences.size()
              ? state.simBodyOccurrences[bodyIndex]
              : 0;
+}
+
+bool EnsureSimTopologyCheckStudies(AppState& state, uint64_t simSlotId,
+                                   uint64_t topoId, double threshold,
+                                   uint64_t* shapeId, uint64_t* solidId,
+                                   std::string* error) {
+  fem::SimDocument* sim = SimBySlotId(state, simSlotId);
+  const fem::Study* found = sim ? sim->FindStudy(topoId) : nullptr;
+  if (found == nullptr || found->type != fem::AnalysisType::Topology)
+    return Fail(error, "study " + std::to_string(topoId) +
+                           " is not a topology study of this simulation");
+  const fem::Study topo = *found; // a copy: studies are added below
+  // One undo step for the pair, on the slot whether it is in front or not.
+  SimSlotUndoGuard guard(state, simSlotId);
+  const auto ensure = [&](bool whole) {
+    uint64_t sid = 0;
+    for (const fem::Study& st : sim->GetStudies())
+      if (st.type == fem::AnalysisType::Static &&
+          st.shapeFrom.study == topoId && st.shapeFrom.whole == whole)
+        sid = st.id;
+    if (sid == 0) {
+      fem::Study& made =
+          sim->AddStudy(topo.name + (whole ? ": solid" : ": shape"));
+      made.type = fem::AnalysisType::Static;
+      sid = made.id;
+    }
+    const fem::Study have = *sim->FindStudy(sid);
+    fem::Study next = have;
+    next.loads = topo.loads;
+    next.loadCases = topo.loadCases;
+    next.refinements.clear();
+    next.gravity = glm::dvec3(0.0);
+    next.shapeFrom = fem::ShapeSource{topoId, whole ? 0.0 : threshold, whole};
+    // Unchanged but for the load ids: left alone, so its input hash -- and
+    // a stored answer -- still hold.
+    const auto withoutIds = [](fem::Study st) {
+      for (fem::Load& l : st.loads)
+        l.id = 0;
+      return DocumentIO::StudyToJson(st);
+    };
+    if (withoutIds(next) == withoutIds(have))
+      return sid;
+    for (fem::Load& l : next.loads)
+      l.id = sim->AllocateId();
+    sim->ReplaceStudy(std::move(next));
+    return sid;
+  };
+  const uint64_t a = ensure(false);
+  const uint64_t b = ensure(true);
+  if (shapeId)
+    *shapeId = a;
+  if (solidId)
+    *solidId = b;
+  return true;
+}
+
+bool StartSimTopologyCheck(AppState& state, uint64_t simSlotId, uint64_t topoId,
+                           double threshold, uint64_t* shapeId,
+                           uint64_t* solidId, std::string* error,
+                           JobStart* jobStart) {
+  uint64_t ids[2] = {0, 0};
+  if (!EnsureSimTopologyCheckStudies(state, simSlotId, topoId, threshold,
+                                     &ids[0], &ids[1], error))
+    return false;
+  if (shapeId)
+    *shapeId = ids[0];
+  if (solidId)
+    *solidId = ids[1];
+  struct Piece {
+    uint64_t studyId = 0;
+    uint64_t inputHash = 0;
+    fem::StudyPlan plan;
+    fem::StudyJobInput input;
+    fem::StudyRuntime runtime;
+  };
+  struct CheckJob {
+    std::vector<Piece> pieces;
+    std::vector<std::pair<uint64_t, uint64_t>> stamps;
+    std::string error;
+    uint64_t errorStudy = 0;
+    std::chrono::steady_clock::time_point started;
+  };
+  auto job = std::make_shared<CheckJob>();
+  const bool running = AStudyRunIsRunning(state);
+  fem::SimDocument* sim = SimBySlotId(state, simSlotId);
+  if (sim == nullptr)
+    return Fail(error, "no such simulation");
+  // The shape study is planned from the topology result, the solid from
+  // the same: each one a stored result answers is not solved again.
+  for (const uint64_t sid : ids) {
+    JobStart one;
+    one.recompute = jobStart != nullptr && jobStart->recompute;
+    if (ReuseSimStudyResult(state, simSlotId, sid, &one))
+      continue;
+    if (running)
+      return Fail(error, "a study run is already in progress");
+    const fem::SimContext ctx = SimContextFor(state, *sim);
+    Piece piece;
+    piece.studyId = sid;
+    piece.inputHash = SimStudyInputHash(state, *sim, sid);
+    if (!fem::PlanSimStudy(ctx, sid, piece.plan, error))
+      return false;
+    job->stamps = ctx.subjectStamps;
+    job->pieces.push_back(std::move(piece));
+  }
+  if (job->pieces.empty()) {
+    if (jobStart)
+      jobStart->reused = true;
+    return true;
+  }
+  job->started = std::chrono::steady_clock::now();
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = "check";
+  bg->label = SimStudyLabel(*sim, topoId, "Checking");
+  bg->cancellable = true;
+  bg->studyId = topoId;
+  bg->owner = jobStart ? jobStart->owner : 0;
+  BackgroundJob* raw = bg.get();
+  fem::SolveOptions solveOptions = JobSolveOptions(state, raw, nullptr);
+  bg->thread = std::thread([job, raw, solveOptions]() {
+    ArmOccSignalHandlers();
+    const double n = static_cast<double>(job->pieces.size());
+    for (size_t i = 0; i < job->pieces.size() && !raw->cancel.load(); ++i) {
+      Piece& p = job->pieces[i];
+      std::string err;
+      if (!fem::SolveConverged(p.plan, p.input, p.runtime, {}, &err,
+                               solveOptions) &&
+          !raw->cancel.load())
+        job->error = err.empty() ? "solve failed" : err;
+      if (!job->error.empty()) {
+        job->errorStudy = p.studyId;
+        break;
+      }
+      raw->fraction.store((static_cast<double>(i) + 1.0) / n);
+    }
+    raw->error = job->error;
+    raw->done.store(true); // last
+  });
+  bg->finish = [job, raw, simSlotId](AppState& st) {
+    CheckJob& j = *job;
+    fem::SimDocument* target = LandingSim(st, simSlotId, "topology check");
+    if (target == nullptr)
+      return true;
+    for (Piece& p : j.pieces) {
+      if (p.runtime.bodies.empty())
+        continue; // the one a cancel or a failure landed in
+      fem::StoreSimMadeMeshes(*target, p.plan, p.input);
+      p.runtime.solver = SolverOf(p.runtime, p.input.type);
+      p.runtime.solveSeconds = Seconds(j.started);
+      p.runtime.inputHash = p.inputHash;
+      RememberStudyResult(st, p.runtime);
+      fem::StoreSimStudyResult(*target, p.studyId, std::move(p.runtime),
+                               p.inputHash, j.stamps);
+    }
+    if (!j.error.empty() && !raw->cancel.load())
+      if (fem::Study* found = target->StudyForRun(j.errorStudy))
+        found->error = j.error;
+    return true;
+  };
+  BackgroundJob& started = StartBackgroundJob(state, std::move(bg));
+  if (jobStart)
+    jobStart->jobId = started.id;
+  return true;
+}
+
+std::vector<size_t> SimulationSlotsFor(const AppState& state, uint64_t docId) {
+  std::vector<size_t> out;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].kind != DocKind::Simulation)
+      continue;
+    const fem::SimDocument* sim = static_cast<int>(i) == state.activePart
+                                      ? state.sim.get()
+                                      : state.parts[i].sim.get();
+    if (sim != nullptr && sim->Subject().docId == docId)
+      out.push_back(i);
+  }
+  return out;
+}
+
+namespace {
+// A tab name no other tab answers to: `stem`, else "stem 2", "stem 3"...
+std::string UniqueTabName(const AppState& state, const std::string& stem) {
+  const auto taken = [&state](const std::string& name) {
+    for (const PartSlot& ps : state.parts)
+      if (ps.name == name)
+        return true;
+    return false;
+  };
+  std::string name = stem;
+  for (int n = 2; taken(name); n++)
+    name = stem + " " + std::to_string(n);
+  return name;
+}
+
+// Appended behind the tab in front: nothing switches, nothing is stashed.
+size_t AppendSimulationSlot(AppState& state, const std::string& stem,
+                            fem::SimDocument sim) {
+  PartSlot slot;
+  slot.id = state.nextPartId++;
+  slot.name = UniqueTabName(state, stem);
+  slot.kind = DocKind::Simulation;
+  slot.sim = std::make_unique<fem::SimDocument>(std::move(sim));
+  slot.lastSavedVersion = slot.sim->SaveStamp();
+  state.parts.push_back(std::move(slot));
+  state.projectMetaDirty = true; // project.json lists it (AddPart says why)
+  return state.parts.size() - 1;
+}
+} // namespace
+
+uint64_t SimulationSlotFor(AppState& state, uint64_t docId, bool create) {
+  const std::vector<size_t> have = SimulationSlotsFor(state, docId);
+  if (!have.empty())
+    return state.parts[have.front()].id;
+  if (!create)
+    return 0;
+  const std::optional<size_t> at = SlotIndexById(state, docId);
+  if (!at)
+    return 0;
+  const PartSlot& subject = state.parts[*at];
+  if (subject.kind != DocKind::Part && subject.kind != DocKind::Assembly)
+    return 0;
+  fem::SimDocument sim;
+  sim.SetSubject({subject.kind == DocKind::Assembly ? fem::SubjectKind::Assembly
+                                                    : fem::SubjectKind::Part,
+                  subject.id, 0, subject.name});
+  const std::string stem = subject.name + " simulation";
+  const size_t added = AppendSimulationSlot(state, stem, std::move(sim));
+  return state.parts[added].id;
+}
+
+size_t MoveStudiesIntoSimulations(AppState& state) {
+  size_t made = 0;
+  const size_t n = state.parts.size(); // the ones appended are not subjects
+  for (size_t i = 0; i < n; i++) {
+    const uint64_t id = state.parts[i].id;
+    const std::string name = state.parts[i].name;
+    std::vector<fem::MigratedSimulation> moved;
+    Document* part =
+        state.parts[i].kind == DocKind::Part ? SlotDoc(state, i) : nullptr;
+    AssemblyDocument* asmDoc = state.parts[i].kind == DocKind::Assembly
+                                   ? SlotAssembly(state, i)
+                                   : nullptr;
+    if (part != nullptr && !part->GetStudies().empty())
+      moved = fem::SimulationsFromPart(*part, id, name);
+    else if (asmDoc != nullptr && !asmDoc->GetStudies().empty())
+      moved = fem::SimulationsFromAssembly(*asmDoc, id, name);
+    else
+      continue;
+    // A study a simulation of this subject already holds stays there: a
+    // recovery over a part file saved before its studies moved.
+    std::vector<const fem::SimDocument*> existing;
+    for (size_t k : SimulationSlotsFor(state, id))
+      existing.push_back(SlotSim(state, k));
+    for (fem::MigratedSimulation& m : moved) {
+      std::vector<uint64_t> held;
+      for (const fem::Study& st : m.sim.GetStudies())
+        if (fem::SimulationHoldingStudy(existing, id, st.id) != nullptr)
+          held.push_back(st.id);
+      for (uint64_t sid : held)
+        m.sim.RemoveStudy(sid);
+      if (m.sim.GetStudies().empty())
+        continue;
+      AppendSimulationSlot(state, m.name, std::move(m.sim));
+      made++;
+    }
+    // The part's and the assembly's own lists go: a simulation is their one
+    // home now. Re-fetched: the append above may have moved the slots.
+    part = state.parts[i].kind == DocKind::Part ? SlotDoc(state, i) : nullptr;
+    asmDoc = state.parts[i].kind == DocKind::Assembly ? SlotAssembly(state, i)
+                                                      : nullptr;
+    std::vector<uint64_t> ids;
+    for (const fem::Study& st :
+         part ? part->GetStudies() : asmDoc->GetStudies())
+      ids.push_back(st.id);
+    for (uint64_t sid : ids)
+      part ? (void)part->RemoveStudy(sid) : (void)asmDoc->RemoveStudy(sid);
+    LOG_INFO("open: the studies of '{}' moved into its simulation", name);
+  }
+  return made;
+}
+
+void AdoptStoredSimResults(AppState& state) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].kind != DocKind::Simulation)
+      continue;
+    fem::SimDocument* sim = SlotSim(state, i);
+    if (sim == nullptr || sim->ResultIds().empty())
+      continue;
+    fem::RestampSimByInputs(*sim, SimContextFor(state, *sim));
+  }
+}
+
+bool StartFrontSimRun(AppState& state, uint64_t studyId, std::string* error) {
+  const uint64_t slot = ActiveSimSlotId(state);
+  fem::SimDocument* sim = SimBySlotId(state, slot);
+  const fem::Study* s = sim ? sim->FindStudy(studyId) : nullptr;
+  if (s == nullptr)
+    return Fail(error, "no such study on the simulation in front");
+  return s->type == fem::AnalysisType::Topology
+             ? StartSimTopologyRun(state, slot, studyId, error)
+             : StartSimStudyRun(state, slot, studyId, error);
 }
 
 } // namespace ui

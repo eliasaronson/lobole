@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include "core/fem/SimDocument.h"
+#include <memory>
+
 // The few helpers that more than one RemoteServer translation unit needs.
 // Not a public interface: only src/remote includes this.
 //
@@ -119,6 +122,17 @@ struct EditMarks {
     size_t depth = 0;
   };
   std::vector<StashedStack> stashedStacks;
+  // The simulation tabs behind the active one, which an RPC edits without
+  // switching (SimSlotUndoGuard): each one's document as it stood and its
+  // history's depth, so a rollback puts it back exactly.
+  struct StashedSim {
+    uint64_t slot = 0;
+    const void* sim = nullptr;
+    size_t undo = 0;
+    uint64_t version = 0;
+    std::shared_ptr<const fem::SimDocument> before;
+  };
+  std::vector<StashedSim> stashedSims;
   // Whether the active tab was saved as it stood: a rollback restores the
   // content, and a restore moves the version on (so no cache serves the
   // state it replaced) -- which would read as an unsaved edit nobody made.

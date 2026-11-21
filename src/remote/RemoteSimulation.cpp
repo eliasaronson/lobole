@@ -16,6 +16,7 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
+#include "core/fem/SimDocument.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteProject.h" // RequireFreshTabName
@@ -24,6 +25,7 @@
 #include "ui/BackgroundJobs.h"
 #include "ui/DocumentSlots.h" // AddPart, SetActivePart
 #include "ui/ImportActions.h"
+#include "ui/SimRunActions.h"
 #include "ui/SimulationActions.h"
 #include "ui/SimulationView.h"
 
@@ -40,6 +42,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -497,7 +500,7 @@ std::vector<int> MeshFacesOn(const fem::FemMesh& mesh,
 // stress_free_c}, or null. A from_study that names no thermal study of the
 // part is refused here, naming those it has; on an assembly (no `doc`) a
 // from_study is refused outright, since an assembly solves no heat.
-fem::ThermalLoad ThermalLoadOf(const json& v, const Document* doc,
+fem::ThermalLoad ThermalLoadOf(const json& v, const fem::SimDocument* doc,
                                uint64_t self) {
   fem::ThermalLoad tl;
   if (v.is_null())
@@ -639,26 +642,24 @@ json ConvergenceJson(const fem::Convergence& c) {
   return out;
 }
 
-// Where the studies live: the active PART, or the active ASSEMBLY
-// (docs/simulation/README.md#assembly-studies). One handler, two homes — the
-// study record is the same, and the verbs are the same; what differs is how
-// an edit becomes an undo step (a command on a part, a full-state snapshot
-// on an assembly) and where a result's staleness is measured.
+// Where the studies live: a simulation document (a tab of its own,
+// docs/simulation/README.md#the-simulation-document-core), named by the
+// call's `simulation` or found from the tab in front (ResolveHost). Its
+// subject -- a part, or an assembly -- is read through `part` and `asmDoc`
+// and never edited here. Every edit is a SimSlotUndoGuard step on the
+// simulation's own tab, whether or not it is in front.
 struct Host {
   ui::AppState& state;
-  Document* part = nullptr;
-  AssemblyDocument* asmDoc = nullptr;
+  Document* part = nullptr;                 // the subject, when a part
+  const AssemblyDocument* asmDoc = nullptr; // the subject, when an assembly
+  fem::SimDocument* sim = nullptr;
+  uint64_t simSlot = 0;
 
   bool IsAssembly() const { return asmDoc != nullptr; }
-  const std::vector<fem::Study>& Studies() const {
-    return part ? part->GetStudies() : asmDoc->GetStudies();
-  }
-  // A RUN's access (Document::StudyForRun): meshing and solving write the
-  // study's transient fields. An edit is Modify, below, which a part records
-  // as a command and so as a saved change.
-  fem::Study* Find(uint64_t id) {
-    return part ? part->StudyForRun(id) : asmDoc->FindStudy(id);
-  }
+  const std::vector<fem::Study>& Studies() const { return sim->GetStudies(); }
+  // A RUN's access (StudyForRun): meshing and solving write the study's
+  // transient fields. An edit is Modify, below.
+  fem::Study* Find(uint64_t id) { return sim->StudyForRun(id); }
   fem::Study& Require(uint64_t id) {
     fem::Study* s = Find(id);
     if (!s)
@@ -666,70 +667,77 @@ struct Host {
     return *s;
   }
   const fem::StudyRuntime* Results(uint64_t id) const {
-    return part ? part->StudyResults(id) : asmDoc->StudyResults(id);
+    return sim->StudyResults(id);
   }
-  bool Stale(uint64_t id) {
-    return part ? part->StudyResultsStale(id)
-                : ui::AssemblyStudyStale(state, *asmDoc, id);
-  }
-  uint64_t AllocateId() {
-    return part ? part->AllocateId() : asmDoc->AllocateId();
-  }
+  bool Stale(uint64_t id) { return ui::SimStudyStale(state, *sim, id); }
+  uint64_t AllocateId() { return sim->AllocateId(); }
   const SymbolTable& Symbols() const {
     return part ? part->Symbols() : state.projectSymbols;
   }
   const fem::Study& Add(const std::string& name, fem::AnalysisType type) {
-    if (part) {
-      auto cmd = std::make_unique<AddStudyCommand>(name, type);
-      AddStudyCommand* raw = cmd.get();
-      state.commands->Execute(std::move(cmd), *part);
-      return *part->FindStudy(raw->StudyId());
+    const uint64_t id = sim->AddStudy(name).id;
+    if (type != sim->FindStudy(id)->type) {
+      fem::Study typed = *sim->FindStudy(id);
+      typed.type = type;
+      // A buckling study takes its own default number of factors, as a
+      // part's AddStudyCommand gave it.
+      if (type == fem::AnalysisType::Buckling)
+        typed.numModes = fem::kBucklingFactorsDefault;
+      sim->ReplaceStudy(std::move(typed));
     }
-    ui::SnapshotAssembly(state);
-    fem::Study& s = asmDoc->AddStudy(name);
-    s.type = type;
-    return s;
+    return *sim->FindStudy(id);
   }
   void Remove(uint64_t id) {
     Require(id);
-    if (part) {
-      state.commands->Execute(std::make_unique<RemoveStudyCommand>(id), *part);
-      return;
-    }
-    ui::SnapshotAssembly(state);
-    asmDoc->RemoveStudy(id);
+    sim->RemoveStudy(id);
   }
-  // One undoable mutation of one study.
+  // One mutation of one study (the call's SimSlotUndoGuard records it). The
+  // roles are the document's: a study's `participants` edit lands there.
   void Modify(uint64_t id, const std::string& desc,
               const std::function<void(fem::Study&)>& mutate) {
-    const fem::Study& cur = Require(id);
-    if (part) {
-      json before = DocumentIO::StudyToJson(cur);
-      fem::Study copy = cur;
-      mutate(copy);
-      json after = DocumentIO::StudyToJson(copy);
-      state.commands->Execute(
-          std::make_unique<ModifyStudyCommand>(desc, before, after), *part);
-      return;
-    }
-    fem::Study copy = cur;
-    mutate(copy); // may throw, BEFORE the snapshot: nothing to undo then
-    ui::SnapshotAssembly(state);
-    *asmDoc->FindStudy(id) = std::move(copy);
-    asmDoc->BumpVersion(); // an edit invalidates results, as on a part
+    (void)desc;
+    fem::Study copy = Require(id);
+    copy.participants = sim->Roles();
+    mutate(copy); // may throw, before anything changed
+    const auto same = [](const std::vector<fem::Participant>& a,
+                         const std::vector<fem::Participant>& b) {
+      if (a.size() != b.size())
+        return false;
+      for (size_t i = 0; i < a.size(); i++)
+        if (a[i].occurrenceId != b[i].occurrenceId || a[i].role != b[i].role ||
+            a[i].friction != b[i].friction ||
+            a[i].meshSize.value != b[i].meshSize.value ||
+            a[i].meshSize.expr != b[i].meshSize.expr)
+          return false;
+      return true;
+    };
+    if (!same(copy.participants, sim->Roles()))
+      sim->SetRoles(copy.participants);
+    copy.participants.clear();
+    sim->ReplaceStudy(std::move(copy));
+  }
+  // A study as the RPCs report it: its document's roles as its participants.
+  fem::Study Shown(const fem::Study& s) const {
+    fem::Study out = s;
+    if (asmDoc != nullptr)
+      out.participants = sim->Roles();
+    return out;
   }
   // The material of a solved body, for the factor of safety: a part's body
   // by index, an assembly's meshed occurrence's placed body by index.
   std::string BodyMaterial(const fem::Study& s, int bodyIndex) {
+    (void)s;
     if (part) {
       const auto& bodies = part->GetBodies();
       return bodyIndex >= 0 && bodyIndex < (int)bodies.size()
                  ? bodies[bodyIndex].material
                  : std::string{};
     }
-    for (const fem::Participant& pt : s.participants)
+    for (const fem::Participant& pt : sim->Roles())
       if (pt.role == fem::ParticipantRole::Meshed) {
-        const auto bodies = ui::OccurrenceSubtreeBodies(state, pt.occurrenceId);
+        const fem::SimContext ctx = ui::SimContextFor(state, *sim);
+        const auto bodies = ctx.placedBodies ? ctx.placedBodies(pt.occurrenceId)
+                                             : std::vector<Body>{};
         return bodyIndex >= 0 && bodyIndex < (int)bodies.size()
                    ? bodies[bodyIndex].material
                    : std::string{};
@@ -770,6 +778,119 @@ struct Host {
   }
 };
 
+// The names of simulation tabs, for a refusal that lists them.
+std::string SimulationNames(const ui::AppState& state,
+                            const std::vector<size_t>& slots) {
+  std::string out;
+  for (size_t k : slots)
+    out += (out.empty() ? "'" : ", '") + state.parts[k].name + "' (" +
+           std::to_string(state.parts[k].id) + ")";
+  return out;
+}
+
+// Which simulation a call acts on (docs/scripting/rpc.md#simulations): the
+// `simulation` it names (a simulation tab's name or id); else the simulation
+// tab in front; else the one simulation of the part or assembly in front --
+// several are refused, naming them. 0 when the part or assembly in front
+// has none (MakeFirstSimulation makes one for add_study).
+uint64_t ResolveSimulationSlot(ui::AppState& state, const RpcParams& p) {
+  std::vector<size_t> all;
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].kind == ui::DocKind::Simulation)
+      all.push_back(i);
+  if (p.contains("simulation")) {
+    const json& v = p.at("simulation");
+    for (size_t k : all)
+      if ((v.is_string() && state.parts[k].name == v.get<std::string>()) ||
+          (v.is_number_unsigned() && state.parts[k].id == v.get<uint64_t>()))
+        return state.parts[k].id;
+    if (!v.is_string() && !v.is_number_unsigned())
+      throw std::runtime_error(
+          "simulation is a simulation tab's name or id (list_parts lists "
+          "them as type \"simulation\")");
+    throw std::runtime_error(
+        "no simulation " + v.dump() + " (the project has: " +
+        (all.empty() ? std::string("none") : SimulationNames(state, all)) +
+        ")");
+  }
+  if (const uint64_t front = ui::ActiveSimSlotId(state))
+    return front;
+  if (state.activePart < 0 ||
+      static_cast<size_t>(state.activePart) >= state.parts.size() ||
+      (!state.document && !state.assembly)) {
+    const char* kind = state.drawing ? "a drawing"
+                       : state.job   ? "a job"
+                                     : "not a part";
+    throw std::runtime_error(
+        "the active document is " + std::string(kind) +
+        "; studies live in a simulation of a part or an assembly -- switch to "
+        "one of those tabs, or name it with `simulation`");
+  }
+  const ui::PartSlot& front = state.parts[state.activePart];
+  const std::vector<size_t> mine = ui::SimulationSlotsFor(state, front.id);
+  if (mine.size() > 1)
+    throw std::runtime_error("'" + front.name + "' has " +
+                             std::to_string(mine.size()) +
+                             " simulations: " + SimulationNames(state, mine) +
+                             " -- name one with `simulation`");
+  if (mine.size() == 1)
+    return state.parts[mine.front()].id;
+  return 0;
+}
+
+// add_study's or enter_simulation's first simulation of the part or the
+// assembly in front, made once what the call is given is checked.
+uint64_t MakeFirstSimulation(ui::AppState& state, const std::string& m,
+                             const RpcParams& p) {
+  if (m == "add_study") {
+    (void)p.value("name", std::string{}); // read: a wrong type refuses here
+    fem::AnalysisType type = fem::AnalysisType::Static;
+    const std::string want = p.contains("type")
+                                 ? p.at("type").get<std::string>()
+                                 : p.value("kind", std::string{});
+    if ((p.contains("kind") || p.contains("type")) &&
+        !fem::AnalysisTypeFromString(want, type))
+      throw std::runtime_error("study type '" + want +
+                               "' is not one of: " + fem::kAnalysisTypeNames);
+    if (type == fem::AnalysisType::Topology && state.assembly)
+      throw std::runtime_error("topology optimisation is a part study; an "
+                               "assembly study is static or modal");
+    if (type == fem::AnalysisType::Thermal && state.assembly)
+      throw std::runtime_error(
+          "a thermal study is a part study's: an assembly study does not "
+          "solve heat yet (docs/simulation/README.md#not-done)");
+  } else if (p.contains("study")) {
+    throw std::runtime_error("no such study");
+  }
+  return ui::SimulationSlotFor(state, state.parts[state.activePart].id, true);
+}
+
+// A display call's simulation, brought forward and in simulation mode.
+void ShowSimulation(ui::AppState& state, uint64_t simSlot) {
+  if (ui::ActiveSimSlotId(state) != simSlot)
+    if (const auto at = ui::SlotIndexById(state, simSlot))
+      ui::SetActivePart(state, *at);
+  ui::EnterSimulation(state);
+}
+
+// The host for a simulation slot: its document and its subject.
+Host HostOf(ui::AppState& state, uint64_t simSlot) {
+  Host host{state};
+  host.simSlot = simSlot;
+  host.sim = ui::SimBySlotId(state, simSlot);
+  if (host.sim == nullptr)
+    throw std::runtime_error("no such simulation");
+  const fem::SimSubject& subject = host.sim->Subject();
+  if (subject.kind == fem::SubjectKind::Assembly)
+    host.asmDoc = ui::AssemblyDocById(state, subject.docId);
+  else
+    host.part = ui::PartDocById(state, subject.docId);
+  if (host.part == nullptr && host.asmDoc == nullptr)
+    throw std::runtime_error("the subject of this simulation ('" +
+                             subject.name + "') is gone");
+  return host;
+}
+
 } // namespace
 
 // FEM study RPCs, carved out of RemoteServer::HandleSemantic. All act on the
@@ -780,12 +901,24 @@ struct Host {
 // response). describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc SimulationMethods[] = {
     {"enter_simulation",
-     "Enter simulation mode on the active part or assembly (S1: an assembly's "
-     "studies live on it, drawn in its Simulation tool window).",
-     "study"},
-    {"exit_simulation", "Leave simulation mode.", ""},
+     "Bring a simulation's tab forward in simulation mode, as the "
+     "Simulation button does: `simulation` (a simulation tab's name or "
+     "id), else the simulation tab in front, else the active part's or "
+     "assembly's one simulation -- made first, with a study, when it has "
+     "none. Every study verb below takes the same optional `simulation`; "
+     "several simulations of the part in front are refused, naming them "
+     "(docs/scripting/rpc.md#simulations). Only this, set_result_display "
+     "and set_mesh_display switch tabs.",
+     "study, simulation"},
+    {"exit_simulation",
+     "Leave simulation mode: from a simulation tab, back to the part or "
+     "assembly it analyses.",
+     ""},
     {"add_study",
-     "Add a study {type: static|modal|topology|buckling|thermal, name?} "
+     "Add a study {type: static|modal|topology|buckling|thermal, name?} to a "
+     "simulation (`simulation`, or as enter_simulation finds one); on a part "
+     "or an assembly that has none, its simulation is made, behind the tab "
+     "in front, which does not switch. "
      "(thermal: steady heat conduction, a part study's; "
      "docs/simulation/README.md#thermal). `kind` is "
      "accepted for the same thing — the enum, the file and `list_studies` "
@@ -796,7 +929,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(struts, ribs, thin walls, tubes, levers in compression), with "
      "requirements on factor_of_safety and buckling_factor: a part that "
      "buckles passes its static study (docs/simulation/README.md#buckling).",
-     "kind, name, type"},
+     "kind, name, type, simulation"},
     {"remove_study",
      "Remove a study {id}. `study` names the same thing here and in every "
      "verb that ACTS ON a study (set_study, mesh_study, run_study, "
@@ -805,8 +938,11 @@ static constexpr MethodDoc SimulationMethods[] = {
      "and this family was the holdout. A verb that only names a study for "
      "CONTEXT (add_load, add_refinement, set_result_display) still takes "
      "`study`, because there `id` would mean the load or the refinement.",
-     "id, study"},
-    {"list_studies", "List studies with status.", "", remote::NoFlags,
+     "id, study, simulation"},
+    {"list_studies",
+     "List a simulation's studies with status (mesh_size and filter_radius "
+     "in mm).",
+     "simulation", remote::NoFlags,
      "studies:{converge?:string, filter_radius?:number, has_results:bool, "
      "id:int, "
      "keep_faces?:int, keep_outs?:object[], load_cases?:object[], "
@@ -921,7 +1057,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "converge, filter_radius, filter_radius_expr, gravity, id, load_cases, "
      "max_iterations, mesh_size, mesh_size_expr, name, nonlinear, num_modes, "
      "participants, shape_from, solver, study, thermal_load, type, "
-     "volume_fraction, volume_fraction_expr"},
+     "volume_fraction, volume_fraction_expr, simulation"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure|"
      "torque|remote|pin|contact|roller|held|cylindrical, face, ...}. "
@@ -1017,21 +1153,21 @@ static constexpr MethodDoc SimulationMethods[] = {
      "face, film_w_m2k, fix_rotation, flux_w_m2, force_n, force_n_expr, "
      "frame, friction, hold, magnitude, magnitude_expr, occurrence, "
      "point_mm, power_w, region, study, temperature_c, torque_nmm, "
-     "torque_nmm_expr, type"},
+     "torque_nmm_expr, type, simulation"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
      "report it — this row said \"by index\", which is the same number only "
      "until you remove one.",
-     "id, load, study"},
+     "id, load, study, simulation"},
     {"add_refinement",
      "Add a local mesh refinement on an element: `size` is the target element "
      "edge length there, in MILLIMETRES, or an expression of the variables "
      "(size_expr; docs/scripting/rpc.md#numbers-that-take-an-expression).",
-     "face, occurrence, size, size_expr, study"},
-    {"remove_refinement", "Remove a refinement.", "face, study"},
+     "face, occurrence, size, size_expr, study, simulation"},
+    {"remove_refinement", "Remove a refinement.", "face, study, simulation"},
     {"add_keep_face", "Topology optimization: mark a face to keep.",
-     "face, study"},
+     "face, study, simulation"},
     {"add_keep_out",
      "Topology optimization: a region the result must leave empty "
      "{study, body} -- a body of this part, by name (a neighbour arrives as "
@@ -1042,11 +1178,11 @@ static constexpr MethodDoc SimulationMethods[] = {
      "part does not have is refused naming those it has; a keep-out that "
      "would take a support's, a load's or a keep face's tet is refused at "
      "the run (docs/topopt/README.md#keep-outs). Returns its index.",
-     "body, box_max, box_min, study"},
+     "body, box_max, box_min, study, simulation"},
     {"remove_keep_out",
      "Remove a keep-out {study, index} (0-based, as list_studies lists "
      "them).",
-     "index, study"},
+     "index, study, simulation"},
     {"check_topology",
      "A static check of a topology result before re-modelling from it "
      "{study, threshold?}: makes (or refreshes) two static studies of the "
@@ -1067,7 +1203,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "probe_study {case} and set_result_display {case}. Solid elements at "
      "a threshold, not SIMP-penalised stiffness "
      "(docs/topopt/README.md#a-static-study-of-the-optimised-shape).",
-     "outlive_client, recompute, study, threshold", remote::NoFlags,
+     "outlive_client, recompute, study, threshold, simulation", remote::NoFlags,
      "job?:int, kind?:string, outlives_client?:bool, running?:bool, "
      "shape_study:int, solid_study:int, started?:bool, "
      "cases?:{displacement_ratio:number, name:string, shape:object, "
@@ -1075,7 +1211,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "keep_faces:any[], load_path_broken:bool, tets:int, "
      "volume_mm3:number}, reused?:bool, threshold?:number, "
      "threshold_lowered_from?:number, topology?:int"},
-    {"remove_keep_face", "Unmark a kept face.", "face, study"},
+    {"remove_keep_face", "Unmark a kept face.", "face, study, simulation"},
     {"mesh_study",
      "Mesh the study (Netgen tets) and KEEP the mesh for set_mesh_display; "
      "returns per body its counts, worst quality and `report` "
@@ -1096,7 +1232,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "cancelled when the connection that started it closes unless "
      "`outlive_client: true`. "
      "Takes `id` (or `study`, the same thing here) — see remove_study.",
-     "async, id, outlive_client, study"},
+     "async, id, outlive_client, study, simulation"},
     {"run_study",
      "Solve the study (blocking, or `async` and poll study_status). Async "
      "meshes AND solves off the frame; the result is stored into the part "
@@ -1140,7 +1276,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(docs/simulation/README.md#nonlinear-static).",
      "id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, "
      "recompute?:bool, timeout_s?:number>0, converge?:string, "
-     "layer_normal?:number[]"},
+     "layer_normal?:number[], simulation?:string|int"},
     {"cancel_study",
      "Cancel a running study: {job} (the id run_study, run_motion_study, "
      "mesh_study, check_requirements or design_sweep answered -- any study "
@@ -1152,7 +1288,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "iterations of an iterative solve; a direct factorization has no "
      "interruption points and ends first) and drops its answer. A job "
      "id that names no study job, or one that has ended, is refused.",
-     "id, job, study"},
+     "id, job, study, simulation"},
     {"study_status",
      "Status/progress of a study: {running, job, meshing?, iteration…} "
      "while a job runs, else the cached result's state (with `input_hash`) "
@@ -1169,7 +1305,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "increment lands). A running in-house static study says `iterations`: "
      "its iterative solve's so far, on the CPU or the GPU (0 for a direct "
      "one).",
-     "id, job, study"},
+     "id, job, study, simulation"},
     {"study_results",
      "Result summary: {type, elements, nodes, stale} plus a `bodies` "
      "array, one entry PER BODY, because a part study meshes and solves each "
@@ -1326,7 +1462,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`applied_total` {force_n}, the resultant of everything applied "
      "(forces, pressures, gravity): the two cancel when the study is in "
      "balance, so that check is one read (per case in `cases`).",
-     "id, layer_normal, study"},
+     "id, layer_normal, study, simulation"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
      "the deformation {study, field, deform_scale?, mode? (0-based, which "
@@ -1358,7 +1494,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "did nothing. A static study with load cases shows `case` (its name or "
      "0-based index).",
      "case, deform_scale, field, layer_normal, markers, mode, range_max, "
-     "range_min, study, threshold"},
+     "range_min, study, threshold, simulation"},
     {"set_mesh_display",
      "Draw the mesh mesh_study kept in place of the body {study?, view: off "
      "| edges | quality | size}: its element edges, alone or over a colour "
@@ -1369,7 +1505,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "a result field off (one picture at a time). Refused when the study has "
      "no kept mesh. Answers `stale` when the geometry or the mesh settings "
      "moved since it was made.",
-     "study, view"},
+     "study, view, simulation"},
     {"check_study",
      "Everything a run of the study would refuse, AT ONCE, each with the "
      "call that fixes it {id (or study)} -> {ok, problems: [{code, message, "
@@ -1384,7 +1520,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "an assembly study every refusal is this one row). `fix.params` is the "
      "call to make, with null where the caller chooses (a face, a "
      "material). run_study refuses the first of these; this is the list.",
-     "id, study", remote::NoFlags,
+     "id, study, simulation", remote::NoFlags,
      "ok:bool, problems:{body?:string, code:string, face?:string, "
      "fix?:object, load_id?:int, message:string}[], receipt:{claims:object[], "
      "schema:string, standing:string, summary:string}"},
@@ -1401,7 +1537,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "reopened from disk keeps its boundary surface only and is refused, "
      "saying to run again (run_study {recompute: true}). A study with load "
      "cases names `case` (its name or 0-based index).",
-     "case, id, path, study", remote::NotInBatch},
+     "case, id, path, study, simulation", remote::NotInBatch},
     {"probe_study",
      "How one FACE moved and how hard it is stressed under a solved static "
      "study {id (or study), face, occurrence?, at?}; on an ASSEMBLY study "
@@ -1440,7 +1576,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "equivalent plastic strain on the face, unitless), and "
      "residual_translation_mm / residual_rotation_rad: the face's rigid "
      "motion once the load is off (docs/simulation/README.md#plasticity).",
-     "at, case, face, id, layer_normal, occurrence, study"},
+     "at, case, face, id, layer_normal, occurrence, study, simulation"},
     {"export_study_inp",
      "Write the CalculiX deck a STATIC, BUCKLING or THERMAL study would run "
      "{id (or study), "
@@ -1462,7 +1598,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "convecting faces; mm, mW, degrees C); a static study's under a "
      "thermal_load carries *EXPANSION and the nodes' *TEMPERATURE. Refused "
      "on a modal or topology study (docs/simulation/README.md#calculix).",
-     "body, case, id, path, study", remote::NotInBatch,
+     "body, case, id, path, study, simulation", remote::NotInBatch,
      "body:string, bytes:int, elements:int, nodes:int, path:string"},
     {"sample_study",
      "The solved fields at one POINT of a static, buckling (its base state) "
@@ -1477,14 +1613,14 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(docs/simulation/reference-cases.md). Refused on a stale or unrun "
      "study, a modal or topology one, and an at_mm that is not three "
      "finite numbers.",
-     "at_mm, case, id, study", remote::NoFlags,
+     "at_mm, case, id, study, simulation", remote::NoFlags,
      "body:string, displacement_mm:number[], distance_mm:number, "
      "node_at_mm:number[], plastic_strain?:number, stress_mpa:number[], "
      "temperature_c?:number, von_mises_mpa:number"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
-     "on, study"},
+     "on, study, simulation"},
     {"export_topo_stl", "Export the optimized topology as STL.",
-     "path, smooth, study, threshold"},
+     "path, smooth, study, threshold, simulation"},
     {"topo_to_body",
      "A topology result as a body to model against {study, path, name?, "
      "threshold?, smooth?}: the smoothed iso-surface (export_topo_stl's) is "
@@ -1495,7 +1631,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`path` when it regenerates, so keep the file with the project. "
      "Returns the part, its volume_mm3, the triangle count and whether the "
      "surface was watertight (docs/topopt/README.md#a-body-from-the-result).",
-     "name, path, smooth, study, threshold", remote::NotInBatch,
+     "name, path, smooth, study, threshold, simulation", remote::NotInBatch,
      "part:string, part_id:int, path:string, threshold:number, "
      "triangles:int, valid:bool, volume_mm3:number, watertight:bool"},
 };
@@ -1702,11 +1838,8 @@ json ExportStudyInp(ui::AppState& state, Host& host, const RpcParams& p) {
                              " does not exist");
   fem::StudyPlan plan;
   std::string err;
-  const bool planned = host.IsAssembly()
-                           ? fem::PlanAssemblyStudy(
-                                 *host.asmDoc, *s,
-                                 ui::AssemblyStudyContextFor(state), plan, &err)
-                           : fem::PlanStudy(*host.part, *s, plan, &err);
+  const bool planned =
+      fem::PlanSimStudy(ui::SimContextFor(state, *host.sim), s->id, plan, &err);
   fem::StudyJobInput input;
   if (!planned || !fem::MeshPlannedStudy(plan, input, &err))
     throw std::runtime_error(err);
@@ -1785,10 +1918,9 @@ json ExportStudyInp(ui::AppState& state, Host& host, const RpcParams& p) {
 // the topology result's shape and its solid design domain, each a static
 // study with the topology study's supports, loads and cases, run now and
 // compared case by case.
-json CheckTopology(ui::AppState& state, Host& host, Document* doc,
-                   const RpcParams& p) {
+json CheckTopology(ui::AppState& state, Host& host, const RpcParams& p) {
   ui::ReapBackgroundJobs(state);
-  if (host.IsAssembly() || doc == nullptr)
+  if (host.IsAssembly() || host.part == nullptr)
     throw std::runtime_error("check_topology reads a part's topology study");
   const uint64_t id = p.at("study").get<uint64_t>();
   const fem::Study topo = host.Require(id); // a copy: studies are added below
@@ -1816,8 +1948,8 @@ json CheckTopology(ui::AppState& state, Host& host, Document* doc,
   ui::JobStart start;
   start.recompute = p.value("recompute", false);
   start.owner = p.value("outlive_client", false) ? 0 : state.rpcConnection;
-  if (!ui::StartTopologyCheck(state, *doc, id, threshold, &shapeId, &solidId,
-                              &err, &start))
+  if (!ui::StartSimTopologyCheck(state, host.simSlot, id, threshold, &shapeId,
+                                 &solidId, &err, &start))
     throw std::runtime_error("check_topology: " + err);
   if (!start.reused)
     return json{{"started", true},
@@ -1908,16 +2040,49 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     return StudyJobJson(state, p.at("job").get<uint64_t>(),
                         m == "cancel_study");
   }
-  if (!doc && !state.assembly) {
-    const char* kind = state.drawing ? "a drawing"
-                       : state.job   ? "a job"
-                       : state.sim   ? "a simulation"
-                                     : "not a part";
-    throw std::runtime_error("the active document is " + std::string(kind) +
-                             "; studies live on a part or an assembly — switch "
-                             "to one of those tabs");
+  // Leaving the mode needs no simulation: it goes back to the subject.
+  if (m == "exit_simulation") {
+    ui::ExitSimulation(state);
+    return json::object();
   }
-  Host host{state, doc, doc ? nullptr : state.assembly.get()};
+  // Which simulation (ResolveSimulationSlot).
+  const bool display = m == "enter_simulation" || m == "set_result_display" ||
+                       m == "set_mesh_display";
+  uint64_t simSlot = ResolveSimulationSlot(state, p);
+  if (simSlot == 0 && m == "list_studies")
+    return json::array(); // nothing analysed it yet
+  // add_study makes the part's or the assembly's first simulation, behind
+  // the tab in front; enter_simulation, like the GUI's Simulation button,
+  // makes it and brings it forward. Only once the call is known to be
+  // accepted: a refused call leaves no tab behind
+  // (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+  if (simSlot == 0 && (m == "add_study" || m == "enter_simulation"))
+    simSlot = MakeFirstSimulation(state, m, p);
+  if (simSlot == 0)
+    throw std::runtime_error(
+        "'" + state.parts[state.activePart].name +
+        "' has no simulation yet: add_study makes one (the Simulation "
+        "button too)");
+  Host host = HostOf(state, simSlot);
+  // What reads the studies through the app's host (a kept mesh, a check, an
+  // export) reads this simulation, in front or not.
+  const ui::StudyHostOverride hostScope(simSlot);
+  // Every edit is one undo step on the simulation's own tab, in front or
+  // not (a refused call leaves nothing to record). A display call brings the
+  // tab forward instead (ShowSimulation), once it is accepted.
+  std::optional<ui::SimSlotUndoGuard> undo;
+  if (!display)
+    undo.emplace(state, simSlot);
+  // The study a display call shows when it names none: the one in front on
+  // its tab, else its first.
+  const auto frontStudy = [&]() -> uint64_t {
+    if (ui::ActiveSimSlotId(state) == host.simSlot)
+      return state.simulation.activeStudyId;
+    return host.Studies().empty() ? 0 : host.Studies().front().id;
+  };
+  // The part the studies stand on, for what reads its geometry; null on an
+  // assembly subject.
+  doc = host.part;
   const auto topoOnly = [&]() {
     if (host.IsAssembly())
       throw std::runtime_error("topology optimisation is a part study; an "
@@ -1963,7 +2128,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     for (const fem::Study& s : host.Studies()) {
       // Report evaluated sizes/magnitudes (against current parameters) without
       // mutating the stored study.
-      fem::Study eval = s;
+      fem::Study eval = host.Shown(s); // the document's roles as its own
       fem::EvaluateStudyExprs(eval, host.Symbols(), nullptr);
       json loads = json::array();
       for (const fem::Load& l : eval.loads) {
@@ -2338,7 +2503,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                 "only a static study takes its shape from a topology result");
           fem::ShapeSource src;
           src.study = v.at("study").get<uint64_t>();
-          const fem::Study* topo = doc->FindStudy(src.study);
+          const fem::Study* topo = host.sim->FindStudy(src.study);
           if (topo == nullptr || topo->type != fem::AnalysisType::Topology)
             throw std::runtime_error("shape_from: study " +
                                      std::to_string(src.study) +
@@ -2368,7 +2533,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // Thermal expansion under a temperature field
       // (docs/simulation/README.md#the-thermal-load-on-a-static-study).
       if (p.contains("thermal_load"))
-        s.thermalLoad = ThermalLoadOf(p.at("thermal_load"), doc, s.id);
+        s.thermalLoad = ThermalLoadOf(
+            p.at("thermal_load"), host.IsAssembly() ? nullptr : host.sim, s.id);
       if (host.IsAssembly())
         if (const std::string why = fem::AssemblyThermalRefusal(s);
             !why.empty())
@@ -2376,7 +2542,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (const std::string why = fem::ThermalRefusal(s); !why.empty())
         throw std::runtime_error(why);
     });
-    return json::object();
+    // The participants are the simulation's, one table for its studies: a
+    // change to them is every study's, and the reply says whose.
+    json out = json::object();
+    if (p.contains("participants") && host.IsAssembly()) {
+      json shared = json::array();
+      for (const fem::Study& other : host.Studies())
+        if (other.id != id)
+          shared.push_back(other.id);
+      out["participants_shared_with"] = std::move(shared);
+    }
+    return out;
   }
   if (m == "add_keep_face" || m == "remove_keep_face") {
     // Topology keep-faces: frozen solid so bolt bosses / bearing seats survive
@@ -2427,6 +2603,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         throw std::runtime_error(
             "a keep-out is a body OR a box (box_min, box_max), not both");
       k.body = p.at("body").get<std::string>();
+      if (doc == nullptr)
+        throw std::runtime_error("add_keep_out: a keep-out body is a part's; "
+                                 "this simulation analyses an assembly");
       std::string names;
       bool found = false;
       for (const Body& b : doc->GetBodies()) {
@@ -2466,7 +2645,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
   }
   if (m == "check_topology") {
     // rpc-returns-from: src/remote/RemoteSimulation.cpp
-    return CheckTopology(state, host, doc, p);
+    return CheckTopology(state, host, p);
   }
   if (m == "export_study_inp") {
     // rpc-returns-from: src/remote/RemoteSimulation.cpp
@@ -2511,6 +2690,24 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Load l;
     l.id = host.AllocateId();
+    // The part a load's face, body or frame is read on: the subject part,
+    // or on an assembly the part of the occurrence the call names.
+    const auto paramPart = [&]() -> const Document& {
+      if (doc != nullptr)
+        return *doc;
+      if (!p.contains("occurrence"))
+        throw std::runtime_error(
+            "a load on an assembly study says whose face: pass occurrence "
+            "(id or name)");
+      const Occurrence& occ =
+          host.OccurrenceOf(p.at("occurrence"), "occurrence");
+      l.occurrenceId = occ.id;
+      const Document* d = ui::OccurrencePartDoc(state, occ);
+      if (d == nullptr)
+        throw std::runtime_error("occurrence " + occ.name +
+                                 " refers to no part in this project");
+      return *d;
+    };
     if (!fem::LoadTypeFromString(p.at("type").get<std::string>(), l.type))
       throw std::runtime_error("unknown load type '" +
                                p.at("type").get<std::string>() +
@@ -2536,10 +2733,6 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                : l.type == fem::LoadType::Convection
                    ? "film_w_m2k and ambient_c"
                    : "power_w and body"));
-      if (host.IsAssembly())
-        throw std::runtime_error(
-            "thermal loads are a part study's: an assembly study does not "
-            "solve heat yet (docs/simulation/README.md#not-done)");
       const auto number = [&](const char* key, double& into) {
         if (!p.contains(key))
           return;
@@ -2577,7 +2770,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         l.body = p.at("body").get<std::string>();
         std::string names;
         bool found = false;
-        for (const Body& b : doc->GetBodies()) {
+        for (const Body& b : paramPart().GetBodies()) {
           if (b.reference)
             continue;
           names += (names.empty() ? "'" : ", '") + b.name + "'";
@@ -2590,7 +2783,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         l.face = studyFaceOf(p.at("face"));
         fem::ResolvedFace rf;
         std::string why;
-        if (!fem::ResolveFace(*doc, l.face, "load", rf, &why))
+        if (!fem::ResolveFace(paramPart(), l.face, "load", rf, &why))
           throw std::runtime_error(why);
         if (p.contains("region"))
           l.region = DocumentIO::LoadRegionFromJson(p.at("region"), "add_load");
@@ -2638,10 +2831,6 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     if (pin) {
       refuseKey("magnitude", "");
       refuseKey("direction", "");
-      if (host.IsAssembly())
-        throw std::runtime_error(
-            "a pin support is a part study's; an assembly study holds its "
-            "part with a fixed face or a rigid neighbour's contact");
       const fem::AnalysisType at = host.Require(id).type;
       if (!SettlesStress(at))
         throw std::runtime_error(
@@ -2660,13 +2849,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     if (fem::IsFrameSupport(l.type)) {
       refuseKey("magnitude", "");
       refuseKey("direction", "");
-      if (host.IsAssembly())
-        throw std::runtime_error(
-            std::string("a ") + fem::LoadTypeToString(l.type) +
-            " support is a part study's; an assembly study holds its part "
-            "with a fixed face or a rigid neighbour's contact");
       // rpc-params: dx_mm, dx_mm_expr, dy_mm, dy_mm_expr, dz_mm, dz_mm_expr
-      ReadFrameSupportParams(p, l, *doc);
+      ReadFrameSupportParams(p, l, paramPart());
     } else {
       for (const char* key : {"hold", "dx_mm", "dy_mm", "dz_mm", "dx_mm_expr",
                               "dy_mm_expr", "dz_mm_expr", "frame"})
@@ -2733,7 +2917,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       l.contactWith =
           host.OccurrenceOf(p.at("contact_with"), "contact_with").id;
       const fem::Study& study = host.Require(id);
-      const fem::Participant* pt = study.FindParticipant(l.contactWith);
+      (void)study;
+      const fem::Participant* pt = host.sim->FindRole(l.contactWith);
       if (!pt || pt->role != fem::ParticipantRole::Rigid)
         throw std::runtime_error(
             "contact_with " + host.OccurrenceName(l.contactWith) +
@@ -2833,10 +3018,6 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       }
     }
     if (p.contains("region")) {
-      if (host.IsAssembly())
-        throw std::runtime_error(
-            "region puts a load on part of a face of a PART study; on an "
-            "assembly study load a whole face");
       if (host.Require(id).type == fem::AnalysisType::Topology)
         throw std::runtime_error(
             "region: a topology study freezes whole faces, so its loads "
@@ -2886,14 +3067,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // Off the frame (docs/ui/long-operations.md#fem-meshing-and-solving): the
       // plan is made here, the mesh on a worker; study_status says `meshing:
       // true` until it lands and then carries the same `bodies` this returns.
-      if (host.IsAssembly())
-        throw std::runtime_error(
-            "an assembly study meshes synchronously (run_study async: true "
-            "meshes and solves off the frame)");
       std::string err;
       ui::JobStart start;
       start.owner = p.value("outlive_client", false) ? 0 : state.rpcConnection;
-      if (!ui::StartMeshRun(state, *doc, id, &err, &start))
+      if (!ui::StartSimMeshRun(state, host.simSlot, id, &err, &start))
         throw std::runtime_error(err);
       return json{{"started", true},
                   {"running", true},
@@ -2972,13 +3149,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     else
       throw std::runtime_error("unknown view: " + v +
                                "; views: off, edges, quality, size");
-    const uint64_t shown = study.value_or(state.simulation.activeStudyId);
+    const uint64_t shown = study.value_or(frontStudy());
     if (view != ui::SimulationState::MeshView::Off &&
         ui::StudyMesh(state, shown) == nullptr)
       throw std::runtime_error(
           "study " + std::to_string(shown) +
           " has no mesh to draw: mesh_study {id} makes one and keeps it");
-    ui::EnterSimulation(state);
+    ShowSimulation(state, host.simSlot);
     if (study)
       state.simulation.activeStudyId = *study;
     state.simulation.meshView = view;
@@ -3060,13 +3237,15 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     if (m == "study_status") {
       const ui::BackgroundJob* job = studyJob();
       const uint64_t jobId = job ? job->id : 0;
-      const ui::MeshRunStatus mrs = ui::GetMeshRunStatus(state, id);
+      const ui::MeshRunStatus mrs =
+          ui::GetMeshRunStatus(state, id, host.simSlot);
       if (mrs.running)
         return json{{"running", true},
                     {"job", jobId},
                     {"meshing", true},
                     {"elapsed_seconds", mrs.elapsedSeconds}};
-      const ui::StudyRunStatus srs = ui::GetStudyRunStatus(state, id);
+      const ui::StudyRunStatus srs =
+          ui::GetStudyRunStatus(state, id, host.simSlot);
       if (srs.running) {
         json out{{"running", true},
                  {"job", jobId},
@@ -3084,7 +3263,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         out["iterations"] = srs.iterations;
         return out;
       }
-      const ui::TopoRunStatus st = ui::GetTopologyStatus(state, id);
+      const ui::TopoRunStatus st =
+          ui::GetTopologyStatus(state, id, host.simSlot);
       if (st.running)
         return json{{"running", true},
                     {"job", jobId},
@@ -3111,7 +3291,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (!s->error.empty())
         out["error"] = s->error;
       if (const ui::MeshReport* mr =
-              doc ? ui::MeshReportFor(state, *doc, id) : nullptr) {
+              ui::SimMeshReportFor(state, host.simSlot, id)) {
         json mesh = MeshReportJson(state, *mr, id);
         if (!mr->error.empty())
           mesh["error"] = mr->error;
@@ -3181,7 +3361,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
               "study_status for it, or leave `async` out");
         std::string err;
         topoOnly();
-        if (!ui::StartTopologyRun(state, *doc, id, &err, &start))
+        if (!ui::StartSimTopologyRun(state, host.simSlot, id, &err, &start))
           throw std::runtime_error(err);
         if (!start.reused)
           return started("topo");
@@ -3189,24 +3369,16 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         // Static/modal: async on request (a big mesh can outlive a remote
         // client's socket timeout when solved synchronously).
         std::string err;
-        const bool ok = host.IsAssembly()
-                            ? ui::StartAssemblyStudyRun(state, *host.asmDoc, id,
-                                                        &err, &start)
-                            : ui::StartStudyRun(state, *doc, id, &err, &start);
+        const bool ok =
+            ui::StartSimStudyRun(state, host.simSlot, id, &err, &start);
         if (!ok)
           throw std::runtime_error(err);
         if (!start.reused)
           return started("study");
-      } else if (!ui::ReuseStudyResult(
-                     state, doc, host.IsAssembly() ? host.asmDoc : nullptr, id,
-                     &start)) {
+      } else if (!ui::ReuseSimStudyResult(state, host.simSlot, id, &start)) {
         std::string err;
-        const bool ran =
-            host.IsAssembly()
-                ? ui::RunAssemblyStudyAndCache(state, *host.asmDoc, id, &err,
-                                               start.timeoutSeconds, &start)
-                : ui::RunStudyAndCache(state, *doc, id, &err,
-                                       start.timeoutSeconds, &start);
+        const bool ran = ui::RunSimStudyAndCache(state, host.simSlot, id, &err,
+                                                 start.timeoutSeconds, &start);
         if (!ran)
           throw std::runtime_error(err);
         if (const fem::StudyRuntime* done = host.Results(id))
@@ -3309,7 +3481,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // must know which bound each neighbour holds — absent is a lower bound
     // on stiffness, rigid an upper one.
     json roles = json::array();
-    for (const fem::Participant& pt : s->participants)
+    for (const fem::Participant& pt : host.sim->Roles())
       roles.push_back({{"occurrence", pt.occurrenceId},
                        {"name", host.OccurrenceName(pt.occurrenceId)},
                        {"role", fem::ParticipantRoleToString(pt.role)}});
@@ -3976,11 +4148,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     if (onCalculix && !fem::IsNonlinear(*s)) {
       fem::Study twin = *s;
       twin.solver = fem::Solver::Auto;
+      // The twin planned in a copy of the simulation (a copy shares the
+      // store and is never kept).
+      fem::SimDocument withTwin = *host.sim;
+      withTwin.ReplaceStudy(twin);
       const uint64_t twinHash =
-          host.IsAssembly()
-              ? fem::AssemblyStudyInputKey(*host.asmDoc, twin,
-                                           ui::AssemblyStudyContextFor(state))
-              : fem::StudyInputKey(*doc, twin);
+          fem::SimStudyInputKey(ui::SimContextFor(state, withTwin), twin.id);
       if (const auto own = twinHash != 0
                                ? state.studyResultsByInput.Find(twinHash)
                                : nullptr) {
@@ -4479,7 +4652,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       // part's face, placed, and the solved mesh's facets that lie on it.
       const Occurrence& occ = host.OccurrenceOf(p.at("occurrence"), "probe");
       const std::vector<Body> placed =
-          ui::AssemblyStudyContextFor(state).placedBodies(occ.id);
+          ui::SimContextFor(state, *host.sim).placedBodies(occ.id);
       TopoDS_Shape onFace;
       for (const Body& b : placed) {
         if (face.featureId != 0 && b.createdBy != face.featureId)
@@ -4740,15 +4913,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       study = p.at("study").get<uint64_t>();
       host.Require(*study);
     }
-    ui::EnterSimulation(state);
+    ShowSimulation(state, host.simSlot);
     if (study)
       state.simulation.activeStudyId = *study;
     return json{{"active", state.simulation.active},
                 {"study", state.simulation.activeStudyId}};
-  }
-  if (m == "exit_simulation") {
-    ui::ExitSimulation(state);
-    return json::object();
   }
   if (m == "set_result_display") {
     // Show/warp a study's result overlay (display only, like set_explode).
@@ -4807,8 +4976,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                                    "read against yield (von_mises, "
                                    "principal_max, principal_min); field " +
                                    f + " is not one");
-        const std::optional<double> y = ui::YieldClampMPa(
-            state, study.value_or(state.simulation.activeStudyId));
+        const std::optional<double> y =
+            ui::YieldClampMPa(state, study.value_or(frontStudy()));
         if (!y)
           throw std::runtime_error("range_max \"yield\": no solved body's "
                                    "material has a yield strength");
@@ -4882,8 +5051,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // missing, not drawn as nothing (a study not yet run takes the choice:
     // it is shown when the run lands).
     {
-      const uint64_t shownStudy =
-          study.value_or(state.simulation.activeStudyId);
+      const uint64_t shownStudy = study.value_or(frontStudy());
       if (field != ui::SimulationState::Field::None &&
           host.Find(shownStudy) != nullptr &&
           host.Results(shownStudy) != nullptr) {
@@ -4916,8 +5084,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       mode = v.get<int>(); // checked above
     }
     if (p.contains("case")) {
-      const fem::StudyRuntime* rt =
-          host.Results(study.value_or(state.simulation.activeStudyId));
+      const fem::StudyRuntime* rt = host.Results(study.value_or(frontStudy()));
       if (!rt)
         throw std::runtime_error("`case`: the study has not been run");
       caseIndex = CaseIndex(rt->caseNames, p.at("case"));
@@ -4931,7 +5098,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       threshold = static_cast<float>(v);
     }
 
-    ui::EnterSimulation(state);
+    ShowSimulation(state, host.simSlot);
     if (study)
       state.simulation.activeStudyId = *study;
     if (state.simulation.field != field) // a range is one field's

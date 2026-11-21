@@ -2069,8 +2069,12 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
 # ---------------------------------------------------------------------------
 # Simulation (FEM stress analysis)
 # ---------------------------------------------------------------------------
-# A Study is a document-level linear-static analysis: fix faces, load faces,
-# solve for von Mises stress + displacement. Faces are {feature_id, element}
+# A Study lives in a simulation: a document of its own, a tab, analysing a
+# part or an assembly. Every study call takes an optional `simulation` (its
+# tab's name or id; default the simulation tab in front, else the active
+# part's or assembly's one simulation, which add_study makes when there is
+# none). A study fixes faces, loads faces and solves for von Mises stress +
+# displacement. Faces are {feature_id, element}
 # refs from list_elements (feature_id = the body's created_by). Assign a real
 # material first (set_material, e.g. "steel") — a study on the default material
 # has no stiffness data and errors. Magnitudes are N (force) / MPa (pressure);
@@ -2078,7 +2082,9 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
 # re-run explicitly. The whole loop is headless: no GUI needed.
 
 
-_reference("add_study", "Create a FEM study on the active part. kind = "
+_reference("add_study", "Create a FEM study in the active part's (or "
+          "assembly's) simulation, made behind the active tab when it has "
+          "none; `simulation` names another. kind = "
           "'static' (default) | 'modal' | 'topology' | 'buckling' | "
           "'thermal' (steady heat: temperature, heat_flux, convection and "
           "heat_generation loads; docs/simulation/README.md#thermal). Returns "

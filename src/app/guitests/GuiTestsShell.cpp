@@ -207,6 +207,8 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       return picked;
     };
     IM_CHECK(clickTop());
+    IM_CHECK_SILENT(s_App->commands != nullptr); // out of it: the part's tab
+    const size_t partDepth = s_App->commands->UndoDepth();
     if (kField) {
       ui::EnterSimulation(*s_App);
       s_App->simulation.field = ui::SimulationState::Field::VonMises;
@@ -217,7 +219,13 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     }
 
     const size_t underlays = s_App->underlayRenderer->DrawCount();
-    const size_t undoDepth = s_App->commands->UndoDepth();
+    // The history in front: the simulation tab's snapshots while its field
+    // is up, else the part's commands.
+    const auto historyDepth = [] {
+      return s_App->commands ? s_App->commands->UndoDepth()
+                             : s_App->simHistory.undo.size();
+    };
+    const size_t undoDepth = historyDepth();
     const size_t tabs = s_App->parts.size();
     const size_t activeTab = s_App->activePart;
     const MeshRenderer* oldMesh = s_App->meshRenderer;
@@ -243,7 +251,7 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
                s_App->fieldRenderer->HasMesh();
       }));
     IM_CHECK_EQ(s_App->underlayRenderer->DrawCount(), underlays);
-    IM_CHECK_EQ(s_App->commands->UndoDepth(), undoDepth);
+    IM_CHECK_EQ(historyDepth(), undoDepth);
     IM_CHECK_EQ(s_App->parts.size(), tabs);
     IM_CHECK_EQ(s_App->activePart, activeTab);
     // The menu bar says so, once.
@@ -307,7 +315,9 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
                    "this window here",
                    start.c_str());
     IM_CHECK(!s_App->renderer.lost);
-    IM_CHECK_EQ(s_App->commands->UndoDepth(), undoDepth);
+    // clickTop left the simulation for the part: the part's history.
+    IM_CHECK(s_App->commands != nullptr);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), partDepth);
     // Leave the menu bar as the next test expects it.
     s_App->rendererRestartedNoticeUntil = -1.0;
     s_App->renderer.lastRebuildAt = -1.0;

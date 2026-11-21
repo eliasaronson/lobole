@@ -174,7 +174,11 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
 // false if no such run is active.
 bool CancelTopologyRun(AppState& state, uint64_t studyId);
 
-TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
+// Status is keyed by (simulation slot, study): study ids are unique only
+// within their document, so a run on one simulation never reads as another's.
+// `simSlotId` 0 is a part's or an assembly's own study.
+TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId,
+                                uint64_t simSlotId = 0);
 
 // The async static/modal counterparts (StudyJob): prepare-on-main +
 // solve-on-worker, polled at the same sites as the topology run. A cancel
@@ -219,12 +223,14 @@ struct MeshRunStatus {
   bool running = false;
   double elapsedSeconds = 0.0;
 };
-MeshRunStatus GetMeshRunStatus(const AppState& state, uint64_t studyId);
+MeshRunStatus GetMeshRunStatus(const AppState& state, uint64_t studyId,
+                               uint64_t simSlotId = 0);
 // The last finished mesh run's report for `studyId` of `doc`, or null.
 const MeshReport* MeshReportFor(const AppState& state, const Document& doc,
                                 uint64_t studyId);
 
-StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId);
+StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId,
+                                 uint64_t simSlotId = 0);
 
 // A world-space cross at the peak of the displayed result field (max von Mises
 // or max displacement), warped by the deform scale. Pushed into the no-depth

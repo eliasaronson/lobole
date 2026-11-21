@@ -5,6 +5,7 @@
 #include "ui/AlignTool.h"
 #include "ui/AssemblyActions.h"
 #include "ui/FitTool.h"
+#include "ui/SimRunActions.h"
 #include "ui/StudyPanel.h"
 
 #include "cad/FaceSelector.h"
@@ -253,6 +254,13 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
         } else if (auto ref =
                        FaceElementRef(state, face.meshId, face.faceIndex)) {
           SelectionItem item{SelectionItem::Kind::Face, 0, *ref};
+          // On a simulation of an assembly, the occurrence the face is on:
+          // what a load's anchor names.
+          if (state.sim)
+            for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
+              if (m.meshId == face.meshId)
+                item.id = SimBodyOccurrence(const_cast<AppState&>(state),
+                                            m.bodyIndex);
           // Which placed part was actually under the cursor. Without it a CAM
           // target resolves by searching for the first body that answers to
           // the same element name (v76).
@@ -504,6 +512,28 @@ bool ResolveElementItem(const AppState& state, const SelectionItem& item,
     bodies = &part->GetBodies();
   } else if (state.document) {
     bodies = &state.document->GetBodies();
+  } else if (state.sim) {
+    // A simulation tab draws its subject's bodies, placed (SimSubjectBodies),
+    // and an element is named within the occurrence it belongs to.
+    AppState& st = const_cast<AppState&>(state);
+    const std::vector<Body>& flat = SimSubjectBodies(st);
+    for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
+      if (m.bodyIndex >= flat.size() ||
+          SimBodyOccurrence(st, m.bodyIndex) != item.id)
+        continue;
+      const Body& body = flat[m.bodyIndex];
+      if (item.element.featureId != 0 &&
+          body.createdBy != item.element.featureId)
+        continue;
+      const auto idx = edge ? body.elementMap.ResolveEdge(item.element.name)
+                            : body.elementMap.Resolve(item.element.name);
+      if (idx) {
+        meshId = m.meshId;
+        index = static_cast<uint32_t>(*idx);
+        return true;
+      }
+    }
+    return false;
   } else {
     return false;
   }

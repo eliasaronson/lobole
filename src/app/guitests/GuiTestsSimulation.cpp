@@ -3,15 +3,21 @@
 
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Measure.h"
+#include "core/fem/SimDocument.h"
+#include "remote/RemoteSimulation.h"
+#include "remote/RpcParams.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h" // the mesh view's style
-#include "render/MeshRenderer.h" // InstanceHighlightRanges (tint test)
-#include "ui/AssemblyActions.h"  // UndoAssembly, PartDocById (S1)
-#include "ui/DocumentSlots.h"    // AddAssembly, SetActivePart
+#include "render/MeshRenderer.h"  // InstanceHighlightRanges (tint test)
+#include "ui/AppActionsInternal.h"
+#include "ui/AssemblyActions.h" // UndoAssembly, PartDocById (S1)
+#include "ui/DocumentSlots.h"   // AddAssembly, SetActivePart
+#include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (arrow-placement test)
+#include "ui/SimRunActions.h"
 #include "ui/SimulationActions.h"
 #include "ui/SimulationView.h" // the kept mesh, the check, the field on show
-#include "ui/StudyHost.h" // ModifyStudy, SimulationContacts, StudyStale
+#include "ui/StudyHost.h"      // ModifyStudy, SimulationContacts, StudyStale
 #include "ui/StudyPanel.h"
 #include "ui/VariableActions.h"    // SetProjectVariable
 #include "ui/ViewportHandleDraw.h" // DrawViewportHandles
@@ -25,6 +31,40 @@
 // shard partition from the binary's own --gui-test-list and asserts every
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
+
+namespace {
+// The face of `body` whose outward normal is `n` (a box's), as a study
+// names it: {the body's feature, the face's stable name}.
+ElementRef FaceFacing(const Body& body, const glm::dvec3& n) {
+  for (const auto& [index, name] : body.elementMap.names)
+    if (const auto info = Measure::DescribeFaceAt(body, index))
+      if (glm::dot(info->normal, n) > 0.999)
+        return ElementRef{body.createdBy, name};
+  return {};
+}
+
+// A steel block on the part in front: 100 x 100 x 16 at the origin.
+void SteelBlock(ImGuiTestContext* ctx) {
+  AddFixtureBox(ctx);
+  const size_t index = Doc()->FeatureCount() - 1;
+  auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(index));
+  IM_CHECK_SILENT(box != nullptr);
+  nlohmann::json before = DocumentIO::FeatureToJson(*box);
+  box->position = glm::vec3(0.0f);
+  box->width = 100.0;
+  box->height = 100.0;
+  box->depth = 16.0;
+  box->SetMaterial("steel");
+  nlohmann::json after = DocumentIO::FeatureToJson(*box);
+  s_App->commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+  ctx->Yield(2);
+}
+
+// The slot id of the simulation tab in front.
+uint64_t FrontSimSlot() { return ui::ActiveSimSlotId(*s_App); }
+} // namespace
+
 void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
   (void)t;
@@ -37,7 +77,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.active);
     ctx->ItemClick("//###ToolWindow/###study_gravity");
     ctx->Yield();
-    const fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    const fem::Study* study = Sim()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
     // Straight down in the world frame — a hand-written axis here once
     // sagged the part sideways and bent it about the wrong axis.
@@ -95,7 +135,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
-    const fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    const fem::Study* study = Sim()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
     IM_CHECK_EQ(study->loads.size(), (size_t)1);
     const fem::Load& load = study->loads[0];
@@ -118,14 +158,14 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     AddFixtureBox(ctx);
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
+    fem::Study* study = Sim()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
 
     // A force on a known face, pushing -Y.
     const Body& body = Doc()->GetBodies()[0];
     IM_CHECK(!body.elementMap.names.empty());
     fem::Load load;
-    load.id = Doc()->AllocateId();
+    load.id = Sim()->AllocateId();
     load.type = fem::LoadType::Force;
     load.face =
         ElementRef{body.createdBy, body.elementMap.names.begin()->second};
@@ -191,14 +231,13 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.loadDrag.active);
     ctx->MouseUp(ImGuiMouseButton_Left);
     ctx->Yield(2);
-    study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
+    study = Sim()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr && !study->loads.empty());
     IM_CHECK(study->loads[0].magnitude > 100.0); // pulling grew it
     // ONE undo restores the grab-time magnitude — not a step per frame.
-    IM_CHECK(s_App->commands->CanUndo());
-    s_App->commands->Undo(*Doc());
+    IM_CHECK(ui::UndoSim(*s_App));
     ctx->Yield();
-    study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
+    study = Sim()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr && !study->loads.empty());
     IM_CHECK(std::abs(study->loads[0].magnitude - 100.0) < 1e-6);
     ui::ExitSimulation(*s_App);
@@ -215,7 +254,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     AddFixtureBox(ctx);
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
+    fem::Study* study = Sim()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
 
     const Body& body = Doc()->GetBodies()[0];
@@ -230,7 +269,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const glm::vec3 n = s_App->faceSelector->GetFaceNormal(mesh, index);
 
     fem::Load load;
-    load.id = Doc()->AllocateId();
+    load.id = Sim()->AllocateId();
     load.type = fem::LoadType::Force;
     load.face = face;
     load.magnitude = 100.0;
@@ -331,7 +370,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const uint64_t studyId = s_App->simulation.activeStudyId;
     ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
-    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
 
     // Euler-Bernoulli for a uniformly distributed load, steel E = 210 GPa:
     // I = b h^3/12 = 20*10^3/12 = 1666.7 mm^4, w = 100/200 = 0.5 N/mm, so
@@ -448,7 +487,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK(ui::CachedStudyCheck(*s_App, studyId).problems.empty());
     IM_CHECK(!ctx->ItemExists("//###ToolWindow/###check_row_0"));
-    const fem::Study before = *Doc()->FindStudy(studyId);
+    const fem::Study before = *Sim()->FindStudy(studyId);
     ui::ModifyStudy(*s_App, studyId, "Remove support", [](fem::Study& cs) {
       std::erase_if(cs.loads, [](const fem::Load& l) {
         return l.type == fem::LoadType::Fixed;
@@ -613,14 +652,14 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_SILENT(popup != nullptr);
     ctx->ItemClick((std::string("//") + popup->Name + "/**/Buckling").c_str());
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(studyId);
+    const fem::Study* st = Sim()->FindStudy(studyId);
     IM_CHECK(st->type == fem::AnalysisType::Buckling);
     IM_CHECK_EQ(st->numModes, fem::kBucklingFactorsDefault);
     // CalculiX solves buckling too: the solver combo stays.
     IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_solver"));
     ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
-    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     IM_CHECK(rt != nullptr && !rt->bodies.empty());
     IM_CHECK(rt->bodies[0].buckling.solved);
     IM_CHECK(rt->bodies[0].results.modes.size() >= 2);
@@ -654,23 +693,23 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick(
         (std::string("//") + popup->Name + "/**/CalculiX (not found)").c_str());
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(studyId);
+    const fem::Study* st = Sim()->FindStudy(studyId);
     IM_CHECK(st != nullptr && st->solver == fem::Solver::Calculix);
     ctx->ItemClick("//###ToolWindow/###study_run");
     ctx->Yield(2);
-    st = Doc()->FindStudy(studyId);
+    st = Sim()->FindStudy(studyId);
     IM_CHECK(st->error.find("calculix_path setting") != std::string::npos);
     IM_CHECK(st->error.find("sudo apt install calculix-ccx") !=
              std::string::npos);
     IM_CHECK(!ui::BackgroundJobRunning(*s_App, "study"));
-    IM_CHECK(Doc()->StudyResults(studyId) == nullptr);
+    IM_CHECK(Sim()->StudyResults(studyId) == nullptr);
 
     ctx->ItemClick("//###ToolWindow/###study_analysis");
     ctx->Yield();
     popup = ctx->UiContext->OpenPopupStack.back().Window;
     ctx->ItemClick((std::string("//") + popup->Name + "/**/Modal").c_str());
     ctx->Yield(2);
-    st = Doc()->FindStudy(studyId);
+    st = Sim()->FindStudy(studyId);
     IM_CHECK(st->type == fem::AnalysisType::Modal);
     IM_CHECK(st->solver == fem::Solver::Auto);
     IM_CHECK(!ctx->ItemExists("//###ToolWindow/###study_solver"));
@@ -690,7 +729,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     ctx->ItemClick("//###ToolWindow/###case_add");
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(studyId);
+    const fem::Study* st = Sim()->FindStudy(studyId);
     IM_CHECK_EQ(st->loadCases.size(), (size_t)2);
     IM_CHECK(st->loads[1].loadCase == st->loadCases[0].name);
 
@@ -711,13 +750,13 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::SimulationApplyToFace(*s_App,
                               ElementRef{cb, std::to_string(cb) + "/face1"});
     ctx->Yield(2);
-    st = Doc()->FindStudy(studyId);
+    st = Sim()->FindStudy(studyId);
     IM_CHECK_EQ(st->loads.size(), (size_t)3);
     IM_CHECK(st->loads[2].loadCase == "Case 2");
 
     ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
-    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     IM_CHECK_EQ(rt->caseNames.size(), (size_t)2);
     IM_CHECK_EQ(rt->bodies[0].cases.size(), (size_t)2);
     // Case 1 bends the beam down, case 2 pushes its end: different answers.
@@ -744,7 +783,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_SILENT(popup != nullptr);
     ctx->ItemClick((std::string("//") + popup->Name + "/**/Topology").c_str());
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(studyId);
+    const fem::Study* st = Sim()->FindStudy(studyId);
     IM_CHECK(st != nullptr);
     IM_CHECK(st->type == fem::AnalysisType::Topology);
 
@@ -758,7 +797,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 
     ctx->ItemClick("//###ToolWindow/###topo_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
-    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     // The OC bisection enforces the volume every iteration, so this holds
     // whatever the compliance does — UNLESS every sensitivity is zero, which
     // is exactly what a zero displacement field produces. That was the shape
@@ -817,7 +856,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     }
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
+    fem::Study* study = Sim()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
     const Body& body = Doc()->GetBodies()[0];
     IM_CHECK(!body.elementMap.names.empty());
@@ -855,7 +894,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // (the shaft's far end, the second vertex of its first primitive) on
     // the face.
     fem::Load load;
-    load.id = Doc()->AllocateId();
+    load.id = Sim()->AllocateId();
     load.type = fem::LoadType::Pressure;
     load.face = face;
     load.magnitude = 0.5;
@@ -898,7 +937,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     AddFixtureBox(ctx);
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
+    fem::Study* study = Sim()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
     const Body& body = Doc()->GetBodies()[0];
     IM_CHECK(body.elementMap.names.size() >= 2);
@@ -907,12 +946,12 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ++it;
     const ElementRef loadedFace{body.createdBy, it->second};
     fem::Load fixed;
-    fixed.id = Doc()->AllocateId();
+    fixed.id = Sim()->AllocateId();
     fixed.type = fem::LoadType::Fixed;
     fixed.face = fixedFace;
     study->loads.push_back(fixed);
     fem::Load press;
-    press.id = Doc()->AllocateId();
+    press.id = Sim()->AllocateId();
     press.type = fem::LoadType::Pressure;
     press.face = loadedFace;
     press.magnitude = 1.0;
@@ -963,7 +1002,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     AddFixtureBox(ctx);
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
+    fem::Study* study = Sim()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
     study->gravity = conv::kGravity;
     ctx->Yield(2);
@@ -1046,13 +1085,14 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     }
     ctx->Yield(3);
 
-    // The toolbar opens the Simulation tool window on an assembly tab.
+    // The toolbar opens the assembly's simulation tab, made for it.
     ToolbarClick(ctx, "###tb_asm_simulation");
     ctx->Yield(2);
     IM_CHECK(s_App->simulation.active);
-    IM_CHECK(s_App->simulationToolOpen);
-    IM_CHECK(ctx->ItemExists("//Simulation###ToolWindow/###study_add"));
-    IM_CHECK_EQ(s_App->assembly->GetStudies().size(), (size_t)1);
+    IM_CHECK(s_App->sim != nullptr);
+    IM_CHECK(s_App->sim->Subject().kind == fem::SubjectKind::Assembly);
+    IM_CHECK(ctx->ItemExists("//###Model/**/###study_add"));
+    IM_CHECK_EQ(Sim()->GetStudies().size(), (size_t)1);
     const uint64_t studyId = s_App->simulation.activeStudyId;
     IM_CHECK(studyId != 0);
 
@@ -1071,19 +1111,19 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ctx->ItemExists(clamp.c_str()));
     ctx->ItemClick(clamp.c_str());
     ctx->Yield(2);
-    const fem::Study* st = s_App->assembly->FindStudy(studyId);
+    const fem::Study* st = Sim()->FindStudy(studyId);
     IM_CHECK(st != nullptr);
     IM_CHECK_EQ(st->loads.size(), (size_t)1);
     IM_CHECK(st->loads[0].type == fem::LoadType::Fixed);
     IM_CHECK_EQ(st->loads[0].contactWith, lower);
-    // And one undo takes the clamp away again: a full-state snapshot.
-    ui::UndoAssembly(*s_App);
+    // And one undo takes the clamp away again: a snapshot of the simulation.
+    ui::UndoSim(*s_App);
     ctx->Yield();
-    st = s_App->assembly->FindStudy(studyId);
+    st = Sim()->FindStudy(studyId);
     IM_CHECK(st != nullptr && st->loads.empty());
     ctx->ItemClick(clamp.c_str());
     ctx->Yield(2);
-    st = s_App->assembly->FindStudy(studyId);
+    st = Sim()->FindStudy(studyId);
     IM_CHECK(st != nullptr && st->loads.size() == 1);
 
     // A face clicked on the SUPPORT is refused in words, not dropped.
@@ -1094,7 +1134,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
                               body.elementMap.names.begin()->second};
     ui::SimulationApplyToFace(*s_App, lower, someFace);
     IM_CHECK(!s_App->simulation.placeRefusal.empty());
-    st = s_App->assembly->FindStudy(studyId);
+    st = Sim()->FindStudy(studyId);
     IM_CHECK(st != nullptr && st->loads.size() == 1);
     ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::None);
 
@@ -1108,14 +1148,15 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!contacts[0].rigidFaces.empty());
     bool tinted = false, ghost = false, meshedGhost = false;
     for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes) {
-      if (m.occurrenceId == lower) {
+      const uint64_t occ = ui::SimBodyOccurrence(*s_App, m.bodyIndex);
+      if (occ == lower) {
         ghost = ghost || s_App->meshRenderer->IsInstanceGhost(m.meshId);
         for (const glm::uvec2& r :
              s_App->meshRenderer->InstanceHighlightRanges(m.meshId))
           tinted = tinted || (r.y >> MeshRenderer::kTintShift) ==
                                  MeshRenderer::kTintFixture;
       }
-      if (m.occurrenceId == upper)
+      if (occ == upper)
         meshedGhost =
             meshedGhost || s_App->meshRenderer->IsInstanceGhost(m.meshId);
     }
@@ -1124,21 +1165,21 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!meshedGhost);
 
 #ifdef HAVE_NETGEN
-    // Run from the window; the result lands on the assembly and is fresh.
+    // Run from the window; the result lands on the simulation, fresh.
     ctx->ItemClick("//Simulation###ToolWindow/###study_run");
     WaitFor(
         ctx, "the assembly study's result",
         [&] {
-          const fem::Study* now = s_App->assembly->FindStudy(studyId);
-          return s_App->assembly->StudyResults(studyId) != nullptr ||
+          const fem::Study* now = Sim()->FindStudy(studyId);
+          return Sim()->StudyResults(studyId) != nullptr ||
                  (now != nullptr && !now->error.empty());
         },
         120.0);
-    const fem::Study* cur = s_App->assembly->FindStudy(studyId);
+    const fem::Study* cur = Sim()->FindStudy(studyId);
     IM_CHECK(cur != nullptr);
     if (!cur->error.empty())
       ctx->LogError("assembly study: %s", cur->error.c_str());
-    const fem::StudyRuntime* rt = s_App->assembly->StudyResults(studyId);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     IM_CHECK(rt != nullptr);
     IM_CHECK(rt->maxDisplacement >= 0.0);
     IM_CHECK(!ui::StudyStale(*s_App, studyId));
@@ -1184,7 +1225,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       ui::EnterSimulation(*s_App);
       ctx->Yield(2);
       const uint64_t id = s_App->simulation.activeStudyId;
-      IM_CHECK_SILENT(Doc()->FindStudy(id) != nullptr);
+      IM_CHECK_SILENT(Sim()->FindStudy(id) != nullptr);
       const Body& body = Doc()->GetBodies()[0];
       std::vector<ElementRef> faces;
       for (const auto& [index, name] : body.elementMap.names)
@@ -1193,19 +1234,19 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       uint64_t forceId = 0;
       ui::ModifyStudy(*s_App, id, "loads", [&](fem::Study& st) {
         fem::Load fixed;
-        fixed.id = Doc()->AllocateId();
+        fixed.id = Sim()->AllocateId();
         fixed.type = fem::LoadType::Fixed;
         fixed.face = faces[0];
         st.loads.push_back(fixed);
         fem::Load force;
-        force.id = forceId = Doc()->AllocateId();
+        force.id = forceId = Sim()->AllocateId();
         force.type = fem::LoadType::Force;
         force.face = faces[1];
         force.magnitude.expr = "load_n";
         st.loads.push_back(force);
       });
       ctx->Yield(3);
-      const fem::Study* st = Doc()->FindStudy(id);
+      const fem::Study* st = Sim()->FindStudy(id);
       IM_CHECK_SILENT(st != nullptr);
       const fem::Load* force = nullptr;
       for (const fem::Load& l : st->loads)
@@ -1238,7 +1279,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     const uint64_t second = s_App->simulation.activeStudyId;
     IM_CHECK(second != first);
-    IM_CHECK_EQ(Doc()->GetStudies().size(), (size_t)2);
+    IM_CHECK_EQ(Sim()->GetStudies().size(), (size_t)2);
 
     ctx->ItemClick(
         ("//###Model/**/###study_sel_" + std::to_string(first)).c_str());
@@ -1253,8 +1294,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ctx->ItemClick("//$FOCUSED/###study_delete");
     ctx->Yield(2);
-    IM_CHECK_EQ(Doc()->GetStudies().size(), (size_t)1);
-    IM_CHECK_EQ(Doc()->GetStudies()[0].id, first);
+    IM_CHECK_EQ(Sim()->GetStudies().size(), (size_t)1);
+    IM_CHECK_EQ(Sim()->GetStudies()[0].id, first);
 
     ctx->ItemClick("//###ToolWindow/###simulation_close");
     ctx->Yield(2);
@@ -1286,7 +1327,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ui::SimulationApplyToFace(*s_App, side);
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    const fem::Study* st = Sim()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK_SILENT(st != nullptr);
     IM_CHECK_EQ(st->loads.size(), (size_t)1);
     IM_CHECK(st->loads[0].type == fem::LoadType::Torque);
@@ -1321,7 +1362,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::SimulationApplyToFace(*s_App, flat);
     ctx->Yield(2);
     const uint64_t sid = s_App->simulation.activeStudyId;
-    IM_CHECK(Doc()->FindStudy(sid)->loads.empty());
+    IM_CHECK(Sim()->FindStudy(sid)->loads.empty());
     IM_CHECK(s_App->simulation.placeRefusal.find("not cylindrical") !=
              std::string::npos);
     // Still armed: choose Z in the axis combo and click again.
@@ -1337,7 +1378,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.torqueAxisChosen);
     ui::SimulationApplyToFace(*s_App, flat);
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(sid);
+    const fem::Study* st = Sim()->FindStudy(sid);
     IM_CHECK_EQ(st->loads.size(), (size_t)1);
     IM_CHECK(st->loads[0].type == fem::LoadType::Torque);
     IM_CHECK(st->loads[0].HasAxis());
@@ -1374,7 +1415,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const uint64_t sid = s_App->simulation.activeStudyId;
     ui::SimulationApplyToFace(*s_App, flat);
     ctx->Yield(2);
-    IM_CHECK(Doc()->FindStudy(sid)->loads.empty());
+    IM_CHECK(Sim()->FindStudy(sid)->loads.empty());
     IM_CHECK(s_App->simulation.placeRefusal.find("not cylindrical") !=
              std::string::npos);
     ctx->ItemClick("//###ToolWindow/###sim_pin_fix_rotation");
@@ -1382,7 +1423,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.pendingPinFixRotation);
     ui::SimulationApplyToFace(*s_App, side);
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(sid);
+    const fem::Study* st = Sim()->FindStudy(sid);
     IM_CHECK_EQ(st->loads.size(), (size_t)1);
     IM_CHECK(st->loads[0].type == fem::LoadType::Pin);
     IM_CHECK(st->loads[0].fixRotation);
@@ -1423,7 +1464,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::SimulationApplyToFace(*s_App, flats[0]);
     ctx->Yield(2);
     {
-      const fem::Study* st = Doc()->FindStudy(sid);
+      const fem::Study* st = Sim()->FindStudy(sid);
       IM_CHECK_EQ(st->loads.size(), (size_t)1);
       IM_CHECK(st->loads[0].type == fem::LoadType::Roller);
       IM_CHECK(ui::SimulationLoadLabel(st->loads[0]) == "roller");
@@ -1434,7 +1475,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     s_App->simulation.pendingHold = {false, false, false};
     ui::SimulationApplyToFace(*s_App, flats[1]);
     ctx->Yield(2);
-    IM_CHECK_EQ(Doc()->FindStudy(sid)->loads.size(), (size_t)1);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)1);
     IM_CHECK(s_App->simulation.placeRefusal.find("Tick the directions") !=
              std::string::npos);
     ctx->ItemClick("//###ToolWindow/###sim_held_x");
@@ -1442,7 +1483,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.pendingHold[0]);
     ui::SimulationApplyToFace(*s_App, flats[1]);
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(sid);
+    const fem::Study* st = Sim()->FindStudy(sid);
     IM_CHECK_EQ(st->loads.size(), (size_t)2);
     IM_CHECK(st->loads[1].type == fem::LoadType::Held);
     IM_CHECK(st->loads[1].hold[0] && !st->loads[1].hold[1] &&
@@ -1485,7 +1526,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const uint64_t sid = s_App->simulation.activeStudyId;
     ui::SimulationApplyToFace(*s_App, side);
     ctx->Yield(2);
-    IM_CHECK(Doc()->FindStudy(sid)->loads.empty());
+    IM_CHECK(Sim()->FindStudy(sid)->loads.empty());
     IM_CHECK(s_App->simulation.placeRefusal.find("not flat") !=
              std::string::npos);
     ctx->ItemInputValue("//###ToolWindow/###sim_contact_friction", 0.25f);
@@ -1493,7 +1534,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.pendingContactFriction == 0.25);
     ui::SimulationApplyToFace(*s_App, flat);
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(sid);
+    const fem::Study* st = Sim()->FindStudy(sid);
     IM_CHECK_EQ(st->loads.size(), (size_t)1);
     IM_CHECK(st->loads[0].type == fem::LoadType::Contact);
     IM_CHECK(st->loads[0].friction == 0.25);
@@ -1536,7 +1577,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     popup = ctx->UiContext->OpenPopupStack.back().Window;
     ctx->ItemClick((std::string("//") + popup->Name + "/**/Thermal").c_str());
     ctx->Yield(2);
-    IM_CHECK(Doc()->FindStudy(sid)->type == fem::AnalysisType::Thermal);
+    IM_CHECK(Sim()->FindStudy(sid)->type == fem::AnalysisType::Thermal);
     IM_CHECK(!ctx->ItemExists("//###ToolWindow/###sim_bc_fixed"));
     const Body& body = Doc()->GetBodies()[0];
     ElementRef side, flat;
@@ -1553,7 +1594,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ui::SimulationApplyToFace(*s_App, side);
     ctx->Yield(2);
-    IM_CHECK(Doc()->FindStudy(sid)->loads.empty());
+    IM_CHECK(Sim()->FindStudy(sid)->loads.empty());
     IM_CHECK(s_App->simulation.placeRefusal.find("Incropera") !=
              std::string::npos);
     ctx->ItemInputValue("//###ToolWindow/###sim_film_w_m2k", "10");
@@ -1561,28 +1602,28 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ui::SimulationApplyToFace(*s_App, side);
     ctx->Yield(2);
-    IM_CHECK_EQ(Doc()->FindStudy(sid)->loads.size(), (size_t)1);
-    IM_CHECK(Doc()->FindStudy(sid)->loads[0].filmWm2K == 10.0);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)1);
+    IM_CHECK(Sim()->FindStudy(sid)->loads[0].filmWm2K == 10.0);
     // A heat source on the body whose face is clicked.
     ctx->ItemClick("//###ToolWindow/###sim_bc_heat_source");
     ctx->Yield();
     ui::SimulationApplyToFace(*s_App, flat);
     ctx->Yield(2);
-    IM_CHECK_EQ(Doc()->FindStudy(sid)->loads.size(), (size_t)1);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)1);
     IM_CHECK(s_App->simulation.placeRefusal.find("power_w") !=
              std::string::npos);
     ctx->ItemInputValue("//###ToolWindow/###sim_source_power_w", "0.2");
     ctx->Yield();
     ui::SimulationApplyToFace(*s_App, flat);
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(sid);
+    const fem::Study* st = Sim()->FindStudy(sid);
     IM_CHECK_EQ(st->loads.size(), (size_t)2);
     IM_CHECK(st->loads[1].type == fem::LoadType::HeatGeneration);
     IM_CHECK(st->loads[1].body == body.name);
 #ifdef HAVE_NETGEN // the run needs a mesh; the refusals above do not
     ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, sid));
-    const fem::StudyRuntime* rt = Doc()->StudyResults(sid);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(sid);
     IM_CHECK(rt != nullptr && !rt->bodies.empty());
     IM_CHECK(rt->bodies[0].thermal.solved);
     IM_CHECK(rt->bodies[0].thermal.maxC > 25.0);
@@ -1632,7 +1673,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ui::SimulationApplyToFace(*s_App, face);
     ctx->Yield(2);
-    const fem::Study* st = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    const fem::Study* st = Sim()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK_EQ(st->loads.size(), (size_t)1);
     const fem::Load& l = st->loads[0];
     IM_CHECK(l.type == fem::LoadType::Remote);
@@ -1661,7 +1702,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     ctx->Yield(2);
-    const ElementRef root = Doc()->FindStudy(studyId)->loads[0].face;
+    const ElementRef root = Sim()->FindStudy(studyId)->loads[0].face;
     ctx->ItemClick("//###ToolWindow/###sim_probe");
     ctx->Yield();
     IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Probe);
@@ -1673,7 +1714,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//###ToolWindow/###sim_probe");
     ctx->Yield();
     // The clamped root carries the bending stress; its peak is real.
-    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     fem::ResolvedFace rf;
     IM_CHECK_SILENT(fem::ResolveFace(*Doc(), root, "t", rf, nullptr));
     const auto stress = fem::FaceStressOf(
@@ -1700,4 +1741,367 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 #endif // HAVE_NETGEN
+
+  // The Simulation button on a part opens the part's simulation tab -- made
+  // for it, with a study -- and the study is set up, meshed, run and read
+  // there, through the window (docs/simulation/README.md#the-simulation-tab).
+  t = IM_REGISTER_TEST(engine, "sim", "the_button_opens_the_parts_simulation");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx);
+    const uint64_t partId = s_App->parts[s_App->activePart].id;
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield(3);
+    IM_CHECK(s_App->sim != nullptr);
+    IM_CHECK(s_App->simulation.active);
+    IM_CHECK(s_App->sim->Subject().docId == partId);
+    IM_CHECK_EQ(s_App->sim->GetStudies().size(), (size_t)1);
+    IM_CHECK(ctx->ItemExists("//###Model/**/###sim_subject"));
+    IM_CHECK(ctx->ItemExists("//###Model/**/###study_add"));
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    const Body body = Doc()->GetBodies()[0];
+    const ElementRef fixed = FaceFacing(body, {0, 0, -1});
+    const ElementRef top = FaceFacing(body, {0, 0, 1});
+    IM_CHECK(!fixed.name.empty() && !top.name.empty());
+    // A support and a load, placed as a click places them.
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::Fixed);
+    ui::SimulationApplyToFace(*s_App, 0, fixed);
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::Pressure);
+    ui::SimulationApplyToFace(*s_App, 0, top);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)2);
+    // The part's own list holds nothing: the simulation is the one home.
+    IM_CHECK(ui::PartDocById(*s_App, partId)->GetStudies().empty());
+#ifdef HAVE_NETGEN
+    ctx->ItemClick("//###ToolWindow/###study_mesh");
+    WaitFor(
+        ctx, "the mesh",
+        [sid] { return ui::StudyMesh(*s_App, sid) != nullptr; }, 120.0);
+    IM_CHECK(ui::SimMeshReportFor(*s_App, FrontSimSlot(), sid) != nullptr);
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid));
+    ctx->Yield(3);
+    IM_CHECK(!ui::StudyStale(*s_App, sid));
+    IM_CHECK(Sim()->StudyResults(sid)->maxVonMises > 0.0);
+    // The result is shown on the tab: a field, and a legend for it.
+    ctx->ItemClick("//###ToolWindow/###result_field");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ctx->ItemClick((std::string("//") +
+                    ctx->UiContext->OpenPopupStack.back().Window->Name +
+                    "/**/###field_von_mises")
+                       .c_str());
+    ctx->Yield(3);
+    IM_CHECK(s_App->simulation.field == ui::SimulationState::Field::VonMises);
+#endif
+    // Leaving goes back to the part.
+    ctx->ItemClick("//Simulation###ToolWindow/###simulation_close");
+    ctx->Yield(2);
+    IM_CHECK(s_App->sim == nullptr);
+    IM_CHECK(s_App->document != nullptr);
+    IM_CHECK_EQ(s_App->parts[s_App->activePart].id, partId);
+    IM_CHECK(!s_App->simulation.active);
+  };
+
+  // An assembly's simulation: a lone participant is the part's own problem
+  // (a pressure on part of a face's study works there), and beside a rigid
+  // neighbour it is clamped where the neighbour touches. Each is set up and
+  // run on the assembly's simulation tab.
+  t = IM_REGISTER_TEST(engine, "sim", "an_assembly_simulation_runs_on_its_tab");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx);
+    const uint64_t partId = s_App->parts[0].id;
+    const Body body = Doc()->GetBodies()[0];
+    const ElementRef bottom = FaceFacing(body, {0, 0, -1});
+    const ElementRef top = FaceFacing(body, {0, 0, 1});
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Stack");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence lo;
+    lo.name = "Lower";
+    lo.partId = partId;
+    lo.fixed = true;
+    const uint64_t lower = s_App->assembly->AddOccurrence(lo);
+    ctx->Yield(3);
+    const uint64_t asmId = s_App->parts[asmIdx].id;
+
+    ToolbarClick(ctx, "###tb_asm_simulation");
+    ctx->Yield(3);
+    IM_CHECK(s_App->sim != nullptr);
+    IM_CHECK(s_App->sim->Subject().docId == asmId);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    // The lone participant: meshed, a support and a load on its faces.
+    ui::ModifyStudy(*s_App, sid, "roles", [&](fem::Study& cs) {
+      cs.participants.push_back(
+          {lower, fem::ParticipantRole::Meshed, ExprValue{0.0}});
+      cs.meshSize = 12.0;
+    });
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sim->Roles().size(), (size_t)1); // the document's
+    IM_CHECK(Sim()->FindStudy(sid)->participants.empty());
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::Fixed);
+    ui::SimulationApplyToFace(*s_App, lower, bottom);
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::Pressure);
+    ui::SimulationApplyToFace(*s_App, lower, top);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid)->loads[0].occurrenceId, lower);
+    // A pin on a lone participant is the planner's to judge, not refused
+    // for being on an assembly: a flat face is refused for its shape.
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::Pin);
+    ui::SimulationApplyToFace(*s_App, lower, top);
+    IM_CHECK(s_App->simulation.placeRefusal.find("cylindrical") !=
+             std::string::npos);
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::None);
+#ifdef HAVE_NETGEN
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid));
+    IM_CHECK(!ui::StudyStale(*s_App, sid));
+    const double lone = Sim()->StudyResults(sid)->maxDisplacement;
+    IM_CHECK(lone > 0.0);
+#endif
+
+    // Beside a rigid neighbour: a second simulation of the same assembly,
+    // its own roles, clamped where the support touches.
+    ctx->ItemClick("//Simulation###ToolWindow/###simulation_close");
+    ctx->Yield(2);
+    IM_CHECK(s_App->assembly != nullptr);
+    Occurrence up;
+    up.name = "Upper";
+    up.partId = partId;
+    up.position = glm::vec3(0.0f, 0.0f, 16.0f);
+    const uint64_t upper = s_App->assembly->AddOccurrence(up);
+    ctx->Yield(3);
+    std::string why;
+    fem::SimDocument second;
+    second.SetSubject({fem::SubjectKind::Assembly, asmId, 0, "Stack"});
+    IM_CHECK(ui::AddSimulation(*s_App, "Stack stacked", std::move(second),
+                               &why) != SIZE_MAX);
+    ctx->Yield(2);
+    IM_CHECK(s_App->sim != nullptr);
+    ui::EnterSimulation(*s_App); // a study, as the button makes
+    ctx->Yield(2);
+    const uint64_t sid2 = s_App->simulation.activeStudyId;
+    ui::ModifyStudy(*s_App, sid2, "roles", [&](fem::Study& cs) {
+      cs.participants.push_back(
+          {upper, fem::ParticipantRole::Meshed, ExprValue{0.0}});
+      cs.participants.push_back(
+          {lower, fem::ParticipantRole::Rigid, ExprValue{0.0}});
+      cs.meshSize = 12.0;
+    });
+    ctx->Yield(2);
+    const std::string clamp =
+        "//Simulation###ToolWindow/###clamp_" + std::to_string(lower);
+    ctx->ItemClick(clamp.c_str());
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::Pressure);
+    ui::SimulationApplyToFace(*s_App, upper, top);
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::None);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Sim()->FindStudy(sid2)->loads.size(), (size_t)2);
+    IM_CHECK_EQ(ui::SimulationContacts(*s_App).size(), (size_t)1);
+#ifdef HAVE_NETGEN
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, sid2));
+    IM_CHECK(!ui::StudyStale(*s_App, sid2));
+    IM_CHECK(Sim()->StudyResults(sid2)->maxDisplacement > 0.0);
+#endif
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // Studies saved on a part and on an assembly (every file before the
+  // simulation document) move into simulation tabs when the project opens:
+  // not in front, the project unedited, a saved result whose inputs are
+  // unchanged current; and they stay so through a save and a reopen
+  // (docs/simulation/README.md#moving-studies-into-a-simulation).
+  t = IM_REGISTER_TEST(engine, "sim", "studies_move_into_simulations_on_open");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    namespace fs = std::filesystem;
+    ctx->SetRef("//##MainMenuBar");
+    // A golden part that saved its studies and their results.
+    std::string err;
+    const std::string golden =
+        SourceFixture("../golden/v153-saved-study-results.json");
+    IM_CHECK(ui::OpenProject(*s_App, golden, &err));
+    ui::MarkProjectOpened(*s_App, golden);
+    ctx->Yield(2);
+    IM_CHECK(s_App->document != nullptr); // the part stays in front
+    IM_CHECK(s_App->document->GetStudies().empty());
+    std::vector<size_t> sims =
+        ui::SimulationSlotsFor(*s_App, s_App->parts[0].id);
+    IM_CHECK_EQ(sims.size(), (size_t)1);
+    IM_CHECK(!ui::ProjectDirty(*s_App));
+    const fem::SimDocument* moved = ui::SlotSim(*s_App, sims[0]);
+    IM_CHECK(moved != nullptr);
+    IM_CHECK(moved->FindStudy(3) != nullptr && moved->FindStudy(7) != nullptr);
+
+    // An assembly's studies, written as every file before did: on the
+    // assembly, solved there.
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    SteelBlock(ctx);
+    const uint64_t partId = s_App->parts[0].id;
+    const Body body = Doc()->GetBodies()[0];
+    const ElementRef top = FaceFacing(body, {0, 0, 1});
+    // The part's own study, as a file before simulations saved it.
+    uint64_t partStudy = 0;
+    {
+      Document& part = *Doc();
+      fem::Study& st = part.AddStudy("Plate");
+      st.meshSize = 12.0;
+      fem::Load fix;
+      fix.id = part.AllocateId();
+      fix.type = fem::LoadType::Fixed;
+      fix.face = FaceFacing(body, {0, 0, -1});
+      st.loads.push_back(fix);
+      fem::Load p1;
+      p1.id = part.AllocateId();
+      p1.type = fem::LoadType::Pressure;
+      p1.face = top;
+      p1.magnitude = 1.0;
+      st.loads.push_back(p1);
+      partStudy = st.id;
+#ifdef HAVE_NETGEN
+      IM_CHECK(ui::RunStudyAndCache(part, partStudy, &err));
+      IM_CHECK(part.StudyResults(partStudy) != nullptr);
+#endif
+    }
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Stack");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence lo;
+    lo.name = "Lower";
+    lo.partId = partId;
+    lo.fixed = true;
+    const uint64_t lower = s_App->assembly->AddOccurrence(lo);
+    Occurrence up;
+    up.name = "Upper";
+    up.partId = partId;
+    up.position = glm::vec3(0.0f, 0.0f, 16.0f);
+    const uint64_t upper = s_App->assembly->AddOccurrence(up);
+    ctx->Yield(3);
+    AssemblyDocument& asmDoc = *s_App->assembly;
+    fem::Study& old = asmDoc.AddStudy("Stacked");
+    old.participants = {{upper, fem::ParticipantRole::Meshed, ExprValue{0.0}},
+                        {lower, fem::ParticipantRole::Rigid, ExprValue{0.0}}};
+    old.meshSize = 12.0;
+    fem::Load clampLoad;
+    clampLoad.id = asmDoc.AllocateId();
+    clampLoad.type = fem::LoadType::Fixed;
+    clampLoad.contactWith = lower;
+    old.loads.push_back(clampLoad);
+    fem::Load press;
+    press.id = asmDoc.AllocateId();
+    press.type = fem::LoadType::Pressure;
+    press.face = top;
+    press.occurrenceId = upper;
+    press.magnitude = 1.0;
+    old.loads.push_back(press);
+    const uint64_t oldId = old.id;
+    asmDoc.BumpVersion();
+#ifdef HAVE_NETGEN
+    IM_CHECK(ui::RunAssemblyStudyAndCache(*s_App, asmDoc, oldId, &err));
+    IM_CHECK(asmDoc.StudyResults(oldId) != nullptr);
+#endif
+    const fs::path dir = fs::temp_directory_path() / "lobole_test_sim_move.lob";
+    fs::remove_all(dir);
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    // Opened: the study is in a simulation of the assembly, with its id.
+    for (int pass = 0; pass < 2; pass++) {
+      ctx->MenuClick("File/New");
+      ctx->Yield();
+      IM_CHECK(ui::OpenProject(*s_App, dir.string(), &err));
+      ui::MarkProjectOpened(*s_App, dir.string());
+      ctx->Yield(2);
+      IM_CHECK(s_App->sim == nullptr); // not brought forward
+      IM_CHECK(!ui::ProjectDirty(*s_App));
+      std::optional<size_t> at;
+      for (size_t i = 0; i < s_App->parts.size(); i++)
+        if (s_App->parts[i].kind == ui::DocKind::Assembly)
+          at = i;
+      IM_CHECK_SILENT(at.has_value());
+      IM_CHECK(ui::SlotAssembly(*s_App, *at)->GetStudies().empty());
+      sims = ui::SimulationSlotsFor(*s_App, s_App->parts[*at].id);
+      IM_CHECK_EQ(sims.size(), (size_t)1);
+      const fem::SimDocument* sim = ui::SlotSim(*s_App, sims[0]);
+      IM_CHECK(sim->FindStudy(oldId) != nullptr);
+      IM_CHECK_EQ(sim->Roles().size(), (size_t)2);
+#ifdef HAVE_NETGEN
+      IM_CHECK(sim->StudyResults(oldId) != nullptr);
+      IM_CHECK(!ui::SimStudyStale(*s_App, *sim, oldId));
+#endif
+      // The part's study too, current.
+      std::optional<size_t> partAt;
+      for (size_t i = 0; i < s_App->parts.size(); i++)
+        if (s_App->parts[i].kind == ui::DocKind::Part)
+          partAt = i;
+      IM_CHECK_SILENT(partAt.has_value());
+      IM_CHECK(ui::SlotDoc(*s_App, *partAt)->GetStudies().empty());
+      const std::vector<size_t> partSims =
+          ui::SimulationSlotsFor(*s_App, s_App->parts[*partAt].id);
+      IM_CHECK_EQ(partSims.size(), (size_t)1);
+      const fem::SimDocument* psim = ui::SlotSim(*s_App, partSims[0]);
+      IM_CHECK(psim->FindStudy(partStudy) != nullptr);
+#ifdef HAVE_NETGEN
+      IM_CHECK(psim->StudyResults(partStudy) != nullptr);
+      IM_CHECK(!ui::SimStudyStale(*s_App, *psim, partStudy));
+#endif
+      // Saved again: the assembly writes no studies, the simulation does.
+      IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+      ui::MarkProjectSaved(*s_App, dir.string(), "test");
+    }
+    fs::remove_all(dir);
+  };
+
+  // A study made over the RPCs on a part with no simulation makes the
+  // part's simulation behind the tab in front -- the part stays in front --
+  // and its edit is one undo step on that simulation's tab.
+  t = IM_REGISTER_TEST(engine, "sim", "an_rpc_study_makes_a_simulation_behind");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    SteelBlock(ctx);
+    const uint64_t partId = s_App->parts[s_App->activePart].id;
+    const Body body = Doc()->GetBodies()[0];
+    const ElementRef bottom = FaceFacing(body, {0, 0, -1});
+    const ElementRef top = FaceFacing(body, {0, 0, 1});
+    const auto rpc = [](const char* m, const nlohmann::json& params) {
+      return remote::HandleSimulationRpc(*s_App, s_App->document.get(), m,
+                                         remote::RpcParams{params});
+    };
+    const auto made = rpc("add_study", {{"name", "Over RPC"}});
+    IM_CHECK_SILENT(made.has_value());
+    const uint64_t sid = made->at("id").get<uint64_t>();
+    ctx->Yield(2);
+    IM_CHECK(s_App->document != nullptr); // no switch
+    IM_CHECK_EQ(s_App->parts[s_App->activePart].id, partId);
+    const std::vector<size_t> sims = ui::SimulationSlotsFor(*s_App, partId);
+    IM_CHECK_EQ(sims.size(), (size_t)1);
+    fem::SimDocument* sim = ui::SlotSim(*s_App, sims[0]);
+    IM_CHECK(sim->FindStudy(sid) != nullptr);
+    const auto face = [](const ElementRef& r) {
+      return nlohmann::json{{"feature_id", r.featureId}, {"element", r.name}};
+    };
+    rpc("set_study", {{"id", sid}, {"mesh_size", 12.0}});
+    rpc("add_load",
+        {{"study", sid}, {"type", "fixed"}, {"face", face(bottom)}});
+    rpc("add_load", {{"study", sid},
+                     {"type", "pressure"},
+                     {"face", face(top)},
+                     {"magnitude", 1.0}});
+    IM_CHECK_EQ(sim->FindStudy(sid)->loads.size(), (size_t)2);
+#ifdef HAVE_NETGEN
+    const auto ran = rpc("run_study", {{"id", sid}});
+    IM_CHECK_SILENT(ran.has_value());
+    IM_CHECK(sim->StudyResults(sid) != nullptr);
+    IM_CHECK(!ui::SimStudyStale(*s_App, *sim, sid));
+#endif
+    IM_CHECK(s_App->document != nullptr); // still no switch
+    // The last load undoes on the simulation's own tab.
+    ui::SetActivePart(*s_App, sims[0]);
+    ctx->Yield(2);
+    IM_CHECK(s_App->sim.get() == sim);
+    IM_CHECK(ui::UndoSim(*s_App));
+    IM_CHECK_EQ(sim->FindStudy(sid)->loads.size(), (size_t)1);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
 }

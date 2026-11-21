@@ -47,6 +47,15 @@ REMOTE = os.path.join(ROOT, "src", "remote")
 # and only a typed row may, with its type.
 DISPATCHER_KEYS = {"expect_revision": "revision"}
 
+# Keys one module's own dispatcher reads for every method it answers, before
+# the method's branch: a study verb's `simulation`, which names the
+# simulation it acts on (ResolveSimulationSlot in RemoteSimulation.cpp,
+# docs/scripting/rpc.md#simulations). A row of that module lists it; the
+# branch never reads it. `exit_simulation` returns before it is read.
+MODULE_DISPATCHER_KEYS = {
+    "RemoteSimulation.cpp": ({"simulation"}, {"exit_simulation"}),
+}
+
 
 def contract_problems(name, column, info):
     """A typed row (docs/scripting/rpc.md#typed-contracts) against its
@@ -94,13 +103,22 @@ def main():
     scanned = scan_files(paths)
     docs = method_docs(paths)
     declared = {}
+    module_problems = []
     for k, v in docs.items():
         ps = v["params"]
         if isinstance(ps, list):
             ps = [x for x in ps if x not in DISPATCHER_KEYS]
+            keys, exempt = MODULE_DISPATCHER_KEYS.get(
+                os.path.basename(v.get("file") or ""), (set(), set()))
+            for mk in sorted(keys):
+                if k not in exempt and mk not in ps:
+                    module_problems.append(
+                        f"{k}: its module's dispatcher reads `{mk}` for every "
+                        f"method, and the row does not list it")
+            ps = [x for x in ps if x not in keys]
         declared[k] = ps
 
-    problems = []
+    problems = list(module_problems)
     typed = 0
     for name, info in sorted(scanned.items()):
         column = docs.get(name, {}).get("column")
@@ -118,7 +136,11 @@ def main():
                 f"{name}: handler branch exists but no MethodDoc row "
                 f"(it would vanish from `describe` entirely)")
             continue
-        want = "*" if info["opaque"] else info["keys"]
+        module_keys = set()
+        for keys, _ in MODULE_DISPATCHER_KEYS.values():
+            module_keys |= keys
+        want = "*" if info["opaque"] else [
+            x for x in info["keys"] if x not in module_keys]
         got = declared[name]
         if got is None:
             problems.append(f"{name}: MethodDoc row has no params initialiser")

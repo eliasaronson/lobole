@@ -14,6 +14,7 @@
 #include "core/features/DatumAxisFeature.h"
 #include "core/fem/Calculix.h"
 #include "core/fem/FemStudy.h"
+#include "core/fem/SimDocument.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
@@ -22,13 +23,16 @@
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h" // FindBackgroundJob // OccurrenceSubtreeBodies, PartDocById
 #include "ui/DockLayout.h"     // PanelHeading
-#include "ui/ExprInput.h"      // expression-capable numeric fields
+#include "ui/DocumentSlots.h"
+#include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/FileDialogs.h"
 #include "ui/Overlays.h"    // ViewportDrawList
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h"    // BeginToolWindowFrame
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
+#include "ui/SimRunActions.h"
+#include "ui/SimTree.h"
 #include "ui/SimulationActions.h"
 #include "ui/SimulationView.h"
 #include "ui/SketchInteraction.h" // WorldToScreen (labels)
@@ -57,6 +61,40 @@
 namespace ui {
 
 namespace {
+
+// The bodies of one top-level occurrence of the studies' assembly, placed:
+// the simulation tab's own (SimSubjectBodies, by SimBodyOccurrence), or the
+// active assembly's.
+std::vector<Body> SubjectOccurrenceBodies(AppState& state,
+                                          uint64_t occurrenceId) {
+  if (!state.sim)
+    return OccurrenceSubtreeBodies(state, occurrenceId);
+  std::vector<Body> out;
+  const std::vector<Body>& flat = SimSubjectBodies(state);
+  for (size_t i = 0; i < flat.size(); i++)
+    if (SimBodyOccurrence(state, i) == occurrenceId)
+      out.push_back(flat[i]);
+  return out;
+}
+
+// The occurrence a render mesh draws: a simulation tab's meshes are its
+// subject's flattened bodies, each of one top-level occurrence.
+uint64_t MeshOccurrence(AppState& state, const DocumentRenderMesh& m) {
+  return state.sim ? SimBodyOccurrence(state, m.bodyIndex) : m.occurrenceId;
+}
+
+// The body a render mesh draws, by its index within its occurrence's part:
+// a simulation tab's flattened bodies are numbered across the occurrences.
+int MeshLocalBody(AppState& state, const DocumentRenderMesh& m) {
+  if (!state.sim)
+    return static_cast<int>(m.bodyIndex);
+  const uint64_t occ = SimBodyOccurrence(state, m.bodyIndex);
+  int k = 0;
+  for (size_t i = 0; i < m.bodyIndex; i++)
+    if (SimBodyOccurrence(state, i) == occ)
+      k++;
+  return k;
+}
 
 const ImVec4 kError(0.95f, 0.5f, 0.4f, 1.0f);
 const ImVec4 kStale(0.95f, 0.75f, 0.35f, 1.0f);
@@ -172,8 +210,8 @@ void DrawFrameSupportTools(AppState& state, const fem::Study& s, Arm&& arm) {
     // The frame: the world's, or a Frame or datum of the part.
     std::string current = "World";
     std::vector<std::pair<uint64_t, std::string>> frames;
-    if (host.part)
-      for (const auto& f : host.part->GetFeatures())
+    if (const Document* part = host.GeometryPart())
+      for (const auto& f : part->GetFeatures())
         if (datumframe::IsAnchor(*f))
           frames.push_back({f->GetId(), f->GetName()});
     for (const auto& [id, name] : frames)
@@ -233,7 +271,7 @@ std::vector<AxisChoice> TorqueAxisChoices(AppState& state) {
   std::vector<AxisChoice> out = {{"X", {AxisRef::Kind::X}},
                                  {"Y", {AxisRef::Kind::Y}},
                                  {"Z", {AxisRef::Kind::Z}}};
-  if (const Document* doc = state.document.get()) {
+  if (const Document* doc = StudyHostOf(state).GeometryPart()) {
     for (const auto& f : doc->GetFeatures()) {
       if (const auto* da = dynamic_cast<const DatumAxisFeature*>(f.get())) {
         AxisRef r;
@@ -273,7 +311,8 @@ bool SameAxisChoice(const AxisRef& a, const AxisRef& b) {
 // The chosen axis as numbers; false when it no longer resolves.
 bool ResolveTorqueAxis(AppState& state, const AxisRef& ref, glm::dvec3& origin,
                        glm::dvec3& dir) {
-  if (Document* doc = state.document.get()) {
+  if (Document* doc =
+          const_cast<Document*>(StudyHostOf(state).GeometryPart())) {
     RegenContext ctx{const_cast<std::vector<Body>&>(doc->GetBodies()),
                      doc->GetFeatures(), doc->GetFeatures().size()};
     return ResolveAxis(ctx, ref, origin, dir);
@@ -323,13 +362,14 @@ struct Probed {
 std::optional<Probed> ProbeFace(AppState& state, const fem::Study& s,
                                 const ElementRef& face) {
   const StudyHost host = StudyHostOf(state);
-  if (!host.part || s.type != fem::AnalysisType::Static)
+  const Document* part = host.GeometryPart();
+  if (!part || s.type != fem::AnalysisType::Static)
     return std::nullopt;
   const fem::StudyRuntime* rt = host.Results(s.id);
   if (!rt || StudyStale(state, s.id))
     return std::nullopt;
   fem::ResolvedFace rf;
-  if (!fem::ResolveFace(*host.part, face, "probe", rf, nullptr))
+  if (!fem::ResolveFace(*part, face, "probe", rf, nullptr))
     return std::nullopt;
   for (const fem::StudyBodyResult& b : rt->bodies) {
     if (b.bodyIndex != rf.bodyIndex)
@@ -356,13 +396,14 @@ std::string ProbeText(const fem::FaceStress& st) {
 void AddProbeRequirement(AppState& state, const fem::Study& s,
                          const ElementRef& face, double now) {
   const StudyHost host = StudyHostOf(state);
-  if (!host.part || state.activePart < 0 ||
+  const Document* part = host.GeometryPart();
+  if (!part || state.activePart < 0 ||
       state.activePart >= static_cast<int>(state.parts.size()))
     return;
   double limit = now;
   fem::ResolvedFace rf;
-  if (fem::ResolveFace(*host.part, face, "probe", rf, nullptr)) {
-    const Body& body = host.part->GetBodies()[rf.bodyIndex];
+  if (fem::ResolveFace(*part, face, "probe", rf, nullptr)) {
+    const Body& body = part->GetBodies()[rf.bodyIndex];
     const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
         CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material));
     if (mp.yieldMPa > 0.0)
@@ -376,7 +417,10 @@ void AddProbeRequirement(AppState& state, const fem::Study& s,
              "global peak.";
   r.measure = {
       {"kind", "study_probe"},
-      {"document", state.parts[state.activePart].id},
+      // The part the study analyses; the study is found in its simulation
+      // (fem::SimulationHoldingStudy).
+      {"document",
+       host.sim ? host.sim->Subject().docId : state.parts[state.activePart].id},
       {"study", s.id},
       {"face", {{"feature_id", face.featureId}, {"element", face.name}}},
       {"quantity", "von_mises_max"}};
@@ -397,7 +441,10 @@ void AddProbeRequirement(AppState& state, const fem::Study& s,
 // to the first that is left.
 void DeleteStudy(AppState& state, uint64_t id) {
   const StudyHost host = StudyHostOf(state);
-  if (host.part) {
+  if (host.sim) {
+    SimUndoGuard guard(state);
+    host.sim->RemoveStudy(id);
+  } else if (host.part) {
     state.commands->Execute(std::make_unique<RemoveStudyCommand>(id),
                             *host.part);
   } else {
@@ -426,7 +473,7 @@ const char* StudyGlyph(fem::AnalysisType type) {
 
 // Where a study stands, in a word, for its row's tail.
 std::string StudyStateWord(AppState& state, const fem::Study& s) {
-  if (GetStudyRunStatus(state, s.id).running)
+  if (GetStudyRunStatus(state, s.id, ActiveSimSlotId(state)).running)
     return "solving";
   if (!s.error.empty())
     return "failed";
@@ -484,8 +531,20 @@ void DrawStudyList(AppState& state) {
 // combo.
 void DrawMaterialCheck(AppState& state) {
   using CADMaterials::MaterialLibrary;
-  Document* doc = state.document.get();
-  if (!doc || !state.commands)
+  // The part the studies stand on, and the command stack its edits go
+  // through: its own tab's, in front or behind the simulation tab.
+  Document* doc = nullptr;
+  CommandStack* commands = nullptr;
+  if (state.document) {
+    doc = state.document.get();
+    commands = state.commands.get();
+  } else if (state.sim && state.sim->Subject().kind == fem::SubjectKind::Part) {
+    if (const auto at = SlotIndexById(state, state.sim->Subject().docId)) {
+      doc = state.parts[*at].doc.get();
+      commands = state.parts[*at].commands.get();
+    }
+  }
+  if (!doc || !commands)
     return;
   const auto& types = MaterialLibrary::AllTypes();
   for (const Body& body : doc->GetBodies()) {
@@ -517,7 +576,7 @@ void DrawMaterialCheck(AppState& state) {
       nlohmann::json before = DocumentIO::FeatureToJson(*owner);
       owner->SetMaterial(MaterialLibrary::Slug(types[sel - 1]));
       nlohmann::json after = DocumentIO::FeatureToJson(*owner);
-      state.commands->Execute(
+      commands->Execute(
           std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     }
   }
@@ -993,16 +1052,17 @@ void DrawReuseNote(uint64_t studyId) {
 // Topology results: an async Run (worker thread) with a live progress bar +
 // Cancel, then the optimization summary and the Shape/Density display controls.
 void DrawTopoResults(AppState& state, const fem::Study& s) {
-  Document* doc = state.document.get();
-  if (!doc)
-    return; // topology is a part study
+  const StudyHost host = StudyHostOf(state);
+  if (!host.sim && !host.part)
+    return; // topology is a part study, or a simulation's
   SimulationState& sim = state.simulation;
   ImGui::SeparatorText("Optimization");
 
   // No poll here any more: this panel is drawn only in Simulation mode, so
   // leaving that mode stranded a finished solve until you came back. Every
   // loop polls instead (ui/BackgroundJobs.h); this panel only reads.
-  const TopoRunStatus st = GetTopologyStatus(state, s.id);
+  const TopoRunStatus st =
+      GetTopologyStatus(state, s.id, ActiveSimSlotId(state));
   if (st.running) {
     const float frac =
         st.maxIterations > 0
@@ -1034,7 +1094,9 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
     std::string err;
     JobStart start;
     start.recompute = ImGui::GetIO().KeyShift;
-    if (!StartTopologyRun(state, *doc, s.id, &err, &start))
+    if (!(host.sim
+              ? StartSimTopologyRun(state, host.simSlotId, s.id, &err, &start)
+              : StartTopologyRun(state, *host.part, s.id, &err, &start)))
       LOG_WARN("topology run failed: {}", err);
     NoteReuse(s.id, start);
   }
@@ -1047,12 +1109,12 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   }
 
   DrawReuseNote(s.id);
-  const fem::StudyRuntime* rt = doc->StudyResults(s.id);
+  const fem::StudyRuntime* rt = host.Results(s.id);
   if (!rt) {
     ImGui::TextColored(kMuted, "Not run yet.");
     return;
   }
-  if (doc->StudyResultsStale(s.id))
+  if (StudyStale(state, s.id))
     ImGui::TextColored(kStale, ICON_FA_TRIANGLE_EXCLAMATION
                        " Stale (model changed since last run)");
 
@@ -1112,16 +1174,22 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
                        " A load reaches no support: the shape is broken");
   // A static study of the shape and of the solid domain, before anything is
   // modelled from it: both are made (or refreshed) and the shape is run.
-  if (!doc->StudyResultsStale(s.id) &&
+  if (!StudyStale(state, s.id) &&
       ImGui::Button(ICON_FA_SCALE_BALANCED " Check shape###topo_check")) {
     uint64_t shapeId = 0, solidId = 0;
     std::string err;
-    if (!EnsureTopologyCheckStudies(state, *doc, s.id, 0.0, &shapeId, &solidId,
-                                    &err)) {
+    const bool made =
+        host.sim ? EnsureSimTopologyCheckStudies(state, host.simSlotId, s.id,
+                                                 0.0, &shapeId, &solidId, &err)
+                 : EnsureTopologyCheckStudies(state, *host.part, s.id, 0.0,
+                                              &shapeId, &solidId, &err);
+    if (!made) {
       LOG_WARN("check shape: {}", err);
     } else {
       JobStart start;
-      if (!StartStudyRun(state, *doc, shapeId, &err, &start))
+      if (!(host.sim
+                ? StartSimStudyRun(state, host.simSlotId, shapeId, &err, &start)
+                : StartStudyRun(state, *host.part, shapeId, &err, &start)))
         LOG_WARN("check shape: {}", err);
       sim.activeStudyId = shapeId;
       sim.field = SimulationState::Field::None;
@@ -1301,7 +1369,8 @@ void DrawMeshStep(AppState& state, const fem::Study& s) {
     return; // a study of a topology result meshes nothing
   SimulationState& sim = state.simulation;
   const StudyHost host = StudyHostOf(state);
-  const MeshRunStatus run = GetMeshRunStatus(state, s.id);
+  const MeshRunStatus run =
+      GetMeshRunStatus(state, s.id, ActiveSimSlotId(state));
   if (run.running) {
     JobProgress bar;
     bar.status = "Meshing";
@@ -1320,9 +1389,11 @@ void DrawMeshStep(AppState& state, const fem::Study& s) {
     std::string err;
     // A part meshes off the frame; an assembly's plan is made of its placed
     // parts on this thread, and its mesh with it.
-    const bool started = host.IsAssembly() ? MeshStudyNow(state, s.id, &err)
-                                           : StartMeshRun(state, *host.part,
-                                                          s.id, &err, nullptr);
+    const bool started =
+        host.sim ? StartSimMeshRun(state, host.simSlotId, s.id, &err)
+        : host.IsAssembly()
+            ? MeshStudyNow(state, s.id, &err)
+            : StartMeshRun(state, *host.part, s.id, &err, nullptr);
     if (!started)
       LOG_WARN("mesh study failed: {}", err);
     else if (sim.meshView == SimulationState::MeshView::Off)
@@ -1423,8 +1494,8 @@ void DrawStudyCheck(AppState& state, const fem::Study& s) {
     // sets it (DrawMaterialCheck), and a refusal Run already printed in
     // full is not repeated under it.
     bool flaggedAbove = false;
-    if (p.code == "material" && host.part)
-      for (const Body& b : host.part->GetBodies())
+    if (p.code == "material" && host.GeometryPart())
+      for (const Body& b : host.GeometryPart()->GetBodies())
         flaggedAbove =
             flaggedAbove ||
             (b.name == p.body &&
@@ -1439,11 +1510,11 @@ void DrawStudyCheck(AppState& state, const fem::Study& s) {
       tip += (tip.empty() ? "" : "\n") + p.fixNote;
     // Where it is: its face, else its body.
     std::optional<std::pair<glm::dvec3, double>> place;
-    if (host.part) {
-      const auto& bodies = host.part->GetBodies();
+    if (const Document* part = host.GeometryPart()) {
+      const auto& bodies = part->GetBodies();
       fem::ResolvedFace rf;
       std::string err;
-      if (p.hasFace && fem::ResolveFace(*host.part, p.face, "", rf, &err)) {
+      if (p.hasFace && fem::ResolveFace(*part, p.face, "", rf, &err)) {
         if (const auto info =
                 Measure::DescribeFaceAt(bodies[rf.bodyIndex], rf.faceIndex))
           place = {info->centroid, std::sqrt(std::max(info->area, 1e-6))};
@@ -1651,7 +1722,8 @@ void DrawResults(AppState& state, const fem::Study& s) {
   // with no progress and nothing to cancel. On a real part that is a hang.
   // (The join happens in ui::PollBackgroundJobs, once per loop iteration —
   // not here, where it only ran while this panel was on screen.)
-  const StudyRunStatus run = GetStudyRunStatus(state, s.id);
+  const StudyRunStatus run =
+      GetStudyRunStatus(state, s.id, ActiveSimSlotId(state));
   if (run.running) {
     // The shared bar (ui/Widgets.h), indeterminate: the linear solver has no
     // progress to report. Its Cancel lands at the next boundary -- after the
@@ -1673,7 +1745,8 @@ void DrawResults(AppState& state, const fem::Study& s) {
       JobStart start;
       start.recompute = ImGui::GetIO().KeyShift;
       const bool started =
-          host.IsAssembly()
+          host.sim ? StartSimStudyRun(state, host.simSlotId, s.id, &err, &start)
+          : host.IsAssembly()
               ? StartAssemblyStudyRun(state, *host.asmDoc, s.id, &err, &start)
               : StartStudyRun(state, *host.part, s.id, &err, &start);
       if (!started)
@@ -1877,7 +1950,7 @@ void DrawResults(AppState& state, const fem::Study& s) {
   // sharp corner whose value is the mesh's, not the part's. A part study:
   // an assembly's mesh is the imprinted fuse, whose faces are not the
   // parts'.
-  if (!host.part)
+  if (!host.GeometryPart())
     return;
   ImGui::SeparatorText("Probes");
   {
@@ -1941,7 +2014,7 @@ namespace {
 // exists.
 void DrawParticipants(AppState& state, const fem::Study& s) {
   const StudyHost host = StudyHostOf(state);
-  if (!host.IsAssembly())
+  if (!host.OnAssembly())
     return;
   ImGui::SeparatorText("Participants");
   // Wrapped, or this one line sets the whole auto-sized window's width.
@@ -1957,8 +2030,11 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
   // No PushID(int) around the rows: every widget carries its occurrence id
   // in its own ###label, which is what a test path can address (a PushID
   // scope is not — docs/ui/testing.md#making-a-widget-addressable).
-  for (const Occurrence& occ : host.asmDoc->GetOccurrences()) {
-    const fem::Participant* pt = s.FindParticipant(occ.id);
+  for (const Occurrence& occ : host.Assembly()->GetOccurrences()) {
+    // A simulation's roles are its document's (ModifyStudy hands them to
+    // the edits below and keeps them there).
+    const fem::Participant* pt =
+        host.sim ? host.sim->FindRole(occ.id) : s.FindParticipant(occ.id);
     int role = !pt                                         ? 0
                : pt->role == fem::ParticipantRole::Meshed  ? 2
                : pt->role == fem::ParticipantRole::Rigid   ? 1
@@ -2125,10 +2201,10 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
     MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " +
                             state.simulation.contactError);
   // Materials come from the parts: say so when the meshed one has none.
-  for (const fem::Participant& pt : s.participants) {
+  for (const fem::Participant& pt : host.Roles(s)) {
     if (pt.role != fem::ParticipantRole::Meshed)
       continue;
-    for (const Body& b : OccurrenceSubtreeBodies(state, pt.occurrenceId)) {
+    for (const Body& b : SubjectOccurrenceBodies(state, pt.occurrenceId)) {
       const auto& mp =
           CADMaterials::MaterialLibrary::GetMaterialOrDefault(b.material);
       if (mp.youngGPa <= 0.0f)
@@ -2144,7 +2220,7 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
 // the part to keep out of (a neighbour arrives as a Derived reference body).
 // A box is set over RPC (add_keep_out {box_min, box_max}).
 void DrawKeepOuts(AppState& state, const fem::Study& s) {
-  const Document* doc = state.document.get();
+  const Document* doc = StudyHostOf(state).GeometryPart();
   if (doc == nullptr)
     return;
   int removeAt = -1;
@@ -2622,10 +2698,13 @@ void DrawStudyPanel(AppState& state) {
   ImGui::Begin(kPanelModel);
   PanelHeading(kPanelModel);
   const StudyHost host = StudyHostOf(state);
-  if (!host.part) {
+  if (!host) {
     ImGui::End();
     return;
   }
+  // What the simulation analyses, above its studies.
+  if (host.sim)
+    DrawSimSubjectRow(state);
   // The list only. The selected study is edited, run and read in the
   // Simulation window, as an assembly's studies already were: one home for
   // the editor, and a panel that does not change length under the cursor
@@ -3000,7 +3079,16 @@ bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
         const nlohmann::json after = DocumentIO::StudyToJson(*study);
         const nlohmann::json before =
             nlohmann::json::parse(sim.loadDrag.beforeJson, nullptr, false);
-        if (host.part) {
+        if (host.sim) {
+          // A snapshot step (SimUndoGuard): the study is put back as it was
+          // at the grab, and the dragged one replaces it under the guard.
+          if (!before.is_discarded() && before != after) {
+            fem::Study dragged = *study;
+            *study = DocumentIO::StudyFromJson(before); // in place, unseen
+            SimUndoGuard guard(state);
+            host.sim->ReplaceStudy(std::move(dragged));
+          }
+        } else if (host.part) {
           if (!before.is_discarded() && before != after && state.commands)
             state.commands->Execute(std::make_unique<ModifyStudyCommand>(
                                         "Drag force", before, after),
@@ -3087,10 +3175,10 @@ std::optional<fem::LoadAxis> TorqueAxisInView(AppState& state,
   if (load.HasAxis())
     return fem::LoadAxis{load.axisOrigin, glm::normalize(load.axisDirection)};
   const StudyHost host = StudyHostOf(state);
-  if (host.part)
-    return fem::CylindricalFaceAxis(*host.part, load.face);
+  if (const Document* part = host.GeometryPart())
+    return fem::CylindricalFaceAxis(*part, load.face);
   const Occurrence* occ =
-      host.asmDoc ? host.asmDoc->FindById(load.occurrenceId) : nullptr;
+      host.Assembly() ? host.Assembly()->FindById(load.occurrenceId) : nullptr;
   const Document* part = occ ? OccurrencePartDoc(state, *occ) : nullptr;
   if (!part)
     return std::nullopt;
@@ -3307,8 +3395,8 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       // it: held there, free in the others.
       std::array<glm::dvec3, 3> axes{glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
                                      glm::dvec3(0, 0, 1)};
-      if (load.frame != 0 && host.part)
-        if (const Feature* f = host.part->FindFeatureById(load.frame);
+      if (load.frame != 0 && host.GeometryPart())
+        if (const Feature* f = host.GeometryPart()->FindFeatureById(load.frame);
             f && datumframe::IsAnchor(*f)) {
           const glm::dmat4 m = datumframe::Matrix(*f);
           for (int k = 0; k < 3; ++k)
@@ -3455,11 +3543,11 @@ void AppendSimulationOverlayGlyphs(AppState& state,
     // The weight of what is SOLVED: the part, or the meshed occurrence.
     std::vector<Body> placed;
     const std::vector<Body>* bodies =
-        host.part ? &host.part->GetBodies() : &placed;
-    if (host.IsAssembly())
-      for (const fem::Participant& pt : s->participants)
+        host.GeometryPart() ? &host.GeometryPart()->GetBodies() : &placed;
+    if (host.OnAssembly())
+      for (const fem::Participant& pt : host.Roles(*s))
         if (pt.role == fem::ParticipantRole::Meshed)
-          placed = OccurrenceSubtreeBodies(state, pt.occurrenceId);
+          placed = SubjectOccurrenceBodies(state, pt.occurrenceId);
     if (const auto mass = Measure::MassOfBodies(*bodies)) {
       sim.com = glm::vec3(mass->centerOfMass);
       sim.comKnown = mass->volume > 0.0;
@@ -3501,17 +3589,17 @@ void AppendSimulationFaceTints(AppState& state) {
   for (const ElementRef& keep : s->keepFaces)
     tintFace(0, keep, MeshRenderer::kTintKeep);
 
-  if (!host.IsAssembly())
+  if (!host.OnAssembly())
     return;
   // Roles, on the picture (S1): a rigid support is a GHOST with its contact
   // faces tinted as the fixture they are -- the faces the imprint found,
   // not the whole part -- and an ignored occurrence stays as it is. The
   // renderer sync rebuilds every instance on the next version change or on
   // ExitSimulation's forced resync, so the ghosting needs no undo.
-  for (const fem::Participant& pt : s->participants)
+  for (const fem::Participant& pt : host.Roles(*s))
     if (pt.role == fem::ParticipantRole::Rigid)
       for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
-        if (m.occurrenceId == pt.occurrenceId &&
+        if (MeshOccurrence(state, m) == pt.occurrenceId &&
             !state.meshRenderer->IsInstanceGhost(m.meshId))
           state.meshRenderer->SetInstanceGhost(m.meshId, 0.35f);
   // The glued seams (S2): both sides' faces in the bond tint.
@@ -3519,7 +3607,7 @@ void AppendSimulationFaceTints(AppState& state) {
     const auto tintSide = [&](uint64_t occ, int body,
                               const std::vector<int>& faces) {
       for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
-        if (m.occurrenceId != occ || static_cast<int>(m.bodyIndex) != body)
+        if (MeshOccurrence(state, m) != occ || MeshLocalBody(state, m) != body)
           continue;
         for (int face : faces) {
           uint32_t first = 0, count = 0;
@@ -3545,8 +3633,8 @@ void AppendSimulationFaceTints(AppState& state) {
     if (!wanted)
       continue;
     for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
-      if (m.occurrenceId != patch.rigidOccurrenceId ||
-          static_cast<int>(m.bodyIndex) != patch.rigidBody)
+      if (MeshOccurrence(state, m) != patch.rigidOccurrenceId ||
+          MeshLocalBody(state, m) != patch.rigidBody)
         continue;
       for (int face : patch.rigidFaces) {
         uint32_t first = 0, count = 0;
@@ -3803,16 +3891,17 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   // On an assembly only the MESHED occurrence takes a load; a click on a
   // support or a bystander is refused where the person can read it, not
   // dropped on the floor.
-  const Document* faceDoc = host.part;
-  if (host.IsAssembly()) {
-    const fem::Participant* pt = s->FindParticipant(occurrenceId);
+  const Document* faceDoc = host.GeometryPart();
+  if (host.OnAssembly()) {
+    const fem::Participant* pt = host.sim ? host.sim->FindRole(occurrenceId)
+                                          : s->FindParticipant(occurrenceId);
     if (!pt || pt->role != fem::ParticipantRole::Meshed) {
       sim.placeRefusal = host.OccurrenceName(occurrenceId) +
                          " is not the meshed occurrence; a load goes on the "
                          "part being solved";
       return;
     }
-    const Occurrence* occ = host.asmDoc->FindById(occurrenceId);
+    const Occurrence* occ = host.Assembly()->FindById(occurrenceId);
     faceDoc = occ ? OccurrencePartDoc(state, *occ) : nullptr;
   }
 
@@ -3945,8 +4034,8 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   load.occurrenceId = occurrenceId;
   // Where the face is, in the frame the study solves in (the world, on an
   // assembly): a torque's axis and a remote load's point are stated there.
-  const Occurrence* placedOcc = occurrenceId != 0 && host.asmDoc
-                                    ? host.asmDoc->FindById(occurrenceId)
+  const Occurrence* placedOcc = occurrenceId != 0 && host.Assembly()
+                                    ? host.Assembly()->FindById(occurrenceId)
                                     : nullptr;
   std::optional<Measure::FaceInfo> info;
   double bodyDiagonal = 0.0;
@@ -4109,8 +4198,8 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     auto into = fem::DefaultForceDirection(*faceDoc, face);
     // A part's inward normal, turned into the world the placed part is
     // solved in.
-    if (into && occurrenceId != 0 && host.asmDoc)
-      if (const Occurrence* occ = host.asmDoc->FindById(occurrenceId))
+    if (into && occurrenceId != 0 && host.Assembly())
+      if (const Occurrence* occ = host.Assembly()->FindById(occurrenceId))
         into = glm::mat3_cast(occ->orientation) * *into;
     load.direction =
         sim.directionOverridden || !into ? sim.pendingDirection : *into;

@@ -693,8 +693,9 @@ void DrawToolWindow(AppState& state) {
       DrawMotionToolWindow(state);
     else if (state.assembly && state.simulationToolOpen)
       DrawSimulationToolWindow(state); // S1: the assembly's studies
-    else if (state.document && state.simulation.active)
-      DrawSimulationToolWindow(state); // a part's study, listed in its dock
+    else if (state.sim && state.simulation.active)
+      DrawSimulationToolWindow(state); // a simulation's study, listed in its
+                                       // dock
     return;
   }
 

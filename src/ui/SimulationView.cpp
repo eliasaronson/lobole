@@ -11,6 +11,7 @@
 #include "render/FieldRenderer.h"
 #include "ui/AppActionsInternal.h"
 #include "ui/AssemblyActions.h"
+#include "ui/DocumentSlots.h"
 #include "ui/SimRunActions.h"
 #include "ui/SimulationActions.h"
 #include "ui/SimulationViewInternal.h"
@@ -67,14 +68,22 @@ const CADMaterials::MaterialProperties& MaterialOfBody(AppState& state,
                                                        const fem::Study& s,
                                                        int bodyIndex) {
   std::string slug;
-  if (host.part) {
-    const auto& bodies = host.part->GetBodies();
+  if (const Document* part = host.GeometryPart()) {
+    const auto& bodies = part->GetBodies();
     if (bodyIndex >= 0 && bodyIndex < static_cast<int>(bodies.size()))
       slug = bodies[bodyIndex].material;
   } else {
-    for (const fem::Participant& pt : s.participants)
+    for (const fem::Participant& pt : host.Roles(s))
       if (pt.role == fem::ParticipantRole::Meshed) {
-        const auto bodies = OccurrenceSubtreeBodies(state, pt.occurrenceId);
+        std::vector<Body> bodies;
+        if (host.sim) {
+          const std::vector<Body>& flat = SimSubjectBodies(state);
+          for (size_t i = 0; i < flat.size(); i++)
+            if (SimBodyOccurrence(state, i) == pt.occurrenceId)
+              bodies.push_back(flat[i]);
+        } else {
+          bodies = OccurrenceSubtreeBodies(state, pt.occurrenceId);
+        }
         if (bodyIndex >= 0 && bodyIndex < static_cast<int>(bodies.size()))
           slug = bodies[bodyIndex].material;
       }
@@ -84,10 +93,10 @@ const CADMaterials::MaterialProperties& MaterialOfBody(AppState& state,
 }
 
 bool SolvedOnSeveral(const StudyHost& host, const fem::Study& s) {
-  if (!host.IsAssembly())
+  if (!host.OnAssembly())
     return false;
   int n = 0;
-  for (const fem::Participant& pt : s.participants)
+  for (const fem::Participant& pt : host.Roles(s))
     n += pt.role == fem::ParticipantRole::Meshed ||
          pt.role == fem::ParticipantRole::Bonded;
   return n > 1;
@@ -108,7 +117,9 @@ std::string MeshSettingsKey(const fem::Study& s) {
 }
 
 const MeshReport* StudyMesh(const AppState& state, uint64_t studyId) {
-  const auto it = state.meshReports.find({ActiveSlotId(state), studyId});
+  const uint64_t slot = StudyHostOverrideSlot() != 0 ? StudyHostOverrideSlot()
+                                                     : ActiveSlotId(state);
+  const auto it = state.meshReports.find({slot, studyId});
   return it == state.meshReports.end() || !it->second.error.empty() ||
                  it->second.bodies.empty() ||
                  it->second.bodies.front().mesh == nullptr
@@ -173,7 +184,7 @@ bool MeshStudyNow(AppState& state, uint64_t studyId, std::string* error) {
   if (!s)
     return fail("no such study");
   if (host.sim)
-    return MeshSimStudyNow(state, ActiveSimSlotId(state), studyId, error);
+    return MeshSimStudyNow(state, host.simSlotId, studyId, error);
   const auto started = std::chrono::steady_clock::now();
   std::vector<fem::StudyBodyMesh> meshes;
   std::vector<fem::MeshBodyReport> reports;
@@ -207,7 +218,8 @@ bool MeshStudyNow(AppState& state, uint64_t studyId, std::string* error) {
 
 std::string MeshFaceName(const AppState& state, const MeshReport::Body& body,
                          int faceIndex) {
-  if (const Document* doc = state.document.get()) {
+  if (const Document* doc =
+          StudyHostOf(const_cast<AppState&>(state)).GeometryPart()) {
     const auto& bodies = doc->GetBodies();
     if (body.bodyIndex >= 0 && body.bodyIndex < static_cast<int>(bodies.size()))
       if (const std::string* name =
@@ -855,7 +867,7 @@ std::vector<fem::StudyProblem> CheckStudyNow(AppState& state, uint64_t studyId,
   if (!s)
     return out;
   if (host.sim)
-    return CheckSimStudyNow(state, ActiveSimSlotId(state), studyId);
+    return CheckSimStudyNow(state, host.simSlotId, studyId);
   const MeshReport* mr = StudyMesh(state, studyId);
   const bool stale = mr != nullptr && StudyMeshStale(state, studyId);
   if (host.part) {

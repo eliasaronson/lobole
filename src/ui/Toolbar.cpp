@@ -1170,7 +1170,7 @@ void DrawAssemblyToolbar(AppState& state) {
   CommandButton(state, "###tb_asm_simulation", "assembly.simulation",
                 "Simulation (mesh one occurrence, clamp it where the others "
                 "touch)",
-                state.simulationToolOpen);
+                false);
   CommandButton(state, "###tb_asm_bom", "assembly.bom",
                 "Bill of materials (parts, quantities, materials, mass)",
                 state.bomWindowOpen);
@@ -1244,6 +1244,13 @@ void DrawSimulationToolbar(AppState& state) {
   // app for the length of a solve — and on a topology study, for the length of
   // an optimization.
   CommandButton(state, "###tb_sim_run", "sim.run", "Run study (mesh + solve)");
+
+  Divider();
+  // Framing and measuring what the simulation analyses: the tab's own bar
+  // until it has a window of its own.
+  CommandButton(state, "###tb_sim_fit", "view.fit", "Fit view");
+  CommandButton(state, "###tb_sim_measure", "view.measure", "Measure",
+                state.measure.active);
 
   Divider();
 
@@ -1504,16 +1511,6 @@ void DrawJobToolbar(AppState& state) {
   ImGui::NewLine();
 }
 
-// A simulation tab's bar (DocKind::Simulation). Minimal until the tab has a
-// window of its own: framing and measuring what it analyses. Ids are
-// "###tb_sim_*", as the job's are "###tb_job_*".
-static void DrawSimTabToolbar(AppState& state) {
-  CommandButton(state, "###tb_sim_fit", "view.fit", "Fit view");
-  CommandButton(state, "###tb_sim_measure", "view.measure", "Measure",
-                state.measure.active);
-  ImGui::NewLine();
-}
-
 void DrawToolbar(AppState& state) {
   if (state.sketchEdit.IsEditing())
     DrawSketchModeToolbar(state);
@@ -1525,8 +1522,6 @@ void DrawToolbar(AppState& state) {
     DrawDrawingToolbar(state);
   else if (state.job)
     DrawJobToolbar(state);
-  else if (state.sim)
-    DrawSimTabToolbar(state);
   else
     DrawModelToolbar(state);
 }

@@ -138,11 +138,18 @@ def main():
         # ---- Saved, and opened again ----------------------------------------
         path = os.path.join(tmp, "reopen.lob")
         d.call("save_project", path=path)
+        # The studies are the part's simulation's, saved in its folder
+        # (docs/simulation/README.md#how-a-simulation-is-saved).
+        sims = os.listdir(os.path.join(path, "simulations"))
+        expect(len(sims) == 1, f"one simulation of the bar: {sims}")
+        results = os.path.join(path, "simulations", sims[0], "results")
         for kind in ("static", "topology"):
             expect(any(f.endswith(".result.json") and f.startswith(
-                str(ids[kind])) for f in os.listdir(
-                    os.path.join(path, "parts", "bar", "studies"))),
+                str(ids[kind])) for f in os.listdir(results)),
                 f"the {kind} result is in the project")
+        expect(not os.path.exists(os.path.join(path, "parts", "bar",
+                                               "studies")),
+               "the part saves no studies of its own")
         d.call("open_project", path=path)
 
         a = connect(app.port)

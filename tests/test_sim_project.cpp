@@ -488,7 +488,9 @@ TEST_CASE("A simulation tab's study runs through the app and lands in it",
   ui::JobStart fresh;
   fresh.recompute = true;
   REQUIRE(ui::StartSimStudyRun(state, simSlot, studyId, &err, &fresh));
-  CHECK(ui::GetStudyRunStatus(state, studyId).running);
+  // Keyed by (simulation, study): the same id on a part reads idle.
+  CHECK(ui::GetStudyRunStatus(state, studyId, simSlot).running);
+  CHECK_FALSE(ui::GetStudyRunStatus(state, studyId).running);
   CHECK_FALSE(ui::StartSimStudyRun(state, simSlot, studyId, &err, &fresh));
   CHECK_THAT(err, ContainsSubstring("already in progress"));
   const uint64_t epoch = sim->StudyResultsEpoch();

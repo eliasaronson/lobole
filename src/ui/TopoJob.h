@@ -33,6 +33,7 @@ namespace ui {
 struct TopoJob {
   uint64_t studyId = 0;
   uint64_t partSlotId = 0;
+  uint64_t simSlotId = 0; // a simulation's study: its tab (0 on a part)
   int maxIterations = 0;
   std::atomic<int> iteration{0};
   std::atomic<double> compliance{0.0};
@@ -57,6 +58,7 @@ struct StudyJob {
   uint64_t studyId = 0;
   uint64_t partSlotId = 0;     // a part's study: the tab it ran on
   uint64_t assemblySlotId = 0; // an assembly's study (S1): its tab instead
+  uint64_t simSlotId = 0;      // a simulation's study: its tab instead
   // An assembly study's stale record, stamped at plan time (the versions of
   // the parts the plan read) and stored with the result.
   std::vector<std::pair<uint64_t, uint64_t>> partVersions;
@@ -87,6 +89,7 @@ struct StudyJob {
 struct MeshJob {
   uint64_t studyId = 0;
   uint64_t partSlotId = 0;
+  uint64_t simSlotId = 0; // a simulation's study: its tab (0 on a part)
   fem::MeshPlan plan;
   std::vector<fem::StudyBodyMesh> meshes;
   // What each mesh says about itself, made on the worker beside it.

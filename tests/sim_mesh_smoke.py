@@ -153,7 +153,10 @@ def mesh_report(d):
     expect(again["stale"] is False
            and d.call("check_study", id=study)["ok"] is True,
            "made again, it is current")
-    # Editing the part marks the mesh, as the mesh size did.
+    # Editing the part marks the mesh, as the mesh size did. The display
+    # calls brought the simulation's tab forward; the part is edited on its
+    # own.
+    d.call("exit_simulation")
     plate = [f for f in d.call("get_state")["features"] if f["id"] == fid][0]
     plate = {k: v for k, v in plate.items()
              if k not in ("id", "distance_expr")}

@@ -3,7 +3,11 @@
 
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/HeavyBuild.h"
+#include "core/fem/SimDocument.h"
+#include "ui/AppActionsInternal.h"
+#include "ui/AssemblyActions.h"
 #include "ui/FeatureBuildJob.h"
+#include "ui/SimRunActions.h"
 
 #include "core/Primitives.h"
 #include "core/SheetMetal.h"
@@ -34,7 +38,26 @@
 // Tests run inside the live application and reach it through the AppState.
 ui::AppState* s_App = nullptr;
 
-Document* Doc() { return s_App->document.get(); }
+Document* Doc() {
+  // On a simulation tab, the part it analyses (its tab is behind): what a
+  // test reads faces and bodies from.
+  if (!s_App->document && s_App->sim &&
+      s_App->sim->Subject().kind == fem::SubjectKind::Part)
+    return ui::PartDocById(*s_App, s_App->sim->Subject().docId);
+  return s_App->document.get();
+}
+
+fem::SimDocument* Sim() {
+  // The simulation in front; else the one simulation of the part or
+  // assembly in front (what an RPC edits behind it).
+  if (s_App->sim)
+    return s_App->sim.get();
+  if (s_App->activePart < 0)
+    return nullptr;
+  const std::vector<size_t> sims =
+      ui::SimulationSlotsFor(*s_App, s_App->parts[s_App->activePart].id);
+  return sims.empty() ? nullptr : ui::SlotSim(*s_App, sims.front());
+}
 
 cam::JobDocument* Job() { return ui::ActiveJob(*s_App); }
 
@@ -446,7 +469,7 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   ctx->MouseClick(ImGuiMouseButton_Left);
   ctx->Yield(2);
 
-  const fem::Study* st = Doc()->FindStudy(s_App->simulation.activeStudyId);
+  const fem::Study* st = Sim()->FindStudy(s_App->simulation.activeStudyId);
   IM_CHECK_SILENT(st != nullptr);
   IM_CHECK_EQ(st->loads.size(), (size_t)2);
   // The default direction is into the picked face: -Y, from the top.
@@ -547,19 +570,27 @@ bool WaitForOpen(ImGuiTestContext* ctx) {
 // reporting it as the engine's 300 s watchdog abort rather than as the
 // missing mesher.
 bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
+  // The simulation the study is in, held: its result lands there whichever
+  // tab is in front by then.
+  fem::SimDocument* sim = Sim();
+  if (sim == nullptr) {
+    ctx->LogError("no simulation to wait on for study %llu",
+                  (unsigned long long)studyId);
+    return false;
+  }
   WaitFor(
       ctx, "a study result",
-      [studyId] {
-        const fem::Study* s = Doc()->FindStudy(studyId);
-        return Doc()->StudyResults(studyId) != nullptr ||
+      [sim, studyId] {
+        const fem::Study* s = sim->FindStudy(studyId);
+        return sim->StudyResults(studyId) != nullptr ||
                (s != nullptr && !s->error.empty());
       },
       120.0);
-  if (Doc()->StudyResults(studyId))
+  if (sim->StudyResults(studyId))
     return true;
   // An IM_CHECK here would return from THIS function and let the test walk on
   // into a null result, which is a segfault rather than a failure report.
-  const fem::Study* st = Doc()->FindStudy(studyId);
+  const fem::Study* st = sim->FindStudy(studyId);
   ctx->LogError("no result for study %llu: %s", (unsigned long long)studyId,
                 st && !st->error.empty() ? st->error.c_str() : "(no error)");
   return false;

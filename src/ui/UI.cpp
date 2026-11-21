@@ -975,7 +975,11 @@ void DrawUI(AppState& state) {
   } else if (state.drawing) {
     DrawSheetPanel(state); // sheet settings + title block in the Model panel
   } else if (state.sim) {
-    DrawSimTree(state); // what it analyses and its studies, read-only
+    // A simulation tab is simulation mode: its studies are listed in the
+    // Model dock and edited in the Simulation window, over its subject.
+    DrawStudyPanel(state);
+    DrawFieldLegend(state);
+    DrawSimulationLabels(state);
   }
   // Outside the tab-kind branch, like Variables and the history: a
   // configuration is a named variant of the document, and a part and an
@@ -1151,7 +1155,7 @@ void DrawUI(AppState& state) {
       AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
       AppendCalibrationMarkers(state, prims);   // calibrate-image picks
     }
-    if (state.document || state.assembly)
+    if (state.document || state.assembly || state.sim)
       AppendSimulationBCGlyphs(state, prims); // FEM load/fixed/keep glyphs
     // The CAM backplot goes to the renderer's CACHED channel, shared: it is
     // hundreds of thousands of vertices on a surfacing job, and copied into
@@ -1173,7 +1177,7 @@ void DrawUI(AppState& state) {
     // depth-tested one is drawn inside the solid where nothing can see it.
     std::vector<PrimVertex> measurePrims;
     AppendMeasureOverlay(state, measurePrims);
-    if (state.document)
+    if (state.document || state.sim)
       AppendSimulationOverlayGlyphs(state,
                                     measurePrims); // gravity, through the part
     // The handles: thick, on top, and drawn from the same records the hit

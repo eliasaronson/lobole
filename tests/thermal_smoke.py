@@ -134,6 +134,9 @@ def main():
                    thermal_load={"from_study": sid})
             d.call("add_load", study=st, type="fixed", face=face(2, -1.0))
             refused(d, "run_study", "expansion coefficient", id=st)
+            # The material is the part's, edited on its tab (the display
+            # calls above brought the simulation's forward).
+            d.call("exit_simulation")
             d.call("set_material", feature_id=fid, material="petg")
             s = d.call("run_study", id=st)
             t = s["temperature"]

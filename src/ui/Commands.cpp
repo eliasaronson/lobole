@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/Commands.h"
+#include "core/fem/SimDocument.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamGenerate.h" // OpenCamGenerate
 #include "ui/CamPanel.h"    // RefreshCamToolpaths
 #include "ui/CamPlayback.h" // BeginCamPlayback
 #include "ui/CamTool.h"     // StartCamVerb, the job verbs
+#include "ui/SimRunActions.h"
 
 #include "common/Logger.h"
 #include "core/Conventions.h"
@@ -228,7 +230,7 @@ size_t Producers(AppState& s) {
              : 0;
 }
 bool HasStudy(AppState& s) {
-  return s.document && s.document->FindStudy(s.simulation.activeStudyId);
+  return s.sim && s.sim->FindStudy(s.simulation.activeStudyId);
 }
 // Cheap and side-effect free: ResolveActiveSketch can EXIT edit mode, which
 // is not something a tooltip or a palette row should be able to do.
@@ -337,17 +339,10 @@ void AlignToPickedFace(AppState& s) {
 }
 
 void RunActiveStudy(AppState& s) {
-  Document* doc = s.document.get();
-  const fem::Study* study =
-      doc ? doc->FindStudy(s.simulation.activeStudyId) : nullptr;
-  if (!study)
+  if (!HasStudy(s))
     return;
   std::string error;
-  const bool ok =
-      study->type == fem::AnalysisType::Topology
-          ? StartTopologyRun(s, *doc, s.simulation.activeStudyId, &error)
-          : StartStudyRun(s, *doc, s.simulation.activeStudyId, &error);
-  if (!ok)
+  if (!StartFrontSimRun(s, s.simulation.activeStudyId, &error))
     LOG_WARN("run study failed: {}", error);
 }
 
@@ -752,11 +747,9 @@ const std::vector<Command>& Table() {
         "assembly.simulation",
         [](AppState& s) { return s.assembly != nullptr; },
         [](AppState& s) {
-          // The third floating viewport mode (S1): a study on the assembly.
-          if (s.simulationToolOpen)
-            ExitSimulation(s);
-          else
-            EnterSimulation(s);
+          // Opens the assembly's simulation tab (made first where there is
+          // none), as the part's command does.
+          EnterSimulation(s);
         });
     add(
         "assembly.bom", [](AppState& s) { return s.assembly != nullptr; },

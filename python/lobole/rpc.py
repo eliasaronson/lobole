@@ -92,7 +92,6 @@ COLUMNS: dict[str, str] = {
     'list_relations': '',
     'list_requirements': '',
     'list_sections': '',
-    'list_studies': '',
     'list_variables': '',
     'mass_properties': 'part?:string|int, body?:int',
     'measure': "a:object, b?:object, kind?:'distance'|'angle'|'both', distance_kind?:string, mode?:'exact'|'mesh', part?:string|int",
@@ -113,7 +112,7 @@ COLUMNS: dict[str, str] = {
     'reset_layout': '',
     'rt_build': '',
     'run_motion_study': 'study:int>=0, async?:bool, include_poses?:bool, leave_at?:string|int, leave_at_deg?:number, leave_at_mm?:number, outlive_client?:bool, recompute?:bool, trace?:object[]',
-    'run_study': 'id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, recompute?:bool, timeout_s?:number>0, converge?:string, layer_normal?:number[]',
+    'run_study': 'id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, recompute?:bool, timeout_s?:number>0, converge?:string, layer_normal?:number[], simulation?:string|int',
     'save_project': 'path:string, message?:string, force?:bool, overwrite_lossy?:bool',
     'set_active_configuration': 'id?:int>=0',
     'set_active_part': 'part?:string|int, name?:string|int, index?:int>=0',
@@ -377,6 +376,7 @@ class RunStudyParams(TypedDict):
     timeout_s: NotRequired[float]
     converge: NotRequired[str]
     layer_normal: NotRequired[Sequence[float]]
+    simulation: NotRequired[str | int]
 
 class SaveProjectParams(TypedDict):
     path: str
@@ -4089,7 +4089,7 @@ class RpcSurface:
     def list_sections(self, _timeout: float | None = None) -> ListSectionsResult:
         raise NotImplementedError
 
-    def list_studies(self, _timeout: float | None = None) -> ListStudiesResult:
+    def list_studies(self, _timeout: float | None = None, **params: Any) -> ListStudiesResult:
         raise NotImplementedError
 
     def list_tables(self, _timeout: float | None = None, **params: Any) -> ListTablesResult:

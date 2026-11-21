@@ -80,7 +80,13 @@
 // Named s_App for continuity: every test body refers to it by this name.
 extern ui::AppState* s_App;
 
+namespace fem {
+class SimDocument;
+}
 Document* Doc();
+// The simulation a test's studies are in: the tab in front, or the one
+// simulation of the part or assembly in front. Null when there is none.
+fem::SimDocument* Sim();
 
 // --- CAM tests: the job tab (docs/cam/README.md#the-model) ---------------
 //

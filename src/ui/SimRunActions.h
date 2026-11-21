@@ -93,6 +93,44 @@ const MeshReport* SimMeshReportFor(const AppState& state, uint64_t simSlotId,
 std::vector<fem::StudyProblem>
 CheckSimStudyNow(AppState& state, uint64_t simSlotId, uint64_t studyId);
 
+// The panel's and the toolbar's Run on the simulation tab in front: a
+// topology study through StartSimTopologyRun, any other StartSimStudyRun.
+bool StartFrontSimRun(AppState& state, uint64_t studyId, std::string* error);
+
+// check_topology on a simulation (EnsureTopologyCheckStudies' rule): the
+// topology study's shape and solid static studies, made or brought up to
+// date under SimSlotUndoGuard, then solved off the frame (kind "check")
+// where no stored result answers them. `job->reused` when both are.
+bool EnsureSimTopologyCheckStudies(AppState& state, uint64_t simSlotId,
+                                   uint64_t topoId, double threshold,
+                                   uint64_t* shapeId, uint64_t* solidId,
+                                   std::string* error);
+bool StartSimTopologyCheck(AppState& state, uint64_t simSlotId, uint64_t topoId,
+                           double threshold, uint64_t* shapeId,
+                           uint64_t* solidId, std::string* error,
+                           JobStart* job = nullptr);
+
+// The simulation tab analysing that document, its slot id: the first one,
+// or (with `create`) a new one appended BEHIND the tab in front, named
+// "<subject> simulation" made unique, in the subject's active configuration.
+// 0 when there is none and none was made, or `docId` is not a part's or an
+// assembly's tab. Nothing switches tabs.
+uint64_t SimulationSlotFor(AppState& state, uint64_t docId, bool create);
+// Every simulation tab analysing that document, by slot index.
+std::vector<size_t> SimulationSlotsFor(const AppState& state, uint64_t docId);
+
+// The open's move (docs/simulation/README.md#moving-studies-into-a-simulation):
+// every part's and assembly's own studies go into new simulation tabs, added
+// behind the tab in front (fem::SimulationsFromPart / SimulationsFromAssembly,
+// ids and saved results kept), and the part's and assembly's lists are
+// emptied. A study a simulation of that subject already holds (a recovery
+// over a part saved before its studies moved) is not moved twice. Returns
+// how many simulations it made. The caller stamps the project saved.
+size_t MoveStudiesIntoSimulations(AppState& state);
+// After an open: each simulation's stored results whose inputs hash as they
+// did read current (fem::RestampSimByInputs against SimContextFor).
+void AdoptStoredSimResults(AppState& state);
+
 // The occurrence a body of SimSubjectBodies (the simulation tab's viewport
 // bodies) belongs to: its top-level occurrence on an assembly subject, which
 // is what a participant and a load's anchor name. 0 on a part subject, or

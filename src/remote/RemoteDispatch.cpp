@@ -5,6 +5,7 @@
 #include "remote/InspectionContracts.h"
 #include "remote/RemoteCatalog.h"
 #include "remote/RemoteServer.h"
+#include "ui/SimRunActions.h"
 
 #include "remote/InstanceRegistry.h"
 
@@ -959,6 +960,40 @@ static std::string BatchRefusalFor(const ui::AppState& state,
       if (slot.id == id && slot.kind == ui::DocKind::Part)
         return switches(slot, "part");
     return {};
+  }
+  // A simulation's calls act on a simulation tab without switching to it,
+  // except where they would make one (add_study on a part or an assembly
+  // that has none) or show one (the display calls, which bring it forward,
+  // and exit_simulation, which goes back to its subject).
+  {
+    const bool display = m == "enter_simulation" || m == "set_result_display" ||
+                         m == "set_mesh_display";
+    if (m == "exit_simulation" && state.sim)
+      return "leaves the simulation tab for its subject's, and a batch's "
+             "rollback cannot switch back";
+    if ((display || m == "add_study") && !ContainsRef(params)) {
+      // rpc-params: simulation
+      const uint64_t front = ui::ActiveSimSlotId(state);
+      uint64_t named = 0;
+      if (params.contains("simulation"))
+        for (const ui::PartSlot& slot : state.parts)
+          if (slot.kind == ui::DocKind::Simulation &&
+              ((params.at("simulation").is_string() &&
+                slot.name == params.at("simulation").get<std::string>()) ||
+               (params.at("simulation").is_number_unsigned() &&
+                slot.id == params.at("simulation").get<uint64_t>())))
+            named = slot.id;
+      if (display && (named != 0 ? named != front : front == 0))
+        return "shows a simulation that is not the active tab: it would "
+               "switch to it, and a batch's rollback cannot switch back";
+      if (m == "add_study" && named == 0 && front == 0 && active != nullptr &&
+          !params.contains("simulation") &&
+          ui::SimulationSlotsFor(state, active->id).empty())
+        return "would make '" + active->name +
+               "' its first simulation, a tab of its own, which a batch's "
+               "rollback cannot take away -- add one study first, outside "
+               "the batch";
+    }
   }
   // A run is made on a copy; `leave_at` then poses the live assembly at one
   // of its samples, writing placements and mate values with no snapshot,
@@ -3331,6 +3366,14 @@ EditMarks MarkEdits(const ui::AppState& state) {
         ui::SlotVersion(mutableState, i) == state.parts[i].lastSavedVersion)
       marks.savedOtherSlots.push_back(state.parts[i].id);
   for (size_t i = 0; i < state.parts.size(); i++)
+    if (static_cast<int>(i) != state.activePart && state.parts[i].sim) {
+      const ui::PartSlot& slot = state.parts[i];
+      marks.stashedSims.push_back(
+          {slot.id, slot.sim.get(), slot.simHistory.undo.size(),
+           slot.sim->Version(),
+           std::make_shared<const fem::SimDocument>(*slot.sim)});
+    }
+  for (size_t i = 0; i < state.parts.size(); i++)
     if (static_cast<int>(i) != state.activePart && state.parts[i].doc) {
       const ui::PartSlot& slot = state.parts[i];
       marks.stashedStacks.push_back(
@@ -3403,6 +3446,26 @@ std::string RollBackEdits(ui::AppState& state, const EditMarks& marks) {
                          "' undone");
           restoredSlots.push_back(slot.id);
         }
+      }
+  }
+  // A simulation edited behind the active tab: its document as marked, and
+  // the steps its edits pushed taken off its history.
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    ui::PartSlot& slot = state.parts[i];
+    if (static_cast<int>(i) == state.activePart || !slot.sim)
+      continue;
+    for (const EditMarks::StashedSim& m : marks.stashedSims)
+      if (m.slot == slot.id && m.sim == slot.sim.get() &&
+          (slot.sim->Version() != m.version ||
+           slot.simHistory.undo.size() > m.undo)) {
+        *slot.sim = *m.before;
+        auto& h = slot.simHistory;
+        if (h.undo.size() > m.undo)
+          h.undo.resize(m.undo);
+        if (h.undoStamps.size() > m.undo)
+          h.undoStamps.resize(m.undo);
+        what.push_back("'" + slot.name + "' restored");
+        restoredSlots.push_back(slot.id);
       }
   }
   // A project edit and its undo regenerated every part, and a stashed tab's

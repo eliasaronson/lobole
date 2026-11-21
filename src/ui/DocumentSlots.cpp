@@ -194,8 +194,10 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   // simulation toolbar up over a brand-new part, editing the new document's
   // (empty) study list — the same half-switched UI the assembly/drawing
   // clearing above exists to prevent.
-  if (state.simulation.active)
-    ExitSimulation(state);
+  if (state.simulation.active) {
+    ResetSimulationDisplay(state);
+    state.simulationToolOpen = false;
+  }
   state.measure = MeasureState{};
   // The CAM job belonged to the document that just went away. Leaving this
   // behind made the panel claim "Z zero at 17.000" and offer to Save G-code
@@ -387,9 +389,14 @@ void ResetActiveTabUiState(AppState& state) {
     state.focusPanel = "CAM";
     state.focusPanelFrames = 60;
   }
-  // A simulation tab's list is the Model panel's (DrawSimTree), for the same
-  // reason.
+  // A simulation tab IS simulation mode: the mode is on exactly while one is
+  // in front (docs/simulation/README.md#the-simulation-tab). Its study list
+  // is the Model panel's, for the same reason as the job's.
   if (state.sim) {
+    state.simulation.active = true;
+    if (!state.sim->GetStudies().empty())
+      state.simulation.activeStudyId = state.sim->GetStudies().front().id;
+    state.gpu.syncedDocumentVersion = UINT64_MAX;
     state.focusPanel = "Model";
     state.focusPanelFrames = 60;
   }

@@ -420,8 +420,12 @@ def studied_part(d, study):
 
     # ---- Both project forms carry them -----------------------------------
     with tempfile.TemporaryDirectory() as tmp:
-        for path in (os.path.join(tmp, "bar.json"),
-                     os.path.join(tmp, "bar.lob")):
+        # A part with a study is two documents, the part and its simulation
+        # (docs/simulation/README.md#the-simulation-tab), so it saves as a
+        # .lob: the single-file .json form holds one document.
+        refused(d, "save_project", "saves as a .lob directory",
+                path=os.path.join(tmp, "bar.json"))
+        for path in (os.path.join(tmp, "bar.lob"),):
             before = rows(d)
             d.call("save_project", path=path)
             d.call("open_project", path=path)

@@ -191,7 +191,10 @@ def main():
         refused(d, "topo_to_body", "Bar shape", study=s, path=stl)
 
         # --- split for printing ------------------------------------------
+        # The display calls brought the simulation's tab forward; the part
+        # is split on its own.
         d.call("set_result_display", field="none")
+        d.call("exit_simulation")
         plan = d.call("split_for_printing", bed_mm=[50, 50, 50],
                       dry_run=True)
         expect(len(plan["pieces"]) == 3, f"three slabs along X: {plan}")

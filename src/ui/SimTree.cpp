@@ -18,6 +18,26 @@
 
 namespace ui {
 
+void DrawSimSubjectRow(AppState& state) {
+  if (!state.sim)
+    return;
+  const fem::SimSubject& subject = state.sim->Subject();
+  // The subject's name as its tab has it now; the document's copy is
+  // what a deleted subject is still called.
+  const std::optional<size_t> at = SlotIndexById(state, subject.docId);
+  const bool gone = !at;
+  ListRowSpec row;
+  row.glyph =
+      subject.kind == fem::SubjectKind::Assembly ? ICON_FA_CUBES : ICON_FA_CUBE;
+  row.label = (gone ? subject.name : state.parts[*at].name) + "###sim_subject";
+  row.dimmed = gone;
+  row.tail = gone ? "missing" : fem::SubjectKindToString(subject.kind);
+  if (gone)
+    row.tooltip = "The " + std::string(fem::SubjectKindToString(subject.kind)) +
+                  " this simulation analyses is no longer in the project";
+  ListRow(row);
+}
+
 void DrawSimTree(AppState& state) {
   if (!state.sim)
     return;
@@ -25,26 +45,9 @@ void DrawSimTree(AppState& state) {
   ImGui::Begin(kPanelModel);
   PanelHeading(kPanelModel);
   const fem::SimDocument& sim = *state.sim;
-  const fem::SimSubject& subject = sim.Subject();
 
-  if (SectionHeader("Analyses", -1, /*defaultOpen=*/true)) {
-    // The subject's name as its tab has it now; the document's copy is
-    // what a deleted subject is still called.
-    const std::optional<size_t> at = SlotIndexById(state, subject.docId);
-    const bool gone = !at;
-    ListRowSpec row;
-    row.glyph = subject.kind == fem::SubjectKind::Assembly ? ICON_FA_CUBES
-                                                           : ICON_FA_CUBE;
-    row.label =
-        (gone ? subject.name : state.parts[*at].name) + "###sim_subject";
-    row.dimmed = gone;
-    row.tail = gone ? "missing" : fem::SubjectKindToString(subject.kind);
-    if (gone)
-      row.tooltip = "The " +
-                    std::string(fem::SubjectKindToString(subject.kind)) +
-                    " this simulation analyses is no longer in the project";
-    ListRow(row);
-  }
+  if (SectionHeader("Analyses", -1, /*defaultOpen=*/true))
+    DrawSimSubjectRow(state);
 
   const std::vector<fem::Study>& studies = sim.GetStudies();
   if (SectionHeader("Studies", static_cast<int>(studies.size()),

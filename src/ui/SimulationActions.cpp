@@ -918,10 +918,12 @@ bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
   return true;
 }
 
-StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
+StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId,
+                                 uint64_t simSlotId) {
   StudyRunStatus st;
   const StudyJob* job = state.studyJob.get();
-  if (!job || job->studyId != studyId || !BackgroundJobRunning(state, "study"))
+  if (!job || job->studyId != studyId || job->simSlotId != simSlotId ||
+      !BackgroundJobRunning(state, "study"))
     return st;
   st.running = true;
   st.elapsedSeconds = Elapsed(job->started);
@@ -936,10 +938,12 @@ StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
   return st;
 }
 
-MeshRunStatus GetMeshRunStatus(const AppState& state, uint64_t studyId) {
+MeshRunStatus GetMeshRunStatus(const AppState& state, uint64_t studyId,
+                               uint64_t simSlotId) {
   MeshRunStatus st;
   const MeshJob* job = state.meshJob.get();
-  if (!job || job->studyId != studyId || !BackgroundJobRunning(state, "mesh"))
+  if (!job || job->studyId != studyId || job->simSlotId != simSlotId ||
+      !BackgroundJobRunning(state, "mesh"))
     return st;
   st.running = true;
   st.elapsedSeconds = Elapsed(job->started);
@@ -958,10 +962,12 @@ bool CancelTopologyRun(AppState& state, uint64_t studyId) {
   return CancelBackgroundJobs(state, "topo") > 0;
 }
 
-TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
+TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId,
+                                uint64_t simSlotId) {
   TopoRunStatus st;
   const TopoJob* job = state.topoJob.get();
-  if (!job || job->studyId != studyId || !BackgroundJobRunning(state, "topo"))
+  if (!job || job->studyId != studyId || job->simSlotId != simSlotId ||
+      !BackgroundJobRunning(state, "topo"))
     return st; // running == false
   st.running = true;
   st.iteration = job->iteration.load(std::memory_order_relaxed);
@@ -986,8 +992,21 @@ std::optional<Measure::DocumentMass> SimulationMass(AppState& state) {
   SimulationState& sim = state.simulation;
   std::vector<Body> placed;
   const std::vector<Body>* bodies = nullptr;
-  if (Document* doc = state.document.get()) {
+  const StudyHost host = StudyHostOf(state);
+  if (const Document* doc = host.GeometryPart()) {
     bodies = &doc->GetBodies();
+  } else if (host.sim) {
+    if (const fem::Study* s = host.sim->FindStudy(sim.activeStudyId)) {
+      (void)s;
+      for (const fem::Participant& pt : host.sim->Roles())
+        if (pt.role == fem::ParticipantRole::Meshed) {
+          const std::vector<Body>& flat = SimSubjectBodies(state);
+          for (size_t i = 0; i < flat.size(); i++)
+            if (SimBodyOccurrence(state, i) == pt.occurrenceId)
+              placed.push_back(flat[i]);
+        }
+    }
+    bodies = &placed;
   } else if (state.assembly) {
     const fem::Study* s = state.assembly->FindStudy(sim.activeStudyId);
     if (s)
@@ -1065,18 +1084,34 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
   sim.pendingMagnitudeExpr.clear();
 }
 
+namespace {
+uint64_t g_hostOverride = 0; // main thread only, as every RPC is
+} // namespace
+
+StudyHostOverride::StudyHostOverride(uint64_t simSlotId)
+    : m_prev(g_hostOverride) {
+  g_hostOverride = simSlotId;
+}
+StudyHostOverride::~StudyHostOverride() { g_hostOverride = m_prev; }
+uint64_t StudyHostOverrideSlot() { return g_hostOverride; }
+
 StudyHost StudyHostOf(AppState& state) {
-  if (state.sim) {
+  fem::SimDocument* named =
+      g_hostOverride != 0 ? SimBySlotId(state, g_hostOverride) : nullptr;
+  if (named != nullptr || state.sim) {
     StudyHost host;
-    host.sim = state.sim.get();
+    host.sim = named != nullptr ? named : state.sim.get();
+    host.simSlotId = named != nullptr ? g_hostOverride : ActiveSimSlotId(state);
     // Read on every frame the panel draws: the subject by id, nothing
     // walked (SimContextFor flattens an assembly).
-    const fem::SimSubject& subject = state.sim->Subject();
+    const fem::SimSubject& subject = host.sim->Subject();
     host.symbols = &state.projectSymbols;
     if (subject.kind == fem::SubjectKind::Assembly)
       host.subjectAssembly = AssemblyDocById(state, subject.docId);
-    else if (const Document* part = PartDocById(state, subject.docId))
+    else if (const Document* part = PartDocById(state, subject.docId)) {
+      host.subjectPart = part;
       host.symbols = &part->Symbols();
+    }
     return host;
   }
   const SymbolTable* symbols = state.document   ? &state.document->Symbols()
@@ -1107,10 +1142,28 @@ void ModifyStudy(AppState& state, uint64_t id, const std::string& desc,
     return;
   if (host.sim) {
     // A simulation edits by snapshot (SimUndoGuard): ReplaceStudy moves its
-    // version and the study's revision.
+    // version and the study's revision. Its roles are the document's: an
+    // edit to the study's participants is handed the document's table and
+    // lands there, so every edit the panel makes to a table still works.
     fem::Study copy = *cur;
+    copy.participants = host.sim->Roles();
     mutate(copy);
     SimUndoGuard guard(state);
+    const auto same = [](const std::vector<fem::Participant>& a,
+                         const std::vector<fem::Participant>& b) {
+      if (a.size() != b.size())
+        return false;
+      for (size_t i = 0; i < a.size(); i++)
+        if (a[i].occurrenceId != b[i].occurrenceId || a[i].role != b[i].role ||
+            a[i].friction != b[i].friction ||
+            a[i].meshSize.value != b[i].meshSize.value ||
+            a[i].meshSize.expr != b[i].meshSize.expr)
+          return false;
+      return true;
+    };
+    if (!same(copy.participants, host.sim->Roles()))
+      host.sim->SetRoles(copy.participants);
+    copy.participants.clear();
     host.sim->ReplaceStudy(std::move(copy));
     return;
   }
@@ -1157,6 +1210,39 @@ uint64_t AddStudyOn(AppState& state, const std::string& name) {
 const std::vector<fem::ContactPatch>& SimulationContacts(AppState& state) {
   SimulationState& sim = state.simulation;
   static const std::vector<fem::ContactPatch> kNone;
+  // A simulation of an assembly: its own plan, cached on the study, the
+  // roles and every subject document's stamp.
+  if (state.sim && sim.IsActive() &&
+      state.sim->Subject().kind == fem::SubjectKind::Assembly) {
+    const fem::Study* st = state.sim->FindStudy(sim.activeStudyId);
+    if (st == nullptr) {
+      sim.contacts.clear();
+      sim.bonds.clear();
+      sim.contactKey = 0;
+      sim.contactError.clear();
+      return kNone;
+    }
+    uint64_t key = std::hash<std::string>{}(
+        DocumentIO::StudyToJson(state.sim->Effective(*st)).dump());
+    key ^= SimRenderVersion(state) * 0x9E3779B97F4A7C15ull;
+    key ^= 0x5157ull; // never a part tab's key
+    if (key == sim.contactKey)
+      return sim.contacts;
+    sim.contactKey = key;
+    sim.contacts.clear();
+    sim.bonds.clear();
+    sim.contactError.clear();
+    fem::StudyPlan plan;
+    std::string err;
+    if (fem::PlanSimStudy(SimContextFor(state, *state.sim), st->id, plan,
+                          &err)) {
+      sim.contacts = std::move(plan.contacts);
+      sim.bonds = std::move(plan.bonds);
+    } else {
+      sim.contactError = err;
+    }
+    return sim.contacts;
+  }
   AssemblyDocument* asmDoc = state.assembly.get();
   const fem::Study* s = asmDoc ? asmDoc->FindStudy(sim.activeStudyId) : nullptr;
   if (!s || !sim.IsActive()) {
@@ -1458,47 +1544,43 @@ bool MeshAssemblyStudyWithReports(AppState& state, AssemblyDocument& asmDoc,
 }
 
 void EnterSimulation(AppState& state) {
-  Document* doc = state.document.get();
-  if (!doc) {
-    // An assembly tab: the studies live on the assembly, and the window is
-    // the floating tool window beside explode and motion (S1).
-    AssemblyDocument* asmDoc = state.assembly.get();
-    if (!asmDoc)
+  // The studies live on a simulation tab: from a part or an assembly, its
+  // simulation is opened -- made first where there is none -- and simulation
+  // mode is that tab being in front
+  // (docs/simulation/README.md#the-simulation-tab).
+  if (!state.sim) {
+    if (!state.document && !state.assembly)
       return;
-    state.measure = MeasureState{};
-    state.simulation.active = true;
-    state.simulationToolOpen = true;
-    state.explodeToolOpen = false;
-    state.motionToolOpen = false;
-    if (asmDoc->GetStudies().empty()) {
-      SnapshotAssembly(state);
-      asmDoc->AddStudy("");
+    if (state.activePart < 0)
+      return;
+    std::string why;
+    if (OpenSimulationFor(state, static_cast<size_t>(state.activePart), &why) ==
+        SIZE_MAX) {
+      LOG_WARN("simulation: {}", why);
+      return;
     }
-    if (!asmDoc->FindStudy(state.simulation.activeStudyId))
-      state.simulation.activeStudyId = asmDoc->GetStudies().front().id;
-    state.gpu.syncedDocumentVersion = UINT64_MAX;
-    return;
   }
+  if (!state.sim)
+    return;
   // Drop the measure tool: it owns the viewport while active, and the
   // simulation toolbar has no Measure toggle to turn it back off.
   state.measure = MeasureState{};
   state.simulation.active = true;
-  // The Studies panel draws into the Model dock window; entering simulation
-  // mode while another tab (Variables, History, ...) owns the shared node
-  // leaves the studies hidden behind it until the user finds the right tab.
-  // Repeated frames, because one SetWindowFocus on a shared dock node does
-  // not reliably win the tab (DockLayout.cpp).
+  state.explodeToolOpen = false;
+  state.motionToolOpen = false;
+  // A new simulation starts with a study, as the mode always did: a quick
+  // check is still one click.
+  if (state.sim->GetStudies().empty()) {
+    SimUndoGuard guard(state);
+    state.sim->AddStudy("");
+  }
+  if (!state.sim->FindStudy(state.simulation.activeStudyId))
+    state.simulation.activeStudyId = state.sim->GetStudies().front().id;
   state.focusPanel = "Model";
   state.focusPanelFrames = 60;
-  if (doc->GetStudies().empty() && state.commands)
-    state.commands->Execute(std::make_unique<AddStudyCommand>(""), *doc);
-  // Select a study to edit (the first, unless one is already active).
-  if (!doc->FindStudy(state.simulation.activeStudyId) &&
-      !doc->GetStudies().empty())
-    state.simulation.activeStudyId = doc->GetStudies().front().id;
-  // Drop the modeling-mode shape-guide ghost while in simulation mode.
   state.gpu.syncedDocumentVersion = UINT64_MAX;
 }
+
 void ResetSimulationDisplay(AppState& state) {
   // Restore any body instances the field overlay hid, and drop the topology
   // iso-surface instance.
@@ -1513,8 +1595,17 @@ void ResetSimulationDisplay(AppState& state) {
   state.simulation = SimulationState{};
 }
 void ExitSimulation(AppState& state) {
-  ResetSimulationDisplay(state);
   state.simulationToolOpen = false;
+  // Leaving a simulation tab goes back to what it analyses.
+  if (state.sim) {
+    const fem::SimSubject subject = state.sim->Subject();
+    if (const std::optional<size_t> at = SlotIndexById(state, subject.docId)) {
+      SetActivePart(state, *at); // resets the display (ResetActiveTabUiState)
+      state.gpu.syncedDocumentVersion = UINT64_MAX;
+      return;
+    }
+  }
+  ResetSimulationDisplay(state);
   state.gpu.syncedDocumentVersion = UINT64_MAX; // force a clean renderer resync
 }
 void SyncFieldRenderer(AppState& state) {
@@ -1525,9 +1616,9 @@ void SyncFieldRenderer(AppState& state) {
   // On an assembly, the solved bodies are the MESHED occurrence's.
   uint64_t meshedOcc = 0;
   std::vector<uint64_t> solvedOccs; // meshed + bonded (S2): one field mesh
-  if (host.IsAssembly())
+  if (host.OnAssembly())
     if (const fem::Study* s = host.Find(sim.activeStudyId))
-      for (const fem::Participant& pt : s->participants) {
+      for (const fem::Participant& pt : host.Roles(*s)) {
         if (pt.role == fem::ParticipantRole::Meshed)
           meshedOcc = pt.occurrenceId;
         if (pt.role == fem::ParticipantRole::Meshed ||
@@ -1562,17 +1653,32 @@ void SyncFieldRenderer(AppState& state) {
       for (const AppState::GpuProjection::SectionCapMesh& cap :
            state.gpu.sectionCapMeshes)
         want.push_back(cap.meshId);
+    // A simulation tab draws its subject flattened: a mesh's occurrence is
+    // SimBodyOccurrence, and its body index within that occurrence is its
+    // place among that occurrence's flattened bodies.
+    const auto occOf = [&](const DocumentRenderMesh& m) {
+      return state.sim ? SimBodyOccurrence(state, m.bodyIndex) : m.occurrenceId;
+    };
+    const auto localIndex = [&](const DocumentRenderMesh& m) {
+      if (!state.sim)
+        return static_cast<int>(m.bodyIndex);
+      const uint64_t occ = SimBodyOccurrence(state, m.bodyIndex);
+      int k = 0;
+      for (size_t i = 0; i < m.bodyIndex; i++)
+        if (SimBodyOccurrence(state, i) == occ)
+          k++;
+      return k;
+    };
     for (int bodyIndex : bodyIndices)
       for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
         if (bondedGroup) {
           // The group's field mesh covers every solved occurrence.
           for (uint64_t occ : solvedOccs)
-            if (m.occurrenceId == occ)
+            if (occOf(m) == occ)
               want.push_back(m.meshId);
           continue;
         }
-        if (static_cast<int>(m.bodyIndex) == bodyIndex &&
-            m.occurrenceId == meshedOcc)
+        if (localIndex(m) == bodyIndex && occOf(m) == meshedOcc)
           want.push_back(m.meshId);
       }
     for (uint32_t id : want)

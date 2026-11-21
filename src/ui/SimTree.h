@@ -13,5 +13,9 @@ struct AppState;
 // (docs/plans/simulation-document.md#stages); until then this says what
 // the tab holds. Draws nothing on any other tab.
 void DrawSimTree(AppState& state);
+// Its first row alone (###sim_subject): what the simulation analyses, its
+// name as the subject's tab has it, "missing" when that tab is gone. The
+// study panel heads its list with it on a simulation tab.
+void DrawSimSubjectRow(AppState& state);
 
 } // namespace ui

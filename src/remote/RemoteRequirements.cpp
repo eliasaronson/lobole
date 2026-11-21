@@ -4,6 +4,9 @@
 #include "remote/RemoteRequirements.h"
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
+#include "core/fem/SimDocument.h"
+#include "core/fem/SimMigration.h"
+#include "ui/SimRunActions.h"
 
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
@@ -599,6 +602,15 @@ uint64_t JobKey(ui::AppState& state, const cam::JobDocument& job) {
 
 // Whether the requirement's references resolve now, and the input hash of
 // what it would measure. `why` non-empty: unresolved.
+// The simulation of document `docId` that holds study `studyId`, or null.
+const fem::SimDocument* SimulationHolding(ui::AppState& state, uint64_t docId,
+                                          uint64_t studyId) {
+  std::vector<const fem::SimDocument*> sims;
+  for (size_t k : ui::SimulationSlotsFor(state, docId))
+    sims.push_back(ui::SlotSim(state, k));
+  return fem::SimulationHoldingStudy(sims, docId, studyId);
+}
+
 uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
                      std::string& why) {
   why.clear();
@@ -689,7 +701,10 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
     }
     if (kind == "study_probe" || kind == "study_result") {
       const uint64_t sid = m.at("study").get<uint64_t>();
-      const fem::Study* s = doc->FindStudy(sid);
+      // The study lives in a simulation of the document
+      // (fem::SimulationHoldingStudy), with the id it had on the part.
+      const fem::SimDocument* sim = SimulationHolding(state, r.Document(), sid);
+      const fem::Study* s = sim ? sim->FindStudy(sid) : nullptr;
       if (!s) {
         why = "study " + std::to_string(sid) + " is gone from '" +
               state.parts[*slot].name + "'";
@@ -709,7 +724,7 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
           return 0;
         }
       }
-      h.U64(fem::StudyInputKey(*doc, *s));
+      h.U64(fem::SimStudyInputKey(ui::SimContextFor(state, *sim), sid));
     } else if (kind == "check_literals") {
       HashLiteralsInputs(h, state, *doc);
     } else if (kind == "section_area" && m.contains("bodies")) {
@@ -1001,7 +1016,26 @@ void RefuseUnresolvable(ui::AppState& state, const req::Requirement& r) {
 // -----------------------------------------------------------------
 
 // Runs `method` through the domain handlers, as a client's call would run.
-json Call(ui::AppState& state, const std::string& method, const json& params) {
+json Call(ui::AppState& state, const std::string& method,
+          const json& callParams) {
+  json params = callParams;
+  // A study a requirement names is found in the simulation of the document
+  // in front that holds it, whichever of its simulations that is.
+  if (!params.contains("simulation") && state.activePart >= 0 &&
+      static_cast<size_t>(state.activePart) < state.parts.size()) {
+    const uint64_t sid = params.contains("id") ? params.value("id", 0ull)
+                         : params.contains("study")
+                             ? params.value("study", 0ull)
+                             : 0;
+    const uint64_t docId = state.parts[state.activePart].id;
+    if (sid != 0)
+      for (size_t k : ui::SimulationSlotsFor(state, docId))
+        if (const fem::SimDocument* sim = ui::SlotSim(state, k))
+          if (sim->FindStudy(sid) != nullptr) {
+            params["simulation"] = state.parts[k].id;
+            break;
+          }
+  }
   RpcParams p{params};
   Document* doc = state.document.get();
   if (doc)

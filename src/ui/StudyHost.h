@@ -34,6 +34,12 @@ struct StudyHost {
   // the host: `subjectAssembly` names its occurrences.
   fem::SimDocument* sim = nullptr;
   const AssemblyDocument* subjectAssembly = nullptr;
+  // A part subject's document, live (its tab may be behind): what a face, a
+  // body, a datum or a material is read from. Never edited through here.
+  const Document* subjectPart = nullptr;
+  // The simulation tab's slot id: what a run, a mesh report and a status
+  // are keyed by (0 off a simulation).
+  uint64_t simSlotId = 0;
   // What a study's expressions read: the part's symbols (which fall back to
   // the project's), or the project's on an assembly tab; on a simulation,
   // its subject's.
@@ -45,6 +51,21 @@ struct StudyHost {
   // The studies are an ASSEMBLY's own (not a simulation's of one).
   bool IsAssembly() const { return asmDoc != nullptr; }
   bool IsSimulation() const { return sim != nullptr; }
+  // The part whose geometry the studies stand on: the part tab's own, or a
+  // simulation's part subject. Null on an assembly.
+  const Document* GeometryPart() const { return part ? part : subjectPart; }
+  // The assembly whose occurrences the studies name: the tab's own, or a
+  // simulation's assembly subject.
+  const AssemblyDocument* Assembly() const {
+    return asmDoc ? asmDoc : subjectAssembly;
+  }
+  // The studies stand on an assembly's occurrences (its own or as a
+  // simulation's subject): loads name an occurrence, roles are listed.
+  bool OnAssembly() const { return Assembly() != nullptr; }
+  // A study's participants table: a simulation's roles are its document's.
+  const std::vector<fem::Participant>& Roles(const fem::Study& s) const {
+    return sim ? sim->Roles() : s.participants;
+  }
   // Read-only: an edit is ModifyStudy, which a part records as a command
   // (and so as a saved change, Document::SaveStamp).
   const std::vector<fem::Study>& Studies() const {
@@ -108,6 +129,22 @@ struct StudyHost {
     return occ ? occ->name : std::to_string(id);
   }
 };
+
+// For the length of an RPC on a simulation that need not be in front:
+// StudyHostOf answers with that simulation, so every helper that reads the
+// studies through the host (a mesh report, a check, an export) reads the
+// one the call named. Nests, and puts back what it found. 0 = none.
+class StudyHostOverride {
+public:
+  explicit StudyHostOverride(uint64_t simSlotId);
+  ~StudyHostOverride();
+  StudyHostOverride(const StudyHostOverride&) = delete;
+  StudyHostOverride& operator=(const StudyHostOverride&) = delete;
+
+private:
+  uint64_t m_prev = 0;
+};
+uint64_t StudyHostOverrideSlot();
 
 // The active tab's host; false on a drawing or job tab. SimulationActions.cpp.
 // On a simulation tab it is the simulation (`sim`), with neither `part` nor

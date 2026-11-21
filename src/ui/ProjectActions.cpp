@@ -7,6 +7,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/RendererSync.h"
+#include "ui/SimRunActions.h"
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
 
@@ -1043,6 +1044,9 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     for (req::Requirement& r : state.requirements)
       if (r.measure.contains("document"))
         r.measure["document"] = state.parts.front().id;
+    // Its studies move into a simulation tab, as a container's do.
+    if (MoveStudiesIntoSimulations(state) > 0)
+      AdoptStoredSimResults(state);
     StampDiskState(state, path); // F8 — see the container branch below
     return true;
   }
@@ -1160,7 +1164,13 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     // motion results the session held were the previous project's.
     state.motionResults.clear();
     state.motionResultRevisions.clear();
+    // A part's or an assembly's own studies move into simulation tabs
+    // behind the one in front, and the open still reads as saved
+    // (MarkProjectOpened stamps it): docs/simulation/README.md, "Moving
+    // studies into a simulation".
+    MoveStudiesIntoSimulations(state);
     AdoptStoredResults(state);
+    AdoptStoredSimResults(state);
     // The opened drawing's views: each one's saved projection is installed
     // when its inputs still hash as they did, and the rest project, all on a
     // `drawing` job rather than on the frame

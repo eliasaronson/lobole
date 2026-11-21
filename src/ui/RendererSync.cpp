@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/RendererSync.h"
+#include "core/fem/SimDocument.h"
 #include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/SceneOverlays.h"
 #include "ui/SequencePlayback.h"
+#include "ui/SimRunActions.h"
 #include "ui/ViewActions.h"
 
 #include "core/LightRig.h"
@@ -478,8 +480,15 @@ void SyncDocumentRenderers(AppState& state) {
   // A job tab has no document of its own, and a topology study belongs to a
   // part -- nothing to ghost here.
   if (state.topoGhostStudyId && !state.simulation.active && state.document) {
-    const fem::StudyRuntime* rt =
-        state.document->StudyResults(state.topoGhostStudyId);
+    // The study is in one of the part's simulations.
+    const fem::StudyRuntime* rt = nullptr;
+    if (state.activePart >= 0)
+      for (size_t k :
+           SimulationSlotsFor(state, state.parts[state.activePart].id))
+        if (const fem::SimDocument* sd = SlotSim(state, k))
+          if (const fem::StudyRuntime* found =
+                  sd->StudyResults(state.topoGhostStudyId))
+            rt = found;
     if (rt && rt->topology) {
       std::vector<glm::vec3> gpos, gnrm;
       std::vector<uint32_t> gidx;

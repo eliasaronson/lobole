@@ -723,7 +723,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     Hold(ctx, 0.5);
     OrbitFor(ctx, -30.0, 2.0);
     EndScene(ctx);
-    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    const fem::StudyRuntime* rt = Sim()->StudyResults(studyId);
     IM_CHECK_SILENT(rt != nullptr);
     IM_CHECK_GT(rt->maxVonMises, 0.0);
   };
