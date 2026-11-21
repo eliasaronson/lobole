@@ -773,6 +773,11 @@ TEST_CASE("A variable renamed or deleted looks inside every simulation",
   CHECK(has(refs, "Part sim: study 'Bend'"));
   REQUIRE(ui::RenamePartVariable(state, part, "t", "wall"));
   CHECK(LoadExpr(state, partSim) == "wall * 10 + gap");
+  // One step on the part's stack: undone and redone with the part.
+  state.commands->Undo(part);
+  CHECK(LoadExpr(state, partSim) == "t * 10 + gap");
+  state.commands->Redo(part);
+  CHECK(LoadExpr(state, partSim) == "wall * 10 + gap");
 
   // The project's: every simulation that sees it, not one that shadows it.
   refs.clear();

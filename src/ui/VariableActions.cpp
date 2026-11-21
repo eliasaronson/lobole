@@ -320,15 +320,48 @@ void RewriteAssemblyRefs(AppState& state, const std::string& from,
 }
 } // namespace
 
+namespace {
+// A part's own variable renamed on its command stack, and what reads it
+// outside the part -- its requirements, the simulations of it -- renamed
+// with it: undone and redone as one step, so an undo never leaves a
+// simulation's study reading a name the part no longer has.
+class RenamePartVariableCommand : public RenameVariableCommand {
+public:
+  RenamePartVariableCommand(AppState& state, uint64_t partId,
+                            std::string oldName, std::string newName)
+      : RenameVariableCommand(oldName, newName), m_state(state),
+        m_partId(partId), m_old(std::move(oldName)), m_new(std::move(newName)) {
+  }
+
+  bool Execute(Document& doc) override {
+    if (!RenameVariableCommand::Execute(doc))
+      return false;
+    Follow(m_old, m_new);
+    return true;
+  }
+  void Undo(Document& doc) override {
+    RenameVariableCommand::Undo(doc);
+    Follow(m_new, m_old);
+  }
+
+private:
+  void Follow(const std::string& from, const std::string& to) {
+    RewriteRequirements(m_state, from, to, m_partId);
+    RewriteSimulations(m_state, from, to, m_partId);
+  }
+  AppState& m_state;
+  uint64_t m_partId;
+  std::string m_old, m_new;
+};
+} // namespace
+
 bool RenamePartVariable(AppState& state, Document& doc,
                         const std::string& oldName,
                         const std::string& newName) {
-  if (!state.commands->Execute(
-          std::make_unique<RenameVariableCommand>(oldName, newName), doc))
-    return false;
-  RewriteRequirements(state, oldName, newName, PartIdOf(state, doc));
-  RewriteSimulations(state, oldName, newName, PartIdOf(state, doc));
-  return true;
+  return state.commands->Execute(
+      std::make_unique<RenamePartVariableCommand>(state, PartIdOf(state, doc),
+                                                  oldName, newName),
+      doc);
 }
 
 bool RemovePartVariable(AppState& state, Document& doc, const std::string& name,
