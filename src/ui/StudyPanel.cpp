@@ -871,7 +871,8 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
                       "shape's runs now; run the solid's to compare.");
 
   // The shape or the density, and the iso-surface's threshold, are the
-  // legend's (DrawLegendControls).
+  // legend's (DrawFieldLegend: the picker, and the threshold behind its
+  // gear).
   // Shape guide: show the optimized shape translucent in the modeling
   // workspace (visible after exiting simulation mode) to re-model against.
   bool ghost = state.topoGhostStudyId == s.id;
@@ -2581,164 +2582,310 @@ ImU32 Turbo(float x) {
 
 namespace {
 
-// The result's controls, at the top of the legend they act on
-// (docs/simulation/README.md#results-display): the field, the mode or the
-// load case, the deformation, the range and the markers, and on a half
-// model its mirror image. What the study's kind does not have is not
-// offered; a field its result does not hold is listed greyed with why.
-void DrawLegendControls(AppState& state, const fem::Study& s,
-                        const fem::StudyRuntime& rt) {
-  SimulationState& sim = state.simulation;
-  using F = SimulationState::Field;
+// The legend's result controls (docs/simulation/README.md#results-display).
+// The bar leads and the controls fold: the legend's face is what is read --
+// its title, which is the field picker, the mode or the case where there is
+// more than one, the study, the bar and where its ends are -- and the gear on
+// the title row opens the rest beside it. What is set away from its default
+// in there is said on the face, in one dim line, so a clamped range or a
+// mirrored half is never a picture nobody can tell from the whole one.
+
+using LegendField = SimulationState::Field;
+
+// What the study's kind makes of its result's display.
+struct LegendKind {
+  bool thermal = false, modal = false, buckling = false, topo = false;
+};
+
+LegendKind LegendKindOf(const fem::Study& s) {
+  LegendKind k;
+  k.thermal = s.type == fem::AnalysisType::Thermal;
+  k.buckling = s.type == fem::AnalysisType::Buckling;
+  k.modal = s.type == fem::AnalysisType::Modal || k.buckling;
+  k.topo = s.type == fem::AnalysisType::Topology;
+  return k;
+}
+
+std::string Capitalised(std::string t) {
+  if (!t.empty() && t.rfind("von ", 0) != 0)
+    t[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(t[0])));
+  return t;
+}
+
+// A field's name as the picker lists it.
+std::string LegendFieldName(LegendField f) {
+  if (f == LegendField::None)
+    return "Off";
+  if (f == LegendField::Shape)
+    return "Shape";
+  if (f == LegendField::Density)
+    return "Density";
+  return Capitalised(fem::SpecOf(*ResultFieldOf(f)).title);
+}
+
+// Which of the folded controls the shown result has: the popover draws these
+// rows, the gear is there when there is one, and the face's summary reads
+// the same flags.
+struct LegendMore {
+  bool deform = false, layers = false, threshold = false, range = false,
+       yield = false, markers = false, mirror = false;
+  bool Any() const {
+    return deform || layers || threshold || range || markers || mirror;
+  }
+};
+
+LegendMore LegendMoreOf(AppState& state, const fem::Study& s,
+                        const ShownField* shown) {
+  const SimulationState& sim = state.simulation;
+  const LegendKind k = LegendKindOf(s);
+  LegendMore m;
+  if (sim.field == LegendField::None)
+    return m;
+  if (k.topo) {
+    m.threshold = sim.field == LegendField::Shape;
+    return m;
+  }
+  m.deform = !k.thermal;
+  m.layers = sim.field == LegendField::AcrossLayers ||
+             sim.field == LegendField::InterlayerFactor;
+  m.range = !k.modal && shown != nullptr && !shown->mesh && !shown->normalized;
+  m.markers = m.range;
+  m.yield = m.range && (sim.field == LegendField::VonMises ||
+                        sim.field == LegendField::PrincipalMax ||
+                        sim.field == LegendField::PrincipalMin);
   const StudyHost host = StudyHostOf(state);
-  const bool thermal = s.type == fem::AnalysisType::Thermal;
-  const bool modal = s.type == fem::AnalysisType::Modal ||
-                     s.type == fem::AnalysisType::Buckling;
-  const bool topo = s.type == fem::AnalysisType::Topology;
-  const float labelW = ImGui::GetFontSize() * 4.2f;
-  const float fieldW = ImGui::GetFontSize() * 9.5f;
-  const auto label = [&](const char* text) {
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(kMuted, "%s", text);
-    ImGui::SameLine(labelW);
-    ImGui::SetNextItemWidth(fieldW);
-  };
-  const auto title = [](F f) -> std::string {
-    if (f == F::None)
-      return "Off";
-    if (f == F::Shape)
-      return "Shape";
-    if (f == F::Density)
-      return "Density";
-    std::string t = fem::SpecOf(*ResultFieldOf(f)).title;
-    if (!t.empty() && f != F::VonMises)
-      t[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(t[0])));
-    return t;
-  };
-  const auto choose = [&](F f) {
+  m.mirror = host && host.sim->Geometry().symmetry.On();
+  return m;
+}
+
+// The picker that is the legend's title: the field, read as a title until
+// it is hovered.
+void DrawLegendFieldCombo(AppState& state, const fem::Study& s,
+                          const char* preview) {
+  SimulationState& sim = state.simulation;
+  const LegendKind k = LegendKindOf(s);
+  const auto choose = [&](LegendField f) {
     if (sim.field != f) {
       sim.field = f;
       sim.clampLo = sim.clampHi = false; // a range is one field's
     }
-    if (f != F::None)
+    if (f != LegendField::None)
       sim.meshView = SimulationState::MeshView::Off;
   };
-
-  // The field.
-  std::string current = title(sim.field);
-  if (modal && sim.field != F::None)
-    current = "Mode shape";
-  label("Field");
-  if (ImGui::BeginCombo("###result_field", current.c_str())) {
-    if (ImGui::Selectable("Off###field_off", sim.field == F::None))
-      choose(F::None);
-    if (modal) {
-      if (ImGui::Selectable("Mode shape###field_mode_shape",
-                            sim.field != F::None))
-        choose(F::Displacement);
-    } else if (topo) {
-      if (ImGui::Selectable("Shape###field_shape", sim.field == F::Shape))
-        choose(F::Shape);
-      if (ImGui::Selectable("Density###field_density", sim.field == F::Density))
-        choose(F::Density);
-    } else {
-      static constexpr F kStatic[] = {
-          F::VonMises,        F::Displacement,     F::PrincipalMax,
-          F::PrincipalMid,    F::PrincipalMin,     F::FactorOfSafety,
-          F::AcrossLayers,    F::InterlayerFactor, F::PlasticStrain,
-          F::ContactPressure, F::Temperature};
-      static constexpr F kThermal[] = {F::Temperature, F::HeatFlux};
-      // What this study's kind has at all: a plastic strain only with
-      // plasticity, a contact pressure only with a contact, a
-      // temperature only under a thermal load.
-      const auto offered = [&](F f) {
-        if (f == F::PlasticStrain)
-          return s.nonlinear.plasticity;
-        if (f == F::ContactPressure)
-          return fem::HasContact(s);
-        if (f == F::Temperature && !thermal)
-          return s.thermalLoad.On();
-        return true;
-      };
-      const auto item = [&](F f) {
-        if (!offered(f))
-          return;
-        const std::string why = FieldRefusal(state, s.id, f);
-        const std::string id =
-            title(f) + "###field_" + fem::SpecOf(*ResultFieldOf(f)).key;
-        ImGui::BeginDisabled(!why.empty());
-        if (ImGui::Selectable(id.c_str(), sim.field == f))
-          choose(f);
-        ImGui::EndDisabled();
-        if (!why.empty() &&
-            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-          ImGui::SetTooltip("%s", why.c_str());
-      };
-      if (thermal)
-        for (F f : kThermal)
-          item(f);
-      else
-        for (F f : kStatic)
-          item(f);
-    }
-    ImGui::EndCombo();
-  }
-  if (sim.field == F::None)
+  if (!ImGui::BeginCombo("###result_field", preview,
+                         ImGuiComboFlags_WidthFitPreview))
     return;
+  if (ImGui::Selectable("Off###field_off", sim.field == LegendField::None))
+    choose(LegendField::None);
+  if (k.modal) {
+    if (ImGui::Selectable("Mode shape###field_mode_shape",
+                          sim.field != LegendField::None))
+      choose(LegendField::Displacement);
+  } else if (k.topo) {
+    if (ImGui::Selectable("Shape###field_shape",
+                          sim.field == LegendField::Shape))
+      choose(LegendField::Shape);
+    if (ImGui::Selectable("Density###field_density",
+                          sim.field == LegendField::Density))
+      choose(LegendField::Density);
+  } else {
+    using F = LegendField;
+    static constexpr F kStatic[] = {
+        F::VonMises,        F::Displacement,     F::PrincipalMax,
+        F::PrincipalMid,    F::PrincipalMin,     F::FactorOfSafety,
+        F::AcrossLayers,    F::InterlayerFactor, F::PlasticStrain,
+        F::ContactPressure, F::Temperature};
+    static constexpr F kThermal[] = {F::Temperature, F::HeatFlux};
+    // What this study's kind has at all: a plastic strain only with
+    // plasticity, a contact pressure only with a contact, a temperature
+    // only under a thermal load. One its result does not hold is listed
+    // greyed with why.
+    const auto offered = [&](F f) {
+      if (f == F::PlasticStrain)
+        return s.nonlinear.plasticity;
+      if (f == F::ContactPressure)
+        return fem::HasContact(s);
+      if (f == F::Temperature && !k.thermal)
+        return s.thermalLoad.On();
+      return true;
+    };
+    const auto item = [&](F f) {
+      if (!offered(f))
+        return;
+      const std::string why = FieldRefusal(state, s.id, f);
+      const std::string id =
+          LegendFieldName(f) + "###field_" + fem::SpecOf(*ResultFieldOf(f)).key;
+      ImGui::BeginDisabled(!why.empty());
+      if (ImGui::Selectable(id.c_str(), sim.field == f))
+        choose(f);
+      ImGui::EndDisabled();
+      if (!why.empty() &&
+          ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", why.c_str());
+    };
+    if (k.thermal)
+      for (F f : kThermal)
+        item(f);
+    else
+      for (F f : kStatic)
+        item(f);
+  }
+  ImGui::EndCombo();
+}
 
-  // The mode, or the load case, shown.
-  if (modal) {
+// The thing changed most, on the face: which mode, or which load case, when
+// the result has more than one. One of each is not a choice and is not
+// drawn.
+struct LegendPick {
+  const char* id = nullptr; // "###result_mode" / "###result_case"
+  const char* itemPrefix = nullptr;
+  std::vector<std::string> items;
+  int* current = nullptr;
+};
+
+LegendPick LegendPickOf(AppState& state, const fem::Study& s,
+                        const fem::StudyRuntime& rt) {
+  SimulationState& sim = state.simulation;
+  const LegendKind k = LegendKindOf(s);
+  LegendPick p;
+  if (sim.field == LegendField::None || k.topo)
+    return p;
+  if (k.modal) {
     const fem::StudyBodyResult* b = nullptr;
     for (const fem::StudyBodyResult& br : rt.bodies)
       if (!br.results.modes.empty()) {
         b = &br;
         break;
       }
-    if (b != nullptr) {
-      const int n = static_cast<int>(b->results.modes.size());
-      sim.activeMode = std::clamp(sim.activeMode, 0, n - 1);
-      const auto modeText = [&](int i) {
-        char buf[64];
-        if (s.type == fem::AnalysisType::Buckling)
-          std::snprintf(buf, sizeof(buf), "%d:  x %.4g", i + 1,
-                        b->results.modes[i].factor);
-        else if (b->results.modes[i].rigid)
-          std::snprintf(buf, sizeof(buf), "%d:  rigid", i + 1);
-        else
-          std::snprintf(buf, sizeof(buf), "%d:  %.4g Hz", i + 1,
-                        b->results.modes[i].frequencyHz);
-        return std::string(buf);
-      };
-      label("Mode");
-      if (ImGui::BeginCombo("###result_mode",
-                            modeText(sim.activeMode).c_str())) {
-        for (int i = 0; i < n; ++i)
-          if (ImGui::Selectable(
-                  (modeText(i) + "###result_mode_" + std::to_string(i)).c_str(),
-                  sim.activeMode == i))
-            sim.activeMode = i;
-        ImGui::EndCombo();
-      }
+    if (b == nullptr)
+      return p;
+    p.id = "###result_mode";
+    p.itemPrefix = "###result_mode_";
+    char buf[64];
+    for (size_t i = 0; i < b->results.modes.size(); ++i) {
+      const auto& m = b->results.modes[i];
+      if (k.buckling)
+        std::snprintf(buf, sizeof(buf), "%zu:  x %.4g", i + 1, m.factor);
+      else if (m.rigid)
+        std::snprintf(buf, sizeof(buf), "%zu:  rigid", i + 1);
+      else
+        std::snprintf(buf, sizeof(buf), "%zu:  %.4g Hz", i + 1, m.frequencyHz);
+      p.items.emplace_back(buf);
     }
-  } else if (!rt.caseNames.empty() && !topo) {
-    sim.activeCase = std::clamp(sim.activeCase, 0,
-                                static_cast<int>(rt.caseNames.size()) - 1);
-    label("Case");
-    if (ImGui::BeginCombo("###result_case",
-                          rt.caseNames[sim.activeCase].c_str())) {
-      for (size_t k = 0; k < rt.caseNames.size(); ++k)
-        if (ImGui::Selectable(
-                (rt.caseNames[k] + "###result_case_" + std::to_string(k))
-                    .c_str(),
-                sim.activeCase == static_cast<int>(k)))
-          sim.activeCase = static_cast<int>(k);
-      ImGui::EndCombo();
-    }
+    p.current = &sim.activeMode;
+  } else if (!rt.caseNames.empty()) {
+    p.id = "###result_case";
+    p.itemPrefix = "###result_case_";
+    p.items = rt.caseNames;
+    p.current = &sim.activeCase;
   }
+  if (p.current != nullptr)
+    *p.current =
+        std::clamp(*p.current, 0, static_cast<int>(p.items.size()) - 1);
+  return p;
+}
 
+void DrawLegendPick(const LegendPick& p) {
+  if (!ImGui::BeginCombo(p.id, p.items[*p.current].c_str(),
+                         ImGuiComboFlags_WidthFitPreview))
+    return;
+  for (size_t i = 0; i < p.items.size(); ++i)
+    if (ImGui::Selectable(
+            (p.items[i] + p.itemPrefix + std::to_string(i)).c_str(),
+            *p.current == static_cast<int>(i)))
+      *p.current = static_cast<int>(i);
+  ImGui::EndCombo();
+}
+
+// The folded controls that are not at their default, said in one line:
+// "deformed ×200 · range to 40 · mirrored". Empty when everything is.
+std::string LegendSummary(const SimulationState& sim, const LegendMore& m) {
+  std::vector<std::string> parts;
+  char buf[96];
+  if (m.deform && sim.deformScale > 0.0f) {
+    std::snprintf(buf, sizeof(buf), "deformed \xc3\x97%.3g", sim.deformScale);
+    parts.emplace_back(buf);
+  }
+  if (m.layers) {
+    const int axis = std::abs(sim.layerNormal.x) > 0.5   ? 0
+                     : std::abs(sim.layerNormal.y) > 0.5 ? 1
+                                                         : 2;
+    parts.emplace_back(std::string("layers along ") + "XYZ"[axis]);
+  }
+  if (m.threshold && sim.topoThreshold > 0.0f) {
+    std::snprintf(buf, sizeof(buf), "threshold %.2f", sim.topoThreshold);
+    parts.emplace_back(buf);
+  }
+  // The range in the title's unit, which the line does not repeat.
+  if (m.range && (sim.clampLo || sim.clampHi)) {
+    if (sim.clampLo && sim.clampHi)
+      std::snprintf(buf, sizeof(buf), "range %.3g to %.3g", sim.rangeLo,
+                    sim.rangeHi);
+    else if (sim.clampHi)
+      std::snprintf(buf, sizeof(buf), "range to %.3g", sim.rangeHi);
+    else
+      std::snprintf(buf, sizeof(buf), "range from %.3g", sim.rangeLo);
+    parts.emplace_back(buf);
+  }
+  if (m.markers && !sim.showExtremes)
+    parts.emplace_back("markers off");
+  if (m.mirror && sim.mirror)
+    parts.emplace_back("mirrored");
+  std::string out;
+  for (const std::string& p : parts)
+    out += (out.empty() ? "" : " \xc2\xb7 ") + p;
+  return out;
+}
+
+// The popover's rows: a label column and one control column, every control
+// the same width, the toggles together at the bottom.
+// The gear's popover, by the one name it is opened, asked after and drawn
+// under (GUI tests reach its window with LegendMore).
+constexpr const char* kLegendMorePopup = "###legend_more";
+constexpr const char* kMarkersLabel = "Max and min markers###result_extremes";
+constexpr const char* kMirrorLabel = "Mirrored half###result_mirror";
+void DrawLegendMoreRows(AppState& state, const fem::Study& s,
+                        const LegendMore& m, const ShownField* shown) {
+  SimulationState& sim = state.simulation;
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const std::string rangeLabel = shown != nullptr && !shown->unit.empty()
+                                     ? "Range (" + shown->unit + ")"
+                                     : std::string("Range");
+  float labelW = 0.0f;
+  for (const char* t : {"Deform", "Layers", "Threshold", "Show"})
+    labelW = std::max(labelW, ImGui::CalcTextSize(t).x);
+  if (m.range)
+    labelW = std::max(labelW, ImGui::CalcTextSize(rangeLabel.c_str()).x);
+  labelW += style.ItemSpacing.x * 2.0f;
+  // One width for every control, wide enough for the toggles' labels.
+  float ctlW = ImGui::GetFontSize() * 9.0f;
+  const float box = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x;
+  if (m.markers)
+    ctlW = std::max(ctlW,
+                    box + ImGui::CalcTextSize(kMarkersLabel, nullptr, true).x);
+  if (m.mirror)
+    ctlW = std::max(ctlW,
+                    box + ImGui::CalcTextSize(kMirrorLabel, nullptr, true).x);
+  const float x0 = ImGui::GetCursorPosX();
+  const auto label = [&](const char* text) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(kMuted, "%s", text);
+    ImGui::SameLine(x0 + labelW);
+    ImGui::SetNextItemWidth(ctlW);
+  };
+  const auto indent = [&] { ImGui::SetCursorPosX(x0 + labelW); };
+
+  if (m.deform) {
+    label("Deform");
+    ImGui::SliderFloat("###deform", &sim.deformScale, 0.0f, 100.0f,
+                       "\xc3\x97%.0f");
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("How many times the displacement the shape is drawn "
+                        "deformed by. Ctrl+click to type a larger one.");
+  }
   // The build direction of the layered fields: a question asked of the
   // result, so it is here with the field.
-  if (sim.field == F::AcrossLayers || sim.field == F::InterlayerFactor) {
+  if (m.layers) {
     int axis = std::abs(sim.layerNormal.x) > 0.5   ? 0
                : std::abs(sim.layerNormal.y) > 0.5 ? 1
                                                    : 2;
@@ -2752,32 +2899,25 @@ void DrawLegendControls(AppState& state, const fem::Study& s,
       ImGui::SetTooltip("The direction the part was built up in, in its "
                         "own axes.");
   }
-
-  if (topo) {
-    if (sim.field == F::Shape) {
-      float thr = sim.topoThreshold;
-      label("Threshold");
-      if (ImGui::SliderFloat("###result_threshold", &thr, 0.0f, 1.0f,
-                             thr == 0.0f ? "auto" : "%.2f"))
-        sim.topoThreshold = thr;
-    }
-    return;
+  if (m.threshold) {
+    float thr = sim.topoThreshold;
+    label("Threshold");
+    if (ImGui::SliderFloat("###result_threshold", &thr, 0.0f, 1.0f,
+                           thr == 0.0f ? "auto" : "%.2f"))
+      sim.topoThreshold = thr;
   }
-  if (!thermal) {
-    label("Deform");
-    ImGui::SliderFloat("###deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
-  }
-
   // The range: an end left empty is the field's own; past an end the
   // picture takes the over or the under colour.
-  const ShownField* shown = sim.shown.get();
-  if (!modal && shown != nullptr && !shown->mesh && !shown->normalized) {
+  if (m.range) {
+    const float dashW = ImGui::CalcTextSize("to").x;
+    const float inner = style.ItemInnerSpacing.x;
+    const float boxW = (ctlW - dashW - 2.0f * inner) * 0.5f;
     const auto bound = [&](const char* id, const char* hint, bool& on,
                            double& v) {
       char buf[32] = "";
       if (on)
         std::snprintf(buf, sizeof(buf), "%.4g", v);
-      ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
+      ImGui::SetNextItemWidth(boxW);
       if (ImGui::InputTextWithHint(id, hint, buf, sizeof(buf))) {
         char* end = nullptr;
         const double d = std::strtod(buf, &end);
@@ -2789,26 +2929,19 @@ void DrawLegendControls(AppState& state, const fem::Study& s,
         ImGui::SetTooltip("Empty: the field's own %s.", hint);
     };
     ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(kMuted, "Range");
-    ImGui::SameLine(labelW);
+    ImGui::TextColored(kMuted, "%s", rangeLabel.c_str());
+    ImGui::SameLine(x0 + labelW);
     bound("###result_range_lo", "min", sim.clampLo, sim.rangeLo);
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SameLine(0.0f, inner);
+    ImGui::TextColored(kMuted, "to");
+    ImGui::SameLine(0.0f, inner);
     bound("###result_range_hi", "max", sim.clampHi, sim.rangeHi);
-    if (!shown->unit.empty()) {
-      ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-      ImGui::TextColored(kMuted, "%s", shown->unit.c_str());
-    }
-    // The yield as the top of a stress, so what is over it reads as
-    // yielded; and the markers at the field's ends.
-    const bool stress = sim.field == F::VonMises ||
-                        sim.field == F::PrincipalMax ||
-                        sim.field == F::PrincipalMin;
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelW -
-                         ImGui::GetStyle().WindowPadding.x);
-    if (stress) {
+    // The yield as the top of a stress, so what is over it reads as yielded.
+    if (m.yield) {
+      indent();
       const std::optional<double> yield = YieldClampMPa(state, s.id);
       ImGui::BeginDisabled(!yield.has_value());
-      if (ImGui::SmallButton("Above yield###result_range_yield")) {
+      if (ImGui::Button("Above yield###result_range_yield", ImVec2(ctlW, 0))) {
         sim.clampHi = true;
         sim.rangeHi = *yield;
       }
@@ -2818,25 +2951,68 @@ void DrawLegendControls(AppState& state, const fem::Study& s,
                                         "yield strength: what is over it "
                                         "takes the over colour."
                                       : "The material has no yield strength.");
-      ImGui::SameLine();
     }
-    ImGui::Checkbox("Max, min###result_extremes", &sim.showExtremes);
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Mark the field's maximum and minimum, with their "
-                        "values.");
   }
-  // A half model, drawn with its mirror image.
-  if (host && host.sim->Geometry().symmetry.On()) {
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelW -
-                         ImGui::GetStyle().WindowPadding.x);
-    ImGui::Checkbox("Mirror the half###result_mirror", &sim.mirror);
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("The study solved half the part, cut on its symmetry "
-                        "plane: draw the other half as its mirror image.");
+  // The toggles, together: the markers at the field's ends, and a half
+  // model drawn with its mirror image.
+  if (m.markers || m.mirror) {
+    if (m.deform || m.layers || m.threshold || m.range)
+      ImGui::Dummy(ImVec2(0.0f, style.ItemSpacing.y));
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(kMuted, "Show");
+    ImGui::SameLine(x0 + labelW);
+    if (m.markers) {
+      ImGui::Checkbox(kMarkersLabel, &sim.showExtremes);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Mark the field's maximum and minimum, with their "
+                          "values.");
+      if (m.mirror)
+        indent();
+    }
+    if (m.mirror) {
+      ImGui::Checkbox(kMirrorLabel, &sim.mirror);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The study solved half the part, cut on its "
+                          "symmetry plane: draw the other half as its mirror "
+                          "image.");
+    }
   }
 }
 
+// The gear's popover, beside the legend and level with its foot. It closes
+// on a click away and on Esc, as the app's other popovers do.
+void DrawLegendMorePopover(AppState& state, const fem::Study& s,
+                           const LegendMore& m, const ShownField* shown) {
+  const ImVec2 pos = ImGui::GetWindowPos();
+  const ImVec2 size = ImGui::GetWindowSize();
+  ImGui::SetNextWindowPos(ImVec2(pos.x + size.x + 6.0f, pos.y + size.y),
+                          ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(18, 20, 26, 240));
+  ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 6.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
+  const bool open = ImGui::BeginPopup(kLegendMorePopup);
+  ImGui::PopStyleVar(2);
+  ImGui::PopStyleColor();
+  if (!open)
+    return;
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    ImGui::CloseCurrentPopup();
+  DrawLegendMoreRows(state, s, m, shown);
+  ImGui::EndPopup();
+}
+
 } // namespace
+
+std::string FieldLegendSummary(AppState& state) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host)
+    return {};
+  const fem::Study* study = host.Find(state.simulation.activeStudyId);
+  if (study == nullptr || host.Results(study->id) == nullptr)
+    return {};
+  const ShownField* shown = state.simulation.shown.get();
+  return LegendSummary(state.simulation, LegendMoreOf(state, *study, shown));
+}
 
 void DrawFieldLegend(AppState& state) {
   SimulationState& sim = state.simulation;
@@ -2849,51 +3025,51 @@ void DrawFieldLegend(AppState& state) {
   const ShownField* shown = sim.shown.get();
   const fem::StudyRuntime* rt = host.Results(sim.activeStudyId);
   const fem::Study* study = host.Find(sim.activeStudyId);
-  // The controls are the result's: while there is one to show. Over the
-  // mesh view they are its Field alone, which puts the mesh away.
-  const bool controls = study != nullptr && rt != nullptr;
+  const bool meshBar = shown != nullptr && !shown->plain && shown->mesh &&
+                       sim.meshView != SimulationState::MeshView::Off;
   bool bar = shown != nullptr && !shown->plain &&
              (shown->mesh
-                  ? sim.meshView != SimulationState::MeshView::Off
+                  ? meshBar
                   : sim.field != SimulationState::Field::None && rt != nullptr);
+  // The controls are the result's, while there is one to show and the mesh
+  // is not: a mesh view's legend is its bar alone (the mesh's Show combo
+  // puts it away).
+  const bool controls = study != nullptr && rt != nullptr && !meshBar;
   if (!controls && !bar)
     return;
-  const bool buckling = study && study->type == fem::AnalysisType::Buckling;
-  const bool modal =
-      study && (study->type == fem::AnalysisType::Modal || buckling);
-  const bool topo = study && study->type == fem::AnalysisType::Topology;
+  const LegendKind kind =
+      study != nullptr ? LegendKindOf(*study) : LegendKind{};
 
-  // What the picture is a picture OF, above the bar: the study and its
-  // analysis, the mode and its frequency, the factor the deformation is
-  // drawn at. A colorbar with a number and no subject was a picture a
-  // reader had to trust.
   const float lineH = ImGui::GetTextLineHeight();
-  // Shorter under the controls, so the legend stays a corner of the view.
-  const float barW = 14.0f, barH = controls ? 120.0f : 160.0f, capH = 8.0f;
+  const float barW = 14.0f, barH = 160.0f, capH = 8.0f;
   const float margin = 12.0f, tickGap = 8.0f;
   const bool extremes =
       bar && !shown->mesh && !shown->normalized && shown->hasExtremes;
-  std::vector<std::string> head;
-  if (study) {
-    head.push_back(study->name + ", " +
-                   (bar && shown->mesh                          ? "mesh"
-                    : buckling                                  ? "buckling"
-                    : modal                                     ? "modal"
-                    : topo                                      ? "topology"
-                    : study->type == fem::AnalysisType::Thermal ? "thermal"
-                                                                : "static"));
-  }
-  // The deformation and the case are the controls' when they are drawn;
-  // a mesh view has none.
-  if (bar && !controls && !shown->mesh && sim.deformScale > 0.0f && !topo) {
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "deformation x%.3g", sim.deformScale);
-    head.push_back(buf);
-  }
+
+  // The title, which is the field picker when there are controls: the
+  // quantity and its unit as the bar draws it.
   std::string title;
   if (bar)
-    title = shown->unit.empty() ? shown->title
-                                : shown->title + " (" + shown->unit + ")";
+    title = Capitalised(shown->unit.empty()
+                            ? shown->title
+                            : shown->title + " (" + shown->unit + ")");
+  else if (sim.field == SimulationState::Field::None)
+    title = "No field";
+  else
+    title = kind.modal ? "Mode shape" : LegendFieldName(sim.field);
+
+  // What the picture is a picture OF, under the title: the study and its
+  // analysis. A colour bar with a number and no subject was a picture a
+  // reader had to trust, and two studies of one part draw alike.
+  std::string studyLine;
+  if (study)
+    studyLine = study->name + " \xc2\xb7 " +
+                (meshBar         ? "mesh"
+                 : kind.buckling ? "buckling"
+                 : kind.modal    ? "modal"
+                 : kind.topo     ? "topology"
+                 : kind.thermal  ? "thermal"
+                                 : "static");
 
   // The ticks: the ends and the quarters, so a colour halfway up the bar is
   // a number too.
@@ -2935,16 +3111,53 @@ void DrawFieldLegend(AppState& state) {
     }
   }
 
-  // One window in the viewport's lower-left corner: the controls, then
-  // what the picture is, then the bar. Its own window so its widgets take
-  // the clicks, and a backdrop so it reads over any colour.
+  // The folded controls: which the result has, and what of them is set.
+  LegendMore more;
+  LegendPick pick;
+  std::string summary;
+  if (controls) {
+    more = LegendMoreOf(state, *study, shown);
+    pick = LegendPickOf(state, *study, *rt);
+    summary = LegendSummary(sim, more);
+  }
+  const bool picks = pick.current != nullptr && pick.items.size() > 1;
+
+  // The face's own width: the widest of what it reads, so the gear sits at
+  // its right edge without the window growing to hold it.
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float comboExtra =
+      style.FramePadding.x * 2.0f + ImGui::GetFrameHeight();
+  const float gearW =
+      ImGui::CalcTextSize(ICON_FA_GEAR).x + style.FramePadding.x * 2.0f;
+  float tickW = 0.0f;
+  for (const std::string& t : ticks)
+    tickW = std::max(tickW, ImGui::CalcTextSize(t.c_str()).x);
+  const float titleW = controls
+                           ? ImGui::CalcTextSize(title.c_str()).x + comboExtra
+                           : ImGui::CalcTextSize(title.c_str()).x;
+  // (A picker's text starts at the face's edge, its frame padding left of it.)
+  float faceW = titleW - (controls ? style.FramePadding.x : 0.0f) +
+                (more.Any() ? style.ItemSpacing.x + gearW : 0.0f);
+  if (picks)
+    faceW = std::max(faceW,
+                     ImGui::CalcTextSize(pick.items[*pick.current].c_str()).x +
+                         comboExtra - style.FramePadding.x);
+  faceW = std::max(faceW, ImGui::CalcTextSize(studyLine.c_str()).x);
+  if (bar)
+    faceW = std::max(faceW, barW + tickGap + tickW);
+  for (const std::string& c : captions)
+    faceW = std::max(faceW, ImGui::CalcTextSize(c.c_str()).x);
+  faceW = std::max(faceW, ImGui::CalcTextSize(summary.c_str()).x);
+
+  // One window in the viewport's lower-left corner. Its own window so its
+  // widgets take the clicks, and a backdrop so it reads over any colour.
   ImGui::SetNextWindowPos(
       ImVec2(state.viewportPos.x + margin,
              state.viewportPos.y + state.viewportSize.y - margin),
       ImGuiCond_Always, ImVec2(0.0f, 1.0f));
   ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(18, 20, 26, 232));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.0f);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
   const ImGuiWindowFlags flags =
       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
@@ -2958,24 +3171,63 @@ void DrawFieldLegend(AppState& state) {
   }
   RecordViewportObstacle(state); // Fit keeps the model out from under it
   const ImU32 dim = IM_COL32(255, 255, 255, 190);
-  for (const std::string& line : head)
-    ImGui::TextColored(ImVec4(1, 1, 1, 0.75f), "%s", line.c_str());
+  const ImVec4 dimText(1, 1, 1, 0.6f);
+  const float x0 = ImGui::GetCursorPosX();
+
+  // The title row: the picker, read as a title (no frame until it is
+  // hovered), and the gear at the face's right edge.
   if (controls) {
-    DrawLegendControls(state, *study, *rt);
+    // Read as a title: no frame or arrow box until hovered, its text on the
+    // face's left edge with the lines under it.
+    const auto titleStyle = [&](bool on) {
+      if (on) {
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 0));
+        ImGui::SetCursorPosX(x0 - style.FramePadding.x);
+      } else {
+        ImGui::PopStyleColor(2);
+      }
+    };
+    titleStyle(true);
+    DrawLegendFieldCombo(state, *study, title.c_str());
+    titleStyle(false);
+    if (more.Any()) {
+      const float after = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
+                          style.ItemSpacing.x;
+      ImGui::SameLine(std::max(after, x0 + faceW - gearW));
+      // A click on it while the popover is open is a click away: it folds
+      // the popover, the legend under it not taking the press.
+      const bool isOpen = ImGui::IsPopupOpen(kLegendMorePopup);
+      ImGui::PushStyleColor(ImGuiCol_Button, isOpen
+                                                 ? IM_COL32(255, 255, 255, 40)
+                                                 : IM_COL32(0, 0, 0, 0));
+      ImGui::PushStyleColor(ImGuiCol_Text, isOpen ? IM_COL32_WHITE : dim);
+      const bool pressed = ImGui::Button(ICON_FA_GEAR "###result_more");
+      ImGui::PopStyleColor(2);
+      if (pressed)
+        ImGui::OpenPopup(kLegendMorePopup);
+      if (ImGui::IsItemHovered() && !isOpen)
+        ImGui::SetTooltip("Display settings");
+      DrawLegendMorePopover(state, *study, more, shown);
+    }
+    if (picks) {
+      titleStyle(true);
+      DrawLegendPick(pick);
+      titleStyle(false);
+    }
     // What the controls changed is drawn next frame: read it again.
     shown = sim.shown.get();
     bar = bar && shown != nullptr &&
           (shown->mesh ? sim.meshView != SimulationState::MeshView::Off
                        : sim.field != SimulationState::Field::None);
-  }
-  if (bar) {
-    if (controls)
-      ImGui::Spacing();
+  } else {
     ImGui::TextUnformatted(title.c_str());
+  }
+  if (!studyLine.empty())
+    ImGui::TextColored(dimText, "%s", studyLine.c_str());
+
+  if (bar) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    float tickW = 0.0f;
-    for (const std::string& t : ticks)
-      tickW = std::max(tickW, ImGui::CalcTextSize(t.c_str()).x);
     const float topCap = shown->over ? capH : 0.0f;
     const float bottomCap = shown->under ? capH : 0.0f;
     const ImVec2 at = ImGui::GetCursorScreenPos();
@@ -3022,6 +3274,9 @@ void DrawFieldLegend(AppState& state) {
     for (const std::string& c : captions)
       ImGui::TextColored(ImVec4(1, 1, 1, 0.75f), "%s", c.c_str());
   }
+  // What is set in the folded controls, so it is never invisible.
+  if (!summary.empty())
+    ImGui::TextColored(dimText, "%s", summary.c_str());
   const ImVec2 boxLo = ImGui::GetWindowPos();
   const ImVec2 boxHi(boxLo.x + ImGui::GetWindowSize().x,
                      boxLo.y + ImGui::GetWindowSize().y);

@@ -495,6 +495,18 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.shown->title == "element quality");
     IM_CHECK(s_App->simulation.shown->lo > 0.0);
     IM_CHECK(s_App->simulation.shown->lo <= 1.0);
+    // Its legend is the same one, with no result controls: no picker, no
+    // gear.
+    {
+      ImGuiWindow* legend = ImGui::FindWindowByName("##FieldLegend");
+      IM_CHECK(legend != nullptr && legend->Active);
+      IM_CHECK(!ctx->ItemExists("//##FieldLegend/###result_more"));
+      IM_CHECK(!ctx->ItemExists("//##FieldLegend/###result_field"));
+      if (legend != nullptr)
+        ctx->LogInfo("mesh legend: %.0f x %.0f", legend->Size.x,
+                     legend->Size.y);
+    }
+    SimWindowShot(ctx, "legend-mesh-quality");
 
     // The report: its worst element's row frames it.
     const std::vector<ui::MeshFinding> rows = ui::MeshFindings(*s_App, *mr);
@@ -630,7 +642,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 
     // A typed maximum of half the peak: the bar stops there and what is
     // past it is over.
-    ctx->ItemInputValue("//##FieldLegend/###result_range_hi",
+    ctx->ItemInputValue(LegendMoreItem(ctx, "###result_range_hi").c_str(),
                         static_cast<float>(peak * 0.5));
     ctx->Yield(3);
     shown = s_App->simulation.shown.get();
@@ -639,7 +651,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(shown->over);
     IM_CHECK(std::abs(shown->hi - peak) < 1e-9); // the field's own maximum
     // "Above yield": steel's 250 MPa is far over this beam, so nothing is.
-    ctx->ItemClick("//##FieldLegend/###result_range_yield");
+    ctx->ItemClick(LegendMoreItem(ctx, "###result_range_yield").c_str());
     ctx->Yield(3);
     shown = s_App->simulation.shown.get();
     IM_CHECK(shown->barHi > 200.0);
@@ -675,7 +687,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       ui::AppendStudyMarker(*s_App, lines);
       IM_CHECK_EQ(lines.size(), (size_t)12);
     }
-    ctx->ItemClick("//##FieldLegend/###result_extremes");
+    ctx->ItemClick(LegendMoreItem(ctx, "###result_extremes").c_str());
     ctx->Yield();
     IM_CHECK(!s_App->simulation.showExtremes);
     {
@@ -683,7 +695,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       ui::AppendStudyMarker(*s_App, lines);
       IM_CHECK(lines.empty());
     }
-    ctx->ItemClick("//##FieldLegend/###result_extremes");
+    ctx->ItemClick(LegendMoreItem(ctx, "###result_extremes").c_str());
+    ctx->KeyPress(ImGuiKey_Escape); // the popover folds; the toolbar is free
 
     // Export: the whole result, to the file the dialog would have named.
     const std::string path =
@@ -2774,9 +2787,12 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   };
 
   // The result's controls are on the legend they act on
-  // (docs/simulation/README.md#results-display): the field and the
-  // deformation chosen there, nothing of them in the tool window, which
-  // keeps the numbers; and the Result row says what it takes on disk.
+  // (docs/simulation/README.md#results-display), and the bar leads: the
+  // face is the field's picker as its title, the bar and where its ends
+  // are; the gear opens the rest beside it, each of which still drives the
+  // result; what is set in there is said on the face; Esc and a click away
+  // fold it. Nothing of them is in the tool window, which keeps the
+  // numbers; and the Result row says what it takes on disk.
   t = IM_REGISTER_TEST(engine, "sim", "the_legend_holds_the_result_controls");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     using Field = ui::SimulationState::Field;
@@ -2785,19 +2801,98 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ToolbarClick(ctx, "###tb_sim_run");
     IM_CHECK(WaitForStudyResult(ctx, sid));
     ctx->Yield(3);
-    // A result and no field yet: the legend is its field's combo.
+    const ImGuiID moreId = ctx->GetID("//##FieldLegend/###legend_more");
+    const auto moreOpen = [&] {
+      return ImGui::IsPopupOpen(moreId, ImGuiPopupFlags_None);
+    };
+    // A result and no field yet: the legend is its field's combo, and
+    // nothing to fold.
     IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_field"));
+    IM_CHECK(!ctx->ItemExists("//##FieldLegend/###result_more"));
     LegendChoose(ctx, "###result_field", "###field_von_mises");
     IM_CHECK(s_App->simulation.field == Field::VonMises);
-    ctx->ItemInputValue("//##FieldLegend/###deform", 40.0f);
-    ctx->Yield(3);
-    IM_CHECK(std::abs(s_App->simulation.deformScale - 40.0f) < 1e-3f);
-    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_range_hi"));
-    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_extremes"));
-    // The legend sits inside the viewport, in its lower-left corner, clear
-    // of the tool window.
+    // Folded: the title is the picker, the gear beside it, a single case
+    // has no case combo, and nothing set means no summary.
+    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_field"));
+    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_more"));
+    IM_CHECK(!ctx->ItemExists("//##FieldLegend/###result_case"));
+    IM_CHECK(!ctx->ItemExists("//##FieldLegend/###deform"));
+    IM_CHECK(!moreOpen());
+    IM_CHECK(ui::FieldLegendSummary(*s_App).empty());
+    {
+      const ui::ShownField* shown = s_App->simulation.shown.get();
+      IM_CHECK(shown != nullptr && shown->hasExtremes);
+    }
     ImGuiWindow* legend = ImGui::FindWindowByName("##FieldLegend");
     IM_CHECK_SILENT(legend != nullptr && legend->Active);
+    ctx->LogInfo("legend folded: %.0f x %.0f", legend->Size.x, legend->Size.y);
+    // Narrow: no wider than its own title, bar and captions.
+    IM_CHECK(legend->Size.x < 0.25f * s_App->viewportSize.x);
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.2f * s_App->viewportSize.y));
+    ctx->Yield(3);
+    SimWindowShot(ctx, "legend-folded");
+
+    // The gear opens the popover beside the legend; its deformation drives
+    // the picture, and folded it is said on the face.
+    const std::string more = LegendMore(ctx);
+    IM_CHECK(moreOpen());
+    {
+      ImGuiWindow* pop = ImGui::FindWindowByName(more.substr(2).c_str());
+      IM_CHECK_SILENT(pop != nullptr);
+      IM_CHECK(pop->Pos.x >= legend->Pos.x + legend->Size.x);
+    }
+    IM_CHECK(ctx->ItemExists((more + "/###result_range_hi").c_str()));
+    IM_CHECK(ctx->ItemExists((more + "/###result_extremes").c_str()));
+    ctx->ItemInputValue((more + "/###deform").c_str(), 40.0f);
+    ctx->Yield(3);
+    IM_CHECK(std::abs(s_App->simulation.deformScale - 40.0f) < 1e-3f);
+    IM_CHECK(moreOpen());
+    ctx->ItemInputValue((more + "/###result_range_hi").c_str(), 20.0f);
+    ctx->Yield(3);
+    IM_CHECK(s_App->simulation.clampHi);
+    IM_CHECK(std::abs(s_App->simulation.shown->barHi - 20.0) < 1e-6);
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.2f * s_App->viewportSize.y));
+    ctx->Yield(3);
+    SimWindowShot(ctx, "legend-popover");
+    // Esc folds it; the face says what is set.
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(!moreOpen());
+    {
+      const std::string summary = ui::FieldLegendSummary(*s_App);
+      IM_CHECK(summary.find("40") != std::string::npos);
+      IM_CHECK(summary.find("range to 20") != std::string::npos);
+    }
+    // The gear again, and a click away folds it too; the gear clicked while
+    // open folds it as well.
+    LegendMore(ctx);
+    IM_CHECK(moreOpen());
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.3f * s_App->viewportSize.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK(!moreOpen());
+    ctx->ItemClick("//##FieldLegend/###result_more");
+    ctx->Yield(2);
+    IM_CHECK(moreOpen());
+    // Clicked as a user would (ItemClick would clear the popup first).
+    ctx->MouseMoveToPos(
+        ctx->ItemInfo("//##FieldLegend/###result_more").RectFull.GetCenter());
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(3);
+    IM_CHECK(!moreOpen());
+    // Put back, the summary goes.
+    s_App->simulation.deformScale = 0.0f;
+    s_App->simulation.clampHi = false;
+    ctx->Yield(3);
+    IM_CHECK(ui::FieldLegendSummary(*s_App).empty());
+    // The legend sits inside the viewport, in its lower-left corner, clear
+    // of the tool window.
     IM_CHECK(legend->Pos.x >= s_App->viewportPos.x);
     IM_CHECK(legend->Pos.y + legend->Size.y <=
              s_App->viewportPos.y + s_App->viewportSize.y + 1.0f);
@@ -2811,7 +2906,6 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
         ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
                s_App->viewportPos.y + 0.2f * s_App->viewportSize.y));
     ctx->Yield(3);
-    SimWindowShot(ctx, "legend-controls");
     // What the result and its mesh take with the project.
     const ui::SimStoredBytes& bytes = ui::SimStoredBytesOf(*s_App);
     IM_CHECK(bytes.results.count(sid) == 1);
@@ -2931,11 +3025,36 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(lowest > 50.0 - 1e-6);
     // The legend draws it, and its mirror image on request.
     LegendChoose(ctx, "###result_field", "###field_von_mises");
-    ctx->ItemInputValue("//##FieldLegend/###deform", 200.0f);
-    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_mirror"));
-    ctx->ItemClick("//##FieldLegend/###result_mirror");
+    ctx->ItemInputValue(LegendMoreItem(ctx, "###deform").c_str(), 200.0f);
+    IM_CHECK(ctx->ItemExists(LegendMoreItem(ctx, "###result_mirror").c_str()));
+    ctx->ItemClick(LegendMoreItem(ctx, "###result_mirror").c_str());
     ctx->Yield(3);
     IM_CHECK(s_App->simulation.mirror);
+    {
+      const ui::ShownField* shown = s_App->simulation.shown.get();
+      IM_CHECK_SILENT(shown != nullptr);
+      ctx->ItemInputValue(LegendMoreItem(ctx, "###result_range_hi").c_str(),
+                          static_cast<float>(0.5 * shown->hi));
+      ctx->Yield(3);
+      IM_CHECK(s_App->simulation.clampHi);
+    }
+    SimWindowShot(ctx, "legend-popover-half-model");
+    // Folded away, the mirror, the range and the deformation are said on
+    // the face.
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(!ImGui::IsPopupOpen(ctx->GetID("//##FieldLegend/###legend_more"),
+                                 ImGuiPopupFlags_None));
+    {
+      const std::string summary = ui::FieldLegendSummary(*s_App);
+      IM_CHECK(summary.find("mirrored") != std::string::npos);
+      IM_CHECK(summary.find("200") != std::string::npos);
+      IM_CHECK(summary.find("range to") != std::string::npos);
+    }
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 0.6f * s_App->viewportSize.x,
+               s_App->viewportPos.y + 0.15f * s_App->viewportSize.y));
+    SimWindowShot(ctx, "legend-clamped-mirrored");
     ui::FitCameraToDocument(*s_App);
     s_App->camera->StopAnimation();
     ctx->MouseMoveToPos(
@@ -3073,6 +3192,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     LegendChoose(ctx, "###result_field", "###field_mode_shape");
     LegendChoose(ctx, "###result_mode", "###result_mode_6");
     IM_CHECK_EQ(s_App->simulation.activeMode, 6);
+    // The mode is on the legend's face, under its title: the thing changed
+    // most is not behind the gear.
+    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_mode"));
+    IM_CHECK(ctx->ItemExists("//##FieldLegend/###result_more"));
     ui::FitCameraToDocument(*s_App);
     s_App->camera->StopAnimation();
     SimTreeClick(ctx, "###sim_result_" + std::to_string(sid));
@@ -3081,6 +3204,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
                s_App->viewportPos.y + 0.12f * s_App->viewportSize.y));
     ctx->Yield(10);
     SimWindowShot(ctx, "free-free-rigid-modes");
+    SimWindowShot(ctx, "legend-modal");
     ui::ExitSimulation(*s_App);
     ctx->Yield();
 #endif

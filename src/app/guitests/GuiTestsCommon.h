@@ -134,6 +134,13 @@ float LensScale();
 
 // Click a model-toolbar icon button by its stable "###tb_*" id.
 void ToolbarClick(ImGuiTestContext* ctx, const char* tbId);
+
+// The field legend's gear popover (docs/simulation/README.md
+// #results-display), opened if it is not: its window's ref, for the result
+// controls folded into it ("//##Popup_xxxxxxxx").
+std::string LegendMore(ImGuiTestContext* ctx);
+// One control in it, by its "###" id: LegendMoreItem(ctx, "###deform").
+std::string LegendMoreItem(ImGuiTestContext* ctx, const char* id);
 // Create from the toolbar, then accept the preview (the real accept path).
 void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId);
 

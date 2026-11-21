@@ -37,8 +37,14 @@ void SetSimParticipantRole(AppState& state, uint64_t occurrenceId,
                            fem::ParticipantRole role);
 
 // The result-field colorbar legend overlaid on the viewport while a field is
-// displayed. Defined in StudyPanel.cpp.
+// displayed: the bar leads, and the result's display controls fold behind
+// its gear (docs/simulation/README.md#results-display). Defined in
+// StudyPanel.cpp.
 void DrawFieldLegend(AppState& state);
+
+// The line the legend's face carries for its folded controls that are set
+// away from their defaults ("deformed x200 · mirrored"); empty when none is.
+std::string FieldLegendSummary(AppState& state);
 
 // Assigns the armed boundary condition (state.simulation.tool) to the face
 // under `ray`, as an undoable study edit. No-op if no tool is armed or the

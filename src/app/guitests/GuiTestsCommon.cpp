@@ -312,6 +312,24 @@ ImVec2 WorldToWindow(const glm::vec3& p) {
 // Click a model-toolbar icon button by its stable "###tb_*" id. The buttons
 // live in a child window under the dock host, so we descend with a "**/"
 // wildcard; the "###" id makes the match independent of the icon glyph.
+std::string LegendMore(ImGuiTestContext* ctx) {
+  // The popover is an ImGui popup of the legend's: its window is named by
+  // the popup's id.
+  const ImGuiID id = ctx->GetID("//##FieldLegend/###legend_more");
+  char name[32];
+  std::snprintf(name, sizeof(name), "##Popup_%08x", id);
+  if (!ImGui::IsPopupOpen(id, ImGuiPopupFlags_None)) {
+    ctx->ItemClick("//##FieldLegend/###result_more");
+    ctx->Yield(2);
+  }
+  IM_CHECK_RETV(ImGui::IsPopupOpen(id, ImGuiPopupFlags_None), "");
+  return std::string("//") + name;
+}
+
+std::string LegendMoreItem(ImGuiTestContext* ctx, const char* id) {
+  return LegendMore(ctx) + "/" + id;
+}
+
 void ToolbarClick(ImGuiTestContext* ctx, const char* tbId) {
   ctx->SetRef("//##DockHost");
   // The sheet-metal and the direct-edit tools live in flyout groups:

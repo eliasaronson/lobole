@@ -708,7 +708,8 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     Hold(ctx, 0.5);
     // The deflection, magnified until it shows: 0.3 mm on a 200 mm beam is
     // invisible at 1x.
-    ctx->ItemInputValue("//##FieldLegend/###deform", 100.0f);
+    ctx->ItemInputValue(LegendMoreItem(ctx, "###deform").c_str(), 100.0f);
+    ctx->KeyPress(ImGuiKey_Escape); // the popover folds away again
     ctx->Yield(2);
     Hold(ctx, 0.5);
     OrbitFor(ctx, 30.0, 2.0);
