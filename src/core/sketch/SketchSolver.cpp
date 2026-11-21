@@ -1965,6 +1965,21 @@ std::string IndexList(const std::vector<size_t>& indices) {
 }
 } // namespace
 
+std::vector<size_t> SubsumedBy(const SketchFeature& sketch,
+                               const Constraint& c) {
+  std::vector<size_t> out;
+  if (c.kind != ConstraintKind::Midpoint || c.driven)
+    return out;
+  for (size_t k = 0; k < sketch.constraints.size(); k++) {
+    const Constraint& t = sketch.constraints[k];
+    if (t.kind == ConstraintKind::PointOnLine && !t.driven &&
+        t.a.entity == c.a.entity && t.a.which == c.a.which &&
+        t.b.entity == c.b.entity)
+      out.push_back(k);
+  }
+  return out;
+}
+
 AddVerdict JudgeAddition(const SketchFeature& before,
                          const SketchFeature& after, Solver* solved) {
   Solver s;

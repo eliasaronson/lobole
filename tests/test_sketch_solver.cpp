@@ -1507,6 +1507,55 @@ TEST_CASE("A driven dimension adds no equation and measures the sketch",
              WithinAbs(std::sqrt(1100.0), 1e-6));
 }
 
+// A circle drawn with its centre snapped onto a line holds a PointOnLine.
+// A Midpoint of the same centre and line says that and more, and with both
+// in the solver calls the pair redundant: the Midpoint was refused as
+// "already fixed" while the centre still slid along the line.
+TEST_CASE("A midpoint takes the place of the same point on the same line",
+          "[solver][sketch]") {
+  using K = sketch::ConstraintKind;
+  SketchFeature s("S", SketchPlane(PlaneType::XY));
+  const uint32_t line = s.AddEntity(sketch::Line{{0, -2}, {0, 2}});
+  sketch::Circle round;
+  round.center = {0.05, 0.3};
+  round.radius = 3.0;
+  const uint32_t circle = s.AddEntity(round);
+  sketch::Constraint on;
+  on.kind = K::PointOnLine;
+  on.a = {circle, 0};
+  on.b = {line, 0};
+  s.constraints.push_back(on);
+  sketch::Constraint mid = on;
+  mid.kind = K::Midpoint;
+
+  // Left beside the PointOnLine it is refused: the bug as it was.
+  SketchFeature both = s;
+  both.constraints.push_back(mid);
+  CHECK_FALSE(sketch::JudgeAddition(s, both).accepted);
+
+  // Taking its place, it is accepted, costs one more freedom, and puts the
+  // centre on the middle of the line.
+  REQUIRE(sketch::SubsumedBy(s, mid) == std::vector<size_t>{0});
+  SketchFeature without = s;
+  without.constraints.clear();
+  SketchFeature after = without;
+  after.constraints.push_back(mid);
+  sketch::Solver solver;
+  const sketch::AddVerdict v = sketch::JudgeAddition(s, after, &solver);
+  REQUIRE(v.accepted);
+  CHECK(v.after.dof == v.before.dof - 1);
+  solver.WriteBack(after.entities);
+  const auto& l = std::get<sketch::Line>(after.entities[0]);
+  const auto& c = std::get<sketch::Circle>(after.entities[1]);
+  CHECK(glm::length(c.center - 0.5 * (l.a + l.b)) < 1e-9);
+
+  // Another point's, another line's, or a driven one is left alone.
+  sketch::Constraint other = mid;
+  other.a = {line, 1};
+  CHECK(sketch::SubsumedBy(s, other).empty());
+  CHECK(sketch::SubsumedBy(s, on).empty());
+}
+
 TEST_CASE("JudgeAddition refuses what constrains nothing", "[solver][driven]") {
   using K = sketch::ConstraintKind;
   DefinedTriangle t;

@@ -918,7 +918,9 @@ static constexpr MethodDoc ModelingMethods[] = {
      "and holds them tangent with equal curvature there. One that "
      "constrains nothing -- the sketch already fixes it, or it contradicts "
      "the sketch -- is refused too, naming the constraints (indices) it "
-     "repeats or contradicts. "
+     "repeats or contradicts. A `midpoint` takes the place of a "
+     "`point_on_line` of the same point on the same line, answered as "
+     "`replaced` (a count). "
      "`driven: true` on a dimension kind, with no value/value_deg/expr, adds "
      "a DRIVEN (reference) dimension: no equation, its value is what the "
      "geometry measures, answered as `measured` (mm; radians for an angle). "
@@ -2662,7 +2664,21 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     } else {
       adds.push_back(build(p.raw()));
     }
-    const size_t had = sk->constraints.size();
+    // What the additions take the place of (sketch::SubsumedBy: a midpoint
+    // over a point-on-line of the same point and line) is out of the sketch
+    // they are judged against, and out of the one they land in.
+    SketchFeature base = *sk;
+    {
+      std::set<size_t> gone;
+      for (const sketch::Constraint& c : adds)
+        for (size_t k : sketch::SubsumedBy(*sk, c))
+          gone.insert(k);
+      for (auto it = gone.rbegin(); it != gone.rend(); ++it)
+        base.constraints.erase(base.constraints.begin() +
+                               static_cast<std::ptrdiff_t>(*it));
+    }
+    const size_t replaced = sk->constraints.size() - base.constraints.size();
+    const size_t had = base.constraints.size();
     const auto refuse = [&](size_t i, const sketch::AddVerdict& v) {
       const std::string at =
           plural ? "constraints[" + std::to_string(i) + "]: " : std::string();
@@ -2684,7 +2700,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // it, or it contradicts the sketch), is refused and nothing is added
     // (docs/sketching/README.md#refusals). Only a refusal is traced one
     // spec at a time, to name the first one refused.
-    SketchFeature trial = *sk;
+    SketchFeature trial = base;
     sketch::Solver solver;
     solver.Load(trial);
     const sketch::SolveResult start = solver.Solve();
@@ -2697,7 +2713,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (!verdict.accepted && verdict.unsupported != SIZE_MAX)
       refuse(verdict.unsupported - had, verdict);
     if (!verdict.accepted) {
-      SketchFeature step = *sk;
+      SketchFeature step = base;
       sketch::SolveResult prev = start;
       std::vector<bool> stepDriving = driving;
       for (size_t i = 0; i < adds.size(); i++) {
@@ -2715,6 +2731,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     }
 
     json before = DocumentIO::FeatureToJson(*sk);
+    sk->constraints = base.constraints;
     sk->constraints.insert(sk->constraints.end(), adds.begin(), adds.end());
     if (verdict.after.ok)
       solver.WriteBack(sk->entities);
@@ -2749,6 +2766,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         list.push_back(measured(i));
       resp["measured"] = std::move(list);
     }
+    if (replaced > 0)
+      resp["replaced"] = replaced;
     return resp;
   }
   if (m == "mirror" || m == "fillet" || m == "pattern" || m == "offset") {

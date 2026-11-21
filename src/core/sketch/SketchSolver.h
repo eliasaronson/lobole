@@ -141,6 +141,14 @@ struct AddVerdict {
   // that one's index. SIZE_MAX otherwise.
   size_t unsupported = static_cast<size_t>(-1);
 };
+// The constraints of `sketch` that adding `c` makes unnecessary, to be taken
+// out as it goes in: a Midpoint says everything a PointOnLine of the same
+// point on the same line says. Left in, the solver reads the pair as
+// redundant and the Midpoint is refused as "already fixed" while the point
+// is still free to slide: a circle drawn with its centre snapped onto a line
+// could never be put on that line's middle. Indices ascending.
+std::vector<size_t> SubsumedBy(const SketchFeature& sketch,
+                               const Constraint& c);
 // `solved`, when given, is left loaded with `after` and solved, for the
 // caller to WriteBack an accepted addition without solving it again.
 AddVerdict JudgeAddition(const SketchFeature& before,

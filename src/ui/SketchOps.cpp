@@ -414,6 +414,14 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
              ((t.a.entity == c.a.entity && t.b.entity == c.b.entity) ||
               (t.a.entity == c.b.entity && t.b.entity == c.a.entity));
     });
+  // A Midpoint takes the place of a PointOnLine of the same point and line
+  // (sketch::SubsumedBy): a centre snapped onto a line can go to its middle.
+  {
+    const std::vector<size_t> gone = sketch::SubsumedBy(*sketch, c);
+    for (auto it = gone.rbegin(); it != gone.rend(); ++it)
+      sketch->constraints.erase(sketch->constraints.begin() +
+                                static_cast<std::ptrdiff_t>(*it));
+  }
   // The first length dimension of a sketch drawn by eye: scale the drawing
   // to it, so the shape is kept (docs/sketching/README.md#the-first-dimension).
   sketch::RescaleOutcome rescale;

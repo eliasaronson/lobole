@@ -341,7 +341,11 @@ every driving constraint without which it would constrain, found by solving
 once with each left out (only on a refusal, and not past 200 constraints):
 `the sketch already fixes that (constraint 5)`, `that contradicts what the
 sketch already fixes (constraints 0, 1, 6)`. Indices are into
-`constraints`. `add_constraint(s)` refuses with it ("not added: …", adding
+`constraints`. One addition takes the place of what it repeats instead of
+being refused: a Midpoint replaces a PointOnLine of the same point on the
+same line (`sketch::SubsumedBy`; a circle whose centre was snapped onto a
+line can then go to the line's middle), and `add_constraint` answers the
+count as `replaced`. `add_constraint(s)` refuses with it ("not added: …", adding
 "pass driven: true (and no value) to add it as a reference dimension" for a
 dimension kind) and leaves the sketch as it was; `add_constraints` judges
 the whole list in one solve and, on a refusal, steps through it to name the
