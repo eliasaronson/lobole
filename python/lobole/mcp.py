@@ -712,7 +712,7 @@ The loop that works — follow it every time:
    worst elements); study_results' convergence.status (a peak that has not
    settled is not a number to design to), whether it flags the peak at a
    support's edge (that is the support's idealisation, not the part's),
-   and stale. Then say what the model leaves out -- the bolts, the contact, the
+   whether the reactions balance the loads applied, and stale. Then say what the model leaves out -- the bolts, the contact, the
    print's layers, the load you assumed -- beside the number you report.
 
 IMPORTING a file: rpc('import_step', {path}) is the importer for every 3D

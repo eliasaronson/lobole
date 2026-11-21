@@ -882,7 +882,8 @@ uint64_t ResolveSimulationSlot(ui::AppState& state, const RpcParams& p) {
     throw std::runtime_error("'" + front.name + "' has " +
                              std::to_string(mine.size()) +
                              " simulations: " + SimulationNames(state, mine) +
-                             " -- name one with `simulation`");
+                             " -- name one with `simulation` "
+                             "(list_simulations lists them)");
   if (mine.size() == 1)
     return state.parts[mine.front()].id;
   return 0;
@@ -953,8 +954,8 @@ const ui::PartSlot& SubjectSlotOf(ui::AppState& state, const json& v) {
 }
 
 // What add_simulation and set_simulation set, each read and checked
-// before anything changes (docs/scripting/rpc.md#a-refused-call-changes-
-// nothing).
+// before anything changes
+// (docs/scripting/rpc.md#a-refused-call-changes-nothing).
 struct SimSettings {
   std::optional<uint64_t> configuration;
   std::optional<ExprValue> meshSize;

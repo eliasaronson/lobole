@@ -16,9 +16,9 @@
 //
 // A project saves and opens these (simulations/<folder>/,
 // core/io/SerializeSimulation.h) as tabs of their own (ui::DocKind::
-// Simulation), and SimMigration.h moves the studies of a part or an assembly
-// into them; the RPCs still use the studies on the part and the assembly
-// (docs/plans/simulation-document.md#stages).
+// Simulation), SimMigration.h moves an older file's studies of a part or an
+// assembly into them, and the GUI and the RPCs act on them
+// (docs/scripting/rpc.md#simulations).
 
 #include "core/ExprValue.h"
 #include "core/Expression.h"

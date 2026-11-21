@@ -313,9 +313,9 @@ as its tail:
 
 ```
 Bracket                        part
+Mesh                           1820 tets
 Studies 2
 v Static 1                     27.1 MPa   (a dot: solved / stale / failed / solving)
-    Mesh                       1820 tets
     Fixed  face3
     Force  face5               100 N, Case 1
     Case 1                     1 load
@@ -332,16 +332,24 @@ v Static 1                     27.1 MPa   (a dot: solved / stale / failed / solv
   (`###role_set_<occurrence>_<role>`; `ui::SetSimParticipantRole`, one undo
   step, shared by every study): the one control a row keeps, as a CAM part
   row keeps its Configuration menu.
+- **The mesh** (`###sim_mesh`): the simulation's, the one every study that
+  sets no mesh size or refinement of its own solves on
+  ([one mesh, shared](../simulation/README.md#one-mesh-shared)): the element
+  count, the report's warning count, a dot for current or stale. Its
+  settings are the simulation's size (`###sim_mesh_size`, as
+  `set_simulation {mesh_size_mm}` sets it). Not drawn when every study
+  meshes apart.
 - **Studies**, each with a disclosure (`###sim_study_open_<id>`), the glyph
   of the command that adds its kind, its name (`###study_sel_<id>`) and its
   headline number (the peak stress, the first frequency or buckling factor,
   the peak temperature, the volume kept). Its state is a small dot on the
   glyph (`ListRowSpec::dotColor`) in the colours the list always used, the
-  word on hover. Under an open study, in the order the work goes: its
-  **Mesh** (`###sim_mesh_<id>`: the element count, the report's warning
-  count, a dot for current or stale), its supports, then its loads
+  word on hover. Under an open study, in the order the work goes: its own
+  **Mesh** (`###sim_mesh_<id>`), only where it meshes apart -- a size
+  (`###study_mesh_size`, in its row's settings and the mesh's; 0 is the
+  simulation's) or a refinement of its own -- its supports, then its loads
   (`###load_row_<id>`, each with the glyph of the command that places it and
-  its value), gravity and a thermal load when the study has them, its load
+  its value, worded as its viewport label words it: `ui::SimulationLoadLabel`), gravity and a thermal load when the study has them, its load
   cases (`###case_row_<study>_<i>`), a topology study's kept faces and
   keep-outs, and its **Result** (`###sim_result_<id>`) once there is one.
   A group with nothing in it is not drawn.
@@ -360,7 +368,8 @@ v Static 1                     27.1 MPa   (a dot: solved / stale / failed / solv
 the work goes, every button a `sim.*` command with its glyph from the icon
 table and a tooltip: **Add study** (a drop-down of static, modal, buckling,
 thermal and topology, `###tb_sim_add_<kind>`, each one undo step named
-"Static 2") | **Mesh** (`###tb_sim_mesh`) | **Supports** (fixed, pin,
+"Static 2" by `fem::SimDocument::AddStudy`, as the Simulation button's
+first study and an unnamed `add_study` are) | **Mesh** (`###tb_sim_mesh`) | **Supports** (fixed, pin,
 contact, roller, held, cylindrical, temperature, convection) and **Loads**
 (force, pressure, torque, remote, heat flux, heat source), two drop-downs
 showing the last used, lit while it is armed; **Add case**
@@ -384,8 +393,9 @@ The shared `###ToolWindow` ([tool-sessions.md](tool-sessions.md)) shows one
 thing at a time (`DrawSimulationToolWindow`, `src/ui/StudyPanel.cpp`): the
 armed tool's settings (what the next face clicked takes, and the case it
 goes in), else those of the tree row in focus -- a study's settings (name,
-analysis, solver, its kind's numbers, gravity, the material check), the
-mesh's size, view and report, a load's place and value (a remote load's
+analysis, solver, its own mesh size, its kind's numbers, gravity, the
+material check), the mesh's size (the simulation's, or a study's own),
+view and report, a load's place and value (a remote load's
 point and a force's case are edited there), a case's loads and weight, a
 participant's role, clamp and friction, the result (its progress while it
 runs, then its numbers, its display and its probes), or the check's

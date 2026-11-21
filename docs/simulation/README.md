@@ -830,9 +830,9 @@ nothing itemised is wrong the RPC runs `PlanStudy` on a copy as a backstop,
 so `ok: true` means the planner accepts the study; the window's list leaves
 that to Run, since the planner copies every body's shape. On an **assembly**
 study everything the assembly planner refuses is one `plan` row (its first
-refusal), beside `no_loads`, `stale_mesh` and `solver`: the part and
-assembly planners are two until the
-[simulation document](../plans/simulation-document.md) makes them one. What
+refusal), beside `no_loads`, `stale_mesh` and `solver`: a study beside a
+neighbour is the assembly planner's, which
+[the one planner](#the-simulation-document-core) routes it to. What
 a run refuses only after meshing and assembling (a free rigid motion, a pin
 that lifts off) is not here.
 
@@ -2715,8 +2715,17 @@ settings mesh once, a study with a mesh size of its own meshes separately,
 an edit to a load never re-meshes, and an edit to the subject moves the key.
 A convergence step's refinement is a mesh of its own and is not stored. A
 study on the document's mesh (`SimDocument::SharesMesh`) sets the document's
-mesh keys (`DocumentMeshKeys`) to the ones it solved on: the mesh the tree's
-Mesh row will show, which a save keeps even when no result reads it.
+mesh keys (`DocumentMeshKeys`) to the ones it solved on, which a save keeps
+even when no result reads it.
+
+The mesh is the simulation's setting: its size (`SimMesh::size`, 0 = auto)
+is set by `set_simulation {mesh_size_mm}` or the Size of the tree's one
+**Mesh** row (`###sim_mesh`, under the subject), which stands for every
+study that sets no size or refinement of its own and shows its mesh
+through the active study when that is one of them. A study with a size of
+its own (`set_study {mesh_size}`, the study's settings) or a refinement
+meshes apart and has a Mesh row of its own under it
+([panels.md](../ui/panels.md#simulation-tab-the-model-panel)).
 
 ### The simulation tab
 
@@ -2725,15 +2734,16 @@ simulation mode: the mode is on exactly while one is in front
 (`ResetActiveTabUiState` turns it on with the tab). The **Simulation**
 button of a part or an assembly (`part.simulation`, `assembly.simulation`:
 `ui::EnterSimulation`) opens that subject's first simulation, making one
-named "<subject> simulation" with a study where there is none. It is
+named "<subject> simulation" with a static study where there is none. It is
 left as any tab is -- another tab, or the subject row's **Open** in its tree
 (`ExitSimulation`, which `exit_simulation` calls too) -- and Escape only
 disarms a tool or puts the tool window away. Its window
 ([panels.md](../ui/panels.md#simulation-tab-the-model-panel)) is the tree of
 what the simulation holds in the Model dock, focused when the tab comes in
 front (`ui::DrawSimTree`, `src/ui/SimTree.cpp`: the subject, an assembly's
-participants with their roles, each study with its mesh, supports, loads,
-cases and result), the toolbar holding every tool
+participants with their roles, the simulation's mesh, each study with its
+own mesh where it meshes apart, its supports, loads, cases and result), the
+toolbar holding every tool
 ([the simulation toolbar](../ui/panels.md#the-simulation-toolbar): add a
 study, mesh, the supports and the loads, check, run, the result's verbs,
 clear storage; the keymap's `simulation` context), and the shared tool
@@ -2752,7 +2762,14 @@ assembly's leaf parts placed in it, without derived ghosts
 the subject's stamp and, on an assembly, every part's).
 `ui::OpenSimulationFor` switches to a part's or an assembly's first
 simulation, or makes one; `ui::SimulationSlotFor` finds or makes one
-behind the tab in front (what `add_study` over RPC does).
+behind the tab in front (what `add_study` over RPC does), and
+`ui::AppendSimulation` adds another behind it (`add_simulation`: a second
+simulation of one subject is how its studies get a different participant
+table, since one simulation's studies share one).
+
+A new study is named by its kind, numbered past the names the simulation
+already has ("Static 1", "Modal 2": `fem::SimDocument::AddStudy`), whether
+the toolbar, the Simulation button or an unnamed `add_study` makes it.
 
 ### Clearing stored meshes and results
 
@@ -2765,6 +2782,9 @@ counting what goes, and is not undone: what it drops is derived, and the
 results and meshes are shared with the undo snapshots, so an undo could
 not bring them back. The simulation reads unsaved, and the next save takes
 their files away. Disabled, saying so, when nothing is stored.
+`clear_sim_storage {simulation?}` does the same over RPC, to a simulation
+in front or behind (the picture on show is cleared only for the one in
+front), and answers how many results and meshes went.
 
 Its undo is a snapshot stack, the job's pattern (`ui::SimHistory`): a
 snapshot shares the results and meshes, `ui::SimUndoGuard` records one step
@@ -3051,7 +3071,8 @@ tinted as a fixture, and bonded seams in the bond colour.
   CalculiX with the version found, or "not found"): CalculiX stays choosable
   without ccx, and Run then refuses in the window's red text with how to
   install it ([CalculiX](#calculix)).
-- In the window: analysis type, mesh size, material check, gravity (a
+- In the window: analysis type, the study's own mesh size (0: the
+  simulation's), material check, gravity (a
   checkbox that sets world-down 9.81 m/s²), and **Boundary conditions**: arm
   Fixed, Force, Pressure, Torque, Remote, and on a static study Pin or
   Contact, and click a face (a pin beside an assembly's neighbour is the
@@ -3092,7 +3113,8 @@ tinted as a fixture, and bonded seams in the bond colour.
   buckling, the **Buckling factors** list (selecting one shows its mode),
   the governing factor with the knockdown and its class, the yield and
   interlayer factors, and the flags as text.
-- Under the mesh size: **Mesh**, which meshes and draws the elements
+- The Mesh row's window: its size (the simulation's, or the study's own
+  where it meshes apart), and the toolbar's **Mesh**, which meshes and draws the elements
   ([the mesh you look at](#the-mesh-you-look-at)), what came out ("41 820
   elements, worst 0.31", and "stale" once it is), **Show mesh** (Hidden,
   Edges, Quality, Size), and **Mesh report**, folded, whose rows frame
@@ -3111,9 +3133,10 @@ tinted as a fixture, and bonded seams in the bond colour.
 
 All in `src/remote/RemoteSimulation.cpp` (`SimulationMethods` table). They
 act on a simulation: `simulation` names one, else the simulation tab in
-front, else the active part's or assembly's one simulation, which
-`add_study` makes behind the tab in front when there is none; only the
-display calls switch tabs ([simulations](../scripting/rpc.md#simulations)).
+front, else the active part's or assembly's one simulation (several are
+refused, naming them), which `add_study` makes behind the tab in front when
+there is none; only the display calls switch tabs
+([simulations](../scripting/rpc.md#simulations)).
 A drawing or job tab is refused, naming where studies live. Pins, the frame
 supports, a thermal study's loads and a load's `region` are not refused for
 being on an assembly: the planner judges them, so a lone participant takes
@@ -3123,9 +3146,13 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 | method | what it does |
 |---|---|
+| `list_simulations {subject?}` | every simulation (or one part's or assembly's): its subject, configuration, `mesh_size_mm`, an assembly's participants, its studies (each `shares_mesh`), what it keeps `stored`, and whether it is in front |
+| `add_simulation {subject?, name?, configuration?, mesh_size_mm?, participants?}` | another simulation, behind the tab in front, with no study; refused in a batch (it makes a tab) |
+| `set_simulation {configuration?, mesh_size_mm?, mesh_size_mm_expr?, participants?}` | what its studies share: the subject's configuration (a part's; an assembly simulation takes 0), the mesh's size, an assembly's role table; one undo step, and every result it reaches reads stale |
+| `clear_sim_storage` | [clearing stored meshes and results](#clearing-stored-meshes-and-results); not undone, refused in a batch |
 | `add_study {type?, name?}` | `type`: static \| modal \| topology \| buckling \| thermal (`kind` accepted; thermal a part study's) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (the simulation's, one table for its studies: the reply's `participants_shared_with` names the other studies it changed; a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study); on an assembly, uniform only: [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
+| `set_study` | `solver` (auto \| in_house \| calculix: [CalculiX](#calculix)), `mesh_size`, `type`, `converge` (a static or buckling study's: auto \| always \| never, [a peak that has settled](#a-peak-that-has-settled)), `gravity` [x,y,z] m/s², `num_modes` (a modal study's frequencies or a buckling study's factors: refused on another unless the same call sets the type, which is applied first), `participants` (the simulation's, one table for its studies: the reply's `participants_shared_with` names the other studies it changed, and `add_simulation` makes a simulation for another table; a `contact` one takes `friction`: [contact](#contact)), `load_cases`, `shape_from`, `nonlinear` (a static study's, solved on CalculiX: [nonlinear static](#nonlinear-static)), `thermal_load` (a static study's: [thermal](#the-thermal-load-on-a-static-study); on an assembly, uniform only: [a thermal load on an assembly](#a-thermal-load-on-an-assembly)), and `volume_fraction`, `filter_radius`, `max_iterations` (a topology study's, refused the same way, naming `type: topology`) |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?, fix_rotation?, friction?}` | returns the load id; `type` contact is a compression-only support on the ground under a flat face, or on a rigid participant (`contact_with`), with `friction` ([contact](#contact)); `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); pin takes a cylindrical face and `fix_rotation?`, on a static part study ([pin supports](#pin-supports)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)); a thermal study's `temperature` {face, temperature_c}, `heat_flux` {face, power_w \| flux_w_m2}, `convection` {face, film_w_m2k, ambient_c} and `heat_generation` {body, power_w} ([thermal](#thermal)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
@@ -3301,9 +3328,9 @@ verb that names a study for context (`add_load`, `add_refinement`,
   suppressed for the analysis shape.
 - Per-participant mesh size on a bonded member applies to its faces only; the
   study's global size still governs the interior.
-- A stored mesh: the kept mesh is the session's, each study makes its own,
-  and a reopened result has no interior to export or cut
-  ([the simulation document](../plans/simulation-document.md)). On an
+- A reopened result has no interior to export or cut (`keep: full`,
+  [the plan](../plans/simulation-document.md#3-results)). On an
   assembly, an asynchronous Mesh, a check that itemises, and a bonded
-  group's factor field once it is read back from disk.
+  group's factor field once it is read back from disk. An assembly
+  simulation's configuration: it analyses the assembly as it stands.
 - A binary or compressed VTU: the export is ASCII.

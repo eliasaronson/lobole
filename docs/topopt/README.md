@@ -492,7 +492,8 @@ every run went to the CPU. `ui::TopologyGpuBuiltIn` and a test in
 3. Arm **Fixed** and click the support faces; arm **Force** or **Pressure**
    and click the loaded faces. Optionally arm **Keep face** for faces that
    must stay solid, pick a body under **Keep out of...** for a region the
-   result must leave empty, and set a mesh size. **Load cases**: **Add
+   result must leave empty, and set a mesh size (the simulation's, on its
+   Mesh row). **Load cases**: **Add
    case** makes one (the first takes every force there is), each with its
    weight; a force or pressure placed while a case is chosen under **In
    case** goes in it.

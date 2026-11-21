@@ -79,9 +79,11 @@ struct SimStorage {
 SimStorage SimStorageOf(AppState& state);
 // Clear stored meshes and results
 // (docs/simulation/README.md#clearing-stored-meshes-and-results): the
-// simulation in front's results and meshes, and the session's mesh reports and
-// pictures of them. Everything is rebuilt on the next run; the studies stay.
-// Not undone: what it drops is derived. Returns what went.
+// results and meshes of the simulation StudyHostOf answers (the one in
+// front, or an RPC's under StudyHostOverride), the session's mesh reports
+// of it, and, when it is in front, the pictures on show. Everything is rebuilt
+// on the next run; the studies stay. Not undone: what it drops is derived.
+// Returns what went.
 SimStorage ClearSimStorage(AppState& state);
 // The toolbar's Add study: a study of `type` on the simulation in front,
 // one undo step, made active and shown in the tool window. Its id.

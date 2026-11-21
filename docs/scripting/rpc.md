@@ -310,6 +310,20 @@ A part or an assembly with none has nothing to list (`list_studies` answers
 `add_study` makes its simulation ("<subject> simulation") BEHIND the tab in
 front, once what it is given is checked, so a refused one leaves no tab.
 
+The simulations themselves have four verbs. `list_simulations {subject?}`
+lists them (the names and ids `simulation` takes), with each one's
+subject, configuration, shared mesh size and participants.
+`add_simulation {subject?, name?, configuration?, mesh_size_mm?,
+participants?}` makes another, behind the tab in front and with no study:
+every study of a simulation shares its participant table, so a second
+table on one assembly is a second simulation, and from then on a study
+verb on that assembly's tab names which one. `set_simulation` edits what
+the studies share -- the configuration analysed, `mesh_size_mm` (the mesh
+every study without a size of its own solves on), the participants -- as
+one undo step, and `clear_sim_storage` drops the stored meshes and results,
+not undoably. `add_simulation` and `clear_sim_storage` are refused in a
+batch: one makes a tab, the other is no undo step.
+
 Nothing switches tabs but the display calls, `enter_simulation`,
 `set_result_display` and `set_mesh_display`, which bring their simulation
 forward in simulation mode (as the Simulation button does: on a part with
