@@ -1175,6 +1175,11 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       args.logLevel = spdlog::level::debug;
     } else if (arg == "-vv") {
       args.logLevel = spdlog::level::trace;
+#if defined(__APPLE__)
+    } else if (arg.starts_with("-psn_")) {
+      // The process serial number older Finder launches append: the OS's,
+      // not the user's, so it is no option to refuse.
+#endif
     } else if (!arg.empty() && arg[0] != '-') {
       // A lone path is --file's: the desktop entry's `Exec=lobole %f`,
       // where a `--file %f` would leave a bare `--file` on a plain launch.

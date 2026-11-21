@@ -63,6 +63,15 @@ std::filesystem::path DataDir() {
   if (std::filesystem::is_directory(parent))
     return parent;
 
+#if defined(__APPLE__)
+  // An app bundle: Contents/MacOS/lobole, its data under Contents/Resources
+  // (packaging/macos/bundle.py), where codesign seals it as resources.
+  const std::filesystem::path bundled =
+      (executable / ".." / "Resources" / "share" / "lobole").lexically_normal();
+  if (std::filesystem::is_directory(bundled))
+    return bundled;
+#endif
+
   return (executable / ".." / "share" / "lobole").lexically_normal();
 }
 

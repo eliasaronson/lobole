@@ -357,6 +357,172 @@ jobs:
           path: smoke-logs/
           if-no-files-found: ignore
 
+  # The macOS app (docs/packaging/README.md#the-macos-app): Lobole.app with
+  # every library it loads inside, MoltenVK and the Vulkan loader too, in a
+  # .dmg. Signed with a Developer ID and notarised when the secrets below
+  # exist; otherwise ad-hoc signed (Apple Silicon runs nothing unsigned) and
+  # the log and the release notes say so.
+  #
+  #   MACOS_CERTIFICATE_P12       base64 of the Developer ID Application .p12
+  #   MACOS_CERTIFICATE_PASSWORD  its password
+  #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD   for notarytool
+  #
+  # The dependencies and their cache are the CI job's (ci.yml, macos).
+  macos:
+    needs: check
+    runs-on: macos-26
+    timeout-minutes: 300
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+      notarised: ${{ steps.notarise.outputs.notarised }}
+      minimum: ${{ steps.runner.outputs.minimum }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      LOBOLE_MEM_RESERVE_MB: "512"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: The runner
+        id: runner
+        run: |
+          sw_vers
+          xcodebuild -version
+          {
+            echo "os=$(sw_vers -productVersion | cut -d. -f1)"
+            echo "xcode=$(xcodebuild -version | head -1 | tr ' ' '-')"
+            echo "minimum=$(. tools/macos-env.sh && echo "$MACOSX_DEPLOYMENT_TARGET")"
+          } >> "$GITHUB_OUTPUT"
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+      - name: Dependencies (cache)
+        id: deps
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/share/lobole/macos-deps
+          key: macos-deps-${{ steps.runner.outputs.os }}-${{ steps.runner.outputs.xcode }}-${{ hashFiles('packaging/macos/deps.sh', 'packaging/appimage/deps.sh', 'nix/patches/occt-*.patch') }}
+      - name: Dependencies
+        run: |
+          if [ "${{ steps.deps.outputs.cache-hit }}" = true ]; then
+            packaging/macos/deps.sh --brew-only
+          else
+            packaging/macos/deps.sh
+          fi
+      - name: ccache (restore)
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-macos-release-${{ github.sha }}
+          restore-keys: ccache-macos-release-
+      - name: Build and install
+        run: |
+          . tools/macos-env.sh
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DLOBOLE_BUILD_TESTS=OFF
+          cmake --build build -j"$(sysctl -n hw.ncpu)" --target designer
+          cmake --install build --prefix "$PWD/stage"
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-macos-release-${{ github.sha }}
+      - name: Bundle Lobole.app
+        run: |
+          . tools/macos-env.sh
+          python3 packaging/macos/bundle.py \
+            --version "${{ needs.check.outputs.version }}" \
+            --stage stage --out dist \
+            --search "$LOBOLE_MACOS_DEPS/lib" \
+            --search "$LOBOLE_MACOS_DEPS/Contents/MacOS" \
+            --search "$LOBOLE_MACOS_DEPS/Contents/Frameworks"
+      # A Developer ID from the secrets, in a keychain of this job's own;
+      # without them, ad-hoc, said in the log and (via `signed`) the notes.
+      - name: Sign
+        id: sign
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+            echo "::warning::No Developer ID certificate (MACOS_CERTIFICATE_P12): the app is ad-hoc signed and not notarised. Gatekeeper will ask users to allow it."
+            packaging/macos/sign.sh dist/Lobole.app
+            echo "signed=adhoc" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          kc_pass="$(uuidgen)"
+          security create-keychain -p "$kc_pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kc_pass" "$keychain"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$kc_pass" "$keychain" >/dev/null
+          # The user's keychains, word-split on purpose (none has a space).
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$keychain" |
+            awk '/Developer ID Application/ {print $2; exit}')"
+          [ -n "$identity" ] || {
+            echo "the certificate holds no Developer ID Application identity:"
+            security find-identity -v -p codesigning "$keychain"; exit 1; }
+          packaging/macos/sign.sh dist/Lobole.app "$identity"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          echo "signed=developer-id" >> "$GITHUB_OUTPUT"
+      - name: Make the disk image
+        run: |
+          dmg="lobole-${{ needs.check.outputs.version }}-macos-arm64.dmg"
+          mkdir -p dmgroot
+          ditto dist/Lobole.app dmgroot/Lobole.app
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname "Loböle ${{ needs.check.outputs.version }}" \
+            -srcfolder dmgroot -fs HFS+ -format UDZO -ov "$dmg"
+          if [ -n "${{ steps.sign.outputs.identity }}" ]; then
+            codesign --force --sign "${{ steps.sign.outputs.identity }}" \
+              --timestamp "$dmg"
+          fi
+          echo "DMG=$dmg" >> "$GITHUB_ENV"
+      - name: Notarise
+        id: notarise
+        if: steps.sign.outputs.signed == 'developer-id'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_TEAM_ID" ] || [ -z "$APPLE_APP_PASSWORD" ]; then
+            echo "::warning::Signed with a Developer ID but not notarised (APPLE_ID, APPLE_TEAM_ID or APPLE_APP_PASSWORD missing): Gatekeeper will still ask users to allow it."
+            exit 0
+          fi
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+            --wait --timeout 60m
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          echo "notarised=yes" >> "$GITHUB_OUTPUT"
+      - name: Smoke the disk image
+        run: packaging/macos/smoke.sh "$DMG" "${{ needs.check.outputs.version }}"
+      # continue-on-error: whether this runner's virtual GPU gives MoltenVK a
+      # device is unproven; with none the script says so and passes. What
+      # removes it: a release run that shows a device and this step green.
+      - name: Open a window on the bundled MoltenVK
+        continue-on-error: true
+        run: packaging/macos/smoke.sh "$DMG" "${{ needs.check.outputs.version }}" --window
+      - name: The smoked app's output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-logs-macos
+          path: smoke-logs/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: lobole-*-macos-arm64.dmg
+
   # The complete source, submodules included, for packagers
   # (docs/packaging/README.md#the-source-tarball).
   source:
@@ -456,7 +622,7 @@ jobs:
   # smoke above passed.
   github-release:
     if: github.ref_type == 'tag'
-    needs: [check, linux, appimage-smoke, windows, deb-smoke, source, aur, python]
+    needs: [check, linux, appimage-smoke, windows, deb-smoke, macos, source, aur, python]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -471,7 +637,7 @@ jobs:
           # carries: the GPL source of the one ccx a release ships as a file
           # (the Flatpak builds its own from the source its manifest pins).
           cp linux/*.AppImage appimage/*.AppImage appimage/calculix-ccx-*-source.tar \
-            windows/* deb/*.deb source/* python/* files/
+            windows/* deb/*.deb macos/*.dmg source/* python/* files/
           (cd files && sha256sum -- * > SHA256SUMS)
           {
             cat notes/notes.md
@@ -485,6 +651,12 @@ jobs:
             echo "JSON-RPC interface without a window, for servers."
             echo "**.deb:** Ubuntu 26.04 only, the full GUI; install it with"
             echo "\`sudo apt install ./lobole_*_amd64.deb\`."
+            echo "**macOS:** \`macos-arm64.dmg\`, Apple Silicon, macOS"
+            echo "${{ needs.macos.outputs.minimum }} or newer; drag Loböle to Applications."
+            if [ "${{ needs.macos.outputs.notarised }}" != yes ]; then
+              echo "It is not notarised by Apple, so macOS refuses the first launch:"
+              echo "open System Settings → Privacy & Security and choose **Open Anyway**."
+            fi
           } > body.md
           gh release create "$GITHUB_REF_NAME" files/* \
             --repo "$GITHUB_REPOSITORY" \
