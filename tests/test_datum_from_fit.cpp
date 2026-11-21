@@ -276,6 +276,165 @@ TEST_CASE("A part mated to a scan's fitted axis stands on that axis",
   CHECK(glm::length(glm::dvec3(f[2]) - s.Axis().Direction()) < 1e-12);
 }
 
+namespace {
+
+// A part holding a cup's scan alone.
+struct CupPart {
+  fixtures::Cup cup = fixtures::ScannedCup(60000);
+  fs::path stl = fixtures::WriteStl(cup.organic.mesh, "fit-hints-cup");
+  Document doc;
+  uint64_t importId = 0;
+  CupPart() {
+    doc.AddFeature(ScanImport(stl));
+    importId = doc.GetFeature(0)->GetId();
+    REQUIRE(doc.Regenerate());
+  }
+  ~CupPart() { fs::remove(stl); }
+  bool Fit(const meshfit::Request& r, meshfit::Result& out,
+           std::string& error) const {
+    return meshfit::Fit(meshfit::BodiesOf(doc.GetBodies(), importId), r, out,
+                        error);
+  }
+};
+
+} // namespace
+
+TEST_CASE("A side hint fits a cup's inside or its outside from its rim",
+          "[datum][fit][mesh_body]") {
+  // Clicked on the rim, between the two walls: the nearest surface is the
+  // rim's flat, and the walls are each 0.6 mm off.
+  CupPart c;
+  for (const bool outside : {false, true}) {
+    meshfit::Request r;
+    r.pointMm = c.cup.onRim;
+    r.kind = mesh::Kind::Cylinder;
+    r.hints.outside = outside;
+    meshfit::Result res;
+    std::string error;
+    INFO((outside ? "outside" : "inside"));
+    REQUIRE(c.Fit(r, res, error));
+    INFO(error);
+    const mesh::FitResult& f = res.region.fit;
+    const double want = outside ? c.cup.outerRadius : c.cup.innerRadius;
+    std::printf("cup rim, side %s: radius %.4f (%.1f), axis %.4f deg %.4f mm "
+                "off, %zu seeds tried\n",
+                outside ? "outside" : "inside", f.radius, want,
+                LineAngleDeg(f.axis, c.cup.axis),
+                FromLine(c.cup.base, f.origin, f.axis), res.seedsTried);
+    CHECK_THAT(f.radius, WithinAbs(want, 0.03));
+    CHECK(LineAngleDeg(f.axis, c.cup.axis) < 0.1);
+    CHECK(FromLine(c.cup.base, f.origin, f.axis) < 0.05);
+    CHECK(res.seedsTried > 1); // the rim's flat was tried and passed by
+  }
+  SECTION("a hint the surface cannot meet is refused, naming it") {
+    meshfit::Request r;
+    r.pointMm = c.cup.onRim;
+    r.kind = mesh::Kind::Cylinder;
+    r.hints.outside = false;
+    r.hints.radiusMin = 20.0;
+    r.hints.radiusMax = 30.0;
+    meshfit::Result res;
+    std::string error;
+    CHECK_FALSE(c.Fit(r, res, error));
+    CHECK_THAT(error, ContainsSubstring("radius_mm [20, 30]"));
+  }
+  SECTION("an axis hint off the cup's axis is refused, naming it") {
+    meshfit::Request r;
+    r.pointMm = c.cup.onRim;
+    r.kind = mesh::Kind::Cylinder;
+    r.hints.outside = true;
+    // 20 degrees off the cup's axis, held to 5.
+    const glm::dvec3 across =
+        glm::normalize(glm::cross(c.cup.axis, glm::dvec3(1, 0, 0)));
+    r.hints.axis = std::cos(20.0 * kPi / 180.0) * c.cup.axis +
+                   std::sin(20.0 * kPi / 180.0) * across;
+    r.hints.axisToleranceRad = 5.0 * kPi / 180.0;
+    meshfit::Result res;
+    std::string error;
+    const bool fitted = c.Fit(r, res, error);
+    INFO(meshfit::ResultJson(res).dump());
+    CHECK_FALSE(fitted);
+    CHECK_THAT(error, ContainsSubstring("axis"));
+  }
+  SECTION("a hint the kind cannot take is refused before anything is read") {
+    meshfit::Request r;
+    r.pointMm = c.cup.onRim;
+    r.kind = mesh::Kind::Plane;
+    r.hints.outside = true;
+    meshfit::Result res;
+    std::string error;
+    CHECK_THROWS_WITH(c.Fit(r, res, error),
+                      ContainsSubstring("side is for a curved kind"));
+  }
+}
+
+TEST_CASE("A datum from_fit keeps its hints and its clip, and refits by them",
+          "[datum][fit][serialize]") {
+  CupPart c;
+  auto axis =
+      std::make_unique<DatumAxisFeature>("Bore", DatumAxisKind::FromFit);
+  axis->fit = {c.importId, c.cup.onRim, mesh::Kind::Cylinder, {}};
+  axis->fit.hints.outside = false;
+  axis->fit.hints.radiusMin = 12.0;
+  axis->fit.hints.radiusMax = 15.0;
+  axis->fit.clipSigma = 2;
+  c.doc.AddFeature(std::move(axis));
+  REQUIRE(c.doc.Regenerate());
+  const auto& a = *dynamic_cast<const DatumAxisFeature*>(c.doc.GetFeature(1));
+  INFO(a.GetError());
+  REQUIRE(a.GetError().empty());
+  CHECK_THAT(a.FitReport().at("radius_mm").get<double>(),
+             WithinAbs(c.cup.innerRadius, 0.03));
+  CHECK(a.FitReport().at("clip_sigma") == 2);
+  const nlohmann::json j = DocumentIO::FeatureToJson(a);
+  CHECK(j.at("fit").at("side") == "inside");
+  CHECK(j.at("fit").at("clip_sigma") == 2);
+  CHECK(j.at("fit").at("radius_mm") == nlohmann::json{12.0, 15.0});
+  CHECK_FALSE(j.at("fit").contains("axis"));
+  const auto back = DocumentIO::FeatureFromJson(j);
+  CHECK(DocumentIO::FeatureToJson(*back) == j);
+  // Written only when given: a datum fitted without them writes neither.
+  ScanPart s;
+  const nlohmann::json plain = DocumentIO::FeatureToJson(s.Axis());
+  CHECK_FALSE(plain.at("fit").contains("clip_sigma"));
+  CHECK_FALSE(plain.at("fit").contains("side"));
+
+  const auto refused = [](nlohmann::json bad, const char* needle) {
+    INFO(bad.dump());
+    try {
+      (void)DocumentIO::FeatureFromJson(bad);
+      FAIL("accepted");
+    } catch (const std::exception& e) {
+      CHECK_THAT(std::string(e.what()), ContainsSubstring(needle));
+    }
+  };
+  nlohmann::json b = j;
+  b["fit"]["clip_sigma"] = 4;
+  refused(b, "1, 2, 3 or \"all\"");
+  b = j;
+  b["fit"]["clip_sigma"] = "most";
+  refused(b, "1, 2, 3 or \"all\"");
+  b = j;
+  b["fit"]["side"] = "within";
+  refused(b, "inside");
+  b = j;
+  b["fit"]["radius_mm"] = {15.0, 12.0};
+  refused(b, "radius_mm");
+  b = j;
+  b["fit"]["axis"] = {0, 0, 1};
+  refused(b, "axis_tolerance_deg");
+  b = j;
+  b["fit"]["within"] = {{"min_mm", {0, 0, 0}}, {"max", {1, 1, 1}}};
+  refused(b, "within");
+  nlohmann::json p = DocumentIO::FeatureToJson(s.Plane());
+  p["fit"]["side"] = "inside";
+  refused(p, "side does not apply to a plane");
+  p = DocumentIO::FeatureToJson(s.Plane());
+  p["fit"]["clip_sigma"] = "all";
+  const auto pb = DocumentIO::FeatureFromJson(p);
+  CHECK(dynamic_cast<const DatumPlaneFeature&>(*pb).fit.clipSigma == 0);
+}
+
 TEST_CASE("The v215 golden's datums are fitted on load",
           "[datum][fit][golden]") {
   // tests/golden/v215-datum-from-fit.json: a 10 mm shaft 30 long on the
@@ -299,4 +458,28 @@ TEST_CASE("The v215 golden's datums are fitted on load",
         1e-9);
   CHECK_THAT(top.OutputPlane().GetOrigin().z, WithinAbs(30.0, 1e-6));
   CHECK(top.FitReport().at("tolerance_mm") == 0.05);
+}
+
+TEST_CASE("The vNEXT golden's datums are fitted by their hints and clip",
+          "[datum][fit][golden]") {
+  // tests/golden/vNEXT-datum-fit-hints.json: v215's shaft, its axis fitted
+  // outside, 9-11 mm, along Z inside a box and clipped at 2 sigma, its top
+  // along Z with every point used.
+  auto doc = testio::Load(std::string(TestSourceDir()) +
+                          "/tests/golden/vNEXT-datum-fit-hints.json");
+  REQUIRE(doc != nullptr);
+  const auto& axis = *dynamic_cast<const DatumAxisFeature*>(doc->GetFeature(2));
+  INFO(axis.GetError());
+  REQUIRE(axis.GetError().empty());
+  CHECK(axis.fit.hints.outside == std::optional<bool>(true));
+  CHECK(axis.fit.clipSigma == std::optional<int>(2));
+  CHECK(axis.FitReport().at("clip_sigma") == 2);
+  CHECK(LineAngleDeg(axis.Direction(), {0, 0, 1}) < 1e-3);
+  CHECK_THAT(axis.FitReport().at("radius_mm").get<double>(),
+             WithinAbs(10.0, 0.01));
+  const auto& top = *dynamic_cast<const DatumPlaneFeature*>(doc->GetFeature(3));
+  INFO(top.GetError());
+  REQUIRE(top.GetError().empty());
+  CHECK(top.FitReport().at("clip_sigma") == "all");
+  CHECK_THAT(top.OutputPlane().GetOrigin().z, WithinAbs(30.0, 1e-6));
 }

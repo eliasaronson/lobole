@@ -1756,6 +1756,46 @@ def main():
                f"the fitted axis passes through the stand's centre: {m}")
         expect_error(d, "measure", "against a datum", a={"datum": top},
                      b={"feature_id": stand})
+        # What the reply says of the points it used, and the hints
+        # (docs/modeling/README.md#hints): the stand's side asked as an
+        # outside surface of about its radius, clipped at two sigma.
+        f = d.call("fit_primitive", feature_id=stand,
+                   point_mm=[reff, 0, 1.5], kind="cylinder",
+                   tolerance_mm=0.1, clip_sigma=2, side="outside",
+                   radius_mm=[reff - 1, reff + 1])
+        expect(f["clip_sigma"] == 2 and 0 < f["used"] and
+               f["sigma_mm"] <= f["rms_mm"] + 1e-12 and
+               f["form_mm"] >= 0 and
+               f["diameter_min_mm"] <= 2 * f["radius_mm"] <=
+               f["diameter_max_mm"] and abs(f["length_mm"] - 3) < 0.1 and
+               f["arc_deg"] > 359 and "warnings" not in f,
+               f"fit_primitive says what it used: {f}")
+        expect_error(d, "fit_primitive", "outside radius_mm",
+                     feature_id=stand, point_mm=[reff, 0, 1.5],
+                     kind="cylinder", tolerance_mm=0.1,
+                     radius_mm=[1, 2])
+        hinted = d.call("add_feature", feature={
+            "type": "DatumAxis", "name": "Stand side", "kind": "from_fit",
+            "fit": {"body_id": stand, "point_mm": [reff, 0, 1.5],
+                    "kind": "cylinder", "tolerance_mm": 0.1,
+                    "clip_sigma": 2, "side": "outside",
+                    "radius_mm": [reff - 1, reff + 1]}})["id"]
+        before = next(x for x in d.call("get_state")["features"]
+                      if x["id"] == hinted)
+        hinted_path = os.path.join(tmp, "hinted_fit.json")
+        d.call("save_project", path=hinted_path)
+        d.call("new_project")
+        d.call("open_project", path=hinted_path)
+        after = next(x for x in d.call("get_state")["features"]
+                     if x["id"] == hinted)
+        expect(after.get("fit") == before.get("fit") and
+               after["fit"]["side"] == "outside" and
+               after["fit"]["clip_sigma"] == 2 and
+               "error" not in after and
+               abs(after["fitted"]["radius_mm"] -
+                   before["fitted"]["radius_mm"]) < 1e-9 and
+               after["fitted"]["clip_sigma"] == 2,
+               f"a datum's hints survive save and reopen: {before} {after}")
 
         expect_error(d, "import_step", "Accepted", path=stl, units="furlong")
         expect_error(d, "import_step", "declares its own", path=step,

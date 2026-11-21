@@ -365,6 +365,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A `DatumPlane` or `DatumAxis` `from_fit`'s `fit` may carry `clip_sigma` (1, 2, 3 or `"all"`) and the hints `side` (`inside` \| `outside`), `radius_mm` [min, max], `axis` [x, y, z] with `axis_tolerance_deg`, and `within` {`min_mm`, `max_mm`}, each written only when given: the datum refits clipped and steered as it was fitted ([hints](../modeling/README.md#hints)). Any other `clip_sigma`, an unknown `side`, a hint the datum's kind cannot take, `axis` without `axis_tolerance_deg` or an unknown key in `within` is refused. Absent, a datum clips at 3 sigma: an older file's datums refit through the new growth (normal band, rim peel, clip) and may move by a fraction of the scan's noise. Golden `vNEXT-datum-fit-hints` |
 
 ## Paths in a project
 

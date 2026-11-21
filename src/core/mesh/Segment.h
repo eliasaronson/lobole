@@ -58,6 +58,15 @@ struct Region {
   double facetTurn = 0.0;
   int sides = 0;
   double sagitta = 0.0;
+  // GrowFrom's: the used points -- the region's vertices left once those
+  // past `clipSigma` sigma of the fit are clipped -- and what they say.
+  // `fit.rms` and `fit.max` stay over every vertex of the region.
+  size_t used = 0;
+  double sigma = 0.0;                        // their RMS distance (mm)
+  double residualLo = 0.0, residualHi = 0.0; // signed, lowest and highest
+  double length = 0.0;    // a cylinder's, along its axis (mm)
+  double arc = 0.0;       // a cylinder's about its axis, a sphere's cap (rad)
+  glm::dvec2 extent{0.0}; // a plane's, along its principal directions (mm)
 };
 
 // A ring of flats whose corners fit a circle but that turns too far a facet
@@ -139,21 +148,52 @@ Recognition Summarize(const TriMesh& mesh, const Segmentation& s, int minSides);
 // precision.
 double ScanTolerance(const TriMesh& mesh);
 
+// How GrowFrom grows and what it keeps.
+struct GrowOptions {
+  // Vertices past this many sigma of the fit's residuals are left out of
+  // it: 1, 2 or 3; 0 keeps every vertex ("all").
+  int clipSigma = 3;
+  FitHints hints;
+};
+
 // The surface of `kind` that triangle `seed` (adjacency built) lies on,
 // grown out from it (docs/modeling/README.md#fitting-a-primitive-to-a-mesh):
 //  1. a disk of rings round the seed, until a curved kind's curvature
 //     stands above the noise (the disk's best plane misses a vertex by
 //     three tolerances) -- a plane's needs only a few rings;
-//  2. a robust fit (FitRobust) of the disk's vertices and normals;
+//  2. a robust fit (FitRobust) of the disk's vertices and normals, and from
+//     it the normal band: the disk's triangles' median tilt from the fit,
+//     times 3 x 1.4826, never less than the tilt `toleranceMm` gives a
+//     triangle of the mesh's median edge;
 //  3. growth across edges, taking a triangle when every corner lies within
-//     `toleranceMm` of the surface and it faces the seed's side of it,
-//     refitted each time the region doubles;
-//  4. grown once more from the seed against the final fit, so the region
-//     does not depend on the order it was reached in, and fitted robustly
-//     again. rms and max are over every vertex of the region.
-// A curved kind whose region is flat to within the tolerance is refused:
-// the radius it gives is the noise's. A failed result carries `why`.
+//     `toleranceMm` of the surface, its normal is inside the band and it
+//     faces the seed's side of it; regrown from the seed under each new
+//     fit, each regrowth capped at three times the triangles of the one
+//     before, until two in a row stop short of their cap;
+//  4. the rim peeled: the region's outer ring of triangles removed, ring by
+//     ring, while its median tilt is more than twice the region's own (and
+//     the band's floor), never below half the region's area; fitted again;
+//  5. clipped: vertices past `clipSigma` robust sigma (1.4826 x the median
+//     absolute residual) of the fit left out and the fit made by least
+//     squares over the rest, until the set stops changing.
+// rms and max are over every vertex of the region; `used`, `sigma` and the
+// residuals over the vertices the clip kept. A curved kind whose region is
+// flat to within the tolerance is refused: the radius it gives is the
+// noise's. So is a fit outside one of the hints, naming it. A failed result
+// carries `why`; `covered`, when given, gets the region it grew (none when
+// no fit was found on the seed's disk, which may reach past its surface),
+// so a caller trying seeds beside it can skip the surface it tried.
 Region GrowFrom(const TriMesh& mesh, uint32_t seed, Kind kind,
-                double toleranceMm, std::string* why = nullptr);
+                double toleranceMm, std::string* why = nullptr,
+                const GrowOptions& options = {},
+                std::vector<uint32_t>* covered = nullptr);
+
+// The fit of `kind` over `triangles` as given (adjacency built), through
+// triangle `seed`: robust, then clipped and refused as GrowFrom's step 5,
+// with the same figures. For a region chosen some other way than growing.
+Region FitTriangles(const TriMesh& mesh, std::vector<uint32_t> triangles,
+                    uint32_t seed, Kind kind, double toleranceMm,
+                    std::string* why = nullptr,
+                    const GrowOptions& options = {});
 
 } // namespace mesh

@@ -1339,27 +1339,56 @@ static constexpr MethodDoc InspectionMethods[] = {
      "tessellation -- under a robust (RANSAC) fit, every corner within "
      "`tolerance_mm` of the surface (default: what the scan's own noise "
      "sets, three times the median stand-off of a vertex from its "
-     "neighbour's plane). `kind`: plane | cylinder | cone | sphere | auto "
+     "neighbour's plane) and its normal within the scan's own normal band, "
+     "its rim peeled where it leans off the fit, then the points past "
+     "`clip_sigma` sigma of the residuals left out and the fit made again "
+     "(clip_sigma 1 | 2 | 3 | \"all\", default 3; anything else refused). "
+     "`kind`: plane | cylinder | cone | sphere | auto "
      "(default auto: each is grown and the one covering the most area "
      "wins, a simpler kind when it covers 95% as much; `tried` lists them). "
-     "Any other kind is refused, naming these. Changes nothing: returns "
-     "the fit -- plane {origin_mm, normal (the way the triangles face)}, "
+     "Any other kind is refused, naming these. Hints, all optional "
+     "(docs/modeling/README.md#hints): `side` inside | outside (a curved "
+     "kind: a bore or a boss), `radius_mm` [min, max] (a cylinder or "
+     "sphere), `axis` [x, y, z] with `axis_tolerance_deg` (a plane's "
+     "normal, a cylinder's or cone's axis, either sense), `within` "
+     "{min_mm, max_mm} (a box the region stays in, holding the point); "
+     "with any, the triangles within a fiftieth of the body's diagonal of "
+     "the point are tried as seeds, nearest first (`seeds_tried`), a "
+     "hypothesis outside a hint is not drawn, and a fit that ends outside "
+     "one is refused naming it; under auto only the kinds every hint "
+     "applies to are tried, and a hint the given kind cannot take is "
+     "refused. Changes nothing: returns "
+     "the fit -- plane {origin_mm, normal (the way the triangles face), "
+     "extent_mm [long, short] along its principal directions}, "
      "cylinder {origin_mm on the axis, axis (largest component positive), "
-     "radius_mm}, cone {apex_mm, axis (apex into the cone), "
-     "half_angle_deg}, sphere {centre_mm, radius_mm} -- with rms_mm and "
-     "max_mm over the region's vertices, the region's triangles and "
+     "radius_mm, length_mm, arc_deg}, cone {apex_mm, axis (apex into the "
+     "cone), half_angle_deg}, sphere {centre_mm, radius_mm, arc_deg (the "
+     "cap the points span)}, a cylinder's and sphere's diameter_min_mm and "
+     "diameter_max_mm (the size moved to the lowest and highest residual "
+     "of the used points) -- with rms_mm and max_mm over every vertex of "
+     "the region, sigma_mm (RMS), form_mm (peak to peak) and used (count) "
+     "over the points the clip kept, clip_sigma, `warnings` (a cylinder or "
+     "sphere under 60 deg of arc: its radius is the least certain), "
+     "the region's triangles and "
      "area_mm2, the body, and seed_distance_mm (how far the point was off "
      "the triangles; refused past a fiftieth of the body's diagonal). A "
      "curved kind on a flat region is refused (its radius would be the "
      "noise's). The datum that keeps the fit is add_feature DatumPlane "
      "(plane) or DatumAxis (cylinder, cone) with kind from_fit and the "
-     "same feature_id, point_mm and kind.",
+     "same feature_id, point_mm and kind, and the clip_sigma and hints to "
+     "refit with.",
      "feature_id:int>=1, point_mm:number[3], kind?:string, "
-     "tolerance_mm?:number>0, part?:string|int",
+     "tolerance_mm?:number>0, clip_sigma?:int|string, side?:string, "
+     "radius_mm?:number[2], axis?:number[3], axis_tolerance_deg?:number>0, "
+     "within?:object, part?:string|int",
      remote::NeedsPart,
      "kind:string, origin_mm?:number[], normal?:number[], axis?:number[], "
      "apex_mm?:number[], centre_mm?:number[], radius_mm?:number, "
      "half_angle_deg?:number, rms_mm:number, max_mm:number, "
+     "sigma_mm:number, form_mm:number, used:int, clip_sigma:int|string, "
+     "diameter_min_mm?:number, diameter_max_mm?:number, length_mm?:number, "
+     "arc_deg?:number, extent_mm?:number[], warnings?:string[], "
+     "seeds_tried?:int, "
      "tolerance_mm:number, triangles:int, area_mm2:number, body:string, "
      "seed_distance_mm:number, tried?:object[], feature_id:int"},
     {"measure",
@@ -6934,6 +6963,16 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         throw std::runtime_error("tolerance_mm is a number of mm");
       request.toleranceMm = p.at("tolerance_mm").get<double>();
     }
+    if (p.contains("clip_sigma") &&
+        !meshfit::ClipSigmaFromJson(p.at("clip_sigma"), request.clipSigma))
+      throw std::runtime_error("clip_sigma: unknown " +
+                               p.at("clip_sigma").dump() +
+                               ". Accepted: " + meshfit::AcceptedClipSigma());
+    json hints = json::object();
+    for (const std::string& k : meshfit::HintKeys())
+      if (p.contains(k))
+        hints[k] = p.at(k);
+    request.hints = meshfit::HintsFromJson(hints, "");
     meshfit::CheckRequest(request);
     const std::vector<const Body*> bodies =
         meshfit::BodiesOf(part->GetBodies(), fid);

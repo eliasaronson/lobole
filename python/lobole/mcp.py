@@ -188,7 +188,9 @@ typed `contract`: every field, its type and its enum values.
   angled: "axis": <axis ref>, "angle_deg": num, "angle_expr"?: str
   through_points: "points": [[x,y,z],[x,y,z],[x,y,z]]
   from_fit: "fit": {{"body_id": <feature whose body>, "point_mm": [x,y,z]
-            on it, "kind": "plane", "tolerance_mm"?: num}} — a plane fitted
+            on it, "kind": "plane", "tolerance_mm"?: num, "clip_sigma"?:
+            1|2|3|"all", "axis"? + "axis_tolerance_deg"?, "within"?:
+            {{"min_mm", "max_mm"}}}} — a plane fitted
             to a SCAN's triangles round the point, refitted every
             regeneration so it follows a re-scan (preview with
             rpc('fit_primitive', ...)); sketch on it, mate to it, measure it
@@ -216,8 +218,11 @@ typed `contract`: every field, its type and its enum values.
   two_points: "points": [[x,y,z],[x,y,z]]
   sketch_line: "sketch_id": <feature id>, "entity_id": <line id>
   from_fit: "fit": {{"body_id", "point_mm", "kind": "cylinder"|"cone",
-            "tolerance_mm"?}} — the axis of a scan's bore, boss or cone,
-            refitted every regeneration
+            "tolerance_mm"?, "clip_sigma"?, "side"?: "inside"|"outside",
+            "radius_mm"?: [min, max] (a cylinder), "axis"? +
+            "axis_tolerance_deg"?, "within"?}} — the axis of a scan's bore,
+            boss or cone, refitted every regeneration, steered by the
+            hints it was fitted with
 - Fillet / Chamfer (3D, on B-Rep edges): {{"type": "Fillet"|"Chamfer",
   "name": str, "radius": num, "radius_expr"?: str,
   "edges": [{{"feature_id": <the body's created_by feature id>,
@@ -1310,13 +1315,24 @@ _reference("fit_primitive", "Fit a plane, cylinder, cone or sphere to a "
           "scan's outliers; changes nothing. params: feature_id (the "
           "feature whose body), point_mm, kind? ('auto', the default | "
           "'plane' | 'cylinder' | 'cone' | 'sphere'), tolerance_mm? "
-          "(default the scan's own noise). Returns the surface (plane "
-          "origin_mm + normal, cylinder origin_mm + axis + radius_mm, cone "
-          "apex_mm + axis + half_angle_deg, sphere centre_mm + radius_mm), "
-          "rms_mm, max_mm, triangles, area_mm2, and for auto `tried`. Keep "
-          "it as a datum that follows a re-scan: add_feature DatumPlane "
-          "(plane) or DatumAxis (cylinder, cone) with kind 'from_fit' and "
-          "fit {body_id, point_mm, kind}; then sketch on it, mate to it "
+          "(default the scan's own noise), clip_sigma? (1 | 2 | 3, the "
+          "default, | 'all': points past that many sigma are left out of "
+          "the fit). Hints, all optional: side? ('inside' a bore | "
+          "'outside' a boss), radius_mm? [min, max], axis? [x,y,z] with "
+          "axis_tolerance_deg?, within? {min_mm, max_mm} (a box the region "
+          "stays in) -- near a rim they pick the surface the nearest one "
+          "is not; a fit that ends outside one is refused naming it. "
+          "Returns the surface (plane origin_mm + normal + extent_mm, "
+          "cylinder origin_mm + axis + radius_mm + length_mm + arc_deg, "
+          "cone apex_mm + axis + half_angle_deg, sphere centre_mm + "
+          "radius_mm + arc_deg; a cylinder's and sphere's diameter_min_mm "
+          "and diameter_max_mm), rms_mm and max_mm over the region, "
+          "sigma_mm, form_mm and used over the points the clip kept, "
+          "warnings (under 60 deg of arc), triangles, area_mm2, and for "
+          "auto `tried`. Keep it as a datum that follows a re-scan: "
+          "add_feature DatumPlane (plane) or DatumAxis (cylinder, cone) "
+          "with kind 'from_fit' and fit {body_id, point_mm, kind} plus the "
+          "same clip_sigma and hints; then sketch on it, mate to it "
           "(add_mate frame: <datum>) or measure it ({datum: id}).")
 
 

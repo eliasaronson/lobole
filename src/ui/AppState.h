@@ -2030,6 +2030,15 @@ struct AppState {
     int fittedKind = -1; // mesh::Kind of the last fit, -1 none
     std::string error;   // why the last fit failed, or why no datum keeps it
     std::string summary; // what it fitted
+    std::string warning; // what the fit warns of (a partial arc)
+    // The clip and the hints (docs/modeling/README.md#hints), folded away:
+    // clip_sigma 1, 2, 3 or 0 for every point; side 0 either, 1 inside,
+    // 2 outside; a radius range seeded from the fit when switched on.
+    int clipSigma = 3;
+    int side = 0;
+    bool radiusOn = false;
+    double radiusMin = 0.0, radiusMax = 0.0;
+    double fittedRadius = 0.0; // the last fit's, 0 when it has none
   } fitTool;
   // Which row owns the viewport drag arrow (0 = the first section).
   uint64_t sectionActiveId = 0;

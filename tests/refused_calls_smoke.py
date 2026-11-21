@@ -419,7 +419,51 @@ def main():
                      {"feature": {
                          "type": "DatumPlane", "name": "Bad", "kind": "from_fit",
                          "fit": {"body_id": imp, "point_mm": [0, 0, 0],
-                                 "kind": "auto"}}}, "accepted: plane")]:
+                                 "kind": "auto"}}}, "accepted: plane"),
+                    # The clip and the hints (docs/modeling/README.md#hints).
+                    ("fit_primitive clip_sigma 4", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "clip_sigma": 4}, '1, 2, 3 or "all"'),
+                    ("fit_primitive clip_sigma most", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "clip_sigma": "most"}, '1, 2, 3 or "all"'),
+                    ("fit_primitive unknown side", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "side": "outer"}, "inside (a bore"),
+                    ("fit_primitive side on a plane", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "kind": "plane", "side": "inside"},
+                     "side is for a curved kind"),
+                    ("fit_primitive radius on a cone", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "kind": "cone", "radius_mm": [1, 2]},
+                     "radius_mm is for a cylinder or a sphere"),
+                    ("fit_primitive radius backwards", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "radius_mm": [5, 2]}, "radius_mm is [min, max]"),
+                    ("fit_primitive axis without a tolerance", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "axis": [0, 0, 1]}, "axis_tolerance_deg go together"),
+                    ("fit_primitive point outside within", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "within": {"min_mm": [1, 1, 1], "max_mm": [2, 2, 2]}},
+                     "outside within"),
+                    ("fit_primitive within unknown key", "fit_primitive",
+                     {"feature_id": imp, "point_mm": [0, 0, 0],
+                      "within": {"min_mm": [-1, -1, -1], "max_mm": [1, 1, 1],
+                                 "pad_mm": 1}}, "Accepted: min_mm, max_mm"),
+                    ("DatumAxis from_fit unknown side", "add_feature",
+                     {"feature": {
+                         "type": "DatumAxis", "name": "Bad", "kind": "from_fit",
+                         "fit": {"body_id": imp, "point_mm": [0, 0, 0],
+                                 "kind": "cylinder", "side": "outer"}}},
+                     "inside (a bore"),
+                    ("DatumAxis from_fit clip_sigma 0", "add_feature",
+                     {"feature": {
+                         "type": "DatumAxis", "name": "Bad", "kind": "from_fit",
+                         "fit": {"body_id": imp, "point_mm": [0, 0, 0],
+                                 "kind": "cylinder", "clip_sigma": 0}}},
+                     '1, 2, 3 or "all"')]:
                 check(label, method, params, needle=needle, tab=part["name"])
             d.call("delete_feature", feature_id=imp)
 

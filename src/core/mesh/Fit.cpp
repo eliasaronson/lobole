@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 
@@ -98,6 +99,96 @@ glm::dvec3 FitResult::Normal(const glm::dvec3& p) const {
   }
   }
   return glm::dvec3(0.0);
+}
+
+bool FitHints::Any() const {
+  return outside || radiusMin || radiusMax || axis || withinLo || withinHi;
+}
+
+const char* FitHints::NotFor(Kind kind) const {
+  if (outside && kind == Kind::Plane)
+    return "side";
+  if ((radiusMin || radiusMax) && kind != Kind::Cylinder &&
+      kind != Kind::Sphere)
+    return "radius_mm";
+  if (axis && kind == Kind::Sphere)
+    return "axis";
+  return nullptr;
+}
+
+bool FitHints::Inside(const glm::dvec3& p) const {
+  if (!withinLo || !withinHi)
+    return true;
+  for (int i = 0; i < 3; i++)
+    if (!(p[i] >= (*withinLo)[i] && p[i] <= (*withinHi)[i]))
+      return false;
+  return true;
+}
+
+namespace {
+
+std::string Num(double v) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%.4g", v);
+  return buf;
+}
+
+} // namespace
+
+std::string FitHints::Miss(const FitResult& f, const glm::dvec3& at,
+                           const glm::dvec3& facing) const {
+  const auto what = [&] {
+    return std::string("the ") + KindName(f.kind) + " fitted here";
+  };
+  if (outside && f.kind != Kind::Plane) {
+    const bool out = glm::dot(facing, f.Normal(at)) > 0.0;
+    if (out != *outside)
+      return what() + " faces " +
+             (out ? "outside (a boss or a ball)"
+                  : "inside (a bore or a socket)") +
+             ", and side asks " + (*outside ? "outside" : "inside");
+  }
+  if ((radiusMin || radiusMax) &&
+      (f.kind == Kind::Cylinder || f.kind == Kind::Sphere)) {
+    const double lo = radiusMin.value_or(0.0);
+    const double hi = radiusMax.value_or(std::numeric_limits<double>::max());
+    if (!(f.radius >= lo && f.radius <= hi))
+      return what() + " has radius " + Num(f.radius) +
+             " mm, outside radius_mm [" + Num(lo) + ", " +
+             (radiusMax ? Num(hi) : std::string("any")) + "]";
+  }
+  if (axis && f.kind != Kind::Sphere) {
+    const double c = std::abs(glm::dot(glm::normalize(f.axis), *axis));
+    const double off = std::acos(std::min(1.0, c));
+    if (off > axisToleranceRad)
+      return what() + " has its " +
+             (f.kind == Kind::Plane ? "normal " : "axis ") +
+             Num(off * 180.0 / M_PI) + " deg from axis [" + Num((*axis).x) +
+             ", " + Num((*axis).y) + ", " + Num((*axis).z) +
+             "], past axis_tolerance_deg " +
+             Num(axisToleranceRad * 180.0 / M_PI);
+  }
+  return "";
+}
+
+std::string FitHints::Describe() const {
+  std::string out;
+  const auto add = [&](const std::string& s) {
+    out += (out.empty() ? "" : ", ") + s;
+  };
+  if (outside)
+    add(std::string("side ") + (*outside ? "outside" : "inside"));
+  if (radiusMin || radiusMax)
+    add("radius_mm [" + Num(radiusMin.value_or(0.0)) + ", " +
+        (radiusMax ? Num(*radiusMax) : std::string("any")) + "]");
+  if (axis)
+    add("axis [" + Num(axis->x) + ", " + Num(axis->y) + ", " + Num(axis->z) +
+        "] within " + Num(axisToleranceRad * 180.0 / M_PI) + " deg");
+  if (withinLo && withinHi)
+    add("within [" + Num(withinLo->x) + ", " + Num(withinLo->y) + ", " +
+        Num(withinLo->z) + "] to [" + Num(withinHi->x) + ", " +
+        Num(withinHi->y) + ", " + Num(withinHi->z) + "]");
+  return out;
 }
 
 namespace {
@@ -697,11 +788,12 @@ FitResult Hypothesis(Kind kind, const glm::dvec3* p, const glm::dvec3* n) {
   return f;
 }
 
-// The least-squares fit of `kind` over `pts`, started from `start`.
-FitResult Refit(Kind kind, const FitResult& start,
-                const std::vector<glm::dvec3>& pts,
-                const std::vector<glm::dvec3>& at,
-                const std::vector<glm::dvec3>& nrm) {
+} // namespace
+
+FitResult FitLeastSquares(Kind kind, const FitResult& start,
+                          const std::vector<glm::dvec3>& pts,
+                          const std::vector<glm::dvec3>& at,
+                          const std::vector<glm::dvec3>& nrm) {
   switch (kind) {
   case Kind::Plane: {
     FitResult f = FitPlane(pts);
@@ -719,12 +811,11 @@ FitResult Refit(Kind kind, const FitResult& start,
   return {};
 }
 
-} // namespace
-
 FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
                     const std::vector<glm::dvec3>& facetCentres,
                     const std::vector<glm::dvec3>& facetNormals,
-                    double toleranceMm, const glm::dvec3* through) {
+                    double toleranceMm, const glm::dvec3* through,
+                    const Admit& admit) {
   FitResult none;
   none.kind = kind;
   const size_t n = points.size(), nf = facetCentres.size();
@@ -819,7 +910,7 @@ FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
     if (!usable)
       continue;
     const FitResult h = Hypothesis(kind, p, q);
-    if (!h.ok || !passes(h))
+    if (!h.ok || !passes(h) || (admit && !admit(h)))
       continue;
     double agree = 0.0;
     size_t in = 0;
@@ -879,7 +970,7 @@ FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
   for (int round = 0; round < 8; round++) {
     if (kind == Kind::Cone)
       planesOf(kept, at, nrm);
-    FitResult f = Refit(kind, kept, pts, at, nrm);
+    FitResult f = FitLeastSquares(kind, kept, pts, at, nrm);
     if (!f.ok || !passes(f))
       break;
     size_t in = 0;
@@ -904,12 +995,12 @@ FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
 
 FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
                     const std::vector<glm::dvec3>& normals, double toleranceMm,
-                    const glm::dvec3* through) {
+                    const glm::dvec3* through, const Admit& admit) {
   if (!normals.empty() && normals.size() != points.size())
     return FitResult{};
   return FitRobust(kind, points,
                    normals.empty() ? std::vector<glm::dvec3>{} : points,
-                   normals, toleranceMm, through);
+                   normals, toleranceMm, through, admit);
 }
 
 } // namespace mesh

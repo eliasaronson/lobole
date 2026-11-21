@@ -9,6 +9,7 @@
 
 #include "mesh_organic.h"
 
+#include "core/MeshFit.h"
 #include "core/mesh/Fit.h"
 #include "core/mesh/MeshBvh.h"
 #include "core/mesh/Segment.h"
@@ -17,10 +18,13 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
+#include <limits>
 #include <memory>
 
 using Catch::Matchers::ContainsSubstring;
@@ -47,6 +51,154 @@ double LineAngleDeg(const glm::dvec3& a, const glm::dvec3& b) {
 double FromLine(const glm::dvec3& p, const glm::dvec3& o, const glm::dvec3& d) {
   const glm::dvec3 w = p - o;
   return glm::length(w - glm::dot(w, d) * d);
+}
+
+// The growth before the region stopped at the edge: every corner within the
+// tolerance and facing the seed's side, refitted each time the region
+// doubles, grown once more against the last fit and fitted again -- by
+// distance alone. What the edge and the cost are measured against, kept
+// here as it was so neither can drift.
+struct LegacySamples {
+  std::vector<glm::dvec3> points, centres, normals;
+};
+
+void LegacyGather(const mesh::TriMesh& m, const std::vector<uint32_t>& tris,
+                  std::vector<uint8_t>& stamp, LegacySamples& out,
+                  size_t most) {
+  std::vector<uint32_t> verts;
+  for (uint32_t t : tris)
+    for (uint32_t v : m.triangles[t])
+      if (!stamp[v]) {
+        stamp[v] = 1;
+        verts.push_back(v);
+      }
+  for (uint32_t v : verts)
+    stamp[v] = 0;
+  std::sort(verts.begin(), verts.end());
+  out.points.clear();
+  out.centres.clear();
+  out.normals.clear();
+  const size_t n = verts.size(), take = std::min(n, most);
+  for (size_t i = 0; i < take; i++)
+    out.points.push_back(m.positions[verts[take == n ? i : i * n / take]]);
+  std::vector<uint32_t> sorted = tris;
+  std::sort(sorted.begin(), sorted.end());
+  const size_t nt = sorted.size(), takeT = std::min(nt, most);
+  for (size_t i = 0; i < takeT; i++) {
+    const uint32_t t = sorted[takeT == nt ? i : i * nt / takeT];
+    const glm::dvec3 a = m.AreaNormal(t);
+    const double l = glm::length(a);
+    if (!(l > 0.0))
+      continue;
+    out.centres.push_back((m.Corner(t, 0) + m.Corner(t, 1) + m.Corner(t, 2)) /
+                          3.0);
+    out.normals.push_back(a / l);
+  }
+}
+
+mesh::Region LegacyGrowFrom(const mesh::TriMesh& m, uint32_t seed,
+                            mesh::Kind kind, double tol) {
+  constexpr size_t kFitPoints = 65536;
+  mesh::Region r;
+  r.fit.kind = kind;
+  std::vector<uint8_t> stamp(m.positions.size(), 0);
+  std::vector<uint8_t> in(m.triangles.size(), 0);
+  LegacySamples smp;
+  const auto robust = [&](const glm::dvec3* through) {
+    return mesh::FitRobust(kind, smp.points, smp.centres, smp.normals, tol,
+                           through);
+  };
+  std::vector<uint32_t> disk{seed}, frontier{seed};
+  in[seed] = 1;
+  size_t lastFit = 0;
+  for (int ring = 0; !frontier.empty(); ring++) {
+    std::vector<uint32_t> next;
+    for (uint32_t t : frontier)
+      for (int e = 0; e < 3; e++) {
+        const uint32_t u = m.neighbour[t][e];
+        if (u != mesh::kNone && !in[u]) {
+          in[u] = 1;
+          next.push_back(u);
+        }
+      }
+    disk.insert(disk.end(), next.begin(), next.end());
+    frontier = std::move(next);
+    if (ring < 1 || disk.size() < 12 || disk.size() < lastFit * 3 / 2)
+      continue;
+    lastFit = disk.size();
+    if (kind == mesh::Kind::Plane)
+      break;
+    LegacyGather(m, disk, stamp, smp, kFitPoints);
+    const mesh::FitResult flat = mesh::FitPlane(smp.points);
+    if (flat.ok && flat.max > 3.0 * tol)
+      break;
+  }
+  for (uint32_t t : disk)
+    in[t] = 0;
+  LegacyGather(m, disk, stamp, smp, kFitPoints);
+  const glm::dvec3 seedCentre =
+      (m.Corner(seed, 0) + m.Corner(seed, 1) + m.Corner(seed, 2)) / 3.0;
+  mesh::FitResult fit = robust(&seedCentre);
+  if (!fit.ok)
+    return r;
+  const double side =
+      glm::dot(m.AreaNormal(seed), fit.Normal(seedCentre)) < 0.0 ? -1.0 : 1.0;
+  const auto takes = [&](const mesh::FitResult& f, uint32_t t) {
+    for (uint32_t v : m.triangles[t])
+      if (!(std::abs(f.Distance(m.positions[v])) <= tol))
+        return false;
+    const glm::dvec3 c =
+        (m.Corner(t, 0) + m.Corner(t, 1) + m.Corner(t, 2)) / 3.0;
+    return side * glm::dot(m.AreaNormal(t), f.Normal(c)) > 0.0;
+  };
+  const auto grow = [&](mesh::FitResult& f, bool refit) {
+    std::vector<uint32_t> region{seed};
+    in[seed] = 1;
+    size_t nextFit = std::max<size_t>(2 * disk.size(), 16);
+    for (size_t i = 0; i < region.size(); i++) {
+      const uint32_t t = region[i];
+      for (int e = 0; e < 3; e++) {
+        const uint32_t u = m.neighbour[t][e];
+        if (u == mesh::kNone || in[u] || !takes(f, u))
+          continue;
+        in[u] = 1;
+        region.push_back(u);
+      }
+      if (refit && region.size() >= nextFit) {
+        nextFit *= 2;
+        LegacyGather(m, region, stamp, smp, kFitPoints);
+        const mesh::FitResult g = robust(&seedCentre);
+        if (g.ok)
+          f = g;
+      }
+    }
+    for (uint32_t t : region)
+      in[t] = 0;
+    return region;
+  };
+  (void)grow(fit, /*refit=*/true);
+  std::vector<uint32_t> region = grow(fit, /*refit=*/false);
+  LegacyGather(m, region, stamp, smp, kFitPoints);
+  if (const mesh::FitResult g = robust(&seedCentre); g.ok)
+    fit = g;
+  LegacyGather(m, region, stamp, smp, m.positions.size());
+  double sum = 0.0, worst = 0.0;
+  for (const glm::dvec3& p : smp.points) {
+    const double d = std::abs(fit.Distance(p));
+    sum += d * d;
+    worst = std::max(worst, d);
+  }
+  fit.rms =
+      smp.points.empty() ? 0.0 : std::sqrt(sum / double(smp.points.size()));
+  fit.max = worst;
+  if (kind == mesh::Kind::Plane && side < 0.0)
+    fit.axis = -fit.axis;
+  std::sort(region.begin(), region.end());
+  r.fit = fit;
+  r.triangles = std::move(region);
+  for (uint32_t t : r.triangles)
+    r.area += m.Area(t);
+  return r;
 }
 
 const fixtures::Post& Post() {
@@ -90,7 +242,9 @@ TEST_CASE("A cylinder grown from a point on a scan is the generated one",
   CHECK_THAT(r.fit.radius, WithinAbs(post.radius, 0.02));
   CHECK(angle < 0.1);
   CHECK(offAxis < 0.05);
-  CHECK(r.fit.max <= tol * (1.0 + 1e-9));
+  // Every corner was within the tolerance of the fit it grew under; the
+  // clip's least squares moves the surface by a fraction of the noise.
+  CHECK(r.fit.max <= tol * 1.01);
   // The region is the cylinder's, round the lump: it covers most of the
   // side (2 pi R H) and none of the lump's crest.
   CHECK(r.area > 0.8 * 2.0 * kPi * post.radius * post.height);
@@ -151,7 +305,11 @@ TEST_CASE("A cone, a plane and a sphere grown from a point are the "
                        post.height + post.coneHeight - 2.0 * post.noise;
       top += on ? 1 : 0;
     }
-    CHECK(r.triangles.size() == top);
+    // A few of the smallest round the pole lean past the scan's own
+    // normal band and stay out: holes, not a neighbour.
+    CHECK(r.triangles.size() <= top);
+    CHECK(r.triangles.size() >= top * 99 / 100);
+    CHECK(low > post.height + post.coneHeight - 2.0 * post.noise);
   }
   SECTION("the bottom, facing down") {
     const mesh::Region r = mesh::GrowFrom(m, SeedAt(m, post.onBottom),
@@ -276,6 +434,224 @@ TEST_CASE("A plane grown on a box is the face picked, not the next one",
     const glm::dvec3 n = glm::normalize(m.AreaNormal(seed));
     CHECK(glm::dot(r.fit.axis, n) > 1.0 - 1e-9);
     CHECK(r.triangles.size() == 2);
+  }
+}
+
+TEST_CASE("A plane fitted near a rounded edge stops at the edge",
+          "[mesh][fit]") {
+  // A block with 0.5 mm rounds on every edge, scanned with +-0.05 mm of
+  // noise, tilted off the axes; its +Z face clicked 2 mm from an edge. A
+  // round's first few degrees lie within the tolerance of the face and
+  // face its way: growth by distance takes them, and they all stand to one
+  // side of it.
+  const fixtures::Block b = fixtures::ScannedBlock();
+  const mesh::TriMesh& m = b.organic.mesh;
+  const double tol = mesh::ScanTolerance(m);
+  const uint32_t seed = SeedAt(m, b.nearEdge);
+  const glm::dvec3 n = b.FaceNormal(2, 1);
+  const glm::dvec3 centre = b.ToWorld({0.0, 0.0, b.half.z});
+  const auto err = [&](const mesh::Region& r, double& deg, double& mm) {
+    deg = LineAngleDeg(r.fit.axis, n);
+    // How far the fitted plane is off the face, at the worst of the
+    // face's middle and the click.
+    mm = std::max(std::abs(r.fit.Distance(centre)),
+                  std::abs(r.fit.Distance(
+                      b.nearEdge - glm::dot(b.nearEdge - centre, n) * n)));
+  };
+  std::string why;
+  const mesh::Region now =
+      mesh::GrowFrom(m, seed, mesh::Kind::Plane, tol, &why);
+  INFO(why);
+  REQUIRE(now.fit.ok);
+  const mesh::Region old = LegacyGrowFrom(m, seed, mesh::Kind::Plane, tol);
+  REQUIRE(old.fit.ok);
+  double nowDeg = 0.0, nowMm = 0.0, oldDeg = 0.0, oldMm = 0.0;
+  err(now, nowDeg, nowMm);
+  err(old, oldDeg, oldMm);
+  std::printf("block edge (tolerance %.4f): now %.5f deg, %.5f mm off, %zu "
+              "triangles, %zu used; by distance alone %.5f deg, %.5f mm "
+              "off, %zu triangles\n",
+              tol, nowDeg, nowMm, now.triangles.size(), now.used, oldDeg, oldMm,
+              old.triangles.size());
+  CHECK(glm::dot(now.fit.axis, n) > 0.0);
+  CHECK(nowDeg < 0.01);
+  CHECK(nowMm < 0.01);
+  // The same mesh, the same click: growth by distance leans into the
+  // rounds.
+  CHECK(oldMm > 2.0 * nowMm);
+  // The used points span the face's flat (30 x 24 less the rounds) and
+  // no more than the face: what the band admits of a round's first
+  // degrees is inside it.
+  std::printf("block edge: extent %.3f x %.3f (flat %.1f x %.1f)\n",
+              now.extent.x, now.extent.y, 2.0 * (b.half.x - b.round),
+              2.0 * (b.half.y - b.round));
+  CHECK(now.extent.x >= 2.0 * (b.half.x - b.round) - 0.1);
+  CHECK(now.extent.x <= 2.0 * b.half.x);
+  CHECK(now.extent.y >= 2.0 * (b.half.y - b.round) - 0.1);
+  CHECK(now.extent.y <= 2.0 * b.half.y);
+}
+
+TEST_CASE("A cylinder fit is not dragged by 30% of a neighbouring face",
+          "[mesh][fit]") {
+  // The post's side, and 30% of the base beside it: the robust fit and the
+  // clip keep the side's.
+  const fixtures::Post& post = Post();
+  const mesh::TriMesh& m = post.organic.mesh;
+  std::vector<uint32_t> side, base;
+  for (uint32_t t = 0; t < m.triangles.size(); t++) {
+    double lo = 1e9, hi = -1e9;
+    for (int c = 0; c < 3; c++) {
+      const double z = glm::dot(m.Corner(t, c) - post.base, post.axis);
+      lo = std::min(lo, z);
+      hi = std::max(hi, z);
+    }
+    if (lo > 0.5 && hi < post.height - 0.5)
+      side.push_back(t);
+    else if (hi < 2.0 * post.noise)
+      base.push_back(t);
+  }
+  // 30% of the base, its outer part: the triangles beside the side.
+  const auto out = [&](uint32_t t) {
+    return FromLine((m.Corner(t, 0) + m.Corner(t, 1) + m.Corner(t, 2)) / 3.0,
+                    post.base, post.axis);
+  };
+  std::sort(base.begin(), base.end(),
+            [&](uint32_t a, uint32_t b) { return out(a) > out(b); });
+  const size_t want = base.size() * 3 / 10;
+  std::vector<uint32_t> region = side;
+  region.insert(region.end(), base.begin(), base.begin() + long(want));
+  std::string why;
+  const mesh::Region r =
+      mesh::FitTriangles(m, region, SeedAt(m, post.onCylinder),
+                         mesh::Kind::Cylinder, mesh::ScanTolerance(m), &why);
+  INFO(why);
+  REQUIRE(r.fit.ok);
+  const double off = FromLine(post.base, r.fit.origin, r.fit.axis);
+  std::printf("cylinder with 30%% of the base: radius %.4f (12), axis %.4f "
+              "deg and %.4f mm off, %zu of %zu triangles' points used\n",
+              r.fit.radius, LineAngleDeg(r.fit.axis, post.axis), off, r.used,
+              region.size());
+  CHECK_THAT(r.fit.radius, WithinAbs(post.radius, post.noise));
+  CHECK(off < post.noise);
+  CHECK(LineAngleDeg(r.fit.axis, post.axis) < 0.1);
+}
+
+TEST_CASE("A cylinder from part of its arc, and the partial-arc warning",
+          "[mesh][fit]") {
+  SECTION("140 degrees") {
+    const fixtures::Arc a = fixtures::ScannedArc(12.0, 140.0, 30.0, 0.4, 0.05);
+    const mesh::TriMesh& m = a.organic.mesh;
+    std::string why;
+    const mesh::Region r =
+        mesh::GrowFrom(m, SeedAt(m, a.onSurface), mesh::Kind::Cylinder,
+                       mesh::ScanTolerance(m), &why);
+    INFO(why);
+    REQUIRE(r.fit.ok);
+    const double off = FromLine(a.base, r.fit.origin, r.fit.axis);
+    std::printf("140 deg arc: radius %.4f (12), axis %.4f deg %.4f mm off, "
+                "arc %.2f deg, length %.3f (30)\n",
+                r.fit.radius, LineAngleDeg(r.fit.axis, a.axis), off,
+                r.arc * 180.0 / kPi, r.length);
+    CHECK_THAT(r.fit.radius, WithinAbs(a.radius, a.noise));
+    CHECK(off < a.noise);
+    CHECK_THAT(r.arc * 180.0 / kPi, WithinAbs(140.0, 2.0));
+    CHECK_THAT(r.length, WithinAbs(30.0, 0.5));
+    meshfit::Result res;
+    res.region = r;
+    CHECK_FALSE(meshfit::ResultJson(res).contains("warnings"));
+  }
+  SECTION("a few degrees of a large bore") {
+    const fixtures::Arc a =
+        fixtures::ScannedArc(150.0, 12.0, 30.0, 0.4, 0.02, /*bore=*/true);
+    const mesh::TriMesh& m = a.organic.mesh;
+    std::string why;
+    const mesh::Region r =
+        mesh::GrowFrom(m, SeedAt(m, a.onSurface), mesh::Kind::Cylinder,
+                       mesh::ScanTolerance(m), &why);
+    INFO(why);
+    REQUIRE(r.fit.ok);
+    std::printf("12 deg of an R150 bore: radius %.3f, arc %.2f deg, diameter "
+                "%.3f to %.3f\n",
+                r.fit.radius, r.arc * 180.0 / kPi,
+                2.0 * (r.fit.radius + r.residualLo),
+                2.0 * (r.fit.radius + r.residualHi));
+    CHECK_THAT(r.arc * 180.0 / kPi, WithinAbs(12.0, 0.5));
+    CHECK_THAT(r.fit.radius, WithinAbs(a.radius, 0.02 * a.radius));
+    meshfit::Result res;
+    res.region = r;
+    const nlohmann::json j = meshfit::ResultJson(res);
+    REQUIRE(j.contains("warnings"));
+    CHECK_THAT(j.at("warnings")[0].get<std::string>(),
+               ContainsSubstring("arc"));
+    // A bore: its triangles face the axis.
+    const glm::dvec3 c = a.onSurface;
+    CHECK(glm::dot(m.AreaNormal(SeedAt(m, c)), r.fit.Normal(c)) < 0.0);
+  }
+}
+
+TEST_CASE("The used points and the figures they give", "[mesh][fit]") {
+  const fixtures::Post& post = Post();
+  const mesh::TriMesh& m = post.organic.mesh;
+  const double tol = mesh::ScanTolerance(m);
+  const uint32_t seed = SeedAt(m, post.onCylinder);
+  // Fewer sigma keeps fewer points, and their sigma is smaller than the
+  // whole region's rms: which is why the reply carries both.
+  size_t lastUsed = std::numeric_limits<size_t>::max();
+  for (const int k : {0, 3, 2, 1}) {
+    mesh::GrowOptions o;
+    o.clipSigma = k;
+    const mesh::Region r =
+        mesh::GrowFrom(m, seed, mesh::Kind::Cylinder, tol, nullptr, o);
+    REQUIRE(r.fit.ok);
+    std::printf("clip %d: radius %.4f, used %zu of %zu, sigma %.4f rms %.4f "
+                "form %.4f\n",
+                k, r.fit.radius, r.used, r.fit.inliers, r.sigma, r.fit.rms,
+                r.residualHi - r.residualLo);
+    CHECK(r.used <= lastUsed);
+    CHECK(r.sigma <= r.fit.rms * (1.0 + 1e-9));
+    CHECK_THAT(r.fit.radius, WithinAbs(post.radius, 0.02));
+    if (k == 0)
+      CHECK(r.used == r.fit.inliers);
+    if (k == 1)
+      CHECK(r.used < r.fit.inliers * 9 / 10);
+    // The used points lie within k robust sigma of the fit (the noise is
+    // uniform to +-0.05: a sigma of 1.4826 x 0.025), so the sizes a caliper
+    // would read are the radius moved by at most that.
+    if (k > 0) {
+      CHECK(r.residualHi <= k * 1.4826 * 0.025 * 1.05);
+      CHECK(r.residualLo >= -k * 1.4826 * 0.025 * 1.05);
+    }
+    lastUsed = r.used;
+  }
+}
+
+// What the region and the clip cost against the growth by distance alone
+// that came before them, on the same machine in the same run: CPU time, a
+// COST check (docs/ui/testing.md#tests-that-time-things).
+TEST_CASE("The region and the clip cost at most twice the old growth",
+          "[mesh][fit][slow]") {
+  for (const size_t n : {size_t(300000), size_t(2000000)}) {
+    const fixtures::Organic s = fixtures::NoisySphere(n);
+    const double tol = mesh::ScanTolerance(s.mesh);
+    const uint32_t seed = SeedAt(s.mesh, {0.0, 0.0, 40.0});
+    const auto cpu = [&](auto&& f) {
+      const std::clock_t t0 = std::clock();
+      f();
+      return double(std::clock() - t0) / CLOCKS_PER_SEC;
+    };
+    mesh::Region now, old;
+    const double oldS = cpu(
+        [&] { old = LegacyGrowFrom(s.mesh, seed, mesh::Kind::Sphere, tol); });
+    const double nowS = cpu(
+        [&] { now = mesh::GrowFrom(s.mesh, seed, mesh::Kind::Sphere, tol); });
+    REQUIRE(now.fit.ok);
+    REQUIRE(old.fit.ok);
+    std::printf("sphere %zu: region + clip %.3f s CPU, the old growth %.3f s "
+                "(x%.2f); radius %.5f, used %zu\n",
+                s.mesh.TriangleCount(), nowS, oldS, nowS / oldS, now.fit.radius,
+                now.used);
+    CHECK(nowS <= 2.0 * oldS);
+    CHECK_THAT(now.fit.radius, WithinAbs(s.radius, 0.01));
   }
 }
 

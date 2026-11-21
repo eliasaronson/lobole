@@ -849,22 +849,30 @@ DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
 
 // v215: a datum fitted to a body's triangles
 // (docs/modeling/README.md#datums-on-a-scan), as {body_id, point_mm, kind,
-// tolerance_mm?}. `kinds` is what this datum accepts; anything else -- auto
-// among them, which would let a re-scan change what the datum is -- is
-// refused naming them.
+// tolerance_mm?}; vNEXT: clip_sigma? and the hints (side?, radius_mm?,
+// axis? + axis_tolerance_deg?, within?), each written only when given.
+// `kinds` is what this datum accepts; anything else -- auto among them,
+// which would let a re-scan change what the datum is -- is refused naming
+// them, as is a hint the kind cannot take.
 json FitRefToJson(const meshfit::FitRef& f) {
   json j{{"body_id", f.bodyFeatureId},
          {"point_mm", Vec3ToJson(f.pointMm)},
          {"kind", mesh::KindName(f.kind)}};
   if (f.toleranceMm)
     j["tolerance_mm"] = *f.toleranceMm;
+  if (f.clipSigma)
+    j["clip_sigma"] = meshfit::ClipSigmaJson(*f.clipSigma);
+  meshfit::HintsToJson(f.hints, j);
   return j;
 }
 
 meshfit::FitRef FitRefFromJson(const json& j, const char* what,
                                std::initializer_list<mesh::Kind> kinds) {
-  readctx::RefuseUnknownKeys(j, {"body_id", "point_mm", "kind", "tolerance_mm"},
-                             what);
+  std::vector<std::string_view> keys{"body_id", "point_mm", "kind",
+                                     "tolerance_mm", "clip_sigma"};
+  for (const std::string& k : meshfit::HintKeys())
+    keys.push_back(k);
+  readctx::RefuseUnknownKeys(j, keys, what);
   meshfit::FitRef f;
   f.bodyFeatureId = IdField(j, "body_id", true);
   if (f.bodyFeatureId == 0)
@@ -897,6 +905,18 @@ meshfit::FitRef FitRefFromJson(const json& j, const char* what,
                                "than 0 (leave it out for the scan's noise)");
     f.toleranceMm = t.get<double>();
   }
+  if (j.contains("clip_sigma")) {
+    int k = 0;
+    if (!meshfit::ClipSigmaFromJson(j.at("clip_sigma"), k))
+      throw std::runtime_error(std::string(what) + ": clip_sigma: unknown " +
+                               j.at("clip_sigma").dump() +
+                               ". Accepted: " + meshfit::AcceptedClipSigma());
+    f.clipSigma = k;
+  }
+  f.hints = meshfit::HintsFromJson(j, what);
+  if (const char* h = f.hints.NotFor(f.kind))
+    throw std::runtime_error(std::string(what) + ": " + h +
+                             " does not apply to a " + mesh::KindName(f.kind));
   return f;
 }
 

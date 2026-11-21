@@ -30,6 +30,8 @@ std::string Point(const glm::dvec3& p) {
 
 nlohmann::json Json(const glm::dvec3& v) { return {v.x, v.y, v.z}; }
 
+const double kCreaseCos = std::cos(2.0 * M_PI / mesh::kMinSidesLowest);
+
 // The order auto prefers a kind in: by how many numbers it takes.
 int Simplicity(mesh::Kind k) {
   switch (k) {
@@ -48,6 +50,133 @@ int Simplicity(mesh::Kind k) {
 } // namespace
 
 std::string AcceptedKinds() { return "plane, cylinder, cone, sphere, auto"; }
+
+std::string AcceptedClipSigma() { return "1, 2, 3 or \"all\""; }
+
+bool ClipSigmaFromJson(const nlohmann::json& j, int& out) {
+  if (j.is_string() && j.get<std::string>() == "all") {
+    out = 0;
+    return true;
+  }
+  if (!j.is_number())
+    return false;
+  const double v = j.get<double>();
+  for (int k = 1; k <= 3; k++)
+    if (v == double(k)) {
+      out = k;
+      return true;
+    }
+  return false;
+}
+
+nlohmann::json ClipSigmaJson(int clipSigma) {
+  return clipSigma == 0 ? nlohmann::json("all") : nlohmann::json(clipSigma);
+}
+
+const std::vector<std::string>& HintKeys() {
+  static const std::vector<std::string> keys{"side", "radius_mm", "axis",
+                                             "axis_tolerance_deg", "within"};
+  return keys;
+}
+
+namespace {
+
+glm::dvec3 Vec3Of(const nlohmann::json& v, const std::string& what) {
+  if (!v.is_array() || v.size() != 3 || !v[0].is_number() ||
+      !v[1].is_number() || !v[2].is_number())
+    throw std::runtime_error(what + " is [x, y, z], not " + v.dump());
+  const glm::dvec3 p(v[0].get<double>(), v[1].get<double>(),
+                     v[2].get<double>());
+  if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+    throw std::runtime_error(what + " is three finite numbers");
+  return p;
+}
+
+} // namespace
+
+mesh::FitHints HintsFromJson(const nlohmann::json& j, const std::string& what) {
+  mesh::FitHints h;
+  const std::string at = what.empty() ? std::string() : what + ": ";
+  if (j.contains("side")) {
+    const nlohmann::json& s = j.at("side");
+    const std::string v = s.is_string() ? s.get<std::string>() : s.dump();
+    if (v == "inside")
+      h.outside = false;
+    else if (v == "outside")
+      h.outside = true;
+    else
+      throw std::runtime_error(at + "side: unknown " + s.dump() +
+                               ". Accepted: inside (a bore, a socket), "
+                               "outside (a boss, a ball)");
+  }
+  if (j.contains("radius_mm")) {
+    const nlohmann::json& r = j.at("radius_mm");
+    if (!r.is_array() || r.size() != 2 || !r[0].is_number() ||
+        !r[1].is_number() || !std::isfinite(r[0].get<double>()) ||
+        !std::isfinite(r[1].get<double>()) || r[0].get<double>() < 0.0 ||
+        !(r[1].get<double>() > 0.0) || r[0].get<double>() > r[1].get<double>())
+      throw std::runtime_error(at +
+                               "radius_mm is [min, max] in mm, 0 <= "
+                               "min <= max and max > 0, not " +
+                               r.dump());
+    h.radiusMin = r[0].get<double>();
+    h.radiusMax = r[1].get<double>();
+  }
+  if (j.contains("axis") != j.contains("axis_tolerance_deg"))
+    throw std::runtime_error(
+        at + "axis and axis_tolerance_deg go together: the direction, and "
+             "how far in degrees the fitted axis (a plane's normal) may lean "
+             "from it");
+  if (j.contains("axis")) {
+    const glm::dvec3 a = Vec3Of(j.at("axis"), at + "axis");
+    if (!(glm::length(a) > 0.0))
+      throw std::runtime_error(at + "axis is a direction, not [0, 0, 0]");
+    h.axis = glm::normalize(a);
+    const nlohmann::json& t = j.at("axis_tolerance_deg");
+    if (!t.is_number() || !(t.get<double>() > 0.0) ||
+        !(t.get<double>() <= 90.0))
+      throw std::runtime_error(at +
+                               "axis_tolerance_deg is a number of "
+                               "degrees above 0 and at most 90, not " +
+                               t.dump());
+    h.axisToleranceRad = angles::ToRadians(t.get<double>());
+  }
+  if (j.contains("within")) {
+    const nlohmann::json& w = j.at("within");
+    if (!w.is_object() || !w.contains("min_mm") || !w.contains("max_mm"))
+      throw std::runtime_error(at +
+                               "within is {min_mm: [x, y, z], max_mm: "
+                               "[x, y, z]}, a box, not " +
+                               w.dump());
+    for (const auto& [k, v] : w.items())
+      if (k != "min_mm" && k != "max_mm")
+        throw std::runtime_error(at + "within: unknown key '" + k +
+                                 "'. Accepted: min_mm, max_mm");
+    const glm::dvec3 lo = Vec3Of(w.at("min_mm"), at + "within.min_mm");
+    const glm::dvec3 hi = Vec3Of(w.at("max_mm"), at + "within.max_mm");
+    if (!(lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z))
+      throw std::runtime_error(at + "within: min_mm is not below max_mm on "
+                                    "every axis");
+    h.withinLo = lo;
+    h.withinHi = hi;
+  }
+  return h;
+}
+
+void HintsToJson(const mesh::FitHints& h, nlohmann::json& j) {
+  if (h.outside)
+    j["side"] = *h.outside ? "outside" : "inside";
+  if (h.radiusMin || h.radiusMax)
+    j["radius_mm"] = {h.radiusMin.value_or(0.0), h.radiusMax.value_or(0.0)};
+  if (h.axis) {
+    j["axis"] = {h.axis->x, h.axis->y, h.axis->z};
+    j["axis_tolerance_deg"] = angles::ToDegrees(h.axisToleranceRad);
+  }
+  if (h.withinLo && h.withinHi) {
+    j["within"] = {{"min_mm", {h.withinLo->x, h.withinLo->y, h.withinLo->z}},
+                   {"max_mm", {h.withinHi->x, h.withinHi->y, h.withinHi->z}}};
+  }
+}
 
 bool KindFromString(const std::string& s, std::optional<mesh::Kind>& kind) {
   if (s == "auto") {
@@ -71,6 +200,22 @@ void CheckRequest(const Request& r) {
       (!std::isfinite(*r.toleranceMm) || !(*r.toleranceMm > 0.0)))
     throw std::runtime_error("tolerance_mm is a number of mm greater than 0 "
                              "(leave it out to take the scan's own noise)");
+  if (r.clipSigma < 0 || r.clipSigma > 3)
+    throw std::runtime_error("clip_sigma is " + AcceptedClipSigma());
+  if (r.kind)
+    if (const char* h = r.hints.NotFor(*r.kind))
+      throw std::runtime_error(
+          std::string(h) + " does not apply to a " + mesh::KindName(*r.kind) +
+          (std::string(h) == "side"
+               ? ": side is for a curved kind (cylinder, cone, sphere); a "
+                 "plane faces the way its triangles do"
+           : std::string(h) == "radius_mm"
+               ? ": radius_mm is for a cylinder or a sphere"
+               : ": axis is for a plane (its normal), a cylinder or a cone"));
+  if (!r.hints.Inside(r.pointMm))
+    throw std::runtime_error("point_mm " + Point(r.pointMm) +
+                             " is outside within: the region grows only "
+                             "inside the box, from the point");
 }
 
 std::vector<const Body*> BodiesOf(const std::vector<Body>& bodies,
@@ -139,16 +284,96 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
   out.seedDistanceMm = hit.distance;
   out.toleranceMm = r.toleranceMm.value_or(mesh::ScanTolerance(m));
 
+  out.clipSigma = r.clipSigma;
   std::vector<mesh::Kind> kinds;
   if (r.kind)
     kinds.push_back(*r.kind);
   else
-    kinds = {mesh::Kind::Plane, mesh::Kind::Sphere, mesh::Kind::Cylinder,
-             mesh::Kind::Cone};
+    for (mesh::Kind k : {mesh::Kind::Plane, mesh::Kind::Sphere,
+                         mesh::Kind::Cylinder, mesh::Kind::Cone})
+      if (r.hints.NotFor(k) == nullptr) // auto tries what the hints allow
+        kinds.push_back(k);
+  // The seeds: the triangle at the point, and with hints every triangle
+  // within the pick's reach of it, nearest first -- near a rim the nearest
+  // surface is often not the one the hints describe.
+  std::vector<uint32_t> seeds{hit.triangle};
+  if (r.hints.Any()) {
+    const double reach = diag / 50.0;
+    std::vector<std::pair<double, uint32_t>> near;
+    std::vector<uint8_t> seen(m.triangles.size(), 0);
+    std::vector<uint32_t> queue{hit.triangle};
+    seen[hit.triangle] = 1;
+    for (size_t i = 0; i < queue.size(); i++) {
+      const uint32_t t = queue[i];
+      const double dist = glm::length(
+          mesh::Bvh::ClosestOnTriangle(r.pointMm, m.Corner(t, 0),
+                                       m.Corner(t, 1), m.Corner(t, 2)) -
+          r.pointMm);
+      if (dist > reach)
+        continue;
+      if (t != hit.triangle)
+        near.emplace_back(dist, t);
+      for (int e = 0; e < 3; e++) {
+        const uint32_t u = m.neighbour[t][e];
+        if (u != mesh::kNone && !seen[u]) {
+          seen[u] = 1;
+          queue.push_back(u);
+        }
+      }
+    }
+    std::sort(near.begin(), near.end());
+    for (const auto& [dist, t] : near)
+      seeds.push_back(t);
+  }
+  mesh::GrowOptions options;
+  options.clipSigma = r.clipSigma;
+  options.hints = r.hints;
   std::vector<mesh::Region> grown;
+  std::vector<size_t> seedsTried;
   for (mesh::Kind k : kinds) {
     std::string why;
-    mesh::Region g = mesh::GrowFrom(m, hit.triangle, k, out.toleranceMm, &why);
+    mesh::Region g;
+    std::vector<uint8_t> covered(seeds.size() > 1 ? m.triangles.size() : 0, 0);
+    size_t attempts = 0;
+    std::vector<glm::dvec3> triedFacing;
+    for (uint32_t seed : seeds) {
+      if (seeds.size() > 1 && covered[seed])
+        continue;
+      // One seed a surface: a triangle turned less than a crease (the
+      // fewest-sided polygon's turn, mesh::kMinSidesLowest) from one
+      // already tried faces the way that surface did.
+      const glm::dvec3 an = m.AreaNormal(seed);
+      const glm::dvec3 facing =
+          glm::length(an) > 0.0 ? glm::normalize(an) : glm::dvec3(0.0);
+      bool same = false;
+      for (const glm::dvec3& f : triedFacing)
+        same = same || glm::dot(f, facing) >= kCreaseCos;
+      if (same)
+        continue;
+      if (attempts == kMostSeeds)
+        break;
+      attempts++;
+      std::string thisWhy;
+      std::vector<uint32_t> reached;
+      g = mesh::GrowFrom(m, seed, k, out.toleranceMm, &thisWhy, options,
+                         &reached);
+      if (g.fit.ok)
+        break;
+      if (why.empty())
+        why = thisWhy; // the nearest surface's reason
+      if (seeds.size() == 1)
+        break;
+      triedFacing.push_back(facing);
+      covered[seed] = 1;
+      for (uint32_t t : reached)
+        covered[t] = 1;
+    }
+    if (!g.fit.ok && attempts > 1)
+      why += " (and on the " + std::to_string(attempts - 1) +
+             (attempts == 2 ? " other surface" : " other surfaces") +
+             " within " + Mm(diag / 50.0) + " mm of the point, none meets " +
+             r.hints.Describe() + ")";
+    seedsTried.push_back(attempts);
     Candidate c;
     c.kind = k;
     c.ok = g.fit.ok;
@@ -158,6 +383,10 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
     out.tried.push_back(c);
     grown.push_back(std::move(g));
   }
+  if (kinds.empty()) {
+    error = "no kind takes every hint given (" + r.hints.Describe() + ")";
+    return false;
+  }
   if (r.kind) {
     if (!grown[0].fit.ok) {
       error = out.tried[0].why + " (at point_mm " + Point(r.pointMm) + " on '" +
@@ -165,6 +394,7 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
       return false;
     }
     out.region = std::move(grown[0]);
+    out.seedsTried = seedsTried[0];
     out.tried.clear();
     return true;
   }
@@ -187,6 +417,7 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
     return false;
   }
   out.region = std::move(grown[size_t(pick)]);
+  out.seedsTried = seedsTried[size_t(pick)];
   out.chosen = true;
   return true;
 }
@@ -217,6 +448,33 @@ nlohmann::json ResultJson(const Result& r) {
   }
   j["rms_mm"] = f.rms;
   j["max_mm"] = f.max;
+  const mesh::Region& g = r.region;
+  j["sigma_mm"] = g.sigma;
+  j["form_mm"] = g.residualHi - g.residualLo;
+  j["used"] = g.used;
+  j["clip_sigma"] = ClipSigmaJson(r.clipSigma);
+  nlohmann::json warnings = nlohmann::json::array();
+  if (f.kind == mesh::Kind::Cylinder || f.kind == mesh::Kind::Sphere) {
+    j["diameter_min_mm"] = 2.0 * (f.radius + g.residualLo);
+    j["diameter_max_mm"] = 2.0 * (f.radius + g.residualHi);
+    const double arc = angles::ToDegrees(g.arc);
+    j["arc_deg"] = arc;
+    if (arc < kPartialArcDeg)
+      warnings.push_back(
+          "the fit covers " + Mm(arc) + " deg of arc, under " +
+          Mm(kPartialArcDeg) +
+          ": a radius from a partial arc is the least "
+          "certain size there is -- fit more of the surface, or give "
+          "radius_mm");
+  }
+  if (f.kind == mesh::Kind::Cylinder)
+    j["length_mm"] = g.length;
+  if (f.kind == mesh::Kind::Plane)
+    j["extent_mm"] = {g.extent.x, g.extent.y};
+  if (!warnings.empty())
+    j["warnings"] = std::move(warnings);
+  if (r.seedsTried > 1)
+    j["seeds_tried"] = r.seedsTried;
   j["tolerance_mm"] = r.toleranceMm;
   j["triangles"] = r.region.triangles.size();
   j["area_mm2"] = r.region.area;
@@ -257,6 +515,8 @@ bool Refit(const RegenContext& ctx, const FitRef& ref, Result& out,
   r.pointMm = ref.pointMm;
   r.kind = ref.kind;
   r.toleranceMm = ref.toleranceMm;
+  r.clipSigma = ref.clipSigma.value_or(kDefaultClipSigma);
+  r.hints = ref.hints;
   try {
     return Fit(bodies, r, out, error);
   } catch (const std::exception& e) {

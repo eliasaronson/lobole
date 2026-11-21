@@ -18,6 +18,8 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -52,6 +54,38 @@ struct FitResult {
   // The unit normal at `p` on the side Distance counts positive (the
   // gradient of Distance); zero on a cylinder's or cone's axis.
   [[nodiscard]] glm::dvec3 Normal(const glm::dvec3& p) const;
+};
+
+// What a fit from a picked point may be steered by: fit_primitive's hints
+// (docs/modeling/README.md#hints), all optional. A hypothesis outside one is
+// not drawn (FitRobust's `admit`), and a fit that ends outside one is refused
+// saying which (Miss).
+struct FitHints {
+  // A curved kind's triangles face away from its axis or centre (outside: a
+  // boss, a ball) or towards it (inside: a bore, a socket).
+  std::optional<bool> outside;
+  std::optional<double> radiusMin, radiusMax; // mm, a cylinder's or sphere's
+  // A unit direction the plane's normal or the cylinder's or cone's axis
+  // keeps within `axisToleranceRad` of, either sense.
+  std::optional<glm::dvec3> axis;
+  double axisToleranceRad = 0.0;
+  // A world box the region's triangles stay inside (every corner).
+  std::optional<glm::dvec3> withinLo, withinHi;
+
+  [[nodiscard]] bool Any() const;
+  // The first hint `kind` cannot take ("side", "radius_mm", "axis"), or
+  // nullptr when it takes them all.
+  [[nodiscard]] const char* NotFor(Kind kind) const;
+  // Why `f` is outside a hint, naming it, or "" when it meets every one.
+  // `at` is a point on the surface and `facing` the unit normal its
+  // triangles face there (what the side is judged by). `within` is not
+  // judged here: it bounds the region, not the fit.
+  [[nodiscard]] std::string Miss(const FitResult& f, const glm::dvec3& at,
+                                 const glm::dvec3& facing) const;
+  // "side inside, radius_mm [4, 6]": what a refusal names.
+  [[nodiscard]] std::string Describe() const;
+  // Whether `p` is inside the `within` box (true when there is none).
+  [[nodiscard]] bool Inside(const glm::dvec3& p) const;
 };
 
 // The plane through `points` (at least three, not collinear).
@@ -95,10 +129,15 @@ FitResult FitSphere(const std::vector<glm::dvec3>& points,
 //
 // With `through`, only a surface passing within the tolerance of that point
 // is taken: a region grown from a picked triangle must be the surface THAT
-// triangle is on, not a larger one beside it (a box's next face).
+// triangle is on, not a larger one beside it (a box's next face). With
+// `admit`, a hypothesis it refuses is not drawn (a hint's); the least
+// squares that refines the best is not held to it, so a fit the surface
+// does not allow comes back as the surface has it, for the caller to judge.
+using Admit = std::function<bool(const FitResult&)>;
 FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
                     const std::vector<glm::dvec3>& normals, double toleranceMm,
-                    const glm::dvec3* through = nullptr);
+                    const glm::dvec3* through = nullptr,
+                    const Admit& admit = {});
 // The same with the hypotheses drawn from oriented samples apart from the
 // points scored and fitted: a mesh region's triangle centres and their unit
 // normals beside its vertices. A facet's normal is its surface's where a
@@ -107,7 +146,17 @@ FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
 FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
                     const std::vector<glm::dvec3>& facetCentres,
                     const std::vector<glm::dvec3>& facetNormals,
-                    double toleranceMm, const glm::dvec3* through = nullptr);
+                    double toleranceMm, const glm::dvec3* through = nullptr,
+                    const Admit& admit = {});
+
+// The least-squares fit of `kind` over `points`, started from `start` (its
+// axis, and a plane's sense): what FitRobust refines its best hypothesis
+// with. A cone starts from the tangent planes `facetNormals` through
+// `facetCentres` (at least three); the other kinds take them empty.
+FitResult FitLeastSquares(Kind kind, const FitResult& start,
+                          const std::vector<glm::dvec3>& points,
+                          const std::vector<glm::dvec3>& facetCentres,
+                          const std::vector<glm::dvec3>& facetNormals);
 
 // The Gauss map of a cylinder or a cone: unit facet `normals`, each weighted
 // (by area), lie on a circle of the unit sphere -- a great circle for a

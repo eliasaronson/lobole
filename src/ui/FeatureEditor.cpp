@@ -635,6 +635,12 @@ void DrawFitRefParams(AppState& state, Feature& f, meshfit::FitRef& fit,
              commit);
   if (fit.toleranceMm)
     ImGui::TextDisabled("Tolerance %.4g mm (its own)", *fit.toleranceMm);
+  if (fit.clipSigma && *fit.clipSigma == 0)
+    ImGui::TextDisabled("Every point used (no clip)");
+  else if (fit.clipSigma)
+    ImGui::TextDisabled("Clipped at %d sigma", *fit.clipSigma);
+  if (fit.hints.Any())
+    ImGui::TextWrapped("Hints: %s", fit.hints.Describe().c_str());
   if (report.is_object()) {
     ImGui::TextDisabled(
         "%zu triangles, %.3g mm RMS (%.3g max) within %.3g mm",
@@ -645,6 +651,18 @@ void DrawFitRefParams(AppState& state, Feature& f, meshfit::FitRef& fit,
     if (report.contains("half_angle_deg"))
       ImGui::TextDisabled("Half angle %.4g deg",
                           report.value("half_angle_deg", 0.0));
+    ImGui::TextDisabled("Used %zu points: sigma %.3g mm, form %.3g mm",
+                        report.value("used", size_t{0}),
+                        report.value("sigma_mm", 0.0),
+                        report.value("form_mm", 0.0));
+    if (report.contains("diameter_min_mm"))
+      ImGui::TextDisabled("Diameter %.4g to %.4g mm",
+                          report.value("diameter_min_mm", 0.0),
+                          report.value("diameter_max_mm", 0.0));
+    if (report.contains("warnings"))
+      for (const auto& w : report.at("warnings"))
+        ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.3f, 1.0f), "%s",
+                           w.get<std::string>().c_str());
   }
 }
 

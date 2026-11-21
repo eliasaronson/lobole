@@ -60,6 +60,20 @@ std::optional<mesh::Kind> AskedKind(const AppState& state) {
   return kKinds[k - 1];
 }
 
+// The hints the window holds, as the fit and the datum take them.
+mesh::FitHints HintsOf(const AppState& state) {
+  const auto& t = state.fitTool;
+  mesh::FitHints h;
+  const std::optional<mesh::Kind> kind = AskedKind(state);
+  if (t.side != 0 && kind != mesh::Kind::Plane)
+    h.outside = t.side == 2;
+  if (t.radiusOn && kind != mesh::Kind::Plane && kind != mesh::Kind::Cone) {
+    h.radiusMin = t.radiusMin;
+    h.radiusMax = t.radiusMax;
+  }
+  return h;
+}
+
 std::vector<const Body*> PickedBodies(const AppState& state) {
   return meshfit::BodiesOf(state.document->GetBodies(),
                            state.fitTool.bodyFeatureId);
@@ -84,13 +98,40 @@ std::string Summary(const meshfit::Result& r) {
     std::snprintf(head, sizeof head, "Sphere, radius %.4g mm", f.radius);
     break;
   }
+  const nlohmann::json j = meshfit::ResultJson(r);
   char tail[200] = {};
   std::snprintf(tail, sizeof tail,
                 "\n%zu triangles, %.4g mm2: %.3g mm RMS (%.3g max) within "
                 "%.3g mm",
                 r.region.triangles.size(), r.region.area, f.rms, f.max,
                 r.toleranceMm);
-  return std::string(head) + tail + (r.chosen ? "\n(auto chose it)" : "");
+  char used[200] = {};
+  std::snprintf(used, sizeof used,
+                "\nUsed %zu points (%s): sigma %.3g mm, form %.3g mm",
+                r.region.used,
+                r.clipSigma == 0   ? "all"
+                : r.clipSigma == 1 ? "1 sigma"
+                : r.clipSigma == 2 ? "2 sigma"
+                                   : "3 sigma",
+                j.value("sigma_mm", 0.0), j.value("form_mm", 0.0));
+  char size[200] = {};
+  if (j.contains("diameter_min_mm"))
+    std::snprintf(size, sizeof size, "\nDiameter %.4g to %.4g mm",
+                  j.value("diameter_min_mm", 0.0),
+                  j.value("diameter_max_mm", 0.0));
+  char extent[200] = {};
+  if (f.kind == mesh::Kind::Cylinder)
+    std::snprintf(extent, sizeof extent, "\n%.4g mm long, %.4g deg of arc",
+                  j.value("length_mm", 0.0), j.value("arc_deg", 0.0));
+  else if (f.kind == mesh::Kind::Sphere)
+    std::snprintf(extent, sizeof extent, "\nA cap of %.4g deg",
+                  j.value("arc_deg", 0.0));
+  else if (f.kind == mesh::Kind::Plane && j.contains("extent_mm"))
+    std::snprintf(extent, sizeof extent, "\n%.4g x %.4g mm",
+                  j["extent_mm"][0].get<double>(),
+                  j["extent_mm"][1].get<double>());
+  return std::string(head) + tail + used + size + extent +
+         (r.chosen ? "\n(auto chose it)" : "");
 }
 
 // The fit at the picked point with the window's kind and tolerance.
@@ -98,7 +139,9 @@ void Recompute(AppState& state) {
   auto& t = state.fitTool;
   t.error.clear();
   t.summary.clear();
+  t.warning.clear();
   t.fittedKind = -1;
+  t.fittedRadius = 0.0;
   if (!OnItsDocument(state) || !t.point)
     return;
   meshfit::Request rq;
@@ -106,6 +149,8 @@ void Recompute(AppState& state) {
   rq.kind = AskedKind(state);
   if (t.ownTolerance)
     rq.toleranceMm = t.toleranceMm;
+  rq.clipSigma = t.clipSigma;
+  rq.hints = HintsOf(state);
   meshfit::Result res;
   std::string why;
   try {
@@ -119,6 +164,12 @@ void Recompute(AppState& state) {
   }
   t.summary = Summary(res);
   t.fittedKind = static_cast<int>(res.region.fit.kind);
+  if (res.region.fit.kind == mesh::Kind::Cylinder ||
+      res.region.fit.kind == mesh::Kind::Sphere)
+    t.fittedRadius = res.region.fit.radius;
+  if (const nlohmann::json j = meshfit::ResultJson(res); j.contains("warnings"))
+    for (const auto& w : j.at("warnings"))
+      t.warning += (t.warning.empty() ? "" : "\n") + w.get<std::string>();
   if (!t.ownTolerance)
     t.toleranceMm = res.toleranceMm; // what it used, shown and editable
   if (res.region.fit.kind == mesh::Kind::Sphere)
@@ -172,6 +223,12 @@ bool AcceptFitTool(AppState& state) {
   ref.kind = static_cast<mesh::Kind>(t.fittedKind); // never auto
   if (t.ownTolerance)
     ref.toleranceMm = t.toleranceMm;
+  // Written only when given, so a datum refits as it was fitted here.
+  if (t.clipSigma != meshfit::kDefaultClipSigma)
+    ref.clipSigma = t.clipSigma;
+  ref.hints = HintsOf(state);
+  if (ref.hints.NotFor(ref.kind) != nullptr)
+    ref.hints = {}; // auto picked a kind the hints were not for
   std::unique_ptr<Feature> datum;
   if (ref.kind == mesh::Kind::Plane) {
     auto dp = std::make_unique<DatumPlaneFeature>("Fitted Plane",
@@ -251,12 +308,70 @@ void DrawFitToolWindow(AppState& state) {
   } else {
     ImGui::TextDisabled("Tolerance: set by the surface's own noise");
   }
+  // The clip and the hints, folded away: most fits need neither.
+  if (ImGui::CollapsingHeader("Hints and clip###fit_hints")) {
+    static constexpr const char* kClips[] = {"All points", "1 sigma", "2 sigma",
+                                             "3 sigma"};
+    int clip = t.clipSigma;
+    LeftLabel("Clip");
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::Combo("##fit_clip", &clip, kClips, 4) && clip != t.clipSigma) {
+      t.clipSigma = clip;
+      Recompute(state);
+    }
+    const bool flat = AskedKind(state) == mesh::Kind::Plane;
+    ImGui::BeginDisabled(flat);
+    static constexpr const char* kSides[] = {"Either", "Inside (a bore)",
+                                             "Outside (a boss)"};
+    int side = t.side;
+    LeftLabel("Side");
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::Combo("##fit_side", &side, kSides, 3) && side != t.side) {
+      t.side = side;
+      Recompute(state);
+    }
+    ImGui::EndDisabled();
+    const bool round = AskedKind(state) != mesh::Kind::Plane &&
+                       AskedKind(state) != mesh::Kind::Cone;
+    ImGui::BeginDisabled(!round);
+    bool on = t.radiusOn;
+    if (ImGui::Checkbox("Radius range###fit_radius_on", &on)) {
+      t.radiusOn = on;
+      // Seeded from the fit it steers, a tenth either side.
+      if (on && t.fittedRadius > 0.0 && !(t.radiusMax > 0.0)) {
+        t.radiusMin = 0.9 * t.fittedRadius;
+        t.radiusMax = 1.1 * t.fittedRadius;
+      }
+      Recompute(state);
+    }
+    if (t.radiusOn) {
+      double lo = t.radiusMin, hi = t.radiusMax;
+      LeftLabel("Radius from (mm)");
+      ImGui::SetNextItemWidth(-1);
+      if (ExprInputDouble(state, "##fit_rmin", &lo, "%.4g") && lo >= 0.0 &&
+          std::isfinite(lo) && lo != t.radiusMin) {
+        t.radiusMin = lo;
+        Recompute(state);
+      }
+      LeftLabel("Radius to (mm)");
+      ImGui::SetNextItemWidth(-1);
+      if (ExprInputDouble(state, "##fit_rmax", &hi, "%.4g") && hi > 0.0 &&
+          std::isfinite(hi) && hi != t.radiusMax) {
+        t.radiusMax = hi;
+        Recompute(state);
+      }
+    }
+    ImGui::EndDisabled();
+  }
   if (state.slotPick.featureId == kFitToolSlot && !state.slotPick.miss.empty())
     ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.3f, 1.0f), "%s",
                        state.slotPick.miss.c_str());
   ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 360.0f);
   if (!t.summary.empty())
     ImGui::TextDisabled("%s", t.summary.c_str());
+  if (!t.warning.empty())
+    ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.3f, 1.0f), "%s",
+                       t.warning.c_str());
   if (!t.error.empty())
     ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "%s", t.error.c_str());
   ImGui::PopTextWrapPos();

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace mesh {
 
@@ -29,8 +30,11 @@ struct Samples {
   std::vector<glm::dvec3> points, centres, normals;
 };
 
-void Gather(const TriMesh& m, const std::vector<uint32_t>& tris,
-            std::vector<uint8_t>& stamp, Samples& out, size_t most) {
+// The distinct vertices of `tris`, ascending. `stamp` (one a vertex) is
+// zero on entry and left so.
+std::vector<uint32_t> VerticesOf(const TriMesh& m,
+                                 const std::vector<uint32_t>& tris,
+                                 std::vector<uint8_t>& stamp) {
   std::vector<uint32_t> verts;
   for (uint32_t t : tris)
     for (uint32_t v : m.triangles[t])
@@ -41,6 +45,22 @@ void Gather(const TriMesh& m, const std::vector<uint32_t>& tris,
   for (uint32_t v : verts)
     stamp[v] = 0;
   std::sort(verts.begin(), verts.end());
+  return verts;
+}
+
+glm::dvec3 Centre(const TriMesh& m, uint32_t t) {
+  return (m.Corner(t, 0) + m.Corner(t, 1) + m.Corner(t, 2)) / 3.0;
+}
+
+glm::dvec3 UnitNormal(const TriMesh& m, uint32_t t) {
+  const glm::dvec3 a = m.AreaNormal(t);
+  const double l = glm::length(a);
+  return l > 0.0 ? a / l : glm::dvec3(0.0);
+}
+
+void Gather(const TriMesh& m, const std::vector<uint32_t>& tris,
+            std::vector<uint8_t>& stamp, Samples& out, size_t most) {
+  const std::vector<uint32_t> verts = VerticesOf(m, tris, stamp);
   out.points.clear();
   out.centres.clear();
   out.normals.clear();
@@ -56,15 +76,74 @@ void Gather(const TriMesh& m, const std::vector<uint32_t>& tris,
     const double l = glm::length(a);
     if (!(l > 0.0))
       continue;
-    out.centres.push_back((m.Corner(t, 0) + m.Corner(t, 1) + m.Corner(t, 2)) /
-                          3.0);
+    out.centres.push_back(Centre(m, t));
     out.normals.push_back(a / l);
   }
 }
 
 FitResult Robust(Kind kind, const Samples& s, double tol,
-                 const glm::dvec3* through) {
-  return FitRobust(kind, s.points, s.centres, s.normals, tol, through);
+                 const glm::dvec3* through, const Admit& admit) {
+  return FitRobust(kind, s.points, s.centres, s.normals, tol, through, admit);
+}
+
+// The middle of `v` (reordered); 0 when it is empty.
+double Median(std::vector<double>& v) {
+  if (v.empty())
+    return 0.0;
+  std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+  return v[v.size() / 2];
+}
+
+// The median edge of the mesh, from a deterministic stride through at most
+// 200,000 of its triangles.
+double MedianEdge(const TriMesh& m) {
+  const size_t n = m.triangles.size();
+  const size_t step = std::max<size_t>(1, n / 200000);
+  std::vector<double> e;
+  e.reserve(3 * (n / step + 1));
+  for (size_t t = 0; t < n; t += step)
+    for (int c = 0; c < 3; c++)
+      e.push_back(glm::length(m.Corner(uint32_t(t), c) -
+                              m.Corner(uint32_t(t), (c + 1) % 3)));
+  return Median(e);
+}
+
+// How far a triangle's normal turns from the fit's at its centre: the
+// cosine, on the seed's `side` (negative when it faces the other way), or
+// 1 for a triangle with no area.
+double TiltCos(const TriMesh& m, const FitResult& f, uint32_t t, double side) {
+  const glm::dvec3 n = UnitNormal(m, t);
+  if (n == glm::dvec3(0.0))
+    return 1.0;
+  return side * glm::dot(n, f.Normal(Centre(m, t)));
+}
+
+// The median tilt (rad) of `tris` from `f`, over at most `most` of them.
+double MedianTilt(const TriMesh& m, const FitResult& f,
+                  const std::vector<uint32_t>& tris, double side, size_t most) {
+  if (tris.empty())
+    return 0.0;
+  const size_t n = tris.size(), take = std::min(n, most);
+  std::vector<double> c;
+  c.reserve(take);
+  for (size_t i = 0; i < take; i++)
+    c.push_back(TiltCos(m, f, tris[take == n ? i : i * n / take], side));
+  // acos falls as the cosine rises: the median cosine's is the median tilt.
+  return std::acos(std::clamp(Median(c), -1.0, 1.0));
+}
+
+// The fewest points a least-squares fit of `kind` takes.
+size_t FewestPoints(Kind k) {
+  switch (k) {
+  case Kind::Plane:
+    return 3;
+  case Kind::Cylinder:
+  case Kind::Sphere:
+    return 5;
+  case Kind::Cone:
+    return 6;
+  }
+  return 6;
 }
 
 constexpr size_t kFitPoints = 65536;
@@ -114,26 +193,271 @@ double ScanTolerance(const TriMesh& m) {
   return std::max(floor, 3.0 * 1.4826 * d[d.size() / 2]);
 }
 
-Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
-                std::string* why) {
+namespace {
+
+Region Failed(Kind kind, std::string* why, std::vector<uint32_t>* covered,
+              std::string msg, const std::vector<uint32_t>* reached = nullptr) {
+  if (why != nullptr)
+    *why = std::move(msg);
+  if (covered != nullptr && reached != nullptr)
+    *covered = *reached;
+  Region failed;
+  failed.fit.kind = kind;
+  return failed;
+}
+
+// The used points of a region fitted by `fit` (step 5 of GrowFrom), what
+// they say, and the refusals: a curved kind on a flat, a fit outside a
+// hint.
+Region Settle(const TriMesh& m, std::vector<uint32_t> region, Kind kind,
+              double tol, FitResult fit, double side,
+              const glm::dvec3& seedCentre, const glm::dvec3& seedNormal,
+              const GrowOptions& opt, std::vector<uint8_t>& stamp,
+              std::string* why, std::vector<uint32_t>* covered) {
   Region r;
   r.fit.kind = kind;
-  const auto fail = [&](std::string msg) {
+  const FitHints& hints = opt.hints;
+  const double precision = 4.0 * m.quantum;
+  // 5. The used points: past clipSigma robust sigma of the fit left out and
+  // the fit made over the rest, until the set stops changing.
+  const std::vector<uint32_t> verts = VerticesOf(m, region, stamp);
+  std::vector<double> d(verts.size());
+  const auto residuals = [&] {
+    for (size_t i = 0; i < verts.size(); i++)
+      d[i] = fit.Distance(m.positions[verts[i]]);
+  };
+  residuals();
+  std::vector<uint8_t> use(verts.size(), 1);
+  if (opt.clipSigma > 0) {
+    std::vector<double> mag(verts.size());
+    std::vector<uint8_t> next(verts.size());
+    for (int round = 0; round < 20; round++) {
+      for (size_t i = 0; i < d.size(); i++)
+        mag[i] = std::abs(d[i]);
+      const double sigma = 1.4826 * Median(mag);
+      const double cut = std::max(double(opt.clipSigma) * sigma, precision);
+      size_t count = 0;
+      for (size_t i = 0; i < d.size(); i++) {
+        next[i] = std::abs(d[i]) <= cut ? 1 : 0;
+        count += next[i];
+      }
+      if (round > 0 && next == use)
+        break;
+      if (count < FewestPoints(kind))
+        break;
+      use = next;
+      const size_t take = std::min(count, kFitPoints);
+      std::vector<glm::dvec3> pts;
+      pts.reserve(take);
+      for (size_t i = 0, k = 0; i < verts.size(); i++)
+        if (use[i]) {
+          // An even stride through the used points.
+          if (k * take / count != (k + 1) * take / count)
+            pts.push_back(m.positions[verts[i]]);
+          k++;
+        }
+      std::vector<glm::dvec3> at, nrm;
+      if (kind == Kind::Cone)
+        for (uint32_t t : region) {
+          const glm::dvec3 c = Centre(m, t), n = UnitNormal(m, t);
+          if (n != glm::dvec3(0.0) && std::abs(fit.Distance(c)) <= cut) {
+            at.push_back(c);
+            nrm.push_back(n);
+          }
+        }
+      FitResult g = FitLeastSquares(kind, fit, pts, at, nrm);
+      if (!g.ok || !(std::abs(g.Distance(seedCentre)) <= tol))
+        break;
+      g.kind = kind;
+      fit = g;
+      residuals();
+    }
+  }
+
+  // What the region and the used points say.
+  double sum = 0.0, worst = 0.0, usedSum = 0.0;
+  double lo = std::numeric_limits<double>::max(), hi = -lo;
+  size_t used = 0;
+  for (size_t i = 0; i < d.size(); i++) {
+    sum += d[i] * d[i];
+    worst = std::max(worst, std::abs(d[i]));
+    if (!use[i])
+      continue;
+    used++;
+    usedSum += d[i] * d[i];
+    lo = std::min(lo, d[i]);
+    hi = std::max(hi, d[i]);
+  }
+  fit.rms = d.empty() ? 0.0 : std::sqrt(sum / double(d.size()));
+  fit.max = worst;
+  fit.inliers = d.size();
+  r.used = used;
+  r.sigma = used == 0 ? 0.0 : std::sqrt(usedSum / double(used));
+  r.residualLo = used == 0 ? 0.0 : lo;
+  r.residualHi = used == 0 ? 0.0 : hi;
+  if (kind != Kind::Plane) {
+    std::vector<glm::dvec3> pts;
+    pts.reserve(verts.size());
+    for (uint32_t v : verts)
+      pts.push_back(m.positions[v]);
+    const FitResult flat = FitPlane(pts);
+    if (!flat.ok || flat.max <= tol)
+      return Failed(kind, why, covered,
+                    std::string("the surface at the point is flat to ") +
+                        Mm(tol) + " mm over the " +
+                        std::to_string(region.size()) +
+                        (region.size() == 1 ? " triangle" : " triangles") +
+                        " round it, so no " + KindName(kind) +
+                        " is defined by it: fit a plane, or, if it is curved "
+                        "and only rougher than that, a larger tolerance_mm",
+                    &region);
+  } else if (side < 0.0) {
+    fit.axis = -fit.axis; // the way the triangles face
+  }
+  if (const std::string miss = hints.Miss(fit, seedCentre, seedNormal);
+      !miss.empty())
+    return Failed(kind, why, covered, miss, &region);
+
+  // The extent of the used points: a cylinder's length and arc, a
+  // sphere's cap, a plane's two spans.
+  const auto usedPoint = [&](size_t i) { return m.positions[verts[i]]; };
+  if (kind == Kind::Cylinder) {
+    glm::dvec3 e1 = glm::normalize(
+        glm::cross(fit.axis, std::abs(fit.axis.x) < 0.6 ? glm::dvec3(1, 0, 0)
+                                                        : glm::dvec3(0, 1, 0)));
+    const glm::dvec3 e2 = glm::cross(fit.axis, e1);
+    constexpr int kBins = 3600; // a tenth of a degree
+    std::vector<uint8_t> bins(kBins, 0);
+    double a0 = std::numeric_limits<double>::max(), a1 = -a0;
+    for (size_t i = 0; i < verts.size(); i++) {
+      if (!use[i])
+        continue;
+      const glm::dvec3 w = usedPoint(i) - fit.origin;
+      const double h = glm::dot(w, fit.axis);
+      a0 = std::min(a0, h);
+      a1 = std::max(a1, h);
+      const double th = std::atan2(glm::dot(w, e2), glm::dot(w, e1)) + M_PI;
+      bins[std::min(kBins - 1, int(th / (2.0 * M_PI) * kBins))] = 1;
+    }
+    r.length = used == 0 ? 0.0 : a1 - a0;
+    // The arc is the turn less its largest empty run of bins, round the
+    // wrap.
+    int gap = 0, run = 0, filled = 0;
+    for (int i = 0; i < 2 * kBins; i++) {
+      if (bins[i % kBins]) {
+        run = 0;
+        filled += i < kBins ? 1 : 0;
+      } else {
+        gap = std::max(gap, std::min(++run, kBins));
+      }
+    }
+    r.arc = filled == 0 ? 0.0 : 2.0 * M_PI * double(kBins - gap) / kBins;
+  } else if (kind == Kind::Sphere) {
+    glm::dvec3 mean(0.0);
+    for (size_t i = 0; i < verts.size(); i++)
+      if (use[i])
+        mean += glm::normalize(usedPoint(i) - fit.origin);
+    double widest = M_PI;
+    if (glm::length(mean) > 1e-9 * double(std::max<size_t>(used, 1))) {
+      mean = glm::normalize(mean);
+      widest = 0.0;
+      for (size_t i = 0; i < verts.size(); i++)
+        if (use[i])
+          widest = std::max(
+              widest,
+              std::acos(std::clamp(
+                  glm::dot(glm::normalize(usedPoint(i) - fit.origin), mean),
+                  -1.0, 1.0)));
+    }
+    r.arc = 2.0 * widest;
+  } else if (kind == Kind::Plane) {
+    glm::dvec3 e1 = glm::normalize(
+        glm::cross(fit.axis, std::abs(fit.axis.x) < 0.6 ? glm::dvec3(1, 0, 0)
+                                                        : glm::dvec3(0, 1, 0)));
+    const glm::dvec3 e2 = glm::cross(fit.axis, e1);
+    glm::dvec2 c(0.0);
+    for (size_t i = 0; i < verts.size(); i++)
+      if (use[i]) {
+        const glm::dvec3 w = usedPoint(i) - fit.origin;
+        c += glm::dvec2(glm::dot(w, e1), glm::dot(w, e2));
+      }
+    c /= double(std::max<size_t>(used, 1));
+    double sxx = 0.0, sxy = 0.0, syy = 0.0;
+    for (size_t i = 0; i < verts.size(); i++)
+      if (use[i]) {
+        const glm::dvec3 w = usedPoint(i) - fit.origin;
+        const glm::dvec2 q = glm::dvec2(glm::dot(w, e1), glm::dot(w, e2)) - c;
+        sxx += q.x * q.x;
+        sxy += q.x * q.y;
+        syy += q.y * q.y;
+      }
+    // The principal direction of the in-plane scatter.
+    const double th = 0.5 * std::atan2(2.0 * sxy, sxx - syy);
+    const glm::dvec2 u(std::cos(th), std::sin(th)), v(-u.y, u.x);
+    glm::dvec2 lo2(std::numeric_limits<double>::max()), hi2(-lo2);
+    for (size_t i = 0; i < verts.size(); i++)
+      if (use[i]) {
+        const glm::dvec3 w = usedPoint(i) - fit.origin;
+        const glm::dvec2 q(glm::dot(w, e1), glm::dot(w, e2));
+        const glm::dvec2 s(glm::dot(q, u), glm::dot(q, v));
+        lo2 = glm::min(lo2, s);
+        hi2 = glm::max(hi2, s);
+      }
+    const glm::dvec2 span = used == 0 ? glm::dvec2(0.0) : hi2 - lo2;
+    r.extent = {std::max(span.x, span.y), std::min(span.x, span.y)};
+  }
+
+  std::sort(region.begin(), region.end());
+  r.fit = fit;
+  r.firstTriangle = region.front();
+  for (uint32_t t : region)
+    r.area += m.Area(t);
+  r.triangles = std::move(region);
+  return r;
+}
+
+} // namespace
+
+Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
+                std::string* why, const GrowOptions& opt,
+                std::vector<uint32_t>* covered) {
+  Region r;
+  r.fit.kind = kind;
+  if (covered != nullptr)
+    covered->clear();
+  const auto fail = [&](std::string msg,
+                        const std::vector<uint32_t>* reached = nullptr) {
     if (why != nullptr)
       *why = std::move(msg);
+    if (covered != nullptr && reached != nullptr)
+      *covered = *reached;
     Region failed;
     failed.fit.kind = kind;
     return failed;
   };
+  const FitHints& hints = opt.hints;
   if (seed >= m.triangles.size() || m.neighbour.size() != m.triangles.size())
     return fail("the point is on no triangle of the mesh");
   if (!(tol > 0.0) || !std::isfinite(tol))
     return fail("the tolerance is not a number of mm greater than 0");
+  if (opt.clipSigma < 0 || opt.clipSigma > 3)
+    return fail("clip_sigma is 1, 2, 3 or \"all\"");
+  if (const char* h = hints.NotFor(kind))
+    return fail(std::string(h) + " does not apply to a " + KindName(kind));
   if (!(m.Area(seed) > 0.0))
     return fail("the triangle at the point has no area");
   std::vector<uint8_t> stamp(m.positions.size(), 0);
   std::vector<uint8_t> in(m.triangles.size(), 0);
   Samples smp;
+  const bool boxed = hints.withinLo && hints.withinHi;
+  const auto inBox = [&](uint32_t t) {
+    if (!boxed)
+      return true;
+    for (uint32_t v : m.triangles[t])
+      if (!hints.Inside(m.positions[v]))
+        return false;
+    return true;
+  };
 
   // 1. The seed disk.
   std::vector<uint32_t> disk{seed}, frontier{seed};
@@ -144,7 +468,7 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
     for (uint32_t t : frontier)
       for (int e = 0; e < 3; e++) {
         const uint32_t u = m.neighbour[t][e];
-        if (u != kNone && !in[u]) {
+        if (u != kNone && !in[u] && inBox(u)) {
           in[u] = 1;
           next.push_back(u);
         }
@@ -164,86 +488,197 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
   for (uint32_t t : disk)
     in[t] = 0;
   Gather(m, disk, stamp, smp, kFitPoints);
-  // The surface the seed is on: through its centre.
-  const glm::dvec3 seedCentre =
-      (m.Corner(seed, 0) + m.Corner(seed, 1) + m.Corner(seed, 2)) / 3.0;
-  FitResult fit = Robust(kind, smp, tol, &seedCentre);
+  // The surface the seed is on: through its centre, and (a hint's) not
+  // drawn outside a hint.
+  const glm::dvec3 seedCentre = Centre(m, seed);
+  const glm::dvec3 seedNormal = UnitNormal(m, seed);
+  Admit admit;
+  if (hints.outside || hints.radiusMin || hints.radiusMax || hints.axis)
+    admit = [&](const FitResult& f) {
+      return hints.Miss(f, seedCentre, seedNormal).empty();
+    };
+  FitResult fit = Robust(kind, smp, tol, &seedCentre, admit);
   if (!fit.ok)
     return fail(std::string("no ") + KindName(kind) +
+                (admit ? " meeting " + hints.Describe() : std::string()) +
                 " fits the surface round the point to " + Mm(tol) + " mm");
 
-  // 3. Growth under the fit; 4. once more against the final one.
+  // 2. The normal band: the scan's own tilt, from the disk under its fit.
   const double side =
       glm::dot(m.AreaNormal(seed), fit.Normal(seedCentre)) < 0.0 ? -1.0 : 1.0;
+  const double edge = MedianEdge(m);
+  const double floorTilt = edge > 0.0 ? std::atan(tol / edge) : 0.0;
+  const double band = std::min(
+      M_PI / 2.0,
+      std::max(3.0 * 1.4826 * MedianTilt(m, fit, disk, side, disk.size()),
+               floorTilt));
+  const double cosBand = std::cos(band);
+  // A triangle so thin that the file's precision cannot fix its normal to
+  // the band is judged by what that precision allows its least height.
+  const double precision = 4.0 * m.quantum;
   const auto takes = [&](const FitResult& f, uint32_t t) {
     for (uint32_t v : m.triangles[t])
       if (!(std::abs(f.Distance(m.positions[v])) <= tol))
         return false;
-    const glm::dvec3 c =
-        (m.Corner(t, 0) + m.Corner(t, 1) + m.Corner(t, 2)) / 3.0;
-    return side * glm::dot(m.AreaNormal(t), f.Normal(c)) > 0.0;
+    if (!inBox(t))
+      return false;
+    const glm::dvec3 an = m.AreaNormal(t);
+    const double l = glm::length(an);
+    if (!(l > 0.0))
+      return false;
+    const double c = side * glm::dot(an / l, f.Normal(Centre(m, t)));
+    if (!(c > 0.0))
+      return false; // facing the other way
+    if (c >= cosBand)
+      return true;
+    double e3[3];
+    for (int e = 0; e < 3; e++)
+      e3[e] = glm::length(m.Corner(t, e) - m.Corner(t, (e + 1) % 3));
+    std::sort(e3, e3 + 3);
+    if (!(precision > 0.0))
+      return false;
+    const double allow = std::atan(precision / (l / e3[2]));
+    return allow > band && c >= std::cos(std::min(M_PI / 2.0, allow));
   };
-  const auto grow = [&](FitResult& f, bool refit) {
+
+  // 3. Regrown from the seed under each new fit, each regrowth capped at
+  // three times the one before, until two in a row stop short of the cap.
+  const auto grow = [&](const FitResult& f, size_t cap) {
     std::vector<uint32_t> region{seed};
     in[seed] = 1;
-    size_t nextFit = std::max<size_t>(2 * disk.size(), 16);
-    for (size_t i = 0; i < region.size(); i++) {
+    for (size_t i = 0; i < region.size() && region.size() < cap; i++) {
       const uint32_t t = region[i];
-      for (int e = 0; e < 3; e++) {
+      for (int e = 0; e < 3 && region.size() < cap; e++) {
         const uint32_t u = m.neighbour[t][e];
         if (u == kNone || in[u] || !takes(f, u))
           continue;
         in[u] = 1;
         region.push_back(u);
       }
-      if (refit && region.size() >= nextFit) {
-        nextFit *= 2;
-        Gather(m, region, stamp, smp, kFitPoints);
-        const FitResult g = Robust(kind, smp, tol, &seedCentre);
-        if (g.ok)
-          f = g;
-      }
     }
     for (uint32_t t : region)
       in[t] = 0;
     return region;
   };
-  (void)grow(fit, /*refit=*/true);
-  std::vector<uint32_t> region = grow(fit, /*refit=*/false);
-  Gather(m, region, stamp, smp, kFitPoints);
-  if (const FitResult g = Robust(kind, smp, tol, &seedCentre); g.ok)
-    fit = g;
-  // rms and max over every vertex of the region.
-  Gather(m, region, stamp, smp, m.positions.size());
-  const std::vector<glm::dvec3>& pts = smp.points;
-  double sum = 0.0, worst = 0.0;
-  for (const glm::dvec3& p : pts) {
-    const double d = std::abs(fit.Distance(p));
-    sum += d * d;
-    worst = std::max(worst, d);
+  std::vector<uint32_t> region;
+  size_t prev = std::max<size_t>(disk.size(), 4);
+  bool wasShort = false;
+  for (int round = 0; round < 64; round++) {
+    const size_t cap = 3 * prev;
+    region = grow(fit, cap);
+    const bool capped = region.size() >= cap;
+    Gather(m, region, stamp, smp, kFitPoints);
+    if (const FitResult g = Robust(kind, smp, tol, &seedCentre, admit); g.ok)
+      fit = g;
+    if (!capped && wasShort)
+      break;
+    wasShort = !capped;
+    prev = region.size();
   }
-  fit.rms = pts.empty() ? 0.0 : std::sqrt(sum / double(pts.size()));
-  fit.max = worst;
-  fit.inliers = pts.size();
-  if (kind != Kind::Plane) {
-    const FitResult flat = FitPlane(pts);
-    if (!flat.ok || flat.max <= tol)
-      return fail(std::string("the surface at the point is flat to ") +
-                  Mm(tol) + " mm over the " + std::to_string(region.size()) +
-                  (region.size() == 1 ? " triangle" : " triangles") +
-                  " round it, so no " + KindName(kind) +
-                  " is defined by it: fit a plane, or, if it is curved and "
-                  "only rougher than that, a larger tolerance_mm");
-  } else if (side < 0.0) {
-    fit.axis = -fit.axis; // the way the triangles face
+
+  // 4. The rim peeled, ring by ring, while it leans off the fit more than
+  // the region does.
+  {
+    const double own = MedianTilt(m, fit, region, side, 200000);
+    // Never below what the file's precision tilts a triangle of the median
+    // edge by: a clean export's flats lean off their fit by nothing, and
+    // twice nothing is not a rim.
+    const double limit =
+        std::max(2.0 * own, edge > 0.0 ? std::atan(precision / edge) : 0.0);
+    double area = 0.0;
+    for (uint32_t t : region) {
+      in[t] = 1;
+      area += m.Area(t);
+    }
+    const double least = 0.5 * area;
+    std::vector<uint32_t> ring;
+    for (uint32_t t : region)
+      for (int e = 0; e < 3; e++) {
+        const uint32_t u = m.neighbour[t][e];
+        if (u == kNone || !in[u]) {
+          ring.push_back(t);
+          break;
+        }
+      }
+    std::vector<uint8_t> next(m.triangles.size(), 0);
+    bool peeled = false;
+    while (!ring.empty()) {
+      if (!(MedianTilt(m, fit, ring, side, ring.size()) > limit))
+        break;
+      double ringArea = 0.0;
+      for (uint32_t t : ring)
+        ringArea += m.Area(t);
+      if (area - ringArea < least)
+        break;
+      for (uint32_t t : ring)
+        in[t] = 0;
+      area -= ringArea;
+      peeled = true;
+      std::vector<uint32_t> inner;
+      for (uint32_t t : ring)
+        for (int e = 0; e < 3; e++) {
+          const uint32_t u = m.neighbour[t][e];
+          if (u != kNone && in[u] && !next[u]) {
+            next[u] = 1;
+            inner.push_back(u);
+          }
+        }
+      for (uint32_t u : inner)
+        next[u] = 0;
+      ring = std::move(inner);
+    }
+    if (peeled) {
+      std::vector<uint32_t> kept;
+      for (uint32_t t : region)
+        if (in[t])
+          kept.push_back(t);
+      region = std::move(kept);
+      Gather(m, region, stamp, smp, kFitPoints);
+      if (const FitResult g = Robust(kind, smp, tol, &seedCentre, admit); g.ok)
+        fit = g;
+    }
+    for (uint32_t t : region)
+      in[t] = 0;
   }
-  std::sort(region.begin(), region.end());
-  r.fit = fit;
-  r.firstTriangle = region.front();
-  for (uint32_t t : region)
-    r.area += m.Area(t);
-  r.triangles = std::move(region);
-  return r;
+
+  return Settle(m, std::move(region), kind, tol, fit, side, seedCentre,
+                seedNormal, opt, stamp, why, covered);
+}
+
+Region FitTriangles(const TriMesh& m, std::vector<uint32_t> triangles,
+                    uint32_t seed, Kind kind, double tol, std::string* why,
+                    const GrowOptions& opt) {
+  if (seed >= m.triangles.size() || triangles.empty())
+    return Failed(kind, why, nullptr, "no triangles to fit");
+  for (uint32_t t : triangles)
+    if (t >= m.triangles.size())
+      return Failed(kind, why, nullptr, "a triangle is not in the mesh");
+  if (!(tol > 0.0) || !std::isfinite(tol))
+    return Failed(kind, why, nullptr,
+                  "the tolerance is not a number of mm greater than 0");
+  if (const char* h = opt.hints.NotFor(kind))
+    return Failed(kind, why, nullptr,
+                  std::string(h) + " does not apply to a " + KindName(kind));
+  std::vector<uint8_t> stamp(m.positions.size(), 0);
+  Samples smp;
+  Gather(m, triangles, stamp, smp, kFitPoints);
+  const glm::dvec3 seedCentre = Centre(m, seed);
+  const glm::dvec3 seedNormal = UnitNormal(m, seed);
+  const FitHints& hints = opt.hints;
+  Admit admit;
+  if (hints.outside || hints.radiusMin || hints.radiusMax || hints.axis)
+    admit = [&](const FitResult& f) {
+      return hints.Miss(f, seedCentre, seedNormal).empty();
+    };
+  const FitResult fit = Robust(kind, smp, tol, &seedCentre, admit);
+  if (!fit.ok)
+    return Failed(kind, why, nullptr,
+                  std::string("no ") + KindName(kind) +
+                      " fits the triangles to " + Mm(tol) + " mm");
+  const double side =
+      glm::dot(m.AreaNormal(seed), fit.Normal(seedCentre)) < 0.0 ? -1.0 : 1.0;
+  return Settle(m, std::move(triangles), kind, tol, fit, side, seedCentre,
+                seedNormal, opt, stamp, why, nullptr);
 }
 
 } // namespace mesh

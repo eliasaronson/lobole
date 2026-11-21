@@ -82,6 +82,49 @@ struct Post {
 };
 Post ScannedPost(size_t triangles, double noise = 0.05, double lump = 1.5);
 
+// A scanned block with every edge rounded, for a fit that must stop at the
+// edge: half sizes `half`, each edge a round of `round`, every vertex moved
+// along the true normal by a deterministic noise of at most `noise`, turned
+// off the axes and moved off the origin. Closed, a grid of about `spacing`.
+struct Block {
+  Organic organic;
+  glm::dmat3 turn{1.0};
+  glm::dvec3 centre{0.0};
+  glm::dvec3 half{15.0, 12.0, 5.0};
+  double round = 0.5, noise = 0.0;
+  [[nodiscard]] glm::dvec3 ToWorld(const glm::dvec3& local) const;
+  // The outward unit normal of the face on `axis` (0-2) at `sign` (+-1).
+  [[nodiscard]] glm::dvec3 FaceNormal(int axis, int sign) const;
+  glm::dvec3 nearEdge{0.0}; // on the +Z face, 2 mm in from its +Y edge
+};
+Block ScannedBlock(double spacing = 0.25, double noise = 0.05,
+                   double round = 0.5);
+
+// A scanned cup, for steering a fit by its side: an outer wall of radius
+// 15, an inner one of 13.8, 30 tall with a 3 mm floor, the rim a flat
+// between them; tilted off Z and moved off the origin, every vertex moved
+// along the normal by a noise of at most `noise`. Closed.
+struct Cup {
+  Organic organic;
+  glm::dvec3 base{0.0}, axis{0.0, 0.0, 1.0};
+  double outerRadius = 15.0, innerRadius = 13.8, height = 30.0, floor = 3.0;
+  double noise = 0.0;
+  glm::dvec3 onRim{0.0}; // half way across the rim
+};
+Cup ScannedCup(size_t triangles, double noise = 0.05);
+
+// An open patch of a cylinder's side: `arcDeg` of its arc and `length`
+// along it, a grid of about `spacing`, facing out of the cylinder or (a
+// bore) into it, tilted off the axes; noise radial, at most `noise`.
+struct Arc {
+  Organic organic;
+  glm::dvec3 base{0.0}, axis{0.0, 0.0, 1.0};
+  double radius = 0.0, arcDeg = 0.0, noise = 0.0;
+  glm::dvec3 onSurface{0.0}; // the middle of the patch
+};
+Arc ScannedArc(double radius, double arcDeg, double length, double spacing,
+               double noise, bool bore = false);
+
 // A triangle soup with what a bad file has, and how many of each.
 struct DirtySoup {
   std::vector<glm::dvec3> soup; // three points a triangle

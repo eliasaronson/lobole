@@ -498,6 +498,234 @@ Post ScannedPost(size_t triangles, double noise, double lump) {
   return post;
 }
 
+// ------------------------------------------------- fixtures for fitting --
+
+namespace {
+
+// A turn of `angle` rad about unit `axis` (Rodrigues).
+glm::dmat3 Turn(const glm::dvec3& axis, double angle) {
+  const glm::dvec3 k = glm::normalize(axis);
+  const glm::dmat3 K(0.0, k.z, -k.y, -k.z, 0.0, k.x, k.y, -k.x, 0.0);
+  return glm::dmat3(1.0) + std::sin(angle) * K +
+         (1.0 - std::cos(angle)) * (K * K);
+}
+
+// A revolved profile, (r, z) samples with their (radial, axial) unit
+// normals, from a pole to a pole: triangulated round `axis` from `base` at
+// edge length about `e`, each vertex moved along its normal by a noise of
+// at most `noise`. Closed and wound outward.
+struct ProfileSample {
+  double r, z;
+  glm::dvec2 n;
+};
+
+mesh::TriMesh Revolve(const std::vector<ProfileSample>& prof,
+                      const glm::dvec3& base, const glm::dvec3& axis,
+                      int nTheta, double noise, uint64_t key) {
+  const glm::dvec3 ex = glm::normalize(glm::cross(glm::dvec3(0, 1, 0), axis));
+  const glm::dvec3 ey = glm::cross(axis, ex);
+  mesh::TriMesh m;
+  std::vector<std::vector<uint32_t>> ring(prof.size());
+  for (size_t i = 0; i < prof.size(); i++) {
+    const ProfileSample& s = prof[i];
+    const int count = s.r < 1e-12 ? 1 : nTheta;
+    for (int j = 0; j < count; j++) {
+      const double th = 2.0 * kPi * j / nTheta;
+      const glm::dvec3 radial = ex * std::cos(th) + ey * std::sin(th);
+      const glm::dvec3 n = radial * s.n.x + axis * s.n.y;
+      ring[i].push_back(uint32_t(m.positions.size()));
+      m.positions.push_back(base + radial * s.r + axis * s.z +
+                            n * (noise * Noise(key++)));
+    }
+  }
+  for (size_t i = 0; i + 1 < prof.size(); i++) {
+    const auto& a = ring[i];
+    const auto& b = ring[i + 1];
+    for (int j = 0; j < nTheta; j++) {
+      const size_t k = size_t((j + 1) % nTheta);
+      if (a.size() == 1)
+        m.triangles.push_back({a[0], b[size_t(j)], b[k]});
+      else if (b.size() == 1)
+        m.triangles.push_back({a[size_t(j)], b[0], a[k]});
+      else {
+        m.triangles.push_back({a[size_t(j)], b[size_t(j)], b[k]});
+        m.triangles.push_back({a[size_t(j)], b[k], a[k]});
+      }
+    }
+  }
+  mesh::BuildAdjacency(m);
+  if (m.Volume() < 0.0) {
+    for (auto& t : m.triangles)
+      std::swap(t[1], t[2]);
+    mesh::BuildAdjacency(m);
+  }
+  m.quantum = mesh::Float32Quantum(m.positions);
+  return m;
+}
+
+// Samples along a straight profile segment from a to b at about `e`, the
+// end left for the next segment unless `last`.
+void Segment(std::vector<ProfileSample>& prof, glm::dvec2 a, glm::dvec2 b,
+             glm::dvec2 n, double e, bool last) {
+  const int k = std::max(1, int(std::lround(glm::length(b - a) / e)));
+  for (int i = 0; i < k + (last ? 1 : 0); i++) {
+    const glm::dvec2 q = a + (b - a) * (double(i) / k);
+    prof.push_back({q.x, q.y, n});
+  }
+}
+
+} // namespace
+
+glm::dvec3 Block::ToWorld(const glm::dvec3& local) const {
+  return centre + turn * local;
+}
+
+glm::dvec3 Block::FaceNormal(int axis, int sign) const {
+  glm::dvec3 n(0.0);
+  n[axis] = double(sign);
+  return turn * n;
+}
+
+Block ScannedBlock(double spacing, double noise, double round) {
+  Block b;
+  b.noise = noise;
+  b.round = round;
+  b.turn = Turn({0.4, -0.7, 0.3}, 0.61);
+  b.centre = {7.0, -4.0, 3.0};
+  const glm::dvec3 A = b.half;
+  int n[3];
+  for (int i = 0; i < 3; i++)
+    n[i] = std::max(2, int(std::lround(2.0 * A[i] / spacing)));
+  const glm::dvec3 inner = A - glm::dvec3(round);
+  mesh::TriMesh m;
+  std::unordered_map<uint64_t, uint32_t> index;
+  uint64_t key = 0xb10c;
+  const auto vertex = [&](int i, int j, int k) {
+    const uint64_t id = (uint64_t(i) * (n[1] + 1) + j) * (n[2] + 1) + k;
+    auto [it, fresh] = index.try_emplace(id, uint32_t(m.positions.size()));
+    if (fresh) {
+      const glm::dvec3 p(-A.x + 2.0 * A.x * i / n[0],
+                         -A.y + 2.0 * A.y * j / n[1],
+                         -A.z + 2.0 * A.z * k / n[2]);
+      // The rounded box is the inner box grown by `round`: a point of the
+      // box's surface goes to the inner box's nearest point, out along the
+      // way to it by the round.
+      const glm::dvec3 q = glm::clamp(p, -inner, inner);
+      const glm::dvec3 dir = glm::normalize(p - q);
+      const glm::dvec3 local = q + dir * (round + noise * Noise(key++));
+      m.positions.push_back(b.ToWorld(local));
+    }
+    return it->second;
+  };
+  for (int axis = 0; axis < 3; axis++)
+    for (int side : {0, 1}) {
+      const int u = (axis + 1) % 3, v = (axis + 2) % 3;
+      for (int i = 0; i < n[u]; i++)
+        for (int j = 0; j < n[v]; j++) {
+          const auto at = [&](int di, int dj) {
+            int c[3];
+            c[axis] = side * n[axis];
+            c[u] = i + di;
+            c[v] = j + dj;
+            return vertex(c[0], c[1], c[2]);
+          };
+          const uint32_t p00 = at(0, 0), p10 = at(1, 0), p11 = at(1, 1),
+                         p01 = at(0, 1);
+          // u x v is +axis: wound outward on the + side.
+          if (side == 1) {
+            m.triangles.push_back({p00, p10, p11});
+            m.triangles.push_back({p00, p11, p01});
+          } else {
+            m.triangles.push_back({p00, p11, p10});
+            m.triangles.push_back({p00, p01, p11});
+          }
+        }
+    }
+  mesh::BuildAdjacency(m);
+  m.quantum = mesh::Float32Quantum(m.positions);
+  // On the +Z face, 2 mm in from its +Y edge.
+  b.nearEdge = b.ToWorld({0.3 * A.x, A.y - 2.0, A.z});
+  Organic& o = b.organic;
+  o.name = "block";
+  m.Bounds(o.lo, o.hi);
+  o.mesh = std::move(m);
+  return b;
+}
+
+Cup ScannedCup(size_t triangles, double noise) {
+  Cup c;
+  c.noise = noise;
+  c.axis = glm::normalize(glm::dvec3(-0.25, 0.35, 1.0));
+  c.base = {-6.0, 4.0, 1.0};
+  const double R = c.outerRadius, Ri = c.innerRadius, H = c.height, F = c.floor;
+  const double length = R + H + (R - Ri) + (H - F) + Ri;
+  const double e = std::sqrt(2.0 * 2.0 * kPi * R * length /
+                             double(std::max<size_t>(triangles, 200)));
+  const int nTheta = std::max(12, int(std::lround(2.0 * kPi * R / e)));
+  std::vector<ProfileSample> prof;
+  Segment(prof, {0, 0}, {R, 0}, {0, -1}, e, false);
+  Segment(prof, {R, 0}, {R, H}, {1, 0}, e, false);
+  Segment(prof, {R, H}, {Ri, H}, {0, 1}, e / 4.0, false);
+  Segment(prof, {Ri, H}, {Ri, F}, {-1, 0}, e, false);
+  Segment(prof, {Ri, F}, {0, F}, {0, 1}, e, true);
+  Organic& o = c.organic;
+  o.name = "cup";
+  o.mesh = Revolve(prof, c.base, c.axis, nTheta, noise, 0xc0ffee);
+  o.mesh.Bounds(o.lo, o.hi);
+  const glm::dvec3 ex = glm::normalize(glm::cross(glm::dvec3(0, 1, 0), c.axis));
+  c.onRim = c.base + c.axis * H + ex * (0.5 * (R + Ri));
+  return c;
+}
+
+Arc ScannedArc(double radius, double arcDeg, double length, double spacing,
+               double noise, bool bore) {
+  Arc a;
+  a.radius = radius;
+  a.arcDeg = arcDeg;
+  a.noise = noise;
+  a.axis = glm::normalize(glm::dvec3(0.2, 1.0, -0.35));
+  a.base = {3.0, -2.0, 5.0};
+  const glm::dvec3 ex = glm::normalize(glm::cross(glm::dvec3(0, 0, 1), a.axis));
+  const glm::dvec3 ey = glm::cross(a.axis, ex);
+  const double span = arcDeg * kPi / 180.0;
+  const int nu = std::max(2, int(std::lround(radius * span / spacing)));
+  const int nv = std::max(2, int(std::lround(length / spacing)));
+  mesh::TriMesh m;
+  uint64_t key = 0xa4c;
+  for (int j = 0; j <= nv; j++)
+    for (int i = 0; i <= nu; i++) {
+      const double th = -0.5 * span + span * i / nu;
+      const glm::dvec3 radial = ex * std::cos(th) + ey * std::sin(th);
+      m.positions.push_back(a.base + a.axis * (length * j / nv) +
+                            radial * (radius + noise * Noise(key++)));
+    }
+  const auto id = [&](int i, int j) { return uint32_t(j * (nu + 1) + i); };
+  for (int j = 0; j < nv; j++)
+    for (int i = 0; i < nu; i++) {
+      // Facing out of the cylinder, or into it for a bore.
+      std::array<uint32_t, 3> t0{id(i, j), id(i + 1, j), id(i + 1, j + 1)};
+      std::array<uint32_t, 3> t1{id(i, j), id(i + 1, j + 1), id(i, j + 1)};
+      for (auto t : {t0, t1}) {
+        const glm::dvec3 p0 = m.positions[t[0]], p1 = m.positions[t[1]],
+                         p2 = m.positions[t[2]];
+        const glm::dvec3 c = (p0 + p1 + p2) / 3.0 - a.base;
+        const glm::dvec3 out = c - glm::dot(c, a.axis) * a.axis;
+        const bool outward = glm::dot(glm::cross(p1 - p0, p2 - p0), out) > 0.0;
+        if (outward == bore)
+          std::swap(t[1], t[2]);
+        m.triangles.push_back(t);
+      }
+    }
+  mesh::BuildAdjacency(m);
+  m.quantum = mesh::Float32Quantum(m.positions);
+  a.onSurface = a.base + a.axis * (0.5 * length) + ex * radius;
+  Organic& o = a.organic;
+  o.name = "arc";
+  m.Bounds(o.lo, o.hi);
+  o.mesh = std::move(m);
+  return a;
+}
+
 Organic Torus(size_t triangles) {
   const double R = 30.0, r = 10.0;
   const int nv = std::max(3, int(std::lround(std::sqrt(triangles / 6.0))));

@@ -48,6 +48,7 @@
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
 #include "ui/ViewportHandle.h"
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -2677,6 +2678,124 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK(!s_App->fitTool.open);
     IM_CHECK_EQ(Doc()->FeatureCount(), features);
+    std::filesystem::remove(stl);
+  };
+
+  // The Fit tool's hints (docs/modeling/README.md#hints): a thin-walled cup
+  // read as a mesh body, clicked on its rim between the walls. Cylinder
+  // with the folded Side hint at Inside fits the bore, at Outside the
+  // outside wall, the window says what the used points read, and Accept
+  // keeps the hint in the datum's fit.
+  t = IM_REGISTER_TEST(engine, "fit", "a_side_hint_picks_a_cups_wall");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto stl =
+        std::filesystem::temp_directory_path() /
+        ("lobole_gui_fit_cup_" + std::to_string(proc::CurrentPid()) + ".stl");
+    const float outer = 15.0f, inner = 13.8f, height = 30.0f, floorZ = 3.0f;
+    {
+      // The profile (r, z) from the bottom's centre round to the floor's.
+      const std::vector<glm::vec2> prof{
+          {0.0f, 0.0f},    {outer, 0.0f},   {outer, 10.0f}, {outer, 20.0f},
+          {outer, height}, {inner, height}, {inner, 20.0f}, {inner, 10.0f},
+          {inner, floorZ}, {0.0f, floorZ}};
+      const int n = 96;
+      const auto at = [&](size_t i, int j) {
+        const float th = 6.2831853f * float(j % n) / float(n);
+        return glm::vec3(prof[i].x * std::cos(th), prof[i].x * std::sin(th),
+                         prof[i].y);
+      };
+      std::vector<std::array<glm::vec3, 3>> tris;
+      for (size_t i = 0; i + 1 < prof.size(); i++)
+        for (int j = 0; j < n; j++) {
+          const glm::vec3 a = at(i, j), b = at(i, j + 1), c = at(i + 1, j + 1),
+                          d = at(i + 1, j);
+          if (prof[i].x > 0.0f)
+            tris.push_back({a, b, c});
+          if (prof[i + 1].x > 0.0f)
+            tris.push_back({a, c, d});
+        }
+      // Wound outward: the profile runs round the solid's section, so one
+      // sense for all; turned if the volume comes out negative.
+      double vol = 0.0;
+      for (const auto& tr : tris)
+        vol += glm::dot(glm::dvec3(tr[0]),
+                        glm::cross(glm::dvec3(tr[1]), glm::dvec3(tr[2])));
+      std::ofstream out(stl, std::ios::binary);
+      const char header[80] = {};
+      out.write(header, 80);
+      const uint32_t count = uint32_t(tris.size());
+      out.write(reinterpret_cast<const char*>(&count), 4);
+      for (auto tr : tris) {
+        if (vol < 0.0)
+          std::swap(tr[1], tr[2]);
+        const float nrm[3] = {0, 0, 0};
+        out.write(reinterpret_cast<const char*>(nrm), 12);
+        for (const glm::vec3& p : tr)
+          out.write(reinterpret_cast<const char*>(&p), 12);
+        const char attr[2] = {};
+        out.write(attr, 2);
+      }
+    }
+    auto imp = std::make_unique<ImportFeature>("cup", stl.string());
+    imp->upAxis = interchange::UpAxis::None;
+    imp->representation = mesh::Representation::Mesh;
+    imp->keepOrigin = true;
+    Doc()->AddFeature(std::move(imp));
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), size_t{1});
+    const size_t features = Doc()->FeatureCount();
+
+    ToolbarClick(ctx, "###tb_fit_primitive");
+    ctx->Yield();
+    IM_CHECK(s_App->fitTool.open);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("##fit_kind/Cylinder");
+    ctx->SetRef("//##MainMenuBar");
+    const glm::vec3 rim(0.5f * (outer + inner), 0.0f, height);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(rim);
+    s_App->camera->SetUp(glm::vec3(1.0f, 0.0f, 0.0f));
+    s_App->camera->SetPosition(rim + glm::vec3(0.0f, 0.0f, 60.0f));
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(rim));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK(s_App->fitTool.point.has_value());
+    // The hints are folded away until asked for.
+    ctx->ItemOpen("//###ToolWindow/###fit_hints");
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("##fit_side/Inside (a bore)");
+    ctx->Yield(2);
+    IM_CHECK_NO_RET(s_App->fitTool.error.empty());
+    if (!s_App->fitTool.error.empty())
+      LOG_ERROR("fit: {}", s_App->fitTool.error);
+    IM_CHECK_EQ(s_App->fitTool.fittedKind, int(mesh::Kind::Cylinder));
+    IM_CHECK(std::abs(s_App->fitTool.fittedRadius - inner) < 0.05);
+    IM_CHECK(s_App->fitTool.summary.find("Diameter") != std::string::npos);
+    IM_CHECK(s_App->fitTool.summary.find("Used") != std::string::npos);
+    ctx->ComboClick("##fit_side/Outside (a boss)");
+    ctx->Yield(2);
+    IM_CHECK(s_App->fitTool.error.empty());
+    IM_CHECK(std::abs(s_App->fitTool.fittedRadius - outer) < 0.05);
+    ctx->ItemClick("###tw_accept");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->fitTool.open);
+    IM_CHECK_EQ(Doc()->FeatureCount(), features + 1);
+    const auto* da =
+        dynamic_cast<const DatumAxisFeature*>(Doc()->GetFeature(features));
+    IM_CHECK(da != nullptr);
+    if (da != nullptr) {
+      IM_CHECK(da->GetError().empty());
+      IM_CHECK(da->fit.hints.outside == std::optional<bool>(true));
+      IM_CHECK(!da->fit.clipSigma); // the default is not written
+      IM_CHECK(std::abs(da->FitReport().value("radius_mm", 0.0) - outer) <
+               0.05);
+    }
     std::filesystem::remove(stl);
   };
 
