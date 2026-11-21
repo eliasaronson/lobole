@@ -282,6 +282,11 @@ only need the callout.
   thread takes the face as the major on a boss and as the basic minor in a
   hole. The groove is capped at 0.95 P wide so neighbouring turns never
   touch.
+- **A modelled thread never resizes the hole it is on.** A table thread in
+  a hole under its basic minor diameter would have its teeth fill part of
+  the bore, so it is refused naming the drill a tapped hole for it takes:
+  "this 6.3 mm hole is too narrow for a modelled M8 thread (…); drill 6.8
+  mm for M8".
 - **The helix** (`src/core/HelicalSweep.{h,cpp}`) is one edge per
   turn on a cylinder: one B-spline over many turns loses accuracy turn by
   turn. It starts a quarter turn off the face's seam. `HelixEdge` is also

@@ -769,6 +769,55 @@ TEST_CASE("a modelled 3/8-16 UNC-2B cuts the groove in a tapped hole wall",
   CHECK_THAT(before - after, WithinRel(groove, 5e-3));
 }
 
+// docs/modeling/kernel-cases.md, solidcraft/threads/2369: a modelled thread
+// never resizes the hole it is on. An M8 in a 6.3 mm hole, under the M8's
+// 6.647 mm basic minor, was cut, its teeth filling part of the bore; it is
+// refused naming the drill, and the body stays as it was. At the tap drill
+// it still cuts.
+TEST_CASE("a modelled thread in a hole under its minor diameter is refused",
+          "[thread][hole]") {
+  const auto plate = [](Document& doc, double dia) {
+    auto pad =
+        std::make_unique<SketchFeature>("Block", SketchPlane(PlaneType::XY));
+    pad->AddRectangle({-15, -15}, {15, 15});
+    doc.AddFeature(std::move(pad));
+    doc.AddFeature(std::make_unique<ExtrudeFeature>(
+        "Pad", doc.GetFeature(0)->GetId(), 10.0, ExtrudeMode::NewBody));
+    auto centre = std::make_unique<SketchFeature>(
+        "Centre", SketchPlane(glm::vec3(0, 0, 10), glm::vec3(0, 0, 1),
+                              glm::vec3(1, 0, 0)));
+    centre->AddEntity(sketch::Point{{0, 0}, 1});
+    doc.AddFeature(std::move(centre));
+    auto hole = std::make_unique<HoleFeature>(
+        "Bore", doc.GetFeature(2)->GetId(), HoleKind::Simple, dia, 10.0);
+    hole->through = true;
+    doc.AddFeature(std::move(hole));
+    REQUIRE(doc.GetFeature(3)->GetError().empty());
+    const Body& drilled = doc.GetBodies()[0];
+    auto th = std::make_unique<ThreadFeature>(
+        "M8", ElementRef{drilled.createdBy, CylFaceName(drilled)}, "M8", 1.25);
+    th->modeled = true;
+    doc.AddFeature(std::move(th));
+  };
+  {
+    Document doc;
+    plate(doc, 6.3);
+    const double before = doc.CachedBodiesAfter(3)->at(0).shape.Volume();
+    const std::string& error = doc.GetFeature(4)->GetError();
+    INFO(error);
+    CHECK(error.find("this 6.3 mm hole is too narrow for a modelled M8") !=
+          std::string::npos);
+    CHECK(error.find("drill 6.8 mm for M8") != std::string::npos);
+    CHECK(doc.GetBodies()[0].shape.Volume() == before);
+  }
+  {
+    Document doc;
+    plate(doc, 6.8);
+    INFO(doc.GetFeature(4)->GetError());
+    CHECK(doc.GetFeature(4)->GetError().empty());
+  }
+}
+
 TEST_CASE("a modelled thread that cannot be cut keeps the body", "[thread]") {
   // A custom 3 mm pitch on a 2 mm boss: the root of that groove would sit
   // below the axis. The feature errors, the body and the overlay stay.

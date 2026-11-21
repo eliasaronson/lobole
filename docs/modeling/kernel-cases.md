@@ -22,11 +22,11 @@ command or parameter Loböle has no counterpart for.
 | shell | 40 | 11 | 11 | 18 |
 | sweeps | 97 | 34 | 15 | 48 |
 | solids | 11 | 3 | 0 | 8 |
-| threads | 31 | 13 | 18 | 0 |
+| threads | 31 | 14 | 17 | 0 |
 | import | 35 | 0 | 0 | 35 |
 | tessellation | 14 | 11 | 1 | 2 |
 | crashes | 12 | 3 | 0 | 9 |
-| **all** | 815 | 341 | 135 | 339 |
+| **all** | 815 | 342 | 134 | 339 |
 
 ## Known failures
 
@@ -158,7 +158,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/threads/2193-modelled-m33x3.5-thread | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/threads/2209-fine-m44x1-thread-on-shaft | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/threads/2209-m44x1.5-thread-on-flange-hub | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/threads/2369-m8-thread-in-6.3mm-hole-refused | accepted | [docs/known-bugs.md#a-modelled-thread-is-cut-in-a-hole-too-narrow-for-it](../known-bugs.md#a-modelled-thread-is-cut-in-a-hole-too-narrow-for-it) |
 | solidcraft/threads/2969-m48x0.75-thread-in-48mm-hole | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/threads/3366-m20-thread-in-20mm-hole | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/threads/3368-faceted-prism-with-bore-and-cross-hole | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |

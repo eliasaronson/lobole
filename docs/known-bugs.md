@@ -83,19 +83,6 @@ the heading if it is not here yet.
   mitre), mitre for a path of lines.
 - **Case:** `solidcraft/sweeps/96-sweep-rectangle-round-a-mitred-corner`.
 
-### A modelled thread is cut in a hole too narrow for it
-
-- **Symptom:** a modelled M8 thread on the wall of a 6.3 mm hole builds.
-  The hole is narrower than the M8 tap drill (6.8 mm), so the thread's teeth
-  would fill it; the case holds that it is refused naming the drill.
-- **Cause:** `ThreadFeature` checks that the thread's root is outside the
-  hole (a 5 mm hole refuses M5) and not that the hole is at least the minor
-  diameter.
-- **Where:** `ThreadFeature::Execute`, `src/core/features/ThreadFeature.cpp`.
-- **Likely fix:** refuse an internal modelled thread in a hole under the
-  thread's minor diameter, naming the tap drill.
-- **Case:** `solidcraft/threads/2369-m8-thread-in-6.3mm-hole-refused`.
-
 ### A union of a tube and nine bars through its wall gains volume
 
 - **Symptom:** a tube (r 21.5 to 23, 20 high) joined with nine round bars

@@ -795,7 +795,7 @@
  "solidcraft/threads/2193-modelled-m33x3.5-thread": "known: refused (docs/modeling/README.md#not-built)",
  "solidcraft/threads/2209-fine-m44x1-thread-on-shaft": "known: refused (docs/modeling/README.md#not-built)",
  "solidcraft/threads/2209-m44x1.5-thread-on-flange-hub": "known: refused (docs/modeling/README.md#not-built)",
- "solidcraft/threads/2369-m8-thread-in-6.3mm-hole-refused": "known: accepted (docs/known-bugs.md#a-modelled-thread-is-cut-in-a-hole-too-narrow-for-it)",
+ "solidcraft/threads/2369-m8-thread-in-6.3mm-hole-refused": "pass",
  "solidcraft/threads/2406-modelled-m8-thread-in-6.8mm-pilot-hole": "pass",
  "solidcraft/threads/2526-three-modelled-threads-in-one-body": "pass",
  "solidcraft/threads/2705-m14-thread-on-14.6mm-shaft-refused": "pass",

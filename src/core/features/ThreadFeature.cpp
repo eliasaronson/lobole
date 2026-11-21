@@ -9,6 +9,7 @@
 #include "core/ElementHistory.h"
 #include "core/HelicalSweep.h"
 #include "core/ThreadStandards.h"
+#include "core/parts/FastenerTable.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp_Face.hxx>
@@ -300,6 +301,31 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     }
 
     if (modeled) {
+      // A modelled thread never resizes the hole it is on: a hole under the
+      // thread's basic minor diameter would have its teeth fill part of it,
+      // so it is refused naming the drill, where it used to be cut into
+      // whatever bore it was given (an M8 in a 6.3 mm hole).
+      if (resolved && !external) {
+        const threads::Standard& s = resolved->standard;
+        const double minor = threads::MinorDiameter(s);
+        if (2.0 * r < minor * (1.0 - 1e-6)) {
+          // The drill a tapped hole for it takes (the tap maker's table),
+          // so the size named is the one a Hole's tapped fit would give.
+          const double drill =
+              parts::HoleDiameter(s.designation, parts::Fit::Tapped, pitch,
+                                  nullptr)
+                  .value_or(threads::TapDrill(s));
+          char buf[200];
+          snprintf(buf, sizeof(buf),
+                   "this %g mm hole is too narrow for a modelled %s thread "
+                   "(its teeth would fill the hole: the thread's minor "
+                   "diameter is %.3f mm); drill %g mm for %s",
+                   std::round(2.0 * r * 1e4) / 1e4, s.designation.c_str(),
+                   minor, drill, s.designation.c_str());
+          SetError(buf);
+          return false;
+        }
+      }
       // The real groove. Any failure is this feature's error: the body stays
       // as it was and the cosmetic overlay above stays drawn.
       const double major = resolved ? resolved->standard.majorDia : 0.0;
