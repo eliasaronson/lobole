@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import json as jsonlib
+import math
 
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
@@ -174,6 +175,44 @@ def main():
         expect(areop["active"] == acfg, f"assembly active config survived: {areop}")
         expect(areop["configurations"][0]["suppressed_occurrences"] == [o2],
                f"assembly suppression survived reopen: {areop}")
+
+        # --- A held mate rotation: bare `rotation` is radians, its twin
+        # `rotation_deg` degrees, and both land as the same hold
+        # (docs/conventions.md#units-and-angles).
+        d.call("set_active_configuration", id=0)
+        hinge = d.call("add_mate", type="revolute", name="hinge",
+                       a={"occurrence": o1, "origin": True},
+                       b={"occurrence": o2, "origin": True},
+                       flipped=False)["id"]
+        hcfg = d.call("add_configuration", name="Held")["id"]
+
+        def held_rotation():
+            row = next(c for c in d.call("list_configurations")[
+                "configurations"] if c["id"] == hcfg)
+            return row.get("mate_overrides", [])
+
+        d.call("set_configuration", id=hcfg, mate_overrides=[
+            {"mate": hinge, "rotation_deg": 30.0}])
+        by_deg = held_rotation()
+        d.call("set_configuration", id=hcfg, mate_overrides=[
+            {"mate": hinge, "rotation": math.radians(30.0)}])
+        by_rad = held_rotation()
+        expect(len(by_deg) == 1 and len(by_rad) == 1, f"one hold: {by_rad}")
+        expect(abs(by_deg[0]["rotation"] - by_rad[0]["rotation"]) < 1e-12
+               and abs(by_rad[0]["rotation_deg"] - 30.0) < 1e-9,
+               f"30 degrees and pi/6 radians hold the same: {by_deg} {by_rad}")
+        before = d.call("list_configurations")
+        for bad, why in [
+                ({"rotation": 0.5, "rotation_deg": 30.0}, "not both"),
+                ({"rotation": 30.0}, "rotation_deg")]:
+            try:
+                d.call("set_configuration", id=hcfg, mate_overrides=[
+                    dict(mate=hinge, **bad)])
+                raise AssertionError(f"{bad} was accepted")
+            except RuntimeError as e:
+                expect(why in str(e), f"{bad} refused naming {why}: {e}")
+            expect(d.call("list_configurations") == before,
+                   f"the refused {bad} changed nothing")
 
         # --- Overriding a PROJECT variable re-derives its project-level
         # dependents (the C-clamp split-brain bug): `h = w * 2` must follow

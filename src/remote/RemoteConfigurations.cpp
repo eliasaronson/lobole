@@ -47,7 +47,9 @@ static constexpr MethodDoc ConfigurationMethods[] = {
      "suppressed_relations [ids], mate_overrides [{mate, rotation (radians) "
      "| rotation_deg, offset (mm), and rotation_deg_expr, rotation_expr "
      "(degrees), offset_expr binding them to the project's variables}] — "
-     "DOFs the configuration holds; an "
+     "DOFs the configuration holds (rotation and rotation_deg together are "
+     "refused, and so is a bare rotation over a full turn: a degrees number "
+     "in the radians key); an "
      "overlay, so leaving it restores the mates. Each list replaces; the "
      "other kind's keys are refused. Editing the active one re-solves; an "
      "expression requirement it moves answers in `requirements`.",
@@ -311,7 +313,18 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
         const std::string at =
             "mate_overrides/" + std::to_string(next.mateOverrides.size()) + "/";
         if (oj.contains("rotation")) {
-          o.rotation = ExprAngle::FromRadians(oj.at("rotation").get<double>());
+          // Bare `rotation` is RADIANS. More than a full turn is not a hold
+          // anyone meant: a number written as degrees trips it from 7 up,
+          // and pinning the mate there would solve to a plausible wrong pose
+          // (docs/conventions.md#units-and-angles).
+          const double rad = oj.at("rotation").get<double>();
+          if (!angles::IsPlausibleSweep(rad))
+            throw std::runtime_error(
+                "mate_overrides: rotation is RADIANS and " +
+                std::to_string(rad) +
+                " is more than a full turn — pass rotation_deg to say "
+                "degrees");
+          o.rotation = ExprAngle::FromRadians(rad);
           ex.Bind(at + "rotation", o.rotation->expr);
         }
         if (oj.contains("rotation_deg")) {
