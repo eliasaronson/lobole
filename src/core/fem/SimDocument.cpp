@@ -202,6 +202,12 @@ bool SimDocument::StudyResultsStale(
          src->densityDigest != rt->sourceDigest;
 }
 
+void SimDocument::RestoreStudyResults(uint64_t studyId, StudyRuntime rt) {
+  rt.solvedAtVersion = 0; // no stamp is 0 (StudyStamp): stale until restamped
+  m_store->results[studyId] = std::move(rt);
+  ++m_store->epoch;
+}
+
 bool SimDocument::MarkStudyResultsCurrent(
     uint64_t studyId, std::vector<std::pair<uint64_t, uint64_t>> stamps) {
   const auto it = m_store->results.find(studyId);

@@ -151,6 +151,7 @@ struct LoadedProject {
   bool container = false;           // a project.json with several documents
   std::unique_ptr<Document> single; // !container: the one document
   std::vector<PartSlot> parts;      // container: every document, in order
+  std::vector<SimSlot> simulations; // container: its simulation documents
   nlohmann::json index;             // container: project.json, for the adopt
   // Parts whose baked geometry could not be used, so they were rebuilt, and
   // why, in words, when every one of them shares a reason ("from an older

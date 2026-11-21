@@ -501,6 +501,7 @@ set(core_sources
     src/core/io/ReadContext.cpp
     src/core/io/Serialization.cpp
     src/core/io/SerializeFeatures.cpp
+    src/core/io/SerializeSimulation.cpp
     src/core/io/SerializeStudies.cpp
     src/core/io/SerializeDrawingProjections.cpp
     src/core/io/SerializeCam.cpp
@@ -587,6 +588,7 @@ set(core_sources
     src/core/fem/FemCheck.cpp
     src/core/fem/FemInputKey.cpp
     src/core/fem/SimDocument.cpp
+    src/core/fem/SimMigration.cpp
     src/core/fem/SimStudy.cpp
     src/core/fem/AssemblyStudy.cpp
     src/core/fem/FemSolver.cpp

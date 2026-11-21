@@ -912,10 +912,11 @@ void CheckEnvelope(const json& j, const char* kind) {
     throw std::runtime_error("this is a " + got + ", not a " + kind);
   // A version older than its kind of document: no build wrote one, and a
   // load would run every migration since on a file that never needed them.
-  const int since = got == "assembly"  ? 23
-                    : got == "drawing" ? 30
-                    : got == "job"     ? 73
-                                       : 1;
+  const int since = got == "assembly"     ? 23
+                    : got == "drawing"    ? 30
+                    : got == "job"        ? 73
+                    : got == "simulation" ? kVersionNEXT
+                                          : 1;
   if (version < since)
     throw std::runtime_error(
         "format version " + std::to_string(version) + " predates " + got +
@@ -2922,6 +2923,57 @@ std::unique_ptr<cam::JobDocument> LoadJobImpl(const std::string& path,
 }
 
 } // namespace
+
+namespace shared {
+bool IsDirFormatPath(const std::string& path) {
+  return DocumentIO::IsDirFormatPath(path);
+}
+std::string NormalizeProjectPath(const std::string& path) {
+  return DocumentIO::NormalizeProjectPath(path);
+}
+bool WriteBytesAtomic(const std::filesystem::path& target,
+                      const std::vector<unsigned char>& bytes,
+                      std::string* error) {
+  return DocumentIO::WriteBytesAtomic(target, bytes, error);
+}
+std::string Base64Encode(const std::vector<unsigned char>& in) {
+  return DocumentIO::Base64Encode(in);
+}
+std::vector<unsigned char> Base64Decode(const std::string& in) {
+  return DocumentIO::Base64Decode(in);
+}
+bool WriteResultFiles(const std::filesystem::path& dir, const std::string& base,
+                      json j, std::set<std::string>& wanted, std::string* error,
+                      const char* suffix) {
+  return DocumentIO::WriteResultFiles(dir, base, std::move(j), wanted, error,
+                                      suffix);
+}
+void PruneCollection(const std::filesystem::path& dir,
+                     const std::set<std::string>& wanted) {
+  DocumentIO::PruneCollection(dir, wanted);
+}
+json ParseFileText(const std::filesystem::path& path,
+                   const std::filesystem::path* root) {
+  return DocumentIO::ParseFileText(path, root);
+}
+std::optional<json> ReadResultFiles(const std::filesystem::path& dir,
+                                    const std::string& rel) {
+  return DocumentIO::ReadResultFiles(dir, rel);
+}
+json InlineList(const json& j, const char* key) {
+  return DocumentIO::InlineList(j, key);
+}
+std::string LoadError(const std::exception& e) {
+  return DocumentIO::LoadError(e);
+}
+void CheckEnvelope(const json& j, const char* kind) {
+  DocumentIO::CheckEnvelope(j, kind);
+}
+void RequireLists(const json& j,
+                  std::initializer_list<std::pair<const char*, int>> lists) {
+  DocumentIO::RequireLists(j, lists);
+}
+} // namespace shared
 
 std::string JobFingerprint(const cam::JobDocument& job) {
   return JobBodyJson(job).dump();

@@ -248,9 +248,11 @@ constexpr const char* kResultsExcluded =
     "# Written by Lobole: saved study results are derived (their input "
     "hash names them)";
 // The study and motion results (v153), and the drawing views' saved
-// projections (v162): derived, each named by its input hash.
+// projections (v162), and a simulation's stored meshes (vNEXT): derived,
+// each named by its input hash or its key.
 constexpr const char* kDerivedPatterns[] = {
-    "*.result.json", "*.result.bin", "*.projection.json", "*.projection.bin"};
+    "*.result.json",    "*.result.bin", "*.projection.json",
+    "*.projection.bin", "*.mesh.json",  "*.mesh.bin"};
 
 void KeepResultsOutOfHistory(const std::string& dir) {
   std::string out;

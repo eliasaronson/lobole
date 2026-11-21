@@ -1,0 +1,10 @@
+{
+  "subject": {"kind": "assembly", "document": 4, "configuration": 7,
+              "name": "Stacked blocks"},
+  "roles": [[2, "meshed"], [1, "bonded"]],
+  "mesh_size": 12.0,
+  "mesh_size_expr": "block_mesh * 2",
+  "mesh_refinements": 1,
+  "studies": [[3, "On the shared mesh", true], [8, "A mesh of its own", false]],
+  "next_id_above": 9
+}

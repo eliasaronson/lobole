@@ -17,11 +17,13 @@
 #include "core/drawing/DrawingDocument.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "core/fem/SimDocument.h"
 #include "core/io/CrashReports.h"
 #include "core/io/GitVault.h"
 #include "core/io/ProjectMerge.h"
 #include "core/io/ProjectPaths.h"
 #include "core/io/Serialization.h"
+#include "core/io/SerializeSimulation.h"
 #include "core/io/Settings.h"
 #include "core/mesh/MeshReaders.h"
 #include "core/mesh/Segment.h"
@@ -414,6 +416,14 @@ std::map<std::string, size_t> JobCounts(const cam::JobDocument& j) {
           {"operations", ops}};
 }
 
+std::map<std::string, size_t> SimCounts(const fem::SimDocument& s) {
+  // Not the stored meshes and results: derived, so one that does not read
+  // is dropped without the load being lossy (as a part's result is).
+  return {{"studies", s.GetStudies().size()},
+          {"roles", s.Roles().size()},
+          {"refinements", s.Mesh().refinements.size()}};
+}
+
 template <class Doc, class LoadFn, class SaveFn, class CountFn>
 Loaded LoadWith(const fs::path& path, LoadFn load, SaveFn save, CountFn count) {
   Loaded l;
@@ -467,6 +477,7 @@ Loaded LoadProject(const fs::path& path) {
                       {"occurrences", occurrences},
                       {"views", views},
                       {"setups", setups},
+                      {"simulations", state->simulations.size()},
                       {"requirements", state->requirements.size()},
                       {"sections", state->sections.size()},
                       {"parameters", state->projectParameters.size()}};
@@ -510,6 +521,15 @@ Loaded LoadAs(Family family, const fs::path& path) {
           return DocumentIO::SaveJob(d, p);
         },
         JobCounts);
+  case Family::SimFile:
+  case Family::SimDir:
+    return LoadWith<fem::SimDocument>(
+        path,
+        [](const std::string& p) { return DocumentIO::LoadSimulation(p); },
+        [](const fem::SimDocument& d, const std::string& p) {
+          return DocumentIO::SaveSimulation(d, p);
+        },
+        SimCounts);
   case Family::Project:
   case Family::ExternalCorpus:
     return LoadProject(path);
@@ -533,6 +553,8 @@ const char* FamilyName(Family f) {
     return "drawing";
   case Family::JobFile:
     return "job";
+  case Family::SimFile:
+    return "simulation";
   case Family::PartDir:
     return "part-dir";
   case Family::AssemblyDir:
@@ -541,6 +563,8 @@ const char* FamilyName(Family f) {
     return "drawing-dir";
   case Family::JobDir:
     return "job-dir";
+  case Family::SimDir:
+    return "simulation-dir";
   case Family::Project:
     return "project";
   case Family::Settings:
@@ -600,10 +624,12 @@ bool IsDocFamily(Family f) {
   case Family::AssemblyFile:
   case Family::DrawingFile:
   case Family::JobFile:
+  case Family::SimFile:
   case Family::PartDir:
   case Family::AssemblyDir:
   case Family::DrawingDir:
   case Family::JobDir:
+  case Family::SimDir:
   case Family::Project:
   case Family::ExternalCorpus:
     return true;
@@ -631,6 +657,23 @@ fem::StudyRuntime HandMadeResult() {
   rt.bodies.push_back(std::move(b));
   rt.inputHash = 0x1234;
   return rt;
+}
+
+// A stored mesh made by hand (one tet10), with a result solved on it, so a
+// saved simulation carries both derived pairs (.mesh.*, .result.*).
+void PlantSimStorage(fem::SimDocument& sim) {
+  if (sim.GetStudies().empty())
+    return;
+  auto mesh = std::make_shared<fem::FemMesh>();
+  for (int i = 0; i < 10; ++i)
+    mesh->nodes.push_back(glm::dvec3(i, 0.5 * i, 0.25 * i));
+  mesh->tets.push_back({0, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+  mesh->boundary.push_back({{0, 1, 2, 4, 5, 6}, 0});
+  const uint64_t key = 0xabcdef0123456789ull;
+  sim.StoreMesh(key, {mesh, "Body"});
+  fem::StudyRuntime rt = HandMadeResult();
+  rt.meshKeys = {key};
+  sim.StoreStudyResults(sim.GetStudies().front().id, std::move(rt));
 }
 
 motion::Result HandMadeMotion(const AssemblyDocument& a) {
@@ -696,6 +739,9 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
   case Family::JobFile:
     files(g / "job");
     break;
+  case Family::SimFile:
+    files(g / "simulation");
+    break;
   case Family::PartDir:
     out = DirCorpus(
         "part-dir", g, scratch,
@@ -748,6 +794,17 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
           return DocumentIO::SaveJob(d, p);
         },
         noTweak);
+    break;
+  case Family::SimDir:
+    out = DirCorpus(
+        "simulation-dir", g / "simulation", scratch,
+        [](const std::string& p) { return DocumentIO::LoadSimulation(p); },
+        [](const fem::SimDocument& d, const std::string& p) {
+          return DocumentIO::SaveSimulation(d, p);
+        },
+        [](fem::SimDocument& sim, const std::string&) {
+          PlantSimStorage(sim);
+        });
     break;
   case Family::Project: {
     // One container of every kind: a part with a saved result, an
@@ -806,6 +863,18 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
                   .has_value(),
               "the job does not save");
     }
+    {
+      // A simulation of the part, with a stored mesh and result; no tab
+      // folder (a simulation is no tab).
+      auto s = DocumentIO::LoadSimulation(
+          (g / "simulation" / "vNEXT-simulation-document.json").string());
+      Require(s.has_value(), "the simulation golden does not load");
+      PlantSimStorage(**s);
+      const fs::path at = entry(5, "Stress check", "simulation", "simulations");
+      docs.back().erase("folder");
+      Require(DocumentIO::SaveSimulation(**s, at.string()).has_value(),
+              "the simulation does not save");
+    }
     json requirement = json::parse(ReadBytes(g / "v160-requirements.json"))
                            .at("requirements")
                            .at(0);
@@ -859,7 +928,8 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
   }
   // swap_kind: a directory document handed another kind's index.json.
   if (family == Family::PartDir || family == Family::AssemblyDir ||
-      family == Family::DrawingDir || family == Family::JobDir) {
+      family == Family::DrawingDir || family == Family::JobDir ||
+      family == Family::SimDir) {
     const json other = {
         {"format", "designer-document"},
         {"version", DocumentIO::DocumentFormatVersion()},
@@ -1206,12 +1276,13 @@ struct Sweep::Impl {
         // The fixed sample reads a sixth of the corpus -- each input costs a
         // load and a save before its first case -- and always the inputs
         // that carry the side files (a saved result, a motion result, saved
-        // projections) and the project.
+        // projections, a simulation's stored meshes) and the project.
         if (!every && only == nullptr && mutate::Hash(in.corpus) % 6 != 0 &&
             in.corpus.find("v153") == std::string::npos &&
             in.corpus.find("v87-") == std::string::npos &&
             in.corpus.find("v162") == std::string::npos &&
             in.corpus.find("v17-full") == std::string::npos &&
+            in.corpus.find("simulation-document") == std::string::npos &&
             family != Family::Project)
           continue;
         RunDocument(in);

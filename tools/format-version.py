@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HEADER = "src/core/io/SerializationInternal.h"
 FORMAT_MD = "docs/versioning/format.md"
 GOLDEN_DIRS = ["tests/golden", "tests/golden/assembly", "tests/golden/job",
-               "tests/golden/drawing"]
+               "tests/golden/drawing", "tests/golden/simulation"]
 # The files that DESCRIBE the rule, and so spell the placeholder as text:
 # `land` leaves them alone and `check` does not scan them.
 DESCRIBES = {"tools/format-version.py", "tools/merge-branch.sh", "CLAUDE.md",

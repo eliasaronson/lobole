@@ -72,13 +72,23 @@ bool PlanSimStudy(const SimContext& ctx, uint64_t studyId, StudyPlan& out,
 // path, AssemblyStudyInputKey beside neighbours. 0 when it would be refused.
 uint64_t SimStudyInputKey(const SimContext& ctx, uint64_t studyId);
 
+// Stamps current every stored result of `sim` whose inputs hash as they did
+// when it was solved (StudyRuntime::inputHash against SimStudyInputKey),
+// against `ctx.subjectStamps`: what a reopened or migrated simulation is
+// handed, so a study whose inputs did not change is not stale. A result
+// whose inputs moved stays stale. Returns how many were stamped current.
+// `ctx.sim` is ignored.
+int RestampSimByInputs(SimDocument& sim, SimContext ctx);
+
 // Plans and solves study `studyId` of `sim` (a static, modal, buckling or
 // thermal study; a topology study is refused), storing the result on `sim`
 // stamped with its input hash and `ctx.subjectStamps`, and every mesh it
 // made under its key. `rt` is the run's whole answer, before the reduction
 // a stored result gets (KeepWhatIsRead). `meshesMade`, when given, is how
-// many bodies were meshed rather than read from the store. The study's
-// error is written on `sim` (StudyForRun). `ctx.sim` is ignored.
+// many bodies were meshed rather than read from the store. A study on the
+// document's mesh (SimDocument::SharesMesh) sets the document's mesh keys
+// to the ones it solved on. The study's error is written on `sim`
+// (StudyForRun). `ctx.sim` is ignored.
 bool RunSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
                  StudyRuntime& rt, std::string* error,
                  int* meshesMade = nullptr);

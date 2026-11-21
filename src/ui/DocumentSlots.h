@@ -89,6 +89,19 @@ bool RenameDocument(AppState& state, size_t index, const std::string& name,
 // reference is not something to create on purpose.
 bool DeletePart(AppState& state, size_t index, std::string* why = nullptr);
 
+// The project's simulation documents (AppState::simulations), which no tab
+// shows yet. Added, renamed and deleted as a job is: the name is one no other
+// document answers to (refused naming why), the id is a new document id, and
+// each marks the project's document list changed (projectMetaDirty). Delete
+// leaves its folder on disk unlisted, as a deleted tab's is. AddSimulation
+// returns the simulation's index, or SIZE_MAX when the name is refused.
+size_t AddSimulation(AppState& state, const std::string& name,
+                     fem::SimDocument sim, std::string* why = nullptr);
+bool RenameSimulation(AppState& state, size_t index, const std::string& name,
+                      std::string* why = nullptr);
+bool DeleteSimulation(AppState& state, size_t index,
+                      std::string* why = nullptr);
+
 // Why that tab cannot be deleted, or empty when it can. The menu asks BEFORE
 // offering, so a refusal is a disabled item with a reason on it rather than a
 // live one that does nothing.

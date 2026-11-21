@@ -367,6 +367,7 @@ const std::vector<Command>& Table() {
     add("file.new", nullptr, [](AppState& s) {
       ReplaceDocument(s, std::make_unique<Document>());
       s.parts.clear();
+      s.simulations.clear();
       s.tabFolders.clear();
       ClearSections(s); // a new project starts uncut
       EnsureParts(s, "Part 1");

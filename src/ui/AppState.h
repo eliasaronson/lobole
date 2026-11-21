@@ -27,6 +27,7 @@
 #include "core/drawing/ViewProjection.h"
 #include "core/features/SketchFeature.h"
 #include "core/fem/FemSolver.h" // ContactPatch (assembly studies)
+#include "core/fem/SimDocument.h"
 #include "core/io/GitVault.h"
 #include "core/io/MouseNav.h"
 #include "core/io/ProjectMerge.h"
@@ -1094,6 +1095,20 @@ struct CamSetupResult {
   std::string lastPost;
 };
 
+// A simulation document of the project (docs/simulation/README.md
+// #how-a-simulation-is-saved), saved as `simulations/<folder>/` beside the
+// parts, assemblies, drawings and jobs. No tab shows one yet: the project
+// keeps what it opened and saves it again, so a file that has them does not
+// lose them (docs/plans/simulation-document.md#stages). Its id comes from
+// the same counter as a slot's (nextPartId), and its name is unique among
+// every document's.
+struct SimSlot {
+  uint64_t id = 0;
+  std::string name;
+  std::unique_ptr<fem::SimDocument> sim;
+  uint64_t lastSavedVersion = 0; // SaveStamp at the last save
+};
+
 struct PartSlot {
   uint64_t id = 0; // stable per-document id (A2): what occurrences reference
   std::string name;
@@ -1321,6 +1336,8 @@ struct AppState {
   std::vector<PartSlot> parts;
   int activePart = 0;
   uint64_t nextPartId = 1; // stable document-id allocator (A2)
+  // The project's simulation documents, which no tab shows yet (SimSlot).
+  std::vector<SimSlot> simulations;
   // Tab-bar folder registry, in display order. THE list of folders: lets a
   // folder exist empty ("+ > New folder" before anything is filed in it, or
   // after its last member moves out). Slot folders self-register on

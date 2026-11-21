@@ -14,8 +14,10 @@
 // (one planner, SimStudy.h), every study of the document solves on one mesh
 // unless it sets a size of its own, and the mesh is kept with the document.
 //
-// The core only, so far: the app's tab, the file format and the RPCs still
-// use the studies on the part and the assembly
+// A project saves and opens these (simulations/<folder>/,
+// core/io/SerializeSimulation.h), and SimMigration.h moves the studies of a
+// part or an assembly into them; the app's tab and the RPCs still use the
+// studies on the part and the assembly
 // (docs/plans/simulation-document.md#stages).
 
 #include "core/ExprValue.h"
@@ -141,6 +143,10 @@ public:
   bool StudyResultsStale(
       uint64_t studyId,
       const std::function<uint64_t(uint64_t docId)>& stampOf) const;
+  // A result read back from a file or moved from a part or an assembly
+  // (SimMigration.h): stored as it is, and stale until RestampSimByInputs
+  // (SimStudy.h) finds its inputs hash as they did when it was solved.
+  void RestoreStudyResults(uint64_t studyId, StudyRuntime rt);
   // Stamps a stored result current against these subject stamps: a reopened
   // project's whose inputs hash as they did. False when absent.
   bool

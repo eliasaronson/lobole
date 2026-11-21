@@ -21,6 +21,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <initializer_list>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -28,6 +32,10 @@
 namespace drawing {
 struct ViewProjection; // core/drawing/ViewProjection.h
 }
+namespace fem {
+struct Participant; // core/fem/FemStudy.h
+struct Refinement;
+} // namespace fem
 
 inline constexpr const char* kFormat = "designer-document";
 // The format version. What each one changed is docs/versioning/format.md's
@@ -43,7 +51,7 @@ inline constexpr const char* kFormat = "designer-document";
 // the other then never conflict.
 inline constexpr int kVersionLanded = 222;
 
-inline constexpr int kVersionPending = 0;
+inline constexpr int kVersionPending = 1;
 inline constexpr int kVersion = kVersionLanded + kVersionPending;
 
 // What a branch's loader migration compares against, `if (version <
@@ -290,3 +298,64 @@ private:
 nlohmann::json ViewProjectionToJson(const drawing::ViewProjection& p);
 drawing::ViewProjection ViewProjectionFromJson(const nlohmann::json& j,
                                                const std::string& what);
+
+// A study's participant and refinement rows (SerializeStudies.cpp), which a
+// simulation's roles and mesh write the same way. FromJson refuses an unknown
+// key or role, naming what is accepted.
+namespace DocumentIO {
+nlohmann::json ParticipantToJson(const fem::Participant& p);
+fem::Participant ParticipantFromJson(const nlohmann::json& j);
+nlohmann::json RefinementToJson(const fem::Refinement& r);
+fem::Refinement RefinementFromJson(const nlohmann::json& j);
+} // namespace DocumentIO
+
+// The file and envelope helpers of Serialization.cpp, for a document kind
+// whose serializer is a translation unit of its own (SerializeSimulation.cpp).
+// Each forwards to the one Serialization.cpp's own readers and writers use,
+// so the kinds cannot drift apart in how they refuse a file.
+namespace DocumentIO::shared {
+// A `.lob`/`.dsgn` name or an existing directory: the directory form.
+bool IsDirFormatPath(const std::string& path);
+// `<project>.lob/index.json` -> `<project>.lob`.
+std::string NormalizeProjectPath(const std::string& path);
+bool WriteBytesAtomic(const std::filesystem::path& target,
+                      const std::vector<unsigned char>& bytes,
+                      std::string* error);
+std::string Base64Encode(const std::vector<unsigned char>& in);
+std::vector<unsigned char> Base64Decode(const std::string& in);
+// A derived file pair beside its item: `<base><suffix>.bin` and
+// `<base><suffix>.json`, the json's kResultData split off into the bin.
+bool WriteResultFiles(const std::filesystem::path& dir, const std::string& base,
+                      nlohmann::json j, std::set<std::string>& wanted,
+                      std::string* error, const char* suffix);
+// Removes the .json and .bin files of `dir` not in `wanted`.
+void PruneCollection(const std::filesystem::path& dir,
+                     const std::set<std::string>& wanted);
+// One project file read and parsed strictly (merge markers, repeated keys),
+// refused when it resolves outside `root`.
+nlohmann::json ParseFileText(const std::filesystem::path& path,
+                             const std::filesystem::path* root = nullptr);
+// A derived pair read back (WriteResultFiles); nullopt, dropped and
+// reported, when it does not read or its halves disagree.
+std::optional<nlohmann::json> ReadResultFiles(const std::filesystem::path& dir,
+                                              const std::string& rel);
+// An inline list of a single-file document, its ids checked.
+nlohmann::json InlineList(const nlohmann::json& j, const char* key);
+// The error a load returns: already named, or named here.
+std::string LoadError(const std::exception& e);
+// format, version and kind; and the lists every version since one writes.
+void CheckEnvelope(const nlohmann::json& j, const char* kind);
+void RequireLists(const nlohmann::json& j,
+                  std::initializer_list<std::pair<const char*, int>> lists);
+// One item of an inline list converted, named in a refusal ("studies[2]: ").
+template <class F> decltype(auto) AtItem(const char* key, size_t i, F&& fn) {
+  try {
+    return fn();
+  } catch (const readctx::Error&) {
+    throw;
+  } catch (const std::exception& e) {
+    throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
+                             "]: " + e.what());
+  }
+}
+} // namespace DocumentIO::shared

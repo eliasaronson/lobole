@@ -31,6 +31,66 @@ namespace DocumentIO {
 // value+expr convention: the numeric field is always written, the expression
 // only when non-empty (a plain literal round-trips byte-identically).
 
+json ParticipantToJson(const fem::Participant& pt) {
+  json pj = {{"occurrence", pt.occurrenceId},
+             {"role", fem::ParticipantRoleToString(pt.role)}};
+  if (pt.meshSize != 0.0 || !pt.meshSize.expr.empty())
+    WriteExpr(pj, "mesh_size", pt.meshSize);
+  if (pt.role == fem::ParticipantRole::Contact && pt.friction != 0.0)
+    pj["friction"] = pt.friction; // v209
+  return pj;
+}
+
+fem::Participant ParticipantFromJson(const json& pj) {
+  readctx::RefuseUnknownKeys(
+      pj, {"occurrence", "role", "mesh_size", "mesh_size_expr", "friction"},
+      "study participant");
+  fem::Participant pt;
+  pt.occurrenceId = pj.at("occurrence").get<uint64_t>();
+  // A role that does not parse is refused, not defaulted to rigid: a
+  // meshed panel silently read as a support is a different study.
+  const std::string roleStr = pj.value("role", std::string{});
+  if (!fem::ParticipantRoleFromString(roleStr, pt.role))
+    throw std::runtime_error("unknown participant role '" + roleStr +
+                             "' (expected one of: meshed, rigid, bonded, "
+                             "contact, ignored)");
+  pt.meshSize = pj.value("mesh_size", 0.0);
+  pt.meshSize.expr = ReadExprText(pj, "mesh_size");
+  if (pj.contains("friction")) { // v209
+    if (pt.role != fem::ParticipantRole::Contact)
+      throw std::runtime_error("participant " +
+                               std::to_string(pt.occurrenceId) +
+                               ": friction is a contact participant's");
+    if (!pj.at("friction").is_number())
+      throw std::runtime_error("participant " +
+                               std::to_string(pt.occurrenceId) +
+                               ": friction is not a number");
+    pt.friction = pj.at("friction").get<double>();
+  }
+  return pt;
+}
+
+json RefinementToJson(const fem::Refinement& r) {
+  json rj = {{"face", ElementRefJson(r.face)}, {"size", r.size.value}};
+  if (r.occurrenceId != 0)
+    rj["occurrence"] = r.occurrenceId;
+  WriteExprText(rj, "size", r.size.expr);
+  return rj;
+}
+
+fem::Refinement RefinementFromJson(const json& rj) {
+  readctx::RefuseUnknownKeys(rj, {"face", "occurrence", "size", "size_expr"},
+                             "study refinement");
+  fem::Refinement r;
+  readctx::RefuseUnknownKeys(rj.at("face"), {"feature_id", "element"},
+                             "study refinement face");
+  r.face = ElementRefFromJson(rj.at("face"));
+  r.occurrenceId = rj.value("occurrence", uint64_t{0});
+  r.size = rj.value("size", 0.0);
+  r.size.expr = ReadExprText(rj, "size");
+  return r;
+}
+
 json StudyToJson(const fem::Study& s) {
   json j;
   j["type"] = "Study";
@@ -133,26 +193,14 @@ json StudyToJson(const fem::Study& s) {
   // part study, so every earlier study file re-saves byte-identically.
   if (!s.participants.empty()) {
     j["participants"] = json::array();
-    for (const fem::Participant& pt : s.participants) {
-      json pj = {{"occurrence", pt.occurrenceId},
-                 {"role", fem::ParticipantRoleToString(pt.role)}};
-      if (pt.meshSize != 0.0 || !pt.meshSize.expr.empty())
-        WriteExpr(pj, "mesh_size", pt.meshSize);
-      if (pt.role == fem::ParticipantRole::Contact && pt.friction != 0.0)
-        pj["friction"] = pt.friction; // v209
-      j["participants"].push_back(std::move(pj));
-    }
+    for (const fem::Participant& pt : s.participants)
+      j["participants"].push_back(ParticipantToJson(pt));
   }
 
   if (!s.refinements.empty()) {
     j["refinements"] = json::array();
-    for (const fem::Refinement& r : s.refinements) {
-      json rj = {{"face", ElementRefJson(r.face)}, {"size", r.size.value}};
-      if (r.occurrenceId != 0)
-        rj["occurrence"] = r.occurrenceId;
-      WriteExprText(rj, "size", r.size.expr);
-      j["refinements"].push_back(std::move(rj));
-    }
+    for (const fem::Refinement& r : s.refinements)
+      j["refinements"].push_back(RefinementToJson(r));
   }
 
   if (!s.loads.empty()) {
@@ -485,47 +533,11 @@ fem::Study StudyFromJson(const json& j) {
     }
   }
 
-  for (const json& pj : j.value("participants", json::array())) {
-    readctx::RefuseUnknownKeys(
-        pj, {"occurrence", "role", "mesh_size", "mesh_size_expr", "friction"},
-        "study participant");
-    fem::Participant pt;
-    pt.occurrenceId = pj.at("occurrence").get<uint64_t>();
-    // A role that does not parse is refused, not defaulted to rigid: a
-    // meshed panel silently read as a support is a different study.
-    const std::string roleStr = pj.value("role", std::string{});
-    if (!fem::ParticipantRoleFromString(roleStr, pt.role))
-      throw std::runtime_error("unknown participant role '" + roleStr +
-                               "' (expected one of: meshed, rigid, bonded, "
-                               "contact, ignored)");
-    pt.meshSize = pj.value("mesh_size", 0.0);
-    pt.meshSize.expr = ReadExprText(pj, "mesh_size");
-    if (pj.contains("friction")) { // v209
-      if (pt.role != fem::ParticipantRole::Contact)
-        throw std::runtime_error("participant " +
-                                 std::to_string(pt.occurrenceId) +
-                                 ": friction is a contact participant's");
-      if (!pj.at("friction").is_number())
-        throw std::runtime_error("participant " +
-                                 std::to_string(pt.occurrenceId) +
-                                 ": friction is not a number");
-      pt.friction = pj.at("friction").get<double>();
-    }
-    s.participants.push_back(std::move(pt));
-  }
+  for (const json& pj : j.value("participants", json::array()))
+    s.participants.push_back(ParticipantFromJson(pj));
 
-  for (const json& rj : j.value("refinements", json::array())) {
-    readctx::RefuseUnknownKeys(rj, {"face", "occurrence", "size", "size_expr"},
-                               "study refinement");
-    fem::Refinement r;
-    readctx::RefuseUnknownKeys(rj.at("face"), {"feature_id", "element"},
-                               "study refinement face");
-    r.face = ElementRefFromJson(rj.at("face"));
-    r.occurrenceId = rj.value("occurrence", uint64_t{0});
-    r.size = rj.value("size", 0.0);
-    r.size.expr = ReadExprText(rj, "size");
-    s.refinements.push_back(std::move(r));
-  }
+  for (const json& rj : j.value("refinements", json::array()))
+    s.refinements.push_back(RefinementFromJson(rj));
 
   for (const json& lj : j.value("loads", json::array())) {
     readctx::RefuseUnknownKeys(

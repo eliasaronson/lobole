@@ -358,6 +358,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A simulation document, `kind: "simulation"` ([how a simulation is saved](../simulation/README.md#how-a-simulation-is-saved)): `subject` {`kind`: `part` \| `assembly`, `document`, `configuration`?, `name`}, `roles` (an assembly's participants, written as a study's `participants`), `mesh` {`size`, `size_expr`?, `refinements`?}, `studies`, `mesh_keys`?. The directory form keeps each stored result as `results/<study id>.result.{json,bin}` (with the `mesh_keys` it was solved on) and each stored mesh as `meshes/<key>.mesh.{json,bin}` (node positions f64); the single file carries both inline as `results` and `meshes`, base64. A project lists one as a document of `type: "simulation"` under `simulations/`. An unknown key, subject kind or role, roles on a part, a mesh size below 0 or a version before this one is refused; a stored result or mesh that does not read is dropped. Golden `simulation/vNEXT-simulation-document` (an assembly subject with roles, a mesh size expression and a refinement, a study on the shared mesh and one with its own; stored meshes and results are not in the corpus, so their round trip is `tests/test_sim_storage.cpp`'s) |
 
 ## Paths in a project
 
@@ -445,9 +446,11 @@ A multi-document project is a directory with `project.json`:
  "documents": [{"id": 3, "name": "Stand", "dir": "parts/Stand", "type": "part"}]}
 ```
 
-`type` is `part`, `assembly`, `drawing` or `job`, stored under `parts/`,
-`assemblies/`, `drawings/` or `jobs/`; `id` is the stable per-document id and
-`folder` an optional tab-bar folder. Optional keys: project-scope
+`type` is `part`, `assembly`, `drawing`, `job` or `simulation`, stored under
+`parts/`, `assemblies/`, `drawings/`, `jobs/` or `simulations/`; `id` is the
+stable per-document id and `folder` an optional tab-bar folder (none on a
+simulation, which is no tab). Simulations are listed after every other
+document, and `active` counts the others only. Optional keys: project-scope
 `parameters`, `folders`, `sections`, `catalogs`, `tables`,
 `requirements_next_id`, `templates`; the project's requirements are files under
 `requirements/` beside it (v160). The envelope is at version 2: the keys

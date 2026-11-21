@@ -262,8 +262,32 @@ bool RunSimStudy(SimDocument& sim, SimContext ctx, uint64_t studyId,
   rt.inputHash = SimStudyInputKey(ctx, studyId);
   rt.solvedPartVersions = ctx.subjectStamps;
   study->error.clear();
+  if (SimDocument::SharesMesh(*study) && !rt.meshKeys.empty())
+    sim.SetDocumentMeshKeys(rt.meshKeys);
   sim.StoreStudyResults(studyId, rt);
   return true;
+}
+
+int RestampSimByInputs(SimDocument& sim, SimContext ctx) {
+  ctx.sim = &sim;
+  const auto stampOf = [&](uint64_t docId) {
+    for (const auto& [id, stamp] : ctx.subjectStamps)
+      if (id == docId)
+        return stamp;
+    return uint64_t{0};
+  };
+  int stamped = 0;
+  for (const uint64_t id : sim.ResultIds()) {
+    const StudyRuntime* rt = sim.StudyResults(id);
+    if (rt == nullptr || rt->inputHash == 0 ||
+        !sim.StudyResultsStale(id, stampOf))
+      continue;
+    if (sim.FindStudy(id) != nullptr &&
+        SimStudyInputKey(ctx, id) == rt->inputHash &&
+        sim.MarkStudyResultsCurrent(id, ctx.subjectStamps))
+      ++stamped;
+  }
+  return stamped;
 }
 
 } // namespace fem

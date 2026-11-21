@@ -27,6 +27,7 @@
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "core/io/SerializePrintSettings.h"
+#include "core/io/SerializeSimulation.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/tube/Rules.h"
 
@@ -1678,8 +1679,8 @@ TEST_CASE("The golden corpus reaches the current kVersion", "[golden]") {
   // how an audit reported a present golden as missing — and tests/golden/
   // drawing/ was missing from this very list, so a drawing-only bump could
   // freeze an artifact the gate would never look at (found adding v89).
-  for (const fs::path& dir :
-       {root, root / "assembly", root / "job", root / "drawing"}) {
+  for (const fs::path& dir : {root, root / "assembly", root / "job",
+                              root / "drawing", root / "simulation"}) {
     if (!fs::exists(dir))
       continue;
     for (const auto& entry : fs::directory_iterator(dir)) {
@@ -1708,7 +1709,9 @@ TEST_CASE("The golden corpus reaches the current kVersion", "[golden]") {
                             << ". A kVersion bump ships a golden AT that "
                                "version — tests/golden/ for a document, "
                                "tests/golden/assembly/ for assembly schema, "
-                               "tests/golden/job/ for a CAM job.");
+                               "tests/golden/job/ for a CAM job, "
+                               "tests/golden/simulation/ for a "
+                               "simulation.");
   CHECK(newest == DocumentIO::DocumentFormatVersion());
 }
 
@@ -2003,4 +2006,85 @@ TEST_CASE("Every golden's written form reads and writes back identical",
       [](const cam::JobDocument& d, const fs::path& p) {
         return DocumentIO::SaveJob(d, p.string()).has_value();
       });
+  CheckWriterFixpoint(
+      root / "simulation", "simulation",
+      [](const fs::path& p) -> std::unique_ptr<fem::SimDocument> {
+        auto r = DocumentIO::LoadSimulation(p.string());
+        return r ? std::move(*r) : nullptr;
+      },
+      [](const fem::SimDocument& d, const fs::path& p) {
+        return DocumentIO::SaveSimulation(d, p.string()).has_value();
+      });
+}
+
+// The SIMULATION corpus (vNEXT, docs/simulation/README.md
+// #how-a-simulation-is-saved): what each golden's expect file says it holds,
+// as loaded and after a save through the current writer.
+TEST_CASE("Simulation golden corpus loads and round-trips",
+          "[golden][fem][simdoc]") {
+  const fs::path dir =
+      fs::path(TestSourceDir()) / "tests" / "golden" / "simulation";
+  REQUIRE(fs::exists(dir));
+  for (const fs::path& golden : GoldensIn(dir)) {
+    DYNAMIC_SECTION(golden.filename().string()) {
+      fs::path expectPath = golden;
+      expectPath.replace_extension(".expect.json");
+      REQUIRE(fs::exists(expectPath));
+      nlohmann::json expect;
+      std::ifstream(expectPath) >> expect;
+      const auto check = [&](const fem::SimDocument& sim) {
+        if (expect.contains("subject")) {
+          const nlohmann::json& s = expect.at("subject");
+          CHECK(fem::SubjectKindToString(sim.Subject().kind) ==
+                s.at("kind").get<std::string>());
+          CHECK(sim.Subject().docId == s.at("document").get<uint64_t>());
+          CHECK(sim.Subject().configuration ==
+                s.value("configuration", uint64_t{0}));
+          CHECK(sim.Subject().name == s.at("name").get<std::string>());
+        }
+        if (expect.contains("roles")) {
+          const nlohmann::json& want = expect.at("roles");
+          REQUIRE(sim.Roles().size() == want.size());
+          for (size_t i = 0; i < want.size(); ++i) {
+            CHECK(sim.Roles()[i].occurrenceId == want[i][0].get<uint64_t>());
+            CHECK(fem::ParticipantRoleToString(sim.Roles()[i].role) ==
+                  want[i][1].get<std::string>());
+          }
+        }
+        if (expect.contains("mesh_size"))
+          CHECK(sim.Mesh().size.value == expect.at("mesh_size").get<double>());
+        if (expect.contains("mesh_size_expr"))
+          CHECK(sim.Mesh().size.expr ==
+                expect.at("mesh_size_expr").get<std::string>());
+        if (expect.contains("mesh_refinements"))
+          CHECK(sim.Mesh().refinements.size() ==
+                expect.at("mesh_refinements").get<size_t>());
+        if (expect.contains("studies")) {
+          const nlohmann::json& want = expect.at("studies");
+          REQUIRE(sim.GetStudies().size() == want.size());
+          for (size_t i = 0; i < want.size(); ++i) {
+            const fem::Study& s = sim.GetStudies()[i];
+            CHECK(s.id == want[i][0].get<uint64_t>());
+            CHECK(s.name == want[i][1].get<std::string>());
+            CHECK(fem::SimDocument::SharesMesh(s) == want[i][2].get<bool>());
+          }
+        }
+        if (expect.contains("next_id_above"))
+          CHECK(sim.NextId() > expect.at("next_id_above").get<uint64_t>());
+      };
+      auto sim = DocumentIO::LoadSimulation(golden.string());
+      REQUIRE(sim.has_value());
+      check(**sim);
+      for (const char* form : {".json", ".lob"}) {
+        const fs::path tmp = fs::temp_directory_path() /
+                             ("golden_sim_rt_" + golden.stem().string() + form);
+        fs::remove_all(tmp);
+        REQUIRE(DocumentIO::SaveSimulation(**sim, tmp.string()).has_value());
+        auto reloaded = DocumentIO::LoadSimulation(tmp.string());
+        REQUIRE(reloaded.has_value());
+        check(**reloaded);
+        fs::remove_all(tmp);
+      }
+    }
+  }
 }

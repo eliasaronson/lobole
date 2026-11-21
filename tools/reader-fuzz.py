@@ -45,10 +45,12 @@ FAMILIES = {
     "assembly": "assembly files",
     "drawing": "drawing files",
     "job": "job files",
+    "simulation": "simulation files",
     "part-dir": "part directories",
     "assembly-dir": "assembly directories",
     "drawing-dir": "drawing directories",
     "job-dir": "job directories",
+    "simulation-dir": "simulation directories",
     "project": "projects",
     "settings": "settings",
     "profiles": "machine and print profiles",
@@ -94,7 +96,7 @@ def cmd_case(a):
         # tree is written as a directory of the same name.
         file_part = a.id.split(":", 1)[0].split("/")
         base = file_part[1] if family in ("part", "assembly", "drawing",
-                                          "job") else "tree.lob"
+                                          "job", "simulation") else "tree.lob"
         out = os.path.join(tmp, base)
         rc, text = run_tests(["Reader fuzz: write one case"], {
             "LOBOLE_READER_FUZZ_CASE": a.id,

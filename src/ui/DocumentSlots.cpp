@@ -530,8 +530,73 @@ bool RenameDocument(AppState& state, size_t index, const std::string& name,
                     "' already exists — names address tabs (add_occurrence, "
                     "set_active_part), so two answering to one would be "
                     "ambiguous");
+  for (const SimSlot& ss : state.simulations)
+    if (ss.name == name)
+      return refuse("a simulation named '" + name + "' already exists");
   state.parts[index].name = name;
   state.projectMetaDirty = true; // tab names live in project.json only
+  return true;
+}
+
+namespace {
+// Why `name` cannot name a simulation (the one at `self` keeps its own).
+std::string SimulationNameRefusal(const AppState& state,
+                                  const std::string& name, size_t self) {
+  if (name.empty())
+    return "a simulation's name must be non-empty";
+  for (const PartSlot& ps : state.parts)
+    if (ps.name == name)
+      return "a tab named '" + name + "' already exists";
+  for (size_t i = 0; i < state.simulations.size(); i++)
+    if (i != self && state.simulations[i].name == name)
+      return "a simulation named '" + name + "' already exists";
+  return {};
+}
+} // namespace
+
+size_t AddSimulation(AppState& state, const std::string& name,
+                     fem::SimDocument sim, std::string* why) {
+  if (const std::string r = SimulationNameRefusal(state, name, SIZE_MAX);
+      !r.empty()) {
+    if (why)
+      *why = r;
+    return SIZE_MAX;
+  }
+  SimSlot slot;
+  slot.id = state.nextPartId++;
+  slot.name = name;
+  slot.sim = std::make_unique<fem::SimDocument>(std::move(sim));
+  state.simulations.push_back(std::move(slot));
+  state.projectMetaDirty = true; // the document list lives in project.json
+  return state.simulations.size() - 1;
+}
+
+bool RenameSimulation(AppState& state, size_t index, const std::string& name,
+                      std::string* why) {
+  std::string r = index < state.simulations.size()
+                      ? SimulationNameRefusal(state, name, index)
+                      : "no simulation at index " + std::to_string(index);
+  if (!r.empty()) {
+    if (why)
+      *why = std::move(r);
+    return false;
+  }
+  if (state.simulations[index].name != name) {
+    state.simulations[index].name = name;
+    state.projectMetaDirty = true;
+  }
+  return true;
+}
+
+bool DeleteSimulation(AppState& state, size_t index, std::string* why) {
+  if (index >= state.simulations.size()) {
+    if (why)
+      *why = "no simulation at index " + std::to_string(index);
+    return false;
+  }
+  state.simulations.erase(state.simulations.begin() +
+                          static_cast<std::ptrdiff_t>(index));
+  state.projectMetaDirty = true;
   return true;
 }
 

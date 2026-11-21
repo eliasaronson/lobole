@@ -229,6 +229,8 @@ add_executable(designer_tests
     test_topo_build.cpp
     test_study_inputs.cpp
     test_sim_document.cpp
+    test_sim_storage.cpp
+    test_sim_project.cpp
     test_drawing_hlr.cpp
     test_drawing.cpp
     test_drawing_sheet.cpp
