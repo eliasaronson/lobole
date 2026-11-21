@@ -53,6 +53,16 @@ The rise is in the follower's unit: mm for a sliding follower, degrees for a
 turning one; the other unit is refused, never converted. The lowest lift of
 the turn sits on the base circle.
 
+Each number of the motion and of the follower takes an expression of the
+variables (vNEXT,
+[numbers that are expressions](../variables/README.md#numbers-that-are-expressions)):
+`lift_expr` beside `lift`, an `[angle, lift]` pair of texts per entry
+(`""` for a number), as the cam relation's; a segment's `to_deg_expr` and
+`rise_mm_expr` / `rise_deg_expr`; the follower's `radius_mm_expr`,
+`offset_mm_expr`, `pivot_mm_expr` ([x, y] texts) and `arm_mm_expr`. Angles
+are in degrees, a rise and a lift in the follower's unit; a motion the
+evaluated values break is the feature's error, as one typed is refused.
+
 ## The follower it is cut for
 
 `follower {kind: roller | flat | knife, motion: slide | turn, radius_mm,

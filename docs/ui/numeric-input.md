@@ -13,6 +13,7 @@ document's and the project's variables when the field commits.
 | `ExprDragFloat` | the same, in float, for view state only (a section's offset and tilt) |
 | `ExprInputDouble`, `ExprInputInt`, `ExprInputDouble3` | plain input fields |
 | `FeatureEditor`'s `ExprDim` / `ExprCount` | a feature dimension with a persisted `*Expr` slot, shown as an `fx` row when it holds an expression |
+| `ExprBoundDrag`, `ExprBoundInt` | a number the model keeps as a value and a text outside a feature (an `ExprValue`, an `ExprInt`): a typed expression binds it, a plain number unbinds it ([variables](../variables/README.md#gui)). On a job or a drawing tab it evaluates over the project's variables, the scope those documents read |
 
 **Drag fields own their text.** The drag is drawn with
 `ImGuiSliderFlags_NoInput`, and all three gestures ImGui would have turned

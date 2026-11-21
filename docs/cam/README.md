@@ -66,6 +66,61 @@ JobDocument                        core/cam/JobDocument.h
 - The job holds one id counter for parts, setups, operations, placements and
   fixtures.
 
+## Numbers that are expressions
+
+A job's numbers take expressions of the project's variables, and keep them
+([variables](../variables/README.md#numbers-that-are-expressions)): a tool
+diameter can be the variable a bore is drilled to. They are `ExprValue`s
+(an `ExprInt` for a count) in `core/cam/CamJob.h`, and
+`cam::VisitSetupExprs` (`JobDocument::VisitExprs` over every setup) hands
+each out with its owner and its path in the job's JSON:
+
+| owner | numbers |
+|---|---|
+| `setup 'Top'` | `safe_z`, `rapid_feed`, `rotation_a` (degrees), `grip_mm`, `reach_offset` [x, y], the stock's `margin` [x, y, z] and `bottom_margin`, and a fixed stock's `size` and `place` [x, y, z] |
+| `tool T3 in setup 'Top'` | `diameter`, `flutes` (a count), `flute_length`, `feed_cut`, `feed_plunge`, `spindle_rpm`, `chipload_min` / `_max`, `overall_length`, `collar_diameter`, `shank_diameter`; `tip_angle` on a tool with a point; `tip_flat`, `neck_diameter`, `neck_length` on a thread mill |
+| `operation 'Pocket 1' in setup 'Top'` | `top_z`, `bottom_z`, every number of the [field table](operations.md#the-capability-table-and-the-field-table) its type has (`stepdown`, `stepover`, `cut_angle_deg`, `passes` -- a count -- ...), `tabs` {`count`, `width`, `height`}, `finish_stock` beside a finish tool, and each `index_a_deg` stop |
+| `placement 12 in setup 'Top'` | `pos` [x, y], `rot_z` |
+| `fixture 'Clamp 1' in setup 'Top'` | a box's `box` [x, y, z]; unseated, `pos` [x, y, z] and `rot_z`; seated, the seat's `along_mm`, `over_mm`, `spin_deg` |
+
+What stays a number, each with its reason, is listed in
+`tests/test_job_exprs.cpp`'s probe, which fails on a number the file holds
+that is neither a slot nor listed: ids and T-words, the derived work origin,
+the clamping quaternions, a seated fixture's solved pose, and the embedded
+**machine** -- a copy of a profile from the machine library, which lives
+outside every project and reads no variables.
+
+- **Scope.** A job reads the project's variables, never one part's: a job
+  can cut several parts, and a lone job outside a project resolves against
+  an empty table, so an expression there is its owner's error naming the
+  variable it could not find.
+- **Recompute.** `ui::SyncProjectScope` evaluates every open job
+  (`cam::EvaluateJobExprs`). A job whose values moved is edited
+  (`ui::MarkJobEdited` on the job in front, its own save stamp otherwise):
+  it is unsaved, its kept verdict no longer matches
+  ([CamVerdictKey](gui.md#whose-results-are-on-screen)), and the open job's
+  toolpaths are made again from the new numbers. An owner whose new values
+  do not evaluate, or that cannot stand (a tool diameter not above 0, a
+  count that comes out fractional), keeps its last good values and is the
+  job's `ExprProblems()`, which the variable edit's own `regen` answers as
+  `jobs: [{job, failed: [{owner, error}]}]` (and `ok: false`).
+- **RPC.** Every method that sets one takes `<key>_expr` beside it
+  (`remote/ExprArgs.h`): `add_cam_setup` / `set_cam_setup` `safe_z_expr`,
+  `rotation_a_expr`, `grip_mm_expr`, `reach_offset_expr`, `stock:
+  {margin_expr, size_expr, place_expr, bottom_margin_expr}` and `tool:
+  {diameter_expr, ...}`; `add_cam_op` / `set_cam_op` / `cam_derive_op` each
+  number's `_expr` (`tabs: {count_expr, ...}`, `index_a_deg_expr` a text per
+  stop); `set_job_placement` `pos_expr`, `rot_z_expr`; `add_job_fixture` /
+  `set_job_fixture` `box_expr`, `pos_expr`, `rot_z_expr` and `seat:
+  {along_mm_expr, ...}`. A text that does not parse or names a variable the
+  project does not have is refused naming the key, before anything changes;
+  a number alone unbinds. `list_cam_setups`, `list_job_parts` and the
+  fixture answers carry each text beside its number.
+- **GUI.** Every field of the CAM panel and the tool window that edits one
+  is an `ExprBoundDrag`: an expression typed with Ctrl+click binds it, a
+  plain number unbinds it. Moving a placement or a fixture by its handles,
+  or putting a fixture against a side, writes its pose whole and unbinds it.
+
 ## The pipeline
 
 ```

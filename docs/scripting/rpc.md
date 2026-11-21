@@ -242,6 +242,25 @@ it under `owners: [{owner, error}]` (and `ok` is false); the owner keeps its
 last good values
 ([variables](../variables/README.md#numbers-that-are-expressions)).
 
+A **CAM job's** and a **drawing's** methods take theirs the same way,
+evaluated over the project's variables (`src/remote/ExprArgs.h`): on a
+job `add_cam_setup` / `set_cam_setup` `safe_z_expr`, `rotation_a_expr`,
+`grip_mm_expr`, `reach_offset_expr`, inside `stock` and `tool` each
+number's `_expr`; `add_cam_op` / `set_cam_op` / `cam_derive_op` each
+number's (`stepdown_expr`, `index_a_deg_expr` a text per stop, `tabs:
+{count_expr, ...}`); `set_job_placement` `pos_expr`, `rot_z_expr`;
+`add_job_fixture` / `set_job_fixture` `box_expr`, `pos_expr`, `rot_z_expr`
+and the seat's ([CAM](../cam/README.md#numbers-that-are-expressions)). On
+a drawing `add_drawing_view` / `set_drawing_view` `scale_expr`,
+`position_expr`, `rotation_deg_expr`, the section's `point_expr` and the
+detail's `center_expr` / `radius_mm_expr`, and `add_drawing_note`'s
+`fcf: {tolerance_mm_expr}`
+([drawings](../drawings/README.md#numbers-that-are-expressions)). Their
+getters answer the texts (`list_cam_setups`, `list_job_parts`, the fixture
+answers, `list_drawing_views`, `list_drawing_notes`), and a variable
+change that leaves one unable to stand is in that call's `regen` under
+`jobs` or `drawings`.
+
 Two older spellings are kept as aliases, since scripts and the SDK use
 them: a STRING where a study's number goes (`mesh_size: "wall / 2"`), and a
 sketch dimension's `expr` (`add_constraint`, and the stored key). Giving a

@@ -73,13 +73,19 @@ One type and one hook carry every expression-capable number, in
   `ExprSlot`: its text, its value in the expression's units (degrees for a
   radian-stored angle), what it measures (`ExprQuantity`: length, angle,
   count, other) and where it lives (`distance`, `origin/2`,
-  `loads/0/magnitude`). `Feature`, `fem::Study`, a requirement's `Bound`
-  and `AssemblyDocument` implement it; the assembly's hands each slot out
+  `loads/0/magnitude`). `Feature`, `fem::Study`, a requirement's `Bound`,
+  `AssemblyDocument`, `cam::JobDocument` and `DrawingDocument` implement
+  it; the assembly's hands each slot out
   with its owner ("mate 'Hinge'") and its path in the assembly's JSON
   (`mates/2/limits/rotation/1`): mates and their limits, occurrence
   positions, relations, exploded steps, motion studies, the sequence,
   configurations' mate overrides and the assembly's studies
   ([what takes one](../assemblies/README.md#numbers-that-are-expressions)).
+  A job's and a drawing's do the same: a CAM job's setups, tools,
+  operations, placements and fixtures
+  ([CAM](../cam/README.md#numbers-that-are-expressions)), a drawing's view
+  scales, positions, turns, section points, detail circles and frame
+  tolerances ([drawings](../drawings/README.md#numbers-that-are-expressions)).
   A part's walk (`Document::VisitDocumentExprs`) is its features and
   studies, then its own numbers outside them, each with its owner: the
   [sheet-metal rules](../sheetmetal/README.md#rules-that-are-expressions)
@@ -105,15 +111,19 @@ One type and one hook carry every expression-capable number, in
   RetainingRing's size; a Curve3D's points, a control polygon's degree, a
   bent path's radius and a helix's origin; a Cradle's direction; a
   DatumPlane's and a DatumAxis's points; a Derived copy's position; a Box's
-  position and a Sphere's and a Cylinder's centre; a custom axis's origin
+  position and a Sphere's and a Cylinder's centre; an Import's turn,
+  placement and scale (an alignment writes the placement whole and unbinds
+  it: [placing an import](../interchange/README.md#placing-an-import)); a
+  CamProfile's lift table, segments and follower
+  ([cam profiles](../modeling/cam-profiles.md)); a custom axis's origin
   (Revolve, Pattern, MoveFace, an angled DatumPlane); and a sketch's linked
   pattern ops ([sketching](../sketching/README.md#patterns-that-are-expressions)).
   A vector is a slot per coordinate (`Vec3Exprs`, written as
   `<key>_expr: [x, y, z]` texts, or one such triple per point of a list).
   They come over the RPC as keys of the feature JSON, like every other
   feature number. What a part writes that takes no expression -- ids,
-  directions, quaternions, an Import's placement, a cam profile's law and
-  follower, derived outputs -- is listed with its reason in
+  directions, quaternions, a cam profile's law, an Import's appearance and
+  how it reads a mesh, derived outputs -- is listed with its reason in
   `tests/test_part_exprs.cpp`'s probe, which fails on a number that is
   neither a slot nor listed.
 
@@ -123,7 +133,7 @@ Everything that walks expressions walks that hook:
   `fem::EvaluateStudyExprs` when a study meshes;
 - rename: `Document::RenameParameter` and `RewriteProjectVarRefs` rewrite
   the features' and the studies' slots and the configurations' overrides;
-  a project rename does every assembly's slots too;
+  a project rename does every assembly's, job's and drawing's slots too;
 - the refusal to delete a variable something reads
   (`Document::FindParameterReferences`, `ui::ProjectVarReferences`);
 - the literals lint ([below](#literals-that-should-be-expressions)), which
@@ -133,9 +143,14 @@ Everything that walks expressions walks that hook:
 against the part's variables, then the project's. An assembly resolves against the
 project's, and has none of its own; a lone assembly outside a project
 resolves against an empty table, so an expression there fails naming
-the variable it could not find. `ui::SyncProjectScope` re-evaluates every
-open assembly after the parts and re-solves one whose values changed
-([recompute](../assemblies/README.md#numbers-that-are-expressions)).
+the variable it could not find. A CAM job and a drawing resolve against
+the project's the same way, never one part's: either can hold several.
+`ui::SyncProjectScope` re-evaluates every open assembly after the parts
+and re-solves one whose values changed
+([recompute](../assemblies/README.md#numbers-that-are-expressions)), then
+every open job, which is then edited and its toolpaths made again, and
+every drawing, which re-projects; a job's or a drawing's owner that cannot
+stand is in the variable edit's `regen` as `jobs` / `drawings`.
 
 ## The expression language
 
@@ -381,6 +396,12 @@ owner (`mate 'Hinge'`), `feature_id` 0, and `field` the slot's path
 `<owner>_<field>`. Applying is two undo steps: the variables on the
 project history, the bindings on the assembly's.
 
+**On a CAM job or a drawing** (`ui::LintJob`, `ui::LintDrawing`) the walk
+is the document's `VisitExprs`: `check_literals` with `part` naming one,
+or on its tab, reports its unbound numbers equal to a project variable of
+their kind (`tool T1 in setup 'Top'`, `cam/0/tools/0/diameter`). It only
+finds them; `extract_variables` is not built for either.
+
 Save as template ([templates](../modeling/templates.md#saving-one)) reads
 the same walk: the literals of the features it saves are offered as the
 template's parameters, named as `extract_variables` would name them, and
@@ -486,8 +507,12 @@ spellings stay accepted as aliases: a string where a study's number goes
   - A plain numeric field evaluates what you type and stores the *result*.
   A field over an `ExprValue` outside a feature (`ExprBoundDrag`: a mate's
   values and limits, the sheet-metal rules, a distance tolerance's limits,
-  a sketch pattern's numbers) keeps the text instead, shows it bound, and a
-  **123** button or a plain number unbinds it.
+  a sketch pattern's numbers -- an existing one's and the Pattern tool's
+  -- every field of the CAM panel and its tool window, a drawing view's
+  scale) keeps the text instead, shows it bound, and a **123** button or a
+  plain number unbinds it. `ExprBoundInt` is the same over an `ExprInt`: a
+  typed expression that comes out fractional is refused, never rounded
+  (a CAM operation's tabs and passes).
   - A feature dimension (`ExprDim` in `src/ui/FeatureEditor.cpp`) has an
     **fx** button that stores the expression text and shows its value or
     error. A **123** button turns it back into a literal.

@@ -477,7 +477,11 @@ DEGREES while `scalar` stays radians. They are written as `count_expr`,
 re-runs `RegenerateDerived` after the solve. The `pattern` RPC takes
 `count_expr`, `step_expr`, `center_expr` and `angle_deg_expr` (with
 `link: true`, the default); the pattern's tool window edits each field
-keeping its text (`EditPatternOp`).
+keeping its text (`EditPatternOp`). The Pattern TOOL that makes one keeps
+what is typed the same way: its count, rows, steps, centre and angle are
+bound fields, and a linked pattern it applies is bound to their texts
+(`ApplyPattern`). An unlinked one is copies, with no op to keep a text on;
+a centre picked on a point tracks the point, not a text.
 
 An arc's `start_angle_deg` and `end_angle_deg` are entity expression
 fields too ([Entities](#entities)), in degrees over angles stored in

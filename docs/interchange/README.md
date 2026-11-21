@@ -228,12 +228,20 @@ scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`)
   key the placement does not take, a vector that is not three finite
   numbers or a scale of 0 or less is refused. `import_step` takes both
   (not with `as_assembly`, whose parts are placed as occurrences), and the
-  reply of `import_step` and `add_feature` echoes them.
+  reply of `import_step` and `add_feature` echoes them. Each number, and
+  the `turn_deg`, takes an expression of the variables in the feature JSON
+  (`translate_mm_expr` and `rotate_deg_expr` as `[x, y, z]` texts inside
+  `placement`, `scale_expr`, `turn_deg_expr`; vNEXT,
+  [numbers that are expressions](../variables/README.md#numbers-that-are-expressions)),
+  set through `modify_feature`.
 - **`align_import {feature_id, mode, …}`** (`src/core/ImportAlign.{h,cpp}`,
   the RPC in `RemoteModeling.cpp`) writes the placement from what the import
   is, as one undo step, and echoes its inputs. The points are where the
   bodies stand now, and the alignment composes onto the placement the
-  import already has. The modes:
+  import already has. It writes the placement WHOLE, so a placement bound
+  to the variables comes out of an alignment unbound -- the composed turn
+  is no longer what any one text said; the Align tool does the same, and
+  puts the texts back when it is cancelled. The modes:
   - `floor` {`point_mm`, `tolerance_mm`?}: the plane of the flat grown from
     the triangle under the point (`mesh::GrowPlane`, `src/core/mesh/Align.h`:
     the region `fit_primitive` grows for a plane, fitted robustly so a stray

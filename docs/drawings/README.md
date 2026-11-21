@@ -28,7 +28,8 @@ onto one sheet. A project holds any number of drawings.
   general tolerance. A misspelt title-block key is refused.
 - **Views** (`DrawingView`): a source document by stable project-document id
   (part or assembly — a rename cannot break a view), a named orientation, a
-  scale (with an optional expression), a sheet position in mm, `showHidden`,
+  scale and a sheet position in mm (each may be an expression:
+  [numbers that are expressions](#numbers-that-are-expressions)), `showHidden`,
   `quality` (`exact` or `fast`), `hidden` occurrences or bodies
   ([leaving bodies off a view](#leaving-bodies-off-a-view)), a part
   `configuration`, a `rotation_deg`, `baseViewId` for a projected child, a
@@ -192,6 +193,41 @@ same world direction to sheet X, the child's X is locked to the base's, and
 likewise for Y (`ui::DrawingFoldedPosition`). Front and top share X; front
 and right share Y; iso shares neither and is placed freely. The coordinate
 along the fold axis is the child's own.
+
+## Numbers that are expressions
+
+A view's numbers take expressions of the project's variables, and keep
+them ([variables](../variables/README.md#numbers-that-are-expressions)):
+`DrawingView`'s `scale`, `position` [x, y] (sheet mm), `rotation_deg`, a
+section's `point` and a detail's `center` [x, y, z] and `radius_mm`, and a
+feature control frame's `tolerance_mm`. `DrawingDocument::VisitExprs`
+hands each out with its owner (`view 'Front'`, `note 4`) and its path in
+the drawing's JSON (`views/0/scale`, `views/2/detail/center/1`); each text
+is written beside its number as `<key>_expr` (`position_expr` a text per
+coordinate, `""` for a number). What stays a number, with its reason, is
+listed in `tests/test_drawing_exprs.cpp`'s probe: ids, a dimension's
+references, and where a dimension's label or a note stands, which a drag
+and the layouts place.
+
+- **Scope.** The project's variables: a drawing draws several parts and
+  assemblies, so no one part's are in reach. A lone drawing resolves
+  against an empty table, and a bound number there is its view's error.
+- **Recompute.** `ui::SyncProjectScope` evaluates every open drawing
+  (`drawing::EvaluateExprs`); one whose values moved changes version and
+  the one in front is updated, so a scale bound to a variable rescales its
+  view. A value that cannot stand (a scale or a detail radius not above 0)
+  leaves the view at its last good numbers and is the drawing's
+  `ExprProblems()`, which the variable edit's own `regen` answers as
+  `drawings: [{drawing, failed: [{owner, id, error}]}]`.
+- **RPC.** `add_drawing_view` / `set_drawing_view` take `scale_expr`,
+  `position_expr`, `rotation_deg_expr`, `section: {point_expr}` and
+  `detail: {center_expr, radius_mm_expr}`; `add_drawing_note` `fcf:
+  {tolerance_mm_expr}`. Each is evaluated over the project's variables when
+  the call arrives and refused naming the key when it does not evaluate.
+  `list_drawing_views` and `list_drawing_notes` answer the texts.
+- **GUI.** A view's Scale menu holds a field for any scale, which keeps an
+  expression typed into it; a scale or a turn picked from the menu is a
+  number and unbinds it.
 
 ## Projection (HLR)
 

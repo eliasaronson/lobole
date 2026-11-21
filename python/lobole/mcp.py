@@ -312,7 +312,10 @@ typed `contract`: every field, its type and its enum values.
   "cycloidal"|"harmonic"|"poly345"|"dwell"|"drop"}}] closing at 360 |
   "lift"?: [[angle_deg, lift]], "follower"?: {{"kind":
   "roller"|"flat"|"knife", "motion": "slide"|"turn", "radius_mm",
-  "offset_mm"? | "pivot_mm": [x, y] + "arm_mm"}}, "turn"?: "ccw"|"cw",
+  "offset_mm"? | "pivot_mm": [x, y] + "arm_mm"}} (each number takes an
+  _expr twin: "lift_expr" [[angle, lift] texts], a segment's "to_deg_expr"
+  / "rise_mm_expr", the follower's "radius_mm_expr", "pivot_mm_expr" ...),
+  "turn"?: "ccw"|"cw",
   "body"?: "new"|"add"}} — omitted motion = a cycloidal lobe rising half the
   base radius; undercut is refused naming the base radius that clears it;
   "report" gives the pressure angle, radii and fit deviation. A cam relation
@@ -453,7 +456,9 @@ typed `contract`: every field, its type and its enum values.
   user's preference), "min_sides"?: int (with recognize, 5-1024, default
   12: the fewest sides a ring of facets needs to be round), "placement"?:
   {{"translate_mm"?: [x, y, z], "rotate_deg"?: [x, y, z]}} and "scale"?:
-  number > 0 (after the axis and the centring: scaled about the origin,
+  number > 0 (each takes an _expr twin: "translate_mm_expr" [x, y, z]
+  texts inside placement, "scale_expr", "turn_deg_expr"; an alignment
+  unbinds what it rewrites) (after the axis and the centring: scaled about the origin,
   turned about world X, Y, Z, moved; rpc('align_import', {{feature_id,
   mode: floor|three_points|principal|scale, ...}}) writes them from a
   picked floor, three points, the principal axes or a known distance)}} —
@@ -539,7 +544,11 @@ Every *_expr field is an expression over PROJECT variables (project-wide by
 default — see set_variable; shared across every part), e.g. "width / 2 + 1".
 A variable that does not resolve is a FEATURE ERROR (visible in get_state), not
 a silent fallback to the literal twin — define the variable before referencing
-it. Angles in *_deg fields and expressions are degrees."""
+it. Angles in *_deg fields and expressions are degrees. A CAM job's and a
+drawing's numbers take <key>_expr the same way over the PROJECT's variables
+(set_cam_setup tool {{diameter_expr}}, add_cam_op stepdown_expr,
+add_drawing_view scale_expr / position_expr ...); a variable edit that leaves
+one unable to stand says so in its own regen (jobs / drawings)."""
 
 # Datum references usable anywhere a constraint ref names an entity.
 DATUM_ORIGIN = 0xFFFFFF00  # sketch origin point (0,0)
@@ -2276,6 +2285,8 @@ _reference("add_drawing_view", "Add a projected VIEW of a part to the ACTIVE dra
           "draws a sheet-metal part's blank with its bend lines. "
           "rotation_deg turns the view on the sheet, counter-clockwise "
           "(a part modelled lying along X drawn upright is front at 90). "
+          "scale_expr / position_expr ([x, y] texts, '' for a number) / "
+          "rotation_deg_expr bind them to the project's variables. "
           "The view is added but NOT projected — call update_drawing. "
           "Returns the new view id.")
 

@@ -240,7 +240,7 @@ text.
 ### 7. The agent surface
 
 One convention for expressions on every number here
-([expressions everywhere](expressions-everywhere.md)). The MCP workflow
+([numbers that are expressions](../variables/README.md#numbers-that-are-expressions)). The MCP workflow
 prompt gains a short "judging a study" section: read `check_study`, the
 mesh report, `convergence.status`, `peak_at_support_edge`, the balance and
 `stale`, and name what the model leaves out.
