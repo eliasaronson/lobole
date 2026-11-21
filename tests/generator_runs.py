@@ -27,6 +27,11 @@ them, and labelled `generators` and `slow`: `ctest -C generators -L
 generators` runs them, and
 tools/merge-branch.sh --full does after the headless suite
 (generators/README.md#the-big-generators-as-tests).
+
+On a hybrid CPU the run is kept on the performance cores (`fast_cores`): the
+budget is sized for one, and the same build costs twice as much on an
+efficiency core and three times on a low-power one, so where the kernel
+happened to put a run decided whether it passed.
 """
 import os
 import re
@@ -72,12 +77,36 @@ def tail(path, n=60):
         return "  (no output)\n"
 
 
+def fast_cores(sysfs="/sys/devices/cpu_core/cpus"):
+    """The performance cores of a hybrid CPU that this process may use, or
+    None where there is nothing to choose (one kind of core, no such file,
+    or none of them allowed to us). Linux lists them as `0-11` or `0-3,8`."""
+    try:
+        with open(sysfs) as f:
+            text = f.read().strip()
+        fast = set()
+        for part in text.split(","):
+            lo, _, hi = part.partition("-")
+            fast.update(range(int(lo), int(hi or lo) + 1))
+        allowed = os.sched_getaffinity(0)
+    except (OSError, ValueError, AttributeError):
+        return None
+    fast &= allowed
+    return fast if fast and fast != allowed else None
+
+
 def main():
     if len(sys.argv) != 4 or sys.argv[2] not in RUNS:
         sys.exit(f"usage: {sys.argv[0]} BINARY {{{','.join(RUNS)}}} "
                  "BUDGET_S")
     binary, name, budget = sys.argv[1], sys.argv[2], float(sys.argv[3])
     build, kind, extra = RUNS[name]
+    # Before the app is launched: it and the generator inherit this.
+    fast = fast_cores()
+    if fast and os.environ.get("LOBOLE_GENERATOR_CORES") != "all":
+        os.sched_setaffinity(0, fast)
+        print(f"{name}: on the {len(fast)} performance cores "
+              "(LOBOLE_GENERATOR_CORES=all runs on every core)")
     out = tempfile.mkdtemp(prefix=f"designer-gen-{name}-")
     env = dict(os.environ, LOBOLE_SCRATCH=out, PYTHONUNBUFFERED="1",
                **extra)

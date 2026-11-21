@@ -137,6 +137,14 @@ budget the generator's process group is killed and the test says so; a
 failure keeps the output directory and names it, with the generator's last
 lines.
 
+A budget is sized for a performance core. On a hybrid CPU (Linux names its
+performance cores in `/sys/devices/cpu_core/cpus`) the runner keeps the
+generator and its instance on those, because the same build costs twice as
+much on an efficiency core and three times on a low-power one, and where
+the kernel put a run used to decide whether it passed. Any other machine
+has no such file and runs as before; `LOBOLE_GENERATOR_CORES=all` runs on
+every core.
+
 **Each one declares itself in its own directory**, `<name>/test.json`: its
 order in the table, why it runs what it runs, its steps (argv lists run in
 order with `&&`; `{python}`, `{generators}`, `{port}` and `{out}` filled in),
