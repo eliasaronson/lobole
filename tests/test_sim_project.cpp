@@ -657,3 +657,84 @@ TEST_CASE("An edit on a simulation behind another tab is undone on its tab",
   }
   CHECK(state.parts[0].simHistory.undo.empty());
 }
+
+namespace {
+// A study reading `expr` in a load's magnitude.
+fem::SimDocument SimReading(fem::SubjectKind kind, uint64_t docId,
+                            const std::string& expr) {
+  fem::SimDocument sim;
+  sim.SetSubject({kind, docId, 0, "subject"});
+  fem::Study& s = sim.AddStudy("Bend");
+  fem::Load l;
+  l.magnitude.expr = expr;
+  s.loads.push_back(l);
+  return sim;
+}
+const std::string& LoadExpr(ui::AppState& state, size_t slot) {
+  return ui::SlotSim(state, slot)
+      ->GetStudies()
+      .front()
+      .loads.front()
+      .magnitude.expr;
+}
+} // namespace
+
+TEST_CASE("A variable renamed or deleted looks inside every simulation",
+          "[fem][simdoc][variables]") {
+  ui::AppState state = StateWithBox();
+  const uint64_t partId = state.parts[0].id;
+  REQUIRE(state.document->SetParameter("t", "2", ""));
+  REQUIRE(ui::SetProjectVariable(state, "gap", "3", ""));
+  // A second part with a local "gap" that shadows the project's.
+  const size_t shadow = ui::AddPart(state, "Shadow");
+  const uint64_t shadowId = state.parts[shadow].id;
+  REQUIRE(ui::SlotDoc(state, shadow)->SetParameter("gap", "5", ""));
+  const size_t rig = ui::AddAssembly(state, "Rig");
+  const uint64_t rigId = state.parts[rig].id;
+
+  const size_t partSim = ui::AddSimulation(
+      state, "Part sim",
+      SimReading(fem::SubjectKind::Part, partId, "t * 10 + gap"));
+  fem::SimMesh mesh;
+  mesh.size.expr = "gap";
+  ui::SlotSim(state, partSim)->SetMesh(mesh);
+  const size_t shadowSim = ui::AddSimulation(
+      state, "Shadow sim",
+      SimReading(fem::SubjectKind::Part, shadowId, "gap * 2"));
+  const size_t rigSim = ui::AddSimulation(
+      state, "Rig sim",
+      SimReading(fem::SubjectKind::Assembly, rigId, "gap * 4"));
+  REQUIRE(partSim != SIZE_MAX);
+  REQUIRE(shadowSim != SIZE_MAX);
+  REQUIRE(rigSim != SIZE_MAX);
+  ui::SetActivePart(state, 0);
+  Document& part = *ui::SlotDoc(state, 0);
+  const auto has = [](const std::vector<std::string>& refs,
+                      const std::string& s) {
+    return std::find(refs.begin(), refs.end(), s) != refs.end();
+  };
+
+  // A part's own variable: its simulation's study reads it.
+  std::vector<std::string> refs;
+  CHECK_FALSE(ui::RemovePartVariable(state, part, "t", &refs));
+  CHECK(has(refs, "Part sim: study 'Bend'"));
+  REQUIRE(ui::RenamePartVariable(state, part, "t", "wall"));
+  CHECK(LoadExpr(state, partSim) == "wall * 10 + gap");
+
+  // The project's: every simulation that sees it, not one that shadows it.
+  refs.clear();
+  CHECK_FALSE(ui::RemoveProjectVariable(state, "gap", &refs));
+  CHECK(has(refs, "Part sim: study 'Bend'"));
+  CHECK(has(refs, "Part sim: simulation mesh"));
+  CHECK(has(refs, "Rig sim: study 'Bend'"));
+  CHECK_FALSE(has(refs, "Shadow sim: study 'Bend'"));
+  REQUIRE(ui::RenameProjectVariable(state, "gap", "clearance"));
+  CHECK(LoadExpr(state, partSim) == "wall * 10 + clearance");
+  CHECK(ui::SlotSim(state, partSim)->Mesh().size.expr == "clearance");
+  CHECK(LoadExpr(state, rigSim) == "clearance * 4");
+  CHECK(LoadExpr(state, shadowSim) == "gap * 2"); // its part's own
+  // Undoing the project rename puts the simulations back too.
+  ui::GlobalUndo(state);
+  CHECK(LoadExpr(state, rigSim) == "gap * 4");
+  CHECK(LoadExpr(state, partSim) == "wall * 10 + gap");
+}

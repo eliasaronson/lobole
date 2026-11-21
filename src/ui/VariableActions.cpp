@@ -42,6 +42,7 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/fem/FemTopo.h"
+#include "core/fem/SimDocument.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
 #include "core/io/ProjectStamp.h"
@@ -225,6 +226,51 @@ void RewriteRequirements(AppState& state, const std::string& from,
   }
 }
 
+// The simulation tabs whose studies read variable `name` in the scope
+// `part` names (0: the project's), with their slot index. A simulation of a
+// part reads that part's scope, where a local variable shadows a project
+// one; a simulation of an assembly, or of a part that is gone, reads the
+// project's.
+template <class F>
+void ForEachSimInScope(AppState& state, const std::string& name, uint64_t part,
+                       F&& visit) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    fem::SimDocument* sim = SlotSim(state, i);
+    if (sim == nullptr)
+      continue;
+    const fem::SimSubject& subject = sim->Subject();
+    const bool ofPart = subject.kind == fem::SubjectKind::Part;
+    if (part != 0) {
+      if (!ofPart || subject.docId != part)
+        continue;
+    } else if (ofPart) {
+      const Document* d = PartDocById(state, subject.docId);
+      if (d != nullptr && d->FindParameter(name) != nullptr)
+        continue; // its part's own variable of the name
+    }
+    visit(i, *sim);
+  }
+}
+
+// A variable renamed: every simulation reading it where it means it follows,
+// as its subject's features do.
+void RewriteSimulations(AppState& state, const std::string& from,
+                        const std::string& to, uint64_t part) {
+  ForEachSimInScope(state, from, part, [&](size_t, fem::SimDocument& sim) {
+    (void)sim.RenameReferences(from, to); // saved; same values
+  });
+}
+
+std::vector<std::string>
+SimulationReferences(AppState& state, const std::string& name, uint64_t part) {
+  std::vector<std::string> refs;
+  ForEachSimInScope(state, name, part, [&](size_t i, fem::SimDocument& sim) {
+    for (const std::string& owner : sim.FindParameterReferences(name))
+      refs.push_back(state.parts[i].name + ": " + owner);
+  });
+  return refs;
+}
+
 } // namespace
 
 std::vector<std::string> RequirementReferences(const AppState& state,
@@ -269,7 +315,8 @@ void RewriteAssemblyRefs(AppState& state, const std::string& from,
       if (changed)
         d->BumpVersion();
     }
-  }
+  } // And every simulation's that reads the project's variable.
+  RewriteSimulations(state, from, to, 0);
 }
 } // namespace
 
@@ -280,6 +327,7 @@ bool RenamePartVariable(AppState& state, Document& doc,
           std::make_unique<RenameVariableCommand>(oldName, newName), doc))
     return false;
   RewriteRequirements(state, oldName, newName, PartIdOf(state, doc));
+  RewriteSimulations(state, oldName, newName, PartIdOf(state, doc));
   return true;
 }
 
@@ -288,6 +336,8 @@ bool RemovePartVariable(AppState& state, Document& doc, const std::string& name,
   std::vector<std::string> refs = doc.FindParameterReferences(name);
   for (std::string& r :
        RequirementReferences(state, name, PartIdOf(state, doc)))
+    refs.push_back(std::move(r));
+  for (std::string& r : SimulationReferences(state, name, PartIdOf(state, doc)))
     refs.push_back(std::move(r));
   if (!refs.empty()) {
     if (outRefs != nullptr)
@@ -349,6 +399,9 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
     for (const std::string& owner : owners)
       refs.push_back(state.parts[i].name + ": " + owner);
   }
+  // A simulation's studies and mesh read it as a part's features do.
+  for (std::string& r : SimulationReferences(state, name, 0))
+    refs.push_back(std::move(r));
   // A requirement that reads it: deleting the variable would leave the
   // requirement unresolved, so it is refused like a feature's reference.
   for (std::string& r : RequirementReferences(state, name, 0))
