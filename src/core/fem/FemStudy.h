@@ -450,13 +450,13 @@ struct Study {
   // many factors (kBucklingFactorsDefault when not given: a symmetric
   // section has two equal first modes).
   int numModes = 6;
-  // Modal only (vNEXT): free-free, the part with no support at all. Its six
+  // Modal only (v229): free-free, the part with no support at all. Its six
   // rigid modes are found and labelled, and `numModes` elastic modes after
   // them (docs/simulation/README.md#free-free-modes). A free study takes no
   // support: one with any is refused, never solved as supported.
   bool freeFree = false;
 
-  // What a stored result keeps (vNEXT): the surface, or the whole field.
+  // What a stored result keeps (v229): the surface, or the whole field.
   KeepMode keep = KeepMode::Surface;
 
   // Topology only. The optimizer removes material from the loaded body down to

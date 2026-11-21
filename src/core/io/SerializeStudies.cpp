@@ -154,7 +154,7 @@ json StudyToJson(const fem::Study& s) {
   if (s.type == fem::AnalysisType::Modal ||
       s.type == fem::AnalysisType::Buckling)
     j["num_modes"] = s.numModes;
-  // vNEXT: a free-free modal study, and a study that keeps its whole field;
+  // v229: a free-free modal study, and a study that keeps its whole field;
   // each absent at its default, so every older study re-saves as it was.
   if (s.freeFree)
     j["free"] = true;
@@ -275,7 +275,7 @@ json StudyToJson(const fem::Study& s) {
         lj["occurrence"] = l.occurrenceId;
       WriteExprText(lj, "magnitude", l.magnitude.expr);
       if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote ||
-          l.type == fem::LoadType::Bearing) // vNEXT: a bearing load's
+          l.type == fem::LoadType::Bearing) // v229: a bearing load's
         lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
       // v170: a torque's axis (omitted: the cylindrical face's own), and a
       // remote load's point.
@@ -471,7 +471,7 @@ fem::Study StudyFromJson(const json& j) {
   s.numModes = j.value("num_modes", s.type == fem::AnalysisType::Buckling
                                         ? fem::kBucklingFactorsDefault
                                         : 6);
-  if (j.contains("free")) { // vNEXT
+  if (j.contains("free")) { // v229
     if (!j.at("free").is_boolean())
       throw std::runtime_error("study free is true or false");
     s.freeFree = j.at("free").get<bool>();
@@ -480,7 +480,7 @@ fem::Study StudyFromJson(const json& j) {
                                "is " +
                                analysisStr);
   }
-  if (j.contains("keep")) { // vNEXT
+  if (j.contains("keep")) { // v229
     const std::string k =
         j.at("keep").is_string() ? j.at("keep").get<std::string>() : "";
     if (!fem::KeepModeFromString(k, s.keep))
@@ -680,7 +680,7 @@ fem::Study StudyFromJson(const json& j) {
       throw std::runtime_error("load " + std::to_string(l.id) +
                                ": direction is a force's, a remote load's or "
                                "a bearing load's");
-    if (l.type == fem::LoadType::Bearing) { // vNEXT
+    if (l.type == fem::LoadType::Bearing) { // v229
       if (!lj.contains("direction"))
         throw std::runtime_error("load " + std::to_string(l.id) +
                                  ": a bearing load needs its direction");
@@ -1089,7 +1089,7 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
                  {"shape", w.F32(m.displacement)}};
       if (m.factor != 0.0) // v207: a buckling mode's load factor
         mj["factor"] = m.factor;
-      // vNEXT: a modal mode's effective mass, and whether it is rigid.
+      // v229: a modal mode's effective mass, and whether it is rigid.
       if (m.effectiveMassKg != glm::dvec3(0.0))
         mj["effective_mass_kg"] = Vec3ToJson(m.effectiveMassKg);
       if (m.rigid)
@@ -1097,7 +1097,7 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
       modes.push_back(std::move(mj));
     }
     out["modes"] = std::move(modes);
-    if (r.modalMassKg > 0) // vNEXT
+    if (r.modalMassKg > 0) // v229
       out["mass_kg"] = r.modalMassKg;
   }
   return out;
@@ -1154,7 +1154,7 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
     mode.frequencyHz = mj.at("frequency_hz").get<double>();
     mode.displacement = f.Vec3s(mj.at("shape"), "a mode shape");
     mode.factor = mj.value("factor", 0.0);
-    if (mj.contains("effective_mass_kg")) // vNEXT
+    if (mj.contains("effective_mass_kg")) // v229
       mode.effectiveMassKg = Vec3FromJson(mj.at("effective_mass_kg"));
     mode.rigid = mj.value("rigid", false);
     r.modes.push_back(std::move(mode));
@@ -1657,7 +1657,7 @@ bool StudyResultToJson(
     out["solver"] = rt.solver;
   if (rt.convergence.checked || !rt.convergence.why.empty())
     out["convergence"] = ConvergenceToJson(rt.convergence);
-  // vNEXT: the whole field, every node and tet (docs/simulation/README.md
+  // v229: the whole field, every node and tet (docs/simulation/README.md
   // #a-full-result).
   if (rt.keepFull)
     out["keep"] = "full";
@@ -1830,7 +1830,7 @@ fem::StudyRuntime StudyResultFromJson(
   }
   if (j.contains("convergence")) // v206
     rt.convergence = ConvergenceFromJson(j.at("convergence"));
-  if (j.contains("keep")) { // vNEXT
+  if (j.contains("keep")) { // v229
     if (j.at("keep") != "full")
       throw std::runtime_error(what + ": keep " + j.at("keep").dump() +
                                " (a saved result says keep only when it is "
@@ -1873,7 +1873,7 @@ fem::StudyRuntime StudyResultFromJson(
     b.bodyIndex = bj.value("body_index", -1);
     b.bodyName = bj.value("body", std::string{});
     if (bj.contains("mesh")) {
-      // A full body written against a stored mesh (vNEXT).
+      // A full body written against a stored mesh (v229).
       if (!rt.keepFull)
         throw std::runtime_error(what + ": body '" + b.bodyName +
                                  "' names a stored mesh, which only a full "

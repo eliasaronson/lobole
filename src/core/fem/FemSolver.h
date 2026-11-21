@@ -259,7 +259,7 @@ struct FemResults {
     double frequencyHz = 0.0;
     std::vector<glm::dvec3> displacement; // normalized (max |u| = 1)
     double factor = 0.0;
-    // A modal mode (vNEXT; zero on a buckling mode and on one saved
+    // A modal mode (v229; zero on a buckling mode and on one saved
     // before): its effective mass along x, y and z (kg), (phi^T M r)^2 /
     // (phi^T M phi) with r a unit translation, so the modes' sum along a
     // direction approaches the mass that moves; and on a free-free study
@@ -269,7 +269,7 @@ struct FemResults {
     bool rigid = false;
   };
   std::vector<ModeShape> modes;
-  // A modal result (vNEXT): the mass of the body as solved (kg), which its
+  // A modal result (v229): the mass of the body as solved (kg), which its
   // modes' effective masses are read against. 0 on another.
   double modalMassKg = 0.0;
 
@@ -900,7 +900,7 @@ struct StudyRuntime {
   // (docs/simulation/README.md#one-mesh-shared). Empty for a run whose mesh
   // was not stored (a topology shape, a convergence step's refinement).
   std::vector<uint64_t> meshKeys;
-  // The study's KeepMode::Full (vNEXT): KeepWhatIsRead keeps every body's
+  // The study's KeepMode::Full (v229): KeepWhatIsRead keeps every body's
   // whole mesh and field, and a save writes them against `meshKey`.
   bool keepFull = false;
   std::vector<StudyBodyResult> bodies;

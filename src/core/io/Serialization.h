@@ -287,7 +287,7 @@ fem::Study StudyFromJson(const nlohmann::json& j);
 // when the inputs still hash the same, stale otherwise). Returns false for a
 // runtime that holds nothing solved. Throws on malformed input.
 //
-// A full result (fem::KeepMode::Full, vNEXT;
+// A full result (fem::KeepMode::Full, v229;
 // docs/simulation/README.md#a-full-result) keeps every node and tet. A body
 // solved on a stored mesh that `storedAs` says is kept (the simulation's,
 // unchanged) is written against it, `mesh` its key, with no nodes, tets or

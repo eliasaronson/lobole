@@ -3642,7 +3642,7 @@ the simulation's mesh.
   `tests/test_fem_free_modal.cpp` (`[free]`,
   [free-free modes](#free-free-modes)), `tests/test_sim_full_result.cpp`
   (`[keepfull]`, [a full result](#a-full-result)), the golden
-  `vNEXT-free-modal-bearing-keep`, `tests/sim_loads_results_smoke.py`
+  `v229-free-modal-bearing-keep`, `tests/sim_loads_results_smoke.py`
   over the RPCs (every refusal changing nothing, the full result through a
   save, a closed app and a new instance), and the GUI's
   `sim/the_load_tool_places_a_bearing_load`,

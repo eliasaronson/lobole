@@ -2158,7 +2158,7 @@ TEST_CASE("Simulation golden corpus loads and round-trips",
             CHECK_FALSE(have.symmetry.On());
           }
         }
-        // vNEXT: a free-free modal study and what a study's result keeps
+        // v229: a free-free modal study and what a study's result keeps
         // (docs/simulation/README.md#free-free-modes, #a-full-result), as
         // [study, free, keep]; and a bearing load, [study, load, force N,
         // direction] (docs/simulation/README.md#bearing-loads).
