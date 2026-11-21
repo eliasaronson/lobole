@@ -2773,7 +2773,7 @@ part's and the assembly's own studies.
 
 A project lists a simulation in `project.json` as a document of `type:
 "simulation"` (v223), stored under `simulations/<folder>/` beside `parts/`,
-`assemblies/`, `drawings/` and `jobs/`. It is a tab (vNEXT): listed in tab
+`assemblies/`, `drawings/` and `jobs/`. It is a tab (v225): listed in tab
 order, `active` may name it, and it may carry a tab `folder`. A project
 written before listed them after every tab with `active` counting tabs
 only, which is the same index. The tab is a `ui::PartSlot` of kind

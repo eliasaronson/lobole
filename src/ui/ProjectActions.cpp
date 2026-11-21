@@ -904,7 +904,7 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
         docs.push_back(
             {{"name", p.at("name")}, {"dir", p.at("dir")}, {"type", "part"}});
     }
-    // A simulation is a tab (vNEXT). One written before it was listed after
+    // A simulation is a tab (v225). One written before it was listed after
     // every tab, with `active` counting tabs alone: the same index into the
     // whole list, so it reads as it is.
     const size_t n = docs.size();
