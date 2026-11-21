@@ -29,6 +29,7 @@
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemThermal.h"
 #include "core/io/Serialization.h"
+#include "study_fixtures.h"
 #include "topo_testmesh.h"
 
 #include <BRepBndLib.hxx>
@@ -657,7 +658,7 @@ TEST_CASE("CalculiX and the in-house solver agree on a column clamped at its "
   const auto isZ = [](double z) {
     return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
   };
-  fem::Study& s = doc.AddStudy("Column");
+  fem::Study s = NewStudy(doc, "Column");
   s.meshSize = 2.5;
   s.loads.push_back(
       MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", isZ(0.0))));
@@ -697,7 +698,7 @@ TEST_CASE("CalculiX and the in-house solver agree on a lug on a pin held from "
     return std::abs(c.x - 80.0) < 1e-6;
   });
   {
-    fem::Study& s = doc.AddStudy("Lug");
+    fem::Study s = NewStudy(doc, "Lug");
     s.meshSize = 2.0;
     fem::Load pin = MakeLoad(doc, fem::LoadType::Pin, boreAt(12.0));
     pin.fixRotation = true;
@@ -707,7 +708,7 @@ TEST_CASE("CalculiX and the in-house solver agree on a lug on a pin held from "
     SolveBoth(Meshed(doc, s), *ccx, "lug on a pin held from turning");
   }
   {
-    fem::Study& s = doc.AddStudy("Lever");
+    fem::Study s = NewStudy(doc, "Lever");
     s.meshSize = 2.0;
     s.loads.push_back(MakeLoad(doc, fem::LoadType::Pin, boreAt(12.0)));
     s.loads.push_back(MakeLoad(doc, fem::LoadType::Pin, boreAt(40.0)));
@@ -744,7 +745,7 @@ TEST_CASE("CalculiX and the in-house solver agree on rollers, a cylindrical "
   const ElementRef end = FaceWhere(body, "plane", [&](const glm::dvec3& c) {
     return std::abs(glm::dot(c, dir) - 50.0) < 1e-6;
   });
-  fem::Study& s = doc.AddStudy("Moved");
+  fem::Study s = NewStudy(doc, "Moved");
   s.meshSize = 2.5;
   s.loads.push_back(MakeLoad(doc, fem::LoadType::Roller, root));
   fem::Load around = MakeLoad(doc, fem::LoadType::Cylindrical, side);
@@ -779,7 +780,7 @@ TEST_CASE("CalculiX and the in-house solver agree on a shaft under a torque "
       FaceWhere(body, "plane", [](const glm::dvec3& c) { return c.z < 30.0; });
   const ElementRef top =
       FaceWhere(body, "plane", [](const glm::dvec3& c) { return c.z > 30.0; });
-  fem::Study& s = doc.AddStudy("Twist");
+  fem::Study s = NewStudy(doc, "Twist");
   s.meshSize = 2.0;
   s.loads.push_back(MakeLoad(doc, fem::LoadType::Fixed, bottom));
   s.loads.push_back(MakeLoad(doc, fem::LoadType::Torque, side, 2000.0));
@@ -800,7 +801,7 @@ TEST_CASE("CalculiX and the in-house solver agree on a pull on part of a face",
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Pull");
+  fem::Study s = NewStudy(doc, "Pull");
   s.meshSize = 2.5;
   s.loads.push_back(MakeLoad(doc, fem::LoadType::Fixed,
                              FaceWhere(body, "plane", [](const glm::dvec3& c) {
@@ -905,7 +906,7 @@ TEST_CASE("the deck export_study_inp writes is one ccx runs",
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Beam");
+  fem::Study s = NewStudy(doc, "Beam");
   s.meshSize = 4.0;
   s.loads.push_back(MakeLoad(doc, fem::LoadType::Fixed,
                              FaceWhere(body, "plane", [](const glm::dvec3& c) {
@@ -1006,7 +1007,7 @@ TEST_CASE("CalculiX and the in-house solver buckle a column at the same "
   const auto isZ = [](double z) {
     return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
   };
-  fem::Study& s = doc.AddStudy("Column");
+  fem::Study s = NewStudy(doc, "Column");
   s.type = fem::AnalysisType::Buckling;
   s.meshSize = 4.0;
   s.loads.push_back(
@@ -1035,7 +1036,7 @@ TEST_CASE("CalculiX and the in-house solver buckle a bracket on a pin at the "
                                                   BooleanOp::Subtract));
   REQUIRE(doc.GetBodies().size() == 1);
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Bracket");
+  fem::Study s = NewStudy(doc, "Bracket");
   s.type = fem::AnalysisType::Buckling;
   s.meshSize = 3.0;
   fem::Load pin = MakeLoad(
@@ -1070,7 +1071,7 @@ TEST_CASE("CalculiX and the in-house solver buckle a shaft under a torque "
       FaceWhere(body, "plane", [](const glm::dvec3& c) { return c.z < 40.0; });
   const ElementRef top =
       FaceWhere(body, "plane", [](const glm::dvec3& c) { return c.z > 40.0; });
-  fem::Study& s = doc.AddStudy("Twist");
+  fem::Study s = NewStudy(doc, "Twist");
   s.type = fem::AnalysisType::Buckling;
   s.meshSize = 1.5;
   s.loads.push_back(MakeLoad(doc, fem::LoadType::Fixed, bottom));
@@ -1198,7 +1199,7 @@ TEST_CASE("calibrate the CalculiX memory estimate", "[.][calculix-calibrate]") {
     box->SetMaterial("steel");
     doc.AddFeature(std::move(box));
     const Body& body = doc.GetBodies()[0];
-    fem::Study& s = doc.AddStudy("Column");
+    fem::Study s = NewStudy(doc, "Column");
     s.meshSize = size;
     s.loads.push_back(MakeLoad(
         doc, fem::LoadType::Fixed,
@@ -1467,7 +1468,7 @@ TEST_CASE("a part rests on the ground under a flat face only",
   roller->SetMaterial("steel");
   doc.AddFeature(std::move(roller));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Rests");
+  fem::Study s = NewStudy(doc, "Rests");
   fem::Load c = MakeLoad(
       doc, fem::LoadType::Contact,
       FaceWhere(body, "cylinder", [](const glm::dvec3&) { return true; }));
@@ -1596,7 +1597,7 @@ TEST_CASE("a cantilever at P L^2 / EI = 1 bends as Bisshopp and Drucker's "
   const double E = Steel().youngGPa * 1000.0;
   const double I = a * a * a * a / 12.0;
   const double P = E * I / (L * L); // k = 1
-  fem::Study& s = doc.AddStudy("Elastica");
+  fem::Study s = NewStudy(doc, "Elastica");
   s.meshSize = 2.5;
   const auto isZ = [](double z) {
     return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
@@ -1657,7 +1658,7 @@ TEST_CASE("at a load too small to deform it, a large-deformation run answers "
   cyl->SetMaterial("steel");
   doc.AddFeature(std::move(cyl));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Small");
+  fem::Study s = NewStudy(doc, "Small");
   s.meshSize = 2.5;
   const auto isZ = [](double z) {
     return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
@@ -1768,7 +1769,7 @@ TEST_CASE("a shallow arch snaps through at its closed form's load, half its "
   REQUIRE_FALSE(pins[0].name.empty());
   REQUIRE_FALSE(pins[1].name.empty());
   REQUIRE_FALSE(crown.empty());
-  fem::Study& s = doc.AddStudy("Arch");
+  fem::Study s = NewStudy(doc, "Arch");
   s.meshSize =
       std::getenv("ARCH_MESH") ? std::atof(std::getenv("ARCH_MESH")) : 3.0;
   for (const ElementRef& p : pins)
@@ -1821,7 +1822,7 @@ TEST_CASE("a column seeded with its first mode peaks below its linear factor, "
     box->SetMaterial("steel");
     doc.AddFeature(std::move(box));
     const Body& body = doc.GetBodies()[0];
-    fem::Study& s = doc.AddStudy("Column");
+    fem::Study s = NewStudy(doc, "Column");
     s.meshSize = 5.0;
     s.loads.push_back(MakeLoad(
         doc, fem::LoadType::Fixed,
@@ -1881,7 +1882,7 @@ TEST_CASE("calibrate the CalculiX nonlinear memory estimate",
     box->SetMaterial("steel");
     doc.AddFeature(std::move(box));
     const Body& body = doc.GetBodies()[0];
-    fem::Study& s = doc.AddStudy("Column");
+    fem::Study s = NewStudy(doc, "Column");
     s.meshSize = size;
     s.nonlinear.largeDeformation = true;
     s.loads.push_back(MakeLoad(
@@ -1968,7 +1969,7 @@ TEST_CASE("a block on the ground lifts off under a moment only past its "
     box->SetMaterial("steel");
     doc.AddFeature(std::move(box));
     const Body& body = doc.GetBodies()[0];
-    fem::Study& s = doc.AddStudy("Rocking");
+    fem::Study s = NewStudy(doc, "Rocking");
     s.meshSize = 4.0;
     s.nonlinear.increments = 2;
     const auto isZ = [](double z) {
@@ -2073,7 +2074,7 @@ TEST_CASE("a thin bridge held by its contact alone is held by its contact, "
       std::make_unique<BooleanFeature>("Bridge", sa, b, BooleanOp::Union));
   REQUIRE(doc.GetBodies().size() == 1);
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Bridge");
+  fem::Study s = NewStudy(doc, "Bridge");
   s.meshSize = t;
   s.nonlinear.increments = 2;
   const auto at = [](double x, double z) {
@@ -2123,7 +2124,7 @@ TEST_CASE("a part on a frictionless contact pushed sideways is refused: the "
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Sliding");
+  fem::Study s = NewStudy(doc, "Sliding");
   s.meshSize = 5.0;
   s.nonlinear.increments = 2;
   const auto isZ = [](double z) {
@@ -2523,7 +2524,7 @@ TEST_CASE("a plastic study is refused where a nonlinear one is, and on a "
   box->SetMaterial("pla");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Yield");
+  fem::Study s = NewStudy(doc, "Yield");
   const auto isZ = [](double z) {
     return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
   };
@@ -2555,7 +2556,7 @@ TEST_CASE("under its yield a plastic run reads CalculiX's own stress, which "
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Under yield");
+  fem::Study s = NewStudy(doc, "Under yield");
   s.meshSize = 3.0;
   const auto isZ = [](double z) {
     return [z](const glm::dvec3& c) { return std::abs(c.z - z) < 1e-6; };
@@ -2624,7 +2625,7 @@ TEST_CASE("a bar pressed past its yield yields uniformly, as its hardening "
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Past yield");
+  fem::Study s = NewStudy(doc, "Past yield");
   s.meshSize = 5.0;
   s.nonlinear.plasticity = true;
   s.nonlinear.increments = 6;
@@ -2750,7 +2751,7 @@ TEST_CASE("a rectangular bar bent past its yield collapses at its plastic "
   const Body& body = doc.GetBodies()[0];
   const double fy = Steel().yieldMPa;
   const double Mp = fy * b * h * h / 4.0;
-  fem::Study& s = doc.AddStudy("Collapse");
+  fem::Study s = NewStudy(doc, "Collapse");
   s.meshSize = 3.4;
   s.nonlinear.plasticity = true;
   s.nonlinear.increments = 10;
@@ -2968,6 +2969,7 @@ namespace {
 // stress-free at 20 C.
 struct HeatedBar {
   Document doc;
+  TestStudies studies; // as a simulation of the bar holds them
   uint64_t heat = 0, clamped = 0;
   HeatedBar(double mesh) {
     auto bar =
@@ -2978,7 +2980,7 @@ struct HeatedBar {
     const auto atX = [](double x) {
       return [x](const glm::dvec3& c) { return std::abs(c.x - x) < 1e-6; };
     };
-    fem::Study& h = doc.AddStudy("Heat");
+    fem::Study h = NewStudy(doc, "Heat");
     h.type = fem::AnalysisType::Thermal;
     h.meshSize = mesh;
     fem::Load hot = MakeLoad(doc, fem::LoadType::Temperature,
@@ -2988,8 +2990,8 @@ struct HeatedBar {
                               FaceWhere(body, "plane", atX(100.0)));
     cold.temperatureC = 20.0;
     h.loads = {hot, cold};
-    heat = h.id;
-    fem::Study& st = doc.AddStudy("Clamped");
+    heat = studies.Add(h).id;
+    fem::Study st = NewStudy(doc, "Clamped");
     st.meshSize = mesh;
     st.loads = {
         MakeLoad(doc, fem::LoadType::Fixed, FaceWhere(body, "plane", atX(0.0))),
@@ -2999,16 +3001,17 @@ struct HeatedBar {
     st.thermalLoad.fromStudy = heat;
     st.thermalLoad.hasStressFree = true;
     st.thermalLoad.stressFreeC = 20.0;
-    clamped = st.id;
+    clamped = studies.Add(st).id;
   }
   fem::StudyRuntime Run(uint64_t id, fem::Solver solver,
                         const fem::CalculixInstall* ccx,
                         const Scratch* scratch) {
-    fem::Study* s = doc.StudyForRun(id);
+    fem::Study* s = studies.Find(id);
     s->solver = solver;
     fem::StudyPlan plan;
     std::string err;
-    REQUIRE(fem::PlanStudy(doc, *s, plan, &err));
+    const fem::StudySiblings siblings = studies.Siblings();
+    REQUIRE(fem::PlanStudy(doc, *s, plan, &err, &siblings));
     fem::SolveOptions options;
     if (ccx)
       options.calculix = RunWith(*ccx, scratch->dir / "runs");
@@ -3095,7 +3098,7 @@ TEST_CASE("a steel bar clamped along its axis, heated past yield and cooled, "
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Heated past yield");
+  fem::Study s = NewStudy(doc, "Heated past yield");
   s.meshSize = 5.0;
   s.nonlinear.plasticity = true;
   s.nonlinear.increments = 8;
@@ -3339,7 +3342,7 @@ TEST_CASE("an exact answer printed to ccx's seven digits balances a thin bent "
       std::make_unique<BooleanFeature>("Sheet", solid, legB, BooleanOp::Union));
   REQUIRE(doc.GetBodies().size() == 1);
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Bent");
+  fem::Study s = NewStudy(doc, "Bent");
   s.meshSize = t;
   s.converge = fem::ConvergeMode::Never;
   s.loads.push_back(MakeLoad(doc, fem::LoadType::Fixed,

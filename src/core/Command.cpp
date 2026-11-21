@@ -215,7 +215,7 @@ void RenameVariableCommand::Undo(Document& doc) {
   doc.RenameParameter(m_newName, m_oldName);
 }
 
-// ---- FEM studies ----------------------------------------------------------
+// ---- Tolerances -----------------------------------------------------------
 
 SetToleranceCommand::SetToleranceCommand(Tolerance tolerance)
     : m_after(std::move(tolerance)) {}
@@ -327,69 +327,6 @@ bool ClearToleranceCommand::Execute(Document& doc) {
 void ClearToleranceCommand::Undo(Document& doc) {
   if (m_had)
     doc.SetTolerance(m_removed);
-}
-
-AddStudyCommand::AddStudyCommand(std::string name, fem::AnalysisType type)
-    : m_name(std::move(name)), m_type(type) {}
-
-std::string AddStudyCommand::Description() const {
-  return m_name.empty() ? "Add study" : "Add study '" + m_name + "'";
-}
-
-bool AddStudyCommand::Execute(Document& doc) {
-  if (m_id == 0) {
-    fem::Study& s = doc.AddStudy(m_name);
-    s.type = m_type; // AddStudy stamped; the type is part of the same edit
-    if (m_type == fem::AnalysisType::Buckling)
-      s.numModes = fem::kBucklingFactorsDefault;
-    m_id = s.id;
-    m_name = s.name; // capture the auto-generated name for redo/description
-  } else {
-    // Redo: restore the same (empty) study with its original id so refs stay
-    // stable across undo/redo, like AddFeatureCommand reusing its feature.
-    fem::Study s;
-    s.id = m_id;
-    s.name = m_name;
-    s.type = m_type;
-    if (m_type == fem::AnalysisType::Buckling)
-      s.numModes = fem::kBucklingFactorsDefault;
-    doc.RestoreStudy(std::move(s));
-  }
-  return true;
-}
-
-void AddStudyCommand::Undo(Document& doc) { doc.RemoveStudy(m_id); }
-
-RemoveStudyCommand::RemoveStudyCommand(uint64_t studyId) : m_id(studyId) {}
-
-std::string RemoveStudyCommand::Description() const { return "Remove study"; }
-
-bool RemoveStudyCommand::Execute(Document& doc) {
-  const fem::Study* s = doc.FindStudy(m_id);
-  if (!s)
-    return false;
-  m_snapshot = DocumentIO::StudyToJson(*s);
-  return doc.RemoveStudy(m_id);
-}
-
-void RemoveStudyCommand::Undo(Document& doc) {
-  doc.RestoreStudy(DocumentIO::StudyFromJson(m_snapshot));
-}
-
-ModifyStudyCommand::ModifyStudyCommand(std::string description,
-                                       nlohmann::json before,
-                                       nlohmann::json after)
-    : m_description(std::move(description)), m_before(std::move(before)),
-      m_after(std::move(after)) {}
-
-std::string ModifyStudyCommand::Description() const { return m_description; }
-
-bool ModifyStudyCommand::Execute(Document& doc) {
-  return doc.ReplaceStudy(DocumentIO::StudyFromJson(m_after));
-}
-
-void ModifyStudyCommand::Undo(Document& doc) {
-  doc.ReplaceStudy(DocumentIO::StudyFromJson(m_before));
 }
 
 // ---- Configurations -------------------------------------------------------

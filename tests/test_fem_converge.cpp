@@ -21,6 +21,7 @@
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "study_fixtures.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -107,6 +108,7 @@ struct Part {
   Document doc;
   ElementRef hot; // the face the peak lies on (the bore, a fillet)
   uint64_t study = 0;
+  fem::Study studied; // the study, the test's own (a part keeps none)
 };
 std::unique_ptr<Part> HolePlate() {
   auto p = std::make_unique<Part>();
@@ -123,11 +125,12 @@ std::unique_ptr<Part> HolePlate() {
   REQUIRE(doc.GetBodies().size() == 1);
   const Body& b = doc.GetBodies()[0];
   p->hot = FaceAt(b, {45, 20, 2.5});
-  fem::Study& s = doc.AddStudy("Hole");
+  fem::Study s = NewStudy(doc, "Hole");
   s.converge = fem::ConvergeMode::Never;
   s.loads.push_back(Fixed(doc, FaceAt(b, {0, 20, 2.5})));
   s.loads.push_back(Force(doc, FaceAt(b, {100, 20, 2.5}), 1500.0, {1, 0, 0}));
   p->study = s.id;
+  p->studied = s;
   return p;
 }
 
@@ -161,11 +164,12 @@ std::unique_ptr<Part> FilletBar() {
   REQUIRE(doc.GetBodies().size() == 1);
   const Body& b = doc.GetBodies()[0];
   p->hot = FaceAt(b, {40.586, 2.414, 2.5});
-  fem::Study& s = doc.AddStudy("Fillet");
+  fem::Study s = NewStudy(doc, "Fillet");
   s.converge = fem::ConvergeMode::Never;
   s.loads.push_back(Fixed(doc, FaceAt(b, {0, 13, 2.5})));
   s.loads.push_back(Force(doc, FaceAt(b, {80, 13, 2.5}), 1000.0, {1, 0, 0}));
   p->study = s.id;
+  p->studied = s;
   return p;
 }
 
@@ -179,17 +183,18 @@ std::unique_ptr<Part> ClampedPlate(double t, const char* material = "steel") {
   box->SetMaterial(material);
   doc.AddFeature(std::move(box));
   const Body& b = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Cantilever");
+  fem::Study s = NewStudy(doc, "Cantilever");
   s.converge = fem::ConvergeMode::Never;
   s.loads.push_back(Fixed(doc, FaceAt(b, {0, 10, t / 2})));
   s.loads.push_back(Force(doc, FaceAt(b, {60, 10, t / 2}),
                           10.0 * (t / 2) * (t / 2), {0, 0, -1}));
   p->hot = FaceAt(b, {30, 10, t});
   p->study = s.id;
+  p->studied = s;
   return p;
 }
 
-fem::Study& StudyOf(Part& p) { return *p.doc.StudyForRun(p.study); }
+fem::Study& StudyOf(Part& p) { return p.studied; }
 
 fem::StudyRuntime Run(Part& p) {
   fem::StudyRuntime rt;

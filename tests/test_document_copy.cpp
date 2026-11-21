@@ -62,9 +62,6 @@ std::unique_ptr<Document> BuildLoadedDocument() {
   cfg.parameterOverrides.push_back({"height", "30"});
   doc->RestoreConfiguration(cfg);
 
-  fem::Study& study = doc->AddStudy("Bend");
-  study.meshSize = 4.0;
-
   doc->SetAsset("underlay.png", {1, 2, 3, 4, 5});
   doc->SetUnits({units::Length::Inch, units::Mass::Gram, units::Angle::Radian});
   // Sheet-metal rules: a copy without them regenerates every flange red.
@@ -141,33 +138,6 @@ TEST_CASE("A copy is a new document, not the same one twice",
         original->GetBodies()[0].shape.Volume());
   CHECK(original->FindParameter("height")->expression == "12");
   CHECK(original->ActiveConfiguration() != 0);
-}
-
-TEST_CASE("A copy carries study results, and a stale one stays stale",
-          "[document][copy][fem]") {
-  std::unique_ptr<Document> original = BuildLoadedDocument();
-  const uint64_t studyId = original->GetStudies()[0].id;
-
-  fem::StudyRuntime rt;
-  rt.solvedAtVersion = original->Version(); // current as of this geometry
-  original->StoreStudyResults(studyId, rt);
-  REQUIRE_FALSE(original->StudyResultsStale(studyId));
-
-  // A solve costs minutes and the copy's geometry IS the original's, so the
-  // result comes along and reads current — re-stamped, because versions are
-  // per document.
-  const Document fresh(*original);
-  REQUIRE(fresh.StudyResults(studyId) != nullptr);
-  CHECK_FALSE(fresh.StudyResultsStale(studyId));
-
-  // But a result that was already stale must not be laundered into a
-  // fresh-looking one by being copied.
-  original->SetParameter("height", "50");
-  original->Regenerate();
-  REQUIRE(original->StudyResultsStale(studyId));
-  const Document stale(*original);
-  REQUIRE(stale.StudyResults(studyId) != nullptr);
-  CHECK(stale.StudyResultsStale(studyId));
 }
 
 // CopyWithGeometry: the same document, reached without re-deriving it. A copy

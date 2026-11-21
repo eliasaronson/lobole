@@ -32,7 +32,7 @@
 #include "ui/PreviewFeature.h"    // BeginToolWindowFrame
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 #include "ui/SimRunActions.h"
-#include "ui/SimTree.h"
+#include "ui/SimTree.h" // DrawSimSubjectRow
 #include "ui/SimulationActions.h"
 #include "ui/SimulationView.h"
 #include "ui/SketchInteraction.h" // WorldToScreen (labels)
@@ -114,8 +114,6 @@ void MessageText(const ImVec4& color, const std::string& text) {
   ImGui::PopTextWrapPos();
 }
 
-// Runs one study edit as an undoable ModifyStudyCommand: snapshot before,
-// apply `mutate` to a copy, snapshot after, execute. Mirrors the RPC path.
 const char* LoadLabel(fem::LoadType t) {
   switch (t) {
   case fem::LoadType::Fixed:
@@ -194,7 +192,8 @@ template <class Arm>
 void DrawFrameSupportTools(AppState& state, const fem::Study& s, Arm&& arm) {
   SimulationState& sim = state.simulation;
   const StudyHost host = StudyHostOf(state);
-  if (host.IsAssembly() || s.type == fem::AnalysisType::Topology ||
+  (void)host;
+  if (s.type == fem::AnalysisType::Topology ||
       s.type == fem::AnalysisType::Thermal)
     return;
   arm(ICON_FA_CIRCLE_DOT " Roller###sim_bc_roller",
@@ -441,15 +440,11 @@ void AddProbeRequirement(AppState& state, const fem::Study& s,
 // to the first that is left.
 void DeleteStudy(AppState& state, uint64_t id) {
   const StudyHost host = StudyHostOf(state);
-  if (host.sim) {
+  if (!host)
+    return;
+  {
     SimUndoGuard guard(state);
     host.sim->RemoveStudy(id);
-  } else if (host.part) {
-    state.commands->Execute(std::make_unique<RemoveStudyCommand>(id),
-                            *host.part);
-  } else {
-    SnapshotAssembly(state);
-    host.asmDoc->RemoveStudy(id);
   }
   state.simulation.activeStudyId =
       host.Studies().empty() ? 0 : host.Studies().front().id;
@@ -589,7 +584,8 @@ void DrawLoadCases(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
   const StudyHost host = StudyHostOf(state);
   // A buckling factor scales one load set: no cases.
-  if (host.IsAssembly() || s.type == fem::AnalysisType::Modal ||
+  (void)host;
+  if (s.type == fem::AnalysisType::Modal ||
       s.type == fem::AnalysisType::Buckling)
     return;
   ImGui::SeparatorText("Load cases");
@@ -783,7 +779,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   }
   // A pin is a static part study's support (docs/simulation/README.md
   // #pin-supports): offered only where it can be placed.
-  if (s.type == fem::AnalysisType::Static && !StudyHostOf(state).IsAssembly())
+  if (s.type == fem::AnalysisType::Static)
     arm(ICON_FA_THUMBTACK " Pin###sim_bc_pin", SimulationState::Tool::Pin);
   // A contact (docs/simulation/README.md#contact) is a static study's,
   // solved on CalculiX: the face rests on the ground.
@@ -1053,8 +1049,8 @@ void DrawReuseNote(uint64_t studyId) {
 // Cancel, then the optimization summary and the Shape/Density display controls.
 void DrawTopoResults(AppState& state, const fem::Study& s) {
   const StudyHost host = StudyHostOf(state);
-  if (!host.sim && !host.part)
-    return; // topology is a part study, or a simulation's
+  if (!host)
+    return;
   SimulationState& sim = state.simulation;
   ImGui::SeparatorText("Optimization");
 
@@ -1094,9 +1090,7 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
     std::string err;
     JobStart start;
     start.recompute = ImGui::GetIO().KeyShift;
-    if (!(host.sim
-              ? StartSimTopologyRun(state, host.simSlotId, s.id, &err, &start)
-              : StartTopologyRun(state, *host.part, s.id, &err, &start)))
+    if (!StartSimTopologyRun(state, host.simSlotId, s.id, &err, &start))
       LOG_WARN("topology run failed: {}", err);
     NoteReuse(s.id, start);
   }
@@ -1178,18 +1172,13 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
       ImGui::Button(ICON_FA_SCALE_BALANCED " Check shape###topo_check")) {
     uint64_t shapeId = 0, solidId = 0;
     std::string err;
-    const bool made =
-        host.sim ? EnsureSimTopologyCheckStudies(state, host.simSlotId, s.id,
-                                                 0.0, &shapeId, &solidId, &err)
-                 : EnsureTopologyCheckStudies(state, *host.part, s.id, 0.0,
-                                              &shapeId, &solidId, &err);
+    const bool made = EnsureSimTopologyCheckStudies(
+        state, host.simSlotId, s.id, 0.0, &shapeId, &solidId, &err);
     if (!made) {
       LOG_WARN("check shape: {}", err);
     } else {
       JobStart start;
-      if (!(host.sim
-                ? StartSimStudyRun(state, host.simSlotId, shapeId, &err, &start)
-                : StartStudyRun(state, *host.part, shapeId, &err, &start)))
+      if (!StartSimStudyRun(state, host.simSlotId, shapeId, &err, &start))
         LOG_WARN("check shape: {}", err);
       sim.activeStudyId = shapeId;
       sim.field = SimulationState::Field::None;
@@ -1387,13 +1376,8 @@ void DrawMeshStep(AppState& state, const fem::Study& s) {
   }
   if (ImGui::Button(ICON_FA_BORDER_ALL " Mesh###study_mesh")) {
     std::string err;
-    // A part meshes off the frame; an assembly's plan is made of its placed
-    // parts on this thread, and its mesh with it.
-    const bool started =
-        host.sim ? StartSimMeshRun(state, host.simSlotId, s.id, &err)
-        : host.IsAssembly()
-            ? MeshStudyNow(state, s.id, &err)
-            : StartMeshRun(state, *host.part, s.id, &err, nullptr);
+    // Off the frame.
+    const bool started = StartSimMeshRun(state, host.simSlotId, s.id, &err);
     if (!started)
       LOG_WARN("mesh study failed: {}", err);
     else if (sim.meshView == SimulationState::MeshView::Off)
@@ -1715,9 +1699,9 @@ void DrawResults(AppState& state, const fem::Study& s) {
   }
 
   ImGui::SeparatorText("Results");
-  // The solve runs on a worker thread (StartStudyRun), the same as topology
-  // and the same as the run_study RPC has always done. Clicking Run used to
-  // call the blocking RunStudyAndCache straight from the draw, so the whole
+  // The solve runs on a worker thread (StartSimStudyRun), the same as
+  // topology and the same as the run_study RPC has always done. Clicking Run
+  // used to call a blocking solve straight from the draw, so the whole
   // app — not just this panel — stopped answering for the length of a solve,
   // with no progress and nothing to cancel. On a real part that is a hang.
   // (The join happens in ui::PollBackgroundJobs, once per loop iteration —
@@ -1745,10 +1729,7 @@ void DrawResults(AppState& state, const fem::Study& s) {
       JobStart start;
       start.recompute = ImGui::GetIO().KeyShift;
       const bool started =
-          host.sim ? StartSimStudyRun(state, host.simSlotId, s.id, &err, &start)
-          : host.IsAssembly()
-              ? StartAssemblyStudyRun(state, *host.asmDoc, s.id, &err, &start)
-              : StartStudyRun(state, *host.part, s.id, &err, &start);
+          StartSimStudyRun(state, host.simSlotId, s.id, &err, &start);
       if (!started)
         LOG_WARN("run study failed: {}", err);
       NoteReuse(s.id, start);
@@ -2313,10 +2294,7 @@ void DrawThermalLoad(AppState& state, const fem::Study& s) {
   const auto apply = [&](fem::ThermalLoad next) {
     fem::Study with = s;
     with.thermalLoad = next;
-    refusal =
-        host.IsAssembly() ? fem::AssemblyThermalRefusal(with) : std::string();
-    if (refusal.empty())
-      refusal = fem::ThermalRefusal(with);
+    refusal = fem::ThermalRefusal(with);
     if (refusal.empty())
       ModifyStudy(state, s.id, "Set thermal load",
                   [&](fem::Study& cs) { cs.thermalLoad = next; });
@@ -2718,10 +2696,7 @@ void DrawStudyPanel(AppState& state) {
 void DrawSimulationToolWindow(AppState& state) {
   BeginToolWindowFrame(state, "Simulation");
   const StudyHost host = StudyHostOf(state);
-  // An assembly's studies are listed here (its dock is the occurrence
-  // panel); a part's are listed in its dock, and edited here.
-  if (host.IsAssembly())
-    DrawStudyList(state);
+  // The studies are listed in the simulation tab's dock, and edited here.
   if (const fem::Study* s = host.Find(state.simulation.activeStudyId))
     DrawStudyBody(state, s);
   else
@@ -3047,7 +3022,7 @@ void ArrowGlyph(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color,
 // length to mean newtons, and it cannot — the glyph is view-scaled so it
 // stays visible on a 90 mm part and a 3 m dock alike.
 //
-// Snapshot at grab, mutate live, one ModifyStudyCommand on release: the
+// Snapshot at grab, mutate live, one SimUndoGuard step on release: the
 // gizmo's contract, so a drag is one undo step and the solved results go
 // stale exactly once.
 bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
@@ -3079,22 +3054,13 @@ bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
         const nlohmann::json after = DocumentIO::StudyToJson(*study);
         const nlohmann::json before =
             nlohmann::json::parse(sim.loadDrag.beforeJson, nullptr, false);
-        if (host.sim) {
-          // A snapshot step (SimUndoGuard): the study is put back as it was
-          // at the grab, and the dragged one replaces it under the guard.
-          if (!before.is_discarded() && before != after) {
-            fem::Study dragged = *study;
-            *study = DocumentIO::StudyFromJson(before); // in place, unseen
-            SimUndoGuard guard(state);
-            host.sim->ReplaceStudy(std::move(dragged));
-          }
-        } else if (host.part) {
-          if (!before.is_discarded() && before != after && state.commands)
-            state.commands->Execute(std::make_unique<ModifyStudyCommand>(
-                                        "Drag force", before, after),
-                                    *host.part);
-        } else if (before != after) {
-          host.asmDoc->BumpVersion();
+        // A snapshot step (SimUndoGuard): the study is put back as it was
+        // at the grab, and the dragged one replaces it under the guard.
+        if (host && !before.is_discarded() && before != after) {
+          fem::Study dragged = *study;
+          *study = DocumentIO::StudyFromJson(before); // in place, unseen
+          SimUndoGuard guard(state);
+          host.sim->ReplaceStudy(std::move(dragged));
         }
       }
       return true;
@@ -3110,8 +3076,8 @@ bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
         1.0 + static_cast<double>(t - sim.loadDrag.startParam) / len;
     load->magnitude = std::max(0.0, sim.loadDrag.startMagnitude * scale);
     load->magnitude.expr.clear(); // a dragged value is a number, not a formula
-    // No staleness bump mid-drag: the ModifyStudyCommand on release is what
-    // moves the document version, so results go stale exactly once — the
+    // No staleness bump mid-drag: the replace on release is what moves the
+    // study's revision, so results go stale exactly once — the
     // gizmo's solve-on-release contract.
     return true;
   }
@@ -3131,8 +3097,6 @@ bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
   sim.loadDrag.startParam =
       RayAxisParam(ray.origin, ray.direction, glm::vec3(0.0f), dir);
   sim.loadDrag.beforeJson = DocumentIO::StudyToJson(*study).dump();
-  if (host.IsAssembly())
-    SnapshotAssembly(state); // the undo step, taken before the live edits
   return true; // consumed: do not also re-pick the face behind the arrow
 }
 
@@ -3950,10 +3914,6 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
               : sim.tool == T::HeatSource ? fem::LoadType::HeatGeneration
                                           : fem::LoadType::Fixed;
     if (fem::IsThermalLoad(th.type)) {
-      if (host.IsAssembly()) {
-        sim.placeRefusal = "A thermal load is a part study's";
-        return;
-      }
       // Only the quantities this type takes: the others' fields may hold
       // values typed for another tool.
       if (th.type == fem::LoadType::Temperature)
@@ -4082,8 +4042,8 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   if (load.type == fem::LoadType::Pin) {
     // Refused where it can be read, and nothing placed: a pin holds a
     // cylinder's axis, and a flat face has none.
-    if (host.IsAssembly() || s->type != fem::AnalysisType::Static) {
-      sim.placeRefusal = "A pin is a static part study's support; this "
+    if (s->type != fem::AnalysisType::Static) {
+      sim.placeRefusal = "A pin is a static study's support; this "
                          "study holds its part with fixed faces";
       return;
     }
@@ -4099,12 +4059,6 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     // Refused where it can be read, and nothing placed
     // (docs/simulation/README.md
     // #rollers-held-directions-and-cylindrical-supports).
-    if (host.IsAssembly()) {
-      sim.placeRefusal = std::string("A ") + fem::LoadTypeToString(load.type) +
-                         " support is a part study's; an assembly study "
-                         "holds its part with fixed faces";
-      return;
-    }
     if (load.type == fem::LoadType::Held) {
       load.hold = sim.pendingHold;
       load.frame = sim.pendingHeldFrame;

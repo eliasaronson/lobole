@@ -954,9 +954,8 @@ void KeepWhatIsRead(StudyRuntime& rt);
 // cut from (ShapeSource), the thermal study whose heat loads it
 // (ThermalLoad::Kind::FromStudy) -- and where they are: the simulation that
 // holds them (SimStudy.cpp builds one from a SimDocument). Every entry point
-// below that takes one reads those studies here when it is given, and from
-// the Document when it is null; for the same studies both hash and refuse
-// alike.
+// below that takes one reads those studies here; null means there are none,
+// so a study that names one is refused (and hashes as if it named nothing).
 struct StudySiblings {
   std::function<const Study*(uint64_t id)> find;
   std::function<const StudyRuntime*(uint64_t id)> results;
@@ -1230,21 +1229,17 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
 // problem.
 uint64_t StudyInputKey(const Document& doc, const Study& study,
                        const StudySiblings* siblings = nullptr);
-// Every stored result of `doc` whose input hash is what a run would hash now
-// is stamped current (Document::MarkStudyResultsCurrent): a reopened project
-// whose parts were regenerated again after loading (the project scope, a
-// variable edit) still holds the answers its inputs have. One that does not
-// match keeps its stamp. Shape studies after the results they are cut from.
-void RestampByInputs(Document& doc);
 uint64_t AssemblyStudyInputKey(const AssemblyDocument& asmDoc,
                                const Study& study,
                                const AssemblyStudyContext& ctx);
 
-// The derived results of an assembly's studies, shared between the document
-// and its undo snapshots (a full-state copy must not duplicate meshes).
-struct StudyRuntimeCache {
-  std::map<uint64_t, StudyRuntime> byStudy;
-  uint64_t epoch = 0;
+// The studies a part or an assembly held in a file written before studies
+// moved into simulation documents, with their saved results: what the
+// reader keeps (Document::TakeOldStudies, AssemblyDocument::TakeOldStudies)
+// for the migration on open (SimMigration.h), and nothing else reads.
+struct OldStudies {
+  std::vector<Study> studies;
+  std::map<uint64_t, StudyRuntime> results;
 };
 // Solves every body of a meshed study; a static one through SolveCases with
 // `options`, and rt.solver says which solver ran.

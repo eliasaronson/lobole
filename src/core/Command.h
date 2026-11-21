@@ -187,62 +187,6 @@ private:
   std::string m_oldName, m_newName;
 };
 
-// ---- FEM studies ----------------------------------------------------------
-
-// Adds a new (empty) study. Undo removes it. The created id is captured on
-// Execute so redo reuses it.
-class AddStudyCommand : public Command {
-public:
-  // `type` is part of the add, so a redo brings back the study that was
-  // added rather than a static one with its id.
-  explicit AddStudyCommand(std::string name = "",
-                           fem::AnalysisType type = fem::AnalysisType::Static);
-
-  std::string Description() const override;
-  bool Execute(Document& doc) override;
-  void Undo(Document& doc) override;
-
-  uint64_t StudyId() const { return m_id; }
-
-private:
-  std::string m_name;
-  fem::AnalysisType m_type = fem::AnalysisType::Static;
-  uint64_t m_id = 0;
-};
-
-// Removes a study, snapshotting it for Undo (which re-adds it at the end of
-// the list — original position is not preserved, like DeleteVariableCommand).
-class RemoveStudyCommand : public Command {
-public:
-  explicit RemoveStudyCommand(uint64_t studyId);
-
-  std::string Description() const override;
-  bool Execute(Document& doc) override;
-  void Undo(Document& doc) override;
-
-private:
-  uint64_t m_id;
-  nlohmann::json m_snapshot; // StudyToJson, captured on Execute
-};
-
-// One study edit (mesh size, refinement add/remove, load add/remove),
-// snapshotted as StudyToJson before/after — one command for every study
-// mutation, since undo semantics are identical. Idempotent like
-// ModifyFeatureCommand: the GUI can mutate live then push this on release.
-class ModifyStudyCommand : public Command {
-public:
-  ModifyStudyCommand(std::string description, nlohmann::json before,
-                     nlohmann::json after);
-
-  std::string Description() const override;
-  bool Execute(Document& doc) override;
-  void Undo(Document& doc) override;
-
-private:
-  std::string m_description;
-  nlohmann::json m_before, m_after;
-};
-
 // ---- Tolerances (docs/tolerances/README.md) ---------------------------------
 
 // Sets or replaces the tolerance on one element. Upsert, because a face
@@ -368,7 +312,7 @@ private:
 
 // One configuration edit (rename, override add/remove, suppression toggle),
 // snapshotted as ConfigurationToJson before/after — idempotent like
-// ModifyStudyCommand.
+// ModifyFeatureCommand.
 class ModifyConfigurationCommand : public Command {
 public:
   ModifyConfigurationCommand(std::string description, nlohmann::json before,

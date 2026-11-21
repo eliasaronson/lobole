@@ -19,6 +19,7 @@
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "study_fixtures.h"
 
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <TopExp_Explorer.hxx>
@@ -401,7 +402,7 @@ TEST_CASE("a torque on a shaft's cylindrical face turns it about its own axis",
   REQUIRE(fem::CylindricalFaceAxis(doc, side).has_value());
   CHECK_FALSE(fem::CylindricalFaceAxis(doc, top).has_value());
 
-  fem::Study& s = doc.AddStudy("Twist");
+  fem::Study s = NewStudy(doc, "Twist");
   s.meshSize = 2.0;
   fem::Load fx;
   fx.id = doc.AllocateId();
@@ -466,7 +467,7 @@ TEST_CASE("a pull on half a cantilever's end bends it by its eccentricity",
   }
   REQUIRE_FALSE(root.name.empty());
   REQUIRE_FALSE(tip.name.empty());
-  fem::Study& s = doc.AddStudy("Pull");
+  fem::Study s = NewStudy(doc, "Pull");
   s.meshSize = 2.5;
   fem::Load fx;
   fx.id = doc.AllocateId();

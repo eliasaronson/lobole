@@ -23,6 +23,7 @@
 #include "ui/ViewportHandleDraw.h" // DrawViewportHandles
 
 #include <filesystem>
+#include <fstream>
 #include <limits>
 
 // Simulation GUI tests, carved out of the single 8,036-line RegisterGuiTests.
@@ -1770,8 +1771,6 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::SimulationApplyToFace(*s_App, 0, top);
     ctx->Yield(2);
     IM_CHECK_EQ(Sim()->FindStudy(sid)->loads.size(), (size_t)2);
-    // The part's own list holds nothing: the simulation is the one home.
-    IM_CHECK(ui::PartDocById(*s_App, partId)->GetStudies().empty());
 #ifdef HAVE_NETGEN
     ctx->ItemClick("//###ToolWindow/###study_mesh");
     WaitFor(
@@ -1911,9 +1910,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 
   // Studies saved on a part and on an assembly (every file before the
   // simulation document) move into simulation tabs when the project opens:
-  // not in front, the project unedited, a saved result whose inputs are
-  // unchanged current; and they stay so through a save and a reopen
-  // (docs/simulation/README.md#moving-studies-into-a-simulation).
+  // not in front, the project unedited; and they stay so through a save,
+  // which writes them in the simulations alone, and a reopen
+  // (docs/simulation/README.md#moving-studies-into-a-simulation). That a
+  // moved result reads current is tests/test_sim_storage.cpp's.
   t = IM_REGISTER_TEST(engine, "sim", "studies_move_into_simulations_on_open");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     namespace fs = std::filesystem;
@@ -1926,7 +1926,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::MarkProjectOpened(*s_App, golden);
     ctx->Yield(2);
     IM_CHECK(s_App->document != nullptr); // the part stays in front
-    IM_CHECK(s_App->document->GetStudies().empty());
+    IM_CHECK(s_App->document->OldStudiesRead() == nullptr); // moved out
     std::vector<size_t> sims =
         ui::SimulationSlotsFor(*s_App, s_App->parts[0].id);
     IM_CHECK_EQ(sims.size(), (size_t)1);
@@ -1935,37 +1935,33 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(moved != nullptr);
     IM_CHECK(moved->FindStudy(3) != nullptr && moved->FindStudy(7) != nullptr);
 
-    // An assembly's studies, written as every file before did: on the
-    // assembly, solved there.
+    // A project whose part and assembly kept studies, as every file before
+    // simulations did: one saved today, given those studies on disk at the
+    // version before.
     ctx->MenuClick("File/New");
     ctx->Yield();
     SteelBlock(ctx);
     const uint64_t partId = s_App->parts[0].id;
     const Body body = Doc()->GetBodies()[0];
     const ElementRef top = FaceFacing(body, {0, 0, 1});
-    // The part's own study, as a file before simulations saved it.
-    uint64_t partStudy = 0;
+    fem::Study plate;
+    plate.id = Doc()->AllocateId();
+    plate.name = "Plate";
+    plate.meshSize = 12.0;
     {
-      Document& part = *Doc();
-      fem::Study& st = part.AddStudy("Plate");
-      st.meshSize = 12.0;
       fem::Load fix;
-      fix.id = part.AllocateId();
+      fix.id = Doc()->AllocateId();
       fix.type = fem::LoadType::Fixed;
       fix.face = FaceFacing(body, {0, 0, -1});
-      st.loads.push_back(fix);
+      plate.loads.push_back(fix);
       fem::Load p1;
-      p1.id = part.AllocateId();
+      p1.id = Doc()->AllocateId();
       p1.type = fem::LoadType::Pressure;
       p1.face = top;
       p1.magnitude = 1.0;
-      st.loads.push_back(p1);
-      partStudy = st.id;
-#ifdef HAVE_NETGEN
-      IM_CHECK(ui::RunStudyAndCache(part, partStudy, &err));
-      IM_CHECK(part.StudyResults(partStudy) != nullptr);
-#endif
+      plate.loads.push_back(p1);
     }
+    const uint64_t partStudy = plate.id;
     const size_t asmIdx = ui::AddAssembly(*s_App, "Stack");
     ui::SetActivePart(*s_App, asmIdx);
     Occurrence lo;
@@ -1980,32 +1976,71 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const uint64_t upper = s_App->assembly->AddOccurrence(up);
     ctx->Yield(3);
     AssemblyDocument& asmDoc = *s_App->assembly;
-    fem::Study& old = asmDoc.AddStudy("Stacked");
-    old.participants = {{upper, fem::ParticipantRole::Meshed, ExprValue{0.0}},
-                        {lower, fem::ParticipantRole::Rigid, ExprValue{0.0}}};
-    old.meshSize = 12.0;
-    fem::Load clampLoad;
-    clampLoad.id = asmDoc.AllocateId();
-    clampLoad.type = fem::LoadType::Fixed;
-    clampLoad.contactWith = lower;
-    old.loads.push_back(clampLoad);
-    fem::Load press;
-    press.id = asmDoc.AllocateId();
-    press.type = fem::LoadType::Pressure;
-    press.face = top;
-    press.occurrenceId = upper;
-    press.magnitude = 1.0;
-    old.loads.push_back(press);
-    const uint64_t oldId = old.id;
+    fem::Study stacked;
+    stacked.id = asmDoc.AllocateId();
+    stacked.name = "Stacked";
+    stacked.participants = {
+        {upper, fem::ParticipantRole::Meshed, ExprValue{0.0}},
+        {lower, fem::ParticipantRole::Rigid, ExprValue{0.0}}};
+    stacked.meshSize = 12.0;
+    {
+      fem::Load clampLoad;
+      clampLoad.id = asmDoc.AllocateId();
+      clampLoad.type = fem::LoadType::Fixed;
+      clampLoad.contactWith = lower;
+      stacked.loads.push_back(clampLoad);
+      fem::Load press;
+      press.id = asmDoc.AllocateId();
+      press.type = fem::LoadType::Pressure;
+      press.face = top;
+      press.occurrenceId = upper;
+      press.magnitude = 1.0;
+      stacked.loads.push_back(press);
+    }
+    const uint64_t oldId = stacked.id;
     asmDoc.BumpVersion();
-#ifdef HAVE_NETGEN
-    IM_CHECK(ui::RunAssemblyStudyAndCache(*s_App, asmDoc, oldId, &err));
-    IM_CHECK(asmDoc.StudyResults(oldId) != nullptr);
-#endif
     const fs::path dir = fs::temp_directory_path() / "lobole_test_sim_move.lob";
     fs::remove_all(dir);
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
-    // Opened: the study is in a simulation of the assembly, with its id.
+    // The document directories (an index.json of each kind), and whether
+    // one lists studies.
+    const auto indexOf = [&](const char* kind) {
+      for (const auto& e : fs::recursive_directory_iterator(dir))
+        if (e.path().filename() == "index.json") {
+          std::ifstream in(e.path());
+          const nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
+          // A part's envelope names no kind.
+          if (!j.is_discarded() &&
+              j.contains("features") == (std::string(kind) == "part") &&
+              j.value("kind", "part") == kind)
+            return e.path();
+        }
+      return fs::path();
+    };
+    const auto listsStudies = [](const fs::path& index) {
+      std::ifstream in(index);
+      return nlohmann::json::parse(in).contains("studies");
+    };
+    for (const auto& [kind, study] :
+         {std::pair<const char*, const fem::Study*>{"part", &plate},
+          {"assembly", &stacked}}) {
+      const fs::path index = indexOf(kind);
+      IM_CHECK_SILENT(!index.empty());
+      IM_CHECK(!listsStudies(index)); // written today: none
+      nlohmann::json j;
+      {
+        std::ifstream in(index);
+        j = nlohmann::json::parse(in);
+      }
+      j["version"] = j.at("version").get<int>() - 1; // the format before
+      j["studies"] = {study->id};
+      fs::create_directories(index.parent_path() / "studies");
+      std::ofstream(index.parent_path() / "studies" /
+                    (std::to_string(study->id) + "-study.json"))
+          << DocumentIO::StudyToJson(*study).dump(2);
+      std::ofstream(index) << j.dump(2);
+    }
+    // Opened: each study is in a simulation of its document, with its id.
     for (int pass = 0; pass < 2; pass++) {
       ctx->MenuClick("File/New");
       ctx->Yield();
@@ -2019,35 +2054,31 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
         if (s_App->parts[i].kind == ui::DocKind::Assembly)
           at = i;
       IM_CHECK_SILENT(at.has_value());
-      IM_CHECK(ui::SlotAssembly(*s_App, *at)->GetStudies().empty());
+      IM_CHECK(ui::SlotAssembly(*s_App, *at)->OldStudiesRead() == nullptr);
       sims = ui::SimulationSlotsFor(*s_App, s_App->parts[*at].id);
       IM_CHECK_EQ(sims.size(), (size_t)1);
       const fem::SimDocument* sim = ui::SlotSim(*s_App, sims[0]);
       IM_CHECK(sim->FindStudy(oldId) != nullptr);
       IM_CHECK_EQ(sim->Roles().size(), (size_t)2);
-#ifdef HAVE_NETGEN
-      IM_CHECK(sim->StudyResults(oldId) != nullptr);
-      IM_CHECK(!ui::SimStudyStale(*s_App, *sim, oldId));
-#endif
-      // The part's study too, current.
+      IM_CHECK_EQ(sim->FindStudy(oldId)->loads.size(), (size_t)2);
+      // The part's study too.
       std::optional<size_t> partAt;
       for (size_t i = 0; i < s_App->parts.size(); i++)
         if (s_App->parts[i].kind == ui::DocKind::Part)
           partAt = i;
       IM_CHECK_SILENT(partAt.has_value());
-      IM_CHECK(ui::SlotDoc(*s_App, *partAt)->GetStudies().empty());
+      IM_CHECK(ui::SlotDoc(*s_App, *partAt)->OldStudiesRead() == nullptr);
       const std::vector<size_t> partSims =
           ui::SimulationSlotsFor(*s_App, s_App->parts[*partAt].id);
       IM_CHECK_EQ(partSims.size(), (size_t)1);
       const fem::SimDocument* psim = ui::SlotSim(*s_App, partSims[0]);
       IM_CHECK(psim->FindStudy(partStudy) != nullptr);
-#ifdef HAVE_NETGEN
-      IM_CHECK(psim->StudyResults(partStudy) != nullptr);
-      IM_CHECK(!ui::SimStudyStale(*s_App, *psim, partStudy));
-#endif
-      // Saved again: the assembly writes no studies, the simulation does.
+      // Saved again: the part and the assembly write no studies, the
+      // simulations do.
       IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
       ui::MarkProjectSaved(*s_App, dir.string(), "test");
+      IM_CHECK(!listsStudies(indexOf("part")));
+      IM_CHECK(!listsStudies(indexOf("assembly")));
     }
     fs::remove_all(dir);
   };

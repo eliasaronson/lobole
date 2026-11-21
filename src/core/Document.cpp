@@ -227,10 +227,7 @@ bool Document::RequestBuild(uint64_t featureId) {
 // that same diff over BOTH copy forms.
 Document::Document(const Document& other, bool reuseGeometry)
     : m_assets(other.m_assets), m_parameters(other.m_parameters),
-      m_tolerances(other.m_tolerances), m_studies(other.m_studies),
-      // Solved results cost minutes and are not derivable from the feature
-      // list, so they travel with the copy (re-stamped below).
-      m_studyRuntime(other.m_studyRuntime),
+      m_tolerances(other.m_tolerances),
       m_configurations(other.m_configurations), m_units(other.m_units),
       m_activeConfiguration(other.m_activeConfiguration),
       m_symbols(other.m_symbols),
@@ -247,10 +244,10 @@ Document::Document(const Document& other, bool reuseGeometry)
   m_sheetMetal = other.m_sheetMetal; // every flange's thickness comes from it
   m_tube = other.m_tube;             // what check_frame and the cut list read
   m_exprProblems = other.m_exprProblems;
-  m_print = other.m_print;           // what the fit checks model a print at
+  m_print = other.m_print; // what the fit checks model a print at
   m_printSettings = other.m_printSettings; // what the slicer is handed
-  m_tables = other.m_tables;         // a lone part's project tables
-  m_templates = other.m_templates;   // ...and its template library
+  m_tables = other.m_tables;               // a lone part's project tables
+  m_templates = other.m_templates;         // ...and its template library
   m_features.reserve(other.m_features.size());
   for (const std::unique_ptr<Feature>& f : other.m_features)
     m_features.push_back(f->Clone());
@@ -268,37 +265,6 @@ Document::Document(const Document& other, bool reuseGeometry)
         m_bakedWarnings[f->GetId()] = f->GetWarning();
   }
   Regenerate();
-  // Study results are stamped with the version they were solved at, and this
-  // document's versions are its own — so the numbers have to be re-stamped or
-  // every copied result reads stale. Only the ones that were CURRENT on the
-  // original are stamped current here: the copy's geometry is the original's
-  // geometry, so a result that matched then matches now. A stale one keeps a
-  // version this document will never hold (0, never a post-regen version) and
-  // goes on reading stale, which is the honest answer — laundering it into a
-  // fresh-looking result is exactly what this codebase refuses to do.
-  for (auto& [id, rt] : m_studyRuntime)
-    rt.solvedAtVersion = other.StudyResultsStale(id) ? 0 : m_version;
-}
-
-bool Document::StudyResultsStale(uint64_t studyId) const {
-  auto it = m_studyRuntime.find(studyId);
-  if (it == m_studyRuntime.end() || it->second.solvedAtVersion != m_version)
-    return true;
-  const fem::Study* s = FindStudy(studyId);
-  if (s == nullptr || s->shapeFrom.study == 0 || s->shapeFrom.study == studyId)
-    return false;
-  const auto src = m_studyRuntime.find(s->shapeFrom.study);
-  return src == m_studyRuntime.end() ||
-         src->second.solvedAtVersion != m_version ||
-         src->second.densityDigest != it->second.sourceDigest;
-}
-
-bool Document::MarkStudyResultsCurrent(uint64_t studyId) {
-  const auto it = m_studyRuntime.find(studyId);
-  if (it == m_studyRuntime.end())
-    return false;
-  it->second.solvedAtVersion = m_version;
-  return true;
 }
 
 Feature* Document::GetFeature(size_t index) {
@@ -1104,22 +1070,6 @@ const Parameter* Document::FindParameter(const std::string& name) const {
   return nullptr;
 }
 
-const fem::Study* Document::FindStudy(uint64_t id) const {
-  for (const fem::Study& s : m_studies) {
-    if (s.id == id)
-      return &s;
-  }
-  return nullptr;
-}
-
-fem::Study* Document::StudyForRun(uint64_t id) {
-  for (fem::Study& s : m_studies) {
-    if (s.id == id)
-      return &s;
-  }
-  return nullptr;
-}
-
 const Tolerance* Document::FindTolerance(uint64_t id) const {
   for (const Tolerance& t : m_tolerances)
     if (t.id == id)
@@ -1191,49 +1141,6 @@ void Document::RestoreTolerance(Tolerance t) {
   m_tolerances.push_back(std::move(t));
   MarkEdited();
   fitband::Stamp(*this, m_bodies);
-}
-
-fem::Study& Document::AddStudy(const std::string& name) {
-  fem::Study study;
-  study.id = m_nextId++;
-  study.name =
-      name.empty() ? ("Study " + std::to_string(m_studies.size() + 1)) : name;
-  m_studies.push_back(std::move(study));
-  MarkEdited();
-  return m_studies.back();
-}
-
-bool Document::RemoveStudy(uint64_t id) {
-  for (auto it = m_studies.begin(); it != m_studies.end(); ++it) {
-    if (it->id == id) {
-      m_studies.erase(it);
-      m_studyRuntime.erase(id); // drop derived mesh/results too
-      MarkEdited();
-      return true;
-    }
-  }
-  return false;
-}
-
-void Document::RestoreStudy(fem::Study study) {
-  EnsureNextIdAtLeast(study.id + 1);
-  for (const fem::Load& l : study.loads)
-    EnsureNextIdAtLeast(l.id + 1);
-  m_studies.push_back(std::move(study));
-  MarkEdited();
-}
-
-bool Document::ReplaceStudy(fem::Study study) {
-  for (fem::Study& s : m_studies) {
-    if (s.id == study.id) {
-      for (const fem::Load& l : study.loads)
-        EnsureNextIdAtLeast(l.id + 1);
-      s = std::move(study);
-      MarkEdited();
-      return true;
-    }
-  }
-  return false;
 }
 
 // ---- Configurations -------------------------------------------------------
@@ -1386,10 +1293,6 @@ void Document::VisitDocumentExprs(
     const std::string owner = "feature '" + feature->GetName() + "'";
     feature->VisitExprs([&](const ExprSlot& slot) { visit(owner, slot); });
   }
-  for (fem::Study& study : m_studies) {
-    const std::string owner = "study '" + study.name + "'";
-    study.VisitExprs([&](const ExprSlot& slot) { visit(owner, slot); });
-  }
   // The part's own numbers outside its features
   // (docs/variables/README.md#numbers-that-are-expressions).
   if (m_sheetMetal)
@@ -1489,16 +1392,12 @@ void Document::ForEachExprText(
 
 void Document::RenameReferences(const std::string& oldName,
                                 const std::string& newName) {
-  // A study and a configuration are saved without moving Version(), so a
-  // change to either is stamped here; the features' is the regeneration's.
+  // A configuration is saved without moving Version(), so a
+  // change to one is stamped here; the features' is the regeneration's.
   bool savedOutsideFeatures = false;
   for (const auto& feature : m_features)
     feature->VisitExprs(
         [&](const ExprSlot& slot) { RenameInSlot(slot, oldName, newName); });
-  for (fem::Study& study : m_studies)
-    study.VisitExprs([&](const ExprSlot& slot) {
-      savedOutsideFeatures |= RenameInSlot(slot, oldName, newName);
-    });
   // The rules and the tolerances: saved without a feature moving, too.
   if (m_sheetMetal)
     m_sheetMetal->VisitExprs([&](const ExprSlot& slot) {

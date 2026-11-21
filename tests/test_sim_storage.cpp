@@ -17,6 +17,7 @@
 #include "core/fem/SimStudy.h"
 #include "core/io/ReadContext.h"
 #include "core/io/SerializeSimulation.h"
+#include "study_fixtures.h"
 
 #include <nlohmann/json.hpp>
 
@@ -237,15 +238,17 @@ TEST_CASE("An assembly's studies move into one simulation per participants "
   const uint64_t oa = asmDoc.AddOccurrence(a);
   const uint64_t ob = asmDoc.AddOccurrence(b);
   const uint64_t oc = asmDoc.AddOccurrence(c);
+  fem::OldStudies old; // as the reader keeps an old assembly file's
   const auto study = [&](const std::string& name,
                          std::vector<fem::Participant> table) {
     fem::Load l;
     l.id = asmDoc.AllocateId();
     l.type = fem::LoadType::Fixed;
     l.occurrenceId = table.empty() ? 0 : table[0].occurrenceId;
-    fem::Study& s = asmDoc.AddStudy(name);
+    fem::Study s = NewStudy(asmDoc, name);
     s.participants = std::move(table);
     s.loads.push_back(l);
+    old.studies.push_back(s);
     return s.id;
   };
   using R = fem::ParticipantRole;
@@ -262,9 +265,9 @@ TEST_CASE("An assembly's studies move into one simulation per participants "
     rt.inputHash = 42;
     rt.maxVonMises = 12.5;
     rt.bodies.resize(1);
-    asmDoc.StoreStudyResults(s3, rt);
+    old.results[s3] = rt;
   }
-  const auto sims = fem::SimulationsFromAssembly(asmDoc, 9, "Frame");
+  const auto sims = fem::SimulationsFromAssembly(old, 9, "Frame");
   REQUIRE(sims.size() == 2);
   CHECK(sims[0].name == "Frame simulation");
   CHECK(sims[1].name == "Frame simulation 2");
@@ -297,7 +300,7 @@ TEST_CASE("An assembly's studies move into one simulation per participants "
   CHECK(fem::SimulationHoldingStudy(all, 9, s2) == &sims[1].sim);
   CHECK(fem::SimulationHoldingStudy(all, 9, s3) == &sims[0].sim);
   CHECK(fem::SimulationHoldingStudy(all, 8, s3) == nullptr);
-  CHECK(fem::SimulationsFromAssembly(AssemblyDocument{}, 9, "X").empty());
+  CHECK(fem::SimulationsFromAssembly(fem::OldStudies{}, 9, "X").empty());
 }
 
 #if defined(HAVE_NETGEN) && defined(HAVE_FEM_SOLVER)
@@ -447,28 +450,27 @@ TEST_CASE("A part's studies move into one simulation whose results stay "
           "current",
           "[fem][simdoc][migration]") {
   Bar bar;
-  fem::Study& today = bar.doc.AddStudy("Bend");
-  const uint64_t id = today.id;
-  {
-    fem::Study setup = bar.Bend();
-    setup.id = id;
-    setup.meshSize = 4.0;
-    fem::Refinement r;
-    r.face = bar.Face(1);
-    r.size = ExprValue{2.0};
-    setup.refinements.push_back(r);
-    REQUIRE(bar.doc.ReplaceStudy(setup));
-  }
-  fem::Study& other = bar.doc.AddStudy("Unrun");
-  const uint64_t unrun = other.id;
+  // As the reader keeps an old part file's studies and results.
+  fem::OldStudies old;
+  fem::Study setup = bar.Bend();
+  setup.id = NewStudy(bar.doc).id;
+  setup.meshSize = 4.0;
+  fem::Refinement r;
+  r.face = bar.Face(1);
+  r.size = ExprValue{2.0};
+  setup.refinements.push_back(r);
+  const uint64_t id = setup.id;
+  old.studies.push_back(setup);
+  const uint64_t unrun =
+      old.studies.emplace_back(NewStudy(bar.doc, "Unrun")).id;
   fem::StudyRuntime rt;
   std::string err;
-  REQUIRE(fem::RunStudy(bar.doc, *bar.doc.StudyForRun(id), rt, &err));
+  REQUIRE(fem::RunStudy(bar.doc, old.studies[0], rt, &err));
   INFO(err);
-  rt.inputHash = fem::StudyInputKey(bar.doc, *bar.doc.FindStudy(id));
-  bar.doc.StoreStudyResults(id, rt);
+  rt.inputHash = fem::StudyInputKey(bar.doc, old.studies[0]);
+  old.results[id] = rt;
 
-  auto sims = fem::SimulationsFromPart(bar.doc, 1, "Bar");
+  auto sims = fem::SimulationsFromPart(old, 1, "Bar");
   REQUIRE(sims.size() == 1);
   CHECK(sims[0].name == "Bar simulation");
   fem::SimDocument& sim = sims[0].sim;
@@ -501,8 +503,7 @@ TEST_CASE("A part's studies move into one simulation whose results stay "
   // A requirement's {document 1, study id} finds it.
   CHECK(fem::SimulationHoldingStudy({&sim}, 1, id) == &sim);
   // A part with no studies has no simulation to make.
-  Bar empty;
-  CHECK(fem::SimulationsFromPart(empty.doc, 2, "Empty").empty());
+  CHECK(fem::SimulationsFromPart(fem::OldStudies{}, 2, "Empty").empty());
 }
 
 #endif // HAVE_NETGEN && HAVE_FEM_SOLVER

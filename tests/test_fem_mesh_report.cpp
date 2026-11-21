@@ -21,6 +21,7 @@
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "study_fixtures.h"
 
 #include <algorithm>
 #include <cmath>
@@ -266,7 +267,7 @@ TEST_CASE("check_study returns every planted problem at once, each with "
   doc.AddFeature(
       std::make_unique<BoxFeature>("Bar", glm::dvec3(0), 100.0, 10.0, 10.0));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("S");
+  fem::Study s = NewStudy(doc, "S");
   // 1. no support: a force and nothing held.
   fem::Load force;
   force.id = doc.AllocateId();
@@ -290,7 +291,7 @@ TEST_CASE("check_study returns every planted problem at once, each with "
   gone.magnitude = 1.0;
   s.loads.push_back(gone);
 
-  const std::string before = doc.GetStudies()[0].error;
+  const std::string before = s.error;
   const std::vector<fem::StudyProblem> problems = fem::CheckStudy(doc, s);
   std::multiset<std::string> codes;
   for (const fem::StudyProblem& p : problems) {
@@ -324,8 +325,8 @@ TEST_CASE("check_study returns every planted problem at once, each with "
       CHECK(p.fixMethod == "set_material");
   }
   // Read-only: the study is as it was.
-  CHECK(doc.GetStudies()[0].error == before);
-  CHECK(doc.GetStudies()[0].loads.size() == 3);
+  CHECK(s.error == before);
+  CHECK(s.loads.size() == 3);
 
   // The same rules a run reads: it refuses this study too.
   fem::StudyPlan plan;
@@ -343,7 +344,7 @@ TEST_CASE("check_study is empty for a study that runs, and finds a region "
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("S");
+  fem::Study s = NewStudy(doc, "S");
   fem::Load fixed;
   fixed.id = doc.AllocateId();
   fixed.type = fem::LoadType::Fixed;

@@ -385,20 +385,23 @@ std::map<std::string, size_t> PartCounts(const Document& d) {
   size_t failed = 0;
   for (size_t i = 0; i < d.FeatureCount(); i++)
     failed += !d.GetFeature(i)->GetError().empty();
-  return {{"features", d.FeatureCount()},
-          {"bodies", d.GetBodies().size()},
-          {"failed", failed},
-          {"studies", d.GetStudies().size()},
-          {"configurations", d.GetConfigurations().size()}};
+  return {
+      {"features", d.FeatureCount()},
+      {"bodies", d.GetBodies().size()},
+      {"failed", failed},
+      // An old file's, as read for the move into a simulation.
+      {"studies", d.OldStudiesRead() ? d.OldStudiesRead()->studies.size() : 0},
+      {"configurations", d.GetConfigurations().size()}};
 }
 
 std::map<std::string, size_t> AssemblyCounts(const AssemblyDocument& a) {
-  return {{"occurrences", a.OccurrenceCount()},
-          {"mates", a.MateCount()},
-          {"relations", a.GetRelations().size()},
-          {"motion", a.GetMotionStudies().size()},
-          {"studies", a.GetStudies().size()},
-          {"configurations", a.GetConfigurations().size()}};
+  return {
+      {"occurrences", a.OccurrenceCount()},
+      {"mates", a.MateCount()},
+      {"relations", a.GetRelations().size()},
+      {"motion", a.GetMotionStudies().size()},
+      {"studies", a.OldStudiesRead() ? a.OldStudiesRead()->studies.size() : 0},
+      {"configurations", a.GetConfigurations().size()}};
 }
 
 std::map<std::string, size_t> DrawingCounts(const DrawingDocument& d) {
@@ -751,11 +754,9 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
         [](const Document& d, const std::string& p) {
           return DocumentIO::Save(d, p);
         },
-        [](Document& d, const std::string& stem) {
-          // One part carries a saved study result (.result.json + .bin).
-          if (stem == "v153-saved-study-results" && !d.GetStudies().empty())
-            d.StoreStudyResults(d.GetStudies().front().id, HandMadeResult());
-        });
+        // A part keeps no study results: a simulation does (the project
+        // corpus's, PlantSimStorage).
+        [](Document&, const std::string&) {});
     break;
   case Family::AssemblyDir:
     out = DirCorpus(
@@ -831,7 +832,6 @@ std::vector<Input> BuildCorpus(Family family, const fs::path& scratch) {
     {
       auto d = DocumentIO::Load((g / "v153-saved-study-results.json").string());
       Require(d.has_value(), "v153 does not load");
-      (*d)->StoreStudyResults((*d)->GetStudies().front().id, HandMadeResult());
       Require(DocumentIO::Save(**d, entry(1, "Plate", "part", "parts").string())
                   .has_value(),
               "the part does not save");

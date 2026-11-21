@@ -468,30 +468,10 @@ TEST_CASE("Rename rewrites feature expressions", "[variables]") {
   CHECK(refs[0] == "feature 'Extrude1'");
 }
 
-namespace {
-// A study whose load and mesh size read variables: the two kinds of field
-// Study::VisitExprs walks.
-fem::Study StudyReading(Document& doc, const std::string& load,
-                        const std::string& mesh) {
-  fem::Study study = doc.AddStudy("Bracket");
-  fem::Load l;
-  l.id = doc.AllocateId();
-  l.type = fem::LoadType::Force;
-  l.magnitude.expr = load;
-  study.loads.push_back(l);
-  study.meshSize.expr = mesh;
-  REQUIRE(doc.ReplaceStudy(study));
-  return study;
-}
-} // namespace
-
-TEST_CASE("Rename reaches a study and a configuration's overrides; delete "
-          "names the study",
-          "[variables]") {
+TEST_CASE("Rename reaches a configuration's overrides", "[variables]") {
   Document doc;
   doc.SetParameter("pull", "100");
   doc.SetParameter("depth", "3");
-  const uint64_t id = StudyReading(doc, "pull * 2", "depth").id;
   Configuration& added = doc.AddConfiguration("Heavy");
   Configuration cfg = added;
   cfg.parameterOverrides = {{"depth", "pull / 10"}};
@@ -501,10 +481,6 @@ TEST_CASE("Rename reaches a study and a configuration's overrides; delete "
   REQUIRE(stack.Execute(
       std::make_unique<RenameVariableCommand>("pull", "force"), doc));
   REQUIRE(doc.RenameParameter("depth", "h"));
-  const fem::Study* study = doc.FindStudy(id);
-  REQUIRE(study != nullptr);
-  CHECK(study->loads.at(0).magnitude.expr == "force * 2");
-  CHECK(study->meshSize.expr == "h");
   // The override follows the variable it overrides, and the text it reads.
   const Configuration* heavy = doc.FindConfiguration(cfg.id);
   REQUIRE(heavy != nullptr);
@@ -515,20 +491,9 @@ TEST_CASE("Rename reaches a study and a configuration's overrides; delete "
   REQUIRE(doc.SetActiveConfiguration(cfg.id));
   CHECK_THAT(doc.Symbols().at("h"), WithinRel(10.0));
   REQUIRE(doc.SetActiveConfiguration(0));
-
-  fem::Study evaluated = *study;
-  std::string err;
-  REQUIRE(fem::EvaluateStudyExprs(evaluated, doc.Symbols(), &err));
-  CHECK_THAT(evaluated.loads.at(0).magnitude, WithinRel(200.0));
-
-  // A variable only the study reads cannot be deleted, and says who reads it.
-  std::vector<std::string> refs;
-  CHECK_FALSE(doc.RemoveParameter("force", &refs));
-  CHECK(std::find(refs.begin(), refs.end(), "study 'Bracket'") != refs.end());
-
-  // Undoing the rename puts the study's text back too.
-  stack.Undo(doc);
-  CHECK(doc.FindStudy(id)->loads.at(0).magnitude.expr == "pull * 2");
+  // A study reads a part's variables from a simulation of it:
+  // tests/test_sim_project.cpp, "A variable renamed or deleted looks inside
+  // every simulation".
 }
 
 TEST_CASE("A variable a configuration's override reads cannot be deleted",
@@ -561,47 +526,6 @@ TEST_CASE("A variable a configuration's override reads cannot be deleted",
   CHECK(std::find(refs.begin(), refs.end(),
                   "Part 1: configuration 'Heavy' (its override of 'depth')") !=
         refs.end());
-}
-
-TEST_CASE("A project variable's rename and delete reach a part's study and an "
-          "assembly's",
-          "[variables]") {
-  ui::AppState state;
-  state.document = std::make_unique<Document>();
-  state.commands = std::make_unique<CommandStack>();
-  ui::EnsureParts(state);
-  REQUIRE(ui::SetProjectVariable(state, "pull", "100", ""));
-  StudyReading(*state.document, "pull", "");
-  ui::AddAssembly(state, "Rig");
-  fem::Study rig;
-  rig.id = 1;
-  rig.name = "Rig study";
-  fem::Load l;
-  l.id = 2;
-  l.magnitude.expr = "pull / 2";
-  rig.loads.push_back(l);
-  state.assembly->GetStudies().push_back(rig);
-
-  std::vector<std::string> refs;
-  CHECK_FALSE(ui::RemoveProjectVariable(state, "pull", &refs));
-  CHECK(std::find(refs.begin(), refs.end(), "Part 1: study 'Bracket'") !=
-        refs.end());
-  CHECK(std::find(refs.begin(), refs.end(), "Rig: study 'Rig study'") !=
-        refs.end());
-
-  const uint64_t asmStamp = state.assembly->SaveStamp();
-  REQUIRE(ui::RenameProjectVariable(state, "pull", "force"));
-  CHECK(state.assembly->GetStudies().at(0).loads.at(0).magnitude.expr ==
-        "force / 2");
-  CHECK(state.assembly->SaveStamp() != asmStamp); // saved, so dirty
-  CHECK(state.parts.at(0).doc->GetStudies().at(0).loads.at(0).magnitude.expr ==
-        "force");
-  // Undo reverses it in both.
-  REQUIRE(ui::UndoProjectVars(state));
-  CHECK(state.assembly->GetStudies().at(0).loads.at(0).magnitude.expr ==
-        "pull / 2");
-  CHECK(state.parts.at(0).doc->GetStudies().at(0).loads.at(0).magnitude.expr ==
-        "pull");
 }
 
 // --- Serialization

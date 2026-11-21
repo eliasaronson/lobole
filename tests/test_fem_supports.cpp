@@ -24,6 +24,7 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
+#include "study_fixtures.h"
 
 #include <cmath>
 #include <functional>
@@ -142,7 +143,7 @@ TEST_CASE("a prescribed displacement carries the reaction the stiffness "
   const double L = 40.0, w = 8.0, delta = 0.02;
   Document doc;
   AddBox(doc, L, w, w);
-  fem::Study& s = doc.AddStudy("Stretch");
+  fem::Study s = NewStudy(doc, "Stretch");
   s.meshSize = 4.0;
   for (int a = 0; a < 3; ++a)
     s.loads.push_back(Support(doc, fem::LoadType::Roller, FlatAt(doc, a, 0.0)));
@@ -181,7 +182,7 @@ TEST_CASE("a half bar on a roller is the whole bar", "[fem][supports][run]") {
   const auto tip = [&](double width, double force, bool half) {
     Document doc;
     AddBox(doc, L, width, w);
-    fem::Study& s = doc.AddStudy("Cantilever");
+    fem::Study s = NewStudy(doc, "Cantilever");
     s.meshSize = 2.5;
     s.loads.push_back(Support(doc, fem::LoadType::Fixed, FlatAt(doc, 0, 0.0)));
     if (half)
@@ -233,7 +234,7 @@ TEST_CASE("a quarter of Lame's cylinder on rollers is the closed form",
                                                   BooleanOp::Intersect));
   doc.GetFeature(4)->SetMaterial("steel");
   doc.Regenerate();
-  fem::Study& s = doc.AddStudy("Lame");
+  fem::Study s = NewStudy(doc, "Lame");
   s.meshSize = 2.0;
   s.loads.push_back(Support(doc, fem::LoadType::Roller, FlatAt(doc, 0, 0.0)));
   s.loads.push_back(Support(doc, fem::LoadType::Roller, FlatAt(doc, 1, 0.0)));
@@ -297,7 +298,7 @@ TEST_CASE("an inclined symmetry plane is its axis-aligned image",
                std::abs(glm::dot(f.centroid, d) - at) < 1e-6;
       });
     };
-    fem::Study& s = doc.AddStudy("Pull");
+    fem::Study s = NewStudy(doc, "Pull");
     s.meshSize = 2.5;
     s.loads.push_back(Support(doc, fem::LoadType::Roller, cap(0.0)));
     fem::Load side = Support(doc, fem::LoadType::Cylindrical,
@@ -345,7 +346,7 @@ TEST_CASE("a mode survives halving on a roller", "[fem][supports][run]") {
   const auto first = [&](double width, bool half) {
     Document doc;
     AddBox(doc, L, width, w);
-    fem::Study& s = doc.AddStudy("Modes");
+    fem::Study s = NewStudy(doc, "Modes");
     s.type = fem::AnalysisType::Modal;
     s.numModes = 2;
     s.meshSize = 2.5;
@@ -383,14 +384,12 @@ TEST_CASE("roller, held and cylindrical supports refuse what they cannot "
                    y1 = FlatAt(doc, 1, 10.0);
   const auto refusal = [&](fem::AnalysisType type,
                            const std::vector<fem::Load>& loads) {
-    fem::Study& s = doc.AddStudy("Refused");
+    fem::Study s = NewStudy(doc, "Refused");
     s.type = type;
     s.meshSize = 4.0;
     s.loads = loads;
     fem::StudyRuntime rt;
-    const std::string err = Run(doc, s, rt);
-    doc.RemoveStudy(s.id);
-    return err;
+    return Run(doc, s, rt);
   };
   const auto fixed = Support(doc, fem::LoadType::Fixed, x0);
   SECTION("a held support that holds nothing") {
@@ -463,7 +462,7 @@ TEST_CASE("check_study finds a held support that holds nothing and a "
           "[fem][supports][check]") {
   Document doc;
   AddBox(doc, 40.0, 10.0, 10.0);
-  fem::Study& s = doc.AddStudy("Checked");
+  fem::Study s = NewStudy(doc, "Checked");
   s.loads.push_back(Support(doc, fem::LoadType::Fixed, FlatAt(doc, 0, 0.0)));
   s.loads.push_back(Held(doc, FlatAt(doc, 0, 40.0), {false, false, false}));
   fem::Load c = Support(doc, fem::LoadType::Cylindrical, FlatAt(doc, 1, 0.0));
@@ -496,7 +495,7 @@ TEST_CASE("a held support takes a datum's axes", "[fem][supports][run]") {
   frame->zAxis = glm::dvec3(0.0, 0.0, 1.0);
   doc.AddFeature(std::move(frame));
   const uint64_t frameId = doc.GetFeature(1)->GetId();
-  fem::Study& s = doc.AddStudy("Turned hold");
+  fem::Study s = NewStudy(doc, "Turned hold");
   s.meshSize = 3.0;
   s.loads.push_back(Support(doc, fem::LoadType::Fixed, FlatAt(doc, 0, 0.0)));
   fem::Load end =
@@ -526,7 +525,7 @@ TEST_CASE("held and cylindrical supports save, reopen and take expressions",
   Document doc;
   AddBox(doc, 20.0, 10.0, 10.0);
   REQUIRE(doc.SetParameter("lift", "0.125"));
-  fem::Study& s = doc.AddStudy("Saved");
+  fem::Study s = NewStudy(doc, "Saved");
   fem::Load h;
   h.id = 7;
   h.type = fem::LoadType::Held;

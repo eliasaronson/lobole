@@ -679,8 +679,7 @@ struct Host {
     if (type != sim->FindStudy(id)->type) {
       fem::Study typed = *sim->FindStudy(id);
       typed.type = type;
-      // A buckling study takes its own default number of factors, as a
-      // part's AddStudyCommand gave it.
+      // A buckling study takes its own default number of factors.
       if (type == fem::AnalysisType::Buckling)
         typed.numModes = fem::kBucklingFactorsDefault;
       sim->ReplaceStudy(std::move(typed));
@@ -2304,8 +2303,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                           : uint64_t{0},
                       r.at("element").get<std::string>()};
   };
-  // Runs one study mutation as a ModifyStudyCommand: snapshot before, apply
-  // `mutate` to a copy, snapshot after, execute.
+  // Runs one study mutation as one undo step on its simulation: `mutate`
+  // applied to a copy, which replaces the study.
   auto modifyStudy = [&](uint64_t id, const std::string& desc,
                          const std::function<void(fem::Study&)>& mutate) {
     host.Modify(id, desc, mutate);

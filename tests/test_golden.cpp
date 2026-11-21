@@ -24,7 +24,10 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/TemplateFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/fem/FemSolver.h" // OldStudies
 #include "core/fem/FemStudy.h"
+#include "core/fem/SimDocument.h"
+#include "core/fem/SimMigration.h"
 #include "core/io/Serialization.h"
 #include "core/io/SerializePrintSettings.h"
 #include "core/io/SerializeSimulation.h"
@@ -894,7 +897,17 @@ void AssertSheetMetal(const Document& doc, const nlohmann::json& expect) {
                                           1e-9));
 }
 
-void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
+// The studies a golden part carries: an old file's as read for the move
+// (Document::OldStudiesRead) -- or `studiesIn`, those studies as a
+// simulation saved and read them back, for a part that went through the
+// current writer, which keeps none (StudiesThroughSimulation).
+void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect,
+                         const std::vector<fem::Study>* studiesIn = nullptr) {
+  const std::vector<fem::Study> none;
+  const std::vector<fem::Study>& studies = studiesIn != nullptr ? *studiesIn
+                                           : doc.OldStudiesRead() != nullptr
+                                               ? doc.OldStudiesRead()->studies
+                                               : none;
   if (expect.contains("generator"))
     CHECK(doc.Generator() == expect.at("generator"));
   if (expect.contains("catalogs"))
@@ -1082,8 +1095,8 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   // load; each [type, magnitude, axis_dir or null, point or null,
   // fix_rotation?] of the first study must hold.
   if (expect.contains("study_loads")) {
-    REQUIRE_FALSE(doc.GetStudies().empty());
-    const auto& loads = doc.GetStudies().front().loads;
+    REQUIRE_FALSE(studies.empty());
+    const auto& loads = studies.front().loads;
     const auto& want = expect.at("study_loads");
     REQUIRE(loads.size() == want.size());
     for (size_t i = 0; i < loads.size(); ++i) {
@@ -1110,9 +1123,9 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   // dropped on load solves a different support; each [type, hold,
   // [dx, dy, dz] mm, frame] of the first study's frame supports must hold.
   if (expect.contains("study_supports")) {
-    REQUIRE_FALSE(doc.GetStudies().empty());
+    REQUIRE_FALSE(studies.empty());
     std::vector<const fem::Load*> supports;
-    const fem::Study& first = doc.GetStudies().front();
+    const fem::Study& first = studies.front();
     for (const fem::Load& l : first.loads)
       if (fem::IsFrameSupport(l.type))
         supports.push_back(&l);
@@ -1139,7 +1152,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const std::string name = want.at(0).get<std::string>();
       INFO("study " << name);
       const fem::Study* st = nullptr;
-      for (const fem::Study& s : doc.GetStudies())
+      for (const fem::Study& s : studies)
         if (s.name == name)
           st = &s;
       REQUIRE(st != nullptr);
@@ -1156,7 +1169,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const std::string name = want.at(0).get<std::string>();
       INFO("study " << name);
       const fem::Study* found = nullptr;
-      for (const fem::Study& st : doc.GetStudies())
+      for (const fem::Study& st : studies)
         if (st.name == name)
           found = &st;
       REQUIRE(found != nullptr);
@@ -1177,7 +1190,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const std::string name = want.at(0).get<std::string>();
       INFO("study " << name);
       const fem::Study* found = nullptr;
-      for (const fem::Study& st : doc.GetStudies())
+      for (const fem::Study& st : studies)
         if (st.name == name)
           found = &st;
       REQUIRE(found != nullptr);
@@ -1200,7 +1213,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const std::string name = want.at(0).get<std::string>();
       INFO("study " << name);
       const fem::Study* found = nullptr;
-      for (const fem::Study& st : doc.GetStudies())
+      for (const fem::Study& st : studies)
         if (st.name == name)
           found = &st;
       REQUIRE(found != nullptr);
@@ -1221,7 +1234,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const std::string name = want.at(0).get<std::string>();
       INFO("study " << name);
       const fem::Study* found = nullptr;
-      for (const fem::Study& st : doc.GetStudies())
+      for (const fem::Study& st : studies)
         if (st.name == name)
           found = &st;
       REQUIRE(found != nullptr);
@@ -1248,7 +1261,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const std::string name = want.at(0).get<std::string>();
       INFO("study " << name);
       const fem::Study* found = nullptr;
-      for (const fem::Study& st : doc.GetStudies())
+      for (const fem::Study& st : studies)
         if (st.name == name)
           found = &st;
       REQUIRE(found != nullptr);
@@ -1269,7 +1282,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const std::string name = want.at(0).get<std::string>();
       INFO("study " << name);
       const fem::Study* found = nullptr;
-      for (const fem::Study& st : doc.GetStudies())
+      for (const fem::Study& st : studies)
         if (st.name == name)
           found = &st;
       REQUIRE(found != nullptr);
@@ -1334,9 +1347,8 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     }
   }
   if (expect.contains("load_regions")) {
-    REQUIRE_FALSE(doc.GetStudies().empty());
-    const nlohmann::json saved =
-        DocumentIO::StudyToJson(doc.GetStudies().front());
+    REQUIRE_FALSE(studies.empty());
+    const nlohmann::json saved = DocumentIO::StudyToJson(studies.front());
     for (const auto& want : expect.at("load_regions")) {
       const size_t i = want.at(0).get<size_t>();
       REQUIRE(i < saved.at("loads").size());
@@ -1772,6 +1784,26 @@ TEST_CASE("The version history covers every kVersion", "[golden]") {
   CHECK(highest + pending == DocumentIO::DocumentFormatVersion());
 }
 
+namespace {
+// An old part's studies moved into a simulation (fem::SimulationsFromPart),
+// saved and read back: where the current writer keeps them.
+std::vector<fem::Study> StudiesThroughSimulation(const Document& doc,
+                                                 const std::string& name) {
+  const fem::OldStudies* old = doc.OldStudiesRead();
+  if (old == nullptr)
+    return {};
+  auto moved = fem::SimulationsFromPart(*old, 1, name);
+  REQUIRE(moved.size() == 1);
+  const fs::path tmp =
+      fs::temp_directory_path() / ("golden_sim_" + name + ".json");
+  REQUIRE(DocumentIO::SaveSimulation(moved[0].sim, tmp.string()));
+  auto back = DocumentIO::LoadSimulation(tmp.string());
+  fs::remove(tmp);
+  REQUIRE(back.has_value());
+  return (*back)->GetStudies();
+}
+} // namespace
+
 TEST_CASE("Golden corpus loads, regenerates, and round-trips",
           "[golden][slow]") {
   const fs::path dir = fs::path(TestSourceDir()) / "tests" / "golden";
@@ -1801,13 +1833,17 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips",
       AssertMatchesExpect(*doc, expect);
       AssertUnits(*doc, expect);
 
-      // Round-trip through the CURRENT writer: migrations must compose
+      // Round-trip through the CURRENT writer: migrations must compose. A
+      // study goes through its simulation's writer; the part keeps none.
+      const std::vector<fem::Study> moved =
+          StudiesThroughSimulation(*doc, golden.stem().string());
       const fs::path tmp = fs::temp_directory_path() /
                            ("golden_rt_" + golden.filename().string());
       REQUIRE(testio::Save(*doc, tmp.string()));
       auto reloaded = testio::Load(tmp.string());
       REQUIRE((reloaded != nullptr && error.empty()));
-      AssertMatchesExpect(*reloaded, expect);
+      CHECK(reloaded->OldStudiesRead() == nullptr);
+      AssertMatchesExpect(*reloaded, expect, &moved);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove(tmp);
     }
@@ -1839,11 +1875,14 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       const fs::path proj = fs::temp_directory_path() /
                             ("golden_dir_" + golden.stem().string() + ".lob");
       fs::remove_all(proj);
+      const std::vector<fem::Study> moved =
+          StudiesThroughSimulation(*doc, golden.stem().string());
       REQUIRE(testio::Save(*doc, proj.string()));
       CHECK(fs::exists(proj / "index.json"));
       auto reloaded = testio::Load(proj.string());
       REQUIRE((reloaded != nullptr && error.empty()));
-      AssertMatchesExpect(*reloaded, expect);
+      CHECK(reloaded->OldStudiesRead() == nullptr);
+      AssertMatchesExpect(*reloaded, expect, &moved);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove_all(proj);
     }

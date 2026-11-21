@@ -3,9 +3,7 @@
 
 #include "core/fem/SimMigration.h"
 
-#include "core/Document.h"
-#include "core/Occurrence.h"
-#include "core/fem/FemSolver.h" // StudyRuntime
+#include "core/fem/FemSolver.h" // OldStudies, StudyRuntime
 
 #include <algorithm>
 #include <tuple>
@@ -16,11 +14,11 @@ namespace {
 
 // A study moved as it is: its ids, its own mesh size and refinements (now
 // overrides of the document's auto mesh), its result beside it.
-void MoveStudy(SimDocument& sim, Study study, const StudyRuntime* result) {
+void MoveStudy(SimDocument& sim, Study study, const OldStudies& old) {
   const uint64_t id = study.id;
   sim.RestoreStudy(std::move(study));
-  if (result != nullptr)
-    sim.RestoreStudyResults(id, *result);
+  if (const auto it = old.results.find(id); it != old.results.end())
+    sim.RestoreStudyResults(id, it->second);
 }
 
 // The table as a sorted list of what each row says, so two tables listing
@@ -47,25 +45,25 @@ SimDocument NewSimulation(SubjectKind kind, uint64_t docId,
 } // namespace
 
 std::vector<MigratedSimulation>
-SimulationsFromPart(const Document& part, uint64_t partId,
+SimulationsFromPart(const OldStudies& old, uint64_t partId,
                     const std::string& partName) {
   std::vector<MigratedSimulation> out;
-  if (part.GetStudies().empty())
+  if (old.studies.empty())
     return out;
   MigratedSimulation m{partName + " simulation",
                        NewSimulation(SubjectKind::Part, partId, partName)};
-  for (const Study& s : part.GetStudies())
-    MoveStudy(m.sim, s, part.StudyResults(s.id));
+  for (const Study& s : old.studies)
+    MoveStudy(m.sim, s, old);
   out.push_back(std::move(m));
   return out;
 }
 
 std::vector<MigratedSimulation>
-SimulationsFromAssembly(const AssemblyDocument& assembly, uint64_t assemblyId,
+SimulationsFromAssembly(const OldStudies& old, uint64_t assemblyId,
                         const std::string& assemblyName) {
   std::vector<MigratedSimulation> out;
   std::vector<std::vector<Row>> tables;
-  for (const Study& s : assembly.GetStudies()) {
+  for (const Study& s : old.studies) {
     const std::vector<Row> table = TableOf(s.participants);
     size_t k = 0;
     while (k < tables.size() && tables[k] != table)
@@ -83,7 +81,7 @@ SimulationsFromAssembly(const AssemblyDocument& assembly, uint64_t assemblyId,
     }
     Study moved = s;
     moved.participants.clear(); // the document's roles stand for it
-    MoveStudy(out[k].sim, std::move(moved), assembly.StudyResults(s.id));
+    MoveStudy(out[k].sim, std::move(moved), old);
   }
   return out;
 }

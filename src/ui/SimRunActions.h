@@ -56,18 +56,18 @@ bool SimStudyStale(AppState& state, const fem::SimDocument& sim,
 uint64_t SimStudyInputHash(AppState& state, const fem::SimDocument& sim,
                            uint64_t studyId, const JobStart* job = nullptr);
 // The study's own result or the session's for these very inputs, stored on
-// the simulation without a solve (ReuseStudyResult's rule). `job->reused`.
+// the simulation without a solve. `job->reused`.
 bool ReuseSimStudyResult(AppState& state, uint64_t simSlotId, uint64_t studyId,
                          JobStart* job);
 
-// Solves on this thread, as RunStudyAndCache does: CalculiX where the study
+// Solves on this thread: CalculiX where the study
 // asks for it (timeoutSeconds bounds that run), the GPU offered, the run's
 // convergence, the result remembered for reuse and stored on the simulation
 // with every mesh it made. A topology study runs its optimisation.
 bool RunSimStudyAndCache(AppState& state, uint64_t simSlotId, uint64_t studyId,
                          std::string* error, double timeoutSeconds = 0.0,
                          const JobStart* job = nullptr);
-// Off the frame (StartStudyRun): planned here, meshed and solved on a
+// Off the frame: planned here, meshed and solved on a
 // worker, stored when it lands. A topology study is StartSimTopologyRun's.
 bool StartSimStudyRun(AppState& state, uint64_t simSlotId, uint64_t studyId,
                       std::string* error, JobStart* jobStart = nullptr);
@@ -97,7 +97,7 @@ CheckSimStudyNow(AppState& state, uint64_t simSlotId, uint64_t studyId);
 // topology study through StartSimTopologyRun, any other StartSimStudyRun.
 bool StartFrontSimRun(AppState& state, uint64_t studyId, std::string* error);
 
-// check_topology on a simulation (EnsureTopologyCheckStudies' rule): the
+// check_topology on a simulation: the
 // topology study's shape and solid static studies, made or brought up to
 // date under SimSlotUndoGuard, then solved off the frame (kind "check")
 // where no stored result answers them. `job->reused` when both are.

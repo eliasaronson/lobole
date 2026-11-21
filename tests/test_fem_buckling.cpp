@@ -19,6 +19,7 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
+#include "study_fixtures.h"
 
 #include <array>
 #include <chrono>
@@ -92,14 +93,14 @@ fem::StudyRuntime Run(Document& doc, fem::Study& s,
 
 // A steel column of a w x d section, `length` tall, clamped at its base and
 // pushed down on its top with `force` N.
-fem::Study& Column(Document& doc, double w, double d, double length,
-                   double force, double meshSize) {
+fem::Study Column(Document& doc, double w, double d, double length,
+                  double force, double meshSize) {
   auto box =
       std::make_unique<BoxFeature>("Column", glm::dvec3(0), w, d, length);
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Column");
+  fem::Study s = NewStudy(doc, "Column");
   s.type = fem::AnalysisType::Buckling;
   s.numModes = fem::kBucklingFactorsDefault;
   s.meshSize = meshSize;
@@ -118,7 +119,7 @@ TEST_CASE("a fixed-free column buckles at Euler's load, a 10 x 20 one in its "
   constexpr double E = 210000.0, L = 200.0, P = 1000.0; // library steel
   {
     Document doc;
-    fem::Study& s = Column(doc, 10.0, 10.0, L, P, 2.5);
+    fem::Study s = Column(doc, 10.0, 10.0, L, P, 2.5);
     const fem::StudyRuntime rt = Run(doc, s);
     const fem::StudyBodyResult& b = rt.bodies[0];
     REQUIRE(b.buckling.solved);
@@ -143,7 +144,7 @@ TEST_CASE("a fixed-free column buckles at Euler's load, a 10 x 20 one in its "
   }
   {
     Document doc;
-    fem::Study& s = Column(doc, 10.0, 20.0, L, P, 2.5);
+    fem::Study s = Column(doc, 10.0, 20.0, L, P, 2.5);
     const fem::StudyRuntime rt = Run(doc, s);
     const auto& modes = rt.bodies[0].results.modes;
     REQUIRE(modes.size() >= 2);
@@ -157,7 +158,7 @@ TEST_CASE("a fixed-free column buckles at Euler's load, a 10 x 20 one in its "
 TEST_CASE("a buckling result is saved and read back as it was",
           "[fem][buckling]") {
   Document doc;
-  fem::Study& s = Column(doc, 10.0, 10.0, 100.0, 1000.0, 4.0);
+  fem::Study s = Column(doc, 10.0, 10.0, 100.0, 1000.0, 4.0);
   fem::StudyRuntime rt = Run(doc, s);
   fem::KeepWhatIsRead(rt);
   nlohmann::json j;
@@ -206,7 +207,7 @@ TEST_CASE("a thin cylinder buckles at the classical load, and is knocked "
                                                   BooleanOp::Subtract));
   REQUIRE(doc.GetBodies().size() == 1);
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Tube");
+  fem::Study s = NewStudy(doc, "Tube");
   s.type = fem::AnalysisType::Buckling;
   s.numModes = fem::kBucklingFactorsDefault;
   s.meshSize = 2.0;
@@ -253,7 +254,7 @@ TEST_CASE("a wide cantilever plate buckles at its plate stiffness",
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Plate");
+  fem::Study s = NewStudy(doc, "Plate");
   s.type = fem::AnalysisType::Buckling;
   s.numModes = fem::kBucklingFactorsDefault;
   s.meshSize = 2.0;
@@ -280,7 +281,7 @@ TEST_CASE("a wide cantilever plate buckles at its plate stiffness",
 
 TEST_CASE("a pull buckles nothing, and says so", "[fem][buckling]") {
   Document doc;
-  fem::Study& s = Column(doc, 10.0, 10.0, 100.0, -1000.0, 4.0);
+  fem::Study s = Column(doc, 10.0, 10.0, 100.0, -1000.0, 4.0);
   const fem::StudyRuntime rt = Run(doc, s);
   const fem::StudyBodyResult& b = rt.bodies[0];
   REQUIRE(b.buckling.solved);
@@ -298,7 +299,7 @@ TEST_CASE("a stocky strut fails below both its buckling and its yield "
   // squash load at 250 MPa (pi^2 E I / (4 L^2) = 25 kN at E 210 GPa): the
   // two meet.
   Document doc;
-  fem::Study& s = Column(doc, 10.0, 10.0, 131.4, 10000.0, 2.5);
+  fem::Study s = Column(doc, 10.0, 10.0, 131.4, 10000.0, 2.5);
   const fem::StudyRuntime rt = Run(doc, s);
   const auto& k = rt.bodies[0].buckling;
   REQUIRE(k.buckles);
@@ -317,7 +318,7 @@ TEST_CASE("a stocky strut fails below both its buckling and its yield "
 
 TEST_CASE("a buckling study refuses load cases", "[fem][buckling]") {
   Document doc;
-  fem::Study& s = Column(doc, 10.0, 10.0, 100.0, 1000.0, 4.0);
+  fem::Study s = Column(doc, 10.0, 10.0, 100.0, 1000.0, 4.0);
   s.loadCases.push_back({"a", ExprValue{1.0}});
   s.loads[1].loadCase = "a";
   fem::StudyRuntime rt;
@@ -330,7 +331,7 @@ TEST_CASE("a buckling run that will not fit in memory is refused, naming "
           "both numbers",
           "[fem][buckling]") {
   Document doc;
-  fem::Study& s = Column(doc, 10.0, 10.0, 100.0, 1000.0, 4.0);
+  fem::Study s = Column(doc, 10.0, 10.0, 100.0, 1000.0, 4.0);
   fem::StudyPlan plan;
   std::string err;
   REQUIRE(fem::PlanStudy(doc, s, plan, &err));
@@ -374,7 +375,7 @@ TEST_CASE("measure: a 1 mm plate's factor at one and two elements through",
       box->SetMaterial("steel");
       doc.AddFeature(std::move(box));
       const Body& body = doc.GetBodies()[0];
-      fem::Study& s = doc.AddStudy("Plate");
+      fem::Study s = NewStudy(doc, "Plate");
       s.type = fem::AnalysisType::Buckling;
       s.numModes = 3;
       s.meshSize = size;
@@ -432,7 +433,7 @@ TEST_CASE("calibrate the buckling memory estimate", "[.][buckling-calibrate]") {
   const double base = PeakRssBytes();
   for (double size : {5.0, 3.5, 2.5, 1.8, 1.5, 1.35}) {
     Document doc;
-    fem::Study& s = Column(doc, 10.0, 10.0, 200.0, 1000.0, size);
+    fem::Study s = Column(doc, 10.0, 10.0, 200.0, 1000.0, size);
     const std::clock_t c0 = std::clock();
     const fem::StudyRuntime rt = Run(doc, s);
     const double cpu = double(std::clock() - c0) / CLOCKS_PER_SEC;
@@ -453,7 +454,7 @@ TEST_CASE("calibrate the buckling memory estimate", "[.][buckling-calibrate]") {
 TEST_CASE("a buckling run of 240k DOF costs what it was measured to",
           "[fem][buckling][slow]") {
   Document doc;
-  fem::Study& s = Column(doc, 10.0, 10.0, 200.0, 1000.0, 1.28);
+  fem::Study s = Column(doc, 10.0, 10.0, 200.0, 1000.0, 1.28);
   const double base = PeakRssBytes();
   const std::clock_t c0 = std::clock();
   const fem::StudyRuntime rt = Run(doc, s);

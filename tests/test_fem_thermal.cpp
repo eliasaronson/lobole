@@ -25,6 +25,7 @@
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemThermal.h"
 #include "core/io/Serialization.h"
+#include "study_fixtures.h"
 #include "topo_testmesh.h"
 
 #include <cmath>
@@ -643,12 +644,13 @@ fem::Load Thermal(Document& doc, fem::LoadType type, const ElementRef& face) {
 }
 
 fem::StudyRuntime Run(Document& doc, fem::Study& s,
-                      fem::ConvergeMode mode = fem::ConvergeMode::Never) {
+                      fem::ConvergeMode mode = fem::ConvergeMode::Never,
+                      const fem::StudySiblings* siblings = nullptr) {
   fem::ConvergeOptions converge;
   converge.mode = mode;
   fem::StudyRuntime rt;
   std::string err;
-  const bool ok = fem::RunStudy(doc, s, rt, converge, &err);
+  const bool ok = fem::RunStudy(doc, s, rt, converge, &err, siblings);
   INFO(err);
   REQUIRE(ok);
   return rt;
@@ -682,7 +684,7 @@ TEST_CASE("a pipe held at its bore and cooled outside carries the radial "
       return std::abs(f.radius - r) < 1e-6;
     };
   };
-  fem::Study& s = doc.AddStudy("Pipe");
+  fem::Study s = NewStudy(doc, "Pipe");
   s.type = fem::AnalysisType::Thermal;
   s.meshSize = 2.5;
   fem::Load bore = Thermal(doc, fem::LoadType::Temperature,
@@ -719,7 +721,7 @@ TEST_CASE("a heated rod peaks at q R^2 / 4k + q R / 2h over its ambient, and "
   rod->SetMaterial("pla");
   doc.AddFeature(std::move(rod));
   const Body& body = doc.GetBodies()[0];
-  fem::Study& s = doc.AddStudy("Rod");
+  fem::Study s = NewStudy(doc, "Rod");
   s.type = fem::AnalysisType::Thermal;
   s.meshSize = 2.5;
   fem::Load out =
@@ -787,7 +789,7 @@ TEST_CASE("a static study takes a thermal study's temperature on its own mesh",
       return std::abs(f.centroid.x - x) < 1e-6;
     };
   };
-  fem::Study& heat = doc.AddStudy("Heat");
+  fem::Study heat = NewStudy(doc, "Heat");
   heat.type = fem::AnalysisType::Thermal;
   heat.meshSize = 5.0;
   fem::Load hot = Thermal(doc, fem::LoadType::Temperature,
@@ -798,7 +800,10 @@ TEST_CASE("a static study takes a thermal study's temperature on its own mesh",
   cold.temperatureC = 20.0;
   heat.loads = {hot, cold};
   const uint64_t heatId = heat.id;
-  fem::Study& st = doc.AddStudy("Clamped");
+  TestStudies studies; // the simulation's, which the static one reads
+  studies.Add(heat);
+  const fem::StudySiblings siblings = studies.Siblings();
+  fem::Study st = NewStudy(doc, "Clamped");
   st.meshSize = 5.0;
   fem::Load a;
   a.id = doc.AllocateId();
@@ -814,12 +819,13 @@ TEST_CASE("a static study takes a thermal study's temperature on its own mesh",
   {
     fem::StudyRuntime rt;
     std::string err;
-    CHECK_FALSE(fem::RunStudy(doc, st, rt, &err));
+    CHECK_FALSE(fem::RunStudy(doc, st, rt, &err, &siblings));
     CHECK_THAT(err, ContainsSubstring("stress_free_c"));
   }
   st.thermalLoad.hasStressFree = true;
   st.thermalLoad.stressFreeC = 20.0;
-  const fem::StudyRuntime rt = Run(doc, st);
+  const fem::StudyRuntime rt =
+      Run(doc, st, fem::ConvergeMode::Never, &siblings);
   const auto& b0 = rt.bodies[0];
   REQUIRE(b0.thermal.load);
   CHECK_THAT(b0.thermal.maxC, WithinAbs(100.0, 1e-6));
@@ -838,9 +844,9 @@ TEST_CASE("a static study takes a thermal study's temperature on its own mesh",
   CHECK(std::abs(fx) > 0.9 * expect);
   CHECK(std::abs(fx) < 1.6 * expect);
   // The input hash takes the thermal study's definition.
-  const uint64_t before = fem::StudyInputKey(doc, st);
-  doc.StudyForRun(heatId)->loads[0].temperatureC = 120.0;
-  CHECK(fem::StudyInputKey(doc, st) != before);
+  const uint64_t before = fem::StudyInputKey(doc, st, &siblings);
+  studies.Find(heatId)->loads[0].temperatureC = 120.0;
+  CHECK(fem::StudyInputKey(doc, st, &siblings) != before);
 }
 
 // The cost of a thermal study of 228k nodes (mesh, conduction, flux
@@ -864,7 +870,7 @@ TEST_CASE("a thermal study of 228k nodes costs what it was measured to",
       return std::abs(f.centroid.x - x) < 1e-6;
     };
   };
-  fem::Study& s = doc.AddStudy("Bar");
+  fem::Study s = NewStudy(doc, "Bar");
   s.type = fem::AnalysisType::Thermal;
   s.meshSize = 0.93;
   fem::Load hot = Thermal(doc, fem::LoadType::Temperature,

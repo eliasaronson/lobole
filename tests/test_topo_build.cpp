@@ -16,7 +16,10 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
+#include "core/fem/SimDocument.h"
+#include "core/fem/SimStudy.h"
 #include "core/io/Serialization.h"
+#include "study_fixtures.h"
 #include "topo_testmesh.h"
 
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -462,7 +465,9 @@ TEST_CASE("A split's pieces fit the bed or the split is refused",
 
 namespace {
 
-Document MakeBar() {
+// The bar and its topology study, `out` (the test's own: a part keeps no
+// studies).
+Document MakeBar(fem::Study* out) {
   Document doc;
   auto box = std::make_unique<BoxFeature>("Envelope", glm::vec3(0, 0, 0), 80.0,
                                           30.0, 30.0);
@@ -472,7 +477,7 @@ Document MakeBar() {
   const auto face = [&](int i) {
     return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
   };
-  fem::Study& s = doc.AddStudy("Generative");
+  fem::Study s = NewStudy(doc, "Generative");
   s.type = fem::AnalysisType::Topology;
   s.meshSize = 6.0;
   s.volumeFraction = 0.35;
@@ -497,6 +502,7 @@ Document MakeBar() {
   side.direction = glm::dvec3(0, 1, 0);
   side.loadCase = "side";
   s.loads.push_back(side);
+  *out = s;
   return doc;
 }
 
@@ -504,8 +510,8 @@ Document MakeBar() {
 
 TEST_CASE("A keep-out leaves its tets out of the design domain",
           "[topopt][topobuild][mesh]") {
-  Document doc = MakeBar();
-  fem::Study& s = *doc.StudyForRun(doc.GetStudies()[0].id);
+  fem::Study s;
+  Document doc = MakeBar(&s);
   fem::TopoInput plain;
   std::string err;
   REQUIRE(fem::PrepareTopology(doc, s, plain, &err));
@@ -540,31 +546,42 @@ TEST_CASE("A keep-out leaves its tets out of the design domain",
 
 TEST_CASE("A static study of the optimised shape against the solid",
           "[topopt][topobuild][mesh][slow]") {
-  Document doc = MakeBar();
-  const uint64_t topoId = doc.GetStudies()[0].id;
+  // In a simulation of the bar, as the shape studies read their topology
+  // result from one.
+  fem::Study topo;
+  Document doc = MakeBar(&topo);
+  const uint64_t topoId = topo.id;
+  fem::SimDocument sim;
+  sim.SetSubject({fem::SubjectKind::Part, 1, 0, "Bar"});
+  sim.RestoreStudy(topo);
+  fem::SimContext ctx;
+  ctx.sim = &sim;
+  ctx.part = &doc;
+  ctx.subjectStamps = {{1, 7}};
+  const auto stamps = [](uint64_t) { return uint64_t{7}; };
   {
     fem::StudyRuntime rt;
     std::string err;
-    REQUIRE(fem::RunTopology(doc, *doc.StudyForRun(topoId), rt, &err));
+    REQUIRE(fem::RunTopology(doc, *sim.StudyForRun(topoId), rt, &err));
     REQUIRE(rt.caseCompliance.size() == 2);
-    rt.solvedAtVersion = doc.Version();
-    doc.StoreStudyResults(topoId, std::move(rt));
+    rt.solvedPartVersions = ctx.subjectStamps;
+    sim.StoreStudyResults(topoId, std::move(rt));
   }
-  const fem::Study topo = *doc.FindStudy(topoId);
   const auto shapeStudy = [&](bool whole) {
-    fem::Study& s = doc.AddStudy(whole ? "solid" : "shape");
+    fem::Study s = NewStudy(doc, whole ? "solid" : "shape");
     s.loads = topo.loads;
     s.loadCases = topo.loadCases;
     s.shapeFrom = {topoId, 0.0, whole};
+    sim.RestoreStudy(s);
     return s.id;
   };
   const uint64_t shapeId = shapeStudy(false);
   const uint64_t solidId = shapeStudy(true);
   fem::StudyRuntime shape, solid;
   std::string err;
-  REQUIRE(fem::RunStudy(doc, *doc.StudyForRun(shapeId), shape, &err));
+  REQUIRE(fem::RunSimStudy(sim, ctx, shapeId, shape, &err));
   INFO(err);
-  REQUIRE(fem::RunStudy(doc, *doc.StudyForRun(solidId), solid, &err));
+  REQUIRE(fem::RunSimStudy(sim, ctx, solidId, solid, &err));
   REQUIRE(shape.caseNames.size() == 2);
   REQUIRE(shape.bodies.size() == 1);
   REQUIRE(shape.bodies[0].cases.size() == 2);
@@ -588,19 +605,19 @@ TEST_CASE("A static study of the optimised shape against the solid",
 
   // Fresh while the topology result is the one it was cut from; stale once
   // that result is replaced.
-  shape.solvedAtVersion = doc.Version();
-  doc.StoreStudyResults(shapeId, shape);
-  CHECK_FALSE(doc.StudyResultsStale(shapeId));
-  const uint64_t keyBefore = fem::StudyInputKey(doc, *doc.FindStudy(shapeId));
-  fem::StudyRuntime other = *doc.StudyResults(topoId);
+  shape.solvedPartVersions = ctx.subjectStamps;
+  sim.StoreStudyResults(shapeId, shape);
+  CHECK_FALSE(sim.StudyResultsStale(shapeId, stamps));
+  const uint64_t keyBefore = fem::SimStudyInputKey(ctx, shapeId);
+  fem::StudyRuntime other = *sim.StudyResults(topoId);
   other.bodies[0].density[0] = 0.5 * (other.bodies[0].density[0] + 0.01);
   other.densityDigest =
       fem::DensityDigest(other.bodies[0].mesh, other.bodies[0].density);
-  doc.StoreStudyResults(topoId, std::move(other));
-  CHECK(doc.StudyResultsStale(shapeId));
+  sim.StoreStudyResults(topoId, std::move(other));
+  CHECK(sim.StudyResultsStale(shapeId, stamps));
   // ...and its input hash moved with it: a run now is not answered from
   // the old one.
-  CHECK(fem::StudyInputKey(doc, *doc.FindStudy(shapeId)) != keyBefore);
+  CHECK(fem::SimStudyInputKey(ctx, shapeId) != keyBefore);
 }
 
 #endif // HAVE_NETGEN && HAVE_FEM_SOLVER

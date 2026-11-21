@@ -101,7 +101,7 @@ row here, a row with no outcome, or a test named below that does not exist.
 | `topo` | its best iterate, stored as the study's result marked `cancelled` (it replaces the earlier result, and is never reused as a cached answer) | `topo_smoke.py::main` |
 | `study` | nothing: a solve cancelled is an answer nobody wants, even one a direct factorization finished after the cancel | `fem_async_smoke.py::main` |
 | `check` | the studies solved whole before the cancel; the one in flight is dropped | `topo_build_smoke.py::main` |
-| `mesh` | nothing: the report is a question about the mesh, dropped with it | `a study solved on the registry lands in its own part, not the active tab` |
+| `mesh` | nothing: the report is a question about the mesh, dropped with it | `a study solved on the registry lands in its own simulation, not the active tab` |
 | `requirements` | the evidence each requirement already measured; the measure in flight is not landed | `requirements/a_slow_check_keeps_the_frame`, `requirements_smoke.py::off_frame` |
 | `design_sweep` | the points it measured, the answer marked cancelled; the model is never touched (it sweeps copies) | `requirements/a_sweep_by_clicking`, `design_sweep_smoke.py::main` |
 | `import` | nothing: the part is unchanged and the read dropped; once it materializes it is not cancellable and lands whole | `import/a_mesh_import_runs_in_background`, `import_job_smoke.py::main` |

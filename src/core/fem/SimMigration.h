@@ -6,12 +6,9 @@
 // The studies of a part or an assembly moved into simulation documents
 // (docs/simulation/README.md#moving-studies-into-a-simulation).
 //
-// NOT called on open yet: the app calls these from the step that turns the
-// study panel into the simulation tab (docs/plans/simulation-document.md
-// #stages), which is also the step that stops saving the part's and the
-// assembly's own study lists. Until then a project keeps its studies where
-// they are, and a simulation document beside them is only what a project
-// already holding one brought with it.
+// A part or an assembly keeps no studies of its own: the reader keeps an
+// old file's as read (fem::OldStudies, Document::TakeOldStudies) and the open
+// moves them with these (ui::MoveStudiesIntoSimulations).
 
 #include "core/fem/SimDocument.h"
 
@@ -19,10 +16,9 @@
 #include <string>
 #include <vector>
 
-class AssemblyDocument;
-class Document;
-
 namespace fem {
+
+struct OldStudies; // FemSolver.h
 
 // One simulation made from studies that lived on a document, and the name
 // the project would list it under.
@@ -31,19 +27,20 @@ struct MigratedSimulation {
   SimDocument sim;
 };
 
-// Every study of `part` (whose project document id is `partId`, its name
-// `partName`), in one simulation of the part in its active configuration:
-// ids kept (study, load), each study's own mesh size and refinements kept on
-// the study as its overrides and the document's mesh left at auto, so each
-// study is planned as it was (SimDocument::Effective) and its input hash is
-// the one its saved result was solved at. Each saved result moves with its
-// study, stale until RestampSimByInputs finds it current. None when the part
-// has no studies.
+// Every study an old part file held (`old`; the part's project document id
+// is `partId`, its name `partName`), in one simulation of the part in its
+// active configuration: ids kept (study, load), each study's own mesh size and
+// refinements kept on the study as its overrides and the document's mesh left
+// at auto, so each study is planned as it was (SimDocument::Effective) and its
+// input hash is the one its saved result was solved at. Each saved result moves
+// with its study, stale until RestampSimByInputs finds it current. None when
+// the part has no studies.
 std::vector<MigratedSimulation>
-SimulationsFromPart(const Document& part, uint64_t partId,
+SimulationsFromPart(const OldStudies& old, uint64_t partId,
                     const std::string& partName);
 
-// The studies of `assembly` (project id `assemblyId`), one simulation per
+// The studies an old assembly file held (project id `assemblyId`), one
+// simulation per
 // distinct participants table (roles live on the document, SimDocument::
 // Roles): studies that agree on who takes part and how share one, in the
 // order the first of each appears; each study's table is cleared, since the
@@ -52,7 +49,7 @@ SimulationsFromPart(const Document& part, uint64_t partId,
 // studies are otherwise moved as SimulationsFromPart moves them. Named
 // "<assembly> simulation", numbered from 2 past the first.
 std::vector<MigratedSimulation>
-SimulationsFromAssembly(const AssemblyDocument& assembly, uint64_t assemblyId,
+SimulationsFromAssembly(const OldStudies& old, uint64_t assemblyId,
                         const std::string& assemblyName);
 
 // The simulation holding study `studyId` of the document `documentId`

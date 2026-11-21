@@ -5,9 +5,7 @@
 
 #include "core/fem/SimDocument.h"
 #include "ui/AppState.h"
-#include "ui/DockLayout.h" // PanelHeading
 #include "ui/DocumentSlots.h"
-#include "ui/PanelTitles.h"
 #include "ui/Widgets.h"
 
 #include "IconsFontAwesome6.h"
@@ -36,33 +34,6 @@ void DrawSimSubjectRow(AppState& state) {
     row.tooltip = "The " + std::string(fem::SubjectKindToString(subject.kind)) +
                   " this simulation analyses is no longer in the project";
   ListRow(row);
-}
-
-void DrawSimTree(AppState& state) {
-  if (!state.sim)
-    return;
-  // Docks into the left "Model" node, as a drawing's sheet panel does.
-  ImGui::Begin(kPanelModel);
-  PanelHeading(kPanelModel);
-  const fem::SimDocument& sim = *state.sim;
-
-  if (SectionHeader("Analyses", -1, /*defaultOpen=*/true))
-    DrawSimSubjectRow(state);
-
-  const std::vector<fem::Study>& studies = sim.GetStudies();
-  if (SectionHeader("Studies", static_cast<int>(studies.size()),
-                    /*defaultOpen=*/true)) {
-    if (studies.empty())
-      ImGui::TextDisabled("No studies yet");
-    for (const fem::Study& study : studies) {
-      ListRowSpec row;
-      row.glyph = ICON_FA_GAUGE_HIGH;
-      row.label = study.name + "###sim_study_" + std::to_string(study.id);
-      row.tail = fem::SimDocument::SharesMesh(study) ? "" : "own mesh";
-      ListRow(row);
-    }
-  }
-  ImGui::End();
 }
 
 } // namespace ui

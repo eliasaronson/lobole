@@ -1277,6 +1277,10 @@ TEST_CASE("every Document mutator of saved state moves the save stamp",
        "a loader's (baseline taken after) or a throwaway copy's"},
       {"RewriteProjectVarRefs", "the caller regenerates every document"},
       {"SetBuildsOffFrame", "how the app builds the part, never saved"},
+      {"SetOldStudies", "an old file's studies, read for the move, never "
+                        "saved by the part"},
+      {"TakeOldStudies", "the open moves them into a simulation, which is "
+                         "saved"},
   };
   const std::string header = ReadSource("src/core/Document.h");
   const std::string impl = ReadSource("src/core/Document.cpp");

@@ -22,6 +22,7 @@
 #include "core/Units.h"
 #include "core/cam/JobDocument.h"
 #include "core/drawing/DrawingDocument.h"
+#include "core/fem/SimDocument.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
@@ -887,9 +888,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (!part.Generator().is_object() || generated::Modified(part))
       throw ContractError(m, "ownership_conflict", "/params/part_id",
                           "unmodified owned output", id);
-    for (const Document* d : {&part, &source}) {
+    for (const auto& [d, docId] :
+         {std::pair<const Document*, uint64_t>{&part, id},
+          {&source, sourceId}}) {
+      // A study stands on the part's faces: it is a simulation's whose
+      // subject the part is.
       if (!d->GetAssets().empty() || !d->GetConfigurations().empty() ||
-          !d->GetStudies().empty() || d->Rollback() >= 0)
+          ui::FindSimulationFor(state, fem::SubjectKind::Part, docId) !=
+              SIZE_MAX ||
+          d->Rollback() >= 0)
         throw std::runtime_error(
             "component update pilot does not replace assets, configurations, "
             "studies or rollback states");

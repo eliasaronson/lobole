@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "study_fixtures.h"
 #include "ui/CreateActions.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -203,60 +204,6 @@ TEST_CASE("FemMesher reports a clear error when built without Netgen",
 
 #endif // HAVE_NETGEN
 
-// ---- Study commands (ungated: no meshing) ---------------------------------
-
-TEST_CASE("Study add/remove commands undo and redo", "[fem][study]") {
-  Document doc;
-  CommandStack stack;
-
-  auto add = std::make_unique<AddStudyCommand>("My Study");
-  AddStudyCommand* raw = add.get();
-  REQUIRE(stack.Execute(std::move(add), doc));
-  const uint64_t id = raw->StudyId();
-  REQUIRE(doc.GetStudies().size() == 1);
-  CHECK(doc.FindStudy(id)->name == "My Study");
-
-  stack.Undo(doc);
-  CHECK(doc.GetStudies().empty());
-  stack.Redo(doc);
-  REQUIRE(doc.GetStudies().size() == 1);
-  CHECK(doc.FindStudy(id) != nullptr);
-
-  REQUIRE(stack.Execute(std::make_unique<RemoveStudyCommand>(id), doc));
-  CHECK(doc.GetStudies().empty());
-  stack.Undo(doc); // restores the removed study, ids intact
-  REQUIRE(doc.GetStudies().size() == 1);
-  CHECK(doc.FindStudy(id)->name == "My Study");
-}
-
-TEST_CASE("ModifyStudyCommand round-trips a load edit", "[fem][study]") {
-  Document doc;
-  CommandStack stack;
-  fem::Study& s = doc.AddStudy("S");
-  const uint64_t id = s.id;
-
-  // Snapshot before/after adding a load, the RPC's before/after shape.
-  nlohmann::json before = DocumentIO::StudyToJson(*doc.FindStudy(id));
-  fem::Study copy = *doc.FindStudy(id);
-  fem::Load l;
-  l.id = doc.AllocateId();
-  l.type = fem::LoadType::Force;
-  l.face = ElementRef{2, "2/cap1"};
-  l.magnitude = 500.0;
-  copy.loads.push_back(l);
-  nlohmann::json after = DocumentIO::StudyToJson(copy);
-
-  REQUIRE(stack.Execute(
-      std::make_unique<ModifyStudyCommand>("Add load", before, after), doc));
-  REQUIRE(doc.FindStudy(id)->loads.size() == 1);
-  CHECK(doc.FindStudy(id)->loads[0].magnitude == 500.0);
-
-  stack.Undo(doc);
-  CHECK(doc.FindStudy(id)->loads.empty());
-  stack.Redo(doc);
-  REQUIRE(doc.FindStudy(id)->loads.size() == 1);
-}
-
 #ifdef HAVE_NETGEN
 
 TEST_CASE("MeshStudy meshes the loaded body and errors on a dangling ref",
@@ -272,7 +219,7 @@ TEST_CASE("MeshStudy meshes the loaded body and errors on a dangling ref",
   const std::string faceName =
       doc.GetBodies()[0].elementMap.names.begin()->second;
 
-  fem::Study& s = doc.AddStudy("S");
+  fem::Study s = NewStudy(doc, "S");
   s.meshSize = 3.0;
   fem::Load fixed;
   fixed.id = doc.AllocateId();
@@ -1044,7 +991,7 @@ TEST_CASE("RunStudy errors when the body material has no stiffness data",
     return std::to_string(createdBy) + "/face" + std::to_string(i);
   };
 
-  fem::Study& s = doc.AddStudy("S");
+  fem::Study s = NewStudy(doc, "S");
   s.meshSize = 6.0;
   fem::Load fixed;
   fixed.id = doc.AllocateId();
@@ -1072,7 +1019,7 @@ TEST_CASE("RunStudy errors when a loaded body has no fixed support",
   doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 50.0,
                                               10.0, 10.0));
   const uint64_t createdBy = doc.GetBodies()[0].createdBy;
-  fem::Study& s = doc.AddStudy("S");
+  fem::Study s = NewStudy(doc, "S");
   s.meshSize = 6.0;
   fem::Load force;
   force.id = doc.AllocateId();
@@ -1107,7 +1054,7 @@ TEST_CASE("RunStudy solves multiple loaded bodies and aggregates the maxima",
   const uint64_t cbA = doc.GetBodies()[0].createdBy;
   const uint64_t cbB = doc.GetBodies()[1].createdBy;
 
-  fem::Study& s = doc.AddStudy("Two bars");
+  fem::Study s = NewStudy(doc, "Two bars");
   s.meshSize = 6.0;
   auto addBar = [&](uint64_t cb, double force) {
     auto face = [&](int i) {
@@ -1549,7 +1496,7 @@ TEST_CASE("PlanStudy + MeshPlannedStudy is PrepareStudy, on copied shapes",
   auto face = [&](int i) {
     return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
   };
-  fem::Study& s = doc.AddStudy("Bar");
+  fem::Study s = NewStudy(doc, "Bar");
   s.meshSize = 6.0;
   fem::Load fx;
   fx.id = doc.AllocateId();
@@ -2010,32 +1957,6 @@ TEST_CASE("S1: an assembly study refuses what it cannot mean",
     CHECK(fem::ParticipantRoleFromString("ignored", role));
     CHECK(role == fem::ParticipantRole::Ignored);
   }
-}
-
-TEST_CASE("S1: an assembly's study results go stale when any part it read "
-          "moves, not only the assembly",
-          "[fem][assembly]") {
-  AssemblyDocument asmDoc;
-  Occurrence o;
-  o.name = "A";
-  o.partId = 7;
-  asmDoc.AddOccurrence(o);
-  fem::Study& s = asmDoc.AddStudy("s");
-  CHECK(asmDoc.StudyResultsStale(s.id, nullptr)); // never run
-  fem::StudyRuntime rt;
-  rt.solvedAtVersion = asmDoc.Version();
-  rt.solvedPartVersions = {{7, 3}};
-  asmDoc.StoreStudyResults(s.id, std::move(rt));
-  const auto partAt = [](uint64_t v) { return [v](uint64_t) { return v; }; };
-  CHECK_FALSE(asmDoc.StudyResultsStale(s.id, partAt(3)));
-  CHECK(asmDoc.StudyResultsStale(s.id, partAt(4))); // the part regenerated
-  asmDoc.BumpVersion();                             // a mate moved
-  CHECK(asmDoc.StudyResultsStale(s.id, partAt(3)));
-  // The cache is SHARED with a full-state copy (an undo snapshot), so the
-  // copy neither duplicates the mesh nor loses the results.
-  AssemblyDocument copy = asmDoc;
-  CHECK(copy.StudyResults(s.id) != nullptr);
-  CHECK(copy.StudyResultsEpoch() == asmDoc.StudyResultsEpoch());
 }
 
 // ---- S2: a neighbour meshed and BONDED

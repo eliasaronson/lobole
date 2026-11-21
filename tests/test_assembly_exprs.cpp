@@ -15,11 +15,13 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Occurrence.h"
+#include "core/fem/SimDocument.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActionsInternal.h" // SlotDoc
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/SimRunActions.h" // SimulationSlotFor, SimBySlotId
 #include "ui/VariableActions.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -274,15 +276,14 @@ TEST_CASE("Rename and delete reach a part, an assembly and a study at once",
   s.to = Rad(90.0);
   s.clashDeflectionMm.expr = "gap / 10";
   a.AddMotionStudy(s);
-  // ...and the assembly's FEM study.
-  fem::Study st;
-  st.id = a.AllocateId();
-  st.name = "Rig study";
+  // ...and a study of the assembly, in its simulation.
+  fem::SimDocument* sim = ui::SimBySlotId(
+      r.state, ui::SimulationSlotFor(
+                   r.state, r.state.parts[r.state.activePart].id, true));
+  REQUIRE(sim != nullptr);
   fem::Load l;
-  l.id = a.AllocateId();
   l.magnitude.expr = "gap * 100";
-  st.loads.push_back(l);
-  a.GetStudies().push_back(st);
+  sim->AddStudy("Rig study").loads.push_back(l);
 
   std::vector<std::string> refs;
   CHECK_FALSE(ui::RemoveProjectVariable(r.state, "gap", &refs));
@@ -292,7 +293,7 @@ TEST_CASE("Rename and delete reach a part, an assembly and a study at once",
   CHECK(has("Part 1: feature 'Plate'"));
   CHECK(has("Box: mate 'Hinge'"));
   CHECK(has("Box: motion study 'Open'"));
-  CHECK(has("Box: study 'Rig study'"));
+  CHECK(has("Box simulation: study 'Rig study'"));
 
   const uint64_t stamp = a.SaveStamp();
   REQUIRE(ui::RenameProjectVariable(r.state, "gap", "clearance"));
@@ -300,7 +301,7 @@ TEST_CASE("Rename and delete reach a part, an assembly and a study at once",
   CHECK(after.FindMateById(r.hinge)->offset.expr == "clearance");
   CHECK(after.GetMotionStudies().at(0).clashDeflectionMm.expr ==
         "clearance / 10");
-  CHECK(after.GetStudies().at(0).loads.at(0).magnitude.expr ==
+  CHECK(sim->GetStudies().at(0).loads.at(0).magnitude.expr ==
         "clearance * 100");
   CHECK(static_cast<const BoxFeature*>(ui::SlotDoc(r.state, 0)->GetFeature(0))
             ->height.expr == "clearance * 2");
@@ -396,8 +397,6 @@ const std::vector<std::pair<std::string, std::string>> kNotBindable = {
     {"motion/*/driver_path/*", "an id"},
     {"motion/*/configuration", "an id"},
     {"motion/*/max_refine", "a solver setting, not a dimension"},
-    {"studies/**",
-     "a FEM study's own numbers, walked by the study's own visitor"},
     {"assertions/**",
      "a clearance as files before v160 held it, moved into the requirements "
      "on open (their bounds take expressions)"},
@@ -622,11 +621,6 @@ AssemblyDocument Everything() {
   hold.offset = ExprValue{1.0};
   c.mateOverrides.push_back(hold);
   c.suppressedMates.push_back(slide);
-  fem::Study& st = a.AddStudy("Rig");
-  fem::Load l;
-  l.id = a.AllocateId();
-  l.magnitude = 10.0;
-  st.loads.push_back(l);
   return a;
 }
 

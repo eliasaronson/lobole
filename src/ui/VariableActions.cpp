@@ -77,6 +77,7 @@
 #include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (Hole select-first)
+#include "ui/SimRunActions.h"     // AdoptStoredSimResults
 #include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
 #include <nlohmann/json.hpp>
@@ -126,9 +127,6 @@ void SyncProjectScope(AppState& state) {
       d->SetProjectSymbols(&state.projectSymbols);
       d->SetProjectParameters(&state.projectParameters);
       d->Regenerate();
-      // A result whose inputs the new values did not touch is still the
-      // answer (an open regenerates every part once more, here).
-      fem::RestampByInputs(*d);
     }
   }
   // Every assembly reads the project's variables
@@ -169,6 +167,10 @@ void SyncProjectScope(AppState& state) {
         d == state.drawing.get())
       RequestDrawingUpdate(state);
   }
+  // A simulation's result whose inputs the new values did not touch is
+  // still the answer: the regenerations above moved its subjects' stamps (an
+  // open regenerates every part once more, here).
+  AdoptStoredSimResults(state);
   state.gpu.syncedDocumentVersion =
       UINT64_MAX; // a cross-tab edit; force resync
 }

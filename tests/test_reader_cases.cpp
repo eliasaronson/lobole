@@ -182,10 +182,8 @@ TEST_CASE("Reader cases: a save prunes a collection emptied since the last",
   doc.AddFeature(
       std::make_unique<BoxFeature>("Box", glm::dvec3(0.0), 10.0, 10.0, 10.0));
   const uint64_t cfg = doc.AddConfiguration("Long").id;
-  const uint64_t study = doc.AddStudy("Pull").id;
   REQUIRE(DocumentIO::Save(doc, dir.string()).has_value());
   REQUIRE(doc.RemoveConfiguration(cfg));
-  REQUIRE(doc.RemoveStudy(study));
   REQUIRE(DocumentIO::Save(doc, dir.string()).has_value());
   readctx::CollectDrops collect;
   REQUIRE(DocumentIO::Load(dir.string()).has_value());

@@ -7,7 +7,6 @@
 #include "ui/DrawingPanel.h"
 #include "ui/OccurrencePanel.h"
 #include "ui/Overlays.h"
-#include "ui/SimTree.h"
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
 
@@ -1104,7 +1103,7 @@ void DrawUI(AppState& state) {
     BuildPreviewHandleOverlay(state, handleDecor);
     // Markers that are not handles keep the no-depth 1 px line channel.
     std::vector<LineVertex3D> gizmo;
-    AppendCogMarker(state, gizmo);   // mass-props CoG cross (no-depth channel)
+    AppendCogMarker(state, gizmo); // mass-props CoG cross (no-depth channel)
     // The selected mate's limits: at its axis, usually inside the parts it
     // joins (a hinge pin in its knuckle), so drawn through them.
     AppendMateLimitOverlay(state, gizmo);

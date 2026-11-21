@@ -1367,22 +1367,18 @@ bool PlanShapeMesh(const Document& doc, const Study& study, int bodyIndex,
   const ShapeSource& src = study.shapeFrom;
   if (study.type != AnalysisType::Static)
     return fail("only a static study takes its shape from a topology result");
-  // The topology study and its result: the simulation's when it hands
-  // them over (StudySiblings), else the part's.
+  // The topology study and its result: the simulation's (StudySiblings).
   const Study* topo =
-      siblings ? (siblings->find ? siblings->find(src.study) : nullptr)
-               : doc.FindStudy(src.study);
+      siblings && siblings->find ? siblings->find(src.study) : nullptr;
   if (topo == nullptr || topo->type != AnalysisType::Topology)
     return fail("shape_from names study " + std::to_string(src.study) +
                 ", which is not a topology study of this part");
   const StudyRuntime* rt =
-      siblings ? (siblings->results ? siblings->results(src.study) : nullptr)
-               : doc.StudyResults(src.study);
+      siblings && siblings->results ? siblings->results(src.study) : nullptr;
   if (rt == nullptr || rt->bodies.empty())
     return fail("topology study '" + topo->name +
                 "' has no result to take a shape from: run it first");
-  if (siblings ? (!siblings->stale || siblings->stale(src.study))
-               : doc.StudyResultsStale(src.study))
+  if (!siblings->stale || siblings->stale(src.study))
     return fail("topology study '" + topo->name +
                 "' is stale: the part changed after it ran, so its shape is "
                 "not this part's -- run it again first");
@@ -1623,19 +1619,15 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   std::map<int, std::vector<std::pair<int, Load>>> heatOf;
   if (study.thermalLoad.kind == ThermalLoad::Kind::FromStudy) {
     const uint64_t from = study.thermalLoad.fromStudy;
-    const Study* src = siblings
-                           ? (siblings->find ? siblings->find(from) : nullptr)
-                           : doc.FindStudy(from);
+    const Study* src =
+        siblings && siblings->find ? siblings->find(from) : nullptr;
     if (!src || src->type != AnalysisType::Thermal) {
       std::string names;
       const auto name = [&](const Study& st) {
         if (st.type == AnalysisType::Thermal)
           names += (names.empty() ? "" : ", ") + std::to_string(st.id);
       };
-      if (siblings == nullptr)
-        for (const Study& st : doc.GetStudies())
-          name(st);
-      else if (siblings->all)
+      if (siblings != nullptr && siblings->all)
         for (const Study* st : siblings->all())
           if (st != nullptr)
             name(*st);

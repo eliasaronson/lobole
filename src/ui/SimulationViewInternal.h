@@ -22,18 +22,9 @@ namespace ui {
 // A kept mesh from what a mesh run made (the meshes are moved in).
 MeshReport MakeMeshReport(std::vector<fem::StudyBodyMesh> meshes,
                           std::vector<fem::MeshBodyReport> reports);
-// The study's mesh key as it is now (its settings; on an assembly also the
-// assembly and its parts).
+// The study's mesh key as it is now (SimMeshKeyNow).
 std::string StudyMeshKeyNow(AppState& state, const StudyHost& host,
                             const fem::Study& s);
-// An assembly study meshed on this thread, each mesh with its report.
-// SimulationActions.cpp (it owns the assembly plan).
-bool MeshAssemblyStudyWithReports(AppState& state, AssemblyDocument& asmDoc,
-                                  uint64_t studyId,
-                                  std::vector<fem::StudyBodyMesh>& meshes,
-                                  std::vector<fem::MeshBodyReport>& reports,
-                                  std::string* error);
-
 // What the overlay is rebuilt on: the kept mesh, the view and the section
 // planes; the result, the field, its case or mode and the legend's clamp.
 uint64_t MeshOverlayKey(const AppState& state, const MeshReport& report);

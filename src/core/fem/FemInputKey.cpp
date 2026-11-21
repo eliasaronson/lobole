@@ -99,9 +99,8 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn,
   // definition -- never its result, which it re-solves on its own mesh.
   if (study.thermalLoad.kind == ThermalLoad::Kind::FromStudy) {
     const uint64_t from = study.thermalLoad.fromStudy;
-    const Study* src = siblings
-                           ? (siblings->find ? siblings->find(from) : nullptr)
-                           : doc.FindStudy(from);
+    const Study* src =
+        siblings && siblings->find ? siblings->find(from) : nullptr;
     if (src == nullptr) {
       h.U64(0);
     } else {
@@ -116,8 +115,7 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn,
   if (study.shapeFrom.study != 0) {
     const uint64_t from = study.shapeFrom.study;
     const StudyRuntime* src =
-        siblings ? (siblings->results ? siblings->results(from) : nullptr)
-                 : doc.StudyResults(from);
+        siblings && siblings->results ? siblings->results(from) : nullptr;
     h.U64(src != nullptr ? src->densityDigest : 0);
   }
   return h.Digest();
@@ -142,21 +140,6 @@ uint64_t RunInputKey(const Document& doc, const Study& study,
   Study withMode = study;
   withMode.converge = converge.mode;
   return RunInputKey(StudyInputKey(doc, withMode, siblings), converge);
-}
-
-void RestampByInputs(Document& doc) {
-  // A shape study's inputs and staleness read its topology result's: the
-  // results it is cut from first.
-  for (const bool shapes : {false, true})
-    for (const Study& s : doc.GetStudies()) {
-      if ((s.shapeFrom.study != 0) != shapes)
-        continue;
-      const StudyRuntime* rt = doc.StudyResults(s.id);
-      if (rt == nullptr || rt->inputHash == 0 || !doc.StudyResultsStale(s.id))
-        continue;
-      if (StudyInputKey(doc, s) == rt->inputHash)
-        doc.MarkStudyResultsCurrent(s.id);
-    }
 }
 
 uint64_t AssemblyStudyInputKey(const AssemblyDocument& asmDoc,

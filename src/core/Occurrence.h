@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 // One placed instance of a part within an assembly. Stores an *explicit*
@@ -280,8 +281,8 @@ struct Mate {
   Connector a;
   Connector b; // the side the solve places (relative to a)
 
-  bool flipped = true;   // reverse b's Z against a's Z (two touching planar
-                         // faces have opposing normals, hence default true)
+  bool flipped = true; // reverse b's Z against a's Z (two touching planar
+                       // faces have opposing normals, hence default true)
   // rotation, offset, dx and dy take expressions (rotation's in degrees);
   // a solve that moves one writes the value and leaves the text, which the
   // next evaluation applies again.
@@ -329,7 +330,7 @@ struct Mate {
 // offset, scaled by the transient explode factor at render time.
 struct ExplodeStep {
   uint64_t occurrenceId = 0;
-  glm::dvec3 offset{0.0}; // world space, at factor 1.0
+  glm::dvec3 offset{0.0};                // world space, at factor 1.0
   std::array<std::string, 3> offsetExpr; // per coordinate; "" = a literal
   // v130: a moving part INSIDE a flexible placement, named as a mate is
   // ({path, mate}, Relation::mateAPath): `path` is [the placement] and
@@ -682,8 +683,7 @@ struct ClearanceAssertion {
 // cannot reach, so an assembly regenerates by a placement pass, not by
 // executing features.
 namespace fem {
-struct StudyRuntime;
-struct StudyRuntimeCache;
+struct OldStudies;
 } // namespace fem
 namespace motion {
 struct Result;
@@ -722,8 +722,8 @@ struct SequenceStep {
   uint64_t mateId = 0;
   ExprValue distanceMm{-1.0}; // from its seat to where it starts; < 0: clear
   ExprValue turnDeg;          // turned about the path over it (a bayonet)
-  bool thread = false;      // it goes on by its thread
-  std::string note;         // what the step is, for a person
+  bool thread = false;        // it goes on by its thread
+  std::string note;           // what the step is, for a person
   bool IsPose() const { return occurrences.empty(); }
 };
 
@@ -746,10 +746,9 @@ struct AssemblyExprProblem {
 class AssemblyDocument {
 public:
   // Every number that takes an expression, with who holds it ("mate
-  // 'Hinge'", "study 'Rig'") and its path in the assembly's JSON
+  // 'Hinge'", "motion study 'Sweep'") and its path in the assembly's JSON
   // ("mates[2].limits.rotation[1]"): the one walk evaluation, rename, the
-  // delete refusal and the literals lint read. The FEM studies' slots
-  // included, under "studies[i].".
+  // delete refusal and the literals lint read.
   void VisitExprs(const std::function<void(const std::string& owner,
                                            const ExprSlot&)>& visit);
   // What the last assembly::EvaluateExprs found (transient).
@@ -858,41 +857,21 @@ public:
       m_nextId = next;
   }
 
-  // ---- FEM studies (docs/simulation/README.md#assembly-studies) ------------
-  // A study is a question asked of the assembly and lives on it, the way a
-  // part's studies live on the part: participants by occurrence, loads with
-  // occurrence-qualified anchors. The same fem::Study record; the shape of
-  // the accessors is Document's. Ids come from the shared counter.
-  const std::vector<fem::Study>& GetStudies() const { return m_studies; }
-  std::vector<fem::Study>& GetStudies() { return m_studies; }
-  const fem::Study* FindStudy(uint64_t id) const;
-  fem::Study* FindStudy(uint64_t id);
-  fem::Study& AddStudy(const std::string& name = ""); // bumps the version
-  bool RemoveStudy(uint64_t id);                      // bumps the version
-  void RestoreStudy(fem::Study study);         // load/undo: keeps its ids
-  uint64_t AllocateId() { return m_nextId++; } // a load's id
-  // Derived mesh + results, saved beside each study (v153), SHARED with
-  // every full-state copy of this document (the undo snapshots): results are
-  // not document state, and a snapshot that duplicated a 2.5M-DOF mesh would
-  // be the reason nobody could undo.
-  const fem::StudyRuntime* StudyResults(uint64_t studyId) const;
-  void StoreStudyResults(uint64_t studyId, fem::StudyRuntime rt);
-  uint64_t StudyResultsEpoch() const;
-  // Stale against the assembly AND every part the solve read: `partVersion`
-  // answers a part id with its current version (the drawing's source rule).
-  bool StudyResultsStale(
-      uint64_t studyId,
-      const std::function<uint64_t(uint64_t partId)>& partVersion) const;
-  // Stamps a stored result as solved at this version and these part
-  // versions: a reopened project's whose inputs hash as they did when it
-  // was made. False when absent.
-  bool MarkStudyResultsCurrent(
-      uint64_t studyId,
-      std::vector<std::pair<uint64_t, uint64_t>> partVersions);
+  uint64_t AllocateId() { return m_nextId++; }
+  // An assembly has no studies: they live in simulation documents. An
+  // assembly saved before they moved carries them in its file, kept here as
+  // read for the open to move (Document::TakeOldStudies says the rest).
+  const fem::OldStudies* OldStudiesRead() const { return m_oldStudies.get(); }
+  void SetOldStudies(std::shared_ptr<fem::OldStudies> studies) {
+    m_oldStudies = std::move(studies);
+  }
+  std::shared_ptr<fem::OldStudies> TakeOldStudies() {
+    return std::exchange(m_oldStudies, nullptr);
+  }
 
   // The motion studies' results (docs/assemblies/README.md#motion-studies),
-  // saved with the project beside each study and read back on open. Derived
-  // like StudyResults and shared with the undo snapshots the same way; what
+  // saved with the project beside each study and read back on open. Derived,
+  // and shared with the undo snapshots (a snapshot must not copy them); what
   // reads them in a session is the app's (ui::MotionResultFor), which
   // installs these and keeps them in step.
   std::shared_ptr<const motion::Result> MotionResult(uint64_t studyId) const;
@@ -982,9 +961,8 @@ private:
   std::vector<MotionStudy> m_motionStudies;
   std::vector<ClearanceAssertion> m_assertions;
   std::vector<Configuration> m_configurations;
-  std::vector<fem::Study> m_studies;
-  std::shared_ptr<fem::StudyRuntimeCache> m_studyRuntime; // see StudyResults
-  std::shared_ptr<MotionResultCache> m_motionResults;     // see MotionResult
+  std::shared_ptr<fem::OldStudies> m_oldStudies;      // TakeOldStudies
+  std::shared_ptr<MotionResultCache> m_motionResults; // see MotionResult
   uint64_t m_activeConfiguration = 0;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused; one id
                          // space shared by occurrences, mates, and views

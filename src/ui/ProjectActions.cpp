@@ -6,6 +6,7 @@
 #include "ui/DerivedActions.h" // RefreshLinks (the open and save gates)
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
+#include "ui/MotionActions.h" // AdoptSavedMotionResults
 #include "ui/RendererSync.h"
 #include "ui/SimRunActions.h"
 #include "ui/VariableActions.h"
@@ -1169,7 +1170,7 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     // (MarkProjectOpened stamps it): docs/simulation/README.md, "Moving
     // studies into a simulation".
     MoveStudiesIntoSimulations(state);
-    AdoptStoredResults(state);
+    AdoptSavedMotionResults(state);
     AdoptStoredSimResults(state);
     // The opened drawing's views: each one's saved projection is installed
     // when its inputs still hash as they did, and the rest project, all on a

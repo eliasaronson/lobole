@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "core/fem/SimDocument.h"
+#include "core/io/SerializeSimulation.h"
+#include "study_fixtures.h"
 #include "ui/CreateActions.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -495,8 +498,9 @@ TEST_CASE("Topo: SIMP cantilever through the real Netgen mesh path",
 
 namespace {
 // A steel design-envelope box body + a topology study fixing x=0 and pushing
-// down on the x=L face. Returns the document; the study is study 0.
-Document MakeTopoDoc() {
+// down on the x=L face. Returns the document; the study is `out` (the
+// test's own: a part keeps no studies).
+Document MakeTopoDoc(fem::Study* out) {
   Document doc;
   auto box = std::make_unique<BoxFeature>("Envelope", glm::vec3(0, 0, 0), 80.0,
                                           30.0, 30.0);
@@ -507,7 +511,7 @@ Document MakeTopoDoc() {
     return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
   };
 
-  fem::Study& s = doc.AddStudy("Generative");
+  fem::Study s = NewStudy(doc, "Generative");
   s.type = fem::AnalysisType::Topology;
   s.meshSize = 6.0;
   s.volumeFraction = 0.35;
@@ -525,14 +529,15 @@ Document MakeTopoDoc() {
   force.magnitude = 1500.0;
   force.direction = glm::dvec3(0, 0, -1);
   s.loads.push_back(force);
+  *out = s;
   return doc;
 }
 } // namespace
 
 TEST_CASE("RunTopology optimizes the loaded body end to end",
           "[topopt][mesh][slow]") {
-  Document doc = MakeTopoDoc();
-  fem::Study& s = *doc.StudyForRun(doc.GetStudies()[0].id);
+  fem::Study s;
+  Document doc = MakeTopoDoc(&s);
   fem::StudyRuntime rt;
   std::string err;
   REQUIRE(fem::RunTopology(doc, s, rt, &err));
@@ -561,7 +566,7 @@ TEST_CASE("RunTopology rejects a multi-body study (v1 is single-body)",
   doc.AddFeature(std::move(b));
   const uint64_t cbA = doc.GetBodies()[0].createdBy;
   const uint64_t cbB = doc.GetBodies()[1].createdBy;
-  fem::Study& s = doc.AddStudy("Two");
+  fem::Study s = NewStudy(doc, "Two");
   s.type = fem::AnalysisType::Topology;
   s.meshSize = 6.0;
   auto load = [&](uint64_t cb, int f, fem::LoadType t) {
@@ -584,24 +589,26 @@ TEST_CASE("RunTopology rejects a multi-body study (v1 is single-body)",
 TEST_CASE("Topology result persists and reloads through the directory format",
           "[topopt][mesh][serialize][slow]") {
   namespace fs = std::filesystem;
-  Document doc = MakeTopoDoc();
-  const uint64_t studyId = doc.GetStudies()[0].id;
+  fem::Study study;
+  Document doc = MakeTopoDoc(&study);
+  const uint64_t studyId = study.id;
+  fem::SimDocument sim; // where the result is kept and saved
+  sim.SetSubject({fem::SubjectKind::Part, 1, 0, "Envelope"});
+  sim.RestoreStudy(study);
   fem::StudyRuntime rt;
   std::string err;
-  REQUIRE(fem::RunTopology(doc, *doc.StudyForRun(studyId), rt, &err));
-  rt.solvedAtVersion = doc.Version();
+  REQUIRE(fem::RunTopology(doc, *sim.StudyForRun(studyId), rt, &err));
   const std::vector<double> density = rt.bodies[0].density; // copy to compare
-  doc.StoreStudyResults(studyId, std::move(rt));
-  REQUIRE_FALSE(doc.StudyResultsStale(studyId));
+  sim.StoreStudyResults(studyId, std::move(rt));
 
   const fs::path proj = fs::temp_directory_path() / "topo_result_roundtrip.lob";
   fs::remove_all(proj);
-  REQUIRE(testio::Save(doc, proj.string()));
-  CHECK(fs::exists(proj / "studies"));
+  REQUIRE(DocumentIO::SaveSimulation(sim, proj.string()));
+  CHECK(fs::exists(proj / "results"));
 
-  auto reloaded = testio::Load(proj.string());
-  REQUIRE((reloaded != nullptr && err.empty()));
-  const fem::StudyRuntime* got = reloaded->StudyResults(studyId);
+  auto reloaded = DocumentIO::LoadSimulation(proj.string());
+  REQUIRE(reloaded.has_value());
+  const fem::StudyRuntime* got = (*reloaded)->StudyResults(studyId);
   REQUIRE(got != nullptr);
   CHECK(got->topology);
   REQUIRE(got->bodies.size() == 1);
@@ -610,9 +617,7 @@ TEST_CASE("Topology result persists and reloads through the directory format",
   // precision, and exactly what the stored result held.
   for (size_t i = 0; i < density.size(); ++i)
     CHECK_THAT(got->bodies[0].density[i], WithinAbs(density[i], 1e-7));
-  CHECK(got->bodies[0].density == doc.StudyResults(studyId)->bodies[0].density);
-  // A just-loaded result is stamped current, not stale.
-  CHECK_FALSE(reloaded->StudyResultsStale(studyId));
+  CHECK(got->bodies[0].density == sim.StudyResults(studyId)->bodies[0].density);
   fs::remove_all(proj);
 }
 

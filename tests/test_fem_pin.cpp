@@ -21,6 +21,7 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
+#include "study_fixtures.h"
 #include "topo_testmesh.h"
 
 #include <algorithm>
@@ -145,7 +146,7 @@ TEST_CASE("a pinned lug bears on the loaded half of its bore",
   const double L = 60.0, w = 20.0, t = 4.0, d = 8.0, x0 = 12.0, F = 400.0;
   auto p = MakePlate(L, w, t, d, {x0}, "steel");
   Document& doc = p->doc;
-  fem::Study& s = doc.AddStudy("Lug");
+  fem::Study s = NewStudy(doc, "Lug");
   s.meshSize = 1.6;
   // One pin alone leaves the lug free to turn on it, so it is held from
   // turning; the pull passes through the axis, so that holds nothing.
@@ -225,8 +226,8 @@ TEST_CASE("a lever on two pins: reactions balance the load and the clamp's "
   const double xF = L; // the force acts on the end face
   const auto solve = [&](fem::LoadType type, double boreSize,
                          fem::StudyRuntime& rt) {
-    fem::Study& s =
-        doc.AddStudy(type == fem::LoadType::Pin ? "Pins" : "Clamps");
+    fem::Study s =
+        NewStudy(doc, type == fem::LoadType::Pin ? "Pins" : "Clamps");
     s.meshSize = 2.0;
     // The bores' sizes below ARE the comparison: a run that refined round
     // its peak (converge: auto, the default) would refine the coarse one
@@ -318,7 +319,7 @@ TEST_CASE("a peak on a support's edge is flagged, and one elsewhere is not",
   {
     auto p = MakePlate(80.0, 10.0, 10.0, 0.0, {}, "steel");
     Document& doc = p->doc;
-    fem::Study& s = doc.AddStudy("Cantilever");
+    fem::Study s = NewStudy(doc, "Cantilever");
     s.meshSize = 2.5;
     s.loads.push_back(Support(doc, fem::LoadType::Fixed, p->endX0));
     s.loads.push_back(Force(doc, p->endX1, 500.0, glm::dvec3(0, 0, -1)));
@@ -338,7 +339,7 @@ TEST_CASE("a peak on a support's edge is flagged, and one elsewhere is not",
   {
     auto p = MakePlate(120.0, 20.0, 4.0, 10.0, {60.0}, "steel");
     Document& doc = p->doc;
-    fem::Study& s = doc.AddStudy("Bar");
+    fem::Study s = NewStudy(doc, "Bar");
     s.meshSize = 2.0;
     s.loads.push_back(Support(doc, fem::LoadType::Fixed, p->endX0));
     s.loads.push_back(Force(doc, p->endX1, 1000.0, glm::dvec3(1, 0, 0)));
@@ -362,7 +363,7 @@ TEST_CASE("a pin is refused where it cannot hold the part",
   std::string err;
 
   SECTION("on a face that is not a cylinder") {
-    fem::Study& s = doc.AddStudy("Flat");
+    fem::Study s = NewStudy(doc, "Flat");
     s.loads.push_back(Support(doc, fem::LoadType::Pin, p->endX0));
     s.loads.push_back(Force(doc, p->endX1, 10.0, glm::dvec3(0, -1, 0)));
     CHECK_FALSE(fem::RunStudy(doc, s, rt, &err));
@@ -370,7 +371,7 @@ TEST_CASE("a pin is refused where it cannot hold the part",
   }
 #ifdef HAVE_NETGEN // found on the meshed part
   SECTION("alone and free to turn: a lever on one pin is a mechanism") {
-    fem::Study& s = doc.AddStudy("One pin");
+    fem::Study s = NewStudy(doc, "One pin");
     s.meshSize = 2.0;
     s.loads.push_back(Support(doc, fem::LoadType::Pin, p->bores[0]));
     s.loads.push_back(Force(doc, p->endX1, 10.0, glm::dvec3(0, -1, 0)));
@@ -387,7 +388,7 @@ TEST_CASE("a pin is refused where it cannot hold the part",
   }
   SECTION("two pins on one axis still let it turn") {
     auto q = MakePlate(60.0, 12.0, 5.0, 5.0, {8.0}, "pla");
-    fem::Study& s = q->doc.AddStudy("Coaxial");
+    fem::Study s = NewStudy(q->doc, "Coaxial");
     s.meshSize = 2.0;
     fem::Load half = Support(q->doc, fem::LoadType::Pin, q->bores[0]);
     half.region.kind = fem::LoadRegion::Kind::Band;
@@ -405,7 +406,7 @@ TEST_CASE("a pin is refused where it cannot hold the part",
     CHECK_THAT(err, ContainsSubstring("free to turn"));
   }
   SECTION("a load that lifts the part off the halves of its bores") {
-    fem::Study& s = doc.AddStudy("Lift");
+    fem::Study s = NewStudy(doc, "Lift");
     s.meshSize = 2.0;
     // Only the lower halves of the two bores: each pin can push the lever
     // down and nothing else, so pushed down at its end, it falls off them.
@@ -425,7 +426,7 @@ TEST_CASE("a pin is refused where it cannot hold the part",
   }
 #endif // HAVE_NETGEN
   SECTION("on a modal or a topology study") {
-    fem::Study& s = doc.AddStudy("Modal");
+    fem::Study s = NewStudy(doc, "Modal");
     s.type = fem::AnalysisType::Modal;
     s.loads.push_back(Support(doc, fem::LoadType::Pin, p->bores[0], true));
     CHECK_FALSE(fem::RunStudy(doc, s, rt, &err));
@@ -446,7 +447,7 @@ TEST_CASE("a pinned study solves iteratively as it does directly, and the "
           "[fem][pin][run]") {
   auto p = MakePlate(60.0, 20.0, 4.0, 8.0, {12.0}, "steel");
   Document& doc = p->doc;
-  fem::Study& s = doc.AddStudy("Lug");
+  fem::Study s = NewStudy(doc, "Lug");
   s.meshSize = 2.0;
   s.loads.push_back(Support(doc, fem::LoadType::Pin, p->bores[0], true));
   s.loads.push_back(Force(doc, p->endX1, 400.0, glm::dvec3(1, 0, 0)));
@@ -548,7 +549,7 @@ TEST_CASE("a short sleeve on a pin, leaned on off its end, settles on its "
   for (const double h : {1.6}) {
     auto b = MakeBushing(14.8, 6.2, 20.0, 2.0, 8.0, "pla");
     Document& doc = b->doc;
-    fem::Study& s = doc.AddStudy("Bushing");
+    fem::Study s = NewStudy(doc, "Bushing");
     s.meshSize = h;
     s.converge = fem::ConvergeMode::Never;
     const fem::Load pin = Support(doc, fem::LoadType::Pin, b->sleeve, true);
@@ -593,7 +594,7 @@ TEST_CASE("two pins held from turning on one bore answer as one",
   auto p = MakePlate(40.0, 12.0, 4.0, 5.0, {8.0}, "pla");
   Document& doc = p->doc;
   const auto solve = [&](int pins, fem::StudyRuntime& rt) {
-    fem::Study& s = doc.AddStudy(pins == 1 ? "One" : "Two");
+    fem::Study s = NewStudy(doc, pins == 1 ? "One" : "Two");
     s.meshSize = 2.0;
     s.converge = fem::ConvergeMode::Never;
     for (int k = 0; k < pins; ++k)
@@ -650,7 +651,7 @@ TEST_CASE("pins whose faces meet off one axis are refused", "[fem][pin]") {
   REQUIRE_FALSE(vertical.name.empty());
   REQUIRE_FALSE(cross.name.empty());
   REQUIRE_FALSE(end.name.empty());
-  fem::Study& s = doc.AddStudy("Crossed");
+  fem::Study s = NewStudy(doc, "Crossed");
   s.meshSize = 3.0;
   s.converge = fem::ConvergeMode::Never;
   s.loads.push_back(Support(doc, fem::LoadType::Pin, vertical, true));

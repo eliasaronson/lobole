@@ -20,8 +20,11 @@
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
-#include "core/io/Autosaver.h"
+#include "core/fem/SimDocument.h"
+#include "core/fem/SimStudy.h"
 #include "core/io/Serialization.h"
+#include "core/io/SerializeSimulation.h"
+#include "study_fixtures.h"
 
 #include <nlohmann/json.hpp>
 
@@ -42,6 +45,7 @@ namespace {
 
 struct Bar {
   Document doc;
+  fem::Study study; // the bar's own: a part keeps none
   uint64_t studyId = 0;
   uint64_t forceId = 0;
   ElementRef Face(int i) const {
@@ -56,7 +60,7 @@ std::unique_ptr<Bar> MakeBar(fem::AnalysisType type) {
       std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 80.0, 10.0, 10.0);
   box->SetMaterial("steel");
   bar->doc.AddFeature(std::move(box));
-  fem::Study& s = bar->doc.AddStudy("Bend");
+  fem::Study s = NewStudy(bar->doc, "Bend");
   s.type = type;
   s.meshSize = 4.0;
   fem::Load fixed;
@@ -73,13 +77,47 @@ std::unique_ptr<Bar> MakeBar(fem::AnalysisType type) {
   s.loads.push_back(force);
   bar->studyId = s.id;
   bar->forceId = force.id;
+  bar->study = s;
   return bar;
 }
 
-fem::Study& StudyOf(Bar& bar) { return *bar.doc.StudyForRun(bar.studyId); }
+fem::Study& StudyOf(Bar& bar) { return bar.study; }
 
-uint64_t Key(Bar& bar) {
-  return fem::StudyInputKey(bar.doc, *bar.doc.FindStudy(bar.studyId));
+uint64_t Key(Bar& bar) { return fem::StudyInputKey(bar.doc, bar.study); }
+
+// A simulation of the bar holding its study, with the study's id (as one
+// moved from the part keeps it), and its context on the part `part`.
+fem::SimDocument SimOf(const Bar& bar) {
+  fem::SimDocument sim;
+  sim.SetSubject({fem::SubjectKind::Part, 1, 0, "Bar"});
+  sim.RestoreStudy(bar.study);
+  return sim;
+}
+fem::SimContext ContextOf(const fem::SimDocument& sim, const Document& part) {
+  fem::SimContext ctx;
+  ctx.sim = &sim;
+  ctx.part = &part;
+  ctx.subjectStamps = {{1, 7}};
+  return ctx;
+}
+const auto kStamps = [](uint64_t) { return uint64_t{7}; };
+
+// The part and its simulation saved as a project keeps them, and read back.
+struct Saved {
+  std::unique_ptr<Document> part;
+  std::unique_ptr<fem::SimDocument> sim;
+};
+Saved SaveAndReopen(const Document& part, const fem::SimDocument& sim,
+                    const std::filesystem::path& dir) {
+  REQUIRE(testio::Save(part, (dir / "part.lob").string()));
+  REQUIRE(DocumentIO::SaveSimulation(sim, (dir / "sim.lob").string()));
+  Saved out;
+  out.part = testio::Load((dir / "part.lob").string());
+  REQUIRE(out.part != nullptr);
+  auto loaded = DocumentIO::LoadSimulation((dir / "sim.lob").string());
+  REQUIRE(loaded.has_value());
+  out.sim = std::move(*loaded);
+  return out;
 }
 
 // A topology runtime by hand (no mesher): what a run would store.
@@ -194,31 +232,35 @@ TEST_CASE("A saved topology result is reused after a reopen, and is stale "
   auto bar = MakeBar(fem::AnalysisType::Topology);
   const uint64_t hash = Key(*bar);
   REQUIRE(hash != 0);
-  bar->doc.StoreStudyResults(bar->studyId, HandMadeTopology(hash));
+  fem::SimDocument sim = SimOf(*bar);
+  sim.StoreStudyResults(bar->studyId, HandMadeTopology(hash));
 
-  const fs::path proj = fs::temp_directory_path() / "study_inputs_reopen.lob";
-  fs::remove_all(proj);
-  REQUIRE(testio::Save(bar->doc, proj.string()));
-  auto reloaded = testio::Load(proj.string());
-  REQUIRE(reloaded != nullptr);
-  const fem::StudyRuntime* got = reloaded->StudyResults(bar->studyId);
-  REQUIRE(got != nullptr);
-  // The hash came back, and the reopened part hashes to it: the geometry
-  // read back from disk is the geometry that was saved, byte for byte.
-  CHECK(got->inputHash == hash);
-  CHECK(fem::StudyInputKey(*reloaded, *reloaded->FindStudy(bar->studyId)) ==
-        hash);
-  CHECK_FALSE(reloaded->StudyResultsStale(bar->studyId));
-
+  const fs::path dir = fs::temp_directory_path() / "study_inputs_reopen";
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  {
+    Saved back = SaveAndReopen(bar->doc, sim, dir);
+    const fem::StudyRuntime* got = back.sim->StudyResults(bar->studyId);
+    REQUIRE(got != nullptr);
+    // The hash came back, and the reopened part hashes to it: the geometry
+    // read back from disk is the geometry that was saved, byte for byte.
+    CHECK(got->inputHash == hash);
+    CHECK(fem::StudyInputKey(*back.part, bar->study) == hash);
+    CHECK(fem::RestampSimByInputs(*back.sim,
+                                  ContextOf(*back.sim, *back.part)) == 1);
+    CHECK_FALSE(back.sim->StudyResultsStale(bar->studyId, kStamps));
+  }
   // A result saved against other inputs reads stale on reopen, rather than
   // current because it was loaded.
-  bar->doc.StoreStudyResults(bar->studyId, HandMadeTopology(hash ^ 1));
-  REQUIRE(testio::Save(bar->doc, proj.string()));
-  auto other = testio::Load(proj.string());
-  REQUIRE(other != nullptr);
-  REQUIRE(other->StudyResults(bar->studyId) != nullptr);
-  CHECK(other->StudyResultsStale(bar->studyId));
-  fs::remove_all(proj);
+  sim.StoreStudyResults(bar->studyId, HandMadeTopology(hash ^ 1));
+  {
+    Saved back = SaveAndReopen(bar->doc, sim, dir);
+    REQUIRE(back.sim->StudyResults(bar->studyId) != nullptr);
+    CHECK(fem::RestampSimByInputs(*back.sim,
+                                  ContextOf(*back.sim, *back.part)) == 0);
+    CHECK(back.sim->StudyResultsStale(bar->studyId, kStamps));
+  }
+  fs::remove_all(dir);
 }
 
 TEST_CASE("A topology result's input hash round-trips, and a malformed one is "
@@ -243,9 +285,9 @@ TEST_CASE("A topology result's input hash round-trips, and a malformed one is "
 
 namespace {
 
-// A real run of the bar's study, stored as the app stores one: stamped, and
-// with the input hash taken before it ran.
-void RunAndStore(Bar& bar) {
+// A real run of the bar's study, stored as the app stores one: with the
+// input hash taken before it ran, in the simulation of the bar.
+void RunAndStore(Bar& bar, fem::SimDocument& sim) {
   fem::Study& s = StudyOf(bar);
   const uint64_t hash = Key(bar);
   REQUIRE(hash != 0);
@@ -256,9 +298,9 @@ void RunAndStore(Bar& bar) {
                       : fem::RunStudy(bar.doc, s, rt, &err);
   INFO(err);
   REQUIRE(ok);
-  rt.solvedAtVersion = bar.doc.Version();
   rt.inputHash = hash;
-  bar.doc.StoreStudyResults(bar.studyId, std::move(rt));
+  REQUIRE(sim.ReplaceStudy(bar.study));
+  sim.StoreStudyResults(bar.studyId, std::move(rt));
 }
 
 std::unique_ptr<Bar> BarOf(fem::AnalysisType type) {
@@ -290,21 +332,26 @@ TEST_CASE("A study result of each kind reopens current, its part hashing as "
         fem::AnalysisType::Topology}) {
     INFO("kind " << static_cast<int>(type));
     auto bar = BarOf(type);
-    RunAndStore(*bar);
-    const fem::StudyRuntime& ran = *bar->doc.StudyResults(bar->studyId);
+    fem::SimDocument sim = SimOf(*bar);
+    RunAndStore(*bar, sim);
+    const fem::StudyRuntime& ran = *sim.StudyResults(bar->studyId);
     const uint64_t hash = ran.inputHash;
 
-    const fs::path proj = fs::temp_directory_path() / "study_kinds_reopen.lob";
-    fs::remove_all(proj);
-    REQUIRE(testio::Save(bar->doc, proj.string()));
-    auto reloaded = testio::Load(proj.string());
-    REQUIRE(reloaded != nullptr);
-    const fem::StudyRuntime* got = reloaded->StudyResults(bar->studyId);
+    const fs::path dir = fs::temp_directory_path() / "study_kinds_reopen";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Saved back = SaveAndReopen(bar->doc, sim, dir);
+    Document* reloaded = back.part.get();
+    const fem::StudyRuntime* got = back.sim->StudyResults(bar->studyId);
     REQUIRE(got != nullptr);
     CHECK(got->inputHash == hash);
-    CHECK(fem::StudyInputKey(*reloaded, *reloaded->FindStudy(bar->studyId)) ==
-          hash);
-    CHECK_FALSE(reloaded->StudyResultsStale(bar->studyId));
+    CHECK(fem::StudyInputKey(*reloaded, bar->study) == hash);
+    const auto restamp = [&] {
+      return fem::RestampSimByInputs(*back.sim,
+                                     ContextOf(*back.sim, *reloaded));
+    };
+    CHECK(restamp() == 1);
+    CHECK_FALSE(back.sim->StudyResultsStale(bar->studyId, kStamps));
 
     // What the panel and the RPCs read came back.
     REQUIRE(got->bodies.size() == ran.bodies.size());
@@ -367,25 +414,24 @@ TEST_CASE("A study result of each kind reopens current, its part hashing as "
     if (type == fem::AnalysisType::Modal)
       CHECK(a.results.modes.size() == 3);
 
-    // The app regenerates an opened part once more (the project scope):
-    // that moves the version, and the result is current again by its
-    // inputs, not by its stamp.
+    // The app regenerates an opened part once more (the project scope): its
+    // inputs hash as they did, so the result is current by its inputs, not
+    // by its stamp.
     reloaded->Regenerate();
-    CHECK(reloaded->StudyResultsStale(bar->studyId));
-    fem::RestampByInputs(*reloaded);
-    CHECK_FALSE(reloaded->StudyResultsStale(bar->studyId));
+    CHECK(fem::SimStudyInputKey(ContextOf(*back.sim, *reloaded),
+                                bar->studyId) == hash);
 
-    // An input moved after the save: stale on reopen, and not restamped.
+    // An input moved after the save: not restamped, and stale on reopen.
     reloaded->GetFeature(0)->SetMaterial("aluminum_6061_t6");
     reloaded->Regenerate();
-    fem::RestampByInputs(*reloaded);
-    CHECK(reloaded->StudyResultsStale(bar->studyId));
-    REQUIRE(testio::Save(*reloaded, proj.string()));
-    auto moved = testio::Load(proj.string());
-    REQUIRE(moved != nullptr);
-    REQUIRE(moved->StudyResults(bar->studyId) != nullptr);
-    CHECK(moved->StudyResultsStale(bar->studyId));
-    fs::remove_all(proj);
+    CHECK(fem::SimStudyInputKey(ContextOf(*back.sim, *reloaded),
+                                bar->studyId) != hash);
+    Saved moved = SaveAndReopen(*reloaded, *back.sim, dir);
+    REQUIRE(moved.sim->StudyResults(bar->studyId) != nullptr);
+    CHECK(fem::RestampSimByInputs(*moved.sim,
+                                  ContextOf(*moved.sim, *moved.part)) == 0);
+    CHECK(moved.sim->StudyResultsStale(bar->studyId, kStamps));
+    fs::remove_all(dir);
   }
 }
 
@@ -407,8 +453,7 @@ TEST_CASE("Meshing a body in place does not move its input hash",
   REQUIRE(testio::Save(bar->doc, proj.string()));
   auto reloaded = testio::Load(proj.string());
   REQUIRE(reloaded != nullptr);
-  CHECK(fem::StudyInputKey(*reloaded, *reloaded->FindStudy(bar->studyId)) ==
-        before);
+  CHECK(fem::StudyInputKey(*reloaded, bar->study) == before);
   fs::remove_all(proj);
 }
 
@@ -501,8 +546,8 @@ TEST_CASE("A shape hashes the same as itself read back from the project",
 
 // What a saved result keeps (docs/simulation/README.md
 // #what-a-saved-result-keeps): a static body's boundary surface, as float,
-// in a .result.bin beside a small .result.json -- and a save whose result
-// has not changed writes neither file.
+// in a .result.bin beside a small .result.json in its simulation's
+// results/ -- and a save whose result has not changed writes neither file.
 TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
           "json, and an unchanged save leaves both files alone",
           "[fem][mesh][serialize][studyjobs]") {
@@ -513,10 +558,10 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
     std::string err;
     REQUIRE(fem::RunStudy(bar->doc, StudyOf(*bar), raw, &err));
   }
-  RunAndStore(*bar);
+  fem::SimDocument sim = SimOf(*bar);
+  RunAndStore(*bar, sim);
   const fem::StudyBodyResult& full = raw.bodies[0];
-  const fem::StudyBodyResult& kept =
-      bar->doc.StudyResults(bar->studyId)->bodies[0];
+  const fem::StudyBodyResult& kept = sim.StudyResults(bar->studyId)->bodies[0];
 
   // The surface, renumbered; the counts of the mesh that was solved.
   CHECK(kept.mesh.tets.empty());
@@ -548,9 +593,9 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
 
   const fs::path proj = fs::temp_directory_path() / "study_result_files.lob";
   fs::remove_all(proj);
-  REQUIRE(testio::Save(bar->doc, proj.string()));
+  REQUIRE(DocumentIO::SaveSimulation(sim, proj.string()));
   fs::path json, bin;
-  for (const auto& e : fs::directory_iterator(proj / "studies")) {
+  for (const auto& e : fs::directory_iterator(proj / "results")) {
     const std::string name = e.path().filename().string();
     if (name.ends_with(".result.json"))
       json = e.path();
@@ -571,71 +616,29 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
   const auto old = fs::file_time_type::clock::now() - std::chrono::hours(1);
   fs::last_write_time(json, old);
   fs::last_write_time(bin, old);
-  REQUIRE(testio::Save(bar->doc, proj.string()));
+  REQUIRE(DocumentIO::SaveSimulation(sim, proj.string()));
   CHECK(fs::last_write_time(json) == old);
   CHECK(fs::last_write_time(bin) == old);
-  auto reloaded = testio::Load(proj.string());
-  REQUIRE(reloaded != nullptr);
+  auto reloaded = DocumentIO::LoadSimulation(proj.string());
+  REQUIRE(reloaded.has_value());
   {
-    const fem::StudyRuntime* back = reloaded->StudyResults(bar->studyId);
+    const fem::StudyRuntime* back = (*reloaded)->StudyResults(bar->studyId);
     REQUIRE(back != nullptr);
     CHECK(back->bodies[0].results.stress == kept.results.stress);
   }
-  REQUIRE(testio::Save(*reloaded, proj.string()));
+  REQUIRE(DocumentIO::SaveSimulation(**reloaded, proj.string()));
   CHECK(fs::last_write_time(json) == old);
   CHECK(fs::last_write_time(bin) == old);
 
   // A new answer is written.
   StudyOf(*bar).loads[1].magnitude = 900.0;
-  RunAndStore(*bar);
-  REQUIRE(testio::Save(bar->doc, proj.string()));
+  RunAndStore(*bar, sim);
+  REQUIRE(DocumentIO::SaveSimulation(sim, proj.string()));
   CHECK(fs::last_write_time(bin) != old);
   fs::remove_all(proj);
 }
 
 #endif // HAVE_NETGEN
-
-// docs/versioning/README.md#autosave-and-recovery
-// The result is made by hand, as a run would store it, so this holds in a
-// build without the mesher too: what is under test is the autosave.
-TEST_CASE("An autosave writes no study result", "[fem][studyjobs][autosave]") {
-  namespace fs = std::filesystem;
-  auto bar = MakeBar(fem::AnalysisType::Topology);
-  const uint64_t hash = Key(*bar);
-  REQUIRE(hash != 0);
-  bar->doc.StoreStudyResults(bar->studyId, HandMadeTopology(hash));
-  const fs::path dir = fs::temp_directory_path() / "study_result_autosave";
-  fs::remove_all(dir);
-  fs::create_directories(dir);
-
-  // The control: a real save of this document writes the result, so the
-  // autosave's missing one is the autosave's doing.
-  const fs::path saved = dir / "saved.lob";
-  REQUIRE(testio::Save(bar->doc, saved.string()));
-  bool wroteResult = false;
-  for (const auto& e : fs::recursive_directory_iterator(saved))
-    wroteResult |=
-        e.path().filename().string().find(".result.") != std::string::npos;
-  REQUIRE(wroteResult);
-  fs::remove_all(saved);
-
-  const std::string project = (dir / "bar.lob").string();
-  Autosaver saver(10.0);
-  saver.Prime(0.0);
-  std::string error;
-  REQUIRE(saver.MaybeSave(bar->doc, project, bar->doc.SaveStamp() - 1, 11.0,
-                          &error));
-  const fs::path sidecar = Autosaver::SidecarPath(project);
-  REQUIRE(fs::is_regular_file(sidecar));
-  for (const auto& e : fs::recursive_directory_iterator(dir))
-    CHECK(e.path().filename().string().find(".result.") == std::string::npos);
-  std::ifstream in(sidecar);
-  const std::string text((std::istreambuf_iterator<char>(in)),
-                         std::istreambuf_iterator<char>());
-  CHECK(text.find("density") == std::string::npos);
-  CHECK(text.find("input_hash") == std::string::npos);
-  fs::remove_all(dir);
-}
 
 // A screw goes on by its marked thread's pitch and hand
 // (docs/assemblies/README.md#a-check-answered-again), and a cosmetic Thread

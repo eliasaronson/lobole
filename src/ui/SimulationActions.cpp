@@ -84,32 +84,9 @@ void AppendStudyMarker(const AppState& state,
   if (shown->hi > shown->lo)
     cross(lo, glm::vec3(0.55f, 0.8f, 1.0f), 0.6f * L);
 }
-bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error,
-                      const fem::ConvergeOptions& converge) {
-  fem::Study* s = doc.StudyForRun(studyId);
-  if (!s) {
-    if (error)
-      *error = "no such study";
-    return false;
-  }
-  fem::StudyRuntime rt;
-  const uint64_t inputHash = fem::RunInputKey(doc, *s, converge);
-  // A topology study runs the SIMP optimizer (minutes, serialized result); a
-  // static/modal study runs the linear solver (seconds, transient result).
-  const bool ok = s->type == fem::AnalysisType::Topology
-                      ? fem::RunTopology(doc, *s, rt, error)
-                      : fem::RunStudy(doc, *s, rt, converge, error);
-  if (!ok)
-    return false;
-  rt.solvedAtVersion = doc.Version();
-  rt.inputHash = inputHash;
-  doc.StoreStudyResults(studyId, std::move(rt));
-  return true;
-}
-
 // The one solver choice, for a run on the frame and a job alike: a solve
 // large enough to go iterative tries the GPU first, under the rules
-// topology's does (StartTopologyRun): LOBOLE_TOPO_GPU=0 keeps it on the
+// topology's does (PickTopologySolver): LOBOLE_TOPO_GPU=0 keeps it on the
 // CPU, =1 admits a software device, and the user's preferred device is
 // asked for. The device is made on the solving thread, and only for a
 // solve that wants one. A synchronous run once went straight to the CPU.
@@ -166,53 +143,6 @@ bool CalculixRunFor(const AppState& state, const fem::Study& s,
   return true;
 }
 
-bool RunStudyAndCache(AppState& state, Document& doc, uint64_t studyId,
-                      std::string* error, double timeoutSeconds,
-                      const JobStart* job) {
-  fem::Study* s = doc.StudyForRun(studyId);
-  if (!s) {
-    if (error)
-      *error = "no such study";
-    return false;
-  }
-  const fem::ConvergeOptions converge = ConvergeOptionsFor(state, *s, job);
-  fem::SolveOptions options;
-  if (!CalculixRunFor(state, *s, timeoutSeconds, options, error)) {
-    s->error = error ? *error : "";
-    return false;
-  }
-  if (!options.calculix && s->type == fem::AnalysisType::Topology)
-    return RunStudyAndCache(doc, studyId, error, converge);
-  // The pipeline a job runs, on the frame: in-house with the solver a job
-  // would choose (OfferGpuSolver), or on CalculiX, the convergence check
-  // re-solving on ccx at each step.
-  if (!options.calculix)
-    OfferGpuSolver(state, options);
-  const uint64_t inputHash = fem::RunInputKey(doc, *s, converge);
-  fem::StudyPlan plan;
-  if (!fem::PlanStudy(doc, *s, plan, error))
-    return false;
-  fem::StudyJobInput input;
-  fem::StudyRuntime rt;
-  options.cancelled = state.rpcCallerGone;
-  const auto started = std::chrono::steady_clock::now();
-  std::string err;
-  if (!fem::SolveConverged(plan, input, rt, converge, &err, options)) {
-    s->error = err.empty() ? "solve failed" : err;
-    if (error)
-      *error = s->error;
-    return false;
-  }
-  rt.solvedAtVersion = doc.Version();
-  rt.inputHash = inputHash;
-  rt.solveSeconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
-          .count();
-  RememberStudyResult(state, rt); // whole, before the store cuts it
-  doc.StoreStudyResults(studyId, std::move(rt));
-  return true;
-}
-
 fem::ConvergeOptions ConvergeOptionsFor(const AppState& state,
                                         const fem::Study& study,
                                         const JobStart* job) {
@@ -227,62 +157,6 @@ fem::ConvergeOptions ConvergeOptionsFor(const AppState& state,
                                job->layerNormal[2]);
   }
   return o;
-}
-
-uint64_t StudyInputHash(AppState& state, const Document* doc,
-                        const AssemblyDocument* asmDoc, uint64_t studyId,
-                        const JobStart* job) {
-  if (doc != nullptr) {
-    const fem::Study* s = doc->FindStudy(studyId);
-    return s ? fem::RunInputKey(*doc, *s, ConvergeOptionsFor(state, *s, job))
-             : 0;
-  }
-  if (asmDoc != nullptr) {
-    const fem::Study* s = asmDoc->FindStudy(studyId);
-    if (s == nullptr)
-      return 0;
-    const fem::ConvergeOptions o = ConvergeOptionsFor(state, *s, job);
-    fem::Study withMode = *s;
-    withMode.converge = o.mode;
-    return fem::RunInputKey(
-        fem::AssemblyStudyInputKey(*asmDoc, withMode,
-                                   AssemblyStudyContextFor(state)),
-        o);
-  }
-  return 0;
-}
-
-bool ReuseStudyResult(AppState& state, Document* doc, AssemblyDocument* asmDoc,
-                      uint64_t studyId, JobStart* job) {
-  if (job != nullptr && job->recompute)
-    return false;
-  const uint64_t hash = StudyInputHash(state, doc, asmDoc, studyId, job);
-  if (hash == 0)
-    return false;
-  // The study's own result first (a reopened project's topology result is
-  // there, with the hash it was saved with), then the session's.
-  const fem::StudyRuntime* own =
-      doc ? doc->StudyResults(studyId) : asmDoc->StudyResults(studyId);
-  std::shared_ptr<const fem::StudyRuntime> stored;
-  if (own != nullptr && own->inputHash == hash && !own->cancelled)
-    stored = std::make_shared<const fem::StudyRuntime>(*own);
-  else
-    stored = state.studyResultsByInput.Find(hash);
-  if (!stored || stored->cancelled)
-    return false;
-  fem::StudyRuntime rt = *stored;
-  if (doc != nullptr) {
-    rt.solvedAtVersion = doc->Version();
-    doc->StoreStudyResults(studyId, std::move(rt));
-  } else {
-    const fem::Study* s = asmDoc->FindStudy(studyId);
-    rt.solvedAtVersion = asmDoc->Version();
-    rt.solvedPartVersions = AssemblyStudyPartVersions(state, *asmDoc, *s);
-    asmDoc->StoreStudyResults(studyId, std::move(rt));
-  }
-  if (job != nullptr)
-    job->reused = true;
-  return true;
 }
 
 void RememberStudyResult(AppState& state, const fem::StudyRuntime& rt) {
@@ -345,44 +219,6 @@ std::string SolverOf(const fem::StudyRuntime& rt, fem::AnalysisType type) {
 }
 
 namespace {
-
-// The part slot `doc` belongs to: the active one (its slot holds no
-// document while it is active) or a stashed one. 0 when `doc` is not a part
-// tab's document at all.
-uint64_t SlotIdOfDoc(const AppState& state, const Document& doc) {
-  for (size_t i = 0; i < state.parts.size(); i++) {
-    const PartSlot& slot = state.parts[i];
-    if (slot.kind != DocKind::Part)
-      continue;
-    const Document* d = slot.doc                ? slot.doc.get()
-                        : i == state.activePart ? state.document.get()
-                                                : nullptr;
-    if (d == &doc)
-      return slot.id;
-  }
-  return 0;
-}
-
-// Where a finished job stores its result: the document it was started
-// from, even when another tab is active now. Null when that tab is gone.
-Document* JobDocument(AppState& state, uint64_t partSlotId, const char* what) {
-  Document* doc = PartDocById(state, partSlotId);
-  if (doc == nullptr)
-    LOG_WARN("{}: the part it ran on was closed before it finished; the "
-             "result is dropped",
-             what);
-  return doc;
-}
-
-std::string StudyLabel(const Document& doc, uint64_t studyId,
-                       const char* verb) {
-  const fem::Study* s = doc.FindStudy(studyId);
-  return std::string(verb) + " '" +
-         (s != nullptr && !s->name.empty()
-              ? s->name
-              : "study " + std::to_string(studyId)) +
-         "'";
-}
 
 double Elapsed(std::chrono::steady_clock::time_point since) {
   return std::chrono::duration<double>(std::chrono::steady_clock::now() - since)
@@ -480,444 +316,6 @@ fem::StudyRuntime TopologyRuntimeOf(TopoJob& j) {
   return rt;
 }
 
-bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
-                      std::string* error, JobStart* jobStart) {
-  fem::Study* s = doc.StudyForRun(studyId);
-  if (!s) {
-    if (error)
-      *error = "no such study";
-    return false;
-  }
-  if (s->type != fem::AnalysisType::Topology) {
-    if (error)
-      *error = "study is not a topology study";
-    return false;
-  }
-  // A stored result for these very inputs answers first: it starts nothing,
-  // so it waits for nothing.
-  if (ReuseStudyResult(state, &doc, nullptr, studyId, jobStart))
-    return true;
-  if (BackgroundJobRunning(state, "topo") ||
-      BackgroundJobRunning(state, "study") ||
-      BackgroundJobRunning(state, "check")) {
-    if (error)
-      *error = "a study run is already in progress";
-    return false;
-  }
-  const uint64_t inputHash = fem::StudyInputKey(doc, *s);
-  // Prepare the immutable snapshot on this (main) thread — meshing needs the
-  // Document. Everything past this point is pure fem data.
-  auto job = std::make_shared<TopoJob>();
-  if (!fem::PrepareTopology(doc, *s, job->input, error))
-    return false;
-  job->studyId = studyId;
-  job->partSlotId = SlotIdOfDoc(state, doc);
-  job->maxIterations = job->input.params.maxIterations;
-  PickTopologySolver(state, *job);
-  job->started = std::chrono::steady_clock::now();
-
-  auto bg = std::make_unique<BackgroundJob>();
-  bg->kind = "topo";
-  bg->label = StudyLabel(doc, studyId, "Optimizing");
-  bg->cancellable = true; // between iterations, keeping the best so far
-  bg->studyId = studyId;
-  bg->owner = jobStart ? jobStart->owner : 0;
-  LaunchTopologyWorker(*bg, job);
-  bg->finish = [job, inputHash](AppState& s) {
-    TopoJob& j = *job;
-    if (Document* target =
-            JobDocument(s, j.partSlotId, "topology optimization")) {
-      if (j.result) {
-        fem::StudyRuntime rt = TopologyRuntimeOf(j);
-        rt.solvedAtVersion = target->Version();
-        rt.inputHash = inputHash;
-        RememberStudyResult(s, rt);
-        target->StoreStudyResults(j.studyId, std::move(rt));
-      } else if (fem::Study* st = target->StudyForRun(j.studyId)) {
-        st->error = "body '" + j.input.bodyName + "': " + j.error;
-      }
-    }
-    if (s.topoJob == job)
-      s.topoJob.reset();
-    return true;
-  };
-  state.topoJob = job;
-  BackgroundJob& started = StartBackgroundJob(state, std::move(bg));
-  if (jobStart)
-    jobStart->jobId = started.id;
-  return true;
-}
-
-bool EnsureTopologyCheckStudies(AppState& state, Document& doc, uint64_t topoId,
-                                double threshold, uint64_t* shapeId,
-                                uint64_t* solidId, std::string* error) {
-  const fem::Study* found = doc.FindStudy(topoId);
-  if (found == nullptr || found->type != fem::AnalysisType::Topology) {
-    if (error)
-      *error = "study " + std::to_string(topoId) +
-               " is not a topology study of this part";
-    return false;
-  }
-  const fem::Study topo = *found; // a copy: studies are added below
-  const auto ensure = [&](bool whole) {
-    uint64_t sid = 0;
-    for (const fem::Study& s : doc.GetStudies())
-      if (s.type == fem::AnalysisType::Static && s.shapeFrom.study == topoId &&
-          s.shapeFrom.whole == whole)
-        sid = s.id;
-    if (sid == 0) {
-      auto cmd = std::make_unique<AddStudyCommand>(
-          topo.name + (whole ? ": solid" : ": shape"),
-          fem::AnalysisType::Static);
-      AddStudyCommand* raw = cmd.get();
-      state.commands->Execute(std::move(cmd), doc);
-      sid = raw->StudyId();
-    }
-    const fem::Study& have = *doc.FindStudy(sid);
-    fem::Study next = have;
-    next.loads = topo.loads;
-    next.loadCases = topo.loadCases;
-    next.refinements.clear();
-    next.gravity = glm::dvec3(0.0);
-    next.shapeFrom = fem::ShapeSource{topoId, whole ? 0.0 : threshold, whole};
-    // Unchanged but for the load ids: left alone, so its input hash -- and
-    // a stored answer -- still hold.
-    const auto withoutIds = [](fem::Study st) {
-      for (fem::Load& l : st.loads)
-        l.id = 0;
-      return DocumentIO::StudyToJson(st);
-    };
-    if (withoutIds(next) == withoutIds(have))
-      return sid;
-    for (fem::Load& l : next.loads)
-      l.id = doc.AllocateId();
-    state.commands->Execute(std::make_unique<ModifyStudyCommand>(
-                                "Check topology", DocumentIO::StudyToJson(have),
-                                DocumentIO::StudyToJson(next)),
-                            doc);
-    return sid;
-  };
-  const uint64_t a = ensure(false);
-  const uint64_t b = ensure(true);
-  if (shapeId)
-    *shapeId = a;
-  if (solidId)
-    *solidId = b;
-  return true;
-}
-
-bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
-                   std::string* error, JobStart* jobStart) {
-  const auto fail = [&](const std::string& m) {
-    if (error)
-      *error = m;
-    return false;
-  };
-  fem::Study* s = doc.StudyForRun(studyId);
-  if (!s)
-    return fail("no such study");
-  if (s->type == fem::AnalysisType::Topology)
-    return fail("topology studies run through the topology path");
-  if (ReuseStudyResult(state, &doc, nullptr, studyId, jobStart))
-    return true;
-  if (BackgroundJobRunning(state, "topo") ||
-      BackgroundJobRunning(state, "study") ||
-      BackgroundJobRunning(state, "check"))
-    return fail("a study run is already in progress");
-  // The solver, before anything starts: a CalculiX study with no ccx is
-  // refused here, saying how to install one, and the panel shows why.
-  fem::SolveOptions calculix;
-  if (!CalculixRunFor(state, *s, jobStart ? jobStart->timeoutSeconds : 0.0,
-                      calculix, error)) {
-    s->error = error ? *error : "";
-    return false;
-  }
-  const fem::ConvergeOptions converge = ConvergeOptionsFor(state, *s, jobStart);
-  const uint64_t inputHash = fem::RunInputKey(doc, *s, converge);
-
-  // Plan on this thread — expressions, face refs, materials need the
-  // Document. The worker meshes the plan's copied shapes and solves; it
-  // never sees the Document
-  // (docs/ui/long-operations.md#fem-meshing-and-solving).
-  auto job = std::make_shared<StudyJob>();
-  if (!fem::PlanStudy(doc, *s, job->plan, error))
-    return false;
-  job->studyId = studyId;
-  job->partSlotId = SlotIdOfDoc(state, doc);
-  job->started = std::chrono::steady_clock::now();
-
-  auto bg = std::make_unique<BackgroundJob>();
-  bg->kind = "study";
-  bg->label = StudyLabel(doc, studyId, "Solving");
-  // After the meshing, and within a few iterations of an iterative solve;
-  // a direct factorization has no interruption points, so there it lands
-  // when the factorization ends. The answer is dropped either way.
-  bg->cancellable = true;
-  bg->studyId = studyId;
-  bg->owner = jobStart ? jobStart->owner : 0;
-  BackgroundJob* raw = bg.get();
-  // Made here: the worker must not read AppState.
-  fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
-  solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get(), raw);
-  bg->thread = std::thread([job, raw, solveOptions, converge]() {
-    ArmOccSignalHandlers(); // OCC's handlers are per thread
-    std::string err;
-    // Mesh, solve, and settle the peak (docs/simulation/README.md
-    // #a-peak-that-has-settled); a cancel inside it is a cancel.
-    if (!fem::SolveConverged(job->plan, job->input, job->runtime, converge,
-                             &err, solveOptions) &&
-        !raw->cancel.load())
-      job->error = err.empty() ? "solve failed" : err;
-    raw->error = job->error;
-    raw->done.store(true); // last
-  });
-  bg->finish = [job, raw, inputHash](AppState& s) {
-    StudyJob& j = *job;
-    if (Document* target = JobDocument(s, j.partSlotId, "study solve")) {
-      if (raw->cancel.load()) {
-        // Cancelled: whatever it reached is not the answer it was asked for.
-      } else if (j.error.empty()) {
-        j.runtime.solvedAtVersion = target->Version();
-        j.runtime.solver = SolverOf(j.runtime, j.input.type);
-        j.runtime.solveSeconds = Elapsed(j.started);
-        j.runtime.inputHash = inputHash;
-        RememberStudyResult(s, j.runtime);
-        target->StoreStudyResults(j.studyId, std::move(j.runtime));
-      } else if (fem::Study* st = target->StudyForRun(j.studyId)) {
-        st->error = j.error;
-      }
-    }
-    if (s.studyJob == job)
-      s.studyJob.reset();
-    return true;
-  };
-  state.studyJob = job;
-  BackgroundJob& started = StartBackgroundJob(state, std::move(bg));
-  if (jobStart)
-    jobStart->jobId = started.id;
-  return true;
-}
-
-bool StartTopologyCheck(AppState& state, Document& doc, uint64_t topoId,
-                        double threshold, uint64_t* shapeId, uint64_t* solidId,
-                        std::string* error, JobStart* jobStart) {
-  const auto fail = [&](const std::string& m) {
-    if (error)
-      *error = m;
-    return false;
-  };
-  uint64_t ids[2] = {0, 0};
-  if (!EnsureTopologyCheckStudies(state, doc, topoId, threshold, &ids[0],
-                                  &ids[1], error))
-    return false;
-  if (shapeId)
-    *shapeId = ids[0];
-  if (solidId)
-    *solidId = ids[1];
-  // Each one a stored result answers is not solved again.
-  struct Part {
-    uint64_t studyId = 0;
-    uint64_t inputHash = 0;
-    fem::StudyPlan plan;
-    fem::StudyJobInput input;
-    fem::StudyRuntime runtime;
-  };
-  struct CheckJob {
-    uint64_t partSlotId = 0;
-    std::vector<Part> parts;
-    std::string error;
-    uint64_t errorStudy = 0;
-    std::chrono::steady_clock::time_point started;
-  };
-  auto job = std::make_shared<CheckJob>();
-  bool running = BackgroundJobRunning(state, "topo") ||
-                 BackgroundJobRunning(state, "study") ||
-                 BackgroundJobRunning(state, "check");
-  for (const uint64_t sid : ids) {
-    JobStart one;
-    one.recompute = jobStart != nullptr && jobStart->recompute;
-    if (ReuseStudyResult(state, &doc, nullptr, sid, &one))
-      continue;
-    if (running)
-      return fail("a study run is already in progress");
-    fem::Study* s = doc.StudyForRun(sid);
-    if (s == nullptr)
-      return fail("no such study");
-    Part part;
-    part.studyId = sid;
-    part.inputHash = fem::StudyInputKey(doc, *s);
-    if (!fem::PlanStudy(doc, *s, part.plan, error))
-      return false;
-    job->parts.push_back(std::move(part));
-  }
-  if (job->parts.empty()) {
-    if (jobStart)
-      jobStart->reused = true;
-    return true;
-  }
-  job->partSlotId = SlotIdOfDoc(state, doc);
-  job->started = std::chrono::steady_clock::now();
-
-  auto bg = std::make_unique<BackgroundJob>();
-  bg->kind = "check";
-  bg->label = StudyLabel(doc, topoId, "Checking");
-  // Between the two solves, inside an iterative one, and after a
-  // factorization (it has no interruption points): what was not finished
-  // is dropped.
-  bg->cancellable = true;
-  bg->studyId = topoId;
-  bg->owner = jobStart ? jobStart->owner : 0;
-  BackgroundJob* raw = bg.get();
-  // Made here: the worker must not read AppState.
-  fem::SolveOptions solveOptions = JobSolveOptions(state, raw, nullptr);
-  bg->thread = std::thread([job, raw, solveOptions]() {
-    ArmOccSignalHandlers(); // OCC's handlers are per thread
-    const double n = static_cast<double>(job->parts.size());
-    for (size_t i = 0; i < job->parts.size() && !raw->cancel.load(); ++i) {
-      Part& p = job->parts[i];
-      std::string err;
-      if (!fem::MeshPlannedStudy(p.plan, p.input, &err))
-        job->error = err.empty() ? "meshing failed" : err;
-      else if (!raw->cancel.load() &&
-               !fem::SolvePreparedStudy(p.input, p.runtime, &err,
-                                        solveOptions) &&
-               !raw->cancel.load()) // a cancel inside the solve is a cancel
-        job->error = err.empty() ? "solve failed" : err;
-      if (!job->error.empty()) {
-        job->errorStudy = p.studyId;
-        break;
-      }
-      raw->fraction.store((static_cast<double>(i) + 1.0) / n);
-    }
-    raw->error = job->error;
-    raw->done.store(true); // last
-  });
-  bg->finish = [job, raw](AppState& s) {
-    CheckJob& j = *job;
-    Document* target = JobDocument(s, j.partSlotId, "topology check");
-    if (target == nullptr)
-      return true;
-    for (Part& p : j.parts) {
-      // Solved whole: a cancel after it does not take it back. The one the
-      // cancel or the failure landed in, and what came after, are dropped.
-      if (p.runtime.bodies.empty())
-        continue;
-      p.runtime.solvedAtVersion = target->Version();
-      p.runtime.solver = SolverOf(p.runtime, p.input.type);
-      p.runtime.solveSeconds = Elapsed(j.started);
-      p.runtime.inputHash = p.inputHash;
-      RememberStudyResult(s, p.runtime);
-      target->StoreStudyResults(p.studyId, std::move(p.runtime));
-    }
-    if (!j.error.empty() && !raw->cancel.load())
-      if (fem::Study* st = target->StudyForRun(j.errorStudy))
-        st->error = j.error;
-    return true;
-  };
-  BackgroundJob& started = StartBackgroundJob(state, std::move(bg));
-  if (jobStart)
-    jobStart->jobId = started.id;
-  return true;
-}
-
-void AdoptStoredResults(AppState& state) {
-  for (size_t i = 0; i < state.parts.size(); i++)
-    if (Document* d = SlotDoc(state, i))
-      fem::RestampByInputs(*d);
-  if (state.document)
-    fem::RestampByInputs(*state.document);
-  if (!state.assembly)
-    return;
-  AssemblyDocument& asmDoc = *state.assembly;
-  for (const fem::Study& s : asmDoc.GetStudies()) {
-    const fem::StudyRuntime* rt = asmDoc.StudyResults(s.id);
-    if (rt == nullptr || rt->inputHash == 0 ||
-        !AssemblyStudyStale(state, asmDoc, s.id))
-      continue;
-    if (fem::AssemblyStudyInputKey(asmDoc, s, AssemblyStudyContextFor(state)) ==
-        rt->inputHash)
-      asmDoc.MarkStudyResultsCurrent(
-          s.id, AssemblyStudyPartVersions(state, asmDoc, s));
-  }
-  AdoptSavedMotionResults(state);
-}
-
-bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
-                  std::string* error, JobStart* jobStart) {
-  const auto fail = [&](const std::string& m) {
-    if (error)
-      *error = m;
-    return false;
-  };
-  if (BackgroundJobRunning(state, "mesh"))
-    return fail("a mesh run is already in progress");
-  fem::Study* s = doc.StudyForRun(studyId);
-  if (!s)
-    return fail("no such study");
-  auto job = std::make_shared<MeshJob>();
-  if (!fem::PlanStudyMesh(doc, *s, job->plan, error))
-    return false;
-  job->studyId = studyId;
-  job->partSlotId = SlotIdOfDoc(state, doc);
-  job->started = std::chrono::steady_clock::now();
-  job->docVersion = doc.Version();
-  job->settingsKey = MeshSettingsKey(*s);
-  state.meshReports.erase({job->partSlotId, studyId});
-
-  auto bg = std::make_unique<BackgroundJob>();
-  bg->kind = "mesh";
-  bg->label = StudyLabel(doc, studyId, "Meshing");
-  // Netgen has no interruption points: a cancel lands when the mesh does,
-  // and the report is dropped.
-  bg->cancellable = true;
-  bg->studyId = studyId;
-  bg->owner = jobStart ? jobStart->owner : 0;
-  BackgroundJob* raw = bg.get();
-  bg->thread = std::thread([job, raw]() {
-    ArmOccSignalHandlers();
-    std::string err;
-    if (!fem::MeshPlanned(job->plan, job->meshes, &err))
-      job->error = err.empty() ? "meshing failed" : err;
-    // What each mesh says about itself, here beside it: the report reads
-    // every element.
-    else
-      for (size_t i = 0; i < job->meshes.size() && i < job->plan.bodies.size();
-           ++i)
-        job->reports.push_back(
-            fem::ReportMesh(job->meshes[i].mesh, job->plan.bodies[i].settings,
-                            fem::AutoMeshSize(job->plan.bodies[i].shape)));
-    raw->error = job->error;
-    raw->done.store(true); // last
-  });
-  bg->finish = [job, raw](AppState& s) {
-    MeshJob& j = *job;
-    if (raw->cancel.load()) {
-      if (s.meshJob == job)
-        s.meshJob.reset();
-      return true;
-    }
-    MeshReport report =
-        MakeMeshReport(std::move(j.meshes), std::move(j.reports));
-    report.error = j.error;
-    report.seconds = Elapsed(j.started);
-    report.docVersion = j.docVersion;
-    report.settingsKey = j.settingsKey;
-    KeepStudyMesh(s, j.partSlotId, j.studyId, std::move(report));
-    if (!j.error.empty())
-      if (Document* target = PartDocById(s, j.partSlotId))
-        if (fem::Study* st = target->StudyForRun(j.studyId))
-          st->error = j.error;
-    if (s.meshJob == job)
-      s.meshJob.reset();
-    return true;
-  };
-  state.meshJob = job;
-  BackgroundJob& started = StartBackgroundJob(state, std::move(bg));
-  if (jobStart)
-    jobStart->jobId = started.id;
-  return true;
-}
-
 StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId,
                                  uint64_t simSlotId) {
   StudyRunStatus st;
@@ -948,12 +346,6 @@ MeshRunStatus GetMeshRunStatus(const AppState& state, uint64_t studyId,
   st.running = true;
   st.elapsedSeconds = Elapsed(job->started);
   return st;
-}
-
-const MeshReport* MeshReportFor(const AppState& state, const Document& doc,
-                                uint64_t studyId) {
-  const auto it = state.meshReports.find({SlotIdOfDoc(state, doc), studyId});
-  return it == state.meshReports.end() ? nullptr : &it->second;
 }
 
 bool CancelTopologyRun(AppState& state, uint64_t studyId) {
@@ -1006,13 +398,6 @@ std::optional<Measure::DocumentMass> SimulationMass(AppState& state) {
               placed.push_back(flat[i]);
         }
     }
-    bodies = &placed;
-  } else if (state.assembly) {
-    const fem::Study* s = state.assembly->FindStudy(sim.activeStudyId);
-    if (s)
-      for (const fem::Participant& pt : s->participants)
-        if (pt.role == fem::ParticipantRole::Meshed)
-          placed = OccurrenceSubtreeBodies(state, pt.occurrenceId);
     bodies = &placed;
   }
   if (!bodies || bodies->empty())
@@ -1114,24 +499,14 @@ StudyHost StudyHostOf(AppState& state) {
     }
     return host;
   }
-  const SymbolTable* symbols = state.document   ? &state.document->Symbols()
-                               : state.assembly ? &state.projectSymbols
-                                                : nullptr;
-  StudyHost host;
-  host.part = state.document.get();
-  host.asmDoc = state.assembly.get();
-  host.symbols = symbols;
-  return host;
+  return {}; // studies live on a simulation tab, and this is none
 }
 
 bool StudyStale(AppState& state, uint64_t studyId) {
   const StudyHost host = StudyHostOf(state);
   if (!host)
     return true;
-  if (host.sim)
-    return SimStudyStale(state, *host.sim, studyId);
-  return host.part ? host.part->StudyResultsStale(studyId)
-                   : AssemblyStudyStale(state, *host.asmDoc, studyId);
+  return SimStudyStale(state, *host.sim, studyId);
 }
 
 void ModifyStudy(AppState& state, uint64_t id, const std::string& desc,
@@ -1140,71 +515,39 @@ void ModifyStudy(AppState& state, uint64_t id, const std::string& desc,
   const fem::Study* cur = host ? host.Find(id) : nullptr;
   if (!cur)
     return;
-  if (host.sim) {
-    // A simulation edits by snapshot (SimUndoGuard): ReplaceStudy moves its
-    // version and the study's revision. Its roles are the document's: an
-    // edit to the study's participants is handed the document's table and
-    // lands there, so every edit the panel makes to a table still works.
-    fem::Study copy = *cur;
-    copy.participants = host.sim->Roles();
-    mutate(copy);
-    SimUndoGuard guard(state);
-    const auto same = [](const std::vector<fem::Participant>& a,
-                         const std::vector<fem::Participant>& b) {
-      if (a.size() != b.size())
-        return false;
-      for (size_t i = 0; i < a.size(); i++)
-        if (a[i].occurrenceId != b[i].occurrenceId || a[i].role != b[i].role ||
-            a[i].friction != b[i].friction ||
-            a[i].meshSize.value != b[i].meshSize.value ||
-            a[i].meshSize.expr != b[i].meshSize.expr)
-          return false;
-      return true;
-    };
-    if (!same(copy.participants, host.sim->Roles()))
-      host.sim->SetRoles(copy.participants);
-    copy.participants.clear();
-    host.sim->ReplaceStudy(std::move(copy));
-    return;
-  }
-  if (host.part) {
-    if (!state.commands)
-      return;
-    nlohmann::json before = DocumentIO::StudyToJson(*cur);
-    fem::Study copy = *cur;
-    mutate(copy);
-    nlohmann::json after = DocumentIO::StudyToJson(copy);
-    state.commands->Execute(
-        std::make_unique<ModifyStudyCommand>(desc, before, after), *host.part);
-    return;
-  }
-  // An assembly edits by full-state snapshot (AssemblyActions): one
-  // snapshot, one mutation, one version bump — the same one undo step.
+  // A simulation edits by snapshot (SimUndoGuard): ReplaceStudy moves its
+  // version and the study's revision. Its roles are the document's: an
+  // edit to the study's participants is handed the document's table and
+  // lands there, so every edit the panel makes to a table still works.
+  (void)desc; // the simulation's undo step is the snapshot, not a name
   fem::Study copy = *cur;
+  copy.participants = host.sim->Roles();
   mutate(copy);
-  SnapshotAssembly(state);
-  *host.asmDoc->FindStudy(id) = std::move(copy);
-  host.asmDoc->BumpVersion();
+  SimUndoGuard guard(state);
+  const auto same = [](const std::vector<fem::Participant>& a,
+                       const std::vector<fem::Participant>& b) {
+    if (a.size() != b.size())
+      return false;
+    for (size_t i = 0; i < a.size(); i++)
+      if (a[i].occurrenceId != b[i].occurrenceId || a[i].role != b[i].role ||
+          a[i].friction != b[i].friction ||
+          a[i].meshSize.value != b[i].meshSize.value ||
+          a[i].meshSize.expr != b[i].meshSize.expr)
+        return false;
+    return true;
+  };
+  if (!same(copy.participants, host.sim->Roles()))
+    host.sim->SetRoles(copy.participants);
+  copy.participants.clear();
+  host.sim->ReplaceStudy(std::move(copy));
 }
 
 uint64_t AddStudyOn(AppState& state, const std::string& name) {
   const StudyHost host = StudyHostOf(state);
   if (!host)
     return 0;
-  if (host.sim) {
-    SimUndoGuard guard(state);
-    return host.sim->AddStudy(name).id;
-  }
-  if (host.part) {
-    if (!state.commands)
-      return 0;
-    auto cmd = std::make_unique<AddStudyCommand>(name);
-    AddStudyCommand* raw = cmd.get();
-    state.commands->Execute(std::move(cmd), *host.part);
-    return raw->StudyId();
-  }
-  SnapshotAssembly(state);
-  return host.asmDoc->AddStudy(name).id;
+  SimUndoGuard guard(state);
+  return host.sim->AddStudy(name).id;
 }
 
 const std::vector<fem::ContactPatch>& SimulationContacts(AppState& state) {
@@ -1243,39 +586,11 @@ const std::vector<fem::ContactPatch>& SimulationContacts(AppState& state) {
     }
     return sim.contacts;
   }
-  AssemblyDocument* asmDoc = state.assembly.get();
-  const fem::Study* s = asmDoc ? asmDoc->FindStudy(sim.activeStudyId) : nullptr;
-  if (!s || !sim.IsActive()) {
-    sim.contacts.clear();
-    sim.bonds.clear();
-    sim.contactKey = 0;
-    sim.contactError.clear();
-    return kNone;
-  }
-  // The key: the study as text, the assembly's version, and every part the
-  // study reads — the same record a result is stamped with.
-  uint64_t key = std::hash<std::string>{}(DocumentIO::StudyToJson(*s).dump());
-  key ^= asmDoc->Version() * 0x9E3779B97F4A7C15ull;
-  for (const auto& [partId, version] :
-       AssemblyStudyPartVersions(state, *asmDoc, *s))
-    key ^= (partId * 0x100000001B3ull) ^ (version * 0x9E3779B97F4A7C15ull);
-  if (key == sim.contactKey)
-    return sim.contacts;
-  sim.contactKey = key;
   sim.contacts.clear();
   sim.bonds.clear();
+  sim.contactKey = 0;
   sim.contactError.clear();
-  fem::Study copy = *s; // the plan writes its refusal into the study
-  fem::StudyPlan plan;
-  std::string err;
-  if (fem::PlanAssemblyStudy(*asmDoc, copy, AssemblyStudyContextFor(state),
-                             plan, &err)) {
-    sim.contacts = std::move(plan.contacts);
-    sim.bonds = std::move(plan.bonds);
-  } else {
-    sim.contactError = err;
-  }
-  return sim.contacts;
+  return kNone;
 }
 
 const std::vector<fem::BondPatch>& SimulationBonds(AppState& state) {
@@ -1288,259 +603,6 @@ uint64_t ActiveSlotId(const AppState& state) {
       static_cast<size_t>(state.activePart) >= state.parts.size())
     return 0;
   return state.parts[state.activePart].id;
-}
-
-fem::AssemblyStudyContext AssemblyStudyContextFor(AppState& state) {
-  fem::AssemblyStudyContext ctx;
-  ctx.placedBodies = [&state](uint64_t occurrenceId) {
-    return OccurrenceSubtreeBodies(state, occurrenceId);
-  };
-  ctx.symbols = &state.projectSymbols;
-  return ctx;
-}
-
-std::vector<std::pair<uint64_t, uint64_t>>
-AssemblyStudyPartVersions(AppState& state, const AssemblyDocument& asmDoc,
-                          const fem::Study& study) {
-  std::vector<std::pair<uint64_t, uint64_t>> out;
-  for (const fem::Participant& pt : study.participants) {
-    if (pt.role == fem::ParticipantRole::Ignored)
-      continue;
-    const Occurrence* occ = asmDoc.FindById(pt.occurrenceId);
-    if (!occ)
-      continue;
-    bool seen = false;
-    for (const auto& [id, v] : out)
-      seen = seen || id == occ->partId;
-    if (seen)
-      continue;
-    // the live part: its stamp covers every configuration of it
-    const Document* part = PartDocById(state, occ->partId);
-    out.push_back({occ->partId, part ? PartStamp(*part) : 0});
-  }
-  return out;
-}
-
-bool AssemblyStudyStale(AppState& state, const AssemblyDocument& asmDoc,
-                        uint64_t studyId) {
-  return asmDoc.StudyResultsStale(studyId, [&state](uint64_t partId) {
-    const Document* part = PartDocById(state, partId);
-    return part ? PartStamp(*part) : uint64_t{0};
-  });
-}
-
-namespace {
-// Plan an assembly study for a run: the imprint and every refusal happen
-// here, on the main thread, against the placed geometry.
-bool PlanForRun(AppState& state, AssemblyDocument& asmDoc, uint64_t studyId,
-                fem::StudyPlan& plan, fem::Study** studyOut,
-                std::string* error) {
-  fem::Study* s = asmDoc.FindStudy(studyId);
-  if (!s) {
-    if (error)
-      *error = "no such study";
-    return false;
-  }
-  if (s->type == fem::AnalysisType::Topology) {
-    if (error)
-      *error = "topology optimisation is a part study";
-    return false;
-  }
-  if (studyOut)
-    *studyOut = s;
-  return fem::PlanAssemblyStudy(asmDoc, *s, AssemblyStudyContextFor(state),
-                                plan, error);
-}
-} // namespace
-
-bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
-                              uint64_t studyId, std::string* error,
-                              double timeoutSeconds, const JobStart* job) {
-  fem::StudyPlan plan;
-  fem::Study* s = nullptr;
-  fem::SolveOptions options;
-  if (fem::Study* found = asmDoc.FindStudy(studyId);
-      found != nullptr &&
-      !CalculixRunFor(state, *found, timeoutSeconds, options, error)) {
-    found->error = error ? *error : "";
-    return false;
-  }
-  if (!options.calculix)
-    OfferGpuSolver(state, options);
-  options.cancelled = state.rpcCallerGone;
-  if (!PlanForRun(state, asmDoc, studyId, plan, &s, error))
-    return false;
-  const auto partVersions = AssemblyStudyPartVersions(state, asmDoc, *s);
-  const uint64_t inputHash =
-      StudyInputHash(state, nullptr, &asmDoc, studyId, job);
-  const fem::ConvergeOptions converge = ConvergeOptionsFor(state, *s, job);
-  fem::StudyJobInput input;
-  fem::StudyRuntime rt;
-  std::string err;
-  if (!fem::SolveConverged(plan, input, rt, converge, &err, options)) {
-    s->error = err;
-    if (error)
-      *error = err;
-    return false;
-  }
-  rt.solvedAtVersion = asmDoc.Version();
-  rt.solvedPartVersions = partVersions;
-  rt.solver = SolverOf(rt, input.type);
-  rt.inputHash = inputHash;
-  RememberStudyResult(state, rt);
-  asmDoc.StoreStudyResults(studyId, std::move(rt));
-  return true;
-}
-
-bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
-                           uint64_t studyId, std::string* error,
-                           JobStart* jobStart) {
-  const auto fail = [&](const std::string& m) {
-    if (error)
-      *error = m;
-    return false;
-  };
-  if (asmDoc.FindStudy(studyId) != nullptr &&
-      ReuseStudyResult(state, nullptr, &asmDoc, studyId, jobStart))
-    return true;
-  if (BackgroundJobRunning(state, "topo") ||
-      BackgroundJobRunning(state, "study") ||
-      BackgroundJobRunning(state, "check"))
-    return fail("a study run is already in progress");
-  fem::SolveOptions calculix;
-  if (fem::Study* found = asmDoc.FindStudy(studyId);
-      found != nullptr &&
-      !CalculixRunFor(state, *found, jobStart ? jobStart->timeoutSeconds : 0.0,
-                      calculix, error)) {
-    found->error = error ? *error : "";
-    return false;
-  }
-  auto job = std::make_shared<StudyJob>();
-  fem::Study* s = nullptr;
-  if (!PlanForRun(state, asmDoc, studyId, job->plan, &s, error))
-    return false;
-  const uint64_t inputHash =
-      StudyInputHash(state, nullptr, &asmDoc, studyId, jobStart);
-  const fem::ConvergeOptions converge = ConvergeOptionsFor(state, *s, jobStart);
-  job->studyId = studyId;
-  job->assemblySlotId = ActiveSlotId(state);
-  job->partVersions = AssemblyStudyPartVersions(state, asmDoc, *s);
-  job->started = std::chrono::steady_clock::now();
-
-  auto bg = std::make_unique<BackgroundJob>();
-  bg->kind = "study";
-  bg->label = "Solving '" + (s->name.empty() ? "study" : s->name) + "'";
-  bg->cancellable = true; // at its boundaries, as StartStudyRun's
-  bg->studyId = studyId;
-  bg->owner = jobStart ? jobStart->owner : 0;
-  BackgroundJob* raw = bg.get();
-  // Made here: the worker must not read AppState.
-  fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
-  solveOptions.calculix = WithEstimateTo(calculix.calculix, job.get(), raw);
-  bg->thread = std::thread([job, raw, solveOptions, converge]() {
-    ArmOccSignalHandlers();
-    std::string err;
-    if (!fem::SolveConverged(job->plan, job->input, job->runtime, converge,
-                             &err, solveOptions) &&
-        !raw->cancel.load()) // a cancel inside the solve is a cancel
-      job->error = err.empty() ? "solve failed" : err;
-    raw->error = job->error;
-    raw->done.store(true);
-  });
-  bg->finish = [job, raw, inputHash](AppState& st) {
-    StudyJob& j = *job;
-    AssemblyDocument* target = AssemblyDocById(st, j.assemblySlotId);
-    if (!target) {
-      LOG_WARN("study solve: the assembly it ran on was closed before it "
-               "finished; the result is dropped");
-    } else if (raw->cancel.load()) {
-      // Cancelled: nothing it reached is the answer it was asked for.
-    } else if (j.error.empty()) {
-      j.runtime.solvedAtVersion = target->Version();
-      j.runtime.solvedPartVersions = j.partVersions;
-      j.runtime.solver = SolverOf(j.runtime, j.input.type);
-      j.runtime.solveSeconds = Elapsed(j.started);
-      j.runtime.inputHash = inputHash;
-      RememberStudyResult(st, j.runtime);
-      target->StoreStudyResults(j.studyId, std::move(j.runtime));
-    } else if (fem::Study* st2 = target->FindStudy(j.studyId)) {
-      st2->error = j.error;
-    }
-    if (st.studyJob == job)
-      st.studyJob.reset();
-    return true;
-  };
-  state.studyJob = job;
-  BackgroundJob& started = StartBackgroundJob(state, std::move(bg));
-  if (jobStart)
-    jobStart->jobId = started.id;
-  return true;
-}
-
-bool MeshAssemblyStudy(AppState& state, AssemblyDocument& asmDoc,
-                       uint64_t studyId, std::vector<fem::StudyBodyMesh>& out,
-                       std::string* error) {
-  fem::StudyPlan plan;
-  fem::Study* s = nullptr;
-  if (!PlanForRun(state, asmDoc, studyId, plan, &s, error))
-    return false;
-  fem::StudyJobInput input;
-  std::string err;
-  if (!fem::MeshPlannedStudy(plan, input, &err)) {
-    s->error = err;
-    if (error)
-      *error = err;
-    return false;
-  }
-  out.clear();
-  for (fem::StudyJobBody& jb : input.bodies) {
-    fem::StudyBodyMesh bm;
-    bm.bodyIndex = jb.bodyIndex;
-    bm.bodyName = jb.bodyName;
-    bm.mesh = std::move(jb.mesh);
-    out.push_back(std::move(bm));
-  }
-  return true;
-}
-
-bool MeshAssemblyStudyWithReports(AppState& state, AssemblyDocument& asmDoc,
-                                  uint64_t studyId,
-                                  std::vector<fem::StudyBodyMesh>& meshes,
-                                  std::vector<fem::MeshBodyReport>& reports,
-                                  std::string* error) {
-  fem::StudyPlan plan;
-  fem::Study* s = nullptr;
-  if (!PlanForRun(state, asmDoc, studyId, plan, &s, error))
-    return false;
-  fem::StudyJobInput input;
-  std::string err;
-  if (!fem::MeshPlannedStudy(plan, input, &err)) {
-    s->error = err;
-    if (error)
-      *error = err;
-    return false;
-  }
-  meshes.clear();
-  reports.clear();
-  for (size_t i = 0; i < input.bodies.size(); ++i) {
-    fem::StudyJobBody& jb = input.bodies[i];
-    // The plan's body is what was meshed: its settings are what the
-    // report's refinements are read against.
-    fem::MeshSettings asked;
-    double autoSize = 0.0;
-    if (i < plan.bodies.size()) {
-      asked = plan.bodies[i].settings;
-      if (!plan.bodies[i].shape.IsNull())
-        autoSize = fem::AutoMeshSize(plan.bodies[i].shape);
-    }
-    reports.push_back(fem::ReportMesh(jb.mesh, asked, autoSize));
-    fem::StudyBodyMesh bm;
-    bm.bodyIndex = jb.bodyIndex;
-    bm.bodyName = jb.bodyName;
-    bm.mesh = std::move(jb.mesh);
-    meshes.push_back(std::move(bm));
-  }
-  return true;
 }
 
 void EnterSimulation(AppState& state) {

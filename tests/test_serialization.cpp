@@ -10,7 +10,10 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/SketchFeature.h"
+#include "core/fem/FemSolver.h" // OldStudies
+#include "core/fem/SimDocument.h"
 #include "core/io/Serialization.h"
+#include "core/io/SerializeSimulation.h"
 
 #include "cad/CADKernel.h"
 
@@ -268,36 +271,38 @@ TEST_CASE("Loading rejects unknown feature types", "[serialization]") {
 }
 
 // ---- FEM studies (v29) ----------------------------------------------------
+// A study is saved in its simulation
+// (docs/simulation/README.md#how-a-simulation-is-saved); an older part file
+// kept them itself, and those are read for the open to move.
 
 namespace {
-Document DocWithStudy() {
-  Document doc;
-  doc.SetParameter("load_n", "1000");
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 10.0,
-                                              4.0, 4.0));
-  fem::Study& s = doc.AddStudy("Static 1");
+fem::SimDocument SimWithStudy() {
+  fem::SimDocument sim;
+  sim.SetSubject({fem::SubjectKind::Part, 1, 0, "Base"});
+  fem::Study s;
+  s.id = 3;
+  s.name = "Static 1";
   s.meshSize = 5.0;
   s.meshSize.expr = "";
   s.refinements.push_back({ElementRef{2, "2/g1"}, ExprValue{1.0}});
   fem::Load fixed;
-  fixed.id = doc.AllocateId();
+  fixed.id = 4;
   fixed.type = fem::LoadType::Fixed;
   fixed.face = ElementRef{2, "2/cap0"};
   s.loads.push_back(fixed);
   fem::Load force;
-  force.id = doc.AllocateId();
+  force.id = 5;
   force.type = fem::LoadType::Force;
   force.face = ElementRef{2, "2/cap1"};
   force.magnitude = 1000.0;
   force.magnitude.expr = "load_n";
   force.direction = glm::dvec3(0, 0, -1);
   s.loads.push_back(force);
-  return doc;
+  sim.RestoreStudy(s);
+  return sim;
 }
 
-void CheckStudyMatches(const Document& loaded) {
-  REQUIRE(loaded.GetStudies().size() == 1);
-  const fem::Study& s = loaded.GetStudies()[0];
+void CheckStudyMatches(const fem::Study& s) {
   CHECK(s.name == "Static 1");
   CHECK(s.meshSize == 5.0);
   REQUIRE(s.refinements.size() == 1);
@@ -311,106 +316,132 @@ void CheckStudyMatches(const Document& loaded) {
   CHECK(s.loads[1].magnitude.expr == "load_n");
   CHECK(s.loads[1].direction.z == -1.0);
 }
+
+void CheckStudyMatches(const fem::SimDocument& loaded) {
+  REQUIRE(loaded.GetStudies().size() == 1);
+  CheckStudyMatches(loaded.GetStudies()[0]);
+}
+
+nlohmann::json ReadJson(const fs::path& p) {
+  std::ifstream in(p);
+  return nlohmann::json::parse(in);
+}
 } // namespace
 
-TEST_CASE("Study round-trips through the single-file format",
+TEST_CASE("Study round-trips through a simulation, in either form",
           "[serialization][fem]") {
-  Document doc = DocWithStudy();
-  fs::path path = TempFile("designer_test_study.json");
-  std::string error;
-  REQUIRE(testio::Save(doc, path.string()));
-  auto loaded = testio::Load(path.string());
-  INFO(error);
-  REQUIRE(loaded != nullptr);
-  CheckStudyMatches(*loaded);
-  fs::remove(path);
+  const fem::SimDocument sim = SimWithStudy();
+  for (const char* form :
+       {"designer_test_study.json", "designer_test_study.lob"}) {
+    INFO(form);
+    const fs::path path = TempFile(form);
+    fs::remove_all(path);
+    REQUIRE(DocumentIO::SaveSimulation(sim, path.string()));
+    auto loaded = DocumentIO::LoadSimulation(path.string());
+    REQUIRE(loaded.has_value());
+    CheckStudyMatches(**loaded);
+    // A freshly allocated id must not collide with the loaded study/load
+    // ids (the high-water mark was restored on load).
+    CHECK((*loaded)->AllocateId() > 5);
+    fs::remove_all(path);
+  }
 }
 
-TEST_CASE("Study round-trips through the directory format",
-          "[serialization][fem]") {
-  Document doc = DocWithStudy();
-  fs::path dir = fs::temp_directory_path() / "designer_test_study.lob";
-  fs::remove_all(dir);
-  std::string error;
-  REQUIRE(testio::Save(doc, dir.string()));
-  CHECK(fs::exists(dir / "studies"));
-  auto loaded = testio::Load(dir.string());
-  INFO(error);
-  REQUIRE(loaded != nullptr);
-  CheckStudyMatches(*loaded);
-  // A freshly allocated id must not collide with the loaded study/load ids
-  // (the high-water mark was restored on load).
-  const fem::Study& s = loaded->GetStudies()[0];
-  uint64_t maxId = s.id;
-  for (const fem::Load& l : s.loads)
-    maxId = std::max(maxId, l.id);
-  CHECK(loaded->AllocateId() > maxId);
-  fs::remove_all(dir);
-}
-
-TEST_CASE("A document with no studies writes no studies key or dir",
+TEST_CASE("A part keeps no studies; an older file's are read for the move",
           "[serialization][fem]") {
   Document doc;
-  doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 1.0, 1.0, 1.0));
-  // Single-file: no "studies" key.
-  fs::path path = TempFile("designer_test_nostudy.json");
-  std::string error;
+  doc.SetParameter("load_n", "1000");
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 10.0,
+                                              4.0, 4.0));
+  const fem::Study study = SimWithStudy().GetStudies()[0];
+  // Single file: no "studies" key; directory: no studies/.
+  const fs::path path = TempFile("designer_test_nostudy.json");
   REQUIRE(testio::Save(doc, path.string()));
-  std::ifstream in(path);
-  const std::string body((std::istreambuf_iterator<char>(in)),
-                         std::istreambuf_iterator<char>());
-  CHECK(body.find("studies") == std::string::npos);
-  fs::remove(path);
-
-  // Directory: no studies/ subdir.
-  fs::path dir = fs::temp_directory_path() / "designer_test_nostudy.lob";
+  nlohmann::json j = ReadJson(path);
+  CHECK_FALSE(j.contains("studies"));
+  const fs::path dir = fs::temp_directory_path() / "designer_test_nostudy.lob";
   fs::remove_all(dir);
   REQUIRE(testio::Save(doc, dir.string()));
   CHECK_FALSE(fs::exists(dir / "studies"));
+  CHECK_FALSE(ReadJson(dir / "index.json").contains("studies"));
+
+  // A file of the version before, as it kept them: read, and kept for the
+  // open to move into a simulation; the ids stay the part's.
+  j["studies"] = {DocumentIO::StudyToJson(study)};
+  j["version"] = j.at("version").get<int>() - 1;
+  std::ofstream(path) << j.dump(2);
+  {
+    auto loaded = testio::Load(path.string());
+    REQUIRE(loaded != nullptr);
+    const fem::OldStudies* old = loaded->OldStudiesRead();
+    REQUIRE(old != nullptr);
+    REQUIRE(old->studies.size() == 1);
+    CheckStudyMatches(old->studies[0]);
+    CHECK(loaded->AllocateId() > 5);
+    // Saved again, it writes none.
+    const fs::path again = TempFile("designer_test_nostudy_again.json");
+    REQUIRE(testio::Save(*loaded, again.string()));
+    CHECK_FALSE(ReadJson(again).contains("studies"));
+    fs::remove(again);
+  }
+  // The same in the directory form, its study a file under studies/.
+  {
+    nlohmann::json index = ReadJson(dir / "index.json");
+    index["studies"] = {study.id};
+    index["version"] = index.at("version").get<int>() - 1;
+    std::ofstream(dir / "index.json") << index.dump(2);
+    fs::create_directories(dir / "studies");
+    std::ofstream(dir / "studies" / "3-static-1.json")
+        << DocumentIO::StudyToJson(study).dump(2);
+    auto loaded = testio::Load(dir.string());
+    REQUIRE(loaded != nullptr);
+    REQUIRE(loaded->OldStudiesRead() != nullptr);
+    REQUIRE(loaded->OldStudiesRead()->studies.size() == 1);
+    CheckStudyMatches(loaded->OldStudiesRead()->studies[0]);
+    // Saved again, the studies/ it had is emptied.
+    REQUIRE(testio::Save(*loaded, dir.string()));
+    CHECK_FALSE(ReadJson(dir / "index.json").contains("studies"));
+    CHECK_FALSE(fs::exists(dir / "studies" / "3-static-1.json"));
+  }
+  fs::remove(path);
   fs::remove_all(dir);
 }
 
 TEST_CASE("Modal analysis type + gravity round-trip (v32)",
           "[serialization][fem]") {
-  Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::dvec3(0, 0, 0), 100.0,
-                                              10.0, 10.0));
-  fem::Study& modal = doc.AddStudy("Modes");
+  fem::SimDocument sim;
+  sim.SetSubject({fem::SubjectKind::Part, 1, 0, "Bar"});
+  fem::Study& modal = sim.AddStudy("Modes");
   modal.type = fem::AnalysisType::Modal;
   modal.numModes = 8;
   modal.meshSize = 5.0;
-  fem::Study& grav = doc.AddStudy("Self weight");
+  fem::Study& grav = sim.AddStudy("Self weight");
   grav.gravity = glm::dvec3(0, 0, -9.81);
   grav.meshSize = 5.0;
 
   fs::path path = TempFile("designer_test_modal.json");
-  std::string error;
-  REQUIRE(testio::Save(doc, path.string()));
+  REQUIRE(DocumentIO::SaveSimulation(sim, path.string()));
   // A static study with no gravity writes none of the new keys (byte-identity).
   {
-    Document plain;
-    plain.AddFeature(
-        std::make_unique<BoxFeature>("B", glm::dvec3(0, 0, 0), 1, 1, 1));
+    fem::SimDocument plain;
+    plain.SetSubject({fem::SubjectKind::Part, 1, 0, "B"});
     plain.AddStudy("S");
     fs::path p2 = TempFile("designer_test_plainstudy.json");
-    REQUIRE(testio::Save(plain, p2.string()));
-    std::ifstream in(p2);
-    const std::string body((std::istreambuf_iterator<char>(in)),
-                           std::istreambuf_iterator<char>());
+    REQUIRE(DocumentIO::SaveSimulation(plain, p2.string()));
+    const nlohmann::json written = ReadJson(p2);
+    const std::string body = written.at("studies").dump();
     CHECK(body.find("analysis") == std::string::npos);
     CHECK(body.find("gravity") == std::string::npos);
     fs::remove(p2);
   }
 
-  auto loaded = testio::Load(path.string());
-  INFO(error);
-  REQUIRE(loaded != nullptr);
-  REQUIRE(loaded->GetStudies().size() == 2);
-  const fem::Study& m = loaded->GetStudies()[0];
+  auto loaded = DocumentIO::LoadSimulation(path.string());
+  REQUIRE(loaded.has_value());
+  REQUIRE((*loaded)->GetStudies().size() == 2);
+  const fem::Study& m = (*loaded)->GetStudies()[0];
   CHECK(m.type == fem::AnalysisType::Modal);
   CHECK(m.numModes == 8);
-  const fem::Study& g = loaded->GetStudies()[1];
+  const fem::Study& g = (*loaded)->GetStudies()[1];
   CHECK(g.type == fem::AnalysisType::Static);
   CHECK(g.gravity.z == -9.81);
   fs::remove(path);

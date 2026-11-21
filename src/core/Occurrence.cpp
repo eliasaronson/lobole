@@ -4,7 +4,7 @@
 #include "core/Occurrence.h"
 #include "core/Angles.h"
 #include "core/MotionStudy.h"
-#include "core/fem/FemSolver.h" // StudyRuntime, StudyRuntimeCache
+#include "core/fem/FemSolver.h" // OldStudies
 
 #include <algorithm>
 #include <cmath>
@@ -365,99 +365,9 @@ const MotionStudy* AssemblyDocument::FindMotionStudyById(uint64_t id) const {
   return nullptr;
 }
 
-// ---- FEM studies (S1) -----------------------------------------------------
-
-const fem::Study* AssemblyDocument::FindStudy(uint64_t id) const {
-  for (const fem::Study& s : m_studies)
-    if (s.id == id)
-      return &s;
-  return nullptr;
-}
-
-fem::Study* AssemblyDocument::FindStudy(uint64_t id) {
-  for (fem::Study& s : m_studies)
-    if (s.id == id)
-      return &s;
-  return nullptr;
-}
-
-fem::Study& AssemblyDocument::AddStudy(const std::string& name) {
-  fem::Study study;
-  study.id = m_nextId++;
-  study.name =
-      name.empty() ? ("Study " + std::to_string(m_studies.size() + 1)) : name;
-  m_studies.push_back(std::move(study));
-  m_version++;
-  return m_studies.back();
-}
-
-bool AssemblyDocument::RemoveStudy(uint64_t id) {
-  const auto it =
-      std::find_if(m_studies.begin(), m_studies.end(),
-                   [id](const fem::Study& s) { return s.id == id; });
-  if (it == m_studies.end())
-    return false;
-  m_studies.erase(it);
-  m_version++;
-  return true;
-}
-
-void AssemblyDocument::RestoreStudy(fem::Study study) {
-  EnsureNextIdAtLeast(study.id + 1);
-  for (const fem::Load& l : study.loads)
-    EnsureNextIdAtLeast(l.id + 1);
-  m_studies.push_back(std::move(study));
-}
-
 struct MotionResultCache {
   std::map<uint64_t, std::shared_ptr<const motion::Result>> byStudy;
 };
-
-const fem::StudyRuntime*
-AssemblyDocument::StudyResults(uint64_t studyId) const {
-  if (!m_studyRuntime)
-    return nullptr;
-  const auto it = m_studyRuntime->byStudy.find(studyId);
-  return it == m_studyRuntime->byStudy.end() ? nullptr : &it->second;
-}
-
-void AssemblyDocument::StoreStudyResults(uint64_t studyId,
-                                         fem::StudyRuntime rt) {
-  if (!m_studyRuntime)
-    m_studyRuntime = std::make_shared<fem::StudyRuntimeCache>();
-  fem::KeepWhatIsRead(rt); // as it is read back and saved
-  m_studyRuntime->byStudy[studyId] = std::move(rt);
-  ++m_studyRuntime->epoch;
-}
-
-uint64_t AssemblyDocument::StudyResultsEpoch() const {
-  return m_studyRuntime ? m_studyRuntime->epoch : 0;
-}
-
-bool AssemblyDocument::StudyResultsStale(
-    uint64_t studyId,
-    const std::function<uint64_t(uint64_t partId)>& partVersion) const {
-  const fem::StudyRuntime* rt = StudyResults(studyId);
-  if (!rt || rt->solvedAtVersion != m_version)
-    return true;
-  for (const auto& [partId, version] : rt->solvedPartVersions)
-    if (!partVersion || partVersion(partId) != version)
-      return true;
-  return false;
-}
-
-bool AssemblyDocument::MarkStudyResultsCurrent(
-    uint64_t studyId, std::vector<std::pair<uint64_t, uint64_t>> partVersions) {
-  if (!m_studyRuntime)
-    return false;
-  const auto it = m_studyRuntime->byStudy.find(studyId);
-  if (it == m_studyRuntime->byStudy.end())
-    return false;
-  it->second.solvedAtVersion = m_version;
-  it->second.solvedPartVersions = std::move(partVersions);
-  ++m_studyRuntime->epoch;
-  return true;
-}
 
 std::shared_ptr<const motion::Result>
 AssemblyDocument::MotionResult(uint64_t studyId) const {

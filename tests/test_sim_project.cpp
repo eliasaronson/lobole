@@ -503,8 +503,9 @@ TEST_CASE("A simulation tab's study runs through the app and lands in it",
 
   // The host on the tab is the simulation.
   const ui::StudyHost host = ui::StudyHostOf(state);
-  REQUIRE(host.IsSimulation());
-  CHECK_FALSE(host.IsAssembly());
+  REQUIRE(host);
+  CHECK(host.sim != nullptr);
+  CHECK_FALSE(host.OnAssembly());
   CHECK(host.Find(studyId) != nullptr);
   CHECK(ui::StudyStale(state, studyId)); // nothing solved yet
 

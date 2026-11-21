@@ -9,7 +9,10 @@
 #include "TestIO.h"
 #include "core/AssemblySolve.h"
 #include "core/Occurrence.h"
+#include "core/fem/FemSolver.h" // OldStudies
+#include "core/fem/SimMigration.h"
 #include "core/io/Serialization.h"
+#include "core/io/SerializeSimulation.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -140,15 +143,18 @@ TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
 // rename (which a save→load round-trip would not catch) fails here.
 // A FROZEN golden for an assembly's own FEM study (v106, S1): participants
 // with roles, a load whose anchor is a CONTACT rather than a face, and a
-// pressure that says whose face it is on.
+// pressure that says whose face it is on. An assembly keeps no studies now:
+// the reader keeps the file's for the open to move into a
+// simulation (fem::SimulationsFromAssembly), which saves them.
 TEST_CASE("Frozen v106 assembly golden carries a study", "[assembly][golden]") {
   const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v106-assembly-study.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc);
-  REQUIRE(asmDoc->GetStudies().size() == 1);
-  const fem::Study& s = asmDoc->GetStudies()[0];
+  REQUIRE(asmDoc->OldStudiesRead() != nullptr);
+  REQUIRE(asmDoc->OldStudiesRead()->studies.size() == 1);
+  const fem::Study& s = asmDoc->OldStudiesRead()->studies[0];
   CHECK(s.id == 3);
   CHECK(s.name == "Upper on lower");
   CHECK(s.meshSize == 12.0);
@@ -170,16 +176,32 @@ TEST_CASE("Frozen v106 assembly golden carries a study", "[assembly][golden]") {
   Occurrence extra;
   extra.partId = 9;
   CHECK(asmDoc->AddOccurrence(extra) == 6);
-  // And it round-trips through the single-file form byte-for-byte on the
-  // study, contact anchor included.
+  // Moved, the study is a simulation's, the participants its roles; and it
+  // round-trips there, contact anchor included. The assembly saved again
+  // keeps none.
+  const auto moved =
+      fem::SimulationsFromAssembly(*asmDoc->OldStudiesRead(), 1, "Rig");
+  REQUIRE(moved.size() == 1);
+  const fs::path simPath =
+      fs::temp_directory_path() / "designer_asm_study_sim.json";
+  REQUIRE(DocumentIO::SaveSimulation(moved[0].sim, simPath.string()));
+  auto sim = DocumentIO::LoadSimulation(simPath.string());
+  REQUIRE(sim.has_value());
+  const fem::Study* back = (*sim)->FindStudy(3);
+  REQUIRE(back != nullptr);
+  CHECK(back->loads[0].contactWith == 1);
+  REQUIRE((*sim)->Roles().size() == 2);
+  CHECK((*sim)->Roles()[0].role == fem::ParticipantRole::Meshed);
+  fs::remove(simPath);
   const fs::path path = fs::temp_directory_path() / "designer_asm_study.json";
   REQUIRE(testio::SaveAssembly(*asmDoc, path.string()));
+  {
+    std::ifstream in(path);
+    CHECK_FALSE(nlohmann::json::parse(in).contains("studies"));
+  }
   auto again = testio::LoadAssembly(path.string());
   REQUIRE(again);
-  REQUIRE(again->GetStudies().size() == 1);
-  CHECK(again->GetStudies()[0].loads[0].contactWith == 1);
-  CHECK(again->GetStudies()[0].participants[0].role ==
-        fem::ParticipantRole::Meshed);
+  CHECK(again->OldStudiesRead() == nullptr);
   fs::remove(path);
 }
 
@@ -192,8 +214,9 @@ TEST_CASE("Frozen v107 assembly golden carries a bonded participant",
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc);
-  REQUIRE(asmDoc->GetStudies().size() == 1);
-  const fem::Study& s = asmDoc->GetStudies()[0];
+  REQUIRE(asmDoc->OldStudiesRead() != nullptr);
+  REQUIRE(asmDoc->OldStudiesRead()->studies.size() == 1);
+  const fem::Study& s = asmDoc->OldStudiesRead()->studies[0];
   REQUIRE(s.participants.size() == 2);
   CHECK(s.participants[1].role == fem::ParticipantRole::Bonded);
   REQUIRE(s.loads.size() == 2);

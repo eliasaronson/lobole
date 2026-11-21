@@ -212,15 +212,6 @@ void AssemblyDocument::VisitExprs(
         visit(owner, ExprSlot(*o.offset, ExprQuantity::Length, at + "offset"));
     }
   }
-  for (size_t i = 0; i < m_studies.size(); i++) {
-    fem::Study& s = m_studies[i];
-    const std::string owner = "study '" + s.name + "'";
-    const std::string at = At("studies", i);
-    s.VisitExprs([&](const ExprSlot& slot) {
-      // The study's own path, under its place in the assembly.
-      visit(owner, slot.WithPath(at + slot.Path()));
-    });
-  }
 }
 
 namespace assembly {

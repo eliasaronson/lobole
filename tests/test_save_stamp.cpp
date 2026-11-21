@@ -18,6 +18,7 @@
 #include "core/Occurrence.h"
 #include "core/cam/JobDocument.h"
 #include "core/drawing/DrawingDocument.h"
+#include "core/fem/SimDocument.h"
 #include "core/io/Autosaver.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
@@ -156,33 +157,42 @@ TEST_CASE("Editing a configuration that is not active is an unsaved change",
   CHECK(ui::ProjectDirty(s.state));
 }
 
-TEST_CASE("Adding, editing and loading a study are unsaved changes",
+// A study lives in a simulation of the part
+// (docs/simulation/README.md#the-simulation-tab): its edits are the
+// simulation's, and leave the part's version alone.
+TEST_CASE("Adding, editing and removing a study are unsaved changes",
           "[savestamp]") {
-  ExpectUnversionedEditDirties("study_add", [](Saved& s) {
-    s.state.commands->Execute(std::make_unique<AddStudyCommand>("S"), s.Doc());
-  });
-
   Saved s("study_edit");
-  s.state.commands->Execute(std::make_unique<AddStudyCommand>("S"), s.Doc());
-  const uint64_t id = s.Doc().GetStudies().front().id;
+  ui::EnsureParts(s.state);
+  std::string why;
+  REQUIRE(ui::OpenSimulationFor(s.state, 0, &why) == 1);
+  CHECK(ui::ProjectDirty(s.state)); // a new document
   s.Save();
-  const uint64_t version = s.Doc().Version();
+  const Document& part = *ui::PartDocById(s.state, s.state.parts[0].id);
+  const uint64_t version = part.Version();
+  const uint64_t id = ui::AddStudyOn(s.state, "S");
+  REQUIRE(id != 0);
+  CHECK(ui::ProjectDirty(s.state));
+  s.Save();
   // The panel's and the RPC's one door for an edit.
   ui::ModifyStudy(s.state, id, "Add load", [&](fem::Study& st) {
     fem::Load load;
-    load.id = s.Doc().AllocateId();
+    load.id = s.state.sim->AllocateId();
     load.type = fem::LoadType::Force;
     st.loads.push_back(load);
   });
-  REQUIRE(s.Doc().FindStudy(id)->loads.size() == 1);
-  CHECK(s.Doc().Version() == version);
+  REQUIRE(s.state.sim->FindStudy(id)->loads.size() == 1);
+  CHECK(part.Version() == version);
   CHECK(ui::ProjectDirty(s.state));
   s.Save();
   ui::ModifyStudy(s.state, id, "Rename",
                   [](fem::Study& st) { st.name = "Renamed"; });
   CHECK(ui::ProjectDirty(s.state));
   s.Save();
-  s.state.commands->Execute(std::make_unique<RemoveStudyCommand>(id), s.Doc());
+  {
+    ui::SimUndoGuard guard(s.state);
+    REQUIRE(s.state.sim->RemoveStudy(id));
+  }
   CHECK(ui::ProjectDirty(s.state));
 }
 
@@ -190,10 +200,12 @@ TEST_CASE("A study run is not an edit", "[savestamp]") {
   // StudyForRun is how a solve writes the study's transient fields (its
   // error): reading or running a saved project must not make it unsaved.
   Saved s("study_run");
-  s.state.commands->Execute(std::make_unique<AddStudyCommand>("S"), s.Doc());
-  const uint64_t id = s.Doc().GetStudies().front().id;
+  ui::EnsureParts(s.state);
+  std::string why;
+  REQUIRE(ui::OpenSimulationFor(s.state, 0, &why) == 1);
+  const uint64_t id = ui::AddStudyOn(s.state, "S");
   s.Save();
-  s.Doc().StudyForRun(id)->error = "no fixed support";
+  s.state.sim->StudyForRun(id)->error = "no fixed support";
   CHECK_FALSE(ui::ProjectDirty(s.state));
 }
 

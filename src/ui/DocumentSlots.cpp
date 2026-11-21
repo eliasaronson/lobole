@@ -4,6 +4,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/DerivedActions.h" // RefreshLinks (the tab gate)
 #include "ui/DrawingActions.h"
+#include "ui/MotionActions.h" // AdoptSavedMotionResults
 #include "ui/RendererSync.h"
 #include "ui/ViewActions.h"
 
@@ -181,9 +182,6 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
                            &cells, {});
   }
   state.document->Regenerate();
-  // The regeneration moved the version its saved results were stamped at:
-  // those whose inputs still hash the same read current again.
-  fem::RestampByInputs(*state.document);
   state.selection.Clear();
   state.pendingFeatureId = 0;
   state.pendingCompanionId = 0;
@@ -1248,9 +1246,9 @@ void SetActivePart(AppState& state, size_t index) {
   // edits without an explicit solve_assembly.
   if (state.assembly && AssemblyPartsStale(state))
     SolveActiveAssembly(state);
-  // An assembly's saved results, read current or stale by their inputs.
+  // An assembly's saved motion results are the ones MotionResultFor answers.
   if (state.assembly)
-    AdoptStoredResults(state);
+    AdoptSavedMotionResults(state);
   // A drawing projects on the FIRST view of the tab (design §2), off the
   // frame (docs/drawings/README.md#projection-off-the-frame); views a job
   // landed while the tab was stashed are assembled now.

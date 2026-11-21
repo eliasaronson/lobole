@@ -16,11 +16,13 @@
 #include "core/cam/CamOpFields.h"
 #include "core/cam/JobDocument.h"
 #include "core/drawing/DrawingDocument.h"
+#include "core/fem/SimDocument.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActionsInternal.h" // SlotDoc, SlotJob
 #include "ui/AppState.h"
 #include "ui/DocumentSlots.h"
 #include "ui/LiteralActions.h"
+#include "ui/SimRunActions.h" // SimulationSlotFor, SimBySlotId
 #include "ui/VariableActions.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -154,11 +156,13 @@ TEST_CASE("Rename and delete reach a part, an assembly, a job, a drawing and "
       std::make_unique<BoxFeature>("Plate", glm::dvec3(0.0), 10.0, 10.0, 10.0);
   box->height.expr = "gap * 2";
   part.AddFeature(std::move(box));
-  // ...a study of the part...
-  fem::Study& st = part.AddStudy("Load case");
+  // ...a study of the part, in a simulation of it...
+  fem::SimDocument* sim = ui::SimBySlotId(
+      r.state, ui::SimulationSlotFor(r.state, r.state.parts[0].id, true));
+  REQUIRE(sim != nullptr);
   fem::Load l;
   l.magnitude.expr = "gap * 100";
-  st.loads.push_back(l);
+  sim->AddStudy("Load case").loads.push_back(l);
   // ...an assembly's mate...
   const size_t asmSlot = ui::AddAssembly(r.state, "Box");
   AssemblyDocument& a = *ui::SlotAssembly(r.state, asmSlot);
@@ -183,7 +187,7 @@ TEST_CASE("Rename and delete reach a part, an assembly, a job, a drawing and "
     return std::find(refs.begin(), refs.end(), s) != refs.end();
   };
   CHECK(has("Part 1: feature 'Plate'"));
-  CHECK(has("Part 1: study 'Load case'"));
+  CHECK(has("Part 1 simulation: study 'Load case'"));
   CHECK(has("Box: mate 'Hinge'"));
   CHECK(has("Job: tool T1 in setup 'Top'"));
   CHECK(has("Sheet: view 'Front'"));
@@ -194,14 +198,14 @@ TEST_CASE("Rename and delete reach a part, an assembly, a job, a drawing and "
         "clearance / 6");
   CHECK(ui::SlotAssembly(r.state, asmSlot)->FindMateById(hinge)->offset.expr ==
         "clearance");
-  CHECK(
-      ui::SlotDoc(r.state, 0)->GetStudies().at(0).loads.at(0).magnitude.expr ==
-      "clearance * 100");
+  CHECK(sim->GetStudies().at(0).loads.at(0).magnitude.expr ==
+        "clearance * 100");
   // Undo puts every one back.
   REQUIRE(ui::UndoProjectVars(r.state));
   CHECK(r.Tool().diameter.expr == "gap * 2");
   CHECK(ui::SlotDrawing(r.state, dwgSlot)->GetViews()[0].scale.expr ==
         "gap / 6");
+  CHECK(sim->GetStudies().at(0).loads.at(0).magnitude.expr == "gap * 100");
 }
 
 // ---- The probe: nothing new arrives unbindable ------------------------------

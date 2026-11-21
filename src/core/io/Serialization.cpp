@@ -701,37 +701,11 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
     // The app creates and commits the project's repo itself (GitVault), so it
     // is the app's job to say how the blob should be treated there.
     WriteRepositoryHints(dirPath, doc.CommitGeometry());
-    // FEM studies (v29): file-per-study under studies/, id list in the index.
-    // Both the key and the directory stay absent when there are no studies, so
-    // a pre-v29 document re-saves byte-identically (the exploded-views v27
-    // discipline). Each result is written beside its study (topology v33,
-    // static and modal v153), with the input hash that produced it.
-    // A collection emptied since the last save is pruned too: a file left
-    // behind is one the next load reports dropping.
+    // A part keeps no studies: they live in simulation documents.
+    // The studies/ of a part saved before is emptied on the next save, its
+    // studies having moved into a simulation on open.
     const fs::path studyDir = dir / "studies";
     std::set<std::string> wantedStudies;
-    if (!doc.GetStudies().empty()) {
-      fs::create_directories(studyDir);
-      index["studies"] = json::array();
-      for (const fem::Study& s : doc.GetStudies()) {
-        const std::string base =
-            std::to_string(IdForFile(s.id, "study", s.name)) + "-" +
-            LabelSlug(s.name);
-        const std::string file = base + ".json";
-        if (!WriteTextAtomic(studyDir / file, StudyToJson(s).dump(2) + "\n",
-                             error))
-          return false;
-        index["studies"].push_back(s.id);
-        wantedStudies.insert(file);
-        // Its result (topology v33, every kind v153).
-        const fem::StudyRuntime* rt = doc.StudyResults(s.id);
-        json resultJson;
-        if (rt && StudyResultToJson(*rt, resultJson) &&
-            !WriteResultFiles(studyDir, base, std::move(resultJson),
-                              wantedStudies, error))
-          return false;
-      }
-    }
     PruneCollection(studyDir, wantedStudies);
     // Configurations (v31): file-per-config under configurations/, id list in
     // the index (the active id is in the envelope). Absent when none, so a
@@ -1146,6 +1120,21 @@ decltype(auto) ReadItem(const fs::path& dir, uint64_t id,
 
 namespace {
 
+// An old file's studies kept on its document for the open to move
+// (TakeOldStudies), when it had any; their ids stay the document's, so
+// nothing made after takes one a requirement names.
+template <class D>
+void KeepOldStudies(D& doc, std::shared_ptr<fem::OldStudies> old) {
+  if (old == nullptr || old->studies.empty())
+    return;
+  for (const fem::Study& st : old->studies) {
+    doc.EnsureNextIdAtLeast(st.id + 1);
+    for (const fem::Load& l : st.loads)
+      doc.EnsureNextIdAtLeast(l.id + 1);
+  }
+  doc.SetOldStudies(std::move(old));
+}
+
 // What a part's envelope may hold, in either form; the single file adds its
 // inline collections and `assets`. Anything else is refused, naming the
 // key: a key this build does not know was written by something that meant
@@ -1329,30 +1318,26 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
                       std::vector<unsigned char>(data.begin(), data.end()));
       });
     }
-    // Study results (v33, v153) loaded below but stored after the final
-    // regen.
-    std::vector<std::pair<uint64_t, fem::StudyRuntime>> pendingResults;
-    // FEM studies (v29): id-prefix files under studies/, index order. A pre-v29
-    // document has no `studies` key ⇒ the loop is empty.
+    // FEM studies (v29 on, as old files kept them): id-prefix files under
+    // studies/, index order, each result (v33, v153) beside its study. Kept as
+    // read for the open to move into a simulation (Document::TakeOldStudies).
+    auto old = std::make_shared<fem::OldStudies>();
     {
       Collection studies = ScanCollection(dir, "studies", "study", ".result");
       for (const auto& [id, rel] :
            ListedFiles(index, "studies", studies, "study")) {
-        doc->RestoreStudy(ReadItem(
+        old->studies.push_back(ReadItem(
             dir, id, rel, [](const json& j) { return StudyFromJson(j); }));
-        // A persisted result loads into the transient runtime cache.
-        // Defer storing it until after the final regeneration below so it can
-        // be stamped with the settled document version (else the rollback /
-        // active-config regen would leave it spuriously stale).
         const auto rit = studies.derived.find(id);
         if (rit == studies.derived.end())
           continue;
         if (auto rj = ReadResultFiles(dir, rit->second))
           if (auto rt = ReadDerived<fem::StudyRuntime>(
                   rit->second, [&] { return StudyResultFromJson(*rj); }))
-            pendingResults.emplace_back(id, std::move(*rt));
+            old->results.emplace(id, std::move(*rt));
       }
     }
+    KeepOldStudies(*doc, std::move(old));
     // Configurations (v31): id-prefix files under configurations/, index order.
     {
       Collection configs =
@@ -1374,27 +1359,6 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // regeneration which decides whether they still describe the recipe.
     LoadGeometry(*doc, dirPath);
     bulk.reset(); // the one regeneration for everything loaded above
-    // Now that regeneration has settled, stamp the persisted results with
-    // the final version so they read as current (v33).
-    // A result whose saved input hash no longer matches what the reopened
-    // part would hand a run was saved stale, or the part moved under it: it
-    // reads stale, and is not reused (v148). All are stored before any is
-    // checked: a shape study's inputs include its topology result's.
-    std::vector<std::pair<uint64_t, uint64_t>> hashed;
-    for (auto& [id, rt] : pendingResults) {
-      rt.solvedAtVersion = doc->Version();
-      if (rt.inputHash != 0)
-        hashed.emplace_back(id, rt.inputHash);
-      doc->StoreStudyResults(id, std::move(rt));
-    }
-    for (const auto& [id, hash] : hashed) {
-      const fem::Study* st = doc->FindStudy(id);
-      if (st == nullptr || fem::StudyInputKey(*doc, *st) != hash) {
-        fem::StudyRuntime rt = *doc->StudyResults(id);
-        rt.solvedAtVersion = UINT64_MAX; // no version reaches it
-        doc->StoreStudyResults(id, std::move(rt));
-      }
-    }
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
              dirPath);
     return doc;
@@ -1557,30 +1521,10 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     }
     PruneCollection(motionDir, wantedMotion);
 
-    // FEM studies (v106) mirror the part's: file-per-study under studies/,
-    // absent when none, each result beside its study (v153).
+    // An assembly keeps no studies; the studies/ of one saved
+    // before is emptied, as a part's is.
     const fs::path asmStudyDir = dir / "studies";
-    if (!asmDoc.GetStudies().empty()) {
-      index["studies"] = json::array();
-      fs::create_directories(asmStudyDir);
-    }
     std::set<std::string> wantedStudies;
-    for (const fem::Study& s : asmDoc.GetStudies()) {
-      const std::string file =
-          std::to_string(IdForFile(s.id, "study", s.name)) + "-" +
-          LabelSlug(s.name) + ".json";
-      if (!WriteTextAtomic(asmStudyDir / file, StudyToJson(s).dump(2) + "\n",
-                           error))
-        return false;
-      index["studies"].push_back(s.id);
-      wantedStudies.insert(file);
-      json resultJson;
-      if (const fem::StudyRuntime* rt = asmDoc.StudyResults(s.id);
-          rt != nullptr && StudyResultToJson(*rt, resultJson) &&
-          !WriteResultFiles(asmStudyDir, file.substr(0, file.size() - 5),
-                            std::move(resultJson), wantedStudies, error))
-        return false;
-    }
     PruneCollection(asmStudyDir, wantedStudies);
 
     // The sequence (v187): in the index, absent when it has no steps.
@@ -1749,24 +1693,23 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       }
     }
     asmDoc->EnsureNextIdAtLeast(maxId + 1);
-    // FEM studies (v106); a result (v153) beside its study, stale until the
-    // app, which can resolve the parts the input hash reads, finds it
-    // current (ui::AdoptStoredResults).
+    // FEM studies (v106 on, as old files kept them), a result (v153) beside
+    // each: kept as read for the open to move into simulations.
     {
+      auto old = std::make_shared<fem::OldStudies>();
       Collection c = ScanCollection(dir, "studies", "study", ".result");
       for (const auto& [id, rel] : ListedFiles(index, "studies", c, "study")) {
-        asmDoc->RestoreStudy(ReadItem(
+        old->studies.push_back(ReadItem(
             dir, id, rel, [](const json& j) { return StudyFromJson(j); }));
         const auto rit = c.derived.find(id);
         if (rit == c.derived.end())
           continue;
         if (auto rj = ReadResultFiles(dir, rit->second))
           if (auto rt = ReadDerived<fem::StudyRuntime>(
-                  rit->second, [&] { return StudyResultFromJson(*rj); })) {
-            rt->solvedAtVersion = UINT64_MAX;
-            asmDoc->StoreStudyResults(id, std::move(*rt));
-          }
+                  rit->second, [&] { return StudyResultFromJson(*rj); }))
+            old->results.emplace(id, std::move(*rt));
       }
+      KeepOldStudies(*asmDoc, std::move(old));
     }
     // Configurations (v31).
     convertAll("configurations", "configurations", "configuration",
@@ -1807,13 +1750,6 @@ static bool SaveImpl(const Document& doc, const std::string& path,
     j["features"] = json::array();
     for (const auto& feature : doc.GetFeatures()) {
       j["features"].push_back(FeatureToJson(*feature));
-    }
-    // FEM studies (v29), inline here (unlike the dir format's studies/ files);
-    // absent when none so pre-v29 files stay byte-identical.
-    if (!doc.GetStudies().empty()) {
-      j["studies"] = json::array();
-      for (const fem::Study& s : doc.GetStudies())
-        j["studies"].push_back(StudyToJson(s));
     }
     // Configurations (v31), inline (the active id is in the envelope above).
     if (!doc.GetConfigurations().empty()) {
@@ -1982,10 +1918,14 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
                                  "a save does not keep it",
                                  false);
           }
-          const json studies = InlineList(j, "studies"); // v29
+          // FEM studies (v29 on, as old files kept them), kept for the open to
+          // move.
+          const json studies = InlineList(j, "studies");
+          auto old = std::make_shared<fem::OldStudies>();
           for (size_t i = 0; i < studies.size(); i++)
-            doc->RestoreStudy(AtItem(
+            old->studies.push_back(AtItem(
                 "studies", i, [&] { return StudyFromJson(studies[i]); }));
+          KeepOldStudies(*doc, std::move(old));
           const json configs = InlineList(j, "configurations"); // v31
           for (size_t i = 0; i < configs.size(); i++)
             doc->RestoreConfiguration(AtItem("configurations", i, [&] {
@@ -2036,11 +1976,6 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
       j["motion"] = json::array();
       for (const MotionStudy& s : asmDoc.GetMotionStudies())
         j["motion"].push_back(MotionStudyToJson(s));
-    }
-    if (!asmDoc.GetStudies().empty()) { // absent when none (v106)
-      j["studies"] = json::array();
-      for (const fem::Study& s : asmDoc.GetStudies())
-        j["studies"].push_back(StudyToJson(s));
     }
     if (!asmDoc.GetAssertions().empty()) { // absent when none (v97)
       j["assertions"] = json::array();
@@ -2122,8 +2057,13 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
             maxId = std::max(maxId, s.id);
             asmDoc->GetMotionStudies().push_back(std::move(s));
           });
-          each("studies",
-               [&](const json& x) { asmDoc->RestoreStudy(StudyFromJson(x)); });
+          // FEM studies (v106 on, as old files kept them), kept for the open to
+          // move.
+          auto old = std::make_shared<fem::OldStudies>();
+          each("studies", [&](const json& x) {
+            old->studies.push_back(StudyFromJson(x));
+          });
+          KeepOldStudies(*asmDoc, std::move(old));
           each("assertions", [&](const json& x) {
             ClearanceAssertion a = ClearanceAssertionFromJson(x);
             maxId = std::max(maxId, a.id);

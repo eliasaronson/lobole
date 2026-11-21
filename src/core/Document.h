@@ -125,7 +125,7 @@ class Document {
 public:
   Document() = default;
   // Deep copy: every feature is cloned (Feature::Clone), and so is everything
-  // else the document IS — parameters, studies, CAM setups, configurations,
+  // else the document IS — parameters, CAM setups, configurations,
   // assets, units, rollback. What it merely CACHED (bodies, baked geometry,
   // the regen cache) is not copied; this copy regenerates itself, so the cost
   // of duplicating a heavy part is one full rebuild — which is exactly what
@@ -294,13 +294,13 @@ public:
                        std::vector<std::string>* outReferences = nullptr);
 
   // Renames a parameter and rewrites every expression referencing it (other
-  // parameters, feature and study fields, configuration overrides -- the
+  // parameters, feature fields, configuration overrides -- the
   // name each overrides too), so references never dangle silently.
   // Returns false if oldName is absent or newName is invalid/taken.
   bool RenameParameter(const std::string& oldName, const std::string& newName);
 
   // Everything that references `name`, as human-readable labels ("parameter
-  // 'depth'", "feature 'Extrude 1'", "study 'Bracket'"). Backs delete
+  // 'depth'", "feature 'Extrude 1'"). Backs delete
   // refusal and UI hints. Non-const because it walks VisitExprs (read-only
   // here).
   std::vector<std::string> FindParameterReferences(const std::string& name);
@@ -309,8 +309,8 @@ public:
   const std::vector<DocumentExprProblem>& ExprProblems() const {
     return m_exprProblems;
   }
-  // Every bound expression text of the features and the studies, with who
-  // holds it ("feature 'Boss'", "study 'Bracket'"), read-only: what a
+  // Every bound expression text of the features, with who
+  // holds it ("feature 'Boss'"), read-only: what a
   // reference search outside the document (a table's) walks.
   void
   ForEachExprText(const std::function<void(const std::string& owner,
@@ -367,7 +367,7 @@ public:
   }
 
   // Rewrites references to `oldName` into `newName` in this document's feature
-  // and study expressions, its local-parameter expressions and its
+  // expressions, its local-parameter expressions and its
   // configurations' overrides (the name each overrides, and the texts),
   // WITHOUT renaming any local
   // parameter DECLARATION (the declaration lives in the project scope). Backs a
@@ -378,70 +378,25 @@ public:
   bool RewriteProjectVarRefs(const std::string& oldName,
                              const std::string& newName);
 
-  // ---- Studies (FEM) ----------------------------------------------------
-  // Document-level analysis definitions, a sibling to the parameter table.
-  // A study consumes the finished bodies and produces no geometry, so it is
-  // not a Feature and does not participate in regeneration. Mesh and results
-  // are derived data held elsewhere (StudyResults, saved beside the study
-  // with the input hash that produced them). Edits do NOT auto-regenerate (a
-  // study is inert until explicitly meshed/solved).
-
   // CAM setups (v58, docs/cam/README.md#invariants). Document-level objects
   // like studies: they describe how to cut the model, and change nothing about
   // it — so they are deliberately OUTSIDE the regen chain hash (a new setup
   // must not rebuild the geometry).
 
-  // Read-only on purpose: a study is saved and does not move Version(), so an
-  // edit through a mutable reference would never reach SaveStamp(). Edit one
-  // with ReplaceStudy.
-  const std::vector<fem::Study>& GetStudies() const { return m_studies; }
-  const fem::Study* FindStudy(uint64_t id) const;
-  // Write access for a RUN, not an edit: meshing and solving refresh a
-  // study's transient fields (its error, its evaluated expressions), and a
-  // load drag previews on it until its ModifyStudyCommand lands. None of that
-  // is a saved change, so this does not stamp.
-  fem::Study* StudyForRun(uint64_t id);
-
-  // Appends a new study with a document-unique id and returns it. `name`
-  // empty means an auto-generated "Study N".
-  fem::Study& AddStudy(const std::string& name = "");
-  // Removes the study with `id`; returns false if absent.
-  bool RemoveStudy(uint64_t id);
-
-  // Appends a fully-formed study (keeping its ids) and raises the id
-  // high-water mark past the study and all its loads. For deserialization.
-  void RestoreStudy(fem::Study study);
-
-  // Replaces the study with `study.id` in place (preserving list order),
-  // raising the id high-water mark past its loads. Returns false if absent.
-  // Backs the study modify Command.
-  bool ReplaceStudy(fem::Study study);
-
-  // The mesh+results cache for a study, or nullptr if it has never been run.
-  // Derived data, saved with the project and read back on load (v153;
-  // docs/simulation/README.md#studies-as-jobs); stale when its
-  // solvedAtVersion differs from Version(). Mutable so const RPC reads can
-  // populate/query it.
-  const fem::StudyRuntime* StudyResults(uint64_t studyId) const {
-    auto it = m_studyRuntime.find(studyId);
-    return it == m_studyRuntime.end() ? nullptr : &it->second;
+  // ---- Studies an old file held ------------------------------------------
+  // A part has no studies: they live in simulation documents
+  // (docs/simulation/README.md#the-simulation-document-core). A part saved
+  // before they moved carries them in its file; the reader keeps them here,
+  // as read, for the open to move into a simulation
+  // (docs/simulation/README.md#moving-studies-into-a-simulation). Nothing
+  // else reads them, nothing writes them, and a copy does not carry them.
+  const fem::OldStudies* OldStudiesRead() const { return m_oldStudies.get(); }
+  void SetOldStudies(std::shared_ptr<fem::OldStudies> studies) {
+    m_oldStudies = std::move(studies);
   }
-  // Kept as it is read back and saved (fem::KeepWhatIsRead).
-  void StoreStudyResults(uint64_t studyId, fem::StudyRuntime rt) {
-    fem::KeepWhatIsRead(rt);
-    m_studyRuntime[studyId] = std::move(rt);
-    ++m_studyResultsEpoch;
+  std::shared_ptr<fem::OldStudies> TakeOldStudies() {
+    return std::exchange(m_oldStudies, nullptr);
   }
-  // Monotonic counter bumped on every StoreStudyResults; lets the field
-  // overlay detect a re-solve (study edits don't bump Version()).
-  uint64_t StudyResultsEpoch() const { return m_studyResultsEpoch; }
-  // Stale when solved at another version, and a static study of a topology
-  // result (fem::ShapeSource) also when that result is stale, gone, or no
-  // longer the one it was cut from.
-  bool StudyResultsStale(uint64_t studyId) const;
-  // Stamps a stored result as solved at this version: one whose inputs hash
-  // as they did when it was made (fem::RestampByInputs). False when absent.
-  bool MarkStudyResultsCurrent(uint64_t studyId);
 
   // ---- Tolerances (docs/tolerances/README.md) ------------------------------
   // Permitted variation of measured features, keyed by element. Like studies
@@ -875,9 +830,9 @@ public:
   int OwnerIndex(uint64_t id) const;
 
 private:
-  // Every expression slot of the features, the studies, the sheet-metal and
+  // Every expression slot of the features, the sheet-metal and
   // tube rules and the tolerances, with who holds it: "feature 'Boss'",
-  // "study 'Bracket'", "sheet-metal rules", "tolerance 12". The one walk
+  // "sheet-metal rules", "tolerance 12". The one walk
   // rename and the delete refusal read
   // (docs/variables/README.md#numbers-that-are-expressions).
   void VisitDocumentExprs(const std::function<void(const std::string& owner,
@@ -920,10 +875,7 @@ private:
   std::vector<tmpl::Template> m_templates;
   std::vector<Parameter> m_parameters;
   std::vector<Tolerance> m_tolerances;
-  std::vector<fem::Study> m_studies;
-  // Per-study mesh+results (StudyResults); keyed by study id.
-  std::map<uint64_t, fem::StudyRuntime> m_studyRuntime;
-  uint64_t m_studyResultsEpoch = 0;
+  std::shared_ptr<fem::OldStudies> m_oldStudies; // TakeOldStudies
   static uint64_t NextInstanceId();
 
   std::vector<Configuration> m_configurations;

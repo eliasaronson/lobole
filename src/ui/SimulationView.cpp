@@ -48,19 +48,6 @@ uint64_t Bits(double v) {
   return b;
 }
 
-// What an assembly study's mesh also depends on: the assembly and the
-// parts it reads (a load edit moves the assembly's version too, so on an
-// assembly any study edit marks the mesh; the simulation document's own
-// mesh hash ends that).
-std::string AssemblyMeshKey(AppState& state, const AssemblyDocument& asmDoc,
-                            const fem::Study& s) {
-  std::string key = "|asm " + std::to_string(asmDoc.Version());
-  for (const auto& [partId, version] :
-       AssemblyStudyPartVersions(state, asmDoc, s))
-    key += "|" + std::to_string(partId) + ":" + std::to_string(version);
-  return key;
-}
-
 // The material of a solved body: a part's body by index, an assembly's
 // meshed occurrence's placed body by index.
 const CADMaterials::MaterialProperties& MaterialOfBody(AppState& state,
@@ -76,14 +63,10 @@ const CADMaterials::MaterialProperties& MaterialOfBody(AppState& state,
     for (const fem::Participant& pt : host.Roles(s))
       if (pt.role == fem::ParticipantRole::Meshed) {
         std::vector<Body> bodies;
-        if (host.sim) {
-          const std::vector<Body>& flat = SimSubjectBodies(state);
-          for (size_t i = 0; i < flat.size(); i++)
-            if (SimBodyOccurrence(state, i) == pt.occurrenceId)
-              bodies.push_back(flat[i]);
-        } else {
-          bodies = OccurrenceSubtreeBodies(state, pt.occurrenceId);
-        }
+        const std::vector<Body>& flat = SimSubjectBodies(state);
+        for (size_t i = 0; i < flat.size(); i++)
+          if (SimBodyOccurrence(state, i) == pt.occurrenceId)
+            bodies.push_back(flat[i]);
         if (bodyIndex >= 0 && bodyIndex < static_cast<int>(bodies.size()))
           slug = bodies[bodyIndex].material;
       }
@@ -129,12 +112,7 @@ const MeshReport* StudyMesh(const AppState& state, uint64_t studyId) {
 
 std::string StudyMeshKeyNow(AppState& state, const StudyHost& host,
                             const fem::Study& s) {
-  if (host.sim)
-    return SimMeshKeyNow(state, *host.sim, s);
-  std::string key = MeshSettingsKey(s);
-  if (host.IsAssembly())
-    key += AssemblyMeshKey(state, *host.asmDoc, s);
-  return key;
+  return host.sim ? SimMeshKeyNow(state, *host.sim, s) : MeshSettingsKey(s);
 }
 
 bool StudyMeshStale(const AppState& constState, uint64_t studyId) {
@@ -144,8 +122,6 @@ bool StudyMeshStale(const AppState& constState, uint64_t studyId) {
   const fem::Study* s = host ? host.Find(studyId) : nullptr;
   if (!mr || !s)
     return false;
-  if (host.part && host.part->Version() != mr->docVersion)
-    return true;
   return StudyMeshKeyNow(state, host, *s) != mr->settingsKey;
 }
 
@@ -183,37 +159,7 @@ bool MeshStudyNow(AppState& state, uint64_t studyId, std::string* error) {
   };
   if (!s)
     return fail("no such study");
-  if (host.sim)
-    return MeshSimStudyNow(state, host.simSlotId, studyId, error);
-  const auto started = std::chrono::steady_clock::now();
-  std::vector<fem::StudyBodyMesh> meshes;
-  std::vector<fem::MeshBodyReport> reports;
-  std::string err;
-  if (host.IsAssembly()) {
-    if (!MeshAssemblyStudyWithReports(state, *host.asmDoc, studyId, meshes,
-                                      reports, &err))
-      return fail(err);
-  } else {
-    fem::MeshPlan plan;
-    if (!fem::PlanStudyMesh(*host.part, *s, plan, &err))
-      return fail(err);
-    if (!fem::MeshPlanned(plan, meshes, &err)) {
-      s->error = err;
-      return fail(err);
-    }
-    for (size_t i = 0; i < meshes.size() && i < plan.bodies.size(); ++i)
-      reports.push_back(
-          fem::ReportMesh(meshes[i].mesh, plan.bodies[i].settings,
-                          fem::AutoMeshSize(plan.bodies[i].shape)));
-  }
-  MeshReport report = MakeMeshReport(std::move(meshes), std::move(reports));
-  report.seconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
-          .count();
-  report.docVersion = host.Version();
-  report.settingsKey = StudyMeshKeyNow(state, host, *s);
-  KeepStudyMesh(state, ActiveSlotId(state), studyId, std::move(report));
-  return true;
+  return MeshSimStudyNow(state, host.simSlotId, studyId, error);
 }
 
 std::string MeshFaceName(const AppState& state, const MeshReport::Body& body,
@@ -569,10 +515,6 @@ std::string KindRefusal(const StudyHost& host, const fem::Study& s,
   if (s.type == fem::AnalysisType::Thermal && field != F::Temperature &&
       field != F::HeatFlux)
     return "a thermal study shows temperature or heat_flux";
-  if ((field == F::AcrossLayers || field == F::InterlayerFactor) &&
-      host.IsAssembly())
-    return "the stress across layers is a part study's: an assembly's parts "
-           "are each printed their own way";
   return "";
 }
 
@@ -861,93 +803,11 @@ bool ExportStudyResultVtu(AppState& state, uint64_t studyId,
 
 std::vector<fem::StudyProblem> CheckStudyNow(AppState& state, uint64_t studyId,
                                              bool thorough) {
-  std::vector<fem::StudyProblem> out;
+  (void)thorough; // a simulation's check plans every time
   const StudyHost host = StudyHostOf(state);
-  const fem::Study* s = host ? host.Find(studyId) : nullptr;
-  if (!s)
-    return out;
-  if (host.sim)
-    return CheckSimStudyNow(state, host.simSlotId, studyId);
-  const MeshReport* mr = StudyMesh(state, studyId);
-  const bool stale = mr != nullptr && StudyMeshStale(state, studyId);
-  if (host.part) {
-    std::vector<fem::CheckMesh> meshes;
-    if (mr && !stale)
-      for (const MeshReport::Body& b : mr->bodies)
-        meshes.push_back({b.bodyIndex, b.mesh.get()});
-    out = fem::CheckStudy(*host.part, *s, meshes.empty() ? nullptr : &meshes,
-                          thorough);
-  } else {
-    if (s->loads.empty()) {
-      fem::StudyProblem p;
-      p.code = "no_loads";
-      p.message = "the study has no loads or supports";
-      p.fixMethod = "add_load";
-      p.fixParams = {{"study", s->id},
-                     {"type", "fixed"},
-                     {"face", nullptr},
-                     {"occurrence", nullptr}};
-      p.fixNote = "face and occurrence: the face that is held and whose it "
-                  "is; or contact_with a rigid participant";
-      out.push_back(std::move(p));
-    } else {
-      fem::Study copy = *s;
-      fem::StudyPlan plan;
-      std::string err;
-      bool refused = false;
-      if (copy.type == fem::AnalysisType::Topology) {
-        err = "topology optimisation is a part study";
-        refused = true;
-      } else if (!thorough && state.simulation.IsActive() &&
-                 state.simulation.activeStudyId == studyId) {
-        // The plan the viewport's contact patches were made from, cached
-        // against the same things (SimulationContacts): the imprint is a
-        // boolean, and the panel does not run it twice.
-        SimulationContacts(state);
-        err = state.simulation.contactError;
-        refused = !err.empty();
-      } else {
-        refused = !fem::PlanAssemblyStudy(
-            *host.asmDoc, copy, AssemblyStudyContextFor(state), plan, &err);
-      }
-      if (refused) {
-        fem::StudyProblem p;
-        p.code = "plan";
-        p.message = err;
-        out.push_back(std::move(p));
-      }
-    }
-  }
-  if (stale) {
-    fem::StudyProblem p;
-    p.code = "stale_mesh";
-    p.message = "the mesh on show was made before the geometry or the mesh "
-                "settings changed: a run meshes again, and what is drawn is "
-                "not what it will solve";
-    p.fixMethod = "mesh_study";
-    p.fixParams = {{"id", s->id}};
-    out.push_back(std::move(p));
-  }
-  if (fem::EffectiveSolver(*s) == fem::Solver::Calculix) {
-    fem::SolveOptions options;
-    std::string err;
-    if (!CalculixRunFor(state, *s, 0.0, options, &err)) {
-      fem::StudyProblem p;
-      p.code = "solver";
-      p.message = err;
-      if (s->solver == fem::Solver::Calculix && !s->nonlinear.On() &&
-          !fem::HasContact(*s)) {
-        p.fixMethod = "set_study";
-        p.fixParams = {{"id", s->id}, {"solver", "in_house"}};
-        p.fixNote = "or install CalculiX as the message says";
-      } else {
-        p.fixNote = "install CalculiX as the message says: this study has "
-                    "no in-house solver";
-      }
-      out.push_back(std::move(p));
-    }
-  }
-  return out;
+  if (!host || host.Find(studyId) == nullptr)
+    return {};
+  return CheckSimStudyNow(state, host.simSlotId, studyId);
 }
 
 const StudyCheck& CachedStudyCheck(AppState& state, uint64_t studyId) {
@@ -959,10 +819,9 @@ const StudyCheck& CachedStudyCheck(AppState& state, uint64_t studyId) {
   uint64_t key = std::hash<std::string>{}(DocumentIO::StudyToJson(*s).dump());
   key = Mix(key, host.Version());
   key = Mix(key, studyId);
-  if (host.IsAssembly())
-    for (const auto& [partId, version] :
-         AssemblyStudyPartVersions(state, *host.asmDoc, *s))
-      key = Mix(Mix(key, partId), version);
+  // The subject as it is now: an edit to the part (or the assembly) the
+  // check reads moves it.
+  key = Mix(key, SimStampOf(state, host.sim->Subject().docId));
   if (const MeshReport* mr = StudyMesh(state, studyId))
     key = Mix(key, mr->epoch * 2 + (StudyMeshStale(state, studyId) ? 1 : 0));
   key |= 1ull;

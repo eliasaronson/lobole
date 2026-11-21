@@ -33,13 +33,16 @@
 // See docs/architecture.md#the-ui-actions-layer.
 
 #include "core/cam/CamToolpath.h"
+#include "core/fem/SimDocument.h"
 #include "render/Camera.h"
+#include "study_fixtures.h"
 #include "ui/CreateActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/DrawingJob.h"
 #include "ui/PrimitiveTool.h" // SnapPrimitiveAxis
 #include "ui/ProjectActions.h"
+#include "ui/SimRunActions.h"
 #include "ui/SketchInteraction.h" // WorldToScreen
 #include "ui/StudyPanel.h"        // SimulationLoadLabel
 #include "ui/ViewActions.h"
@@ -2861,13 +2864,13 @@ TEST_CASE("a cancelled clone keeps what it cloned and does not open it",
 // job is exactly that build.
 #ifdef HAVE_NETGEN
 
-TEST_CASE("a study solved on the registry lands in its own part, not the "
-          "active tab",
+TEST_CASE("a study solved on the registry lands in its own simulation, not "
+          "the active tab",
           "[actions][jobs][fem]") {
   // A3 phase 3. The FEM polls used to take "the active document", so a solve
-  // started on a part tab and left for another tab was not reaped until you
-  // came back — and would have been stored into the WRONG document had the
-  // poll not been guarded. The job now remembers its part slot.
+  // started on one tab and left for another was not reaped until you came
+  // back — and would have been stored into the WRONG document had the poll
+  // not been guarded. The job remembers its simulation's slot.
   ui::AppState state = MakeHeadlessState();
   Document& doc = *state.document;
   auto bar =
@@ -2880,7 +2883,7 @@ TEST_CASE("a study solved on the registry lands in its own part, not the "
   auto face = [&](int i) {
     return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
   };
-  fem::Study& s = doc.AddStudy("Bar");
+  fem::Study s = NewStudy(doc, "Bar");
   s.meshSize = 6.0;
   // One solve: this is about where the job lands, and under `auto` the
   // refinement steps outlast the poll on a loaded machine.
@@ -2897,14 +2900,20 @@ TEST_CASE("a study solved on the registry lands in its own part, not the "
   fo.magnitude = 2000.0;
   fo.direction = glm::dvec3(1, 0, 0);
   s.loads.push_back(fo);
-  const uint64_t studyId = s.id;
+  // In the bar's simulation, behind the bar's tab.
   const uint64_t barSlot = state.parts[state.activePart].id;
+  const uint64_t simSlot = ui::SimulationSlotFor(state, barSlot, true);
+  fem::SimDocument* sim = ui::SimBySlotId(state, simSlot);
+  REQUIRE(sim != nullptr);
+  sim->RestoreStudy(s);
+  const uint64_t studyId = s.id;
 
   std::string err;
-  REQUIRE(ui::StartStudyRun(state, doc, studyId, &err));
-  CHECK(ui::GetStudyRunStatus(state, studyId).running);
+  REQUIRE(ui::StartSimStudyRun(state, simSlot, studyId, &err));
+  CHECK(ui::GetStudyRunStatus(state, studyId, simSlot).running);
   CHECK(ui::BackgroundJobRunning(state, "study"));
-  CHECK_FALSE(ui::StartStudyRun(state, doc, studyId, &err)); // one at a time
+  CHECK_FALSE(
+      ui::StartSimStudyRun(state, simSlot, studyId, &err)); // one at a time
   {
     const std::vector<ui::BackgroundJobInfo> jobs =
         ui::ListBackgroundJobs(state);
@@ -2917,45 +2926,44 @@ TEST_CASE("a study solved on the registry lands in its own part, not the "
   ui::AddPart(state, "Other");
   REQUIRE(state.parts[state.activePart].id != barSlot);
   PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "study"); });
-  CHECK_FALSE(ui::GetStudyRunStatus(state, studyId).running);
+  CHECK_FALSE(ui::GetStudyRunStatus(state, studyId, simSlot).running);
   CHECK(state.studyJob == nullptr);
 
-  // The bar has its results; the other part has nothing of the sort.
-  Document* barDoc = ui::PartDocById(state, barSlot);
-  REQUIRE(barDoc != nullptr);
-  REQUIRE(barDoc != state.document.get());
-  const fem::StudyRuntime* rt = barDoc->StudyResults(studyId);
+  // The bar's simulation has its results.
+  sim = ui::SimBySlotId(state, simSlot);
+  REQUIRE(sim != nullptr);
+  const fem::StudyRuntime* rt = sim->StudyResults(studyId);
   REQUIRE(rt != nullptr);
   CHECK(rt->bodies.size() == 1);
   CHECK(rt->bodies[0].results.maxVonMises > 0.0);
-  CHECK(barDoc->FindStudy(studyId)->error.empty());
-  CHECK(state.document->StudyResults(studyId) == nullptr);
+  CHECK(sim->FindStudy(studyId)->error.empty());
+  Document* barDoc = ui::PartDocById(state, barSlot);
+  REQUIRE(barDoc != nullptr);
 
   // mesh_study's async path: the plan on this thread, the mesh on a worker,
   // the report where study_status reads it.
-  REQUIRE(ui::StartMeshRun(state, *barDoc, studyId, &err));
-  CHECK(ui::GetMeshRunStatus(state, studyId).running);
-  CHECK(ui::MeshReportFor(state, *barDoc, studyId) == nullptr);
+  REQUIRE(ui::StartSimMeshRun(state, simSlot, studyId, &err));
+  CHECK(ui::GetMeshRunStatus(state, studyId, simSlot).running);
+  CHECK(ui::SimMeshReportFor(state, simSlot, studyId) == nullptr);
   PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "mesh"); });
-  const ui::MeshReport* report = ui::MeshReportFor(state, *barDoc, studyId);
+  const ui::MeshReport* report = ui::SimMeshReportFor(state, simSlot, studyId);
   REQUIRE(report != nullptr);
   CHECK(report->error.empty());
   REQUIRE(report->bodies.size() == 1);
   CHECK(report->bodies[0].name == "Bar");
   CHECK(report->bodies[0].nodes > 0);
   CHECK(report->bodies[0].elements > 0);
-  CHECK(ui::MeshReportFor(state, *state.document, studyId) == nullptr);
 
   // Cancelled (docs/ui/long-operations.md#the-cancel-rule): the report is a
   // question about the mesh, dropped with it; the part and its solved
   // results are untouched.
   const uint64_t version = barDoc->Version();
-  REQUIRE(ui::StartMeshRun(state, *barDoc, studyId, &err));
+  REQUIRE(ui::StartSimMeshRun(state, simSlot, studyId, &err));
   REQUIRE(ui::CancelBackgroundJobs(state, "mesh") == 1);
   PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "mesh"); });
-  CHECK(ui::MeshReportFor(state, *barDoc, studyId) == nullptr);
+  CHECK(ui::SimMeshReportFor(state, simSlot, studyId) == nullptr);
   CHECK(barDoc->Version() == version);
-  CHECK(barDoc->StudyResults(studyId) != nullptr);
+  CHECK(ui::SimBySlotId(state, simSlot)->StudyResults(studyId) != nullptr);
 }
 
 #endif // HAVE_NETGEN

@@ -297,7 +297,7 @@ bool StartSimStudyRun(AppState& state, uint64_t simSlotId, uint64_t studyId,
   auto bg = std::make_unique<BackgroundJob>();
   bg->kind = "study";
   bg->label = SimStudyLabel(*sim, studyId, "Solving");
-  bg->cancellable = true; // at its boundaries, as StartStudyRun's
+  bg->cancellable = true; // at its boundaries
   bg->studyId = studyId;
   bg->owner = jobStart ? jobStart->owner : 0;
   BackgroundJob* raw = bg.get();
@@ -808,16 +808,21 @@ size_t MoveStudiesIntoSimulations(AppState& state) {
     const uint64_t id = state.parts[i].id;
     const std::string name = state.parts[i].name;
     std::vector<fem::MigratedSimulation> moved;
-    Document* part =
-        state.parts[i].kind == DocKind::Part ? SlotDoc(state, i) : nullptr;
-    AssemblyDocument* asmDoc = state.parts[i].kind == DocKind::Assembly
-                                   ? SlotAssembly(state, i)
-                                   : nullptr;
-    if (part != nullptr && !part->GetStudies().empty())
-      moved = fem::SimulationsFromPart(*part, id, name);
-    else if (asmDoc != nullptr && !asmDoc->GetStudies().empty())
-      moved = fem::SimulationsFromAssembly(*asmDoc, id, name);
-    else
+    // Taken: a simulation is their one home now, and the part or assembly
+    // keeps none.
+    std::shared_ptr<fem::OldStudies> old;
+    if (state.parts[i].kind == DocKind::Part) {
+      if (Document* part = SlotDoc(state, i))
+        old = part->TakeOldStudies();
+      if (old)
+        moved = fem::SimulationsFromPart(*old, id, name);
+    } else if (state.parts[i].kind == DocKind::Assembly) {
+      if (AssemblyDocument* asmDoc = SlotAssembly(state, i))
+        old = asmDoc->TakeOldStudies();
+      if (old)
+        moved = fem::SimulationsFromAssembly(*old, id, name);
+    }
+    if (!old)
       continue;
     // A study a simulation of this subject already holds stays there: a
     // recovery over a part file saved before its studies moved.
@@ -836,17 +841,6 @@ size_t MoveStudiesIntoSimulations(AppState& state) {
       AppendSimulationSlot(state, m.name, std::move(m.sim));
       made++;
     }
-    // The part's and the assembly's own lists go: a simulation is their one
-    // home now. Re-fetched: the append above may have moved the slots.
-    part = state.parts[i].kind == DocKind::Part ? SlotDoc(state, i) : nullptr;
-    asmDoc = state.parts[i].kind == DocKind::Assembly ? SlotAssembly(state, i)
-                                                      : nullptr;
-    std::vector<uint64_t> ids;
-    for (const fem::Study& st :
-         part ? part->GetStudies() : asmDoc->GetStudies())
-      ids.push_back(st.id);
-    for (uint64_t sid : ids)
-      part ? (void)part->RemoveStudy(sid) : (void)asmDoc->RemoveStudy(sid);
     LOG_INFO("open: the studies of '{}' moved into its simulation", name);
   }
   return made;
