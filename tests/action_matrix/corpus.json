@@ -223,6 +223,7 @@
   {"design": "golden/v213-import-placement", "kind": "golden", "source": "tests/golden/v213-import-placement.json"},
   {"design": "golden/v214-sketch-section", "kind": "golden", "source": "tests/golden/v214-sketch-section.json"},
   {"design": "golden/v215-datum-from-fit", "kind": "golden", "source": "tests/golden/v215-datum-from-fit.json"},
+  {"design": "golden/vNEXT-datum-fit-hints", "kind": "golden", "source": "tests/golden/vNEXT-datum-fit-hints.json"},
   {"design": "golden/v216-u-name-by-fewer-edges", "kind": "golden", "source": "tests/golden/v216-u-name-by-fewer-edges.json"},
   {"design": "golden/v217-closed-spline-two-edges", "kind": "golden", "source": "tests/golden/v217-closed-spline-two-edges.json"},
   {"design": "golden/v219-factor-of-safety", "kind": "golden", "source": "tests/golden/v219-factor-of-safety.json"},

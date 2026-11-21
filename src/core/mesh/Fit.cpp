@@ -3,6 +3,8 @@
 
 #include "core/mesh/Fit.h"
 
+#include "core/Angles.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -163,10 +165,10 @@ std::string FitHints::Miss(const FitResult& f, const glm::dvec3& at,
     if (off > axisToleranceRad)
       return what() + " has its " +
              (f.kind == Kind::Plane ? "normal " : "axis ") +
-             Num(off * 180.0 / M_PI) + " deg from axis [" + Num((*axis).x) +
+             Num(angles::ToDegrees(off)) + " deg from axis [" + Num((*axis).x) +
              ", " + Num((*axis).y) + ", " + Num((*axis).z) +
              "], past axis_tolerance_deg " +
-             Num(axisToleranceRad * 180.0 / M_PI);
+             Num(angles::ToDegrees(axisToleranceRad));
   }
   return "";
 }
@@ -183,7 +185,7 @@ std::string FitHints::Describe() const {
         (radiusMax ? Num(*radiusMax) : std::string("any")) + "]");
   if (axis)
     add("axis [" + Num(axis->x) + ", " + Num(axis->y) + ", " + Num(axis->z) +
-        "] within " + Num(axisToleranceRad * 180.0 / M_PI) + " deg");
+        "] within " + Num(angles::ToDegrees(axisToleranceRad)) + " deg");
   if (withinLo && withinHi)
     add("within [" + Num(withinLo->x) + ", " + Num(withinLo->y) + ", " +
         Num(withinLo->z) + "] to [" + Num(withinHi->x) + ", " +

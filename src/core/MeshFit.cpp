@@ -299,7 +299,7 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
   std::vector<uint32_t> seeds{hit.triangle};
   if (r.hints.Any()) {
     const double reach = diag / 50.0;
-    std::vector<std::pair<double, uint32_t>> near;
+    std::vector<std::pair<double, uint32_t>> nearby;
     std::vector<uint8_t> seen(m.triangles.size(), 0);
     std::vector<uint32_t> queue{hit.triangle};
     seen[hit.triangle] = 1;
@@ -312,7 +312,7 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
       if (dist > reach)
         continue;
       if (t != hit.triangle)
-        near.emplace_back(dist, t);
+        nearby.emplace_back(dist, t);
       for (int e = 0; e < 3; e++) {
         const uint32_t u = m.neighbour[t][e];
         if (u != mesh::kNone && !seen[u]) {
@@ -321,8 +321,8 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
         }
       }
     }
-    std::sort(near.begin(), near.end());
-    for (const auto& [dist, t] : near)
+    std::sort(nearby.begin(), nearby.end());
+    for (const auto& [dist, t] : nearby)
       seeds.push_back(t);
   }
   mesh::GrowOptions options;
@@ -368,7 +368,10 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
       for (uint32_t t : reached)
         covered[t] = 1;
     }
-    if (!g.fit.ok && attempts > 1)
+    if (!g.fit.ok && attempts == 1 && r.hints.Any() &&
+        why.find(r.hints.Describe()) == std::string::npos)
+      why += " (with the hints " + r.hints.Describe() + ")";
+    else if (!g.fit.ok && attempts > 1)
       why += " (and on the " + std::to_string(attempts - 1) +
              (attempts == 2 ? " other surface" : " other surfaces") +
              " within " + Mm(diag / 50.0) + " mm of the point, none meets " +

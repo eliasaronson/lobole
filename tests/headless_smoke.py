@@ -1770,7 +1770,7 @@ def main():
                f["diameter_max_mm"] and abs(f["length_mm"] - 3) < 0.1 and
                f["arc_deg"] > 359 and "warnings" not in f,
                f"fit_primitive says what it used: {f}")
-        expect_error(d, "fit_primitive", "outside radius_mm",
+        expect_error(d, "fit_primitive", "radius_mm [1, 2]",
                      feature_id=stand, point_mm=[reff, 0, 1.5],
                      kind="cylinder", tolerance_mm=0.1,
                      radius_mm=[1, 2])

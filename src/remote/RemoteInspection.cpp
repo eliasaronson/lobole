@@ -6968,8 +6968,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error("clip_sigma: unknown " +
                                p.at("clip_sigma").dump() +
                                ". Accepted: " + meshfit::AcceptedClipSigma());
+    // rpc-params: side, radius_mm, axis, axis_tolerance_deg, within
     json hints = json::object();
-    for (const std::string& k : meshfit::HintKeys())
+    for (const char* k :
+         {"side", "radius_mm", "axis", "axis_tolerance_deg", "within"})
       if (p.contains(k))
         hints[k] = p.at(k);
     request.hints = meshfit::HintsFromJson(hints, "");

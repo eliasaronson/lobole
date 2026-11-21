@@ -336,10 +336,43 @@ Region Settle(const TriMesh& m, std::vector<uint32_t> region, Kind kind,
       const double h = glm::dot(w, fit.axis);
       a0 = std::min(a0, h);
       a1 = std::max(a1, h);
-      const double th = std::atan2(glm::dot(w, e2), glm::dot(w, e1)) + M_PI;
-      bins[std::min(kBins - 1, int(th / (2.0 * M_PI) * kBins))] = 1;
+      stamp[verts[i]] = 1;
     }
     r.length = used == 0 ? 0.0 : a1 - a0;
+    // The turn the surface covers: each triangle with two used corners
+    // marks the arc between its corners, so a coarse export's facets cover
+    // what their corners span.
+    const auto angle = [&](const glm::dvec3& p) {
+      const glm::dvec3 w = p - fit.origin;
+      return std::atan2(glm::dot(w, e2), glm::dot(w, e1));
+    };
+    for (uint32_t t : region) {
+      int usedCorners = 0;
+      for (uint32_t v : m.triangles[t])
+        usedCorners += stamp[v];
+      if (usedCorners < 2)
+        continue;
+      const double base = angle(m.Corner(t, 0));
+      double lo = 0.0, hi = 0.0;
+      for (int c = 1; c < 3; c++) {
+        const double dth =
+            std::remainder(angle(m.Corner(t, c)) - base, 2.0 * M_PI);
+        lo = std::min(lo, dth);
+        hi = std::max(hi, dth);
+      }
+      if (!(hi - lo < M_PI))
+        continue; // round the axis: not a facet of the side
+      const auto bin = [&](double th) {
+        const double u = std::fmod(th + 3.0 * M_PI, 2.0 * M_PI);
+        return std::min(kBins - 1, int(u / (2.0 * M_PI) * kBins));
+      };
+      const int b0 = bin(base + lo);
+      const int n = std::max(1, int((hi - lo) / (2.0 * M_PI) * kBins) + 1);
+      for (int k = 0; k < n; k++)
+        bins[(b0 + k) % kBins] = 1;
+    }
+    for (uint32_t v : verts)
+      stamp[v] = 0;
     // The arc is the turn less its largest empty run of bins, round the
     // wrap.
     int gap = 0, run = 0, filled = 0;
