@@ -280,6 +280,101 @@ TEST_CASE("Chamfer bevels a referenced edge", "[fillet]") {
   CHECK(map.Resolve(edge.name + ";G" + std::to_string(chamferId)).has_value());
 }
 
+// docs/modeling/kernel-cases.md (solidcraft/ladder/08-chamfers/004 and
+// fillets/every-box-corner-three-edges-chamfer-2): chamfers that meet three
+// at a corner are mitred, each bevel its own plane. OpenCASCADE closes such
+// a corner with a plane through the bevels' ends, a triangle more and
+// material the bevels leave. At a corner of the box [0,a]x[0,b]x[0,c] the
+// three bevels of distance d remove d^2/2 (a + b + c), less each pair's
+// overlap d^3/3, plus the three's d^3/4 (by inclusion and exclusion).
+TEST_CASE("Three chamfers meeting at a corner are mitred", "[fillet]") {
+  const auto pick = [](const Document& doc, auto pred) {
+    std::vector<ElementRef> out;
+    const Body& body = doc.GetBodies().at(0);
+    const auto polylines = body.shape.GenerateEdgePolylines();
+    for (size_t e = 0; e < polylines.size(); e++) {
+      bool all = polylines[e].size() >= 2;
+      for (const auto& p : polylines[e])
+        all = all && pred(p);
+      if (all)
+        out.push_back(
+            {body.createdBy, *body.elementMap.EdgeNameOf(static_cast<int>(e))});
+    }
+    return out;
+  };
+  const auto faces = [](const Document& doc) {
+    return doc.GetBodies().at(0).elementMap.names.size();
+  };
+  const auto near = [](float a, float b) { return std::abs(a - b) < 1e-3f; };
+  SECTION("one corner of a 60 x 40 x 20 block, in either order") {
+    for (const bool reversed : {false, true}) {
+      Document doc;
+      doc.AddFeature(
+          std::make_unique<BoxFeature>("Stock", glm::vec3(0), 60, 40, 20));
+      std::vector<ElementRef> edges = pick(doc, [&](const glm::vec3& p) {
+        const int at = near(p.x, 60) + near(p.y, 40) + near(p.z, 20);
+        return at >= 2;
+      });
+      REQUIRE(edges.size() == 3);
+      if (reversed)
+        std::reverse(edges.begin(), edges.end());
+      doc.AddFeature(std::make_unique<FilletFeature>("Bevel", edges, 3.0,
+                                                     EdgeBlendOp::Chamfer));
+      INFO(doc.GetFeature(1)->GetError());
+      REQUIRE(doc.GetFeature(1)->GetError().empty());
+      const double d = 3.0;
+      const double removed = d * d / 2 * 120 - d * d * d + d * d * d / 4;
+      CHECK_THAT(BodyVolume(doc), WithinRel(48000.0 - removed, 1e-9));
+      CHECK(faces(doc) == 9); // six and the three bevels: no corner patch
+    }
+  }
+  SECTION("every edge of a 25 mm cube") {
+    Document doc;
+    doc.AddFeature(
+        std::make_unique<BoxFeature>("Cube", glm::vec3(0), 25, 25, 25));
+    const std::vector<ElementRef> edges =
+        pick(doc, [](const glm::vec3&) { return true; });
+    REQUIRE(edges.size() == 12);
+    doc.AddFeature(std::make_unique<FilletFeature>("Bevel", edges, 2.5,
+                                                   EdgeBlendOp::Chamfer));
+    INFO(doc.GetFeature(1)->GetError());
+    REQUIRE(doc.GetFeature(1)->GetError().empty());
+    // Per corner as above with a = b = c = h, the half side: 8 h^3 - 12 h
+    // d^2 + 6 d^3 over the eight octants.
+    const double h = 12.5, d = 2.5;
+    CHECK_THAT(BodyVolume(doc),
+               WithinRel(8 * h * h * h - 12 * h * d * d + 6 * d * d * d, 1e-9));
+    CHECK(faces(doc) == 18);
+  }
+  SECTION("every edge of a 40 x 30 x 12.5 box, in an order that was refused") {
+    Document doc;
+    doc.AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0), 40, 30, 12.5));
+    // solidcraft/fillets/3655: each edge by a point on it, in its order.
+    const std::vector<glm::vec3> at = {
+        {40, 15, 12.5}, {20, 0, 0}, {0, 30, 6},    {0, 15, 12.5},
+        {40, 30, 6},    {0, 0, 6},  {40, 15, 0},   {40, 0, 6},
+        {20, 30, 12.5}, {0, 15, 0}, {20, 0, 12.5}, {20, 30, 0}};
+    std::vector<ElementRef> edges;
+    for (const glm::vec3& q : at) {
+      const auto one = pick(doc, [&](const glm::vec3& p) {
+        int same = 0;
+        for (int i = 0; i < 3; i++)
+          same += near(p[i], q[i]);
+        return same >= 2;
+      });
+      REQUIRE(one.size() == 1);
+      edges.push_back(one[0]);
+    }
+    doc.AddFeature(std::make_unique<FilletFeature>("Bevel", edges, 2.5,
+                                                   EdgeBlendOp::Chamfer));
+    INFO(doc.GetFeature(1)->GetError());
+    REQUIRE(doc.GetFeature(1)->GetError().empty());
+    CHECK_THAT(BodyVolume(doc), WithinRel(14062.5, 1e-9));
+    CHECK(faces(doc) == 18);
+  }
+}
+
 TEST_CASE("Fillet follows an upstream height edit (the payoff)", "[fillet]") {
   Document doc;
   uint64_t ext = 0;

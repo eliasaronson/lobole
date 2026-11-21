@@ -8,16 +8,24 @@
 #include "core/ElementHistory.h"
 #include "core/HeavyBuild.h" // Cancelled
 
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
 #include <ChFi3d.hxx>
+#include <Precision.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Vertex.hxx>
 
 #include <algorithm>
+#include <map>
 
 FilletFeature::FilletFeature(const std::string& name,
                              std::vector<ElementRef> edges, double radius,
@@ -84,6 +92,92 @@ std::string EdgeObjection(const Body& body, const std::vector<int>& indices,
       first = no;
   }
   return first;
+}
+
+} // namespace
+
+namespace {
+
+// The chamfered edges in the order they are built. A corner where three or
+// more of them meet is closed by BRepFilletAPI_MakeChamfer with a plane
+// through their ends (a triangle cut off flat), where the bevels' own planes
+// meet in a point further out: three distance-3 chamfers at a box corner
+// came out 2.25 mm3 short with a face more. Built in stages, every bevel is
+// its own plane cut and the corner is mitred, whatever the order: the first
+// takes two edges at a vertex, each later one one more. One stage, the
+// usual case, when no such corner is picked.
+std::vector<std::vector<int>> ChamferStages(const Body& body,
+                                            const std::vector<int>& indices) {
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(body.shape.GetShape(), TopAbs_EDGE, edges);
+  TopTools_IndexedMapOfShape vertices;
+  TopExp::MapShapes(body.shape.GetShape(), TopAbs_VERTEX, vertices);
+  const auto endsOf = [&](int idx) {
+    TopoDS_Vertex a, b;
+    TopExp::Vertices(TopoDS::Edge(edges(idx + 1)), a, b);
+    return std::pair{a.IsNull() ? 0 : vertices.FindIndex(a),
+                     b.IsNull() ? 0 : vertices.FindIndex(b)};
+  };
+  std::vector<std::vector<int>> stages;
+  std::vector<int> left = indices;
+  while (!left.empty()) {
+    // Two at a vertex in the first stage, which the builder mitres; after
+    // it one, since a corner already bevelled takes only one more at a time.
+    const int most = stages.empty() ? 2 : 1;
+    std::map<int, int> used; // vertex -> edges of this stage on it
+    std::vector<int> stage, later;
+    for (int idx : left) {
+      const auto [a, b] = endsOf(idx);
+      if ((a != 0 && used[a] >= most) ||
+          (b != 0 && b != a && used[b] >= most)) {
+        later.push_back(idx);
+        continue;
+      }
+      if (a != 0)
+        used[a]++;
+      if (b != 0 && b != a)
+        used[b]++;
+      stage.push_back(idx);
+    }
+    stages.push_back(std::move(stage));
+    left = std::move(later);
+  }
+  return stages;
+}
+
+// The edges of `shape` that lie on `original`: what a chamfer at one of its
+// ends left of it. Every edge whose ends and middle are on it, to the
+// kernel's tolerance, by index in `shape`'s edge map.
+std::vector<int> PiecesOf(const TopoDS_Edge& original,
+                          const TopoDS_Shape& shape) {
+  std::vector<int> out;
+  Bnd_Box reach;
+  BRepBndLib::Add(original, reach);
+  const double tol =
+      std::max(10.0 * Precision::Confusion(), BRep_Tool::Tolerance(original));
+  reach.Enlarge(tol);
+  const auto onOriginal = [&](const gp_Pnt& p) {
+    BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(p).Vertex(),
+                                 original);
+    return d.IsDone() && d.Value() <= tol;
+  };
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  for (int i = 1; i <= edges.Extent(); i++) {
+    const TopoDS_Edge e = TopoDS::Edge(edges(i));
+    if (BRep_Tool::Degenerated(e))
+      continue;
+    Bnd_Box box;
+    BRepBndLib::Add(e, box);
+    if (box.IsOut(reach))
+      continue;
+    BRepAdaptor_Curve c(e);
+    const double a = c.FirstParameter(), b = c.LastParameter();
+    if (onOriginal(c.Value(a)) && onOriginal(c.Value(0.5 * (a + b))) &&
+        onOriginal(c.Value(b)))
+      out.push_back(i - 1);
+  }
+  return out;
 }
 
 } // namespace
@@ -173,9 +267,45 @@ bool FilletFeature::Execute(RegenContext& ctx) {
   std::string error;
   topo::EdgeBlendFailure failure;
   CADShape result;
-  if (!past)
+  if (!past && op == EdgeBlendOp::Chamfer) {
+    // In stages (ChamferStages). A later stage's edges are what the stages
+    // before it left of the picked ones: shortened at the corner, and named
+    // afresh, so they are found by place, on the edge they were cut from.
+    const std::vector<std::vector<int>> stages = ChamferStages(*body, indices);
+    TopTools_IndexedMapOfShape picked;
+    TopExp::MapShapes(body->shape.GetShape(), TopAbs_EDGE, picked);
+    result = body->shape;
+    map = body->elementMap;
+    for (size_t k = 0; k < stages.size() && result.IsValid(); k++) {
+      std::vector<int> at;
+      if (k == 0) {
+        at = stages[0];
+      } else {
+        for (int idx : stages[k]) {
+          const std::vector<int> left =
+              PiecesOf(TopoDS::Edge(picked(idx + 1)), result.GetShape());
+          if (left.empty()) {
+            const std::string* name = body->elementMap.EdgeNameOf(idx);
+            error = "chamfer edge '" + (name != nullptr ? *name : "?") +
+                    "' was consumed by the chamfers built before it at a "
+                    "corner of three";
+            result = CADShape();
+            break;
+          }
+          at.insert(at.end(), left.begin(), left.end());
+        }
+        if (!result.IsValid())
+          break;
+      }
+      ElementMap next;
+      result = topo::EdgeBlendNamed(result, map, at, op, radius, GetId(), next,
+                                    &error, &failure);
+      map = std::move(next);
+    }
+  } else if (!past) {
     result = topo::EdgeBlendNamed(body->shape, body->elementMap, indices, op,
                                   radius, GetId(), map, &error, &failure);
+  }
   std::string cause;
   if (past) {
     cause = past->why;

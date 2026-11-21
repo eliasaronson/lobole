@@ -147,7 +147,7 @@ holds a spec to ([typed feature specs](../scripting/rpc.md#typed-feature-specs))
 | `Frame` | a named datum frame that mates anchor to (assemblies area) |
 | `Boolean` | `union`, `subtract` or `intersect` of two bodies by `createdBy`; both operands consumed into one result, so booleans chain. The result must pass BRepCheck and [the boolean check](#a-boolean-is-checked-before-it-is-kept) |
 | `Pattern` | `mirror` (about a base or datum plane), `linear`, `circular` of a source; see [Patterns](#patterns) |
-| `Fillet`, `Chamfer` | edges by `ElementRef`; blend faces named from the spine edge |
+| `Fillet`, `Chamfer` | edges by `ElementRef`; blend faces named from the spine edge. Chamfers that meet three or more at a corner are built in stages (two at a vertex, then one more at a time), so the corner is mitred where the bevels' planes meet; OpenCASCADE's single build cuts it off flat with a triangle of its own |
 | `Shell` | hollows a body, `open_faces` by `ElementRef` |
 | `Draft` | tapers `faces` about a neutral plane |
 | `Split` | a body by a face, a datum or an offset base plane |

@@ -16,9 +16,9 @@ command or parameter Loböle has no counterpart for.
 
 | area | cases | pass | known | untranslated |
 |---|---|---|---|---|
-| ladder | 170 | 100 | 15 | 55 |
+| ladder | 170 | 101 | 14 | 55 |
 | booleans | 130 | 64 | 9 | 57 |
-| fillets | 275 | 99 | 69 | 107 |
+| fillets | 275 | 101 | 67 | 107 |
 | shell | 40 | 11 | 11 | 18 |
 | sweeps | 97 | 34 | 15 | 48 |
 | solids | 11 | 3 | 0 | 8 |
@@ -26,7 +26,7 @@ command or parameter Loböle has no counterpart for.
 | import | 35 | 0 | 0 | 35 |
 | tessellation | 14 | 11 | 1 | 2 |
 | crashes | 12 | 3 | 0 | 9 |
-| **all** | 815 | 338 | 138 | 339 |
+| **all** | 815 | 341 | 135 | 339 |
 
 ## Known failures
 
@@ -68,7 +68,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/324-fillet-over-hole-cut-by-overlong-cylinder | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |
 | solidcraft/fillets/324-fillet-over-hole-overlap | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |
 | solidcraft/fillets/3276-chamfer-edge-of-1mm-protrusion-on-joined-l | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
-| solidcraft/fillets/3655-chamfer-edge-order-box | volume | [docs/known-bugs.md#three-chamfers-meeting-at-a-corner-cut-it-off-flat](../known-bugs.md#three-chamfers-meeting-at-a-corner-cut-it-off-flat) |
 | solidcraft/fillets/4055-chamfer-bar-edge-over-joined-pin | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/4101-chamfer-tapered-plug-corners | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/fillets/4174-fillet-cylinder-base-arc-ending-at-block-edge | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
@@ -100,7 +99,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/cov-fillet-section-chamfer-pipe-on-plate-2 | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |
 | solidcraft/fillets/cov-fillet-tee-pipe-r8-into-pipe-r20-r3 | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/fillets/every-boss-root-round-r10-as-tall-as-boss | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/every-box-corner-three-edges-chamfer-2 | volume | [docs/known-bugs.md#three-chamfers-meeting-at-a-corner-cut-it-off-flat](../known-bugs.md#three-chamfers-meeting-at-a-corner-cut-it-off-flat) |
 | solidcraft/fillets/every-chamfer-pocket-rim-5-5-past-the-floor | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/every-chamfer-pocket-rim-5-full-depth | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/every-hole-top-rim-chamfer-10-full-depth | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
@@ -120,7 +118,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/ladder/06-threads/015-internal-tr20x4-nut | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/06-threads/019-external-tr40x14-p7-two-start | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/06-threads/021-internal-rp-1-2 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/ladder/08-chamfers/004-corner-three-equal-3 | volume | [docs/known-bugs.md#three-chamfers-meeting-at-a-corner-cut-it-off-flat](../known-bugs.md#three-chamfers-meeting-at-a-corner-cut-it-off-flat) |
 | solidcraft/ladder/09-shells-and-offsets/006-shell-rounds-r1-thinner-than-t2 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/09-shells-and-offsets/011-part-shell | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/09-shells-and-offsets/012-closed-shell-sealed-void | refused | [docs/modeling/README.md#not-built](README.md#not-built) |

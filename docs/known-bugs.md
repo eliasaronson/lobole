@@ -69,26 +69,6 @@ the heading if it is not here yet.
   cost a second build of every honest refusal. The fix belongs upstream, in
   the offset's intersections, not in the order.
 
-### Three chamfers meeting at a corner cut it off flat
-
-- **Symptom:** a Chamfer of three edges that meet at a box corner removes
-  more than the three bevels do: at distance 3 on the 60 x 40 x 20 stock the
-  volume is 47478 where the mitred bevels leave 47480.25, with one face
-  more (the corner's triangle). At distance 2 the difference is 0.667 mm³;
-  all twelve edges of a 25 mm cube at 2.5 are 10.4 mm³ and eight faces
-  out.
-- **Cause:** `BRepFilletAPI_MakeChamfer` closes a corner of three chamfers
-  with a plane through their three ends; the bevels' own planes meet in a
-  point further out.
-- **Where:** the Chamfer in `src/core/features/FilletFeature.cpp`, which
-  leaves the corner to OpenCASCADE.
-- **Likely fix:** build the corner from the three bevel planes (a cut by
-  each plane in turn gives it), or say in the Chamfer's doc that the corner
-  is cut flat.
-- **Cases:** `solidcraft/ladder/08-chamfers/004-corner-three-equal-3`,
-  `solidcraft/fillets/every-box-corner-three-edges-chamfer-2`,
-  `solidcraft/fillets/3655-chamfer-edge-order-box`.
-
 ### A sweep rounds a sharp corner of its path
 
 - **Symptom:** an 8 x 5 rectangle swept up 30 and across 40 along two lines
