@@ -430,8 +430,12 @@ repeat until |r|/|F| < 1e-5:
   nothing forever.
 - **Progress is measured by the potential energy** Π(u) = ½uᵀKu − Fᵀu, which
   every step lowers by exactly ½α·p·r; the residual norm is not monotone.
-  The solve stops at the 1e-5 target, after three steps that gain less than
-  1e-13 of Π, or after 40 steps.
+  The solve stops at the 1e-5 target, after three steps in a row that
+  neither gain more than 1e-13 of Π nor halve the best residual so far
+  (`gpu::RefineStall`: near the answer a step's gain goes as the residual
+  squared, and a slender part's falls under 1e-13 while the residual still
+  drops tenfold a step), or after 40 steps (400 for a static study's
+  strict solve, [../simulation/README.md](../simulation/README.md#the-solver)).
 - **The warm start** (the previous SIMP iteration's u) is first scaled by its
   energy-optimal factor for the new stiffness — never worse than it or zero.
 - The inner tolerance 1e-1 measured fastest: 1e-2 spent iterations solving

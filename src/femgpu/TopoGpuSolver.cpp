@@ -132,6 +132,14 @@ double Dot(const std::vector<double>& a, const std::vector<double>& b) {
   return s;
 }
 
+// A residual for an error: std::to_string's six decimals print 1e-7 as
+// "0.000000" and 6e-7 as "0.000001".
+std::string Sci(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.2e", v);
+  return buf;
+}
+
 } // namespace
 
 struct TopoGpuSolver::Impl {
@@ -388,7 +396,8 @@ bool TopoGpuSolver::Refine(const std::vector<double>& scale,
 
   std::vector<double> d(n), Kd, p, Kp;
   double pKp = 0.0;
-  int steps = 0, innerIters = 0, stalls = 0;
+  int steps = 0, innerIters = 0;
+  RefineStall stall(rel);
   while (rel > kTol && steps < kMaxSteps) {
     if (strict && strict->cancelled && strict->cancelled()) {
       if (error)
@@ -452,12 +461,11 @@ bool TopoGpuSolver::Refine(const std::vector<double>& scale,
                    steps, rel, relNew, gain, -energy, st.iterations,
                    st.relResidual, alpha);
     rel = relNew;
-    // Short of the target: three steps in a row that lower the energy by
-    // less than fp64 can tell from rounding are the floor of what the inner
-    // solve can contribute.
-    if (gain > 1e-13 * std::abs(energy))
-      stalls = 0;
-    else if (++stalls >= 3)
+    // Short of the target: three steps in a row that neither lower the
+    // energy by more than fp64 can tell from rounding nor halve the
+    // residual are the floor of what the inner solve can contribute
+    // (RefineStall says why the residual counts too).
+    if (stall.Step(gain, energy, rel))
       break;
   }
 
@@ -474,10 +482,9 @@ bool TopoGpuSolver::Refine(const std::vector<double>& scale,
     strict->iterations = innerIters;
     if (!(rel <= kTol)) {
       if (error)
-        *error = "GPU solve reached a relative residual of " +
-                 std::to_string(rel) + ", not the " + std::to_string(kTol) +
-                 " asked for, in " + std::to_string(steps) +
-                 " refinement steps";
+        *error = "GPU solve reached a relative residual of " + Sci(rel) +
+                 ", not the " + Sci(kTol) + " asked for, in " +
+                 std::to_string(steps) + " refinement steps";
       return false;
     }
     return true;

@@ -16,10 +16,37 @@
 
 #include "core/fem/FemTopo.h"
 
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 
 namespace gpu {
+
+// When Refine's outer loop has stopped gaining. A step is progress when it
+// lowers the energy by more than fp64 can tell from rounding (1e-13 of it),
+// OR when it at least halves the best residual before it; three steps in a
+// row that are neither end the solve. The energy alone is not enough: near
+// the answer a step's gain goes as the square of the residual, and on a
+// slender part it falls under 1e-13 of the energy while the residual still
+// drops tenfold a step. Judged on the energy alone, a static solve stopped
+// three steps after the first such step, just short of its 1e-7 or just
+// under it as the fp32 inner solves fell (the tea alarm's 0.5 mm clip: 9
+// steps at 6e-7 one run in three, 11 at 5e-8 otherwise), and the CPU that
+// finished it was refused as stalled one run in a dozen.
+struct RefineStall {
+  explicit RefineStall(double startRel) : best(startRel) {}
+  // After a step that gained `gain` with the energy at `energy` and left the
+  // residual at `rel`: true when the solve should stop.
+  bool Step(double gain, double energy, double rel) {
+    const bool progress = gain > 1e-13 * std::abs(energy) || rel < 0.5 * best;
+    best = std::min(best, rel);
+    stalls = progress ? 0 : stalls + 1;
+    return stalls >= 3;
+  }
+  double best;
+  int stalls = 0;
+};
 
 class TopoGpuSolver : public fem::TopoLinearSolver {
 public:

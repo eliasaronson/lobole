@@ -1887,3 +1887,76 @@ TEST_CASE("femgpu bench: full SIMP loop GPU vs CPU on the bulky cube",
 }
 
 #endif // HAVE_FEM_SOLVER
+
+TEST_CASE("femgpu: refinement does not stop while its residual still falls",
+          "[femgpu][cg][static]") {
+  // The tea alarm's clip grip (106k DOF, a 0.5 mm steel sheet), one run of
+  // its GPU solve as FEMGPU_SOLVE_TRACE printed it: each step's energy gain
+  // and the residual it left, at an energy of 1.18. From step 7 on every
+  // gain is under 1e-13 of the energy while the residual still drops
+  // tenfold a step, and the energy-only rule stopped after step 9 at 5.95e-7
+  // against the static solve's 1e-7.
+  const double energy = 1.18;
+  struct Step {
+    double gain, rel;
+  };
+  const Step clip[] = {
+      {1.16e+00, 1.940e+01}, {4.87e-05, 1.401e+00}, {9.55e-07, 1.229e-01},
+      {1.10e-08, 7.251e-03}, {2.55e-11, 6.366e-04}, {6.75e-14, 5.513e-05},
+      {1.70e-15, 5.714e-06}, {1.66e-17, 5.951e-07}, {1.2e-19, 6.1e-08}};
+  gpu::RefineStall stall(2.112e+02);
+  for (const Step& s : clip)
+    CHECK_FALSE(stall.Step(s.gain, energy, s.rel));
+
+  // A real floor still ends it, three steps after progress stops: gains
+  // under rounding and a residual that wanders without halving its best.
+  gpu::RefineStall floor(1e-3);
+  CHECK_FALSE(floor.Step(1e-20, energy, 9e-4));
+  CHECK_FALSE(floor.Step(1e-20, energy, 4e-4)); // halved: progress
+  CHECK_FALSE(floor.Step(1e-20, energy, 6e-4));
+  CHECK_FALSE(floor.Step(1e-20, energy, 3e-4));
+  CHECK(floor.Step(1e-20, energy, 2.5e-4));
+}
+
+TEST_CASE("femgpu: a thin sheet's static solve reaches its tolerance on the "
+          "GPU",
+          "[femgpu][cg][static][slow]") {
+  std::string gerr;
+  if (!gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr))
+    SKIP("no usable compute device: " << gerr);
+  // An 80 x 10 x 0.5 mm steel strip bent through its thickness, meshed at
+  // its thickness: slender enough that a step's energy gain falls under
+  // fp64's 1e-13 of the energy while the residual is still 1e-4 or so,
+  // three decades above the static solve's 1e-7. Judged on the energy
+  // alone, refinement stopped short of 1e-7 (at 2e-7 to 1e-6) in three of
+  // six runs replayed from their traces -- the GPU's fp32 sums do not
+  // repeat -- and the CPU finished them, as it did the tea alarm's clip.
+  fem::FemMesh mesh = GenerateBoxMesh(160, 20, 1, 80.0, 10.0, 0.5);
+  const std::vector<fem::Material> mats{{193000.0, 0.29, 7.9e-9}};
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad tip;
+  tip.type = fem::LoadType::Force;
+  tip.tris = TrisAtPlane(mesh, 0, 80.0, 1e-6);
+  tip.magnitude = 0.5;
+  tip.direction = glm::dvec3(0, 0, -1);
+  const std::vector<std::vector<fem::FaceLoad>> cases{{tip}};
+  fem::SolveOptions onGpu;
+  onGpu.iterativeAboveDofs = 0;
+  onGpu.makeExternal = [](std::string* why) {
+    std::unique_ptr<fem::TopoLinearSolver> s =
+        gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, why);
+    return s;
+  };
+  for (int run = 0; run < 6; ++run) {
+    std::string err;
+    fem::SolveReport report;
+    const auto solved = fem::SolveCases(mesh, mats, fixed, cases, &err,
+                                        glm::dvec3(0), onGpu, &report);
+    INFO("run " << run << ": " << err << " declined '"
+                << report.externalDeclined << "', residual "
+                << report.worstResidual);
+    REQUIRE(solved.has_value());
+    CHECK(report.solver == fem::kGpuSolverName);
+    CHECK(report.externalDeclined.empty());
+  }
+}

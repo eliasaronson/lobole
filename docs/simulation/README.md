@@ -1203,10 +1203,22 @@ buckling).
       GPU got to (a start worse than zero is dropped), and the rest of the
       cases on the CPU. The result's `solver` names the CPU with `GPU
       declined: <why>`, and if the CPU fails too its error ends "the GPU
-      solve before it: <why>". The GPU stops short on the same energy
-      floor the CPU's stall reads, a little above its 1e-7, so its iterate
-      gains nothing the CPU's window can see: refused as stalled, it failed
-      the tea alarm's clip one run in three, at a residual of a few 1e-7.
+      solve before it: <why>". Its iterate is already at the floor of
+      what fp64 CG can gain on: on the tea alarm's 0.5 mm clip (106k DOF)
+      2000 CPU iterations from a GPU iterate at 6e-7 changed the energy in
+      its 17th digit and left the residual, computed afresh, anywhere from
+      6e-7 to 2.3e-6 (CG's updated residual drifts from the true one as it
+      iterates), which is how the clip was refused one run in a dozen. A
+      CPU solve of the same study from zero ends at a true residual of
+      7.6e-7, against a rounding floor (eps |K| |u| / |F|) of 1.7e-7.
+    - So the GPU's refinement must not stop early. It stops after three
+      steps in a row that neither lower the energy by more than 1e-13 of it
+      nor halve the best residual (`gpu::RefineStall`). The energy alone
+      is not enough: near the answer a step's gain goes as the square of
+      the residual, and on a slender part it is under 1e-13 of the energy
+      at a residual of 1e-4, while each step still cuts the residual
+      tenfold. Judged on the energy alone, the clip's solve stopped at 6e-7
+      in a third of runs, and an 80 x 10 x 0.5 mm strip's in half.
     - The GPU's own arithmetic is not reproducible run to run (its SpMV
       scatters each element's product with an fp32 `atomicAdd`, in
       whatever order the device schedules it):
