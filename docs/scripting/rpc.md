@@ -356,8 +356,8 @@ body called it.
   so in its own response, never only in a later `get_state` —
   `regen_honesty_smoke`. That includes `undo` and `set_active_configuration`.
   A failed row is `{index, name, error, after_earlier_failure?,
-  kernel_fault?, fits?}`; `fits` is on a Fillet or Chamfer whose size does
-  not build, `{param: "radius", asked_mm, fits_mm, fails_mm, basis,
+  kernel_fault?, fits?}`; `fits` is on a Fillet, Chamfer or Shell whose size
+  does not build, `{param: "radius" | "thickness", asked_mm, fits_mm, fails_mm, basis,
   element?, stopped?}`: the largest size that built (`null` when none did),
   the least known to fail, `basis` `"built"` (the size asked was built and
   failed) or `"bound"` (it was past a bound that holds, a disc's rim, and
@@ -895,11 +895,12 @@ gears, a rack and pinion, a screw -- the thing to add is a RELATION, not a
 mate: see add_relation
 ```
 
-`does_not_fit` is `add_feature`'s or `modify_feature`'s refusal of a Fillet
-or Chamfer that does not build at the size asked (both build one on a copy
-first, as they do a direct edit): `path` `/params/feature/radius`, `param`
-`radius`, `observed` the size asked, `expected` `{max_mm}`, and `fits`, the
-object a `regen.failed[]` row carries. The SDK raises it as
+`does_not_fit` is `add_feature`'s or `modify_feature`'s refusal of a
+Fillet, Chamfer or Shell that does not build at the size asked (both build
+one on a copy first, as they do a direct edit): `path`
+`/params/feature/radius` (a Shell's `/params/feature/thickness`), `param`
+`radius` or `thickness`, `observed` the size asked, `expected` `{max_mm}`,
+and `fits`, the object a `regen.failed[]` row carries. The SDK raises it as
 `lobole.DoesNotFit`, whose `fits_mm` is the size to send instead:
 
 ```

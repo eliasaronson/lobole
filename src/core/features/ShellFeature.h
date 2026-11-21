@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/BlendFit.h"
 #include "core/ElementMap.h"
 #include "core/Feature.h"
 
@@ -55,6 +56,11 @@ public:
   uint64_t bodyId = 0; // producing-feature id of the body to hollow
   std::vector<ElementRef> openFaces;
   ExprValue thickness{1.0};
+
+  // The last wall search (core/BlendFit.h), kept with the executed state so
+  // a shell that stays broken does not search again. Derived, never
+  // serialized; restored by CopyDerivedState with the rest of the object.
+  fit::Memo fitMemo;
 };
 
 // The thinnest wall of `body`: from a point well inside each face, along its

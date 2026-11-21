@@ -18,8 +18,6 @@
 {"method":"mass_properties","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"body_id":100,"id":130,"name":"Sh3","open_faces":[{"element":"100/cap0;M120","feature_id":100}],"thickness":4.63,"type":"Shell"}}}
-{"method":"undo","params":{}}
 {"method":"get_state","params":{}}
 {"method":"list_parts","params":{}}
 {"method":"add_part","params":{"name":"Rebuild"}}

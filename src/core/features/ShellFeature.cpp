@@ -5,7 +5,9 @@
 
 #include "cad/OccPatches.h"
 #include "cad/OccSignals.h"
+#include "core/BlendFit.h"
 #include "core/DirectEdit.h" // MakeDeadline, BuilderBudgetS
+#include "core/HeavyBuild.h" // Cancelled
 #include "core/Measure.h"    // InvalidReasons
 #include "core/ModelSpace.h"
 #include "core/features/OffsetFaceFeature.h" // WallsUnder
@@ -140,6 +142,25 @@ std::string ShellOnce(const Body& body, const TopoDS_Shape& input,
            (said != nullptr && *said ? std::string(" (") + said + ")" : "") +
            "; a thinner wall usually builds";
   }
+}
+
+// The builder's reason with the wall that fits after it
+// (docs/modeling/README.md#the-size-that-fits): "...; the largest wall that
+// fits is 0.7 mm". Its own advice to try a thinner wall goes, since this
+// says which.
+std::string WithWallThatFits(std::string why, const fit::Answer& a) {
+  for (const char* advice : {"; a thinner wall usually builds"})
+    if (why.ends_with(advice))
+      why.resize(why.size() - std::string_view(advice).size());
+  if (a.stopped)
+    return why + (a.fits ? "; a wall of " + fit::Mm(*a.fits) +
+                               " mm builds and " + fit::Mm(a.fails) +
+                               " mm does not (the search ran out of time)"
+                         : std::string("; the search for a wall that fits "
+                                       "ran out of time"));
+  if (a.fits)
+    return why + "; the largest wall that fits is " + fit::Mm(*a.fits) + " mm";
+  return why + "; no wall builds, down to " + fit::Mm(a.fails) + " mm";
 }
 
 } // namespace
@@ -332,6 +353,7 @@ bool ShellFeature::Execute(RegenContext& ctx) {
   const Handle(Message_ProgressIndicator) deadline =
       directedit::MakeDeadline(budget);
   std::string error;
+  bool gaveUp = false;
   for (int attempt = 0; attempt < attempts; attempt++) {
     BRepBuilderAPI_Copy copy(shape, /*copyGeom=*/false, /*copyMesh=*/false);
     TopTools_ListOfShape remove;
@@ -347,6 +369,7 @@ bool ShellFeature::Execute(RegenContext& ctx) {
               std::to_string(body->shape.FaceCount()) + " faces by a wall of " +
               Mm(thickness) +
               " mm costs more; a thicker wall, or fewer faces, builds faster";
+      gaveUp = true;
       break;
     }
     if (why.empty()) {
@@ -359,7 +382,47 @@ bool ShellFeature::Execute(RegenContext& ctx) {
     }
     error = std::move(why);
   }
-  SetError(error);
+  if (gaveUp) {
+    SetError(error);
+    LOG_ERROR("ShellFeature '{}': {} ({} attempts)", m_name, error, attempts);
+    return false;
+  }
+  // The wall does not build: search for the one that does, inside the same
+  // deadline (docs/modeling/README.md#the-size-that-fits). The first guess
+  // is half the body's thinnest wall, then four steps; an offset costs
+  // seconds where a blend costs milliseconds.
+  const double asked = thickness.value;
+  std::optional<fit::Answer> answer =
+      fitMemo.For(body->shape, removeIdx, fit::kShellOp, asked);
+  if (!answer) {
+    std::optional<fit::Bound> guess;
+    if (const auto thin = ThinnestWall(*body))
+      guess = fit::Bound{0.5 * *thin, {}, {}, fit::BoundKind::Width};
+    answer = fit::LargestThatBuilds(
+        asked, guess,
+        [&](double wall) {
+          BRepBuilderAPI_Copy copy(shape, /*copyGeom=*/false,
+                                   /*copyMesh=*/false);
+          TopTools_ListOfShape remove;
+          for (const TopoDS_Shape& f : facesToRemove)
+            remove.Append(copy.ModifiedShape(f));
+          std::optional<CADShape> result;
+          ElementMap map;
+          const bool built = ShellOnce(*body, copy.Shape(), remove, wall,
+                                       deadline->Start(), GetId(), result, map)
+                                 .empty();
+          if (!built && directedit::Expired(deadline))
+            throw fit::Stopped{};
+          return built;
+        },
+        [&] { return heavy::Cancelled() || directedit::Expired(deadline); },
+        {.steps = fit::kShellSearchSteps, .seedIsBound = false});
+    fitMemo = fit::Memo{body->shape, removeIdx, fit::kShellOp, *answer};
+  }
+  FitHint hint = fit::HintOf(*answer);
+  hint.param = "thickness";
+  error = WithWallThatFits(std::move(error), *answer);
+  SetError(error, std::move(hint));
   LOG_ERROR("ShellFeature '{}': {} ({} attempts)", m_name, error, attempts);
   return false;
 }

@@ -3168,6 +3168,16 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                 BodyRefLabel(state, fp->bodyId));
   } else if (auto* sh = dynamic_cast<ShellFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Thickness", sh->thickness);
+    // As a blend's: the committed Shell's editor says why it is broken and
+    // offers the wall that fits.
+    if (commit && sh->GetFitHint() && !sh->ErrorAfterEarlierFailure()) {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(ImVec4(0.90f, 0.40f, 0.40f, 1.0f),
+                         ICON_FA_TRIANGLE_EXCLAMATION " %s",
+                         sh->GetError().c_str());
+      ImGui::PopTextWrapPos();
+      DrawFitButton(state, feature, index, commit);
+    }
     PickSlotRow(state, feature, PickSlot::ShellBody,
                 BodyRefLabel(state, sh->bodyId));
     PickSlotRow(state, feature, PickSlot::ShellOpenFaces,
@@ -3229,19 +3239,24 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
 
 bool DrawFitButton(AppState& state, Feature& feature, size_t index,
                    bool commit) {
-  auto* fil = dynamic_cast<FilletFeature*>(&feature);
-  if (fil == nullptr || !state.document)
+  // The field the hint is about: a blend's radius, a Shell's thickness.
+  ExprValue* field = nullptr;
+  if (auto* fil = dynamic_cast<FilletFeature*>(&feature))
+    field = &fil->radius;
+  else if (auto* sh = dynamic_cast<ShellFeature*>(&feature))
+    field = &sh->thickness;
+  if (field == nullptr || !state.document)
     return false;
-  const auto& hint = fil->GetFitHint();
-  if (!hint || !hint->fitsMm || fil->radius.Bound())
+  const auto& hint = feature.GetFitHint();
+  if (!hint || !hint->fitsMm || field->Bound())
     return false;
   char label[64];
   std::snprintf(label, sizeof(label), "Use %s mm###tw_fit",
                 fit::Mm(*hint->fitsMm).c_str());
   if (!ImGui::Button(label))
     return false;
-  const nlohmann::json before = DocumentIO::FeatureToJson(*fil);
-  fil->radius = *hint->fitsMm;
+  const nlohmann::json before = DocumentIO::FeatureToJson(feature);
+  *field = *hint->fitsMm;
   CommitDiscrete(state, feature, before, index, commit);
   return true;
 }

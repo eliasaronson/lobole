@@ -5,9 +5,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "TestIO.h"
+#include "core/BlendFit.h"
 #include "core/Document.h"
 #include "core/ElementHistory.h"
 #include "core/Feature.h"
+#include "core/Measure.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/FilletFeature.h"
@@ -307,4 +309,71 @@ TEST_CASE("A shell leaves the body it was handed as it found it", "[shell]") {
     shell.Execute(ctx);
     CHECK(tolerances(revolve) == before);
   }
+}
+
+// A wall the offset builder refuses after WallObjection passed it says the
+// wall that does build (docs/modeling/README.md#the-size-that-fits): a box
+// whose bottom edges are rounded 1.5, shelled 2 from the top, cannot offset
+// its rounds inward by more than their radius.
+TEST_CASE("A shell wall past an inner round says the wall that fits",
+          "[shell][fit]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 40, 30, 10));
+  REQUIRE(doc.Regenerate());
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  // The four bottom edges, and the top face.
+  {
+    const Body& b = doc.GetBodies().at(0);
+    const auto polylines = b.shape.GenerateEdgePolylines();
+    std::vector<ElementRef> bottom;
+    for (size_t e = 0; e < polylines.size(); e++) {
+      bool low = !polylines[e].empty();
+      for (const auto& q : polylines[e])
+        low = low && std::abs(q.z) < 1e-3f;
+      if (low)
+        bottom.push_back({id, *b.elementMap.EdgeNameOf(static_cast<int>(e))});
+    }
+    REQUIRE(bottom.size() == 4);
+    doc.AddFeature(std::make_unique<FilletFeature>("Round", bottom, 1.5));
+    REQUIRE(doc.Regenerate());
+  }
+  const Body& rounded = doc.GetBodies().at(0);
+  std::string top;
+  {
+    int i = 0;
+    for (TopExp_Explorer ex(rounded.shape.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next(), i++) {
+      GProp_GProps g;
+      BRepGProp::SurfaceProperties(ex.Current(), g);
+      if (std::abs(g.CentreOfMass().Z() - 10.0) < 1e-6)
+        top = *rounded.elementMap.NameOf(i);
+    }
+  }
+  REQUIRE_FALSE(top.empty());
+  const double before = rounded.shape.Volume();
+  doc.AddFeature(std::make_unique<ShellFeature>(
+      "Bin", id, std::vector<ElementRef>{ElementRef{id, top}}, 2.0));
+  auto* sh = dynamic_cast<ShellFeature*>(doc.GetFeature(2));
+  CHECK_FALSE(doc.Regenerate());
+  INFO(sh->GetError());
+  REQUIRE(sh->GetFitHint().has_value());
+  const FitHint h = *sh->GetFitHint();
+  CHECK(h.param == "thickness");
+  CHECK(h.askedMm == 2.0);
+  REQUIRE(h.fitsMm.has_value());
+  CHECK(*h.fitsMm < 2.0);
+  CHECK(sh->GetError().find("; the largest wall that fits is " +
+                            fit::Mm(*h.fitsMm) + " mm") != std::string::npos);
+  // The least size the search saw fail does not build.
+  REQUIRE(h.failsMm.has_value());
+  sh->thickness = *h.failsMm;
+  CHECK_FALSE(doc.Regenerate());
+  // The wall reported builds a valid shell that hollowed the body.
+  sh->thickness = *h.fitsMm;
+  REQUIRE(doc.Regenerate());
+  CHECK(sh->GetError().empty());
+  CHECK_FALSE(sh->GetFitHint().has_value());
+  const CADShape& shelled = doc.GetBodies().at(0).shape;
+  CHECK(Measure::InvalidReasons(shelled).empty());
+  CHECK(shelled.Volume() < 0.5 * before);
 }

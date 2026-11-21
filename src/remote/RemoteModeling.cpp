@@ -27,6 +27,7 @@
 #include "core/features/MoveFaceFeature.h"
 #include "core/features/OffsetFaceFeature.h"
 #include "core/features/ReplaceFaceFeature.h"
+#include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/WormFeature.h"
@@ -221,12 +222,13 @@ bool IsDirectEdit(const Feature& f) {
          dynamic_cast<const ReplaceFaceFeature*>(&f) != nullptr;
 }
 
-// A Fillet or Chamfer is tried the same way: a size that does not fit is
-// refused with the size that does, in a `diagnostic` of code does_not_fit
+// A Fillet, Chamfer or Shell is tried the same way: a size that does not fit
+// is refused with the size that does, in a `diagnostic` of code does_not_fit
 // (docs/scripting/rpc.md#structured-errors), where it used to be committed
 // as a feature that could only fail.
 bool TriedOnACopy(const Feature& f) {
-  return IsDirectEdit(f) || dynamic_cast<const FilletFeature*>(&f) != nullptr;
+  return IsDirectEdit(f) || dynamic_cast<const FilletFeature*>(&f) != nullptr ||
+         dynamic_cast<const ShellFeature*>(&f) != nullptr;
 }
 
 void RefuseFailingDirectEdit(Document& doc, const Feature& f,

@@ -36,8 +36,6 @@
 {"method":"mass_properties","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"body_id":130,"id":170,"name":"Sh7","open_faces":[{"element":"130/g2;M160","feature_id":130}],"thickness":0.76,"type":"Shell"}}}
-{"method":"undo","params":{}}
 {"method":"get_state","params":{}}
 {"method":"list_parts","params":{}}
 {"method":"add_part","params":{"name":"Rebuild"}}

@@ -1099,8 +1099,8 @@ accepted:
 
 ## The size that fits
 
-A Fillet or Chamfer that cannot be built at the size asked says the size
-that can: "fillet radius 10 mm does not fit: the largest radius that fits
+A Fillet, Chamfer or Shell that cannot be built at the size asked says the
+size that can (a Shell's [wall](#a-shells-wall) below): "fillet radius 10 mm does not fit: the largest radius that fits
 is 7.49 mm (face '1/face0' is 15 mm wide between the two picked edges, so
 the rounds meet at 7.5 mm)", on an 80×15×20 box with both vertical edges of
 one end picked. The caller, a person dragging the field or an agent
@@ -1187,6 +1187,33 @@ the document unchanged; a size an upstream edit broke is a broken feature
 in that edit's `regen`. `tests/test_blend_fit.cpp` checks each answer by
 what it is for: the size reported builds a valid solid of the closed-form
 volume, and 2 % above it does not.
+
+### A Shell's wall
+
+`WallObjection` (`ShellFeature.cpp`) refuses a wall that breaks through an
+open face before the offset builder runs, and says the wall that fits. A
+wall it passes that the builder then refuses -- an inner round smaller than
+the wall, a rib thinner than two walls -- is searched the same way, on
+`thickness`: inside the Shell's one deadline (`directedit::BuilderBudgetS`),
+the first guess half the body's thinnest wall (`ThinnestWall`), then four
+steps (`fit::kShellSearchSteps`), since an offset costs seconds where a blend
+costs milliseconds. The guess is not a bound: where it builds the search
+goes on above it. A candidate builds when `ShellOnce` gives a solid every
+one of its checks passes, the same as the wall asked. The builder's reason
+keeps its words and gives up its "a thinner wall usually builds" for the
+wall that does: a 40×30×10 box whose bottom edges are rounded 1.5, shelled
+2 from the top, says "shell failed (wall too thick for the geometry?); the
+largest wall that fits is 1.41 mm" (1.41 builds, 1.58 does not: four steps
+leave a bracket a blend's eight would close). A candidate the deadline
+stops part way is neither (`fit::Stopped`), and the search reports the
+bracket it has: "... ; a wall of 0.5 mm builds and 1 mm does not (the
+search ran out of time)"; where nothing builds, "... ; no wall builds, down
+to 0.00128 mm". The answer is a `FitHint` with `param: "thickness"`, kept
+on the feature (`ShellFeature::fitMemo`) like a blend's, so `regen`, the
+refusal's diagnostic and the tool window's button read it
+as they read a blend's. `add_feature` and `modify_feature` build a Shell on
+a copy first, as they do a blend, and refuse one that does not build
+(`does_not_fit`) with the document unchanged.
 
 ### Bounds that refuse
 
