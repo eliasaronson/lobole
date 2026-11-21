@@ -783,7 +783,10 @@ not abort:
   and archives the log, traceback and a `reproduce.sh` under
   `$XDG_STATE_HOME/lobole/smoke-failures/`, which every CI job that runs
   tests uploads when it fails, with ctest's `LastTest.log` (and the GUI
-  suite's log). Every launch sets
+  suite's log). A run in a linked git worktree archives under that
+  worktree's `build/smoke-failures/` instead, and `LOBOLE_SMOKE_FAILURES`
+  names any other place: a parallel agent's failures stay out of the
+  developer's folder. Every launch sets
   `LOBOLE_EXIT_WITH_PARENT=<its pid>`, so the app gets SIGTERM when the
   test dies however it dies — a SIGKILLed smoke used to leave its instance
   serving nothing under init for hours (`src/app/ParentWatch.h`,

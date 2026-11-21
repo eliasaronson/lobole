@@ -279,6 +279,27 @@ def launch(binary, extra_args=(), env=None, timeout=30.0, headless=True,
         app.close()
 
 
+def failures_root():
+    """Where a failing smoke's evidence is kept.
+
+    `$LOBOLE_SMOKE_FAILURES`, when set. In a linked git worktree (its `.git`
+    is a file), the worktree's own `build/smoke-failures`: a worktree is an
+    agent's scratch checkout, and its failures do not belong among the
+    developer's, in a folder that is theirs. Otherwise the state directory,
+    which CI uploads.
+    """
+    given = os.environ.get("LOBOLE_SMOKE_FAILURES")
+    if given:
+        return given
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if os.path.isfile(os.path.join(repo, ".git")):
+        return os.path.join(repo, "build", "smoke-failures")
+    return os.path.join(
+        os.environ.get("XDG_STATE_HOME",
+                       os.path.expanduser("~/.local/state")),
+        "lobole", "smoke-failures")
+
+
 def _archive_failure(app_log):
     """Keep a failing run's evidence somewhere the next run cannot destroy.
 
@@ -298,10 +319,7 @@ def _archive_failure(app_log):
     """
     try:
         name = os.path.basename(sys.argv[0]).removesuffix(".py") or "smoke"
-        root = os.path.join(
-            os.environ.get("XDG_STATE_HOME",
-                           os.path.expanduser("~/.local/state")),
-            "lobole", "smoke-failures")
+        root = failures_root()
         os.makedirs(root, exist_ok=True)
         # Keep the last 20; past that the oldest are noise, same rule the GUI
         # archive follows.

@@ -48,7 +48,7 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from smoke_app import launch_app  # noqa: E402
+from smoke_app import failures_root, launch_app  # noqa: E402
 from smoke_world import (World, build_fixture, changed,  # noqa: E402
                          outside_baselines)
 
@@ -390,9 +390,7 @@ class Sweep:
                 report = os.path.join(reps[0]["path"], "report.txt")
             if reps and self.keep_reports:
                 keep = os.path.join(
-                    os.environ.get("XDG_STATE_HOME",
-                                   os.path.expanduser("~/.local/state")),
-                    "lobole", "smoke-failures",
+                    failures_root(),
                     time.strftime("%Y%m%d-%H%M%S") + f"-hostile-{pid}")
                 shutil.copytree(reps[0]["path"], keep, dirs_exist_ok=True)
                 report = os.path.join(keep, "report.txt")
