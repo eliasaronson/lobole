@@ -46,7 +46,14 @@ there is no compositor, occlusion or screen lock to throttle presentation.
   or a merge does not relink `designer` under the shards
   ([the development loop](../architecture.md#the-development-loop)).
 - It compares the number of tests that ran with `--gui-test-list`, so a bad
-  partition fails loudly instead of skipping tests.
+  partition fails loudly instead of skipping tests. Before that,
+  `tools/gui_shard.py` runs every shard's filter through its copy of the
+  engine's matcher over the whole inventory and stops naming any test two
+  shards would run, or none. The engine matches a term against the name OR
+  the category, ignoring case, and `^a$` means "starts with a and ends with
+  a" (so `a_takes_a` is selected too): tests whose terms reach each other go
+  to one shard, and `--fast` keeps a slow test whose exclusion would take
+  another with it. `gui_shard_selftest` plants each case.
 - It reaps Xvfb servers orphaned by an earlier run.
 - Every sharded run times each test as its shard prints it and folds the
   times into `~/.cache/lobole-dev/gui-test-times.txt` (the mean of the old

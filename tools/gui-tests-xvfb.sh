@@ -258,9 +258,14 @@ if [ "$SHARDS" = auto ]; then
   echo "shards: $SHARDS ($free CPUs free, memory for $mem; -j N to choose)"
 fi
 cpu_claim "$SHARDS"
-python3 "$ROOT/tools/gui_shard.py" --list "$WORK/list" --times "$TIMES" \
+# It refuses a partition the engine's filter would read as running a test
+# twice or not at all, naming the tests (docs/ui/testing.md#running-them).
+if ! python3 "$ROOT/tools/gui_shard.py" --list "$WORK/list" --times "$TIMES" \
   --times "$RECORDED" --shards "$SHARDS" ${SLOWER_THAN:+--slower-than "$SLOWER_THAN"} \
-  > "$WORK/filters" 2> "$WORK/info"
+  > "$WORK/filters" 2> "$WORK/info"; then
+  cat "$WORK/info" >&2
+  exit 1
+fi
 EXPECTED="$(sed -n 's/^# tests: //p' "$WORK/info")"
 sed -n 's/^# estimated/estimated/p' "$WORK/info"
 

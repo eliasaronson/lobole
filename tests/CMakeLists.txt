@@ -1987,6 +1987,12 @@ add_test(NAME kernel_cases_selftest
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernel_cases_smoke.py
                  --self-test)
 set_tests_properties(kernel_cases_selftest PROPERTIES TIMEOUT 60)
+
+# The GUI runner's partition, under the engine's own filter reading
+# (docs/ui/testing.md#running-them): planted names that reach each other.
+add_test(NAME gui_shard_selftest
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gui_shard.py --self-test)
+set_tests_properties(gui_shard_selftest PROPERTIES TIMEOUT 60)
 add_test(NAME kernel_cases_ladder
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernel_cases_smoke.py
                  $<TARGET_FILE:designer> --ladder)
