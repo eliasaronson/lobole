@@ -1,0 +1,26 @@
+{
+ "bbox": {
+  "max": [
+   50,
+   56.8778,
+   40
+  ],
+  "min": [
+   -50,
+   -50,
+   0
+  ]
+ },
+ "body_count": 1,
+ "method": "Drum pi 2500 40 = 314159.27. Boss pi 5.5^2 12 = 1140.40, less what lies inside the drum: the lens of the circles R50 and R5.5 with centres 55.0000 apart, r^2 acos((d^2+r^2-R^2)/(2dr)) + R^2 acos((d^2+R^2-r^2)/(2dR)) - sqrt((-d+r+R)(d+r-R)(d-r+R)(d+r+R))/2 = 1.4673, times 12. Union V0 = 315282.06. A convex round takes material: less than V0. Round the whole rim it takes r^2 (1 - pi/4) = 0.05365 swept round at most 2 pi 50: 16.855; the rim outside the boss is 355.0 of 360 degrees (the boss covers 2 acos((d^2+R^2-r^2)/(2dR)) = 5.01 degrees), so it takes more than half that. V in [V0 - 16.85, V0 - 8.43]. The round is inside the union's box.",
+ "outcome": "solid",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#16654"
+ ],
+ "volume_mm3": [
+  315265.2,
+  315273.7
+ ],
+ "what": "an R0.5 round on the top rim of a drum D100 x 40 (along z) that a boss R5.5 stands beside, its axis parallel to the drum's and 5 mm outside the drum's wall, from z = 28 up to the drum's top (the boss's top is the drum's top face carried on): the rim is the arc outside the boss, and the round's rail on the top face, a circle of radius 49.5, runs on across the boss's top where the rim has ended"
+}

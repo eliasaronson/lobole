@@ -1,0 +1,25 @@
+{
+ "bbox": {
+  "max": [
+   30,
+   0,
+   40
+  ],
+  "min": [
+   -30,
+   -60,
+   -30
+  ]
+ },
+ "body_count": 1,
+ "method": "Drum pi 900 40 = 113097.34. Box 16 40 20 = 12800, half its length inside the drum's span of y: the part of |x| <= 8, z >= 20 inside the circle R30, Int (sqrt(900 - x^2) - 20) dx = 154.2488, times 20. Union V0 = 122812.36. A convex round takes material: less than V0. Round the whole rim it takes r^2 (1 - pi/4) = 3.4336 swept round at most 2 pi 30: 647.22; the rim outside the box is 329 of 360 degrees (the box covers 2 asin(8/30)), so it takes more than half that. V in [V0 - 647.2, V0 - 323.6]. The round is inside the union's box.",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#16654"
+ ],
+ "volume_mm3": [
+  122165.1,
+  122488.7
+ ],
+ "what": "an R4 round on the rim of a drum R30 x 40 (along -y, the rim at y = -40) that a box stands across (x from -8 to 8, y from -60 to -20, z from 20 to 40): the round's rail on the end face, a circle of radius 26, leaves that face across one wall of the box, short of the rim's end there, and comes back across the other wall, at the rim's other end"
+}

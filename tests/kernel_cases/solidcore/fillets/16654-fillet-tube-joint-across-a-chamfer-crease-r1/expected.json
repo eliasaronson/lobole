@@ -1,0 +1,25 @@
+{
+ "bbox": {
+  "max": [
+   38.46036921299638,
+   25,
+   60.75510696599781
+  ],
+  "min": [
+   -25,
+   -25,
+   0
+  ]
+ },
+ "body_count": 1,
+ "method": "cylinder R25 H60 with a 10 mm chamfer on its top edge (side to z=50, cone to R15 at z=60); a R6 tube from (0,0,37.5) along (2,0,1) for 40 joined, crossing the side/chamfer crease. The joint on the side is rounded r1; at each crease vertex the round ends on the chamfer (an Nx1 corner). The joint on the chamfer is one edge split by the tube's seam, which is no wall standing on the chamfer. A concave round adds material inside the joint only, so the box is the unrounded body's: x from -25 to the tube's end disc, 40*2/sqrt5 + 6/sqrt5 = 38.46037; y +-25; z from 0 to 37.5 + 40/sqrt5 + 6*2/sqrt5 = 60.75511; graded to 4e-5, the blends' approximation tolerance. The chamfer's own crease is G0, so the body's blend seams are not graded as one order.",
+ "outcome": "solid",
+ "source": "invariants",
+ "sources": [
+  "tangency-labs/solidcraft#16654"
+ ],
+ "tolerance": {
+  "abs_mm": 4e-05
+ },
+ "what": "a 1 mm round along a slanted tube's joint on a cylinder's side, where the joint runs on across the crease into a 10 mm top chamfer, builds as 1.5 mm does"
+}

@@ -1,0 +1,10 @@
+{
+ "body_count": 1,
+ "method": "the round must build: one closed solid whose face count is the loft's 3 plus the round's 1. A round of a ruled spline wall has no closed-form volume, so the volume is not graded",
+ "outcome": "solid",
+ "source": "invariants",
+ "sources": [
+  "tangency-labs/solidcraft#15858"
+ ],
+ "what": "a loft (ruled, degree 1) between two closed fit-point splines through 12 points each, a circle of radius 15 at x = -30 and an ellipse of half-axes 20 and 19.998 at x = 30. Each spline is 12 cubic Bezier pieces that join with one tangent direction; the ellipse's pieces join at unequal speeds and its tangents at the joints are not the circle's, so the loft face's normal turns by 7e-11 rad across its knot lines at u = 0.95 (from the control points: (1-u) a0 T0 + u a1 T1 against (1-u) b0 T0 + u b1 T1). The ellipse's rim, one closed edge, rounded R2 must give one closed solid of 4 faces"
+}

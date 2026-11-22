@@ -1,0 +1,12 @@
+{
+ "body_count": 1,
+ "faces": 13,
+ "method": "the operand has 12 faces. The chamfer adds its one face. Its end at the wall lies on the cylinder r 20.4 that both wall faces lie on, so it is bounded by the wall itself and adds no end face: 12 + 1 = 13 faces, one closed solid",
+ "outcome": "solid",
+ "source": "invariants",
+ "sources": [
+  "tangency-labs/solidcraft#15505",
+  "tangency-labs/solidcraft#14558"
+ ],
+ "what": "a 1 mm chamfer on the concave edge between a cone (z 1.5..3) and a plane through the Z axis; the edge's outer end lies on the wall where two faces of one cylinder (r 20.4 about Z) meet, at a seam across the chamfer's end. The chamfer must end on the cylinder, without a face of its own there"
+}

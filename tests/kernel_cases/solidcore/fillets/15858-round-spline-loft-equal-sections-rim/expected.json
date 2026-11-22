@@ -1,0 +1,10 @@
+{
+ "body_count": 1,
+ "method": "the blend must build: one closed solid whose face count is the loft's 3 plus the blend's 1. A round or chamfer of a ruled spline wall has no closed-form volume, so the volume is not graded",
+ "outcome": "solid",
+ "source": "invariants",
+ "sources": [
+  "tangency-labs/solidcraft#15858"
+ ],
+ "what": "control: the same loft with both spline sections at radius 15, where the loft face's normal is the same on both sides of every knot line; the end rim rounded R2 gives one closed solid of 4 faces"
+}

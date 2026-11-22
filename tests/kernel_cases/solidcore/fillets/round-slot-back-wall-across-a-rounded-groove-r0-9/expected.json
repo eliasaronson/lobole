@@ -1,0 +1,14 @@
+{
+ "body_count": 1,
+ "method": "V0 = 7931.946204485 as in chamfer-slot-back-wall-across-a-rounded-groove-0-4 (Cavalieri for the groove and rounds, the slot by quadrature of the closed-form top). The round: at each station the ball of radius 0.9 touches the wall y = -7.28 and the top n = f(x), and the section is the ball's arc between its contacts; the slot's side walls x = 1.3 and 3.1 cut it off. On the slope the section is r^2 tan(22.5 deg) - r^2 (pi/4)/2 over x in [xr, 3.1]; below xr each slice x = const meets each station's arc at one point, t = asin((x - m.x) sin w / (r v2.x)) / w on the arc m + r (sin((1-t) w) v1 + sin(t w) v2) / sin w, and the removed area is the polygon of those points, between the slice's exact ends, and the edge's corner. The result depends on both the slice and the station counts: 801 slices give 0.0367140074 with 400 stations per slice, 0.0367140763 with 800 and 0.0367140984 with 1600; 1601 slices with 800 stations give 0.0367141123. Removed 0.0367141 (converged to about 1e-8). V = 7931.90949038",
+ "outcome": "solid",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#18824"
+ ],
+ "tolerance": {
+  "abs_mm": 1e-06
+ },
+ "volume_mm3": 7931.90949038,
+ "what": "the block, groove and slot of chamfer-slot-back-wall-across-a-rounded-groove-0-4, the back wall's top edge chain rounded 0.9 instead: the ball nearly fills the groove's 1 mm round, its centre there on an ellipse 0.2 mm across"
+}

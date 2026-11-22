@@ -1,0 +1,10 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [10.0000000101, 1.01e-08], "end": [0, 10.0000000101]}},
+  {"command": "sketch.line", "params": {"points": [[0, 10.0000000101], [0, 0], [10.0000000101, 1.01e-08]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.revolve", "params": {"axis": "y", "body_name": "Dome"}},
+  {"command": "solid.mirror", "params": {"bodies": ["Dome"], "plane": "XZ", "combine": true}}
+ ]
+}

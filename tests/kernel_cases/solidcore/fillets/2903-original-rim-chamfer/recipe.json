@@ -1,0 +1,14 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.rectangle.rounded", "params": {"p0": [0, 0], "p1": [60, 40], "radius": 6}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 30, "body_name": "Body1"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 30}},
+  {"command": "sketch.rectangle.rounded", "params": {"p0": [3, 3], "p1": [57, 37], "radius": 3}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": -27, "operation": "cut", "targets": ["Body1"]}},
+  {"command": "solid.fillet", "params": {"edges": [[30.0, 3, 3], [57, 20.0, 3], [30.0, 37, 3], [3, 20.0, 3], [3.8786796564, 3.8786796564, 3], [3.8786796564, 36.1213203436, 3], [56.1213203436, 3.8786796564, 3], [56.1213203436, 36.1213203436, 3]], "radius": 1}},
+  {"command": "solid.chamfer", "params": {"edges": [[30.0, 3, 30], [57, 20.0, 30], [30.0, 37, 30], [3, 20.0, 30], [3.8786796564, 3.8786796564, 30], [3.8786796564, 36.1213203436, 30], [56.1213203436, 3.8786796564, 30], [56.1213203436, 36.1213203436, 30]], "distance": 0.47}}
+ ]
+}

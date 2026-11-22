@@ -2130,8 +2130,11 @@ copies them and writes `SOURCE` (the repository, the commit, every file's
 SHA-256); the runner refuses a tree that differs. `solidcore/<area>/<id>/`
 holds the `expected` block of a case solidcore added later, beside a recipe
 written here from the entry's description (solidcore's entries are kernel
-calls on recorded bodies, not scripts); the ones whose bodies are not a
-few plain dimensions are still to write. `LICENSES.txt` says what was taken and under which licence.
+calls on recorded bodies, not scripts), the body rebuilt from the
+description and the recorded vertices; where it needs a command with no
+translation (a fit-point spline, a surface loft, a coil of a sketch, a
+face split) the recipe still says it in SolidCraft's words and the case is
+untranslated. `LICENSES.txt` says what was taken and under which licence.
 The answer never comes from a kernel, theirs or ours.
 
 **A recipe is translated at run time** (`tools/kernel_cases_translate.py`)
@@ -2223,8 +2226,9 @@ the cases that took over 3 s.
 
 ### Known rows that are not kernel defects
 
-Some rows are `known: volume` and name this section instead of a
-known-bugs entry, because the difference is not a defect that can be shown:
+Some rows are `known: volume` or `known: topology` and name this section
+instead of a known-bugs entry, because the difference is not a defect that
+can be shown:
 
 - **Right to 1e-6, not to the digits stated.** The answer agrees to
   between 1e-9 and 1e-6 relative (a box by a micron), past the floor above.
@@ -2245,7 +2249,22 @@ known-bugs entry, because the difference is not a defect that can be shown:
   from a square to a circle depends on how the sections are paired, and a
   loft through five or ten circles of an elbow is not the torus (2e-6 to
   1e-3); a 1/4-28 UNF tapped hole takes the tap drill of SolidCraft's
-  table.
+  table. A chamfer on a curved face is placed by SolidCraft where a ball
+  touching both faces touches them, ours at an equal chord from the edge
+  on each (a half cylinder's root, 0.7127 mm³ where the case's 0.5231 is
+  its ball's). solidcore's chamfer along a tangent chain keeps its offsets,
+  taken at the wedge of the chain's plane-plane edge, where ours keeps equal
+  setbacks: a slot wall's chamfer running into a groove's round removes
+  0.274 mm³ where the case's 0.444 is solidcore's, and an independent
+  section integration gives 0.273 for equal setbacks. Two of its windows
+  are `known: accepted` for the same reason: under equal setbacks the
+  wall's chamfer and the window's stay apart (by 0.002 and 0.007 mm), so
+  the pair builds where solidcore's offsets overlap and refuse.
+- **A face thinner than the confusion.** Two rounded boxes 1e-4 mm apart
+  leave a sliver whose ends, where both outlines run tangent into the same
+  side, are 1e-4 long and under 1e-9 thick: the case counts each a face,
+  and a kernel at 1e-7 mm makes each an edge (8 faces of the case's 10, the
+  volume right to 2e-6).
 
 Every other failing row names a [known-bugs](../known-bugs.md) entry or a
 line under [Not built](#not-built).
@@ -2531,6 +2550,15 @@ reference case.
     against a boss, an opening or another blend ("the blend could not be
     built", "the fillet failed on N contour(s)", or a result the validity
     check refuses);
+  - a round whose rail runs on past the rim's end across a neighbour's top
+    face (a drum's rim beside a boss flush with its top), one as large as
+    the ledge it runs under (a branch tube's joint under a flange 1 mm
+    proud, at R1 exactly: 0.999 builds), one that shrinks to nothing where
+    two equal tubes touch, a mixed-convexity corner whose concave round
+    has to roll over the convex one's end, a joint round whose joint a
+    tube's seam vertex cuts 0.37 mm short of a chamfer's crease (with the
+    seam elsewhere it builds), and a chamfer ending where two faces of one
+    cylinder meet (OpenCASCADE builds it invalid);
   - a Shell whose wall is thicker than a round inside it, that opens the
     side of a thin rib, or whose floor falls away to a drain, and a Shell
     with no open face (a sealed void);

@@ -1,0 +1,8 @@
+{
+ "commands": [
+  {"command": "solid.cylinder", "params": {"base": [0, 0, 34], "radius": 34, "height": 56, "body_name": "Body1"}},
+  {"command": "solid.cylinder", "params": {"base": [0, 0, 84], "radius": 35, "height": 6, "operation": "join", "targets": ["Body1"]}},
+  {"command": "solid.cylinder", "params": {"base": [0, 0, 60], "axis": "X", "radius": 25, "height": 62, "operation": "join", "targets": ["Body1"]}},
+  {"command": "solid.fillet", "params": {"edges": [[28.0933256216, -19.151111078, 76.0696902422], [28.0933256216, -19.151111078, 43.9303097578], [28.0933256216, 19.151111078, 43.9303097578], [28.0933256216, 19.151111078, 76.0696902422]], "radius": 1}}
+ ]
+}

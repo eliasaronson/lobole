@@ -1,0 +1,9 @@
+{
+ "commands": [
+  {"command": "solid.cylinder", "params": {"base": [0, 0, 0], "radius": 22.5, "height": 30, "body_name": "Body1"}},
+  {"command": "solid.box", "params": {"corner": [0, -9, 0], "length": 110, "width": 18, "height": 7.5, "operation": "join"}},
+  {"command": "solid.chamfer", "params": {"edges": [[-22.5, 0, 0]], "distance": 7.5}},
+  {"command": "solid.chamfer", "params": {"edges": [[60, -9, 0], [60, 9, 0]], "distance": 7.5, "distance2": 4.330127018922194}},
+  {"command": "solid.fillet", "params": {"edges": [[17.4522107625, -6.8297390306, 3.7409977353]], "radius": 5}}
+ ]
+}

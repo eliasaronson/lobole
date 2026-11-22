@@ -1,0 +1,9 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": {"origin": [-22, 0, 44], "x_dir": [0, 0, 1], "y_dir": [0, -1, 0]}}},
+  {"command": "sketch.spline.control_point", "params": {"points": [[-69.446366, 2.808157], [-69.743002617, 2.828967043], [-70.039639304, 2.849776091], [-70.336276, 2.870585]]}},
+  {"command": "sketch.line", "params": {"points": [[-70.336276, 2.870585], [-70.241215685, -2.1483713459], [-69.446366, 2.808157]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 44, "operation": "new", "body_name": "sliver"}}
+ ]
+}

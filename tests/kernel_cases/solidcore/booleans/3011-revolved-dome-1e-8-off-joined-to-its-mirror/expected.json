@@ -1,0 +1,13 @@
+{
+ "body_count": 1,
+ "method": "two hemispheres r 10 meeting in the disc y = 0: V = 2*(2/3*pi*10^3) = 4/3*pi*10^3 = 4188.790; one body. Tolerance 1e-3 relative",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcore#3011"
+ ],
+ "tolerance": {
+  "rel": 0.001
+ },
+ "volume_mm3": 4188.79,
+ "what": "a dome made by `solid.revolve` (quarter disc r 10 about y, its arc passing through [7.0710678118654755, 7.0710678], about 1e-8 off the true circle (its y is rounded to 8 decimals; the exact point passes)) joined to its own mirror across y = 0 (`solid.mirror` with combine): a sphere. With the arc about 1e-8 off, the check refused the result ('Face Near missing Seam') until #13713 was fixed (#14348); the same case with the exact arc passes, and so does a primitive sphere joined to a cylinder (2851)"
+}

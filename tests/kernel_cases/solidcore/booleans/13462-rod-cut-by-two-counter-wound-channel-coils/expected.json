@@ -1,0 +1,14 @@
+{
+ "body_count": 1,
+ "method": "Each horizontal section of a screw sweep of a profile D in a plane normal to the axis is one rotated copy of D. With D_in = D n disk(16.5), A_in its area, one sweep removes A_in*|p|; the two sweeps' sections at one height are D_in turned by +t and -t, whose overlap integrates over the turn to (|p|/2pi)*Int s(r)^2 r dr, s(r) the angle D_in covers on the circle of radius r. s(r) found exactly from the circle's crossings with the profile's lines and axis-centred arcs, integrated by adaptive Gauss-Kronrod: A_in = 4.214046963094, Int s^2 r dr = 1.279023422464. V = pi*16.5^2*124 - 2*A_in*30 + (30/2pi)*Int s^2 r dr. The one-sweep form agrees with a single cut to 3e-12. Tolerance 1e-6: the sweeps' walls are within 3e-3 of the screw surfaces (|p|*1e-4), which moves the two sweeps' overlap by about 2e-3 mm^3 (1.6e-8 here)",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#13462",
+  "tangency-labs/solidcore#3214"
+ ],
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "volume_mm3": 105810.29046175262,
+ "what": "a rod (r 16.5, 124 long) cut by two one-turn screw sweeps of one channel profile, one right-handed and one left-handed, pitch 30, both starting on the rod's top face: the channel's two radial walls meet the rod's surface, so each sweep's rail on it is a helix there and the two rails cross. The cut's new edge along a crossing rail took an interval its UV curve's trim had snapped 2.4e-12 past its 3D curve's end ('SmEdge test 2, Bad Domain')"
+}

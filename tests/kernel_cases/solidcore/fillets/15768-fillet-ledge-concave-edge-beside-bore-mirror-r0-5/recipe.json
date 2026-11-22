@@ -1,0 +1,24 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.line", "params": {"points": [[18, 0], [18, 48], [-18, 48], [-18, 0]]}},
+  {"command": "sketch.arc.three_point", "params": {"start": [-18, 0], "end": [18, 0], "through": [0, -18]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 15, "body_name": "Part"}},
+  {"command": "solid.box", "params": {"corner": [-7.5, -20, 0], "length": 15, "width": 70, "height": 6, "operation": "cut", "targets": ["Part"]}},
+  {"command": "solid.cylinder", "params": {"base": [0, 0, 15], "radius": 12, "height": -3, "operation": "cut", "targets": ["Part"]}},
+  {"command": "solid.cylinder", "params": {"base": [0, 0, 12], "radius": 6, "height": -6, "operation": "cut", "targets": ["Part"]}},
+  {"command": "solid.box", "params": {"corner": [-18, 21, 15], "length": 36, "width": 27, "height": 18, "operation": "join", "targets": ["Part"]}},
+  {"command": "solid.box", "params": {"corner": [-9, 21, 15], "length": 18, "width": 6, "height": 18, "operation": "cut", "targets": ["Part"]}},
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, 30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}},
+  {"command": "sketch.line", "params": {"points": [[-18, 45], [-18, 33], [18, 33], [18, 45]]}},
+  {"command": "sketch.arc.three_point", "params": {"start": [18, 45], "end": [-18, 45], "through": [0, 63]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": -18, "operation": "join", "targets": ["Part"]}},
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, 21, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}},
+  {"command": "sketch.slot.center_to_center", "params": {"p0": [0, 33], "p1": [0, 45], "width": 24}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": -27, "operation": "cut", "targets": ["Part"]}},
+  {"command": "solid.fillet", "params": {"edges": [[15, 30, 33]], "radius": 0.5}}
+ ]
+}

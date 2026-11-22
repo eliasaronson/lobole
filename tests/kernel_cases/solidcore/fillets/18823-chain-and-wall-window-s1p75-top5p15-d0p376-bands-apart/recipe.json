@@ -1,0 +1,22 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "YZ"}},
+  {"command": "sketch.line", "params": {"closed": true, "points": [[-10, 0], [10, 0], [10, 15], [0, 15], [-10, 5]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 20, "direction": "symmetric"}},
+  {"command": "sketch.create", "params": {"plane": "YZ"}},
+  {"command": "sketch.line", "params": {"closed": true, "points": [[-18.8388, -0.3033], [2.3744, 20.9099], [4.4957, 18.7886], [-16.7175, -2.4246]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.revolve", "params": {"axis": "l1", "operation": "cut"}},
+  {"command": "solid.fillet", "params": {"edges": [[1.6583, -5, 10], [-1.6583, -5, 10]], "radius": 1}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 2}},
+  {"command": "sketch.line", "params": {"closed": true, "points": [[3.2133, -11.3595], [5.0236, -11.3595], [3.1218, -7.2811], [1.3115, -7.2811]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 15, "operation": "cut"}},
+  {"command": "sketch.create", "params": {"plane": {"origin": [2.504235925, -8.6558295, 0], "x_dir": [0.4226183, -0.9063078, 0], "y_dir": [0, 0, 1]}}},
+  {"command": "sketch.line", "params": {"closed": true, "points": [[-0.1, 4.65], [0.1, 4.65], [0.1, 5.15], [-0.1, 5.15]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 1.5, "operation": "cut"}},
+  {"command": "solid.chamfer", "params": {"edges": [[2.4395, -9.7, 5.3], [2.051082025, -8.86713865, 5.15]], "distance": 0.376}}
+ ]
+}

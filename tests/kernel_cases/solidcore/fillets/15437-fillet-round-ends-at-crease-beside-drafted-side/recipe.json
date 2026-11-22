@@ -1,0 +1,13 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}},
+  {"command": "sketch.line", "params": {"points": [[0, 0], [0.8, 0], [6, 0.2725204522718143], [6, 8], [0, 8]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": -12, "body_name": "Block"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": -1}},
+  {"command": "sketch.line", "params": {"points": [[-1, 10.094334002709473], [7, 9.675071768445145], [7, 20], [-1, 20]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 10, "operation": "cut", "targets": ["Block"]}},
+  {"command": "solid.fillet", "params": {"edges": [[3.4, 9.863739773864094, 0.13626022613590716]], "radius": 2.6}}
+ ]
+}

@@ -1,0 +1,16 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.line", "params": {"points": [[50, 0], [25, 43.3012701892], [-25, 43.3012701892], [-50, 0], [-25, -43.3012701892], [25, -43.3012701892]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 50, "body_name": "Bowl"}},
+  {"command": "sketch.create", "params": {"plane": {"origin": [1e-10, 0, 0], "x_dir": [0.5, 0.8660254038, 0.0], "y_dir": [0, 0, 1]}}},
+  {"command": "sketch.line", "params": {"points": [[0, 72], [69, 72]]}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 72], "start": [49.999999999168075, 24.450026287250246], "end": [69.0, 72.00000000000001]}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 72], "start": [25.000000000535596, 7.688259236954096], "end": [49.999999999168075, 24.450026287250246]}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 72], "start": [1.2675094371175105e-14, 3.0], "end": [25.000000000535596, 7.688259236954096]}},
+  {"command": "sketch.line", "params": {"points": [[0, 3], [0, 72]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.revolve", "params": {"axis": "y", "operation": "cut", "targets": ["Bowl"]}}
+ ]
+}

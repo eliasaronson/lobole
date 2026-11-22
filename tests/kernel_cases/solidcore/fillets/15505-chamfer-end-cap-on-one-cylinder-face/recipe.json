@@ -1,0 +1,29 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": -2.4}},
+  {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 21.3}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 8.4, "operation": "new", "body_name": "Body1"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 6}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [6.464180708855, 17.760190532854], "sweep": 290}},
+  {"command": "sketch.line", "params": {"points": [[18.9, 0.0], [20.4, 0.0]]}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [20.4, 0.0], "sweep": 45}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [14.424978336206, 14.424978336206], "sweep": 25}},
+  {"command": "sketch.line", "params": {"points": [[6.977210923844, 19.169729464033], [6.464180708855, 17.760190532854]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 6, "direction": "negative", "operation": "cut"}},
+  {"command": "sketch.create", "params": {"plane": "XZ"}},
+  {"command": "sketch.line", "params": {"points": [[18.9, -3], [20.4, -1.5], [20.4, -6], [18.9, -6]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.revolve", "params": {"axis": "y", "angle": 45, "operation": "join"}},
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.circle.center", "params": {"center": [18.84714246323, 7.806742020248], "radius": 0.6}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 3, "operation": "join"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 6}},
+  {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 25}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 1, "direction": "negative", "operation": "cut"}},
+  {"command": "solid.chamfer", "params": {"edges": [[13.894648250345078, 13.894648250345076, 2.25]], "distance": 1}}
+ ]
+}

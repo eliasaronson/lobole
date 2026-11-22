@@ -1,0 +1,6 @@
+{
+ "commands": [
+  {"command": "solid.cylinder", "params": {"base": [30, 20, 20], "radius": 2.5, "height": 5, "axis": "X", "body_name": "Rod"}},
+  {"command": "solid.sphere", "params": {"center": [25, 17.5, 10], "radius": 12.5, "operation": "intersect", "targets": ["Rod"]}}
+ ]
+}

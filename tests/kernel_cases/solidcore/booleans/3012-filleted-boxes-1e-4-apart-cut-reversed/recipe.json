@@ -1,0 +1,11 @@
+{
+ "commands": [
+  {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 40, "width": 30, "height": 10, "body_name": "A"}},
+  {"command": "solid.fillet", "params": {"edges": [[0, 0, 5], [40, 0, 5], [0, 30, 5], [40, 30, 5]], "radius": 2}},
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.rectangle.rounded", "params": {"p0": [0.0001, 0], "p1": [40.0001, 30], "radius": 2}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 10, "operation": "new", "body_name": "B"}},
+  {"command": "solid.combine", "params": {"target": "B", "tools": ["A"], "operation": "cut"}}
+ ]
+}

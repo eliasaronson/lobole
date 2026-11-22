@@ -1,0 +1,25 @@
+{
+ "bbox": {
+  "max": [
+   15,
+   -59.50961894323342,
+   46.47114317029974
+  ],
+  "min": [
+   -15,
+   -110.49038105676658,
+   -15
+  ]
+ },
+ "body_count": 1,
+ "method": "a R15 cylinder along -Y from y=-60 for 40 and a R15 tube from (0,-72.5,-4.330127) along (0,-1/2,sqrt3/2) for 50 joined; the tube's outer face split by the plane through the joint's top point (0,-66.339746,15) normal to the tube's axis, then by the YZ plane, so the joint's top point is a vertex of five edges: the two joint edges, the split circle's two halves and the seam. The two joint edges rounded r4 (tangent chain on). The splits lie on the tube's one surface, so they are no corner: the round runs through. A concave round adds material inside the joint only, so the box is the unrounded body's: x and the crank's z +-15; y from the tube's end disc, -97.5 - 15 sqrt3/2 = -110.490381, to its base disc, -72.5 + 15 sqrt3/2 = -59.509619; z up to the end disc, -4.330127 + 50 sqrt3/2 + 15/2 = 46.471143; graded to 4e-5, the blends' approximation tolerance.",
+ "outcome": "solid",
+ "source": "invariants",
+ "sources": [
+  "tangency-labs/solidcraft#16654"
+ ],
+ "tolerance": {
+  "abs_mm": 4e-05
+ },
+ "what": "a 4 mm round along the joint of two R15 cylinders whose axes cross at 60 degrees, where the tube's cylinder is split on its own surface through the joint's top point (a circle across it and its seam), builds instead of being refused as a corner no blend handles"
+}

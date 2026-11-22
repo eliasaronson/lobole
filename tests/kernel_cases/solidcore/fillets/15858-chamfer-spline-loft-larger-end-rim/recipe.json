@@ -1,0 +1,12 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "YZ", "offset": -30, "name": "Sec0"}},
+  {"command": "sketch.spline.fit_point", "params": {"points": [[0.0, 5.0], [7.5, 7.01], [12.99, 12.5], [15.0, 20.0], [12.99, 27.5], [7.5, 32.99], [0.0, 35.0], [-7.5, 32.99], [-12.99, 27.5], [-15.0, 20.0], [-12.99, 12.5], [-7.5, 7.01]], "periodic": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sketch.create", "params": {"plane": "YZ", "offset": 30, "name": "Sec1"}},
+  {"command": "sketch.spline.fit_point", "params": {"points": [[0.0, 0.0], [10.0, 2.679], [17.321, 10.0], [20.0, 20.0], [17.321, 30.0], [10.0, 37.321], [0.0, 40.0], [-10.0, 37.321], [-17.321, 30.0], [-20.0, 20.0], [-17.321, 10.0], [-10.0, 2.679]], "periodic": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.loft", "params": {"sections": [{"sketch": "Sec0"}, {"sketch": "Sec1"}], "body_name": "LoftBody"}},
+  {"command": "solid.chamfer", "params": {"edges": [[30, 10, 37.321]], "distance": 2}}
+ ]
+}

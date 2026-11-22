@@ -1,0 +1,10 @@
+{
+ "body_count": 1,
+ "method": "cylinder r 2.5 from x 30 to 35 on the axis y 20, z 20; sphere r 12.5 at (25, 17.5, 10). With y, z measured from the cylinder axis, a point of the section is inside the sphere for x up to 25 + q, q = sqrt(156.25 - (2.5 + y)^2 - (10 + z)^2), which is under 35 everywhere (q <= 7.1), so the length inside both is q - 5 where q > 5. V = the integral of (q - 5) over the disk r 2.5 where q > 5: 37.385197 (midpoint rule in polar coordinates, 1000^2, 2000^2 and 4000^2 cells agree to 1e-7). The intersection curve touches the sphere seam (its meridian in the plane y 17.5 on the +x side) at (32.5, 17.5, 20), since 7.5^2 + 10^2 = 12.5^2.",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#17167"
+ ],
+ "volume_mm3": 37.385197,
+ "what": "a cylinder intersected with a sphere whose seam its side touches at one point (fuzz seed 660): refused as SmFace Test #29 Face crosses Seam, because the boolean joined the two intersection edges at the touch point"
+}

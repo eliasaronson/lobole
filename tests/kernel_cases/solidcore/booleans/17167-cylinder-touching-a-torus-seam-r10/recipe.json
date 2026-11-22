@@ -1,0 +1,6 @@
+{
+ "commands": [
+  {"command": "solid.cylinder", "params": {"base": [22.5, 30, 7.5], "radius": 10, "height": 20, "body_name": "Rod"}},
+  {"command": "solid.torus", "params": {"center": [10, 20, 22.5], "major": 15, "minor": 5, "operation": "intersect", "targets": ["Rod"]}}
+ ]
+}

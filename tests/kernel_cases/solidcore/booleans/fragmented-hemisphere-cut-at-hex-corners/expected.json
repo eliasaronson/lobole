@@ -1,0 +1,9 @@
+{
+ "source": "analytic",
+ "method": "Closed-form polar integral of the spherical roof over the regular hexagon; derivation in what. The +5e-11 mm X shift changes the exact volume by <4e-7 mm^3 (roof derivative bound in what), below the grading tolerance.",
+ "body_count": 1,
+ "volume_mm3": 72904.37954157148,
+ "tolerance": {
+  "rel": 1e-06
+ }
+}

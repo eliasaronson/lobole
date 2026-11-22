@@ -1,0 +1,13 @@
+{
+ "body_count": 1,
+ "method": "The chain's chamfer on the wall: solidcore keeps a chamfer's offsets along a tangent chain, taken at the wedge of its edge between planes (the wall and the slope, 72.612 deg; surface/procedural_blend/chamfer.rs), r = d tan(36.306 deg) off the wall and off the slope, the r1 round or the r3 groove. Its rail on the wall is the foot on the wall of the point standing r off both, solved section by section along the chain (independently, with no kernel output). The window's chamfer is between two planes at 90 deg: it takes the wall from its top edge up to d above it, over the window's 0.2 along the wall, and ends on the window's side walls. On the window's span the chain's rail on the wall stays 0.05723 above the top of the window's strip, so the bands are apart and the two chamfers remove separate material (main refused it). V0 = 4962.01269 (the part before the window: see 18823-chamfer-slot-wall-edge-running-on-into-a-round); the window, 0.2 x 0.5 x 1.0, lies wholly in the part: 0.1; the chain's chamfer removes R = 0.44378 (the material on the edge's side of the chord between the rails' feet, integrated on a 0.005 grid; 0.01 gives 0.0006 less at 0.4); the window's chamfer removes d^2/2 x 0.2 = 0.016000. V = 4961.45291, within 0.003.",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#18823"
+ ],
+ "volume_mm3": [
+  4961.4499,
+  4961.4559
+ ],
+ "what": "issue 18823's part (a block with a 45 deg slope, a groove with r1 rounds and a slot slanted 65 deg in plan; see 18823-chamfer-slot-wall-edge-running-on-into-a-round) with a window 0.2 wide, 0.5 tall and 1.0 deep cut square into the slot's inner wall, centred 1.85 along the wall from its back corner (1.3115, -7.2811), its top edge at z = 4.95. A 0.4 chamfer on the wall's top edge, with its tangent chain, and on the window's top edge together."
+}

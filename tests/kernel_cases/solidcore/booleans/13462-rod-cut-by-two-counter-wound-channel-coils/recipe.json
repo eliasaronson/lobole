@@ -1,0 +1,14 @@
+{
+ "commands": [
+  {"command": "solid.cylinder", "params": {"base": [0, 0, 0], "radius": 16.5, "height": 124, "body_name": "Rod"}},
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, 0, 124], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Channel"}},
+  {"command": "sketch.line", "params": {"points": [[16.0820519578, 2.5654660461], [15.5, 1.9916037002]]}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [15.5, 1.9916037002], "end": [15.5, -1.9916037002]}},
+  {"command": "sketch.line", "params": {"points": [[15.5, -1.9916037002], [16.0820519578, -2.5654660462], [16.2226064248, -3.0128127705], [17.205794693, -3.1954074838]]}},
+  {"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [17.205794693, -3.1954074838], "end": [17.205794693, 3.1954074838]}},
+  {"command": "sketch.line", "params": {"points": [[17.205794693, 3.1954074838], [16.2226064249, 3.0128127705], [16.0820519578, 2.5654660461]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.coil", "params": {"sketch": "Channel", "base": [0, 0, 124], "axis": [0, 0, -1], "pitch": 30, "revolutions": 1, "operation": "cut", "targets": ["Rod"]}},
+  {"command": "solid.coil", "params": {"sketch": "Channel", "base": [0, 0, 124], "axis": [0, 0, -1], "pitch": 30, "revolutions": 1, "clockwise": true, "operation": "cut", "targets": ["Rod"]}}
+ ]
+}

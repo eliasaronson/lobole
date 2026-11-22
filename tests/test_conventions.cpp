@@ -2090,7 +2090,10 @@ TEST_CASE("every doc a file cites exists, down to its heading",
       if (!e.is_regular_file() || !exts.contains(e.path().extension()) ||
           s.find("thirdparty") != std::string::npos ||
           s.find("/golden/") != std::string::npos ||
-          s.find("/results/") != std::string::npos)
+          s.find("/results/") != std::string::npos ||
+          // Copied unchanged from another repository, citing its docs
+          // (docs/modeling/README.md#kernel-cases).
+          s.find("/kernel_cases/solidc") != std::string::npos)
         continue;
       files.push_back(e.path());
     }

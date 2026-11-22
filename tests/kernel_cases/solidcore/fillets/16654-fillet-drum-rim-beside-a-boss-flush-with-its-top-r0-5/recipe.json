@@ -1,0 +1,7 @@
+{
+ "commands": [
+  {"command": "solid.cylinder", "params": {"base": [0, 0, 0], "radius": 50, "height": 40, "body_name": "Drum"}},
+  {"command": "solid.cylinder", "params": {"base": [19.6295573829, 51.3778208661, 28], "radius": 5.5, "height": 12, "operation": "join", "targets": ["Drum"]}},
+  {"command": "solid.fillet", "params": {"edges": [[-29.8112437483, -40.1408737596, 40], [31.5608718147, 38.7802961605, 40]], "radius": 0.5}}
+ ]
+}

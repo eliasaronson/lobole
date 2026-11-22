@@ -1,0 +1,12 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, -14000.0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "A"}},
+  {"command": "sketch.spline.fit_point", "params": {"points": [[-20000.0, 15000.0], [-6666.666666666666, 13960.769515458673], [6666.666666666668, 16039.230484541327], [20000.0, 15000.0]], "ids": ["s1"]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, 14000.0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "B"}},
+  {"command": "sketch.spline.fit_point", "params": {"points": [[-20000.0, 17000.0], [-6666.666666666666, 16133.974596215561], [6666.666666666668, 16133.974596215561], [20000.0, 17000.0]], "ids": ["s1"]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "surface.loft", "params": {"sections": [{"sketch": "A"}, {"sketch": "B"}], "body_name": "Body1"}},
+  {"command": "surface.thicken", "params": {"bodies": ["Body1"], "thickness": -250}}
+ ]
+}

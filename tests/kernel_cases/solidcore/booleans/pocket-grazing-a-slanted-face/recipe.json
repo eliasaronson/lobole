@@ -1,0 +1,17 @@
+{
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}},
+  {"command": "sketch.line", "params": {"points": [[26.716, -3.6805], [26.716, 51.3195], [18.716, 51.3195], [18.716, 58.6204], [15.7793, 59.9045005604], [-2.7312, 42.7860005399], [-11.6645987472, 30.7363994334], [-28.284, 0.3195], [-28.284, -3.6805]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 60, "body_name": "Pocketed block"}},
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, -6, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}},
+  {"command": "sketch.arc.three_point", "params": {"start": [14.7160000015, 58.0466313918], "end": [15.3581, 59.5149996319], "through": [14.88352394040428, 58.847950635276376]}},
+  {"command": "sketch.line", "params": {"points": [[15.3581, 59.5149996319], [14.000201594, 60.9833006642], [-4.2264, 44.1274019938], [-13.3535, 31.8166015179], [-26.2368, 8.2375016121], [-24.4817, 7.2785021386]]}},
+  {"command": "sketch.arc.three_point", "params": {"start": [-24.4817, 7.2785021386], "end": [-22.7266, 8.3195011904], "through": [-23.746917189229357, 8.039703798937234]}},
+  {"command": "sketch.line", "params": {"points": [[-22.7266, 8.3195011904], [10.716, 8.3195011904]]}},
+  {"command": "sketch.arc.three_point", "params": {"start": [10.716, 8.3195011904], "end": [14.7159999992, 12.3195313918], "through": [13.544460648713297, 9.491061897194832]}},
+  {"command": "sketch.line", "params": {"points": [[14.7159999992, 12.3195313918], [14.7160000015, 58.0466313918]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 21, "operation": "cut", "targets": ["Pocketed block"]}}
+ ]
+}

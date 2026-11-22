@@ -1,0 +1,10 @@
+{
+ "body_count": 1,
+ "method": "cylinder r 2.5 on the axis x 15, y 12.5 from z 7.5 to 35; torus R 7.5, r 5 about the z axis through (10, 10), centre z 15. The torus spans z 10 to 20, inside the cylinder s length, so V = the integral over the cylinder s disk of 2 sqrt(25 - (rho - 7.5)^2), rho the distance to the torus axis, where |rho - 7.5| < 5: 175.625004 (midpoint rule in polar coordinates, 1000^2 to 4000^2 cells agree to 1e-8).",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcraft#17167"
+ ],
+ "volume_mm3": 175.625004,
+ "what": "a cylinder r 2.5 intersected with a torus whose seam its side touches (fuzz seed 686): refused twice as SmFace Test #29 Face crosses Seam"
+}

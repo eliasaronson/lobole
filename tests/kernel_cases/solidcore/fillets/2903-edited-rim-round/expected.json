@@ -1,0 +1,12 @@
+{
+ "source": "analytic",
+ "body_count": 1,
+ "faces": 27,
+ "edges": 64,
+ "vertices": 40,
+ "volume_mm3": 20771.58921103918,
+ "tolerance": {
+  "rel": 1e-09
+ },
+ "method": "V0=(70*50-4*A*6^2)*33-(66*46-4*A*4^2)*31, L=192+8*pi. There is no floor round. A=1-pi/4 and M=5/6-pi/4 are the unit round section area and first moment. Outward parallel contours have Jacobian1+kappa*u and total turning2*pi. For the top inner round, subtract L*A*r^2+2*pi*M*r^3, at size0.627. Eight new strip faces, sixteen extra edges and eight extra vertices give counts(27, 64, 40); the existing annular top face remains annular."
+}

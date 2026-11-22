@@ -101,26 +101,92 @@ the heading if it is not here yet.
   `1008-fillet-tray-floor-and-three-of-four-corners`,
   `cov-fillet-section-chamfer-pipe-on-plate-2`,
   `solidcraft/booleans/2810-taper-extrude-arcs-meeting-at-corners`,
+  `solidcore/fillets/round-slot-back-wall-across-a-rounded-groove-r0-9`
+  (3e-8 of 7931.9, a round along a tangent chain over a groove's round),
   `solidcraft/threads/3368-faceted-prism-with-bore-and-cross-hole` (8e-5,
   a faceted prism with a bore: no blend, kept here until it is looked at).
 
-### A round after a bend round leaves a face more
+### A blend beside a plane an add left in two pieces is refused at every size
 
-- **Symptom:** an L bracket whose inside bend is rounded, then its front
-  inner outline rounded R1 along the tangent chain, has the right volume
-  on 13 faces; the case counts 12.
-- **Cause:** OpenCASCADE's blend builder, not the count. The chain's
-  straight rounds are a cylinder each, and the round along the bend's arc
-  is a torus (4.48 mm²) and, where it meets the round of the foot's edge at
-  the arc's tangent end (x about 6.8, z about 4.9), a B-spline patch of its
-  own (3.8 mm², `kind: other` in `list_elements`): the same ball rolling
-  between the same two surfaces, built as two faces that cannot merge. The
-  volume is right to 2e-10.
-- **Likely fix:** none of ours short of building the round along a
-  tangent chain ourselves; the count stays a known topology row.
-- **Where:** `FilletFeature`.
+- **Symptom:** a Fillet or Chamfer on an edge that ends on, or runs beside,
+  a plane an `add` left as two coplanar faces is refused whatever its size,
+  and the size its refusal names does not fit either. An L joined from two
+  boxes, its wall's edge alone: "no radius builds on these edges, down to
+  0.00257 mm", where the same L extruded from one profile rounds R2.5 and
+  R3.5 to their closed forms (9463.66702, 9409.58736). A cylinder joined
+  flush with a bar along its bottom, its bottom rim chamfered: "the largest
+  distance that fits is 0.121 mm", where 7.5 builds once the bottom is one
+  face. An L bracket's front inner outline rounded after its bend round
+  builds 13 faces where the case counts 12.
+- **Cause:** an `add` keeps the coplanar faces it joined apart until a
+  Refine (the operation table's `Refine` row), and OpenCASCADE's blend
+  builder fails, or builds a patch more, where the blend's end or its run
+  meets the edge between two pieces of one plane. The size search then
+  reads the builder's failure at every size as the size's. Every case
+  below passes when a Refine follows each `add` (an experiment on the
+  corpus; the translator does not do it), except where noted.
+- **Where:** `ApplyBodyMode` (`src/core/BodyMode.cpp`) leaves the faces;
+  `EdgeBlendNamed` (`src/core/ElementHistory.cpp`) blends on them.
+- **Likely fix:** merge the coplanar faces next to the picked edges on the
+  blend's copy before the builder (`ShapeUpgrade_UnifySameDomain`, names
+  through its history as `RefineFeature` keeps them), or merge them in the
+  `add` itself. Either moves element names, so it is a change of its own.
+- **Cases:** `solidcore/fillets/12342-round-wall-and-ledge-edges-r2-5`,
+  `solidcore/fillets/12342-round-wall-edge-r5-past-the-wall-refused` (at
+  R5 still [not built](modeling/README.md#not-built) once merged: past
+  its 4 mm wall), `solidcore/fillets/14755-round-between-cone-and-plane-chamfers`
+  (its rim chamfer; the bar's chamfers after it take two distances and are
+  not translated), `solidcraft/fillets/556-fillet-edge-ending-on-curved-boss`,
+  `851-chamfer-arc-and-top-front-2`, `851-chamfer-arc-top-edge-9-5`,
+  `851-fillet-top-front-and-front-left-upright`,
+  `851-fillet-top-front-then-front-left-upright`,
+  `851-fillet-top-front-then-upright`,
+  `every-l-bracket-both-bends-r3-r8-concentric`,
+  `every-l-bracket-outside-bend-r5`,
+  `every-l-bracket-front-inner-outline-after-bend-round-r1` (the face more).
+
+### A round runs on across a crease of a few degrees
+
+- **Symptom:** a Fillet of one edge also rounds the edge beyond a crease
+  of up to about five degrees, which nobody picked. A block whose bottom
+  turns up 3° at x = 0.8, its bottom side edge's long piece rounded R2.6,
+  comes back with both pieces round: 459.17945 mm³ where the short piece
+  left sharp gives 459.94891. On the same block a crease of 1° or 3° is
+  crossed, one of 6°, 10° or 20° is not.
+- **Cause:** OpenCASCADE's blend builder adds an edge's tangent chain, and
+  it reads a crease under its own angular tolerance as tangent; nothing of
+  ours compares the contour it made with the edges picked.
+- **Where:** `AddBlendEdges` (`src/core/ElementHistory.cpp`).
+- **Likely fix:** after `Add`, walk the builder's contour
+  (`NbEdges`/`Edge`) and refuse, naming the crease and its angle, a
+  contour that crossed a vertex where the faces meet at more than the
+  modeller's own tangency (`ChFi3d::IsTangentFaces` at a tighter angle), or
+  give the builder that tolerance (`SetParams`).
 - **Case:**
-  `solidcraft/fillets/every-l-bracket-front-inner-outline-after-bend-round-r1`.
+  `solidcore/fillets/15437-fillet-round-ends-at-crease-beside-drafted-side`.
+
+### A blend the validity check passes can be far off in volume
+
+- **Symptom:** the size a refused Fillet names as the one that fits builds
+  a body `check_geometry` passes with a volume nowhere near a round's. Two
+  equal tubes in a tee, their whole joint at R2: refused, "the largest
+  radius that fits is 0.143 mm"; R0.143 builds 76595.87 mm³ on a union of
+  75823.00, 773 mm³ added where a round of that size adds under 1. One of
+  the joint's half ellipses alone at R1 and R0.143 builds about 750 mm³
+  too many, also valid; at R2 and R0.1 it adds 16.1 and 0.042, as it
+  should.
+- **Cause:** not established. OpenCASCADE's builder returns a solid whose
+  faces pass BRepCheck but enclose more than the union and the round; the
+  validity check (`Measure::InvalidReasons`) is all the size search and the
+  feature ask of a result.
+- **Where:** `FilletFeature`; the size search
+  ([the size that fits](modeling/README.md#the-size-that-fits)).
+- **Likely fix:** hold a blend's result to the volume a blend of its size
+  can move (the union's volume plus or minus the edges' length times the
+  section r² (1 - pi/4), doubled for curvature) before it is kept or named
+  as the size that fits.
+- **Case:** `solidcore/fillets/16654-fillet-equal-tube-tee-pinched-at-the-sides-r2`
+  (its row is the refusal at R2; the wrong volume is at the size named).
 
 ### A cavity touching the outer skin along a line is one shell with it
 

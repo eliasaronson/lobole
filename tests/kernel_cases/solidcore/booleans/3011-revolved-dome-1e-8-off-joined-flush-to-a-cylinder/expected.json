@@ -1,0 +1,13 @@
+{
+ "body_count": 1,
+ "method": "hemisphere V = 2/3*pi*10^3 = 2094.395 (the arc being about 1e-8 off its circle changes it by about 1e-8 relative, far inside the tolerance); cylinder V = pi*10^2*15 = 4712.389; they meet in the disc y = 0 of area 314.159 and share no volume, so V = 2/3*pi*10^3 + pi*10^2*15 = 6806.784; one body. Tolerance 1e-3 relative",
+ "source": "analytic",
+ "sources": [
+  "tangency-labs/solidcore#3011"
+ ],
+ "tolerance": {
+  "rel": 0.001
+ },
+ "volume_mm3": 6806.784,
+ "what": "a dome made by `solid.revolve` (quarter disc r 10 about y, its arc passing through [7.0710678118654755, 7.0710678], about 1e-8 off the true circle (its y is rounded to 8 decimals; the exact point passes)) joined flush to a cylinder of the same radius (r 10, h 15, below y = 0, sharing the circular face y = 0): one solid. With the arc about 1e-8 off, the check refused the result ('Face Near missing Seam') until #13713 was fixed (#14348); the same case with the exact arc passes, and so does a primitive sphere joined to a cylinder (2851)"
+}
