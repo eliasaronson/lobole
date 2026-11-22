@@ -5,6 +5,7 @@
 // explain is.
 
 #include "core/mesh/Split.h"
+#include "core/Angles.h"
 
 #include <algorithm>
 #include <array>
@@ -500,16 +501,16 @@ std::string TwoSurfaces::Describe() const {
     return s;
   }
   std::string s = "two planes here: " + Fmt(offset) + " mm apart and " +
-                  Fmt(angle * 180.0 / M_PI) + " deg to each other, through " +
-                  Vec(throughA) + " and " + Vec(throughB) +
-                  "; click one, or give ";
-  s += angle * 180.0 / M_PI > 1.0 ? "axis (the normal of the one you mean)"
-                                  : "within (a box round the one you mean)";
+                  Fmt(angles::ToDegrees(angle)) +
+                  " deg to each other, through " + Vec(throughA) + " and " +
+                  Vec(throughB) + "; click one, or give ";
+  s += angles::ToDegrees(angle) > 1.0 ? "axis (the normal of the one you mean)"
+                                      : "within (a box round the one you mean)";
   return s;
 }
 
 bool PlaneBow::Crown(bool bowsPastNoise) const {
-  return spreadRad > kCrownSpreadDeg * M_PI / 180.0 ||
+  return spreadRad > angles::ToRadians(kCrownSpreadDeg) ||
          (cover < kCrownCover && bowsPastNoise);
 }
 

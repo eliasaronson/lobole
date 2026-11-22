@@ -6,6 +6,7 @@
 
 #include "core/mesh/Segment.h"
 
+#include "core/Angles.h"
 #include "core/mesh/Split.h"
 
 #include <algorithm>
@@ -735,11 +736,11 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
   char buf[160];
   std::string msg = "the plane fitted here is a strip along the crown of a "
                     "round: ";
-  if (bow.spreadRad > kCrownSpreadDeg * M_PI / 180.0) {
+  if (bow.spreadRad > angles::ToRadians(kCrownSpreadDeg)) {
     std::snprintf(buf, sizeof buf,
                   "its normals turn %.1f deg across it (a flat's stay "
                   "within %.0f)",
-                  bow.spreadRad * 180.0 / M_PI, kCrownSpreadDeg);
+                  angles::ToDegrees(bow.spreadRad), kCrownSpreadDeg);
   } else {
     std::snprintf(buf, sizeof buf,
                   "it covers %.0f%% of its bounding rectangle (a flat face "
