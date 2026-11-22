@@ -137,6 +137,9 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
   static const std::set<std::string> kUnboundByDesign = {
       // Menu-only.
       "file.export",
+      // File > Open File...: the file chooser beside Open Project's (Ctrl+O)
+      // folder chooser, for the rarer single-file document.
+      "file.open_file",
       // Direct edit (docs/modeling/README.md#direct-edit): four tools in one
       // toolbar flyout, reached far less often than the features that make
       // a part; a chord each would spend four mnemonics.

@@ -17,6 +17,7 @@
 #include "ui/DesignSweepPanel.h"
 #include "ui/DiskPoller.h"
 #include "ui/DocumentSlots.h"
+#include "ui/FileDialogs.h" // the unsaved-work offer and Open File
 #include "ui/OpenJob.h"
 #include "ui/PanelTitles.h"
 #include "ui/ProjectActions.h"
@@ -861,6 +862,197 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
 
     Autosaver::Clear("");
     fs::remove_all(state);
+  };
+
+  // A stopped session's never-saved work, offered back at the next start
+  // (docs/versioning/README.md#a-stop-offers-unsaved-work-back): the modal
+  // says when and how much, Discard asks before it deletes, Keep goes back,
+  // and Recover opens the work untitled and dirty -- not as a project at the
+  // slot's path, and not in the recent list. The offer is planted as
+  // start-up takes it; the slots are fixtures in this run's own state dir.
+  t = IM_REGISTER_TEST(engine, "crash", "a_stopped_sessions_work_is_offered");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    namespace fs = std::filesystem;
+    const fs::path state(Autosaver::StateDir());
+    fs::create_directories(state);
+    RecentProjects::Clear();
+    const auto plant = [&](const std::string& tag, double width) {
+      Document d;
+      d.AddFeature(std::make_unique<BoxFeature>("Box 1", glm::vec3(0), width,
+                                                10.0, 10.0));
+      const fs::path p = state / ("unsaved-" + tag + ".autosave.json");
+      if (!DocumentIO::Save(d, p.string()))
+        IM_ERRORF("could not write the fixture %s", p.string().c_str());
+      return p;
+    };
+    const std::string kept = "20200202-000000-21";
+    const std::string dropped = "20200202-000000-22";
+    const fs::path keptPath = plant(kept, 31.0);
+    const fs::path droppedPath = plant(dropped, 32.0);
+    const bool hadOwn = fs::exists(Autosaver::SidecarPath(""));
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto offer = [&](const std::string& tag) {
+      const auto slot = Autosaver::SlotOf(state.string(), tag);
+      IM_CHECK(slot.has_value());
+      crash::SetUnsavedOffer(crash::UnsavedOffer{*slot, tag, ""});
+      ctx->Yield(3);
+    };
+    offer(kept);
+    ctx->SetRef("//###UnsavedOffer");
+    GuiShot(ctx, "unsaved_offer");
+    ctx->ItemClick("Discard...###unsaved_discard");
+    ctx->Yield(2);
+    GuiShot(ctx, "unsaved_offer_discard");
+    ctx->ItemClick("Keep###unsaved_discard_cancel");
+    ctx->Yield(2);
+    IM_CHECK(fs::exists(keptPath)); // asked, not deleted
+    ctx->ItemClick("Recover###unsaved_recover");
+    IM_CHECK(WaitForOpen(ctx));
+    ctx->Yield(2);
+    IM_CHECK(!crash::PendingUnsavedOffer().has_value());
+    BoxFeature* box = nullptr;
+    for (size_t i = 0; i < Doc()->FeatureCount() && !box; i++)
+      box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(i));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 31.0);
+    // Untitled, dirty, never saved: no project path, not a recent project.
+    IM_CHECK(s_App->projectPath.empty());
+    IM_CHECK(ui::ProjectDirty(*s_App));
+    IM_CHECK(ui::WindowTitle(*s_App).find("Untitled") != std::string::npos);
+    IM_CHECK(RecentProjects::List().empty());
+    // Taken over as this instance's own slot, so it is not offered twice.
+    if (!hadOwn) {
+      IM_CHECK(!fs::exists(keptPath));
+      IM_CHECK(fs::exists(Autosaver::SidecarPath("")));
+    }
+    IM_CHECK(!fs::exists(keptPath.string() + ".autosave"));
+
+    // Discard, asked once, deletes that work and opens nothing.
+    const size_t features = Doc()->FeatureCount();
+    offer(dropped);
+    ctx->SetRef("//###UnsavedOffer");
+    ctx->ItemClick("Discard...###unsaved_discard");
+    ctx->Yield(2);
+    ctx->ItemClick("Delete###unsaved_discard_confirm");
+    ctx->Yield(2);
+    IM_CHECK(!crash::PendingUnsavedOffer().has_value());
+    IM_CHECK(!fs::exists(droppedPath));
+    IM_CHECK_EQ(Doc()->FeatureCount(), features);
+
+    Autosaver::Clear("");
+    fs::remove(keptPath);
+  };
+
+  // File > Open Recent > Unsaved work lists every never-saved session's work
+  // no running instance owns, newest first; a pick opens it untitled and
+  // dirty. A slot of several documents is a submenu of them. File > Open
+  // File... takes the same road for a .json, and refuses anything else by
+  // naming what it accepts. And a SAVED project with a newer autosave --
+  // what a stop leaves -- is offered recovery from Open Recent too, as File
+  // > Open Project always offered it.
+  t = IM_REGISTER_TEST(engine, "file", "open_recent_lists_unsaved_work");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    namespace fs = std::filesystem;
+    const fs::path state(Autosaver::StateDir());
+    fs::create_directories(state);
+    RecentProjects::Clear();
+    const auto save = [&](const fs::path& p, double width) {
+      Document d;
+      d.AddFeature(std::make_unique<BoxFeature>("Box 1", glm::vec3(0), width,
+                                                10.0, 10.0));
+      fs::create_directories(p.parent_path());
+      IM_CHECK(DocumentIO::Save(d, p.string()).has_value());
+    };
+    const fs::path one = state / "unsaved-20200303-000000-31.autosave.json";
+    const fs::path several = state / "unsaved-20200303-000000-32.autosave.d";
+    save(one, 27.0);
+    save(several / "parts" / "Bracket.json", 5.0);
+    save(several / "parts" / "Plate.json", 6.0);
+    // The one document is the newest.
+    fs::last_write_time(several, fs::file_time_type::clock::now() -
+                                     std::chrono::hours(2));
+    fs::last_write_time(one, fs::file_time_type::clock::now());
+    const auto listed = Autosaver::OrphanUnsavedSlots(
+        state.string(), crash::LiveSessionStems(state));
+    int at = -1, atSeveral = -1;
+    for (size_t i = 0; i < listed.size(); i++) {
+      if (listed[i].path == one.string())
+        at = static_cast<int>(i);
+      if (listed[i].path == several.string())
+        atSeveral = static_cast<int>(i);
+    }
+    IM_CHECK(at >= 0 && atSeveral > at);
+    IM_CHECK_EQ(listed[static_cast<size_t>(atSeveral)].documents, (size_t)2);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ctx->MenuClick("File/Open Recent");
+    ctx->Yield(2);
+    GuiShot(ctx, "open_recent_unsaved_work");
+    ctx->MenuClick(
+        ("File/Open Recent/###unsaved" + std::to_string(at)).c_str());
+    IM_CHECK(WaitForOpen(ctx));
+    ctx->Yield(2);
+    IM_CHECK(Doc()->FeatureCount() > 0);
+    IM_CHECK(s_App->projectPath.empty());
+    IM_CHECK(ui::ProjectDirty(*s_App));
+    IM_CHECK(RecentProjects::List().empty());
+
+    // Open File: a document inside a slot's folder is unsaved work too; a
+    // file that is no document is refused, naming what is accepted.
+    std::string error;
+    IM_CHECK(!ui::OpenPickedFile(*s_App, (state / "x.step").string(), &error));
+    IM_CHECK(error.find(".json") != std::string::npos);
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK(ui::OpenPickedFile(
+        *s_App, (several / "parts" / "Plate.json").string(), &error));
+    IM_CHECK(WaitForOpen(ctx));
+    ctx->Yield(2);
+    IM_CHECK(s_App->projectPath.empty());
+    IM_CHECK(ui::ProjectDirty(*s_App));
+    IM_CHECK(!fs::exists((several / "parts" / "Plate.json.autosave")));
+    // The folder itself is no project, and says what to do instead.
+    IM_CHECK(!ui::OpenProject(*s_App, several.string(), &error));
+    IM_CHECK(error.find("each opens on its own") != std::string::npos);
+
+    // A saved project left with a newer autosave, reopened from the list.
+    const fs::path dir =
+        fs::temp_directory_path() / "lobole_recent_recovery_gui";
+    fs::remove_all(dir);
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx);
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &error));
+    ui::MarkProjectSaved(*s_App, dir.string(), "test");
+    const std::string saved = s_App->projectPath;
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    save(Autosaver::SidecarPath(saved), 44.0);
+    fs::last_write_time(Autosaver::SidecarPath(saved),
+                        fs::file_time_type::clock::now() +
+                            std::chrono::seconds(5));
+    ctx->MenuClick("File/Open Recent/###recent0");
+    ctx->Yield(3);
+    IM_CHECK(s_App->recoveryOffer == saved);
+    IM_CHECK(ctx->ItemExists("//Recover autosave?/Recover autosave"));
+    ctx->ItemClick("//Recover autosave?/Open saved file");
+    IM_CHECK(WaitForOpen(ctx));
+    IM_CHECK(s_App->recoveryOffer.empty());
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+
+    Autosaver::Clear("");
+    Autosaver::Clear(saved);
+    fs::remove_all(dir);
+    fs::remove(one);
+    fs::remove_all(several);
+    RecentProjects::Clear();
   };
 
   // A clean project must stop costing anything. The conflicts scan walks the

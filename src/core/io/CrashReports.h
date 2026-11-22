@@ -12,6 +12,8 @@
 #include <string_view>
 #include <vector>
 
+#include "core/io/Autosaver.h" // UnsavedSlot
+
 // Crash reports a user can hand over (docs/architecture.md#crashes-and-stalls).
 //
 // Every run holds a SESSION MARKER, `<state>/sessions/<started>-<pid>.json`,
@@ -30,9 +32,8 @@ namespace crash {
 inline constexpr size_t kKeepReports = 20;
 inline constexpr size_t kKeepLogs = 10;
 inline constexpr size_t kLogTailLines = 2000;
-// Unsaved slots (core/io/Autosaver.h) no live session owns, kept anyway:
-// a dirty exit leaves one, which nothing offers again but a user may look
-// for by hand.
+// Unsaved slots (core/io/Autosaver.h) no live session owns, kept anyway: a
+// dirty exit leaves one, which File > Open Recent > Unsaved work lists.
 inline constexpr size_t kKeepUnsavedSlots = 10;
 
 // This process's session: the names its files go by.
@@ -43,6 +44,10 @@ struct Session {
   std::filesystem::path crashFile; // sessions/<stem>.crash, by the handler
   std::filesystem::path dumpFile;  // sessions/<stem>.dmp, Windows only
   std::filesystem::path logFile;   // logs/<stem>.log
+  // sessions/<stem>.stopped: the marker, renamed by the visible windowed
+  // app's stop handler instead of deleted, so the next windowed start can
+  // offer the unsaved work the session was stopped with (TakeStoppedOffer).
+  std::filesystem::path stopped;
 };
 
 // Starts this process's session under `stateDir`: opens the session log
@@ -96,6 +101,29 @@ struct Report {
 // alone — including this process's own.
 std::vector<Report> CollectDeadSessions(const std::filesystem::path& stateDir,
                                         size_t keep = kKeepReports);
+
+// The stems of the sessions still running: markers (and stop notes) some
+// process holds a lock on, this process's own included. What an unsaved
+// slot's tag is checked against before it is offered, listed or taken over.
+std::vector<std::string>
+LiveSessionStems(const std::filesystem::path& stateDir);
+
+// A stopped session's never-saved work, offered once by the next windowed
+// start (docs/versioning/README.md#a-stop-offers-unsaved-work-back).
+struct UnsavedOffer {
+  Autosaver::UnsavedSlot slot;
+  std::string stem;    // the session that was stopped
+  std::string started; // when it started, local time
+};
+// Takes every stop note in `<stateDir>/sessions` whose process is gone
+// (deleting it: said once) and returns the newest whose session left
+// unsaved work; a note still locked is a process still dying, left alone.
+std::optional<UnsavedOffer>
+TakeStoppedOffer(const std::filesystem::path& stateDir);
+// The offer the windowed start took, until it is answered (the GUI's modal,
+// or opening that slot) -- read by the modal and autosave_status.
+void SetUnsavedOffer(std::optional<UnsavedOffer> offer);
+const std::optional<UnsavedOffer>& PendingUnsavedOffer();
 
 // The reports on disk, newest first (NewerReport).
 std::vector<Report> ListReports(const std::filesystem::path& stateDir);

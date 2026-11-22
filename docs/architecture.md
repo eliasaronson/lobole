@@ -491,7 +491,10 @@ by the same name drift apart without any test noticing:
 ### Stopping
 
 The windowed app dies on `SIGTERM`/`SIGINT` as it always did (the crash
-handler deletes the session marker first: a stop is not a crash).
+handler deletes the session marker first: a stop is not a crash -- or, for
+a visible window, renames it to a stop note, so the next start can offer the
+never-saved work: [a stop offers unsaved work
+back](versioning/README.md#a-stop-offers-unsaved-work-back)).
 `--headless` and `--offscreen` stop cleanly, and within a bound
 (`src/app/StopSignal.{h,cpp}`). The handler sets a flag the loop reads once an
 iteration; on its own that never ended a main thread inside one long call
@@ -585,10 +588,15 @@ and a double signal (143, at once).
   project changes) and holds an **exclusive lock** on it for its whole life
   (`platform::FileLock`: `flock`, `LockFileEx`). A clean exit deletes it,
   and so do SIGTERM, SIGINT and SIGHUP, since a process asked to stop has
-  not crashed. On Windows a console control handler does the same for
+  not crashed -- except that a visible window renames it to
+  `sessions/<stem>.stopped`, a note no collector reports, for the next
+  windowed start to offer that session's unsaved work
+  ([versioning](versioning/README.md#a-stop-offers-unsaved-work-back)). On
+  Windows a console control handler does the same for
   Ctrl+C, Ctrl+Break, the console closing, logoff and shutdown: headless and
   offscreen are asked to stop (their `SIGINT` handler) and end the session
-  the ordinary way, and the windowed app deletes the marker and ends.
+  the ordinary way, and the windowed app deletes (or renames) the marker and
+  ends.
   `TerminateProcess` cannot be caught, so there a session that ended without
   a report reads "ended from outside (Task Manager, taskkill /F) or power
   lost": running out of memory is a failed allocation, which the crash

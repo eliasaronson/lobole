@@ -13,6 +13,7 @@
 #include "common/Platform.h"
 #include "core/io/CrashReports.h"
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -359,4 +360,80 @@ TEST_CASE("Logs in one second are pruned by pid read as a number", "[crash]") {
   CHECK(
       logfile::NewerName("20260101-000001-32.log", "20260101-000000-308.log"));
   CHECK(logfile::NewerName("20260101-000000-32-2", "20260101-000000-32"));
+}
+
+// A stop is not a crash, but the visible windowed app's stop leaves its
+// marker renamed to a note (sessions/<stem>.stopped) so the next windowed
+// start can offer the never-saved work it was stopped with
+// (docs/versioning/README.md#a-stop-offers-unsaved-work-back).
+TEST_CASE("Live sessions are the held markers and stop notes", "[crash]") {
+  ScratchDir s("lobole-crash-live");
+  PlantMarker(s.dir, "20260301-000000-1");
+  PlantMarker(s.dir, "20260301-000000-2");
+  Write(s.dir / "sessions" / "20260301-000000-3.stopped", "{}");
+  Write(s.dir / "sessions" / "20260301-000000-4.stopped", "{}");
+  platform::FileLock held, dying;
+  REQUIRE(held.TryLock(s.dir / "sessions" / "20260301-000000-1.json", false));
+  REQUIRE(
+      dying.TryLock(s.dir / "sessions" / "20260301-000000-3.stopped", false));
+  auto live = crash::LiveSessionStems(s.dir);
+  std::sort(live.begin(), live.end());
+  CHECK(live ==
+        std::vector<std::string>{"20260301-000000-1", "20260301-000000-3"});
+  // Asking takes nothing: the dead marker is still there to be collected.
+  CHECK(fs::exists(s.dir / "sessions" / "20260301-000000-2.json"));
+}
+
+TEST_CASE("A stop note offers the stopped session's unsaved work once",
+          "[crash]") {
+  ScratchDir s("lobole-crash-stopped");
+  const std::string withWork = "20260302-100000-11";
+  const std::string newer = "20260302-110000-12";
+  const std::string clean = "20260302-120000-13";
+  const std::string dying = "20260302-130000-14";
+  for (const std::string& stem : {withWork, newer, clean, dying})
+    Write(s.dir / "sessions" / (stem + ".stopped"),
+          nlohmann::json{{"stem", stem}, {"started", "2026-03-02 10:00:00"}}
+              .dump());
+  const auto plant = [&](const std::string& stem, int hoursAgo) {
+    const fs::path p = s.dir / ("unsaved-" + stem + ".autosave.json");
+    Write(p, "{}");
+    fs::last_write_time(p, fs::file_time_type::clock::now() -
+                               std::chrono::hours(hoursAgo));
+  };
+  plant(withWork, 3);
+  plant(newer, 1);
+  plant(dying, 0);
+  platform::FileLock stillGoing;
+  REQUIRE(stillGoing.TryLock(s.dir / "sessions" / (dying + ".stopped"), false));
+
+  // Collecting the dead keeps a noted slot however many others there are,
+  // and turns no stop note into a crash report.
+  for (int i = 0; i < 12; i++)
+    Write(s.dir / ("unsaved-other" + std::to_string(i) + ".autosave.json"),
+          "{}");
+  CHECK(crash::CollectDeadSessions(s.dir).empty());
+  CHECK(fs::exists(s.dir / ("unsaved-" + withWork + ".autosave.json")));
+  CHECK(fs::exists(s.dir / ("unsaved-" + newer + ".autosave.json")));
+  // A note with no work behind it has nothing to offer, and goes.
+  CHECK_FALSE(fs::exists(s.dir / "sessions" / (clean + ".stopped")));
+
+  const auto offer = crash::TakeStoppedOffer(s.dir);
+  REQUIRE(offer.has_value());
+  CHECK(offer->stem == newer); // the newest work
+  CHECK(offer->slot.tag == newer);
+  CHECK(offer->slot.documents == 1);
+  CHECK(offer->started == "2026-03-02 10:00:00");
+  // Taken: every dead note is gone, the work stays for Open Recent.
+  CHECK_FALSE(fs::exists(s.dir / "sessions" / (withWork + ".stopped")));
+  CHECK_FALSE(fs::exists(s.dir / "sessions" / (newer + ".stopped")));
+  CHECK(fs::exists(s.dir / ("unsaved-" + withWork + ".autosave.json")));
+  // A note still locked is a process still dying: left for a later start.
+  CHECK(fs::exists(s.dir / "sessions" / (dying + ".stopped")));
+  CHECK_FALSE(crash::TakeStoppedOffer(s.dir).has_value());
+
+  stillGoing.Release();
+  const auto later = crash::TakeStoppedOffer(s.dir);
+  REQUIRE(later.has_value());
+  CHECK(later->stem == dying);
 }

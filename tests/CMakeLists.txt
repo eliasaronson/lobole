@@ -1310,6 +1310,17 @@ set_tests_properties(startup_failure_smoke PROPERTIES LABELS "gui;pygui"
 # once, a report, every drawing method refused as device_lost, the rest
 # answering, and Restart (docs/rendering/README.md#a-lost-device), windowed
 # and offscreen.
+# A stop with never-saved work offers it back at the next windowed start,
+# and opening it comes up untitled and dirty
+# (docs/versioning/README.md#a-stop-offers-unsaved-work-back). The windowed
+# app needs the display tools/xvfb-exec.sh gives, hence pygui.
+add_test(NAME unsaved_work_smoke
+         COMMAND ${XVFB_EXEC} python3
+                 ${CMAKE_CURRENT_SOURCE_DIR}/unsaved_work_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(unsaved_work_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 add_test(NAME device_loss_smoke
          COMMAND ${XVFB_EXEC} python3
                  ${CMAKE_CURRENT_SOURCE_DIR}/device_loss_smoke.py

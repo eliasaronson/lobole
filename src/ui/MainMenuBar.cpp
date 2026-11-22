@@ -17,6 +17,7 @@
 #include "common/RuntimePaths.h"
 #include "core/Feature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Autosaver.h"
 #include "core/io/CrashReports.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
@@ -60,9 +61,23 @@ bool BeginTopMenu(AppState& state, const char* label) {
 // kept in the state dir, and it INCLUDES paths that are missing right now —
 // an unplugged drive is not a reason to forget a project you had open. Those
 // entries are disabled and say why, with a one-click way to drop them.
-void DrawOpenRecentMenu(AppState& state) {
+//
+// Below them, **Unsaved work**: every never-saved session's work that no
+// running instance owns, newest first
+// (docs/versioning/README.md#a-stop-offers-unsaved-work-back). Read once a
+// second at most while the menu is drawn: it lists a directory and tries a
+// lock per session.
+void DrawOpenRecentMenu(AppState& state, bool fileMenuAppearing) {
   const std::vector<std::string> recent = RecentProjects::List();
-  if (!ImGui::BeginMenu("Open Recent", !recent.empty()))
+  static std::vector<Autosaver::UnsavedSlot> unsaved;
+  static double unsavedAt = -1.0;
+  if (fileMenuAppearing || unsavedAt < 0.0 ||
+      ImGui::GetTime() - unsavedAt > 1.0) {
+    unsaved = Autosaver::OrphanUnsavedSlots(
+        Autosaver::StateDir(), crash::LiveSessionStems(Autosaver::StateDir()));
+    unsavedAt = ImGui::GetTime();
+  }
+  if (!ImGui::BeginMenu("Open Recent", !recent.empty() || !unsaved.empty()))
     return;
   std::string forget;
   size_t index = 0;
@@ -82,11 +97,8 @@ void DrawOpenRecentMenu(AppState& state) {
       // Off the frame (ui/OpenJob.h). A path that exists but fails to
       // load stays in the list: the modal says why, and the failure may be
       // this build's, not the file's.
-      std::string error;
-      if (!StartOpenProject(state, path, &error)) {
-        state.openError = "Could not open " + path + ": " + error;
-        LOG_ERROR("{}", state.openError);
-      }
+      // A newer autosave is offered first, as File > Open Project does.
+      OpenProjectOrOfferRecovery(state, path);
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -102,17 +114,61 @@ void DrawOpenRecentMenu(AppState& state) {
       ImGui::EndPopup();
     }
   }
-  ImGui::Separator();
-  if (ImGui::MenuItem("Clear list"))
-    RecentProjects::Clear();
+  if (!recent.empty()) {
+    ImGui::Separator();
+    if (ImGui::MenuItem("Clear list"))
+      RecentProjects::Clear();
+  }
+  std::string recover;
+  if (!unsaved.empty()) {
+    ImGui::SeparatorText("Unsaved work");
+    for (size_t i = 0; i < unsaved.size(); i++) {
+      const Autosaver::UnsavedSlot& slot = unsaved[i];
+      const std::string label =
+          UnsavedWorkTime(slot) + " \xc2\xb7 " +
+          std::to_string(slot.documents) +
+          (slot.documents == 1 ? " document" : " documents");
+      const std::string id = "###unsaved" + std::to_string(i);
+      namespace fs = std::filesystem;
+      if (fs::is_directory(slot.path)) {
+        // Several documents, no project to hold them: each opens on its own.
+        if (ImGui::BeginMenu((label + id).c_str())) {
+          std::error_code ec;
+          size_t k = 0;
+          for (const auto& f : fs::recursive_directory_iterator(slot.path, ec))
+            if (f.is_regular_file(ec) && f.path().extension() == ".json" &&
+                ImGui::MenuItem((fs::relative(f.path(), slot.path, ec)
+                                     .replace_extension()
+                                     .string() +
+                                 "###doc" + std::to_string(k++))
+                                    .c_str()))
+              recover = f.path().string();
+          ImGui::EndMenu();
+        }
+      } else if (ImGui::MenuItem((label + id).c_str())) {
+        recover = slot.path;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Never saved; opens untitled\n%s", slot.path.c_str());
+    }
+  }
   ImGui::EndMenu();
   if (!forget.empty())
     RecentProjects::Forget(forget);
+  if (!recover.empty()) {
+    unsavedAt = -1.0;
+    std::string error;
+    if (!RecoverUnsavedWork(state, recover, &error)) {
+      state.openError = error;
+      LOG_ERROR("{}", error);
+    }
+  }
 }
 
 void DrawFileMenu(AppState& state) {
   if (!BeginTopMenu(state, "File"))
     return;
+  const bool appearing = ImGui::IsWindowAppearing();
 
   // The menu ITEM and the chord run the same command — they used to be two
   // bodies, and Ctrl+N did strictly less than File > New.
@@ -121,7 +177,13 @@ void DrawFileMenu(AppState& state) {
 #ifdef HAVE_NATIVEFILEDIALOG
   if (ImGui::MenuItem("Open Project...", Hint(state, "file.open").c_str()))
     RunCommand(state, "file.open");
-  DrawOpenRecentMenu(state);
+  // A project is a folder, so Open Project is a folder chooser; a document
+  // saved as one .json file is picked here
+  // (docs/versioning/README.md#opening-a-file).
+  if (ImGui::MenuItem("Open File...###file_open_file",
+                      Hint(state, "file.open_file").c_str()))
+    RunCommand(state, "file.open_file");
+  DrawOpenRecentMenu(state, appearing);
   if (ImGui::MenuItem("Save Project", Hint(state, "file.save").c_str()))
     RunCommand(state, "file.save");
   if (ImGui::MenuItem("Save Project As...",

@@ -231,3 +231,86 @@ TEST_CASE("HasNewerAutosave and Clear", "[autosave]") {
   CHECK_FALSE(Autosaver::HasNewerAutosave(project));
   CHECK_FALSE(fs::exists(Autosaver::SidecarPath(project)));
 }
+
+// File > Open Recent > Unsaved work and the start-up offer list what no live
+// instance owns (docs/versioning/README.md#a-stop-offers-unsaved-work-back).
+TEST_CASE("Unsaved slots are listed per instance, newest first, live ones not",
+          "[autosave]") {
+  const fs::path state = TempDir("orphans");
+  Autosaver::SetInstanceTag("20261024-050000-9");
+  const auto plant = [&](const fs::path& p, int hoursAgo,
+                         const std::string& text = "{}") {
+    fs::create_directories(p.parent_path());
+    std::ofstream(p) << text;
+    fs::last_write_time(p, fs::file_time_type::clock::now() -
+                               std::chrono::hours(hoursAgo));
+  };
+  plant(state / "unsaved-20261024-050000-9.autosave.json", 1); // this one
+  plant(state / "unsaved-live.autosave.json", 1);
+  plant(state / "unsaved-old.autosave.json", 30);
+  plant(state / "unsaved-new.autosave.json", 2);
+  // A never-saved project of several documents: its directory counts them.
+  plant(state / "unsaved-multi.autosave.d" / "parts" / "A.json", 5);
+  plant(state / "unsaved-multi.autosave.d" / "parts" / "B.json", 5);
+  plant(state / "unsaved-multi.autosave.d" / "parts" / "B.json.tmp", 5);
+  fs::last_write_time(state / "unsaved-multi.autosave.d",
+                      fs::file_time_type::clock::now() - std::chrono::hours(5));
+  // Empty: holds no document, so nothing to offer.
+  plant(state / "unsaved-empty.autosave.json", 1, "");
+  plant(state / "Part.lob.autosave", 1);
+
+  const auto slots = Autosaver::OrphanUnsavedSlots(state.string(), {"live"});
+  REQUIRE(slots.size() == 3);
+  CHECK(slots[0].tag == "new");
+  CHECK(slots[0].documents == 1);
+  CHECK(slots[0].path == (state / "unsaved-new.autosave.json").string());
+  CHECK(slots[1].tag == "multi");
+  CHECK(slots[1].documents == 2);
+  CHECK(fs::is_directory(slots[1].path));
+  CHECK(slots[2].tag == "old");
+  CHECK(slots[0].modifiedUnix > slots[2].modifiedUnix);
+
+  CHECK(Autosaver::SlotOf(state.string(), "old").has_value());
+  CHECK_FALSE(Autosaver::SlotOf(state.string(), "empty").has_value());
+  CHECK_FALSE(Autosaver::SlotOf(state.string(), "nobody").has_value());
+
+  // A path inside a slot is unsaved work as much as the slot is.
+  CHECK(Autosaver::IsUnsavedSlotPath(slots[0].path));
+  CHECK(Autosaver::IsUnsavedSlotPath(
+      (state / "unsaved-multi.autosave.d" / "parts" / "A.json").string()));
+  CHECK_FALSE(Autosaver::IsUnsavedSlotPath((state / "Part.lob").string()));
+  CHECK(Autosaver::SlotTag("unsaved-new.autosave.json") == "new");
+  CHECK(Autosaver::SlotTag("Part.lob.autosave").empty());
+  fs::remove_all(state);
+}
+
+TEST_CASE("Discarding unsaved work deletes that instance's slot and no other",
+          "[autosave]") {
+  const fs::path state = TempDir("discard");
+  Autosaver::SetInstanceTag("20261024-060000-9");
+  for (const char* name :
+       {"unsaved-gone.autosave.json", "unsaved-kept.autosave.json",
+        "unsaved-20261024-060000-9.autosave.json", "unsaved.autosave.json"})
+    std::ofstream(state / name) << "{}";
+  fs::create_directories(state / "unsaved-gone.autosave.d" / "parts");
+
+  std::string error;
+  CHECK(Autosaver::DiscardUnsavedSlot(state.string(), "gone", &error));
+  CHECK_FALSE(fs::exists(state / "unsaved-gone.autosave.json"));
+  CHECK_FALSE(fs::exists(state / "unsaved-gone.autosave.d"));
+  CHECK(fs::exists(state / "unsaved-kept.autosave.json"));
+  // The shared slot older builds wrote has the empty tag.
+  CHECK(Autosaver::DiscardUnsavedSlot(state.string(), "", &error));
+  CHECK_FALSE(fs::exists(state / "unsaved.autosave.json"));
+
+  // Refused: this instance's own work, a name that is not one, nothing there.
+  CHECK_FALSE(Autosaver::DiscardUnsavedSlot(state.string(), "20261024-060000-9",
+                                            &error));
+  CHECK(error.find("own") != std::string::npos);
+  CHECK(fs::exists(state / "unsaved-20261024-060000-9.autosave.json"));
+  CHECK_FALSE(Autosaver::DiscardUnsavedSlot(state.string(), "../kept", &error));
+  CHECK(fs::exists(state / "unsaved-kept.autosave.json"));
+  CHECK_FALSE(Autosaver::DiscardUnsavedSlot(state.string(), "gone", &error));
+  CHECK(error.find("no unsaved work") != std::string::npos);
+  fs::remove_all(state);
+}

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -51,12 +52,44 @@ public:
   // `unsaved.autosave.json` / `.d` builds before the tag wrote?
   [[nodiscard]] static bool IsUnsavedSlot(const std::string& filename);
 
+  // Is this path an unsaved slot, or inside one (a document of a slot's
+  // directory)? Such a path opens as unsaved work, never as a project
+  // (docs/versioning/README.md#opening-unsaved-work).
+  [[nodiscard]] static bool IsUnsavedSlotPath(const std::string& path);
+  // The instance tag an unsaved slot's file name carries; "" for the shared
+  // slot of older builds, and for a name that is no slot.
+  static std::string SlotTag(const std::string& filename);
+
+  // One never-saved session's work, as a start-up offer and File > Open
+  // Recent > Unsaved work show it: the slot's file (or its directory, when
+  // that was written last), the instance it was, when it was last written,
+  // and how many documents it holds.
+  struct UnsavedSlot {
+    std::string path;
+    std::string tag;
+    int64_t modifiedUnix = 0;
+    size_t documents = 0;
+  };
+  // The slots in `stateDir` holding a document that no live instance owns --
+  // tags not in `live` and not this process's -- newest first.
+  static std::vector<UnsavedSlot>
+  OrphanUnsavedSlots(const std::string& stateDir,
+                     const std::vector<std::string>& live);
+  // The slot of instance `tag` in `stateDir`, when it holds a document.
+  static std::optional<UnsavedSlot> SlotOf(const std::string& stateDir,
+                                           const std::string& tag);
+  // Deletes instance `tag`'s slot (its file and its directory) from
+  // `stateDir`. Refuses this instance's own, and a tag that is not a plain
+  // name; false with the reason when there is nothing to delete.
+  static bool DiscardUnsavedSlot(const std::string& stateDir,
+                                 const std::string& tag, std::string* error);
+
   // Deletes the unsaved slots in `stateDir` that no live instance owns --
   // tags not in `live` and not this process's -- beyond the newest `keep`.
-  // A dirty exit keeps its slot, and nothing offers it again, so without
-  // this every never-saved session would leave one behind for good. Called
-  // by crash::CollectDeadSessions AFTER it has copied the dead sessions'
-  // slots into their reports.
+  // A dirty exit keeps its slot, so without this every never-saved session
+  // would leave one behind for good. Called by crash::CollectDeadSessions
+  // AFTER it has copied the dead sessions' slots into their reports, with a
+  // stopped session's noted slot counted as live.
   static void PruneUnsavedSlots(const std::string& stateDir,
                                 const std::vector<std::string>& live,
                                 size_t keep);

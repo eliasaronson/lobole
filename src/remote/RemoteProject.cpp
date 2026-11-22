@@ -25,6 +25,7 @@
 #include "core/fem/SimDocument.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
+#include "core/io/CrashReports.h" // the unsaved-work offer
 #include "core/io/GitVault.h"
 #include "core/io/ImportFormats.h"
 #include "core/io/MeshImportCost.h"
@@ -354,7 +355,12 @@ static constexpr MethodDoc ProjectMethods[] = {
      "", remote::NotInBatch},
     {"autosave_status",
      "Which documents have autosaved work waiting to be "
-     "recovered.",
+     "recovered. Also `unsaved_offer`: the never-saved work a stopped "
+     "session left, which this start offers (windowed only; null when there "
+     "is none), and `unsaved_slots`: every never-saved session's work no "
+     "running instance owns, newest first, as File > Open Recent > Unsaved "
+     "work lists it. Each is {path, tag, modified_unix, documents}; "
+     "open_project on a `path` opens that work untitled and dirty.",
      ""},
     {"project_changed_on_disk",
      "Has anything else written to the project since it was opened or last "
@@ -1060,8 +1066,12 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // Loading is where a broken model most often ARRIVES: a project saved
     // against an older kernel, or one whose feature no longer builds, used to
     // open with a silent success and nothing to poll.
+    // Where it autosaves NOW: an unsaved slot opens untitled
+    // (state.projectPath ""), into this instance's own slot.
     json out = {{"autosave_available", autosaveAvailable},
-                {"autosave_path", Autosaver::SidecarPath(path)}};
+                {"autosave_path", Autosaver::SidecarPath(state.projectPath)}};
+    if (state.projectPath.empty())
+      out["unsaved_work"] = true;
     // Parts whose baked geometry could not be used and were rebuilt, and
     // why: the difference between a 0.04 s open and a 20 s one, and what a
     // save would fix (docs/ui/long-operations.md#opening-a-project).
@@ -1196,9 +1206,23 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     for (const std::string& rel :
          Autosaver::RecoverableDocuments(state.projectPath))
       docs.push_back(rel);
+    const auto slotJson = [](const Autosaver::UnsavedSlot& slot) {
+      return json{{"path", slot.path},
+                  {"tag", slot.tag},
+                  {"modified_unix", slot.modifiedUnix},
+                  {"documents", slot.documents}};
+    };
+    json slots = json::array();
+    for (const Autosaver::UnsavedSlot& slot : Autosaver::OrphanUnsavedSlots(
+             Autosaver::StateDir(),
+             crash::LiveSessionStems(Autosaver::StateDir())))
+      slots.push_back(slotJson(slot));
+    const auto& offer = crash::PendingUnsavedOffer();
     return json{
         {"documents", docs},
-        {"single_file", Autosaver::HasNewerAutosave(state.projectPath)}};
+        {"single_file", Autosaver::HasNewerAutosave(state.projectPath)},
+        {"unsaved_offer", offer ? slotJson(offer->slot) : json(nullptr)},
+        {"unsaved_slots", slots}};
   }
   // --- Variables (moved here from RemoteModeling 2026-08-22) -------------
   //

@@ -377,8 +377,9 @@ can cancel it; a `--file` project still opens as before. GUI
 
 `OpenProject` is their composition and stays synchronous for the RPC
 (`open_project`), restore, merge, branch switch and sync. The opens a person
-starts — File > Open, Open Recent, and the recovery prompt's "Open saved
-file" — call `StartOpenProject` (`src/ui/OpenJob.{h,cpp}`), which runs
+starts — File > Open Project, File > Open File, Open Recent, recovering
+unsaved work, and the recovery prompt's "Open saved file" — call
+`StartOpenProject` (`src/ui/OpenJob.{h,cpp}`), which runs
 `ReadProject` as an `open` job under a modal: parts done over parts to load,
 the names of the parts being built, and why they are being rebuilt. Cancel
 discards the half-read project and leaves the open one untouched, since

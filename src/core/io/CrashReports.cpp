@@ -36,6 +36,7 @@ nlohmann::json g_marker;
 std::string g_project;
 bool g_projectNoted = false;
 std::optional<Report> g_notice;
+std::optional<UnsavedOffer> g_unsavedOffer;
 std::optional<std::string> g_startupFailureNotice;
 
 std::tm LocalTime(std::time_t t) {
@@ -501,6 +502,7 @@ std::optional<Session> BeginSession(const fs::path& stateDir,
   s.crashFile = sessions / (s.stem + ".crash");
   s.dumpFile = sessions / (s.stem + ".dmp");
   s.logFile = stateDir / "logs" / (s.stem + ".log");
+  s.stopped = sessions / (s.stem + ".stopped");
   // Before the marker lists it: the unsaved slot is this session's.
   Autosaver::SetInstanceTag(s.stem);
 
@@ -744,10 +746,86 @@ std::vector<Report> CollectDeadSessions(const fs::path& stateDir, size_t keep) {
   std::sort(out.begin(), out.end(), NewerReport);
   PruneReports(stateDir, keep);
   logfile::Prune(stateDir / "logs", kKeepLogs, liveLogs);
-  // After the reports have their copies: what is left of a dead session's
-  // unsaved slot is offered by nothing.
-  Autosaver::PruneUnsavedSlots(stateDir.string(), liveStems, kKeepUnsavedSlots);
+  // After the reports have their copies. A session that was stopped with
+  // unsaved work left a note (StoppedNotePath) for the next windowed start
+  // to offer: its slot is kept for that, like a live one. A note whose slot
+  // is gone (discarded, recovered) has nothing left to offer.
+  std::vector<std::string> keepStems = liveStems;
+  for (const auto& e : fs::directory_iterator(sessions, ec)) {
+    if (e.path().extension() != ".stopped")
+      continue;
+    const std::string stem = e.path().stem().string();
+    platform::FileLock note;
+    if (note.TryLock(e.path(), /*create=*/false) &&
+        !Autosaver::SlotOf(stateDir.string(), stem)) {
+      std::error_code rm;
+      fs::remove(e.path(), rm);
+      continue;
+    }
+    keepStems.push_back(stem);
+  }
+  Autosaver::PruneUnsavedSlots(stateDir.string(), keepStems, kKeepUnsavedSlots);
   return out;
+}
+
+std::vector<std::string> LiveSessionStems(const fs::path& stateDir) {
+  std::vector<std::string> live;
+  std::error_code ec;
+  for (const auto& e : fs::directory_iterator(stateDir / "sessions", ec)) {
+    const fs::path ext = e.path().extension();
+    if (ext != ".json" && ext != ".stopped")
+      continue;
+    // A marker held is a process still running -- this one's own too, whose
+    // lock is on another handle. A stop note stays locked until its process
+    // has finished dying.
+    platform::FileLock lock;
+    if (!lock.TryLock(e.path(), /*create=*/false))
+      live.push_back(e.path().stem().string());
+  }
+  return live;
+}
+
+std::optional<UnsavedOffer> TakeStoppedOffer(const fs::path& stateDir) {
+  std::optional<UnsavedOffer> best;
+  std::error_code ec;
+  for (const auto& e : fs::directory_iterator(stateDir / "sessions", ec)) {
+    if (e.path().extension() != ".stopped")
+      continue;
+    platform::FileLock lock;
+    if (!lock.TryLock(e.path(), /*create=*/false))
+      continue; // its process is still on its way out
+    nlohmann::json j = nlohmann::json::object();
+    try {
+      j = nlohmann::json::parse(ReadFile(e.path()));
+    } catch (const std::exception&) {
+      j = nlohmann::json::object(); // the name still says whose it was
+    }
+    UnsavedOffer offer;
+    offer.stem = e.path().stem().string();
+    offer.started = j.is_object() ? j.value("started", "") : "";
+    // Taken: said once, by this start. What it offered stays in File > Open
+    // Recent > Unsaved work until it is recovered, discarded or pruned.
+    std::error_code rm;
+    fs::remove(e.path(), rm);
+    lock.Release();
+    const auto slot = Autosaver::SlotOf(stateDir.string(), offer.stem);
+    if (!slot)
+      continue; // stopped with nothing unsaved
+    offer.slot = *slot;
+    if (!best || offer.slot.modifiedUnix > best->slot.modifiedUnix)
+      best = std::move(offer);
+  }
+  return best;
+}
+
+void SetUnsavedOffer(std::optional<UnsavedOffer> offer) {
+  std::lock_guard guard(g_mutex);
+  g_unsavedOffer = std::move(offer);
+}
+
+const std::optional<UnsavedOffer>& PendingUnsavedOffer() {
+  // Read on the main thread only, like Notice().
+  return g_unsavedOffer;
 }
 
 std::vector<Report> ListReports(const fs::path& stateDir) {

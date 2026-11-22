@@ -30,6 +30,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -95,6 +96,11 @@ void OpenPickedProject(AppState& state, const std::string& path) {
   }
 }
 
+// What the fallback browser is for: File > Import's CAD files, or File >
+// Open File's documents (a static rather than AppState: one browser, one
+// purpose at a time).
+bool g_browserOpensDocuments = false;
+
 void UpdateDirectoryContents(AppState& state) {
   state.directoryContents.clear();
 
@@ -116,9 +122,12 @@ void UpdateDirectoryContents(AppState& state) {
           std::string ext = entry.path().extension().string();
           std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-          if (interchange::FormatOf(filename) !=
-                  interchange::ImportFormat::None ||
-              ext == ".dxf" || ext == ".svg") {
+          if (g_browserOpensDocuments) {
+            if (ext == ".json")
+              state.directoryContents.push_back("[DOC] " + filename);
+          } else if (interchange::FormatOf(filename) !=
+                         interchange::ImportFormat::None ||
+                     ext == ".dxf" || ext == ".svg") {
             state.directoryContents.push_back("[CAD] " + filename);
           } else {
             state.directoryContents.push_back(filename);
@@ -134,7 +143,8 @@ void UpdateDirectoryContents(AppState& state) {
   std::sort(state.directoryContents.begin(), state.directoryContents.end());
 }
 
-void OpenBrowserFallback(AppState& state) {
+void OpenBrowserFallback(AppState& state, bool documents = false) {
+  g_browserOpensDocuments = documents;
   state.showFileBrowser = true;
   if (state.currentPath.empty() ||
       !std::filesystem::is_directory(state.currentPath)) {
@@ -304,6 +314,70 @@ void DrawCrashNoticeModal(AppState& state) {
   ImGui::EndPopup();
 }
 
+// A stopped session's never-saved work, offered back once by the next
+// windowed start (docs/versioning/README.md#a-stop-offers-unsaved-work-back).
+// Not a crash, so nothing here says one happened. Discard deletes it, so it
+// asks first; Later leaves it in File > Open Recent > Unsaved work.
+void DrawUnsavedOfferModal(AppState& state) {
+  const std::optional<crash::UnsavedOffer>& offer =
+      crash::PendingUnsavedOffer();
+  if (!offer || crash::Notice())
+    return; // the crash notice goes first
+  const char* title = "Unsaved work###UnsavedOffer";
+  if (!ImGui::IsPopupOpen(title))
+    ImGui::OpenPopup(title);
+  if (!ImGui::BeginPopupModal(title, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+  static bool confirmDiscard = false;
+  const Autosaver::UnsavedSlot slot = offer->slot; // a copy: the offer ends
+  const bool several = std::filesystem::is_directory(slot.path);
+  ImGui::Text("Unsaved work from %s", UnsavedWorkTime(slot).c_str());
+  ImGui::TextDisabled(
+      "%zu document%s that %s never saved, from when Loböle last stopped.",
+      slot.documents, slot.documents == 1 ? "" : "s",
+      slot.documents == 1 ? "was" : "were");
+  if (several)
+    ImGui::TextWrapped("Each of its documents opens on its own, from File > "
+                       "Open Recent > Unsaved work.");
+  ImGui::Spacing();
+  bool close = false;
+  if (confirmDiscard) {
+    ImGui::TextUnformatted("Delete this unsaved work? It cannot be undone.");
+    if (ImGui::Button("Delete###unsaved_discard_confirm")) {
+      std::string error;
+      if (!Autosaver::DiscardUnsavedSlot(Autosaver::StateDir(), slot.tag,
+                                         &error))
+        LOG_ERROR("Could not discard the unsaved work: {}", error);
+      close = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Keep###unsaved_discard_cancel"))
+      confirmDiscard = false;
+  } else {
+    ImGui::BeginDisabled(several);
+    if (ImGui::Button("Recover###unsaved_recover")) {
+      std::string error;
+      if (!RecoverUnsavedWork(state, slot.path, &error))
+        state.openError = error;
+      close = true;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Discard...###unsaved_discard"))
+      confirmDiscard = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Later###unsaved_later"))
+      close = true;
+  }
+  if (close) {
+    confirmDiscard = false;
+    crash::SetUnsavedOffer(std::nullopt);
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
 // The start-up notices after the crash notice, one at a time and only when
 // no other popup is up (two modals opened in one frame replace each other):
 // the last start found no renderer; the settings file could not be read and
@@ -312,8 +386,8 @@ void DrawCrashNoticeModal(AppState& state) {
 // fault inside OpenCASCADE was caught
 // (docs/modeling/README.md#a-caught-kernel-fault). Each is said once.
 void DrawStartupNotices(AppState& state) {
-  if (crash::Notice())
-    return; // the crash notice goes first
+  if (crash::Notice() || crash::PendingUnsavedOffer())
+    return; // the crash notice and the unsaved-work offer go first
   struct Notice {
     const char* title;
     std::string heading, body;
@@ -558,8 +632,10 @@ void DrawBrowserWindow(AppState& state) {
   if (!state.showFileBrowser)
     return;
 
-  ImGui::Begin("Import CAD File", &state.showFileBrowser,
-               ImGuiWindowFlags_AlwaysAutoResize);
+  // One window either way; "###" keeps its id when the title changes.
+  ImGui::Begin(g_browserOpensDocuments ? "Open File###FileBrowser"
+                                       : "Import CAD File###FileBrowser",
+               &state.showFileBrowser, ImGuiWindowFlags_AlwaysAutoResize);
 
   ImGui::Text("Current Path: %s", state.currentPath.c_str());
   ImGui::Separator();
@@ -601,6 +677,14 @@ void DrawBrowserWindow(AppState& state) {
             } catch (const std::exception& e) {
               LOG_ERROR("Error entering directory: {}", e.what());
             }
+          } else if (item.starts_with("[DOC]")) {
+            const std::string fullPath =
+                (std::filesystem::path(state.currentPath) / item.substr(6))
+                    .string();
+            std::string error;
+            if (!OpenPickedFile(state, fullPath, &error))
+              state.openError = error;
+            state.showFileBrowser = false;
           } else if (item.starts_with("[CAD]")) {
             std::string fullPath =
                 (std::filesystem::path(state.currentPath) / item.substr(6))
@@ -620,7 +704,10 @@ void DrawBrowserWindow(AppState& state) {
     ImGui::EndListBox();
   }
 
-  ImGui::Text("Double-click directories to enter, CAD files to load");
+  ImGui::TextUnformatted(
+      g_browserOpensDocuments
+          ? "Double-click directories to enter, a .json document to open"
+          : "Double-click directories to enter, CAD files to load");
 
   ImGui::End();
 }
@@ -649,11 +736,75 @@ bool NativeDialogsSafe() {
 void DrawFileBrowser(AppState& state) {
   DrawRecoveryModal(state);
   DrawCrashNoticeModal(state);
+  DrawUnsavedOfferModal(state);
   DrawStartupNotices(state);
   DrawSafeModeBanner(state);
   DrawDiskChangeModal(state);
   DrawLossySaveModal(state);
   DrawBrowserWindow(state);
+}
+
+std::string UnsavedWorkTime(const Autosaver::UnsavedSlot& slot) {
+  const std::time_t t = static_cast<std::time_t>(slot.modifiedUnix);
+  std::tm tm{};
+#if defined(_WIN32)
+  localtime_s(&tm, &t);
+#else
+  localtime_r(&t, &tm);
+#endif
+  char text[32];
+  std::strftime(text, sizeof text, "%Y-%m-%d %H:%M", &tm);
+  return text;
+}
+
+bool RecoverUnsavedWork(AppState& state, const std::string& path,
+                        std::string* error) {
+  // The ordinary open, off the frame: the open marks it unsaved work
+  // (MarkProjectOpened), so recovering and opening the slot by its path are
+  // one road.
+  if (!StartOpenProject(state, path, error)) {
+    if (error)
+      *error = "Could not recover " + path + ": " + *error;
+    return false;
+  }
+  return true;
+}
+
+bool OpenPickedFile(AppState& state, const std::string& path,
+                    std::string* error) {
+  namespace fs = std::filesystem;
+  const fs::path p(path);
+  // A project's own index, or its project.json, is that project.
+  const std::string name = p.filename().string();
+  if (name == "index.json" || name == "project.json" ||
+      DocumentIO::IsProjectFolderName(NormalizeProjectPick(path))) {
+    OpenProjectOrOfferRecovery(state, NormalizeProjectPick(path));
+    return true;
+  }
+  if (p.extension() != ".json") {
+    if (error)
+      *error = "Open File opens a single-file Loböle document (.json), or a "
+               "project's index.json or project.json; " +
+               name +
+               " is neither (a CAD file comes in through File > Import, a "
+               ".lob project through File > Open Project)";
+    return false;
+  }
+  OpenProjectOrOfferRecovery(state, path);
+  return true;
+}
+
+void OpenProjectOrOfferRecovery(AppState& state, const std::string& path) {
+  // Unsaved work is opened as what it is, never offered "its" autosave.
+  if (!Autosaver::IsUnsavedSlotPath(path) &&
+      (Autosaver::HasNewerAutosave(path) ||
+       !Autosaver::RecoverableDocuments(path).empty())) {
+    // Defer to the recovery modal (DrawFileBrowser) — the user picks
+    // between the saved file and the newer autosave.
+    state.recoveryOffer = path;
+    return;
+  }
+  OpenPickedProject(state, path);
 }
 
 #ifdef HAVE_NATIVEFILEDIALOG
@@ -726,14 +877,33 @@ void OpenProjectDialog(AppState& state) {
       NFD_OKAY) {
     const std::string path = NormalizeProjectPick(outPath);
     NFD_FreePathU8(outPath);
-    if (Autosaver::HasNewerAutosave(path) ||
-        !Autosaver::RecoverableDocuments(path).empty()) {
-      // Defer to the recovery modal (DrawFileBrowser) — the user picks
-      // between the saved file and the newer autosave.
-      state.recoveryOffer = path;
-      return;
+    OpenProjectOrOfferRecovery(state, path);
+  }
+}
+
+void OpenFileDialog(AppState& state) {
+  // The single-file form Open Project's folder chooser cannot pick: a
+  // document saved as one .json, a project's index.json, or unsaved work
+  // (docs/versioning/README.md#opening-a-file).
+  if (!NativeDialogsSafe()) {
+    OpenBrowserFallback(state, /*documents=*/true);
+    return;
+  }
+  nfdu8char_t* outPath = nullptr;
+  const nfdu8filteritem_t filters[] = {{"Loböle document", "json"}};
+  const nfdresult_t result =
+      InDialog([&] { return NFD_OpenDialogU8(&outPath, filters, 1, nullptr); });
+  if (result == NFD_OKAY) {
+    const std::string path(outPath);
+    NFD_FreePathU8(outPath);
+    std::string error;
+    if (!OpenPickedFile(state, path, &error)) {
+      state.openError = error;
+      LOG_ERROR("{}", error);
     }
-    OpenPickedProject(state, path);
+  } else if (result != NFD_CANCEL) {
+    LOG_ERROR("Error opening file dialog: {}", NFD_GetError());
+    OpenBrowserFallback(state, /*documents=*/true);
   }
 }
 
@@ -910,6 +1080,10 @@ void ImportFileDialog(AppState& state) { OpenBrowserFallback(state); }
 void OpenReferenceImageDialog(AppState& state) {
   state.sketchEdit.actionMsg =
       "Reference-image import needs the native file dialog.";
+}
+
+void OpenFileDialog(AppState& state) {
+  OpenBrowserFallback(state, /*documents=*/true);
 }
 
 void OpenProjectDialog(AppState&) {

@@ -15,6 +15,7 @@
 #include "cad/CADKernel.h" // ArmOccSignalHandlers
 #include "core/Parallel.h"
 #include "core/Units.h"
+#include "core/io/CrashReports.h" // the start-up offer of unsaved work
 #include "core/io/GeometryCache.h"
 #include "core/io/ProjectPaths.h"
 #include "core/io/ReadContext.h"
@@ -853,6 +854,16 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
   out.path = path;
   const fs::path projFile = fs::path(path) / "project.json";
   std::error_code existsEc;
+  // A never-saved project of several documents autosaves only the ones it
+  // changed, one file each and no project.json: not a project to open, and
+  // reading it as one fails with "project.json missing", which says nothing.
+  if (Autosaver::IsUnsavedSlotPath(path) && fs::is_directory(path, existsEc))
+    return std::unexpected(
+        "unsaved work of several documents is not a project: a never-saved "
+        "project's autosave keeps each changed document as a file of its "
+        "own, and each opens on its own (File > Open Recent > Unsaved work, "
+        "or File > Open File... on a .json in " +
+        path + ")");
   if (!fs::exists(projFile) && fs::is_directory(path, existsEc) &&
       !fs::exists(fs::path(path) / "index.json", existsEc))
     // Neither form: a container whose project.json went (its documents'
@@ -1429,7 +1440,51 @@ void MarkProjectSaved(AppState& state, const std::string& requested,
   StampDiskState(state, path);
 }
 
+namespace {
+// What an unsaved slot opened by its path becomes
+// (docs/versioning/README.md#opening-unsaved-work): the never-saved document
+// it holds, untitled and dirty, autosaving into THIS instance's slot and
+// nowhere near the state dir's -- not a project at `path`, which put it in
+// the recent list and autosaved it to `…autosave.json.autosave`.
+void MarkUnsavedWorkOpened(AppState& state, const std::string& path) {
+  MarkProjectOpened(state, "");
+  MarkProjectRecovered(state, ""); // dirty: none of it is saved anywhere
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (static_cast<int>(i) != state.activePart)
+      state.parts[i].lastSavedVersion = 0;
+  LOG_INFO("open: {} as unsaved work", path);
+
+  // The slot it came from: taken over as this instance's own when it is a
+  // dead session's slot in the state dir and this instance has none, so it
+  // is not offered a second time; otherwise left where it is (a crash
+  // report's copy, a live instance's slot, or this instance's own work).
+  namespace fs = std::filesystem;
+  const fs::path from(path);
+  const std::string tag = Autosaver::SlotTag(from.filename().string());
+  std::error_code ec;
+  const fs::path stateDir(Autosaver::StateDir());
+  const fs::path mine(Autosaver::SidecarPath(""));
+  const std::vector<std::string> live = crash::LiveSessionStems(stateDir);
+  if (const auto& offer = crash::PendingUnsavedOffer();
+      offer && offer->slot.tag == tag)
+    crash::SetUnsavedOffer(std::nullopt);
+  if (fs::is_regular_file(from, ec) &&
+      fs::equivalent(from.parent_path(), stateDir, ec) &&
+      tag != Autosaver::InstanceTag() &&
+      std::find(live.begin(), live.end(), tag) == live.end() &&
+      !fs::exists(mine, ec) && !fs::exists(Autosaver::SidecarDir(""), ec)) {
+    fs::rename(from, mine, ec);
+    if (ec)
+      LOG_WARN("Could not take over {}: {}", path, ec.message());
+  }
+}
+} // namespace
+
 void MarkProjectOpened(AppState& state, const std::string& path) {
+  if (!path.empty() && Autosaver::IsUnsavedSlotPath(path)) {
+    MarkUnsavedWorkOpened(state, path);
+    return;
+  }
   LOG_INFO("open: {}", path.empty() ? std::string("(new)") : path);
   // A new project, or one opened without AdoptProject: the last open's
   // drops were another project's.

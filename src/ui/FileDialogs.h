@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/io/Autosaver.h" // UnsavedSlot
 #include "ui/AppState.h"
 
 namespace ui {
@@ -19,6 +20,22 @@ void OpenReferenceImageDialog(AppState& state); // sketch underlay (v49)
 // Folder picker (projects are .lob folders): picking the project — or
 // anything inside it — opens it.
 void OpenProjectDialog(AppState& state);
+// File > Open File...: the single-file .json document (or a project's
+// index.json) Open Project's folder chooser cannot pick.
+void OpenFileDialog(AppState& state);
+// What Open File does with the path picked: a project's index.json or
+// project.json opens that project, a .json opens as a document (unsaved work
+// untitled), anything else is refused naming what is accepted.
+bool OpenPickedFile(AppState& state, const std::string& path,
+                    std::string* error);
+// Open a project, or offer its newer autosave first (the "Recover autosave?"
+// modal): Open Project, Open Recent and Open File all go through it.
+void OpenProjectOrOfferRecovery(AppState& state, const std::string& path);
+// Open never-saved work (an unsaved slot) as an untitled, dirty document.
+bool RecoverUnsavedWork(AppState& state, const std::string& path,
+                        std::string* error);
+// When a slot was last written, local time, as the offer and the menu say.
+std::string UnsavedWorkTime(const Autosaver::UnsavedSlot& slot);
 // Save As: always asks for a (new) location.
 void SaveProjectDialog(AppState& state);
 // Plain save (Ctrl+S): re-saves in place when the project has a home; the

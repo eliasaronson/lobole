@@ -1906,9 +1906,17 @@ int main(int argc, char** argv) {
     ~SessionEnd() { crash::EndSession(); } // a clean exit leaves no marker
   } sessionEnd;
   const bool windowed = !args.runGuiTests && !args.headless && !args.offscreen;
+  // The person's own window: a stop leaves a note naming its unsaved work,
+  // and a start offers what a stopped one left
+  // (docs/versioning/README.md#a-stop-offers-unsaved-work-back). Not a
+  // hidden window, which is an agent's or a test's: its work is no one's to
+  // be offered.
+  const bool visibleWindow = windowed && !args.hidden;
   if (auto session =
           crash::BeginSession(RuntimePaths::UserStateDir(), sessionMode)) {
-    SetCrashReportFiles(session->crashFile, session->dumpFile, session->marker);
+    SetCrashReportFiles(session->crashFile, session->dumpFile, session->marker,
+                        visibleWindow ? session->stopped
+                                      : std::filesystem::path());
     // --crash-test: once there is a marker to leave behind, and before the
     // first frame, so a windowed one counts towards safe mode.
     if (args.crashTest)
@@ -1920,6 +1928,8 @@ int main(int argc, char** argv) {
       // crash_reports RPC.
       if (!reports.empty() && windowed)
         crash::SetNotice(std::move(reports.front()));
+      if (visibleWindow)
+        crash::SetUnsavedOffer(crash::TakeStoppedOffer(session->stateDir));
     }
     if (windowed) {
       // A restart after a lost device: the report that session wrote is the

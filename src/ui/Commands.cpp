@@ -381,6 +381,8 @@ const std::vector<Command>& Table() {
     add(
         "file.open", [](AppState&) { return FileDialogsAvailable(); },
         [](AppState& s) { OpenProjectDialog(s); });
+    // Native dialogs, or the built-in browser where there are none.
+    add("file.open_file", nullptr, [](AppState& s) { OpenFileDialog(s); });
     add(
         "file.save", [](AppState&) { return FileDialogsAvailable(); },
         [](AppState& s) { SaveProjectAction(s); });

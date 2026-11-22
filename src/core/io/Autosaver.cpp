@@ -10,6 +10,7 @@
 #include "core/io/Serialization.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
@@ -103,6 +104,124 @@ void Autosaver::PruneUnsavedSlots(const std::string& stateDir,
       std::error_code rm;
       fs::remove_all(p, rm);
     }
+}
+
+bool Autosaver::IsUnsavedSlotPath(const std::string& path) {
+  for (fs::path p(path); !p.empty() && p != p.root_path(); p = p.parent_path())
+    if (IsUnsavedSlot(p.filename().string()))
+      return true;
+  return false;
+}
+
+std::string Autosaver::SlotTag(const std::string& filename) {
+  return IsUnsavedSlot(filename) ? TagOf(filename) : std::string();
+}
+
+namespace {
+
+int64_t UnixTime(fs::file_time_type t) {
+  return std::chrono::duration_cast<std::chrono::seconds>(
+             std::chrono::clock_cast<std::chrono::system_clock>(t)
+                 .time_since_epoch())
+      .count();
+}
+
+// Every unsaved slot in `stateDir`, one per tag: its file and its directory
+// taken together, named by whichever was written last.
+std::map<std::string, Autosaver::UnsavedSlot>
+SlotsByTag(const std::string& stateDir) {
+  std::map<std::string, Autosaver::UnsavedSlot> out;
+  std::error_code ec;
+  for (const auto& e : fs::directory_iterator(stateDir, ec)) {
+    const std::string name = e.path().filename().string();
+    if (!Autosaver::IsUnsavedSlot(name))
+      continue;
+    std::error_code tec;
+    const int64_t when = UnixTime(fs::last_write_time(e.path(), tec));
+    size_t documents = 0;
+    if (e.is_directory(tec)) {
+      // One file per document (`parts/Stand.json`); a temp file mid-write
+      // is not one.
+      for (const auto& f : fs::recursive_directory_iterator(e.path(), tec))
+        if (f.is_regular_file(tec) && f.path().extension() == ".json")
+          ++documents;
+    } else if (e.is_regular_file(tec) && fs::file_size(e.path(), tec) > 0) {
+      documents = 1;
+    }
+    Autosaver::UnsavedSlot& slot = out[TagOf(name)];
+    slot.tag = TagOf(name);
+    slot.documents += documents;
+    if (slot.path.empty() || when > slot.modifiedUnix ||
+        (when == slot.modifiedUnix && !e.is_directory(tec))) {
+      slot.path = e.path().string();
+      slot.modifiedUnix = std::max(slot.modifiedUnix, when);
+    }
+  }
+  return out;
+}
+
+} // namespace
+
+std::vector<Autosaver::UnsavedSlot>
+Autosaver::OrphanUnsavedSlots(const std::string& stateDir,
+                              const std::vector<std::string>& live) {
+  const std::string mine = InstanceTag();
+  std::vector<UnsavedSlot> out;
+  for (auto& [tag, slot] : SlotsByTag(stateDir)) {
+    if (tag == mine || slot.documents == 0 ||
+        std::find(live.begin(), live.end(), tag) != live.end())
+      continue;
+    out.push_back(std::move(slot));
+  }
+  std::sort(out.begin(), out.end(),
+            [](const UnsavedSlot& a, const UnsavedSlot& b) {
+              return a.modifiedUnix != b.modifiedUnix
+                         ? a.modifiedUnix > b.modifiedUnix
+                         : a.tag > b.tag;
+            });
+  return out;
+}
+
+std::optional<Autosaver::UnsavedSlot>
+Autosaver::SlotOf(const std::string& stateDir, const std::string& tag) {
+  auto slots = SlotsByTag(stateDir);
+  const auto it = slots.find(tag);
+  if (it == slots.end() || it->second.documents == 0)
+    return std::nullopt;
+  return it->second;
+}
+
+bool Autosaver::DiscardUnsavedSlot(const std::string& stateDir,
+                                   const std::string& tag, std::string* error) {
+  // Only an unsaved slot, only by its tag, only in the state dir: what this
+  // deletes is decided here, never by a path someone handed in.
+  if (tag == InstanceTag() || tag.find_first_of("/\\:") != std::string::npos ||
+      tag == "." || tag == "..") {
+    if (error)
+      *error = tag == InstanceTag() ? "that is this instance's own unsaved work"
+                                    : "'" + tag + "' is not an unsaved slot";
+    return false;
+  }
+  // "" is the shared slot builds before the instance tag wrote.
+  const std::string stem =
+      tag.empty() ? std::string("unsaved") : kUnsavedPrefix + tag;
+  std::error_code ec;
+  bool any = false;
+  for (const char* suffix : {kFileSuffix, kDirSuffix}) {
+    const fs::path p = fs::path(stateDir) / (stem + suffix);
+    if (fs::exists(p, ec)) {
+      fs::remove_all(p, ec);
+      if (ec) {
+        if (error)
+          *error = "could not delete " + p.string() + ": " + ec.message();
+        return false;
+      }
+      any = true;
+    }
+  }
+  if (!any && error)
+    *error = "no unsaved work named " + tag + " in " + stateDir;
+  return any;
 }
 
 std::string Autosaver::SidecarPath(const std::string& projectPath) {

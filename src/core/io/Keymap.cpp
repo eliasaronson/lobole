@@ -118,6 +118,10 @@ const Binding kDefaults[] = {
     // ---------------------------------------------------------------- Global
     {"file.new", Context::Global, "New Project", "File", "Ctrl+N"},
     {"file.open", Context::Global, "Open Project", "File", "Ctrl+O"},
+    // The file chooser Open Project's folder chooser is not: a single-file
+    // .json document, a project's index.json, unsaved work.
+    {"file.open_file", Context::Global, "Open File (a single-file document)",
+     "File", ""},
     {"file.save", Context::Global, "Save Project", "File", "Ctrl+S"},
     {"file.save_as", Context::Global, "Save Project As", "File",
      "Ctrl+Shift+S"},

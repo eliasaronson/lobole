@@ -32,11 +32,14 @@
 void InstallCrashHandler();
 
 // Where this session's crash file and Windows minidump go, and the marker the
-// termination signals delete. Copied into fixed buffers here, while
-// allocating is safe; also records the loaded modules.
+// termination signals delete -- or, given `stoppedFile`, rename to it, the
+// note a stop with unsaved work leaves (crash::Session::stopped). Copied into
+// fixed buffers here, while allocating is safe; also records the loaded
+// modules.
 void SetCrashReportFiles(const std::filesystem::path& crashFile,
                          const std::filesystem::path& dumpFile,
-                         const std::filesystem::path& markerFile);
+                         const std::filesystem::path& markerFile,
+                         const std::filesystem::path& stoppedFile = {});
 
 // Records the loaded modules again — after start-up has loaded the libraries
 // it loads late (the Vulkan driver), so their frames get a module too.

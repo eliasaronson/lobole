@@ -79,6 +79,9 @@ void WriteStderr(const char* s) { WriteStderr(s, strlen(s)); }
 constexpr size_t kPathMax = 4096;
 char g_crashPath[kPathMax] = {};
 char g_markerPath[kPathMax] = {};
+// Where the marker goes when a stop leaves a note instead
+// (crash::Session::stopped); empty = deleted.
+char g_stoppedPath[kPathMax] = {};
 // What std::terminate was handed, for the SIGABRT that follows it.
 char g_exceptionWhat[512] = {};
 constexpr int kMaxCrashFrames = 64;
@@ -362,8 +365,16 @@ void OnFatalSignal(int sig, siginfo_t* info, void*) {
 // before. The headless and offscreen loops install their own handlers for
 // SIGINT/SIGTERM (app/StopSignal.h) and exit cleanly, within a bound, which
 // ends the session the ordinary way.
+//
+// The visible windowed app's marker is RENAMED to the session's stop note
+// instead (rename is async-signal-safe): the next windowed start offers the
+// unsaved work it was stopped with
+// (docs/versioning/README.md#a-stop-offers-unsaved-work-back). The lock
+// travels with the file, so the note reads as live until this process is
+// gone.
 void OnTerminationSignal(int sig) {
-  if (g_markerPath[0])
+  if (g_markerPath[0] &&
+      (!g_stoppedPath[0] || rename(g_markerPath, g_stoppedPath) != 0))
     unlink(g_markerPath);
   signal(sig, SIG_DFL);
   raise(sig);
@@ -374,6 +385,7 @@ void OnTerminationSignal(int sig) {
 wchar_t g_crashPathW[kPathMax] = {};
 wchar_t g_dumpPathW[kPathMax] = {};
 wchar_t g_markerPathW[kPathMax] = {};
+wchar_t g_stoppedPathW[kPathMax] = {};
 
 void PutFrame(const Out& out, const char* tag, uintptr_t address) {
   out.Put(tag);
@@ -743,7 +755,9 @@ BOOL WINAPI OnConsoleControl(DWORD event) {
   // Where nothing stops cleanly (the windowed app): the session marker goes,
   // so the next start does not report a crash, and the process ends at once,
   // as the default signal action does on Linux.
-  if (g_markerPathW[0])
+  if (g_markerPathW[0] &&
+      (!g_stoppedPathW[0] ||
+       !MoveFileExW(g_markerPathW, g_stoppedPathW, MOVEFILE_REPLACE_EXISTING)))
     DeleteFileW(g_markerPathW);
   if (!closing)
     TerminateProcess(GetCurrentProcess(), STATUS_CONTROL_C_EXIT);
@@ -784,7 +798,8 @@ void InstallCrashHandler() {
 
 void SetCrashReportFiles(const std::filesystem::path& crashFile,
                          const std::filesystem::path& dumpFile,
-                         const std::filesystem::path& markerFile) {
+                         const std::filesystem::path& markerFile,
+                         const std::filesystem::path& stoppedFile) {
 #if defined(_WIN32)
   // Wide, from the path itself: path::string() is the ANSI code page there,
   // which cannot spell every user name.
@@ -797,6 +812,7 @@ void SetCrashReportFiles(const std::filesystem::path& crashFile,
   widen(g_crashPathW, crashFile);
   widen(g_dumpPathW, dumpFile);
   widen(g_markerPathW, markerFile);
+  widen(g_stoppedPathW, stoppedFile);
   // dbghelp loads here, not inside the filter.
   (void)LoadLibraryW(L"dbghelp.dll");
   RecordShippedModules();
@@ -806,6 +822,7 @@ void SetCrashReportFiles(const std::filesystem::path& crashFile,
 #endif
   CopyInto(g_crashPath, sizeof g_crashPath, crashFile.string());
   CopyInto(g_markerPath, sizeof g_markerPath, markerFile.string());
+  CopyInto(g_stoppedPath, sizeof g_stoppedPath, stoppedFile.string());
 }
 
 void RefreshCrashModules() {

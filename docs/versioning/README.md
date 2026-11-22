@@ -25,7 +25,8 @@ container would otherwise be a directory named `.json` without the git
 history, which keys on `.lob`. Open dispatches on the path: a `.lob` (or
 `.dsgn`) or any directory opens as a project (`project.json` present means
 the container form), a file as a single document. Picking an `index.json`
-inside a `.lob` opens the project. Every place that asks "is this a
+inside a `.lob` opens the project -- File > Open File... is the chooser that
+can pick one ([opening a file](#opening-a-file)). Every place that asks "is this a
 project?" goes through `ui::IsProjectPath` / `ui::NormalizeProjectPick`, and
 "is this the folder form?" through `DocumentIO::IsProjectFolderName`.
 
@@ -422,11 +423,14 @@ is what keeps crash recovery working: the session marker lists the slot by
 its full name, so the next start copies exactly the dead session's slot
 into its report.
 
-A slot outlives its session after a dirty exit, and nothing offers it
-again. `crash::CollectDeadSessions`, after copying the dead sessions'
+A slot outlives its session after a dirty exit. A stopped session's is
+offered back at the next start ([below](#a-stop-offers-unsaved-work-back)),
+and every one no running instance owns is listed under File > Open Recent >
+Unsaved work. `crash::CollectDeadSessions`, after copying the dead sessions'
 slots into their reports, prunes the slots no live session owns beyond the
 newest ten (`kKeepUnsavedSlots`; the shared slot older builds left counts as
-one of them) — never a live session's, never its own.
+one of them) — never a live session's, never its own, and never one a stop
+note still names.
 
 A clean save clears every sidecar of the project it saved, and this
 instance's unsaved slot — never another instance's. Recovery:
@@ -456,6 +460,87 @@ single file would carry inline (`DocumentIO::SaveSimulationBody`): an
 autosave never writes one, and a recovered document's studies run again
 ([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps))
 and its drawing views project again.
+
+### A stop offers unsaved work back
+
+A stop is not a crash: SIGTERM, SIGINT or SIGHUP (`tools/dev-watch.sh`
+relaunching on a rebuild, a logout) gets no crash report. It used to get
+nothing at all -- the marker was deleted and the never-saved work sat in its
+slot unseen. Now the **visible windowed app**'s stop handler renames its
+marker to a stop note, `sessions/<stem>.stopped`, instead of deleting it
+(`rename` is safe in a signal handler; the lock goes with the file, so the
+note reads as a live session until the process is gone).
+
+When an offer appears: the next start that is itself a visible window takes
+every note whose process is gone (`crash::TakeStoppedOffer`, deleting them:
+it is said once) and, if any of those sessions left a slot holding a
+document, offers the newest: **"Unsaved work from <when it was last
+written>"**, how many documents, and **Recover / Discard... / Later**. No
+crash wording, no report. Recover opens it as [unsaved
+work](#opening-unsaved-work); Discard asks once more ("Delete this unsaved
+work? It cannot be undone.") and deletes the slot
+(`Autosaver::DiscardUnsavedSlot`, which refuses this instance's own); Later
+leaves the slot, which File > Open Recent > Unsaved work still lists. A
+crash notice goes first; the start-up notices wait for both.
+
+When it does not:
+
+- a stop with nothing unsaved, or whose work was saved as a project: the
+  note names no slot with a document, and goes;
+- a crash: the crash notice offers the report's copy instead;
+- closing the window: the person chose to leave (and was asked about
+  unsaved changes), so there is no note;
+- `--headless`, `--offscreen`, `--hidden` and `--gui-tests` runs: they leave
+  no note when stopped and take none when started. A hidden window is an
+  agent's or a test's, and every instance on the machine shares the state
+  dir -- its work is no one's to be offered to the person at their app. Their
+  slots are still listed by Open Recent, and their notes still kept from
+  pruning, for the visible start they are for;
+- a live session's slot, ever: notes and markers are checked by their lock
+  (`crash::LiveSessionStems`).
+
+`autosave_status` reports the pending offer (`unsaved_offer`) and the slots
+Open Recent lists (`unsaved_slots`), each `{path, tag, modified_unix,
+documents}`.
+
+A stopped session that had a SAVED project leaves its sidecar beside the
+project, newer than the project file: opening that project by File > Open
+Project, File > Open Recent or File > Open File offers "Recover autosave?"
+(Open Recent did not, before; it opened the saved file and left the newer
+autosave unmentioned). Opening it by `open_project` or a path on the command
+line answers `autosave_available` / opens the saved file, as before.
+
+### Opening unsaved work
+
+An unsaved slot opened by its path -- from the offer, from Open Recent's
+Unsaved work, by File > Open File, by `open_project` or on the command line
+-- is the never-saved document it holds: **untitled** (no project path, so
+Save asks where), **dirty**, **not** added to the recent list, and
+autosaving into THIS instance's own slot. It used to open as a project at
+that path: titled after the slot, remembered among recent projects, and
+autosaved to `…autosave.json.autosave` in the state dir. A path inside a
+slot's directory is unsaved work the same way (`Autosaver::IsUnsavedSlotPath`,
+honoured in `ui::MarkProjectOpened`). A dead session's slot in the state dir
+is renamed to this instance's slot when this instance has none, so it is not
+offered twice; a live instance's, a crash report's copy, or one elsewhere is
+left where it is. `open_project` says `unsaved_work: true` and the slot it
+now autosaves to.
+
+A never-saved project of **several** documents autosaves only the documents
+it changed, one file each and no project list, so it is not a project to
+open: opening the folder is refused, saying so, and Open Recent shows it as
+a submenu of its documents, each of which opens on its own. Its offer has no
+Recover button for the same reason.
+
+### Opening a file
+
+File > Open Project (Ctrl+O) is a folder chooser, because a project is a
+`.lob` folder. **File > Open File...** (`file.open_file`, unbound) is the
+file chooser for what that cannot pick: a single-file `.json` document,
+a project's `index.json` or `project.json` (which opens that project), or
+unsaved work. Anything else is refused, naming what it accepts (a CAD file
+comes in through File > Import). Without native dialogs it is the built-in
+browser, listing `.json` files.
 
 ## A shared project's history
 
@@ -647,7 +732,7 @@ so a saved project is self-contained. See
 | `new_project` | reset to one empty part, discarding what is open |
 | `open_project {path}` | open; returns `autosave_available`, `autosave_path`, `rebuilt_parts`, `rebuild_reason`, `dropped` ([a lossy load](#a-lossy-load)), regen, and a digest against no bodies (every body `added`) |
 | `save_project {path, message?, force?, overwrite_lossy?}` | save; `message` is the git commit message; refuses when the disk moved unless `force`, and over a lossy open unless `overwrite_lossy` (then its reply carries `warning`) |
-| `autosave_now`, `autosave_status` | force an autosave; list recoverable documents |
+| `autosave_now`, `autosave_status` | force an autosave; list recoverable documents, the start-up's unsaved-work offer and every never-saved session's work |
 | `project_changed_on_disk` | the stamp check |
 
 History, merge and remote RPCs are listed in [history.md](history.md#rpcs).
