@@ -38,7 +38,7 @@
  "solidcore/fillets/16654-fillet-drum-rim-beside-a-boss-flush-with-its-top-r0-5": "known: refused (docs/modeling/README.md#not-built)",
  "solidcore/fillets/16654-fillet-drum-rim-under-a-box-standing-across-it-r4": "pass",
  "solidcore/fillets/16654-fillet-drum-rim-under-a-tube-standing-across-it-r4": "pass",
- "solidcore/fillets/16654-fillet-equal-tube-tee-pinched-at-the-sides-r2": "known: refused (docs/known-bugs.md#a-blend-the-validity-check-passes-can-be-far-off-in-volume)",
+ "solidcore/fillets/16654-fillet-equal-tube-tee-pinched-at-the-sides-r2": "known: refused (docs/modeling/README.md#not-built)",
  "solidcore/fillets/16654-fillet-tube-joint-across-a-chamfer-crease-r1": "known: refused (docs/modeling/README.md#not-built)",
  "solidcore/fillets/16654-fillet-tube-joint-through-its-cylinders-own-splits-r4": "untranslated: `solid.split_face`",
  "solidcore/fillets/18823-chain-and-wall-window-s1p65-top5p1-d0p4-bands-apart": "known: volume (docs/modeling/README.md#known-rows-that-are-not-kernel-defects)",

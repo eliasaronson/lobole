@@ -35,6 +35,7 @@
 #include <TopoDS.hxx>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -177,4 +178,108 @@ TEST_CASE("Nothing builds past a refusing bound", "[.fit_sweep]") {
           if (kFactors[level] >= 1.0 + fit::RefuseMargin(k))
             CHECK(t.built[level] == 0);
   }
+}
+
+// The evidence for fit::kReachMargin
+// (docs/modeling/README.md#a-blend-moves-the-volume-it-can): every edge set
+// of the same bodies, filleted and
+// chamfered at a quarter, a half and nine tenths of its least bound, and
+// every build the validity check passes held to the volume its blend can
+// move. Prints the most each way, as a fraction of the reach, and every
+// build the objection would refuse; one it refuses that is a blend is a
+// margin too tight.
+TEST_CASE("A blend that builds moves the volume within its reach",
+          "[.fit_sweep]") {
+  const char* dir = std::getenv("LOBOLE_FIT_SWEEP_DIR");
+  if (dir == nullptr)
+    SKIP("LOBOLE_FIT_SWEEP_DIR names no directory of BREP files");
+  int shardK = 0, shardN = 1;
+  if (const char* s = std::getenv("LOBOLE_FIT_SWEEP_SHARD"))
+    REQUIRE(std::sscanf(s, "%d/%d", &shardK, &shardN) == 2);
+  std::vector<std::filesystem::path> files;
+  for (const auto& e : std::filesystem::recursive_directory_iterator(dir))
+    if (e.path().extension() == ".brep")
+      files.push_back(e.path());
+  std::sort(files.begin(), files.end());
+  REQUIRE_FALSE(files.empty());
+
+  int built = 0, held = 0;
+  double most = 0.0; // |change| / reach on the side it moved
+  std::string mostAt;
+  std::vector<std::string> refused;
+  for (size_t fi = 0; fi < files.size(); fi++) {
+    if (static_cast<int>(fi % shardN) != shardK)
+      continue;
+    TopoDS_Shape whole;
+    BRep_Builder builder;
+    if (!BRepTools::Read(whole, files[fi].c_str(), builder))
+      continue;
+    int solidNo = 0;
+    for (TopExp_Explorer sx(whole, TopAbs_SOLID); sx.More();
+         sx.Next(), solidNo++) {
+      Body body;
+      body.shape = CADShape(sx.Current());
+      body.createdBy = 1;
+      topo::NamePrimitiveElements(body.shape, "1", body.elementMap);
+      TopTools_IndexedMapOfShape edges;
+      TopExp::MapShapes(sx.Current(), TopAbs_EDGE, edges);
+      const double before = body.shape.Volume();
+      for (int e = 0; e < edges.Extent(); e++)
+        for (const EdgeBlendOp op :
+             {EdgeBlendOp::Fillet, EdgeBlendOp::Chamfer}) {
+          std::vector<int> on;
+          const Body base = topo::BlendBody(body, {e}, op, on);
+          const auto least = fit::BlendBound(base, on, op);
+          if (!least)
+            continue;
+          std::vector<int> all = on;
+          for (const topo::BlendContour& c :
+               topo::EdgeBlendContours(base.shape, on, op))
+            for (const int x : c.edges)
+              if (std::find(all.begin(), all.end(), x) == all.end())
+                all.push_back(x);
+          const auto reach = fit::ReachOf(base, all);
+          for (const double factor : {0.25, 0.5, 0.9}) {
+            const double size = least->size * factor;
+            const CADShape result =
+                topo::EdgeBlendUnnamed(base.shape, on, op, size, false);
+            if (!result.IsValid() || !Measure::InvalidReasons(result).empty())
+              continue;
+            built++;
+            if (!reach)
+              continue;
+            held++;
+            const fit::VolumeReach r = fit::ReachAt(*reach, op, size);
+            const double change = result.Volume() - before;
+            const double side = change < 0.0 ? r.remove : r.add;
+            const double ratio =
+                side > 0.0 ? std::abs(change) / side
+                           : (std::abs(change) > 1e-9 * before ? HUGE_VAL : 0);
+            const std::string at =
+                files[fi].filename().string() + " solid " +
+                std::to_string(solidNo) + " edge " + std::to_string(e) +
+                (op == EdgeBlendOp::Chamfer ? " chamfer " : " fillet ") +
+                fit::Mm(size) + ": change " + std::to_string(change) +
+                " mm3, reach -" + std::to_string(r.remove) + " +" +
+                std::to_string(r.add);
+            if (ratio > most) {
+              most = ratio;
+              mostAt = at;
+            }
+            if (const std::string why =
+                    fit::VolumeObjection(op, size, base.shape, result, r);
+                !why.empty())
+              refused.push_back(at);
+          }
+        }
+    }
+  }
+  std::printf("reach_sweep: %d valid builds, %d held to a reach; the most "
+              "%.4g of its reach (%s)\n",
+              built, held, most, mostAt.c_str());
+  // Each one refused is to be looked at: a blend it refuses is a reach too
+  // tight. The four of the corpus are wrong bodies (README).
+  for (const std::string& r : refused)
+    std::printf("reach_sweep refused: %s\n", r.c_str());
+  CHECK(held > 0);
 }

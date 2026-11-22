@@ -271,18 +271,38 @@ bool FilletFeature::Execute(RegenContext& ctx) {
   // measures; EdgeBlendNamed merges its own copy the same way.
   std::vector<int> onBase;
   const Body base = topo::BlendBody(*body, indices, op, onBase);
+  // What a blend of these edges can move the volume (fit::ReachOf), over
+  // the builder's contours: measured once, at the first result to hold to
+  // it (docs/modeling/README.md#a-blend-moves-the-volume-it-can).
+  std::optional<std::optional<std::vector<fit::EdgeReach>>> reach;
+  const auto wrongVolume = [&](const CADShape& built, double size) {
+    if (!reach) {
+      std::vector<int> all = onBase;
+      for (const topo::BlendContour& c :
+           topo::EdgeBlendContours(base.shape, onBase, op))
+        for (const int e : c.edges)
+          if (std::find(all.begin(), all.end(), e) == all.end())
+            all.push_back(e);
+      reach = fit::ReachOf(base, all);
+    }
+    if (!*reach)
+      return std::string();
+    return fit::VolumeObjection(op, size, base.shape, built,
+                                fit::ReachAt(**reach, op, size));
+  };
   ElementMap map;
   std::string error;
   topo::EdgeBlendFailure failure;
   CADShape result;
-  // Why a built result is not kept, or empty: the blend builder reported
-  // success on blends that crossed themselves, and the part went on with a
-  // body check_geometry called invalid (tools/fuzz.py).
+  // Why a built result is not kept, or empty: invalid (the blend builder
+  // reported success on blends that crossed themselves, and the part went
+  // on with a body check_geometry called invalid, tools/fuzz.py), or valid
+  // and of a volume no blend of the size reaches (the tee of two tubes at
+  // R0.143 built 773 mm3 on).
   const auto unkept = [&](const CADShape& built, double size) -> std::string {
-    (void)size;
     if (const std::string bad = Measure::InvalidReasons(built); !bad.empty())
       return std::string(what) + " produced an invalid solid (" + bad + ")";
-    return {};
+    return wrongVolume(built, size);
   };
   // The blend at the asked size, its splits merged or (`merge` false) the
   // body as it is.

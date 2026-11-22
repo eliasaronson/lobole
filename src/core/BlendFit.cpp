@@ -3,6 +3,8 @@
 
 #include "core/BlendFit.h"
 
+#include "cad/Integrate.h"
+
 #include "core/Measure.h"
 #include "core/MeasureBlend.h"
 #include "core/features/FilletFeature.h" // EdgeBlendOp
@@ -13,6 +15,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepClass_FaceClassifier.hxx>
+#include <BRepLProp_CLProps.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
 #include <BndLib_Add2dCurve.hxx>
@@ -21,8 +24,11 @@
 #include <ElCLib.hxx>
 #include <ElSLib.hxx>
 #include <GCE2d_MakeSegment.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
 #include <Geom2dAPI_InterCurveCurve.hxx>
+#include <Geom2d_Curve.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
@@ -33,6 +39,7 @@
 #include <gp_Cylinder.hxx>
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Pnt2d.hxx>
 
 #include <algorithm>
 #include <array>
@@ -946,6 +953,239 @@ FitHint BoundHint(const Answer& a) {
   FitHint h = HintOf(a);
   h.basis = "bound";
   return h;
+}
+
+namespace {
+
+// The solid's interior angle between the two faces of `edge` at its
+// parameter `u`, radians (under pi convex, over it concave), from the faces'
+// normals and the direction into the first: Measure::DihedralAngleAt's
+// reading, without its stations' classification, for nine stations an edge.
+struct EdgeAngle {
+  BRepAdaptor_Curve curve;
+  struct Side {
+    BRepAdaptor_Surface surface;
+    Handle(Geom2d_Curve) pcurve;
+    bool reversedEdge = false, reversedFace = false;
+  };
+  std::vector<Side> sides;
+
+  EdgeAngle(const TopoDS_Edge& edge, const TopoDS_Face& f1,
+            const TopoDS_Face& f2)
+      : curve(edge) {
+    for (const TopoDS_Face& f : {f1, f2}) {
+      TopoDS_Edge inFace = edge;
+      for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next())
+        if (ex.Current().IsSame(edge)) {
+          inFace = TopoDS::Edge(ex.Current());
+          break;
+        }
+      double a = 0.0, b = 0.0;
+      Side s{BRepAdaptor_Surface(f, false),
+             BRep_Tool::CurveOnSurface(inFace, f, a, b),
+             inFace.Orientation() == TopAbs_REVERSED,
+             f.Orientation() == TopAbs_REVERSED};
+      sides.push_back(std::move(s));
+    }
+  }
+
+  std::optional<double> At(double u) const {
+    gp_Pnt p;
+    gp_Vec t;
+    curve.D1(u, p, t);
+    if (t.Magnitude() < 1e-12 || sides.size() != 2 ||
+        sides[0].pcurve.IsNull() || sides[1].pcurve.IsNull())
+      return std::nullopt;
+    gp_Vec n[2], into0;
+    for (int k = 0; k < 2; k++) {
+      const gp_Pnt2d uv = sides[k].pcurve->Value(u);
+      gp_Pnt q;
+      gp_Vec du, dv;
+      sides[k].surface.D1(uv.X(), uv.Y(), q, du, dv);
+      n[k] = du.Crossed(dv);
+      if (n[k].Magnitude() < 1e-12)
+        return std::nullopt;
+      n[k].Normalize();
+      if (sides[k].reversedFace)
+        n[k].Reverse();
+    }
+    // Into the first face: its normal across the edge as the face runs it
+    // (the material on the left, seen from outside).
+    // The explorer composes the face's orientation onto its edges', so
+    // the outward normal crossed with the edge's direction as the face
+    // holds it points into the face either way.
+    gp_Vec run = t.Normalized();
+    if (sides[0].reversedEdge)
+      run.Reverse();
+    into0 = n[0].Crossed(run);
+    const double between = n[0].Angle(n[1]);
+    return into0.Dot(n[1]) < 0.0 ? std::numbers::pi - between
+                                 : std::numbers::pi + between;
+  }
+};
+
+} // namespace
+
+std::optional<std::vector<EdgeReach>>
+ReachOf(const Body& body, const std::vector<int>& contourEdges) {
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(body.shape.GetShape(), TopAbs_EDGE, edges);
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+  TopExp::MapShapesAndAncestors(body.shape.GetShape(), TopAbs_EDGE, TopAbs_FACE,
+                                edgeFaces);
+  // At a cusp (a knife edge, the faces' normals opposite) which side holds
+  // the material is a guess: the section counts on both.
+  constexpr double kCuspRad = 0.05;
+  // Stations to within a fiftieth of each end: the angle can run to nothing
+  // at a knife edge's tip, and its section with it to everything.
+  constexpr double kStations[] = {0.02, 0.1,  0.25, 0.4, 0.5,
+                                  0.6,  0.75, 0.9,  0.98};
+  std::vector<EdgeReach> out;
+  try {
+    for (const int e : contourEdges) {
+      if (e < 0 || e + 1 > edges.Extent())
+        return std::nullopt;
+      const TopoDS_Edge& edge = TopoDS::Edge(edges(e + 1));
+      TopoDS_Face f1, f2;
+      if (const int at = edgeFaces.FindIndex(edge); at != 0)
+        for (const TopoDS_Shape& f : edgeFaces(at)) {
+          if (f1.IsNull())
+            f1 = TopoDS::Face(f);
+          else if (!f.IsSame(f1))
+            f2 = TopoDS::Face(f);
+        }
+      if (f2.IsNull())
+        return std::nullopt;
+      const EdgeAngle angle(edge, f1, f2);
+      const double a = angle.curve.FirstParameter(),
+                   b = angle.curve.LastParameter();
+      EdgeReach r;
+      for (const double t : kStations) {
+        const std::optional<double> theta = angle.At(a + (b - a) * t);
+        if (!theta || !std::isfinite(*theta))
+          return std::nullopt;
+        const bool concave = *theta > std::numbers::pi;
+        const double phi =
+            std::clamp(concave ? 2.0 * std::numbers::pi - *theta : *theta, 1e-6,
+                       std::numbers::pi);
+        (concave ? r.concave : r.convex).push_back(phi);
+        if (phi < kCuspRad)
+          (concave ? r.convex : r.concave).push_back(phi);
+      }
+      r.length = GCPnts_AbscissaPoint::Length(angle.curve);
+      if (angle.curve.GetType() == GeomAbs_Circle) {
+        r.curvature = 1.0 / angle.curve.Circle().Radius();
+      } else if (angle.curve.GetType() != GeomAbs_Line) {
+        for (int k = 0; k <= 8; k++) {
+          BRepLProp_CLProps props(angle.curve, a + (b - a) * k / 8.0, 2, 1e-9);
+          r.curvature = std::max(r.curvature, std::abs(props.Curvature()));
+        }
+      }
+      out.push_back(std::move(r));
+    }
+  } catch (const Standard_Failure&) {
+    return std::nullopt;
+  }
+  return out;
+}
+
+VolumeReach ReachAt(const std::vector<EdgeReach>& reach, EdgeBlendOp op,
+                    double size) {
+  const bool chamfer = op == EdgeBlendOp::Chamfer;
+  // How far from the edge the blend reaches: its setback in the wedge of
+  // the faces' tangent planes, or the ball's own size where faces that
+  // curve away from it carry its contact further out (two cylinders meeting
+  // nearly tangent).
+  const auto setback = [&](double phi) {
+    return std::max(size, chamfer ? size : size / std::tan(phi / 2.0));
+  };
+  // The section at an angle -- the wedge's, or the ball's disc where that is
+  // more -- swept along a curved edge at its setback.
+  const auto moved = [&](double phi, double curvature) {
+    const double half = phi / 2.0;
+    const double wedge =
+        chamfer ? 0.5 * size * size * std::sin(phi)
+                : size * size *
+                      (1.0 / std::tan(half) - (std::numbers::pi - phi) / 2.0);
+    const double section = std::max(wedge, std::numbers::pi * size * size);
+    return section * (1.0 + setback(phi) * curvature);
+  };
+  VolumeReach v;
+  double ends = 0.0;
+  for (const EdgeReach& r : reach) {
+    double most[2] = {0.0, 0.0}, reaches = 0.0;
+    for (const double phi : r.convex) {
+      most[0] = std::max(most[0], moved(phi, r.curvature));
+      reaches = std::max(reaches, setback(phi));
+    }
+    for (const double phi : r.concave) {
+      most[1] = std::max(most[1], moved(phi, r.curvature));
+      reaches = std::max(reaches, setback(phi));
+    }
+    v.remove += r.length * most[0];
+    v.add += r.length * most[1];
+    // Past each end the blend meets whatever is there -- an end face at a
+    // slant, a neighbour it runs out over -- within its setback of the
+    // vertex: a ball of that radius, either way.
+    ends += 2.0 * (4.0 / 3.0) * std::numbers::pi * reaches * reaches * reaches;
+  }
+  v.ends = ends;
+  return v;
+}
+
+constexpr double kBuilderTolerance = 1e-4; // mm
+
+std::string VolumeObjection(EdgeBlendOp op, double size, const CADShape& input,
+                            const CADShape& built, const VolumeReach& reach) {
+  // First the fixed rule and one estimate of each suspect face, their gap
+  // as the uncertainty: a blend's B-spline faces cost the integrator's
+  // halvings ten times over, and the margin is a factor, not a digit.
+  cad::IntegrateOptions quick;
+  quick.area = false;
+  quick.maxHalvings = 0;
+  const cad::Integral q = cad::Integrate(built.GetShape(), quick);
+  std::string why = VolumeObjection(op, size, input.Volume(), q.volume, reach,
+                                    4.0 * q.volumeUncertainty);
+  if (why.empty())
+    return why;
+  CADShape::MassProps a, b;
+  if (!input.ComputeMassProps(a) || !built.ComputeMassProps(b))
+    return why;
+  // The integration's own uncertainty, and the builder's: it approximates
+  // the faces it rebuilds to 1e-4 mm (ChFi3d_Builder's tolapp3d), over at
+  // most the body's area.
+  return VolumeObjection(op, size, a.volume, b.volume, reach,
+                         4.0 * (a.volumeUncertainty + b.volumeUncertainty) +
+                             kBuilderTolerance *
+                                 std::max(a.surfaceArea, b.surfaceArea));
+}
+
+std::string VolumeObjection(EdgeBlendOp op, double size, double before,
+                            double after, const VolumeReach& reach,
+                            double slack) {
+  if (!std::isfinite(before) || !std::isfinite(after))
+    return {};
+  const double change = after - before;
+  const double floor = kReachFloor * std::abs(before) + slack;
+  const double removes = kReachMargin * (reach.remove + reach.ends) + floor;
+  const double adds = kReachMargin * (reach.add + reach.ends) + floor;
+  if (change >= -removes && change <= adds)
+    return {};
+  const bool chamfer = op == EdgeBlendOp::Chamfer;
+  const std::string what = chamfer ? "chamfer" : "fillet";
+  const std::string noun = chamfer ? "a chamfer of " : "a round of ";
+  const auto mm3 = [](double v) { return std::format("{:.4g}", v); };
+  std::string limit;
+  if (change > 0.0)
+    limit = "can add at most " + mm3(reach.add + reach.ends) + " mm3" +
+            (reach.add > 0.0 ? "" : " (past their ends: they are convex)");
+  else
+    limit = "can remove at most " + mm3(reach.remove + reach.ends) + " mm3" +
+            (reach.remove > 0.0 ? "" : " (past their ends: they are concave)");
+  return what + " produced a solid " + mm3(std::abs(change)) + " mm3 " +
+         (change > 0.0 ? "larger" : "smaller") + " than the part, where " +
+         noun + Mm(size) + " mm on these edges " + limit +
+         ": OpenCASCADE's blend builder built a wrong solid";
 }
 
 } // namespace fit

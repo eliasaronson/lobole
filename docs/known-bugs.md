@@ -123,29 +123,6 @@ the heading if it is not here yet.
   the name.
 - **Case:** `solidcraft/fillets/every-l-bracket-front-inner-outline-after-bend-round-r1`.
 
-### A blend the validity check passes can be far off in volume
-
-- **Symptom:** the size a refused Fillet names as the one that fits builds
-  a body `check_geometry` passes with a volume nowhere near a round's. Two
-  equal tubes in a tee, their whole joint at R2: refused, "the largest
-  radius that fits is 0.143 mm"; R0.143 builds 76595.87 mm³ on a union of
-  75823.00, 773 mm³ added where a round of that size adds under 1. One of
-  the joint's half ellipses alone at R1 and R0.143 builds about 750 mm³
-  too many, also valid; at R2 and R0.1 it adds 16.1 and 0.042, as it
-  should.
-- **Cause:** not established. OpenCASCADE's builder returns a solid whose
-  faces pass BRepCheck but enclose more than the union and the round; the
-  validity check (`Measure::InvalidReasons`) is all the size search and the
-  feature ask of a result.
-- **Where:** `FilletFeature`; the size search
-  ([the size that fits](modeling/README.md#the-size-that-fits)).
-- **Likely fix:** hold a blend's result to the volume a blend of its size
-  can move (the union's volume plus or minus the edges' length times the
-  section r² (1 - pi/4), doubled for curvature) before it is kept or named
-  as the size that fits.
-- **Case:** `solidcore/fillets/16654-fillet-equal-tube-tee-pinched-at-the-sides-r2`
-  (its row is the refusal at R2; the wrong volume is at the size named).
-
 ### A cavity touching the outer skin along a line is one shell with it
 
 - **Symptom:** a box less a cylinder that lies inside it and touches a wall

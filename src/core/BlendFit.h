@@ -193,4 +193,54 @@ FitHint BoundHint(const Answer& a);
 // A size in mm as the sentences print it: 7.49, 10, 0.3.
 std::string Mm(double v);
 
+// How much a blend can move the volume
+// (docs/modeling/README.md#a-blend-moves-the-volume-it-can): on a convex
+// edge a round or a chamfer only
+// removes, on a concave one only adds, and at most the edge's length times
+// the blend's section in the wedge of its faces -- r^2 (cot(phi/2) - (pi -
+// phi)/2) for a round, d^2 sin(phi)/2 for a chamfer, phi the faces' angle
+// across the material at a convex edge and across the air at a concave one
+// -- times 1 + setback x curvature where the edge curves. Per edge of the
+// blend's contours (the picked edges and their tangent chains), measured
+// once at stations along it: the reach at a size is the edge's length times
+// the largest section at any station, summed.
+struct EdgeReach {
+  double length = 0.0;    // mm
+  double curvature = 0.0; // 1/mm, the edge's most
+  // phi at the stations where the edge is convex, and where it is concave.
+  std::vector<double> convex, concave;
+};
+// None where an edge's angle cannot be measured: then nothing is held.
+std::optional<std::vector<EdgeReach>>
+ReachOf(const Body& body, const std::vector<int>& contourEdges);
+// The most it can remove and add at `size` along the edges, mm^3, and past
+// their ends either way: a ball of the edge's largest setback at each end
+// (a round meeting a slanted end face, or running out over a neighbour).
+struct VolumeReach {
+  double remove = 0.0;
+  double add = 0.0;
+  double ends = 0.0;
+};
+VolumeReach ReachAt(const std::vector<EdgeReach>& reach, EdgeBlendOp op,
+                    double size);
+// How far past its reach a blend's volume change may be before the result
+// is refused: the corpus's most is in docs/modeling/README.md (the sweep,
+// "[.fit_sweep]"), well under it. Plus an absolute floor, so a blend whose
+// reach is a speck is not held to the volume's own noise.
+inline constexpr double kReachMargin = 2.0;
+inline constexpr double kReachFloor = 1e-6; // of the body's volume
+// Why `after` (the blend's result's volume) is not a blend of `size` on a
+// body of volume `before`, or empty: a change of the wrong sign, or past
+// kReachMargin times the reach, by more than `slack` mm^3 (what the two
+// volumes' integration may be off: the caller asks it only of a result this
+// refuses, since the uncertainty costs the area's integration too).
+std::string VolumeObjection(EdgeBlendOp op, double size, double before,
+                            double after, const VolumeReach& reach,
+                            double slack = 0.0);
+// VolumeObjection of `built` on `input`, the two volumes' uncertainty
+// (CADShape::ComputeMassProps) taken as slack, four times over, where it
+// would refuse without.
+std::string VolumeObjection(EdgeBlendOp op, double size, const CADShape& input,
+                            const CADShape& built, const VolumeReach& reach);
+
 } // namespace fit

@@ -1521,7 +1521,8 @@ refuse a size past them, and every other kind seeds the search.
 
 **The search** (`fit::LargestThatBuilds`). When the build at the asked size
 fails -- the builder is not done, a faulty contour, a fault in its signal
-scope, or a result `Measure::InvalidReasons` calls invalid; not the edges'
+scope, a result `Measure::InvalidReasons` calls invalid, or one whose volume
+no blend of that size reaches; not the edges'
 own objections, which no size cures -- the first candidate sits just under
 the bound (a thousandth below it, so two rounds that would meet exactly
 leave a sliver). Under a bound that refuses, where that builds it is the
@@ -1534,8 +1535,9 @@ proportion whatever its size. Nine builds at most, a fixed count, so the answer 
 on how busy the machine is. Every candidate is rounded down to three
 significant digits, so the number reported is a number that was built. A
 candidate builds when `topo::EdgeBlendUnnamed` returns a solid that
-`InvalidReasons` passes: the two things `Execute` requires, without naming
-the result. The candidates build on the body with the
+`InvalidReasons` passes and whose volume a blend of its size can reach
+([below](#a-blend-moves-the-volume-it-can)): what `Execute` requires,
+without naming the result. The candidates build on the body with the
 splits the blend meets merged ([a blend beside a split](#a-blend-beside-a-split)), as the feature does. `BRepFilletAPI_MakeFillet::Build` ignores its progress range in
 OpenCASCADE 7.9, so the search is bounded by its count; it asks
 `heavy::Cancelled()` before each candidate, and a stopped search reports
@@ -1744,7 +1746,9 @@ the search read the builder's failure as the size's ("no radius builds ...
 down to 0.00257 mm" where the L from one profile rounds R2.5).
 
 So a Fillet or Chamfer the builder fails on as the body is, or whose
-result is invalid, is built again on a copy with the splits it meets merged
+result is invalid or of a volume no blend reaches
+([below](#a-blend-moves-the-volume-it-can)), is built again on a copy with
+the splits it meets merged
 (`topo::MergeBesideBlend`, `src/core/ElementHistory.cpp`), and nothing
 else. A **split** is an edge between two faces on one surface (a cheap test
 of the analytic geometry -- coplanar planes, coaxial cylinders and cones of
@@ -1801,6 +1805,60 @@ matrix a gear wheel's tooth outline (its flanks meet their neighbours at
 0.9 to 1.3 degrees), a flattened 60-degree fold's strips (0.8 to 3
 degrees) and a closed spline's two edges (0.6) are refused one edge at a
 time, where the builder rounded the whole chain.
+
+### A blend moves the volume it can
+
+`Measure::InvalidReasons` passes solids the builder makes that are not
+blends: on a tee of two tubes, R0.143 on the whole joint built a solid 773
+mm3 over the union where a round of that size adds under one, and the size
+search named it as the size that fits. A round or a chamfer removes
+material at a convex edge and adds it at a concave one, and only near the
+edge. So a result is held to what a blend of its size can move
+(`fit::ReachOf`, `fit::ReachAt`, over the contours' edges, the tangent
+chains included):
+
+- along each edge, on its own side (convex: removed, concave: added), its
+  length times the largest section at nine stations along it -- the wedge's,
+  r^2 (cot(phi/2) - (pi - phi)/2) for a round and d^2 sin(phi)/2 for a
+  chamfer, phi the angle across the material or the air, or the ball's disc
+  pi r^2 where that is more (faces that curve away from the ball, two
+  cylinders meeting nearly tangent, carry its contact past the wedge's
+  setback) -- times 1 + setback x curvature along a curved edge;
+- past each edge's ends, either way, a ball of its largest setback: a round
+  meeting a slanted end face, or running out over a neighbour, changes what
+  is there.
+
+A result whose change is past `fit::kReachMargin` (2) times that, the wrong
+way or too far, plus a millionth of the body, is refused as an invalid one
+is (`fit::VolumeObjection`), at the size asked and at every candidate of the
+search, so the size the search names builds a blend's volume. Every volume
+goes through `cad::Integrate`: the result's first at its fixed rule and one
+estimate of each suspect face, no halvings, their gap four times over as
+slack (a blend's B-spline faces cost the halvings ten times over, and the
+margin is a factor, not a digit); a result that would be refused is then
+measured whole (`ComputeMassProps`, both bodies), and their uncertainties
+four times over and the builder's approximation tolerance (1e-4 mm,
+`ChFi3d_Builder`'s tolapp3d) over the body's area are the slack: a round of
+a thousandth of a millimetre beside a modelled thread moves the volume by
+up to 1e-3 mm3 that is neither. The reach is measured once a feature, at
+its first result, from the faces' normals at the stations (the same angle
+`Measure::DihedralAngleAt` reads, on all 13 404 edges of the sweep's
+bodies). It costs 40 ms on the plate of 100 bores below (its 108 edges)
+and 15 ms a result: the `[fillet]` tests' 54 that main also has took 5.0 s
+of CPU where they took 4.5.
+
+The evidence is the hidden sweep's second case (`tests/test_blend_fit_sweep.cpp`,
+`[.fit_sweep]`): every edge of the kernel cases' bodies and the action
+matrix's (less the gear train's), filleted and chamfered at a quarter, a
+half and nine tenths of its least bound. Of 27 735 valid builds on the
+kernel cases' bodies it refuses one, a chamfer of 1.425 mm on a 19 mm
+concave edge that added 637 mm3 where its corner's triangle is 19; of
+23 216 on the matrix's, three, one edge of fuzz/24 rounded at 0.19, 0.39
+and 0.69 mm, which removed 101 and 70 mm3 and then added 135, where the
+three rounds can remove 1.4, 5.7 and 19.
+`tests/test_blend_fit.cpp` plants wrong volumes against a box edge's reach
+and holds the tee through the feature: R0.143 is refused for its volume,
+and nothing it builds at R2 or under is kept.
 
 ## Kernel calls build on a copy of the cached body
 

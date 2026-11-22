@@ -588,3 +588,95 @@ TEST_CASE("A rim chamfer beside a bar flush with its bottom builds",
   CHECK(*hint.fitsMm > 7.0);
   BuildsAtAndNotAbove(split, f, *hint.fitsMm);
 }
+
+TEST_CASE("A blend that builds a valid solid of the wrong volume is refused",
+          "[fillet][fit]") {
+  // docs/modeling/README.md#a-blend-moves-the-volume-it-can. Planted: a
+  // round of 1 mm on a box's edge, convex, removes (1 - pi/4) per mm of it;
+  // it is held to the ball's disc, pi r^2 a mm, which is more.
+  Document doc;
+  Box(doc, 10, 10, 10);
+  const auto edge = EdgesWhere(doc, [](const auto& p) {
+    return All(p, [](const glm::vec3& q) {
+      return Near(q.x, 0.0f) && Near(q.y, 0.0f);
+    });
+  });
+  REQUIRE(edge.size() == 1);
+  const Body& body = doc.GetBodies().at(0);
+  const int idx = *body.elementMap.ResolveEdge(edge[0].name);
+  const auto reach = fit::ReachOf(body, {idx});
+  REQUIRE(reach.has_value());
+  const fit::VolumeReach at1 = fit::ReachAt(*reach, EdgeBlendOp::Fillet, 1.0);
+  CHECK_THAT(at1.remove, WithinRel(std::numbers::pi * 10.0, 1e-12));
+  CHECK(at1.add == 0.0);
+  // Past each end, a ball of its setback (1 mm): 2 x 4/3 pi.
+  CHECK_THAT(at1.ends, WithinRel(8.0 / 3.0 * std::numbers::pi, 1e-12));
+  const double v = 1000.0, round = (1.0 - std::numbers::pi / 4.0) * 10.0;
+  // The right body passes; one that grew, or lost far more than a round
+  // can, does not.
+  CHECK(fit::VolumeObjection(EdgeBlendOp::Fillet, 1.0, v, v - round, at1)
+            .empty());
+  const std::string grew =
+      fit::VolumeObjection(EdgeBlendOp::Fillet, 1.0, v, v + 50.0, at1);
+  CHECK(grew.find("50 mm3 larger than the part") != std::string::npos);
+  CHECK(grew.find("(past their ends: they are convex)") != std::string::npos);
+  CHECK_FALSE(fit::VolumeObjection(EdgeBlendOp::Fillet, 1.0, v, v - 100.0, at1)
+                  .empty());
+  // The slack the caller gives (the volumes' uncertainty) is room on top.
+  CHECK(fit::VolumeObjection(EdgeBlendOp::Fillet, 1.0, v, v + 50.0, at1, 40.0)
+            .empty());
+}
+
+TEST_CASE("The size that fits a tee's joint builds a round's volume",
+          "[fillet][fit]") {
+  // Two R15 tubes in a tee (kernel case solidcore/fillets/16654), the whole
+  // joint at R2: refused, and the size the refusal named, R0.143, built a
+  // valid solid 773 mm3 over the union where a round of it adds under 1.
+  Document doc;
+  auto along = std::make_unique<SketchFeature>(
+      "S", SketchPlane({0, 0, 0}, {0, -1, 0}, {1, 0, 0}));
+  along->AddEntity(sketch::Circle{{0.0, 0.0}, 15.0});
+  doc.AddFeature(std::move(along));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Tube", doc.GetFeature(0)->GetId(), 80.0, ExtrudeMode::NewBody));
+  auto up = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  up->AddEntity(sketch::Circle{{0.0, -40.0}, 15.0});
+  doc.AddFeature(std::move(up));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Branch", doc.GetFeature(2)->GetId(), 40.0, ExtrudeMode::Add));
+  REQUIRE(doc.Regenerate());
+  const double v0 = doc.GetBodies().at(0).shape.Volume();
+  REQUIRE_THAT(v0, WithinRel(75823.0, 1e-4));
+  const auto joint = EdgesWhere(doc, [](const auto& p) {
+    return All(p, [](const glm::vec3& q) {
+      return q.z > -1e-3f && std::abs(std::hypot(q.x, q.z) - 15.0f) < 1e-2f &&
+             std::abs(std::hypot(q.x, q.y + 40.0f) - 15.0f) < 1e-2f;
+    });
+  });
+  REQUIRE_FALSE(joint.empty());
+  FilletFeature* f = AddBlend(doc, joint, 0.143);
+  // The size the search named before: valid, and refused for its volume.
+  CHECK_FALSE(doc.Regenerate());
+  INFO(f->GetError());
+  CHECK(f->GetError().find("OpenCASCADE's blend builder built a wrong "
+                           "solid") != std::string::npos);
+  // At R2 the search keeps no wrong solid either: whatever it names builds
+  // a round's volume, more than the union (the joint is concave) and under
+  // the case's bound, 2 L 0.858 r^2.
+  f->radius = 2.0;
+  const auto t0 = std::clock();
+  CHECK_FALSE(doc.Regenerate());
+  INFO("the refusal at R2: " << double(std::clock() - t0) / CLOCKS_PER_SEC
+                             << " s of CPU");
+  if (const auto hint = f->GetFitHint(); hint && hint->fitsMm) {
+    f->radius = *hint->fitsMm;
+    REQUIRE(doc.Regenerate());
+    const double v = doc.GetBodies().at(0).shape.Volume();
+    const double r = *hint->fitsMm;
+    CHECK(v > v0);
+    CHECK(v - v0 < 2.0 * 114.6 * (1.0 - std::numbers::pi / 4.0) * r * r);
+  } else {
+    CHECK(f->GetError().find("no radius builds on these edges") !=
+          std::string::npos);
+  }
+}

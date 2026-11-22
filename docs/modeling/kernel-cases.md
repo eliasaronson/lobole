@@ -44,7 +44,7 @@ command or parameter Loböle has no counterpart for.
 | solidcore/fillets/15505-chamfer-end-cap-between-two-faces-of-one-cylinder | topology | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcore/fillets/15505-chamfer-end-cap-on-one-cylinder-face | topology | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcore/fillets/16654-fillet-drum-rim-beside-a-boss-flush-with-its-top-r0-5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcore/fillets/16654-fillet-equal-tube-tee-pinched-at-the-sides-r2 | refused | [docs/known-bugs.md#a-blend-the-validity-check-passes-can-be-far-off-in-volume](../known-bugs.md#a-blend-the-validity-check-passes-can-be-far-off-in-volume) |
+| solidcore/fillets/16654-fillet-equal-tube-tee-pinched-at-the-sides-r2 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcore/fillets/16654-fillet-tube-joint-across-a-chamfer-crease-r1 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcore/fillets/18823-chain-and-wall-window-s1p65-top5p1-d0p4-bands-apart | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcore/fillets/18823-chain-and-wall-window-s1p65-top5p15-d0p4-bands-apart | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
