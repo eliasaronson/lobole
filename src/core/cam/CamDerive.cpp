@@ -455,8 +455,26 @@ DerivedOp DeriveOperation(const Setup& setup,
     // sampler part's 1.5 mm chamfer came out 6 mm, 4.5 mm into the part all
     // the way round, and its r3 round-over gouged the top beside it. Found,
     // the break is the model's, from the model's top edge.
-    const ModelledBreak modelled =
+    //
+    // Probed within the tool's radius of the wall, which is as wide as a
+    // V-bit can chamfer. A ball is not bounded by its own size -- it walks
+    // the arc -- and a round wider than the ball, probed that narrowly, read
+    // as its first r of width and the height there: the speaker floor's R11
+    // under a 4 mm ball came back "2 mm wide and 6.33 tall, not a round".
+    // So a ball looks as far as the material above the wall goes, and keeps
+    // what it finds only when it IS a round; anything else (a shoulder
+    // further back) falls back to the narrow probe, as before.
+    const auto isRound = [](const ModelledBreak& b) {
+      return std::abs(b.width - b.height) <= 0.1 * std::max(b.width, b.height);
+    };
+    ModelledBreak modelled =
         FindModelledBreak(bodies, wall, tool.diameter * 0.5 + 1e-6, hi.z);
+    if (tool.type == ToolType::Ball) {
+      const ModelledBreak wide = FindModelledBreak(
+          bodies, wall, tool.diameter * 0.5 + (hi.z - wall.topZ) + 1e-6, hi.z);
+      if (wide.found && isRound(wide))
+        modelled = wide;
+    }
     double edgeTop = wall.topZ;
     double asked = 0.0;
     if (modelled.found) {
@@ -473,9 +491,7 @@ DerivedOp DeriveOperation(const Setup& setup,
                     "model's angle, or change the chamfer";
           return out;
         }
-      } else if (tool.type == ToolType::Ball &&
-                 std::abs(modelled.width - modelled.height) >
-                     0.1 * std::max(modelled.width, modelled.height)) {
+      } else if (tool.type == ToolType::Ball && !isRound(modelled)) {
         out.why = "the model's break on that edge is " +
                   Round2(modelled.width) + " mm wide and " +
                   Round2(modelled.height) +

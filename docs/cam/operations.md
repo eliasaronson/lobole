@@ -375,6 +375,11 @@ square step nobody asked for.
 - **The size:** the break's width there for a chamfer (exact at its top),
   or its height for a round (a round meets the face tangentially, so its
   width just below falls short).
+- **How far it looks:** a tool radius in from the wall, as wide as a V-bit
+  can chamfer. A ball walks the arc, so a round wider than it is fine: the
+  ball also probes as far as the material above the wall goes, and keeps
+  that when it is a round. Probed only a radius in, an R11 under a 4 mm ball
+  read as 2 mm wide and 6.3 tall, and was refused as not a round.
 - **Refused:** a V-bit whose angle is not the chamfer's, naming both, and a
   ball on a break that is not a round.
 - **Before this:** the edge was the wall's top, below the modelled break,
