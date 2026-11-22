@@ -2885,8 +2885,15 @@ static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
     // during GUI tests (they run on defaults and must not touch the
     // developer's config).
     if (!args.runGuiTests) {
-      if (autosaver.Interval() != g_App.settings.autosaveInterval)
+      // A CHANGE to the preference applies live; the preference as it was
+      // at start does not, or an explicit --autosave (which wins, above)
+      // lasted one frame -- the interval was reset to the setting on the
+      // first iteration of this loop.
+      static double appliedAutosave = g_App.settings.autosaveInterval;
+      if (g_App.settings.autosaveInterval != appliedAutosave) {
+        appliedAutosave = g_App.settings.autosaveInterval;
         autosaver.SetInterval(g_App.settings.autosaveInterval);
+      }
       ui::FlushSettings(g_App, glfwGetTime());
     }
 
