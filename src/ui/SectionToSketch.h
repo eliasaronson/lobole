@@ -28,8 +28,13 @@ SketchPlane SectionSketchPlane(AppState& state,
 // that crosses no body), the reason in `state.sectionSketchMsg`.
 uint64_t SectionToSketch(AppState& state, uint64_t sectionId);
 
-// The tool window's rows: the fit and To sketch, and the pieces' detail;
-// for the active cut.
+// "Trace" (docs/sketching/README.md#tracing-a-section): that sketch, and
+// the pieces of its cut traced over it as real lines and arcs, one undo
+// step. Returns the sketch's id; 0 when refused, as SectionToSketch.
+uint64_t TraceSectionToSketch(AppState& state, uint64_t sectionId);
+
+// The tool window's rows: the fit and To sketch; the detail and Trace; for
+// the active cut.
 void DrawSectionToSketchRow(AppState& state);
 
 } // namespace ui

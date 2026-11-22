@@ -8,6 +8,7 @@
 #include "core/Angles.h"
 #include "core/Command.h"
 #include "core/features/RevolveFeature.h"
+#include "core/sketch/SectionTrace.h"
 #include "ui/AssemblyActions.h"
 #include "ui/Commands.h"
 #include "ui/DocumentSlots.h"
@@ -1548,6 +1549,162 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     s_App->sectionSketchFit = sketch::SectionFit::Arcs;
     std::error_code ec;
     std::filesystem::remove(stl, ec);
+  };
+
+  // "Trace" (docs/sketching/README.md#tracing-a-section): a slot's cut
+  // traced as two real lines and two real arcs, joined end to end, one undo
+  // step; a traced line is picked in the viewport like any other; and when
+  // the slot grows, the section follows it and the traced geometry stays
+  // where it was drawn, section_fit saying it is off the cut.
+  t = IM_REGISTER_TEST(engine, "section", "trace_draws_real_geometry");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const auto slot = [](double half, double r) {
+      auto sk =
+          std::make_unique<SketchFeature>("Slot", SketchPlane(PlaneType::XY));
+      sk->AddEntity(sketch::Line{{-half, -r}, {half, -r}});
+      sk->AddEntity(
+          sketch::Arc{{half, 0}, r, -angles::kPi / 2, angles::kPi / 2});
+      sk->AddEntity(sketch::Line{{half, r}, {-half, r}});
+      sk->AddEntity(
+          sketch::Arc{{-half, 0}, r, angles::kPi / 2, 3 * angles::kPi / 2});
+      return sk;
+    };
+    Doc()->AddFeature(slot(20.0, 6.0));
+    const uint64_t slotSketch = Doc()->GetFeature(0)->GetId();
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>(
+        "Slot body", slotSketch, 20.0, ExtrudeMode::NewBody));
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    ToolbarClick(ctx, "###tb_section");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
+    s_App->sectionActiveId = s_App->sections[0].id;
+    s_App->sections[0].offset = 10.0f;
+    ctx->Yield();
+    const size_t before = Doc()->FeatureCount();
+    const size_t depth = s_App->commands->UndoDepth();
+    ctx->SetRef("//Section###ToolWindow");
+    GuiShot(ctx, "section_tool_trace_row");
+    ctx->ItemClick("**/###tracesection");
+    ctx->Yield(3);
+    IM_CHECK(s_App->sectionSketchMsg.empty());
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth + 1); // one step
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(sk != nullptr);
+    if (sk == nullptr)
+      return;
+    IM_CHECK(sk->GetError().empty());
+    IM_CHECK_EQ(sk->traced.size(), (size_t)4);
+    int lines = 0, arcs = 0;
+    std::map<uint32_t, sketch::Entity> drawn;
+    for (const sketch::TracedFrom& tf : sk->traced) {
+      const size_t idx = sk->IndexOfEntity(tf.entity);
+      IM_CHECK(idx != std::numeric_limits<size_t>::max());
+      if (idx == std::numeric_limits<size_t>::max())
+        return;
+      const sketch::Entity& e = sk->entities[idx];
+      IM_CHECK(!sketch::IsConstruction(e));         // real geometry
+      IM_CHECK(sk->GeneratedBy(tf.entity).empty()); // nothing owns it
+      lines += std::holds_alternative<sketch::Line>(e);
+      arcs += std::holds_alternative<sketch::Arc>(e);
+      drawn[tf.entity] = e;
+    }
+    IM_CHECK_EQ(lines, 2);
+    IM_CHECK_EQ(arcs, 2);
+    size_t joints = 0;
+    for (const sketch::Constraint& c : sk->constraints)
+      joints += c.kind == sketch::ConstraintKind::Coincident;
+    IM_CHECK_EQ(joints, (size_t)4);
+    // Picked in the viewport like any line: its middle, clicked.
+    IM_CHECK_EQ(s_App->sketchEdit.activeSketchId, sk->GetId());
+    if (s_App->camera)
+      s_App->camera->FinishAnimation();
+    ctx->Yield(2);
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    s_App->sketchEdit.selected.clear();
+    uint32_t lineId = 0;
+    glm::dvec2 mid(0.0);
+    for (const auto& [id, e] : drawn)
+      if (const auto* l = std::get_if<sketch::Line>(&e)) {
+        lineId = id;
+        mid = 0.5 * (l->a + l->b) + glm::dvec2(5.0, 0.0);
+      }
+    const glm::vec2 at =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(mid));
+    ctx->MouseMoveToPos(ImVec2(at.x, at.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    // The section's own line lies under it (a B-Rep's cut is exact): a
+    // click at the same spot cycles from one to the other.
+    const std::vector<uint32_t>& under = sk->external[0].genIds;
+    if (!s_App->sketchEdit.selected.empty() &&
+        std::find(under.begin(), under.end(),
+                  s_App->sketchEdit.selected[0].entity) != under.end()) {
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+    }
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+    if (!s_App->sketchEdit.selected.empty())
+      IM_CHECK_EQ(s_App->sketchEdit.selected[0].entity, lineId);
+    s_App->sketchEdit.selected = {
+        sketch::PointRef{lineId, sketch::kWholeEntity}};
+    if (!GuiTestCaptureDir().empty()) {
+      if (s_App->camera) {
+        s_App->camera->FinishAnimation();
+        s_App->camera->StopAnimation();
+        s_App->camera->SetTarget(glm::vec3(0.0f, 0.0f, 10.0f));
+        s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+        s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f + 70.0f));
+      }
+      ctx->Yield(3);
+      GuiShot(ctx, "section_trace_slot");
+    }
+    s_App->sketchEdit.selected.clear();
+    const uint64_t traceId = sk->GetId();
+    const std::vector<uint32_t> genBefore = sk->external[0].genIds;
+    // The slot grows 2 mm along its length: the section is cut again.
+    {
+      const nlohmann::json b = DocumentIO::FeatureToJson(*Doc()->GetFeature(0));
+      nlohmann::json a = DocumentIO::FeatureToJson(*slot(22.0, 6.0));
+      a["id"] = b["id"];
+      s_App->commands->Execute(std::make_unique<ModifyFeatureCommand>(0, b, a),
+                               *Doc());
+    }
+    ctx->Yield(3);
+    sk = dynamic_cast<SketchFeature*>(Doc()->FindFeatureById(traceId));
+    IM_CHECK(sk != nullptr);
+    if (sk == nullptr)
+      return;
+    IM_CHECK(sk->GetError().empty());
+    // The section moved with the slot...
+    bool sectionMoved = false;
+    for (uint32_t g : sk->external[0].genIds)
+      if (const auto* l =
+              std::get_if<sketch::Line>(&sk->entities[sk->IndexOfEntity(g)]))
+        sectionMoved = sectionMoved ||
+                       std::abs(std::abs(l->a.x) - 22.0) < 1e-3 ||
+                       std::abs(std::abs(l->b.x) - 22.0) < 1e-3;
+    IM_CHECK(sectionMoved);
+    // ...and the traced geometry did not.
+    for (const auto& [id, e] : drawn) {
+      const size_t idx = sk->IndexOfEntity(id);
+      IM_CHECK(idx != std::numeric_limits<size_t>::max());
+      if (idx == std::numeric_limits<size_t>::max())
+        continue;
+      for (uint8_t w = 0; w < 3; w++)
+        IM_CHECK(glm::length(sketch::EntityPointUV(sk->entities[idx], w) -
+                             sketch::EntityPointUV(e, w)) < 1e-9);
+    }
+    // section_fit: the arcs are off the cut now, the lines still on it.
+    int off = 0;
+    for (const sketch::TracedMiss& m : sketch::SectionFitReport(*sk))
+      off += !m.cut || !m.miss.explained;
+    IM_CHECK_EQ(off, 2);
+    s_App->sketchEdit = ui::SketchEditState{};
+    ui::ClearSections(*s_App);
+    s_App->sectionToolOpen = false;
   };
 
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_the_cut");

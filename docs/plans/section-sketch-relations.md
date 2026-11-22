@@ -7,39 +7,35 @@ with the evidence for it, and none is applied past what the scan allows.
 
 ## The problem
 
-`project_section` (docs/sketching/README.md#a-section-into-a-sketch) draws
-the cut as solver-fixed construction geometry, and its `pieces` fit finds
+A section is drawn into a sketch as solver-fixed construction
+(docs/sketching/README.md#a-section-into-a-sketch); its `pieces` fit finds
 the lines and arcs the cut is made of, each with its own fit and
-uncertainty (docs/sketching/README.md#the-pieces-fit). That is right for a profile
-that should follow the scan exactly, and wrong for reverse engineering a
-made part:
+uncertainty (docs/sketching/README.md#the-pieces-fit), and `trace_section`
+draws them as real, joined geometry over it, with `section_fit` saying how
+far the cut stands from each (docs/sketching/README.md#tracing-a-section).
+What is left:
 
-- **Nothing relates the pieces.** A slot's sides are 0.2° from parallel, its
-  ends 0.03 mm from equal, a boss 11.97 mm across. The designer has to see
-  each of these, redraw the outline by hand over the construction geometry
-  and constrain it, with no way to know whether "12" is inside the scan's
-  noise or a guess.
-- **A dimension has no error bar.** The reply gives one `deviation_mm` for
-  the whole section.
+- **Nothing relates the traced pieces.** A slot's sides are 0.2° from
+  parallel, its ends 0.03 mm from equal, a boss 11.97 mm across. The
+  designer has to see each of these and constrain it, with no way to know
+  whether "12" is inside the scan's noise or a guess.
+- **A round's and a thread's size are read by hand.**
 
 ## The shape of the fix
 
-### 2. Real geometry beside the section
+What it builds on: each traced entity's `PieceFit` (its points' sigma, its
+parameters' sigmas: a line's angle and offset, an arc's centre and
+radius, widened by its residuals' correlation) is what an `off` is divided
+by. It is computed by `sketch::FitPieces` and kept only on the section
+(`ExternalGeom::pieces`, not saved) and in `trace_section`'s reply; the
+candidates need it per traced entity, so they refit each traced entity's
+span (`TracedFrom` records it) of the current cut, as `section_fit`
+measures it (`sketch::SectionFitReport`). A small round's sigma leaves out
+where its tangent points are (the docs say by how much); a candidate on
+one should not be offered at a sigma it does not have -- a tangent-
+constrained refit between its neighbours is the likely answer.
 
-`trace_section {sketch_id, section, detail?}` (and **Trace** in the Section
-tool's To sketch) adds real, non-construction lines and arcs for the
-pieces, coincident where consecutive pieces meet, over a section that stays
-as it is underneath. The traced entities are ordinary sketch geometry; they
-record which section and which span of it each came from
-(`traced_from {section, chain, from, to}`), nothing more.
-
-The section still follows a re-scan. The traced geometry does not move by
-itself: it is the designer's drawing. `section_fit {sketch_id}` reports, for
-each traced entity, how far the current cut stands from it (sigma, worst
-stretch, and where), so a re-scan or a held relation that pulled a piece off
-the object is seen.
-
-### 3. Candidates, with their evidence
+### 1. Candidates, with their evidence
 
 `sketch_candidates {sketch_id}` lists what the traced geometry nearly is.
 Each row: the relation or dimension, the entities, `off` (how far the fit is
@@ -58,7 +54,7 @@ for a size the `nominal`.
   table in the source.
 - Nothing is offered past `max_sigmas` (default 3).
 
-### 4. Accepting
+### 2. Accepting
 
 `accept_candidates {sketch_id, max_sigmas?, max_move_mm?, only?}` adds the
 candidates as ordinary constraints and dimensions, nearest (fewest sigmas)
@@ -80,7 +76,7 @@ order of acceptance, the move limit and the fit report afterwards are what
 keep the sketch on the scan; a dimension accepted at its nominal is a
 driving dimension the designer can change.
 
-### 5. Reading a round and a thread off a scan
+### 3. Reading a round and a thread off a scan
 
 Two readers that give a feature its size, used as the default when the tool
 is opened on a scan-backed body (docs/ui/tool-sessions.md#defaults-and-refusals):
@@ -97,24 +93,19 @@ is opened on a scan-backed body (docs/ui/tool-sessions.md#defaults-and-refusals)
 
 ## Stages
 
-- **B.** Trace and `section_fit` (§2).
-- **C.** Candidates and accepting (§3, §4), the RPCs, then the tool.
-- **D.** The two readers (§5).
+- **C.** Candidates and accepting (§1, §2), the RPCs, then the tool (a
+  candidates list in the Section tool's Trace area, or the sketch's).
+- **D.** The two readers (§3).
 
 ## Files
 
-- `src/core/sketch/SketchSection.{h,cpp}` (the pieces), new
-  `src/core/sketch/SectionTrace.{h,cpp}`, `SketchCandidates.{h,cpp}`
-- `src/core/features/SketchFeature.cpp` (`traced_from`, kept through
-  regeneration), the sketch serialization (`vNEXT`: `fit: "pieces"`,
-  `detail`, `traced_from`)
+- new `src/core/sketch/SketchCandidates.{h,cpp}` (beside
+  `SectionPieces`/`SectionTrace`)
 - new `src/core/mesh/ReadRound.{h,cpp}`, `ReadThread.{h,cpp}`
-- `src/remote/RemoteModeling.cpp` (`project_section`, `trace_section`,
-  `section_fit`, `sketch_candidates`, `accept_candidates`),
-  `src/remote/RemoteInspection.cpp` (the readers)
+- `src/remote/RemoteModeling.cpp` (`sketch_candidates`,
+  `accept_candidates`), `src/remote/RemoteInspection.cpp` (the readers)
 - `src/ui/SectionToSketch.{h,cpp}`
-- docs/sketching/README.md, docs/modeling/README.md,
-  docs/versioning/format.md
+- docs/sketching/README.md, docs/modeling/README.md
 
 ## Verified by
 
@@ -131,10 +122,9 @@ generator's numbers.
   the noise, and its dimensions at their nominals. A candidate that would
   drag a side 0.5 mm off the points is left, naming the move. A redundant
   one is left as redundant. Undo removes all of it in one step.
-- **A re-scan.** The section moves, the traced sketch does not, and
-  `section_fit` reports the piece that no longer lies on the cut.
 - **Through the pipeline:** the traced, constrained profile is extruded and
-  the body's deviation from the scan
+  the body's deviation from the scan (as `test_section_trace.cpp` does for
+  the traced profile unconstrained)
   (`compare_scan`,
   [how far a body is from a scan](../inspect/README.md#how-far-a-body-is-from-a-scan))
   is within the tolerance.

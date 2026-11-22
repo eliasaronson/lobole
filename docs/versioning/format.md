@@ -369,7 +369,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A sketch section's `fit` may be `pieces`, the lines and arcs the cut is made of, with `detail` (0 to 1, written only for that fit) ([the pieces fit](../sketching/README.md#the-pieces-fit)). A detail on another fit, or outside 0 to 1, is refused. Golden `vNEXT-section-pieces` |
+| vNEXT | A sketch section's `fit` may be `pieces`, the lines and arcs the cut is made of, with `detail` (0 to 1, written only for that fit) ([the pieces fit](../sketching/README.md#the-pieces-fit)); a sketch takes `traced`, a list of {`entity`, `section`, `chain`, `from`, `to`}: an entity traced over a section and where from ([tracing a section](../sketching/README.md#tracing-a-section)), written only when there is one. A detail on another fit or outside 0 to 1, a traced record naming an entity the sketch does not have or an `external` that is not a section, a value that is not a whole number, and an unknown key are refused. Golden `vNEXT-section-pieces` |
 
 ## Paths in a project
 

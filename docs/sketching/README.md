@@ -18,7 +18,7 @@ in the file; the UI and expressions show degrees.
 | Smooth, the derivative equations of a spline joint, the same | `src/core/sketch/ConstraintSplineJoint.{h,cpp}` |
 | orientations a value edit must keep, `MeasureDimension` (pure geometry) | `src/core/sketch/SketchOrientation.{h,cpp}` |
 | loops, open ends, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
-| a section into a sketch: the cut of mesh and B-Rep bodies, its fits | `src/core/sketch/SketchSection.{h,cpp}`; the pieces fit in `src/core/sketch/SectionPieces.{h,cpp}`; the Section tool's "To sketch" in `src/ui/SectionToSketch.{h,cpp}` |
+| a section into a sketch: the cut of mesh and B-Rep bodies, its fits | `src/core/sketch/SketchSection.{h,cpp}`; the pieces fit in `src/core/sketch/SectionPieces.{h,cpp}`, tracing and `section_fit` in `src/core/sketch/SectionTrace.{h,cpp}`; the Section tool's "To sketch" and "Trace" in `src/ui/SectionToSketch.{h,cpp}` |
 | text labels: fonts, glyph layout, box corners | `src/core/sketch/SketchText.{h,cpp}`, the Hershey data `src/core/sketch/HersheyRomanSimplex.inc` |
 | snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
 | box-select hit test (pure) | `src/core/sketch/SketchSelection.{h,cpp}` |
@@ -853,11 +853,45 @@ or shared by three neighbours:
   0.03 mm of noise the walls take a 1 mm round's tangent ends and two draws
   in five read it as a chamfer; with 0.02 mm, one in twelve;
 - a 0.05 mm wave (wavelength 25 mm) on a 60 mm wall is one line;
+- a B-Rep slot's exact cut comes back as its two lines and two arcs
+  (`test_section_trace.cpp`).
 - **Cost**: about 0.1 s of CPU for a 40,000-point cut (a 600 × 400 rounded
   rectangle every 0.05 mm), against 0.005 s for the greedy `arcs`; the test
   holds it under 1 s. Sampled every 0.02 mm with 0.02 mm of noise -- closer
   than the noise is deep -- a round's tangent stretch can come back as a
   line of its own.
+
+### Tracing a section
+
+The section is solver-fixed construction: right for an outline to follow,
+not for a part to be drawn on. `trace_section {sketch_id, section,
+detail?}` (and **Trace** in the Section tool) draws the pieces fit of the
+section's current cut as **real** lines and arcs over it
+(`sketch::TraceSection`, `src/core/sketch/SectionTrace.{h,cpp}`):
+non-construction, free in the solve, coincident where consecutive pieces
+meet (round a closed chain too), and solved once. The section stays as it
+is underneath. A traced entity is ordinary geometry -- Split, Trim, Fillet
+and the dimension tools take it, a drag moves it -- and the sketch records
+where it came from, `traced {entity, section, chain, from, to}` (vNEXT):
+the section's index in `external`, the chain, and the span of the chain's
+points as cut when it was traced. Nothing more: the record does not move
+the entity. It is dropped with its entity, and with its section (whose
+later records follow their index down).
+
+The section still follows a re-scan; the traced geometry is the designer's
+drawing and does not. `section_fit {sketch_id}` says how far the current
+cut stands from each traced entity: each point of the cut counts for the
+traced entity nearest it whose span its foot falls in, on the chain nearest
+that entity, and per entity the reply gives `sigma_mm`, `mean_mm` (signed),
+`stretch_mm` and `stretch_at` (the worst six-point mean miss, and where),
+the chain's `noise_mm`, and `on_cut`: whether the pieces fit's own three
+tests still pass. A piece a re-scan moved off the object reads
+`on_cut: false` with the stretch where it left.
+
+Refused, changing nothing: a sketch with no section, a `section` that is
+not one of its sections (naming those that are), a detail outside 0 to 1,
+a section whose cut is empty. `section_fit` on a sketch with sections and
+nothing traced lists nothing.
 
 #### What a section costs
 
@@ -1680,6 +1714,8 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |
 | `project_geometry` | `sketch_id, feature_id, element, kind` | live external geometry; returns `gen_ids` |
 | `project_section` | `sketch_id, bodies?, tolerance_mm?, fit?, detail?` | [a section into a sketch](#a-section-into-a-sketch); returns `gen_ids`, `tolerance_mm`, `deviation_mm`, `chains`, `open_chains`, and for `fit: "pieces"` `detail` and `pieces` ([the pieces fit](#the-pieces-fit)) |
+| `trace_section` | `sketch_id, section, detail?` | real lines and arcs over a section ([tracing a section](#tracing-a-section)); returns `ids`, `pieces`, `coincident`, `deviation_mm` |
+| `section_fit` | `sketch_id` | per traced entity, how far the current cut stands from it |
 | `add_reference_image` | `sketch_id, path, at? \| origin?, opacity?, units_per_pixel?, rotation \| rotation_deg, show_always?` | returns `image_id`, `at`, `origin`; turned about its centre |
 | `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, show_always?, at? \| origin?, units_per_pixel?, rotation \| rotation_deg` | returns `at`, `origin`; a turn keeps the centre |
 | `calibrate_reference_image` | `sketch_id, image_id, p1, p2, distance, align?` | `distance` in sketch mm |
@@ -1711,8 +1747,15 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
 - `tests/test_section_pieces.cpp` `[pieces]` -- [the pieces
   fit](#the-pieces-fit) against generated outlines, the coverage of its
   sigmas over many draws (`[slow]`), an exact cut, the detail, its cost.
-- `section/pieces_over_a_noisy_scan` (GUI): To sketch in pieces over a
-  noisy scan; the refusals in `refused_calls_smoke.py`.
+- `tests/test_section_trace.cpp` `[pieces]` -- [tracing](#tracing-a-section)
+  a scanned slot (real, joined, saved and refused), a B-Rep slot, a re-scan
+  that moves the section and not the traced sketch with `section_fit`
+  naming the moved arc, and the traced profile extruded and compared with
+  the scan (`compare_scan`'s comparison: within 0.1 mm on over 97 % of
+  it). GUI: `section/trace_draws_real_geometry` (Trace in the Section
+  tool: real, picked in the viewport, one undo step, unmoved when the
+  section is cut again) and `section/pieces_over_a_noisy_scan`; the
+  refusals in `refused_calls_smoke.py`.
 - `tests/test_sketch_import.cpp` `[import]` — the conic image (similarity,
   mirror, skew) exact; each DXF mapping row's entity and geometry (a bulge
   arc's radius and side; a non-uniform spline as ONE spline on its knots

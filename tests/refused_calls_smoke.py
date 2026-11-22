@@ -321,7 +321,30 @@ def main():
                      "detail")]:
                 check(label, "project_section", params, needle=needle,
                       tab=part["name"])
+            # Tracing a section (docs/sketching/README.md#tracing-a-section):
+            # refused before anything is drawn.
+            for label, method, params, needle in [
+                    ("trace_section a sketch with no section", "trace_section",
+                     {"sketch_id": probe, "section": 0}, "no section"),
+                    ("section_fit a sketch with no section", "section_fit",
+                     {"sketch_id": probe}, "no section")]:
+                check(label, method, params, needle=needle, tab=part["name"])
             d.call("delete_feature", feature_id=probe)
+            cut = d.call("add_feature", feature={
+                "type": "Sketch", "name": "Trace probe",
+                "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]}, "entities": []})["id"]
+            sec = d.call("project_section", sketch_id=cut, fit="pieces")
+            for label, params, needle in [
+                    ("trace_section not a section",
+                     {"sketch_id": cut, "section": sec["external_index"] + 3},
+                     "its sections: %d" % sec["external_index"]),
+                    ("trace_section detail past 1",
+                     {"sketch_id": cut, "section": sec["external_index"],
+                      "detail": -0.5}, "from 0")]:
+                check(label, "trace_section", params, needle=needle,
+                      tab=part["name"])
+            d.call("delete_feature", feature_id=cut)
 
             # A sketch fillet (docs/sketching/README.md#fillet): every
             # refusal computed before the first entity changes.

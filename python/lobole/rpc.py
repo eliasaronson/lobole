@@ -115,6 +115,7 @@ COLUMNS: dict[str, str] = {
     'run_motion_study': 'study:int>=0, async?:bool, include_poses?:bool, leave_at?:string|int, leave_at_deg?:number, leave_at_mm?:number, outlive_client?:bool, recompute?:bool, trace?:object[]',
     'run_study': 'id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, recompute?:bool, timeout_s?:number>0, converge?:string, layer_normal?:number[], simulation?:string|int',
     'save_project': 'path:string, message?:string, force?:bool, overwrite_lossy?:bool',
+    'section_fit': 'sketch_id:int>=1',
     'set_active_configuration': 'id?:int>=0',
     'set_active_part': 'part?:string|int, name?:string|int, index?:int>=0',
     'set_assembly_sequence': 'steps:object[], allowance_mm?:number, allowance_mm_expr?:string',
@@ -125,6 +126,7 @@ COLUMNS: dict[str, str] = {
     'set_scan_deviation': 'scan?:int, body?:int, tolerance_mm?:number>0, clear?:bool',
     'set_variable': "name:string, expression:string|number, scope?:'project'|'part', comment?:string",
     'solve_assembly': '',
+    'trace_section': 'sketch_id:int>=1, section:int>=0, detail?:number',
     'undo': '',
     'validation_revision': '',
     'view': 'fit?:bool, name:@views',
@@ -403,6 +405,9 @@ class SaveProjectParams(TypedDict):
     force: NotRequired[bool]
     overwrite_lossy: NotRequired[bool]
 
+class SectionFitParams(TypedDict):
+    sketch_id: int
+
 class SetActiveConfigurationParams(TypedDict):
     id: NotRequired[int]
 
@@ -477,6 +482,11 @@ class SetVariableParams(TypedDict):
     expression: str | float
     scope: NotRequired[Literal['project', 'part']]
     comment: NotRequired[str]
+
+class TraceSectionParams(TypedDict):
+    sketch_id: int
+    section: int
+    detail: NotRequired[float]
 
 class ViewParams(TypedDict):
     fit: NotRequired[bool]
@@ -1504,6 +1514,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'sample_study': {'type': 'object', 'properties': {'body': {'type': 'string'}, 'displacement_mm': {'type': 'array', 'items': {'type': 'number'}}, 'distance_mm': {'type': 'number'}, 'element': {'type': 'integer'}, 'inside': {'type': 'boolean'}, 'node_at_mm': {'type': 'array', 'items': {'type': 'number'}}, 'plastic_strain': {'type': 'number'}, 'stress_mpa': {'type': 'array', 'items': {'type': 'number'}}, 'temperature_c': {'type': 'number'}, 'von_mises_mpa': {'type': 'number'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['body', 'displacement_mm', 'distance_mm', 'inside', 'node_at_mm', 'stress_mpa', 'von_mises_mpa'], 'additionalProperties': False},
     'save_print_profile': {'type': 'object', 'properties': {'conditions': {'type': 'string'}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'process': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'from_mm': {'type': 'number'}, 'kind': {'type': 'string'}, 'source': {'type': 'string'}, 'to_mm': {'type': 'number'}}, 'required': ['allowance_mm', 'from_mm', 'kind'], 'additionalProperties': False}}, 'stl_deflection_mm': {'type': 'number'}, 'stl_deflection_stated': {'type': 'boolean'}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'bed_exclude_mm': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'line_width_mm': {'type': 'number'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['material', 'name', 'process', 'rows', 'stl_deflection_mm', 'stl_deflection_stated'], 'additionalProperties': False},
     'save_template': {'type': 'object', 'properties': {'suggestions': {'type': 'object', 'properties': {'literals': {'type': 'array', 'items': {}}, 'references': {'type': 'array', 'items': {'type': 'string'}}, 'variables': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['literals', 'references', 'variables'], 'additionalProperties': False}, 'template': {'type': 'object', 'properties': {'features': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'parameters': {'type': 'array', 'items': {'type': 'object'}}, 'revision': {'type': 'integer'}, 'comment': {'type': 'string'}}, 'required': ['features', 'name', 'parameters', 'revision'], 'additionalProperties': False}, 'instances_marked': {'type': 'array', 'items': {'type': 'object', 'properties': {'feature_id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'revision': {'type': 'integer'}, 'template_changed': {'type': 'boolean'}}, 'required': ['feature_id', 'name', 'part', 'part_id', 'revision', 'template_changed'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['template'], 'additionalProperties': False},
+    'section_fit': {'type': 'object', 'properties': {'entities': {'type': 'array', 'items': {'type': 'object'}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['entities'], 'additionalProperties': False},
     'set_assembly_sequence': {'type': 'object', 'properties': {'steps': {'type': 'array', 'items': {'type': 'object'}}, 'allowance_mm': {'type': 'number'}, 'allowance_mm_expr': {'type': 'string'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['steps', 'allowance_mm'], 'additionalProperties': False},
     'set_job_fixture': {'type': 'object', 'properties': {'enabled': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part': {'type': 'integer'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'rot_z': {'type': 'number'}, 'safe_z': {'type': 'number'}, 'setup': {'type': 'integer'}, 'seat': {'type': 'object', 'properties': {'along_mm': {'type': 'number'}, 'edge': {'type': 'string'}, 'element': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'over_mm': {'type': 'number'}, 'spin_deg': {'type': 'number'}, 'along_mm_expr': {'type': 'string'}, 'over_mm_expr': {'type': 'string'}, 'spin_deg_expr': {'type': 'string'}}, 'required': ['along_mm', 'edge', 'element', 'feature_id', 'over_mm', 'spin_deg'], 'additionalProperties': False}, 'box': {'type': 'array', 'items': {'type': 'number'}}, 'box_expr': {'type': 'array', 'items': {'type': 'string'}}, 'pos_expr': {'type': 'array', 'items': {'type': 'string'}}, 'rot_z_expr': {'type': 'string'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['enabled', 'id', 'name', 'pos', 'rot_z', 'safe_z', 'setup'], 'additionalProperties': False},
     'set_job_part': {'type': 'object', 'properties': {'configuration': {'type': 'integer'}, 'id': {'type': 'integer'}, 'moved': {'type': 'integer'}, 'configuration_name': {'type': 'string'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['configuration', 'id', 'moved'], 'additionalProperties': False},
@@ -1514,6 +1525,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'solve_assembly': {'type': 'object', 'properties': {'errored_mates': {'type': 'integer'}, 'mates': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'status': {'type': 'string'}, 'error': {'type': 'string'}, 'residual_mm': {'type': 'number'}}, 'required': ['id', 'name', 'status'], 'additionalProperties': False}}, 'occurrences': {'type': 'integer'}, 'placed': {'type': 'integer'}, 'placed_by_mates': {'type': 'integer'}, 'placed_by_transform': {'type': 'integer'}, 'dof': {'type': 'integer'}, 'loop_mates': {'type': 'integer'}, 'loops_closed': {'type': 'boolean'}, 'redundant_mates': {'type': 'array', 'items': {'type': 'integer'}}, 'residual_mm': {'type': 'number'}, 'flexible': {'type': 'array', 'items': {'type': 'object', 'properties': {'configuration_id': {'type': 'integer'}, 'mates': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'occurrence': {'type': 'integer'}, 'placed_by_mates': {'type': 'integer'}, 'placed_by_transform': {'type': 'integer'}}, 'required': ['configuration_id', 'mates', 'name', 'occurrence', 'placed_by_mates', 'placed_by_transform'], 'additionalProperties': False}}, 'errored_attachments': {'type': 'integer'}, 'attachment_errors': {'type': 'array', 'items': {'type': 'object'}}, 'suspects': {'type': 'array', 'items': {'type': 'object', 'properties': {'closes': {'type': 'array', 'items': {'type': 'integer'}}, 'connector': {'type': 'string'}, 'mate': {'type': 'integer'}, 'name': {'type': 'string'}, 'sole': {'type': 'boolean'}, 'tilt_deg': {'type': 'number'}}, 'required': ['closes', 'connector', 'mate', 'name', 'sole', 'tilt_deg'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['errored_mates', 'mates', 'occurrences', 'placed', 'placed_by_mates', 'placed_by_transform'], 'additionalProperties': False},
     'split_for_printing': {'type': 'object', 'properties': {'automatic': {'type': 'boolean'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'body': {'type': 'string'}, 'cuts': {'type': 'array', 'items': {'type': 'object', 'properties': {'at_mm': {'type': 'number'}, 'axis': {'type': 'string'}}, 'required': ['at_mm', 'axis'], 'additionalProperties': False}}, 'fits_whole': {'type': 'boolean'}, 'part': {'type': 'string'}, 'pieces': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'fits': {'type': 'boolean'}, 'index': {'type': 'integer'}, 'material': {'type': 'string'}, 'orientation': {'type': 'object'}, 'size_mm': {'type': 'array', 'items': {'type': 'number'}}, 'solids': {'type': 'integer'}, 'volume_mm3': {'type': 'number'}, 'part': {'type': 'string'}, 'part_id': {'type': 'integer'}}, 'required': ['bbox_max', 'bbox_min', 'fits', 'index', 'material', 'orientation', 'size_mm', 'solids', 'volume_mm3'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['automatic', 'bed_mm', 'body', 'cuts', 'fits_whole', 'part', 'pieces'], 'additionalProperties': False},
     'topo_to_body': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'path': {'type': 'string'}, 'threshold': {'type': 'number'}, 'triangles': {'type': 'integer'}, 'valid': {'type': 'boolean'}, 'volume_mm3': {'type': 'number'}, 'watertight': {'type': 'boolean'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['part', 'part_id', 'path', 'threshold', 'triangles', 'valid', 'volume_mm3', 'watertight'], 'additionalProperties': False},
+    'trace_section': {'type': 'object', 'properties': {'section': {'type': 'integer'}, 'ids': {'type': 'array', 'items': {'type': 'integer'}}, 'pieces': {'type': 'array', 'items': {'type': 'object'}}, 'coincident': {'type': 'integer'}, 'deviation_mm': {'type': 'number'}, 'regen': {'type': 'object'}, 'digest': {'type': 'object'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['section', 'ids', 'pieces', 'coincident', 'deviation_mm', 'regen', 'digest'], 'additionalProperties': False},
     'tube_schedule': {'type': 'object', 'properties': {'count': {'type': 'integer'}, 'members': {'type': 'integer'}, 'tubes': {'type': 'array', 'items': {'type': 'object', 'properties': {'bends': {'type': 'array', 'items': {'type': 'object'}}, 'bodies': {'type': 'array', 'items': {'type': 'string'}}, 'curve': {'type': 'integer'}, 'cut_length_mm': {'type': 'number'}, 'length_mm': {'type': 'number'}, 'name': {'type': 'string'}, 'outer_diameter_mm': {'type': 'number'}, 'path_length_mm': {'type': 'number'}, 'quantity': {'type': 'integer'}, 'wall_mm': {'type': 'number'}, 'coped_off_mm': {'type': 'number'}}, 'required': ['bends', 'bodies', 'curve', 'cut_length_mm', 'length_mm', 'name', 'outer_diameter_mm', 'path_length_mm', 'quantity', 'wall_mm'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['count', 'members', 'tubes'], 'additionalProperties': False},
     'verify_assertions': {'type': 'object', 'properties': {'assertions': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'integer'}, 'b': {'type': 'integer'}, 'id': {'type': 'integer'}, 'last_verdict': {'type': 'string'}, 'measured_mm': {'type': 'number'}, 'min_mm': {'type': 'number'}, 'mode': {'type': 'string'}, 'name': {'type': 'string'}, 'standing': {'type': 'string'}, 'why': {'type': 'string'}, 'note': {'type': 'string'}}, 'required': ['a', 'b', 'id', 'last_verdict', 'min_mm', 'mode', 'name', 'standing', 'why'], 'additionalProperties': False}}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['assertions', 'receipt'], 'additionalProperties': False},
 }
@@ -3754,6 +3766,10 @@ SaveTemplateResult = TypedDict('SaveTemplateResult', {
     'instances_marked': NotRequired[list[SaveTemplateResultInstancesMarked]],
 })
 
+SectionFitResult = TypedDict('SectionFitResult', {
+    'entities': list[dict[str, Any]],
+})
+
 SetAssemblySequenceResult = TypedDict('SetAssemblySequenceResult', {
     'steps': list[dict[str, Any]],
     'allowance_mm': float,
@@ -3975,6 +3991,16 @@ TopoToBodyResult = TypedDict('TopoToBodyResult', {
     'valid': bool,
     'volume_mm3': float,
     'watertight': bool,
+})
+
+TraceSectionResult = TypedDict('TraceSectionResult', {
+    'section': int,
+    'ids': list[int],
+    'pieces': list[dict[str, Any]],
+    'coincident': int,
+    'deviation_mm': float,
+    'regen': dict[str, Any],
+    'digest': dict[str, Any],
 })
 
 TubeScheduleResultTubes = TypedDict('TubeScheduleResultTubes', {
@@ -4428,6 +4454,9 @@ class RpcSurface:
     def save_template(self, _timeout: float | None = None, **params: Any) -> SaveTemplateResult:
         raise NotImplementedError
 
+    def section_fit(self, _timeout: float | None = None, **params: Unpack[SectionFitParams]) -> SectionFitResult:
+        raise NotImplementedError
+
     def set_active_configuration(self, _timeout: float | None = None, **params: Unpack[SetActiveConfigurationParams]) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -4477,6 +4506,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def topo_to_body(self, _timeout: float | None = None, **params: Any) -> TopoToBodyResult:
+        raise NotImplementedError
+
+    def trace_section(self, _timeout: float | None = None, **params: Unpack[TraceSectionParams]) -> TraceSectionResult:
         raise NotImplementedError
 
     def tube_schedule(self, _timeout: float | None = None, **params: Any) -> TubeScheduleResult:

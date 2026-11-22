@@ -14,7 +14,56 @@
       "width": 40.0
     },
     {
-      "constraints": [],
+      "constraints": [
+        {
+          "a": [
+            101,
+            1
+          ],
+          "b": [
+            102,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            102,
+            1
+          ],
+          "b": [
+            103,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            103,
+            1
+          ],
+          "b": [
+            104,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            104,
+            1
+          ],
+          "b": [
+            101,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        }
+      ],
       "entities": [
         {
           "a": [
@@ -67,6 +116,54 @@
           "construction": true,
           "id": 4231634379,
           "type": "line"
+        },
+        {
+          "a": [
+            0.0,
+            0.0
+          ],
+          "b": [
+            40.0,
+            0.0
+          ],
+          "id": 101,
+          "type": "line"
+        },
+        {
+          "a": [
+            40.0,
+            0.0
+          ],
+          "b": [
+            40.0,
+            20.0
+          ],
+          "id": 102,
+          "type": "line"
+        },
+        {
+          "a": [
+            40.0,
+            20.0
+          ],
+          "b": [
+            0.0,
+            20.0
+          ],
+          "id": 103,
+          "type": "line"
+        },
+        {
+          "a": [
+            0.0,
+            20.0
+          ],
+          "b": [
+            0.0,
+            0.0
+          ],
+          "id": 104,
+          "type": "line"
         }
       ],
       "external": [
@@ -104,6 +201,36 @@
           0.0
         ]
       },
+      "traced": [
+        {
+          "chain": 0,
+          "entity": 101,
+          "from": 0,
+          "section": 0,
+          "to": 1
+        },
+        {
+          "chain": 0,
+          "entity": 102,
+          "from": 1,
+          "section": 0,
+          "to": 2
+        },
+        {
+          "chain": 0,
+          "entity": 103,
+          "from": 2,
+          "section": 0,
+          "to": 3
+        },
+        {
+          "chain": 0,
+          "entity": 104,
+          "from": 3,
+          "section": 0,
+          "to": 0
+        }
+      ],
       "type": "Sketch"
     }
   ],

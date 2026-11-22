@@ -1050,6 +1050,17 @@ struct ExternalGeom {
   std::vector<PieceFit> pieces;
 };
 
+// A traced entity's origin (vNEXT, docs/sketching/README.md#tracing-a-section):
+// ordinary geometry drawn over span [from, to] of chain `chain` of the
+// section `external[section]`, as cut when it was traced. A record and
+// nothing more: the entity does not follow the section.
+struct TracedFrom {
+  uint32_t entity = 0;
+  uint32_t section = 0;
+  uint32_t chain = 0;
+  uint32_t from = 0, to = 0;
+};
+
 } // namespace sketch
 
 // A 2D sketch in the parametric history. Owns its plane as a baked value —
@@ -1418,6 +1429,8 @@ public:
   // not silently duplicate driving expressions, and the aggregate entity
   // structs (and every brace-init of them) stay untouched.
   std::map<uint32_t, std::map<std::string, std::string>> entityExprs;
+  // Entities traced over a section, and where from (vNEXT).
+  std::vector<sketch::TracedFrom> traced;
 
   // An id no other entity in this sketch has, and that a sketch edited
   // SEPARATELY is not going to mint either (F9).

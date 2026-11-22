@@ -35,6 +35,7 @@
 #include "core/io/ReadContext.h" // kMaxPartFeatures
 #include "core/io/RecognitionJson.h"
 #include "core/io/Serialization.h"
+#include "core/sketch/SectionTrace.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchSection.h"
 #include "core/sketch/SketchSolver.h"
@@ -907,13 +908,43 @@ static constexpr MethodDoc ModelingMethods[] = {
      "arc (one sigma, from the fit's own normal equations)}. A plane that "
      "cuts none of the bodies is refused and changes nothing. The clearance "
      "round it is the sketch's `offset`, which takes this construction "
-     "outline and makes real geometry.",
+     "outline and makes real geometry; `trace_section` draws real geometry "
+     "over it.",
      "sketch_id:int>=1, bodies?:any[], tolerance_mm?:number>0, "
      "fit?:string, detail?:number",
      remote::NeedsPart,
      "external_index:int, gen_ids:int[], tolerance_mm:number, "
      "deviation_mm:number, chains:int, open_chains:int, fit:string, "
      "detail?:number, pieces?:object[], regen:object, digest:object"},
+    {"trace_section",
+     "Trace a sketch's section (`section`: its external_index, as "
+     "project_section returned it) as REAL lines and arcs: the pieces fit "
+     "of its current cut at `detail` (0 to 1; default the section's own "
+     "for a pieces section, else 0.5), added as ordinary, non-construction "
+     "geometry, coincident where consecutive pieces meet, over the section, "
+     "which stays as it is underneath "
+     "(docs/sketching/README.md#tracing-a-section). Each traced entity "
+     "records where it came from (`traced_from`); it does not follow a "
+     "re-scan -- `section_fit` says how far the cut has moved from it. One "
+     "undo step. Returns {section, ids, pieces (as project_section's), "
+     "coincident, deviation_mm, regen, digest}. Refused, changing nothing: "
+     "a sketch with no section, a `section` that is not one of its "
+     "sections, a detail outside 0 to 1, a section with no cut.",
+     "sketch_id:int>=1, section:int>=0, detail?:number", remote::NeedsPart,
+     "section:int, ids:int[], pieces:object[], coincident:int, "
+     "deviation_mm:number, regen:object, digest:object"},
+    {"section_fit",
+     "How far a sketch's current section cut stands from each entity "
+     "traced over it (docs/sketching/README.md#tracing-a-section): per "
+     "traced entity {id, kind, section, chain, from, to, cut (false when no "
+     "point of the cut lies along it), points, sigma_mm (the rms distance "
+     "of the cut's points along it), mean_mm (their signed mean: + outside "
+     "an arc, left of a line's direction), stretch_mm (the worst mean miss "
+     "over a few points) and stretch_at [u, v] (where, sketch mm), noise_mm "
+     "(its chain's own scatter), on_cut (the pieces fit's own three tests "
+     "still pass)}. A traced entity whose section was removed is not "
+     "listed. Read-only. Refused for a sketch with no section.",
+     "sketch_id:int>=1", remote::NeedsPart, "entities:object[]"},
     {"add_reference_image",
      "Attach an image underlay to a sketch from an image file (`path`: PNG, "
      "JPEG or BMP, up to 16384 px a side; anything else is refused). "
@@ -2878,6 +2909,121 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         pieces.push_back(PieceJson(*sk, ext.genIds[k], ext.pieces[k]));
       resp["pieces"] = std::move(pieces);
     }
+    json after = DocumentIO::FeatureToJson(*sk);
+    const json preDigest = BodyDigestJson(*doc);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    resp["regen"] = RegenSummaryJson(*doc);
+    resp["digest"] = DigestJson(preDigest, *doc);
+    return resp;
+  }
+  if (m == "section_fit") {
+    // How far the cut stands from each traced entity
+    // (docs/sketching/README.md#tracing-a-section). Read-only.
+    size_t index = 0;
+    const uint64_t sketchId = p.at("sketch_id").get<uint64_t>();
+    auto* sk =
+        dynamic_cast<SketchFeature*>(doc->FindFeatureById(sketchId, &index));
+    if (!sk)
+      throw std::runtime_error(
+          "no sketch with id " + std::to_string(sketchId) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
+    std::vector<size_t> sections;
+    for (size_t i = 0; i < sk->external.size(); i++)
+      if (sk->external[i].kind == sketch::ExternalKind::Section)
+        sections.push_back(i);
+    if (sections.empty())
+      throw std::runtime_error(m + ": sketch " + std::to_string(sketchId) +
+                               " has no section (project_section draws one)");
+    json rows = json::array();
+    for (const sketch::TracedMiss& t : sketch::SectionFitReport(*sk)) {
+      const size_t idx = sk->IndexOfEntity(t.from.entity);
+      const sketch::Entity& e = sk->entities[idx];
+      json r = {{"id", t.from.entity},
+                {"kind", std::holds_alternative<sketch::Line>(e)     ? "line"
+                         : std::holds_alternative<sketch::Circle>(e) ? "circle"
+                                                                     : "arc"},
+                {"section", t.from.section},
+                {"chain", t.from.chain},
+                {"from", t.from.from},
+                {"to", t.from.to},
+                {"cut", t.cut},
+                {"noise_mm", t.noiseMm}};
+      if (t.cut) {
+        r["points"] = t.miss.points;
+        r["sigma_mm"] = t.miss.sigmaMm;
+        r["mean_mm"] = t.miss.meanMm;
+        r["stretch_mm"] = t.miss.stretchMm;
+        r["stretch_at"] = {t.miss.stretchAt.x, t.miss.stretchAt.y};
+        r["on_cut"] = t.miss.explained;
+      } else {
+        r["on_cut"] = false;
+      }
+      rows.push_back(std::move(r));
+    }
+    return json{{"entities", std::move(rows)}};
+  }
+  if (m == "trace_section") {
+    // Real geometry over a section, and how far the cut stands from it
+    // (docs/sketching/README.md#tracing-a-section). Every parameter is read
+    // and checked before the sketch is touched.
+    size_t index = 0;
+    const uint64_t sketchId = p.at("sketch_id").get<uint64_t>();
+    auto* sk =
+        dynamic_cast<SketchFeature*>(doc->FindFeatureById(sketchId, &index));
+    if (!sk)
+      throw std::runtime_error(
+          "no sketch with id " + std::to_string(sketchId) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
+    std::vector<size_t> sections;
+    for (size_t i = 0; i < sk->external.size(); i++)
+      if (sk->external[i].kind == sketch::ExternalKind::Section)
+        sections.push_back(i);
+    if (sections.empty())
+      throw std::runtime_error(m + ": sketch " + std::to_string(sketchId) +
+                               " has no section (project_section draws one)");
+    const json& sj = p.at("section");
+    std::string accepted;
+    for (size_t i : sections)
+      accepted += (accepted.empty() ? "" : ", ") + std::to_string(i);
+    if (!sj.is_number_integer() || sj.get<int64_t>() < 0 ||
+        std::find(sections.begin(), sections.end(), sj.get<size_t>()) ==
+            sections.end())
+      throw std::runtime_error("trace_section: section " + sj.dump() +
+                               " is not one of sketch " +
+                               std::to_string(sketchId) +
+                               "'s sections (its sections: " + accepted + ")");
+    const size_t ei = sj.get<size_t>();
+    const sketch::ExternalGeom& ext = sk->external[ei];
+    double detail = ext.fit == sketch::SectionFit::Pieces ? ext.detail : 0.5;
+    if (p.contains("detail"))
+      detail = SectionDetail(p.at("detail"), "trace_section");
+    if (ext.cut.empty())
+      throw std::runtime_error("trace_section: section " + std::to_string(ei) +
+                               " has no cut to trace" +
+                               (sk->GetError().empty()
+                                    ? std::string()
+                                    : " (the sketch: " + sk->GetError() + ")"));
+    json before = DocumentIO::FeatureToJson(*sk);
+    const sketch::TraceResult tr = sketch::TraceSection(*sk, ei, detail);
+    if (!tr.error.empty()) // refused before anything was added
+      throw std::runtime_error("trace_section: " + tr.error);
+    sketch::Solver solver;
+    solver.Load(*sk);
+    if (solver.Solve().ok)
+      solver.WriteBack(sk->entities);
+    sk->RegenerateDerived();
+    doc->Regenerate();
+    json pieces = json::array();
+    for (size_t k = 0; k < tr.ids.size(); k++)
+      pieces.push_back(PieceJson(*sk, tr.ids[k], tr.pieces[k]));
+    json resp = {{"section", ei},
+                 {"ids", tr.ids},
+                 {"pieces", std::move(pieces)},
+                 {"coincident", tr.coincident},
+                 {"deviation_mm", tr.deviation}};
     json after = DocumentIO::FeatureToJson(*sk);
     const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(

@@ -679,6 +679,8 @@ size_t SketchFeature::DeleteEntity(uint32_t id) {
   constraints = std::move(kept);
   entities.erase(entities.begin() + idx);
   entityExprs.erase(id); // any coordinate expressions die with the entity
+  std::erase_if(traced,
+                [&](const sketch::TracedFrom& t) { return t.entity == id; });
   return droppedNonTrivial;
 }
 
@@ -2369,6 +2371,14 @@ void SketchFeature::RemoveExternalGeometry(size_t extIndex) {
   for (uint32_t id : external[extIndex].genIds)
     DeleteEntity(id);
   external.erase(external.begin() + extIndex);
+  // What was traced over it stays drawn, its record gone; the later
+  // sections' records follow their index down.
+  std::erase_if(traced, [&](const sketch::TracedFrom& t) {
+    return t.section == extIndex;
+  });
+  for (sketch::TracedFrom& t : traced)
+    if (t.section > extIndex)
+      t.section--;
 }
 
 namespace {

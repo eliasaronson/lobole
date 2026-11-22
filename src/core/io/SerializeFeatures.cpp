@@ -1379,6 +1379,20 @@ json FeatureToJson(const Feature& feature) {
       }
       j["next_image_id"] = sk->nextImageId;
     }
+    // vNEXT: entities traced over a section, and where from. A record of a
+    // gone entity or section is not written.
+    json traced = json::array();
+    for (const sketch::TracedFrom& t : sk->traced)
+      if (sk->IndexOfEntity(t.entity) != std::numeric_limits<size_t>::max() &&
+          t.section < sk->external.size() &&
+          sk->external[t.section].kind == sketch::ExternalKind::Section)
+        traced.push_back({{"entity", t.entity},
+                          {"section", t.section},
+                          {"chain", t.chain},
+                          {"from", t.from},
+                          {"to", t.to}});
+    if (!traced.empty())
+      j["traced"] = std::move(traced);
   } else if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     j["sketch_id"] = ext->sketchId;
     WriteExpr(j, "distance",
@@ -2832,7 +2846,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             {"Sketch",
              {"plane", "plane_ref", "plane_ref_sketch", "face_ref", "entities",
               "constraints", "derived_ops", "external", "images",
-              "next_image_id",
+              "next_image_id", "traced",
               // ignored since ids are minted collision-resistantly; older
               // files still carry it
               "next_entity_id"}},
@@ -3347,6 +3361,47 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         maxImg = std::max(maxImg, img.id);
       sk->nextImageId = std::max<uint32_t>(
           {maxImg + 1, j.value("next_image_id", uint32_t{0})});
+    }
+    if (j.contains("traced")) { // vNEXT
+      const json& tj = j.at("traced");
+      if (!tj.is_array())
+        throw std::runtime_error("sketch '" + name +
+                                 "': traced is a list, got " +
+                                 tj.dump().substr(0, 60));
+      for (const json& t : tj) {
+        if (!t.is_object())
+          throw std::runtime_error("sketch '" + name +
+                                   "': a traced record is an object, got " +
+                                   t.dump().substr(0, 60));
+        readctx::RefuseUnknownKeys(
+            t, {"entity", "section", "chain", "from", "to"}, "traced record");
+        for (const char* key : {"entity", "section", "chain", "from", "to"})
+          if (!t.contains(key) || !t.at(key).is_number_integer() ||
+              t.at(key).get<int64_t>() < 0 ||
+              t.at(key).get<int64_t>() > 0xffffffffLL)
+            throw std::runtime_error(
+                "sketch '" + name + "': a traced record's " + key +
+                " is a whole number 0 or more, got " +
+                (t.contains(key) ? t.at(key).dump().substr(0, 40)
+                                 : std::string("none")));
+        sketch::TracedFrom r;
+        r.entity = t.at("entity").get<uint32_t>();
+        r.section = t.at("section").get<uint32_t>();
+        r.chain = t.at("chain").get<uint32_t>();
+        r.from = t.at("from").get<uint32_t>();
+        r.to = t.at("to").get<uint32_t>();
+        if (sk->IndexOfEntity(r.entity) == std::numeric_limits<size_t>::max())
+          throw std::runtime_error(
+              "sketch '" + name + "': a traced record names entity " +
+              std::to_string(r.entity) + ", which the sketch does not have");
+        if (r.section >= sk->external.size() ||
+            sk->external[r.section].kind != sketch::ExternalKind::Section)
+          throw std::runtime_error(
+              "sketch '" + name + "': entity " + std::to_string(r.entity) +
+              " is traced from external " + std::to_string(r.section) +
+              ", which is not a section of the sketch");
+        sk->traced.push_back(r);
+      }
     }
     sk->planeRef =
         j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked

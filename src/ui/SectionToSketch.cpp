@@ -4,7 +4,11 @@
 #include "ui/SectionToSketch.h"
 
 #include "common/Logger.h"
+#include "core/Command.h"
+#include "core/io/Serialization.h"
+#include "core/sketch/SectionTrace.h"
 #include "core/sketch/SketchSection.h"
+#include "core/sketch/SketchSolver.h"
 #include "ui/SketchInteraction.h"
 #include "ui/ViewActions.h"
 
@@ -88,6 +92,46 @@ uint64_t SectionToSketch(AppState& state, uint64_t sectionId) {
   return id;
 }
 
+uint64_t TraceSectionToSketch(AppState& state, uint64_t sectionId) {
+  if (state.document == nullptr || !state.commands) {
+    state.sectionSketchMsg =
+        "A sketch belongs to a part: open the part to trace its section";
+    return 0;
+  }
+  const size_t depth = state.commands->UndoDepth();
+  const uint64_t id = SectionToSketch(state, sectionId);
+  if (id == 0)
+    return 0;
+  size_t index = 0;
+  auto* sk =
+      dynamic_cast<SketchFeature*>(state.document->FindFeatureById(id, &index));
+  if (sk == nullptr || sk->external.empty())
+    return id;
+  const nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+  const sketch::TraceResult tr =
+      sketch::TraceSection(*sk, sk->external.size() - 1,
+                           std::clamp(state.sectionSketchDetail, 0.0, 1.0));
+  if (!tr.error.empty()) {
+    state.sectionSketchMsg = "Traced nothing: " + tr.error;
+    return id;
+  }
+  sketch::Solver solver;
+  solver.Load(*sk);
+  if (solver.Solve().ok)
+    solver.WriteBack(sk->entities);
+  sk->RegenerateDerived();
+  state.document->Regenerate();
+  const nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  // The sketch and its tracing are one step to undo.
+  state.commands->CoalesceSince(depth, "Trace section");
+  LOG_INFO("Section {} traced into sketch {}: {} entities", sectionId, id,
+           tr.ids.size());
+  return id;
+}
+
 namespace {
 
 // The pieces fit's detail: fewer, longer pieces to the left.
@@ -98,7 +142,8 @@ void DrawDetailSlider(AppState& state) {
     state.sectionSketchDetail =
         std::clamp(static_cast<double>(detail), 0.0, 1.0);
   ImGui::SetItemTooltip("The pieces fit's detail: fewer, longer pieces to "
-                        "the left, more, shorter ones to the right");
+                        "the left, more, shorter ones to the right (Trace, "
+                        "and To sketch in Pieces)");
 }
 
 } // namespace
@@ -125,8 +170,18 @@ void DrawSectionToSketchRow(AppState& state) {
   ImGui::SetItemTooltip("A new sketch on the active cut, with the cut drawn in "
                         "it as construction geometry that follows the "
                         "bodies. Offset it for a profile");
-  if (state.sectionSketchFit == sketch::SectionFit::Pieces)
-    DrawDetailSlider(state);
+  // Trace: the pieces, as real geometry over the cut, at this detail.
+  DrawDetailSlider(state);
+  ImGui::SameLine();
+  ImGui::BeginDisabled(none);
+  if (ImGui::Button("Trace###tracesection"))
+    TraceSectionToSketch(state, state.sectionActiveId);
+  ImGui::EndDisabled();
+  ImGui::SetItemTooltip(
+      "A new sketch on the active cut with the cut drawn in it, and real "
+      "lines and arcs traced over it: the pieces it is made of, joined end "
+      "to end, to dimension and build on. They stay where they are when the "
+      "cut moves");
   if (!state.sectionSketchMsg.empty())
     ImGui::TextWrapped("%s", state.sectionSketchMsg.c_str());
 }

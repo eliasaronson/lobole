@@ -363,6 +363,15 @@ TEST_CASE("The vNEXT pieces golden's section is drawn on load",
     CHECK(e.pieces[k].sigmaMm < 1e-3); // a B-Rep's cut: exact
   }
   CHECK(e.deviationMm < 1e-3);
+  // And the box's outline traced over it: four real lines, where from.
+  REQUIRE(s.traced.size() == 4);
+  for (const sketch::TracedFrom& t : s.traced) {
+    CHECK(t.section == 0);
+    const auto& ent = s.entities[s.IndexOfEntity(t.entity)];
+    CHECK_FALSE(sketch::IsConstruction(ent));
+  }
+  const nlohmann::json again = DocumentIO::FeatureToJson(s);
+  CHECK(again.at("traced").size() == 4);
 }
 
 // What a section into a sketch costs on a scan, by size: hidden, run by name

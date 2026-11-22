@@ -399,6 +399,8 @@ const std::vector<std::pair<std::string, std::string>> kNotBindable = {
      "a mirror's and a centre-referenced pattern's, which use none"},
     {"Sketch/external/**", "ids, fingerprints and a refit tolerance"},
     {"Sketch/images/**", "an underlay, cosmetic and out of the chain hash"},
+    {"Sketch/traced/**",
+     "a record of where a traced entity came from: ids and point indices"},
     // Ids and references.
     {"*/sketch_id", "an id"},
     {"*/source_id", "an id"},
