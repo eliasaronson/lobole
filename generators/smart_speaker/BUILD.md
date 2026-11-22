@@ -87,13 +87,33 @@ it is more accurate than what it guides.
 `cam.py` posts fourteen operations, all on the BAFFLE's front: two flange
 recesses, two through openings, ten screw holes. `cam_back.py` adds four
 more programs — each upright's back face, in two setups apiece — carrying
-the divider dado and the face dowels.
+the divider dado and the face dowels. `cam_side.py` cuts the side wall's
+inner face from its top end: the stopped divider dado, T-boned at its ends
+so the square divider seats (the reliefs hide under the uprights' ends), and
+the four upper face dowels. Run it on both side walls. `cam_floor.py` cuts
+the bottom wall underside up: the port hole on tabs, its R11 roundover with
+a 4 mm ball nose (T2, a separate program after the hole; its speeds are a
+starting point, not a test cut), and every bolt and T-nut hole.
+
+**At the machine, every program is set up the same way:** the end being cut
+at the BACK of the bed, the rest of the panel hanging off the FRONT, and the
+zero on the panel's FAR-RIGHT corner (highest X and Y; every coordinate in
+the file is negative), Z0 on its top face. An upright's top-end and
+bottom-end programs differ only by turning the panel round between them. On
+the bottom end that corner is the outer corner of a foot. Each program has
+a setup sheet beside it saying the same, with a plan view.
 
 Still not cut, by anything:
 
 - any panel outline, or the plinth's foot profile;
-- the side walls' and the divider's own dados and face dowels;
-- the T-nut holes in any panel but the baffle;
+- the divider's dados;
+- **the side walls' lower face dowels**, 972 and 1014 mm from the top end,
+  past the 900 mm of travel. The front/back pair is 150 mm from the bottom
+  end and 8 mm in from the long edge, so the edge-dowel guide above,
+  straddling the side wall's long edge against its bottom end, drills it.
+  The bottom wall's pair, 108 mm up and 110 mm either side of centre, is
+  marked out;
+- the T-nut holes in the side, back and top walls;
 - **the edge dowels**, which is a drill's job — see the guide above.
 
 The baffle is 1122 mm against the 6090's 900 mm of travel, so the plinth end
