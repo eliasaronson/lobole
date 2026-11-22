@@ -79,7 +79,7 @@ def tilt_wheel(app, S):
     sk.circle((0, 0), d=shaft_d)
     part.extrude(sk.add(), 2 * X.arm_out + X.main_ring_land, mode="add",
                  name="Shaft")
-    r = part.worm_wheel(rim, teeth=int(S["wheel_teeth"]),
+    r = part.worm_wheel(rim, teeth="wheel_teeth",
                         starts=int(S["worm_starts"]), hand="right",
                         name="Tilt wheel")
     # The -Y bearing's inner ring is held by a ring in a groove at the arm's

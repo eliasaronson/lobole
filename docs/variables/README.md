@@ -315,7 +315,8 @@ expression's units (mm, degrees), its kind -- length, angle or count, from
 the field's name and a sketch dimension's kind -- and, when it must not be
 driven, why: a coordinate a sketch constraint names (drive the dimension), a
 sketch entity a pattern, mirror, copy or projection generates, a hole
-diameter its fit sets, an extrude distance that ends through all or up to a
+diameter its fit sets, a table thread's pitch (its row's: another is the
+feature's error), an extrude distance that ends through all or up to a
 face.
 
 **Literal findings.** A field holding a bare number EQUAL (to 1e-6 mm) to a

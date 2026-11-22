@@ -71,7 +71,7 @@ def worm(app, S):
                           name="Blank")
     face = blank.faces(kind="cylinder")[0]
     r = part.worm(face, starts=int(S["worm_starts"]), hand="right",
-                  backlash=S["worm_backlash"], name="Worm")
+                  backlash="worm_backlash", name="Worm")
     print("worm report:", r.get("report", {}).get("locking"))
     X = common.named(S)
     journal = model("shaft", S["worm_brg_d"])
@@ -131,7 +131,7 @@ def block(app, S):
     part.hole(sk.add(), d=1.0, through=True, kind="counterbore",
               fit={"thread": "M4", "kind": "normal"},
               cb_diameter=model("hole", S["m4_cb_d"]),
-              cb_depth=h - S["block_web"], name="Screws")
+              cb_depth="block_h - block_web", name="Screws")
     part.material("petg")
     common.frame(part, "bore", (0, 0, 0), (1, 0, 0), (0, 0, 1))
     part.check()

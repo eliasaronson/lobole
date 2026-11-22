@@ -5,6 +5,7 @@
 
 #include "core/ElementOrigin.h"
 #include "core/Expression.h"
+#include "core/ThreadStandards.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/SketchFeature.h"
@@ -170,6 +171,13 @@ std::string NotDrivable(const json& fj, const std::string& path) {
            fj.at("fit").value("thread", std::string{}) + ")";
   if (type == "Hole" && path == "depth" && fj.value("through", false))
     return "a through hole has no depth";
+  // A table thread's pitch is its row's: another number is the feature's
+  // error (threads::PitchError), so there is nothing for a variable to drive.
+  if (type == "Thread" && path == "pitch") {
+    const std::string designation = fj.value("designation", std::string{});
+    if (threads::Lookup(designation))
+      return "the pitch of a " + designation + " thread is its table's";
+  }
   if (type == "Extrude" && path == "distance") {
     const std::string end = fj.value("end_mode", std::string("blind"));
     if (end == "through_all" || end == "up_to_face")

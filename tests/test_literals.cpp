@@ -14,6 +14,7 @@
 #include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/ThreadFeature.h"
 
 #include <algorithm>
 
@@ -195,6 +196,27 @@ TEST_CASE("the field walk names every expression-capable number",
   for (const literals::Field& f : literals::Fields(through))
     if (f.path == "distance")
       CHECK_FALSE(f.notDrivable.empty());
+}
+
+TEST_CASE("a table thread's pitch is the table's, not a literal",
+          "[literals]") {
+  // The pitch of a 3/8-16 UNC is the row's 1.5875 mm; another is the
+  // feature's error, so a variable equal to it (a tripod screw's pitch)
+  // has nothing to drive. A custom thread's pitch is its own.
+  const ThreadFeature table("Tripod", ElementRef{1, "1/face0"}, "3/8-16 UNC-2B",
+                            1.5875);
+  bool seen = false;
+  for (const literals::Field& f : literals::Fields(table))
+    if (f.path == "pitch") {
+      seen = true;
+      CHECK_THAT(f.notDrivable,
+                 Catch::Matchers::ContainsSubstring("its table's"));
+    }
+  CHECK(seen);
+  const ThreadFeature custom("Odd", ElementRef{1, "1/face0"}, "custom", 1.1);
+  for (const literals::Field& f : literals::Fields(custom))
+    if (f.path == "pitch")
+      CHECK(f.notDrivable.empty());
 }
 
 TEST_CASE("an extraction plan drives the same geometry", "[literals]") {

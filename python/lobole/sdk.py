@@ -2248,6 +2248,11 @@ class Part(_Tab):
             f["through"] = True
         if depth is not None:
             _dim(f, "depth", depth)
+        # A counterbore's or countersink's own sizes are dimensions too: an
+        # expression string stays a variable.
+        for key in ("cb_diameter", "cb_depth", "cs_diameter", "cs_depth"):
+            if key in kw:
+                _dim(f, key, kw.pop(key))
         f.update(kw)
         return self._feature(f)
 
@@ -2398,7 +2403,7 @@ class Part(_Tab):
         if module:
             f["module"] = module
         if backlash:
-            f["backlash"] = backlash
+            _dim(f, "backlash", backlash)
         if length:
             f["length"] = length
         return self._feature(f)
@@ -2445,8 +2450,17 @@ class Part(_Tab):
         if hand not in ("right", "left"):
             raise SdkError(f"worm wheel hand must be 'right' or 'left', not {hand!r}")
         self._gear_blank(face, "worm_wheel")
-        f = dict(type="WormWheel", name=name, face=face.ref, teeth=teeth,
-                 starts=starts, hand=hand, pressure_angle_deg=pressure_angle_deg)
+        f = dict(type="WormWheel", name=name, face=face.ref, starts=starts,
+                 hand=hand, pressure_angle_deg=pressure_angle_deg)
+        # A count: a whole number, or an expression (a Param or its name)
+        # that keeps the wheel following the variable.
+        if isinstance(teeth, Param):
+            f["teeth"] = int(round(float(teeth)))
+            f["teeth_expr"] = teeth.expr
+        elif isinstance(teeth, str):
+            f["teeth_expr"] = teeth
+        else:
+            f["teeth"] = teeth
         if module:
             f["module"] = module
         if worm_diameter:

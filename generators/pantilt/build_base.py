@@ -124,9 +124,13 @@ def pan_wheel(app, S):
     # ISO 4762 M4: head 7 across, 4 high; the counterbore clears it.
     part.hole(sk.add(), d=1.0, through=True, kind="counterbore",
               fit={"thread": SCREW, "kind": "normal"},
-              cb_diameter=model("hole", 7.0 + 2 * S["nozzle"]), cb_depth=4.5,
+              cb_diameter=model("hole", 7.0 + 2 * S["nozzle"]),
+              cb_depth=part.param(
+                  "m4_cb_depth", "4.5", scope="project",
+                  comment="mm, an ISO 4762 M4 head (4 high) sunk half a "
+                          "millimetre"),
               name="Screws")
-    r = part.worm_wheel(rim, teeth=int(S["wheel_teeth"]),
+    r = part.worm_wheel(rim, teeth="wheel_teeth",
                         starts=int(S["worm_starts"]), hand="right",
                         name="Pan wheel")
     print("pan wheel report:", {k: r.get("report", {}).get(k) for k in (
