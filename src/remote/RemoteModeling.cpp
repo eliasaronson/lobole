@@ -2385,6 +2385,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       return resp;
     };
     if (!bestFit) {
+      // Asked by ParkModelingRequest: only a best fit waits; this one is
+      // answered when it is dispatched, and must not be done twice.
+      if (g_offFrameAlign != nullptr)
+        return json::object();
       importalign::Result aligned;
       std::string why;
       if (!importalign::Align(importalign::ImportBodies(*doc, *imp), current,

@@ -408,7 +408,7 @@ TEST_CASE("align_import refuses what is not an alignment, naming it",
           "[import][align]") {
   CHECK_FALSE(importalign::ModeFromString("flor"));
   CHECK(importalign::AcceptedModes() ==
-        "floor, three_points, principal, scale");
+        "floor, three_points, principal, scale, best_fit");
   importalign::Request rq;
   rq.mode = importalign::Mode::ThreePoints;
   rq.pointsMm = {{0, 0, 0}, {1, 0, 0}};
@@ -423,6 +423,25 @@ TEST_CASE("align_import refuses what is not an alignment, naming it",
   rq.distanceMm = 10.0;
   rq.pointsMm = {{1, 2, 3}, {1, 2, 3}};
   importalign::CheckRequest(rq); // well formed; the geometry refuses it
+  // A best fit's own inputs, refused by their form; and its pairs and
+  // region refused on any other mode.
+  {
+    importalign::Request best;
+    best.mode = importalign::Mode::BestFit;
+    best.pairsMm = {{glm::dvec3(0.0), glm::dvec3(0.0)}};
+    CHECK_THROWS_WITH(importalign::CheckRequest(best),
+                      ContainsSubstring("three pairs"));
+    best.pairsMm.clear();
+    best.region = importalign::Request::Region{true, glm::dvec3(0.0), 0.0};
+    CHECK_THROWS_WITH(importalign::CheckRequest(best),
+                      ContainsSubstring("radius_mm a number of mm greater"));
+    importalign::Request floor = best;
+    floor.mode = importalign::Mode::Floor;
+    floor.pointsMm = {glm::dvec3(0.0)};
+    floor.region->radiusMm = 1.0;
+    CHECK_THROWS_WITH(importalign::CheckRequest(floor),
+                      ContainsSubstring("they are best_fit's"));
+  }
 
   const fs::path stl = fixtures::WriteStl(Cuboid({40, 20, 10}), "align-refuse");
   Document doc;

@@ -213,8 +213,11 @@ bool Align(const std::vector<const Body*>& bodies,
            const importplace::Placement& current, const Request& r, Result& out,
            std::string& error) {
   CheckRequest(r);
-  if (r.mode == Mode::BestFit)
-    throw std::logic_error("best_fit has a body to go onto: BestFit");
+  if (r.mode == Mode::BestFit) {
+    error = "best_fit lays the import onto another body, which Align is "
+            "not given: it is BestFit's";
+    return false;
+  }
   const Gathered g = Gather(bodies);
   if (g.meshes.empty()) {
     error = "the import has no bodies to align: it made nothing (see its "
