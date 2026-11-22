@@ -438,6 +438,35 @@ expression-driven — since it would have no unknown). Point-on-spline adds
 one unknown, the point's curve parameter, seeded at the nearest point. DOF
 2 per pole (2 fewer when closed).
 
+#### A spline cut exactly
+
+Split and Fillet cut a spline where it is crossed or where a fillet touches
+it (`sketch::CutSpline`, `core/sketch/SketchSpline.{h,cpp}`). The sketch
+stores only clamped-uniform splines, so a piece that starts mid-span is not
+one storable spline. Knot insertion (Boehm, `sketch::InsertKnot`, which the
+DXF reader's `SplineToSketch` uses too) changes no point of the curve: the
+cut u, in span [k, k+1], is raised to multiplicity p, and so are k and k+1
+(where they are inside the domain). Over the span each side is then a
+Bézier, past the next knot the whole spans are one clamped-uniform spline,
+a side inside one span is one Bézier, and a cut on a knot leaves two
+clamped-uniform splines: up to four pieces, which together ARE the curve
+(`tests/test_sketch_split_curves.cpp` evaluates them against it, 1e-12
+relative). Consecutive pieces are joined Coincident and Curvature where the
+curve was C2 (mid-span; a knot of a cubic), Coincident and Tangent where it
+was C1 (a knot of a quadratic; mid-span at degree 1, where the pieces are
+collinear), and Coincident alone at a knot of a polyline and at a closed
+spline's seam (one cut makes the pieces of a closed spline; the seam is its
+other). The longest piece keeps the id.
+
+A pole the insertion leaves in place keeps its constraints and its
+expressions (`p4x`), re-indexed onto its piece (each `SplinePiece` names the
+original pole of each of its poles). A constraint on a pole the insertion
+replaced is dropped, and the edit names each one, in the RPC's `dropped`
+and the prompt pill: "fixed (constraint 6) on pole 4 of spline 9", "the
+expression on p3x of spline 9". The pieces carry more poles than the spline
+did, so the DOF rises, and the pill's count says by how much. No format
+change: the results are entities and constraints the file already holds.
+
 In the GUI the axis ends are dots and pick points (inference snaps to them
 too), so dragging one resizes and turns the ellipse. Dragging an ellipse or
 elliptical arc by its BODY drags its centre (the holds carry the rest);
@@ -825,42 +854,60 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   constraint that reads the dead id, and returns how many *non-trivial*
   constraints (anything but Coincident/Horizontal/Vertical) were dropped, for
   a warning. Dimensions on the dead entity are dropped, not transferred.
-- **SplitEntity(id, cuts, whyNot)** — cuts a line or an arc at one point,
-  a circle at two, into pieces that stay one curve ([Split](#split)). Piece
-  1 keeps the id, and the ids come back in order along the curve (a
-  circle's from the first cut counter-clockwise; both pieces are arcs). A
-  line's pieces are joined by a Coincident and a Parallel, or a copy of the
-  Horizontal/Vertical the line carried, so they stay collinear; an arc's by
-  Coincident and Concentric, so the radius follows. A circle's two arcs are
-  joined Coincident at both cuts and Tangent at the first: a concentric
-  beside two coincidents repeats an equation, which PlaneGCS reports as
-  redundant, and two arcs through the same two points tangent at one are
-  one circle with no configuration where that degenerates (an equal radius
-  does, with the cuts a diameter apart). The transfer
+- **SplitEntity(id, cuts, whyNot, report)** — cuts a line, an arc, an
+  elliptical arc or a spline at one point (a closed spline's seam is its
+  other cut), a circle or an ellipse at two, into pieces that stay one curve
+  ([Split](#split)). Piece 1 keeps the id — of a spline's pieces the
+  longest does — and the ids come back in order along the curve (a closed
+  curve's from the first cut counter-clockwise; a circle's or an ellipse's
+  pieces are arcs or elliptical arcs). A line's pieces are joined by a
+  Coincident and a Parallel, or a copy of the Horizontal/Vertical the line
+  carried, so they stay collinear; an arc's by Coincident and Concentric,
+  so the radius follows. A circle's two arcs are joined Coincident at both
+  cuts and Tangent at the first: a concentric beside two coincidents
+  repeats an equation, which PlaneGCS reports as redundant, and two arcs
+  through the same two points tangent at one are one circle with no
+  configuration where that degenerates (an equal radius does, with the cuts
+  a diameter apart). An elliptical arc's pieces are joined Coincident and
+  Concentric, and an axis end of piece 2 is made coincident with piece 1's:
+  the major end where the cut is nearer the minor axis, else the minor end.
+  Concentric and Equal (the obvious pair) pin piece 2's turn only to first
+  order away from the axis ends — at one, turning the ellipse slides the
+  joint along it — so a cut on an axis end, as often as a line through the
+  centre makes one, would have left a DOF loose. An ellipse's two arcs are
+  joined Coincident at both cuts and Tangent at the first, with the two axis
+  ends of piece 2 farthest from the cuts held on piece 1's ellipse: with a
+  concentric, cuts a diameter apart (a line through the centre) leave the
+  second coincident repeating the first. A spline is cut exactly
+  ([A spline cut exactly](#a-spline-cut-exactly)). The transfer
   reads each constraint's slots: a ref to the far end in a POINT slot moves
   to piece 2 (so a whole-edge distance `{id,0}`-`{id,1}` spans both
   pieces), and so does a tangent or curvature joined at that end (the
   first coincident between an end of each, as the solver reads a joint);
   anything on the whole curve — its direction, its circle, a point on it, a
   symmetry about it, a radius — stays on piece 1, which the joints hold
-  piece 2 to. A midpoint of the line becomes a symmetric of the outer ends
+  piece 2 to; a point on a spline goes to the piece it lies on. A midpoint
+  of the line becomes a symmetric of the outer ends
   about the point. A far end's coordinate expressions go with it, and a
-  linked pattern or mirror of the curve repeats both pieces. Each joint is
+  linked pattern or mirror of the curve repeats every piece. Each joint is
   held where it lies: at another curve's end or a point it is made
   coincident with it, taking the place of the point-on-curve that held that
   end on this curve (`sketch::SubsumedBy`, [Refusals](#refusals)); at a
   crossing (`SplitCut::crossing`, a curve or a datum axis) it is held on the
-  crossing curve, so the DOF does not change; anywhere else it slides, one
-  DOF more. Refused with nothing changed, naming why (`SplitRefusal` is the
-  part that does not depend on the cuts): an unknown id, an entity a linked
-  op or the model generates (`GeneratedBy`), a point or a label, a spline,
-  an ellipse or an elliptical arc ("a spline is not split yet (Split takes
-  lines, arcs and circles)"), the wrong number of cuts, a cut at an end
-  (1e-4 mm), two cuts at one point, a cut more than a hundredth of the
-  curve's length off it, a crossing that does not cross, and an equal
-  length on the line or an `arc_length` on the arc, which two pieces cannot
-  keep ("line 5 carries an equal length (constraint 3), which two pieces
-  cannot keep: delete it, then split").
+  crossing curve, so the DOF does not change (a spline's extra poles aside);
+  anywhere else it slides, one DOF more. Refused with nothing changed,
+  naming why (`SplitRefusal` is the part that does not depend on the cuts):
+  an unknown id, an entity a linked op or the model generates
+  (`GeneratedBy`), a point or a label ("Split takes lines, arcs, circles,
+  ellipses, elliptical arcs and splines"), a circle-shaped ellipse, which
+  the solver holds rigid so its pieces could not follow each other, the
+  wrong number of cuts, a cut at an end or a closed spline's seam (1e-4
+  mm), two cuts at one point, a cut more than a hundredth of the curve's
+  length off it, a crossing that does not cross, an equal length on the
+  line or an `arc_length` on the arc, which two pieces cannot keep ("line 5
+  carries an equal length (constraint 3), which two pieces cannot keep:
+  delete it, then split"), a spline piece past 255 poles, and a linked
+  pattern centred on a pole the cut replaces.
 - **TrimLineAt / TrimCurveAt(id, click, whyNot)** — remove the span between
   the crossings (with lines and circles) that bracket the click. With no
   bracketing crossing the whole entity goes. A line is cut by Trim's own
@@ -887,15 +934,22 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   it ([the first dimension](#the-first-dimension)).
 - **MirrorEntities(sources, axis, link)** — bake: reflected copies. Linked: a
   `Mirror` derived op.
-- **FilletCorner(id1, id2, r, nearUV, whyNot, largestFit)** — rounds the
-  corner two curves make at a shared end: lines and arcs, in any pair, either
-  way round. The geometry is `sketch::FilletOfCurves`
+- **FilletCorner(id1, id2, r, nearUV, whyNot, largestFit, report)** —
+  rounds the corner two curves make at a shared end: lines, arcs,
+  elliptical arcs and open splines, in any pair, either way round. The
+  geometry is `sketch::FilletOfCurves`
   (`core/sketch/SketchFillet.{h,cpp}`, pure): the centre is where the two
-  curves' offsets by `r` toward the inside of the corner meet nearest it
-  (an offset line, or the arc's circle at R + r, or at R − r where the arc
-  bends into the corner), each tangent point the foot of the centre on its
-  curve, and the arc the one between them that faces the corner. A tangent
-  point past the far end of its curve, or an arc bending tighter than `r`,
+  curves' offsets by `r` toward the inside of the corner meet nearest it.
+  For lines and arcs that is closed form (an offset line, or the arc's
+  circle at R + r, or at R − r where the arc bends into the corner), each
+  tangent point the foot of the centre on its curve. With an elliptical arc
+  or a spline in the pair it is Newton on the two curve parameters
+  (`FilletByNewton`, analytic first and second derivatives, the spline's
+  from its hodograph), seeded by the fillet of the two end tangents; a
+  stretch between the corner and a tangent point bending toward the inside
+  tighter than `r` is refused as too large. The arc is the one between the
+  tangent points that faces the corner. A tangent
+  point past the far end of its curve, or a curve bending tighter than `r`,
   is refused as too large, and `sketch::LargestFillet` bisects the same
   construction for the largest radius that fits, rounded DOWN to three
   significant figures so the number named is one that fits: "4 mm does not
@@ -903,12 +957,20 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   number). `nearUV` (sketch mm; the RPC's `near`) picks the corner when
   the two share two ends (a half disc's line and arc); without it that is
   refused, naming both.
-  Each curve is trimmed to its tangent point (a line's end, an arc's angle)
-  and the arc is joined to each with a Coincident and a Tangent (the
-  shared-end angle form, [Constraints](#constraints)). The old corner
+  Each curve is trimmed to its tangent point (a line's end, an arc's angle,
+  an elliptical arc's parameter) and the arc is joined to each with a
+  Coincident and a Tangent (the shared-end angle form,
+  [Constraints](#constraints)). A spline is cut at its tangent point
+  exactly ([A spline cut exactly](#a-spline-cut-exactly)) and its corner
+  side removed; the arc joins the end the cut leaves, and `report` (the
+  RPC's `replaced` and `dropped`) names the spline, its pieces and each
+  constraint the cut could not keep. The old corner
   becomes a **construction point**: constraints that held either corner end
-  are re-pointed onto it, and it is held on each line's line and each arc's
-  circle, so every curve keeps where it ran. Only a slot that names a POINT
+  are re-pointed onto it, and it is held on each line's line, each arc's
+  circle and each elliptical arc's ellipse, so every curve keeps where it
+  ran. A spline gets no such lock, since nothing of it runs past its
+  tangent point, and between two splines a corner point nothing names is
+  not kept. Only a slot that names a POINT
   is re-pointed: a line's corner end and the whole line are both
   `{line, 0}` or `{line, 1}`, so a tangent, a point-on-line's curve or a
   one-line horizontal naming the line keeps it. A re-pointed coincident
@@ -918,11 +980,12 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   constraint *added by the fillet* that is redundant (same DOF without it)
   is dropped, so a good fillet does not read as conflicting; user
   constraints are never removed. Everything is computed and checked before
-  the first entity changes, so a refusal changes nothing. Refused by name:
-  a spline or an elliptical arc end ("a spline end is not filleted yet (a
-  fillet takes lines and arcs)"), a circle, ellipse, point or label (no
-  end), two curves sharing no end, and an entity a linked op generates or a
-  projection owns (`GeneratedBy`), as Trim and Split refuse them.
+  the first entity changes (a spline's cut included), so a refusal changes
+  nothing. Refused by name: a circle, ellipse, closed spline, point or label
+  ("entity 4 is a circle, which has no end to round (a fillet takes lines,
+  arcs, elliptical arcs and open splines that share an end)"), two curves
+  sharing no end, and an entity a linked op generates or a projection owns
+  (`GeneratedBy`), as Trim and Split refuse them.
 - **AddLinearPattern / AddCircularPattern(..., link)** — bake or a derived op.
   The circular angle is the per-step angle.
 - **OffsetChain(chain, distance, joinArc)** — offsets one closed loop through
@@ -1223,8 +1286,9 @@ the next regeneration.
 ### Split
 
 The Split tool (`SketchTool::Split`, `sketch.split`, K, `###tb_sk_split`
-after Trim, the part Split's glyph) cuts the line, arc or circle under a
-click into pieces that stay one curve (`SplitEntity`,
+after Trim, the part Split's glyph) cuts the curve under a click — a line,
+an arc, a circle, an ellipse, an elliptical arc or a spline — into pieces
+that stay one curve (`SplitEntity`,
 [Operations](#operations-on-the-entity-list)). Hovering snaps the cut to a
 crossing with any curve — a line, circle, arc, ellipse, spline or datum
 axis, found by sampling the other curve and bisecting each sign change of
@@ -1232,19 +1296,28 @@ its distance to this one (`sketch::Crossings`) — within the coincident
 snap's 10 px, then to another curve's end (or a point) on it, else to the
 nearest point. Where two curves cross, the one nearer the cursor is the
 one cut, so the cursor goes along the curve meant; at a T it is the bar
-(the stem's foot would be a cut at an end). It previews a tick across the curve at the cut and the two
-pieces in two shades. Each click is one solve and one undo step; a tap in
-empty space or Enter finishes. A circle takes two clicks: the prompt reads
-"Split (Step 1/2)" over it and "Step 2/2" once the first cut is held;
-Escape drops the held cut and keeps the tool, a click on another curve
-says to click the circle again. The prompt pill alone says what to do; a
-refusal says only why, prefixed "Not split:", in `SplitEntity`'s words.
+(the stem's foot would be a cut at an end). Two curves neither of which is
+a line, an arc or a circle cross where their polylines do, refined by
+Newton on both parameters. It previews a tick across the curve at the cut
+(`sketch::TangentAt`) and the pieces in alternating shades (a spline's up
+to four, `SplitPieces`). Each click is one solve and one undo step; a tap
+in empty space or Enter finishes. A circle or an ellipse takes two clicks:
+the prompt reads "Split (Step 1/2)" over it and "Step 2/2" once the first
+cut is held; Escape drops the held cut and keeps the tool, a click on
+another curve says to click the held one again. A closed spline takes one,
+its seam being the other. The prompt pill alone says what to do; a
+refusal says only why, prefixed "Not split:", in `SplitEntity`'s words, and
+a spline's cut that dropped constraints says which, "Split; dropped fixed
+(constraint 6) on pole 4 of spline 9".
 
 Splitting a line where a circle crosses it, twice, and making the piece
 inside construction (Q) is the use it was built for: the sketch stays
 solved at the same DOF, the outer pieces stay collinear with the inner one
 (each carries the Horizontal the line did), and a cut built from the sketch
 builds to the same volume (`split/line_over_circle_inner_construction`).
+The same on a traced spline, split where a line crosses it and one piece
+made construction, leaves the sketch solving clean with nothing moved
+(`split/spline_crossed_by_line_construction`).
 
 ### Fillet
 
@@ -1266,7 +1339,9 @@ step; a tap in empty space or Enter finishes.
 The prompt pill alone says what to do — "click inside a corner, or pick two
 curves (radius 1 mm)", the radius through `FormatLength` — and a refusal
 says only why, prefixed "Not filleted:": the radius too large with the
-largest that fits, a spline end, an entity a pattern owns. The Tool window
+largest that fits, a curve with no end, an entity a pattern owns. A fillet
+that cut a spline and dropped constraints says which ("Filleted; dropped
+…"). The Tool window
 keeps the radius field and its note. The radius starts at 0, "not chosen":
 arming the tool sets it to one cell of the sketch's grid (`SketchGridFor`,
 `FilletToolActivated`), as Text takes its cap height from five, and a typed
@@ -1331,8 +1406,8 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr \| driven` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm (an `arc_length` too), or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. A constraint that constrains nothing is refused ([Refusals](#refusals)). `driven: true` on a dimension kind, with none of `value`/`value_deg`/`expr`, adds a [driven dimension](#constraints) and answers `measured` (mm; radians for an angle). Every answer carries the sketch's `dof` after the add. One solve, one undo step. The geometry is taken literally: nothing is [rescaled](#the-first-dimension). A new variable driving a dimension is a `batch` of `set_variable` (`scope: "part"` keeps it one undo step; a project variable is undone on its own) and `add_constraint` with `expr` naming it |
 | `add_constraints` | `sketch_id, constraints[]` | many at once, each spec as `add_constraint`'s: one judgement, solve, regen, undo step; a refused spec adds nothing and is named by index; `measured` lists each spec's measure (null for a driving one) when any is driven |
 | `delete_entity` | `sketch_id, entity_id` | with the constraint cleanup above |
-| `split` | `sketch_id, entity_id, at, crossing?` | a line or an arc at `at` = [u, v] in sketch mm, a circle at two, `[[u, v], [u, v]]`; `crossing` = an entity id (or one per cut, null for none) cuts at that curve's crossing nearest each `at` and holds the joint on it; without it `at` moves to the nearest point of the curve (refused past a hundredth of its length). Returns `entity_ids` in order along the curve, the first keeping the id, and `dof`, `regen`, `digest`; a refusal names why ([Operations](#operations-on-the-entity-list), SplitEntity) and changes nothing |
-| `fillet` | `sketch_id, entity1, entity2, radius, near?` | lines and arcs sharing an end; `radius` in mm, `near` = [u, v] in sketch mm picks the corner where they share two ends; returns `arc_id`; a refusal names why ([Operations](#operations-on-the-entity-list), FilletCorner) and changes nothing |
+| `split` | `sketch_id, entity_id, at, crossing?` | a line, an arc, an elliptical arc or a spline at `at` = [u, v] in sketch mm, a circle or an ellipse at two, `[[u, v], [u, v]]`; `crossing` = an entity id (or one per cut, null for none) cuts at that curve's crossing nearest each `at` and holds the joint on it; without it `at` moves to the nearest point of the curve (refused past a hundredth of its length). Returns `entity_ids` in order along the curve, the first keeping the id (of a spline's pieces, the longest), `dropped` (each constraint on a spline pole the cut replaced, by name; [A spline cut exactly](#a-spline-cut-exactly)), and `dof`, `regen`, `digest`; a refusal names why ([Operations](#operations-on-the-entity-list), SplitEntity) and changes nothing |
+| `fillet` | `sketch_id, entity1, entity2, radius, near?` | lines, arcs, elliptical arcs and open splines sharing an end; `radius` in mm, `near` = [u, v] in sketch mm picks the corner where they share two ends; returns `arc_id`, `replaced` (`[{spline, pieces}]`, each spline cut at its tangent point and its pieces in order) and `dropped`; a refusal names why ([Operations](#operations-on-the-entity-list), FilletCorner) and changes nothing |
 | `offset` | `sketch_id, chain, distance, join_arc?` | sign of `distance` picks the side |
 | `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
 | `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |
@@ -1461,6 +1536,21 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
   arc to its length, shows `add_constraint` leaving the rest of a rough
   sketch literal, and drives a dimension by a new variable in one batch and
   one undo.
+- `tests/test_sketch_split_curves.cpp` `[split]` `[fillet]` `[spline]`
+  `[ellipse]` — a spline cut at any parameter (mid-span, on a knot, in the
+  first and last span; degrees 1-3) evaluating to the same curve; an
+  ellipse, an elliptical arc and a spline split at crossings (a diameter on
+  each axis, the cuts on axis ends) and at free points, each piece on the
+  original within 1e-9 mm, the sketch solving clean at the DOF it had (one
+  more per free cut; a spline's extra poles above), nothing moving, either
+  piece made construction leaving the rest, the ids surviving the file; a
+  spline's kept poles' constraints and expressions re-indexed and each
+  dropped one named; a closed spline's one cut and seam; line–spline,
+  spline–spline and line–elliptical-arc fillets tangent within 1e-9 mm,
+  solved clean and extruded; a fillet too large naming the largest that
+  fits, which fits; the owner's corner (a spline, a vertical line, two
+  collinear horizontal lines), each sector the spline bounds filleting it;
+  one undo step.
 - `tests/test_sketch_curves.cpp` `[ellipse]` `[spline]` `[refusal]` —
   ellipses, elliptical arcs and splines solved: DOF, radii by axis-end
   distance through an extrude and a revolve, tangency checked as directions
@@ -1484,5 +1574,8 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
 - Transferring a dimension from a deleted entity onto a coincident survivor.
 - Extend tool, numeric move/rotate/scale of a selection, slot and polygon
   primitives.
+- Trim bounded by crossings with ellipses and splines (Split cuts them; Trim
+  reads lines and circles); a fillet between curves that share no end
+  (crossing lines, two circles); sketch chamfers.
 - Text: multi-line labels, text on a path, shaping (ligatures, complex
   scripts), fonts beyond the two bundled ones.
