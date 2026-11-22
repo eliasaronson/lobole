@@ -822,18 +822,164 @@ std::string FaultyContourPlaces(BRepFilletAPI_MakeFillet& mk) {
   return out.empty() ? out : " — near " + out;
 }
 
+// How far two faces may meet from tangent and still be one smooth run for
+// a blend: the blend builder's own angular tolerance (ChFi3d_Builder's
+// `angular`, BRepFilletAPI_MakeFillet's default 1e-2 rad, 0.57 degrees),
+// within which it makes a blend's faces meet their supports, so a crease
+// under it is one the builder's own blends leave. Its tangent-chain walk
+// reads faces as tangent up to 0.1 rad (ChFi3d::IsTangentFaces,
+// LocalAnalysis_SurfaceContinuity's angular tolerance), so a crease of up
+// to 5.7 degrees is walked across, and the edge past it rounded unasked
+// (docs/modeling/README.md#a-blend-runs-only-as-far-as-it-is-tangent).
+constexpr double kCreaseRad = 1e-2;
+
+// The outward normal of `face` at `v`, or none where it is not defined
+// (a cone's apex).
+std::optional<gp_Dir> NormalAt(const TopoDS_Face& face,
+                               const TopoDS_Vertex& v) {
+  try {
+    const gp_Pnt2d uv = BRep_Tool::Parameters(v, face);
+    const BRepAdaptor_Surface s(face, false);
+    gp_Pnt p;
+    gp_Vec du, dv;
+    s.D1(uv.X(), uv.Y(), p, du, dv);
+    const gp_Vec n = du.Crossed(dv);
+    if (n.Magnitude() < 1e-12)
+      return std::nullopt;
+    gp_Dir d(n);
+    if (face.Orientation() == TopAbs_REVERSED)
+      d.Reverse();
+    return d;
+  } catch (const Standard_Failure&) {
+    return std::nullopt;
+  }
+}
+
+// The sharpest crease at `v` other than along `a` and `b`, the two edges a
+// contour joins there: the largest angle between the faces' normals across
+// any other edge at `v` (0 where every one is smooth).
+double CreaseAt(const TopoDS_Vertex& v, const TopoDS_Shape& a,
+                const TopoDS_Shape& b,
+                const TopTools_IndexedDataMapOfShapeListOfShape& vertexEdges,
+                const TopTools_IndexedDataMapOfShapeListOfShape& edgeFaces) {
+  double most = 0.0;
+  const int at = vertexEdges.FindIndex(v);
+  if (at == 0)
+    return most;
+  for (const TopoDS_Shape& e : vertexEdges(at)) {
+    if (e.IsSame(a) || e.IsSame(b) || BRep_Tool::Degenerated(TopoDS::Edge(e)))
+      continue;
+    const int fi = edgeFaces.FindIndex(e);
+    if (fi == 0)
+      continue;
+    TopoDS_Face f1, f2;
+    for (const TopoDS_Shape& f : edgeFaces(fi)) {
+      if (f1.IsNull())
+        f1 = TopoDS::Face(f);
+      else if (!f.IsSame(f1))
+        f2 = TopoDS::Face(f);
+    }
+    if (f2.IsNull())
+      continue; // a seam, or a face on one side only
+    const auto n1 = NormalAt(f1, v), n2 = NormalAt(f2, v);
+    if (n1 && n2)
+      most = std::max(most, n1->Angle(*n2));
+  }
+  return most;
+}
+
+// An edge the builder's tangent chain took past a crease, from a picked
+// edge: what the blend would round that nobody picked.
+struct RunOn {
+  int from = -1, beyond = -1; // indices in the edge map
+  double angle = 0.0;         // radians
+  gp_Pnt at;
+};
+
+// The first edge of a contour reached from the picked edges only across a
+// crease sharper than kCreaseRad, or none: every edge of every contour is
+// picked or joined to a picked one through smooth vertices.
+template <typename Maker>
+std::optional<RunOn> RunsOnPastCrease(Maker& mk, const TopoDS_Shape& shape,
+                                      const TopTools_IndexedMapOfShape& edges,
+                                      const std::vector<int>& picked) {
+  std::optional<TopTools_IndexedDataMapOfShapeListOfShape> vertexEdges,
+      edgeFaces;
+  for (int c = 1; c <= mk.NbContours(); c++) {
+    const int n = mk.NbEdges(c);
+    std::vector<int> chain;
+    std::vector<char> reached;
+    for (int j = 1; j <= n; j++) {
+      const int at = edges.FindIndex(mk.Edge(c, j)) - 1;
+      chain.push_back(at);
+      reached.push_back(std::find(picked.begin(), picked.end(), at) !=
+                        picked.end());
+    }
+    if (std::all_of(reached.begin(), reached.end(), [](char r) { return r; }))
+      continue;
+    if (!vertexEdges) {
+      vertexEdges.emplace();
+      edgeFaces.emplace();
+      TopExp::MapShapesAndAncestors(shape, TopAbs_VERTEX, TopAbs_EDGE,
+                                    *vertexEdges);
+      TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE,
+                                    *edgeFaces);
+    }
+    // The crossing between neighbours j and j+1 (and n and 1 when the
+    // contour closes): smooth, or the crease there.
+    const bool closed = mk.Closed(c);
+    const auto crossing = [&](int j, int k) -> std::optional<RunOn> {
+      const TopoDS_Edge& a = mk.Edge(c, j + 1);
+      const TopoDS_Edge& b = mk.Edge(c, k + 1);
+      TopoDS_Vertex v;
+      if (!TopExp::CommonVertex(a, b, v))
+        return std::nullopt;
+      const double angle = CreaseAt(v, a, b, *vertexEdges, *edgeFaces);
+      if (angle <= kCreaseRad)
+        return std::nullopt;
+      return RunOn{chain[j], chain[k], angle, BRep_Tool::Pnt(v)};
+    };
+    std::optional<RunOn> blocked;
+    for (bool grew = true; grew;) {
+      grew = false;
+      for (int j = 0; j < n; j++) {
+        if (!reached[j])
+          continue;
+        for (const int k : {j - 1, j + 1}) {
+          const int kk = closed ? (k + n) % n : k;
+          if (kk < 0 || kk >= n || reached[kk])
+            continue;
+          if (const auto crease = crossing(j, kk)) {
+            if (!blocked)
+              blocked = crease;
+            continue;
+          }
+          reached[kk] = 1;
+          grew = true;
+        }
+      }
+    }
+    if (std::find(reached.begin(), reached.end(), 0) != reached.end() &&
+        blocked)
+      return blocked;
+  }
+  return std::nullopt;
+}
+
 // Adds the edges to a blend maker (OCC's tangent-chain walk). Adding an
 // edge walks the chain of edges tangent to it, which is where the builder
 // went round a vertex beside a seam for ever (patched in our OCC,
 // nix/patches/occt-fillet-reorder-faces-loop.patch: it throws) -- so in the
 // signal scope too, not only the build. False with `error` set when the walk
-// failed, or when an edge started no contour: its faces tangent, or a face
+// failed, when an edge started no contour (its faces tangent, or a face
 // on one side only, and on no other edge's tangent chain -- OCC left it out
-// and built the rest, saying nothing. `edges` indexes the builder's input;
-// `nameOf` names an edge of it by that index; one edge picked twice is added
-// once.
+// and built the rest, saying nothing), or when the walk ran on past a
+// crease to an edge nobody picked (RunsOnPastCrease). `edges` indexes
+// `shape`, the builder's input; `nameOf` names an edge of it by that index;
+// one edge picked twice is added once.
 template <typename Maker>
-bool AddBlendEdges(Maker& mk, const TopTools_IndexedMapOfShape& edges,
+bool AddBlendEdges(Maker& mk, const TopoDS_Shape& shape,
+                   const TopTools_IndexedMapOfShape& edges,
                    const std::vector<int>& edgeIndices, double radiusOrDistance,
                    const std::function<std::string(int)>& nameOf,
                    std::string* error) {
@@ -851,6 +997,22 @@ bool AddBlendEdges(Maker& mk, const TopTools_IndexedMapOfShape& edges,
         *error = "edge '" + nameOf(idx) +
                  "' starts no blend (its two faces meet tangentially, "
                  "or it has a face on one side only): leave it out";
+      return false;
+    }
+    if (const auto run = RunsOnPastCrease(mk, shape, edges, edgeIndices)) {
+      if (error) {
+        char buf[160];
+        std::snprintf(buf, sizeof buf,
+                      "a crease of %.3g degrees at (%.3f, %.3f, %.3f)",
+                      run->angle * 180.0 / std::numbers::pi, run->at.X(),
+                      run->at.Y(), run->at.Z());
+        *error = "the blend of edge '" + nameOf(run->from) +
+                 "' would run on across " + buf + " to edge '" +
+                 nameOf(run->beyond) +
+                 "', which is not picked: OpenCASCADE's blend builder "
+                 "takes faces meeting within 5.7 degrees for tangent and "
+                 "cannot stop there. Pick that edge too to blend both";
+      }
       return false;
     }
     return true;
@@ -914,10 +1076,12 @@ std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
     const auto nameOf = EdgeNamer(shape, shape, nullptr, bodyMap);
     if (op == EdgeBlendOp::Chamfer) {
       BRepFilletAPI_MakeChamfer mk(shape);
-      AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, nameOf, &error);
+      AddBlendEdges(mk, shape, edges, edgeIndices, radiusOrDistance, nameOf,
+                    &error);
     } else {
       BRepFilletAPI_MakeFillet mk(shape);
-      AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, nameOf, &error);
+      AddBlendEdges(mk, shape, edges, edgeIndices, radiusOrDistance, nameOf,
+                    &error);
     }
     return error;
   } catch (const Standard_Failure& e) {
@@ -1287,7 +1451,8 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
     TopExp::MapShapes(shape, TopAbs_EDGE, edges);
     const auto nameOf = EdgeNamer(shape, copy, m.history, bodyMap);
     const auto addAll = [&](auto& mk) {
-      return AddBlendEdges(mk, edges, m.edges, radiusOrDistance, nameOf, error);
+      return AddBlendEdges(mk, shape, edges, m.edges, radiusOrDistance, nameOf,
+                           error);
     };
 
     if (op == EdgeBlendOp::Chamfer) {

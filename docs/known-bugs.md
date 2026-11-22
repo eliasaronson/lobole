@@ -123,26 +123,6 @@ the heading if it is not here yet.
   the name.
 - **Case:** `solidcraft/fillets/every-l-bracket-front-inner-outline-after-bend-round-r1`.
 
-### A round runs on across a crease of a few degrees
-
-- **Symptom:** a Fillet of one edge also rounds the edge beyond a crease
-  of up to about five degrees, which nobody picked. A block whose bottom
-  turns up 3° at x = 0.8, its bottom side edge's long piece rounded R2.6,
-  comes back with both pieces round: 459.17945 mm³ where the short piece
-  left sharp gives 459.94891. On the same block a crease of 1° or 3° is
-  crossed, one of 6°, 10° or 20° is not.
-- **Cause:** OpenCASCADE's blend builder adds an edge's tangent chain, and
-  it reads a crease under its own angular tolerance as tangent; nothing of
-  ours compares the contour it made with the edges picked.
-- **Where:** `AddBlendEdges` (`src/core/ElementHistory.cpp`).
-- **Likely fix:** after `Add`, walk the builder's contour
-  (`NbEdges`/`Edge`) and refuse, naming the crease and its angle, a
-  contour that crossed a vertex where the faces meet at more than the
-  modeller's own tangency (`ChFi3d::IsTangentFaces` at a tighter angle), or
-  give the builder that tolerance (`SetParams`).
-- **Case:**
-  `solidcore/fillets/15437-fillet-round-ends-at-crease-beside-drafted-side`.
-
 ### A blend the validity check passes can be far off in volume
 
 - **Symptom:** the size a refused Fillet names as the one that fits builds

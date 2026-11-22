@@ -15,9 +15,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <limits>
+#include <numbers>
 #include <string>
 
 using Catch::Matchers::WithinAbs;
@@ -607,4 +610,117 @@ TEST_CASE("A filleted spline head fused to a turned base names every edge",
   // Stable: a from-scratch regeneration names the same edges the same way.
   const Document again(doc);
   CHECK(names(again) == first);
+}
+
+namespace {
+
+// A block x 0..6, z from its bottom to 8, y 0..-12: the bottom flat to
+// x = 0.8 and rising at `creaseDeg` from there, so its side edge at y = 0 is
+// two pieces meeting at a crease of that angle (kernel case
+// solidcore/fillets/15437, without the drafted side).
+void CreasedBlock(Document& doc, double creaseDeg) {
+  const double rise = 5.2 * std::tan(creaseDeg * std::numbers::pi / 180.0);
+  auto sk = std::make_unique<SketchFeature>(
+      "Section", SketchPlane({0, 0, 0}, {0, -1, 0}, {1, 0, 0}));
+  const std::array<glm::dvec2, 5> p = {
+      glm::dvec2{0, 0}, {0.8, 0}, {6, rise}, {6, 8}, {0, 8}};
+  for (size_t i = 0; i < p.size(); i++)
+    sk->AddEntity(sketch::Line{p[i], p[(i + 1) % p.size()]});
+  doc.AddFeature(std::move(sk));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Block", doc.GetFeature(0)->GetId(), 12.0, ExtrudeMode::NewBody));
+  REQUIRE(doc.Regenerate());
+}
+
+// The side edge's two pieces at y = 0: the long one past the crease, and the
+// short one before it.
+bool OnSide(const glm::vec3& q) { return std::abs(q.y) < 1e-3f && q.z < 0.6f; }
+ElementRef LongPiece(const Document& doc) {
+  return PickEdge(
+      doc, [](const glm::vec3& q) { return OnSide(q) && q.x > 0.8f - 1e-3f; });
+}
+ElementRef ShortPiece(const Document& doc) {
+  return PickEdge(
+      doc, [](const glm::vec3& q) { return OnSide(q) && q.x < 0.8f + 1e-3f; });
+}
+
+} // namespace
+
+TEST_CASE("A round runs on past a crease only as far as it is tangent",
+          "[fillet]") {
+  // docs/modeling/README.md#a-blend-runs-only-as-far-as-it-is-tangent: the
+  // blend builder's tangent walk crosses a crease of up to 5.7 degrees and
+  // rounds the edge past it, which nobody picked. Under the builder's own
+  // angular tolerance (0.57 degrees) the two pieces are one smooth run and
+  // both are rounded; past it, up to where the builder stops on its own,
+  // the round is refused, naming the crease; past that it ends there.
+  const auto round = [](double deg, bool both) {
+    Document doc;
+    CreasedBlock(doc, deg);
+    const double before = doc.GetBodies().at(0).shape.Volume();
+    std::vector<ElementRef> edges = {LongPiece(doc)};
+    if (both)
+      edges.push_back(ShortPiece(doc));
+    doc.AddFeature(std::make_unique<FilletFeature>("Round", edges, 0.4));
+    const bool built = doc.Regenerate();
+    const auto* f = doc.GetFeature(doc.FeatureCount() - 1);
+    struct Out {
+      bool built;
+      std::string error;
+      double removed;
+      int shortEdges;
+    };
+    // The short piece, sharp, is still an edge of the body.
+    int sharp = 0;
+    for (const auto& poly :
+         doc.GetBodies().at(0).shape.GenerateEdgePolylines()) {
+      bool all = poly.size() >= 2;
+      for (const auto& q : poly)
+        all = all && std::abs(q.y) < 1e-3f && std::abs(q.z) < 1e-3f &&
+              q.x < 0.8f + 1e-3f;
+      sharp += all ? 1 : 0;
+    }
+    return Out{built, f->GetError(),
+               before - doc.GetBodies().at(0).shape.Volume(), sharp};
+  };
+  // The round's spandrel (1 - pi/4) r^2 along the long piece's 5.2 mm
+  // (and its run past the end at the crease aside): what one piece removes.
+  const double one = (1.0 - std::numbers::pi / 4.0) * 0.16 * 5.2;
+
+  SECTION("0.5 degrees: one smooth run, both pieces rounded") {
+    const auto out = round(0.5, false);
+    INFO(out.error << "; removed " << out.removed << " mm3, one piece's "
+                   << one);
+    REQUIRE(out.built);
+    CHECK(out.shortEdges == 0);
+    CHECK(out.removed > one * 1.1);
+  }
+  for (const double deg : {1.0, 3.0}) {
+    DYNAMIC_SECTION(deg << " degrees: refused, naming the crease") {
+      const auto out = round(deg, false);
+      CHECK_FALSE(out.built);
+      CHECK(out.error.find("would run on across a crease of " +
+                           std::format("{:.3g}", deg) +
+                           " degrees at (0.800, "
+                           "0.000, 0.000)") != std::string::npos);
+      CHECK(out.error.find("which is not picked") != std::string::npos);
+      CHECK(out.removed == 0.0);
+      // Both picked: both rounded, as asked.
+      const auto both = round(deg, true);
+      INFO(both.error);
+      CHECK(both.built);
+      CHECK(both.shortEdges == 0);
+    }
+  }
+  SECTION("6 degrees: the builder's walk stops there") {
+    // Past 0.1 rad the walk does not cross: the long piece is the contour,
+    // built as picked, and its end at the crease is the builder's (it eats
+    // into the short piece's corner, short of rounding it).
+    const auto out = round(6.0, false);
+    INFO(out.error << "; removed " << out.removed << " mm3, one piece's "
+                   << one);
+    REQUIRE(out.built);
+    CHECK(out.removed > one);
+    CHECK(out.removed < one * 6.0 / 5.2);
+  }
 }

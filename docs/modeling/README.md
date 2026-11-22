@@ -1779,6 +1779,29 @@ measured to the edge between the pieces. A blend that does build as the
 body is but builds a patch more where it meets a split keeps it
 ([known bug](../known-bugs.md#a-blend-that-builds-beside-a-split-builds-a-patch-more)).
 
+### A blend runs only as far as it is tangent
+
+The builder adds a picked edge's tangent chain, and its walk reads two
+faces as tangent up to 0.1 rad (`ChFi3d::IsTangentFaces`), so a round ran
+on across a crease of up to 5.7 degrees and rounded the edge past it, which
+nobody picked. A blend's run is held to the builder's own angular
+tolerance instead, 1e-2 rad (0.57 degrees: `ChFi3d_Builder`'s `angular`,
+within which it makes a blend meet its supports): after the edges are
+added, each contour is walked from the picked edges (`RunsOnPastCrease`),
+crossing a vertex only where every other edge there joins faces within it.
+An edge reached only across a sharper crease is not built; the builder
+cannot be told to stop there, so the blend is refused, naming the crease:
+"the blend of edge 'E' would run on across a crease of 3 degrees at (0.800,
+10.000, 0.000) to edge 'F', which is not picked: ...; pick that edge too to
+blend both". Picked as well, both are blended; at 0.5 degrees the two are
+one run and both are rounded unasked; at 6 degrees the builder stops there
+itself and the round ends at the crease (`tests/test_fillet.cpp`). It is a
+rule about the faces, not about what looks like one edge: in the action
+matrix a gear wheel's tooth outline (its flanks meet their neighbours at
+0.9 to 1.3 degrees), a flattened 60-degree fold's strips (0.8 to 3
+degrees) and a closed spline's two edges (0.6) are refused one edge at a
+time, where the builder rounded the whole chain.
+
 ## Kernel calls build on a copy of the cached body
 
 The body a feature acts on is the previous feature's cached result, which
@@ -2695,7 +2718,9 @@ reference case.
     two equal tubes touch, a mixed-convexity corner whose concave round
     has to roll over the convex one's end, a joint round whose joint a
     tube's seam vertex cuts 0.37 mm short of a chamfer's crease (with the
-    seam elsewhere it builds);
+    seam elsewhere it builds), and a round that has to end at a crease of a
+    few degrees its builder walks across, the edge past it not picked
+    ([a blend runs only as far as it is tangent](#a-blend-runs-only-as-far-as-it-is-tangent));
   - a Shell whose wall is thicker than a round inside it, that opens the
     side of a thin rib, or whose floor falls away to a drain, and a Shell
     with no open face (a sealed void);
