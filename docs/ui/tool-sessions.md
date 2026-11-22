@@ -154,6 +154,11 @@ origin that misses the body. Examples in the code:
   snapped within the coincident snap's 10 px (a distance on the screen, the
   same at any zoom), and a refusal names why, "Not split: …"
   ([sketching](../sketching/README.md#split)).
+- On a model drawn over a scan, the first edge picked into a fresh Fillet
+  or Chamfer takes the round or chamfer the scan reads there, and a face
+  picked into the Thread tool the thread the scan carries
+  ([modeling](../modeling/README.md#reading-a-thread-off-a-scan));
+  otherwise:
 - Fillet and Chamfer open at a tenth of the target body's thinnest extent,
   rounded to 1/2/5 (`SizeFromBody`); Shell at a tenth of its thinnest wall
   (`SizeFromWall`, `ThinnestWall`: on a body already hollow the extent is

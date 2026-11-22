@@ -660,6 +660,19 @@ def main():
                     ("fit_primitive no such feature", "fit_primitive",
                      {"feature_id": 987654, "point_mm": [0, 0, 0]},
                      "no feature with id"),
+                    # Reading a round or a thread off the scan
+                    # (docs/modeling/README.md#reading-a-round-off-a-scan).
+                    ("read_round a B-Rep import", "read_round",
+                     {"feature_id": imp, "point_mm": [0, 0, 0]},
+                     "made no mesh body"),
+                    ("read_round point not three numbers", "read_round",
+                     {"feature_id": imp, "point_mm": [0, 0]}, "point_mm"),
+                    ("read_thread a B-Rep import", "read_thread",
+                     {"feature_id": imp, "point_mm": [0, 0, 0]},
+                     "made no mesh body"),
+                    ("read_thread no such feature", "read_thread",
+                     {"feature_id": 987654, "point_mm": [0, 0, 0]},
+                     "no feature with id"),
                     ("DatumAxis from_fit of a plane", "add_feature",
                      {"feature": {
                          "type": "DatumAxis", "name": "Bad", "kind": "from_fit",

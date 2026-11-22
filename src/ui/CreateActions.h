@@ -129,6 +129,27 @@ double SizeFromFace(const AppState& state, const ElementRef& face,
 [[nodiscard]] std::string ThreadForFace(const AppState& state,
                                         const ElementRef& face);
 
+// A scan's reading where a tool acts on a model at it
+// (docs/modeling/README.md#reading-a-round-off-a-scan): the mesh bodies of
+// `bodies` near `edge` read for a round (Fillet) or a chamfer (Chamfer) at
+// the edge's middle. The size is the reading's, put on the 0.5 mm step
+// when that lies within three of its sigmas (sketch::StepsFor). nullopt
+// with no scan there, or one that reads as something else.
+[[nodiscard]] std::optional<double>
+BlendFromScan(const std::vector<Body>& bodies, const ElementRef& edge,
+              bool chamfer);
+
+// The thread a scan carries on a cylindrical face (ReadThread at the
+// face): its nearest standard size, and its hand. nullopt with no scan on
+// the face, no thread on it, or a size the Thread feature does not take.
+struct ScanThread {
+  std::string designation;
+  double pitch = 0.0;
+  bool rightHanded = true;
+};
+[[nodiscard]] std::optional<ScanThread>
+ThreadFromScan(const std::vector<Body>& bodies, const ElementRef& face);
+
 // Move Face's default: in the host face's plane (the face the picked ones
 // sit in), along the body's largest extent in that plane, a tenth of it,
 // rounded as SizeFromFace rounds. With no faces, along the body's largest

@@ -1325,6 +1325,94 @@ refused on load; the golden `v230-datum-fit-hints`; the GUI tests
 `headless_smoke.py` (the new reply keys, and a hinted datum surviving save
 and reopen); `refused_calls_smoke.py`.
 
+### Reading a round off a scan
+
+`read_round {feature_id, point_mm}` (`mesh::ReadRound`,
+`src/core/mesh/ReadRound.{h,cpp}`) gives an edge of a scan its size. At
+the point -- on the edge, or on a model's sharp edge drawn where the scan
+is rounded, which stands off it by up to the round's size -- the triangles
+about it are split by their normals into two faces, and the edge runs
+along both (their normals' cross product). A section square to the edge
+(`mesh::Slice`) through the point gives the run of points about it; the
+faces in it are lines, each fitted to its end of the run and grown in while
+five points in a row do not leave it, and what lies between is read three
+ways with the faces held where they are:
+
+- **sharp**: the two lines meeting;
+- **a round** of one radius, tangent to both (one parameter);
+- **a chamfer** of two distances, one along each face from where they meet
+  (two parameters).
+
+Each is scored by its AIC, the residuals over the faces' own noise
+(widened by its correlation) squared plus twice its parameters; the lowest
+is the `verdict`, and `also_fits` names any within 6 of it -- the readings
+the scan does not tell from it. A round's `radius_mm` and `sigma_mm` are
+its fit held tangent to both faces with the faces free
+(`sketch::FitTangentRound`, as [the pieces
+fit](../sketching/README.md#the-pieces-fit) holds a small round), so the
+sigma carries where it touches them. The window starts at 40 mesh edges
+and doubles while the corner takes more than a third of it, up to a
+quarter of the scan's diagonal; the edge's direction is read in the first
+window only, where no other face of the part is in it. Refused, naming
+why: no mesh within the first window of the point (`no scan`), one face
+there (`no edge`), faces too short to read.
+
+Measured by `tests/test_read_round.cpp` on scanned prisms whose one corner
+is generated round, chamfered or sharp, 0.02 mm of noise: rounds of 0.5
+(sampled every 0.05 mm), 2 (0.1) and 6 mm (0.2) between faces at 90° and
+60° read as rounds within three of their sigmas (0.553 ± 0.021 and
+0.479 ± 0.008 for the 0.5 mm ones are the furthest, 2.5 sigmas; the
+larger within one), the angle within 1.5°; a sharp corner reads sharp and
+a 1.5 mm chamfer as one, its distances within 0.1 mm. A 1 mm round every
+0.2 mm with 0.03 mm of noise read as a round in five draws of five, and in
+three of them the chamfer was within 6 (`also_fits`): the scan carries
+six points on it, and says so.
+
+### Reading a thread off a scan
+
+`read_thread {feature_id, point_mm}` (`mesh::ReadThread`,
+`src/core/mesh/ReadThread.{h,cpp}`):
+
+- **The cylinder**: a ball of triangles about the point, grown until it
+  reaches round at least 150° of the fitted circle and two radii; the axis
+  is the principal direction of the triangles' normals whose spread stands
+  apart from the other two (a surface of revolution's normals lie on a cone
+  about its axis: a thread's flanks tilt them along it, a plain bore's
+  not at all), the centre and radius a circle through the triangles round
+  it; then a band of four radii along the axis is fitted again.
+- **The signal**: each vertex's radius against its axial position, in
+  twelve sectors round the axis, binned a mesh edge long.
+- **The pitch**: the first strong peak of the sectors' mean
+  autocorrelation, then each sector's own in windows of four turns; the
+  median of those, and refused as no thread when fewer than half agree
+  within 5 % or the peak is under 0.5 (a plain bore). It is then refined to
+  the pitch whose fold over every turn and sector leaves the sharpest
+  profile; `pitch_sigma_mm` is the windows' spread.
+- **The hand**: the shift between neighbouring sectors' signals (a
+  right-hand thread advances with the angle about the axis), as a share of
+  pitch / sectors (`phase_share`, ±1 for a single start read cleanly).
+- **The profile**, folded over every turn: its highest and lowest radius
+  are the major and minor diameters, its slope at mid depth the flank
+  (`flank_deg`, from the radial plane). `internal` when the triangles face
+  the axis.
+- **The nearest standard**: ISO trapezoidal (ISO 2904's preferred pitch of
+  each size) for a flank under 22.5°, else the metric and unified rows of
+  the thread table, by the sum of the diameter's and the pitch's relative
+  miss; `LH` for a left hand.
+
+Measured (asserted) on scanned threads with 0.02 mm of noise: an
+M8 × 1.25 bolt reads 1.2500 mm, 8.00 mm, right hand, 30° flanks, M8; a
+Tr16 × 4 left-hand nut 3.9999 mm, 16.00 mm, left hand, internal, 15°,
+`Tr16x4 LH`; a plain 10 mm bore is refused as no thread.
+
+**As a default.** On a model drawn over a scan, the first edge picked into
+a fresh Fillet takes the scan's round there (the reading put on the
+0.5 mm step when that is within three sigmas), a Chamfer the scan's
+chamfer; a cylindrical face picked into the Thread tool takes the thread
+the scan carries on it, size, pitch and hand, before the face's own size
+(`ui::BlendFromScan`, `ui::ThreadFromScan`;
+[defaults](../ui/tool-sessions.md#defaults-and-refusals)).
+
 ## Sizes past the model space are refused
 
 `kModelSpaceMm` (`src/core/ModelSpace.h`) is a kilometre: OpenCASCADE's
@@ -1917,7 +2005,9 @@ feature; a Boolean, pattern or Split's body continues its source's material:
 ([../variables/README.md](../variables/README.md#literals-that-should-be-expressions));
 `list_elements`, `curve_points`,
 `tube_schedule`, `grow_faces` ([Delete Face](#delete-face)) and
-`fit_primitive` ([fitting a primitive to a mesh](#fitting-a-primitive-to-a-mesh))
+`fit_primitive` ([fitting a primitive to a mesh](#fitting-a-primitive-to-a-mesh)),
+`read_round` and `read_thread` ([reading a round](#reading-a-round-off-a-scan)
+and [a thread](#reading-a-thread-off-a-scan) off a scan)
 (`src/remote/RemoteInspection.cpp`). A direct edit that would not build is
 refused by `add_feature` and `modify_feature` ([Direct edit](#direct-edit)). `get_state` lists each
 feature with its error, warning, `suppressed` and, for a Derived, `stale`.
@@ -2380,7 +2470,9 @@ Headless, one file per feature (`tests/test_extrude.cpp`,
 `test_datum`, `test_primitives`, `test_boolean`, `test_pattern`, `test_fillet`, `test_shell`,
 `test_draft`, `test_split`, `test_refine`, `test_rib`, `test_thread`,
 `test_hole`, `test_worm`, `test_cam_profile`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,
-`test_derived`, `test_toponaming`, and `test_direct_edit` for the four
+`test_derived`, `test_toponaming`, `test_read_round` ([reading a
+round](#reading-a-round-off-a-scan) and [a thread](#reading-a-thread-off-a-scan)
+off a scan, and the defaults they give), and `test_direct_edit` for the four
 [direct edits](#direct-edit), on a 40×30×20 block and on real STEP files in
 `tests/fixtures/step/`, each pair equal to the file with the edit made at its
 source, with `tests/direct_edit_step_smoke.py` deleting and offsetting every

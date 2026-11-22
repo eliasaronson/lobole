@@ -180,6 +180,7 @@ add_executable(designer_tests
     test_section_pieces.cpp
     test_section_trace.cpp
     test_sketch_candidates.cpp
+    test_read_round.cpp
     test_mesh_organic.cpp
     test_mesh_body.cpp
     test_mesh_body_import.cpp

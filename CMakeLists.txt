@@ -525,6 +525,8 @@ set(core_sources
     src/core/sketch/SectionPieces.cpp
     src/core/sketch/SectionTrace.cpp
     src/core/sketch/SketchCandidates.cpp
+    src/core/mesh/ReadRound.cpp
+    src/core/mesh/ReadThread.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/sketch/SketchFillet.cpp
     src/core/sketch/SketchSplit.cpp

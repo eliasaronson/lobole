@@ -83,6 +83,9 @@
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/WormFeature.h"
+#include "core/mesh/ReadRound.h"
+#include "core/mesh/ReadThread.h"
+#include "core/sketch/SketchCandidates.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamPlayback.h"   // SyncCamPlayback (SyncRenderersToDocument)
@@ -683,6 +686,72 @@ double SizeFromFace(const AppState& state, const ElementRef& face,
   if (!(reach > 0.0))
     return fallback;
   return RoundDown125(reach / 10.0);
+}
+
+namespace {
+
+std::vector<const mesh::TriMesh*> ScanMeshes(const std::vector<Body>& bodies) {
+  std::vector<const mesh::TriMesh*> out;
+  for (const Body& b : bodies)
+    if (b.IsMesh() && b.mesh != nullptr && !b.mesh->triangles.empty())
+      out.push_back(b.mesh.get());
+  return out;
+}
+
+} // namespace
+
+std::optional<double> BlendFromScan(const std::vector<Body>& bodies,
+                                    const ElementRef& edge, bool chamfer) {
+  const std::vector<const mesh::TriMesh*> scans = ScanMeshes(bodies);
+  if (scans.empty())
+    return std::nullopt;
+  const auto box = Measure::ElementBounds(bodies, edge);
+  if (!box)
+    return std::nullopt;
+  const mesh::RoundReading r =
+      mesh::ReadRound(scans, 0.5 * (box->min + box->max));
+  if (!r.ok)
+    return std::nullopt;
+  const double step = sketch::StepsFor(units::Length::Millimetre).radiusStep;
+  if (!chamfer && r.verdict == mesh::EdgeReading::Round && r.radiusMm > 0.0) {
+    const double nominal = std::round(r.radiusMm / step) * step;
+    return nominal > 0.0 && std::abs(r.radiusMm - nominal) <= 3.0 * r.sigmaMm
+               ? nominal
+               : r.radiusMm;
+  }
+  if (chamfer && r.verdict == mesh::EdgeReading::Chamfer) {
+    const double d = 0.5 * (r.chamferMm[0] + r.chamferMm[1]);
+    return d > 0.0 ? std::optional<double>(d) : std::nullopt;
+  }
+  return std::nullopt;
+}
+
+std::optional<ScanThread> ThreadFromScan(const std::vector<Body>& bodies,
+                                         const ElementRef& face) {
+  const std::vector<const mesh::TriMesh*> scans = ScanMeshes(bodies);
+  if (scans.empty())
+    return std::nullopt;
+  const auto el = Measure::Describe(bodies, face);
+  const auto box = Measure::ElementBounds(bodies, face);
+  if (!el || !box || el->shape != "cylinder" || !el->hasRadius || !el->hasAxis)
+    return std::nullopt;
+  // A point on the face: its box's middle (on the axis) out by its radius.
+  const glm::dvec3 axis = glm::normalize(el->axis);
+  glm::dvec3 side = glm::cross(axis, glm::dvec3(1.0, 0.0, 0.0));
+  if (glm::length(side) < 0.1)
+    side = glm::cross(axis, glm::dvec3(0.0, 1.0, 0.0));
+  const glm::dvec3 at =
+      0.5 * (box->min + box->max) + glm::normalize(side) * el->radius;
+  const mesh::ThreadReading t = mesh::ReadThread(scans, at);
+  if (!t.ok)
+    return std::nullopt;
+  std::string name = t.nearest;
+  if (const size_t lh = name.find(" LH"); lh != std::string::npos)
+    name.erase(lh);
+  const auto row = threads::Lookup(name);
+  if (!row)
+    return std::nullopt;
+  return ScanThread{row->designation, row->pitch, t.rightHand};
 }
 
 std::string ThreadForFace(const AppState& state, const ElementRef& face) {

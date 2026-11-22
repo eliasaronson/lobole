@@ -1169,15 +1169,26 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
     if (auto* th = dynamic_cast<ThreadFeature*>(&f);
         th != nullptr && item.kind == SelectionItem::Kind::Face) {
       th->face = item.element;
-      // In the tool, the face sizes the thread: the metric size that face
-      // carries, not the M8 the tool opened with, which fitted only an M8.
-      if (state.pendingFeatureId == f.GetId())
-        if (const std::string size = ThreadForFace(state, th->face);
-            !size.empty())
+      // In the tool, the face sizes the thread: the thread a scan on it
+      // carries (pitch, size and hand read off it), else the metric size
+      // the face carries -- not the M8 the tool opened with, which fitted
+      // only an M8.
+      if (state.pendingFeatureId == f.GetId()) {
+        if (const auto scan =
+                state.document != nullptr
+                    ? ThreadFromScan(state.document->GetBodies(), th->face)
+                    : std::nullopt) {
+          th->designation = scan->designation;
+          th->pitch = scan->pitch;
+          th->rightHanded = scan->rightHanded;
+        } else if (const std::string size = ThreadForFace(state, th->face);
+                   !size.empty()) {
           if (const auto row = threads::Lookup(size)) {
             th->designation = row->designation;
             th->pitch = row->pitch;
           }
+        }
+      }
       return true;
     }
     return false;
@@ -1370,7 +1381,28 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
     if (auto* fil = dynamic_cast<FilletFeature*>(&f);
         fil != nullptr && item.kind == SelectionItem::Kind::Edge) {
       // Toggles + commits internally (the remap needs its own error path).
+      const bool first = fil->edges.empty();
       ApplyBlendEdgePick(state, *fil, item.element, meshId, index, liveRegen);
+      // The first edge of a fresh tool on a model at a scan: the size the
+      // scan reads there (a round's radius, a chamfer's distance), not the
+      // tenth of the body the tool opened with.
+      if (first && fil->edges.size() == 1 && fil->radius.expr.empty() &&
+          state.pendingFeatureId == f.GetId() && state.document != nullptr) {
+        size_t at = 0;
+        const std::vector<Body>* input =
+            state.document->FindFeatureById(fil->GetId(), &at) != nullptr &&
+                    at > 0
+                ? state.document->CachedBodiesAfter(at - 1)
+                : nullptr;
+        if (input != nullptr)
+          if (const auto size =
+                  BlendFromScan(*input, fil->edges.front(),
+                                fil->op == EdgeBlendOp::Chamfer)) {
+            fil->radius = *size;
+            if (liveRegen)
+              state.document->Regenerate();
+          }
+      }
       return false;
     }
     return false;

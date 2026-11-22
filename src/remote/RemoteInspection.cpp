@@ -42,6 +42,8 @@
 #include "core/features/ShellFeature.h" // ThinnestWall
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
+#include "core/mesh/ReadRound.h"
+#include "core/mesh/ReadThread.h"
 #include "core/tube/CutList.h"
 #include "core/tube/Rules.h"
 #include "remote/RemoteHelpers.h"
@@ -1340,6 +1342,51 @@ static constexpr MethodDoc InspectionMethods[] = {
     // guessing, so a row that promises a branch nobody wrote is the
     // "refuse, don't substitute" rule inverted — we refuse the call and
     // advertise the capability. It now names exactly what runs.
+    {"read_round",
+     "Read a round off a scan at an edge "
+     "(docs/modeling/README.md#reading-a-round-off-a-scan): at `point_mm` "
+     "on or near an edge of the mesh bodies feature `feature_id` made, a "
+     "section square to the edge (from the two faces' normals), the faces "
+     "in it as lines, and which of three readings the points between them "
+     "carry -- a round tangent to both, a chamfer, or sharp -- judged "
+     "against each other in the scan's own noise (AIC). Returns {verdict: "
+     "round | chamfer | sharp, radius_mm and sigma_mm (a round's: held "
+     "tangent to both faces, so the sigma carries where it touches them), "
+     "chamfer_mm [two distances from where the faces meet, along each], "
+     "angle_deg (between the faces, inside), also_fits (the readings the "
+     "scan does not tell from the verdict), worse {round, chamfer, sharp} "
+     "(each reading's AIC above the best), noise_mm, window_mm, points, "
+     "edge_dir, corner_mm}. Read-only. Refused, naming why: no mesh at "
+     "the point (`no scan`), one face there (`no edge`).",
+     "feature_id:int>=1, point_mm:number[3]", remote::NeedsPart,
+     "verdict:string, radius_mm:number, sigma_mm:number, "
+     "chamfer_mm:number[], angle_deg:number, also_fits:string[], "
+     "worse:object, noise_mm:number, window_mm:number, points:int, "
+     "edge_dir:number[], corner_mm:number[]"},
+    {"read_thread",
+     "Read a thread off a scan "
+     "(docs/modeling/README.md#reading-a-thread-off-a-scan): at "
+     "`point_mm` on a threaded surface of the mesh bodies feature "
+     "`feature_id` made, the cylinder it is about (its axis from the "
+     "triangles' normals), radius against axial position in twelve "
+     "sectors, the pitch the autocorrelation of most windows of four turns "
+     "agrees on, the hand from the shift between neighbouring sectors, "
+     "and the diameters from the profile folded over every turn. Returns "
+     "{pitch_mm, pitch_sigma_mm, major_diameter_mm, minor_diameter_mm, "
+     "flank_deg (from the radial plane: 30 metric, 15 trapezoidal), hand: "
+     "right | left, internal (a tapped hole's), windows_agree, windows, "
+     "phase_share (the sectors' shift over pitch / sectors: +-1 for a "
+     "single start read cleanly), nearest (the nearest ISO metric, unified "
+     "or trapezoidal size, ' LH' for a left hand), nearest_major_mm, "
+     "nearest_pitch_mm, axis_point_mm, axis_dir, length_mm}. Read-only. "
+     "Refused, naming why: no mesh at the point, or no thread there (a "
+     "plain bore's radius repeats no more than noise does).",
+     "feature_id:int>=1, point_mm:number[3]", remote::NeedsPart,
+     "pitch_mm:number, pitch_sigma_mm:number, major_diameter_mm:number, "
+     "minor_diameter_mm:number, flank_deg:number, hand:string, "
+     "internal:bool, windows_agree:int, windows:int, phase_share:number, "
+     "nearest:string, nearest_major_mm:number, nearest_pitch_mm:number, "
+     "axis_point_mm:number[], axis_dir:number[], length_mm:number"},
     {"fit_primitive",
      "Fit a plane, cylinder, cone, sphere or torus to a body's triangles from "
      "a "
@@ -7102,6 +7149,85 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       AttachReceipt(out, receipt);
     }
     return out;
+  }
+  if (m == "read_round" || m == "read_thread") {
+    // Read-only readers off a scan
+    // (docs/modeling/README.md#reading-a-round-off-a-scan): every input
+    // checked, then the reading; nothing changes.
+    const Document& part = RequirePartDoc(doc, m.c_str());
+    const json& fj = p.at("feature_id");
+    if (!fj.is_number_integer())
+      throw std::runtime_error(m + ": feature_id is the id of the feature "
+                                   "whose scan to read (get_state lists them)");
+    const uint64_t fid = fj.get<uint64_t>();
+    const Feature* feature = part.FindFeatureById(fid);
+    if (feature == nullptr)
+      throw std::runtime_error("no feature with id " + std::to_string(fid) +
+                               " -- get_state lists every feature with its id");
+    const json& pj = p.at("point_mm");
+    if (!pj.is_array() || pj.size() != 3 || !pj[0].is_number() ||
+        !pj[1].is_number() || !pj[2].is_number())
+      throw std::runtime_error(m + ": point_mm is [x, y, z] in mm, not " +
+                               pj.dump());
+    const glm::dvec3 at(pj[0].get<double>(), pj[1].get<double>(),
+                        pj[2].get<double>());
+    std::vector<const mesh::TriMesh*> meshes;
+    for (const Body* b : meshfit::BodiesOf(part.GetBodies(), fid))
+      if (b->IsMesh() && b->mesh != nullptr)
+        meshes.push_back(b->mesh.get());
+    if (meshes.empty())
+      throw std::runtime_error(m + ": feature " + std::to_string(fid) + " ('" +
+                               feature->GetName() +
+                               "') made no mesh body: the readers read a "
+                               "scan");
+    const auto v3 = [](const glm::dvec3& v) { return json{v.x, v.y, v.z}; };
+    if (m == "read_round") {
+      const mesh::RoundReading r = mesh::ReadRound(meshes, at);
+      if (!r.ok)
+        throw std::runtime_error("read_round: " + r.why);
+      json also = json::array();
+      for (mesh::EdgeReading e : r.alsoFits)
+        also.push_back(mesh::ToString(e));
+      json out = {{"verdict", mesh::ToString(r.verdict)},
+                  {"angle_deg", r.angleDeg},
+                  {"also_fits", std::move(also)},
+                  {"worse",
+                   {{"round", r.worse[0]},
+                    {"chamfer", r.worse[1]},
+                    {"sharp", r.worse[2]}}},
+                  {"noise_mm", r.noiseMm},
+                  {"window_mm", r.windowMm},
+                  {"points", r.points},
+                  {"edge_dir", v3(r.edgeDir)},
+                  {"corner_mm", v3(r.corner)}};
+      if (r.verdict == mesh::EdgeReading::Round) {
+        out["radius_mm"] = r.radiusMm;
+        out["sigma_mm"] =
+            std::isfinite(r.sigmaMm) ? json(r.sigmaMm) : json(nullptr);
+      } else if (r.verdict == mesh::EdgeReading::Chamfer) {
+        out["chamfer_mm"] = {r.chamferMm[0], r.chamferMm[1]};
+      }
+      return out;
+    }
+    const mesh::ThreadReading t = mesh::ReadThread(meshes, at);
+    if (!t.ok)
+      throw std::runtime_error("read_thread: " + t.why);
+    return json{{"pitch_mm", t.pitchMm},
+                {"pitch_sigma_mm", t.pitchSigmaMm},
+                {"major_diameter_mm", t.majorDiameterMm},
+                {"minor_diameter_mm", t.minorDiameterMm},
+                {"flank_deg", t.flankDeg},
+                {"hand", t.rightHand ? "right" : "left"},
+                {"internal", t.internal},
+                {"windows_agree", t.windowsAgree},
+                {"windows", t.windows},
+                {"phase_share", t.phaseShare},
+                {"nearest", t.nearest},
+                {"nearest_major_mm", t.nearestMajorMm},
+                {"nearest_pitch_mm", t.nearestPitchMm},
+                {"axis_point_mm", v3(t.axisPoint)},
+                {"axis_dir", v3(t.axisDir)},
+                {"length_mm", t.lengthMm}};
   }
   if (m == "fit_primitive") {
     // Read-only: every input checked, then the fit; nothing changes.

@@ -108,6 +108,8 @@ COLUMNS: dict[str, str] = {
     'ping': '',
     'project_changed_on_disk': '',
     'project_section': 'sketch_id:int>=1, bodies?:any[], tolerance_mm?:number>0, fit?:string, detail?:number',
+    'read_round': 'feature_id:int>=1, point_mm:number[3]',
+    'read_thread': 'feature_id:int>=1, point_mm:number[3]',
     'redo': '',
     'remote_list': '',
     'remove_mate': 'id:int>=0',
@@ -387,6 +389,14 @@ class ProjectSectionParams(TypedDict):
     tolerance_mm: NotRequired[float]
     fit: NotRequired[str]
     detail: NotRequired[float]
+
+class ReadRoundParams(TypedDict):
+    feature_id: int
+    point_mm: Sequence[float]
+
+class ReadThreadParams(TypedDict):
+    feature_id: int
+    point_mm: Sequence[float]
 
 class RemoveMateParams(TypedDict):
     id: int
@@ -1534,6 +1544,8 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'mass_properties': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'body': {'type': 'integer'}, 'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'inertia': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'surface_area_mm2': {'type': 'number'}, 'volume_mm3': {'type': 'number'}, 'density': {'type': 'number'}, 'volume_uncertainty_mm3': {'type': 'number'}, 'area_uncertainty_mm2': {'type': 'number'}, 'printed': {'anyOf': [{'type': 'object'}, {'type': 'null'}]}}, 'required': ['bbox_max', 'bbox_min', 'body', 'center_of_mass_mm', 'inertia', 'mass_g', 'material', 'name', 'surface_area_mm2', 'volume_mm3'], 'additionalProperties': False}}, 'warnings': {'type': 'array', 'items': {'type': 'string'}}, 'bbox_mm': {'anyOf': [{'type': 'object', 'properties': {'max': {'type': 'array', 'items': {'type': 'number'}}, 'min': {'type': 'array', 'items': {'type': 'number'}}, 'size': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['max', 'min', 'size'], 'additionalProperties': False}, {'type': 'null'}]}, 'total': {'type': 'object', 'properties': {'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'volume_mm3': {'type': 'number'}, 'printed': {'type': 'object'}}, 'required': ['center_of_mass_mm', 'mass_g', 'volume_mm3'], 'additionalProperties': False}, 'occurrences': {'type': 'array', 'items': {'type': 'object', 'properties': {'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'name': {'type': 'string'}, 'occurrence': {'type': 'integer'}, 'part_id': {'type': 'integer'}, 'volume_mm3': {'type': 'number'}, 'mass_from': {'type': 'string'}, 'printed': {'type': 'object'}}, 'required': ['center_of_mass_mm', 'mass_g', 'name', 'occurrence', 'part_id', 'volume_mm3', 'mass_from'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['bbox_mm', 'total'], 'additionalProperties': False},
     'print_allowance': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'basic_mm': {'type': 'number'}, 'confirm': {'type': 'string'}, 'designation': {'type': 'string'}, 'kind': {'type': 'string'}, 'material': {'type': 'string'}, 'model_mm': {'type': 'number'}, 'pitch': {'type': 'number'}, 'process': {'type': 'string'}, 'source': {'type': 'string'}, 'stl_chord_loss_mm': {'type': 'number'}, 'stl_deflection_mm': {'type': 'number'}, 'stl_note': {'type': 'string'}, 'profile': {'type': 'string'}, 'note': {'type': 'string'}, 'from': {'type': 'string'}, 'interference_side_mm': {'type': 'number'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['allowance_mm', 'basic_mm', 'confirm', 'kind', 'material', 'model_mm', 'process', 'source', 'stl_chord_loss_mm', 'stl_deflection_mm', 'stl_note'], 'additionalProperties': False},
     'project_section': {'type': 'object', 'properties': {'external_index': {'type': 'integer'}, 'gen_ids': {'type': 'array', 'items': {'type': 'integer'}}, 'tolerance_mm': {'type': 'number'}, 'deviation_mm': {'type': 'number'}, 'chains': {'type': 'integer'}, 'open_chains': {'type': 'integer'}, 'fit': {'type': 'string'}, 'detail': {'type': 'number'}, 'pieces': {'type': 'array', 'items': {'type': 'object'}}, 'regen': {'type': 'object'}, 'digest': {'type': 'object'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['external_index', 'gen_ids', 'tolerance_mm', 'deviation_mm', 'chains', 'open_chains', 'fit', 'regen', 'digest'], 'additionalProperties': False},
+    'read_round': {'type': 'object', 'properties': {'verdict': {'type': 'string'}, 'radius_mm': {'type': 'number'}, 'sigma_mm': {'type': 'number'}, 'chamfer_mm': {'type': 'array', 'items': {'type': 'number'}}, 'angle_deg': {'type': 'number'}, 'also_fits': {'type': 'array', 'items': {'type': 'string'}}, 'worse': {'type': 'object'}, 'noise_mm': {'type': 'number'}, 'window_mm': {'type': 'number'}, 'points': {'type': 'integer'}, 'edge_dir': {'type': 'array', 'items': {'type': 'number'}}, 'corner_mm': {'type': 'array', 'items': {'type': 'number'}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['verdict', 'radius_mm', 'sigma_mm', 'chamfer_mm', 'angle_deg', 'also_fits', 'worse', 'noise_mm', 'window_mm', 'points', 'edge_dir', 'corner_mm'], 'additionalProperties': False},
+    'read_thread': {'type': 'object', 'properties': {'pitch_mm': {'type': 'number'}, 'pitch_sigma_mm': {'type': 'number'}, 'major_diameter_mm': {'type': 'number'}, 'minor_diameter_mm': {'type': 'number'}, 'flank_deg': {'type': 'number'}, 'hand': {'type': 'string'}, 'internal': {'type': 'boolean'}, 'windows_agree': {'type': 'integer'}, 'windows': {'type': 'integer'}, 'phase_share': {'type': 'number'}, 'nearest': {'type': 'string'}, 'nearest_major_mm': {'type': 'number'}, 'nearest_pitch_mm': {'type': 'number'}, 'axis_point_mm': {'type': 'array', 'items': {'type': 'number'}}, 'axis_dir': {'type': 'array', 'items': {'type': 'number'}}, 'length_mm': {'type': 'number'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['pitch_mm', 'pitch_sigma_mm', 'major_diameter_mm', 'minor_diameter_mm', 'flank_deg', 'hand', 'internal', 'windows_agree', 'windows', 'phase_share', 'nearest', 'nearest_major_mm', 'nearest_pitch_mm', 'axis_point_mm', 'axis_dir', 'length_mm'], 'additionalProperties': False},
     'remove_requirement': {'type': 'object', 'properties': {'removed': {'type': 'integer'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['removed'], 'additionalProperties': False},
     'sample_study': {'type': 'object', 'properties': {'body': {'type': 'string'}, 'displacement_mm': {'type': 'array', 'items': {'type': 'number'}}, 'distance_mm': {'type': 'number'}, 'element': {'type': 'integer'}, 'inside': {'type': 'boolean'}, 'node_at_mm': {'type': 'array', 'items': {'type': 'number'}}, 'plastic_strain': {'type': 'number'}, 'stress_mpa': {'type': 'array', 'items': {'type': 'number'}}, 'temperature_c': {'type': 'number'}, 'von_mises_mpa': {'type': 'number'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['body', 'displacement_mm', 'distance_mm', 'inside', 'node_at_mm', 'stress_mpa', 'von_mises_mpa'], 'additionalProperties': False},
     'save_print_profile': {'type': 'object', 'properties': {'conditions': {'type': 'string'}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'process': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'from_mm': {'type': 'number'}, 'kind': {'type': 'string'}, 'source': {'type': 'string'}, 'to_mm': {'type': 'number'}}, 'required': ['allowance_mm', 'from_mm', 'kind'], 'additionalProperties': False}}, 'stl_deflection_mm': {'type': 'number'}, 'stl_deflection_stated': {'type': 'boolean'}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'bed_exclude_mm': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'line_width_mm': {'type': 'number'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['material', 'name', 'process', 'rows', 'stl_deflection_mm', 'stl_deflection_stated'], 'additionalProperties': False},
@@ -3745,6 +3757,40 @@ ProjectSectionResult = TypedDict('ProjectSectionResult', {
     'digest': dict[str, Any],
 })
 
+ReadRoundResult = TypedDict('ReadRoundResult', {
+    'verdict': str,
+    'radius_mm': float,
+    'sigma_mm': float,
+    'chamfer_mm': list[float],
+    'angle_deg': float,
+    'also_fits': list[str],
+    'worse': dict[str, Any],
+    'noise_mm': float,
+    'window_mm': float,
+    'points': int,
+    'edge_dir': list[float],
+    'corner_mm': list[float],
+})
+
+ReadThreadResult = TypedDict('ReadThreadResult', {
+    'pitch_mm': float,
+    'pitch_sigma_mm': float,
+    'major_diameter_mm': float,
+    'minor_diameter_mm': float,
+    'flank_deg': float,
+    'hand': str,
+    'internal': bool,
+    'windows_agree': int,
+    'windows': int,
+    'phase_share': float,
+    'nearest': str,
+    'nearest_major_mm': float,
+    'nearest_pitch_mm': float,
+    'axis_point_mm': list[float],
+    'axis_dir': list[float],
+    'length_mm': float,
+})
+
 RemoveRequirementResult = TypedDict('RemoveRequirementResult', {
     'removed': int,
 })
@@ -4471,6 +4517,12 @@ class RpcSurface:
         raise NotImplementedError
 
     def project_section(self, _timeout: float | None = None, **params: Unpack[ProjectSectionParams]) -> ProjectSectionResult:
+        raise NotImplementedError
+
+    def read_round(self, _timeout: float | None = None, **params: Unpack[ReadRoundParams]) -> ReadRoundResult:
+        raise NotImplementedError
+
+    def read_thread(self, _timeout: float | None = None, **params: Unpack[ReadThreadParams]) -> ReadThreadResult:
         raise NotImplementedError
 
     def redo(self, _timeout: float | None = None) -> dict[str, Any]:
