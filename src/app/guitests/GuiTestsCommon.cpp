@@ -132,6 +132,9 @@ void ResetAppForTest() {
     s_App->fontRebuildRequested = true;
   s_App->selection.Clear();
   s_App->sketchEdit = {};
+  // Sticky for a session, so it outlives the sketch a test set it in, and the
+  // modes flyout's dot then reports a mode off its default to the next test.
+  s_App->sketchSlice = false;
   s_App->sketchDrag = {};
   s_App->slotPick = {};
   s_App->measure = {};
