@@ -1763,12 +1763,16 @@ CompareBodySets(const std::vector<Body>& bodiesA, const glm::dmat4& xfA,
     SetCompare out;
     const auto measure = [](const CADShape& s, double& vol, double& surf,
                             glm::dvec3& com, glm::dvec3& mn, glm::dvec3& mx,
-                            int& faces, int& edges) {
+                            int& faces, int& edges, double& volUnc,
+                            double& surfUnc, std::vector<int>& unconverged) {
       CADShape::MassProps mp;
       if (s.ComputeMassProps(mp)) {
         vol = mp.volume;
         surf = mp.surfaceArea;
         com = mp.centerOfMass;
+        volUnc = mp.volumeUncertainty;
+        surfUnc = mp.areaUncertainty;
+        unconverged = mp.unconvergedFaces;
       }
       s.GetBoundingBox(mn, mx);
       for (TopExp_Explorer ex(s.GetShape(), TopAbs_FACE); ex.More(); ex.Next())
@@ -1778,9 +1782,11 @@ CompareBodySets(const std::vector<Body>& bodiesA, const glm::dmat4& xfA,
       edges = edgeMap.Extent();
     };
     measure(a, out.volumeA, out.surfaceA, out.comA, out.minA, out.maxA,
-            out.facesA, out.edgesA);
+            out.facesA, out.edgesA, out.volumeUncertaintyA,
+            out.surfaceUncertaintyA, out.unconvergedA);
     measure(b, out.volumeB, out.surfaceB, out.comB, out.minB, out.maxB,
-            out.facesB, out.edgesB);
+            out.facesB, out.edgesB, out.volumeUncertaintyB,
+            out.surfaceUncertaintyB, out.unconvergedB);
 
     // Everything above came off the two shapes directly. Everything below is
     // three booleans, which is where the seconds are.

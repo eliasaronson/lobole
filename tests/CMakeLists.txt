@@ -1104,6 +1104,16 @@ add_test(NAME regen_honesty_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(regen_honesty_smoke PROPERTIES TIMEOUT 120)
 
+# An uncertain volume says so in the reply that reports it: with the
+# integrator's halvings capped at zero (LOBOLE_TEST_INTEGRATE_HALVINGS), a
+# body trimmed by intersection curves carries its uncertainty and a warning
+# in mass_properties and compare_geometry
+# (docs/inspect/README.md#the-face-by-face-integrator). Headless.
+add_test(NAME mass_uncertainty_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mass_uncertainty_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(mass_uncertainty_smoke PROPERTIES TIMEOUT 120)
+
 # `fit: "reduce"` on add_feature and modify_feature stores the size that
 # builds and says both in its own response
 # (docs/modeling/README.md#reducing-on-the-call). Headless.

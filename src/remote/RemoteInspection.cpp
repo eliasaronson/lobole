@@ -97,6 +97,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1313,13 +1314,20 @@ static constexpr MethodDoc InspectionMethods[] = {
      "center_of_mass_mm, inertia_g_mm2 (about that centre, world axes), "
      "printed[], solid[] (the occurrences weighed each way)} or {why}. A "
      "closed mesh body is weighed off its triangles; an open one is "
-     "refused, naming its loops (docs/inspect/README.md#mesh-bodies).",
+     "refused, naming its loops (docs/inspect/README.md#mesh-bodies). "
+     "A part's body row carries `volume_uncertainty_mm3` and "
+     "`area_uncertainty_mm2`, how far each figure can be off, where that is "
+     "not zero (a face the fixed Gauss rule can get wrong was checked by a "
+     "second estimate); past 1e-9 of the figure, `warnings` names the body "
+     "and the faces whose estimate did not settle "
+     "(docs/inspect/README.md#the-face-by-face-integrator).",
      "part?:string|int, body?:int", remote::NoFlags,
      "bodies?:{bbox_max:number[], bbox_min:number[], body:int, "
      "center_of_mass_mm:number[], inertia:number[][], "
      "mass_g:number|null, material:string, name:string, "
      "surface_area_mm2:number, volume_mm3:number, density?:number, "
-     "printed?:object|null}[], "
+     "volume_uncertainty_mm3?:number, area_uncertainty_mm2?:number, "
+     "printed?:object|null}[], warnings?:string[], "
      "bbox_mm:{max:number[], min:number[], size:number[]}|null, "
      "total:{center_of_mass_mm:number[], mass_g:number|null, "
      "volume_mm3:number, printed?:object}, "
@@ -1847,7 +1855,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "a re-drawn tube whose volume matched to four figures scored iou 0.333 "
      "because the reference was 900 mm away. Off by default — a golden taken "
      "AT a position is a real thing to check — and `center_offset` still "
-     "says how far it moved.",
+     "says how far it moved. A volume or area known only to worse than "
+     "1e-9 of itself is named in `warnings`, with the faces whose "
+     "estimate did not settle "
+     "(docs/inspect/README.md#the-face-by-face-integrator).",
      "a, align, b, extra_path, golden_path, materialize, metrics, "
      "missing_path"},
     {"clear_geometry_delta",
@@ -1991,6 +2002,54 @@ json PrintedThreadJson(const ui::PrintedThread& t) {
 }
 
 namespace {
+
+// The warning an uncertain figure earns: a volume or an area that may be
+// further off than 1e-9 of itself, the floor the kernel cases hold a stated
+// figure to (docs/inspect/README.md#mass-properties). Empty when both are
+// inside it. `who` names the body.
+std::string UncertainFigureWarning(const std::string& who, double volume,
+                                   double volumeUncertainty, double area,
+                                   double areaUncertainty,
+                                   const std::vector<int>& faces) {
+  constexpr double kFloor = 1e-9;
+  const bool v = volumeUncertainty > kFloor * std::abs(volume);
+  const bool a = areaUncertainty > kFloor * std::abs(area);
+  if (!v && !a)
+    return "";
+  char buf[200];
+  std::string out = who + ": ";
+  if (v) {
+    std::snprintf(buf, sizeof buf,
+                  "its volume is known to +-%.3g mm3 (%.1e "
+                  "of it)",
+                  volumeUncertainty,
+                  volumeUncertainty / std::max(std::abs(volume), 1e-300));
+    out += buf;
+  }
+  if (a) {
+    std::snprintf(buf, sizeof buf, "%sits area to +-%.3g mm2 (%.1e of it)",
+                  v ? " and " : "", areaUncertainty,
+                  areaUncertainty / std::max(std::abs(area), 1e-300));
+    out += buf;
+  }
+  if (faces.empty()) {
+    out += "; every face's estimate settled, and the fixed rule and the "
+           "second estimate still differ that much";
+  } else {
+    out += faces.size() == 1 ? "; the estimate of face "
+                             : "; the estimates "
+                               "of faces ";
+    for (size_t i = 0; i < faces.size(); i++) {
+      if (i == 8) {
+        out += " and " + std::to_string(faces.size() - 8) + " more";
+        break;
+      }
+      out += (i ? ", " : "") + std::to_string(faces[i]);
+    }
+    out += " did not settle";
+  }
+  return out + " (docs/inspect/README.md#the-face-by-face-integrator)";
+}
 
 json PrintTablesJson() {
   json tables = json::array();
@@ -5103,6 +5162,21 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"faces", {{"reference", c->facesA}, {"candidate", c->facesB}}},
                 {"edges", {{"reference", c->edgesA}, {"candidate", c->edgesB}}},
                 {"verdicts", verdicts}};
+    // An uncertain volume says so beside the volumes it compares.
+    {
+      json warnings = json::array();
+      for (const auto& [who, v, vu, area, au, faces] :
+           {std::tuple{"the reference", c->volumeA, c->volumeUncertaintyA,
+                       c->surfaceA, c->surfaceUncertaintyA, &c->unconvergedA},
+            std::tuple{"the candidate", c->volumeB, c->volumeUncertaintyB,
+                       c->surfaceB, c->surfaceUncertaintyB, &c->unconvergedB}})
+        if (std::string w =
+                UncertainFigureWarning(who, v, vu, area, au, *faces);
+            !w.empty())
+          warnings.push_back(std::move(w));
+      if (!warnings.empty())
+        out["warnings"] = std::move(warnings);
+    }
     if (wantOverlap) {
       out["iou"] = iou;
       out["dice"] = dice;
@@ -5505,6 +5579,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     std::string printedWhy;
     bool anyPrinted = false;
     json out = json::array();
+    json warnings = json::array();
     for (size_t i = 0; i < mass->bodies.size(); i++) {
       const Measure::BodyMass& bm = mass->bodies[i];
       json inertia = json::array();
@@ -5520,6 +5595,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                      {bm.centerOfMass.x, bm.centerOfMass.y, bm.centerOfMass.z}},
                     {"inertia", inertia},
                     {"material", bm.material}};
+      // How far the two figures can be off, where that is not zero: a body
+      // with a face the fixed rule can get wrong.
+      if (bm.volumeUncertainty > 0.0)
+        entry["volume_uncertainty_mm3"] = bm.volumeUncertainty;
+      if (bm.areaUncertainty > 0.0)
+        entry["area_uncertainty_mm2"] = bm.areaUncertainty;
+      if (std::string w = UncertainFigureWarning(
+              "body " + std::to_string(which) + " '" + bm.name + "'", bm.volume,
+              bm.volumeUncertainty, bm.surfaceArea, bm.areaUncertainty,
+              bm.unconvergedFaces);
+          !w.empty())
+        warnings.push_back(std::move(w));
       // The MEASURED box, evaluated off the surfaces rather than bounded by
       // their control points -- the same box get_state and the digest
       // report, memoized on the shape.
@@ -5577,7 +5664,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         total["printed"] = {{"why", printedWhy}};
       }
     }
-    return json{{"bodies", out}, {"bbox_mm", BoxJson(all)}, {"total", total}};
+    json reply{{"bodies", out}, {"bbox_mm", BoxJson(all)}, {"total", total}};
+    if (!warnings.empty())
+      reply["warnings"] = std::move(warnings);
+    return reply;
   }
   if (m == "check_geometry") {
     // B-Rep validity per body (OCC BRepCheck_Analyzer) — flags invalid faces/

@@ -32,9 +32,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <ctime>
 #include <map>
 #include <numbers>
+#include <optional>
+#include <stdexcept>
+#include <string>
 
 namespace cad {
 
@@ -474,6 +478,24 @@ bool FixedFigure(const TopoDS_Face& face, const gp_Pnt& about, bool volume,
 }
 
 } // namespace
+
+int DefaultHalvings() {
+  static const std::optional<int> seam = []() -> std::optional<int> {
+    const char* v = std::getenv("LOBOLE_TEST_INTEGRATE_HALVINGS");
+    if (v == nullptr)
+      return 6;
+    if (v[0] >= '0' && v[0] <= '6' && v[1] == '\0')
+      return v[0] - '0';
+    return std::nullopt;
+  }();
+  if (!seam)
+    throw std::runtime_error(
+        std::string("LOBOLE_TEST_INTEGRATE_HALVINGS is '") +
+        std::getenv("LOBOLE_TEST_INTEGRATE_HALVINGS") +
+        "'; it takes one integer from 0 to 6, the halvings a suspect face's "
+        "second estimate may take");
+  return *seam;
+}
 
 Integral Integrate(const TopoDS_Shape& shape, const IntegrateOptions& options) {
   Integral out;

@@ -282,6 +282,12 @@ struct SetCompare {
   double volumeA = 0.0, volumeB = 0.0;
   double common = 0.0, missing = 0.0, extra = 0.0;
   double surfaceA = 0.0, surfaceB = 0.0;
+  // How far each side's volume (mm^3) and area (mm^2) can be off, and the
+  // faces whose second estimate did not settle
+  // (docs/inspect/README.md#the-face-by-face-integrator).
+  double volumeUncertaintyA = 0.0, volumeUncertaintyB = 0.0;
+  double surfaceUncertaintyA = 0.0, surfaceUncertaintyB = 0.0;
+  std::vector<int> unconvergedA, unconvergedB;
   glm::dvec3 comA{0.0}, comB{0.0};
   glm::dvec3 minA{0.0}, maxA{0.0}, minB{0.0}, maxB{0.0};
   int facesA = 0, facesB = 0, edgesA = 0, edgesB = 0;

@@ -219,7 +219,15 @@ among the part's bodies (a Derived ghost is not weighed, and the rows after
 it keep their own indices and boxes); plus `total {volume_mm3,
 center_of_mass_mm, mass_g}` and `bbox_mm {min, max, size}`, the measured box
 of everything it weighed together (on an assembly, every visible leaf where
-the solve put it). Density comes from the body's material; a body with
+the solve put it). A part's body row also carries
+`volume_uncertainty_mm3` and `area_uncertainty_mm2`, how far each figure
+can be off, where that is not zero: a body with a face
+[the integrator](#the-face-by-face-integrator) had to check. Past 1e-9 of
+the figure (the kernel cases' floor) `warnings` names the body and the faces
+whose estimate did not settle, and `compare_geometry` repeats the warning
+beside its volumes. `get_state`'s digest stays a bare `volume_mm3`; an
+assembly's occurrence rows carry no uncertainty yet. Density comes from
+the body's material; a body with
 no material has no mass rather than an assumed density, and the BOM names it
 in `warnings`. On an assembly tab without `part` it aggregates every visible
 occurrence in world space. Its bbox is measured off the surfaces, and so are
@@ -278,7 +286,9 @@ the box's half diagonal for a moment, its square for the inertia) and the
 sum of their areas. The fixed figure stands when it is within 1e-12 of that
 scale of the second estimate; otherwise the second one is used. Each figure
 carries an uncertainty: the last halving's change, plus the gap to the
-fixed rule where that stood.
+fixed rule where that stood. `LOBOLE_TEST_INTEGRATE_HALVINGS` (0 to 6) caps
+the halvings for a test: at 0 every suspect face is left unconverged, which
+is how `mass_uncertainty_smoke` sees an uncertain figure reported.
 
 Those two thresholds come from `tests/test_integrate.cpp`. On faces where
 the fixed rule is exact (boxes, cylinders, cones, spheres, tori, each given
@@ -879,6 +889,9 @@ bodies are not counted twice.
   claims a shape match. On parts carrying toroidal fillets the booleans cost
   seconds; volume mode costs milliseconds. `missing_path`, `extra_path` and
   `materialize` need the booleans and are refused with it.
+- A side whose volume or area is known only to worse than 1e-9 of itself is
+  named in `warnings`, with the faces whose estimate did not settle
+  ([mass properties](#mass-properties)).
 - Volume is a weak oracle: a frustum faked from stacked discs matches a real
   one on bbox, volume and centre of mass. The census separates them
   (`cone:1 plane:2` against `cylinder:6 plane:7`), which is why volume mode
@@ -1061,10 +1074,14 @@ GUI suite, and the measure parity phase in `remote_smoke`.
 
 ## What it does not do yet
 
-- Answer a volume or mass with `cad::Integrate`, or report an uncertainty
-  ([the plan](../plans/checked-mass-properties.md)). A face with no
-  boundary (natural restriction) keeps the fixed rule's figure even on a
-  B-spline surface.
+- Check a face with no boundary (natural restriction): it keeps the fixed
+  rule's figure even on a B-spline surface.
+- Check a face's own area as `list_elements`, `measure`, a section, a
+  seal's contact or the print check report it: those still come from
+  `BRepGProp::SurfaceProperties`'s fixed rule on the face. A body's total
+  area goes through the integrator.
+- Carry the uncertainty into an assembly's occurrence rows, the BOM or the
+  Properties dock.
 - Measure a face, edge or body against a datum, or a datum of an
   occurrence in world space (`frame` places one; `measure` does not yet).
 - Pick a raw vertex (corners cover the cases people ask for).

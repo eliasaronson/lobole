@@ -29,6 +29,13 @@ struct FaceFigure {
   double area = 0.0;               // mm^2
 };
 
+// The halvings a suspect face's second estimate may take by default: six,
+// or what the test seam LOBOLE_TEST_INTEGRATE_HALVINGS says (an integer 0
+// to 6; anything else is refused with std::runtime_error). Zero leaves
+// every suspect face unconverged, which is how the smokes see an uncertain
+// figure reported (tests/mass_uncertainty_smoke.py).
+int DefaultHalvings();
+
 struct IntegrateOptions {
   // Which figures to integrate: the volume group (volume, moments, inertia)
   // and the area. Each group converges on its own, so a figure is the same
@@ -40,7 +47,7 @@ struct IntegrateOptions {
   // (the pieces split at the knots). A test seam: zero leaves every suspect
   // face unconverged, its uncertainty the gap between the fixed rule and the
   // first estimate.
-  int maxHalvings = 6;
+  int maxHalvings = DefaultHalvings();
   // Two successive estimates of a face agree when every figure moves by no
   // more than this fraction of the body's scale: the sum of the faces'
   // volumes' magnitudes (times the box's half diagonal for a moment, its

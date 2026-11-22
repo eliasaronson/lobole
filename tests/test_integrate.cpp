@@ -17,6 +17,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/fem/FemMesher.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -817,7 +818,11 @@ TEST_CASE("an extruded spline loop", "[integrate]") {
   CheckAgainst(run.result, truth, 1e-9);
 }
 
-TEST_CASE("a modelled M10 thread to a shoulder", "[integrate][slow]") {
+namespace {
+
+// tests/kernel_cases/solidcraft/ladder/06-threads/004-external-m10-to-shoulder:
+// an M10 thread modelled on a d10 shaft down to a d16 collar.
+TopoDS_Shape M10ToShoulder() {
   Document doc;
   auto collar =
       std::make_unique<SketchFeature>("Collar", SketchPlane(PlaneType::XY));
@@ -850,7 +855,13 @@ TEST_CASE("a modelled M10 thread to a shoulder", "[integrate][slow]") {
   doc.AddFeature(std::move(th));
   INFO(doc.GetFeature(4)->GetError());
   REQUIRE(doc.GetFeature(4)->GetError().empty());
-  const TopoDS_Shape s = Placed(doc.GetBodies()[0].shape.GetShape());
+  return doc.GetBodies()[0].shape.GetShape();
+}
+
+} // namespace
+
+TEST_CASE("a modelled M10 thread to a shoulder", "[integrate][slow]") {
+  const TopoDS_Shape s = Placed(M10ToShoulder());
   // tests/kernel_cases/solidcraft/ladder/06-threads/004-external-m10-to-shoulder
   const double truth = 3639.157562673;
   const SameCore held;
@@ -1172,4 +1183,23 @@ TEST_CASE("a tube trimmed by 40 intersection curves", "[integrate][slow]") {
   // copy included): the suspect faces' second estimates. The budget is
   // half as much again.
   CHECK(now < 3.0 * today);
+}
+
+TEST_CASE("a meshed thread body is not refused for its volume",
+          "[integrate][fem][slow]") {
+  // The FEM mesh check's slack takes the integrator's uncertainty for the
+  // B-Rep's own volume: on a thread, 57 of 75 faces suspect, it converges
+  // and the mesh is held to its own sag.
+  const TopoDS_Shape s = M10ToShoulder();
+  fem::MeshSettings ms;
+  ms.maxSize = 0.0; // auto
+  std::string err;
+  const auto mesh = fem::Mesh(s, ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+  CHECK_THAT(mesh->stats.shapeVolumeMm3, WithinRel(3639.157562673, 1e-7));
+  CHECK(mesh->stats.shapeVolumeErrorMm3 < 1e-6);
+  CHECK(fem::MeshVolumeRefusal(*mesh, mesh->stats.shapeVolumeMm3,
+                               mesh->stats.shapeVolumeErrorMm3)
+            .empty());
 }

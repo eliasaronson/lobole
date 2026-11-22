@@ -2077,7 +2077,11 @@ the `import` area is vendored and waits.
   `mass_properties`; every body valid and closed by `check_geometry`. A
   volume or an area is held to half a unit in the last digit the case
   states, never tighter than 1e-9 relative, or to the case's own
-  `tolerance`; a `[min, max]` is inclusive. A coordinate is held the same
+  `tolerance`; a `[min, max]` is inclusive. A figure whose uncertainty
+  (`volume_uncertainty_mm3`, `area_uncertainty_mm2`) is wider than that
+  room is a `volume` failure even where the figure itself lands inside it
+  ([the integrator](../inspect/README.md#the-face-by-face-integrator)).
+  A coordinate is held the same
   way, and a box's side stated as a whole number to 1e-4 mm. SolidCraft's blanket
   1e-3 is not used: the near-tangent ladder's answers differ from the
   stock's by 2e-7 of it.
@@ -2153,8 +2157,8 @@ line under [Not built](#not-built).
     tools/kernel_cases.py vendor --from SOLIDCRAFT [--solidcore SOLIDCORE]
     tools/kernel_cases.py self-test
 
-`replay` prints one case's calls and its expected values against what was
-measured; `--keep` leaves the instance running with the part open.
+`replay` prints one case's calls, its expected values against what was
+measured, and the volume's and area's uncertainty; `--keep` leaves the instance running with the part open.
 `kernel_cases_ladder` (headless suite) runs the ladder's tiers less the
 slow list on one instance, checks the vendored files against `SOURCE`,
 every case for a row, and the generated page against the rows;

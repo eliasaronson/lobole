@@ -370,6 +370,16 @@ def grade(exp, got):
         else:
             row(key, "volume", want, have,
                 abs(have - want.value) <= measure_tolerance(want, rel))
+        # A figure that may be further off than the case allows is not
+        # inside its tolerance, wherever it landed: a volume failure.
+        unc = got.get(mine + "_uncertainty") or 0.0
+        if have is not None and unc > 0.0:
+            if isinstance(want, list):
+                room = min(have - want[0].value, want[1].value - have)
+            else:
+                room = measure_tolerance(want, rel)
+            row(key.replace("_mm", "_uncertainty_mm"), "volume", room, unc,
+                unc <= room)
     if "center_of_mass" in exp:
         want, have = exp["center_of_mass"], got.get("center_of_mass")
         row("center_of_mass", "volume", want, have, have is not None and all(
@@ -533,7 +543,9 @@ class Outcome:
     "fail: <class>"; `detail` says why, and `rows` are the graded
     quantities."""
 
-    def __init__(self, status, detail="", rows=(), seconds=0.0, calls=()):
+    def __init__(self, status, detail="", rows=(), seconds=0.0, calls=(),
+                 measured=None):
+        self.measured = measured or {}
         self.status = status
         self.detail = detail
         self.rows = list(rows)
@@ -657,7 +669,8 @@ def run_case(d, case, scratch):
         run["refusal"]["changed"] = now != sorted(
             (b[0], b[2]) for b in before)
     status, detail, rows = judge(exp, run)
-    return Outcome(status, detail, rows, time.time() - t0, tr.log)
+    return Outcome(status, detail, rows, time.time() - t0, tr.log,
+                   run.get("measured"))
 
 
 # ----------------------------------------------------------- the instances
@@ -1135,6 +1148,10 @@ def cmd_replay(args):
     for q, cls, want, have, ok in outcome.rows:
         print(f"  {'ok  ' if ok else 'FAIL'} {q:15s} expected {want}\n"
               f"       {'':15s} measured {have}")
+    if "volume" in outcome.measured:
+        m = outcome.measured
+        print(f"  uncertainty: volume +-{m.get('volume_uncertainty', 0.0):.3g}"
+              f" mm3, area +-{m.get('area_uncertainty', 0.0):.3g} mm2")
     print(f"{outcome.status} ({outcome.seconds:.1f} s)"
           + (f": {outcome.detail}" if outcome.detail else ""))
     print(f"status.json: {read_status().get(case)!r}")

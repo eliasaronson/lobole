@@ -146,6 +146,15 @@ def main():
     status, detail, _ = kc.judge(exp, {"refusal": None, "measured": off})
     check("a volume off in the eighth digit",
           status == "fail: volume" and "volume_mm3" in detail, status)
+    unsure = dict(right, volume_uncertainty=1e-4)  # wider than 1e-9 of it
+    status, detail, _ = kc.judge(exp, {"refusal": None, "measured": unsure})
+    check("a right volume whose uncertainty is wider than its tolerance",
+          status == "fail: volume" and "volume_uncertainty_mm3" in detail,
+          status)
+    status, _, _ = kc.judge(exp, {"refusal": None, "measured":
+                                  dict(right, volume_uncertainty=1e-7)})
+    check("a right volume known to within its tolerance", status == "pass",
+          status)
     status, _, _ = kc.judge(exp, {"refusal": None, "measured":
                                   dict(right, faces=4)})
     check("a right volume on one face too many", status == "fail: topology",

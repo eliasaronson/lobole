@@ -25,6 +25,13 @@ struct BodyMass {
   double surfaceArea = 0.0;
   glm::dvec3 centerOfMass{0.0};
   double inertia[3][3] = {}; // unit-density, about the CoM (world axes)
+  // How far the volume (mm^3) and the area (mm^2) can be off, and the faces
+  // (explorer order) whose second estimate did not settle: zero and empty on
+  // a body with no face in doubt, and on a mesh body
+  // (docs/inspect/README.md#the-face-by-face-integrator).
+  double volumeUncertainty = 0.0;
+  double areaUncertainty = 0.0;
+  std::vector<int> unconvergedFaces;
   double density = 0.0;      // kg/m^3; 0 = unknown
   bool massKnown = false;
   double massG = 0.0; // valid when massKnown

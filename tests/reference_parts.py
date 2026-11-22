@@ -239,6 +239,12 @@ def measure(d):
     out["volume"] = mp["total"]["volume_mm3"]
     out["center_of_mass"] = mp["total"]["center_of_mass_mm"]
     out["area"] = sum(b["surface_area_mm2"] for b in mp["bodies"])
+    # How far each can be off (docs/inspect/README.md#mass-properties): a row
+    # carries its uncertainty only where it is not zero.
+    out["volume_uncertainty"] = sum(b.get("volume_uncertainty_mm3", 0.0)
+                                    for b in mp["bodies"])
+    out["area_uncertainty"] = sum(b.get("area_uncertainty_mm2", 0.0)
+                                  for b in mp["bodies"])
     lo = [min(b["bbox_min"][i] for b in mp["bodies"]) for i in range(3)]
     hi = [max(b["bbox_max"][i] for b in mp["bodies"]) for i in range(3)]
     out["bbox"] = [lo, hi]
@@ -274,6 +280,12 @@ def compare(case, measured):
             e = exp[q + ("_mm3" if q == "volume" else "_mm2")]
             err = abs(m - e) / abs(e)
             rows.append((q, e, m, err, tol[q], err <= tol[q]))
+            # A figure that may be further off than the tolerance is not
+            # inside it, wherever it landed.
+            unc = measured.get(q + "_uncertainty", 0.0) / abs(e)
+            if unc > 0.0:
+                rows.append((q + " uncertainty", 0.0, unc, unc, tol[q],
+                             unc <= tol[q]))
         elif q == "center_of_mass":
             e = exp["center_of_mass"]
             err = math.dist(e, m) / diag

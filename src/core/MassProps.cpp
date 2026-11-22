@@ -48,6 +48,9 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
     bm.material = materialOverride.empty() ? body.material : materialOverride;
     bm.volume = mp.volume;
     bm.surfaceArea = mp.surfaceArea;
+    bm.volumeUncertainty = mp.volumeUncertainty;
+    bm.areaUncertainty = mp.areaUncertainty;
+    bm.unconvergedFaces = mp.unconvergedFaces;
     bm.centerOfMass = mp.centerOfMass;
     for (int r = 0; r < 3; r++)
       for (int c = 0; c < 3; c++)
