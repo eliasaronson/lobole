@@ -7,6 +7,7 @@
 // noise sets, and auto's choice -- each checked against the surface the
 // fixture was generated on, never against the fit's own numbers.
 
+#include "SameCore.h"
 #include "mesh_organic.h"
 
 #include "core/MeshFit.h"
@@ -630,6 +631,9 @@ TEST_CASE("The used points and the figures they give", "[mesh][fit]") {
 // COST check (docs/ui/testing.md#tests-that-time-things).
 TEST_CASE("The region and the clip cost at most twice the old growth",
           "[mesh][fit][slow]") {
+  // Both times on one core: a move between a performance and an efficiency
+  // core between them read x2.20 where the code costs x1.1.
+  const SameCore held;
   for (const size_t n : {size_t(300000), size_t(2000000)}) {
     const fixtures::Organic s = fixtures::NoisySphere(n);
     const double tol = mesh::ScanTolerance(s.mesh);
