@@ -139,6 +139,7 @@ const char* FeatureIcon(const std::string& type) {
       {"CornerRelief", "part.sheet_corner_relief"},
       {"Hem", "part.sheet_hem"},
       {"Jog", "part.sheet_jog"},
+      {"Fold", "part.sheet_fold"},
       {"Unfold", "part.sheet_unfold"},
       {"Refold", "part.sheet_refold"},
       {"Loft", "part.loft"},

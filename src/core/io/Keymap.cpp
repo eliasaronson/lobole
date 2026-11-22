@@ -251,6 +251,8 @@ const Binding kDefaults[] = {
      "Sheet metal", ""},
     {"part.sheet_jog", Context::Part, "Jog (step a panel along a line)",
      "Sheet metal", ""},
+    {"part.sheet_fold", Context::Part,
+     "Fold (turn the sheet on one side of a line)", "Sheet metal", ""},
     {"part.sheet_corner_relief", Context::Part,
      "Corner relief (where two bends cross)", "Sheet metal", ""},
     {"part.sheet_normal_cut", Context::Part,

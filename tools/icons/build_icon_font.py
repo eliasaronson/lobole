@@ -581,6 +581,19 @@ def line_midpoint():
              pt(7, 7, 4))
 
 
+# ---- sheet metal, appended -----------------------------------------------
+
+@icon
+def fold():
+    """A tab folded up out of a plate: the plate with the gap the tab left,
+    and the tab standing up off the gap's near edge."""
+    plate = U(line((0, 12.5), (3, 12.5), w=2.2), line((10.5, 12.5), (14, 12.5), w=2.2))
+    tab = line((2, 12.5), (4, 12.5), (9.5, 2), w=2.2, join="round")
+    # The hole it left, dotted where the tab used to lie.
+    dots = U(*[rect(x, 12.0, 1, 1) for x in (6, 8)])
+    return U(plate, tab, dots)
+
+
 # --------------------------------------------------------------------------
 
 
@@ -757,6 +770,7 @@ def compare_map():
         "CAM_FACE": "GRIP_LINES", "CAM_WALLS": "MOUNTAIN_SUN",
         "CAM_SURFACE_ROUGH": "CHART_AREA", "CAM_SURFACE": "WATER",
         "CAM_ROTARY_ROUGH": "DRUM", "CAM_ROTARY_FINISH": "SCROLL",
+        "FOLD": "ARROW_TURN_UP",
     }
     return {k: cp[v] for k, v in was.items() if v in cp}
 

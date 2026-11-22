@@ -164,8 +164,8 @@ holds a spec to ([typed feature specs](../scripting/rpc.md#typed-feature-specs))
 | `Fastener` | a generated standard part; only in a part of its own, placed in an assembly (the parts area) |
 | `DeleteFace`, `OffsetFace`, `MoveFace`, `ReplaceFace` | change a body's faces where they are; see [Direct edit](#direct-edit) |
 
-Sheet-metal features (`BaseFlange`, `EdgeFlange`, `Hem`, `Jog`, `Unfold`,
-`Refold`, `FlatPattern`, `CornerRelief`, `NormalCut`) and `Cope` are
+Sheet-metal features (`BaseFlange`, `EdgeFlange`, `Hem`, `Jog`, `Fold`,
+`Unfold`, `Refold`, `FlatPattern`, `CornerRelief`, `NormalCut`) and `Cope` are
 documented in the sheet-metal and tube areas.
 
 Body modes: extrude, revolve, sweep, loft and pipe take `mode:
@@ -248,7 +248,7 @@ from sketches.
 - **A lost reference is the sketch's error**, never the world plane: a
   deleted or suppressed datum, sketch or frame ("the plane this sketch is on
   ... is gone"), a face that no longer resolves. A feature whose sketch
-  failed (Extrude, Revolve, Loft, Rib, Hole, Normal Cut, Jog, Base Flange,
+  failed (Extrude, Revolve, Loft, Rib, Hole, Normal Cut, Jog, Fold, Base Flange,
   Sweep's profile) fails too, rather than building from the sketch's last
   plane ([../sketching/README.md](../sketching/README.md)).
 

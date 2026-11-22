@@ -196,6 +196,7 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "part.sheet_refold",
       "part.sheet_hem",
       "part.sheet_jog",
+      "part.sheet_fold",
       "part.sheet_corner_relief",
       "part.sheet_normal_cut",
       // The simulation toolbar's drop-downs (docs/ui/panels.md

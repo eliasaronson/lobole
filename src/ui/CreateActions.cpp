@@ -43,6 +43,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/FlatPatternFeature.h"
+#include "core/features/FoldFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/HemFeature.h"
 #include "core/features/JogFeature.h"
@@ -958,6 +959,34 @@ void CreateJog(AppState& state) {
     height = 2.0 * rules->EffectiveBendRadius() + 2.0 * rules->thickness;
   BeginPreviewFeature(state, std::make_unique<JogFeature>(
                                  NextName(state, "Jog"), line, height));
+}
+
+void CreateFold(AppState& state) {
+  if (!state.document)
+    return;
+  // The newest one-line sketch, as a jog takes. Nothing else is set: the
+  // radius is the rules' (0 = theirs), the side is resolved from the sheet
+  // the first time the fold sees it, and with no stock declared the preview
+  // refuses naming the rules.
+  uint64_t line = 0;
+  for (const auto& f : state.document->GetFeatures()) {
+    const auto* sk = dynamic_cast<const SketchFeature*>(f.get());
+    if (sk == nullptr)
+      continue;
+    int lines = 0, others = 0;
+    for (const sketch::Entity& e : sk->entities) {
+      if (const auto* l = std::get_if<sketch::Line>(&e)) {
+        if (!l->construction)
+          ++lines;
+      } else if (!std::holds_alternative<sketch::Point>(e)) {
+        ++others;
+      }
+    }
+    if (lines == 1 && others == 0)
+      line = sk->GetId();
+  }
+  BeginPreviewFeature(
+      state, std::make_unique<FoldFeature>(NextName(state, "Fold"), line));
 }
 
 void CreateNormalCut(AppState& state) {

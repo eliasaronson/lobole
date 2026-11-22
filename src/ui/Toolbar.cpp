@@ -680,7 +680,7 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
-  // Sheet metal, in one group: nine tools in a row is most of a toolbar.
+  // Sheet metal, in one group: ten tools in a row is most of a toolbar.
   static int sheetTool = 0;
   CommandGroup(
       state, "sheet", sheetTool,
@@ -692,6 +692,9 @@ void DrawModelToolbar(AppState& state) {
         "Hem (fold a panel edge right back on itself)"},
        {"###tb_jog", "part.sheet_jog",
         "Jog (step a panel up along a one-line sketch)"},
+       {"###tb_fold", "part.sheet_fold",
+        "Fold (turn the sheet on one side of a one-line sketch: a tab, a "
+        "blank folded up)"},
        {"###tb_corner_relief", "part.sheet_corner_relief",
         "Corner relief (cut where two bends cross, so neither tears)"},
        {"###tb_normal_cut", "part.sheet_normal_cut",

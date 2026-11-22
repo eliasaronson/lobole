@@ -636,7 +636,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[45] = {
+const ToolCase kToolCases[46] = {
     // The primitives stand on something: each arms a face/plane pick, and
     // the Top plane of an empty part is enough for its defaults.
     {"box", "###tb_box", Needs::Nothing, Expect::PickThenChanges},
@@ -714,6 +714,8 @@ const ToolCase kToolCases[45] = {
     {"hem", "###tb_hem", Needs::SheetBlank, Expect::RefusesUntilPicked},
     // With no one-line sketch to step along, the jog says so and waits.
     {"jog", "###tb_jog", Needs::SheetBlank, Expect::RefusesUntilPicked},
+    // So does a fold: the line is the sketch, and there is none yet.
+    {"fold", "###tb_fold", Needs::SheetBlank, Expect::RefusesUntilPicked},
     // Every corner of the newest body where two bends cross.
     {"corner_relief", "###tb_corner_relief", Needs::SheetCornered,
      Expect::Changes},

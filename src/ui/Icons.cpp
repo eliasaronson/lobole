@@ -67,6 +67,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"part.sheet_edge_flange", ICON_DS_EDGE_FLANGE},
     {"part.sheet_hem", ICON_DS_HEM},
     {"part.sheet_jog", ICON_DS_JOG},
+    {"part.sheet_fold", ICON_DS_FOLD},
     {"part.sheet_corner_relief", ICON_DS_CORNER_RELIEF},
     {"part.sheet_normal_cut", ICON_DS_NORMAL_CUT},
     {"part.sheet_flat_pattern", ICON_DS_FLAT_PATTERN},

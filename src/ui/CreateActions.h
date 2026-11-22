@@ -181,6 +181,11 @@ void CreateHem(AppState& state);
 
 void CreateJog(AppState& state);
 
+// A fold on the newest sketch that holds one line, at the rules' radius and
+// a square bend, turning the side that frees less of the sheet
+// (docs/sheetmetal/README.md#fold).
+void CreateFold(AppState& state);
+
 // Relieves every corner of the newest body where two bends cross.
 void CreateCornerRelief(AppState& state);
 

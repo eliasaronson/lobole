@@ -448,7 +448,7 @@ feature appeared.
 | Cradle | `###tb_cradle` | `cradle/a_block_cut_to_a_ball_off_the_frame`, `defaults/cradle` (refused without a print process) |
 | Align (an import's placement) | `###tb_align` | `align/a_floor_picked_on_a_scan_is_one_undo_step` (waits for a pick, Accept disabled; a floor clicked previews; one undo step; Cancel puts it back). It edits an Import, so it is not a `defaults/*` creation case |
 | Pattern / Mirror | `###tb_pattern`, `###tb_mirror` | `pattern/*` (including `pattern/cut_row_is_the_pattern_source`: a hole patterns as a hole, its source the cut's tree row) |
-| Sheet metal | `###tb_base_flange`, `###tb_edge_flange`, `###tb_flat_pattern`, `###tb_hem`, `###tb_jog`, `###tb_corner_relief`, `###tb_normal_cut`, `###tb_unfold`, `###tb_refold` (one flyout, `**/sheet/###more`) | `sheetmetal/edge_pick_bends_a_wall`, `sheetmetal/panel_declares_the_stock`, `sheetmetal/flat_view_on_a_sheet` |
+| Sheet metal | `###tb_base_flange`, `###tb_edge_flange`, `###tb_flat_pattern`, `###tb_hem`, `###tb_jog`, `###tb_fold`, `###tb_corner_relief`, `###tb_normal_cut`, `###tb_unfold`, `###tb_refold` (one flyout, `**/sheet/###more`) | `sheetmetal/edge_pick_bends_a_wall`, `sheetmetal/panel_declares_the_stock`, `sheetmetal/flat_view_on_a_sheet`, `sheetmetal/fold_turns_a_tab` |
 | Datum plane / axis | `###tb_datum_plane`, `###tb_datum_axis` | `datum/plane_offset_then_sketch_on_its_row` |
 
 Every creation tool is also opened with nothing selected by the `defaults/*`

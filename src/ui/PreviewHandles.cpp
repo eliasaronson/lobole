@@ -14,6 +14,7 @@
 #include "core/Measure.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/FoldFeature.h"
 #include "core/features/MoveFaceFeature.h"
 #include "core/features/OffsetFaceFeature.h"
 #include "core/features/RevolveFeature.h"
@@ -27,6 +28,8 @@
 #include "imgui.h"
 
 #include <glm/gtc/constants.hpp>
+
+#include <BRepClass3d_SolidClassifier.hxx>
 
 #include <algorithm>
 #include <cfloat>
@@ -116,6 +119,7 @@ enum class HandleParam : int {
   MoveX,     // Move Face's translation, one arrow per axis
   MoveY,
   MoveZ,
+  FoldAngle, // a fold's sweep, degrees, on an arc about its bend
 };
 
 // What one of the pending feature's handles looks like this frame.
@@ -342,6 +346,30 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
     return false;
   }
 
+  // A fold: an arc about its bends' axis, midway along the line, turned in
+  // the direction the fold turns, so dragging it round folds further.
+  if (auto* fo = dynamic_cast<FoldFeature*>(f)) {
+    if (!fo->angleDeg.expr.empty() || fo->zones.empty())
+      return false;
+    const glm::dvec3 axis = glm::normalize(fo->axisDir);
+    const glm::dvec3 mid = 0.5 * (fo->lineA + fo->lineB);
+    const glm::dvec3 n = glm::cross(fo->parentDir, fo->upDir);
+    if (glm::length(n) < 1e-9)
+      return false;
+    HandleSpec spec;
+    spec.param = HandleParam::FoldAngle;
+    spec.rotate = true;
+    spec.degrees = true;
+    spec.anchor = fo->axisOrigin + axis * glm::dot(mid - fo->axisOrigin, axis);
+    spec.dir = glm::normalize(n);
+    spec.arcRadius = std::max(
+        static_cast<float>(3.0 * (fo->effectiveRadius + fo->allowance)),
+        0.35f * GizmoScale(state));
+    spec.value = fo->angleDeg;
+    out.push_back(spec);
+    return true;
+  }
+
   if (auto* rev = dynamic_cast<RevolveFeature*>(f)) {
     if (!rev->angleDeg.expr.empty())
       return false;
@@ -419,7 +447,11 @@ void ApplyHandleValue(AppState& state, Feature& f, HandleParam param,
   auto* rev = dynamic_cast<RevolveFeature*>(&f);
   auto* off = dynamic_cast<OffsetFaceFeature*>(&f);
   auto* mv = dynamic_cast<MoveFaceFeature*>(&f);
-  if (off && param == HandleParam::Offset)
+  auto* fo = dynamic_cast<FoldFeature*>(&f);
+  if (fo && param == HandleParam::FoldAngle)
+    // Never flat (nothing to fold) and never past folded flat on itself.
+    fo->angleDeg = std::clamp(v, 0.5, 180.0);
+  else if (off && param == HandleParam::Offset)
     // Either way through the face, never onto it: zero offsets nothing.
     off->distance =
         std::abs(v) < kMinLength ? (v < 0 ? -kMinLength : kMinLength) : v;
@@ -442,6 +474,48 @@ void ApplyHandleValue(AppState& state, Feature& f, HandleParam param,
   state.document->Regenerate();
 }
 
+// A click on the sheet on one side of a pending fold's line: that side is
+// the one that turns ("Other side" in the tool window, by direct
+// manipulation). Tested against the sheet before the fold, which is where
+// the line was drawn; a click anywhere else is left for picking.
+bool FoldSideClick(AppState& state, const Ray& ray) {
+  size_t index = 0;
+  auto* fo = dynamic_cast<FoldFeature*>(ResolvePendingFeature(state, &index));
+  if (fo == nullptr || fo->zones.empty() || index == 0 || !state.document)
+    return false;
+  const glm::dvec3 n = fo->faceNormal;
+  const double denom = glm::dot(glm::dvec3(ray.direction), n);
+  if (std::abs(denom) < 1e-9)
+    return false;
+  const double s = glm::dot(fo->lineA - glm::dvec3(ray.origin), n) / denom;
+  if (s <= 0.0)
+    return false;
+  const glm::dvec3 p = glm::dvec3(ray.origin) + glm::dvec3(ray.direction) * s;
+  const std::vector<Body>* input = state.document->CachedBodiesAfter(index - 1);
+  const auto& rules = state.document->SheetMetal();
+  if (input == nullptr || !rules)
+    return false;
+  const glm::dvec3 in = p - n * (rules->thickness / 2.0);
+  const bool onSheet =
+      std::any_of(input->begin(), input->end(), [&](const Body& b) {
+        BRepClass3d_SolidClassifier c(b.shape.GetShape(),
+                                      gp_Pnt(in.x, in.y, in.z), 1e-6);
+        return c.State() == TopAbs_IN;
+      });
+  if (!onSheet)
+    return false;
+  const glm::dvec3 a = glm::normalize(fo->lineB - fo->lineA);
+  const double left = glm::dot(glm::cross(n, a), p - fo->lineA);
+  if (std::abs(left) < 1e-6)
+    return false;
+  const FoldSide want = left > 0.0 ? FoldSide::Left : FoldSide::Right;
+  if (want != fo->side) {
+    fo->side = want;
+    state.document->Regenerate();
+  }
+  return true;
+}
+
 double CurrentHandleValue(const Feature& f, HandleParam param) {
   if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&f))
     return param == HandleParam::Distance2 ? ext->distance2
@@ -451,6 +525,8 @@ double CurrentHandleValue(const Feature& f, HandleParam param) {
     return fil->radius;
   if (auto* rev = dynamic_cast<const RevolveFeature*>(&f))
     return rev->angleDeg;
+  if (auto* fo = dynamic_cast<const FoldFeature*>(&f))
+    return fo->angleDeg;
   if (auto* off = dynamic_cast<const OffsetFaceFeature*>(&f))
     return off->distance;
   if (auto* mv = dynamic_cast<const MoveFaceFeature*>(&f))
@@ -512,6 +588,22 @@ void BuildPreviewHandleOverlay(AppState& state, std::vector<PrimVertex>& out) {
         AppendPrimLine(corners[i], corners[(i + 1) % 4], kHandleHalfPx, tint,
                        out);
     }
+
+    // A fold's zones, where the flat stock each bend takes came from, so
+    // the tab the line frees -- and the one it does not -- read at a
+    // glance; and the line itself.
+    if (spec.param == HandleParam::FoldAngle)
+      if (const auto* fo =
+              dynamic_cast<const FoldFeature*>(ResolvePendingFeature(state))) {
+        const glm::vec4 zone(tint.r, tint.g, tint.b, 0.7f);
+        for (const sheet::FoldZone& z : fo->zones)
+          for (int i = 0; i < 4; i++)
+            AppendPrimLine(glm::vec3(z.corners[i]),
+                           glm::vec3(z.corners[(i + 1) % 4]),
+                           0.6f * kHandleHalfPx, zone, out);
+        AppendPrimLine(glm::vec3(fo->lineA), glm::vec3(fo->lineB),
+                       kHandleHalfPx, tint, out);
+      }
 
     if (!spec.rotate) {
       // A blend/short-arrow base tick so the grab point reads on the
@@ -597,7 +689,9 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
     // modifier meant opposite things on a part tab and an assembly tab.
     // The capture window is what makes snap-by-default safe: a value that is
     // not near a round one is left exactly where the drag put it.
-    const bool deg = param == HandleParam::Angle || param == HandleParam::Twist;
+    const bool deg = param == HandleParam::Angle ||
+                     param == HandleParam::Twist ||
+                     param == HandleParam::FoldAngle;
     const bool snap = !ImGui::GetIO().KeyCtrl;
     v = deg ? SnapAngleDeg(v, snap) : SnapLength(v, snap);
     // ...and whatever survives that still reads at display precision.
@@ -634,7 +728,8 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
   }
   const int hit = HitTestHandles(records, ray, grab);
   if (hit < 0)
-    return false; // let selection and armed tools consume a missed click
+    // A click on the sheet beside a fold's line turns that side instead.
+    return FoldSideClick(state, ray);
   const HandleSpec& spec = specs[static_cast<size_t>(hit)];
   float startParam = 0.0f;
   if (!spec.rotate) {

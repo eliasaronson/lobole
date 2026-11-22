@@ -37,6 +37,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/FlatPatternFeature.h"
+#include "core/features/FoldFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/HemFeature.h"
 #include "core/features/HoleFeature.h"
@@ -3200,6 +3201,44 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     ExprDim(state, feature, index, commit, "Angle", jg->angleDeg);
     HandleEdit(state, feature, ImGui::Checkbox("Other side", &jg->flip), index,
                commit);
+  } else if (auto* fo = dynamic_cast<FoldFeature*>(&feature)) {
+    // The line, as a jog's: a sketch holding one line, drawn on the panel.
+    DrawFeatureRefCombo(state, feature, "Line", &fo->sketchId, index, commit,
+                        /*allowNone=*/false, AcceptJogLine);
+    ExprDim(state, feature, index, commit, "Angle", fo->angleDeg);
+    ExprDim(state, feature, index, commit, "Radius", fo->radius);
+    // Unset, the radius is the stock's: say which number that is and where
+    // it came from, as the Sheet Metal panel labels it.
+    if (fo->radius.value <= 0.0 && fo->effectiveRadius > 0.0)
+      ImGui::TextDisabled("Radius %.3g mm, from the %s", fo->effectiveRadius,
+                          fo->radiusSource == "rules" ? "sheet-metal rules"
+                                                      : "material's minimum");
+    const char* positions[] = {"Line on the crease", "Line at bend start",
+                               "Line at bend end"};
+    int pos = std::to_underlying(fo->position);
+    if (LabeledCombo("Position", &pos, positions, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*fo);
+      fo->position = static_cast<sheet::FoldPosition>(pos);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    // Which side turns. Resolved once from the sheet; this swaps it, as a
+    // click on the other side of the line in the viewport does.
+    bool other = fo->side == FoldSide::Right;
+    if (ImGui::Checkbox("Other side###fold_other_side", &other)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*fo);
+      fo->side = other ? FoldSide::Right : FoldSide::Left;
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    bool away = fo->reverse;
+    if (ImGui::Checkbox("Fold away###fold_away", &away)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*fo);
+      fo->reverse = away;
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    if (!fo->zones.empty())
+      ImGui::TextDisabled("%zu bend%s, each taking %.3g mm of flat sheet",
+                          fo->zones.size(), fo->zones.size() == 1 ? "" : "s",
+                          fo->allowance);
   } else if (auto* uf = dynamic_cast<UnfoldFeature*>(&feature)) {
     PickSlotRow(state, feature, PickSlot::UnfoldBody,
                 BodyRefLabel(state, uf->bodyId));

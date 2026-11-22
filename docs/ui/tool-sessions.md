@@ -186,9 +186,12 @@ origin that misses the body. Examples in the code:
 - Picking a cylindrical face into the Thread tool sizes it: the ISO metric
   coarse size whose major diameter (a boss) or tap drill (a hole) is
   nearest the face's diameter (`defaults/thread_takes_the_faces_size`).
-- Edge Flange, Hem and Jog take their lengths from the sheet-metal rules.
-  With none declared they open at 0 and the preview refuses naming the
-  rules, as Base Flange does (`defaults/sheet_tools_without_a_gauge`).
+- Edge Flange, Hem and Jog take their lengths from the sheet-metal rules,
+  and Fold its radius (the rules', labelled by where it came from) and the
+  side it turns (the one that frees less of the sheet, resolved from the
+  part once and stored). With none declared they open at 0 and the preview
+  refuses naming the rules, as Base Flange does
+  (`defaults/sheet_tools_without_a_gauge`).
 - Offset Face opens at a tenth of the smaller of the face's inset (how far
   its inside reaches from its edges) and the body's thinnest extent, rounded
   the same way, outward (`SizeFromFace`), derived again from the first face

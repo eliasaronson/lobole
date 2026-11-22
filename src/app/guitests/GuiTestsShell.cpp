@@ -878,10 +878,10 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       Seen part;
       CollectToolbarIcons(ctx, "//##DockHost", "part", part,
                           {"tb_base_flange", "tb_edge_flange", "tb_hem",
-                           "tb_jog", "tb_corner_relief", "tb_normal_cut",
-                           "tb_flat_pattern", "tb_unfold", "tb_refold",
-                           "tb_delete_face", "tb_offset_face", "tb_move_face",
-                           "tb_replace_face"});
+                           "tb_jog", "tb_fold", "tb_corner_relief",
+                           "tb_normal_cut", "tb_flat_pattern", "tb_unfold",
+                           "tb_refold", "tb_delete_face", "tb_offset_face",
+                           "tb_move_face", "tb_replace_face"});
       CollectFlyout(ctx, "sheet/###more", "part", part);
       CollectFlyout(ctx, "direct/###more", "part", part);
       IM_CHECK_GT((int)part.size(), 30);

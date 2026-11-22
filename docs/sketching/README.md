@@ -51,7 +51,7 @@ history the plane is refreshed from it -- a datum plane fitted to a scan
 which is how a sketch stands on a scan's flat. A reference that is gone,
 suppressed or itself in error is a regeneration error naming it, never a
 fall-back to the last plane; a feature built on a failed sketch (Extrude,
-Revolve, Loft, Rib, Hole, Normal Cut, Jog, Base Flange, Sweep's profile)
+Revolve, Loft, Rib, Hole, Normal Cut, Jog, Fold, Base Flange, Sweep's profile)
 fails with it, naming it, rather than building on the plane and profile
 the sketch held before. The last two kinds are what a primitive placed on a sketch or a
 frame attaches by ([../modeling/README.md](../modeling/README.md#primitives)).

@@ -558,6 +558,7 @@ const std::vector<Command>& Table() {
     add("part.sheet_refold", Idle, [](AppState& s) { CreateRefold(s); });
     add("part.sheet_hem", IdleBody, [](AppState& s) { CreateHem(s); });
     add("part.sheet_jog", Idle, [](AppState& s) { CreateJog(s); });
+    add("part.sheet_fold", Idle, [](AppState& s) { CreateFold(s); });
     add("part.sheet_corner_relief", IdleBody,
         [](AppState& s) { CreateCornerRelief(s); });
     add("part.sheet_normal_cut", IdleBody,

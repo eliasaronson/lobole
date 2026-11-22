@@ -14,6 +14,7 @@
 #include "core/PrintAllowance.h"
 #include "core/ScanCompare.h"
 #include "core/SheetMetal.h"
+#include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CradleFeature.h"
 #include "core/features/DatumAxisFeature.h"
@@ -21,6 +22,7 @@
 #include "core/features/DeleteFaceFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FlatPatternFeature.h"
+#include "core/features/FoldFeature.h"
 #include "core/features/HemFeature.h"
 #include "core/features/JogFeature.h"
 #include "core/features/MoveFaceFeature.h"
@@ -45,6 +47,7 @@
 #include "ui/MeasureActions.h"
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h"
+#include "ui/PreviewHandles.h"
 #include "ui/PrimitiveTool.h"
 #include "ui/PrintProfileActions.h"
 #include "ui/ProjectActions.h" // ProjectDirty
@@ -2200,7 +2203,8 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     AddFixtureBox(ctx);
     IM_CHECK(!Doc()->SheetMetal());
     const ui::DocumentFingerprint before = ui::FingerprintOf(*Doc());
-    for (const char* tb : {"###tb_edge_flange", "###tb_hem", "###tb_jog"}) {
+    for (const char* tb :
+         {"###tb_edge_flange", "###tb_hem", "###tb_jog", "###tb_fold"}) {
       ToolbarClick(ctx, tb);
       ctx->Yield(2);
       Feature* f = Doc()->FindFeatureById(s_App->pendingFeatureId);
@@ -2215,6 +2219,8 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
         length = hem->length;
       else if (auto* jog = dynamic_cast<JogFeature*>(f))
         length = jog->height;
+      else if (auto* fold = dynamic_cast<FoldFeature*>(f))
+        length = fold->radius; // 0: the rules', which there are none of
       IM_CHECK_EQ(length, 0.0);
       ui::CancelPendingFeature(*s_App);
       ctx->Yield();
@@ -4772,6 +4778,151 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
     ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
     ctx->Yield(2);
+  };
+
+  // A tab cut on three sides inside a plate, folded with the Fold tool: the
+  // newest one-line sketch is taken, the tab (the side that frees less) is
+  // what turns, a click on the plate's side of the line turns that instead
+  // and a click on the tab's turns the tab again, the arc at the bend drags
+  // the angle (snapping like every angle drag), and Accept is one undo step.
+  t = IM_REGISTER_TEST(engine, "sheetmetal", "fold_turns_a_tab");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield(2);
+    sheet::SheetMetalRules rules;
+    rules.material = "aluminum_6061_t6";
+    rules.gauge = "1.5mm";
+    rules.thickness = 1.5;
+    Doc()->SetSheetMetal(rules);
+    const double t = rules.thickness;
+    // A 100 x 60 plate, a U-slot round a 20 x 25 tab joined at y = 15, and
+    // a line across the tab's root.
+    auto blank = std::make_unique<SketchFeature>(
+        "Blank",
+        SketchPlane(glm::dvec3(0.0), glm::dvec3(0, 0, 1), glm::dvec3(1, 0, 0)));
+    uint32_t id = 1;
+    for (const std::vector<glm::dvec2>& loop :
+         {std::vector<glm::dvec2>{{0, 0}, {100, 0}, {100, 60}, {0, 60}},
+          std::vector<glm::dvec2>{{38, 15},
+                                  {40, 15},
+                                  {40, 40},
+                                  {60, 40},
+                                  {60, 15},
+                                  {62, 15},
+                                  {62, 42},
+                                  {38, 42}}})
+      for (size_t i = 0; i < loop.size(); ++i)
+        blank->AddEntity(
+            sketch::Line{loop[i], loop[(i + 1) % loop.size()], id++});
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::move(blank)), *Doc());
+    const uint64_t blankId =
+        Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetId();
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(
+            std::make_unique<BaseFlangeFeature>("Base", blankId)),
+        *Doc());
+    auto line = std::make_unique<SketchFeature>(
+        "Tab line", SketchPlane(glm::dvec3(0, 0, t), glm::dvec3(0, 0, 1),
+                                glm::dvec3(1, 0, 0)));
+    line->AddEntity(sketch::Line{{42, 20}, {58, 20}, 1});
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::move(line)), *Doc());
+    const uint64_t lineId =
+        Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetId();
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    const double before = Doc()->GetBodies()[0].shape.Volume();
+
+    // From above, so the plate and both sides of the line are clickable.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(50.0f, 30.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(50.0f, 10.0f, 160.0f));
+    ctx->Yield(2);
+
+    const size_t undo = s_App->commands->UndoDepth();
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarClick(ctx, "###tb_fold");
+    ctx->Yield(2);
+    auto* fold = dynamic_cast<FoldFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(fold != nullptr);
+    IM_CHECK_EQ(fold->sketchId, lineId);
+    IM_CHECK_STR_EQ(fold->GetError().c_str(), "");
+    IM_CHECK(fold->side == FoldSide::Left); // +y of a line running +x: the tab
+    IM_CHECK_EQ(fold->zones.size(), (size_t)1);
+    IM_CHECK_EQ(fold->radius.value, 0.0); // the rules'
+    IM_CHECK(std::abs(fold->effectiveRadius - 1.5 * t) < 1e-9);
+
+    // A click on the plate below the line turns the plate instead; one on
+    // the tab turns the tab again.
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(20.0f, 8.0f, t)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    fold = dynamic_cast<FoldFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(fold != nullptr);
+    IM_CHECK(fold->side == FoldSide::Right);
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(50.0f, 32.0f, t)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    fold = dynamic_cast<FoldFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(fold != nullptr);
+    IM_CHECK(fold->side == FoldSide::Left);
+    IM_CHECK_STR_EQ(fold->GetError().c_str(), "");
+
+    // The arc at the bend: from 90, +43 degrees lands inside 135's capture.
+    std::vector<PrimVertex> decor;
+    s_App->viewportHandles.clear();
+    ui::BuildPreviewHandleOverlay(*s_App, decor);
+    IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)1);
+    const ui::ViewportHandle arc = s_App->viewportHandles[0];
+    IM_CHECK(arc.kind == ui::HandleKind::Rotate);
+    const glm::vec3 centre = arc.origin, axis = arc.dir;
+    const float radius = arc.length;
+    const glm::vec3 b1 = ui::PerpTo(axis), b2 = glm::cross(axis, b1);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(centre);
+    s_App->camera->SetUp(glm::vec3(0.0f, 0.0f, 1.0f));
+    s_App->camera->SetPosition(centre + axis * (radius * 6.0f) +
+                               b1 * (radius * 0.5f));
+    ctx->Yield(2);
+    const auto at = [&](float deg) {
+      const float a = glm::radians(deg);
+      return centre + (std::cos(a) * b1 + std::sin(a) * b2) * radius;
+    };
+    ctx->MouseMoveToPos(WorldToWindow(at(0.0f)));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->hoveredHandle, arc.id);
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(WorldToWindow(at(43.0f)));
+    ctx->Yield(2);
+    IM_CHECK(s_App->handleDrag.active);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    fold = dynamic_cast<FoldFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(fold != nullptr);
+    IM_CHECK(std::abs(fold->angleDeg - 135.0) < 1e-6); // snapped
+    IM_CHECK_STR_EQ(fold->GetError().c_str(), "");
+
+    // Accept: one undo step, the tab folded and the plate where it was.
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undo + 1);
+    const Feature* last = Doc()->GetFeature(Doc()->FeatureCount() - 1);
+    IM_CHECK_STR_EQ(last->TypeName().c_str(), "Fold");
+    IM_CHECK_STR_EQ(last->GetError().c_str(), "");
+    const Body& body = Doc()->GetBodies()[0];
+    IM_CHECK_EQ(body.bends.size(), (size_t)1);
+    IM_CHECK(std::abs(body.bends[0].angle - glm::radians(135.0)) < 1e-9);
+    IM_CHECK(std::abs(body.bends[0].width - 20.0) < 1e-9);
+    // A fold moves metal; it adds or loses only what the bend changes.
+    IM_CHECK(std::abs(body.shape.Volume() - before) < 0.01 * before);
+    glm::dvec3 lo, hi;
+    body.shape.GetBoundingBox(lo, hi);
+    IM_CHECK(hi.z > 10.0); // the tab stands up off the plate
   };
 
   // The flat pattern tool keeps the part FOLDED in the base configuration.
