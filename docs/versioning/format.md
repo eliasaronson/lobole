@@ -362,6 +362,7 @@ here; the golden corpus and git history cover them.
 | 233 | A sketch constraint may be of `kind` `smooth` (`SplineJoint`): `a` and `b` the meeting ends of two splines of one degree joined by a coincident, whose first and (from degree 3) second derivatives agree there ([smooth](../sketching/README.md#smooth)). Split now cuts a spline into two pieces on its own knots joined coincident + `smooth`, where it made up to four joined `curvature`. Golden `v233-spline-smooth` |
 | 234 | A sketch section's `fit` may be `pieces`, the lines and arcs the cut is made of, with `detail` (0 to 1, written only for that fit) ([the pieces fit](../sketching/README.md#the-pieces-fit)); a sketch takes `traced`, a list of {`entity`, `section`, `chain`, `from`, `to`}: an entity traced over a section and where from ([tracing a section](../sketching/README.md#tracing-a-section)), written only when there is one. A detail on another fit or outside 0 to 1, a traced record naming an entity the sketch does not have or an `external` that is not a section, a value that is not a whole number, and an unknown key are refused. Golden `v234-section-pieces` |
 | 235 | A requirement's measure kinds `body_count` {`document`: a part}, its bodies with reference ones not counted, and `bbox` {`document`: a part, `axis`: `x`\|`y`\|`z`}, mm, the size of its measured box along that axis ([measures](../requirements/README.md#measures)). A build that knows neither refuses the file; an `axis` other than the three is refused. Golden `v235-expect-kinds` |
+| 236 | A feature type `Fold` {sketch_id, angle_deg? (+_expr), radius_mm? (+_expr), position?: centerline \| bend_start \| bend_end, side?: left \| right, reverse?}: the sheet on one side of a line drawn on a panel turned about it, each stretch of the line through material freeing its own piece. `side` is written once it is resolved; `side_at_mm`, which an RPC may send in its place, is never written. An older build refuses the unknown type ([fold](../sheetmetal/README.md#fold)). Golden `v236-fold` |
 
 ## Pending changes
 
@@ -371,7 +372,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A feature type `Fold` {sketch_id, angle_deg? (+_expr), radius_mm? (+_expr), position?: centerline \| bend_start \| bend_end, side?: left \| right, reverse?}: the sheet on one side of a line drawn on a panel turned about it, each stretch of the line through material freeing its own piece. `side` is written once it is resolved; `side_at_mm`, which an RPC may send in its place, is never written. An older build refuses the unknown type ([fold](../sheetmetal/README.md#fold)). Golden `vNEXT-fold` |
 
 ## Paths in a project
 

@@ -2410,7 +2410,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(2R + t)(1 - cos angle), is refused",
      "sketch_id:int>=0, height?:number, height_expr?:string, "
      "angle_deg?:number, angle_deg_expr?:string, flip?:bool"},
-    {"Fold", kVersionNEXT,
+    {"Fold", 236,
      "sketch_id (a sketch holding ONE line drawn on a flat panel face), "
      "angle_deg? (+_expr, (0, 180], default 90), radius_mm? (+_expr; omitted "
      "= the rules' bend radius), position?: centerline (default; the line is "
@@ -4190,7 +4190,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     jg->angleDeg.expr = ReadExprText(j, "angle_deg");
     jg->flip = j.value("flip", false);
     out = std::move(jg);
-  } else if (type == "Fold") { // vNEXT
+  } else if (type == "Fold") { // v236
     auto fo =
         std::make_unique<FoldFeature>(name, IdField(j, "sketch_id", true));
     fo->angleDeg = j.value("angle_deg", 90.0);
