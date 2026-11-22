@@ -378,8 +378,8 @@ body called it.
   does not build, `{param: "radius" | "thickness", asked_mm, fits_mm, fails_mm, basis,
   element?, stopped?}`: the largest size that built (`null` when none did),
   the least known to fail, `basis` `"built"` (the size asked was built and
-  failed) or `"bound"` (it was past a bound that holds, a disc's rim, and
-  was not built), and the face or edge whose bound decided it
+  failed) or `"bound"` (it was past a bound that holds -- a circle's axis, or two
+  blends meeting across a face -- and was not built), and the face or edge whose bound decided it
   ([modeling](../modeling/README.md#the-size-that-fits)). A
   `set_variable` that grows a radius past its limit answers the size in its
   own response.
