@@ -11,6 +11,7 @@
 #include "core/Angles.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/ElementHistory.h"
 #include "core/ElementOrigin.h"
 #include "core/Expression.h"
 #include "core/HeavyBuild.h"
@@ -416,6 +417,95 @@ json CutDropsJson(const std::vector<SketchFeature::CutDrop>& drops) {
   return out;
 }
 
+// A face or an edge named by a handle read BEFORE a later feature modified
+// it -- an SDK Body's faces read, then a fillet on the face's rim -- no
+// longer resolves on the bodies a feature appended now sees: the history
+// appended `;M<tag>` to its name (docs/modeling/toponaming.md). The naming
+// scheme names its successor: the ONE element whose name is the old one
+// plus whole, unsplit `;M<tag>` steps (topo::DescentOf, Modified) -- the same
+// face, modified, which a fastener's seat already follows. Every
+// {feature_id, element} in the request `fj` that resolves nowhere but has
+// exactly that one successor is rewritten to it, and returned as {feature_id,
+// from, to} for the answer to say. One that was split, or that two elements
+// claim, is refused naming them: there is no one element it means. Nothing
+// is checked in a batch or while a heavy feature builds (the bodies are not
+// the ones the feature will see), nor for an insert before the tip, nor for
+// a Derived feature, whose references name another part's bodies.
+json FollowModifiedNames(const Document& doc, json& fj) {
+  json followed = json::array();
+  if (!fj.is_object() || fj.value("type", std::string{}) == "Derived" ||
+      doc.InBulkEdit() || doc.HasUnbuilt() ||
+      (doc.Rollback() >= 0 &&
+       static_cast<size_t>(doc.Rollback()) < doc.FeatureCount()))
+    return followed;
+  const std::vector<Body>& bodies = doc.GetBodies();
+  const std::function<void(json&)> walk = [&](json& j) {
+    if (j.is_array()) {
+      for (json& x : j)
+        walk(x);
+      return;
+    }
+    if (!j.is_object())
+      return;
+    if (j.size() == 2 && j.contains("feature_id") && j.contains("element") &&
+        j.at("feature_id").is_number_unsigned() &&
+        j.at("element").is_string()) {
+      const uint64_t fid = j.at("feature_id").get<uint64_t>();
+      const std::string name = j.at("element").get<std::string>();
+      std::vector<std::string> descendants;
+      bool modified = false, owned = false;
+      const ElementMap* map = nullptr;
+      topo::ElementKind kind = topo::ElementKind::Face;
+      for (const Body& b : bodies) {
+        if (b.createdBy != fid)
+          continue;
+        owned = true;
+        if (b.elementMap.Resolve(name) || b.elementMap.ResolveEdge(name))
+          return; // it names something here: nothing to follow
+        for (const auto* names : {&b.elementMap.names, &b.elementMap.edgeNames})
+          for (const auto& [idx, later] : *names) {
+            (void)idx;
+            // Only what the element itself became: an edge named after a
+            // face (`<face>;U2`) descends from its name too, but is not it.
+            const topo::Descent d = topo::DescentOf(name, later);
+            if (d != topo::Descent::Modified && d != topo::Descent::Split)
+              continue;
+            descendants.push_back(later);
+            modified = d == topo::Descent::Modified;
+            map = &b.elementMap;
+            kind = names == &b.elementMap.names ? topo::ElementKind::Face
+                                                : topo::ElementKind::Edge;
+          }
+      }
+      if (!owned || descendants.empty())
+        return; // the feature's own error says what is missing
+      if (descendants.size() == 1 && modified) {
+        followed.push_back(
+            {{"feature_id", fid}, {"from", name}, {"to", descendants[0]}});
+        j["element"] = descendants[0];
+        return;
+      }
+      std::string list;
+      for (size_t i = 0; i < descendants.size(); i++)
+        list += (i == 0                        ? "'"
+                 : i + 1 == descendants.size() ? " and '"
+                                               : ", '") +
+                descendants[i] + "'";
+      throw std::runtime_error(
+          topo::UnresolvedReason(*map, name, kind, "element") +
+          " (a later feature made it " + list +
+          "): no one element is the one it named; pick the one you meant. "
+          "The document is unchanged");
+    }
+    for (auto& [key, value] : j.items()) {
+      (void)key;
+      walk(value);
+    }
+  };
+  walk(fj);
+  return followed;
+}
+
 // What a feature says about the bodies it would act on (Feature::WhyRefusedOn):
 // an element on no body or on two, a blend edge with nothing to round, a
 // shell wall the body cannot take, a pattern of a feature that made no body.
@@ -667,7 +757,13 @@ static constexpr MethodDoc ModelingMethods[] = {
      "created_by; a blend whose edges start no blend; a Draft face square "
      "to the pull; a Shell wall that breaks through an open face; a Pattern "
      "or Mirror of a feature that made no body "
-     "(docs/modeling/README.md#refused-on-the-bodies). A Cradle returns "
+     "(docs/modeling/README.md#refused-on-the-bodies). An element named "
+     "before a later feature modified it (a handle read before a fillet "
+     "on its rim) is followed to the ONE element it became, `followed` "
+     "[{feature_id, from, to}] saying so; one a later feature split, or "
+     "two claim, is refused naming them "
+     "(docs/modeling/toponaming.md#following-a-modified-name). A Cradle "
+     "returns "
      "`report` {clearance_mm, clearance_from, resolution_mm, deviation_mm, "
      "cells, estimate_s, triangles}, and a Boolean with a mesh operand "
      "{mesh, triangles, target_deflection_mm?, tool_deflection_mm?} "
@@ -2075,6 +2171,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       fj["configuration"] = id;
     }
     ImportRepresentationDefault(state, fj);
+    const json followed = FollowModifiedNames(*doc, fj);
     auto feature = FeatureFromJsonNamed(fj);
     RejectUnknownFeatureFields(fj, *feature);
     // The GUI refuses a tool with missing inputs; the script API used to
@@ -2110,6 +2207,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // Return the id the document actually assigned, so callers reference it
     // (a downstream extrude names its sketch by id) without guessing.
     json resp = {{"index", index}, {"id", doc->GetFeature(index)->GetId()}};
+    // A name read before a later feature modified its element, followed to
+    // the element it became: said in the call that did it.
+    if (!followed.empty())
+      resp["followed"] = followed;
     // For sketches, also return the stable entity ids assigned on load (clients
     // send entities without ids and reference these in add_constraint).
     if (auto* sk = dynamic_cast<const SketchFeature*>(doc->GetFeature(index))) {

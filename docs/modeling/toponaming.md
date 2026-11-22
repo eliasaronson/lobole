@@ -347,6 +347,27 @@ summary and `face_appearance_unresolved` in `get_state`, and the override is
 kept until it is cleared or resolves again
 ([a face of its own](../rendering/materials.md#a-face-of-its-own)).
 
+### Following a modified name
+
+A name read off the part and used AFTER a later feature modified what it
+named -- an SDK `Body`'s faces read, then a fillet on the face's rims, then
+`part.frame(..., face)` -- names nothing on the bodies the new feature sees:
+the fillet appended `;M<tag>` to the face's name. The scheme names the
+successor, and `add_feature` follows it (`FollowModifiedNames`,
+`src/remote/RemoteModeling.cpp`): every `{feature_id, element}` in the
+request that resolves nowhere on the tip's bodies, but has exactly one
+element whose name is it plus whole, unsplit `;M<tag>` steps
+(`topo::DescentOf` Modified -- the rule a fastener's seat follows), is
+rewritten to that name, and the answer's `followed` [{feature_id, from,
+to}] says so. One a later feature split, or that two elements claim, is
+refused naming them, the document unchanged; an edge named after the face
+(`<face>;U2`) is not a successor. It is the RPC's, so the SDK, a script
+and the MCP tools get it alike. Nothing is followed inside a batch or
+while a heavy feature builds (the bodies are not the ones the feature will
+see), for an insert above the rollback bar, or in a Derived feature, whose
+references name another part's bodies -- those stay the feature's own
+error (`check_handle_read_before_a_fillet` in `tests/sdk_smoke.py`).
+
 Edge picks for a blend are stored against the blend's **input** body, not its
 displayed output (whose names already carry the blend's own tag):
 `Document::CachedBodiesAfter` supplies the input, and

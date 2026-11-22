@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import lobole.sdk as sdk  # noqa: E402
 from lobole.client import Client  # noqa: E402
-from lobole.errors import DoesNotFit, UnknownArgument  # noqa: E402
+from lobole.errors import DoesNotFit, Refused, UnknownArgument  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -319,6 +319,46 @@ def check_bad_blend_refuses(app):
     expect(red["asked_mm"] == 8.0 and 0 < red["built_mm"] < 8.0,
            f"fit='reduce' builds the size that fits: {red}")
     expect(reduced["regen"]["ok"], f"and the part is healthy: {reduced}")
+
+
+def check_handle_read_before_a_fillet(app):
+    """A face read off a Body BEFORE a later feature modified it still names
+    it (docs/modeling/toponaming.md#following-a-modified-name): the fillet
+    on the cylinder's rims appends `;M<tag>` to its name, and the app
+    follows the old name to the one face it became, saying so; a face a
+    later cut split in two is refused naming both pieces."""
+    part = app.part("stale handle")
+    body = part.cylinder("Top", d=40, height=30, name="Rod")
+    side = body.faces(kind="cylinder")[0]
+    part.fillet(body.edges(circular=True), r=2)
+    seat = part.frame("pin", side)
+    part.check()
+    frames = [f for f in part.state()["features"] if f["type"] == "Frame"]
+    expect(len(frames) == 1 and frames[0]["elements"][0]["element"] !=
+           side.name and frames[0]["elements"][0]["element"].startswith(
+               side.name + ";M"),
+           f"the frame names the face the fillet made of it: {frames}")
+    expect(abs(seat.origin.x) < 1e-6 and abs(seat.origin.y) < 1e-6,
+           f"and sits on the cylinder's axis: {seat}")
+    part.activate()
+    r = app.add_feature(feature={
+        "type": "Frame", "name": "pin2", "kind": "from_element",
+        "elements": [side.ref]})
+    expect(r.get("followed") == [{"feature_id": side.feature_id,
+                                  "from": side.name,
+                                  "to": frames[0]["elements"][0]["element"]}],
+           f"the answer says which name it followed: {r}")
+    # Split in two by a slot through it: no one face is the one it named.
+    part.box("Top", width=10, depth=60, height=30, mode="cut", name="Slot")
+    try:
+        app.add_feature(feature={
+            "type": "Frame", "name": "pin3", "kind": "from_element",
+            "elements": [side.ref]})
+        expect(False, "a name split in two must be refused")
+    except Refused as e:
+        expect("pick the one you meant" in str(e) and
+               str(e).count(side.name + ";M") >= 2,
+               f"naming the pieces: {e}")
 
 
 def check_faces_by_maker(app):
@@ -715,6 +755,9 @@ def main():
 
         # ---- A Param drives what it is passed to ------------------------
         check_params_drive(app)
+
+        # ---- A handle read before a fillet still names its face ---------
+        check_handle_read_before_a_fillet(app)
 
         # ---- A bad blend refuses, and the session survives it ------------
         check_bad_blend_refuses(app)

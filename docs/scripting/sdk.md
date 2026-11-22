@@ -10,8 +10,8 @@ app = connect()                         # the one announced instance, or port=
 part = app.part("piston")               # create a part tab (create=False opens one)
 bore = part.param("bore", 86)           # a variable, and a Param that knows it
 body = part.cylinder("Top", d="bore", height=40)  # a Body: a sketch + extrude
-seat = part.frame("wrist_pin", body.faces(kind="cylinder")[0])
 part.fillet(body.edges(circular=True), r=2)
+seat = part.frame("wrist_pin", body.faces(kind="cylinder")[0])
 part.check()                            # raises on any broken feature
 # pi * 43^2 * 40, less the two 2 mm rims: raises ExpectationFailed on a miss
 app.check_expect(volume_mm3=231893.2, tolerance_pct=0.05, part=part.id)
