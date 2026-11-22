@@ -26,6 +26,8 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <math.hxx>
+#include <math_Jacobi.hxx>
+#include <math_Matrix.hxx>
 #include <math_Vector.hxx>
 
 #include <algorithm>
@@ -420,37 +422,45 @@ private:
 
 // The fixed rule on one face, about `about`: exactly what
 // BRepGProp::VolumeProperties and SurfaceProperties add for it.
-bool FixedFigure(const TopoDS_Face& face, const gp_Pnt& about,
-                 FaceFigure& out) {
+bool FixedFigure(const TopoDS_Face& face, const gp_Pnt& about, bool volume,
+                 bool area, FaceFigure& out) {
   TopLoc_Location l;
   const Handle(Geom_Surface) & surf = BRep_Tool::Surface(face, l);
   if (surf.IsNull()) {
     const Handle(Poly_Triangulation) & tri = BRep_Tool::Triangulation(face, l);
     if (tri.IsNull() || tri->NbNodes() == 0 || tri->NbTriangles() == 0)
       return false;
-    RawMesh mv;
-    mv.SetLocation(about);
-    mv.Perform(tri, l, face.Orientation());
-    out = mv.Figure();
-    BRepGProp_MeshProps ms(BRepGProp_MeshProps::Sinert);
-    ms.SetLocation(about);
-    ms.Perform(tri, l, face.Orientation());
-    out.area = ms.Mass();
+    if (volume) {
+      RawMesh mv;
+      mv.SetLocation(about);
+      mv.Perform(tri, l, face.Orientation());
+      out = mv.Figure();
+    }
+    if (area) {
+      BRepGProp_MeshProps ms(BRepGProp_MeshProps::Sinert);
+      ms.SetLocation(about);
+      ms.Perform(tri, l, face.Orientation());
+      out.area = ms.Mass();
+    }
     return true;
   }
   BRepGProp_Face bf;
   BRepGProp_Domain bd;
   bf.Load(face);
   const bool natural = face.NbChildren() == 0;
-  Raw<BRepGProp_Vinert> v;
-  v.SetLocation(about);
-  if (natural) {
-    v.Perform(bf);
-  } else {
-    bd.Init(face);
-    v.Perform(bf, bd);
+  if (volume) {
+    Raw<BRepGProp_Vinert> v;
+    v.SetLocation(about);
+    if (natural) {
+      v.Perform(bf);
+    } else {
+      bd.Init(face);
+      v.Perform(bf, bd);
+    }
+    out = v.Figure();
   }
-  out = v.Figure();
+  if (!area)
+    return true;
   BRepGProp_Sinert s;
   s.SetLocation(about);
   if (natural) {
@@ -489,7 +499,7 @@ Integral Integrate(const TopoDS_Shape& shape, const IntegrateOptions& options) {
       continue;
     FaceReport r;
     r.index = index;
-    if (!FixedFigure(face, about, r.fixed))
+    if (!FixedFigure(face, about, options.volume, options.area, r.fixed))
       continue;
     TopLoc_Location l;
     r.suspect = !BRep_Tool::Surface(face, l).IsNull() &&
@@ -527,47 +537,66 @@ Integral Integrate(const TopoDS_Shape& shape, const IntegrateOptions& options) {
       out.unconverged.push_back(r.index);
       continue;
     }
+    // Each group (the volume's figures, the area) stops at the level where
+    // it converged, so it does not depend on whether the other was asked.
+    const bool wantV = options.volume, wantA = options.area;
     FaceFigure prev = second.At(0), cur = prev;
     FaceFigure change = Gap(prev, r.fixed);
-    r.volumeChanges.push_back(change.volume / out.scale.volume);
-    bool converged = false;
+    if (wantV)
+      r.volumeChanges.push_back(change.volume / out.scale.volume);
+    FaceFigure curV = cur, changeV = change, curA = cur, changeA = change;
+    bool doneV = !wantV, doneA = !wantA;
     int level = 0;
-    while (level < options.maxHalvings) {
+    while ((!doneV || !doneA) && level < options.maxHalvings) {
       level++;
       cur = second.At(level);
       change = Gap(cur, prev);
-      r.volumeChanges.push_back(change.volume / out.scale.volume);
+      if (wantV)
+        r.volumeChanges.push_back(change.volume / out.scale.volume);
       prev = cur;
-      if (VolumeWithin(change, out.scale, options.convergence) &&
-          AreaWithin(change, out.scale, options.convergence)) {
-        converged = true;
-        break;
+      if (!doneV) {
+        curV = cur;
+        changeV = change;
+        doneV = VolumeWithin(change, out.scale, options.convergence);
+      }
+      if (!doneA) {
+        curA = cur;
+        changeA = change;
+        doneA = AreaWithin(change, out.scale, options.convergence);
       }
     }
+    const bool converged =
+        (!wantV || (doneV && level > 0)) && (!wantA || (doneA && level > 0));
     r.seconds = ThreadSeconds() - t0;
-    r.second = cur;
+    r.second = wantV ? curV : FaceFigure{};
+    r.second.area = wantA ? curA.area : 0.0;
     r.halvings = level;
     r.converged = converged;
     if (!converged)
       out.unconverged.push_back(r.index);
 
-    const FaceFigure gap = Gap(r.fixed, cur);
-    const FaceFigure stands = Add(gap, change);
-    if (VolumeWithin(gap, out.scale, options.agreement)) {
-      r.uncertainty = stands;
-    } else {
-      r.volumeReplaced = true;
-      r.used.volume = cur.volume;
-      r.used.moment = cur.moment;
-      r.used.inertia = cur.inertia;
-      r.uncertainty = change;
+    if (wantV) {
+      const FaceFigure gap = Gap(r.fixed, curV);
+      if (VolumeWithin(gap, out.scale, options.agreement)) {
+        r.uncertainty = Add(gap, changeV);
+      } else {
+        r.volumeReplaced = true;
+        r.used.volume = curV.volume;
+        r.used.moment = curV.moment;
+        r.used.inertia = curV.inertia;
+        r.uncertainty = changeV;
+      }
     }
-    if (AreaWithin(gap, out.scale, options.agreement)) {
-      r.uncertainty.area = stands.area;
-    } else {
-      r.areaReplaced = true;
-      r.used.area = cur.area;
-      r.uncertainty.area = change.area;
+    r.uncertainty.area = 0.0;
+    if (wantA) {
+      const FaceFigure gap = Gap(r.fixed, curA);
+      if (AreaWithin(gap, out.scale, options.agreement)) {
+        r.uncertainty.area = gap.area + changeA.area;
+      } else {
+        r.areaReplaced = true;
+        r.used.area = curA.area;
+        r.uncertainty.area = changeA.area;
+      }
     }
   }
 
@@ -609,6 +638,31 @@ Integral Integrate(const TopoDS_Shape& shape, const IntegrateOptions& options) {
   out.inertiaUncertainty =
       uJ + 2.0 * std::sqrt(3.0) * S * uS / V + S * S * uV / (V * V);
   return out;
+}
+
+double VolumeOf(const TopoDS_Shape& shape) {
+  IntegrateOptions o;
+  o.area = false;
+  return Integrate(shape, o).volume;
+}
+
+void PrincipalAxes(const Integral& m, double moments[3], glm::dvec3 axes[3]) {
+  math_Matrix a(1, 3, 1, 3);
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++)
+      a(r + 1, c + 1) = m.inertia[r][c];
+  math_Jacobi j(a);
+  for (int k = 0; k < 3; k++) {
+    moments[k] = j.IsDone() ? j.Value(k + 1) : 0.0;
+    glm::dvec3 v(k == 0, k == 1, k == 2);
+    if (j.IsDone()) {
+      math_Vector e(1, 3);
+      j.Vector(k + 1, e);
+      v = glm::dvec3(e(1), e(2), e(3));
+    }
+    const double len = glm::length(v);
+    axes[k] = len > 0.0 ? v / len : glm::dvec3(k == 0, k == 1, k == 2);
+  }
 }
 
 } // namespace cad

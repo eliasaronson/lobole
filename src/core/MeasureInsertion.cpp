@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/MeasureInsertion.h"
+#include "cad/Integrate.h"
 
 #include "cad/NonDestructiveBoolean.h"
 #include "common/Logger.h"
@@ -14,10 +15,8 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
-#include <BRepGProp.hxx>
 #include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
-#include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
@@ -61,9 +60,7 @@ gp_Trsf Rigid(const glm::dmat4& m) {
 }
 
 double VolumeOf(const TopoDS_Shape& s) {
-  GProp_GProps p;
-  BRepGProp::VolumeProperties(s, p);
-  return std::max(0.0, p.Mass());
+  return std::max(0.0, cad::VolumeOf(s));
 }
 
 struct Reading {

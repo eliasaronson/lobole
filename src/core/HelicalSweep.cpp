@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/HelicalSweep.h"
+#include "cad/Integrate.h"
 
 #include "core/features/SweepFeature.h"
 
@@ -12,14 +13,12 @@
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
-#include <BRepGProp.hxx>
 #include <BRepLib.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
-#include <GProp_GProps.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Standard_Failure.hxx>
@@ -174,12 +173,8 @@ CADShape HelicalSweep(const HelicalSweepSpec& spec, std::string* why) {
     TopoDS_Shape one = swept.GetShape();
     // MakeSolid can close a shell whose orientation comes out inward; a
     // negative volume here would make the cut add material.
-    {
-      GProp_GProps props;
-      BRepGProp::VolumeProperties(one, props);
-      if (props.Mass() < 0.0)
-        one.Reverse();
-    }
+    if (cad::VolumeOf(one) < 0.0)
+      one.Reverse();
 
     TopoDS_Compound all;
     BRep_Builder builder;
@@ -215,9 +210,7 @@ CADShape HelicalSweep(const HelicalSweepSpec& spec, std::string* why) {
       return CADShape();
     }
     const TopoDS_Shape clipped = common.Shape();
-    GProp_GProps props;
-    BRepGProp::VolumeProperties(clipped, props);
-    if (!(props.Mass() > 0.0)) {
+    if (!(cad::VolumeOf(clipped) > 0.0)) {
       Fail(why, "the clipped helical sweep is empty");
       return CADShape();
     }
@@ -300,9 +293,7 @@ bool ScrewSweepFace(const TopoDS_Face& face, const gp_Ax1& axis, double length,
       if (!shell.IsDone() || !shell.MakeSolid())
         return false;
       solid = shell.Shape();
-      GProp_GProps props;
-      BRepGProp::VolumeProperties(solid, props);
-      if (props.Mass() < 0.0)
+      if (cad::VolumeOf(solid) < 0.0)
         solid.Reverse(); // inside out: a cut with it would add material
       if (first)
         *first = shell.FirstShape();

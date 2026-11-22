@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/Measure.h"
+#include "cad/Integrate.h"
 #include "core/Angles.h"
 #include "core/FitBands.h"
 
@@ -694,9 +695,7 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
         BuildQuery(common, sa, sb, kContactFuzz);
         if (!common.IsDone() || common.Shape().IsNull())
           continue;
-        GProp_GProps props;
-        BRepGProp::VolumeProperties(common.Shape(), props);
-        total += std::max(0.0, props.Mass());
+        total += std::max(0.0, cad::VolumeOf(common.Shape()));
       }
     }
     return total;
@@ -937,9 +936,7 @@ static TopoDS_Shape CutAnnulus(const TopoDS_Shape& overlap,
 }
 
 static double VolumeOf(const TopoDS_Shape& s) {
-  GProp_GProps props;
-  BRepGProp::VolumeProperties(s, props);
-  return std::max(0.0, props.Mass());
+  return std::max(0.0, cad::VolumeOf(s));
 }
 
 // Removes from `overlap` the grip of a ring seated in its groove
@@ -1628,16 +1625,16 @@ std::optional<SetContact> ContactImpl(const std::vector<Body>& bodiesA,
              (pressed(*pa[i].body) && pressed(*pb[j].body))))
           overlap =
               RelievePressFits(overlap, pa[i].Spans(), pb[j].Spans(), out);
-        GProp_GProps props;
-        BRepGProp::VolumeProperties(overlap, props);
-        const double v = std::max(0.0, props.Mass());
+        cad::IntegrateOptions volumeOnly;
+        volumeOnly.area = false;
+        const cad::Integral m = cad::Integrate(overlap, volumeOnly);
+        const double v = std::max(0.0, m.volume);
         out.volume += v;
         if (v > 0.0) {
           // Weighted by volume, so several overlapping pairs report the
           // centre of the interference rather than the centre of the last
           // one found.
-          const gp_Pnt c = props.CentreOfMass();
-          weighted += v * glm::dvec3(c.X(), c.Y(), c.Z());
+          weighted += v * m.centerOfMass;
           BRepBndLib::Add(overlap, overlapBox);
           out.overlaps = true;
         }
@@ -1794,9 +1791,7 @@ CompareBodySets(const std::vector<Body>& bodiesA, const glm::dmat4& xfA,
     const auto volumeOf = [](const TopoDS_Shape& s) {
       if (s.IsNull())
         return 0.0;
-      GProp_GProps props;
-      BRepGProp::VolumeProperties(s, props);
-      return std::max(0.0, props.Mass());
+      return std::max(0.0, cad::VolumeOf(s));
     };
     BRepAlgoAPI_Common common;
     BuildQuery(common, a.GetShape(), b.GetShape());
@@ -3118,10 +3113,13 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
           const glm::dvec3 w = glm::dvec3(t.xf * glm::dvec4(*p, 1.0));
           return gp_Pnt(w.x, w.y, w.z);
         }
-        GProp_GProps props;
-        BRepGProp::VolumeProperties(s, props);
-        if (props.Mass() <= 0.0) // a sheet or a wire: fall back to area
-          BRepGProp::SurfaceProperties(s, props);
+        cad::IntegrateOptions volumeOnly;
+        volumeOnly.area = false;
+        const cad::Integral m = cad::Integrate(s, volumeOnly);
+        if (m.volume > 0.0)
+          return gp_Pnt(m.centerOfMass.x, m.centerOfMass.y, m.centerOfMass.z);
+        GProp_GProps props; // a sheet or a wire: fall back to area
+        BRepGProp::SurfaceProperties(s, props);
         return props.CentreOfMass();
       };
       const auto ca = centre(a, sa);

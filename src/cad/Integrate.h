@@ -11,9 +11,10 @@
 #include <vector>
 
 // A body's volume, moments and area, face by face, each with an uncertainty
-// (docs/inspect/README.md#the-face-by-face-integrator). Not yet what answers a
-// measure: CADShape::Volume and ComputeMassProps still call BRepGProp's fixed
-// rule on the whole shape.
+// (docs/inspect/README.md#the-face-by-face-integrator). Every volume and mass
+// measure goes through it: CADShape::Volume and ComputeMassProps (cached by
+// shape), and VolumeOf for a shape measured once. test_conventions.cpp keeps
+// BRepGProp::VolumeProperties out of every other file.
 namespace cad {
 
 // What one face contributes, about a point `about` (Integrate uses the centre
@@ -29,6 +30,12 @@ struct FaceFigure {
 };
 
 struct IntegrateOptions {
+  // Which figures to integrate: the volume group (volume, moments, inertia)
+  // and the area. Each group converges on its own, so a figure is the same
+  // bits whether it was integrated alone or with the other (CADShape::Volume
+  // takes the volume alone, ComputeMassProps adds the area to it).
+  bool volume = true;
+  bool area = true;
   // The halvings a suspect face's second estimate may take after the first
   // (the pieces split at the knots). A test seam: zero leaves every suspect
   // face unconverged, its uncertainty the gap between the fixed rule and the
@@ -97,5 +104,14 @@ struct Integral {
 // faces.
 Integral Integrate(const TopoDS_Shape& shape,
                    const IntegrateOptions& options = {});
+
+// The volume alone, integrated afresh: for a shape made to be measured once
+// (a boolean's result, a piece of a split). A body's volume goes through
+// CADShape::Volume, which caches it.
+double VolumeOf(const TopoDS_Shape& shape);
+
+// The principal moments of `m`'s inertia (about its centre) and their axes,
+// unit vectors, in no particular order.
+void PrincipalAxes(const Integral& m, double moments[3], glm::dvec3 axes[3]);
 
 } // namespace cad

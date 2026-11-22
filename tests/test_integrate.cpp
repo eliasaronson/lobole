@@ -11,6 +11,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "SameCore.h"
+#include "cad/CADKernel.h"
 #include "cad/Integrate.h"
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
@@ -938,4 +939,237 @@ TEST_CASE("where the fixed rule is exact the two estimates agree",
     worst = std::max({worst, gap, areaGap});
   }
   CHECK(worst < cad::IntegrateOptions{}.agreement);
+}
+
+namespace {
+
+// CADShape's mass properties against a true value, as CheckAgainst does
+// the integrator's.
+void CheckMass(const CADShape::MassProps& mp, const Moments& truth,
+               double rel) {
+  cad::Integral r;
+  r.volume = mp.volume;
+  r.volumeUncertainty = mp.volumeUncertainty;
+  r.centerOfMass = mp.centerOfMass;
+  for (int i = 0; i < 3; i++)
+    for (int j = 0; j < 3; j++)
+      r.inertia[i][j] = mp.inertia[i][j];
+  CheckAgainst(r, truth, rel);
+}
+
+TopoDS_Shape TubeWithBars(int bars, Moments& truth) {
+  TopoDS_Shape body = Tube();
+  truth = Cylinder(23, 0, 20) - Cylinder(21.5, 0, 20);
+  for (int k = 0; k < bars; k++) {
+    const double turn = 2 * kPi * k / bars;
+    body = BRepAlgoAPI_Fuse(body, Bar(turn)).Shape();
+    truth = truth + BarOutsideTube(10.0).Moved(TurnZ(turn), glm::dvec3(0.0));
+  }
+  return body;
+}
+
+} // namespace
+
+TEST_CASE("CADShape measures the hard cases through the integrator",
+          "[integrate][cadkernel]") {
+  struct Case {
+    const char* name;
+    TopoDS_Shape shape;
+    Moments truth;
+  };
+  std::vector<Case> cases;
+  {
+    Moments t;
+    const TopoDS_Shape s = TubeWithBars(1, t);
+    cases.push_back({"tube + one bar", Placed(s), Placed(t)});
+  }
+  {
+    Moments t;
+    const TopoDS_Shape s = TubeWithBars(9, t);
+    cases.push_back({"tube + nine bars", Placed(s), Placed(t)});
+  }
+  cases.push_back({"extruded 24-span spline", Placed(KnottedPrism(12.0)),
+                   Placed(KnottedPrismTruth(12.0))});
+  for (const Case& c : cases) {
+    INFO(c.name);
+    // The volume first, then the rest: the volume keeps its bits when the
+    // area is added to the cached entry.
+    const CADShape shape(c.shape);
+    const double v = shape.Volume();
+    CHECK_THAT(v, WithinRel(c.truth.v, 1e-9));
+    CADShape::MassProps mp;
+    REQUIRE(shape.ComputeMassProps(mp));
+    CHECK(mp.volume == v);
+    CheckMass(mp, c.truth, 1e-9);
+    CHECK(mp.unconvergedFaces.empty());
+    // A copy is a new TShape, measured from scratch with the area at once:
+    // the same bits as the volume alone, then the area.
+    const CADShape fresh(BRepBuilderAPI_Copy(c.shape).Shape());
+    CADShape::MassProps both;
+    REQUIRE(fresh.ComputeMassProps(both));
+    CHECK(both.volume == mp.volume);
+    CHECK(both.surfaceArea == mp.surfaceArea);
+    CHECK(both.centerOfMass == mp.centerOfMass);
+  }
+}
+
+TEST_CASE("the mass cache carries a body through its placement",
+          "[integrate][cadkernel]") {
+  Moments truth;
+  const TopoDS_Shape body = TubeWithBars(1, truth);
+  // One TShape, three placements: where it was built, placed, and placed
+  // then turned again. Each reads its own centre and inertia from one entry.
+  const CADShape home(body);
+  CADShape::MassProps a, b, c;
+  REQUIRE(home.ComputeMassProps(a));
+  CheckMass(a, truth, 1e-9);
+  const CADShape placed(Placed(body));
+  REQUIRE(placed.ComputeMassProps(b));
+  CheckMass(b, Placed(truth), 1e-9);
+  CHECK(b.volume == a.volume);
+  CHECK(b.surfaceArea == a.surfaceArea);
+  const CADShape twice(Placed(Placed(body)));
+  REQUIRE(twice.ComputeMassProps(c));
+  CheckMass(c, Placed(Placed(truth)), 1e-9);
+  // The integrator on the placed shape itself agrees with the carried one,
+  // to the rounding a turned frame brings (2e-12 of it here).
+  const cad::Integral direct = cad::Integrate(Placed(body));
+  CHECK_THAT(b.volume, WithinRel(direct.volume, 1e-10));
+  for (int i = 0; i < 3; i++)
+    CHECK_THAT(b.centerOfMass[i], WithinAbs(direct.centerOfMass[i], 1e-9));
+  // Inside out, the same TShape encloses the negative volume.
+  const CADShape reversed(Placed(body).Reversed());
+  CHECK(reversed.Volume() == -b.volume);
+  CADShape::MassProps r;
+  REQUIRE(reversed.ComputeMassProps(r));
+  CHECK(r.volume == -b.volume);
+  CHECK(r.centerOfMass == b.centerOfMass);
+  CHECK(r.inertia[0][0] == -b.inertia[0][0]);
+  CHECK(r.surfaceArea == b.surfaceArea);
+}
+
+namespace {
+
+// The CPU time of the cheapest of `n` runs of `f`.
+template <class F> double Cheapest(int n, F&& f) {
+  double best = 1e300;
+  for (int i = 0; i < n; i++) {
+    const double t0 = CpuSeconds();
+    f();
+    best = std::min(best, CpuSeconds() - t0);
+  }
+  return best;
+}
+
+} // namespace
+
+TEST_CASE("mass properties of a body with no face in doubt cost no more "
+          "than the three passes they replace",
+          "[integrate][slow]") {
+  // A plate with 12 x 12 holes: 293 faces on planes and cylinders, bounded
+  // by lines and circles, none suspect. One fixed volume pass and one area
+  // pass replace two volume passes and an area pass.
+  TopoDS_Shape plate =
+      BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 130, 130, 6).Shape();
+  TopTools_ListOfShape holes;
+  for (int i = 0; i < 12; i++)
+    for (int j = 0; j < 12; j++)
+      holes.Append(
+          BRepPrimAPI_MakeCylinder(
+              gp_Ax2(gp_Pnt(10 + 10 * i, 10 + 10 * j, -1), gp_Dir(0, 0, 1)),
+              3.0, 8.0)
+              .Shape());
+  BRepAlgoAPI_Cut cut;
+  TopTools_ListOfShape args;
+  args.Append(plate);
+  cut.SetArguments(args);
+  cut.SetTools(holes);
+  cut.Build();
+  REQUIRE(cut.IsDone());
+  const TopoDS_Shape s = Placed(cut.Shape());
+  const SameCore held;
+  REQUIRE(cad::Integrate(s).suspectFaces == 0);
+  const double today = Cheapest(3, [&] { (void)TodaysRule(s); });
+  const double now = Cheapest(3, [&] {
+    // A copy is a new TShape: the cache cannot answer it.
+    CADShape::MassProps mp;
+    REQUIRE(CADShape(BRepBuilderAPI_Copy(s).Shape()).ComputeMassProps(mp));
+  });
+  const double copy =
+      Cheapest(3, [&] { (void)BRepBuilderAPI_Copy(s).Shape(); });
+  std::printf("[integrate] holed plate: today's three passes %.4f s, "
+              "ComputeMassProps uncached %.4f s (a copy alone %.4f s)\n",
+              today, now, copy);
+  CHECK(now - copy <= today);
+}
+
+TEST_CASE("an unchanged body's volume and mass are a lookup",
+          "[integrate][slow]") {
+  // A stand-in for a Derived snapshot of 197 bodies
+  // (docs/modeling/README.md#the-model): every mutating RPC digests every
+  // body's volume, and the bodies that did not change must not be
+  // integrated again. Each body here is the tube with bars, whose faces are
+  // in doubt, at its own placement of one TShape or another.
+  Moments truth;
+  std::vector<TopoDS_Shape> kinds;
+  for (int k = 0; k < 4; k++)
+    kinds.push_back(TubeWithBars(1 + k, truth));
+  std::vector<CADShape> bodies;
+  for (int i = 0; i < 197; i++) {
+    gp_Trsf t;
+    t.SetTranslation(gp_Vec(60.0 * (i % 14), 60.0 * (i / 14), 0));
+    bodies.emplace_back(kinds[i % 4].Moved(TopLoc_Location(t)));
+  }
+  const SameCore held;
+  const double t0 = CpuSeconds();
+  double first = 0.0;
+  for (const CADShape& b : bodies)
+    first += b.Volume();
+  const double cold = CpuSeconds() - t0;
+  const double t1 = CpuSeconds();
+  double again = 0.0;
+  for (const CADShape& b : bodies)
+    again += b.Volume();
+  const double warm = CpuSeconds() - t1;
+  const double t2 = CpuSeconds();
+  for (const CADShape& b : bodies) {
+    CADShape::MassProps mp;
+    REQUIRE(b.ComputeMassProps(mp));
+  }
+  const double withArea = CpuSeconds() - t2;
+  const double t3 = CpuSeconds();
+  for (const CADShape& b : bodies) {
+    CADShape::MassProps mp;
+    REQUIRE(b.ComputeMassProps(mp));
+  }
+  const double massWarm = CpuSeconds() - t3;
+  std::printf("[integrate] 197 bodies: volumes %.4f s cold, %.6f s warm; "
+              "mass properties %.4f s adding the area, %.6f s warm\n",
+              cold, warm, withArea, massWarm);
+  CHECK(again == first);
+  CHECK(warm < 0.02 * cold);
+  CHECK(massWarm < 0.02 * (cold + withArea));
+}
+
+TEST_CASE("a tube trimmed by 40 intersection curves", "[integrate][slow]") {
+  // Forty bars through the tube's wall: 80 intersection curves on its two
+  // cylinders and one on each bar, every one a B-spline p-curve.
+  Moments truth;
+  const TopoDS_Shape s = Placed(TubeWithBars(40, truth));
+  truth = Placed(truth);
+  const SameCore held;
+  const double today = Cheapest(3, [&] { (void)TodaysRule(s); });
+  CADShape::MassProps mp;
+  const double now = Cheapest(3, [&] {
+    REQUIRE(CADShape(BRepBuilderAPI_Copy(s).Shape()).ComputeMassProps(mp));
+  });
+  std::printf("[integrate] tube + 40 bars: today %.4f s, ComputeMassProps "
+              "%.4f s, volume %+.2e of the closed form +- %.1e\n",
+              today, now, mp.volume - truth.v, mp.volumeUncertainty);
+  CheckMass(mp, truth, 1e-9);
+  CHECK(mp.unconvergedFaces.empty());
+  // Measured at 2.0 times today's three passes (0.097 s against 0.049, a
+  // copy included): the suspect faces' second estimates. The budget is
+  // half as much again.
+  CHECK(now < 3.0 * today);
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "cad/MeshRebuild.h"
+#include "cad/Integrate.h"
 
 #include "core/mesh/MeshReaders.h"
 
@@ -10,11 +11,9 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Shell.hxx>
-#include <BRepGProp.hxx>
 #include <BRepLib.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
-#include <GProp_GProps.hxx>
 #include <GeomAPI_PointsToBSpline.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomLProp_SLProps.hxx>
@@ -1026,9 +1025,7 @@ Rebuilt Builder::Run() {
   }
   // The volume the facets enclose against the solid's: no further apart
   // than the facets stood off the surfaces fitted to them.
-  GProp_GProps props;
-  BRepGProp::VolumeProperties(result, props);
-  const double rebuilt = props.Mass();
+  const double rebuilt = cad::VolumeOf(result);
   const double meshed = m_mesh.Volume();
   double allowed = m_mesh.SurfaceArea() * m_tol;
   for (const mesh::Region& r : m_seg.regions)

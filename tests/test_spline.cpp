@@ -225,10 +225,13 @@ TEST_CASE("The v217 golden's closed spline is two edges and weighs its area",
   REQUIRE(doc->FeatureCount() == 3);
   INFO(doc->GetFeature(2)->GetError());
   CHECK(doc->GetFeature(2)->GetError().empty());
-  // The fillet takes about 7.4 mm^3; OpenCASCADE 7.6 and 7.9 agree on it to
-  // 1.2e-3 mm^3, so the bound is kernel-wide and still names the round.
+  // The fillet takes about 7.37 mm^3; OpenCASCADE 7.6 and 7.9 agree on it
+  // to 1.2e-3 mm^3, so the bound is kernel-wide and still names the round.
+  // The pad is its cap's area, 1130.973936519 mm^2 integrated span by span
+  // along the spline, times 4: 4523.895746075, which the integrator gives to
+  // its last digit and BRepGProp's fixed rule read 0.19 heavy.
   CHECK_THAT(doc->GetBodies().at(0).shape.Volume(),
-             WithinAbs(4516.701355, 1e-2));
+             WithinAbs(4516.525400, 1e-2));
 }
 
 TEST_CASE("A lone closed spline's pad shells", "[spline][extrude]") {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/fem/SimGeometry.h"
+#include "cad/Integrate.h"
 
 #include "core/Document.h"
 #include "core/ElementOrigin.h"
@@ -73,11 +74,7 @@ double AreaOf(const TopoDS_Shape& face) {
   return props.Mass();
 }
 
-double VolumeOf(const TopoDS_Shape& s) {
-  GProp_GProps props;
-  BRepGProp::VolumeProperties(s, props);
-  return props.Mass();
-}
+double VolumeOf(const TopoDS_Shape& s) { return cad::VolumeOf(s); }
 
 // What a suppressed feature did to the element named `name`.
 struct Through {

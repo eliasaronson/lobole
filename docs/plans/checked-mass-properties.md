@@ -17,9 +17,7 @@ digits it is reported to, or say how far off it can be.
   face uses the surface's order. That is exact on a face bounded by lines
   and conics. An intersection curve is a B-spline that is smooth only
   between its knots, and one rule across the knots is not exact. The tube
-  and nine bars
-  (docs/known-bugs.md#a-union-of-a-tube-and-nine-bars-through-its-wall-gains-volume)
-  measures 4596.234 mm³ where the closed form is 4595.675, and one bar adds
+  and nine bars measures 4596.234 mm³ where the closed form is 4595.675, and one bar adds
   44.609 where it should add 44.6277. The rule runs across u in one piece
   too, so a surface's own knot lines break it the same way: a closed
   24-span spline extruded 12 mm reads 15826.450 for 15841.851, and a

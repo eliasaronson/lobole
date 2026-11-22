@@ -17,16 +17,16 @@ command or parameter Loböle has no counterpart for.
 | area | cases | pass | known | untranslated |
 |---|---|---|---|---|
 | ladder | 170 | 101 | 14 | 55 |
-| booleans | 130 | 64 | 9 | 57 |
-| fillets | 275 | 101 | 67 | 107 |
+| booleans | 130 | 65 | 8 | 57 |
+| fillets | 275 | 104 | 64 | 107 |
 | shell | 40 | 11 | 11 | 18 |
-| sweeps | 97 | 35 | 14 | 48 |
+| sweeps | 97 | 36 | 13 | 48 |
 | solids | 11 | 3 | 0 | 8 |
 | threads | 31 | 14 | 17 | 0 |
 | import | 35 | 0 | 0 | 35 |
 | tessellation | 14 | 11 | 1 | 2 |
 | crashes | 12 | 3 | 0 | 9 |
-| **all** | 815 | 343 | 133 | 339 |
+| **all** | 815 | 348 | 128 | 339 |
 
 ## Known failures
 
@@ -37,7 +37,6 @@ command or parameter Loböle has no counterpart for.
 | solidcore/booleans/17439-cylinder-cavity-touching-two-walls-along-lines | topology | [docs/known-bugs.md#a-cavity-touching-the-outer-skin-along-a-line-is-one-shell-with-it](../known-bugs.md#a-cavity-touching-the-outer-skin-along-a-line-is-one-shell-with-it) |
 | solidcore/fillets/12342-round-wall-and-ledge-edges-r2-5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcore/shell/14412-offset-face-adjacent-walls-out | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/booleans/1107-join-hollow-hub-with-nine-blades | volume | [docs/known-bugs.md#a-union-of-a-tube-and-nine-bars-through-its-wall-gains-volume](../known-bugs.md#a-union-of-a-tube-and-nine-bars-through-its-wall-gains-volume) |
 | solidcraft/booleans/1647-box-cylinder-general-intersect | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/booleans/1949-tapered-extrude-side-in-collinear-pieces | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/booleans/2810-taper-extrude-arcs-meeting-at-corners | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |
@@ -55,8 +54,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/1080-fillet-sloped-basin-1-mm-rim-r4-2-edges | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/1080-fillet-sloped-basin-1-mm-rim-r4-4-edges | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/1113-chamfer-arc-top-edge-full-wall-height | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/1207-fillet-concave-arc-at-boss | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
-| solidcraft/fillets/1207-fillet-straight-edge-ending-on-boss | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/fillets/1213-round-end-circle-of-bent-tube | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |
 | solidcraft/fillets/1557-fillet-vertical-corners-after-bottom-rounds | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/190-fillet-disc-rim-past-its-2mm-wall | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
@@ -92,7 +89,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/851-fillet-top-front-then-front-left-upright | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/851-fillet-top-front-then-upright | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/854-fillet-revolved-disc-both-rims-full-round | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/926-fillet-top-edge-ending-on-boss-wall-above-it | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/fillets/cov-fillet-exact-cylinders-touching-at-a-point-r1 | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/fillets/cov-fillet-exact-oblique-plane-cone-rim-r1-5 | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |
 | solidcraft/fillets/cov-fillet-exact-oblique-plane-cylinder-rim-r2 | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |
@@ -111,10 +107,10 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/every-pocket-rim-edges-r5-as-deep-as-pocket | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/04-spline-profiles/004-sweep-square-along-bezier | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/ladder/04-spline-profiles/008-loft-square-to-circle | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
-| solidcraft/ladder/05-holes-and-taps/012-crossing-tapped-holes-offset | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/ladder/05-holes-and-taps/015-tapped-1-4-28-unf-blind | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/ladder/05-holes-and-taps/016-tapped-rc-1-2-through | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/05-holes-and-taps/017-tapped-1-4-npt-through | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
+| solidcraft/ladder/06-threads/004-external-m10-to-shoulder | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/ladder/06-threads/015-internal-tr20x4-nut | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/06-threads/019-external-tr40x14-p7-two-start | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/06-threads/021-internal-rp-1-2 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
@@ -140,7 +136,6 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/sweeps/1856-disk-and-36-twisted-lofted-blades-joined | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/sweeps/2570-loft-circle-to-a-non-star-shaped-comb | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/sweeps/3345-sweep-profile-mid-line-round-a-rounded-rectangle | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/sweeps/3528-revolved-dome-cut-by-a-ball-on-its-seam | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/sweeps/4305-sweep-cut-groove-round-rounded-pocket-wall | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/sweeps/5037-sweep-wall-round-rounded-rectangle-rim | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/sweeps/5324-sweep-square-round-closed-path-from-mid-edge | refused | [docs/modeling/README.md#not-built](README.md#not-built) |

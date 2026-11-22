@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/PrintSplit.h"
+#include "cad/Integrate.h"
 
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
-#include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <Bnd_Box.hxx>
-#include <GProp_GProps.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
@@ -147,9 +146,7 @@ std::optional<Plan> PlanCuts(const TopoDS_Shape& shapeIn, const glm::dvec3& bed,
         std::vector<Solid> solids;
         for (TopExp_Explorer ex(common.Shape(), TopAbs_SOLID); ex.More();
              ex.Next()) {
-          GProp_GProps props;
-          BRepGProp::VolumeProperties(ex.Current(), props);
-          Solid sd{{}, {}, props.Mass()};
+          Solid sd{{}, {}, cad::VolumeOf(ex.Current())};
           if (sd.volume < 1e-6 || !Bounds(ex.Current(), sd.lo, sd.hi))
             continue;
           solids.push_back(sd);
@@ -243,9 +240,7 @@ std::optional<Plan> PlanAutomatic(const TopoDS_Shape& shape,
     pc.cellMax = hi;
     pc.solids = 1;
     pc.fits = FitsBed(size, bed, &pc.orientation);
-    GProp_GProps props;
-    BRepGProp::VolumeProperties(shape, props);
-    pc.volume = props.Mass();
+    pc.volume = cad::VolumeOf(shape);
     plan.pieces.push_back(pc);
     return plan;
   }

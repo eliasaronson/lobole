@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/MeasureSeal.h"
+#include "cad/Integrate.h"
 
 #include "cad/NonDestructiveBoolean.h"
 #include "core/Feature.h"
@@ -284,23 +285,35 @@ bool AxisOf(const TopoDS_Shape& contact, double tol, Frame& fr,
   } else {
     GProp_GProps g;
     BRepGProp::SurfaceProperties(contact, g);
-    if (g.Mass() <= 1e-12)
-      BRepGProp::VolumeProperties(contact, g);
-    if (g.Mass() <= 1e-12)
-      return false;
-    const GProp_PrincipalProps pp = g.PrincipalProperties();
-    double i1, i2, i3;
-    pp.Moments(i1, i2, i3);
-    const double spread[3] = {std::min(std::abs(i1 - i2), std::abs(i1 - i3)),
-                              std::min(std::abs(i2 - i1), std::abs(i2 - i3)),
-                              std::min(std::abs(i3 - i1), std::abs(i3 - i2))};
+    double i[3];
+    glm::dvec3 axes[3];
+    if (g.Mass() > 1e-12) {
+      const GProp_PrincipalProps pp = g.PrincipalProperties();
+      pp.Moments(i[0], i[1], i[2]);
+      const gp_Vec a1 = pp.FirstAxisOfInertia(), a2 = pp.SecondAxisOfInertia(),
+                   a3 = pp.ThirdAxisOfInertia();
+      axes[0] = glm::dvec3(a1.X(), a1.Y(), a1.Z());
+      axes[1] = glm::dvec3(a2.X(), a2.Y(), a2.Z());
+      axes[2] = glm::dvec3(a3.X(), a3.Y(), a3.Z());
+      fr.p = V(g.CentreOfMass());
+    } else {
+      const cad::Integral m = cad::Integrate(contact, [] {
+        cad::IntegrateOptions o;
+        o.area = false;
+        return o;
+      }());
+      if (m.volume <= 1e-12)
+        return false;
+      cad::PrincipalAxes(m, i, axes);
+      fr.p = m.centerOfMass;
+    }
+    const double spread[3] = {
+        std::min(std::abs(i[0] - i[1]), std::abs(i[0] - i[2])),
+        std::min(std::abs(i[1] - i[0]), std::abs(i[1] - i[2])),
+        std::min(std::abs(i[2] - i[0]), std::abs(i[2] - i[1]))};
     const int k =
         static_cast<int>(std::max_element(spread, spread + 3) - spread);
-    const gp_Vec ax = k == 0   ? pp.FirstAxisOfInertia()
-                      : k == 1 ? pp.SecondAxisOfInertia()
-                               : pp.ThirdAxisOfInertia();
-    fr.p = V(g.CentreOfMass());
-    fr.d = glm::normalize(glm::dvec3(ax.X(), ax.Y(), ax.Z()));
+    fr.d = glm::normalize(axes[k]);
     from = "the contact's own principal axis";
   }
   fr.d = glm::normalize(fr.d);
@@ -343,11 +356,10 @@ Seal(const std::vector<Body>& bodiesA, const glm::dmat4& xfA,
         if (cad::BuildNonDestructive(com, a, b, touchTolMm))
           for (TopExp_Explorer ex(com.Shape(), TopAbs_SOLID); ex.More();
                ex.Next()) {
-            GProp_GProps g;
-            BRepGProp::VolumeProperties(ex.Current(), g);
-            if (g.Mass() <= 1e-9)
+            const double v = cad::VolumeOf(ex.Current());
+            if (v <= 1e-9)
               continue;
-            rep.overlapVolumeMm3 += g.Mass();
+            rep.overlapVolumeMm3 += v;
             bb.Add(overlap, ex.Current());
             bb.Add(all, ex.Current());
             anyOverlap = true;

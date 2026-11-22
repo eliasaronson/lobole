@@ -69,39 +69,6 @@ the heading if it is not here yet.
   cost a second build of every honest refusal. The fix belongs upstream, in
   the offset's intersections, not in the order.
 
-### A union of a tube and nine bars through its wall gains volume
-
-- **Symptom:** a tube (r 21.5 to 23, 20 high) joined with nine round bars
-  (r 1) standing radially out of its wall, one Boolean a bar, measures
-  4596.234 mm³; the closed form is 4595.675. Each union adds 44.68 to
-  44.77 where every bar adds 44.628, and the centre of mass ends 0.7 µm
-  off the axis.
-- **Cause:** the MEASURE, not the solid. The fused body is right: the
-  same body integrated by `BRepGProp::VolumeProperties` with a precision
-  (the adaptive rule, to 1e-7) is 4595.67543, the closed form to nine
-  digits, and so is V(bar) - V(tube ∩ bar) per bar. `CADShape::Volume` and
-  `ComputeMassProps` use the fixed Gauss rule, which is exact on a face
-  bounded by lines and conics and not on a cylinder trimmed by the bars'
-  intersection B-splines (one bar, built from primitives, reads 44.609
-  added for 44.6277). Nor is it on a face whose surface has knot lines
-  inside it: a closed 24-span cubic spline extruded 12 mm reads 15826.450
-  for 15841.851 (the side face alone 1.2 % heavy) with the centre of mass
-  0.2 mm off.
-- **Tried:** the adaptive rule everywhere fixes this case and five rows filed
-  as [not kernel defects](modeling/README.md#known-rows-that-are-not-kernel-defects)
-  (1207 twice, 926, 05-holes-and-taps/012, 3528), and breaks others: a revolved Bezier profile
-  reads 0.6 mm³ over, a horn torus 0.02 over, the menger sponge's 400-face
-  union times out. The adaptive rule only on faces of an elementary surface
-  with a non-conic edge still measured the modelled M10 thread
-  (06-threads/004) 7 % heavy, while reporting that it had converged.
-- **Where:** `CADShape::Volume` and `CADShape::ComputeMassProps`,
-  `src/cad/CADKernel.cpp`.
-- **Likely fix:** `cad::Integrate`
-  ([the face-by-face integrator](inspect/README.md#the-face-by-face-integrator))
-  measures every one of these within 2e-10 of the closed form; the
-  measures do not call it yet ([the plan](plans/checked-mass-properties.md)).
-- **Case:** `solidcraft/booleans/1107-join-hollow-hub-with-nine-blades`.
-
 ### A blend along a curved edge is off its rolling-ball volume
 
 - **Symptom:** a Fillet or Chamfer whose edge is an intersection curve or
@@ -112,10 +79,12 @@ the heading if it is not here yet.
   floor and three of its corners (1e-4), a chamfer where a pipe meets a
   plate (6e-4), a tapered extrude of arcs meeting at corners (one face
   more).
-- **Cause:** not established case by case. Part of it may be the measure:
-  see [the tube and nine bars](#a-union-of-a-tube-and-nine-bars-through-its-wall-gains-volume),
-  whose fixed-rule volume is off by the same order on faces trimmed by
-  intersection curves. OpenCASCADE's blend surface on
+- **Cause:** not established case by case, and not the measure:
+  [the face-by-face integrator](inspect/README.md#the-face-by-face-integrator),
+  which checks every face the fixed Gauss rule can get wrong, moves none of
+  these cases by more than 1e-8 of its volume (the pipe chamfer 40264.4913,
+  the round over a hole 7582.6448, the tray 145524.7077, the bent tube's
+  rim 131361.8716). OpenCASCADE's blend surface on
   such an edge is an approximation to its own tolerance, and where rounds
   meet at a corner it builds a patch of its own; neither is the rolling
   ball's envelope.

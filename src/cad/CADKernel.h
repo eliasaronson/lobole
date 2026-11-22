@@ -159,6 +159,16 @@ public:
     double surfaceArea = 0.0;
     glm::dvec3 centerOfMass{0.0};
     double inertia[3][3] = {}; // about centerOfMass, world-axis aligned
+    // How far each figure can be off, in its own unit (mm^3, mm^2, mm along
+    // any axis, mm^5 of any component): zero on a body with no face the
+    // fixed Gauss rule can get wrong
+    // (docs/inspect/README.md#the-face-by-face-integrator).
+    double volumeUncertainty = 0.0;
+    double areaUncertainty = 0.0;
+    double centerUncertainty = 0.0;
+    double inertiaUncertainty = 0.0;
+    // Faces (TopExp_Explorer order) whose second estimate did not settle.
+    std::vector<int> unconvergedFaces;
   };
   bool ComputeMassProps(MassProps& out) const;
 

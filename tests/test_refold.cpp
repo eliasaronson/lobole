@@ -17,8 +17,6 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepCheck_Analyzer.hxx>
-#include <BRepGProp.hxx>
-#include <GProp_GProps.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
@@ -286,17 +284,12 @@ TEST_CASE("a hole drawn flat across a crease is wrapped onto the bend",
   // A * t (2R + t) / 2 / (R + K t) — more than the flat hole's A * t, since
   // the outside of a bend is stretched further than the inside is squeezed.
   //
-  // Measured at a tight integration tolerance: CADShape::Volume()'s default
-  // is some 45 ppm loose on the ruled walls of a wrapped cut, which here is
-  // half a cubic millimetre — larger than the thing being checked.
-  const auto precise = [&] {
-    GProp_GProps g;
-    BRepGProp::VolumeProperties(doc.GetBodies()[0].shape.GetShape(), g, 1e-7);
-    return g.Mass();
-  };
+  // The wrapped cut's ruled walls are where BRepGProp's fixed rule read some
+  // 45 ppm loose, half a cubic millimetre here; CADShape::Volume checks
+  // those faces (docs/inspect/README.md#the-face-by-face-integrator).
   const double plug =
       std::numbers::pi * r * r * kT * (2.0 * kR + kT) / 2.0 / (kR + kK * kT);
-  CHECK_THAT(folded - precise(), WithinAbs(plug, 0.01));
+  CHECK_THAT(folded - doc.GetBodies()[0].shape.Volume(), WithinAbs(plug, 0.01));
 
   // And laying it flat again gives back the SAME blank the hole was drawn
   // on — the wrap and the unwrap are one map.

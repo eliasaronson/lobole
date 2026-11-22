@@ -975,8 +975,9 @@ the degree-3 rule on a tetrahedron) and compares it with the B-Rep's. The
 tolerance is derived from the mesh's own deflection
 (`fem::MeshVolumeSlack`): each boundary triangle's area times the sag of its
 midside nodes off their chords, which is the volume a faceted mesh of the
-same nodes would miss; plus the error OpenCASCADE's adaptive integration
-reports for the B-Rep's own volume, and a hundred-thousandth of the volume
+same nodes would miss; plus the uncertainty
+[the face-by-face integrator](../inspect/README.md#the-face-by-face-integrator)
+states for the B-Rep's own volume, and a hundred-thousandth of the volume
 for rounding. A flat-faced body therefore has to match to a part in a
 hundred thousand, and a tube at the automatic size sits well inside its
 slack. Past it the mesh is refused, with both volumes and which way it is

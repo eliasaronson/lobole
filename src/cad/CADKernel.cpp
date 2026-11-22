@@ -3,6 +3,7 @@
 
 #include "cad/CADKernel.h"
 #include "cad/BoundedRead.h"
+#include "cad/Integrate.h"
 #include "common/DesignerVersion.h"
 
 #include <array>
@@ -147,62 +148,156 @@ bool CADShape::IsValid() const { return !m_shape.IsNull(); }
 
 namespace {
 
-// Volume by shape IDENTITY. Every mutating RPC digests every body of the
-// part twice (before and after), and the digest is the volume; a part that
-// holds a Derived snapshot of a 197-body PCB spent 14 s per sketch add in
-// BRepGProp::VolumeProperties on bodies that had not changed (the SO-101
-// gripper, docs/modeling/README.md#the-model). A shape moved by a rigid
-// placement shares its TShape, so keying on the TShape (plus the location's
-// scale, the one part of a location that changes a volume) makes the second
-// and every later pass a lookup. The handle in the entry keeps the TShape
-// alive, so its address cannot be recycled for a different shape while the
-// entry lives; the ring bounds the memory.
+// Mass properties by shape IDENTITY. Every mutating RPC digests every body
+// of the part twice (before and after), and the digest is the volume; a part
+// that holds a Derived snapshot of a 197-body PCB spent 14 s per sketch add
+// integrating bodies that had not changed (the SO-101 gripper,
+// docs/modeling/README.md#the-model). A shape moved by a rigid placement
+// shares its TShape, so the entry is keyed on the TShape and holds the
+// integral of the TShape in its OWN frame (unlocated, FORWARD); a lookup
+// carries the centre and the inertia through the shape's placement. So the
+// figures do not depend on which placement asked first, and mass properties
+// of an unchanged body are a lookup too. A location that scales is not
+// rigid: such a shape is integrated where it is, uncached. The handle in the
+// entry keeps the TShape alive, so its address cannot be recycled for a
+// different shape while the entry lives; the ring bounds the memory.
 struct VolumeCache {
   struct Entry {
     Handle(TopoDS_TShape) keepAlive;
-    double scale = 1.0;
-    double volume = 0.0;
+    cad::Integral own; // the TShape unlocated and FORWARD; no faces
+    bool hasArea = false;
   };
   static constexpr size_t kCapacity = 4096;
   std::mutex mutex;
   std::unordered_map<const TopoDS_TShape*, Entry> entries;
   std::deque<const TopoDS_TShape*> order; // insertion order, for eviction
 
-  std::optional<double> Find(const TopoDS_Shape& shape) {
+  static bool Rigid(const TopoDS_Shape& shape) {
+    return shape.Location().Transformation().ScaleFactor() == 1.0;
+  }
+  static TopoDS_Shape Own(const TopoDS_Shape& shape) {
+    return shape.Located(TopLoc_Location()).Oriented(TopAbs_FORWARD);
+  }
+  // The entry, if there is one; `hasArea` says whether it carries the area.
+  std::optional<Entry> Find(const TopoDS_Shape& shape) {
     std::lock_guard<std::mutex> lock(mutex);
     auto it = entries.find(shape.TShape().get());
-    if (it == entries.end() ||
-        it->second.scale != shape.Location().Transformation().ScaleFactor())
+    if (it == entries.end())
       return std::nullopt;
-    return it->second.volume * Sign(shape);
+    return it->second;
   }
-  // The same TShape the other way out encloses the negative of its volume,
-  // so the entry holds the FORWARD figure and a reversed shape reads it
-  // negated. Without this, a solid reversed in place — an inside-out result,
-  // the thing BooleanRefusal exists to catch — read as the positive volume
-  // cached for its forward twin.
-  static double Sign(const TopoDS_Shape& shape) {
-    return shape.Orientation() == TopAbs_REVERSED ? -1.0 : 1.0;
-  }
-  void Store(const TopoDS_Shape& shape, double volume) {
+  void Store(const TopoDS_Shape& shape, const cad::Integral& own,
+             bool hasArea) {
     std::lock_guard<std::mutex> lock(mutex);
     const TopoDS_TShape* key = shape.TShape().get();
-    if (entries.find(key) == entries.end()) {
-      order.push_back(key);
-      while (order.size() > kCapacity) {
-        entries.erase(order.front());
-        order.pop_front();
-      }
+    auto it = entries.find(key);
+    if (it != entries.end()) {
+      // Never trade an entry with the area for one without: the volume's
+      // figures are the same bits either way.
+      if (it->second.hasArea && !hasArea)
+        return;
+      it->second = {shape.TShape(), own, hasArea};
+      return;
     }
-    entries[key] = {shape.TShape(),
-                    shape.Location().Transformation().ScaleFactor(),
-                    volume * Sign(shape)};
+    order.push_back(key);
+    while (order.size() > kCapacity) {
+      entries.erase(order.front());
+      order.pop_front();
+    }
+    entries[key] = {shape.TShape(), own, hasArea};
   }
 };
+
+// The integral of a shape whose TShape gave `own`, at the shape's placement
+// and orientation. The same TShape the other way out encloses the negative
+// of its volume (and inertia); without that, a solid reversed in place -- an
+// inside-out result, the thing BooleanRefusal exists to catch -- read as the
+// positive volume of its forward twin. A rotation turns the inertia; the
+// bounds on a centre's or an inertia component's uncertainty, stated per
+// axis, then widen by the most a rotation can mix the axes (sqrt 3, and 3).
+cad::Integral Placed(const cad::Integral& own, const TopoDS_Shape& shape) {
+  cad::Integral out = own;
+  const gp_Trsf t = shape.Location().Transformation();
+  if (t.Form() != gp_Identity) {
+    const gp_Mat m = t.VectorialPart();
+    double r[3][3];
+    bool turned = false;
+    for (int i = 0; i < 3; i++)
+      for (int j = 0; j < 3; j++) {
+        r[i][j] = m.Value(i + 1, j + 1);
+        if (r[i][j] != (i == j ? 1.0 : 0.0))
+          turned = true;
+      }
+    gp_Pnt c(own.centerOfMass.x, own.centerOfMass.y, own.centerOfMass.z);
+    c.Transform(t);
+    out.centerOfMass = glm::dvec3(c.X(), c.Y(), c.Z());
+    gp_Pnt about = own.about;
+    about.Transform(t);
+    out.about = about;
+    if (turned) {
+      for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++) {
+          double v = 0.0;
+          for (int k = 0; k < 3; k++)
+            for (int l = 0; l < 3; l++)
+              v += r[i][k] * own.inertia[k][l] * r[j][l];
+          out.inertia[i][j] = v;
+        }
+      out.centerUncertainty *= std::sqrt(3.0);
+      out.inertiaUncertainty *= 3.0;
+    }
+  }
+  if (shape.Orientation() == TopAbs_REVERSED) {
+    out.volume = -out.volume;
+    for (auto& row : out.inertia)
+      for (double& v : row)
+        v = -v;
+  }
+  return out;
+}
+
+// What the cache holds for `shape`, integrating what it lacks: the volume's
+// figures always, the area when `area`.
+cad::Integral Measured(const TopoDS_Shape& shape, bool area);
 
 VolumeCache& TheVolumeCache() {
   static VolumeCache cache;
   return cache;
+}
+
+cad::Integral Measured(const TopoDS_Shape& shape, bool area) {
+  if (!VolumeCache::Rigid(shape)) {
+    cad::IntegrateOptions o;
+    o.area = area;
+    return cad::Integrate(shape, o);
+  }
+  VolumeCache& cache = TheVolumeCache();
+  const std::optional<VolumeCache::Entry> hit = cache.Find(shape);
+  if (hit && (hit->hasArea || !area))
+    return Placed(hit->own, shape);
+  const TopoDS_Shape own = VolumeCache::Own(shape);
+  cad::Integral result;
+  if (hit) {
+    // The volume is known: integrate the area alone and add it.
+    cad::IntegrateOptions o;
+    o.volume = false;
+    const cad::Integral a = cad::Integrate(own, o);
+    result = hit->own;
+    result.area = a.area;
+    result.areaUncertainty = a.areaUncertainty;
+    result.unconverged.insert(result.unconverged.end(), a.unconverged.begin(),
+                              a.unconverged.end());
+    std::sort(result.unconverged.begin(), result.unconverged.end());
+    result.unconverged.erase(
+        std::unique(result.unconverged.begin(), result.unconverged.end()),
+        result.unconverged.end());
+  } else {
+    cad::IntegrateOptions o;
+    o.area = area;
+    result = cad::Integrate(own, o);
+  }
+  cache.Store(shape, result, area);
+  return Placed(result, shape);
 }
 
 // The TIGHT box by shape IDENTITY and LOCATION: the same TShape at the same
@@ -354,12 +449,7 @@ bool CADShape::SameGeometryAs(const CADShape& other) const {
 double CADShape::Volume() const {
   if (!IsValid())
     return 0.0;
-  if (const std::optional<double> hit = TheVolumeCache().Find(m_shape))
-    return *hit;
-  GProp_GProps props;
-  BRepGProp::VolumeProperties(m_shape, props);
-  TheVolumeCache().Store(m_shape, props.Mass());
-  return props.Mass();
+  return Measured(m_shape, false).volume;
 }
 
 int CADShape::SolidCount() const {
@@ -384,24 +474,18 @@ bool CADShape::ComputeMassProps(MassProps& out) const {
   if (!IsValid())
     return false;
 
-  GProp_GProps volumeProps;
-  BRepGProp::VolumeProperties(m_shape, volumeProps);
-  out.volume = volumeProps.Mass();
-  const gp_Pnt com = volumeProps.CentreOfMass();
-  out.centerOfMass = glm::dvec3(com.X(), com.Y(), com.Z());
-
-  // A GProps' inertia matrix is about its system location — anchor a second
-  // pass at the center of mass so the matrix is the physical one.
-  GProp_GProps aboutCom(com);
-  BRepGProp::VolumeProperties(m_shape, aboutCom);
-  const gp_Mat inertia = aboutCom.MatrixOfInertia();
+  const cad::Integral m = Measured(m_shape, true);
+  out.volume = m.volume;
+  out.centerOfMass = m.centerOfMass;
   for (int r = 0; r < 3; r++)
     for (int c = 0; c < 3; c++)
-      out.inertia[r][c] = inertia.Value(r + 1, c + 1);
-
-  GProp_GProps surfaceProps;
-  BRepGProp::SurfaceProperties(m_shape, surfaceProps);
-  out.surfaceArea = surfaceProps.Mass();
+      out.inertia[r][c] = m.inertia[r][c];
+  out.surfaceArea = m.area;
+  out.volumeUncertainty = m.volumeUncertainty;
+  out.areaUncertainty = m.areaUncertainty;
+  out.centerUncertainty = m.centerUncertainty;
+  out.inertiaUncertainty = m.inertiaUncertainty;
+  out.unconvergedFaces = m.unconverged;
   return true;
 }
 

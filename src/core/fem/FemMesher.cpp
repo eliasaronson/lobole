@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/fem/FemMesher.h"
+#include "cad/Integrate.h"
 
 #include "common/Logger.h"
 
@@ -57,17 +58,17 @@ double AutoSize(const TopoDS_Shape& shape) {
 }
 
 // The volume of every solid of `shape` (mm^3; 0 for one with none), and in
-// `error` how well it is known: the adaptive integration's own estimate
-// over curved faces, asked for to a part in a hundred thousand.
+// `error` how well it is known: the face-by-face integrator's uncertainty
+// (docs/inspect/README.md#the-face-by-face-integrator).
 [[maybe_unused]] double ShapeVolume(const TopoDS_Shape& shape, double& error) {
   double v = 0.0;
   error = 0.0;
+  cad::IntegrateOptions volumeOnly;
+  volumeOnly.area = false;
   for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next()) {
-    GProp_GProps props;
-    const double rel = BRepGProp::VolumeProperties(ex.Current(), props, 1e-5);
-    const double solid = std::abs(props.Mass());
-    v += solid;
-    error += std::max(rel, 0.0) * solid;
+    const cad::Integral m = cad::Integrate(ex.Current(), volumeOnly);
+    v += std::abs(m.volume);
+    error += m.volumeUncertainty;
   }
   return v;
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/WormGear.h"
+#include "cad/Integrate.h"
 
 #include "cad/NonDestructiveBoolean.h"
 #include "common/Logger.h"
@@ -18,13 +19,11 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
-#include <BRepGProp.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRep_Builder.hxx>
 #include <GC_MakeArcOfCircle.hxx>
-#include <GProp_GProps.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
@@ -68,11 +67,7 @@ std::string Fmt(const char* fmt, double a, double b = 0.0, double c = 0.0) {
   return buf;
 }
 
-double VolumeOf(const TopoDS_Shape& s) {
-  GProp_GProps props;
-  BRepGProp::VolumeProperties(s, props);
-  return props.Mass();
-}
+double VolumeOf(const TopoDS_Shape& s) { return cad::VolumeOf(s); }
 
 } // namespace
 
@@ -965,11 +960,7 @@ void Through(const Handle(BRepTools_History) & h, const TopoDS_Shape& s,
     out.Append(s);
 }
 
-double Volume(const TopoDS_Shape& s) {
-  GProp_GProps props;
-  BRepGProp::VolumeProperties(s, props);
-  return props.Mass();
-}
+double Volume(const TopoDS_Shape& s) { return cad::VolumeOf(s); }
 
 } // namespace
 

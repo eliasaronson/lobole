@@ -10,6 +10,7 @@
 // document is ever edited by a simulation.
 
 #include "cad/CADMaterials.h"
+#include "cad/Integrate.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
@@ -63,10 +64,10 @@ struct SolidCentroid {
 };
 
 SolidCentroid CentroidOf(const TopoDS_Shape& s) {
-  GProp_GProps props;
-  BRepGProp::VolumeProperties(s, props);
-  const gp_Pnt c = props.CentreOfMass();
-  return {glm::dvec3(c.X(), c.Y(), c.Z()), props.Mass()};
+  cad::IntegrateOptions volumeOnly;
+  volumeOnly.area = false;
+  const cad::Integral m = cad::Integrate(s, volumeOnly);
+  return {m.centerOfMass, m.volume};
 }
 
 // The solid of `result` that came from `input`: after a general fuse of

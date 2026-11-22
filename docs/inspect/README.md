@@ -242,11 +242,23 @@ viewport.
 
 ### The face-by-face integrator
 
-Every volume, centre, inertia and area above is still BRepGProp's fixed
-Gauss rule on the whole shape (`CADShape::Volume`, `ComputeMassProps`).
-`cad::Integrate` (`src/cad/Integrate.h`) is the measure that is to replace
-it ([the plan](../plans/checked-mass-properties.md)); nothing calls it yet
-outside its tests.
+Every volume, centre, inertia and area above comes from `cad::Integrate`
+(`src/cad/Integrate.h`): `CADShape::Volume` and `ComputeMassProps` call it
+through the volume cache, and a shape measured once (a boolean's overlap, a
+piece of a split, a sweep's sign check, the FEM mesh check) through
+`cad::VolumeOf` or `Integrate` itself. `BRepGProp::VolumeProperties` is
+called nowhere else (`tests/test_conventions.cpp` says so); a face's area
+used only to choose or sort faces still comes from `SurfaceProperties`.
+
+The cache is keyed on the TShape and holds the integral of the TShape in
+its own frame (unlocated, forward); a lookup carries the centre and the
+inertia through the shape's placement and negates the volume of a reversed
+one. So a body reads the same bits whichever placement asked first, and the
+mass properties of an unchanged body are a lookup. `Volume` integrates the
+volume's figures alone; `ComputeMassProps` adds the area to the entry. The
+two groups converge separately, so a figure is the same whether it was
+integrated alone or with the other. A location that scales is integrated
+where it is, uncached.
 
 It integrates each face alone, about the centre of the shape's box, and sums
 the faces in explorer order, so a shape gives the same bits every time. A
@@ -1007,7 +1019,12 @@ as a conic and as a rational B-spline, an extruded 24-span spline loop, a
 revolved Bezier profile, a horn torus, a modelled M10 thread and a level-3
 Menger sponge; the faces' figures summing to the body's, the fixed rule's
 figures kept bit for bit on faces that are not suspect, the two estimates'
-agreement on exact faces, and its CPU time against today's three passes),
+agreement on exact faces, and its CPU time against BRepGProp's three
+passes; through `CADShape`, the same bodies to their closed forms placed,
+placed twice and reversed from one cache entry, the volume's bits the same
+whether the area was integrated with it or after, a body with no face in
+doubt no dearer than the three passes, 197 unchanged bodies a lookup, and a
+tube trimmed by 40 intersection curves within its budget),
 `test_measure.cpp` (enclosed area: four wall bodies ring exactly the
 floor, a gap encloses nothing, a plate encloses its bore level and tilted;
 the exact distance over a 96-gon shaft in its bore, concentric and off

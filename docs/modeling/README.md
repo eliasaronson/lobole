@@ -52,11 +52,13 @@ Topic pages:
   feature's JSON and therefore of the cache key. An expression that fails to
   evaluate is a feature error, not a silent fall-back to the literal.
 - The kernel is OpenCASCADE behind `CADShape` (`src/cad/CADKernel.{h,cpp}`).
-  `CADShape::Volume` is cached by TShape identity (plus the location's scale),
+  `CADShape::Volume` and `ComputeMassProps` are cached by TShape identity,
   because every mutating RPC digests every body's volume before and after, and
   an unchanged body — a large Derived snapshot especially — must not be
-  re-measured each time. The cache holds the forward figure; a shape reversed
-  in place reads it negated, which is what an inside-out solid encloses.
+  re-measured each time. The cache holds the TShape's own, forward figures
+  and carries them through a rigid placement; a shape reversed in place reads
+  the volume negated, which is what an inside-out solid encloses
+  ([the integrator](../inspect/README.md#the-face-by-face-integrator)).
 
 ## Regeneration
 
@@ -2127,7 +2129,11 @@ known-bugs entry, because the difference is not a defect that can be shown:
   1e-7 mm confusion on a 30 mm part, a swept, lofted or blended surface
   approximated to its own tolerance (a square swept along a Bezier is 2e-6
   off), and the case's own quadrature, whose value is printed to sixteen
-  digits whatever it is good to.
+  digits whatever it is good to. The modelled M10 thread to a shoulder
+  (`06-threads/004`) is one: its groove is SMLib's screw sweep, 6.7e-8 of
+  the volume over the ideal one along the threaded length, which lifts the
+  centre of mass 6.5e-7 mm, past the last digit the case states; the
+  measured centre is the one that volume implies to 2e-9 mm.
 - **The case's formula is approximate.** A rectangle extruded with a taper
   is a prismatoid, V = h (A0 + 4 Am + A1) / 6; two cases state the
   pyramid's h (A0 + A1 + sqrt(A0 A1)) / 3, which is 7e-5 and 7e-4 off, and

@@ -2189,6 +2189,37 @@ TEST_CASE("OCC's signal handlers are armed in one place", "[convention]") {
   CHECK(offenders.empty());
 }
 
+TEST_CASE("a volume is integrated through cad::Integrate", "[convention]") {
+  // BRepGProp's fixed rule runs one Gauss rule across a trimmed face's knots
+  // and is wrong there without saying so: a tube with nine bars through its
+  // wall measured 0.56 mm3 heavy. cad::Integrate checks such a face with a
+  // second estimate and says how far off it can be
+  // (docs/inspect/README.md#the-face-by-face-integrator); a direct caller
+  // would bring the silent figure back. A face's area used to choose or
+  // sort faces may still call SurfaceProperties.
+  const std::regex use(
+      R"(\bBRepGProp::VolumeProperties(Gen)?\b|\bBRepGProp_Vinert\b(?!\.hxx))");
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"})
+    for (const SourceFile& src : SourcesUnder("src", ext)) {
+      if (Relative(src.path) == "src/cad/Integrate.cpp")
+        continue;
+      for (const auto& [n, row] : CodeLines(src.text))
+        if (std::regex_search(row, use))
+          offenders.push_back(Relative(src.path) + ":" + std::to_string(n) +
+                              ": " + row);
+    }
+  INFO("measure through CADShape::Volume / ComputeMassProps, or "
+       "cad::Integrate / cad::VolumeOf (cad/Integrate.h), instead:\n" +
+       [&] {
+         std::string s;
+         for (const std::string& o : offenders)
+           s += "  " + o + "\n";
+         return s;
+       }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("a curve is sampled through cad::SampleCurve", "[convention]") {
   // GCPnts_QuasiUniformDeflection judges a span by its end tangents, and on
   // OCC 7.6 (what Ubuntu 24.04 ships, and CI tests) a span that ends where
