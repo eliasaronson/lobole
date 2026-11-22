@@ -1188,6 +1188,11 @@ public:
   // SplitEntity's refusals that do not depend on the cuts. For a tool's
   // first click on a closed curve.
   std::string SplitRefusal(uint32_t id) const;
+  // What a cut of spline `id` at `at` (sketch mm, on the curve) would drop
+  // -- the same transfer SplitEntity runs, as a dry run: CutReport::dropped,
+  // nothing changed. Empty for any other curve, or a cut that is refused.
+  // For the Split tool's hover.
+  std::vector<std::string> SplitDropsAt(uint32_t id, glm::dvec2 at) const;
 
   // Trims the line `id` at `clickUV`: removes the sub-segment the click falls
   // in, bounded by the line's intersections with other lines (Trim's own

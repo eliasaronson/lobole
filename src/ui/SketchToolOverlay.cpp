@@ -372,6 +372,49 @@ void DrawSnapGlyphs(AppState& state) {
   }
 }
 
+void DrawSplitDrops(AppState& state) {
+  const SketchEditState& edit = state.sketchEdit;
+  if (!edit.IsEditing() || edit.tool != SketchTool::Split ||
+      !edit.hasSplitPreview || edit.splitPreviewDrops.empty() ||
+      edit.splitPreviewCuts.empty())
+    return;
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (!sketch)
+    return;
+  // Beside the cut (the warning pill's amber), so the eye is already there:
+  // a cut a little further along may keep what this one drops.
+  const glm::vec2 p =
+      SketchUVToScreen(state, sketch->plane, edit.splitPreviewCuts.back());
+  const char* kHead = "A cut here drops";
+  const ImU32 head = IM_COL32(255, 205, 120, 255);
+  const ImU32 body = IM_COL32(226, 232, 240, 255);
+  const float line = ImGui::GetTextLineHeight();
+  float w = ImGui::CalcTextSize(kHead).x;
+  for (const std::string& d : edit.splitPreviewDrops)
+    w = std::max(w, ImGui::CalcTextSize(d.c_str()).x);
+  const float padX = 8.0f, padY = 5.0f, gap = 2.0f;
+  const float h = line * (1.0f + edit.splitPreviewDrops.size()) +
+                  gap * edit.splitPreviewDrops.size();
+  // Below right of the cut, kept inside the viewport.
+  float x = p.x + 16.0f, y = p.y + 16.0f;
+  const float right = state.viewportPos.x + state.viewportSize.x - 4.0f;
+  const float bottom = state.viewportPos.y + state.viewportSize.y - 4.0f;
+  if (x + w + 2.0f * padX > right)
+    x = std::max(state.viewportPos.x + 4.0f, p.x - 16.0f - w - 2.0f * padX);
+  if (y + h + 2.0f * padY > bottom)
+    y = std::max(state.viewportPos.y + 4.0f, p.y - 16.0f - h - 2.0f * padY);
+  ImDrawList* dl = ViewportDrawList();
+  dl->AddRectFilled(ImVec2(x, y),
+                    ImVec2(x + w + 2.0f * padX, y + h + 2.0f * padY),
+                    IM_COL32(60, 44, 24, 235), 5.0f);
+  float ty = y + padY;
+  dl->AddText(ImVec2(x + padX, ty), head, kHead);
+  for (const std::string& d : edit.splitPreviewDrops) {
+    ty += line + gap;
+    dl->AddText(ImVec2(x + padX, ty), body, d.c_str());
+  }
+}
+
 ToolPrompt SketchToolPrompt(const SketchEditState& edit,
                             const units::System& units) {
   using T = SketchTool;

@@ -5,6 +5,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "common/ChildProcess.h"
 #include "core/sketch/SketchOrientation.h"
+#include "core/sketch/SketchSpline.h" // CutSpline
 #include "core/sketch/SketchSplit.h"
 #include "render/UnderlayRenderer.h"
 #include "ui/BackgroundJobs.h"
@@ -938,6 +939,142 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
       ui::GlobalUndo(*s_App);
     ctx->Yield();
     IM_CHECK(DocumentIO::FeatureToJson(*Doc()->GetFeature(0)) == after);
+  };
+
+  // docs/sketching/README.md#a-spline-cut-exactly: the Split tool's hover
+  // says what the cut at the cursor would drop -- a dimension on a pole of
+  // the cut's span -- before the click, and the click drops exactly that.
+  t = IM_REGISTER_TEST(engine, "split", "spline_hover_names_what_it_drops");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const sketch::BSpline wave{
+        {{-3, -1}, {-2, 1.5}, {-0.5, -1.5}, {1, 1.8}, {2.2, -0.5}, {3, 1}}};
+    const uint32_t spline = sk->AddEntity(wave);
+    const std::vector<double> U = sketch::SplineKnots(wave);
+    const double u =
+        0.5 * (U[sketch::BSplineDegree(wave)] + U[wave.poles.size()]);
+    const auto cut = sketch::CutSpline(wave, u);
+    IM_CHECK(cut.has_value());
+    std::vector<bool> kept(wave.poles.size(), false);
+    for (const auto& piece : cut->pieces)
+      for (int src : piece.source)
+        if (src >= 0)
+          kept[static_cast<size_t>(src)] = true;
+    uint8_t replaced = 0;
+    for (uint8_t k = 1; k + 1 < wave.poles.size() && replaced == 0; k++)
+      if (!kept[k])
+        replaced = k;
+    IM_CHECK_GT((int)replaced, 0);
+    const uint32_t anchor = sk->AddEntity(sketch::Point{{-2.5, -2.5}});
+    const double d = glm::length(wave.poles[replaced] - glm::dvec2(-2.5, -2.5));
+    sk->constraints.push_back(
+        {sketch::ConstraintKind::Distance, {anchor, 0}, {spline, replaced}, d});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const auto& live =
+        std::get<sketch::BSpline>(sk->entities[sk->IndexOfEntity(spline)]);
+    const glm::dvec2 cutAt = sketch::BSplineEvalUV(live, u);
+    const std::string expected = "distance (constraint 0) on pole " +
+                                 std::to_string(replaced) + " of spline " +
+                                 std::to_string(spline);
+
+    ctx->KeyPress(ImGuiKey_K);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Split);
+    const glm::vec2 p =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(cutAt));
+    ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+    ctx->Yield(2);
+    {
+      const ui::SketchEditState& e = s_App->sketchEdit;
+      IM_CHECK(e.hasSplitPreview);
+      IM_CHECK_EQ(e.splitPreviewCurve, spline);
+      IM_CHECK_EQ(e.splitPreviewDrops.size(), (size_t)1);
+      IM_CHECK_STR_EQ(e.splitPreviewDrops[0].c_str(), expected.c_str());
+      IM_CHECK_EQ(sk->constraints.size(), (size_t)1); // nothing dropped yet
+    }
+    GuiShot(ctx, "split_hover_drops");
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    for (const sketch::Constraint& c : sk->constraints)
+      IM_CHECK(c.kind != sketch::ConstraintKind::Distance);
+    IM_CHECK(s_App->sketchEdit.actionMsg == "Split; dropped " + expected);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    IM_CHECK(DocumentIO::FeatureToJson(*Doc()->GetFeature(0)) == after);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
+  // docs/sketching/README.md#gui: the Dimension tool on a spline's body
+  // refuses in the tool, before a ghost is drawn -- it used to draw one from
+  // the last pole and fail at the solver -- and adds nothing.
+  t = IM_REGISTER_TEST(engine, "dimension", "spline_body_refused");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const sketch::BSpline wave{
+        {{-3, -1}, {-2, 1.5}, {-0.5, -1.5}, {1, 1.8}, {2.2, -0.5}, {3, 1}}};
+    sk->AddEntity(wave);
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const size_t undo0 = s_App->commands->UndoDepth();
+    ctx->KeyPress(ImGuiKey_D);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Dimension);
+    // A point of the body halfway along, away from every pole.
+    const std::vector<double> U = sketch::SplineKnots(wave);
+    const glm::dvec2 mid = sketch::BSplineEvalUV(
+        wave, 0.5 * (U[sketch::BSplineDegree(wave)] + U[wave.poles.size()]));
+    const glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(mid));
+    ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+    ctx->Yield(2);
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    const ui::SketchEditState& e = s_App->sketchEdit;
+    IM_CHECK_STR_EQ(e.actionMsg.c_str(),
+                    "Not dimensioned: a spline has no size of its own: "
+                    "dimension its ends, a pole, or a point placed on it");
+    IM_CHECK(!e.dimPlacing); // no ghost
+    IM_CHECK(e.selected.empty());
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Dimension);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undo0);
+    IM_CHECK(DocumentIO::FeatureToJson(*Doc()->GetFeature(0)) == after);
+    // A second click on the body is refused the same way, still no ghost.
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->sketchEdit.dimPlacing);
+    IM_CHECK(DocumentIO::FeatureToJson(*Doc()->GetFeature(0)) == after);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
   };
 
   // Hovering (no click) with the Trim tool computes the preview span for the

@@ -273,6 +273,105 @@ TEST_CASE("A spline's cut keeps the constraints on the poles it leaves and "
   CHECK(sk.entityExprs[ids.front()].at("p0y") == "0");
 }
 
+TEST_CASE("A dimension survives a spline's cut wherever what it measured "
+          "still exists, and the dry run names the one it drops first",
+          "[sketch][spline][split]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const sketch::BSpline wave = Wave(3);
+  const uint32_t sp = sk.AddEntity(wave);
+  const double u = 1.5;
+  const auto cut = sketch::CutSpline(wave, u);
+  REQUIRE(cut);
+  std::set<int> kept;
+  for (const auto& piece : cut->pieces)
+    for (int s : piece.source)
+      if (s >= 0)
+        kept.insert(s);
+  // A pole the cut replaces, and one it leaves away from the cut.
+  int replaced = -1, far = -1;
+  for (int k = 1; k + 1 < static_cast<int>(wave.poles.size()); k++) {
+    if (!kept.count(k) && replaced < 0)
+      replaced = k;
+    if (kept.count(k))
+      far = k;
+  }
+  REQUIRE(replaced > 0);
+  REQUIRE(far > 0);
+  // An anchor fixed at the origin side, and a point placed on the spline.
+  const uint32_t anchor = sk.AddEntity(sketch::Point{{-3.0, -4.0}});
+  sk.constraints.push_back({FK::Fixed, {anchor, 0}, {0, 0}, 0.0});
+  const glm::dvec2 onAt = sketch::BSplineEvalUV(wave, 3.4);
+  const uint32_t on = sk.AddEntity(sketch::Point{onAt});
+  sk.constraints.push_back({FK::PointOnLine, {on, 0}, {sp, 0}, 0.0});
+  const auto dist = [&](const sketch::PointRef& r) {
+    return glm::length(sketch::EntityPointUV(Get(sk, r.entity), r.which) -
+                       sketch::EntityPointUV(Get(sk, anchor), 0));
+  };
+  struct Dim {
+    sketch::PointRef to;
+    double value;
+    size_t index;
+  };
+  std::vector<Dim> dims;
+  for (const sketch::PointRef& r :
+       {sketch::PointRef{sp, 0},
+        sketch::PointRef{sp, static_cast<uint8_t>(far)},
+        sketch::PointRef{on, 0},
+        sketch::PointRef{sp, static_cast<uint8_t>(replaced)}}) {
+    dims.push_back({r, dist(r), sk.constraints.size()});
+    sk.constraints.push_back({FK::Distance, {anchor, 0}, r, dims.back().value});
+  }
+  SolvedDof(sk);
+
+  // The dry run: what the cut would drop, nothing changed.
+  const glm::dvec2 at = sketch::BSplineEvalUV(wave, u);
+  const nlohmann::json before = DocumentIO::FeatureToJson(sk);
+  const std::vector<std::string> dry = sk.SplitDropsAt(sp, at);
+  CHECK(DocumentIO::FeatureToJson(sk) == before);
+  REQUIRE(dry.size() == 1);
+  CHECK(dry[0] == "distance (constraint " + std::to_string(dims[3].index) +
+                      ") on pole " + std::to_string(replaced) + " of spline " +
+                      std::to_string(sp));
+  CHECK(sk.SplitDropsAt(sk.AddEntity(sketch::Line{{0, -9}, {1, -9}}), at)
+            .empty()); // a line's cut drops nothing of this kind
+
+  // The cut drops exactly that, and the rest keep their values.
+  SketchFeature::CutReport report;
+  std::string why;
+  const auto ids = sk.SplitEntity(sp, {{at, 0}}, &why, &report);
+  INFO(why);
+  REQUIRE(ids.size() == 2);
+  CHECK(report.dropped == dry);
+  Solved(sk);
+  int distances = 0;
+  for (const auto& c : sk.constraints) {
+    if (c.kind != FK::Distance)
+      continue;
+    distances++;
+    const double measured =
+        glm::length(sketch::EntityPointUV(Get(sk, c.a.entity), c.a.which) -
+                    sketch::EntityPointUV(Get(sk, c.b.entity), c.b.which));
+    CHECK_THAT(measured, WithinAbs(c.value, 1e-6));
+    bool known = false;
+    for (size_t d = 0; d < 3; d++)
+      known |= std::abs(c.value - dims[d].value) < 1e-12;
+    CHECK(known);
+  }
+  CHECK(distances == 3);
+
+  // A distance to the new joint drives where the joint lies.
+  const auto& first = std::get<sketch::BSpline>(Get(sk, ids.front()));
+  const sketch::PointRef joint{ids.front(),
+                               static_cast<uint8_t>(first.poles.size() - 1)};
+  const double now = dist(joint);
+  sk.constraints.push_back({FK::Distance, {anchor, 0}, joint, now + 0.75});
+  Solved(sk);
+  CHECK_THAT(dist(joint), WithinAbs(now + 0.75, 1e-6));
+  const auto& second = std::get<sketch::BSpline>(Get(sk, ids.back()));
+  CHECK(glm::length(sketch::EntityPointUV(Get(sk, joint.entity), joint.which) -
+                    second.poles.front()) < 1e-6); // still one curve
+}
+
 TEST_CASE("A closed spline takes one cut; its seam is the other",
           "[sketch][spline][split]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));

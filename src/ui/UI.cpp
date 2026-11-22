@@ -1197,6 +1197,7 @@ void DrawUI(AppState& state) {
       DrawSnapGlyphs(state);
       DrawPrimitiveSnapCue(state); // a primitive ghost being dragged
       DrawSelectionBox(state);
+      DrawSplitDrops(state);
       DrawDatumLabels(state);
       DrawElementNameOverlay(state); // toponaming debug: hovered face's name
       DrawDimensions(state);

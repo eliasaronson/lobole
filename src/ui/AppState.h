@@ -256,6 +256,10 @@ struct SketchEditState {
   std::vector<glm::dvec2> splitPreviewTicks; // two per cut: across the curve
   std::vector<sketch::Entity> splitPreviewPieces;
   uint32_t splitPreviewCurve = 0;
+  // What the cut under the cursor would drop (a spline's constraints and
+  // pole expressions on the poles it replaces: SketchFeature::SplitDropsAt),
+  // drawn beside the cut.
+  std::vector<std::string> splitPreviewDrops;
   bool splitPreviewClosed = false; // the curve takes two cuts (a circle,
                                    // an ellipse)
 

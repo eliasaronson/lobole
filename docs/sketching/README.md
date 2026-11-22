@@ -510,6 +510,19 @@ constraint on a replaced pole is dropped, and the edit names each one, in
 the RPC's `dropped` and the prompt pill: "fixed (constraint 6) on pole 4 of
 spline 9", "the expression on p3x of spline 9".
 
+So **a dimension stays on the thing it measured if that thing still
+exists**: one on an end, on a pole away from the cut, or on a point placed
+on the spline survives the cut with its value, and the joint is a point
+like any other end, so a distance, an X/Y or a coincident takes it -- a
+distance to the joint drives where the joint lies. Only one on a pole of
+the cut's own span goes. What a cut would drop is decided before anything
+moves (`PlanSplineCut`, `SketchFeature.cpp`), and `SplitDropsAt` runs that
+same decision as a dry run, which is how the Split tool names a drop before
+the click ([Split](#split)). A spline's length and its radius at a point
+are not dimensions yet; the Dimension tool refuses a spline's body
+([GUI](#gui)). Tests: `tests/test_sketch_split_curves.cpp` ("A dimension
+survives a spline's cut wherever…").
+
 #### Smooth
 
 Smooth [`smooth`] (`ConstraintKind::SplineJoint`, badge `C2`, `C1` at degree
@@ -1324,7 +1337,11 @@ is not a plain number is an expression, with variable completion; angles
 are typed in degrees; a negative value flips direction; `name = value`
 makes a project variable and drives the dimension by it
 ([numeric input](../ui/numeric-input.md#a-new-variable)). Labels drag to
-reposition (`labelOffset`).
+reposition (`labelOffset`). A spline's body is refused in the tool, before a
+ghost is drawn, and nothing is picked: "Not dimensioned: a spline has no
+size of its own: dimension its ends, a pole, or a point placed on it" (it
+used to draw a ghost from the last pole and then fail at the solver;
+`dimension/spline_body_refused`).
 
 ### The toolbar
 
@@ -1432,7 +1449,12 @@ another curve says to click the held one again. A closed spline takes one,
 its seam being the other. The prompt pill alone says what to do; a
 refusal says only why, prefixed "Not split:", in `SplitEntity`'s words, and
 a spline's cut that dropped constraints says which, "Split; dropped fixed
-(constraint 6) on pole 4 of spline 9".
+(constraint 6) on pole 4 of spline 9". Before the click, the hover says it
+too: beside the cut, in the warning amber, "A cut here drops" and each thing
+the cut at the cursor would drop (`SplitDropsAt`, the cut's own decision run
+dry; `SketchEditState::splitPreviewDrops`, drawn by `DrawSplitDrops`), so a
+cut a little further along can keep it
+(`split/spline_hover_names_what_it_drops`).
 
 Splitting a line where a circle crosses it, twice, and making the piece
 inside construction (Q) is the use it was built for: the sketch stays
@@ -1700,7 +1722,7 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
   are stored and fixed, never solved for), and no tool or RPC edits them;
   continuity at a closed spline's seam beyond C0.
 - G2 with an ellipse or elliptical arc; an arc length on an elliptical arc
-  or a spline.
+  or a spline; a spline's radius at a point as a dimension.
 - A first-dimension rescale over the RPC (deliberately: scripts' geometry
   stays literal), or with a linked pattern's millimetre parameters scaled
   along.

@@ -688,6 +688,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     edit.splitPreviewCuts.clear();
     edit.splitPreviewTicks.clear();
     edit.splitPreviewPieces.clear();
+    edit.splitPreviewDrops.clear();
     edit.splitPreviewCurve = 0;
     edit.splitPreviewClosed = false;
     if (edit.splitCircle != 0 &&
@@ -793,6 +794,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.splitPreviewCuts = cuts;
       if (!twoCuts || cuts.size() == 2)
         edit.splitPreviewPieces = sketch::SplitPieces(e, cuts);
+      // What a click here would drop, said before it is clicked: the same
+      // transfer the cut runs, as a dry run.
+      if (std::holds_alternative<sketch::BSpline>(e))
+        edit.splitPreviewDrops = sketch->SplitDropsAt(curveId, cut.at);
       edit.splitPreviewCurve = curveId;
       edit.splitPreviewClosed = twoCuts;
       edit.hasSplitPreview = true;

@@ -96,6 +96,10 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out);
 // snapping. Call once per frame from the UI pass.
 void DrawSnapGlyphs(AppState& state);
 
+// Draws, beside the Split tool's cut under the cursor, what that cut would
+// drop (SketchEditState::splitPreviewDrops). No-op when it drops nothing.
+void DrawSplitDrops(AppState& state);
+
 // Draws the rubber-band selection rectangle while a box-select drag is active
 // (blue solid = window / left→right; green dashed = crossing / right→left).
 // No-op otherwise. Call once per frame from the UI pass.

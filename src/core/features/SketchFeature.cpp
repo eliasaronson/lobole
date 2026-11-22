@@ -1183,7 +1183,179 @@ std::string SplineCutRefusal(const SketchFeature& sk, uint32_t id, double u,
              ", which the cut replaces: centre it elsewhere, then split";
   return {};
 }
+
+// What a cut of spline `id` of `sk` at parameter `u`, keeping `keep`, does
+// with what the spline carries, decided before anything moves: where each
+// pole goes, the end each tangent or curvature is joined at, the piece each
+// point on the spline lies on, and what is dropped (one reason per dropped
+// constraint, then the pole expressions). SplitSplineAt's transfer, and its
+// dry run SplitDropsAt; `cut` is empty when the cut cannot be made.
+struct SplineCutPlan {
+  std::optional<sketch::SplineCut> cut;
+  size_t lo = 0, hi = 0;
+  // Where each original pole went: (piece, which), or nowhere (replaced).
+  std::vector<std::optional<std::pair<size_t, uint8_t>>> where;
+  std::vector<int> joinedAt, onPiece;
+  std::vector<std::string> dropOf; // per constraint: "" = it survives
+  std::vector<std::string> dropped;
+};
+
+SplineCutPlan PlanSplineCut(const SketchFeature& sk, uint32_t id, double u,
+                            int keep) {
+  using K = sketch::ConstraintKind;
+  SplineCutPlan plan;
+  const size_t idx = sk.IndexOfEntity(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return plan;
+  const auto* sp = std::get_if<sketch::BSpline>(&sk.entities[idx]);
+  if (!sp)
+    return plan;
+  const sketch::BSpline& original = *sp;
+  plan.cut = sketch::CutSpline(original, u);
+  if (!plan.cut)
+    return plan;
+  const sketch::SplineCut& cut = *plan.cut;
+  const std::string name = "spline " + std::to_string(id);
+  const size_t n = original.poles.size();
+  const size_t lo = plan.lo = keep == 2 ? cut.before : 0;
+  const size_t hi = plan.hi = keep == 1 ? cut.before : cut.pieces.size();
+  auto& where = plan.where;
+  where.assign(n, std::nullopt);
+  for (size_t i = lo; i < hi; i++) {
+    const std::vector<int>& src = cut.pieces[i].source;
+    for (size_t k = 0; k < src.size(); k++)
+      if (src[k] >= 0 && !where[static_cast<size_t>(src[k])])
+        where[static_cast<size_t>(src[k])] = {i, static_cast<uint8_t>(k)};
+  }
+  const auto& constraints = sk.constraints;
+  const auto& entities = sk.entities;
+  const auto isLineId = [&](uint32_t e) {
+    if (sketch::IsDatum(e))
+      return e != sketch::kOrigin;
+    const size_t i = sk.IndexOfEntity(e);
+    return i != std::numeric_limits<size_t>::max() &&
+           std::holds_alternative<sketch::Line>(entities[i]);
+  };
+  // The end each tangent or curvature on the spline is joined at (as the
+  // solver reads a joint), and which kept piece each point on the spline
+  // lies on.
+  std::vector<int>& joinedAt = plan.joinedAt;
+  std::vector<int>& onPiece = plan.onPiece;
+  joinedAt.assign(constraints.size(), -1);
+  onPiece.assign(constraints.size(), -1);
+  const std::vector<uint8_t> ends = sketch::EndsOf(original);
+  const auto isEnd = [](const std::vector<uint8_t>& es, uint8_t w) {
+    return std::find(es.begin(), es.end(), w) != es.end();
+  };
+  for (size_t k = 0; k < constraints.size(); k++) {
+    const sketch::Constraint& t = constraints[k];
+    if (t.kind == K::PointOnLine && t.b.entity == id && t.a.entity != id) {
+      const size_t ai = sk.IndexOfEntity(t.a.entity);
+      const glm::dvec2 q = sketch::IsDatum(t.a.entity)
+                               ? sketch::DatumPointUV(t.a.entity, t.a.which)
+                           : ai == std::numeric_limits<size_t>::max()
+                               ? glm::dvec2(0.0)
+                               : sketch::EntityPointUV(entities[ai], t.a.which);
+      double best = std::numeric_limits<double>::infinity();
+      for (size_t i = lo; i < hi; i++) {
+        const auto nr = sketch::NearestOnCurve(cut.pieces[i].spline, q);
+        if (nr && nr->distance < best) {
+          best = nr->distance;
+          onPiece[k] = static_cast<int>(i);
+        }
+      }
+      // On the part a fillet removed: nothing of the curve is there.
+      if (best > 1e-6 * (1.0 + sketch::CurveLength(original)))
+        onPiece[k] = -2;
+      continue;
+    }
+    if ((t.kind != K::Tangent && t.kind != K::Curvature) ||
+        (t.a.entity == id) == (t.b.entity == id))
+      continue;
+    const uint32_t other = t.a.entity == id ? t.b.entity : t.a.entity;
+    const size_t oi = sk.IndexOfEntity(other);
+    if (oi == std::numeric_limits<size_t>::max())
+      continue;
+    const std::vector<uint8_t> otherEnds = sketch::EndsOf(entities[oi]);
+    for (const sketch::Constraint& c : constraints) {
+      if (c.kind != K::Coincident)
+        continue;
+      bool found = false;
+      for (const auto& [p, q] : {std::pair{c.a, c.b}, std::pair{c.b, c.a}})
+        if (p.entity == id && isEnd(ends, p.which) && q.entity == other &&
+            isEnd(otherEnds, q.which)) {
+          joinedAt[k] = p.which;
+          found = true;
+          break;
+        }
+      if (found)
+        break;
+    }
+  }
+
+  // What the transfer cannot keep.
+  plan.dropOf.assign(constraints.size(), {});
+  for (size_t k = 0; k < constraints.size(); k++) {
+    const sketch::Constraint& con = constraints[k];
+    const PointSlots slots = PointSlotsOf(con, isLineId(con.c.entity));
+    std::vector<size_t> gone;
+    const auto check = [&](const sketch::PointRef& r) {
+      if (r.entity == id && (r.which >= n || !where[r.which]))
+        gone.push_back(r.which);
+    };
+    if (slots.a)
+      check(con.a);
+    if (slots.b)
+      check(con.b);
+    if (slots.c)
+      check(con.c);
+    const std::string what = std::string(sketch::ConstraintWord(con.kind)) +
+                             " (constraint " + std::to_string(k) + ")";
+    std::string& drop = plan.dropOf[k];
+    if (!gone.empty()) {
+      std::sort(gone.begin(), gone.end());
+      gone.erase(std::unique(gone.begin(), gone.end()), gone.end());
+      std::string poles = gone.size() == 1 ? "pole " : "poles ";
+      for (size_t g = 0; g < gone.size(); g++)
+        poles += (g == 0                 ? ""
+                  : g + 1 == gone.size() ? " and "
+                                         : ", ") +
+                 std::to_string(gone[g]);
+      drop = what + " on " + poles + " of " + name;
+    } else if (joinedAt[k] >= 0) {
+      const size_t w = static_cast<size_t>(joinedAt[k]);
+      if (w >= n || !where[w])
+        drop = what + " at the end of " + name + " the cut removed";
+    } else if (onPiece[k] == -2) {
+      drop = what + " on the part of " + name + " the cut removed";
+    }
+    if (!drop.empty())
+      plan.dropped.push_back(drop);
+  }
+  // Pole expressions follow their poles; a replaced pole's is dropped.
+  if (auto it = sk.entityExprs.find(id); it != sk.entityExprs.end())
+    for (const auto& [field, expr] : it->second) {
+      const auto pf = sketch::PoleField(field);
+      if (!pf || pf->first >= n || !where[pf->first])
+        plan.dropped.push_back("the expression on " + field + " of " + name);
+    }
+  return plan;
+}
 } // namespace
+
+std::vector<std::string> SketchFeature::SplitDropsAt(uint32_t id,
+                                                     glm::dvec2 at) const {
+  const size_t idx = IndexOfEntity(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return {};
+  const auto* sp = std::get_if<sketch::BSpline>(&entities[idx]);
+  if (!sp)
+    return {};
+  const double u = sketch::SplineParamNearest(*sp, at);
+  if (!SplineCutRefusal(*this, id, u, 0).empty())
+    return {};
+  return PlanSplineCut(*this, id, u, 0).dropped;
+}
 
 std::vector<uint32_t>
 SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
@@ -1204,82 +1376,15 @@ SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
   if (std::string why = SplineCutRefusal(*this, id, u, keep); !why.empty())
     return fail(why);
   const sketch::BSpline original = *sp;
-  const std::string name = "spline " + std::to_string(id);
   const size_t n = original.poles.size();
   const bool closed = sketch::SplineClosed(original);
-  const auto cut = sketch::CutSpline(original, u);
-  const size_t lo = keep == 2 ? cut->before : 0;
-  const size_t hi = keep == 1 ? cut->before : cut->pieces.size();
-  // Where each original pole went: (piece, which), or nowhere (replaced).
-  std::vector<std::optional<std::pair<size_t, uint8_t>>> where(n);
-  for (size_t i = lo; i < hi; i++) {
-    const std::vector<int>& src = cut->pieces[i].source;
-    for (size_t k = 0; k < src.size(); k++)
-      if (src[k] >= 0 && !where[static_cast<size_t>(src[k])])
-        where[static_cast<size_t>(src[k])] = {i, static_cast<uint8_t>(k)};
-  }
-
-  const auto isLineId = [&](uint32_t e) {
-    if (sketch::IsDatum(e))
-      return e != sketch::kOrigin;
-    const size_t i = IndexOfEntity(e);
-    return i != std::numeric_limits<size_t>::max() &&
-           std::holds_alternative<sketch::Line>(entities[i]);
-  };
-  // Before anything moves: the end each tangent or curvature on the spline
-  // is joined at (as the solver reads a joint), and which kept piece each
-  // point on the spline lies on.
-  std::vector<int> joinedAt(constraints.size(), -1);
-  std::vector<int> onPiece(constraints.size(), -1);
-  const std::vector<uint8_t> ends = sketch::EndsOf(original);
-  const auto isEnd = [](const std::vector<uint8_t>& es, uint8_t w) {
-    return std::find(es.begin(), es.end(), w) != es.end();
-  };
-  for (size_t k = 0; k < constraints.size(); k++) {
-    const sketch::Constraint& t = constraints[k];
-    if (t.kind == K::PointOnLine && t.b.entity == id && t.a.entity != id) {
-      const size_t ai = IndexOfEntity(t.a.entity);
-      const glm::dvec2 q = sketch::IsDatum(t.a.entity)
-                               ? sketch::DatumPointUV(t.a.entity, t.a.which)
-                           : ai == std::numeric_limits<size_t>::max()
-                               ? glm::dvec2(0.0)
-                               : sketch::EntityPointUV(entities[ai], t.a.which);
-      double best = std::numeric_limits<double>::infinity();
-      for (size_t i = lo; i < hi; i++) {
-        const auto nr = sketch::NearestOnCurve(cut->pieces[i].spline, q);
-        if (nr && nr->distance < best) {
-          best = nr->distance;
-          onPiece[k] = static_cast<int>(i);
-        }
-      }
-      // On the part a fillet removed: nothing of the curve is there.
-      if (best > 1e-6 * (1.0 + sketch::CurveLength(original)))
-        onPiece[k] = -2;
-      continue;
-    }
-    if ((t.kind != K::Tangent && t.kind != K::Curvature) ||
-        (t.a.entity == id) == (t.b.entity == id))
-      continue;
-    const uint32_t other = t.a.entity == id ? t.b.entity : t.a.entity;
-    const size_t oi = IndexOfEntity(other);
-    if (oi == std::numeric_limits<size_t>::max())
-      continue;
-    const std::vector<uint8_t> otherEnds = sketch::EndsOf(entities[oi]);
-    for (const sketch::Constraint& c : constraints) {
-      if (c.kind != K::Coincident)
-        continue;
-      bool found = false;
-      for (const auto& [p, q] : {std::pair{c.a, c.b}, std::pair{c.b, c.a}})
-        if (p.entity == id && isEnd(ends, p.which) && q.entity == other &&
-            isEnd(otherEnds, q.which)) {
-          joinedAt[k] = p.which;
-          found = true;
-          break;
-        }
-      if (found)
-        break;
-    }
-  }
+  // Everything decided before anything moves (the dry run's plan).
+  SplineCutPlan plan = PlanSplineCut(*this, id, u, keep);
+  const auto& cut = plan.cut;
+  const size_t lo = plan.lo, hi = plan.hi;
+  const auto& where = plan.where;
+  const std::vector<int>& joinedAt = plan.joinedAt;
+  const std::vector<int>& onPiece = plan.onPiece;
 
   // The pieces: the longest kept keeps the id. AddEntity may reallocate
   // `entities`: nothing above is dereferenced past here.
@@ -1301,21 +1406,26 @@ SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
     return sketch::PointRef{ids[where[pole]->first], where[pole]->second};
   };
 
-  // The transfer.
-  std::vector<std::string> dropped;
+  const auto isLineId = [&](uint32_t e) {
+    if (sketch::IsDatum(e))
+      return e != sketch::kOrigin;
+    const size_t i = IndexOfEntity(e);
+    return i != std::numeric_limits<size_t>::max() &&
+           std::holds_alternative<sketch::Line>(entities[i]);
+  };
+
+  // The transfer: what the plan drops goes, the rest is re-pointed.
   std::vector<sketch::Constraint> survivors;
   survivors.reserve(constraints.size());
   for (size_t k = 0; k < constraints.size(); k++) {
+    if (!plan.dropOf[k].empty())
+      continue;
     sketch::Constraint con = constraints[k];
     const PointSlots slots = PointSlotsOf(con, isLineId(con.c.entity));
-    std::vector<size_t> gone;
     const auto map = [&](sketch::PointRef& r) {
-      if (r.entity != id)
-        return;
-      if (const auto to = refOf(r.which))
-        r = *to;
-      else
-        gone.push_back(r.which);
+      if (r.entity == id)
+        if (const auto to = refOf(r.which))
+          r = *to;
     };
     if (slots.a)
       map(con.a);
@@ -1323,30 +1433,9 @@ SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
       map(con.b);
     if (slots.c)
       map(con.c);
-    const std::string word = sketch::ConstraintWord(con.kind);
-    const std::string what = word + " (constraint " + std::to_string(k) + ")";
-    if (!gone.empty()) {
-      std::sort(gone.begin(), gone.end());
-      gone.erase(std::unique(gone.begin(), gone.end()), gone.end());
-      std::string poles = gone.size() == 1 ? "pole " : "poles ";
-      for (size_t g = 0; g < gone.size(); g++)
-        poles += (g == 0                 ? ""
-                  : g + 1 == gone.size() ? " and "
-                                         : ", ") +
-                 std::to_string(gone[g]);
-      dropped.push_back(what + " on " + poles + " of " + name);
-      continue;
-    }
     if (joinedAt[k] >= 0) {
       const auto to = refOf(static_cast<size_t>(joinedAt[k]));
-      if (!to) {
-        dropped.push_back(what + " at the end of " + name + " the cut removed");
-        continue;
-      }
       (con.a.entity == id ? con.a : con.b).entity = to->entity;
-    } else if (onPiece[k] == -2) {
-      dropped.push_back(what + " on the part of " + name + " the cut removed");
-      continue;
     } else if (onPiece[k] >= 0) {
       con.b.entity = ids[static_cast<size_t>(onPiece[k])];
     }
@@ -1354,19 +1443,17 @@ SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
   }
   constraints = std::move(survivors);
 
-  // Pole expressions follow their poles; a replaced pole's is dropped.
+  // Pole expressions follow their poles; a replaced pole's is dropped (the
+  // plan named it).
   if (auto it = entityExprs.find(id); it != entityExprs.end()) {
     std::map<std::string, std::string> old = std::move(it->second);
     entityExprs.erase(it);
     for (const auto& [field, expr] : old) {
       const auto pf = sketch::PoleField(field);
       const auto to = pf ? refOf(pf->first) : std::nullopt;
-      if (!to) {
-        dropped.push_back("the expression on " + field + " of " + name);
-        continue;
-      }
-      entityExprs[to->entity]["p" + std::to_string(to->which) +
-                              (pf->second ? "x" : "y")] = expr;
+      if (to)
+        entityExprs[to->entity]["p" + std::to_string(to->which) +
+                                (pf->second ? "x" : "y")] = expr;
     }
   }
 
@@ -1417,8 +1504,8 @@ SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
     RegenerateDerived();
   if (report) {
     report->replaced.push_back({id, order});
-    report->dropped.insert(report->dropped.end(), dropped.begin(),
-                           dropped.end());
+    report->dropped.insert(report->dropped.end(), plan.dropped.begin(),
+                           plan.dropped.end());
   }
   return order;
 }

@@ -47,6 +47,11 @@ namespace ui {
 
 namespace {
 
+// The Dimension tool's refusal of a spline's body.
+constexpr const char* kSplineBodyRefusal =
+    "a spline has no size of its own: dimension its ends, a pole, or a point "
+    "placed on it";
+
 // UV of a point ref against the live sketch (datum origin/axes included).
 std::optional<glm::dvec2> TargetUV(const SketchFeature& sk,
                                    const sketch::PointRef& r) {
@@ -266,6 +271,14 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
 
   const sketch::Entity* e = entityOf(pick.ref.entity);
   const bool isAxis = sketch::IsDatum(pick.ref.entity);
+
+  // A spline's body has no size to dimension: refused here, before a ghost
+  // is drawn, and nothing is picked (docs/sketching/README.md#gui).
+  if (pick.body && e != nullptr &&
+      std::holds_alternative<sketch::BSpline>(*e)) {
+    edit.actionMsg = std::string("Not dimensioned: ") + kSplineBodyRefusal;
+    return;
+  }
 
   // A circle/arc body goes straight to radius (label-only) placement.
   if (pick.body && e != nullptr &&
