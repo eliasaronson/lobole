@@ -1358,8 +1358,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "edge_dir, corner_mm}. Read-only. Refused, naming why: no mesh at "
      "the point (`no scan`), one face there (`no edge`).",
      "feature_id:int>=1, point_mm:number[3]", remote::NeedsPart,
-     "verdict:string, radius_mm:number, sigma_mm:number, "
-     "chamfer_mm:number[], angle_deg:number, also_fits:string[], "
+     "verdict:string, radius_mm?:number, sigma_mm?:number|null, "
+     "chamfer_mm?:number[], angle_deg:number, also_fits:string[], "
      "worse:object, noise_mm:number, window_mm:number, points:int, "
      "edge_dir:number[], corner_mm:number[]"},
     {"read_thread",

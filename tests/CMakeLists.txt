@@ -943,6 +943,13 @@ add_test(NAME measure_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(measure_smoke PROPERTIES TIMEOUT 120)
 
+# read_round's answers through the strict client: a round, a chamfer, each
+# with only its own keys (docs/modeling/README.md#reading-a-round-off-a-scan).
+add_test(NAME read_round_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/read_round_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(read_round_smoke PROPERTIES TIMEOUT 120)
+
 # Tolerances and fits (docs/tolerances/README.md): a tolerance as design intent
 # over RPC, and check_fits pairing faces off the assembly's own mates —
 # including a sub-assembly, where reaching the part behind an anchor is a walk

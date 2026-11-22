@@ -172,3 +172,76 @@ def mesh_sphere(path, center=(0.0, 0.0, 0.0), r=20.0, rings=48, cut_z=None):
                     f.write(struct.pack("<3f", *pts[k]))
                 f.write(b"\0\0")
     return len(tris)
+
+
+def scanned_corner(path, size, chamfer=False, height=40.0, seed=802):
+    """Writes, as a binary STL, a scan of a 30 mm square prism (z 0 to
+    `height`) whose corner at the origin is a round of `size` -- or a chamfer
+    of `size` along each face: points every 0.1 mm within 8 mm of the corner
+    and between z 15 and 25, 1 mm elsewhere, each moved 0.01 mm (one sigma)
+    along its normal, capped flat. The GUI suite's WriteScannedPrism, for a
+    smoke that reads the corner back (read_round). Pure Python."""
+    import math
+    import random
+    import struct
+    at, nrm = [], []
+
+    def line(a, b):
+        d = (b[0] - a[0], b[1] - a[1])
+        ln = math.hypot(*d)
+        n = (d[1] / ln, -d[0] / ln)
+        s = 0.0
+        while s < ln - 1e-9:
+            p = (a[0] + d[0] * s / ln, a[1] + d[1] * s / ln)
+            at.append(p)
+            nrm.append(n)
+            s += 0.1 if math.hypot(*p) < 8.0 else 1.0
+
+    r = size
+    line((r, 0.0), (30.0, 0.0))
+    line((30.0, 0.0), (30.0, 30.0))
+    line((30.0, 30.0), (0.0, 30.0))
+    line((0.0, 30.0), (0.0, r))
+    if chamfer:
+        line((0.0, r), (r, 0.0))
+    else:
+        k = max(8, math.ceil(r * 1.5708 / 0.1))
+        for i in range(k):
+            a = math.pi + 0.5 * math.pi * i / k
+            at.append((r + r * math.cos(a), r + r * math.sin(a)))
+            nrm.append((math.cos(a), math.sin(a)))
+    zs, z = [], 0.0
+    while z < height - 1e-9:
+        zs.append(z)
+        z += 0.1 if 15.0 <= z < 25.0 else 1.0
+    zs.append(height)
+    rng = random.Random(seed)
+    n = len(at)
+    pos = []
+    for z in zs:
+        for (x, y), (nx, ny) in zip(at, nrm):
+            g = rng.gauss(0.0, 0.01)
+            pos.append((x + nx * g, y + ny * g, z))
+    tris = []
+    levels = len(zs) - 1
+    for lv in range(levels):
+        for i in range(n):
+            a, b = lv * n + i, lv * n + (i + 1) % n
+            tris.append((a, b, b + n))
+            tris.append((a, b + n, a + n))
+    bottom = len(pos)
+    pos.append((15.0, 15.0, 0.0))
+    pos.append((15.0, 15.0, height))
+    top = levels * n
+    for i in range(n):
+        tris.append((bottom, (i + 1) % n, i))
+        tris.append((bottom + 1, top + i, top + (i + 1) % n))
+    with open(path, "wb") as f:
+        f.write(b"\0" * 80)
+        f.write(struct.pack("<I", len(tris)))
+        for t in tris:
+            f.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            for k in t:
+                f.write(struct.pack("<3f", *pos[k]))
+            f.write(b"\0\0")
+    return len(tris)
