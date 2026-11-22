@@ -7,7 +7,7 @@ project format are in [../versioning/README.md](../versioning/README.md).
 reads STEP, IGES, STL, OBJ, PLY, glTF and BREP into the active part (or a
 STEP or IGES as an assembly), the same as an `Import` feature through `add_feature`; an
 STL is [recognised](#recognising-a-faceted-mesh) into true planes,
-cylinders, cones and spheres unless `representation` is `facets`. A DXF or
+cylinders, cones, spheres and tori unless `representation` is `facets`. A DXF or
 SVG goes into a sketch through `import_sketch`. An unknown method that looks
 like an import (`import_stl`, `import_mesh`) is refused naming both
 ([RPCs](#rpcs)).
@@ -17,7 +17,7 @@ like an import (`import_stl`, `import_mesh`) is refused naming both
 | STEP (`.step`, `.stp`) | names, colours, product structure; a part or a whole assembly; stood up by its [header](#up-axis) | named, coloured products placed per occurrence, nested sub-assemblies, millimetres, `Loböle` as the originating system |
 | IGES (`.igs`, `.iges`) | as STEP, and trimmed surfaces [sewn into solids](#iges) | — |
 | BREP (`.brep`) | exact | exact; one shape (a part's bodies fused, or one body) |
-| STL (`.stl`) | [recognised](#recognising-a-faceted-mesh): its planes, cylinders, cones and spheres rebuilt as true faces; or, with `representation: facets`, sewn triangles (a solid when closed, a shell when open) | binary, re-meshed at a chord tolerance; one shape |
+| STL (`.stl`) | [recognised](#recognising-a-faceted-mesh): its planes, cylinders, cones, spheres and tori rebuilt as true faces; or, with `representation: facets`, sewn triangles (a solid when closed, a shell when open) | binary, re-meshed at a chord tolerance; one shape |
 | OBJ (`.obj`) | [each object a named, coloured body](#obj), sewn as an STL | visual meshes (below) |
 | PLY (`.ply`) | [ASCII or binary](#ply-and-gltf), polygons fanned, a uniform vertex colour kept; any `representation` | visual meshes (below) |
 | glTF (`.glb`, `.gltf`) | [the default scene's meshes, placed](#ply-and-gltf), metres read as mm, Y up stood on Z; any `representation` | visual meshes with PBR materials, part or assembly, instanced |
@@ -49,8 +49,8 @@ the recipe, and each regeneration reads it.
   file's header (`ImportedModel::origin`) for the [up axis](#up-axis).
 - **IGES**, **OBJ**, **PLY** and **glTF**: see [IGES](#iges), [OBJ](#obj)
   and [PLY and glTF](#ply-and-gltf).
-- **STL** is recognised by default: the planes, cylinders, cones and
-  spheres its triangles were tessellated from are rebuilt as true faces
+- **STL** is recognised by default: the planes, cylinders, cones,
+  spheres and tori its triangles were tessellated from are rebuilt as true faces
   ([recognising a faceted mesh](#recognising-a-faceted-mesh)). With
   `representation: facets`, or when the rebuild fails a check, it becomes
   one planar face per triangle, sewn: a closed mesh arrives as a solid, an
@@ -557,14 +557,15 @@ so it can run on a worker thread.
     fits them robustly (RANSAC,
     [fitting a primitive to a mesh](../modeling/README.md#fitting-a-primitive-to-a-mesh)).
 - **`SegmentAll`** (`Segment.{h,cpp}`) puts every triangle in exactly one
-  region. A region is a plane, cylinder, cone or sphere, and the regions are
-  ordered by their lowest file triangle.
+  region. A region is a plane, cylinder, cone, sphere or torus, and the
+  regions are ordered by their lowest file triangle.
   1. **Flat patches.** Triangles flood together when every corner is within
      four quanta of the patch's plane. The test is a distance, not a normal
      angle.
   2. **Curved regions.** Neighbouring patches that turn by less than a
      pentagon's 72° are grown from a seed triple under a hypothesis:
-     cylinder, then cone, then sphere. Every vertex must stay on the fitted
+     cylinder, then cone, then sphere, then torus. Every vertex must stay on
+     the fitted
      surface to the same four quanta. The plane a fillet is tangent to has
      its normal on the fillet's great circle but its vertices far from the
      cylinder, so it is never taken.
@@ -577,14 +578,31 @@ so it can run on a worker thread.
        on them.
      - OpenSCAD's default resolution makes a small hole a pentagon, which
        `min_sides: 5` asks for as round.
-  4. **What fits nothing** stays as its flat patches, such as a torus corner
-     where two fillets meet. These are counted in `facetsLeft`.
-  5. **One flat is not a curve.** A region more than half of whose area is
+  4. **A torus is told by a fourth circle.** A tessellated round's corners
+     lie on circles about its axis, and any three such circles lie on some
+     torus: a cone's ring of facets and the next ring of whatever it meets
+     fit one. So a torus is tried only on sixteen corners or more, every
+     patch must face the way the torus does where it is (to within the most
+     a facet may turn), and a torus that would replace another kind, or
+     start a region from a seed's triple, needs a neighbouring patch with a
+     corner on a circle the fit was not made through that lies on it too.
+     A ring of a torus's grid fits a cone exactly, so a round's growth
+     usually starts as a cone and becomes the torus when it outgrows it.
+  5. **One surface held by another is merged.** Two curved regions side by
+     side where one's surface holds the other's corners (and faces as its
+     patches do) are one region: a ring of a torus taken as a cone before
+     the torus grew, a cylinder's single ring of strips split with a sphere
+     (two equal circles lie on both). The surface that holds both takes the
+     other; when each holds both, the simpler kind (cylinder, cone, sphere,
+     torus) does.
+  6. **What fits nothing** stays as its flat patches, such as a variable
+     round or a freeform blend. These are counted in `facetsLeft`.
+  7. **One flat is not a curve.** A region more than half of whose area is
      one flat is refused: a flat wall and two narrow facets beside it fit a
      cylinder of a radius ninety times the part's (the Seeedstudio plate's
      walls came out as cylinders of radius 619 mm), and a tessellated
      surface is facets of a size.
-  6. **Tangent where the part is tangent.** A rounded corner or a fillet
+  8. **Tangent where the part is tangent.** A rounded corner or a fillet
      meets its flats tangentially, but two fits made on their own are not
      tangent to each other: the cylinder sits a hair inside or outside the
      plane. An edit that extends both (Offset Face) then found them crossing
@@ -598,7 +616,7 @@ so it can run on a worker thread.
 
 `cad::RebuildFromRegions` (`src/cad/MeshRebuild.{h,cpp}`) makes one face per
 region, on its fitted `Geom_Plane`, `Geom_CylindricalSurface`,
-`Geom_ConicalSurface` or `Geom_SphericalSurface`. It is the only OpenCASCADE
+`Geom_ConicalSurface`, `Geom_SphericalSurface` or `Geom_ToroidalSurface`. It is the only OpenCASCADE
 code involved.
 
 - **Edges are shared.** The boundary between two regions is cut at its
@@ -612,7 +630,9 @@ code involved.
     wanders along a tangent junction is not followed wiggle by wiggle, and
     the curve stays small for the checks.
   - A rim is the circle the round surface beside it has: square to its axis,
-    centred on it, at its radius. A circle fitted to the points tilts by
+    centred on it, at its radius -- on a torus, the radius it has at the
+    rim's height, or, for a meridian (where a torus meets the round it turns
+    off from), the tube's circle about the core. A circle fitted to the points tilts by
     their noise, and a tilted rim is not an iso-line of the surface, which
     an edit extending the surface from its rim reads as a curved boundary.
   - A loop with no corner, such as a hole's rim, is a full circle with one
@@ -629,6 +649,11 @@ code involved.
   cannot merge the strip back into the bore.
   - A sphere's pole is put in the middle of its region, where
     `ShapeFix_Face` closes it with a degenerate edge.
+  - A torus's u seam is behind its region, as a cylinder's; its v seam is
+    its outer equator wherever the frame turns, and `ShapeFix_Face` adds
+    the seams a ring all the way round needs. A whole torus (a ring, an
+    O-ring) has no boundary at all and is the surface's own face, its two
+    seams its bounds.
 - **Nothing is sewn.** The faces are built on the shared edges and put into
   shells directly, so the quilt, most of a faceted import's time, never
   runs. `ShapeFix_Face` adds a curved face's p-curves and seams through a
@@ -678,8 +703,9 @@ naming the four.
   `auto`. It is refused with `facets` and `mesh`, and `representation` is
   refused on any file that is not a mesh (STL, OBJ, PLY, glTF).
 - **The reply says what was recognised.** `add_feature` and `import_step`
-  answer with `recognition`: per body, every cylinder, cone and sphere
-  (radius, axis, centre, side count, sagitta), the polygons left flat,
+  answer with `recognition`: per body, every cylinder, cone, sphere and
+  torus (radius -- a torus's `major_radius_mm` and `minor_radius_mm` --,
+  axis, centre, side count, sagitta), the polygons left flat,
   `facets_left`, `tolerance_mm`, and `fell_back` when the rebuild failed a
   check. `get_state`'s row for the feature carries the same with counts
   only. In the GUI, the import note says the summary ("24 cylinders, 6
@@ -699,7 +725,15 @@ What it is checked against:
   - a bracket with a counterbore, a countersink (a cone), a boss, and
     hexagon, octagon and decagon pockets (listed, not rounded);
   - a filleted angle;
-  - an oblique hole and a dome.
+  - an oblique hole and a dome;
+  - a block whose upright edges are rounded 6 and then its top edges 2,
+    with a boss on top rounded 1.5 at its foot, turned off the axes
+    (`tests/test_mesh_rebuild.cpp`): the four corners where the rounds
+    meet are quarter tori (core 4, tube 2) and the boss's foot a whole
+    ring of a concave one (core 6.5, tube 1.5), each to 10⁻³ mm and 10⁻⁸ in
+    its axis, rebuilt on `Geom_ToroidalSurface` with the CAD volume to
+    10⁻⁶ and no facets left; and the clean torus fixture rebuilds as one
+    toroidal face.
 - **Files another program wrote.** `tests/fixtures/mesh/` holds three
   OpenSCAD exports beside their `.scad` sources, whose headers list the
   answers (`tests/test_mesh_files.cpp`): a motor plate with a nut trap, a
@@ -1086,8 +1120,7 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
   seven-sided and not quite regular: they are listed as polygons kept flat,
   and the SO-101 upper arm's 2.1 mm hole stays one even at `min_sides: 5`,
   its widest facet turning past 72°.
-- Recognising a torus (the corner where two fillets meet stays as facets),
-  and a mesh noisier than the precision it was written at (a scan, or a
+- Recognising a mesh noisier than the precision it was written at (a scan, or a
   part re-saved through a mesh editor). Recognition's tolerance is quanta
   of the file's precision; one region at a time, a scan's noise is taken by
   `fit_primitive` and the datums fitted to it

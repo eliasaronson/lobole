@@ -1,18 +1,14 @@
 # A scan: what a fit found, and how far the model is from it
 
-A primitive fitted to a scan rests on the surface that was clicked, says how
-good it is, takes hints and says what it found when one surface does not
-explain the region
+A primitive fitted to a scan -- a plane, cylinder, cone, sphere or torus --
+rests on the surface that was clicked, says how good it is, takes hints and
+says what it found when one surface does not explain the region
 ([fitting a primitive to a mesh](../modeling/README.md#fitting-a-primitive-to-a-mesh)).
-It should also fit a torus. A
-model built on a scan should be checkable against that scan: laid onto it,
-and coloured by how far it stands off.
+A model built on a scan should be checkable against that scan: laid onto
+it, and coloured by how far it stands off.
 
 ## The problem
 
-- **No torus.** `fit_primitive` cannot fit a round or a ring, and mesh
-  recognition leaves the corner where two fillets meet as facets
-  (docs/interchange/README.md#not-done).
 - **A scan cannot be laid onto a model, or onto the scan before it.**
   `align_import` has floor, three points, principal axes and scale
   (src/core/ImportAlign.cpp). A re-scan has to be placed by hand "in the
@@ -25,25 +21,7 @@ and coloured by how far it stands off.
 
 ## The shape of the fix
 
-### 1. A torus
-
-`kind: "torus"` in `mesh::Fit` and `fit_primitive`: every normal of a torus
-passes through its spine circle at the tube's radius. For a candidate tube
-radius (searched on a log scale, both signs: a convex tube and a concave
-round) the points are moved inward along their normals by it; a plane and a
-circle through the moved points give the axis, the centre and the major
-radius. The candidates are scored as the other kinds' hypotheses are, and
-the best refined by least squares on the seven parameters. The reply:
-`centre_mm`, `axis`, `major_radius_mm`, `minor_radius_mm`, and `concave`.
-`auto` tries it last and takes it only when no simpler kind covers 95% as
-much. A `DatumAxis` fits a torus (its axis through its centre).
-
-Recognition (`mesh::SegmentAll`, `cad::RebuildFromRegions`) gains the torus
-as a region kind, rebuilt on a `Geom_ToroidalSurface`, with the same three
-checks and demotion as the other kinds. The fillet-corner line leaves
-"Not done".
-
-### 2. Laying a scan onto a body
+### 1. Laying a scan onto a body
 
 `align_import {mode: "best_fit", onto, …}` moves an Import's placement so its
 mesh lies on `onto`: a body of the part (B-Rep, by its tessellation, or
@@ -70,7 +48,7 @@ another mesh body).
 A datum's seed is a world point, so a re-scan laid onto the old scan's body
 by this keeps its datums.
 
-### 3. How far a body is from the scan
+### 2. How far a body is from the scan
 
 `compare_scan {scan, body, tolerance_mm?}` (inspection; changes nothing).
 `scan` is a mesh body, `body` any body.
@@ -111,10 +89,8 @@ where they compare a body with its mesh.
 
 Each lands on its own with the suites green.
 
-- **C.** The torus (§1), in `fit_primitive` and the datums, then in
-  recognition.
-- **D.** Best fit (§2).
-- **E.** Deviation (§3): the RPC, then the picture and the tool.
+- **D.** Best fit (§1).
+- **E.** Deviation (§2): the RPC, then the picture and the tool.
 
 ## Not in this plan
 
@@ -126,29 +102,20 @@ sketch: [section-sketch-relations.md](section-sketch-relations.md).
 
 ## Files
 
-- `src/core/mesh/Grow.cpp`, `Fit.{h,cpp}`, `Segment.{h,cpp}`; new
-  `src/core/mesh/Register.{h,cpp}` (ICP), `Deviation.{h,cpp}`
-- `src/core/MeshFit.{h,cpp}`, the datum features' `fit`, `FitReport`
+- new `src/core/mesh/Register.{h,cpp}` (ICP), `Deviation.{h,cpp}`
 - `src/core/ImportAlign.{h,cpp}`, `src/core/mesh/Align.{h,cpp}`
-- `src/cad/MeshRebuild.cpp` (the torus)
-- `src/remote/RemoteInspection.cpp` (`fit_primitive`, `compare_scan`,
+- `src/remote/RemoteInspection.cpp` (`compare_scan`,
   `set_scan_deviation`), `src/remote/RemoteModeling.cpp` (`align_import`)
-- `src/ui/FitTool.cpp`, a new `src/ui/ScanCompareTool.{h,cpp}`, the field
-  renderer
-- `tests/mesh_organic.{h,cpp}` (fixtures), `tests/test_mesh_fit_scan.cpp`,
-  new `tests/test_mesh_register.cpp`, `tests/test_mesh_deviation.cpp`
-- docs/modeling/README.md, docs/interchange/README.md,
-  docs/inspect/README.md
+- a new `src/ui/ScanCompareTool.{h,cpp}`, the field renderer
+- `tests/mesh_organic.{h,cpp}` (fixtures), new
+  `tests/test_mesh_register.cpp`, `tests/test_mesh_deviation.cpp`
+- docs/modeling/README.md, docs/inspect/README.md
 
 ## Verified by
 
 Every fixture is tilted off the axes, so a fit that only works axis-aligned
 cannot pass, and every number is checked against the generator's.
 
-- **The torus.** A scanned ring and a concave round between two faces:
-  both radii within the noise, `concave` right. A faceted CAD part with
-  fillets meeting at a corner is recognised with a toroidal face and passes
-  recognition's volume check.
 - **Best fit.** A scan displaced by random rigid motions (seeded) from its
   body is brought back within the noise, for a bracket, a near-cube with one
   feature, and a scan of half the part; a thin plate is not flipped onto its

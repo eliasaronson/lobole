@@ -913,8 +913,8 @@ undo step, built as a job, undone) and `defaults/cradle`.
 `fit_primitive {feature_id, point_mm, kind?, tolerance_mm?, clip_sigma?,
 side?, radius_mm?, axis?, axis_tolerance_deg?, within?, part?}`
 (`src/core/MeshFit.{h,cpp}`, the region in `src/core/mesh/Grow.cpp`, the
-fit in `src/core/mesh/Fit.cpp`) fits a plane, cylinder, cone or sphere to
-the triangles round a point on the bodies feature `feature_id` made: a
+fit in `src/core/mesh/Fit.cpp`) fits a plane, cylinder, cone, sphere or
+[torus](#a-torus) to the triangles round a point on the bodies feature `feature_id` made: a
 scan's mesh body, or a B-Rep's tessellation (a thousandth of its
 diagonal). It changes nothing; it is what the [datums](#datums-on-a-scan)
 below refit, and what the Fit tool previews.
@@ -964,7 +964,8 @@ below refit, and what the Fit tool previews.
    from the region's triangles, each its centre and unit normal -- a plane
    from three, a sphere from two normal lines' closest approach, a
    cylinder from two normals (their cross product is the axis), a cone
-   from three tangent planes (their meeting point is the apex) -- and
+   from three tangent planes (their meeting point is the apex), a torus as
+   [below](#a-torus) -- and
    scored by the vertices within the tolerance; a tie goes to the one the
    triangles' normals agree with (a box's face beats the diagonal plane
    through the same four corners). Only a surface through the seed
@@ -990,13 +991,14 @@ below refit, and what the Fit tool previews.
    surfaces is refused naming both, and a plane along the crown of a round
    naming the round.
 
-`kind` is `plane | cylinder | cone | sphere | auto`; any other is refused,
-naming them. `auto` grows each and keeps the one covering the most area,
-or a simpler one (plane, sphere, cylinder, cone, in that order) covering at
-least 95% as much (`meshfit::kAutoShare`) -- a cone fits a cylinder's
-triangles as well as the cylinder does, with a half angle of nearly
-nothing -- and the reply's `tried` lists each with its area or why it
-failed.
+`kind` is `plane | cylinder | cone | sphere | torus | auto`; any other is
+refused, naming them. `auto` grows each and keeps the one covering the
+most area, or a simpler one (plane, sphere, cylinder, cone, torus, in that
+order) covering at least 95% as much (`meshfit::kAutoShare`) -- a cone
+fits a cylinder's triangles as well as the cylinder does, with a half
+angle of nearly nothing, and a torus a sphere's with a core of nothing, so
+the torus is taken only where nothing simpler covers nearly as much -- and
+the reply's `tried` lists each with its area or why it failed.
 
 **The reply**: a plane's `origin_mm`, `normal` (the way the triangles
 face) and `extent_mm` (the used points' spans along their two principal
@@ -1006,7 +1008,10 @@ its own, and a refit must not flip it), `radius_mm`, `length_mm` and
 `arc_deg` (the used points' span along and about the axis); a cone's
 `apex_mm`, `axis` (from the apex into the cone) and `half_angle_deg`; a
 sphere's `centre_mm`, `radius_mm` and `arc_deg` (the cap the used points
-span, seen from the centre). A cylinder and a sphere also carry
+span, seen from the centre); a torus's `centre_mm`, `axis` (largest
+component positive, as a cylinder's), `major_radius_mm` (its core
+circle's), `minor_radius_mm` (the tube's) and `concave` (the triangles
+face the core circle: a round at a boss's foot, not a ring). A cylinder and a sphere also carry
 `diameter_min_mm` and `diameter_max_mm`: the fitted size moved to the
 lowest and the highest radial residual of the used points, the sizes a
 caliper could read. Then two populations: `rms_mm` and `max_mm` over every
@@ -1017,6 +1022,73 @@ because a sigma taken over what a cut kept is smaller than the noise.
 (`meshfit::kPartialArcDeg`): a partial arc is where a radius is least
 certain. And `tolerance_mm`, `triangles`, `area_mm2`, `body`,
 `seed_distance_mm`, and with hints `seeds_tried`.
+
+### A torus
+
+A round turned about an axis is a torus: a fillet round a boss's foot, the
+corner where a round along an edge turns round a rounded corner, a ring.
+Every normal of a torus meets its core circle a tube's radius in, and its
+axis. So its hypotheses are not drawn from minimal samples
+(`mesh::FitRobust`, `TorusHypotheses` in `src/core/mesh/Fit.cpp`):
+
+- **one per tube radius**, on a log scale (steps of 12%) from the
+  tolerance to twice the points' span, either sign -- a convex tube and a
+  concave round: the region's oriented samples moved along their normals by
+  it lie on the core circle when it is right, and a plane and a circle
+  through the moved points (twice more through those within three times
+  their median distance of it) give the axis, the centre and the core's
+  radius; the tube's is then the points' median distance from that circle;
+- **the axis the normal lines meet** (`TorusFromNormals`): least squares
+  over every normal line, a line's moment eliminated, and the circle the
+  points make in the half-plane through it;
+- **the osculating fan**, for the first disk a region grows from, too small
+  for its third order: the curvatures and their directions, read from how
+  the normals turn across it (on a circle a normal's lean is exactly its
+  distance along over the radius, where a parabola through the heights
+  reads an arc's curvature high), fix a torus up to the tilt of its axis in
+  the plane of the normal and the tube's direction; eleven tilts, 15° apart,
+  either curvature taken as the tube's;
+- **the fit the region was regrown under** (`FitRobust`'s `also`): on a
+  fine scan a facet's normal is too noisy for the first two once the region
+  is wider than the fan's disk.
+
+Each is scored as the other kinds' are, the six best refined by least
+squares over the points they keep and scored again, and the best refined
+on its seven numbers (centre, axis, the two radii) as every kind's is.
+`concave` is which way the seed's triangle faces the fit.
+
+**The rim of a round.** A round is narrow, so the faces it is tangent to
+are a large share of what it first grows over: their first millimetre lies
+within the tolerance of it and inside the normal band of a noisy scan, and
+the fit leans to them (a 3 mm round between two faces read 3.4 after one
+peel). A torus's rim is peeled again under each fit made without the last
+rim, until no ring leans, and a ring is peeled also while its triangles
+*lag* behind the normal as it turns round the tube away from the region's
+middle, on average, by more than an eighth of the region's own tilt: a
+tangent face's strip keeps its normal where the round's goes on turning,
+where noise lags as often one way as the other.
+
+**Hints**: `side` (`outside` a ring, `inside` a concave round) and `axis`
+apply; `radius_mm` is refused (a torus has two radii). A torus region is
+not split as [two surfaces](#two-surfaces) are, but it is what two
+cylinders side by side are judged against: where the two halves' axes lean
+apart by more than a degree (`mesh::kBentDeg`; a step's agree to a tenth),
+a torus over the region -- started also from the core those two axes are
+tangents of -- is the one smooth surface, and a bent tube read as two
+cylinders is not refused as two. A plane on the crown of a round names
+whichever round auto would take there: a cylinder, a sphere or a torus.
+
+How it is checked (`tests/test_mesh_fit_scan.cpp`, tilted off the axes, ±0.05
+mm of noise along the normal): a scanned ring of core 20 and tube 5 at a
+0.5 mm grid: 19.9999 and 4.9996, its axis 0.001° and its centre 0.0004 mm
+off, convex, the whole ring grown; `auto` takes it. A concave round of 3
+mm at the foot of an R8 boss on a plate (core 11): 10.996 and 2.993, axis
+0.01° and centre 0.006 mm off, `concave`, 92% of the round's area and none
+of the faces either side past the noise; `auto` takes it, the plate a
+plane and the boss its R8 cylinder; a plane asked of the round is refused
+naming the torus at the scan's tolerance and at 0.6 mm, never "two
+planes". The stepped bore under `auto` at 0.6 mm is still refused as two
+cylinders, and the post's side is its cylinder with the torus tried.
 
 ### Two surfaces
 
@@ -1162,7 +1234,9 @@ at 2M (hidden `[fit-cost]`); against the growth by distance alone that
 came before the band, the peel and the clip, measured in the same run
 (`[slow]`, CPU time, held to twice): 1.2 times at 300k and at 2M. Where
 the [split](#two-surfaces) runs, a stepped bore of 240k triangles grown
-over both its cylinders and refused: 1.3 times. The
+over both its cylinders and refused: 1.3 times. A scanned ring grown
+whole as a torus takes 0.11 s at 10k triangles, 0.37 s at 160k and 1.0 s
+at 1M, and `auto` there (every kind grown) 0.27, 1.0 and 3.0 s. The
 noise tolerance is a stride through at most 200,000 edges, under 20 ms at
 any size. A datum refits this on every regeneration that reaches it.
 
@@ -1182,8 +1256,9 @@ place (aligned the same way) and the datum moves onto it.
   its normal the way the triangles face, its in-plane X the world's X laid
   into it (the world's Y when the normal is near X).
 - A DatumAxis fits a `cylinder` (origin the axis point nearest the seed,
-  sense with its largest component positive) or a `cone` (origin the
-  apex, from the apex into the cone).
+  sense with its largest component positive), a `cone` (origin the
+  apex, from the apex into the cone) or a `torus` (origin its centre,
+  sense as a cylinder's).
 - The kind is stored, never `auto`, so a re-scan cannot turn a datum into
   another kind; a kind the datum does not fit is refused on load, naming
   the ones it does, and so is a hint its kind cannot take or a
@@ -1211,7 +1286,7 @@ world's); the **`frame`** query, which reports the same frame; and
 **`measure`** with a `{datum}` side ([measuring a
 datum](../inspect/README.md#datums)). The Fit tool (`###tb_fit_primitive`,
 `src/ui/FitTool.{h,cpp}`) picks the point, previews the fit in its window
-with its kind (Auto by default) and tolerance (the scan's noise unless
+with its kind (Auto by default; Torus among them) and tolerance (the scan's noise unless
 "Own tolerance"), shows what the used points read (sigma, form, the
 diameters, a cylinder's length and arc, a plane's spans) and the
 partial-arc warning, and Accept adds the datum as one undo step; a sphere
